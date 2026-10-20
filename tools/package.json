@@ -1,0 +1,8 @@
+{
+  "name": "ironwood-archer-tooling",
+  "private": true,
+  "description": "Project-local Godot MCP tooling; not required to play the game.",
+  "devDependencies": {
+    "@coding-solo/godot-mcp": "0.1.1"
+  }
+}

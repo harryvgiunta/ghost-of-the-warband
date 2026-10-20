@@ -1,0 +1,10 @@
+.godot/
+tools/node_modules/
+*.log
+.runtime/
+.mcp.json
+.env
+.env.*
+!.env.example
+godot_bin/
+*.zip
