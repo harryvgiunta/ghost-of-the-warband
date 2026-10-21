@@ -23,6 +23,7 @@ var health_label: Label
 var attack_label: Label
 var connection_label: Label
 var respawn_label: Label
+var _cover_status: Label
 var bar: ProgressBar
 var bow_buttons: Array[Button] = []
 var armor_buttons: Array[Button] = []
@@ -99,6 +100,10 @@ func _ready() -> void:
 	health_label = _ui._label(bottom,"",Vector2(18,10),16,UI.TEAL)
 	attack_label = _ui._label(bottom,"",Vector2(18,35),14,UI.CREAM)
 	bar = _ui._bar(bottom,Vector2(18,73),Vector2(604,8),UI.GOLD)
+	var cover_panel := _ui._panel(match_ui,Vector2(-200,-220),Vector2(400,62))
+	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
+	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
+	_ui._label(cover_panel,"F  Cover / exit   HOLD RMB  Peek   X  Shoulder",Vector2(15,35),11,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -185,6 +190,13 @@ func update_match(state: Dictionary) -> void:
 		sword_buttons[index].set_pressed_no_signal(index == int(state.sword))
 	weapon_buttons[0].set_pressed_no_signal(state.weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(state.weapon == "sword")
+
+func update_cover(active: bool, low: bool, peeking: bool, side: int) -> void:
+	var stance := "OPEN"
+	if active:
+		stance = ("LOW COVER" if low else "TALL COVER") + (" / PEEKING" if peeking else " / TUCKED")
+	_cover_status.text = stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
+	_cover_status.add_theme_color_override("font_color", UI.TEAL if active and peeking else UI.GOLD if active else UI.MUTED)
 
 func _process(_delta: float) -> void:
 	queue_redraw()

@@ -30,6 +30,7 @@ var _health_label: Label
 var _gold_label: Label
 var _phase: Label
 var _loadout: Label
+var _cover_status: Label
 var _bow_details: Label
 var _health_bar: ProgressBar
 var _stamina_bar: ProgressBar
@@ -94,6 +95,10 @@ func _ready() -> void:
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
 	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
+	var cover_panel := _panel(self, Vector2(-200, -265), Vector2(400, 62))
+	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
+	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
+	_label(cover_panel, "F  Cover / exit   HOLD RMB  Peek   X  Shoulder", Vector2(15, 35), 11, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -178,6 +183,13 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	else:
 		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
+
+func update_cover(active: bool, low: bool, peeking: bool, side: int) -> void:
+	var stance := "OPEN"
+	if active:
+		stance = ("LOW COVER" if low else "TALL COVER") + (" / PEEKING" if peeking else " / TUCKED")
+	_cover_status.text = stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
+	_cover_status.add_theme_color_override("font_color", TEAL if active and peeking else GOLD if active else MUTED)
 
 func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, sword: int, weapon: String, sword_data: Dictionary) -> void:
 	for index in 3:

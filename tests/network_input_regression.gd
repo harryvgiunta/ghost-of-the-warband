@@ -18,6 +18,8 @@ var released_charge := -1.0
 var saw_damage := false
 var saw_sword := false
 var saw_roll := false
+var saw_cover := false
+var saw_peek := false
 
 func _initialize() -> void:
 	call_deferred("run")
@@ -85,6 +87,8 @@ func observe() -> void:
 		saw_damage = saw_damage or actor.health < 99
 		saw_sword = saw_sword or (actor.rig.weapon == "sword" and actor.rig.phase == "MELEE")
 		saw_roll = saw_roll or actor.rig._roll_progress >= 0
+		saw_cover = saw_cover or (actor.cover.active and actor.cover.low and not actor.cover.peeking)
+		saw_peek = saw_peek or actor.cover.peeking
 
 func run() -> void:
 	report = Report.new()
@@ -165,6 +169,27 @@ func host_run() -> void:
 		check(bool(observation.get("damage",false)) and bool(observation.get("sword",false)) and bool(observation.get("roll",false)),"Other clients receive damage and the revised animation states")
 	await key(KEY_SPACE,true)
 	check(arena.actors[0].roll.active,"Host local Shift+Space launches an immediate roll")
+	await pause(1.0)
+	arena.actors[1].revive()
+	arena.actors[1].rig.set_weapon("bow")
+	arena.actors[1].position = Vector3(0,0.05,-11.6)
+	await pause(0.4)
+	report.command.rpc(7)
+	await wait_message("covered")
+	check(arena.actors[1].cover.active and arena.actors[1].cover.low,"Remote F attaches to real arena stone cover on the host")
+	check(arena.actors[1].position.x>0.3 and arena.actors[1].position.z> -12.0,"Remote cover motion slides along the wall without penetrating it")
+	var cover_shots: int = arena.shots_fired
+	report.command.rpc(8)
+	await wait_message("peeked")
+	check(arena.actors[1].cover.peeking and arena.shots_fired==cover_shots+1,"Remote held peek enables exactly one released projectile")
+	report.command.rpc(9)
+	await wait_message("left_cover")
+	check(not arena.actors[1].cover.active and arena.actors[1].roll.active,"Remote Shift+Space leaves cover and rolls")
+	report.command.rpc(10)
+	await wait_message("cover_observer2")
+	await wait_message("cover_observer3")
+	for label in ["covered","peeked","cover_observer2","cover_observer3"]:
+		check(int(report.messages.get(label,{}).get("failures",1))==0,"Remote cover behavior and presentation pass for "+label)
 	arena.leave_game()
 	await pause(0.8)
 	for pid in children:
@@ -227,6 +252,54 @@ func client_run(port: int) -> void:
 						await key(KEY_SPACE,true)
 						await pause(0.3)
 						report.result.rpc_id(1,"rolled",{})
+					7:
+						arena._set_cursor_free(false)
+						arena._camera_yaw = 0.0
+						arena.send_action("cover",true)
+						arena.send_action("cover",{"position":Vector3.ZERO})
+						await pause(0.15)
+						check(not arena.actors[1].cover.active,"Malformed remote cover requests cannot attach or teleport")
+						await key(KEY_F)
+						var movement := InputEventKey.new()
+						movement.keycode = KEY_D
+						movement.physical_keycode = KEY_D
+						movement.pressed = true
+						Input.parse_input_event(movement)
+						await pause(0.35)
+						movement = movement.duplicate()
+						movement.pressed = false
+						Input.parse_input_event(movement)
+						await pause(0.15)
+						check(arena.actors[1].cover.active and arena.actors[1].cover._capsule.height<1.2,"Remote cover presents a physically crouched actor")
+						arena.send_action("peek",{"pressed":true,"right":Vector3(NAN,0,0),"side":1})
+						arena.send_action("peek",{"pressed":true,"right":Vector3.RIGHT,"side":0})
+						await pause(0.15)
+						check(not arena.actors[1].cover.peeking,"Malformed remote peek intent cannot expose the actor")
+						report.result.rpc_id(1,"covered",{"failures":failures})
+					8:
+						var peek := InputEventMouseButton.new()
+						peek.button_index = MOUSE_BUTTON_RIGHT
+						peek.pressed = true
+						Input.parse_input_event(peek)
+						await pause(0.4)
+						await key(KEY_X)
+						await pause(0.4)
+						check(arena.actors[1].cover.peeking and arena._shoulder_camera.side == -1,"Remote RMB peeks while X switches the local shoulder")
+						await mouse(root.get_visible_rect().size*0.5,true)
+						await pause(0.3)
+						await mouse(root.get_visible_rect().size*0.5,false)
+						await pause(0.2)
+						report.result.rpc_id(1,"peeked",{"failures":failures})
+					9:
+						var peek := InputEventMouseButton.new()
+						peek.button_index = MOUSE_BUTTON_RIGHT
+						Input.parse_input_event(peek)
+						await pause(0.2)
+						await key(KEY_SPACE,true)
+						report.result.rpc_id(1,"left_cover",{})
 			elif completed == 6:
 				report.result.rpc_id(1,"observer%d"%arena.local_slot,{"damage":saw_damage,"sword":saw_sword,"roll":saw_roll})
+			elif completed == 10:
+				check(saw_cover and saw_peek,"Observer receives crouched and exposed cover transitions")
+				report.result.rpc_id(1,"cover_observer%d"%arena.local_slot,{"failures":failures})
 		await pause(0.02)

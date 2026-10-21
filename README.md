@@ -66,10 +66,13 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 
 | Control | Action |
 | --- | --- |
-| WASD | Move relative to the camera |
+| WASD | Move relative to the camera; slide along the surface while in cover |
 | Shift | Run; consumes stamina |
 | Space | Jump |
 | Shift + Space | Immediately jump-roll in the movement direction, or forward if stationary |
+| F | Post up against nearby solid cover / leave cover |
+| Hold right mouse in cover | Peek over low cover or around the selected edge of tall cover |
+| X | Smoothly switch between right- and left-shoulder camera views |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
@@ -82,6 +85,14 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | C | Cycle armor |
 
 **1 always equips the selected bow; 2 always equips the selected sword. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
+
+## Cover movement and shoulder views
+
+Both Frontier and Arena use the same geometry-driven cover movement. Stand within **1.35 m** of a tree trunk, wall, stone barrier or solid debris and press **F**. The character approaches the surface with normal collision, faces away from it, and stays attached while you look around freely. **WASD** moves along the surface at cover speed; sprinting is disabled. Rounded trunks can be followed, while exposed edges and sharp corners stop movement instead of automatically walking you out of protection. Decorative meshes without collision and the ground are not cover.
+
+Low cover lowers both the skeleton and the real collision capsule. **Hold RMB** to stand and peek over it. At tall cover, move to an edge, then hold RMB to physically step out on the selected shoulder's side. Peek movement stays anchored; release RMB to return behind cover. **X** swaps the camera smoothly and selects the other peek side. The camera uses a swept sphere against world geometry, including during shoulder transitions, so nearby walls cannot be crossed by the camera boom. Shoulder switching changes the view, not the weapon's handedness.
+
+Attack normally with LMB / Q **while exposed**; tucked cover cannot fire through the obstacle. Returning to cover cancels an unreleased draw. **F**, **Space**, or **Shift + Space** leaves cover; jump and roll retain their existing behavior. Cover grants no invulnerability. Death, respawn and returning to camp clear cover state. Arena movement, exposure, collider changes and attacks remain host-authoritative, with cover poses replicated to the other players.
 
 ## Bow charge, damage and re-nocking
 
@@ -139,6 +150,8 @@ git pull --ff-only
 
 `assets/characters/ironwood_ranger.glb` contains the skinned character and authored clips; its adjacent JSON records source timing and weapon/palm transforms. `scripts/archer.gd` samples these animations on the physics clock, applies bow/terrain corrections, and emits blade sweeps from the same pose used to render the sword. `combat.gd` handles authoritative swept contact, independent sword recovery and bow readiness. `dodge_roll.gd` owns explicit Shift + Space roll state. `main.gd` controls the frontier; `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas. World and weapon geometry remain runtime-generated.
 
+`cover_movement.gd` owns surface acquisition, tangential movement, low-cover collision and physical peeking. `shoulder_camera.gd` provides the shared smooth shoulder offset and volume-based camera collision. `cover_movement_regression.gd` exercises walls, curved trunks, rotated surfaces, edge stops, crouch/peek transitions, lifecycle resets and camera obstruction. The four-process `network_input_regression.gd` also exercises remote cover movement, peeking, shoulder input, malformed requests and observer replication.
+
 The repo-local [Ironwood Archer skill](.omp/skills/ironwood-archer/SKILL.md) covers architecture, gameplay contracts, authored skeletal animation, multiplayer integration, testing and safe restarts. OMP discovers it at session startup; invoke `/skill:ironwood-archer` in a new session to load it explicitly.
 
 Run the behavior regressions after setup:
@@ -155,6 +168,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/arm_clearance_regression.gd
 & $Godot --headless --path . --script res://tests/weapon_input_regression.gd
 & $Godot --headless --path . --script res://tests/network_input_regression.gd
+& $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 ```
 
 ### Rebuilding character assets

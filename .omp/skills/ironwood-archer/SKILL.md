@@ -25,6 +25,7 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 | Authored assets | `assets/characters/ironwood_ranger.glb`, adjacent JSON/provenance/import settings, and `tools/prepare_character.py` / `tools/character_clearance.py` for reproducible Blender retargeting and cloth-clearance validation |
 | Shared combat | `scripts/combat.gd`: attack eligibility, independent sword recovery, linear bow damage, and continuous blade-contact collision |
 | Roll | `scripts/dodge_roll.gd`: explicit modifier request, direction, takeoff, finite roll progress, and airborne reuse restriction |
+| Cover and shoulder camera | `scripts/cover_movement.gd`: shared physics/crouch/peek state; `scripts/shoulder_camera.gd`: smooth shoulder swap and swept camera collision |
 | Weapon/projectile geometry | `scripts/bow.gd`, `scripts/sword.gd`, `scripts/arrow.gd`, `scripts/geo.gd` |
 | UI | `scripts/hud.gd` for frontier; `scripts/arena_hud.gd` for arena |
 | World and supporting systems | `scripts/range_world.gd`, `scripts/arena_world.gd`, `scripts/enemy.gd`, `scripts/range_audio.gd` |
@@ -38,6 +39,14 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - Both controllers pass `event.shift_pressed`. The arena's `jump` action carries an explicitly validated boolean, not a trusted client animation state.
 - `1` equips the selected bow; `2` equips the selected sword. Sizes are selected independently with mouse buttons, not number-key cycling.
 - Mouse and Q are held attack inputs for bows. Release launches at most one arrow. Escape/equipment cancellation must not fire an arrow or leave a held-input latch active.
+
+### Cover and shoulder controls
+
+- F toggles grounded, geometry-derived cover within 1.35 m. Both controllers use the same `CoverMovement`; WASD projects onto the cover tangent, cylinders can be followed, and edges/hard corners stop movement. Sprint is disabled while attached.
+- RMB holds a physical peek: standing collider over low cover, or lateral exposure at a tall-cover edge. Returning to cover cancels unreleased attacks. Combat requires exposure while attached; no blind fire or damage through the wall.
+- X changes the shared shoulder camera's side, not weapon handedness. Camera smoothing advances once per render frame; crosshair queries call `resolve()` without advancing it. Preserve swept-volume obstruction and initial-overlap recovery.
+- Cover owns capsule height; the rig crouches by lowering its pelvis and solving the existing fixed-length legs to planted feet. `set_cover()` runs before locomotion/roll pose updates in both modes. Animation serialization includes cover/crouch state.
+- Jump/roll, death, respawn and camp return clear cover. Arena accepts only validated cover direction and peek intent (`pressed`, horizontal unit `right`, ±1 `side`); the host derives contacts, normal, protected anchor and actual exposure. Never accept cover position/normal from a client. Peek side captures view-right on RMB press and refreshes on X; mouse-look remains free.
 
 ### Bow charge and recovery
 
@@ -97,7 +106,8 @@ $Checks = @(
     'action_pose_regression',
     'weapon_input_regression',
     'arm_clearance_regression',
-    'network_input_regression'
+    'network_input_regression',
+    'cover_movement_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"
@@ -116,6 +126,7 @@ Use the selected engine path instead if `GODOT_PATH` is configured. Check exit c
 - `arm_clearance_regression` skins the actual torso mesh on the CPU and checks forearm intersection through draw, re-nock, sword windup and recovery. A named hand target or a guessed torso radius is not proof of visible clearance.
 - `weapon_input_regression` injects real Godot input through frontier/arena equipment and attack controls.
 - `network_input_regression` launches four actual ENet processes and checks authoritative input, damage, and replicated action states. Keep its isolated port/process lifecycle; do not replace it with mocked RPC echoes.
+- `cover_movement_regression` checks real surface acquisition, tangential/curved movement, edge stops, physical low/tall exposure, attack restrictions, lifecycle resets and camera obstruction. The network regression also drives cover input and observes exposure/crouch on remote peers.
 
 For shared combat, rig, or network changes, run the complete set after integration. Keep deterministic regression tests for meaningful behavior and boundaries, not HUD wording, copied fields, or source text.
 

@@ -7,6 +7,7 @@ const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ARMOR := [0.0, 0.15, 0.30]
 var slot := 0
 var peer_id := 0
@@ -15,6 +16,10 @@ var display_name := "Bot"
 var rig
 var combat
 var roll
+var cover
+var peek_requested := false
+var peek_view_right := Vector3.RIGHT
+var peek_shoulder := 1
 var health := 100.0
 var alive := true
 var kills := 0
@@ -46,6 +51,9 @@ func _ready() -> void:
 	collider.position.y = 0.9
 	collider.shape = capsule
 	add_child(collider)
+	cover = CoverMovement.new()
+	add_child(cover)
+	cover.setup(self,collider)
 	rig = Archer.new()
 	add_child(rig)
 	_floor_query.collision_mask = 1
@@ -58,6 +66,7 @@ func _ready() -> void:
 		if authoritative and alive:
 			fired.emit(slot,origin,direction,speed,charge))
 	combat.actor = self
+	combat.cover = cover
 	combat.target_mask = 4
 	combat.source_id = slot
 	combat.damage_enabled = false
@@ -97,6 +106,8 @@ func revive() -> void:
 	move_direction = Vector2.ZERO
 	run_requested = false
 	jump_requested = false
+	input_age = 0.0
+	leave_cover()
 	health = 100.0
 	stamina = 100.0
 	_exhausted = false
@@ -117,10 +128,26 @@ func revive() -> void:
 	rig.visible = true
 
 func press_jump(roll_requested: bool) -> void:
+	leave_cover()
 	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,is_on_floor(),roll_requested) or jump_requested
 	if roll.active:
 		jump_requested = false
 		combat.stop()
+
+func toggle_cover(preferred_direction: Vector3) -> void:
+	if cover.active:
+		leave_cover()
+	elif alive and is_on_floor() and not roll.active and cover.try_enter(preferred_direction):
+		jump_requested = false
+		run_requested = false
+		combat.stop()
+
+func leave_cover() -> void:
+	cover.exit()
+	peek_requested = false
+	peek_view_right = Vector3.RIGHT
+	peek_shoulder = 1
+	rig.set_cover(false,cover.normal,false)
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,1.2,0)
@@ -137,6 +164,7 @@ func take_damage(amount: float, source_id: int) -> void:
 		respawn = 3.0
 		deaths += 1
 		combat.stop()
+		leave_cover()
 		collision_layer = 0
 		collision_mask = 0
 		rig.visible = false
@@ -157,16 +185,27 @@ func step(delta: float, actors: Array) -> void:
 	elif input_age > 0.65:
 		move_direction = Vector2.ZERO
 		run_requested = false
+		peek_requested = false
 	var direction := Vector3(move_direction.x,0,move_direction.y)
-	var running := run_requested and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
+	var running: bool = run_requested and not cover.active and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
 	stamina = clampf(stamina + delta * (-19 if running else 13),0,100)
 	if stamina <= 1:
 		_exhausted = true
 	elif stamina >= 25:
 		_exhausted = false
-	var speed := 8.5 if running else 5.5
-	velocity.x = move_toward(velocity.x,direction.x*speed,35*delta)
-	velocity.z = move_toward(velocity.z,direction.z*speed,35*delta)
+	if cover.active:
+		var tangent: Vector3 = cover.normal.cross(Vector3.UP)
+		var cover_side := peek_shoulder if peek_view_right.dot(tangent) >= 0.0 else -peek_shoulder
+		var was_peeking: bool = cover.peeking
+		var cover_velocity: Vector3 = cover.step(delta,direction,peek_requested,cover_side)
+		velocity.x = cover_velocity.x
+		velocity.z = cover_velocity.z
+		if was_peeking and not cover.peeking:
+			combat.stop()
+	else:
+		var speed := 8.5 if running else 5.5
+		velocity.x = move_toward(velocity.x,direction.x*speed,35*delta)
+		velocity.z = move_toward(velocity.z,direction.z*speed,35*delta)
 	if roll.active:
 		velocity.x = roll.direction.x * DodgeRoll.SPEED
 		velocity.z = roll.direction.z * DodgeRoll.SPEED
@@ -183,6 +222,7 @@ func step(delta: float, actors: Array) -> void:
 	position.x = clampf(position.x,-21.7,21.7)
 	position.z = clampf(position.z,-21.7,21.7)
 	var actual := (position-before)/maxf(delta,0.0001)
+	rig.set_cover(cover.active,cover.normal,cover.low and not cover.peeking)
 	rig.set_locomotion(actual,is_on_floor() and not roll.active)
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(actual,running or roll.active,is_on_floor() and not roll.active)
@@ -244,7 +284,7 @@ func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
 		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_index,"sword":rig.sword_index,"weapon":rig.weapon,
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
-		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor()}
+		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
 func apply_snapshot(state: Dictionary) -> void:
 	var replaced := peer_id != int(state.peer) or is_bot != bool(state.bot)
@@ -272,6 +312,10 @@ func apply_snapshot(state: Dictionary) -> void:
 		rig.set_sword(int(state.sword))
 	if rig.weapon != str(state.weapon):
 		rig.set_weapon(str(state.weapon))
+	cover.apply_snapshot(state.cover)
+	if not alive:
+		leave_cover()
+	rig.set_cover(cover.active,cover.normal,cover.low and not cover.peeking)
 	rig.set_locomotion(velocity,bool(state.grounded) and float(state.animation.roll) < 0)
 	rig.apply_animation_state(state.animation)
 	combat.attack_progress = state.progress

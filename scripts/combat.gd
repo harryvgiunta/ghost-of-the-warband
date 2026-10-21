@@ -12,6 +12,7 @@ var melee_progress := 1.0
 var movement_mode := "STANDING"
 var grounded := false
 var actor: CharacterBody3D
+var cover
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
@@ -43,7 +44,7 @@ func set_aim(point: Vector3) -> void:
 		update_aim()
 
 func can_draw() -> bool:
-	return rig.weapon == "bow" and grounded and rig.phase == "READY" and rig._roll_progress < 0.0
+	return rig.weapon == "bow" and grounded and rig.phase == "READY" and rig._roll_progress < 0.0 and _can_attack_from_cover()
 
 func begin_draw() -> bool:
 	if not can_draw():
@@ -53,6 +54,9 @@ func begin_draw() -> bool:
 	return true
 
 func release_draw() -> void:
+	if not _can_attack_from_cover():
+		stop()
+		return
 	if rig.phase != "DRAWING" and rig.phase != "HOLDING":
 		return
 	update_aim()
@@ -63,7 +67,7 @@ func stop() -> void:
 	rig.cancel_draw()
 
 func begin_melee() -> bool:
-	if not grounded or melee_progress < 1.0 - 0.000001:
+	if not grounded or melee_progress < 1.0 - 0.000001 or not _can_attack_from_cover():
 		return false
 	update_aim()
 	if rig.begin_melee():
@@ -183,6 +187,11 @@ func set_motion(actual_velocity: Vector3, running: bool, on_ground: bool) -> voi
 		movement_mode = "STANDING"
 	else:
 		movement_mode = "RUNNING" if running else "WALKING"
+	if is_instance_valid(cover) and cover.active:
+		movement_mode = "PEEKING" if cover.peeking else "COVER"
+
+func _can_attack_from_cover() -> bool:
+	return not is_instance_valid(cover) or not cover.active or cover.peeking
 
 func get_attack_interval() -> float:
 	if rig.weapon == "sword" and rig.phase not in ["RELEASE", "RECOVER"]:
@@ -190,6 +199,8 @@ func get_attack_interval() -> float:
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:
+	if not _can_attack_from_cover() and rig.phase in ["DRAWING","HOLDING","MELEE"]:
+		stop()
 	# Sword recovery continues across weapon swaps but never gates a bow draw.
 	if melee_progress < 1.0:
 		melee_progress = minf(1.0, melee_progress + delta / float(Archer.SWORD_DATA[rig.sword_index].seconds))
@@ -213,4 +224,10 @@ static func damage_for(bow_index: int, charge: float) -> float:
 
 func _on_rig_shot(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	attack_progress = 0.0
+	if is_instance_valid(cover) and cover.active and is_instance_valid(actor):
+		_sight_query.from = actor.global_position+Vector3.UP*1.4
+		_sight_query.to = origin
+		if not actor.get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty():
+			# A weapon protruding through cover must still fire from this side of it.
+			origin = _sight_query.from
 	shot.emit(origin, direction, speed, clampf(charge, 0.0, 1.0))

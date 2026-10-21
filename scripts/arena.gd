@@ -6,6 +6,7 @@ const Hud = preload("res://scripts/arena_hud.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
+const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 var actors: Array = []
 var local_slot := -1
 var network_role := "offline"
@@ -26,11 +27,12 @@ var _send_elapsed := 0.0
 var _camera_yaw := 0.65
 var _camera_pitch := 0.08
 var _camera_distance := 4.5
+var _shoulder_camera := ShoulderCamera.new()
 var _cursor_free := true
 var _mouse_drawing := false
 var _key_drawing := false
+var _peek_held := false
 var _query := PhysicsRayQueryParameters3D.new()
-var _camera_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
 	name = "Arena"
@@ -70,7 +72,6 @@ func _ready() -> void:
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 4
-	_camera_query.collision_mask = 1
 	multiplayer.peer_connected.connect(_peer_connected)
 	multiplayer.peer_disconnected.connect(_peer_disconnected)
 	multiplayer.connected_to_server.connect(_connected)
@@ -154,6 +155,7 @@ func leave_game() -> void:
 	shots_fired = 0
 	_mouse_drawing = false
 	_key_drawing = false
+	_peek_held = false
 	_cursor_free = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	for projectile in projectiles:
@@ -162,6 +164,7 @@ func leave_game() -> void:
 	projectiles.clear()
 	for actor in actors:
 		actor.combat.stop()
+		actor.leave_cover()
 		actor.authoritative = false
 		actor.combat.damage_enabled = false
 		actor.visible = false
@@ -351,6 +354,20 @@ func _apply_action(slot: int, action: String, value: Variant) -> void:
 		"jump":
 			if typeof(value) == TYPE_BOOL:
 				actor.press_jump(value)
+		"cover":
+			if typeof(value) == TYPE_VECTOR3 and value.is_finite() and value.length_squared() > 0.01 and value.length_squared() <= 1000000.0:
+				actor.toggle_cover(value.normalized())
+		"peek":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("pressed")) != TYPE_BOOL or typeof(value.get("right")) != TYPE_VECTOR3 or typeof(value.get("side")) != TYPE_INT:
+				return
+			var right: Vector3 = value.right
+			if not right.is_finite() or absf(right.y) > 0.01 or absf(right.length_squared()-1.0) > 0.01 or value.side not in [-1,1]:
+				return
+			actor.peek_requested = value.pressed
+			actor.peek_view_right = Vector3(right.x,0,right.z).normalized()
+			actor.peek_shoulder = value.side
 		"bow":
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_bow(value)
@@ -401,10 +418,14 @@ func _on_killed(slot: int, source: int) -> void:
 		actors[source].kills += 1
 		print("ARENA_KILL source=",source," victim=",slot)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if local_slot < 0:
 		return
 	var actor = actors[local_slot]
+	if not actor.alive and (_peek_held or _mouse_drawing or _key_drawing):
+		_peek_held = false
+		_cancel_draw_input()
+	_shoulder_camera.update(delta)
 	_update_game_camera()
 	var rows: Array[Dictionary] = []
 	for fighter in actors:
@@ -412,24 +433,24 @@ func _process(_delta: float) -> void:
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
 		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn})
+	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
 
 func _update_game_camera() -> void:
-	var focus: Vector3 = actors[local_slot].position + Vector3(0,1.5,0)
+	var actor = actors[local_slot]
+	var height: float = actor.cover.camera_height() if actor.cover.active else 1.5
+	var focus: Vector3 = actor.position + Vector3(0,height,0)
 	var back := Vector3(sin(_camera_yaw)*cos(_camera_pitch),sin(_camera_pitch),cos(_camera_yaw)*cos(_camera_pitch))
-	var right := Vector3(cos(_camera_yaw),0,-sin(_camera_yaw))
-	var destination := focus + back*_camera_distance + right*0.70
-	_camera_query.from = focus
-	_camera_query.to = destination
-	var hit := get_world_3d().direct_space_state.intersect_ray(_camera_query)
-	camera.position = hit.position + hit.normal*0.25 if not hit.is_empty() else destination
+	camera.position = _shoulder_camera.resolve(get_world_3d().direct_space_state,focus,back,_camera_distance)
 	camera.look_at(camera.position-back)
 
 func _set_cursor_free(value: bool) -> void:
 	_cursor_free = value
 	if value:
 		_cancel_draw_input()
+		_peek_held = false
+		_send_peek_input()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
 func _crosshair_aim() -> Vector3:
@@ -444,6 +465,11 @@ func _crosshair_aim() -> Vector3:
 func _input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		_peek_held = false
+		_send_peek_input()
+		if actors[local_slot].cover.active:
+			_cancel_draw_input()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
 			_mouse_drawing = false
@@ -460,6 +486,9 @@ func _cancel_draw_input() -> void:
 	_key_drawing = false
 	send_action("stop")
 
+func _send_peek_input() -> void:
+	send_action("peek",{"pressed":_peek_held,"right":Vector3(cos(_camera_yaw),0,-sin(_camera_yaw)),"side":_shoulder_camera.side})
+
 func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
@@ -469,6 +498,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_2: send_action("weapon","sword")
 			KEY_C: send_action("armor",(actors[local_slot].rig.armor_index+1)%3)
 			KEY_SPACE: send_action("jump",event.shift_pressed)
+			KEY_F:
+				_cancel_draw_input()
+				send_action("cover",Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw)))
+				if _peek_held:
+					_send_peek_input()
+			KEY_X:
+				_shoulder_camera.swap()
+				if _peek_held:
+					_send_peek_input()
 			KEY_ESCAPE, KEY_I: _set_cursor_free(not _cursor_free)
 			KEY_Q:
 				_set_cursor_free(false)
@@ -483,6 +521,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				send_action("draw",_crosshair_aim())
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_set_cursor_free(false)
+			_peek_held = true
+			_send_peek_input()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_camera_distance = maxf(3,_camera_distance-0.5)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:

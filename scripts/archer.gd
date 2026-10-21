@@ -46,6 +46,9 @@ var _roll_progress := -1.0
 var _roll_direction := Vector3.FORWARD
 var _velocity := Vector3.ZERO
 var _grounded := true
+var _cover_active := false
+var _cover_crouched := false
+var _cover_weight := 0.0
 var _ground_sampler := Callable()
 var _aim_point := Vector3(0,1.5,-20)
 var _motion_time := 0.0
@@ -308,6 +311,12 @@ func set_roll(progress: float, direction: Vector3) -> void:
 		global_rotation.y = atan2(-direction.x,-direction.z)
 	_update_pose(0.0)
 
+func set_cover(active: bool, outward: Vector3, crouched: bool) -> void:
+	_cover_active = active
+	_cover_crouched = active and crouched
+	if active and phase == "READY":
+		global_rotation.y = atan2(-outward.x,-outward.z)
+
 func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 	if grounded and not _grounded and _velocity.y < -1.0:
 		_landing_weight = 1.0
@@ -315,7 +324,7 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if phase == "READY" and _roll_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not _cover_active and phase == "READY" and _roll_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
 		global_rotation.y = atan2(-world_velocity.x,-world_velocity.z)
 
 func set_ground_sampler(sampler: Callable) -> void:
@@ -326,7 +335,8 @@ func get_animation_state() -> Dictionary:
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
 		"yaw":global_rotation.y,"roll":_roll_progress,"roll_direction":_roll_direction,
-		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight}
+		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight,
+		"cover":_cover_active,"crouched":_cover_crouched,"cover_weight":_cover_weight}
 
 func apply_animation_state(state: Dictionary) -> void:
 	phase = str(state.phase)
@@ -346,6 +356,9 @@ func apply_animation_state(state: Dictionary) -> void:
 	_locomotion_phase = float(state.locomotion_phase)
 	_air_time = float(state.air_time)
 	_landing_weight = float(state.landing)
+	_cover_active = bool(state.cover)
+	_cover_crouched = bool(state.crouched)
+	_cover_weight = float(state.cover_weight)
 	_update_pose(0.0)
 
 func get_arrow_origin() -> Vector3:
@@ -407,6 +420,7 @@ func advance_animation(delta: float) -> void:
 func _advance_step(delta: float) -> void:
 	_phase_time += delta
 	_motion_time += delta
+	_cover_weight = move_toward(_cover_weight,1.0 if _cover_crouched else 0.0,delta*6.0)
 	if _grounded:
 		var speed := Vector2(_velocity.x,_velocity.z).length()
 		var clip := _locomotion_clip(speed)
@@ -487,7 +501,7 @@ func _update_pose(delta: float) -> void:
 	var coupled_carry := weapon == "sword" and sword_index == 2 and phase != "MELEE"
 	var guarding := coupled_carry and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
-	var action := phase == "MELEE" or drawing or guarding
+	var action := phase == "MELEE" or drawing or guarding or _cover_active
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
 	var archery := _archery_weight() if drawing else 0.0
@@ -557,6 +571,8 @@ func _update_pose(delta: float) -> void:
 	if arm_overlay:
 		for index in _guard_bones.size():
 			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
+	if _cover_weight > 0.0 and _roll_progress < 0.0:
+		_apply_cover_crouch()
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery)
@@ -572,6 +588,16 @@ func _update_pose(delta: float) -> void:
 		active_sword.global_transform = _bone_world(_arms[1][2]) * _sword_grip
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
+
+func _apply_cover_crouch() -> void:
+	# Lower the pelvis, not the whole mesh: feet stay planted and bone lengths stay fixed.
+	var left := _bone_world(_legs[0][2])
+	var right := _bone_world(_legs[1][2])
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.origin.y -= 0.58*_cover_weight
+	_set_bone_world(_bones.pelvis,pelvis)
+	_solve_limb(_legs[0],left.origin,left.basis,-global_basis.z)
+	_solve_limb(_legs[1],right.origin,right.basis,-global_basis.z)
 
 func _update_hand_contacts() -> void:
 	var left := _bone_world(_arms[0][2])
