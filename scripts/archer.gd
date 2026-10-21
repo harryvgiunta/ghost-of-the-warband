@@ -40,6 +40,8 @@ var _swords: Array[Node3D] = []
 var _melee_struck := false
 var _roll_progress := -1.0
 var _roll_direction := Vector3.FORWARD
+var _landing_weight := 0.0
+var _takeoff_weight := 0.0
 var draw_amount: float = 0.0
 var phase: String = "READY"
 var bow_hand: Node3D
@@ -400,7 +402,9 @@ func release_string() -> void:
 	_release_raise = smoothstep(0.07, RAISE_SECONDS, _phase_time) if phase == "DRAWING" else 1.0
 	_release_plant = smoothstep(0.0, 0.18, _phase_time) if phase == "DRAWING" else 1.0
 	var origin: Vector3 = get_arrow_origin()
-	var direction: Vector3 = active_bow.get_arrow_direction()
+	var direction: Vector3 = (_aim_point - origin).normalized()
+	if direction.length_squared() < 0.0001:
+		direction = active_bow.get_arrow_direction()
 	phase = "RELEASE"
 	_phase_time = 0.0
 	var speed: float = float(BOW_DATA[bow_index].speed) * lerpf(0.45, 1.0, _release_charge)
@@ -423,6 +427,10 @@ func aim_at(world_point: Vector3) -> void:
 		_update_pose()
 
 func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
+	if grounded and not _grounded and _velocity.y < -1.0:
+		_landing_weight = 1.0
+	if not grounded and _grounded and world_velocity.y > 1.0:
+		_takeoff_weight = 1.0
 	_velocity = world_velocity
 	_grounded = grounded
 	if phase == "READY" and Vector2(world_velocity.x, world_velocity.z).length_squared() > 0.01:
@@ -436,7 +444,7 @@ func get_animation_state() -> Dictionary:
 		"aim": _aim_point, "release_draw": _release_draw,
 		"release_charge": _release_charge, "release_raise": _release_raise,
 		"release_plant": _release_plant, "yaw": global_rotation.y,
-		"roll":_roll_progress,"roll_direction":_roll_direction}
+		"roll":_roll_progress,"roll_direction":_roll_direction,"landing":_landing_weight,"takeoff":_takeoff_weight}
 
 func apply_animation_state(state: Dictionary) -> void:
 	phase = str(state.phase)
@@ -450,6 +458,8 @@ func apply_animation_state(state: Dictionary) -> void:
 	global_rotation.y = float(state.yaw)
 	_roll_progress = float(state.roll)
 	_roll_direction = state.roll_direction
+	_landing_weight = float(state.landing)
+	_takeoff_weight = float(state.takeoff)
 	_update_pose()
 
 func get_arrow_origin() -> Vector3:
@@ -485,6 +495,8 @@ func _process(delta: float) -> void:
 	if not _built:
 		return
 	_time += delta
+	_landing_weight = move_toward(_landing_weight,0.0,delta*4.0)
+	_takeoff_weight = move_toward(_takeoff_weight,0.0,delta*8.0)
 	var previous_time: float = _phase_time
 	_phase_time += delta
 	var speed: float = Vector2(_velocity.x, _velocity.z).length()
@@ -554,6 +566,7 @@ func _update_pose() -> void:
 	var stride: float = _walk_blend
 	var bob: float = -0.035 * stride + sin(_gait * 2.0) * 0.012 * stride
 	bob += sin(_time * 1.8) * 0.002 * (1.0 - stride)
+	bob -= 0.10 * maxf(_landing_weight,_takeoff_weight)
 	var torso_yaw: float = STANCE_YAW * plant
 	# While shooting on the move, hips/feet keep a softer angle than the chest;
 	# the gait travels along actual velocity, including strafing and backpedaling.
@@ -629,52 +642,91 @@ func _update_melee_pose() -> void:
 		var toward := _aim_point - global_position
 		if Vector2(toward.x,toward.z).length_squared() > 0.01:
 			global_rotation.y = atan2(-toward.x,-toward.z)
+	var t := clampf(_phase_time / float(SWORD_DATA[sword_index].seconds),0,1) if phase == "MELEE" else 0.0
+	var windup := smoothstep(0.0,0.42,t)
+	var cut := smoothstep(0.42,0.67,t)
+	var recover := smoothstep(0.67,1.0,t)
+	var loaded := windup * (1.0-cut)
+	var delivered := cut * (1.0-recover)
 	var stride := _walk_blend
-	var bob := -0.035 * stride + sin(_gait*2.0)*0.012*stride
-	bob = _prepare_feet(Basis.IDENTITY,Basis.IDENTITY,1.0-stride,stride,bob)
-	_torso.transform = Transform3D(Basis.IDENTITY,Vector3(0,bob,0))
-	_head.rotation = Vector3.ZERO
-	var contact := Vector3(0.28,1.13,-0.12)
-	var angle := -0.68
-	if phase == "MELEE":
-		var t := clampf(_phase_time / float(SWORD_DATA[sword_index].seconds),0,1)
-		if t < 0.38:
-			var raise := smoothstep(0.0,0.38,t)
-			contact = contact.lerp(Vector3(0.15,2.02,-0.06),raise)
-			angle = lerpf(-0.68,1.25,raise)
-		elif t < 0.72:
-			var chop := smoothstep(0.38,0.72,t)
-			contact = Vector3(0.15,2.02,-0.06).lerp(Vector3(0.14,1.35,-0.42),chop)
-			angle = lerpf(1.25,-1.05,chop)
-		else:
-			var recover := smoothstep(0.72,1.0,t)
-			contact = Vector3(0.14,1.35,-0.42).lerp(contact,recover)
-			angle = lerpf(-1.05,-0.68,recover)
-	contact.y += bob
+	var bob := -0.035*stride + sin(_gait*2.0)*0.012*stride - 0.10*maxf(_landing_weight,_takeoff_weight) - 0.055*delivered
+	bob = _prepare_feet(Basis.IDENTITY,Basis.IDENTITY,1.0-stride,stride,bob,0.18)
+	var hip_basis := Basis(Vector3.UP,-0.10*loaded + 0.12*delivered)
+	var shoulder_basis := Basis(Vector3.UP,-0.06 - 0.26*loaded + 0.30*delivered)
+	shoulder_basis = Basis(Vector3.RIGHT,0.04*loaded - 0.14*delivered) * shoulder_basis
+	var shift := Vector3(0,bob,0.025*loaded - 0.06*delivered)
+	var pivot := Vector3(0,0.94,0)
+	_torso.transform = Transform3D(shoulder_basis,pivot-shoulder_basis*pivot+shift)
+	_head.rotation = Vector3(-0.04*delivered,0.06+0.26*loaded-0.30*delivered,0)
+	for finger: Node3D in _draw_fingers:
+		finger.position.x = -0.006
+		finger.position.z = -0.075
+		finger.rotation.y = 0.0
+	var guard := Vector3(0.05 if sword_index == 2 else 0.25,1.21,-0.27)
+	var high := Vector3(0.06 if sword_index == 2 else 0.16,2.00,-0.19)
+	var low := Vector3(0.08 if sword_index == 2 else 0.18,1.20,-0.45)
+	var contact := guard.lerp(high,windup).lerp(low,cut).lerp(guard,recover) + shift
+	var angle := lerpf(lerpf(lerpf(-0.45,1.22,windup),-0.75,cut),-0.45,recover)
 	var hand_basis := Basis(Vector3.RIGHT,angle)
-	_solve_chain(_upper_arms[1],_forearms[1],_shoulders[1]+Vector3(0,bob,0),contact+hand_basis.z*FINGER_OFFSET,Vector3(0.8,0.1,0.5),ARM_UPPER,ARM_LOWER)
+	var shoulder: Vector3 = _torso.transform * _shoulders[1]
+	_solve_chain(_upper_arms[1],_forearms[1],shoulder,contact+hand_basis.z*FINGER_OFFSET,Vector3(0.8,0.15,0.35),ARM_UPPER,ARM_LOWER)
 	_orient_endpoint(_wrists[1],_upper_arms[1],_forearms[1],hand_basis)
 	active_sword.transform = Transform3D(hand_basis,to_local(string_hand.global_position))
-	var left_contact := Vector3(-0.28,1.05+bob,-0.12)
+	var left_contact := Vector3(-0.32,1.15,0.02+0.14*delivered) + shift
 	var left_basis := Basis(Vector3.RIGHT,-0.7)
-	if sword_index == 2 and phase == "MELEE":
-		left_contact = to_local(string_hand.global_position)+hand_basis.z*0.12
+	if sword_index == 2:
+		left_contact = to_local(string_hand.global_position) + hand_basis.z*0.16
 		left_basis = hand_basis
-	_solve_chain(_upper_arms[0],_forearms[0],_shoulders[0]+Vector3(0,bob,0),left_contact+left_basis.z*GRIP_OFFSET,Vector3(-0.8,-0.2,0.2),ARM_UPPER,ARM_LOWER)
+	shoulder = _torso.transform * _shoulders[0]
+	_solve_chain(_upper_arms[0],_forearms[0],shoulder,left_contact+left_basis.z*GRIP_OFFSET,Vector3(-0.8,0.10,0.20),ARM_UPPER,ARM_LOWER)
 	_orient_endpoint(_wrists[0],_upper_arms[0],_forearms[0],left_basis)
 	for side in 2:
 		var sign_x := -1.0 if side == 0 else 1.0
-		var hip := Vector3(sign_x*0.125,0.94+bob,0)
+		var hip := hip_basis*Vector3(sign_x*0.125,0.94,0) + shift
 		_solve_chain(_thighs[side],_shins[side],hip,_ankle_targets[side],Vector3(sign_x*0.08,0,-1),LEG_UPPER,LEG_LOWER)
 		_orient_endpoint(_ankles[side],_thighs[side],_shins[side],_foot_bases[side])
 
 func _apply_roll() -> void:
 	if _roll_progress < 0.0:
 		return
+	var t := clampf(_roll_progress,0,1)
+	var tuck := smoothstep(0.0,0.18,t) * (1.0-smoothstep(0.74,1.0,t))
+	var base_offset := _torso.position
+	var left_contact := to_local(bow_hand.global_position)
+	var right_contact := to_local(string_hand.global_position)
+	var left_basis := global_basis.transposed()*bow_hand.global_basis
+	var right_basis := global_basis.transposed()*string_hand.global_basis
+	var pelvis := Vector3(0,0.94,0)
+	var curl := Basis(Vector3.RIGHT,-0.45*tuck)
+	_torso.transform = Transform3D(curl*_torso.basis,pelvis+curl*(base_offset-pelvis)+Vector3(0,-0.16*tuck,0))
+	_head.rotation.x = lerpf(_head.rotation.x,-0.30,tuck)
+	left_contact = left_contact.lerp(Vector3(-0.28,1.12+base_offset.y,-0.34),tuck)
+	left_basis = left_basis.slerp(Basis(Vector3.RIGHT,-PI/2.0),tuck)
+	var protected_hand := Vector3(0.28,1.13+base_offset.y,-0.37)
+	if weapon == "sword":
+		protected_hand = Vector3(0.34,1.15+base_offset.y,-0.10)
+		right_basis = right_basis.slerp(Basis(Vector3.UP,-PI/2.0)*Basis(Vector3.RIGHT,-0.05),tuck)
+	right_contact = right_contact.lerp(protected_hand,tuck)
+	_solve_chain(_upper_arms[0],_forearms[0],_torso.transform*_shoulders[0],left_contact+left_basis.z*GRIP_OFFSET,Vector3(-0.8,-0.3,0.1),ARM_UPPER,ARM_LOWER)
+	_orient_endpoint(_wrists[0],_upper_arms[0],_forearms[0],left_basis)
+	_solve_chain(_upper_arms[1],_forearms[1],_torso.transform*_shoulders[1],right_contact+right_basis.z*FINGER_OFFSET,Vector3(0.8,-0.3,0.1),ARM_UPPER,ARM_LOWER)
+	_orient_endpoint(_wrists[1],_upper_arms[1],_forearms[1],right_basis)
+	if weapon == "bow":
+		active_bow.transform = Transform3D(left_basis,to_local(bow_hand.global_position))
+		active_bow.set_arrow_visible(tuck < 0.1)
+	else:
+		active_sword.transform = Transform3D(right_basis,to_local(string_hand.global_position))
+	for side in 2:
+		var sign_x := -1.0 if side == 0 else 1.0
+		var ankle := to_local(_ankles[side].global_position).lerp(Vector3(sign_x*0.16,0.60+base_offset.y,0.05),tuck)
+		var hip: Vector3 = _torso.transform*Vector3(sign_x*0.125,0.94,0)
+		var pole := Vector3(sign_x*0.08,0.8*tuck,-1)
+		_solve_chain(_thighs[side],_shins[side],hip,ankle,pole,LEG_UPPER,LEG_LOWER)
+		_orient_endpoint(_ankles[side],_thighs[side],_shins[side],_foot_bases[side]*Basis(Vector3.RIGHT,-0.4*tuck))
 	var right := Vector3(-_roll_direction.z,0,_roll_direction.x)
 	var local_axis := global_basis.transposed()*right.normalized()
-	var spin := Basis(local_axis,-TAU*_roll_progress)
-	var pivot := Vector3(0,0.95,0)
+	var spin := Basis(local_axis,-TAU*smoothstep(0.10,0.86,t))
+	var pivot := Vector3(0,0.90,0)
 	var turn := Transform3D(spin,pivot-spin*pivot)
 	_torso.transform = turn*_torso.transform
 	for limb in _upper_arms:
@@ -683,10 +735,10 @@ func _apply_roll() -> void:
 		limb.transform = turn*limb.transform
 	if weapon == "bow":
 		active_bow.transform = turn*active_bow.transform
-	elif is_instance_valid(active_sword):
+	else:
 		active_sword.transform = turn*active_sword.transform
 
-func _prepare_feet(stance: Basis, pitch: Basis, plant: float, stride: float, bob: float) -> float:
+func _prepare_feet(stance: Basis, pitch: Basis, plant: float, stride: float, bob: float, stagger: float = 0.0) -> float:
 	var lowest_floor: float = INF
 	var travel := Vector3(_velocity.x, 0, _velocity.z)
 	travel = global_basis.transposed() * travel.normalized() if travel.length_squared() > 0.01 else Vector3.FORWARD
@@ -694,7 +746,7 @@ func _prepare_feet(stance: Basis, pitch: Basis, plant: float, stride: float, bob
 		var sign_x: float = -1.0 if side == 0 else 1.0
 		var step_phase: float = _gait + (0.0 if side == 0 else PI)
 		var lift: float = maxf(0.0, cos(step_phase)) * 0.14 * stride
-		var sole: Vector3 = stance * Vector3(sign_x * 0.19, 0, -sign_x * 0.045 * plant)
+		var sole: Vector3 = stance * Vector3(sign_x * 0.19, 0, sign_x * (stagger - 0.045) * plant)
 		sole += travel * sin(step_phase) * 0.27 * stride
 		var boot_basis: Basis = stance * Basis(Vector3.UP, -sign_x * 0.07)
 		var floor_y: float = 0.0

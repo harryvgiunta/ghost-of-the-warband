@@ -97,7 +97,7 @@ func run() -> void:
 	roll.advance(0.15,false)
 	check(not roll.press_jump(Vector3.RIGHT,Vector3.FORWARD,false) and roll.active,"Quick second Space starts a jump-roll")
 	check(roll.direction.is_equal_approx(Vector3.RIGHT),"Strafing direction overrides facing for the roll")
-	roll.advance(0.6,false)
+	roll.advance(Roll.DURATION+0.01,false)
 	check(not roll.active,"Roll ends after its finite duration")
 	roll.press_jump(Vector3.FORWARD,Vector3.FORWARD,false)
 	roll.press_jump(Vector3.FORWARD,Vector3.FORWARD,false)

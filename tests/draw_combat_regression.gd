@@ -6,6 +6,7 @@ var failures := 0
 var checks := 0
 var charges: Array[float] = []
 var directions: Array[Vector3] = []
+var origins: Array[Vector3] = []
 var rig
 var combat
 
@@ -35,9 +36,10 @@ func run() -> void:
 	combat = Combat.new()
 	holder.add_child(combat)
 	combat.setup(rig, Vector3(0, 1.7, -20))
-	combat.shot.connect(func(_origin, direction, _speed, charge):
+	combat.shot.connect(func(origin, direction, _speed, charge):
 		charges.append(charge)
-		directions.append(direction))
+		directions.append(direction)
+		origins.append(origin))
 	combat.set_motion(Vector3.ZERO, false, true)
 	for bow in 3:
 		for fraction in [0.0, 0.25, 0.5, 1.0]:
@@ -87,6 +89,7 @@ func run() -> void:
 	check(combat.aim_point == fixed_point, "No entity tracking or automatic target lock")
 	combat.release_draw()
 	check(charges.size() == before + 1 and directions[-1].x > 0.25, "Release uses the latest aim, not the initial click")
+	check(directions[-1].dot((fixed_point-origins[-1]).normalized())>0.99999,"Released arrow follows the actual aim line without gravity compensation")
 	advance(0.5)
 	var progress: float = combat.attack_progress
 	rig.set_bow(2)

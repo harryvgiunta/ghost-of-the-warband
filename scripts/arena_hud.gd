@@ -47,7 +47,7 @@ func _ready() -> void:
 	theme = style_theme
 	lobby = _ui._panel(self, Vector2(-285,-285),Vector2(570,570))
 	lobby.set_anchors_preset(Control.PRESET_CENTER,true)
-	_ui._label(lobby,"IRONWOOD  /  ARENA",Vector2(25,22),30,UI.GOLD)
+	_ui._label(lobby,"IRONWOOD / ARENA  " + str(ProjectSettings.get_setting("application/config/version")),Vector2(25,22),28,UI.GOLD)
 	_ui._label(lobby,"Four fighters. Every archer for himself.",Vector2(25,68),18,UI.CREAM)
 	_ui._label(lobby,"Empty seats use bots. Joining players replace bots.\nLAN / direct IP  •  No account or matchmaking required.",Vector2(25,101),14,UI.MUTED)
 	_ui._label(lobby,"YOUR NAME",Vector2(25,159),12,UI.GOLD)
@@ -85,7 +85,7 @@ func _ready() -> void:
 	match_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(match_ui)
 	var top := _ui._panel(match_ui,Vector2(24,22),Vector2(475,102))
-	_ui._label(top,"IRONWOOD  /  FREE-FOR-ALL",Vector2(18,12),22,UI.GOLD)
+	_ui._label(top,"IRONWOOD / ARENA  " + str(ProjectSettings.get_setting("application/config/version")),Vector2(18,12),22,UI.GOLD)
 	connection_label = _ui._label(top,"",Vector2(18,46),12,UI.MUTED)
 	connection_label.size = Vector2(440,45)
 	connection_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -110,8 +110,8 @@ func _ready() -> void:
 		button.toggle_mode = true
 		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword"))
 		weapon_buttons.append(button)
-	_ui._label(equipment,"BOW SIZE",Vector2(14,56),11,UI.GOLD)
-	_ui._label(equipment,"SWORD SIZE",Vector2(174,56),11,UI.GOLD)
+	_ui._label(equipment,"BOW SIZE / CLICK",Vector2(14,56),11,UI.GOLD)
+	_ui._label(equipment,"SWORD SIZE / CLICK",Vector2(174,56),11,UI.GOLD)
 	for index in 3:
 		var title: String = ["SMALL / 1s","MEDIUM / 2s","LARGE / 3s"][index]
 		var bow := _ui._button(equipment,title,Vector2(12,78+index*37),Vector2(148,32))
@@ -134,11 +134,11 @@ func _ready() -> void:
 		button.size = Vector2(100,32)
 		button.pressed.connect(func(): armor_selected.emit(index))
 		armor_buttons.append(button)
-	_ui._label(equipment,"Bow: hold + release. Sword: click.",Vector2(14,278),12,UI.MUTED)
+	_ui._label(equipment,"ESC / I: cursor. Sizes are mouse-only.",Vector2(14,278),12,UI.MUTED)
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"WASD  Move   SHIFT  Run   SPACE x2  Jump-roll   1  Bow   2  Sword   LMB / Q  Attack   RMB / Wheel  Camera",Vector2(-535,-25),12,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SPACE x2  Roll   ESC / I  Equipment cursor",Vector2(-535,-25),12,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -189,6 +189,7 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	if reticle_visible and not lobby.visible:
-		draw_arc(reticle,15,0,TAU,32,Color("172b31"),4,true)
-		draw_arc(reticle,15,0,TAU,32,UI.GOLD,1.5,true)
-		draw_circle(reticle,2,UI.GOLD)
+		for axis in UI.CROSSHAIR_AXES:
+			draw_line(reticle+axis*5,reticle+axis*13,Color(0.04,0.09,0.10,0.85),3.5,true)
+			draw_line(reticle+axis*5,reticle+axis*13,Color.WHITE,1.25,true)
+		draw_circle(reticle,1.5,Color.WHITE)

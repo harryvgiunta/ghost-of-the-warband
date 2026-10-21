@@ -29,6 +29,7 @@ var stamina := 100.0
 var _exhausted := false
 var input_age := 0.0
 var _label: Label3D
+var _ground_ring: MeshInstance3D
 var _target_position := Vector3.ZERO
 var _received_pose := false
 var _floor_query := PhysicsRayQueryParameters3D.new()
@@ -76,7 +77,7 @@ func _ready() -> void:
 	circle.outer_radius = 0.43
 	circle.rings = 24
 	circle.ring_segments = 6
-	Geo.mesh_node(self,circle,Geo.material(colors[slot]),Vector3(0,0.025,0))
+	_ground_ring = Geo.mesh_node(self,circle,Geo.material(colors[slot]),Vector3(0,0.025,0))
 
 func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) -> void:
 	peer_id = owner_id
@@ -279,3 +280,5 @@ func _process(delta: float) -> void:
 	if not authoritative and _received_pose:
 		position = position.lerp(_target_position,1.0-exp(-delta*22.0))
 	_label.text = "%s%s  %d" % [display_name," [BOT]" if is_bot else "",int(health)]
+	_ground_ring.visible = alive
+	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)

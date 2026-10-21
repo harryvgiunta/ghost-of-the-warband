@@ -8,11 +8,13 @@ signal view_toggled
 signal camp_requested
 signal map_toggled
 signal arena_requested
+signal cursor_requested(free: bool)
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
+const CROSSHAIR_AXES = [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]
 var map_open := false
 var reticle := Vector2.ZERO
 var reticle_visible := false
@@ -66,7 +68,7 @@ func _ready() -> void:
 	ui_theme.set_stylebox("pressed", "Button", _style(GOLD, GOLD, 6))
 	theme = ui_theme
 	var title := _panel(self, Vector2(24, 22), Vector2(300, 88))
-	_label(title, "I R O N W O O D", Vector2(17, 11), 25, CREAM)
+	_label(title, "IRONWOOD  " + str(ProjectSettings.get_setting("application/config/version")), Vector2(17, 11), 25, CREAM)
 	_region = _label(title, "The frontier", Vector2(18, 49), 16, GOLD)
 	var quest_panel := _panel(self, Vector2(-340, 22), Vector2(316, 154))
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT, true)
@@ -108,7 +110,7 @@ func _ready() -> void:
 	var arena_button := _button(self, "4-PLAYER ARENA", Vector2(-216, -207), Vector2(192, 35))
 	arena_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	arena_button.pressed.connect(func(): arena_requested.emit())
-	var hints := _label(self, "WASD  Move   SHIFT  Run   SPACE x2  Jump-roll   1  Bow   2  Sword   LMB / Q  Attack   I  Equipment   ESC  Cancel", Vector2(-510, -23), 12, CREAM)
+	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SPACE x2  Roll   ESC / I  Equipment cursor", Vector2(-510, -23), 12, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -123,7 +125,7 @@ func _build_equipment() -> void:
 		button.toggle_mode = true
 		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword"))
 		weapon_buttons.append(button)
-	_label(_equipment,"BOW SIZE / SHOT COOLDOWN",Vector2(18,112),11,MUTED)
+	_label(_equipment,"BOW SIZE / CLICK TO SELECT",Vector2(18,112),11,MUTED)
 	for index in 3:
 		var button := _button(_equipment,["SMALL SHORTBOW / 1s","MEDIUM RECURVE / 2s","LARGE LONGBOW / 3s"][index],Vector2(16,134+index*34),Vector2(250,30))
 		button.toggle_mode = true
@@ -132,7 +134,7 @@ func _build_equipment() -> void:
 		button.pressed.connect(func(): bow_selected.emit(index))
 		bow_buttons.append(button)
 	_bow_details = _label(_equipment,"",Vector2(18,241),11,TEAL)
-	_label(_equipment,"SWORD SIZE / OVERHAND CHOP",Vector2(18,275),11,MUTED)
+	_label(_equipment,"SWORD SIZE / CLICK TO SELECT",Vector2(18,275),11,MUTED)
 	for index in 3:
 		var button := _button(_equipment,["SMALL SWORD / 1s","MEDIUM SWORD / 2s","LARGE SWORD / 3s"][index],Vector2(16,297+index*34),Vector2(250,30))
 		button.toggle_mode = true
@@ -150,7 +152,7 @@ func _build_equipment() -> void:
 		armor_buttons.append(button)
 	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(16,543),Vector2(250,30))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"Bow: hold, aim, release. Sword: click.\nDouble-tap Space for a directional roll.",Vector2(18,584),11,MUTED)
+	_label(_equipment,"1 = bow. 2 = sword. Sizes are mouse-only.\nEscape frees the cursor; click world to aim.",Vector2(18,584),11,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -205,16 +207,19 @@ func toggle_equipment() -> void:
 	_equipment.visible = not _equipment.visible
 	map_open = false
 	_map_button.text = "M   WORLD MAP"
+	cursor_requested.emit(_equipment.visible)
 
 func toggle_map() -> void:
 	map_open = not map_open
 	_equipment.visible = false
 	_map_button.text = "M   CLOSE MAP" if map_open else "M   WORLD MAP"
+	cursor_requested.emit(map_open)
 
 func close_panels() -> void:
 	_equipment.visible = false
 	map_open = false
 	_map_button.text = "M   WORLD MAP"
+	cursor_requested.emit(false)
 
 func show_feedback(message: String, seconds: float = 3.0) -> void:
 	_feedback.text = message
@@ -239,11 +244,10 @@ func _draw() -> void:
 	else:
 		_draw_map(Rect2(Vector2(size.x - 216, 196), Vector2(192, 192)), false)
 	if reticle_visible and not map_open:
-		draw_arc(reticle, 15, 0, TAU, 32, Color(0.04, 0.09, 0.10, 0.8), 4.5, true)
-		draw_arc(reticle, 15, 0, TAU, 32, GOLD, 1.5, true)
-		draw_line(reticle + Vector2(-23, 0), reticle + Vector2(-10, 0), GOLD, 1.5)
-		draw_line(reticle + Vector2(10, 0), reticle + Vector2(23, 0), GOLD, 1.5)
-		draw_circle(reticle, 2.0, GOLD)
+		for axis in CROSSHAIR_AXES:
+			draw_line(reticle+axis*5,reticle+axis*13,Color(0.04,0.09,0.10,0.85),3.5,true)
+			draw_line(reticle+axis*5,reticle+axis*13,Color.WHITE,1.25,true)
+		draw_circle(reticle,1.5,Color.WHITE)
 
 func _map_point(point: Vector3, rect: Rect2) -> Vector2:
 	var normalized := Vector2(point.x, point.z) / (_world_limit * 2.0) + Vector2.ONE * 0.5

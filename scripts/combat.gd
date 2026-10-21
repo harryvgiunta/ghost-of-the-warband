@@ -4,7 +4,6 @@ extends Node
 signal shot(origin: Vector3, direction: Vector3, speed: float, charge: float)
 
 const Archer = preload("res://scripts/archer.gd")
-const Arrow = preload("res://scripts/arrow.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
 var rig
 var aim_point := Vector3.ZERO
@@ -118,32 +117,13 @@ func advance(delta: float) -> void:
 func update_aim() -> void:
 	if rig.phase == "RELEASE" or rig.phase == "RECOVER":
 		return
-	if rig.weapon == "sword":
-		rig.aim_at(aim_point)
-		return
-	var charge := clampf(rig.draw_amount, 0.0, 1.0)
-	var speed := float(Archer.BOW_DATA[rig.bow_index].speed) * lerpf(0.45, 1.0, charge)
-	var origin: Vector3 = rig.get_arrow_origin()
-	var direction := ballistic_direction(origin, aim_point, speed)
-	rig.aim_at(origin + direction * 40.0)
+	# Aim is a world-space point from the camera ray, never a tracked unit or
+	# a compensated ballistic solution. Gravity acts after the arrow is released.
+	rig.aim_at(aim_point)
 
 static func damage_for(bow_index: int, charge: float) -> float:
 	return float(BASE_DAMAGE[bow_index]) * clampf(charge, 0.0, 1.0)
 
-static func ballistic_direction(origin: Vector3, destination: Vector3, speed: float) -> Vector3:
-	var displacement := destination - origin
-	var horizontal := Vector3(displacement.x, 0, displacement.z)
-	var distance := horizontal.length()
-	if distance < 0.001:
-		return Vector3.FORWARD
-	var gravity := -Arrow.GRAVITY.y
-	var speed_squared := speed * speed
-	var discriminant := speed_squared * speed_squared - gravity * (gravity * distance * distance + 2.0 * displacement.y * speed_squared)
-	var tangent := 1.0
-	if discriminant >= 0.0:
-		tangent = (speed_squared - sqrt(discriminant)) / (gravity * distance)
-	var angle := clampf(atan(tangent), -Archer.MAX_ELEVATION, Archer.MAX_ELEVATION)
-	return horizontal.normalized() * cos(angle) + Vector3.UP * sin(angle)
 
 func _on_rig_shot(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	attack_progress = 0.0

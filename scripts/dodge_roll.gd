@@ -1,8 +1,8 @@
 extends Node
 ## A second jump press within the tap window starts one directional airborne roll.
 const DOUBLE_TAP_SECONDS := 0.30
-const DURATION := 0.55
-const SPEED := 10.5
+const DURATION := 0.68
+const SPEED := 8.5
 var active := false
 var direction := Vector3.FORWARD
 var progress := 0.0

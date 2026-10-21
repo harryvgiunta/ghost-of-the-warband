@@ -33,15 +33,15 @@ var respawns := 0
 var activated: Dictionary = {}
 var inspecting := false
 var camera_yaw := 0.22
-var camera_pitch := 0.38
-var camera_distance := 7.5
+var camera_pitch := 0.08
+var camera_distance := 4.5
 var camera_focus := Vector3.ZERO
 var _camera_ready := false
 var _orbiting := false
 var _orbit_pointer := Vector2.ZERO
 var _key_drawing := false
 var _mouse_drawing := false
-var _aim_cursor := Vector2.ZERO
+var _cursor_free := false
 var _jump_requested := false
 var _interaction_id := ""
 var _interaction_allowed := false
@@ -101,6 +101,7 @@ func _ready() -> void:
 	hud.view_toggled.connect(toggle_view)
 	hud.camp_requested.connect(return_to_camp)
 	hud.map_toggled.connect(toggle_map)
+	hud.cursor_requested.connect(_set_cursor_free)
 	hud.arena_requested.connect(func(): cancel_input(); get_tree().change_scene_to_file("res://arena.tscn"))
 	archer.loadout_changed.connect(_update_loadout)
 	hud.configure_map(world.landmarks, world.map_paths, world.interactables, world.WORLD_LIMIT)
@@ -118,6 +119,7 @@ func _ready() -> void:
 	_update_camera(1.0)
 	hud.show_feedback("The old waystones have gone dark. Follow the trails north.")
 	print("IRONWOOD_WORLD_READY enemies=%d waystones=3 terrain=290m" % enemies.size())
+	_set_cursor_free(false)
 
 func _physics_process(delta: float) -> void:
 	roll.advance(delta,player.is_on_floor())
@@ -126,7 +128,7 @@ func _physics_process(delta: float) -> void:
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
 	if input_vector.length() > 1.0:
 		input_vector = input_vector.normalized()
-	if inspecting or hud.map_open:
+	if inspecting or hud.map_open or _cursor_free:
 		input_vector = Vector2.ZERO
 	var running := Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1
 	var speed := SPRINT_SPEED if running else WALK_SPEED
@@ -171,12 +173,10 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	_update_camera(delta)
 	if _mouse_drawing or _key_drawing:
-		update_pointer_aim(_aim_cursor)
+		update_crosshair_aim()
 	_update_interaction()
-	hud.reticle_visible = archer.phase == "DRAWING" or archer.phase == "HOLDING"
-	if hud.reticle_visible:
-		hud.reticle = camera.unproject_position(combat.aim_point)
-		hud.reticle_visible = not camera.is_position_behind(combat.aim_point)
+	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
+	hud.reticle = get_viewport().get_visible_rect().size * 0.5
 	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode)
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 
@@ -187,56 +187,64 @@ func _sample_floor(point: Vector3) -> float:
 	return float(hit.position.y) if not hit.is_empty() else player.global_position.y
 
 func _update_camera(delta: float) -> void:
-	var desired_focus := player.global_position + Vector3(0, 1.25 if not inspecting else 1.05, 0)
+	var desired_focus := player.global_position + Vector3(0, 1.5 if not inspecting else 1.05, 0)
 	var factor := 1.0 if not _camera_ready else 1.0 - exp(-delta * 10.0)
 	camera_focus = camera_focus.lerp(desired_focus, factor)
 	var offset := Vector3(sin(camera_yaw) * cos(camera_pitch), sin(camera_pitch), cos(camera_yaw) * cos(camera_pitch)) * camera_distance
-	var desired_position := camera_focus + offset
+	var right := Vector3(cos(camera_yaw),0,-sin(camera_yaw))
+	var desired_position := camera_focus + offset + (Vector3.ZERO if inspecting else right * 0.70)
 	_camera_query.from = camera_focus
 	_camera_query.to = desired_position
 	var hit := get_world_3d().direct_space_state.intersect_ray(_camera_query)
 	if not hit.is_empty():
 		desired_position = hit.position + hit.normal * 0.25
 	camera.global_position = desired_position
-	if camera.global_position.distance_squared_to(camera_focus) > 0.01:
-		camera.look_at(camera_focus)
+	if inspecting:
+		if camera.global_position.distance_squared_to(camera_focus) > 0.01:
+			camera.look_at(camera_focus)
+	else:
+		camera.look_at(camera.global_position - offset.normalized())
 	_camera_ready = true
 
 
 
-func _ray_from_pointer(point: Vector2) -> Dictionary:
-	_aim_query.from = camera.project_ray_origin(point)
-	_aim_query.to = _aim_query.from + camera.project_ray_normal(point) * 300.0
-	return get_world_3d().direct_space_state.intersect_ray(_aim_query)
+func _set_cursor_free(value: bool) -> void:
+	_cursor_free = value
+	if value:
+		cancel_input()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
-func update_pointer_aim(point: Vector2) -> void:
-	_aim_cursor = point
-	var hit := _ray_from_pointer(point)
-	var destination: Vector3 = hit.position if not hit.is_empty() else camera.project_ray_origin(point) + camera.project_ray_normal(point) * 60.0
-	combat.set_aim(destination)
+func update_crosshair_aim() -> void:
+	_update_camera(0.0)
+	if inspecting:
+		combat.set_aim(player.global_position + Vector3(0,1.7,0) - archer.global_basis.z * 30.0)
+		return
+	var center := get_viewport().get_visible_rect().size * 0.5
+	_aim_query.from = camera.project_ray_origin(center)
+	_aim_query.to = _aim_query.from + camera.project_ray_normal(center) * 300.0
+	var hit := get_world_3d().direct_space_state.intersect_ray(_aim_query)
+	combat.set_aim(hit.position if not hit.is_empty() else _aim_query.to)
 
-func begin_attack(point: Vector2) -> void:
+func begin_attack() -> void:
 	if hud.map_open:
 		return
-	update_pointer_aim(point)
+	update_crosshair_aim()
 	var started: bool = combat.begin_melee() if archer.weapon == "sword" else combat.begin_draw()
 	if not started:
 		hud.show_feedback("Wait for the weapon cooldown and stand on solid ground.")
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and (_mouse_drawing or _key_drawing):
-		_aim_cursor = event.position
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
 			_mouse_drawing = false
 			if not _key_drawing:
-				update_pointer_aim(event.position)
+				update_crosshair_aim()
 				combat.release_draw()
 	if event is InputEventKey and event.keycode == KEY_Q and not event.pressed:
 		if _key_drawing:
 			_key_drawing = false
 			if not _mouse_drawing:
-				update_pointer_aim(_aim_cursor)
+				update_crosshair_aim()
 				combat.release_draw()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_orbiting = false
@@ -261,31 +269,46 @@ func _unhandled_input(event: InputEvent) -> void:
 				if inspecting:
 					toggle_view()
 				hud.close_panels()
+				_set_cursor_free(true)
 			KEY_Q:
+				if not inspecting:
+					hud.close_panels()
+					_set_cursor_free(false)
 				_key_drawing = true
 				if not _mouse_drawing:
-					begin_attack(get_viewport().get_mouse_position())
+					begin_attack()
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			if not inspecting:
+				hud.close_panels()
+				_set_cursor_free(false)
 			_mouse_drawing = true
 			if not _key_drawing:
-				begin_attack(event.position)
+				begin_attack()
 		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			_orbiting = true
-			_orbit_pointer = event.position
+			if inspecting:
+				_orbiting = true
+				_orbit_pointer = event.position
+			else:
+				hud.close_panels()
+				_set_cursor_free(false)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			camera_distance = maxf(camera_distance - 0.45, 2.7)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			camera_distance = minf(camera_distance + 0.45, 17.0)
-	if event is InputEventMouseMotion and _orbiting and (event.button_mask & MOUSE_BUTTON_MASK_RIGHT) != 0:
-		var change: Vector2 = event.position - _orbit_pointer
-		_orbit_pointer = event.position
-		camera_yaw -= change.x * 0.006
-		camera_pitch = clampf(camera_pitch + change.y * 0.004, -0.10, 1.05)
+	if event is InputEventMouseMotion:
+		if not _cursor_free and not inspecting:
+			camera_yaw -= event.relative.x * 0.004
+			camera_pitch = clampf(camera_pitch + event.relative.y * 0.004, -0.7, 0.7)
+		elif _orbiting and (event.button_mask & MOUSE_BUTTON_MASK_RIGHT) != 0:
+			var change: Vector2 = event.position - _orbit_pointer
+			_orbit_pointer = event.position
+			camera_yaw -= change.x * 0.006
+			camera_pitch = clampf(camera_pitch + change.y * 0.004, -0.10, 1.05)
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and is_instance_valid(archer):
-		cancel_input()
+		_set_cursor_free(true)
 
 func cancel_input() -> void:
 	_key_drawing = false
@@ -323,9 +346,10 @@ func _update_loadout() -> void:
 func toggle_view() -> void:
 	inspecting = not inspecting
 	camera_yaw = archer.global_rotation.y + (2.0 if inspecting else 0.2)
-	camera_pitch = 0.12 if inspecting else 0.38
-	camera_distance = 4.0 if inspecting else 7.5
+	camera_pitch = 0.12 if inspecting else 0.08
+	camera_distance = 4.0 if inspecting else 4.5
 	hud.set_inspecting(inspecting)
+	_set_cursor_free(inspecting)
 
 func toggle_map() -> void:
 	cancel_input()
@@ -394,10 +418,11 @@ func return_to_camp() -> void:
 	inspecting = false
 	hud.set_inspecting(false)
 	camera_yaw = 0.22
-	camera_pitch = 0.38
-	camera_distance = 7.5
+	camera_pitch = 0.08
+	camera_distance = 4.5
 	_camera_ready = false
 	hud.show_feedback("Ironwood village  /  Safe haven")
+	_set_cursor_free(false)
 
 func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	var arrow := Arrow.new()

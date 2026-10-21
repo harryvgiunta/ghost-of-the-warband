@@ -17,9 +17,10 @@ func _ready() -> void:
 	point.rotation.x = -PI/2
 	point.scale.z = 0.28
 	Geo.box(self,Vector3(0.32+sword_kind*0.07,0.06,0.065),Vector3(0,0,-0.075),gold)
-	var handle := Geo.cylinder(self,0.028,0.028,0.19,Vector3(0,0,0.055),leather,10)
+	var grip_length := 0.31 if sword_kind == 2 else 0.19
+	var handle := Geo.cylinder(self,0.028,0.028,grip_length,Vector3(0,0,-0.04+grip_length*0.5),leather,10)
 	handle.rotation.x = PI/2
 	for index in 6:
-		var binding := Geo.cylinder(self,0.030,0.030,0.008,Vector3(0,0,-0.025+index*0.031),gold,10)
+		var binding := Geo.cylinder(self,0.030,0.030,0.008,Vector3(0,0,-0.025+index*(grip_length-0.03)/5.0),gold,10)
 		binding.rotation.x=PI/2
-	Geo.sphere(self,0.043,Vector3(0,0,0.17),gold)
+	Geo.sphere(self,0.043,Vector3(0,0,grip_length-0.02),gold)

@@ -70,18 +70,20 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Space twice within 0.30 seconds | Jump-roll in the movement direction, or forward if stationary |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
-| Hold left mouse / Q with bow | Raise and draw; move the mouse to aim freely |
-| Release left mouse / Q with bow | Fire exactly one arrow |
+| Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
+| Hold left mouse / Q with bow | Raise and draw while continuing to aim |
+| Release left mouse / Q with bow | Launch exactly one arrow; damage occurs only on impact |
 | Click left mouse / Q with sword | Perform one uncharged overhand chop |
-| Escape | Cancel a held draw or unfinished attack |
-| Right mouse drag / wheel | Orbit camera / zoom |
+| Escape / I | Free the cursor for equipment clicks; cancel a held attack |
+| Click the world / right mouse | Resume captured mouse-look |
+| Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
 | C | Cycle armor |
 
-Choose **small / medium / large** bows and swords independently in the equipment UI. Weapon switching remembers both selections. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
+**1 always equips the selected bow; 2 always equips the selected sword. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
 
 ## Bow damage and cooldowns
 
-There is **no auto-fire and no target lock-on**. Aim points follow the mouse while the button is held. Holding at full draw never fires automatically. The arrow uses the latest aim when released.
+Aiming behaves like a shooter: the camera turns with the mouse and the crosshair stays in the center. There is **no auto-fire, unit lock-on, target tracking, or automatic gravity compensation**. Hold left mouse to draw and aim; release to launch one arrow along the current crosshair aim. Holding at full draw never fires automatically. Arrows still fall under gravity after launch, and only actual collision applies damage.
 
 ```text
 arrow damage = bow base damage × clamp(draw amount, 0, 1)
@@ -105,7 +107,11 @@ Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, inclu
 
 The strike checks nearby opposing collision bodies in front of the attacker, with line-of-sight checks so cover blocks damage. Each swing damages a target at most once. Switching weapons or rolling before impact cancels the pending strike without resetting cooldown.
 
-A quick second Space press turns the jump into a forward tumble and directional burst. Running or strafing direction takes priority over facing. Only one roll is allowed per airborne jump; it does not grant invulnerability or ignore world collisions.
+The sword animation uses a staggered stance, hip/shoulder rotation, weight transfer through the downward cut, a closed grip, and recovery. The greatsword stays two-handed. The character art is stylized, not a photorealistic or motion-captured model.
+
+A quick second Space press turns the jump into a tucked forward tumble and directional burst. Knees and elbows fold, the chin tucks, the weapon stays clear of the torso, and landing compresses the legs before returning to the normal stance. Running or strafing direction takes priority over facing. Only one roll is allowed per airborne jump; it does not grant invulnerability or ignore world collisions.
+
+[In-engine sword and jump-roll motion preview](media/motion-preview.mp4)
 
 ## Game modes
 
@@ -115,7 +121,7 @@ A quick second Space press turns the jump into a forward tumble and directional 
 
 ## Update
 
-Close the game, then:
+**Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. The old ZIP test build used 1/2/3 for bow sizes and must not be used with this revision. Current windows show **0.2.0** in the HUD.
 
 ```powershell
 git pull --ff-only
@@ -136,6 +142,9 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/projectile_regression.gd
 & $Godot --headless --path . --script res://tests/gameplay_regression.gd
 & $Godot --headless --path . --script res://tests/melee_roll_regression.gd
+& $Godot --headless --path . --script res://tests/action_pose_regression.gd
+& $Godot --headless --path . --script res://tests/weapon_input_regression.gd
+& $Godot --headless --path . --script res://tests/network_input_regression.gd
 ```
 
 Optional Godot MCP tooling is pinned under `tools/`; run `npm ci --ignore-scripts` there if needed. Local MCP configuration, engine binaries, imports, caches and logs are excluded from Git. They are not required from the original development machine.
