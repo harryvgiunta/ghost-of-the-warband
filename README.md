@@ -1,6 +1,6 @@
 # Ironwood — Frontier and Arena
 
-A Godot 4 third-person action game with a seamless woodland frontier and a four-combatant multiplayer arena. Original procedural male character, swappable bows, swords and armor, free-aim archery, overhand melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game with a seamless woodland frontier and a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords and armor, free-aim archery, contact-driven overhand melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -14,6 +14,8 @@ cd ironwood-arena
 ```
 
 `Setup.cmd` downloads **Godot 4.7.2 stable** from its official GitHub release, verifies the pinned SHA-256 checksum, and installs it inside the ignored `.runtime/godot` directory. No administrator access or system-wide installation is needed. Running setup again reuses the verified-version installation. The game launchers also run setup automatically if the managed engine is missing.
+
+The launchers import the bundled character assets before starting the game, so a fresh checkout does not need an existing `.godot` cache. Subsequent launches reuse imported assets. Blender is not required to play.
 
 - **Arena.cmd:** multiplayer lobby, or solo practice against bots.
 - **Play.cmd:** the single-player frontier.
@@ -67,7 +69,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | WASD | Move relative to the camera |
 | Shift | Run; consumes stamina |
 | Space | Jump |
-| Space twice within 0.30 seconds | Jump-roll in the movement direction, or forward if stationary |
+| Shift + Space | Immediately jump-roll in the movement direction, or forward if stationary |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
@@ -81,7 +83,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 
 **1 always equips the selected bow; 2 always equips the selected sword. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
 
-## Bow damage and cooldowns
+## Bow charge, damage and re-nocking
 
 Aiming behaves like a shooter: the camera turns with the mouse and the crosshair stays in the center. There is **no auto-fire, unit lock-on, target tracking, or automatic gravity compensation**. Hold left mouse to draw and aim; release to launch one arrow along the current crosshair aim. Holding at full draw never fires automatically. Arrows still fall under gravity after launch, and only actual collision applies damage.
 
@@ -89,29 +91,33 @@ Aiming behaves like a shooter: the camera turns with the mouse and the crosshair
 arrow damage = bow base damage × clamp(draw amount, 0, 1)
 ```
 
-Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Base damage is 30 / 38 / 50 for the three bow sizes; armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision.
+Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision.
 
-Cooldown starts on release. Wait until ready before starting another draw. Changing equipment or movement retains fractional cooldown progress; cancellation cannot reset it.
+The charge bar and bowstring animation fill together over the bow's full draw duration, including raising the bow. Release whenever you want: a large bow held for **1.5 seconds deals 50% damage**; holding it for 3 seconds gives full damage.
 
-| Bow | Standing cooldown | Walking cooldown | Running cooldown |
-| --- | --- | --- | --- |
-| Small | 1 second | 2 seconds | 4 seconds |
-| Medium | 2 seconds | 4 seconds | 8 seconds |
-| Large | 3 seconds | 6 seconds | 12 seconds |
+| Bow | Full draw duration | Full damage before armor |
+| --- | --- | --- |
+| Small | 1 second | 30 |
+| Medium | 2 seconds | 38 |
+| Large | 3 seconds | 50 |
 
-Walking reduces cooldown recovery rate by 50%; running by 75%. Standing has no penalty. Actual movement determines the penalty, so pushing into a wall counts as standing. You can move while aiming. New attacks cannot begin while airborne or rolling.
+There is **no separate bow attack cooldown**. Every release, even at zero or partial draw, plays a 0.28-second follow-through followed by 0.95 seconds to fetch and nock the next arrow. You can start drawing again as soon as that animation finishes. The HUD shows **NOCKING NEXT ARROW** during recovery. Changing weapons, bow size, movement or canceling cannot skip or restart re-nocking. Canceling an unreleased draw does not spend its arrow. Walking and running do not slow charging or re-nocking; you can move while aiming. New attacks cannot begin while airborne or rolling.
+
+The draw hand uses a cheek-surface landmark on the imported head. Bow raising, shoulder retrieval and re-nocking follow reachable paths outside the torso; the bow is brought in front of the centreline while loading. Geometry regressions check the forearms against the actual skinned outfit, not just whether the bones remain connected.
 
 ## Swords and jump-rolls
 
 Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, including raise, strike and recovery. Melee has no held charge or damage multiplier. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving.
 
-The strike checks nearby opposing collision bodies in front of the attacker, with line-of-sight checks so cover blocks damage. Each swing damages a target at most once. Switching weapons or rolling before impact cancels the pending strike without resetting cooldown.
+Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
-The sword animation uses a staggered stance, hip/shoulder rotation, weight transfer through the downward cut, a closed grip, and recovery. The greatsword stays two-handed. The character art is stylized, not a photorealistic or motion-captured model.
+The character uses a 65-bone skinned humanoid and authored animation clips. The greatsword has a genuine two-handed overhead load, accelerating downward cut, whole-body weight transfer, closed hilt grip, follow-through and recovery. Short/medium swords use a separate authored one-handed overhead. Windup and recovery absorb the different weapon durations instead of stretching the cutting stroke into slow motion. Source motions are retargeted and grip/timing corrections baked in Blender; sword elbows are not posed by runtime IK. The textured character and environment remain stylized, not photorealistic rendering.
 
-A quick second Space press turns the jump into a tucked forward tumble and directional burst. Knees and elbows fold, the chin tucks, the weapon stays clear of the torso, and landing compresses the legs before returning to the normal stance. Running or strafing direction takes priority over facing. Only one roll is allowed per airborne jump; it does not grant invulnerability or ignore world collisions.
+**Shift + Space** starts a tucked forward tumble and directional burst immediately, either from the ground or during a jump. Space alone only jumps; double-tapping it never rolls. Knees and elbows fold, the chin tucks, the weapon stays clear of the torso, and landing compresses the legs before returning to the normal stance. Running or strafing direction takes priority over facing. Only one roll is allowed before landing; it does not grant invulnerability or ignore world collisions.
 
-[In-engine sword and jump-roll motion preview](media/motion-preview.mp4)
+[In-engine authored sword, bow, movement and roll preview](media/motion-preview.mp4)
+
+Authored walk, jog and sprint clips follow actual movement speed with a continuous gait phase. The sprint includes knee/heel recovery, flight, body lean and alternating arm drive. Bow aiming and terrain contact use skeletal corrections; the greatsword keeps a coupled two-hand carry. Collisions that stop movement also stop the running gait.
 
 ## Game modes
 
@@ -131,21 +137,39 @@ git pull --ff-only
 
 ## Development and tests
 
-All assets are runtime-generated Godot geometry. `scripts/archer.gd` handles the articulated character and equipment animation; `combat.gd` owns bow cooldowns and sword hit checks; `dodge_roll.gd` owns double-tap roll state. `main.gd` controls the frontier. `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas.
+`assets/characters/ironwood_ranger.glb` contains the skinned character and authored clips; its adjacent JSON records source timing and weapon/palm transforms. `scripts/archer.gd` samples these animations on the physics clock, applies bow/terrain corrections, and emits blade sweeps from the same pose used to render the sword. `combat.gd` handles authoritative swept contact, independent sword recovery and bow readiness. `dodge_roll.gd` owns explicit Shift + Space roll state. `main.gd` controls the frontier; `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas. World and weapon geometry remain runtime-generated.
+
+The repo-local [Ironwood Archer skill](.omp/skills/ironwood-archer/SKILL.md) covers architecture, gameplay contracts, authored skeletal animation, multiplayer integration, testing and safe restarts. OMP discovers it at session startup; invoke `/skill:ironwood-archer` in a new session to load it explicitly.
 
 Run the behavior regressions after setup:
 
 ```powershell
 $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
+& $Godot --headless --editor --path . --import
 & $Godot --headless --path . --script res://tests/rig_regression.gd
 & $Godot --headless --path . --script res://tests/draw_combat_regression.gd
 & $Godot --headless --path . --script res://tests/projectile_regression.gd
 & $Godot --headless --path . --script res://tests/gameplay_regression.gd
 & $Godot --headless --path . --script res://tests/melee_roll_regression.gd
 & $Godot --headless --path . --script res://tests/action_pose_regression.gd
+& $Godot --headless --path . --script res://tests/arm_clearance_regression.gd
 & $Godot --headless --path . --script res://tests/weapon_input_regression.gd
 & $Godot --headless --path . --script res://tests/network_input_regression.gd
 ```
+
+### Rebuilding character assets
+
+The bundled model and motions are **CC0**: Ranger/base characters and locomotion by [Quaternius](https://quaternius.com/), with the two-handed heavy attack by [Gres](https://opengameart.org/content/humanoid-soulslike-animations). Exact source files, extraction ranges and modifications are recorded in [the asset provenance](assets/characters/LICENSE.txt). No paid pack or game account is needed.
+
+To re-author the assets, install Blender 5.1+, download and unpack the listed free sources into `.runtime/character-source`, then run:
+
+```powershell
+$Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
+& $Blender --background --python tools/prepare_character.py -- .runtime/character-source assets/characters/ironwood_ranger.glb
+& $Godot --headless --editor --path . --import
+```
+
+Keep the GLB, adjacent JSON/provenance, and `.glb.import` settings together. Import settings preserve authored clip names, use 60 Hz animation sampling, and keep textures embedded rather than duplicating extracted PNGs. The preparation workflow preserves the authored striking arm and body motion, corrects support-hand proportions and clothing clearance, and smooths the one-handed cut's timing. `tools/character_clearance.py` validates interpolated support-arm motion against the deformed outfit before export is accepted.
 
 Optional Godot MCP tooling is pinned under `tools/`; run `npm ci --ignore-scripts` there if needed. Local MCP configuration, engine binaries, imports, caches and logs are excluded from Git. They are not required from the original development machine.
 

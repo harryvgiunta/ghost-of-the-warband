@@ -106,6 +106,7 @@ func revive() -> void:
 	roll.reset()
 	rig.set_roll(-1.0,Vector3.FORWARD)
 	combat.attack_progress = 1.0
+	combat.melee_progress = 1.0
 	rig.phase = "READY"
 	rig.draw_amount = 0.0
 	rig._phase_time = 0.0
@@ -115,9 +116,10 @@ func revive() -> void:
 	collision_mask = 1 | 4
 	rig.visible = true
 
-func press_jump() -> void:
-	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,is_on_floor()) or jump_requested
+func press_jump(roll_requested: bool) -> void:
+	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,is_on_floor(),roll_requested) or jump_requested
 	if roll.active:
+		jump_requested = false
 		combat.stop()
 
 func get_aim_position() -> Vector3:

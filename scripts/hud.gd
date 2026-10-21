@@ -110,7 +110,7 @@ func _ready() -> void:
 	var arena_button := _button(self, "4-PLAYER ARENA", Vector2(-216, -207), Vector2(192, 35))
 	arena_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	arena_button.pressed.connect(func(): arena_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SPACE x2  Roll   ESC / I  Equipment cursor", Vector2(-510, -23), 12, CREAM)
+	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SHIFT + SPACE  Roll   ESC / I  Equipment cursor", Vector2(-540, -23), 12, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -172,8 +172,10 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "DRAW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO SHOOT" % [draw_amount * 100, draw_amount]
 	elif phase_name == "MELEE":
 		_phase.text = "OVERHAND CHOP / %.1f s SWING" % interval
+	elif phase_name in ["RELEASE", "RECOVER"]:
+		_phase.text = "NOCKING NEXT ARROW / %.1f s" % [(1.0 - progress) * interval]
 	elif progress < 0.999999:
-		_phase.text = "COOLDOWN %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
+		_phase.text = "RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	else:
 		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
 
@@ -185,7 +187,7 @@ func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, 
 	_weapon = weapon
 	weapon_buttons[0].set_pressed_no_signal(weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(weapon == "sword")
-	_bow_details.text = "%.0f s COOLDOWN  /  %.2f s DRAW" % [float(data.attack_interval), float(data.draw_seconds)]
+	_bow_details.text = "%.0f s FULL DRAW / RE-NOCK AFTER SHOT" % float(data.draw_seconds)
 	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),data.name if weapon == "bow" else sword_data.name,armor_name]
 
 

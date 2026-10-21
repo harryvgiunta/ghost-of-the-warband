@@ -30,15 +30,17 @@ func check(condition: bool, message: String) -> void:
 func pause(seconds: float) -> void:
 	await create_timer(seconds).timeout
 
-func key(code: Key) -> void:
+func key(code: Key, shift_pressed: bool = false) -> void:
 	var event := InputEventKey.new()
 	event.keycode = code
 	event.physical_keycode = code
+	event.shift_pressed = shift_pressed
 	event.pressed = true
 	Input.parse_input_event(event)
 	event = InputEventKey.new()
 	event.keycode = code
 	event.physical_keycode = code
+	event.shift_pressed = shift_pressed
 	Input.parse_input_event(event)
 	await pause(0.12)
 
@@ -142,21 +144,27 @@ func host_run() -> void:
 	arena.actors[0].position = Vector3(0,0.05,0)
 	arena.actors[0].health = 100
 	arena.actors[1].position = Vector3(0,0.05,1.4)
-	arena.actors[1].combat.attack_progress = 1.0
 	await pause(0.3)
 	report.command.rpc(3)
 	await wait_message("chopped")
 	check(is_equal_approx(arena.actors[0].health,50.0),"Revised remote greatsword animation still deals one authoritative hit")
 	report.command.rpc(4)
-	await wait_message("rolled")
-	check(saw_roll and saw_sword,"New sword and tucked roll states reach the server")
-	await pause(0.3)
+	await wait_message("double_space")
+	check(not saw_roll,"Remote repeated Space and malformed jump modifiers never roll")
+	check(not arena.actors[1].is_on_floor(),"Remote Space alone still jumps")
+	await pause(0.6)
 	report.command.rpc(5)
+	await wait_message("rolled")
+	check(saw_roll and saw_sword,"One remote Shift+Space sends the roll state to the server")
+	await pause(0.3)
+	report.command.rpc(6)
 	await wait_message("observer2")
 	await wait_message("observer3")
 	for label in ["observer2","observer3"]:
 		var observation: Dictionary = report.messages.get(label,{})
 		check(bool(observation.get("damage",false)) and bool(observation.get("sword",false)) and bool(observation.get("roll",false)),"Other clients receive damage and the revised animation states")
+	await key(KEY_SPACE,true)
+	check(arena.actors[0].roll.active,"Host local Shift+Space launches an immediate roll")
 	arena.leave_game()
 	await pause(0.8)
 	for pid in children:
@@ -209,10 +217,16 @@ func client_run(port: int) -> void:
 						await pause(3.1)
 						report.result.rpc_id(1,"chopped",{})
 					4:
+						arena.send_action("jump",null)
+						arena.send_action("jump",1)
+						arena.send_action("jump","true")
 						await key(KEY_SPACE)
 						await key(KEY_SPACE)
+						report.result.rpc_id(1,"double_space",{})
+					5:
+						await key(KEY_SPACE,true)
 						await pause(0.3)
 						report.result.rpc_id(1,"rolled",{})
-			elif completed == 5:
+			elif completed == 6:
 				report.result.rpc_id(1,"observer%d"%arena.local_slot,{"damage":saw_damage,"sword":saw_sword,"roll":saw_roll})
 		await pause(0.02)

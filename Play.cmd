@@ -11,4 +11,6 @@ if not exist "%GODOT%" (
   echo Run Setup.cmd or set GODOT_PATH to an existing Godot executable.
   exit /b 1
 )
+start "" /wait "%GODOT%" --headless --editor --path "%~dp0." --import
+if errorlevel 1 exit /b 1
 start "" "%GODOT%" --path "%~dp0." %*

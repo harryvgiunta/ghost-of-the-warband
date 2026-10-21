@@ -1,0 +1,151 @@
+{
+  "asset": "ironwood_ranger.glb",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 65,
+  "forward": [
+    0,
+    0,
+    1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_height": 1.8690080093219876,
+  "palms": {
+    "left": [
+      0.004087315406650305,
+      0.05361263081431389,
+      -0.002925032051280141
+    ],
+    "right": [
+      -0.004087434615939856,
+      0.05361264944076538,
+      -0.002925018547102809
+    ]
+  },
+  "palm_measurement": "Midpoint of wrist and mean index/middle/ring/pinky proximal knuckles in bone-local coordinates",
+  "bow_anchor": {
+    "bone": "Head",
+    "position": [
+      -0.08079380542039871,
+      0.048218902200460434,
+      0.06087256968021393
+    ],
+    "measurement": "Right cheek surface near the jaw, offset 30 mm outward for palm clearance"
+  },
+  "sword_grip": {
+    "position": [
+      -0.014369714073836803,
+      0.052676260471343994,
+      0.002630072645843029
+    ],
+    "rotation": [
+      0.7074536681175232,
+      -0.7064352631568909,
+      -0.021308954805135727,
+      0.0021170289255678654
+    ]
+  },
+  "sword_axes": {
+    "blade": [
+      0,
+      0,
+      -1
+    ],
+    "handle": [
+      0,
+      0,
+      1
+    ],
+    "thickness": [
+      0,
+      1,
+      0
+    ]
+  },
+  "clips": {
+    "overhead": {
+      "name": "Sword_Overhead",
+      "duration": 1.2666666666666666,
+      "strike_start": 0.6833333333333333,
+      "strike_end": 0.9333333333333333
+    },
+    "overhead_one_hand": {
+      "name": "Sword_Overhead_OneHand",
+      "duration": 2.0833333333333335,
+      "strike_start": 0.25,
+      "strike_end": 0.5
+    }
+  },
+  "animations": {
+    "Idle_Loop": 2.5,
+    "Walk_Loop": 1.3333333333333333,
+    "Jog_Fwd_Loop": 0.9333333333333333,
+    "Sprint_Loop": 0.6666666666666666,
+    "Jump_Start": 1.3333333333333333,
+    "Jump_Loop": 2.5,
+    "Jump_Land": 1.2666666666666666,
+    "Roll": 1.4666666666666666,
+    "Sword_Overhead_OneHand": 2.0833333333333335,
+    "Sword_Idle_OneHand": 1.6666666666666667,
+    "Sword_Idle": 2.4,
+    "Sword_Overhead": 1.2666666666666666
+  },
+  "authoring_fps": 60,
+  "gres_height_scale": 0.5092428046251969,
+  "support_clearance": {
+    "Sword_Idle": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        30.0,
+        70.0
+      ],
+      "handle_slide": [
+        0.12,
+        0.12000000000000001
+      ],
+      "clavicle_depression_degrees": [
+        0.0,
+        0.0
+      ],
+      "clavicle_protraction_degrees": [
+        0.0,
+        0.0
+      ]
+    },
+    "Sword_Overhead": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        10.0,
+        79.44444444444444
+      ],
+      "handle_slide": [
+        0.08,
+        0.12000000000000001
+      ],
+      "clavicle_depression_degrees": [
+        -20.0,
+        0.0
+      ],
+      "clavicle_protraction_degrees": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "support_clearance_validation": {
+    "sample_hz": 240,
+    "samples": 957,
+    "forearm_radius": 0.03,
+    "radial_axes": 2,
+    "maximum_support_hilt_error": 0.0018235577093374286,
+    "transitions": [
+      "idle loop",
+      "guard to windup",
+      "recovery to guard"
+    ]
+  }
+}

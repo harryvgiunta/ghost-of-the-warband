@@ -348,7 +348,9 @@ func _apply_action(slot: int, action: String, value: Variant) -> void:
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value):
 				actor.combat.release_draw()
 		"stop": actor.combat.stop()
-		"jump": actor.press_jump()
+		"jump":
+			if typeof(value) == TYPE_BOOL:
+				actor.press_jump(value)
 		"bow":
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_bow(value)
@@ -466,7 +468,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
 			KEY_C: send_action("armor",(actors[local_slot].rig.armor_index+1)%3)
-			KEY_SPACE: send_action("jump")
+			KEY_SPACE: send_action("jump",event.shift_pressed)
 			KEY_ESCAPE, KEY_I: _set_cursor_free(not _cursor_free)
 			KEY_Q:
 				_set_cursor_free(false)

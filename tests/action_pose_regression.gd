@@ -1,8 +1,6 @@
 extends SceneTree
 
-const Actor = preload("res://scripts/arena_actor.gd")
 const Archer = preload("res://scripts/archer.gd")
-const Roll = preload("res://scripts/dodge_roll.gd")
 var failures := 0
 var checks := 0
 
@@ -15,56 +13,105 @@ func check(condition: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
-func check_limbs(rig: Node3D) -> void:
-	var joints: Dictionary = rig.get_joint_positions()
+func check_limbs(rig: Node3D, joints: Dictionary) -> void:
 	for side in ["left","right"]:
-		check(absf(joints[side+"_shoulder"].distance_to(joints[side+"_elbow"])-Archer.ARM_UPPER)<0.0001,"Upper arms retain anatomical length in the action pose")
-		check(absf(joints[side+"_elbow"].distance_to(joints[side+"_wrist"])-Archer.ARM_LOWER)<0.0001,"Forearms remain attached to wrists")
-		check(absf(joints[side+"_hip"].distance_to(joints[side+"_knee"])-Archer.LEG_UPPER)<0.0001,"Thighs retain their length")
-		check(absf(joints[side+"_knee"].distance_to(joints[side+"_ankle"])-Archer.LEG_LOWER)<0.0001,"Shins stay connected while tucked")
+		var suffix := "l" if side == "left" else "r"
+		for segment in [["shoulder","elbow","lowerarm"],["elbow","wrist","hand"],["hip","knee","calf"],["knee","ankle","foot"]]:
+			var bone: int = rig.skeleton.find_bone(segment[2]+"_"+suffix)
+			var rest_length: float = rig.skeleton.get_bone_rest(bone).origin.length()
+			check(absf(joints[side+"_"+segment[0]].distance_to(joints[side+"_"+segment[1]])-rest_length)<0.002,"Animation preserves the imported bone lengths and connected joints")
+
+func check_two_hand_grip(rig: Node3D) -> void:
+	var handle_start: Vector3 = rig.active_sword.global_position
+	var handle_end: Vector3 = rig.active_sword.to_global(Vector3(0,0,0.31))
+	var nearest := Geometry3D.get_closest_point_to_segment(rig.bow_hand.global_position,handle_start,handle_end)
+	check(nearest.distance_to(rig.bow_hand.global_position)<0.035,"Greatsword support palm stays on the actual handle, not an unattached pose target")
+
+func check_overhead(rig: Node3D, size: int) -> void:
+	rig.set_weapon("sword")
+	rig.set_sword(size)
+	rig.set_locomotion(Vector3.ZERO,true)
+	rig.advance_animation(0.3)
+	check(rig.begin_melee(),"Selected sword starts its authored overhead attack")
+	var previous: Dictionary = rig.get_joint_positions()
+	var highest_hand := -INF
+	var lowest_tip_after_load := INF
+	var highest_tip := -INF
+	var lowest_pelvis := INF
+	var highest_pelvis := -INF
+	var loaded := false
+	var duration: float = Archer.SWORD_DATA[size].seconds
+	for frame in int(round(duration*120.0)):
+		rig.advance_animation(1.0/120.0)
+		var joints: Dictionary = rig.get_joint_positions()
+		check_limbs(rig,joints)
+		for side in ["left","right"]:
+			check(joints[side+"_elbow"].distance_to(previous[side+"_elbow"])<0.18,"Authored elbows move continuously without an IK pole flip")
+		var palm_y: float = rig.string_hand.global_position.y
+		highest_hand = maxf(highest_hand,palm_y-joints.anchor.y)
+		loaded = loaded or palm_y>joints.anchor.y+0.06
+		highest_tip = maxf(highest_tip,rig.get_blade_tip().y)
+		if loaded:
+			lowest_tip_after_load = minf(lowest_tip_after_load,rig.get_blade_tip().y)
+		var pelvis: float = (joints.left_hip.y+joints.right_hip.y)*0.5
+		lowest_pelvis = minf(lowest_pelvis,pelvis)
+		highest_pelvis = maxf(highest_pelvis,pelvis)
+		if size == 2:
+			check_two_hand_grip(rig)
+		previous = joints
+	check(highest_hand>0.06,"Sword loads overhead above the head before chopping")
+	check(highest_tip-lowest_tip_after_load>0.8,"The loaded blade travels down through a substantial chopping arc")
+	check(highest_pelvis-lowest_pelvis>0.015,"Heavy attack transfers body weight instead of moving only the hands")
+	check(rig.phase=="READY","The complete authored windup, strike and recovery return to ready")
+
+func check_running(rig: Node3D, weapon: String, size: int) -> void:
+	rig.set_weapon(weapon)
+	rig.set_sword(size)
+	rig.set_locomotion(Vector3(0,0,-8.5),true)
+	rig.advance_animation(0.4)
+	var low := Vector2(INF,INF)
+	var high := Vector2(-INF,-INF)
+	var flight := 0
+	for frame in 120:
+		rig.advance_animation(1.0/120.0)
+		var joints: Dictionary = rig.get_joint_positions()
+		check_limbs(rig,joints)
+		for side in 2:
+			var prefix := "left" if side == 0 else "right"
+			var hand_z: float = joints[prefix+"_wrist"].z-joints[prefix+"_shoulder"].z
+			low[side] = minf(low[side],hand_z)
+			high[side] = maxf(high[side],hand_z)
+		if joints.left_foot.y>0.02 and joints.right_foot.y>0.02:
+			flight += 1
+		if weapon=="sword" and size==2:
+			check_two_hand_grip(rig)
+	if weapon=="bow" or size!=2:
+		check(high.x-low.x>0.25 and high.y-low.y>0.25,"The authored sprint drives both arms, including the weapon arm")
+	check(flight>0,"The sprint has genuine flight rather than accelerated walking")
 
 func run() -> void:
 	var holder := Node3D.new()
 	root.add_child(holder)
 	var rig := Archer.new()
 	holder.add_child(rig)
-	rig.set_process(false)
-	rig.set_weapon("sword")
+	rig.set_physics_process(false)
 	rig.aim_at(Vector3(0,1.2,-10))
 	for size in 3:
-		rig.set_sword(size)
-		rig.phase = "READY"
-		rig._process(0.01)
-		var rest_forward: Vector3 = rig.get_stance_forward()
-		rig.begin_melee()
-		for sample in 12:
-			rig._process(float(Archer.SWORD_DATA[size].seconds)/12.0)
-			check_limbs(rig)
-			var joints := rig.get_joint_positions()
-			check(absf(joints.left_foot.y)<0.015 and absf(joints.right_foot.y)<0.015,"Sword weight transfer keeps both standing feet grounded")
-			if size == 2:
-				var grip: Vector3 = rig.active_sword.to_global(Vector3(0,0,0.16))
-				check(rig.bow_hand.global_position.distance_to(grip)<0.025,"Greatsword off-hand stays on the handle throughout the cut")
-			if sample == 4:
-				check(rest_forward.dot(rig.get_stance_forward())<0.99,"Sword windup rotates the shoulders instead of moving only the arms")
+		check_overhead(rig,size)
 	for weapon in ["bow","sword"]:
 		rig.set_weapon(weapon)
-		rig.phase = "READY"
 		rig.set_locomotion(Vector3(0,0,-8.5),false)
-		for progress in [0.0,0.12,0.3,0.5,0.72,0.9,1.0]:
+		var shortest_fold := INF
+		for progress in [0.0,0.15,0.3,0.45,0.6,0.75,0.9,1.0]:
 			rig.set_roll(progress,Vector3.FORWARD)
-			check_limbs(rig)
-			if progress == 0.5:
-				var joints := rig.get_joint_positions()
-				check(joints.left_hip.distance_to(joints.left_ankle)<0.48,"Mid-roll folds the leg rather than rotating a straight body")
-				check(joints.right_hip.distance_to(joints.right_ankle)<0.48,"Both legs are tucked during the roll")
+			var joints := rig.get_joint_positions()
+			check_limbs(rig,joints)
+			shortest_fold = minf(shortest_fold,joints.left_hip.distance_to(joints.left_ankle))
+		check(shortest_fold<0.55,"Authored roll folds the knees rather than rotating a straight mannequin")
 		rig.set_roll(-1.0,Vector3.FORWARD)
-		rig.set_locomotion(Vector3(0,-5,0),false)
-		rig.set_locomotion(Vector3.ZERO,true)
-		rig._process(0.01)
-		check(rig._landing_weight>0.5,"A descending landing triggers weight absorption")
-		rig._process(0.35)
-		check(rig._landing_weight==0.0,"Landing settles back to the normal stance")
+	check_running(rig,"bow",1)
+	check_running(rig,"sword",1)
+	check_running(rig,"sword",2)
 	holder.queue_free()
 	await process_frame
 	print("ACTION_POSE_REGRESSION checks=",checks," failures=",failures)

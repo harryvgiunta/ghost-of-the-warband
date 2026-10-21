@@ -1,9 +1,9 @@
 extends Node3D
 
 const Geo = preload("res://scripts/geo.gd")
-# Human-scale draw shared by all bow shapes; equipment never rescales the rig.
+# Human-scale draw fitted to the imported ranger's arm span, shared by all bow shapes.
 const BRACE_DISTANCE: float = 0.18
-const DRAW_DISTANCE: float = 0.825
+const DRAW_DISTANCE: float = 0.62
 const ARROW_SHAFT: float = 0.91
 const ARROW_LENGTH: float = 0.98
 

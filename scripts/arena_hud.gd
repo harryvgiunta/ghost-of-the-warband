@@ -138,7 +138,7 @@ func _ready() -> void:
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SPACE x2  Roll   ESC / I  Equipment cursor",Vector2(-535,-25),12,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SHIFT + SPACE  Roll   ESC / I  Equipment cursor",Vector2(-560,-25),12,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -171,8 +171,10 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "DRAW %.0f%% / DAMAGE x%.2f / RELEASE TO FIRE" % [float(state.draw)*100,float(state.draw)]
 	elif state.phase == "MELEE":
 		attack_label.text = "OVERHAND CHOP / %.1f s SWING" % float(state.attack_interval)
+	elif state.phase in ["RELEASE", "RECOVER"]:
+		attack_label.text = "NOCKING NEXT ARROW / %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	elif float(state.attack_progress) < 0.999999:
-		attack_label.text = "COOLDOWN %.1f s / WALK -50%% / RUN -75%% RATE" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
+		attack_label.text = "RECOVERY %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	else:
 		attack_label.text = "READY / HOLD LMB, AIM, RELEASE" if state.weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
 	bar.value = float(state.draw if drawing else state.attack_progress) * 100.0

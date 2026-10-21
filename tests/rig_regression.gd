@@ -19,16 +19,17 @@ func check(condition: bool, description: String) -> void:
 func check_limbs(rig: Node3D, label: String) -> void:
 	var joints: Dictionary = rig.get_joint_positions()
 	for side in ["left", "right"]:
-		check(absf(joints[side + "_shoulder"].distance_to(joints[side + "_elbow"]) - Archer.ARM_UPPER) < 0.0001, label + " connected upper arm")
-		check(absf(joints[side + "_elbow"].distance_to(joints[side + "_wrist"]) - Archer.ARM_LOWER) < 0.0001, label + " connected forearm")
-		check(absf(joints[side + "_hip"].distance_to(joints[side + "_knee"]) - Archer.LEG_UPPER) < 0.0001, label + " connected thigh")
-		check(absf(joints[side + "_knee"].distance_to(joints[side + "_ankle"]) - Archer.LEG_LOWER) < 0.0001, label + " connected shin")
+		var suffix := "l" if side == "left" else "r"
+		for segment in [["shoulder","elbow","lowerarm"],["elbow","wrist","hand"],["hip","knee","calf"],["knee","ankle","foot"]]:
+			var bone: int = rig.skeleton.find_bone(segment[2]+"_"+suffix)
+			var rest_length: float = rig.skeleton.get_bone_rest(bone).origin.length()
+			check(absf(joints[side+"_"+segment[0]].distance_to(joints[side+"_"+segment[1]])-rest_length)<0.001, label+" retains the imported anatomical segment length")
 
 func advance_to(rig: Node3D, desired_phase: String) -> void:
 	for step in 240:
 		if rig.phase == desired_phase:
 			return
-		rig._process(1.0 / 60.0)
+		rig.advance_animation(1.0 / 60.0)
 	check(false, "Animation must reach " + desired_phase)
 
 func check_bows(holder: Node3D) -> void:
@@ -60,18 +61,18 @@ func run() -> void:
 	check((beam.transform * Vector3(0, 0.5, 0)).is_equal_approx(b), "Diagonal beam must retain its second endpoint")
 	var rig := Archer.new()
 	holder.add_child(rig)
-	rig.set_process(false)
+	rig.set_physics_process(false)
 	rig.arrow_released.connect(func(_origin, _direction, _speed, _charge): emitted += 1)
 	rig.aim_at(Vector3(0, 1.7, -30))
 	check_limbs(rig, "carry")
 	rig.set_locomotion(Vector3(0, 0, -5.0), true)
 	for step in 12:
-		rig._process(0.05)
+		rig.advance_animation(0.05)
 		check_limbs(rig, "walking")
 	rig.set_locomotion(Vector3.ZERO, true)
 	rig.begin_draw()
 	for step in 30:
-		rig._process(1.0 / 60.0)
+		rig.advance_animation(1.0 / 60.0)
 		check_limbs(rig, "raising")
 	var progress := rig.draw_amount
 	rig.set_bow(2)
@@ -107,7 +108,7 @@ func run() -> void:
 	check_limbs(rig, "follow-through")
 	advance_to(rig, "READY")
 	rig.begin_draw()
-	rig._process(0.5)
+	rig.advance_animation(0.5)
 	rig.cancel_draw()
 	rig.release_string()
 	check(emitted == 1 and rig.phase == "READY", "Canceled draw never fires")

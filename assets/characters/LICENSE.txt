@@ -1,0 +1,119 @@
+IRONWOOD RANGER — ASSET LICENSE AND PROVENANCE
+
+All source model and animation content below is distributed by its creators under
+Creative Commons CC0 1.0 Universal (Public Domain Dedication):
+https://creativecommons.org/publicdomain/zero/1.0/
+https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+CC0 permits copying, modifying, distributing and using this content commercially
+without permission. Attribution is not required by CC0; provenance is retained
+here for traceability. No paid packs, paid export services or restricted files
+were used. Downloads used the creators' ordinary free Standard download flow.
+
+CREATORS AND PRIMARY SOURCES
+
+Quaternius — Modular Character Outfits - Fantasy [Standard]
+https://quaternius.com/packs/modularcharacteroutfitsfantasy.html
+https://quaternius.itch.io/modular-character-outfits-fantasy
+Original archive: Modular Character Outfits - Fantasy[Standard].zip
+Original selected model:
+  Exports/glTF (Godot-Unreal)/Outfits/Male_Ranger.gltf
+  Male_Ranger.bin and referenced T_Ranger_* / T_Regular_Male_* textures
+The archive's License_Standard.txt explicitly specifies CC0 1.0 Universal.
+
+Quaternius — Universal Base Characters [Standard]
+https://quaternius.com/packs/universalbasecharacters.html
+https://quaternius.itch.io/universal-base-characters
+Original archive: Universal Base Characters[Standard].zip
+Original selected model:
+  Base Characters/Godot - UE/Superhero_Male_FullBody.gltf
+  Superhero_Male_FullBody.bin and referenced head/eye/brow textures
+Only the head, eyes and eyebrows are retained; anatomy covered by the Ranger
+outfit is removed. Head geometry is fitted to the Ranger's neck/head joint.
+The free pack's glTF refers to T_Hair_1_Normal_png.png and T_Eye_Normal_png.png;
+these resolve to the archive's T_Hair_1_Normal.png and T_Eye_Normal.png.
+
+Quaternius, with animation collaboration credited on the pack page to
+Gonzalo Furnier — Universal Animation Library [Standard], v3.0 (June 2026)
+https://quaternius.com/packs/universalanimationlibrary.html
+https://quaternius.itch.io/universal-animation-library
+Original archive: Universal Animation Library[Standard].zip
+Original selected animation source:
+  Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb
+Retained authored clips: Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop,
+Jump_Start, Jump_Loop, Jump_Land, Roll; Sword_Idle -> Sword_Idle_OneHand.
+
+Quaternius — Universal Animation Library 2 [Standard], June 2026 update
+https://quaternius.com/packs/universalanimationlibrary2.html
+https://quaternius.itch.io/universal-animation-library-2
+Original archive: Universal Animation Library 2[Standard].zip
+Original selected animation source:
+  Universal Animation Library 2[Standard]/Unreal-Godot/UAL2_Standard.glb
+Sword_Heavy_Combo, final overhead finisher only, source seconds 2.25–4.333333
+(frames 135–260 after 60 fps import) -> Sword_Overhead_OneHand.
+This is a one-handed downward overhead cut with its authored load, low
+follow-through and recovery; earlier combo strikes are excluded.
+Timing cleanup within source frames 150–165 redistributes the same ordered
+authored poses by cumulative pelvis/spine/shoulder/elbow/wrist travel, sampled
+at 240 Hz, with smooth acceleration and deceleration. The source concentrated
+an elbow movement of 0.240 m into 9.47 ms around frame 152. This timing-only
+repair spreads the downstroke over the existing 0.25-second active interval;
+it does not alter joint poses, clip length, windup/recovery, or the two-hand clip.
+
+Gres — Humanoid SoulsLike Animations (October 4, 2026)
+https://opengameart.org/content/humanoid-soulslike-animations
+https://opengameart.org/users/gres
+Original source file:
+https://opengameart.org/sites/default/files/playerstraightswordanimations.blend
+Original file name: playerstraightswordanimations.blend
+Original rig: Human. Original animation frame rate: 60 fps.
+Retained authored clips:
+  Idle_SS_TH, frames 1–145 -> Sword_Idle
+  SS_TH_Charge02_Start, frames 1–23, followed by
+  SS_TH_Charge02_Heavy, frames 2–55 -> Sword_Overhead
+The selected motion is an actual two-handed overhead downward cut, not a
+horizontal slash or a one-handed attack relabeled as two-handed. The authored
+lift, rearward load, fast downstroke, low follow-through and recovery are kept.
+The source Longsword object's authored Child Of hand.R constraint supplies the
+weapon orientation. Its original +Z blade is converted to game-local -Z; the
+right-palm grip centre uses source sword mesh z=27.85 (object scale 0.01).
+The weapon mesh itself is not redistributed: gameplay equipment supplies it.
+
+LOCAL PREPARATION
+
+Outputs: ironwood_ranger.glb and ironwood_ranger.json (measured integration data).
+Reproducible preparation: tools/prepare_character.py and its
+tools/character_clearance.py helper (Blender 5.1+).
+Source downloads and preparation/inspection .blend files are stored under the
+ignored .runtime/character-source directory, not redistributed as giant packs.
+The shipped GLB contains only the clothed male model, selected authored motions,
+skin and required embedded textures (resized to a maximum of 1024 pixels).
+All animation uses one Ranger skeleton. Rest-axis rotation retargeting preserves
+source whole-body movement and the attacking arm's original elbow bend. The
+Gres source has different limb proportions. A two-bone support-palm cleanup
+holds the left palm on the source-derived hilt, correcting the difference
+between source mitten and Ranger finger/palm proportions. Minimal support-
+clavicle elevation supplies anatomical reach during the high load, without
+stretching bones. Fingers use the Quaternius Sword_Idle right-hand authored
+gripping pose, mirrored for the left hand, instead of an unmapped mitten.
+
+Clothed-rig clearance cleanup affects only the two-handed support arm in
+Sword_Idle and Sword_Overhead. The left elbow pole is moved outward while
+keeping the wrist on the hilt; low recovery additionally uses at most 20 degrees
+of support-clavicle depression and a smooth palm slide from 0.12 to 0.08 metres
+along the existing handle. The pose search uses actual deformed Male_Ranger_Body
+triangles, not an estimated torso capsule. A continuity-penalized path and
+short symmetric smoothing avoid frame-by-frame pole switching. Anatomical bone
+lengths, attacking right-arm/blade trajectory, torso/leg motion, source timing,
+and one-handed clips are preserved. No runtime sword IK is required.
+
+The exported GLB is reimported into Blender and inspected at 240 Hz: both
+forearms' centerlines and +/-30 mm offsets along BOTH perpendicular axes must
+clear the actual skinned shirt. Idle looping, guard-to-windup and recovery-to-
+guard interpolations are also inspected. The support palm must remain on the
+handle. Measured correction ranges and validation results are retained in
+ironwood_ranger.json. No programmatically invented attack pose sequence is used.
+
+Bow-specific authored draw/release clips were not included in the downloaded
+free Standard libraries; bow interaction is a gameplay skeletal overlay rather
+than a mislabeled asset clip.

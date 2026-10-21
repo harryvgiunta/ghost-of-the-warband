@@ -162,9 +162,9 @@ func _physics_process(delta: float) -> void:
 	var limit: float = world.WORLD_LIMIT - 2.0
 	player.position.x = clampf(player.position.x, -limit, limit)
 	player.position.z = clampf(player.position.z, -limit, limit)
-	archer.set_locomotion(player.velocity, player.is_on_floor() and not roll.active)
 	archer.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
+	archer.set_locomotion(actual_velocity, player.is_on_floor() and not roll.active)
 	combat.set_motion(actual_velocity, running or roll.active, player.is_on_floor() and not roll.active)
 	combat.advance(delta)
 	if player.position.y < -25.0:
@@ -231,7 +231,7 @@ func begin_attack() -> void:
 	update_crosshair_aim()
 	var started: bool = combat.begin_melee() if archer.weapon == "sword" else combat.begin_draw()
 	if not started:
-		hud.show_feedback("Wait for the weapon cooldown and stand on solid ground.")
+		hud.show_feedback("Finish the current attack or nock the next arrow, and stand on solid ground.")
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -255,7 +255,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1: equip_weapon("bow")
 			KEY_2: equip_weapon("sword")
 			KEY_C: equip_armor((archer.armor_index + 1) % 3)
-			KEY_SPACE: press_jump()
+			KEY_SPACE: press_jump(event.shift_pressed)
 			KEY_E: interact()
 			KEY_I: hud.toggle_equipment()
 			KEY_M: toggle_map()
@@ -329,11 +329,12 @@ func equip_weapon(value: String) -> void:
 	archer.set_weapon(value)
 	audio.play_sound("equip")
 
-func press_jump() -> void:
+func press_jump(roll_requested: bool) -> void:
 	if inspecting or hud.map_open:
 		return
-	_jump_requested = roll.press_jump(_movement_direction,-archer.global_basis.z,player.is_on_floor()) or _jump_requested
+	_jump_requested = roll.press_jump(_movement_direction,-archer.global_basis.z,player.is_on_floor(),roll_requested) or _jump_requested
 	if roll.active:
+		_jump_requested = false
 		cancel_input()
 
 func equip_armor(index: int) -> void:

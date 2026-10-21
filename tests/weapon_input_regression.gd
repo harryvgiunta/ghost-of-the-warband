@@ -127,7 +127,7 @@ func run() -> void:
 	check(absf(arena._camera_yaw-start_yaw)>0.1,"Aim remains freely mouse-controlled during draw")
 	check(arena.hud.reticle.is_equal_approx(center),"Aim reticle never follows the target off center")
 	await look(Vector2(-55,8))
-	await create_timer(0.9).timeout
+	await create_timer(1.6).timeout
 	check(rig.phase=="HOLDING" and arena.shots_fired==0,"Fully drawn bow waits for release indefinitely")
 	var old_position: Vector3 = victim.position
 	victim.position.x += 3
