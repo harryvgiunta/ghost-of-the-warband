@@ -8,6 +8,7 @@ const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const WALK_SPEED := 5.5
@@ -20,6 +21,7 @@ var hud
 var audio
 var combat
 var roll
+var slide
 var cover
 var shoulder_camera := ShoulderCamera.new()
 var _peek_requested := false
@@ -85,6 +87,8 @@ func _ready() -> void:
 	combat.actor = player
 	roll = DodgeRoll.new()
 	add_child(roll)
+	slide = RunningSlide.new()
+	add_child(slide)
 	cover = CoverMovement.new()
 	add_child(cover)
 	cover.setup(player,collider)
@@ -138,9 +142,10 @@ func _physics_process(delta: float) -> void:
 		input_vector = input_vector.normalized()
 	if inspecting or hud.map_open or _cursor_free:
 		input_vector = Vector2.ZERO
+		slide.reset()
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1
 	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
-	stamina = clampf(stamina + delta * (-19.0 if running else 13.0), 0.0, 100.0)
+	stamina = clampf(stamina + delta * (-19.0 if running or slide.active else 13.0), 0.0, 100.0)
 	if stamina <= 1.0:
 		_sprint_exhausted = true
 	elif stamina >= 25.0:
@@ -149,6 +154,7 @@ func _physics_process(delta: float) -> void:
 	var camera_back := Vector3(sin(camera_yaw), 0, cos(camera_yaw))
 	var direction := camera_right * input_vector.x + camera_back * input_vector.y
 	_movement_direction = direction
+	var slide_velocity: Vector3 = slide.step(delta,player,cover,direction,roll.active)
 	var acceleration := 35.0 if player.is_on_floor() else 10.0
 	player.velocity.x = move_toward(player.velocity.x, direction.x * speed, acceleration * delta)
 	player.velocity.z = move_toward(player.velocity.z, direction.z * speed, acceleration * delta)
@@ -158,6 +164,9 @@ func _physics_process(delta: float) -> void:
 	if was_in_cover:
 		player.velocity.x = covered_velocity.x
 		player.velocity.z = covered_velocity.z
+	if slide.active:
+		player.velocity.x = slide_velocity.x
+		player.velocity.z = slide_velocity.z
 	if roll.active:
 		player.velocity.x = roll.direction.x * DodgeRoll.SPEED
 		player.velocity.z = roll.direction.z * DodgeRoll.SPEED
@@ -176,11 +185,13 @@ func _physics_process(delta: float) -> void:
 	var limit: float = world.WORLD_LIMIT - 2.0
 	player.position.x = clampf(player.position.x, -limit, limit)
 	player.position.z = clampf(player.position.z, -limit, limit)
-	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
-	archer.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
+	slide.after_move(player,actual_velocity)
+	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
+	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
+	archer.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	archer.set_locomotion(actual_velocity, player.is_on_floor() and not roll.active)
-	combat.set_motion(actual_velocity, running or roll.active, player.is_on_floor() and not roll.active)
+	combat.set_motion(actual_velocity, running or roll.active or slide.active, player.is_on_floor() and not roll.active)
 	if _mouse_drawing or _key_drawing or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	combat.advance(delta)
@@ -197,7 +208,7 @@ func _process(delta: float) -> void:
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
 	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode)
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
-	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched)
+	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
 func _sample_floor(point: Vector3) -> float:
 	_floor_query.from = point + Vector3(0, 1.15, 0)
@@ -378,6 +389,7 @@ func toggle_cover() -> void:
 	if cover.active:
 		cover.exit()
 	elif not roll.active and cover.try_enter(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))):
+		slide.reset()
 		hud.show_feedback("In cover  /  LMB or Q attacks out; RMB peeks; F leaves")
 	else:
 		hud.show_feedback("Move closer to a tree, wall or solid debris and stand on the ground.")
@@ -385,7 +397,13 @@ func toggle_cover() -> void:
 func toggle_crouch() -> void:
 	if inspecting or hud.map_open or _cursor_free or not player.is_on_floor() or roll.active:
 		return
-	cover.toggle_crouch()
+	var requested: bool = not cover.crouch_requested
+	if requested:
+		var sprinting := Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and _movement_direction.length_squared() > 0.1
+		slide.try_start(player,cover,sprinting,roll.active)
+	else:
+		slide.reset()
+	cover.crouch_requested = requested
 
 func press_jump(roll_requested: bool) -> void:
 	if inspecting or hud.map_open or _cursor_free:
@@ -394,6 +412,8 @@ func press_jump(roll_requested: bool) -> void:
 	_peek_requested = false
 	if not cover.prepare_jump():
 		return
+	slide.reset()
+	archer.set_slide(-1.0,Vector3.FORWARD)
 	cancel_input()
 	_jump_requested = roll.press_jump(_movement_direction,-archer.global_basis.z,grounded,roll_requested) or _jump_requested
 	if roll.active:
@@ -475,9 +495,11 @@ func return_to_camp() -> void:
 	cancel_input()
 	roll.reset()
 	cover.reset()
+	slide.reset()
 	_jump_requested = false
 	_movement_direction = Vector3.ZERO
 	archer.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
+	archer.set_slide(-1.0,Vector3.FORWARD)
 	archer.set_roll(-1.0,Vector3.FORWARD)
 	player.global_position = world.player_spawn + Vector3(0, 0.25, 0)
 	player.velocity = Vector3.ZERO

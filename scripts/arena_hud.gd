@@ -100,10 +100,10 @@ func _ready() -> void:
 	health_label = _ui._label(bottom,"",Vector2(18,10),16,UI.TEAL)
 	attack_label = _ui._label(bottom,"",Vector2(18,35),14,UI.CREAM)
 	bar = _ui._bar(bottom,Vector2(18,73),Vector2(604,8),UI.GOLD)
-	var cover_panel := _ui._panel(match_ui,Vector2(-240,-240),Vector2(480,82))
-	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
+	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(480,98))
+	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SHIFT  Slide   SPACE  Jump\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side",Vector2(15,35),12,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side",Vector2(15,35),12,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -191,8 +191,8 @@ func update_match(state: Dictionary) -> void:
 	weapon_buttons[0].set_pressed_no_signal(state.weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(state.weapon == "sword")
 
-func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool) -> void:
-	var stance := "CROUCHED" if crouched else "OPEN"
+func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool, sliding: bool) -> void:
+	var stance := "SLIDING" if sliding else "CROUCHED" if crouched else "OPEN"
 	if active:
 		if peeking:
 			stance = "TOP LOOKOUT" if low else "LEFT LOOKOUT" if side < 0 else "RIGHT LOOKOUT"

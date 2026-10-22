@@ -82,9 +82,17 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look |
 | Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
-| C | Toggle crouch while grounded; armor is selected with equipment buttons |
+| C | Toggle crouch while grounded; slide when pressed during a sprint |
 
 **1 always equips the selected bow; 2 always equips the selected sword. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
+
+## Running slide
+
+In both Frontier and Arena, **hold Shift while moving, then press C** to slide. The character must already be sprinting on the ground: standing still, walking, exhaustion, rolling and attached cover cannot trigger a running slide.
+
+The slide starts at **10.5 m/s**, slows to crouch speed over **0.75 seconds**, and finishes crouched. Releasing WASD or Shift preserves its momentum; WASD allows limited steering without reversing direction. It uses the normal collision capsule, lowers the camera, and shows a low, planted slide pose instead of cycling running steps. Sprint stamina consumption continues during the slide, and holding Shift cannot automatically repeat it.
+
+Press **C** again to cancel and stand when headroom permits. **Space** jumps and **Shift + Space** rolls out of the slide, also requiring standing clearance. Blocked forward travel or leaving the ground ends the slide; death, respawn and returning to camp clear it. Grounded attacks still work, and sliding grants no invulnerability. Arena derives slide eligibility and movement on the host and replicates the pose to other players.
 
 ## Cover movement and shoulder views
 
@@ -186,6 +194,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/network_input_regression.gd
 & $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 & $Godot --headless --path . --script res://tests/wolf_regression.gd
+& $Godot --headless --path . --script res://tests/running_slide_regression.gd
 ```
 
 ### Rebuilding character assets

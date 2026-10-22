@@ -7,6 +7,7 @@ const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ARMOR := [0.0, 0.15, 0.30]
 var slot := 0
@@ -16,6 +17,7 @@ var display_name := "Bot"
 var rig
 var combat
 var roll
+var slide
 var cover
 var peek_requested := false
 var peek_view_right := Vector3.RIGHT
@@ -74,6 +76,8 @@ func _ready() -> void:
 	combat.damage_enabled = false
 	roll = DodgeRoll.new()
 	add_child(roll)
+	slide = RunningSlide.new()
+	add_child(slide)
 	_label = Label3D.new()
 	_label.position.y = 2.3
 	_label.font_size = 36
@@ -137,18 +141,31 @@ func press_jump(roll_requested: bool) -> void:
 	_exposure_tick = -1
 	combat.stop()
 	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,grounded,roll_requested) or jump_requested
+	if jump_requested or roll.active:
+		slide.reset()
+		rig.set_slide(-1.0,Vector3.FORWARD)
 	if roll.active:
 		jump_requested = false
 		combat.stop()
 
 func set_crouch(requested: bool) -> void:
-	if alive and is_on_floor() and not roll.active:
-		cover.crouch_requested = requested
+	if not requested:
+		slide.reset()
+		rig.set_slide(-1.0,Vector3.FORWARD)
+	if not alive or not is_on_floor() or roll.active:
+		return
+	if requested and not cover.crouch_requested:
+		var sprinting: bool = run_requested and not _exhausted and stamina > 1 and move_direction.length_squared() > 0.01
+		if slide.try_start(self,cover,sprinting,roll.active):
+			return
+	cover.crouch_requested = requested
 
 func toggle_cover(preferred_direction: Vector3) -> void:
 	if cover.active:
 		leave_cover()
 	elif alive and is_on_floor() and not roll.active and cover.try_enter(preferred_direction):
+		slide.reset()
+		rig.set_slide(-1.0,Vector3.FORWARD)
 		_exposure_tick = -1
 		jump_requested = false
 		combat.stop()
@@ -165,6 +182,7 @@ func leave_cover() -> void:
 func reset_stance() -> void:
 	combat.stop()
 	cover.reset()
+	slide.reset()
 	peek_requested = false
 	peek_view_right = Vector3.RIGHT
 	peek_shoulder = 1
@@ -174,6 +192,7 @@ func reset_stance() -> void:
 	move_direction = Vector2.ZERO
 	run_requested = false
 	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
+	rig.set_slide(-1.0,Vector3.FORWARD)
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,1.2,0)
@@ -228,11 +247,13 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		move_direction = Vector2.ZERO
 		run_requested = false
 		peek_requested = false
+		slide.reset()
 		if combat.wants_cover_exposure() or rig.charge_frozen:
 			combat.stop()
 	var direction := Vector3(move_direction.x,0,move_direction.y)
+	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
-	stamina = clampf(stamina + delta * (-19 if running else 13),0,100)
+	stamina = clampf(stamina + delta * (-19 if running or slide.active else 13),0,100)
 	if stamina <= 1:
 		_exhausted = true
 	elif stamina >= 25:
@@ -245,7 +266,10 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	elif _exposure_tick < 0:
 		_exposure_tick = simulation_tick
 	update_cover_aim_readiness()
-	if was_in_cover:
+	if slide.active:
+		velocity.x = slide_velocity.x
+		velocity.z = slide_velocity.z
+	elif was_in_cover:
 		velocity.x = cover_velocity.x
 		velocity.z = cover_velocity.z
 	else:
@@ -270,10 +294,12 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	position.x = clampf(position.x,-21.7,21.7)
 	position.z = clampf(position.z,-21.7,21.7)
 	var actual := (position-before)/maxf(delta,0.0001)
+	slide.after_move(self,actual)
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
+	rig.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	rig.set_locomotion(actual,is_on_floor() and not roll.active)
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
-	combat.set_motion(actual,running or roll.active,is_on_floor() and not roll.active)
+	combat.set_motion(actual,running or slide.active or roll.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
 
 func _bot_step(_delta: float, actors: Array) -> void:

@@ -112,9 +112,6 @@ func exit() -> void:
 	_peek_side = 0
 	_side_extents = Vector2(PEEK_DISTANCE,PEEK_DISTANCE)
 
-func toggle_crouch() -> void:
-	crouch_requested = not crouch_requested
-
 func prepare_jump() -> bool:
 	if not _can_stand():
 		return false

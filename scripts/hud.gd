@@ -95,10 +95,10 @@ func _ready() -> void:
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
 	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
-	var cover_panel := _panel(self, Vector2(-240, -285), Vector2(480, 82))
-	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
+	var cover_panel := _panel(self, Vector2(24, -255), Vector2(480, 98))
+	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   C  Crouch   SHIFT  Slide   SPACE  Jump\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -184,8 +184,8 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 	else:
 		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
 
-func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool) -> void:
-	var stance := "CROUCHED" if crouched else "OPEN"
+func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool, sliding: bool) -> void:
+	var stance := "SLIDING" if sliding else "CROUCHED" if crouched else "OPEN"
 	if active:
 		if peeking:
 			stance = "TOP LOOKOUT" if low else "LEFT LOOKOUT" if side < 0 else "RIGHT LOOKOUT"

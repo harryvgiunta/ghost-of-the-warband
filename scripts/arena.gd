@@ -461,7 +461,7 @@ func _process(delta: float) -> void:
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
 		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn})
-	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched)
+	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched,actor.rig.slide_progress >= 0.0)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
 

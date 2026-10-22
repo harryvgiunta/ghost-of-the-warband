@@ -44,7 +44,9 @@ var active_sword: Node3D
 var skeleton: Skeleton3D
 var _phase_time := 0.0
 var _roll_progress := -1.0
-var _roll_direction := Vector3.FORWARD
+var slide_progress := -1.0
+var _slide_direction := Vector3.FORWARD
+var _slide_weight := 0.0
 var _velocity := Vector3.ZERO
 var _grounded := true
 var _cover_active := false
@@ -74,11 +76,13 @@ var _chest_rest_basis := Basis.IDENTITY
 var _bones: Dictionary = {}
 var _arms: Array[PackedInt32Array] = []
 var _legs: Array[PackedInt32Array] = []
+var _leg_lengths := Vector2.ZERO
 var _leg_bones := PackedInt32Array()
 var _lower_pose: Array[Transform3D] = []
 var _blend_pose: Array[Transform3D] = []
 var _authored_pose: Array[Transform3D] = []
 var _crouch_pose: Array[Transform3D] = []
+var _slide_crouch_pose: Array[Transform3D] = []
 var _crouch_lowering := 0.0
 var _cover_bones := PackedInt32Array()
 var _cover_neutral: Array[Transform3D] = []
@@ -132,6 +136,8 @@ func _ready() -> void:
 	var standing_pelvis := skeleton.get_bone_global_pose(_bones.pelvis).origin.y
 	_sample_clip(str(_profile.clips.crouch_idle.name),0.0)
 	_crouch_lowering = 0.58-(standing_pelvis-skeleton.get_bone_global_pose(_bones.pelvis).origin.y)
+	for bone in skeleton.get_bone_count():
+		_slide_crouch_pose.append(skeleton.get_bone_pose(bone))
 	_palm_left = _vector(_profile.palms.left)
 	_palm_right = _vector(_profile.palms.right)
 	_jaw_bone = int(_bones[_profile.bow_anchor.bone])
@@ -141,6 +147,9 @@ func _ready() -> void:
 	for side in 2:
 		var rest := skeleton.global_transform * skeleton.get_bone_global_rest(_legs[side][2])
 		_foot_height[side] = rest.origin.y - global_position.y
+		var thigh := skeleton.get_bone_global_rest(_legs[side][0]).origin
+		var calf := skeleton.get_bone_global_rest(_legs[side][1]).origin
+		_leg_lengths[side] = thigh.distance_to(calf)+calf.distance_to(skeleton.get_bone_global_rest(_legs[side][2]).origin)
 		_foot_up.append(rest.basis.inverse() * Vector3.UP)
 	for bone in skeleton.get_bone_count():
 		var ancestor := bone
@@ -329,10 +338,20 @@ func aim_at(world_point: Vector3) -> void:
 
 func set_roll(progress: float, direction: Vector3) -> void:
 	_roll_progress = progress
-	_roll_direction = direction
 	if progress >= 0.0:
 		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
 	_update_pose(0.0)
+
+func set_slide(progress: float, direction: Vector3) -> void:
+	slide_progress = clampf(progress,0.0,1.0) if progress >= 0.0 else -1.0
+	if slide_progress >= 0.0:
+		var planar := Vector3(direction.x,0.0,direction.z)
+		if not planar.is_zero_approx():
+			_slide_direction = planar.normalized()
+		if phase == "READY" and _roll_progress < 0.0:
+			global_basis = Basis(Vector3.UP,atan2(-_slide_direction.x,-_slide_direction.z))
+	elif _crouch_amount <= 0.0 or _cover_active:
+		_slide_weight = 0.0
 
 func set_cover(active: bool, outward: Vector3, crouch_amount: float, peeking: bool, lean: Vector3) -> void:
 	_cover_active = active
@@ -349,17 +368,19 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not _cover_active and phase == "READY" and _roll_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not _cover_active and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
 		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
 
 func set_ground_sampler(sampler: Callable) -> void:
 	_ground_sampler = sampler
 
 func get_animation_state() -> Dictionary:
+	# Roll facing already travels in yaw; compact slide state also fits maximum-length names.
 	return {"phase":phase,"draw":draw_amount,"charge_frozen":charge_frozen,"time":_phase_time,"aim":_aim_point,
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
-		"yaw":global_rotation.y,"roll":_roll_progress,"roll_direction":_roll_direction,
+		"yaw":global_rotation.y,"roll":_roll_progress,
+		"slide":Vector4(slide_progress,_slide_direction.x,_slide_direction.z,_slide_weight),
 		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight}
 
 func apply_animation_state(state: Dictionary) -> void:
@@ -376,7 +397,10 @@ func apply_animation_state(state: Dictionary) -> void:
 	_release_bow_rotation = state.release_rotation
 	global_basis = Basis(Vector3.UP,float(state.yaw))
 	_roll_progress = float(state.roll)
-	_roll_direction = state.roll_direction
+	var slide: Vector4 = state.slide
+	slide_progress = slide.x
+	_slide_direction = Vector3(slide.y,0.0,slide.z)
+	_slide_weight = slide.w
 	_motion_time = float(state.motion_time)
 	_locomotion_phase = float(state.locomotion_phase)
 	_air_time = float(state.air_time)
@@ -443,7 +467,9 @@ func advance_animation(delta: float) -> void:
 func _advance_step(delta: float) -> void:
 	_phase_time += delta
 	_motion_time += delta
-	if _grounded:
+	var slide_target := 1.0 if slide_progress >= 0.0 else 0.0
+	_slide_weight = move_toward(_slide_weight,slide_target,delta/BLEND_SECONDS) if _grounded and _roll_progress < 0.0 and not _cover_active else 0.0
+	if _grounded and slide_progress < 0.0:
 		var speed := Vector2(_velocity.x,_velocity.z).length()
 		var clip := _locomotion_clip(speed)
 		var reference_speed := 8.5 if clip == "Sprint_Loop" else (5.5 if clip == "Jog_Fwd_Loop" else 2.4)
@@ -521,7 +547,8 @@ func _update_pose(delta: float) -> void:
 	if not _built:
 		return
 	var speed := Vector2(_velocity.x,_velocity.z).length()
-	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0
+	var sliding := _grounded and _roll_progress < 0.0 and not _cover_active and (slide_progress >= 0.0 or _slide_weight > 0.0)
+	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var coupled_carry := weapon == "sword" and sword_index == 2 and phase != "MELEE"
 	var guarding := coupled_carry and _grounded and _roll_progress < 0.0
@@ -558,7 +585,7 @@ func _update_pose(delta: float) -> void:
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
 		time = _air_time/0.15*_player.get_animation(clip).length if _air_time < 0.15 else fposmod(_air_time,_player.get_animation(clip).length)
-	elif _landing_weight > 0.0 and not moving:
+	elif _landing_weight > 0.0 and not moving and not sliding:
 		clip = "Jump_Land"
 		time = (1.0-_landing_weight)*_player.get_animation(clip).length
 	elif moving:
@@ -577,10 +604,14 @@ func _update_pose(delta: float) -> void:
 	if leaning:
 		_sample_cover_lean()
 	if crouching:
-		var crouch_clip := str(_profile.clips.crouch_forward.name if moving else _profile.clips.crouch_idle.name)
-		_sample_clip(crouch_clip,_locomotion_clip_time(crouch_clip) if moving else fposmod(_motion_time,_player.get_animation(crouch_clip).length))
+		var crouch_moving := moving or (sliding and slide_progress < 0.0 and speed > 0.1)
+		var crouch_clip := str(_profile.clips.crouch_forward.name if crouch_moving else _profile.clips.crouch_idle.name)
+		var crouch_time := _locomotion_clip_time(crouch_clip) if crouch_moving else fposmod(_motion_time,_player.get_animation(crouch_clip).length)
+		_sample_clip(crouch_clip,crouch_time)
+		var slide_blend := smoothstep(0.0,1.0,_slide_weight)
 		for bone in skeleton.get_bone_count():
-			_crouch_pose[bone] = skeleton.get_bone_pose(bone)
+			var pose := skeleton.get_bone_pose(bone)
+			_crouch_pose[bone] = pose.interpolate_with(_slide_crouch_pose[bone],slide_blend) if sliding else pose
 	if arm_overlay:
 		_sample_clip("Sword_Idle",fposmod(_motion_time,_player.get_animation("Sword_Idle").length))
 		for index in _guard_bones.size():
@@ -621,7 +652,9 @@ func _update_pose(delta: float) -> void:
 		_apply_cover_lean()
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
-			_plant_archery_feet(archery)
+			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
+		if sliding:
+			_apply_slide_pose(drawing or phase == "MELEE" or coupled_carry)
 		_place_feet()
 	if drawing:
 		var head := _bone_world(_bones.Head)
@@ -650,6 +683,36 @@ func _apply_cover_crouch(lower_only: bool) -> void:
 	_set_bone_world(_bones.pelvis,pelvis)
 	_solve_limb(_legs[0],left.origin,left.basis)
 	_solve_limb(_legs[1],right.origin,right.basis)
+
+func _apply_slide_pose(lower_only: bool) -> void:
+	# Slide offsets are measured against the imported leg chains. Only fixed-length
+	# limb rotations follow the targets; physical crouch remains owned by CoverMovement.
+	var weight := smoothstep(0.0,1.0,_slide_weight)*_crouch_amount
+	if weight <= 0.0:
+		return
+	var stance := Basis(Vector3.UP,atan2(-_slide_direction.x,-_slide_direction.z))
+	var spine := _bone_world(_bones.spine_01)
+	var pelvis := _bone_world(_bones.pelvis)
+	var travel := atan2(-_slide_direction.x,-_slide_direction.z)-global_rotation.y-STANCE_YAW*_archery_weight()
+	pelvis.basis = Basis(Vector3.UP,wrapf(travel,-PI,PI)*weight)*pelvis.basis
+	var leg_length := (_leg_lengths.x+_leg_lengths.y)*0.5
+	pelvis.origin += (stance.z*0.08-Vector3.UP*0.08)*leg_length*weight
+	_set_bone_world(_bones.pelvis,pelvis)
+	var corrected_spine := _bone_world(_bones.spine_01)
+	# Keep action/guard orientation and both grips intact; ready stance leans back
+	# slightly over the tucked trailing knee instead of pitching the whole mesh.
+	corrected_spine.basis = spine.basis if lower_only else Basis(stance.x,0.16*weight)*spine.basis
+	_set_bone_world(_bones.spine_01,corrected_spine)
+	for side in 2:
+		var sign_x := -1.0 if side == 0 else 1.0
+		var foot := _bone_world(_legs[side][2])
+		var reach := 0.70 if side == 0 else -0.22
+		var target := global_position+stance*Vector3(sign_x*0.19*_leg_lengths[side],_foot_height[side],-reach*_leg_lengths[side])
+		var rest_basis := stance*Basis(Vector3.UP,PI)*skeleton.get_bone_global_rest(_legs[side][2]).basis
+		if side == 0:
+			rest_basis = Basis(stance.x,0.14)*rest_basis
+		var pole := stance*Vector3(sign_x*0.18,0.25,-1.0)
+		_solve_limb(_legs[side],foot.origin.lerp(target,weight),foot.basis.slerp(rest_basis,weight),pole)
 
 func _sample_cover_lean() -> void:
 	var clip: Dictionary = _profile.clips.cover_top
