@@ -95,10 +95,10 @@ func _ready() -> void:
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
 	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
-	var cover_panel := _panel(self, Vector2(-200, -265), Vector2(400, 62))
+	var cover_panel := _panel(self, Vector2(-240, -285), Vector2(480, 82))
 	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   HOLD RMB  Peek   X  Shoulder", Vector2(15, 35), 11, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SHIFT  Slide   SPACE  Jump\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -147,7 +147,7 @@ func _build_equipment() -> void:
 		button.size = Vector2(250,30)
 		button.pressed.connect(func(): sword_selected.emit(index))
 		sword_buttons.append(button)
-	_label(_equipment,"ARMOR / C TO CYCLE",Vector2(18,410),11,MUTED)
+	_label(_equipment,"ARMOR / CLICK TO EQUIP",Vector2(18,410),11,MUTED)
 	for index in 3:
 		var button := _button(_equipment,["RANGER LEATHER / LIGHT","SENTINEL MAIL / 15% GUARD","WARDEN PLATE / 30% GUARD"][index],Vector2(16,432+index*33),Vector2(250,29))
 		button.toggle_mode = true
@@ -184,11 +184,14 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 	else:
 		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
 
-func update_cover(active: bool, low: bool, peeking: bool, side: int) -> void:
-	var stance := "OPEN"
+func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool) -> void:
+	var stance := "CROUCHED" if crouched else "OPEN"
 	if active:
-		stance = ("LOW COVER" if low else "TALL COVER") + (" / PEEKING" if peeking else " / TUCKED")
-	_cover_status.text = stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
+		if peeking:
+			stance = "TOP LOOKOUT" if low else "LEFT LOOKOUT" if side < 0 else "RIGHT LOOKOUT"
+		else:
+			stance = ("LOW COVER" if low else "TALL COVER") + (" / CROUCHED" if crouched else " / TUCKED")
+	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", TEAL if active and peeking else GOLD if active else MUTED)
 
 func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, sword: int, weapon: String, sword_data: Dictionary) -> void:

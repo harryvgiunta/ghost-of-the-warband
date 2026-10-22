@@ -89,6 +89,69 @@ func check_running(rig: Node3D, weapon: String, size: int) -> void:
 		check(high.x-low.x>0.25 and high.y-low.y>0.25,"The authored sprint drives both arms, including the weapon arm")
 	check(flight>0,"The sprint has genuine flight rather than accelerated walking")
 
+func check_cover_poses(holder: Node3D) -> void:
+	for action in ["peek","draw","release"]:
+		var rig := Archer.new()
+		holder.add_child(rig)
+		rig.set_physics_process(false)
+		rig.set_ground_sampler(func(_point: Vector3) -> float: return 0.0)
+		rig.set_cover(true,Vector3.BACK,0.0,true,Vector3.ZERO)
+		rig.aim_at(Vector3(0,1.4,12))
+		if action in ["draw","release"]:
+			rig.begin_draw()
+			rig.advance_animation(0.8)
+			if action == "release":
+				rig.release_string()
+				rig.advance_animation(0.08)
+		else:
+			rig.advance_animation(0.2)
+		for crouch in [0.0,1.0]:
+			for lean in [Vector3.UP,Vector3.LEFT,Vector3.RIGHT]:
+				rig.set_cover(true,Vector3.BACK,crouch,true,Vector3.ZERO)
+				rig._update_pose(0.0)
+				var neutral_head: Vector3 = rig._bone_world(rig._bones.Head).origin
+				var neutral_chest: Vector3 = (rig._bone_world(rig._arms[0][0]).origin+rig._bone_world(rig._arms[1][0]).origin)*0.5
+				var neutral_basis: Basis = rig._bone_world(rig._bones.spine_03).basis
+				var neutral_joints := rig.get_joint_positions()
+				rig.set_cover(true,Vector3.BACK,crouch,true,lean)
+				rig._update_pose(0.0)
+				var direction: Vector3 = Vector3.FORWARD if lean == Vector3.UP else lean
+				var head_motion: Vector3 = rig._bone_world(rig._bones.Head).origin-neutral_head
+				var chest_motion: Vector3 = (rig._bone_world(rig._arms[0][0]).origin+rig._bone_world(rig._arms[1][0]).origin)*0.5-neutral_chest
+				var torso_turn: Basis = rig._bone_world(rig._bones.spine_03).basis*neutral_basis.inverse()
+				var articulation: float = torso_turn.get_rotation_quaternion().get_angle()
+				var max_articulation := 0.31 if lean==Vector3.UP else 0.40
+				check(head_motion.dot(direction)>0.0 and chest_motion.dot(direction)>0.0 and articulation>0.12 and articulation<max_articulation,"Cover %s visibly articulates toward %s without excessive torso tilt, including crouch %.0f" % [action,lean,crouch])
+				var joints := rig.get_joint_positions()
+				check_limbs(rig,joints)
+				check(joints.left_foot.distance_to(neutral_joints.left_foot)<0.02 and joints.right_foot.distance_to(neutral_joints.right_foot)<0.02,"Lean weight transfer keeps both feet planted")
+				rig.set_cover(true,Vector3.BACK,crouch,false,Vector3.ZERO)
+				rig._update_pose(0.0)
+				check(rig._bone_world(rig._bones.Head).origin.distance_to(neutral_head)<0.002,"Removing the lean restores the action pose without accumulated offsets")
+		var observer := Archer.new()
+		holder.add_child(observer)
+		observer.set_physics_process(false)
+		observer.set_cover(true,Vector3.BACK,1.0,true,Vector3.LEFT)
+		rig.set_cover(true,Vector3.BACK,1.0,true,Vector3.LEFT)
+		rig._update_pose(0.0)
+		observer.apply_animation_state(rig.get_animation_state())
+		observer.advance_animation(0.2)
+		observer.apply_animation_state(rig.get_animation_state())
+		check(observer._bone_world(observer._bones.Head).origin.distance_to(rig._bone_world(rig._bones.Head).origin)<0.005,"Replicated %s reconstructs the crouched lean on the real skeleton" % action)
+		observer.queue_free()
+		if action == "peek":
+			rig.aim_at(Vector3(0,1.4,-12))
+			rig.set_cover(true,Vector3.BACK,0.0,false,Vector3.UP*0.5)
+			rig._update_pose(0.0)
+			check(absf(rig.global_basis.z.z)<0.1,"A partial peek turns through an intermediate facing instead of snapping")
+			rig.set_cover(true,Vector3.BACK,0.0,true,Vector3.UP)
+			rig._update_pose(0.0)
+			check((-rig.global_basis.z).dot(Vector3.FORWARD)>0.99,"An idle top peek faces over the obstacle toward the aim point")
+			rig.set_cover(true,Vector3.BACK,1.0,false,Vector3.ZERO)
+			rig._update_pose(0.0)
+			check((-rig.global_basis.z).dot(Vector3.BACK)>0.99,"Retucking restores the protected outward facing")
+		rig.queue_free()
+
 func run() -> void:
 	var holder := Node3D.new()
 	root.add_child(holder)
@@ -112,6 +175,7 @@ func run() -> void:
 	check_running(rig,"bow",1)
 	check_running(rig,"sword",1)
 	check_running(rig,"sword",2)
+	check_cover_poses(holder)
 	holder.queue_free()
 	await process_frame
 	print("ACTION_POSE_REGRESSION checks=",checks," failures=",failures)

@@ -20,6 +20,8 @@ var cover
 var peek_requested := false
 var peek_view_right := Vector3.RIGHT
 var peek_shoulder := 1
+var aim_snapshot_tick := -1
+var _exposure_tick := -1
 var health := 100.0
 var alive := true
 var kills := 0
@@ -107,7 +109,7 @@ func revive() -> void:
 	run_requested = false
 	jump_requested = false
 	input_age = 0.0
-	leave_cover()
+	reset_stance()
 	health = 100.0
 	stamina = 100.0
 	_exhausted = false
@@ -128,26 +130,50 @@ func revive() -> void:
 	rig.visible = true
 
 func press_jump(roll_requested: bool) -> void:
-	leave_cover()
-	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,is_on_floor(),roll_requested) or jump_requested
+	var grounded := is_on_floor()
+	peek_requested = false
+	if not alive or not cover.prepare_jump():
+		return
+	_exposure_tick = -1
+	combat.stop()
+	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,grounded,roll_requested) or jump_requested
 	if roll.active:
 		jump_requested = false
 		combat.stop()
+
+func set_crouch(requested: bool) -> void:
+	if alive and is_on_floor() and not roll.active:
+		cover.crouch_requested = requested
 
 func toggle_cover(preferred_direction: Vector3) -> void:
 	if cover.active:
 		leave_cover()
 	elif alive and is_on_floor() and not roll.active and cover.try_enter(preferred_direction):
+		_exposure_tick = -1
 		jump_requested = false
-		run_requested = false
 		combat.stop()
 
 func leave_cover() -> void:
+	combat.stop()
 	cover.exit()
+	_exposure_tick = -1
 	peek_requested = false
 	peek_view_right = Vector3.RIGHT
 	peek_shoulder = 1
-	rig.set_cover(false,cover.normal,false)
+	rig.set_cover(false,cover.normal,cover.crouch_amount,false,Vector3.ZERO)
+
+func reset_stance() -> void:
+	combat.stop()
+	cover.reset()
+	peek_requested = false
+	peek_view_right = Vector3.RIGHT
+	peek_shoulder = 1
+	aim_snapshot_tick = -1
+	_exposure_tick = -1
+	jump_requested = false
+	move_direction = Vector2.ZERO
+	run_requested = false
+	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,1.2,0)
@@ -164,13 +190,29 @@ func take_damage(amount: float, source_id: int) -> void:
 		respawn = 3.0
 		deaths += 1
 		combat.stop()
-		leave_cover()
+		reset_stance()
+		roll.reset()
 		collision_layer = 0
 		collision_mask = 0
 		rig.visible = false
 		killed.emit(slot,source_id)
 
-func step(delta: float, actors: Array) -> void:
+func update_combat_cover_side() -> void:
+	cover.view_right = peek_view_right
+	var tangent: Vector3 = cover.normal.cross(Vector3.UP)
+	var side: int = peek_shoulder if peek_view_right.dot(tangent) >= 0.0 else -peek_shoulder
+	if side != combat.cover_side:
+		_exposure_tick = -1
+	combat.cover_side = side
+	update_cover_aim_readiness()
+
+func update_cover_aim_readiness() -> void:
+	if not cover.active:
+		_exposure_tick = -1
+	combat.cover_aim_ready = is_bot or peer_id <= 1 or not cover.active \
+		or (_exposure_tick >= 0 and aim_snapshot_tick >= _exposure_tick)
+
+func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	if not authoritative:
 		return
 	if not alive:
@@ -186,31 +228,37 @@ func step(delta: float, actors: Array) -> void:
 		move_direction = Vector2.ZERO
 		run_requested = false
 		peek_requested = false
+		if combat.wants_cover_exposure() or rig.charge_frozen:
+			combat.stop()
 	var direction := Vector3(move_direction.x,0,move_direction.y)
-	var running: bool = run_requested and not cover.active and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
+	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
 	stamina = clampf(stamina + delta * (-19 if running else 13),0,100)
 	if stamina <= 1:
 		_exhausted = true
 	elif stamina >= 25:
 		_exhausted = false
-	if cover.active:
-		var tangent: Vector3 = cover.normal.cross(Vector3.UP)
-		var cover_side := peek_shoulder if peek_view_right.dot(tangent) >= 0.0 else -peek_shoulder
-		var was_peeking: bool = cover.peeking
-		var cover_velocity: Vector3 = cover.step(delta,direction,peek_requested,cover_side)
+	var was_in_cover: bool = cover.active
+	update_combat_cover_side()
+	var cover_velocity: Vector3 = cover.step(delta,direction,peek_requested or combat.wants_cover_exposure(),combat.cover_side,running)
+	if not cover.peeking:
+		_exposure_tick = -1
+	elif _exposure_tick < 0:
+		_exposure_tick = simulation_tick
+	update_cover_aim_readiness()
+	if was_in_cover:
 		velocity.x = cover_velocity.x
 		velocity.z = cover_velocity.z
-		if was_peeking and not cover.peeking:
-			combat.stop()
 	else:
-		var speed := 8.5 if running else 5.5
+		var speed := 2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5
 		velocity.x = move_toward(velocity.x,direction.x*speed,35*delta)
 		velocity.z = move_toward(velocity.z,direction.z*speed,35*delta)
 	if roll.active:
 		velocity.x = roll.direction.x * DodgeRoll.SPEED
 		velocity.z = roll.direction.z * DodgeRoll.SPEED
-	if is_on_floor():
-		velocity.y = 7.0 if jump_requested else -1.0
+	if jump_requested:
+		velocity.y = 7.0
+	elif is_on_floor():
+		velocity.y = -1.0
 	else:
 		velocity.y -= 20*delta
 	if roll.takeoff_pending:
@@ -222,7 +270,7 @@ func step(delta: float, actors: Array) -> void:
 	position.x = clampf(position.x,-21.7,21.7)
 	position.z = clampf(position.z,-21.7,21.7)
 	var actual := (position-before)/maxf(delta,0.0001)
-	rig.set_cover(cover.active,cover.normal,cover.low and not cover.peeking)
+	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	rig.set_locomotion(actual,is_on_floor() and not roll.active)
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(actual,running or roll.active,is_on_floor() and not roll.active)
@@ -314,8 +362,8 @@ func apply_snapshot(state: Dictionary) -> void:
 		rig.set_weapon(str(state.weapon))
 	cover.apply_snapshot(state.cover)
 	if not alive:
-		leave_cover()
-	rig.set_cover(cover.active,cover.normal,cover.low and not cover.peeking)
+		reset_stance()
+	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	rig.set_locomotion(velocity,bool(state.grounded) and float(state.animation.roll) < 0)
 	rig.apply_animation_state(state.animation)
 	combat.attack_progress = state.progress

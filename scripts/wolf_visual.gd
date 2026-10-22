@@ -1,0 +1,133 @@
+extends Node3D
+
+## Presentation-only controller for the imported Briar wolf. Gameplay owns the
+## root motion, state timer, damage and death lifecycle; this node only samples
+## the authored clips and holds the final corpse pose.
+
+const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
+const IDLE_CLIP := "Wolf_Idle_Loop"
+const TROT_CLIP := "Wolf_Trot_Loop"
+const ATTACK_CLIP := "Wolf_Attack"
+const DEATH_CLIP := "Wolf_Death"
+const TROT_DURATION := 0.6
+const TROT_STRIDE := 1.15
+const ATTACK_IMPACT := 0.65
+const ATTACK_RECOVERY := 0.85
+const DEATH_DURATION := 0.45
+const MOVE_THRESHOLD := 0.18
+
+var _player: AnimationPlayer
+var _skeleton: Skeleton3D
+var _clip := ""
+var _speed := 0.0
+var _combat_state := ""
+var _combat_time := 0.0
+var _attack_playing := false
+var _dead := false
+var _death_time := 0.0
+var _death_held := false
+
+
+func _ready() -> void:
+	var scene := WOLF_SCENE.instantiate()
+	add_child(scene)
+	_player = scene.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	_skeleton = scene.find_child("Skeleton3D", true, false) as Skeleton3D
+	if _player == null or _skeleton == null:
+		push_error("Wolf visual is missing its AnimationPlayer or Skeleton3D")
+		return
+	for name in [IDLE_CLIP, TROT_CLIP, ATTACK_CLIP, DEATH_CLIP]:
+		if not _player.has_animation(name):
+			push_error("Wolf visual is missing clip: " + name)
+			return
+	_player.get_animation(IDLE_CLIP).loop_mode = Animation.LOOP_LINEAR
+	_player.get_animation(TROT_CLIP).loop_mode = Animation.LOOP_LINEAR
+	_player.get_animation(ATTACK_CLIP).loop_mode = Animation.LOOP_NONE
+	_player.get_animation(DEATH_CLIP).loop_mode = Animation.LOOP_NONE
+	_clip = IDLE_CLIP
+	_player.speed_scale = 1.0
+	_player.play(IDLE_CLIP)
+
+
+func set_motion(speed: float) -> void:
+	_speed = speed
+
+
+func set_combat(state: String, time: float) -> void:
+	_combat_state = state
+	_combat_time = time
+	if _dead:
+		return
+	if state in ["WINDUP", "RECOVER"] and not _attack_playing:
+		_attack_playing = true
+		_clip = ATTACK_CLIP
+		_player.speed_scale = 1.0
+		_player.play(ATTACK_CLIP, 0.08)
+
+
+func die() -> void:
+	if _dead:
+		return
+	_dead = true
+	_attack_playing = false
+	_death_time = 0.0
+	_death_held = false
+	_clip = DEATH_CLIP
+	if _player:
+		_player.speed_scale = 1.0
+		_player.play(DEATH_CLIP, 0.08)
+
+
+func get_clip_name() -> String:
+	return _clip
+
+
+func is_dead() -> bool:
+	return _dead
+
+
+func _process(delta: float) -> void:
+	if _player == null:
+		return
+	if _dead:
+		_advance_death(delta)
+		return
+	if _attack_playing:
+		# The gameplay timer is authoritative. Seek to its mapped position so a
+		# long physics frame cannot desynchronise the bite from the damage check.
+		if _combat_state == "WINDUP":
+			_player.seek(clampf(_combat_time, 0.0, ATTACK_IMPACT), true)
+			return
+		if _combat_state == "RECOVER":
+			_player.seek(ATTACK_IMPACT + clampf(_combat_time, 0.0, ATTACK_RECOVERY), true)
+			return
+		_attack_playing = false
+		_select_locomotion()
+		return
+	_select_locomotion()
+
+
+func _select_locomotion() -> void:
+	if _speed > MOVE_THRESHOLD:
+		if _clip != TROT_CLIP:
+			_clip = TROT_CLIP
+			_player.speed_scale = 1.0
+			_player.play(TROT_CLIP, 0.18)
+		_player.speed_scale = clampf(_speed / (TROT_STRIDE / TROT_DURATION), 0.35, 2.6)
+	else:
+		if _clip != IDLE_CLIP:
+			_clip = IDLE_CLIP
+			_player.speed_scale = 1.0
+			_player.play(IDLE_CLIP, 0.20)
+		else:
+			_player.speed_scale = 1.0
+
+
+func _advance_death(delta: float) -> void:
+	if _death_held:
+		return
+	_death_time += delta
+	if _death_time >= DEATH_DURATION:
+		_death_held = true
+		_player.seek(DEATH_DURATION, true)
+		_player.pause()

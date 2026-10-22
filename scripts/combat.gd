@@ -13,6 +13,11 @@ var movement_mode := "STANDING"
 var grounded := false
 var actor: CharacterBody3D
 var cover
+var cover_side: int = 1
+var cover_aim_ready := true
+var _cover_attack := false
+var _auto_exposure := false
+var _release_pending := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
@@ -21,6 +26,8 @@ const MAX_SWEEP_CONTACTS := 32
 var _melee_query := PhysicsShapeQueryParameters3D.new()
 var _melee_shape := CapsuleShape3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
+var _shaft_query := PhysicsShapeQueryParameters3D.new()
+var _shaft_shape := SphereShape3D.new()
 var _melee_exclude: Array[RID] = []
 var _source_exclude: Array[RID] = []
 var _melee_victims: Dictionary = {}
@@ -34,9 +41,14 @@ func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	rig.arrow_released.connect(_on_rig_shot)
 	rig.melee_started.connect(_on_melee_started)
 	rig.melee_sweep.connect(_on_melee_sweep)
+	rig.loadout_changed.connect(_on_loadout_changed)
 	_melee_query.shape = _melee_shape
 	_melee_query.margin = 0.001
 	_sight_query.collision_mask = 1
+	_shaft_shape.radius = 0.01
+	_shaft_query.shape = _shaft_shape
+	_shaft_query.collision_mask = 1
+	_shaft_query.margin = 0.001
 
 func set_aim(point: Vector3) -> void:
 	if point.is_finite():
@@ -44,31 +56,99 @@ func set_aim(point: Vector3) -> void:
 		update_aim()
 
 func can_draw() -> bool:
-	return rig.weapon == "bow" and grounded and rig.phase == "READY" and rig._roll_progress < 0.0 and _can_attack_from_cover()
+	return rig.weapon == "bow" and grounded and rig.phase == "READY" and rig._roll_progress < 0.0
 
 func begin_draw() -> bool:
-	if not can_draw():
+	if not can_draw() or not _accept_cover_draw():
 		return false
 	rig.begin_draw()
 	update_aim()
 	return true
 
 func release_draw() -> void:
-	if not _can_attack_from_cover():
+	if rig.phase not in ["DRAWING", "HOLDING"] or _release_pending:
+		return
+	if _cover_attack and not _cover_attached():
 		stop()
 		return
-	if rig.phase != "DRAWING" and rig.phase != "HOLDING":
+	if _cover_attached():
+		if not grounded or rig._roll_progress >= 0.0 or not cover.can_peek(cover_side):
+			stop()
+			return
+		_cover_attack = true
+		if not _can_release_from_cover():
+			_auto_exposure = true
+		_release_pending = true
+		rig.charge_frozen = true
+		_try_cover_release()
 		return
 	update_aim()
 	rig.release_string()
 
+func _on_loadout_changed() -> void:
+	if _cover_attack:
+		stop()
+
 func stop() -> void:
+	_cover_attack = false
+	_auto_exposure = false
+	_release_pending = false
 	_melee_active = false
 	rig.cancel_draw()
 
-func begin_melee() -> bool:
-	if not grounded or melee_progress < 1.0 - 0.000001 or not _can_attack_from_cover():
+func wants_cover_exposure() -> bool:
+	return _auto_exposure and _cover_attached() \
+		and rig.phase in ["DRAWING","HOLDING","RELEASE"]
+
+func _cover_attached() -> bool:
+	return is_instance_valid(cover) and cover.active
+
+func _accept_cover_draw() -> bool:
+	if _cover_attached() and not cover.can_peek(cover_side):
 		return false
+	_cover_attack = _cover_attached()
+	_auto_exposure = _cover_attack and not _can_release_from_cover()
+	return true
+
+func _try_cover_release() -> void:
+	if not _release_pending or not _can_release_from_cover():
+		return
+	if rig.phase == "DRAWING" and rig._phase_time < Archer.RAISE_SECONDS:
+		return
+	# A remote camera must have observed this physical exposure before its
+	# near-cover aim can authorize release. Charge stays frozen while it catches up.
+	if not cover_aim_ready:
+		return
+	update_aim()
+	if not _cover_shaft_clear():
+		stop()
+		return
+	_release_pending = false
+	rig.release_string()
+
+func _cover_shaft_clear() -> bool:
+	if not is_instance_valid(actor):
+		return false
+	var nock: Vector3 = rig.active_bow.get_nock_position()
+	var tip: Vector3 = rig.get_arrow_origin()
+	var space := actor.get_world_3d().direct_space_state
+	_shaft_query.transform = Transform3D(Basis.IDENTITY,nock)
+	_shaft_query.motion = Vector3.ZERO
+	# Sweeps ignore initial overlaps, including a nock buried inside cover.
+	if not space.intersect_shape(_shaft_query,1).is_empty():
+		return false
+	_shaft_query.motion = tip-nock
+	return space.cast_motion(_shaft_query)[0] >= 1.0
+
+func begin_melee() -> bool:
+	if not grounded or melee_progress < 1.0 - 0.000001 \
+			or rig.weapon != "sword" or rig.phase != "READY" or rig._roll_progress >= 0.0:
+		return false
+	stop()
+	if _cover_attached():
+		cover.exit()
+		# Clear the visual constraint before the first swing pose, without moving or standing the body.
+		rig.set_cover(false,Vector3.ZERO,cover.crouch_amount,false,Vector3.ZERO)
 	update_aim()
 	if rig.begin_melee():
 		attack_progress = 0.0
@@ -190,8 +270,9 @@ func set_motion(actual_velocity: Vector3, running: bool, on_ground: bool) -> voi
 	if is_instance_valid(cover) and cover.active:
 		movement_mode = "PEEKING" if cover.peeking else "COVER"
 
-func _can_attack_from_cover() -> bool:
-	return not is_instance_valid(cover) or not cover.active or cover.peeking
+func _can_release_from_cover() -> bool:
+	return not _cover_attached() or (cover.peeking and (cover.low \
+		or cover.lean.dot(cover.normal.cross(Vector3.UP))*float(cover_side) > 0.0))
 
 func get_attack_interval() -> float:
 	if rig.weapon == "sword" and rig.phase not in ["RELEASE", "RECOVER"]:
@@ -199,8 +280,20 @@ func get_attack_interval() -> float:
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:
-	if not _can_attack_from_cover() and rig.phase in ["DRAWING","HOLDING","MELEE"]:
-		stop()
+	if _cover_attack:
+		if not _cover_attached() or not grounded or rig._roll_progress >= 0.0 \
+				or (is_instance_valid(actor) and actor.get("alive") == false):
+			stop()
+		elif rig.phase in ["RECOVER","READY"]:
+			_cover_attack = false
+			_auto_exposure = false
+			_release_pending = false
+		elif (_auto_exposure or _release_pending) and not cover.can_peek(cover_side):
+			stop()
+		elif _release_pending:
+			if not _can_release_from_cover():
+				_auto_exposure = true
+			_try_cover_release()
 	# Sword recovery continues across weapon swaps but never gates a bow draw.
 	if melee_progress < 1.0:
 		melee_progress = minf(1.0, melee_progress + delta / float(Archer.SWORD_DATA[rig.sword_index].seconds))
@@ -224,10 +317,5 @@ static func damage_for(bow_index: int, charge: float) -> float:
 
 func _on_rig_shot(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	attack_progress = 0.0
-	if is_instance_valid(cover) and cover.active and is_instance_valid(actor):
-		_sight_query.from = actor.global_position+Vector3.UP*1.4
-		_sight_query.to = origin
-		if not actor.get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty():
-			# A weapon protruding through cover must still fire from this side of it.
-			origin = _sight_query.from
+	# The checked visible shaft owns the muzzle; never relocate it to the chest.
 	shot.emit(origin, direction, speed, clampf(charge, 0.0, 1.0))

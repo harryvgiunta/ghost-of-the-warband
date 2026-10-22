@@ -19,6 +19,7 @@ var hud
 var audio
 var camera: Camera3D
 var _peer_slots: Dictionary = {}
+# Per actor: newest snapshot sent by the host or applied by this client.
 var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
 var _player_name := "Ranger"
 var _endpoint := ""
@@ -32,6 +33,7 @@ var _cursor_free := true
 var _mouse_drawing := false
 var _key_drawing := false
 var _peek_held := false
+var _peek_right := Vector3.RIGHT
 var _query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
@@ -156,6 +158,7 @@ func leave_game() -> void:
 	_mouse_drawing = false
 	_key_drawing = false
 	_peek_held = false
+	_peek_right = Vector3.RIGHT
 	_cursor_free = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	for projectile in projectiles:
@@ -164,7 +167,7 @@ func leave_game() -> void:
 	projectiles.clear()
 	for actor in actors:
 		actor.combat.stop()
-		actor.leave_cover()
+		actor.reset_stance()
 		actor.authoritative = false
 		actor.combat.damage_enabled = false
 		actor.visible = false
@@ -278,39 +281,49 @@ func _physics_process(delta: float) -> void:
 		if network_role == "host":
 			_set_movement(local_slot,direction,running,_crosshair_aim())
 		elif _send_elapsed >= 0.05:
-			_move_input.rpc_id(1,direction,running,_crosshair_aim())
+			_move_input.rpc_id(1,direction,running,_crosshair_aim(),_snapshot_ticks[local_slot])
 	if network_role == "host":
 		server_tick += 1
 		for actor in actors:
-			actor.step(delta,actors)
+			actor.step(delta,actors,server_tick)
 		if _send_elapsed >= 0.05:
 			# One fighter per datagram stays below ENet's MTU without fragmentation.
 			for actor in actors:
 				_receive_snapshot.rpc(server_tick,actor.slot,actor.snapshot())
+				_snapshot_ticks[actor.slot] = server_tick
 	if _send_elapsed >= 0.05:
 		_send_elapsed = fmod(_send_elapsed,0.05)
 
-func _set_movement(slot: int, direction: Vector2, running: bool, aim: Vector3) -> void:
-	if not direction.is_finite():
+func _set_movement(slot: int, direction: Vector2, running: bool, aim: Vector3, aim_tick: int = -1) -> void:
+	if not direction.is_finite() or not _set_aim(slot,aim,aim_tick):
 		return
 	actors[slot].move_direction = direction.limit_length()
 	actors[slot].run_requested = running
 	actors[slot].input_age = 0
-	_set_aim(slot,aim)
 
-func _set_aim(slot: int, point: Vector3) -> bool:
+func _set_aim(slot: int, point: Vector3, aim_tick: int = -1) -> bool:
 	if not point.is_finite() or point.length_squared() > 1000000.0:
 		return false
+	var actor = actors[slot]
+	if actor.peer_id > 1:
+		if aim_tick < 0 or aim_tick > _snapshot_ticks[slot]:
+			return false
+		# Reliable draw/release may arrive after a newer movement aim. Honor
+		# the action without rewinding its aim or exposure acknowledgement.
+		if aim_tick < actor.aim_snapshot_tick:
+			return true
+		actor.aim_snapshot_tick = aim_tick
+	actor.update_cover_aim_readiness()
 	actors[slot].combat.set_aim(point)
 	return true
 
 @rpc("any_peer","call_remote","unreliable_ordered")
-func _move_input(direction: Vector2, running: bool, aim: Vector3) -> void:
-	if network_role != "host":
+func _move_input(direction: Vector2, running: bool, aim: Vector3, aim_tick: Variant) -> void:
+	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if _peer_slots.has(sender):
-		_set_movement(int(_peer_slots[sender]),direction,running,aim)
+		_set_movement(int(_peer_slots[sender]),direction,running,aim,aim_tick)
 
 @rpc("authority","call_remote","unreliable")
 func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
@@ -323,32 +336,43 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 func send_action(action: String, value: Variant = null) -> void:
 	if local_slot < 0:
 		return
+	if action in ["bow","sword","weapon","armor"]:
+		_cancel_draw_input()
+	if action == "draw" and not _peek_held and actors[local_slot].rig.phase == "READY":
+		_capture_peek_context()
+	if action in ["draw","release"]:
+		_send_peek_input()
 	if network_role == "host":
 		_apply_action(local_slot,action,value)
 	elif network_role == "client":
-		_action_input.rpc_id(1,action,value)
+		_action_input.rpc_id(1,action,value,_snapshot_ticks[local_slot])
 
 @rpc("any_peer","call_remote","reliable")
-func _action_input(action: String, value: Variant) -> void:
-	if network_role != "host":
+func _action_input(action: String, value: Variant, aim_tick: Variant) -> void:
+	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if _peer_slots.has(sender):
-		_apply_action(int(_peer_slots[sender]),action,value)
+		var slot := int(_peer_slots[sender])
+		if aim_tick < 0 or aim_tick > _snapshot_ticks[slot]:
+			return
+		_apply_action(slot,action,value,aim_tick)
 
-func _apply_action(slot: int, action: String, value: Variant) -> void:
+func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1) -> void:
 	var actor = actors[slot]
 	if not actor.alive:
 		return
 	match action:
 		"draw":
-			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value):
+			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
+				actor.update_combat_cover_side()
 				if actor.rig.weapon == "sword":
 					actor.combat.begin_melee()
 				else:
 					actor.combat.begin_draw()
 		"release":
-			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value):
+			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
+				actor.update_combat_cover_side()
 				actor.combat.release_draw()
 		"stop": actor.combat.stop()
 		"jump":
@@ -357,6 +381,9 @@ func _apply_action(slot: int, action: String, value: Variant) -> void:
 		"cover":
 			if typeof(value) == TYPE_VECTOR3 and value.is_finite() and value.length_squared() > 0.01 and value.length_squared() <= 1000000.0:
 				actor.toggle_cover(value.normalized())
+		"crouch":
+			if typeof(value) == TYPE_BOOL:
+				actor.set_crouch(value)
 		"peek":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -368,6 +395,7 @@ func _apply_action(slot: int, action: String, value: Variant) -> void:
 			actor.peek_requested = value.pressed
 			actor.peek_view_right = Vector3(right.x,0,right.z).normalized()
 			actor.peek_shoulder = value.side
+			actor.update_combat_cover_side()
 		"bow":
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_bow(value)
@@ -433,13 +461,13 @@ func _process(delta: float) -> void:
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
 		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn})
-	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side)
+	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
 
 func _update_game_camera() -> void:
 	var actor = actors[local_slot]
-	var height: float = actor.cover.camera_height() if actor.cover.active else 1.5
+	var height: float = actor.cover.camera_height()
 	var focus: Vector3 = actor.position + Vector3(0,height,0)
 	var back := Vector3(sin(_camera_yaw)*cos(_camera_pitch),sin(_camera_pitch),cos(_camera_yaw)*cos(_camera_pitch))
 	camera.position = _shoulder_camera.resolve(get_world_3d().direct_space_state,focus,back,_camera_distance)
@@ -456,8 +484,11 @@ func _set_cursor_free(value: bool) -> void:
 func _crosshair_aim() -> Vector3:
 	_update_game_camera()
 	var center := get_viewport().get_visible_rect().size * 0.5
-	_query.from = camera.project_ray_origin(center)
-	_query.to = _query.from + camera.project_ray_normal(center)*120.0
+	var ray_origin := camera.project_ray_origin(center)
+	var ray_direction := camera.project_ray_normal(center)
+	var muzzle_depth := maxf(0.0,(actors[local_slot].rig.get_arrow_origin()-ray_origin).dot(ray_direction))
+	_query.from = ray_origin + ray_direction*(muzzle_depth+0.05)
+	_query.to = ray_origin + ray_direction*120.0
 	_query.exclude = [actors[local_slot].get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
 	return hit.position if not hit.is_empty() else _query.to
@@ -468,8 +499,6 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
 		_send_peek_input()
-		if actors[local_slot].cover.active:
-			_cancel_draw_input()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
 			_mouse_drawing = false
@@ -486,8 +515,11 @@ func _cancel_draw_input() -> void:
 	_key_drawing = false
 	send_action("stop")
 
+func _capture_peek_context() -> void:
+	_peek_right = Vector3(cos(_camera_yaw),0,-sin(_camera_yaw))
+
 func _send_peek_input() -> void:
-	send_action("peek",{"pressed":_peek_held,"right":Vector3(cos(_camera_yaw),0,-sin(_camera_yaw)),"side":_shoulder_camera.side})
+	send_action("peek",{"pressed":_peek_held,"right":_peek_right,"side":_shoulder_camera.side})
 
 func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
@@ -496,17 +528,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
-			KEY_C: send_action("armor",(actors[local_slot].rig.armor_index+1)%3)
-			KEY_SPACE: send_action("jump",event.shift_pressed)
-			KEY_F:
-				_cancel_draw_input()
-				send_action("cover",Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw)))
-				if _peek_held:
+			KEY_C:
+				if not _cursor_free:
+					send_action("crouch",not actors[local_slot].cover.crouch_requested)
+			KEY_SPACE:
+				if not _cursor_free:
+					_peek_held = false
 					_send_peek_input()
+					send_action("jump",event.shift_pressed)
+			KEY_F:
+				if not _cursor_free:
+					_cancel_draw_input()
+					_peek_held = false
+					_capture_peek_context()
+					_send_peek_input()
+					send_action("cover",Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw)))
 			KEY_X:
 				_shoulder_camera.swap()
-				if _peek_held:
-					_send_peek_input()
+				_capture_peek_context()
+				_send_peek_input()
 			KEY_ESCAPE, KEY_I: _set_cursor_free(not _cursor_free)
 			KEY_Q:
 				_set_cursor_free(false)
@@ -522,6 +562,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_set_cursor_free(false)
 			_peek_held = true
+			_capture_peek_context()
 			_send_peek_input()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_camera_distance = maxf(3,_camera_distance-0.5)

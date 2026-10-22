@@ -1,0 +1,156 @@
+extends SceneTree
+
+const WOLF := preload("res://assets/characters/ironwood_wolf.glb")
+const WolfVisual = preload("res://scripts/wolf_visual.gd")
+const Enemy = preload("res://scripts/enemy.gd")
+
+var failures := 0
+var checks := 0
+
+
+func _initialize() -> void:
+	call_deferred("run")
+
+
+func check(condition: bool, message: String) -> void:
+	checks += 1
+	if not condition:
+		failures += 1
+		push_error(message)
+
+
+func run() -> void:
+	var world := Node3D.new()
+	root.add_child(world)
+
+	# Imported asset contract: geometry, orientation, clips, texture.
+	var scene := WOLF.instantiate()
+	world.add_child(scene)
+	await process_frame
+	var player := scene.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	var skeleton := scene.find_child("Skeleton3D", true, false) as Skeleton3D
+	var mesh := scene.find_child("WolfMesh", true, false) as MeshInstance3D
+	check(player != null, "Imported wolf scene has an AnimationPlayer")
+	check(skeleton != null, "Imported wolf scene has a Skeleton3D")
+	check(mesh != null, "Imported wolf scene has the skinned mesh")
+	if player and skeleton and mesh:
+		var names := player.get_animation_list()
+		for required in ["Wolf_Idle_Loop", "Wolf_Trot_Loop", "Wolf_Attack", "Wolf_Death"]:
+			check(required in names, "Imported wolf has clip " + required)
+		check(is_equal_approx(player.get_animation("Wolf_Idle_Loop").length, 2.4), "Idle clip is 2.4 seconds")
+		check(is_equal_approx(player.get_animation("Wolf_Trot_Loop").length, 0.6), "Trot clip is 0.6 seconds")
+		check(is_equal_approx(player.get_animation("Wolf_Attack").length, 1.5), "Attack clip is 1.5 seconds")
+		check(is_equal_approx(player.get_animation("Wolf_Death").length, 0.45), "Death clip is 0.45 seconds")
+		check(player.get_animation("Wolf_Idle_Loop").loop_mode == Animation.LOOP_LINEAR, "Idle loops")
+		check(player.get_animation("Wolf_Trot_Loop").loop_mode == Animation.LOOP_LINEAR, "Trot loops")
+		check(player.get_animation("Wolf_Attack").loop_mode == Animation.LOOP_NONE, "Attack does not loop")
+		check(player.get_animation("Wolf_Death").loop_mode == Animation.LOOP_NONE, "Death does not loop")
+		check(skeleton.get_bone_count() == 37, "Wolf skeleton has the expected 37 bones")
+		for bone in ["root", "pelvis", "head", "jaw", "front_paw_l", "hind_toes_r", "tail_04"]:
+			check(skeleton.find_bone(bone) >= 0, "Wolf skeleton has bone " + bone)
+		var head_rest := skeleton.get_bone_global_rest(skeleton.find_bone("head")).origin
+		var tail_rest := skeleton.get_bone_global_rest(skeleton.find_bone("tail_04")).origin
+		check(head_rest.z < -0.5, "Wolf faces gameplay -Z")
+		check(tail_rest.z > 0.5, "Wolf tail extends behind the body")
+		var bounds := mesh.get_aabb()
+		check(absf(bounds.position.y) < 0.03, "Wolf paws sit at the ground plane")
+		check(bounds.size.y > 1.0 and bounds.size.y < 1.3, "Wolf height stays inside the captured capsule scale")
+		check(bounds.size.z > 1.8 and bounds.size.z < 2.4, "Wolf body length reads as a quadruped, not a stretched sphere")
+		check(bounds.size.x > 0.4 and bounds.size.x < 0.7, "Wolf torso width is plausible")
+		var surface_material := mesh.mesh.surface_get_material(0) as StandardMaterial3D
+		check(surface_material != null and surface_material.albedo_texture != null, "Fur surface has an embedded albedo texture")
+		if surface_material and surface_material.albedo_texture:
+			check(surface_material.albedo_texture.get_width() == 1024 and surface_material.albedo_texture.get_height() == 1024, "Coat texture is 1024x1024")
+		# No authored root translation may leak into gameplay movement.
+		var root_bone := skeleton.find_bone("root")
+		for clip in ["Wolf_Idle_Loop", "Wolf_Trot_Loop", "Wolf_Attack", "Wolf_Death"]:
+			var length: float = player.get_animation(clip).length
+			for time in [0.0, length * 0.5, length]:
+				player.play(clip)
+				player.seek(time, true)
+				player.pause()
+				await process_frame
+				skeleton.force_update_all_bone_transforms()
+				check(skeleton.get_bone_global_pose(root_bone).origin.length() < 0.001, "Clip " + clip + " keeps the root bone stationary")
+	scene.queue_free()
+	await process_frame
+
+	# Visual controller: bite impact and held death.
+	var visual := WolfVisual.new()
+	world.add_child(visual)
+	await process_frame
+	await process_frame
+	var visual_skeleton := visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	check(visual.get_clip_name() == "Wolf_Idle_Loop", "Wolf visual starts in idle")
+	visual.set_combat("WINDUP", 0.0)
+	await create_timer(0.12).timeout
+	visual.set_combat("WINDUP", 0.55)
+	await process_frame
+	await process_frame
+	visual_skeleton.force_update_all_bone_transforms()
+	var jaw_bone := visual_skeleton.find_bone("jaw")
+	var jaw_open: Quaternion = visual_skeleton.get_bone_global_pose(jaw_bone).basis.get_rotation_quaternion()
+	var jaw_windup: Vector3 = visual_skeleton.get_bone_global_pose(jaw_bone).origin
+	var head_windup: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
+	visual.set_combat("WINDUP", 0.65)
+	await process_frame
+	await process_frame
+	visual_skeleton.force_update_all_bone_transforms()
+	var jaw_impact: Quaternion = visual_skeleton.get_bone_global_pose(jaw_bone).basis.get_rotation_quaternion()
+	var jaw_impact_origin: Vector3 = visual_skeleton.get_bone_global_pose(jaw_bone).origin
+	var head_impact: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
+	check(visual.get_clip_name() == "Wolf_Attack", "Windup starts the authored attack clip")
+	check(jaw_open.angle_to(jaw_impact) > 0.25, "Bite closes between windup and the 0.65 s impact")
+	check(jaw_impact_origin.z < visual_skeleton.get_bone_global_rest(jaw_bone).origin.z - 0.06, "Bite drives the jaw forward at impact")
+	visual.die()
+	await create_timer(0.55).timeout
+	visual_skeleton.force_update_all_bone_transforms()
+	var dead_head: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
+	check(visual.is_dead(), "Wolf visual enters its death state")
+	check(visual.get_clip_name() == "Wolf_Death", "Death clip is selected")
+	check(dead_head.y < 0.6, "Authored death collapses the body to the ground")
+	await create_timer(0.25).timeout
+	visual_skeleton.force_update_all_bone_transforms()
+	var held_head: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
+	check(held_head.distance_to(dead_head) < 0.01, "Final corpse pose is held after the death clip ends")
+	visual.queue_free()
+	await process_frame
+
+	# Enemy cutover: wolf presentation only, sentinel primitives untouched.
+	var dummy_player := CharacterBody3D.new()
+	world.add_child(dummy_player)
+	dummy_player.position = Vector3(0, 0, 0)
+	var wolf_enemy := Enemy.new()
+	wolf_enemy.kind = 0
+	wolf_enemy.player = dummy_player
+	wolf_enemy.safe_center = Vector3(1000, 0, 1000)
+	wolf_enemy.position = Vector3(0, 0, -2.0)
+	world.add_child(wolf_enemy)
+	await physics_frame
+	await physics_frame
+	check(wolf_enemy._wolf != null, "Wolf enemy attaches its imported visual")
+	check(wolf_enemy._legs.is_empty() and wolf_enemy._arms.is_empty(), "Wolf no longer creates primitive limb nodes")
+	check(wolf_enemy._body.get_child_count() == 1 and wolf_enemy._body.get_child(0) == wolf_enemy._wolf, "Wolf body contains only the imported visual")
+	wolf_enemy.take_damage(999.0, 0)
+	await create_timer(0.55).timeout
+	check(wolf_enemy.state == "DEAD" and wolf_enemy._wolf.is_dead(), "Wolf enemy routes lethal damage through the authored death")
+	check(wolf_enemy.scale == Vector3.ONE and wolf_enemy._body.scale == Vector3.ONE, "Wounded wolf keeps root and visual container scale identity during the collapse")
+	wolf_enemy.queue_free()
+	await process_frame
+
+	var sentinel := Enemy.new()
+	sentinel.kind = 1
+	sentinel.position = Vector3(6, 0, 0)
+	world.add_child(sentinel)
+	await physics_frame
+	await physics_frame
+	check(sentinel._wolf == null, "Sentinel does not attach the wolf visual")
+	check(sentinel._legs.size() == 2 and sentinel._arms.size() == 2, "Sentinel keeps its primitive limb presentation")
+	sentinel.take_damage(999.0, 0)
+	await create_timer(0.55).timeout
+	check(sentinel._body.rotation.z > 1.0, "Sentinel keeps its existing death roll")
+	sentinel.queue_free()
+	world.queue_free()
+	await process_frame
+	print("WOLF_REGRESSION checks=", checks, " failures=", failures)
+	quit(0 if failures == 0 else 1)

@@ -78,6 +78,78 @@
       "duration": 2.0833333333333335,
       "strike_start": 0.25,
       "strike_end": 0.5
+    },
+    "crouch_idle": {
+      "name": "Crouch_Idle_Loop",
+      "duration": 2.933333333333333,
+      "loop": true,
+      "pelvis_drop": 0.4039465266432466,
+      "pelvis_drop_range": [
+        0.3998904824256897,
+        0.40791958570480347
+      ],
+      "foot_fore_aft_excursion": {
+        "l": 0.0008886456489562988,
+        "r": 0.015314936637878418
+      },
+      "measurement": "Metres, mean/min/max pelvis drop relative to Idle_Loop frame 0; ankle +Z excursion is not full-cycle stride distance"
+    },
+    "crouch_forward": {
+      "name": "Crouch_Fwd_Loop",
+      "duration": 2,
+      "loop": true,
+      "pelvis_drop": 0.37792434943609,
+      "pelvis_drop_range": [
+        0.3522830605506897,
+        0.4128049910068512
+      ],
+      "foot_fore_aft_excursion": {
+        "l": 0.8206175863742828,
+        "r": 0.8062260001897812
+      },
+      "measurement": "Metres, mean/min/max pelvis drop relative to Idle_Loop frame 0; ankle +Z excursion is not full-cycle stride distance",
+      "nominal_speed": 0.7453060895204544,
+      "stride": 1.4906121790409088,
+      "stride_measurement": "Estimated full-cycle travel: median backwards ankle speed within 25 mm of lowest contact, multiplied by cycle duration"
+    },
+    "cover_left": {
+      "name": "Cover_Lean_Left",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        1,
+        0,
+        0
+      ],
+      "torso_degrees": 18.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
+    },
+    "cover_right": {
+      "name": "Cover_Lean_Right",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        -1,
+        0,
+        0
+      ],
+      "torso_degrees": 18.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
+    },
+    "cover_top": {
+      "name": "Cover_Lean_Top",
+      "duration": 0.23999999463558197,
+      "loop": false,
+      "lean_direction": [
+        0,
+        0,
+        1
+      ],
+      "torso_degrees": 14.0,
+      "pelvis_counterbalance": 0.02,
+      "pelvis_lowering": 0.012
     }
   },
   "animations": {
@@ -89,6 +161,11 @@
     "Jump_Loop": 2.5,
     "Jump_Land": 1.2666666666666666,
     "Roll": 1.4666666666666666,
+    "Crouch_Idle_Loop": 2.933333333333333,
+    "Crouch_Fwd_Loop": 2,
+    "Cover_Lean_Left": 0.23999999463558197,
+    "Cover_Lean_Right": 0.23999999463558197,
+    "Cover_Lean_Top": 0.23999999463558197,
     "Sword_Overhead_OneHand": 2.0833333333333335,
     "Sword_Idle_OneHand": 1.6666666666666667,
     "Sword_Idle": 2.4,
@@ -135,6 +212,13 @@
         0.0
       ]
     }
+  },
+  "cover_authoring": {
+    "reference": "Identical Idle_Loop frame 0 for all lean clips; additive world-space bone deltas",
+    "axes": "Asset Y-up/+Z-forward: left +X, right -X, top +Z; Blender (x,y,z) exports as (x,z,-y)",
+    "rotation_axes": "Left -Z, right +Z, top +X in asset space; pelvis -3 degrees, spine chain 50/80/100 percent of torso_degrees, neck -2 and head -5 degrees relative to chest",
+    "contact": "Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral",
+    "timing": "Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping"
   },
   "support_clearance_validation": {
     "sample_hz": 240,

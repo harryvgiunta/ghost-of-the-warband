@@ -1,0 +1,42 @@
+---
+name: ironwood-creatures
+description: Use when creating, replacing, rigging, skinning, or animating Ironwood characters and creatures, including new humanoids or outfits, the BriarWolf's textured quadruped overhaul, authored animation retargeting, combat-timed clips, foot contact or pose drift, and requested size or coat variants.
+---
+
+# Ironwood Characters and Creatures
+
+Use this skill for character anatomy, deformation, animation, and gameplay integration. Use [Ironwood Assets](../ironwood-assets/SKILL.md) for acquisition, provenance, texture production, reproducible export, and general asset delivery; use [Ironwood Archer](../ironwood-archer/SKILL.md) for project/toolchain and shared gameplay contracts. Read the relevant references below **before** implementing their stage. Repository file paths in prose are relative to the project root; Markdown links are relative to this document.
+
+## Scope and current facts
+
+- For the wolf route, the first overhaul is **one default grey Briar wolf**. Do not also build sizes, coats, other species, or gameplay changes unless requested. Future variants are an architectural constraint, not authorization to ship a variant system now. For humanoids, use the separate reference rather than imposing wolf anatomy or timing.
+- The default grey Briar wolf overhaul is implemented. `scripts/enemy.gd` uses the imported `assets/characters/ironwood_wolf.glb` through `scripts/wolf_visual.gd` for `kind == 0`; `kind == 1` remains the primitive Ruin sentinel sharing the AI/damage lifecycle. Do not rebuild the wolf, add primitives back, or create size/coat variants unless requested.
+- The shipped wolf is original procedural work authored by `tools/prepare_wolf.py`: a continuous body/neck/head skin, separate jaw/ears/eyes/nose/teeth/claws, one packed 1024 sRGB coat, 37 bones, 15,036 triangles, and in-place `Wolf_Idle_Loop` (2.4 s), `Wolf_Trot_Loop` (0.6 s, 1.15 m stride), `Wolf_Attack` (1.5 s, impact 0.65 s) and `Wolf_Death` (0.45 s). The projection and death are presentation only.
+- `tools/prepare_character.py` and `tools/character_clearance.py` are Ranger/humanoid-specific. Reuse their pipeline conventions, **not** their bone map or clearance assumptions for a quadruped.
+- The reference recipes below record the contracts used for the shipped wolf. Treat the actual GLB, adjacent JSON, importer settings and `tools/prepare_wolf.py` as the current measured source of truth; inspect them before changing clips, proportions or contact timing.
+
+## Choose the bounded task
+
+| Request | Required reading | Deliverable boundary |
+| --- | --- | --- |
+| First wolf overhaul or new quadruped | [Wolf authoring](references/wolf-authoring.md), then [Animation and integration](references/animation-integration.md), then delivery section of [Variants and evidence](references/variants-and-evidence.md) | The default grey wolf is shipped; use this route for a deliberate replacement or a new quadruped, not to rebuild the existing asset. |
+| New humanoid, player/NPC replacement, outfit or humanoid animation | [Humanoid authoring](references/humanoid-authoring.md), [Ironwood Assets](../ironwood-assets/SKILL.md), and the project skill | Requested body/outfit/clip set integrated with its actual controller and equipment |
+| Gait, attack, death, foot sliding, or sinking pose fix | [Animation and integration](references/animation-integration.md); authoring rig section if axes/weights change | Correct authored motion and integration, not gameplay retuning |
+| Explicit small/medium/big or black/grey/white request | [Variants and evidence](references/variants-and-evidence.md), plus animation stride section | Only requested combinations, with shared compatible rig/animations |
+| Source/model/texture acquisition or export problem | [Ironwood Assets](../ironwood-assets/SKILL.md), then affected authoring section | Licensed reproducible inputs and a verified import, not an assumed download |
+
+## Execute in order
+
+1. **Read the live contracts.** For wolves inspect `_ready`, `_build_wolf_visual`, `_build_guardian`, `get_aim_position`, `_physics_process`, `_steer`, and `take_damage` in `scripts/enemy.gd`, plus `scripts/wolf_visual.gd`, `tools/prepare_wolf.py` and `assets/characters/ironwood_wolf.json`. For humanoids inspect the actual consumer and the [humanoid reference](references/humanoid-authoring.md), especially `scripts/archer.gd` and its JSON when replacing the player. Find actual spawn/caller sites before changing an interface. Record existing behavior and the user's scope. Do not rename gameplay states merely to match animation clips.
+2. **Choose a real source route.** Either acquire a verified redistributable character plus usable motion, or author the continuous mesh and keyed motion in Blender. Record source URLs, exact license and attribution, modifications, and hashes. Missing redistribution permission blocks shipping that source; the Ranger's CC0 license does not cover an unrelated download.
+3. **Author and measure.** Follow the selected humanoid or wolf reference's mesh → UV/material → rest rig → weights gates. Record actual units, axes, bind transforms, dimensions, and foot/paw sole offsets. Do not animate a broken bind pose.
+4. **Bake and export all required motion.** Follow the phase/contact recipes and export/import gates. Set clip loops intentionally and measure durations after export; labels alone do not prove a usable clip.
+5. **Integrate presentation only.** Keep the actual controller as physics/gameplay authority and feed post-collision motion into the new visual controller. For the wolf, cut over its branch completely while retaining sentinel primitives and animation. Do not keep fallback primitives that hide missing assets.
+6. **Inspect in world.** Use actual gameplay, combat, terrain, rendered contact sheets, and relevant regressions, as detailed in the evidence reference. A successful GLB export or a viewport bone screenshot does not complete this task.
+7. **Deliver honestly.** Track runtime assets, metadata, exact provenance, and reusable authoring tools according to repository conventions. Update existing project documentation for the new pipeline/contracts. Remove temporary probes, leave source downloads/captures in ignored local storage, and use the handoff template. Report observed checks separately from unexercised gates.
+
+## Tool boundaries
+
+Read current launch/setup files before running tools. The scoped workstation has Blender at `C:/Program Files/Blender Foundation/Blender 5.1/blender.exe` and managed Godot at `.runtime/godot/Godot_v4.7.2-stable_win64_console.exe`; resolve availability again and honor `GODOT_PATH`. Use Blender CLI with Python/`bpy` for deterministic authoring. There is no assumed Blender MCP or image/3D-generation service. Mounted Godot tools may inspect/launch/run a project; read their route schemas before calling. A headless import cannot supply rendered visual evidence.
+
+`tools/prepare_wolf.py` and `tests/wolf_regression.gd` now exist for the default wolf. Run the authoring script only when intentionally regenerating or changing that asset, and run the regression after integration. A different creature or variant still needs its own implemented authoring path and validation; do not point a new asset at the wolf script or claim the wolf regression validates unrelated geometry. For instruction-only requests, create instructions only: do not produce assets or execute the future validation workflow.

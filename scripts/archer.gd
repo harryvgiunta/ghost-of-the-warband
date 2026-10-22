@@ -36,6 +36,7 @@ var armor_index := 0
 var weapon := "bow"
 var phase := "READY"
 var draw_amount := 0.0
+var charge_frozen := false
 var bow_hand: Node3D
 var string_hand: Node3D
 var active_bow: Bow
@@ -47,8 +48,9 @@ var _roll_direction := Vector3.FORWARD
 var _velocity := Vector3.ZERO
 var _grounded := true
 var _cover_active := false
-var _cover_crouched := false
-var _cover_weight := 0.0
+var _cover_normal := Vector3.ZERO
+var _cover_lean := Vector3.ZERO
+var _crouch_amount := 0.0
 var _ground_sampler := Callable()
 var _aim_point := Vector3(0,1.5,-20)
 var _motion_time := 0.0
@@ -75,6 +77,13 @@ var _legs: Array[PackedInt32Array] = []
 var _leg_bones := PackedInt32Array()
 var _lower_pose: Array[Transform3D] = []
 var _blend_pose: Array[Transform3D] = []
+var _authored_pose: Array[Transform3D] = []
+var _crouch_pose: Array[Transform3D] = []
+var _crouch_lowering := 0.0
+var _cover_bones := PackedInt32Array()
+var _cover_neutral: Array[Transform3D] = []
+var _cover_turns: Array[Basis] = []
+var _cover_shift := Vector3.ZERO
 var _guard_bones := PackedInt32Array()
 var _guard_pose: Array[Transform3D] = []
 var _display_clip := ""
@@ -97,7 +106,7 @@ func _ready() -> void:
 	name = "Archer"
 	_model = CHARACTER.instantiate()
 	add_child(_model)
-	_model.rotation.y = PI
+	_model.basis = Basis(Vector3.UP,PI)
 	skeleton = _find_node_of_type(_model, "Skeleton3D") as Skeleton3D
 	_player = _find_node_of_type(_model, "AnimationPlayer") as AnimationPlayer
 	assert(skeleton != null and _player != null, "The ranger asset must contain its rig and authored animation library")
@@ -105,6 +114,8 @@ func _ready() -> void:
 	for index in skeleton.get_bone_count():
 		_bones[skeleton.get_bone_name(index)] = index
 		_blend_pose.append(Transform3D.IDENTITY)
+		_authored_pose.append(skeleton.get_bone_pose(index))
+		_crouch_pose.append(Transform3D.IDENTITY)
 	for side in ["l", "r"]:
 		_arms.append(PackedInt32Array([_bones["upperarm_"+side],_bones["lowerarm_"+side],_bones["hand_"+side]]))
 		_legs.append(PackedInt32Array([_bones["thigh_"+side],_bones["calf_"+side],_bones["foot_"+side]]))
@@ -112,6 +123,15 @@ func _ready() -> void:
 			_leg_bones.append(_bones[prefix+side])
 	_leg_bones.append(_bones.pelvis)
 	_lower_pose.resize(_leg_bones.size())
+	for bone_name in ["pelvis","spine_01","spine_02","spine_03","neck_01","Head"]:
+		_cover_bones.append(_bones[bone_name])
+	_sample_clip(str(_profile.clips.cover_top.name),0.0)
+	for bone in _cover_bones:
+		_cover_neutral.append(skeleton.get_bone_global_pose(bone))
+		_cover_turns.append(Basis.IDENTITY)
+	var standing_pelvis := skeleton.get_bone_global_pose(_bones.pelvis).origin.y
+	_sample_clip(str(_profile.clips.crouch_idle.name),0.0)
+	_crouch_lowering = 0.58-(standing_pelvis-skeleton.get_bone_global_pose(_bones.pelvis).origin.y)
 	_palm_left = _vector(_profile.palms.left)
 	_palm_right = _vector(_profile.palms.right)
 	_jaw_bone = int(_bones[_profile.bow_anchor.bone])
@@ -260,6 +280,7 @@ func begin_draw() -> void:
 	if weapon != "bow" or phase != "READY" or _roll_progress >= 0.0:
 		return
 	draw_amount = 0.0
+	charge_frozen = false
 	phase = "DRAWING"
 	_phase_time = 0.0
 	_update_pose(0.0)
@@ -275,6 +296,7 @@ func get_bow_recovery_progress() -> float:
 func release_string() -> void:
 	if phase not in ["DRAWING","HOLDING"]:
 		return
+	charge_frozen = false
 	_release_charge = clampf(draw_amount,0,1)
 	_release_draw = draw_amount
 	_release_raise = _archery_weight()
@@ -292,6 +314,7 @@ func release_string() -> void:
 	_update_pose(0.0)
 
 func cancel_draw() -> void:
+	charge_frozen = false
 	if phase not in ["DRAWING","HOLDING","MELEE"]:
 		return
 	phase = "READY"
@@ -308,14 +331,16 @@ func set_roll(progress: float, direction: Vector3) -> void:
 	_roll_progress = progress
 	_roll_direction = direction
 	if progress >= 0.0:
-		global_rotation.y = atan2(-direction.x,-direction.z)
+		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
 	_update_pose(0.0)
 
-func set_cover(active: bool, outward: Vector3, crouched: bool) -> void:
+func set_cover(active: bool, outward: Vector3, crouch_amount: float, peeking: bool, lean: Vector3) -> void:
 	_cover_active = active
-	_cover_crouched = active and crouched
-	if active and phase == "READY":
-		global_rotation.y = atan2(-outward.x,-outward.z)
+	_cover_normal = outward
+	_cover_lean = lean if active else Vector3.ZERO
+	_crouch_amount = clampf(crouch_amount,0.0,1.0)
+	if active and (phase == "READY" or not peeking):
+		global_basis = Basis(Vector3.UP,atan2(-outward.x,-outward.z))
 
 func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 	if grounded and not _grounded and _velocity.y < -1.0:
@@ -325,22 +350,22 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 	_velocity = world_velocity
 	_grounded = grounded
 	if not _cover_active and phase == "READY" and _roll_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
-		global_rotation.y = atan2(-world_velocity.x,-world_velocity.z)
+		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
 
 func set_ground_sampler(sampler: Callable) -> void:
 	_ground_sampler = sampler
 
 func get_animation_state() -> Dictionary:
-	return {"phase":phase,"draw":draw_amount,"time":_phase_time,"aim":_aim_point,
+	return {"phase":phase,"draw":draw_amount,"charge_frozen":charge_frozen,"time":_phase_time,"aim":_aim_point,
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
 		"yaw":global_rotation.y,"roll":_roll_progress,"roll_direction":_roll_direction,
-		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight,
-		"cover":_cover_active,"crouched":_cover_crouched,"cover_weight":_cover_weight}
+		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight}
 
 func apply_animation_state(state: Dictionary) -> void:
 	phase = str(state.phase)
 	draw_amount = float(state.draw)
+	charge_frozen = bool(state.charge_frozen)
 	_phase_time = float(state.time)
 	_aim_point = state.aim
 	_release_draw = float(state.release_draw)
@@ -349,16 +374,14 @@ func apply_animation_state(state: Dictionary) -> void:
 	_release_grip = state.release_grip
 	_release_contact = state.release_contact
 	_release_bow_rotation = state.release_rotation
-	global_rotation.y = float(state.yaw)
+	global_basis = Basis(Vector3.UP,float(state.yaw))
 	_roll_progress = float(state.roll)
 	_roll_direction = state.roll_direction
 	_motion_time = float(state.motion_time)
 	_locomotion_phase = float(state.locomotion_phase)
 	_air_time = float(state.air_time)
 	_landing_weight = float(state.landing)
-	_cover_active = bool(state.cover)
-	_cover_crouched = bool(state.crouched)
-	_cover_weight = float(state.cover_weight)
+	# The owning actor applies its single authoritative cover snapshot via set_cover first.
 	_update_pose(0.0)
 
 func get_arrow_origin() -> Vector3:
@@ -420,17 +443,19 @@ func advance_animation(delta: float) -> void:
 func _advance_step(delta: float) -> void:
 	_phase_time += delta
 	_motion_time += delta
-	_cover_weight = move_toward(_cover_weight,1.0 if _cover_crouched else 0.0,delta*6.0)
 	if _grounded:
 		var speed := Vector2(_velocity.x,_velocity.z).length()
 		var clip := _locomotion_clip(speed)
 		var reference_speed := 8.5 if clip == "Sprint_Loop" else (5.5 if clip == "Jog_Fwd_Loop" else 2.4)
-		_locomotion_phase = fposmod(_locomotion_phase+delta*speed/(reference_speed*float(_profile.animations[clip])),1.0)
+		var stride := reference_speed*float(_profile.animations[clip])
+		stride = lerpf(stride,float(_profile.clips.crouch_forward.stride),_crouch_amount)
+		_locomotion_phase = fposmod(_locomotion_phase+delta*speed/stride,1.0)
 	_air_time += delta if not _grounded else 0.0
 	_landing_weight = move_toward(_landing_weight,0.0,delta*4.0)
 	match phase:
 		"DRAWING":
-			draw_amount = minf(1.0,draw_amount+delta/float(BOW_DATA[bow_index].draw_seconds))
+			if not charge_frozen:
+				draw_amount = minf(1.0,draw_amount+delta/float(BOW_DATA[bow_index].draw_seconds))
 			if draw_amount >= 1.0-0.000001:
 				draw_amount = 1.0
 				phase = "HOLDING"
@@ -505,11 +530,17 @@ func _update_pose(delta: float) -> void:
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
 	var archery := _archery_weight() if drawing else 0.0
-	if _roll_progress < 0.0 and phase != "READY":
+	if _roll_progress < 0.0 and (phase != "READY" or _cover_active):
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
-			global_rotation.y = atan2(-offset.x,-offset.z)
-	_model.rotation = Vector3(0,PI+STANCE_YAW*archery,0)
+			var yaw := atan2(-offset.x,-offset.z)
+			if _cover_active:
+				var tucked_yaw := atan2(-_cover_normal.x,-_cover_normal.z)
+				yaw = lerp_angle(tucked_yaw,yaw,smoothstep(0.0,1.0,_cover_lean.length()))
+			global_basis = Basis(Vector3.UP,yaw)
+	# These nodes are rotation-only. Repeated Euler setters preserve extracted
+	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
+	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery)
 	_model.position = Vector3.ZERO
 	var clip := ("Sword_Idle" if sword_index == 2 else "Sword_Idle_OneHand") if weapon == "sword" else "Idle_Loop"
 	var time := fposmod(_motion_time,_player.get_animation(clip).length)
@@ -535,12 +566,21 @@ func _update_pose(delta: float) -> void:
 		time = _locomotion_clip_time(clip)
 	if clip != _display_clip or lower_clip != _display_lower_clip or weapon != _display_weapon or drawing != _display_drawing:
 		for bone in skeleton.get_bone_count():
-			_blend_pose[bone] = skeleton.get_bone_pose(bone)
+			_blend_pose[bone] = _authored_pose[bone]
 		_blend_time = 0.0
 		_display_clip = clip
 		_display_lower_clip = lower_clip
 		_display_weapon = weapon
 		_display_drawing = drawing
+	var crouching := _crouch_amount > 0.0 and _roll_progress < 0.0
+	var leaning := _cover_active and not _cover_lean.is_zero_approx() and _roll_progress < 0.0
+	if leaning:
+		_sample_cover_lean()
+	if crouching:
+		var crouch_clip := str(_profile.clips.crouch_forward.name if moving else _profile.clips.crouch_idle.name)
+		_sample_clip(crouch_clip,_locomotion_clip_time(crouch_clip) if moving else fposmod(_motion_time,_player.get_animation(crouch_clip).length))
+		for bone in skeleton.get_bone_count():
+			_crouch_pose[bone] = skeleton.get_bone_pose(bone)
 	if arm_overlay:
 		_sample_clip("Sword_Idle",fposmod(_motion_time,_player.get_animation("Sword_Idle").length))
 		for index in _guard_bones.size():
@@ -554,6 +594,20 @@ func _update_pose(delta: float) -> void:
 	if layer_lower_body:
 		for index in _leg_bones.size():
 			skeleton.set_bone_pose(_leg_bones[index],_lower_pose[index])
+	_blend_time = minf(BLEND_SECONDS,_blend_time+delta)
+	if _blend_time < BLEND_SECONDS and _roll_progress < 0.0:
+		var weight := smoothstep(0.0,BLEND_SECONDS,_blend_time)
+		for bone in skeleton.get_bone_count():
+			skeleton.set_bone_pose(bone,_blend_pose[bone].interpolate_with(skeleton.get_bone_pose(bone),weight))
+	# Blend authored motion only. Feeding already crouched/IK-corrected bones
+	# back into the next transition applies their offsets again on every switch.
+	for bone in skeleton.get_bone_count():
+		_authored_pose[bone] = skeleton.get_bone_pose(bone)
+	if arm_overlay:
+		for index in _guard_bones.size():
+			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
+	if crouching:
+		_apply_cover_crouch(drawing or phase == "MELEE" or coupled_carry)
 	if moving and action:
 		var spine_pose := _bone_world(_bones.spine_01)
 		var pelvis := _bone_world(_bones.pelvis)
@@ -563,16 +617,8 @@ func _update_pose(delta: float) -> void:
 		var corrected_spine := _bone_world(_bones.spine_01)
 		corrected_spine.basis = spine_pose.basis
 		_set_bone_world(_bones.spine_01,corrected_spine)
-	_blend_time = minf(BLEND_SECONDS,_blend_time+delta)
-	if _blend_time < BLEND_SECONDS and _roll_progress < 0.0:
-		var weight := smoothstep(0.0,BLEND_SECONDS,_blend_time)
-		for bone in skeleton.get_bone_count():
-			skeleton.set_bone_pose(bone,_blend_pose[bone].interpolate_with(skeleton.get_bone_pose(bone),weight))
-	if arm_overlay:
-		for index in _guard_bones.size():
-			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
-	if _cover_weight > 0.0 and _roll_progress < 0.0:
-		_apply_cover_crouch()
+	if leaning:
+		_apply_cover_lean()
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery)
@@ -589,15 +635,50 @@ func _update_pose(delta: float) -> void:
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
 
-func _apply_cover_crouch() -> void:
-	# Lower the pelvis, not the whole mesh: feet stay planted and bone lengths stay fixed.
+func _apply_cover_crouch(lower_only: bool) -> void:
+	# Authored crouch steps replace standing strides; aim and sword grips keep their upper-body pose.
+	if lower_only:
+		for bone in _leg_bones:
+			skeleton.set_bone_pose(bone,skeleton.get_bone_pose(bone).interpolate_with(_crouch_pose[bone],_crouch_amount))
+	else:
+		for bone in skeleton.get_bone_count():
+			skeleton.set_bone_pose(bone,skeleton.get_bone_pose(bone).interpolate_with(_crouch_pose[bone],_crouch_amount))
 	var left := _bone_world(_legs[0][2])
 	var right := _bone_world(_legs[1][2])
 	var pelvis := _bone_world(_bones.pelvis)
-	pelvis.origin.y -= 0.58*_cover_weight
+	pelvis.origin.y -= _crouch_lowering*_crouch_amount
 	_set_bone_world(_bones.pelvis,pelvis)
-	_solve_limb(_legs[0],left.origin,left.basis,-global_basis.z)
-	_solve_limb(_legs[1],right.origin,right.basis,-global_basis.z)
+	_solve_limb(_legs[0],left.origin,left.basis)
+	_solve_limb(_legs[1],right.origin,right.basis)
+
+func _sample_cover_lean() -> void:
+	var clip: Dictionary = _profile.clips.cover_top
+	if _cover_lean.y <= 0.0:
+		clip = _profile.clips.cover_left if _cover_lean.dot(_cover_normal.cross(Vector3.UP)) > 0.0 else _profile.clips.cover_right
+	_sample_clip(str(clip.name),clampf(_cover_lean.length(),0.0,1.0)*float(clip.duration))
+	var parent_turn := Basis.IDENTITY
+	for index in _cover_bones.size():
+		var pose := skeleton.get_bone_global_pose(_cover_bones[index])
+		var turn := pose.basis*_cover_neutral[index].basis.inverse()
+		_cover_turns[index] = turn*parent_turn.inverse()
+		parent_turn = turn
+	_cover_shift = skeleton.get_bone_global_pose(_bones.pelvis).origin-_cover_neutral[0].origin
+
+func _apply_cover_lean() -> void:
+	# Keep the authored lean in the cover frame, even when an attack turns toward the crosshair.
+	var cover_basis := Basis(Vector3.UP,atan2(-_cover_normal.x,-_cover_normal.z))
+	var inverse := cover_basis.inverse()
+	var left := _bone_world(_legs[0][2])
+	var right := _bone_world(_legs[1][2])
+	for index in _cover_bones.size():
+		var bone := _cover_bones[index]
+		var pose := _bone_world(bone)
+		pose.basis = cover_basis*_cover_turns[index]*inverse*pose.basis
+		if index == 0:
+			pose.origin += cover_basis*_cover_shift
+		_set_bone_world(bone,pose)
+	_solve_limb(_legs[0],left.origin,left.basis)
+	_solve_limb(_legs[1],right.origin,right.basis)
 
 func _update_hand_contacts() -> void:
 	var left := _bone_world(_arms[0][2])
@@ -623,14 +704,18 @@ func _update_bow_pose(drawing: bool) -> void:
 		var chest := _bone_world(_bones.spine_03).origin
 		var shoulder_gate := shoulder+body_right*0.16+Vector3.UP*0.28-body_forward*0.03
 		var front_gate := shoulder+body_forward*0.32+body_right*0.12+Vector3.UP*0.10
-		var offset := _aim_point-global_position
-		var elevation := clampf(atan2(offset.y-(_jaw_anchor().y-global_position.y),maxf(Vector2(offset.x,offset.z).length(),0.001)),-MAX_ELEVATION,MAX_ELEVATION)
-		var aim_basis := global_basis*Basis(Vector3.RIGHT,elevation)
+		var anchor := _jaw_anchor()
+		var offset := _aim_point-anchor
+		var elevation := clampf(atan2(offset.y,maxf(Vector2(offset.x,offset.z).length(),0.001)),-MAX_ELEVATION,MAX_ELEVATION)
+		var aim_yaw := atan2(-offset.x,-offset.z)
+		if _cover_active:
+			aim_yaw = lerp_angle(atan2(-_cover_normal.x,-_cover_normal.z),aim_yaw,smoothstep(0.0,1.0,_cover_lean.length()))
+		var aim_basis := Basis(Vector3.UP,aim_yaw)*Basis(Vector3.RIGHT,elevation)
 		var weight := _archery_weight()
 		# Push the bow out while pulling the string back; a fully extended bow
 		# at zero tension puts its brace point beyond the drawing arm's reach.
 		var grip_distance := lerpf(Bow.BRACE_DISTANCE+0.12,Bow.DRAW_DISTANCE,draw_amount)
-		grip = carry_grip.lerp(_jaw_anchor()-aim_basis.z*grip_distance,weight)
+		grip = carry_grip.lerp(anchor-aim_basis.z*grip_distance,weight)
 		bow_basis = bow_basis.slerp(aim_basis,weight)
 		if phase == "RELEASE":
 			grip = to_global(_release_grip)

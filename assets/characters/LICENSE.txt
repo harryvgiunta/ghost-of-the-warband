@@ -41,7 +41,8 @@ Original archive: Universal Animation Library[Standard].zip
 Original selected animation source:
   Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb
 Retained authored clips: Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop,
-Jump_Start, Jump_Loop, Jump_Land, Roll; Sword_Idle -> Sword_Idle_OneHand.
+Jump_Start, Jump_Loop, Jump_Land, Roll, Crouch_Idle_Loop, Crouch_Fwd_Loop;
+Sword_Idle -> Sword_Idle_OneHand.
 
 Quaternius — Universal Animation Library 2 [Standard], June 2026 update
 https://quaternius.com/packs/universalanimationlibrary2.html
@@ -117,3 +118,77 @@ ironwood_ranger.json. No programmatically invented attack pose sequence is used.
 Bow-specific authored draw/release clips were not included in the downloaded
 free Standard libraries; bow interaction is a gameplay skeletal overlay rather
 than a mislabeled asset clip.
+
+Cover_Lean_Left, Cover_Lean_Right and Cover_Lean_Top are original local additive
+cover poses authored reproducibly by tools/prepare_character.py, not renamed
+source attacks. All begin at the identical retargeted Idle_Loop frame zero.
+Smooth weight transfer keys pelvis counterbalance, three articulated spine
+joints and modest neck/head counterbalance; arm-local transforms remain neutral
+so attack/aim overlays retain their grip. Fixed-length two-bone leg solves keep
+the original ankles and foot orientations planted. These local additions are
+distributed under the same CC0 1.0 dedication linked above.
+
+Exported asset axes are +Y up and +Z forward. Anatomical left leans toward +X
+and right toward -X, each reaching 18 degrees chest tilt; top leans toward +Z
+at 14 degrees. The pelvis countertranslates 0.02 metres, counterrotates by
+3 degrees and lowers 0.012 metres for knee reach. The three spine joints reach
+50/80/100 percent of chest tilt; neck/head reduce chest tilt by 2/5 degrees.
+Each non-looping clip contains 16 full-hierarchy samples;
+its GLB input times are uniformly retimed to 0.24 seconds after the normal
+60 Hz bake (avoiding a rounded 14.4-frame endpoint). Existing combat values,
+source timings, clearance corrections and sockets are unaffected by retiming.
+
+Crouch clips use the same Quaternius rest-axis retargeting as other locomotion.
+JSON records their actual duration, mean/range of pelvis lowering relative to
+Idle_Loop frame zero, and ankle fore/aft excursion. Crouch_Fwd_Loop nominal
+speed and full-cycle stride estimate use median backwards ankle speed during
+ground contact within 25 mm of the lowest ankle, multiplied by cycle duration.
+The in-place source has no root-distance track; this is an explicitly measured
+contact-velocity estimate, not a claimed source root-motion distance.
+
+IRONWOOD BRIAR WOLF — ASSET LICENSE AND PROVENANCE
+
+The wolf asset is original procedural work authored for this repository. It
+does not derive from the Quaternius/Gres Ranger sources above, and their CC0
+licences do not cover it. No third-party model, texture, motion capture or
+reference asset is included.
+
+Authoring source: tools/prepare_wolf.py (deterministic Blender Python).
+Authoring tool: Blender 5.1.2 (build 2026-05-19), scene unit metres, 60 fps.
+Runtime engine: Godot 4.7.2.
+Runtime outputs:
+  assets/characters/ironwood_wolf.glb
+  assets/characters/ironwood_wolf.json (measured integration metadata)
+  assets/characters/ironwood_wolf.glb.import (embedded image handling 2)
+
+The wolf GLB embeds one 1024 x 1024 sRGB albedo texture painted directly into
+the UV atlas from rest-space anatomy. It contains a continuous body/neck/head,
+separate lower jaw, ears, eyes, nose, teeth, claws and paw pads. The mesh has
+15,036 triangles, 37 skeleton bones and nine material surfaces. Exported bounds
+are approximately 0.537 x 1.176 x 2.218 metres with the paws at y=0; exported
+forward is -Z and up is +Y, matching gameplay without a wrapper rotation.
+
+Authored clips (60 Hz baked, in-place):
+  Wolf_Idle_Loop  2.40 s, loop
+  Wolf_Trot_Loop  0.60 s, loop, 1.15 m full-cycle stride, 0.45 stance duty
+  Wolf_Attack     1.50 s, non-loop, authored impact at 0.65 s
+  Wolf_Death      0.45 s, non-loop, final collapse pose held by the runtime
+
+The runtime presentation is scripts/wolf_visual.gd; the wolf branch of
+scripts/enemy.gd owns only AI/collision/damage and samples the attack from its
+existing 0.65 s windup and 0.85 s recovery timers. No clip event deals damage.
+
+The wolf is distributed under CC0 1.0 Universal, the same dedication linked at
+the top of this file, to match the project's existing character assets.
+
+Reproduce with:
+  blender --background --python-exit-code 1 --python tools/prepare_wolf.py -- \
+      .runtime/character-source/wolf assets/characters/ironwood_wolf.glb
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
+A fresh Blender run reproduces the measured geometry, skeleton, clip timings
+and coat pattern; byte-identical output is not promised because Smart UV
+packing can vary. The hashes below identify the shipped artifacts.
+
+GLB SHA-256: 8124663196ee2fdd18f8a051c7140311b114d570fd2cc1080e764b56bbe135eb
+Metadata JSON SHA-256: 77bfb0b985cb56e63d3a10d70f7eebfdc2877eb92a517738939dc06bdc56cce7

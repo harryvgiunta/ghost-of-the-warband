@@ -4,6 +4,7 @@ signal defeated(enemy: Node3D, reward: int)
 signal damaged_player(amount: float)
 
 const Geo = preload("res://scripts/geo.gd")
+const WolfVisual = preload("res://scripts/wolf_visual.gd")
 var kind := 0
 var player: CharacterBody3D
 var safe_center := Vector3.ZERO
@@ -15,6 +16,7 @@ var state := "IDLE"
 var _state_time := 0.0
 var _walk_time := 0.0
 var _body: Node3D
+var _wolf: WolfVisual
 var _legs: Array[Node3D] = []
 var _arms: Array[Node3D] = []
 var _warning: MeshInstance3D
@@ -39,7 +41,7 @@ func _ready() -> void:
 	_body = Node3D.new()
 	add_child(_body)
 	if kind == 0:
-		_build_wolf()
+		_build_wolf_visual()
 	else:
 		_build_guardian()
 	var warning_material := Geo.material(Color(0.95, 0.22, 0.08, 0.38))
@@ -48,30 +50,10 @@ func _ready() -> void:
 	_warning.visible = false
 	_query.collision_mask = 1
 
-func _build_wolf() -> void:
-	var fur := Geo.material(Color("66594d"))
-	var dark := Geo.material(Color("302f31"))
-	var light := Geo.material(Color("aaa08b"))
-	var amber := Geo.material(Color("ec9a43"))
-	Geo.sphere(_body, 0.46, Vector3(0, 0.66, 0), fur, Vector3(0.65, 0.75, 1.35))
-	Geo.sphere(_body, 0.31, Vector3(0, 0.79, -0.44), fur, Vector3(0.88, 1.0, 1.0))
-	Geo.sphere(_body, 0.22, Vector3(0, 0.86, -0.67), light, Vector3(0.8, 0.85, 1.0))
-	Geo.box(_body, Vector3(0.22, 0.16, 0.33), Vector3(0, 0.79, -0.86), fur)
-	Geo.box(_body, Vector3(0.17, 0.11, 0.07), Vector3(0, 0.82, -1.04), dark)
-	for side in [-1.0, 1.0]:
-		var ear := Geo.cylinder(_body, 0.11, 0.0, 0.27, Vector3(side * 0.15, 1.09, -0.60), dark, 3)
-		ear.rotation.z = side * -0.25
-		Geo.sphere(_body, 0.029, Vector3(side * 0.166, 0.90, -0.77), amber)
-		for longitudinal in [-0.34, 0.35]:
-			var leg := Node3D.new()
-			leg.position = Vector3(side * 0.22, 0.58, longitudinal)
-			_body.add_child(leg)
-			_legs.append(leg)
-			Geo.beam(leg, Vector3.ZERO, Vector3(0, -0.27, 0.07), 0.075, fur)
-			Geo.beam(leg, Vector3(0, -0.27, 0.07), Vector3(0, -0.49, -0.01), 0.045, dark)
-			Geo.box(leg, Vector3(0.12, 0.09, 0.19), Vector3(0, -0.51, -0.05), light)
-	Geo.beam(_body, Vector3(0, 0.65, 0.43), Vector3(0.05, 0.39, 0.99), 0.09, fur)
-	Geo.sphere(_body, 0.1, Vector3(0.05, 0.40, 0.96), dark)
+func _build_wolf_visual() -> void:
+	_wolf = WolfVisual.new()
+	_wolf.name = "WolfVisual"
+	_body.add_child(_wolf)
 
 func _build_guardian() -> void:
 	var stone := Geo.material(Color("65747a"), 0.1)
@@ -150,14 +132,19 @@ func _physics_process(delta: float) -> void:
 	velocity.z = move_toward(velocity.z, target_direction.z * speed, delta * 12.0)
 	velocity.y = -1.0 if is_on_floor() else velocity.y - 18.0 * delta
 	move_and_slide()
-	var moving := Vector2(velocity.x, velocity.z).length()
-	_walk_time += delta * moving * 2.4
-	_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
-	for index in _legs.size():
-		var offset := PI if index % 2 == 0 else 0.0
-		_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
-	for arm in _arms:
-		arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
+	if kind == 0:
+		var actual_velocity := get_real_velocity()
+		_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
+		_wolf.set_combat(state, _state_time)
+	else:
+		var moving := Vector2(velocity.x, velocity.z).length()
+		_walk_time += delta * moving * 2.4
+		_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
+		for index in _legs.size():
+			var offset := PI if index % 2 == 0 else 0.0
+			_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
+		for arm in _arms:
+			arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
 
 func _steer(direction: Vector3) -> Vector3:
 	_query.from = global_position + Vector3(0, 0.65, 0)
@@ -194,7 +181,15 @@ func take_damage(amount: float, _source_id: int) -> void:
 		set_deferred("collision_mask", 0)
 		defeated.emit(self, 8 if kind == 0 else 18)
 		var death_tween := create_tween()
-		death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
-		death_tween.tween_interval(4.0)
-		death_tween.tween_property(self, "scale", Vector3.ONE * 0.01, 0.4)
-		death_tween.tween_callback(queue_free)
+		if kind == 0:
+			_wolf.die()
+			# 0.45 s authored collapse + 4.0 s held corpse, then shrink only the
+			# visual container; the CharacterBody root stays identity-scaled.
+			death_tween.tween_interval(4.45)
+			death_tween.tween_property(_body, "scale", Vector3.ONE * 0.01, 0.4)
+			death_tween.tween_callback(queue_free)
+		else:
+			death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
+			death_tween.tween_interval(4.0)
+			death_tween.tween_property(self, "scale", Vector3.ONE * 0.01, 0.4)
+			death_tween.tween_callback(queue_free)

@@ -2,7 +2,7 @@
 Run: blender --background --python tools/prepare_character.py -- SOURCE_DIR OUTPUT_GLB
 SOURCE_DIR contains the unpacked Standard archives and Gres' original .blend;
 see assets/characters/LICENSE.txt for acquisition URLs and original filenames.
-No motion is generated: source poses are sampled and rest-axis retargeted.
+Source locomotion/combat is retargeted; additive cover leans are authored here.
 """
 import bpy
 import bmesh
@@ -195,18 +195,162 @@ def bake(name, source_rig, segments, mapping, scale, grip=False, source_times=No
     return action
 
 
+def solve_planted_leg(side, ankle, knee_hint, foot_rotation):
+    """Rotate a fixed-length leg to its neutral ankle, preserving foot contact."""
+    upper = rig.pose.bones['thigh_' + side]
+    lower = rig.pose.bones['calf_' + side]
+    hip = upper.head.copy()
+    a, b = upper.bone.length, lower.bone.length
+    direction = ankle - hip
+    distance = direction.length
+    if not abs(a - b) < distance < a + b:
+        raise RuntimeError(f'Cover stance cannot reach planted {side} ankle')
+    axis = direction / distance
+    along = (a*a - b*b + distance*distance) / (2*distance)
+    pole = knee_hint - hip
+    pole -= axis * pole.dot(axis)
+    knee = hip + axis * along + pole.normalized() * math.sqrt(max(0, a*a - along*along))
+    for name, destination in [('thigh_' + side, knee), ('calf_' + side, ankle)]:
+        bone = rig.pose.bones[name]
+        delta = (bone.tail - bone.head).rotation_difference(destination - bone.head)
+        set_rotation(name, delta @ bone.matrix.to_quaternion())
+    set_rotation('foot_' + side, foot_rotation)
+
+
+def author_cover(name, idle, direction, degrees):
+    """Key weight transfer and articulated lean; leave arm-local grip untouched.
+
+    Blender +Z is up and -Y is forward. Export converts (x,y,z) to
+    (x,z,-y), so anatomical left is asset +X and forward is asset +Z.
+    Sixteen full-hierarchy samples are retimed to exactly 0.24 s in the GLB.
+    """
+    set_action(rig, idle)
+    bpy.context.scene.frame_set(0)
+    neutral = {bone.name: bone.matrix_basis.copy() for bone in rig.pose.bones}
+    world = {bone.name: bone.matrix.copy() for bone in rig.pose.bones}
+    axis = Vector((0, 0, 1)).cross(direction).normalized()
+    action = bpy.data.actions.new(name)
+    set_action(rig, action)
+    for frame in range(16):
+        for bone in rig.pose.bones:
+            bone.matrix_basis = neutral[bone.name]
+        bpy.context.view_layer.update()
+        u = frame / 15
+        weight = u*u*(3 - 2*u)
+        if frame:
+            # Counterbalance the shoulders with the hips; soften knees enough
+            # to keep both original ankles reachable without stretching.
+            set_rotation('pelvis', Matrix.Rotation(math.radians(-3) * weight, 4, axis).to_quaternion() @ world['pelvis'].to_quaternion())
+            pelvis = rig.pose.bones['pelvis']
+            matrix = pelvis.matrix.copy()
+            matrix.translation = world['pelvis'].translation - direction * (0.02 * weight) + Vector((0, 0, -0.012 * weight))
+            pelvis.matrix = matrix
+            bpy.context.view_layer.update()
+            for bone_name, angle in [('spine_01', degrees * 0.50), ('spine_02', degrees * 0.80), ('spine_03', degrees), ('neck_01', degrees - 2), ('Head', degrees - 5)]:
+                rotation = Matrix.Rotation(math.radians(angle) * weight, 4, axis).to_quaternion()
+                set_rotation(bone_name, rotation @ world[bone_name].to_quaternion())
+            for side in ('l', 'r'):
+                solve_planted_leg(side, world['foot_' + side].translation, world['calf_' + side].translation + Vector((0, -0.1, 0)), world['foot_' + side].to_quaternion())
+        for bone in rig.pose.bones:
+            bone.keyframe_insert('location', frame=frame, group=bone.name)
+            bone.keyframe_insert('rotation_quaternion', frame=frame, group=bone.name)
+            bone.keyframe_insert('scale', frame=frame, group=bone.name)
+    action.use_fake_user = True
+    print('AUTHORED', name, '16 full-hierarchy samples; export duration 0.24 seconds')
+    return action
+
+
+def measure_crouch(action, standing_pelvis_height):
+    set_action(rig, action)
+    heights, feet = [], {'l': [], 'r': []}
+    for frame in range(int(action.frame_range[0]), int(action.frame_range[1]) + 1):
+        bpy.context.scene.frame_set(frame)
+        heights.append(rig.pose.bones['pelvis'].head.z)
+        for side in feet:
+            feet[side].append(rig.pose.bones['foot_' + side].head.copy())
+    result = {
+        'pelvis_drop': standing_pelvis_height - sum(heights) / len(heights),
+        'pelvis_drop_range': [standing_pelvis_height - max(heights), standing_pelvis_height - min(heights)],
+        'foot_fore_aft_excursion': {side: max(point.y for point in values) - min(point.y for point in values) for side, values in feet.items()},
+        'measurement': 'Metres, mean/min/max pelvis drop relative to Idle_Loop frame 0; ankle +Z excursion is not full-cycle stride distance',
+    }
+    if action.get('export_name') == 'Crouch_Fwd_Loop':
+        # An in-place clip has no root travel. Infer authored travel from the
+        # backwards ankle speed during grounded stance, not swing excursion.
+        stance_speeds = []
+        for values in feet.values():
+            contact_height = min(point.z for point in values) + 0.025
+            for start, end in zip(values, values[1:]):
+                speed = (end.y - start.y) * FPS
+                if max(start.z, end.z) <= contact_height and speed > 0.03:
+                    stance_speeds.append(speed)
+        if not stance_speeds:
+            raise RuntimeError('Crouch forward clip has no measurable backwards stance travel')
+        stance_speeds.sort()
+        middle = len(stance_speeds) // 2
+        speed = (stance_speeds[middle] + stance_speeds[(len(stance_speeds) - 1) // 2]) / 2
+        result.update(nominal_speed=speed, stride=speed * (action.frame_range[1] - action.frame_range[0]) / FPS,
+                      stride_measurement='Estimated full-cycle travel: median backwards ankle speed within 25 mm of lowest contact, multiplied by cycle duration')
+    print('CROUCH_MEASUREMENTS', action.get('export_name'), result)
+    return result
+
+
+def retime_cover_export(path, names):
+    """Retain 60 Hz production export, then rescale only lean sample times.
+
+    0.24 seconds is 14.4 frames at 60 Hz; integer NLA baking would otherwise
+    truncate the last pose. No bone values, other clips or sockets are changed.
+    """
+    raw = path.read_bytes()
+    json_size = struct.unpack_from('<I', raw, 12)[0]
+    document = json.loads(raw[20:20 + json_size])
+    binary = bytearray(raw[28 + json_size:])
+    lean_inputs = {sampler['input'] for animation in document['animations'] if animation['name'] in names for sampler in animation['samplers']}
+    other_inputs = {sampler['input'] for animation in document['animations'] if animation['name'] not in names for sampler in animation['samplers']}
+    if lean_inputs & other_inputs:
+        raise RuntimeError('Cover sample times unexpectedly share another clip accessor')
+    for index in lean_inputs:
+        accessor = document['accessors'][index]
+        view = document['bufferViews'][accessor['bufferView']]
+        if accessor['componentType'] != 5126 or accessor['type'] != 'SCALAR':
+            raise RuntimeError('Cover time accessor is not float scalar')
+        offset = view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
+        stride = view.get('byteStride', 4)
+        factor = 0.24 / accessor['max'][0]
+        for sample in range(accessor['count']):
+            at = offset + sample * stride
+            struct.pack_into('<f', binary, at, struct.unpack_from('<f', binary, at)[0] * factor)
+        accessor['min'] = [struct.unpack_from('<f', binary, offset)[0]]
+        accessor['max'] = [struct.unpack_from('<f', binary, offset + (accessor['count'] - 1) * stride)[0]]
+    encoded = json.dumps(document, separators=(',', ':')).encode('utf-8')
+    encoded += b' ' * (-len(encoded) % 4)
+    path.write_bytes(struct.pack('<III', 0x46546C67, 2, 28 + len(encoded) + len(binary)) + struct.pack('<II', len(encoded), 0x4E4F534A) + encoded + struct.pack('<II', len(binary), 0x004E4942) + binary)
+
+
 set_action(ual, ual_actions['Sword_Idle'])
 bpy.context.scene.frame_set(0)
 authored_finger_grip = {bone.name: bone.rotation_quaternion.copy() for bone in ual.pose.bones if bone.name.endswith('_r') and bone.name.startswith(('index_', 'middle_', 'ring_', 'pinky_', 'thumb_'))}
 
 identity = {b.name:b.name for b in rig.data.bones}
-clips = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop', 'Sprint_Loop', 'Jump_Start', 'Jump_Loop', 'Jump_Land', 'Roll']
+clips = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop', 'Sprint_Loop', 'Jump_Start', 'Jump_Loop', 'Jump_Land', 'Roll', 'Crouch_Idle_Loop', 'Crouch_Fwd_Loop']
 finished = []
 for name in clips:
     source_action = ual_actions[name]
     # Imported glTF samples already use the scene's 60 fps timebase.
     finished.append(bake(name + '_prepared', ual, [(source_action, round(source_action.frame_range[0]), round(source_action.frame_range[1]))], identity, 1.0))
     finished[-1]['export_name'] = name
+
+set_action(rig, finished[0])
+bpy.context.scene.frame_set(0)
+standing_pelvis_height = rig.pose.bones['pelvis'].head.z
+crouch_measurements = {name: measure_crouch(action, standing_pelvis_height) for name, action in zip(clips, finished) if name.startswith('Crouch_')}
+cover_specs = {
+    'cover_left': ('Cover_Lean_Left', Vector((1, 0, 0)), 18.0, [1, 0, 0]),
+    'cover_right': ('Cover_Lean_Right', Vector((-1, 0, 0)), 18.0, [-1, 0, 0]),
+    'cover_top': ('Cover_Lean_Top', Vector((0, -1, 0)), 14.0, [0, 0, 1]),
+}
+for name, direction, degrees, _ in cover_specs.values():
+    finished.append(author_cover(name, finished[0], direction, degrees))
 
 # The Quaternius heavy combo ends in a right-handed overhead cut. Extract its
 # final load/downstroke/recovery only; preceding combo hits are not exported.
@@ -319,6 +463,7 @@ for pb in rig.pose.bones:
     pb.matrix_basis = Matrix.Identity(4)
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 bpy.ops.export_scene.gltf(filepath=str(OUTPUT), export_format='GLB', export_animations=True, export_animation_mode='NLA_TRACKS', export_nla_strips=True, export_force_sampling=True, export_frame_range=False, export_yup=True, export_materials='EXPORT', export_image_format='AUTO', export_skins=True)
+retime_cover_export(OUTPUT, {spec[0] for spec in cover_specs.values()})
 
 # Read final GLB values rather than duplicating export name/time conventions.
 raw = OUTPUT.read_bytes()
@@ -357,11 +502,21 @@ metadata = {
     'clips': {
         'overhead': {'name': 'Sword_Overhead', 'duration': durations['Sword_Overhead'], 'strike_start': 41/60, 'strike_end': 56/60},
         'overhead_one_hand': {'name': 'Sword_Overhead_OneHand', 'duration': durations['Sword_Overhead_OneHand'], 'strike_start': 15/60, 'strike_end': 30/60},
+        'crouch_idle': {'name': 'Crouch_Idle_Loop', 'duration': durations['Crouch_Idle_Loop'], 'loop': True, **crouch_measurements['Crouch_Idle_Loop']},
+        'crouch_forward': {'name': 'Crouch_Fwd_Loop', 'duration': durations['Crouch_Fwd_Loop'], 'loop': True, **crouch_measurements['Crouch_Fwd_Loop']},
+        **{key: {'name': name, 'duration': durations[name], 'loop': False, 'lean_direction': axis, 'torso_degrees': degrees, 'pelvis_counterbalance': 0.02, 'pelvis_lowering': 0.012} for key, (name, _, degrees, axis) in cover_specs.items()},
     },
     'animations': durations,
     'authoring_fps': FPS,
     'gres_height_scale': scale,
     'support_clearance': support_clearance,
+    'cover_authoring': {
+        'reference': 'Identical Idle_Loop frame 0 for all lean clips; additive world-space bone deltas',
+        'axes': 'Asset Y-up/+Z-forward: left +X, right -X, top +Z; Blender (x,y,z) exports as (x,z,-y)',
+        'rotation_axes': 'Left -Z, right +Z, top +X in asset space; pelvis -3 degrees, spine chain 50/80/100 percent of torso_degrees, neck -2 and head -5 degrees relative to chest',
+        'contact': 'Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral',
+        'timing': 'Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping',
+    },
 }
 # Store the editable prepared scene outside the repository for visual inspection.
 bpy.ops.wm.save_as_mainfile(filepath=str(SOURCE / 'prepared_ranger.blend'))

@@ -1,0 +1,125 @@
+{
+  "asset": "ironwood_wolf.glb",
+  "skeleton": "WolfArmature/Skeleton3D",
+  "bone_count": 37,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "ear_l",
+    "ear_r",
+    "scapula_l",
+    "upper_fore_l",
+    "lower_fore_l",
+    "carpus_l",
+    "front_paw_l",
+    "front_toes_l",
+    "scapula_r",
+    "upper_fore_r",
+    "lower_fore_r",
+    "carpus_r",
+    "front_paw_r",
+    "front_toes_r",
+    "tail_01",
+    "tail_02",
+    "tail_03",
+    "tail_04",
+    "thigh_l",
+    "shin_l",
+    "hock_l",
+    "hind_paw_l",
+    "hind_toes_l",
+    "thigh_r",
+    "shin_r",
+    "hock_r",
+    "hind_paw_r",
+    "hind_toes_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.2688637673854828,
+    0,
+    -1.0649999380111694
+  ],
+  "rest_bounds_max": [
+    0.2686416804790497,
+    1.1759934425354004,
+    1.1529457569122314
+  ],
+  "shoulder_height": 0.96,
+  "muzzle_length": 0.36,
+  "tail_length": 0.5,
+  "mesh_triangles": 15036,
+  "materials": [
+    "Wolf_Fur",
+    "Wolf_Mouth",
+    "Wolf_Tongue",
+    "Wolf_Nose",
+    "Wolf_EyeSocket",
+    "Wolf_Iris",
+    "Wolf_Pupil",
+    "Wolf_Teeth",
+    "Wolf_Pads"
+  ],
+  "embedded_images": [
+    "image/png"
+  ],
+  "clips": {
+    "idle": {
+      "name": "Wolf_Idle_Loop",
+      "duration": 2.4,
+      "loop": true
+    },
+    "trot": {
+      "name": "Wolf_Trot_Loop",
+      "duration": 0.6,
+      "loop": true,
+      "stride": 1.15,
+      "duty": 0.45,
+      "contact_offsets": {
+        "fore_l": 0.0,
+        "hind_r": 0.0,
+        "fore_r": 0.5,
+        "hind_l": 0.5
+      }
+    },
+    "attack": {
+      "name": "Wolf_Attack",
+      "duration": 1.5,
+      "loop": false,
+      "impact": 0.65,
+      "recovery_end": 1.5
+    },
+    "death": {
+      "name": "Wolf_Death",
+      "duration": 0.45,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Wolf_Idle_Loop": 2.4,
+    "Wolf_Trot_Loop": 0.6,
+    "Wolf_Attack": 1.5,
+    "Wolf_Death": 0.45
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 4,
+  "source": "Original procedural wolf authored by tools/prepare_wolf.py; no third-party model, texture or motion.",
+  "reproducer": "tools/prepare_wolf.py"
+}

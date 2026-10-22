@@ -104,6 +104,10 @@ func run() -> void:
 	check(combat.can_draw(), "Equipment swaps preserve recovery progress rather than restarting it")
 	combat.begin_draw()
 	advance(0.6)
+	var held_fraction: float = rig.draw_amount
+	rig.set_bow(0)
+	rig.set_armor(2)
+	check(rig.phase == "DRAWING" and is_equal_approx(rig.draw_amount,held_fraction), "Cover-intent cancellation does not change ordinary mid-draw equipment behavior")
 	combat.stop()
 	combat.release_draw()
 	check(charges.size() == before + 1, "Cancel does not fire a charged shot")

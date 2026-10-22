@@ -100,10 +100,10 @@ func _ready() -> void:
 	health_label = _ui._label(bottom,"",Vector2(18,10),16,UI.TEAL)
 	attack_label = _ui._label(bottom,"",Vector2(18,35),14,UI.CREAM)
 	bar = _ui._bar(bottom,Vector2(18,73),Vector2(604,8),UI.GOLD)
-	var cover_panel := _ui._panel(match_ui,Vector2(-200,-220),Vector2(400,62))
+	var cover_panel := _ui._panel(match_ui,Vector2(-240,-240),Vector2(480,82))
 	cover_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   HOLD RMB  Peek   X  Shoulder",Vector2(15,35),11,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SHIFT  Slide   SPACE  Jump\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side",Vector2(15,35),12,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -131,7 +131,7 @@ func _ready() -> void:
 		sword.size = Vector2(148,32)
 		sword.pressed.connect(func(): sword_selected.emit(index))
 		sword_buttons.append(sword)
-	_ui._label(equipment,"ARMOR / C TO CYCLE",Vector2(14,204),11,UI.GOLD)
+	_ui._label(equipment,"ARMOR / CLICK TO EQUIP",Vector2(14,204),11,UI.GOLD)
 	for index in 3:
 		var button := _ui._button(equipment,["Leather","Mail","Plate"][index],Vector2(12+index*105,228),Vector2(100,32))
 		button.toggle_mode = true
@@ -191,11 +191,14 @@ func update_match(state: Dictionary) -> void:
 	weapon_buttons[0].set_pressed_no_signal(state.weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(state.weapon == "sword")
 
-func update_cover(active: bool, low: bool, peeking: bool, side: int) -> void:
-	var stance := "OPEN"
+func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool) -> void:
+	var stance := "CROUCHED" if crouched else "OPEN"
 	if active:
-		stance = ("LOW COVER" if low else "TALL COVER") + (" / PEEKING" if peeking else " / TUCKED")
-	_cover_status.text = stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
+		if peeking:
+			stance = "TOP LOOKOUT" if low else "LEFT LOOKOUT" if side < 0 else "RIGHT LOOKOUT"
+		else:
+			stance = ("LOW COVER" if low else "TALL COVER") + (" / CROUCHED" if crouched else " / TUCKED")
+	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", UI.TEAL if active and peeking else UI.GOLD if active else UI.MUTED)
 
 func _process(_delta: float) -> void:
