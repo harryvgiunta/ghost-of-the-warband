@@ -9,6 +9,7 @@ const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
+const Hitbox = preload("res://scripts/hitbox.gd")
 const ARMOR := [0.0, 0.15, 0.30]
 var slot := 0
 var peer_id := 0
@@ -156,7 +157,7 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 	else:
 		combat.stop_block()
 
-func receive_melee(amount: float, source_id: int, attacker_position: Vector3) -> int:
+func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
 	if not authoritative or not alive or source_id == slot:
 		return Combat.DEFENSE_NONE
 	var outcome: int = combat.resolve_melee_defense(attacker_position)
@@ -171,7 +172,7 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3) ->
 			velocity.x = push.x
 			velocity.z = push.z
 		return outcome
-	take_damage(amount,source_id)
+	take_damage(amount,source_id,headshot)
 	return Combat.DEFENSE_NONE
 
 func clash_bounce(direction: Vector3) -> void:
@@ -239,13 +240,19 @@ func reset_stance() -> void:
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,1.2,0)
 
+func head_hitbox_center() -> Vector3:
+	return rig.head_hitbox_center() if is_instance_valid(rig) else global_position
+
+func head_hit_profile() -> Vector2:
+	return rig.head_hit_profile() if is_instance_valid(rig) else Vector2.ZERO
+
 func get_display_name() -> String:
 	return display_name
 
-func take_damage(amount: float, source_id: int) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
-	health = maxf(0,health - amount * (1.0 - float(ARMOR[rig.armor_index])))
+	health = maxf(0,health - amount * Hitbox.damage_multiplier(headshot) * (1.0 - float(ARMOR[rig.armor_index])))
 	if health <= 0:
 		alive = false
 		respawn = 3.0

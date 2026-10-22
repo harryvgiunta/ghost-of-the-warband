@@ -98,7 +98,11 @@ func run() -> void:
 		# ArenaActor's real capsule has its center 0.9 m above its origin.
 		contact_position = contact - Vector3(0, 0.9, 0)
 		victim.position = contact_position
-		victim.health = 100.0
+		# The greatsword's vertical cut crosses the head zone; the one-handed
+		# cuts contact the chest. Use enough health for either multiplier.
+		var headshot_multiplier := 2.0 if size == 2 else 1.0
+		var start_health := 200.0
+		victim.health = start_health
 		var rightmost := -INF
 		var blade_radius := 0.0
 		for sample in samples:
@@ -114,23 +118,23 @@ func run() -> void:
 		check(start_swing(), "Equipped sword starts after its previous recovery")
 		check(attacker.rig.draw_amount == 0.0, "Melee never pulls a bowstring")
 		advance(maxf(0.0, first_contact_time - 2.0 * STEP))
-		check(sweep_count == 0 and victim.health == 100.0, "Windup cannot damage a target on the future blade path")
+		check(sweep_count == 0 and victim.health == start_health, "Windup cannot damage a target on the future blade path")
 		check(not attacker.combat.begin_melee(), "Click spam cannot restart a sword swing")
 		advance(last_contact_time + STEP - clock)
-		check(is_equal_approx(victim.health, 100.0 - [30.0, 38.0, 50.0][size]), "Actual blade contact damages an opposing collider exactly once per swing")
+		check(is_equal_approx(victim.health, start_health - [30.0, 38.0, 50.0][size] * headshot_multiplier), "Actual blade contact damages an opposing collider exactly once per swing")
 		check(off_blade.health == 100.0, "A nearby actor entirely off the blade path is not damaged")
 		var active_samples := sweep_count
-		victim.health = 100.0
+		victim.health = start_health
 		advance(maxf(0.0, duration - STEP - clock))
 		check(attacker.rig.phase == "MELEE", "The selected sword retains its full 1/2/3-second animation")
-		check(victim.health == 100.0 and sweep_count == active_samples, "Recovery has no active sweeps or damage")
+		check(victim.health == start_health and sweep_count == active_samples, "Recovery has no active sweeps or damage")
 		advance(2.0 * STEP)
 		check(attacker.rig.phase == "READY" and attacker.combat.attack_progress >= 0.999999, "Sword duration and independent recovery finish together")
 		check(start_swing(), "A new swing can target the same victim again")
 		# One deliberately coarse animation step crosses windup, strike, and
 		# recovery; the real rig must emit every chronological contact sample.
 		step(duration + STEP)
-		check(is_equal_approx(victim.health, 100.0 - [30.0, 38.0, 50.0][size]), "A coarse animation step cannot skip blade contact or retain last swing's victim exclusion")
+		check(is_equal_approx(victim.health, start_health - [30.0, 38.0, 50.0][size] * headshot_multiplier), "A coarse animation step cannot skip blade contact or retain last swing's victim exclusion")
 		check(off_blade.health == 100.0, "Coarse stepping does not invent off-blade hits")
 	if not samples.is_empty():
 		# A thin world-layer sheet bisects the source-to-contact path. Its

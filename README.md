@@ -125,6 +125,8 @@ arrow damage = bow base damage × clamp(draw amount, 0, 1)
 
 Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision.
 
+Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus the frontier wolf and sentinel, and the multiplier is resolved before armor. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
+
 The charge bar and bowstring animation fill together over the bow's full draw duration, including raising the bow. Release whenever you want: a large bow held for **1.5 seconds deals 50% damage**; holding it for 3 seconds gives full damage.
 
 | Bow | Full draw duration | Full damage before armor |
@@ -139,7 +141,7 @@ The draw hand uses a cheek-surface landmark on the imported head. Bow raising, s
 
 ## Swords and jump-rolls
 
-Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, including raise, strike and recovery. Melee has no held charge or damage multiplier. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving.
+Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, including raise, strike and recovery. Melee has no held charge; only a head-zone contact doubles damage. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving.
 
 Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
@@ -212,6 +214,8 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 & $Godot --headless --path . --script res://tests/wolf_regression.gd
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
+& $Godot --headless --path . --script res://tests/block_clash_regression.gd
+& $Godot --headless --path . --script res://tests/hitbox_regression.gd
 ```
 
 ### Rebuilding character assets

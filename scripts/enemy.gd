@@ -5,6 +5,7 @@ signal attacked(attacker: CharacterBody3D, amount: float)
 
 const Geo = preload("res://scripts/geo.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
+const Hitbox = preload("res://scripts/hitbox.gd")
 var kind := 0
 var player: CharacterBody3D
 var safe_center := Vector3.ZERO
@@ -88,6 +89,18 @@ func get_aim_position() -> Vector3:
 
 func get_display_name() -> String:
 	return "Briar wolf" if kind == 0 else "Ruin sentinel"
+
+func head_hitbox_center() -> Vector3:
+	if kind == 0 and is_instance_valid(_wolf):
+		return _wolf.head_hitbox_center()
+	if is_instance_valid(_body):
+		return _body.to_global(Vector3(0,1.92,-0.02))
+	return get_aim_position()
+
+func head_hit_profile() -> Vector2:
+	if kind == 0:
+		return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.SENTINEL_HEAD_RADIUS,Hitbox.SENTINEL_HEAD_HALF_HEIGHT)
 
 
 func _physics_process(delta: float) -> void:
@@ -174,12 +187,13 @@ func stagger(seconds: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 
-func take_damage(amount: float, _source_id: int) -> void:
+func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
-	health = maxf(0.0, health - amount)
+	var applied := amount * Hitbox.damage_multiplier(headshot)
+	health = maxf(0.0, health - applied)
 	var label := Label3D.new()
-	label.text = str(int(amount))
+	label.text = str(int(applied))
 	label.font_size = 54
 	label.pixel_size = 0.007
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

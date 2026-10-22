@@ -7,6 +7,7 @@ signal defense_resolved(defender_slot: int, position: Vector3, parried: bool)
 
 const Archer = preload("res://scripts/archer.gd")
 const Geo = preload("res://scripts/geo.gd")
+const Hitbox = preload("res://scripts/hitbox.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
 const PARRY_WINDOW := 0.25
 const PARRY_STAGGER := 0.8
@@ -335,11 +336,15 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 			return
 		_melee_victims[unit.get_instance_id()] = true
 		var damage := float(Archer.SWORD_DATA[_swing_sword_index].damage)
+		# A rest point can sit anywhere in the overlap, so both blade poses are
+		# tested as segments against the animated head zone.
+		var headshot := Hitbox.blade_headshot(unit,base_from,tip_from,radius) \
+			or Hitbox.blade_headshot(unit,base_to,tip_to,radius)
 		var outcome := DEFENSE_NONE
 		if unit.has_method("receive_melee"):
-			outcome = int(unit.receive_melee(damage,source_id,actor.global_position))
+			outcome = int(unit.receive_melee(damage,source_id,actor.global_position,headshot))
 		else:
-			unit.take_damage(damage,source_id)
+			unit.take_damage(damage,source_id,headshot)
 		if outcome == DEFENSE_PARRY:
 			_block_feedback(unit,hit.point,true)
 		elif outcome == DEFENSE_BLOCK:

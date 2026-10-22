@@ -9,6 +9,7 @@ signal melee_sweep(previous_base: Vector3, previous_tip: Vector3, current_base: 
 const Geo = preload("res://scripts/geo.gd")
 const Bow = preload("res://scripts/bow.gd")
 const Sword = preload("res://scripts/sword.gd")
+const Hitbox = preload("res://scripts/hitbox.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":22.0, "length":1.0},
@@ -444,6 +445,14 @@ func get_arrow_origin() -> Vector3:
 func get_stance_forward() -> Vector3:
 	var pose := _bone_world(_bones.spine_03)
 	return (pose.basis * skeleton.get_bone_global_rest(_bones.spine_03).basis.inverse()).z.normalized()
+
+func head_hitbox_center() -> Vector3:
+	if not _built:
+		return global_position + Vector3(0, Hitbox.HUMAN_HEAD_OFFSET + 1.6, 0)
+	return _bone_world(_bones.Head) * Vector3(0, Hitbox.HUMAN_HEAD_OFFSET, 0)
+
+func head_hit_profile() -> Vector2:
+	return Vector2(Hitbox.HUMAN_HEAD_RADIUS, Hitbox.HUMAN_HEAD_HALF_HEIGHT)
 
 func get_joint_positions() -> Dictionary:
 	var result: Dictionary = {}

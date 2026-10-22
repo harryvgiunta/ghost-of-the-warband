@@ -171,7 +171,9 @@ func run() -> void:
 	defender.rig.global_basis = Basis(Vector3.UP,PI * 0.5)
 	check(attacker.combat.begin_melee(), "Facing-test swing starts")
 	advance(contact_time + 0.05)
-	check(is_equal_approx(defender.health,100.0 - SWORD_DAMAGE), "A guard facing away from the attack takes normal damage")
+	# The close overhead strikes the head zone, so require at least the base
+	# damage instead of pinning one zone; hitbox_regression checks both values.
+	check(defender.health <= 100.0 - SWORD_DAMAGE, "A guard facing away from the attack takes unblocked damage")
 	check(is_equal_approx(defender.stamina,100.0), "An unblocked hit spends no guard stamina")
 	advance(3.0)
 

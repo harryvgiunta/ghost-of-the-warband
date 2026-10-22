@@ -3,6 +3,7 @@ extends Node3D
 signal impacted(enemy_hit: bool, impact_position: Vector3)
 
 const Bow = preload("res://scripts/bow.gd")
+const Hitbox = preload("res://scripts/hitbox.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 var velocity := Vector3.ZERO
 var flying := true
@@ -45,7 +46,7 @@ func _physics_process(delta: float) -> void:
 		var hit_enemy := collider.has_method("take_damage")
 		if hit_enemy:
 			if authoritative_damage:
-				collider.take_damage(damage, source_id)
+				collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
 			visible = false
 		impacted.emit(hit_enemy, global_position)
 		return

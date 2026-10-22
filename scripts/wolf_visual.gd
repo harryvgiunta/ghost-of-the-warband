@@ -4,6 +4,7 @@ extends Node3D
 ## root motion, state timer, damage and death lifecycle; this node only samples
 ## the authored clips and holds the final corpse pose.
 
+const Hitbox = preload("res://scripts/hitbox.gd")
 const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
 const IDLE_CLIP := "Wolf_Idle_Loop"
 const TROT_CLIP := "Wolf_Trot_Loop"
@@ -18,6 +19,7 @@ const MOVE_THRESHOLD := 0.18
 
 var _player: AnimationPlayer
 var _skeleton: Skeleton3D
+var _head_bone := -1
 var _clip := ""
 var _speed := 0.0
 var _combat_state := ""
@@ -36,6 +38,7 @@ func _ready() -> void:
 	if _player == null or _skeleton == null:
 		push_error("Wolf visual is missing its AnimationPlayer or Skeleton3D")
 		return
+	_head_bone = _skeleton.find_bone("head")
 	for name in [IDLE_CLIP, TROT_CLIP, ATTACK_CLIP, DEATH_CLIP]:
 		if not _player.has_animation(name):
 			push_error("Wolf visual is missing clip: " + name)
@@ -77,6 +80,14 @@ func die() -> void:
 		_player.speed_scale = 1.0
 		_player.play(DEATH_CLIP, 0.08)
 
+
+func head_hitbox_center() -> Vector3:
+	if _skeleton == null or _head_bone < 0:
+		return global_position
+	return _skeleton.global_transform * _skeleton.get_bone_global_pose(_head_bone).origin
+
+func head_hit_profile() -> Vector2:
+	return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
 
 func get_clip_name() -> String:
 	return _clip

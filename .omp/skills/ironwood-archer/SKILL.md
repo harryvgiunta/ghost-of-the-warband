@@ -24,7 +24,7 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 | Character and animation | `scripts/archer.gd`: imported Skeleton3D/AnimationPlayer, action phases, physics-clock sampling, bow/terrain IK, equipment sockets, and animation-state replication |
 | Briar wolf presentation | `scripts/wolf_visual.gd`: imported `assets/characters/ironwood_wolf.glb`, idle/trot speed sampling, attack seek from gameplay timers, and held death; `tools/prepare_wolf.py` reproduces the mesh/rig/coat/clips |
 | Authored assets | `assets/characters/ironwood_ranger.glb` and `assets/characters/ironwood_wolf.glb` with adjacent JSON/provenance/import settings; `tools/prepare_character.py` / `tools/character_clearance.py` for Ranger retargeting, `tools/prepare_wolf.py` for the wolf |
-| Shared combat | `scripts/combat.gd`: attack eligibility, independent sword recovery, linear bow damage, and continuous blade-contact collision |
+| Shared combat | `scripts/combat.gd`: attack eligibility, independent sword recovery, linear bow damage, and continuous blade-contact collision; `scripts/hitbox.gd`: head/body damage zones and the 2x head multiplier |
 | Roll | `scripts/dodge_roll.gd`: explicit modifier request, direction, takeoff, finite roll progress, and airborne reuse restriction |
 | Running slide | `scripts/running_slide.gd`: achieved-sprint eligibility, finite deceleration, limited steering and collision/ground-loss termination |
 | Cover and shoulder camera | `scripts/cover_movement.gd`: shared physics/crouch/peek state; `scripts/shoulder_camera.gd`: smooth shoulder swap and swept camera collision |
@@ -75,6 +75,14 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - Every shot, including zero/partial charge, spends the nocked arrow and completes recovery before another draw. Equipment swaps, cancellation, or rolling cannot skip/restart that recovery. Canceling an unreleased draw does not spend its arrow.
 - Carry leftover frame time from release into recovery. Do not add a frame-dependent extra delay at phase boundaries.
 - Aim remains a world-space point from the camera ray, not target tracking or gravity compensation. Start the query at the projected actor position plus `cover.camera_height()` and exclude the attached cover body through `CoverMovement.attached_surface()` (host-cached, replica-derived from `normal`) so top peeks can fire over the wall you are posted against. Never choose the start from the animated muzzle: it feeds bow facing/raise back into targeting, skips close crosshair targets and makes shoulder convergence unstable. Aim the bow from its cheek anchor. Before a cover release, sweep the actual nock-to-tip shaft with finite radius and an initial-overlap check. Obstruction cancels pending release/frozen charge. Never relocate a clear shot's origin behind the obstacle; it launches from the rendered arrow tip. Ordinary projectile collision alone applies damage.
+
+### Damage zones
+
+- `scripts/hitbox.gd` owns the **2x head multiplier** and the zone profiles for humanoids, the wolf and the sentinel. Head zones are logical damage volumes against the single physical body capsule; do not add extra collision shapes, layers, areas or RIDs. That keeps arrows, blades, movement and cover on the existing authoritative collision path.
+- Zones are upright cylinders around animated joints: arena actors read the rig's `Head` bone, the wolf reads its imported `head` bone, and the sentinel uses its stone head. Crouch, cover lean, rolls and the wolf's bite move the zone with the skeleton.
+- Arrow damage classifies the actual ray hit point with `Hitbox.is_headshot`. Blades must use `Hitbox.blade_headshot` with both swept blade segments and the blade radius; a shape query's rest point can sit anywhere in the overlap and must not decide the zone. A vertical greatsword cut legitimately crosses the head zone while a horizontal one-handed cut contacts the chest.
+- Receivers take a `headshot` boolean: `ArenaActor.take_damage` / `receive_melee` and `enemy.gd.take_damage`. Apply the multiplier before armor and before the frontier damage label. Arena damage stays host-authoritative; do not add a headshot field to snapshots or trust client classification.
+- `melee_roll_regression` intentionally expects the greatsword's vertical cut to deal 2x and the one-handed cuts to deal base damage. Do not flatten those expectations to a single value.
 
 ### Swords and state isolation
 
@@ -142,7 +150,8 @@ $Checks = @(
     'cover_movement_regression',
     'running_slide_regression',
     'wolf_regression',
-    'block_clash_regression'
+    'block_clash_regression',
+    'hitbox_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"
@@ -165,6 +174,7 @@ Use the selected engine path instead if `GODOT_PATH` is configured. Check exit c
 - `wolf_regression` checks the imported wolf’s 37-bone skeleton, clip names/durations/loops, -Z facing, ground contact, embedded 1024 coat, stationary root, bite closure/forward thrust, held death, `enemy.gd` cutover and sentinel preservation.
 - `running_slide_regression` checks sprint-crouch eligibility, retained momentum, finite deceleration, bounded steering, no held-input retrigger, wall/headroom safety, jump/roll/death/revive transitions, grounded combat, replicated skeletons and fixed limb lengths. Contact checks allow the physics solver's `safe_margin`, not visible penetration.
 - `block_clash_regression` probes a real authored blade contact, then checks a 0.10 s-front parry (zero damage, 0.8 s stagger, interrupted swing, immediate counter), a held block (zero damage, one stamina chunk, pushback, no stagger), the authored one-hand/two-hand guard clips and runtime blade directions, the greatsword support hand at the hilt, a perpendicular guard failure, replicated guard presentation, and simultaneous active swings clashing once with zero damage, bounced separation, cleared recovery and immediate re-attack. It also drives the frontier right-click enemy path through parry and held block, plus arena host right-click press/release.
+- `hitbox_regression` checks the animated humanoid head zone through a full crouch, 2x before armor, replica rejection, sentinel and wolf zones, a real arrow headshot/body pair, and a real swept-blade headshot. `melee_roll_regression` covers the greatsword-head/one-hand-chest zone split.
 
 For shared combat, rig, or network changes, run the complete set after integration. Keep deterministic regression tests for meaningful behavior and boundaries, not HUD wording, copied fields, or source text.
 
