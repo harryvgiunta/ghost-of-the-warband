@@ -24,12 +24,6 @@ const SWORD_DATA = [
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
 ]
 const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
-## The authored stab thrusts at humanoid chest height (about 1.2 m). A wolf's
-## physical capsule tops out at 0.95 m, so a low aim drops the pelvis into a
-## lunge; the authored arm path stays intact and the blade follows it down.
-const LOW_STAB_DEPTH := 0.45
-const LOW_STAB_AIM_HEIGHT := 1.0
-const LOW_STAB_RANGE := 2.4
 const ARMOR_NAMES = ["Ranger leather", "Sentinel mail", "Warden plate"]
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
@@ -806,11 +800,6 @@ func _update_pose(delta: float) -> void:
 		_set_bone_world(_bones.spine_01,corrected_spine)
 	if leaning:
 		_apply_cover_lean()
-	var low_stab := 0.0
-	if weapon == "dagger" and phase == "MELEE":
-		low_stab = _low_stab_depth()*_low_stab_ramp()
-	if low_stab > 0.0:
-		_apply_low_stab(low_stab)
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
@@ -821,6 +810,8 @@ func _update_pose(delta: float) -> void:
 		var head := _bone_world(_bones.Head)
 		head.basis = Basis(Vector3.UP,-STANCE_YAW*archery)*head.basis
 		_set_bone_world(_bones.Head,head)
+	if weapon == "dagger" and phase == "MELEE":
+		_aim_dagger_stab()
 	if weapon == "bow":
 		_update_bow_pose(drawing)
 	else:
@@ -832,33 +823,6 @@ func _update_pose(delta: float) -> void:
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
 	_sync_weapon_visibility()
-
-func _low_stab_depth() -> float:
-	if weapon != "dagger" or phase != "MELEE" or _roll_progress >= 0.0:
-		return 0.0
-	var offset := _aim_point-global_position
-	var horizontal := Vector2(offset.x,offset.z).length()
-	# Only a nearby, genuinely low aim asks for the lunge. A distant camera
-	# ray hitting the ground must not squat the character on every stab.
-	if horizontal < 0.2 or horizontal > LOW_STAB_RANGE or offset.y >= LOW_STAB_AIM_HEIGHT:
-		return 0.0
-	return LOW_STAB_DEPTH*(1.0-_crouch_amount)
-
-func _low_stab_ramp() -> float:
-	var window := _melee_window()
-	return minf(smoothstep(0.0,window.x,_phase_time),
-		1.0-smoothstep(window.y,melee_seconds(),_phase_time))
-
-func _apply_low_stab(amount: float) -> void:
-	# Lower the pelvis while keeping both feet planted; the authored stab pose
-	# and its weapon socket ride down with the torso.
-	var left := _bone_world(_legs[0][2])
-	var right := _bone_world(_legs[1][2])
-	var pelvis := _bone_world(_bones.pelvis)
-	pelvis.origin.y -= amount
-	_set_bone_world(_bones.pelvis,pelvis)
-	_solve_limb(_legs[0],left.origin,left.basis)
-	_solve_limb(_legs[1],right.origin,right.basis)
 
 func _apply_cover_crouch(lower_only: bool) -> void:
 	# Authored crouch steps replace standing strides; aim and sword grips keep their upper-body pose.
@@ -940,6 +904,34 @@ func _update_hand_contacts() -> void:
 	var right := _bone_world(_arms[1][2])
 	bow_hand.global_transform = Transform3D(left.basis,left*_palm_left)
 	string_hand.global_transform = Transform3D(right.basis,right*_palm_right)
+
+func _aim_dagger_stab() -> void:
+	var shoulder := _bone_world(_arms[1][0]).origin
+	var hand := _bone_world(_arms[1][2])
+	var offset := _aim_point-shoulder
+	# Ignore a placeholder/self aim (the arena's initial aim is the actor's own
+	# chest); the authored thrust remains for those.
+	if Vector2(offset.x,offset.z).length() < 0.35 or offset.length_squared() < 0.0001:
+		return
+	var direction := offset.normalized()
+	# Keep the authored chamber/extension travel, but put the hand on the aim
+	# line: the signed distance along the aim is the authored hand's own.
+	var along := (hand.origin-shoulder).dot(direction)
+	# During the strike the arm extends toward the aim point. The hand cannot
+	# pass the arm's length or the point itself (the blade's reach is 0.43).
+	var elbow := _bone_world(_arms[1][1]).origin
+	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(hand.origin)
+	var aim_along := offset.length()-float(DAGGER_DATA.length)-0.09
+	var window := _melee_window()
+	var thrust := smoothstep(window.x*0.6,window.y,_phase_time)
+	along = lerpf(along,clampf(aim_along,along,arm_reach-0.01),thrust)
+	var up := Vector3.UP
+	if absf(direction.dot(up)) > 0.98:
+		up = global_basis.x
+	var aim_basis := Basis.looking_at(direction,up)
+	# The socket carries its own grip rotation; cancel it so the blade axis
+	# itself points at the aim rather than the hand bone.
+	_solve_limb(_arms[1],shoulder+direction*along,aim_basis*_sword_grip.basis.inverse())
 
 func _update_bow_pose(drawing: bool) -> void:
 	var left := _bone_world(_arms[0][2])

@@ -225,27 +225,52 @@ func run() -> void:
 	Input.parse_input_event(release)
 	await process_frame
 
-	# The authored stab thrusts at humanoid chest height. A low aim must drop
-	# into the lunge so the blade can reach the wolf's 0.95 m capsule.
+	# The dagger thrust itself follows the crosshair. Aim low at the wolf and
+	# the blade must angle down to that point, not run through its chest line.
 	game.combat.stop()
 	game.archer.cancel_draw()
 	game.combat.melee_progress = 1.0
 	var wolf = game.enemies[0]
 	wolf.set_physics_process(false)
-	wolf.global_position = game.player.global_position + Vector3(0, 0, -1.0)
+	wolf.global_position = game.player.global_position + Vector3(0, 0, -0.8)
 	wolf.rotation.y = PI
 	wolf.health = 100.0
 	game.combat.set_motion(Vector3.ZERO, false, true)
 	await physics_frame
 	await physics_frame
 	game.combat.set_aim(wolf.get_aim_position())
-	check(game.combat.begin_melee(), "A low-aimed dagger stab starts")
+	check(game.combat.begin_melee(), "A crosshair-aimed dagger stab starts")
+	var aim_dot := -1.0
+	var signed_drop := 0.0
 	var stab_time := 0.0
 	while stab_time < Archer.DAGGER_DATA.seconds + STEP:
 		game.archer.advance_animation(STEP)
 		game.combat.advance(STEP)
 		stab_time += STEP
-	check(is_equal_approx(wolf.health, 100.0 - float(Archer.DAGGER_DATA.damage)), "A low-aimed dagger stab lunges onto the wolf's short capsule")
+		if stab_time > 0.20 and stab_time < 0.24:
+			var base: Vector3 = game.archer.get_blade_base()
+			var tip: Vector3 = game.archer.get_blade_tip()
+			var wanted: Vector3 = (game.combat.aim_point - base).normalized()
+			aim_dot = maxf(aim_dot, (tip - base).normalized().dot(wanted))
+			signed_drop = tip.y - base.y
+	check(aim_dot > 0.9, "The dagger blade points at the crosshair aim point")
+	check(signed_drop < -0.05, "A low crosshair aim angles the stab down")
+	check(wolf.health < 100.0, "The aimed dagger blade contacts the wolf")
+
+	# Pointing above the wolf must not secretly stab down at it.
+	game.combat.stop()
+	game.archer.cancel_draw()
+	game.combat.melee_progress = 1.0
+	wolf.health = 100.0
+	game.combat.set_motion(Vector3.ZERO, false, true)
+	game.combat.set_aim(game.player.global_position + Vector3(0, 1.5, -20.0))
+	check(game.combat.begin_melee(), "A high-aimed dagger stab starts")
+	var high_time := 0.0
+	while high_time < Archer.DAGGER_DATA.seconds + STEP:
+		game.archer.advance_animation(STEP)
+		game.combat.advance(STEP)
+		high_time += STEP
+	check(is_equal_approx(wolf.health, 100.0), "The stab follows the aim instead of auto-targeting the wolf")
 	game.queue_free()
 	await process_frame
 
