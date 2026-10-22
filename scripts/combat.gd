@@ -11,6 +11,7 @@ const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
 const PARRY_WINDOW := 0.25
+const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
 const BLOCK_STAMINA := 22.0
 const DAGGER_BLOCK_STAMINA := 30.0
@@ -37,6 +38,7 @@ var cover_aim_ready := true
 var _cover_attack := false
 var _auto_exposure := false
 var _release_pending := false
+var _shaft_grace := 0.0
 var _pending_throw := false
 var target_mask := 2
 var source_id := -1
@@ -124,8 +126,9 @@ func release_throw() -> void:
 			_auto_exposure = true
 		_release_pending = true
 		_pending_throw = true
+		_shaft_grace = 0.0
 		rig.charge_frozen = true
-		_try_cover_release()
+		_try_cover_release(0.0)
 		return
 	update_aim()
 	rig.release_throw()
@@ -205,9 +208,10 @@ func release_draw() -> void:
 		if not _can_release_from_cover():
 			_auto_exposure = true
 		_release_pending = true
+		_shaft_grace = 0.0
 		_pending_throw = false
 		rig.charge_frozen = true
-		_try_cover_release()
+		_try_cover_release(0.0)
 		return
 	update_aim()
 	rig.release_string()
@@ -220,6 +224,7 @@ func stop() -> void:
 	_cover_attack = false
 	_auto_exposure = false
 	_release_pending = false
+	_shaft_grace = 0.0
 	_pending_throw = false
 	_melee_active = false
 	stop_block()
@@ -239,7 +244,7 @@ func _accept_cover_draw() -> bool:
 	_auto_exposure = _cover_attack and not _can_release_from_cover()
 	return true
 
-func _try_cover_release() -> void:
+func _try_cover_release(delta: float) -> void:
 	if not _release_pending or not _can_release_from_cover():
 		return
 	if rig.phase in ["DRAWING","T_DRAW"] and rig._phase_time < Archer.RAISE_SECONDS:
@@ -258,8 +263,14 @@ func _try_cover_release() -> void:
 		rig.release_throw()
 		return
 	if not _cover_shaft_clear():
+		# A fresh exposure still has its lean/bow pose blending. Give the
+		# settled pose a bounded chance to clear before calling it an obstruction.
+		_shaft_grace += maxf(delta,0.0)
+		if _shaft_grace < SHAFT_SETTLE_GRACE:
+			return
 		stop()
 		return
+	_shaft_grace = 0.0
 	_release_pending = false
 	rig.release_string()
 
@@ -579,7 +590,7 @@ func advance(delta: float) -> void:
 		elif _release_pending:
 			if not _can_release_from_cover():
 				_auto_exposure = true
-			_try_cover_release()
+			_try_cover_release(delta)
 	# Sword recovery continues across weapon swaps but never gates a bow draw.
 	if melee_progress < 1.0:
 		melee_progress = minf(1.0, melee_progress + delta / _swing_seconds)

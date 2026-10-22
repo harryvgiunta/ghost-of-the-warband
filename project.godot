@@ -2,10 +2,14 @@ config_version=5
 
 [application]
 config/name="IRONWOOD | The Frontier"
-config/version="0.2.0"
-run/main_scene="res://main.tscn"
+config/version="0.3.0"
+run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-config/description="A seamless woodland frontier. Explore, hunt, and restore the lost waystones."
+config/description="A seamless woodland frontier and four-seat arena, staged from the Hollow."
+
+[autoload]
+PlayerState="*res://scripts/player_state.gd"
+Session="*res://scripts/session.gd"
 
 [display]
 window/size/viewport_width=1440
