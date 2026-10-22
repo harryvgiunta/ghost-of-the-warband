@@ -492,7 +492,12 @@ func _crosshair_aim() -> Vector3:
 	var actor_depth := maxf(0.0,(aim_anchor-ray_origin).dot(ray_direction))
 	_query.from = ray_origin + ray_direction*actor_depth
 	_query.to = ray_origin + ray_direction*120.0
-	_query.exclude = [actors[local_slot].get_rid()]
+	# Skip only the cover this fighter is posted against, on host and replica.
+	var excluded: Array[RID] = [actor.get_rid()]
+	var cover_rid: RID = actor.cover.attached_surface()
+	if cover_rid.is_valid():
+		excluded.append(cover_rid)
+	_query.exclude = excluded
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
 	return hit.position if not hit.is_empty() else _query.to
 

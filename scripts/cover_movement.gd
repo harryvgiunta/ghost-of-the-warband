@@ -38,6 +38,7 @@ var _firing_query := PhysicsShapeQueryParameters3D.new()
 var _capsule_query := PhysicsShapeQueryParameters3D.new()
 var _walk_collision := KinematicCollision3D.new()
 var _exclude: Array[RID] = []
+var attached_rid := RID()
 
 func setup(body: CharacterBody3D, collider: CollisionShape3D) -> void:
 	_body = body
@@ -86,6 +87,7 @@ func try_enter(preferred_direction: Vector3) -> bool:
 	if best.is_empty():
 		return false
 	normal = _flat_normal(best.normal)
+	attached_rid = best.rid
 	_anchor = best.position+normal*GAP-Vector3.UP*PROBE_HEIGHT
 	var support := _support(_anchor)
 	if support.is_empty():
@@ -102,6 +104,7 @@ func try_enter(preferred_direction: Vector3) -> bool:
 
 func exit() -> void:
 	active = false
+	attached_rid = RID()
 	peeking = false
 	lean = Vector3.ZERO
 	_side_lean = false
@@ -144,6 +147,7 @@ func step(delta: float, desired_direction: Vector3, wants_peek: bool, shoulder: 
 		exit()
 		_update_stance(delta,crouch_requested)
 		return Vector3.ZERO
+	attached_rid = contact.rid
 	var tangent := normal.cross(Vector3.UP)
 	var travel := clampf(desired_direction.dot(tangent),-1.0,1.0)
 	var speed := FAST_SPEED if fast else SPEED
@@ -306,6 +310,20 @@ func _apply_height() -> void:
 func _can_stand() -> bool:
 	_clearance.transform = Transform3D(Basis.IDENTITY,_body.global_position+Vector3.UP*((STAND_HEIGHT+CROUCH_HEIGHT)*0.5-_capsule.radius))
 	return _body.get_world_3d().direct_space_state.intersect_shape(_clearance,1).is_empty()
+
+# The surface the body is attached to, including on replicated actors whose
+# collision-driven steps run on the host. Aim queries skip only this body,
+# never whatever the weapon pose happens to project past.
+func attached_surface() -> RID:
+	if not active:
+		return RID()
+	if attached_rid.is_valid():
+		return attached_rid
+	var from := _body.global_position-normal*(GAP*0.5)+Vector3.UP*PROBE_HEIGHT
+	_ray.from = from
+	_ray.to = from-normal*(REACH+GAP)
+	var hit := _body.get_world_3d().direct_space_state.intersect_ray(_ray)
+	return hit.rid if not hit.is_empty() else RID()
 
 func _probe(point: Vector3, outward: Vector3, height: float) -> Dictionary:
 	_ray.from = point+Vector3.UP*height+outward*0.10

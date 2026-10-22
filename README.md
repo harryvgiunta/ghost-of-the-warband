@@ -116,7 +116,7 @@ A draw begun during a manual RMB peek leaves that peek under manual control: rel
 
 Aiming behaves like a shooter: the camera turns with the mouse and the crosshair stays in the center. There is **no auto-fire, unit lock-on, target tracking, or automatic gravity compensation**. Hold left mouse to draw and aim; release to launch one arrow along the current crosshair aim. Holding at full draw never fires automatically. Arrows still fall under gravity after launch, and only actual collision applies damage.
 
-Both shoulder views aim at the world point under the crosshair, independently of the character's previous facing. Raising or turning the bow cannot make the aim query skip a nearby target. Camera-side cover is excluded at the character's view-height plane, not at the moving arrow tip; arrows still launch from the visible tip and collide normally.
+Both shoulder views aim at the world point under the crosshair, independently of the character's previous facing. Aim queries start at the character's view-height plane and skip only the cover body you are posted against. Raising or turning the bow cannot make the query skip a nearby target. Arrows still launch from the visible tip and collide normally.
 
 ```text
 arrow damage = bow base damage × clamp(draw amount, 0, 1)

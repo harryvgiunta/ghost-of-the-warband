@@ -54,6 +54,7 @@ var _jump_requested := false
 var _interaction_id := ""
 var _interaction_allowed := false
 var _aim_query := PhysicsRayQueryParameters3D.new()
+var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
@@ -252,6 +253,12 @@ func update_crosshair_aim() -> void:
 	var actor_depth := maxf(0.0,(aim_anchor-ray_origin).dot(ray_direction))
 	_aim_query.from = ray_origin + ray_direction*actor_depth
 	_aim_query.to = ray_origin + ray_direction * 300.0
+	# The body you are posted against is camera-side cover, not a target.
+	_aim_exclude.clear()
+	var cover_rid: RID = cover.attached_surface()
+	if cover_rid.is_valid():
+		_aim_exclude.append(cover_rid)
+	_aim_query.exclude = _aim_exclude
 	var hit := get_world_3d().direct_space_state.intersect_ray(_aim_query)
 	combat.set_aim(hit.position if not hit.is_empty() else _aim_query.to)
 
