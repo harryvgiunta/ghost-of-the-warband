@@ -1,9 +1,11 @@
 extends Node3D
 
 const Actor = preload("res://scripts/arena_actor.gd")
+const Archer = preload("res://scripts/archer.gd")
 const World = preload("res://scripts/arena_world.gd")
 const Hud = preload("res://scripts/arena_hud.gd")
 const Arrow = preload("res://scripts/arrow.gd")
+const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
@@ -14,6 +16,7 @@ var server_tick := 0
 var last_snapshot_tick := -1
 var projectiles: Array[Node3D] = []
 var shots_fired := 0
+var throws_fired := 0
 var world
 var hud
 var audio
@@ -32,6 +35,7 @@ var _shoulder_camera := ShoulderCamera.new()
 var _cursor_free := true
 var _mouse_drawing := false
 var _key_drawing := false
+var _throw_held := false
 var _peek_held := false
 var _peek_right := Vector3.RIGHT
 var _query := PhysicsRayQueryParameters3D.new()
@@ -48,6 +52,7 @@ func _ready() -> void:
 		add_child(actor)
 		actor.configure(0,true,"Bot %d" % (index+1),world.spawn_points[index])
 		actor.fired.connect(_on_fired)
+		actor.thrown_weapon.connect(_on_thrown_weapon)
 		actor.killed.connect(_on_killed)
 		actor.combat.clash.connect(_on_clash)
 		actor.combat.defense_resolved.connect(_on_defense_resolved)
@@ -188,8 +193,10 @@ func leave_game() -> void:
 	server_tick = 0
 	_send_elapsed = 0
 	shots_fired = 0
+	throws_fired = 0
 	_mouse_drawing = false
 	_key_drawing = false
+	_throw_held = false
 	_peek_held = false
 	_peek_right = Vector3.RIGHT
 	_cursor_free = true
@@ -408,9 +415,9 @@ func send_action(action: String, value: Variant = null) -> void:
 		return
 	if action in ["bow","sword","weapon","armor"]:
 		_cancel_draw_input()
-	if action == "draw" and not _peek_held and actors[local_slot].rig.phase == "READY":
+	if action in ["draw","throw"] and not _peek_held and actors[local_slot].rig.phase == "READY":
 		_capture_peek_context()
-	if action in ["draw","release"]:
+	if action in ["draw","release","throw","throw_release"]:
 		_send_peek_input()
 	if network_role == "host":
 		_apply_action(local_slot,action,value)
@@ -436,7 +443,7 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
 				actor.update_combat_cover_side()
-				if actor.rig.weapon == "sword":
+				if actor.rig.weapon in ["sword","dagger"]:
 					actor.combat.begin_melee()
 				else:
 					actor.combat.begin_draw()
@@ -444,6 +451,14 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
 				actor.update_combat_cover_side()
 				actor.combat.release_draw()
+		"throw":
+			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
+				actor.update_combat_cover_side()
+				actor.combat.begin_throw()
+		"throw_release":
+			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
+				actor.update_combat_cover_side()
+				actor.combat.release_throw()
 		"stop": actor.combat.stop()
 		"jump":
 			if typeof(value) == TYPE_BOOL:
@@ -482,7 +497,7 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_sword(value)
 		"weapon":
-			if typeof(value) == TYPE_STRING and value in ["bow","sword"]:
+			if typeof(value) == TYPE_STRING and value in ["bow","sword","dagger"]:
 				actor.combat.stop()
 				actor.rig.set_weapon(value)
 		"armor":
@@ -519,6 +534,39 @@ func _arrow_event(slot: int, origin: Vector3, direction: Vector3, speed: float) 
 	if network_role == "client" and slot >= 0 and slot < 4:
 		_spawn_arrow(slot,origin,direction,speed,0.0,false)
 		shots_fired += 1
+
+func _on_thrown_weapon(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
+	if network_role != "host":
+		return
+	var damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	_spawn_thrown(slot,origin,direction,speed,weapon_name,weapon_index,damage,true)
+	_throw_event.rpc(slot,origin,direction,speed,weapon_name,weapon_index)
+	throws_fired += 1
+
+func _spawn_thrown(slot: int, origin: Vector3, direction: Vector3, speed: float, weapon_name: String, weapon_index: int, damage: float, authoritative: bool) -> void:
+	var thrown := Thrown.new()
+	thrown.source_id = slot
+	thrown.weapon = weapon_name
+	thrown.weapon_index = weapon_index
+	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
+	thrown.hit_mask = 1 | 4
+	thrown.authoritative_damage = authoritative
+	add_child(thrown)
+	var excluded: Array[RID] = [actors[slot].get_rid()]
+	thrown.launch(origin,direction,speed,damage,excluded)
+	for index in range(projectiles.size()-1,-1,-1):
+		if not is_instance_valid(projectiles[index]):
+			projectiles.remove_at(index)
+	projectiles.append(thrown)
+	if projectiles.size() > 128:
+		projectiles.pop_front().queue_free()
+	if slot == local_slot:
+		audio.play_sound("release")
+
+@rpc("authority","call_remote","reliable")
+func _throw_event(slot: int, origin: Vector3, direction: Vector3, speed: float, weapon_name: String, weapon_index: int) -> void:
+	if network_role == "client" and slot >= 0 and slot < 4:
+		_spawn_thrown(slot,origin,direction,speed,weapon_name,weapon_index,0.0,false)
 
 func _on_clash(position: Vector3) -> void:
 	if network_role != "host":
@@ -557,7 +605,7 @@ func _process(delta: float) -> void:
 	if local_slot < 0:
 		return
 	var actor = actors[local_slot]
-	if not actor.alive and (_peek_held or _mouse_drawing or _key_drawing):
+	if not actor.alive and (_peek_held or _mouse_drawing or _key_drawing or _throw_held):
 		_peek_held = false
 		_cancel_draw_input()
 	_shoulder_camera.update(delta)
@@ -626,10 +674,15 @@ func _input(event: InputEvent) -> void:
 			_key_drawing = false
 			if not _mouse_drawing:
 				send_action("release",_crosshair_aim())
+	if event is InputEventKey and event.keycode == KEY_T and not event.pressed:
+		if _throw_held:
+			_throw_held = false
+			send_action("throw_release",_crosshair_aim())
 
 func _cancel_draw_input() -> void:
 	_mouse_drawing = false
 	_key_drawing = false
+	_throw_held = false
 	send_action("stop")
 
 func _capture_peek_context() -> void:
@@ -645,6 +698,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
+			KEY_3: send_action("weapon","dagger")
 			KEY_C:
 				if not _cursor_free:
 					send_action("crouch",not actors[local_slot].cover.crouch_requested)
@@ -670,6 +724,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_key_drawing = true
 				if not _mouse_drawing:
 					send_action("draw",_crosshair_aim())
+			KEY_T:
+				_set_cursor_free(false)
+				_throw_held = true
+				send_action("throw",_crosshair_aim())
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_set_cursor_free(false)

@@ -1,6 +1,6 @@
 # Ironwood — The Hollow, Frontier and Arena
 
-A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords and armor, free-aim archery, contact-driven overhand melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -79,7 +79,7 @@ Replace `HOST_TAILSCALE_IP` with the address supplied by the host:
 
 Or enter the address and port in the arena lobby and click **Join Game**. Use `127.0.0.1` only when both instances run on the same computer. Host addresses are not stored in this repository.
 
-There are four seats: the host and up to three joining humans. Empty seats use bots. Joining replaces a bot; disconnecting restores one. A fifth human is refused. Health, movement, attacks, damage, kill/death scores, and respawns are host-authoritative. Clients send input and aim points, not damage or charge claims. The host leaving returns clients to the lobby; there is no host migration or matchmaking service.
+There are four seats: the host and up to three joining humans. Empty seats use bots. Joining replaces a bot; disconnecting restores one. A fifth human is refused. Health, movement, attacks, thrown weapons, damage, kill/death scores, and respawns are host-authoritative. Clients send input and aim points, not damage or charge claims. The host leaving returns clients to the lobby; there is no host migration or matchmaking service.
 
 ### Connection troubleshooting
 
@@ -102,14 +102,18 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Shift + Space | Immediately jump-roll in the movement direction, or forward if stationary |
 | F | Post up against nearby solid cover / leave cover |
 | Hold right mouse with a sword | Guard. The first 0.25 s is a parry; holding longer standard-blocks each hit and spends stamina |
+| Hold right mouse with a dagger | Weak guard only: no parry, and blocked hits deal half damage while spending more stamina |
 | Hold right mouse in cover | Guard and peek over low cover or around the selected edge of tall cover |
 | X | Swap shoulder camera and select the left/right lookout while in cover |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
+| 3 | Equip the dagger |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
 | Hold left mouse / Q with bow | Raise and draw while aiming; automatically expose from cover |
 | Release left mouse / Q with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
-| Click left mouse / Q with sword | Break sticky cover and immediately perform one uncharged overhand chop |
+| Hold T with a sword or dagger | Charge a throw while aiming. Damage scales with charge, and a bow-style recovery follows the release |
+| Release T with a sword or dagger | Hurl the equipped weapon as a projectile. The endless supply keeps the same weapon equipped |
+| Click left mouse / Q with sword or dagger | Break sticky cover and immediately perform one uncharged melee attack: an overhand chop or a quick stab |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
@@ -118,7 +122,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Mouse wheel in the Hollow | Zoom the staging camera |
 | Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
 
 ## Running slide
 
@@ -172,25 +176,40 @@ There is **no separate bow attack cooldown**. Every release, even at zero or par
 
 The draw hand uses a cheek-surface landmark on the imported head. Bow raising, shoulder retrieval and re-nocking follow reachable paths outside the torso; the bow is brought in front of the centreline while loading. Geometry regressions check the forearms against the actual skinned outfit, not just whether the bones remain connected.
 
+## Thrown weapons
+
+Hold **T** with a sword or dagger equipped to charge a throw, then release to hurl the weapon. Throwing reuses the bow's attack shape: the crosshair aim is the flight line, damage is multiplied by the actual charge, and a release spends a **0.28-second** follow-through plus **0.95 seconds** of recovery before another throw, swing or draw can start. Holding at full charge never throws automatically.
+
+```text
+thrown damage = weapon base damage × clamp(charge, 0, 1)
+```
+
+Charge time follows the equipped weapon's own attack duration: **1 / 2 / 3 seconds** for the shortsword, arming sword and greatsword, and **0.5 seconds** for the dagger. Full damage is the weapon's normal melee base damage (30 / 38 / 50 for swords, 14 for the dagger), halved at half charge and zero at zero charge. A thrown weapon falls under the same gravity as an arrow, uses swept physics collision, stops on the first world or body contact, and applies the normal **2x head-zone** multiplier before armor. It cannot be parried as melee; it uses the projectile damage path.
+
+The hand weapon leaves the hand for the release frame and the **endless supply** restores the same equipped weapon as recovery begins. This is temporary: inventory consumption arrives in a separate work stream. **T never replaces melee**; left mouse and Q still perform the normal sword or dagger attack. Throws automatically expose from cover like a bow, and a wall between the hand and the aim line cancels the throw rather than passing the weapon through cover. In the arena the host owns the thrown projectile, its damage and its replication; clients only send the charge/release intent and aim.
+
 ## Swords and jump-rolls
 
 Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, including raise, strike and recovery. Melee has no held charge; only a head-zone contact doubles damage. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving.
+
+The **dagger** (key **3**) is a single close-range weapon: a **0.5-second** authored forward stab with a short windup, a brief blade-contact window and fast recovery. It deals **14** base damage, less than the 30-damage shortsword, and has a thinner, shorter contact volume. The same head-zone multiplier applies. The clip is authored on the Ranger skeleton in Blender; the runtime sweeps the actual dagger blade along the animated hand path rather than using a cone. A low aim inside the dagger's reach drops the pelvis into a short lunge, lowering that chest-height thrust onto short targets such as the wolf without replacing the authored arm path or the blade-contact damage.
 
 Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
 ## Guarding, parries and clashes
 
-Equip a sword with **2** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. A hit from the front resolves from the guard timer, not exact blade geometry:
+Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. A hit from the front resolves from the guard timer and weapon, not exact blade geometry:
 
 | Outcome | Trigger | Result |
 | --- | --- | --- |
 | Parry | Block began at most **0.25 s** before the hit | No damage. The attacker is staggered for **0.8 s**, leaving a guaranteed counter-hit. |
 | Standard block | Guard held longer than **0.25 s** before the hit | No damage, **22 stamina** spent, and the defender is pushed slightly away. Both sides return to neutral. |
-| Unblocked | Guard down, wrong facing, rolling, attacking, or no sword | Normal damage applies. |
+| Weak dagger block | Any hit into a raised dagger | **Half damage** still applies, **30 stamina** spent, no parry, and the attacker's swing continues. |
+| Unblocked | Guard down, wrong facing, rolling, attacking, or no weapon | Normal damage applies. |
 
-Releasing RMB drops the guard; pressing an attack while guarding also drops it. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for short and arming swords, and the two-handed `Sword_Block_Loop` for the greatsword. Both are **120-sample / 1.983-second** breathing loops with planted feet; the greatsword's support hand stays on the actual hilt. These clips animate the Ranger rig only; the sword remains the normal socketed runtime weapon, and the lower-body crouch/slide layer does not overwrite the guard arms.
+Releasing RMB drops the guard; pressing an attack while guarding also drops it. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for the dagger, short and arming swords, and the two-handed `Sword_Block_Loop` for the greatsword. Both are **120-sample / 1.983-second** breathing loops with planted feet; the greatsword's support hand stays on the actual hilt. These clips animate the Ranger rig only; the held weapon remains the normal socketed runtime model, and the lower-body crouch/slide layer does not overwrite the guard arms.
 
-If two sword users are in their active downstroke at the same time and facing each other, their blades **clash** instead of trading damage: sparks and a loud clang, zero damage in both directions, a small bounce apart, and both swings reset so either fighter can immediately act again. A clash never uses an exact sword-to-sword contact test; simultaneous active hit-frames plus mutual facing are sufficient.
+If two **sword** users are in their active downstroke at the same time and facing each other, their blades **clash** instead of trading damage: sparks and a loud clang, zero damage in both directions, a small bounce apart, and both swings reset so either fighter can immediately act again. A clash never uses an exact sword-to-sword contact test; simultaneous active hit-frames plus mutual facing are sufficient. A dagger never clashes; it can only weak-block and must rely on its speed and short recovery.
 
 The character uses a 65-bone skinned humanoid and authored animation clips. The greatsword has a genuine two-handed overhead load, accelerating downward cut, whole-body weight transfer, closed hilt grip, follow-through and recovery. Short/medium swords use a separate authored one-handed overhead. Windup and recovery absorb the different weapon durations instead of stretching the cutting stroke into slow motion. Source motions are retargeted and grip/timing corrections baked in Blender; sword elbows are not posed by runtime IK. The textured character and environment remain stylized, not photorealistic rendering.
 
@@ -254,6 +273,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd
 & $Godot --headless --path . --script res://tests/hitbox_regression.gd
 & $Godot --headless --path . --script res://tests/hub_regression.gd
+& $Godot --headless --path . --script res://tests/throw_regression.gd
 ```
 
 ### Rebuilding character assets
@@ -270,7 +290,7 @@ $Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
 
 Keep the GLB, adjacent JSON/provenance, and `.glb.import` settings together. Import settings preserve authored clip names, use 60 Hz animation sampling, and keep textures embedded rather than duplicating extracted PNGs. The preparation workflow preserves the authored striking arm and body motion, corrects support-hand proportions and clothing clearance, and smooths the one-handed cut's timing. `tools/character_clearance.py` validates interpolated support-arm motion against the deformed outfit before export is accepted.
 
-The same rebuild imports `Crouch_Idle_Loop` and `Crouch_Fwd_Loop` from the existing Quaternius source and authors `Cover_Lean_Top`, `Cover_Lean_Left` and `Cover_Lean_Right` in Blender. The three 0.24-second lean clips share an idle reference, with planted feet and unchanged local arm poses for weapon layering. JSON records their asset-space directions and the crouch clip's measured stride estimate; runtime cadence follows actual movement rather than requested speed.
+The same rebuild imports `Crouch_Idle_Loop` and `Crouch_Fwd_Loop` from the existing Quaternius source and authors `Cover_Lean_Top`, `Cover_Lean_Left` and `Cover_Lean_Right` in Blender, plus the **0.5-second** `Dagger_Stab` thrust and the two held guard loops. The three 0.24-second lean clips share an idle reference, with planted feet and unchanged local arm poses for weapon layering. JSON records their asset-space directions, the stab's contact window and the crouch clip's measured stride estimate; runtime cadence follows actual movement rather than requested speed.
 
 Optional Godot MCP tooling is pinned under `tools/`; run `npm ci --ignore-scripts` there if needed. Local MCP configuration, engine binaries, imports, caches and logs are excluded from Git. They are not required from the original development machine.
 

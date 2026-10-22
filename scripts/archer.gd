@@ -2,6 +2,7 @@ extends Node3D
 ## Imported humanoid animation, with skeletal aim/terrain corrections and real blade samples.
 
 signal arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float)
+signal weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon: String, weapon_index: int)
 signal loadout_changed()
 signal melee_started()
 signal melee_sweep(previous_base: Vector3, previous_tip: Vector3, current_base: Vector3, current_tip: Vector3, radius: float)
@@ -9,6 +10,7 @@ signal melee_sweep(previous_base: Vector3, previous_tip: Vector3, current_base: 
 const Geo = preload("res://scripts/geo.gd")
 const Bow = preload("res://scripts/bow.gd")
 const Sword = preload("res://scripts/sword.gd")
+const Dagger = preload("res://scripts/dagger.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
@@ -17,10 +19,17 @@ const BOW_DATA = [
 	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":34.0, "length":1.8},
 ]
 const SWORD_DATA = [
-	{"name":"Shortsword", "seconds":1.0, "length":0.80, "reach":1.8, "damage":30.0},
-	{"name":"Arming sword", "seconds":2.0, "length":1.05, "reach":2.1, "damage":38.0},
-	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0},
+	{"name":"Shortsword", "seconds":1.0, "length":0.80, "reach":1.8, "damage":30.0, "throw_speed":26.0},
+	{"name":"Arming sword", "seconds":2.0, "length":1.05, "reach":2.1, "damage":38.0, "throw_speed":28.0},
+	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
 ]
+const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
+## The authored stab thrusts at humanoid chest height (about 1.2 m). A wolf's
+## physical capsule tops out at 0.95 m, so a low aim drops the pelvis into a
+## lunge; the authored arm path stays intact and the blade follows it down.
+const LOW_STAB_DEPTH := 0.45
+const LOW_STAB_AIM_HEIGHT := 1.0
+const LOW_STAB_RANGE := 2.4
 const ARMOR_NAMES = ["Ranger leather", "Sentinel mail", "Warden plate"]
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
@@ -42,6 +51,7 @@ var bow_hand: Node3D
 var string_hand: Node3D
 var active_bow: Bow
 var active_sword: Node3D
+var active_dagger: Node3D
 var skeleton: Skeleton3D
 var _phase_time := 0.0
 var _roll_progress := -1.0
@@ -182,8 +192,13 @@ func _ready() -> void:
 		sword.blade_length = float(SWORD_DATA[index].length)
 		add_child(sword)
 		_swords.append(sword)
+	var dagger := Dagger.new()
+	dagger.blade_length = float(DAGGER_DATA.length)
+	add_child(dagger)
+	dagger.visible = false
 	active_bow = _bows[bow_index]
 	active_sword = _swords[sword_index]
+	active_dagger = dagger
 	_build_equipment()
 	_built = true
 	set_bow(bow_index)
@@ -240,9 +255,8 @@ func set_bow(index: int) -> void:
 	bow_index = clampi(index,0,2)
 	if not _built:
 		return
-	for i in _bows.size():
-		_bows[i].visible = weapon == "bow" and i == bow_index
 	active_bow = _bows[bow_index]
+	_sync_weapon_visibility()
 	_update_pose(0.0)
 	loadout_changed.emit()
 
@@ -253,24 +267,34 @@ func set_sword(index: int) -> void:
 	sword_index = clampi(index,0,2)
 	if not _built:
 		return
-	for i in _swords.size():
-		_swords[i].visible = weapon == "sword" and i == sword_index
 	active_sword = _swords[sword_index]
+	_sync_weapon_visibility()
 	_update_pose(0.0)
 	loadout_changed.emit()
 
 func set_weapon(value: String) -> void:
-	if value not in ["bow","sword"] or value == weapon:
+	if value not in ["bow","sword","dagger"] or value == weapon:
 		return
-	if phase not in ["RELEASE","RECOVER"]:
+	if phase not in ["RELEASE","RECOVER","T_RELEASE","T_RECOVER"]:
 		phase = "READY"
 		_phase_time = 0.0
 		draw_amount = 0.0
-	if value != "sword":
-		_blocking = false
+	_blocking = false
 	weapon = value
 	set_bow(bow_index)
 	set_sword(sword_index)
+	_sync_weapon_visibility()
+
+func _sync_weapon_visibility() -> void:
+	# A thrown weapon leaves the hand for its release frame, then the endless
+	# supply restores the same equipped weapon as the recovery begins.
+	var hidden := phase == "T_RELEASE"
+	for i in _swords.size():
+		_swords[i].visible = weapon == "sword" and i == sword_index and not hidden
+	for i in _bows.size():
+		_bows[i].visible = weapon == "bow" and i == bow_index
+	if active_dagger != null:
+		active_dagger.visible = weapon == "dagger" and not hidden
 
 func set_armor(index: int) -> void:
 	armor_index = clampi(index,0,2)
@@ -281,13 +305,25 @@ func set_armor(index: int) -> void:
 	loadout_changed.emit()
 
 func begin_melee() -> bool:
-	if weapon != "sword" or phase != "READY" or _roll_progress >= 0.0:
+	if weapon not in ["sword","dagger"] or phase != "READY" or _roll_progress >= 0.0:
 		return false
 	phase = "MELEE"
 	_phase_time = 0.0
 	melee_started.emit()
 	_update_pose(0.0)
 	return true
+
+func melee_seconds() -> float:
+	return float(DAGGER_DATA.seconds) if weapon == "dagger" else float(SWORD_DATA[sword_index].seconds)
+
+func melee_damage() -> float:
+	return float(DAGGER_DATA.damage) if weapon == "dagger" else float(SWORD_DATA[sword_index].damage)
+
+func melee_reach() -> float:
+	return float(DAGGER_DATA.reach) if weapon == "dagger" else float(SWORD_DATA[sword_index].reach)
+
+func melee_radius() -> float:
+	return 0.022 if weapon == "dagger" else 0.035 + 0.011 * sword_index
 
 func begin_draw() -> void:
 	if weapon != "bow" or phase != "READY" or _roll_progress >= 0.0:
@@ -298,11 +334,34 @@ func begin_draw() -> void:
 	_phase_time = 0.0
 	_update_pose(0.0)
 
-func get_bow_recovery_progress() -> float:
+func begin_throw() -> bool:
+	if weapon not in ["sword","dagger"] or phase != "READY" or _roll_progress >= 0.0:
+		return false
+	draw_amount = 0.0
+	charge_frozen = false
+	phase = "T_DRAW"
+	_phase_time = 0.0
+	_update_pose(0.0)
+	return true
+
+func charge_seconds() -> float:
+	if weapon == "bow":
+		return float(BOW_DATA[bow_index].draw_seconds)
+	if weapon == "dagger":
+		return float(DAGGER_DATA.seconds)
+	return float(SWORD_DATA[sword_index].seconds)
+
+func throw_speed() -> float:
+	return float(DAGGER_DATA.throw_speed) if weapon == "dagger" else float(SWORD_DATA[sword_index].throw_speed)
+
+func get_throw_origin() -> Vector3:
+	return active_dagger.global_position if weapon == "dagger" else active_sword.global_position
+
+func get_recovery_progress() -> float:
 	var duration := RELEASE_SECONDS + RECOVER_SECONDS
-	if phase == "RELEASE":
+	if phase in ["RELEASE","T_RELEASE"]:
 		return clampf(_phase_time/duration,0,1)
-	if phase == "RECOVER":
+	if phase in ["RECOVER","T_RECOVER"]:
 		return clampf((RELEASE_SECONDS+_phase_time)/duration,0,1)
 	return 1.0
 
@@ -326,9 +385,26 @@ func release_string() -> void:
 	arrow_released.emit(origin,direction,float(BOW_DATA[bow_index].speed)*lerpf(0.45,1.0,_release_charge),_release_charge)
 	_update_pose(0.0)
 
+func release_throw() -> void:
+	if phase not in ["T_DRAW","T_HOLD"] or weapon not in ["sword","dagger"]:
+		return
+	charge_frozen = false
+	_release_charge = clampf(draw_amount,0,1)
+	_release_draw = draw_amount
+	var origin := get_throw_origin()
+	var direction := (_aim_point-origin).normalized()
+	if direction.length_squared() < 0.0001:
+		direction = -global_basis.z
+	phase = "T_RELEASE"
+	_phase_time = 0.0
+	# Endless supply: the equipped weapon is never consumed, only a flying copy
+	# leaves the hand. Damage scales with charge exactly like a bow draw.
+	weapon_thrown.emit(origin,direction,throw_speed()*lerpf(0.45,1.0,_release_charge),_release_charge,weapon,sword_index if weapon == "sword" else 0)
+	_update_pose(0.0)
+
 func cancel_draw() -> void:
 	charge_frozen = false
-	if phase not in ["DRAWING","HOLDING","MELEE"]:
+	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD","MELEE"]:
 		return
 	phase = "READY"
 	draw_amount = 0.0
@@ -366,7 +442,7 @@ func set_cover(active: bool, outward: Vector3, crouch_amount: float, peeking: bo
 		global_basis = Basis(Vector3.UP,atan2(-outward.x,-outward.z))
 
 func set_blocking(active: bool, forward: Vector3 = Vector3.ZERO) -> void:
-	_blocking = active and weapon == "sword"
+	_blocking = active and weapon in ["sword","dagger"]
 	if _blocking:
 		face_block(forward)
 	_update_pose(0.0)
@@ -382,7 +458,7 @@ func is_blocking() -> bool:
 	return _blocking
 
 func in_strike_window() -> bool:
-	if phase != "MELEE" or weapon != "sword":
+	if phase != "MELEE" or weapon not in ["sword","dagger"]:
 		return false
 	var window := _melee_window()
 	return _phase_time >= window.x-0.000001 and _phase_time <= window.y+0.000001
@@ -414,7 +490,7 @@ func get_animation_state() -> Dictionary:
 func apply_animation_state(state: Dictionary) -> void:
 	var replicated_phase := str(state.phase)
 	var guard_phase := replicated_phase == "GUARD"
-	_blocking = guard_phase and weapon == "sword"
+	_blocking = guard_phase and weapon in ["sword","dagger"]
 	phase = "READY" if guard_phase else replicated_phase
 	draw_amount = float(state.draw)
 	charge_frozen = bool(state.charge_frozen)
@@ -470,9 +546,13 @@ func get_joint_positions() -> Dictionary:
 	return result
 
 func get_blade_base() -> Vector3:
+	if weapon == "dagger":
+		return active_dagger.to_global(Vector3(0,0,-0.09))
 	return active_sword.to_global(Vector3(0,0,-0.09))
 
 func get_blade_tip() -> Vector3:
+	if weapon == "dagger":
+		return active_dagger.to_global(Vector3(0,0,-float(DAGGER_DATA.length)-0.09))
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
 
 func _physics_process(delta: float) -> void:
@@ -495,8 +575,8 @@ func advance_animation(delta: float) -> void:
 		_advance_step(step)
 		var window := _melee_window()
 		if _phase_time >= window.x and previous_time <= window.y and _roll_progress < 0.0:
-			melee_sweep.emit(previous_base,previous_tip,get_blade_base(),get_blade_tip(),0.035+0.011*sword_index)
-		if _phase_time >= float(SWORD_DATA[sword_index].seconds)-0.000001:
+			melee_sweep.emit(previous_base,previous_tip,get_blade_base(),get_blade_tip(),melee_radius())
+		if _phase_time >= melee_seconds()-0.000001:
 			phase = "READY"
 			_phase_time = 0.0
 		remaining -= step
@@ -525,21 +605,39 @@ func _advance_step(delta: float) -> void:
 				draw_amount = 1.0
 				phase = "HOLDING"
 				_phase_time = 0.0
+		"T_DRAW":
+			if not charge_frozen:
+				draw_amount = minf(1.0,draw_amount+delta/charge_seconds())
+			if draw_amount >= 1.0-0.000001:
+				draw_amount = 1.0
+				phase = "T_HOLD"
+				_phase_time = 0.0
 		"RELEASE":
 			draw_amount = _release_draw*(1.0-smoothstep(0.0,0.075,_phase_time))
 			if _phase_time >= RELEASE_SECONDS:
 				draw_amount = 0.0
 				phase = "RECOVER"
 				_phase_time -= RELEASE_SECONDS
-	if phase == "RECOVER" and _phase_time >= RECOVER_SECONDS-0.000001:
+		"T_RELEASE":
+			draw_amount = _release_draw*(1.0-smoothstep(0.0,0.075,_phase_time))
+			if _phase_time >= RELEASE_SECONDS:
+				draw_amount = 0.0
+				phase = "T_RECOVER"
+				_phase_time -= RELEASE_SECONDS
+	if phase in ["RECOVER","T_RECOVER"] and _phase_time >= RECOVER_SECONDS-0.000001:
 		phase = "READY"
 		_phase_time = 0.0
 	_update_pose(delta)
 
 func _melee_clip() -> Dictionary:
+	if weapon == "dagger":
+		return _profile.clips.stab
 	return _profile.clips.overhead if sword_index == 2 else _profile.clips.overhead_one_hand
 
 func _melee_window() -> Vector2:
+	if weapon == "dagger":
+		var clip := _melee_clip()
+		return Vector2(float(clip.strike_start),float(clip.strike_end))
 	var duration := float(SWORD_DATA[sword_index].seconds)
 	var cut_seconds := 0.22+0.04*sword_index
 	var windup := (duration-cut_seconds)*0.55
@@ -548,12 +646,27 @@ func _melee_window() -> Vector2:
 func _melee_clip_time() -> float:
 	var clip := _melee_clip()
 	var window := _melee_window()
-	var duration := float(SWORD_DATA[sword_index].seconds)
+	var duration := melee_seconds()
 	if _phase_time < window.x:
 		return lerpf(0.0,float(clip.strike_start),clampf(_phase_time/window.x,0,1))
 	if _phase_time < window.y:
 		return lerpf(float(clip.strike_start),float(clip.strike_end),(_phase_time-window.x)/(window.y-window.x))
 	return lerpf(float(clip.strike_end),float(clip.duration),clampf((_phase_time-window.y)/(duration-window.y),0,1))
+
+func _throw_clip_time() -> float:
+	# Charge winds through the authored chamber; release snaps through the
+	# authored strike, then the follow-through doubles as the resupply recovery.
+	var clip := _melee_clip()
+	var strike_start := float(clip.strike_start)
+	var strike_end := float(clip.strike_end)
+	match phase:
+		"T_DRAW":
+			return lerpf(0.0,strike_start,clampf(_phase_time/charge_seconds(),0,1))
+		"T_HOLD":
+			return strike_start
+		"T_RELEASE":
+			return lerpf(strike_start,strike_end,smoothstep(0.0,RELEASE_SECONDS,_phase_time))
+	return lerpf(strike_end,float(clip.duration),smoothstep(0.0,RECOVER_SECONDS,_phase_time))
 
 func _archery_weight() -> float:
 	if phase == "DRAWING":
@@ -589,10 +702,11 @@ func _update_pose(delta: float) -> void:
 	var sliding := _grounded and _roll_progress < 0.0 and not _cover_active and (slide_progress >= 0.0 or _slide_weight > 0.0)
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
-	var coupled_carry := weapon == "sword" and sword_index == 2 and phase != "MELEE"
+	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
+	var coupled_carry := weapon == "sword" and sword_index == 2 and phase != "MELEE" and not throwing
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
-	var action := phase == "MELEE" or drawing or guarding or _cover_active
+	var action := phase == "MELEE" or drawing or throwing or guarding or _cover_active
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
 	var archery := _archery_weight() if drawing else 0.0
@@ -608,7 +722,7 @@ func _update_pose(delta: float) -> void:
 	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
 	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery)
 	_model.position = Vector3.ZERO
-	var clip := ("Sword_Idle" if sword_index == 2 else "Sword_Idle_OneHand") if weapon == "sword" else "Idle_Loop"
+	var clip := ("Sword_Idle" if sword_index == 2 else "Sword_Idle_OneHand") if weapon == "sword" else ("Sword_Idle_OneHand" if weapon == "dagger" else "Idle_Loop")
 	var time := fposmod(_motion_time,_player.get_animation(clip).length)
 	if _roll_progress >= 0.0:
 		clip = "Roll"
@@ -616,10 +730,13 @@ func _update_pose(delta: float) -> void:
 	elif phase == "MELEE":
 		clip = str(_melee_clip().name)
 		time = _melee_clip_time()
+	elif throwing:
+		clip = str(_melee_clip().name)
+		time = _throw_clip_time()
 	elif drawing:
 		time = 0.0
 	elif guarding:
-		clip = "Sword_Block_Loop" if sword_index == 2 else "Sword_Block_Loop_OneHand"
+		clip = "Sword_Block_Loop" if weapon == "sword" and sword_index == 2 else "Sword_Block_Loop_OneHand"
 		time = fposmod(_motion_time,_player.get_animation(clip).length)
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
@@ -677,7 +794,7 @@ func _update_pose(delta: float) -> void:
 		for index in _guard_bones.size():
 			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
 	if crouching:
-		_apply_cover_crouch(drawing or phase == "MELEE" or coupled_carry or _blocking)
+		_apply_cover_crouch(drawing or phase == "MELEE" or throwing or coupled_carry or _blocking)
 	if moving and action:
 		var spine_pose := _bone_world(_bones.spine_01)
 		var pelvis := _bone_world(_bones.pelvis)
@@ -689,11 +806,16 @@ func _update_pose(delta: float) -> void:
 		_set_bone_world(_bones.spine_01,corrected_spine)
 	if leaning:
 		_apply_cover_lean()
+	var low_stab := 0.0
+	if weapon == "dagger" and phase == "MELEE":
+		low_stab = _low_stab_depth()*_low_stab_ramp()
+	if low_stab > 0.0:
+		_apply_low_stab(low_stab)
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
-			_apply_slide_pose(drawing or phase == "MELEE" or coupled_carry or _blocking)
+			_apply_slide_pose(drawing or phase == "MELEE" or throwing or coupled_carry or _blocking)
 		_place_feet()
 	if drawing:
 		var head := _bone_world(_bones.Head)
@@ -703,9 +825,40 @@ func _update_pose(delta: float) -> void:
 		_update_bow_pose(drawing)
 	else:
 		_update_hand_contacts()
-		active_sword.global_transform = _bone_world(_arms[1][2]) * _sword_grip
+		if weapon == "dagger":
+			active_dagger.global_transform = _bone_world(_arms[1][2]) * _sword_grip
+		else:
+			active_sword.global_transform = _bone_world(_arms[1][2]) * _sword_grip
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
+	_sync_weapon_visibility()
+
+func _low_stab_depth() -> float:
+	if weapon != "dagger" or phase != "MELEE" or _roll_progress >= 0.0:
+		return 0.0
+	var offset := _aim_point-global_position
+	var horizontal := Vector2(offset.x,offset.z).length()
+	# Only a nearby, genuinely low aim asks for the lunge. A distant camera
+	# ray hitting the ground must not squat the character on every stab.
+	if horizontal < 0.2 or horizontal > LOW_STAB_RANGE or offset.y >= LOW_STAB_AIM_HEIGHT:
+		return 0.0
+	return LOW_STAB_DEPTH*(1.0-_crouch_amount)
+
+func _low_stab_ramp() -> float:
+	var window := _melee_window()
+	return minf(smoothstep(0.0,window.x,_phase_time),
+		1.0-smoothstep(window.y,melee_seconds(),_phase_time))
+
+func _apply_low_stab(amount: float) -> void:
+	# Lower the pelvis while keeping both feet planted; the authored stab pose
+	# and its weapon socket ride down with the torso.
+	var left := _bone_world(_legs[0][2])
+	var right := _bone_world(_legs[1][2])
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.origin.y -= amount
+	_set_bone_world(_bones.pelvis,pelvis)
+	_solve_limb(_legs[0],left.origin,left.basis)
+	_solve_limb(_legs[1],right.origin,right.basis)
 
 func _apply_cover_crouch(lower_only: bool) -> void:
 	# Authored crouch steps replace standing strides; aim and sword grips keep their upper-body pose.

@@ -2,6 +2,7 @@ extends Node
 ## Manual bow and sword combat shared by the frontier and authoritative arena actors.
 
 signal shot(origin: Vector3, direction: Vector3, speed: float, charge: float)
+signal thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon: String, weapon_index: int)
 signal clash(position: Vector3)
 signal defense_resolved(defender_slot: int, position: Vector3, parried: bool)
 
@@ -13,6 +14,8 @@ const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
 const BLOCK_STAMINA := 22.0
+const DAGGER_BLOCK_STAMINA := 30.0
+const WEAK_BLOCK_DAMAGE_SCALE := 0.5
 const BLOCK_PUSH_SPEED := 5.5
 const BLOCK_FACING_DOT := 0.35
 const CLASH_FACING_DOT := 0.35
@@ -21,6 +24,7 @@ const CLASH_BOT_DELAY := 0.4
 const DEFENSE_NONE := 0
 const DEFENSE_PARRY := 1
 const DEFENSE_BLOCK := 2
+const DEFENSE_WEAK_BLOCK := 3
 var rig
 var aim_point := Vector3.ZERO
 var attack_progress := 1.0
@@ -35,6 +39,7 @@ var _cover_attack := false
 var _auto_exposure := false
 var _release_pending := false
 var _shaft_grace := 0.0
+var _pending_throw := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
@@ -54,12 +59,15 @@ var _source_exclude: Array[RID] = []
 var _melee_victims: Dictionary = {}
 var _melee_active := false
 var _melee_blocked := false
-var _swing_sword_index := -1
+var _swing_weapon := "sword"
+var _swing_damage := 0.0
+var _swing_seconds := 1.0
 
 func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	rig = archer
 	aim_point = initial_aim
 	rig.arrow_released.connect(_on_rig_shot)
+	rig.weapon_thrown.connect(_on_rig_throw)
 	rig.melee_started.connect(_on_melee_started)
 	rig.melee_sweep.connect(_on_melee_sweep)
 	rig.loadout_changed.connect(_on_loadout_changed)
@@ -88,10 +96,47 @@ func begin_draw() -> bool:
 	update_aim()
 	return true
 
+func can_throw() -> bool:
+	return rig.weapon in ["sword","dagger"] and grounded and rig.phase == "READY" \
+		and rig._roll_progress < 0.0 and stagger_time <= 0.0 \
+		and melee_progress >= 1.0-0.000001
+
+func begin_throw() -> bool:
+	if not can_throw() or not _accept_cover_draw():
+		return false
+	stop_block()
+	if not rig.begin_throw():
+		return false
+	update_aim()
+	return true
+
+func release_throw() -> void:
+	if rig.phase not in ["T_DRAW","T_HOLD"] or rig.weapon not in ["sword","dagger"] \
+			or _release_pending:
+		return
+	if _cover_attack and not _cover_attached():
+		stop()
+		return
+	if _cover_attached():
+		if not grounded or rig._roll_progress >= 0.0 or not cover.can_peek(cover_side):
+			stop()
+			return
+		_cover_attack = true
+		if not _can_release_from_cover():
+			_auto_exposure = true
+		_release_pending = true
+		_pending_throw = true
+		_shaft_grace = 0.0
+		rig.charge_frozen = true
+		_try_cover_release(0.0)
+		return
+	update_aim()
+	rig.release_throw()
+
 func start_block(forward: Vector3) -> bool:
 	if blocking:
 		return true
-	if not grounded or stagger_time > 0.0 or rig.weapon != "sword" \
+	if not grounded or stagger_time > 0.0 or rig.weapon not in ["sword","dagger"] \
 			or rig.phase != "READY" or rig._roll_progress >= 0.0:
 		return false
 	if is_instance_valid(actor) and actor.get("alive") == false:
@@ -127,7 +172,14 @@ func resolve_melee_defense(attacker_position: Vector3) -> int:
 	if to_attacker.length_squared() > 0.000001 and forward.length_squared() > 0.000001 \
 			and forward.normalized().dot(to_attacker.normalized()) < BLOCK_FACING_DOT:
 		return DEFENSE_NONE
+	# A dagger cannot set a proper edge or lever: it never parries and only
+	# softens a hit. Swords retain the timing-based parry/block split.
+	if rig.weapon == "dagger":
+		return DEFENSE_WEAK_BLOCK
 	return DEFENSE_PARRY if block_time <= PARRY_WINDOW else DEFENSE_BLOCK
+
+func block_stamina_cost() -> float:
+	return DAGGER_BLOCK_STAMINA if rig.weapon == "dagger" else BLOCK_STAMINA
 
 func stagger(seconds: float) -> void:
 	stagger_time = maxf(stagger_time,seconds)
@@ -157,6 +209,7 @@ func release_draw() -> void:
 			_auto_exposure = true
 		_release_pending = true
 		_shaft_grace = 0.0
+		_pending_throw = false
 		rig.charge_frozen = true
 		_try_cover_release(0.0)
 		return
@@ -172,13 +225,14 @@ func stop() -> void:
 	_auto_exposure = false
 	_release_pending = false
 	_shaft_grace = 0.0
+	_pending_throw = false
 	_melee_active = false
 	stop_block()
 	rig.cancel_draw()
 
 func wants_cover_exposure() -> bool:
 	return _auto_exposure and _cover_attached() \
-		and rig.phase in ["DRAWING","HOLDING","RELEASE"]
+		and rig.phase in ["DRAWING","HOLDING","RELEASE","T_DRAW","T_HOLD","T_RELEASE"]
 
 func _cover_attached() -> bool:
 	return is_instance_valid(cover) and cover.active
@@ -193,13 +247,21 @@ func _accept_cover_draw() -> bool:
 func _try_cover_release(delta: float) -> void:
 	if not _release_pending or not _can_release_from_cover():
 		return
-	if rig.phase == "DRAWING" and rig._phase_time < Archer.RAISE_SECONDS:
+	if rig.phase in ["DRAWING","T_DRAW"] and rig._phase_time < Archer.RAISE_SECONDS:
 		return
 	# A remote camera must have observed this physical exposure before its
 	# near-cover aim can authorize release. Charge stays frozen while it catches up.
 	if not cover_aim_ready:
 		return
 	update_aim()
+	if _pending_throw:
+		if not _cover_throw_clear():
+			stop()
+			return
+		_release_pending = false
+		_pending_throw = false
+		rig.release_throw()
+		return
 	if not _cover_shaft_clear():
 		# A fresh exposure still has its lean/bow pose blending. Give the
 		# settled pose a bounded chance to clear before calling it an obstruction.
@@ -226,9 +288,25 @@ func _cover_shaft_clear() -> bool:
 	_shaft_query.motion = tip-nock
 	return space.cast_motion(_shaft_query)[0] >= 1.0
 
+func _cover_throw_clear() -> bool:
+	if not is_instance_valid(actor):
+		return false
+	var origin: Vector3 = rig.get_throw_origin()
+	var direction: Vector3 = (aim_point-origin).normalized()
+	if direction.length_squared() < 0.5:
+		return false
+	# The weapon leaves the exposed hand along the aim line. A wall between the
+	# hand and the first metre of flight cancels the throw instead of passing
+	# the weapon through cover.
+	_sight_query.from = origin
+	_sight_query.to = origin + direction*1.2
+	_sight_query.collision_mask = 1
+	_sight_query.exclude = _source_exclude
+	return actor.get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty()
+
 func begin_melee() -> bool:
 	if not grounded or melee_progress < 1.0 - 0.000001 or stagger_time > 0.0 \
-			or rig.weapon != "sword" or rig.phase != "READY" or rig._roll_progress >= 0.0:
+			or rig.weapon not in ["sword","dagger"] or rig.phase != "READY" or rig._roll_progress >= 0.0:
 		return false
 	stop()
 	if _cover_attached():
@@ -248,7 +326,9 @@ func _on_melee_started() -> void:
 	_source_exclude.clear()
 	_melee_active = true
 	_melee_blocked = false
-	_swing_sword_index = rig.sword_index
+	_swing_weapon = rig.weapon
+	_swing_damage = rig.melee_damage()
+	_swing_seconds = rig.melee_seconds()
 	if is_instance_valid(actor):
 		_source_exclude.append(actor.get_rid())
 		_melee_exclude.append(actor.get_rid())
@@ -257,8 +337,8 @@ func _on_melee_started() -> void:
 func _can_damage_melee() -> bool:
 	return damage_enabled and _melee_active and not _melee_blocked \
 		and is_instance_valid(actor) and actor.get("alive") != false \
-		and rig.weapon == "sword" and rig.phase == "MELEE" \
-		and rig.sword_index == _swing_sword_index and rig._roll_progress < 0.0
+		and rig.weapon == _swing_weapon and rig.phase == "MELEE" \
+		and rig._roll_progress < 0.0
 
 func _on_melee_sweep(previous_base: Vector3, previous_tip: Vector3,
 		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
@@ -345,7 +425,7 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 			_resolve_clash(unit,target_combat,hit.point)
 			return
 		_melee_victims[unit.get_instance_id()] = true
-		var damage := float(Archer.SWORD_DATA[_swing_sword_index].damage)
+		var damage := _swing_damage
 		# A rest point can sit anywhere in the overlap, so both blade poses are
 		# tested as segments against the animated head zone.
 		var headshot := Hitbox.blade_headshot(unit,base_from,tip_from,radius) \
@@ -359,6 +439,9 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 			_block_feedback(unit,hit.point,true)
 		elif outcome == DEFENSE_BLOCK:
 			_block_feedback(unit,hit.point,false)
+		elif outcome == DEFENSE_WEAK_BLOCK:
+			# A dagger only softens the hit; the attacker's swing continues.
+			_block_feedback(unit,hit.point,false,false)
 	if world_fraction < 1.0:
 		# An authored animation may continue beyond a wall; it must not resume
 		# damage on the far side in the next sample of this same swing.
@@ -416,14 +499,14 @@ func abort_melee_to_neutral() -> void:
 	if is_instance_valid(rig) and rig.phase == "MELEE":
 		rig.cancel_draw()
 
-func _block_feedback(unit: Node, at: Vector3, parried: bool) -> void:
+func _block_feedback(unit: Node, at: Vector3, parried: bool, reset_attacker: bool = true) -> void:
 	var defender_slot := int(unit.get("slot")) if unit.get("slot") != null else -1
 	defense_resolved.emit(defender_slot,at,parried)
-	if not parried:
+	if not parried and reset_attacker:
 		# A held block is a neutral reset: the attacker's swing is knocked aside
 		# instead of retaining a long recovery the defender could punish for free.
 		abort_melee_to_neutral()
-	elif is_instance_valid(actor) and actor.has_method("stagger"):
+	elif parried and is_instance_valid(actor) and actor.has_method("stagger"):
 		actor.stagger(PARRY_STAGGER)
 
 static func spawn_impact(parent: Node3D, at: Vector3, kind: String) -> void:
@@ -478,8 +561,8 @@ func _can_release_from_cover() -> bool:
 		or cover.lean.dot(cover.normal.cross(Vector3.UP))*float(cover_side) > 0.0))
 
 func get_attack_interval() -> float:
-	if rig.weapon == "sword" and rig.phase not in ["RELEASE", "RECOVER"]:
-		return float(Archer.SWORD_DATA[rig.sword_index].seconds)
+	if rig.weapon in ["sword","dagger"] and rig.phase not in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
+		return rig.melee_seconds()
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:
@@ -497,10 +580,11 @@ func advance(delta: float) -> void:
 		if not _cover_attached() or not grounded or rig._roll_progress >= 0.0 \
 				or (is_instance_valid(actor) and actor.get("alive") == false):
 			stop()
-		elif rig.phase in ["RECOVER","READY"]:
+		elif rig.phase in ["RECOVER","READY","T_RECOVER"]:
 			_cover_attack = false
 			_auto_exposure = false
 			_release_pending = false
+			_pending_throw = false
 		elif (_auto_exposure or _release_pending) and not cover.can_peek(cover_side):
 			stop()
 		elif _release_pending:
@@ -509,16 +593,16 @@ func advance(delta: float) -> void:
 			_try_cover_release(delta)
 	# Sword recovery continues across weapon swaps but never gates a bow draw.
 	if melee_progress < 1.0:
-		melee_progress = minf(1.0, melee_progress + delta / float(Archer.SWORD_DATA[rig.sword_index].seconds))
+		melee_progress = minf(1.0, melee_progress + delta / _swing_seconds)
 	# Bow readiness follows the actual release/re-nock animation, not a second timer.
-	if rig.weapon == "bow" or rig.phase in ["RELEASE", "RECOVER"]:
-		attack_progress = rig.get_bow_recovery_progress()
+	if rig.weapon == "bow" or rig.phase in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
+		attack_progress = rig.get_recovery_progress()
 	else:
 		attack_progress = melee_progress
 	update_aim()
 
 func update_aim() -> void:
-	if rig.phase == "RELEASE" or rig.phase == "RECOVER":
+	if rig.phase in ["RELEASE","RECOVER","T_RELEASE","T_RECOVER"]:
 		return
 	# Aim is a world-space point from the camera ray, never a tracked unit or
 	# a compensated ballistic solution. Gravity acts after the arrow is released.
@@ -527,8 +611,18 @@ func update_aim() -> void:
 static func damage_for(bow_index: int, charge: float) -> float:
 	return float(BASE_DAMAGE[bow_index]) * clampf(charge, 0.0, 1.0)
 
+static func throw_damage(weapon_name: String, weapon_index: int, charge: float) -> float:
+	var base := float(Archer.DAGGER_DATA.damage) if weapon_name == "dagger" \
+		else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].damage)
+	return base * clampf(charge, 0.0, 1.0)
+
 
 func _on_rig_shot(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	attack_progress = 0.0
 	# The checked visible shaft owns the muzzle; never relocate it to the chest.
 	shot.emit(origin, direction, speed, clampf(charge, 0.0, 1.0))
+
+func _on_rig_throw(origin: Vector3, direction: Vector3, speed: float, charge: float,
+		weapon_name: String, weapon_index: int) -> void:
+	attack_progress = 0.0
+	thrown.emit(origin, direction, speed, clampf(charge, 0.0, 1.0), weapon_name, weapon_index)

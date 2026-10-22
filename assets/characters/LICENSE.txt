@@ -70,6 +70,16 @@ two-hand clip's support arm is solved onto the actual hilt. Blade directions,
 wrist/elbow targets, planted-foot solve and clearance validation are recorded
 in ironwood_ranger.json.
 
+Authored dagger thrust (no new external source)
+tools/prepare_character.py authors Dagger_Stab as a 31-sample, 0.5-second
+forward thrust built from the existing licensed Sword_Idle_OneHand pose. The
+right hand chambers beside the ribs and drives along the character's forward
+axis; the sword socket is rolled so the dagger blade leads the fist, and the
+existing authored right-hand finger grip is retained. Feet stay planted through
+a fixed-length leg solve. The clip animates only the Ranger skeleton; the dagger
+is the runtime socketed weapon. Timing, authored targets and contact window are
+recorded in ironwood_ranger.json.
+
 Gres — Humanoid SoulsLike Animations (October 4, 2026)
 https://opengameart.org/content/humanoid-soulslike-animations
 https://opengameart.org/users/gres
