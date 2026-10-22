@@ -2,7 +2,9 @@
 Run: blender --background --python tools/prepare_character.py -- SOURCE_DIR OUTPUT_GLB
 SOURCE_DIR contains the unpacked Standard archives and Gres' original .blend;
 see assets/characters/LICENSE.txt for acquisition URLs and original filenames.
-Source locomotion/combat is retargeted; additive cover leans are authored here.
+Source locomotion/combat is retargeted; additive cover leans and held sword
+guards are authored here. Guard clips animate the character skeleton only;
+the sword remains a runtime socketed weapon.
 """
 import bpy
 import bmesh
@@ -260,6 +262,64 @@ def author_cover(name, idle, direction, degrees):
     return action
 
 
+def author_guard_loop(name, base_action, blade_direction, wrist, elbow, frames=120, two_hand=False):
+    """Author a character-only held guard from an existing sword stance.
+
+    The right hand is solved to a fixed front-of-chest target and rolled until
+    the sword socket points along the requested armature-space blade direction.
+    The pelvis breathes while both ankles stay planted. A two-hand clip then
+    re-solves the support arm onto the actual hilt; the sword itself is never
+    part of the skinned character or these clips.
+    """
+    set_action(rig, base_action)
+    bpy.context.scene.frame_set(0)
+    base_basis = {bone.name: bone.matrix_basis.copy() for bone in rig.pose.bones}
+    base_world = {bone.name: bone.matrix.copy() for bone in rig.pose.bones}
+    hand_rotation = rig.pose.bones['hand_r'].matrix.to_quaternion()
+    # Use the exported/runtime grip, not the Blender-only socket object, whose
+    # additional axis compensation exists only for bone parenting.
+    grip_rotation = socket_matrix.to_quaternion()
+    blade = (hand_rotation @ (grip_rotation @ Vector((0, 0, -1)))).normalized()
+    hand_rotation = blade.rotation_difference(Vector(blade_direction).normalized()) @ hand_rotation
+    knuckles = sum((rig.data.bones[f'{finger}_01_l'].head_local for finger in ['index', 'middle', 'ring', 'pinky']), Vector()) / 4
+    palm = rest['hand_l'].inverted() @ ((knuckles + rig.data.bones['hand_l'].head_local) / 2)
+    action = bpy.data.actions.new(name)
+    set_action(rig, action)
+    for frame in range(frames):
+        phase = math.tau * frame / frames
+        breath = math.sin(phase)
+        sway = math.cos(phase)
+        for bone in rig.pose.bones:
+            bone.matrix_basis = base_basis[bone.name]
+        bpy.context.view_layer.update()
+        set_rotation('pelvis', Matrix.Rotation(math.radians(-2.0 + 0.5 * sway), 3, 'Z').to_quaternion() @ base_world['pelvis'].to_quaternion())
+        pelvis = rig.pose.bones['pelvis'].matrix.copy()
+        pelvis.translation = base_world['pelvis'].translation + Vector((0.004 * sway, 0.002 * breath, -0.025 + 0.003 * breath))
+        rig.pose.bones['pelvis'].matrix = pelvis
+        bpy.context.view_layer.update()
+        lean = 4.0 + 0.7 * breath
+        yaw = 6.0 + 0.6 * sway
+        for bone_name, factor in [('spine_01', 0.50), ('spine_02', 0.80), ('spine_03', 1.0), ('neck_01', 0.90), ('Head', 0.80)]:
+            rotation = (Matrix.Rotation(math.radians(yaw * factor), 3, 'Z') @ Matrix.Rotation(math.radians(lean * factor), 3, 'X')).to_quaternion()
+            set_rotation(bone_name, rotation @ base_world[bone_name].to_quaternion())
+        target = Vector(wrist) + Vector((0.005 * sway, 0.006 * breath, 0.004 * breath))
+        solve_arm('r', target, Vector(elbow), hand_rotation)
+        for side in ('l', 'r'):
+            solve_planted_leg(side, base_world['foot_' + side].translation,
+                              base_world['calf_' + side].translation + Vector((0, -0.1, 0)),
+                              base_world['foot_' + side].to_quaternion())
+        for bone in rig.pose.bones:
+            bone.keyframe_insert('location', frame=frame, group=bone.name)
+            bone.keyframe_insert('rotation_quaternion', frame=frame, group=bone.name)
+            bone.keyframe_insert('scale', frame=frame, group=bone.name)
+    action.use_fake_user = True
+    support = None
+    if two_hand:
+        support = correct_support_arm(rig, body_mesh, action, socket_matrix, palm, set_rotation, solve_arm)
+    print('AUTHORED_GUARD', name, frames, 'frames', frames / FPS, 'seconds', 'support', support)
+    return action, support
+
+
 def measure_crouch(action, standing_pelvis_height):
     set_action(rig, action)
     heights, feet = [], {'l': [], 'r': []}
@@ -381,6 +441,7 @@ for frame in range(150, 166):
     one_hand_times[frame] = sample_frames[upper - 1] + fraction * (sample_frames[upper] - sample_frames[upper - 1])
 finished.append(bake('Sword_Overhead_OneHand', ual2, [(one_hand_source,135,260)], identity, 1.0, source_times=one_hand_times))
 finished.append(bake('Sword_Idle_OneHand', ual, [(ual_actions['Sword_Idle'],0,100)], identity, 1.0))
+one_hand_idle = finished[-1]
 
 # Gres authored two-handed motion is 60 fps and has a distinct skeletal rig.
 with bpy.data.libraries.load(str(SOURCE / 'playerstraightswordanimations.blend'), link=False) as (data_from, data_to):
@@ -415,6 +476,7 @@ left_knuckles = sum((rig.data.bones[f'{finger}_01_l'].head_local for finger in [
 left_palm_local = rest['hand_l'].inverted() @ ((left_knuckles + rig.data.bones['hand_l'].head_local) / 2)
 finished.append(bake('Sword_Idle', source, [(gres_actions['Idle_SS_TH'],1,145)], mapping, scale, grip=True))
 finished[-1]['export_name'] = 'Sword_Idle'
+two_hand_idle = finished[-1]
 finished.append(bake('Sword_Overhead', source, [(gres_actions['SS_TH_Charge02_Start'],1,23),(gres_actions['SS_TH_Charge02_Heavy'],2,55)], mapping, scale, grip=True))
 body_mesh = next(obj for obj in ranger_objects if obj.type == 'MESH' and obj.name == 'Male_Ranger_Body')
 support_clearance = {
@@ -432,6 +494,20 @@ socket.matrix_parent_inverse = Matrix.Identity(4)
 socket.matrix_basis = Matrix.Translation((0, -rig.data.bones['hand_r'].length, 0)) @ socket_matrix @ Matrix.Rotation(-math.pi / 2, 4, 'X')
 ranger_objects.add(socket)
 print('SWORD_SOCKET_HAND_LOCAL', [list(row) for row in socket_matrix])
+
+# Character-only held guards. The sword remains a runtime socket; these clips
+# control the body, planted feet, and (for the greatsword) the support hilt.
+one_hand_block, _ = author_guard_loop(
+    'Sword_Block_Loop_OneHand', one_hand_idle,
+    Vector((0.86, -0.20, 0.47)), Vector((-0.18, -0.32, 1.24)), Vector((-0.46, -0.02, 1.08)),
+    frames=120, two_hand=False)
+finished.append(one_hand_block)
+two_hand_block, two_hand_support = author_guard_loop(
+    'Sword_Block_Loop', two_hand_idle,
+    Vector((0.94, -0.12, 0.32)), Vector((-0.06, -0.31, 1.18)), Vector((-0.38, -0.08, 1.05)),
+    frames=120, two_hand=True)
+finished.append(two_hand_block)
+support_clearance['Sword_Block_Loop'] = two_hand_support
 
 # Remove sources and their animation tracks. Export only baked required actions.
 for obj in list(bpy.data.objects):
@@ -502,6 +578,8 @@ metadata = {
     'clips': {
         'overhead': {'name': 'Sword_Overhead', 'duration': durations['Sword_Overhead'], 'strike_start': 41/60, 'strike_end': 56/60},
         'overhead_one_hand': {'name': 'Sword_Overhead_OneHand', 'duration': durations['Sword_Overhead_OneHand'], 'strike_start': 15/60, 'strike_end': 30/60},
+        'block_one_hand': {'name': 'Sword_Block_Loop_OneHand', 'duration': durations['Sword_Block_Loop_OneHand'], 'loop': True, 'grip': 'one_hand', 'frames': 120},
+        'block_two_hand': {'name': 'Sword_Block_Loop', 'duration': durations['Sword_Block_Loop'], 'loop': True, 'grip': 'two_hand', 'frames': 120},
         'crouch_idle': {'name': 'Crouch_Idle_Loop', 'duration': durations['Crouch_Idle_Loop'], 'loop': True, **crouch_measurements['Crouch_Idle_Loop']},
         'crouch_forward': {'name': 'Crouch_Fwd_Loop', 'duration': durations['Crouch_Fwd_Loop'], 'loop': True, **crouch_measurements['Crouch_Fwd_Loop']},
         **{key: {'name': name, 'duration': durations[name], 'loop': False, 'lean_direction': axis, 'torso_degrees': degrees, 'pelvis_counterbalance': 0.02, 'pelvis_lowering': 0.012} for key, (name, _, degrees, axis) in cover_specs.items()},
@@ -516,6 +594,22 @@ metadata = {
         'rotation_axes': 'Left -Z, right +Z, top +X in asset space; pelvis -3 degrees, spine chain 50/80/100 percent of torso_degrees, neck -2 and head -5 degrees relative to chest',
         'contact': 'Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral',
         'timing': 'Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping',
+    },
+    'block_authoring': {
+        'one_hand': {
+            'name': 'Sword_Block_Loop_OneHand', 'duration': durations['Sword_Block_Loop_OneHand'], 'loop': True,
+            'blade_direction': [0.86, -0.20, 0.47], 'wrist_target': [-0.18, -0.32, 1.24],
+            'elbow_hint': [-0.46, -0.02, 1.08], 'frames': 120,
+        },
+        'two_hand': {
+            'name': 'Sword_Block_Loop', 'duration': durations['Sword_Block_Loop'], 'loop': True,
+            'blade_direction': [0.94, -0.12, 0.32], 'wrist_target': [-0.06, -0.31, 1.18],
+            'elbow_hint': [-0.38, -0.08, 1.05], 'frames': 120,
+        },
+        'axes': 'Armature-space targets; Blender +X = character left, -Y = forward, +Z = up',
+        'contact': 'Fixed-length planted legs; pelvis breathes ±3 mm and spine ±0.7 degrees over 120 samples',
+        'support': 'Two-hand guard keeps the left palm on the actual SwordSocket handle; one-hand guard leaves the offhand free',
+        'runtime': 'The clips animate only the character skeleton; the sword is the normal runtime socketed weapon',
     },
 }
 # Store the editable prepared scene outside the repository for visual inspection.

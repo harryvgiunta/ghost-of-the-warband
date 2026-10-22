@@ -71,7 +71,8 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Space | Jump |
 | Shift + Space | Immediately jump-roll in the movement direction, or forward if stationary |
 | F | Post up against nearby solid cover / leave cover |
-| Hold right mouse in cover | Peek over low cover or around the selected edge of tall cover |
+| Hold right mouse with a sword | Guard. The first 0.25 s is a parry; holding longer standard-blocks each hit and spends stamina |
+| Hold right mouse in cover | Guard and peek over low cover or around the selected edge of tall cover |
 | X | Swap shoulder camera and select the left/right lookout while in cover |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
@@ -80,7 +81,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Release left mouse / Q with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
 | Click left mouse / Q with sword | Break sticky cover and immediately perform one uncharged overhand chop |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
-| Click the world / right mouse | Resume captured mouse-look |
+| Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
 
@@ -142,6 +143,20 @@ Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, inclu
 
 Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
+## Guarding, parries and clashes
+
+Equip a sword with **2** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. A hit from the front resolves from the guard timer, not exact blade geometry:
+
+| Outcome | Trigger | Result |
+| --- | --- | --- |
+| Parry | Block began at most **0.25 s** before the hit | No damage. The attacker is staggered for **0.8 s**, leaving a guaranteed counter-hit. |
+| Standard block | Guard held longer than **0.25 s** before the hit | No damage, **22 stamina** spent, and the defender is pushed slightly away. Both sides return to neutral. |
+| Unblocked | Guard down, wrong facing, rolling, attacking, or no sword | Normal damage applies. |
+
+Releasing RMB drops the guard; pressing an attack while guarding also drops it. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for short and arming swords, and the two-handed `Sword_Block_Loop` for the greatsword. Both are **120-sample / 1.983-second** breathing loops with planted feet; the greatsword's support hand stays on the actual hilt. These clips animate the Ranger rig only; the sword remains the normal socketed runtime weapon, and the lower-body crouch/slide layer does not overwrite the guard arms.
+
+If two sword users are in their active downstroke at the same time and facing each other, their blades **clash** instead of trading damage: sparks and a loud clang, zero damage in both directions, a small bounce apart, and both swings reset so either fighter can immediately act again. A clash never uses an exact sword-to-sword contact test; simultaneous active hit-frames plus mutual facing are sufficient.
+
 The character uses a 65-bone skinned humanoid and authored animation clips. The greatsword has a genuine two-handed overhead load, accelerating downward cut, whole-body weight transfer, closed hilt grip, follow-through and recovery. Short/medium swords use a separate authored one-handed overhead. Windup and recovery absorb the different weapon durations instead of stretching the cutting stroke into slow motion. Source motions are retargeted and grip/timing corrections baked in Blender; sword elbows are not posed by runtime IK. The textured character and environment remain stylized, not photorealistic rendering.
 
 **Shift + Space** starts a tucked forward tumble and directional burst immediately, either from the ground or during a jump. Space alone only jumps; double-tapping it never rolls. Knees and elbows fold, the chin tucks, the weapon stays clear of the torso, and landing compresses the legs before returning to the normal stance. Running or strafing direction takes priority over facing. Only one roll is allowed before landing; it does not grant invulnerability or ignore world collisions.
@@ -168,7 +183,7 @@ git pull --ff-only
 
 ## Development and tests
 
-`assets/characters/ironwood_ranger.glb` contains the skinned character and authored clips; its adjacent JSON records source timing and weapon/palm transforms. `scripts/archer.gd` samples these animations on the physics clock, applies bow/terrain corrections, and emits blade sweeps from the same pose used to render the sword. `assets/characters/ironwood_wolf.glb` is the original textured Briar wolf: a continuous skinned quadruped with a 37-bone rig, deterministic grey coat and in-place idle, trot, bite and death clips. `scripts/wolf_visual.gd` samples them and maps the 1.5 s bite to gameplay's 0.65 s impact and 0.85 s recovery; `enemy.gd` keeps AI, collision, damage and the corpse lifetime authoritative. `combat.gd` handles authoritative swept contact, independent sword recovery and bow readiness. `dodge_roll.gd` owns explicit Shift + Space roll state. `main.gd` controls the frontier; `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas. World and weapon geometry remain runtime-generated.
+`assets/characters/ironwood_ranger.glb` contains the skinned character and authored clips, including the one- and two-handed held guard loops; its adjacent JSON records source timing, guard targets/support clearance and weapon/palm transforms. `scripts/archer.gd` samples these animations on the physics clock, applies bow/terrain corrections, and emits blade sweeps from the same pose used to render the sword. `assets/characters/ironwood_wolf.glb` is the original textured Briar wolf: a continuous skinned quadruped with a 37-bone rig, deterministic grey coat and in-place idle, trot, bite and death clips. `scripts/wolf_visual.gd` samples them and maps the 1.5 s bite to gameplay's 0.65 s impact and 0.85 s recovery; `enemy.gd` keeps AI, collision, damage and the corpse lifetime authoritative. `combat.gd` handles authoritative swept contact, independent sword recovery and bow readiness. `dodge_roll.gd` owns explicit Shift + Space roll state. `main.gd` controls the frontier; `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas. World and weapon geometry remain runtime-generated.
 
 `cover_movement.gd` owns acquisition, supported capsule sweeps, contiguous-surface sliding, bounded firing-corridor search and latched lookout/retuck state. The single authoritative cover snapshot contains physical stance and world-space `lean`; animation snapshots do not duplicate it. `archer.gd` layers the authored pose before foot/weapon corrections. `Combat` checks the actual shaft before a cover release; melee still clears cover before its first swing pose. Arena aim samples carry the observed own-actor snapshot tick, and remote release waits for the current exposure epoch before applying the unchanged shaft collision check. Regressions exercise left/right tree shots, convex and compound cover, slopes/recovery, side swaps/free look, blocked shafts, malformed/stale aim stamps, cancellation, melee exits and observer replication.
 

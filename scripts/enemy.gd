@@ -1,7 +1,7 @@
 extends CharacterBody3D
 
 signal defeated(enemy: Node3D, reward: int)
-signal damaged_player(amount: float)
+signal attacked(attacker: CharacterBody3D, amount: float)
 
 const Geo = preload("res://scripts/geo.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
@@ -14,6 +14,7 @@ var alive := true
 var home := Vector3.ZERO
 var state := "IDLE"
 var _state_time := 0.0
+var _stagger_duration := 0.0
 var _walk_time := 0.0
 var _body: Node3D
 var _wolf: WolfVisual
@@ -99,13 +100,19 @@ func _physics_process(delta: float) -> void:
 	var player_safe := Vector2(player.position.x - safe_center.x, player.position.z - safe_center.z).length() < 19.0
 	var target_direction := Vector3.ZERO
 	var speed := 3.1 if kind == 0 else 2.2
-	if state == "WINDUP":
+	if state == "STAGGER":
+		if _state_time >= _stagger_duration:
+			state = "IDLE"
+			_state_time = 0.0
+	elif state == "WINDUP":
 		if _state_time >= 0.65:
 			if distance < 2.1 and not player_safe and absf(player.position.y - position.y) < 1.7:
-				damaged_player.emit(13.0 if kind == 0 else 23.0)
-			state = "RECOVER"
-			_state_time = 0.0
-			_warning.visible = false
+				attacked.emit(self,13.0 if kind == 0 else 23.0)
+			# A parry can synchronously replace the attack with STAGGER.
+			if state == "WINDUP":
+				state = "RECOVER"
+				_state_time = 0.0
+				_warning.visible = false
 	elif state == "RECOVER":
 		if _state_time > 0.85:
 			state = "IDLE"
@@ -156,6 +163,16 @@ func _steer(direction: Vector3) -> Vector3:
 	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
 		return left
 	return direction.rotated(Vector3.UP, -1.05)
+
+func stagger(seconds: float) -> void:
+	if not alive:
+		return
+	state = "STAGGER"
+	_state_time = 0.0
+	_stagger_duration = maxf(0.0,seconds)
+	_warning.visible = false
+	velocity.x = 0.0
+	velocity.z = 0.0
 
 func take_damage(amount: float, _source_id: int) -> void:
 	if not alive:

@@ -103,7 +103,7 @@ func _ready() -> void:
 	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(480,98))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side",Vector2(15,35),12,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Guard / peek   X  Lookout side",Vector2(15,35),12,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -139,7 +139,7 @@ func _ready() -> void:
 		button.size = Vector2(100,32)
 		button.pressed.connect(func(): armor_selected.emit(index))
 		armor_buttons.append(button)
-	_ui._label(equipment,"ESC / I: cursor. Sizes are mouse-only.",Vector2(14,278),12,UI.MUTED)
+	_ui._label(equipment,"ESC / I: cursor. Sizes: mouse. RMB: guard.",Vector2(14,278),12,UI.MUTED)
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
@@ -176,6 +176,8 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "DRAW %.0f%% / DAMAGE x%.2f / RELEASE TO FIRE" % [float(state.draw)*100,float(state.draw)]
 	elif state.phase == "MELEE":
 		attack_label.text = "OVERHAND CHOP / %.1f s SWING" % float(state.attack_interval)
+	elif state.get("blocking",false):
+		attack_label.text = "PARRY WINDOW / COUNTER NOW" if state.get("parry",false) else "GUARDING / HOLD RMB"
 	elif state.phase in ["RELEASE", "RECOVER"]:
 		attack_label.text = "NOCKING NEXT ARROW / %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	elif float(state.attack_progress) < 0.999999:

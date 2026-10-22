@@ -49,6 +49,8 @@ func _ready() -> void:
 		actor.configure(0,true,"Bot %d" % (index+1),world.spawn_points[index])
 		actor.fired.connect(_on_fired)
 		actor.killed.connect(_on_killed)
+		actor.combat.clash.connect(_on_clash)
+		actor.combat.defense_resolved.connect(_on_defense_resolved)
 		actor.visible = false
 		actors.append(actor)
 	camera = Camera3D.new()
@@ -315,6 +317,11 @@ func _set_aim(slot: int, point: Vector3, aim_tick: int = -1) -> bool:
 		actor.aim_snapshot_tick = aim_tick
 	actor.update_cover_aim_readiness()
 	actors[slot].combat.set_aim(point)
+	if actor.combat.blocking:
+		var facing: Vector3 = point - actor.global_position
+		facing.y = 0.0
+		if facing.length_squared() > 0.000001:
+			actor.combat.face_block(facing)
 	return true
 
 @rpc("any_peer","call_remote","unreliable_ordered")
@@ -384,6 +391,15 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"crouch":
 			if typeof(value) == TYPE_BOOL:
 				actor.set_crouch(value)
+		"block":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("pressed")) != TYPE_BOOL or typeof(value.get("forward")) != TYPE_VECTOR3:
+				return
+			var forward: Vector3 = value.forward
+			if not forward.is_finite() or (value.pressed and forward.length_squared() < 0.25):
+				return
+			actor.set_block(value.pressed,Vector3(forward.x,0,forward.z))
 		"peek":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -441,6 +457,34 @@ func _arrow_event(slot: int, origin: Vector3, direction: Vector3, speed: float) 
 		_spawn_arrow(slot,origin,direction,speed,0.0,false)
 		shots_fired += 1
 
+func _on_clash(position: Vector3) -> void:
+	if network_role != "host":
+		return
+	Combat.spawn_impact(self,position,"clash")
+	audio.play_sound("clang")
+	_clash_event.rpc(position)
+
+func _on_defense_resolved(defender_slot: int, position: Vector3, parried: bool) -> void:
+	if network_role != "host":
+		return
+	Combat.spawn_impact(self,position,"parry" if parried else "block")
+	audio.play_sound("parry" if parried else "block")
+	_defense_event.rpc(defender_slot,position,parried)
+
+@rpc("authority","call_remote","reliable")
+func _defense_event(_defender_slot: int, position: Vector3, parried: bool) -> void:
+	if network_role != "client":
+		return
+	Combat.spawn_impact(self,position,"parry" if parried else "block")
+	audio.play_sound("parry" if parried else "block")
+
+@rpc("authority","call_remote","unreliable")
+func _clash_event(position: Vector3) -> void:
+	if network_role != "client":
+		return
+	Combat.spawn_impact(self,position,"clash")
+	audio.play_sound("clang")
+
 func _on_killed(slot: int, source: int) -> void:
 	if network_role == "host" and source >= 0 and source < 4 and source != slot:
 		actors[source].kills += 1
@@ -460,7 +504,8 @@ func _process(delta: float) -> void:
 		rows.append({"slot":fighter.slot,"name":fighter.display_name,"bot":fighter.is_bot,"health":fighter.health,"kills":fighter.kills,"deaths":fighter.deaths})
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
-		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn})
+		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
+		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and actor.combat.block_time <= Combat.PARRY_WINDOW})
 	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched,actor.rig.slide_progress >= 0.0)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
@@ -506,6 +551,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
+		send_action("block",{"pressed":false,"forward":Vector3.ZERO})
 		_send_peek_input()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
@@ -572,6 +618,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_peek_held = true
 			_capture_peek_context()
 			_send_peek_input()
+			send_action("block",{"pressed":true,"forward":Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw))})
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_camera_distance = maxf(3,_camera_distance-0.5)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:

@@ -2,9 +2,23 @@ extends Node
 ## Manual bow and sword combat shared by the frontier and authoritative arena actors.
 
 signal shot(origin: Vector3, direction: Vector3, speed: float, charge: float)
+signal clash(position: Vector3)
+signal defense_resolved(defender_slot: int, position: Vector3, parried: bool)
 
 const Archer = preload("res://scripts/archer.gd")
+const Geo = preload("res://scripts/geo.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
+const PARRY_WINDOW := 0.25
+const PARRY_STAGGER := 0.8
+const BLOCK_STAMINA := 22.0
+const BLOCK_PUSH_SPEED := 5.5
+const BLOCK_FACING_DOT := 0.35
+const CLASH_FACING_DOT := 0.35
+const CLASH_BOUNCE_SPEED := 4.5
+const CLASH_BOT_DELAY := 0.4
+const DEFENSE_NONE := 0
+const DEFENSE_PARRY := 1
+const DEFENSE_BLOCK := 2
 var rig
 var aim_point := Vector3.ZERO
 var attack_progress := 1.0
@@ -21,6 +35,10 @@ var _release_pending := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
+var blocking := false
+var block_time := 0.0
+var stagger_time := 0.0
+var clash_cooldown := 0.0
 const MAX_SWEEP_STEPS := 32
 const MAX_SWEEP_CONTACTS := 32
 var _melee_query := PhysicsShapeQueryParameters3D.new()
@@ -56,14 +74,70 @@ func set_aim(point: Vector3) -> void:
 		update_aim()
 
 func can_draw() -> bool:
-	return rig.weapon == "bow" and grounded and rig.phase == "READY" and rig._roll_progress < 0.0
+	return rig.weapon == "bow" and grounded and rig.phase == "READY" \
+		and rig._roll_progress < 0.0 and stagger_time <= 0.0
 
 func begin_draw() -> bool:
 	if not can_draw() or not _accept_cover_draw():
 		return false
+	stop_block()
 	rig.begin_draw()
 	update_aim()
 	return true
+
+func start_block(forward: Vector3) -> bool:
+	if blocking:
+		return true
+	if not grounded or stagger_time > 0.0 or rig.weapon != "sword" \
+			or rig.phase != "READY" or rig._roll_progress >= 0.0:
+		return false
+	if is_instance_valid(actor) and actor.get("alive") == false:
+		return false
+	blocking = true
+	block_time = 0.0
+	rig.set_blocking(true,forward)
+	return true
+
+func stop_block() -> void:
+	if not blocking:
+		return
+	blocking = false
+	block_time = 0.0
+	if is_instance_valid(rig):
+		rig.set_blocking(false)
+
+func face_block(forward: Vector3) -> void:
+	if blocking and is_instance_valid(rig):
+		rig.face_block(forward)
+
+func resolve_melee_defense(attacker_position: Vector3) -> int:
+	if not blocking or not is_instance_valid(rig) or rig.phase == "MELEE" \
+			or rig._roll_progress >= 0.0:
+		return DEFENSE_NONE
+	if is_instance_valid(actor) and actor.get("alive") == false:
+		return DEFENSE_NONE
+	var origin: Vector3 = actor.global_position if is_instance_valid(actor) else rig.global_position
+	var to_attacker := attacker_position - origin
+	to_attacker.y = 0.0
+	var forward: Vector3 = -rig.global_basis.z
+	forward.y = 0.0
+	if to_attacker.length_squared() > 0.000001 and forward.length_squared() > 0.000001 \
+			and forward.normalized().dot(to_attacker.normalized()) < BLOCK_FACING_DOT:
+		return DEFENSE_NONE
+	return DEFENSE_PARRY if block_time <= PARRY_WINDOW else DEFENSE_BLOCK
+
+func stagger(seconds: float) -> void:
+	stagger_time = maxf(stagger_time,seconds)
+	stop_block()
+	_melee_active = false
+	_melee_blocked = false
+	_melee_victims.clear()
+	_melee_exclude.clear()
+	_source_exclude.clear()
+	attack_progress = 1.0
+	melee_progress = 1.0
+	if is_instance_valid(rig) and rig.phase == "MELEE":
+		rig.cancel_draw()
 
 func release_draw() -> void:
 	if rig.phase not in ["DRAWING", "HOLDING"] or _release_pending:
@@ -94,6 +168,7 @@ func stop() -> void:
 	_auto_exposure = false
 	_release_pending = false
 	_melee_active = false
+	stop_block()
 	rig.cancel_draw()
 
 func wants_cover_exposure() -> bool:
@@ -141,7 +216,7 @@ func _cover_shaft_clear() -> bool:
 	return space.cast_motion(_shaft_query)[0] >= 1.0
 
 func begin_melee() -> bool:
-	if not grounded or melee_progress < 1.0 - 0.000001 \
+	if not grounded or melee_progress < 1.0 - 0.000001 or stagger_time > 0.0 \
 			or rig.weapon != "sword" or rig.phase != "READY" or rig._roll_progress >= 0.0:
 		return false
 	stop()
@@ -254,12 +329,125 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 		_sight_query.to = hit.point
 		if not space.intersect_ray(_sight_query).is_empty():
 			continue
+		var target_combat = unit.get("combat")
+		if is_instance_valid(target_combat) and _can_clash_with(unit,target_combat):
+			_resolve_clash(unit,target_combat,hit.point)
+			return
 		_melee_victims[unit.get_instance_id()] = true
-		unit.take_damage(float(Archer.SWORD_DATA[_swing_sword_index].damage), source_id)
+		var damage := float(Archer.SWORD_DATA[_swing_sword_index].damage)
+		var outcome := DEFENSE_NONE
+		if unit.has_method("receive_melee"):
+			outcome = int(unit.receive_melee(damage,source_id,actor.global_position))
+		else:
+			unit.take_damage(damage,source_id)
+		if outcome == DEFENSE_PARRY:
+			_block_feedback(unit,hit.point,true)
+		elif outcome == DEFENSE_BLOCK:
+			_block_feedback(unit,hit.point,false)
 	if world_fraction < 1.0:
 		# An authored animation may continue beyond a wall; it must not resume
 		# damage on the far side in the next sample of this same swing.
 		_melee_blocked = true
+
+func _can_clash_with(unit: Node, target_combat) -> bool:
+	if target_combat == self or not is_instance_valid(target_combat) \
+			or not is_instance_valid(actor) or not is_instance_valid(rig):
+		return false
+	var other_rig = target_combat.rig
+	if not is_instance_valid(other_rig) or other_rig.weapon != "sword" \
+			or not other_rig.in_strike_window():
+		return false
+	if rig.weapon != "sword" or not rig.in_strike_window():
+		return false
+	var delta: Vector3 = unit.global_position - actor.global_position
+	delta.y = 0.0
+	if delta.length_squared() < 0.000001:
+		return false
+	var direction := delta.normalized()
+	var forward: Vector3 = -rig.global_basis.z
+	forward.y = 0.0
+	var other_forward: Vector3 = -other_rig.global_basis.z
+	other_forward.y = 0.0
+	return forward.length_squared() > 0.000001 and other_forward.length_squared() > 0.000001 \
+		and forward.normalized().dot(direction) >= CLASH_FACING_DOT \
+		and other_forward.normalized().dot(-direction) >= CLASH_FACING_DOT
+
+func _resolve_clash(unit: Node, target_combat, at: Vector3) -> void:
+	var delta: Vector3 = unit.global_position - actor.global_position
+	delta.y = 0.0
+	var direction: Vector3 = -rig.global_basis.z
+	if delta.length_squared() > 0.000001:
+		direction = delta.normalized()
+	if actor.has_method("clash_bounce"):
+		actor.clash_bounce(-direction)
+	if unit.has_method("clash_bounce"):
+		unit.clash_bounce(direction)
+	abort_melee_to_neutral()
+	target_combat.abort_melee_to_neutral()
+	# Only the detecting bot waits; the other may swing first next frame.
+	# Symmetric delays would make two bots re-clash forever in lockstep.
+	clash_cooldown = CLASH_BOT_DELAY
+	target_combat.clash_cooldown = 0.0
+	clash.emit(at)
+
+func abort_melee_to_neutral() -> void:
+	_melee_active = false
+	_melee_blocked = false
+	_melee_victims.clear()
+	_melee_exclude.clear()
+	_source_exclude.clear()
+	attack_progress = 1.0
+	melee_progress = 1.0
+	if is_instance_valid(rig) and rig.phase == "MELEE":
+		rig.cancel_draw()
+
+func _block_feedback(unit: Node, at: Vector3, parried: bool) -> void:
+	var defender_slot := int(unit.get("slot")) if unit.get("slot") != null else -1
+	defense_resolved.emit(defender_slot,at,parried)
+	if not parried:
+		# A held block is a neutral reset: the attacker's swing is knocked aside
+		# instead of retaining a long recovery the defender could punish for free.
+		abort_melee_to_neutral()
+	elif is_instance_valid(actor) and actor.has_method("stagger"):
+		actor.stagger(PARRY_STAGGER)
+
+static func spawn_impact(parent: Node3D, at: Vector3, kind: String) -> void:
+	if not is_instance_valid(parent):
+		return
+	var color := Color("ffd37a")
+	if kind == "parry":
+		color = Color("bff4ff")
+	elif kind == "block":
+		color = Color("9fc9ff")
+	var mat := Geo.material(color,0.3,0.25)
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 3.5
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var root := Node3D.new()
+	root.name = "DefenseImpact"
+	parent.add_child(root)
+	root.global_position = at
+	var directions := [
+		Vector3.RIGHT,Vector3.LEFT,Vector3.UP,Vector3.DOWN,Vector3.FORWARD,Vector3.BACK,
+		(Vector3.RIGHT+Vector3.UP).normalized(),(Vector3.LEFT+Vector3.UP).normalized(),
+		(Vector3.FORWARD+Vector3.RIGHT).normalized(),(Vector3.BACK+Vector3.LEFT).normalized()]
+	for direction in directions:
+		var beam := Geo.beam(root,Vector3.ZERO,direction*0.42,0.016,mat,4)
+		beam.scale = Vector3.ONE*0.2
+		var tween := beam.create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(beam,"scale",Vector3.ONE*1.25,0.15)
+		tween.tween_property(beam,"transparency",1.0,0.18)
+	var core := Geo.sphere(root,0.10,Vector3.ZERO,mat)
+	core.scale = Vector3.ONE*0.3
+	var core_tween := core.create_tween()
+	core_tween.set_parallel(true)
+	core_tween.tween_property(core,"scale",Vector3.ONE*2.4,0.12)
+	core_tween.tween_property(core,"transparency",1.0,0.16)
+	var life := root.create_tween()
+	life.tween_interval(0.22)
+	life.tween_callback(root.queue_free)
 
 func set_motion(actual_velocity: Vector3, running: bool, on_ground: bool) -> void:
 	grounded = on_ground
@@ -280,6 +468,16 @@ func get_attack_interval() -> float:
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:
+	if stagger_time > 0.0:
+		stagger_time = maxf(0.0,stagger_time-delta)
+	if clash_cooldown > 0.0:
+		clash_cooldown = maxf(0.0,clash_cooldown-delta)
+	if blocking:
+		if rig._roll_progress >= 0.0 \
+				or (is_instance_valid(actor) and actor.get("alive") == false):
+			stop_block()
+		else:
+			block_time += delta
 	if _cover_attack:
 		if not _cover_attached() or not grounded or rig._roll_progress >= 0.0 \
 				or (is_instance_valid(actor) and actor.get("alive") == false):

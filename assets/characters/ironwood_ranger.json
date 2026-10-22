@@ -79,6 +79,20 @@
       "strike_start": 0.25,
       "strike_end": 0.5
     },
+    "block_one_hand": {
+      "name": "Sword_Block_Loop_OneHand",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "grip": "one_hand",
+      "frames": 120
+    },
+    "block_two_hand": {
+      "name": "Sword_Block_Loop",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "grip": "two_hand",
+      "frames": 120
+    },
     "crouch_idle": {
       "name": "Crouch_Idle_Loop",
       "duration": 2.933333333333333,
@@ -169,7 +183,9 @@
     "Sword_Overhead_OneHand": 2.0833333333333335,
     "Sword_Idle_OneHand": 1.6666666666666667,
     "Sword_Idle": 2.4,
-    "Sword_Overhead": 1.2666666666666666
+    "Sword_Overhead": 1.2666666666666666,
+    "Sword_Block_Loop_OneHand": 1.9833333333333334,
+    "Sword_Block_Loop": 1.9833333333333334
   },
   "authoring_fps": 60,
   "gres_height_scale": 0.5092428046251969,
@@ -211,6 +227,25 @@
         0.0,
         0.0
       ]
+    },
+    "Sword_Block_Loop": {
+      "forearm_radius": 0.03,
+      "pole_degrees": [
+        30.0,
+        35.0
+      ],
+      "handle_slide": [
+        0.11,
+        0.11
+      ],
+      "clavicle_depression_degrees": [
+        -10.0,
+        -10.0
+      ],
+      "clavicle_protraction_degrees": [
+        -20.0,
+        -20.0
+      ]
     }
   },
   "cover_authoring": {
@@ -220,12 +255,70 @@
     "contact": "Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral",
     "timing": "Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping"
   },
+  "block_authoring": {
+    "one_hand": {
+      "name": "Sword_Block_Loop_OneHand",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "blade_direction": [
+        0.86,
+        -0.2,
+        0.47
+      ],
+      "wrist_target": [
+        -0.18,
+        -0.32,
+        1.24
+      ],
+      "elbow_hint": [
+        -0.46,
+        -0.02,
+        1.08
+      ],
+      "frames": 120
+    },
+    "two_hand": {
+      "name": "Sword_Block_Loop",
+      "duration": 1.9833333333333334,
+      "loop": true,
+      "blade_direction": [
+        0.94,
+        -0.12,
+        0.32
+      ],
+      "wrist_target": [
+        -0.06,
+        -0.31,
+        1.18
+      ],
+      "elbow_hint": [
+        -0.38,
+        -0.08,
+        1.05
+      ],
+      "frames": 120
+    },
+    "axes": "Armature-space targets; Blender +X = character left, -Y = forward, +Z = up",
+    "contact": "Fixed-length planted legs; pelvis breathes \u00b13 mm and spine \u00b10.7 degrees over 120 samples",
+    "support": "Two-hand guard keeps the left palm on the actual SwordSocket handle; one-hand guard leaves the offhand free",
+    "runtime": "The clips animate only the character skeleton; the sword is the normal runtime socketed weapon"
+  },
   "support_clearance_validation": {
     "sample_hz": 240,
-    "samples": 957,
+    "samples": 1911,
     "forearm_radius": 0.03,
     "radial_axes": 2,
     "maximum_support_hilt_error": 0.0018235577093374286,
+    "validated_clips": [
+      "Sword_Idle",
+      "Sword_Overhead",
+      "Sword_Block_Loop",
+      "Sword_Block_Loop_OneHand"
+    ],
+    "guard_blade_lengths": {
+      "Sword_Block_Loop": 1.4,
+      "Sword_Block_Loop_OneHand": 1.05
+    },
     "transitions": [
       "idle loop",
       "guard to windup",

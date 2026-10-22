@@ -172,21 +172,41 @@ def validate_export(filepath, metadata):
     count, maximum_grip_error = 0, 0.0
     endpoints = {}
 
-    def inspect(label):
+    def inspect(label, check_support=True, guard_blade=0.0):
         nonlocal count, maximum_grip_error
         bpy.context.view_layer.update()
         tree = torso_tree(body)
         for side in ('l', 'r'):
             if not forearm_clear(tree, rig.pose.bones['lowerarm_' + side].head, rig.pose.bones['hand_' + side].head, .03):
                 raise RuntimeError(f'{label}: {side} forearm intersects actual skinned shirt at 30 mm radial clearance')
-        hand_local = (rig.pose.bones['hand_r'].matrix @ grip).inverted() @ (rig.pose.bones['hand_l'].matrix @ palm)
-        error = math.hypot(hand_local.x, hand_local.y)
-        maximum_grip_error = max(maximum_grip_error, error)
-        if error > .008 or not .075 <= hand_local.z <= .265:
-            raise RuntimeError(f'{label}: support palm has left the handle: {tuple(hand_local)}')
+        if check_support:
+            hand_local = (rig.pose.bones['hand_r'].matrix @ grip).inverted() @ (rig.pose.bones['hand_l'].matrix @ palm)
+            error = math.hypot(hand_local.x, hand_local.y)
+            maximum_grip_error = max(maximum_grip_error, error)
+            if error > .008 or not .075 <= hand_local.z <= .265:
+                raise RuntimeError(f'{label}: support palm has left the handle: {tuple(hand_local)}')
+        if guard_blade > 0.0:
+            # Match the runtime sword exactly: the weapon is attached with the
+            # exported hand-local grip, not the Blender socket helper's axes.
+            blade_transform = rig.pose.bones['hand_r'].matrix @ grip
+            base = blade_transform.translation.copy()
+            direction = (blade_transform.to_3x3() @ Vector((0, 0, -1))).normalized()
+            tip = base + direction * guard_blade
+            if base.y > -.15 or tip.y > -.15:
+                raise RuntimeError(f'{label}: guard blade is not held in front of the body: {tuple(base)} -> {tuple(tip)}')
+            for fraction in range(10, 101, 2):
+                point = base + direction * (guard_blade * fraction / 100)
+                surface, normal, _, distance = tree.find_nearest(point)
+                if surface is not None and distance < .02 and (point - surface).dot(normal) < -.001:
+                    raise RuntimeError(f'{label}: guard blade intersects the actual skinned shirt at {tuple(point)}')
         count += 1
 
-    for name in ('Sword_Idle', 'Sword_Overhead'):
+    for name, check_support, guard_blade in (
+        ('Sword_Idle', True, 0.0),
+        ('Sword_Overhead', True, 0.0),
+        ('Sword_Block_Loop', True, 1.4),
+        ('Sword_Block_Loop_OneHand', False, 1.05),
+    ):
         action = bpy.data.actions[name]
         rig.animation_data.action = action
         rig.animation_data.action_slot = action.slots[0]
@@ -194,7 +214,7 @@ def validate_export(filepath, metadata):
         for quarter in range(last*4 + 1):
             frame = quarter / 4
             bpy.context.scene.frame_set(math.floor(frame), subframe=frame % 1)
-            inspect(f'{name} frame {frame}')
+            inspect(f'{name} frame {frame}', check_support, guard_blade)
             if quarter in (0, last*4):
                 endpoints[(name, quarter == 0)] = [bone.matrix_basis.copy() for bone in rig.pose.bones]
     rig.animation_data.action = None
@@ -210,4 +230,6 @@ def validate_export(filepath, metadata):
     print('EXPORTED_SUPPORT_CLEARANCE', count, 'samples; maximum hilt error', maximum_grip_error)
     return {'sample_hz': 240, 'samples': count, 'forearm_radius': .03,
             'radial_axes': 2, 'maximum_support_hilt_error': maximum_grip_error,
+            'validated_clips': ['Sword_Idle', 'Sword_Overhead', 'Sword_Block_Loop', 'Sword_Block_Loop_OneHand'],
+            'guard_blade_lengths': {'Sword_Block_Loop': 1.4, 'Sword_Block_Loop_OneHand': 1.05},
             'transitions': ['idle loop', 'guard to windup', 'recovery to guard']}

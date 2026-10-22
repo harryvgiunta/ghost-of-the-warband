@@ -127,7 +127,7 @@ func _ready() -> void:
 		enemy.safe_center = world.player_spawn
 		add_child(enemy)
 		enemy.defeated.connect(_on_enemy_defeated)
-		enemy.damaged_player.connect(take_damage)
+		enemy.attacked.connect(_on_enemy_attack)
 		enemies.append(enemy)
 	_update_camera(1.0)
 	hud.show_feedback("The old waystones have gone dark. Follow the trails north.")
@@ -146,7 +146,8 @@ func _physics_process(delta: float) -> void:
 		slide.reset()
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1
 	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
-	stamina = clampf(stamina + delta * (-19.0 if running or slide.active else 13.0), 0.0, 100.0)
+	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
+	stamina = clampf(stamina + delta * stamina_rate, 0.0, 100.0)
 	if stamina <= 1.0:
 		_sprint_exhausted = true
 	elif stamina >= 25.0:
@@ -161,6 +162,7 @@ func _physics_process(delta: float) -> void:
 	player.velocity.z = move_toward(player.velocity.z, direction.z * speed, acceleration * delta)
 	var was_in_cover: bool = cover.active
 	_update_combat_cover_side()
+	combat.face_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw)))
 	var covered_velocity: Vector3 = cover.step(delta,direction,_peek_requested or combat.wants_cover_exposure(),combat.cover_side,running)
 	if was_in_cover:
 		player.velocity.x = covered_velocity.x
@@ -207,7 +209,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode)
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW)
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -298,6 +300,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_orbiting = false
 		_peek_requested = false
+		combat.stop_block()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -349,6 +352,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_cursor_free(false)
 				_peek_requested = cover.active
 				_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
+				if not combat.start_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))) and not cover.active:
+					hud.show_feedback("Equip a sword with 2, stand still and finish recovery to guard.")
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			camera_distance = maxf(camera_distance - 0.45, 2.7)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
@@ -399,7 +404,7 @@ func toggle_cover() -> void:
 		cover.exit()
 	elif not roll.active and cover.try_enter(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))):
 		slide.reset()
-		hud.show_feedback("In cover  /  LMB or Q attacks out; RMB peeks; F leaves")
+		hud.show_feedback("In cover  /  LMB or Q attacks out; RMB guards and peeks; F leaves")
 	else:
 		hud.show_feedback("Move closer to a tree, wall or solid debris and stand on the ground.")
 
@@ -490,6 +495,30 @@ func interact() -> void:
 	if activated.size() == 3:
 		gold += 100
 		hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
+
+func _on_enemy_attack(attacker, amount: float) -> void:
+	if not is_instance_valid(attacker) or not attacker.alive:
+		return
+	var outcome: int = combat.resolve_melee_defense(attacker.global_position)
+	if outcome == Combat.DEFENSE_PARRY:
+		attacker.stagger(Combat.PARRY_STAGGER)
+		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"parry")
+		audio.play_sound("parry")
+		hud.show_feedback("PARRY  /  counter now",1.2)
+		return
+	if outcome == Combat.DEFENSE_BLOCK:
+		stamina = maxf(0.0,stamina-Combat.BLOCK_STAMINA)
+		var push: Vector3 = player.global_position - attacker.global_position
+		push.y = 0.0
+		if push.length_squared() > 0.000001:
+			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
+			player.velocity.x = push.x
+			player.velocity.z = push.z
+		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"block")
+		audio.play_sound("block")
+		hud.show_feedback("BLOCKED  /  -%d stamina" % int(Combat.BLOCK_STAMINA),1.0)
+		return
+	take_damage(amount)
 
 func take_damage(amount: float) -> void:
 	health = maxf(0.0, health - amount * (1.0 - float(ARMOR_REDUCTION[archer.armor_index])))

@@ -21,7 +21,7 @@ Read [the project skill](../ironwood-archer/SKILL.md) for gameplay and toolchain
 | --- | --- |
 | `assets/characters/ironwood_ranger.glb`, adjacent JSON, `.glb.import`, `LICENSE.txt` | A textured, skinned Ranger with authored humanoid clips; license facts apply only to the recorded sources. |
 | `assets/characters/ironwood_wolf.glb`, adjacent JSON, `.glb.import`, wolf section in `LICENSE.txt` | Original textured, skinned default grey wolf: 37 bones, 15,036 triangles, 1024 embedded coat, idle/trot/bite/death clips. |
-| `tools/prepare_character.py`, `tools/character_clearance.py` | Ranger-specific source assembly, humanoid retargeting and clearance. **Not** a generic model/wolf builder or quadruped retargeter. |
+| `tools/prepare_character.py`, `tools/character_clearance.py` | Ranger-specific source assembly, humanoid retargeting, authored cover/guard loops and clearance. **Not** a generic model/wolf builder or quadruped retargeter. |
 | `tools/prepare_wolf.py`, `scripts/wolf_visual.gd`, `tests/wolf_regression.gd` | Deterministic wolf mesh/rig/coat/clip authoring, presentation-only runtime sampling, and the real import/pose regression. |
 | `scripts/geo.gd` | Primitive mesh helpers; meters, Y-up; materials supplied to `mesh_node()` become `material_override`. |
 | `scripts/enemy.gd` | `kind == 0` BriarWolf attaches the imported wolf through `_build_wolf_visual()`; `kind == 1` RuinSentinel keeps its primitive presentation and shares the behavior script. |

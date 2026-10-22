@@ -50,6 +50,7 @@ var _slide_weight := 0.0
 var _velocity := Vector3.ZERO
 var _grounded := true
 var _cover_active := false
+var _blocking := false
 var _cover_normal := Vector3.ZERO
 var _cover_lean := Vector3.ZERO
 var _crouch_amount := 0.0
@@ -264,6 +265,8 @@ func set_weapon(value: String) -> void:
 		phase = "READY"
 		_phase_time = 0.0
 		draw_amount = 0.0
+	if value != "sword":
+		_blocking = false
 	weapon = value
 	set_bow(bow_index)
 	set_sword(sword_index)
@@ -361,6 +364,28 @@ func set_cover(active: bool, outward: Vector3, crouch_amount: float, peeking: bo
 	if active and (phase == "READY" or not peeking):
 		global_basis = Basis(Vector3.UP,atan2(-outward.x,-outward.z))
 
+func set_blocking(active: bool, forward: Vector3 = Vector3.ZERO) -> void:
+	_blocking = active and weapon == "sword"
+	if _blocking:
+		face_block(forward)
+	_update_pose(0.0)
+
+func face_block(forward: Vector3) -> void:
+	if not _blocking:
+		return
+	var planar := Vector3(forward.x,0.0,forward.z)
+	if planar.length_squared() > 0.000001:
+		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
+
+func is_blocking() -> bool:
+	return _blocking
+
+func in_strike_window() -> bool:
+	if phase != "MELEE" or weapon != "sword":
+		return false
+	var window := _melee_window()
+	return _phase_time >= window.x-0.000001 and _phase_time <= window.y+0.000001
+
 func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 	if grounded and not _grounded and _velocity.y < -1.0:
 		_landing_weight = 1.0
@@ -368,7 +393,7 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not _cover_active and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not _cover_active and not _blocking and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
 		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
 
 func set_ground_sampler(sampler: Callable) -> void:
@@ -376,7 +401,9 @@ func set_ground_sampler(sampler: Callable) -> void:
 
 func get_animation_state() -> Dictionary:
 	# Roll facing already travels in yaw; compact slide state also fits maximum-length names.
-	return {"phase":phase,"draw":draw_amount,"charge_frozen":charge_frozen,"time":_phase_time,"aim":_aim_point,
+	# Guard rides in the presentation phase instead of another payload field:
+	# gameplay still sees READY, while replicas show the sword guard pose.
+	return {"phase":"GUARD" if _blocking else phase,"draw":draw_amount,"charge_frozen":charge_frozen,"time":_phase_time,"aim":_aim_point,
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
 		"yaw":global_rotation.y,"roll":_roll_progress,
@@ -384,7 +411,10 @@ func get_animation_state() -> Dictionary:
 		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight}
 
 func apply_animation_state(state: Dictionary) -> void:
-	phase = str(state.phase)
+	var replicated_phase := str(state.phase)
+	var guard_phase := replicated_phase == "GUARD"
+	_blocking = guard_phase and weapon == "sword"
+	phase = "READY" if guard_phase else replicated_phase
 	draw_amount = float(state.draw)
 	charge_frozen = bool(state.charge_frozen)
 	_phase_time = float(state.time)
@@ -551,7 +581,7 @@ func _update_pose(delta: float) -> void:
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var coupled_carry := weapon == "sword" and sword_index == 2 and phase != "MELEE"
-	var guarding := coupled_carry and _grounded and _roll_progress < 0.0
+	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
 	var action := phase == "MELEE" or drawing or guarding or _cover_active
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
@@ -580,7 +610,7 @@ func _update_pose(delta: float) -> void:
 	elif drawing:
 		time = 0.0
 	elif guarding:
-		clip = "Sword_Idle"
+		clip = "Sword_Block_Loop" if sword_index == 2 else "Sword_Block_Loop_OneHand"
 		time = fposmod(_motion_time,_player.get_animation(clip).length)
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
@@ -638,7 +668,7 @@ func _update_pose(delta: float) -> void:
 		for index in _guard_bones.size():
 			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
 	if crouching:
-		_apply_cover_crouch(drawing or phase == "MELEE" or coupled_carry)
+		_apply_cover_crouch(drawing or phase == "MELEE" or coupled_carry or _blocking)
 	if moving and action:
 		var spine_pose := _bone_world(_bones.spine_01)
 		var pelvis := _bone_world(_bones.pelvis)
@@ -654,7 +684,7 @@ func _update_pose(delta: float) -> void:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
-			_apply_slide_pose(drawing or phase == "MELEE" or coupled_carry)
+			_apply_slide_pose(drawing or phase == "MELEE" or coupled_carry or _blocking)
 		_place_feet()
 	if drawing:
 		var head := _bone_world(_bones.Head)

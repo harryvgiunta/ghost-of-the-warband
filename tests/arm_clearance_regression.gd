@@ -100,6 +100,36 @@ func run() -> void:
 			if failures>0:
 				break
 	if failures==0:
+		rig.set_weapon("sword")
+		for size in 3:
+			rig.set_sword(size)
+			rig.set_blocking(true,Vector3(0,0,-1))
+			advance(2.0,"Sword guard loop")
+			if failures>0:
+				break
+			rig.set_blocking(false)
+			advance(0.3,"Sword guard transition")
+			if failures>0:
+				break
+	if failures==0:
+		rig.set_weapon("sword")
+		rig.set_sword(0)
+		rig.set_blocking(true,Vector3(0,0,-1))
+		rig.set_cover(false,Vector3.ZERO,0.6,false,Vector3.ZERO)
+		advance(0.4,"Crouched sword guard")
+		rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
+		rig.set_blocking(false)
+		advance(0.3,"Crouched guard exit")
+	if failures==0:
+		rig.set_weapon("sword")
+		rig.set_sword(1)
+		rig.set_blocking(true,Vector3(0,0,-1))
+		rig.set_locomotion(Vector3(0,0,-5.5),true)
+		advance(0.8,"Moving sword guard")
+		rig.set_locomotion(Vector3.ZERO,true)
+		rig.set_blocking(false)
+		advance(0.3,"Moving guard exit")
+	if failures==0:
 		for weapon in ["bow","sword"]:
 			rig.set_weapon(weapon)
 			for speed in [5.5,8.5]:

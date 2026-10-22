@@ -98,7 +98,7 @@ func _ready() -> void:
 	var cover_panel := _panel(self, Vector2(24, -255), Vector2(480, 98))
 	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Guard / peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -157,7 +157,7 @@ func _build_equipment() -> void:
 		armor_buttons.append(button)
 	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(16,543),Vector2(250,30))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"1 = bow. 2 = sword. Sizes are mouse-only.\nEscape frees the cursor; click world to aim.",Vector2(18,584),11,MUTED)
+	_label(_equipment,"1 = bow. 2 = sword. Sizes are mouse-only.\nRMB guards with a sword. Escape frees the cursor; click world to aim.",Vector2(18,584),11,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -166,7 +166,7 @@ func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array
 	_interactables = interactables
 	_world_limit = limit
 
-func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String) -> void:
+func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false) -> void:
 	_region.text = region
 	_health_label.text = "HEALTH  %d / 100" % int(health)
 	_health_bar.value = health
@@ -177,6 +177,8 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "DRAW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO SHOOT" % [draw_amount * 100, draw_amount]
 	elif phase_name == "MELEE":
 		_phase.text = "OVERHAND CHOP / %.1f s SWING" % interval
+	elif blocking:
+		_phase.text = "PARRY WINDOW / COUNTER NOW" if parry_ready else "GUARDING / EACH HIT COSTS STAMINA"
 	elif phase_name in ["RELEASE", "RECOVER"]:
 		_phase.text = "NOCKING NEXT ARROW / %.1f s" % [(1.0 - progress) * interval]
 	elif progress < 0.999999:

@@ -148,6 +148,48 @@ func press_jump(roll_requested: bool) -> void:
 		jump_requested = false
 		combat.stop()
 
+func set_block(pressed: bool, forward: Vector3) -> void:
+	if not authoritative or not alive:
+		return
+	if pressed:
+		combat.start_block(forward)
+	else:
+		combat.stop_block()
+
+func receive_melee(amount: float, source_id: int, attacker_position: Vector3) -> int:
+	if not authoritative or not alive or source_id == slot:
+		return Combat.DEFENSE_NONE
+	var outcome: int = combat.resolve_melee_defense(attacker_position)
+	if outcome == Combat.DEFENSE_PARRY:
+		return outcome
+	if outcome == Combat.DEFENSE_BLOCK:
+		stamina = maxf(0.0,stamina-Combat.BLOCK_STAMINA)
+		var push := global_position - attacker_position
+		push.y = 0.0
+		if push.length_squared() > 0.000001:
+			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
+			velocity.x = push.x
+			velocity.z = push.z
+		return outcome
+	take_damage(amount,source_id)
+	return Combat.DEFENSE_NONE
+
+func clash_bounce(direction: Vector3) -> void:
+	if not authoritative:
+		return
+	var planar := Vector3(direction.x,0.0,direction.z)
+	if planar.length_squared() > 0.000001:
+		planar = planar.normalized()
+		velocity.x = planar.x * Combat.CLASH_BOUNCE_SPEED
+		velocity.z = planar.z * Combat.CLASH_BOUNCE_SPEED
+
+func stagger(seconds: float) -> void:
+	if not authoritative:
+		return
+	combat.stagger(seconds)
+	velocity.x = 0.0
+	velocity.z = 0.0
+
 func set_crouch(requested: bool) -> void:
 	if not requested:
 		slide.reset()
@@ -248,12 +290,20 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		run_requested = false
 		peek_requested = false
 		slide.reset()
+		combat.stop_block()
 		if combat.wants_cover_exposure() or rig.charge_frozen:
 			combat.stop()
+	if combat.stagger_time > 0.0:
+		move_direction = Vector2.ZERO
+		run_requested = false
+		jump_requested = false
+		peek_requested = false
+		combat.stop_block()
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
-	stamina = clampf(stamina + delta * (-19 if running or slide.active else 13),0,100)
+	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
+	stamina = clampf(stamina + delta * stamina_rate,0,100)
 	if stamina <= 1:
 		_exhausted = true
 	elif stamina >= 25:
@@ -303,6 +353,12 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	combat.advance(delta)
 
 func _bot_step(_delta: float, actors: Array) -> void:
+	if combat.stagger_time > 0.0:
+		move_direction = Vector2.ZERO
+		run_requested = false
+		jump_requested = false
+		combat.stop_block()
+		return
 	var nearest = null
 	var distance := INF
 	for other in actors:
@@ -339,7 +395,8 @@ func _bot_step(_delta: float, actors: Array) -> void:
 		rig.set_weapon("bow")
 	if rig.weapon == "sword":
 		move_direction = Vector2(direction.x,direction.z) if distance > 2.25 else Vector2.ZERO
-		if not obstructed and distance <= pow(float(Archer.SWORD_DATA[rig.sword_index].reach),2):
+		if combat.clash_cooldown <= 0.0 and not obstructed \
+				and distance <= pow(float(Archer.SWORD_DATA[rig.sword_index].reach),2):
 			combat.begin_melee()
 		return
 	if not obstructed and distance < 625.0:
@@ -395,6 +452,10 @@ func apply_snapshot(state: Dictionary) -> void:
 	combat.attack_progress = state.progress
 	combat.movement_mode = state.movement
 	combat.aim_point = state.aim
+	combat.blocking = rig.is_blocking()
+	# Guard timing stays host-authoritative; a replica HUD shows GUARDING rather
+	# than inventing a parry window from snapshot arrival time.
+	combat.block_time = 0.0
 
 func _process(delta: float) -> void:
 	if not authoritative and _received_pose:

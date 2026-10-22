@@ -61,6 +61,15 @@ an elbow movement of 0.240 m into 9.47 ms around frame 152. This timing-only
 repair spreads the downstroke over the existing 0.25-second active interval;
 it does not alter joint poses, clip length, windup/recovery, or the two-hand clip.
 
+Authored held guards (no new external source)
+tools/prepare_character.py authors Sword_Block_Loop_OneHand and
+Sword_Block_Loop as character-only 120-sample loops. They are built from the
+existing licensed Sword_Idle_OneHand and Sword_Idle poses, retarget only the
+Ranger skeleton, and keep the sword as the runtime socketed weapon. The
+two-hand clip's support arm is solved onto the actual hilt. Blade directions,
+wrist/elbow targets, planted-foot solve and clearance validation are recorded
+in ironwood_ranger.json.
+
 Gres — Humanoid SoulsLike Animations (October 4, 2026)
 https://opengameart.org/content/humanoid-soulslike-animations
 https://opengameart.org/users/gres
