@@ -246,9 +246,11 @@ func update_crosshair_aim() -> void:
 	var center := get_viewport().get_visible_rect().size * 0.5
 	var ray_origin := camera.project_ray_origin(center)
 	var ray_direction := camera.project_ray_normal(center)
-	# Ignore camera-side cover behind the muzzle, not obstacles in the shot's path.
-	var muzzle_depth := maxf(0.0,(archer.get_arrow_origin()-ray_origin).dot(ray_direction))
-	_aim_query.from = ray_origin + ray_direction*(muzzle_depth+0.05)
+	# Clip camera-side cover at the actor, never at the animated weapon tip.
+	# Using the tip feeds bow rotation back into target selection and skips close targets.
+	var aim_anchor: Vector3 = player.global_position + Vector3.UP*cover.camera_height()
+	var actor_depth := maxf(0.0,(aim_anchor-ray_origin).dot(ray_direction))
+	_aim_query.from = ray_origin + ray_direction*actor_depth
 	_aim_query.to = ray_origin + ray_direction * 300.0
 	var hit := get_world_3d().direct_space_state.intersect_ray(_aim_query)
 	combat.set_aim(hit.position if not hit.is_empty() else _aim_query.to)

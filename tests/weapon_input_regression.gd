@@ -99,6 +99,69 @@ func input_box(scene: Node3D, point: Vector3, size: Vector3) -> StaticBody3D:
 	scene.add_child(body)
 	return body
 
+func crosshair_shoulder_checks(scene, frontier: bool) -> void:
+	var actor: CharacterBody3D = scene.player if frontier else scene.actors[0]
+	var rig = scene.archer if frontier else actor.rig
+	var combat = scene.combat if frontier else actor.combat
+	var shoulder = scene.shoulder_camera if frontier else scene._shoulder_camera
+	var saved_position := actor.position
+	var saved_yaw: float = scene.camera_yaw if frontier else scene._camera_yaw
+	var saved_pitch: float = scene.camera_pitch if frontier else scene._camera_pitch
+	var platform := input_box(scene,Vector3(0,59.5,0),Vector3(8,1,40))
+	var target := input_box(scene,Vector3(0,61.5,-10),Vector3(0.4,3.0,0.02))
+	actor.position = Vector3(0,60.02,7)
+	actor.velocity = Vector3.ZERO
+	rig.set_bow(0)
+	if frontier:
+		scene.camera_yaw = 0.0
+		scene.camera_pitch = 0.0
+		scene._camera_ready = false
+	else:
+		scene._camera_yaw = 0.0
+		scene._camera_pitch = 0.0
+	scene._set_cursor_free(false)
+	await physics_ticks(90)
+	for side in [1,-1]:
+		if shoulder.side != side:
+			await key(KEY_X)
+		await physics_ticks(60)
+		for distance in [0.8,2.0,15.0]:
+			# A narrow real target on the camera line, not a copy of combat's aim.
+			target.position = Vector3(scene.camera.global_position.x,scene.camera.global_position.y,actor.position.z-distance)
+			await physics_ticks(2)
+			rig.global_basis = Basis(Vector3.UP,float(side)*PI*0.5)
+			held_key(KEY_Q,true)
+			var stable := true
+			for tick in 70:
+				await physics_frame
+				var expected := target.position+Vector3.BACK*0.01
+				stable = stable and combat.aim_point.distance_to(expected)<0.01
+			check(stable,"Crosshair target stays fixed through bow raising and draw from either shoulder at %.1f m"%distance)
+			var arrows: Array = scene.arrows if frontier else scene.projectiles
+			var previous_shot = arrows.back() if not arrows.is_empty() else null
+			held_key(KEY_Q,false)
+			var arrow = arrows.back() if not arrows.is_empty() else null
+			check(arrow != null and arrow != previous_shot,"Shoulder aiming releases a new physical arrow")
+			if arrow != null and arrow != previous_shot:
+				var desired: Vector3 = (target.position+Vector3.BACK*0.01-arrow.global_position).normalized()
+				check(arrow.velocity.normalized().dot(desired)>0.9999,"Launch follows the crosshair target instead of initial character facing")
+				check(arrow.velocity.dot(-rig.active_bow.global_basis.z)>0.0,"A nearby crosshair target never reverses the arrow through its own bow")
+				await physics_ticks(45)
+				check(not arrow.flying and absf(arrow.global_position.z-(target.position.z+0.01))<0.01 and absf(arrow.global_position.x-target.position.x)<0.01,"Real arrow strikes the crosshair target from either shoulder, retaining gravity")
+			await physics_ticks(90)
+	platform.queue_free()
+	target.queue_free()
+	actor.position = saved_position
+	actor.velocity = Vector3.ZERO
+	if frontier:
+		scene.camera_yaw = saved_yaw
+		scene.camera_pitch = saved_pitch
+		scene._camera_ready = false
+	else:
+		scene._camera_yaw = saved_yaw
+		scene._camera_pitch = saved_pitch
+	await physics_ticks(30)
+
 func slide_distance(actor: CharacterBody3D, cover, code: Key, fast: bool) -> float:
 	held_key(KEY_SHIFT,fast)
 	held_key(code,true)
@@ -473,6 +536,7 @@ func run() -> void:
 	await look(Vector2(45,0))
 	check(absf(game.camera_yaw-yaw)>0.1,"Frontier mouse movement turns view without holding RMB")
 	check(game.hud.reticle.is_equal_approx(root.get_visible_rect().size*0.5),"Frontier reticle stays at screen center")
+	await crosshair_shoulder_checks(game,true)
 	await cover_input_checks(game,true)
 	await side_attack_input_checks(game,true)
 	await lookout_input_checks(game,true)
@@ -539,6 +603,7 @@ func run() -> void:
 	check(is_equal_approx(victim.health,62.0),"Damage is applied when the full-draw arrow actually reaches the collider")
 	await create_timer(0.8).timeout
 	check(arena.shots_fired==1,"Releasing does not enable automatic fire")
+	await crosshair_shoulder_checks(arena,false)
 	await cover_input_checks(arena,false)
 	await side_attack_input_checks(arena,false)
 	await lookout_input_checks(arena,false)

@@ -486,8 +486,11 @@ func _crosshair_aim() -> Vector3:
 	var center := get_viewport().get_visible_rect().size * 0.5
 	var ray_origin := camera.project_ray_origin(center)
 	var ray_direction := camera.project_ray_normal(center)
-	var muzzle_depth := maxf(0.0,(actors[local_slot].rig.get_arrow_origin()-ray_origin).dot(ray_direction))
-	_query.from = ray_origin + ray_direction*(muzzle_depth+0.05)
+	# Match frontier: shoulder and bow poses must not move the start past a target.
+	var actor = actors[local_slot]
+	var aim_anchor: Vector3 = actor.global_position + Vector3.UP*actor.cover.camera_height()
+	var actor_depth := maxf(0.0,(aim_anchor-ray_origin).dot(ray_direction))
+	_query.from = ray_origin + ray_direction*actor_depth
 	_query.to = ray_origin + ray_direction*120.0
 	_query.exclude = [actors[local_slot].get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
