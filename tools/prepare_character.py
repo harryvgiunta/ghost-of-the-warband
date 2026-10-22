@@ -320,6 +320,82 @@ def author_guard_loop(name, base_action, blade_direction, wrist, elbow, frames=1
     return action, support
 
 
+def author_stab(name, base_action, frames=31):
+    """Author a fast forward dagger thrust with planted feet.
+
+    The right hand chambers beside the ribs, drives forward along -Y, holds
+    the extension briefly, then recovers to the one-hand carry. The weapon
+    socket is rolled so the short blade leads the fist instead of hanging.
+    All bone targets are armature-space metres; the character faces -Y.
+    """
+    set_action(rig, base_action)
+    bpy.context.scene.frame_set(0)
+    base_basis = {bone.name: bone.matrix_basis.copy() for bone in rig.pose.bones}
+    base_world = {bone.name: bone.matrix.copy() for bone in rig.pose.bones}
+    base_hand = rig.pose.bones['hand_r'].matrix.to_quaternion()
+    blade = (base_hand @ (socket_matrix.to_quaternion() @ Vector((0, 0, -1)))).normalized()
+    thrust_hand = blade.rotation_difference(Vector((0, -1, -0.06)).normalized()) @ base_hand
+    base_shoulder = base_world['upperarm_r'].translation.copy()
+    base_elbow = base_world['lowerarm_r'].translation.copy()
+    base_wrist = base_world['hand_r'].translation.copy()
+    base_offset = base_wrist - base_shoulder
+    base_left_wrist = base_world['hand_l'].translation.copy()
+    base_left_elbow = base_world['lowerarm_l'].translation.copy()
+    base_left_hand = rig.pose.bones['hand_l'].matrix.to_quaternion()
+    chamber_offset = Vector((-0.05, 0.16, -0.14))
+    thrust_offset = Vector((0.0, -0.455, -0.02))
+    chamber_hint = Vector((-0.18, 0.06, -0.16))
+    thrust_hint = Vector((-0.12, -0.05, -0.14))
+
+    def smooth(value):
+        value = max(0.0, min(1.0, value))
+        return value*value*(3.0 - 2.0*value)
+
+    action = bpy.data.actions.new(name)
+    set_action(rig, action)
+    for frame in range(frames):
+        t = frame / (frames - 1)
+        chamber = smooth(t / 0.30)
+        drive = smooth((t - 0.30) / 0.20)
+        recover = smooth((t - 0.62) / 0.38)
+        for bone in rig.pose.bones:
+            bone.matrix_basis = base_basis[bone.name]
+        bpy.context.view_layer.update()
+        yaw = (-16.0*chamber + 34.0*drive) * (1.0 - recover)
+        lean = (4.0*chamber + 6.0*drive) * (1.0 - recover)
+        push = (-0.05*drive) * (1.0 - recover)
+        drop = (0.02*drive) * (1.0 - recover)
+        set_rotation('pelvis', Matrix.Rotation(math.radians(yaw*0.25), 4, 'Z').to_quaternion() @ base_world['pelvis'].to_quaternion())
+        pelvis = rig.pose.bones['pelvis'].matrix.copy()
+        pelvis.translation = base_world['pelvis'].translation + Vector((0, -push, -drop))
+        rig.pose.bones['pelvis'].matrix = pelvis
+        bpy.context.view_layer.update()
+        for bone_name, factor in [('spine_01', 0.50), ('spine_02', 0.80), ('spine_03', 1.0), ('neck_01', 0.35), ('Head', 0.25)]:
+            rotation = (Matrix.Rotation(math.radians(yaw*factor), 4, 'Z') @ Matrix.Rotation(math.radians(lean*factor), 4, 'X')).to_quaternion()
+            set_rotation(bone_name, rotation @ base_world[bone_name].to_quaternion())
+        shoulder = rig.pose.bones['upperarm_r'].head.copy()
+        offset = base_offset.lerp(chamber_offset, chamber).lerp(thrust_offset, drive)
+        offset = offset.lerp(base_offset, recover)
+        hint = shoulder + chamber_hint.lerp(thrust_hint, drive)
+        turn = (0.7*chamber + 0.3*drive) * (1.0 - recover)
+        solve_arm('r', shoulder + offset, hint, base_hand.slerp(thrust_hand, turn))
+        for finger_name, rotation in authored_finger_grip.items():
+            rig.pose.bones[finger_name].rotation_quaternion = rotation
+        left_target = base_left_wrist + Vector((0.0, 0.06, -0.02)) * drive * (1.0 - recover)
+        solve_arm('l', left_target, base_left_elbow + Vector((0.0, 0.02, 0.0)), base_left_hand)
+        for side in ('l', 'r'):
+            solve_planted_leg(side, base_world['foot_' + side].translation,
+                              base_world['calf_' + side].translation + Vector((0, -0.1, 0)),
+                              base_world['foot_' + side].to_quaternion())
+        for bone in rig.pose.bones:
+            bone.keyframe_insert('location', frame=frame, group=bone.name)
+            bone.keyframe_insert('rotation_quaternion', frame=frame, group=bone.name)
+            bone.keyframe_insert('scale', frame=frame, group=bone.name)
+    action.use_fake_user = True
+    print('AUTHORED_STAB', name, frames, 'frames', frames / FPS, 'seconds')
+    return action
+
+
 def measure_crouch(action, standing_pelvis_height):
     set_action(rig, action)
     heights, feet = [], {'l': [], 'r': []}
@@ -495,6 +571,10 @@ socket.matrix_basis = Matrix.Translation((0, -rig.data.bones['hand_r'].length, 0
 ranger_objects.add(socket)
 print('SWORD_SOCKET_HAND_LOCAL', [list(row) for row in socket_matrix])
 
+# Fast one-handed dagger thrust. The socket origin was derived above from the
+# source sword constraint, so the same runtime grip carries the dagger.
+finished.append(author_stab('Dagger_Stab', one_hand_idle))
+
 # Character-only held guards. The sword remains a runtime socket; these clips
 # control the body, planted feet, and (for the greatsword) the support hilt.
 one_hand_block, _ = author_guard_loop(
@@ -578,6 +658,7 @@ metadata = {
     'clips': {
         'overhead': {'name': 'Sword_Overhead', 'duration': durations['Sword_Overhead'], 'strike_start': 41/60, 'strike_end': 56/60},
         'overhead_one_hand': {'name': 'Sword_Overhead_OneHand', 'duration': durations['Sword_Overhead_OneHand'], 'strike_start': 15/60, 'strike_end': 30/60},
+        'stab': {'name': 'Dagger_Stab', 'duration': durations['Dagger_Stab'], 'strike_start': 10/60, 'strike_end': 17/60},
         'block_one_hand': {'name': 'Sword_Block_Loop_OneHand', 'duration': durations['Sword_Block_Loop_OneHand'], 'loop': True, 'grip': 'one_hand', 'frames': 120},
         'block_two_hand': {'name': 'Sword_Block_Loop', 'duration': durations['Sword_Block_Loop'], 'loop': True, 'grip': 'two_hand', 'frames': 120},
         'crouch_idle': {'name': 'Crouch_Idle_Loop', 'duration': durations['Crouch_Idle_Loop'], 'loop': True, **crouch_measurements['Crouch_Idle_Loop']},
@@ -594,6 +675,12 @@ metadata = {
         'rotation_axes': 'Left -Z, right +Z, top +X in asset space; pelvis -3 degrees, spine chain 50/80/100 percent of torso_degrees, neck -2 and head -5 degrees relative to chest',
         'contact': 'Fixed-length leg rotation solve keeps neutral ankles and foot orientation planted; arm-local transforms remain neutral',
         'timing': 'Smoothstep weight transfer, 16 samples from neutral to exposed; exported sample times uniformly retimed to 0.24 seconds without looping',
+    },
+    'stab_authoring': {
+        'name': 'Dagger_Stab', 'duration': durations['Dagger_Stab'], 'frames': 31, 'loop': False,
+        'phases': 'chamber 0.00-0.15 s, forward drive 0.15-0.25 s, extension 0.25-0.31 s, recovery 0.31-0.50 s',
+        'contact': 'Fixed-length planted feet; right hand socket rolled so the blade leads the fist; right-hand fingers use the authored sword grip',
+        'runtime': 'The clip animates only the character skeleton; the dagger is a normal runtime socketed weapon',
     },
     'block_authoring': {
         'one_hand': {

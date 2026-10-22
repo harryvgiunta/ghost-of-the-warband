@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
 signal fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float)
+signal thrown_weapon(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon: String, weapon_index: int)
 signal killed(slot: int, source: int)
 
 const Archer = preload("res://scripts/archer.gd")
@@ -70,6 +71,9 @@ func _ready() -> void:
 	combat.shot.connect(func(origin: Vector3,direction: Vector3,speed: float,charge: float):
 		if authoritative and alive:
 			fired.emit(slot,origin,direction,speed,charge))
+	combat.thrown.connect(func(origin: Vector3,direction: Vector3,speed: float,charge: float,weapon_name: String,weapon_index: int):
+		if authoritative and alive:
+			thrown_weapon.emit(slot,origin,direction,speed,charge,weapon_name,weapon_index))
 	combat.actor = self
 	combat.cover = cover
 	combat.target_mask = 4
@@ -163,14 +167,16 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 	var outcome: int = combat.resolve_melee_defense(attacker_position)
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
-	if outcome == Combat.DEFENSE_BLOCK:
-		stamina = maxf(0.0,stamina-Combat.BLOCK_STAMINA)
+	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
+		stamina = maxf(0.0,stamina-combat.block_stamina_cost())
 		var push := global_position - attacker_position
 		push.y = 0.0
 		if push.length_squared() > 0.000001:
 			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 			velocity.x = push.x
 			velocity.z = push.z
+		if outcome == Combat.DEFENSE_WEAK_BLOCK:
+			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot)
 		return outcome
 	take_damage(amount,source_id,headshot)
 	return Combat.DEFENSE_NONE

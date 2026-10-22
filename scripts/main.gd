@@ -3,6 +3,7 @@ extends Node3D
 const Archer = preload("res://scripts/archer.gd")
 const World = preload("res://scripts/range_world.gd")
 const Arrow = preload("res://scripts/arrow.gd")
+const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
@@ -31,6 +32,7 @@ var player: CharacterBody3D
 var camera: Camera3D
 var enemies: Array[CharacterBody3D] = []
 var arrows: Array[Node3D] = []
+var thrown_weapons: Array[Node3D] = []
 var health := 100.0
 var stamina := 100.0
 var _sprint_exhausted := false
@@ -49,6 +51,7 @@ var _orbiting := false
 var _orbit_pointer := Vector2.ZERO
 var _key_drawing := false
 var _mouse_drawing := false
+var _throw_held := false
 var _cursor_free := false
 var _jump_requested := false
 var _interaction_id := ""
@@ -85,6 +88,7 @@ func _ready() -> void:
 	add_child(combat)
 	combat.setup(archer, player.position + Vector3(0, 1.4, -24))
 	combat.shot.connect(_on_arrow_released)
+	combat.thrown.connect(_on_weapon_thrown)
 	combat.actor = player
 	roll = DodgeRoll.new()
 	add_child(roll)
@@ -195,7 +199,7 @@ func _physics_process(delta: float) -> void:
 	archer.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	archer.set_locomotion(actual_velocity, player.is_on_floor() and not roll.active)
 	combat.set_motion(actual_velocity, running or roll.active or slide.active, player.is_on_floor() and not roll.active)
-	if _mouse_drawing or _key_drawing or combat.wants_cover_exposure() or archer.charge_frozen:
+	if _mouse_drawing or _key_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	combat.advance(delta)
 	if player.position.y < -25.0:
@@ -204,7 +208,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	shoulder_camera.update(delta)
 	_update_camera(delta)
-	if _mouse_drawing or _key_drawing or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen:
+	if _mouse_drawing or _key_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
@@ -278,9 +282,20 @@ func begin_attack() -> void:
 		return
 	_capture_attack_cover_side()
 	update_crosshair_aim()
-	var started: bool = combat.begin_melee() if archer.weapon == "sword" else combat.begin_draw()
+	var started: bool = combat.begin_melee() if archer.weapon in ["sword","dagger"] else combat.begin_draw()
 	if not started:
-		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon == "sword" else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
+		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
+
+func begin_throw_attack() -> void:
+	if hud.map_open:
+		return
+	if archer.weapon not in ["sword","dagger"]:
+		hud.show_feedback("Equip a sword with 2 or the dagger with 3 to throw.")
+		return
+	_capture_attack_cover_side()
+	update_crosshair_aim()
+	if not combat.begin_throw():
+		hud.show_feedback("Finish recovery and stand on solid ground to throw.")
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -297,6 +312,12 @@ func _input(event: InputEvent) -> void:
 				_update_combat_cover_side()
 				update_crosshair_aim()
 				combat.release_draw()
+	if event is InputEventKey and event.keycode == KEY_T and not event.pressed:
+		if _throw_held:
+			_throw_held = false
+			_update_combat_cover_side()
+			update_crosshair_aim()
+			combat.release_throw()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_orbiting = false
 		_peek_requested = false
@@ -307,6 +328,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_1: equip_weapon("bow")
 			KEY_2: equip_weapon("sword")
+			KEY_3: equip_weapon("dagger")
 			KEY_C: toggle_crouch()
 			KEY_SPACE: press_jump(event.shift_pressed)
 			KEY_F: toggle_cover()
@@ -335,6 +357,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_key_drawing = true
 				if not _mouse_drawing:
 					begin_attack()
+			KEY_T:
+				if not inspecting:
+					hud.close_panels()
+					_set_cursor_free(false)
+				if not _throw_held:
+					_throw_held = true
+					begin_throw_attack()
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			if not inspecting:
@@ -353,7 +382,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_peek_requested = cover.active
 				_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 				if not combat.start_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))) and not cover.active:
-					hud.show_feedback("Equip a sword with 2, stand still and finish recovery to guard.")
+					hud.show_feedback("Equip a sword or dagger with 2 or 3, stand still and finish recovery to guard.")
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			camera_distance = maxf(camera_distance - 0.45, 2.7)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
@@ -375,6 +404,7 @@ func _notification(what: int) -> void:
 func cancel_input() -> void:
 	_key_drawing = false
 	_mouse_drawing = false
+	_throw_held = false
 	_orbiting = false
 	_peek_requested = false
 	combat.stop()
@@ -440,7 +470,7 @@ func equip_armor(index: int) -> void:
 	audio.play_sound("equip")
 
 func _update_loadout() -> void:
-	hud.update_loadout(archer.bow_index, archer.armor_index, Archer.BOW_DATA[archer.bow_index], Archer.ARMOR_NAMES[archer.armor_index], archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index])
+	hud.update_loadout(archer.bow_index, archer.armor_index, Archer.BOW_DATA[archer.bow_index], Archer.ARMOR_NAMES[archer.armor_index], archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA)
 
 func toggle_view() -> void:
 	inspecting = not inspecting
@@ -506,8 +536,9 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 		audio.play_sound("parry")
 		hud.show_feedback("PARRY  /  counter now",1.2)
 		return
-	if outcome == Combat.DEFENSE_BLOCK:
-		stamina = maxf(0.0,stamina-Combat.BLOCK_STAMINA)
+	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
+		var cost: float = combat.block_stamina_cost()
+		stamina = maxf(0.0,stamina-cost)
 		var push: Vector3 = player.global_position - attacker.global_position
 		push.y = 0.0
 		if push.length_squared() > 0.000001:
@@ -516,7 +547,12 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 			player.velocity.z = push.z
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"block")
 		audio.play_sound("block")
-		hud.show_feedback("BLOCKED  /  -%d stamina" % int(Combat.BLOCK_STAMINA),1.0)
+		if outcome == Combat.DEFENSE_WEAK_BLOCK:
+			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE)
+			if health > 0.0:
+				hud.show_feedback("WEAK BLOCK  /  -%d stamina  /  dagger only softens the hit" % int(cost),1.2)
+		else:
+			hud.show_feedback("BLOCKED  /  -%d stamina" % int(cost),1.0)
 		return
 	take_damage(amount)
 
@@ -572,6 +608,24 @@ func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charg
 func _on_arrow_impact(enemy_hit: bool, _position: Vector3) -> void:
 	if enemy_hit:
 		audio.play_sound("hit")
+
+func _on_weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
+	var thrown := Thrown.new()
+	thrown.weapon = weapon_name
+	thrown.weapon_index = weapon_index
+	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
+	add_child(thrown)
+	var shot_damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	var excluded: Array[RID] = [player.get_rid()]
+	thrown.launch(origin, direction, speed, shot_damage, excluded)
+	thrown.impacted.connect(_on_arrow_impact)
+	for index in range(thrown_weapons.size() - 1, -1, -1):
+		if not is_instance_valid(thrown_weapons[index]):
+			thrown_weapons.remove_at(index)
+	thrown_weapons.append(thrown)
+	if thrown_weapons.size() > 32:
+		thrown_weapons.pop_front().queue_free()
+	audio.play_sound("release")
 
 func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 	gold += reward

@@ -32,6 +32,7 @@ var _phase: Label
 var _loadout: Label
 var _cover_status: Label
 var _bow_details: Label
+var _dagger_details: Label
 var _health_bar: ProgressBar
 var _stamina_bar: ProgressBar
 var _charge_bar: ProgressBar
@@ -98,7 +99,7 @@ func _ready() -> void:
 	var cover_panel := _panel(self, Vector2(24, -255), Vector2(480, 98))
 	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB / Q  Attack (sword exits)   HOLD RMB  Guard / peek   X  Lookout side", Vector2(15, 35), 12, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB/Q  Attack   HOLD T  Throw   HOLD RMB  Guard / peek   X  Lookout", Vector2(15, 35), 12, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -115,7 +116,7 @@ func _ready() -> void:
 	var arena_button := _button(self, "4-PLAYER ARENA", Vector2(-216, -207), Vector2(192, 35))
 	arena_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	arena_button.pressed.connect(func(): arena_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SHIFT + SPACE  Roll   ESC / I  Equipment cursor", Vector2(-540, -23), 12, CREAM)
+	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   HOLD T  Throw sword / dagger   1  Bow   2  Sword   3  Dagger   SHIFT + SPACE  Roll   ESC / I  Equipment cursor", Vector2(-540, -23), 12, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -125,10 +126,12 @@ func _build_equipment() -> void:
 	_equipment = _panel(self, Vector2(24, 130), Vector2(282, 615))
 	_label(_equipment, "EQUIPMENT", Vector2(18, 15), 12, GOLD)
 	_label(_equipment, "A ranger of Ironwood", Vector2(18, 40), 20, CREAM)
-	for index in 2:
-		var button := _button(_equipment,["1  BOW","2  SWORD"][index],Vector2(16+index*129,72),Vector2(121,30))
+	for index in 3:
+		var button := _button(_equipment,["1  BOW","2  SWORD","3  DAGGER"][index],Vector2(12+index*90,72),Vector2(84,30))
 		button.toggle_mode = true
-		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword"))
+		button.add_theme_font_size_override("font_size",11)
+		button.size = Vector2(84,30)
+		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword" if index == 1 else "dagger"))
 		weapon_buttons.append(button)
 	_label(_equipment,"BOW SIZE / CLICK TO SELECT",Vector2(18,112),11,MUTED)
 	for index in 3:
@@ -147,17 +150,18 @@ func _build_equipment() -> void:
 		button.size = Vector2(250,30)
 		button.pressed.connect(func(): sword_selected.emit(index))
 		sword_buttons.append(button)
-	_label(_equipment,"ARMOR / CLICK TO EQUIP",Vector2(18,410),11,MUTED)
+	_dagger_details = _label(_equipment,"",Vector2(18,399),10,TEAL)
+	_label(_equipment,"ARMOR / CLICK TO EQUIP",Vector2(18,416),11,MUTED)
 	for index in 3:
-		var button := _button(_equipment,["RANGER LEATHER / LIGHT","SENTINEL MAIL / 15% GUARD","WARDEN PLATE / 30% GUARD"][index],Vector2(16,432+index*33),Vector2(250,29))
+		var button := _button(_equipment,["RANGER LEATHER / LIGHT","SENTINEL MAIL / 15% GUARD","WARDEN PLATE / 30% GUARD"][index],Vector2(16,438+index*33),Vector2(250,29))
 		button.toggle_mode = true
 		button.add_theme_font_size_override("font_size",12)
 		button.size = Vector2(250,29)
 		button.pressed.connect(func(): armor_selected.emit(index))
 		armor_buttons.append(button)
-	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(16,543),Vector2(250,30))
+	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(16,549),Vector2(250,30))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"1 = bow. 2 = sword. Sizes are mouse-only.\nRMB guards with a sword. Escape frees the cursor; click world to aim.",Vector2(18,584),11,MUTED)
+	_label(_equipment,"1 bow. 2 sword. 3 dagger. Sizes are mouse-only.\nRMB guards. A dagger can only weak-block.\nHOLD T throws the equipped sword or dagger.\nEscape frees the cursor; click the world to aim.",Vector2(18,576),10,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -172,19 +176,26 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 	_health_bar.value = health
 	_stamina_bar.value = stamina
 	_gold_label.text = "%d GOLD  /  %d FOES" % [gold, kills]
-	_charge_bar.value = draw_amount * 100.0 if phase_name in ["DRAWING", "HOLDING"] else progress * 100.0
+	_charge_bar.value = draw_amount * 100.0 if phase_name in ["DRAWING", "HOLDING", "T_DRAW", "T_HOLD"] else progress * 100.0
 	if phase_name in ["DRAWING", "HOLDING"]:
 		_phase.text = "DRAW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO SHOOT" % [draw_amount * 100, draw_amount]
+	elif phase_name in ["T_DRAW", "T_HOLD"]:
+		_phase.text = "THROW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO THROW" % [draw_amount * 100, draw_amount]
 	elif phase_name == "MELEE":
-		_phase.text = "OVERHAND CHOP / %.1f s SWING" % interval
+		_phase.text = ("QUICK STAB / %.2f s SWING" if _weapon == "dagger" else "OVERHAND CHOP / %.1f s SWING") % interval
 	elif blocking:
-		_phase.text = "PARRY WINDOW / COUNTER NOW" if parry_ready else "GUARDING / EACH HIT COSTS STAMINA"
+		if _weapon == "dagger":
+			_phase.text = "WEAK GUARD / DAGGER ONLY SOFTENS THE HIT"
+		else:
+			_phase.text = "PARRY WINDOW / COUNTER NOW" if parry_ready else "GUARDING / EACH HIT COSTS STAMINA"
 	elif phase_name in ["RELEASE", "RECOVER"]:
 		_phase.text = "NOCKING NEXT ARROW / %.1f s" % [(1.0 - progress) * interval]
+	elif phase_name in ["T_RELEASE", "T_RECOVER"]:
+		_phase.text = "THROW RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	elif progress < 0.999999:
 		_phase.text = "RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	else:
-		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else "READY / CLICK FOR AN OVERHAND CHOP"
+		_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT" if _weapon == "bow" else ("READY / CLICK FOR A QUICK STAB / HOLD T TO THROW" if _weapon == "dagger" else "READY / CLICK FOR AN OVERHAND CHOP / HOLD T TO THROW")
 
 func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool, sliding: bool) -> void:
 	var stance := "SLIDING" if sliding else "CROUCHED" if crouched else "OPEN"
@@ -196,7 +207,7 @@ func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: b
 	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", TEAL if active and peeking else GOLD if active else MUTED)
 
-func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, sword: int, weapon: String, sword_data: Dictionary) -> void:
+func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}) -> void:
 	for index in 3:
 		bow_buttons[index].set_pressed_no_signal(index == bow)
 		armor_buttons[index].set_pressed_no_signal(index == armor)
@@ -204,8 +215,12 @@ func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, 
 	_weapon = weapon
 	weapon_buttons[0].set_pressed_no_signal(weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(weapon == "sword")
+	weapon_buttons[2].set_pressed_no_signal(weapon == "dagger")
 	_bow_details.text = "%.0f s FULL DRAW / RE-NOCK AFTER SHOT" % float(data.draw_seconds)
-	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),data.name if weapon == "bow" else sword_data.name,armor_name]
+	var weapon_name := String(data.name) if weapon == "bow" else String(dagger_data.name) if weapon == "dagger" else String(sword_data.name)
+	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_name]
+	if _dagger_details != null and not dagger_data.is_empty():
+		_dagger_details.text = "%.1f s STAB / %d DAMAGE / WEAK GUARD" % [float(dagger_data.seconds),int(dagger_data.damage)]
 
 
 func update_world_position(position_at: Vector3, yaw: float, activated: Dictionary) -> void:

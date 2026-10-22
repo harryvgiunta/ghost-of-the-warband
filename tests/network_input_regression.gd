@@ -600,7 +600,7 @@ func client_run(port: int) -> void:
 						await key(KEY_2)
 						check(rig.weapon=="sword" and rig.bow_index==2 and rig.sword_index==0,"Remote key 2 equips sword without resizing either weapon")
 						await key(KEY_3)
-						check(rig.weapon=="sword" and rig.bow_index==2 and rig.sword_index==0,"Remote key 3 has no size binding")
+						check(rig.weapon=="dagger" and rig.bow_index==2 and rig.sword_index==0,"Remote key 3 equips the dagger without resizing either weapon")
 						await key(KEY_1)
 						check(rig.weapon=="bow","Remote key 1 equips bow")
 						await click(arena.hud.bow_buttons[1])
