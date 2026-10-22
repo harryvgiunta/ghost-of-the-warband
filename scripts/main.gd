@@ -19,6 +19,7 @@ var world
 var archer
 var hud
 var audio
+var _player_state
 var combat
 var roll
 var slide
@@ -58,6 +59,7 @@ var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
+	_player_state = get_node_or_null("/root/PlayerState")
 	_aim_query.collision_mask = 1 | 2
 	_floor_query.collision_mask = 1
 	world = World.new()
@@ -115,7 +117,12 @@ func _ready() -> void:
 	hud.camp_requested.connect(return_to_camp)
 	hud.map_toggled.connect(toggle_map)
 	hud.cursor_requested.connect(_set_cursor_free)
-	hud.arena_requested.connect(func(): cancel_input(); get_tree().change_scene_to_file("res://arena.tscn"))
+	hud.hub_requested.connect(_return_to_hub)
+	if _player_state != null:
+		archer.set_bow(_player_state.equipped_index("bow"))
+		archer.set_sword(_player_state.equipped_index("sword"))
+		archer.set_armor(_player_state.equipped_index("armor"))
+		gold = int(_player_state.credits)
 	archer.loadout_changed.connect(_update_loadout)
 	hud.configure_map(world.landmarks, world.map_paths, world.interactables, world.WORLD_LIMIT)
 	_update_loadout()
@@ -489,11 +496,11 @@ func interact() -> void:
 		return
 	activated[_interaction_id] = true
 	world.activate_interactable(_interaction_id)
-	gold += 25
+	_award_gold(25)
 	audio.play_sound("bullseye")
 	hud.show_feedback("Waystone restored  /  +25 gold")
 	if activated.size() == 3:
-		gold += 100
+		_award_gold(100)
 		hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
 
 func _on_enemy_attack(attacker, amount: float) -> void:
@@ -574,7 +581,18 @@ func _on_arrow_impact(enemy_hit: bool, _position: Vector3) -> void:
 		audio.play_sound("hit")
 
 func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
-	gold += reward
+	_award_gold(reward)
 	kills += 1
 	enemies.erase(enemy)
 	hud.show_feedback("%s defeated  /  +%d gold" % [enemy.get_display_name(), reward])
+
+func _award_gold(amount: int) -> void:
+	gold += amount
+	if _player_state != null:
+		_player_state.add_credits(amount)
+
+func _return_to_hub() -> void:
+	cancel_input()
+	if _player_state != null:
+		_player_state.save_state()
+	get_tree().change_scene_to_file("res://menu.tscn")

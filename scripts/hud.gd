@@ -7,7 +7,7 @@ signal weapon_selected(value: String)
 signal view_toggled
 signal camp_requested
 signal map_toggled
-signal arena_requested
+signal hub_requested
 signal cursor_requested(free: bool)
 
 const CREAM := Color("eee9db")
@@ -112,9 +112,10 @@ func _ready() -> void:
 	var camp_button := _button(self, "R   RETURN TO CAMP", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var arena_button := _button(self, "4-PLAYER ARENA", Vector2(-216, -207), Vector2(192, 35))
-	arena_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
-	arena_button.pressed.connect(func(): arena_requested.emit())
+	var hub_button := _button(self, "RETURN TO THE HOLLOW", Vector2(-216, -207), Vector2(192, 35))
+	hub_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
+	hub_button.add_theme_font_size_override("font_size", 13)
+	hub_button.pressed.connect(func(): hub_requested.emit())
 	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   1  Bow   2  Sword   SHIFT + SPACE  Roll   ESC / I  Equipment cursor", Vector2(-540, -23), 12, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))

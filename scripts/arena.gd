@@ -68,7 +68,7 @@ func _ready() -> void:
 	hud.host_requested.connect(host_game)
 	hud.join_requested.connect(join_game)
 	hud.leave_requested.connect(leave_game)
-	hud.frontier_requested.connect(_frontier)
+	hud.hub_requested.connect(_hub)
 	hud.bow_selected.connect(func(index: int): send_action("bow",index))
 	hud.armor_selected.connect(func(index: int): send_action("armor",index))
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
@@ -84,6 +84,10 @@ func _ready() -> void:
 	call_deferred("_read_arguments")
 
 func _read_arguments() -> void:
+	var pending: Dictionary = {}
+	var session_node := get_node_or_null("/root/Session")
+	if session_node != null:
+		pending = session_node.take()
 	var args := OS.get_cmdline_user_args()
 	var port := 7777
 	var player_name := "Ranger"
@@ -95,18 +99,44 @@ func _read_arguments() -> void:
 			player_name = args[index+1]
 		elif args[index] == "--arena-join" and index+1 < args.size():
 			address = args[index+1]
+	# Explicit command-line intent stays authoritative; the hub request fills the gap.
 	if args.has("--arena-host"):
 		host_game(port,player_name)
 	elif not address.is_empty():
 		join_game(address,port,player_name)
+	elif str(pending.get("mode","")) == "skirmish":
+		host_game(int(pending.port),str(pending.name),true)
+	elif str(pending.get("mode","")) == "host":
+		host_game(int(pending.port),str(pending.name))
+	elif str(pending.get("mode","")) == "client":
+		join_game(str(pending.address),int(pending.port),str(pending.name))
 
-func host_game(port: int, player_name: String) -> void:
+func host_game(port: int, player_name: String, find_open_port: bool = false) -> void:
 	leave_game()
 	if port < 1024 or port > 65535:
 		hud.set_status("Choose a UDP port between 1024 and 65535.")
 		return
+	if find_open_port:
+		var open_port := _find_open_port(port)
+		if open_port <= 0:
+			hud.set_status("No free UDP port near %d. Close another host and try again." % port)
+			return
+		port = open_port
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_server(port,3)
+	if error != OK and find_open_port:
+		# A local practice match must not lose to an existing host on the default port.
+		for offset in range(1,16):
+			var candidate := port + offset
+			if candidate > 65535:
+				break
+			var retry := ENetMultiplayerPeer.new()
+			var retry_error := retry.create_server(candidate,3)
+			if retry_error == OK:
+				peer = retry
+				port = candidate
+				error = OK
+				break
 	if error != OK:
 		hud.set_status("Could not host on UDP %d: %s" % [port,error_string(error)])
 		return
@@ -127,6 +157,7 @@ func host_game(port: int, player_name: String) -> void:
 	_endpoint = "UDP %d / LAN %s / same PC 127.0.0.1" % [port,", ".join(addresses)]
 	hud.show_match(_player_name,_endpoint)
 	_set_cursor_free(false)
+	_apply_loadout(0,_local_loadout())
 	print("ARENA_HOST_READY port=",port)
 
 func join_game(address: String, port: int, player_name: String) -> void:
@@ -182,13 +213,43 @@ func _connection_ended(message: String) -> void:
 	hud.set_status(message)
 	print("ARENA_CONNECTION_ENDED ",message)
 
-func _frontier() -> void:
+func _hub() -> void:
 	leave_game()
-	get_tree().change_scene_to_file("res://main.tscn")
+	get_tree().change_scene_to_file("res://menu.tscn")
+
+func _find_open_port(start: int) -> int:
+	var last := mini(start+15,65535)
+	for candidate in range(start,last+1):
+		var probe := PacketPeerUDP.new()
+		var error := probe.bind(candidate)
+		probe.close()
+		if error == OK:
+			return candidate
+	return 0
 
 func _safe_name(value: String) -> String:
 	var result := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
 	return "Ranger" if result.is_empty() else result
+
+func _local_loadout() -> Dictionary:
+	var node := get_node_or_null("/root/PlayerState")
+	if node == null:
+		return {}
+	return {"bow":int(node.equipped_index("bow")), "sword":int(node.equipped_index("sword")), "armor":int(node.equipped_index("armor"))}
+
+func _apply_loadout(slot: int, loadout: Dictionary) -> void:
+	if slot < 0 or slot >= actors.size() or loadout.is_empty():
+		return
+	var actor = actors[slot]
+	var bow: Variant = loadout.get("bow")
+	var sword: Variant = loadout.get("sword")
+	var armor: Variant = loadout.get("armor")
+	if typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2:
+		actor.rig.set_bow(int(bow))
+	if typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2:
+		actor.rig.set_sword(int(sword))
+	if typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 2:
+		actor.rig.set_armor(int(armor))
 
 func get_human_count() -> int:
 	var count := 0
@@ -238,15 +299,17 @@ func _clear_remote_arrows(slot: int) -> void:
 
 func _connected() -> void:
 	multiplayer.multiplayer_peer.get_peer(1).set_timeout(32,2000,5000)
-	_register.rpc_id(1,_player_name)
+	_register.rpc_id(1,_player_name,_local_loadout())
 
 @rpc("any_peer","call_remote","reliable")
-func _register(player_name: String) -> void:
+func _register(player_name: String, loadout: Dictionary) -> void:
 	if network_role != "host":
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	if _peer_slots.has(sender):
-		actors[int(_peer_slots[sender])].display_name = _safe_name(player_name)
+		var slot := int(_peer_slots[sender])
+		actors[slot].display_name = _safe_name(player_name)
+		_apply_loadout(slot,loadout)
 
 @rpc("authority","call_remote","reliable")
 func _accept(slot: int) -> void:
