@@ -1,6 +1,6 @@
-# Ironwood — Frontier and Arena
+# Ironwood — The Hollow, Frontier and Arena
 
-A Godot 4 third-person action game with a seamless woodland frontier and a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -10,18 +10,48 @@ Requires Windows x64, PowerShell, and [Git](https://git-scm.com/download/win). N
 git clone https://github.com/harryvgiunta/ironwood-arena.git
 cd ironwood-arena
 .\Setup.cmd
-.\Arena.cmd
+.\Play.cmd
 ```
 
 `Setup.cmd` downloads **Godot 4.7.2 stable** from its official GitHub release, verifies the pinned SHA-256 checksum, and installs it inside the ignored `.runtime/godot` directory. No administrator access or system-wide installation is needed. Running setup again reuses the verified-version installation. The game launchers also run setup automatically if the managed engine is missing.
 
 The launchers import the bundled character assets before starting the game, so a fresh checkout does not need an existing `.godot` cache. Subsequent launches reuse imported assets. Blender is not required to play.
 
-- **Arena.cmd:** multiplayer lobby, or solo practice against bots.
-- **Play.cmd:** the single-player frontier.
+- **Play.cmd:** the Hollow, the default staging screen, with inventory, stash, vendors and every game mode.
+- **Arena.cmd:** the multiplayer lobby directly, or solo practice against bots. The arena lobby's **Return to the Hollow** button reconnects the hub flow.
 - **Host Tailscale.cmd:** immediately host an arena on UDP 7777.
 
-Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `arena.tscn` or `main.tscn`; the Windows setup script does not install engines for those platforms.
+Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `menu.tscn`, `arena.tscn` or `main.tscn`; the Windows setup script does not install engines for those platforms.
+
+## The Hollow: the default screen
+
+Every normal launch opens **the Hollow**, the out-of-raid staging depot. The ranger stands in the middle of the screen in the gear you last equipped, with three vendor stalls around the clearing. The HUD carries the inventory, the stash, the selected vendor and the four ways to deploy.
+
+| Area | Capacity and behaviour |
+| --- | --- |
+| Inventory | **10 slots**. Bought gear and the kit you own live here. Equipping a bow, sword or armor set applies it on entry to every mode. |
+| Stash | **20 slots**. Long-term storage that is never equipped automatically. |
+| Purse | Credits earned in the frontier; the starting purse is **200**. |
+| Equipped kit | One bow, one sword and one armor set, kept in the inventory and marked with `*`. The only copy of an equipped item cannot be sold or stashed; equip a replacement first. |
+
+| Vendor | Stock and prices |
+| --- | --- |
+| Fletcher Orla | Shortbow 120 / Recurve 220 / Longbow 360 |
+| Smith Brann | Shortsword 110 / Arming sword 195 / Greatsword 340 |
+| Quartermaster Vey | Ranger leather 55 / Sentinel mail 180 / Warden plate 320 |
+
+Click a slot to inspect its stats and reach **EQUIP**, **TO STASH** / **TO INVENTORY**, or **SELL** at 60% of the purchase price. Click vendor stock, then **BUY**; purchases need a free inventory slot and enough credits. A full inventory or stash rejects the action with a status message instead of dropping gear.
+
+Every change is written to `user://player_state.json` immediately, so gear and credits survive quitting and scene changes. Delete that file to restore the starting kit: shortbow, shortsword, ranger leather, an otherwise empty stash and 200 credits.
+
+| Deploy action | Result |
+| --- | --- |
+| **Arena Skirmish** | Starts a real four-seat arena on this PC; bots fill empty seats. It claims the first free UDP port from 7777, so an existing host never blocks practice. |
+| **Host a Game** | Opens a name and UDP-port form, then hosts the arena. Share the host address privately. |
+| **Join a Game** | Opens a name, address and UDP-port form, then joins that host. |
+| **Enter the Frontier** | Opens the open PvE world for the waystone hunt. |
+
+The equipped bow, sword and armor become the starting loadout in both the frontier and the arena. Frontier gold is the Hollow's credits: kills and restored waystones grow the same purse. Equipment buttons inside a match still change that session's loadout, but only the Hollow's equipped kit is saved. Drag the 3D view to orbit, use the wheel to zoom, and press `Escape` to close the host or join form.
 
 ## Play with friends over Tailscale
 
@@ -88,8 +118,11 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
+| Left-drag in the Hollow | Orbit the staging camera around the ranger |
+| Mouse wheel in the Hollow | Zoom the staging camera |
+| Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, and **N** toggles sound. The arena displays equipment controls and a **Leave Match** button.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
 
 ## Running slide
 
@@ -188,18 +221,20 @@ Authored walk, jog and sprint clips follow actual movement speed with a continuo
 
 ## Game modes
 
-**Arena:** a small woodland free-for-all with trees and stone cover, four combatants, simple pursuit/attack bots, score tracking, and three-second respawns. Bots use the same damage and attack paths as players.
+**The Hollow:** the default out-of-raid screen. The ranger stands in the depot with a 10-slot inventory, a 20-slot stash, three vendors and the purse. Bought and equipped gear persists across launches, and the equipped kit is the starting loadout for every other mode.
 
-**Frontier:** a seamless 290 × 290 metre zone containing a village, enterable houses, forest, ruined fortress, upland shrine, trails and bridge. Defeat wolves and sentinels, clear defenders and restore three waystones. The village campfire heals. Mail reduces incoming damage by 15%, plate by 30%. Progress lasts for the play session; death preserves restored waystones.
+**Arena:** a small woodland free-for-all with trees and stone cover, four combatants, simple pursuit/attack bots, score tracking, and three-second respawns. Bots use the same damage and attack paths as players. Enter from the Hollow with **Arena Skirmish** (hosts locally on the first free UDP port from 7777), **Host a Game**, or **Join a Game**; `Arena.cmd` still opens the standalone lobby.
+
+**Frontier:** a seamless 290 × 290 metre zone containing a village, enterable houses, forest, ruined fortress, upland shrine, trails and bridge. Defeat wolves and sentinels, clear defenders and restore three waystones. The village campfire heals. Mail reduces incoming damage by 15%, plate by 30%. Gold from foes and waystones is added to the Hollow purse immediately. Progress lasts for the play session; death preserves restored waystones. Use **Return to the Hollow** to bank the session and re-equip.
 
 ## Update
 
-**Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. The old ZIP test build used 1/2/3 for bow sizes and must not be used with this revision. Current windows show **0.2.0** in the HUD.
+**Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. The old ZIP test build used 1/2/3 for bow sizes and must not be used with this revision. Current windows show **0.3.0** in the HUD, and `Play.cmd` opens the Hollow.
 
 ```powershell
 git pull --ff-only
 .\Setup.cmd
-.\Arena.cmd
+.\Play.cmd
 ```
 
 ## Development and tests
@@ -207,6 +242,8 @@ git pull --ff-only
 `assets/characters/ironwood_ranger.glb` contains the skinned character and authored clips, including the one- and two-handed held guard loops; its adjacent JSON records source timing, guard targets/support clearance and weapon/palm transforms. `scripts/archer.gd` samples these animations on the physics clock, applies bow/terrain corrections, and emits blade sweeps from the same pose used to render the sword. `assets/characters/ironwood_wolf.glb` is the original textured Briar wolf: a continuous skinned quadruped with a 37-bone rig, deterministic grey coat and in-place idle, trot, bite and death clips. `scripts/wolf_visual.gd` samples them and maps the 1.5 s bite to gameplay's 0.65 s impact and 0.85 s recovery; `enemy.gd` keeps AI, collision, damage and the corpse lifetime authoritative. `combat.gd` handles authoritative swept contact, independent sword recovery and bow readiness. `dodge_roll.gd` owns explicit Shift + Space roll state. `main.gd` controls the frontier; `arena.gd` and `arena_actor.gd` implement authoritative ENet multiplayer and replicas. World and weapon geometry remain runtime-generated.
 
 `cover_movement.gd` owns acquisition, supported capsule sweeps, contiguous-surface sliding, bounded firing-corridor search and latched lookout/retuck state. The single authoritative cover snapshot contains physical stance and world-space `lean`; animation snapshots do not duplicate it. `archer.gd` layers the authored pose before foot/weapon corrections. `Combat` checks the actual shaft before a cover release; melee still clears cover before its first swing pose. Arena aim samples carry the observed own-actor snapshot tick, and remote release waits for the current exposure epoch before applying the unchanged shaft collision check. Regressions exercise left/right tree shots, convex and compound cover, slopes/recovery, side swaps/free look, blocked shafts, malformed/stale aim stamps, cancellation, melee exits and observer replication.
+
+`hub_regression.gd` drives the out-of-raid loop: 10-slot inventory and 20-slot stash limits, vendor pricing and rejections, equipped-copy protection, save/reload persistence, HUD panel and modal geometry with label clipping, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, and the hub-to-arena host session with validated seat loadouts. Script-mode tests start from the authored defaults instead of a player's real save.
 
 Repo-local skills provide step-by-step instructions for coding and asset-authoring agents:
 
@@ -235,6 +272,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd
 & $Godot --headless --path . --script res://tests/hitbox_regression.gd
+& $Godot --headless --path . --script res://tests/hub_regression.gd
 & $Godot --headless --path . --script res://tests/throw_regression.gd
 ```
 

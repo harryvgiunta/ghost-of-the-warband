@@ -1,6 +1,6 @@
 ---
 name: ironwood-archer
-description: Use when modifying, debugging, launching, or verifying this Ironwood Godot repository, including authored skeletal character animation, Blender retargeting, frontier and arena gameplay, bow and sword combat, roll controls, HUD, and authoritative ENet multiplayer.
+description: Use when modifying, debugging, launching, or verifying this Ironwood Godot repository, including the Hollow staging hub, inventory/stash/vendor economy, authored skeletal character animation, Blender retargeting, frontier and arena gameplay, bow and sword combat, roll controls, HUD, and authoritative ENet multiplayer.
 ---
 
 # Ironwood Archer
@@ -18,8 +18,12 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 
 | Surface | Implementation and integration points |
 | --- | --- |
-| Frontier | `main.tscn`, `scripts/main.gd`: movement, input, camera, crosshair aim, equipment, and HUD updates |
-| Arena/session | `arena.tscn`, `scripts/arena.gd`: host/client lifecycle, input actions, aim validation, authoritative projectile spawning, snapshots, and camera |
+| Hollow hub | `menu.tscn`, `scripts/menu.gd`: default main scene, ranger preview, orbit camera, depot dressing, mode entry, and hub-return hand-off |
+| Hub HUD | `scripts/menu_hud.gd`: 10 inventory slots, 20 stash slots, three vendor tabs, item inspector, purse, host/join forms, and deploy buttons |
+| Out-of-raid state | `scripts/player_state.gd` (autoload `PlayerState`): 10/20 capacities, item catalog, vendor stock, credits, equipped kit, and `user://player_state.json` persistence |
+| Session bridge | `scripts/session.gd` (autoload `Session`): one-shot host/join intent from the hub; explicit command-line flags still win |
+| Frontier | `main.tscn`, `scripts/main.gd`: movement, input, camera, crosshair aim, equipment, HUD updates, hub purse sync, and hub return |
+| Arena/session | `arena.tscn`, `scripts/arena.gd`: host/client lifecycle, hub intent, client loadout registration, input actions, aim validation, authoritative projectile spawning, snapshots, and camera |
 | Arena combatant | `scripts/arena_actor.gd`: authoritative movement, bots, stamina, health, respawn, `snapshot()` and `apply_snapshot()` |
 | Character and animation | `scripts/archer.gd`: imported Skeleton3D/AnimationPlayer, action phases, physics-clock sampling, bow/terrain IK, equipment sockets, and animation-state replication |
 | Briar wolf presentation | `scripts/wolf_visual.gd`: imported `assets/characters/ironwood_wolf.glb`, idle/trot speed sampling, attack seek from gameplay timers, and held death; `tools/prepare_wolf.py` reproduces the mesh/rig/coat/clips |
@@ -29,10 +33,24 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 | Running slide | `scripts/running_slide.gd`: achieved-sprint eligibility, finite deceleration, limited steering and collision/ground-loss termination |
 | Cover and shoulder camera | `scripts/cover_movement.gd`: shared physics/crouch/peek state; `scripts/shoulder_camera.gd`: smooth shoulder swap and swept camera collision |
 | Weapon/projectile geometry | `scripts/bow.gd`, `scripts/sword.gd`, `scripts/dagger.gd`, `scripts/arrow.gd`, `scripts/thrown_weapon.gd`, `scripts/geo.gd` |
-| UI | `scripts/hud.gd` for frontier; `scripts/arena_hud.gd` for arena |
+| UI | `scripts/menu_hud.gd` for the Hollow; `scripts/hud.gd` for frontier; `scripts/arena_hud.gd` for arena |
 | World and supporting systems | `scripts/range_world.gd`, `scripts/arena_world.gd`, `scripts/enemy.gd` (wolf/sentinel AI and damage authority), `scripts/range_audio.gd` |
 
 ## Gameplay contracts to preserve
+
+### The Hollow and out-of-raid state
+
+- `project.godot` sets `run/main_scene="res://menu.tscn"`; every normal launch starts in the Hollow. `Play.cmd` therefore opens the hub. `Arena.cmd` still opens `arena.tscn` directly for the standalone lobby and scripted hosts/joins.
+- `PlayerState` is the only authority for out-of-raid gear. `INVENTORY_CAPACITY` is **10** and `STASH_CAPACITY` is **20**; both are hard limits enforced by `buy`, `move_to_stash` and `move_to_inventory`. Do not add overflow slots or silently drop rejected items.
+- The starting state is the shortbow, shortsword, ranger leather (equipped, three inventory slots), an empty stash and 200 credits. Equipped gear stays in the inventory and is marked with `*`; the last copy of an equipped item cannot be sold or stashed. A duplicate copy may be sold while that gear type remains equipped.
+- `scripts/menu_hud.gd` is read-only over state: selection lives in the HUD, every mutation is a signal handled by `menu.gd` (`buy_requested`, `equip_requested`, `stash_requested`, `unstash_requested`, `sell_requested`). Keep capacity/affordability checks in `PlayerState`, not only in button enablement.
+- `scripts/menu.gd` applies the equipped bow/sword/armor indexes to its `Archer` preview after each change. Keep the camera framing the ranger between the inventory (left) and vendor (right) panels, the stash panel above the bottom edge, and the modal form inside the viewport. `hub_regression` asserts panel containment, pairwise non-overlap, label clipping, and modal field containment; update it with layout changes.
+- Vendors, prices and item stats live in `PlayerState.ITEMS` / `VENDORS`. Selling pays `floor(price * 0.6)`. Bought gear does not auto-equip.
+- Persistence writes `user://player_state.json` on every mutation and loads on autoload ready. Unknown item ids and excess entries are dropped on load. Deleting the file restores the starting kit. Never break the format silently; `hub_regression` round-trips it.
+- Frontier and arena start from `PlayerState.equipped_index(kind)`. In-match equipment buttons still change that session's loadout, but those session changes are not written back; only the Hollow's equipped kit persists.
+- Frontier rewards use `_award_gold`, which updates the visible session gold and calls `PlayerState.add_credits`. Do not add a second wallet path.
+- The arena consumes `Session.take()` once in `_read_arguments`; `--arena-host` / `--arena-join` remain authoritative. Hub practice uses `mode="skirmish"`, which calls `host_game(..., find_open_port=true)` and tries 7777 through 7792 so an existing host never blocks a local practice match; explicit hosting still reports the requested port conflict. A hub host applies its own kit in `host_game`; a joining client sends `{bow,sword,armor}` with `_register`, the host applies it to that seat, and the normal snapshots drive the client's presentation. Validate every value in `_apply_loadout` (integer 0..2); never trust a client's claimed indexes beyond that.
+- Hub return paths: the frontier HUD button emits `hub_requested` and loads `menu.tscn`; the arena lobby's **Return to the Hollow** does the same after `leave_game()`. Do not recreate the old frontier/arena shortcut loop.
 
 ### Input and rolls
 
@@ -75,7 +93,7 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - There is no separate bow cooldown or movement recovery penalty. Readiness follows the actual release/re-nock animation through `get_bow_recovery_progress()`. The current follow-through is 0.28 seconds and arrow retrieval/re-nocking is 0.95 seconds.
 - Every shot, including zero/partial charge, spends the nocked arrow and completes recovery before another draw. Equipment swaps, cancellation, or rolling cannot skip/restart that recovery. Canceling an unreleased draw does not spend its arrow.
 - Carry leftover frame time from release into recovery. Do not add a frame-dependent extra delay at phase boundaries.
-- Aim remains a world-space point from the camera ray, not target tracking or gravity compensation. Start the query at the projected actor position plus `cover.camera_height()` and exclude the attached cover body through `CoverMovement.attached_surface()` (host-cached, replica-derived from `normal`) so top peeks can fire over the wall you are posted against. Never choose the start from the animated muzzle: it feeds bow facing/raise back into targeting, skips close crosshair targets and makes shoulder convergence unstable. Aim the bow from its cheek anchor. Before a cover release, sweep the actual nock-to-tip shaft with finite radius and an initial-overlap check. Obstruction cancels pending release/frozen charge. Never relocate a clear shot's origin behind the obstacle; it launches from the rendered arrow tip. Ordinary projectile collision alone applies damage.
+- Aim remains a world-space point from the camera ray, not target tracking or gravity compensation. Start the query at the projected actor position plus `cover.camera_height()` and exclude the attached cover body through `CoverMovement.attached_surface()` (host-cached, replica-derived from `normal`) so top peeks can fire over the wall you are posted against. Never choose the start from the animated muzzle: it feeds bow facing/raise back into targeting, skips close crosshair targets and makes shoulder convergence unstable. Aim the bow from its cheek anchor. Before a cover release, sweep the actual nock-to-tip shaft with finite radius and an initial-overlap check. A fresh exposure gets `Combat.SHAFT_SETTLE_GRACE` (0.15 s) for its lean/bow pose to settle before a blocked shaft is treated as permanent; a settled obstruction still cancels pending release/frozen charge. Never relocate a clear shot's origin behind the obstacle; it launches from the rendered arrow tip. Ordinary projectile collision alone applies damage.
 
 ### Damage zones
 
@@ -138,12 +156,13 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 
 1. Change the shared rig/combat/roll behavior first, then migrate both controllers and their callsites.
 2. For new animation state, update both rig serialization methods and review actor snapshots/replica application. The host owns combat and damage; clients submit input/aim, not charge or damage claims.
-3. Update both HUDs, equipment hints, and the README when controls or timing change. Never leave labels describing a removed cooldown or input gesture.
-4. Check weapon swaps, cancellation, airborne restrictions, respawn, and host/client behavior at the affected state boundaries.
+3. Update the Hollow HUD, both match HUDs, equipment hints, and the README when controls or timing change. Never leave labels describing a removed cooldown, gesture, or launch path.
+4. When gear, capacities, prices or equipped-kit behavior changes, update `PlayerState`, the hub's inspector/buttons, both mode-start loadout paths, and `hub_regression` together.
+5. Check weapon swaps, cancellation, airborne restrictions, respawn, and host/client behavior at the affected state boundaries.
 
 ## Run and verify
 
-Windows launchers: `Play.cmd` opens the frontier; `Arena.cmd` opens the lobby; `Host Tailscale.cmd` hosts a match. They honor `GODOT_PATH`, run setup if needed, and import the bundled assets before starting. A fresh checkout must not rely on an existing `.godot` cache. Blender is only needed to re-author assets, not to play. Keep runtime binaries, logs, captures, and temporary scripts out of source control.
+Windows launchers: `Play.cmd` opens the Hollow hub (default main scene); `Arena.cmd` opens the standalone arena lobby; `Host Tailscale.cmd` hosts a match. They honor `GODOT_PATH`, run setup if needed, and import the bundled assets before starting. A fresh checkout must not rely on an existing `.godot` cache. Blender is only needed to re-author assets, not to play. Keep runtime binaries, logs, captures, and temporary scripts out of source control.
 
 For the managed Windows console engine, run from the repository root:
 
@@ -167,7 +186,8 @@ $Checks = @(
     'block_clash_regression',
     'hitbox_regression',
     'dagger_regression',
-    'throw_regression'
+    'throw_regression',
+    'hub_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"
@@ -193,6 +213,7 @@ Use the selected engine path instead if `GODOT_PATH` is configured. Check exit c
 - `hitbox_regression` checks the animated humanoid head zone through a full crouch, 2x before armor, replica rejection, sentinel and wolf zones, a real arrow headshot/body pair, and a real swept-blade headshot. `melee_roll_regression` covers the greatsword-head/one-hand-chest zone split.
 - `dagger_regression` checks the exported `Dagger_Stab` clip and its 0.5 s window, the 14-damage/1.2 m reach profile, a real authored blade contact, the aim-directed blade direction, a low-aim wolf contact, and a high aim that does not auto-target, the model swap, the one-hand guard pose, an instant dagger guard producing a weak block rather than a parry, half damage plus the heavier stamina cost, the attacker's continued swing, and unchanged sword parry/block timing.
 - `throw_regression` checks per-weapon charge duration and damage scaling, one projectile per release, the 0.28 + 0.95 recovery gate, cancellation and roll/melee gating, the thrown model matching the equipped weapon, real swept projectile damage including headshots and world cover, the endless-supply hand restoration, frontier T input, and the arena host throw action/projectile.
+- `hub_regression` checks the 10-slot inventory and 20-slot stash limits, vendor prices/affordability, equipped-copy protection, save/reload persistence, the hub's panel layout/containment/non-overlap/label clipping and host/join form geometry, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, and the hub-to-arena host session with validated seat loadouts.
 
 For shared combat, rig, or network changes, run the complete set after integration. Keep deterministic regression tests for meaningful behavior and boundaries, not HUD wording, copied fields, or source text.
 
@@ -202,6 +223,6 @@ Tests are not visual proof. Launch the actual changed scene and exercise its inp
 
 Godot keeps loaded scripts in memory. When asked to restart, identify processes by executable path and project arguments, preserve their scene/network arguments, close only this repo's game instances gracefully, and relaunch them. Do not kill unrelated Godot editors/games or silently force-kill a nonresponsive process. Restarting clears session-only frontier progress and disconnects a running match; reconnect clients to a restarted host.
 
-Observe startup rather than assuming it: the frontier emits `IRONWOOD_WORLD_READY`, hosts emit `ARENA_HOST_READY`, and joined clients emit `ARENA_CLIENT_READY`. Leave a user-requested game running; close temporary verification instances.
+Observe startup rather than assuming it: the hub emits `IRONWOOD_HUB_READY`, the frontier emits `IRONWOOD_WORLD_READY`, hosts emit `ARENA_HOST_READY`, and joined clients emit `ARENA_CLIENT_READY`. Leave a user-requested game running; close temporary verification instances.
 
 Report the exact behavior changed, exercised verification, and any remaining blocker. Update this skill when an intentional change supersedes one of its repo contracts; do not preserve obsolete aliases or old input paths just to match these notes.

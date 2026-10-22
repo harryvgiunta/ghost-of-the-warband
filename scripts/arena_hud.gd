@@ -3,7 +3,7 @@ extends Control
 signal host_requested(port: int, player_name: String)
 signal join_requested(address: String, port: int, player_name: String)
 signal leave_requested
-signal frontier_requested
+signal hub_requested
 signal bow_selected(index: int)
 signal armor_selected(index: int)
 signal sword_selected(index: int)
@@ -79,8 +79,8 @@ func _ready() -> void:
 	status_label = _ui._label(lobby,"",Vector2(25,389),14,UI.TEAL)
 	status_label.size = Vector2(515,96)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var frontier := _ui._button(lobby,"RETURN TO THE FRONTIER",Vector2(25,505),Vector2(515,38))
-	frontier.pressed.connect(func(): frontier_requested.emit())
+	var hub := _ui._button(lobby,"RETURN TO THE HOLLOW",Vector2(25,505),Vector2(515,38))
+	hub.pressed.connect(func(): hub_requested.emit())
 	match_ui = Control.new()
 	match_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	match_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
