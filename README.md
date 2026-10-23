@@ -121,7 +121,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Release T with a sword or dagger | Hurl the equipped weapon as a projectile. The endless supply keeps the same weapon equipped |
 | Click left mouse while dual wielding | Left-hand dagger stab |
 | Click right mouse while dual wielding | Right-hand sword overhead toward the crosshair; never a guard |
-| Q / E | Quick-step dodge left / right; grounded, short cooldown, 7 stamina |
+| Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
 | G | Interact with the campfire or a waystone |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
@@ -143,7 +143,9 @@ Press **C** again to cancel and stand when headroom permits. **Space** jumps and
 
 ## Quick steps
 
-**Q** and **E** perform a grounded quick step left or right relative to the camera. The step covers about **2.55 m in 0.24 s**, spends **7 stamina**, and enters a **0.55-second cooldown**. It is not a roll and grants no invulnerability. A step cancels a held bow draw, a melee swing, a throw or a guard, exits sticky cover, and ends immediately if the feet leave the ground. The torso pitches into the lunge while the authored locomotion carries the legs. Q and E no longer draw, attack or interact; **G** interacts with the campfire and waystones.
+**Q** and **E** perform a grounded side step left or right relative to the camera. The step covers about **2.95 m in 0.30 s**, spends **7 stamina**, and enters a **0.55-second cooldown**. It is not a roll and grants no invulnerability. A step cancels a held bow draw, a melee swing, a throw or a guard, exits sticky cover, and ends immediately if the feet leave the ground. The character keeps the facing it had before the step: the hips and shoulders rotate into the travel while the head stays on the target, the leading foot reaches out and lifts, and the trailing foot braces. Q and E no longer draw, attack or interact; **G** interacts with the campfire and waystones.
+
+`playtest/sidestep_lab.tscn` opens an isolated plaza for tuning this move: a facing tree, a metre grid and a measured trace of the last step. Launch it with **`playtest/Sidestep Lab.cmd`** or run the scene directly. It uses the real `Archer` and `DodgeStep` code; only the camera and the test props are local to the lab.
 
 ## Cover movement and shoulder views
 
