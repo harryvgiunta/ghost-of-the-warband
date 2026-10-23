@@ -25,6 +25,9 @@ const WOLF_HEAD_HALF_HEIGHT := 0.18
 ## Sentinel: the stone head caps the 1.9 m body capsule.
 const SENTINEL_HEAD_RADIUS := 0.30
 const SENTINEL_HEAD_HALF_HEIGHT := 0.16
+## Cinder devil: half-size humanoid; the horned head is the top of the 0.9 m capsule.
+const DEVIL_HEAD_RADIUS := 0.17
+const DEVIL_HEAD_HALF_HEIGHT := 0.10
 
 
 static func damage_multiplier(headshot: bool) -> float:

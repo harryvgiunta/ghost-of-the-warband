@@ -510,7 +510,7 @@ func activate_interactable(id: String) -> void:
 
 
 func _build_enemy_spawns() -> void:
-	# Clear ground near roads; two defenders per objective, ten roaming wilderness enemies.
+	# Clear ground near roads; objective defenders, wilderness hunters and devil packs.
 	for entry in [
 		Vector3(-49, 0, -20), Vector3(-61, 0, -30),
 		Vector3(49, 1, -56), Vector3(61, 1, -65),
@@ -521,6 +521,18 @@ func _build_enemy_spawns() -> void:
 		Vector3(35, 1, -80), Vector3(8, 0, -91)
 	]:
 		enemy_spawns.append({"position": _ground(entry.x, entry.z), "kind": int(entry.y)})
+	# Cinder devil packs. The village-glade pack sits just outside the camp's
+	# 19 m safe ring; the western pack joins the existing woodland hunters.
+	var glade := Vector2(-20, 21)
+	for index in 5:
+		var angle := TAU * float(index) / 5.0
+		var point := glade + Vector2(cos(angle), sin(angle)) * 2.7
+		enemy_spawns.append({"position": _ground(point.x, point.y), "kind": 2, "pack_index": index})
+	var western := Vector2(-46, -30)
+	for index in 3:
+		var angle := TAU * float(index) / 3.0 + 0.4
+		var point := western + Vector2(cos(angle), sin(angle)) * 2.4
+		enemy_spawns.append({"position": _ground(point.x, point.y), "kind": 2, "pack_index": 5 + index})
 
 
 func _reserved(point: Vector2, margin: float) -> bool:

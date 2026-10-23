@@ -140,6 +140,7 @@ func _ready() -> void:
 	for record: Dictionary in world.enemy_spawns:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
+		enemy.pack_index = int(record.get("pack_index", -1))
 		enemy.position = record.position + Vector3(0, 0.12, 0)
 		enemy.player = player
 		enemy.safe_center = world.player_spawn
