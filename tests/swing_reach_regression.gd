@@ -28,12 +28,12 @@ func _spawn_devil(game, distance: float):
 	devil.set_physics_process(false)
 	return devil
 
-func _swing(game, devil) -> void:
+func _swing(game, devil, variant: String = "horizontal_left") -> void:
 	game.camera_yaw = 0.0
 	game.shoulder_camera.side = 1
 	game._next_swing_side = 1
 	game.combat.set_aim(devil.get_aim_position())
-	game.begin_attack("right","horizontal_left")
+	game.begin_attack("right",variant)
 	# begin_attack refreshes the crosshair; pin the aim back onto the short target.
 	game.combat.set_aim(devil.get_aim_position())
 
@@ -78,6 +78,29 @@ func run() -> void:
 		await physics_frame
 	check(far.alive and is_equal_approx(far.health,far.max_health), "The forgiveness envelope ends before an unrelated 2.3 m target")
 	far.queue_free()
+	await process_frame
+	_reset_swing(game)
+	game.archer.set_weapon("dagger")
+	await physics_frame
+
+	var dagger_near = _spawn_devil(game,1.20)
+	await physics_frame
+	_swing(game,dagger_near,"")
+	for frame in 120:
+		await physics_frame
+	check(dagger_near.health < dagger_near.max_health, "A dagger thrust reaches a devil at its 1.2 m advertised reach")
+	dagger_near.queue_free()
+	await process_frame
+	_reset_swing(game)
+	await physics_frame
+
+	var dagger_far = _spawn_devil(game,1.90)
+	await physics_frame
+	_swing(game,dagger_far,"")
+	for frame in 120:
+		await physics_frame
+	check(dagger_far.alive and is_equal_approx(dagger_far.health,dagger_far.max_health), "The dagger envelope ends before an unrelated 1.9 m target")
+	dagger_far.queue_free()
 	game.queue_free()
 	await process_frame
 	print("SWING_REACH_REGRESSION checks=", checks, " failures=", failures)

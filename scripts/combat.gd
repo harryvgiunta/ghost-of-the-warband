@@ -519,18 +519,29 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 	var state := _swing_state(hand)
 	if not _can_damage_melee(hand,state) or radius <= 0.0:
 		return
-	# Horizontal cuts get a small reach and thickness envelope. The authored
-	# blade is short against half-size devils that strike from the advertised
-	# reach; the visible cut stays authoritative, but the hit volume is wider.
-	if hand == "right" and is_instance_valid(rig) and rig.weapon == "sword" 			and str(rig._right_variant) in ["horizontal_left","horizontal_right"]:
-		var reach := 0.14 + 0.04 * int(rig.sword_index)
+	# Horizontal cuts and dagger thrusts get a small reach and thickness
+	# envelope. The authored blades are short against half-size devils that
+	# strike from the advertised reach; the visible blade stays authoritative,
+	# but the hit volume is wider. Overheads and sword stabs keep their own.
+	var reach := 0.0
+	var thicken := 0.0
+	if is_instance_valid(rig):
+		if hand == "right" and rig.weapon == "sword" \
+				and str(rig._right_variant) in ["horizontal_left","horizontal_right"]:
+			reach = 0.14 + 0.04 * int(rig.sword_index)
+			thicken = 0.045
+		elif (hand == "right" and rig.weapon == "dagger") \
+				or (hand == "left" and rig.weapon == "dual"):
+			reach = 0.38
+			thicken = 0.06
+	if reach > 0.0:
 		var previous_length := (previous_tip-previous_base).length()
 		var current_length := (current_tip-current_base).length()
 		if previous_length > 0.0001:
 			previous_tip += (previous_tip-previous_base)/previous_length*reach
 		if current_length > 0.0001:
 			current_tip += (current_tip-current_base)/current_length*reach
-		radius += 0.045
+		radius += thicken
 	# Translation is continuous (cast_motion), not discrete overlap sampling.
 	# Subdivide rotation only. A small conservative capsule expansion encloses
 	# both endpoint orientations, including stationary and very fast samples.
