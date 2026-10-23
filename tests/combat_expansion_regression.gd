@@ -72,8 +72,14 @@ func run() -> void:
 	for pair in [["right",right],["left",left]]:
 		var travel: Vector3 = pair[1].travel
 		check(Vector2(travel.x,travel.z).length() > absf(travel.y)*1.5,"%s horizontal cut sweeps across the body" % pair[0])
-		check(travel.length() > 0.45,"%s horizontal cut covers a real blade path" % pair[0])
+		check(travel.length() > 1.4,"%s horizontal cut covers a real blade path, not a forward poke" % pair[0])
 	check(signf(right.travel.x) != signf(left.travel.x),"Left and right horizontal cuts mirror their lateral path")
+	# The greatsword sweeps further than a one-handed cut; a wide bat-like arc
+	# is the point of the heavy weapon, so require it to travel much further.
+	attacker.rig.set_sword(2)
+	var heavy: Dictionary = horizontal_tip(attacker,"horizontal_right")
+	check(heavy.travel.length() > 2.4,"The greatsword carries its blade through a full-body swing")
+	attacker.rig.set_sword(0)
 	# Forward stab uses the authored thrust clip, a 0.5 s window, and extends
 	# the socketed blade toward the crosshair instead of reusing the overhead.
 	reset_swing(attacker)
