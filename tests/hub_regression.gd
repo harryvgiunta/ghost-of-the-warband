@@ -177,6 +177,16 @@ func _test_session_bridge() -> void:
 	session.arm_arena("skirmish","127.0.0.1",7777,"Practice")
 	request = session.take()
 	check(str(request.mode) == "skirmish","Practice keeps its own mode so the arena can pick a free port")
+	session.arm_delve("delve-solo","127.0.0.1",7777,"Delver")
+	request = session.take()
+	check(str(request.mode) == "delve-solo","The hub arms a solo delve request")
+	check(str(request.address) == "127.0.0.1" and int(request.port) == 7777,"A solo delve keeps the local route")
+	check(str(request.name) == "Delver","A delve request carries the preferred name")
+	session.arm_delve("delve-join","10.0.0.6",7900,"")
+	request = session.take()
+	check(str(request.mode) == "delve-join","A delve join keeps its own mode")
+	check(str(request.address) == "10.0.0.6","A delve join carries the host address")
+	check(str(request.name) == "Ranger","An empty delve name falls back to Ranger")
 
 func _test_menu() -> void:
 	state.reset()
@@ -210,10 +220,26 @@ func _test_menu() -> void:
 	check(menu.hud.inventory_buttons.size() == 10,"The hub renders ten inventory slots")
 	check(menu.hud.stash_buttons.size() == 20,"The hub renders twenty stash slots")
 	check(menu.hud.vendor_buttons.size() == 3,"The hub offers three vendors")
-	var deploy_buttons: Array[Button] = [menu.hud.skirmish_button,menu.hud.host_button,menu.hud.join_button,menu.hud.frontier_button]
+	var deploy_buttons: Array[Button] = [menu.hud.skirmish_button,menu.hud.host_button,menu.hud.join_button,menu.hud.frontier_button,
+		menu.hud.delve_button,menu.hud.delve_host_button,menu.hud.delve_join_button]
 	for button in deploy_buttons:
 		check(button.visible,"Every deploy action is available from the default screen")
 		check(menu.hud.action_panel.get_global_rect().encloses(button.get_global_rect()),"Deploy actions sit inside their panel")
+	for first in deploy_buttons.size():
+		for second in range(first+1,deploy_buttons.size()):
+			check(not deploy_buttons[first].get_global_rect().intersects(deploy_buttons[second].get_global_rect()),"Deploy actions do not overlap each other")
+	var action_rect: Rect2 = menu.hud.action_panel.get_global_rect()
+	check(is_equal_approx(action_rect.size.x,600.0) and is_equal_approx(action_rect.size.y,306.0),"The deploy panel keeps its authored two-column size")
+	var left_column_end: float = maxf(menu.hud.frontier_button.get_global_rect().end.x,menu.hud.host_button.get_global_rect().end.x)
+	check(menu.hud.delve_button.get_global_rect().position.x > left_column_end,"The delve column starts clear of the arena column")
+	check(action_rect.encloses(menu.hud.delve_host_button.get_global_rect()) and action_rect.encloses(menu.hud.delve_join_button.get_global_rect()),"Both delve host and join actions sit in the right column")
+	menu.hud.set_delve_progress(2,false)
+	check(menu.hud.delve_button.text.begins_with("RESUME THE DELVE"),"A stored run resumes the delve instead of descending fresh")
+	check(menu.hud.delve_button.text.ends_with("WAVE 2"),"The resume label names the stored wave")
+	menu.hud.set_delve_progress(3,true)
+	check(menu.hud.delve_button.text.ends_with("FINAL CACHE"),"A cleared wave offers the final cache")
+	menu.hud.set_delve_progress(0,false)
+	check(menu.hud.delve_button.text == "DESCEND THE DELVE","Without a stored run the delve starts fresh")
 	var enabled := 0
 	for button in menu.hud.inventory_buttons:
 		if not button.disabled:
@@ -288,7 +314,10 @@ func _test_menu() -> void:
 	for panel in panels:
 		for child in panel.get_children():
 			if child is Label:
-				check(panel.get_global_rect().encloses(child.get_global_rect()),"Panel labels stay inside their panel")
+				var inside := panel.get_global_rect().encloses(child.get_global_rect())
+				if not inside:
+					print("HUB_LABEL_OUT panel=",panel.name," text=",child.text," label=",child.get_global_rect()," panel_rect=",panel.get_global_rect())
+				check(inside,"Panel labels stay inside their panel")
 	check(menu.hud._vendor_tag.get_visible_line_count() == menu.hud._vendor_tag.get_line_count(),"Vendor copy is not clipped")
 	check(menu.hud._detail_text.get_visible_line_count() == menu.hud._detail_text.get_line_count(),"Item copy is not clipped")
 	menu.hud.host_button.pressed.emit()
@@ -309,6 +338,34 @@ func _test_menu() -> void:
 	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._address_input.get_global_rect()),"The join address field fits the form")
 	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._confirm_button.get_global_rect()),"The join confirm button fits the form")
 	menu.hud.close_form()
+	menu.hud.delve_host_button.pressed.emit()
+	await process_frame
+	check(menu.hud.is_form_open(),"The delve host action opens the delve hosting form")
+	check(menu.hud._modal_kind == "delve_host","The delve host form is the delve host kind")
+	var delve_modal: Rect2 = menu.hud._modal_panel.get_global_rect()
+	check(view_rect.encloses(delve_modal),"The delve host form fits on screen")
+	check(delve_modal.encloses(menu.hud._name_input.get_global_rect()),"The delve host name field fits the form")
+	check(delve_modal.encloses(menu.hud._port_input.get_global_rect()),"The delve host port field fits the form")
+	check(delve_modal.encloses(menu.hud._confirm_button.get_global_rect()),"The delve host confirm button fits the form")
+	check(delve_modal.encloses(menu.hud._cancel_button.get_global_rect()),"The delve host cancel button fits the form")
+	check(not menu.hud._address_input.visible,"The delve host form hides the join address field")
+	check(menu.hud._confirm_button.text == "HOST DELVE","The delve host form confirms a delve")
+	menu.hud.close_form()
+	check(not menu.hud.is_form_open(),"The delve host form closes")
+	menu.hud.delve_join_button.pressed.emit()
+	await process_frame
+	check(menu.hud.is_form_open(),"The delve join action opens the delve join form")
+	check(menu.hud._modal_kind == "delve_join","The delve join form is the delve join kind")
+	check(view_rect.encloses(menu.hud._modal_panel.get_global_rect()),"The delve join form fits on screen")
+	check(menu.hud._address_input.visible,"The delve join form shows the host address field")
+	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._name_input.get_global_rect()),"The delve join name field fits the form")
+	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._address_input.get_global_rect()),"The delve join address field fits the form")
+	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._port_input.get_global_rect()),"The delve join port field fits the form")
+	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._confirm_button.get_global_rect()),"The delve join confirm button fits the form")
+	check(menu.hud._modal_panel.get_global_rect().encloses(menu.hud._cancel_button.get_global_rect()),"The delve join cancel button fits the form")
+	check(menu.hud._confirm_button.text == "JOIN DELVE","The delve join form confirms a delve")
+	menu.hud.close_form()
+	check(not menu.hud.is_form_open(),"The delve join form closes")
 	menu.queue_free()
 	await process_frame
 

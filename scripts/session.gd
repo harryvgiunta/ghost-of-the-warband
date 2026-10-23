@@ -17,6 +17,9 @@ func arm_arena(next_mode: String, next_address: String, next_port: int, next_nam
 	if player_name.is_empty():
 		player_name = "Ranger"
 
+func arm_delve(next_mode: String, next_address: String, next_port: int, next_name: String) -> void:
+	arm_arena(next_mode,next_address,next_port,next_name)
+
 func has_request() -> bool:
 	return mode != ""
 

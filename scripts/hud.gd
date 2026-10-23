@@ -357,6 +357,8 @@ func _draw_map(rect: Rect2, expanded: bool) -> void:
 	for item: Dictionary in _interactables:
 		var point := _map_point(item.position, rect)
 		var color := TEAL if _activated.has(item.id) else GOLD
+		if item.kind == "delve":
+			color = Color("e08a4f")
 		if item.kind == "camp":
 			draw_rect(Rect2(point - Vector2.ONE * 4, Vector2.ONE * 8), Color("d69b74"))
 		else:

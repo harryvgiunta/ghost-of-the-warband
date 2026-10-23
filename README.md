@@ -1,6 +1,6 @@
-# Ironwood — The Hollow, Frontier and Arena
+# Ironwood — The Hollow, Frontier, Arena and the Sunken Delve
 
-A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger, a shield, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier, a four-combatant multiplayer arena, or a sealed one-room survival delve beneath Hearthstead. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger, a shield, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -25,7 +25,7 @@ Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can
 
 ## The Hollow: the default screen
 
-Every normal launch opens **the Hollow**, the out-of-raid staging depot. The ranger stands in the middle of the screen in the gear you last equipped, with three vendor stalls around the clearing. The HUD carries the inventory, the stash, the selected vendor and the four ways to deploy.
+Every normal launch opens **the Hollow**, the out-of-raid staging depot. The ranger stands in the middle of the screen in the gear you last equipped, with three vendor stalls around the clearing. The HUD carries the inventory, the stash, the selected vendor and every way to deploy, including the Sunken Delve.
 
 | Area | Capacity and behaviour |
 | --- | --- |
@@ -50,6 +50,9 @@ Every change is written to `user://player_state.json` immediately, so gear and c
 | **Host a Game** | Opens a name and UDP-port form, then hosts the arena. Share the host address privately. |
 | **Join a Game** | Opens a name, address and UDP-port form, then joins that host. |
 | **Enter the Frontier** | Opens the open PvE world for the waystone hunt. |
+| **Descend the Delve** | Hosts a local delve on the first free UDP port and drops the party into the sealed chamber. The button changes to **Resume the Delve** while a cleared-wave checkpoint exists. |
+| **Host a Delve** | Opens a name and UDP-port form, then hosts a delve party on that port. Share the address privately. |
+| **Join a Delve** | Opens a name, address and UDP-port form, then joins that delve. The joining ranger drops into the host's current phase. |
 
 The equipped bow, sword and five armor pieces become the starting loadout in both the frontier and the arena. Frontier gold is the Hollow's credits: kills and restored waystones grow the same purse. Equipment buttons inside a match still change that session's loadout, but only the Hollow's equipped kit is saved. Drag the 3D view to orbit, use the wheel to zoom, and press `Escape` to close the host or join form.
 
@@ -99,6 +102,8 @@ Or enter the address and port in the arena lobby and click **Join Game**. Use `1
 
 There are four seats: the host and up to three joining humans. Empty seats use bots. Joining replaces a bot; disconnecting restores one. A fifth human is refused. Health, movement, attacks, thrown weapons, damage, kill/death scores, and respawns are host-authoritative. Clients send input and aim points, not damage or charge claims. The host leaving returns clients to the lobby; there is no host migration or matchmaking service.
 
+The delve uses the same ENet transport and the same **Host a Delve** / **Join a Delve** forms, but a delve host needs no lobby: the party stages on the landing until the host presses **G** to descend. A client joining during a wave drops straight into the sealed chamber; a client joining after a clear lands beside the cache. A fifth ranger is refused. The host owns wave, seal, cache and wipe state; clients only send movement and action intents. If the host leaves, clients see **Connection Lost** and can return to the Hollow.
+
 ### Connection troubleshooting
 
 - Confirm the host is in a match, not merely at the lobby.
@@ -140,7 +145,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click left mouse while dual wielding | Left-hand dagger stab |
 | Click right mouse while dual wielding | Right-hand sword overhead toward the crosshair; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| G | Interact with the campfire or a waystone |
+| G | Interact with the campfire or a waystone, begin or resume a delve descent, open a wave cache, descend, or ascend to the surface |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom. Right-drag orbits only in frontier inspection view |
@@ -149,7 +154,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Mouse wheel in the Hollow | Zoom the staging camera |
 | Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** The shield is legal only with the dagger or the medium arming sword; switching to a bow, shortsword or greatsword stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **G** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** In a delve, **R** in the surface staging clears a saved checkpoint and begins a fresh run; movement, combat, cover, rolls and equipment use the same controls as the frontier. The shield is legal only with the dagger or the medium arming sword; switching to a bow, shortsword or greatsword stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **G** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
 
 ## Running slide
 
@@ -294,6 +299,8 @@ The Hollow and arena lobby remember the **last player name, host address and UDP
 
 **Frontier:** a seamless 290 × 290 metre zone containing a village, enterable houses, forest, ruined fortress, upland shrine, trails and bridge. Defeat wolves, sentinels and cinder devil packs, clear defenders and restore three waystones. The village campfire heals. Mail reduces incoming damage by 15%, plate by 30%. Gold from foes and waystones is added to the Hollow purse immediately. Progress lasts for the play session; death preserves restored waystones. Use **Return to the Hollow** to bank the session and re-equip.
 
+**The Sunken Delve:** a host-authoritative instanced survival room reached from the Hollow's deploy panel or the stone stair beside Hearthstead camp. The party stages on a raised landing, then drops through a shaft into one medium chamber with a 15 m ceiling, a central defence dais, pillars, barricades, crates and four dark archways. The room seals while a wave is alive. **Three waves of two cinder devils** trickle in from alternating archways and hunt the nearest living ranger; downed rangers stay down. A cleared wave opens the gates and, after a short cache-sealing timer, spawns a banded chest at the dais with a gold loot burst. Any ranger can open it; there is deliberately **no inventory, drop or loot-table system in this iteration**. After a clear the party can descend through the south gate (next wave) or ascend through the north gate back to the open frontier. A saved checkpoint records the last cleared wave and cache state, so the next run resumes there; a full-party wipe ends the run and clears the checkpoint. The Hollow and Hearthstead both host a local server, so friends can join any of these runs from **Join a Delve**.
+
 **Cinder devil packs:** half-height ember-skinned humanoids with horns, claws and ember eyes. **Five packs (20 devils)** hunt the frontier: a mixed five-devil pack in the glade north-west of the camp beyond the safe ring, a three-devil pack in the western woods, and four-devil packs in the northern woods, the southern meadow and the ridge approach. Each pack mixes roles: **claw**, **dagger**, **short sword** and **bow**. They do not charge in a straight line: they orbit at different radii and directions, leap, slide, and make quick half-distance side steps (**1.48 m in 0.22 s**) to reach a flank. Melee devils dive in with a telegraphed strike; bow devils kite at range and release real arrows, aiming with a small ballistic lead. Up to **three** pack members commit to an attack at once, and attacks come faster than the first pass. All devils have **24 health** and award **6 gold**; claw hits deal **8** (**10** on a landing pounce), daggers **6**, short swords **11**, and bow arrows **7**. Their compact head zone makes headshots harder but still doubles damage.
 
 ## World art
@@ -382,7 +389,12 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/hub_regression.gd
 & $Godot --headless --path . --script res://tests/throw_regression.gd
 & $Godot --headless --path . --script res://tests/world_art_regression.gd
+& $Godot --headless --path . --script res://tests/delve_regression.gd
+& $Godot --headless --path . --script res://tests/delve_entry_regression.gd
+& $Godot --headless --path . --script res://tests/delve_network_regression.gd
 ```
+
+`delve_regression.gd` checks the three-wave/two-devil plan, checkpoint JSON round-trip and corruption rejection, the chamber spawns/ceiling/gates and reachable ascent/descent, the full solo flow (drop, sealed wave, real bow damage, clear timer, cache burst, descend, final cache, explicit revive, party wipe), and checkpoint resume. `delve_entry_regression.gd` drives the Hollow's **Descend the Delve** button, the Hearthstead stair, and the ascent back to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the landing, both see the wave, and both see the cache open.
 
 ### Rebuilding character assets
 

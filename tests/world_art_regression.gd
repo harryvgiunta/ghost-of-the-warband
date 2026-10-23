@@ -194,7 +194,7 @@ func _check_frontier() -> void:
 	var boulders := _multimeshes(frontier, "Boulder_")
 	check(not boulders.is_empty(), "boulders must use the batched textured rock")
 	# Gameplay data is untouched.
-	check(frontier.interactables.size() == 4, "camp plus three waystones must remain interactive")
+	check(frontier.interactables.size() == 5, "camp, three waystones and the delve entrance must remain interactive")
 	check(frontier.enemy_spawns.size() == 36, "all enemy spawns must survive the art pass")
 	check(frontier.map_paths.size() == 5 and frontier.landmarks.size() == 5, "map data must be unchanged")
 	check(frontier.player_spawn.distance_to(Vector3(0, frontier.terrain_height(0, 35), 35)) < 0.02,

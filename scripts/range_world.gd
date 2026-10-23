@@ -336,6 +336,65 @@ func _build_village() -> void:
 	_solid_box(market, Vector3(3.6, 0.9, 0.85), Vector3(0, 0.45, -0.8), _wood)
 	for i in range(5):
 		Geo.sphere(market, 0.2, Vector3(-1.2 + float(i) * 0.5, 1.04, -0.8), _gold)
+	_build_delve_entrance()
+
+
+func _build_delve_entrance() -> void:
+	# A sunken stair sealed behind Hearthstead's east stalls, kept clear of the
+	# camp, market and house footprints.
+	var root := _root_at("SunkenDelveEntrance", _ground(9, 29))
+	var well := Geo.material(Color("070b0c"), 0.0, 0.95)
+	well.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var teal_rune := Geo.material(Color("4a8d86"), 0.15)
+	teal_rune.emission_enabled = true
+	teal_rune.emission = Color("3fd6c0")
+	teal_rune.emission_energy_multiplier = 0.55
+	var orange_rune := Geo.material(Color("91552f"), 0.15)
+	orange_rune.emission_enabled = true
+	orange_rune.emission = Color("f08a3c")
+	orange_rune.emission_energy_multiplier = 0.5
+	# Collision only follows the kerb rim; the southern approach stays open.
+	for i in range(12):
+		var angle: float = TAU * float(i) / 12.0
+		if sin(angle) > 0.42:
+			continue
+		var point := Vector3(cos(angle) * 2.5, 0.28, sin(angle) * 2.5)
+		_solid_box(root, Vector3(0.82, 0.56, 0.72), point, _stone, -angle)
+	for i in range(4):
+		Geo.box(root, Vector3(2.5, 0.14, 0.5), Vector3(0, 0.29 - float(i) * 0.09, 1.55 - float(i) * 0.4), _stone)
+	# The unlit disc reads as a bottomless well beneath the descending steps.
+	Geo.cylinder(root, 1.85, 1.85, 0.05, Vector3(0, 0.035, 0), well, 24)
+	for side in [-1.0, 1.0]:
+		_solid_box(root, Vector3(0.7, 4.6, 0.7), Vector3(side * 2.0, 2.3, -1.8), _stone)
+		Geo.box(root, Vector3(0.1, 3.2, 0.16), Vector3(side * 1.62, 2.1, -1.8), teal_rune if side < 0.0 else orange_rune)
+		Geo.box(root, Vector3(0.16, 0.16, 0.12), Vector3(side * 1.62, 3.55, -1.8), orange_rune if side < 0.0 else teal_rune)
+	Geo.box(root, Vector3(5.1, 0.72, 0.86), Vector3(0, 4.96, -1.8), _stone)
+	Geo.box(root, Vector3(3.4, 0.12, 0.14), Vector3(0, 5.1, -1.35), teal_rune)
+	# Braziers flank the stair mouth with warm light that never blocks the walk in.
+	for side in [-1.0, 1.0]:
+		var base := Vector3(side * 3.15, 0, 0.9)
+		Geo.cylinder(root, 0.34, 0.28, 1.05, base + Vector3(0, 0.53, 0), _stone, 8)
+		Geo.cylinder(root, 0.42, 0.3, 0.22, base + Vector3(0, 1.14, 0), _stone, 8)
+		var flame := Geo.material(Color("ffc46b"))
+		flame.emission_enabled = true
+		flame.emission = Color("ff8a2e")
+		flame.emission_energy_multiplier = 1.4
+		Geo.cylinder(root, 0.3, 0.0, 0.62, base + Vector3(0, 1.45, 0), flame, 6)
+		var light := OmniLight3D.new()
+		light.position = base + Vector3(0, 1.9, 0)
+		light.light_color = Color("ffab5e")
+		light.light_energy = 1.35
+		light.omni_range = 7.0
+		root.add_child(light)
+	var label := Label3D.new()
+	label.text = "THE SUNKEN DELVE"
+	label.font_size = 52
+	label.pixel_size = 0.0048
+	label.modulate = Color("bde8df")
+	label.outline_size = 6
+	label.position = Vector3(0, 5.0, -1.26)
+	root.add_child(label)
+	interactables.append({"id": "delve", "name": "The Sunken Delve", "kind": "delve", "position": root.position, "node": root})
 
 
 func _build_house(point: Vector2, angle: float, label: String) -> void:

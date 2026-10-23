@@ -1,6 +1,6 @@
 ---
 name: ironwood-archer
-description: Use when modifying, debugging, launching, or verifying this Ironwood Godot repository, including the Hollow staging hub, inventory/stash/vendor economy, authored skeletal character animation, Blender retargeting, frontier and arena gameplay, bow, sword, dagger and dual-wield combat, roll controls, HUD, and authoritative ENet multiplayer.
+description: Use when modifying, debugging, launching, or verifying this Ironwood Godot repository, including the Hollow staging hub, inventory/stash/vendor economy, authored skeletal character animation, Blender retargeting, frontier, arena and sealed survival-delve gameplay, bow, sword, dagger and dual-wield combat, roll controls, HUD, and authoritative ENet multiplayer.
 ---
 
 # Ironwood Archer
@@ -18,12 +18,12 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 
 | Surface | Implementation and integration points |
 | --- | --- |
-| Hollow hub | `menu.tscn`, `scripts/menu.gd`: default main scene, ranger preview, orbit camera, depot dressing, mode entry, and hub-return hand-off |
+| Hollow hub | `menu.tscn`, `scripts/menu.gd`: default main scene, ranger preview, orbit camera, depot dressing, arena/frontier/delve mode entry, and hub-return hand-off |
 | Hub HUD | `scripts/menu_hud.gd`: 10 inventory slots, 20 stash slots, three vendor tabs, item inspector, purse, host/join forms, and deploy buttons |
 | Out-of-raid state | `scripts/player_state.gd` (autoload `PlayerState`): 10/20 capacities, item catalog, vendor stock, credits, per-slot equipped armor, and `user://player_state.json` persistence |
 | Armor | `scripts/armor_data.gd`: five slots, four sets, item ids, packed ints and per-piece guard; `tools/character_armor.py`: generated mail/plate/cloth meshes plus leather gloves and textures, built by `tools/prepare_character.py` |
 | Session bridge | `scripts/session.gd` (autoload `Session`): one-shot host/join intent from the hub; explicit command-line flags still win |
-| Frontier | `main.tscn`, `scripts/main.gd`: movement, input, camera, crosshair aim, equipment, HUD updates, hub purse sync, and hub return |
+| Frontier | `main.tscn`, `scripts/main.gd`: movement, input, camera, crosshair aim, equipment, HUD updates, hub purse sync, Hearthstead delve stair, and hub return |
 | Arena/session | `arena.tscn`, `scripts/arena.gd`: host/client lifecycle, hub intent, client loadout registration, input actions, aim validation, authoritative projectile spawning, snapshots, and camera |
 | Arena combatant | `scripts/arena_actor.gd`: authoritative movement, bots, stamina, health, respawn, `snapshot()` and `apply_snapshot()` |
 | Character and animation | `scripts/archer.gd`: imported Skeleton3D/AnimationPlayer, action phases, physics-clock sampling, bow/terrain IK, equipment sockets, per-slot armor mesh visibility, and animation-state replication |
@@ -35,7 +35,8 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 | Running slide | `scripts/running_slide.gd`: achieved-sprint eligibility, finite deceleration, limited steering and collision/ground-loss termination |
 | Cover and shoulder camera | `scripts/cover_movement.gd`: shared physics/crouch/peek state; `scripts/shoulder_camera.gd`: smooth shoulder swap and swept camera collision |
 | Weapon/projectile geometry | `scripts/bow.gd`, `scripts/sword.gd`, `scripts/dagger.gd`, `scripts/shield.gd`, `scripts/arrow.gd`, `scripts/thrown_weapon.gd`, `scripts/geo.gd` |
-| UI | `scripts/menu_hud.gd` for the Hollow; `scripts/hud.gd` for frontier; `scripts/arena_hud.gd` for arena |
+| Sunken Delve | `delve.tscn`, `scripts/delve.gd` (host-authoritative three-wave run, drop/seal/clear/resume, cache and scene hand-off), `scripts/delve_world.gd` (chamber), `scripts/delve_actor.gd`, `scripts/delve_devil.gd`, `scripts/delve_chest.gd`, `scripts/delve_hud.gd`, `scripts/delve_progress.gd` (checkpoint JSON) |
+| UI | `scripts/menu_hud.gd` for the Hollow; `scripts/hud.gd` for frontier; `scripts/arena_hud.gd` for arena; `scripts/delve_hud.gd` for the delve |
 | World and supporting systems | `scripts/range_world.gd`, `scripts/arena_world.gd`, `scripts/enemy.gd` (wolf/sentinel/cinder devil AI and damage authority), `scripts/range_audio.gd` |
 | World art | `scripts/world/` (`world_style.gd`, `tree_kit.gd`, `texture_library.gd`, `scatter.gd`, `grass_field.gd`, `environment_kit.gd`, `shaders/`), `assets/world/textures/`, `assets/world/world_textures.json`, `tools/world_textures.py`; integrated by `range_world.gd` and `arena_world.gd` |
 
@@ -197,6 +198,18 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - Spawns live in `range_world.gd` via `_add_devil_pack`: **five packs / 20 devils** — the five-devil camp glade, a three-devil western-woods pack, and four-devil packs in the northern woods, southern meadow and ridge approach. Each spawn record carries `weapon` (`claw`/`dagger`/`sword`/`bow`); `main.gd` passes `pack_index` and `devil_weapon` into `enemy.gd` for deterministic variation. Keep the roles mixed so the packs read differently.
 - `tests/devil_regression.gd` checks the half-size capsule/head profile, all action states, half-distance quick steps, leaps/slides, claw hits at 8/10, dagger/short-sword profiles and held meshes, bow `SHOOT`/arrow release, a curved orbit path, the three-attacker cap, parry cancellation/recovery, and 6-gold death. It does not replace visual inspection; launch the frontier and fight a mixed pack.
 
+### The Sunken Delve
+
+- Entry is through `menu.tscn` (**Descend the Delve**, **Host a Delve**, **Join a Delve**) or the `delve` interactable beside Hearthstead camp; both arm `Session` with `delve-solo`/`delve-host`/`delve-join` and load `delve.tscn`. A solo entry is still a real ENet host on the first free port, so friends can join from the Hollow. No new autoload is used.
+- The run is host-authoritative: `delve.gd` owns player movement snapshots, devil AI/snapshots, wave state, seals, the cache, damage and the party-wipe check. Clients send movement/aim/action intents and receive `_receive_snapshot`, `_devil_snapshots` and reliable `_run_state` (phase, wave, remaining, timer, seals, cache, party). Never let a client claim wave/chest/damage state.
+- Phase contract: `ASSEMBLY` (raised landing) → `WAVE` (party dropped to `world.drop_center`, portcullises sealed, devil queue trickles every 1.4 s) → `CLEARED` (gates open, 2.2 s cache timer, chest spawns, checkpoint saved) → next `WAVE` or `COMPLETE` (final cache claimed) or `GAME_OVER` (every active human down; checkpoint cleared). There is no arena-style respawn; `DelveActor.respawn_at` is the only explicit revive.
+- The first iteration is exactly **three waves × two cinder devils**. `DelveProgress._WAVE_WEAPONS` owns the melee role mix; `_start_wave` spreads the two spawns across alternating archways. Devil AI is chase/telegraph/strike, not the frontier pack orbit machine.
+- The cache is presentation only: `delve_chest.gd` opens once, fires `LootBurst` and a light flash, and grants nothing. Do not add inventory/drop/loot paths until the game type is explicitly extended.
+- Checkpoints live in `user://delve_state.json` as `{version,wave,chest_ready,seed}`. Save only when the cache timer finishes; clear on the final cache claim and on a party wipe. Tests point `save_path` at a test file. `R` in assembly clears the checkpoint and begins a fresh run.
+- Ascending loads `res://main.tscn` (the open frontier); the game-over/hub overlay loads `res://menu.tscn`. `delve.tscn` opened directly (no Session/args) falls back to a solo host so editor launches remain playable.
+- Contract geometry: `DelveWorld.LIMIT=17.0`, `CEILING_HEIGHT=15.0`, `DROP_HEIGHT=8.0`, four `player_spawns` on the landing, four `enemy_spawns`, `descent_position` and `ascent_position` both reachable on the chamber floor, `chest_position` on the dais. Gates are named `NorthGate`/`SouthGate` with `GateShape`/`GateBars`; `set_sealed` owns collision and bar visibility. Keep the 15 m ceiling and central fill so the shoulder camera never clips.
+- `delve_regression` covers the plan/checkpoint/chamber/solo flow/real bow damage/resume/wipe; `delve_entry_regression` drives both entry paths and the ascent; `delve_network_regression` joins a second real ENet process and verifies wave/cache replication. Run all three with the shared suite.
+
 ### World art and scenery (frontier and arena)
 
 - Scenery is presentation only. `range_world.gd` terrain heights/routes/clearings, player and enemy spawns, interactables, waystones, `_reserved` gameplay clearings and village/fort collision remain authoritative. `arena_world.gd` keeps `LIMIT = 32`, the four spawn points, the 14 real cover-tree positions and their **0.55 m radius / 5.5 m height** cylinder colliders; cover and network regressions attach to those exact bodies. Art changes may replace meshes and materials, never that geometry.
@@ -251,7 +264,10 @@ $Checks = @(
     'shield_regression',
     'hub_regression',
     'dual_wield_regression',
-    'combat_expansion_regression'
+    'combat_expansion_regression',
+    'delve_regression',
+    'delve_entry_regression',
+    'delve_network_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"
@@ -282,6 +298,7 @@ Use the selected engine path instead if `GODOT_PATH` is configured. Check exit c
 - `throw_regression` checks per-weapon charge duration and damage scaling, one projectile per release, the 0.28 + 0.95 recovery gate, cancellation and roll/melee gating, the thrown model matching the equipped weapon, real swept projectile damage including headshots and world cover, the endless-supply hand restoration, frontier T input, and the arena host throw action/projectile.
 - `shield_regression` checks dagger/medium-sword shield eligibility, automatic stow on shortsword/greatsword/bow, the raised shield block pose and collision layer, full front-block outcome and shield stamina cost, no melee damage through the block, passive arrow hits on raised and carried shields applying zero damage and sticking to the shield, a body arrow damaging and sticking to the player, the arena host shield action plus the packed snapshot state, and clearance of the physical shield disc against every visible armor set (leather, mail, plate and cloth) in carried and raised states.
 - `hub_regression` checks the 10-slot inventory and 20-slot stash limits, vendor prices/affordability, per-slot armor equipping and mixed-set guard, legacy whole-set save migration, equipped-copy protection, save/reload persistence, the hub's panel layout/containment/non-overlap/label clipping, the scrollable 20-piece Quartermaster list, host/join form geometry, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, the hub-to-arena host session with validated seat loadouts, and the remembered network form defaults.
+- `delve_regression` checks the 3 × 2 wave plan, checkpoint JSON (including corruption), the 15 m chamber/gates/reachable exits, the full solo flow with a real arrow, cache burst, descend/final-cache/complete, explicit revive, party wipe and checkpoint resume. `delve_entry_regression` checks the Hollow deploy button, the Hearthstead stair, and ascending back to `main.tscn`; `delve_network_regression` uses two real ENet processes to check join, replicated devils, clear and cache open.
 - `combat_expansion_regression` checks left/right horizontal blade paths, the aim-directed sword stab, damage-scaled hit stagger and its replicated `STAGGER` flinch phase, soft fighter separation, buffered snapshot interpolation and extrapolation, network-cache round-trip, quick-step timing/cooldown, shoulder-based LMB alternation, wheel stab/overhead input, Q/E step binds without drawing or attacking, and the arena's `melee`/`step` authority actions.
 - `dual_wield_regression` checks sword-right/dagger-left visibility, greatsword and shield exclusion, no guard pose or stale guard, the offhand aim direction and attachment, the left stab's dagger profile, fixed arm lengths and real blade contact, the right sword's profile, neutral offhand arm and real hand socket, independent per-hand start/recovery, both hands damaging while their clocks overlap, same-hand restart gating, per-hand standard-block abort, attack-parry facing/window exclusivity and zero damage, compact `MELEE_L`/secondary-hand snapshot replication, T throwing and releasing the right sword, frontier LMB/RMB input mapping, and arena host left/right actions. `arm_clearance_regression` also skins the actual torso through the dual offhand guard, left stab, and both one-handed right chops.
 

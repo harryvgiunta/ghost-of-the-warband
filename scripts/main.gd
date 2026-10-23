@@ -581,6 +581,9 @@ func _update_interaction() -> void:
 		if item.kind == "camp":
 			prompt = "G  /  Rest at the campfire"
 			_interaction_allowed = true
+		elif item.kind == "delve":
+			prompt = "G  /  Descend into the Sunken Delve"
+			_interaction_allowed = true
 		elif activated.has(item.id):
 			prompt = item.name + "  /  Restored"
 		else:
@@ -598,6 +601,9 @@ func interact() -> void:
 	_update_interaction()
 	if not _interaction_allowed:
 		return
+	if _interaction_id == "delve":
+		_enter_delve()
+		return
 	if _interaction_id == "camp":
 		health = 100.0
 		stamina = 100.0
@@ -611,6 +617,21 @@ func interact() -> void:
 	if activated.size() == 3:
 		_award_gold(100)
 		hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
+
+func _enter_delve() -> void:
+	cancel_input()
+	if _player_state != null:
+		_player_state.save_state()
+	var player_name := "Ranger"
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		var cached := str(cache.player_name).strip_edges()
+		if not cached.is_empty():
+			player_name = cached
+	var session := get_node_or_null("/root/Session")
+	if session != null:
+		session.arm_delve("delve-solo","127.0.0.1",7777,player_name)
+	get_tree().change_scene_to_file("res://delve.tscn")
 
 func _on_enemy_attack(attacker, amount: float) -> void:
 	if not is_instance_valid(attacker) or not attacker.alive:

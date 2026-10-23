@@ -1,10 +1,12 @@
 extends Control
-## Hub interface: inventory, stash, vendors and the four ways to leave the Hollow.
+## Hub interface: inventory, stash, vendors and every way to leave the Hollow.
 ## The panel is read-only over PlayerState; every mutation is a signal to menu.gd.
 
 signal mode_selected(mode: String)
 signal host_confirmed(port: int, player_name: String)
 signal join_confirmed(address: String, port: int, player_name: String)
+signal delve_host_confirmed(port: int, player_name: String)
+signal delve_join_confirmed(address: String, port: int, player_name: String)
 signal buy_requested(item_id: String)
 signal equip_requested(index: int)
 signal stash_requested(index: int)
@@ -31,6 +33,9 @@ var skirmish_button: Button
 var host_button: Button
 var join_button: Button
 var frontier_button: Button
+var delve_button: Button
+var delve_host_button: Button
+var delve_join_button: Button
 var inventory_buttons: Array[Button] = []
 var stash_buttons: Array[Button] = []
 var stock_buttons: Array[Button] = []
@@ -252,22 +257,51 @@ func _build_vendors() -> void:
 	_label(panel,"A purchase needs a free inventory slot.",Vector2(16,398),10,MUTED)
 
 func _build_actions() -> void:
-	action_panel = _panel(self,Vector2(-404,-324),Vector2(380,306))
+	# Two columns share one wide panel: arena and frontier on the left, the
+	# Sunken Delve on the right. 600x306 keeps clear of the vendors above and
+	# the stash to the left at the 1440x900 design resolution.
+	action_panel = _panel(self,Vector2(-624,-324),Vector2(600,306))
 	var panel := action_panel
 	panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	_label(panel,"DEPLOY",Vector2(18,12),12,GOLD)
-	skirmish_button = _button(panel,"ARENA SKIRMISH",Vector2(18,36),Vector2(344,42))
+	skirmish_button = _button(panel,"ARENA SKIRMISH",Vector2(18,38),Vector2(268,42))
 	skirmish_button.pressed.connect(func(): mode_selected.emit("skirmish"))
-	_label(panel,"Four-seat arena on this PC; bots fill empty seats.",Vector2(18,80),10,MUTED)
-	host_button = _button(panel,"HOST A GAME",Vector2(18,104),Vector2(344,38))
+	_label(panel,"Four seats; bots fill any empty seat.",Vector2(18,86),10,MUTED)
+	host_button = _button(panel,"HOST A GAME",Vector2(18,108),Vector2(268,38))
 	host_button.pressed.connect(open_host_form)
-	join_button = _button(panel,"JOIN A GAME",Vector2(18,148),Vector2(344,38))
+	join_button = _button(panel,"JOIN A GAME",Vector2(18,152),Vector2(268,38))
 	join_button.pressed.connect(open_join_form)
-	frontier_button = _button(panel,"ENTER THE FRONTIER  /  OPEN PvE",Vector2(18,196),Vector2(344,44))
-	frontier_button.add_theme_font_size_override("font_size",13)
+	frontier_button = _button(panel,"ENTER THE FRONTIER  /  OPEN PvE",Vector2(18,202),Vector2(268,44))
+	frontier_button.add_theme_font_size_override("font_size",12)
 	frontier_button.pressed.connect(func(): mode_selected.emit("pve"))
-	_label(panel,"Waystones, wolves and gold await.",Vector2(18,246),10,MUTED)
-	_label(panel,"Your equipped kit carries into every mode.",Vector2(18,272),10,MUTED)
+	_label(panel,"Waystones, wolves and gold await.",Vector2(18,254),10,MUTED)
+	_label(panel,"Your equipped kit carries into every mode.",Vector2(18,274),10,MUTED)
+	_label(panel,"THE SUNKEN DELVE",Vector2(304,12),12,GOLD)
+	delve_button = _button(panel,"DESCEND THE DELVE",Vector2(304,38),Vector2(278,54))
+	delve_button.add_theme_font_size_override("font_size",13)
+	delve_button.pressed.connect(func(): mode_selected.emit("delve"))
+	delve_host_button = _button(panel,"HOST A DELVE",Vector2(304,102),Vector2(134,38))
+	delve_host_button.add_theme_font_size_override("font_size",12)
+	delve_host_button.pressed.connect(open_delve_host_form)
+	delve_join_button = _button(panel,"JOIN A DELVE",Vector2(448,102),Vector2(134,38))
+	delve_join_button.add_theme_font_size_override("font_size",12)
+	delve_join_button.pressed.connect(open_delve_join_form)
+	var delve_hint_one := _label(panel,"Three waves of cinder devils trickle in\nfrom four dark archways. Cleared waves\nleave a cache.",Vector2(304,158),10,MUTED)
+	delve_hint_one.size = Vector2(278,48)
+	var delve_hint_two := _label(panel,"The gate seals behind you;\ndowned rangers stay down.",Vector2(304,216),10,MUTED)
+	delve_hint_two.size = Vector2(278,32)
+
+func set_delve_progress(wave: int, chest_ready: bool) -> void:
+	if delve_button == null:
+		return
+	if wave <= 0:
+		delve_button.text = "DESCEND THE DELVE"
+	elif chest_ready and wave >= 3:
+		delve_button.text = "RESUME THE DELVE  /  FINAL CACHE"
+	elif chest_ready:
+		delve_button.text = "RESUME THE DELVE  /  WAVE %d CACHE" % wave
+	else:
+		delve_button.text = "RESUME THE DELVE  /  WAVE %d" % wave
 
 func _build_status() -> void:
 	_status = _label(self,"Choose a vendor, move gear, then deploy.",Vector2(-212,30),14,TEAL)
@@ -369,6 +403,45 @@ func open_join_form() -> void:
 	_modal_layer.visible = true
 	_name_input.grab_focus()
 
+func open_delve_host_form() -> void:
+	_modal_kind = "delve_host"
+	_modal_title.text = "HOST THE SUNKEN DELVE"
+	_modal_hint.text = "One sealed chamber, three waves, two cinder devils apiece. Share this address and UDP port with your party."
+	_name_label.visible = true
+	_name_input.visible = true
+	_name_input.text = _default_name
+	_address_label.visible = false
+	_address_input.visible = false
+	_port_label.position = Vector2(300,96)
+	_port_input.position = Vector2(300,116)
+	_confirm_button.position = Vector2(24,176)
+	_cancel_button.position = Vector2(236,176)
+	_confirm_button.text = "HOST DELVE"
+	_form_error.text = ""
+	_port_input.value = _default_port
+	_modal_layer.visible = true
+	_name_input.grab_focus()
+
+func open_delve_join_form() -> void:
+	_modal_kind = "delve_join"
+	_modal_title.text = "JOIN THE SUNKEN DELVE"
+	_modal_hint.text = "Ask the host for the address and UDP port. The gate seals once the run begins."
+	_name_label.visible = true
+	_name_input.visible = true
+	_name_input.text = _default_name
+	_address_label.visible = true
+	_address_input.visible = true
+	_address_input.text = _default_address
+	_port_label.position = Vector2(300,160)
+	_port_input.position = Vector2(300,180)
+	_confirm_button.position = Vector2(24,236)
+	_cancel_button.position = Vector2(236,236)
+	_confirm_button.text = "JOIN DELVE"
+	_form_error.text = ""
+	_port_input.value = _default_port
+	_modal_layer.visible = true
+	_name_input.grab_focus()
+
 func _on_confirm() -> void:
 	var clean_name := _name_input.text.strip_edges().left(16)
 	if clean_name.is_empty():
@@ -387,6 +460,20 @@ func _on_confirm() -> void:
 			return
 		close_form()
 		join_confirmed.emit(address,int(_port_input.value),clean_name)
+	elif _modal_kind == "delve_host":
+		var delve_port := int(_port_input.value)
+		if delve_port < 1024 or delve_port > 65535:
+			_form_error.text = "Choose a UDP port between 1024 and 65535."
+			return
+		close_form()
+		delve_host_confirmed.emit(delve_port,clean_name)
+	elif _modal_kind == "delve_join":
+		var delve_address := _address_input.text.strip_edges()
+		if delve_address.is_empty():
+			_form_error.text = "Enter the host's address."
+			return
+		close_form()
+		delve_join_confirmed.emit(delve_address,int(_port_input.value),clean_name)
 
 func refresh() -> void:
 	if state == null:

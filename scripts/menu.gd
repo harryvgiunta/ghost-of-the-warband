@@ -1,13 +1,15 @@
 extends Node3D
 ## The Hollow: out-of-raid staging. The ranger, their kit, three vendors and the
-## four ways out — arena skirmish, host, join, or the open frontier.
+## ways out — arena skirmish, host, join, the open frontier or the Sunken Delve.
 
 const Archer = preload("res://scripts/archer.gd")
 const Geo = preload("res://scripts/geo.gd")
 const StateScript = preload("res://scripts/player_state.gd")
 const SessionScript = preload("res://scripts/session.gd")
 const HubHud = preload("res://scripts/menu_hud.gd")
+const DelveProgress = preload("res://scripts/delve_progress.gd")
 const SKIRMISH_PORT := 7777
+const DELVE_PORT := 7777
 
 var state
 var session
@@ -37,9 +39,13 @@ func _ready() -> void:
 	hud = HubHud.new()
 	layer.add_child(hud)
 	hud.configure(state,session)
+	var stored_run: Dictionary = DelveProgress.load_run()
+	hud.set_delve_progress(int(stored_run.get("wave",0)),bool(stored_run.get("chest_ready",false)))
 	hud.mode_selected.connect(_on_mode_selected)
 	hud.host_confirmed.connect(_on_host_confirmed)
 	hud.join_confirmed.connect(_on_join_confirmed)
+	hud.delve_host_confirmed.connect(_on_delve_host_confirmed)
+	hud.delve_join_confirmed.connect(_on_delve_join_confirmed)
 	hud.buy_requested.connect(_on_buy)
 	hud.equip_requested.connect(_on_equip)
 	hud.stash_requested.connect(_on_stash)
@@ -139,6 +145,8 @@ func _on_sell(location: String, index: int) -> void:
 func _on_mode_selected(mode: String) -> void:
 	if mode == "pve":
 		_enter_frontier()
+	elif mode == "delve":
+		_enter_delve_solo()
 	elif mode == "skirmish":
 		_open_arena("skirmish","127.0.0.1",SKIRMISH_PORT,_preferred_name())
 
@@ -147,6 +155,12 @@ func _on_host_confirmed(port: int, player_name: String) -> void:
 
 func _on_join_confirmed(address: String, port: int, player_name: String) -> void:
 	_open_arena("client",address,port,player_name)
+
+func _on_delve_host_confirmed(port: int, player_name: String) -> void:
+	_open_delve("delve-host","127.0.0.1",port,player_name)
+
+func _on_delve_join_confirmed(address: String, port: int, player_name: String) -> void:
+	_open_delve("delve-join",address,port,player_name)
 
 func _preferred_name() -> String:
 	var value := str(session.player_name).strip_edges()
@@ -170,6 +184,25 @@ func _open_arena(mode: String, address: String, port: int, player_name: String) 
 func _enter_frontier() -> void:
 	state.save_state()
 	get_tree().change_scene_to_file("res://main.tscn")
+
+func _enter_delve_solo() -> void:
+	state.save_state()
+	var solo_name := _preferred_name()
+	session.arm_delve("delve-solo","127.0.0.1",DELVE_PORT,solo_name)
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		cache.remember(solo_name,"",DELVE_PORT)
+	get_tree().change_scene_to_file("res://delve.tscn")
+
+func _open_delve(mode: String, address: String, port: int, player_name: String) -> void:
+	session.player_name = player_name
+	session.arm_delve(mode,address,port,player_name)
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		# Only a join updates the remembered host address, matching the arena.
+		cache.remember(player_name,address if mode == "delve-join" else "",port)
+	state.save_state()
+	get_tree().change_scene_to_file("res://delve.tscn")
 
 func _build_environment() -> void:
 	var environment := Environment.new()
