@@ -16,7 +16,6 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
-const ARMOR_REDUCTION := [0.0, 0.15, 0.30]
 
 var world
 var archer
@@ -120,7 +119,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	layer.add_child(hud)
 	hud.bow_selected.connect(equip_bow)
-	hud.armor_selected.connect(equip_armor)
+	hud.armor_selected.connect(equip_armor_slot)
 	hud.sword_selected.connect(equip_sword)
 	hud.weapon_selected.connect(equip_weapon)
 	hud.shield_selected.connect(equip_shield)
@@ -132,7 +131,7 @@ func _ready() -> void:
 	if _player_state != null:
 		archer.set_bow(_player_state.equipped_index("bow"))
 		archer.set_sword(_player_state.equipped_index("sword"))
-		archer.set_armor(_player_state.equipped_index("armor"))
+		archer.set_armor_pieces(_player_state.equipped_pieces())
 		gold = int(_player_state.credits)
 	archer.loadout_changed.connect(_update_loadout)
 	hud.configure_map(world.landmarks, world.map_paths, world.interactables, world.WORLD_LIMIT)
@@ -545,13 +544,16 @@ func press_jump(roll_requested: bool) -> void:
 		_jump_requested = false
 		cancel_input()
 
-func equip_armor(index: int) -> void:
+func equip_armor_slot(slot: String, set_index: int) -> void:
 	cancel_input()
-	archer.set_armor(index)
+	archer.set_armor_piece(slot,set_index)
 	audio.play_sound("equip")
 
+func _armor_summary() -> String:
+	return "%d%% GUARD" % int(round(archer.armor_reduction() * 100.0))
+
 func _update_loadout() -> void:
-	hud.update_loadout(archer.bow_index, archer.armor_index, Archer.BOW_DATA[archer.bow_index], Archer.ARMOR_NAMES[archer.armor_index], archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
+	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
 
 func toggle_view() -> void:
 	inspecting = not inspecting
@@ -638,7 +640,7 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 	take_damage(amount)
 
 func take_damage(amount: float, react: bool = true) -> void:
-	var applied := amount * (1.0 - float(ARMOR_REDUCTION[archer.armor_index]))
+	var applied: float = amount * (1.0 - archer.armor_reduction())
 	health = maxf(0.0, health - applied)
 	if react:
 		var seconds: float = combat.stagger_from_damage(applied)

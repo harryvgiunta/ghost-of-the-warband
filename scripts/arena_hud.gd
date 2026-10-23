@@ -1,11 +1,13 @@
 extends Control
 
+const ArmorData = preload("res://scripts/armor_data.gd")
+
 signal host_requested(port: int, player_name: String)
 signal join_requested(address: String, port: int, player_name: String)
 signal leave_requested
 signal hub_requested
 signal bow_selected(index: int)
-signal armor_selected(index: int)
+signal armor_selected(slot: String, set_index: int)
 signal sword_selected(index: int)
 signal weapon_selected(value: String)
 signal shield_selected(active: bool)
@@ -28,6 +30,7 @@ var _cover_status: Label
 var bar: ProgressBar
 var bow_buttons: Array[Button] = []
 var armor_buttons: Array[Button] = []
+var _armor_pieces: Dictionary = {}
 var sword_buttons: Array[Button] = []
 var weapon_buttons: Array[Button] = []
 var shield_button: Button
@@ -146,13 +149,13 @@ func _ready() -> void:
 		sword.size = Vector2(148,32)
 		sword.pressed.connect(func(): sword_selected.emit(index))
 		sword_buttons.append(sword)
-	_ui._label(equipment,"ARMOR / CLICK TO EQUIP",Vector2(14,204),11,UI.GOLD)
-	for index in 3:
-		var button := _ui._button(equipment,["Leather","Mail","Plate"][index],Vector2(12+index*105,228),Vector2(100,32))
-		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",12)
-		button.size = Vector2(100,32)
-		button.pressed.connect(func(): armor_selected.emit(index))
+	_ui._label(equipment,"ARMOR / CLICK SLOT TO CYCLE",Vector2(14,204),11,UI.GOLD)
+	for index in ArmorData.SLOTS.size():
+		var slot: String = ArmorData.SLOTS[index]
+		var button := _ui._button(equipment,"",Vector2(12+index*62,228),Vector2(58,34))
+		button.add_theme_font_size_override("font_size",9)
+		button.size = Vector2(58,34)
+		button.pressed.connect(_cycle_armor.bind(slot))
 		armor_buttons.append(button)
 	shield_button = _ui._button(equipment,"4  SHIELD",Vector2(12,268),Vector2(100,28))
 	shield_button.toggle_mode = true
@@ -239,9 +242,12 @@ func update_match(state: Dictionary) -> void:
 			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 	bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
 	respawn_label.text = "RESPAWNING IN %.1f" % float(state.respawn) if float(state.respawn) > 0 else ""
+	_armor_pieces = ArmorData.unpack(int(state.armor) & 1023)
+	for index in ArmorData.SLOTS.size():
+		var slot: String = ArmorData.SLOTS[index]
+		armor_buttons[index].text = "%s\n%s" % [ArmorData.slot_label(slot).to_upper().left(5),ArmorData.set_abbreviation(int(_armor_pieces.get(slot,0)))]
 	for index in 3:
 		bow_buttons[index].set_pressed_no_signal(index == int(state.bow))
-		armor_buttons[index].set_pressed_no_signal(index == int(state.armor))
 		sword_buttons[index].set_pressed_no_signal(index == int(state.sword))
 	weapon_buttons[0].set_pressed_no_signal(state.weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(state.weapon == "sword")
@@ -251,6 +257,10 @@ func update_match(state: Dictionary) -> void:
 	var shield_allowed: bool = state.weapon == "dagger" or (state.weapon == "sword" and int(state.sword) == 1)
 	shield_button.set_pressed_no_signal(bool(state.get("shield",false)))
 	shield_button.disabled = not shield_allowed
+
+func _cycle_armor(slot: String) -> void:
+	var next := (int(_armor_pieces.get(slot,0)) + 1) % ArmorData.SET_IDS.size()
+	armor_selected.emit(slot,next)
 
 func _melee_pct(value: float) -> String:
 	return "READY" if value >= 0.999999 else "%d%%" % int(value*100.0)

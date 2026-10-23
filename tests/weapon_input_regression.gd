@@ -498,16 +498,16 @@ func cover_input_checks(scene, frontier: bool) -> void:
 	actor.velocity = Vector3.ZERO
 	scene._set_cursor_free(false)
 	await physics_ticks(24)
-	var armor: int = rig.armor_index
+	var armor: int = rig.armor_bits()
 	var standing_height: float = cover._capsule.height
 	await key(KEY_C)
 	await physics_ticks(24)
 	check(cover.crouched and cover._capsule.height<standing_height-0.4,"C crouches outside cover by shrinking the real capsule")
-	check(rig.armor_index==armor,"C crouch never changes equipped armor")
+	check(rig.armor_bits()==armor,"C crouch never changes equipped armor")
 	await key(KEY_C)
 	await physics_ticks(24)
 	check(not cover.crouched and absf(cover._capsule.height-standing_height)<0.02,"Second C restores standing posture and collider")
-	check(rig.armor_index==armor,"C stand never changes equipped armor")
+	check(rig.armor_bits()==armor,"C stand never changes equipped armor")
 	await key(KEY_F)
 	await physics_ticks(24)
 	check(cover.active and cover.low and cover._capsule.height<1.2,"F enters low cover through the real controller")

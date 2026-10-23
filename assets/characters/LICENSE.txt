@@ -165,6 +165,38 @@ ground contact within 25 mm of the lowest ankle, multiplied by cycle duration.
 The in-place source has no root-distance track; this is an explicitly measured
 contact-velocity estimate, not a claimed source root-motion distance.
 
+IRONWOOD ARMOR — ASSET LICENSE AND PROVENANCE
+
+The swappable armor pieces are original procedural work authored for this
+repository. The mail, plate and Emberweave cloth sets, the leather gloves and
+the dark hose underlayer do not derive from any additional third-party source;
+the CC0 Quaternius Ranger outfit above supplies the leather hood, jerkin, belt,
+pauldron, bracers, trousers and boots that are grouped by slot at runtime.
+
+Authoring source: tools/character_armor.py (deterministic Blender Python),
+called by tools/prepare_character.py after the Ranger animations are baked.
+Authoring tool: Blender 5.1.2 (build 2026-05-19), scene unit metres, 60 fps.
+Runtime outputs (inside the Ranger GLB/JSON):
+  Armor_<Set>_<Slot> for set in Mail, Plate, Cloth and slot in Head, Chest,
+  Hands, Legs, Feet; Armor_Leather_Hands; Ranger_Base_Calf
+  armor.generated metadata in ironwood_ranger.json
+  embedded 512 x 512 sRGB albedo and normal textures generated in Blender
+
+The pieces are skinned to the Ranger's 65-bone rest skeleton with explicit
+weights, authored in armature space (+X character left, -Y forward, +Z up) and
+exported in the same GLB as the animated body. The base calf is always visible
+so short sabatons can be mixed with the short leather trousers without an empty
+shin. The leather outfit is the licensed Quaternius mesh above, split by node
+name; no pixels or vertices from a restricted source are used.
+
+Reproduce with:
+  blender --background --python-exit-code 1 --python tools/prepare_character.py -- \
+      .runtime/character-source assets/characters/ironwood_ranger.glb
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
+The armor is distributed under CC0 1.0 Universal, the same dedication linked at
+the top of this file, to match the project's existing character assets.
+
 IRONWOOD BRIAR WOLF — ASSET LICENSE AND PROVENANCE
 
 The wolf asset is original procedural work authored for this repository. It

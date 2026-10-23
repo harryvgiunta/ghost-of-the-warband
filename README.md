@@ -29,20 +29,20 @@ Every normal launch opens **the Hollow**, the out-of-raid staging depot. The ran
 
 | Area | Capacity and behaviour |
 | --- | --- |
-| Inventory | **10 slots**. Bought gear and the kit you own live here. Equipping a bow, sword or armor set applies it on entry to every mode. |
+| Inventory | **10 slots**. Bought gear and the kit you own live here. Equipping a bow, sword or any armor piece applies it on entry to every mode. |
 | Stash | **20 slots**. Long-term storage that is never equipped automatically. |
 | Purse | Credits earned in the frontier; the starting purse is **200**. |
-| Equipped kit | One bow, one sword and one armor set, kept in the inventory and marked with `*`. The only copy of an equipped item cannot be sold or stashed; equip a replacement first. |
+| Equipped kit | One bow, one sword and **five armor pieces** (head, chest, hands, legs, feet), kept in the inventory and marked with `*`. The only copy of an equipped piece cannot be sold or stashed; equip a replacement first. |
 
 | Vendor | Stock and prices |
 | --- | --- |
 | Fletcher Orla | Shortbow 120 / Recurve 220 / Longbow 360 |
 | Smith Brann | Shortsword 110 / Arming sword 195 / Greatsword 340 |
-| Quartermaster Vey | Ranger leather 55 / Sentinel mail 180 / Warden plate 320 |
+| Quartermaster Vey | **20 individual armor pieces**: Ranger leather 55 total / Sentinel mail 180 / Warden plate 320 / Emberweave cloth 140 |
 
 Click a slot to inspect its stats and reach **EQUIP**, **TO STASH** / **TO INVENTORY**, or **SELL** at 60% of the purchase price. Click vendor stock, then **BUY**; purchases need a free inventory slot and enough credits. A full inventory or stash rejects the action with a status message instead of dropping gear.
 
-Every change is written to `user://player_state.json` immediately, so gear and credits survive quitting and scene changes. Delete that file to restore the starting kit: shortbow, shortsword, ranger leather, an otherwise empty stash and 200 credits.
+Every change is written to `user://player_state.json` immediately, so gear and credits survive quitting and scene changes. Delete that file to restore the starting kit: shortbow, shortsword, the five Ranger leather pieces, an otherwise empty stash and 200 credits.
 
 | Deploy action | Result |
 | --- | --- |
@@ -51,7 +51,25 @@ Every change is written to `user://player_state.json` immediately, so gear and c
 | **Join a Game** | Opens a name, address and UDP-port form, then joins that host. |
 | **Enter the Frontier** | Opens the open PvE world for the waystone hunt. |
 
-The equipped bow, sword and armor become the starting loadout in both the frontier and the arena. Frontier gold is the Hollow's credits: kills and restored waystones grow the same purse. Equipment buttons inside a match still change that session's loadout, but only the Hollow's equipped kit is saved. Drag the 3D view to orbit, use the wheel to zoom, and press `Escape` to close the host or join form.
+The equipped bow, sword and five armor pieces become the starting loadout in both the frontier and the arena. Frontier gold is the Hollow's credits: kills and restored waystones grow the same purse. Equipment buttons inside a match still change that session's loadout, but only the Hollow's equipped kit is saved. Drag the 3D view to orbit, use the wheel to zoom, and press `Escape` to close the host or join form.
+
+
+### Armor: four sets, five slots
+
+Armor is equipped **per slot**, so a cloth hood can sit over a mail hauberk, leather gloves and plate legs. Every set supplies a head, chest, hands, legs and feet piece:
+
+| Set | Head | Chest | Hands | Legs | Feet | Full-set guard |
+| --- | --- | --- | --- | --- | --- | --- |
+| Ranger leather | Hood 10 | Jerkin 15 | Gloves 8 | Trousers 12 | Boots 10 | 0% |
+| Sentinel mail | Coif 35 | Hauberk 55 | Mittens 25 | Chausses 40 | Sabatons 25 | 15% |
+| Warden plate | Sallet 65 | Cuirass 90 | Gauntlets 45 | Cuisses 80 | Sabatons 40 | 30% |
+| Emberweave cloth | Hood 25 | Robe 45 | Wraps 20 | Skirt 35 | Boots 15 | 0% |
+
+The leather outfit is the imported Ranger mesh split by region; mail is riveted ring weave, plate is blackened articulated steel, and Emberweave is a layered mage robe with a torn hem and brass trim. Each piece renders on the same 65-bone skeleton as the ranger and follows the authored idle, draw, swing, crouch, slide, roll and cover poses. A dark hose underlayer fills the shin whenever the short leather trousers are mixed with short sabatons.
+
+Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The Hollow's Quartermaster sells all 20 pieces; old whole-set items from earlier saves remain valid as full-set bundles and are migrated to the five slots on load.
+
+In a match, the equipment panel lists five slot buttons (**HEAD / CHEST / HANDS / LEGS / FEET**). Click a slot to cycle Leather → Mail → Plate → Cloth for that session. Session changes are not written back; only the Hollow's equipped pieces persist.
 
 ## Play with friends over Tailscale
 
@@ -290,7 +308,7 @@ git pull --ff-only
 
 `cover_movement.gd` owns acquisition, supported capsule sweeps, contiguous-surface sliding, bounded firing-corridor search and latched lookout/retuck state. The single authoritative cover snapshot contains physical stance and world-space `lean`; animation snapshots do not duplicate it. `archer.gd` layers the authored pose before foot/weapon corrections. `Combat` checks the actual shaft before a cover release; melee still clears cover before its first swing pose. Arena aim samples carry the observed own-actor snapshot tick, and remote release waits for the current exposure epoch before applying the unchanged shaft collision check. Regressions exercise left/right tree shots, convex and compound cover, slopes/recovery, side swaps/free look, blocked shafts, malformed/stale aim stamps, cancellation, melee exits and observer replication.
 
-`hub_regression.gd` drives the out-of-raid loop: 10-slot inventory and 20-slot stash limits, vendor pricing and rejections, equipped-copy protection, save/reload persistence, HUD panel and modal geometry with label clipping, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, and the hub-to-arena host session with validated seat loadouts. Script-mode tests start from the authored defaults instead of a player's real save.
+`hub_regression.gd` drives the out-of-raid loop: 10-slot inventory and 20-slot stash limits, per-slot armor equipping and mixed-set guard, legacy whole-set save migration, the scrollable 20-piece Quartermaster stock, vendor pricing and rejections, equipped-copy protection, save/reload persistence, HUD panel and modal geometry with label clipping, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, and the hub-to-arena host session with validated seat loadouts. Script-mode tests start from the authored defaults instead of a player's real save.
 
 Repo-local skills provide step-by-step instructions for coding and asset-authoring agents:
 

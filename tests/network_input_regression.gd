@@ -200,7 +200,7 @@ func held_attack(pressed: bool) -> void:
 
 func crouch_checks() -> void:
 	var actor = arena.actors[arena.local_slot]
-	var armor: int = actor.rig.armor_index
+	var armor: int = actor.rig.armor_bits()
 	var standing_height: float = actor.cover._capsule.height
 	for invalid in [null,1,"true",{"pressed":true}]:
 		arena.send_action("crouch",invalid)
@@ -209,7 +209,7 @@ func crouch_checks() -> void:
 	await key(KEY_C)
 	await pause(0.4)
 	check(not actor.cover.active and actor.cover.crouched and actor.cover._capsule.height<standing_height-0.4,"C crouches outside cover with a smaller real collider")
-	check(actor.rig.armor_index==armor,"C crouch preserves armor across the network")
+	check(actor.rig.armor_bits()==armor,"C crouch preserves armor across the network")
 	for invalid in [null,0,"false",{}]:
 		arena.send_action("crouch",invalid)
 	await pause(0.25)
@@ -221,7 +221,7 @@ func crouch_checks() -> void:
 	await key(KEY_C)
 	await pause(0.4)
 	check(not actor.cover.crouched and absf(actor.cover._capsule.height-standing_height)<0.02,"Second C restores the authoritative standing collider")
-	check(actor.rig.armor_index==armor,"C stand preserves armor across the network")
+	check(actor.rig.armor_bits()==armor,"C stand preserves armor across the network")
 
 func slide_distance(code: Key, fast: bool) -> float:
 	var actor = arena.actors[arena.local_slot]

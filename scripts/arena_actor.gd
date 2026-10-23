@@ -13,7 +13,7 @@ const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
-const ARMOR := [0.0, 0.15, 0.30]
+const ArmorData = preload("res://scripts/armor_data.gd")
 var slot := 0
 var peer_id := 0
 var is_bot := true
@@ -310,7 +310,7 @@ func get_display_name() -> String:
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
-	var applied := amount * Hitbox.damage_multiplier(headshot) * (1.0 - float(ARMOR[rig.armor_index]))
+	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
 	if react:
@@ -515,7 +515,7 @@ func _floor_height(point: Vector3) -> float:
 
 func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
-		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_index | (4 if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,
+		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
 		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
@@ -551,11 +551,10 @@ func apply_snapshot(state: Dictionary) -> void:
 	collision_mask = 1 if alive else 0
 	if rig.bow_index != int(state.bow):
 		rig.set_bow(int(state.bow))
-	var armor_bits := int(state.armor)
-	var armor_index := armor_bits & 3
-	var shield_state := (armor_bits & 4) != 0
-	if rig.armor_index != armor_index:
-		rig.set_armor(armor_index)
+	var armor_bits := int(state.armor) & 1023
+	var shield_state := (int(state.armor) & ArmorData.SHIELD_BIT) != 0
+	if rig.armor_bits() != armor_bits:
+		rig.set_armor_bits(armor_bits)
 	if rig.sword_index != int(state.sword):
 		rig.set_sword(int(state.sword))
 	if rig.weapon != str(state.weapon):

@@ -35,6 +35,8 @@ var inventory_buttons: Array[Button] = []
 var stash_buttons: Array[Button] = []
 var stock_buttons: Array[Button] = []
 var vendor_buttons: Array[Button] = []
+var stock_scroll: ScrollContainer
+var stock_list: VBoxContainer
 var _inventory_count: Label
 var _stash_count: Label
 var _credits: Label
@@ -223,20 +225,31 @@ func _build_vendors() -> void:
 	_vendor_tag = _label(panel,"",Vector2(16,98),11,MUTED)
 	_vendor_tag.size = Vector2(348,26)
 	_vendor_tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	for index in 3:
-		var button := _button(panel,"",Vector2(16,132+index*40),Vector2(348,34))
+	stock_scroll = ScrollContainer.new()
+	stock_scroll.position = Vector2(16,132)
+	stock_scroll.size = Vector2(348,150)
+	stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(stock_scroll)
+	stock_list = VBoxContainer.new()
+	stock_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stock_list.add_theme_constant_override("separation",4)
+	stock_scroll.add_child(stock_list)
+	for index in 20:
+		var button := _button(stock_list,"",Vector2.ZERO,Vector2(320,30))
+		button.custom_minimum_size = Vector2(0,30)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.add_theme_font_size_override("font_size",13)
+		button.add_theme_font_size_override("font_size",12)
 		button.pressed.connect(_on_stock.bind(index))
 		stock_buttons.append(button)
-	_stock_header = _label(panel,"SELECT A STOCK ITEM",Vector2(16,254),10,MUTED)
-	_stock_meta = _label(panel,"",Vector2(16,272),15,CREAM)
-	_stock_text = _label(panel,"",Vector2(16,296),11,MUTED)
-	_stock_text.size = Vector2(348,40)
+	_stock_header = _label(panel,"SELECT A STOCK ITEM",Vector2(16,288),10,MUTED)
+	_stock_meta = _label(panel,"",Vector2(16,306),15,CREAM)
+	_stock_text = _label(panel,"",Vector2(16,324),11,MUTED)
+	_stock_text.size = Vector2(348,32)
 	_stock_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	buy_button = _button(panel,"BUY",Vector2(16,346),Vector2(348,36))
+	buy_button = _button(panel,"BUY",Vector2(16,360),Vector2(348,34))
 	buy_button.pressed.connect(_on_buy)
-	_label(panel,"A purchase needs a free inventory slot.",Vector2(16,390),10,MUTED)
+	_label(panel,"A purchase needs a free inventory slot.",Vector2(16,398),10,MUTED)
 
 func _build_actions() -> void:
 	action_panel = _panel(self,Vector2(-404,-324),Vector2(380,306))
@@ -420,10 +433,12 @@ func _refresh_vendor() -> void:
 		var button := stock_buttons[index]
 		if index < stock.size():
 			var item_id: String = stock[index]
+			button.visible = true
 			button.disabled = false
 			button.text = "%s%s   %d c" % ["* " if state.is_equipped(item_id) else "",state.item_name(item_id),state.item_price(item_id)]
 			button.set_pressed_no_signal(_location == "stock" and _stock_item == item_id)
 		else:
+			button.visible = false
 			button.disabled = true
 			button.text = ""
 	if _location == "stock" and not _stock_item.is_empty():
@@ -513,6 +528,8 @@ func _on_vendor_tab(index: int) -> void:
 	if _location == "stock":
 		_location = ""
 		_stock_item = ""
+	if stock_scroll != null:
+		stock_scroll.scroll_vertical = 0
 	refresh()
 
 func _on_stock(index: int) -> void:
