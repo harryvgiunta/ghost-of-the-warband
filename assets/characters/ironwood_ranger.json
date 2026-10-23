@@ -1,5 +1,5 @@
 {
-  "asset": "ironwood_ranger.glb",
+  "asset": "ranger_armor.glb",
   "skeleton": "Armature/Skeleton3D",
   "bone_count": 65,
   "forward": [
@@ -196,6 +196,87 @@
   },
   "authoring_fps": 60,
   "gres_height_scale": 0.5092428046251969,
+  "armor": {
+    "source": "tools/character_armor.py",
+    "slots": [
+      "head",
+      "chest",
+      "hands",
+      "legs",
+      "feet"
+    ],
+    "sets": [
+      "leather",
+      "mail",
+      "plate",
+      "cloth"
+    ],
+    "extra": {
+      "leather": {
+        "hands": [
+          "Armor_Leather_Hands"
+        ]
+      }
+    },
+    "generated": {
+      "plate": {
+        "head": [
+          "Armor_Plate_Head"
+        ],
+        "chest": [
+          "Armor_Plate_Chest"
+        ],
+        "hands": [
+          "Armor_Plate_Hands"
+        ],
+        "legs": [
+          "Armor_Plate_Legs"
+        ],
+        "feet": [
+          "Armor_Plate_Feet"
+        ]
+      },
+      "mail": {
+        "head": [
+          "Armor_Mail_Head"
+        ],
+        "chest": [
+          "Armor_Mail_Chest"
+        ],
+        "hands": [
+          "Armor_Mail_Hands"
+        ],
+        "legs": [
+          "Armor_Mail_Legs"
+        ],
+        "feet": [
+          "Armor_Mail_Feet"
+        ]
+      },
+      "cloth": {
+        "head": [
+          "Armor_Cloth_Head"
+        ],
+        "chest": [
+          "Armor_Cloth_Chest"
+        ],
+        "hands": [
+          "Armor_Cloth_Hands"
+        ],
+        "legs": [
+          "Armor_Cloth_Legs"
+        ],
+        "feet": [
+          "Armor_Cloth_Feet"
+        ]
+      },
+      "leather": {
+        "hands": [
+          "Armor_Leather_Hands"
+        ]
+      }
+    }
+  },
   "support_clearance": {
     "Sword_Idle": {
       "forearm_radius": 0.03,

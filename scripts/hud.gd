@@ -1,7 +1,7 @@
 extends Control
 
 signal bow_selected(index: int)
-signal armor_selected(index: int)
+signal armor_selected(slot: String, set_index: int)
 signal sword_selected(index: int)
 signal weapon_selected(value: String)
 signal shield_selected(active: bool)
@@ -11,6 +11,7 @@ signal map_toggled
 signal hub_requested
 signal cursor_requested(free: bool)
 
+const ArmorData = preload("res://scripts/armor_data.gd")
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
@@ -25,6 +26,7 @@ var sword_buttons: Array[Button] = []
 var weapon_buttons: Array[Button] = []
 var _weapon := "bow"
 var _shield_equipped := false
+var _armor_pieces: Dictionary = {}
 var _shield_button: Button
 var _dual_button: Button
 var _equipment: Panel
@@ -161,21 +163,23 @@ func _build_equipment() -> void:
 		button.pressed.connect(func(): sword_selected.emit(index))
 		sword_buttons.append(button)
 	_dagger_details = _label(_equipment,"",Vector2(18,399),10,TEAL)
-	_label(_equipment,"ARMOR / CLICK TO EQUIP",Vector2(18,416),11,MUTED)
-	for index in 3:
-		var button := _button(_equipment,["RANGER LEATHER / LIGHT","SENTINEL MAIL / 15% GUARD","WARDEN PLATE / 30% GUARD"][index],Vector2(16,438+index*33),Vector2(250,29))
-		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",12)
-		button.size = Vector2(250,29)
-		button.pressed.connect(func(): armor_selected.emit(index))
+	_label(_equipment,"ARMOR / CLICK SLOT TO CYCLE",Vector2(18,416),11,MUTED)
+	for index in ArmorData.SLOTS.size():
+		var slot: String = ArmorData.SLOTS[index]
+		var column := index % 2
+		var row := index / 2
+		var button := _button(_equipment,"",Vector2(16+column*130,438+row*30),Vector2(120,26))
+		button.add_theme_font_size_override("font_size",11)
+		button.size = Vector2(120,26)
+		button.pressed.connect(_cycle_armor.bind(slot))
 		armor_buttons.append(button)
-	_shield_button = _button(_equipment,"4  SHIELD",Vector2(16,536),Vector2(120,28))
+	_shield_button = _button(_equipment,"4  SHIELD",Vector2(16,530),Vector2(120,28))
 	_shield_button.toggle_mode = true
 	_shield_button.add_theme_font_size_override("font_size",12)
 	_shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
-	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(146,536),Vector2(120,28))
+	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(146,530),Vector2(120,28))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,572),9,MUTED)
+	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,564),9,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -244,14 +248,17 @@ func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: b
 	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", TEAL if active and peeking else GOLD if active else MUTED)
 
-func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}, shield: bool = false) -> void:
+func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_summary: String, sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}, shield: bool = false) -> void:
 	_shield_equipped = shield
+	_armor_pieces = armor_pieces.duplicate()
 	var shield_allowed := weapon == "dagger" or (weapon == "sword" and sword == 1)
 	_shield_button.set_pressed_no_signal(shield)
 	_shield_button.disabled = not shield_allowed
+	for index in ArmorData.SLOTS.size():
+		var slot: String = ArmorData.SLOTS[index]
+		armor_buttons[index].text = "%s  %s" % [ArmorData.slot_label(slot).to_upper(),ArmorData.set_abbreviation(int(_armor_pieces.get(slot,0)))]
 	for index in 3:
 		bow_buttons[index].set_pressed_no_signal(index == bow)
-		armor_buttons[index].set_pressed_no_signal(index == armor)
 		sword_buttons[index].set_pressed_no_signal(index == sword)
 	_weapon = weapon
 	weapon_buttons[0].set_pressed_no_signal(weapon == "bow")
@@ -263,10 +270,14 @@ func update_loadout(bow: int, armor: int, data: Dictionary, armor_name: String, 
 	var weapon_name := String(data.name) if weapon == "bow" else String(dagger_data.name) if weapon == "dagger" else String(sword_data.name)
 	if weapon == "dual":
 		weapon_name = "%s + dagger" % String(sword_data.name)
-	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_name]
+	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_summary]
 	if _dagger_details != null and not dagger_data.is_empty():
 		_dagger_details.text = "%.1f s STAB / %d DAMAGE / WEAK GUARD" % [float(dagger_data.seconds),int(dagger_data.damage)]
 
+
+func _cycle_armor(slot: String) -> void:
+	var next := (int(_armor_pieces.get(slot,0)) + 1) % ArmorData.SET_IDS.size()
+	armor_selected.emit(slot,next)
 
 func update_world_position(position_at: Vector3, yaw: float, activated: Dictionary) -> void:
 	_player_position = position_at

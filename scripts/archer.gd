@@ -13,6 +13,7 @@ const Sword = preload("res://scripts/sword.gd")
 const Dagger = preload("res://scripts/dagger.gd")
 const Shield = preload("res://scripts/shield.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
@@ -25,7 +26,6 @@ const SWORD_DATA = [
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
 ]
 const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
-const ARMOR_NAMES = ["Ranger leather", "Sentinel mail", "Warden plate"]
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
 const RECOVER_SECONDS := 0.95
@@ -37,7 +37,7 @@ static var _profile: Dictionary = JSON.parse_string(FileAccess.get_file_as_strin
 
 var bow_index := 1
 var sword_index := 1
-var armor_index := 0
+var armor_pieces := {"head":0, "chest":0, "hands":0, "legs":0, "feet":0}
 var weapon := "bow"
 var phase := "READY"
 var draw_amount := 0.0
@@ -80,7 +80,7 @@ var _model: Node3D
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
 var _swords: Array[Node3D] = []
-var _armor: Array[Node3D] = []
+var _armor_meshes: Dictionary = {}
 var _chest: Node3D
 var _quiver: Node3D
 var _chest_rest_basis := Basis.IDENTITY
@@ -225,7 +225,7 @@ func _ready() -> void:
 	_built = true
 	set_bow(bow_index)
 	set_sword(sword_index)
-	set_armor(armor_index)
+	_apply_armor_visibility()
 	_update_pose(0.0)
 
 func _find_node_of_type(root: Node, type_name: String) -> Node:
@@ -262,21 +262,7 @@ func _build_equipment() -> void:
 		var z := sin(index*2.4)*0.04
 		Geo.beam(_quiver,Vector3(x,0.18,z),Vector3(x,0.47,z),0.004,trim,6)
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
-	for index in 3:
-		var armor := Node3D.new()
-		_chest.add_child(armor)
-		_armor.append(armor)
-		if index == 0:
-			continue # The imported ranger outfit is the leather loadout.
-		var metal := Geo.material(Color("65777b") if index == 1 else Color("a3b5ba"),0.65,0.46)
-		var coat := Geo.cylinder(armor,0.235,0.25,0.36,Vector3(0,-0.09,0),metal,16)
-		coat.scale.z = 0.65
-		if index == 1:
-			for row in 7:
-				Geo.cylinder(armor,0.238,0.238,0.018,Vector3(0,0.06-row*0.045,0),trim,16).scale.z = 0.65
-		else:
-			Geo.sphere(armor,0.21,Vector3(0,0.01,-0.09),metal,Vector3(1,0.85,0.40))
-			Geo.box(armor,Vector3(0.025,0.32,0.025),Vector3(0,-0.06,-0.19),trim)
+	_build_armor_meshes()
 
 func set_bow(index: int) -> void:
 	bow_index = clampi(index,0,2)
@@ -341,13 +327,90 @@ func _sync_weapon_visibility() -> void:
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and is_visible_in_tree())
 
-func set_armor(index: int) -> void:
-	armor_index = clampi(index,0,2)
-	if not _built:
+func _build_armor_meshes() -> void:
+	# The imported leather outfit is split across the same five slots as the
+	# generated shells.  Arrows/head/face/hair stay outside every group.
+	var source_slots := {
+		"Male_Ranger_Head_Hood": "head",
+		"Male_Ranger_Body": "chest",
+		"Male_Ranger_Body_Belt_1": "chest",
+		"Male_Ranger_Body_Belt_2": "chest",
+		"Male_Ranger_Acc_Pauldron": "chest",
+		"Male_Ranger_Arms": "chest",
+		"Male_Ranger_Arms_Bracer": "hands",
+		"Male_Ranger_Legs": "legs",
+		"Male_Ranger_Feet_Boots": "feet",
+	}
+	for slot in ArmorData.SLOTS:
+		_armor_meshes[slot] = {}
+		for set_index in ArmorData.SET_IDS.size():
+			_armor_meshes[slot][set_index] = []
+	for node in _model.find_children("*","MeshInstance3D",true,false):
+		var mesh_name := str(node.name)
+		var slot := str(source_slots.get(mesh_name,""))
+		var set_index := 0 if not slot.is_empty() else -1
+		if mesh_name.begins_with("Armor_"):
+			var parts := mesh_name.split("_")
+			if parts.size() >= 3:
+				set_index = ArmorData.SET_IDS.find(parts[1].to_lower())
+				slot = parts[2].to_lower()
+		if set_index >= 0 and _armor_meshes.has(slot):
+			_armor_meshes[slot][set_index].append(node)
+	var generated: Dictionary = _profile.get("armor",{}).get("generated",{})
+	for set_name: String in generated:
+		var set_index := ArmorData.SET_IDS.find(set_name)
+		if set_index < 0:
+			continue
+		for slot: String in generated[set_name]:
+			if not _armor_meshes.has(slot):
+				continue
+			for mesh_name: String in generated[set_name][slot]:
+				var node := _model.find_child(mesh_name,true,false)
+				if node is MeshInstance3D and not _armor_meshes[slot][set_index].has(node):
+					_armor_meshes[slot][set_index].append(node)
+
+func _apply_armor_visibility() -> void:
+	for slot in ArmorData.SLOTS:
+		var active := int(armor_pieces.get(slot,0))
+		for set_index: int in _armor_meshes.get(slot,{}):
+			for node: Node3D in _armor_meshes[slot][set_index]:
+				node.visible = set_index == active
+
+func set_armor_piece(slot: String, set_index: int) -> void:
+	if slot not in ArmorData.SLOTS:
 		return
-	for i in _armor.size():
-		_armor[i].visible = i == armor_index
+	armor_pieces[slot] = clampi(set_index,0,ArmorData.SET_IDS.size()-1)
+	if _built:
+		_apply_armor_visibility()
 	loadout_changed.emit()
+
+func set_armor_pieces(pieces: Dictionary) -> void:
+	for slot in ArmorData.SLOTS:
+		armor_pieces[slot] = clampi(int(pieces.get(slot,0)),0,ArmorData.SET_IDS.size()-1)
+	if _built:
+		_apply_armor_visibility()
+	loadout_changed.emit()
+
+func set_armor(index: int) -> void:
+	# Convenience for tests and whole-set loadouts: every slot uses one set.
+	var value := clampi(index,0,ArmorData.SET_IDS.size()-1)
+	for slot in ArmorData.SLOTS:
+		armor_pieces[slot] = value
+	if _built:
+		_apply_armor_visibility()
+	loadout_changed.emit()
+
+func set_armor_bits(bits: int) -> void:
+	set_armor_pieces(ArmorData.unpack(bits & 1023))
+
+func armor_bits() -> int:
+	return ArmorData.pack(armor_pieces)
+
+func armor_piece(slot: String) -> int:
+	return int(armor_pieces.get(slot,0))
+
+func armor_reduction() -> float:
+	return ArmorData.reduction(armor_pieces)
 
 func can_equip_shield() -> bool:
 	return weapon == "dagger" or (weapon == "sword" and sword_index == 1)
@@ -1486,7 +1549,7 @@ func _update_shield_pose() -> void:
 		# Keep the shield clear of the weapon hand behind it: the one-handed
 		# guard bracer reaches almost to the face, so a close carry clips it.
 		# Crouching brings that hand further forward relative to the chest.
-		var reach := 0.56+0.06*_crouch_amount
+		var reach := 0.58+0.06*_crouch_amount
 		var center := chest+forward*reach+Vector3.UP*0.02-right*0.08
 		var basis := Basis.looking_at(forward,Vector3.UP)
 		active_shield.global_transform = Transform3D(basis,center)
@@ -1499,7 +1562,7 @@ func _update_shield_pose() -> void:
 		var hand := _bone_world(_arms[0][2])
 		var outward := -global_basis.x
 		var basis := Basis.looking_at(outward,Vector3.UP)
-		var center := hand.origin+outward*0.12+Vector3.UP*0.02
+		var center := hand.origin+outward*0.18+Vector3.UP*0.02
 		active_shield.global_transform = Transform3D(basis,center)
 
 func _update_bow_pose(drawing: bool) -> void:

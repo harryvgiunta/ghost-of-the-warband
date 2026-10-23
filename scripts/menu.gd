@@ -108,7 +108,7 @@ func _apply_preview_loadout() -> void:
 		return
 	archer.set_bow(state.equipped_index("bow"))
 	archer.set_sword(state.equipped_index("sword"))
-	archer.set_armor(state.equipped_index("armor"))
+	archer.set_armor_pieces(state.equipped_pieces())
 
 func _on_buy(item_id: String) -> void:
 	var result: Dictionary = state.buy(item_id)

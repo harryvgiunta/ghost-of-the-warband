@@ -18,6 +18,7 @@ from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from character_clearance import correct_support_arm, validate_export
+from character_armor import build_character_armor
 
 SOURCE, OUTPUT = (Path(value).resolve() for value in sys.argv[sys.argv.index('--') + 1:][:2])
 FPS = 60
@@ -589,6 +590,17 @@ two_hand_block, two_hand_support = author_guard_loop(
 finished.append(two_hand_block)
 support_clearance['Sword_Block_Loop'] = two_hand_support
 
+# Author the swappable armor shells in the same rest space and skin.  The rig
+# is put back on its rest pose so every piece is modelled against the bind
+# skeleton, not against the last sampled guard or overhead pose.
+rig.animation_data.action = None
+bpy.context.scene.frame_set(0)
+for pose_bone in rig.pose.bones:
+    pose_bone.matrix_basis = Matrix.Identity(4)
+bpy.context.view_layer.update()
+armor_objects, armor_metadata = build_character_armor(rig, SOURCE)
+ranger_objects.update(armor_objects)
+
 # Remove sources and their animation tracks. Export only baked required actions.
 for obj in list(bpy.data.objects):
     if obj not in ranger_objects:
@@ -640,7 +652,9 @@ jaw_palm = jaw_surface + Vector((-0.03, 0.005, 0.0))
 bow_anchor = list(rest['Head'].inverted() @ jaw_palm)
 # All exported skinned meshes share the identity mesh transform. Measure their
 # actual Y-up POSITION bounds, excluding removed source/preview objects.
-position_bounds = [document['accessors'][primitive['attributes']['POSITION']] for mesh in document['meshes'] for primitive in mesh['primitives']]
+position_bounds = [document['accessors'][primitive['attributes']['POSITION']]
+                   for mesh in document['meshes'] if not mesh.get('name', '').startswith('Armor_')
+                   for primitive in mesh['primitives']]
 rest_height = max(a['max'][1] for a in position_bounds) - min(a['min'][1] for a in position_bounds)
 metadata = {
     'asset': OUTPUT.name,
@@ -668,6 +682,7 @@ metadata = {
     'animations': durations,
     'authoring_fps': FPS,
     'gres_height_scale': scale,
+    'armor': armor_metadata,
     'support_clearance': support_clearance,
     'cover_authoring': {
         'reference': 'Identical Idle_Loop frame 0 for all lean clips; additive world-space bone deltas',

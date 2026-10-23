@@ -2,6 +2,7 @@ extends SceneTree
 ## Hub economy, persistence, preview wiring and mode hand-off.
 
 const StateScript = preload("res://scripts/player_state.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const TEST_SAVE := "user://hub_regression_state.json"
 
 var failures := 0
@@ -43,12 +44,14 @@ func run() -> void:
 func _test_state_rules() -> void:
 	check(state.INVENTORY_CAPACITY == 10,"Inventory holds ten slots")
 	check(state.STASH_CAPACITY == 20,"Stash holds twenty slots")
-	check(state.inventory.size() == 3,"Starter kit fills three inventory slots")
+	check(state.inventory.size() == 7,"Starter kit fills seven inventory slots")
 	check(state.stash.is_empty(),"Stash starts empty")
 	check(state.credits == StateScript.STARTING_CREDITS,"Starting purse is the authoring constant")
 	check(state.equipped_index("bow") == 0,"Starter shortbow is equipped")
 	check(state.equipped_index("sword") == 0,"Starter shortsword is equipped")
-	check(state.equipped_index("armor") == 0,"Starter leather is equipped")
+	for armor_slot in ArmorData.SLOTS:
+		check(state.equipped_index(armor_slot) == 0,"Starter leather %s is equipped" % armor_slot)
+	check(state.owned_in_inventory("armor_leather_chest") == 1,"Starter leather chest is owned")
 	check(state.owned_in_inventory("bow_short") == 1,"Starter bow is owned in the inventory")
 
 	var credits_before: int = state.credits
@@ -84,6 +87,16 @@ func _test_state_rules() -> void:
 	check(state.stash.size() == 1,"Stash receives the moved item")
 	check(bool(state.move_to_inventory(0).ok),"Stashed gear returns to the inventory")
 	check(state.stash.is_empty(),"Returning gear empties the stash slot")
+
+	# Per-slot equipping: a mail chest must not replace the leather hood.
+	state.credits = 2000
+	check(bool(state.buy("armor_mail_chest").ok),"A single armor piece can be bought")
+	var mail_chest: int = state.inventory.find("armor_mail_chest")
+	check(bool(state.equip(mail_chest).ok),"A single armor piece can be equipped")
+	check(state.equipped_index("chest") == 1,"The mail chest occupies only the chest slot")
+	check(state.equipped_index("head") == 0,"The leather hood remains equipped")
+	check(state.is_equipped("armor_mail_chest"),"The mixed armor piece is queryable")
+	check(is_equal_approx(state.armor_reduction(),0.05),"Only the mail chest contributes guard")
 
 	state.credits = 100000
 	while not state.inventory_full():
@@ -127,8 +140,25 @@ func _test_persistence() -> void:
 	check(loaded.credits == state.credits,"Credits survive a reload")
 	check(PackedStringArray(loaded.inventory) == PackedStringArray(state.inventory),"Inventory survives a reload")
 	check(PackedStringArray(loaded.stash) == PackedStringArray(state.stash),"Stash survives a reload")
-	check(PackedStringArray([loaded.equipped_id("bow"),loaded.equipped_id("sword"),loaded.equipped_id("armor")]) == PackedStringArray([state.equipped_id("bow"),state.equipped_id("sword"),state.equipped_id("armor")]),"Equipped kit survives a reload")
+	for kind in StateScript.DEFAULTS:
+		check(loaded.equipped_id(kind) == state.equipped_id(kind),"Equipped %s survives a reload" % kind)
 	loaded.free()
+	# A version-1 save stored one whole-set armor id; it must migrate to five slots.
+	var v1_path := "user://hub_regression_v1.json"
+	var v1_file := FileAccess.open(v1_path, FileAccess.WRITE)
+	v1_file.store_string(JSON.stringify({"version":1,"credits":200,
+		"inventory":["bow_short","sword_short","armor_mail"],"stash":[],
+		"equipped":{"bow":"bow_short","sword":"sword_short","armor":"armor_mail"}}))
+	v1_file.close()
+	var legacy = StateScript.new()
+	legacy.save_path = v1_path
+	legacy.load_state()
+	for slot in ArmorData.SLOTS:
+		check(legacy.equipped_id(slot) == "armor_mail","Version-1 armor migrates to the %s slot" % slot)
+	check(legacy.equipped_index("chest") == 1,"Migrated mail preserves its set index")
+	check(legacy.is_equipped("armor_mail"),"Migrated whole-set mail is queryable")
+	legacy.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(v1_path))
 
 func _test_session_bridge() -> void:
 	session.clear()
@@ -150,7 +180,9 @@ func _test_session_bridge() -> void:
 
 func _test_menu() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great","armor":"armor_mail"}
+	state.equipped = {"bow":"bow_long","sword":"sword_great",
+		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
+		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
 	state.save_state()
 	var menu = load("res://menu.tscn").instantiate()
 	root.add_child(menu)
@@ -162,7 +194,19 @@ func _test_menu() -> void:
 	check(menu.camera != null and menu.camera.current,"The hub frames the ranger with an active camera")
 	check(menu.archer.bow_index == 2,"Preview equips the stored longbow")
 	check(menu.archer.sword_index == 2,"Preview equips the stored greatsword")
-	check(menu.archer.armor_index == 1,"Preview equips the stored mail")
+	check(menu.archer.armor_piece("head") == 1,"Preview equips the stored mail hood")
+	check(menu.archer.armor_piece("chest") == 1,"Preview equips the stored mail chest")
+	check(menu.archer.armor_piece("feet") == 1,"Preview equips the stored mail sabatons")
+	var mail_chest_mesh := menu.archer._model.find_child("Armor_Mail_Chest",true,false) as MeshInstance3D
+	var leather_body := menu.archer._model.find_child("Male_Ranger_Body",true,false) as MeshInstance3D
+	check(mail_chest_mesh != null and mail_chest_mesh.visible,"The mail chest replaces the leather torso mesh")
+	check(leather_body != null and not leather_body.visible,"The source leather torso is hidden under another chest")
+	menu.archer.set_armor_pieces({"head":0,"chest":0,"hands":0,"legs":0,"feet":2})
+	var base_calf := menu.archer._model.find_child("Ranger_Base_Calf",true,false) as MeshInstance3D
+	var leather_boots := menu.archer._model.find_child("Male_Ranger_Feet_Boots",true,false) as MeshInstance3D
+	check(base_calf != null and base_calf.visible,"The base calf fills the shin under short sabatons")
+	check(leather_boots != null and not leather_boots.visible,"Plate sabatons hide the leather boots independently")
+	menu.archer.set_armor_pieces(state.equipped_pieces())
 	check(menu.hud.inventory_buttons.size() == 10,"The hub renders ten inventory slots")
 	check(menu.hud.stash_buttons.size() == 20,"The hub renders twenty stash slots")
 	check(menu.hud.vendor_buttons.size() == 3,"The hub offers three vendors")
@@ -186,8 +230,14 @@ func _test_menu() -> void:
 		check(menu.hud.inventory_panel.get_global_rect().encloses(button.get_global_rect()),"Inventory slots sit inside their panel")
 	for button in menu.hud.stash_buttons:
 		check(menu.hud.stash_panel.get_global_rect().encloses(button.get_global_rect()),"Stash slots sit inside their panel")
+	check(menu.hud.vendor_panel.get_global_rect().encloses(menu.hud.stock_scroll.get_global_rect()),"Vendor stock scroll sits inside its panel")
+	var visible_stock := 0
 	for button in menu.hud.stock_buttons:
-		check(menu.hud.vendor_panel.get_global_rect().encloses(button.get_global_rect()),"Vendor stock sits inside its panel")
+		if button.visible:
+			visible_stock += 1
+			if visible_stock <= 4:
+				check(menu.hud.stock_scroll.get_global_rect().grow(2).encloses(button.get_global_rect()),"Visible vendor stock rows sit inside the scroll")
+	check(visible_stock == 3,"The Fletcher lists three bows")
 	var feet_on_screen: Vector2 = menu.camera.unproject_position(menu.archer.global_position)
 	var head_on_screen: Vector2 = menu.camera.unproject_position(menu.archer.global_position+Vector3(0,1.85,0))
 	check(view_rect.has_point(feet_on_screen) and view_rect.has_point(head_on_screen),"The ranger is framed on screen")
@@ -199,6 +249,12 @@ func _test_menu() -> void:
 	check(not status_rect.intersects(menu.hud.header_panel.get_global_rect()),"The status line clears the title panel")
 	check(not status_rect.intersects(menu.hud.purse_panel.get_global_rect()),"The status line clears the purse panel")
 
+	menu.hud.vendor_buttons[2].pressed.emit()
+	var quartermaster_stock := 0
+	for button in menu.hud.stock_buttons:
+		if button.visible:
+			quartermaster_stock += 1
+	check(quartermaster_stock == 20,"The Quartermaster lists all twenty armor pieces")
 	menu.hud.vendor_buttons[0].pressed.emit()
 	menu.hud.stock_buttons[2].pressed.emit()
 	check(menu.hud.buy_button.visible,"Selecting vendor stock reveals the purchase action")
@@ -258,7 +314,9 @@ func _test_menu() -> void:
 
 func _test_frontier() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great","armor":"armor_mail"}
+	state.equipped = {"bow":"bow_long","sword":"sword_great",
+		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
+		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
 	state.credits = 480
 	state.save_state()
 	var game = load("res://main.tscn").instantiate()
@@ -266,7 +324,9 @@ func _test_frontier() -> void:
 	await create_timer(0.5).timeout
 	check(game.archer.bow_index == 2,"The frontier starts with the hub longbow")
 	check(game.archer.sword_index == 2,"The frontier starts with the hub greatsword")
-	check(game.archer.armor_index == 1,"The frontier starts with the hub mail")
+	check(game.archer.armor_piece("head") == 1,"The frontier starts with the hub mail hood")
+	check(game.archer.armor_piece("chest") == 1,"The frontier starts with the hub mail chest")
+	check(is_equal_approx(game.archer.armor_reduction(),0.15),"The full mail kit grants 15% guard")
 	check(game.gold == 480,"The frontier starts with the hub purse")
 	var before: int = state.credits
 	game._award_gold(7)
@@ -277,7 +337,9 @@ func _test_frontier() -> void:
 
 func _test_arena() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great","armor":"armor_mail"}
+	state.equipped = {"bow":"bow_long","sword":"sword_great",
+		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
+		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
 	state.credits = 480
 	state.save_state()
 	session.clear()
@@ -291,15 +353,22 @@ func _test_arena() -> void:
 	check(arena.local_slot == 0,"The hub host owns the first seat")
 	check(arena.actors[0].rig.bow_index == 2,"The arena host starts with the hub longbow")
 	check(arena.actors[0].rig.sword_index == 2,"The arena host starts with the hub greatsword")
-	check(arena.actors[0].rig.armor_index == 1,"The arena host starts with the hub mail")
-	arena._apply_loadout(1,{"bow":2,"sword":0,"armor":2})
+	check(arena.actors[0].rig.armor_piece("chest") == 1,"The arena host starts with the hub mail chest")
+	check(is_equal_approx(arena.actors[0].rig.armor_reduction(),0.15),"The arena host starts with the full mail guard")
+	await process_frame
+	arena.hud.armor_buttons[1].pressed.emit()
+	await process_frame
+	check(arena.actors[0].rig.armor_piece("chest") == 2,"The arena slot button cycles only the chest")
+	check(arena.actors[0].rig.armor_piece("head") == 1,"The other armor slots keep their mail")
+	arena._apply_loadout(1,{"bow":2,"sword":0,"armor":ArmorData.pack({"head":2,"chest":2,"hands":2,"legs":2,"feet":2})})
 	check(arena.actors[1].rig.bow_index == 2,"A validated client loadout applies to its seat")
 	check(arena.actors[1].rig.sword_index == 0,"The whole validated client kit applies")
-	check(arena.actors[1].rig.armor_index == 2,"Armor selection applies to the hosted seat")
+	check(arena.actors[1].rig.armor_piece("chest") == 2,"Armor selection applies to the hosted seat")
+	check(is_equal_approx(arena.actors[1].rig.armor_reduction(),0.30),"A full plate loadout grants 30% guard")
 	arena._apply_loadout(1,{"bow":9,"sword":"greatsword","armor":-1})
 	check(arena.actors[1].rig.bow_index == 2,"An invalid bow index is ignored")
 	check(arena.actors[1].rig.sword_index == 0,"An invalid sword type is ignored")
-	check(arena.actors[1].rig.armor_index == 2,"An invalid armor index is ignored")
+	check(arena.actors[1].rig.armor_piece("chest") == 2,"An invalid armor payload is ignored")
 	arena.leave_game()
 	check(arena.network_role == "offline","Leaving the arena returns to the lobby state")
 	arena.queue_free()

@@ -1,5 +1,7 @@
 extends SceneTree
 
+const ArmorData = preload("res://scripts/armor_data.gd")
+
 const Actor = preload("res://scripts/arena_actor.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
@@ -52,6 +54,10 @@ func check_shield_clear(rig, label: String) -> void:
 	var overlap := 0
 	var where := ""
 	for child in rig.find_children("*","MeshInstance3D",true,false):
+		# Hidden armor pieces cannot visually clip the shield; only scan the
+		# surfaces the current slot combination actually renders.
+		if not child.visible or not child.is_visible_in_tree():
+			continue
 		if child.skin == null or child.mesh == null:
 			continue
 		var transforms: Array[Transform3D] = []
@@ -171,7 +177,7 @@ func run() -> void:
 	arena.send_action("shield",true)
 	await create_timer(0.1).timeout
 	check(arena.actors[0].rig.shield_equipped, "The arena host applies the shield action")
-	check((int(arena.actors[0].snapshot().get("armor",0)) & 4) != 0, "The arena snapshot carries the shield state")
+	check((int(arena.actors[0].snapshot().get("armor",0)) & ArmorData.SHIELD_BIT) != 0, "The arena snapshot carries the shield state")
 	arena.send_action("block",{"pressed":true,"forward":Vector3(0,0,-1)})
 	await create_timer(0.1).timeout
 	check(arena.actors[0].combat.blocking, "The arena host raises the shield block")
@@ -225,6 +231,20 @@ func run() -> void:
 	await physics_frame
 	await physics_frame
 	check_shield_clear(clearance,"Raised")
+	# Every visible set must clear the shield in both carried and raised states.
+	var set_names := ["Mail","Plate","Cloth"]
+	for set_index in range(1,4):
+		clearance.set_armor(set_index)
+		clearance.set_blocking(false)
+		clearance.advance_animation(0.6)
+		await physics_frame
+		await physics_frame
+		check_shield_clear(clearance,set_names[set_index-1]+" carried")
+		clearance.set_blocking(true,Vector3(0,0,-1))
+		clearance.advance_animation(0.6)
+		await physics_frame
+		await physics_frame
+		check_shield_clear(clearance,set_names[set_index-1]+" raised")
 	clearance.queue_free()
 	await process_frame
 

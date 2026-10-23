@@ -9,6 +9,7 @@ const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 var actors: Array = []
 var local_slot := -1
 var network_role := "offline"
@@ -79,7 +80,7 @@ func _ready() -> void:
 	hud.leave_requested.connect(leave_game)
 	hud.hub_requested.connect(_hub)
 	hud.bow_selected.connect(func(index: int): send_action("bow",index))
-	hud.armor_selected.connect(func(index: int): send_action("armor",index))
+	hud.armor_selected.connect(func(slot: String, set_index: int): send_action("armor",{"slot":slot,"set":set_index}))
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
 	hud.weapon_selected.connect(func(value: String): send_action("weapon",value))
 	hud.shield_selected.connect(func(active: bool): send_action("shield",active))
@@ -256,7 +257,7 @@ func _local_loadout() -> Dictionary:
 	var node := get_node_or_null("/root/PlayerState")
 	if node == null:
 		return {}
-	return {"bow":int(node.equipped_index("bow")), "sword":int(node.equipped_index("sword")), "armor":int(node.equipped_index("armor"))}
+	return {"bow":int(node.equipped_index("bow")), "sword":int(node.equipped_index("sword")), "armor":ArmorData.pack(node.equipped_pieces())}
 
 func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	if slot < 0 or slot >= actors.size() or loadout.is_empty():
@@ -269,8 +270,8 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 		actor.rig.set_bow(int(bow))
 	if typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2:
 		actor.rig.set_sword(int(sword))
-	if typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 2:
-		actor.rig.set_armor(int(armor))
+	if typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023:
+		actor.rig.set_armor_bits(int(armor))
 
 func get_human_count() -> int:
 	var count := 0
@@ -569,8 +570,14 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 				actor.combat.stop()
 				actor.rig.set_shield(value)
 		"armor":
-			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
-				actor.rig.set_armor(value)
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("slot")) != TYPE_STRING or typeof(value.get("set")) != TYPE_INT:
+				return
+			var armor_slot := str(value.slot)
+			var armor_set := int(value.set)
+			if armor_slot in ArmorData.SLOTS and armor_set >= 0 and armor_set < ArmorData.SET_IDS.size():
+				actor.rig.set_armor_piece(armor_slot,armor_set)
 
 func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	if network_role != "host":
@@ -687,7 +694,7 @@ func _process(delta: float) -> void:
 		rows.append({"slot":fighter.slot,"name":fighter.display_name,"bot":fighter.is_bot,"health":fighter.health,"kills":fighter.kills,"deaths":fighter.deaths})
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
-		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
+		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_bits(),"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
 		"shield":actor.rig.shield_equipped,
 		"left_melee":actor.rig.melee_progress_for("left"),"right_melee":actor.rig.melee_progress_for("right"),
 		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
