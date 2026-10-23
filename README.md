@@ -112,22 +112,26 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | 4 | Equip or stow the shield (dagger or medium arming sword only) |
 | 5 | Dual-wield the selected one-handed sword in the right hand and the dagger in the left; press again to return to the sword |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
-| Hold left mouse / Q with bow | Raise and draw while aiming; automatically expose from cover |
-| Release left mouse / Q with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
+| Hold left mouse with bow | Raise and draw while aiming; automatically expose from cover |
+| Release left mouse with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
+| Click left mouse with sword or dagger | Break sticky cover and immediately attack: a horizontal swing from the current camera shoulder, or a dagger stab. Repeated horizontal swings rebound to the other side |
+| Scroll wheel up with sword or dagger | Forward stab along the crosshair |
+| Scroll wheel down with sword or dagger | Overhead chop |
 | Hold T with a sword or dagger | Charge a throw while aiming. Damage scales with charge, and a bow-style recovery follows the release |
 | Release T with a sword or dagger | Hurl the equipped weapon as a projectile. The endless supply keeps the same weapon equipped |
-| Click left mouse / Q with sword or dagger | Break sticky cover and immediately perform one uncharged melee attack: an overhand chop or a quick stab |
-| Click left mouse / Q while dual wielding | Left-hand dagger stab |
-| Click right mouse while dual wielding | Right-hand sword chop toward the crosshair; never a guard |
+| Click left mouse while dual wielding | Left-hand dagger stab |
+| Click right mouse while dual wielding | Right-hand sword overhead toward the crosshair; never a guard |
+| Q / E | Quick-step dodge left / right; grounded, short cooldown, 7 stamina |
+| G | Interact with the campfire or a waystone |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
-| Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
+| Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom. Right-drag orbits only in frontier inspection view |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
 | Left-drag in the Hollow | Orbit the staging camera around the ranger |
 | Mouse wheel in the Hollow | Zoom the staging camera |
 | Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** The shield is legal only with the dagger or the medium arming sword; switching to a bow, shortsword or greatsword stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** The shield is legal only with the dagger or the medium arming sword; switching to a bow, shortsword or greatsword stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **G** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
 
 ## Running slide
 
@@ -136,6 +140,10 @@ In both Frontier and Arena, **hold Shift while moving, then press C** to slide. 
 The slide starts at **10.5 m/s**, slows to crouch speed over **0.75 seconds**, and finishes crouched. Releasing WASD or Shift preserves its momentum; WASD allows limited steering without reversing direction. It uses the normal collision capsule, lowers the camera, and shows a low, planted slide pose instead of cycling running steps. Sprint stamina consumption continues during the slide, and holding Shift cannot automatically repeat it.
 
 Press **C** again to cancel and stand when headroom permits. **Space** jumps and **Shift + Space** rolls out of the slide, also requiring standing clearance. Blocked forward travel or leaving the ground ends the slide; death, respawn and returning to camp clear it. Grounded attacks still work, and sliding grants no invulnerability. Arena derives slide eligibility and movement on the host and replicates the pose to other players.
+
+## Quick steps
+
+**Q** and **E** perform a grounded quick step left or right relative to the camera. The step covers about **2.55 m in 0.24 s**, spends **7 stamina**, and enters a **0.55-second cooldown**. It is not a roll and grants no invulnerability. A step cancels a held bow draw, a melee swing, a throw or a guard, exits sticky cover, and ends immediately if the feet leave the ground. The torso pitches into the lunge while the authored locomotion carries the legs. Q and E no longer draw, attack or interact; **G** interacts with the campfire and waystones.
 
 ## Cover movement and shoulder views
 
@@ -147,11 +155,11 @@ Lookouts keep one protected anchor and one selected destination through hold and
 
 **C** toggles manual crouch on the ground, in or out of cover; it never changes armor. Crouching lowers the camera, skeleton and collision capsule together. Authored crouch idle and stepping animations support attached movement at both slide speeds, including curved surfaces. Side peeks preserve crouch; a top peek temporarily rises, then restores the tucked posture. Outside cover, crouched movement is **2.2 m/s** and Shift does not sprint. Leaving with **F** preserves manual crouch. Standing waits for clear headroom rather than expanding the capsule through a ceiling.
 
-**LMB / Q attacks directly out of cover; RMB is not required.** A bow draw automatically exposes over low cover or around the selected edge. Releasing early freezes charge while the character finishes exposing and raising the bow, then fires exactly once. The character retucks after follow-through. Blocked edges and insufficient headroom reject bow exposure rather than storing a shot that fires later.
+**LMB attacks directly out of cover; RMB is not required.** A bow draw automatically exposes over low cover or around the selected edge. Releasing early freezes charge while the character finishes exposing and raising the bow, then fires exactly once. The character retucks after follow-through. Blocked edges and insufficient headroom reject bow exposure rather than storing a shot that fires later.
 
 **Melee breaks sticky cover immediately.** A valid sword click releases attachment and starts the normal swing without waiting for a peek, including at the solid middle of a tall wall. You can move away from the wall during the attack and remain detached afterward; press **F** to attach again. The exit does not teleport, force standing, or clear manual crouch. Cooldown, airborne and rolling restrictions still apply, and a rejected attack does not detach you. The blade still collides with world cover; attacking does not allow damage through walls.
 
-A draw begun during a manual RMB peek leaves that peek under manual control: release RMB to retuck without canceling the held draw; releasing the bow afterward exposes again before firing. Holding RMB keeps the manual peek after a bow attack finishes; it cannot reattach a melee attacker. Cover releases check the visible arrow shaft from nock to tip, including an initially buried nock. A genuinely obstructed shaft cancels its pending shot instead of firing through the obstacle or storing a latent release. Clear shots launch from the rendered arrow tip, never from a replacement chest position. Actual projectile collisions still block obstacles.
+A draw begun during a manual RMB peek leaves that peek under manual control: release RMB to retuck without canceling the held draw; releasing the bow afterward exposes again before firing. Holding RMB keeps the manual peek after a bow attack finishes; it cannot reattach a melee attacker. Cover releases check the visible arrow shaft from nock to tip, including an initially buried nock. A genuinely obstructed shaft cancels its pending shot instead of firing through the obstacle or storing a latent release. Clear shots follow the center crosshair ray: the physics arrow starts at a validated point on that ray, and the rendered shaft blends from the bow tip to the authoritative path over 0.12 s. If that camera-ray point would be buried in the cover the character is posted against, the shot keeps the rendered tip rather than firing through geometry. Actual projectile collisions still block obstacles.
 
 **Space** and **Shift + Space** leave cover, clear manual crouch and attack/peek intent, then jump or roll; insufficient standing headroom blocks takeoff. Cover grants no invulnerability. Cancellation, equipment changes, death, respawn and returning to camp clear pending attacks. Arena remains host-authoritative: clients send validated movement, lookout context, crouch intent and the snapshot used to sample aim—not trusted collider sizes or cover positions. Remote releases wait for a fresh aim sample from the current exposed pose, without adding charge. Lost input cancels automatic/frozen cover intent, so it cannot fire later when input resumes.
 
@@ -159,13 +167,13 @@ A draw begun during a manual RMB peek leaves that peek under manual control: rel
 
 Aiming behaves like a shooter: the camera turns with the mouse and the crosshair stays in the center. There is **no auto-fire, unit lock-on, target tracking, or automatic gravity compensation**. Hold left mouse to draw and aim; release to launch one arrow along the current crosshair aim. Holding at full draw never fires automatically. Arrows still fall under gravity after launch, and only actual collision applies damage.
 
-Both shoulder views aim at the world point under the crosshair, independently of the character's previous facing. Aim queries start at the character's view-height plane and skip only the cover body you are posted against. Raising or turning the bow cannot make the query skip a nearby target. Arrows still launch from the visible tip and collide normally.
+Both shoulder views aim at the world point under the crosshair, independently of the character's previous facing. Aim queries start at the character's view-height plane and skip the shooter and only the cover body you are posted against. Raising or turning the bow cannot make the query skip a nearby target. Arrows launch along the exact center-crosshair ray instead of converging from the bow tip, and the visible shaft blends from the bow to that ray over 0.12 s, so shoulder swaps and bow poses cannot bend the trajectory. Arrows still fall under gravity and collide normally.
 
 ```text
 arrow damage = bow base damage × clamp(draw amount, 0, 1)
 ```
 
-Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision.
+Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
 
 Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus the frontier wolf and sentinel, and the multiplier is resolved before armor. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
 
@@ -191,11 +199,19 @@ thrown damage = weapon base damage × clamp(charge, 0, 1)
 
 Charge time follows the equipped weapon's own attack duration: **1 / 2 / 3 seconds** for the shortsword, arming sword and greatsword, and **0.5 seconds** for the dagger. Full damage is the weapon's normal melee base damage (30 / 38 / 50 for swords, 14 for the dagger), halved at half charge and zero at zero charge. A thrown weapon falls under the same gravity as an arrow, uses swept physics collision, stops on the first world or body contact, and applies the normal **2x head-zone** multiplier before armor. It cannot be parried as melee; it uses the projectile damage path.
 
-The hand weapon leaves the hand for the release frame and the **endless supply** restores the same equipped weapon as recovery begins. This is temporary: inventory consumption arrives in a separate work stream. **T never replaces melee**; left mouse and Q still perform the normal sword or dagger attack. Throws automatically expose from cover like a bow, and a wall between the hand and the aim line cancels the throw rather than passing the weapon through cover. In the arena the host owns the thrown projectile, its damage and its replication; clients only send the charge/release intent and aim.
+The hand weapon leaves the hand for the release frame and the **endless supply** restores the same equipped weapon as recovery begins. This is temporary: inventory consumption arrives in a separate work stream. **T never replaces melee**; left mouse and the wheel still perform the normal sword or dagger attacks. Throws automatically expose from cover like a bow, and a wall between the hand and the aim line cancels the throw rather than passing the weapon through cover. In the arena the host owns the thrown projectile, its damage and its replication; clients only send the charge/release intent and aim.
 
 ## Swords and jump-rolls
 
-Small / medium / large swords perform **1 / 2 / 3-second** overhand chops, including raise, strike and recovery. Melee has no held charge; only a head-zone contact doubles damage. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving.
+Small / medium / large swords keep their **1 / 2 / 3-second** authored windup, strike and recovery. Three swing paths share that timing language:
+
+| Input | Swing | Path |
+| --- | --- | --- |
+| LMB | Horizontal cut from the camera shoulder | A hip-led lateral arc at chest height. Right shoulder starts right-to-left; left shoulder starts left-to-right. The next LMB rebound cuts from the opposite side unless X selects a new shoulder first |
+| Wheel up | Forward stab | The authored dagger thrust clip drives a **0.5-second** sword thrust down the crosshair line, with a short windup and fast recovery |
+| Wheel down | Overhead chop | The original authored one-hand or greatsword overhead load and downstroke |
+
+Melee has no held charge; only a head-zone contact doubles damage. A click starts one swing; holding the button does not repeat it. Sword swing durations remain fixed while moving. The LMB horizontal variant layers the lateral hand path over the authored weight transfer and keeps the greatsword's support hand on the hilt; the wheel variants reuse authored motion rather than a procedural body replacement.
 
 The **dagger** (key **3**) is a single close-range weapon: a **0.5-second** authored forward stab with a short windup, a brief blade-contact window and fast recovery. It deals **14** base damage, less than the 30-damage shortsword, and has a thinner, shorter contact volume. The same head-zone multiplier applies. The clip is authored on the Ranger skeleton in Blender; the runtime sweeps the actual dagger blade along the animated hand path rather than using a cone. The right arm and dagger socket aim along the crosshair: the authored chamber and extension run down that line, so the blade goes where you point — low at a wolf's head or level at a humanoid — instead of always thrusting at chest height. The hip and foot stance stays authored; there is no auto-lunge or auto-target.
 
@@ -205,7 +221,7 @@ Damage comes from the **moving blade**, not a fixed percentage of the swing or a
 
 Press **5** with a one-handed sword selected to hold that sword in the right hand and the dagger in the left. The mode requires the small shortsword or medium arming sword; the greatsword is two-handed, so selecting it leaves dual wield. The shield is stowed and cannot be equipped while dual wielding.
 
-Left click or **Q** performs the left-hand dagger stab; right click performs the right-hand sword chop. Both face the crosshair; the dagger thrust follows the aim point while the sword uses its normal authored overhead. Each uses its own weapon's timing, blade geometry and recovery clock and stays socketed in the correct hand. The left stab uses the **0.5-second** dagger profile (**14** damage, **1.2 m** reach); the right chop uses the selected one-handed sword's normal overhead timing and damage. **T** still throws the right-hand sword.
+Left click performs the left-hand dagger stab; right click performs the right-hand sword overhead. Both face the crosshair; the dagger thrust follows the aim point while the sword uses its normal authored overhead. Scroll up stabs and scroll down cuts overhead with the right-hand sword. Each uses its own weapon's timing, blade geometry and recovery clock and stays socketed in the correct hand. The left stab uses the **0.5-second** dagger profile (**14** damage, **1.2 m** reach); the right chop uses the selected one-handed sword's normal overhead timing and damage. **T** still throws the right-hand sword.
 
 **Recovery is per hand.** You can start the right sword while the left dagger is still winding up or recovering, and you can start the left dagger during a sword swing. Each hand has its own damage window, so the second attack never waits for the first to finish, and the freed hand can attack again as soon as its own clip completes. While the right sword is active it drives the body animation; the left thrust is layered on the same skeleton. The HUD shows **LEFT** and **RIGHT** percentages (or **READY**). A standard block knocks aside only the hand that contacted it; a parry staggers and cancels both.
 
@@ -238,11 +254,23 @@ The character uses a 65-bone skinned humanoid and authored animation clips. The 
 
 Authored walk, jog and sprint clips follow actual movement speed with a continuous gait phase. The sprint includes knee/heel recovery, flight, body lean and alternating arm drive. Bow aiming and terrain contact use skeletal corrections; the greatsword keeps a coupled two-hand carry. Collisions that stop movement also stop the running gait.
 
+## Multiplayer feel
+
+Remote fighters use **snapshot interpolation** rather than chasing the newest packet. Each replica buffers timestamped host snapshots and renders **0.12 s** behind them, blending position between the two samples that bracket the render time. The local client seat uses a shorter **0.05 s** delay. If packets are late, the last authoritative velocity carries the body for at most **0.15 s**, then it holds instead of inventing a long extrapolation. Teleports and respawns snap and clear the buffer.
+
+Every hit spawns a **scrolling world-space damage number** that rises, drifts and fades; headshots are larger and gold, damage you take is red, and lethal blows are orange. Arena clients derive the number from the authoritative health delta in each snapshot, so all peers see it without a new network message.
+
+Taking damage applies a **hit stagger** of `0.08 s + 0.012 s per damage`, capped at **0.62 s**. A light dagger hit interrupts briefly; a greatsword or headshot interrupts longer. The victim's movement input, guard, draw, throw and swing are interrupted, the torso and head recoil visibly, and the cap still leaves a counter window. The recoil replicates through the animation phase as `STAGGER` without adding a snapshot field.
+
+Fighters no longer hard-collide with each other. Their capsules have a **soft separation** that only pushes when centres are inside **0.46 m**, which lets two players close to stabbing distance without being shoved off their aim. World geometry, cover, blades and projectiles still collide normally.
+
+The Hollow and arena lobby remember the **last player name, host address and UDP port** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
+
 ## Game modes
 
 **The Hollow:** the default out-of-raid screen. The ranger stands in the depot with a 10-slot inventory, a 20-slot stash, three vendors and the purse. Bought and equipped gear persists across launches, and the equipped kit is the starting loadout for every other mode.
 
-**Arena:** a small woodland free-for-all with trees and stone cover, four combatants, simple pursuit/attack bots, score tracking, and three-second respawns. Bots use the same damage and attack paths as players. Enter from the Hollow with **Arena Skirmish** (hosts locally on the first free UDP port from 7777), **Host a Game**, or **Join a Game**; `Arena.cmd` still opens the standalone lobby.
+**Arena:** a 64 × 64 metre woodland free-for-all with a wide spawn ring, new flank trees and stone islands around the original centre cover, four combatants, simple pursuit/attack bots, score tracking, and three-second respawns. Bots use the same damage and attack paths as players. Enter from the Hollow with **Arena Skirmish** (hosts locally on the first free UDP port from 7777), **Host a Game**, or **Join a Game**; `Arena.cmd` still opens the standalone lobby.
 
 **Frontier:** a seamless 290 × 290 metre zone containing a village, enterable houses, forest, ruined fortress, upland shrine, trails and bridge. Defeat wolves and sentinels, clear defenders and restore three waystones. The village campfire heals. Mail reduces incoming damage by 15%, plate by 30%. Gold from foes and waystones is added to the Hollow purse immediately. Progress lasts for the play session; death preserves restored waystones. Use **Return to the Hollow** to bank the session and re-equip.
 

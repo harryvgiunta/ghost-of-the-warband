@@ -13,6 +13,9 @@ const BASE_DAMAGE := [30.0, 38.0, 50.0]
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
+const HIT_STAGGER_MIN := 0.08
+const HIT_STAGGER_MAX := 0.62
+const HIT_STAGGER_PER_DAMAGE := 0.012
 const BLOCK_STAMINA := 22.0
 const DAGGER_BLOCK_STAMINA := 30.0
 const SHIELD_BLOCK_STAMINA := 18.0
@@ -50,6 +53,11 @@ var _pending_throw := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
+# The last validated camera-ray muzzle. Arrows leave along this line instead of
+# converging from the animated bow tip to the crosshair point.
+var launch_origin := Vector3.INF
+var launch_direction := Vector3.ZERO
+const CAMERA_MUZZLE_FORWARD := 0.08
 var blocking := false
 var block_time := 0.0
 var stagger_time := 0.0
@@ -61,6 +69,8 @@ var _melee_shape := CapsuleShape3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 var _shaft_query := PhysicsShapeQueryParameters3D.new()
 var _shaft_shape := SphereShape3D.new()
+var _launch_query := PhysicsShapeQueryParameters3D.new()
+var _launch_shape := SphereShape3D.new()
 var left_melee_progress := 1.0
 var right_melee_progress := 1.0
 var _left_swing_seconds := float(Archer.DAGGER_DATA.seconds)
@@ -109,11 +119,82 @@ func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	_shaft_query.shape = _shaft_shape
 	_shaft_query.collision_mask = 1
 	_shaft_query.margin = 0.001
+	_launch_shape.radius = 0.02
+	_launch_query.shape = _launch_shape
+	_launch_query.collision_mask = 1
+	_launch_query.margin = 0.001
 
 func set_aim(point: Vector3) -> void:
 	if point.is_finite():
 		aim_point = point
 		update_aim()
+
+func clear_camera_ray() -> void:
+	launch_origin = Vector3.INF
+	launch_direction = Vector3.ZERO
+
+func set_camera_ray(ray_origin: Vector3, ray_direction: Vector3) -> void:
+	# Physics arrows follow the exact center crosshair, not a converging line
+	# from the animated bow. The muzzle is relocated onto that camera ray only
+	# when the point and its link to the rendered tip are clear; cover shots
+	# whose visible shaft is exposed but whose camera ray is buried keep the
+	# rendered tip instead of shooting through geometry.
+	clear_camera_ray()
+	if not is_instance_valid(actor) or not is_instance_valid(rig):
+		return
+	if not ray_origin.is_finite() or not ray_direction.is_finite():
+		return
+	var direction := ray_direction.normalized()
+	if direction.length_squared() < 0.5:
+		return
+	var anchor: Vector3 = actor.global_position
+	anchor.y += cover.camera_height() if is_instance_valid(cover) else 1.2
+	var anchor_offset := anchor - ray_origin
+	var actor_depth := maxf(0.0,anchor_offset.dot(direction))
+	# A legitimate shoulder-camera ray passes within a shoulder offset of the
+	# actor. Reject a client-supplied ray that would spawn the projectile away
+	# from its shooter.
+	if (anchor_offset - direction * actor_depth).length() > 2.0:
+		return
+	var aim_depth := (aim_point-ray_origin).dot(direction)
+	if not is_finite(aim_depth) or aim_depth <= actor_depth + CAMERA_MUZZLE_FORWARD + 0.02:
+		return
+	var min_depth := actor_depth + CAMERA_MUZZLE_FORWARD
+	var max_depth := aim_depth - 0.02
+	var tip: Vector3 = rig.get_arrow_origin()
+	var tip_depth := (tip-ray_origin).dot(direction)
+	var space := actor.get_world_3d().direct_space_state
+	var excluded: Array[RID] = [actor.get_rid()]
+	var path_end := ray_origin + direction * max_depth
+	# Prefer the camera-ray point nearest the rendered arrow tip so the visual
+	# relocation is short. The capsule-depth muzzle is the fallback.
+	for depth in [clampf(tip_depth,min_depth,max_depth),clampf(actor_depth+0.12,min_depth,max_depth)]:
+		var origin := ray_origin + direction * float(depth)
+		if not _launch_point_clear(space,origin,excluded):
+			continue
+		if not _launch_line_clear(space,origin,path_end,excluded):
+			continue
+		if not _launch_line_clear(space,tip,origin,excluded):
+			continue
+		launch_origin = origin
+		launch_direction = direction
+		return
+
+func _launch_point_clear(space: PhysicsDirectSpaceState3D, point: Vector3, excluded: Array[RID]) -> bool:
+	_launch_query.transform = Transform3D(Basis.IDENTITY,point)
+	_launch_query.motion = Vector3.ZERO
+	_launch_query.collision_mask = 1 | target_mask
+	_launch_query.exclude = excluded
+	return space.intersect_shape(_launch_query,1).is_empty()
+
+func _launch_line_clear(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, excluded: Array[RID]) -> bool:
+	if from.distance_squared_to(to) < 0.000001:
+		return true
+	_sight_query.from = from
+	_sight_query.to = to
+	_sight_query.collision_mask = 1 | target_mask
+	_sight_query.exclude = excluded
+	return space.intersect_ray(_sight_query).is_empty()
 
 func can_draw() -> bool:
 	return rig.weapon == "bow" and grounded and rig.phase == "READY" \
@@ -224,6 +305,14 @@ func block_stamina_cost() -> float:
 		return SHIELD_BLOCK_STAMINA
 	return DAGGER_BLOCK_STAMINA if rig.weapon == "dagger" else BLOCK_STAMINA
 
+func stagger_from_damage(amount: float) -> float:
+	# Heavier hits interrupt longer. The minimum keeps a glancing chip from
+	# feeling weightless, while the cap leaves a counter window after a
+	# greatsword hit instead of chaining a second free hit.
+	var seconds := clampf(HIT_STAGGER_MIN+maxf(amount,0.0)*HIT_STAGGER_PER_DAMAGE,HIT_STAGGER_MIN,HIT_STAGGER_MAX)
+	stagger(seconds)
+	return seconds
+
 func stagger(seconds: float) -> void:
 	stagger_time = maxf(stagger_time,seconds)
 	stop_block()
@@ -260,13 +349,20 @@ func release_draw() -> void:
 		_try_cover_release(0.0)
 		return
 	update_aim()
-	rig.release_string()
+	_release_archer()
+
+func _release_archer() -> void:
+	if launch_origin.is_finite() and launch_direction.length_squared() > 0.5:
+		rig.release_string(launch_origin,launch_direction)
+	else:
+		rig.release_string()
 
 func _on_loadout_changed() -> void:
 	if _cover_attack:
 		stop()
 
 func stop() -> void:
+	clear_camera_ray()
 	_cover_attack = false
 	_auto_exposure = false
 	_release_pending = false
@@ -324,7 +420,7 @@ func _try_cover_release(delta: float) -> void:
 		return
 	_shaft_grace = 0.0
 	_release_pending = false
-	rig.release_string()
+	_release_archer()
 
 func _cover_shaft_clear() -> bool:
 	if not is_instance_valid(actor):
@@ -359,7 +455,7 @@ func _cover_throw_clear() -> bool:
 	_sight_query.exclude = excluded
 	return actor.get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty()
 
-func begin_melee(hand: String = "right") -> bool:
+func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	var key := "left" if hand == "left" else "right"
 	if not grounded or stagger_time > 0.0 or rig._roll_progress >= 0.0:
 		return false
@@ -368,6 +464,9 @@ func begin_melee(hand: String = "right") -> bool:
 			return false
 	elif rig.weapon not in ["sword","dagger","dual"]:
 		return false
+	var requested := variant if variant in ["overhead","horizontal_left","horizontal_right","stab"] else "overhead"
+	if key == "left":
+		requested = "stab"
 	if melee_progress_for(key) < 1.0 - 0.000001 or not rig.can_begin_melee(key):
 		return false
 	var other_active: bool = rig.is_melee()
@@ -386,7 +485,7 @@ func begin_melee(hand: String = "right") -> bool:
 			# Clear the visual constraint before the first swing pose, without moving or standing the body.
 			rig.set_cover(false,Vector3.ZERO,cover.crouch_amount,false,Vector3.ZERO)
 	update_aim()
-	if not rig.begin_melee(key):
+	if not rig.begin_melee(key,requested):
 		return false
 	_set_melee_progress(key,0.0)
 	attack_progress = 0.0

@@ -83,6 +83,14 @@ func held_key(code: Key, pressed: bool) -> void:
 	Input.parse_input_event(event)
 	Input.flush_buffered_events()
 
+func held_attack(pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = root.get_screen_transform()*(root.get_visible_rect().size*0.5)
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
+
 func physics_ticks(count: int) -> void:
 	for tick in count:
 		await physics_frame
@@ -131,7 +139,7 @@ func crosshair_shoulder_checks(scene, frontier: bool) -> void:
 			target.position = Vector3(scene.camera.global_position.x,scene.camera.global_position.y,actor.position.z-distance)
 			await physics_ticks(2)
 			rig.global_basis = Basis(Vector3.UP,float(side)*PI*0.5)
-			held_key(KEY_Q,true)
+			held_attack(true)
 			var stable := true
 			for tick in 70:
 				await physics_frame
@@ -140,14 +148,25 @@ func crosshair_shoulder_checks(scene, frontier: bool) -> void:
 			check(stable,"Crosshair target stays fixed through bow raising and draw from either shoulder at %.1f m"%distance)
 			var arrows: Array = scene.arrows if frontier else scene.projectiles
 			var previous_shot = arrows.back() if not arrows.is_empty() else null
-			held_key(KEY_Q,false)
+			held_attack(false)
 			var arrow = arrows.back() if not arrows.is_empty() else null
 			check(arrow != null and arrow != previous_shot,"Shoulder aiming releases a new physical arrow")
 			if arrow != null and arrow != previous_shot:
 				var desired: Vector3 = (target.position+Vector3.BACK*0.01-arrow.global_position).normalized()
+				var center := root.get_visible_rect().size*0.5
+				var view_origin: Vector3 = scene.camera.project_ray_origin(center)
+				var view_direction: Vector3 = scene.camera.project_ray_normal(center)
 				check(arrow.velocity.normalized().dot(desired)>0.9999,"Launch follows the crosshair target instead of initial character facing")
+				check((arrow.global_position-view_origin).cross(view_direction).length()<0.02,"Open-field arrow starts on the center crosshair ray")
+				check(arrow.velocity.normalized().dot(view_direction)>0.9999,"Open-field arrow flies along the center crosshair ray")
 				check(arrow.velocity.dot(-rig.active_bow.global_basis.z)>0.0,"A nearby crosshair target never reverses the arrow through its own bow")
-				await physics_ticks(45)
+				if is_equal_approx(float(distance),15.0):
+					await physics_ticks(8)
+					var visual_tip: Vector3 = arrow._visual.global_position-arrow._visual.global_basis.z*0.98
+					check(visual_tip.distance_to(arrow.global_position)<0.05,"Rendered arrow converges onto the authoritative crosshair path")
+					await physics_ticks(37)
+				else:
+					await physics_ticks(45)
 				check(not arrow.flying and absf(arrow.global_position.z-(target.position.z+0.01))<0.01 and absf(arrow.global_position.x-target.position.x)<0.01,"Real arrow strikes the crosshair target from either shoulder, retaining gravity")
 			await physics_ticks(90)
 	platform.queue_free()
@@ -196,40 +215,40 @@ func automatic_input_checks(scene, frontier: bool) -> void:
 	combat.shot.connect(record)
 	for keyboard in [false,true]:
 		if keyboard:
-			held_key(KEY_Q,true)
+			held_attack(true)
 		else:
 			await mouse(center,true)
 		await physics_ticks(30)
-		check(cover.active and cover.peeking and cover.lean.y>0.95 and rig.phase in ["DRAWING","HOLDING"],"LMB and Q automatically rise and lean without RMB in both controllers")
+		check(cover.active and cover.peeking and cover.lean.y>0.95 and rig.phase in ["DRAWING","HOLDING"],"Two independent LMB holds rise and lean without RMB in both controllers")
 		if keyboard:
-			held_key(KEY_Q,false)
+			held_attack(false)
 		else:
 			await mouse(center,false)
 		await physics_ticks(100)
 		check(cover.active and not cover.peeking and cover.lean.is_zero_approx() and cover._capsule.height<1.2,"A direct input shot retucks after release while staying attached")
-	check(emitted.size()==2,"Each independent LMB/Q hold releases one arrow")
-	held_key(KEY_Q,true)
+	check(emitted.size()==2,"Each independent LMB hold releases one arrow")
+	held_attack(true)
 	await physics_ticks(1)
 	var charge: float = rig.draw_amount
-	held_key(KEY_Q,false)
-	check(emitted.size()==2,"Quick Q release waits for exposure rather than shooting tucked")
+	held_attack(false)
+	check(emitted.size()==2,"Quick LMB release waits for exposure rather than shooting tucked")
 	await physics_ticks(100)
-	check(emitted.size()==3,"Quick Q press-release completes exactly once")
+	check(emitted.size()==3,"Quick LMB press-release completes exactly once")
 	if emitted.size()>2:
 		check(absf(float(emitted[2].charge)-charge)<0.001,"A quick queued input cannot gain charge after key-up")
-	held_key(KEY_Q,true)
-	held_key(KEY_Q,false)
+	held_attack(true)
+	held_attack(false)
 	await key(KEY_2)
 	await physics_ticks(45)
 	check(emitted.size()==3 and cover.lean.is_zero_approx(),"Equipment cancellation clears the queued shot and automatic exposure")
 	var melee_origin: Vector3 = actor.position
 	await mouse(center,true)
-	check(not cover.active and rig.phase=="MELEE" and actor.position.distance_to(melee_origin)<0.03,"LMB starts melee immediately and breaks sticky cover without stepping to exposure")
+	check(not cover.active and rig.phase.begins_with("MELEE") and actor.position.distance_to(melee_origin)<0.03,"LMB starts melee immediately and breaks sticky cover without stepping to exposure")
 	await mouse(center,false)
 	held_key(KEY_S,true)
 	await physics_ticks(12)
 	held_key(KEY_S,false)
-	check(not cover.active and rig.phase=="MELEE" and actor.position.z>melee_origin.z+0.3,"The real controller can move away from the wall during melee")
+	check(not cover.active and rig.phase.begins_with("MELEE") and actor.position.z>melee_origin.z+0.3,"The real controller can move away from the wall during melee")
 	await physics_ticks(210)
 	check(not cover.active and cover.lean.is_zero_approx(),"Sword recovery does not automatically reattach to cover")
 	actor.position = melee_origin+Vector3.UP*0.02
@@ -237,9 +256,9 @@ func automatic_input_checks(scene, frontier: bool) -> void:
 	await physics_ticks(20)
 	await key(KEY_F)
 	await physics_ticks(20)
-	held_key(KEY_Q,true)
-	check(not cover.active and rig.phase=="MELEE","Q also breaks cover and starts the sword immediately")
-	held_key(KEY_Q,false)
+	held_attack(true)
+	check(not cover.active and rig.phase.begins_with("MELEE"),"LMB also breaks cover and starts the sword immediately")
+	held_attack(false)
 	await physics_ticks(210)
 	await key(KEY_1)
 	await key(KEY_F)
@@ -299,16 +318,16 @@ func side_attack_input_checks(scene, frontier: bool) -> void:
 		if side==1:
 			await mouse(center,true)
 		else:
-			held_key(KEY_Q,true)
+			held_attack(true)
 		await physics_ticks(30)
 		var desired: Vector3 = (combat.aim_point-rig.get_arrow_origin()).normalized()
 		var horizontal := Vector3(desired.x,0,desired.z).normalized()
-		check(cover.active and cover.peeking and cover._capsule.height<1.2 and actor.position.distance_to(anchor)>0.35 and actor.position.distance_to(anchor)<0.52,"Real LMB/Q input exposes either edge compactly while staying crouched")
+		check(cover.active and cover.peeking and cover._capsule.height<1.2 and actor.position.distance_to(anchor)>0.35 and actor.position.distance_to(anchor)<0.52,"Real LMB input exposes either edge compactly while staying crouched")
 		check((-rig.global_basis.z).dot(horizontal)>0.95 and rig.active_bow.get_arrow_direction().dot(desired)>0.98,"Both real controller shoulder attacks visibly face the shot instead of the tucked direction")
 		if side==1:
 			await mouse(center,false)
 		else:
-			held_key(KEY_Q,false)
+			held_attack(false)
 		await physics_ticks(100)
 		check((scene.shots if frontier else scene.shots_fired)==count+1 and cover.active and actor.position.distance_to(anchor)<0.03 and cover._capsule.height<1.2,"Each edge input fires once and restores its protected crouched anchor")
 	await key(KEY_F)
@@ -347,7 +366,12 @@ func lookout_input_checks(scene, frontier: bool) -> void:
 	input_box(scene,Vector3(0,39.5,0),Vector3(16,1,16))
 	var emitted: Array[Dictionary] = []
 	var record := func(origin: Vector3, direction: Vector3, _speed: float, _charge: float):
-		check(origin.distance_to(rig.get_arrow_origin())<0.0001,"Cover shot starts at the rendered arrow tip, never the actor chest")
+		check(rig.last_arrow_visual_origin.distance_to(rig.get_arrow_origin())<0.0001,"Shot captures the rendered arrow tip for its visual blend")
+		var shot_center := root.get_visible_rect().size*0.5
+		var view_origin: Vector3 = scene.camera.project_ray_origin(shot_center)
+		var view_direction: Vector3 = scene.camera.project_ray_normal(shot_center)
+		check((origin-view_origin).cross(view_direction).length()<0.01,"Cover shot launches on the center crosshair ray")
+		check(direction.dot(view_direction)>0.9999,"Cover shot direction is the center crosshair ray")
 		check(direction.dot((combat.aim_point-origin).normalized())>0.999,"Lookout projectile preserves the exact aim line")
 		var query := PhysicsRayQueryParameters3D.create(origin,origin+direction*2.0,1)
 		query.hit_from_inside = true
@@ -387,14 +411,14 @@ func lookout_input_checks(scene, frontier: bool) -> void:
 				await mouse(center,true,MOUSE_BUTTON_RIGHT)
 				await physics_ticks(30)
 			if mode == 2:
-				held_key(KEY_Q,true)
+				held_attack(true)
 			else:
 				await mouse(center,true)
 			await physics_ticks(30)
 			if mode == 1:
 				await key(KEY_X)
 				await physics_ticks(45)
-			check(cover.peeking and cover.lean.x < -0.95 and actor.position.x < anchor.x-0.35,"X-left physically exposes "+kind+" for manual RMB and direct LMB/Q")
+			check(cover.peeking and cover.lean.x < -0.95 and actor.position.x < anchor.x-0.35,"X-left physically exposes "+kind+" for manual RMB and direct LMB")
 			check(rig.phase in ["DRAWING","HOLDING"],"Shoulder swapping preserves the held bow draw")
 			var captured: Vector3 = scene._peek_right
 			if mode == 2:
@@ -406,7 +430,7 @@ func lookout_input_checks(scene, frontier: bool) -> void:
 				await physics_ticks(30)
 				check(not cover.peeking and rig.phase in ["DRAWING","HOLDING"],"Manual left retuck keeps its held draw without claiming automatic exposure")
 			if mode == 2:
-				held_key(KEY_Q,false)
+				held_attack(false)
 			else:
 				await mouse(center,false)
 			await physics_ticks(35)
@@ -434,7 +458,7 @@ func lookout_input_checks(scene, frontier: bool) -> void:
 		await physics_ticks(24)
 		await mouse(center,true,MOUSE_BUTTON_RIGHT)
 		await physics_ticks(30)
-		held_key(KEY_Q,true)
+		held_attack(true)
 		await physics_ticks(140)
 		var nock: Vector3 = rig.active_bow.get_nock_position()
 		var point: Vector3 = nock if at_nock else nock.lerp(rig.get_arrow_origin(),0.5)
@@ -443,7 +467,7 @@ func lookout_input_checks(scene, frontier: bool) -> void:
 		# moves the actor away and makes the deliberately blocked shaft clear.
 		check(not combat._cover_shaft_clear(),"Weapon clearance rejects both an initially buried nock and a blocked shaft midpoint")
 		var before := emitted.size()
-		held_key(KEY_Q,false)
+		held_attack(false)
 		await physics_ticks(35)
 		check(emitted.size()==before and not combat._release_pending and not rig.charge_frozen,"Obstructed shaft cancels safely without a shot or frozen latent release")
 		await mouse(center,false,MOUSE_BUTTON_RIGHT)

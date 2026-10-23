@@ -9,9 +9,11 @@ const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
+const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 const ARMOR_REDUCTION := [0.0, 0.15, 0.30]
@@ -23,8 +25,10 @@ var audio
 var _player_state
 var combat
 var roll
+var step
 var slide
 var cover
+var _next_swing_side := 0
 var shoulder_camera := ShoulderCamera.new()
 var _peek_requested := false
 var _peek_right := Vector3.RIGHT
@@ -50,7 +54,6 @@ var camera_focus := Vector3.ZERO
 var _camera_ready := false
 var _orbiting := false
 var _orbit_pointer := Vector2.ZERO
-var _key_drawing := false
 var _mouse_drawing := false
 var _throw_held := false
 var _cursor_free := false
@@ -95,6 +98,8 @@ func _ready() -> void:
 	combat.actor = player
 	roll = DodgeRoll.new()
 	add_child(roll)
+	step = DodgeStep.new()
+	add_child(step)
 	slide = RunningSlide.new()
 	add_child(slide)
 	cover = CoverMovement.new()
@@ -149,6 +154,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	roll.advance(delta,player.is_on_floor())
+	step.advance(delta,player.is_on_floor())
 	var input_vector := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
@@ -157,6 +163,9 @@ func _physics_process(delta: float) -> void:
 	if inspecting or hud.map_open or _cursor_free:
 		input_vector = Vector2.ZERO
 		slide.reset()
+	if combat.stagger_time > 0.0:
+		input_vector = Vector2.ZERO
+		step.active = false
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1
 	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
 	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
@@ -183,6 +192,10 @@ func _physics_process(delta: float) -> void:
 	if slide.active:
 		player.velocity.x = slide_velocity.x
 		player.velocity.z = slide_velocity.z
+	if step.active:
+		var step_velocity: Vector3 = step.velocity()
+		player.velocity.x = step_velocity.x
+		player.velocity.z = step_velocity.z
 	if roll.active:
 		player.velocity.x = roll.direction.x * DodgeRoll.SPEED
 		player.velocity.z = roll.direction.z * DodgeRoll.SPEED
@@ -205,10 +218,11 @@ func _physics_process(delta: float) -> void:
 	slide.after_move(player,actual_velocity)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
+	archer.set_step(step.progress if step.active else -1.0,step.direction)
 	archer.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	archer.set_locomotion(actual_velocity, player.is_on_floor() and not roll.active)
-	combat.set_motion(actual_velocity, running or roll.active or slide.active, player.is_on_floor() and not roll.active)
-	if _mouse_drawing or _key_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
+	combat.set_motion(actual_velocity, running or roll.active or slide.active or step.active, player.is_on_floor() and not roll.active)
+	if _mouse_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	combat.advance(delta)
 	if player.position.y < -25.0:
@@ -217,7 +231,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	shoulder_camera.update(delta)
 	_update_camera(delta)
-	if _mouse_drawing or _key_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen:
+	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
@@ -258,6 +272,7 @@ func update_crosshair_aim() -> void:
 	_update_camera(0.0)
 	if inspecting:
 		combat.set_aim(player.global_position + Vector3(0,1.7,0) - archer.global_basis.z * 30.0)
+		combat.clear_camera_ray()
 		return
 	var center := get_viewport().get_visible_rect().size * 0.5
 	var ray_origin := camera.project_ray_origin(center)
@@ -268,14 +283,18 @@ func update_crosshair_aim() -> void:
 	var actor_depth := maxf(0.0,(aim_anchor-ray_origin).dot(ray_direction))
 	_aim_query.from = ray_origin + ray_direction*actor_depth
 	_aim_query.to = ray_origin + ray_direction * 300.0
-	# The body you are posted against is camera-side cover, not a target.
+	# The body you are posted against is camera-side cover, not a target. The
+	# shooter's own capsule is never a crosshair target either.
 	_aim_exclude.clear()
+	_aim_exclude.append(player.get_rid())
 	var cover_rid: RID = cover.attached_surface()
 	if cover_rid.is_valid():
 		_aim_exclude.append(cover_rid)
 	_aim_query.exclude = _aim_exclude
 	var hit := get_world_3d().direct_space_state.intersect_ray(_aim_query)
-	combat.set_aim(hit.position if not hit.is_empty() else _aim_query.to)
+	var aim: Vector3 = hit.position if not hit.is_empty() else _aim_query.to
+	combat.set_aim(aim)
+	combat.set_camera_ray(ray_origin,ray_direction)
 
 func _update_combat_cover_side() -> void:
 	cover.view_right = _peek_right
@@ -286,15 +305,48 @@ func _capture_attack_cover_side() -> void:
 		_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
 
-func begin_attack(hand: String = "right") -> void:
+func _horizontal_variant() -> String:
+	var side := _next_swing_side
+	if side == 0:
+		side = 1 if shoulder_camera.side > 0 else -1
+	_next_swing_side = -side
+	return "horizontal_right" if side > 0 else "horizontal_left"
+
+func begin_attack(hand: String = "right", variant: String = "") -> void:
 	if hud.map_open:
 		return
 	_capture_attack_cover_side()
 	update_crosshair_aim()
 	var requested := hand if archer.weapon == "dual" else "right"
-	var started: bool = combat.begin_melee(requested) if archer.weapon in ["sword","dagger","dual"] else combat.begin_draw()
+	var saved_side := _next_swing_side
+	var started := false
+	if archer.weapon in ["sword","dagger","dual"]:
+		var swing := variant
+		if requested == "left":
+			swing = "stab"
+		elif archer.weapon == "dagger" or not swing.is_empty():
+			pass
+		elif swing.is_empty():
+			swing = _horizontal_variant()
+		started = combat.begin_melee(requested,swing)
+	else:
+		started = combat.begin_draw()
 	if not started:
+		_next_swing_side = saved_side
 		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger","dual"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
+
+func quick_step(side: int) -> void:
+	if inspecting or hud.map_open or _cursor_free or side == 0 or combat.stagger_time > 0.0:
+		return
+	var direction: Vector3 = Vector3(cos(camera_yaw),0,-sin(camera_yaw))*signf(float(side))
+	if not step.try_step(direction,player.is_on_floor(),roll.active):
+		return
+	cancel_input()
+	if cover.active:
+		cover.exit()
+	slide.reset()
+	archer.set_slide(-1.0,Vector3.FORWARD)
+	stamina = maxf(0.0,stamina-DodgeStep.STAMINA_COST)
 
 func begin_throw_attack() -> void:
 	if hud.map_open:
@@ -311,17 +363,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
 			_mouse_drawing = false
-			if not _key_drawing:
-				_update_combat_cover_side()
-				update_crosshair_aim()
-				combat.release_draw()
-	if event is InputEventKey and event.keycode == KEY_Q and not event.pressed:
-		if _key_drawing:
-			_key_drawing = false
-			if not _mouse_drawing:
-				_update_combat_cover_side()
-				update_crosshair_aim()
-				combat.release_draw()
+			_update_combat_cover_side()
+			update_crosshair_aim()
+			combat.release_draw()
 	if event is InputEventKey and event.keycode == KEY_T and not event.pressed:
 		if _throw_held:
 			_throw_held = false
@@ -346,9 +390,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F: toggle_cover()
 			KEY_X:
 				shoulder_camera.swap()
+				_next_swing_side = shoulder_camera.side
 				_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 				_update_combat_cover_side()
-			KEY_E: interact()
+			KEY_Q: quick_step(-1)
+			KEY_E: quick_step(1)
+			KEY_G: interact()
 			KEY_I: hud.toggle_equipment()
 			KEY_M: toggle_map()
 			KEY_V: toggle_view()
@@ -362,13 +409,6 @@ func _unhandled_input(event: InputEvent) -> void:
 					toggle_view()
 				hud.close_panels()
 				_set_cursor_free(true)
-			KEY_Q:
-				if not inspecting:
-					hud.close_panels()
-					_set_cursor_free(false)
-				_key_drawing = true
-				if not _mouse_drawing:
-					begin_attack("left")
 			KEY_T:
 				if not inspecting:
 					hud.close_panels()
@@ -382,8 +422,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.close_panels()
 				_set_cursor_free(false)
 			_mouse_drawing = true
-			if not _key_drawing:
-				begin_attack("left")
+			begin_attack("left")
 		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			if inspecting:
 				_orbiting = true
@@ -391,7 +430,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif archer.weapon == "dual":
 				hud.close_panels()
 				_set_cursor_free(false)
-				begin_attack("right")
+				begin_attack("right","overhead")
 			else:
 				hud.close_panels()
 				_set_cursor_free(false)
@@ -400,9 +439,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not combat.start_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))) and not cover.active:
 					hud.show_feedback("Equip a sword or dagger with 2 or 3, stand still and finish recovery to guard.")
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			camera_distance = maxf(camera_distance - 0.45, 2.7)
+			if event.ctrl_pressed:
+				camera_distance = maxf(camera_distance - 0.45, 2.7)
+			elif archer.weapon in ["sword","dagger","dual"] and not inspecting and not hud.map_open and not _cursor_free:
+				begin_attack("right","stab")
+			else:
+				hud.show_feedback("Equip a sword with 2 to stab or swing.")
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			camera_distance = minf(camera_distance + 0.45, 17.0)
+			if event.ctrl_pressed:
+				camera_distance = minf(camera_distance + 0.45, 17.0)
+			elif archer.weapon in ["sword","dagger","dual"] and not inspecting and not hud.map_open and not _cursor_free:
+				begin_attack("right","overhead")
+			else:
+				hud.show_feedback("Equip a sword with 2 to stab or swing.")
 	if event is InputEventMouseMotion:
 		if not _cursor_free and not inspecting:
 			camera_yaw -= event.relative.x * 0.004
@@ -418,7 +467,6 @@ func _notification(what: int) -> void:
 		_set_cursor_free(true)
 
 func cancel_input() -> void:
-	_key_drawing = false
 	_mouse_drawing = false
 	_throw_held = false
 	_orbiting = false
@@ -466,7 +514,7 @@ func toggle_cover() -> void:
 		cover.exit()
 	elif not roll.active and cover.try_enter(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))):
 		slide.reset()
-		hud.show_feedback("In cover  /  LMB or Q attacks out; RMB guards and peeks; F leaves")
+		hud.show_feedback("In cover  /  LMB attacks out; scroll up stabs; scroll down overhead; RMB guards and peeks; F leaves")
 	else:
 		hud.show_feedback("Move closer to a tree, wall or solid debris and stand on the ground.")
 
@@ -489,6 +537,7 @@ func press_jump(roll_requested: bool) -> void:
 	if not cover.prepare_jump():
 		return
 	slide.reset()
+	step.reset()
 	archer.set_slide(-1.0,Vector3.FORWARD)
 	cancel_input()
 	_jump_requested = roll.press_jump(_movement_direction,-archer.global_basis.z,grounded,roll_requested) or _jump_requested
@@ -525,7 +574,7 @@ func _update_interaction() -> void:
 			continue
 		_interaction_id = item.id
 		if item.kind == "camp":
-			prompt = "E  /  Rest at the campfire"
+			prompt = "G  /  Rest at the campfire"
 			_interaction_allowed = true
 		elif activated.has(item.id):
 			prompt = item.name + "  /  Restored"
@@ -535,7 +584,7 @@ func _update_interaction() -> void:
 				if is_instance_valid(enemy) and enemy.alive and enemy.position.distance_to(item.position) < 12.0:
 					guarded = true
 					break
-			prompt = "Defeat the nearby guardians to restore this waystone" if guarded else "E  /  Restore " + item.name
+			prompt = "Defeat the nearby guardians to restore this waystone" if guarded else "G  /  Restore " + item.name
 			_interaction_allowed = not guarded
 		break
 	hud.set_interaction(prompt)
@@ -580,7 +629,7 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"block")
 		audio.play_sound("block")
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
-			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE)
+			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,false)
 			if health > 0.0:
 				hud.show_feedback("WEAK BLOCK  /  -%d stamina  /  dagger only softens the hit" % int(cost),1.2)
 		else:
@@ -588,8 +637,14 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 		return
 	take_damage(amount)
 
-func take_damage(amount: float) -> void:
-	health = maxf(0.0, health - amount * (1.0 - float(ARMOR_REDUCTION[archer.armor_index])))
+func take_damage(amount: float, react: bool = true) -> void:
+	var applied := amount * (1.0 - float(ARMOR_REDUCTION[archer.armor_index]))
+	health = maxf(0.0, health - applied)
+	if react:
+		var seconds: float = combat.stagger_from_damage(applied)
+		archer.set_hit_react(seconds)
+		step.reset()
+	DamageNumbers.spawn(self,player.global_position,applied,"self",false,health <= 0.0)
 	audio.play_sound("hit")
 	hud.flash_damage()
 	if health <= 0.0:
@@ -600,8 +655,10 @@ func take_damage(amount: float) -> void:
 func return_to_camp() -> void:
 	cancel_input()
 	roll.reset()
+	step.reset()
 	cover.reset()
 	slide.reset()
+	archer.set_hit_react(0.0)
 	_jump_requested = false
 	_movement_direction = Vector3.ZERO
 	archer.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
@@ -626,8 +683,10 @@ func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charg
 	add_child(arrow)
 	var shot_damage := Combat.damage_for(archer.bow_index, charge)
 	var excluded: Array[RID] = [player.get_rid()]
+	if is_instance_valid(archer.active_shield):
+		excluded.append(archer.active_shield.get_rid())
 	arrow.hit_mask = 1 | 2 | 8
-	arrow.launch(origin, direction, speed, shot_damage, excluded)
+	arrow.launch(origin, direction, speed, shot_damage, excluded, archer.last_arrow_visual_origin)
 	arrow.impacted.connect(_on_arrow_impact)
 	for index in range(arrows.size() - 1, -1, -1):
 		if not is_instance_valid(arrows[index]):

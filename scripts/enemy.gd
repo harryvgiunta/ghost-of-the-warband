@@ -6,6 +6,7 @@ signal attacked(attacker: CharacterBody3D, amount: float)
 const Geo = preload("res://scripts/geo.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 var kind := 0
 var player: CharacterBody3D
 var safe_center := Vector3.ZERO
@@ -192,18 +193,7 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 		return
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
-	var label := Label3D.new()
-	label.text = str(int(applied))
-	label.font_size = 54
-	label.pixel_size = 0.007
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.modulate = Color("f4d89b")
-	get_parent().add_child(label)
-	label.global_position = get_aim_position() + Vector3(0, 0.7, 0)
-	var text_tween := label.create_tween()
-	text_tween.tween_property(label, "position:y", label.position.y + 0.9, 0.8)
-	text_tween.parallel().tween_property(label, "modulate:a", 0.0, 0.8)
-	text_tween.tween_callback(label.queue_free)
+	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
 	if health <= 0.0:
 		alive = false
 		state = "DEAD"

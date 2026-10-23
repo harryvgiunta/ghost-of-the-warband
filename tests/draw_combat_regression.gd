@@ -7,6 +7,7 @@ var checks := 0
 var charges: Array[float] = []
 var directions: Array[Vector3] = []
 var origins: Array[Vector3] = []
+var speeds: Array[float] = []
 var rig
 var combat
 
@@ -36,10 +37,11 @@ func run() -> void:
 	combat = Combat.new()
 	holder.add_child(combat)
 	combat.setup(rig, Vector3(0, 1.7, -20))
-	combat.shot.connect(func(origin, direction, _speed, charge):
+	combat.shot.connect(func(origin, direction, speed, charge):
 		charges.append(charge)
 		directions.append(direction)
-		origins.append(origin))
+		origins.append(origin)
+		speeds.append(speed))
 	combat.set_motion(Vector3.ZERO, false, true)
 	for bow in 3:
 		for fraction in [0.0, 0.25, 0.5, 1.0]:
@@ -55,10 +57,13 @@ func run() -> void:
 			check(absf(charges[-1] - fraction) < 0.0001, "Damage multiplier equals actual draw fraction")
 			var expected: float = [30.0, 38.0, 50.0][bow] * fraction
 			check(absf(Combat.damage_for(bow, charges[-1]) - expected) < 0.001, "Released damage scales linearly from zero to full damage")
+			var expected_speed: float = float(Archer.BOW_DATA[bow].speed) * lerpf(0.45,1.0,charges[-1])
+			check(absf(speeds[-1] - expected_speed) < 0.001, "Arrow launch speed scales with the bow and charge")
 			combat.release_draw()
 			check(charges.size() == before + 1, "Repeated release cannot duplicate a shot")
 			check(not combat.begin_draw() and not rig.active_bow.nocked_arrow.visible, "Every release spends the arrow and requires re-nocking, even at zero charge")
 	check(Combat.damage_for(1,-1.0) == 0.0 and Combat.damage_for(1,2.0) == 38.0, "Damage multiplier clamps to zero through one")
+	check(is_equal_approx(float(Archer.BOW_DATA[0].speed),66.0) and is_equal_approx(float(Archer.BOW_DATA[1].speed),84.0) and is_equal_approx(float(Archer.BOW_DATA[2].speed),102.0), "Bow arrows launch at 66/84/102 m/s")
 	for mode in 3:
 		advance(1.24)
 		rig.set_bow(2)

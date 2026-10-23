@@ -8,9 +8,11 @@ const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const ARMOR := [0.0, 0.15, 0.30]
 var slot := 0
 var peer_id := 0
@@ -19,8 +21,11 @@ var display_name := "Bot"
 var rig
 var combat
 var roll
+var dodge
 var slide
 var cover
+var bounds := 31.5
+var interp_delay := 0.12
 var peek_requested := false
 var peek_view_right := Vector3.RIGHT
 var peek_shoulder := 1
@@ -32,6 +37,7 @@ var kills := 0
 var deaths := 0
 var respawn := 0.0
 var authoritative := false
+var is_local := false
 var spawn_point := Vector3.ZERO
 var move_direction := Vector2.ZERO
 var run_requested := false
@@ -43,13 +49,19 @@ var _label: Label3D
 var _ground_ring: MeshInstance3D
 var _target_position := Vector3.ZERO
 var _received_pose := false
+var _states: Array[Dictionary] = []
+const INTERP_BUFFER_LIMIT := 32
+const INTERP_HISTORY := 0.9
+const INTERP_EXTRAPOLATION := 0.15
 var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
 	set_meta("ironwood_player", true)
 	collision_layer = 4
-	collision_mask = 1 | 4
+	# Fighters do not hard-collide with each other. A gentle authoritative
+	# separation keeps bodies from stacking while allowing a close measure.
+	collision_mask = 1
 	floor_snap_length = 0.5
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.3
@@ -82,6 +94,8 @@ func _ready() -> void:
 	combat.damage_enabled = false
 	roll = DodgeRoll.new()
 	add_child(roll)
+	dodge = DodgeStep.new()
+	add_child(dodge)
 	slide = RunningSlide.new()
 	add_child(slide)
 	_label = Label3D.new()
@@ -114,6 +128,7 @@ func revive() -> void:
 	position = spawn_point + Vector3(0,0.08,0)
 	_target_position = position
 	_received_pose = false
+	_states.clear()
 	velocity = Vector3.ZERO
 	move_direction = Vector2.ZERO
 	run_requested = false
@@ -126,7 +141,11 @@ func revive() -> void:
 	alive = true
 	respawn = 0.0
 	combat.stop()
+	combat.clear_camera_ray()
 	roll.reset()
+	dodge.reset()
+	rig.set_hit_react(0.0)
+	rig.set_step(-1.0,Vector3.FORWARD)
 	rig.set_roll(-1.0,Vector3.FORWARD)
 	combat.attack_progress = 1.0
 	combat.left_melee_progress = 1.0
@@ -138,7 +157,7 @@ func revive() -> void:
 	rig.global_rotation.y = atan2(spawn_point.x,spawn_point.z)
 	combat.aim_point = Vector3(0,1.2,0)
 	collision_layer = 4
-	collision_mask = 1 | 4
+	collision_mask = 1
 	rig.visible = true
 
 func press_jump(roll_requested: bool) -> void:
@@ -148,6 +167,7 @@ func press_jump(roll_requested: bool) -> void:
 		return
 	_exposure_tick = -1
 	combat.stop()
+	dodge.reset()
 	jump_requested = roll.press_jump(Vector3(move_direction.x,0,move_direction.y),-rig.global_basis.z,grounded,roll_requested) or jump_requested
 	if jump_requested or roll.active:
 		slide.reset()
@@ -179,7 +199,9 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 			velocity.x = push.x
 			velocity.z = push.z
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
-			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot)
+			# The raised dagger absorbs the impact: half damage but the guard
+			# stays up and the attacker's swing continues.
+			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false)
 		return outcome
 	take_damage(amount,source_id,headshot)
 	return Combat.DEFENSE_NONE
@@ -197,8 +219,28 @@ func stagger(seconds: float) -> void:
 	if not authoritative:
 		return
 	combat.stagger(seconds)
+	rig.set_hit_react(seconds)
+	dodge.reset()
 	velocity.x = 0.0
 	velocity.z = 0.0
+
+func try_step(direction: Vector3) -> bool:
+	if not authoritative or not alive or combat.stagger_time > 0.0:
+		return false
+	var planar := Vector3(direction.x,0.0,direction.z)
+	if planar.length_squared() < 0.0001:
+		return false
+	if not dodge.can_step(is_on_floor(),roll.active):
+		return false
+	if cover.active:
+		leave_cover()
+	if not dodge.try_step(planar,is_on_floor(),roll.active):
+		return false
+	combat.stop()
+	slide.reset()
+	rig.set_slide(-1.0,Vector3.FORWARD)
+	stamina = maxf(0.0,stamina-DodgeStep.STAMINA_COST)
+	return true
 
 func set_crouch(requested: bool) -> void:
 	if not requested:
@@ -240,6 +282,8 @@ func reset_stance() -> void:
 	rig._sync_primary_hand()
 	cover.reset()
 	slide.reset()
+	dodge.reset()
+	rig.set_hit_react(0.0)
 	peek_requested = false
 	peek_view_right = Vector3.RIGHT
 	peek_shoulder = 1
@@ -263,10 +307,16 @@ func head_hit_profile() -> Vector2:
 func get_display_name() -> String:
 	return display_name
 
-func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
-	health = maxf(0,health - amount * Hitbox.damage_multiplier(headshot) * (1.0 - float(ARMOR[rig.armor_index])))
+	var applied := amount * Hitbox.damage_multiplier(headshot) * (1.0 - float(ARMOR[rig.armor_index]))
+	health = maxf(0,health - applied)
+	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
+	if react:
+		var seconds: float = combat.stagger_from_damage(applied)
+		rig.set_hit_react(seconds)
+		dodge.reset()
 	if health <= 0:
 		alive = false
 		respawn = 3.0
@@ -304,6 +354,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		return
 	input_age += delta
 	roll.advance(delta,is_on_floor())
+	dodge.advance(delta,is_on_floor())
 	if is_bot:
 		_bot_step(delta,actors)
 	elif input_age > 0.65:
@@ -347,9 +398,17 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		var speed := 2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5
 		velocity.x = move_toward(velocity.x,direction.x*speed,35*delta)
 		velocity.z = move_toward(velocity.z,direction.z*speed,35*delta)
+	if dodge.active:
+		var step_velocity: Vector3 = dodge.velocity()
+		velocity.x = step_velocity.x
+		velocity.z = step_velocity.z
 	if roll.active:
 		velocity.x = roll.direction.x * DodgeRoll.SPEED
 		velocity.z = roll.direction.z * DodgeRoll.SPEED
+	if not was_in_cover and not roll.active:
+		var separation := _separation_velocity(actors)
+		velocity.x += separation.x
+		velocity.z += separation.z
 	if jump_requested:
 		velocity.y = 7.0
 	elif is_on_floor():
@@ -362,16 +421,38 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	jump_requested = false
 	var before := position
 	move_and_slide()
-	position.x = clampf(position.x,-21.7,21.7)
-	position.z = clampf(position.z,-21.7,21.7)
+	position.x = clampf(position.x,-bounds,bounds)
+	position.z = clampf(position.z,-bounds,bounds)
 	var actual := (position-before)/maxf(delta,0.0001)
 	slide.after_move(self,actual)
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	rig.set_slide(slide.progress if slide.active else -1.0,slide.direction)
+	rig.set_step(dodge.progress if dodge.active else -1.0,dodge.direction)
 	rig.set_locomotion(actual,is_on_floor() and not roll.active)
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
-	combat.set_motion(actual,running or slide.active or roll.active,is_on_floor() and not roll.active)
+	combat.set_motion(actual,running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
+
+func _separation_velocity(actors: Array) -> Vector3:
+	# Hard fighter capsules would stop centres 0.6 m apart and shove a close
+	# attacker off their aim. Bodies are now soft: a bounded push only grows
+	# once the centres are inside 0.46 m, still leaving room to measure a stab.
+	var push := Vector3.ZERO
+	for other in actors:
+		if other == self or not is_instance_valid(other) or not other.alive:
+			continue
+		var offset: Vector3 = global_position-other.global_position
+		offset.y = 0.0
+		var distance := offset.length()
+		if distance >= 0.46:
+			continue
+		if distance < 0.001:
+			var angle := TAU*float(slot)/4.0
+			offset = Vector3(cos(angle),0.0,sin(angle))
+		else:
+			offset /= distance
+		push += offset*(0.46-distance)/0.46
+	return push.limit_length(1.0)*3.2
 
 func _bot_step(_delta: float, actors: Array) -> void:
 	if combat.stagger_time > 0.0:
@@ -443,19 +524,31 @@ func apply_snapshot(state: Dictionary) -> void:
 	peer_id = int(state.peer)
 	is_bot = bool(state.bot)
 	display_name = str(state.name)
-	_target_position = state.position
-	if replaced or not _received_pose or position.distance_squared_to(_target_position) > 36:
-		position = _target_position
+	var previous_health := health
+	var had_pose := _received_pose
+	var target: Vector3 = state.position
+	_target_position = target
+	var now := Time.get_ticks_msec()/1000.0
+	_states.append({"time":now,"position":target,"velocity":state.velocity})
+	while _states.size() > INTERP_BUFFER_LIMIT:
+		_states.pop_front()
+	while _states.size() > 2 and float(_states[0].time) < now-INTERP_HISTORY:
+		_states.pop_front()
+	if replaced or not _received_pose or position.distance_squared_to(target) > 36:
+		position = target
+	_states[-1] = {"time":now,"position":target,"velocity":state.velocity}
 	_received_pose = true
 	velocity = state.velocity
 	health = state.health
+	if not authoritative and had_pose and not replaced and previous_health-health > 0.01:
+		DamageNumbers.spawn(get_parent(),global_position,previous_health-health,"self" if is_local else "hit",false,health <= 0.0)
 	alive = state.alive
 	kills = state.kills
 	deaths = state.deaths
 	respawn = state.respawn
 	rig.visible = alive
 	collision_layer = 4 if alive else 0
-	collision_mask = 1 | 4 if alive else 0
+	collision_mask = 1 if alive else 0
 	if rig.bow_index != int(state.bow):
 		rig.set_bow(int(state.bow))
 	var armor_bits := int(state.armor)
@@ -483,9 +576,36 @@ func apply_snapshot(state: Dictionary) -> void:
 	# than inventing a parry window from snapshot arrival time.
 	combat.block_time = 0.0
 
+func _interpolate_position(render_time: float) -> Vector3:
+	if _states.is_empty():
+		return _target_position
+	var newest: Dictionary = _states[-1]
+	if render_time >= float(newest.time):
+		# Snapshot starved: carry the last authoritative velocity briefly, then
+		# hold. Never invent a long extrapolation that can rewind a hit.
+		var extra := minf(render_time-float(newest.time),INTERP_EXTRAPOLATION)
+		return Vector3(newest.position)+Vector3(newest.velocity)*extra
+	var oldest: Dictionary = _states[0]
+	if render_time <= float(oldest.time):
+		var first_point: Vector3 = oldest.position
+		return first_point
+	for index in range(1,_states.size()):
+		var after: Dictionary = _states[index]
+		if render_time > float(after.time):
+			continue
+		var before: Dictionary = _states[index-1]
+		var span := maxf(float(after.time)-float(before.time),0.001)
+		var weight := clampf((render_time-float(before.time))/span,0.0,1.0)
+		var from_point: Vector3 = before.position
+		var to_point: Vector3 = after.position
+		return from_point.lerp(to_point,weight)
+	var last_point: Vector3 = newest.position
+	return last_point
+
 func _process(delta: float) -> void:
 	if not authoritative and _received_pose:
-		position = position.lerp(_target_position,1.0-exp(-delta*22.0))
+		var render_time := Time.get_ticks_msec()/1000.0-interp_delay
+		position = _interpolate_position(render_time)
 	_label.text = "%s%s  %d" % [display_name," [BOT]" if is_bot else "",int(health)]
 	_ground_ring.visible = alive
 	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)

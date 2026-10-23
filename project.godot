@@ -10,6 +10,7 @@ config/description="A seamless woodland frontier and four-seat arena, staged fro
 [autoload]
 PlayerState="*res://scripts/player_state.gd"
 Session="*res://scripts/session.gd"
+NetCache="*res://scripts/net_cache.gd"
 
 [display]
 window/size/viewport_width=1440

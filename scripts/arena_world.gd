@@ -1,19 +1,19 @@
 extends Node3D
 
 const Geo = preload("res://scripts/geo.gd")
-const LIMIT := 22.0
-var spawn_points: Array[Vector3] = [Vector3(-14, 0, -14), Vector3(14, 0, 14), Vector3(-14, 0, 14), Vector3(14, 0, -14)]
+const LIMIT := 32.0
+var spawn_points: Array[Vector3] = [Vector3(-22, 0, -22), Vector3(22, 0, 22), Vector3(-22, 0, 22), Vector3(22, 0, -22)]
 
 func _ready() -> void:
 	var grass := Geo.material(Color("7b8b60"))
 	var wood := Geo.material(Color("68533e"))
 	var stone := Geo.material(Color("7d8982"))
-	_solid_box(Vector3(46, 0.6, 46), Vector3(0, -0.3, 0), grass)
+	_solid_box(Vector3(66, 0.6, 66), Vector3(0, -0.3, 0), grass)
 	for side in [-1.0, 1.0]:
-		_solid_box(Vector3(46, 1.4, 0.7), Vector3(0, 0.7, side * 22.5), stone)
-		_solid_box(Vector3(0.7, 1.4, 44), Vector3(side * 22.5, 0.7, 0), stone)
-		for index in 12:
-			Geo.box(self, Vector3(0.3, 2.1, 0.3), Vector3(-22 + index * 4, 1.05, side * 22.5), wood)
+		_solid_box(Vector3(66, 1.4, 0.7), Vector3(0, 0.7, side * 32.5), stone)
+		_solid_box(Vector3(0.7, 1.4, 64), Vector3(side * 32.5, 0.7, 0), stone)
+		for index in 17:
+			Geo.box(self, Vector3(0.3, 2.1, 0.3), Vector3(-32 + index * 4, 1.05, side * 32.5), wood)
 	var colors := [Color("70c4cb"), Color("e4a75f"), Color("bfa1dc"), Color("86c48a")]
 	for index in 4:
 		Geo.cylinder(self, 2, 2, 0.025, spawn_points[index] + Vector3(0, 0.012, 0), Geo.material(colors[index].darkened(0.3)), 32)
@@ -24,7 +24,14 @@ func _ready() -> void:
 		label.font_size = 90
 		label.pixel_size = 0.014
 		add_child(label)
-	for location in [Vector3(-9,0,-7), Vector3(9,0,7), Vector3(-8,0,9), Vector3(8,0,-9), Vector3(-18,0,1), Vector3(18,0,-1)]:
+	# Existing centre cover stays where the combat regressions expect it; the
+	# expanded flanks add new sight lines, trees and stone islands.
+	var tree_locations := [
+		Vector3(-9,0,-7), Vector3(9,0,7), Vector3(-8,0,9), Vector3(8,0,-9), Vector3(-18,0,1), Vector3(18,0,-1),
+		Vector3(-24,0,8), Vector3(24,0,-8), Vector3(-12,0,-24), Vector3(12,0,24),
+		Vector3(-28,0,-4), Vector3(28,0,4), Vector3(0,0,27), Vector3(0,0,-27),
+	]
+	for location: Vector3 in tree_locations:
 		var trunk := StaticBody3D.new()
 		trunk.position = location
 		trunk.collision_layer = 1
@@ -40,9 +47,15 @@ func _ready() -> void:
 		trunk.add_child(collision)
 		for tier in 3:
 			Geo.cylinder(trunk, 2.3 - tier * 0.45, 0.05, 3.1, Vector3(0,4.6 + tier * 1.2,0), Geo.material(Color("4d735c").lightened(tier * 0.07)), 7)
-	for location in [Vector3(-11,0,2),Vector3(11,0,-2),Vector3(0,0,-13),Vector3(0,0,13)]:
+	var cover_boxes := [
+		Vector3(-11,0,2), Vector3(11,0,-2), Vector3(0,0,-13), Vector3(0,0,13),
+		Vector3(-20,0,-6), Vector3(20,0,6), Vector3(-6,0,20), Vector3(6,0,-20),
+		Vector3(-26,0,18), Vector3(26,0,-18),
+	]
+	for location: Vector3 in cover_boxes:
 		_solid_box(Vector3(3.2, 1.4, 1.5), location + Vector3(0,0.7,0), stone)
 		Geo.box(self, Vector3(3.35,0.12,1.65), location + Vector3(0,1.42,0), wood)
+	# Bound the expanded field visually without adding a second floor collider.
 	Geo.box(self,Vector3(180,0.3,180),Vector3(0,-0.65,0),grass)
 	var sky_material := ProceduralSkyMaterial.new()
 	sky_material.sky_top_color = Color("789fab")

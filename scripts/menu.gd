@@ -150,11 +150,20 @@ func _on_join_confirmed(address: String, port: int, player_name: String) -> void
 
 func _preferred_name() -> String:
 	var value := str(session.player_name).strip_edges()
+	if value.is_empty() or value == "Ranger":
+		var cache := get_node_or_null("/root/NetCache")
+		if cache != null:
+			value = str(cache.player_name)
 	return "Ranger" if value.is_empty() else value.left(16)
 
 func _open_arena(mode: String, address: String, port: int, player_name: String) -> void:
 	session.player_name = player_name
 	session.arm_arena(mode,address,port,player_name)
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		# Hosting should not overwrite the address of the last host this player
+		# joined; only a join updates it.
+		cache.remember(player_name,address if mode == "client" else "",port)
 	state.save_state()
 	get_tree().change_scene_to_file("res://arena.tscn")
 

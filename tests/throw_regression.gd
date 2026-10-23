@@ -266,7 +266,7 @@ func frontier_checks() -> void:
 	Input.flush_buffered_events()
 	await process_frame
 	await process_frame
-	check(game.archer.phase == "MELEE", "LMB still performs the normal melee attack after a throw")
+	check(game.archer.phase.begins_with("MELEE"), "LMB still performs the normal melee attack after a throw")
 	var click_up := InputEventMouseButton.new()
 	click_up.button_index = MOUSE_BUTTON_LEFT
 	click_up.position = click.position

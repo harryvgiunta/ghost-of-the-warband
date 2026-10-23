@@ -100,10 +100,10 @@ func _ready() -> void:
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
 	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
-	var cover_panel := _panel(self, Vector2(24, -255), Vector2(480, 98))
+	var cover_panel := _panel(self, Vector2(24, -289), Vector2(620, 116))
 	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Left / draw   RMB  Right / guard / peek   HOLD T  Throw   X  Lookout", Vector2(15, 35), 12, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right   G  Interact\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Horizontal swing / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek   HOLD T  Throw   X  Lookout", Vector2(15, 35), 11, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -121,7 +121,7 @@ func _ready() -> void:
 	hub_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	hub_button.add_theme_font_size_override("font_size", 13)
 	hub_button.pressed.connect(func(): hub_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   HOLD T  Throw   1 Bow  2 Sword  3 Dagger  4 Shield  5 Dual   SHIFT + SPACE  Roll   ESC / I  Equipment", Vector2(-540, -23), 12, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   G  Interact   ESC  Equipment", Vector2(-560, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -175,7 +175,7 @@ func _build_equipment() -> void:
 	_shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
 	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(146,536),Vector2(120,28))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"1 bow. 2 sword. 3 dagger. 4 shield. 5 dual-wield.\nDual: sword + dagger. LMB/Q left stab, RMB right chop, no guard.\nAn active strike parries; HOLD T throws the right sword.",Vector2(18,576),10,MUTED)
+	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,572),9,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -197,11 +197,17 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "DRAW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO SHOOT" % [draw_amount * 100, draw_amount]
 	elif phase_name in ["T_DRAW", "T_HOLD"]:
 		_phase.text = "THROW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO THROW" % [draw_amount * 100, draw_amount]
-	elif phase_name in ["MELEE","MELEE_L"]:
+	elif phase_name.begins_with("MELEE"):
 		if _weapon == "dual":
 			_phase.text = ("LEFT DAGGER STAB / %.2f s" if phase_name == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % interval
+		elif phase_name == "MELEE_ST" or _weapon == "dagger":
+			_phase.text = "FORWARD STAB / %.2f s SWING" % interval
+		elif phase_name == "MELEE_HL":
+			_phase.text = "LEFT HORIZONTAL SWING / %.1f s" % interval
+		elif phase_name == "MELEE_HR":
+			_phase.text = "RIGHT HORIZONTAL SWING / %.1f s" % interval
 		else:
-			_phase.text = ("QUICK STAB / %.2f s SWING" if _weapon == "dagger" else "OVERHAND CHOP / %.1f s SWING") % interval
+			_phase.text = "OVERHEAD CHOP / %.1f s SWING" % interval
 	elif blocking:
 		if _shield_equipped:
 			_phase.text = "SHIELD UP / FRONT ARROWS STOP"
@@ -221,9 +227,9 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		elif _weapon == "bow":
 			_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT"
 		elif _weapon == "dagger":
-			_phase.text = "READY / CLICK FOR A QUICK STAB / HOLD T TO THROW"
+			_phase.text = "READY / LMB STAB / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 		else:
-			_phase.text = "READY / CLICK FOR AN OVERHAND CHOP / HOLD T TO THROW"
+			_phase.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 
 func _melee_pct(value: float) -> String:
 	return "READY" if value >= 0.999999 else "%d%%" % int(value*100.0)

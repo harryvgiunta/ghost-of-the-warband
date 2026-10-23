@@ -64,7 +64,7 @@ func tree_lookout_checks() -> void:
 			await pause(0.4)
 			await mouse(center,true)
 		else:
-			held_key(KEY_Q,true)
+			held_attack(true)
 		await pause(0.6)
 		check(actor.cover.peeking and actor.cover.lean.x*side>0.95 and actor.position.x*side>anchor.x*side+0.35,"Remote left/right tree lookout reaches a physical side exposure")
 		var captured: Vector3 = arena._peek_right
@@ -79,7 +79,7 @@ func tree_lookout_checks() -> void:
 			Input.parse_input_event(motion)
 			await pause(0.15)
 			check(actor.cover.lean.x>0.95 and actor.rig.phase in ["DRAWING","HOLDING"],"Remote free look crosses the side sign without switching shoulder or canceling draw")
-			held_key(KEY_Q,false)
+			held_attack(false)
 		# A manually retucked release includes re-exposure, follow-through and
 		# physical return before the next replicated draw can begin.
 		var elapsed := 0.0
@@ -112,7 +112,7 @@ func melee_cover_exit_checks() -> void:
 	await mouse(root.get_visible_rect().size*0.5,true)
 	await mouse(root.get_visible_rect().size*0.5,false)
 	await pause(0.15)
-	check(not actor.cover.active and actor.rig.phase=="MELEE" and Vector2(actor.position.x-origin.x,actor.position.z-origin.z).length()<0.03,"Network melee starts without a peek step and breaks attachment on the authority and replica")
+	check(not actor.cover.active and actor.rig.phase.begins_with("MELEE") and Vector2(actor.position.x-origin.x,actor.position.z-origin.z).length()<0.03,"Network melee starts without a peek step and breaks attachment on the authority and replica")
 	await pause(1.2)
 	check(not actor.cover.active and actor.rig.phase=="READY","Network sword recovery stays detached")
 
@@ -189,6 +189,13 @@ func held_key(code: Key, pressed: bool) -> void:
 	event.keycode = code
 	event.physical_keycode = code
 	event.pressed = pressed
+	Input.parse_input_event(event)
+
+func held_attack(pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = root.get_screen_transform()*(root.get_visible_rect().size*0.5)
 	Input.parse_input_event(event)
 
 func crouch_checks() -> void:
@@ -271,8 +278,8 @@ func return_to_cover_checks() -> void:
 	await mouse(root.get_visible_rect().size*0.5,false,MOUSE_BUTTON_RIGHT)
 	if arena.network_role == "client":
 		for stamp in [null,true,0.5,"0",-1,2147483647]:
-			arena._action_input.rpc_id(1,"release",arena._crosshair_aim(),stamp)
-			arena._move_input.rpc_id(1,Vector2.ONE,false,arena._crosshair_aim(),stamp)
+			arena._action_input.rpc_id(1,"release",arena._crosshair_aim(),stamp,null)
+			arena._move_input.rpc_id(1,Vector2.ONE,false,arena._crosshair_aim(),stamp,null)
 	await pause(0.4)
 	check(actor.cover.active and not actor.cover.peeking and actor.cover._capsule.height<1.2,"RMB release returns to low cover without detaching")
 	check(actor.rig.phase in ["DRAWING","HOLDING"] and actor.rig.draw_amount>=draw_before,"RMB release preserves the held bow draw on the authority and replica")
@@ -348,10 +355,10 @@ func observe() -> void:
 		else:
 			pending_cover_charge.erase(actor.slot)
 		saw_damage = saw_damage or actor.health < 99
-		saw_sword = saw_sword or (actor.rig.weapon == "sword" and actor.rig.phase == "MELEE")
+		saw_sword = saw_sword or (actor.rig.weapon == "sword" and actor.rig.phase.begins_with("MELEE"))
 		if actor.cover.active and actor.rig.weapon=="sword":
 			melee_cover_seen[actor.slot] = true
-		if melee_cover_seen.has(actor.slot) and not actor.cover.active and actor.rig.phase=="MELEE":
+		if melee_cover_seen.has(actor.slot) and not actor.cover.active and actor.rig.phase.begins_with("MELEE"):
 			var aim_direction: Vector3 = actor.rig._aim_point-actor.position
 			aim_direction.y = 0.0
 			if (-actor.rig.global_basis.z).dot(aim_direction.normalized())>0.95:

@@ -15,9 +15,9 @@ const Shield = preload("res://scripts/shield.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
-	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":22.0, "length":1.0},
-	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":28.0, "length":1.4},
-	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":34.0, "length":1.8},
+	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
+	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":84.0, "length":1.4},
+	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":102.0, "length":1.8},
 ]
 const SWORD_DATA = [
 	{"name":"Shortsword", "seconds":1.0, "length":0.80, "reach":1.8, "damage":30.0, "throw_speed":26.0},
@@ -75,6 +75,7 @@ var _release_raise := 0.0
 var _release_grip := Vector3.ZERO
 var _release_contact := Vector3.ZERO
 var _release_bow_rotation := Quaternion.IDENTITY
+var last_arrow_visual_origin := Vector3.ZERO
 var _model: Node3D
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
@@ -114,10 +115,14 @@ var _string_grip_basis := Basis.IDENTITY
 var _sword_grip := Transform3D.IDENTITY
 var _sword_grip_left := Transform3D.IDENTITY
 var _melee_hand := "right"
+var _right_variant := "overhead"
 var _left_melee_time := -1.0
 var _right_melee_time := -1.0
 var _left_melee_duration := float(DAGGER_DATA.seconds)
 var _right_melee_duration := 1.0
+var _step_progress := -1.0
+var _step_direction := Vector3.RIGHT
+var _hit_react := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
 var _offhand_weapon_basis := Basis.IDENTITY
@@ -371,12 +376,19 @@ func melee_progress_for(hand: String) -> float:
 	var duration := _left_melee_duration if hand == "left" else _right_melee_duration
 	return clampf(time/maxf(duration,0.001),0.0,1.0)
 
-func _attacking_left() -> bool:
-	return phase == "MELEE_L"
+func _right_phase() -> String:
+	match _right_variant:
+		"horizontal_left":
+			return "MELEE_HL"
+		"horizontal_right":
+			return "MELEE_HR"
+		"stab":
+			return "MELEE_ST"
+	return "MELEE"
 
 func _sync_primary_hand() -> void:
 	if _right_melee_time >= 0.0:
-		phase = "MELEE"
+		phase = _right_phase()
 		_melee_hand = "right"
 		_phase_time = _right_melee_time
 	elif _left_melee_time >= 0.0:
@@ -388,18 +400,26 @@ func _sync_primary_hand() -> void:
 		_melee_hand = "right"
 		_phase_time = 0.0
 
+func _right_duration_for(variant: String) -> float:
+	if variant == "stab" or weapon == "dagger":
+		return float(DAGGER_DATA.seconds)
+	return float(SWORD_DATA[sword_index].seconds)
+
+func _valid_variant(variant: String) -> bool:
+	return variant in ["overhead","horizontal_left","horizontal_right","stab"]
+
 func can_begin_melee(hand: String) -> bool:
 	if _roll_progress >= 0.0:
 		return false
 	if hand == "left":
 		if weapon != "dual" or _left_melee_time >= 0.0:
 			return false
-		return phase == "READY" or phase == "MELEE"
+		return phase == "READY" or (phase.begins_with("MELEE") and phase != "MELEE_L")
 	if weapon not in ["sword","dagger","dual"] or _right_melee_time >= 0.0:
 		return false
 	return phase == "READY" or phase == "MELEE_L"
 
-func begin_melee(hand: String = "right") -> bool:
+func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	var key := "left" if hand == "left" else "right"
 	if not can_begin_melee(key):
 		return false
@@ -407,7 +427,13 @@ func begin_melee(hand: String = "right") -> bool:
 		_left_melee_duration = float(DAGGER_DATA.seconds)
 		_left_melee_time = 0.0
 	else:
-		_right_melee_duration = melee_seconds("right")
+		var requested := variant if _valid_variant(variant) else "overhead"
+		if weapon == "dagger":
+			# The dagger's only attack is already a stab; keep its established
+			# MELEE presentation phase so HUD and regression contracts stay put.
+			requested = "overhead"
+		_right_variant = requested
+		_right_melee_duration = _right_duration_for(requested)
 		_right_melee_time = 0.0
 	_sync_primary_hand()
 	melee_started.emit(key)
@@ -430,6 +456,8 @@ func melee_seconds(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	if key == "left" or weapon == "dagger":
 		return float(DAGGER_DATA.seconds)
+	if _right_melee_time >= 0.0:
+		return _right_melee_duration
 	return float(SWORD_DATA[sword_index].seconds)
 
 func melee_damage(hand: String = "") -> float:
@@ -493,7 +521,7 @@ func get_recovery_progress() -> float:
 		return clampf((RELEASE_SECONDS+_phase_time)/duration,0,1)
 	return 1.0
 
-func release_string() -> void:
+func release_string(override_origin: Vector3 = Vector3.INF, override_direction: Vector3 = Vector3.ZERO) -> void:
 	if phase not in ["DRAWING","HOLDING"]:
 		return
 	charge_frozen = false
@@ -503,10 +531,17 @@ func release_string() -> void:
 	_release_grip = to_local(active_bow.global_position)
 	_release_contact = to_local(string_hand.global_position)
 	_release_bow_rotation = (global_basis.inverse()*active_bow.global_basis).get_rotation_quaternion()
-	var origin := get_arrow_origin()
+	var visual_origin := get_arrow_origin()
+	var origin := visual_origin
 	var direction := (_aim_point-origin).normalized()
-	if direction.length_squared() < 0.0001:
+	if override_origin.is_finite() and override_direction.length_squared() > 0.5:
+		origin = override_origin
+		direction = override_direction.normalized()
+	elif direction.length_squared() < 0.0001:
 		direction = active_bow.get_arrow_direction()
+	# The rendered arrow leaves from the bow; the physics arrow leaves along the
+	# validated crosshair ray. Arrow blends one to the other over a few frames.
+	last_arrow_visual_origin = visual_origin
 	phase = "RELEASE"
 	_phase_time = 0.0
 	active_bow.set_arrow_visible(false)
@@ -533,7 +568,7 @@ func release_throw() -> void:
 
 func cancel_draw() -> void:
 	charge_frozen = false
-	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD","MELEE","MELEE_L"]:
+	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD"] and not phase.begins_with("MELEE"):
 		return
 	_clear_melee()
 	phase = "READY"
@@ -550,6 +585,21 @@ func set_roll(progress: float, direction: Vector3) -> void:
 	_roll_progress = progress
 	if progress >= 0.0:
 		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
+	_update_pose(0.0)
+
+func set_hit_react(seconds: float) -> void:
+	if seconds <= 0.0:
+		_hit_react = 0.0
+	else:
+		_hit_react = maxf(_hit_react,seconds)
+	_update_pose(0.0)
+
+func set_step(progress: float, direction: Vector3) -> void:
+	_step_progress = clampf(progress,0.0,1.0) if progress >= 0.0 else -1.0
+	if _step_progress >= 0.0:
+		var planar := Vector3(direction.x,0.0,direction.z)
+		if not planar.is_zero_approx():
+			_step_direction = planar.normalized()
 	_update_pose(0.0)
 
 func set_slide(progress: float, direction: Vector3) -> void:
@@ -624,7 +674,15 @@ func get_animation_state() -> Dictionary:
 	var melee_secondary := draw_amount
 	if is_melee():
 		melee_secondary = _left_melee_time if _right_melee_time >= 0.0 else _right_melee_time
-	return {"phase":"GUARD" if _blocking else phase,"draw":melee_secondary,"charge_frozen":charge_frozen,"time":_phase_time,"aim":_aim_point,
+	var presentation := "GUARD" if _blocking else phase
+	var presentation_time := _phase_time
+	if _hit_react > 0.0001 and phase == "READY" and not _blocking:
+		# STAGGER rides in the existing phase string; time carries the remaining
+		# reaction, so the flinch costs no extra snapshot key. An attack that is
+		# already active owns the pose instead.
+		presentation = "STAGGER"
+		presentation_time = _hit_react
+	return {"phase":presentation,"draw":melee_secondary,"charge_frozen":charge_frozen,"time":presentation_time,"aim":_aim_point,
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
 		"yaw":global_rotation.y,"roll":_roll_progress,
@@ -635,18 +693,34 @@ func apply_animation_state(state: Dictionary) -> void:
 	var replicated_phase := str(state.phase)
 	var guard_phase := replicated_phase == "GUARD"
 	_blocking = guard_phase and weapon in ["sword","dagger"]
-	if replicated_phase in ["MELEE","MELEE_L"]:
+	if replicated_phase.begins_with("MELEE"):
 		var secondary := float(state.draw)
 		_left_melee_duration = float(DAGGER_DATA.seconds)
-		if replicated_phase == "MELEE":
-			_right_melee_duration = melee_seconds("right")
-			_right_melee_time = float(state.time)
-			_left_melee_time = secondary
-		else:
+		if replicated_phase == "MELEE_L":
 			_left_melee_time = float(state.time)
 			_right_melee_time = secondary
+		else:
+			_right_variant = "overhead"
+			if replicated_phase == "MELEE_HL":
+				_right_variant = "horizontal_left"
+			elif replicated_phase == "MELEE_HR":
+				_right_variant = "horizontal_right"
+			elif replicated_phase == "MELEE_ST":
+				_right_variant = "stab"
+			_right_melee_duration = _right_duration_for(_right_variant)
+			_right_melee_time = float(state.time)
+			_left_melee_time = secondary
 		_sync_primary_hand()
 		draw_amount = 0.0
+		_hit_react = 0.0
+	elif replicated_phase == "STAGGER":
+		_left_melee_time = -1.0
+		_right_melee_time = -1.0
+		phase = "READY"
+		_melee_hand = "right"
+		_phase_time = 0.0
+		draw_amount = 0.0
+		_hit_react = maxf(float(state.time),0.0)
 	else:
 		_left_melee_time = -1.0
 		_right_melee_time = -1.0
@@ -654,6 +728,7 @@ func apply_animation_state(state: Dictionary) -> void:
 		_melee_hand = "right"
 		_phase_time = 0.0 if guard_phase else float(state.time)
 		draw_amount = float(state.draw)
+		_hit_react = 0.0
 	charge_frozen = bool(state.charge_frozen)
 	_aim_point = state.aim
 	_release_draw = float(state.release_draw)
@@ -725,6 +800,7 @@ func _physics_process(delta: float) -> void:
 func advance_animation(delta: float) -> void:
 	if not _built:
 		return
+	_hit_react = maxf(0.0,_hit_react-delta)
 	if not is_melee():
 		_advance_step(delta)
 		return
@@ -825,14 +901,18 @@ func _advance_step(delta: float) -> void:
 		_phase_time = 0.0
 	_update_pose(delta)
 
-func _melee_clip() -> Dictionary:
-	if _attacking_left() or weapon == "dagger":
+func _melee_clip_for(hand: String, variant: String) -> Dictionary:
+	var key := "left" if hand == "left" else "right"
+	if key == "left" or weapon == "dagger" or variant == "stab":
 		return _profile.clips.stab
 	return _profile.clips.overhead if sword_index == 2 else _profile.clips.overhead_one_hand
 
+func _melee_clip() -> Dictionary:
+	return _melee_clip_for(_melee_hand,_right_variant if _melee_hand == "right" else "stab")
+
 func _melee_window(hand: String = "") -> Vector2:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left" or weapon == "dagger" or (key == "right" and _right_variant == "stab"):
 		var clip: Dictionary = _profile.clips.stab
 		return Vector2(float(clip.strike_start),float(clip.strike_end))
 	var duration := _right_melee_duration if _right_melee_time >= 0.0 else float(SWORD_DATA[sword_index].seconds)
@@ -853,7 +933,7 @@ func _melee_clip_time() -> float:
 func _throw_clip_time() -> float:
 	# Charge winds through the authored chamber; release snaps through the
 	# authored strike, then the follow-through doubles as the resupply recovery.
-	var clip := _melee_clip()
+	var clip := _melee_clip_for("right","overhead")
 	var strike_start := float(clip.strike_start)
 	var strike_end := float(clip.strike_end)
 	match phase:
@@ -930,7 +1010,7 @@ func _update_pose(delta: float) -> void:
 		clip = str(_melee_clip().name)
 		time = _melee_clip_time()
 	elif throwing:
-		clip = str(_melee_clip().name)
+		clip = str(_melee_clip_for("right","overhead").name)
 		time = _throw_clip_time()
 	elif drawing:
 		time = 0.0
@@ -1005,11 +1085,15 @@ func _update_pose(delta: float) -> void:
 		_set_bone_world(_bones.spine_01,corrected_spine)
 	if leaning:
 		_apply_cover_lean()
+	_apply_melee_swing_path()
+	_apply_hit_react_pose()
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
 			_apply_slide_pose(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual")
+		if _step_progress >= 0.0 and not is_melee() and not throwing:
+			_apply_step_pose()
 		_place_feet()
 	if drawing:
 		var head := _bone_world(_bones.Head)
@@ -1017,8 +1101,14 @@ func _update_pose(delta: float) -> void:
 		_set_bone_world(_bones.Head,head)
 	if weapon == "dual":
 		_pose_dual_arms()
-	elif weapon == "dagger" and phase == "MELEE":
+		if _right_melee_time >= 0.0 and _right_variant == "stab":
+			_aim_sword_thrust()
+	elif weapon == "dagger" and _right_melee_time >= 0.0:
 		_aim_dagger_stab()
+	elif weapon == "sword" and _right_melee_time >= 0.0 and _right_variant == "stab":
+		_aim_sword_thrust()
+	if _right_melee_time >= 0.0 and _right_variant in ["horizontal_left","horizontal_right"]:
+		_apply_horizontal_arm_path()
 	_update_shield_pose()
 	if weapon == "bow":
 		_update_bow_pose(drawing)
@@ -1154,6 +1244,103 @@ func _apply_slide_pose(lower_only: bool) -> void:
 		var pole := stance*Vector3(sign_x*0.18,0.25,-1.0)
 		_solve_limb(_legs[side],foot.origin.lerp(target,weight),foot.basis.slerp(rest_basis,weight),pole)
 
+func _apply_melee_swing_path() -> void:
+	# The authored overhead clip supplies the weight transfer and arm path. A
+	# horizontal variant adds a hip-led yaw arc through the same strike window,
+	# so the actual socketted blade sweeps wide instead of descending.
+	if _right_melee_time < 0.0 or _right_variant not in ["horizontal_left","horizontal_right"]:
+		return
+	var window := _melee_window("right")
+	var duration := _right_melee_duration
+	var side := -1.0 if _right_variant == "horizontal_right" else 1.0
+	var load_end := maxf(window.x-0.05,0.01)
+	var angle := 0.0
+	if _right_melee_time < load_end:
+		angle = side*0.62*smoothstep(0.0,load_end,_right_melee_time)
+	elif _right_melee_time < window.y:
+		angle = side*lerpf(0.62,-0.48,smoothstep(window.x,window.y,_right_melee_time))
+	else:
+		angle = -side*0.48*(1.0-smoothstep(window.y,duration,_right_melee_time))
+	if absf(angle) <= 0.0001:
+		return
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.basis = Basis(Vector3.UP,angle)*pelvis.basis
+	_set_bone_world(_bones.pelvis,pelvis)
+
+func _apply_horizontal_arm_path() -> void:
+	# The authored overhead clip still supplies the load and weight transfer.
+	# During the strike, drive the sword hand along a chest-height lateral arc
+	# so the blade truly cuts sideways instead of only inheriting the overhead
+	# downstroke. The authored recovery restores the arm as the blend ends.
+	if _right_melee_time < 0.0 or _right_variant not in ["horizontal_left","horizontal_right"]:
+		return
+	var window := _melee_window("right")
+	var duration := _right_melee_duration
+	var load_start := maxf(window.x-0.20,0.0)
+	var settle_end := minf(duration,window.y+0.28)
+	var weight := 0.0
+	var arc_t := 0.0
+	if _right_melee_time >= load_start and _right_melee_time < window.x:
+		weight = smoothstep(load_start,window.x,_right_melee_time)
+	elif _right_melee_time >= window.x and _right_melee_time <= window.y:
+		weight = 1.0
+		arc_t = smoothstep(window.x,window.y,_right_melee_time)
+	elif _right_melee_time > window.y and _right_melee_time < settle_end:
+		weight = 1.0-smoothstep(window.y,settle_end,_right_melee_time)
+		arc_t = 1.0
+	if weight <= 0.0001:
+		return
+	var chest := _bone_world(_bones.spine_03).origin
+	var offset := _aim_point-chest
+	offset.y = 0.0
+	var forward := -global_basis.z
+	if offset.length_squared() > 0.04:
+		forward = offset.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	var sign := 1.0 if _right_variant == "horizontal_right" else -1.0
+	var arc_angle := sign*lerpf(1.30,-0.35,arc_t)
+	var radius := minf(0.56,chest.distance_to(_bone_world(_arms[1][0]).origin)+0.42)
+	var target := chest+forward*(cos(arc_angle)*radius)+right*(sin(arc_angle)*radius)-Vector3.UP*0.06
+	var tangent := (forward*sin(arc_angle)-right*cos(arc_angle)).normalized()
+	var target_basis := Basis.looking_at(tangent,Vector3.UP)*_sword_grip.basis.inverse()
+	var hand := _bone_world(_arms[1][2])
+	var pole := forward*0.45+right*0.25+Vector3.UP*0.15
+	_solve_limb(_arms[1],hand.origin.lerp(target,weight),hand.basis.slerp(target_basis,weight),pole)
+	if weapon == "sword" and sword_index == 2:
+		# The greatsword keeps both hands on the handle. The support palm sits
+		# just behind the sword hand along the cut's blade axis.
+		var support_target := _bone_world(_arms[1][2]).origin-(tangent*0.19*weight)
+		var support_basis := Basis.looking_at(tangent,Vector3.UP)
+		_solve_limb(_arms[0],support_target,support_basis,right*0.35+Vector3.UP*0.25)
+
+func _apply_hit_react_pose() -> void:
+	if _hit_react <= 0.0001 or _roll_progress >= 0.0 or phase != "READY" or _blocking:
+		return
+	var weight := clampf(_hit_react/0.42,0.0,1.0)
+	var spine := _bone_world(_bones.spine_01)
+	spine.basis = Basis(global_basis.x,0.22*weight)*spine.basis
+	_set_bone_world(_bones.spine_01,spine)
+	var head := _bone_world(_bones.Head)
+	head.basis = Basis(global_basis.x,0.14*weight)*head.basis
+	_set_bone_world(_bones.Head,head)
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.origin += global_basis.z*0.035*weight
+	_set_bone_world(_bones.pelvis,pelvis)
+
+func _apply_step_pose() -> void:
+	# A quick planted lunge: pitch the hips and chest a few degrees into the
+	# step without inventing a new clip or changing the socketed weapon pose.
+	var weight := sin(clampf(_step_progress,0.0,1.0)*PI)
+	if weight <= 0.0 or not is_zero_approx(_crouch_amount):
+		return
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.basis = Basis(global_basis.x,-0.18*weight)*pelvis.basis
+	pelvis.origin -= Vector3.UP*0.05*weight
+	_set_bone_world(_bones.pelvis,pelvis)
+	var spine := _bone_world(_bones.spine_01)
+	spine.basis = Basis(global_basis.x,-0.10*weight)*spine.basis
+	_set_bone_world(_bones.spine_01,spine)
+
 func _sample_cover_lean() -> void:
 	var clip: Dictionary = _profile.clips.cover_top
 	if _cover_lean.y <= 0.0:
@@ -1188,6 +1375,26 @@ func _update_hand_contacts() -> void:
 	var right := _bone_world(_arms[1][2])
 	bow_hand.global_transform = Transform3D(left.basis,left*_palm_left)
 	string_hand.global_transform = Transform3D(right.basis,right*_palm_right)
+
+func _aim_sword_thrust() -> void:
+	var shoulder := _bone_world(_arms[1][0]).origin
+	var hand := _bone_world(_arms[1][2])
+	var offset := _aim_point-shoulder
+	if Vector2(offset.x,offset.z).length() < 0.35 or offset.length_squared() < 0.0001:
+		return
+	var direction := offset.normalized()
+	var along := (hand.origin-shoulder).dot(direction)
+	var elbow := _bone_world(_arms[1][1]).origin
+	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(hand.origin)
+	var aim_along := offset.length()-float(SWORD_DATA[sword_index].length)-0.09
+	var window := _melee_window("right")
+	var thrust := smoothstep(window.x*0.6,window.y,_right_melee_time)
+	along = lerpf(along,clampf(aim_along,along,arm_reach-0.01),thrust)
+	var up := Vector3.UP
+	if absf(direction.dot(up)) > 0.98:
+		up = global_basis.x
+	var aim_basis := Basis.looking_at(direction,up)
+	_solve_limb(_arms[1],shoulder+direction*along,aim_basis*_sword_grip.basis.inverse())
 
 func _aim_dagger_stab() -> void:
 	var shoulder := _bone_world(_arms[1][0]).origin

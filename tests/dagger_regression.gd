@@ -37,7 +37,7 @@ func advance(seconds: float) -> void:
 
 func observe_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3,
 		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
-	check(hand == "right" and attacker.rig.phase == "MELEE", "Only an active stab emits blade sweeps")
+	check(hand == "right" and attacker.rig.phase.begins_with("MELEE"), "Only an active stab emits blade sweeps")
 	if recording:
 		samples.append({"time":clock, "base":current_base, "tip":current_tip, "radius":radius})
 

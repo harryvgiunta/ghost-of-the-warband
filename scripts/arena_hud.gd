@@ -84,6 +84,11 @@ func _ready() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var hub := _ui._button(lobby,"RETURN TO THE HOLLOW",Vector2(25,505),Vector2(515,38))
 	hub.pressed.connect(func(): hub_requested.emit())
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		name_input.text = str(cache.player_name)
+		address_input.text = str(cache.address)
+		port_input.value = int(cache.port)
 	match_ui = Control.new()
 	match_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	match_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -103,10 +108,10 @@ func _ready() -> void:
 	health_label = _ui._label(bottom,"",Vector2(18,10),16,UI.TEAL)
 	attack_label = _ui._label(bottom,"",Vector2(18,35),14,UI.CREAM)
 	bar = _ui._bar(bottom,Vector2(18,73),Vector2(604,8),UI.GOLD)
-	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(480,98))
+	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(620,116))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Left / draw   RMB  Right / guard / peek   HOLD T  Throw   X  Lookout",Vector2(15,35),12,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Horizontal swing / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek   HOLD T  Throw   X  Lookout",Vector2(15,35),11,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -153,11 +158,11 @@ func _ready() -> void:
 	shield_button.toggle_mode = true
 	shield_button.add_theme_font_size_override("font_size",11)
 	shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
-	_ui._label(equipment,"1-4 gear / 5 dual. LMB left, RMB right; no guard.",Vector2(14,301),10,UI.MUTED)
+	_ui._label(equipment,"Gear 1-5. LMB by shoulder. Wheel: stab / overhead.",Vector2(14,301),9,UI.MUTED)
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   HOLD T  Throw   1 Bow  2 Sword  3 Dagger  4 Shield  5 Dual   SHIFT + SPACE  Roll   ESC / I  Equipment",Vector2(-560,-25),12,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   ESC  Equipment",Vector2(-560,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -197,13 +202,19 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "DRAW %.0f%% / DAMAGE x%.2f / RELEASE TO FIRE" % [float(state.draw)*100,float(state.draw)]
 	elif throwing:
 		attack_label.text = "THROW %.0f%% / DAMAGE x%.2f / RELEASE TO THROW" % [float(state.draw)*100,float(state.draw)]
-	elif state.phase in ["MELEE","MELEE_L"]:
+	elif str(state.phase).begins_with("MELEE"):
 		if state.weapon == "dual":
 			attack_label.text = ("LEFT DAGGER STAB / %.2f s" if state.phase == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % float(state.attack_interval)
 			if state.get("attack_parry",false):
 				attack_label.text += "  /  ATTACK PARRY"
+		elif state.phase == "MELEE_ST" or state.weapon == "dagger":
+			attack_label.text = "FORWARD STAB / %.2f s SWING" % float(state.attack_interval)
+		elif state.phase == "MELEE_HL":
+			attack_label.text = "LEFT HORIZONTAL SWING / %.1f s" % float(state.attack_interval)
+		elif state.phase == "MELEE_HR":
+			attack_label.text = "RIGHT HORIZONTAL SWING / %.1f s" % float(state.attack_interval)
 		else:
-			attack_label.text = ("QUICK STAB / %.2f s SWING" if state.weapon == "dagger" else "OVERHAND CHOP / %.1f s SWING") % float(state.attack_interval)
+			attack_label.text = "OVERHEAD CHOP / %.1f s SWING" % float(state.attack_interval)
 	elif state.get("blocking",false):
 		if state.get("shield",false):
 			attack_label.text = "SHIELD UP / FRONT ARROWS STOP"
@@ -223,9 +234,9 @@ func update_match(state: Dictionary) -> void:
 		elif state.weapon == "bow":
 			attack_label.text = "READY / HOLD LMB, AIM, RELEASE"
 		elif state.weapon == "dagger":
-			attack_label.text = "READY / CLICK FOR A QUICK STAB / HOLD T TO THROW"
+			attack_label.text = "READY / LMB OR WHEEL UP STABS / WHEEL DOWN OVERHEAD"
 		else:
-			attack_label.text = "READY / CLICK FOR AN OVERHAND CHOP / HOLD T TO THROW"
+			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 	bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
 	respawn_label.text = "RESPAWNING IN %.1f" % float(state.respawn) if float(state.respawn) > 0 else ""
 	for index in 3:

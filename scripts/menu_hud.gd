@@ -71,6 +71,8 @@ var _index := -1
 var _stock_item := ""
 var _vendor := 0
 var _default_name := "Ranger"
+var _default_address := "127.0.0.1"
+var _default_port := 7777
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -87,7 +89,12 @@ func _ready() -> void:
 func configure(player_state, session_state) -> void:
 	state = player_state
 	session = session_state
-	if session != null:
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		_default_name = str(cache.player_name)
+		_default_address = str(cache.address)
+		_default_port = int(cache.port)
+	elif session != null:
 		_default_name = str(session.player_name)
 	refresh()
 
@@ -325,7 +332,7 @@ func open_host_form() -> void:
 	_cancel_button.position = Vector2(236,176)
 	_confirm_button.text = "HOST ARENA"
 	_form_error.text = ""
-	_port_input.value = 7777
+	_port_input.value = _default_port
 	_modal_layer.visible = true
 	_name_input.grab_focus()
 
@@ -338,14 +345,14 @@ func open_join_form() -> void:
 	_name_input.text = _default_name
 	_address_label.visible = true
 	_address_input.visible = true
-	_address_input.text = "127.0.0.1"
+	_address_input.text = _default_address
 	_port_label.position = Vector2(300,160)
 	_port_input.position = Vector2(300,180)
 	_confirm_button.position = Vector2(24,236)
 	_cancel_button.position = Vector2(236,236)
 	_confirm_button.text = "JOIN ARENA"
 	_form_error.text = ""
-	_port_input.value = 7777
+	_port_input.value = _default_port
 	_modal_layer.visible = true
 	_name_input.grab_focus()
 

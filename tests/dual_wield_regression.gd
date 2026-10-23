@@ -373,6 +373,7 @@ func run() -> void:
 	check(victim.rig.in_strike_window(), "The control sword is in its strike window")
 	check(victim.combat.resolve_melee_defense(attacker.global_position) == Combat.DEFENSE_NONE,
 		"Attack parrying is exclusive to dual wield")
+	reset_pair()
 
 	# Snapshot phase and replica pose must carry the attacking hand.
 	attacker.rig.set_weapon("dual")
@@ -395,7 +396,7 @@ func run() -> void:
 	replica.set_weapon("dual")
 	replica.apply_animation_state(state)
 	replica.advance_animation(0.22)
-	check(replica.phase == "MELEE_L" and replica._attacking_left(),
+	check(replica.phase == "MELEE_L" and replica.has_melee("left"),
 		"A replica decodes the left attack phase")
 	check(replica.active_sword.visible and replica.active_dagger.visible,
 		"A replica shows both dual weapons")
@@ -420,7 +421,7 @@ func run() -> void:
 	world.queue_free()
 	await process_frame
 
-	# Frontier input: LMB/Q left, RMB right, and RMB never guards.
+	# Frontier input: LMB left, RMB right, and RMB never guards.
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await create_timer(0.4).timeout
