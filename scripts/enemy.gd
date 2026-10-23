@@ -9,17 +9,20 @@ const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
+const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 const DEVIL_AGGRO := 30.0
 const DEVIL_LEASH := 48.0
-const DEVIL_WINDUP := 0.34
+const DEVIL_WINDUP := 0.30
 const DEVIL_STRIKE := 0.16
-const DEVIL_RECOVER := 0.38
+const DEVIL_RECOVER := 0.30
 const DEVIL_SLIDE_SECONDS := 0.46
 const DEVIL_DAMAGE := 8.0
 const DEVIL_LEAP_DAMAGE := 10.0
+const DEVIL_MAX_ATTACKERS := 3
 var kind := 0
 var pack_index := -1
+var devil_weapon := "claw"
 var player: CharacterBody3D
 var safe_center := Vector3.ZERO
 var health := 38.0
@@ -53,7 +56,11 @@ var _slide_speed := 0.0
 var _leap_direction := Vector3.FORWARD
 var _leap_air_time := 0.0
 var _attack_damage := DEVIL_DAMAGE
+var _attack_reach := 1.8
+var _leap_damage := DEVIL_LEAP_DAMAGE
 var _struck := false
+var _shot_fired := false
+var shots_fired := 0
 var _move_intent := Vector3.ZERO
 var _move_speed := 0.0
 var _face_intent := Vector3.FORWARD
@@ -98,14 +105,38 @@ func _ready() -> void:
 	if kind == 2:
 		add_to_group("cinder_devils")
 		_dodge = DodgeStep.new()
+		_dodge.travel = DodgeStep.TRAVEL * 0.5
+		_dodge.duration = 0.22
 		add_child(_dodge)
 		var seeded := maxi(pack_index,0)
 		_rng.seed = 7319 + seeded * 131
 		_orbit_dir = 1.0 if seeded % 2 == 0 else -1.0
 		_orbit_radius = 3.4 + float(seeded % 3) * 1.0
 		_orbit_phase = _rng.randf() * TAU
-		_attack_cooldown = 0.55 + float(seeded) * 0.32
-		_decision_timer = _rng.randf_range(0.2,0.65)
+		_attack_cooldown = 0.25 + float(seeded % 5) * 0.18
+		_decision_timer = _rng.randf_range(0.15,0.45)
+		devil_weapon = str(devil_weapon).to_lower()
+		if devil_weapon not in ["claw","dagger","sword","bow"]:
+			devil_weapon = "claw"
+		match devil_weapon:
+			"dagger":
+				_attack_damage = 6.0
+				_attack_reach = 1.6
+				_leap_damage = 8.0
+			"sword":
+				_attack_damage = 11.0
+				_attack_reach = 2.0
+				_leap_damage = 13.0
+			"bow":
+				_attack_damage = 7.0
+				_attack_reach = 0.0
+				_leap_damage = 7.0
+				_orbit_radius = 8.2 + float(seeded % 3) * 0.8
+			_:
+				_attack_damage = DEVIL_DAMAGE
+				_attack_reach = 1.8
+				_leap_damage = DEVIL_LEAP_DAMAGE
+		_devil.set_weapon(devil_weapon)
 		if is_instance_valid(player):
 			var start := global_position - player.global_position
 			start.y = 0.0
@@ -285,10 +316,10 @@ func _step_devil(delta: float) -> void:
 			_leap_air_time += delta
 			_face_intent = _leap_direction
 			if is_on_floor() and _leap_air_time > 0.18:
-				if distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < 2:
-					_devil_begin_windup(DEVIL_LEAP_DAMAGE)
+				if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
+					_devil_begin_windup(_leap_damage)
 				else:
-					_decision_timer = 0.20
+					_decision_timer = 0.15
 					_enter_devil_state("CIRCLE")
 		"DIVE":
 			if distance > 0.001:
@@ -300,7 +331,7 @@ func _step_devil(delta: float) -> void:
 				_move_intent = _steer_devil(_devil_with_separation(dive_offset.normalized()))
 			_move_speed = 9.2
 			if distance < 1.65 or _state_time >= 0.48:
-				_devil_begin_windup(DEVIL_DAMAGE)
+				_devil_begin_windup(_attack_damage)
 		"WINDUP":
 			if distance > 0.001:
 				_face_intent = to_player.normalized()
@@ -313,7 +344,16 @@ func _step_devil(delta: float) -> void:
 				_struck = true
 				_devil_strike(distance,to_player)
 			if _state_time >= DEVIL_STRIKE:
-				_attack_cooldown = 1.1+_rng.randf()*1.0
+				_attack_cooldown = 0.75+_rng.randf()*0.70
+				_enter_devil_state("RECOVER")
+		"SHOOT":
+			if distance > 0.001:
+				_face_intent = to_player.normalized()
+			if not _shot_fired and _state_time >= 0.30:
+				_shot_fired = true
+				_shoot_arrow()
+			if _state_time >= 0.52:
+				_attack_cooldown = 0.70+_rng.randf()*0.60
 				_enter_devil_state("RECOVER")
 		"RECOVER":
 			if distance > 0.001:
@@ -355,10 +395,10 @@ func _step_devil(delta: float) -> void:
 	move_and_slide()
 	var actual := (global_position-before)/maxf(delta,0.0001)
 	if state == "LEAP" and not was_grounded and is_on_floor() and _leap_air_time > 0.18:
-		if distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < 2:
-			_devil_begin_windup(DEVIL_LEAP_DAMAGE)
+		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
+			_devil_begin_windup(_leap_damage)
 		else:
-			_decision_timer = 0.20
+			_decision_timer = 0.15
 			_enter_devil_state("CIRCLE")
 	_devil.set_motion(actual,is_on_floor())
 	_devil.set_action(state,_state_time)
@@ -366,74 +406,96 @@ func _step_devil(delta: float) -> void:
 	_devil.set_slide(_slide_time/DEVIL_SLIDE_SECONDS if state == "SLIDE" else -1.0)
 
 func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
-	_orbit_angle += _orbit_dir*delta*(1.45+0.35*sin(_orbit_phase+_state_time*0.8))
+	_orbit_angle += _orbit_dir*delta*(1.65+0.40*sin(_orbit_phase+_state_time*0.8))
 	var predicted := player.global_position+player.velocity*0.10
 	var radius := _orbit_radius+sin(_orbit_phase+_state_time*0.7)*0.55
 	var ring := predicted+Vector3(cos(_orbit_angle),0.0,sin(_orbit_angle))*radius
 	var offset := ring-global_position
 	offset.y = 0.0
 	var direction := offset.normalized() if offset.length_squared() > 0.0001 else Vector3.FORWARD
-	if distance < 2.4:
-		direction -= to_player.normalized()*0.8
-	elif distance > 9.0:
+	var retreat_at := 7.5 if devil_weapon == "bow" else 2.4
+	var close_at := 13.0 if devil_weapon == "bow" else 9.0
+	if distance < retreat_at:
+		direction -= to_player.normalized()*1.0
+	elif distance > close_at:
 		direction += to_player.normalized()*0.8
 	_move_intent = _steer_devil(_devil_with_separation(direction))
-	_move_speed = 6.4
+	_move_speed = 6.8
 	_face_intent = _move_intent
 	if _decision_timer <= 0.0:
-		_decision_timer = 0.55+_rng.randf()*0.60
+		_decision_timer = 0.38+_rng.randf()*0.35
 		_devil_choose(distance,to_player)
 
 func _devil_choose(distance: float, to_player: Vector3) -> void:
-	if _attack_cooldown <= 0.0 and distance < 7.0 and _pack_attackers() < 2:
-		_attack_damage = DEVIL_DAMAGE
+	if not is_on_floor():
+		return
+	var roll := _rng.randf()
+	if devil_weapon == "bow":
+		if distance < 6.0:
+			if _leap_cooldown <= 0.0 and roll < 0.38:
+				_devil_start_leap(distance,to_player,true)
+			elif _slide_cooldown <= 0.0 and roll < 0.72:
+				_devil_start_slide(to_player,true)
+			elif _dodge.can_step(true,false):
+				_devil_start_step(to_player)
+			return
+		if _attack_cooldown <= 0.0 and distance <= 16.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS and _devil_has_los():
+			_enter_devil_state("SHOOT")
+			return
+		if roll < 0.22 and _dodge.can_step(true,false):
+			_devil_start_step(to_player)
+		return
+	if _attack_cooldown <= 0.0 and distance < 8.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
 		_enter_devil_state("DIVE")
 		return
-	if is_on_floor():
-		var roll := _rng.randf()
-		if _leap_cooldown <= 0.0 and roll < 0.30:
-			_devil_start_leap(distance,to_player)
-			return
-		if roll < 0.58 and _dodge.can_step(true,false):
-			_devil_start_step(to_player)
-			return
-		if _slide_cooldown <= 0.0 and distance > 2.3 and roll < 0.74:
-			_devil_start_slide(to_player)
-			return
+	if _leap_cooldown <= 0.0 and roll < 0.32:
+		_devil_start_leap(distance,to_player)
+		return
+	if roll < 0.64 and _dodge.can_step(true,false):
+		_devil_start_step(to_player)
+		return
+	if _slide_cooldown <= 0.0 and distance > 2.3 and roll < 0.82:
+		_devil_start_slide(to_player)
 
 func _devil_start_step(to_player: Vector3) -> void:
 	if to_player.length_squared() < 0.0001:
 		return
 	var tangent := Vector3(-to_player.z,0.0,to_player.x).normalized()
 	var side := 1.0 if _rng.randf() < 0.5 else -1.0
-	var direction := (tangent*side*0.9+to_player.normalized()*0.22).normalized()
+	var forward_bias := -0.30 if devil_weapon == "bow" else 0.22
+	var direction := (tangent*side*0.9+to_player.normalized()*forward_bias).normalized()
 	if _dodge.try_step(direction,is_on_floor(),false):
 		_enter_devil_state("STEP")
 		_face_intent = to_player.normalized()
 
-func _devil_start_leap(distance: float, to_player: Vector3) -> void:
+func _devil_start_leap(distance: float, to_player: Vector3, retreat: bool = false) -> void:
 	if to_player.length_squared() < 0.0001:
 		return
 	var tangent := Vector3(-to_player.z,0.0,to_player.x).normalized()*_orbit_dir
 	var forward := to_player.normalized()
 	var direction := (forward*0.55+tangent*0.85).normalized()
-	if distance > 4.5:
+	if retreat:
+		direction = (-forward*0.65+tangent*0.85).normalized()
+	elif distance > 4.5:
 		direction = (forward*0.80+tangent*0.50).normalized()
 	_leap_direction = _steer_devil(direction)
 	_leap_air_time = 0.0
-	_leap_cooldown = 1.25+_rng.randf()*0.45
+	_leap_cooldown = 1.05+_rng.randf()*0.40
 	_enter_devil_state("LEAP")
 	velocity.y = 6.5
 
-func _devil_start_slide(to_player: Vector3) -> void:
+func _devil_start_slide(to_player: Vector3, retreat: bool = false) -> void:
 	if to_player.length_squared() < 0.0001:
 		return
 	var tangent := Vector3(-to_player.z,0.0,to_player.x).normalized()*_orbit_dir
-	var direction := (tangent*0.9+to_player.normalized()*0.35).normalized()
+	var forward := to_player.normalized()
+	var direction := (tangent*0.9+forward*0.35).normalized()
+	if retreat:
+		direction = (-forward*0.70+tangent*0.85).normalized()
 	_slide_direction = _steer_devil(direction)
 	_slide_time = 0.0
-	_slide_speed = 9.4
-	_slide_cooldown = 1.4+_rng.randf()*0.6
+	_slide_speed = 9.6
+	_slide_cooldown = 1.2+_rng.randf()*0.5
 	_enter_devil_state("SLIDE")
 
 func _devil_begin_windup(damage: float) -> void:
@@ -448,10 +510,11 @@ func _devil_begin_windup(damage: float) -> void:
 func _enter_devil_state(next: String) -> void:
 	state = next
 	_state_time = 0.0
+	_shot_fired = false
 	_warning.visible = next == "WINDUP"
 
 func _devil_strike(distance: float, to_player: Vector3) -> void:
-	if distance > 1.8 or absf(player.global_position.y-global_position.y) > 1.25:
+	if distance > _attack_reach or absf(player.global_position.y-global_position.y) > 1.25:
 		return
 	if to_player.length_squared() > 0.0001 and (-global_basis.z).dot(to_player.normalized()) < 0.15:
 		return
@@ -460,6 +523,27 @@ func _devil_strike(distance: float, to_player: Vector3) -> void:
 	if not get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
 		return
 	attacked.emit(self,_attack_damage)
+
+func _shoot_arrow() -> void:
+	if not is_instance_valid(player) or get_parent() == null:
+		return
+	var origin: Vector3 = _devil.get_bow_origin()
+	var target := player.global_position+Vector3(0,1.0,0)+player.velocity*0.12
+	var flight := origin.distance_to(target)/30.0
+	target.y += 0.5*4.0*flight*flight
+	var direction := (target-origin).normalized()
+	var arrow := Arrow.new()
+	arrow.hit_mask = 1 | 4
+	get_parent().add_child(arrow)
+	arrow.launch(origin,direction,30.0,_attack_damage,[get_rid()],origin)
+	shots_fired += 1
+
+func _devil_has_los() -> bool:
+	if not is_instance_valid(player):
+		return false
+	_query.from = global_position+Vector3(0,0.55,0)
+	_query.to = player.global_position+Vector3(0,0.85,0)
+	return get_world_3d().direct_space_state.intersect_ray(_query).is_empty()
 
 func _devil_with_separation(direction: Vector3) -> Vector3:
 	var push := Vector3.ZERO
@@ -480,7 +564,7 @@ func _pack_attackers() -> int:
 			continue
 		if other.global_position.distance_squared_to(global_position) > 196.0:
 			continue
-		if str(other.get("state")) in ["WINDUP","STRIKE","DIVE"]:
+		if str(other.get("state")) in ["WINDUP","STRIKE","DIVE","SHOOT"]:
 			count += 1
 	return count
 

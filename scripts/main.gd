@@ -73,6 +73,7 @@ func _ready() -> void:
 	player = CharacterBody3D.new()
 	player.name = "Player"
 	player.set_meta("ironwood_player", true)
+	player.set_meta("ironwood_damage_target", self)
 	player.collision_layer = 4
 	player.collision_mask = 1 | 2
 	player.floor_snap_length = 0.6
@@ -140,6 +141,7 @@ func _ready() -> void:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
 		enemy.pack_index = int(record.get("pack_index", -1))
+		enemy.devil_weapon = str(record.get("weapon", "claw"))
 		enemy.position = record.position + Vector3(0, 0.12, 0)
 		enemy.player = player
 		enemy.safe_center = world.player_spawn

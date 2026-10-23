@@ -1,9 +1,10 @@
 extends SceneTree
 ## Cinder devil packs must circle and flank rather than charge in a line, mix
-## leaps, slides and shared quick steps, and commit at most two attackers.
+## leaps, slides and shared quick steps, and commit at most three attackers.
 
 const Enemy = preload("res://scripts/enemy.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
+const DodgeStep = preload("res://scripts/dodge_step.gd")
 
 var failures := 0
 var checks := 0
@@ -63,6 +64,8 @@ func run() -> void:
 	var head_height: float = first.head_hitbox_center().y-first.global_position.y
 	check(head_height > 0.6 and head_height < 1.0, "The head zone sits on the animated head, not the body centre")
 	check(first._dodge != null, "Cinder devils own a shared quick-step controller")
+	check(is_equal_approx(first._dodge.travel,DodgeStep.TRAVEL*0.5), "Devil side steps cover half the player distance")
+	check(is_equal_approx(first._dodge.duration,0.22), "Devil side steps use the quicker 0.22 s timing")
 
 	var hits: Array[float] = []
 	for devil in devils:
@@ -104,7 +107,7 @@ func run() -> void:
 		if not (is_equal_approx(amount,8.0) or is_equal_approx(amount,10.0)):
 			valid_hit = false
 	check(valid_hit, "Claw and landing-pounce damage stay at 8 and 10")
-	check(max_attackers <= 2, "No more than two pack members commit to an attack at once")
+	check(max_attackers <= Enemy.DEVIL_MAX_ATTACKERS, "No more than three pack members commit to an attack at once")
 	for index in devils.size():
 		var straight := Vector2(devils[index].global_position.x-start[index].x,devils[index].global_position.z-start[index].z).length()
 		check(paths[index] > 6.0 and paths[index] > straight*1.5, "Devil %d circles instead of charging in a straight line" % index)
@@ -115,6 +118,57 @@ func run() -> void:
 	check(not staggered._dodge.active, "A parry also cancels an in-flight quick step")
 	await create_timer(0.9).timeout
 	check(staggered.state != "STAGGER", "The devil recovers from parry stagger and rejoins the pack")
+
+	for devil in devils:
+		devil.queue_free()
+	await process_frame
+
+	var dagger_devil := Enemy.new()
+	dagger_devil.kind = 2
+	dagger_devil.devil_weapon = "dagger"
+	dagger_devil.pack_index = 20
+	dagger_devil.player = dummy
+	dagger_devil.safe_center = Vector3(1000,0,1000)
+	dagger_devil.position = Vector3(15,0.12,15)
+	world.add_child(dagger_devil)
+	dagger_devil.set_physics_process(false)
+	await process_frame
+	check(dagger_devil._devil._weapon_role == "dagger" and dagger_devil._devil._melee_weapon != null, "Dagger devils hold a dagger mesh")
+	check(is_equal_approx(dagger_devil._attack_damage,6.0) and is_equal_approx(dagger_devil._attack_reach,1.6), "Daggers use the short 6-damage reach profile")
+	var sword_devil := Enemy.new()
+	sword_devil.kind = 2
+	sword_devil.devil_weapon = "sword"
+	sword_devil.pack_index = 21
+	sword_devil.player = dummy
+	sword_devil.safe_center = Vector3(1000,0,1000)
+	sword_devil.position = Vector3(18,0.12,18)
+	world.add_child(sword_devil)
+	sword_devil.set_physics_process(false)
+	await process_frame
+	check(sword_devil._devil._weapon_role == "sword" and sword_devil._devil._melee_weapon != null, "Sword devils hold a short sword mesh")
+	check(is_equal_approx(sword_devil._attack_damage,11.0) and is_equal_approx(sword_devil._attack_reach,2.0), "Short swords use the longer 11-damage reach profile")
+	var bow_devil := Enemy.new()
+	bow_devil.kind = 2
+	bow_devil.devil_weapon = "bow"
+	bow_devil.pack_index = 22
+	bow_devil.player = dummy
+	bow_devil.safe_center = Vector3(1000,0,1000)
+	bow_devil.position = Vector3(9,0.12,9)
+	world.add_child(bow_devil)
+	await physics_frame
+	check(bow_devil._devil._weapon_role == "bow" and bow_devil._devil._bow != null, "Bow devils hold a bow mesh")
+	check(is_equal_approx(bow_devil._attack_damage,7.0) and is_equal_approx(bow_devil._attack_reach,0.0), "Bow devils use the 7-damage ranged profile")
+	var saw_shoot := false
+	for frame in 360:
+		await physics_frame
+		if bow_devil.state == "SHOOT":
+			saw_shoot = true
+	check(saw_shoot, "Bow devils enter the ranged shoot state")
+	check(bow_devil.shots_fired > 0, "Bow devils release real arrow projectiles")
+	dagger_devil.queue_free()
+	sword_devil.queue_free()
+	bow_devil.queue_free()
+	await process_frame
 
 	var doomed := Enemy.new()
 	doomed.kind = 2

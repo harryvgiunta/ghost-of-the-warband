@@ -6,10 +6,13 @@ extends Node3D
 
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const Bow = preload("res://scripts/bow.gd")
+const Sword = preload("res://scripts/sword.gd")
+const Dagger = preload("res://scripts/dagger.gd")
 
-const WINDUP_SECONDS := 0.34
+const WINDUP_SECONDS := 0.30
 const STRIKE_SECONDS := 0.16
-const RECOVER_SECONDS := 0.38
+const RECOVER_SECONDS := 0.30
 const DEATH_SECONDS := 0.55
 
 var _rig: Node3D
@@ -24,6 +27,11 @@ var _arm_l: Node3D
 var _arm_r: Node3D
 var _elbow_l: Node3D
 var _elbow_r: Node3D
+var _hand_l: Node3D
+var _hand_r: Node3D
+var _weapon_role := "claw"
+var _melee_weapon: Node3D
+var _bow
 var _tail: Array[Node3D] = []
 var _skin: StandardMaterial3D
 var _hide: StandardMaterial3D
@@ -104,16 +112,21 @@ func _build_body() -> void:
 		elbow.position = Vector3(0,-0.17,0)
 		arm.add_child(elbow)
 		Geo.cylinder(elbow,0.029,0.036,0.14,Vector3(0,-0.07,0),_skin,7)
-		Geo.sphere(elbow,0.042,Vector3(0,-0.145,-0.005),_hide)
+		var hand := Node3D.new()
+		hand.position = Vector3(0,-0.145,-0.005)
+		elbow.add_child(hand)
+		Geo.sphere(hand,0.042,Vector3.ZERO,_hide)
 		for claw_index in 3:
-			var claw := Geo.cylinder(elbow,0.014,0.0,0.065,Vector3((float(claw_index)-1.0)*0.022,-0.176,-0.045),_horn,4)
+			var claw := Geo.cylinder(hand,0.014,0.0,0.065,Vector3((float(claw_index)-1.0)*0.022,-0.031,-0.040),_horn,4)
 			claw.rotation = Vector3(-2.1,0.0,(float(claw_index)-1.0)*0.18)
 		if side < 0.0:
 			_arm_l = arm
 			_elbow_l = elbow
+			_hand_l = hand
 		else:
 			_arm_r = arm
 			_elbow_r = elbow
+			_hand_r = hand
 
 	# Two-bone legs with split hooves.
 	for side in [-1.0,1.0]:
@@ -151,6 +164,46 @@ func _build_body() -> void:
 		parent = segment
 	var spade := Geo.cylinder(parent,0.045,0.0,0.11,Vector3(0,0.0,0.17),_hide,4)
 	spade.rotation = Vector3(PI*0.5,PI*0.25,0.0)
+
+func set_weapon(role: String) -> void:
+	_weapon_role = role
+	if is_instance_valid(_melee_weapon):
+		_melee_weapon.queue_free()
+		_melee_weapon = null
+	if is_instance_valid(_bow):
+		_bow.queue_free()
+		_bow = null
+	match role:
+		"dagger":
+			var dagger = Dagger.new()
+			dagger.blade_length = 0.30
+			_hand_r.add_child(dagger)
+			dagger.position = Vector3(0,0,-0.02)
+			dagger.scale = Vector3.ONE*0.9
+			_melee_weapon = dagger
+		"sword":
+			var sword = Sword.new()
+			sword.sword_kind = 0
+			sword.blade_length = 0.62
+			_hand_r.add_child(sword)
+			sword.position = Vector3(0,0,-0.03)
+			sword.scale = Vector3.ONE*0.9
+			_melee_weapon = sword
+		"bow":
+			var bow = Bow.new()
+			bow.bow_kind = 1
+			bow.bow_length = 0.9
+			_hand_l.add_child(bow)
+			bow.position = Vector3(0,-0.02,0)
+			bow.scale = Vector3.ONE*0.9
+			bow.set_draw(0.0)
+			bow.set_arrow_visible(false)
+			_bow = bow
+
+func get_bow_origin() -> Vector3:
+	if is_instance_valid(_bow):
+		return _bow.get_arrow_origin()
+	return _hand_l.to_global(Vector3(0,-0.02,-0.20))
 
 func set_motion(velocity: Vector3, grounded: bool) -> void:
 	_speed = Vector2(velocity.x,velocity.z).length()
@@ -285,6 +338,20 @@ func _apply_pose(_delta: float) -> void:
 				_arm_l.rotation.x = -1.15*flinch
 				_arm_r.rotation.x = -1.05*flinch
 				head_rotation.x = 0.25*flinch
+	if is_instance_valid(_bow):
+		if _action == "SHOOT":
+			var aim := clampf(_action_time/0.30,0.0,1.0)
+			_arm_l.rotation = Vector3(lerpf(_arm_l.rotation.x,-1.40,aim),0.0,-0.05)
+			_elbow_l.rotation = Vector3(lerpf(_elbow_l.rotation.x,-0.10,aim),0.0,0.0)
+			_arm_r.rotation = Vector3(lerpf(_arm_r.rotation.x,-1.05,aim),0.0,0.22)
+			_elbow_r.rotation = Vector3(lerpf(_elbow_r.rotation.x,-1.30,aim),0.0,0.0)
+			torso_rotation.y = lerpf(torso_rotation.y,0.18,aim)
+			head_rotation.y = lerpf(head_rotation.y,-0.10,aim)
+			_bow.set_draw(minf(aim,1.0) if _action_time < 0.30 else 0.0)
+			_bow.set_arrow_visible(_action_time < 0.30)
+		else:
+			_bow.set_draw(0.0)
+			_bow.set_arrow_visible(false)
 	# The step layer must be applied after action poses so a step still reads
 	# as lateral travel instead of being cancelled by a claw pose.
 	if step_weight > 0.0:

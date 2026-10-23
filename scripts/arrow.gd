@@ -57,9 +57,16 @@ func _physics_process(delta: float) -> void:
 		flying = false
 		var collider: Object = hit.collider
 		var is_shield := collider.has_method("is_shield")
+		var damage_target: Object = collider.get_meta("ironwood_damage_target") if collider.has_meta("ironwood_damage_target") else null
+		var hit_player := damage_target != null and is_instance_valid(damage_target) and damage_target.has_method("take_damage")
 		var hit_enemy := collider.has_method("take_damage") and not is_shield
-		if hit_enemy and authoritative_damage:
-			collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
+		if authoritative_damage:
+			if hit_player:
+				# The frontier controller owns the player's two-argument
+				# take_damage; the bare CharacterBody has no damage method.
+				damage_target.take_damage(damage)
+			elif hit_enemy:
+				collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
 		# A shield intercepts the arrow without transferring damage to its
 		# owner. Players and shields keep the shaft so it visibly sticks where
 		# it landed; the arrow still times out with the existing age limit.

@@ -521,18 +521,21 @@ func _build_enemy_spawns() -> void:
 		Vector3(35, 1, -80), Vector3(8, 0, -91)
 	]:
 		enemy_spawns.append({"position": _ground(entry.x, entry.z), "kind": int(entry.y)})
-	# Cinder devil packs. The village-glade pack sits just outside the camp's
-	# 19 m safe ring; the western pack joins the existing woodland hunters.
-	var glade := Vector2(-20, 21)
-	for index in 5:
-		var angle := TAU * float(index) / 5.0
-		var point := glade + Vector2(cos(angle), sin(angle)) * 2.7
-		enemy_spawns.append({"position": _ground(point.x, point.y), "kind": 2, "pack_index": index})
-	var western := Vector2(-46, -30)
-	for index in 3:
-		var angle := TAU * float(index) / 3.0 + 0.4
-		var point := western + Vector2(cos(angle), sin(angle)) * 2.4
-		enemy_spawns.append({"position": _ground(point.x, point.y), "kind": 2, "pack_index": 5 + index})
+	# Cinder devil packs. The village glade pack sits just outside the camp's
+	# 19 m safe ring; the others hunt the woods, the south meadow and the ridge.
+	_add_devil_pack(Vector2(-20, 21), ["claw","dagger","sword","bow","claw"], 0)
+	_add_devil_pack(Vector2(-46, -30), ["bow","sword","dagger"], 5)
+	_add_devil_pack(Vector2(-20, -45), ["claw","sword","bow","dagger"], 8)
+	_add_devil_pack(Vector2(22, 58), ["claw","bow","dagger","sword"], 12)
+	_add_devil_pack(Vector2(-10, -70), ["bow","sword","claw","dagger"], 16)
+
+
+func _add_devil_pack(center: Vector2, weapons: Array, first_index: int) -> void:
+	for index in weapons.size():
+		var angle := TAU * float(index) / float(weapons.size()) + float(first_index) * 0.37
+		var point := center + Vector2(cos(angle), sin(angle)) * 2.6
+		enemy_spawns.append({"position": _ground(point.x, point.y), "kind": 2,
+			"pack_index": first_index + index, "weapon": str(weapons[index])})
 
 
 func _reserved(point: Vector2, margin: float) -> bool:
