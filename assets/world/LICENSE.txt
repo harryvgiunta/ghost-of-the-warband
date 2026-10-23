@@ -1,0 +1,22 @@
+IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
+
+Every texture under this directory (assets/world/textures/) is original,
+procedurally generated work authored for this repository. No third-party
+source imagery, scans, photo textures or paid packs were used or downloaded.
+
+Authoring source: tools/world_textures.py (deterministic Python, numpy and
+Pillow only). Running the tool regenerates every PNG in this directory
+byte-identically. Colour maps are authored in display (sRGB) space; normal
+maps are derived from authored height fields in the OpenGL convention
+(+Y up, green = up) and carry no baked directional light.
+
+Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
+alpha atlases, terrain detail and macro variation, rock and water normals,
+and building materials (planks, timber, plaster, shingles, stone).
+
+The textures are distributed under CC0 1.0 Universal (Public Domain
+Dedication), the same dedication used by the character assets in this
+repository:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+No attribution is required by CC0; this file records provenance.

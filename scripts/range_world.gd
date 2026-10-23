@@ -2,11 +2,22 @@ extends Node3D
 ## Seamless frontier: all public positions are world-space with this root at identity.
 
 const Geo = preload("res://scripts/geo.gd")
+const WorldStyleKit = preload("res://scripts/world/world_style.gd")
+const TreeKit = preload("res://scripts/world/tree_kit.gd")
+const WorldScatter = preload("res://scripts/world/scatter.gd")
+const GrassField = preload("res://scripts/world/grass_field.gd")
+const WorldEnvironmentKit = preload("res://scripts/world/environment_kit.gd")
+const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const WORLD_LIMIT := 145.0
 const GRID_STEP := 2.0
 const GRID_CELLS := 145
 const GRID_SIDE := GRID_CELLS + 1
 const BRIDGE_HEIGHT := 3.0
+const TREE_CANDIDATES := 1120
+const TREE_CHUNK := 44.0
+const BACKDROP_TREES := 520
+const GRASS_SEED := 93617
+const TREE_SEED := 73109
 
 var player_spawn: Vector3 = Vector3(0.0, 3.0, 35.0)
 var enemy_spawns: Array[Dictionary] = []
@@ -35,17 +46,28 @@ var _stone: StandardMaterial3D
 var _gold: StandardMaterial3D
 var _cyan: StandardMaterial3D
 var _activated: Dictionary = {}
+var style: WorldStyleKit
+var _tree_variants: Dictionary = {}
+var _tree_species: Dictionary = {}
+var _rock_material: StandardMaterial3D
 
 
 func _ready() -> void:
 	_rng.seed = 714209
-	_wood = Geo.material(Color("836044"))
-	_timber = Geo.material(Color("493e32"))
-	_plaster = Geo.material(Color("ddd0a5"))
-	_roof = Geo.material(Color("795045"))
-	_stone = Geo.material(Color("858a7c"))
+	style = WorldStyleKit.frontier()
+	var prop_tints: Dictionary = style.props.get("tints", {})
+	_wood = TextureLibrary.building_material("wood", prop_tints.get("wood", Color.WHITE))
+	_timber = TextureLibrary.building_material("timber", prop_tints.get("timber", Color.WHITE))
+	_plaster = TextureLibrary.building_material("plaster", prop_tints.get("plaster", Color.WHITE))
+	_roof = TextureLibrary.building_material("roof", prop_tints.get("roof", Color.WHITE))
+	_stone = TextureLibrary.building_material("stone", prop_tints.get("stone", Color.WHITE))
+	_rock_material = TextureLibrary.rock_material()
 	_gold = Geo.material(Color("b99b55"), 0.3)
+	_gold.metallic = 0.55
+	_gold.roughness = 0.36
 	_cyan = Geo.material(Color("558e92"), 0.2)
+	_cyan.metallic = 0.2
+	_cyan.roughness = 0.28
 	_solids = StaticBody3D.new()
 	_solids.name = "FrontierSolidObstacles"
 	_solids.collision_layer = 1
@@ -63,7 +85,9 @@ func _ready() -> void:
 	_build_waystone("ridge", "Suncrest Waystone", Vector2(-15, -100))
 	_build_enemy_spawns()
 	_build_woodland()
+	_build_backdrop_trees()
 	_build_rocks()
+	_build_ground_cover()
 	_build_signposts()
 	generation_stats["terrain_vertices"] = GRID_SIDE * GRID_SIDE
 	generation_stats["terrain_triangles"] = GRID_CELLS * GRID_CELLS * 2
@@ -71,40 +95,14 @@ func _ready() -> void:
 	generation_stats["obstacle_shapes"] = _solids.get_child_count()
 	generation_stats["paths"] = map_paths.size()
 	generation_stats["enemies"] = enemy_spawns.size()
+	generation_stats["texture_count"] = TextureLibrary.texture_count()
+	generation_stats["world_style"] = style.id
 
 
 func _build_lighting() -> void:
-	var sky_material := ProceduralSkyMaterial.new()
-	sky_material.sky_top_color = Color("789fab")
-	sky_material.sky_horizon_color = Color("dfdbc0")
-	sky_material.ground_bottom_color = Color("637057")
-	sky_material.ground_horizon_color = Color("c5cbb2")
-	var sky := Sky.new()
-	sky.sky_material = sky_material
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_SKY
-	environment.sky = sky
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("bed1d1")
-	environment.ambient_light_energy = 0.48
-	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	environment.fog_enabled = true
-	environment.fog_light_color = Color("c5d0bd")
-	environment.fog_light_energy = 0.7
-	environment.fog_density = 0.0022
-	environment.fog_sky_affect = 0.12
-	var world := WorldEnvironment.new()
-	world.environment = environment
-	add_child(world)
-	var sun := DirectionalLight3D.new()
-	sun.name = "WarmFrontierSun"
-	sun.rotation_degrees = Vector3(-48, -32, 0)
-	sun.light_color = Color("ffe2b3")
-	sun.light_energy = 0.95
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 110.0
-	sun.shadow_bias = 0.04
-	add_child(sun)
+	var built: Dictionary = WorldEnvironmentKit.build(self, style)
+	generation_stats["sky_texture"] = String(style.sky.get("texture", ""))
+	generation_stats["sun"] = built.get("sun") != null
 
 
 func _route_sample(x: float, z: float) -> Vector2:
@@ -186,14 +184,19 @@ func _build_terrain() -> void:
 			_heights[index] = height
 			vertices[index] = Vector3(x, height, z)
 			var shade: float = (sin(x * 0.21) * cos(z * 0.18) + 1.0) * 0.5
-			var color := Color("657c4e").lerp(Color("89935e"), shade * 0.65)
+			# Vertex colour is a light value/hue multiplier over the authored
+			# terrain textures; the texture supplies the material colour.
+			var color := Color(0.78, 0.84, 0.68).lerp(Color(0.96, 0.95, 0.78), shade * 0.7)
 			if z < -75.0:
-				color = color.lerp(Color("a0a184"), clampf((-z - 75.0) / 65.0, 0.0, 0.7))
+				color = color.lerp(Color(0.86, 0.84, 0.76), clampf((-z - 75.0) / 65.0, 0.0, 0.6))
 			var road_distance: float = _route_sample(x, z).x
-			color = color.lerp(Color("b5a17a"), 1.0 - smoothstep(1.5, 3.2, road_distance))
+			var dirt: float = 1.0 - smoothstep(1.5, 3.4, road_distance)
+			color = color.lerp(Color(1.0, 0.95, 0.84), dirt)
 			if height < 1.0:
-				color = Color("857d60")
-			color = color.lerp(Color("747b72"), smoothstep(120.0, 140.0, maxf(absf(x), absf(z))))
+				color = Color(0.62, 0.58, 0.48)
+				dirt = maxf(dirt, 0.55)
+			color = color.lerp(Color(0.80, 0.82, 0.84), smoothstep(120.0, 140.0, maxf(absf(x), absf(z))))
+			color.a = dirt
 			colors[index] = color
 	for iz in range(GRID_CELLS):
 		for ix in range(GRID_CELLS):
@@ -219,8 +222,7 @@ func _build_terrain() -> void:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var material := Geo.material(Color.WHITE)
-	material.vertex_color_use_as_albedo = true
+	var material := TextureLibrary.terrain_material(style)
 	Geo.mesh_node(self, mesh, material).name = "ContinuousFrontierTerrain"
 	var body := StaticBody3D.new()
 	body.name = "TerrainCollision"
@@ -378,10 +380,12 @@ func _build_house(point: Vector2, angle: float, label: String) -> void:
 
 
 func _build_water_and_bridge() -> void:
-	var water := Geo.material(Color("477f86"), 0.22, 0.26)
+	var water := TextureLibrary.water_material()
 	# Opaque water keeps Compatibility rendering stable; its shore is inside the carved bowl.
 	var pond := Geo.cylinder(self, 1, 1, 0.045, Vector3(22, 0.25, -10), water, 64)
+	pond.name = "Willowwater"
 	pond.scale = Vector3(7.75, 1, 26.35)
+	pond.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var bridge := _root_at("WillowBridge", Vector3(22, BRIDGE_HEIGHT, -10))
 	_solid_box(bridge, Vector3(22, 0.35, 4.8), Vector3(0, -0.175, 0), _timber)
 	for i in range(44):
@@ -561,113 +565,227 @@ func _reserved(point: Vector2, margin: float) -> bool:
 
 
 func _build_woodland() -> void:
-	var trunks: Array[Transform3D] = []
-	var pine_dark: Array[Transform3D] = []
-	var pine_light: Array[Transform3D] = []
-	var oak: Array[Transform3D] = []
-	var amber: Array[Transform3D] = []
-	for i in range(560):
+	_tree_variants.clear()
+	_tree_species.clear()
+	var species_list: Array = style.trees
+	var total_weight := 0.0
+	for species in species_list:
+		total_weight += maxf(0.0, float(species.get("weight", 1.0)))
+		_tree_species[String(species.get("id", ""))] = species
+	var trunks: Dictionary = {}
+	var leaves: Dictionary = {}
+	var tree_count := 0
+	for i in range(TREE_CANDIDATES):
 		var point := Vector2(_rng.randf_range(-126, 126), _rng.randf_range(-126, 124))
 		if _reserved(point, 6.5):
 			continue
 		# More open meadow in the south; dense woodland on the west and northern shoulders.
 		if point.y > 45.0 and i % 3 != 0:
 			continue
-		var base := _ground(point.x, point.y)
-		var height: float = _rng.randf_range(7.0, 12.0)
-		var radius: float = height * 0.045
-		trunks.append(Transform3D(Basis.IDENTITY.scaled(Vector3(radius, height * 0.8, radius)), base + Vector3(0, height * 0.4, 0)))
-		var collision := CollisionShape3D.new()
-		var shape := CylinderShape3D.new()
-		shape.radius = radius
-		shape.height = height * 0.8
-		collision.shape = shape
-		collision.position = base + Vector3(0, shape.height * 0.5, 0)
-		_solids.add_child(collision)
-		if i % 3 != 0:
-			for layer in range(3):
-				var width: float = height * (0.30 - float(layer) * 0.065)
-				var branch_transform := Transform3D(Basis(Vector3.UP, float(i)).scaled(Vector3(width, height * 0.49, width)), base + Vector3(0, height * (0.48 + float(layer) * 0.19), 0))
-				if layer == 1:
-					pine_light.append(branch_transform)
-				else:
-					pine_dark.append(branch_transform)
-		else:
-			for branch in range(3):
-				var crown_transform := Transform3D(Basis(Vector3.UP, float(i)).scaled(Vector3(height * 0.25, height * 0.23, height * 0.24)), base + Vector3(float(branch - 1) * height * 0.16, height * (0.73 + float(branch % 2) * 0.12), 0))
-				if i % 4 == 0:
-					amber.append(crown_transform)
-				else:
-					oak.append(crown_transform)
-	var trunk_mesh := CylinderMesh.new()
-	trunk_mesh.bottom_radius = 1.0
-	trunk_mesh.top_radius = 0.68
-	trunk_mesh.height = 1.0
-	trunk_mesh.radial_segments = 7
-	_batch("BatchedTreeTrunks", trunk_mesh, _timber, trunks)
-	var cone := CylinderMesh.new()
-	cone.bottom_radius = 1.0
-	cone.top_radius = 0.0
-	cone.height = 1.0
-	cone.radial_segments = 7
-	_batch("BatchedPineShade", cone, Geo.material(Color("315e49")), pine_dark)
-	_batch("BatchedPineLight", cone, Geo.material(Color("54805a")), pine_light)
-	var crown := SphereMesh.new()
-	crown.radius = 1.0
-	crown.height = 2.0
-	crown.radial_segments = 7
-	crown.rings = 4
-	_batch("BatchedOakCrowns", crown, Geo.material(Color("78934f")), oak)
-	_batch("BatchedAmberCrowns", crown, Geo.material(Color("b2a65d")), amber)
-	generation_stats["trees"] = trunks.size()
-	_build_grass()
-
-
-func _build_grass() -> void:
-	var vertices := PackedVector3Array()
-	var normals := PackedVector3Array()
-	for i in range(3):
-		var angle: float = float(i) * PI / 3.0
-		var side := Vector3(cos(angle), 0, sin(angle)) * 0.22
-		vertices.append_array(PackedVector3Array([-side, side, Vector3(0.06, 0.6 + float(i) * 0.06, 0)]))
-		normals.append_array(PackedVector3Array([Vector3.UP, Vector3.UP, Vector3.UP]))
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var material := Geo.material(Color("879853"))
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var grass: Array[Transform3D] = []
-	for i in range(4200):
-		var point := Vector2(_rng.randf_range(-122, 122), _rng.randf_range(-122, 122))
-		if _reserved(point, 3.0):
+		var species: Dictionary = _pick_species(species_list, total_weight)
+		if species.is_empty():
 			continue
-		var scale_at: float = _rng.randf_range(0.6, 1.5)
-		grass.append(Transform3D(Basis(Vector3.UP, _rng.randf_range(0, TAU)).scaled(Vector3.ONE * scale_at), _ground(point.x, point.y)))
-	_batch("BatchedMeadowGrass", mesh, material, grass, false)
-	generation_stats["grass_clumps"] = grass.size()
+		var variants: Array = _variants_for(species)
+		if variants.is_empty():
+			continue
+		var variant_index := _rng.randi_range(0, variants.size() - 1)
+		var variant: Dictionary = variants[variant_index]
+		var base := _ground(point.x, point.y)
+		var scale_at := _rng.randf_range(0.86, 1.14)
+		var xform := Transform3D(Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale_at), base)
+		var key := "%s|%d" % [String(species["id"]), variant_index]
+		if not trunks.has(key):
+			trunks[key] = [] as Array[Dictionary]
+			leaves[key] = [] as Array[Dictionary]
+		(trunks[key] as Array[Dictionary]).append({
+			"transform": xform,
+			"color": _pick_color(species.get("bark_tints", []), Color.WHITE),
+		})
+		if variant.get("leaves") != null:
+			(leaves[key] as Array[Dictionary]).append({
+				"transform": xform,
+				"color": _pick_color(species.get("tints", []), Color.WHITE),
+			})
+		# Trunk collision follows the authored trunk; crowns never block arrows.
+		var tree_height: float = float(variant.get("height", 8.0)) * scale_at
+		var trunk_spec: Vector2 = species.get("trunk", Vector2(0.04, 0.62))
+		var trunk_height := maxf(1.4, tree_height * float(trunk_spec.y) * 0.95)
+		var trunk_radius := maxf(0.16, tree_height * float(trunk_spec.x) * 1.04)
+		var shape := CylinderShape3D.new()
+		shape.radius = trunk_radius
+		shape.height = trunk_height
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		collision.position = base + Vector3(0, trunk_height * 0.5, 0)
+		_solids.add_child(collision)
+		tree_count += 1
+	# Batch each species/variant pair once; WorldScatter splits it into 44 m chunks.
+	var variant_total := 0
+	for key in trunks.keys():
+		var parts := String(key).split("|")
+		var species: Dictionary = _tree_species.get(parts[0], {})
+		var variants: Array = _tree_variants.get(parts[0], [])
+		if species.is_empty() or variants.is_empty():
+			continue
+		var variant: Dictionary = variants[int(parts[1])]
+		var label := String(parts[0]) + "_" + String(parts[1])
+		WorldScatter.batch(self, "TreeTrunk_" + label, variant["trunk"],
+			TextureLibrary.bark_material(String(variant["bark"])), trunks[key], TREE_CHUNK,
+			{"cast_shadow": true})
+		if variant.get("leaves") != null and not (leaves[key] as Array).is_empty():
+			WorldScatter.batch(self, "TreeLeaves_" + label, variant["leaves"],
+				TextureLibrary.foliage_material_tuned(String(variant["leaves_texture"]), variant["wind"]),
+				leaves[key], TREE_CHUNK, {"cast_shadow": true})
+	for values in _tree_variants.values():
+		variant_total += (values as Array).size()
+	generation_stats["trees"] = tree_count
+	generation_stats["tree_instances"] = tree_count
+	generation_stats["tree_variants"] = variant_total
+
+
+func _build_backdrop_trees() -> void:
+	# A high, uncollidable treeline closes the horizon above the enclosing hills.
+	var pine: Dictionary = style.species_by_id("briar_pine")
+	var oak: Dictionary = style.species_by_id("ironoak")
+	if pine.is_empty() or oak.is_empty():
+		return
+	var pine_variants := _variants_for(pine)
+	var oak_variants := _variants_for(oak)
+	var pine_buckets: Dictionary = {}
+	var oak_buckets: Dictionary = {}
+	var placed := 0
+	for i in range(BACKDROP_TREES):
+		var angle := _rng.randf_range(0.0, TAU)
+		var distance := _rng.randf_range(120.0, 143.0)
+		var point := Vector2(cos(angle) * distance, sin(angle) * distance)
+		var base := _ground(point.x, point.y)
+		if base.y > 40.0 and i % 2 == 0:
+			continue
+		var use_oak := i % 3 == 0
+		var variants: Array = oak_variants if use_oak else pine_variants
+		if variants.is_empty():
+			continue
+		var variant_index := _rng.randi_range(0, variants.size() - 1)
+		var bucket: Dictionary = oak_buckets if use_oak else pine_buckets
+		if not bucket.has(variant_index):
+			bucket[variant_index] = [] as Array[Dictionary]
+		var species: Dictionary = oak if use_oak else pine
+		var scale_at := _rng.randf_range(1.05, 1.55)
+		var xform := Transform3D(Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale_at), base)
+		(bucket[variant_index] as Array[Dictionary]).append({
+			"transform": xform,
+			"color": _pick_color(species.get("tints", []), Color.WHITE),
+		})
+		placed += 1
+	for bucket_info in [[pine, pine_variants, pine_buckets], [oak, oak_variants, oak_buckets]]:
+		var species: Dictionary = bucket_info[0]
+		var variants: Array = bucket_info[1]
+		var buckets: Dictionary = bucket_info[2]
+		for variant_index in buckets.keys():
+			var variant: Dictionary = variants[int(variant_index)]
+			var label := "%s_%d" % [String(species["id"]), int(variant_index)]
+			WorldScatter.batch(self, "BackdropTrunk_" + label, variant["trunk"],
+				TextureLibrary.bark_material(String(variant["bark"])), buckets[variant_index],
+				TREE_CHUNK, {"cast_shadow": false})
+			if variant.get("leaves") != null:
+				WorldScatter.batch(self, "BackdropLeaves_" + label, variant["leaves"],
+					TextureLibrary.foliage_material_tuned(String(variant["leaves_texture"]), variant["wind"]),
+					buckets[variant_index], TREE_CHUNK, {"cast_shadow": false})
+	generation_stats["backdrop_trees"] = placed
+
+
+func _build_ground_cover() -> void:
+	var counts: Dictionary = GrassField.build(self, style, _ground_point, _grass_reserved, GRASS_SEED)
+	generation_stats["grass_instances"] = int(counts.get("grass", 0))
+	generation_stats["flower_instances"] = int(counts.get("flowers", 0))
+	generation_stats["fern_instances"] = int(counts.get("ferns", 0))
+	generation_stats["ground_cover_chunks"] = int(counts.get("chunks", 0))
+
+
+func _ground_point(point: Vector2) -> Vector3:
+	return _ground(point.x, point.y)
+
+
+func _grass_reserved(point: Vector2) -> bool:
+	if maxf(absf(point.x), absf(point.y)) > 119.0:
+		return true
+	if _route_sample(point.x, point.y).x < 2.1:
+		return true
+	if Vector2((point.x - 22.0) / 11.5, (point.y + 10.0) / 35.5).length() < 1.02:
+		return true
+	if point.distance_to(Vector2(4, 35)) < 3.4:
+		return true
+	if point.distance_to(Vector2(-7, 28)) < 3.6:
+		return true
+	for house in [Vector2(-15, 42), Vector2(15, 42), Vector2(-15, 16), Vector2(15, 16)]:
+		if point.distance_to(house) < 5.4:
+			return true
+	if absf(point.x - 55.0) < 18.0 and absf(point.y + 60.0) < 18.0:
+		return true
+	if point.distance_to(Vector2(-15, -100)) < 8.5:
+		return true
+	for entry in interactables:
+		var location: Vector3 = entry["position"]
+		if point.distance_to(Vector2(location.x, location.z)) < 2.6:
+			return true
+	return false
 
 
 func _build_rocks() -> void:
-	for i in range(60):
+	var variants: Array = []
+	for index in range(3):
+		var mesh := SphereMesh.new()
+		mesh.radius = 1.0
+		mesh.height = 1.65
+		mesh.radial_segments = 7
+		mesh.rings = 4
+		variants.append(mesh)
+	var boulders: Array = [ [] as Array[Dictionary], [] as Array[Dictionary], [] as Array[Dictionary] ]
+	var tints: Array = style.ground_cover.get("rocks", {}).get("tints", [])
+	for i in range(72):
 		var point := Vector2(_rng.randf_range(-124, 124), _rng.randf_range(-124, 112))
 		if _reserved(point, 7.0):
 			continue
-		var radius: float = _rng.randf_range(0.8, 2.2)
 		var base := _ground(point.x, point.y)
-		var mesh := SphereMesh.new()
-		mesh.radius = radius
-		mesh.height = radius * 1.6
-		mesh.radial_segments = 6
-		mesh.rings = 3
-		var visual := Geo.mesh_node(self, mesh, _stone, base + Vector3(0, radius * 0.45, 0))
-		visual.rotation.y = _rng.randf_range(0, TAU)
+		var radius: float = _rng.randf_range(0.7, 2.1)
+		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3(
+			radius * _rng.randf_range(0.95, 1.3),
+			radius * _rng.randf_range(0.55, 0.9),
+			radius * _rng.randf_range(0.95, 1.3)))
+		var scale_y := basis.get_scale().y
+		var xform := Transform3D(basis, base + Vector3(0, scale_y * 0.825, 0))
+		var bucket: Array[Dictionary] = boulders[i % 3]
+		bucket.append({"transform": xform, "color": _pick_color(tints, Color.WHITE)})
+		var shape := SphereShape3D.new()
+		shape.radius = maxf(basis.get_scale().x, basis.get_scale().z) * 0.92
 		var collision := CollisionShape3D.new()
-		collision.shape = mesh.create_convex_shape()
-		collision.transform = visual.transform
+		collision.shape = shape
+		collision.position = xform.origin
 		_solids.add_child(collision)
+	for index in range(3):
+		WorldScatter.batch(self, "Boulder_%d" % index, variants[index], _rock_material, boulders[index], 48.0,
+			{"cast_shadow": true})
+	var pebble_mesh := SphereMesh.new()
+	pebble_mesh.radius = 1.0
+	pebble_mesh.height = 1.25
+	pebble_mesh.radial_segments = 6
+	pebble_mesh.rings = 3
+	var pebble_tints: Array = style.ground_cover.get("pebbles", {}).get("tints", [])
+	var pebbles: Array[Dictionary] = []
+	for i in range(220):
+		var point := Vector2(_rng.randf_range(-118, 118), _rng.randf_range(-118, 112))
+		if _reserved(point, 4.5):
+			continue
+		var base := _ground(point.x, point.y)
+		var size_at := _rng.randf_range(0.09, 0.28)
+		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3(size_at, size_at * 0.7, size_at))
+		pebbles.append({
+			"transform": Transform3D(basis, base + Vector3(0, size_at * 0.44, 0)),
+			"color": _pick_color(pebble_tints, Color.WHITE),
+		})
+	WorldScatter.batch(self, "Pebbles", pebble_mesh, _rock_material, pebbles, 32.0,
+		{"visible_end": 52.0, "cast_shadow": false})
+	generation_stats["rocks"] = 72
 
 
 func _build_signposts() -> void:
@@ -689,22 +807,37 @@ func _build_signposts() -> void:
 		root.add_child(label)
 
 
-func _batch(label: String, mesh: Mesh, material: Material, transforms: Array[Transform3D], shadows: bool = true) -> void:
-	if transforms.is_empty():
-		return
-	var batch := MultiMesh.new()
-	batch.transform_format = MultiMesh.TRANSFORM_3D
-	batch.mesh = mesh
-	batch.instance_count = transforms.size()
-	for i in range(transforms.size()):
-		batch.set_instance_transform(i, transforms[i])
-	var instance := MultiMeshInstance3D.new()
-	instance.name = label
-	instance.multimesh = batch
-	instance.material_override = material
-	if not shadows:
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(instance)
+func _variants_for(species: Dictionary) -> Array:
+	var species_id := String(species.get("id", ""))
+	if _tree_variants.has(species_id):
+		return _tree_variants[species_id]
+	var variants: Array = TreeKit.build_variants(species, TREE_SEED + _stable_seed(species_id))
+	_tree_variants[species_id] = variants
+	return variants
+
+
+func _pick_species(species_list: Array, total_weight: float) -> Dictionary:
+	if species_list.is_empty():
+		return {}
+	var roll := _rng.randf() * maxf(total_weight, 0.0001)
+	for species in species_list:
+		roll -= maxf(0.0, float(species.get("weight", 1.0)))
+		if roll <= 0.0:
+			return species
+	return species_list[species_list.size() - 1]
+
+
+func _pick_color(pool: Array, fallback: Color) -> Color:
+	if pool.is_empty():
+		return fallback
+	return pool[_rng.randi_range(0, pool.size() - 1)]
+
+
+static func _stable_seed(text: String) -> int:
+	var value := 17
+	for i in range(text.length()):
+		value = (value * 31 + text.unicode_at(i)) & 0x7fffffff
+	return value
 
 
 func _count_nodes(node: Node) -> int:

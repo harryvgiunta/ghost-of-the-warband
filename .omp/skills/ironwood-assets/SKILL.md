@@ -26,6 +26,7 @@ Read [the project skill](../ironwood-archer/SKILL.md) for gameplay and toolchain
 | `scripts/geo.gd` | Primitive mesh helpers; meters, Y-up; materials supplied to `mesh_node()` become `material_override`. |
 | `scripts/enemy.gd` | `kind == 0` BriarWolf attaches the imported wolf through `_build_wolf_visual()`; `kind == 1` RuinSentinel keeps its primitive presentation and shares the behavior script. |
 | `.runtime/character-source` | Ignored source-download workspace for the existing character. Ignored `.runtime` is not permanent storage for new irreplaceable authored work. |
+| `assets/world/textures/`, `assets/world/world_textures.json`, `tools/world_textures.py` | Original, deterministic procedural world textures (CC0) plus a manifest. Woodland/arena trees and grass are runtime-generated meshes in `scripts/world/`, not Blender assets; do not model replacement trees in Blender for this pipeline or substitute downloaded textures. |
 | Managed Godot / Blender | Existing Windows engine path and Blender 5.1 path appear in the references; honor `GODOT_PATH`. No Blender MCP or image/3D generation service is mounted. |
 
 Re-read affected code before acting: these facts can change. Search unknown behavior with `find`; locate known names with `grep`/`glob`, then read bounded sections. Inventory existing scenes, materials, textures, source metadata, and actual callers before downloading or building anything.

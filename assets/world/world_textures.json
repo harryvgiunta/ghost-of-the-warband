@@ -1,0 +1,308 @@
+{
+ "generator": "tools/world_textures.py",
+ "seed": 20261023,
+ "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
+ "file_count": 28,
+ "total_bytes": 11324908,
+ "textures": [
+  {
+   "id": "sky_frontier",
+   "file": "sky_frontier.png",
+   "size": [
+    4096,
+    2048
+   ],
+   "channels": 3,
+   "tiling": "u",
+   "n_version": null,
+   "kind": "sky",
+   "description": "Painterly midday equirectangular sky: deep blue zenith, layered cumulus with sun-side rims, high cirrus, thin warm haze, hazy ridges, dither; seamless at u."
+  },
+  {
+   "id": "bark_oak",
+   "file": "bark_oak.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_oak_n.png",
+   "kind": "bark",
+   "description": "Warm grey-brown oak bark with deep vertical fissures and knots."
+  },
+  {
+   "id": "bark_pine",
+   "file": "bark_pine.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_pine_n.png",
+   "kind": "bark",
+   "description": "Reddish-brown pine bark in flaking plates with dark grooves."
+  },
+  {
+   "id": "bark_birch",
+   "file": "bark_birch.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_birch_n.png",
+   "kind": "bark",
+   "description": "Off-white birch bark, horizontal dark scars, sparse lenticels."
+  },
+  {
+   "id": "bark_dead",
+   "file": "bark_dead.png",
+   "size": [
+    256,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bark_dead_n.png",
+   "kind": "bark",
+   "description": "Pale weathered dead-wood bark, cracked grey splits."
+  },
+  {
+   "id": "leaves_broadleaf",
+   "file": "leaves_broadleaf.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 oak/broadleaf cluster cards (green), flat mid-tone, vein detail."
+  },
+  {
+   "id": "leaves_amber",
+   "file": "leaves_amber.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 autumn rowan cluster cards in gold and orange."
+  },
+  {
+   "id": "leaves_birch",
+   "file": "leaves_birch.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 silver-birch twig cards with small light-green leaves."
+  },
+  {
+   "id": "needles_pine",
+   "file": "needles_pine.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "foliage",
+   "description": "2x2 pine needle fan sprigs on short branches."
+  },
+  {
+   "id": "grass_meadow",
+   "file": "grass_meadow.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "2x2 pale-green upright grass tufts (tint friendly)."
+  },
+  {
+   "id": "flowers",
+   "file": "flowers.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "4x2 wildflower cards: daisy, buttercup, poppy, cornflower, campion, yarrow, marigold, violet."
+  },
+  {
+   "id": "fern",
+   "file": "fern.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "groundcover",
+   "description": "2x2 fern fronds with serrated pinnae."
+  },
+  {
+   "id": "terrain_grass",
+   "file": "terrain_grass.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "Fine meadow grass and clover detail for the terrain shader."
+  },
+  {
+   "id": "terrain_dirt",
+   "file": "terrain_dirt.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "Packed trail dirt with small stones and cracks."
+  },
+  {
+   "id": "terrain_rock",
+   "file": "terrain_rock.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "Scree and fractured rock face with moss patches."
+  },
+  {
+   "id": "terrain_macro",
+   "file": "terrain_macro.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "terrain",
+   "description": "Low-frequency grey-green mottling for macro terrain variation."
+  },
+  {
+   "id": "rock",
+   "file": "rock.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "rock_n.png",
+   "kind": "prop",
+   "description": "Seamless granite boulder surface with moss and lichen."
+  },
+  {
+   "id": "wood_planks",
+   "file": "wood_planks.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Warm horizontal timber planks with staggered butt joints."
+  },
+  {
+   "id": "timber",
+   "file": "timber.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Dark aged structural timber with cracks and iron pegs."
+  },
+  {
+   "id": "plaster",
+   "file": "plaster.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Warm lime plaster with patchy tone, hairline cracks and grit."
+  },
+  {
+   "id": "roof_shingles",
+   "file": "roof_shingles.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Weathered wooden roof shingles in staggered rows with moss."
+  },
+  {
+   "id": "stone_blocks",
+   "file": "stone_blocks.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "building",
+   "description": "Ashlar stone block coursing with mortar joints and pits."
+  },
+  {
+   "id": "water_normal",
+   "file": "water_normal.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": null,
+   "kind": "effect",
+   "description": "Tileable animated ripple normal map (OpenGL +Y up)."
+  }
+ ]
+}
