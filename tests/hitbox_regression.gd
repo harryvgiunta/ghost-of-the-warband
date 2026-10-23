@@ -133,9 +133,10 @@ func run() -> void:
 	attacker.combat.set_aim(Vector3(-30, 1.2, -50))
 	await physics_frame
 	var samples: Array[Dictionary] = []
-	var recorder := func(previous_base: Vector3, previous_tip: Vector3,
+	var recorder := func(hand: String, previous_base: Vector3, previous_tip: Vector3,
 			current_base: Vector3, current_tip: Vector3, radius: float) -> void:
-		samples.append({"base":current_base,"tip":current_tip})
+		if hand == "right":
+			samples.append({"base":current_base,"tip":current_tip})
 	attacker.rig.melee_sweep.connect(recorder)
 	attacker.combat.damage_enabled = false
 	check(attacker.combat.begin_melee(), "The head-zone check starts a real authored swing")

@@ -8,6 +8,7 @@ signal bow_selected(index: int)
 signal armor_selected(index: int)
 signal sword_selected(index: int)
 signal weapon_selected(value: String)
+signal shield_selected(active: bool)
 
 const UI = preload("res://scripts/hud.gd")
 var reticle := Vector2.ZERO
@@ -29,6 +30,8 @@ var bow_buttons: Array[Button] = []
 var armor_buttons: Array[Button] = []
 var sword_buttons: Array[Button] = []
 var weapon_buttons: Array[Button] = []
+var shield_button: Button
+var dual_button: Button
 var _ui := UI.new()
 
 func _ready() -> void:
@@ -103,7 +106,7 @@ func _ready() -> void:
 	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(480,98))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB/Q  Attack   HOLD T  Throw   HOLD RMB  Guard / peek   X  Lookout",Vector2(15,35),12,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Left / draw   RMB  Right / guard / peek   HOLD T  Throw   X  Lookout",Vector2(15,35),12,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -111,12 +114,17 @@ func _ready() -> void:
 	var equipment := _ui._panel(match_ui,Vector2(24,-360),Vector2(330,317))
 	equipment.set_anchors_preset(Control.PRESET_BOTTOM_LEFT,true)
 	for index in 3:
-		var button := _ui._button(equipment,["1  BOW","2  SWORD","3  DAGGER"][index],Vector2(12+index*105,12),Vector2(98,32))
+		var button := _ui._button(equipment,["1 BOW","2 SWD","3 DAG"][index],Vector2(12+index*78,12),Vector2(74,32))
 		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",11)
-		button.size = Vector2(98,32)
+		button.add_theme_font_size_override("font_size",10)
+		button.size = Vector2(74,32)
 		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword" if index == 1 else "dagger"))
 		weapon_buttons.append(button)
+	dual_button = _ui._button(equipment,"5 DUAL",Vector2(246,12),Vector2(74,32))
+	dual_button.toggle_mode = true
+	dual_button.add_theme_font_size_override("font_size",10)
+	dual_button.size = Vector2(74,32)
+	dual_button.pressed.connect(func(): weapon_selected.emit("dual"))
 	_ui._label(equipment,"BOW SIZE / CLICK",Vector2(14,56),11,UI.GOLD)
 	_ui._label(equipment,"SWORD SIZE / CLICK",Vector2(174,56),11,UI.GOLD)
 	for index in 3:
@@ -141,11 +149,15 @@ func _ready() -> void:
 		button.size = Vector2(100,32)
 		button.pressed.connect(func(): armor_selected.emit(index))
 		armor_buttons.append(button)
-	_ui._label(equipment,"1 bow / 2 sword / 3 dagger. Sizes: mouse.\nRMB: guard. T: throw the equipped weapon.",Vector2(14,274),11,UI.MUTED)
+	shield_button = _ui._button(equipment,"4  SHIELD",Vector2(12,268),Vector2(100,28))
+	shield_button.toggle_mode = true
+	shield_button.add_theme_font_size_override("font_size",11)
+	shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
+	_ui._label(equipment,"1-4 gear / 5 dual. LMB left, RMB right; no guard.",Vector2(14,301),10,UI.MUTED)
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   HOLD T  Throw sword / dagger   1  Bow   2  Sword   3  Dagger   SHIFT + SPACE  Roll   ESC / I  Equipment cursor",Vector2(-560,-25),12,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   HOLD LMB  Draw   RELEASE  Shoot   HOLD T  Throw   1 Bow  2 Sword  3 Dagger  4 Shield  5 Dual   SHIFT + SPACE  Roll   ESC / I  Equipment",Vector2(-560,-25),12,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -175,14 +187,27 @@ func update_match(state: Dictionary) -> void:
 	health_label.text = "HEALTH  %d / 100   /   %s" % [int(state.health),str(state.movement)]
 	var drawing: bool = state.phase in ["DRAWING","HOLDING"]
 	var throwing: bool = state.phase in ["T_DRAW","T_HOLD"]
-	if drawing:
+	var left_melee := float(state.get("left_melee",1.0))
+	var right_melee := float(state.get("right_melee",1.0))
+	if state.weapon == "dual" and (left_melee < 0.999999 or right_melee < 0.999999):
+		attack_label.text = "DUAL  /  LEFT %s  /  RIGHT %s" % [_melee_pct(left_melee),_melee_pct(right_melee)]
+		if state.get("attack_parry",false):
+			attack_label.text += "  /  ATTACK PARRY"
+	elif drawing:
 		attack_label.text = "DRAW %.0f%% / DAMAGE x%.2f / RELEASE TO FIRE" % [float(state.draw)*100,float(state.draw)]
 	elif throwing:
 		attack_label.text = "THROW %.0f%% / DAMAGE x%.2f / RELEASE TO THROW" % [float(state.draw)*100,float(state.draw)]
-	elif state.phase == "MELEE":
-		attack_label.text = ("QUICK STAB / %.2f s SWING" if state.weapon == "dagger" else "OVERHAND CHOP / %.1f s SWING") % float(state.attack_interval)
+	elif state.phase in ["MELEE","MELEE_L"]:
+		if state.weapon == "dual":
+			attack_label.text = ("LEFT DAGGER STAB / %.2f s" if state.phase == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % float(state.attack_interval)
+			if state.get("attack_parry",false):
+				attack_label.text += "  /  ATTACK PARRY"
+		else:
+			attack_label.text = ("QUICK STAB / %.2f s SWING" if state.weapon == "dagger" else "OVERHAND CHOP / %.1f s SWING") % float(state.attack_interval)
 	elif state.get("blocking",false):
-		if state.weapon == "dagger":
+		if state.get("shield",false):
+			attack_label.text = "SHIELD UP / FRONT ARROWS STOP"
+		elif state.weapon == "dagger":
 			attack_label.text = "WEAK GUARD / DAGGER ONLY SOFTENS THE HIT"
 		else:
 			attack_label.text = "PARRY WINDOW / COUNTER NOW" if state.get("parry",false) else "GUARDING / HOLD RMB"
@@ -193,7 +218,14 @@ func update_match(state: Dictionary) -> void:
 	elif float(state.attack_progress) < 0.999999:
 		attack_label.text = "RECOVERY %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	else:
-		attack_label.text = "READY / HOLD LMB, AIM, RELEASE" if state.weapon == "bow" else ("READY / CLICK FOR A QUICK STAB / HOLD T TO THROW" if state.weapon == "dagger" else "READY / CLICK FOR AN OVERHAND CHOP / HOLD T TO THROW")
+		if state.weapon == "dual":
+			attack_label.text = "DUAL WIELD / LMB LEFT STAB / RMB RIGHT CHOP / NO GUARD"
+		elif state.weapon == "bow":
+			attack_label.text = "READY / HOLD LMB, AIM, RELEASE"
+		elif state.weapon == "dagger":
+			attack_label.text = "READY / CLICK FOR A QUICK STAB / HOLD T TO THROW"
+		else:
+			attack_label.text = "READY / CLICK FOR AN OVERHAND CHOP / HOLD T TO THROW"
 	bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
 	respawn_label.text = "RESPAWNING IN %.1f" % float(state.respawn) if float(state.respawn) > 0 else ""
 	for index in 3:
@@ -203,6 +235,14 @@ func update_match(state: Dictionary) -> void:
 	weapon_buttons[0].set_pressed_no_signal(state.weapon == "bow")
 	weapon_buttons[1].set_pressed_no_signal(state.weapon == "sword")
 	weapon_buttons[2].set_pressed_no_signal(state.weapon == "dagger")
+	dual_button.set_pressed_no_signal(state.weapon == "dual")
+	dual_button.disabled = int(state.sword) == 2
+	var shield_allowed: bool = state.weapon == "dagger" or (state.weapon == "sword" and int(state.sword) == 1)
+	shield_button.set_pressed_no_signal(bool(state.get("shield",false)))
+	shield_button.disabled = not shield_allowed
+
+func _melee_pct(value: float) -> String:
+	return "READY" if value >= 0.999999 else "%d%%" % int(value*100.0)
 
 func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: bool, sliding: bool) -> void:
 	var stance := "SLIDING" if sliding else "CROUCHED" if crouched else "OPEN"

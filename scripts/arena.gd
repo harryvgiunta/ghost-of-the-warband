@@ -78,6 +78,7 @@ func _ready() -> void:
 	hud.armor_selected.connect(func(index: int): send_action("armor",index))
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
 	hud.weapon_selected.connect(func(value: String): send_action("weapon",value))
+	hud.shield_selected.connect(func(active: bool): send_action("shield",active))
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 4
@@ -413,7 +414,7 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 func send_action(action: String, value: Variant = null) -> void:
 	if local_slot < 0:
 		return
-	if action in ["bow","sword","weapon","armor"]:
+	if action in ["bow","sword","weapon","armor","shield"]:
 		_cancel_draw_input()
 	if action in ["draw","throw"] and not _peek_held and actors[local_slot].rig.phase == "READY":
 		_capture_peek_context()
@@ -443,10 +444,16 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
 				actor.update_combat_cover_side()
-				if actor.rig.weapon in ["sword","dagger"]:
+				if actor.rig.weapon == "dual":
+					actor.combat.begin_melee("left")
+				elif actor.rig.weapon in ["sword","dagger"]:
 					actor.combat.begin_melee()
 				else:
 					actor.combat.begin_draw()
+		"attack_right":
+			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
+				actor.update_combat_cover_side()
+				actor.combat.begin_melee("right")
 		"release":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick):
 				actor.update_combat_cover_side()
@@ -497,9 +504,19 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_sword(value)
 		"weapon":
-			if typeof(value) == TYPE_STRING and value in ["bow","sword","dagger"]:
+			if typeof(value) == TYPE_STRING and value in ["bow","sword","dagger","dual"]:
+				var requested := str(value)
+				if requested == "dual":
+					if actor.rig.weapon == "dual":
+						requested = "sword"
+					elif actor.rig.sword_index == 2:
+						return
 				actor.combat.stop()
-				actor.rig.set_weapon(value)
+				actor.rig.set_weapon(requested)
+		"shield":
+			if typeof(value) == TYPE_BOOL:
+				actor.combat.stop()
+				actor.rig.set_shield(value)
 		"armor":
 			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
 				actor.rig.set_armor(value)
@@ -515,7 +532,7 @@ func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, cha
 func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, damage: float, authoritative: bool) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = slot
-	arrow.hit_mask = 1 | 4
+	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
 	var excluded: Array[RID] = [actors[slot].get_rid()]
@@ -616,7 +633,10 @@ func _process(delta: float) -> void:
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
 		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_index,"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
-		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and actor.combat.block_time <= Combat.PARRY_WINDOW})
+		"shield":actor.rig.shield_equipped,
+		"left_melee":actor.rig.melee_progress_for("left"),"right_melee":actor.rig.melee_progress_for("right"),
+		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
+		"attack_parry":actor.rig.weapon == "dual" and actor.rig.in_strike_window()})
 	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched,actor.rig.slide_progress >= 0.0)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
@@ -662,7 +682,8 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
-		send_action("block",{"pressed":false,"forward":Vector3.ZERO})
+		if actors[local_slot].rig.weapon != "dual":
+			send_action("block",{"pressed":false,"forward":Vector3.ZERO})
 		_send_peek_input()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _mouse_drawing:
@@ -699,6 +720,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
 			KEY_3: send_action("weapon","dagger")
+			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
+			KEY_5: send_action("weapon","dual")
 			KEY_C:
 				if not _cursor_free:
 					send_action("crouch",not actors[local_slot].cover.crouch_requested)
@@ -736,10 +759,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				send_action("draw",_crosshair_aim())
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_set_cursor_free(false)
-			_peek_held = true
-			_capture_peek_context()
-			_send_peek_input()
-			send_action("block",{"pressed":true,"forward":Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw))})
+			if actors[local_slot].rig.weapon == "dual":
+				send_action("attack_right",_crosshair_aim())
+			else:
+				_peek_held = true
+				_capture_peek_context()
+				_send_peek_input()
+				send_action("block",{"pressed":true,"forward":Vector3(-sin(_camera_yaw),0,-cos(_camera_yaw))})
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_camera_distance = maxf(3,_camera_distance-0.5)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:

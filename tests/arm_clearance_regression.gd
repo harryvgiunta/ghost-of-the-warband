@@ -137,6 +137,48 @@ func run() -> void:
 				advance(0.8,"Moving weapon carry")
 				if failures>0:
 					break
+	if failures==0:
+		rig.set_locomotion(Vector3.ZERO,true)
+		for size in [0,1]:
+			rig.set_weapon("dual")
+			rig.set_sword(size)
+			rig.aim_at(Vector3(0,1.6,-30))
+			advance(0.4,"Dual offhand guard")
+			if failures>0:
+				break
+			rig.begin_melee("left")
+			advance(0.7,"Dual left stab and recovery")
+			if failures>0:
+				break
+			rig.aim_at(Vector3(2.0,1.4,-20))
+			advance(0.3,"Dual offhand guard after aim")
+			if failures>0:
+				break
+			rig.begin_melee("right")
+			advance(float(size+1)+0.4,"Dual right chop")
+			if failures>0:
+				break
+	if failures==0:
+		rig.set_weapon("dual")
+		rig.set_sword(1)
+		rig.aim_at(Vector3(0,1.6,-30))
+		rig.begin_melee("right")
+		advance(0.3,"Dual overlap sword windup")
+		if failures==0:
+			rig.begin_melee("left")
+			advance(0.5,"Dual overlap left stab during sword")
+		if failures==0:
+			advance(0.8,"Dual overlap sword finish")
+	if failures==0:
+		rig.cancel_draw()
+		rig.set_weapon("dual")
+		rig.set_sword(1)
+		rig.aim_at(Vector3(0,1.6,-30))
+		rig.begin_melee("left")
+		advance(0.1,"Dual reverse overlap dagger windup")
+		if failures==0:
+			rig.begin_melee("right")
+			advance(1.4,"Dual reverse overlap sword during dagger")
 	holder.queue_free()
 	await process_frame
 	print("ARM_CLEARANCE_REGRESSION samples=",samples," failures=",failures)

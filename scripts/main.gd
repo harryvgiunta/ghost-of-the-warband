@@ -70,6 +70,7 @@ func _ready() -> void:
 	add_child(world)
 	player = CharacterBody3D.new()
 	player.name = "Player"
+	player.set_meta("ironwood_player", true)
 	player.collision_layer = 4
 	player.collision_mask = 1 | 2
 	player.floor_snap_length = 0.6
@@ -117,6 +118,7 @@ func _ready() -> void:
 	hud.armor_selected.connect(equip_armor)
 	hud.sword_selected.connect(equip_sword)
 	hud.weapon_selected.connect(equip_weapon)
+	hud.shield_selected.connect(equip_shield)
 	hud.view_toggled.connect(toggle_view)
 	hud.camp_requested.connect(return_to_camp)
 	hud.map_toggled.connect(toggle_map)
@@ -220,7 +222,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW)
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -284,19 +286,20 @@ func _capture_attack_cover_side() -> void:
 		_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
 
-func begin_attack() -> void:
+func begin_attack(hand: String = "right") -> void:
 	if hud.map_open:
 		return
 	_capture_attack_cover_side()
 	update_crosshair_aim()
-	var started: bool = combat.begin_melee() if archer.weapon in ["sword","dagger"] else combat.begin_draw()
+	var requested := hand if archer.weapon == "dual" else "right"
+	var started: bool = combat.begin_melee(requested) if archer.weapon in ["sword","dagger","dual"] else combat.begin_draw()
 	if not started:
-		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
+		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger","dual"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
 
 func begin_throw_attack() -> void:
 	if hud.map_open:
 		return
-	if archer.weapon not in ["sword","dagger"]:
+	if archer.weapon not in ["sword","dagger","dual"]:
 		hud.show_feedback("Equip a sword with 2 or the dagger with 3 to throw.")
 		return
 	_capture_attack_cover_side()
@@ -336,6 +339,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1: equip_weapon("bow")
 			KEY_2: equip_weapon("sword")
 			KEY_3: equip_weapon("dagger")
+			KEY_4: equip_shield(not archer.shield_equipped)
+			KEY_5: equip_weapon("dual")
 			KEY_C: toggle_crouch()
 			KEY_SPACE: press_jump(event.shift_pressed)
 			KEY_F: toggle_cover()
@@ -363,7 +368,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_set_cursor_free(false)
 				_key_drawing = true
 				if not _mouse_drawing:
-					begin_attack()
+					begin_attack("left")
 			KEY_T:
 				if not inspecting:
 					hud.close_panels()
@@ -378,11 +383,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_cursor_free(false)
 			_mouse_drawing = true
 			if not _key_drawing:
-				begin_attack()
+				begin_attack("left")
 		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			if inspecting:
 				_orbiting = true
 				_orbit_pointer = event.position
+			elif archer.weapon == "dual":
+				hud.close_panels()
+				_set_cursor_free(false)
+				begin_attack("right")
 			else:
 				hud.close_panels()
 				_set_cursor_free(false)
@@ -427,8 +436,24 @@ func equip_sword(index: int) -> void:
 	audio.play_sound("equip")
 
 func equip_weapon(value: String) -> void:
+	if value == "dual":
+		if archer.weapon == "dual":
+			value = "sword"
+		elif archer.sword_index == 2:
+			hud.show_feedback("Dual wield needs a one-handed sword. Select the small or medium sword.")
+			return
 	cancel_input()
-	archer.set_weapon(value)
+	if not archer.set_weapon(value):
+		hud.show_feedback("Dual wield needs a one-handed sword. Select the small or medium sword.")
+		return
+	audio.play_sound("equip")
+
+func equip_shield(value: bool) -> void:
+	if value and not archer.can_equip_shield():
+		hud.show_feedback("Shield fits the dagger or the medium arming sword.")
+		return
+	cancel_input()
+	archer.set_shield(value)
 	audio.play_sound("equip")
 
 func toggle_cover() -> void:
@@ -477,7 +502,7 @@ func equip_armor(index: int) -> void:
 	audio.play_sound("equip")
 
 func _update_loadout() -> void:
-	hud.update_loadout(archer.bow_index, archer.armor_index, Archer.BOW_DATA[archer.bow_index], Archer.ARMOR_NAMES[archer.armor_index], archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA)
+	hud.update_loadout(archer.bow_index, archer.armor_index, Archer.BOW_DATA[archer.bow_index], Archer.ARMOR_NAMES[archer.armor_index], archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
 
 func toggle_view() -> void:
 	inspecting = not inspecting
@@ -601,6 +626,7 @@ func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charg
 	add_child(arrow)
 	var shot_damage := Combat.damage_for(archer.bow_index, charge)
 	var excluded: Array[RID] = [player.get_rid()]
+	arrow.hit_mask = 1 | 2 | 8
 	arrow.launch(origin, direction, speed, shot_damage, excluded)
 	arrow.impacted.connect(_on_arrow_impact)
 	for index in range(arrows.size() - 1, -1, -1):

@@ -24,6 +24,7 @@ func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: floa
 	global_position = origin
 	velocity = direction.normalized() * speed
 	damage = shot_damage
+	_query.collision_mask = hit_mask
 	_query.exclude = excluded
 	look_at(global_position + direction, Vector3.UP)
 
@@ -43,10 +44,17 @@ func _physics_process(delta: float) -> void:
 		global_position = hit.position
 		flying = false
 		var collider: Object = hit.collider
-		var hit_enemy := collider.has_method("take_damage")
-		if hit_enemy:
-			if authoritative_damage:
-				collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
+		var is_shield := collider.has_method("is_shield")
+		var hit_enemy := collider.has_method("take_damage") and not is_shield
+		if hit_enemy and authoritative_damage:
+			collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
+		# A shield intercepts the arrow without transferring damage to its
+		# owner. Players and shields keep the shaft so it visibly sticks where
+		# it landed; the arrow still times out with the existing age limit.
+		if (is_shield or collider.has_meta("ironwood_player")) and collider is Node3D:
+			reparent(collider as Node3D, true)
+			visible = true
+		elif hit_enemy:
 			visible = false
 		impacted.emit(hit_enemy, global_position)
 		return

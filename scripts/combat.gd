@@ -15,6 +15,7 @@ const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
 const BLOCK_STAMINA := 22.0
 const DAGGER_BLOCK_STAMINA := 30.0
+const SHIELD_BLOCK_STAMINA := 18.0
 const WEAK_BLOCK_DAMAGE_SCALE := 0.5
 const BLOCK_PUSH_SPEED := 5.5
 const BLOCK_FACING_DOT := 0.35
@@ -28,7 +29,13 @@ const DEFENSE_WEAK_BLOCK := 3
 var rig
 var aim_point := Vector3.ZERO
 var attack_progress := 1.0
-var melee_progress := 1.0
+var melee_progress := 1.0:
+	set(value):
+		melee_progress = value
+		# Existing callers and tests reset the single-weapon recovery through
+		# this field. Keep that behavior; per-hand dual recovery is explicit.
+		if is_instance_valid(rig) and rig.weapon != "dual":
+			right_melee_progress = value
 var movement_mode := "STANDING"
 var grounded := false
 var actor: CharacterBody3D
@@ -54,14 +61,38 @@ var _melee_shape := CapsuleShape3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 var _shaft_query := PhysicsShapeQueryParameters3D.new()
 var _shaft_shape := SphereShape3D.new()
-var _melee_exclude: Array[RID] = []
-var _source_exclude: Array[RID] = []
-var _melee_victims: Dictionary = {}
-var _melee_active := false
-var _melee_blocked := false
-var _swing_weapon := "sword"
-var _swing_damage := 0.0
-var _swing_seconds := 1.0
+var left_melee_progress := 1.0
+var right_melee_progress := 1.0
+var _left_swing_seconds := float(Archer.DAGGER_DATA.seconds)
+var _right_swing_seconds := 1.0
+var _swings: Dictionary = {}
+
+func _swing_state(hand: String) -> Dictionary:
+	if not _swings.has(hand):
+		var excluded: Array[RID] = []
+		_swings[hand] = {"active":false, "weapon":"", "damage":0.0,
+			"victims":{}, "exclude":excluded, "blocked":false}
+	return _swings[hand]
+
+func melee_progress_for(hand: String) -> float:
+	return left_melee_progress if hand == "left" else right_melee_progress
+
+func _set_melee_progress(hand: String, value: float) -> void:
+	if hand == "left":
+		left_melee_progress = value
+	else:
+		right_melee_progress = value
+
+func _sync_display_progress() -> void:
+	if is_instance_valid(rig) and rig.weapon == "dual":
+		if rig.has_melee("right"):
+			melee_progress = right_melee_progress
+		elif rig.has_melee("left"):
+			melee_progress = left_melee_progress
+		else:
+			melee_progress = minf(left_melee_progress,right_melee_progress)
+	else:
+		melee_progress = right_melee_progress
 
 func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	rig = archer
@@ -97,7 +128,7 @@ func begin_draw() -> bool:
 	return true
 
 func can_throw() -> bool:
-	return rig.weapon in ["sword","dagger"] and grounded and rig.phase == "READY" \
+	return rig.weapon in ["sword","dagger","dual"] and grounded and rig.phase == "READY" \
 		and rig._roll_progress < 0.0 and stagger_time <= 0.0 \
 		and melee_progress >= 1.0-0.000001
 
@@ -111,7 +142,7 @@ func begin_throw() -> bool:
 	return true
 
 func release_throw() -> void:
-	if rig.phase not in ["T_DRAW","T_HOLD"] or rig.weapon not in ["sword","dagger"] \
+	if rig.phase not in ["T_DRAW","T_HOLD"] or rig.weapon not in ["sword","dagger","dual"] \
 			or _release_pending:
 		return
 	if _cover_attack and not _cover_attached():
@@ -135,6 +166,9 @@ func release_throw() -> void:
 
 func start_block(forward: Vector3) -> bool:
 	if blocking:
+		if rig.weapon == "dual":
+			stop_block()
+			return false
 		return true
 	if not grounded or stagger_time > 0.0 or rig.weapon not in ["sword","dagger"] \
 			or rig.phase != "READY" or rig._roll_progress >= 0.0:
@@ -159,8 +193,7 @@ func face_block(forward: Vector3) -> void:
 		rig.face_block(forward)
 
 func resolve_melee_defense(attacker_position: Vector3) -> int:
-	if not blocking or not is_instance_valid(rig) or rig.phase == "MELEE" \
-			or rig._roll_progress >= 0.0:
+	if not is_instance_valid(rig) or rig._roll_progress >= 0.0:
 		return DEFENSE_NONE
 	if is_instance_valid(actor) and actor.get("alive") == false:
 		return DEFENSE_NONE
@@ -169,9 +202,17 @@ func resolve_melee_defense(attacker_position: Vector3) -> int:
 	to_attacker.y = 0.0
 	var forward: Vector3 = -rig.global_basis.z
 	forward.y = 0.0
-	if to_attacker.length_squared() > 0.000001 and forward.length_squared() > 0.000001 \
-			and forward.normalized().dot(to_attacker.normalized()) < BLOCK_FACING_DOT:
+	var facing := to_attacker.length_squared() <= 0.000001 or forward.length_squared() <= 0.000001 \
+		or forward.normalized().dot(to_attacker.normalized()) >= BLOCK_FACING_DOT
+	# Dual wielders cannot guard. Their active blade is the defense: a strike
+	# already inside its authored contact window parries a front melee hit.
+	if rig.weapon == "dual":
+		return DEFENSE_PARRY if rig.in_strike_window() and facing else DEFENSE_NONE
+	if not blocking or rig.is_melee() or not facing:
 		return DEFENSE_NONE
+	# A shield is a full front block and never parries.
+	if rig.shield_equipped:
+		return DEFENSE_BLOCK
 	# A dagger cannot set a proper edge or lever: it never parries and only
 	# softens a hit. Swords retain the timing-based parry/block split.
 	if rig.weapon == "dagger":
@@ -179,19 +220,24 @@ func resolve_melee_defense(attacker_position: Vector3) -> int:
 	return DEFENSE_PARRY if block_time <= PARRY_WINDOW else DEFENSE_BLOCK
 
 func block_stamina_cost() -> float:
+	if rig.shield_equipped:
+		return SHIELD_BLOCK_STAMINA
 	return DAGGER_BLOCK_STAMINA if rig.weapon == "dagger" else BLOCK_STAMINA
 
 func stagger(seconds: float) -> void:
 	stagger_time = maxf(stagger_time,seconds)
 	stop_block()
-	_melee_active = false
-	_melee_blocked = false
-	_melee_victims.clear()
-	_melee_exclude.clear()
-	_source_exclude.clear()
+	for hand in ["left","right"]:
+		var state := _swing_state(hand)
+		state.active = false
+		state.blocked = false
+		state.victims.clear()
+		state.exclude.clear()
+	left_melee_progress = 1.0
+	right_melee_progress = 1.0
 	attack_progress = 1.0
 	melee_progress = 1.0
-	if is_instance_valid(rig) and rig.phase == "MELEE":
+	if is_instance_valid(rig) and rig.is_melee():
 		rig.cancel_draw()
 
 func release_draw() -> void:
@@ -226,9 +272,15 @@ func stop() -> void:
 	_release_pending = false
 	_shaft_grace = 0.0
 	_pending_throw = false
-	_melee_active = false
+	for hand in ["left","right"]:
+		var state := _swing_state(hand)
+		state.active = false
+		state.blocked = false
+		state.victims.clear()
+		state.exclude.clear()
 	stop_block()
 	rig.cancel_draw()
+	_sync_display_progress()
 
 func wants_cover_exposure() -> bool:
 	return _auto_exposure and _cover_attached() \
@@ -301,48 +353,72 @@ func _cover_throw_clear() -> bool:
 	_sight_query.from = origin
 	_sight_query.to = origin + direction*1.2
 	_sight_query.collision_mask = 1
-	_sight_query.exclude = _source_exclude
+	var excluded: Array[RID] = []
+	if is_instance_valid(actor):
+		excluded.append(actor.get_rid())
+	_sight_query.exclude = excluded
 	return actor.get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty()
 
-func begin_melee() -> bool:
-	if not grounded or melee_progress < 1.0 - 0.000001 or stagger_time > 0.0 \
-			or rig.weapon not in ["sword","dagger"] or rig.phase != "READY" or rig._roll_progress >= 0.0:
+func begin_melee(hand: String = "right") -> bool:
+	var key := "left" if hand == "left" else "right"
+	if not grounded or stagger_time > 0.0 or rig._roll_progress >= 0.0:
 		return false
-	stop()
-	if _cover_attached():
-		cover.exit()
-		# Clear the visual constraint before the first swing pose, without moving or standing the body.
-		rig.set_cover(false,Vector3.ZERO,cover.crouch_amount,false,Vector3.ZERO)
+	if key == "left":
+		if rig.weapon != "dual":
+			return false
+	elif rig.weapon not in ["sword","dagger","dual"]:
+		return false
+	if melee_progress_for(key) < 1.0 - 0.000001 or not rig.can_begin_melee(key):
+		return false
+	var other_active: bool = rig.is_melee()
+	if other_active and rig.weapon != "dual":
+		return false
+	if other_active:
+		# Overlapping dual swing: the other hand keeps its clock and contacts.
+		stop_block()
+		if _cover_attached():
+			cover.exit()
+			rig.set_cover(false,Vector3.ZERO,cover.crouch_amount,false,Vector3.ZERO)
+	else:
+		stop()
+		if _cover_attached():
+			cover.exit()
+			# Clear the visual constraint before the first swing pose, without moving or standing the body.
+			rig.set_cover(false,Vector3.ZERO,cover.crouch_amount,false,Vector3.ZERO)
 	update_aim()
-	if rig.begin_melee():
-		attack_progress = 0.0
-		melee_progress = 0.0
-		return true
-	return false
+	if not rig.begin_melee(key):
+		return false
+	_set_melee_progress(key,0.0)
+	attack_progress = 0.0
+	_sync_display_progress()
+	return true
 
-func _on_melee_started() -> void:
-	_melee_victims.clear()
-	_melee_exclude.clear()
-	_source_exclude.clear()
-	_melee_active = true
-	_melee_blocked = false
-	_swing_weapon = rig.weapon
-	_swing_damage = rig.melee_damage()
-	_swing_seconds = rig.melee_seconds()
+func _on_melee_started(hand: String) -> void:
+	var state := _swing_state(hand)
+	state.active = true
+	state.blocked = false
+	state.weapon = rig.weapon
+	state.damage = rig.melee_damage(hand)
+	state.victims.clear()
+	state.exclude.clear()
 	if is_instance_valid(actor):
-		_source_exclude.append(actor.get_rid())
-		_melee_exclude.append(actor.get_rid())
-	_sight_query.exclude = _source_exclude
+		state.exclude.append(actor.get_rid())
+	var seconds: float = rig.melee_seconds(hand)
+	if hand == "left":
+		_left_swing_seconds = seconds
+	else:
+		_right_swing_seconds = seconds
 
-func _can_damage_melee() -> bool:
-	return damage_enabled and _melee_active and not _melee_blocked \
+func _can_damage_melee(hand: String, state: Dictionary) -> bool:
+	return damage_enabled and state.active and not state.blocked \
 		and is_instance_valid(actor) and actor.get("alive") != false \
-		and rig.weapon == _swing_weapon and rig.phase == "MELEE" \
+		and rig.weapon == state.weapon and rig.has_melee(hand) \
 		and rig._roll_progress < 0.0
 
-func _on_melee_sweep(previous_base: Vector3, previous_tip: Vector3,
+func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3,
 		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
-	if not _can_damage_melee() or radius <= 0.0:
+	var state := _swing_state(hand)
+	if not _can_damage_melee(hand,state) or radius <= 0.0:
 		return
 	# Translation is continuous (cast_motion), not discrete overlap sampling.
 	# Subdivide rotation only. A small conservative capsule expansion encloses
@@ -357,12 +433,13 @@ func _on_melee_sweep(previous_base: Vector3, previous_tip: Vector3,
 		var tip_from := previous_tip.lerp(current_tip, start_fraction)
 		var base_to := previous_base.lerp(current_base, end_fraction)
 		var tip_to := previous_tip.lerp(current_tip, end_fraction)
-		_sweep_capsule(space, base_from, tip_from, base_to, tip_to, radius)
-		if not _can_damage_melee():
+		_sweep_capsule(space,hand,state,base_from,tip_from,base_to,tip_to,radius)
+		if not _can_damage_melee(hand,state):
 			return
 
-func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
-		tip_from: Vector3, base_to: Vector3, tip_to: Vector3, radius: float) -> void:
+func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dictionary,
+		base_from: Vector3, tip_from: Vector3, base_to: Vector3, tip_to: Vector3,
+		radius: float) -> void:
 	var blade_from := tip_from - base_from
 	var blade_to := tip_to - base_to
 	var blade := (blade_from + blade_to) * 0.5
@@ -377,10 +454,10 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 	_melee_query.transform = pose
 	_melee_query.motion = Vector3.ZERO
 	_melee_query.collision_mask = 1
-	_melee_query.exclude = _source_exclude
+	_melee_query.exclude = state.exclude
 	# cast_motion ignores initial overlaps; test those explicitly first.
 	if not space.get_rest_info(_melee_query).is_empty():
-		_melee_blocked = true
+		state.blocked = true
 		return
 	_melee_query.motion = motion
 	var world_fraction := 1.0
@@ -389,9 +466,9 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 		world_fraction = world_cast[0]
 	_melee_query.collision_mask = target_mask
 	for contact in MAX_SWEEP_CONTACTS:
-		if not _can_damage_melee():
+		if not _can_damage_melee(hand,state):
 			return
-		_melee_query.exclude = _melee_exclude
+		_melee_query.exclude = state.exclude
 		_melee_query.transform = pose
 		_melee_query.motion = Vector3.ZERO
 		var hit := space.get_rest_info(_melee_query)
@@ -409,23 +486,24 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 				break
 		# Exclude every visited collider so dead/non-damageable bodies cannot
 		# monopolize the bounded query loop. Victims persist for the whole swing.
-		_melee_exclude.append(hit.rid)
+		state.exclude.append(hit.rid)
 		var unit = instance_from_id(hit.collider_id)
 		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
-				or unit.get("alive") != true or _melee_victims.has(unit.get_instance_id()):
+				or unit.get("alive") != true or state.victims.has(unit.get_instance_id()):
 			continue
 		# The contact is on the actual blade query, never an actor-centered hit
 		# fallback. This ray also prevents a windup starting through thin cover.
 		_sight_query.from = actor.global_position + Vector3(0, 1.1, 0)
 		_sight_query.to = hit.point
+		_sight_query.exclude = state.exclude
 		if not space.intersect_ray(_sight_query).is_empty():
 			continue
 		var target_combat = unit.get("combat")
 		if is_instance_valid(target_combat) and _can_clash_with(unit,target_combat):
 			_resolve_clash(unit,target_combat,hit.point)
 			return
-		_melee_victims[unit.get_instance_id()] = true
-		var damage := _swing_damage
+		state.victims[unit.get_instance_id()] = true
+		var damage: float = state.damage
 		# A rest point can sit anywhere in the overlap, so both blade poses are
 		# tested as segments against the animated head zone.
 		var headshot := Hitbox.blade_headshot(unit,base_from,tip_from,radius) \
@@ -436,16 +514,16 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, base_from: Vector3,
 		else:
 			unit.take_damage(damage,source_id,headshot)
 		if outcome == DEFENSE_PARRY:
-			_block_feedback(unit,hit.point,true)
+			_block_feedback(unit,hit.point,true,hand)
 		elif outcome == DEFENSE_BLOCK:
-			_block_feedback(unit,hit.point,false)
+			_block_feedback(unit,hit.point,false,hand)
 		elif outcome == DEFENSE_WEAK_BLOCK:
 			# A dagger only softens the hit; the attacker's swing continues.
-			_block_feedback(unit,hit.point,false,false)
+			_block_feedback(unit,hit.point,false,hand,false)
 	if world_fraction < 1.0:
 		# An authored animation may continue beyond a wall; it must not resume
 		# damage on the far side in the next sample of this same swing.
-		_melee_blocked = true
+		state.blocked = true
 
 func _can_clash_with(unit: Node, target_combat) -> bool:
 	if target_combat == self or not is_instance_valid(target_combat) \
@@ -489,23 +567,39 @@ func _resolve_clash(unit: Node, target_combat, at: Vector3) -> void:
 	clash.emit(at)
 
 func abort_melee_to_neutral() -> void:
-	_melee_active = false
-	_melee_blocked = false
-	_melee_victims.clear()
-	_melee_exclude.clear()
-	_source_exclude.clear()
+	for hand in ["left","right"]:
+		var state := _swing_state(hand)
+		state.active = false
+		state.blocked = false
+		state.victims.clear()
+		state.exclude.clear()
+	left_melee_progress = 1.0
+	right_melee_progress = 1.0
 	attack_progress = 1.0
 	melee_progress = 1.0
-	if is_instance_valid(rig) and rig.phase == "MELEE":
+	if is_instance_valid(rig) and rig.is_melee():
 		rig.cancel_draw()
 
-func _block_feedback(unit: Node, at: Vector3, parried: bool, reset_attacker: bool = true) -> void:
+func abort_swing(hand: String) -> void:
+	var state := _swing_state(hand)
+	state.active = false
+	state.blocked = false
+	state.victims.clear()
+	state.exclude.clear()
+	_set_melee_progress(hand,1.0)
+	if is_instance_valid(rig):
+		rig.abort_melee(hand)
+	_sync_display_progress()
+	attack_progress = melee_progress
+
+func _block_feedback(unit: Node, at: Vector3, parried: bool,
+		hand: String, reset_attacker: bool = true) -> void:
 	var defender_slot := int(unit.get("slot")) if unit.get("slot") != null else -1
 	defense_resolved.emit(defender_slot,at,parried)
 	if not parried and reset_attacker:
-		# A held block is a neutral reset: the attacker's swing is knocked aside
-		# instead of retaining a long recovery the defender could punish for free.
-		abort_melee_to_neutral()
+		# A held block knocks aside the swing that contacted it. A dual wielder's
+		# other hand keeps its own clock and can continue into the opening.
+		abort_swing(hand)
 	elif parried and is_instance_valid(actor) and actor.has_method("stagger"):
 		actor.stagger(PARRY_STAGGER)
 
@@ -560,9 +654,9 @@ func _can_release_from_cover() -> bool:
 	return not _cover_attached() or (cover.peeking and (cover.low \
 		or cover.lean.dot(cover.normal.cross(Vector3.UP))*float(cover_side) > 0.0))
 
-func get_attack_interval() -> float:
-	if rig.weapon in ["sword","dagger"] and rig.phase not in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
-		return rig.melee_seconds()
+func get_attack_interval(hand: String = "") -> float:
+	if rig.weapon in ["sword","dagger","dual"] and rig.phase not in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
+		return rig.melee_seconds(hand)
 	return Archer.RELEASE_SECONDS + Archer.RECOVER_SECONDS
 
 func advance(delta: float) -> void:
@@ -571,7 +665,7 @@ func advance(delta: float) -> void:
 	if clash_cooldown > 0.0:
 		clash_cooldown = maxf(0.0,clash_cooldown-delta)
 	if blocking:
-		if rig._roll_progress >= 0.0 \
+		if rig.weapon == "dual" or rig._roll_progress >= 0.0 \
 				or (is_instance_valid(actor) and actor.get("alive") == false):
 			stop_block()
 		else:
@@ -591,9 +685,13 @@ func advance(delta: float) -> void:
 			if not _can_release_from_cover():
 				_auto_exposure = true
 			_try_cover_release(delta)
-	# Sword recovery continues across weapon swaps but never gates a bow draw.
-	if melee_progress < 1.0:
-		melee_progress = minf(1.0, melee_progress + delta / _swing_seconds)
+	# Each hand recovers independently. Sword recovery continues across weapon
+	# swaps but never gates a bow draw.
+	if left_melee_progress < 1.0:
+		left_melee_progress = minf(1.0,left_melee_progress + delta / maxf(_left_swing_seconds,0.001))
+	if right_melee_progress < 1.0:
+		right_melee_progress = minf(1.0,right_melee_progress + delta / maxf(_right_swing_seconds,0.001))
+	_sync_display_progress()
 	# Bow readiness follows the actual release/re-nock animation, not a second timer.
 	if rig.weapon == "bow" or rig.phase in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:
 		attack_progress = rig.get_recovery_progress()

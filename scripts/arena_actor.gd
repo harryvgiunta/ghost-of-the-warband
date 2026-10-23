@@ -47,6 +47,7 @@ var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
+	set_meta("ironwood_player", true)
 	collision_layer = 4
 	collision_mask = 1 | 4
 	floor_snap_length = 0.5
@@ -128,10 +129,12 @@ func revive() -> void:
 	roll.reset()
 	rig.set_roll(-1.0,Vector3.FORWARD)
 	combat.attack_progress = 1.0
+	combat.left_melee_progress = 1.0
+	combat.right_melee_progress = 1.0
 	combat.melee_progress = 1.0
-	rig.phase = "READY"
+	rig._clear_melee()
+	rig._sync_primary_hand()
 	rig.draw_amount = 0.0
-	rig._phase_time = 0.0
 	rig.global_rotation.y = atan2(spawn_point.x,spawn_point.z)
 	combat.aim_point = Vector3(0,1.2,0)
 	collision_layer = 4
@@ -230,6 +233,11 @@ func leave_cover() -> void:
 
 func reset_stance() -> void:
 	combat.stop()
+	combat.left_melee_progress = 1.0
+	combat.right_melee_progress = 1.0
+	combat.melee_progress = 1.0
+	rig._clear_melee()
+	rig._sync_primary_hand()
 	cover.reset()
 	slide.reset()
 	peek_requested = false
@@ -426,7 +434,7 @@ func _floor_height(point: Vector3) -> float:
 
 func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
-		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_index,"sword":rig.sword_index,"weapon":rig.weapon,
+		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_index | (4 if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
 		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
@@ -450,12 +458,17 @@ func apply_snapshot(state: Dictionary) -> void:
 	collision_mask = 1 | 4 if alive else 0
 	if rig.bow_index != int(state.bow):
 		rig.set_bow(int(state.bow))
-	if rig.armor_index != int(state.armor):
-		rig.set_armor(int(state.armor))
+	var armor_bits := int(state.armor)
+	var armor_index := armor_bits & 3
+	var shield_state := (armor_bits & 4) != 0
+	if rig.armor_index != armor_index:
+		rig.set_armor(armor_index)
 	if rig.sword_index != int(state.sword):
 		rig.set_sword(int(state.sword))
 	if rig.weapon != str(state.weapon):
 		rig.set_weapon(str(state.weapon))
+	if rig.shield_equipped != shield_state:
+		rig.set_shield(shield_state)
 	cover.apply_snapshot(state.cover)
 	if not alive:
 		reset_stance()

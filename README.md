@@ -1,6 +1,6 @@
 # Ironwood — The Hollow, Frontier and Arena
 
-A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a 10-slot inventory, a 20-slot stash and three vendors. From there, deploy to a seamless woodland frontier or a four-combatant multiplayer arena. A textured, rigged male Ranger with authored human animation, swappable bows, swords, a dagger, a shield, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -103,17 +103,22 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | F | Post up against nearby solid cover / leave cover |
 | Hold right mouse with a sword | Guard. The first 0.25 s is a parry; holding longer standard-blocks each hit and spends stamina |
 | Hold right mouse with a dagger | Weak guard only: no parry, and blocked hits deal half damage while spending more stamina |
+| Hold right mouse with a shield | Raise the shield. Full front block, no parry, **18 stamina**; arrows that hit it deal no damage and stick in the shield |
 | Hold right mouse in cover | Guard and peek over low cover or around the selected edge of tall cover |
 | X | Swap shoulder camera and select the left/right lookout while in cover |
 | 1 | Equip the selected bow |
 | 2 | Equip the selected sword |
 | 3 | Equip the dagger |
+| 4 | Equip or stow the shield (dagger or medium arming sword only) |
+| 5 | Dual-wield the selected one-handed sword in the right hand and the dagger in the left; press again to return to the sword |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
 | Hold left mouse / Q with bow | Raise and draw while aiming; automatically expose from cover |
 | Release left mouse / Q with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
 | Hold T with a sword or dagger | Charge a throw while aiming. Damage scales with charge, and a bow-style recovery follows the release |
 | Release T with a sword or dagger | Hurl the equipped weapon as a projectile. The endless supply keeps the same weapon equipped |
 | Click left mouse / Q with sword or dagger | Break sticky cover and immediately perform one uncharged melee attack: an overhand chop or a quick stab |
+| Click left mouse / Q while dual wielding | Left-hand dagger stab |
+| Click right mouse while dual wielding | Right-hand sword chop toward the crosshair; never a guard |
 | Escape / I | Free the cursor for equipment clicks; cancel a held attack |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Zoom; right-drag orbits only in frontier inspection view |
@@ -122,7 +127,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Mouse wheel in the Hollow | Zoom the staging camera |
 | Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger. No number key changes size.** Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 always equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** The shield is legal only with the dagger or the medium arming sword; switching to a bow, shortsword or greatsword stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor; clicking the world resumes aiming. In the frontier, **I** opens equipment, **V** inspects the character, **M** opens the map, **E** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
 
 ## Running slide
 
@@ -196,6 +201,16 @@ The **dagger** (key **3**) is a single close-range weapon: a **0.5-second** auth
 
 Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
+## Dual wield
+
+Press **5** with a one-handed sword selected to hold that sword in the right hand and the dagger in the left. The mode requires the small shortsword or medium arming sword; the greatsword is two-handed, so selecting it leaves dual wield. The shield is stowed and cannot be equipped while dual wielding.
+
+Left click or **Q** performs the left-hand dagger stab; right click performs the right-hand sword chop. Both face the crosshair; the dagger thrust follows the aim point while the sword uses its normal authored overhead. Each uses its own weapon's timing, blade geometry and recovery clock and stays socketed in the correct hand. The left stab uses the **0.5-second** dagger profile (**14** damage, **1.2 m** reach); the right chop uses the selected one-handed sword's normal overhead timing and damage. **T** still throws the right-hand sword.
+
+**Recovery is per hand.** You can start the right sword while the left dagger is still winding up or recovering, and you can start the left dagger during a sword swing. Each hand has its own damage window, so the second attack never waits for the first to finish, and the freed hand can attack again as soon as its own clip completes. While the right sword is active it drives the body animation; the left thrust is layered on the same skeleton. The HUD shows **LEFT** and **RIGHT** percentages (or **READY**). A standard block knocks aside only the hand that contacted it; a parry staggers and cancels both.
+
+**Dual wield has no guard.** RMB never raises a block, and a shield cannot be raised. Instead, an attack that has reached its authored blade-contact window parries a front melee hit: no damage and the attacker is staggered for **0.8 s**. Windup, recovery, a hit from behind, or any non-dual attack does not parry. The attack parry does not stop the dual wielder's own swing, and there is no stamina cost.
+
 ## Guarding, parries and clashes
 
 Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. A hit from the front resolves from the guard timer and weapon, not exact blade geometry:
@@ -203,11 +218,15 @@ Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounde
 | Outcome | Trigger | Result |
 | --- | --- | --- |
 | Parry | Block began at most **0.25 s** before the hit | No damage. The attacker is staggered for **0.8 s**, leaving a guaranteed counter-hit. |
-| Standard block | Guard held longer than **0.25 s** before the hit | No damage, **22 stamina** spent, and the defender is pushed slightly away. Both sides return to neutral. |
+| Standard block | Guard held longer than **0.25 s** before the hit | No damage, **22 stamina** spent, and the defender is pushed slightly away. The contacting hand resets; a dual wielder's other hand keeps swinging. |
 | Weak dagger block | Any hit into a raised dagger | **Half damage** still applies, **30 stamina** spent, no parry, and the attacker's swing continues. |
-| Unblocked | Guard down, wrong facing, rolling, attacking, or no weapon | Normal damage applies. |
+| Shield block | Any front hit into a raised shield | **No damage**, **18 stamina** spent, the defender is pushed back, and no parry is possible. |
+| Attack parry | Dual wield and the strike is inside its contact window and facing the attacker | No damage and the attacker is staggered for **0.8 s**; the dual wielder's swing continues. No stamina cost. |
+| Unblocked | Guard down, wrong facing, rolling, attacking outside a dual strike window, or no weapon | Normal damage applies. |
 
-Releasing RMB drops the guard; pressing an attack while guarding also drops it. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for the dagger, short and arming swords, and the two-handed `Sword_Block_Loop` for the greatsword. Both are **120-sample / 1.983-second** breathing loops with planted feet; the greatsword's support hand stays on the actual hilt. These clips animate the Ranger rig only; the held weapon remains the normal socketed runtime model, and the lower-body crouch/slide layer does not overwrite the guard arms.
+The **shield** (**4**) is a physical off-hand item carried on the left arm and legal only with the dagger or the medium arming sword. Holding RMB raises it in front of the chest and head, overriding the dagger's weak guard or the sword's parry timing with a **full front block**. The shield is a moving collision body in both modes: an arrow that hits it — raised or merely carried — deals **zero damage** to the player and **sticks into the shield**. An arrow that reaches the body still deals damage and **sticks into the player** where it landed. Stowed shields are hidden and inert; switching to a bow, shortsword or greatsword automatically stows the shield.
+
+Releasing RMB drops the guard; pressing an attack while guarding also drops it. Dual wielders cannot guard at all: RMB attacks with the right-hand sword instead, and defense comes from the timed attack parry above. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for the dagger, short and arming swords, and the two-handed `Sword_Block_Loop` for the greatsword. Both are **120-sample / 1.983-second** breathing loops with planted feet; the greatsword's support hand stays on the actual hilt. These clips animate the Ranger rig only; the held weapon remains the normal socketed runtime model, and the lower-body crouch/slide layer does not overwrite the guard arms.
 
 If two **sword** users are in their active downstroke at the same time and facing each other, their blades **clash** instead of trading damage: sparks and a loud clang, zero damage in both directions, a small bounce apart, and both swings reset so either fighter can immediately act again. A clash never uses an exact sword-to-sword contact test; simultaneous active hit-frames plus mutual facing are sufficient. A dagger never clashes; it can only weak-block and must rely on its speed and short recovery.
 
