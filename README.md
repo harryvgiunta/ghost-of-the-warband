@@ -235,7 +235,7 @@ Melee has no held charge; only a head-zone contact doubles damage. A click start
 
 The **dagger** (key **3**) is a single close-range weapon: a **0.5-second** authored forward stab with a short windup, a brief blade-contact window and fast recovery. It deals **14** base damage, less than the 30-damage shortsword, and has a thinner, shorter contact volume. The same head-zone multiplier applies. The clip is authored on the Ranger skeleton in Blender; the runtime sweeps the actual dagger blade along the animated hand path rather than using a cone. The right arm and dagger socket aim along the crosshair: the authored chamber and extension run down that line, so the blade goes where you point — low at a wolf's head or level at a humanoid — instead of always thrusting at chest height. The hip and foot stance stays authored; there is no auto-lunge or auto-target.
 
-Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
+Damage comes from the **moving blade**, not a fixed percentage of the swing or an attacker-centered cone. During the authored downstroke, continuous blade-volume sweeps detect real contact and block at world cover. Horizontal cuts lower toward the crosshair and carry a small forward/thickness forgiveness envelope, so a short devil at the shortsword's advertised reach is hit; overheads and stabs keep their existing volumes. Each swing damages a target at most once; windup and recovery cannot damage it. Switching weapons or rolling cancels further contacts without resetting sword recovery. Sword recovery continues independently while a bow is equipped; it neither blocks bow charging nor gets cleared by switching back.
 
 ## Dual wield
 
@@ -339,6 +339,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 & $Godot --headless --path . --script res://tests/wolf_regression.gd
 & $Godot --headless --path . --script res://tests/devil_regression.gd
+& $Godot --headless --path . --script res://tests/swing_reach_regression.gd
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd
 & $Godot --headless --path . --script res://tests/hitbox_regression.gd

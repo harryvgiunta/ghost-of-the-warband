@@ -1388,17 +1388,26 @@ func _apply_horizontal_arm_path() -> void:
 	var sign := 1.0 if _right_variant == "horizontal_right" else -1.0
 	var arc_angle := sign*lerpf(1.30,-0.35,arc_t)
 	var radius := minf(0.56,chest.distance_to(_bone_world(_arms[1][0]).origin)+0.42)
-	var target := chest+forward*(cos(arc_angle)*radius)+right*(sin(arc_angle)*radius)-Vector3.UP*0.06
+	# Aim low against short targets: a fixed chest-height cut passes over the
+	# half-size devils entirely. The cut still stays horizontal; only its plane
+	# follows the crosshair's height.
+	var aim_height := clampf(_aim_point.y,0.35,chest.y)
+	var arc_height := lerpf(chest.y-0.06,aim_height,0.70)
+	var target := chest+forward*(cos(arc_angle)*radius)+right*(sin(arc_angle)*radius)+Vector3.UP*(arc_height-chest.y)
 	var tangent := (forward*sin(arc_angle)-right*cos(arc_angle)).normalized()
-	var target_basis := Basis.looking_at(tangent,Vector3.UP)*_sword_grip.basis.inverse()
+	# Angle the blade forward as well as sideways. A pure tangent cut leaves
+	# the tip circling the shoulder; a 35-degree forward bias gives the cut
+	# honest reach toward the crosshair without turning it into a thrust.
+	var blade_dir := (tangent+forward*2.60).normalized()
+	var target_basis := Basis.looking_at(blade_dir,Vector3.UP)*_sword_grip.basis.inverse()
 	var hand := _bone_world(_arms[1][2])
 	var pole := forward*0.45+right*0.25+Vector3.UP*0.15
 	_solve_limb(_arms[1],hand.origin.lerp(target,weight),hand.basis.slerp(target_basis,weight),pole)
 	if weapon == "sword" and sword_index == 2:
 		# The greatsword keeps both hands on the handle. The support palm sits
 		# just behind the sword hand along the cut's blade axis.
-		var support_target := _bone_world(_arms[1][2]).origin-(tangent*0.19*weight)
-		var support_basis := Basis.looking_at(tangent,Vector3.UP)
+		var support_target := _bone_world(_arms[1][2]).origin-(blade_dir*0.19*weight)
+		var support_basis := Basis.looking_at(blade_dir,Vector3.UP)
 		_solve_limb(_arms[0],support_target,support_basis,right*0.35+Vector3.UP*0.25)
 
 func _apply_hit_react_pose() -> void:
