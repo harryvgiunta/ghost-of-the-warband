@@ -20,12 +20,14 @@ Authoring model
 * Detail textures are authored in "paint" (sRGB display) space; nothing is
   linearised.  Normal maps are derived from authored height fields with a
   central-difference gradient and the OpenGL (+Y up) convention.
-* The sky is a 4096x2048 equirectangular panorama: an elevation ramp with a
-  warm haze band, a broad Gaussian sun bloom (no disc), two cumulus banks with
-  sun-side rim lighting and aerial-perspective fade, high cirrus, three hazy
-  ridgelines just above the horizon and 1 LSB dither against 8-bit banding.
-  Clouds are composed at half resolution and smoothly upsampled (they are soft
-  by nature) which keeps the whole build well under two minutes.
+* The sky is a 4096x2048 equirectangular panorama built in linear light: a
+  Rayleigh-like elevation gradient, a real-sized sun disc placed at the scene
+  key light's actual direction, a forward-scattered aureole, one flat cumulus
+  deck projected with true perspective (clouds converge toward the horizon)
+  and sun-driven self-shadowing, thin high cirrus, and aerial haze.  There are
+  no painted grain/brush overlays or static ridgeline silhouettes.  Clouds are
+  composed at half resolution (lighting at quarter resolution) and smoothly
+  upsampled; the build stays well under two minutes.
 
 CLI
 ---
@@ -222,203 +224,269 @@ def dither(arr, scale=0.5, seed=SEED):
 # sky (4096x2048 equirectangular, seamless in u)
 # ---------------------------------------------------------------------------
 
-SKY_STOPS = [
-    (0.000, (38, 84, 158)),
-    (0.100, (56, 104, 178)),
-    (0.240, (90, 138, 198)),
-    (0.340, (118, 158, 204)),
-    (0.420, (146, 176, 208)),
-    (0.462, (160, 182, 204)),
-    (0.486, (184, 194, 200)),
-    (0.494, (214, 206, 192)),
-    (0.504, (238, 226, 204)),
-    (0.518, (212, 208, 188)),
-    (0.560, (184, 188, 162)),
-    (0.700, (148, 156, 134)),
-    (1.000, (104, 114, 100)),
-]
+# Godot's PanoramaSkyMaterial samples this equirect as
+#   u = atan2(dir.x, -dir.z) / TAU      (0 = -Z, 0.25 = +X, 0.5 = +Z)
+#   v = acos(dir.y) / PI                (0 = zenith)
+# The sun must sit where the scene's DirectionalLight3D actually shines from;
+# Godot applies Euler rotations in YXZ order and a light shines along local -Z.
+SKY_SUN_ROTATION = (-48.0, -32.0, 0.0)   # == WorldStyle.frontier() sun_rotation
+SKY_SUN_RADIUS = math.radians(0.266)     # real solar angular radius
+SKY_TAU = 2.0 * math.pi
+
+# Linear-light palette.  Everything below is computed in linear radiance and
+# encoded to sRGB once, so shading and haze mix with physical falloff instead
+# of hand-picked display-space stops.
+SKY_ZENITH = np.array((0.052, 0.118, 0.355), np.float32)
+SKY_HORIZON = np.array((0.520, 0.600, 0.740), np.float32)
+SKY_HORIZON_SUN = np.array((0.880, 0.770, 0.590), np.float32)
+SKY_GROUND = np.array((0.032, 0.040, 0.046), np.float32)
+SKY_SUN_CORE = np.array((1.000, 0.972, 0.930), np.float32)
+SKY_SUN_GLOW = np.array((1.000, 0.900, 0.740), np.float32)
+SKY_CLOUD_SHADE = np.array((0.230, 0.275, 0.360), np.float32)
+SKY_CLOUD_MID = np.array((0.620, 0.665, 0.740), np.float32)
+SKY_CLOUD_LIT = np.array((0.960, 0.955, 0.930), np.float32)
+SKY_CLOUD_WARM = np.array((1.000, 0.935, 0.810), np.float32)
+SKY_CIRRUS = np.array((0.900, 0.905, 0.900), np.float32)
+
+_U32 = np.uint64(0xFFFFFFFF)
 
 
-def _sky_ramp(v, stops=SKY_STOPS):
-    v = np.asarray(v, np.float32).ravel()
-    pos = np.array([s[0] for s in stops], np.float32)
-    cols = np.array([s[1] for s in stops], np.float32) / 255.0
-    out = np.empty((v.size, 3), np.float32)
-    for c in range(3):
-        out[:, c] = np.interp(v, pos, cols[:, c])
+def sky_sun_uv(rotation_deg=SKY_SUN_ROTATION):
+    """Return the sun's (u, v) in the panorama sampled by Godot's sky shader."""
+    pitch, yaw = math.radians(rotation_deg[0]), math.radians(rotation_deg[1])
+    dx = math.sin(yaw) * math.cos(pitch)
+    dy = -math.sin(pitch)
+    dz = math.cos(yaw) * math.cos(pitch)
+    u = (math.atan2(dx, -dz) / SKY_TAU) % 1.0
+    v = math.acos(max(-1.0, min(1.0, dy))) / math.pi
+    return u, v
+
+
+def _linear_to_srgb(c):
+    a = np.clip(c, 0.0, 1.0)
+    out = np.empty_like(a)
+    lo = a <= 0.0031308
+    out[lo] = a[lo] * 12.92
+    out[~lo] = 1.055 * np.power(a[~lo], 1.0 / 2.4) - 0.055
     return out
 
 
+def _hash01(ix, iy, seed):
+    """Deterministic lattice hash for planar (unbounded) value noise."""
+    hx = ix.astype(np.int64).astype(np.uint64) & _U32
+    hy = iy.astype(np.int64).astype(np.uint64) & _U32
+    n = (hx * np.uint64(1597334677) + hy * np.uint64(3812015801)
+         + np.uint64(seed) * np.uint64(2654435761))
+    n &= _U32
+    n ^= n >> np.uint64(13)
+    n *= np.uint64(1274126177)
+    n &= _U32
+    n ^= n >> np.uint64(16)
+    return (n & np.uint64(0xFFFFFF)).astype(np.float32) * np.float32(1.0 / 16777215.0)
+
+
+def _pnoise(x, y, seed):
+    """Smooth 2D value noise at arbitrary (non-tiling) planar coordinates."""
+    x = np.asarray(x, np.float32)
+    y = np.asarray(y, np.float32)
+    x0 = np.floor(x)
+    y0 = np.floor(y)
+    tx = smooth(x - x0)
+    ty = smooth(y - y0)
+    xi = x0.astype(np.int64)
+    yi = y0.astype(np.int64)
+    v00 = _hash01(xi, yi, seed)
+    v10 = _hash01(xi + 1, yi, seed)
+    v01 = _hash01(xi, yi + 1, seed)
+    v11 = _hash01(xi + 1, yi + 1, seed)
+    top = v00 + (v10 - v00) * tx
+    bot = v01 + (v11 - v01) * tx
+    return top + (bot - top) * ty
+
+
+def _pfbm(x, y, seed, octaves=4, gain=0.5, lacunarity=2.0):
+    total = 0.0
+    norm = 0.0
+    amp = 1.0
+    fx = 1.0
+    for o in range(octaves):
+        total = total + amp * _pnoise(x * fx, y * fx, seed + 7919 * o)
+        norm += amp
+        amp *= gain
+        fx *= lacunarity
+    return total / norm
+
+
+def _cloud_plane(el, lon, scale=1.45):
+    """Project view rays onto one horizontal cloud deck at unit height.
+
+    A flat deck viewed from below gives real perspective: clouds crowd and
+    stretch toward the horizon and open up overhead.  This is what separates a
+    photographed sky from a flat painted cloud texture.
+    """
+    el = np.maximum(el, math.radians(2.0))
+    cot = np.cos(el) / np.sin(el)
+    return cot * np.sin(lon) * scale, -cot * np.cos(lon) * scale
+
+
+def _cloud_density(px, py):
+    """0..1 cumulus density on the cloud plane (domain-warped fBm)."""
+    cov = _pfbm(px * 0.70 + 4.7, py * 0.70 - 2.3, SEED + 71, octaves=4)
+    warp = _pfbm(px * 1.65 + 13.1, py * 1.65 + 6.9, SEED + 72, octaves=3)
+    det = _pfbm(px * 3.5 + (warp - 0.5) * 1.6,
+                py * 3.5 - (warp - 0.5) * 1.6, SEED + 73, octaves=4)
+    shape = 0.64 * cov + 0.36 * det
+    return smoothstep(0.485, 0.648, shape)
+
+
+def _resample_half(field, w, h):
+    u = (np.arange(w, dtype=np.float32) + 0.5) / w
+    v = (np.arange(h, dtype=np.float32) + 0.5) / h
+    return sample_field(field, u[None, :], v[:, None], wrap_x=True, wrap_y=False)
+
+
 def make_sky(w=4096, h=2048, debug=None):
-    """Painterly midday panorama.  Returned as float RGB 0..1, (h, w, 3)."""
-    sun_az = 0.615 * 2.0 * math.pi
-    sun_el = math.radians(26.0)
-    sun_dir = np.array(
-        [math.cos(sun_el) * math.cos(sun_az), math.sin(sun_el),
-         math.cos(sun_el) * math.sin(sun_az)], np.float32)
+    """Realistic midday panorama.  Returned as float sRGB 0..1, (h, w, 3).
 
-    uv = (np.arange(w, dtype=np.float32) + 0.5) / w
-    vv = (np.arange(h, dtype=np.float32) + 0.5) / h
-    v = vv[:, None]
-    az = uv * (2.0 * math.pi)
-    el = (0.5 - vv) * math.pi
+    Rayleigh-like elevation gradient, a real-sized sun disc at the scene key
+    light's actual position with forward-scattered aureole, a single flat
+    cumulus deck with perspective convergence plus sun-driven self-shadowing,
+    thin high cirrus, and aerial haze.  No painted grain, brush strokes or
+    static ridgeline silhouettes.
+    """
+    sun_u, sun_v = sky_sun_uv()
+    sun_lon = sun_u * SKY_TAU
+    pitch, yaw = math.radians(SKY_SUN_ROTATION[0]), math.radians(SKY_SUN_ROTATION[1])
+    sun_dir = np.array((math.sin(yaw) * math.cos(pitch),
+                        -math.sin(pitch),
+                        math.cos(yaw) * math.cos(pitch)), np.float32)
+    sun_el = math.asin(float(sun_dir[1]))
 
-    # --- base elevation ramp + gentle value mottling for a painted feel -----
-    ramp = _sky_ramp(vv)
-    sky = np.broadcast_to(ramp[:, None, :], (h, w, 3)).astype(np.float32)
-    mottle = fbm(w, h, 5, 3, SEED + 3, octaves=4, wrap="x")
-    mottle = 0.955 + 0.075 * mottle
-    sky *= mottle[..., None]
+    u = (np.arange(w, dtype=np.float32) + 0.5) / w
+    v = (np.arange(h, dtype=np.float32) + 0.5) / h
+    el = ((0.5 - v) * math.pi).astype(np.float32)          # (h,)
+    lon = (u * SKY_TAU).astype(np.float32)                 # (w,)
 
-    # --- direction grid + broad sun bloom ----------------------------------
-    ce = np.cos(el)[:, None]
-    dx = ce * np.cos(az)[None, :]
-    dy = np.broadcast_to(np.sin(el)[:, None], (h, w)).astype(np.float32)
-    dz = ce * np.sin(az)[None, :]
-    dot = dx * sun_dir[0] + dy * sun_dir[1] + dz * sun_dir[2]
-    ang = np.arccos(np.clip(dot, -1.0, 1.0))
-    del dot, dx, dy, dz
+    # --- sky dome ----------------------------------------------------------
+    # Haze grows exponentially toward the horizon.  The horizon is pale blue
+    # away from the sun and warm on the sun's side (forward Mie scattering).
+    haze = np.exp(-np.maximum(el, 0.0) / 0.145).astype(np.float32)
+    dlon = ((lon - sun_lon + math.pi) % SKY_TAU) - math.pi
+    sun_az = np.exp(-(dlon / 0.85) ** 2)
+    horizon = (SKY_HORIZON[None, :] * (1.0 - 0.72 * sun_az[:, None])
+               + SKY_HORIZON_SUN[None, :] * (0.72 * sun_az[:, None]))
+    sky = (SKY_ZENITH[None, None, :] * (1.0 - haze[:, None, None])
+           + horizon[None, :, :] * haze[:, None, None]).astype(np.float32)
 
-    # Soft bloom: blend toward warm white instead of adding, so the glow
-    # never clips a channel and cannot read as a hard sun disc.
-    glow_core = np.exp(-((ang / 0.055) ** 2))
-    glow_wide = np.exp(-((ang / 0.36) ** 2))
-    glow_halo = np.exp(-((ang / 0.85) ** 2))
-    glow = np.clip(0.34 * glow_wide + 0.11 * glow_halo + 0.47 * glow_core,
-                   0.0, 1.0) * 0.94
-    sky = mix(sky, rgb(255, 250, 236), glow[..., None])
-    del glow_core, glow_wide, glow_halo, glow, ang
+    cos_theta = (np.sin(el)[:, None] * float(sun_dir[1])
+                 + np.cos(el)[:, None] * math.cos(sun_el)
+                 * np.cos(lon[None, :] - sun_lon))
+    theta = np.arccos(np.clip(cos_theta, -1.0, 1.0)).astype(np.float32)
 
-    # --- clouds, composed at half resolution -------------------------------
-    # Three noise scales: banking masses, cumulus billows, small boil detail.
+    # --- sun: aureole + limb-darkened disc ---------------------------------
+    glow = (1.10 * np.exp(-(theta / 0.030) ** 2)
+            + 0.38 * np.exp(-(theta / 0.105) ** 2)
+            + 0.14 * np.exp(-(theta / 0.360) ** 2)
+            + 0.045 * np.exp(-theta / 1.05))
+    sky += glow[..., None] * (SKY_SUN_GLOW * 0.62)[None, None, :]
+    del glow
+    disc = 1.0 - smoothstep(SKY_SUN_RADIUS * 0.80, SKY_SUN_RADIUS * 1.12, theta)
+    sky = sky * (1.0 - disc[..., None]) + SKY_SUN_CORE[None, None, :] * disc[..., None]
+    del disc, cos_theta
+    debug_sun = (sun_u, sun_v)
+
+    # --- below the horizon: neutral dark haze (terrain hides nearly all) ----
+    below = smoothstep(0.0, 0.085, -el)[:, None, None]
+    sky = sky * (1.0 - below) + SKY_GROUND[None, None, :] * below
+    del below
+
+    # --- cumulus deck, half resolution -------------------------------------
     cw, ch = w // 2, h // 2
     u2 = (np.arange(cw, dtype=np.float32) + 0.5) / cw
     v2 = (np.arange(ch, dtype=np.float32) + 0.5) / ch
-    vv2 = v2[:, None]
-
-    # isotropic-ish lumps (cells are roughly square in angle: fx ~= 2*fy)
-    cov = (0.50 * fbm(cw, ch, 8, 4, SEED + 11, octaves=5, wrap="x")
-           + 0.32 * fbm(cw, ch, 18, 9, SEED + 12, octaves=4, wrap="x")
-           + 0.18 * fbm(cw, ch, 40, 20, SEED + 18, octaves=3, wrap="x"))
-    cov = stretch(cov, 2, 98)
-    wx = (fbm(cw, ch, 4, 3, SEED + 13, octaves=3, wrap="x") - 0.5) * 0.040
-    wy = (fbm(cw, ch, 5, 4, SEED + 14, octaves=3, wrap="x") - 0.5) * 0.020
-    cov = sample_field(cov, u2[None, :] + wx, v2[:, None] + wy, wrap_x=True,
-                       wrap_y=False)
-
-    base_shift = (value_noise(cw, 1, 7, 1, SEED + 15, wrap="x")[0] - 0.5) * 0.014
-    vbase = 0.4692 + base_shift[None, :]
-    vtop = 0.2500
-
-    H = (vbase - v2[:, None]) / (vbase - vtop)
-    Hc = np.clip(H, 0.0, 1.0)
-    base_mask = smoothstep(0.0, 0.011, vbase - v2[:, None])
-    topfade = 1.0 - smoothstep(0.62, 1.02, H)
-    dens = smoothstep(0.595, 0.672, cov) * base_mask * topfade
-
-    # sun-side rims: density compared with a sample shifted toward the sun
-    az2 = u2 * (2.0 * math.pi)
     el2 = (0.5 - v2) * math.pi
-    du = np.sign(np.sin(sun_az - az2))[None, :] * 0.0060
-    dv = np.where(el2[:, None] < sun_el, -0.0022, 0.0022)
-    d_shift = sample_field(dens, u2[None, :] + du, v2[:, None] + dv,
-                           wrap_x=True, wrap_y=False)
-    rim = np.clip((dens - d_shift) * 2.4, 0.0, 1.0)
-    del d_shift
+    lon2 = u2 * SKY_TAU
+    dlon2 = ((lon2 - sun_lon + math.pi) % SKY_TAU) - math.pi
+    sun_az2 = np.exp(-(dlon2 / 0.85) ** 2)
+    px, py = _cloud_plane(el2[:, None], lon2[None, :])
+    dens = _cloud_density(px, py)
 
-    # light structure inside the cloud: tops lit, bases in cool shade
-    puff = fbm(cw, ch, 34, 30, SEED + 16, octaves=3, wrap="x")
-    bright = 0.30 + 0.60 * Hc ** 0.80 + 0.50 * rim + 0.06 * (puff - 0.5)
-    bright = np.clip(bright, 0.0, 1.0)
+    # Self-shadowing at quarter resolution: sample the same deck toward the
+    # sun; surfaces facing the sun transmit light, cloud interiors and bases
+    # fall into cool shade.  This is real cloud lighting, not a painted rim.
+    qw, qh = w // 4, h // 4
+    uq = (np.arange(qw, dtype=np.float32) + 0.5) / qw
+    vq = (np.arange(qh, dtype=np.float32) + 0.5) / qh
+    elq = (0.5 - vq) * math.pi
+    lonq = uq * SKY_TAU
+    pxs, pys = _cloud_plane(elq[:, None], lonq[None, :])
+    lx, ly = math.sin(sun_lon), -math.cos(sun_lon)
+    d0 = _cloud_density(pxs, pys)
+    d1 = _cloud_density(pxs + lx * 0.045, pys + ly * 0.045)
+    d2 = _cloud_density(pxs + lx * 0.110, pys + ly * 0.110)
+    d3 = _cloud_density(pxs + lx * 0.250, pys + ly * 0.250)
+    optical = 0.50 * d1 + 0.85 * d2 + 1.10 * d3
+    trans = np.exp(-2.6 * optical)
+    rim = np.clip((d0 - d1) * 8.0, 0.0, 1.0)
+    del d0, d1, d2, d3, optical, pxs, pys
+    trans = _resample_half(trans, cw, ch)
+    rim = _resample_half(rim, cw, ch)
 
-    lit = rgb(255, 250, 238)
-    midc = rgb(186, 195, 214)
-    shade = rgb(104, 120, 152)
-    cloud = mix(shade, midc, smoothstep(0.06, 0.60, bright))
-    cloud = mix(cloud, lit, smoothstep(0.56, 1.0, bright))
+    theta2 = np.arccos(np.clip(
+        np.sin(el2)[:, None] * float(sun_dir[1])
+        + np.cos(el2)[:, None] * math.cos(sun_el)
+        * np.cos(lon2[None, :] - sun_lon), -1.0, 1.0)).astype(np.float32)
+    sun_prox = np.exp(-(theta2 / 0.50) ** 2)
+    bright = np.clip(0.05 + 0.88 * np.power(trans, 1.15)
+                     + 0.55 * rim + 0.10 * sun_prox, 0.0, 1.0)
+    cloud = mix(SKY_CLOUD_SHADE[None, None, :], SKY_CLOUD_MID[None, None, :],
+                smoothstep(0.10, 0.55, bright)[..., None])
+    cloud = mix(cloud, SKY_CLOUD_LIT[None, None, :],
+                smoothstep(0.55, 0.96, bright)[..., None])
+    warm = np.clip(0.22 * sun_prox * (0.4 + rim), 0.0, 0.55)
+    cloud = mix(cloud, SKY_CLOUD_WARM[None, None, :], warm[..., None])
+    del theta2, sun_prox, trans, rim
 
-    sunprox = np.exp(-((np.arccos(np.clip(
-        np.cos(el2)[:, None] * np.cos(az2)[None, :] * sun_dir[0]
-        + np.sin(el2)[:, None] * sun_dir[1]
-        + np.cos(el2)[:, None] * np.sin(az2)[None, :] * sun_dir[2],
-        -1.0, 1.0)) / 0.55) ** 2))
-    cloud = mix(cloud, rgb(255, 245, 220),
-                np.clip(sunprox * 0.42 + rim * 0.30, 0.0, 0.72))
-    del sunprox
+    # Aerial perspective: distant cloud sinks into the horizon haze.
+    haze2 = np.clip(smoothstep(0.355, 0.487, v2)[:, None], 0.0, 1.0)
+    hz_col = (SKY_HORIZON[None, None, :] * (1.0 - 0.65 * sun_az2[None, :, None])
+              + SKY_HORIZON_SUN[None, None, :] * (0.65 * sun_az2[None, :, None]))
+    cloud = (cloud * (1.0 - 0.55 * haze2[..., None])
+             + hz_col * (0.55 * haze2[..., None]))
+    alpha = np.power(dens, 0.9) * 0.985
+    alpha *= smoothstep(0.030, 0.190, el2)[:, None]
+    alpha *= 1.0 - 0.50 * haze2
+    del hz_col
 
-    # faint interior billow creases (painted, not a noise field)
-    crease = smoothstep(0.62, 0.90, fbm(cw, ch, 26, 20, SEED + 17, octaves=3,
-                                        wrap="x", ridge=True))
-    cloud *= (1.0 - 0.14 * crease * (1.0 - rim))[..., None]
+    # --- thin high cirrus ---------------------------------------------------
+    cir = (0.58 * fbm(cw, ch, 3, 30, SEED + 81, octaves=4, wrap="x")
+           + 0.42 * fbm(cw, ch, 7, 64, SEED + 82, octaves=3, wrap="x"))
+    cir = stretch(cir, 30.0, 99.5)
+    cir_a = smoothstep(0.60, 0.94, cir) * 0.26
+    cir_a *= smoothstep(0.15, 0.33, el2)[:, None]
+    cir_a *= 1.0 - 0.80 * smoothstep(0.435, 0.495, v2)[:, None]
 
-    band = smoothstep(0.010, 0.030, el2[:, None]) * (1.0 - smoothstep(1.15, 1.45, el2[:, None]))
-    alpha = dens * band * 0.97
-
-    # aerial perspective: clouds near the horizon sink into the haze
-    haze_mix = smoothstep(0.415, 0.500, v2[:, None])
-    haze_col = _sky_ramp(v2)[:, None, :]
-    cloud = mix(cloud, haze_col, haze_mix * 0.46)
-    alpha *= 1.0 - 0.30 * haze_mix
-
-    # --- thin high cirrus (two crossed anisotropic layers) -----------------
-    cir = (0.55 * fbm(cw, ch, 2, 20, SEED + 21, octaves=5, wrap="x")
-           + 0.45 * fbm(cw, ch, 3, 34, SEED + 22, octaves=4, wrap="x"))
-    cir_wx = (fbm(cw, ch, 3, 6, SEED + 23, octaves=2, wrap="x") - 0.5) * 0.09
-    cir = sample_field(cir, u2[None, :] + cir_wx, v2[:, None], wrap_x=True)
-    cir = stretch(cir, 40, 99.5)
-    cir_a = smoothstep(0.20, 0.80, cir) * 0.30
-    cir_a *= smoothstep(0.14, 0.28, el2[:, None])       # above 8-16 deg
-    cir_a *= 1.0 - smoothstep(1.00, 1.30, el2[:, None])
-    cir_col = mix(rgb(245, 245, 242), rgb(255, 249, 236), 0.5)
-
-    cloud = mix(cloud, cir_col, (cir_a / np.maximum(alpha + cir_a, 1e-5))[..., None])
-    alpha = 1.0 - (1.0 - alpha) * (1.0 - cir_a)
-
-    # --- composite clouds onto the full-resolution sky ---------------------
-    uu = uv
+    # --- composite at full resolution --------------------------------------
+    uu = u[None, :]
+    vv = v[:, None]
+    a_cir = sample_field(cir_a, uu, vv, wrap_x=True)
     for c in range(3):
-        up = sample_field(cloud[..., c], uu, vv[:, None], wrap_x=True)
-        al = sample_field(alpha, uu, vv[:, None], wrap_x=True)
-        sky[..., c] = sky[..., c] * (1.0 - al) + up * al
+        sky[..., c] = sky[..., c] * (1.0 - a_cir) + SKY_CIRRUS[c] * a_cir
+    del a_cir, cir, cir_a
+    a_cloud = sample_field(alpha, uu, vv, wrap_x=True)
+    for c in range(3):
+        up = sample_field(cloud[..., c], uu, vv, wrap_x=True)
+        sky[..., c] = sky[..., c] * (1.0 - a_cloud) + up * a_cloud
+
     if debug is not None:
-        debug["alpha"] = al
-        debug["dens"] = dens
-        debug["rim"] = rim
-        debug["sun"] = (sun_az, sun_el)
-        debug["cov"] = cov
-    del cov, dens, cloud, alpha, cir, cir_a
+        debug["coverage"] = float(dens.mean())
+        debug["sun"] = (sun_el, debug_sun)
+    del dens, cloud, alpha
 
-    # --- fine painterly grain (coherent, not white noise) ------------------
-    grain = fbm(w, h, 900, 420, SEED + 61, octaves=2, wrap="x")
-    stroke = fbm(w, h, 260, 40, SEED + 62, octaves=2, wrap="x")
-    sky *= (1.0 + (grain - 0.5) * 0.135 + (stroke - 0.5) * 0.075)[..., None]
-    del grain, stroke
-
-    # --- three hazy ridgelines just above the horizon ----------------------
-    ridge_specs = [
-        # (base_deg, amp_deg, freq, colour, edge softness in v)
-        (0.55, 0.55, 3.0, (150, 168, 188), 0.0016),
-        (0.85, 0.90, 4.5, (128, 150, 176), 0.0012),
-        (0.35, 1.35, 6.5, (108, 134, 163), 0.0009),
-    ]
-    horizon_v = 0.5
-    for i, (base_deg, amp_deg, freq, col, soft) in enumerate(ridge_specs):
-        n = value_noise(w, 1, freq, 1, SEED + 31 + i, wrap="x")[0]
-        n2 = value_noise(w, 1, freq * 3, 1, SEED + 41 + i, wrap="x")[0]
-        line = base_deg + amp_deg * (0.72 * n + 0.28 * n2)
-        el_line = np.radians(line)[None, :]
-        mask = 1.0 - smoothstep(-soft, soft, el[:, None] - el_line)
-        # only the thin band around the horizon is a silhouette, so the haze
-        # ramp below it survives
-        mask *= 1.0 - smoothstep(0.500, 0.522, vv[:, None])
-        # fade each ridge down into the haze so it reads as distance
-        ccol = np.array(col, np.float32) / 255.0
-        depth = 0.45 + 0.25 * i
-        val = mix(ccol, _sky_ramp(np.array([0.5]))[0], depth)
-        sky = sky * (1.0 - mask[..., None] * 0.92) + val * (mask[..., None] * 0.92)
-
-    # --- dither to defeat 8-bit banding, quantise --------------------------
-    img = np.clip(dither(sky, 1.0, SEED + 51), 0.0, 1.0)
+    # --- encode + 1 LSB dither against 8-bit banding -----------------------
+    img = _linear_to_srgb(sky)
+    del sky
+    img = np.clip(dither(img, 1.0, SEED + 51), 0.0, 1.0)
     return to_image(img, "RGB")
 
 
@@ -1390,9 +1458,10 @@ ATLAS_LAYOUT = {
 ASSETS = [
     dict(id="sky_frontier", file="sky_frontier.png", size=(4096, 2048),
          channels=3, tiling="u", n_version=None, kind="sky",
-         description="Painterly midday equirectangular sky: deep blue zenith, layered "
-                     "cumulus with sun-side rims, high cirrus, thin warm haze, hazy "
-                     "ridges, dither; seamless at u."),
+         description="Photoreal midday equirectangular sky: Rayleigh blue zenith, "
+                     "real sun disc aligned to the key light, perspective cumulus "
+                     "deck with self-shadowing, thin cirrus, aerial horizon haze; "
+                     "seamless at u."),
     dict(id="bark_oak", file="bark_oak.png", size=(256, 512), channels=3,
          tiling="both", n_version="bark_oak_n.png", kind="bark",
          description="Warm grey-brown oak bark with deep vertical fissures and knots."),
@@ -1604,10 +1673,10 @@ def sky_metrics(img):
     hp = np.abs(lum * 255.0 - blur)
     top = hp[:int(0.55 * h)]
     sm = seam_metrics(np.asarray(img.convert("RGB")), "x")
-    # sun: brightest broad region in the upper sky
-    sun_az = 0.615 * 2.0 * math.pi
-    sx = int(sun_az / (2.0 * math.pi) * w)
-    sy = int((0.5 - math.radians(26.0) / math.pi) * h)
+    # sun: sample the authored disc so the report checks the real alignment
+    sun_u, sun_v = sky_sun_uv()
+    sx = int(sun_u * w) % w
+    sy = max(0, min(h - 1, int(sun_v * h)))
     return dict(bands=rows, hp50=float(np.percentile(top, 50)),
                 hp90=float(np.percentile(top, 90)),
                 hp99=float(np.percentile(top, 99)),
@@ -1917,8 +1986,10 @@ def validate_and_report(t_start):
             % (sm["hp50"], sm["hp90"], sm["hp99"]))
         add("  brightest pixels >0.90 luma: %.2f%% ; sun sample rgb %s" % (
             100.0 * sm["bright_frac"], np.round(sm["sun_rgb"] * 255).astype(int)))
+        # A natural horizon band is brighter than the old painted ramp; keep
+        # checking that it is not blown out and still carries cloud structure.
         ok = (sm["seam"]["x_edge"] <= 2.0 and
-              sm["bands"][2][3] < 0.78 and sm["bands"][2][4] > 0.045)
+              sm["bands"][2][3] < 0.88 and sm["bands"][2][4] > 0.040)
         checks.append(ok)
         add("  sky structure check: %s" % ("PASS" if ok else "REVIEW"))
 

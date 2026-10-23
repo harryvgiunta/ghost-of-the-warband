@@ -101,8 +101,8 @@ static func default_trees() -> Array[Dictionary]:
 	]
 
 
-## Warm, sunlit woodland frontier. The palette pushes yellow-green grass, amber
-## accents and a hazy painted horizon.
+## Warm, sunlit woodland frontier. The palette pushes yellow-green grass and
+## amber accents under a natural blue sky with a pale horizon haze.
 static func frontier() -> WorldStyle:
 	var style := WorldStyle.new()
 	style.id = "frontier"
@@ -113,10 +113,10 @@ static func frontier() -> WorldStyle:
 		"sun_color": Color("ffe2b3"),
 		"sun_energy": 1.05,
 		"sun_shadow_distance": 110.0,
-		"ambient_color": Color("bed1d1"),
+		"ambient_color": Color("c6d3dd"),
 		"ambient_energy": 0.52,
 		"use_sky_ambient": true,
-		"fog_color": Color("c5d0bd"),
+		"fog_color": Color("c9d2d8"),
 		"fog_density": 0.0022,
 		"fog_sun_scatter": 0.25,
 		"fog_sky_affect": 0.12,
@@ -219,10 +219,10 @@ static func arena() -> WorldStyle:
 		"sun_color": Color("ffe8c2"),
 		"sun_energy": 1.12,
 		"sun_shadow_distance": 80.0,
-		"ambient_color": Color("c9d8d8"),
+		"ambient_color": Color("cfdae1"),
 		"ambient_energy": 0.54,
 		"use_sky_ambient": true,
-		"fog_color": Color("d3ddc9"),
+		"fog_color": Color("d2dbe0"),
 		"fog_density": 0.0014,
 		"fog_sun_scatter": 0.2,
 		"fog_sky_affect": 0.08,

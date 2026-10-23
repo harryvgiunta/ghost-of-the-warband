@@ -3,7 +3,7 @@
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
  "file_count": 28,
- "total_bytes": 11324908,
+ "total_bytes": 8935129,
  "textures": [
   {
    "id": "sky_frontier",
@@ -16,7 +16,7 @@
    "tiling": "u",
    "n_version": null,
    "kind": "sky",
-   "description": "Painterly midday equirectangular sky: deep blue zenith, layered cumulus with sun-side rims, high cirrus, thin warm haze, hazy ridges, dither; seamless at u."
+   "description": "Photoreal midday equirectangular sky: Rayleigh blue zenith, real sun disc aligned to the key light, perspective cumulus deck with self-shadowing, thin cirrus, aerial horizon haze; seamless at u."
   },
   {
    "id": "bark_oak",

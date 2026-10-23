@@ -1,10 +1,11 @@
 class_name WorldEnvironmentKit
 extends RefCounted
-## Builds the painted sky, global environment and shadow-casting sun for a style.
+## Builds the authored sky, global environment and shadow-casting sun for a style.
 ##
-## Panorama sky + fog + filmic tonemap + a small saturation/contrast lift give
-## the WoW-ish painted look. All values come from `style.sky` so frontier and
-## arena share one code path.
+## The panorama is a photorealistic equirectangular sky whose sun disc and
+## aureole are authored at the key light's actual direction, so shadows and the
+## visible sun agree. Fog is tinted to the same horizon haze. All values come
+## from `style.sky` so frontier and arena share one code path.
 ##
 ## Compatibility note: sky ambient was probed on this project's GL Compatibility
 ## build (panorama sky, ambient source SKY): a white rough probe sphere is lit and
@@ -24,7 +25,7 @@ static func build(parent: Node3D, style: WorldStyle) -> Dictionary:
 	var sky := Sky.new()
 	sky.sky_material = panorama
 	# Static panorama: automatic processing refreshes radiance only when the
-	# material changes, which is exactly what a painted backdrop needs.
+	# material changes, which is exactly what a fixed sky needs.
 	sky.process_mode = Sky.PROCESS_MODE_AUTOMATIC
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 
