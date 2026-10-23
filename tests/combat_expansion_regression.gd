@@ -163,7 +163,7 @@ func run() -> void:
 	check(step_node.try_step(Vector3.RIGHT,true,false) and step_node.active,"A grounded quick step starts")
 	var step_velocity: Vector3 = step_node.velocity()
 	check(step_velocity.x > 4.0,"The quick step has real takeoff speed")
-	for tick in 16:
+	for tick in 20:
 		step_node.advance(1.0/60.0,true)
 	check(not step_node.active and step_node.cooldown_left > 0.0,"The step ends and enters cooldown")
 	check(not step_node.try_step(Vector3.RIGHT,true,false),"The step cannot restart during cooldown")

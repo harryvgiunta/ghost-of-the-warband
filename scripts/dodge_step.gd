@@ -3,8 +3,8 @@ extends Node
 ## Short travel, short recovery, and no invulnerability: unlike the roll this
 ## is a positioning move that can be chained after a brief cooldown.
 
-const DURATION := 0.24
-const DISTANCE := 2.55
+const DURATION := 0.30
+const TRAVEL := 2.95
 const COOLDOWN := 0.55
 const STAMINA_COST := 7.0
 
@@ -44,10 +44,10 @@ func advance(delta: float, grounded: bool) -> void:
 func velocity() -> Vector3:
 	if not active:
 		return Vector3.ZERO
-	# Squared falloff keeps the takeoff snappy while preserving roughly the
-	# advertised travel distance across the fixed duration.
+	# Ease-out calibrated at the 60 Hz physics rate: the sampled travel over
+	# DURATION is TRAVEL, so the HUD, docs and the real move agree.
 	var weight := 1.0-progress
-	return direction * (DISTANCE/DURATION) * (1.15*weight+0.25)
+	return direction * (TRAVEL/DURATION) * (1.46*weight+0.31)
 
 func reset() -> void:
 	active = false

@@ -122,6 +122,7 @@ var _left_melee_duration := float(DAGGER_DATA.seconds)
 var _right_melee_duration := 1.0
 var _step_progress := -1.0
 var _step_direction := Vector3.RIGHT
+var _step_facing_hold := 0.0
 var _hit_react := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
@@ -663,6 +664,10 @@ func set_step(progress: float, direction: Vector3) -> void:
 		var planar := Vector3(direction.x,0.0,direction.z)
 		if not planar.is_zero_approx():
 			_step_direction = planar.normalized()
+		# The step's own momentum is still decaying on the next few ticks.
+		# Keep the facing latched so the exit does not snap the root into the
+		# step direction and undo the whole side-step silhouette.
+		_step_facing_hold = 0.20
 	_update_pose(0.0)
 
 func set_slide(progress: float, direction: Vector3) -> void:
@@ -722,7 +727,9 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not _cover_active and not _blocking and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not _cover_active and not _blocking and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+		# A quick step keeps the original facing; its travel is applied by the
+		# hips and shoulders below instead of snapping the whole body sideways.
 		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
 
 func set_ground_sampler(sampler: Callable) -> void:
@@ -745,6 +752,11 @@ func get_animation_state() -> Dictionary:
 		# already active owns the pose instead.
 		presentation = "STAGGER"
 		presentation_time = _hit_react
+	elif _step_progress >= 0.0 and phase == "READY" and not _blocking:
+		# The quick step also rides in the phase string. Time carries its
+		# progress, so replicas get the shoulder turn with no extra payload key.
+		presentation = "STEP"
+		presentation_time = _step_progress
 	return {"phase":presentation,"draw":melee_secondary,"charge_frozen":charge_frozen,"time":presentation_time,"aim":_aim_point,
 		"release_draw":_release_draw,"release_charge":_release_charge,"release_raise":_release_raise,
 		"release_grip":_release_grip,"release_contact":_release_contact,"release_rotation":_release_bow_rotation,
@@ -755,6 +767,7 @@ func get_animation_state() -> Dictionary:
 func apply_animation_state(state: Dictionary) -> void:
 	var replicated_phase := str(state.phase)
 	var guard_phase := replicated_phase == "GUARD"
+	var step_phase := replicated_phase == "STEP"
 	_blocking = guard_phase and weapon in ["sword","dagger"]
 	if replicated_phase.begins_with("MELEE"):
 		var secondary := float(state.draw)
@@ -787,9 +800,9 @@ func apply_animation_state(state: Dictionary) -> void:
 	else:
 		_left_melee_time = -1.0
 		_right_melee_time = -1.0
-		phase = "READY" if guard_phase else replicated_phase
+		phase = "READY" if guard_phase or step_phase else replicated_phase
 		_melee_hand = "right"
-		_phase_time = 0.0 if guard_phase else float(state.time)
+		_phase_time = 0.0 if guard_phase or step_phase else float(state.time)
 		draw_amount = float(state.draw)
 		_hit_react = 0.0
 	charge_frozen = bool(state.charge_frozen)
@@ -803,6 +816,14 @@ func apply_animation_state(state: Dictionary) -> void:
 	global_basis = Basis(Vector3.UP,float(state.yaw))
 	if _blocking:
 		_block_forward = -global_basis.z
+	if step_phase:
+		_step_progress = clampf(float(state.time),0.0,1.0)
+		# Replicas have no separate step payload; the snapshot velocity is the
+		# same world travel the owner collided into.
+		var travel := Vector3(_velocity.x,0.0,_velocity.z)
+		_step_direction = travel.normalized() if travel.length_squared() > 0.0625 else global_basis.x
+	else:
+		_step_progress = -1.0
 	_roll_progress = float(state.roll)
 	var slide: Vector4 = state.slide
 	slide_progress = slide.x
@@ -1038,9 +1059,13 @@ func _locomotion_clip_time(clip: String) -> float:
 func _update_pose(delta: float) -> void:
 	if not _built:
 		return
+	_step_facing_hold = maxf(0.0,_step_facing_hold-delta)
 	var speed := Vector2(_velocity.x,_velocity.z).length()
 	var sliding := _grounded and _roll_progress < 0.0 and not _cover_active and (slide_progress >= 0.0 or _slide_weight > 0.0)
-	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding
+	var stepping := _grounded and _step_progress >= 0.0 and _roll_progress < 0.0 and not sliding
+	# The quick step owns its own planted lunge; the forward locomotion cycle
+	# would read as a sprint in the step direction instead of a side step.
+	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
 	var coupled_carry := weapon == "sword" and sword_index == 2 and not is_melee() and not throwing
@@ -1391,18 +1416,37 @@ func _apply_hit_react_pose() -> void:
 	_set_bone_world(_bones.pelvis,pelvis)
 
 func _apply_step_pose() -> void:
-	# A quick planted lunge: pitch the hips and chest a few degrees into the
-	# step without inventing a new clip or changing the socketed weapon pose.
+	# A planted lateral lunge. The root keeps its facing while the hips open
+	# toward the travel, the chest turns further and the head stays on target.
+	# That is the side step; snapping the whole body to the velocity read as a
+	# one-beat sideways sprint instead.
 	var weight := sin(clampf(_step_progress,0.0,1.0)*PI)
-	if weight <= 0.0 or not is_zero_approx(_crouch_amount):
+	if weight <= 0.0:
 		return
+	var travel := Vector3(_step_direction.x,0.0,_step_direction.z)
+	if travel.length_squared() < 0.0001:
+		return
+	travel = travel.normalized()
+	var face := -global_basis.z
+	var turn := clampf(atan2(face.cross(travel).y,face.dot(travel)),-PI*0.5,PI*0.5)
+	var side := signf(turn)
 	var pelvis := _bone_world(_bones.pelvis)
-	pelvis.basis = Basis(global_basis.x,-0.18*weight)*pelvis.basis
-	pelvis.origin -= Vector3.UP*0.05*weight
+	pelvis.basis = Basis(Vector3.UP,turn*0.30*weight) \
+		* Basis(face,-side*0.12*weight) \
+		* Basis(global_basis.x,-0.16*weight) * pelvis.basis
+	pelvis.origin += travel*(0.10*weight) - Vector3.UP*0.05*weight
 	_set_bone_world(_bones.pelvis,pelvis)
 	var spine := _bone_world(_bones.spine_01)
-	spine.basis = Basis(global_basis.x,-0.10*weight)*spine.basis
+	spine.basis = Basis(Vector3.UP,turn*0.22*weight) \
+		* Basis(face,side*0.05*weight) \
+		* Basis(global_basis.x,-0.06*weight) * spine.basis
 	_set_bone_world(_bones.spine_01,spine)
+	var chest := _bone_world(_bones.spine_02)
+	chest.basis = Basis(Vector3.UP,turn*0.08*weight)*chest.basis
+	_set_bone_world(_bones.spine_02,chest)
+	var head := _bone_world(_bones.Head)
+	head.basis = Basis(Vector3.UP,-turn*0.42*weight)*head.basis
+	_set_bone_world(_bones.Head,head)
 
 func _sample_cover_lean() -> void:
 	var clip: Dictionary = _profile.clips.cover_top
@@ -1647,17 +1691,41 @@ func _plant_archery_feet(weight: float) -> void:
 		var basis := skeleton.global_basis*skeleton.get_bone_global_rest(_legs[side][2]).basis
 		_solve_limb(_legs[side],foot.origin.lerp(planted,weight),foot.basis.slerp(basis,weight),stance*Vector3(sign_x*0.08,0,-1))
 
+func _step_foot_offset(side: int) -> Vector3:
+	# Widen the stance toward the step: the leading foot reaches out and lifts,
+	# the trailing foot braces. The pelvis shift is deliberately smaller than
+	# the lead reach so the silhouette stays a step, not a slide.
+	if _step_progress < 0.0:
+		return Vector3.ZERO
+	var travel := Vector3(_step_direction.x,0.0,_step_direction.z)
+	if travel.length_squared() < 0.0001:
+		return Vector3.ZERO
+	travel = travel.normalized()
+	var local := travel.dot(global_basis.x)
+	if absf(local) < 0.1:
+		return Vector3.ZERO
+	var weight := sin(clampf(_step_progress,0.0,1.0)*PI)
+	var lead := 0 if local < 0.0 else 1
+	if side == lead:
+		return travel*(0.26*weight)+Vector3.UP*(0.075*weight)
+	return travel*(-0.07*weight)
+
 func _place_feet() -> void:
 	if not _ground_sampler.is_valid():
 		return
+	var offset_l := _step_foot_offset(0)
+	var offset_r := _step_foot_offset(1)
 	var left := _bone_world(_legs[0][2])
 	var right := _bone_world(_legs[1][2])
-	var floors := Vector2(float(_ground_sampler.call(left.origin)),float(_ground_sampler.call(right.origin)))
+	var left_floor := left.origin+Vector3(offset_l.x,0.0,offset_l.z)
+	var right_floor := right.origin+Vector3(offset_r.x,0.0,offset_r.z)
+	var floors := Vector2(float(_ground_sampler.call(left_floor)),float(_ground_sampler.call(right_floor)))
 	var base_floor := minf(floors.x,floors.y)
 	_model.position.y = clampf(base_floor-global_position.y,-0.4,0.4)
 	for side in 2:
 		var foot := _bone_world(_legs[side][2])
-		var ankle := foot.origin+Vector3.UP*(floors[side]-base_floor)
+		var offset := offset_l if side == 0 else offset_r
+		var ankle := foot.origin+offset+Vector3.UP*(floors[side]-base_floor)
 		var toe := foot.origin-global_basis.z*0.15
 		var edge := foot.origin+global_basis.x*0.08
 		var forward := -global_basis.z*0.15+Vector3.UP*(float(_ground_sampler.call(toe))-floors[side])
