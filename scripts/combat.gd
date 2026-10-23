@@ -519,17 +519,18 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 	var state := _swing_state(hand)
 	if not _can_damage_melee(hand,state) or radius <= 0.0:
 		return
-	# Horizontal cuts and dagger thrusts get a small reach and thickness
-	# envelope. The authored blades are short against half-size devils that
-	# strike from the advertised reach; the visible blade stays authoritative,
-	# but the hit volume is wider. Overheads and sword stabs keep their own.
+	# Horizontal cuts and dagger thrusts get a reach and thickness envelope.
+	# The authored blades are short against half-size devils that strike from
+	# the advertised reach; the visible blade stays authoritative, but the hit
+	# volume is wider. A greatsword sweeps a far larger arc than a dagger, so
+	# its envelope grows with the blade. Overheads and sword stabs keep their own.
 	var reach := 0.0
 	var thicken := 0.0
 	if is_instance_valid(rig):
 		if hand == "right" and rig.weapon == "sword" \
 				and str(rig._right_variant) in ["horizontal_left","horizontal_right"]:
-			reach = 0.14 + 0.04 * int(rig.sword_index)
-			thicken = 0.045
+			reach = 0.20 + 0.03 * int(rig.sword_index)
+			thicken = 0.05 + 0.03 * int(rig.sword_index)
 		elif (hand == "right" and rig.weapon == "dagger") \
 				or (hand == "left" and rig.weapon == "dual"):
 			reach = 0.38
@@ -548,20 +549,44 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 	var blade_change := (current_tip - current_base) - (previous_tip - previous_base)
 	var steps := clampi(ceili(blade_change.length() / (radius * 0.25)), 1, MAX_SWEEP_STEPS)
 	var space := actor.get_world_3d().direct_space_state
-	for step in steps:
-		var start_fraction := float(step) / steps
-		var end_fraction := float(step + 1) / steps
-		var base_from := previous_base.lerp(current_base, start_fraction)
-		var tip_from := previous_tip.lerp(current_tip, start_fraction)
-		var base_to := previous_base.lerp(current_base, end_fraction)
-		var tip_to := previous_tip.lerp(current_tip, end_fraction)
-		_sweep_capsule(space,hand,state,base_from,tip_from,base_to,tip_to,radius)
-		if not _can_damage_melee(hand,state):
-			return
+	# A horizontal cut is a swipe through a vertical band, not a razor line.
+	# Sample the same blade path again lower down so a short target is inside
+	# the swing instead of under a chest-high blade. The lateral reach is
+	# unchanged; the band only grows vertically.
+	var drops: Array[float] = [0.0]
+	var horizontal_sword: bool = reach > 0.0 and hand == "right" and rig.weapon == "sword"
+	if horizontal_sword:
+		drops = [0.0,-0.18,-0.36]
+	var face := Vector3.ZERO
+	if is_instance_valid(rig):
+		face = -rig.global_basis.z
+		face.y = 0.0
+	for drop in drops:
+		var lift := Vector3.UP*drop
+		for step in steps:
+			var start_fraction := float(step) / steps
+			var end_fraction := float(step + 1) / steps
+			var base_from := previous_base.lerp(current_base, start_fraction)+lift
+			var tip_from := previous_tip.lerp(current_tip, start_fraction)+lift
+			var base_to := previous_base.lerp(current_base, end_fraction)+lift
+			var tip_to := previous_tip.lerp(current_tip, end_fraction)+lift
+			# The wide coil sweeps the blade behind and beside the body, so only
+			# scenery in the cut's forward cone cancels it; a tree the coil
+			# merely passes must not swallow the whole strike. The sight ray
+			# still stops damage through cover between the actor and a target.
+			var guard_world := true
+			if horizontal_sword and not face.is_zero_approx():
+				var centre := ((base_from+tip_from)+(base_to+tip_to))*0.25-actor.global_position
+				centre.y = 0.0
+				guard_world = centre.length_squared() < 0.0001 \
+					or face.dot(centre.normalized()) > 0.35
+			_sweep_capsule(space,hand,state,base_from,tip_from,base_to,tip_to,radius,guard_world)
+			if not _can_damage_melee(hand,state):
+				return
 
 func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dictionary,
 		base_from: Vector3, tip_from: Vector3, base_to: Vector3, tip_to: Vector3,
-		radius: float) -> void:
+		radius: float, guard_world: bool = true) -> void:
 	var blade_from := tip_from - base_from
 	var blade_to := tip_to - base_to
 	var blade := (blade_from + blade_to) * 0.5
@@ -575,17 +600,18 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 	var pose := Transform3D(Basis(tangent, axis, tangent.cross(axis)), center)
 	_melee_query.transform = pose
 	_melee_query.motion = Vector3.ZERO
-	_melee_query.collision_mask = 1
-	_melee_query.exclude = state.exclude
-	# cast_motion ignores initial overlaps; test those explicitly first.
-	if not space.get_rest_info(_melee_query).is_empty():
-		state.blocked = true
-		return
-	_melee_query.motion = motion
 	var world_fraction := 1.0
-	if not motion.is_zero_approx():
-		var world_cast := space.cast_motion(_melee_query)
-		world_fraction = world_cast[0]
+	if guard_world:
+		_melee_query.collision_mask = 1
+		_melee_query.exclude = state.exclude
+		# cast_motion ignores initial overlaps; test those explicitly first.
+		if not space.get_rest_info(_melee_query).is_empty():
+			state.blocked = true
+			return
+		_melee_query.motion = motion
+		if not motion.is_zero_approx():
+			var world_cast := space.cast_motion(_melee_query)
+			world_fraction = world_cast[0]
 	_melee_query.collision_mask = target_mask
 	for contact in MAX_SWEEP_CONTACTS:
 		if not _can_damage_melee(hand,state):

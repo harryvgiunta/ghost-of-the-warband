@@ -37,6 +37,18 @@ func _swing(game, devil, variant: String = "horizontal_left") -> void:
 	# begin_attack refreshes the crosshair; pin the aim back onto the short target.
 	game.combat.set_aim(devil.get_aim_position())
 
+func _spawn_devil_at(game, offset: Vector3):
+	var devil := Enemy.new()
+	devil.kind = 2
+	devil.devil_weapon = "claw"
+	devil.pack_index = 0
+	devil.player = game.player
+	devil.safe_center = Vector3(1000,0,1000)
+	devil.position = game.player.global_position+offset
+	game.add_child(devil)
+	devil.set_physics_process(false)
+	return devil
+
 func _reset_swing(game) -> void:
 	game.combat.stop()
 	game.archer._clear_melee()
@@ -80,6 +92,31 @@ func run() -> void:
 	far.queue_free()
 	await process_frame
 	_reset_swing(game)
+	await physics_frame
+
+	# A horizontal cut is a swing across the front, not a narrow band down the
+	# crosshair. Both flanks of the arc take damage from one right-to-left cut.
+	var right_flank = _spawn_devil_at(game,Vector3(1.00,0,-0.58))
+	var left_flank = _spawn_devil_at(game,Vector3(-1.00,0,-0.58))
+	await physics_frame
+	# Aim down the middle: the arc is centred on the crosshair, so both flanks
+	# have to be inside one swing from a level forward aim.
+	game.camera_yaw = 0.0
+	game.shoulder_camera.side = 1
+	game._next_swing_side = 1
+	game.combat.set_aim(game.player.global_position+Vector3(0,0.6,-6))
+	game.begin_attack("right","horizontal_right")
+	game.combat.set_aim(game.player.global_position+Vector3(0,0.6,-6))
+	for frame in 120:
+		await physics_frame
+	check(right_flank.health < right_flank.max_health,"The right-to-left cut hits a target 60 degrees to the starting side")
+	check(left_flank.health < left_flank.max_health,"The same cut follows through to a target 60 degrees to the far side")
+	right_flank.queue_free()
+	left_flank.queue_free()
+	await process_frame
+	_reset_swing(game)
+
+	game.archer.set_sword(0)
 	game.archer.set_weapon("dagger")
 	await physics_frame
 
