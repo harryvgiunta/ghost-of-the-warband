@@ -5,6 +5,7 @@ signal armor_selected(slot: String, set_index: int)
 signal sword_selected(index: int)
 signal weapon_selected(value: String)
 signal shield_selected(active: bool)
+signal consumable_selected(kind: String)
 signal view_toggled
 signal camp_requested
 signal map_toggled
@@ -30,6 +31,8 @@ var _shield_equipped := false
 var _armor_pieces: Dictionary = {}
 var _shield_button: Button
 var _dual_button: Button
+var _bandage_button: Button
+var _potion_button: Button
 var _equipment: Panel
 var _region: Label
 var _quest: Label
@@ -129,14 +132,14 @@ func _ready() -> void:
 	hub_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	hub_button.add_theme_font_size_override("font_size", 13)
 	hub_button.pressed.connect(func(): hub_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   G  Interact   I  Inventory   O  Equipment", Vector2(-560, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   6 / 7  Consumables   SHIFT + SPACE  Roll   G  Interact   I  Inventory   O  Equipment", Vector2(-560, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
 	_build_equipment()
 
 func _build_equipment() -> void:
-	_equipment = _panel(self, Vector2(24, 130), Vector2(282, 615))
+	_equipment = _panel(self, Vector2(24, 120), Vector2(282, 665))
 	_label(_equipment, "EQUIPMENT", Vector2(18, 15), 12, GOLD)
 	_label(_equipment, "A ranger of Ironwood", Vector2(18, 40), 20, CREAM)
 	for index in 3:
@@ -185,7 +188,15 @@ func _build_equipment() -> void:
 	_shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
 	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(146,530),Vector2(120,28))
 	_view_button.pressed.connect(func(): view_toggled.emit())
-	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,564),9,MUTED)
+	_bandage_button = _button(_equipment,"6  BANDAGE",Vector2(16,566),Vector2(120,28))
+	_bandage_button.add_theme_font_size_override("font_size",12)
+	_bandage_button.pressed.connect(func(): consumable_selected.emit("bandage"))
+	_bandage_button.tooltip_text = "3 s use / 35 health over the next 3 s"
+	_potion_button = _button(_equipment,"7  POTION",Vector2(146,566),Vector2(120,28))
+	_potion_button.add_theme_font_size_override("font_size",12)
+	_potion_button.pressed.connect(func(): consumable_selected.emit("potion"))
+	_potion_button.tooltip_text = "0.5 s use / 50 health instantly"
+	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\n6 bandage   7 healing potion\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,598),9,MUTED)
 	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
@@ -194,14 +205,20 @@ func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array
 	_interactables = interactables
 	_world_limit = limit
 
-func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0) -> void:
+func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0, consume_kind: String = "", consume_time: float = 0.0) -> void:
 	_region.text = region
 	_health_label.text = "HEALTH  %d / 100" % int(health)
 	_health_bar.value = health
 	_stamina_bar.value = stamina
 	_gold_label.text = "%d GOLD  /  %d FOES" % [gold, kills]
 	_charge_bar.value = draw_amount * 100.0 if phase_name in ["DRAWING", "HOLDING", "T_DRAW", "T_HOLD"] else progress * 100.0
-	if _weapon == "dual" and (left_melee < 0.999999 or right_melee < 0.999999):
+	if phase_name == "BANDAGE" or consume_kind == "bandage":
+		_charge_bar.value = clampf(consume_time/3.0,0.0,1.0)*100.0
+		_phase.text = "WRAPPING BANDAGE  %d%%  /  STAND STILL" % int(clampf(consume_time/3.0,0.0,1.0)*100.0)
+	elif phase_name == "DRINK" or consume_kind == "potion":
+		_charge_bar.value = clampf(consume_time/0.5,0.0,1.0)*100.0
+		_phase.text = "DRINKING POTION  %d%%" % int(clampf(consume_time/0.5,0.0,1.0)*100.0)
+	elif _weapon == "dual" and (left_melee < 0.999999 or right_melee < 0.999999):
 		_phase.text = "DUAL  /  LEFT %s  /  RIGHT %s" % [_melee_pct(left_melee),_melee_pct(right_melee)]
 	elif phase_name in ["DRAWING", "HOLDING"]:
 		_phase.text = "DRAW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO SHOOT" % [draw_amount * 100, draw_amount]

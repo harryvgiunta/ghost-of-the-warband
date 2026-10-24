@@ -170,6 +170,21 @@
       "torso_degrees": 14.0,
       "pelvis_counterbalance": 0.02,
       "pelvis_lowering": 0.012
+    },
+    "bandage": {
+      "name": "Bandage_Wrap",
+      "duration": 3,
+      "loop": false,
+      "use_seconds": 3.0,
+      "heal": 35.0,
+      "heal_seconds": 3.0
+    },
+    "potion": {
+      "name": "Potion_Drink",
+      "duration": 0.5,
+      "loop": false,
+      "use_seconds": 0.5,
+      "heal": 50.0
     }
   },
   "animations": {
@@ -421,5 +436,11 @@
       "guard to windup",
       "recovery to guard"
     ]
+  },
+  "consumable_authoring": {
+    "authoring_fps": 60,
+    "bandage_frames": 180,
+    "bandage_description": "Left forearm raised across the sternum; right hand makes two wrapping loops around it.",
+    "potion_description": "Right hand raises a bottle to the mouth, hand and head tip for the drink, then lower."
   }
 }

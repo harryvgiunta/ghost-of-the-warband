@@ -88,6 +88,7 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - Space jumps; **Shift + Space rolls immediately** from the ground or during a jump. Repeated unmodified Space presses never roll. There is no double-tap window.
 - Movement determines roll direction, then facing is the fallback. Keep the single-roll-per-airborne-cycle restriction, normal world collisions, and attack cancellation; a roll is not invulnerability.
 - Both controllers pass `event.shift_pressed`. The arena's `jump` action carries an explicitly validated boolean, not a trusted client animation state.
+- `6` uses a bandage and `7` drinks a healing potion in every in-match equipment panel. A bandage channels for 3 s then restores 35 health over 3 s; a potion channels for 0.5 s then restores 50 health. `Archer` plays the merged `Bandage_Wrap`/`Potion_Drink` clips and sockets a procedural roll/bottle; damage, attacks, jumps, rolls, steps, cover changes and gear changes cancel the channel. The host owns the channel and heal on authoritative actors. `tools/prepare_consumables.py` merges only the two new clips into the original GLB.
 - `1` equips the selected bow; `2` equips the selected sword; `3` equips the single dagger; `4` equips or stows the shield; `5` toggles dual wield. The shield is legal with the dagger or **any one-handed sword** (`sword_index` 0 or 1, including the shortsword); switching to a bow, greatsword, staff or dual wield stows it. Bow and sword sizes are selected independently with mouse buttons, not number-key cycling.
 - Dual wield requires a one-handed sword main (`sword_index` 0/1), no staff, focus or shield, and a dagger or one-handed sword in the off hand; key **5** holds the dagger in the left hand, while a paperdoll off-hand piece arms that weapon. LMB performs the left attack; RMB performs the right sword overhead instead of guarding. T still throws the right-hand sword. `set_sword(2)` leaves dual mode; `set_weapon("dual")` refuses a greatsword. The mode is session-only like `1`/`2`/`3`, not persisted in `PlayerState`.
 - **LMB is the only held attack input for bows.** Release launches at most one arrow. Escape/equipment cancellation must not fire an arrow or leave a held-input latch active. Q no longer draws; E no longer interacts.
@@ -254,6 +255,8 @@ Windows launchers: `Play.cmd` opens the Hollow hub (default main scene); `Arena.
 
 `playtest/sidestep_lab.tscn` (or `playtest/Sidestep Lab.cmd`) is the isolated quick-step range: the real `Archer`/`DodgeStep`, a facing tree, a metre grid, and a measured trace of the last step. Tune the step there and confirm the visual result before touching the shared controllers.
 
+Run `python tools/run_tests.py` for the full suite in parallel (isolated `APPDATA`, unique fixed UDP ports, `--fixed-fps 240` for `cover_movement_regression`/`weapon_input_regression`, one retry).
+
 For the managed Windows console engine, run from the repository root:
 
 ```powershell
@@ -288,7 +291,8 @@ $Checks = @(
     'combat_expansion_regression',
     'delve_regression',
     'delve_entry_regression',
-    'delve_network_regression'
+    'delve_network_regression',
+    'consumable_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"

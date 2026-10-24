@@ -28,6 +28,10 @@ const SWORD_DATA = [
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
 ]
 const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
+const CONSUMABLE_DATA = {
+	"bandage": {"name":"Bandage", "seconds":3.0, "heal":35.0, "heal_seconds":3.0, "clip":"Bandage_Wrap", "phase":"BANDAGE"},
+	"potion": {"name":"Healing potion", "seconds":0.5, "heal":50.0, "heal_seconds":0.0, "clip":"Potion_Drink", "phase":"DRINK"},
+}
 ## Two-handed staves reuse the greatsword combat profile; only the visible
 ## shaft endpoints differ, so blade sweeps follow the real staff length.
 const STAFF_DATA = [
@@ -78,6 +82,9 @@ var active_dagger: Node3D
 var active_shield
 var shield_equipped := false
 var shield_variant := 1
+var consumable_kind := ""
+var _bandage_prop: Node3D
+var _potion_prop: Node3D
 var active_staff: Node3D
 var active_off_weapon: Node3D
 var active_focus: Node3D
@@ -281,6 +288,7 @@ func _ready() -> void:
 	if focus_active:
 		active_focus = _focus_items.get(focus_kind,null)
 	_build_equipment()
+	_build_consumable_props()
 	_built = true
 	set_bow(bow_index)
 	set_sword(sword_index)
@@ -323,6 +331,73 @@ func _build_equipment() -> void:
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
 	_build_armor_meshes()
 
+func _build_consumable_props() -> void:
+	var cloth := Geo.material(Color("ddd6c2"))
+	var cloth_edge := Geo.material(Color("b7ad92"))
+	_bandage_prop = Node3D.new()
+	_bandage_prop.name = "BandageRoll"
+	_bandage_prop.visible = false
+	add_child(_bandage_prop)
+	Geo.cylinder(_bandage_prop,0.036,0.036,0.105,Vector3.ZERO,cloth,12)
+	Geo.cylinder(_bandage_prop,0.038,0.038,0.012,Vector3(0,0.049,0),cloth_edge,12)
+	Geo.box(_bandage_prop,Vector3(0.085,0.003,0.19),Vector3(0,-0.018,0.09),cloth)
+	Geo.sphere(_bandage_prop,0.038,Vector3(0,-0.052,0),cloth,Vector3(1.0,0.6,1.0))
+	var glass := Geo.material(Color(0.42,0.68,0.64,0.75),0.2,0.25)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var liquid := Geo.material(Color("b73f45"),0.1,0.45)
+	var cork := Geo.material(Color("a8814f"))
+	_potion_prop = Node3D.new()
+	_potion_prop.name = "HealingPotion"
+	_potion_prop.visible = false
+	add_child(_potion_prop)
+	Geo.cylinder(_potion_prop,0.033,0.033,0.085,Vector3(0,0.042,0),liquid,12)
+	Geo.cylinder(_potion_prop,0.036,0.030,0.125,Vector3(0,0.062,0),glass,12)
+	Geo.cylinder(_potion_prop,0.017,0.017,0.045,Vector3(0,0.145,0),glass,10)
+	Geo.cylinder(_potion_prop,0.020,0.020,0.022,Vector3(0,0.176,0),cork,10)
+	Geo.sphere(_potion_prop,0.018,Vector3(0,0.09,0),liquid)
+	_update_consumable_props()
+
+func begin_consumable(kind: String) -> bool:
+	if not CONSUMABLE_DATA.has(kind):
+		return false
+	if phase != "READY" or _roll_progress >= 0.0 or is_melee():
+		return false
+	consumable_kind = kind
+	phase = str(CONSUMABLE_DATA[kind].phase)
+	_phase_time = 0.0
+	draw_amount = 0.0
+	charge_frozen = false
+	_blocking = false
+	_update_pose(0.0)
+	return true
+
+func end_consumable() -> void:
+	if phase not in ["BANDAGE","DRINK"]:
+		return
+	phase = "READY"
+	_phase_time = 0.0
+	consumable_kind = ""
+	_update_pose(0.0)
+
+func cancel_consumable() -> void:
+	if phase in ["BANDAGE","DRINK"]:
+		end_consumable()
+
+func is_consuming() -> bool:
+	return phase in ["BANDAGE","DRINK"]
+
+func _update_consumable_props() -> void:
+	if _bandage_prop == null or _potion_prop == null:
+		return
+	var consuming := is_consuming()
+	_bandage_prop.visible = consuming and consumable_kind == "bandage"
+	_potion_prop.visible = consuming and consumable_kind == "potion"
+	if not consuming:
+		return
+	var socket := _bone_world(_arms[1][2]) * _sword_grip
+	var prop := _bandage_prop if consumable_kind == "bandage" else _potion_prop
+	prop.global_transform = Transform3D(socket.basis * Basis(Vector3.RIGHT,PI*0.5),socket.origin)
+
 func _build_weapon_visuals() -> void:
 	# Off-hand 1H swords are separate meshes from the main-hand set so both
 	# hands can show the same sword size at once.
@@ -348,6 +423,7 @@ func _build_weapon_visuals() -> void:
 		_focus_items[kind] = focus
 
 func set_bow(index: int) -> void:
+	cancel_consumable()
 	bow_index = clampi(index,0,2)
 	if not _built:
 		return
@@ -357,6 +433,7 @@ func set_bow(index: int) -> void:
 	loadout_changed.emit()
 
 func set_sword(index: int) -> void:
+	cancel_consumable()
 	if is_melee():
 		_clear_melee()
 		phase = "READY"
@@ -379,6 +456,7 @@ func set_sword(index: int) -> void:
 	loadout_changed.emit()
 
 func set_weapon(value: String) -> bool:
+	cancel_consumable()
 	if value not in ["bow","sword","dagger","dual","none"]:
 		return false
 	if value != "dual":
@@ -561,24 +639,25 @@ func _sync_weapon_visibility() -> void:
 	# A thrown weapon leaves the hand for its release frame, then the endless
 	# supply restores the same equipped weapon as the recovery begins.
 	var hidden := phase == "T_RELEASE"
+	var consuming := is_consuming()
 	var staff_shown := _staff_shown()
 	var left_shown := weapon == "dual" and off_weapon_active and off_weapon_kind in ["dagger","sword"]
 	for i in _swords.size():
-		_swords[i].visible = weapon in ["sword","dual"] and i == sword_index and not hidden and not staff_shown
+		_swords[i].visible = weapon in ["sword","dual"] and i == sword_index and not hidden and not staff_shown and not consuming
 	for i in _bows.size():
-		_bows[i].visible = weapon == "bow" and i == bow_index
+		_bows[i].visible = weapon == "bow" and i == bow_index and not consuming
 	for i in _staffs.size():
-		_staffs[i].visible = staff_shown and i == staff_index and not hidden
+		_staffs[i].visible = staff_shown and i == staff_index and not hidden and not consuming
 	if active_dagger != null:
-		active_dagger.visible = (weapon == "dagger" and not hidden) \
-			or (left_shown and off_weapon_kind == "dagger")
+		active_dagger.visible = ((weapon == "dagger" and not hidden) \
+			or (left_shown and off_weapon_kind == "dagger")) and not consuming
 	for i in _off_swords.size():
-		_off_swords[i].visible = left_shown and off_weapon_kind == "sword" and i == off_weapon_index
-	var focus_shown := focus_active and _focus_supported()
+		_off_swords[i].visible = left_shown and off_weapon_kind == "sword" and i == off_weapon_index and not consuming
+	var focus_shown := focus_active and _focus_supported() and not consuming
 	for key: String in _focus_items:
 		_focus_items[key].visible = focus_shown and key == focus_kind
 	if active_shield != null:
-		active_shield.set_active(shield_equipped and is_visible_in_tree())
+		active_shield.set_active(shield_equipped and not consuming and is_visible_in_tree())
 
 func _build_armor_meshes() -> void:
 	# The imported leather outfit is split across the same five slots as the
@@ -630,6 +709,7 @@ func _apply_armor_visibility() -> void:
 				node.visible = set_index == active
 
 func set_armor_piece(slot: String, set_index: int) -> void:
+	cancel_consumable()
 	if slot not in ArmorData.SLOTS:
 		return
 	armor_pieces[slot] = clampi(set_index,0,ArmorData.SET_IDS.size()-1)
@@ -638,6 +718,7 @@ func set_armor_piece(slot: String, set_index: int) -> void:
 	loadout_changed.emit()
 
 func set_armor_pieces(pieces: Dictionary) -> void:
+	cancel_consumable()
 	for slot in ArmorData.SLOTS:
 		armor_pieces[slot] = clampi(int(pieces.get(slot,0)),0,ArmorData.SET_IDS.size()-1)
 	if _built:
@@ -645,6 +726,7 @@ func set_armor_pieces(pieces: Dictionary) -> void:
 	loadout_changed.emit()
 
 func set_armor(index: int) -> void:
+	cancel_consumable()
 	# Convenience for tests and whole-set loadouts: every slot uses one set.
 	var value := clampi(index,0,ArmorData.SET_IDS.size()-1)
 	for slot in ArmorData.SLOTS:
@@ -671,6 +753,7 @@ func can_equip_shield() -> bool:
 	return weapon == "dagger" or (weapon == "sword" and sword_index <= 1)
 
 func set_shield(active: bool) -> bool:
+	cancel_consumable()
 	var allowed := active and can_equip_shield()
 	if shield_equipped == allowed:
 		return shield_equipped
@@ -728,7 +811,7 @@ func _valid_variant(variant: String) -> bool:
 	return variant in ["overhead","horizontal_left","horizontal_right","stab"]
 
 func can_begin_melee(hand: String) -> bool:
-	if _roll_progress >= 0.0:
+	if _roll_progress >= 0.0 or is_consuming():
 		return false
 	if hand == "left":
 		if weapon != "dual" or _left_melee_time >= 0.0:
@@ -901,6 +984,7 @@ func release_throw() -> void:
 
 func cancel_draw() -> void:
 	charge_frozen = false
+	cancel_consumable()
 	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD"] and not phase.begins_with("MELEE"):
 		return
 	_clear_melee()
@@ -925,6 +1009,7 @@ func set_hit_react(seconds: float) -> void:
 		_hit_react = 0.0
 	else:
 		_hit_react = maxf(_hit_react,seconds)
+		cancel_consumable()
 	_update_pose(0.0)
 
 func set_step(progress: float, direction: Vector3) -> void:
@@ -996,7 +1081,7 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not _cover_active and not _blocking and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not _cover_active and not _blocking and not is_consuming() and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
 		# A quick step keeps the original facing; its travel is applied by the
 		# hips and shoulders below instead of snapping the whole body sideways.
 		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
@@ -1037,6 +1122,7 @@ func apply_animation_state(state: Dictionary) -> void:
 	var replicated_phase := str(state.phase)
 	var guard_phase := replicated_phase == "GUARD"
 	var step_phase := replicated_phase == "STEP"
+	var consume_phase := replicated_phase in ["BANDAGE","DRINK"]
 	_blocking = guard_phase and weapon in ["sword","dagger"]
 	if replicated_phase.begins_with("MELEE"):
 		var secondary := float(state.draw)
@@ -1080,6 +1166,7 @@ func apply_animation_state(state: Dictionary) -> void:
 		_phase_time = 0.0 if guard_phase or step_phase else float(state.time)
 		draw_amount = float(state.draw)
 		_hit_react = 0.0
+		consumable_kind = ("bandage" if replicated_phase == "BANDAGE" else "potion") if consume_phase else ""
 	charge_frozen = bool(state.charge_frozen)
 	_aim_point = state.aim
 	_release_draw = float(state.release_draw)
@@ -1263,6 +1350,9 @@ func _advance_step(delta: float) -> void:
 				draw_amount = 0.0
 				phase = "T_RECOVER"
 				_phase_time -= RELEASE_SECONDS
+		"BANDAGE","DRINK":
+			var consume_length := float(CONSUMABLE_DATA.get(consumable_kind, {}).get("seconds", 0.0))
+			_phase_time = minf(_phase_time, consume_length)
 	if phase in ["RECOVER","T_RECOVER"] and _phase_time >= RECOVER_SECONDS-0.000001:
 		phase = "READY"
 		_phase_time = 0.0
@@ -1354,16 +1444,17 @@ func _update_pose(delta: float) -> void:
 	# The quick step owns its own planted lunge; the forward locomotion cycle
 	# would read as a sprint in the step direction instead of a side step.
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
+	var consuming := is_consuming()
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
-	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing
+	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing and not consuming
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
-	var action := is_melee() or drawing or throwing or guarding or _cover_active
+	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
 	var archery := _archery_weight() if drawing else 0.0
-	if _roll_progress < 0.0 and (phase != "READY" or _cover_active):
+	if _roll_progress < 0.0 and not consuming and (phase != "READY" or _cover_active):
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
 			var yaw := atan2(-offset.x,-offset.z)
@@ -1388,6 +1479,9 @@ func _update_pose(delta: float) -> void:
 	elif throwing:
 		clip = str(_melee_clip_for("right","overhead").name)
 		time = _throw_clip_time()
+	elif consuming:
+		clip = str(CONSUMABLE_DATA.get(consumable_kind, {}).get("clip","Idle_Loop"))
+		time = clampf(_phase_time,0.0,_player.get_animation(clip).length)
 	elif drawing:
 		time = 0.0
 	elif guarding:
@@ -1449,7 +1543,7 @@ func _update_pose(delta: float) -> void:
 		for index in _guard_bones.size():
 			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
 	if crouching:
-		_apply_cover_crouch(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual")
+		_apply_cover_crouch(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual" or consuming)
 	if moving and action:
 		var spine_pose := _bone_world(_bones.spine_01)
 		var pelvis := _bone_world(_bones.pelvis)
@@ -1467,7 +1561,7 @@ func _update_pose(delta: float) -> void:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
-			_apply_slide_pose(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual")
+			_apply_slide_pose(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual" or consuming)
 		if _step_progress >= 0.0 and not is_melee() and not throwing:
 			_apply_step_pose()
 		_place_feet()
@@ -1475,7 +1569,7 @@ func _update_pose(delta: float) -> void:
 		var head := _bone_world(_bones.Head)
 		head.basis = Basis(Vector3.UP,-STANCE_YAW*archery)*head.basis
 		_set_bone_world(_bones.Head,head)
-	if weapon == "dual":
+	if weapon == "dual" and not consuming:
 		_pose_dual_arms()
 		if _right_melee_time >= 0.0 and _right_variant == "stab":
 			_aim_sword_thrust()
@@ -1505,6 +1599,7 @@ func _update_pose(delta: float) -> void:
 			active_focus.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
+	_update_consumable_props()
 	_sync_weapon_visibility()
 
 func _pose_dual_arms() -> void:

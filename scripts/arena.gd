@@ -88,6 +88,7 @@ func _ready() -> void:
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
 	hud.weapon_selected.connect(func(value: String): send_action("weapon",value))
 	hud.shield_selected.connect(func(active: bool): send_action("shield",active))
+	hud.consumable_selected.connect(func(kind: String): send_action("consume",kind))
 	var player_state := get_node_or_null("/root/PlayerState")
 	if player_state != null:
 		_field_inventory = FieldInventoryScript.new()
@@ -634,6 +635,9 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			if typeof(value) == TYPE_BOOL:
 				actor.combat.stop()
 				actor.rig.set_shield(value)
+		"consume":
+			if typeof(value) == TYPE_STRING and value in ["bandage","potion"]:
+				actor.try_consume(value)
 		"armor":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -759,7 +763,7 @@ func _process(delta: float) -> void:
 		rows.append({"slot":fighter.slot,"name":fighter.display_name,"bot":fighter.is_bot,"health":fighter.health,"kills":fighter.kills,"deaths":fighter.deaths})
 	hud.update_match({"players":rows,"local_slot":local_slot,"health":actor.health,"movement":actor.combat.movement_mode,
 		"attack_interval":actor.combat.get_attack_interval(),"attack_progress":actor.combat.attack_progress,
-		"phase":actor.rig.phase,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_bits(),"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
+		"phase":actor.rig.phase,"phase_time":actor.rig._phase_time,"draw":actor.rig.draw_amount,"bow":actor.rig.bow_index,"armor":actor.rig.armor_bits(),"sword":actor.rig.sword_index,"weapon":actor.rig.weapon,"respawn":actor.respawn,
 		"shield":actor.rig.shield_equipped,
 		"left_melee":actor.rig.melee_progress_for("left"),"right_melee":actor.rig.melee_progress_for("right"),
 		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
@@ -900,6 +904,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
+			KEY_6: send_action("consume","bandage")
+			KEY_7: send_action("consume","potion")
 			KEY_C:
 				if not _cursor_free:
 					send_action("crouch",not actors[local_slot].cover.crouch_requested)

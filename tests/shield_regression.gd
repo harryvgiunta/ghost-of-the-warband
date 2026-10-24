@@ -172,7 +172,7 @@ func run() -> void:
 	var arena = load("res://arena.tscn").instantiate()
 	root.add_child(arena)
 	await create_timer(0.3).timeout
-	arena.host_game(7898, "Shield Regression")
+	arena.host_game(7896, "Shield Regression")
 	await create_timer(0.2).timeout
 	arena.send_action("weapon","dagger")
 	await create_timer(0.1).timeout

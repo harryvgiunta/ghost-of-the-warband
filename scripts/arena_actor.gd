@@ -44,6 +44,10 @@ var run_requested := false
 var jump_requested := false
 var stamina := 100.0
 var _exhausted := false
+var consume_kind := ""
+var _consume_elapsed := 0.0
+var _heal_remaining := 0.0
+var _heal_rate := 0.0
 var input_age := 0.0
 var _label: Label3D
 var _ground_ring: MeshInstance3D
@@ -139,6 +143,10 @@ func revive() -> void:
 	health = 100.0
 	stamina = 100.0
 	_exhausted = false
+	consume_kind = ""
+	_consume_elapsed = 0.0
+	_heal_remaining = 0.0
+	_heal_rate = 0.0
 	alive = true
 	respawn = 0.0
 	combat.stop()
@@ -275,6 +283,10 @@ func leave_cover() -> void:
 	rig.set_cover(false,cover.normal,cover.crouch_amount,false,Vector3.ZERO)
 
 func reset_stance() -> void:
+	consume_kind = ""
+	_consume_elapsed = 0.0
+	_heal_remaining = 0.0
+	_heal_rate = 0.0
 	combat.stop()
 	combat.left_melee_progress = 1.0
 	combat.right_melee_progress = 1.0
@@ -311,6 +323,7 @@ func get_display_name() -> String:
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
+	_cancel_consumable()
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
@@ -329,6 +342,49 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		collision_mask = 0
 		rig.visible = false
 		killed.emit(slot,source_id)
+
+func try_consume(kind: String) -> bool:
+	if not authoritative or not alive or consume_kind != "":
+		return false
+	if not Archer.CONSUMABLE_DATA.has(kind) or health >= 99.999:
+		return false
+	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active:
+		return false
+	combat.stop()
+	if not rig.begin_consumable(kind):
+		return false
+	consume_kind = kind
+	_consume_elapsed = 0.0
+	return true
+
+func _advance_consumable(delta: float) -> void:
+	if consume_kind != "":
+		if not rig.is_consuming():
+			consume_kind = ""
+			_consume_elapsed = 0.0
+		else:
+			_consume_elapsed += delta
+			var data: Dictionary = Archer.CONSUMABLE_DATA[consume_kind]
+			if _consume_elapsed >= float(data.seconds):
+				var kind := consume_kind
+				consume_kind = ""
+				_consume_elapsed = 0.0
+				rig.end_consumable()
+				if kind == "bandage":
+					_heal_remaining = float(data.heal)
+					_heal_rate = float(data.heal)/maxf(float(data.heal_seconds),0.001)
+				else:
+					health = minf(100.0,health+float(data.heal))
+	if _heal_remaining > 0.0:
+		var amount := minf(_heal_rate*delta,_heal_remaining)
+		health = minf(100.0,health+amount)
+		_heal_remaining = maxf(0.0,_heal_remaining-amount)
+
+func _cancel_consumable() -> void:
+	if consume_kind != "":
+		consume_kind = ""
+		_consume_elapsed = 0.0
+		rig.cancel_consumable()
 
 func update_combat_cover_side() -> void:
 	cover.view_right = peek_view_right
@@ -354,6 +410,13 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 			revive()
 		return
 	input_age += delta
+	_advance_consumable(delta)
+	if consume_kind != "":
+		move_direction = Vector2.ZERO
+		run_requested = false
+		jump_requested = false
+		peek_requested = false
+		combat.stop_block()
 	roll.advance(delta,is_on_floor())
 	dodge.advance(delta,is_on_floor())
 	if is_bot:

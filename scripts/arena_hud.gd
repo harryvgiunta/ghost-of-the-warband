@@ -11,6 +11,7 @@ signal armor_selected(slot: String, set_index: int)
 signal sword_selected(index: int)
 signal weapon_selected(value: String)
 signal shield_selected(active: bool)
+signal consumable_selected(kind: String)
 
 const UI = preload("res://scripts/hud.gd")
 var reticle := Vector2.ZERO
@@ -161,11 +162,17 @@ func _ready() -> void:
 	shield_button.toggle_mode = true
 	shield_button.add_theme_font_size_override("font_size",11)
 	shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
-	_ui._label(equipment,"Gear 1-5. LMB by shoulder. Wheel: stab / overhead.",Vector2(14,301),9,UI.MUTED)
+	var bandage := _ui._button(equipment,"6 BANDAGE",Vector2(118,268),Vector2(100,28))
+	bandage.add_theme_font_size_override("font_size",10)
+	bandage.pressed.connect(func(): consumable_selected.emit("bandage"))
+	var potion := _ui._button(equipment,"7 POTION",Vector2(224,268),Vector2(94,28))
+	potion.add_theme_font_size_override("font_size",10)
+	potion.pressed.connect(func(): consumable_selected.emit("potion"))
+	_ui._label(equipment,"Gear 1-5. 6 bandage / 7 potion. LMB by shoulder. Wheel: stab / overhead.",Vector2(14,301),9,UI.MUTED)
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   ESC  Equipment",Vector2(-560,-25),11,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   6 / 7  Consumables   SHIFT + SPACE  Roll   ESC  Equipment",Vector2(-560,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -197,7 +204,12 @@ func update_match(state: Dictionary) -> void:
 	var throwing: bool = state.phase in ["T_DRAW","T_HOLD"]
 	var left_melee := float(state.get("left_melee",1.0))
 	var right_melee := float(state.get("right_melee",1.0))
-	if state.weapon == "dual" and (left_melee < 0.999999 or right_melee < 0.999999):
+	var consume_time := float(state.get("phase_time",0.0))
+	if state.phase == "BANDAGE":
+		attack_label.text = "WRAPPING BANDAGE  %d%%  /  STAND STILL" % int(clampf(consume_time/3.0,0.0,1.0)*100.0)
+	elif state.phase == "DRINK":
+		attack_label.text = "DRINKING POTION  %d%%" % int(clampf(consume_time/0.5,0.0,1.0)*100.0)
+	elif state.weapon == "dual" and (left_melee < 0.999999 or right_melee < 0.999999):
 		attack_label.text = "DUAL  /  LEFT %s  /  RIGHT %s" % [_melee_pct(left_melee),_melee_pct(right_melee)]
 		if state.get("attack_parry",false):
 			attack_label.text += "  /  ATTACK PARRY"
@@ -242,7 +254,12 @@ func update_match(state: Dictionary) -> void:
 			attack_label.text = "UNARMED / RETURN TO THE HOLLOW TO EQUIP"
 		else:
 			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
-	bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
+	if state.phase == "BANDAGE":
+		bar.value = clampf(consume_time/3.0,0.0,1.0) * 100.0
+	elif state.phase == "DRINK":
+		bar.value = clampf(consume_time/0.5,0.0,1.0) * 100.0
+	else:
+		bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
 	respawn_label.text = "RESPAWNING IN %.1f" % float(state.respawn) if float(state.respawn) > 0 else ""
 	_armor_pieces = ArmorData.unpack(int(state.armor) & 1023)
 	for index in ArmorData.SLOTS.size():

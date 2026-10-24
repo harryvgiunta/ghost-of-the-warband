@@ -58,6 +58,10 @@ var _loot_cursor := 0
 var _full_message_cooldown := 0.0
 var health := 100.0
 var stamina := 100.0
+var _consume_kind := ""
+var _consume_time := 0.0
+var _heal_remaining := 0.0
+var _heal_rate := 0.0
 var _sprint_exhausted := false
 var gold := 0
 var kills := 0
@@ -144,6 +148,7 @@ func _ready() -> void:
 	hud.sword_selected.connect(equip_sword)
 	hud.weapon_selected.connect(equip_weapon)
 	hud.shield_selected.connect(equip_shield)
+	hud.consumable_selected.connect(use_consumable)
 	hud.view_toggled.connect(toggle_view)
 	hud.camp_requested.connect(return_to_camp)
 	hud.map_toggled.connect(toggle_map)
@@ -259,13 +264,17 @@ func _physics_process(delta: float) -> void:
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
 	if input_vector.length() > 1.0:
 		input_vector = input_vector.normalized()
+	_advance_consumable(delta)
 	if inspecting or hud.map_open or _cursor_free or _field_inventory_open():
+		input_vector = Vector2.ZERO
+		slide.reset()
+	if _consume_kind != "":
 		input_vector = Vector2.ZERO
 		slide.reset()
 	if combat.stagger_time > 0.0:
 		input_vector = Vector2.ZERO
 		step.active = false
-	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1
+	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == ""
 	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
 	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
 	stamina = clampf(stamina + delta * stamina_rate, 0.0, 100.0)
@@ -336,7 +345,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"))
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time)
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -415,6 +424,7 @@ func _horizontal_variant() -> String:
 func begin_attack(hand: String = "right", variant: String = "") -> void:
 	if hud.map_open or _field_inventory_open():
 		return
+	_cancel_consumable()
 	_capture_attack_cover_side()
 	update_crosshair_aim()
 	var requested := hand if archer.weapon == "dual" else "right"
@@ -438,6 +448,7 @@ func begin_attack(hand: String = "right", variant: String = "") -> void:
 func quick_step(side: int) -> void:
 	if inspecting or hud.map_open or _cursor_free or side == 0 or combat.stagger_time > 0.0:
 		return
+	_cancel_consumable()
 	var direction: Vector3 = Vector3(cos(camera_yaw),0,-sin(camera_yaw))*signf(float(side))
 	if not step.try_step(direction,player.is_on_floor(),roll.active):
 		return
@@ -451,6 +462,7 @@ func quick_step(side: int) -> void:
 func begin_throw_attack() -> void:
 	if hud.map_open or _field_inventory_open():
 		return
+	_cancel_consumable()
 	if archer.weapon not in ["sword","dagger","dual"]:
 		hud.show_feedback("Equip a sword with 2 or the dagger with 3 to throw.")
 		return
@@ -502,6 +514,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
+			KEY_6: use_consumable("bandage")
+			KEY_7: use_consumable("potion")
 			KEY_C: toggle_crouch()
 			KEY_SPACE: press_jump(event.shift_pressed)
 			KEY_F: toggle_cover()
@@ -584,6 +598,7 @@ func cancel_input() -> void:
 	_throw_held = false
 	_orbiting = false
 	_peek_requested = false
+	_cancel_consumable()
 	combat.stop()
 
 func equip_bow(index: int) -> void:
@@ -620,6 +635,7 @@ func equip_shield(value: bool) -> void:
 func toggle_cover() -> void:
 	if inspecting or hud.map_open or _cursor_free:
 		return
+	_cancel_consumable()
 	cancel_input()
 	_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
@@ -634,6 +650,7 @@ func toggle_cover() -> void:
 func toggle_crouch() -> void:
 	if inspecting or hud.map_open or _cursor_free or not player.is_on_floor() or roll.active:
 		return
+	_cancel_consumable()
 	var requested: bool = not cover.crouch_requested
 	if requested:
 		var sprinting := Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and _movement_direction.length_squared() > 0.1
@@ -645,6 +662,7 @@ func toggle_crouch() -> void:
 func press_jump(roll_requested: bool) -> void:
 	if inspecting or hud.map_open or _cursor_free:
 		return
+	_cancel_consumable()
 	var grounded := player.is_on_floor()
 	_peek_requested = false
 	if not cover.prepare_jump():
@@ -668,6 +686,72 @@ func _armor_summary() -> String:
 
 func _update_loadout() -> void:
 	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
+
+func use_consumable(kind: String) -> void:
+	if not Archer.CONSUMABLE_DATA.has(kind):
+		return
+	var data: Dictionary = Archer.CONSUMABLE_DATA[kind]
+	if _consume_kind != "":
+		hud.show_feedback("Already using %s." % String(Archer.CONSUMABLE_DATA[_consume_kind].name))
+		return
+	if inspecting or hud.map_open or _cursor_free or _field_inventory_open():
+		return
+	if health >= 99.999:
+		hud.show_feedback("Health is already full.")
+		return
+	if combat.stagger_time > 0.0:
+		hud.show_feedback("Recover your footing before using %s." % String(data.name).to_lower())
+		return
+	if not player.is_on_floor() or roll.active or slide.active:
+		hud.show_feedback("Stand on solid ground to use %s." % String(data.name).to_lower())
+		return
+	cancel_input()
+	if cover.active:
+		cover.exit()
+	slide.reset()
+	archer.set_slide(-1.0,Vector3.FORWARD)
+	if not archer.begin_consumable(kind):
+		hud.show_feedback("Finish the current action before using %s." % String(data.name).to_lower())
+		return
+	_consume_kind = kind
+	_consume_time = 0.0
+	audio.play_sound("equip")
+	hud.show_feedback("Using %s  /  stand still" % String(data.name).to_lower(),1.2)
+
+func _advance_consumable(delta: float) -> void:
+	if _consume_kind != "":
+		if not archer.is_consuming():
+			_consume_kind = ""
+			_consume_time = 0.0
+		else:
+			_consume_time += delta
+			var data: Dictionary = Archer.CONSUMABLE_DATA[_consume_kind]
+			if _consume_time >= float(data.seconds):
+				var kind := _consume_kind
+				_consume_kind = ""
+				_consume_time = 0.0
+				archer.end_consumable()
+				if kind == "bandage":
+					_heal_remaining = float(data.heal)
+					_heal_rate = float(data.heal)/maxf(float(data.heal_seconds),0.001)
+					hud.show_feedback("Bandage applied  /  %d health over %.0f s" % [int(data.heal),float(data.heal_seconds)],2.0)
+				else:
+					_heal(float(data.heal))
+					hud.show_feedback("Healing potion  /  +%d health" % int(data.heal),1.5)
+				audio.play_sound("heal")
+	if _heal_remaining > 0.0:
+		var amount := minf(_heal_rate*delta,_heal_remaining)
+		_heal(amount)
+		_heal_remaining = maxf(0.0,_heal_remaining-amount)
+
+func _heal(amount: float) -> void:
+	health = minf(100.0,health+amount)
+
+func _cancel_consumable() -> void:
+	if _consume_kind != "":
+		_consume_kind = ""
+		_consume_time = 0.0
+		archer.cancel_consumable()
 
 func toggle_view() -> void:
 	inspecting = not inspecting
@@ -784,6 +868,7 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 	take_damage(amount)
 
 func take_damage(amount: float, react: bool = true) -> void:
+	_cancel_consumable()
 	var applied: float = amount * (1.0 - archer.armor_reduction())
 	health = maxf(0.0, health - applied)
 	if react:
@@ -800,6 +885,9 @@ func take_damage(amount: float, react: bool = true) -> void:
 
 func return_to_camp() -> void:
 	cancel_input()
+	_cancel_consumable()
+	_heal_remaining = 0.0
+	_heal_rate = 0.0
 	roll.reset()
 	step.reset()
 	cover.reset()

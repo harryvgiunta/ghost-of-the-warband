@@ -18,6 +18,7 @@ func _ready() -> void:
 	sounds["clang"] = _synthesize(0.48, 230.0, 0.52, 74.0)
 	sounds["parry"] = _synthesize(0.36, 1480.0, 0.14, 2350.0)
 	sounds["block"] = _synthesize(0.22, 170.0, 0.5, 82.0)
+	sounds["heal"] = _synthesize(0.42, 660.0, 0.03, 990.0)
 
 func play_sound(sound: String) -> void:
 	if muted:

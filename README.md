@@ -166,6 +166,8 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | 3 | Equip the dagger |
 | 4 | Equip or stow the shield (any one-handed sword or the dagger) |
 | 5 | Dual-wield the selected one-handed sword in the right hand and the dagger in the left; press again to return to the sword |
+| 6 | Use a bandage: three-second channel, then 35 health over the next three seconds |
+| 7 | Drink a healing potion: half-second channel, then 50 health |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
 | Hold left mouse with bow | Raise and draw while aiming; automatically expose from cover |
 | Release left mouse with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
@@ -428,7 +430,10 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/delve_regression.gd
 & $Godot --headless --path . --script res://tests/delve_entry_regression.gd
 & $Godot --headless --path . --script res://tests/delve_network_regression.gd
+& $Godot --headless --path . --script res://tests/consumable_regression.gd
 ```
+
+`python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
 
 `delve_regression.gd` checks the three-wave/two-devil plan, checkpoint JSON round-trip and corruption rejection, the chamber spawns/ceiling/gates and reachable ascent/descent, the full solo flow (drop, sealed wave, real bow damage, clear timer, cache burst, descend, final cache, explicit revive, party wipe), and checkpoint resume. `delve_entry_regression.gd` drives the Hollow's **Descend the Delve** button, the **Sunken Delve hatch inside the Wayfarer Inn** and its `G / Open the hatch to the Sunken Delve` prompt, the frontier delve-host hatch hand-off on the requested port, and the ascent back to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the landing, both see the wave, and both see the cache open.
 
@@ -447,6 +452,8 @@ $Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
 ```
 
 Keep the GLB, adjacent JSON/provenance, and `.glb.import` settings together. Import settings preserve authored clip names, use 60 Hz animation sampling, and keep textures embedded rather than duplicating extracted PNGs. The preparation workflow preserves the authored striking arm and body motion, corrects support-hand proportions and clothing clearance, and smooths the one-handed cut's timing. `tools/character_clearance.py` validates interpolated support-arm motion against the deformed outfit before export is accepted.
+
+`tools/prepare_consumables.py` imports the shipped GLB and merges the authored **3.0-second `Bandage_Wrap`** and **0.5-second `Potion_Drink`** clips into the original document, leaving every existing node, skin, mesh and animation untouched.
 
 The same rebuild imports `Crouch_Idle_Loop` and `Crouch_Fwd_Loop` from the existing Quaternius source and authors `Cover_Lean_Top`, `Cover_Lean_Left` and `Cover_Lean_Right` in Blender, plus the **0.5-second** `Dagger_Stab` thrust and the two held guard loops. The three 0.24-second lean clips share an idle reference, with planted feet and unchanged local arm poses for weapon layering. JSON records their asset-space directions, the stab's contact window and the crouch clip's measured stride estimate; runtime cadence follows actual movement rather than requested speed.
 
