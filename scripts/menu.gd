@@ -25,6 +25,7 @@ var _dragging := false
 var _focus := Vector3(0,1.02,0)
 var _lanterns: Array[OmniLight3D] = []
 var _lantern_energy: Array[float] = []
+var _floor_props: Node3D
 var _time := 0.0
 
 func _ready() -> void:
@@ -48,6 +49,10 @@ func _ready() -> void:
 	hud.delve_join_confirmed.connect(_on_delve_join_confirmed)
 	hud.buy_requested.connect(_on_buy)
 	hud.equip_requested.connect(_on_equip)
+	hud.unequip_requested.connect(_on_unequip)
+	hud.move_equipped_requested.connect(_on_move_equipped)
+	hud.drop_requested.connect(_on_drop)
+	hud.floor_pickup_requested.connect(_on_floor_pickup)
 	hud.stash_requested.connect(_on_stash)
 	hud.unstash_requested.connect(_on_unstash)
 	hud.sell_requested.connect(_on_sell)
@@ -108,20 +113,94 @@ func _refresh() -> void:
 	if hud != null:
 		hud.refresh()
 	_apply_preview_loadout()
+	_rebuild_floor_props()
 
 func _apply_preview_loadout() -> void:
 	if archer == null or state == null:
 		return
-	archer.set_bow(state.equipped_index("bow"))
-	archer.set_sword(state.equipped_index("sword"))
-	archer.set_armor_pieces(state.equipped_pieces())
+	archer.apply_loadout(state.loadout())
+
+func _rebuild_floor_props() -> void:
+	if _floor_props == null:
+		_floor_props = Node3D.new()
+		_floor_props.name = "FloorItems"
+		add_child(_floor_props)
+	for child in _floor_props.get_children():
+		_floor_props.remove_child(child)
+		child.queue_free()
+	if state == null:
+		return
+	var items: Array = state.floor_items
+	for index in items.size():
+		_floor_prop(index,str(items[index]))
+
+func _floor_prop(index: int, item_id: String) -> void:
+	# Small coloured props at the ranger's feet; presentation only, no collision.
+	var column := index % 4
+	var row := index / 4
+	var x := -0.30 + float(column) * 0.20
+	var z := 0.38 + float(row) * 0.13
+	var mat := Geo.material(_floor_color(item_id),0.15,0.7)
+	if index % 3 == 0:
+		Geo.cylinder(_floor_props,0.10,0.10,0.04,Vector3(x,0.08,z),mat,12)
+	else:
+		var box := Geo.box(_floor_props,Vector3(0.16,0.09,0.12),Vector3(x,0.10,z),mat)
+		box.rotation.y = float(index) * 0.7
+
+func _floor_color(item_id: String) -> Color:
+	match str(state.item_category(item_id)):
+		"bow":
+			return Color("8a6a3c")
+		"1h","2h":
+			return Color("9aa8aa")
+		"shield":
+			return Color("6a5138")
+		"staff":
+			return Color("7a5a34")
+		"focus":
+			return Color("72cbb6")
+		"jewelry":
+			return Color("e9bf76")
+		"armor","armor_bundle":
+			return Color("4a3626")
+	return Color("b9a88a")
 
 func _on_buy(item_id: String) -> void:
 	var result: Dictionary = state.buy(item_id)
 	hud.set_status(str(result.message))
 
-func _on_equip(index: int) -> void:
-	var result: Dictionary = state.equip(index)
+func _on_equip(index: int, target_slot: String) -> void:
+	var result: Dictionary = state.equip_from_inventory(index,target_slot)
+	hud.clear_selection()
+	hud.refresh()
+	hud.set_status(str(result.message))
+
+func _on_unequip(slot: String) -> void:
+	var result: Dictionary = state.unequip_to_backpack(slot)
+	hud.clear_selection()
+	hud.refresh()
+	hud.set_status(str(result.message))
+
+func _on_move_equipped(from_slot: String, to_slot: String) -> void:
+	var result: Dictionary = state.move_equipped(from_slot,to_slot)
+	hud.clear_selection()
+	hud.refresh()
+	hud.set_status(str(result.message))
+
+func _on_drop(area: String, key: Variant) -> void:
+	var result: Dictionary
+	if area == "paperdoll":
+		result = state.drop_equipped(str(key))
+	else:
+		result = state.drop_from_inventory(int(key))
+	hud.clear_selection()
+	hud.refresh()
+	hud.set_status(str(result.message))
+
+func _on_floor_pickup(index: int) -> void:
+	var result: Dictionary = state.pickup_floor(index)
+	hud.clear_selection()
+	hud.refresh()
 	hud.set_status(str(result.message))
 
 func _on_stash(index: int) -> void:
@@ -137,7 +216,7 @@ func _on_unstash(index: int) -> void:
 	hud.set_status(str(result.message))
 
 func _on_sell(location: String, index: int) -> void:
-	var result: Dictionary = state.sell(location,index)
+	var result: Dictionary = state.sell("inventory" if location == "backpack" else location,index)
 	hud.clear_selection()
 	hud.refresh()
 	hud.set_status(str(result.message))
@@ -332,6 +411,7 @@ func _build_character() -> void:
 	archer.set_ground_sampler(func(_point: Vector3): return 0.0)
 	archer.set_locomotion(Vector3.ZERO,true)
 	_apply_preview_loadout()
+	_rebuild_floor_props()
 
 func _build_camera() -> void:
 	camera = Camera3D.new()

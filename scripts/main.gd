@@ -14,14 +14,30 @@ const RunningSlide = preload("res://scripts/running_slide.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
+const LootPickup = preload("res://scripts/loot_pickup.gd")
+const FieldInventory = preload("res://scripts/field_inventory.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
+const PICKUP_RADIUS := 1.6
+const FULL_MESSAGE_INTERVAL := 2.5
+# Deterministic frontier drops: every entry is a real PlayerState item id and the
+# first eight cover all eight equipment categories the paperdoll understands.
+const LOOT_SEQUENCE := [
+	"dagger_iron", "shield_buckler", "staff_fire", "ring_copper",
+	"focus_tome", "neck_ember", "armor_mail_chest", "sword_short",
+	"shield_kite", "staff_bone", "ring_silver", "focus_skull",
+	"neck_bone", "armor_plate_hands", "shield_tower", "ring_blood",
+]
 
 var world
 var archer
 var hud
+var field_inventory
 var audio
 var _player_state
+var _delve_host := false
+var _delve_port := 7777
+var _delve_name := ""
 var combat
 var roll
 var step
@@ -37,6 +53,9 @@ var camera: Camera3D
 var enemies: Array[CharacterBody3D] = []
 var arrows: Array[Node3D] = []
 var thrown_weapons: Array[Node3D] = []
+var loot_pickups: Array[Node3D] = []
+var _loot_cursor := 0
+var _full_message_cooldown := 0.0
 var health := 100.0
 var stamina := 100.0
 var _sprint_exhausted := false
@@ -64,6 +83,7 @@ var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
 
 func _ready() -> void:
+	_read_arguments()
 	_player_state = get_node_or_null("/root/PlayerState")
 	_aim_query.collision_mask = 1 | 2
 	_floor_query.collision_mask = 1
@@ -130,13 +150,17 @@ func _ready() -> void:
 	hud.cursor_requested.connect(_set_cursor_free)
 	hud.hub_requested.connect(_return_to_hub)
 	if _player_state != null:
-		archer.set_bow(_player_state.equipped_index("bow"))
-		archer.set_sword(_player_state.equipped_index("sword"))
-		archer.set_armor_pieces(_player_state.equipped_pieces())
+		archer.apply_loadout(_player_state.loadout())
 		gold = int(_player_state.credits)
+	else:
+		archer.set_bow(0)
+		archer.set_sword(0)
+		archer.set_armor_pieces({"head": 0, "chest": 0, "hands": 0, "legs": 0, "feet": 0})
 	archer.loadout_changed.connect(_update_loadout)
 	hud.configure_map(world.landmarks, world.map_paths, world.interactables, world.WORLD_LIMIT)
 	_update_loadout()
+	_refresh_backpack()
+	_build_field_inventory()
 	for record: Dictionary in world.enemy_spawns:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
@@ -154,6 +178,79 @@ func _ready() -> void:
 	print("IRONWOOD_WORLD_READY enemies=%d waystones=3 terrain=290m" % enemies.size())
 	_set_cursor_free(false)
 
+
+func _read_arguments() -> void:
+	# Host intent is parsed here because the frontier is the launcher for a
+	# hosted delve: the hatch descent arms `delve-host` with these values.
+	var args := OS.get_cmdline_user_args()
+	for index in args.size():
+		var argument := str(args[index])
+		if argument == "--delve-host":
+			_delve_host = true
+		elif argument == "--delve-port" and index + 1 < args.size():
+			_delve_port = clampi(args[index + 1].to_int(), 1024, 65535)
+		elif argument == "--delve-name" and index + 1 < args.size():
+			_delve_name = str(args[index + 1]).strip_edges()
+
+
+func _build_field_inventory() -> void:
+	field_inventory = FieldInventory.new()
+	field_inventory.name = "FieldInventory"
+	field_inventory.layer = 2
+	add_child(field_inventory)
+	field_inventory.configure(_player_state,get_node_or_null("/root/Session"),archer,Callable(self,"_drop_field_loot"))
+	field_inventory.opened.connect(_on_field_inventory_opened)
+	field_inventory.closed.connect(_on_field_inventory_closed)
+	field_inventory.loadout_changed.connect(_on_field_loadout_changed)
+	hud.inventory_requested.connect(toggle_field_inventory)
+
+
+func _field_inventory_open() -> bool:
+	return field_inventory != null and field_inventory.is_open()
+
+
+func toggle_field_inventory() -> void:
+	if field_inventory == null:
+		return
+	if field_inventory.is_open():
+		field_inventory.close()
+		return
+	if inspecting:
+		toggle_view()
+	field_inventory.open()
+
+
+func _on_field_inventory_opened() -> void:
+	# Opening cancels a live attack and frees the cursor; movement, attacks and
+	# interactions stay blocked until the overlay closes.
+	cancel_input()
+	_jump_requested = false
+	hud.close_panels()
+	_set_cursor_free(true)
+
+
+func _on_field_inventory_closed() -> void:
+	_set_cursor_free(false)
+
+
+func _on_field_loadout_changed() -> void:
+	if _player_state == null:
+		return
+	cancel_input()
+	archer.apply_loadout(_player_state.loadout())
+	_update_loadout()
+	_refresh_backpack()
+
+
+func _drop_field_loot(item_id: String) -> void:
+	# The helper already removed the item from PlayerState. The pickup starts
+	# unarmed so the drop lands at the ranger's feet without an instant re-pickup.
+	if item_id.is_empty():
+		return
+	_spawn_loot(item_id,player.global_position,false)
+	hud.show_feedback("%s dropped" % _loot_display_name(item_id),2.0)
+
+
 func _physics_process(delta: float) -> void:
 	roll.advance(delta,player.is_on_floor())
 	step.advance(delta,player.is_on_floor())
@@ -162,7 +259,7 @@ func _physics_process(delta: float) -> void:
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
 	if input_vector.length() > 1.0:
 		input_vector = input_vector.normalized()
-	if inspecting or hud.map_open or _cursor_free:
+	if inspecting or hud.map_open or _cursor_free or _field_inventory_open():
 		input_vector = Vector2.ZERO
 		slide.reset()
 	if combat.stagger_time > 0.0:
@@ -218,6 +315,7 @@ func _physics_process(delta: float) -> void:
 	player.position.z = clampf(player.position.z, -limit, limit)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
 	slide.after_move(player,actual_velocity)
+	_collect_loot(delta)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)
@@ -315,7 +413,7 @@ func _horizontal_variant() -> String:
 	return "horizontal_right" if side > 0 else "horizontal_left"
 
 func begin_attack(hand: String = "right", variant: String = "") -> void:
-	if hud.map_open:
+	if hud.map_open or _field_inventory_open():
 		return
 	_capture_attack_cover_side()
 	update_crosshair_aim()
@@ -351,7 +449,7 @@ func quick_step(side: int) -> void:
 	stamina = maxf(0.0,stamina-DodgeStep.STAMINA_COST)
 
 func begin_throw_attack() -> void:
-	if hud.map_open:
+	if hud.map_open or _field_inventory_open():
 		return
 	if archer.weapon not in ["sword","dagger","dual"]:
 		hud.show_feedback("Equip a sword with 2 or the dagger with 3 to throw.")
@@ -381,6 +479,23 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		# The field inventory always answers I and Escape first so it can close
+		# without leaking keys into movement, attacks or the waystone prompts.
+		if event.keycode == KEY_I:
+			toggle_field_inventory()
+			return
+		if event.keycode == KEY_ESCAPE:
+			if _field_inventory_open():
+				field_inventory.close()
+				return
+			cancel_input()
+			if inspecting:
+				toggle_view()
+			hud.close_panels()
+			_set_cursor_free(true)
+			return
+		if _field_inventory_open():
+			return
 		match event.keycode:
 			KEY_1: equip_weapon("bow")
 			KEY_2: equip_weapon("sword")
@@ -398,19 +513,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q: quick_step(-1)
 			KEY_E: quick_step(1)
 			KEY_G: interact()
-			KEY_I: hud.toggle_equipment()
+			KEY_O: hud.toggle_equipment()
 			KEY_M: toggle_map()
 			KEY_V: toggle_view()
 			KEY_R: return_to_camp()
 			KEY_N:
 				audio.muted = not audio.muted
 				hud.show_feedback("Sound off" if audio.muted else "Sound on")
-			KEY_ESCAPE:
-				cancel_input()
-				if inspecting:
-					toggle_view()
-				hud.close_panels()
-				_set_cursor_free(true)
 			KEY_T:
 				if not inspecting:
 					hud.close_panels()
@@ -418,6 +527,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not _throw_held:
 					_throw_held = true
 					begin_throw_attack()
+	if _field_inventory_open():
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			if not inspecting:
@@ -490,11 +601,11 @@ func equip_weapon(value: String) -> void:
 		if archer.weapon == "dual":
 			value = "sword"
 		elif archer.sword_index == 2:
-			hud.show_feedback("Dual wield needs a one-handed sword. Select the small or medium sword.")
+			hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Equip one in the Hollow.")
 			return
 	cancel_input()
 	if not archer.set_weapon(value):
-		hud.show_feedback("Dual wield needs a one-handed sword. Select the small or medium sword.")
+		hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Equip one in the Hollow.")
 		return
 	audio.play_sound("equip")
 
@@ -573,6 +684,9 @@ func toggle_map() -> void:
 func _update_interaction() -> void:
 	_interaction_id = ""
 	_interaction_allowed = false
+	if _field_inventory_open():
+		hud.set_interaction("")
+		return
 	var prompt := ""
 	for item: Dictionary in world.interactables:
 		if player.position.distance_to(item.position) > 3.8:
@@ -582,7 +696,7 @@ func _update_interaction() -> void:
 			prompt = "G  /  Rest at the campfire"
 			_interaction_allowed = true
 		elif item.kind == "delve":
-			prompt = "G  /  Descend into the Sunken Delve"
+			prompt = "G  /  Open the hatch to the Sunken Delve"
 			_interaction_allowed = true
 		elif activated.has(item.id):
 			prompt = item.name + "  /  Restored"
@@ -598,6 +712,8 @@ func _update_interaction() -> void:
 	hud.set_interaction(prompt)
 
 func interact() -> void:
+	if _field_inventory_open():
+		return
 	_update_interaction()
 	if not _interaction_allowed:
 		return
@@ -622,15 +738,19 @@ func _enter_delve() -> void:
 	cancel_input()
 	if _player_state != null:
 		_player_state.save_state()
-	var player_name := "Ranger"
-	var cache := get_node_or_null("/root/NetCache")
-	if cache != null:
-		var cached := str(cache.player_name).strip_edges()
-		if not cached.is_empty():
-			player_name = cached
+	var player_name := _delve_name
+	if player_name.is_empty():
+		player_name = "Ranger"
+		var cache := get_node_or_null("/root/NetCache")
+		if cache != null:
+			var cached := str(cache.player_name).strip_edges()
+			if not cached.is_empty():
+				player_name = cached
 	var session := get_node_or_null("/root/Session")
 	if session != null:
-		session.arm_delve("delve-solo","127.0.0.1",7777,player_name)
+		# Host Tailscale.cmd launches the frontier with --delve-host, so the
+		# hatch descent is what actually opens the hosted party on that port.
+		session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
 	get_tree().change_scene_to_file("res://delve.tscn")
 
 func _on_enemy_attack(attacker, amount: float) -> void:
@@ -748,8 +868,79 @@ func _on_weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge
 func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 	_award_gold(reward)
 	kills += 1
+	var kind_value = enemy.get("kind")
+	var drop_kind: int = int(kind_value) if kind_value != null else 0
+	var drop_at: Vector3 = enemy.global_position
 	enemies.erase(enemy)
 	hud.show_feedback("%s defeated  /  +%d gold" % [enemy.get_display_name(), reward])
+	if (kills + drop_kind) % 2 == 0:
+		var item_id := str(LOOT_SEQUENCE[_loot_cursor % LOOT_SEQUENCE.size()])
+		_loot_cursor += 1
+		_spawn_loot(item_id, drop_at)
+
+func _spawn_loot(item_id: String, at: Vector3, armed := true) -> Node3D:
+	var pickup := LootPickup.new()
+	pickup.name = "Loot_" + item_id
+	pickup.setup(item_id, _loot_display_name(item_id))
+	pickup.set_armed(armed)
+	pickup.position = _drop_floor(at)
+	add_child(pickup)
+	loot_pickups.append(pickup)
+	return pickup
+
+func _drop_floor(at: Vector3) -> Vector3:
+	_floor_query.from = at + Vector3(0, 2.0, 0)
+	_floor_query.to = at - Vector3(0, 3.0, 0)
+	var hit := get_world_3d().direct_space_state.intersect_ray(_floor_query)
+	return (hit.position + Vector3(0, 0.05, 0)) if not hit.is_empty() else at
+
+func _loot_display_name(item_id: String) -> String:
+	if _player_state != null and _player_state.has_method("item_name"):
+		var named := str(_player_state.item_name(item_id))
+		if not named.is_empty() and named != item_id:
+			return named
+	return item_id.capitalize()
+
+func _backpack_capacity() -> int:
+	return int(_player_state.INVENTORY_CAPACITY) if _player_state != null else 10
+
+func _refresh_backpack() -> void:
+	if hud == null:
+		return
+	var count: int = _player_state.inventory.size() if _player_state != null else 0
+	hud.set_backpack(count, _backpack_capacity())
+
+func _collect_loot(delta: float) -> void:
+	_full_message_cooldown = maxf(0.0, _full_message_cooldown - delta)
+	for index in range(loot_pickups.size() - 1, -1, -1):
+		var pickup: Node3D = loot_pickups[index]
+		if not is_instance_valid(pickup) or pickup.is_queued_for_deletion():
+			loot_pickups.remove_at(index)
+			continue
+		if _player_state == null:
+			continue
+		var offset: Vector3 = pickup.global_position - player.global_position
+		var in_reach: bool = Vector2(offset.x, offset.z).length() <= PICKUP_RADIUS and absf(offset.y) <= 2.4
+		if not in_reach:
+			# A freshly dropped item arms itself once the dropper steps clear;
+			# only a later approach collects it.
+			if not bool(pickup.get("armed")):
+				pickup.set("armed", true)
+			continue
+		if not bool(pickup.get("armed")):
+			continue
+		var item_id := str(pickup.get("item_id"))
+		var result: Dictionary = _player_state.try_pickup(item_id)
+		if bool(result.get("ok", false)):
+			var picked := str(pickup.get("display_name"))
+			loot_pickups.remove_at(index)
+			pickup.queue_free()
+			var capacity := _backpack_capacity()
+			_refresh_backpack()
+			hud.show_feedback("Picked up %s  /  backpack %d/%d" % [picked, _player_state.inventory.size(), capacity], 2.5)
+		elif _full_message_cooldown <= 0.0:
+			_full_message_cooldown = FULL_MESSAGE_INTERVAL
+			hud.show_feedback("Backpack full  /  backpack %d/%d  /  make room in the Hollow" % [_player_state.inventory.size(), _backpack_capacity()], 2.5)
 
 func _award_gold(amount: int) -> void:
 	gold += amount

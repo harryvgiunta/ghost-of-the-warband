@@ -50,6 +50,7 @@ var _ground_ring: MeshInstance3D
 var _target_position := Vector3.ZERO
 var _received_pose := false
 var _states: Array[Dictionary] = []
+var _gear_bits := -1
 const INTERP_BUFFER_LIMIT := 32
 const INTERP_HISTORY := 0.9
 const INTERP_EXTRAPOLATION := 0.15
@@ -513,9 +514,29 @@ func _floor_height(point: Vector3) -> float:
 	var hit := get_world_3d().direct_space_state.intersect_ray(_floor_query)
 	return float(hit.position.y) if not hit.is_empty() else global_position.y
 
+func gear_bits() -> int:
+	# Ten compact bits for the paperdoll presentation that the bow/sword/armor
+	# fields cannot carry: off-hand weapon, staff, focus and shield silhouette.
+	var bits := 0
+	if rig.off_weapon_active:
+		bits |= 1
+	if rig.off_weapon_kind == "sword":
+		bits |= 2
+	bits |= (int(rig.off_weapon_index) & 1) << 2
+	if rig.staff_active:
+		bits |= 1 << 3
+	bits |= (int(rig.staff_index) & 1) << 4
+	var focus_code := 0
+	if rig.focus_active:
+		focus_code = 1 if rig.focus_kind == "tome" else 2
+	bits |= (focus_code & 3) << 5
+	bits |= (int(rig.focus_index) & 1) << 7
+	bits |= (int(rig.shield_variant) & 3) << 8
+	return bits
+
 func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
-		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,
+		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
 		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
@@ -557,10 +578,28 @@ func apply_snapshot(state: Dictionary) -> void:
 		rig.set_armor_bits(armor_bits)
 	if rig.sword_index != int(state.sword):
 		rig.set_sword(int(state.sword))
+	var gear := int(state.get("gear",_gear_bits))
+	var gear_changed := gear != _gear_bits
+	var staff_on := (gear & 8) != 0
+	var staff_slot := (gear >> 4) & 1
+	if gear_changed:
+		_gear_bits = gear
+		var off_active := (gear & 1) != 0
+		var off_kind := "sword" if (gear & 2) != 0 else "dagger"
+		var focus_code := (gear >> 5) & 3
+		var focus_kind := "" if focus_code == 0 else ("tome" if focus_code == 1 else "skull")
+		# Arm the off hand before the weapon mode so a replicated dual loadout
+		# can actually enter dual; the staff is restored last because set_sword()
+		# deliberately stows it.
+		rig.set_off_focus(focus_kind,(gear >> 7) & 1,focus_code != 0)
+		rig.set_shield_variant((gear >> 8) & 3)
+		rig.set_off_weapon(off_kind,(gear >> 2) & 1,off_active)
 	if rig.weapon != str(state.weapon):
 		rig.set_weapon(str(state.weapon))
 	if rig.shield_equipped != shield_state:
 		rig.set_shield(shield_state)
+	if gear_changed:
+		rig.set_staff(staff_slot,staff_on)
 	cover.apply_snapshot(state.cover)
 	if not alive:
 		reset_stance()

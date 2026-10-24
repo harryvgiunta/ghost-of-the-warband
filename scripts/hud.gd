@@ -9,6 +9,7 @@ signal view_toggled
 signal camp_requested
 signal map_toggled
 signal hub_requested
+signal inventory_requested
 signal cursor_requested(free: bool)
 
 const ArmorData = preload("res://scripts/armor_data.gd")
@@ -34,6 +35,7 @@ var _region: Label
 var _quest: Label
 var _health_label: Label
 var _gold_label: Label
+var _backpack_label: Label
 var _phase: Label
 var _loadout: Label
 var _cover_status: Label
@@ -97,6 +99,10 @@ func _ready() -> void:
 	_stamina_bar = _bar(vitals, Vector2(16, 58), Vector2(268, 5), GOLD)
 	_label(vitals, "STAMINA", Vector2(16, 70), 10, MUTED)
 	_gold_label = _label(vitals, "0 GOLD  /  0 FOES", Vector2(16, 91), 13, GOLD)
+	var backpack := _panel(self, Vector2(-216, -243), Vector2(192, 30))
+	backpack.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
+	backpack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_backpack_label = _label(backpack, "BACKPACK  0 / 10", Vector2(12, 6), 12, TEAL)
 	var charge := _panel(self, Vector2(-260, -133), Vector2(520, 101))
 	charge.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
@@ -110,9 +116,9 @@ func _ready() -> void:
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
 	_interaction_panel.visible = false
-	var equipment_button := _button(self, "I   EQUIPMENT", Vector2(-216, -163), Vector2(192, 35))
+	var equipment_button := _button(self, "I   INVENTORY", Vector2(-216, -163), Vector2(192, 35))
 	equipment_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
-	equipment_button.pressed.connect(toggle_equipment)
+	equipment_button.pressed.connect(func(): inventory_requested.emit())
 	_map_button = _button(self, "M   WORLD MAP", Vector2(-216, -119), Vector2(192, 35))
 	_map_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	_map_button.pressed.connect(func(): map_toggled.emit())
@@ -123,7 +129,7 @@ func _ready() -> void:
 	hub_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	hub_button.add_theme_font_size_override("font_size", 13)
 	hub_button.pressed.connect(func(): hub_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   G  Interact   ESC  Equipment", Vector2(-560, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   SHIFT + SPACE  Roll   G  Interact   I  Inventory   O  Equipment", Vector2(-560, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -203,7 +209,7 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "THROW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO THROW" % [draw_amount * 100, draw_amount]
 	elif phase_name.begins_with("MELEE"):
 		if _weapon == "dual":
-			_phase.text = ("LEFT DAGGER STAB / %.2f s" if phase_name == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % interval
+			_phase.text = ("LEFT OFF-HAND STAB / %.2f s" if phase_name == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % interval
 		elif phase_name == "MELEE_ST" or _weapon == "dagger":
 			_phase.text = "FORWARD STAB / %.2f s SWING" % interval
 		elif phase_name == "MELEE_HL":
@@ -227,11 +233,13 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	else:
 		if _weapon == "dual":
-			_phase.text = "DUAL WIELD / LMB LEFT STAB / RMB RIGHT CHOP / NO GUARD"
+			_phase.text = "DUAL WIELD / LMB LEFT ATTACK / RMB RIGHT CHOP / NO GUARD"
 		elif _weapon == "bow":
 			_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT"
 		elif _weapon == "dagger":
 			_phase.text = "READY / LMB STAB / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
+		elif _weapon == "none":
+			_phase.text = "UNARMED / OPEN THE HOLLOW AND EQUIP A WEAPON"
 		else:
 			_phase.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 
@@ -251,7 +259,7 @@ func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: b
 func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_summary: String, sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}, shield: bool = false) -> void:
 	_shield_equipped = shield
 	_armor_pieces = armor_pieces.duplicate()
-	var shield_allowed := weapon == "dagger" or (weapon == "sword" and sword == 1)
+	var shield_allowed := weapon == "dagger" or (weapon == "sword" and sword <= 1)
 	_shield_button.set_pressed_no_signal(shield)
 	_shield_button.disabled = not shield_allowed
 	for index in ArmorData.SLOTS.size():
@@ -267,10 +275,13 @@ func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_
 	_dual_button.set_pressed_no_signal(weapon == "dual")
 	_dual_button.disabled = sword == 2
 	_bow_details.text = "%.0f s FULL DRAW / RE-NOCK AFTER SHOT" % float(data.draw_seconds)
-	var weapon_name := String(data.name) if weapon == "bow" else String(dagger_data.name) if weapon == "dagger" else String(sword_data.name)
-	if weapon == "dual":
-		weapon_name = "%s + dagger" % String(sword_data.name)
-	_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_summary]
+	if weapon == "none":
+		_loadout.text = "UNARMED / %s" % armor_summary
+	else:
+		var weapon_name := String(data.name) if weapon == "bow" else String(dagger_data.name) if weapon == "dagger" else String(sword_data.name)
+		if weapon == "dual":
+			weapon_name = "%s + OFF HAND" % String(sword_data.name)
+		_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_summary]
 	if _dagger_details != null and not dagger_data.is_empty():
 		_dagger_details.text = "%.1f s STAB / %d DAMAGE / WEAK GUARD" % [float(dagger_data.seconds),int(dagger_data.damage)]
 
@@ -278,6 +289,12 @@ func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_
 func _cycle_armor(slot: String) -> void:
 	var next := (int(_armor_pieces.get(slot,0)) + 1) % ArmorData.SET_IDS.size()
 	armor_selected.emit(slot,next)
+
+func set_backpack(count: int, capacity: int) -> void:
+	if _backpack_label == null:
+		return
+	_backpack_label.text = "BACKPACK  %d / %d" % [count, capacity]
+	_backpack_label.add_theme_color_override("font_color", GOLD if count >= capacity else TEAL)
 
 func update_world_position(position_at: Vector3, yaw: float, activated: Dictionary) -> void:
 	_player_position = position_at

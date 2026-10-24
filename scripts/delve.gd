@@ -21,8 +21,14 @@ const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const State = preload("res://scripts/player_state.gd")
+const Rules = preload("res://scripts/equipment_rules.gd")
+const LootPickup = preload("res://scripts/loot_pickup.gd")
+const FieldInventoryScript = preload("res://scripts/field_inventory.gd")
 
 const INTERACT_RANGE := 4.0
+const PICKUP_RADIUS := 1.6
+const DROP_FULL_INTERVAL := 2.5
 const CHEST_RANGE := 3.5
 const DEVIL_TRICKLE := 1.4
 const CLEAR_DELAY := 2.2
@@ -90,6 +96,11 @@ var _peek_right := Vector3.RIGHT
 var _query := PhysicsRayQueryParameters3D.new()
 var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
+var loot_pickups: Array = []
+var _field_inventory
+var _player_state
+var _drop_query := PhysicsRayQueryParameters3D.new()
+var _loot_message_cooldown := 0.0
 
 func _ready() -> void:
 	name = "Delve"
@@ -129,9 +140,20 @@ func _ready() -> void:
 	layer.add_child(hud)
 	hud.hub_requested.connect(_hub)
 	hud.surface_requested.connect(_on_surface_requested)
+	_player_state = get_node_or_null("/root/PlayerState")
+	if _player_state != null:
+		_field_inventory = FieldInventoryScript.new()
+		_field_inventory.name = "FieldInventory"
+		_field_inventory.layer = layer.layer + 1
+		add_child(_field_inventory)
+		_field_inventory.opened.connect(_on_field_opened)
+		_field_inventory.closed.connect(_on_field_closed)
+		_field_inventory.loadout_changed.connect(_on_field_loadout_changed)
+		_field_inventory.configure(_player_state,get_node_or_null("/root/Session"),null,Callable(self,"_drop_field_item"))
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 2
+	_drop_query.collision_mask = 1
 	multiplayer.peer_connected.connect(_peer_connected)
 	multiplayer.peer_disconnected.connect(_peer_disconnected)
 	multiplayer.connected_to_server.connect(_connected)
@@ -266,6 +288,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 	_set_cursor_free(false)
 	_remember_network(_player_name,"",port)
 	_apply_loadout(0,_local_loadout())
+	_bind_field_rig()
 	_mode_elapsed = 0.0
 	_auto_fired = false
 	_set_phase("ASSEMBLY")
@@ -297,6 +320,10 @@ func leave_game() -> void:
 		return
 	network_role = "offline"
 	local_slot = -1
+	if _field_inventory != null:
+		if _field_inventory.is_open():
+			_field_inventory.close()
+		_field_inventory.rebind(null)
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -338,6 +365,11 @@ func leave_game() -> void:
 		if is_instance_valid(projectile):
 			projectile.queue_free()
 	projectiles.clear()
+	for entry in loot_pickups:
+		var pickup = entry.get("node")
+		if is_instance_valid(pickup):
+			pickup.queue_free()
+	loot_pickups.clear()
 	for actor in actors:
 		actor.combat.stop()
 		actor.reset_stance()
@@ -389,10 +421,26 @@ func _remember_network(player_name: String, address: String, port: int) -> void:
 		cache.remember(player_name,address,port)
 
 func _local_loadout() -> Dictionary:
-	var node := get_node_or_null("/root/PlayerState")
+	var node: Variant = get_node_or_null("/root/PlayerState")
 	if node == null:
 		return {}
-	return {"bow":int(node.equipped_index("bow")), "sword":int(node.equipped_index("sword")), "armor":ArmorData.pack(node.equipped_pieces())}
+	return {
+		"main":str(node.main_item()),
+		"off":str(node.off_item()),
+		"bow":int(node.equipped_index("bow")),
+		"sword":int(node.equipped_index("sword")),
+		"armor":ArmorData.pack(node.equipped_pieces()),
+	}
+
+func _catalog_hand(value: Variant, slot: String) -> String:
+	# Seat loadouts come off the wire: only real gear legal for that hand.
+	if typeof(value) != TYPE_STRING:
+		return ""
+	var id := str(value)
+	var item: Dictionary = State.ITEMS.get(id,{})
+	if item.is_empty() or not Rules.allowed(item,slot):
+		return ""
+	return id
 
 func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	if slot < 0 or slot >= actors.size() or loadout.is_empty():
@@ -401,11 +449,29 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	var bow: Variant = loadout.get("bow")
 	var sword: Variant = loadout.get("sword")
 	var armor: Variant = loadout.get("armor")
-	if typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2:
+	var bow_ok := typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2
+	var sword_ok := typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2
+	var armor_ok := typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023
+	var main_raw: Variant = loadout.get("main")
+	var off_raw: Variant = loadout.get("off")
+	var main := _catalog_hand(main_raw,"main")
+	var off := _catalog_hand(off_raw,"off")
+	var hands_present := loadout.has("main") or loadout.has("off")
+	var main_ok := not loadout.has("main") or (typeof(main_raw) == TYPE_STRING and (str(main_raw).is_empty() or not main.is_empty()))
+	var off_ok := not loadout.has("off") or (typeof(off_raw) == TYPE_STRING and (str(off_raw).is_empty() or not off.is_empty()))
+	if hands_present and main_ok and off_ok:
+		# Hub kits carry the whole paperdoll; the state script derives the
+		# weapon mode, staff, focus, shield and off-hand from the validated ids.
+		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
+		# hand falls through instead of wiping a valid seat.
+		var pieces: Dictionary = ArmorData.unpack(int(armor) & 1023) if armor_ok else actor.rig.armor_pieces.duplicate()
+		actor.rig.apply_loadout(State.build_loadout(main,off,pieces))
+		return
+	if bow_ok:
 		actor.rig.set_bow(int(bow))
-	if typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2:
+	if sword_ok:
 		actor.rig.set_sword(int(sword))
-	if typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023:
+	if armor_ok:
 		actor.rig.set_armor_bits(int(armor))
 
 func get_human_count() -> int:
@@ -544,6 +610,7 @@ func _accept(slot: int) -> void:
 	actors[slot].visible = true
 	actors[slot].interp_delay = 0.05
 	hud.configure(_endpoint)
+	_bind_field_rig()
 	_set_cursor_free(false)
 	print("DELVE_CLIENT_READY slot=%d" % slot)
 
@@ -555,6 +622,7 @@ func _physics_process(delta: float) -> void:
 		if _join_elapsed > 6.0:
 			_connection_ended("Connection timed out. The host may be offline, full, or blocked by a firewall.")
 		return
+	_collect_loot(delta)
 	_send_elapsed += delta
 	if local_slot >= 0:
 		var x := float(Input.is_physical_key_pressed(KEY_D))-float(Input.is_physical_key_pressed(KEY_A))
@@ -667,7 +735,7 @@ func send_action(action: String, value: Variant = null) -> void:
 		elif network_role == "client":
 			_action_input.rpc_id(1,action,null,_snapshot_ticks[local_slot],null)
 		return
-	if action in ["bow","sword","weapon","armor","shield"]:
+	if action in ["bow","sword","weapon","armor","shield","loadout"]:
 		_cancel_draw_input()
 	if action in ["draw","throw"] and not _peek_held and actors[local_slot].rig.phase == "READY":
 		_capture_peek_context()
@@ -691,6 +759,11 @@ func _action_input(action: String, value: Variant, aim_tick: Variant, aim_origin
 		# Interaction is a world-position check; it needs no aim rewind.
 		_apply_action(slot,action,null)
 		return
+	if action == "loadout":
+		# Kit changes are seat state, not aim; no snapshot rewind needed.
+		if typeof(value) == TYPE_DICTIONARY:
+			_apply_loadout(slot,value)
+		return
 	if typeof(aim_tick) != TYPE_INT:
 		return
 	if aim_tick < 0 or aim_tick > _snapshot_ticks[slot]:
@@ -701,6 +774,11 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 	if slot < 0 or slot >= actors.size():
 		return
 	var actor = actors[slot]
+	if action == "loadout":
+		# Same validated seat loader as the join handshake; unknown fields die here.
+		if typeof(value) == TYPE_DICTIONARY:
+			_apply_loadout(slot,value)
+		return
 	if not actor.alive:
 		return
 	match action:
@@ -1025,6 +1103,104 @@ func _set_cursor_free(value: bool) -> void:
 		_send_peek_input()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
+func _field_inventory_open() -> bool:
+	return _field_inventory != null and _field_inventory.is_open()
+
+func _on_field_opened() -> void:
+	# A menu opens with the pointer free and any held draw or throw cancelled.
+	_set_cursor_free(true)
+
+func _on_field_closed() -> void:
+	# Closing must not recapture the pointer in the lobby, a dead run or after
+	# the connection dropped; the scene owns that decision.
+	if network_role == "offline" or local_slot < 0 or phase == "GAME_OVER":
+		return
+	_set_cursor_free(false)
+
+func _bind_field_rig() -> void:
+	if _field_inventory == null:
+		return
+	var rig: Variant = null
+	if local_slot >= 0 and local_slot < actors.size():
+		rig = actors[local_slot].rig
+	_field_inventory.rebind(rig)
+
+func _on_field_loadout_changed() -> void:
+	if local_slot < 0 or local_slot >= actors.size():
+		return
+	_bind_field_rig()
+	_apply_loadout(local_slot,_local_loadout())
+	hud.update_local(_local_state(actors[local_slot]))
+	if network_role == "client":
+		# The host rebuilds the seat from the same validated catalog ids and
+		# its snapshots stay the presentation authority for everyone else.
+		send_action("loadout",_local_loadout())
+
+func _drop_field_item(item_id: String) -> void:
+	if _player_state == null or local_slot < 0 or local_slot >= actors.size():
+		return
+	var id := str(item_id)
+	if id.is_empty() or not State.ITEMS.has(id):
+		return
+	var facing := Vector3(-sin(_camera_yaw),0.0,-cos(_camera_yaw))
+	var pickup := LootPickup.new()
+	pickup.name = "FieldDrop_" + id
+	pickup.setup(id,_field_display_name(id))
+	pickup.position = _drop_floor(actors[local_slot].global_position + facing*0.8)
+	add_child(pickup)
+	# A dropped piece arms only after the dropper steps clear, so it cannot be
+	# swallowed again from the same spot.
+	loot_pickups.append({"node":pickup, "item_id":id, "armed":false})
+
+func _collect_loot(delta: float) -> void:
+	_loot_message_cooldown = maxf(0.0,_loot_message_cooldown - delta)
+	if _player_state == null or local_slot < 0 or local_slot >= actors.size():
+		return
+	var actor = actors[local_slot]
+	if not actor.alive:
+		return
+	for index in range(loot_pickups.size()-1,-1,-1):
+		var entry: Dictionary = loot_pickups[index]
+		var pickup = entry.get("node")
+		if not is_instance_valid(pickup) or pickup.is_queued_for_deletion():
+			loot_pickups.remove_at(index)
+			continue
+		var offset: Vector3 = pickup.global_position - actor.global_position
+		var in_reach: bool = Vector2(offset.x,offset.z).length() <= PICKUP_RADIUS and absf(offset.y) <= 2.4
+		if not in_reach:
+			if not bool(entry.get("armed",true)):
+				entry["armed"] = true
+			continue
+		if not bool(entry.get("armed",true)):
+			continue
+		var result: Dictionary = _player_state.try_pickup(str(entry.get("item_id","")))
+		if bool(result.get("ok",false)):
+			var picked := str(pickup.get("display_name"))
+			loot_pickups.remove_at(index)
+			pickup.queue_free()
+			hud.set_status(str(result.get("message","Picked up %s." % picked)),2.5)
+			_refresh_field_hud()
+		elif _loot_message_cooldown <= 0.0:
+			_loot_message_cooldown = DROP_FULL_INTERVAL
+			hud.set_status(str(result.get("message","Backpack full.")),2.5)
+
+func _field_display_name(item_id: String) -> String:
+	if _player_state != null and _player_state.has_method("item_name"):
+		var named := str(_player_state.item_name(item_id))
+		if not named.is_empty() and named != item_id:
+			return named
+	return item_id.capitalize()
+
+func _drop_floor(at: Vector3) -> Vector3:
+	_drop_query.from = at + Vector3(0,2.0,0)
+	_drop_query.to = at - Vector3(0,3.0,0)
+	var hit := get_world_3d().direct_space_state.intersect_ray(_drop_query)
+	return (hit.position + Vector3(0,0.05,0)) if not hit.is_empty() else at
+
+func _refresh_field_hud() -> void:
+	if _field_inventory != null and _field_inventory.hud != null:
+		_field_inventory.hud.refresh()
+
 func _crosshair_aim() -> Vector3:
 	_update_game_camera()
 	var center := get_viewport().get_visible_rect().size * 0.5
@@ -1049,6 +1225,8 @@ func _crosshair_aim() -> Vector3:
 
 func _input(event: InputEvent) -> void:
 	if local_slot < 0:
+		return
+	if _field_inventory_open():
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
@@ -1096,6 +1274,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if _field_inventory_open():
+			# The paperdoll/backpack owns the keyboard while it is up.
+			match event.keycode:
+				KEY_ESCAPE, KEY_I:
+					_field_inventory.close()
+			return
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
@@ -1133,11 +1317,22 @@ func _unhandled_input(event: InputEvent) -> void:
 					resume_data.clear()
 					run_seed = randi()
 					begin_descent()
-			KEY_ESCAPE, KEY_I: _set_cursor_free(not _cursor_free)
+			KEY_ESCAPE:
+				if _field_inventory_open():
+					_field_inventory.close()
+				else:
+					_set_cursor_free(not _cursor_free)
+			KEY_I:
+				if _field_inventory != null:
+					_field_inventory.toggle()
+				else:
+					_set_cursor_free(not _cursor_free)
 			KEY_T:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
+	if _field_inventory_open():
+		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -1514,6 +1709,8 @@ func _apply_run_state(state: Dictionary) -> void:
 			actor.collision_mask = 0
 	_sync_client_chest()
 	if phase == "GAME_OVER":
+		if _field_inventory_open():
+			_field_inventory.close()
 		_set_cursor_free(true)
 	if phase != previous_phase:
 		match phase:
@@ -1552,6 +1749,8 @@ func _set_phase(value: String) -> void:
 	phase = value
 	print("DELVE_PHASE phase=%s wave=%d" % [phase,wave])
 	if phase == "GAME_OVER":
+		if _field_inventory_open():
+			_field_inventory.close()
 		_set_cursor_free(true)
 		hud.show_game_over("The delve has claimed the party.")
 

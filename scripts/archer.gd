@@ -12,6 +12,8 @@ const Bow = preload("res://scripts/bow.gd")
 const Sword = preload("res://scripts/sword.gd")
 const Dagger = preload("res://scripts/dagger.gd")
 const Shield = preload("res://scripts/shield.gd")
+const Staff = preload("res://scripts/staff.gd")
+const FocusItem = preload("res://scripts/focus_item.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
@@ -26,6 +28,12 @@ const SWORD_DATA = [
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
 ]
 const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
+## Two-handed staves reuse the greatsword combat profile; only the visible
+## shaft endpoints differ, so blade sweeps follow the real staff length.
+const STAFF_DATA = [
+	{"name":"Ember staff", "length":1.75},
+	{"name":"Bone staff", "length":1.60},
+]
 ## Horizontal cut profiles, one row per sword size (shortsword, arming sword,
 ## greatsword). Angles are radians relative to the crosshair: `load` cocks the
 ## hands back over the striking side, `cross` carries them past the opposite
@@ -56,6 +64,9 @@ var bow_index := 1
 var sword_index := 1
 var armor_pieces := {"head":0, "chest":0, "hands":0, "legs":0, "feet":0}
 var weapon := "bow"
+## The paperdoll main-hand category. Empty hands cannot be dual-wielded; a bow
+## or dagger may still hand the session back to the selected one-handed sword.
+var main_hand_kind := "sword"
 var phase := "READY"
 var draw_amount := 0.0
 var charge_frozen := false
@@ -66,6 +77,20 @@ var active_sword: Node3D
 var active_dagger: Node3D
 var active_shield
 var shield_equipped := false
+var shield_variant := 1
+var active_staff: Node3D
+var active_off_weapon: Node3D
+var active_focus: Node3D
+var staff_index := 0
+var staff_active := false
+## The off hand defaults to the dagger so the established dual-wield mode keeps
+## its visible left-hand weapon until a loadout replaces it.
+var off_weapon_kind := "dagger"
+var off_weapon_index := 0
+var off_weapon_active := true
+var focus_kind := ""
+var focus_index := 0
+var focus_active := false
 var skeleton: Skeleton3D
 var _phase_time := 0.0
 var _roll_progress := -1.0
@@ -97,6 +122,9 @@ var _model: Node3D
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
 var _swords: Array[Node3D] = []
+var _off_swords: Array[Node3D] = []
+var _staffs: Array[Node3D] = []
+var _focus_items: Dictionary = {}
 var _armor_meshes: Dictionary = {}
 var _chest: Node3D
 var _quiver: Node3D
@@ -243,6 +271,15 @@ func _ready() -> void:
 	active_bow = _bows[bow_index]
 	active_sword = _swords[sword_index]
 	active_dagger = dagger
+	_build_weapon_visuals()
+	active_off_weapon = active_dagger
+	active_staff = _staffs[0]
+	if off_weapon_active and off_weapon_kind != "dagger":
+		active_off_weapon = _off_weapon_mesh()
+	if staff_active:
+		active_staff = _staffs[staff_index]
+	if focus_active:
+		active_focus = _focus_items.get(focus_kind,null)
 	_build_equipment()
 	_built = true
 	set_bow(bow_index)
@@ -286,6 +323,30 @@ func _build_equipment() -> void:
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
 	_build_armor_meshes()
 
+func _build_weapon_visuals() -> void:
+	# Off-hand 1H swords are separate meshes from the main-hand set so both
+	# hands can show the same sword size at once.
+	for index in 2:
+		var off := Sword.new()
+		off.sword_kind = index
+		off.blade_length = float(SWORD_DATA[index].length)
+		add_child(off)
+		off.visible = false
+		_off_swords.append(off)
+	for index in STAFF_DATA.size():
+		var staff := Staff.new()
+		staff.staff_kind = index
+		staff.blade_length = float(STAFF_DATA[index].length)
+		add_child(staff)
+		staff.visible = false
+		_staffs.append(staff)
+	for kind in ["tome", "skull"]:
+		var focus := FocusItem.new()
+		focus.focus_kind = kind
+		add_child(focus)
+		focus.visible = false
+		_focus_items[kind] = focus
+
 func set_bow(index: int) -> void:
 	bow_index = clampi(index,0,2)
 	if not _built:
@@ -300,6 +361,9 @@ func set_sword(index: int) -> void:
 		_clear_melee()
 		phase = "READY"
 		_phase_time = 0.0
+	# Selecting a sword is the session hand-off away from a staff. The Hollow
+	# loadout re-activates the staff after this call.
+	staff_active = false
 	sword_index = clampi(index,0,2)
 	if weapon == "dual" and sword_index == 2:
 		# The greatsword needs both hands; fall back to the one-handed sword mode.
@@ -315,11 +379,23 @@ func set_sword(index: int) -> void:
 	loadout_changed.emit()
 
 func set_weapon(value: String) -> bool:
-	if value not in ["bow","sword","dagger","dual"]:
+	if value not in ["bow","sword","dagger","dual","none"]:
 		return false
-	if value == "dual" and sword_index == 2:
+	if value != "dual":
+		main_hand_kind = value
+	if value == "dual" and shield_equipped and off_weapon_active:
+		# A raised shield is stowed when a legal off-hand weapon enters dual.
+		shield_equipped = false
+		_blocking = false
+	if value == "dual" and not _dual_ready():
 		return false
 	if value == weapon:
+		# Pressing the sword key while a staff supplies this same "sword" mode
+		# must still hand the session back to the actual sword.
+		if value == "sword" and staff_active:
+			staff_active = false
+			_sync_weapon_visibility()
+			_update_pose(0.0)
 		return true
 	_clear_melee()
 	if phase not in ["RELEASE","RECOVER","T_RELEASE","T_RECOVER"]:
@@ -336,16 +412,171 @@ func set_weapon(value: String) -> bool:
 	_sync_weapon_visibility()
 	return true
 
+func apply_loadout(loadout: Dictionary) -> void:
+	# Session hand-off from PlayerState.loadout(): armor, main mode, off item
+	# and the matching pose. Pure presentation; every setter keeps its own
+	# legality checks, so a malformed dict degrades instead of crashing.
+	var mode := str(loadout.get("weapon",""))
+	var staff_value := int(loadout.get("staff",-1))
+	var bow_value := int(loadout.get("bow",0))
+	var sword_value := int(loadout.get("sword",0))
+	var off_id := str(loadout.get("off",""))
+	var shield_on := bool(loadout.get("shield",false))
+	set_armor_pieces(loadout.get("armor",{}))
+	set_staff(0,false)
+	set_off_focus("",0,false)
+	set_off_weapon("",0,false)
+	set_shield(false)
+	set_bow(bow_value)
+	set_sword(sword_value)
+	var focus: Dictionary = loadout.get("focus",{})
+	if focus.has("kind"):
+		set_off_focus(str(focus.get("kind","")),int(focus.get("index",0)),true)
+	var off_weapon: Dictionary = loadout.get("off_weapon",{})
+	if off_weapon.has("kind"):
+		set_off_weapon(str(off_weapon.get("kind","")),int(off_weapon.get("index",0)),true)
+	if shield_on:
+		set_shield_variant(_shield_variant_for(off_id))
+	var dual_ready := sword_value <= 1 and staff_value < 0 and not focus_active \
+		and off_weapon_active and off_weapon_kind in ["dagger","sword"]
+	match mode:
+		"bow":
+			set_weapon("bow")
+			set_sword(0)
+		"dagger":
+			set_weapon("dagger")
+			set_sword(0)
+		"sword":
+			set_weapon("sword")
+			if dual_ready:
+				set_weapon("dual")
+		"dual":
+			set_weapon("sword")
+			set_weapon("dual")
+		_:
+			set_weapon("none")
+	if shield_on:
+		set_shield(true)
+	# Activate the staff after the mode selection: set_sword() intentionally
+	# stows a staff, and a fresh loadout must be able to replace that session
+	# hand-off with the paperdoll's main-hand staff.
+	if staff_value >= 0:
+		set_staff(staff_value,true)
+	_update_pose(0.0)
+	_sync_weapon_visibility()
+
+func set_staff(index: int, active: bool) -> void:
+	staff_index = clampi(index,0,STAFF_DATA.size()-1)
+	staff_active = active
+	active_staff = _staffs[staff_index] if not _staffs.is_empty() else null
+	if not _built:
+		return
+	_sync_weapon_visibility()
+	_update_pose(0.0)
+	loadout_changed.emit()
+
+func set_off_weapon(kind: String, index: int, active: bool) -> void:
+	off_weapon_kind = kind if kind in ["dagger","sword"] else ""
+	off_weapon_index = clampi(index,0,1)
+	off_weapon_active = active and not off_weapon_kind.is_empty()
+	active_off_weapon = _off_weapon_mesh()
+	if weapon == "dual" and not _dual_ready():
+		_clear_melee()
+		weapon = "sword"
+		_sync_primary_hand()
+	if not _built:
+		return
+	_sync_weapon_visibility()
+	_update_pose(0.0)
+	loadout_changed.emit()
+
+func set_off_focus(kind: String, index: int, active: bool) -> void:
+	focus_kind = kind if kind in ["tome","skull"] else ""
+	focus_index = clampi(index,0,1)
+	focus_active = active and not focus_kind.is_empty()
+	active_focus = _focus_items.get(focus_kind,null) if focus_active else null
+	if focus_active and weapon == "dual":
+		_clear_melee()
+		weapon = "sword"
+		_sync_primary_hand()
+	if not _built:
+		return
+	_sync_weapon_visibility()
+	_update_pose(0.0)
+	loadout_changed.emit()
+
+func set_shield_variant(index: int) -> void:
+	shield_variant = clampi(index,0,2)
+	if active_shield != null and active_shield.has_method("set_variant"):
+		active_shield.set_variant(shield_variant)
+	if not _built:
+		return
+	_update_pose(0.0)
+
+func _shield_variant_for(item_id: String) -> int:
+	match item_id:
+		"shield_buckler":
+			return 0
+		"shield_tower":
+			return 2
+	return 1
+
+func _off_weapon_mesh() -> Node3D:
+	if not off_weapon_active:
+		return null
+	if off_weapon_kind == "sword":
+		return _off_swords[off_weapon_index] if _off_swords.size() > off_weapon_index else null
+	if off_weapon_kind == "dagger":
+		return active_dagger
+	return null
+
+func _dual_ready() -> bool:
+	return main_hand_kind != "none" and sword_index <= 1 and staff_active == false \
+		and not focus_active and not shield_equipped \
+		and off_weapon_active and off_weapon_kind in ["dagger","sword"]
+
+func _staff_shown() -> bool:
+	return staff_active and weapon == "sword"
+
+func _off_profile() -> Dictionary:
+	if off_weapon_kind == "sword":
+		return SWORD_DATA[off_weapon_index]
+	return DAGGER_DATA
+
+func _left_blade_node() -> Node3D:
+	if active_off_weapon != null:
+		return active_off_weapon
+	return active_dagger
+
+func _focus_supported() -> bool:
+	# A held focus is a two-slot loadout: one-handed main, nothing blocking or
+	# dual-wielded, and no action pose that owns the left arm.
+	if weapon not in ["sword","dagger"] or sword_index > 1:
+		return false
+	if shield_equipped or staff_active or _roll_progress >= 0.0:
+		return false
+	return phase not in ["DRAWING","HOLDING","RELEASE","RECOVER"]
+
 func _sync_weapon_visibility() -> void:
 	# A thrown weapon leaves the hand for its release frame, then the endless
 	# supply restores the same equipped weapon as the recovery begins.
 	var hidden := phase == "T_RELEASE"
+	var staff_shown := _staff_shown()
+	var left_shown := weapon == "dual" and off_weapon_active and off_weapon_kind in ["dagger","sword"]
 	for i in _swords.size():
-		_swords[i].visible = weapon in ["sword","dual"] and i == sword_index and not hidden
+		_swords[i].visible = weapon in ["sword","dual"] and i == sword_index and not hidden and not staff_shown
 	for i in _bows.size():
 		_bows[i].visible = weapon == "bow" and i == bow_index
+	for i in _staffs.size():
+		_staffs[i].visible = staff_shown and i == staff_index and not hidden
 	if active_dagger != null:
-		active_dagger.visible = weapon == "dual" or (weapon == "dagger" and not hidden)
+		active_dagger.visible = (weapon == "dagger" and not hidden) \
+			or (left_shown and off_weapon_kind == "dagger")
+	for i in _off_swords.size():
+		_off_swords[i].visible = left_shown and off_weapon_kind == "sword" and i == off_weapon_index
+	var focus_shown := focus_active and _focus_supported()
+	for key: String in _focus_items:
+		_focus_items[key].visible = focus_shown and key == focus_kind
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and is_visible_in_tree())
 
@@ -435,7 +666,9 @@ func armor_reduction() -> float:
 	return ArmorData.reduction(armor_pieces)
 
 func can_equip_shield() -> bool:
-	return weapon == "dagger" or (weapon == "sword" and sword_index == 1)
+	# Any one-handed sword or the dagger can carry the shield; the 2H
+	# greatsword, staff, bow and dual wield still cannot.
+	return weapon == "dagger" or (weapon == "sword" and sword_index <= 1)
 
 func set_shield(active: bool) -> bool:
 	var allowed := active and can_equip_shield()
@@ -510,7 +743,7 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	if not can_begin_melee(key):
 		return false
 	if key == "left":
-		_left_melee_duration = float(DAGGER_DATA.seconds)
+		_left_melee_duration = float(_off_profile().seconds)
 		_left_melee_time = 0.0
 	else:
 		var requested := variant if _valid_variant(variant) else "overhead"
@@ -542,7 +775,9 @@ func _clear_melee() -> void:
 
 func melee_seconds(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return float(_off_profile().seconds)
+	if weapon == "dagger":
 		return float(DAGGER_DATA.seconds)
 	if _right_melee_time >= 0.0:
 		return _right_melee_duration
@@ -550,19 +785,25 @@ func melee_seconds(hand: String = "") -> float:
 
 func melee_damage(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return float(_off_profile().damage)
+	if weapon == "dagger":
 		return float(DAGGER_DATA.damage)
 	return float(SWORD_DATA[sword_index].damage)
 
 func melee_reach(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return float(_off_profile().reach)
+	if weapon == "dagger":
 		return float(DAGGER_DATA.reach)
 	return float(SWORD_DATA[sword_index].reach)
 
 func melee_radius(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return (0.035 + 0.011 * off_weapon_index) if off_weapon_kind == "sword" else 0.022
+	if weapon == "dagger":
 		return 0.022
 	return 0.035 + 0.011 * sword_index
 
@@ -576,7 +817,7 @@ func begin_draw() -> void:
 	_update_pose(0.0)
 
 func begin_throw() -> bool:
-	if weapon not in ["sword","dagger","dual"] or phase != "READY" or _roll_progress >= 0.0:
+	if staff_active or weapon not in ["sword","dagger","dual"] or phase != "READY" or _roll_progress >= 0.0:
 		return false
 	draw_amount = 0.0
 	charge_frozen = false
@@ -599,7 +840,11 @@ func throw_speed() -> float:
 	return float(DAGGER_DATA.throw_speed) if weapon == "dagger" else float(SWORD_DATA[sword_index].throw_speed)
 
 func get_throw_origin() -> Vector3:
-	return active_dagger.global_position if weapon == "dagger" else active_sword.global_position
+	if weapon == "dagger":
+		return active_dagger.global_position
+	if _staff_shown():
+		return active_staff.global_position
+	return active_sword.global_position
 
 func get_recovery_progress() -> float:
 	var duration := RELEASE_SECONDS + RECOVER_SECONDS
@@ -795,7 +1040,7 @@ func apply_animation_state(state: Dictionary) -> void:
 	_blocking = guard_phase and weapon in ["sword","dagger"]
 	if replicated_phase.begins_with("MELEE"):
 		var secondary := float(state.draw)
-		_left_melee_duration = float(DAGGER_DATA.seconds)
+		_left_melee_duration = float(_off_profile().seconds)
 		if replicated_phase == "MELEE_L":
 			_left_melee_time = float(state.time)
 			_right_melee_time = secondary
@@ -898,14 +1143,22 @@ func get_joint_positions() -> Dictionary:
 
 func get_blade_base(hand: String = "") -> Vector3:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return _left_blade_node().to_global(Vector3(0,0,-0.09))
+	if weapon == "dagger":
 		return active_dagger.to_global(Vector3(0,0,-0.09))
+	if _staff_shown():
+		return active_staff.to_global(Vector3(0,0,-0.09))
 	return active_sword.to_global(Vector3(0,0,-0.09))
 
 func get_blade_tip(hand: String = "") -> Vector3:
 	var key := hand if hand in ["left","right"] else _melee_hand
-	if key == "left" or weapon == "dagger":
+	if key == "left":
+		return _left_blade_node().to_global(Vector3(0,0,-float(_off_profile().length)-0.09))
+	if weapon == "dagger":
 		return active_dagger.to_global(Vector3(0,0,-float(DAGGER_DATA.length)-0.09))
+	if _staff_shown():
+		return active_staff.to_global(Vector3(0,0,-float(STAFF_DATA[staff_index].length)-0.09))
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
 
 func _physics_process(delta: float) -> void:
@@ -1028,7 +1281,12 @@ func _melee_window(hand: String = "") -> Vector2:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	if key == "left" or weapon == "dagger" or (key == "right" and _right_variant == "stab"):
 		var clip: Dictionary = _profile.clips.stab
-		return Vector2(float(clip.strike_start),float(clip.strike_end))
+		var scale := 1.0
+		if key == "left":
+			# The authored stab is 0.5 s; an off-hand sword keeps the same
+			# proportion of its longer swing instead of hitting too early.
+			scale = _left_melee_duration / maxf(float(clip.duration),0.0001)
+		return Vector2(float(clip.strike_start),float(clip.strike_end)) * scale
 	var duration := _right_melee_duration if _right_melee_time >= 0.0 else float(SWORD_DATA[sword_index].seconds)
 	var cut_seconds := 0.22+0.04*sword_index
 	var windup := (duration-cut_seconds)*0.55
@@ -1098,7 +1356,7 @@ func _update_pose(delta: float) -> void:
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
-	var coupled_carry := weapon == "sword" and sword_index == 2 and not is_melee() and not throwing
+	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
 	var action := is_melee() or drawing or throwing or guarding or _cover_active
@@ -1118,7 +1376,7 @@ func _update_pose(delta: float) -> void:
 	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery)
 	_model.position = Vector3.ZERO
 	var clip := ("Sword_Idle_OneHand" if weapon in ["sword","dagger"] or weapon == "dual" else "Idle_Loop")
-	if weapon == "sword" and sword_index == 2:
+	if weapon == "sword" and (sword_index == 2 or _staff_shown()):
 		clip = "Sword_Idle"
 	var time := fposmod(_motion_time,_player.get_animation(clip).length)
 	if _roll_progress >= 0.0:
@@ -1133,7 +1391,7 @@ func _update_pose(delta: float) -> void:
 	elif drawing:
 		time = 0.0
 	elif guarding:
-		clip = "Sword_Block_Loop" if weapon == "sword" and sword_index == 2 else "Sword_Block_Loop_OneHand"
+		clip = "Sword_Block_Loop" if weapon == "sword" and (sword_index == 2 or _staff_shown()) else "Sword_Block_Loop_OneHand"
 		time = fposmod(_motion_time,_player.get_animation(clip).length)
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
@@ -1230,15 +1488,21 @@ func _update_pose(delta: float) -> void:
 	_update_shield_pose()
 	if weapon == "bow":
 		_update_bow_pose(drawing)
-	else:
+	elif weapon != "none":
 		_update_hand_contacts()
+		var right_hand := _bone_world(_arms[1][2])
 		if weapon == "dagger":
-			active_dagger.global_transform = _bone_world(_arms[1][2]) * _sword_grip
+			active_dagger.global_transform = right_hand * _sword_grip
 		elif weapon == "dual":
-			active_sword.global_transform = _bone_world(_arms[1][2]) * _sword_grip
-			active_dagger.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
+			active_sword.global_transform = right_hand * _sword_grip
+			if active_off_weapon != null:
+				active_off_weapon.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
+		elif _staff_shown():
+			active_staff.global_transform = right_hand * _sword_grip
 		else:
-			active_sword.global_transform = _bone_world(_arms[1][2]) * _sword_grip
+			active_sword.global_transform = right_hand * _sword_grip
+		if active_focus != null:
+			active_focus.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
 	_sync_weapon_visibility()
@@ -1282,7 +1546,7 @@ func _pose_dual_arms() -> void:
 		var arm_reach := shoulder_l.distance_to(elbow)+elbow.distance_to(_bone_world(_arms[0][2]).origin)
 		var aim_along := 0.35
 		if offset.length_squared() > 0.1225:
-			aim_along = maxf(0.10,offset.length()-float(DAGGER_DATA.length)-0.09)
+			aim_along = maxf(0.10,offset.length()-float(_off_profile().length)-0.09)
 		var extended := shoulder_l+direction*minf(aim_along,arm_reach-0.01)
 		var window := _melee_window("left")
 		var extend := smoothstep(window.x-0.06,window.x,_left_melee_time)
@@ -1444,7 +1708,7 @@ func _apply_horizontal_arm_path() -> void:
 	var swing := _horizontal_swing_timeline()
 	if float(swing.weight) <= 0.0:
 		return
-	var two_hand: bool = weapon == "sword" and sword_index == 2
+	var two_hand: bool = weapon == "sword" and (sword_index == 2 or _staff_shown())
 	# The swing centre is the shoulder line, not the spine base: the hands orbit
 	# the torso, and a pitch-forward crouch would otherwise place every target
 	# below and ahead of the ribcage that actually has to clear them.
@@ -1671,7 +1935,8 @@ func _aim_sword_thrust() -> void:
 	var along := (hand.origin-shoulder).dot(direction)
 	var elbow := _bone_world(_arms[1][1]).origin
 	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(hand.origin)
-	var aim_along := offset.length()-float(SWORD_DATA[sword_index].length)-0.09
+	var blade_length := float(STAFF_DATA[staff_index].length) if _staff_shown() else float(SWORD_DATA[sword_index].length)
+	var aim_along := offset.length()-blade_length-0.09
 	var window := _melee_window("right")
 	var thrust := smoothstep(window.x*0.6,window.y,_right_melee_time)
 	along = lerpf(along,clampf(aim_along,along,arm_reach-0.01),thrust)
@@ -1716,6 +1981,10 @@ func _update_shield_pose() -> void:
 		active_shield.set_active(false)
 		return
 	active_shield.set_active(true)
+	var shield_radius := 0.36
+	if active_shield.has_method("radius"):
+		shield_radius = float(active_shield.radius())
+	var size_delta := shield_radius-0.36
 	if _blocking:
 		var forward := _block_forward
 		forward.y = 0.0
@@ -1727,7 +1996,7 @@ func _update_shield_pose() -> void:
 		# Keep the shield clear of the weapon hand behind it: the one-handed
 		# guard bracer reaches almost to the face, so a close carry clips it.
 		# Crouching brings that hand further forward relative to the chest.
-		var reach := 0.58+0.06*_crouch_amount
+		var reach := 0.58+size_delta+0.06*_crouch_amount
 		var center := chest+forward*reach+Vector3.UP*0.02-right*0.08
 		var basis := Basis.looking_at(forward,Vector3.UP)
 		active_shield.global_transform = Transform3D(basis,center)
@@ -1740,7 +2009,8 @@ func _update_shield_pose() -> void:
 		var hand := _bone_world(_arms[0][2])
 		var outward := -global_basis.x
 		var basis := Basis.looking_at(outward,Vector3.UP)
-		var center := hand.origin+outward*0.18+Vector3.UP*0.02
+		var carry := 0.18+size_delta*0.5
+		var center := hand.origin+outward*carry+Vector3.UP*0.02
 		active_shield.global_transform = Transform3D(basis,center)
 
 func _update_bow_pose(drawing: bool) -> void:

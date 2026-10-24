@@ -1,6 +1,6 @@
 extends SceneTree
-## End-to-end entry paths: the Hollow's DESCEND button and Hearthstead's stair
-## both hand off through Session and land in a hosted delve scene.
+## End-to-end entry paths: the Hollow's DESCEND button and the Wayfarer Inn
+## hatch both hand off through Session and land in a hosted delve scene.
 
 const Progress = preload("res://scripts/delve_progress.gd")
 const TEST_STATE := "user://delve_entry_state.json"
@@ -73,16 +73,22 @@ func _test_town_path() -> void:
 		if str(record.get("id", "")) == "delve":
 			entry = record
 			break
-	check(not entry.is_empty(), "Hearthstead contains the delve stair")
+	check(not entry.is_empty(), "Hearthstead contains the delve hatch")
 	if entry.is_empty():
 		await _drop_scene()
 		return
+	var inn = frontier.world.find_child("WayfarerInn",true,false)
+	var hatch = frontier.world.find_child("SunkenDelveHatch",true,false)
+	check(inn != null and hatch != null, "The Wayfarer Inn contains the Sunken Delve hatch")
+	if inn != null and hatch != null:
+		var local: Vector3 = inn.to_local(hatch.global_position)
+		check(absf(local.x) < 3.4 and absf(local.z) < 2.8, "The hatch is inside the house")
 	frontier.player.global_position = (entry.get("position", Vector3.ZERO) as Vector3) + Vector3(0, 0.25, 1.0)
 	frontier._update_interaction()
-	check(frontier._interaction_allowed, "The town stair can be used")
+	check(frontier._interaction_allowed, "The hatch can be used from inside the inn")
 	frontier._enter_delve()
 	var delve = await _wait_scene("res://delve.tscn")
-	check(delve != null, "The town stair loads the delve scene")
+	check(delve != null, "The hatch loads the delve scene")
 	if delve != null:
 		var hosted := false
 		var deadline := Time.get_ticks_msec() + 4000
@@ -91,7 +97,43 @@ func _test_town_path() -> void:
 				hosted = true
 				break
 			await process_frame
-		check(hosted, "The town stair hosts a local room")
+		check(hosted, "The inn hatch hosts a local room")
+		delve.leave_game()
+	await _drop_scene()
+
+func _test_host_hatch_path() -> void:
+	session.clear()
+	var frontier = load("res://main.tscn").instantiate()
+	root.add_child(frontier)
+	current_scene = frontier
+	await create_timer(0.6).timeout
+	frontier._delve_host = true
+	frontier._delve_port = 7816
+	frontier._delve_name = "Hatch Host"
+	var entry: Dictionary = {}
+	for record in frontier.world.interactables:
+		if str(record.get("id", "")) == "delve":
+			entry = record
+			break
+	check(not entry.is_empty(), "The host path can find the inn hatch")
+	if entry.is_empty():
+		await _drop_scene()
+		return
+	frontier.player.global_position = (entry.get("position", Vector3.ZERO) as Vector3) + Vector3(0, 0.25, 1.0)
+	frontier._update_interaction()
+	frontier._enter_delve()
+	var delve = await _wait_scene("res://delve.tscn")
+	check(delve != null, "The host hatch loads the delve scene")
+	if delve != null:
+		var hosted := false
+		var deadline := Time.get_ticks_msec() + 4000
+		while Time.get_ticks_msec() < deadline:
+			if delve.network_role == "host":
+				hosted = true
+				break
+			await process_frame
+		check(hosted, "Host Tailscale's hatch descent hosts the delve")
+		check(str(delve._endpoint).contains("7816"), "The host hatch uses the requested UDP port")
 		delve.leave_game()
 	await _drop_scene()
 
@@ -149,6 +191,7 @@ func run() -> void:
 	session.clear()
 	await _test_menu_path()
 	await _test_town_path()
+	await _test_host_hatch_path()
 	await _test_ascent_path()
 	state.reset()
 	session.clear()

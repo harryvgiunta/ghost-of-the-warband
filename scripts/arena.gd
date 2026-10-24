@@ -10,6 +10,9 @@ const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const State = preload("res://scripts/player_state.gd")
+const Rules = preload("res://scripts/equipment_rules.gd")
+const FieldInventoryScript = preload("res://scripts/field_inventory.gd")
 var actors: Array = []
 var local_slot := -1
 var network_role := "offline"
@@ -42,6 +45,7 @@ var _peek_right := Vector3.RIGHT
 var _query := PhysicsRayQueryParameters3D.new()
 var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
+var _field_inventory
 
 func _ready() -> void:
 	name = "Arena"
@@ -84,6 +88,17 @@ func _ready() -> void:
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
 	hud.weapon_selected.connect(func(value: String): send_action("weapon",value))
 	hud.shield_selected.connect(func(active: bool): send_action("shield",active))
+	var player_state := get_node_or_null("/root/PlayerState")
+	if player_state != null:
+		_field_inventory = FieldInventoryScript.new()
+		_field_inventory.name = "FieldInventory"
+		_field_inventory.layer = layer.layer + 1
+		add_child(_field_inventory)
+		_field_inventory.opened.connect(_on_field_opened)
+		_field_inventory.closed.connect(_on_field_closed)
+		_field_inventory.loadout_changed.connect(_on_field_loadout_changed)
+		# No world-drop handler: arena drops fall back to the Hollow floor.
+		_field_inventory.configure(player_state,get_node_or_null("/root/Session"),null)
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 4
@@ -171,6 +186,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 	hud.show_match(_player_name,_endpoint)
 	_set_cursor_free(false)
 	_apply_loadout(0,_local_loadout())
+	_bind_field_rig()
 	print("ARENA_HOST_READY port=",port)
 
 func join_game(address: String, port: int, player_name: String) -> void:
@@ -193,6 +209,10 @@ func join_game(address: String, port: int, player_name: String) -> void:
 
 func leave_game() -> void:
 	network_role = "offline"
+	if _field_inventory != null:
+		if _field_inventory.is_open():
+			_field_inventory.close()
+		_field_inventory.rebind(null)
 	local_slot = -1
 	multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -254,10 +274,26 @@ func _remember_network(player_name: String, address: String, port: int) -> void:
 		cache.remember(player_name,address,port)
 
 func _local_loadout() -> Dictionary:
-	var node := get_node_or_null("/root/PlayerState")
+	var node: Variant = get_node_or_null("/root/PlayerState")
 	if node == null:
 		return {}
-	return {"bow":int(node.equipped_index("bow")), "sword":int(node.equipped_index("sword")), "armor":ArmorData.pack(node.equipped_pieces())}
+	return {
+		"main":str(node.main_item()),
+		"off":str(node.off_item()),
+		"bow":int(node.equipped_index("bow")),
+		"sword":int(node.equipped_index("sword")),
+		"armor":ArmorData.pack(node.equipped_pieces()),
+	}
+
+func _catalog_hand(value: Variant, slot: String) -> String:
+	# Seat loadouts come off the wire: only real gear legal for that hand.
+	if typeof(value) != TYPE_STRING:
+		return ""
+	var id := str(value)
+	var item: Dictionary = State.ITEMS.get(id,{})
+	if item.is_empty() or not Rules.allowed(item,slot):
+		return ""
+	return id
 
 func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	if slot < 0 or slot >= actors.size() or loadout.is_empty():
@@ -266,11 +302,29 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	var bow: Variant = loadout.get("bow")
 	var sword: Variant = loadout.get("sword")
 	var armor: Variant = loadout.get("armor")
-	if typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2:
+	var bow_ok := typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2
+	var sword_ok := typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2
+	var armor_ok := typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023
+	var main_raw: Variant = loadout.get("main")
+	var off_raw: Variant = loadout.get("off")
+	var main := _catalog_hand(main_raw,"main")
+	var off := _catalog_hand(off_raw,"off")
+	var hands_present := loadout.has("main") or loadout.has("off")
+	var main_ok := not loadout.has("main") or (typeof(main_raw) == TYPE_STRING and (str(main_raw).is_empty() or not main.is_empty()))
+	var off_ok := not loadout.has("off") or (typeof(off_raw) == TYPE_STRING and (str(off_raw).is_empty() or not off.is_empty()))
+	if hands_present and main_ok and off_ok:
+		# Hub kits carry the whole paperdoll; the state script derives the
+		# weapon mode, staff, focus, shield and off-hand from the validated ids.
+		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
+		# hand falls through instead of wiping a valid seat.
+		var pieces: Dictionary = ArmorData.unpack(int(armor) & 1023) if armor_ok else actor.rig.armor_pieces.duplicate()
+		actor.rig.apply_loadout(State.build_loadout(main,off,pieces))
+		return
+	if bow_ok:
 		actor.rig.set_bow(int(bow))
-	if typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2:
+	if sword_ok:
 		actor.rig.set_sword(int(sword))
-	if typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023:
+	if armor_ok:
 		actor.rig.set_armor_bits(int(armor))
 
 func get_human_count() -> int:
@@ -346,6 +400,7 @@ func _accept(slot: int) -> void:
 		actor.is_local = actor.slot == slot
 	actors[slot].interp_delay = 0.05
 	hud.show_match(_player_name,_endpoint)
+	_bind_field_rig()
 	_set_cursor_free(false)
 	print("ARENA_CLIENT_READY slot=",slot)
 
@@ -443,7 +498,7 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 func send_action(action: String, value: Variant = null) -> void:
 	if local_slot < 0:
 		return
-	if action in ["bow","sword","weapon","armor","shield"]:
+	if action in ["bow","sword","weapon","armor","shield","loadout"]:
 		_cancel_draw_input()
 	if action in ["draw","throw"] and not _peek_held and actors[local_slot].rig.phase == "READY":
 		_capture_peek_context()
@@ -462,12 +517,22 @@ func _action_input(action: String, value: Variant, aim_tick: Variant, aim_origin
 	var sender := multiplayer.get_remote_sender_id()
 	if _peer_slots.has(sender):
 		var slot := int(_peer_slots[sender])
+		if action == "loadout":
+			# Kit changes are seat state, not aim; no snapshot rewind needed.
+			if typeof(value) == TYPE_DICTIONARY:
+				_apply_loadout(slot,value)
+			return
 		if aim_tick < 0 or aim_tick > _snapshot_ticks[slot]:
 			return
 		_apply_action(slot,action,value,aim_tick,aim_origin)
 
 func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1, aim_origin: Variant = null) -> void:
 	var actor = actors[slot]
+	if action == "loadout":
+		# Same validated seat loader as the join handshake; unknown fields die here.
+		if typeof(value) == TYPE_DICTIONARY:
+			_apply_loadout(slot,value)
+		return
 	if not actor.alive:
 		return
 	match action:
@@ -719,6 +784,37 @@ func _set_cursor_free(value: bool) -> void:
 		_send_peek_input()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
+func _field_inventory_open() -> bool:
+	return _field_inventory != null and _field_inventory.is_open()
+
+func _on_field_opened() -> void:
+	# A menu opens with the pointer free and any held draw or throw cancelled.
+	_set_cursor_free(true)
+
+func _on_field_closed() -> void:
+	# Closing must not recapture the pointer in the lobby or after a disconnect.
+	if network_role == "offline" or local_slot < 0:
+		return
+	_set_cursor_free(false)
+
+func _bind_field_rig() -> void:
+	if _field_inventory == null:
+		return
+	var rig: Variant = null
+	if local_slot >= 0 and local_slot < actors.size():
+		rig = actors[local_slot].rig
+	_field_inventory.rebind(rig)
+
+func _on_field_loadout_changed() -> void:
+	if local_slot < 0 or local_slot >= actors.size():
+		return
+	_bind_field_rig()
+	_apply_loadout(local_slot,_local_loadout())
+	if network_role == "client":
+		# The host rebuilds the seat from the same validated catalog ids and
+		# its snapshots stay the presentation authority for everyone else.
+		send_action("loadout",_local_loadout())
+
 func _crosshair_aim() -> Vector3:
 	_update_game_camera()
 	var center := get_viewport().get_visible_rect().size * 0.5
@@ -743,6 +839,8 @@ func _crosshair_aim() -> Vector3:
 
 func _input(event: InputEvent) -> void:
 	if local_slot < 0:
+		return
+	if _field_inventory_open():
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
@@ -790,6 +888,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if _field_inventory_open():
+			# The paperdoll/backpack owns the keyboard while it is up.
+			match event.keycode:
+				KEY_ESCAPE, KEY_I:
+					_field_inventory.close()
+			return
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
@@ -818,11 +922,22 @@ func _unhandled_input(event: InputEvent) -> void:
 				_send_peek_input()
 			KEY_Q: _send_step(-1)
 			KEY_E: _send_step(1)
-			KEY_ESCAPE, KEY_I: _set_cursor_free(not _cursor_free)
+			KEY_ESCAPE:
+				if _field_inventory_open():
+					_field_inventory.close()
+				else:
+					_set_cursor_free(not _cursor_free)
+			KEY_I:
+				if _field_inventory != null:
+					_field_inventory.toggle()
+				else:
+					_set_cursor_free(not _cursor_free)
 			KEY_T:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
+	if _field_inventory_open():
+		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon
 		if event.button_index == MOUSE_BUTTON_LEFT:

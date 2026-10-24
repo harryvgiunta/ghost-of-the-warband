@@ -302,7 +302,7 @@ func _solid_box(parent: Node3D, size: Vector3, point: Vector3, material: Materia
 
 func _build_village() -> void:
 	_build_house(Vector2(-15, 42), 0.0, "ForesterHouse")
-	_build_house(Vector2(15, 42), 0.0, "WayfarerInn")
+	var inn := _build_house(Vector2(15, 42), 0.0, "WayfarerInn")
 	_build_house(Vector2(-15, 16), PI, "FletcherWorkshop")
 	_build_house(Vector2(15, 16), PI, "HearthsteadStore")
 	var camp := _root_at("HearthsteadCampfire", _ground(4, 35))
@@ -336,68 +336,79 @@ func _build_village() -> void:
 	_solid_box(market, Vector3(3.6, 0.9, 0.85), Vector3(0, 0.45, -0.8), _wood)
 	for i in range(5):
 		Geo.sphere(market, 0.2, Vector3(-1.2 + float(i) * 0.5, 1.04, -0.8), _gold)
-	_build_delve_entrance()
+	_build_delve_hatch(inn)
 
 
-func _build_delve_entrance() -> void:
-	# A sunken stair sealed behind Hearthstead's east stalls, kept clear of the
-	# camp, market and house footprints.
-	var root := _root_at("SunkenDelveEntrance", _ground(9, 29))
-	var well := Geo.material(Color("070b0c"), 0.0, 0.95)
+func _build_delve_hatch(inn: Node3D) -> void:
+	# The only delve entrance is a boarded hatch in the Wayfarer Inn's common
+	# room, one step inside the doorway. Everything here is presentation only:
+	# no collision, so the doorway and the interior stay walkable.
+	var root := Node3D.new()
+	root.name = "SunkenDelveHatch"
+	root.position = Vector3(0, 0.06, 0.6)
+	inn.add_child(root)
+	var well := Geo.material(Color("05090a"), 0.0, 0.95)
 	well.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var iron := Geo.material(Color("3a444b"), 0.72, 0.44)
 	var teal_rune := Geo.material(Color("4a8d86"), 0.15)
 	teal_rune.emission_enabled = true
 	teal_rune.emission = Color("3fd6c0")
 	teal_rune.emission_energy_multiplier = 0.55
-	var orange_rune := Geo.material(Color("91552f"), 0.15)
-	orange_rune.emission_enabled = true
-	orange_rune.emission = Color("f08a3c")
-	orange_rune.emission_energy_multiplier = 0.5
-	# Collision only follows the kerb rim; the southern approach stays open.
-	for i in range(12):
-		var angle: float = TAU * float(i) / 12.0
-		if sin(angle) > 0.42:
-			continue
-		var point := Vector3(cos(angle) * 2.5, 0.28, sin(angle) * 2.5)
-		_solid_box(root, Vector3(0.82, 0.56, 0.72), point, _stone, -angle)
+	# Stone rim with an iron band; the raised lip reads as a hatch surround.
+	for i in range(8):
+		var angle: float = TAU * float(i) / 8.0
+		var block := Geo.box(root, Vector3(0.66, 0.16, 0.34), Vector3(cos(angle) * 0.9, 0.08, sin(angle) * 0.9), _stone)
+		block.rotation.y = -angle
+		var stud := Geo.box(root, Vector3(0.1, 0.03, 0.1), Vector3(cos(angle) * 0.9, 0.165, sin(angle) * 0.9), iron)
+		stud.rotation.y = -angle
+		if i in [2, 6]:
+			var rune := Geo.box(root, Vector3(0.22, 0.02, 0.08), Vector3(cos(angle) * 0.9, 0.17, sin(angle) * 0.9), teal_rune)
+			rune.rotation.y = -angle
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.73
+	ring.outer_radius = 0.81
+	ring.rings = 28
+	ring.ring_segments = 8
+	Geo.mesh_node(root, ring, iron, Vector3(0, 0.17, 0))
+	# The unlit shaft under the open leaf, with three stone steps descending.
+	Geo.cylinder(root, 0.72, 0.72, 0.03, Vector3(0, 0.02, 0), well, 24)
+	for i in range(3):
+		Geo.box(root, Vector3(1.05 - float(i) * 0.12, 0.09, 0.24), Vector3(0, 0.075 - float(i) * 0.018, 0.44 - float(i) * 0.22), _stone)
+	# The trapdoor leaf stands open on its north hinges, clear of the walk in.
+	var leaf := Node3D.new()
+	leaf.position = Vector3(0, 0.15, -0.85)
+	leaf.rotation.x = deg_to_rad(-105.0)
+	root.add_child(leaf)
 	for i in range(4):
-		Geo.box(root, Vector3(2.5, 0.14, 0.5), Vector3(0, 0.29 - float(i) * 0.09, 1.55 - float(i) * 0.4), _stone)
-	# The unlit disc reads as a bottomless well beneath the descending steps.
-	Geo.cylinder(root, 1.85, 1.85, 0.05, Vector3(0, 0.035, 0), well, 24)
+		Geo.box(leaf, Vector3(0.3, 0.05, 1.25), Vector3(-0.45 + float(i) * 0.3, 0.0, 0.625), _wood)
+	for z in [0.18, 1.07]:
+		Geo.box(leaf, Vector3(1.26, 0.06, 0.1), Vector3(0, 0.03, z), iron)
 	for side in [-1.0, 1.0]:
-		_solid_box(root, Vector3(0.7, 4.6, 0.7), Vector3(side * 2.0, 2.3, -1.8), _stone)
-		Geo.box(root, Vector3(0.1, 3.2, 0.16), Vector3(side * 1.62, 2.1, -1.8), teal_rune if side < 0.0 else orange_rune)
-		Geo.box(root, Vector3(0.16, 0.16, 0.12), Vector3(side * 1.62, 3.55, -1.8), orange_rune if side < 0.0 else teal_rune)
-	Geo.box(root, Vector3(5.1, 0.72, 0.86), Vector3(0, 4.96, -1.8), _stone)
-	Geo.box(root, Vector3(3.4, 0.12, 0.14), Vector3(0, 5.1, -1.35), teal_rune)
-	# Braziers flank the stair mouth with warm light that never blocks the walk in.
+		Geo.box(root, Vector3(0.16, 0.1, 0.34), Vector3(side * 0.42, 0.17, -0.82), iron)
+	# A hanging plaque is the signpost the doorway never had.
+	Geo.box(root, Vector3(2.6, 0.14, 0.16), Vector3(0, 3.2, 0.05), _timber)
 	for side in [-1.0, 1.0]:
-		var base := Vector3(side * 3.15, 0, 0.9)
-		Geo.cylinder(root, 0.34, 0.28, 1.05, base + Vector3(0, 0.53, 0), _stone, 8)
-		Geo.cylinder(root, 0.42, 0.3, 0.22, base + Vector3(0, 1.14, 0), _stone, 8)
-		var flame := Geo.material(Color("ffc46b"))
-		flame.emission_enabled = true
-		flame.emission = Color("ff8a2e")
-		flame.emission_energy_multiplier = 1.4
-		Geo.cylinder(root, 0.3, 0.0, 0.62, base + Vector3(0, 1.45, 0), flame, 6)
-		var light := OmniLight3D.new()
-		light.position = base + Vector3(0, 1.9, 0)
-		light.light_color = Color("ffab5e")
-		light.light_energy = 1.35
-		light.omni_range = 7.0
-		root.add_child(light)
+		Geo.box(root, Vector3(0.03, 0.82, 0.03), Vector3(side * 0.55, 2.78, 0.05), iron)
+	Geo.box(root, Vector3(1.5, 0.34, 0.06), Vector3(0, 2.3, 0.08), _wood)
 	var label := Label3D.new()
 	label.text = "THE SUNKEN DELVE"
-	label.font_size = 52
-	label.pixel_size = 0.0048
+	label.font_size = 40
+	label.pixel_size = 0.0036
 	label.modulate = Color("bde8df")
 	label.outline_size = 6
-	label.position = Vector3(0, 5.0, -1.26)
+	label.position = Vector3(0, 2.3, 0.02)
+	label.rotation.y = PI
 	root.add_child(label)
-	interactables.append({"id": "delve", "name": "The Sunken Delve", "kind": "delve", "position": root.position, "node": root})
+	var light := OmniLight3D.new()
+	light.position = Vector3(0, 1.15, 0.1)
+	light.light_color = Color("ffab5e")
+	light.light_energy = 1.2
+	light.omni_range = 3.6
+	root.add_child(light)
+	interactables.append({"id": "delve", "name": "The Sunken Delve", "kind": "delve", "position": root.global_position, "node": root})
 
 
-func _build_house(point: Vector2, angle: float, label: String) -> void:
+func _build_house(point: Vector2, angle: float, label: String) -> Node3D:
 	var house := _root_at(label, _ground(point.x, point.y))
 	house.rotation.y = angle
 	# An actual 1.8m doorway, open interior, and walkable terrain floor.
@@ -436,6 +447,7 @@ func _build_house(point: Vector2, angle: float, label: String) -> void:
 	# Door swung inward, never a solid slab across the entrance.
 	Geo.box(house, Vector3(0.14, 2.55, 1.7), Vector3(-0.86, 1.275, -2.1), _wood)
 	Geo.box(house, Vector3(1.8, 0.035, 2.0), Vector3(0, 0.025, -4.0), _stone)
+	return house
 
 
 func _build_water_and_bridge() -> void:

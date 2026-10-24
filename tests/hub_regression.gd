@@ -42,17 +42,24 @@ func run() -> void:
 	quit(0 if failures == 0 else 1)
 
 func _test_state_rules() -> void:
-	check(state.INVENTORY_CAPACITY == 10,"Inventory holds ten slots")
+	check(state.INVENTORY_CAPACITY == 10,"Backpack holds ten slots")
 	check(state.STASH_CAPACITY == 20,"Stash holds twenty slots")
-	check(state.inventory.size() == 7,"Starter kit fills seven inventory slots")
+	check(state.inventory.size() == 3,"Starter backpack holds three items")
+	check(PackedStringArray(state.inventory) == PackedStringArray(["sword_short","dagger_iron","shield_buckler"]),"Starter backpack carries the sword, dagger and buckler")
 	check(state.stash.is_empty(),"Stash starts empty")
+	check(state.floor_items.is_empty(),"The floor starts clear")
 	check(state.credits == StateScript.STARTING_CREDITS,"Starting purse is the authoring constant")
-	check(state.equipped_index("bow") == 0,"Starter shortbow is equipped")
-	check(state.equipped_index("sword") == 0,"Starter shortsword is equipped")
+	check(state.equipped_id("main") == "bow_short","The starter shortbow fills the main hand")
+	check(state.equipped_id("off").is_empty(),"The starter off hand is empty")
+	check(state.equipped_index("bow") == 0,"Starter shortbow drives the gameplay bow index")
+	check(state.equipped_index("sword") == 0,"A bow main hand reports the short sword index")
 	for armor_slot in ArmorData.SLOTS:
-		check(state.equipped_index(armor_slot) == 0,"Starter leather %s is equipped" % armor_slot)
-	check(state.owned_in_inventory("armor_leather_chest") == 1,"Starter leather chest is owned")
-	check(state.owned_in_inventory("bow_short") == 1,"Starter bow is owned in the inventory")
+		check(state.equipped_id(armor_slot) == "armor_leather_" + armor_slot,"Starter leather %s is equipped" % armor_slot)
+		check(state.equipped_index(armor_slot) == 0,"Starter leather %s reports set index zero" % armor_slot)
+	check(state.is_equipped("bow_short"),"The paperdoll bow is queryable")
+	check(state.is_equipped("armor_leather_chest"),"The paperdoll chest is queryable")
+	check(state.owned_in_inventory("bow_short") == 0,"Equipped starter gear is not duplicated in the backpack")
+	check(state.owned_in_inventory("armor_leather_chest") == 0,"Equipped starter armor leaves the backpack")
 
 	var credits_before: int = state.credits
 	var result: Dictionary = state.buy("bow_long")
@@ -63,47 +70,73 @@ func _test_state_rules() -> void:
 	state.credits = 2000
 	result = state.buy("bow_long")
 	check(bool(result.ok),"An affordable purchase succeeds")
-	check(state.inventory[-1] == "bow_long","Purchases append to the inventory")
+	check(state.inventory[-1] == "bow_long","Purchases append to the backpack")
 	check(state.credits == 1640,"Purchase spends the listed price")
 	var long_index: int = state.inventory.size()-1
-	check(bool(state.equip(long_index).ok),"Owned gear can be equipped")
+	result = state.equip_from_inventory(long_index)
+	check(bool(result.ok),"Backpack gear can be equipped through the paperdoll flow")
+	check(state.equipped_id("main") == "bow_long","Equipping a longbow fills the main hand")
 	check(state.equipped_index("bow") == 2,"Equipping a longbow drives the gameplay bow index")
 	check(state.is_equipped("bow_long"),"Equipped state is queryable")
-	check(not bool(state.sell("inventory",long_index).ok),"The last copy of equipped gear cannot be sold")
-	check(not bool(state.move_to_stash(long_index).ok),"The last copy of equipped gear cannot be stashed")
+	check(state.owned_in_inventory("bow_long") == 0,"Equipped gear leaves the backpack")
+	check(state.owned_in_inventory("bow_short") == 1,"The displaced starter bow returns to the backpack")
+	check(state.equipped_id("off").is_empty(),"A bow leaves the off hand empty")
 
 	result = state.buy("bow_long")
 	check(bool(result.ok),"Duplicate gear can be bought")
 	var duplicate_index: int = state.inventory.size()-1
 	credits_before = state.credits
 	result = state.sell("inventory",duplicate_index)
-	check(bool(result.ok),"A duplicate copy sells even while that item type is equipped")
+	check(bool(result.ok),"A duplicate copy sells while that item type is equipped")
 	check(state.credits == credits_before + state.sell_value("bow_long"),"Selling pays the sell rate")
-	check(state.owned_in_inventory("bow_long") == 1,"Selling removes one copy only")
+	check(state.owned_in_inventory("bow_long") == 0,"Selling removes one copy only")
+	check(state.equipped_index("bow") == 2,"Selling a duplicate leaves the paperdoll bow equipped")
+
+	# The paperdoll owns equipped gear, so a spare backpack copy is ordinary
+	# stock: there is no last-copy protection left.
+	state.credits = 2000
+	check(bool(state.buy("armor_leather_head").ok),"A spare copy of equipped armor can be bought")
+	var spare_hood: int = state.inventory.find("armor_leather_head")
+	check(spare_hood >= 0,"The spare hood sits in the backpack")
+	credits_before = state.credits
+	result = state.sell("inventory",spare_hood)
+	check(bool(result.ok),"The backpack's only copy of the equipped hood sells")
+	check(state.credits == credits_before + state.sell_value("armor_leather_head"),"Selling the spare pays the sell rate")
+	check(state.equipped_id("head") == "armor_leather_head","Selling a backpack copy leaves the hood equipped")
 
 	var starter_index: int = state.inventory.find("bow_short")
-	check(starter_index >= 0,"The unequipped starter bow is still present")
+	check(starter_index >= 0,"The displaced starter bow is still present")
 	check(bool(state.move_to_stash(starter_index).ok),"Unequipped gear moves to the stash")
 	check(state.stash.size() == 1,"Stash receives the moved item")
-	check(bool(state.move_to_inventory(0).ok),"Stashed gear returns to the inventory")
+	check(bool(state.move_to_inventory(0).ok),"Stashed gear returns to the backpack")
 	check(state.stash.is_empty(),"Returning gear empties the stash slot")
 
 	# Per-slot equipping: a mail chest must not replace the leather hood.
-	state.credits = 2000
 	check(bool(state.buy("armor_mail_chest").ok),"A single armor piece can be bought")
 	var mail_chest: int = state.inventory.find("armor_mail_chest")
-	check(bool(state.equip(mail_chest).ok),"A single armor piece can be equipped")
-	check(state.equipped_index("chest") == 1,"The mail chest occupies only the chest slot")
+	check(bool(state.equip_from_inventory(mail_chest).ok),"A single armor piece can be equipped")
+	check(state.equipped_id("chest") == "armor_mail_chest","The mail chest occupies only the chest slot")
+	check(state.equipped_index("chest") == 1,"The mail chest reports the mail set index")
 	check(state.equipped_index("head") == 0,"The leather hood remains equipped")
 	check(state.is_equipped("armor_mail_chest"),"The mixed armor piece is queryable")
+	check(state.owned_in_inventory("armor_mail_chest") == 0,"Equipped mail leaves the backpack")
+	check(state.inventory.has("armor_leather_chest"),"The displaced leather chest returns to the backpack")
 	check(is_equal_approx(state.armor_reduction(),0.05),"Only the mail chest contributes guard")
+
+	check(bool(state.buy("sword_arming").ok),"A one-handed sword can be bought")
+	var arming_index: int = state.inventory.find("sword_arming")
+	check(bool(state.equip_from_inventory(arming_index).ok),"A sword equips from the backpack")
+	check(state.equipped_id("main") == "sword_arming","The arming sword fills the main hand")
+	check(state.equipped_index("sword") == 1,"Equipping an arming sword drives the gameplay sword index")
+	check(state.equipped_index("bow") == 0,"A sword main hand reports no bow")
+	check(state.owned_in_inventory("sword_arming") == 0,"The equipped sword leaves the backpack")
 
 	state.credits = 100000
 	while not state.inventory_full():
-		check(bool(state.buy("armor_leather").ok),"Buying fills the inventory")
-	check(state.inventory.size() == StateScript.INVENTORY_CAPACITY,"Inventory stops at ten")
+		check(bool(state.buy("armor_leather").ok),"Buying fills the backpack")
+	check(state.inventory.size() == StateScript.INVENTORY_CAPACITY,"Backpack stops at ten")
 	result = state.buy("armor_leather")
-	check(not bool(result.ok),"A full inventory rejects purchases")
+	check(not bool(result.ok),"A full backpack rejects purchases")
 	check(state.inventory.size() == StateScript.INVENTORY_CAPACITY,"A rejected purchase grows nothing")
 
 	while not state.stash_full():
@@ -113,7 +146,7 @@ func _test_state_rules() -> void:
 				if bool(state.move_to_stash(index).ok):
 					moved = true
 					break
-			check(moved,"A full inventory can always drain unequipped gear to the stash")
+			check(moved,"A full backpack can always drain unequipped gear to the stash")
 		check(bool(state.buy("armor_leather").ok),"Refill after draining")
 		check(bool(state.move_to_stash(state.inventory.size()-1).ok),"Move the refill to the stash")
 	check(state.stash.size() == StateScript.STASH_CAPACITY,"Stash stops at twenty")
@@ -133,17 +166,28 @@ func _test_state_rules() -> void:
 	check(state.credits == credits_before + 7,"Frontier rewards reach the purse")
 
 func _test_persistence() -> void:
+	var dropped_id: String = state.inventory[0]
+	check(bool(state.drop_from_inventory(0).ok),"A backpack item can be dropped to the floor")
+	check(PackedStringArray(state.floor_items) == PackedStringArray([dropped_id]),"Dropped gear waits on the floor")
 	state.save_state()
+	var saved_data: Variant = JSON.parse_string(FileAccess.get_file_as_string(TEST_SAVE))
+	check(typeof(saved_data) == TYPE_DICTIONARY,"The save is readable JSON")
+	if typeof(saved_data) == TYPE_DICTIONARY:
+		var saved: Dictionary = saved_data
+		check(int(saved.get("version",0)) == StateScript.SAVE_VERSION,"The save writes the current version")
 	var loaded = StateScript.new()
 	loaded.save_path = TEST_SAVE
 	loaded.load_state()
 	check(loaded.credits == state.credits,"Credits survive a reload")
-	check(PackedStringArray(loaded.inventory) == PackedStringArray(state.inventory),"Inventory survives a reload")
+	check(PackedStringArray(loaded.inventory) == PackedStringArray(state.inventory),"Backpack survives a reload")
 	check(PackedStringArray(loaded.stash) == PackedStringArray(state.stash),"Stash survives a reload")
+	check(PackedStringArray(loaded.floor_items) == PackedStringArray(state.floor_items),"Floor items survive a reload")
 	for kind in StateScript.DEFAULTS:
 		check(loaded.equipped_id(kind) == state.equipped_id(kind),"Equipped %s survives a reload" % kind)
 	loaded.free()
-	# A version-1 save stored one whole-set armor id; it must migrate to five slots.
+
+	# A version-1 save stored one whole-set armor id; it must expand to the five
+	# per-slot pieces and stop answering as the legacy bundle.
 	var v1_path := "user://hub_regression_v1.json"
 	var v1_file := FileAccess.open(v1_path, FileAccess.WRITE)
 	v1_file.store_string(JSON.stringify({"version":1,"credits":200,
@@ -154,11 +198,44 @@ func _test_persistence() -> void:
 	legacy.save_path = v1_path
 	legacy.load_state()
 	for slot in ArmorData.SLOTS:
-		check(legacy.equipped_id(slot) == "armor_mail","Version-1 armor migrates to the %s slot" % slot)
+		check(legacy.equipped_id(slot) == "armor_mail_" + slot,"Version-1 armor migrates to the %s slot" % slot)
 	check(legacy.equipped_index("chest") == 1,"Migrated mail preserves its set index")
-	check(legacy.is_equipped("armor_mail"),"Migrated whole-set mail is queryable")
+	check(legacy.is_equipped("armor_mail_chest"),"Migrated per-slot mail is queryable")
+	check(not legacy.is_equipped("armor_mail"),"The legacy bundle id is no longer queryable")
+	check(legacy.equipped_id("main") == "bow_short","The legacy bow keeps the main hand")
+	check(legacy.equipped_id("off").is_empty(),"Legacy saves leave the off hand empty")
+	check(not legacy.inventory.has("bow_short") and not legacy.inventory.has("armor_mail"),"Migrated equipped copies leave the backpack")
+	check(legacy.inventory.has("sword_short"),"The displaced legacy sword stays in the backpack")
+	check(is_equal_approx(legacy.armor_reduction(),0.15),"A migrated mail kit keeps its full guard")
 	legacy.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(v1_path))
+
+	# A version-2 save stored one armor piece per slot; every piece must survive.
+	var v2_path := "user://hub_regression_v2.json"
+	var v2_file := FileAccess.open(v2_path, FileAccess.WRITE)
+	v2_file.store_string(JSON.stringify({"version":2,"credits":260,
+		"inventory":["bow_recurve","sword_arming","armor_leather_head"],"stash":["dagger_iron"],
+		"equipped":{"bow":"bow_recurve","sword":"sword_arming",
+			"head":"armor_plate_head","chest":"armor_plate_chest","hands":"armor_leather_hands",
+			"legs":"armor_plate_legs","feet":"armor_cloth_feet"}}))
+	v2_file.close()
+	var per_slot = StateScript.new()
+	per_slot.save_path = v2_path
+	per_slot.load_state()
+	var expected_pieces := {
+		"head":"armor_plate_head","chest":"armor_plate_chest","hands":"armor_leather_hands",
+		"legs":"armor_plate_legs","feet":"armor_cloth_feet"
+	}
+	for slot in ArmorData.SLOTS:
+		check(per_slot.equipped_id(slot) == expected_pieces[slot],"Version-2 keeps the %s piece" % slot)
+	check(per_slot.equipped_id("main") == "bow_recurve","Version-2 keeps the stored bow")
+	check(per_slot.equipped_index("chest") == 2,"Version-2 keeps the plate chest index")
+	check(is_equal_approx(per_slot.armor_reduction(),0.22),"Version-2 keeps the mixed-set guard")
+	check(per_slot.inventory.has("sword_arming"),"The stored legacy sword returns to the backpack")
+	check(not per_slot.inventory.has("bow_recurve"),"The equipped legacy bow leaves the backpack")
+	check(PackedStringArray(per_slot.stash) == PackedStringArray(["dagger_iron"]),"Version-2 keeps the stash")
+	per_slot.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(v2_path))
 
 func _test_session_bridge() -> void:
 	session.clear()
@@ -190,9 +267,12 @@ func _test_session_bridge() -> void:
 
 func _test_menu() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great",
+	state.equipped = {
 		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
-		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
+		"legs":"armor_mail_legs","feet":"armor_mail_feet",
+		"neck":"neck_ember","ring1":"ring_copper","ring2":"",
+		"main":"sword_arming","off":"shield_kite"
+	}
 	state.save_state()
 	var menu = load("res://menu.tscn").instantiate()
 	root.add_child(menu)
@@ -202,11 +282,17 @@ func _test_menu() -> void:
 	check(menu.state == state,"The hub uses the persistent PlayerState service")
 	check(menu.archer != null and menu.archer.is_visible_in_tree(),"The ranger stands in the default screen")
 	check(menu.camera != null and menu.camera.current,"The hub frames the ranger with an active camera")
-	check(menu.archer.bow_index == 2,"Preview equips the stored longbow")
-	check(menu.archer.sword_index == 2,"Preview equips the stored greatsword")
+	check(menu.archer.bow_index == 0,"The preview reads the stored bow slot")
+	check(menu.archer.sword_index == 1,"Preview equips the stored arming sword")
+	check(menu.archer.shield_equipped,"Preview raises the stored off-hand shield")
+	check(menu.archer.weapon == "sword","The preview derives sword mode from the paperdoll")
 	check(menu.archer.armor_piece("head") == 1,"Preview equips the stored mail hood")
 	check(menu.archer.armor_piece("chest") == 1,"Preview equips the stored mail chest")
 	check(menu.archer.armor_piece("feet") == 1,"Preview equips the stored mail sabatons")
+	var stored_loadout: Dictionary = state.loadout()
+	check(int(stored_loadout["sword"]) == menu.archer.sword_index,"The preview consumes PlayerState.loadout()")
+	check(bool(stored_loadout["shield"]) == menu.archer.shield_equipped,"The preview consumes the loadout's off hand")
+	check(int(stored_loadout["armor"]["chest"]) == menu.archer.armor_piece("chest"),"The preview consumes the loadout's armor map")
 	var mail_chest_mesh := menu.archer._model.find_child("Armor_Mail_Chest",true,false) as MeshInstance3D
 	var leather_body := menu.archer._model.find_child("Male_Ranger_Body",true,false) as MeshInstance3D
 	check(mail_chest_mesh != null and mail_chest_mesh.visible,"The mail chest replaces the leather torso mesh")
@@ -217,9 +303,13 @@ func _test_menu() -> void:
 	check(base_calf != null and base_calf.visible,"The base calf fills the shin under short sabatons")
 	check(leather_boots != null and not leather_boots.visible,"Plate sabatons hide the leather boots independently")
 	menu.archer.set_armor_pieces(state.equipped_pieces())
-	check(menu.hud.inventory_buttons.size() == 10,"The hub renders ten inventory slots")
+	check(menu.hud.paperdoll_buttons.size() == 10,"The hub renders ten paperdoll slots")
+	check(menu.hud.backpack_buttons.size() == 10,"The hub renders ten backpack slots")
 	check(menu.hud.stash_buttons.size() == 20,"The hub renders twenty stash slots")
+	check(menu.hud.stock_buttons.size() == 28,"The hub renders the whole stock list")
 	check(menu.hud.vendor_buttons.size() == 3,"The hub offers three vendors")
+	check(menu.hud.paperdoll_buttons[1].item == "armor_mail_chest","The paperdoll shows the stored chest")
+	check(menu.hud.paperdoll_buttons[8].item == "sword_arming","The paperdoll shows the main hand")
 	var deploy_buttons: Array[Button] = [menu.hud.skirmish_button,menu.hud.host_button,menu.hud.join_button,menu.hud.frontier_button,
 		menu.hud.delve_button,menu.hud.delve_host_button,menu.hud.delve_join_button]
 	for button in deploy_buttons:
@@ -240,22 +330,27 @@ func _test_menu() -> void:
 	check(menu.hud.delve_button.text.ends_with("FINAL CACHE"),"A cleared wave offers the final cache")
 	menu.hud.set_delve_progress(0,false)
 	check(menu.hud.delve_button.text == "DESCEND THE DELVE","Without a stored run the delve starts fresh")
-	var enabled := 0
-	for button in menu.hud.inventory_buttons:
-		if not button.disabled:
-			enabled += 1
-	check(enabled == state.inventory.size(),"Inventory slots match owned gear")
+	var filled := 0
+	for button in menu.hud.backpack_buttons:
+		if not str(button.item).is_empty():
+			filled += 1
+	check(filled == state.inventory.size(),"Backpack slots match owned gear")
 	var view_rect: Rect2 = menu.get_viewport().get_visible_rect()
-	var panels: Array[Panel] = [menu.hud.header_panel,menu.hud.purse_panel,menu.hud.inventory_panel,menu.hud.stash_panel,menu.hud.vendor_panel,menu.hud.action_panel]
+	var panels: Array[Panel] = [menu.hud.header_panel,menu.hud.purse_panel,menu.hud.paperdoll_panel,
+		menu.hud.backpack_panel,menu.hud.stash_panel,menu.hud.vendor_panel,menu.hud.action_panel]
 	for panel in panels:
 		check(view_rect.encloses(panel.get_global_rect()),"Every hub panel stays on screen")
 	for first in panels.size():
 		for second in range(first+1,panels.size()):
 			check(not panels[first].get_global_rect().intersects(panels[second].get_global_rect()),"Hub panels do not overlap each other")
-	for button in menu.hud.inventory_buttons:
-		check(menu.hud.inventory_panel.get_global_rect().encloses(button.get_global_rect()),"Inventory slots sit inside their panel")
+	for button in menu.hud.paperdoll_buttons:
+		check(menu.hud.paperdoll_panel.get_global_rect().encloses(button.get_global_rect()),"Paperdoll slots sit inside their panel")
+	for button in menu.hud.backpack_buttons:
+		check(menu.hud.backpack_panel.get_global_rect().encloses(button.get_global_rect()),"Backpack slots sit inside their panel")
 	for button in menu.hud.stash_buttons:
 		check(menu.hud.stash_panel.get_global_rect().encloses(button.get_global_rect()),"Stash slots sit inside their panel")
+	check(menu.hud.backpack_panel.get_global_rect().encloses(menu.hud.floor_scroll.get_global_rect()),"The bottom floor strip sits inside the backpack panel")
+	check(menu.hud.backpack_panel.get_global_rect().encloses(menu.hud._floor_label.get_global_rect()),"The floor label sits inside the backpack panel")
 	check(menu.hud.vendor_panel.get_global_rect().encloses(menu.hud.stock_scroll.get_global_rect()),"Vendor stock scroll sits inside its panel")
 	var visible_stock := 0
 	for button in menu.hud.stock_buttons:
@@ -263,11 +358,11 @@ func _test_menu() -> void:
 			visible_stock += 1
 			if visible_stock <= 4:
 				check(menu.hud.stock_scroll.get_global_rect().grow(2).encloses(button.get_global_rect()),"Visible vendor stock rows sit inside the scroll")
-	check(visible_stock == 3,"The Fletcher lists three bows")
+	check(visible_stock == 5,"The Fletcher lists five bows and staves")
 	var feet_on_screen: Vector2 = menu.camera.unproject_position(menu.archer.global_position)
 	var head_on_screen: Vector2 = menu.camera.unproject_position(menu.archer.global_position+Vector3(0,1.85,0))
 	check(view_rect.has_point(feet_on_screen) and view_rect.has_point(head_on_screen),"The ranger is framed on screen")
-	check(head_on_screen.x > menu.hud.inventory_panel.get_global_rect().end.x,"The ranger stands clear of the inventory panel")
+	check(head_on_screen.x > menu.hud.paperdoll_panel.get_global_rect().end.x,"The ranger stands clear of the paperdoll panel")
 	check(head_on_screen.x < menu.hud.vendor_panel.get_global_rect().position.x,"The ranger stands clear of the vendor panel")
 	check(feet_on_screen.y < menu.hud.stash_panel.get_global_rect().position.y,"The stash panel leaves the ranger's feet visible")
 	var status_rect: Rect2 = menu.hud._status.get_global_rect()
@@ -277,10 +372,14 @@ func _test_menu() -> void:
 
 	menu.hud.vendor_buttons[2].pressed.emit()
 	var quartermaster_stock := 0
+	var quartermaster_rows := 0
 	for button in menu.hud.stock_buttons:
 		if button.visible:
 			quartermaster_stock += 1
-	check(quartermaster_stock == 20,"The Quartermaster lists all twenty armor pieces")
+			quartermaster_rows += 1
+			if quartermaster_rows <= 4:
+				check(menu.hud.stock_scroll.get_global_rect().grow(2).encloses(button.get_global_rect()),"Quartermaster rows sit inside the scroll")
+	check(quartermaster_stock == 27,"The Quartermaster lists all twenty-seven pieces")
 	menu.hud.vendor_buttons[0].pressed.emit()
 	menu.hud.stock_buttons[2].pressed.emit()
 	check(menu.hud.buy_button.visible,"Selecting vendor stock reveals the purchase action")
@@ -293,24 +392,54 @@ func _test_menu() -> void:
 	check(state.inventory.size() == stock_before+1,"The hub purchase adds the selected item")
 	check(state.inventory[-1] == "bow_recurve","The hub buys the selected stock item")
 	var recurve_index: int = state.inventory.find("bow_recurve")
-	check(recurve_index >= 0,"Bought gear appears in the inventory")
-	menu.hud.inventory_buttons[recurve_index].pressed.emit()
-	check(not menu.hud.equip_button.disabled,"A fresh bow can be equipped")
-	menu.hud.equip_button.pressed.emit()
-	check(state.is_equipped("bow_recurve"),"Hub equip updates the stored kit")
-	check(menu.archer.bow_index == 1,"Hub equip updates the rendered ranger")
+	check(recurve_index >= 0,"Bought gear appears in the backpack")
 
-	var sword_index: int = state.inventory.find("sword_short")
-	check(sword_index >= 0,"The unequipped starter sword is listed")
-	menu.hud.inventory_buttons[sword_index].pressed.emit()
+	menu.hud.backpack_buttons[recurve_index].right_clicked.emit("backpack",recurve_index,"","bow_recurve")
+	check(state.equipped_id("main") == "bow_recurve","Right-click equips a backpack bow into the main hand")
+	check(state.owned_in_inventory("bow_recurve") == 0,"The equipped bow leaves the backpack")
+	check(menu.archer.bow_index == 1,"The preview follows a right-click equip")
+	check(not menu.archer.shield_equipped,"A bow stows the shield")
+	check(state.owned_in_inventory("sword_arming") == 1,"The displaced sword returns to the backpack")
+	check(state.owned_in_inventory("shield_kite") == 1,"The displaced shield returns to the backpack")
+
+	var arming_index: int = state.inventory.find("sword_arming")
+	check(arming_index >= 0,"The displaced sword is listed in the backpack")
+	menu.hud.backpack_buttons[arming_index].pressed.emit()
+	check(not menu.hud.equip_button.disabled,"A fresh sword can be equipped")
+	menu.hud.equip_button.pressed.emit()
+	check(state.equipped_id("main") == "sword_arming","Hub EQUIP updates the stored main hand")
+	check(menu.archer.sword_index == 1,"Hub EQUIP updates the rendered sword")
+
+	var kite_index: int = state.inventory.find("shield_kite")
+	check(kite_index >= 0,"The displaced shield is listed in the backpack")
+	menu.hud.backpack_buttons[kite_index].right_clicked.emit("backpack",kite_index,"","shield_kite")
+	check(state.equipped_id("off") == "shield_kite","Right-click routes a shield to the off hand")
+	check(menu.archer.shield_equipped,"The preview raises the equipped shield")
+
+	var stash_index: int = state.inventory.find("bow_recurve")
+	check(stash_index >= 0,"The displaced bow is in the backpack")
+	menu.hud.backpack_buttons[stash_index].pressed.emit()
 	check(not menu.hud.move_button.disabled,"Unequipped gear can be stored")
 	menu.hud.move_button.pressed.emit()
-	check(state.stash.has("sword_short"),"Hub storage moves the item to the stash")
+	check(state.stash.has("bow_recurve"),"Hub storage moves the item to the stash")
 	menu.hud.stash_buttons[0].pressed.emit()
 	var credits_before: int = state.credits
 	menu.hud.sell_button.pressed.emit()
 	check(state.stash.is_empty(),"Hub selling removes the stashed item")
 	check(state.credits > credits_before,"Hub selling pays credits")
+
+	check(state.inventory.has("sword_short"),"The starter sword is still in the backpack")
+	var floor_item: String = state.inventory[0]
+	menu.hud._on_world_dropped({"area":"backpack","index":0,"item":floor_item})
+	check(state.floor_items.size() == 1 and state.floor_items[0] == floor_item,"Dropping over the viewport drops the item at the ranger's feet")
+	check(menu.hud.floor_buttons.size() == 1,"The floor strip lists the dropped item")
+	if menu.hud.floor_buttons.size() == 1:
+		check(menu.hud.floor_buttons[0].item == floor_item,"The floor strip names the dropped gear")
+		menu.hud.floor_buttons[0].pressed.emit()
+		menu.hud.equip_button.pressed.emit()
+		check(state.floor_items.is_empty(),"Picking up clears the floor")
+		check(state.inventory.has(floor_item),"Picked-up gear returns to the backpack")
+
 	for panel in panels:
 		for child in panel.get_children():
 			if child is Label:
@@ -371,19 +500,22 @@ func _test_menu() -> void:
 
 func _test_frontier() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great",
+	state.equipped = {
 		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
-		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
+		"legs":"armor_mail_legs","feet":"armor_mail_feet",
+		"neck":"","ring1":"","ring2":"","main":"sword_great","off":""
+	}
 	state.credits = 480
 	state.save_state()
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await create_timer(0.5).timeout
-	check(game.archer.bow_index == 2,"The frontier starts with the hub longbow")
 	check(game.archer.sword_index == 2,"The frontier starts with the hub greatsword")
+	check(game.archer.bow_index == 0,"A greatsword main hand reports the short bow index")
 	check(game.archer.armor_piece("head") == 1,"The frontier starts with the hub mail hood")
 	check(game.archer.armor_piece("chest") == 1,"The frontier starts with the hub mail chest")
 	check(is_equal_approx(game.archer.armor_reduction(),0.15),"The full mail kit grants 15% guard")
+	check(not game.archer.shield_equipped,"An empty off hand starts with the shield stowed")
 	check(game.gold == 480,"The frontier starts with the hub purse")
 	var before: int = state.credits
 	game._award_gold(7)
@@ -394,9 +526,11 @@ func _test_frontier() -> void:
 
 func _test_arena() -> void:
 	state.reset()
-	state.equipped = {"bow":"bow_long","sword":"sword_great",
+	state.equipped = {
 		"head":"armor_mail_head","chest":"armor_mail_chest","hands":"armor_mail_hands",
-		"legs":"armor_mail_legs","feet":"armor_mail_feet"}
+		"legs":"armor_mail_legs","feet":"armor_mail_feet",
+		"neck":"","ring1":"","ring2":"","main":"sword_great","off":""
+	}
 	state.credits = 480
 	state.save_state()
 	session.clear()
@@ -408,24 +542,35 @@ func _test_arena() -> void:
 		await process_frame
 	check(arena.network_role == "host","A hub host request starts an arena server")
 	check(arena.local_slot == 0,"The hub host owns the first seat")
-	check(arena.actors[0].rig.bow_index == 2,"The arena host starts with the hub longbow")
 	check(arena.actors[0].rig.sword_index == 2,"The arena host starts with the hub greatsword")
+	check(arena.actors[0].rig.bow_index == 0,"A greatsword main hand reports the short bow index")
 	check(arena.actors[0].rig.armor_piece("chest") == 1,"The arena host starts with the hub mail chest")
 	check(is_equal_approx(arena.actors[0].rig.armor_reduction(),0.15),"The arena host starts with the full mail guard")
+	await process_frame
 	await process_frame
 	arena.hud.armor_buttons[1].pressed.emit()
 	await process_frame
 	check(arena.actors[0].rig.armor_piece("chest") == 2,"The arena slot button cycles only the chest")
 	check(arena.actors[0].rig.armor_piece("head") == 1,"The other armor slots keep their mail")
-	arena._apply_loadout(1,{"bow":2,"sword":0,"armor":ArmorData.pack({"head":2,"chest":2,"hands":2,"legs":2,"feet":2})})
-	check(arena.actors[1].rig.bow_index == 2,"A validated client loadout applies to its seat")
-	check(arena.actors[1].rig.sword_index == 0,"The whole validated client kit applies")
+	var plate_pieces := {"head":2,"chest":2,"hands":2,"legs":2,"feet":2}
+	arena._apply_loadout(1,{"main":"sword_arming","off":"shield_kite","armor":ArmorData.pack(plate_pieces)})
+	check(arena.actors[1].rig.bow_index == 0,"A validated client loadout reports the short bow index")
+	check(arena.actors[1].rig.sword_index == 1,"The client's main hand applies to its seat")
+	check(arena.actors[1].rig.shield_equipped,"The client's off hand raises the shield")
 	check(arena.actors[1].rig.armor_piece("chest") == 2,"Armor selection applies to the hosted seat")
 	check(is_equal_approx(arena.actors[1].rig.armor_reduction(),0.30),"A full plate loadout grants 30% guard")
-	arena._apply_loadout(1,{"bow":9,"sword":"greatsword","armor":-1})
-	check(arena.actors[1].rig.bow_index == 2,"An invalid bow index is ignored")
-	check(arena.actors[1].rig.sword_index == 0,"An invalid sword type is ignored")
+	arena._apply_loadout(1,{"main":"armor_mail_chest","off":"not_a_real_item","armor":-1})
+	check(arena.actors[1].rig.sword_index == 1,"An invalid main hand is ignored")
+	check(arena.actors[1].rig.shield_equipped,"An invalid off hand keeps the shield")
 	check(arena.actors[1].rig.armor_piece("chest") == 2,"An invalid armor payload is ignored")
+	arena._apply_loadout(1,{"bow":9,"sword":"greatsword","armor":-1})
+	check(arena.actors[1].rig.bow_index == 0,"An invalid bow index is ignored")
+	check(arena.actors[1].rig.sword_index == 1,"An invalid sword type is ignored")
+	check(arena.actors[1].rig.armor_piece("chest") == 2,"An invalid index payload is ignored")
+	arena._apply_loadout(9,{"main":"sword_short","off":"","armor":0})
+	check(arena.actors[1].rig.sword_index == 1,"An out-of-range seat is ignored")
+	arena._apply_loadout(1,{"main":"","off":"","armor":ArmorData.pack(plate_pieces)})
+	check(arena.actors[1].rig.weapon == "none","Explicitly empty paperdoll hands apply as unarmed")
 	arena.leave_game()
 	check(arena.network_role == "offline","Leaving the arena returns to the lobby state")
 	arena.queue_free()

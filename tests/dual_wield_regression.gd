@@ -427,6 +427,9 @@ func run() -> void:
 	await create_timer(0.4).timeout
 	for enemy in game.enemies:
 		enemy.set_physics_process(false)
+	# main.tscn applies the hub loadout, whose off hand is empty; restore the
+	# default off dagger that the dual-wield mode expects.
+	game.archer.set_off_weapon("dagger",0,true)
 	game.archer.set_sword(0)
 	game.archer.set_weapon("dual")
 	game._set_cursor_free(false)
@@ -476,6 +479,9 @@ func run() -> void:
 	arena.host_game(7898,"Dual Regression")
 	await create_timer(0.2).timeout
 	arena.send_action("sword",0)
+	# The host applied its hub paperdoll, which has an empty off hand; restore
+	# the default off dagger so the dual action has a left-hand weapon.
+	arena.actors[0].rig.set_off_weapon("dagger",0,true)
 	arena.send_action("weapon","dual")
 	await create_timer(0.1).timeout
 	check(arena.actors[0].rig.weapon == "dual", "Arena accepts the dual loadout action")

@@ -49,7 +49,15 @@ func look(relative: Vector2) -> void:
 	await process_frame
 
 func equipment_checks(scene, rig, frontier: bool) -> void:
-	await key(KEY_I)
+	if frontier:
+		await key(KEY_I)
+		check(scene._field_inventory_open(),"I opens the field paperdoll")
+		await key(KEY_ESCAPE)
+		check(not scene._field_inventory_open(),"Escape closes the field paperdoll")
+		await key(KEY_O)
+	else:
+		await key(KEY_ESCAPE)
+		check(scene._cursor_free,"Escape frees the arena cursor for the equipment panel")
 	await click(scene.hud.bow_buttons[2])
 	await click(scene.hud.sword_buttons[0])
 	check(rig.bow_index == 2 and rig.sword_index == 0,"Mouse clicks select each weapon's size independently")
@@ -69,10 +77,11 @@ func equipment_checks(scene, rig, frontier: bool) -> void:
 	await key(KEY_1)
 	await click(scene.hud.bow_buttons[0])
 	check(rig.bow_index == 0 and rig.sword_index == 2,"Bow size clicks do not overwrite the selected sword")
-	await key(KEY_I)
 	if frontier:
+		await key(KEY_O)
 		check(not scene._cursor_free,"Closing equipment restores mouse-look")
 	else:
+		await key(KEY_ESCAPE)
 		check(not scene._cursor_free,"Arena equipment toggle restores mouse-look")
 
 func held_key(code: Key, pressed: bool) -> void:

@@ -207,7 +207,7 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "THROW %.0f%% / DAMAGE x%.2f / RELEASE TO THROW" % [float(state.draw)*100,float(state.draw)]
 	elif str(state.phase).begins_with("MELEE"):
 		if state.weapon == "dual":
-			attack_label.text = ("LEFT DAGGER STAB / %.2f s" if state.phase == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % float(state.attack_interval)
+			attack_label.text = ("LEFT OFF-HAND STAB / %.2f s" if state.phase == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % float(state.attack_interval)
 			if state.get("attack_parry",false):
 				attack_label.text += "  /  ATTACK PARRY"
 		elif state.phase == "MELEE_ST" or state.weapon == "dagger":
@@ -233,11 +233,13 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "RECOVERY %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	else:
 		if state.weapon == "dual":
-			attack_label.text = "DUAL WIELD / LMB LEFT STAB / RMB RIGHT CHOP / NO GUARD"
+			attack_label.text = "DUAL WIELD / LMB LEFT ATTACK / RMB RIGHT CHOP / NO GUARD"
 		elif state.weapon == "bow":
 			attack_label.text = "READY / HOLD LMB, AIM, RELEASE"
 		elif state.weapon == "dagger":
 			attack_label.text = "READY / LMB OR WHEEL UP STABS / WHEEL DOWN OVERHEAD"
+		elif state.weapon == "none":
+			attack_label.text = "UNARMED / RETURN TO THE HOLLOW TO EQUIP"
 		else:
 			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 	bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
@@ -254,7 +256,7 @@ func update_match(state: Dictionary) -> void:
 	weapon_buttons[2].set_pressed_no_signal(state.weapon == "dagger")
 	dual_button.set_pressed_no_signal(state.weapon == "dual")
 	dual_button.disabled = int(state.sword) == 2
-	var shield_allowed: bool = state.weapon == "dagger" or (state.weapon == "sword" and int(state.sword) == 1)
+	var shield_allowed: bool = state.weapon == "dagger" or (state.weapon == "sword" and int(state.sword) <= 1)
 	shield_button.set_pressed_no_signal(bool(state.get("shield",false)))
 	shield_button.disabled = not shield_allowed
 

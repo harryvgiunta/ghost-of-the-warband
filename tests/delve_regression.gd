@@ -290,11 +290,11 @@ func _test_entries() -> void:
 		if str(entry.get("id", "")) == "delve":
 			delve_entry = entry
 			break
-	check(not delve_entry.is_empty(), "Hearthstead exposes a delve entrance")
+	check(not delve_entry.is_empty(), "Hearthstead exposes the inn hatch")
 	if not delve_entry.is_empty():
 		frontier.player.global_position = (delve_entry.get("position", Vector3.ZERO) as Vector3) + Vector3(0, 0.25, 1.0)
 		frontier._update_interaction()
-		check(frontier._interaction_id == "delve", "Standing at the stair selects the delve")
+		check(frontier._interaction_id == "delve", "Standing at the hatch selects the delve")
 		check(frontier._interaction_allowed, "The delve entrance is usable")
 		check(frontier.hud._interaction.text.contains("Sunken Delve"), "The prompt names the delve")
 	frontier.queue_free()

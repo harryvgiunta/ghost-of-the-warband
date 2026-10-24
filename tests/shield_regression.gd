@@ -51,6 +51,8 @@ func check_shield_clear(rig, label: String) -> void:
 	if rig.active_shield.global_position.is_zero_approx():
 		check(false, "%s shield pose is uninitialized" % label)
 		return
+	var shield_radius: float = rig.active_shield.radius()
+	var shield_thickness: float = Shield.THICKNESS*(shield_radius/Shield.RADIUS)
 	var overlap := 0
 	var where := ""
 	for child in rig.find_children("*","MeshInstance3D",true,false):
@@ -79,7 +81,7 @@ func check_shield_clear(rig, label: String) -> void:
 					if weights[slot] > 0.0:
 						point += (transforms[joints[slot]]*vertices[vertex_index])*weights[slot]
 				var local := inverse*point
-				if Vector2(local.x,local.y).length() <= Shield.RADIUS and absf(local.z) <= Shield.THICKNESS*0.5+0.002:
+				if Vector2(local.x,local.y).length() <= shield_radius and absf(local.z) <= shield_thickness*0.5+0.002:
 					overlap += 1
 					where = str(child.name)
 					break
@@ -97,7 +99,7 @@ func run() -> void:
 	await physics_frame
 	await physics_frame
 
-	# Equip rules: dagger and the medium arming sword only.
+	# Equip rules: the dagger and any one-handed sword; the greatsword, staff and bow are excluded.
 	victim.rig.set_weapon("dagger")
 	check(victim.rig.set_shield(true), "The dagger accepts a shield")
 	check(victim.rig.shield_equipped and victim.rig.active_shield.visible, "The equipped shield is visible")
@@ -106,10 +108,10 @@ func run() -> void:
 	victim.rig.set_sword(1)
 	check(victim.rig.set_shield(true), "The medium arming sword accepts a shield")
 	victim.rig.set_sword(0)
-	check(not victim.rig.shield_equipped, "Changing to the shortsword stows the shield")
-	check(not victim.rig.set_shield(true), "The shortsword cannot raise the shield")
+	check(victim.rig.shield_equipped, "Changing to the shortsword keeps the shield equipped")
+	check(victim.rig.set_shield(true), "The shortsword accepts a shield")
 	victim.rig.set_sword(2)
-	check(not victim.rig.shield_equipped, "The greatsword cannot carry the shield")
+	check(not victim.rig.shield_equipped, "The greatsword stows the shield")
 	victim.rig.set_weapon("bow")
 	check(not victim.rig.set_shield(true), "The bow cannot carry the shield")
 	victim.rig.set_weapon("dagger")
@@ -245,6 +247,18 @@ func run() -> void:
 		await physics_frame
 		await physics_frame
 		check_shield_clear(clearance,set_names[set_index-1]+" raised")
+	clearance.set_armor(0)
+	clearance.set_shield_variant(2)
+	clearance.set_blocking(false)
+	clearance.advance_animation(0.6)
+	await physics_frame
+	await physics_frame
+	check_shield_clear(clearance,"Tower carried")
+	clearance.set_blocking(true,Vector3(0,0,-1))
+	clearance.advance_animation(0.6)
+	await physics_frame
+	await physics_frame
+	check_shield_clear(clearance,"Tower raised")
 	clearance.queue_free()
 	await process_frame
 
