@@ -293,11 +293,33 @@ def add_head_jaw_markers(rig: bpy.types.Object, face: Vector, jaw: Vector) -> No
     add_bone(rig, "jaw", jaw, jaw + Vector((0.0, -0.045, -0.010)), "Head", True)
 
 
-def add_wing_bones(rig: bpy.types.Object, side: str, shoulder, elbow, wrist, tip) -> None:
+def folded_wing_points(side: str) -> dict:
+    """Narrow, folded bat-wing skeleton posed along the back."""
     s = 1.0 if side == "l" else -1.0
-    add_bone(rig, f"wing_01_{side}", shoulder, elbow, "spine_03", True)
-    add_bone(rig, f"wing_02_{side}", elbow, wrist, f"wing_01_{side}", True)
-    add_bone(rig, f"wing_03_{side}", wrist, tip, f"wing_02_{side}", True)
+    shoulder = Vector((0.10 * s, 0.13, 1.43))
+    elbow = Vector((0.30 * s, 0.19, 1.63))
+    wrist = Vector((0.21 * s, 0.28, 1.49))
+    tips = [
+        Vector((0.16 * s, 0.36, 0.88)),
+        Vector((0.25 * s, 0.38, 0.99)),
+        Vector((0.32 * s, 0.35, 1.12)),
+        Vector((0.36 * s, 0.31, 1.28)),
+    ]
+    return {
+        "shoulder": shoulder,
+        "elbow": elbow,
+        "wrist": wrist,
+        "tip": tips[-1],
+        "body": Vector((0.10 * s, 0.22, 0.94)),
+        "tips": tips,
+    }
+
+
+def add_folded_wing_bones(rig: bpy.types.Object, side: str) -> None:
+    p = folded_wing_points(side)
+    add_bone(rig, f"wing_01_{side}", p["shoulder"], p["elbow"], "spine_03", True)
+    add_bone(rig, f"wing_02_{side}", p["elbow"], p["wrist"], f"wing_01_{side}", True)
+    add_bone(rig, f"wing_03_{side}", p["wrist"], p["tip"], f"wing_02_{side}", True)
 
 
 def add_tail_bones(rig: bpy.types.Object, points: list[Vector], prefix: str = "tail") -> None:
@@ -427,20 +449,12 @@ def make_spike(rig, bone: str, base: Vector, direction: Vector, length: float,
 
 
 def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) -> list[bpy.types.Object]:
+    """A folded bat wing: bent arm, hanging membrane and four finger struts."""
+    p = folded_wing_points(side)
     s = 1.0 if side == "l" else -1.0
-    shoulder = Vector((0.13 * s, 0.10, 1.38))
-    elbow = Vector((0.55 * s, 0.20, 1.52))
-    wrist = Vector((0.95 * s, 0.28, 1.44))
-    tip = Vector((1.30 * s, 0.36, 1.22))
-    body = Vector((0.16 * s, 0.16, 0.92))
-    tips = [
-        Vector((0.88 * s, 0.46, 0.66)),
-        Vector((1.04 * s, 0.49, 0.78)),
-        Vector((1.23 * s, 0.45, 0.95)),
-        Vector((1.36 * s, 0.40, 1.16)),
-    ]
-    boundary = [shoulder, body] + tips + [tip]
-    # Resample boundary to a smooth outer curve.
+    shoulder, elbow, wrist = p["shoulder"], p["elbow"], p["wrist"]
+    body, tips = p["body"], p["tips"]
+    boundary = [shoulder, body] + tips
     dense = []
     for i in range(len(boundary) - 1):
         a, b = boundary[i], boundary[i + 1]
@@ -449,9 +463,8 @@ def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) 
     dense.append(boundary[-1])
     n = len(dense)
     center = wrist
-    rings = 7
+    rings = 8
     verts, uvs, faces = [], [], []
-    # center vertex
     verts.append(center)
     uvs.append((0.5, 0.0))
     ring_start = []
@@ -459,13 +472,14 @@ def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) 
         t = r / rings
         ring_start.append(len(verts))
         for i, edge in enumerate(dense):
-            p = center.lerp(edge, t)
-            # A gentle backward sag and downward billow for a living membrane.
-            p.y += 0.035 * math.sin(math.pi * t) * (0.4 + 0.6 * i / max(1, n - 1))
-            p.z += 0.018 * math.sin(math.pi * t) * math.sin(i / max(1, n - 1) * math.pi)
-            verts.append(p)
+            q = center.lerp(edge, t)
+            # Pleats: alternating folds across the folded membrane.
+            fold = 0.016 * math.sin(i / max(1, n - 1) * math.pi * 3.4 + 0.35) * math.sin(math.pi * t)
+            q.y += fold
+            q.x += 0.35 * fold * s
+            q.z += 0.010 * math.sin(math.pi * t) * math.sin(i / max(1, n - 1) * math.pi)
+            verts.append(q)
             uvs.append((i / max(1, n - 1), t))
-    # center fan to first ring
     for i in range(n):
         a = ring_start[0] + i
         b = ring_start[0] + (i + 1) % n
@@ -487,22 +501,18 @@ def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) 
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=solid.name)
     parts = [obj]
-    # Arm bones covered in skin.
-    arm, _ = tube(f"WingArm_{side}", [shoulder, elbow, wrist], [0.036, 0.030, 0.021], 16, skin_mat)
+    arm, _ = tube(f"WingArm_{side}", [shoulder, elbow, wrist], [0.038, 0.030, 0.020], 16, skin_mat)
     weight_by_segments(arm, rig, [f"wing_01_{side}", f"wing_02_{side}", f"wing_03_{side}"], power=2.5)
     parts.append(arm)
-    # Finger struts from wrist to each tip.
-    for idx, p in enumerate(tips + [tip]):
-        mid = wrist.lerp(p, 0.55) + Vector((0, 0.02, 0.02))
-        strut, _ = tube(f"WingStrut_{side}_{idx}", [wrist, mid, p], [0.013, 0.008, 0.003], 10, skin_mat)
+    for idx, tip in enumerate(tips):
+        mid = wrist.lerp(tip, 0.55) + Vector((0.0, 0.018, 0.0))
+        strut, _ = tube(f"WingStrut_{side}_{idx}", [wrist, mid, tip], [0.012, 0.007, 0.0025], 10, skin_mat)
         rigid_skin(strut, rig, f"wing_03_{side}")
         parts.append(strut)
-    # Thumb claw at the wrist.
-    claw = make_claw(rig, f"wing_03_{side}", wrist + Vector((0.02 * s, -0.01, 0.01)),
-                     Vector((0.6 * s, -0.1, 0.2)), 0.035, skin_mat, 6)
+    claw = make_claw(rig, f"wing_03_{side}", wrist + Vector((0.015 * s, -0.01, 0.01)),
+                     Vector((0.35 * s, -0.15, 0.85)), 0.045, skin_mat, 6)
     parts.append(claw)
     return parts
-
 
 def make_tail(rig, points, radii, material, tip_material, tail_bones, spade=True) -> list[bpy.types.Object]:
     obj, _ = tube("Tail", points, radii, 14, material)

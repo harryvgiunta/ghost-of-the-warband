@@ -268,10 +268,14 @@ Sources:
     Hell beast body, 37-bone skeleton and authored idle/trot/bite/death.
 
 Original modifications in this repository:
-  - goat skull, ram horns, cloven hoof caps, shaggy fur mantle, hip rings;
-  - succubus horns, bat-wing membranes, spade tail and finger claws;
-  - gargoyle stone treatment, stone wings/horns/tail/claws, moss and ember
-    fissures;
+  - goat: human head removed; bare goat skull head, ram horns, body fur and
+    neck ruff, cloven hoof boots, tribal leather harness with a bone/iron
+    pauldron.  The ranger outfit/hood is not used on the goat;
+  - succubus: large satanic horns, folded leathery bat wings, spade tail and
+    finger claws; the extra waistband/belt is removed;
+  - gargoyle: folded stone wings; bespoke black-iron cuirass, layered
+    pauldrons, bracers, greaves, tassets and gorget with rivets and spikes;
+    stone body, horns/tail/claws, moss and ember fissures; 1.5x scale;
   - spawn enlarged head, small horns, fangs, needle claws, ragged wraps and
     tail;
   - beast cranial horns, spinal ridge, enlarged toe claws and charred/ember
@@ -317,11 +321,11 @@ stay in .runtime/devil-source/<mob>/.
 Final shipped hashes:
   ironwood_beast.glb SHA-256: 9e707abb23377f8a8d02b24d9d3fbb999b27092dcb09eded7ce0687d11528eea
   ironwood_beast.json SHA-256: 19347e730b20dec096415131533e4b0c1687c86be6497ff5cbbff40a0e6d1703
-  ironwood_gargoyle.glb SHA-256: 56cd01503a9a056d9bf7ee3c6bbe05247021e942fcdb02d45f56afda7d9f6069
-  ironwood_gargoyle.json SHA-256: 97f525f3bf69715f8bd6ca67d4a9de204611e5888b22cad77d2ab1405a66d47a
-  ironwood_hell_goat.glb SHA-256: 8cb8b87d4a474ae4e9959170ed2e0b66752676afe1a7f420e4a9e21d4db3aae8
-  ironwood_hell_goat.json SHA-256: c1cf675aec4990f68646b22082df934256f832e038f3dd8eaabd5aee11884013
+  ironwood_gargoyle.glb SHA-256: 87143de0b70a5487b42600608c29cb9c911a5b35231b1706b736fcd692ad40cf
+  ironwood_gargoyle.json SHA-256: 6bbb3d30c3934bc5941494c2904eeacf757a300f657038869afb2f7fc9579b9d
+  ironwood_hell_goat.glb SHA-256: f162f4186b7f5e2b7ca864e554cc4a3a024550e36548f35b3bde79ddb04f773e
+  ironwood_hell_goat.json SHA-256: f3f264fbc9e72f63ad08c879e498d322927b2a453ea517169830d7d9ec91e0b8
   ironwood_spawn.glb SHA-256: f9bbd3b1493c29cbced64762504dbe5a6360e4e3b8a81d2a0a5d35ff1d67a866
   ironwood_spawn.json SHA-256: 53e216811dbb905abe6814b3a5860f51a4e9ca4a33cb233e95c6fa6066853ddf
-  ironwood_succubus.glb SHA-256: 635aa76ad125cdaa6d828fba21719022f841a1dbbcb7c52bda5f4843dc8ba6ba
-  ironwood_succubus.json SHA-256: fd04eb83e9de6416beac6bcb974bbbeacc342338b063bd1d2cce8eeff5ebf3ab
+  ironwood_succubus.glb SHA-256: 55fc842adf68b68fe8759f5546af2c99e0cb167596c54e10433277b730e26bf2
+  ironwood_succubus.json SHA-256: 7d3493dd0b10c5fd05810ff5ba4e3e5b23a816ae8c87b2890f956366529fc641

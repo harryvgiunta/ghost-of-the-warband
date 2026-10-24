@@ -20,7 +20,7 @@ Everything below is CC0 1.0 Universal; provenance is recorded in
 | Source | Used for |
 | --- | --- |
 | Quaternius — Universal Base Characters: `Superhero_Female_FullBody`, `Superhero_Male_FullBody` | Body, face, eyes, 65-bone skeleton |
-| Quaternius — Modular Character Outfits Fantasy: `Female_Ranger`, `Male_Ranger` | Corset/boots, full ranger leather outfit, hood, belts, source hand skin |
+| Quaternius — Modular Character Outfits Fantasy: `Female_Ranger`, `Male_Ranger` | Female corset/boots for the succubus; ranger leather textures. The goat deliberately does not use the ranger outfit. |
 | Quaternius — Universal Base Characters hairstyles: `Hair_Long` | Succubus hair |
 | Quaternius — Universal Animation Library 1/2 | Idle, walk, jog/sprint, crouch loops and sword swings re-used for locomotion and attacks |
 | Ironwood `ironwood_wolf.glb` | Hell beast body, wolf skeleton and authored idle/trot/attack/death |
@@ -76,11 +76,17 @@ bones are numbered `wing_01_l`… and `tail_01`…
 
 | Mob | Height | Footprint | Triangles | Bones | Materials | Images |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Hellish goat man | 2.02 m | 2.07 m | 49,292 | 68 | 9 | 21 |
-| Succubus | 1.91 m | 2.72 m | 36,286 | 76 | 8 | 20 |
+| Hellish goat man | 2.01 m | 2.07 m | 30,322 | 68 | 10 | 24 |
+| Succubus | 2.11 m | 1.71 m | 34,230 | 76 | 7 | 20 |
 | Devil spawn | 1.09 m | 0.99 m | 16,054 | 70 | 6 | 15 |
 | Hell beast | 1.78 m | 2.99 m | 16,436 | 37 | 9 | 7 |
-| Gargoyle | 2.08 m | 3.05 m | 17,896 | 76 | 5 | 14 |
+| Gargoyle | 3.11 m | 3.28 m | 31,972 | 76 | 7 | 17 |
+
+The goat deliberately uses the male base body with the human head removed
+rather than the ranger outfit; the skull is the actual head. The gargoyle is
+1.5x the earlier build and wears a bespoke black-iron cuirass/pauldron/bracer/
+greave/tasset/gorget set over its stone body, with folded stone wings. The
+succubus uses folded leathery wings, large satanic horns and no waistband/belt.
 
 All meshes are a single joined skinned MeshInstance with multiple PBR material
 surfaces. Feet sit at approximately y = 0; rest minima are within 4 cm of the
@@ -141,8 +147,9 @@ runtime carries only values glTF cannot express.
 - The 65-bone Quaternius skeleton is retained for every humanoid. Extra bones:
   `head`, `jaw`, and for winged mobs `wing_01_l/r`…`wing_03_l/r`; tails use
   `tail_01`…`tail_03`.
-- The male base/outfit shares the ranger skeleton, so idle/walk/sprint clips
-  apply directly. The female base is 17 mm lower at the pelvis; the build adds
+- The male base shares the ranger skeleton, so idle/walk/sprint clips apply
+  directly. The goat cuts the human head at the neck, covers the cut with a
+  fur ruff and mounts the skull as the head; the ranger hood/outfit is absent. The female base is 17 mm lower at the pelvis; the build adds
   that offset to the pelvis location keys for the succubus/spawn.
 - The finished character is rotated 180° around Blender Z and scaled once, so
   the exported asset faces glTF −Z. Source action locations are scaled by the

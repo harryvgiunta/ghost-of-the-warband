@@ -410,6 +410,36 @@ def stone_maps(mob: str, out_dir: Path, size: int = 2048, prefix: str = "stone",
     print("STONE", mob, prefix, detail_stats(np.clip(albedo, 0, 1)))
 
 
+
+def metal_maps(mob: str, out_dir: Path, prefix: str = "metal") -> None:
+    style = STYLES[mob]
+    dark, light = style.get("metal", ((0.030, 0.033, 0.036), (0.16, 0.18, 0.20)))
+    size = 1024
+    macro = wt.fbm(size, size, 4, 4, SEED + 121, octaves=5)
+    hammer = wt.fbm(size, size, 18, 18, SEED + 122, octaves=4, ridge=True)
+    scratches = wt.fbm(size, size, 7, 180, SEED + 123, octaves=4, ridge=True)
+    fine = wt.fbm(size, size, 150, 150, SEED + 124, octaves=3)
+    a = np.array(dark, np.float32)[None, None, :]
+    b = np.array(light, np.float32)[None, None, :]
+    albedo = wt.mix(a, b, wt.smoothstep(0.25, 0.85, 0.55 * macro + 0.35 * hammer + 0.10 * fine))
+    # Edge wear and bright scratch lines.
+    scratch_mask = wt.smoothstep(0.66, 0.92, scratches)
+    albedo = albedo * (0.86 + 0.32 * fine[..., None])
+    albedo = albedo * (1.0 - 0.45 * scratch_mask[..., None]) + np.array((0.28, 0.30, 0.32), np.float32)[None, None, :] * (0.45 * scratch_mask[..., None])
+    # Rust/ember pitting.
+    rust_mask = wt.smoothstep(0.60, 0.82, wt.fbm(size, size, 8, 8, SEED + 125, octaves=4))
+    rust = np.array((0.22, 0.075, 0.025), np.float32)[None, None, :]
+    albedo = albedo * (1.0 - 0.55 * rust_mask[..., None]) + rust * (0.55 * rust_mask[..., None]) * (0.7 + 0.5 * fine[..., None])
+    height = 0.25 * hammer + 0.18 * fine + 0.30 * scratch_mask - 0.20 * rust_mask
+    normal = wt.normal_from_height(height.astype(np.float32), strength=1.8)
+    rough = 0.34 + 0.24 * (1.0 - scratch_mask) + 0.22 * rust_mask + 0.08 * fine
+    metallic = 0.96 - 0.45 * rust_mask
+    write_rgb(np.clip(albedo, 0, 1), out_path(out_dir, f"{prefix}_albedo.png"))
+    write_rgb(normal, out_path(out_dir, f"{prefix}_normal.png"))
+    write_rgb(np.repeat(np.clip(rough, 0, 1)[..., None], 3, axis=-1), out_path(out_dir, f"{prefix}_roughness.png"))
+    write_rgb(np.repeat(np.clip(metallic, 0, 1)[..., None], 3, axis=-1), out_path(out_dir, f"{prefix}_metallic.png"))
+    print("METAL", mob, detail_stats(np.clip(albedo, 0, 1)))
+
 def fur_maps(mob: str, out_dir: Path, prefix: str = "fur") -> None:
     style = STYLES[mob]
     col = np.array(style.get("fur", (0.07, 0.05, 0.035)), np.float32)
@@ -514,11 +544,13 @@ def build_mob(mob: str) -> None:
         bone_maps(mob, out_dir)
         fur_maps(mob, out_dir)
         cloth_maps(mob, out_dir)
+        metal_maps(mob, out_dir)
     elif mob == "gargoyle":
         stone_maps(mob, out_dir)
         horn_maps(mob, out_dir)  # kind == stone -> horn_* stone maps
         eye_maps(mob, out_dir)
         cloth_maps(mob, out_dir)
+        metal_maps(mob, out_dir)
     elif mob == "beast":
         beast_coat(out_dir)
         horn_maps(mob, out_dir)

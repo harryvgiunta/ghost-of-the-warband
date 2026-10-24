@@ -77,7 +77,7 @@ STYLES = {
         "hair_tint": (0.055, 0.018, 0.022),
         "eye_iris": (1.0, 0.48, 0.06),
         "eye_emission": 2.4,
-        "horn": ("ram", (0.10, 0.055, 0.045), (0.70, 0.58, 0.43)),
+        "horn": ("ram", (0.055, 0.012, 0.010), (0.62, 0.44, 0.30)),
         "membrane": (0.20, 0.035, 0.045),
         "cloth": (0.17, 0.055, 0.065),
         "surfaces": ["crimson-grey demon skin", "black oxblood leather harness", "bat-wing membrane", "keratin horns"],
@@ -99,6 +99,7 @@ STYLES = {
         "bone": (0.72, 0.66, 0.52),
         "fur": (0.13, 0.09, 0.06),
         "cloth": (0.18, 0.12, 0.08),
+        "metal": ((0.030, 0.028, 0.025), (0.15, 0.14, 0.12)),
         "surfaces": ["goat skull mask and ram horns", "shaggy black fur mantle", "weathered ranger leather", "cloven hoof boots"],
     },
     "gargoyle": {
@@ -116,6 +117,7 @@ STYLES = {
         "eye_emission": 3.2,
         "horn": ("stone", (0.14, 0.15, 0.14), (0.48, 0.47, 0.43)),
         "cloth": (0.18, 0.19, 0.18),
+        "metal": ((0.028, 0.032, 0.036), (0.16, 0.18, 0.20)),
         "surfaces": ["basalt stone anatomy", "cracked stone wings", "moss and ember fissures", "glowing eyes"],
     },
     "spawn": {
@@ -156,6 +158,7 @@ TEXTURE_NAMES = (
     "membrane_albedo", "membrane_normal", "membrane_roughness",
     "cloth_albedo", "cloth_normal", "cloth_roughness",
     "stone_albedo", "stone_normal", "stone_roughness", "stone_emission",
+    "metal_albedo", "metal_normal", "metal_roughness", "metal_metallic",
     "fur_albedo", "fur_normal", "fur_roughness",
     "beast_coat_albedo", "beast_coat_normal", "beast_coat_roughness", "beast_coat_emission",
 )

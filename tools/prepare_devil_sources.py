@@ -11,6 +11,8 @@ import math
 import sys
 from pathlib import Path
 
+import bmesh
+import numpy as np
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
@@ -21,15 +23,17 @@ if str(ROOT / "tools") not in sys.path:
 from devil_source_pipeline import (  # noqa: E402
     BASE_UE, HAIR, OUTFIT_DIR, SOURCE_RUNTIME, DEVILS, FPS, WOLF_GLB,
     action_fcurves, add_bone, add_constant_pelvis_offset, add_extra_curves,
-    add_group_weight, add_head_jaw_markers, add_tail_bones, add_wing_bones,
+    add_group_weight, add_head_jaw_markers, add_tail_bones,
     apply_orientation_and_scale, armature_modifier, assign_action, bake_action,
     copy_action_rename, delete_objects, export_glb, import_gltf, import_piece,
     import_ranger_actions, make_claw, make_fang, make_horn, make_mantle,
     make_goat_skull, make_hoof, make_skirt, make_spike, make_tail, make_wing,
     mesh_object, pbr_material, replace_materials, reset_scene, rigid_skin,
     scale_action_locations, setup_nla, simple_material, tube,
-    weight_by_segments, write_metadata,
+    weight_by_segments, write_metadata, add_folded_wing_bones,
 )
+from devil_armor import (bracer, chest_cuirass, goat_harness, gorget, greave,
+                         pauldron, tassets)
 
 
 def mesh_list(added):
@@ -151,18 +155,15 @@ def build_succubus() -> dict:
     print("BASE_FEMALE", len(base), [o.name for o in base], "bones", len(rig.data.bones))
 
     outfit = import_piece(OUTFIT_DIR / "Female_Ranger.gltf", rig,
-                          ["Female_Ranger_Body", "Female_Ranger_Body_Belt_1",
-                           "Female_Ranger_Body_Belt_2", "Female_Ranger_Feet"])
+                          ["Female_Ranger_Body", "Female_Ranger_Feet"])
     hair = import_piece(HAIR / "Hair_Long.gltf", rig, ["Hair_Long"])
     actions = import_ranger_actions()
     print("ACTIONS", sorted(actions)[:12], "idle_range", actions["Idle_Loop"].frame_range)
 
     # Extra bones before transforms.
     add_head_jaw_markers(rig, Vector((0.0, -0.095, 1.620)), Vector((0.0, -0.085, 1.565)))
-    add_wing_bones(rig, "l", (0.13, 0.10, 1.38), (0.55, 0.20, 1.52),
-                   (0.95, 0.28, 1.44), (1.30, 0.36, 1.22))
-    add_wing_bones(rig, "r", (-0.13, 0.10, 1.38), (-0.55, 0.20, 1.52),
-                   (-0.95, 0.28, 1.44), (-1.30, 0.36, 1.22))
+    add_folded_wing_bones(rig, "l")
+    add_folded_wing_bones(rig, "r")
     tail_pts = [Vector((0, 0.08, 0.95)), Vector((0, 0.20, 0.86)),
                 Vector((0, 0.30, 0.70)), Vector((0, 0.36, 0.52))]
     add_tail_bones(rig, tail_pts, "tail")
@@ -185,7 +186,6 @@ def build_succubus() -> dict:
                             roughness_value=0.52)
     cloth = pbr_material("Cloth_Succubus", td, "cloth_albedo.png", "cloth_normal.png",
                          "cloth_roughness.png", roughness_value=0.90)
-    metal = simple_material("Metal_Succubus", (0.045, 0.035, 0.030), 0.32, 0.9)
     dark = simple_material("Dark_Succubus", (0.006, 0.004, 0.004), 0.6)
 
     replace_materials_bulk(base + outfit + hair,
@@ -203,9 +203,11 @@ def build_succubus() -> dict:
     extras = []
     # Horns.
     for side, s in (("l", 1), ("r", -1)):
-        pts = [Vector((0.055 * s, -0.050, 1.695)), Vector((0.080 * s, 0.010, 1.780)),
-               Vector((0.110 * s, 0.090, 1.865)), Vector((0.145 * s, 0.155, 1.900))]
-        extras.append(make_horn(rig, side, pts, [0.034, 0.026, 0.015, 0.0025], horn, "Head", 40))
+        pts = [Vector((0.062 * s, -0.060, 1.730)), Vector((0.104 * s, 0.010, 1.865)),
+               Vector((0.138 * s, 0.100, 1.980)), Vector((0.132 * s, 0.200, 2.055)),
+               Vector((0.095 * s, 0.275, 2.090)), Vector((0.060 * s, 0.315, 2.075))]
+        extras.append(make_horn(rig, side, pts,
+                                [0.052, 0.045, 0.034, 0.022, 0.011, 0.0025], horn, "Head", 48))
     # Wings.
     for side in ("l", "r"):
         extras.extend(make_wing(rig, side, membrane, skin))
@@ -224,9 +226,8 @@ def build_succubus() -> dict:
     for s in (-1, 1):
         extras.append(make_fang(rig, Vector((0.024 * s, -0.108, 1.598)),
                                 Vector((0.0, -0.15, -1.0)), 0.022, horn, "Head"))
-    # Tattered loincloth and a metal belt.
+    # Tattered loincloth; no metal waistband.
     extras.append(make_skirt(rig, 1.060, 0.790, 0.275, 0.345, cloth, "Loincloth", 44, 0.055))
-    extras.extend(make_belt(rig, 1.050, 0.285, leather, metal, "Belt"))
     # Ensure every extra has an armature modifier and is parented.
     for obj in extras:
         if not any(m.type == "ARMATURE" for m in obj.modifiers):
@@ -404,6 +405,137 @@ def render_preview(rig, mesh, mob: str, idle_name: str | None = None) -> None:
     bpy.ops.render.render(write_still=True)
     print("PREVIEW", scene.render.filepath)
 
+
+
+
+# ---------------------------------------------------------------------------
+# Goat-specific body helpers
+
+
+def cut_head(body, z_cut: float = 1.52) -> None:
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bm.verts.ensure_lookup_table()
+    doomed = [v for v in bm.verts if v.co.z > z_cut]
+    bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(body.data)
+    bm.free()
+    body.data.update()
+
+
+def _fur_clump(rig, material, base: Vector, direction: Vector, length: float,
+               bones: list[str], radius: float = 0.012):
+    d = direction.normalized()
+    down = Vector((0, 0, -1))
+    p1 = base + d * length * 0.32 + down * length * 0.10
+    p2 = base + d * length * 0.60 + down * length * 0.42
+    p3 = base + d * length * 0.72 + down * length * 0.88
+    obj, _ = tube("FurClump", [base, p1, p2, p3],
+                  [radius, radius * 0.72, radius * 0.40, radius * 0.06], 3, material)
+    weight_by_segments(obj, rig, bones, power=1.5, max_bones=2)
+    return obj
+
+
+def make_fur_patches(rig, material, seed: int = 31):
+    rng = np.random.default_rng(seed)
+    parts = []
+
+    def region(bone_name: str, t0: float, t1: float, along: int, around: int,
+               radius: float, length: float, bones: list[str]):
+        bone = rig.data.bones.get(bone_name)
+        if bone is None:
+            return
+        axis = (bone.tail_local - bone.head_local).normalized()
+        up = Vector((0, 0, 1)) if abs(axis.z) < 0.85 else Vector((0, 1, 0))
+        n = axis.cross(up).normalized()
+        b2 = axis.cross(n).normalized()
+        for i in range(along):
+            t = t0 + (t1 - t0) * (i + 0.5) / along
+            center = bone.head_local.lerp(bone.tail_local, t)
+            for j in range(around):
+                a = math.tau * (j + 0.5) / around + (i % 2) * 0.12
+                radial = n * math.cos(a) + b2 * math.sin(a)
+                base = center + radial * radius
+                L = length * (0.78 + 0.42 * float(rng.random()))
+                parts.append(_fur_clump(rig, material, base,
+                                        radial * 0.75 + Vector((0, 0, -0.35)),
+                                        L, bones))
+
+    for side in ("l", "r"):
+        region(f"lowerarm_{side}", 0.12, 0.92, 6, 5, 0.052, 0.10,
+               [f"lowerarm_{side}"])
+        region(f"upperarm_{side}", 0.18, 0.86, 4, 5, 0.062, 0.11,
+               [f"upperarm_{side}"])
+        region(f"calf_{side}", 0.10, 0.92, 7, 6, 0.068, 0.13,
+               [f"calf_{side}"])
+        region(f"thigh_{side}", 0.18, 0.82, 4, 5, 0.085, 0.11,
+               [f"thigh_{side}"])
+    # Chest, back and flanks.
+    for z, count in ((1.22, 14), (1.34, 14), (1.44, 12)):
+        for j in range(count):
+            a = math.tau * j / count
+            base = Vector((math.cos(a) * 0.23, math.sin(a) * 0.17 + 0.01, z))
+            L = 0.095 * (0.8 + 0.5 * float(rng.random()))
+            parts.append(_fur_clump(rig, material, base,
+                                    Vector((math.cos(a), math.sin(a), -0.35)), L,
+                                    ["spine_02", "spine_03"]))
+    return parts
+
+
+def make_hoof_boot(rig, side: str, horn, fur):
+    foot = rig.data.bones.get(f"foot_{side}")
+    calf = rig.data.bones.get(f"calf_{side}")
+    if foot is None or calf is None:
+        return []
+    x = foot.head_local.x
+    parts = []
+    # Boot/shin sleeve covering the human foot and ankle.
+    sleeve, _ = tube("HoofBoot",
+                     [Vector((x, 0.045, 0.36)), Vector((x, 0.020, 0.21)),
+                      Vector((x, -0.005, 0.09))],
+                     [0.082, 0.078, 0.064], 18, fur)
+    weight_by_segments(sleeve, rig, [f"calf_{side}", f"foot_{side}"], power=1.6)
+    parts.append(sleeve)
+    # Two cloven hoof toes at the bottom, extending forward.
+    for toe in (-1, 1):
+        cx = x + toe * 0.027
+        verts = [
+            Vector((cx - 0.024, 0.045, 0.105)),
+            Vector((cx + 0.024, 0.045, 0.105)),
+            Vector((cx + 0.021, -0.125, 0.065)),
+            Vector((cx - 0.021, -0.125, 0.065)),
+            Vector((cx - 0.018, -0.110, 0.0)),
+            Vector((cx + 0.018, -0.110, 0.0)),
+        ]
+        faces = [(0, 1, 2, 3), (3, 2, 5, 4), (0, 3, 4), (1, 5, 2), (0, 4, 5, 1)]
+        obj = mesh_object(f"Hoof_{side}_{toe}", verts, faces, None, horn)
+        for poly in obj.data.polygons:
+            poly.use_smooth = False
+        rigid_skin(obj, rig, f"foot_{side}")
+        parts.append(obj)
+    # Fur cuff at the boot top.
+    for j in range(10):
+        a = math.tau * j / 10
+        base = Vector((x + math.cos(a) * 0.085, math.sin(a) * 0.075 + 0.02, 0.34))
+        parts.append(_fur_clump(rig, fur, base,
+                                Vector((math.cos(a), math.sin(a), -0.5)),
+                                0.10, [f"calf_{side}"]))
+    return parts
+
+
+def make_fur_collar(rig, material):
+    collar = make_skirt(rig, 1.565, 1.415, 0.125, 0.205, material, "NeckRuff", 36, 0.012)
+    for vg in list(collar.vertex_groups):
+        collar.vertex_groups.remove(vg)
+    weight_by_segments(collar, rig, ["neck_01", "spine_03"], power=1.8)
+    parts = [collar]
+    for j in range(18):
+        a = math.tau * j / 18
+        base = Vector((math.cos(a) * 0.155, math.sin(a) * 0.145 + 0.01, 1.495))
+        parts.append(_fur_clump(rig, material, base,
+                                Vector((math.cos(a), math.sin(a), -0.55)),
+                                0.105, ["neck_01", "Head"]))
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -643,17 +775,13 @@ def build_hell_goat() -> dict:
     reset_scene()
     added, rig = import_gltf(BASE_UE / "Superhero_Male_FullBody.gltf")
     base = base_meshes(added)
-    # The hood covers the human head; remove its separate eyes/brows.
     base = [o for o in base if o.name not in ("Face", "Face.001", "Eyebrows", "Eyes")]
     delete_objects([o for o in added if o.type == "MESH" and o not in base])
     body = find_body(base)
     print("BASE_MALE", [o.name for o in base], "bones", len(rig.data.bones))
-    outfit = import_piece(OUTFIT_DIR / "Male_Ranger.gltf", rig,
-                          ["Male_Ranger_Body", "Male_Ranger_Arms", "Male_Ranger_Arms_Bracer",
-                           "Male_Ranger_Feet_Boots", "Male_Ranger_Legs", "Male_Ranger_Acc_Pauldron",
-                           "Male_Ranger_Body_Belt_1", "Male_Ranger_Head_Hood"])
-    boot = next((o for o in outfit if o.name.startswith("Male_Ranger_Feet_Boots")), None)
     actions = import_ranger_actions()
+    # The skull is the head: cut the human head/neck above the shoulders.
+    cut_head(body, 1.515)
     add_head_jaw_markers(rig, Vector((0.0, -0.135, 1.640)), Vector((0.0, -0.100, 1.560)))
     td = base_material_maps(mob)
     skin = pbr_material("Skin_HellGoat", td, "skin_albedo.png", "skin_normal.png",
@@ -668,43 +796,38 @@ def build_hell_goat() -> dict:
                         "bone_roughness.png", roughness_value=0.55)
     fur = pbr_material("Fur_HellGoat", td, "fur_albedo.png", "fur_normal.png",
                        "fur_roughness.png", roughness_value=0.85)
+    cloth = pbr_material("Cloth_HellGoat", td, "cloth_albedo.png", "cloth_normal.png",
+                         "cloth_roughness.png", roughness_value=0.90)
+    iron = pbr_material("Iron_HellGoat", td, "metal_albedo.png", "metal_normal.png",
+                        "metal_roughness.png", metallic="metal_metallic.png",
+                        roughness_value=0.48)
+    bronze = simple_material("Bronze_HellGoat", (0.36, 0.22, 0.08), 0.34, 0.92)
     dark = simple_material("Dark_HellGoat", (0.006, 0.005, 0.004), 0.62)
-    metal = simple_material("Metal_HellGoat", (0.035, 0.030, 0.026), 0.38, 0.85)
-    # Keep MI_Regular_Male for the ranger's actual hand skin.
-    replace_materials_bulk(base + outfit,
-                           {"MI_Superhero_Male": skin, "MI_Ranger": leather})
+    replace_materials_bulk(base, {"MI_Superhero_Male": skin})
     add_marker_weights(body, rig)
     for obj in bpy.data.objects:
         if obj.type == "MESH" and obj.name.startswith("Icosphere"):
             bpy.data.objects.remove(obj, do_unlink=True)
     extras = []
-    # Goat skull mask.
+    # Goat skull as the actual head, ram horns, neck ruff and body fur.
     extras.extend(make_goat_skull(rig, bone, dark, eye, horn))
-    # Ram horns.
     for side, s in (("l", 1), ("r", -1)):
         pts = [Vector((0.085 * s, -0.035, 1.720)), Vector((0.170 * s, 0.030, 1.770)),
                Vector((0.255 * s, 0.120, 1.735)), Vector((0.300 * s, 0.215, 1.635)),
                Vector((0.285 * s, 0.285, 1.530)), Vector((0.230 * s, 0.320, 1.455))]
         extras.append(make_horn(rig, side, pts,
                                 [0.058, 0.052, 0.043, 0.031, 0.017, 0.003], horn, "Head", 48))
-    # Shaggy fur mantle around the hood.
-    extras.extend(make_mantle(rig, fur, rings=3, per_ring=56, seed=17))
-    # Cloven hoof caps at the boot tips.
-    for side, s in (("l", 1), ("r", -1)):
-        if boot:
-            center = boot_toe_center(boot, s)
-            extras.extend(make_hoof(rig, side, center, f"foot_{side}", horn))
-    # Claws through the gloves.
+    extras.extend(make_fur_collar(rig, fur))
+    extras.extend(make_mantle(rig, fur, rings=3, per_ring=64, seed=17))
+    extras.extend(make_fur_patches(rig, fur))
+    for side in ("l", "r"):
+        extras.extend(make_hoof_boot(rig, side, horn, fur))
     extras.extend(add_hand_claws(rig, horn, 0.042))
-    # A few iron harness rings at the belt.
-    for x in (-0.16, 0.16):
-        obj = make_spike(rig, "pelvis", Vector((x, -0.13, 1.03)), Vector((0, -0.4, 0.2)),
-                         0.025, metal, sides=8, radius=0.012)
-        extras.append(obj)
+    extras.extend(goat_harness(rig, leather, iron, bronze, bone, cloth))
     for obj in extras:
         if not any(m.type == "ARMATURE" for m in obj.modifiers):
             armature_modifier(obj, rig)
-    joined = join_all(base + outfit + extras, body, rig)
+    joined = join_all(base + extras, body, rig)
     apply_orientation_and_scale(rig, joined, 1.08)
     clips, baked = build_actions(
         rig, actions,
@@ -726,9 +849,10 @@ def build_hell_goat() -> dict:
              ["Idle_Loop", "Walk_Loop", "Run_Loop", "Attack", "Hit", "Death"]]
     meta = make_scene_export(rig, joined, order, DEVILS / "ironwood_hell_goat.glb",
                              mob, "Hellish goat man", clips, 0.20, 0.15,
-                             ["goat skull mask and ram horns", "shaggy fur mantle",
-                              "weathered ranger leather", "cloven hoof boots", "glowing eyes"],
-                             "CC0 Quaternius male base and ranger outfit plus core animations; original goat skull, horns, fur and hooves")
+                             ["bare goat skull head and ram horns", "shaggy body fur and neck ruff",
+                              "tribal leather harness with bone/iron pauldron",
+                              "cloven hoof boots and claws", "no ranger outfit"],
+                             "CC0 Quaternius male base and core animations; original goat skull, horns, fur, hooves and tribal harness")
     render_preview(rig, joined, mob, "HellGoat_Idle_Loop")
     return meta
 
@@ -748,10 +872,8 @@ def build_gargoyle() -> dict:
     print("BASE_GARGOYLE", [o.name for o in base], "bones", len(rig.data.bones))
     actions = import_ranger_actions()
     add_head_jaw_markers(rig, Vector((0.0, -0.105, 1.640)), Vector((0.0, -0.085, 1.565)))
-    add_wing_bones(rig, "l", (0.13, 0.10, 1.38), (0.55, 0.20, 1.52),
-                   (0.95, 0.28, 1.44), (1.30, 0.36, 1.22))
-    add_wing_bones(rig, "r", (-0.13, 0.10, 1.38), (-0.55, 0.20, 1.52),
-                   (-0.95, 0.28, 1.44), (-1.30, 0.36, 1.22))
+    add_folded_wing_bones(rig, "l")
+    add_folded_wing_bones(rig, "r")
     tail_pts = [Vector((0, 0.08, 0.95)), Vector((0, 0.22, 0.86)),
                 Vector((0, 0.34, 0.70)), Vector((0, 0.42, 0.52))]
     add_tail_bones(rig, tail_pts, "tail")
@@ -766,7 +888,11 @@ def build_gargoyle() -> dict:
                        emission="eye_emission.png", emission_strength=3.2, roughness_value=0.22)
     cloth = pbr_material("Cloth_Gargoyle", td, "cloth_albedo.png", "cloth_normal.png",
                          "cloth_roughness.png", roughness_value=0.90)
-    metal = simple_material("Metal_Gargoyle", (0.035, 0.032, 0.030), 0.36, 0.85)
+    iron = pbr_material("Iron_Gargoyle", td, "metal_albedo.png", "metal_normal.png",
+                        "metal_roughness.png", metallic="metal_metallic.png",
+                        roughness_value=0.45)
+    bronze = simple_material("Bronze_Gargoyle", (0.42, 0.25, 0.09), 0.32, 0.95)
+    rivet = simple_material("Rivet_Gargoyle", (0.11, 0.115, 0.12), 0.40, 0.92)
     dark = simple_material("Dark_Gargoyle", (0.006, 0.006, 0.006), 0.7)
     smart_uv(body, 1.8)
     replace_materials_bulk(base, {"MI_Superhero_Male": stone, "MI_Eyes": eye,
@@ -788,12 +914,18 @@ def build_gargoyle() -> dict:
     extras.extend(add_hand_claws(rig, horn_stone, 0.060))
     extras.extend(add_foot_claws(rig, horn_stone, 0.060))
     extras.append(make_skirt(rig, 1.060, 0.780, 0.275, 0.355, cloth, "Loincloth", 44, 0.045))
-    extras.extend(make_belt(rig, 1.050, 0.288, cloth, metal, "Belt"))
+    extras.extend(chest_cuirass(rig, iron, bronze, rivet))
+    extras.extend(gorget(rig, iron, bronze))
+    for side in ("l", "r"):
+        extras.extend(pauldron(rig, side, iron, bronze, rivet))
+        extras.extend(bracer(rig, side, iron, bronze, rivet))
+        extras.extend(greave(rig, side, iron, bronze, rivet))
+    extras.extend(tassets(rig, iron, bronze, cloth, rivet))
     for obj in extras:
         if not any(m.type == "ARMATURE" for m in obj.modifiers):
             armature_modifier(obj, rig)
     joined = join_all(base + extras, body, rig)
-    apply_orientation_and_scale(rig, joined, 1.12)
+    apply_orientation_and_scale(rig, joined, 1.68)
     extra_kinds = {
         "wing": [f"wing_{i:02d}_{s}" for s in ("l", "r") for i in range(1, 4)],
         "tail": ["tail_01", "tail_02", "tail_03"],
@@ -818,7 +950,7 @@ def build_gargoyle() -> dict:
     order = [next(a for a in bpy.data.actions if a.name == f"Gargoyle_{k}") for k in
              ["Idle_Loop", "Walk_Loop", "Run_Loop", "Attack", "Hit", "Death"]]
     meta = make_scene_export(rig, joined, order, DEVILS / "ironwood_gargoyle.glb",
-                             mob, "Gargoyle", clips, 0.20, 0.15,
+                             mob, "Gargoyle", clips, 0.30, 0.20,
                              ["basalt stone anatomy with smart-projected stone maps",
                               "stone bat wings, horns, tail and claws",
                               "moss, ember fissures, cloth wrap", "glowing eyes"],

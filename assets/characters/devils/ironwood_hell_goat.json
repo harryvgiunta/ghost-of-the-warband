@@ -87,28 +87,29 @@
   "unit": "metres",
   "rest_bounds_min": [
     -1.035731,
-    -0.010271,
-    -0.399304
+    -0.042973,
+    -0.3969
   ],
   "rest_bounds_max": [
     1.035731,
-    2.014244,
-    0.407415
+    1.96764,
+    0.412494
   ],
-  "height": 2.024515,
-  "mesh_triangles": 49292,
+  "height": 2.010613,
+  "mesh_triangles": 30322,
   "materials": [
     "Skin_HellGoat",
-    "Leather_HellGoat",
-    "MI_Regular_Male",
     "Bone_HellGoat",
     "Dark_HellGoat",
     "Eye_HellGoat",
     "Horn_HellGoat",
     "Fur_HellGoat",
-    "Metal_HellGoat"
+    "Leather_HellGoat",
+    "Bronze_HellGoat",
+    "Iron_HellGoat",
+    "Cloth_HellGoat"
   ],
-  "embedded_images": 21,
+  "embedded_images": 24,
   "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {
@@ -154,12 +155,12 @@
     "half_height": 0.15
   },
   "authoring_fps": 60,
-  "source": "CC0 Quaternius male base and ranger outfit plus core animations; original goat skull, horns, fur and hooves",
+  "source": "CC0 Quaternius male base and core animations; original goat skull, horns, fur, hooves and tribal harness",
   "surface_notes": [
-    "goat skull mask and ram horns",
-    "shaggy fur mantle",
-    "weathered ranger leather",
-    "cloven hoof boots",
-    "glowing eyes"
+    "bare goat skull head and ram horns",
+    "shaggy body fur and neck ruff",
+    "tribal leather harness with bone/iron pauldron",
+    "cloven hoof boots and claws",
+    "no ranger outfit"
   ]
 }

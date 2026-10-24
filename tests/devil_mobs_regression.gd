@@ -17,7 +17,7 @@ const MOBS := {
 			"hit": "HellGoat_Hit", "death": "HellGoat_Death",
 		},
 		"durations": [2.5, 1.333, 0.667, 1.45, 0.5, 1.25],
-		"height": [1.95, 2.15], "span": [1.9, 2.2],
+		"height": [1.95, 2.10], "span": [1.9, 2.2],
 		"kind": 3, "display": "Hellish goat man",
 	},
 	"succubus": {
@@ -29,7 +29,7 @@ const MOBS := {
 			"hit": "Succubus_Hit", "death": "Succubus_Death",
 		},
 		"durations": [2.5, 1.333, 0.667, 1.35, 0.45, 1.2],
-		"height": [1.8, 2.0], "span": [2.5, 2.9],
+		"height": [2.0, 2.2], "span": [1.5, 1.9],
 		"kind": 4, "display": "Succubus",
 	},
 	"spawn": {
@@ -65,7 +65,7 @@ const MOBS := {
 			"hit": "Gargoyle_Hit", "death": "Gargoyle_Death",
 		},
 		"durations": [2.5, 1.333, 0.933, 1.8, 0.5, 1.4],
-		"height": [2.0, 2.2], "span": [2.8, 3.2],
+		"height": [3.0, 3.25], "span": [2.8, 3.5],
 		"kind": 7, "display": "Gargoyle",
 	},
 }

@@ -62,7 +62,7 @@ const DATA := {
 		"walk_speed": 1.00, "run_speed": 2.80, "run_threshold": 1.80,
 		"impact": 0.95, "duration": 1.80,
 		"head_offset": Vector3.ZERO,
-		"head_radius": 0.20, "head_half": 0.15, "organic": false, "hover": 0.0,
+		"head_radius": 0.30, "head_half": 0.20, "organic": false, "hover": 0.0,
 	},
 }
 

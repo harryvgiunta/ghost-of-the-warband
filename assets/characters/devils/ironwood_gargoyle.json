@@ -94,25 +94,27 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -1.525311,
-    -0.038255,
-    -0.41748
+    -1.63893,
+    -0.057383,
+    -0.62622
   ],
   "rest_bounds_max": [
-    1.525311,
-    2.037703,
-    0.555309
+    1.63893,
+    3.056554,
+    0.767008
   ],
-  "height": 2.075958,
-  "mesh_triangles": 17896,
+  "height": 3.113937,
+  "mesh_triangles": 31972,
   "materials": [
     "Stone_Gargoyle",
     "Eye_Gargoyle",
     "HornStone_Gargoyle",
     "Cloth_Gargoyle",
-    "Metal_Gargoyle"
+    "Iron_Gargoyle",
+    "Bronze_Gargoyle",
+    "Rivet_Gargoyle"
   ],
-  "embedded_images": 14,
+  "embedded_images": 17,
   "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {
@@ -154,8 +156,8 @@
   },
   "head_zone": {
     "bone": "head",
-    "radius": 0.2,
-    "half_height": 0.15
+    "radius": 0.3,
+    "half_height": 0.2
   },
   "authoring_fps": 60,
   "source": "CC0 Quaternius male base plus core animations; original stone treatment, wings, horns, tail and claws",
