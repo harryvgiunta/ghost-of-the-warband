@@ -1,0 +1,320 @@
+extends SceneTree
+
+## Imported-asset, presentation, gameplay and world-placement coverage for the
+## five devil mobs. The GLBs are loaded dynamically so a missing asset reports
+## a clear failure instead of aborting the test at parse time.
+
+const Visual = preload("res://scripts/devil_mob_visual.gd")
+const Mob = preload("res://scripts/devil_mob.gd")
+
+const MOBS := {
+	"hell_goat": {
+		"scene": "res://assets/characters/devils/ironwood_hell_goat.glb",
+		"json": "res://assets/characters/devils/ironwood_hell_goat.json",
+		"clips": {
+			"idle": "HellGoat_Idle_Loop", "walk": "HellGoat_Walk_Loop",
+			"run": "HellGoat_Run_Loop", "attack": "HellGoat_Attack",
+			"hit": "HellGoat_Hit", "death": "HellGoat_Death",
+		},
+		"durations": [2.4, 1.1, 0.65, 1.45, 0.5, 1.25],
+		"height": [2.05, 2.35], "span": [0.9, 1.4],
+		"kind": 3, "display": "Hellish goat man",
+	},
+	"succubus": {
+		"scene": "res://assets/characters/devils/ironwood_succubus.glb",
+		"json": "res://assets/characters/devils/ironwood_succubus.json",
+		"clips": {
+			"idle": "Succubus_Idle_Loop", "walk": "Succubus_Walk_Loop",
+			"run": "Succubus_Run_Loop", "attack": "Succubus_Attack",
+			"hit": "Succubus_Hit", "death": "Succubus_Death",
+		},
+		"durations": [2.4, 1.15, 0.62, 1.35, 0.45, 1.2],
+		"height": [1.75, 2.1], "span": [1.4, 2.4],
+		"kind": 4, "display": "Succubus",
+	},
+	"spawn": {
+		"scene": "res://assets/characters/devils/ironwood_spawn.glb",
+		"json": "res://assets/characters/devils/ironwood_spawn.json",
+		"clips": {
+			"idle": "Spawn_Idle_Loop", "walk": "Spawn_Walk_Loop",
+			"run": "Spawn_Run_Loop", "attack": "Spawn_Attack",
+			"hit": "Spawn_Hit", "death": "Spawn_Death",
+		},
+		"durations": [2.0, 0.9, 0.5, 1.1, 0.4, 1.0],
+		"height": [1.0, 1.35], "span": [0.7, 1.4],
+		"kind": 5, "display": "Devil spawn",
+	},
+	"beast": {
+		"scene": "res://assets/characters/devils/ironwood_beast.glb",
+		"json": "res://assets/characters/devils/ironwood_beast.json",
+		"clips": {
+			"idle": "Beast_Idle_Loop", "walk": "Beast_Walk_Loop",
+			"run": "Beast_Run_Loop", "attack": "Beast_Attack",
+			"hit": "Beast_Hit", "death": "Beast_Death",
+		},
+		"durations": [2.6, 1.3, 0.75, 1.6, 0.5, 1.3],
+		"height": [1.45, 1.9], "span": [2.2, 3.3],
+		"kind": 6, "display": "Hell beast",
+	},
+	"gargoyle": {
+		"scene": "res://assets/characters/devils/ironwood_gargoyle.glb",
+		"json": "res://assets/characters/devils/ironwood_gargoyle.json",
+		"clips": {
+			"idle": "Gargoyle_Idle_Loop", "walk": "Gargoyle_Walk_Loop",
+			"run": "Gargoyle_Run_Loop", "attack": "Gargoyle_Attack",
+			"hit": "Gargoyle_Hit", "death": "Gargoyle_Death",
+		},
+		"durations": [3.0, 1.5, 0.9, 1.8, 0.5, 1.4],
+		"height": [2.1, 2.55], "span": [1.0, 2.2],
+		"kind": 7, "display": "Gargoyle",
+	},
+}
+
+var failures := 0
+var checks := 0
+
+
+func _initialize() -> void:
+	call_deferred("run")
+
+
+func check(condition: bool, message: String) -> void:
+	checks += 1
+	if not condition:
+		failures += 1
+		push_error(message)
+
+
+func run() -> void:
+	var world_root := Node3D.new()
+	world_root.name = "DevilTestWorld"
+	root.add_child(world_root)
+	for mob_id in MOBS:
+		await _check_asset(world_root, mob_id)
+		await _check_visual(world_root, mob_id)
+		await _check_gameplay(world_root, mob_id)
+	await _check_ai_approach(world_root)
+	await _check_frontier_instances(world_root)
+	print("DEVIL_MOBS_REGRESSION checks=%d failures=%d" % [checks, failures])
+	quit(1 if failures > 0 else 0)
+
+
+func _check_asset(world_root: Node3D, mob_id: String) -> void:
+	var spec: Dictionary = MOBS[mob_id]
+	var packed := load(str(spec.scene)) as PackedScene
+	check(packed != null, "Missing devil GLB: " + str(spec.scene))
+	if packed == null:
+		return
+	var instance := packed.instantiate()
+	world_root.add_child(instance)
+	await process_frame
+	var player := instance.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	var skeleton := instance.find_child("Skeleton3D", true, false) as Skeleton3D
+	var mesh := instance.find_child("HellGoatMesh", true, false) as MeshInstance3D
+	if mesh == null:
+		for child in instance.find_children("*", "MeshInstance3D", true, false):
+			mesh = child as MeshInstance3D
+			break
+	check(player != null, mob_id + " has an AnimationPlayer")
+	check(skeleton != null, mob_id + " has a Skeleton3D")
+	check(mesh != null, mob_id + " has a skinned MeshInstance3D")
+	if player and skeleton and mesh:
+		var names := player.get_animation_list()
+		check(names.size() == 6, mob_id + " exports exactly six clips (found %d)" % names.size())
+		for key in spec.clips:
+			var clip_name: String = spec.clips[key]
+			check(clip_name in names, mob_id + " has clip " + clip_name)
+			if clip_name in names:
+				var duration: float = player.get_animation(clip_name).length
+				var expected := float(spec.durations[["idle", "walk", "run", "attack", "hit", "death"].find(key)])
+				check(absf(duration - expected) < 0.08,
+					"%s %s duration %.3f is close to %.3f" % [mob_id, clip_name, duration, expected])
+				var loops: bool = player.get_animation(clip_name).loop_mode == Animation.LOOP_LINEAR
+				check(loops == (key in ["idle", "walk", "run"]), mob_id + " loop mode for " + clip_name)
+		var bone_count := skeleton.get_bone_count()
+		check(bone_count >= 24 and bone_count <= 48, mob_id + " bone count is in budget (found %d)" % bone_count)
+		for bone in ["root", "pelvis", "head", "jaw"]:
+			check(skeleton.find_bone(bone) >= 0, mob_id + " has bone " + bone)
+		var head_bone := skeleton.find_bone("head")
+		if head_bone >= 0:
+			var head_rest := skeleton.get_bone_global_rest(head_bone).origin
+			check(head_rest.z < -0.02, mob_id + " head sits on the gameplay -Z forward side")
+			check(head_rest.y > 0.45, mob_id + " head sits above the pelvis")
+		var root_bone := skeleton.find_bone("root")
+		if root_bone >= 0:
+			for key in spec.clips:
+				var clip_name: String = spec.clips[key]
+				var length: float = player.get_animation(clip_name).length
+				for time in [0.0, length * 0.5, length]:
+					player.play(clip_name)
+					player.seek(time, true)
+					player.pause()
+					await process_frame
+					skeleton.force_update_all_bone_transforms()
+					check(skeleton.get_bone_global_pose(root_bone).origin.length() < 0.001,
+						"%s %s keeps its root bone stationary" % [mob_id, clip_name])
+		var bounds := mesh.get_aabb()
+		check(bounds.position.y > -0.08 and bounds.position.y < 0.08,
+			"%s rest sole sits near the ground (%.3f)" % [mob_id, bounds.position.y])
+		check(bounds.size.y >= float(spec.height[0]) and bounds.size.y <= float(spec.height[1]),
+			"%s height %.3f stays in range" % [mob_id, bounds.size.y])
+		check(maxf(bounds.size.x, bounds.size.z) >= float(spec.span[0])
+			and maxf(bounds.size.x, bounds.size.z) <= float(spec.span[1]),
+			"%s footprint %.3f stays in range" % [mob_id, maxf(bounds.size.x, bounds.size.z)])
+		var material := mesh.mesh.surface_get_material(0) as StandardMaterial3D
+		check(material != null, mob_id + " has a standard material")
+		if material:
+			check(material.albedo_texture != null, mob_id + " has an albedo atlas")
+			check(material.normal_enabled and material.normal_texture != null, mob_id + " has a normal atlas")
+			check(material.roughness_texture != null, mob_id + " has a roughness atlas")
+			check(material.metallic_texture != null, mob_id + " has a metallic atlas")
+			check(material.emission_enabled and material.emission_texture != null, mob_id + " has an emission atlas")
+	# Adjacent metadata must describe the same deliverable.
+	var metadata_text := FileAccess.get_file_as_string(str(spec.json))
+	check(not metadata_text.is_empty(), "Missing metadata JSON for " + mob_id)
+	if not metadata_text.is_empty():
+		var metadata = JSON.parse_string(metadata_text)
+		check(metadata is Dictionary, mob_id + " metadata parses")
+		if metadata is Dictionary:
+			check(str(metadata.get("mob", "")) == mob_id, mob_id + " metadata mob id matches")
+			check(int(metadata.get("mesh_triangles", 0)) >= 20000, mob_id + " triangle budget")
+			check(metadata.get("embedded_images", []).size() >= 4, mob_id + " embeds four atlas images")
+	instance.queue_free()
+	await process_frame
+
+
+func _check_visual(world_root: Node3D, mob_id: String) -> void:
+	var visual = Visual.new()
+	visual.mob_id = mob_id
+	visual.profile = Mob.PROFILES[mob_id]
+	world_root.add_child(visual)
+	await process_frame
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.idle, mob_id + " first plays idle")
+	visual.set_motion(Vector3(1.2, 0.0, 0.0), true)
+	visual.set_combat("CIRCLE", 0.0)
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.walk, mob_id + " low speed selects walk")
+	visual.set_motion(Vector3(4.5, 0.0, 0.0), true)
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.run, mob_id + " high speed selects run")
+	visual.set_motion(Vector3.ZERO, true)
+	visual.set_combat("WINDUP", 0.1)
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.attack, mob_id + " windup selects attack")
+	visual.set_combat("STAGGER", 0.0)
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.hit, mob_id + " stagger selects hit")
+	visual.die()
+	await process_frame
+	check(visual.get_clip_name() == MOBS[mob_id].clips.death, mob_id + " death selects the death clip")
+	var head := visual.head_hitbox_center()
+	check(head.y > 0.4, mob_id + " head hitbox follows the head bone")
+	var profile := visual.head_hit_profile()
+	check(profile.x > 0.1 and profile.y > 0.05, mob_id + " head hit profile is non-degenerate")
+	visual.queue_free()
+	await process_frame
+
+
+func _check_gameplay(world_root: Node3D, mob_id: String) -> void:
+	var spec: Dictionary = MOBS[mob_id]
+	var player := CharacterBody3D.new()
+	player.position = Vector3(0.0, 0.0, 3.0)
+	world_root.add_child(player)
+	var mob = Mob.new()
+	mob.mob_id = mob_id
+	mob.player = player
+	mob.position = Vector3(0.0, 0.0, 0.0)
+	world_root.add_child(mob)
+	await process_frame
+	await process_frame
+	check(mob.kind == int(spec.kind), mob_id + " uses its own loot-parity kind")
+	check(mob.max_health > 0.0, mob_id + " has health")
+	check(mob.get_display_name() == str(spec.display), mob_id + " display name matches")
+	check(mob.head_hit_profile().x > 0.1, mob_id + " exposes a head zone")
+	check(mob.held_weapon_id() == "", mob_id + " is a natural-weapon mob")
+	var reward := [-1]
+	mob.defeated.connect(func(_enemy: Node3D, value: int) -> void: reward[0] = value)
+	mob.take_damage(99999.0, 0, false)
+	await process_frame
+	check(not mob.alive, mob_id + " dies at zero health")
+	check(reward[0] > 0, mob_id + " pays gold on death")
+	check(is_instance_valid(mob._visual) and mob._visual.is_dead(), mob_id + " holds its corpse pose")
+	mob.queue_free()
+	player.queue_free()
+	await process_frame
+
+
+func _check_ai_approach(world_root: Node3D) -> void:
+	# A stationary player six metres away must pull an orbiting devil into its
+	# attack trigger; an orbit-only AI would circle forever at `orbit` radius.
+	var floor_body := StaticBody3D.new()
+	var floor_shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(30.0, 1.0, 30.0)
+	floor_shape.shape = box
+	floor_body.position = Vector3(0.0, -0.5, -6.0)
+	floor_body.add_child(floor_shape)
+	world_root.add_child(floor_body)
+	var target := CharacterBody3D.new()
+	target.position = Vector3(0.0, 0.0, -6.0)
+	world_root.add_child(target)
+	for mob_id in ["hell_goat", "succubus", "spawn"]:
+		var mob = Mob.new()
+		mob.mob_id = mob_id
+		mob.player = target
+		mob.safe_center = Vector3(200.0, 0.0, 200.0)
+		mob.position = Vector3(0.0, 0.2, 0.0)
+		world_root.add_child(mob)
+		var entered_attack := false
+		var closest := 99.0
+		for frame in 150:
+			await physics_frame
+			if not is_instance_valid(mob) or not mob.alive:
+				break
+			closest = minf(closest, Vector2(mob.global_position.x - target.global_position.x,
+				mob.global_position.z - target.global_position.z).length())
+			if str(mob.state) in ["WINDUP", "STRIKE", "RECOVER"]:
+				entered_attack = true
+				break
+		check(entered_attack or closest < float(Mob.PROFILES[mob_id].reach) + 1.2,
+			mob_id + " closes from six metres and reaches an attack state")
+		mob.queue_free()
+		await process_frame
+	target.queue_free()
+	floor_body.queue_free()
+	await process_frame
+
+
+func _check_frontier_instances(world_root: Node3D) -> void:
+	var packed := load("res://main.tscn") as PackedScene
+	check(packed != null, "main.tscn loads")
+	if packed == null:
+		return
+	var frontier := packed.instantiate()
+	world_root.add_child(frontier)
+	await process_frame
+	await process_frame
+	var world = frontier.world
+	check(world != null, "frontier exposes its generated world")
+	if world != null:
+		check(world.enemy_spawns.size() == 36, "existing enemy spawn contract remains 36")
+		check(world.devil_spawns.size() == 11, "devil court has 11 authored placements")
+		var counts := {}
+		for record in world.devil_spawns:
+			var mob_id := str(record.get("mob", ""))
+			counts[mob_id] = int(counts.get(mob_id, 0)) + 1
+			check(MOBS.has(mob_id), "devil spawn references a known mob: " + mob_id)
+			check(record.has("position"), "devil spawn has a terrain position")
+		for mob_id in MOBS:
+			check(int(counts.get(mob_id, 0)) >= 2, mob_id + " appears at least twice in the frontier")
+	var devils := get_nodes_in_group("devil_mobs")
+	check(devils.size() == 11, "frontier spawns 11 live devil mobs (found %d)" % devils.size())
+	var kinds := {}
+	for devil in devils:
+		kinds[int(devil.get("kind"))] = true
+		check(is_instance_valid(devil.get("_visual")), "every frontier devil has an imported visual")
+	for expected in [3, 4, 5, 6, 7]:
+		check(kinds.has(expected), "frontier includes devil kind %d" % expected)
+	frontier.queue_free()
+	await process_frame

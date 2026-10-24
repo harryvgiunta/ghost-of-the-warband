@@ -13,6 +13,7 @@ Read [the project skill](../ironwood-archer/SKILL.md) for gameplay and toolchain
 
 - [Authoring and PBR](references/authoring.md): before acquiring or creating a model, changing topology/UVs, painting fur, baking maps, or choosing deterministic Blender source storage. Contains the existing Ranger command and the explicit prerequisite for any new authoring script.
 - [Godot integration and delivery](references/integration.md): before GLB export/import, changing materials per instance, replacing a runtime object, or verifying/handing off an asset. Contains cold-import and actual-render gates.
+- [Devil mob workflow](../../../../docs/devil-mobs.md): the implemented deterministic anatomy/atlas/rig/clip pipeline for the five frontier devils, including the shared module API, budgets, contact gates and runtime contract.
 - For a reused asset with no geometry changes, read intake in the first reference and all applicable integration gates; do not rebuild a mesh just because Blender is available.
 
 ## Repo facts, not proposed features
@@ -23,6 +24,8 @@ Read [the project skill](../ironwood-archer/SKILL.md) for gameplay and toolchain
 | `assets/characters/ironwood_wolf.glb`, adjacent JSON, `.glb.import`, wolf section in `LICENSE.txt` | Original textured, skinned default grey wolf: 37 bones, 15,036 triangles, 1024 embedded coat, idle/trot/bite/death clips. |
 | `tools/prepare_character.py`, `tools/character_clearance.py` | Ranger-specific source assembly, humanoid retargeting, authored cover/guard loops and clearance. **Not** a generic model/wolf builder or quadruped retargeter. |
 | `tools/prepare_wolf.py`, `scripts/wolf_visual.gd`, `tests/wolf_regression.gd` | Deterministic wolf mesh/rig/coat/clip authoring, presentation-only runtime sampling, and the real import/pose regression. |
+| `assets/characters/devils/ironwood_<mob>.glb` + adjacent JSON + `.glb.import`, `tools/prepare_devils.py`, `tools/devil_pipeline.py`, `tools/devils/<mob>.py`, `tools/check_devil.py` | Five original devils (Hellish goat man, Succubus, Devil spawn, Hell beast, Gargoyle): metaball anatomy, packed 5-channel PBR atlas, explicit rigs and six baked clips. Deterministic rebuild; sources stay in ignored `.runtime/devil-source/<mob>/`. |
+| `scripts/devil_mob.gd`, `scripts/devil_mob_visual.gd`, `tests/devil_mobs_regression.gd` | Five-profile frontier AI plus imported-GLB presentation; the regression validates assets, clip mapping, head zones, death rewards and the 11-entry `devil_spawns` table separately from the legacy `enemy_spawns`. |
 | `scripts/geo.gd` | Primitive mesh helpers; meters, Y-up; materials supplied to `mesh_node()` become `material_override`. |
 | `scripts/enemy.gd` | `kind == 0` BriarWolf attaches the imported wolf through `_build_wolf_visual()`; `kind == 1` RuinSentinel keeps its primitive presentation and shares the behavior script. |
 | `.runtime/character-source` | Ignored source-download workspace for the existing character. Ignored `.runtime` is not permanent storage for new irreplaceable authored work. |

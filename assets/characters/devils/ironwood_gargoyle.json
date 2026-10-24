@@ -1,0 +1,167 @@
+{
+  "asset": "ironwood_gargoyle.glb",
+  "mob": "gargoyle",
+  "display_name": "Gargoyle",
+  "skeleton": "GargoyleArmature/Skeleton3D",
+  "bone_count": 38,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "clavicle_l",
+    "upper_arm_l",
+    "forearm_l",
+    "hand_l",
+    "fingers_l",
+    "wing_root_l",
+    "wing_mid_l",
+    "wing_tip_l",
+    "clavicle_r",
+    "upper_arm_r",
+    "forearm_r",
+    "hand_r",
+    "fingers_r",
+    "wing_root_r",
+    "wing_mid_r",
+    "wing_tip_r",
+    "tail_01",
+    "tail_02",
+    "tail_03",
+    "thigh_l",
+    "shin_l",
+    "tarsus_l",
+    "foot_l",
+    "toes_l",
+    "thigh_r",
+    "shin_r",
+    "tarsus_r",
+    "foot_r",
+    "toes_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.5628949999809265,
+    0,
+    -0.40525588393211365
+  ],
+  "rest_bounds_max": [
+    0.5641477108001709,
+    2.343935489654541,
+    0.6545556783676147
+  ],
+  "height": 2.35,
+  "mesh_triangles": 39240,
+  "materials": [
+    "Gargoyle_Surface"
+  ],
+  "embedded_images": [
+    "image/png",
+    "image/png",
+    "image/png",
+    "image/png"
+  ],
+  "texture_atlas": {
+    "size": 2048,
+    "tags": [
+      "body",
+      "stone",
+      "stone_dark",
+      "lichen",
+      "membrane",
+      "horn",
+      "claw",
+      "eye",
+      "teeth",
+      "mouth"
+    ],
+    "channels": [
+      "albedo",
+      "normal",
+      "roughness",
+      "metallic",
+      "emission"
+    ]
+  },
+  "clips": {
+    "idle": {
+      "name": "Gargoyle_Idle_Loop",
+      "duration": 3,
+      "loop": true
+    },
+    "walk": {
+      "name": "Gargoyle_Walk_Loop",
+      "duration": 1.5,
+      "loop": true,
+      "stride": 1.7,
+      "duty": 0.66,
+      "fallback_speed": 1.133
+    },
+    "run": {
+      "name": "Gargoyle_Run_Loop",
+      "duration": 0.9,
+      "loop": true,
+      "stride": 2.9,
+      "duty": 0.42,
+      "fallback_speed": 3.222
+    },
+    "attack": {
+      "name": "Gargoyle_Attack",
+      "duration": 1.8,
+      "loop": false,
+      "impact": 0.95,
+      "recovery_end": 1.8
+    },
+    "hit": {
+      "name": "Gargoyle_Hit",
+      "duration": 0.5,
+      "loop": false
+    },
+    "death": {
+      "name": "Gargoyle_Death",
+      "duration": 1.4,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Gargoyle_Idle_Loop": 3,
+    "Gargoyle_Walk_Loop": 1.5,
+    "Gargoyle_Run_Loop": 0.9,
+    "Gargoyle_Attack": 1.8,
+    "Gargoyle_Hit": 0.5,
+    "Gargoyle_Death": 1.4
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.3,
+    "half_height": 0.14
+  },
+  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
+  "reproducer": "tools/prepare_devils.py --mob gargoyle",
+  "role": "sentinel",
+  "surface_notes": [
+    "chipped slate plates",
+    "lichen on upward faces",
+    "ember cracks",
+    "keratin horns and claws",
+    "stone wing membrane",
+    "ember eyes"
+  ]
+}

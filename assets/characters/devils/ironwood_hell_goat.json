@@ -1,0 +1,165 @@
+{
+  "asset": "ironwood_hell_goat.glb",
+  "mob": "hell_goat",
+  "display_name": "Hellish goat man",
+  "skeleton": "HellGoatArmature/Skeleton3D",
+  "bone_count": 34,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "ear_l",
+    "ear_r",
+    "clavicle_l",
+    "upper_arm_l",
+    "forearm_l",
+    "hand_l",
+    "fingers_l",
+    "clavicle_r",
+    "upper_arm_r",
+    "forearm_r",
+    "hand_r",
+    "fingers_r",
+    "tail_01",
+    "tail_02",
+    "tail_03",
+    "thigh_l",
+    "shin_l",
+    "tarsus_l",
+    "foot_l",
+    "toes_l",
+    "thigh_r",
+    "shin_r",
+    "tarsus_r",
+    "foot_r",
+    "toes_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.5488870143890381,
+    -0.004145003855228424,
+    -0.49809974431991577
+  ],
+  "rest_bounds_max": [
+    0.5841001272201538,
+    2.2036972045898438,
+    0.5298455953598022
+  ],
+  "height": 2.2,
+  "mesh_triangles": 38072,
+  "materials": [
+    "HellGoat_Surface"
+  ],
+  "embedded_images": [
+    "image/png",
+    "image/png",
+    "image/png",
+    "image/png"
+  ],
+  "texture_atlas": {
+    "size": 2048,
+    "tags": [
+      "body",
+      "skin",
+      "fur",
+      "hair",
+      "horn",
+      "hoof",
+      "claw",
+      "eye",
+      "teeth",
+      "mouth",
+      "leather",
+      "metal"
+    ],
+    "channels": [
+      "albedo",
+      "normal",
+      "roughness",
+      "metallic",
+      "emission"
+    ]
+  },
+  "clips": {
+    "idle": {
+      "name": "HellGoat_Idle_Loop",
+      "duration": 2.4,
+      "loop": true
+    },
+    "walk": {
+      "name": "HellGoat_Walk_Loop",
+      "duration": 1.1,
+      "loop": true,
+      "stride": 1.45,
+      "duty": 0.62,
+      "fallback_speed": 1.32
+    },
+    "run": {
+      "name": "HellGoat_Run_Loop",
+      "duration": 0.65,
+      "loop": true,
+      "stride": 2.35,
+      "duty": 0.38,
+      "fallback_speed": 3.62
+    },
+    "attack": {
+      "name": "HellGoat_Attack",
+      "duration": 1.45,
+      "loop": false,
+      "impact": 0.62,
+      "recovery_end": 1.45
+    },
+    "hit": {
+      "name": "HellGoat_Hit",
+      "duration": 0.5,
+      "loop": false
+    },
+    "death": {
+      "name": "HellGoat_Death",
+      "duration": 1.25,
+      "loop": false
+    }
+  },
+  "animations": {
+    "HellGoat_Idle_Loop": 2.4,
+    "HellGoat_Walk_Loop": 1.1,
+    "HellGoat_Run_Loop": 0.65,
+    "HellGoat_Attack": 1.45,
+    "HellGoat_Hit": 0.5,
+    "HellGoat_Death": 1.25
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.3,
+    "half_height": 0.14
+  },
+  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
+  "reproducer": "tools/prepare_devils.py --mob hell_goat",
+  "role": "charger",
+  "surface_notes": [
+    "procedural charcoal fur",
+    "ram horn",
+    "cloven hoof",
+    "ember eyes",
+    "leather harness",
+    "iron collar"
+  ]
+}

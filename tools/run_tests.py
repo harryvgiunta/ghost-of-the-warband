@@ -33,6 +33,7 @@ TESTS = [
     "running_slide_regression",
     "wolf_regression",
     "devil_regression",
+    "devil_mobs_regression",
     "swing_reach_regression",
     "block_clash_regression",
     "hitbox_regression",

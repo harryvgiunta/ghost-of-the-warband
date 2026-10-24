@@ -365,6 +365,30 @@ python tools/world_textures.py
 
 The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedication are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
 
+## Devil court
+
+Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (shaggy digitigrade charger), **Succubus** (winged crimson raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (stone sentinel). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract.
+
+They are original procedural assets authored by `tools/prepare_devils.py`; no third-party model, texture or motion is used. The supplied design references informed palette and proportions only. Each mob is one imported GLB with:
+
+- a continuous skinned metaball body plus rigid horns, claws, tusks, hooves, wings and armour;
+- a packed PBR atlas — albedo, tangent-space normal, roughness, metallic and emission — painted in rest space at 1024 or 2048 px;
+- fur/hair clumps on silhouette regions, painted keratin growth rings, membrane veins, leather grain and stone/lichen/ember-crack zones;
+- six baked 60 Hz clips: idle, walk, run, attack, hit and death, with authored foot contact, anticipation, impact and collapse.
+
+`scripts/devil_mob_visual.gd` is presentation only: it samples the clips, scales cadence from actual post-collision movement, and maps the physics attack clock onto the authored impact frame. `scripts/devil_mob.gd` owns the shared state machine, per-mob profiles, collision, damage, parries/staggers, gold and the corpse hold. The existing frontier loot rotation and HUD feedback are unchanged.
+
+The full authoring workflow, budgets and gates are documented in [docs/devil-mobs.md](docs/devil-mobs.md). Rebuild all five assets with:
+
+```powershell
+$Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
+& $Blender --background --python-exit-code 1 --python tools/prepare_devils.py -- all
+& $Godot --headless --editor --path . --import
+& $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
+```
+
+Intermediate `.blend` sources, PBR atlases and capture sheets are written to the ignored `.runtime/devil-source/<mob>/` workspace. Keep each shipped GLB, its adjacent JSON and its `.glb.import` together; import settings embed the textures and sample animation at 60 Hz.
+
 ## Update
 
 **Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. Current windows show **0.4.0** in the HUD, and `Play.cmd` opens the main menu.
@@ -408,6 +432,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 & $Godot --headless --path . --script res://tests/wolf_regression.gd
 & $Godot --headless --path . --script res://tests/devil_regression.gd
+& $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
 & $Godot --headless --path . --script res://tests/swing_reach_regression.gd
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd

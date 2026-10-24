@@ -1,4 +1,4 @@
-IRONWOOD RANGER — ASSET LICENSE AND PROVENANCE
+IRONWOOD CHARACTER ASSETS — LICENSE AND PROVENANCE
 
 All source model and animation content below is distributed by its creators under
 Creative Commons CC0 1.0 Universal (Public Domain Dedication):
@@ -243,3 +243,54 @@ packing can vary. The hashes below identify the shipped artifacts.
 
 GLB SHA-256: 8124663196ee2fdd18f8a051c7140311b114d570fd2cc1080e764b56bbe135eb
 Metadata JSON SHA-256: 77bfb0b985cb56e63d3a10d70f7eebfdc2877eb92a517738939dc06bdc56cce7
+
+IRONWOOD DEVIL MOBS — ORIGINAL WORK AND PROVENANCE
+
+The five frontier devil mobs (Hellish goat man, Succubus, Devil spawn, Hell
+beast and Gargoyle) are original procedural work authored by
+tools/prepare_devils.py on top of tools/devil_pipeline.py. No third-party
+model, texture, motion clip, photogrammetry scan or generated image is
+included. The design reference images supplied for this work were used only
+for palette and proportion guidance; they are not redistributed and are not
+inputs to the build.
+
+Assets:
+  assets/characters/devils/ironwood_hell_goat.glb  + .json
+  assets/characters/devils/ironwood_succubus.glb   + .json
+  assets/characters/devils/ironwood_spawn.glb      + .json
+  assets/characters/devils/ironwood_beast.glb      + .json
+  assets/characters/devils/ironwood_gargoyle.glb   + .json
+
+Each GLB contains a single continuous skinned body, rigid detail meshes
+(horns, claws, teeth, tusks, hooves, wings, harnesses), one packed PBR atlas
+(albedo, tangent normal, roughness, metallic, emission) embedded as PNG, and
+six 60 Hz baked in-place clips: idle, walk, run, attack, hit and death. The
+adjacent JSON records the measured skeleton, bounds, clip durations, stride,
+duty and impact times. Runtime presentation and AI live in
+scripts/devil_mob_visual.gd and scripts/devil_mob.gd; spawns are authored in
+RangeWorld.devil_spawns.
+
+The assets are dedicated to the public domain under CC0 1.0 Universal, the
+same dedication linked at the top of this file.
+
+Reproduce with:
+  blender --background --python-exit-code 1 --python tools/prepare_devils.py -- all
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+  Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/devil_mobs_regression.gd
+
+A fresh Blender run reproduces the measured geometry, rigs, clip timings and
+procedural atlases; byte-identical output is not promised because Smart UV
+packing and metaball conversion can vary. Editable .blend sources and atlas
+captures are kept in the ignored .runtime/devil-source/<mob>/ workspace.
+
+Final shipped hashes:
+  ironwood_beast.glb SHA-256: 6bf992578d665648e4aa6d477379c771c3dc0341ae0f62deaeca73dca1fb5c5c
+  ironwood_beast.json SHA-256: 336cfdee0d293814207efe4ea4df9dca969d941c43db6e8cb886d89a86354374
+  ironwood_gargoyle.glb SHA-256: 61b4057f02eeb1dd272756e2a1429c153f0ee75ed78783421cc4b0f52e235ff8
+  ironwood_gargoyle.json SHA-256: 1d682654ed5b067f37fd4eedb5912a3d54e61739b7aa4e0b1567f97e6cd034ff
+  ironwood_hell_goat.glb SHA-256: b6b4284c957efb6c38232e9e33ef8a99fc96c291ccf73e73d10eac2bc7384438
+  ironwood_hell_goat.json SHA-256: 5a95ed20de4305cf40a656d0d7126f1240df88ffae4363a9b709d4f1d7554b33
+  ironwood_spawn.glb SHA-256: 9972f872935f05a28602949ea7f3f05e1156c8b350efcf7cfd911ecb10c08aac
+  ironwood_spawn.json SHA-256: f0dce65005efc2dfb376e3f2e22857c5a5311c93b58b86ce9ba0890d868fe6d3
+  ironwood_succubus.glb SHA-256: 027bb857e935dccc7ae831c99f2711b369c62067473ee7a10451068f2e69270f
+  ironwood_succubus.json SHA-256: ee7cbdc30774bdd0190689ba0597ea2307cdc8e2b3b1e98668fdfa143e5bcdff

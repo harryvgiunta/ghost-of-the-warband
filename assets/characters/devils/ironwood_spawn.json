@@ -1,0 +1,161 @@
+{
+  "asset": "ironwood_spawn.glb",
+  "mob": "spawn",
+  "display_name": "Devil spawn",
+  "skeleton": "SpawnArmature/Skeleton3D",
+  "bone_count": 33,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "ear_l",
+    "ear_r",
+    "clavicle_l",
+    "upper_arm_l",
+    "forearm_l",
+    "hand_l",
+    "fingers_l",
+    "clavicle_r",
+    "upper_arm_r",
+    "forearm_r",
+    "hand_r",
+    "fingers_r",
+    "tail_01",
+    "tail_02",
+    "thigh_l",
+    "shin_l",
+    "tarsus_l",
+    "foot_l",
+    "toes_l",
+    "thigh_r",
+    "shin_r",
+    "tarsus_r",
+    "foot_r",
+    "toes_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.3579597473144531,
+    0.001127708237618208,
+    -0.6055383086204529
+  ],
+  "rest_bounds_max": [
+    0.3623065948486328,
+    1.1423542499542236,
+    0.3333112597465515
+  ],
+  "height": 1.15,
+  "mesh_triangles": 23844,
+  "materials": [
+    "Spawn_Surface"
+  ],
+  "embedded_images": [
+    "image/png",
+    "image/png",
+    "image/png",
+    "image/png"
+  ],
+  "texture_atlas": {
+    "size": 1024,
+    "tags": [
+      "body",
+      "skin",
+      "bone",
+      "mouth",
+      "teeth",
+      "claw",
+      "hair",
+      "eye",
+      "ember"
+    ],
+    "channels": [
+      "albedo",
+      "normal",
+      "roughness",
+      "metallic",
+      "emission"
+    ]
+  },
+  "clips": {
+    "idle": {
+      "name": "Spawn_Idle_Loop",
+      "duration": 2,
+      "loop": true
+    },
+    "walk": {
+      "name": "Spawn_Walk_Loop",
+      "duration": 0.9,
+      "loop": true,
+      "stride": 0.95,
+      "duty": 0.55,
+      "fallback_speed": 1.06
+    },
+    "run": {
+      "name": "Spawn_Run_Loop",
+      "duration": 0.5,
+      "loop": true,
+      "stride": 1.7,
+      "duty": 0.34,
+      "fallback_speed": 3.4
+    },
+    "attack": {
+      "name": "Spawn_Attack",
+      "duration": 1.1,
+      "loop": false,
+      "impact": 0.48,
+      "recovery_end": 1.1
+    },
+    "hit": {
+      "name": "Spawn_Hit",
+      "duration": 0.4,
+      "loop": false
+    },
+    "death": {
+      "name": "Spawn_Death",
+      "duration": 1,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Spawn_Idle_Loop": 2,
+    "Spawn_Walk_Loop": 0.9,
+    "Spawn_Run_Loop": 0.5,
+    "Spawn_Attack": 1.1,
+    "Spawn_Hit": 0.4,
+    "Spawn_Death": 1
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.22,
+    "half_height": 0.1
+  },
+  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
+  "reproducer": "tools/prepare_devils.py --mob spawn",
+  "role": "skirmisher",
+  "surface_notes": [
+    "near-black blue-grey hide",
+    "exposed tan ribcage",
+    "needle teeth",
+    "ember eyes",
+    "keratin back spikes",
+    "sparse bristle crest"
+  ]
+}

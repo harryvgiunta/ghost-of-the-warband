@@ -22,6 +22,9 @@ const TREE_SEED := 73109
 var player_spawn: Vector3 = Vector3(0.0, 3.0, 35.0)
 var town_entry: Vector3 = Vector3(0.0, 3.0, 47.0)
 var enemy_spawns: Array[Dictionary] = []
+## Authored devil-court placements. Kept separate from `enemy_spawns` so the
+## existing wolf/sentinel/cinder spawn contract stays a stable 36 entries.
+var devil_spawns: Array[Dictionary] = []
 var interactables: Array[Dictionary] = []
 var landmarks: Array[Dictionary] = []
 var map_paths: Array[PackedVector3Array] = []
@@ -85,6 +88,7 @@ func _ready() -> void:
 	_build_waystone("ruins", "Watchfall Waystone", Vector2(55, -60))
 	_build_waystone("ridge", "Suncrest Waystone", Vector2(-15, -100))
 	_build_enemy_spawns()
+	_build_devil_spawns()
 	_build_woodland()
 	_build_backdrop_trees()
 	_build_rocks()
@@ -96,6 +100,7 @@ func _ready() -> void:
 	generation_stats["obstacle_shapes"] = _solids.get_child_count()
 	generation_stats["paths"] = map_paths.size()
 	generation_stats["enemies"] = enemy_spawns.size()
+	generation_stats["devils"] = devil_spawns.size()
 	generation_stats["texture_count"] = TextureLibrary.texture_count()
 	generation_stats["world_style"] = style.id
 
@@ -728,6 +733,29 @@ func _add_devil_pack(center: Vector2, weapons: Array, first_index: int) -> void:
 			"pack_index": first_index + index, "weapon": str(weapons[index])})
 
 
+func _build_devil_spawns() -> void:
+	# The devil court is distributed along the existing roads and clearings so
+	# each species is encountered in a distinct habitat: goat sentries near the
+	# gate road, a spawn nest at the eastern crossroads, a beast in the western
+	# woods, a succubus on the open meadow and gargoyles on the northern ridge.
+	for record in [
+		{"mob": "hell_goat", "at": Vector2(-6, 14)},
+		{"mob": "hell_goat", "at": Vector2(-38, -18)},
+		{"mob": "succubus", "at": Vector2(24, -2)},
+		{"mob": "succubus", "at": Vector2(-12, -32)},
+		{"mob": "spawn", "at": Vector2(10, -16)},
+		{"mob": "spawn", "at": Vector2(14, -19)},
+		{"mob": "spawn", "at": Vector2(7, -20)},
+		{"mob": "beast", "at": Vector2(-28, -10)},
+		{"mob": "beast", "at": Vector2(44, -44)},
+		{"mob": "gargoyle", "at": Vector2(30, -72)},
+		{"mob": "gargoyle", "at": Vector2(-20, -64)},
+	]:
+		var point: Vector2 = record.at
+		devil_spawns.append({"mob": str(record.mob),
+			"position": _ground(point.x, point.y)})
+
+
 func _reserved(point: Vector2, margin: float) -> bool:
 	if maxf(absf(point.x), absf(point.y)) > 124.0:
 		return true
@@ -746,6 +774,10 @@ func _reserved(point: Vector2, margin: float) -> bool:
 	for entry in enemy_spawns:
 		var location: Vector3 = entry["position"]
 		if point.distance_to(Vector2(location.x, location.z)) < 3.0:
+			return true
+	for entry in devil_spawns:
+		var location: Vector3 = entry["position"]
+		if point.distance_to(Vector2(location.x, location.z)) < 4.5:
 			return true
 	return false
 
