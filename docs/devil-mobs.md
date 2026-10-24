@@ -80,15 +80,17 @@ bones are numbered `wing_01_l`… and `tail_01`…
 | Succubus | 2.11 m | 2.30 m | 34,110 | 76 | 6 | 17 |
 | Devil spawn | 1.09 m | 0.99 m | 16,054 | 70 | 6 | 15 |
 | Hell beast | 1.78 m | 2.99 m | 16,436 | 37 | 9 | 7 |
-| Gargoyle | 3.16 m | 3.28 m | 18,848 | 77 | 4 | 8 |
+| Gargoyle | 3.35 m | 3.24 m | 33,776 | 76 | 4 | 8 |
 
 The goat deliberately uses the male base body with the human head removed
 rather than the ranger outfit; the skull is the actual head, the body is jet
-black, and there is no armor, harness, ring or glowing eye. The gargoyle is
-1.5x the earlier build: a naked, hunched basalt monster with folded stone
-wings, spinal/shoulder/forearm spikes, fangs, crown horns, oversized claws and
-empty stone sockets with ember cores. The succubus uses clean half-open bat
-wings, large black satanic horns and no waistband, belt or loincloth ring.
+black, and there is no armor, harness, ring or glowing eye. The gargoyle is a
+3.4 m hunched basalt brute: a carved demon face with a heavy brow shelf, deep
+sockets and ember-slit eyes, a broad fanged muzzle, pointed ears and swept
+crown horns, over a weight-sculpted muscular body with a spinal/shoulder/
+forearm spike ridge, half-raised stone bat wings with finger struts, a heavy
+tail and oversized claws. The succubus uses clean half-open bat wings, large
+black satanic horns and no waistband, belt or loincloth ring.
 
 All meshes are a single joined skinned MeshInstance with multiple PBR material
 surfaces. Feet sit at approximately y = 0; rest minima are within 4 cm of the
@@ -110,11 +112,15 @@ places the authored strike on the damage frame.
 | Gargoyle | 2.500 | 1.333 | 0.933 | 1.80 (0.95) | 0.50 | 1.40 |
 
 Locomotion comes from the Quaternius loops (spawn uses the crouch loops; beast
-uses the wolf trot for both walk and run, with speed-scaled playback). Attacks:
-one-handed overhead for the succubus, two-handed overhead for the goat man and
-gargoyle, dagger thrust for the spawn, authored wolf bite for the beast. Hit
-and death are baked from the idle pose with authored spine/jaw/wing/tail
-overlays; the death clips add a grounded pelvis drop.
+uses the wolf trot for both walk and run, with speed-scaled playback). The
+gargoyle retimes the standing idle/walk/jog loops under an authored predator
+hunch: forward spine, dropped pelvis, bent knees and a slow stone-breath swell.
+Attacks: one-handed overhead for the succubus, two-handed overhead for the goat
+man and gargoyle, dagger thrust for the spawn, authored wolf bite for the beast.
+The gargoyle attack adds a jaw-open roar, a wing flare and a head thrust, and
+its hit/death clips also open the jaw. Hit and death are baked from the idle
+pose with authored spine/jaw/wing/tail overlays; the death clips add a grounded
+pelvis drop.
 
 ## Material design
 

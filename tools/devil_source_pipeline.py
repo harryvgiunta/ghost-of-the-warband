@@ -315,8 +315,9 @@ def wing_points(side: str, spread: bool = False) -> dict:
             "top": top, "bottom": bottom, "body": body, "spread": spread}
 
 
-def add_wing_bones(rig: bpy.types.Object, side: str, spread: bool = False) -> None:
-    p = wing_points(side, spread)
+def add_wing_bones(rig: bpy.types.Object, side: str, spread: bool = False,
+                   points: dict | None = None) -> None:
+    p = points if points is not None else wing_points(side, spread)
     add_bone(rig, f"wing_01_{side}", p["shoulder"], p["elbow"], "spine_03", True)
     add_bone(rig, f"wing_02_{side}", p["elbow"], p["wrist"], f"wing_01_{side}", True)
     add_bone(rig, f"wing_03_{side}", p["wrist"], p["top"], f"wing_02_{side}", True)

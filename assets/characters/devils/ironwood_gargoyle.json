@@ -3,7 +3,7 @@
   "mob": "gargoyle",
   "display_name": "Gargoyle",
   "skeleton": "Armature/Skeleton3D",
-  "bone_count": 77,
+  "bone_count": 76,
   "bone_names": [
     "root",
     "pelvis",
@@ -80,8 +80,7 @@
     "ball_leaf_r",
     "tail_01",
     "tail_02",
-    "tail_03",
-    "neutral_bone"
+    "tail_03"
   ],
   "forward": [
     0,
@@ -95,22 +94,22 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -1.63893,
-    -0.057383,
-    -0.644178
+    -1.61762,
+    -0.015406,
+    -0.543889
   ],
   "rest_bounds_max": [
-    1.63893,
-    3.101505,
-    0.767008
+    1.61762,
+    3.33875,
+    0.812294
   ],
-  "height": 3.158888,
-  "mesh_triangles": 18848,
+  "height": 3.354156,
+  "mesh_triangles": 33776,
   "materials": [
     "Stone_Gargoyle",
     "Dark_Gargoyle",
-    "EmberEye_Gargoyle",
-    "HornStone_Gargoyle"
+    "HornStone_Gargoyle",
+    "EmberEye_Gargoyle"
   ],
   "embedded_images": 8,
   "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
@@ -158,11 +157,11 @@
     "half_height": 0.2
   },
   "authoring_fps": 60,
-  "source": "CC0 Quaternius male base plus core animations; original stone, spikes, wings, claws, hunch and ember sockets",
+  "source": "CC0 Quaternius male base plus core animations; original carved gargoyle head, muscle sculpt, stone wings, horns, claws and stance",
   "surface_notes": [
-    "naked basalt stone body, folded membrane wings",
-    "hunched feral pose, spinal/shoulder/forearm spikes",
-    "empty stone sockets with ember cores, fangs and crown horns",
-    "oversized claws; 1.5x scale; no armor or cloth"
+    "heavily muscled basalt anatomy, hunched predator stance",
+    "carved demon face: heavy brow, deep sockets, ember eyes, bared fangs",
+    "swept crown horns, pointed ears, spinal and shoulder spikes",
+    "half-raised stone bat wings, heavy tail, oversized claws"
   ]
 }

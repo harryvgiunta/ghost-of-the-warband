@@ -14,7 +14,7 @@ from pathlib import Path
 import bmesh
 import numpy as np
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "tools") not in sys.path:
@@ -366,7 +366,7 @@ def render_preview(rig, mesh, mob: str, idle_name: str | None = None) -> None:
     bg = scene.world.node_tree.nodes.get("Background")
     if bg:
         bg.inputs[0].default_value = (0.025, 0.030, 0.040, 1.0)
-        bg.inputs[1].default_value = 0.6
+        bg.inputs[1].default_value = 0.35
     # Show the idle pose rather than the bind pose.
     idle = bpy.data.actions.get(idle_name) if idle_name else None
     if idle is None:
@@ -376,17 +376,17 @@ def render_preview(rig, mesh, mob: str, idle_name: str | None = None) -> None:
         bpy.context.scene.frame_set(0)
         bpy.context.view_layer.update()
     # Camera in front of the rotated character (it faces +Y in Blender now).
-    bpy.ops.object.camera_add(location=(2.2, 3.4, 1.55))
+    bpy.ops.object.camera_add(location=(3.2, 4.8, 1.9))
     cam = bpy.context.object
-    cam.data.lens = 55
+    cam.data.lens = 40
     scene.camera = cam
-    look = Vector((0, 0, 1.10)) - cam.location
+    look = Vector((0, 0, 1.45)) - cam.location
     cam.rotation_euler = look.to_track_quat("-Z", "Y").to_euler()
     # Three-point area lighting.
     for name, pos, energy, size in [
-        ("Key", (3.5, 3.0, 3.2), 900, 3.0),
-        ("Fill", (-3.0, 2.0, 2.0), 350, 4.0),
-        ("Rim", (-1.0, -3.0, 2.8), 700, 2.0),
+        ("Key", (3.5, 3.0, 3.2), 500, 3.0),
+        ("Fill", (-3.0, 2.0, 2.0), 200, 4.0),
+        ("Rim", (-1.0, -3.0, 2.8), 400, 2.0),
     ]:
         bpy.ops.object.light_add(type="AREA", location=pos)
         light = bpy.context.object
@@ -399,6 +399,39 @@ def render_preview(rig, mesh, mob: str, idle_name: str | None = None) -> None:
     scene.render.filepath = str(out / f"{mob}_preview.png")
     bpy.ops.render.render(write_still=True)
     print("PREVIEW", scene.render.filepath)
+
+
+def render_head_preview(rig, mob: str, idle_name: str | None = None) -> None:
+    """Second still: three-quarter face close-up at sculpted feature scale."""
+    scene = bpy.context.scene
+    idle = bpy.data.actions.get(idle_name) if idle_name else None
+    if idle:
+        assign_action(rig, idle)
+        scene.frame_set(0)
+        bpy.context.view_layer.update()
+    cam = scene.camera
+    if cam is None:
+        return
+    scene.render.resolution_x = 800
+    scene.render.resolution_y = 800
+    cam.data.lens = 70
+    marker = rig.pose.bones.get("head")
+    if marker is not None:
+        m = rig.matrix_world @ marker.matrix
+        face = m.translation
+        basis = m.to_3x3()
+        forward = (basis @ Vector((0.0, 1.0, 0.0))).normalized()
+        right = (basis @ Vector((1.0, 0.0, 0.0))).normalized()
+        target = face + Vector((0.0, 0.0, -0.01))
+        cam.location = target + forward * 1.05 + right * 0.24
+    else:
+        target = Vector((0.0, 0.0, 2.70))
+        cam.location = (0.62, 1.05, 2.86)
+    cam.rotation_euler = (target - cam.location).to_track_quat("-Z", "Y").to_euler()
+    out = SOURCE_RUNTIME / mob / "captures"
+    scene.render.filepath = str(out / f"{mob}_face.png")
+    bpy.ops.render.render(write_still=True)
+    print("FACE_PREVIEW", scene.render.filepath)
 
 
 
@@ -561,22 +594,44 @@ def make_neck_tube(rig, material) -> bpy.types.Object:
 
 
 def gargoyle_hunch(rig, t: float, duration: float) -> None:
-    for name, angle in [("spine_01", 13.0), ("spine_02", 12.0), ("spine_03", 9.0),
-                        ("neck_01", -8.0), ("Head", -7.0)]:
+    # Predatory stoop on the upright source pose plus a slow stone-breath swell.
+    breath = math.sin(t * math.tau / 2.5)
+    for name, angle in [("spine_01", 10.0 + 0.8 * breath),
+                        ("spine_02", 9.0 + 0.9 * breath),
+                        ("spine_03", 7.0 + 0.6 * breath),
+                        ("neck_01", -9.0), ("Head", -5.0 + 1.2 * breath)]:
         pb = rig.pose.bones.get(name)
         if pb:
             pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(angle))
     for side, s in (("l", 1), ("r", -1)):
         pb = rig.pose.bones.get(f"upperarm_{side}")
         if pb:
-            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(8.0 * s))
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(10.0 * s))
+        pb = rig.pose.bones.get(f"lowerarm_{side}")
+        if pb:
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(-11.0 * s))
         for i in range(1, 4):
             pb = rig.pose.bones.get(f"wing_{i:02d}_{side}")
             if pb:
-                pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(5.0 * math.sin(t * 1.6 + i)))
+                pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(6.0 * math.sin(t * 1.6 + i)))
     pb = rig.pose.bones.get("tail_01")
     if pb:
-        pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(8.0 * math.sin(t * 1.2)))
+        pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(10.0 * math.sin(t * 1.2)))
+    pelvis = rig.pose.bones.get("pelvis")
+    if pelvis:
+        m = pelvis.matrix.copy()
+        m.translation.z -= 0.020
+        pelvis.matrix = m
+    for side in ("l", "r"):
+        pb = rig.pose.bones.get(f"thigh_{side}")
+        if pb:
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(-7.0))
+        pb = rig.pose.bones.get(f"calf_{side}")
+        if pb:
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(14.0))
+        pb = rig.pose.bones.get(f"foot_{side}")
+        if pb:
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(-7.0))
 
 
 def goat_hunch(rig, t: float, duration: float) -> None:
@@ -669,13 +724,13 @@ def add_hand_claws(rig, material, length: float, sides: int = 8):
     return parts
 
 
-def add_foot_claws(rig, material, length: float, count: int = 3):
+def add_foot_claws(rig, material, length: float, count: int = 3, lift: float = 0.0):
     parts = []
     for side in ("l", "r"):
         bone = rig.data.bones.get(f"ball_{side}")
         if bone is None:
             continue
-        base = bone.tail_local.copy()
+        base = bone.tail_local.copy() + Vector((0.0, 0.0, lift))
         for i in range(count):
             off = (i - (count - 1) * 0.5) * 0.026
             parts.append(make_claw(rig, bone.name, base + Vector((off, 0, 0)),
@@ -786,11 +841,21 @@ def goat_attack(rig, t: float, duration: float) -> None:
 def gargoyle_attack(rig, t: float, duration: float) -> None:
     u = min(1.0, t / max(1e-5, duration))
     flare = math.sin(math.pi * min(1.0, u / 0.54))
+    snarl = smooth(0.40, 0.58, u) * (1.0 - smooth(0.72, 1.0, u))
     for side in ("l", "r"):
         for i in range(1, 4):
             pb = rig.pose.bones.get(f"wing_{i:02d}_{side}")
             if pb:
-                pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(10.0 * flare))
+                pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(16.0 * flare))
+        pb = rig.pose.bones.get(f"upperarm_{side}")
+        if pb:
+            pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(10.0 * flare * (1 if side == "l" else -1)))
+    pb = rig.pose.bones.get("jaw")
+    if pb:
+        pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(26.0 * snarl))
+    pb = rig.pose.bones.get("Head")
+    if pb:
+        pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((1, 0, 0), math.radians(-7.0 * snarl))
     pb = rig.pose.bones.get("tail_01")
     if pb:
         pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(14.0 * math.sin(u * math.pi)))
@@ -927,6 +992,371 @@ def build_hell_goat() -> dict:
 # Gargoyle
 
 
+def gargoyle_wing_points(side: str) -> dict:
+    """Half-raised stone bat wing whose finger tips clear the horns."""
+    s = 1.0 if side == "l" else -1.0
+    return {
+        "shoulder": Vector((0.105 * s, 0.115, 1.455)),
+        "elbow": Vector((0.350 * s, 0.170, 1.705)),
+        "wrist": Vector((0.575 * s, 0.230, 1.850)),
+        "top": Vector((0.800 * s, 0.310, 1.975)),
+    }
+
+
+def make_ellipsoid(rig, name, center, scale, material, bone="Head",
+                   rotation=(0.0, 0.0, 0.0), us=28, vs=18):
+    rot = Euler(rotation, "XYZ").to_matrix()
+    c = Vector(center)
+    sc = Vector(scale)
+    verts, faces, uvs = [], [], []
+    for i in range(vs + 1):
+        theta = math.pi * i / vs
+        st, ct = math.sin(theta), math.cos(theta)
+        for j in range(us + 1):
+            phi = math.tau * j / us
+            local = Vector((sc.x * st * math.cos(phi),
+                            sc.y * st * math.sin(phi),
+                            sc.z * ct))
+            verts.append(rot @ local + c)
+            uvs.append((j / us, i / vs))
+    for i in range(vs):
+        for j in range(us):
+            a = i * (us + 1) + j
+            faces.append((a, a + 1, a + us + 2, a + us + 1))
+    obj = mesh_object(name, verts, faces, uvs, material)
+    rigid_skin(obj, rig, bone)
+    return obj
+
+
+def make_loft(rig, name, stations, material, bone="Head", sides=24):
+    """Ring-lofted mass travelling along -Y (snout, jaw)."""
+    verts, faces, uvs = [], [], []
+    rings = len(stations)
+    for i, (y, cz, rx, rz) in enumerate(stations):
+        for j in range(sides):
+            a = math.tau * j / sides
+            verts.append(Vector((rx * math.cos(a), y, cz + rz * math.sin(a))))
+            uvs.append((j / sides * 2.0, i / max(1, rings - 1)))
+    for i in range(rings - 1):
+        for j in range(sides):
+            a = i * sides + j
+            b = i * sides + (j + 1) % sides
+            faces.append((a, b, b + sides, a + sides))
+    faces.append(tuple(range(sides - 1, -1, -1)))
+    base = (rings - 1) * sides
+    faces.append(tuple(base + j for j in range(sides)))
+    obj = mesh_object(name, verts, faces, uvs, material)
+    rigid_skin(obj, rig, bone)
+    return obj
+
+
+def make_blade(rig, name, spine, widths, thickness, material, bone="Head", sides=8):
+    """Flattened pointed fin used for the ears."""
+    pts = [Vector(p) for p in spine]
+    obj, _ = tube(name, pts, widths, sides, material)
+    for v in obj.data.vertices:
+        v.co.y = pts[0].y + (v.co.y - pts[0].y) * thickness
+    rigid_skin(obj, rig, bone)
+    return obj
+
+
+def make_tooth(rig, base, direction, length, radius, material, bone="Head", sides=8):
+    d = Vector(direction).normalized()
+    p0 = Vector(base)
+    obj, _ = tube("Tooth", [p0, p0 + d * length * 0.5, p0 + d * length * 0.85,
+                            p0 + d * length],
+                  [radius, radius * 0.70, radius * 0.34, 0.0006], sides, material)
+    rigid_skin(obj, rig, bone)
+    return obj
+
+
+# Bone-keyed radial inflation; chunkier than a uniform scale and still blends
+# across joints because every vertex uses its own skin weights.
+GARGOYLE_AXIS_BULK = {
+    "clavicle": 1.38, "upperarm": 1.55, "lowerarm": 1.45, "hand": 1.20,
+    "thigh": 1.40, "calf": 1.38, "spine_01": 1.26,
+    "spine_02": 1.34, "spine_03": 1.42, "neck_01": 1.35, "pelvis": 1.20,
+}
+
+# (centre, radii, outward strength) in source rest space; mirrored later.
+GARGOYLE_BULGES = [
+    ((0.072, -0.060, 1.405), (0.075, 0.075, 0.070), 0.045),   # pectoral
+    ((0.215, 0.060, 1.465), (0.075, 0.085, 0.080), 0.050),    # deltoid
+    ((0.070, 0.055, 1.500), (0.085, 0.075, 0.055), 0.035),    # trapezius
+    ((0.150, 0.070, 1.320), (0.070, 0.075, 0.110), 0.030),    # latissimus
+    ((0.330, 0.060, 1.462), (0.095, 0.065, 0.060), 0.030),    # biceps
+    ((0.560, 0.062, 1.458), (0.100, 0.060, 0.055), 0.022),    # forearm
+    ((0.095, 0.110, 0.995), (0.075, 0.060, 0.085), 0.028),    # glute
+    ((0.110, -0.020, 0.780), (0.075, 0.085, 0.150), 0.030),   # quadriceps
+    ((0.118, 0.085, 0.360), (0.065, 0.070, 0.130), 0.026),    # calf
+    ((0.000, -0.100, 1.230), (0.085, 0.055, 0.110), 0.014),   # abdominal wall
+]
+
+
+def bulk_gargoyle(body, rig) -> None:
+    axis = {}
+    for name, factor in GARGOYLE_AXIS_BULK.items():
+        for side in ("l", "r") if name not in ("spine_01", "spine_02", "spine_03", "neck_01", "pelvis") else ("",):
+            full = f"{name}_{side}" if side else name
+            bone = rig.data.bones.get(full)
+            if bone:
+                axis[full] = (bone.head_local.copy(), bone.tail_local.copy(), factor)
+    bulges = list(GARGOYLE_BULGES)
+    bulges += [((-c[0], c[1], c[2]), r, w) for c, r, w in GARGOYLE_BULGES if abs(c[0]) > 1e-6]
+    groups = {g.index: g.name for g in body.vertex_groups}
+    verts = body.data.vertices
+    normals = [v.normal.copy() for v in verts]
+    for v, nrm in zip(verts, normals):
+        p = v.co.copy()
+        if p.z > 1.53:
+            continue
+        acc = Vector()
+        total = 0.0
+        for g in v.groups:
+            bone_name = groups.get(g.group)
+            entry = axis.get(bone_name)
+            if entry is None or g.weight < 0.02:
+                continue
+            a, b, factor = entry
+            if bone_name.startswith(("calf", "thigh")):
+                factor = 1.0 + (factor - 1.0) * smooth(0.015, 0.16, p.z)
+            ab = b - a
+            if ab.length_squared < 1e-9:
+                continue
+            t = max(0.0, min(1.0, (p - a).dot(ab) / ab.length_squared))
+            acc += (p - (a + ab * t)) * (factor - 1.0) * g.weight
+            total += g.weight
+        if total > 1e-5:
+            p += acc / total
+        for center, radii, strength in bulges:
+            dx = (p.x - center[0]) / radii[0]
+            dy = (p.y - center[1]) / radii[1]
+            dz = (p.z - center[2]) / radii[2]
+            q = dx * dx + dy * dy + dz * dz
+            if q < 3.4:
+                p += nrm * (strength * math.exp(-q))
+        v.co = p
+    body.data.update()
+
+
+GARGOYLE_HEAD_PIVOT = Vector((0.0, 0.010, 1.560))
+GARGOYLE_HEAD_SCALE = 1.26
+
+
+def make_gargoyle_head(rig, stone, horn_stone, dark, ember):
+    parts = []
+    # Cranium and jowl enclose the removed human face completely.
+    parts.append(make_ellipsoid(rig, "GargoyleCranium", (0.0, -0.005, 1.725),
+                                (0.115, 0.128, 0.112), stone))
+    # Carved face plate: flattens the mask so the sockets read from the front.
+    parts.append(make_ellipsoid(rig, "GargoyleFacePlate", (0.0, -0.110, 1.702),
+                                (0.106, 0.032, 0.098), stone))
+    parts.append(make_ellipsoid(rig, "GargoyleJowl", (0.0, -0.010, 1.618),
+                                (0.108, 0.118, 0.070), stone))
+    # Broad short snout below the eyes.
+    parts.append(make_loft(rig, "GargoyleMuzzle", [
+        (0.020, 1.690, 0.090, 0.058),
+        (-0.040, 1.686, 0.094, 0.058),
+        (-0.100, 1.680, 0.090, 0.055),
+        (-0.150, 1.672, 0.084, 0.051),
+        (-0.190, 1.664, 0.072, 0.046),
+        (-0.218, 1.658, 0.056, 0.038),
+        (-0.236, 1.654, 0.038, 0.030),
+    ], stone))
+    # Lower jaw hangs open in a snarl and follows the jaw bone.
+    parts.append(make_loft(rig, "GargoyleJaw", [
+        (0.000, 1.596, 0.098, 0.038),
+        (-0.060, 1.590, 0.096, 0.036),
+        (-0.120, 1.584, 0.086, 0.032),
+        (-0.170, 1.578, 0.072, 0.028),
+        (-0.210, 1.574, 0.052, 0.024),
+        (-0.228, 1.572, 0.034, 0.020),
+    ], stone, bone="jaw"))
+    # Dark maw behind the bared teeth.
+    parts.append(make_ellipsoid(rig, "GargoyleMaw", (0.0, -0.168, 1.612),
+                                (0.070, 0.055, 0.020), dark))
+    # Nose pad and bridge.
+    parts.append(make_ellipsoid(rig, "GargoyleNosePad", (0.0, -0.236, 1.662),
+                                (0.042, 0.011, 0.013), stone))
+    nose_pts = [Vector((0.0, -0.145, 1.760)), Vector((0.0, -0.182, 1.714)),
+                Vector((0.0, -0.218, 1.680))]
+    nose, _ = tube("GargoyleNoseRidge", nose_pts, [0.016, 0.020, 0.012], 10, stone)
+    rigid_skin(nose, rig, "Head")
+    parts.append(nose)
+    # Upper lip and upper fangs.
+    lip_pts = [Vector((-0.070, -0.190, 1.636)), Vector((-0.036, -0.218, 1.632)),
+               Vector((0.0, -0.230, 1.630)), Vector((0.036, -0.218, 1.632)),
+               Vector((0.070, -0.190, 1.636))]
+    lip, _ = tube("GargoyleLip", lip_pts, [0.014, 0.016, 0.017, 0.016, 0.014], 10, stone)
+    rigid_skin(lip, rig, "Head")
+    parts.append(lip)
+    for i in range(9):
+        x = -0.064 + 0.016 * i
+        length = 0.018 + 0.013 * (1.0 - abs(x) / 0.072)
+        parts.append(make_tooth(rig, Vector((x, -0.212 + abs(x) * 0.40, 1.633)),
+                                Vector((0.0, -0.12, -1.0)), length, 0.0072,
+                                horn_stone))
+    for s in (-1, 1):
+        # Socket: flat dark inset, thin orbital rim, ember lens deep inside.
+        parts.append(make_ellipsoid(rig, "GargoyleSocket",
+                                    (0.070 * s, -0.139, 1.716),
+                                    (0.038, 0.006, 0.030), dark,
+                                    rotation=(0.0, math.radians(14.0 * s), 0.0)))
+        rim = []
+        for i in range(16):
+            a = math.tau * i / 16
+            x = 0.070 * s + 0.047 * math.cos(a)
+            z = 1.718 + 0.035 * math.sin(a) + 0.22 * (x - 0.070 * s)
+            rim.append(Vector((x, -0.146, z)))
+        orbit, _ = tube("GargoyleOrbit", rim, [0.010] * 16, 8, stone)
+        rigid_skin(orbit, rig, "Head")
+        parts.append(orbit)
+        parts.append(make_ellipsoid(rig, "GargoyleEmber",
+                                    (0.070 * s, -0.147, 1.714),
+                                    (0.009, 0.005, 0.009), ember))
+        # Heavy brow shelf over both sockets.
+        brow_pts = [Vector((0.006 * s, -0.148, 1.738)),
+                    Vector((0.040 * s, -0.152, 1.748)),
+                    Vector((0.078 * s, -0.140, 1.744)),
+                    Vector((0.104 * s, -0.094, 1.726))]
+        brow, _ = tube("GargoyleBrow", brow_pts, [0.018, 0.027, 0.024, 0.014], 12, stone)
+        for v in brow.data.vertices:
+            v.co.z = 1.744 + (v.co.z - 1.744) * 0.68
+        rigid_skin(brow, rig, "Head")
+        parts.append(brow)
+        # Angular cheek plate with a swept cheek horn.
+        parts.append(make_ellipsoid(rig, "GargoyleCheek",
+                                    (0.098 * s, -0.115, 1.672),
+                                    (0.037, 0.050, 0.042), stone))
+        parts.append(make_tooth(rig, Vector((0.100 * s, -0.135, 1.665)),
+                                Vector((0.90 * s, -0.45, 0.05)), 0.060, 0.014,
+                                horn_stone))
+        # Brow horn.
+        parts.append(make_tooth(rig, Vector((0.088 * s, -0.058, 1.780)),
+                                Vector((0.55 * s, -0.30, 1.0)), 0.075, 0.016,
+                                horn_stone))
+        # Pointed ear.
+        parts.append(make_blade(rig, "GargoyleEar",
+                                [(0.100 * s, 0.006, 1.746),
+                                 (0.150 * s, 0.046, 1.794),
+                                 (0.204 * s, 0.092, 1.828),
+                                 (0.240 * s, 0.122, 1.846)],
+                                [0.038, 0.030, 0.017, 0.0015], 0.34, stone))
+        # Swept-back crown horn.
+        parts.append(make_horn(rig, "l" if s > 0 else "r",
+                               [Vector((0.060 * s, 0.030, 1.806)),
+                                Vector((0.130 * s, 0.078, 1.880)),
+                                Vector((0.184 * s, 0.152, 1.932)),
+                                Vector((0.208 * s, 0.240, 1.912)),
+                                Vector((0.196 * s, 0.306, 1.842))],
+                               [0.048, 0.038, 0.026, 0.014, 0.002],
+                               horn_stone, "Head", 32))
+        # Flared nostril.
+        parts.append(make_ellipsoid(rig, "GargoyleNostril",
+                                    (0.020 * s, -0.246, 1.660),
+                                    (0.0085, 0.004, 0.0065), dark))
+        # Lower fangs and a tusk outside the lip, both on the jaw.
+        parts.append(make_tooth(rig, Vector((0.058 * s, -0.196, 1.598)),
+                                Vector((0.05 * s, 0.04, 1.0)), 0.036, 0.010,
+                                horn_stone, "jaw"))
+        parts.append(make_tooth(rig, Vector((0.076 * s, -0.158, 1.592)),
+                                Vector((0.16 * s, -0.22, 0.95)), 0.065, 0.014,
+                                horn_stone, "jaw"))
+        parts.append(make_tooth(rig, Vector((0.036 * s, -0.228, 1.560)),
+                                Vector((0.18 * s, -0.55, -0.45)), 0.048, 0.011,
+                                horn_stone, "jaw"))
+    for i in range(7):
+        x = -0.050 + 0.0167 * i
+        parts.append(make_tooth(rig, Vector((x, -0.206 + abs(x) * 0.35, 1.598)),
+                                Vector((0.0, 0.06, 1.0)), 0.017, 0.0062,
+                                horn_stone, "jaw"))
+    for obj in parts:
+        for v in obj.data.vertices:
+            v.co = GARGOYLE_HEAD_PIVOT + (v.co - GARGOYLE_HEAD_PIVOT) * GARGOYLE_HEAD_SCALE
+        obj.data.update()
+    return parts
+
+
+def make_gargoyle_wing(rig, side, membrane_mat, rib_mat):
+    """Boned bat wing: scalloped finger membrane, stone arm and rib struts."""
+    s = 1.0 if side == "l" else -1.0
+    shoulder = Vector((0.105 * s, 0.115, 1.455))
+    elbow = Vector((0.350 * s, 0.170, 1.705))
+    wrist = Vector((0.575 * s, 0.230, 1.850))
+    tips = [Vector((0.800 * s, 0.310, 1.975)),
+            Vector((0.760 * s, 0.385, 1.700)),
+            Vector((0.660 * s, 0.435, 1.470)),
+            Vector((0.540 * s, 0.458, 1.230)),
+            Vector((0.425 * s, 0.452, 1.060))]
+    body = Vector((0.130 * s, 0.190, 1.120))
+
+    def scallop(a, b, count=4, depth=0.10):
+        out = []
+        for i in range(1, count):
+            t = i / count
+            out.append(a.lerp(b, t).lerp(wrist, depth * math.sin(math.pi * t)))
+        return out
+
+    boundary = [shoulder, elbow, wrist, tips[0]]
+    for a, b in zip(tips, tips[1:]):
+        boundary += scallop(a, b)
+        boundary.append(b)
+    boundary.append(body)
+    center = sum(boundary, Vector()) / len(boundary)
+    n = len(boundary)
+    verts = [center + Vector((0.0, 0.020, 0.0))]
+    uvs = [(0.5, 0.5)]
+    for frac in (0.40, 0.72, 1.0):
+        for i, p in enumerate(boundary):
+            q = center.lerp(p, frac)
+            q.y += 0.045 * math.sin(math.pi * 0.5 * frac) * math.sin(math.pi * (i + 0.5) / n)
+            verts.append(q)
+            uvs.append((0.5 + 0.5 * q.x / (0.86 * s if s > 0 else -0.86),
+                        0.5 + (q.z - 1.48) / 0.62))
+    faces = []
+    for i in range(n):
+        faces.append((0, 1 + i, 1 + (i + 1) % n))
+    for r in range(2):
+        a0 = 1 + r * n
+        b0 = 1 + (r + 1) * n
+        for i in range(n):
+            i2 = (i + 1) % n
+            faces.append((a0 + i, b0 + i, b0 + i2, a0 + i2))
+    obj = mesh_object(f"GWingMembrane_{side}", verts, faces, uvs, membrane_mat)
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    weight_by_segments(obj, rig, [f"wing_01_{side}", f"wing_02_{side}",
+                                  f"wing_03_{side}", "spine_03"], power=2.0)
+    solid = obj.modifiers.new("Solidify", "SOLIDIFY")
+    solid.thickness = 0.030
+    solid.offset = 0.0
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=solid.name)
+    parts = [obj]
+    arm, _ = tube(f"GWingArm_{side}", [shoulder, elbow, wrist],
+                  [0.045, 0.034, 0.022], 14, rib_mat)
+    weight_by_segments(arm, rig, [f"wing_01_{side}", f"wing_02_{side}",
+                                  f"wing_03_{side}"], power=2.5)
+    parts.append(arm)
+    for i, tip in enumerate(tips):
+        midp = wrist.lerp(tip, 0.55) + Vector((0.0, 0.020, 0.0))
+        strut, _ = tube(f"GWingRib_{side}_{i}", [wrist, midp, tip],
+                        [0.018, 0.010, 0.003], 10, rib_mat)
+        rigid_skin(strut, rig, f"wing_03_{side}" if i == 0 else f"wing_02_{side}")
+        parts.append(strut)
+    parts.append(make_tooth(rig, elbow + Vector((0.0, 0.030, 0.020)),
+                            Vector((0.25 * s, 0.55, 0.60)), 0.080, 0.016, rib_mat,
+                            f"wing_02_{side}"))
+    parts.append(make_tooth(rig, tips[0] + Vector((0.0, 0.0, -0.012)),
+                            Vector((0.25 * s, 0.05, 0.75)), 0.060, 0.012, rib_mat,
+                            f"wing_03_{side}"))
+    return parts
+
+
 def build_gargoyle() -> dict:
     mob = "gargoyle"
     reset_scene()
@@ -937,86 +1367,94 @@ def build_gargoyle() -> dict:
     body = find_body(base)
     print("BASE_GARGOYLE", [o.name for o in base], "bones", len(rig.data.bones))
     actions = import_ranger_actions()
-    add_head_jaw_markers(rig, Vector((0.0, -0.105, 1.640)), Vector((0.0, -0.085, 1.565)))
-    add_wing_bones(rig, "l", spread=False)
-    add_wing_bones(rig, "r", spread=False)
-    tail_pts = [Vector((0, 0.08, 0.95)), Vector((0, 0.22, 0.86)),
-                Vector((0, 0.34, 0.70)), Vector((0, 0.42, 0.52))]
+    face = GARGOYLE_HEAD_PIVOT + (Vector((0.0, -0.128, 1.700)) - GARGOYLE_HEAD_PIVOT) * GARGOYLE_HEAD_SCALE
+    jaw = GARGOYLE_HEAD_PIVOT + (Vector((0.0, -0.030, 1.620)) - GARGOYLE_HEAD_PIVOT) * GARGOYLE_HEAD_SCALE
+    add_head_jaw_markers(rig, face, jaw)
+    for side in ("l", "r"):
+        add_wing_bones(rig, side, points=gargoyle_wing_points(side))
+    tail_pts = [Vector((0, 0.10, 1.02)), Vector((0, 0.24, 0.92)),
+                Vector((0, 0.36, 0.72)), Vector((0, 0.44, 0.50))]
     add_tail_bones(rig, tail_pts, "tail")
     td = base_material_maps(mob)
     stone = pbr_material("Stone_Gargoyle", td, "stone_albedo.png", "stone_normal.png",
                          "stone_roughness.png", emission="stone_emission.png",
-                         emission_strength=1.2, roughness_value=0.78)
+                         emission_strength=0.65, roughness_value=0.80)
     horn_stone = pbr_material("HornStone_Gargoyle", td, "horn_albedo.png", "horn_normal.png",
                               "horn_roughness.png", emission="horn_emission.png",
-                              emission_strength=0.6, roughness_value=0.72)
+                              emission_strength=0.25, roughness_value=0.74)
     dark = simple_material("Dark_Gargoyle", (0.004, 0.004, 0.004), 0.72)
-    ember = simple_material("EmberEye_Gargoyle", (0.90, 0.08, 0.008), 0.22,
-                            emission=(1.0, 0.11, 0.006), emission_strength=4.0)
-    smart_uv(body, 1.8)
+    ember = simple_material("EmberEye_Gargoyle", (0.75, 0.06, 0.006), 0.25,
+                            emission=(1.0, 0.10, 0.008), emission_strength=3.0)
     replace_materials_bulk(base, {"MI_Superhero_Male": stone})
     add_marker_weights(body, rig)
     for obj in bpy.data.objects:
         if obj.type == "MESH" and obj.name.startswith("Icosphere"):
             bpy.data.objects.remove(obj, do_unlink=True)
-    extras = []
-    # Empty stone sockets with tiny ember cores; no human eye meshes.
-    for s in (-1, 1):
-        extras.append(make_sphere("Socket", (0.058 * s, -0.140, 1.640),
-                                  (0.038, 0.026, 0.042), dark, rig, "Head"))
-        extras.append(make_sphere("EmberEye", (0.058 * s, -0.163, 1.640),
-                                  (0.013, 0.010, 0.014), ember, rig, "Head"))
-    # Crown horns.
+    # Bodybuilder mass, then UV project the sculpted surface.
+    bulk_gargoyle(body, rig)
+    smart_uv(body, 2.1)
+    extras = make_gargoyle_head(rig, stone, horn_stone, dark, ember)
+    # Stone collar spikes around the neck base.
+    for i in range(11):
+        a = math.tau * i / 11
+        base_p = Vector((math.cos(a) * 0.125, math.sin(a) * 0.115 + 0.015, 1.558))
+        extras.append(make_tooth(rig, base_p,
+                                 Vector((math.cos(a) * 0.8, math.sin(a) * 0.8, 0.55)),
+                                 0.075, 0.019, horn_stone, "neck_01"))
+    # Shoulder spikes; the outer pair rides the arm.
     for side, s in (("l", 1), ("r", -1)):
-        pts = [Vector((0.070 * s, -0.030, 1.710)), Vector((0.155 * s, 0.020, 1.805)),
-               Vector((0.235 * s, 0.105, 1.790)), Vector((0.285 * s, 0.180, 1.700)),
-               Vector((0.265 * s, 0.235, 1.610))]
-        extras.append(make_horn(rig, side, pts,
-                                [0.052, 0.044, 0.031, 0.016, 0.003],
-                                horn_stone, "Head", 32))
-    # Brow/cheek spikes, fangs, spinal ridge.
-    for s in (-1, 1):
-        extras.append(make_spike(rig, "Head", Vector((0.052 * s, -0.108, 1.685)),
-                                 Vector((0.25 * s, -0.35, 1.0)), 0.070,
-                                 horn_stone, sides=6, radius=0.014))
-        extras.append(make_spike(rig, "Head", Vector((0.073 * s, -0.075, 1.600)),
-                                 Vector((0.7 * s, -0.2, 0.5)), 0.055,
-                                 horn_stone, sides=6, radius=0.012))
-        for x in (0.018, 0.042):
-            extras.append(make_fang(rig, Vector((x * s, -0.108, 1.575)),
-                                    Vector((0.0, -0.18, -1.0)), 0.032, horn_stone, "Head"))
-    for bone, base_p, direction, length in [
-        ("chest", (0.0, 0.300, 1.450), (0.0, 0.15, 1.0), 0.150),
-        ("spine_03", (0.0, 0.180, 1.520), (0.0, 0.04, 1.0), 0.160),
-        ("spine_03", (0.0, 0.040, 1.540), (0.0, 0.0, 1.0), 0.150),
-        ("spine_02", (0.0, -0.100, 1.500), (0.0, -0.05, 1.0), 0.130),
-        ("spine_01", (0.0, -0.240, 1.420), (0.0, -0.12, 1.0), 0.120),
-        ("spine_01", (0.0, -0.360, 1.300), (0.0, -0.22, 1.0), 0.100),
+        extras.append(make_tooth(rig, Vector((0.150 * s, 0.010, 1.548)),
+                                 Vector((0.45 * s, 0.10, 1.0)), 0.105, 0.022,
+                                 horn_stone, "spine_03"))
+        extras.append(make_tooth(rig, Vector((0.196 * s, 0.058, 1.522)),
+                                 Vector((0.65 * s, 0.35, 0.9)), 0.115, 0.023,
+                                 horn_stone, f"clavicle_{side}"))
+        extras.append(make_tooth(rig, Vector((0.238 * s, -0.005, 1.470)),
+                                 Vector((0.95 * s, -0.10, 0.55)), 0.090, 0.019,
+                                 horn_stone, f"upperarm_{side}"))
+    # Spinal ridge down the back.
+    for bone, base_p, direction, length, radius in [
+        ("spine_03", (0.0, 0.140, 1.520), (0.0, 0.55, 1.0), 0.115, 0.024),
+        ("spine_03", (0.0, 0.152, 1.440), (0.0, 0.55, 1.0), 0.100, 0.022),
+        ("spine_02", (0.0, 0.142, 1.360), (0.0, 0.60, 1.0), 0.090, 0.020),
+        ("spine_02", (0.0, 0.132, 1.280), (0.0, 0.65, 1.0), 0.085, 0.019),
+        ("spine_01", (0.0, 0.126, 1.200), (0.0, 0.65, 1.0), 0.080, 0.018),
+        ("spine_01", (0.0, 0.126, 1.120), (0.0, 0.70, 1.0), 0.075, 0.017),
+        ("pelvis", (0.0, 0.120, 1.040), (0.0, 0.70, 1.0), 0.065, 0.015),
     ]:
-        extras.append(make_spike(rig, bone, Vector(base_p), Vector(direction), length,
-                                 horn_stone, sides=8, radius=0.024))
+        extras.append(make_tooth(rig, Vector(base_p), Vector(direction), length,
+                                 radius, horn_stone, bone))
+    # Upper-arm and forearm ridges.
     for side, s in (("l", 1), ("r", -1)):
-        extras.append(make_spike(rig, f"upperarm_{side}", Vector((0.215 * s, 0.0, 1.520)),
-                                 Vector((0.55 * s, 0.15, 1.0)), 0.135,
-                                 horn_stone, sides=8, radius=0.020))
-        extras.append(make_spike(rig, f"lowerarm_{side}", Vector((0.520 * s, 0.0, 1.420)),
-                                 Vector((1.0 * s, 0.0, 0.18)), 0.080,
-                                 horn_stone, sides=6, radius=0.014))
-    # Folded stone wings, tail, claws.
+        extras.append(make_tooth(rig, Vector((0.300 * s, 0.120, 1.500)),
+                                 Vector((0.25 * s, 0.75, 0.70)), 0.090, 0.018,
+                                 horn_stone, f"upperarm_{side}"))
+        for t, radius in ((0.45, 0.014), (0.72, 0.012)):
+            px = (0.463 + (0.706 - 0.463) * t) * s
+            extras.append(make_tooth(rig, Vector((px, 0.122, 1.455)),
+                                     Vector((0.15 * s, 0.85, -0.25)),
+                                     0.075 - t * 0.02, radius, horn_stone,
+                                     f"lowerarm_{side}"))
+    # Half-raised stone wings, heavy tail, oversized claws.
     for side in ("l", "r"):
-        extras.extend(make_wing(rig, side, stone, stone, thickness=0.014, spread=False))
-    extras.extend(make_tail(rig, tail_pts, [0.045, 0.036, 0.024, 0.012],
-                            stone, stone, [f"tail_{i:02d}" for i in range(1, 4)]))
-    extras.extend(add_hand_claws(rig, horn_stone, 0.060))
-    extras.extend(add_foot_claws(rig, horn_stone, 0.060))
+        extras.extend(make_gargoyle_wing(rig, side, stone, horn_stone))
+    extras.extend(make_tail(rig, tail_pts, [0.060, 0.048, 0.032, 0.016],
+                            stone, horn_stone, [f"tail_{i:02d}" for i in range(1, 4)]))
+    extras.extend(add_hand_claws(rig, horn_stone, 0.085))
+    extras.extend(add_foot_claws(rig, horn_stone, 0.065, lift=0.045))
     for obj in extras:
         if not any(m.type == "ARMATURE" for m in obj.modifiers):
             armature_modifier(obj, rig)
     joined = join_all(base + extras, body, rig)
-    apply_orientation_and_scale(rig, joined, 1.68)
+    scale = 1.62
+    apply_orientation_and_scale(rig, joined, scale)
 
     def hunch(rig, t, dur):
         gargoyle_hunch(rig, t, dur)
+
+    def loop_warp(source, duration):
+        src_dur = (source.frame_range[1] - source.frame_range[0]) / FPS
+        return lambda t, sd=src_dur, d=duration: t * sd / max(1e-5, d)
 
     clips = {}
     for key, src_name, new_name, duration in [
@@ -1024,9 +1462,11 @@ def build_gargoyle() -> dict:
         ("walk", "Walk_Loop", "Gargoyle_Walk_Loop", 1.333),
         ("run", "Jog_Fwd_Loop", "Gargoyle_Run_Loop", 0.933),
     ]:
-        act = bake_action(rig, actions[src_name], new_name, duration,
-                          overlay=hunch, pelvis_offset=0.0)
-        scale_action_locations(act, 1.68)
+        src = actions[src_name]
+        act = bake_action(rig, src, new_name, duration,
+                          warp=loop_warp(src, duration), overlay=hunch,
+                          pelvis_offset=0.0)
+        scale_action_locations(act, scale)
         clips[key] = {"name": new_name, "duration": duration}
     atk_src = actions["Sword_Overhead"]
     src_dur = (atk_src.frame_range[1] - atk_src.frame_range[0]) / FPS
@@ -1039,31 +1479,33 @@ def build_gargoyle() -> dict:
                       overlay=lambda rig, t, dur: (gargoyle_hunch(rig, t, dur),
                                                    gargoyle_attack(rig, t, dur)),
                       pelvis_offset=0.0)
-    scale_action_locations(atk, 1.68)
+    scale_action_locations(atk, scale)
     clips["attack"] = {"name": "Gargoyle_Attack", "duration": 1.80, "impact": 0.95}
-    hit = bake_action(rig, actions["Idle_Loop"], "Gargoyle_Hit", 0.50,
+    hit = bake_action(rig, actions["Crouch_Idle_Loop"], "Gargoyle_Hit", 0.50,
                       overlay=lambda rig, t, dur: (gargoyle_hunch(rig, t, dur),
-                                                   humanoid_hit(rig, t, dur)),
+                                                   humanoid_hit(rig, t, dur, jaw=True)),
                       source_frame0=True, pelvis_offset=0.0)
-    scale_action_locations(hit, 1.68)
+    scale_action_locations(hit, scale)
     clips["hit"] = {"name": "Gargoyle_Hit", "duration": 0.50}
-    death = bake_action(rig, actions["Idle_Loop"], "Gargoyle_Death", 1.40,
+    death = bake_action(rig, actions["Crouch_Idle_Loop"], "Gargoyle_Death", 1.40,
                         overlay=lambda rig, t, dur: (gargoyle_hunch(rig, t, dur),
-                                                     humanoid_death(rig, t, dur, wings=True, tail=True)),
+                                                     humanoid_death(rig, t, dur, jaw=True,
+                                                                    wings=True, tail=True)),
                         source_frame0=True, pelvis_offset=0.0)
-    scale_action_locations(death, 1.68)
+    scale_action_locations(death, scale)
     add_pelvis_drop(death, rig, 1.40, 0.32)
     clips["death"] = {"name": "Gargoyle_Death", "duration": 1.40}
     order = [next(a for a in bpy.data.actions if a.name == f"Gargoyle_{k}") for k in
              ["Idle_Loop", "Walk_Loop", "Run_Loop", "Attack", "Hit", "Death"]]
     meta = make_scene_export(rig, joined, order, DEVILS / "ironwood_gargoyle.glb",
                              mob, "Gargoyle", clips, 0.30, 0.20,
-                             ["naked basalt stone body, folded membrane wings",
-                              "hunched feral pose, spinal/shoulder/forearm spikes",
-                              "empty stone sockets with ember cores, fangs and crown horns",
-                              "oversized claws; 1.5x scale; no armor or cloth"],
-                             "CC0 Quaternius male base plus core animations; original stone, spikes, wings, claws, hunch and ember sockets")
+                             ["heavily muscled basalt anatomy, hunched predator stance",
+                              "carved demon face: heavy brow, deep sockets, ember eyes, bared fangs",
+                              "swept crown horns, pointed ears, spinal and shoulder spikes",
+                              "half-raised stone bat wings, heavy tail, oversized claws"],
+                             "CC0 Quaternius male base plus core animations; original carved gargoyle head, muscle sculpt, stone wings, horns, claws and stance")
     render_preview(rig, joined, mob, "Gargoyle_Idle_Loop")
+    render_head_preview(rig, mob, "Gargoyle_Idle_Loop")
     return meta
 
 

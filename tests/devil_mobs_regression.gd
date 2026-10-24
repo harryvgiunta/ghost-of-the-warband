@@ -65,7 +65,7 @@ const MOBS := {
 			"hit": "Gargoyle_Hit", "death": "Gargoyle_Death",
 		},
 		"durations": [2.5, 1.333, 0.933, 1.8, 0.5, 1.4],
-		"height": [3.0, 3.25], "span": [2.8, 3.5],
+		"height": [3.2, 3.45], "span": [2.8, 3.5],
 		"kind": 7, "display": "Gargoyle",
 	},
 }
