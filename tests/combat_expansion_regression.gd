@@ -49,36 +49,11 @@ func reset_swing(actor) -> void:
 	actor.combat.set_motion(Vector3.ZERO,false,true)
 	actor.combat.set_aim(actor.global_position+Vector3(0,1.2,-8))
 
-func horizontal_tip(actor, variant: String) -> Dictionary:
-	reset_swing(actor)
-	check(actor.combat.begin_melee("right",variant),"%s starts" % variant)
-	var window: Vector2 = actor.rig._melee_window("right")
-	advance(actor,window.x+0.02)
-	var start: Vector3 = actor.rig.get_blade_tip("right")
-	advance(actor,maxf(window.y-window.x-0.03,0.01))
-	var finish: Vector3 = actor.rig.get_blade_tip("right")
-	return {"start":start,"end":finish,"travel":finish-start}
-
 func run() -> void:
 	var world := Node3D.new()
 	root.add_child(world)
 	var attacker = fighter(world,0,Vector3.ZERO)
 	attacker.rig.set_weapon("sword")
-	attacker.rig.set_sword(0)
-	# Horizontal cuts use the authored overhead body timing plus an actual
-	# hip-led lateral arc. Both sides must sweep across, not merely down.
-	var right: Dictionary = horizontal_tip(attacker,"horizontal_right")
-	var left: Dictionary = horizontal_tip(attacker,"horizontal_left")
-	for pair in [["right",right],["left",left]]:
-		var travel: Vector3 = pair[1].travel
-		check(Vector2(travel.x,travel.z).length() > absf(travel.y)*1.5,"%s horizontal cut sweeps across the body" % pair[0])
-		check(travel.length() > 1.4,"%s horizontal cut covers a real blade path, not a forward poke" % pair[0])
-	check(signf(right.travel.x) != signf(left.travel.x),"Left and right horizontal cuts mirror their lateral path")
-	# The greatsword sweeps further than a one-handed cut; a wide bat-like arc
-	# is the point of the heavy weapon, so require it to travel much further.
-	attacker.rig.set_sword(2)
-	var heavy: Dictionary = horizontal_tip(attacker,"horizontal_right")
-	check(heavy.travel.length() > 2.4,"The greatsword carries its blade through a full-body swing")
 	attacker.rig.set_sword(0)
 	# Forward stab uses the authored thrust clip, a 0.5 s window, and extends
 	# the socketed blade toward the crosshair instead of reusing the overhead.
@@ -176,7 +151,7 @@ func run() -> void:
 	step_node.free()
 	world.queue_free()
 
-	# Frontier routing: shoulder determines the horizontal side, consecutive
+	# Frontier routing: shoulder determines the diagonal side, consecutive
 	# swings rebound, wheel variants and Q/E steps are real inputs.
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
@@ -187,16 +162,18 @@ func run() -> void:
 	game.archer.set_weapon("sword")
 	game._set_cursor_free(false)
 	game.shoulder_camera.side = 1
-	game._next_swing_side = 1
+	game._next_swing_side = 0
 	game.begin_attack("right")
-	check(game.archer.phase == "MELEE_HR","A right-shoulder LMB swing starts from the right")
+	check(game.archer.phase == "MELEE_DR","A right-shoulder LMB swing starts from the right")
+	game.begin_attack("right")
+	check(game._next_swing_side == -1,"A rejected frontier click does not consume the next side")
 	game.combat.stop()
 	game.combat.right_melee_progress = 1.0
 	game.combat.melee_progress = 1.0
 	game.archer._clear_melee()
 	game.archer._sync_primary_hand()
 	game.begin_attack("right")
-	check(game.archer.phase == "MELEE_HL","A second LMB swing rebounds from the left")
+	check(game.archer.phase == "MELEE_DL","A second LMB swing rebounds from the left")
 	game.combat.stop()
 	game.combat.right_melee_progress = 1.0
 	game.combat.melee_progress = 1.0
@@ -217,6 +194,25 @@ func run() -> void:
 	down.pressed = true
 	game._unhandled_input(down)
 	check(game.archer.phase == "MELEE" and game.archer._right_variant == "overhead","Wheel down starts the overhead swing")
+	game.combat.stop()
+	game.combat.right_melee_progress = 1.0
+	game.combat.melee_progress = 1.0
+	game.archer._clear_melee()
+	game.archer._sync_primary_hand()
+	game.archer.set_weapon("dagger")
+	var x_key := InputEventKey.new()
+	x_key.keycode = KEY_X
+	x_key.pressed = true
+	game._unhandled_input(x_key)
+	game.begin_attack("right")
+	check(game.archer.phase == "MELEE_DL","X resets the next dagger diagonal to the new left shoulder")
+	game.combat.stop()
+	game.combat.right_melee_progress = 1.0
+	game.combat.melee_progress = 1.0
+	game.archer._clear_melee()
+	game.archer._sync_primary_hand()
+	game.begin_attack("right")
+	check(game.archer.phase == "MELEE_DR","Dagger LMB rebounds to the opposite diagonal")
 	game.combat.stop()
 	game.combat.right_melee_progress = 1.0
 	game.combat.melee_progress = 1.0
@@ -258,30 +254,61 @@ func run() -> void:
 		await process_frame
 		net_cache.reset()
 
-	# Arena authority routes both the explicit melee variant and the quick step.
-	var arena = load("res://arena.tscn").instantiate()
-	root.add_child(arena)
-	await create_timer(0.3).timeout
-	var socket := PacketPeerUDP.new()
-	check(socket.bind(0) == OK,"Expansion regression finds a free UDP port")
-	var port: int = socket.get_local_port()
-	socket.close()
-	arena.host_game(port,"Expansion")
-	await create_timer(0.3).timeout
-	arena.actors[0].is_bot = false
-	var arena_actor = arena.actors[0]
-	arena._apply_action(0,"weapon","sword")
-	arena._apply_action(0,"melee",{"aim":Vector3(0,1.2,-8),"hand":"right","variant":"stab"})
-	check(arena_actor.rig.phase == "MELEE_ST","The arena accepts an explicit forward-stab action")
-	arena_actor.combat.stop()
-	arena_actor.combat.right_melee_progress = 1.0
-	arena_actor.combat.melee_progress = 1.0
-	arena_actor.rig._clear_melee()
-	arena_actor.rig._sync_primary_hand()
-	arena._apply_action(0,"step",Vector3.RIGHT)
-	check(arena_actor.dodge.active,"The host applies a quick step from the network action")
-	arena.leave_game()
-	arena.queue_free()
-	await process_frame
+	# Both network modes share validated melee actions and input routing.
+	for scene_path in ["res://arena.tscn","res://delve.tscn"]:
+		var mode = load(scene_path).instantiate()
+		root.add_child(mode)
+		await create_timer(0.3).timeout
+		var socket := PacketPeerUDP.new()
+		check(socket.bind(0) == OK,"Expansion regression finds a free UDP port")
+		var port: int = socket.get_local_port()
+		socket.close()
+		mode.host_game(port,"Expansion")
+		await create_timer(0.3).timeout
+		var actor = mode.actors[0]
+		var landing_deadline := 0.0
+		while not actor.is_on_floor() and landing_deadline < 3.0:
+			await create_timer(0.05).timeout
+			landing_deadline += 0.05
+		check(actor.is_on_floor(),"%s lands before grounded combat inputs" % scene_path)
+		mode._set_cursor_free(false)
+		mode._apply_action(0,"weapon","sword")
+		actor.rig.set_sword(0)
+		reset_swing(actor)
+		mode._shoulder_camera.side = 1
+		mode._next_swing_side = 0
+		mode._send_melee("right")
+		check(actor.rig.phase == "MELEE_DR","%s starts the shoulder diagonal" % scene_path)
+		mode._send_melee("right")
+		check(mode._next_swing_side == -1,"%s rejected host click preserves alternation" % scene_path)
+		reset_swing(actor)
+		mode._send_melee("right")
+		check(actor.rig.phase == "MELEE_DL","%s alternates its accepted host cuts" % scene_path)
+		reset_swing(actor)
+		mode._apply_action(0,"melee",{"aim":Vector3(0,1.2,-8),"hand":"right","variant":"invalid"})
+		check(not actor.rig.has_melee("right"),"%s rejects unknown variants" % scene_path)
+		mode._apply_action(0,"draw",Vector3(0,1.2,-8))
+		check(not actor.rig.has_melee("right"),"%s draw action is bow-only" % scene_path)
+		mode._apply_action(0,"melee",{"aim":Vector3(0,1.2,-8),"hand":"right","variant":"stab"})
+		check(actor.rig.phase == "MELEE_ST","%s accepts an explicit forward stab" % scene_path)
+		reset_swing(actor)
+		actor.rig.set_off_weapon("dagger",0,true)
+		mode._apply_action(0,"weapon","dual")
+		var left_click := InputEventMouseButton.new()
+		left_click.button_index = MOUSE_BUTTON_LEFT
+		left_click.pressed = true
+		mode._unhandled_input(left_click)
+		check(actor.rig.has_melee("left") and actor.rig.melee_variant("left") == "diagonal_left","%s dual LMB cuts from the left" % scene_path)
+		var right_click := InputEventMouseButton.new()
+		right_click.button_index = MOUSE_BUTTON_RIGHT
+		right_click.pressed = true
+		mode._unhandled_input(right_click)
+		check(actor.rig.has_melee("right") and actor.rig.melee_variant("right") == "diagonal_right" and not actor.combat.blocking,"%s dual RMB cuts from the right without guarding" % scene_path)
+		reset_swing(actor)
+		mode._apply_action(0,"step",Vector3.RIGHT)
+		check(actor.dodge.active,"%s host applies a network quick step" % scene_path)
+		mode.leave_game()
+		mode.queue_free()
+		await process_frame
 	print("COMBAT_EXPANSION_REGRESSION checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)

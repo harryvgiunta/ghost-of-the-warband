@@ -85,9 +85,58 @@ func reset_pair() -> void:
 	attacker.rig.set_locomotion(Vector3.ZERO,true)
 	victim.rig.set_locomotion(Vector3.ZERO,true)
 
+func check_variant_snapshots(parent: Node3D) -> void:
+	var source := Archer.new()
+	var replica := Archer.new()
+	parent.add_child(source)
+	parent.add_child(replica)
+	for rig in [source,replica]:
+		rig.set_physics_process(false)
+		rig.set_weapon("dual")
+	var ready_keys: int = source.get_animation_state().size()
+	for left_variant in ["overhead","stab","diagonal_left","diagonal_right"]:
+		for right_variant in ["overhead","stab","diagonal_left","diagonal_right"]:
+			source._clear_melee()
+			source._sync_primary_hand()
+			check(source.begin_melee("left",left_variant),"Snapshot matrix starts the chosen left variant")
+			source.advance_animation(0.08)
+			check(source.begin_melee("right",right_variant),"Snapshot matrix overlaps the chosen right variant")
+			source.advance_animation(0.04)
+			var state: Dictionary = source.get_animation_state()
+			check(state.size() == ready_keys,"Per-hand variants add no snapshot keys")
+			replica.apply_animation_state(state)
+			for hand in ["left","right"]:
+				check(replica.has_melee(hand) and replica.melee_variant(hand) == source.melee_variant(hand),"Mixed precision/diagonal snapshot preserves each hand")
+				check(is_equal_approx(replica.melee_seconds(hand),source.melee_seconds(hand)),"Mixed snapshot retains each attack's duration")
+			check(absf(replica._left_melee_time-source._left_melee_time)<=0.00051,"Mixed secondary clock keeps millisecond precision")
+			source.abort_melee("right")
+			replica.apply_animation_state(source.get_animation_state())
+			check(not replica.has_melee("right") and replica.has_melee("left") and replica.melee_variant("left") == left_variant,
+				"Primary hand abort retains the surviving hand's precise variant")
+			replica.advance_animation(replica.melee_seconds("left"))
+			check(replica.phase == "READY","The surviving replicated hand recovers independently")
+	source._clear_melee()
+	source._sync_primary_hand()
+	source.advance_animation(0.3)
+	check(source.begin_melee("left","diagonal_left"),"The neutral-hand probe starts a left diagonal")
+	source.advance_animation(0.2)
+	for bone: int in source._neutral_right_arm:
+		var neutral: Transform3D = source._neutral_right_arm[bone]
+		var current: Transform3D = source.skeleton.get_bone_pose(bone)
+		check(current.origin.distance_to(neutral.origin)<0.002 and current.basis.get_rotation_quaternion().angle_to(neutral.basis.get_rotation_quaternion())<0.02,
+			"The idle right arm remains anatomically neutral while the left hand cuts")
+	source.advance_animation(0.21)
+	var recovering: Vector3 = source.get_blade_base("left")
+	source.advance_animation(0.02)
+	check(source.phase == "READY" and recovering.distance_to(source.get_blade_base("left"))<0.12,
+		"The left hand reaches its carry before expiry instead of snapping after recovery")
+	source.queue_free()
+	replica.queue_free()
+
 func run() -> void:
 	var world := Node3D.new()
 	root.add_child(world)
+	check_variant_snapshots(world)
 	attacker = fighter(world,0,Vector3.ZERO)
 	victim = fighter(world,1,Vector3(0,0,-1.5))
 	attacker.rig.melee_sweep.connect(observe_sweep)
@@ -227,19 +276,19 @@ func run() -> void:
 	reset_pair()
 	attacker.combat.set_aim(victim.global_position+Vector3(0,1.2,0))
 	attacker.combat.damage_enabled = false
-	check(attacker.combat.begin_melee("left"), "The overlap probe starts the left attack")
+	check(attacker.combat.begin_melee("left","diagonal_left"), "The overlap probe starts the left diagonal")
 	advance(0.1)
 	check(attacker.combat.left_melee_progress > 0.1 and attacker.combat.left_melee_progress < 0.3,
 		"The left hand owns its own recovery clock")
 	check(not attacker.combat.begin_melee("left"), "The same hand cannot restart before its own recovery")
-	check(attacker.combat.begin_melee("right"), "The right hand starts while the left is still active")
+	check(attacker.combat.begin_melee("right","diagonal_right"), "The right diagonal starts while the left is still active")
 	check(attacker.rig.has_melee("left") and attacker.rig.has_melee("right"),
 		"Both hands remain active after the overlapping input")
-	check(attacker.rig.phase == "MELEE", "The right sword owns the primary body clip while both are active")
+	check(attacker.rig.phase == "MELEE_DR", "The right sword owns the primary body phase while both are active")
 	check(attacker.combat.right_melee_progress < 0.1, "The right hand starts its own recovery clock")
 	var overlap_state: Dictionary = attacker.rig.get_animation_state()
-	check(str(overlap_state.phase) == "MELEE" and float(overlap_state.draw) > 0.0 and float(overlap_state.time) < 0.2,
-		"The compact snapshot carries the primary time and the left hand's secondary time")
+	check(str(overlap_state.phase) == "MELEE_DR" and (int(overlap_state.draw) & 3) == 1 and (int(overlap_state.draw) >> 2) > 0 and float(overlap_state.time) < 0.2,
+		"The compact snapshot packs the left variant and elapsed time without extra keys")
 	var overlap_replica := Archer.new()
 	world.add_child(overlap_replica)
 	overlap_replica.set_physics_process(false)
@@ -247,16 +296,20 @@ func run() -> void:
 	overlap_replica.set_sword(1)
 	overlap_replica.set_weapon("dual")
 	overlap_replica.apply_animation_state(overlap_state)
-	check(overlap_replica.has_melee("left") and overlap_replica.has_melee("right") and overlap_replica.phase == "MELEE",
+	check(overlap_replica.has_melee("left") and overlap_replica.has_melee("right") and overlap_replica.phase == "MELEE_DR",
 		"A replica decodes both overlapping hands from the compact snapshot")
-	check(is_equal_approx(overlap_replica._right_melee_duration,float(Archer.SWORD_DATA[1].seconds)) and is_equal_approx(overlap_replica._left_melee_duration,float(Archer.DAGGER_DATA.seconds)),
-		"The replica derives the replicated sword and dagger durations")
+	check(overlap_replica.melee_variant("left") == "diagonal_left" and overlap_replica.melee_variant("right") == "diagonal_right",
+		"The overlapping replica preserves both independently mirrored variants")
+	check(absf(overlap_replica._left_melee_time-attacker.rig._left_melee_time) <= 0.00051,
+		"Packed secondary time remains within half a millisecond")
+	check(is_equal_approx(overlap_replica._right_melee_duration,Archer.DIAGONAL_SECONDS[1]) and is_equal_approx(overlap_replica._left_melee_duration,0.42),
+		"The replica derives each equipped hand's diagonal duration")
 	overlap_replica.advance_animation(0.6)
-	check(not overlap_replica.has_melee("left") and overlap_replica.has_melee("right") and overlap_replica.phase == "MELEE",
+	check(not overlap_replica.has_melee("left") and overlap_replica.has_melee("right") and overlap_replica.phase == "MELEE_DR",
 		"The shorter dagger completes on the replica while the arming sword continues")
-	overlap_replica.advance_animation(1.6)
+	overlap_replica.advance_animation(0.2)
 	check(not overlap_replica.has_melee("right") and overlap_replica.phase == "READY",
-		"The replicated arming sword uses its full two-second duration")
+		"The replicated arming sword recovers at its diagonal duration")
 	overlap_replica.queue_free()
 	recording = true
 	samples.clear()
@@ -284,9 +337,9 @@ func run() -> void:
 	attacker.combat.damage_enabled = true
 	attacker.combat.set_aim(victim.global_position+Vector3(0,1.2,0))
 	victim.combat.set_aim(attacker.global_position+Vector3(0,1.2,0))
-	check(attacker.combat.begin_melee("left"), "The damage overlap starts the left stab")
+	check(attacker.combat.begin_melee("left","diagonal_left"), "The damage overlap starts the left diagonal")
 	advance(0.12)
-	check(attacker.combat.begin_melee("right"), "The damage overlap starts the right sword")
+	check(attacker.combat.begin_melee("right","diagonal_right"), "The damage overlap starts the right diagonal")
 	advance(0.12)
 	var after_left: float = victim.health
 	check(after_left <= 200.0-float(Archer.DAGGER_DATA.damage),
@@ -385,7 +438,7 @@ func run() -> void:
 	attacker.rig._sync_primary_hand()
 	attacker.combat.set_motion(Vector3.ZERO,false,true)
 	attacker.rig._aim_point = attacker.global_position+Vector3(-0.8,1.25,-5.0)
-	check(attacker.combat.begin_melee("left"), "The replication probe starts a left stab")
+	check(attacker.combat.begin_melee("left","diagonal_left"), "The replication probe starts a left diagonal")
 	advance(0.22)
 	var state: Dictionary = attacker.rig.get_animation_state()
 	check(str(state.phase) == "MELEE_L", "The animation snapshot carries the left attack phase")
@@ -395,9 +448,11 @@ func run() -> void:
 	replica.set_process(false)
 	replica.set_weapon("dual")
 	replica.apply_animation_state(state)
-	replica.advance_animation(0.22)
+	replica.advance_animation(0.10)
 	check(replica.phase == "MELEE_L" and replica.has_melee("left"),
 		"A replica decodes the left attack phase")
+	check(replica.melee_variant("left") == "diagonal_left" and is_equal_approx(replica.melee_seconds("left"),0.42),
+		"A left-only snapshot preserves diagonal identity and timing")
 	check(replica.active_sword.visible and replica.active_dagger.visible,
 		"A replica shows both dual weapons")
 	var replica_dagger: Vector3 = replica.active_dagger.to_global(Vector3(0,0,-0.09))
@@ -438,13 +493,13 @@ func run() -> void:
 	press.pressed = true
 	Input.parse_input_event(press)
 	await process_frame
-	check(game.archer.phase == "MELEE_L", "Frontier left click starts the left dagger attack")
+	check(game.archer.phase == "MELEE_L" and game.archer.melee_variant("left") == "diagonal_left", "Frontier left click starts the left diagonal")
 	var overlap_press := InputEventMouseButton.new()
 	overlap_press.button_index = MOUSE_BUTTON_RIGHT
 	overlap_press.pressed = true
 	Input.parse_input_event(overlap_press)
 	await process_frame
-	check(game.archer.has_melee("left") and game.archer.has_melee("right") and game.archer.phase == "MELEE",
+	check(game.archer.has_melee("left") and game.archer.has_melee("right") and game.archer.phase == "MELEE_DR",
 		"Frontier right click overlaps the active left dagger")
 	check(not game.combat.blocking, "The overlapping right click still cannot guard")
 	var overlap_release := InputEventMouseButton.new()
@@ -462,7 +517,7 @@ func run() -> void:
 	right_press.pressed = true
 	Input.parse_input_event(right_press)
 	await process_frame
-	check(game.archer.phase == "MELEE" and not game.combat.blocking,
+	check(game.archer.phase == "MELEE_DR" and not game.combat.blocking,
 		"Frontier right click starts the right sword attack and cannot guard")
 	var right_release := InputEventMouseButton.new()
 	right_release.button_index = MOUSE_BUTTON_RIGHT
@@ -485,12 +540,12 @@ func run() -> void:
 	arena.send_action("weapon","dual")
 	await create_timer(0.1).timeout
 	check(arena.actors[0].rig.weapon == "dual", "Arena accepts the dual loadout action")
-	arena.send_action("draw",Vector3(0,1.2,-4))
+	arena.send_action("melee",{"hand":"left","variant":"diagonal_left","aim":Vector3(0,1.2,-4)})
 	await create_timer(0.1).timeout
-	check(arena.actors[0].rig.phase == "MELEE_L", "Arena draw input starts the left attack")
-	arena.send_action("attack_right",Vector3(0,1.2,-4))
+	check(arena.actors[0].rig.phase == "MELEE_L" and arena.actors[0].rig.melee_variant("left") == "diagonal_left", "Arena melee input starts the left diagonal")
+	arena.send_action("melee",{"hand":"right","variant":"diagonal_right","aim":Vector3(0,1.2,-4)})
 	await create_timer(0.1).timeout
-	check(arena.actors[0].rig.has_melee("left") and arena.actors[0].rig.has_melee("right") and arena.actors[0].rig.phase == "MELEE",
+	check(arena.actors[0].rig.has_melee("left") and arena.actors[0].rig.has_melee("right") and arena.actors[0].rig.phase == "MELEE_DR",
 		"Arena right attack action overlaps the active left hand")
 	arena.send_action("stop")
 	arena.leave_game()

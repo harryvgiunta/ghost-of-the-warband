@@ -100,6 +100,16 @@ func run() -> void:
 			if failures>0:
 				break
 	if failures==0:
+		for weapon in ["sword","dagger"]:
+			rig.set_weapon(weapon)
+			for size in (3 if weapon == "sword" else 1):
+				rig.set_sword(size)
+				for variant in ["diagonal_left","diagonal_right"]:
+					rig.begin_melee("right",variant)
+					advance(rig.melee_seconds("right")+0.2,"%s %d %s" % [weapon,size,variant])
+					if failures>0:
+						break
+	if failures==0:
 		rig.set_weapon("sword")
 		for size in 3:
 			rig.set_sword(size)
@@ -162,11 +172,11 @@ func run() -> void:
 		rig.set_weapon("dual")
 		rig.set_sword(1)
 		rig.aim_at(Vector3(0,1.6,-30))
-		rig.begin_melee("right")
-		advance(0.3,"Dual overlap sword windup")
+		rig.begin_melee("right","diagonal_right")
+		advance(0.12,"Dual overlap sword load")
 		if failures==0:
-			rig.begin_melee("left")
-			advance(0.5,"Dual overlap left stab during sword")
+			rig.begin_melee("left","diagonal_left")
+			advance(0.42,"Dual overlap descending left cut during sword")
 		if failures==0:
 			advance(0.8,"Dual overlap sword finish")
 	if failures==0:
@@ -174,11 +184,20 @@ func run() -> void:
 		rig.set_weapon("dual")
 		rig.set_sword(1)
 		rig.aim_at(Vector3(0,1.6,-30))
-		rig.begin_melee("left")
-		advance(0.1,"Dual reverse overlap dagger windup")
+		rig.begin_melee("left","diagonal_left")
+		advance(0.08,"Dual reverse overlap dagger load")
 		if failures==0:
-			rig.begin_melee("right")
-			advance(1.4,"Dual reverse overlap sword during dagger")
+			rig.begin_melee("right","diagonal_right")
+			advance(1.0,"Dual reverse overlap sword during dagger")
+	if failures==0:
+		for size in 2:
+			rig.set_off_weapon("sword",size,true)
+			rig.set_weapon("dual")
+			for variant in ["diagonal_left","diagonal_right"]:
+				rig.begin_melee("left",variant)
+				advance(rig.melee_seconds("left")+0.2,"Offhand sword diagonal and recovery")
+				if failures>0:
+					break
 	holder.queue_free()
 	await process_frame
 	print("ARM_CLEARANCE_REGRESSION samples=",samples," failures=",failures)

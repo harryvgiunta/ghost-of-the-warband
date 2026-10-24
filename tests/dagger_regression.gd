@@ -213,17 +213,6 @@ func run() -> void:
 	check(is_equal_approx(game.health, 100.0 - 20.0 * Combat.WEAK_BLOCK_DAMAGE_SCALE), "Frontier weak block only halves an enemy hit")
 	check(is_equal_approx(game.stamina, 100.0 - Combat.DAGGER_BLOCK_STAMINA), "Frontier weak block spends the dagger stamina chunk")
 	check(enemy.state == enemy_state, "Frontier weak block does not stagger the enemy")
-	var click := InputEventMouseButton.new()
-	click.button_index = MOUSE_BUTTON_LEFT
-	click.pressed = true
-	Input.parse_input_event(click)
-	await process_frame
-	check(game.archer.weapon == "dagger" and game.archer.phase == "MELEE", "Frontier left click starts the dagger stab through the normal controller")
-	var release := InputEventMouseButton.new()
-	release.button_index = MOUSE_BUTTON_LEFT
-	release.pressed = false
-	Input.parse_input_event(release)
-	await process_frame
 
 	# The dagger thrust itself follows the crosshair. Aim low at the wolf and
 	# the blade must angle down to that point, not run through its chest line.
@@ -274,23 +263,6 @@ func run() -> void:
 	game.queue_free()
 	await process_frame
 
-	# The arena host routes the same attack action through the dagger branch.
-	var arena = load("res://arena.tscn").instantiate()
-	root.add_child(arena)
-	await create_timer(0.3).timeout
-	arena.host_game(7897, "Dagger Regression")
-	await create_timer(0.2).timeout
-	arena.send_action("weapon", "dagger")
-	await create_timer(0.1).timeout
-	check(arena.actors[0].rig.weapon == "dagger" and arena.actors[0].rig.active_dagger.visible, "Arena accepts the dagger loadout action")
-	arena.send_action("draw", Vector3(0, 1.2, -4))
-	await create_timer(0.1).timeout
-	check(arena.actors[0].rig.weapon == "dagger" and arena.actors[0].rig.phase == "MELEE", "Arena draw input starts the dagger stab, not a bow draw")
-	check(arena.actors[0].rig._melee_clip().name == "Dagger_Stab", "Arena uses the authored dagger clip")
-	arena.send_action("stop")
-	arena.leave_game()
-	arena.queue_free()
-	await process_frame
 
 	print("DAGGER_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)

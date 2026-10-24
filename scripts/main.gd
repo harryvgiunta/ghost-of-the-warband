@@ -447,12 +447,12 @@ func _capture_attack_cover_side() -> void:
 		_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
 
-func _horizontal_variant() -> String:
+func _diagonal_variant() -> String:
 	var side := _next_swing_side
 	if side == 0:
 		side = 1 if shoulder_camera.side > 0 else -1
 	_next_swing_side = -side
-	return "horizontal_right" if side > 0 else "horizontal_left"
+	return "diagonal_right" if side > 0 else "diagonal_left"
 
 func begin_attack(hand: String = "right", variant: String = "") -> void:
 	if hud.map_open or _ui_open():
@@ -465,12 +465,11 @@ func begin_attack(hand: String = "right", variant: String = "") -> void:
 	var started := false
 	if archer.weapon in ["sword","dagger","dual"]:
 		var swing := variant
-		if requested == "left":
-			swing = "stab"
-		elif archer.weapon == "dagger" or not swing.is_empty():
-			pass
-		elif swing.is_empty():
-			swing = _horizontal_variant()
+		if swing.is_empty():
+			if archer.weapon == "dual":
+				swing = "diagonal_left" if requested == "left" else "diagonal_right"
+			else:
+				swing = _diagonal_variant()
 		started = combat.begin_melee(requested,swing)
 	else:
 		started = combat.begin_draw()
@@ -593,7 +592,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif archer.weapon == "dual":
 				hud.close_panels()
 				_set_cursor_free(false)
-				begin_attack("right","overhead")
+				begin_attack("right","diagonal_right")
 			else:
 				hud.close_panels()
 				_set_cursor_free(false)

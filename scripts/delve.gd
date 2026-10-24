@@ -746,7 +746,7 @@ func send_action(action: String, value: Variant = null) -> void:
 		_capture_peek_context()
 	if action in ["draw","release","throw","throw_release"]:
 		_send_peek_input()
-	var aim_origin: Variant = _aim_origin if _aim_origin_valid and action in ["draw","release","throw","throw_release","attack_right","melee"] else null
+	var aim_origin: Variant = _aim_origin if _aim_origin_valid and action in ["draw","release","throw","throw_release","melee"] else null
 	if network_role == "host":
 		_apply_action(local_slot,action,value,-1,aim_origin)
 	elif network_role == "client":
@@ -790,16 +790,7 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
 				actor.update_combat_cover_side()
-				if actor.rig.weapon == "dual":
-					actor.combat.begin_melee("left")
-				elif actor.rig.weapon in ["sword","dagger"]:
-					actor.combat.begin_melee()
-				else:
-					actor.combat.begin_draw()
-		"attack_right":
-			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
-				actor.update_combat_cover_side()
-				actor.combat.begin_melee("right","overhead")
+				actor.combat.begin_draw()
 		"melee":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -807,11 +798,15 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			var hand := str(value.get("hand","right"))
 			var variant := str(value.get("variant","overhead"))
 			if typeof(aim) != TYPE_VECTOR3 or hand not in ["left","right"] \
-					or variant not in ["overhead","horizontal_left","horizontal_right","stab"]:
+					or variant not in ["overhead","diagonal_left","diagonal_right","stab"]:
 				return
 			if _set_aim(slot,aim,aim_tick,aim_origin):
 				actor.update_combat_cover_side()
-				actor.combat.begin_melee(hand,variant)
+				if actor.combat.begin_melee(hand,variant) and slot == local_slot and actor.rig.weapon != "dual":
+					if variant == "diagonal_right":
+						_next_swing_side = -1
+					elif variant == "diagonal_left":
+						_next_swing_side = 1
 		"step":
 			if typeof(value) != TYPE_VECTOR3:
 				return
@@ -1180,7 +1175,6 @@ func _quick_swap() -> void:
 	_on_ui_loadout_changed()
 	audio.play_sound("equip")
 	hud.set_status(str(result.get("message", "Swapped weapons.")),1.5)
-
 func _drop_world_item(item_id: String) -> void:
 	if _player_state == null or local_slot < 0 or local_slot >= actors.size():
 		return
@@ -1298,16 +1292,22 @@ func _capture_peek_context() -> void:
 func _send_peek_input() -> void:
 	send_action("peek",{"pressed":_peek_held,"right":_peek_right,"side":_shoulder_camera.side})
 
-func _horizontal_variant() -> String:
+func _diagonal_variant() -> String:
 	var side := _next_swing_side
 	if side == 0:
 		side = 1 if _shoulder_camera.side > 0 else -1
-	_next_swing_side = -side
-	return "horizontal_right" if side > 0 else "horizontal_left"
+	return "diagonal_right" if side > 0 else "diagonal_left"
 
-func _send_melee(hand: String, variant: String) -> void:
+func _send_melee(hand: String, variant: String = "") -> void:
+	if variant.is_empty():
+		variant = _diagonal_variant()
 	var aim := _crosshair_aim()
 	send_action("melee",{"aim":aim,"hand":hand,"variant":variant})
+	if network_role == "client" and actors[local_slot].rig.weapon != "dual":
+		if variant == "diagonal_right":
+			_next_swing_side = -1
+		elif variant == "diagonal_left":
+			_next_swing_side = 1
 
 func _send_step(side: int) -> void:
 	if local_slot < 0 or _cursor_free or side == 0:
@@ -1393,15 +1393,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_mouse_drawing = true
 				send_action("draw",_crosshair_aim())
 			elif weapon == "dual":
-				_send_melee("left","stab")
-			elif weapon == "dagger":
-				_send_melee("right","stab")
-			else:
-				_send_melee("right",_horizontal_variant())
+				_send_melee("left","diagonal_left")
+			elif weapon in ["sword","dagger"]:
+				_send_melee("right")
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_set_cursor_free(false)
 			if weapon == "dual":
-				send_action("attack_right",_crosshair_aim())
+				_send_melee("right","diagonal_right")
 			else:
 				_peek_held = true
 				_capture_peek_context()

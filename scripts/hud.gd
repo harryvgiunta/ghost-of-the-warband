@@ -101,7 +101,7 @@ func _ready() -> void:
 	var cover_panel := _panel(self, Vector2(24, -289), Vector2(620, 116))
 	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_cover_status = _label(cover_panel, "OPEN / RIGHT SHOULDER", Vector2(15, 10), 12, MUTED)
-	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right   G  Interact\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Horizontal swing / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek   HOLD T  Throw   X  Lookout", Vector2(15, 35), 11, CREAM)
+	_label(cover_panel, "F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right   G  Interact\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Diagonal cut / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek (dual: right cut)   HOLD T  Throw   X  Lookout", Vector2(15, 35), 11, CREAM)
 	_interaction_panel = _panel(self, Vector2(-310, -190), Vector2(620, 39))
 	_interaction_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_interaction = _label(_interaction_panel, "", Vector2(15, 9), 14, GOLD)
@@ -118,7 +118,7 @@ func _ready() -> void:
 	var camp_button := _button(self, "R   RETURN TO TOWN", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -150,13 +150,13 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "THROW %.0f%%  /  DAMAGE x%.2f  /  RELEASE TO THROW" % [draw_amount * 100, draw_amount]
 	elif phase_name.begins_with("MELEE"):
 		if _weapon == "dual":
-			_phase.text = ("LEFT OFF-HAND STAB / %.2f s" if phase_name == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % interval
-		elif phase_name == "MELEE_ST" or _weapon == "dagger":
+			_phase.text = ("LEFT DIAGONAL CUT / %.2f s" if phase_name == "MELEE_L" else "RIGHT ATTACK / %.2f s") % interval
+		elif phase_name == "MELEE_ST":
 			_phase.text = "FORWARD STAB / %.2f s SWING" % interval
-		elif phase_name == "MELEE_HL":
-			_phase.text = "LEFT HORIZONTAL SWING / %.1f s" % interval
-		elif phase_name == "MELEE_HR":
-			_phase.text = "RIGHT HORIZONTAL SWING / %.1f s" % interval
+		elif phase_name == "MELEE_DL":
+			_phase.text = "LEFT DIAGONAL CUT / %.2f s" % interval
+		elif phase_name == "MELEE_DR":
+			_phase.text = "RIGHT DIAGONAL CUT / %.2f s" % interval
 		else:
 			_phase.text = "OVERHEAD CHOP / %.1f s SWING" % interval
 	elif blocking:
@@ -174,15 +174,13 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		_phase.text = "RECOVERY %.1f s  /  %s" % [(1.0 - progress) * interval, movement]
 	else:
 		if _weapon == "dual":
-			_phase.text = "DUAL WIELD / LMB LEFT ATTACK / RMB RIGHT CHOP / NO GUARD"
+			_phase.text = "DUAL WIELD / LMB LEFT CUT / RMB RIGHT CUT / NO GUARD"
 		elif _weapon == "bow":
 			_phase.text = "READY / HOLD LMB TO DRAW / RELEASE TO SHOOT"
-		elif _weapon == "dagger":
-			_phase.text = "READY / LMB STAB / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 		elif _weapon == "none":
 			_phase.text = "UNARMED / PRESS P TO EQUIP A WEAPON"
 		else:
-			_phase.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
+			_phase.text = "READY / LMB DIAGONAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 
 func _melee_pct(value: float) -> String:
 	return "READY" if value >= 0.999999 else "%d%%" % int(value*100.0)

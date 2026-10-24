@@ -64,9 +64,17 @@ var stagger_time := 0.0
 var clash_cooldown := 0.0
 const MAX_SWEEP_STEPS := 32
 const MAX_SWEEP_CONTACTS := 32
+const CLEAVE_ANGLE_PADDING := deg_to_rad(12.0)
+const CLEAVE_BOTTOM := -0.25
+const CLEAVE_TOP := 1.85
+const MAX_CLEAVE_CONTACTS := 128
+var _cleave_query := PhysicsShapeQueryParameters3D.new()
+var _cleave_shape := CylinderShape3D.new()
 var _melee_query := PhysicsShapeQueryParameters3D.new()
 var _melee_shape := CapsuleShape3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
+# Camera projectile lanes include fighters; melee occlusion is scenery-only.
+var _melee_sight_query := PhysicsRayQueryParameters3D.new()
 var _shaft_query := PhysicsShapeQueryParameters3D.new()
 var _shaft_shape := SphereShape3D.new()
 var _launch_query := PhysicsShapeQueryParameters3D.new()
@@ -81,7 +89,8 @@ func _swing_state(hand: String) -> Dictionary:
 	if not _swings.has(hand):
 		var excluded: Array[RID] = []
 		_swings[hand] = {"active":false, "weapon":"", "damage":0.0,
-			"victims":{}, "exclude":excluded, "blocked":false}
+			"victims":{}, "exclude":excluded, "blocked":false,
+			"diagonal":false, "reach":0.0, "half_angle":0.0, "side":1.0, "cut":0.0}
 	return _swings[hand]
 
 func melee_progress_for(hand: String) -> float:
@@ -114,7 +123,10 @@ func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	rig.loadout_changed.connect(_on_loadout_changed)
 	_melee_query.shape = _melee_shape
 	_melee_query.margin = 0.001
-	_sight_query.collision_mask = 1
+	_cleave_query.shape = _cleave_shape
+	_cleave_query.margin = 0.0
+	_melee_sight_query.collision_mask = 1
+	_melee_sight_query.hit_from_inside = true
 	_shaft_shape.radius = 0.01
 	_shaft_query.shape = _shaft_shape
 	_shaft_query.collision_mask = 1
@@ -464,9 +476,9 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 			return false
 	elif rig.weapon not in ["sword","dagger","dual"]:
 		return false
-	var requested := variant if variant in ["overhead","horizontal_left","horizontal_right","stab"] else "overhead"
-	if key == "left":
-		requested = "stab"
+	if variant not in ["overhead","diagonal_left","diagonal_right","stab"]:
+		return false
+	var requested := variant
 	if melee_progress_for(key) < 1.0 - 0.000001 or not rig.can_begin_melee(key):
 		return false
 	var other_active: bool = rig.is_melee()
@@ -498,6 +510,11 @@ func _on_melee_started(hand: String) -> void:
 	state.blocked = false
 	state.weapon = rig.weapon
 	state.damage = rig.melee_damage(hand)
+	state.diagonal = rig.is_diagonal_swing(hand)
+	state.reach = rig.melee_reach(hand)
+	state.half_angle = rig.melee_half_angle(hand)
+	state.side = 1.0 if rig.melee_variant(hand) == "diagonal_right" else -1.0
+	state.cut = 0.0
 	state.victims.clear()
 	state.exclude.clear()
 	if is_instance_valid(actor):
@@ -519,22 +536,17 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 	var state := _swing_state(hand)
 	if not _can_damage_melee(hand,state) or radius <= 0.0:
 		return
-	# Horizontal cuts and dagger thrusts get a reach and thickness envelope.
-	# The authored blades are short against half-size devils that strike from
-	# the advertised reach; the visible blade stays authoritative, but the hit
-	# volume is wider. A greatsword sweeps a far larger arc than a dagger, so
-	# its envelope grows with the blade. Overheads and sword stabs keep their own.
+	if state.diagonal:
+		_sweep_cleave(hand,state)
+		return
+	# Precision attacks still follow the blade. Daggers retain their short
+	# thrust envelope; broad diagonal cuts use the frontal sweep above.
 	var reach := 0.0
 	var thicken := 0.0
-	if is_instance_valid(rig):
-		if hand == "right" and rig.weapon == "sword" \
-				and str(rig._right_variant) in ["horizontal_left","horizontal_right"]:
-			reach = 0.20 + 0.03 * int(rig.sword_index)
-			thicken = 0.05 + 0.03 * int(rig.sword_index)
-		elif (hand == "right" and rig.weapon == "dagger") \
-				or (hand == "left" and rig.weapon == "dual"):
-			reach = 0.38
-			thicken = 0.06
+	if (hand == "right" and rig.weapon == "dagger") \
+			or (hand == "left" and rig.weapon == "dual"):
+		reach = 0.38
+		thicken = 0.06
 	if reach > 0.0:
 		var previous_length := (previous_tip-previous_base).length()
 		var current_length := (current_tip-current_base).length()
@@ -549,44 +561,70 @@ func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3
 	var blade_change := (current_tip - current_base) - (previous_tip - previous_base)
 	var steps := clampi(ceili(blade_change.length() / (radius * 0.25)), 1, MAX_SWEEP_STEPS)
 	var space := actor.get_world_3d().direct_space_state
-	# A horizontal cut is a swipe through a vertical band, not a razor line.
-	# Sample the same blade path again lower down so a short target is inside
-	# the swing instead of under a chest-high blade. The lateral reach is
-	# unchanged; the band only grows vertically.
-	var drops: Array[float] = [0.0]
-	var horizontal_sword: bool = reach > 0.0 and hand == "right" and rig.weapon == "sword"
-	if horizontal_sword:
-		drops = [0.0,-0.18,-0.36]
-	var face := Vector3.ZERO
-	if is_instance_valid(rig):
-		face = -rig.global_basis.z
-		face.y = 0.0
-	for drop in drops:
-		var lift := Vector3.UP*drop
-		for step in steps:
-			var start_fraction := float(step) / steps
-			var end_fraction := float(step + 1) / steps
-			var base_from := previous_base.lerp(current_base, start_fraction)+lift
-			var tip_from := previous_tip.lerp(current_tip, start_fraction)+lift
-			var base_to := previous_base.lerp(current_base, end_fraction)+lift
-			var tip_to := previous_tip.lerp(current_tip, end_fraction)+lift
-			# The wide coil sweeps the blade behind and beside the body, so only
-			# scenery in the cut's forward cone cancels it; a tree the coil
-			# merely passes must not swallow the whole strike. The sight ray
-			# still stops damage through cover between the actor and a target.
-			var guard_world := true
-			if horizontal_sword and not face.is_zero_approx():
-				var centre := ((base_from+tip_from)+(base_to+tip_to))*0.25-actor.global_position
-				centre.y = 0.0
-				guard_world = centre.length_squared() < 0.0001 \
-					or face.dot(centre.normalized()) > 0.35
-			_sweep_capsule(space,hand,state,base_from,tip_from,base_to,tip_to,radius,guard_world)
-			if not _can_damage_melee(hand,state):
-				return
+	for step in steps:
+		var start_fraction := float(step) / steps
+		var end_fraction := float(step + 1) / steps
+		var base_from := previous_base.lerp(current_base, start_fraction)
+		var tip_from := previous_tip.lerp(current_tip, start_fraction)
+		var base_to := previous_base.lerp(current_base, end_fraction)
+		var tip_to := previous_tip.lerp(current_tip, end_fraction)
+		_sweep_capsule(space,hand,state,base_from,tip_from,base_to,tip_to,radius)
+		if not _can_damage_melee(hand,state):
+			return
+
+func _sweep_cleave(hand: String, state: Dictionary) -> void:
+	# Sweep a body-height sector in the same direction and active interval as
+	# the visible diagonal. It reaches point-blank and short foes without
+	# demanding that a thin animated blade cross their exact height.
+	var cut: float = smoothstep(0.0,1.0,rig.melee_cut_progress(hand))
+	var angle_from: float = state.side * lerpf(state.half_angle,-state.half_angle,state.cut)
+	var angle_to: float = state.side * lerpf(state.half_angle,-state.half_angle,cut)
+	state.cut = cut
+	var low := maxf(-PI*0.5,minf(angle_from,angle_to)-CLEAVE_ANGLE_PADDING)
+	var high := minf(PI*0.5,maxf(angle_from,angle_to)+CLEAVE_ANGLE_PADDING)
+	var forward: Vector3 = aim_point-rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	_cleave_shape.radius = state.reach
+	_cleave_shape.height = CLEAVE_TOP-CLEAVE_BOTTOM
+	_cleave_query.transform = Transform3D(Basis.IDENTITY,
+		actor.global_position+Vector3.UP*(CLEAVE_TOP+CLEAVE_BOTTOM)*0.5)
+	_cleave_query.collision_mask = target_mask
+	_cleave_query.exclude = state.exclude
+	var space := actor.get_world_3d().direct_space_state
+	var hits := space.intersect_shape(_cleave_query,MAX_CLEAVE_CONTACTS)
+	for hit in hits:
+		if not _can_damage_melee(hand,state):
+			return
+		var unit = hit.collider
+		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
+				or unit.get("alive") != true or state.victims.has(unit.get_instance_id()):
+			continue
+		var offset: Vector3 = unit.global_position-actor.global_position
+		offset.y = 0.0
+		var angle := atan2(offset.dot(right),offset.dot(forward))
+		if angle < low or angle > high:
+			continue
+		var contact: Vector3 = unit.get_aim_position()
+		contact.y = clampf(contact.y,actor.global_position.y+CLEAVE_BOTTOM+0.05,
+			actor.global_position.y+CLEAVE_TOP-0.05)
+		_melee_sight_query.from = actor.global_position+Vector3(0,1.0-0.45*rig._crouch_amount,0)
+		_melee_sight_query.to = contact
+		_melee_sight_query.exclude = state.exclude
+		# Scenery occludes each target, not the entire crowd: hitting a wall on
+		# one flank cannot swallow the clear part of the same cut.
+		if not space.intersect_ray(_melee_sight_query).is_empty():
+			continue
+		state.exclude.append(hit.rid)
+		_resolve_melee_contact(hand,state,unit,contact,false)
 
 func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dictionary,
 		base_from: Vector3, tip_from: Vector3, base_to: Vector3, tip_to: Vector3,
-		radius: float, guard_world: bool = true) -> void:
+		radius: float) -> void:
 	var blade_from := tip_from - base_from
 	var blade_to := tip_to - base_to
 	var blade := (blade_from + blade_to) * 0.5
@@ -601,17 +639,16 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 	_melee_query.transform = pose
 	_melee_query.motion = Vector3.ZERO
 	var world_fraction := 1.0
-	if guard_world:
-		_melee_query.collision_mask = 1
-		_melee_query.exclude = state.exclude
-		# cast_motion ignores initial overlaps; test those explicitly first.
-		if not space.get_rest_info(_melee_query).is_empty():
-			state.blocked = true
-			return
-		_melee_query.motion = motion
-		if not motion.is_zero_approx():
-			var world_cast := space.cast_motion(_melee_query)
-			world_fraction = world_cast[0]
+	_melee_query.collision_mask = 1
+	_melee_query.exclude = state.exclude
+	# cast_motion ignores initial overlaps; test those explicitly first.
+	if not space.get_rest_info(_melee_query).is_empty():
+		state.blocked = true
+		return
+	_melee_query.motion = motion
+	if not motion.is_zero_approx():
+		var world_cast := space.cast_motion(_melee_query)
+		world_fraction = world_cast[0]
 	_melee_query.collision_mask = target_mask
 	for contact in MAX_SWEEP_CONTACTS:
 		if not _can_damage_melee(hand,state):
@@ -641,37 +678,38 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 			continue
 		# The contact is on the actual blade query, never an actor-centered hit
 		# fallback. This ray also prevents a windup starting through thin cover.
-		_sight_query.from = actor.global_position + Vector3(0, 1.1, 0)
-		_sight_query.to = hit.point
-		_sight_query.exclude = state.exclude
-		if not space.intersect_ray(_sight_query).is_empty():
+		_melee_sight_query.from = actor.global_position + Vector3(0, 1.1, 0)
+		_melee_sight_query.to = hit.point
+		_melee_sight_query.exclude = state.exclude
+		if not space.intersect_ray(_melee_sight_query).is_empty():
 			continue
-		var target_combat = unit.get("combat")
-		if is_instance_valid(target_combat) and _can_clash_with(unit,target_combat):
-			_resolve_clash(unit,target_combat,hit.point)
-			return
-		state.victims[unit.get_instance_id()] = true
-		var damage: float = state.damage
-		# A rest point can sit anywhere in the overlap, so both blade poses are
-		# tested as segments against the animated head zone.
 		var headshot := Hitbox.blade_headshot(unit,base_from,tip_from,radius) \
 			or Hitbox.blade_headshot(unit,base_to,tip_to,radius)
-		var outcome := DEFENSE_NONE
-		if unit.has_method("receive_melee"):
-			outcome = int(unit.receive_melee(damage,source_id,actor.global_position,headshot))
-		else:
-			unit.take_damage(damage,source_id,headshot)
-		if outcome == DEFENSE_PARRY:
-			_block_feedback(unit,hit.point,true,hand)
-		elif outcome == DEFENSE_BLOCK:
-			_block_feedback(unit,hit.point,false,hand)
-		elif outcome == DEFENSE_WEAK_BLOCK:
-			# A dagger only softens the hit; the attacker's swing continues.
-			_block_feedback(unit,hit.point,false,hand,false)
+		_resolve_melee_contact(hand,state,unit,hit.point,headshot)
 	if world_fraction < 1.0:
 		# An authored animation may continue beyond a wall; it must not resume
 		# damage on the far side in the next sample of this same swing.
 		state.blocked = true
+
+func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
+		at: Vector3, headshot: bool) -> void:
+	var target_combat = unit.get("combat")
+	if is_instance_valid(target_combat) and _can_clash_with(unit,target_combat):
+		_resolve_clash(unit,target_combat,at)
+		return
+	state.victims[unit.get_instance_id()] = true
+	var damage: float = state.damage
+	var outcome := DEFENSE_NONE
+	if unit.has_method("receive_melee"):
+		outcome = int(unit.receive_melee(damage,source_id,actor.global_position,headshot))
+	else:
+		unit.take_damage(damage,source_id,headshot)
+	if outcome == DEFENSE_PARRY:
+		_block_feedback(unit,at,true,hand)
+	elif outcome == DEFENSE_BLOCK:
+		_block_feedback(unit,at,false,hand)
+	elif outcome == DEFENSE_WEAK_BLOCK:
+		_block_feedback(unit,at,false,hand,false)
 
 func _can_clash_with(unit: Node, target_combat) -> bool:
 	if target_combat == self or not is_instance_valid(target_combat) \

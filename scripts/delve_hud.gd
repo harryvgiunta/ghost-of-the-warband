@@ -330,6 +330,11 @@ func update_local(state: Dictionary) -> void:
 	var right := float(state.get("right", 1.0))
 	if left < 0.999999 or right < 0.999999:
 		readiness += "   L %s / R %s" % [_percent(left), _percent(right)]
+	if phase == "READY" and progress >= 0.999999:
+		if weapon == "DUAL":
+			readiness += "  /  LMB LEFT CUT / RMB RIGHT CUT"
+		elif weapon in ["SWORD", "DAGGER"]:
+			readiness += "  /  LMB DIAGONAL / WHEEL STAB, OVERHEAD"
 	_readiness_label.text = readiness
 
 func _readiness_line(phase: String, draw: float, progress: float, interval: float, blocking: bool, parry: bool) -> String:
@@ -338,8 +343,12 @@ func _readiness_line(phase: String, draw: float, progress: float, interval: floa
 		return "DRAW %d%%  /  RELEASE TO STRIKE" % int(round(draw * 100.0))
 	if phase == "T_DRAW" or phase == "T_HOLD":
 		return "THROW %d%%  /  RELEASE" % int(round(draw * 100.0))
+	if phase in ["MELEE_DL", "MELEE_DR", "MELEE_L"]:
+		return "DIAGONAL CUT  /  %.2f s" % interval
+	if phase == "MELEE_ST":
+		return "FORWARD STAB  /  %.2f s" % interval
 	if phase.begins_with("MELEE"):
-		return "SWING  /  %.2f s" % interval
+		return "OVERHEAD  /  %.2f s" % interval
 	if blocking:
 		return "PARRY WINDOW  /  COUNTER NOW" if parry else "GUARDING  /  HOLD RMB"
 	if phase == "RELEASE" or phase == "RECOVER" or phase == "T_RELEASE" or phase == "T_RECOVER":

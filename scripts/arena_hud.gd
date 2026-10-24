@@ -117,7 +117,7 @@ func _ready() -> void:
 	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(620,116))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
-	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Horizontal swing / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek   HOLD T  Throw   X  Lookout",Vector2(15,35),11,UI.CREAM)
+	_ui._label(cover_panel,"F  Cover / exit   C  Crouch   SPACE  Jump   Q / E  Step left / right\nSHIFT  Sprint / fast cover   Sprint + C  Slide\nLMB  Diagonal cut / draw   WHEEL UP  Stab   WHEEL DOWN  Overhead\nRMB  Guard / peek (dual: right cut)   HOLD T  Throw   X  Lookout",Vector2(15,35),11,UI.CREAM)
 	respawn_label = _ui._label(match_ui,"",Vector2(-300,-30),28,UI.GOLD)
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
@@ -180,7 +180,7 @@ func _ready() -> void:
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -233,15 +233,15 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "THROW %.0f%% / DAMAGE x%.2f / RELEASE TO THROW" % [float(state.draw)*100,float(state.draw)]
 	elif str(state.phase).begins_with("MELEE"):
 		if state.weapon == "dual":
-			attack_label.text = ("LEFT OFF-HAND STAB / %.2f s" if state.phase == "MELEE_L" else "RIGHT SWORD CHOP / %.1f s") % float(state.attack_interval)
+			attack_label.text = ("LEFT DIAGONAL CUT / %.2f s" if state.phase == "MELEE_L" else "RIGHT ATTACK / %.2f s") % float(state.attack_interval)
 			if state.get("attack_parry",false):
 				attack_label.text += "  /  ATTACK PARRY"
-		elif state.phase == "MELEE_ST" or state.weapon == "dagger":
+		elif state.phase == "MELEE_ST":
 			attack_label.text = "FORWARD STAB / %.2f s SWING" % float(state.attack_interval)
-		elif state.phase == "MELEE_HL":
-			attack_label.text = "LEFT HORIZONTAL SWING / %.1f s" % float(state.attack_interval)
-		elif state.phase == "MELEE_HR":
-			attack_label.text = "RIGHT HORIZONTAL SWING / %.1f s" % float(state.attack_interval)
+		elif state.phase == "MELEE_DL":
+			attack_label.text = "LEFT DIAGONAL CUT / %.2f s" % float(state.attack_interval)
+		elif state.phase == "MELEE_DR":
+			attack_label.text = "RIGHT DIAGONAL CUT / %.2f s" % float(state.attack_interval)
 		else:
 			attack_label.text = "OVERHEAD CHOP / %.1f s SWING" % float(state.attack_interval)
 	elif state.get("blocking",false):
@@ -259,15 +259,13 @@ func update_match(state: Dictionary) -> void:
 		attack_label.text = "RECOVERY %.1f s" % [(1.0-float(state.attack_progress))*float(state.attack_interval)]
 	else:
 		if state.weapon == "dual":
-			attack_label.text = "DUAL WIELD / LMB LEFT ATTACK / RMB RIGHT CHOP / NO GUARD"
+			attack_label.text = "DUAL WIELD / LMB LEFT CUT / RMB RIGHT CUT / NO GUARD"
 		elif state.weapon == "bow":
 			attack_label.text = "READY / HOLD LMB, AIM, RELEASE"
-		elif state.weapon == "dagger":
-			attack_label.text = "READY / LMB OR WHEEL UP STABS / WHEEL DOWN OVERHEAD"
 		elif state.weapon == "none":
 			attack_label.text = "UNARMED / PRESS P TO EQUIP"
 		else:
-			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
+			attack_label.text = "READY / LMB DIAGONAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 	if state.phase == "BANDAGE":
 		bar.value = clampf(consume_time/3.0,0.0,1.0) * 100.0
 	elif state.phase == "DRINK":

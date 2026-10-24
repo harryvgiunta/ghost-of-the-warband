@@ -468,15 +468,15 @@ func host_run() -> void:
 	check(absf(arena.actors[0].health-(100.0-38.0*released_charge))<0.01,"Only actual projectile impact applies linear charge-scaled damage")
 	await pause(2.1)
 	arena.actors[0].position = Vector3(0,0.05,0)
-	# Enough health for a head-zone chop without dying; require exactly one
-	# authoritative hit (50 base, 100 on the head, never two).
+	# A standard greatsword cleave applies base damage once, not an incidental
+	# headshot or one copy per sampled contact.
 	arena.actors[0].health = 200.0
 	arena.actors[1].position = Vector3(0,0.05,1.4)
 	await pause(0.3)
 	report.command.rpc(3)
 	await wait_message("chopped")
 	var chop_damage: float = 200.0 - float(arena.actors[0].health)
-	check(chop_damage >= 50.0 and chop_damage <= 100.0,"Remote greatsword animation still deals one authoritative hit")
+	check(is_equal_approx(chop_damage,50.0),"Remote greatsword cleave deals one authoritative 50-damage hit (got %.2f; source %s; target %s; aim %s)" % [chop_damage,arena.actors[1].position,arena.actors[0].position,arena.actors[1].combat.aim_point])
 	report.command.rpc(4)
 	await wait_message("double_space")
 	check(not saw_roll,"Remote repeated Space and malformed jump modifiers never roll")
