@@ -2,43 +2,77 @@
   "asset": "ironwood_hell_goat.glb",
   "mob": "hell_goat",
   "display_name": "Hellish goat man",
-  "skeleton": "HellGoatArmature/Skeleton3D",
-  "bone_count": 34,
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 68,
   "bone_names": [
     "root",
     "pelvis",
     "spine_01",
     "spine_02",
-    "chest",
+    "spine_03",
     "neck_01",
-    "neck_02",
+    "Head",
     "head",
     "jaw",
-    "ear_l",
-    "ear_r",
     "clavicle_l",
-    "upper_arm_l",
-    "forearm_l",
+    "upperarm_l",
+    "lowerarm_l",
     "hand_l",
-    "fingers_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
     "clavicle_r",
-    "upper_arm_r",
-    "forearm_r",
+    "upperarm_r",
+    "lowerarm_r",
     "hand_r",
-    "fingers_r",
-    "tail_01",
-    "tail_02",
-    "tail_03",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
     "thigh_l",
-    "shin_l",
-    "tarsus_l",
+    "calf_l",
     "foot_l",
-    "toes_l",
+    "ball_l",
+    "ball_leaf_l",
     "thigh_r",
-    "shin_r",
-    "tarsus_r",
+    "calf_r",
     "foot_r",
-    "toes_r"
+    "ball_r",
+    "ball_leaf_r",
+    "neutral_bone"
   ],
   "forward": [
     0,
@@ -52,114 +86,80 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -0.5488870143890381,
-    -0.004145003855228424,
-    -0.49809974431991577
+    -1.035731,
+    -0.010271,
+    -0.399304
   ],
   "rest_bounds_max": [
-    0.5841001272201538,
-    2.2036972045898438,
-    0.5298455953598022
+    1.035731,
+    2.014244,
+    0.407415
   ],
-  "height": 2.2,
-  "mesh_triangles": 38072,
+  "height": 2.024515,
+  "mesh_triangles": 49292,
   "materials": [
-    "HellGoat_Surface"
+    "Skin_HellGoat",
+    "Leather_HellGoat",
+    "MI_Regular_Male",
+    "Bone_HellGoat",
+    "Dark_HellGoat",
+    "Eye_HellGoat",
+    "Horn_HellGoat",
+    "Fur_HellGoat",
+    "Metal_HellGoat"
   ],
-  "embedded_images": [
-    "image/png",
-    "image/png",
-    "image/png",
-    "image/png"
-  ],
-  "texture_atlas": {
-    "size": 2048,
-    "tags": [
-      "body",
-      "skin",
-      "fur",
-      "hair",
-      "horn",
-      "hoof",
-      "claw",
-      "eye",
-      "teeth",
-      "mouth",
-      "leather",
-      "metal"
-    ],
-    "channels": [
-      "albedo",
-      "normal",
-      "roughness",
-      "metallic",
-      "emission"
-    ]
-  },
+  "embedded_images": 21,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {
       "name": "HellGoat_Idle_Loop",
-      "duration": 2.4,
+      "duration": 2.5,
+      "impact": null,
       "loop": true
     },
     "walk": {
       "name": "HellGoat_Walk_Loop",
-      "duration": 1.1,
-      "loop": true,
-      "stride": 1.45,
-      "duty": 0.62,
-      "fallback_speed": 1.32
+      "duration": 1.333333,
+      "impact": null,
+      "loop": true
     },
     "run": {
       "name": "HellGoat_Run_Loop",
-      "duration": 0.65,
-      "loop": true,
-      "stride": 2.35,
-      "duty": 0.38,
-      "fallback_speed": 3.62
+      "duration": 0.666667,
+      "impact": null,
+      "loop": true
     },
     "attack": {
       "name": "HellGoat_Attack",
       "duration": 1.45,
-      "loop": false,
       "impact": 0.62,
-      "recovery_end": 1.45
+      "loop": false
     },
     "hit": {
       "name": "HellGoat_Hit",
       "duration": 0.5,
+      "impact": null,
       "loop": false
     },
     "death": {
       "name": "HellGoat_Death",
       "duration": 1.25,
+      "impact": null,
       "loop": false
     }
   },
-  "animations": {
-    "HellGoat_Idle_Loop": 2.4,
-    "HellGoat_Walk_Loop": 1.1,
-    "HellGoat_Run_Loop": 0.65,
-    "HellGoat_Attack": 1.45,
-    "HellGoat_Hit": 0.5,
-    "HellGoat_Death": 1.25
-  },
-  "authoring_fps": 60,
-  "root_translation_channels": 6,
   "head_zone": {
     "bone": "head",
-    "radius": 0.3,
-    "half_height": 0.14
+    "radius": 0.2,
+    "half_height": 0.15
   },
-  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
-  "reproducer": "tools/prepare_devils.py --mob hell_goat",
-  "role": "charger",
+  "authoring_fps": 60,
+  "source": "CC0 Quaternius male base and ranger outfit plus core animations; original goat skull, horns, fur and hooves",
   "surface_notes": [
-    "procedural charcoal fur",
-    "ram horn",
-    "cloven hoof",
-    "ember eyes",
-    "leather harness",
-    "iron collar"
+    "goat skull mask and ram horns",
+    "shaggy fur mantle",
+    "weathered ranger leather",
+    "cloven hoof boots",
+    "glowing eyes"
   ]
 }

@@ -2,42 +2,79 @@
   "asset": "ironwood_spawn.glb",
   "mob": "spawn",
   "display_name": "Devil spawn",
-  "skeleton": "SpawnArmature/Skeleton3D",
-  "bone_count": 33,
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 70,
   "bone_names": [
     "root",
     "pelvis",
     "spine_01",
     "spine_02",
-    "chest",
+    "spine_03",
     "neck_01",
-    "neck_02",
+    "Head",
     "head",
     "jaw",
-    "ear_l",
-    "ear_r",
     "clavicle_l",
-    "upper_arm_l",
-    "forearm_l",
+    "upperarm_l",
+    "lowerarm_l",
     "hand_l",
-    "fingers_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
     "clavicle_r",
-    "upper_arm_r",
-    "forearm_r",
+    "upperarm_r",
+    "lowerarm_r",
     "hand_r",
-    "fingers_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r",
     "tail_01",
     "tail_02",
-    "thigh_l",
-    "shin_l",
-    "tarsus_l",
-    "foot_l",
-    "toes_l",
-    "thigh_r",
-    "shin_r",
-    "tarsus_r",
-    "foot_r",
-    "toes_r"
+    "tail_03"
   ],
   "forward": [
     0,
@@ -51,111 +88,76 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -0.3579597473144531,
-    0.001127708237618208,
-    -0.6055383086204529
+    -0.493518,
+    -0.009599,
+    -0.20097
   ],
   "rest_bounds_max": [
-    0.3623065948486328,
-    1.1423542499542236,
-    0.3333112597465515
+    0.493518,
+    1.080274,
+    0.232929
   ],
-  "height": 1.15,
-  "mesh_triangles": 23844,
+  "height": 1.089874,
+  "mesh_triangles": 16054,
   "materials": [
-    "Spawn_Surface"
+    "Skin_Spawn",
+    "Eye_Spawn",
+    "Horn_Spawn",
+    "Cloth_Spawn",
+    "Leather_Spawn",
+    "Metal_Spawn"
   ],
-  "embedded_images": [
-    "image/png",
-    "image/png",
-    "image/png",
-    "image/png"
-  ],
-  "texture_atlas": {
-    "size": 1024,
-    "tags": [
-      "body",
-      "skin",
-      "bone",
-      "mouth",
-      "teeth",
-      "claw",
-      "hair",
-      "eye",
-      "ember"
-    ],
-    "channels": [
-      "albedo",
-      "normal",
-      "roughness",
-      "metallic",
-      "emission"
-    ]
-  },
+  "embedded_images": 15,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {
       "name": "Spawn_Idle_Loop",
-      "duration": 2,
+      "duration": 2.933333,
+      "impact": null,
       "loop": true
     },
     "walk": {
       "name": "Spawn_Walk_Loop",
-      "duration": 0.9,
-      "loop": true,
-      "stride": 0.95,
-      "duty": 0.55,
-      "fallback_speed": 1.06
+      "duration": 2.0,
+      "impact": null,
+      "loop": true
     },
     "run": {
       "name": "Spawn_Run_Loop",
-      "duration": 0.5,
-      "loop": true,
-      "stride": 1.7,
-      "duty": 0.34,
-      "fallback_speed": 3.4
+      "duration": 0.666667,
+      "impact": null,
+      "loop": true
     },
     "attack": {
       "name": "Spawn_Attack",
       "duration": 1.1,
-      "loop": false,
       "impact": 0.48,
-      "recovery_end": 1.1
+      "loop": false
     },
     "hit": {
       "name": "Spawn_Hit",
       "duration": 0.4,
+      "impact": null,
       "loop": false
     },
     "death": {
       "name": "Spawn_Death",
-      "duration": 1,
+      "duration": 1.0,
+      "impact": null,
       "loop": false
     }
   },
-  "animations": {
-    "Spawn_Idle_Loop": 2,
-    "Spawn_Walk_Loop": 0.9,
-    "Spawn_Run_Loop": 0.5,
-    "Spawn_Attack": 1.1,
-    "Spawn_Hit": 0.4,
-    "Spawn_Death": 1
-  },
-  "authoring_fps": 60,
-  "root_translation_channels": 6,
   "head_zone": {
     "bone": "head",
-    "radius": 0.22,
-    "half_height": 0.1
+    "radius": 0.165,
+    "half_height": 0.13
   },
-  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
-  "reproducer": "tools/prepare_devils.py --mob spawn",
-  "role": "skirmisher",
+  "authoring_fps": 60,
+  "source": "CC0 Quaternius female base and core animations; original spawn proportions, horns, claws, fangs and rags",
   "surface_notes": [
-    "near-black blue-grey hide",
-    "exposed tan ribcage",
-    "needle teeth",
-    "ember eyes",
-    "keratin back spikes",
-    "sparse bristle crest"
+    "pale sickly source skin with veins",
+    "enlarged head",
+    "small horns, fangs and needle claws",
+    "ragged chest wrap and loincloth"
   ]
 }

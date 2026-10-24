@@ -369,25 +369,27 @@ The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedic
 
 Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (shaggy digitigrade charger), **Succubus** (winged crimson raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (stone sentinel). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract. Five of the sixteen spawns form a starting court inside the town’s safe ring — one of each species, about 10 m ahead of the south-gate spawn — so all five can be inspected immediately without aggro.
 
-They are original procedural assets authored by `tools/prepare_devils.py`; no third-party model, texture or motion is used. The supplied design references informed palette and proportions only. Each mob is one imported GLB with:
+They are built from the same licensed CC0 Quaternius sources as the ranger — the male/female bases, ranger outfits, long hair and 65-bone animation library — with original devil anatomy and paint on top. No generated image, photogrammetry scan or restricted file is used. Each mob is one imported GLB with:
 
-- a continuous skinned metaball body plus rigid horns, claws, tusks, hooves, wings and armour;
-- a packed PBR atlas — albedo, tangent-space normal, roughness, metallic and emission — painted in rest space at 1024 or 2048 px;
-- fur/hair clumps on silhouette regions, painted keratin growth rings, membrane veins, leather grain and stone/lichen/ember-crack zones;
-- six baked 60 Hz clips: idle, walk, run, attack, hit and death, with authored foot contact, anticipation, impact and collapse.
+- a real skinned Quaternius human/ranger body (or the original Briar wolf for the beast) plus authored horns, goat skull, membrane wings, tails, claws, fangs, hooves, fur mantle and stone treatment;
+- source PBR skin, leather, hair and eye maps (2048/1024 px) tinted while retaining pores, grain and iris detail, plus authored bone, horn, membrane, cloth, stone and fur maps;
+- six baked 60 Hz clips: idle, walk, run, attack, hit and death, using the ranger/wolf authored locomotion and time-warped attacks;
+- extra `head`/`jaw`, wing and tail bones where the silhouette needs them.
+
+The result is the ranger's authored PBR quality on a demon silhouette rather than a procedural blob.
 
 `scripts/devil_mob_visual.gd` is presentation only: it samples the clips, scales cadence from actual post-collision movement, and maps the physics attack clock onto the authored impact frame. `scripts/devil_mob.gd` owns the shared state machine, per-mob profiles, collision, damage, parries/staggers, gold and the corpse hold. The existing frontier loot rotation and HUD feedback are unchanged.
 
 The full authoring workflow, budgets and gates are documented in [docs/devil-mobs.md](docs/devil-mobs.md). Rebuild all five assets with:
 
 ```powershell
-$Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
-& $Blender --background --python-exit-code 1 --python tools/prepare_devils.py -- all
+python tools/build_devils.py all
+$Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --editor --path . --import
 & $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
 ```
 
-Intermediate `.blend` sources, PBR atlases and capture sheets are written to the ignored `.runtime/devil-source/<mob>/` workspace. Keep each shipped GLB, its adjacent JSON and its `.glb.import` together; import settings embed the textures and sample animation at 60 Hz.
+Tinted source maps, authored PBR maps, preview renders and capture sheets are written to the ignored `.runtime/devil-source/<mob>/` workspace; source archives stay in `.runtime/character-source/`. Keep each shipped GLB, its adjacent JSON and its `.glb.import` together; import settings embed the textures and sample animation at 60 Hz.
 
 ## Update
 

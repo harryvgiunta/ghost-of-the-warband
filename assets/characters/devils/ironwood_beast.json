@@ -2,8 +2,8 @@
   "asset": "ironwood_beast.glb",
   "mob": "beast",
   "display_name": "Hell beast",
-  "skeleton": "BeastArmature/Skeleton3D",
-  "bone_count": 36,
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 37,
   "bone_names": [
     "root",
     "pelvis",
@@ -31,6 +31,7 @@
     "tail_01",
     "tail_02",
     "tail_03",
+    "tail_04",
     "thigh_l",
     "shin_l",
     "hock_l",
@@ -54,114 +55,79 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -0.7562543749809265,
-    0.015250004827976227,
-    -1.2690545320510864
+    -0.362966,
+    -0.004254,
+    -1.43775
   ],
   "rest_bounds_max": [
-    0.67528235912323,
-    1.6681432723999023,
-    1.4650607109069824
+    0.362666,
+    1.779253,
+    1.556477
   ],
-  "height": 1.65,
-  "mesh_triangles": 50840,
+  "height": 1.783507,
+  "mesh_triangles": 16436,
   "materials": [
-    "Beast_Surface"
+    "Fur_Beast",
+    "Mouth_Beast",
+    "Tongue_Beast",
+    "Nose_Beast",
+    "Dark_Beast",
+    "EyeIris_Beast",
+    "Teeth_Beast",
+    "Pads_Beast",
+    "Horn_Beast"
   ],
-  "embedded_images": [
-    "image/png",
-    "image/png",
-    "image/png",
-    "image/png"
-  ],
-  "texture_atlas": {
-    "size": 2048,
-    "tags": [
-      "body",
-      "fur",
-      "hair",
-      "flesh",
-      "skin",
-      "bone",
-      "claw",
-      "eye",
-      "teeth",
-      "mouth"
-    ],
-    "channels": [
-      "albedo",
-      "normal",
-      "roughness",
-      "metallic",
-      "emission"
-    ]
-  },
+  "embedded_images": 7,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {
       "name": "Beast_Idle_Loop",
-      "duration": 2.6,
+      "duration": 2.4,
+      "impact": null,
       "loop": true
     },
     "walk": {
       "name": "Beast_Walk_Loop",
-      "duration": 1.3,
-      "loop": true,
-      "stride": 1.9,
-      "duty": 0.55,
-      "fallback_speed": 1.46
+      "duration": 0.6,
+      "impact": null,
+      "loop": true
     },
     "run": {
       "name": "Beast_Run_Loop",
-      "duration": 0.75,
-      "loop": true,
-      "stride": 3.3,
-      "duty": 0.36,
-      "fallback_speed": 4.4
+      "duration": 0.6,
+      "impact": null,
+      "loop": true
     },
     "attack": {
       "name": "Beast_Attack",
       "duration": 1.6,
-      "loop": false,
       "impact": 0.82,
-      "recovery_end": 1.6
+      "loop": false
     },
     "hit": {
       "name": "Beast_Hit",
       "duration": 0.5,
+      "impact": null,
       "loop": false
     },
     "death": {
       "name": "Beast_Death",
-      "duration": 1.3,
+      "duration": 0.45,
+      "impact": null,
       "loop": false
     }
   },
-  "animations": {
-    "Beast_Idle_Loop": 2.6,
-    "Beast_Walk_Loop": 1.3,
-    "Beast_Run_Loop": 0.75,
-    "Beast_Attack": 1.6,
-    "Beast_Hit": 0.5,
-    "Beast_Death": 1.3
-  },
-  "authoring_fps": 60,
-  "root_translation_channels": 6,
   "head_zone": {
     "bone": "head",
-    "radius": 0.45,
-    "half_height": 0.22
+    "radius": 0.38,
+    "half_height": 0.2
   },
-  "source": "Original procedural creature authored by tools/prepare_devils.py; no third-party model, texture or motion.",
-  "reproducer": "tools/prepare_devils.py --mob beast",
-  "role": "bruiser",
-  "body_length": 2.7,
-  "locomotion": "heavy trot, four-beat fallback walk",
+  "authoring_fps": 60,
+  "source": "CC0 wolf asset plus original char/ember treatment, horns, ridge and claws",
   "surface_notes": [
-    "procedural dark shaggy fur",
-    "exposed flesh muzzle",
-    "bone back ridge",
-    "bone tusks",
-    "keratin claws",
-    "ember eyes"
+    "charred wolf fur with ember fissures",
+    "bone horns and spinal ridge",
+    "enlarged claws",
+    "glowing eyes"
   ]
 }

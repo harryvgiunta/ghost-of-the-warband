@@ -23,46 +23,46 @@ const DATA := {
 		"idle": "HellGoat_Idle_Loop", "walk": "HellGoat_Walk_Loop",
 		"run": "HellGoat_Run_Loop", "attack": "HellGoat_Attack",
 		"hit": "HellGoat_Hit", "death": "HellGoat_Death",
-		"walk_speed": 1.32, "run_speed": 3.62, "run_threshold": 2.15,
+		"walk_speed": 1.50, "run_speed": 4.00, "run_threshold": 2.15,
 		"impact": 0.62, "duration": 1.45,
-		"head_offset": Vector3(0.0, 0.07, -0.10),
-		"head_radius": 0.30, "head_half": 0.14, "organic": true, "hover": 0.0,
+		"head_offset": Vector3.ZERO,
+		"head_radius": 0.20, "head_half": 0.15, "organic": true, "hover": 0.0,
 	},
 	"succubus": {
 		"idle": "Succubus_Idle_Loop", "walk": "Succubus_Walk_Loop",
 		"run": "Succubus_Run_Loop", "attack": "Succubus_Attack",
 		"hit": "Succubus_Hit", "death": "Succubus_Death",
-		"walk_speed": 1.13, "run_speed": 3.55, "run_threshold": 2.00,
+		"walk_speed": 1.40, "run_speed": 4.20, "run_threshold": 2.00,
 		"impact": 0.58, "duration": 1.35,
-		"head_offset": Vector3(0.0, 0.06, -0.05),
-		"head_radius": 0.26, "head_half": 0.13, "organic": true, "hover": 0.10,
+		"head_offset": Vector3.ZERO,
+		"head_radius": 0.135, "head_half": 0.095, "organic": true, "hover": 0.0,
 	},
 	"spawn": {
 		"idle": "Spawn_Idle_Loop", "walk": "Spawn_Walk_Loop",
 		"run": "Spawn_Run_Loop", "attack": "Spawn_Attack",
 		"hit": "Spawn_Hit", "death": "Spawn_Death",
-		"walk_speed": 1.06, "run_speed": 3.40, "run_threshold": 1.95,
+		"walk_speed": 1.30, "run_speed": 4.60, "run_threshold": 1.95,
 		"impact": 0.48, "duration": 1.10,
-		"head_offset": Vector3(0.0, 0.00, -0.06),
-		"head_radius": 0.22, "head_half": 0.10, "organic": true, "hover": 0.0,
+		"head_offset": Vector3.ZERO,
+		"head_radius": 0.165, "head_half": 0.13, "organic": true, "hover": 0.0,
 	},
 	"beast": {
 		"idle": "Beast_Idle_Loop", "walk": "Beast_Walk_Loop",
 		"run": "Beast_Run_Loop", "attack": "Beast_Attack",
 		"hit": "Beast_Hit", "death": "Beast_Death",
-		"walk_speed": 1.46, "run_speed": 4.40, "run_threshold": 2.60,
+		"walk_speed": 1.40, "run_speed": 3.80, "run_threshold": 2.40,
 		"impact": 0.82, "duration": 1.60,
-		"head_offset": Vector3(0.0, 0.00, -0.12),
-		"head_radius": 0.45, "head_half": 0.22, "organic": true, "hover": 0.0,
+		"head_offset": Vector3.ZERO,
+		"head_radius": 0.38, "head_half": 0.20, "organic": true, "hover": 0.0,
 	},
 	"gargoyle": {
 		"idle": "Gargoyle_Idle_Loop", "walk": "Gargoyle_Walk_Loop",
 		"run": "Gargoyle_Run_Loop", "attack": "Gargoyle_Attack",
 		"hit": "Gargoyle_Hit", "death": "Gargoyle_Death",
-		"walk_speed": 1.13, "run_speed": 3.22, "run_threshold": 2.00,
+		"walk_speed": 1.00, "run_speed": 2.80, "run_threshold": 1.80,
 		"impact": 0.95, "duration": 1.80,
-		"head_offset": Vector3(0.0, 0.06, -0.08),
-		"head_radius": 0.30, "head_half": 0.14, "organic": false, "hover": 0.0,
+		"head_offset": Vector3.ZERO,
+		"head_radius": 0.20, "head_half": 0.15, "organic": false, "hover": 0.0,
 	},
 }
 
@@ -135,10 +135,13 @@ func _tune_materials() -> void:
 				var tuned := (material as StandardMaterial3D).duplicate() as StandardMaterial3D
 				tuned.emission_energy_multiplier = 1.35
 				tuned.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-				if bool(_data.get("organic", false)) \
+				var mat_name := tuned.resource_name.to_lower()
+				var fleshy := mat_name.contains("skin") or mat_name.contains("membrane") \
+						or mat_name.contains("fur") or mat_name.contains("flesh")
+				if bool(_data.get("organic", false)) and fleshy \
 						and RenderingServer.get_current_rendering_method() == "forward_plus":
 					tuned.subsurf_scatter_enabled = true
-					tuned.subsurf_scatter_strength = 0.08
+					tuned.subsurf_scatter_strength = 0.06
 				node.set_surface_override_material(surface, tuned)
 
 

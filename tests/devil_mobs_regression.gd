@@ -16,8 +16,8 @@ const MOBS := {
 			"run": "HellGoat_Run_Loop", "attack": "HellGoat_Attack",
 			"hit": "HellGoat_Hit", "death": "HellGoat_Death",
 		},
-		"durations": [2.4, 1.1, 0.65, 1.45, 0.5, 1.25],
-		"height": [2.05, 2.35], "span": [0.9, 1.4],
+		"durations": [2.5, 1.333, 0.667, 1.45, 0.5, 1.25],
+		"height": [1.95, 2.15], "span": [1.9, 2.2],
 		"kind": 3, "display": "Hellish goat man",
 	},
 	"succubus": {
@@ -28,8 +28,8 @@ const MOBS := {
 			"run": "Succubus_Run_Loop", "attack": "Succubus_Attack",
 			"hit": "Succubus_Hit", "death": "Succubus_Death",
 		},
-		"durations": [2.4, 1.15, 0.62, 1.35, 0.45, 1.2],
-		"height": [1.75, 2.1], "span": [1.4, 2.4],
+		"durations": [2.5, 1.333, 0.667, 1.35, 0.45, 1.2],
+		"height": [1.8, 2.0], "span": [2.5, 2.9],
 		"kind": 4, "display": "Succubus",
 	},
 	"spawn": {
@@ -40,8 +40,8 @@ const MOBS := {
 			"run": "Spawn_Run_Loop", "attack": "Spawn_Attack",
 			"hit": "Spawn_Hit", "death": "Spawn_Death",
 		},
-		"durations": [2.0, 0.9, 0.5, 1.1, 0.4, 1.0],
-		"height": [1.0, 1.35], "span": [0.7, 1.4],
+		"durations": [2.933, 2.0, 0.667, 1.1, 0.4, 1.0],
+		"height": [1.0, 1.2], "span": [0.8, 1.1],
 		"kind": 5, "display": "Devil spawn",
 	},
 	"beast": {
@@ -52,8 +52,8 @@ const MOBS := {
 			"run": "Beast_Run_Loop", "attack": "Beast_Attack",
 			"hit": "Beast_Hit", "death": "Beast_Death",
 		},
-		"durations": [2.6, 1.3, 0.75, 1.6, 0.5, 1.3],
-		"height": [1.45, 1.9], "span": [2.2, 3.3],
+		"durations": [2.4, 0.6, 0.6, 1.6, 0.5, 0.45],
+		"height": [1.6, 1.9], "span": [2.8, 3.2],
 		"kind": 6, "display": "Hell beast",
 	},
 	"gargoyle": {
@@ -64,8 +64,8 @@ const MOBS := {
 			"run": "Gargoyle_Run_Loop", "attack": "Gargoyle_Attack",
 			"hit": "Gargoyle_Hit", "death": "Gargoyle_Death",
 		},
-		"durations": [3.0, 1.5, 0.9, 1.8, 0.5, 1.4],
-		"height": [2.1, 2.55], "span": [1.0, 2.2],
+		"durations": [2.5, 1.333, 0.933, 1.8, 0.5, 1.4],
+		"height": [2.0, 2.2], "span": [2.8, 3.2],
 		"kind": 7, "display": "Gargoyle",
 	},
 }
@@ -132,7 +132,7 @@ func _check_asset(world_root: Node3D, mob_id: String) -> void:
 				var loops: bool = player.get_animation(clip_name).loop_mode == Animation.LOOP_LINEAR
 				check(loops == (key in ["idle", "walk", "run"]), mob_id + " loop mode for " + clip_name)
 		var bone_count := skeleton.get_bone_count()
-		check(bone_count >= 24 and bone_count <= 48, mob_id + " bone count is in budget (found %d)" % bone_count)
+		check(bone_count >= 24 and bone_count <= 96, mob_id + " bone count is in budget (found %d)" % bone_count)
 		for bone in ["root", "pelvis", "head", "jaw"]:
 			check(skeleton.find_bone(bone) >= 0, mob_id + " has bone " + bone)
 		var head_bone := skeleton.find_bone("head")
@@ -161,14 +161,28 @@ func _check_asset(world_root: Node3D, mob_id: String) -> void:
 		check(maxf(bounds.size.x, bounds.size.z) >= float(spec.span[0])
 			and maxf(bounds.size.x, bounds.size.z) <= float(spec.span[1]),
 			"%s footprint %.3f stays in range" % [mob_id, maxf(bounds.size.x, bounds.size.z)])
-		var material := mesh.mesh.surface_get_material(0) as StandardMaterial3D
-		check(material != null, mob_id + " has a standard material")
-		if material:
-			check(material.albedo_texture != null, mob_id + " has an albedo atlas")
-			check(material.normal_enabled and material.normal_texture != null, mob_id + " has a normal atlas")
-			check(material.roughness_texture != null, mob_id + " has a roughness atlas")
-			check(material.metallic_texture != null, mob_id + " has a metallic atlas")
-			check(material.emission_enabled and material.emission_texture != null, mob_id + " has an emission atlas")
+		var materials: Array[StandardMaterial3D] = []
+		for surface in mesh.mesh.get_surface_count():
+			var candidate := mesh.mesh.surface_get_material(surface) as StandardMaterial3D
+			if candidate != null:
+				materials.append(candidate)
+		check(not materials.is_empty(), mob_id + " has standard materials")
+		var has_albedo := false
+		var has_normal := false
+		var has_roughness := false
+		var has_metallic := false
+		var has_emission := false
+		for candidate in materials:
+			has_albedo = has_albedo or candidate.albedo_texture != null
+			has_normal = has_normal or (candidate.normal_enabled and candidate.normal_texture != null)
+			has_roughness = has_roughness or candidate.roughness_texture != null
+			has_metallic = has_metallic or candidate.metallic_texture != null
+			has_emission = has_emission or (candidate.emission_enabled and candidate.emission_texture != null)
+		check(has_albedo, mob_id + " has an albedo map")
+		check(has_normal, mob_id + " has a normal map")
+		check(has_roughness, mob_id + " has a roughness map")
+		check(has_metallic, mob_id + " has a metallic map")
+		check(has_emission, mob_id + " has an emission map")
 	# Adjacent metadata must describe the same deliverable.
 	var metadata_text := FileAccess.get_file_as_string(str(spec.json))
 	check(not metadata_text.is_empty(), "Missing metadata JSON for " + mob_id)
@@ -177,8 +191,8 @@ func _check_asset(world_root: Node3D, mob_id: String) -> void:
 		check(metadata is Dictionary, mob_id + " metadata parses")
 		if metadata is Dictionary:
 			check(str(metadata.get("mob", "")) == mob_id, mob_id + " metadata mob id matches")
-			check(int(metadata.get("mesh_triangles", 0)) >= 20000, mob_id + " triangle budget")
-			check(metadata.get("embedded_images", []).size() >= 4, mob_id + " embeds four atlas images")
+			check(int(metadata.get("mesh_triangles", 0)) >= 12000, mob_id + " triangle budget")
+			check(int(metadata.get("embedded_images", 0)) >= 4, mob_id + " embeds at least four images")
 	instance.queue_free()
 	await process_frame
 

@@ -1,217 +1,179 @@
 # Devil mob authoring workflow
 
 Five frontier mobs — Hellish goat man, Succubus, Devil spawn, Hell beast and
-Gargoyle — are shipped as original, reproducible Blender assets. This document
-records the workflow used to produce them and the gates a sixth mob must pass.
+Gargoyle — are shipped as reproducible, source-based Blender assets. This is the
+same quality route as the ranger: licensed CC0 Quaternius human bases, outfits,
+hair and skeleton clips, with original devil anatomy, materials, rig additions
+and attack/death authoring on top.
 
-## What this pipeline is, and is not
+The earlier procedural metaball pass was retired. It produced complete assets,
+but its smooth blob anatomy and packed single-atlas surfaces did not reach the
+ranger's authored PBR detail. The current pipeline keeps the deterministic,
+offline build and replaces the surfaces with the ranger's CC0 source maps.
 
-There is no text-to-3D or image-generation service in this repository. The
-mobs are not downloaded, photogrammetry-scanned or generated from the supplied
-concept images. Those images were used only as design references; the shipped
-geometry, textures and motion are authored deterministically from measurements
-and procedural fields.
+## Sources and licensing
 
-"Photorealistic" here means game-photoreal at a 2–30 m combat distance:
+Everything below is CC0 1.0 Universal; provenance is recorded in
+`assets/characters/LICENSE.txt` and the source archives stay in the ignored
+`.runtime/character-source/` workspace.
 
-- continuous anatomical surfaces with correct joints and a readable silhouette;
-- layered rigid details (horns, claws, teeth, hooves, wings, armour) rather
-  than a single smooth blob;
-- a packed PBR atlas with albedo, tangent-space normal, roughness, metallic and
-  emission channels, not a flat global tint;
-- multi-scale surface detail (pores, fur clumps, keratin rings, leather grain,
-  membrane veins, granite speckle, lichen, ember cracks);
-- authored whole-body motion with contact timing, anticipation and follow-through;
-- runtime tuning that the glTF cannot carry (emission energy, anisotropic
-  filtering; subsurface scattering is enabled only on Forward+, while this
-  project ships the GL Compatibility renderer).
+| Source | Used for |
+| --- | --- |
+| Quaternius — Universal Base Characters: `Superhero_Female_FullBody`, `Superhero_Male_FullBody` | Body, face, eyes, 65-bone skeleton |
+| Quaternius — Modular Character Outfits Fantasy: `Female_Ranger`, `Male_Ranger` | Corset/boots, full ranger leather outfit, hood, belts, source hand skin |
+| Quaternius — Universal Base Characters hairstyles: `Hair_Long` | Succubus hair |
+| Quaternius — Universal Animation Library 1/2 | Idle, walk, jog/sprint, crouch loops and sword swings re-used for locomotion and attacks |
+| Ironwood `ironwood_wolf.glb` | Hell beast body, wolf skeleton and authored idle/trot/attack/death |
+| Original authoring in this repository | Horns, skull, wings, tails, claws, fangs, hooves, fur mantle, stone treatment, tinted PBR maps, extra bones, attack/hit/death timing |
 
-It does not attempt pore-level close-up realism. A capture from 10–30 m in the
-frontier is the review surface.
+The supplied design-reference images informed palette and proportions only.
+They are not redistributed and are not build inputs. No generated image,
+photogrammetry scan, paid pack or restricted file is used.
 
 ## Repository surfaces
 
 | Surface | Purpose |
 | --- | --- |
-| `tools/prepare_devils.py` | CLI entry point; builds one or all mobs |
-| `tools/devil_pipeline.py` | Shared mesh, rig, weighting, atlas, clip, export and metadata code |
-| `tools/devils/<mob>.py` | One `SPEC` + `build_parts()` per creature |
-| `tools/check_devil.py` | Objective source-blend validator |
+| `tools/build_devils.py` | One-command texture + Blender rebuild for one or all mobs |
+| `tools/devil_styles.py` | Source-map paths, palettes and per-mob recipes |
+| `tools/devil_source_textures.py` | System-Python PBR pass (Pillow + numpy): source-map tinting and authored horn/bone/membrane/cloth/stone/fur/eye maps |
+| `tools/prepare_devil_sources.py` | Blender assembly, extra anatomy, rig additions, clip authoring, GLB/JSON export |
+| `tools/devil_source_pipeline.py` | Shared Blender import, material, mesh, skinning, bake, export and measurement helpers |
 | `assets/characters/devils/ironwood_<mob>.glb` | Runtime skinned, animated, textured mesh |
-| `assets/characters/devils/ironwood_<mob>.json` | Measured bones, bounds, clips, texture contract |
-| `assets/characters/devils/ironwood_<mob>.glb.import` | Godot import settings (embedded PNG, 60 Hz) |
-| `scripts/devil_mob_visual.gd` | Presentation-only clip sampler |
-| `scripts/devil_mob.gd` | Gameplay AI, damage, death, loot reward |
-| `scripts/range_world.gd` | `devil_spawns` terrain placements |
-| `tests/devil_mobs_regression.gd` | Asset, visual, gameplay and world coverage |
+| `assets/characters/devils/ironwood_<mob>.json` | Measured bones, bounds, clips, materials, head zone |
+| `assets/characters/devils/ironwood_<mob>.glb.import` | Godot import settings (embedded images, 60 Hz sampling) |
+| `scripts/devil_mob_visual.gd` | Presentation-only clip sampler, attack impact mapping, material tuning |
+| `scripts/devil_mob.gd` | Gameplay AI, collision, damage, parries, gold, corpse hold |
+| `scripts/range_world.gd` | 16 `devil_spawns`, including the five-mob starting court |
+| `tests/devil_mobs_regression.gd` | Asset, visual, gameplay, head-zone and frontier coverage |
 
-Ignore `.runtime/devil-source/<mob>/`: it holds the editable `.blend`, atlas
-PNGs and capture sheets. Do not commit it.
+Ignored intermediates live in `.runtime/devil-source/<mob>/` (`textures/`,
+`captures/`). Do not commit them.
 
-## Stage 1 — design and measure
-
-Record the archetype, role, target height, silhouette landmarks, palette and
-required actions before writing geometry. The five shipped specs use these
-targets:
-
-| Mob | Height / span | Role | Signature |
-| --- | --- | --- | --- |
-| Hellish goat man | 2.20 m | Charger | Ram horns, cloven hooves, shaggy forearms, headbutt |
-| Succubus | 1.88 m | Flyer | Bat wings, spade tail, claw rake, crimson skin |
-| Devil spawn | 1.15 m | Crawler | Long arms, exposed ribs, needle teeth, pounce |
-| Hell beast | 1.65 m shoulder / 2.7 m long | Brute | Heavy quadruped, mane, tusks, rear-and-slam |
-| Gargoyle | 2.35 m | Sentinel | Folded stone wings, ember cracks, double-fist slam |
-
-Coordinates are metres, Blender Z-up, creature facing +Y. glTF export is Y-up,
-so +Y Blender becomes -Z in Godot, the gameplay forward axis. The sole plane is
-z = 0; the head bone is named exactly `head`.
-
-## Stage 2 — anatomy and details
-
-Build the deforming body as one metaball object. Metaballs give a continuous
-skin across shoulders, hips and neck without the welded seams of joined
-primitives. Then convert, smooth and decimate to the triangle budget.
-
-Add details as separate meshes with their own surface tag:
-
-- horns, claws, teeth, hooves, tusks and back spikes (keratin/bone);
-- eyes as emissive spheres;
-- leather harnesses, straps and belts;
-- wing membranes (a curved grid, solidified for thickness);
-- fur/hair clumps: tapered tubes grown from sampled surface points along the
-  local normal, with a length-scaled bend.
-
-Each part is either envelope-weighted to the body skin map or rigidly weighted
-to one bone. The shared envelope pass keeps at most four influences per vertex
-and smooths across mesh edges to remove shoulder/hip banding.
-
-## Stage 3 — UV and PBR atlas
-
-All parts are joined into one mesh, then smart-projected and packed into one
-UV atlas. The pipeline clears any primitive UV layers first: joining objects
-that already carry UVs otherwise leaves smart-project output in a different
-layer than the one the painter reads.
-
-The atlas is painted in rest space from the actual triangle positions on a
-2048² (large mobs) or 1024² (small mobs) grid. Each texel records:
-
-- **Albedo** (sRGB): base/second/accent palette mixed by multi-scale value
-  noise, ridged veins, pores, strand fields, growth rings, grain, lichen and
-  cavity darkening.
-- **Height** (metric): drives the tangent-space normal map. The gradient is
-  converted with each triangle's UV-to-metre scale, so detail strength stays
-  consistent across automatically packed islands.
-- **Roughness / metallic**: material-specific values plus noise; eyes are very
-  smooth, metal is metallic, stone and fur are rough.
-- **Emission** (sRGB): ember irises, molten gargoyle cracks, spawn skin seams.
-- **Cavity**: baked from vertex concavity into albedo and roughness; no
-  separate AO texture is shipped.
-
-Fur/hair clumps are painted with directional strand fields, not a flat colour.
-The single packed material carries all five maps, so each mob is one primitive
-and one draw call per instance.
-
-## Stage 4 — rig, weights and clips
-
-Each creature declares an explicit semantic bone map and five-bone leg chains.
-The shared solver places the ankle/foot at a target, keeps the cannon and sole
-world-level, and supports a foot pitch and toe flex. It is a sagittal solve:
-every bone in a leg chain must share one X coordinate. Arms, wings, tails and
-ears are authored with armature-space pitch/yaw/roll.
-
-Bake six clips at 60 Hz:
-
-| Clip | Loop | Purpose |
-| --- | --- | --- |
-| idle | yes | breathing, weight shift, head scan, wing/tail drift |
-| walk | yes | low-speed locomotion, planted contacts |
-| run | yes | high-speed locomotion, longer stride and clearance |
-| attack | no | anticipation, fast strike, follow-through, recovery |
-| hit | no | flinch/stagger |
-| death | no | collapse and held corpse |
-
-Walk/run stride and duty are exported so runtime cadence can be derived from
-actual movement. The attack JSON records the impact time; the visual controller
-maps the physics attack clock onto that frame instead of letting the clip free-run.
-
-## Stage 5 — export and import
-
-`tools/prepare_devils.py` writes the GLB with NLA tracks (one per clip),
-Y-up conversion, embedded PNG textures, tangents and skins. It triangulates
-before export so tangents can be calculated. The adjacent JSON is generated by
-parsing the GLB, not by hand.
-
-Godot import settings must keep:
-
-- `animation/fps=60`;
-- `gltf/embedded_image_handling=2` (embed, do not extract duplicate PNGs);
-- `nodes/use_name_suffixes=false` (stable `Skeleton3D` / `AnimationPlayer` names);
-- `meshes/ensure_tangents=true`.
-
-## Stage 6 — runtime integration
-
-`DevilMobVisual` loads only the requested GLB at spawn, verifies all six clips,
-sets loop modes, tunes the material (emission energy, anisotropic filtering,
-optional SSS) and samples clips. It never moves the character root.
-
-`DevilMob` owns a shared state machine: IDLE, RETURN, CIRCLE, WINDUP, STRIKE,
-RECOVER, STAGGER, DEAD. Per-mob profiles change health, damage, reach, speed,
-orbit radius, aggression/leash, cadence, lunge speed, turn rate and gold. The
-existing `attacked`, `defeated`, `take_damage`, `stagger`, head-zone and loot
-contracts are unchanged, so parries, blocks, headshots, damage numbers and the
-frontier loot rotation work without special cases.
-
-## Stage 7 — validation gates
-
-Run, in order:
+## Build
 
 ```powershell
-$Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
-& $Blender --background --python-exit-code 1 --python tools/prepare_devils.py -- all
-& $Blender --background --python-exit-code 1 --python tools/check_devil.py -- hell_goat
+python tools/build_devils.py all
+# or one mob
+python tools/build_devils.py succubus
+```
+
+The wrapper runs the system-Python texture pass, then Blender 5.1 in
+background mode. Override the executable with `IRONWOOD_BLENDER` if needed.
+After a rebuild, reimport in Godot and run the regression:
+
+```powershell
+$Godot = '.\\.runtime\\godot\\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --editor --path . --import
 & $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
 ```
 
-`check_devil.py` reports triangle count, bones, bounds, unweighted vertices,
-maximum influences and per-clip ground penetration. Gates:
+## Shipped budgets
 
-- 20k–55k triangles; 24–48 bones; ≤4 influences; no unweighted vertices.
-- rest sole within ±0.05 m of z = 0;
-- idle/walk/run/hit minimum z ≥ −0.03 m;
-- attack/death minimum z ≥ −0.06 m;
-- six clips with the exact names and durations declared in JSON;
-- embedded albedo, normal, roughness, metallic and emission maps;
-- root bone stationary in every clip; the GLB may carry constant sampled root translation tracks, so the test checks the posed root origin rather than the channel count.
+Heights and footprints are measured from the imported GLB. The head zone is a
+marker bone (`head`) at the face; `jaw` exists on every mob. Extra wing/tail
+bones are numbered `wing_01_l`… and `tail_01`…
 
-`devil_mobs_regression.gd` additionally checks the imported clip inventory,
-loop modes, head zone, visual state mapping, gameplay death/reward, the
-16-entry devil spawn table (five of them in the starting safe-ring court), the
-unchanged 36-entry legacy spawn table, and 16 live mobs in the frontier with all
-five kinds present.
+| Mob | Height | Footprint | Triangles | Bones | Materials | Images |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Hellish goat man | 2.02 m | 2.07 m | 49,292 | 68 | 9 | 21 |
+| Succubus | 1.91 m | 2.72 m | 36,286 | 76 | 8 | 20 |
+| Devil spawn | 1.09 m | 0.99 m | 16,054 | 70 | 6 | 15 |
+| Hell beast | 1.78 m | 2.99 m | 16,436 | 37 | 9 | 7 |
+| Gargoyle | 2.08 m | 3.05 m | 17,896 | 76 | 5 | 14 |
 
-Tests are not visual proof. Render the PBR hero and contact sheets into
-`.runtime/devil-source/<mob>/captures/`, inspect opposing stride phases, the
-attack impact, the death hold and the silhouette at the intended camera
-distance, and report what was actually inspected.
+All meshes are a single joined skinned MeshInstance with multiple PBR material
+surfaces. Feet sit at approximately y = 0; rest minima are within 4 cm of the
+ground.
 
-## Adding a sixth mob
+## Clip contract
 
-1. Copy `tools/devils/hell_goat.py` and change `SPEC`.
-2. Keep the height, bone map, chains, skin map, palette, eye data and six clip
-   records explicit; do not infer them from the goat.
-3. Keep leg-chain X constant and target the fourth bone's rest head.
-4. Author geometry with `part(obj, tag, rigid=...)`; list every tag in
-   `paint_tags`.
-5. Run the build, then `check_devil.py`; fix pose or weights, never the checker.
-6. Add the mob to `DevilMobVisual.SCENES`/`DATA`, `DevilMob.PROFILES`,
-   `RangeWorld.devil_spawns` and the regression table.
-7. Re-run the asset, visual, gameplay and world checks.
+All clips are baked/sampled at 60 Hz, in-place, with a stationary root. Idle,
+walk and run loop; attack, hit and death do not. Attack durations and impact
+times are authored to the gameplay clock so `DevilMobVisual._seek_attack()`
+places the authored strike on the damage frame.
 
-## Provenance
+| Mob | Idle | Walk | Run | Attack (impact) | Hit | Death |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Hellish goat man | 2.500 | 1.333 | 0.667 | 1.45 (0.62) | 0.50 | 1.25 |
+| Succubus | 2.500 | 1.333 | 0.667 | 1.35 (0.58) | 0.45 | 1.20 |
+| Devil spawn | 2.933 | 2.000 | 0.667 | 1.10 (0.48) | 0.40 | 1.00 |
+| Hell beast | 2.400 | 0.600 | 0.600 | 1.60 (0.82) | 0.50 | 0.45 |
+| Gargoyle | 2.500 | 1.333 | 0.933 | 1.80 (0.95) | 0.50 | 1.40 |
 
-The five GLBs, their atlases and their clips are original procedural work
-authored by `tools/prepare_devils.py`. No third-party model, texture, motion
-or generated image is included. The authored `.blend` files, atlas PNGs and
-capture sheets remain in ignored `.runtime` storage; the tracked deliverables
-are the GLBs, adjacent JSON, import settings, authoring code and tests.
+Locomotion comes from the Quaternius loops (spawn uses the crouch loops; beast
+uses the wolf trot for both walk and run, with speed-scaled playback). Attacks:
+one-handed overhead for the succubus, two-handed overhead for the goat man and
+gargoyle, dagger thrust for the spawn, authored wolf bite for the beast. Hit
+and death are baked from the idle pose with authored spine/jaw/wing/tail
+overlays; the death clips add a grounded pelvis drop.
+
+## Material design
+
+Source skin, leather, hair and eye maps are retained at their authored detail
+and recoloured in display space, so pores, leather grain, weave and iris
+structure survive. The authored extras use deterministic PBR sets:
+
+- **Skin** — source albedo/normal/roughness, tinted; mottling, subtle veins and
+  scars; 2048².
+- **Leather** — 4096² ranger base/normal/ORM resampled to 2048², tinted oxblood
+  (succubus/spawn) or weathered brown (goat man).
+- **Hair** — 2048² source cards resampled to 1024² and tinted near-black.
+- **Eyes** — 256² iris recoloured amber/red with an emissive iris mask.
+- **Horn** — 1024² keratin with growth rings, longitudinal striations, stained
+  base and pale tip; normal + roughness.
+- **Bone** — 1024² pale bone with pores, stains and crack networks; normal +
+  roughness.
+- **Membrane** — 1024² wing membrane with branching vessels, wrinkles and a
+  raised normal map.
+- **Cloth** — 1024² weave with slub and fuzz.
+- **Stone** — 2048² basalt with cracks, pits, moss/lichen and an ember-fissure
+  emission map.
+- **Fur** — 1024² root-to-tip strand gradient with clump normal/roughness.
+
+Runtime tuning (`devil_mob_visual.gd`) enables subsurface scattering only on
+skin/membrane/fur material names and anisotropic filtering on every surface.
+Emission energy is raised for eyes/stone/fur. The glTF carries the maps; the
+runtime carries only values glTF cannot express.
+
+## Animation and rig notes
+
+- The 65-bone Quaternius skeleton is retained for every humanoid. Extra bones:
+  `head`, `jaw`, and for winged mobs `wing_01_l/r`…`wing_03_l/r`; tails use
+  `tail_01`…`tail_03`.
+- The male base/outfit shares the ranger skeleton, so idle/walk/sprint clips
+  apply directly. The female base is 17 mm lower at the pelvis; the build adds
+  that offset to the pelvis location keys for the succubus/spawn.
+- The finished character is rotated 180° around Blender Z and scaled once, so
+  the exported asset faces glTF −Z. Source action locations are scaled by the
+  same factor. The mesh is unparented during transform application and
+  reparented afterwards; this avoids baking the parent scale twice.
+- Attack bakes time-warp the source clip so the authored strike lands on the
+  measured `impact`; the visual then maps the physics WINDUP/STRIKE/RECOVER
+  clock onto that same pose. No clip event deals damage.
+- Hit/death are full-skeleton bakes from the idle pose; the death action gets a
+  grounded pelvis drop. Root translation stays zero, which the regression
+  checks at the start, midpoint and end of every clip.
+
+## Verification gates
+
+`tests/devil_mobs_regression.gd` loads each GLB and checks:
+
+- exactly six clips, names, durations (±0.08 s) and loop modes;
+- 24–96 bones, `root`/`pelvis`/`head`/`jaw`, head rest on the −Z forward side
+  and above the pelvis;
+- stationary root at clip start/mid/end;
+- rest sole near y = 0, height and footprint ranges;
+- at least one albedo/normal/roughness/metallic/emission map across the
+  multi-material mesh;
+- idle → walk → run selection, attack/hit/death clip selection, head-zone
+  center/profile and death reward;
+- the 16-entry `devil_spawns` table, the unchanged 36-entry legacy
+  `enemy_spawns`, all five kinds live in the frontier, and the starting court
+  (one of each species, inside the safe ring, on screen and idle).
+
+Visual review is still required. The build has no image-capable critic; it
+verifies source provenance, map presence/resolution, silhouette bounds, bone
+placement, clip timing and contact. Render the preview and the in-game captures
+in `.runtime/devil-source/<mob>/captures/` and `.runtime/devil-captures/` and
+inspect them at combat distance before shipping.
