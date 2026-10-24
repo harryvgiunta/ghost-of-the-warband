@@ -77,6 +77,7 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	check(rig.begin_melee(hand,variant),"The %s %s diagonal cut starts" % [hand,variant])
 	var window: Vector2 = rig._melee_window(hand)
 	var duration: float = rig.melee_seconds(hand)
+	var arm_side := "right" if hand == "right" else "left"
 	var previous: Dictionary = rig.get_joint_positions()
 	var entry := Vector3.ZERO
 	var exit := Vector3.ZERO
@@ -91,6 +92,11 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	var bent_knees := false
 	var finish_stance := 0.0
 	var in_window := false
+	var load_tip_forward := INF
+	var load_wrist_up := -INF
+	var load_wrist_forward := INF
+	var entry_forward := 0.0
+	var exit_forward := 0.0
 	for frame in int(ceil(duration*120.0))+1:
 		rig.advance_animation(1.0/120.0)
 		var joints: Dictionary = rig.get_joint_positions()
@@ -109,6 +115,17 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 		pelvis_low = minf(pelvis_low,pelvis)
 		pelvis_high = maxf(pelvis_high,pelvis)
 		var hips: Vector3 = (joints.left_hip+joints.right_hip)*0.5
+		var swing_forward: Vector3 = -rig.global_basis.z
+		swing_forward.y = 0.0
+		swing_forward = swing_forward.normalized()
+		if time < window.x:
+			# The last windup frame is the cocked pose: wrist above the
+			# shoulder, hand held back, blade loaded behind the shoulder plane.
+			var load_shoulder: Vector3 = joints[arm_side+"_shoulder"]
+			var load_wrist: Vector3 = joints[arm_side+"_wrist"]
+			load_tip_forward = (rig.get_blade_tip(hand)-rig.global_position).dot(swing_forward)
+			load_wrist_up = load_wrist.y-load_shoulder.y
+			load_wrist_forward = (load_wrist-load_shoulder).dot(swing_forward)
 		if time >= window.x and time <= window.y:
 			lowest = minf(lowest,tip.y-rig.global_position.y)
 			highest = maxf(highest,tip.y-rig.global_position.y)
@@ -124,11 +141,18 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 			if not in_window:
 				in_window = true
 				entry = tip
+				entry_forward = (tip-rig.global_position).dot(swing_forward)
 				loaded_hips = hips
 			else:
 				swept += wrapf(azimuth-previous_azimuth,-PI,PI)
 			exit = tip
+			exit_forward = (tip-rig.global_position).dot(swing_forward)
 			previous_azimuth = azimuth
+	check(load_wrist_up>0.18,"The diagonal cocks the wrist above the shoulder before cutting (up %.3f, size %d %s %s)" % [load_wrist_up,size,hand,variant])
+	check(load_tip_forward<0.05,"The diagonal backswing loads the blade behind the body plane (tip %.3f, wrist up %.3f, size %d %s %s)" % [load_tip_forward,load_wrist_up,size,hand,variant])
+	var two_hand_load := size == 2 and hand == "right" and not dagger
+	check(load_wrist_forward<(0.32 if two_hand_load else 0.18),"The diagonal draws the hand back instead of extending it forward")
+	check(exit_forward-entry_forward>0.30,"The backswing releases forward through the active cut")
 	check(absf(swept)>deg_to_rad(105.0),"Diagonal blade traverses a broad frontal arc")
 	check(swept < 0.0 if variant == "diagonal_right" else swept > 0.0,"Opposite diagonal variants mirror the cut direction")
 	check(entry.y-exit.y > 0.35,"The active stroke descends instead of sweeping a level plane")

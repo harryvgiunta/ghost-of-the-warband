@@ -38,16 +38,24 @@ const STAFF_DATA = [
 	{"name":"Ember staff", "length":1.75},
 	{"name":"Bone staff", "length":1.60},
 ]
-## Descending cuts keep their load in front of the shoulder. Larger blades
-## unwind farther, without pointing backwards or pitching into the floor.
+## Every standard cut starts with a real backswing: the hands cock up and
+## behind the striking shoulder while the chest winds away from the target.
+## `back` is the rearward wrist travel from the shoulder line, `height` the
+## lift above it and `cock` the extra blade angle beyond the active sector.
+## Larger blades load higher and unwind farther before falling across the
+## front. The cut itself still drives forward, so the coil never reads as a
+## wind-up that merely pushes the sword away from the body.
 const DIAGONAL_SECONDS = [0.60,0.78,1.02]
 const DIAGONAL_SWING = [
-	{"load":0.90, "cross":1.00, "body_load":0.36, "body_cross":0.55,
-		"radius_load":0.28, "radius_cross":0.42, "height":0.06},
-	{"load":1.02, "cross":1.12, "body_load":0.44, "body_cross":0.64,
-		"radius_load":0.30, "radius_cross":0.45, "height":0.08},
-	{"load":1.14, "cross":1.24, "body_load":0.52, "body_cross":0.76,
-		"radius_load":0.28, "radius_cross":0.44, "height":0.10},
+	{"load":0.90, "cross":1.00, "body_load":0.50, "body_cross":0.58,
+		"radius_load":0.24, "radius_cross":0.42, "height":0.26,
+		"back":0.30, "cock":0.15},
+	{"load":1.02, "cross":1.12, "body_load":0.60, "body_cross":0.66,
+		"radius_load":0.26, "radius_cross":0.45, "height":0.30,
+		"back":0.36, "cock":0.15},
+	{"load":1.14, "cross":1.24, "body_load":0.70, "body_cross":0.78,
+		"radius_load":0.24, "radius_cross":0.44, "height":0.34,
+		"back":0.30, "cock":0.15},
 ]
 const MELEE_VARIANTS = ["overhead","diagonal_left","diagonal_right","stab"]
 const RAISE_SECONDS := 0.30
@@ -1777,22 +1785,26 @@ func _diagonal_swing_timeline(hand: String) -> Dictionary:
 	var size := off_weapon_index if hand == "left" else sword_index
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
 	var spec: Dictionary = DIAGONAL_SWING[0 if dagger else size]
-	var coil := smoothstep(0.0,window.x,time)
+	# Reach the cocked pose just before the active stroke and hold it there
+	# for a beat, so the backswing reads instead of blending into the cut.
+	var coil := smoothstep(0.0,window.x*0.86,time)
 	var cut := smoothstep(0.0,1.0,melee_cut_progress(hand))
 	var release := smoothstep(duration*0.76,duration,time)
 	var cross_body := (side < 0.0) == (hand == "right")
 	var radius_load := float(spec.radius_load)*(0.82 if cross_body else 1.0)
+	var back := float(spec.back)*(0.72 if cross_body else 1.0)
+	var half := melee_half_angle(hand)
 	var azimuth := side*lerpf(lerpf(0.30,float(spec.load),coil),-float(spec.cross),cut)
-	# Blade azimuth matches combat's swept frontal sector; the wrist stays
-	# closer to centre so a wide cut does not require a stretched shoulder.
-	var blade_azimuth := side*lerpf(melee_half_angle(hand),-melee_half_angle(hand),cut)
+	# The blade loads outside the active sector and pitched up; it drops into
+	# the sector as the hands drive forward. Combat still owns the hit arc.
+	var blade_azimuth := side*lerpf(lerpf(0.30,half+float(spec.cock),coil),-half,cut)
 	return {
 		"raise":coil, "coil":coil, "cut":cut, "release":release,
 		"azimuth":azimuth, "blade_azimuth":blade_azimuth,
 		"body":-side*lerpf(float(spec.body_load)*coil,-float(spec.body_cross),cut),
 		"radius":lerpf(lerpf(0.22,radius_load,coil),float(spec.radius_cross),cut),
-		"height":float(spec.height),
-		"lean":0.04*coil-0.10*cut, "pitch":lerpf(-0.30,0.14,cut),
+		"height":float(spec.height), "back":back*(1.0-cut),
+		"lean":0.06*coil-0.10*cut, "pitch":lerpf(-0.55,0.16,cut),
 	}
 
 func _apply_melee_swing_path() -> void:
@@ -1867,7 +1879,8 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 	# support forearm across the chest even when both wrists are reachable.
 	var hand_centre := pivot if two_hand else shoulder
 	var target := hand_centre+right*(radial.dot(right)*float(swing.radius)*0.55)
-	target += forward*((0.40 if two_hand else 0.24)+0.10*radial.dot(forward))+Vector3.UP*(height-hand_centre.y)
+	target += forward*((0.40 if two_hand else 0.24)+0.10*radial.dot(forward)-float(swing.back))
+	target += Vector3.UP*(height-hand_centre.y)
 	var elbow := _bone_world(_arms[arm][1]).origin
 	var wrist_origin := _bone_world(_arms[arm][2]).origin
 	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(wrist_origin)
@@ -1907,9 +1920,13 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 	if start_out.length_squared() < 0.0001:
 		start_out = right*hand_side
 	var leave := start.origin+start_out.normalized()*0.26+Vector3.UP*0.16
+	# The windup bows outward and up toward the cocked pose. Reusing the low
+	# forward recovery control would push the hands away from the body before
+	# the cut and erase the backswing.
+	var load_via := pivot+right*(0.30*hand_side)+forward*0.06+Vector3.UP*0.16
 	var hand_path := target
 	if raise < 1.0:
-		hand_path = _hand_arc(start.origin,leave,via,hand_path,raise)
+		hand_path = _hand_arc(start.origin,leave,load_via,hand_path,raise)
 	var start_sword := start.basis*grip.basis
 	var target_sword := Basis.looking_at(blade_dir,Vector3.UP)
 	# Once the pose owns the arm, use the target orientation directly. Blending
@@ -1967,14 +1984,20 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 		var support_target: Basis = handle.basis*_sword_grip_left.basis.inverse()
 		var support_basis := _blend_basis(left.basis,support_target,solve_weight)
 		var carry_depth := clampf((handle.affine_inverse()*(left*_palm_left)).z,0.06,0.29)
-		var grip_depth := lerpf(carry_depth,0.20,solve_weight)
+		# A cocked hilt is high and central; keep the support hand nearer the
+		# primary so its forearm does not fold across the chest during the load.
+		var grip_depth := lerpf(carry_depth,
+			lerpf(0.12,0.20,smoothstep(0.0,0.55,float(swing.cut))),solve_weight)
 		var support_offset := handle*Vector3(0,0,grip_depth)-sword_hand.origin-support_basis*_palm_left
 		var reach_weight := lerpf(0.998,0.90,solve_weight)
 		# Bone-pose recovery may pull the primary wrist back before the torso
 		# has unwound. Keep the shared hilt ahead of the chest while solving,
 		# then hand its depth back to the authored carry with the same blend.
 		var carry_handoff := 1.0-smoothstep(0.65,1.0,release)
-		var front_clearance := lerpf((hand.origin-pivot).dot(forward),0.40,engage*carry_handoff)
+		# A cocked hilt may sit close to the chest line, but never inside it.
+		# Restore the 0.40 m front clearance as soon as the cut drives out.
+		var clearance_floor := lerpf(0.14,0.40,smoothstep(0.0,0.30,float(swing.cut)))
+		var front_clearance := lerpf((hand.origin-pivot).dot(forward),clearance_floor,engage*carry_handoff)
 		var hilt_target := sword_hand.origin+forward*maxf(0.0,front_clearance-(sword_hand.origin-pivot).dot(forward))
 		var coupled := _two_hand_wrist_target(hilt_target,shoulder,arm_reach*reach_weight,
 			support_shoulder-support_offset,support_length*reach_weight,forward)
@@ -1988,7 +2011,10 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 		var exterior_pole := (-right*1.4+forward*0.9-Vector3.UP*0.25).normalized()
 		# Keep the exterior bend until the hilt has returned to the front guard;
 		# restoring the carry elbow earlier cuts across the still-turned ribs.
-		var elbow_weight := engage*support_attach*carry_handoff
+		# Drive the support elbow outward from the start of the acquisition.
+		# Waiting for full attachment leaves the authored down/in bend in place
+		# while the wrist is already crossing the chest.
+		var elbow_weight := engage*smoothstep(0.0,load_end*0.82,time)*carry_handoff
 		var support_pole := authored_support_pole.lerp(exterior_pole,elbow_weight)
 		var wrist_target := handle*Vector3(0,0,grip_depth)-support_basis*_palm_left
 		if support_attach < 1.0:
