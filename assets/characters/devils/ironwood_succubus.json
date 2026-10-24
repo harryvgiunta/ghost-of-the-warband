@@ -1,0 +1,169 @@
+{
+  "asset": "ironwood_succubus.glb",
+  "mob": "succubus",
+  "display_name": "Succubus",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 76,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "spine_03",
+    "neck_01",
+    "Head",
+    "head",
+    "jaw",
+    "clavicle_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "hand_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
+    "clavicle_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "hand_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "wing_01_l",
+    "wing_02_l",
+    "wing_03_l",
+    "wing_01_r",
+    "wing_02_r",
+    "wing_03_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r",
+    "tail_01",
+    "tail_02",
+    "tail_03"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -1.150214,
+    -0.008407,
+    -0.167541
+  ],
+  "rest_bounds_max": [
+    1.150214,
+    2.100865,
+    0.442334
+  ],
+  "height": 2.109272,
+  "mesh_triangles": 34110,
+  "materials": [
+    "Skin_Succubus",
+    "Hair_Succubus",
+    "Eye_Succubus",
+    "Leather_Succubus",
+    "Horn_Succubus",
+    "Membrane_Succubus"
+  ],
+  "embedded_images": 17,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
+  "clips": {
+    "idle": {
+      "name": "Succubus_Idle_Loop",
+      "duration": 2.5,
+      "impact": null,
+      "loop": true
+    },
+    "walk": {
+      "name": "Succubus_Walk_Loop",
+      "duration": 1.333333,
+      "impact": null,
+      "loop": true
+    },
+    "run": {
+      "name": "Succubus_Run_Loop",
+      "duration": 0.666667,
+      "impact": null,
+      "loop": true
+    },
+    "attack": {
+      "name": "Succubus_Attack",
+      "duration": 1.35,
+      "impact": 0.58,
+      "loop": false
+    },
+    "hit": {
+      "name": "Succubus_Hit",
+      "duration": 0.45,
+      "impact": null,
+      "loop": false
+    },
+    "death": {
+      "name": "Succubus_Death",
+      "duration": 1.2,
+      "impact": null,
+      "loop": false
+    }
+  },
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.135,
+    "half_height": 0.095
+  },
+  "authoring_fps": 60,
+  "source": "CC0 Quaternius female base, female ranger outfit, hair, core animations; original devil modifications",
+  "surface_notes": [
+    "source female base and ranger leather",
+    "long hair",
+    "bat wings, tail, keratin horns and claws",
+    "crimson-grey skin with authored pores/veins"
+  ]
+}

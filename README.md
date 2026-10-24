@@ -364,6 +364,32 @@ python tools/world_textures.py
 
 The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedication are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
 
+## Devil court
+
+Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (jet-black armorless goat demon with empty skull sockets and black horns/hooves), **Succubus** (half-open-wing, black-horned raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (carved stone brute with ember-slit sockets, a fanged muzzle, crown horns, half-raised bat wings and a spiked spine). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract. Five of the sixteen spawns form a starting court inside the town’s safe ring — one of each species, about 10 m ahead of the south-gate spawn — so all five can be inspected immediately without aggro.
+
+They are built from the same licensed CC0 Quaternius sources as the ranger — the male/female bases, ranger outfits, long hair and 65-bone animation library — with original devil anatomy and paint on top. No generated image, photogrammetry scan or restricted file is used. Each mob is one imported GLB with:
+
+- a real skinned Quaternius body (the goat deliberately uses no ranger outfit) or the original Briar wolf for the beast, plus authored goat skull, horns, clean membrane wings, tails, claws, fangs, hoof boots, fur and stone spikes;
+- source PBR skin, leather, hair and eye maps (2048/1024 px) tinted while retaining pores, grain and iris detail, plus authored bone, horn, membrane, stone and fur maps;
+- six baked 60 Hz clips: idle, walk, run, attack, hit and death, using the ranger/wolf authored locomotion and time-warped attacks;
+- extra `head`/`jaw`, wing and tail bones where the silhouette needs them.
+
+The result is the ranger's authored PBR quality on a demon silhouette rather than a procedural blob.
+
+`scripts/devil_mob_visual.gd` is presentation only: it samples the clips, scales cadence from actual post-collision movement, and maps the physics attack clock onto the authored impact frame. `scripts/devil_mob.gd` owns the shared state machine, per-mob profiles, collision, damage, parries/staggers, gold and the corpse hold. The existing frontier loot rotation and HUD feedback are unchanged.
+
+The full authoring workflow, budgets and gates are documented in [docs/devil-mobs.md](docs/devil-mobs.md). Rebuild all five assets with:
+
+```powershell
+python tools/build_devils.py all
+$Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
+& $Godot --headless --editor --path . --import
+& $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
+```
+
+Tinted source maps, authored PBR maps, preview renders and capture sheets are written to the ignored `.runtime/devil-source/<mob>/` workspace; source archives stay in `.runtime/character-source/`. Keep each shipped GLB, its adjacent JSON and its `.glb.import` together; import settings embed the textures and sample animation at 60 Hz.
+
 ## Update
 
 **Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. Current windows show **0.4.0** in the HUD, and `Play.cmd` opens the main menu.
@@ -409,6 +435,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/cover_movement_regression.gd
 & $Godot --headless --path . --script res://tests/wolf_regression.gd
 & $Godot --headless --path . --script res://tests/devil_regression.gd
+& $Godot --headless --path . --script res://tests/devil_mobs_regression.gd
 & $Godot --headless --path . --script res://tests/swing_reach_regression.gd
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd

@@ -1,4 +1,4 @@
-IRONWOOD RANGER — ASSET LICENSE AND PROVENANCE
+IRONWOOD CHARACTER ASSETS — LICENSE AND PROVENANCE
 
 All source model and animation content below is distributed by its creators under
 Creative Commons CC0 1.0 Universal (Public Domain Dedication):
@@ -243,3 +243,89 @@ packing can vary. The hashes below identify the shipped artifacts.
 
 GLB SHA-256: 8124663196ee2fdd18f8a051c7140311b114d570fd2cc1080e764b56bbe135eb
 Metadata JSON SHA-256: 77bfb0b985cb56e63d3a10d70f7eebfdc2877eb92a517738939dc06bdc56cce7
+
+IRONWOOD DEVIL MOBS — SOURCE-BASED WORK AND PROVENANCE
+
+The five frontier devil mobs (Hellish goat man, Succubus, Devil spawn, Hell
+beast and Gargoyle) are original assemblies and modifications built on the
+CC0 Quaternius sources already documented above and the project's original CC0
+Ironwood wolf. No generated image, photogrammetry scan, paid pack or restricted
+file is included. The supplied design reference images informed palette and
+proportion only; they are not redistributed and are not build inputs.
+
+Sources:
+  Quaternius — Universal Base Characters (CC0):
+    Superhero_Female_FullBody, Superhero_Male_FullBody (body, face, eyes,
+    65-bone skeleton) and the long hair cards.
+  Quaternius — Modular Character Outfits Fantasy (CC0):
+    Female_Ranger and Male_Ranger (body, arms, hands, belts, legs, boots,
+    hood, pauldron), with their source skin/leather PBR maps.
+  Quaternius — Universal Animation Library 1 and 2 (CC0):
+    Idle_Loop, Walk_Loop, Jog_Fwd_Loop, Sprint_Loop, Crouch_Idle_Loop,
+    Crouch_Fwd_Loop, Sword_Overhead_OneHand, Sword_Overhead and Dagger_Stab
+    as locomotion/attack bases.
+  Ironwood wolf (original CC0, see the section above):
+    Hell beast body, 37-bone skeleton and authored idle/trot/bite/death.
+
+Original modifications in this repository:
+  - goat: human head removed; jet-black furred body with a bare black goat
+    skull, empty sockets, black ram horns, hooves and claws; no armor,
+    harness, rings or glowing eyes; compact black neck and feral hunch;
+  - succubus: large black satanic horns, clean half-open bat-wing membranes,
+    spade tail and claws; no waistband, belt or loincloth ring;
+  - gargoyle: naked basalt stone body, folded stone wings, feral hunch,
+    spinal/shoulder/forearm spikes, fangs, crown horns and oversized claws;
+    empty stone sockets with ember cores; 1.5x scale; no armor, cloth or belt;
+  - spawn enlarged head, small horns, fangs, needle claws, ragged wraps and
+    tail;
+  - beast cranial horns, spinal ridge, enlarged toe claws and charred/ember
+    coat treatment;
+  - tinted source skin/leather/hair/eye maps that retain the source pores,
+    grain, weave and iris structure; authored bone, horn, membrane, cloth,
+    stone and fur maps;
+  - extra head/jaw, wing and tail bones; attack/hit/death bakes, time warps
+    and grounded death drops;
+  - all gameplay integration (devil_mob.gd, devil_mob_visual.gd, spawns,
+    regression).
+
+Assets:
+  assets/characters/devils/ironwood_hell_goat.glb  + .json
+  assets/characters/devils/ironwood_succubus.glb   + .json
+  assets/characters/devils/ironwood_spawn.glb      + .json
+  assets/characters/devils/ironwood_beast.glb      + .json
+  assets/characters/devils/ironwood_gargoyle.glb   + .json
+
+Each GLB contains a joined skinned mesh with multiple PBR material surfaces,
+embedded source/authored PNG maps (skin, leather, hair, eye, horn, bone,
+membrane, cloth, stone, fur), extra bones where required, and six 60 Hz
+in-place clips: idle, walk, run, attack, hit and death. The adjacent JSON
+records the measured skeleton, bounds, clips, impact times, materials and head
+zone. Runtime presentation, AI and spawns live in scripts/devil_mob_visual.gd,
+scripts/devil_mob.gd and RangeWorld.devil_spawns.
+
+The assets are dedicated to the public domain under CC0 1.0 Universal, the
+same dedication linked at the top of this file, to match the source packs and
+the project's existing character assets.
+
+Reproduce with:
+  python tools/build_devils.py all
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+  Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/devil_mobs_regression.gd
+
+A fresh build reproduces the measured geometry, rigs, clip timing and texture
+recipes; byte-identical output is not promised because Blender's Smart UV
+packing/export ordering can vary. Source archives stay in the ignored
+.runtime/character-source/ workspace; tinted maps, authored maps and captures
+stay in .runtime/devil-source/<mob>/.
+
+Final shipped hashes:
+  ironwood_beast.glb SHA-256: 9e707abb23377f8a8d02b24d9d3fbb999b27092dcb09eded7ce0687d11528eea
+  ironwood_beast.json SHA-256: 19347e730b20dec096415131533e4b0c1687c86be6497ff5cbbff40a0e6d1703
+  ironwood_gargoyle.glb SHA-256: a815d25425bc2849c7f6288f88dc9030257c4337b3f5ab3cc3375a1d6bb48d44
+  ironwood_gargoyle.json SHA-256: f7ed83207be9f7a6d4f57c40213ee4df3a59d307f2a9a651dc593e22c08ac8a9
+  ironwood_hell_goat.glb SHA-256: 6ecd520c1699203f3801bf32c1e61fd1798844cc2a6280c88317fb37dbc76b8f
+  ironwood_hell_goat.json SHA-256: 4a9fc3ef1e571eefcd803db21e839f2a939707b6cd6c5cef617af26ad191bbc8
+  ironwood_spawn.glb SHA-256: f9bbd3b1493c29cbced64762504dbe5a6360e4e3b8a81d2a0a5d35ff1d67a866
+  ironwood_spawn.json SHA-256: 53e216811dbb905abe6814b3a5860f51a4e9ca4a33cb233e95c6fa6066853ddf
+  ironwood_succubus.glb SHA-256: df7605ef10544cdc56bb6e6091a51b0518f1d8325e0b41e09282b7ca1dc44660
+  ironwood_succubus.json SHA-256: d81d9bb3bcdf6439bc025ebcfe90d034adb23620a6ecb199e500d2a2bf4afdf6

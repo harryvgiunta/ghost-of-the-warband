@@ -1,0 +1,167 @@
+{
+  "asset": "ironwood_gargoyle.glb",
+  "mob": "gargoyle",
+  "display_name": "Gargoyle",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 76,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "spine_03",
+    "neck_01",
+    "Head",
+    "head",
+    "jaw",
+    "clavicle_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "hand_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
+    "clavicle_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "hand_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "wing_01_l",
+    "wing_02_l",
+    "wing_03_l",
+    "wing_01_r",
+    "wing_02_r",
+    "wing_03_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r",
+    "tail_01",
+    "tail_02",
+    "tail_03"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -1.61762,
+    -0.015406,
+    -0.543889
+  ],
+  "rest_bounds_max": [
+    1.61762,
+    3.33875,
+    0.812294
+  ],
+  "height": 3.354156,
+  "mesh_triangles": 33776,
+  "materials": [
+    "Stone_Gargoyle",
+    "Dark_Gargoyle",
+    "HornStone_Gargoyle",
+    "EmberEye_Gargoyle"
+  ],
+  "embedded_images": 8,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
+  "clips": {
+    "idle": {
+      "name": "Gargoyle_Idle_Loop",
+      "duration": 2.5,
+      "impact": null,
+      "loop": true
+    },
+    "walk": {
+      "name": "Gargoyle_Walk_Loop",
+      "duration": 1.333,
+      "impact": null,
+      "loop": true
+    },
+    "run": {
+      "name": "Gargoyle_Run_Loop",
+      "duration": 0.933,
+      "impact": null,
+      "loop": true
+    },
+    "attack": {
+      "name": "Gargoyle_Attack",
+      "duration": 1.8,
+      "impact": 0.95,
+      "loop": false
+    },
+    "hit": {
+      "name": "Gargoyle_Hit",
+      "duration": 0.5,
+      "impact": null,
+      "loop": false
+    },
+    "death": {
+      "name": "Gargoyle_Death",
+      "duration": 1.4,
+      "impact": null,
+      "loop": false
+    }
+  },
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.3,
+    "half_height": 0.2
+  },
+  "authoring_fps": 60,
+  "source": "CC0 Quaternius male base plus core animations; original carved gargoyle head, muscle sculpt, stone wings, horns, claws and stance",
+  "surface_notes": [
+    "heavily muscled basalt anatomy, hunched predator stance",
+    "carved demon face: heavy brow, deep sockets, ember eyes, bared fangs",
+    "swept crown horns, pointed ears, spinal and shoulder spikes",
+    "half-raised stone bat wings, heavy tail, oversized claws"
+  ]
+}

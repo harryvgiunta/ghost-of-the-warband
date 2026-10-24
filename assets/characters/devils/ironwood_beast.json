@@ -1,0 +1,133 @@
+{
+  "asset": "ironwood_beast.glb",
+  "mob": "beast",
+  "display_name": "Hell beast",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 37,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "ear_l",
+    "ear_r",
+    "scapula_l",
+    "upper_fore_l",
+    "lower_fore_l",
+    "carpus_l",
+    "front_paw_l",
+    "front_toes_l",
+    "scapula_r",
+    "upper_fore_r",
+    "lower_fore_r",
+    "carpus_r",
+    "front_paw_r",
+    "front_toes_r",
+    "tail_01",
+    "tail_02",
+    "tail_03",
+    "tail_04",
+    "thigh_l",
+    "shin_l",
+    "hock_l",
+    "hind_paw_l",
+    "hind_toes_l",
+    "thigh_r",
+    "shin_r",
+    "hock_r",
+    "hind_paw_r",
+    "hind_toes_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.362966,
+    -0.004254,
+    -1.43775
+  ],
+  "rest_bounds_max": [
+    0.362666,
+    1.779253,
+    1.556477
+  ],
+  "height": 1.783507,
+  "mesh_triangles": 16436,
+  "materials": [
+    "Fur_Beast",
+    "Mouth_Beast",
+    "Tongue_Beast",
+    "Nose_Beast",
+    "Dark_Beast",
+    "EyeIris_Beast",
+    "Teeth_Beast",
+    "Pads_Beast",
+    "Horn_Beast"
+  ],
+  "embedded_images": 7,
+  "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
+  "clips": {
+    "idle": {
+      "name": "Beast_Idle_Loop",
+      "duration": 2.4,
+      "impact": null,
+      "loop": true
+    },
+    "walk": {
+      "name": "Beast_Walk_Loop",
+      "duration": 0.6,
+      "impact": null,
+      "loop": true
+    },
+    "run": {
+      "name": "Beast_Run_Loop",
+      "duration": 0.6,
+      "impact": null,
+      "loop": true
+    },
+    "attack": {
+      "name": "Beast_Attack",
+      "duration": 1.6,
+      "impact": 0.82,
+      "loop": false
+    },
+    "hit": {
+      "name": "Beast_Hit",
+      "duration": 0.5,
+      "impact": null,
+      "loop": false
+    },
+    "death": {
+      "name": "Beast_Death",
+      "duration": 0.45,
+      "impact": null,
+      "loop": false
+    }
+  },
+  "head_zone": {
+    "bone": "head",
+    "radius": 0.38,
+    "half_height": 0.2
+  },
+  "authoring_fps": 60,
+  "source": "CC0 wolf asset plus original char/ember treatment, horns, ridge and claws",
+  "surface_notes": [
+    "charred wolf fur with ember fissures",
+    "bone horns and spinal ridge",
+    "enlarged claws",
+    "glowing eyes"
+  ]
+}
