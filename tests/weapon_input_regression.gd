@@ -51,16 +51,22 @@ func look(relative: Vector2) -> void:
 func equipment_checks(scene, rig, frontier: bool) -> void:
 	if frontier:
 		await key(KEY_I)
-		check(scene._field_inventory_open(),"I opens the field paperdoll")
+		check(scene._ui_open() and scene.world_ui.active_view() == "inventory","I opens the backpack")
 		await key(KEY_ESCAPE)
-		check(not scene._field_inventory_open(),"Escape closes the field paperdoll")
-		await key(KEY_O)
+		check(not scene._ui_open(),"Escape closes the backpack")
+		await key(KEY_P)
+		check(scene._ui_open() and scene.world_ui.active_view() == "equipment","P opens the paperdoll")
+		await key(KEY_ESCAPE)
+		check(not scene._ui_open() and not scene._cursor_free,"Closing the paperdoll restores mouse-look")
+		scene.equip_bow(2)
+		scene.equip_sword(0)
+		scene.equip_weapon("bow")
 	else:
 		await key(KEY_ESCAPE)
-		check(scene._cursor_free,"Escape frees the arena cursor for the equipment panel")
-	await click(scene.hud.bow_buttons[2])
-	await click(scene.hud.sword_buttons[0])
-	check(rig.bow_index == 2 and rig.sword_index == 0,"Mouse clicks select each weapon's size independently")
+		check(scene._cursor_free,"Escape frees the arena cursor for equipment clicks")
+		scene.send_action("bow",2)
+		scene.send_action("sword",0)
+		check(rig.bow_index == 2 and rig.sword_index == 0,"The arena accepts size selections through its authority action")
 	await key(KEY_2)
 	check(rig.weapon == "sword" and rig.active_sword.visible and not rig.active_bow.visible,"Key 2 equips the actual sword model")
 	check(rig.bow_index == 2 and rig.sword_index == 0,"Key 2 never changes a weapon size")
@@ -71,18 +77,17 @@ func equipment_checks(scene, rig, frontier: bool) -> void:
 	await key(KEY_3)
 	check(rig.weapon == "dagger" and rig.active_dagger.visible and not rig.active_sword.visible and not rig.active_bow.visible,"Key 3 equips the actual dagger model")
 	check(rig.bow_index == 2 and rig.sword_index == 0,"Key 3 selects no bow or sword size")
-	await key(KEY_2)
-	await click(scene.hud.sword_buttons[2])
-	check(rig.sword_index == 2 and rig.bow_index == 2,"Sword size remains mouse-selectable while equipped")
-	await key(KEY_1)
-	await click(scene.hud.bow_buttons[0])
-	check(rig.bow_index == 0 and rig.sword_index == 2,"Bow size clicks do not overwrite the selected sword")
-	if frontier:
-		await key(KEY_O)
-		check(not scene._cursor_free,"Closing equipment restores mouse-look")
-	else:
+	if not frontier:
+		await key(KEY_2)
+		scene.send_action("sword",2)
+		check(rig.sword_index == 2 and rig.bow_index == 2,"Sword size remains selectable while equipped")
+		await key(KEY_1)
+		scene.send_action("bow",0)
+		check(rig.bow_index == 0 and rig.sword_index == 2,"Bow size actions do not overwrite the selected sword")
 		await key(KEY_ESCAPE)
-		check(not scene._cursor_free,"Arena equipment toggle restores mouse-look")
+	else:
+		await key(KEY_1)
+	check(not scene._cursor_free,"Combat controls keep mouse-look captured")
 
 func held_key(code: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()

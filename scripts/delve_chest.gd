@@ -14,7 +14,7 @@ const FLASH_ENERGY := 4.5
 const FLASH_TIME := 0.55
 
 var is_open: bool = false
-var wave: int = 0
+var depth: int = 0
 
 var _lid: Node3D
 var _burst: CPUParticles3D
@@ -40,9 +40,9 @@ func _ready() -> void:
 	_build_flash()
 
 
-## Cache which wave spawned this chest (presentation only).
-func set_wave(value: int) -> void:
-	wave = value
+## Cache which depth spawned this chest (presentation only).
+func set_depth(value: int) -> void:
+	depth = value
 
 
 func is_opened() -> bool:

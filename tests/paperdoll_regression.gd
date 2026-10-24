@@ -39,6 +39,7 @@ func run() -> void:
 	state.save_path = TEST_SAVE
 	state.reset()
 	_test_taxonomy()
+	_test_quick_swap()
 	_test_hand_rules()
 	_test_overflow_and_off_override()
 	_test_dual_and_jewelry()
@@ -46,7 +47,7 @@ func run() -> void:
 	_test_persistence()
 	await _test_rig_loadouts()
 	await _test_gear_replication()
-	await _test_hub()
+	await _test_world_kit()
 	await _test_frontier_loot()
 	state.reset()
 	_remove(TEST_SAVE)
@@ -63,8 +64,10 @@ func _test_taxonomy() -> void:
 	check(state.equipped_id("head") == "armor_leather_head","The leather hood starts equipped")
 	check(state.equipped_id("feet") == "armor_leather_feet","The leather boots start equipped")
 	check(state.main_item() == "bow_short" and state.off_item().is_empty(),"The shortbow starts in the main hand with an empty off hand")
-	check(state.inventory.size() == 3,"The starter backpack holds three pieces")
-	check(state.inventory.has("sword_short") and state.inventory.has("dagger_iron") and state.inventory.has("shield_buckler"),"The starter backpack contains the sword, dagger and buckler")
+	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size(),"The starter backpack holds every catalog weapon")
+	for item_id: String in StateScript.STARTING_INVENTORY:
+		check(state.inventory.has(item_id),"The starter backpack contains %s" % item_id)
+	check(state.inventory.size() == 12,"The catalog exposes twelve weapons")
 	check(state.credits == StateScript.STARTING_CREDITS,"The starter purse is unchanged")
 	for item_id: String in StateScript.ITEMS:
 		var item: Dictionary = StateScript.ITEMS[item_id]
@@ -134,6 +137,37 @@ func _test_taxonomy() -> void:
 	check(str(focus_loadout.focus.kind) == "tome","A tome off hand marks the focus")
 	var off_weapon: Dictionary = StateScript.build_loadout("sword_short","dagger_iron",{})
 	check(str(off_weapon.off_weapon.kind) == "dagger","An off-hand dagger marks the off weapon")
+
+func _test_quick_swap() -> void:
+	state.reset()
+	check(state.quick_set_label() == "Shortsword + Buckler","The quick swap defaults to the starter sword and buckler")
+	var before: int = state.inventory.size()
+	var result: Dictionary = state.quick_swap()
+	check(bool(result.ok),"TAB swaps the bow for the bound melee pair")
+	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","The bound main and off hand equip together")
+	check(state.inventory.has("bow_short") and not state.inventory.has("sword_short") and not state.inventory.has("shield_buckler"),"The displaced bow trades places with the melee pair")
+	check(state.inventory.size() == before - 1,"The two-hand melee pair and one bow keep the backpack count honest")
+	check(state.quick_main() == "bow_short" and state.quick_off().is_empty(),"The outgoing bow becomes the new quick set")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "bow_short" and state.off_item().is_empty(),"TAB toggles back to the bow")
+	check(state.inventory.has("sword_short") and state.inventory.has("shield_buckler"),"The melee pair returns to the backpack")
+
+	result = state.equip_from_inventory(_find("sword_great"))
+	check(bool(result.ok) and state.main_item() == "sword_great","The greatsword equips for a custom bind")
+	result = state.bind_quick_from_equipped()
+	check(bool(result.ok) and state.quick_main() == "sword_great" and state.quick_off().is_empty(),"BIND SWAP stores the current pair")
+	result = state.equip_from_inventory(_find("bow_short"))
+	check(bool(result.ok) and state.main_item() == "bow_short","The bow re-equips after binding")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "sword_great" and state.off_item().is_empty(),"TAB equips the bound two-hander")
+	check(state.inventory.has("bow_short"),"The bow returns to the backpack")
+
+	state.quick = {"main":"staff_fire", "off":""}
+	var staff := _find("staff_fire")
+	check(staff >= 0,"The ember staff is carried")
+	state.move_to_stash(staff)
+	result = state.quick_swap()
+	check(not bool(result.ok) and str(result.get("message","")).contains("not carried"),"A stashed quick-swap weapon blocks the swap")
 
 func _test_hand_rules() -> void:
 	state.reset()
@@ -306,6 +340,7 @@ func _test_persistence() -> void:
 	state.equipped["ring2"] = "ring_silver"
 	state.floor_items.assign(["staff_fire","focus_tome"])
 	state.inventory.append("sword_arming")
+	state.quick = {"main":"sword_great", "off":""}
 	state.save_state()
 	var loaded = StateScript.new()
 	loaded.save_path = TEST_SAVE
@@ -314,6 +349,7 @@ func _test_persistence() -> void:
 	check(loaded.equipped_id("neck") == "neck_ember","Neck jewelry survives a reload")
 	check(loaded.equipped_id("ring1") == "ring_copper" and loaded.equipped_id("ring2") == "ring_silver","Rings survive a reload")
 	check(loaded.main_item() == "bow_short" and loaded.off_item().is_empty(),"The bow loadout survives a reload")
+	check(loaded.quick_main() == "sword_great" and loaded.quick_off().is_empty(),"The quick swap pair survives a reload")
 	check(PackedStringArray(loaded.floor_items) == PackedStringArray(state.floor_items),"Floor items survive a reload")
 	loaded.free()
 
@@ -446,113 +482,51 @@ func _test_gear_replication() -> void:
 	world.queue_free()
 	await process_frame
 
-func _test_hub() -> void:
+func _test_world_kit() -> void:
 	state.reset()
-	state.equipped["main"] = "sword_short"
-	state.equipped["off"] = "shield_buckler"
-	state.equipped["chest"] = "armor_mail_chest"
-	state.equipped["head"] = "armor_mail_head"
-	state.equipped["hands"] = "armor_mail_hands"
-	state.equipped["legs"] = "armor_mail_legs"
-	state.equipped["feet"] = "armor_mail_feet"
-	state.save_state()
-	var menu = load("res://menu.tscn").instantiate()
-	root.add_child(menu)
-	await process_frame
-	await process_frame
-	check(menu.hud.paperdoll_buttons.size() == 10,"The hub renders ten paperdoll slots")
-	check(menu.hud.backpack_buttons.size() == 10,"The hub renders ten backpack slots")
-	check(menu.hud.stash_buttons.size() == 20,"The hub still renders twenty stash slots")
-	check(menu.hud.stock_buttons.size() == 28,"The vendor list buffers twenty-eight stock rows")
-	check(menu.hud.vendor_buttons.size() == 3,"The hub still offers three vendors")
-	check(menu.archer.sword_index == 0,"The preview follows the equipped sword")
-	check(menu.archer.shield_equipped,"The preview shows the equipped shield")
-	check(menu.archer.armor_piece("chest") == 1,"The preview follows the equipped mail chest")
-	var view_rect: Rect2 = menu.get_viewport().get_visible_rect()
-	var panels: Array[Panel] = [menu.hud.header_panel,menu.hud.purse_panel,menu.hud.paperdoll_panel,menu.hud.backpack_panel,menu.hud.stash_panel,menu.hud.vendor_panel,menu.hud.action_panel]
-	for panel in panels:
-		check(view_rect.encloses(panel.get_global_rect()),"Hub panel %s stays on screen" % panel.name)
-	for first in panels.size():
-		for second in range(first+1,panels.size()):
-			check(not panels[first].get_global_rect().intersects(panels[second].get_global_rect()),"Hub panels do not overlap")
-	for button in menu.hud.paperdoll_buttons:
-		check(menu.hud.paperdoll_panel.get_global_rect().encloses(button.get_global_rect()),"Paperdoll slots sit inside their panel")
-	for button in menu.hud.backpack_buttons:
-		check(menu.hud.backpack_panel.get_global_rect().encloses(button.get_global_rect()),"Backpack slots sit inside their panel")
-	check(menu.hud.paperdoll_buttons[0].text.begins_with("HEAD"),"The first paperdoll slot is the head")
-	check(menu.hud.paperdoll_buttons[8].text.begins_with("MAIN HAND"),"The ninth paperdoll slot is the main hand")
-	check(menu.hud.paperdoll_buttons[9].text.begins_with("OFF-HAND"),"The tenth paperdoll slot is the off hand")
-	# Right-click equips from the backpack. The sword is already equipped, so
-	# use the starter bow as the displaced item and check the preview follows.
-	var bow: int = state.inventory.find("bow_short")
-	if bow < 0:
-		state.inventory.append("bow_short")
-		bow = state.inventory.size()-1
-	menu.hud.refresh()
-	menu.hud._on_backpack_slot(bow)
-	menu.hud._on_equip()
-	check(state.main_item() == "bow_short","The hub EQUIP action follows the paperdoll")
-	check(menu.archer.weapon == "bow","The hub preview switches to the equipped bow")
-	check(state.inventory.has("sword_short"),"The old main sword returns to the backpack")
-	# Drag the sword from the backpack onto the main-hand slot.
+	var game = load("res://main.tscn").instantiate()
+	root.add_child(game)
+	await create_timer(0.5).timeout
+	game.set_physics_process(false)
+	for enemy in game.enemies:
+		enemy.set_physics_process(false)
+	game.world_ui.open_equipment()
+	check(game.world_ui.paperdoll_buttons.size() == 10,"The in-world kit renders ten paperdoll slots")
+	check(game.world_ui.backpack_buttons.size() == StateScript.INVENTORY_CAPACITY,"The in-world kit buffers every backpack slot")
+	check(game.world_ui.stash_buttons.size() == 20,"The stash panel renders twenty slots")
+	check(game.world_ui.stock_buttons.size() == 28,"The vendor list buffers twenty-eight stock rows")
+	check(game.world_ui.paperdoll_panel.visible and not game.world_ui.inventory_panel.visible,"Equipment shows only the paperdoll")
+	check(game.world_ui.paperdoll_buttons[0].text.begins_with("HEAD"),"The first paperdoll slot is the head")
+	check(game.world_ui.paperdoll_buttons[8].text.begins_with("MAIN HAND"),"The ninth paperdoll slot is the main hand")
+	check(game.world_ui.paperdoll_buttons[9].text.begins_with("OFF-HAND"),"The tenth paperdoll slot is the off hand")
+	for button in game.world_ui.paperdoll_buttons:
+		check(game.world_ui.paperdoll_panel.get_global_rect().encloses(button.get_global_rect()),"Paperdoll slots sit inside their panel")
+	game.world_ui.close()
+	game.world_ui.open_inventory()
+	check(game.world_ui.inventory_panel.visible and not game.world_ui.paperdoll_panel.visible,"Inventory shows only the pack")
+	for button in game.world_ui.backpack_buttons:
+		check(game.world_ui.inventory_panel.get_global_rect().encloses(button.get_global_rect()),"Backpack slots sit inside their panel")
+	# Equip the starter sword from the pack and check the live rig follows.
 	var sword: int = state.inventory.find("sword_short")
-	menu.hud._on_slot_dropped({"area":"backpack","index":sword,"slot":"","item":"sword_short"},"paperdoll",-1,"main")
-	check(state.main_item() == "sword_short","Backpack-to-paperdoll drop equips the main hand")
-	# Drop the bow from the backpack onto the 3D view.
-	var bow_index: int = state.inventory.find("bow_short")
-	menu.hud._on_world_dropped({"area":"backpack","index":bow_index,"slot":"","item":"bow_short"})
-	check(state.floor_items.has("bow_short"),"A backpack item dropped on the 3D view lands on the floor")
-	check(menu.hud.floor_buttons.size() == 1,"The floor strip lists the dropped item")
-	menu.hud._on_floor_slot(0)
-	menu.hud._on_equip()
-	check(state.inventory.has("bow_short") and state.floor_items.is_empty(),"The floor strip picks the item back up")
-	# Paperdoll-to-paperdoll move and paperdoll-to-3D drop.
-	state.equipped["ring1"] = "ring_copper"
-	state.equipped["ring2"] = ""
-	menu.hud.refresh()
-	menu.hud._on_slot_dropped({"area":"paperdoll","index":-1,"slot":"ring1","item":"ring_copper"},"paperdoll",-1,"ring2")
-	check(state.equipped_id("ring1").is_empty() and state.equipped_id("ring2") == "ring_copper","Paperdoll drop moves a ring")
-	menu.hud._on_world_dropped({"area":"paperdoll","index":-1,"slot":"ring2","item":"ring_copper"})
-	check(state.floor_items.has("ring_copper"),"A paperdoll item dropped on the 3D view lands on the floor")
-	# Hover card and inspector expose the item's stats and quoted flavor line.
-	var sample_index: int = state.inventory.find("dagger_iron")
-	if sample_index < 0:
-		state.inventory.append("dagger_iron")
-		sample_index = state.inventory.size()-1
-	menu.hud.refresh()
-	menu.hud._on_backpack_slot(sample_index)
-	await process_frame
-	check(menu.hud._detail_meta.text.contains("DMG 14–28"),"The inspector shows the damage range")
-	check(menu.hud._detail_meta.text.contains("SPEED 0.5 s"),"The inspector shows the attack speed")
-	check(menu.hud._detail_text.text.contains("“Small, honest, and always closer than you think.”"),"The inspector quotes the flavor line")
-	check(menu.hud._detail_text.get_visible_line_count() == menu.hud._detail_text.get_line_count(),"The inspector summary and quote are not clipped")
-	menu.hud._on_paperdoll_slot("head")
-	check(menu.hud._detail_meta.text.contains("MAIL ARMOR  /  HEAD"),"The inspector names the armor set and slot")
-	check(menu.hud._detail_meta.text.contains("GUARD 3%"),"The inspector shows the armor guard")
-	check(menu.hud._detail_meta.text.contains("EQUIPPED"),"The inspector marks a worn piece")
-	menu.hud._on_backpack_slot(sample_index)
-	var slot: InventorySlot = menu.hud.backpack_buttons[sample_index]
-	var tip: Variant = slot._make_custom_tooltip("Iron Dagger")
-	check(tip is Control,"Hovering a backpack item builds a stat card")
-	if tip is Control:
-		var texts: Array[String] = []
-		_collect_labels(tip,texts)
-		check("Iron Dagger" in texts,"The hover card names the item")
-		check("DAGGER  /  ONE-HAND" in texts,"The hover card shows the type and hand")
-		check("DAMAGE" in texts and "14–28" in texts,"The hover card shows the min/max damage")
-		check("ATTACK SPEED" in texts and "0.5 s stab" in texts,"The hover card shows the attack speed")
-		check("REACH" in texts and "1.2 m" in texts,"The hover card shows the reach")
-		check("“Small, honest, and always closer than you think.”" in texts,"The hover card quotes the flavor line")
-		tip.free()
-	state.equipped["main"] = "sword_great"
-	state.equipped["off"] = ""
-	menu.hud.refresh()
-	menu.hud._on_paperdoll_slot("main")
-	await process_frame
-	var meta_font: Font = menu.hud._detail_meta.get_theme_font("font")
-	var meta_width: float = meta_font.get_string_size(menu.hud._detail_meta.text,HORIZONTAL_ALIGNMENT_LEFT,-1,11).x
-	check(meta_width <= menu.hud._detail_meta.size.x,"The longest inspector stat line fits")
-	menu.queue_free()
+	check(sword >= 0,"The starter sword is in the pack")
+	game.world_ui._location = "backpack"
+	game.world_ui._index = sword
+	game.world_ui._on_primary()
+	check(state.main_item() == "sword_short","Equipping from the pack updates the main hand")
+	check(game.archer.weapon == "sword","The live rig applies the equipped sword")
+	check(state.inventory.has("bow_short"),"The displaced bow returns to the pack")
+	# Right-click unequips the main hand back into the pack.
+	game.world_ui._on_right_clicked("paperdoll",-1,"main","sword_short")
+	check(state.main_item().is_empty() and state.inventory.has("sword_short"),"Right-click unequips the paperdoll")
+	game.world_ui.close()
+	var tab := InputEventKey.new()
+	tab.keycode = KEY_TAB
+	tab.physical_keycode = KEY_TAB
+	tab.pressed = true
+	game._unhandled_input(tab)
+	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","TAB equips the bound pair")
+	check(game.archer.weapon == "sword" and game.archer.shield_equipped,"TAB applies the bound pair to the live rig")
+	game.queue_free()
 	await process_frame
 
 func _test_frontier_loot() -> void:
@@ -593,5 +567,20 @@ func _test_frontier_loot() -> void:
 	state.inventory.remove_at(state.inventory.size()-1)
 	game._collect_loot(0.0)
 	check(state.inventory.has("ring_blood"),"The same pickup is claimable after making room")
+	var cinder = null
+	for enemy in game.enemies:
+		if int(enemy.kind) == 2:
+			cinder = enemy
+			break
+	check(cinder != null,"The frontier contains a cinder devil")
+	if cinder != null:
+		cinder.devil_weapon = "sword"
+		var pickups_before: int = game.loot_pickups.size()
+		cinder.take_damage(99999.0,-1)
+		var dropped := false
+		for drop_node in game.loot_pickups:
+			if is_instance_valid(drop_node) and str(drop_node.item_id) == "sword_short":
+				dropped = true
+		check(game.loot_pickups.size() == pickups_before + 1 and dropped,"A sword devil drops its shortsword on the ground")
 	game.queue_free()
 	await process_frame

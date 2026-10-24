@@ -9,6 +9,7 @@ const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
+const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 const DEVIL_AGGRO := 30.0
@@ -186,6 +187,11 @@ func get_aim_position() -> Vector3:
 
 func get_display_name() -> String:
 	return "Briar wolf" if kind == 0 else ("Cinder devil" if kind == 2 else "Ruin sentinel")
+
+## The catalog id of the weapon this mob carries; empty for wolves, sentinels
+## and claw devils that hold nothing.
+func held_weapon_id() -> String:
+	return HeldWeapon.item_id(devil_weapon) if kind == 2 else ""
 
 func head_hitbox_center() -> Vector3:
 	if kind == 0 and is_instance_valid(_wolf):
@@ -616,6 +622,9 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 		_warning.visible = false
 		set_deferred("collision_layer", 0)
 		set_deferred("collision_mask", 0)
+		if kind == 2 and is_instance_valid(_devil):
+			# The dropped pickup owns the weapon now; keep it out of the corpse.
+			_devil.set_weapon("claw")
 		defeated.emit(self, 8 if kind == 0 else (6 if kind == 2 else 18))
 		var death_tween := create_tween()
 		if kind == 0:

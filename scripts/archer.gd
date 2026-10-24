@@ -438,7 +438,7 @@ func set_sword(index: int) -> void:
 		_clear_melee()
 		phase = "READY"
 		_phase_time = 0.0
-	# Selecting a sword is the session hand-off away from a staff. The Hollow
+	# Selecting a sword is the session hand-off away from a staff. The persistent
 	# loadout re-activates the staff after this call.
 	staff_active = false
 	sword_index = clampi(index,0,2)

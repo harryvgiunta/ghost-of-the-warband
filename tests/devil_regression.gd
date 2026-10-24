@@ -134,6 +134,7 @@ func run() -> void:
 	dagger_devil.set_physics_process(false)
 	await process_frame
 	check(dagger_devil._devil._weapon_role == "dagger" and dagger_devil._devil._melee_weapon != null, "Dagger devils hold a dagger mesh")
+	check(dagger_devil.held_weapon_id() == "dagger_iron", "Dagger devils drop the iron dagger")
 	check(is_equal_approx(dagger_devil._attack_damage,6.0) and is_equal_approx(dagger_devil._attack_reach,1.6), "Daggers use the short 6-damage reach profile")
 	var sword_devil := Enemy.new()
 	sword_devil.kind = 2
@@ -146,6 +147,7 @@ func run() -> void:
 	sword_devil.set_physics_process(false)
 	await process_frame
 	check(sword_devil._devil._weapon_role == "sword" and sword_devil._devil._melee_weapon != null, "Sword devils hold a short sword mesh")
+	check(sword_devil.held_weapon_id() == "sword_short", "Sword devils drop the shortsword")
 	check(is_equal_approx(sword_devil._attack_damage,11.0) and is_equal_approx(sword_devil._attack_reach,2.0), "Short swords use the longer 11-damage reach profile")
 	var bow_devil := Enemy.new()
 	bow_devil.kind = 2
@@ -157,6 +159,7 @@ func run() -> void:
 	world.add_child(bow_devil)
 	await physics_frame
 	check(bow_devil._devil._weapon_role == "bow" and bow_devil._devil._bow != null, "Bow devils hold a bow mesh")
+	check(bow_devil.held_weapon_id() == "bow_recurve", "Bow devils drop the recurve bow")
 	check(is_equal_approx(bow_devil._attack_damage,7.0) and is_equal_approx(bow_devil._attack_reach,0.0), "Bow devils use the 7-damage ranged profile")
 	var saw_shoot := false
 	for frame in 360:
@@ -183,6 +186,7 @@ func run() -> void:
 	check(not doomed.alive and doomed.state == "DEAD", "Lethal damage puts a devil into its death state")
 	check(doomed._devil.is_dead(), "The devil visual routes death through its own flop")
 	check(reward_received == 6, "A Cinder devil awards six gold")
+	check(doomed.held_weapon_id().is_empty(), "A claw devil drops no weapon")
 	await create_timer(0.6).timeout
 	check(doomed._devil._death_time > 0.5, "The devil death pose advances even while the corpse is held")
 

@@ -14,6 +14,7 @@ const DevilVisual = preload("res://scripts/devil_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
+const HeldWeapon = preload("res://scripts/held_weapon.gd")
 
 const STATE_EMERGE := "EMERGE"
 const STATE_CHASE := "CHASE"
@@ -45,7 +46,8 @@ var health := MAX_HEALTH
 var max_health := MAX_HEALTH
 var enemy_id := 0
 var devil_weapon := "claw"
-var wave := 1
+var depth := 1
+var chase_speed := CHASE_SPEED
 var target = null
 var state := STATE_EMERGE
 
@@ -93,9 +95,9 @@ func _ready() -> void:
 	_query.collision_mask = 1
 
 
-func configure(next_id: int, weapon: String, next_wave: int) -> void:
+func configure(next_id: int, weapon: String, next_depth: int) -> void:
 	enemy_id = next_id
-	wave = next_wave
+	depth = maxi(1, next_depth)
 	devil_weapon = str(weapon).to_lower()
 	if devil_weapon not in ["claw","dagger","sword"]:
 		devil_weapon = "claw"
@@ -109,6 +111,12 @@ func configure(next_id: int, weapon: String, next_wave: int) -> void:
 		_:
 			_attack_damage = 8.0
 			_attack_reach = 1.9
+	# Deeper chambers breed heavier, faster devils. Speed growth is capped so
+	# they keep telegraphing instead of teleporting past the strike window.
+	var step := float(depth - 1)
+	max_health = MAX_HEALTH * (1.0 + 0.28 * step)
+	_attack_damage *= 1.0 + 0.15 * step
+	chase_speed = CHASE_SPEED * minf(1.35, 1.0 + 0.03 * step)
 	if is_instance_valid(_visual):
 		_visual.set_weapon(devil_weapon)
 	# Per-enemy randomness: two devils in a wave never share a swing rhythm.
@@ -177,7 +185,7 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 		_:
 			pass
 	if move_intent.length_squared() > 0.0001:
-		var desired := move_intent.normalized()*CHASE_SPEED
+		var desired := move_intent.normalized()*chase_speed
 		velocity.x = move_toward(velocity.x,desired.x,26.0*delta)
 		velocity.z = move_toward(velocity.z,desired.z,26.0*delta)
 	else:
@@ -211,7 +219,7 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 
 func snapshot() -> Dictionary:
 	return {"id":enemy_id,"pos":position,"yaw":rotation.y,"state":state,"time":_state_time,
-		"health":health,"alive":alive,"weapon":devil_weapon}
+		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth}
 
 
 func apply_snapshot(snapshot_state: Dictionary) -> void:
@@ -258,6 +266,9 @@ func head_hit_profile() -> Vector2:
 
 func get_display_name() -> String:
 	return "Cinder devil"
+
+func held_weapon_id() -> String:
+	return HeldWeapon.item_id(devil_weapon)
 
 
 func _process(delta: float) -> void:
@@ -327,6 +338,7 @@ func _die(announce: bool) -> void:
 	if is_instance_valid(_warning):
 		_warning.visible = false
 	if is_instance_valid(_visual):
+		_visual.set_weapon("claw")
 		_visual.set_action(STATE_DEAD,0.0)
 		_visual.die()
 	if announce:

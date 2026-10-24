@@ -1,6 +1,6 @@
-# Ironwood — The Hollow, Frontier, Arena and the Sunken Delve
+# Ironwood — Town, Frontier, Arena and the Endless Sunken Delve
 
-A Godot 4 third-person action game staged from the Hollow, an out-of-raid depot with a paperdoll of **ten equipment slots**, a **10-slot backpack**, a 20-slot stash, a floor strip and three vendors. From there, deploy to a seamless woodland frontier, a four-combatant multiplayer arena, or a sealed one-room survival delve beneath Hearthstead. A textured, rigged male Ranger with authored human animation, swappable bows, swords, daggers, shields, staffs, foci and jewelry, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game with one in-game world: a main menu, a walkable PvE town with three keepers, a stash and an arena portal, a seamless woodland frontier, a four-combatant multiplayer arena, and an endless one-room survival delve beneath the town. The ranger carries a **15-slot backpack**, a **20-slot stash** and **ten independent equipment slots**. A textured, rigged male Ranger with authored human animation, swappable bows, swords, daggers, shields, staffs, foci and jewelry, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -17,49 +17,43 @@ cd ironwood-arena
 
 The launchers import the bundled character assets before starting the game, so a fresh checkout does not need an existing `.godot` cache. Subsequent launches reuse imported assets. Blender is not required to play.
 
-- **Play.cmd:** the Hollow, the default staging screen, with the equipment paperdoll, backpack, stash, vendors and every game mode.
-- **Arena.cmd:** the multiplayer lobby directly, or solo practice against bots. The arena lobby's **Return to the Hollow** button reconnects the hub flow.
-- **Host Tailscale.cmd:** starts the frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** in Hearthstead and open the Sunken Delve hatch to host; the hatch launches the delve on that port. Friends join with the Hollow's **Join a Delve** form and your Tailscale address.
+- **Play.cmd:** opens the main menu (**Start New Game**, **Load Saved Game**, **Join Game**).
+- **Arena.cmd:** opens the standalone multiplayer lobby directly, or solo practice against bots. Its **Return to Town** button loads the PvE town.
+- **Host Tailscale.cmd:** starts the town/frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** and jump into the Sunken Delve hatch to host on that port. Friends join with the main menu's **Join Game** form, choosing **Delve party**.
 
-Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `menu.tscn`, `arena.tscn` or `main.tscn`; the Windows setup script does not install engines for those platforms.
+Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `title.tscn`, `main.tscn`, `arena.tscn` or `delve.tscn`; the Windows setup script does not install engines for those platforms.
 
-## The Hollow: the default screen
+## Main menu and the town
 
-Every normal launch opens **the Hollow**, the out-of-raid staging depot. The ranger stands in the middle of the screen wearing the gear you last equipped, with three vendor stalls around the clearing. The HUD carries the ten-slot equipment paperdoll, the 10-slot backpack, the stash, the floor strip, the selected vendor and every way to deploy, including the Sunken Delve.
+Every launch opens the **main menu** with exactly three doors:
 
-| Area | Capacity and behaviour |
+| Menu action | Result |
 | --- | --- |
-| Paperdoll | **10 equipment slots**: head, chest, hands, legs, boots, neck, ring 1, ring 2, main hand and off-hand. Equipped gear is separate from the backpack and is not marked with `*` in the backpack; vendor stock marks the equipped piece with `*`. |
-| Backpack | **10 slots** for gear you own but are not wearing. Bought gear, loot and displaced equipment land here. |
-| Stash | **20 slots**. Long-term storage that is never equipped automatically. |
-| Floor | Items dropped in the Hollow. They stay on the ground and can be picked back up from the floor strip. |
-| Purse | Credits earned in the frontier; the starting purse is **200**. |
+| **Start New Game** | Resets the ranger to the starter kit, purse and empty stash, then starts at the south gate of Hearthstead. |
+| **Load Saved Game** | Restores `user://player_state.json` and starts at the town gate. Disabled when no save exists. |
+| **Join Game** | Opens the cached name/address/port form, chooses an **arena match** or **delve party**, and joins that host. |
 
-The starter kit is the five Ranger leather pieces (head, chest, hands, legs, boots) plus the shortbow equipped in the main hand with an empty off-hand. The shortsword, iron dagger and buckler sit in the backpack, and the purse holds 200 credits.
+There is no out-of-game depot. **Hearthstead** is the staging town inside the open PvE world, and every service is a real object you walk up to and press **G** on:
 
-| Vendor | Stock and prices |
-| --- | --- |
-| Fletcher Orla | **5 items**: Shortbow 120 / Recurve 220 / Longbow 360 / Ember Staff 240 / Bone Staff 320 |
-| Smith Brann | **7 items**: Shortsword 110 / Arming sword 195 / Greatsword 340 / Iron Dagger 70 / Buckler 90 / Kite Shield 170 / Tower Shield 280 |
-| Quartermaster Vey | **27 items**: **20 armor pieces** (Ranger leather 55 total / Sentinel mail 180 / Warden plate 320 / Emberweave cloth 140) plus Ash Tome 110, Bone Skull 150, Ember Charm 120, Bone Talisman 80, Copper Ring 40, Silver Ring 95 and Bloodstone Ring 160 |
+| Town service | Where | What it does |
+| --- | --- | --- |
+| **Smith Brann** | ForesterHouse, behind the forge counter | Swords, daggers and shields |
+| **Storekeeper Orla** | FletcherWorkshop, behind the counter | Bows, staves and trail goods |
+| **Quartermaster Vey** | HearthsteadStore, behind the counter | 20 armor pieces plus foci, necklaces and rings |
+| **Town Stash** | Open market awning | 20-slot long-term storage, beside your 15-slot backpack |
+| **Arena Portal** | Green west of the Wayfarer Inn | Hosts a local four-seat arena on the first free UDP port |
+| **Hearthstead Campfire** | Town square | Restores health and stamina |
+| **Sunken Delve hatch** | Inside the Wayfarer Inn | A real hole in the floor: jump in to fall into the delve |
 
-**Hover any paperdoll, backpack, stash, floor or vendor slot** to raise a stat card with the item's name, type and hand, min–max damage (body hit to headshot), attack speed, reach, guard or block, its description and a quoted flavor line. Click any slot to pin the same stats in the inspector, then use **EQUIP** / **UNEQUIP**, **TO STASH** / **TO INVENTORY**, **DROP** or **SELL** at 60% of the purchase price. Right-click a backpack item to equip it to its natural slot; **Alt+right-click** sends a one-hander to the off-hand. Right-click an equipment slot to unequip it, and right-click a floor item to pick it up. Drag gear from the backpack onto a paperdoll slot to equip it there, between paperdoll slots to move or swap it, onto the stash to store it, or onto the ranger's 3D view to drop it at your feet. Click vendor stock, then **BUY**; purchases need a free backpack slot and enough credits. A full backpack or stash rejects the action with a status message; equipment displaced by an equip moves to the backpack, or to the floor when there is no room.
+The starter kit is the five Ranger leather pieces plus the shortbow in the main hand, **every catalog weapon in the backpack**: three bows, three swords, the iron dagger, two staffs and three shields, and 200 credits. The tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**. Bought gear needs a free backpack slot; selling pays 60% of the purchase price.
 
-Every change is written to `user://player_state.json` immediately, so gear, floor items and credits survive quitting and scene changes. The save stores all ten equipment slots separately from the backpack. Delete that file to restore the starting kit: five leather pieces and the shortbow equipped, the shortsword, iron dagger and buckler in the backpack, an empty stash and floor, and 200 credits.
+Press **I** anywhere in the world to open the **inventory** (15 backpack slots plus the ground strip). Press **P** to open the **equipment paperdoll** (10 equipment slots: head, chest, hands, legs, feet, neck, ring 1, ring 2, main hand and off-hand). Right-click a backpack item to equip it to its natural slot, a paperdoll item to return it to the pack, a stash item to take it, or a ground item to pick it up. While a keeper or the stash is open, the same overlay adds their stock or the 20-slot stash beside the pack; **EQUIP**, **TO STASH**, **TO INVENTORY**, **SELL** and **DROP** act on the selected piece. Drag-free controls: click a slot, then use the action buttons.
 
-| Deploy action | Result |
-| --- | --- |
-| **Arena Skirmish** | Starts a real four-seat arena on this PC; bots fill empty seats. It claims the first free UDP port from 7777, so an existing host never blocks practice. |
-| **Host a Game** | Opens a name and UDP-port form, then hosts the arena. Share the host address privately. |
-| **Join a Game** | Opens a name, address and UDP-port form, then joins that host. |
-| **Enter the Frontier** | Opens the open PvE world for the waystone hunt. |
-| **Descend the Delve** | Hosts a local delve on the first free UDP port and drops the party into the sealed chamber. The button changes to **Resume the Delve** while a cleared-wave checkpoint exists. |
-| **Host a Delve** | Opens a name and UDP-port form, then hosts a delve party on that port. Share the address privately. |
-| **Join a Delve** | Opens a name, address and UDP-port form, then joins that delve. The joining ranger drops into the host's current phase. |
+**TAB swaps one bound weapon pair.** The starter bind is the equipped shortbow against the shortsword and buckler, so TAB alternates ranged and sword-and-board out of the box. The outgoing pair becomes the new bind, so the same key toggles back. Any legal main/off combination works: bow, one- or two-handed sword, dagger, staff, shield, focus or a dual-wield pair. To bind a different pair, equip it, open **P**, select the main or off-hand slot, and press **BIND SWAP**; the paperdoll shows the active bind and every swap is written to the save. Both pairs must be carried in the backpack or hands; a stashed piece blocks the swap with a message.
 
-The paperdoll's main hand, off-hand and five armor pieces become the starting loadout in the frontier, arena and delve. A bow, one-handed sword or dagger, greatsword, staff or bare hands in the main hand and a shield, focus, second one-hander or nothing in the off-hand map to the session's weapon mode; necklaces and rings are carried but do not change combat. Frontier gold is the Hollow's credits: kills and restored waystones grow the same purse. Equipment buttons inside a match still change that session's loadout (keys **1**–**5**), but that session gear is not saved; only the Hollow's paperdoll and the field overlay write the persistent kit. Drag the 3D view to orbit, use the wheel to zoom, and press `Escape` to close the host or join form.
+Dropping a piece in town, the frontier or the delve spawns a physical world pickup at the ranger's feet. It arms only after you step clear, so the dropper cannot scoop it straight back up. Arena drops fall back to the persistent ground list. Every successful change is written to `user://player_state.json` immediately; equipment is stored separately from the backpack, and the main/off hands plus five armor pieces become the starting loadout in every mode. Deleting that file restores the starter kit.
 
-In the field, press **I** in the frontier, arena or delve to open the **field paperdoll and backpack** over the game. It uses the same ten equipment slots and 10-slot backpack as the Hollow, hides the Hollow-only header, purse, stash, vendor, deploy and floor panels, and applies every equip, unequip or move to `PlayerState` and the live ranger immediately. Dropping a piece in the frontier or delve spawns a world pickup at the ranger's feet; it arms only after you step clear, so the dropper cannot scoop it straight back up. Arena drops have no world pickup and fall back to the Hollow's floor list. Press **I** or `Escape` to close the overlay; the frontier keeps **O** for the session equipment panel. Stashing, selling, buying and deploying are unavailable in the field overlay.
+**New-game vs. load:** Start New Game overwrites the save with the starter kit; Load Saved Game re-reads the saved kit, stash, ground items and purse. The delve is an in-session endless run, so it has no resume checkpoint.
 
 ### Item taxonomy and hand rules
 
@@ -83,9 +77,9 @@ In the field, press **I** in the frontier, arena or delve to open the **field pa
 
 ### Looting in the frontier
 
-Frontier enemies can drop **physical gear** on death. Walk within **1.6 m** of a drop to pick it up; the pickup enters the **backpack first** and is never auto-equipped. A **full backpack leaves the item on the ground**, and a second attempt still refuses it. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings. Carry loot back to the Hollow, where it appears in the backpack; equip it there or sell it. The Hollow's 3D view is a drop target, so unwanted gear can be dropped at the ranger's feet and picked back up from the floor strip.
+Frontier enemies can drop **physical gear** on death. Walk within **1.6 m** of a drop to pick it up; the pickup enters the **backpack first** and is never auto-equipped. A **full backpack leaves the item on the ground**, and a second attempt still refuses it. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings. **A cinder devil carrying a weapon always drops that exact piece** — iron dagger, shortsword or recurve bow — and the corpse releases the mesh; the same rule covers the delve devils' daggers and swords. Claw devils, wolves and sentinels keep the rotating gear drop. Carry loot back to town, open **I**, and equip or sell it at a keeper; unwanted gear can also be dropped at the ranger's feet and picked back up from the world.
 
-Dropping gear from the field paperdoll (**I**) in the frontier or the delve likewise spawns a `LootPickup` at the ranger's feet. That drop starts **unarmed**: it only arms after the dropper steps out of the 1.6 m pickup radius, so walking back over it later banks it into the backpack normally. The delve copy keeps the same arming rule and local pickup list; a full backpack still leaves it on the ground.
+Dropping gear from the **inventory** (**I**) in town, the frontier or the delve likewise spawns a `LootPickup` at the ranger's feet. That drop starts **unarmed**: it only arms after the dropper steps out of the 1.6 m pickup radius, so walking back over it later banks it into the backpack normally. The delve copy keeps the same arming rule and local pickup list; a full backpack still leaves it on the ground.
 
 ### Armor: four sets, five slots
 
@@ -100,9 +94,9 @@ Armor is equipped **per slot**, so a cloth hood can sit over a mail hauberk, lea
 
 The leather outfit is the imported Ranger mesh split by region; mail is riveted ring weave, plate is blackened articulated steel, and Emberweave is a layered mage robe with a torn hem and brass trim. Each piece renders on the same 65-bone skeleton as the ranger and follows the authored idle, draw, swing, crouch, slide, roll and cover poses. A dark hose underlayer fills the shin whenever the short leather trousers are mixed with short sabatons.
 
-Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The Hollow's Quartermaster sells all 20 pieces alongside the two foci, two necklaces and three rings; old whole-set items from earlier saves are migrated to the five slots on load.
+Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The town Quartermaster sells all 20 pieces alongside the two foci, two necklaces and three rings; old whole-set items from earlier saves are migrated to the five slots on load.
 
-In a match, the equipment panel lists five slot buttons (**HEAD / CHEST / HANDS / LEGS / FEET**). Click a slot to cycle Leather → Mail → Plate → Cloth for that session. Session changes are not written back; only the Hollow's equipped pieces persist.
+In a match, the arena's session panel lists five slot buttons (**HEAD / CHEST / HANDS / LEGS / FEET**). Click a slot to cycle Leather → Mail → Plate → Cloth for that session. Session changes are not written back; only the equipment paperdoll's pieces persist.
 
 ## Play with friends over Tailscale
 
@@ -134,7 +128,7 @@ Or enter the address and port in the arena lobby and click **Join Game**. Use `1
 
 There are four seats: the host and up to three joining humans. Empty seats use bots. Joining replaces a bot; disconnecting restores one. A fifth human is refused. Health, movement, attacks, thrown weapons, damage, kill/death scores, and respawns are host-authoritative. Clients send input and aim points, not damage or charge claims. The host leaving returns clients to the lobby; there is no host migration or matchmaking service.
 
-The delve uses the same ENet transport and the same **Host a Delve** / **Join a Delve** forms, but a delve host needs no lobby: the party stages on the landing until the host presses **G** to descend. A host launched with **`Host Tailscale.cmd`** starts in the frontier instead and opens the party from the inn hatch, which reports the same requested port. A client joining during a wave drops straight into the sealed chamber; a client joining after a clear lands beside the cache. A fifth ranger is refused. The host owns wave, seal, cache and wipe state; clients only send movement and action intents. If the host leaves, clients see **Connection Lost** and can return to the Hollow.
+The delve uses the same ENet transport. A delve host needs no lobby: the party falls into the chamber and waits at the altar until any survivor presses **G**. A host launched with **`Host Tailscale.cmd`** starts in town and opens the party from the inn hatch, which reports the same requested port. A client joining during a wave drops into the chamber; a client joining after a clear lands beside the cache. A fifth ranger is refused. The host owns depth, wave, seal, cache, rope, hole and wipe state; clients only send movement and action intents. If the host leaves, clients see **Connection Lost** and can return to town.
 
 ### Connection troubleshooting
 
@@ -166,6 +160,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | 3 | Equip the dagger |
 | 4 | Equip or stow the shield (any one-handed sword or the dagger) |
 | 5 | Dual-wield the selected one-handed sword in the right hand and the dagger in the left; press again to return to the sword |
+| TAB | Swap the equipped main/off pair with the bound quick-swap pair; the displaced pair becomes the new bind |
 | 6 | Use a bandage: three-second channel, then 35 health over the next three seconds |
 | 7 | Drink a healing potion: half-second channel, then 50 health |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
@@ -179,18 +174,15 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click left mouse while dual wielding | Left-hand dagger stab |
 | Click right mouse while dual wielding | Right-hand sword overhead toward the crosshair; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| G | Interact with the campfire or a waystone, open the Sunken Delve hatch inside the Wayfarer Inn, open a wave cache, descend, or ascend to the surface |
-| I | Open or close the field paperdoll and backpack in the frontier, arena and delve; while open it owns the cursor and blocks movement, attacks and interactions |
-| O | Open or close the session equipment panel in the frontier (bow size, sword size and per-slot armor) |
-| Escape | Close the field paperdoll and backpack first; otherwise free the cursor for equipment clicks, cancel a held attack, or toggle the captured cursor in the arena and delve |
+| G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
+| I | Open or close the in-world inventory (15 backpack slots plus the ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
+| P | Open or close the equipment paperdoll (ten equipped slots); while open it owns the cursor and blocks movement, attacks and interactions |
+| Escape | Close the inventory, paperdoll, keeper or stash panel first; otherwise free the cursor for equipment clicks, cancel a held attack, or toggle the captured cursor in the arena and delve |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
-| Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom. Right-drag orbits only in frontier inspection view |
+| Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
-| Left-drag in the Hollow | Orbit the staging camera around the ranger |
-| Mouse wheel in the Hollow | Zoom the staging camera |
-| Escape in the Hollow | Close the host or join form |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield. No number key changes size.** The Hollow paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match. **I** opens the field paperdoll/backpack in all three modes, **O** opens the frontier's session equipment panel, and `Escape` closes the field overlay before freeing the cursor. In a delve, **R** in the surface staging clears a saved checkpoint and begins a fresh run; movement, combat, cover, rolls and equipment use the same controls as the frontier. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a bow, greatsword, staff or dual wield stows it. Dual wield requires a one-handed sword (small shortsword or medium arming sword); selecting the greatsword leaves the mode, and the shield is stowed. Click the small / medium / large buttons to select each weapon's size independently. Escape frees the cursor once the field overlay is closed; clicking the world resumes aiming. In the frontier, **I** opens the field paperdoll, **O** opens the session equipment panel, **V** inspects the character, **M** opens the map, **G** interacts, **R** returns to camp, **N** toggles sound, and the **Return to the Hollow** button ends the run. The arena displays equipment controls and a **Leave Match** button; the arena lobby returns to the Hollow.
+**1 always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail reduces incoming damage by 15%, plate by 30%; mixed sets add the pieces actually worn. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
 
 ## Running slide
 
@@ -325,17 +317,15 @@ Taking damage applies a **hit stagger** of `0.08 s + 0.012 s per damage`, capped
 
 Fighters no longer hard-collide with each other. Their capsules have a **soft separation** that only pushes when centres are inside **0.46 m**, which lets two players close to stabbing distance without being shoved off their aim. World geometry, cover, blades and projectiles still collide normally.
 
-The Hollow and arena lobby remember the **last player name, host address and UDP port** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
+The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
 
 ## Game modes
 
-**The Hollow:** the default out-of-raid screen. The ranger stands in the depot with the ten-slot paperdoll, a 10-slot backpack, a 20-slot stash, a floor strip, three vendors and the purse. Bought, looted and equipped gear persists across launches, and the equipped kit is the starting loadout for every other mode.
+**Hearthstead / Open PvE:** the main world. New games start at the south gate; walk north into the square. The town has enterable houses, three keeper counters, the market stash chest, the arena portal, the campfire and the delve hatch. Beyond the safe ring lie forest, a ruined fortress, an upland shrine, trails and the bridge. Defeat wolves, sentinels and cinder devil packs, clear defenders and restore three waystones. Gold from foes and waystones enters the same purse immediately, and defeated enemies drop physical gear that is picked up into the backpack. Death returns you to the town gate with restored health; restored waystones stay restored for the session.
 
-**Arena:** a 64 × 64 metre woodland free-for-all with a wide spawn ring, new flank trees and stone islands around the original centre cover, four combatants, simple pursuit/attack bots, score tracking, and three-second respawns. Bots use the same damage and attack paths as players. Enter from the Hollow with **Arena Skirmish** (hosts locally on the first free UDP port from 7777), **Host a Game**, or **Join a Game**; `Arena.cmd` still opens the standalone lobby.
+**Arena:** a 64 × 64 metre woodland free-for-all with a wide spawn ring, flank trees and stone islands around the centre cover, four combatants, simple pursuit/attack bots, score tracking and three-second respawns. Bots use the same damage and attack paths as players. Step into the **Arena Portal** in town to host a local match on the first free UDP port from 7777; the main menu's **Join Game** connects to a host. `Arena.cmd` still opens the standalone lobby, whose **Return to Town** button loads Hearthstead.
 
-**Frontier:** a seamless 290 × 290 metre zone containing a village, enterable houses, forest, ruined fortress, upland shrine, trails and bridge. Defeat wolves, sentinels and cinder devil packs, clear defenders and restore three waystones. The village campfire heals. Mail reduces incoming damage by 15%, plate by 30%. Gold from foes and waystones is added to the Hollow purse immediately, and defeated enemies drop physical gear that is picked up into the backpack. Progress lasts for the play session; death preserves restored waystones. Use **Return to the Hollow** to bank the session and re-equip.
-
-**The Sunken Delve:** a host-authoritative instanced survival room reached from the Hollow's deploy panel or the **hatch inside the Wayfarer Inn** in Hearthstead. `Host Tailscale.cmd` starts the host in the frontier for that hatch: walk into the inn, press **G** at the hatch, and it opens the hosted party on the requested port; clients join from the Hollow's **Join a Delve** form. The party stages on a raised landing, then drops through a shaft into one medium chamber with a 15 m ceiling, a central defence dais, pillars, barricades, crates and four dark archways. The room seals while a wave is alive. **Three waves of two cinder devils** trickle in from alternating archways and hunt the nearest living ranger; downed rangers stay down. A cleared wave opens the gates and, after a short cache-sealing timer, spawns a banded chest at the dais with a gold loot burst. Any ranger can open it; the cache is presentation only, and the delve deliberately has **no enemy loot table or cache rewards** — only gear you drop yourself through the field overlay lies on the floor. After a clear the party can descend through the south gate (next wave) or ascend through the north gate back to the open frontier. A saved checkpoint records the last cleared wave and cache state, so the next run resumes there; a full-party wipe ends the run and clears the checkpoint. The Hollow and the inn hatch both host a local server, so friends can join any of these runs from **Join a Delve**.
+**The Sunken Delve:** a host-authoritative, endless survival room reached by **falling through the hatch in the Wayfarer Inn**. The floor cell is physically open; jump in and the scene hands off as you drop. The party falls from the ceiling into one chamber with a 15 m ceiling, a central dais, pillars, barricades, crates and four dark archways. Walk to the **altar** at the dais and press **G** to begin the depth. The gates seal while the wave is alive and cinder devils trickle out of alternating archways, hunting the nearest living ranger; downed rangers stay down. When the wave breaks, the gates open, the cache appears after a short delay, a **rope drops from the ceiling**, and a **floor plate opens** near the dais. Open the cache for gold (`40 + 30 × depth`) plus one deterministic piece from a depth-scaled loot tier, climb the rope to return to town, or drop through the open floor to recycle the room at the next, harder depth. Enemy count starts at two and grows to eight; health, damage and chase speed scale with depth. There is no fixed wave count and no resume checkpoint — the loop is the run. `Host Tailscale.cmd` starts the town in delve-host mode, so the same hatch opens a hosted party on UDP 7777; friends choose **Join Game → Delve party**.
 
 **Cinder devil packs:** half-height ember-skinned humanoids with horns, claws and ember eyes. **Five packs (20 devils)** hunt the frontier: a mixed five-devil pack in the glade north-west of the camp beyond the safe ring, a three-devil pack in the western woods, and four-devil packs in the northern woods, the southern meadow and the ridge approach. Each pack mixes roles: **claw**, **dagger**, **short sword** and **bow**. They do not charge in a straight line: they orbit at different radii and directions, leap, slide, and make quick half-distance side steps (**1.48 m in 0.22 s**) to reach a flank. Melee devils dive in with a telegraphed strike; bow devils kite at range and release real arrows, aiming with a small ballistic lead. Up to **three** pack members commit to an attack at once, and attacks come faster than the first pass. All devils have **24 health** and award **6 gold**; claw hits deal **8** (**10** on a landing pounce), daggers **6**, short swords **11**, and bow arrows **7**. Their compact head zone makes headshots harder but still doubles damage.
 
@@ -377,7 +367,7 @@ The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedic
 
 ## Update
 
-**Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. The old ZIP test build used 1/2/3 for bow sizes and must not be used with this revision. Current windows show **0.3.0** in the HUD, and `Play.cmd` opens the Hollow.
+**Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. Current windows show **0.4.0** in the HUD, and `Play.cmd` opens the main menu.
 
 ```powershell
 git pull --ff-only
@@ -391,7 +381,7 @@ git pull --ff-only
 
 `cover_movement.gd` owns acquisition, supported capsule sweeps, contiguous-surface sliding, bounded firing-corridor search and latched lookout/retuck state. The single authoritative cover snapshot contains physical stance and world-space `lean`; animation snapshots do not duplicate it. `archer.gd` layers the authored pose before foot/weapon corrections. `Combat` checks the actual shaft before a cover release; melee still clears cover before its first swing pose. Arena aim samples carry the observed own-actor snapshot tick, and remote release waits for the current exposure epoch before applying the unchanged shaft collision check. Regressions exercise left/right tree shots, convex and compound cover, slopes/recovery, side swaps/free look, blocked shafts, malformed/stale aim stamps, cancellation, melee exits and observer replication.
 
-`paperdoll_regression.gd` drives the equipment system: the ten slots and starter kit, item taxonomy and legal-slot rules, right-click routing, the two-handed main/off override and its backpack/floor overflow, the off-hand override that returns a two-handed main to the backpack, dual-wield routing, ring slots, drops and floor pickups, a full backpack rejecting loot, version-3 save round-trip with floor items and version-1/2 migration, rig loadouts for bow, staff, focus, shield, dual and empty hands, and the hub's ten paperdoll/ten backpack/20 stash/28 stock/3 vendor widgets, panel layout, drag-to-slot equipping and drag-to-3D-view dropping; `field_inventory_regression.gd` carries the same paperdoll and backpack into the frontier, arena and delve field overlay. `hub_regression.gd` covers the surrounding out-of-raid loop: 10-slot backpack and 20-slot stash limits, per-slot armor equipping and mixed-set guard, legacy save migration, the scrollable Quartermaster stock, vendor pricing and rejections, save/reload persistence, HUD panel and modal geometry with label clipping, the 3D preview following equipped gear, the frontier's stored loadout and purse hand-off, and the hub-to-arena host session with validated seat loadouts. Script-mode tests start from the authored defaults instead of a player's real save.
+`paperdoll_regression.gd` drives the equipment system: the ten slots and every-weapon starter kit, item taxonomy and legal-slot rules, right-click routing, the two-handed main/off override and its backpack/floor overflow, the off-hand override that returns a two-handed main to the backpack, dual-wield routing, ring slots, drops and floor pickups, a full backpack rejecting loot, version-4 save round-trip with floor items and version-1/2/3 migration, the TAB quick-swap pair and its BIND SWAP path, a cinder devil's held-shortsword ground drop, rig loadouts for bow, staff, focus, shield, dual and empty hands, and the in-world paperdoll's ten slots, panel containment, live-rig equipping and right-click unequip. Script-mode tests start from the authored defaults instead of a player's real save.
 
 Repo-local skills provide step-by-step instructions for coding and asset-authoring agents:
 
@@ -422,9 +412,10 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/running_slide_regression.gd
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd
 & $Godot --headless --path . --script res://tests/hitbox_regression.gd
-& $Godot --headless --path . --script res://tests/hub_regression.gd
+& $Godot --headless --path . --script res://tests/title_menu_regression.gd
+& $Godot --headless --path . --script res://tests/town_services_regression.gd
 & $Godot --headless --path . --script res://tests/paperdoll_regression.gd
-& $Godot --headless --path . --script res://tests/field_inventory_regression.gd
+& $Godot --headless --path . --script res://tests/world_ui_regression.gd
 & $Godot --headless --path . --script res://tests/throw_regression.gd
 & $Godot --headless --path . --script res://tests/world_art_regression.gd
 & $Godot --headless --path . --script res://tests/delve_regression.gd
@@ -435,9 +426,9 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
 
-`delve_regression.gd` checks the three-wave/two-devil plan, checkpoint JSON round-trip and corruption rejection, the chamber spawns/ceiling/gates and reachable ascent/descent, the full solo flow (drop, sealed wave, real bow damage, clear timer, cache burst, descend, final cache, explicit revive, party wipe), and checkpoint resume. `delve_entry_regression.gd` drives the Hollow's **Descend the Delve** button, the **Sunken Delve hatch inside the Wayfarer Inn** and its `G / Open the hatch to the Sunken Delve` prompt, the frontier delve-host hatch hand-off on the requested port, and the ascent back to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the landing, both see the wave, and both see the cache open.
+`delve_regression.gd` checks the endless loop: the fall-in start, the altar phase, a sealed scaled wave, the clear delay, cache spawn, rope descent, floor-hole opening, chest rewards, depth-two recycling with three devils, and the rope return to town. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the wave and cache, and both observe the descent into depth two.
 
-`field_inventory_regression.gd` drives the in-match **field paperdoll/backpack** in the real frontier, delve and arena scenes. It checks that **I** opens the overlay and frees the cursor, that ten paperdoll and ten backpack slots render while the Hollow-only header, vendor and stash panels stay hidden, that an equip updates `PlayerState` and the live rig (`Archer.apply_loadout`), that the displaced piece returns to the backpack, and that dropping in the frontier or delve removes the item from the backpack, spawns a world pickup, keeps it unarmed until the ranger steps clear, and re-banks it on the way back. It also checks that arena drops fall back to the Hollow floor, that `Escape` closes the overlay, that the hatch exists inside the Wayfarer Inn and remains the frontier delve interaction, and that the arena and delve expose the same overlay.
+`world_ui_regression.gd` drives the in-world **I/P kit** in the real delve and arena scenes. It checks that **I** opens the backpack and frees the cursor, that **P** opens the paperdoll, that an equip updates `PlayerState` and the live rig (`Archer.apply_loadout`), that `Escape` closes the kit and recaptures the mouse, and that arena drops fall back to the persistent ground list. `town_services_regression.gd` walks the PvE town: the three keeper counters, the stash chest, the arena portal, the open hatch cell, the town-gate spawn, I/P panel switching, vendor buying, stash transfers and unarmed world drops. `title_menu_regression.gd` covers Start New Game, Load Saved Game, the disabled-load state and the cached Join form.
 
 ### Rebuilding character assets
 

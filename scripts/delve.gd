@@ -1,19 +1,20 @@
 extends Node3D
 ## Host-authoritative controller for "The Sunken Delve".
 ##
-## One sealed chamber, three waves of cinder devils trickling out of four dark
-## archways, a cache when a wave breaks, and a checkpointed run that can be
-## resumed or wiped. Networking follows the arena: the host simulates every
-## body, clients send input and action intents, and snapshots drive the
-## replicas. Everything the host decides about the run itself travels as a
-## reliable run state so the HUD and caches cannot drift apart.
+## One sealed chamber that never ends: the party drops through the ceiling,
+## touches the altar, breaks a scaled wave of cinder devils, loots the cache,
+## then either climbs the rope to town or drops through the floor into a deeper
+## depth. The same room is recycled, so every run is the same geometry with a
+## higher `depth`. Networking follows the arena: the host simulates every body,
+## clients send input and action intents, and snapshots drive the replicas. All
+## run decisions travel as a reliable run state so the HUD and caches cannot
+## drift apart.
 
 const Actor = preload("res://scripts/delve_actor.gd")
 const Devil = preload("res://scripts/delve_devil.gd")
 const Chest = preload("res://scripts/delve_chest.gd")
 const World = preload("res://scripts/delve_world.gd")
 const Hud = preload("res://scripts/delve_hud.gd")
-const Progress = preload("res://scripts/delve_progress.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
@@ -24,7 +25,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
-const FieldInventoryScript = preload("res://scripts/field_inventory.gd")
+const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 
 const INTERACT_RANGE := 4.0
 const PICKUP_RADIUS := 1.6
@@ -37,6 +38,17 @@ const RUN_STATE_INTERVAL := 0.2
 const MAX_SHOTS := 128
 const AUTO_BEGIN_DELAY := 2.0
 const HOOK_KILL_DELAY := 2.0
+const MAX_DEPTH_ENEMIES := 8
+const BASE_DEPTH_ENEMIES := 2
+const WEAPON_CYCLE := ["claw","dagger","sword"]
+# Cache loot climbs in tiers. The depth picks the tier; run_seed + depth picks
+# the exact piece, so every peer agrees without sharing an RNG.
+const LOOT_TIERS := [
+	["ring_copper","dagger_iron","shield_buckler","focus_tome","neck_bone"],
+	["sword_arming","bow_recurve","shield_kite","focus_skull","neck_ember","armor_mail_chest"],
+	["bow_long","sword_great","shield_tower","staff_fire","ring_blood","armor_plate_chest"],
+	["staff_bone","ring_blood","armor_plate_chest","bow_long","sword_great"],
+]
 
 var world
 var hud
@@ -47,13 +59,13 @@ var devils: Array = []
 var chest
 var local_slot := -1
 var network_role := "offline"
-var phase := "ASSEMBLY"
-var wave := 1
+var phase := "ALTAR"
+var depth := 1
 var chest_ready := false
 var chest_open := false
+var rope_lowered := false
+var hole_open := false
 var run_seed := 0
-var save_path: String = Progress.SAVE_PATH
-var resume_data: Dictionary = {}
 var server_tick := 0
 var last_snapshot_tick := -1
 var projectiles: Array[Node3D] = []
@@ -97,7 +109,7 @@ var _query := PhysicsRayQueryParameters3D.new()
 var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
 var loot_pickups: Array = []
-var _field_inventory
+var _world_ui
 var _player_state
 var _drop_query := PhysicsRayQueryParameters3D.new()
 var _loot_message_cooldown := 0.0
@@ -142,14 +154,14 @@ func _ready() -> void:
 	hud.surface_requested.connect(_on_surface_requested)
 	_player_state = get_node_or_null("/root/PlayerState")
 	if _player_state != null:
-		_field_inventory = FieldInventoryScript.new()
-		_field_inventory.name = "FieldInventory"
-		_field_inventory.layer = layer.layer + 1
-		add_child(_field_inventory)
-		_field_inventory.opened.connect(_on_field_opened)
-		_field_inventory.closed.connect(_on_field_closed)
-		_field_inventory.loadout_changed.connect(_on_field_loadout_changed)
-		_field_inventory.configure(_player_state,get_node_or_null("/root/Session"),null,Callable(self,"_drop_field_item"))
+		_world_ui = FieldInventoryScript.new()
+		_world_ui.name = "WorldUI"
+		_world_ui.layer = layer.layer + 1
+		add_child(_world_ui)
+		_world_ui.opened.connect(_on_ui_opened)
+		_world_ui.closed.connect(_on_ui_closed)
+		_world_ui.loadout_changed.connect(_on_ui_loadout_changed)
+		_world_ui.configure(_player_state,get_node_or_null("/root/Session"),null,Callable(self,"_drop_world_item"),true)
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 2
@@ -159,9 +171,6 @@ func _ready() -> void:
 	multiplayer.connected_to_server.connect(_connected)
 	multiplayer.connection_failed.connect(func(): _connection_ended("Could not join. Check the address, UDP port and host capacity (four delvers)."))
 	multiplayer.server_disconnected.connect(func(): _connection_ended("The host disconnected. Host a new delve or join another party."))
-	resume_data = Progress.load_run(save_path)
-	if not resume_data.is_empty():
-		run_seed = int(resume_data.get("seed", 0))
 	call_deferred("_read_arguments")
 
 func _read_arguments() -> void:
@@ -254,11 +263,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 	_peer_slots.clear()
 	_peer_slots[1] = 0
 	_player_name = _safe_name(player_name)
-	resume_data = Progress.load_run(save_path)
-	if resume_data.is_empty():
-		run_seed = randi()
-	else:
-		run_seed = int(resume_data.get("seed", randi()))
+	run_seed = randi()
 	_on_devils_reset_local()
 	for actor in actors:
 		actor.authoritative = true
@@ -270,7 +275,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 		actor.combat.target_mask = 2
 		actor.combat.damage_enabled = false
 	var local = actors[0]
-	local.configure(1,false,_player_name,_assembly_spawn(0))
+	local.configure(1,false,_player_name,world.drop_center)
 	local.visible = true
 	local.is_local = true
 	local.collision_layer = 4
@@ -284,14 +289,17 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 			addresses.append(address)
 	_endpoint = "UDP %d / LAN %s / same PC 127.0.0.1" % [port,", ".join(addresses)]
 	hud.configure(_endpoint)
-	hud.set_status("Descend when the party is ready.",2.5)
+	hud.set_status("Touch the altar to begin the descent.",2.5)
 	_set_cursor_free(false)
 	_remember_network(_player_name,"",port)
 	_apply_loadout(0,_local_loadout())
-	_bind_field_rig()
+	_bind_ui_rig()
 	_mode_elapsed = 0.0
 	_auto_fired = false
-	_set_phase("ASSEMBLY")
+	_drop_party()
+	_set_phase("ALTAR")
+	hud.show_banner("DEPTH %d" % depth,2.0)
+	_sync_run_state()
 	print("DELVE_HOST_READY port=%d" % port)
 
 func join_game(address: String, port: int, player_name: String) -> void:
@@ -312,6 +320,7 @@ func join_game(address: String, port: int, player_name: String) -> void:
 	_join_elapsed = 0.0
 	hud.configure(_endpoint)
 	hud.set_status("Connecting to " + _endpoint + "...")
+	print("DELVE_JOIN_ATTEMPT %s:%d" % [address.strip_edges(),port])
 
 func leave_game() -> void:
 	# A server-disconnected signal can arrive while the scene is being freed;
@@ -320,10 +329,10 @@ func leave_game() -> void:
 		return
 	network_role = "offline"
 	local_slot = -1
-	if _field_inventory != null:
-		if _field_inventory.is_open():
-			_field_inventory.close()
-		_field_inventory.rebind(null)
+	if _world_ui != null:
+		if _world_ui.is_open():
+			_world_ui.close()
+		_world_ui.rebind(null)
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -354,10 +363,12 @@ func leave_game() -> void:
 	_peek_right = Vector3.RIGHT
 	_cursor_free = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	phase = "ASSEMBLY"
-	wave = 1
+	phase = "ALTAR"
+	depth = 1
 	chest_ready = false
 	chest_open = false
+	rope_lowered = false
+	hole_open = false
 	_clear_devils()
 	_remove_chest()
 	_on_devils_reset_local()
@@ -382,6 +393,8 @@ func leave_game() -> void:
 		actor.collision_mask = 0
 	if world != null:
 		world.set_sealed(false)
+		world.set_rope_lowered(false)
+		world.set_hole_open(false)
 
 func _connection_ended(message: String) -> void:
 	if not is_inside_tree():
@@ -392,10 +405,10 @@ func _connection_ended(message: String) -> void:
 
 func _hub() -> void:
 	leave_game()
-	get_tree().change_scene_to_file("res://menu.tscn")
+	get_tree().change_scene_to_file("res://main.tscn")
 
 func _on_surface_requested() -> void:
-	if network_role == "host" and (phase == "CLEARED" or phase == "COMPLETE"):
+	if network_role == "host" and phase == "CLEARED":
 		ascend_to_surface()
 		return
 	leave_game()
@@ -418,7 +431,7 @@ func _safe_name(value: String) -> String:
 func _remember_network(player_name: String, address: String, port: int) -> void:
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
-		cache.remember(player_name,address,port)
+		cache.remember(player_name,address,port,"delve")
 
 func _local_loadout() -> Dictionary:
 	var node: Variant = get_node_or_null("/root/PlayerState")
@@ -521,21 +534,11 @@ func _lowest_free_slot() -> int:
 			return slot
 	return -1
 
-func _assembly_spawn(slot: int) -> Vector3:
-	var spawns: Array = world.player_spawns
-	if spawns.is_empty():
-		return Vector3(0,3.3,15.2)
-	return spawns[clampi(slot,0,spawns.size()-1)]
-
 func _join_spawn(slot: int) -> Vector3:
-	match phase:
-		"WAVE":
-			var angle := TAU * float(slot) / 4.0
-			return world.drop_center + Vector3(cos(angle)*1.8,0.0,sin(angle)*1.8)
-		"CLEARED", "COMPLETE":
-			return world.chest_position + Vector3(2.0 + float(slot)*0.6,0.0,2.0)
-		_:
-			return _assembly_spawn(slot)
+	if phase == "CLEARED":
+		return world.chest_position + Vector3(2.0 + float(slot)*0.6, 0.0, 2.0)
+	var angle := TAU * float(slot) / 4.0
+	return world.drop_center + Vector3(cos(angle)*2.4,0.0,sin(angle)*2.4)
 
 func _deactivate_slot(slot: int) -> void:
 	if slot < 0 or slot >= actors.size():
@@ -599,7 +602,8 @@ func _accept(slot: int) -> void:
 		return
 	local_slot = slot
 	_next_swing_side = 0
-	_camera_yaw = atan2(_assembly_spawn(slot).x,_assembly_spawn(slot).z)
+	var join_point := _join_spawn(slot)
+	_camera_yaw = atan2(join_point.x,join_point.z)
 	for actor in actors:
 		actor.authoritative = false
 		actor.is_local = actor.slot == slot
@@ -610,7 +614,7 @@ func _accept(slot: int) -> void:
 	actors[slot].visible = true
 	actors[slot].interp_delay = 0.05
 	hud.configure(_endpoint)
-	_bind_field_rig()
+	_bind_ui_rig()
 	_set_cursor_free(false)
 	print("DELVE_CLIENT_READY slot=%d" % slot)
 
@@ -651,6 +655,7 @@ func _physics_process(delta: float) -> void:
 				if is_instance_valid(devil) and devil.alive:
 					devil.step(delta,actors,live)
 		_advance_host_state(delta)
+		_check_hole_descent()
 		_check_party_wipe()
 		if _send_elapsed >= SNAPSHOT_INTERVAL:
 			for actor in actors:
@@ -973,10 +978,39 @@ func _on_actor_fell(_slot: int, _source_id: int) -> void:
 		return
 	_check_party_wipe()
 
-func _on_devil_died(_devil) -> void:
+func _on_devil_died(devil) -> void:
 	if network_role != "host":
 		return
-	_check_wave_cleared()
+	_drop_devil_weapon(devil)
+	_check_depth_cleared()
+
+## The authoritative host spawns the local pickup once and mirrors it to every
+## client, which keeps each peer's own PlayerState pickup local and authoritative.
+func _drop_devil_weapon(devil) -> void:
+	if not is_instance_valid(devil) or not devil.has_method("held_weapon_id"):
+		return
+	var item_id := str(devil.held_weapon_id())
+	if item_id.is_empty() or not State.ITEMS.has(item_id):
+		return
+	var at := _drop_floor(devil.global_position)
+	_spawn_weapon_pickup(item_id,at)
+	_weapon_drop_event.rpc(item_id,at)
+
+@rpc("authority","call_remote","reliable")
+func _weapon_drop_event(item_id: String, at: Vector3) -> void:
+	if network_role != "client":
+		return
+	_spawn_weapon_pickup(item_id,at)
+
+func _spawn_weapon_pickup(item_id: String, at: Vector3) -> void:
+	if not State.ITEMS.has(item_id):
+		return
+	var pickup := LootPickup.new()
+	pickup.name = "DevilDrop_" + item_id
+	pickup.setup(item_id,_field_display_name(item_id))
+	pickup.position = at
+	add_child(pickup)
+	loot_pickups.append({"node":pickup, "item_id":item_id, "armed":true})
 
 func _on_devil_struck(_target, _amount, position: Vector3, outcome) -> void:
 	if network_role != "host":
@@ -1007,6 +1041,10 @@ func _impact_event(position: Vector3, kind: String) -> void:
 
 func _process(delta: float) -> void:
 	_elapsed += delta
+	if _exit_after > 0.0 and _elapsed >= _exit_after:
+		_exit_after = 0.0
+		print("DELVE_EXIT depth=%d phase=%s chest_ready=%s chest_open=%s rope_lowered=%s hole_open=%s" % [depth,phase,chest_ready,chest_open,world.is_rope_lowered(),world.is_hole_open()])
+		get_tree().quit(0)
 	if network_role == "host":
 		_process_hooks(delta)
 	if local_slot < 0:
@@ -1029,17 +1067,14 @@ func _process(delta: float) -> void:
 
 func _process_hooks(delta: float) -> void:
 	_mode_elapsed += delta
-	if _auto_start and not _auto_fired and phase == "ASSEMBLY" and _mode_elapsed >= AUTO_BEGIN_DELAY:
+	if _auto_start and not _auto_fired and phase == "ALTAR" and _mode_elapsed >= AUTO_BEGIN_DELAY:
 		_auto_fired = true
-		begin_descent()
+		begin_wave()
 	if _kill_wave_hook and not _kill_fired and phase == "WAVE" and _wave_elapsed >= HOOK_KILL_DELAY:
 		_kill_fired = true
 		for devil in devils.duplicate():
 			if is_instance_valid(devil) and devil.alive:
 				devil.take_damage(99999.0,-1)
-	if _exit_after > 0.0 and _elapsed >= _exit_after:
-		_exit_after = 0.0
-		get_tree().quit(0)
 
 func _local_state(actor) -> Dictionary:
 	return {
@@ -1060,13 +1095,10 @@ func _prompt_text() -> String:
 	var actor = actors[local_slot]
 	var pos: Vector3 = actor.global_position
 	match phase:
-		"ASSEMBLY":
-			if network_role == "host":
-				var shaft: Vector3 = world.player_spawns[1] if world.player_spawns.size() > 1 else world.player_spawns[0]
-				if pos.distance_to(shaft) <= INTERACT_RANGE:
-					return "G  BEGIN THE DESCENT"
-				return "Walk to the shaft to begin"
-			return "Waiting for the host to begin the descent"
+		"ALTAR":
+			if pos.distance_to(world.altar_position) <= INTERACT_RANGE:
+				return "G  TOUCH THE ALTAR"
+			return "Walk to the altar to begin depth %d" % depth
 		"WAVE":
 			var remaining := _remaining_enemies()
 			if network_role == "client":
@@ -1075,15 +1107,11 @@ func _prompt_text() -> String:
 		"CLEARED":
 			if chest_ready and not chest_open and is_instance_valid(chest) and pos.distance_to(world.chest_position) <= CHEST_RANGE:
 				return "G  OPEN THE CACHE"
-			if wave < Progress.WAVE_COUNT and pos.distance_to(world.descent_position) <= INTERACT_RANGE:
-				return "G  DESCEND TO WAVE %d" % (wave + 1)
-			if pos.distance_to(world.ascent_position) <= INTERACT_RANGE:
+			if rope_lowered and pos.distance_to(world.rope_position) <= INTERACT_RANGE:
 				return "G  ASCEND TO THE SURFACE"
-			return "The wave is broken; descend or ascend."
-		"COMPLETE":
-			if pos.distance_to(world.ascent_position) <= INTERACT_RANGE:
-				return "G  ASCEND TO THE SURFACE"
-			return "The cache is yours"
+			if hole_open and pos.distance_to(world.hole_position) <= INTERACT_RANGE:
+				return "G  DESCEND TO DEPTH %d" % (depth + 1)
+			return "The depth is broken - take the rope or the hole."
 		_:
 			return ""
 
@@ -1103,32 +1131,32 @@ func _set_cursor_free(value: bool) -> void:
 		_send_peek_input()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
-func _field_inventory_open() -> bool:
-	return _field_inventory != null and _field_inventory.is_open()
+func _ui_open() -> bool:
+	return _world_ui != null and _world_ui.is_open()
 
-func _on_field_opened() -> void:
+func _on_ui_opened() -> void:
 	# A menu opens with the pointer free and any held draw or throw cancelled.
 	_set_cursor_free(true)
 
-func _on_field_closed() -> void:
+func _on_ui_closed() -> void:
 	# Closing must not recapture the pointer in the lobby, a dead run or after
 	# the connection dropped; the scene owns that decision.
 	if network_role == "offline" or local_slot < 0 or phase == "GAME_OVER":
 		return
 	_set_cursor_free(false)
 
-func _bind_field_rig() -> void:
-	if _field_inventory == null:
+func _bind_ui_rig() -> void:
+	if _world_ui == null:
 		return
 	var rig: Variant = null
 	if local_slot >= 0 and local_slot < actors.size():
 		rig = actors[local_slot].rig
-	_field_inventory.rebind(rig)
+	_world_ui.rebind(rig)
 
-func _on_field_loadout_changed() -> void:
+func _on_ui_loadout_changed() -> void:
 	if local_slot < 0 or local_slot >= actors.size():
 		return
-	_bind_field_rig()
+	_bind_ui_rig()
 	_apply_loadout(local_slot,_local_loadout())
 	hud.update_local(_local_state(actors[local_slot]))
 	if network_role == "client":
@@ -1136,7 +1164,24 @@ func _on_field_loadout_changed() -> void:
 		# its snapshots stay the presentation authority for everyone else.
 		send_action("loadout",_local_loadout())
 
-func _drop_field_item(item_id: String) -> void:
+## TAB toggles the persistent hand pair; the host rebuilds the seat from the
+## same loadout action used by the paperdoll.
+func _quick_swap() -> void:
+	if _ui_open():
+		return
+	var node: Variant = get_node_or_null("/root/PlayerState")
+	if node == null:
+		return
+	var result: Dictionary = node.quick_swap()
+	if not bool(result.get("ok", false)):
+		hud.set_status(str(result.get("message", "No quick swap set.")))
+		return
+	_cancel_draw_input()
+	_on_ui_loadout_changed()
+	audio.play_sound("equip")
+	hud.set_status(str(result.get("message", "Swapped weapons.")),1.5)
+
+func _drop_world_item(item_id: String) -> void:
 	if _player_state == null or local_slot < 0 or local_slot >= actors.size():
 		return
 	var id := str(item_id)
@@ -1179,7 +1224,7 @@ func _collect_loot(delta: float) -> void:
 			loot_pickups.remove_at(index)
 			pickup.queue_free()
 			hud.set_status(str(result.get("message","Picked up %s." % picked)),2.5)
-			_refresh_field_hud()
+			_refresh_world_ui()
 		elif _loot_message_cooldown <= 0.0:
 			_loot_message_cooldown = DROP_FULL_INTERVAL
 			hud.set_status(str(result.get("message","Backpack full.")),2.5)
@@ -1197,9 +1242,9 @@ func _drop_floor(at: Vector3) -> Vector3:
 	var hit := get_world_3d().direct_space_state.intersect_ray(_drop_query)
 	return (hit.position + Vector3(0,0.05,0)) if not hit.is_empty() else at
 
-func _refresh_field_hud() -> void:
-	if _field_inventory != null and _field_inventory.hud != null:
-		_field_inventory.hud.refresh()
+func _refresh_world_ui() -> void:
+	if _world_ui != null:
+		_world_ui.refresh()
 
 func _crosshair_aim() -> Vector3:
 	_update_game_camera()
@@ -1226,7 +1271,7 @@ func _crosshair_aim() -> Vector3:
 func _input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
@@ -1274,11 +1319,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if _field_inventory_open():
-			# The paperdoll/backpack owns the keyboard while it is up.
+		if _ui_open():
+			# The inventory/equipment overlay owns the keyboard while it is up.
 			match event.keycode:
-				KEY_ESCAPE, KEY_I:
-					_field_inventory.close()
+				KEY_ESCAPE:
+					_world_ui.close()
+				KEY_I:
+					if _world_ui.active_view() == "inventory":
+						_world_ui.close()
+					else:
+						_world_ui.open_inventory()
+				KEY_P:
+					if _world_ui.active_view() == "equipment":
+						_world_ui.close()
+					else:
+						_world_ui.open_equipment()
 			return
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
@@ -1286,6 +1341,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
+			KEY_TAB: _quick_swap()
 			KEY_C:
 				if not _cursor_free:
 					send_action("crouch",not actors[local_slot].cover.crouch_requested)
@@ -1311,27 +1367,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_G:
 				if not _cursor_free:
 					send_action("interact")
-			KEY_R:
-				if network_role == "host" and phase == "ASSEMBLY":
-					Progress.clear_run(save_path)
-					resume_data.clear()
-					run_seed = randi()
-					begin_descent()
 			KEY_ESCAPE:
-				if _field_inventory_open():
-					_field_inventory.close()
+				_set_cursor_free(not _cursor_free)
+			KEY_I:
+				if _world_ui != null:
+					_world_ui.open_inventory()
 				else:
 					_set_cursor_free(not _cursor_free)
-			KEY_I:
-				if _field_inventory != null:
-					_field_inventory.toggle()
+			KEY_P:
+				if _world_ui != null:
+					_world_ui.open_equipment()
 				else:
 					_set_cursor_free(not _cursor_free)
 			KEY_T:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon
@@ -1386,45 +1438,41 @@ func _exit_tree() -> void:
 # Run flow
 # --------------------------------------------------------------------------
 
-func begin_descent() -> void:
-	if network_role != "host" or phase != "ASSEMBLY":
+func begin_wave() -> void:
+	if network_role != "host" or phase != "ALTAR":
 		return
-	var start_wave := 1
-	var start_cleared := false
-	if not resume_data.is_empty():
-		start_wave = clampi(int(resume_data.get("wave",1)),1,Progress.WAVE_COUNT)
-		start_cleared = bool(resume_data.get("chest_ready",false))
-		var saved_seed := int(resume_data.get("seed",run_seed))
-		if saved_seed != 0:
-			run_seed = saved_seed
-	resume_data.clear()
-	wave = start_wave
-	_drop_party()
-	if start_cleared:
-		_clear_devils()
-		world.set_sealed(false)
-		chest_ready = true
-		chest_open = false
-		_clear_timer = 0.0
-		_spawn_chest()
-		_set_phase("CLEARED")
-		hud.show_wave_banner("WAVE %d CLEARED" % wave,2.0)
-		_sync_run_state()
-	else:
-		_start_wave()
+	_start_wave()
 
-func descend_next_wave() -> void:
+func descend_next_depth() -> void:
 	if network_role != "host" or phase != "CLEARED":
 		return
-	if wave >= Progress.WAVE_COUNT:
-		return
-	wave += 1
-	_start_wave()
+	depth += 1
+	_clear_devils()
+	_remove_chest()
+	chest_ready = false
+	chest_open = false
+	rope_lowered = false
+	hole_open = false
+	world.set_rope_lowered(false)
+	world.set_hole_open(false)
+	world.set_sealed(false)
+	_clear_timer = 0.0
+	_wave_elapsed = 0.0
+	_spawn_timer = 0.0
+	_spawn_queue.clear()
+	_kill_fired = false
+	_auto_fired = false
+	_mode_elapsed = 0.0
+	_drop_party()
+	_set_phase("ALTAR")
+	hud.show_banner("DEPTH %d" % depth,2.5)
+	print("DELVE_DEPTH_DESCEND depth=%d" % depth)
+	_sync_run_state()
 
 func ascend_to_surface() -> void:
 	if network_role != "host":
 		return
-	if phase != "CLEARED" and phase != "COMPLETE":
+	if phase != "CLEARED":
 		return
 	_ascend_event.rpc()
 	print("DELVE_RETURN_SURFACE")
@@ -1464,27 +1512,26 @@ func _start_wave() -> void:
 	_remove_chest()
 	chest_ready = false
 	chest_open = false
+	rope_lowered = false
+	hole_open = false
+	world.set_rope_lowered(false)
+	world.set_hole_open(false)
 	world.set_sealed(true)
 	_clear_timer = 0.0
 	_wave_elapsed = 0.0
 	_kill_fired = false
 	_spawn_timer = 0.0
 	_spawn_queue.clear()
-	var count: int = maxi(1,Progress.wave_size(wave))
-	var weapons: Array = Progress.wave_weapons(wave)
+	var count := mini(BASE_DEPTH_ENEMIES + (depth - 1),MAX_DEPTH_ENEMIES)
 	var spawn_count: int = maxi(1,world.enemy_spawns.size())
-	var arch_offset: int = (absi(run_seed) + wave) % spawn_count
+	var arch_offset: int = (absi(run_seed) + depth) % spawn_count
 	var arch_stride: int = maxi(1, spawn_count / count)
 	for index in count:
-		var weapon := "claw"
-		if not weapons.is_empty():
-			weapon = str(weapons[index % weapons.size()])
+		var weapon := str(WEAPON_CYCLE[(depth - 1 + index) % WEAPON_CYCLE.size()])
 		_spawn_queue.append({"weapon":weapon, "spawn":(arch_offset + index * arch_stride) % spawn_count})
 	_set_phase("WAVE")
-	hud.show_wave_banner("WAVE %d" % wave,2.0)
-	print("DELVE_WAVE_START wave=%d mobs=%d" % [wave,count])
-	if wave > 1:
-		_save_checkpoint(false)
+	hud.show_banner("DEPTH %d" % depth,2.0)
+	print("DELVE_DEPTH_START depth=%d mobs=%d" % [depth,count])
 	_sync_run_state()
 
 func _advance_host_state(delta: float) -> void:
@@ -1504,7 +1551,12 @@ func _advance_host_state(delta: float) -> void:
 				_clear_timer = 0.0
 				chest_ready = true
 				_spawn_chest()
-				_save_checkpoint(true)
+				rope_lowered = true
+				hole_open = true
+				world.set_rope_lowered(true)
+				world.set_hole_open(true)
+				hud.set_status("The cache is ready. Climb the rope or drop through the floor.",3.0)
+				print("DELVE_CACHE_READY depth=%d" % depth)
 				_sync_run_state()
 		_:
 			pass
@@ -1518,7 +1570,7 @@ func _spawn_devil(weapon: String, spawn_index: int) -> void:
 	var devil = Devil.new()
 	devil.name = "Devil%d" % _next_devil_id
 	add_child(devil)
-	devil.configure(_next_devil_id,weapon,wave)
+	devil.configure(_next_devil_id,weapon,depth)
 	devil.authoritative = true
 	devil.global_position = spawn_point
 	var flat := Vector3(facing.x,0.0,facing.z)
@@ -1529,17 +1581,17 @@ func _spawn_devil(weapon: String, spawn_index: int) -> void:
 	devils.append(devil)
 	_next_devil_id += 1
 
-func _wave_cleared() -> void:
+func _depth_cleared() -> void:
 	if phase != "WAVE":
 		return
 	_set_phase("CLEARED")
 	world.set_sealed(false)
 	_clear_timer = CLEAR_DELAY
-	print("DELVE_WAVE_CLEAR wave=%d" % wave)
-	hud.show_wave_banner("WAVE %d CLEARED" % wave,2.0)
+	print("DELVE_DEPTH_CLEAR depth=%d" % depth)
+	hud.show_banner("DEPTH %d CLEARED" % depth,2.0)
 	_sync_run_state()
 
-func _check_wave_cleared() -> void:
+func _check_depth_cleared() -> void:
 	if phase != "WAVE":
 		return
 	if not _spawn_queue.is_empty():
@@ -1547,7 +1599,17 @@ func _check_wave_cleared() -> void:
 	for devil in devils:
 		if is_instance_valid(devil) and devil.alive:
 			return
-	_wave_cleared()
+	_depth_cleared()
+
+func _check_hole_descent() -> void:
+	if phase != "CLEARED" or not hole_open:
+		return
+	for actor in actors:
+		if actor.peer_id <= 0 or not actor.alive:
+			continue
+		if world.is_in_hole(actor.global_position):
+			descend_next_depth()
+			return
 
 func _remaining_enemies() -> int:
 	if phase != "WAVE":
@@ -1610,7 +1672,7 @@ func _devil_snapshots(tick: int, states: Array) -> void:
 				continue
 			var created = Devil.new()
 			add_child(created)
-			created.configure(id,str(state.get("weapon","claw")),int(state.get("wave",wave)))
+			created.configure(id,str(state.get("weapon","claw")),int(state.get("depth",depth)))
 			created.authoritative = false
 			_devil_nodes[id] = created
 			node = created
@@ -1624,7 +1686,7 @@ func _spawn_chest() -> void:
 	chest.position = world.chest_position
 	if not chest.opened.is_connected(_on_chest_opened):
 		chest.opened.connect(_on_chest_opened)
-	chest.set_wave(wave)
+	chest.set_depth(depth)
 
 func _remove_chest() -> void:
 	if is_instance_valid(chest):
@@ -1636,14 +1698,40 @@ func _on_chest_opened() -> void:
 		return
 	chest_open = true
 	_chest_event.rpc()
-	print("DELVE_CHEST_OPEN")
-	if wave >= Progress.WAVE_COUNT:
-		Progress.clear_run(save_path)
-		_set_phase("COMPLETE")
-		hud.show_wave_banner("THE CACHE IS YOURS",3.0)
-	else:
-		hud.set_status("The cache is open. Descend when the party is ready.",2.5)
+	var gold := 40 + 30 * depth
+	var item_id := _reward_item()
+	_grant_reward(depth,gold,item_id)
+	_reward_event.rpc(depth,gold,item_id)
+	print("DELVE_CHEST_OPEN depth=%d gold=%d item=%s" % [depth,gold,item_id])
 	_sync_run_state()
+
+@rpc("authority","call_remote","reliable")
+func _reward_event(depth_value: int, gold: int, item_id: String) -> void:
+	_grant_reward(depth_value,gold,item_id)
+
+## Every peer grants to its own PlayerState. The host calls this once locally
+## and the authority RPC covers the clients, so credits land exactly once.
+func _grant_reward(depth_value: int, gold: int, item_id: String) -> void:
+	hud.show_banner("+%d GOLD" % gold,2.5)
+	if _player_state == null:
+		hud.set_status("DEPTH %d CACHE: %d gold" % [depth_value,gold],4.0)
+		return
+	_player_state.add_credits(gold)
+	var gained := ""
+	if not item_id.is_empty():
+		var result: Dictionary = _player_state.try_pickup(item_id)
+		gained = _field_display_name(item_id) if bool(result.get("ok",false)) else "backpack full"
+	var message := "+%d gold" % gold
+	if not gained.is_empty():
+		message += "  /  " + gained
+	hud.set_status("DEPTH %d CACHE: %s" % [depth_value,message],4.5)
+
+## Deterministic per (seed, depth): the table climbs in tiers, the index is the
+## same on every peer because the host broadcasts the chosen id anyway.
+func _reward_item() -> String:
+	var table: Array = LOOT_TIERS[mini((depth - 1) / 5,LOOT_TIERS.size() - 1)]
+	var index := (absi(run_seed) + depth * 7) % table.size()
+	return str(table[index])
 
 @rpc("authority","call_remote","reliable")
 func _chest_event() -> void:
@@ -1674,11 +1762,13 @@ func _run_state(state: Dictionary) -> void:
 
 func _apply_run_state(state: Dictionary) -> void:
 	var previous_phase := phase
-	var previous_wave := wave
+	var previous_depth := depth
 	phase = str(state.get("phase",phase))
-	wave = int(state.get("wave",wave))
+	depth = maxi(1,int(state.get("depth",depth)))
 	chest_ready = bool(state.get("chest_ready",chest_ready))
 	chest_open = bool(state.get("chest_open",chest_open))
+	rope_lowered = bool(state.get("rope_lowered",rope_lowered))
+	hole_open = bool(state.get("hole_open",hole_open))
 	_clear_timer = float(state.get("timer",0.0))
 	_remote_state = state.duplicate(true)
 	# The host's slot index is not this client's; the party panel marks the
@@ -1687,6 +1777,8 @@ func _apply_run_state(state: Dictionary) -> void:
 	if state.has("endpoint"):
 		_endpoint = str(state.get("endpoint",_endpoint))
 	world.set_sealed(bool(state.get("sealed",false)))
+	world.set_rope_lowered(rope_lowered)
+	world.set_hole_open(hole_open)
 	var party: Variant = state.get("party",[])
 	var active_slots: Dictionary = {}
 	if party is Array:
@@ -1709,21 +1801,21 @@ func _apply_run_state(state: Dictionary) -> void:
 			actor.collision_mask = 0
 	_sync_client_chest()
 	if phase == "GAME_OVER":
-		if _field_inventory_open():
-			_field_inventory.close()
+		if _ui_open():
+			_world_ui.close()
 		_set_cursor_free(true)
 	if phase != previous_phase:
 		match phase:
+			"ALTAR":
+				hud.show_banner("DEPTH %d" % depth,2.0)
 			"WAVE":
-				hud.show_wave_banner("WAVE %d" % wave,2.0)
+				hud.show_banner("DEPTH %d" % depth,2.0)
 			"CLEARED":
-				hud.show_wave_banner("WAVE %d CLEARED" % wave,2.0)
+				hud.show_banner("DEPTH %d CLEARED" % depth,2.0)
 			"GAME_OVER":
 				hud.show_game_over("The delve has claimed the party.")
-			"COMPLETE":
-				hud.show_wave_banner("THE CACHE IS YOURS",3.0)
-	elif wave != previous_wave:
-		hud.show_wave_banner("WAVE %d" % wave,2.0)
+	elif depth != previous_depth:
+		hud.show_banner("DEPTH %d" % depth,2.0)
 
 func _run_state_dict() -> Dictionary:
 	var party: Array = []
@@ -1733,10 +1825,11 @@ func _run_state_dict() -> Dictionary:
 		party.append({"slot":actor.slot, "name":actor.display_name, "health":actor.health,
 			"alive":actor.alive, "peer":actor.peer_id, "downed":not actor.alive})
 	return {
-		"phase":phase, "wave":wave, "waves":Progress.WAVE_COUNT,
+		"phase":phase, "depth":depth,
 		"remaining":_remaining_enemies(),
 		"timer":maxf(0.0,_clear_timer) if phase == "CLEARED" else 0.0,
 		"sealed":bool(world.sealed), "chest_ready":chest_ready, "chest_open":chest_open,
+		"rope_lowered":bool(world.is_rope_lowered()), "hole_open":bool(world.is_hole_open()),
 		"party":party, "role":network_role, "endpoint":_endpoint, "local_slot":local_slot,
 	}
 
@@ -1747,10 +1840,10 @@ func _sync_run_state() -> void:
 
 func _set_phase(value: String) -> void:
 	phase = value
-	print("DELVE_PHASE phase=%s wave=%d" % [phase,wave])
+	print("DELVE_PHASE phase=%s depth=%d" % [phase,depth])
 	if phase == "GAME_OVER":
-		if _field_inventory_open():
-			_field_inventory.close()
+		if _ui_open():
+			_world_ui.close()
 		_set_cursor_free(true)
 		hud.show_game_over("The delve has claimed the party.")
 
@@ -1774,15 +1867,10 @@ func _game_over() -> void:
 	if phase == "GAME_OVER":
 		return
 	_set_phase("GAME_OVER")
-	Progress.clear_run(save_path)
-	resume_data.clear()
 	for actor in actors:
 		actor.combat.stop()
-	print("DELVE_GAME_OVER")
+	print("DELVE_GAME_OVER depth=%d" % depth)
 	_sync_run_state()
-
-func _save_checkpoint(open_ready: bool) -> void:
-	Progress.save_run(wave,open_ready,run_seed,save_path)
 
 func _drop_party() -> void:
 	var index := 0
@@ -1803,25 +1891,20 @@ func _host_interact(slot: int) -> void:
 		return
 	var pos: Vector3 = actor.global_position
 	match phase:
-		"ASSEMBLY":
-			if slot != 0:
-				return
-			var shaft: Vector3 = world.player_spawns[1] if world.player_spawns.size() > 1 else world.player_spawns[0]
-			if pos.distance_to(shaft) <= INTERACT_RANGE:
-				begin_descent()
+		"ALTAR":
+			if pos.distance_to(world.altar_position) <= INTERACT_RANGE:
+				begin_wave()
 		"CLEARED":
 			if chest_ready and not chest_open and is_instance_valid(chest) \
 					and pos.distance_to(world.chest_position) <= CHEST_RANGE:
 				open_chest()
 				return
-			# Any survivor can take the party through a cleared gate. This keeps
-			# the run moving when the host's own ranger is down but the party lives.
-			if pos.distance_to(world.descent_position) <= INTERACT_RANGE:
-				descend_next_wave()
-			elif pos.distance_to(world.ascent_position) <= INTERACT_RANGE:
+			# The rope is the way out; the open floor is the way deeper. Either
+			# survivor may lead, so a downed host does not strand the party.
+			if rope_lowered and pos.distance_to(world.rope_position) <= INTERACT_RANGE:
 				ascend_to_surface()
-		"COMPLETE":
-			if pos.distance_to(world.ascent_position) <= INTERACT_RANGE:
-				ascend_to_surface()
+				return
+			if hole_open and pos.distance_to(world.hole_position) <= INTERACT_RANGE:
+				descend_next_depth()
 		_:
 			pass

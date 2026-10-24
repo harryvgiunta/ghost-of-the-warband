@@ -1,202 +1,94 @@
 extends SceneTree
-## End-to-end entry paths: the Hollow's DESCEND button and the Wayfarer Inn
-## hatch both hand off through Session and land in a hosted delve scene.
+## Town exits: falling through the inn hatch enters the delve, the arena portal
+## hosts a match, and the delve rope returns to town.
 
-const Progress = preload("res://scripts/delve_progress.gd")
-const TEST_STATE := "user://delve_entry_state.json"
-const TEST_RUN := "user://delve_entry_run.json"
+const TEST_SAVE := "user://delve_entry_state.json"
 
-var failures := 0
-var checks := 0
 var state
 var session
-
-func _initialize() -> void:
-	call_deferred("run")
+var checks := 0
+var failures := 0
 
 func check(condition: bool, message: String) -> void:
 	checks += 1
 	if not condition:
 		failures += 1
 		push_error(message)
-		print("DELVE_ENTRY_FAIL  ", message)
+		print("ENTRY_FAIL  ",message)
 
-func _wait_scene(path: String, timeout: float = 8.0) -> Node:
-	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
-	while Time.get_ticks_msec() < deadline:
-		var scene := current_scene
-		if scene != null and scene.scene_file_path == path:
-			return scene
-		await process_frame
-	var fallback := current_scene
-	return fallback if fallback != null and fallback.scene_file_path == path else null
+func _initialize() -> void:
+	call_deferred("run")
 
-func _drop_scene() -> void:
-	if current_scene != null:
-		current_scene.queue_free()
-		current_scene = null
-	await process_frame
+func _remove_test_save() -> void:
+	if FileAccess.file_exists(TEST_SAVE):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE))
 
-func _test_menu_path() -> void:
-	var menu = load("res://menu.tscn").instantiate()
-	root.add_child(menu)
-	current_scene = menu
-	await process_frame
-	await process_frame
-	check(menu.hud.delve_button != null, "The Hollow builds the delve button")
-	menu._enter_delve_solo()
-	var delve = await _wait_scene("res://delve.tscn")
-	check(delve != null, "The Hollow loads the delve scene")
-	if delve == null:
-		return
-	var hosted := false
-	var deadline := Time.get_ticks_msec() + 4000
-	while Time.get_ticks_msec() < deadline:
-		if delve.network_role == "host":
-			hosted = true
-			break
-		await process_frame
-	check(hosted, "The Hollow's solo deploy hosts the room")
-	check(delve.phase == "ASSEMBLY", "The deploy lands on the surface staging")
-	check(delve.world != null and delve.world.player_spawns.size() == 4, "The loaded room has its party spawns")
-	delve.leave_game()
-	await _drop_scene()
-
-func _test_town_path() -> void:
-	session.clear()
-	var frontier = load("res://main.tscn").instantiate()
-	root.add_child(frontier)
-	current_scene = frontier
-	await create_timer(0.6).timeout
-	var entry: Dictionary = {}
-	for record in frontier.world.interactables:
-		if str(record.get("id", "")) == "delve":
-			entry = record
-			break
-	check(not entry.is_empty(), "Hearthstead contains the delve hatch")
-	if entry.is_empty():
-		await _drop_scene()
-		return
-	var inn = frontier.world.find_child("WayfarerInn",true,false)
-	var hatch = frontier.world.find_child("SunkenDelveHatch",true,false)
-	check(inn != null and hatch != null, "The Wayfarer Inn contains the Sunken Delve hatch")
-	if inn != null and hatch != null:
-		var local: Vector3 = inn.to_local(hatch.global_position)
-		check(absf(local.x) < 3.4 and absf(local.z) < 2.8, "The hatch is inside the house")
-	frontier.player.global_position = (entry.get("position", Vector3.ZERO) as Vector3) + Vector3(0, 0.25, 1.0)
-	frontier._update_interaction()
-	check(frontier._interaction_allowed, "The hatch can be used from inside the inn")
-	frontier._enter_delve()
-	var delve = await _wait_scene("res://delve.tscn")
-	check(delve != null, "The hatch loads the delve scene")
-	if delve != null:
-		var hosted := false
-		var deadline := Time.get_ticks_msec() + 4000
-		while Time.get_ticks_msec() < deadline:
-			if delve.network_role == "host":
-				hosted = true
-				break
-			await process_frame
-		check(hosted, "The inn hatch hosts a local room")
-		delve.leave_game()
-	await _drop_scene()
-
-func _test_host_hatch_path() -> void:
-	session.clear()
-	var frontier = load("res://main.tscn").instantiate()
-	root.add_child(frontier)
-	current_scene = frontier
-	await create_timer(0.6).timeout
-	frontier._delve_host = true
-	frontier._delve_port = 7816
-	frontier._delve_name = "Hatch Host"
-	var entry: Dictionary = {}
-	for record in frontier.world.interactables:
-		if str(record.get("id", "")) == "delve":
-			entry = record
-			break
-	check(not entry.is_empty(), "The host path can find the inn hatch")
-	if entry.is_empty():
-		await _drop_scene()
-		return
-	frontier.player.global_position = (entry.get("position", Vector3.ZERO) as Vector3) + Vector3(0, 0.25, 1.0)
-	frontier._update_interaction()
-	frontier._enter_delve()
-	var delve = await _wait_scene("res://delve.tscn")
-	check(delve != null, "The host hatch loads the delve scene")
-	if delve != null:
-		var hosted := false
-		var deadline := Time.get_ticks_msec() + 4000
-		while Time.get_ticks_msec() < deadline:
-			if delve.network_role == "host":
-				hosted = true
-				break
-			await process_frame
-		check(hosted, "Host Tailscale's hatch descent hosts the delve")
-		check(str(delve._endpoint).contains("7816"), "The host hatch uses the requested UDP port")
-		delve.leave_game()
-	await _drop_scene()
-
-func _test_ascent_path() -> void:
-	session.clear()
-	Progress.clear_run(TEST_RUN)
-	session.arm_delve("delve-solo", "127.0.0.1", 7777, "Ascent")
-	var delve = load("res://delve.tscn").instantiate()
-	delve.save_path = TEST_RUN
-	root.add_child(delve)
-	current_scene = delve
-	var hosted := false
-	var deadline := Time.get_ticks_msec() + 5000
-	while Time.get_ticks_msec() < deadline:
-		if delve.network_role == "host":
-			hosted = true
-			break
-		await process_frame
-	check(hosted, "The ascent fixture hosts")
-	if not hosted:
-		await _drop_scene()
-		return
-	delve.begin_descent()
-	var spawned := false
-	deadline = Time.get_ticks_msec() + 5000
-	while Time.get_ticks_msec() < deadline:
-		if delve.devils.size() >= 2:
-			spawned = true
-			break
-		await process_frame
-	check(spawned, "The ascent fixture receives its wave")
-	for devil in delve.devils.duplicate():
-		if is_instance_valid(devil) and devil.alive:
-			devil.take_damage(9999.0, -1)
-	var cleared := false
-	deadline = Time.get_ticks_msec() + 5000
-	while Time.get_ticks_msec() < deadline:
-		if delve.phase == "CLEARED" and delve.chest_ready:
-			cleared = true
-			break
-		await process_frame
-	check(cleared, "The ascent fixture clears its wave")
-	delve.ascend_to_surface()
-	var frontier = await _wait_scene("res://main.tscn")
-	check(frontier != null, "Ascending returns the party to the open frontier")
-	check(not Progress.load_run(TEST_RUN).is_empty(), "Ascending keeps the cleared checkpoint")
-	Progress.clear_run(TEST_RUN)
-	await _drop_scene()
+func _entry(world, id: String) -> Dictionary:
+	for item in world.interactables:
+		if str(item.id) == id:
+			return item
+	return {}
 
 func run() -> void:
+	_remove_test_save()
 	state = root.get_node("PlayerState")
 	session = root.get_node("Session")
-	state.save_path = TEST_STATE
-	state.reset()
-	session.clear()
-	await _test_menu_path()
-	await _test_town_path()
-	await _test_host_hatch_path()
-	await _test_ascent_path()
-	state.reset()
-	session.clear()
-	if FileAccess.file_exists(TEST_STATE):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_STATE))
-	Progress.clear_run(TEST_RUN)
-	print("DELVE_ENTRY_REGRESSION checks=", checks, " failures=", failures)
+	state.save_path = TEST_SAVE
+	state.reset(false)
+
+	var game = load("res://main.tscn").instantiate()
+	root.add_child(game)
+	await create_timer(0.5).timeout
+	game.set_physics_process(false)
+	for enemy in game.enemies:
+		enemy.set_physics_process(false)
+	check(game.world.player_spawn.distance_to(Vector3(0,3,47)) < 0.05,"A new journey starts at the town gate")
+	var hatch := _entry(game.world,"delve")
+	check(not hatch.is_empty(),"The delve hatch remains a map marker")
+	var inn = game.world.get_node_or_null("WayfarerInn")
+	check(inn != null and inn.get_node_or_null("SunkenDelveHatch") != null,"The hatch is built inside the Wayfarer Inn")
+	var hatch_node = inn.get_node("SunkenDelveHatch") if inn != null else null
+	if hatch_node != null:
+		check(absf(hatch_node.global_position.x - 16.0) < 0.05 and absf(hatch_node.global_position.z - 42.0) < 0.05,"The hatch sits over the open floor cell")
+	check(game.world.is_over_delve_hatch(Vector3(16,2.2,42)),"The hatch footprint is open at the floor")
+	check(not game.world.is_over_delve_hatch(Vector3(12,2.2,42)),"The hatch does not trigger outside the opening")
+
+	var portal := _entry(game.world,"arena_portal")
+	check(not portal.is_empty() and str(portal.kind) == "portal","The arena portal is interactive")
+	check(game.world.get_node_or_null("ArenaPortal") != null,"The portal has a placeholder world node")
+	var stash := _entry(game.world,"stash")
+	check(not stash.is_empty() and game.world.get_node_or_null("TownStash") != null,"The stash chest is in town")
+
+	# A real fall through the hatch hands off to the delve.
+	game.set_physics_process(true)
+	game.player.global_position = Vector3(16,3.8,42)
+	game.player.velocity = Vector3.ZERO
+	await create_timer(0.9).timeout
+	check(current_scene != null and current_scene.scene_file_path == "res://delve.tscn","The fall loads the delve")
+	if current_scene != null and current_scene.get("phase") != null:
+		check(str(current_scene.phase) == "ALTAR","The fall lands at the altar phase")
+		check(current_scene.network_role == "host","The hatch opens a solo host")
+		var delve = current_scene
+		delve._set_phase("CLEARED")
+		delve.ascend_to_surface()
+		await create_timer(0.7).timeout
+		check(current_scene != null and current_scene.scene_file_path == "res://main.tscn","The rope returns to town")
+
+	# The arena portal hosts a practice match and returns to town.
+	var trip = load("res://main.tscn").instantiate()
+	root.add_child(trip)
+	await create_timer(0.4).timeout
+	trip.set_physics_process(false)
+	trip._enter_arena()
+	await create_timer(0.7).timeout
+	check(current_scene != null and current_scene.scene_file_path == "res://arena.tscn","The portal loads the arena")
+	if current_scene != null and current_scene.get("network_role") != null:
+		check(str(current_scene.network_role) == "host","The portal hosts a local match")
+		current_scene._hub()
+		await create_timer(0.5).timeout
+		check(current_scene != null and current_scene.scene_file_path == "res://main.tscn","The arena returns to town")
+
+	state.reset(false)
+	_remove_test_save()
+	print("DELVE_ENTRY_REGRESSION checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)

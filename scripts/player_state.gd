@@ -9,11 +9,11 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 
-const INVENTORY_CAPACITY := 10
+const INVENTORY_CAPACITY := 15
 const STASH_CAPACITY := 20
 const STARTING_CREDITS := 200
 const SELL_RATE := 0.6
-const SAVE_VERSION := 3
+const SAVE_VERSION := 4
 const DEFAULT_SAVE_PATH := "user://player_state.json"
 
 const ITEMS := {
@@ -253,14 +253,14 @@ const ITEM_QUOTES := {
 }
 
 const VENDORS := [
-	{"name":"Fletcher Orla", "tag":"FLETCHER", "line":"Bows, strings and staves.", "stock":[
+	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
 		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
 		"sword_short","sword_arming","sword_great","dagger_iron",
 		"shield_buckler","shield_kite","shield_tower",
 	]},
-	{"name":"Quartermaster Vey", "tag":"STORE", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
+	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
 		"armor_leather_head","armor_leather_chest","armor_leather_hands","armor_leather_legs","armor_leather_feet",
 		"armor_mail_head","armor_mail_chest","armor_mail_hands","armor_mail_legs","armor_mail_feet",
 		"armor_plate_head","armor_plate_chest","armor_plate_hands","armor_plate_legs","armor_plate_feet",
@@ -269,7 +269,18 @@ const VENDORS := [
 	]},
 ]
 
-const STARTING_INVENTORY := ["sword_short","dagger_iron","shield_buckler"]
+## Every weapon in the catalog starts in the backpack. The shortbow is also the
+## starting main hand, so one spare remains in the pack for the quick swap.
+const STARTING_INVENTORY := [
+	"bow_short","bow_recurve","bow_long",
+	"sword_short","sword_arming","sword_great",
+	"dagger_iron",
+	"staff_fire","staff_bone",
+	"shield_buckler","shield_kite","shield_tower",
+]
+## One bound alternate hand pair. TAB moves the active pair into this slot and
+## equips the stored pair; the displaced pair becomes the new quick set.
+const QUICK_DEFAULT := {"main":"sword_short", "off":"shield_buckler"}
 
 const DEFAULTS := {
 	"head":"armor_leather_head", "chest":"armor_leather_chest", "hands":"armor_leather_hands",
@@ -282,6 +293,7 @@ var inventory: Array[String] = []
 var stash: Array[String] = []
 var floor_items: Array[String] = []
 var equipped: Dictionary = DEFAULTS.duplicate()
+var quick: Dictionary = QUICK_DEFAULT.duplicate()
 var save_path := DEFAULT_SAVE_PATH
 
 func _ready() -> void:
@@ -544,12 +556,82 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 func loadout() -> Dictionary:
 	return build_loadout(main_item(), off_item(), equipped_pieces())
 
+func quick_main() -> String:
+	return str(quick.get("main", ""))
+
+func quick_off() -> String:
+	return str(quick.get("off", ""))
+
+func quick_set_label() -> String:
+	return _hand_pair_label(quick_main(), quick_off())
+
+func has_quick_set() -> bool:
+	return not quick_main().is_empty() or not quick_off().is_empty()
+
+## Store the exact main/off pair currently equipped as the TAB alternate.
+func bind_quick_from_equipped() -> Dictionary:
+	if main_item().is_empty() and off_item().is_empty():
+		return {"ok":false, "message":"Equip a weapon pair before binding the quick swap."}
+	quick = {"main":main_item(), "off":off_item()}
+	_commit()
+	return {"ok":true, "message":"Bound %s to TAB." % quick_set_label()}
+
+## Swap the active hands with the bound pair. Both pairs live in the same
+## carried pool (backpack plus equipped hands), so no gear is created or lost.
+## The outgoing pair becomes the new bound set and TAB toggles back.
+func quick_swap() -> Dictionary:
+	var target_main := quick_main()
+	var target_off := quick_off()
+	if target_main.is_empty() and target_off.is_empty():
+		return {"ok":false, "message":"No quick swap set is bound. Open the paperdoll and bind one."}
+	if target_main == main_item() and target_off == off_item():
+		return {"ok":false, "message":"Already holding the quick swap set."}
+	var target_main_item: Dictionary = _item(target_main)
+	var target_off_item: Dictionary = _item(target_off)
+	if not target_main.is_empty() and not EquipmentRules.allowed(target_main_item, "main"):
+		return {"ok":false, "message":"The quick swap main hand is not a main-hand weapon."}
+	if not target_off.is_empty() and not EquipmentRules.allowed(target_off_item, "off"):
+		return {"ok":false, "message":"The quick swap off hand is not an off-hand item."}
+	if EquipmentRules.two_handed(target_main_item) and not target_off.is_empty():
+		return {"ok":false, "message":"The quick swap set pairs a two-handed weapon with an off hand."}
+	var pool := _to_dict_strings(inventory)
+	if not main_item().is_empty():
+		pool.append(main_item())
+	if not off_item().is_empty():
+		pool.append(off_item())
+	for hand_id in [target_main, target_off]:
+		if hand_id.is_empty():
+			continue
+		var found := pool.find(hand_id)
+		if found < 0:
+			return {"ok":false, "message":"%s is not carried. Move it from the stash to the backpack." % item_name(hand_id)}
+		pool.remove_at(found)
+	if pool.size() > INVENTORY_CAPACITY:
+		return {"ok":false, "message":"Backpack full (%d / %d). Make room before swapping." % [pool.size(), INVENTORY_CAPACITY]}
+	var outgoing_main := main_item()
+	var outgoing_off := off_item()
+	equipped["main"] = target_main
+	equipped["off"] = target_off
+	inventory = pool
+	quick = {"main":outgoing_main, "off":outgoing_off}
+	_commit()
+	return {"ok":true, "message":"Swapped to %s." % quick_set_label()}
+
+func _hand_pair_label(main_id: String, off_id: String) -> String:
+	var parts := PackedStringArray()
+	if not main_id.is_empty():
+		parts.append(item_name(main_id))
+	if not off_id.is_empty():
+		parts.append(item_name(off_id))
+	return " + ".join(parts) if not parts.is_empty() else "Unarmed"
+
 func reset(persist: bool = true) -> void:
 	credits = STARTING_CREDITS
 	inventory.assign(STARTING_INVENTORY)
 	stash.clear()
 	floor_items.clear()
 	equipped = DEFAULTS.duplicate()
+	quick = QUICK_DEFAULT.duplicate()
 	if persist:
 		_commit()
 	else:
@@ -660,7 +742,7 @@ func drop_equipped(slot: String) -> Dictionary:
 	return {"ok":true, "message":"Dropped %s at your feet." % item_name(item_id)}
 
 ## Field world drops: the item leaves the ranger's pack but never joins the
-## Hollow's floor list, because the scene spawns it in the world instead.
+## out-of-raid floor list, because the scene spawns it in the world instead.
 func take_from_inventory(index: int) -> Dictionary:
 	if index < 0 or index >= inventory.size():
 		return {"ok":false, "item_id":"", "message":"That slot is empty."}
@@ -748,6 +830,7 @@ func save_state() -> void:
 		"inventory":inventory,
 		"stash":stash,
 		"equipped":equipped,
+		"quick":quick,
 		"floor":floor_items,
 	}))
 	file.close()
@@ -768,13 +851,18 @@ func load_state() -> void:
 	stash = _read_list(data.get("stash", []), STASH_CAPACITY)
 	floor_items = _read_list(data.get("floor", []), 0)
 	equipped = DEFAULTS.duplicate()
+	quick = QUICK_DEFAULT.duplicate()
 	var saved_equipped: Variant = data.get("equipped", {})
 	if typeof(saved_equipped) == TYPE_DICTIONARY:
 		if version >= 3:
 			_load_equipped_v3(saved_equipped)
 		else:
 			_load_equipped_legacy(saved_equipped)
+	var saved_quick: Variant = data.get("quick", {})
+	if typeof(saved_quick) == TYPE_DICTIONARY:
+		_load_quick(saved_quick)
 	_normalize_equipped()
+	_normalize_quick()
 	changed.emit()
 
 func _read_list(value: Variant, limit: int) -> Array[String]:
@@ -876,3 +964,24 @@ func _normalize_equipped() -> void:
 		var displaced := off_item()
 		equipped["off"] = ""
 		_give_to_inventory(displaced)
+
+## A saved quick pair must stay legal: unknown or wrong-hand ids are dropped,
+## and a two-handed main hand cannot keep a paired off hand.
+func _load_quick(saved: Dictionary) -> void:
+	var main_id := str(saved.get("main", ""))
+	var off_id := str(saved.get("off", ""))
+	quick = {
+		"main": main_id if not main_id.is_empty() and EquipmentRules.allowed(_item(main_id), "main") else "",
+		"off": off_id if not off_id.is_empty() and EquipmentRules.allowed(_item(off_id), "off") else "",
+	}
+
+func _normalize_quick() -> void:
+	var main_id := quick_main()
+	var off_id := quick_off()
+	if not main_id.is_empty() and not EquipmentRules.allowed(_item(main_id), "main"):
+		main_id = ""
+	if not off_id.is_empty() and not EquipmentRules.allowed(_item(off_id), "off"):
+		off_id = ""
+	if EquipmentRules.two_handed(_item(main_id)):
+		off_id = ""
+	quick = {"main":main_id, "off":off_id}

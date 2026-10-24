@@ -5,7 +5,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 signal host_requested(port: int, player_name: String)
 signal join_requested(address: String, port: int, player_name: String)
 signal leave_requested
-signal hub_requested
+signal town_requested
 signal bow_selected(index: int)
 signal armor_selected(slot: String, set_index: int)
 signal sword_selected(index: int)
@@ -27,6 +27,8 @@ var health_label: Label
 var attack_label: Label
 var connection_label: Label
 var respawn_label: Label
+var toast_label: Label
+var _toast_time := 0.0
 var _cover_status: Label
 var bar: ProgressBar
 var bow_buttons: Array[Button] = []
@@ -86,8 +88,8 @@ func _ready() -> void:
 	status_label = _ui._label(lobby,"",Vector2(25,389),14,UI.TEAL)
 	status_label.size = Vector2(515,96)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var hub := _ui._button(lobby,"RETURN TO THE HOLLOW",Vector2(25,505),Vector2(515,38))
-	hub.pressed.connect(func(): hub_requested.emit())
+	var hub := _ui._button(lobby,"RETURN TO TOWN",Vector2(25,505),Vector2(515,38))
+	hub.pressed.connect(func(): town_requested.emit())
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
 		name_input.text = str(cache.player_name)
@@ -120,6 +122,10 @@ func _ready() -> void:
 	respawn_label.set_anchors_preset(Control.PRESET_CENTER,true)
 	respawn_label.size.x = 600
 	respawn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	toast_label = _ui._label(match_ui,"",Vector2(-300,-170),13,UI.TEAL)
+	toast_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
+	toast_label.size = Vector2(600,22)
+	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var equipment := _ui._panel(match_ui,Vector2(24,-360),Vector2(330,317))
 	equipment.set_anchors_preset(Control.PRESET_BOTTOM_LEFT,true)
 	for index in 3:
@@ -169,10 +175,12 @@ func _ready() -> void:
 	potion.add_theme_font_size_override("font_size",10)
 	potion.pressed.connect(func(): consumable_selected.emit("potion"))
 	_ui._label(equipment,"Gear 1-5. 6 bandage / 7 potion. LMB by shoulder. Wheel: stab / overhead.",Vector2(14,301),9,UI.MUTED)
+	# The persistent paperdoll is the only visible equipment UI; P opens it.
+	equipment.visible = false
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   6 / 7  Consumables   SHIFT + SPACE  Roll   ESC  Equipment",Vector2(-560,-25),11,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -192,6 +200,12 @@ func show_match(local_name: String, address: String) -> void:
 
 func set_status(message: String) -> void:
 	status_label.text = message
+
+func flash_status(message: String, seconds: float = 2.0) -> void:
+	if toast_label == null:
+		return
+	toast_label.text = message
+	_toast_time = seconds
 
 func update_match(state: Dictionary) -> void:
 	var lines := PackedStringArray()
@@ -251,7 +265,7 @@ func update_match(state: Dictionary) -> void:
 		elif state.weapon == "dagger":
 			attack_label.text = "READY / LMB OR WHEEL UP STABS / WHEEL DOWN OVERHEAD"
 		elif state.weapon == "none":
-			attack_label.text = "UNARMED / RETURN TO THE HOLLOW TO EQUIP"
+			attack_label.text = "UNARMED / PRESS P TO EQUIP"
 		else:
 			attack_label.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 	if state.phase == "BANDAGE":
@@ -294,7 +308,11 @@ func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: b
 	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", UI.TEAL if active and peeking else UI.GOLD if active else UI.MUTED)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _toast_time > 0.0:
+		_toast_time = maxf(_toast_time - delta, 0.0)
+		if _toast_time == 0.0 and toast_label != null:
+			toast_label.text = ""
 	queue_redraw()
 
 func _draw() -> void:

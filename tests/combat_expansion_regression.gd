@@ -242,19 +242,19 @@ func run() -> void:
 	game.queue_free()
 	await process_frame
 
-	# The Hollow forms open with the cached name, address and port.
+	# The title join form opens with the cached name, address and port.
 	var net_cache = root.get_node_or_null("NetCache")
 	check(net_cache != null,"NetCache autoload is registered")
 	if net_cache != null:
 		net_cache.remember("CachedRanger","100.64.0.12",7999)
-		var hub = load("res://menu.tscn").instantiate()
-		root.add_child(hub)
+		var title = load("res://title.tscn").instantiate()
+		root.add_child(title)
 		await create_timer(0.35).timeout
-		hub.hud.join_button.pressed.emit()
+		title._open_join()
 		await process_frame
-		check(hub.hud._name_input.text == "CachedRanger" and hub.hud._address_input.text == "100.64.0.12" and int(hub.hud._port_input.value) == 7999,"The join form restores the cached name, address and port")
-		hub.hud.close_form()
-		hub.queue_free()
+		check(title._name_input.text == "CachedRanger" and title._address_input.text == "100.64.0.12" and int(title._port_input.value) == 7999,"The join form restores the cached name, address and port")
+		title._close_join()
+		title.queue_free()
 		await process_frame
 		net_cache.reset()
 

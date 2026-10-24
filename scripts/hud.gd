@@ -9,11 +9,10 @@ signal consumable_selected(kind: String)
 signal view_toggled
 signal camp_requested
 signal map_toggled
-signal hub_requested
 signal inventory_requested
+signal equipment_requested
 signal cursor_requested(free: bool)
 
-const ArmorData = preload("res://scripts/armor_data.gd")
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
@@ -22,18 +21,9 @@ const CROSSHAIR_AXES = [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]
 var map_open := false
 var reticle := Vector2.ZERO
 var reticle_visible := false
-var bow_buttons: Array[Button] = []
-var armor_buttons: Array[Button] = []
-var sword_buttons: Array[Button] = []
-var weapon_buttons: Array[Button] = []
 var _weapon := "bow"
 var _shield_equipped := false
 var _armor_pieces: Dictionary = {}
-var _shield_button: Button
-var _dual_button: Button
-var _bandage_button: Button
-var _potion_button: Button
-var _equipment: Panel
 var _region: Label
 var _quest: Label
 var _health_label: Label
@@ -42,8 +32,6 @@ var _backpack_label: Label
 var _phase: Label
 var _loadout: Label
 var _cover_status: Label
-var _bow_details: Label
-var _dagger_details: Label
 var _health_bar: ProgressBar
 var _stamina_bar: ProgressBar
 var _charge_bar: ProgressBar
@@ -52,7 +40,6 @@ var _interaction: Label
 var _feedback: Label
 var _feedback_time := 0.0
 var _damage_flash := 0.0
-var _view_button: Button
 var _map_button: Button
 var _player_position := Vector3.ZERO
 var _player_yaw := 0.0
@@ -105,7 +92,7 @@ func _ready() -> void:
 	var backpack := _panel(self, Vector2(-216, -243), Vector2(192, 30))
 	backpack.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	backpack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_backpack_label = _label(backpack, "BACKPACK  0 / 10", Vector2(12, 6), 12, TEAL)
+	_backpack_label = _label(backpack, "BACKPACK  0 / 15", Vector2(12, 6), 12, TEAL)
 	var charge := _panel(self, Vector2(-260, -133), Vector2(520, 101))
 	charge.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
@@ -122,82 +109,19 @@ func _ready() -> void:
 	var equipment_button := _button(self, "I   INVENTORY", Vector2(-216, -163), Vector2(192, 35))
 	equipment_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	equipment_button.pressed.connect(func(): inventory_requested.emit())
+	var kit_button := _button(self, "P   EQUIPMENT", Vector2(-216, -207), Vector2(192, 35))
+	kit_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
+	kit_button.pressed.connect(func(): equipment_requested.emit())
 	_map_button = _button(self, "M   WORLD MAP", Vector2(-216, -119), Vector2(192, 35))
 	_map_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	_map_button.pressed.connect(func(): map_toggled.emit())
-	var camp_button := _button(self, "R   RETURN TO CAMP", Vector2(-216, -75), Vector2(192, 35))
+	var camp_button := _button(self, "R   RETURN TO TOWN", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var hub_button := _button(self, "RETURN TO THE HOLLOW", Vector2(-216, -207), Vector2(192, 35))
-	hub_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
-	hub_button.add_theme_font_size_override("font_size", 13)
-	hub_button.pressed.connect(func(): hub_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   6 / 7  Consumables   SHIFT + SPACE  Roll   G  Interact   I  Inventory   O  Equipment", Vector2(-560, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / horizontal swing   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
-	_build_equipment()
-
-func _build_equipment() -> void:
-	_equipment = _panel(self, Vector2(24, 120), Vector2(282, 665))
-	_label(_equipment, "EQUIPMENT", Vector2(18, 15), 12, GOLD)
-	_label(_equipment, "A ranger of Ironwood", Vector2(18, 40), 20, CREAM)
-	for index in 3:
-		var button := _button(_equipment,["1 BOW","2 SWD","3 DAG"][index],Vector2(12+index*66,72),Vector2(62,30))
-		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",10)
-		button.size = Vector2(62,30)
-		button.pressed.connect(func(): weapon_selected.emit("bow" if index == 0 else "sword" if index == 1 else "dagger"))
-		weapon_buttons.append(button)
-	_dual_button = _button(_equipment,"5 DUAL",Vector2(210,72),Vector2(62,30))
-	_dual_button.toggle_mode = true
-	_dual_button.add_theme_font_size_override("font_size",10)
-	_dual_button.size = Vector2(62,30)
-	_dual_button.pressed.connect(func(): weapon_selected.emit("dual"))
-	_label(_equipment,"BOW SIZE / CLICK TO SELECT",Vector2(18,112),11,MUTED)
-	for index in 3:
-		var button := _button(_equipment,["SMALL SHORTBOW / 1s","MEDIUM RECURVE / 2s","LARGE LONGBOW / 3s"][index],Vector2(16,134+index*34),Vector2(250,30))
-		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",13)
-		button.size = Vector2(250,30)
-		button.pressed.connect(func(): bow_selected.emit(index))
-		bow_buttons.append(button)
-	_bow_details = _label(_equipment,"",Vector2(18,241),11,TEAL)
-	_label(_equipment,"SWORD SIZE / CLICK TO SELECT",Vector2(18,275),11,MUTED)
-	for index in 3:
-		var button := _button(_equipment,["SMALL SWORD / 1s","MEDIUM SWORD / 2s","LARGE SWORD / 3s"][index],Vector2(16,297+index*34),Vector2(250,30))
-		button.toggle_mode = true
-		button.add_theme_font_size_override("font_size",13)
-		button.size = Vector2(250,30)
-		button.pressed.connect(func(): sword_selected.emit(index))
-		sword_buttons.append(button)
-	_dagger_details = _label(_equipment,"",Vector2(18,399),10,TEAL)
-	_label(_equipment,"ARMOR / CLICK SLOT TO CYCLE",Vector2(18,416),11,MUTED)
-	for index in ArmorData.SLOTS.size():
-		var slot: String = ArmorData.SLOTS[index]
-		var column := index % 2
-		var row := index / 2
-		var button := _button(_equipment,"",Vector2(16+column*130,438+row*30),Vector2(120,26))
-		button.add_theme_font_size_override("font_size",11)
-		button.size = Vector2(120,26)
-		button.pressed.connect(_cycle_armor.bind(slot))
-		armor_buttons.append(button)
-	_shield_button = _button(_equipment,"4  SHIELD",Vector2(16,530),Vector2(120,28))
-	_shield_button.toggle_mode = true
-	_shield_button.add_theme_font_size_override("font_size",12)
-	_shield_button.toggled.connect(func(active: bool): shield_selected.emit(active))
-	_view_button = _button(_equipment,"V  INSPECT STANCE",Vector2(146,530),Vector2(120,28))
-	_view_button.pressed.connect(func(): view_toggled.emit())
-	_bandage_button = _button(_equipment,"6  BANDAGE",Vector2(16,566),Vector2(120,28))
-	_bandage_button.add_theme_font_size_override("font_size",12)
-	_bandage_button.pressed.connect(func(): consumable_selected.emit("bandage"))
-	_bandage_button.tooltip_text = "3 s use / 35 health over the next 3 s"
-	_potion_button = _button(_equipment,"7  POTION",Vector2(146,566),Vector2(120,28))
-	_potion_button.add_theme_font_size_override("font_size",12)
-	_potion_button.pressed.connect(func(): consumable_selected.emit("potion"))
-	_potion_button.tooltip_text = "0.5 s use / 50 health instantly"
-	_label(_equipment,"1 bow   2 sword   3 dagger   4 shield   5 dual\n6 bandage   7 healing potion\nDual: LMB left stab, RMB right overhead\nLMB horizontal follows the shoulder\nWheel up stab / wheel down overhead",Vector2(18,598),9,MUTED)
-	_equipment.visible = false
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
 	_landmarks = landmarks
@@ -256,7 +180,7 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		elif _weapon == "dagger":
 			_phase.text = "READY / LMB STAB / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 		elif _weapon == "none":
-			_phase.text = "UNARMED / OPEN THE HOLLOW AND EQUIP A WEAPON"
+			_phase.text = "UNARMED / PRESS P TO EQUIP A WEAPON"
 		else:
 			_phase.text = "READY / LMB HORIZONTAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
 
@@ -273,25 +197,10 @@ func update_cover(active: bool, low: bool, peeking: bool, side: int, crouched: b
 	_cover_status.text = stance if active and peeking else stance + (" / LEFT SHOULDER" if side < 0 else " / RIGHT SHOULDER")
 	_cover_status.add_theme_color_override("font_color", TEAL if active and peeking else GOLD if active else MUTED)
 
-func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_summary: String, sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}, shield: bool = false) -> void:
+func update_loadout(_bow: int, armor_pieces: Dictionary, data: Dictionary, armor_summary: String, _sword: int, weapon: String, sword_data: Dictionary, dagger_data: Dictionary = {}, shield: bool = false) -> void:
 	_shield_equipped = shield
 	_armor_pieces = armor_pieces.duplicate()
-	var shield_allowed := weapon == "dagger" or (weapon == "sword" and sword <= 1)
-	_shield_button.set_pressed_no_signal(shield)
-	_shield_button.disabled = not shield_allowed
-	for index in ArmorData.SLOTS.size():
-		var slot: String = ArmorData.SLOTS[index]
-		armor_buttons[index].text = "%s  %s" % [ArmorData.slot_label(slot).to_upper(),ArmorData.set_abbreviation(int(_armor_pieces.get(slot,0)))]
-	for index in 3:
-		bow_buttons[index].set_pressed_no_signal(index == bow)
-		sword_buttons[index].set_pressed_no_signal(index == sword)
 	_weapon = weapon
-	weapon_buttons[0].set_pressed_no_signal(weapon == "bow")
-	weapon_buttons[1].set_pressed_no_signal(weapon == "sword")
-	weapon_buttons[2].set_pressed_no_signal(weapon == "dagger")
-	_dual_button.set_pressed_no_signal(weapon == "dual")
-	_dual_button.disabled = sword == 2
-	_bow_details.text = "%.0f s FULL DRAW / RE-NOCK AFTER SHOT" % float(data.draw_seconds)
 	if weapon == "none":
 		_loadout.text = "UNARMED / %s" % armor_summary
 	else:
@@ -299,13 +208,6 @@ func update_loadout(bow: int, armor_pieces: Dictionary, data: Dictionary, armor_
 		if weapon == "dual":
 			weapon_name = "%s + OFF HAND" % String(sword_data.name)
 		_loadout.text = "%s / %s / %s" % [weapon.to_upper(),weapon_name,armor_summary]
-	if _dagger_details != null and not dagger_data.is_empty():
-		_dagger_details.text = "%.1f s STAB / %d DAMAGE / WEAK GUARD" % [float(dagger_data.seconds),int(dagger_data.damage)]
-
-
-func _cycle_armor(slot: String) -> void:
-	var next := (int(_armor_pieces.get(slot,0)) + 1) % ArmorData.SET_IDS.size()
-	armor_selected.emit(slot,next)
 
 func set_backpack(count: int, capacity: int) -> void:
 	if _backpack_label == null:
@@ -323,24 +225,15 @@ func set_interaction(text: String) -> void:
 	_interaction_panel.visible = not text.is_empty()
 	_interaction.text = text
 
-func set_inspecting(value: bool) -> void:
-	_equipment.visible = value
-	_view_button.text = "V   RETURN TO ADVENTURE" if value else "V   INSPECT STANCE"
-
-func toggle_equipment() -> void:
-	_equipment.visible = not _equipment.visible
-	map_open = false
-	_map_button.text = "M   WORLD MAP"
-	cursor_requested.emit(_equipment.visible)
+func set_inspecting(_value: bool) -> void:
+	pass
 
 func toggle_map() -> void:
 	map_open = not map_open
-	_equipment.visible = false
 	_map_button.text = "M   CLOSE MAP" if map_open else "M   WORLD MAP"
 	cursor_requested.emit(map_open)
 
 func close_panels() -> void:
-	_equipment.visible = false
 	map_open = false
 	_map_button.text = "M   WORLD MAP"
 	cursor_requested.emit(false)
@@ -393,6 +286,12 @@ func _draw_map(rect: Rect2, expanded: bool) -> void:
 		var color := TEAL if _activated.has(item.id) else GOLD
 		if item.kind == "delve":
 			color = Color("e08a4f")
+		elif item.kind == "stash":
+			color = Color("b7c46f")
+		elif item.kind == "portal":
+			color = Color("b28be0")
+		elif item.kind == "vendor":
+			color = Color("e9bf76")
 		if item.kind == "camp":
 			draw_rect(Rect2(point - Vector2.ONE * 4, Vector2.ONE * 8), Color("d69b74"))
 		else:
@@ -405,7 +304,7 @@ func _draw_map(rect: Rect2, expanded: bool) -> void:
 	draw_colored_polygon(triangle, CREAM)
 	draw_string(font, rect.position + Vector2(12, 20), "IRONWOOD FRONTIER  /  M TO CLOSE" if expanded else "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, GOLD)
 	if expanded:
-		draw_string(font, rect.position + Vector2(18, rect.size.y - 14), "Gold: dark waystone   /   Teal: restored   /   Square: village campfire", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, MUTED)
+		draw_string(font, rect.position + Vector2(18, rect.size.y - 14), "Gold: waystone / keeper   /   Teal: restored   /   Purple: arena portal   /   Square: campfire", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, MUTED)
 
 func _panel(parent: Node, position_at: Vector2, dimensions: Vector2) -> Panel:
 	var panel := Panel.new()

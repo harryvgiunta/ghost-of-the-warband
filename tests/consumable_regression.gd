@@ -28,7 +28,7 @@ func run() -> void:
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await pause(0.5)
-	check(game.hud._bandage_button != null and game.hud._potion_button != null,"The frontier equipment menu exposes both consumables")
+	check(game.world_ui != null,"The frontier builds the in-world kit")
 	game.health = 40.0
 	game._unhandled_input(key_event(KEY_6))
 	check(game.archer.phase == "BANDAGE" and game._consume_kind == "bandage","Hotkey 6 starts the bandage channel")
