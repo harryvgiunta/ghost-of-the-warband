@@ -94,27 +94,26 @@
   ],
   "unit": "metres",
   "rest_bounds_min": [
-    -0.856409,
+    -1.150214,
     -0.008407,
-    -0.36225
+    -0.167541
   ],
   "rest_bounds_max": [
-    0.856409,
+    1.150214,
     2.100865,
-    0.388461
+    0.442334
   ],
   "height": 2.109272,
-  "mesh_triangles": 34230,
+  "mesh_triangles": 34110,
   "materials": [
     "Skin_Succubus",
     "Hair_Succubus",
     "Eye_Succubus",
     "Leather_Succubus",
     "Horn_Succubus",
-    "Membrane_Succubus",
-    "Cloth_Succubus"
+    "Membrane_Succubus"
   ],
-  "embedded_images": 20,
+  "embedded_images": 17,
   "texture_sets": "source PBR skin/leather/hair + authored horn/bone/membrane/stone/fur/cloth",
   "clips": {
     "idle": {

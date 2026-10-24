@@ -177,7 +177,10 @@ def skin_maps(mob: str, out_dir: Path) -> None:
     target = np.array(style["skin_target"], np.float32)[None, None, :]
     # Keep source pore/shading detail in luminance; move only chroma + value.
     colorized = target * (0.38 + 1.18 * gray)
-    albedo = base * (1.0 - 0.72 * style["skin_desaturate"]) + colorized * (0.72 * style["skin_desaturate"])
+    if style.get("skin_blackout"):
+        albedo = colorized * 0.92
+    else:
+        albedo = base * (1.0 - 0.72 * style["skin_desaturate"]) + colorized * (0.72 * style["skin_desaturate"])
 
     # Mottled circulation and subtle blue/red capillary variation.
     low = wt.fbm(size, size, 7, 7, SEED + 11, octaves=5, wrap="both")
@@ -533,24 +536,16 @@ def build_mob(mob: str) -> None:
         hair_maps(mob, out_dir)
         eye_maps(mob, out_dir)
         horn_maps(mob, out_dir)
-        cloth_maps(mob, out_dir)
         if mob == "succubus":
             membrane_maps(mob, out_dir)
     elif mob == "hell_goat":
         skin_maps(mob, out_dir)
-        leather_maps(mob, out_dir)
-        eye_maps(mob, out_dir)
         horn_maps(mob, out_dir)
         bone_maps(mob, out_dir)
         fur_maps(mob, out_dir)
-        cloth_maps(mob, out_dir)
-        metal_maps(mob, out_dir)
     elif mob == "gargoyle":
         stone_maps(mob, out_dir)
         horn_maps(mob, out_dir)  # kind == stone -> horn_* stone maps
-        eye_maps(mob, out_dir)
-        cloth_maps(mob, out_dir)
-        metal_maps(mob, out_dir)
     elif mob == "beast":
         beast_coat(out_dir)
         horn_maps(mob, out_dir)

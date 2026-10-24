@@ -367,12 +367,12 @@ The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedic
 
 ## Devil court
 
-Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (bare-skull goat demon with body fur, hoof boots and a tribal harness), **Succubus** (folded-wing, large-horned raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (50% larger, folded stone wings and bespoke black-iron plate). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract. Five of the sixteen spawns form a starting court inside the town’s safe ring — one of each species, about 10 m ahead of the south-gate spawn — so all five can be inspected immediately without aggro.
+Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (jet-black armorless goat demon with empty skull sockets and black horns/hooves), **Succubus** (half-open-wing, black-horned raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (50% larger, naked hunched stone gargoyle with folded wings, spikes and ember sockets). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract. Five of the sixteen spawns form a starting court inside the town’s safe ring — one of each species, about 10 m ahead of the south-gate spawn — so all five can be inspected immediately without aggro.
 
 They are built from the same licensed CC0 Quaternius sources as the ranger — the male/female bases, ranger outfits, long hair and 65-bone animation library — with original devil anatomy and paint on top. No generated image, photogrammetry scan or restricted file is used. Each mob is one imported GLB with:
 
-- a real skinned Quaternius body (the goat deliberately uses no ranger outfit) or the original Briar wolf for the beast, plus authored goat skull, horns, folded membrane wings, tails, claws, fangs, hoof boots, fur and bespoke plate armor;
-- source PBR skin, leather, hair and eye maps (2048/1024 px) tinted while retaining pores, grain and iris detail, plus authored bone, horn, membrane, cloth, stone, fur and blackened-iron maps;
+- a real skinned Quaternius body (the goat deliberately uses no ranger outfit) or the original Briar wolf for the beast, plus authored goat skull, horns, clean membrane wings, tails, claws, fangs, hoof boots, fur and stone spikes;
+- source PBR skin, leather, hair and eye maps (2048/1024 px) tinted while retaining pores, grain and iris detail, plus authored bone, horn, membrane, stone and fur maps;
 - six baked 60 Hz clips: idle, walk, run, attack, hit and death, using the ranger/wolf authored locomotion and time-warped attacks;
 - extra `head`/`jaw`, wing and tail bones where the silhouette needs them.
 

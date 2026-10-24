@@ -293,34 +293,33 @@ def add_head_jaw_markers(rig: bpy.types.Object, face: Vector, jaw: Vector) -> No
     add_bone(rig, "jaw", jaw, jaw + Vector((0.0, -0.045, -0.010)), "Head", True)
 
 
-def folded_wing_points(side: str) -> dict:
-    """Narrow, folded bat-wing skeleton posed along the back."""
+def wing_points(side: str, spread: bool = False) -> dict:
+    """Wing skeleton. Folded is a narrow back-hanging wing; spread is a full
+    half-open bat wing for the succubus."""
     s = 1.0 if side == "l" else -1.0
-    shoulder = Vector((0.10 * s, 0.13, 1.43))
-    elbow = Vector((0.30 * s, 0.19, 1.63))
-    wrist = Vector((0.21 * s, 0.28, 1.49))
-    tips = [
-        Vector((0.16 * s, 0.36, 0.88)),
-        Vector((0.25 * s, 0.38, 0.99)),
-        Vector((0.32 * s, 0.35, 1.12)),
-        Vector((0.36 * s, 0.31, 1.28)),
-    ]
-    return {
-        "shoulder": shoulder,
-        "elbow": elbow,
-        "wrist": wrist,
-        "tip": tips[-1],
-        "body": Vector((0.10 * s, 0.22, 0.94)),
-        "tips": tips,
-    }
+    if spread:
+        shoulder = Vector((0.12 * s, 0.12, 1.42))
+        elbow = Vector((0.55 * s, 0.20, 1.62))
+        wrist = Vector((0.92 * s, 0.28, 1.50))
+        top = Vector((1.15 * s, 0.36, 1.32))
+        bottom = Vector((0.72 * s, 0.44, 0.82))
+        body = Vector((0.15 * s, 0.20, 1.00))
+    else:
+        shoulder = Vector((0.10 * s, 0.13, 1.43))
+        elbow = Vector((0.30 * s, 0.19, 1.63))
+        wrist = Vector((0.25 * s, 0.30, 1.55))
+        top = Vector((0.33 * s, 0.35, 1.30))
+        bottom = Vector((0.18 * s, 0.36, 0.95))
+        body = Vector((0.10 * s, 0.20, 1.00))
+    return {"shoulder": shoulder, "elbow": elbow, "wrist": wrist,
+            "top": top, "bottom": bottom, "body": body, "spread": spread}
 
 
-def add_folded_wing_bones(rig: bpy.types.Object, side: str) -> None:
-    p = folded_wing_points(side)
+def add_wing_bones(rig: bpy.types.Object, side: str, spread: bool = False) -> None:
+    p = wing_points(side, spread)
     add_bone(rig, f"wing_01_{side}", p["shoulder"], p["elbow"], "spine_03", True)
     add_bone(rig, f"wing_02_{side}", p["elbow"], p["wrist"], f"wing_01_{side}", True)
-    add_bone(rig, f"wing_03_{side}", p["wrist"], p["tip"], f"wing_02_{side}", True)
-
+    add_bone(rig, f"wing_03_{side}", p["wrist"], p["top"], f"wing_02_{side}", True)
 
 def add_tail_bones(rig: bpy.types.Object, points: list[Vector], prefix: str = "tail") -> None:
     for i in range(len(points) - 1):
@@ -448,53 +447,55 @@ def make_spike(rig, bone: str, base: Vector, direction: Vector, length: float,
 # Wings, tails, cloth, fur, skull
 
 
-def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) -> list[bpy.types.Object]:
-    """A folded bat wing: bent arm, hanging membrane and four finger struts."""
-    p = folded_wing_points(side)
+def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004,
+              spread: bool = False) -> list[bpy.types.Object]:
+    """Clean bat-wing membrane sheet: leading arm, trailing scalloped edge and
+    four visible finger struts.  No radial fan or chopped wedges."""
+    p = wing_points(side, spread)
     s = 1.0 if side == "l" else -1.0
     shoulder, elbow, wrist = p["shoulder"], p["elbow"], p["wrist"]
-    body, tips = p["body"], p["tips"]
-    boundary = [shoulder, body] + tips
-    dense = []
-    for i in range(len(boundary) - 1):
-        a, b = boundary[i], boundary[i + 1]
-        for j in range(4):
-            dense.append(a.lerp(b, j / 4))
-    dense.append(boundary[-1])
-    n = len(dense)
-    center = wrist
-    rings = 8
+    top, bottom, body = p["top"], p["bottom"], p["body"]
+
+    def leading(u):
+        if u < 0.42:
+            return shoulder.lerp(elbow, u / 0.42)
+        if u < 0.70:
+            return elbow.lerp(wrist, (u - 0.42) / 0.28)
+        return wrist.lerp(top, (u - 0.70) / 0.30)
+
+    mid = body.lerp(bottom, 0.55) + Vector((0.0, 0.035, 0.015))
+
+    def trailing(u):
+        # Quadratic body->mid->bottom with a gentle scalloped bat edge.
+        q = (1 - u) ** 2 * body + 2 * (1 - u) * u * mid + u * u * bottom
+        q += Vector((0.012 * math.sin(u * math.pi * 4.0) * s,
+                     0.010 * math.sin(u * math.pi * 3.0), 0.0))
+        return q
+
+    rows, cols = 14, 10
     verts, uvs, faces = [], [], []
-    verts.append(center)
-    uvs.append((0.5, 0.0))
-    ring_start = []
-    for r in range(1, rings + 1):
-        t = r / rings
-        ring_start.append(len(verts))
-        for i, edge in enumerate(dense):
-            q = center.lerp(edge, t)
-            # Pleats: alternating folds across the folded membrane.
-            fold = 0.016 * math.sin(i / max(1, n - 1) * math.pi * 3.4 + 0.35) * math.sin(math.pi * t)
-            q.y += fold
-            q.x += 0.35 * fold * s
-            q.z += 0.010 * math.sin(math.pi * t) * math.sin(i / max(1, n - 1) * math.pi)
+    for i in range(rows + 1):
+        u = i / rows
+        L, T = leading(u), trailing(u)
+        for j in range(cols + 1):
+            v = j / cols
+            q = L.lerp(T, v)
+            billow = 0.030 * math.sin(math.pi * v) * math.sin(math.pi * u)
+            q.y += billow
+            q.x += 0.18 * billow * s
+            q.z += 0.012 * math.sin(math.pi * v) * math.sin(math.pi * u * 2.0)
             verts.append(q)
-            uvs.append((i / max(1, n - 1), t))
-    for i in range(n):
-        a = ring_start[0] + i
-        b = ring_start[0] + (i + 1) % n
-        faces.append((0, a, b))
-    for r in range(len(ring_start) - 1):
-        a0 = ring_start[r]
-        b0 = ring_start[r + 1]
-        for i in range(n):
-            a = a0 + i
-            b = a0 + (i + 1) % n
-            c = b0 + (i + 1) % n
-            d = b0 + i
+            uvs.append((u * 1.6, v))
+    for i in range(rows):
+        for j in range(cols):
+            a = i * (cols + 1) + j
+            b = a + 1
+            c = a + cols + 2
+            d = a + cols + 1
             faces.append((a, b, c, d))
     obj = mesh_object(f"WingMembrane_{side}", verts, faces, uvs, membrane_mat)
-    weight_by_segments(obj, rig, [f"wing_01_{side}", f"wing_02_{side}", f"wing_03_{side}", "spine_03"], power=2.2)
+    weight_by_segments(obj, rig, [f"wing_01_{side}", f"wing_02_{side}",
+                                  f"wing_03_{side}", "spine_03"], power=2.0)
     solid = obj.modifiers.new("Solidify", "SOLIDIFY")
     solid.thickness = thickness
     solid.offset = 0.0
@@ -504,9 +505,11 @@ def make_wing(rig, side: str, membrane_mat, skin_mat, thickness: float = 0.004) 
     arm, _ = tube(f"WingArm_{side}", [shoulder, elbow, wrist], [0.038, 0.030, 0.020], 16, skin_mat)
     weight_by_segments(arm, rig, [f"wing_01_{side}", f"wing_02_{side}", f"wing_03_{side}"], power=2.5)
     parts.append(arm)
-    for idx, tip in enumerate(tips):
-        mid = wrist.lerp(tip, 0.55) + Vector((0.0, 0.018, 0.0))
-        strut, _ = tube(f"WingStrut_{side}_{idx}", [wrist, mid, tip], [0.012, 0.007, 0.0025], 10, skin_mat)
+    for idx, u in enumerate((0.64, 0.80, 0.93, 1.0)):
+        tip = trailing(u)
+        midp = wrist.lerp(tip, 0.55) + Vector((0.0, 0.010, 0.0))
+        strut, _ = tube(f"WingStrut_{side}_{idx}", [wrist, midp, tip],
+                        [0.012, 0.007, 0.0025], 10, skin_mat)
         rigid_skin(strut, rig, f"wing_03_{side}")
         parts.append(strut)
     claw = make_claw(rig, f"wing_03_{side}", wrist + Vector((0.015 * s, -0.01, 0.01)),
@@ -675,18 +678,19 @@ def make_goat_skull(rig, bone_mat, dark_mat, eye_mat, horn_mat) -> list[bpy.type
         bpy.context.collection.objects.link(sock)
         me.materials.append(dark_mat)
         parts.append(sock)
-        bm = bmesh.new()
-        bmesh.ops.create_uvsphere(bm, u_segments=12, v_segments=8, radius=1.0)
-        for v in bm.verts:
-            v.co *= 0.012
-            v.co += Vector((0.058 * side, -0.166, 1.652))
-        me = bpy.data.meshes.new("SkullEye")
-        bm.to_mesh(me)
-        bm.free()
-        eye = bpy.data.objects.new("SkullEye", me)
-        bpy.context.collection.objects.link(eye)
-        me.materials.append(eye_mat)
-        parts.append(eye)
+        if eye_mat is not None:
+            bm = bmesh.new()
+            bmesh.ops.create_uvsphere(bm, u_segments=12, v_segments=8, radius=1.0)
+            for v in bm.verts:
+                v.co *= 0.012
+                v.co += Vector((0.058 * side, -0.166, 1.652))
+            me = bpy.data.meshes.new("SkullEye")
+            bm.to_mesh(me)
+            bm.free()
+            eye = bpy.data.objects.new("SkullEye", me)
+            bpy.context.collection.objects.link(eye)
+            me.materials.append(eye_mat)
+            parts.append(eye)
     # Nasal void
     bm = bmesh.new()
     bmesh.ops.create_cone(bm, cap_ends=True, segments=12, radius1=0.022, radius2=0.004,

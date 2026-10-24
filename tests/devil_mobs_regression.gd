@@ -29,7 +29,7 @@ const MOBS := {
 			"hit": "Succubus_Hit", "death": "Succubus_Death",
 		},
 		"durations": [2.5, 1.333, 0.667, 1.35, 0.45, 1.2],
-		"height": [2.0, 2.2], "span": [1.5, 1.9],
+		"height": [2.0, 2.2], "span": [2.1, 2.5],
 		"kind": 4, "display": "Succubus",
 	},
 	"spawn": {
@@ -170,19 +170,13 @@ func _check_asset(world_root: Node3D, mob_id: String) -> void:
 		var has_albedo := false
 		var has_normal := false
 		var has_roughness := false
-		var has_metallic := false
-		var has_emission := false
 		for candidate in materials:
 			has_albedo = has_albedo or candidate.albedo_texture != null
 			has_normal = has_normal or (candidate.normal_enabled and candidate.normal_texture != null)
 			has_roughness = has_roughness or candidate.roughness_texture != null
-			has_metallic = has_metallic or candidate.metallic_texture != null
-			has_emission = has_emission or (candidate.emission_enabled and candidate.emission_texture != null)
 		check(has_albedo, mob_id + " has an albedo map")
 		check(has_normal, mob_id + " has a normal map")
 		check(has_roughness, mob_id + " has a roughness map")
-		check(has_metallic, mob_id + " has a metallic map")
-		check(has_emission, mob_id + " has an emission map")
 	# Adjacent metadata must describe the same deliverable.
 	var metadata_text := FileAccess.get_file_as_string(str(spec.json))
 	check(not metadata_text.is_empty(), "Missing metadata JSON for " + mob_id)
