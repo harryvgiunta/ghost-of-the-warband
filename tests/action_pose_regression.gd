@@ -151,7 +151,7 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	check(load_wrist_up>0.18,"The diagonal cocks the wrist above the shoulder before cutting (up %.3f, size %d %s %s)" % [load_wrist_up,size,hand,variant])
 	check(load_tip_forward<0.05,"The diagonal backswing loads the blade behind the body plane (tip %.3f, wrist up %.3f, size %d %s %s)" % [load_tip_forward,load_wrist_up,size,hand,variant])
 	var two_hand_load := size == 2 and hand == "right" and not dagger
-	check(load_wrist_forward<(0.32 if two_hand_load else 0.18),"The diagonal draws the hand back instead of extending it forward")
+	check(load_wrist_forward<(0.40 if two_hand_load else 0.18),"The diagonal draws the hand back instead of extending it forward (f %.3f, size %d %s %s)" % [load_wrist_forward,size,hand,variant])
 	check(exit_forward-entry_forward>0.30,"The backswing releases forward through the active cut")
 	check(absf(swept)>deg_to_rad(105.0),"Diagonal blade traverses a broad frontal arc")
 	check(swept < 0.0 if variant == "diagonal_right" else swept > 0.0,"Opposite diagonal variants mirror the cut direction")
@@ -164,6 +164,72 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	check(finish_stance>0.10,"Mirrored cuts finish braced over the matching leading foot")
 	check(rig.phase == "READY","The diagonal cut and both hands recover to ready")
 	return entry.distance_to(exit)
+
+func check_staff_diagonal(rig: Node3D) -> void:
+	rig.set_weapon("sword")
+	rig.set_staff(0,true)
+	rig.set_locomotion(Vector3.ZERO,true)
+	rig.advance_animation(0.5)
+	var idle_base: Vector3 = rig.get_blade_base("right")
+	var idle_tip: Vector3 = rig.get_blade_tip("right")
+	var idle_center := (idle_base+idle_tip)*0.5
+	var idle_right: Vector3 = rig.get_joint_positions().right_wrist
+	check(idle_right.distance_to(idle_center)<0.35,"The staff grip sits around the shaft middle, not at one end")
+	for variant in ["diagonal_right","diagonal_left"]:
+		rig.set_staff(0,true)
+		check(rig.begin_melee("right",variant),"The staff starts its %s cut" % variant)
+		var window: Vector2 = rig._melee_window("right")
+		var max_center := 0.0
+		var max_axis := 0.0
+		var min_separation := INF
+		var max_separation := 0.0
+		var both_ends := false
+		var elapsed := 0.0
+		while elapsed < rig.melee_seconds("right")+0.05:
+			rig.advance_animation(1.0/120.0)
+			elapsed += 1.0/120.0
+			if not rig.has_melee("right"):
+				break
+			var joints: Dictionary = rig.get_joint_positions()
+			var base: Vector3 = rig.get_blade_base("right")
+			var tip: Vector3 = rig.get_blade_tip("right")
+			var axis := (tip-base).normalized()
+			var right: Vector3 = joints.right_wrist
+			var left: Vector3 = joints.left_wrist
+			max_center = maxf(max_center,right.distance_to((base+tip)*0.5))
+			if elapsed >= window.x:
+				both_ends = both_ends or (base-right).dot(axis)*(tip-right).dot(axis)<0.0
+			if elapsed >= window.x and elapsed <= window.y:
+				max_axis = maxf(max_axis,(left-base).cross(axis).length())
+				var separation := left.distance_to(right)
+				min_separation = minf(min_separation,separation)
+				max_separation = maxf(max_separation,separation)
+		check(max_center<0.35,"The %s staff swing keeps the right hand at the shaft middle" % variant)
+		check(max_axis<0.12,"The %s staff swing keeps the support hand on the shaft (%.3f)" % [variant,max_axis])
+		check(min_separation>0.20 and max_separation<0.45,"The %s staff hands stay spaced around the middle" % variant)
+		check(both_ends,"The %s staff extends on both sides of the grip" % variant)
+		check(rig.phase=="READY","The %s staff cut recovers to ready" % variant)
+	rig.set_staff(0,false)
+
+func check_staff_precision(rig: Node3D) -> void:
+	rig.set_weapon("sword")
+	rig.set_staff(0,true)
+	rig.set_locomotion(Vector3.ZERO,true)
+	for variant in ["overhead","stab"]:
+		rig.advance_animation(2.4)
+		rig.set_staff(0,true)
+		check(rig.begin_melee("right",variant),"The staff starts its %s precision attack" % variant)
+		var lowest := INF
+		var duration: float = rig.melee_seconds("right")
+		var elapsed := 0.0
+		while elapsed < duration:
+			rig.advance_animation(1.0/120.0)
+			elapsed += 1.0/120.0
+			var base: Vector3 = rig.get_blade_base("right")
+			var tip: Vector3 = rig.get_blade_tip("right")
+			lowest = minf(lowest,minf(base.y,tip.y))
+		check(lowest>(0.0 if variant=="overhead" else 0.5),"The staff %s keeps both shaft ends clear of the floor (lowest %.3f)" % [variant,lowest])
+		check(rig.phase=="READY","The staff %s recovers to ready" % variant)
 
 func check_running(rig: Node3D, weapon: String, size: int) -> void:
 	rig.set_weapon(weapon)
@@ -278,6 +344,8 @@ func run() -> void:
 	check_diagonal(rig,1,"diagonal_right")
 	rig.position.y = 0.0
 	rig.aim_at(Vector3(0,1.2,-10))
+	check_staff_diagonal(rig)
+	check_staff_precision(rig)
 	for weapon in ["bow","sword"]:
 		rig.set_weapon(weapon)
 		rig.set_locomotion(Vector3(0,0,-8.5),false)

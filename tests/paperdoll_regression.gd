@@ -118,7 +118,7 @@ func _test_taxonomy() -> void:
 		elif category == "staff":
 			check(is_equal_approx(float(stats.get("damage",0.0)),float(Archer.SWORD_DATA[2].damage)),"%s HUD damage matches the staff's greatsword profile" % item_id)
 			check(is_equal_approx(float(stats.get("attack",0.0)),float(Archer.SWORD_DATA[2].seconds)),"%s HUD swing speed matches the staff's greatsword profile" % item_id)
-			check(is_equal_approx(float(stats.get("reach",0.0)),float(Archer.SWORD_DATA[2].reach)),"%s HUD reach matches the staff's greatsword profile" % item_id)
+			check(is_equal_approx(float(stats.get("reach",0.0)),state.item_reach(item_id)),"%s HUD reach matches its middle-grip staff profile" % item_id)
 		elif category == "shield":
 			check(int(stats.get("block",0)) == int(Combat.SHIELD_BLOCK_STAMINA),"%s HUD block stamina matches the shield block" % item_id)
 	check(StateScript.ITEMS.has("staff_fire") and StateScript.ITEMS.has("focus_skull") and StateScript.ITEMS.has("ring_blood"),"Staffs, skulls and rings are in the catalog")
@@ -411,6 +411,7 @@ func _test_rig_loadouts() -> void:
 	var staff_base: Vector3 = rig.get_blade_base()
 	var staff_tip: Vector3 = rig.get_blade_tip()
 	check(staff_base.distance_to(staff_tip) > 1.0,"The staff has a long blade endpoint")
+	check(is_equal_approx(rig.melee_reach(),state.item_reach("staff_fire")),"The rig's staff reach matches its middle-grip catalog profile")
 	rig.set_weapon("sword")
 	check(not rig.staff_active and not rig.active_staff.visible and rig.active_sword.visible,"Selecting a sword stows the staff")
 
