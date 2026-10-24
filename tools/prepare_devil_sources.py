@@ -593,6 +593,25 @@ def make_neck_tube(rig, material) -> bpy.types.Object:
     return obj
 
 
+def drop_pelvis(rig, amount: float) -> None:
+    """Drop the pelvis `amount` metres in armature Z without touching `matrix`.
+
+    The hunch is an overlay: it runs once per baked frame on top of a freshly
+    restored base pose, and the bake has only keyed frames <= f. Reading
+    `pose_bone.matrix` there therefore returns the previous frame's evaluated
+    pose and the offset compounds on every key -- the gargoyle sank a further
+    3 cm per frame and dropped through the floor. The pelvis location channel
+    is the basis the overlay owns, and a rest-space translation needs no
+    depsgraph update, so it stays constant.
+    """
+    pb = rig.pose.bones.get("pelvis")
+    bone = rig.data.bones.get("pelvis")
+    if pb is None or bone is None or abs(amount) < 1e-9:
+        return
+    local = bone.matrix_local.to_3x3().inverted() @ Vector((0.0, 0.0, -1.0))
+    pb.location += local.normalized() * amount
+
+
 def gargoyle_hunch(rig, t: float, duration: float) -> None:
     # Predatory stoop on the upright source pose plus a slow stone-breath swell.
     breath = math.sin(t * math.tau / 2.5)
@@ -617,11 +636,7 @@ def gargoyle_hunch(rig, t: float, duration: float) -> None:
     pb = rig.pose.bones.get("tail_01")
     if pb:
         pb.rotation_quaternion = pb.rotation_quaternion @ Quaternion((0, 0, 1), math.radians(10.0 * math.sin(t * 1.2)))
-    pelvis = rig.pose.bones.get("pelvis")
-    if pelvis:
-        m = pelvis.matrix.copy()
-        m.translation.z -= 0.020
-        pelvis.matrix = m
+    drop_pelvis(rig, 0.020)
     for side in ("l", "r"):
         pb = rig.pose.bones.get(f"thigh_{side}")
         if pb:

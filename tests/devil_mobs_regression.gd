@@ -92,6 +92,7 @@ func run() -> void:
 	for mob_id in MOBS:
 		await _check_asset(world_root, mob_id)
 		await _check_visual(world_root, mob_id)
+		await _check_ground_contact(world_root, mob_id)
 		await _check_gameplay(world_root, mob_id)
 	await _check_ai_approach(world_root)
 	await _check_frontier_instances(world_root)
@@ -221,6 +222,82 @@ func _check_visual(world_root: Node3D, mob_id: String) -> void:
 	var profile := visual.head_hit_profile()
 	check(profile.x > 0.1 and profile.y > 0.05, mob_id + " head hit profile is non-degenerate")
 	visual.queue_free()
+	await process_frame
+
+
+## Lowest skinned vertex of the imported mesh, in the asset's own space.
+func deformed_floor(instance: Node3D, skeleton: Skeleton3D) -> float:
+	var lowest := INF
+	for node in instance.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := node as MeshInstance3D
+		if mesh_instance.mesh == null or mesh_instance.skin == null:
+			continue
+		var skin := mesh_instance.skin
+		var bones: PackedInt32Array = []
+		var binds: Array[Transform3D] = []
+		for index in skin.get_bind_count():
+			bones.append(skeleton.find_bone(skin.get_bind_name(index)))
+			binds.append(skin.get_bind_pose(index))
+		var transforms: Array[Transform3D] = []
+		for index in bones.size():
+			transforms.append(skeleton.global_transform * skeleton.get_bone_global_pose(bones[index]) * binds[index])
+		for surface in mesh_instance.mesh.get_surface_count():
+			var arrays := mesh_instance.mesh.surface_get_arrays(surface)
+			if arrays[Mesh.ARRAY_VERTEX] == null or arrays[Mesh.ARRAY_BONES] == null:
+				continue
+			var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
+			var joints: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
+			if vertices.is_empty() or joints.is_empty():
+				continue
+			var influences := joints.size() / vertices.size()
+			for vertex in vertices.size():
+				var point := Vector3.ZERO
+				for influence in influences:
+					var slot := vertex * influences + influence
+					if weights[slot] > 0.0:
+						point += (transforms[joints[slot]] * vertices[vertex]) * weights[slot]
+				lowest = minf(lowest, point.y)
+	return lowest
+
+
+func _check_ground_contact(world_root: Node3D, mob_id: String) -> void:
+	# The authored overlays are applied per baked frame. A pelvis offset written
+	# through `pose_bone.matrix` reads the previous frame's pose, compounds on
+	# every key and drops the mob through the terrain while it stands idle; the
+	# rest-pose bounds check cannot see that. Sample the deformed mesh across
+	# each locomotion loop instead: claws stay on the floor and the loop does
+	# not ride down or up between its first and last frame.
+	var packed := load(str(MOBS[mob_id].scene)) as PackedScene
+	if packed == null:
+		return
+	var instance := packed.instantiate() as Node3D
+	world_root.add_child(instance)
+	var player := instance.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	var skeleton := instance.find_child("Skeleton3D", true, false) as Skeleton3D
+	if player == null or skeleton == null:
+		instance.queue_free()
+		return
+	for key in ["idle", "walk", "run"]:
+		var clip_name := str(MOBS[mob_id].clips[key])
+		var length := player.get_animation(clip_name).length
+		var first := 0.0
+		var last := 0.0
+		for step in 5:
+			player.play(clip_name, 0.0)
+			player.seek(length * float(step) / 4.0, true)
+			await process_frame
+			await process_frame
+			var floor_y := deformed_floor(instance, skeleton)
+			if step == 0:
+				first = floor_y
+			last = floor_y
+			check(floor_y >= -0.15 and floor_y <= 0.40,
+				"%s %s keeps its claws near the floor (%.3f at %.2fs)" % [
+					mob_id, clip_name, floor_y, length * float(step) / 4.0])
+		check(absf(last - first) <= 0.08,
+			"%s %s holds its height across the loop (%.3f to %.3f)" % [mob_id, clip_name, first, last])
+	instance.queue_free()
 	await process_frame
 
 

@@ -180,6 +180,11 @@ runtime carries only values glTF cannot express.
   and above the pelvis;
 - stationary root at clip start/mid/end;
 - rest sole near y = 0, height and footprint ranges;
+- the deformed locomotion mesh stays on the floor across idle/walk/run: lowest
+  vertex never below −0.15 m, and the loop's first and last sample agree within
+  0.08 m. Overlays must drop the pelvis through its location channel; writing
+  `pose_bone.matrix` mid-bake reads the previous frame's pose and compounds the
+  offset every key until the mob sinks through the terrain;
 - at least one albedo/normal/roughness map across the multi-material mesh;
   metallic/emission are optional and present only where the design needs them;
 - idle → walk → run selection, attack/hit/death clip selection, head-zone
