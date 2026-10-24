@@ -46,17 +46,45 @@ const STAFF_DATA = [
 ## front. The cut itself still drives forward, so the coil never reads as a
 ## wind-up that merely pushes the sword away from the body.
 const DIAGONAL_SECONDS = [0.60,0.78,1.02]
+## Phase split of the diagonal: cocked wind-up up to 30%, violent release
+## 30-45%, heavy follow-through 45-65%, then recovery. The release curve is
+## shared by the visible arm and the damage sector, so the blade does not lag
+## the hits.
+const DIAGONAL_WINDUP := 0.30
+const DIAGONAL_FOLLOW := 0.65
+const DIAGONAL_RELEASE := 0.43
+const DIAGONAL_RELEASE_END := 0.82
+## The hips lead the arm by a couple of frames; the chest leads the shoulder.
+const DIAGONAL_PELVIS_LEAD := 0.035
+const DIAGONAL_SPINE_LEAD := 0.018
+## Pelvis and spine carry separate yaw: the pelvis coils 25-33 degrees and the
+## spine adds 38-49 degrees on top. At the follow-through both continue past
+## the target so the right shoulder finishes ahead of the left.
 const DIAGONAL_SWING = [
-	{"load":0.90, "cross":1.00, "body_load":0.50, "body_cross":0.58,
+	{"load":0.90, "cross":1.00, "pelvis_load":0.44, "spine_load":0.66,
+		"pelvis_cross":0.24, "spine_cross":0.40,
 		"radius_load":0.24, "radius_cross":0.42, "height":0.26,
-		"back":0.30, "cock":0.15},
-	{"load":1.02, "cross":1.12, "body_load":0.60, "body_cross":0.66,
+		"back":0.30, "cock":0.15, "pitch_load":-0.55, "pitch_cross":0.16},
+	{"load":1.02, "cross":1.12, "pelvis_load":0.52, "spine_load":0.78,
+		"pelvis_cross":0.30, "spine_cross":0.50,
 		"radius_load":0.26, "radius_cross":0.45, "height":0.30,
-		"back":0.36, "cock":0.15},
-	{"load":1.14, "cross":1.24, "body_load":0.70, "body_cross":0.78,
+		"back":0.36, "cock":0.15, "pitch_load":-0.55, "pitch_cross":0.16},
+	{"load":1.14, "cross":1.24, "pelvis_load":0.58, "spine_load":0.86,
+		"pelvis_cross":0.34, "spine_cross":0.56,
 		"radius_load":0.24, "radius_cross":0.44, "height":0.34,
-		"back":0.30, "cock":0.15},
+		"back":0.30, "cock":0.15, "pitch_load":-0.55, "pitch_cross":0.16},
 ]
+## A staff is held around its middle, so the hands stay close to the shaft
+## centre and the staff itself supplies the visual reach. It cocks compactly,
+## then sweeps both ends through the diagonal.
+const DIAGONAL_STAFF = {
+	"load":0.95, "cross":0.88, "pelvis_load":0.58, "spine_load":0.86,
+	"pelvis_cross":0.34, "spine_cross":0.56,
+	"radius_load":0.20, "radius_cross":0.30, "height":0.22,
+	"back":0.10, "cock":0.10, "pitch_load":-0.65, "pitch_cross":0.20,
+}
+const STAFF_GRIP_DEPTH := 0.32
+const STAFF_REACH = [1.60,1.50]
 const MELEE_VARIANTS = ["overhead","diagonal_left","diagonal_right","stab"]
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
@@ -827,6 +855,17 @@ func melee_cut_progress(hand: String) -> float:
 	var time := _left_melee_time if hand == "left" else _right_melee_time
 	return clampf((time-window.x)/maxf(window.y-window.x,0.001),0.0,1.0)
 
+func _diagonal_curve_value(progress: float) -> float:
+	var p := clampf(progress,0.0,1.0)
+	if p < DIAGONAL_RELEASE:
+		# The release spends most of the arc in the first 15% of the total
+		# timeline, then decelerates through the follow-through.
+		return DIAGONAL_RELEASE_END*pow(p/DIAGONAL_RELEASE,1.35)
+	return DIAGONAL_RELEASE_END+(1.0-DIAGONAL_RELEASE_END)*smoothstep(DIAGONAL_RELEASE,1.0,p)
+
+func melee_cut_curve(hand: String) -> float:
+	return _diagonal_curve_value(melee_cut_progress(hand))
+
 func melee_half_angle(hand: String) -> float:
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
 	var size := off_weapon_index if hand == "left" else sword_index
@@ -900,7 +939,7 @@ func melee_reach(hand: String = "") -> float:
 	if weapon == "dagger":
 		return float(DAGGER_DATA.reach)
 	if _staff_shown():
-		return float(SWORD_DATA[2].reach)+float(STAFF_DATA[staff_index].length)-float(SWORD_DATA[2].length)
+		return float(STAFF_REACH[staff_index])
 	return float(SWORD_DATA[sword_index].reach)
 
 func melee_radius(hand: String = "") -> float:
@@ -1401,7 +1440,7 @@ func _melee_clip() -> Dictionary:
 func _melee_window(hand: String = "") -> Vector2:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	if is_diagonal_swing(key):
-		return Vector2(0.25,0.65)*melee_seconds(key)
+		return Vector2(DIAGONAL_WINDUP,DIAGONAL_FOLLOW)*melee_seconds(key)
 	if key == "left" or weapon == "dagger" or (key == "right" and _right_variant == "stab"):
 		var clip: Dictionary = _profile.clips.stab
 		var scale := 1.0
@@ -1647,7 +1686,9 @@ func _update_pose(delta: float) -> void:
 			if active_off_weapon != null:
 				active_off_weapon.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
 		elif _staff_shown():
-			active_staff.global_transform = right_hand * _sword_grip
+			# A staff is gripped around its middle: the right hand sits just
+			# below the shaft centre and the support hand above it.
+			active_staff.global_transform = _weapon_socket(right_hand)
 		else:
 			active_sword.global_transform = right_hand * _sword_grip
 		if active_focus != null:
@@ -1784,11 +1825,18 @@ func _diagonal_swing_timeline(hand: String) -> Dictionary:
 	var side := 1.0 if melee_variant(hand) == "diagonal_right" else -1.0
 	var size := off_weapon_index if hand == "left" else sword_index
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
-	var spec: Dictionary = DIAGONAL_SWING[0 if dagger else size]
+	var staff := _staff_shown()
+	var spec: Dictionary = DIAGONAL_STAFF if staff else DIAGONAL_SWING[0 if dagger else size]
 	# Reach the cocked pose just before the active stroke and hold it there
 	# for a beat, so the backswing reads instead of blending into the cut.
 	var coil := smoothstep(0.0,window.x*0.86,time)
-	var cut := smoothstep(0.0,1.0,melee_cut_progress(hand))
+	var cut := melee_cut_curve(hand)
+	# The hips unwind first, then the chest, then the arm. Both leads are
+	# clamped by the shared curve, so the cocked pose still holds through the
+	# end of the wind-up while the lower body has already started.
+	var window_length := maxf(window.y-window.x,0.001)
+	var pelvis_cut := _diagonal_curve_value((time-window.x+DIAGONAL_PELVIS_LEAD)/window_length)
+	var spine_cut := _diagonal_curve_value((time-window.x+DIAGONAL_SPINE_LEAD)/window_length)
 	var release := smoothstep(duration*0.76,duration,time)
 	var cross_body := (side < 0.0) == (hand == "right")
 	var radius_load := float(spec.radius_load)*(0.82 if cross_body else 1.0)
@@ -1798,13 +1846,16 @@ func _diagonal_swing_timeline(hand: String) -> Dictionary:
 	# The blade loads outside the active sector and pitched up; it drops into
 	# the sector as the hands drive forward. Combat still owns the hit arc.
 	var blade_azimuth := side*lerpf(lerpf(0.30,half+float(spec.cock),coil),-half,cut)
+	var pelvis_yaw := -side*lerpf(float(spec.pelvis_load)*coil,-float(spec.pelvis_cross),pelvis_cut)
+	var spine_yaw := -side*lerpf(float(spec.spine_load)*coil,-float(spec.spine_cross),spine_cut)
 	return {
 		"raise":coil, "coil":coil, "cut":cut, "release":release,
 		"azimuth":azimuth, "blade_azimuth":blade_azimuth,
-		"body":-side*lerpf(float(spec.body_load)*coil,-float(spec.body_cross),cut),
+		"pelvis":pelvis_yaw, "spine":spine_yaw,
 		"radius":lerpf(lerpf(0.22,radius_load,coil),float(spec.radius_cross),cut),
 		"height":float(spec.height), "back":back*(1.0-cut),
-		"lean":0.06*coil-0.10*cut, "pitch":lerpf(-0.55,0.16,cut),
+		"lean":0.10*coil-0.26*cut,
+		"pitch":lerpf(float(spec.pitch_load),float(spec.pitch_cross),cut),
 	}
 
 func _apply_melee_swing_path() -> void:
@@ -1817,35 +1868,44 @@ func _apply_melee_swing_path() -> void:
 		return
 	var swing := _diagonal_swing_timeline(hand)
 	var release := float(swing.release)
-	var body := float(swing.body)*(1.0-release)
+	var pelvis_yaw := float(swing.pelvis)*(1.0-release)
+	var spine_yaw := float(swing.spine)*(1.0-release)
 	var lean := float(swing.lean)*(1.0-release)
-	if absf(body) <= 0.0001 and absf(lean) <= 0.0001:
+	if absf(pelvis_yaw)+absf(spine_yaw)+absf(lean) <= 0.0001:
 		return
-	# The overhead supplies the crouched load and rear-to-front leg drive.
-	# Turn the hips into the diagonal without rotating the planted soles;
-	# locomotion/crouch/slide keep ownership of their own lower-body stance.
-	if _grounded and _velocity.length_squared() < 0.01 and _crouch_amount < 0.01 and _slide_weight < 0.01:
+	# The hips lead, the chest follows, the shoulder drags behind the chest.
+	# A planted, stationary actor can rotate the pelvis and re-solve the feet.
+	# While locomotion, crouch or a slide owns the lower body, lock the pelvis
+	# and move the whole coil into the spine and right clavicle.
+	var stationary := _grounded and _velocity.length_squared() < 0.01 \
+		and _crouch_amount < 0.01 and _slide_weight < 0.01
+	var spine_total := spine_yaw + (0.0 if stationary else pelvis_yaw)
+	if stationary:
 		var left_foot := _bone_world(_legs[0][2])
 		var right_foot := _bone_world(_legs[1][2])
 		var pelvis := _bone_world(_bones.pelvis)
-		pelvis.basis = Basis(Vector3.UP,body*0.35)*pelvis.basis
+		pelvis.basis = Basis(Vector3.UP,pelvis_yaw)*pelvis.basis
 		_set_bone_world(_bones.pelvis,pelvis)
 		_solve_limb(_legs[0],left_foot.origin,left_foot.basis)
 		_solve_limb(_legs[1],right_foot.origin,right_foot.basis)
-		body *= 0.65
 	var spine := _bone_world(_bones.spine_01)
-	spine.basis = Basis(Vector3.UP,body*0.42)*spine.basis
+	spine.basis = Basis(Vector3.UP,spine_total*0.45)*spine.basis
 	_set_bone_world(_bones.spine_01,spine)
 	var middle := _bone_world(_bones.spine_02)
-	middle.basis = Basis(Vector3.UP,body*0.31)*Basis(global_basis.x,lean*0.5)*middle.basis
+	middle.basis = Basis(Vector3.UP,spine_total*0.33)*Basis(global_basis.x,lean*0.5)*middle.basis
 	_set_bone_world(_bones.spine_02,middle)
 	var chest := _bone_world(_bones.spine_03)
-	chest.basis = Basis(Vector3.UP,body*0.27)*Basis(global_basis.x,lean*0.5)*chest.basis
+	chest.basis = Basis(Vector3.UP,spine_total*0.22)*Basis(global_basis.x,lean*0.5)*chest.basis
 	_set_bone_world(_bones.spine_03,chest)
+	# The right clavicle carries the shoulder farther into the swing without
+	# moving the whole chest. It is re-solved with the arm afterwards.
+	var clavicle := _bone_world(_bones.clavicle_r)
+	clavicle.basis = Basis(Vector3.UP,spine_total*0.16)*clavicle.basis
+	_set_bone_world(_bones.clavicle_r,clavicle)
 	# Keep the gaze on the target while the body winds away from it: the
 	# silhouette reads as a coil but the crosshair stays meaningful.
 	var head := _bone_world(_bones.Head)
-	head.basis = Basis(Vector3.UP,-body*0.55)*head.basis
+	head.basis = Basis(Vector3.UP,-(pelvis_yaw+spine_yaw)*0.55)*head.basis
 	_set_bone_world(_bones.Head,head)
 
 func _apply_diagonal_arm_path(hand_key: String) -> void:
@@ -1853,7 +1913,8 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 	var arm := 0 if hand_key == "left" else 1
 	var hand_side := -1.0 if arm == 0 else 1.0
 	var grip := _sword_grip_left if arm == 0 else _sword_grip
-	var two_hand: bool = hand_key == "right" and weapon == "sword" and (sword_index == 2 or _staff_shown())
+	var staff := _staff_shown()
+	var two_hand: bool = hand_key == "right" and weapon == "sword" and (sword_index == 2 or staff)
 	# Transition waypoints follow the shoulder line rather than the spine base,
 	# including crouched and elevated actors.
 	var pivot := (_bone_world(_arms[0][0]).origin+_bone_world(_arms[1][0]).origin)*0.5
@@ -1970,6 +2031,9 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 		# inside both wrist-reach spheres instead of clamping the support wrist
 		# away from the handle when the primary hand takes it out of reach.
 		var sword_hand := _bone_world(_arms[1][2])
+		# The support depth is measured from the right hand along the weapon's
+		# own +Z. The staff's visual node is offset along that shaft, so the
+		# grip point must stay in hand space rather than node-space.
 		var handle := sword_hand*_sword_grip
 		var left := _bone_world(_arms[0][2])
 		# When switching from a one-handed carry, the blade initially remains
@@ -1977,17 +2041,24 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 		# the left arm through the torso to grasp that still-rearward hilt.
 		# Acquire it after the outward lift, completing before the active cut.
 		var load_end := _melee_window(hand_key).x
-		var support_attach := smoothstep(load_end*0.65,load_end,time)
+		# Close the support grip through the first part of the load. Waiting
+		# until the top leaves the authored cross-chest arm in place while the
+		# chest has already coiled, which drives the forearm through the ribs.
+		var support_attach := smoothstep(load_end*0.35,load_end,time)
 		var support_shoulder := _bone_world(_arms[0][0]).origin
 		var support_elbow := _bone_world(_arms[0][1]).origin
 		var support_length := support_shoulder.distance_to(support_elbow)+support_elbow.distance_to(left.origin)
 		var support_target: Basis = handle.basis*_sword_grip_left.basis.inverse()
 		var support_basis := _blend_basis(left.basis,support_target,solve_weight)
 		var carry_depth := clampf((handle.affine_inverse()*(left*_palm_left)).z,0.06,0.29)
-		# A cocked hilt is high and central; keep the support hand nearer the
-		# primary so its forearm does not fold across the chest during the load.
-		var grip_depth := lerpf(carry_depth,
-			lerpf(0.12,0.20,smoothstep(0.0,0.55,float(swing.cut))),solve_weight)
+		# A staff's hands stay spaced around its middle. A sword's support hand
+		# slides toward the pommel and only widens as the cut drives out.
+		var grip_depth: float
+		if staff:
+			grip_depth = STAFF_GRIP_DEPTH
+		else:
+			grip_depth = lerpf(carry_depth,
+				lerpf(0.05,0.20,smoothstep(0.0,0.55,float(swing.cut))),solve_weight)
 		var support_offset := handle*Vector3(0,0,grip_depth)-sword_hand.origin-support_basis*_palm_left
 		var reach_weight := lerpf(0.998,0.90,solve_weight)
 		# Bone-pose recovery may pull the primary wrist back before the torso
@@ -1996,7 +2067,8 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 		var carry_handoff := 1.0-smoothstep(0.65,1.0,release)
 		# A cocked hilt may sit close to the chest line, but never inside it.
 		# Restore the 0.40 m front clearance as soon as the cut drives out.
-		var clearance_floor := lerpf(0.14,0.40,smoothstep(0.0,0.30,float(swing.cut)))
+		var clearance_floor := lerpf(0.28 if staff else 0.34,0.40,
+			smoothstep(0.0,0.30,float(swing.cut)))
 		var front_clearance := lerpf((hand.origin-pivot).dot(forward),clearance_floor,engage*carry_handoff)
 		var hilt_target := sword_hand.origin+forward*maxf(0.0,front_clearance-(sword_hand.origin-pivot).dot(forward))
 		var coupled := _two_hand_wrist_target(hilt_target,shoulder,arm_reach*reach_weight,
@@ -2029,6 +2101,31 @@ func _apply_diagonal_arm_path(hand_key: String) -> void:
 			wrist_target = support_shoulder+(wrist_target-support_shoulder).limit_length(acquire_reach)
 			support_basis = _blend_basis(left.basis,support_basis,support_attach)
 		_solve_limb(_arms[0],wrist_target,support_basis,support_pole)
+	elif hand_key == "right" and weapon != "dual" and not shield_equipped and not focus_active:
+		# A free off hand reaches forward as a counterbalance during the coil,
+		# then returns with the recovery. Shield/focus hands keep their guard.
+		_pose_counterbalance_arm(float(swing.coil)*(1.0-release),forward,right)
+
+func _pose_counterbalance_arm(weight: float, forward: Vector3, right: Vector3) -> void:
+	if weight <= 0.0001:
+		return
+	var shoulder := _bone_world(_arms[0][0]).origin
+	var hand := _bone_world(_arms[0][2])
+	var upper_pose := skeleton.get_bone_pose(_arms[0][0])
+	var lower_pose := skeleton.get_bone_pose(_arms[0][1])
+	var hand_pose := skeleton.get_bone_pose(_arms[0][2])
+	var elbow := _bone_world(_arms[0][1]).origin
+	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(hand.origin)
+	var target := shoulder+forward*0.42-right*0.14+Vector3.UP*0.04
+	var offset := target-shoulder
+	if offset.length() > arm_reach*0.90:
+		target = shoulder+offset.normalized()*arm_reach*0.90
+	var pole := (-right*1.2+forward*0.2-Vector3.UP*0.5).normalized()
+	_solve_limb(_arms[0],target,hand.basis,pole)
+	if weight < 0.999999:
+		skeleton.set_bone_pose(_arms[0][0],upper_pose.interpolate_with(skeleton.get_bone_pose(_arms[0][0]),weight))
+		skeleton.set_bone_pose(_arms[0][1],lower_pose.interpolate_with(skeleton.get_bone_pose(_arms[0][1]),weight))
+		skeleton.set_bone_pose(_arms[0][2],hand_pose.interpolate_with(skeleton.get_bone_pose(_arms[0][2]),weight))
 
 func _two_hand_wrist_target(target: Vector3, primary: Vector3, primary_radius: float,
 		support: Vector3, support_radius: float, forward: Vector3) -> Vector3:
@@ -2312,6 +2409,30 @@ func _jaw_anchor() -> Vector3:
 func _hand_arc(start: Vector3, control_a: Vector3, control_b: Vector3, finish: Vector3, t: float) -> Vector3:
 	var u := 1.0-t
 	return start*(u*u*u)+control_a*(3.0*u*u*t)+control_b*(3.0*u*t*t)+finish*(t*t*t)
+
+func _staff_mesh_offset() -> float:
+	# Shift the shaft so the grip origin sits just below its midpoint; the
+	# support hand then grips STAFF_GRIP_DEPTH above it, around the centre.
+	var middle := float(STAFF_DATA[staff_index].length)*0.5+0.25
+	if not _staff_shown() or not is_melee():
+		return middle
+	var variant := melee_variant("right")
+	if variant not in ["overhead","stab"]:
+		return middle
+	# The authored overhead and thrust finish with the sword hand low or
+	# ahead of the chest. A centred shaft would put its lower half through
+	# the floor or the head, so the staff slides to an end grip for those two
+	# precision attacks and returns to the middle on recovery.
+	var duration := melee_seconds("right")
+	var time := maxf(_right_melee_time,0.0)
+	var slide := smoothstep(0.0,minf(0.40,duration*0.38),time)
+	var restore := smoothstep(duration*0.78,duration,time)
+	return lerpf(middle,0.0,slide*(1.0-restore))
+
+func _weapon_socket(hand_xf: Transform3D) -> Transform3D:
+	if _staff_shown():
+		return hand_xf*_sword_grip*Transform3D(Basis(),Vector3(0,0,_staff_mesh_offset()))
+	return hand_xf*_sword_grip
 
 func _bone_world(index: int) -> Transform3D:
 	return skeleton.global_transform*skeleton.get_bone_global_pose(index)

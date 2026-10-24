@@ -576,7 +576,7 @@ func _sweep_cleave(hand: String, state: Dictionary) -> void:
 	# Sweep a body-height sector in the same direction and active interval as
 	# the visible diagonal. It reaches point-blank and short foes without
 	# demanding that a thin animated blade cross their exact height.
-	var cut: float = smoothstep(0.0,1.0,rig.melee_cut_progress(hand))
+	var cut: float = rig.melee_cut_curve(hand)
 	var angle_from: float = state.side * lerpf(state.half_angle,-state.half_angle,state.cut)
 	var angle_to: float = state.side * lerpf(state.half_angle,-state.half_angle,cut)
 	state.cut = cut
