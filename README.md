@@ -367,7 +367,7 @@ The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedic
 
 ## Devil court
 
-Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (shaggy digitigrade charger), **Succubus** (winged crimson raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (stone sentinel). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract.
+Five devil-themed mobs inhabit the frontier outside Hearthstead: the **Hellish goat man** (shaggy digitigrade charger), **Succubus** (winged crimson raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (stone sentinel). Their placements are authored in `RangeWorld.devil_spawns`, deliberately separate from the legacy 36-entry `enemy_spawns` contract. Five of the sixteen spawns form a starting court inside the town’s safe ring — one of each species, about 10 m ahead of the south-gate spawn — so all five can be inspected immediately without aggro.
 
 They are original procedural assets authored by `tools/prepare_devils.py`; no third-party model, texture or motion is used. The supplied design references informed palette and proportions only. Each mob is one imported GLB with:
 

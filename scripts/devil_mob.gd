@@ -107,6 +107,11 @@ func _ready() -> void:
 	max_health = float(profile.health)
 	health = max_health
 	home = global_position
+	if is_instance_valid(player):
+		var facing := player.global_position - global_position
+		facing.y = 0.0
+		if facing.length_squared() > 0.0001:
+			rotation.y = atan2(-facing.x, -facing.z)
 	collision_layer = 2
 	collision_mask = 1 | 2 | 4
 	floor_snap_length = 0.6

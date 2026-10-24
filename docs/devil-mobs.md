@@ -186,8 +186,9 @@ maximum influences and per-clip ground penetration. Gates:
 
 `devil_mobs_regression.gd` additionally checks the imported clip inventory,
 loop modes, head zone, visual state mapping, gameplay death/reward, the
-11-entry devil spawn table, the unchanged 36-entry legacy spawn table, and 11
-live mobs in the frontier with all five kinds present.
+16-entry devil spawn table (five of them in the starting safe-ring court), the
+unchanged 36-entry legacy spawn table, and 16 live mobs in the frontier with all
+five kinds present.
 
 Tests are not visual proof. Render the PBR hero and contact sheets into
 `.runtime/devil-source/<mob>/captures/`, inspect opposing stride phases, the

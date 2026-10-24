@@ -299,7 +299,7 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 	check(world != null, "frontier exposes its generated world")
 	if world != null:
 		check(world.enemy_spawns.size() == 36, "existing enemy spawn contract remains 36")
-		check(world.devil_spawns.size() == 11, "devil court has 11 authored placements")
+		check(world.devil_spawns.size() == 16, "devil court has 16 authored placements")
 		var counts := {}
 		for record in world.devil_spawns:
 			var mob_id := str(record.get("mob", ""))
@@ -309,12 +309,34 @@ func _check_frontier_instances(world_root: Node3D) -> void:
 		for mob_id in MOBS:
 			check(int(counts.get(mob_id, 0)) >= 2, mob_id + " appears at least twice in the frontier")
 	var devils := get_nodes_in_group("devil_mobs")
-	check(devils.size() == 11, "frontier spawns 11 live devil mobs (found %d)" % devils.size())
+	check(devils.size() == 16, "frontier spawns 16 live devil mobs (found %d)" % devils.size())
 	var kinds := {}
 	for devil in devils:
 		kinds[int(devil.get("kind"))] = true
 		check(is_instance_valid(devil.get("_visual")), "every frontier devil has an imported visual")
 	for expected in [3, 4, 5, 6, 7]:
 		check(kinds.has(expected), "frontier includes devil kind %d" % expected)
+	# Starting court: one of each species must be inside the safe ring, on
+	# screen from the south-gate spawn, and still idle after a second.
+	var spawn_point: Vector3 = frontier.player.global_position
+	var starting := []
+	for devil in devils:
+		if devil.global_position.distance_to(spawn_point) < 15.0:
+			starting.append(devil)
+	check(starting.size() == 5, "starting court has one mob of each species (found %d)" % starting.size())
+	var starting_ids := {}
+	for devil in starting:
+		starting_ids[str(devil.get("mob_id"))] = true
+	for mob_id in MOBS:
+		check(starting_ids.has(mob_id), mob_id + " is visible in the starting court")
+	for frame in 60:
+		await physics_frame
+	for devil in starting:
+		check(str(devil.get("state")) not in ["WINDUP", "STRIKE", "RECOVER"],
+			str(devil.get("mob_id")) + " stays idle inside the safe ring")
+		var camera: Camera3D = frontier.camera
+		if camera != null:
+			check(camera.is_position_in_frustum(devil.get_aim_position()),
+				str(devil.get("mob_id")) + " is inside the spawn camera frustum")
 	frontier.queue_free()
 	await process_frame

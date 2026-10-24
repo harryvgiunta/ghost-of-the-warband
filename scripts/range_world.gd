@@ -734,10 +734,24 @@ func _add_devil_pack(center: Vector2, weapons: Array, first_index: int) -> void:
 
 
 func _build_devil_spawns() -> void:
-	# The devil court is distributed along the existing roads and clearings so
-	# each species is encountered in a distinct habitat: goat sentries near the
-	# gate road, a spawn nest at the eastern crossroads, a beast in the western
-	# woods, a succubus on the open meadow and gargoyles on the northern ridge.
+	# Starting court: one of each species inside the town's 19 m safe ring, in a
+	# readable arc about 10 m ahead of the south-gate spawn. They idle (no aggro)
+	# until the player leaves the ring, so the new mobs are inspectable at once.
+	for record in [
+		{"mob": "hell_goat", "at": Vector2(7, 40)},
+		{"mob": "succubus", "at": Vector2(3.5, 38)},
+		{"mob": "spawn", "at": Vector2(0, 37)},
+		{"mob": "beast", "at": Vector2(-3.5, 38)},
+		{"mob": "gargoyle", "at": Vector2(-7, 40)},
+	]:
+		var point: Vector2 = record.at
+		devil_spawns.append({"mob": str(record.mob),
+			"position": _ground(point.x, point.y)})
+	# The rest of the court is distributed along the existing roads and
+	# clearings so each species is encountered in a distinct habitat: goat
+	# sentries near the gate road, a spawn nest at the eastern crossroads, a
+	# beast in the western woods, a succubus on the open meadow and gargoyles on
+	# the northern ridge.
 	for record in [
 		{"mob": "hell_goat", "at": Vector2(-6, 14)},
 		{"mob": "hell_goat", "at": Vector2(-38, -18)},
