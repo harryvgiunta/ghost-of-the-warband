@@ -43,6 +43,17 @@ func run() -> void:
 	fixture.add_child(panel)
 	var stub := Node3D.new()
 	fixture.add_child(stub)
+	# A primitive body for the stain to lie on: the fixture rig has no skeleton,
+	# which is exactly the devil/sentinel path.
+	var stub_body := MeshInstance3D.new()
+	var stub_sphere := SphereMesh.new()
+	stub_sphere.radius = 1.0
+	stub_sphere.height = 2.0
+	stub_sphere.radial_segments = 12
+	stub_sphere.rings = 8
+	stub_body.mesh = stub_sphere
+	stub_body.position = Vector3(0.0, 1.0, 0.0)
+	stub.add_child(stub_body)
 	var stub_sword = Sword.new()
 	stub_sword.sword_kind = 1
 	stub.add_child(stub_sword)
@@ -84,9 +95,11 @@ func run() -> void:
 	check(is_equal_approx(float(stain.life), 60.0), "The registered stain records a 60 s life")
 	lone.advance(56.9)
 	check(lone.stain_count() == 2 and stain_node.visible, "Blood is fully present before the fade window")
-	var full_scale := stain_node.scale
+	check(is_equal_approx((stain_node as GeometryInstance3D).transparency, 0.0),
+		"Blood is fully opaque before the fade window")
 	lone.advance(2.0)
-	check(stain_node.scale.x < full_scale.x, "Blood fades over the final three seconds")
+	check((stain_node as GeometryInstance3D).transparency > 0.0,
+		"Blood fades over the final three seconds")
 	lone.advance(1.0)
 	check(lone.stain_count() == 2, "Blood survives at 59.9 seconds")
 	lone.advance(0.2)
@@ -100,6 +113,24 @@ func run() -> void:
 	check(stub_coating != null, "A blade hit coats the weapon")
 	check(stub_coating != null and _mesh_vertices(stub_coating) > 0,
 		"A high-damage hit leaves droplets and a smear")
+	var coating_box := (stub_coating as MeshInstance3D).get_aabb()
+	check(coating_box.size.length() < 0.8,
+		"A blade coating stays on the blade instead of ballooning")
+
+	# --- bow smear -----------------------------------------------------------
+	var arrow_visual = load("res://scripts/bow.gd").create_arrow_visual()
+	fixture.add_child(arrow_visual)
+	await process_frame
+	BloodFx.stain_projectile(arrow_visual, 22.0)
+	await process_frame
+	var smear = arrow_visual.get_node_or_null("BloodSmear")
+	check(smear != null, "An arrow carries a smear where it stuck")
+	if smear != null:
+		var smear_box := (smear as MeshInstance3D).get_aabb()
+		check(smear_box.size.x <= 0.03 and smear_box.size.y <= 0.03,
+			"The arrow smear never fattens past the shaft")
+		check(smear_box.size.z <= 0.09,
+			"The arrow smear stays a short wet streak, not a coating")
 
 	# --- projectile hook -----------------------------------------------------
 	var field = root.get_node_or_null("BloodField")

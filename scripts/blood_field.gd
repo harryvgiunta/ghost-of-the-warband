@@ -5,9 +5,15 @@ extends Node3D
 ## exceeds the render budget. Created lazily by `BloodFx.field_for`.
 
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const BloodSurface = preload("res://scripts/blood_surface.gd")
 
 const PATCH_SEGMENTS := 12
 const PATCH_RINGS := 2
+## Body stains are a coarse grid bent onto the measured cloth surface: enough
+## segments to follow a shoulder or a thigh, cheap enough to merge several
+## splashes into the single mesh each wound owns.
+const BODY_RINGS := 5
+const BODY_SEGMENTS := 5
 const MAX_BURSTS := 10
 const MAX_BODY_STAINS := 10
 const MAX_WEAPON_STAINS := 8
@@ -17,6 +23,9 @@ const PATCH_LIFT := 0.012
 var max_surface_stains := 160
 var lifetime := BloodFx.LIFETIME
 var _stains: Array[Dictionary] = []
+## Visible-armor signature per rig: when the cloth underneath changes, the stains
+## measured against the old surface are dropped instead of floating off it.
+var _body_signatures: Dictionary = {}
 var _bursts: Array[Dictionary] = []
 var _rng := RandomNumberGenerator.new()
 var _query := PhysicsRayQueryParameters3D.new()
@@ -159,6 +168,7 @@ func clear_all() -> void:
 	for stain in _stains:
 		if is_instance_valid(stain.node):
 			(stain.node as Node).queue_free()
+			_release_attachment(stain.node as Node)
 	for burst in _bursts:
 		if is_instance_valid(burst.node):
 			(burst.node as Node).queue_free()
@@ -180,6 +190,7 @@ func advance(delta: float) -> void:
 			_apply_fade(stain, clampf(remaining / BloodFx.FADE_SECONDS, 0.0, 1.0))
 		if remaining <= 0.0:
 			(node as Node).queue_free()
+			_release_attachment(node as Node)
 			_stains.remove_at(index)
 	for index in range(_bursts.size() - 1, -1, -1):
 		var burst: Dictionary = _bursts[index]
@@ -193,7 +204,7 @@ func _apply_fade(stain: Dictionary, factor: float) -> void:
 	var node = stain.node
 	if not is_instance_valid(node):
 		return
-	if str(stain.kind) == "patch":
+	if str(stain.kind) in ["patch", "soak"]:
 		(node as GeometryInstance3D).transparency = 1.0 - factor
 	else:
 		(node as Node3D).scale = (stain.scale as Vector3) * maxf(factor, 0.001)
@@ -207,113 +218,222 @@ func _register_stain(node: Node, stain_owner: Node, kind: String, cap: int) -> v
 func _enforce_cap(stain_owner: Node, cap: int) -> void:
 	var count := 0
 	for stain in _stains:
-		if stain.owner == stain_owner and is_instance_valid(stain.node):
-			count += 1
+		if stain.owner != stain_owner or not is_instance_valid(stain.node):
+			continue
+		if (stain.node as Node).is_queued_for_deletion():
+			continue
+		count += 1
 	var excess := count - cap
 	var index := 0
 	while excess > 0 and index < _stains.size():
 		var stain: Dictionary = _stains[index]
-		if stain.owner != stain_owner:
+		if stain.owner != stain_owner or not is_instance_valid(stain.node) \
+				or (stain.node as Node).is_queued_for_deletion():
 			index += 1
 			continue
 		if is_instance_valid(stain.node):
 			(stain.node as Node).queue_free()
+			_release_attachment(stain.node as Node)
 		_stains.remove_at(index)
 		excess -= 1
+
+func _drop_rig_stains(rig: Node3D) -> void:
+	for index in range(_stains.size() - 1, -1, -1):
+		var stain: Dictionary = _stains[index]
+		if stain.owner != rig:
+			continue
+		if is_instance_valid(stain.node):
+			(stain.node as Node).queue_free()
+			_release_attachment(stain.node as Node)
+		_stains.remove_at(index)
+
+## Frees the bone attachment a stain was riding on once nothing is left on it,
+## so long fights do not leave empty nodes hanging off every skeleton bone.
+func _release_attachment(node: Node) -> void:
+	var parent := node.get_parent()
+	if parent == null or not parent.has_meta("blood_attachment"):
+		return
+	for other in _stains:
+		var sibling = other.node
+		if sibling == null or not is_instance_valid(sibling) or sibling == node:
+			continue
+		if sibling.is_queued_for_deletion():
+			continue
+		if sibling.get_parent() == parent:
+			return
+	parent.queue_free()
 
 # --- body and weapon stains ------------------------------------------------
 
 func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 		lethal: bool, scale: float) -> void:
-	var anchor := _attach_point(rig, at)
-	var anchor_node := anchor.parent as Node3D
-	var anchor_xform: Transform3D = anchor.world
-	var root_origin: Vector3 = anchor.local
-	var count := 2
-	if amount >= 20.0:
-		count += 2
+	var body := BloodSurface.body_for(rig)
+	if body.is_empty():
+		return
+	var signature := int(body.get("signature", 0))
+	if signature != int(_body_signatures.get(rig.get_instance_id(), signature)):
+		_drop_rig_stains(rig)
+	if _body_signatures.size() > 256:
+		_body_signatures.clear()
+	_body_signatures[rig.get_instance_id()] = signature
+	var carrier := BloodSurface.nearest_carrier(body, at)
+	if carrier.is_empty():
+		return
+	var anchor := BloodSurface.anchor_for(carrier)
+	if anchor == null:
+		return
+	BloodSurface.prepare_pose(carrier)
+	var center := BloodSurface.to_local(carrier, at)
+	var down := BloodSurface.down_local(carrier)
+	var lift := BloodSurface.LIFT * clampf(scale, 0.6, 2.2)
+	# Severity sets both the size of the soak and how many separate splashes
+	# land: one hard blow soaks the whole panel, a graze only freckles it.
+	var base := clampf(0.034 + amount * 0.0028, 0.038, 0.150) * scale
+	var splashes := 4
+	if amount >= 14.0:
+		splashes += 1
+	if amount >= 26.0:
+		splashes += 1
 	if headshot:
-		count += 2
+		splashes += 2
 	if lethal:
-		count += 4
-	var base_radius := clampf(0.014 + amount * 0.0014, 0.016, 0.062) * scale
-	# Place the wet blotches on the body's outer shell. A raycast would return
-	# the physics capsule, which is wider than the devil and narrower than the
-	# sentinel; the scale-derived shell tracks every rig type.
-	var shell := 0.23 * scale
-	var to_local := anchor_xform.basis.inverse()
-	var down_local := (to_local * Vector3.DOWN).normalized()
+		splashes += 3
+	# The splashes are laid out on the measured cloth itself, not around it:
+	# a hit has to be readable on the clothes from every side of the fight.
+	var limit := BloodSurface.patch_extent(carrier)
+	var points := BloodSurface.cluster(carrier, splashes, _rng, center)
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var first_local := Vector3.ZERO
-	for index in count:
-		var direction := Vector3(_rng.randf_range(-1.0, 1.0),
-			_rng.randf_range(-0.3, 0.9) if headshot else _rng.randf_range(-1.0, 1.0),
-			_rng.randf_range(-1.0, 1.0))
-		if direction.length_squared() < 0.0001:
-			direction = Vector3.UP
-		direction = direction.normalized()
-		var point := at + direction * shell * _rng.randf_range(0.78, 1.2)
-		var local_point := anchor_xform.affine_inverse() * point
-		var local_normal := (to_local * direction).normalized()
+	var placed := 0
+	for index in points.size():
+		var half_up := minf(base * _rng.randf_range(0.70, 1.55), limit.x)
+		var half_wide := minf(base * _rng.randf_range(0.50, 1.05), limit.y)
 		if index == 0:
-			first_local = local_point
-		var radius := base_radius * _rng.randf_range(0.55, 1.2)
-		var size := Vector3(radius, radius * 0.45, radius * _rng.randf_range(0.8, 1.4))
-		var blob := Transform3D(_basis_from_y(local_normal) * Basis.from_scale(size),
-			local_point - root_origin + local_normal * 0.003)
-		tool.append_from(BloodFx.blot_mesh(), 0, blob)
-	if scale >= 0.7 and (amount >= 12.0 or lethal):
-		var length := base_radius * _rng.randf_range(2.4, 5.4)
-		var drip := Transform3D(_basis_from_y(down_local),
-			first_local - root_origin + down_local * length * 0.5)
-		drip.basis = drip.basis * Basis.from_scale(
-			Vector3(base_radius * 0.32, length, base_radius * 0.32))
-		tool.append_from(BloodFx.drip_mesh(), 0, drip)
+			half_up = minf(base, limit.x)
+			half_wide = minf(base * 0.92, limit.y)
+		if BloodSurface.add_patch(tool, carrier, points[index], down, half_up,
+				half_wide, BODY_RINGS, BODY_SEGMENTS, _rng.randf() * TAU, lift):
+			placed += 1
+	# Gravity runs: narrow streaks under the first splash, the way blood wicks
+	# down a belt or a sleeve instead of pooling on it.
+	if not points.is_empty():
+		var runs := 1 if amount < 26.0 else 2
+		for index in runs:
+			var half_run := minf(base * _rng.randf_range(1.1, 2.2), limit.x * 1.8)
+			var start: Vector3 = points[0] + down * (half_run + limit.x * 0.3)
+			if BloodSurface.add_patch(tool, carrier, start, down, half_run,
+					minf(base * _rng.randf_range(0.11, 0.19), limit.y * 0.3),
+					BODY_RINGS, 2, _rng.randf_range(-0.25, 0.25), lift):
+				placed += 1
+	if placed == 0:
+		tool.clear()
+		return
 	var mesh := tool.commit()
 	if mesh == null or mesh.get_surface_count() == 0:
 		return
 	var node := MeshInstance3D.new()
-	node.name = "BloodWound"
+	node.name = "BloodSoak"
 	node.set_meta("blood_stain", "wound")
 	node.mesh = mesh
-	node.material_override = BloodFx.blot_material()
+	node.material_override = BloodFx.soak_material(_rng.randi() % BloodFx.SPLAT_VARIANTS)
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
-	anchor_node.add_child(node)
-	node.position = root_origin
-	_register_stain(node, rig, "group", MAX_BODY_STAINS)
+	anchor.add_child(node)
+	_register_stain(node, rig, "soak", MAX_BODY_STAINS)
 
-func _attach_point(rig: Node3D, at: Vector3) -> Dictionary:
-	var skeleton := _find_skeleton(rig)
-	if skeleton != null:
-		var best := -1
-		var best_distance := INF
-		for index in skeleton.get_bone_count():
-			var bone_origin: Vector3 = skeleton.get_bone_global_pose(index).origin
-			var distance := (skeleton.global_transform * bone_origin).distance_squared_to(at)
-			if distance < best_distance:
-				best_distance = distance
-				best = index
-		if best >= 0 and best_distance < 9.0:
-			var bone_world: Transform3D = skeleton.global_transform \
-				* skeleton.get_bone_global_pose(best)
-			var attachment := BoneAttachment3D.new()
-			attachment.name = "BloodBone"
-			attachment.bone_name = skeleton.get_bone_name(best)
-			skeleton.add_child(attachment)
-			return {"parent": attachment,
-				"local": bone_world.affine_inverse() * at, "world": bone_world}
-	return {"parent": rig, "local": rig.to_local(at), "world": rig.global_transform}
+## An arrow carries a smear, not a blade coating: a wet skim on the shaft just
+## behind the head and two specks. Sized from the shaft, never the fletching.
+func stain_projectile(anchor: Node3D, amount: float) -> void:
+	if not is_instance_valid(anchor) or not anchor.is_inside_tree():
+		return
+	var bounds := _anchor_bounds(anchor)
+	if bounds.size.length_squared() < 0.000001:
+		return
+	var center := bounds.get_center()
+	var axis := 2
+	if bounds.size.x >= bounds.size.y and bounds.size.x >= bounds.size.z:
+		axis = 0
+	elif bounds.size.y >= bounds.size.z:
+		axis = 1
+	var shaft := center
+	var component: float = center[axis]
+	shaft[axis] = -1.0 if component < 0.0 else 1.0
+	var thin := 0
+	for candidate in 3:
+		if candidate == axis:
+			continue
+		if thin == axis or bounds.size[candidate] < bounds.size[thin]:
+			thin = candidate
+	var wide := 3 - axis - thin
+	var thin_axis := Vector3.ZERO
+	thin_axis[thin] = 1.0
+	var wide_axis := Vector3.ZERO
+	wide_axis[wide] = 1.0
+	var length: float = bounds.size[axis]
+	var shaft_radius := clampf(length * 0.008, 0.004, 0.011)
+	var smear_length := clampf(0.018 + amount * 0.0008, 0.018, 0.05)
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var side := 1.0 if _rng.randf() < 0.5 else -1.0
+	var normal := thin_axis * side
+	var smear_center: Vector3 = shaft * length * _rng.randf_range(0.70, 0.88)
+	_wrap_shaft(tool, smear_center, normal, wide_axis, shaft, shaft_radius,
+		smear_length * 0.5, shaft_radius * 0.9)
+	for index in 2:
+		var speck_side := 1.0 if _rng.randf() < 0.5 else -1.0
+		_wrap_shaft(tool, smear_center + shaft * _rng.randf_range(-0.02, 0.02),
+			thin_axis * speck_side, wide_axis, shaft,
+			shaft_radius * _rng.randf_range(0.5, 0.9), 0.004, 0.0035)
+	var mesh := tool.commit()
+	if mesh == null or mesh.get_surface_count() == 0:
+		return
+	var node := MeshInstance3D.new()
+	node.name = "BloodSmear"
+	node.set_meta("blood_stain", "coating")
+	node.mesh = mesh
+	node.material_override = BloodFx.soak_material(_rng.randi() % BloodFx.SPLAT_VARIANTS)
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	anchor.add_child(node)
+	node.position = center
+	_register_stain(node, anchor, "group", MAX_WEAPON_STAINS)
 
-func _find_skeleton(rig: Node3D) -> Skeleton3D:
-	if rig is Skeleton3D:
-		return rig as Skeleton3D
-	var found := rig.find_children("*", "Skeleton3D", true, false)
-	if found.is_empty():
-		return null
-	return found[0] as Skeleton3D
-
+## Lays a small textured band around a thin shaft so the stain curves with it.
+func _wrap_shaft(tool: SurfaceTool, center: Vector3, normal: Vector3,
+		across: Vector3, axis: Vector3, radius: float, half_length: float,
+		half_wide: float) -> void:
+	# A band, never a full wrap: a shaft painted right round reads as goo.
+	var rings := 2
+	var segments := 2
+	var band := SurfaceTool.new()
+	band.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for row in rings + 1:
+		var along := float(row) / float(rings) * 2.0 - 1.0
+		for column in segments + 1:
+			var sideways := float(column) / float(segments) * 2.0 - 1.0
+			var turn := sideways * half_wide / maxf(radius + 0.0015, 0.002)
+			var direction := (normal * cos(turn) + across * sin(turn)).normalized()
+			var point: Vector3 = center + axis * (along * half_length) \
+				+ direction * (radius + 0.0015)
+			band.set_normal(direction)
+			band.set_uv(Vector2(along * 0.5 + 0.5, sideways * 0.5 + 0.5))
+			band.add_vertex(point)
+	var stride := segments + 1
+	for row in rings:
+		for column in segments:
+			var a := row * stride + column
+			var b := a + 1
+			var c := a + stride
+			var d := c + 1
+			band.add_index(a)
+			band.add_index(c)
+			band.add_index(b)
+			band.add_index(b)
+			band.add_index(c)
+			band.add_index(d)
+	var built := band.commit()
+	if built != null and built.get_surface_count() > 0:
+		tool.append_from(built, 0, Transform3D())
 func _anchor_bounds(anchor: Node3D) -> AABB:
 	var combined := AABB()
 	var first := true
@@ -475,16 +595,18 @@ func _spawn_burst(at: Vector3, direction: Vector3, amount: float, scale: float,
 	var burst := CPUParticles3D.new()
 	burst.name = "BloodSpray"
 	burst.one_shot = true
-	burst.amount = clampi(int(round(8.0 + amount * 0.8)), 10, 56)
+	burst.amount = clampi(int(round(16.0 + amount * 1.6)), 18, 80)
 	burst.lifetime = _rng.randf_range(0.34, 0.62)
 	burst.explosiveness = 0.95
 	burst.direction = (direction + Vector3.UP * up_bias).normalized()
 	burst.spread = 48.0
 	burst.initial_velocity_min = 1.2 * scale
-	burst.initial_velocity_max = 4.4 * scale
+	burst.initial_velocity_max = 3.6 * scale
 	burst.gravity = Vector3(0.0, -9.8, 0.0)
-	burst.scale_amount_min = 0.006 * scale
-	burst.scale_amount_max = 0.016 * scale
+	# Motes, not marbles: a droplet at this scale reads as spray, while a
+	# centimetre sphere reads as beading paint.
+	burst.scale_amount_min = 0.0015 * scale
+	burst.scale_amount_max = 0.0035 * scale
 	burst.mesh = BloodFx.drop_mesh()
 	burst.material_override = BloodFx.drop_material()
 	burst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

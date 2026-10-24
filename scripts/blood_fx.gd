@@ -16,10 +16,10 @@ const SPLAT_VARIANTS := 3
 static var _splat_textures: Array[Texture2D] = []
 static var _pool_texture: Texture2D
 static var _patch_materials: Array[StandardMaterial3D] = []
+static var _soak_materials: Array[StandardMaterial3D] = []
 static var _pool_material: StandardMaterial3D
 static var _blot_material: StandardMaterial3D
 static var _blot_mesh: SphereMesh
-static var _drip_mesh: CylinderMesh
 static var _drop_mesh: SphereMesh
 static var _drop_material: StandardMaterial3D
 static var _prepared := false
@@ -63,7 +63,11 @@ static func stain_weapon_node(anchor: Node3D, amount: float, scale: float = 1.0)
 		field.stain_weapon(anchor, amount, clampf(scale, 0.3, 2.5))
 
 static func stain_projectile(node: Node3D, amount: float) -> void:
-	stain_weapon_node(node, amount, 0.75)
+	if not is_instance_valid(node) or amount <= 0.0 or not node.is_inside_tree():
+		return
+	var field := field_for(node)
+	if field != null:
+		field.stain_projectile(node, amount)
 
 ## Finds the per-scene blood owner, creating it under the current scene root on
 ## the first wound. Called only from real damage events.
@@ -107,6 +111,15 @@ static func patch_material(variant: int = -1) -> StandardMaterial3D:
 		variant = randi() % SPLAT_VARIANTS
 	return _patch_materials[clampi(variant, 0, _patch_materials.size() - 1)]
 
+## Blood soaked into cloth or hide: the same organic splat shape as the ground
+## spatter, but lit, matte and double-sided so it reads as a stain on fabric
+## instead of a wet bubble sitting on top of it.
+static func soak_material(variant: int = -1) -> StandardMaterial3D:
+	_prepare()
+	if variant < 0:
+		variant = randi() % SPLAT_VARIANTS
+	return _soak_materials[clampi(variant, 0, _soak_materials.size() - 1)]
+
 static func pool_material() -> StandardMaterial3D:
 	_prepare()
 	return _pool_material
@@ -118,10 +131,6 @@ static func blot_material() -> StandardMaterial3D:
 static func blot_mesh() -> SphereMesh:
 	_prepare()
 	return _blot_mesh
-
-static func drip_mesh() -> CylinderMesh:
-	_prepare()
-	return _drip_mesh
 
 static func drop_mesh() -> SphereMesh:
 	_prepare()
@@ -146,12 +155,6 @@ static func _prepare() -> void:
 	_blot_mesh.radial_segments = 8
 	_blot_mesh.rings = 4
 
-	_drip_mesh = CylinderMesh.new()
-	_drip_mesh.bottom_radius = 1.0
-	_drip_mesh.top_radius = 0.6
-	_drip_mesh.height = 1.0
-	_drip_mesh.radial_segments = 6
-
 	_drop_mesh = SphereMesh.new()
 	_drop_mesh.radius = 1.0
 	_drop_mesh.height = 2.0
@@ -161,12 +164,13 @@ static func _prepare() -> void:
 	_drop_material = StandardMaterial3D.new()
 	# CPUParticles3D instance colors do not tint a StandardMaterial3D on the
 	# compatibility renderer, so the blood tint lives on the shared material.
-	_drop_material.albedo_color = Color(0.42, 0.017, 0.011, 1.0)
+	_drop_material.albedo_color = Color(0.31, 0.022, 0.017, 1.0)
 	_drop_material.vertex_color_use_as_albedo = false
-	_drop_material.roughness = 0.22
+	_drop_material.roughness = 0.48
 
 	_splat_textures.clear()
 	_patch_materials.clear()
+	_soak_materials.clear()
 	for variant in SPLAT_VARIANTS:
 		var texture := _build_texture(0x51A7 + variant * 0x2C1, false)
 		_splat_textures.append(texture)
@@ -178,6 +182,19 @@ static func _prepare() -> void:
 		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		material.render_priority = 0
 		_patch_materials.append(material)
+		# Lit, rough and slightly varied per variant: wet cloth darkens the dye
+		# and dries toward a dull brown-red, never a glossy blister.
+		var soak := StandardMaterial3D.new()
+		soak.albedo_texture = _build_body_texture(0x9E37 + variant * 0x1F3)
+		soak.albedo_color = [Color(1.0, 0.90, 0.88), Color(0.94, 0.80, 0.76),
+			Color(0.86, 0.70, 0.66)][variant]
+		soak.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		soak.cull_mode = BaseMaterial3D.CULL_DISABLED
+		soak.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		soak.roughness = 0.62
+		soak.metallic = 0.0
+		soak.render_priority = 1
+		_soak_materials.append(soak)
 	_pool_texture = _build_texture(0xB100D, true)
 	_pool_material = StandardMaterial3D.new()
 	_pool_material.albedo_texture = _pool_texture
@@ -226,6 +243,62 @@ static func _build_texture(seed_value: int, pool: bool) -> ImageTexture:
 		_paint_disc(image, at, radius,
 			Color(0.320 * shade + 0.04, 0.013 * shade, 0.010 * shade,
 				rng.randf_range(0.35, 0.94)))
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+## Soaked cloth, not a dropped blob: a torn, wicking edge, a darker dried rim
+## and a spray of stretch specks flung along the strike.
+static func _build_body_texture(seed_value: int) -> ImageTexture:
+	var size := 160
+	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var noise := FastNoiseLite.new()
+	noise.seed = seed_value
+	noise.frequency = 0.085
+	noise.fractal_octaves = 4
+	noise.fractal_gain = 0.55
+	var warp := FastNoiseLite.new()
+	warp.seed = seed_value + 977
+	warp.frequency = 0.028
+	warp.fractal_octaves = 2
+	var center := Vector2(float(size), float(size)) * 0.5
+	var reach := float(size) * 0.34
+	for y in size:
+		for x in size:
+			var point := Vector2(float(x) + 0.5, float(y) + 0.5)
+			var offset := point - center
+			# Warp the radius so the stain bleeds unevenly into the weave.
+			var pull := warp.get_noise_2d(float(x), float(y)) * 0.22
+			var radial := clampf(1.0 - offset.length() / reach - pull, 0.0, 1.0)
+			if radial <= 0.0:
+				continue
+			var grain := (noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
+			var alpha := smoothstep(0.05, 0.46, radial * (0.34 + grain * 1.30))
+			if alpha <= 0.004:
+				continue
+			# A wet core of fresh crimson; the wicking rim dries toward oxblood.
+			var shade := 0.55 + 0.45 * smoothstep(0.0, 0.85, radial)
+			var color := Color((0.395 + 0.060 * grain) * shade,
+				(0.043 + 0.014 * grain) * shade,
+				(0.034 + 0.012 * grain) * shade, alpha)
+			image.set_pixel(x, y, color)
+	for index in 74:
+		var angle := rng.randf() * TAU
+		var distance := reach * rng.randf_range(0.55, 1.55)
+		var at := center + Vector2(cos(angle), sin(angle)) * distance
+		var stretch := rng.randf_range(1.0, 3.2)
+		var along := Vector2(cos(angle + PI * 0.5), sin(angle + PI * 0.5))
+		var radius := rng.randf_range(0.6, 1.9)
+		var shade := rng.randf_range(0.40, 0.78)
+		var tint := Color(0.390 * shade + 0.02, 0.040 * shade, 0.032 * shade)
+		var steps := int(ceil(stretch))
+		for step in steps:
+			_paint_disc(image, at + along * (float(step) * radius * 0.85),
+				radius * (1.0 - 0.18 * float(step)),
+				Color(tint.r, tint.g, tint.b,
+					rng.randf_range(0.30, 0.90) * (1.0 - 0.2 * float(step))))
 	image.generate_mipmaps()
 	return ImageTexture.create_from_image(image)
 
