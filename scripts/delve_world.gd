@@ -40,8 +40,14 @@ var enemy_spawns: Array[Dictionary] = [
 var descent_position: Vector3 = Vector3(0, 0.05, -15.0)
 var ascent_position: Vector3 = Vector3(0, 0.05, 12.2)
 var chest_position: Vector3 = Vector3(0, 0.06, 0)
+var altar_position: Vector3 = Vector3(0, 0.05, -4.0)
+var rope_position: Vector3 = Vector3(5.2, 0.05, 3.0)
+var hole_position: Vector3 = Vector3(-5.2, 0.05, 3.0)
+var hole_radius: float = 1.05
 var drop_center: Vector3 = Vector3(0, 8.0, 0)
 var sealed: bool = false
+var rope_lowered: bool = false
+var hole_open: bool = false
 var generation_stats: Dictionary = {}
 
 var _rock: StandardMaterial3D
@@ -54,6 +60,10 @@ var _solids: int = 0
 var _lights: int = 0
 var _gate_shapes: Array[CollisionShape3D] = []
 var _gate_bars: Array[MeshInstance3D] = []
+var _rope_pivot: Node3D
+var _hole_plate: Node3D
+var _hole_plate_base: Vector3
+var _hole_void: MeshInstance3D
 
 
 func _ready() -> void:
@@ -76,6 +86,9 @@ func _ready() -> void:
 	_build_archways()
 	_build_side_alcoves()
 	_build_dais()
+	_build_altar()
+	_build_rope()
+	_build_hole()
 	_build_pillars()
 	_build_cover()
 	_build_torches()
@@ -91,6 +104,9 @@ func _ready() -> void:
 		"torches": _lights,
 		"archways": enemy_spawns.size(),
 		"limit": LIMIT,
+		"altar": 1,
+		"rope": 1,
+		"hole": 1,
 	}
 
 
@@ -102,6 +118,66 @@ func set_sealed(value: bool) -> void:
 		shape.disabled = not value
 	for bars in _gate_bars:
 		bars.visible = value
+
+
+## The rope is hidden in the rock until a depth is cleared; lowering it grows
+## the line out of the ceiling over 0.7 s so the party can climb out.
+func set_rope_lowered(value: bool, instant: bool = false) -> void:
+	if value == rope_lowered:
+		return
+	rope_lowered = value
+	if _rope_pivot == null:
+		return
+	if value:
+		_rope_pivot.visible = true
+		if instant or not is_inside_tree():
+			_rope_pivot.scale = Vector3.ONE
+			return
+		_rope_pivot.scale = Vector3(1.0, 0.02, 1.0)
+		var tween := create_tween()
+		tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		tween.tween_property(_rope_pivot, "scale", Vector3.ONE, 0.7)
+	else:
+		_rope_pivot.scale = Vector3(1.0, 0.02, 1.0)
+		_rope_pivot.visible = false
+
+
+func is_rope_lowered() -> bool:
+	return rope_lowered
+
+
+## Opens the floor plate and exposes the dark shaft that leads one depth down.
+func set_hole_open(value: bool, instant: bool = false) -> void:
+	if value == hole_open:
+		return
+	hole_open = value
+	if _hole_plate == null:
+		return
+	_hole_void.visible = value
+	var target_position := _hole_plate_base + (Vector3(-2.35, 0.16, 0.0) if value else Vector3.ZERO)
+	var target_angle := -1.1 if value else 0.0
+	if instant or not is_inside_tree():
+		_hole_plate.position = target_position
+		_hole_plate.rotation.z = target_angle
+		return
+	var tween := create_tween()
+	tween.set_parallel(true)
+	tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(_hole_plate, "position", target_position, 0.4)
+	tween.tween_property(_hole_plate, "rotation:z", target_angle, 0.4)
+
+
+func is_hole_open() -> bool:
+	return hole_open
+
+
+## True while a body standing on the chamber floor is inside the open shaft.
+func is_in_hole(point: Vector3) -> bool:
+	if not hole_open:
+		return false
+	var dx := point.x - hole_position.x
+	var dz := point.z - hole_position.z
+	return dx * dx + dz * dz <= hole_radius * hole_radius and point.y <= 1.2
 
 
 func _build_environment() -> void:
@@ -399,6 +475,85 @@ func _build_dais() -> void:
 		var angle := TAU * float(index) / 8.0
 		Geo.box(dais, Vector3(0.55, 0.04, 0.55),
 			Vector3(cos(angle) * 3.55, 0.02, sin(angle) * 3.55), _stone)
+
+
+func _build_altar() -> void:
+	var altar := Node3D.new()
+	altar.name = "Altar"
+	altar.position = altar_position
+	add_child(altar)
+	var body := _solid_box(Vector3(1.5, 0.95, 1.0), Vector3(0, 0.475, 0), _dark_stone, altar)
+	body.name = "AltarBlock"
+	Geo.box(altar, Vector3(1.66, 0.14, 1.0), Vector3(0, 1.02, 0), _stone)
+	Geo.box(altar, Vector3(1.34, 0.08, 0.86), Vector3(0, 1.12, 0), _dark_stone)
+	for side in [-1.0, 1.0]:
+		Geo.box(altar, Vector3(0.18, 0.34, 0.72), Vector3(side * 0.48, 1.28, 0), _stone)
+
+	var rune := StandardMaterial3D.new()
+	rune.albedo_color = Color("101b1d")
+	rune.emission_enabled = true
+	rune.emission = Color("79e3d3")
+	rune.emission_energy_multiplier = 1.8
+	rune.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rune.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	Geo.cylinder(altar, 0.42, 0.42, 0.02, Vector3(0, 1.17, 0), rune, 24)
+	var rune_points: Array[Vector3] = [
+		Vector3(-0.34, 0.6, 0.505), Vector3(0.0, 0.6, 0.505), Vector3(0.34, 0.6, 0.505),
+	]
+	for offset in rune_points:
+		Geo.box(altar, Vector3(0.1, 0.5, 0.03), offset, rune)
+	_add_omni(altar_position + Vector3(0, 1.7, 0), Color("79e3d3"), 1.5, 6.5)
+
+
+func _build_rope() -> void:
+	_rope_pivot = Node3D.new()
+	_rope_pivot.name = "Rope"
+	_rope_pivot.position = Vector3(rope_position.x, CEILING_HEIGHT - 0.2, rope_position.z)
+	add_child(_rope_pivot)
+	var rope_material := Geo.material(Color("9a7b52"), 0.0, 0.85)
+	var length := CEILING_HEIGHT - 1.05
+	Geo.cylinder(_rope_pivot, 0.07, 0.07, length, Vector3(0, -length * 0.5, 0), rope_material, 10)
+	var knots := int(length / 1.4)
+	for index in knots:
+		Geo.cylinder(_rope_pivot, 0.115, 0.115, 0.12,
+			Vector3(0, -0.55 - float(index) * 1.4, 0), rope_material, 10)
+	Geo.sphere(_rope_pivot, 0.16, Vector3(0, -length, 0), rope_material)
+	_rope_pivot.scale = Vector3(1.0, 0.02, 1.0)
+	_rope_pivot.visible = false
+
+
+func _build_hole() -> void:
+	var hole := Node3D.new()
+	hole.name = "FloorHole"
+	hole.position = hole_position
+	add_child(hole)
+	var void_material := StandardMaterial3D.new()
+	void_material.albedo_color = Color(0.004, 0.005, 0.007)
+	void_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	void_material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	void_material.disable_receive_shadows = true
+	_hole_void = Geo.cylinder(hole, hole_radius, hole_radius, 0.015,
+		Vector3(0, 0.02, 0), void_material, 32)
+	_hole_void.visible = false
+	for index in 12:
+		var angle := TAU * float(index) / 12.0
+		Geo.box(hole, Vector3(0.34, 0.1, 0.3),
+			Vector3(cos(angle) * (hole_radius + 0.13), 0.05, sin(angle) * (hole_radius + 0.13)), _stone)
+
+	_hole_plate = Node3D.new()
+	_hole_plate.name = "HolePlate"
+	_hole_plate_base = Vector3(0, 0.09, 0)
+	_hole_plate.position = _hole_plate_base
+	hole.add_child(_hole_plate)
+	Geo.cylinder(_hole_plate, hole_radius, hole_radius, 0.08, Vector3.ZERO, _dark_stone, 32)
+	Geo.cylinder(_hole_plate, 0.34, 0.34, 0.03, Vector3(0, 0.05, 0), _iron, 16)
+	var plate_rune := StandardMaterial3D.new()
+	plate_rune.albedo_color = Color("182427")
+	plate_rune.emission_enabled = true
+	plate_rune.emission = Color("6798a3")
+	plate_rune.emission_energy_multiplier = 0.5
+	plate_rune.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	Geo.box(_hole_plate, Vector3(0.7, 0.02, 0.08), Vector3(0, 0.05, 0), plate_rune)
 
 
 func _build_pillars() -> void:

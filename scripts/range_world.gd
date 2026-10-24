@@ -20,6 +20,7 @@ const GRASS_SEED := 93617
 const TREE_SEED := 73109
 
 var player_spawn: Vector3 = Vector3(0.0, 3.0, 35.0)
+var town_entry: Vector3 = Vector3(0.0, 3.0, 47.0)
 var enemy_spawns: Array[Dictionary] = []
 var interactables: Array[Dictionary] = []
 var landmarks: Array[Dictionary] = []
@@ -90,7 +91,7 @@ func _ready() -> void:
 	_build_ground_cover()
 	_build_signposts()
 	generation_stats["terrain_vertices"] = GRID_SIDE * GRID_SIDE
-	generation_stats["terrain_triangles"] = GRID_CELLS * GRID_CELLS * 2
+	generation_stats["terrain_triangles"] = (GRID_CELLS * GRID_CELLS - 1) * 2
 	generation_stats["nodes"] = _count_nodes(self)
 	generation_stats["obstacle_shapes"] = _solids.get_child_count()
 	generation_stats["paths"] = map_paths.size()
@@ -200,6 +201,10 @@ func _build_terrain() -> void:
 			colors[index] = color
 	for iz in range(GRID_CELLS):
 		for ix in range(GRID_CELLS):
+			# One cell of the Wayfarer Inn floor is left open for the delve hatch:
+			# the collision trimesh shares this mesh, so the hole is physical.
+			if ix == 80 and iz == 93:
+				continue
 			var a: int = iz * GRID_SIDE + ix
 			indices.append_array(PackedInt32Array([a, a + 1, a + GRID_SIDE, a + 1, a + GRID_SIDE + 1, a + GRID_SIDE]))
 	var normals := PackedVector3Array()
@@ -235,11 +240,11 @@ func _build_terrain() -> void:
 
 
 func _build_map_data() -> void:
-	player_spawn = _ground(0, 35)
+	player_spawn = _ground(town_entry.x, town_entry.z)
 	for entry in [
 		["Hearthstead", Vector2(0, 35)], ["Heartwood", Vector2(-55, -25)],
 		["Watchfall Ruins", Vector2(55, -60)], ["Suncrest Ridge", Vector2(-15, -100)],
-		["Willow Bridge", Vector2(22, -10)]
+		["Willow Bridge", Vector2(22, -10)], ["The Sunken Delve", Vector2(16, 42)],
 	]:
 		var point: Vector2 = entry[1]
 		var location := _ground(point.x, point.y)
@@ -301,10 +306,10 @@ func _solid_box(parent: Node3D, size: Vector3, point: Vector3, material: Materia
 
 
 func _build_village() -> void:
-	_build_house(Vector2(-15, 42), 0.0, "ForesterHouse")
+	var forester := _build_house(Vector2(-15, 42), 0.0, "ForesterHouse")
 	var inn := _build_house(Vector2(15, 42), 0.0, "WayfarerInn")
-	_build_house(Vector2(-15, 16), PI, "FletcherWorkshop")
-	_build_house(Vector2(15, 16), PI, "HearthsteadStore")
+	var fletcher := _build_house(Vector2(-15, 16), PI, "FletcherWorkshop")
+	var store := _build_house(Vector2(15, 16), PI, "HearthsteadStore")
 	var camp := _root_at("HearthsteadCampfire", _ground(4, 35))
 	for i in range(9):
 		var angle: float = float(i) * TAU / 9.0
@@ -336,16 +341,129 @@ func _build_village() -> void:
 	_solid_box(market, Vector3(3.6, 0.9, 0.85), Vector3(0, 0.45, -0.8), _wood)
 	for i in range(5):
 		Geo.sphere(market, 0.2, Vector3(-1.2 + float(i) * 0.5, 1.04, -0.8), _gold)
+	_build_town_services(forester, fletcher, store)
 	_build_delve_hatch(inn)
 
 
+func _build_town_services(forester: Node3D, fletcher: Node3D, store: Node3D) -> void:
+	# The three keepers live in the town's own buildings. Their counters face
+	# the doorway; the interactable point sits on the customer side.
+	_build_vendor_station(forester,Vector3(0.8,0,1.2),1,Color("8f4a38"),"SMITH BRANN","Smith Brann")
+	_build_vendor_station(fletcher,Vector3(0,0,1.0),0,Color("3f6b57"),"STOREKEEPER ORLA","Storekeeper Orla")
+	_build_vendor_station(store,Vector3(0,0,1.0),2,Color("4b4f72"),"QUARTERMASTER VEY","Quartermaster Vey")
+	_build_stash_chest()
+	_build_arena_portal()
+
+
+func _build_vendor_station(house: Node3D, local_at: Vector3, vendor_index: int, accent: Color, label_text: String, display_name: String) -> void:
+	var keeper := Node3D.new()
+	keeper.name = "Keeper_%d" % vendor_index
+	keeper.position = local_at
+	house.add_child(keeper)
+	var cloth := Geo.material(accent,0.72,0.62)
+	var trim := Geo.material(Color("b99b55"),0.3,0.4)
+	var skin := Geo.material(Color("c9a27a"),0.12,0.82)
+	var dark := Geo.material(Color("262b31"),0.6,0.5)
+	Geo.cylinder(keeper,0.32,0.46,1.12,Vector3(0,0.58,0),cloth,10)
+	Geo.cylinder(keeper,0.30,0.30,0.10,Vector3(0,1.16,0),trim,10)
+	Geo.sphere(keeper,0.23,Vector3(0,1.40,0),skin,Vector3(1,1.08,1))
+	Geo.cylinder(keeper,0.27,0.30,0.20,Vector3(0,1.58,0),dark,8)
+	Geo.box(keeper,Vector3(0.16,0.62,0.18),Vector3(-0.34,0.82,0),cloth)
+	Geo.box(keeper,Vector3(0.16,0.62,0.18),Vector3(0.34,0.82,0),cloth)
+	Geo.box(keeper,Vector3(0.42,0.20,0.06),Vector3(0,0.94,-0.22),trim)
+	var label := Label3D.new()
+	label.text = label_text
+	label.font_size = 34
+	label.pixel_size = 0.0034
+	label.modulate = Color("f0d7a2")
+	label.outline_size = 6
+	label.position = Vector3(0,2.18,0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	keeper.add_child(label)
+	_box_collision(keeper,Vector3(0.62,1.8,0.62),Vector3(0,0.9,0))
+	var counter_at := local_at + Vector3(0,0,-1.0)
+	_solid_box(house,Vector3(2.9,0.95,0.72),counter_at,_wood)
+	Geo.box(house,Vector3(3.0,0.08,0.82),counter_at + Vector3(0,0.51,0),trim)
+	var open_at := house.to_global(counter_at + Vector3(0,0,-0.92))
+	interactables.append({
+		"id": "vendor_%d" % vendor_index,
+		"name": display_name,
+		"kind": "vendor", "vendor": vendor_index,
+		"position": open_at, "node": keeper,
+	})
+
+
+func _build_stash_chest() -> void:
+	var root := _root_at("TownStash", _ground(-7, 29.2))
+	_solid_box(root,Vector3(1.2,0.72,0.72),Vector3(0,0.36,0),_wood)
+	Geo.box(root,Vector3(1.24,0.12,0.76),Vector3(0,0.74,0),_stone)
+	for x in [-0.38,0.38]:
+		Geo.box(root,Vector3(0.10,0.76,0.78),Vector3(x,0.38,0),_timber)
+	Geo.box(root,Vector3(0.22,0.24,0.10),Vector3(0,0.44,-0.40),_gold)
+	var label := Label3D.new()
+	label.text = "TOWN STASH"
+	label.font_size = 34
+	label.pixel_size = 0.0034
+	label.modulate = Color("e9d8a8")
+	label.outline_size = 6
+	label.position = Vector3(0,1.32,0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	root.add_child(label)
+	interactables.append({
+		"id": "stash", "name": "Town Stash", "kind": "stash",
+		"position": root.global_position + Vector3(0,0,0.9), "node": root,
+	})
+
+
+func _build_arena_portal() -> void:
+	var root := _root_at("ArenaPortal", _ground(7, 44))
+	var rune := Geo.material(Color("6f4fa1"),0.2)
+	rune.emission_enabled = true
+	rune.emission = Color("9b6cff")
+	rune.emission_energy_multiplier = 1.4
+	var veil := StandardMaterial3D.new()
+	veil.albedo_color = Color(0.36,0.22,0.62,0.62)
+	veil.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	veil.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	veil.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for side in [-1.0,1.0]:
+		_solid_box(root,Vector3(0.46,3.4,0.5),Vector3(side*1.55,1.7,0),_stone)
+		Geo.box(root,Vector3(0.20,3.0,0.24),Vector3(side*1.55,1.8,0.28),rune)
+	_solid_box(root,Vector3(3.8,0.46,0.54),Vector3(0,3.55,0),_stone)
+	Geo.box(root,Vector3(2.35,2.9,0.06),Vector3(0,1.62,0),veil)
+	Geo.cylinder(root,1.7,1.7,0.035,Vector3(0,0.03,0),rune,32)
+	var light := OmniLight3D.new()
+	light.position = Vector3(0,1.7,0.5)
+	light.light_color = Color("a37bff")
+	light.light_energy = 1.3
+	light.omni_range = 6.0
+	root.add_child(light)
+	var label := Label3D.new()
+	label.text = "ARENA"
+	label.font_size = 40
+	label.pixel_size = 0.0036
+	label.modulate = Color("d9c8ff")
+	label.outline_size = 6
+	label.position = Vector3(0,4.05,0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	root.add_child(label)
+	interactables.append({
+		"id": "arena_portal", "name": "Arena Portal", "kind": "portal",
+		"position": root.global_position + Vector3(0,0,1.0), "node": root,
+	})
+
+
+func is_over_delve_hatch(point: Vector3) -> bool:
+	return absf(point.x - 16.0) < 0.92 and absf(point.z - 42.0) < 0.92
+
+
 func _build_delve_hatch(inn: Node3D) -> void:
-	# The only delve entrance is a boarded hatch in the Wayfarer Inn's common
-	# room, one step inside the doorway. Everything here is presentation only:
-	# no collision, so the doorway and the interior stay walkable.
+	# A real opening in the inn floor: the terrain cell underneath is omitted
+	# from the shared visual/collision mesh, so the ranger can jump in. The
+	# shaft is walled down to a dark bottom; main.gd changes scenes on the fall.
 	var root := Node3D.new()
 	root.name = "SunkenDelveHatch"
-	root.position = Vector3(0, 0.06, 0.6)
+	root.position = Vector3(1, 0.06, 0)
 	inn.add_child(root)
 	var well := Geo.material(Color("05090a"), 0.0, 0.95)
 	well.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -353,39 +471,35 @@ func _build_delve_hatch(inn: Node3D) -> void:
 	var teal_rune := Geo.material(Color("4a8d86"), 0.15)
 	teal_rune.emission_enabled = true
 	teal_rune.emission = Color("3fd6c0")
-	teal_rune.emission_energy_multiplier = 0.55
-	# Stone rim with an iron band; the raised lip reads as a hatch surround.
+	teal_rune.emission_energy_multiplier = 0.9
 	for i in range(8):
 		var angle: float = TAU * float(i) / 8.0
-		var block := Geo.box(root, Vector3(0.66, 0.16, 0.34), Vector3(cos(angle) * 0.9, 0.08, sin(angle) * 0.9), _stone)
+		var block := Geo.box(root, Vector3(0.66, 0.16, 0.36), Vector3(cos(angle) * 1.35, 0.08, sin(angle) * 1.35), _stone)
 		block.rotation.y = -angle
-		var stud := Geo.box(root, Vector3(0.1, 0.03, 0.1), Vector3(cos(angle) * 0.9, 0.165, sin(angle) * 0.9), iron)
-		stud.rotation.y = -angle
 		if i in [2, 6]:
-			var rune := Geo.box(root, Vector3(0.22, 0.02, 0.08), Vector3(cos(angle) * 0.9, 0.17, sin(angle) * 0.9), teal_rune)
+			var rune := Geo.box(root, Vector3(0.24, 0.02, 0.09), Vector3(cos(angle) * 1.35, 0.17, sin(angle) * 1.35), teal_rune)
 			rune.rotation.y = -angle
 	var ring := TorusMesh.new()
-	ring.inner_radius = 0.73
-	ring.outer_radius = 0.81
-	ring.rings = 28
+	ring.inner_radius = 1.18
+	ring.outer_radius = 1.28
+	ring.rings = 32
 	ring.ring_segments = 8
 	Geo.mesh_node(root, ring, iron, Vector3(0, 0.17, 0))
-	# The unlit shaft under the open leaf, with three stone steps descending.
-	Geo.cylinder(root, 0.72, 0.72, 0.03, Vector3(0, 0.02, 0), well, 24)
-	for i in range(3):
-		Geo.box(root, Vector3(1.05 - float(i) * 0.12, 0.09, 0.24), Vector3(0, 0.075 - float(i) * 0.018, 0.44 - float(i) * 0.22), _stone)
+	# Shaft walls below the floor keep a falling ranger inside the opening.
+	for side in [-1.0, 1.0]:
+		_solid_box(root, Vector3(0.3, 5.2, 2.3), Vector3(side * 1.15, -2.72, 0), _stone)
+		_solid_box(root, Vector3(2.3, 5.2, 0.3), Vector3(0, -2.72, side * 1.15), _stone)
+	Geo.box(root, Vector3(2.0, 0.02, 2.0), Vector3(0, -3.15, 0), well)
+	Geo.cylinder(root, 0.44, 0.0, 2.6, Vector3(0, -1.4, 0), teal_rune, 10)
 	# The trapdoor leaf stands open on its north hinges, clear of the walk in.
 	var leaf := Node3D.new()
-	leaf.position = Vector3(0, 0.15, -0.85)
+	leaf.position = Vector3(0, 0.15, -1.15)
 	leaf.rotation.x = deg_to_rad(-105.0)
 	root.add_child(leaf)
 	for i in range(4):
-		Geo.box(leaf, Vector3(0.3, 0.05, 1.25), Vector3(-0.45 + float(i) * 0.3, 0.0, 0.625), _wood)
-	for z in [0.18, 1.07]:
-		Geo.box(leaf, Vector3(1.26, 0.06, 0.1), Vector3(0, 0.03, z), iron)
-	for side in [-1.0, 1.0]:
-		Geo.box(root, Vector3(0.16, 0.1, 0.34), Vector3(side * 0.42, 0.17, -0.82), iron)
-	# A hanging plaque is the signpost the doorway never had.
+		Geo.box(leaf, Vector3(0.3, 0.05, 1.55), Vector3(-0.45 + float(i) * 0.3, 0.0, 0.775), _wood)
+	for z in [0.24, 1.31]:
+		Geo.box(leaf, Vector3(1.56, 0.06, 0.1), Vector3(0, 0.03, z), iron)
 	Geo.box(root, Vector3(2.6, 0.14, 0.16), Vector3(0, 3.2, 0.05), _timber)
 	for side in [-1.0, 1.0]:
 		Geo.box(root, Vector3(0.03, 0.82, 0.03), Vector3(side * 0.55, 2.78, 0.05), iron)
@@ -401,10 +515,11 @@ func _build_delve_hatch(inn: Node3D) -> void:
 	root.add_child(label)
 	var light := OmniLight3D.new()
 	light.position = Vector3(0, 1.15, 0.1)
-	light.light_color = Color("ffab5e")
-	light.light_energy = 1.2
-	light.omni_range = 3.6
+	light.light_color = Color("55e0cd")
+	light.light_energy = 1.6
+	light.omni_range = 4.2
 	root.add_child(light)
+	# Kept as a map marker only; the fall itself is the entrance.
 	interactables.append({"id": "delve", "name": "The Sunken Delve", "kind": "delve", "position": root.global_position, "node": root})
 
 

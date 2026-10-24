@@ -193,12 +193,12 @@ func _check_frontier() -> void:
 	check(not pebbles.is_empty(), "pebbles must dress the paths")
 	var boulders := _multimeshes(frontier, "Boulder_")
 	check(not boulders.is_empty(), "boulders must use the batched textured rock")
-	# Gameplay data is untouched.
-	check(frontier.interactables.size() == 5, "camp, three waystones and the delve entrance must remain interactive")
+	# Gameplay data is updated for the in-game town, not removed.
+	check(frontier.interactables.size() == 10, "camp, three keepers, stash, portal, delve and three waystones are interactive")
 	check(frontier.enemy_spawns.size() == 36, "all enemy spawns must survive the art pass")
-	check(frontier.map_paths.size() == 5 and frontier.landmarks.size() == 5, "map data must be unchanged")
-	check(frontier.player_spawn.distance_to(Vector3(0, frontier.terrain_height(0, 35), 35)) < 0.02,
-		"player spawn must stay on the authored ground")
+	check(frontier.map_paths.size() == 5 and frontier.landmarks.size() == 6, "map data tracks the town and the delve")
+	check(frontier.player_spawn.distance_to(Vector3(0, frontier.terrain_height(0, 47), 47)) < 0.02,
+		"the new journey spawns at the town gate")
 	game.queue_free()
 	await process_frame
 

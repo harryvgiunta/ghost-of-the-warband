@@ -64,14 +64,19 @@ func check_overhead(rig: Node3D, size: int) -> void:
 	check(highest_pelvis-lowest_pelvis>0.015,"Heavy attack transfers body weight instead of moving only the hands")
 	check(rig.phase=="READY","The complete authored windup, strike and recovery return to ready")
 
-func check_horizontal(rig: Node3D, size: int, variant: String) -> void:
+func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "right", dagger: bool = false) -> float:
 	rig.set_weapon("sword")
 	rig.set_sword(size)
+	if hand == "left":
+		rig.set_off_weapon("dagger" if dagger else "sword",size,true)
+		rig.set_weapon("dual")
+	elif dagger:
+		rig.set_weapon("dagger")
 	rig.set_locomotion(Vector3.ZERO,true)
 	rig.advance_animation(0.4)
-	check(rig.begin_melee("right",variant),"The %s horizontal cut starts" % variant)
-	var window: Vector2 = rig._melee_window("right")
-	var duration: float = Archer.SWORD_DATA[size].seconds
+	check(rig.begin_melee(hand,variant),"The %s %s diagonal cut starts" % [hand,variant])
+	var window: Vector2 = rig._melee_window(hand)
+	var duration: float = rig.melee_seconds(hand)
 	var previous: Dictionary = rig.get_joint_positions()
 	var entry := Vector3.ZERO
 	var exit := Vector3.ZERO
@@ -79,41 +84,62 @@ func check_horizontal(rig: Node3D, size: int, variant: String) -> void:
 	var swept := 0.0
 	var lowest := INF
 	var highest := -INF
+	var pelvis_low := INF
+	var pelvis_high := -INF
+	var loaded_hips := Vector3.ZERO
+	var driven_hips := Vector3.ZERO
+	var bent_knees := false
+	var finish_stance := 0.0
 	var in_window := false
-	for frame in int(round(duration*120.0)):
+	for frame in int(ceil(duration*120.0))+1:
 		rig.advance_animation(1.0/120.0)
-		if rig._right_melee_time < 0.0:
-			break
 		var joints: Dictionary = rig.get_joint_positions()
 		check_limbs(rig,joints)
 		for side in ["left","right"]:
 			check(joints[side+"_elbow"].distance_to(previous[side+"_elbow"])<0.25,
-				"Horizontal %s %d elbows move continuously without an IK pole flip" % [variant,size])
-		var time: float = rig._right_melee_time
-		var tip: Vector3 = rig.get_blade_tip()
-		lowest = minf(lowest,tip.y)
-		highest = maxf(highest,tip.y)
-		var azimuth := atan2(tip.x-rig.global_position.x,-(tip.z-rig.global_position.z))
+				"Diagonal %s %d elbows remain continuous through recovery" % [variant,size])
+		previous = joints
+		if not rig.has_melee(hand):
+			break
+		var time: float = rig._left_melee_time if hand == "left" else rig._right_melee_time
+		var tip: Vector3 = rig.get_blade_tip(hand)
+		var blade: Vector3 = tip-rig.get_blade_base(hand)
+		var azimuth := atan2(blade.x,-blade.z)
+		var pelvis: float = (joints.left_hip.y+joints.right_hip.y)*0.5
+		pelvis_low = minf(pelvis_low,pelvis)
+		pelvis_high = maxf(pelvis_high,pelvis)
+		var hips: Vector3 = (joints.left_hip+joints.right_hip)*0.5
 		if time >= window.x and time <= window.y:
-			# Both hands stay on the hilt through the whole cut, not only at the
-			# instant the contact volume is sampled.
-			if size == 2:
+			lowest = minf(lowest,tip.y-rig.global_position.y)
+			highest = maxf(highest,tip.y-rig.global_position.y)
+			var left_bend: float = (joints.left_hip-joints.left_knee).angle_to(joints.left_ankle-joints.left_knee)
+			var right_bend: float = (joints.right_hip-joints.right_knee).angle_to(joints.right_ankle-joints.right_knee)
+			bent_knees = bent_knees or (left_bend+right_bend)*0.5 < deg_to_rad(125.0)
+			driven_hips = hips
+			var lead: Vector3 = joints.left_foot if variant == "diagonal_right" else joints.right_foot
+			var trail: Vector3 = joints.right_foot if variant == "diagonal_right" else joints.left_foot
+			finish_stance = (lead-trail).dot(-rig.global_basis.z)
+			if size == 2 and hand == "right" and not dagger:
 				check_two_hand_grip(rig)
 			if not in_window:
 				in_window = true
 				entry = tip
+				loaded_hips = hips
 			else:
-				swept += absf(wrapf(azimuth-previous_azimuth,-PI,PI))
+				swept += wrapf(azimuth-previous_azimuth,-PI,PI)
 			exit = tip
 			previous_azimuth = azimuth
-		previous = joints
-	check(swept > deg_to_rad(105.0),
-		"Horizontal %s %d sweeps the blade through a wide arc (%.0f degrees)" % [variant,size,rad_to_deg(swept)])
-	check(entry.distance_to(exit) > 1.2+0.5*size,
-		"Horizontal %s %d carries the blade through a real path (%.2f m)" % [variant,size,entry.distance_to(exit)])
-	check(lowest > 0.25 and highest < 2.7,
-		"Horizontal %s %d stays between waist and head height (%.2f..%.2f)" % [variant,size,lowest,highest])
-	check(rig.phase == "READY","The horizontal cut recovers to ready")
+	check(absf(swept)>deg_to_rad(105.0),"Diagonal blade traverses a broad frontal arc")
+	check(swept < 0.0 if variant == "diagonal_right" else swept > 0.0,"Opposite diagonal variants mirror the cut direction")
+	check(entry.y-exit.y > 0.35,"The active stroke descends instead of sweeping a level plane")
+	check(entry.distance_to(exit) > (0.7 if dagger else 1.2+0.5*size),"The blade follows a size-scaled cross-front path")
+	check(lowest > 0.25 and highest < 2.7,"The diagonal stays above the actor-relative floor and below an implausible high load")
+	check(pelvis_high-pelvis_low>0.10,"Diagonal body motion lowers and raises the hips, rather than making an idle-sized bob")
+	check(bent_knees,"The active stroke is driven through flexed knees, not locked upright legs")
+	check((driven_hips-loaded_hips).dot(-rig.global_basis.z)>0.15,"The hips transfer weight forward from the loaded leg through the cut")
+	check(finish_stance>0.10,"Mirrored cuts finish braced over the matching leading foot")
+	check(rig.phase == "READY","The diagonal cut and both hands recover to ready")
+	return entry.distance_to(exit)
 
 func check_running(rig: Node3D, weapon: String, size: int) -> void:
 	rig.set_weapon(weapon)
@@ -212,9 +238,22 @@ func run() -> void:
 	rig.aim_at(Vector3(0,1.2,-10))
 	for size in 3:
 		check_overhead(rig,size)
-	for size in 3:
-		for variant in ["horizontal_right","horizontal_left"]:
-			check_horizontal(rig,size,variant)
+	for variant in ["diagonal_right","diagonal_left"]:
+		var previous_span := 0.0
+		for size in 3:
+			var span := check_diagonal(rig,size,variant)
+			check(span > previous_span+0.25,"Each larger sword visibly broadens the cut")
+			previous_span = span
+		check_diagonal(rig,0,variant,"right",true)
+		check_diagonal(rig,0,variant,"left",true)
+		for size in 2:
+			check_diagonal(rig,size,variant,"left")
+	# Elevated actors use the same body-relative path, not an absolute floor clamp.
+	rig.position.y = 7.0
+	rig.aim_at(Vector3(0,8.2,-10))
+	check_diagonal(rig,1,"diagonal_right")
+	rig.position.y = 0.0
+	rig.aim_at(Vector3(0,1.2,-10))
 	for weapon in ["bow","sword"]:
 		rig.set_weapon(weapon)
 		rig.set_locomotion(Vector3(0,0,-8.5),false)

@@ -1,6 +1,6 @@
 extends Node
 ## Remembers the last host address, player name and UDP port for both the
-## Hollow forms and the standalone arena lobby. This is presentation data only;
+## Title join form and the standalone arena lobby. This is presentation data only;
 ## Session remains the one-shot host/join hand-off.
 
 const SAVE_PATH := "user://net_cache.json"
@@ -9,6 +9,7 @@ const TEST_SAVE_PATH := "user://net_cache_test.json"
 var player_name := "Ranger"
 var address := "127.0.0.1"
 var port := 7777
+var mode := "arena"
 var save_path := SAVE_PATH
 
 func _ready() -> void:
@@ -32,14 +33,19 @@ func load_cache() -> void:
 	var saved_port := int(data.get("port",port))
 	if saved_port >= 1024 and saved_port <= 65535:
 		port = saved_port
+	var saved_mode := str(data.get("mode","arena"))
+	if saved_mode in ["arena","delve"]:
+		mode = saved_mode
 
-func remember(next_name: String, next_address: String, next_port: int) -> void:
+func remember(next_name: String, next_address: String, next_port: int, next_mode: String = "") -> void:
 	player_name = _clean_name(next_name)
 	var clean_address := next_address.strip_edges()
 	if not clean_address.is_empty():
 		address = clean_address
 	if next_port >= 1024 and next_port <= 65535:
 		port = next_port
+	if next_mode in ["arena","delve"]:
+		mode = next_mode
 	save_cache()
 
 func save_cache() -> void:
@@ -52,6 +58,7 @@ func save_cache() -> void:
 		"player_name":player_name,
 		"address":address,
 		"port":port,
+		"mode":mode,
 	}))
 	file.close()
 
@@ -59,6 +66,7 @@ func reset(persist: bool = true) -> void:
 	player_name = "Ranger"
 	address = "127.0.0.1"
 	port = 7777
+	mode = "arena"
 	if persist:
 		save_cache()
 

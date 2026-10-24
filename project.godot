@@ -2,10 +2,10 @@ config_version=5
 
 [application]
 config/name="IRONWOOD | The Frontier"
-config/version="0.3.0"
-run/main_scene="res://menu.tscn"
+config/version="0.4.0"
+run/main_scene="res://title.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-config/description="A seamless woodland frontier, four-seat arena and sealed survival delve, staged from the Hollow."
+config/description="A seamless woodland town and frontier, a four-seat arena and an endless survival delve beneath Hearthstead."
 
 [autoload]
 PlayerState="*res://scripts/player_state.gd"

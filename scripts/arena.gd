@@ -12,7 +12,7 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
-const FieldInventoryScript = preload("res://scripts/field_inventory.gd")
+const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 var actors: Array = []
 var local_slot := -1
 var network_role := "offline"
@@ -45,7 +45,7 @@ var _peek_right := Vector3.RIGHT
 var _query := PhysicsRayQueryParameters3D.new()
 var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
-var _field_inventory
+var _world_ui
 
 func _ready() -> void:
 	name = "Arena"
@@ -82,7 +82,7 @@ func _ready() -> void:
 	hud.host_requested.connect(host_game)
 	hud.join_requested.connect(join_game)
 	hud.leave_requested.connect(leave_game)
-	hud.hub_requested.connect(_hub)
+	hud.town_requested.connect(_hub)
 	hud.bow_selected.connect(func(index: int): send_action("bow",index))
 	hud.armor_selected.connect(func(slot: String, set_index: int): send_action("armor",{"slot":slot,"set":set_index}))
 	hud.sword_selected.connect(func(index: int): send_action("sword",index))
@@ -91,15 +91,15 @@ func _ready() -> void:
 	hud.consumable_selected.connect(func(kind: String): send_action("consume",kind))
 	var player_state := get_node_or_null("/root/PlayerState")
 	if player_state != null:
-		_field_inventory = FieldInventoryScript.new()
-		_field_inventory.name = "FieldInventory"
-		_field_inventory.layer = layer.layer + 1
-		add_child(_field_inventory)
-		_field_inventory.opened.connect(_on_field_opened)
-		_field_inventory.closed.connect(_on_field_closed)
-		_field_inventory.loadout_changed.connect(_on_field_loadout_changed)
-		# No world-drop handler: arena drops fall back to the Hollow floor.
-		_field_inventory.configure(player_state,get_node_or_null("/root/Session"),null)
+		_world_ui = FieldInventoryScript.new()
+		_world_ui.name = "WorldUI"
+		_world_ui.layer = layer.layer + 1
+		add_child(_world_ui)
+		_world_ui.opened.connect(_on_ui_opened)
+		_world_ui.closed.connect(_on_ui_closed)
+		_world_ui.loadout_changed.connect(_on_ui_loadout_changed)
+		# No world-drop handler: arena drops fall back to the persistent floor list.
+		_world_ui.configure(player_state,get_node_or_null("/root/Session"),null,Callable(),true)
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 4
@@ -187,7 +187,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 	hud.show_match(_player_name,_endpoint)
 	_set_cursor_free(false)
 	_apply_loadout(0,_local_loadout())
-	_bind_field_rig()
+	_bind_ui_rig()
 	print("ARENA_HOST_READY port=",port)
 
 func join_game(address: String, port: int, player_name: String) -> void:
@@ -210,10 +210,10 @@ func join_game(address: String, port: int, player_name: String) -> void:
 
 func leave_game() -> void:
 	network_role = "offline"
-	if _field_inventory != null:
-		if _field_inventory.is_open():
-			_field_inventory.close()
-		_field_inventory.rebind(null)
+	if _world_ui != null:
+		if _world_ui.is_open():
+			_world_ui.close()
+		_world_ui.rebind(null)
 	local_slot = -1
 	multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -253,7 +253,7 @@ func _connection_ended(message: String) -> void:
 
 func _hub() -> void:
 	leave_game()
-	get_tree().change_scene_to_file("res://menu.tscn")
+	get_tree().change_scene_to_file("res://main.tscn")
 
 func _find_open_port(start: int) -> int:
 	var last := mini(start+15,65535)
@@ -272,7 +272,7 @@ func _safe_name(value: String) -> String:
 func _remember_network(player_name: String, address: String, port: int) -> void:
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
-		cache.remember(player_name,address,port)
+		cache.remember(player_name,address,port,"arena")
 
 func _local_loadout() -> Dictionary:
 	var node: Variant = get_node_or_null("/root/PlayerState")
@@ -401,7 +401,7 @@ func _accept(slot: int) -> void:
 		actor.is_local = actor.slot == slot
 	actors[slot].interp_delay = 0.05
 	hud.show_match(_player_name,_endpoint)
-	_bind_field_rig()
+	_bind_ui_rig()
 	_set_cursor_free(false)
 	print("ARENA_CLIENT_READY slot=",slot)
 
@@ -505,7 +505,7 @@ func send_action(action: String, value: Variant = null) -> void:
 		_capture_peek_context()
 	if action in ["draw","release","throw","throw_release"]:
 		_send_peek_input()
-	var aim_origin: Variant = _aim_origin if _aim_origin_valid and action in ["draw","release","throw","throw_release","attack_right","melee"] else null
+	var aim_origin: Variant = _aim_origin if _aim_origin_valid and action in ["draw","release","throw","throw_release","melee"] else null
 	if network_role == "host":
 		_apply_action(local_slot,action,value,-1,aim_origin)
 	elif network_role == "client":
@@ -540,16 +540,7 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
 				actor.update_combat_cover_side()
-				if actor.rig.weapon == "dual":
-					actor.combat.begin_melee("left")
-				elif actor.rig.weapon in ["sword","dagger"]:
-					actor.combat.begin_melee()
-				else:
-					actor.combat.begin_draw()
-		"attack_right":
-			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
-				actor.update_combat_cover_side()
-				actor.combat.begin_melee("right","overhead")
+				actor.combat.begin_draw()
 		"melee":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -557,11 +548,15 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			var hand := str(value.get("hand","right"))
 			var variant := str(value.get("variant","overhead"))
 			if typeof(aim) != TYPE_VECTOR3 or hand not in ["left","right"] \
-					or variant not in ["overhead","horizontal_left","horizontal_right","stab"]:
+					or variant not in ["overhead","diagonal_left","diagonal_right","stab"]:
 				return
 			if _set_aim(slot,aim,aim_tick,aim_origin):
 				actor.update_combat_cover_side()
-				actor.combat.begin_melee(hand,variant)
+				if actor.combat.begin_melee(hand,variant) and slot == local_slot and actor.rig.weapon != "dual":
+					if variant == "diagonal_right":
+						_next_swing_side = -1
+					elif variant == "diagonal_left":
+						_next_swing_side = 1
 		"step":
 			if typeof(value) != TYPE_VECTOR3:
 				return
@@ -788,36 +783,56 @@ func _set_cursor_free(value: bool) -> void:
 		_send_peek_input()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
 
-func _field_inventory_open() -> bool:
-	return _field_inventory != null and _field_inventory.is_open()
+func _ui_open() -> bool:
+	return _world_ui != null and _world_ui.is_open()
 
-func _on_field_opened() -> void:
+func _on_ui_opened() -> void:
 	# A menu opens with the pointer free and any held draw or throw cancelled.
+	_cancel_draw_input()
+	_peek_held = false
+	_send_peek_input()
 	_set_cursor_free(true)
 
-func _on_field_closed() -> void:
+func _on_ui_closed() -> void:
 	# Closing must not recapture the pointer in the lobby or after a disconnect.
 	if network_role == "offline" or local_slot < 0:
 		return
 	_set_cursor_free(false)
 
-func _bind_field_rig() -> void:
-	if _field_inventory == null:
+func _bind_ui_rig() -> void:
+	if _world_ui == null:
 		return
 	var rig: Variant = null
 	if local_slot >= 0 and local_slot < actors.size():
 		rig = actors[local_slot].rig
-	_field_inventory.rebind(rig)
+	_world_ui.rebind(rig)
 
-func _on_field_loadout_changed() -> void:
+func _on_ui_loadout_changed() -> void:
 	if local_slot < 0 or local_slot >= actors.size():
 		return
-	_bind_field_rig()
+	_bind_ui_rig()
 	_apply_loadout(local_slot,_local_loadout())
 	if network_role == "client":
 		# The host rebuilds the seat from the same validated catalog ids and
 		# its snapshots stay the presentation authority for everyone else.
 		send_action("loadout",_local_loadout())
+
+## TAB toggles the persistent hand pair; the host rebuilds the seat from the
+## same loadout action used by the paperdoll.
+func _quick_swap() -> void:
+	if _ui_open():
+		return
+	var node: Variant = get_node_or_null("/root/PlayerState")
+	if node == null:
+		return
+	var result: Dictionary = node.quick_swap()
+	if not bool(result.get("ok", false)):
+		hud.flash_status(str(result.get("message", "No quick swap set.")))
+		return
+	_cancel_draw_input()
+	_on_ui_loadout_changed()
+	audio.play_sound("equip")
+	hud.flash_status(str(result.get("message", "Swapped weapons.")),1.5)
 
 func _crosshair_aim() -> Vector3:
 	_update_game_camera()
@@ -844,7 +859,7 @@ func _crosshair_aim() -> Vector3:
 func _input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_peek_held = false
@@ -871,16 +886,22 @@ func _capture_peek_context() -> void:
 func _send_peek_input() -> void:
 	send_action("peek",{"pressed":_peek_held,"right":_peek_right,"side":_shoulder_camera.side})
 
-func _horizontal_variant() -> String:
+func _diagonal_variant() -> String:
 	var side := _next_swing_side
 	if side == 0:
 		side = 1 if _shoulder_camera.side > 0 else -1
-	_next_swing_side = -side
-	return "horizontal_right" if side > 0 else "horizontal_left"
+	return "diagonal_right" if side > 0 else "diagonal_left"
 
-func _send_melee(hand: String, variant: String) -> void:
+func _send_melee(hand: String, variant: String = "") -> void:
+	if variant.is_empty():
+		variant = _diagonal_variant()
 	var aim := _crosshair_aim()
 	send_action("melee",{"aim":aim,"hand":hand,"variant":variant})
+	if network_role == "client" and actors[local_slot].rig.weapon != "dual":
+		if variant == "diagonal_right":
+			_next_swing_side = -1
+		elif variant == "diagonal_left":
+			_next_swing_side = 1
 
 func _send_step(side: int) -> void:
 	if local_slot < 0 or _cursor_free or side == 0:
@@ -892,11 +913,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if local_slot < 0:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if _field_inventory_open():
-			# The paperdoll/backpack owns the keyboard while it is up.
+		if _ui_open():
+			# The inventory/equipment overlay owns the keyboard while it is up.
 			match event.keycode:
-				KEY_ESCAPE, KEY_I:
-					_field_inventory.close()
+				KEY_ESCAPE:
+					_world_ui.close()
+				KEY_I:
+					if _world_ui.active_view() == "inventory":
+						_world_ui.close()
+					else:
+						_world_ui.open_inventory()
+				KEY_P:
+					if _world_ui.active_view() == "equipment":
+						_world_ui.close()
+					else:
+						_world_ui.open_equipment()
 			return
 		match event.keycode:
 			KEY_1: send_action("weapon","bow")
@@ -904,6 +935,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
+			KEY_TAB: _quick_swap()
 			KEY_6: send_action("consume","bandage")
 			KEY_7: send_action("consume","potion")
 			KEY_C:
@@ -929,20 +961,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q: _send_step(-1)
 			KEY_E: _send_step(1)
 			KEY_ESCAPE:
-				if _field_inventory_open():
-					_field_inventory.close()
+				_set_cursor_free(not _cursor_free)
+			KEY_I:
+				if _world_ui != null:
+					_world_ui.open_inventory()
 				else:
 					_set_cursor_free(not _cursor_free)
-			KEY_I:
-				if _field_inventory != null:
-					_field_inventory.toggle()
+			KEY_P:
+				if _world_ui != null:
+					_world_ui.open_equipment()
 				else:
 					_set_cursor_free(not _cursor_free)
 			KEY_T:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon
@@ -952,15 +986,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_mouse_drawing = true
 				send_action("draw",_crosshair_aim())
 			elif weapon == "dual":
-				_send_melee("left","stab")
-			elif weapon == "dagger":
-				_send_melee("right","stab")
-			else:
-				_send_melee("right",_horizontal_variant())
+				_send_melee("left","diagonal_left")
+			elif weapon in ["sword","dagger"]:
+				_send_melee("right")
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_set_cursor_free(false)
 			if weapon == "dual":
-				send_action("attack_right",_crosshair_aim())
+				_send_melee("right","diagonal_right")
 			else:
 				_peek_held = true
 				_capture_peek_context()

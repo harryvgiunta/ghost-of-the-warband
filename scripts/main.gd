@@ -15,7 +15,7 @@ const CoverMovement = preload("res://scripts/cover_movement.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
-const FieldInventory = preload("res://scripts/field_inventory.gd")
+const WorldUI = preload("res://scripts/world_ui.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 const PICKUP_RADIUS := 1.6
@@ -32,7 +32,7 @@ const LOOT_SEQUENCE := [
 var world
 var archer
 var hud
-var field_inventory
+var world_ui
 var audio
 var _player_state
 var _delve_host := false
@@ -81,7 +81,10 @@ var _throw_held := false
 var _cursor_free := false
 var _jump_requested := false
 var _interaction_id := ""
+var _interaction_kind := ""
+var _interaction_vendor := -1
 var _interaction_allowed := false
+var _entering_scene := false
 var _aim_query := PhysicsRayQueryParameters3D.new()
 var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
@@ -153,7 +156,8 @@ func _ready() -> void:
 	hud.camp_requested.connect(return_to_camp)
 	hud.map_toggled.connect(toggle_map)
 	hud.cursor_requested.connect(_set_cursor_free)
-	hud.hub_requested.connect(_return_to_hub)
+	hud.inventory_requested.connect(toggle_inventory)
+	hud.equipment_requested.connect(toggle_equipment)
 	if _player_state != null:
 		archer.apply_loadout(_player_state.loadout())
 		gold = int(_player_state.credits)
@@ -165,7 +169,7 @@ func _ready() -> void:
 	hud.configure_map(world.landmarks, world.map_paths, world.interactables, world.WORLD_LIMIT)
 	_update_loadout()
 	_refresh_backpack()
-	_build_field_inventory()
+	_build_world_ui()
 	for record: Dictionary in world.enemy_spawns:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
@@ -198,34 +202,44 @@ func _read_arguments() -> void:
 			_delve_name = str(args[index + 1]).strip_edges()
 
 
-func _build_field_inventory() -> void:
-	field_inventory = FieldInventory.new()
-	field_inventory.name = "FieldInventory"
-	field_inventory.layer = 2
-	add_child(field_inventory)
-	field_inventory.configure(_player_state,get_node_or_null("/root/Session"),archer,Callable(self,"_drop_field_loot"))
-	field_inventory.opened.connect(_on_field_inventory_opened)
-	field_inventory.closed.connect(_on_field_inventory_closed)
-	field_inventory.loadout_changed.connect(_on_field_loadout_changed)
-	hud.inventory_requested.connect(toggle_field_inventory)
+func _build_world_ui() -> void:
+	world_ui = WorldUI.new()
+	world_ui.name = "WorldUI"
+	world_ui.layer = 2
+	add_child(world_ui)
+	world_ui.configure(_player_state,get_node_or_null("/root/Session"),archer,Callable(self,"_drop_field_loot"),true)
+	world_ui.opened.connect(_on_ui_opened)
+	world_ui.closed.connect(_on_ui_closed)
+	world_ui.loadout_changed.connect(_on_ui_loadout_changed)
 
 
-func _field_inventory_open() -> bool:
-	return field_inventory != null and field_inventory.is_open()
+func _ui_open() -> bool:
+	return world_ui != null and world_ui.is_open()
 
 
-func toggle_field_inventory() -> void:
-	if field_inventory == null:
+func toggle_inventory() -> void:
+	if world_ui == null:
 		return
-	if field_inventory.is_open():
-		field_inventory.close()
+	if world_ui.is_open() and world_ui.active_view() == "inventory":
+		world_ui.close()
 		return
 	if inspecting:
 		toggle_view()
-	field_inventory.open()
+	world_ui.open_inventory()
 
 
-func _on_field_inventory_opened() -> void:
+func toggle_equipment() -> void:
+	if world_ui == null:
+		return
+	if world_ui.is_open() and world_ui.active_view() == "equipment":
+		world_ui.close()
+		return
+	if inspecting:
+		toggle_view()
+	world_ui.open_equipment()
+
+
+func _on_ui_opened() -> void:
 	# Opening cancels a live attack and frees the cursor; movement, attacks and
 	# interactions stay blocked until the overlay closes.
 	cancel_input()
@@ -234,17 +248,34 @@ func _on_field_inventory_opened() -> void:
 	_set_cursor_free(true)
 
 
-func _on_field_inventory_closed() -> void:
+func _on_ui_closed() -> void:
 	_set_cursor_free(false)
 
 
-func _on_field_loadout_changed() -> void:
+func _on_ui_loadout_changed() -> void:
 	if _player_state == null:
 		return
 	cancel_input()
 	archer.apply_loadout(_player_state.loadout())
 	_update_loadout()
 	_refresh_backpack()
+
+
+## TAB swaps the active hands with the bound paperdoll pair. The displaced
+## pair becomes the new quick set, so the same key toggles back.
+func quick_swap() -> void:
+	if _player_state == null or inspecting or hud.map_open or _cursor_free or _ui_open():
+		return
+	var result: Dictionary = _player_state.quick_swap()
+	if not bool(result.get("ok", false)):
+		hud.show_feedback(str(result.get("message", "No quick swap set.")), 2.0)
+		return
+	cancel_input()
+	archer.apply_loadout(_player_state.loadout())
+	_update_loadout()
+	_refresh_backpack()
+	audio.play_sound("equip")
+	hud.show_feedback(str(result.get("message", "Swapped weapons.")), 1.5)
 
 
 func _drop_field_loot(item_id: String) -> void:
@@ -265,7 +296,7 @@ func _physics_process(delta: float) -> void:
 	if input_vector.length() > 1.0:
 		input_vector = input_vector.normalized()
 	_advance_consumable(delta)
-	if inspecting or hud.map_open or _cursor_free or _field_inventory_open():
+	if inspecting or hud.map_open or _cursor_free or _ui_open():
 		input_vector = Vector2.ZERO
 		slide.reset()
 	if _consume_kind != "":
@@ -334,7 +365,9 @@ func _physics_process(delta: float) -> void:
 	if _mouse_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	combat.advance(delta)
-	if player.position.y < -25.0:
+	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
+		_enter_delve()
+	elif player.position.y < -25.0:
 		return_to_camp()
 
 func _process(delta: float) -> void:
@@ -414,15 +447,15 @@ func _capture_attack_cover_side() -> void:
 		_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
 
-func _horizontal_variant() -> String:
+func _diagonal_variant() -> String:
 	var side := _next_swing_side
 	if side == 0:
 		side = 1 if shoulder_camera.side > 0 else -1
 	_next_swing_side = -side
-	return "horizontal_right" if side > 0 else "horizontal_left"
+	return "diagonal_right" if side > 0 else "diagonal_left"
 
 func begin_attack(hand: String = "right", variant: String = "") -> void:
-	if hud.map_open or _field_inventory_open():
+	if hud.map_open or _ui_open():
 		return
 	_cancel_consumable()
 	_capture_attack_cover_side()
@@ -432,12 +465,11 @@ func begin_attack(hand: String = "right", variant: String = "") -> void:
 	var started := false
 	if archer.weapon in ["sword","dagger","dual"]:
 		var swing := variant
-		if requested == "left":
-			swing = "stab"
-		elif archer.weapon == "dagger" or not swing.is_empty():
-			pass
-		elif swing.is_empty():
-			swing = _horizontal_variant()
+		if swing.is_empty():
+			if archer.weapon == "dual":
+				swing = "diagonal_left" if requested == "left" else "diagonal_right"
+			else:
+				swing = _diagonal_variant()
 		started = combat.begin_melee(requested,swing)
 	else:
 		started = combat.begin_draw()
@@ -460,7 +492,7 @@ func quick_step(side: int) -> void:
 	stamina = maxf(0.0,stamina-DodgeStep.STAMINA_COST)
 
 func begin_throw_attack() -> void:
-	if hud.map_open or _field_inventory_open():
+	if hud.map_open or _ui_open():
 		return
 	_cancel_consumable()
 	if archer.weapon not in ["sword","dagger","dual"]:
@@ -491,14 +523,17 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		# The field inventory always answers I and Escape first so it can close
+		# The in-world kit always answers I, P and Escape first so it can close
 		# without leaking keys into movement, attacks or the waystone prompts.
 		if event.keycode == KEY_I:
-			toggle_field_inventory()
+			toggle_inventory()
+			return
+		if event.keycode == KEY_P:
+			toggle_equipment()
 			return
 		if event.keycode == KEY_ESCAPE:
-			if _field_inventory_open():
-				field_inventory.close()
+			if _ui_open():
+				world_ui.close()
 				return
 			cancel_input()
 			if inspecting:
@@ -506,7 +541,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.close_panels()
 			_set_cursor_free(true)
 			return
-		if _field_inventory_open():
+		if _ui_open():
 			return
 		match event.keycode:
 			KEY_1: equip_weapon("bow")
@@ -514,6 +549,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
+			KEY_TAB: quick_swap()
 			KEY_6: use_consumable("bandage")
 			KEY_7: use_consumable("potion")
 			KEY_C: toggle_crouch()
@@ -527,7 +563,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q: quick_step(-1)
 			KEY_E: quick_step(1)
 			KEY_G: interact()
-			KEY_O: hud.toggle_equipment()
 			KEY_M: toggle_map()
 			KEY_V: toggle_view()
 			KEY_R: return_to_camp()
@@ -541,7 +576,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not _throw_held:
 					_throw_held = true
 					begin_throw_attack()
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -557,7 +592,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif archer.weapon == "dual":
 				hud.close_panels()
 				_set_cursor_free(false)
-				begin_attack("right","overhead")
+				begin_attack("right","diagonal_right")
 			else:
 				hud.close_panels()
 				_set_cursor_free(false)
@@ -616,11 +651,11 @@ func equip_weapon(value: String) -> void:
 		if archer.weapon == "dual":
 			value = "sword"
 		elif archer.sword_index == 2:
-			hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Equip one in the Hollow.")
+			hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Press P to change the kit.")
 			return
 	cancel_input()
 	if not archer.set_weapon(value):
-		hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Equip one in the Hollow.")
+		hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Press P to change the kit.")
 		return
 	audio.play_sound("equip")
 
@@ -694,7 +729,7 @@ func use_consumable(kind: String) -> void:
 	if _consume_kind != "":
 		hud.show_feedback("Already using %s." % String(Archer.CONSUMABLE_DATA[_consume_kind].name))
 		return
-	if inspecting or hud.map_open or _cursor_free or _field_inventory_open():
+	if inspecting or hud.map_open or _cursor_free or _ui_open():
 		return
 	if health >= 99.999:
 		hud.show_feedback("Health is already full.")
@@ -767,73 +802,118 @@ func toggle_map() -> void:
 
 func _update_interaction() -> void:
 	_interaction_id = ""
+	_interaction_kind = ""
+	_interaction_vendor = -1
 	_interaction_allowed = false
-	if _field_inventory_open():
+	if _ui_open():
 		hud.set_interaction("")
 		return
 	var prompt := ""
 	for item: Dictionary in world.interactables:
+		# The delve hatch is entered by falling through it, not by a prompt.
+		if item.kind == "delve":
+			continue
 		if player.position.distance_to(item.position) > 3.8:
 			continue
-		_interaction_id = item.id
-		if item.kind == "camp":
-			prompt = "G  /  Rest at the campfire"
-			_interaction_allowed = true
-		elif item.kind == "delve":
-			prompt = "G  /  Open the hatch to the Sunken Delve"
-			_interaction_allowed = true
-		elif activated.has(item.id):
-			prompt = item.name + "  /  Restored"
-		else:
-			var guarded := false
-			for enemy in enemies:
-				if is_instance_valid(enemy) and enemy.alive and enemy.position.distance_to(item.position) < 12.0:
-					guarded = true
-					break
-			prompt = "Defeat the nearby guardians to restore this waystone" if guarded else "G  /  Restore " + item.name
-			_interaction_allowed = not guarded
+		_interaction_id = str(item.id)
+		_interaction_kind = str(item.kind)
+		match _interaction_kind:
+			"camp":
+				prompt = "G  /  Rest at the campfire"
+				_interaction_allowed = true
+			"vendor":
+				_interaction_vendor = int(item.get("vendor",-1))
+				prompt = "G  /  Trade with %s" % item.name
+				_interaction_allowed = _interaction_vendor >= 0
+			"stash":
+				prompt = "G  /  Open the town stash"
+				_interaction_allowed = true
+			"portal":
+				prompt = "G  /  Step into the arena"
+				_interaction_allowed = true
+			"waystone":
+				if activated.has(item.id):
+					prompt = item.name + "  /  Restored"
+				else:
+					var guarded := false
+					for enemy in enemies:
+						if is_instance_valid(enemy) and enemy.alive and enemy.position.distance_to(item.position) < 12.0:
+							guarded = true
+							break
+					prompt = "Defeat the nearby guardians to restore this waystone" if guarded else "G  /  Restore " + item.name
+					_interaction_allowed = not guarded
+			_:
+				continue
 		break
 	hud.set_interaction(prompt)
 
 func interact() -> void:
-	if _field_inventory_open():
+	if _ui_open():
 		return
 	_update_interaction()
 	if not _interaction_allowed:
 		return
-	if _interaction_id == "delve":
-		_enter_delve()
-		return
-	if _interaction_id == "camp":
-		health = 100.0
-		stamina = 100.0
-		hud.show_feedback("Rested. The frontier is waiting.")
-		return
-	activated[_interaction_id] = true
-	world.activate_interactable(_interaction_id)
-	_award_gold(25)
-	audio.play_sound("bullseye")
-	hud.show_feedback("Waystone restored  /  +25 gold")
-	if activated.size() == 3:
-		_award_gold(100)
-		hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
+	match _interaction_kind:
+		"vendor":
+			world_ui.open_vendor(_interaction_vendor)
+		"stash":
+			world_ui.open_stash()
+		"portal":
+			_enter_arena()
+		"camp":
+			health = 100.0
+			stamina = 100.0
+			hud.show_feedback("Rested. The town is waiting.")
+		"waystone":
+			activated[_interaction_id] = true
+			world.activate_interactable(_interaction_id)
+			_award_gold(25)
+			audio.play_sound("bullseye")
+			hud.show_feedback("Waystone restored  /  +25 gold")
+			if activated.size() == 3:
+				_award_gold(100)
+				hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
 
-func _enter_delve() -> void:
-	cancel_input()
-	if _player_state != null:
-		_player_state.save_state()
-	var player_name := _delve_name
-	if player_name.is_empty():
-		player_name = "Ranger"
+func _preferred_name() -> String:
+	var value := _delve_name.strip_edges()
+	if value.is_empty():
 		var cache := get_node_or_null("/root/NetCache")
 		if cache != null:
-			var cached := str(cache.player_name).strip_edges()
-			if not cached.is_empty():
-				player_name = cached
+			value = str(cache.player_name).strip_edges()
+	return "Ranger" if value.is_empty() else value.left(16)
+
+func _enter_arena() -> void:
+	if _entering_scene:
+		return
+	_entering_scene = true
+	cancel_input()
+	if _ui_open():
+		world_ui.close()
+	if _player_state != null:
+		_player_state.save_state()
+	var player_name := _preferred_name()
+	var session := get_node_or_null("/root/Session")
+	if session != null:
+		session.arm_arena("skirmish","127.0.0.1",7777,player_name)
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		cache.remember(player_name,"",7777,"arena")
+	get_tree().change_scene_to_file("res://arena.tscn")
+
+func _enter_delve() -> void:
+	if _entering_scene:
+		return
+	_entering_scene = true
+	cancel_input()
+	if _ui_open():
+		world_ui.close()
+	if _player_state != null:
+		_player_state.save_state()
+	var player_name := _preferred_name()
 	var session := get_node_or_null("/root/Session")
 	if session != null:
 		# Host Tailscale.cmd launches the frontier with --delve-host, so the
-		# hatch descent is what actually opens the hosted party on that port.
+		# hatch fall is what actually opens the hosted party on that port.
 		session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
 	get_tree().change_scene_to_file("res://delve.tscn")
 
@@ -909,7 +989,7 @@ func return_to_camp() -> void:
 	camera_pitch = 0.08
 	camera_distance = 4.5
 	_camera_ready = false
-	hud.show_feedback("Ironwood village  /  Safe haven")
+	hud.show_feedback("Hearthstead gate  /  Safe haven")
 	_set_cursor_free(false)
 
 func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
@@ -990,7 +1070,7 @@ func _loot_display_name(item_id: String) -> String:
 	return item_id.capitalize()
 
 func _backpack_capacity() -> int:
-	return int(_player_state.INVENTORY_CAPACITY) if _player_state != null else 10
+	return int(_player_state.INVENTORY_CAPACITY) if _player_state != null else 15
 
 func _refresh_backpack() -> void:
 	if hud == null:
@@ -1028,15 +1108,9 @@ func _collect_loot(delta: float) -> void:
 			hud.show_feedback("Picked up %s  /  backpack %d/%d" % [picked, _player_state.inventory.size(), capacity], 2.5)
 		elif _full_message_cooldown <= 0.0:
 			_full_message_cooldown = FULL_MESSAGE_INTERVAL
-			hud.show_feedback("Backpack full  /  backpack %d/%d  /  make room in the Hollow" % [_player_state.inventory.size(), _backpack_capacity()], 2.5)
+			hud.show_feedback("Backpack full  /  backpack %d/%d  /  sell or stash a piece in town" % [_player_state.inventory.size(), _backpack_capacity()], 2.5)
 
 func _award_gold(amount: int) -> void:
 	gold += amount
 	if _player_state != null:
 		_player_state.add_credits(amount)
-
-func _return_to_hub() -> void:
-	cancel_input()
-	if _player_state != null:
-		_player_state.save_state()
-	get_tree().change_scene_to_file("res://menu.tscn")

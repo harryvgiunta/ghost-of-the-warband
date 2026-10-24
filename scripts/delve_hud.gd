@@ -92,10 +92,10 @@ func _build_run_panels() -> void:
 	var caption := _label(run, "THE SUNKEN DELVE", Vector2.ZERO, 10, GOLD)
 	caption.size = Vector2(400, 16)
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	wave_label = _label(run, "WAVE 1 / 3", Vector2(0, 17), 24, CREAM)
+	wave_label = _label(run, "DEPTH 1", Vector2(0, 17), 24, CREAM)
 	wave_label.size = Vector2(400, 32)
 	wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	phase_label = _label(run, "SURFACE LANDING — DROP WHEN READY", Vector2(0, 54), 13, TEAL)
+	phase_label = _label(run, "TOUCH THE ALTAR", Vector2(0, 54), 13, TEAL)
 	phase_label.size = Vector2(400, 26)
 	phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	phase_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -203,10 +203,10 @@ func _build_game_over() -> void:
 	_game_over_reason.size = Vector2(432, 98)
 	_game_over_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_game_over_reason.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	surface_button = _button(box, "RETURN TO THE FRONTIER", Vector2(24, 196), Vector2(208, 42))
+	surface_button = _button(box, "RETURN TO TOWN", Vector2(24, 196), Vector2(208, 42))
 	surface_button.add_theme_font_size_override("font_size", 12)
 	surface_button.pressed.connect(func(): surface_requested.emit())
-	hub_button = _button(box, "RETURN TO THE HOLLOW", Vector2(248, 196), Vector2(208, 42))
+	hub_button = _button(box, "ABANDON DELVE", Vector2(248, 196), Vector2(208, 42))
 	hub_button.add_theme_font_size_override("font_size", 12)
 	hub_button.pressed.connect(func(): hub_requested.emit())
 
@@ -234,23 +234,22 @@ func update_run(state: Dictionary) -> void:
 	# endpoint is the host address, so endpoint presence cannot decide the role.
 	_role = "HOST" if int(state.get("local_slot", -1)) == 0 else "CLIENT"
 	_refresh_endpoint()
-	var wave := int(state.get("wave", 1))
-	var waves := maxi(1, int(state.get("waves", 3)))
-	var phase := str(state.get("phase", "ASSEMBLY"))
-	wave_label.text = "WAVE %d / %d" % [wave, waves]
+	var depth := maxi(1, int(state.get("depth", 1)))
+	var phase := str(state.get("phase", "ALTAR"))
+	wave_label.text = "DEPTH %d" % depth
 	phase_label.text = _phase_line(state, phase)
 	var phase_color := CREAM
 	if phase == "GAME_OVER":
 		phase_color = GOLD
-	elif phase == "CLEARED" or phase == "COMPLETE":
+	elif phase == "CLEARED":
 		phase_color = TEAL
 	phase_label.add_theme_color_override("font_color", phase_color)
 	_update_party(state)
 
 func _phase_line(state: Dictionary, phase: String) -> String:
 	match phase:
-		"ASSEMBLY":
-			return "SURFACE LANDING — DROP WHEN READY"
+		"ALTAR":
+			return "TOUCH THE ALTAR"
 		"WAVE":
 			var remaining := int(state.get("remaining", 0))
 			var sealed := bool(state.get("sealed", true))
@@ -258,16 +257,14 @@ func _phase_line(state: Dictionary, phase: String) -> String:
 		"CLEARED":
 			var timer := float(state.get("timer", -1.0))
 			if bool(state.get("chest_open", false)):
-				return "CACHE CLAIMED"
+				return "CACHE CLAIMED — ROPE OR HOLE"
 			if timer > 0.0:
-				return "WAVE CLEARED — CACHE SEALING %.1f" % timer
+				return "DEPTH CLEARED — CACHE SEALING %.1f" % timer
 			if bool(state.get("chest_ready", false)):
-				return "CACHE READY"
-			return "WAVE CLEARED"
+				return "CACHE READY — ROPE OR HOLE"
+			return "DEPTH CLEARED"
 		"GAME_OVER":
 			return "THE DELVE CLAIMS YOU"
-		"COMPLETE":
-			return "THE DELVE IS CLEARED"
 	return phase
 
 func _update_party(state: Dictionary) -> void:
@@ -331,6 +328,11 @@ func update_local(state: Dictionary) -> void:
 	var right := float(state.get("right", 1.0))
 	if left < 0.999999 or right < 0.999999:
 		readiness += "   L %s / R %s" % [_percent(left), _percent(right)]
+	if phase == "READY" and progress >= 0.999999:
+		if weapon == "DUAL":
+			readiness += "  /  LMB LEFT CUT / RMB RIGHT CUT"
+		elif weapon in ["SWORD", "DAGGER"]:
+			readiness += "  /  LMB DIAGONAL / WHEEL STAB, OVERHEAD"
 	_readiness_label.text = readiness
 
 func _readiness_line(phase: String, draw: float, progress: float, interval: float, blocking: bool, parry: bool) -> String:
@@ -339,8 +341,12 @@ func _readiness_line(phase: String, draw: float, progress: float, interval: floa
 		return "DRAW %d%%  /  RELEASE TO STRIKE" % int(round(draw * 100.0))
 	if phase == "T_DRAW" or phase == "T_HOLD":
 		return "THROW %d%%  /  RELEASE" % int(round(draw * 100.0))
+	if phase in ["MELEE_DL", "MELEE_DR", "MELEE_L"]:
+		return "DIAGONAL CUT  /  %.2f s" % interval
+	if phase == "MELEE_ST":
+		return "FORWARD STAB  /  %.2f s" % interval
 	if phase.begins_with("MELEE"):
-		return "SWING  /  %.2f s" % interval
+		return "OVERHEAD  /  %.2f s" % interval
 	if blocking:
 		return "PARRY WINDOW  /  COUNTER NOW" if parry else "GUARDING  /  HOLD RMB"
 	if phase == "RELEASE" or phase == "RECOVER" or phase == "T_RELEASE" or phase == "T_RECOVER":
@@ -362,7 +368,7 @@ func set_prompt(text: String) -> void:
 	prompt_label.visible = not text.is_empty()
 	_prompt_panel.visible = not text.is_empty()
 
-func show_wave_banner(text: String, seconds: float = 2.0) -> void:
+func show_banner(text: String, seconds: float = 2.0) -> void:
 	_ensure_ui()
 	if _banner_label == null:
 		return

@@ -468,15 +468,15 @@ func host_run() -> void:
 	check(absf(arena.actors[0].health-(100.0-38.0*released_charge))<0.01,"Only actual projectile impact applies linear charge-scaled damage")
 	await pause(2.1)
 	arena.actors[0].position = Vector3(0,0.05,0)
-	# Enough health for a head-zone chop without dying; require exactly one
-	# authoritative hit (50 base, 100 on the head, never two).
+	# A standard greatsword cleave applies base damage once, not an incidental
+	# headshot or one copy per sampled contact.
 	arena.actors[0].health = 200.0
 	arena.actors[1].position = Vector3(0,0.05,1.4)
 	await pause(0.3)
 	report.command.rpc(3)
 	await wait_message("chopped")
 	var chop_damage: float = 200.0 - float(arena.actors[0].health)
-	check(chop_damage >= 50.0 and chop_damage <= 100.0,"Remote greatsword animation still deals one authoritative hit")
+	check(is_equal_approx(chop_damage,50.0),"Remote greatsword cleave deals one authoritative 50-damage hit (got %.2f; source %s; target %s; aim %s)" % [chop_damage,arena.actors[1].position,arena.actors[0].position,arena.actors[1].combat.aim_point])
 	report.command.rpc(4)
 	await wait_message("double_space")
 	check(not saw_roll,"Remote repeated Space and malformed jump modifiers never roll")
@@ -602,15 +602,17 @@ func client_run(port: int) -> void:
 				match completed:
 					1:
 						await key(KEY_ESCAPE)
-						await click(arena.hud.bow_buttons[2])
-						await click(arena.hud.sword_buttons[0])
+						arena.send_action("bow",2)
+						arena.send_action("sword",0)
+						await pause(0.15)
 						await key(KEY_2)
 						check(rig.weapon=="sword" and rig.bow_index==2 and rig.sword_index==0,"Remote key 2 equips sword without resizing either weapon")
 						await key(KEY_3)
 						check(rig.weapon=="dagger" and rig.bow_index==2 and rig.sword_index==0,"Remote key 3 equips the dagger without resizing either weapon")
 						await key(KEY_1)
 						check(rig.weapon=="bow","Remote key 1 equips bow")
-						await click(arena.hud.bow_buttons[1])
+						arena.send_action("bow",1)
+						await pause(0.15)
 						await key(KEY_ESCAPE)
 						await aim(Vector3(-3,1.2,-4))
 						await mouse(root.get_visible_rect().size*0.5,true)
@@ -622,7 +624,8 @@ func client_run(port: int) -> void:
 						report.result.rpc_id(1,"released",{})
 					3:
 						await key(KEY_ESCAPE)
-						await click(arena.hud.sword_buttons[2])
+						arena.send_action("sword",2)
+						await pause(0.15)
 						await key(KEY_2)
 						await key(KEY_ESCAPE)
 						await aim(Vector3(0,1.2,0))
