@@ -30,6 +30,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
+	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
 		var seconds: float = combat.stagger_from_damage(applied)
 		rig.set_hit_react(seconds)

@@ -318,6 +318,14 @@ Fighters no longer hard-collide with each other. Their capsules have a **soft se
 
 The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
 
+## Blood and wounds
+
+This is an 18+ game: unmitigated damage now leaves persistent gore. Every real contact sprays gravity-driven droplets from the wound, coats the victim in wet blotches, marks the attacker's drawn blade with blood, and drops spatter on the floor beneath the hit. Lethal blows add an arterial burst and a growing pool under the corpse. Blocked, parried and weak-blocked hits draw no impact spray; only weak blocks still leave the half damage's wound.
+
+Stains last **60 seconds**, then fade over the final three and are released. Surface spatter follows slopes and steps because each patch is conformed to the real collision surface; body blood is attached to the nearest skeleton bone so it travels with the limb, and weapon blood is parented to the drawn weapon so it moves through every swing. A scene owns at most **160 surface stains** and **10 wounds per fighter** (8 per weapon); the oldest stain is recycled first when a large fight exceeds that budget. Blood is presentation only — it never changes damage, hit detection or network authority, and a hit that applies no damage spawns none.
+
+The project renders with the **GL Compatibility** backend, which has no decal support, so blood does not use `Decal` nodes: `scripts/blood_fx.gd` owns procedural splat/pool textures and materials, and the per-scene `scripts/blood_field.gd` builds surface meshes, body/weapon blotches, and capped particle bursts. The host spawns blood where it applies damage; arena and delve clients derive wounds and the weapon-blood tally from the snapshot health delta and `weapon_blood` field, so all peers see the same result without a dedicated network message.
+
 ## Game modes
 
 **Hearthstead / Open PvE:** the main world. New games start at the south gate; walk north into the square. The town has enterable houses, three keeper counters, the market stash chest, the arena portal, the campfire and the delve hatch. Beyond the safe ring lie forest, a ruined fortress, an upland shrine, trails and the bridge. Defeat wolves, sentinels and cinder devil packs, clear defenders and restore three waystones. Gold from foes and waystones enters the same purse immediately, and defeated enemies drop physical gear that is picked up into the backpack. Death returns you to the town gate with restored health; restored waystones stay restored for the session.
@@ -423,6 +431,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/delve_entry_regression.gd
 & $Godot --headless --path . --script res://tests/delve_network_regression.gd
 & $Godot --headless --path . --script res://tests/consumable_regression.gd
+& $Godot --headless --path . --script res://tests/blood_regression.gd
 ```
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.

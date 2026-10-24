@@ -7,6 +7,7 @@ signal impacted(enemy_hit: bool, impact_position: Vector3)
 
 const Sword = preload("res://scripts/sword.gd")
 const Dagger = preload("res://scripts/dagger.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const SPIN_SPEED := 11.0
@@ -64,7 +65,9 @@ func _physics_process(delta: float) -> void:
 		var hit_enemy := collider.has_method("take_damage")
 		if hit_enemy:
 			if authoritative_damage:
-				collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
+				var headshot := Hitbox.is_headshot(collider as Node, hit.position)
+				collider.take_damage(damage, source_id, headshot)
+				BloodFx.impact(self, hit.position, velocity, damage, headshot)
 			visible = false
 		impacted.emit(hit_enemy, global_position)
 		return

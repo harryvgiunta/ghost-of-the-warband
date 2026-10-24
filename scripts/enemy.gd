@@ -4,6 +4,7 @@ signal defeated(enemy: Node3D, reward: int)
 signal attacked(attacker: CharacterBody3D, amount: float)
 
 const Geo = preload("res://scripts/geo.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -184,6 +185,21 @@ func _build_guardian() -> void:
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0, 0.68 if kind == 0 else (0.55 if kind == 2 else 1.28), 0)
+
+func blood_rig() -> Node3D:
+	if kind == 2 and is_instance_valid(_devil):
+		var anchor := _devil.blood_anchor()
+		if is_instance_valid(anchor):
+			return anchor
+	return _body
+
+func blood_scale() -> float:
+	return 1.35 if kind == 0 else (0.75 if kind == 2 else 1.0)
+
+func blood_weapon_anchor(_hand: String = "") -> Node3D:
+	if kind == 2 and is_instance_valid(_devil):
+		return _devil.weapon_anchor()
+	return null
 
 func get_display_name() -> String:
 	return "Briar wolf" if kind == 0 else ("Cinder devil" if kind == 2 else "Ruin sentinel")
@@ -616,6 +632,10 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
+	if kind != 1:
+		# The Ruin sentinel is stone; only flesh-and-blood bodies bleed.
+		BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
+			health <= 0.0,blood_scale())
 	if health <= 0.0:
 		alive = false
 		state = "DEAD"

@@ -32,6 +32,7 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 | Cinder devil presentation and pack AI | `scripts/devil_visual.gd`: procedural half-size horned humanoid, run/leap/slide/step/claw/death poses; `enemy.gd` kind 2 `_step_devil`: orbit slots, shared `DodgeStep`, slides, leaps, dives, pack separation and a three-attacker cap |
 | Authored assets | `assets/characters/ironwood_ranger.glb` and `assets/characters/ironwood_wolf.glb` with adjacent JSON/provenance/import settings; `tools/prepare_character.py` / `tools/character_clearance.py` for Ranger retargeting, `tools/character_armor.py` for the five-slot armor pieces and textures, `tools/prepare_wolf.py` for the wolf |
 | Shared combat | `scripts/combat.gd`: attack eligibility, independent hand recovery, diagonal swept-sector cleaves, precision blade contacts, linear bow damage, guards and clashes; `scripts/hitbox.gd`: precision/projectile head zones and the 2x multiplier |
+| Blood | `scripts/blood_fx.gd`: procedural splat/pool textures and shared wet materials, the static impact/wound/weapon-stain API and scene-field lookup; `scripts/blood_field.gd`: per-scene 60 s stains, conformed floor patches, bone- and weapon-parented coatings, spray bursts, fade and render budgets. Damage hooks live in `combat.gd`, `arrow.gd`, `thrown_weapon.gd`, `main.gd`, `arena_actor.gd`, `delve_actor.gd`, `enemy.gd` and `delve_devil.gd` |
 | Roll | `scripts/dodge_roll.gd`: explicit modifier request, direction, takeoff, finite roll progress, and airborne reuse restriction |
 | Running slide | `scripts/running_slide.gd`: achieved-sprint eligibility, finite deceleration, limited steering and collision/ground-loss termination |
 | Cover and shoulder camera | `scripts/cover_movement.gd`: shared physics/crouch/peek state; `scripts/shoulder_camera.gd`: smooth shoulder swap and swept camera collision |
@@ -150,6 +151,16 @@ Work from the repository root containing `project.godot`. Paths below are reposi
 - Diagonal cleaves always use base body damage, never incidental headshots. Arrows classify their actual ray point with `Hitbox.is_headshot`; precision stabs/overheads use `Hitbox.blade_headshot` with swept blade segments and radius, never a shape query's arbitrary rest point. Thrown weapons retain their projectile head-zone path. Apply the 2x multiplier before armor only for these precision/projectile contacts.
 - Receivers take a `headshot` boolean: `ArenaActor.take_damage` / `receive_melee` and `enemy.gd.take_damage`. Apply the multiplier before armor and before the frontier damage label. Arena damage stays host-authoritative; do not add a headshot field to snapshots or trust client classification.
 - `melee_roll_regression` intentionally expects the greatsword's vertical cut to deal 2x and the one-handed cuts to deal base damage. Do not flatten those expectations to a single value.
+
+### Blood and wounds
+
+- Blood is **presentation only** and must never gate damage, hits, blocks, stamina or network authority. Spawn it only where damage was actually applied: unmitigated melee contact, a projectile that damaged a body, a real `take_damage`, and a replicated health/weapon-blood delta. Parry, standard block and shield block spawn no spray; a weak dagger block keeps only the half-damage wound.
+- `BloodFx` is the static entry point (`impact`, `wound`, `stain_weapon`, `stain_weapon_node`, `stain_projectile`). `field_for` lazily creates one `BloodField` under `get_tree().current_scene` (tree root in script-mode tests). Do not add a global autoload or persist the field across scenes.
+- **60 seconds** is the contract: `BloodFx.LIFETIME = 60.0`, fading over the final `FADE_SECONDS = 3.0` and then freeing. Surface patches fade through `GeometryInstance3D.transparency`; rig/weapon coatings shrink. Budgets are `BloodField.max_surface_stains = 160` world patches, 10 wounds per rig and 8 coatings per weapon; recycle oldest-first. Do not remove the budgets without measuring a crowd fight.
+- The renderer is **GL Compatibility**, which has no `Decal` support. Keep ground blood as physics-conformed `ArrayMesh` patches and body/weapon blood as bone- or weapon-parented meshes. Never replace this with `Decal` or a `next_pass` stain shader.
+- Body blood attaches to the nearest `Skeleton3D` bone through `BoneAttachment3D`; weapon blood attaches to the drawn weapon node so it follows swings, sockets and equipment swaps. Player weapon anchors come from `Archer.blood_weapon_anchor(hand)`; enemies expose `blood_rig()`, `blood_scale()` and `blood_weapon_anchor(hand)`, and `devil_visual.gd` provides `blood_anchor()`/`weapon_anchor()`.
+- Each wound and each weapon coating is merged through `SurfaceTool` into **one** `MeshInstance3D`; do not add a separate node per droplet. Ground splats stay one mesh per stain. This keeps a bloody crowd inside the draw budget.
+- Networked clients derive wounds from snapshot health deltas and weapon coatings from the snapshot `weapon_blood` tally (`ArenaActor.note_weapon_blood`, inherited by `DelveActor`). Do not add a dedicated blood RPC or trust client damage claims for blood.
 
 ### Thrown weapons
 
@@ -296,7 +307,8 @@ $Checks = @(
     'delve_regression',
     'delve_entry_regression',
     'delve_network_regression',
-    'consumable_regression'
+    'consumable_regression',
+    'blood_regression'
 )
 foreach ($Check in $Checks) {
     & $Godot --headless --path . --script "res://tests/$Check.gd"
@@ -330,6 +342,7 @@ Use the selected engine path instead if `GODOT_PATH` is configured. Check exit c
 - `world_ui_regression` drives the in-world I/P kit in real delve and arena scenes: `I` opens the backpack and frees the cursor, `P` opens the paperdoll, an equip updates `PlayerState` and the live rig, `Escape` closes the kit, and arena drops fall back to `floor_items`. `town_services_regression` walks the PvE town: three keeper counters, stash chest, arena portal, open hatch cell, gate spawn, I/P switching, buying, stash transfers and unarmed world drops. `title_menu_regression` covers Start New Game, Load Saved Game, the disabled-load state and the cached Join form.
 - `delve_regression` checks the endless loop: fall-in start, altar phase, scaled sealed wave, a dagger devil's ground drop, clear delay, cache/rope/hole, chest rewards, depth-two recycling with three devils, and the rope return to town. `delve_entry_regression` checks the town gate, the physical inn hatch fall, the arena portal host and the rope return to `main.tscn`; `delve_network_regression` uses two real ENet processes to check altar join, replicated depth/phase/devils, cache open and descent into depth two.
 - `combat_expansion_regression` checks the aim-directed sword stab, damage-scaled hit stagger and its replicated flinch, soft fighter separation, snapshot interpolation/extrapolation, network cache, quick steps, frontier sword/dagger shoulder alternation and X reset, rejected-click alternation, wheel inputs and Q/E binds. Arena and delve cover validated diagonal/stab actions, bow-only draw, rejected variants, host alternation, dual left/right input and step authority. Blade paths belong to `action_pose_regression`.
+- `blood_regression` checks the sixty-second stain lifetime and its final-three-second fade, surface/body/weapon coverage, headshot severity, projectile and melee hooks, lethal pools, per-rig and per-weapon budgets, the world render budget, player and enemy damage integration, and the replicated `weapon_blood` snapshot tally. Blood is presentation; it must not change damage or authority.
 - `dual_wield_regression` covers per-hand weapon profiles, sockets/visibility and anatomical arms, independent clocks and overlap, same-hand rejection, per-hand block abort, attack-parry facing/window, compact left/right variant replication, T throwing, frontier LMB/RMB and validated arena melee actions. Normal dual cuts are diagonals; explicit precision stabs keep their separate blade/headshot coverage. `arm_clearance_regression` retains skinned-torso checks for dual guard and explicit precision poses.
 
 For shared combat, rig, or network changes, run the complete set after integration. Keep deterministic regression tests for meaningful behavior and boundaries, not HUD wording, copied fields, or source text.

@@ -6,6 +6,7 @@ signal killed(slot: int, source: int)
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -32,6 +33,7 @@ var peek_shoulder := 1
 var aim_snapshot_tick := -1
 var _exposure_tick := -1
 var health := 100.0
+var weapon_blood := 0.0
 var alive := true
 var kills := 0
 var deaths := 0
@@ -141,6 +143,7 @@ func revive() -> void:
 	input_age = 0.0
 	reset_stance()
 	health = 100.0
+	weapon_blood = 0.0
 	stamina = 100.0
 	_exhausted = false
 	consume_kind = ""
@@ -320,6 +323,11 @@ func head_hit_profile() -> Vector2:
 func get_display_name() -> String:
 	return display_name
 
+func note_weapon_blood(amount: float) -> void:
+	# Host-side tally replicated in snapshots so clients can coat the weapon
+	# they render for this fighter. Purely cosmetic.
+	weapon_blood += maxf(amount, 0.0)
+
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
@@ -327,6 +335,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
+	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
 		var seconds: float = combat.stagger_from_damage(applied)
 		rig.set_hit_react(seconds)
@@ -600,6 +609,7 @@ func gear_bits() -> int:
 func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
 		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
+		"weapon_blood":weapon_blood,
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
 		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
@@ -609,6 +619,7 @@ func apply_snapshot(state: Dictionary) -> void:
 	is_bot = bool(state.bot)
 	display_name = str(state.name)
 	var previous_health := health
+	var previous_weapon_blood := weapon_blood
 	var had_pose := _received_pose
 	var target: Vector3 = state.position
 	_target_position = target
@@ -624,8 +635,13 @@ func apply_snapshot(state: Dictionary) -> void:
 	_received_pose = true
 	velocity = state.velocity
 	health = state.health
+	weapon_blood = float(state.get("weapon_blood",weapon_blood))
+	var fresh_weapon_blood := 0.0
+	if not authoritative and had_pose and not replaced and weapon_blood-previous_weapon_blood > 0.01:
+		fresh_weapon_blood = weapon_blood-previous_weapon_blood
 	if not authoritative and had_pose and not replaced and previous_health-health > 0.01:
 		DamageNumbers.spawn(get_parent(),global_position,previous_health-health,"self" if is_local else "hit",false,health <= 0.0)
+		BloodFx.wound(self,rig,get_aim_position(),previous_health-health,false,health <= 0.0,1.0)
 	alive = state.alive
 	kills = state.kills
 	deaths = state.deaths
@@ -663,6 +679,8 @@ func apply_snapshot(state: Dictionary) -> void:
 		rig.set_shield(shield_state)
 	if gear_changed:
 		rig.set_staff(staff_slot,staff_on)
+	if fresh_weapon_blood > 0.0:
+		BloodFx.stain_weapon(rig,fresh_weapon_blood)
 	cover.apply_snapshot(state.cover)
 	if not alive:
 		reset_stance()
