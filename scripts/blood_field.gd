@@ -11,11 +11,12 @@ const BloodSurface = preload("res://scripts/blood_surface.gd")
 
 const PATCH_SEGMENTS := 12
 const PATCH_RINGS := 2
-## Body stains are a coarse grid bent onto the measured cloth surface: enough
-## segments to follow a shoulder or a thigh, cheap enough to merge several
-## splashes into the single mesh each wound owns.
-const BODY_RINGS := 5
-const BODY_SEGMENTS := 5
+## Body stains are a small conforming grid: every vertex projects onto the
+## measured garment, so the sheet hugs a curved breastplate instead of floating
+## in the tangent plane. 3x3 is dense enough to follow the curve yet small
+## enough to read as a flat colour stain, not a 3D card.
+const BODY_RINGS := 3
+const BODY_SEGMENTS := 3
 const MAX_BURSTS := 14
 const MAX_BODY_STAINS := 10
 const MAX_WEAPON_STAINS := 8
@@ -45,6 +46,9 @@ var _query := PhysicsRayQueryParameters3D.new()
 ## Distinct owner key for pools so `_enforce_cap` counts them separately from
 ## the surface spatter. Never a tree node.
 var _pool_owner := RefCounted.new()
+## Live death pools: world position and radius, so a body can check whether a
+## foot is standing in blood. Updated as pools spawn and expire.
+var _pools: Array[Dictionary] = []
 
 func _ready() -> void:
 	_rng.seed = 0xB100D
@@ -164,16 +168,12 @@ func stain_weapon(anchor: Node3D, amount: float, scale: float) -> void:
 	var blade_value = anchor.get("blade_length") if "blade_length" in anchor else null
 	if blade_value != null:
 		blade_length = maxf(float(blade_value), 0.05)
-	# Blade-sized droplets rather than whole-hilt AABB fractions.
-	var droplet := clampf(blade_length * 0.026, 0.009, 0.024) * scale
-	var lateral := clampf(blade_length * 0.045, 0.012, 0.055)
-	# Half-thickness of the blade plus the flattened blob's own half-thickness:
-	# the coating must sit proud of the steel, not inside it.
-	var surface := clampf(blade_length * 0.030, 0.012, 0.026)
-	var droplet_count := 3
-	if amount >= 22.0:
-		droplet_count += 1
-	if amount >= 42.0:
+	# Thin, sparse coating: a few small specks and a narrow smear.
+	var droplet := clampf(blade_length * 0.012, 0.004, 0.010) * scale
+	var lateral := clampf(blade_length * 0.020, 0.006, 0.022)
+	var surface := clampf(blade_length * 0.012, 0.005, 0.010)
+	var droplet_count := 2
+	if amount >= 30.0:
 		droplet_count += 1
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -189,9 +189,9 @@ func stain_weapon(anchor: Node3D, amount: float, scale: float) -> void:
 		var size := Vector3(radius, radius * 0.22, radius * _rng.randf_range(0.8, 1.5))
 		tool.append_from(BloodFx.blot_mesh(), 0,
 			Transform3D(_basis_from_y(normal) * Basis.from_scale(size), position))
-	# One elongated smear on the blade's flat reads as a dragged cut.
-	var smear_length := blade_length * _rng.randf_range(0.26, 0.46)
-	var smear_width := lateral * _rng.randf_range(1.4, 2.2)
+	# A narrow, short smear: a thin dragged cut, not a thick coating.
+	var smear_length := blade_length * _rng.randf_range(0.12, 0.22)
+	var smear_width := lateral * _rng.randf_range(0.6, 1.0)
 	var smear_side := 1.0 if _rng.randf() < 0.5 else -1.0
 	var smear_normal := thin_axis * smear_side
 	var smear := Transform3D(
@@ -263,6 +263,111 @@ func advance(delta: float) -> void:
 			if is_instance_valid(burst.node):
 				(burst.node as Node).queue_free()
 			_bursts.remove_at(index)
+	for index in range(_pools.size() - 1, -1, -1):
+		if not is_instance_valid(_pools[index].node):
+			_pools.remove_at(index)
+
+## True when a world point is inside a live death pool. Pools are flat on the
+## ground, so the check is a radius in the floor plane plus a height band: a
+## rooftop above a street pool is not standing in it.
+func is_in_blood(at: Vector3) -> bool:
+	for pool in _pools:
+		if not is_instance_valid(pool.node):
+			continue
+		var center: Vector3 = pool.position
+		if absf(at.y - center.y) > 0.8:
+			continue
+		var offset := at - center
+		offset.y = 0.0
+		if offset.length() <= float(pool.radius) * 1.1:
+			return true
+	return false
+
+## A bloody footprint: an elongated patch in the travel direction, like a
+## real foot print. `direction` is the horizontal travel vector. `strength`
+## is 0..1 — the first steps in a pool are dense, later ones fade.
+func footprint(at: Vector3, direction: Vector3, strength: float) -> void:
+	if strength <= 0.01:
+		return
+	var hit := _ray(at + Vector3(0.0, 0.3, 0.0), at + Vector3(0.0, -1.5, 0.0),
+		GROUND_MASK)
+	if hit.is_empty():
+		return
+	var normal: Vector3 = hit.normal
+	if normal.y < 0.35:
+		return
+	var dir := direction
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		dir = Vector3.FORWARD
+	dir = dir.normalized()
+	var side := Vector3.UP.cross(dir).normalized()
+	# Foot-sized: ~25 cm long, ~11 cm wide, scaled by how bloody the step is.
+	var length := 0.125 * (0.7 + strength * 0.3)
+	var width := 0.055 * (0.7 + strength * 0.3)
+	var center := (hit.position as Vector3) + normal * PATCH_LIFT
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	# Enough samples to resolve the print's silhouette and tread, small enough
+	# that two steps a second never costs anything.
+	var rows := 7
+	var cols := 7
+	for row in rows:
+		var t := float(row) / float(rows - 1)
+		var taper := 0.75 + 0.25 * t
+		var along := (t - 0.5) * length * 2.0
+		for col in cols:
+			var s := (float(col) / float(cols - 1) - 0.5) * 2.0
+			var offset := dir * along + side * (s * width * taper)
+			var target := center + offset
+			var ray_hit := _ray(target + normal * 0.5, target - normal * 0.5,
+				GROUND_MASK)
+			var point := target
+			if not ray_hit.is_empty():
+				point = (ray_hit.position as Vector3) + normal * PATCH_LIFT
+			vertices.append(point - center)
+			normals.append(normal)
+			uvs.append(Vector2(t, float(col) / float(cols - 1)))
+	for row in rows - 1:
+		for col in cols - 1:
+			var a := row * cols + col
+			var b := a + 1
+			var c := a + cols
+			var d := c + 1
+			indices.append(a)
+			indices.append(c)
+			indices.append(b)
+			indices.append(b)
+			indices.append(c)
+			indices.append(d)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var patch := MeshInstance3D.new()
+	patch.set_meta("blood_stain", "footprint")
+	patch.mesh = mesh
+	# Per-instance material so each step carries its own alpha: the first steps
+	# in a pool are dense, later ones wipe off as the blood runs out.
+	var mat := BloodFx.footprint_material().duplicate()
+	mat.albedo_color.a = clampf(0.35 + strength * 0.65, 0.15, 1.0)
+	patch.material_override = mat
+	patch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	patch.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	patch.position = center
+	add_child(patch)
+	# Named after parenting so every print gets a readable, unique name instead
+	# of the engine's @MeshInstance3D@N fallback.
+	patch.name = "BloodFootprint"
+	# Footprints fade with the floor spatter and share its render budget; they
+	# are not tied to the five-minute pool that made them.
+	_register_stain(patch, null, "patch", max_surface_stains, lifetime)
 
 func _apply_fade(stain: Dictionary, factor: float) -> void:
 	var node = stain.node
@@ -347,85 +452,43 @@ func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 	var anchor := BloodSurface.anchor_for(carrier)
 	if anchor == null:
 		return
-	BloodSurface.prepare_pose(carrier)
 	var center := BloodSurface.to_local(carrier, at)
 	var down := BloodSurface.down_local(carrier)
 	var lift := BloodSurface.LIFT * clampf(scale, 0.6, 2.2)
-	# Severity sets both the size of the soak and how many separate splashes
-	# land. Sizes stay small and varied: one huge splat reads as a red bib,
-	# while a scatter of specks and droplets reads as spatter.
-	var base := clampf(0.016 + amount * 0.0014, 0.020, 0.070) * scale
-	var splashes := 7
-	if amount >= 14.0:
-		splashes += 2
-	if amount >= 26.0:
-		splashes += 2
-	if headshot:
-		splashes += 3
-	if lethal:
-		splashes += 4
-	if localized:
-		# A douse is dense and local: all of it lands where the blood hit.
-		splashes += 6
-	# The splashes are laid out on the measured cloth itself, not around it:
-	# a hit has to be readable on the clothes from every side of the fight.
+	# Visible flat quads: the soak texture does the shape work.
+	var base := clampf(0.020 + amount * 0.0012, 0.025, 0.055) * scale
 	var limit := BloodSurface.patch_extent(carrier)
-	var points: Array[Vector3] = []
-	if localized:
-		var reach := maxf(base * 2.0, 0.02)
-		points.append(center)
-		for index in splashes - 1:
-			var direction := Vector3(_rng.randf_range(-1.0, 1.0),
-				_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0))
-			if direction.length_squared() < 0.0001:
-				direction = Vector3.UP
-			points.append(center + direction.normalized() * reach
-				* _rng.randf_range(0.12, 1.0))
-	else:
-		points = BloodSurface.cluster(carrier, splashes, _rng, center)
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var placed := 0
-	for index in points.size():
-		var spread := _rng.randf_range(0.22, 0.9)
-		if index == 0:
-			spread = 0.9
-		elif _rng.randf() < 0.35:
-			# A third of the droplets are tiny: the speckle is what sells it.
-			spread *= 0.45
-		var half_up := minf(base * spread * _rng.randf_range(0.85, 1.12),
-			limit.x * 0.6)
-		var half_wide := minf(base * spread * _rng.randf_range(0.70, 1.0),
-			limit.y * 0.55)
-		if BloodSurface.add_patch(tool, carrier, points[index], down, half_up,
-				half_wide, BODY_RINGS, BODY_SEGMENTS, _rng.randf() * TAU, lift):
-			placed += 1
-	# Fine spray where the blood actually hit, not only the strip-wide scatter:
-	# the eye reads a splash from small specks around one soak.
-	for index in 10:
+	# Main soak: the broad, flat patch that reads as a colour stain.
+	var half_up := minf(base * _rng.randf_range(0.90, 1.10), limit.x * 0.7)
+	var half_wide := minf(base * _rng.randf_range(0.75, 1.0), limit.y * 0.65)
+	if BloodSurface.add_patch(tool, carrier, center, down, half_up,
+			half_wide, BODY_RINGS, BODY_SEGMENTS, _rng.randf() * TAU, lift):
+		placed += 1
+	# Small extra soaks that overlap the main one, so the union reads as one
+	# irregular splash rather than a ring of separate discs.
+	var satellites := 1
+	if amount >= 20.0:
+		satellites = 2
+	if headshot or lethal:
+		satellites += 1
+	if localized:
+		satellites += 1
+	for index in satellites:
 		var direction := Vector3(_rng.randf_range(-1.0, 1.0),
 			_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0))
 		if direction.length_squared() < 0.0001:
-			continue
-		var fleck_at: Vector3 = center + direction.normalized() \
-			* base * _rng.randf_range(0.5, 2.4)
-		var fleck := base * _rng.randf_range(0.10, 0.24)
-		if BloodSurface.add_patch(tool, carrier, fleck_at, down, fleck,
-				fleck * _rng.randf_range(0.70, 1.0), BODY_RINGS, 3,
-				_rng.randf() * TAU, lift):
+			direction = Vector3.UP
+		var sat_at: Vector3 = center + direction.normalized() \
+			* base * _rng.randf_range(0.30, 0.65)
+		var sat := base * _rng.randf_range(0.30, 0.50)
+		if BloodSurface.add_patch(tool, carrier, sat_at, down,
+				sat * _rng.randf_range(0.85, 1.10),
+				sat * _rng.randf_range(0.70, 1.0),
+				BODY_RINGS, BODY_SEGMENTS, _rng.randf() * TAU, lift):
 			placed += 1
-	# Gravity runs: narrow streaks under the first splash, the way blood wicks
-	# down a belt or a sleeve. They overlap that splash and stop at the cloth's
-	# last measured band instead of running off the limb.
-	if not points.is_empty():
-		var runs := 1 if amount < 26.0 else 2
-		for index in runs:
-			var half_run := minf(base * _rng.randf_range(0.8, 1.5), limit.x * 0.55)
-			var start: Vector3 = points[0] + down * (half_run * 0.45)
-			if BloodSurface.add_patch(tool, carrier, start, down, half_run,
-					minf(base * _rng.randf_range(0.10, 0.16), limit.y * 0.22),
-					BODY_RINGS, 2, _rng.randf_range(-0.25, 0.25), lift):
-				placed += 1
 	if placed == 0:
 		tool.clear()
 		return
@@ -632,6 +695,7 @@ func _grow_pool(center: Vector3, normal: Vector3, radius: float,
 	if creep:
 		tween.tween_property(pool, "scale", Vector3.ONE * 1.18, 12.0) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_pools.append({"node": pool, "position": center, "radius": radius})
 	return pool
 
 func _spawn_patch(center: Vector3, normal: Vector3, radius: float,

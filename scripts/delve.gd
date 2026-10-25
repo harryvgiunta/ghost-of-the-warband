@@ -24,12 +24,18 @@ const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
+const SpellProjectile = preload("res://scripts/spell_projectile.gd")
+const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
+## Delve devils answer the backstab preflight; the players' layer is 4.
+const BACKSTAB_MASK := 2
+const BACKSTAB_RANGE := 8.0
 
 const INTERACT_RANGE := 4.0
 const PICKUP_RADIUS := 1.6
@@ -159,6 +165,7 @@ func _ready() -> void:
 		actor.fired.connect(_on_fired)
 		actor.thrown_weapon.connect(_on_thrown_weapon)
 		actor.fell.connect(_on_actor_fell)
+		actor.ability.cue.connect(_on_ability_cue.bind(actor))
 		actors.append(actor)
 	camera = Camera3D.new()
 	camera.current = true
@@ -778,7 +785,7 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 	actors[slot].apply_snapshot(state)
 	var current_ability := str(actors[slot].ability.active_id)
 	if actors[slot].ability.active and current_ability != previous_ability:
-		var definition := AbilityRules.by_slot(int(actors[slot].ability.active_slot))
+		var definition := AbilityRules.by_id(current_ability)
 		var sound := str(definition.get("sound",""))
 		if not sound.is_empty():
 			audio.play_sound(sound)
@@ -938,6 +945,15 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"ability":
 			if typeof(value) != TYPE_INT or int(value) < 0 or int(value) >= AbilityRules.SLOT_COUNT:
 				return
+			var seat_definition: Dictionary = actor.ability.definition(int(value))
+			if not actor.ability.active and actor.alive and not seat_definition.is_empty():
+				# A backstab needs a body under the fighter's aim: refuse before
+				# the runner spends stamina or starts its clock.
+				var refusal: String = _prepare_backstab(actor, seat_definition)
+				if not refusal.is_empty():
+					if int(slot) == local_slot:
+						hud.set_status(refusal,1.6)
+					return
 			var outcome: Dictionary = actor.try_ability(int(value))
 			if bool(outcome.get("ok",false)):
 				var definition: Dictionary = outcome.get("definition",{})
@@ -965,18 +981,20 @@ func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, cha
 	_arrow_event.rpc(slot,origin,direction,speed,visual_origin)
 	shots_fired += 1
 
-func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, damage: float, authoritative: bool, visual_origin: Vector3 = Vector3.INF) -> void:
+func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, damage: float, authoritative: bool, visual_origin: Vector3 = Vector3.INF, pierce_count: int = 0) -> void:
 	if slot < 0 or slot >= actors.size():
 		return
 	var arrow := Arrow.new()
 	arrow.source_id = slot
-	arrow.hit_mask = 1 | 2
+	# Layer 8 is the shield: an enemy clone or a party member's raised shield
+	# takes the shaft before the body behind it.
+	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
 	var excluded: Array[RID] = [actors[slot].get_rid()]
 	if is_instance_valid(actors[slot].rig.active_shield):
 		excluded.append(actors[slot].rig.active_shield.get_rid())
-	arrow.launch(origin,direction,speed,damage,excluded,visual_origin)
+	arrow.launch(origin,direction,speed,damage,excluded,visual_origin,pierce_count)
 	for index in range(projectiles.size()-1,-1,-1):
 		if not is_instance_valid(projectiles[index]):
 			projectiles.remove_at(index)
@@ -987,6 +1005,207 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 			oldest.queue_free()
 	if slot == local_slot:
 		audio.play_sound("release")
+
+func _ability_authority(actor) -> bool:
+	return network_role != "client" and actor != null and is_instance_valid(actor) \
+		and bool(actor.authoritative)
+
+
+func _on_ability_cue(id: String, cue: String, index: int, actor) -> void:
+	if not is_instance_valid(actor):
+		return
+	var runner = actor.ability
+	if not runner.active or str(runner.active_id) != id:
+		return
+	var definition: Dictionary = runner.active_definition
+	if definition.is_empty():
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var authoritative := _ability_authority(actor)
+	var damage: float = AbilityRules.damage_for(definition, actor.rig)
+	match str(effect.get("kind", "")):
+		"barrage", "volley", "piercing_shot":
+			_delve_ability_shots(actor, definition, index, damage, authoritative)
+		"projectile":
+			_delve_ability_spell(actor, definition, damage, authoritative)
+		"backstab":
+			_delve_ability_backstab(actor, cue, damage, authoritative)
+		"melee_arc", "melee_ring":
+			_delve_ability_melee(actor, definition, cue, index, damage, authoritative)
+
+
+func _delve_ability_shots(actor, definition: Dictionary, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var kind := str(effect.get("kind", ""))
+	var rig = actor.rig
+	var aim: Vector3 = actor.combat.aim_point
+	# The cue lands before the rig's own pose step, so aim and resample the bow
+	# before reading the hand: the arrow leaves on the live crosshair line.
+	rig.aim_at(aim)
+	rig.refresh_bow_pose()
+	var origin: Vector3 = rig.get_arrow_origin()
+	var base := aim - origin
+	if base.length_squared() < 0.0001:
+		base = -rig.global_basis.z
+	var shots := int(effect.get("shots", 1)) if kind == "volley" else 1
+	var speed := float(Archer.BOW_DATA[clampi(int(rig.bow_index), 0, 2)].speed) \
+		* float(effect.get("arrow_speed_scale", 1.0))
+	var pierce := int(effect.get("pierce", 0))
+	for shot in shots:
+		var pattern_index := index if kind == "barrage" else shot
+		var offsets := AbilityFx.shot_offsets(definition, pattern_index)
+		var direction := AbilityFx.rotate_direction(base, offsets.x, offsets.y)
+		_spawn_arrow(int(actor.slot), origin, direction, speed, damage, authoritative, origin, pierce)
+
+
+func _delve_ability_spell(actor, definition: Dictionary, damage: float,
+		authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = actor.rig
+	var origin: Vector3 = rig.cast_origin()
+	var aim: Vector3 = actor.combat.aim_point
+	var direction := aim - origin
+	if direction.length_squared() < 0.0001:
+		direction = -rig.global_basis.z
+	var spell := SpellProjectile.new()
+	spell.kind = str(effect.get("projectile", "fireball"))
+	spell.hit_mask = 1 | 2 | 8
+	add_child(spell)
+	var excluded: Array[RID] = [actor.get_rid()]
+	if is_instance_valid(rig.active_shield):
+		excluded.append(rig.active_shield.get_rid())
+	spell.launch(origin, direction, float(effect.get("speed", 22.0)), damage,
+		excluded, spell.hit_mask, authoritative, rig.global_position,
+		float(effect.get("radius", 0.0)), int(effect.get("pierce", 0)))
+	spell.source_rig = rig
+	spell.set_meta("stagger", float(effect.get("stagger", 0.0)))
+	if authoritative:
+		spell.detonated.connect(_on_ability_spell_detonated.bind(spell, actor.combat))
+
+
+func _on_ability_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref) -> void:
+	if not is_instance_valid(spell) or not is_instance_valid(combat_ref):
+		return
+	if spell.blast_radius <= 0.0:
+		return
+	combat_ref.ability_blast(centre, spell.blast_radius, spell.damage,
+		float(spell.get_meta("stagger", 0.0)))
+
+
+func _delve_ability_melee(actor, definition: Dictionary, cue: String, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = actor.rig
+	var id := str(definition.get("id", ""))
+	var radius := float(effect.get("radius", 1.7))
+	var arc := float(effect.get("arc_degrees", 360.0))
+	var ring := str(effect.get("kind", "")) == "melee_ring" or arc >= 359.0
+	var forward: Vector3 = actor.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	# The greatsword's wind-up is presentation only: the blade gathers speed
+	# before the ring cue spends the hit.
+	if cue == "wind":
+		AbilityFx.blade_trail(self, rig, 0.55)
+		return
+	# The lunge's dash beat marks the takeoff with its wake; the thrust cue,
+	# not the dash, spends the hit.
+	if cue == "dash":
+		AbilityFx.lunge_wake(self, rig, 0.40)
+		return
+	if authoritative:
+		# A travelling skill already swept its lane, so the closing beat shares
+		# that victim set and never hits a body the dash passed through twice.
+		var victims: Dictionary = {}
+		if bool(effect.get("path_damage", false)):
+			victims = actor.ability.active_victims
+		actor.combat.ability_strike(radius, arc, damage,
+			float(effect.get("stagger", 0.0)), ring, not ring, victims)
+	if id.begins_with("shield_"):
+		# The shield face is the weapon, so the impact sits on the boss instead
+		# of a crescent that never matched the hands.
+		AbilityFx.shield_impact(self, rig.global_position + forward * 0.95 + Vector3.UP * 1.05,
+			forward, radius, id == "shield_slam")
+		if ring:
+			AbilityFx.ground_shockwave(self, rig.global_position, radius)
+		return
+	if ring:
+		AbilityFx.spin_burst(self, rig.global_position, radius)
+		AbilityFx.blade_trail(self, rig, 0.30)
+	elif id == "double_slash":
+		AbilityFx.blade_trail(self, rig, 0.24)
+	elif id == "lunge_thrust":
+		AbilityFx.blade_trail(self, rig, 0.18)
+	else:
+		var cues: Array = definition.get("cues", [])
+		var alternate := 1.0 if index % 2 == 0 else -1.0
+		if cues.size() <= 1:
+			alternate = 0.0
+		AbilityFx.slash_arc(self, rig.global_position, forward.rotated(Vector3.UP, 0.32 * alternate),
+			radius, minf(arc, 200.0), AbilityFx.STEEL)
+
+
+## A backstab needs a live body under the fighter's aim. The resolved body
+## rides on the seat so the blink and stab cues agree with the preflight.
+func _prepare_backstab(actor, definition: Dictionary) -> String:
+	if str(definition.get("effect", {}).get("kind", "")) != "backstab":
+		return ""
+	var target: Node3D = _backstab_target(actor)
+	if target == null:
+		actor.remove_meta("backstab_target")
+		return "No backstab target."
+	actor.set_meta("backstab_target",target)
+	return ""
+
+
+func _backstab_target(actor) -> Node3D:
+	var exclude: Array[RID] = []
+	exclude.append(actor.get_rid())
+	return BackstabAbility.find_target(get_world_3d().direct_space_state,
+		actor.global_position,actor.combat.aim_point,BACKSTAB_MASK,BACKSTAB_RANGE,exclude)
+
+
+## The blink cue smokes the old spot and, on the authority only, teleports
+## behind the preflight target; the stab cue spends the dagger damage on the
+## body the caster is now behind.
+func _delve_ability_backstab(actor, cue: String, damage: float, authoritative: bool) -> void:
+	var rig = actor.rig
+	var target: Node3D = null
+	if actor.has_meta("backstab_target"):
+		var resolved = actor.get_meta("backstab_target")
+		if is_instance_valid(resolved) and resolved is Node3D:
+			target = resolved
+	var forward: Vector3 = actor.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	if cue == "blink":
+		AbilityFx.smoke_puff(self, rig.global_position, 1.0, true)
+		if not authoritative or target == null:
+			# Replicas never move themselves: the host's snapshot carries the
+			# new position and only the smoke reads on this peer.
+			return
+		var spot: Dictionary = BackstabAbility.behind_spot(get_world_3d().direct_space_state, target)
+		if not bool(spot.get("ok", false)):
+			return
+		BackstabAbility.blink(actor, spot.position, float(spot.yaw))
+		AbilityFx.smoke_puff(self, rig.global_position, 1.0, true)
+		return
+	if cue != "stab":
+		return
+	if target == null:
+		target = _backstab_target(actor)
+	if target != null and authoritative and target.get("alive") != false:
+		BackstabAbility.strike(actor, target, damage, int(actor.slot))
+	if target != null:
+		AbilityFx.backstab_flash(self, target.global_position - forward * 0.35 + Vector3.UP * 1.15, forward)
+
 
 @rpc("authority","call_remote","reliable")
 func _arrow_event(slot: int, origin: Vector3, direction: Vector3, speed: float, visual_origin: Variant = null) -> void:
@@ -1148,7 +1367,7 @@ func _local_state(actor) -> Dictionary:
 		"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
 		"left":actor.rig.melee_progress_for("left"), "right":actor.rig.melee_progress_for("right"),
 		"downed":not actor.alive, "sealed":bool(world.sealed), "run_phase":phase,
-		"ability":actor.ability.hud_state(0),
+		"ability":actor.ability.hud_state(0), "ability_off":actor.ability.hud_state(1),
 	}
 
 func _prompt_text() -> String:
@@ -1414,7 +1633,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					send_action("ability",0)
 				else:
 					send_action("weapon","bow")
-			KEY_2: send_action("weapon","sword")
+			KEY_2:
+				if event.shift_pressed:
+					send_action("ability",1)
+				else:
+					send_action("weapon","sword")
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
@@ -2001,7 +2224,7 @@ func _clone_arrow_event(origin: Vector3, direction: Vector3, speed: float) -> vo
 	if network_role != "client":
 		return
 	var arrow := Arrow.new()
-	arrow.hit_mask = 1 | 4
+	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = false
 	add_child(arrow)
 	arrow.launch(origin,direction,speed,0.0,[])

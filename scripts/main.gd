@@ -14,8 +14,12 @@ const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
+const SpellProjectile = preload("res://scripts/spell_projectile.gd")
+const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const BloodyFeet = preload("res://scripts/bloody_feet.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
@@ -29,6 +33,10 @@ const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
+## A backstab needs a live body under the crosshair: frontier enemies sit on
+## layer 2, so the preflight searches that layer only.
+const BACKSTAB_MASK := 2
+const BACKSTAB_RANGE := 8.0
 const PICKUP_RADIUS := 1.6
 const FULL_MESSAGE_INTERVAL := 2.5
 const MAX_HEALTH := 100.0
@@ -134,6 +142,7 @@ var _entering_scene := false
 var _aim_query := PhysicsRayQueryParameters3D.new()
 var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
+var _bloody_feet := BloodyFeet.new()
 
 func _ready() -> void:
 	_read_arguments()
@@ -182,6 +191,7 @@ func _ready() -> void:
 	ability = AbilityRunner.new()
 	add_child(ability)
 	ability.setup(self,archer,combat,WALK_SPEED)
+	_bind_ability_cues(ability)
 	_anchor_player = player
 	_anchor_rig = archer
 	_anchor_combat = combat
@@ -402,6 +412,10 @@ func _physics_process(delta: float) -> void:
 		return
 	roll.advance(delta,player.is_on_floor())
 	step.advance(delta,player.is_on_floor())
+	# A release cue has to leave on the frame's crosshair, and the runner emits
+	# its cues below, before the later draw-time refresh.
+	if archer.is_ability():
+		update_crosshair_aim()
 	ability.advance(delta)
 	var input_vector := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
@@ -418,7 +432,7 @@ func _physics_process(delta: float) -> void:
 	if combat.stagger_time > 0.0:
 		input_vector = Vector2.ZERO
 		step.active = false
-	if ability.active:
+	if ability.active and not ability.allows_movement():
 		input_vector = Vector2.ZERO
 		slide.reset()
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == "" and not ability.active
@@ -455,10 +469,22 @@ func _physics_process(delta: float) -> void:
 		player.velocity.x = roll.direction.x * DodgeRoll.SPEED
 		player.velocity.z = roll.direction.z * DodgeRoll.SPEED
 	if ability.active:
-		var charge_velocity: Vector3 = ability.velocity()
-		player.velocity.x = charge_velocity.x
-		player.velocity.z = charge_velocity.z
+		# A melee skill keeps the walk computed above; a planted skill stops
+		# dead. Either way a committed travel window wins over both.
 		_jump_requested = false
+		var ability_velocity: Vector3 = ability.velocity()
+		if not ability_velocity.is_zero_approx():
+			player.velocity.x = ability_velocity.x
+			player.velocity.z = ability_velocity.z
+		elif not ability.allows_movement():
+			player.velocity.x = 0.0
+			player.velocity.z = 0.0
+		else:
+			# Hand the dash back to the feet: the walk target caps the residual
+			# travel instead of gliding a lane past the authored distance.
+			var walked := Vector2(player.velocity.x, player.velocity.z).limit_length(speed)
+			player.velocity.x = walked.x
+			player.velocity.z = walked.y
 	if _jump_requested and not inspecting and not hud.map_open:
 		player.velocity.y = 7.0
 	elif player.is_on_floor():
@@ -474,9 +500,12 @@ func _physics_process(delta: float) -> void:
 	var limit: float = world.WORLD_LIMIT - 2.0
 	player.position.x = clampf(player.position.x, -limit, limit)
 	player.position.z = clampf(player.position.z, -limit, limit)
+	# The lunge cuts the lane it just crossed, measured after the move.
+	_ability_path_strike(ability)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
 	slide.after_move(player,actual_velocity)
 	_collect_loot(delta)
+	_bloody_feet.update(delta,player,archer)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)
@@ -498,12 +527,12 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	shoulder_camera.update(delta)
 	_update_camera(delta)
-	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen:
+	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen or archer.is_ability():
 		update_crosshair_aim()
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0))
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0), ability.hud_state(1))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -706,7 +735,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					activate_ability(0)
 				else:
 					equip_weapon("bow")
-			KEY_2: equip_weapon("sword")
+			KEY_2:
+				if event.shift_pressed:
+					activate_ability(1)
+				else:
+					equip_weapon("sword")
 			KEY_3: equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
@@ -933,6 +966,13 @@ func activate_ability(slot: int) -> void:
 	if not reason.is_empty():
 		hud.show_feedback(reason,1.6)
 		return
+	# The skill spends its cost down the crosshair, so resolve the aim from the
+	# camera now instead of firing on a heading left over from before the press.
+	update_crosshair_aim()
+	var refusal: String = _prepare_backstab(ability.actor, ability.definition(slot))
+	if not refusal.is_empty():
+		hud.show_feedback(refusal,1.6)
+		return
 	cancel_input()
 	var outcome: Dictionary = ability.activate(slot)
 	if not bool(outcome.get("ok",false)):
@@ -943,6 +983,264 @@ func activate_ability(slot: int) -> void:
 	if not sound.is_empty():
 		audio.play_sound(sound)
 	hud.show_feedback("%s  /  -%d stamina" % [str(definition.get("name","")),int(float(definition.get("stamina_cost",0.0)))],1.2)
+
+## A backstab needs a live body under the crosshair before it may spend
+## stamina or start its clock. The resolved body rides on the runner actor so
+## the blink and stab cues agree with the preflight even if the aim has moved.
+func _prepare_backstab(actor, definition: Dictionary) -> String:
+	if str(definition.get("effect", {}).get("kind", "")) != "backstab":
+		return ""
+	var target: Node3D = _backstab_target(actor)
+	if target == null:
+		if actor != null and is_instance_valid(actor):
+			actor.remove_meta("backstab_target")
+		return "No backstab target."
+	actor.set_meta("backstab_target",target)
+	return ""
+
+
+## A bound world seat carries its own aim; the solo runner's actor is this
+## scene, whose aim and body live on `combat` and `player`.
+func _backstab_target(actor) -> Node3D:
+	var position: Vector3 = archer.global_position
+	var aim: Vector3 = combat.aim_point
+	var exclude: Array[RID] = []
+	if actor != null and is_instance_valid(actor) and actor is CollisionObject3D:
+		position = actor.global_position
+		aim = actor.combat.aim_point
+		exclude.append(actor.get_rid())
+	elif player is CollisionObject3D:
+		exclude.append(player.get_rid())
+	return BackstabAbility.find_target(get_world_3d().direct_space_state,
+		position,aim,BACKSTAB_MASK,BACKSTAB_RANGE,exclude)
+
+
+## The body a backstab moves. A bound world seat owns its own teleport; the
+## solo frontier runner's actor is this scene, so the player capsule stands in.
+func _backstab_body(actor):
+	if actor != null and is_instance_valid(actor) and actor.has_method("teleport_to"):
+		return actor
+	return player
+
+
+func _bind_ability_cues(runner) -> void:
+	if runner == null or not is_instance_valid(runner):
+		return
+	if not runner.cue.is_connected(_on_ability_cue):
+		runner.cue.connect(_on_ability_cue.bind(runner))
+
+
+func _ability_authority(runner) -> bool:
+	if network_role == "client":
+		return false
+	if runner != null and is_instance_valid(runner.actor) and runner.actor.get("authoritative") != null:
+		return bool(runner.actor.authoritative)
+	return true
+
+
+func _on_ability_cue(id: String, cue: String, index: int, runner) -> void:
+	if not is_instance_valid(runner) or not runner.active or str(runner.active_id) != id:
+		return
+	var definition: Dictionary = runner.active_definition
+	if definition.is_empty():
+		return
+	var rig = runner.rig
+	if rig == null or not is_instance_valid(rig):
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var authoritative := _ability_authority(runner)
+	var damage: float = AbilityRules.damage_for(definition, rig)
+	match str(effect.get("kind", "")):
+		"barrage", "volley", "piercing_shot":
+			_ability_shots(runner, definition, index, damage, authoritative)
+		"projectile":
+			_ability_spell(runner, definition, damage, authoritative)
+		"backstab":
+			_ability_backstab(runner, cue, damage, authoritative)
+		"melee_arc", "melee_ring":
+			_ability_melee(runner, definition, cue, index, damage, authoritative)
+
+
+func _ability_shots(runner, definition: Dictionary, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var kind := str(effect.get("kind", ""))
+	var rig = runner.rig
+	var aim: Vector3 = runner.combat.aim_point
+	# The cue lands before this rig's own pose step, so aim and resample the bow
+	# before reading the hand: the arrow leaves on the live crosshair line.
+	rig.aim_at(aim)
+	rig.refresh_bow_pose()
+	var origin: Vector3 = rig.get_arrow_origin()
+	var base := aim - origin
+	if base.length_squared() < 0.0001:
+		base = -rig.global_basis.z
+	var shots := int(effect.get("shots", 1)) if kind == "volley" else 1
+	var speed := float(Archer.BOW_DATA[clampi(int(rig.bow_index), 0, 2)].speed) \
+		* float(effect.get("arrow_speed_scale", 1.0))
+	var pierce := int(effect.get("pierce", 0))
+	for shot in shots:
+		var pattern_index := index if kind == "barrage" else shot
+		var offsets := AbilityFx.shot_offsets(definition, pattern_index)
+		var direction := AbilityFx.rotate_direction(base, offsets.x, offsets.y)
+		var excluded: Array[RID] = []
+		if runner.actor is CollisionObject3D:
+			excluded.append(runner.actor.get_rid())
+		var source_slot := int(runner.actor.get("slot")) if runner.actor.get("slot") != null else -1
+		_spawn_arrow(origin, direction, speed, damage, excluded, origin, source_slot, authoritative, pierce)
+	if runner.actor == player:
+		audio.play_sound("release")
+
+
+func _ability_spell(runner, definition: Dictionary, damage: float,
+		authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = runner.rig
+	var origin: Vector3 = rig.cast_origin()
+	var aim: Vector3 = runner.combat.aim_point
+	var direction := aim - origin
+	if direction.length_squared() < 0.0001:
+		direction = -rig.global_basis.z
+	var spell := SpellProjectile.new()
+	spell.kind = str(effect.get("projectile", "fireball"))
+	spell.hit_mask = 1 | 2 | 8
+	add_child(spell)
+	var excluded: Array[RID] = []
+	if runner.actor is CollisionObject3D:
+		excluded.append(runner.actor.get_rid())
+	spell.launch(origin, direction, float(effect.get("speed", 22.0)), damage,
+		excluded, spell.hit_mask, authoritative, rig.global_position,
+		float(effect.get("radius", 0.0)), int(effect.get("pierce", 0)))
+	spell.source_rig = rig
+	spell.set_meta("stagger", float(effect.get("stagger", 0.0)))
+	if authoritative:
+		spell.detonated.connect(_on_spell_detonated.bind(spell, runner.combat))
+
+
+func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref) -> void:
+	if not is_instance_valid(spell) or not is_instance_valid(combat_ref):
+		return
+	if spell.blast_radius <= 0.0:
+		return
+	combat_ref.ability_blast(centre, spell.blast_radius, spell.damage,
+		float(spell.get_meta("stagger", 0.0)))
+
+
+## A travelling skill sweeps the lane it has just crossed: after the body moved
+## for the tick, every body inside the path arc takes one hit. The activation's
+## victim set is shared with the closing thrust beat, so no body is hit twice.
+func _ability_path_strike(runner) -> void:
+	if not is_instance_valid(runner) or not runner.active:
+		return
+	var effect: Dictionary = runner.active_definition.get("effect", {})
+	if not bool(effect.get("path_damage", false)):
+		return
+	if float(runner.elapsed) > float(runner.travel_seconds) + 0.02:
+		return
+	runner.combat.ability_strike(float(effect.get("path_radius", 1.0)),
+		float(effect.get("path_arc_degrees", 180.0)),
+		AbilityRules.damage_for(runner.active_definition, runner.rig),
+		float(effect.get("stagger", 0.0)), false, false, runner.active_victims)
+
+
+func _ability_melee(runner, definition: Dictionary, cue: String, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = runner.rig
+	var id := str(definition.get("id", ""))
+	var radius := float(effect.get("radius", 1.7))
+	var arc := float(effect.get("arc_degrees", 360.0))
+	var ring := str(effect.get("kind", "")) == "melee_ring" or arc >= 359.0
+	var forward: Vector3 = runner.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	# The greatsword's wind-up is presentation only: the blade gathers speed
+	# before the ring cue spends the hit.
+	if cue == "wind":
+		AbilityFx.blade_trail(self, rig, 0.55)
+		return
+	# The lunge's dash beat marks the takeoff with its wake; the thrust cue,
+	# not the dash, spends the hit.
+	if cue == "dash":
+		AbilityFx.lunge_wake(self, rig, 0.40)
+		return
+	if authoritative:
+		# A travelling skill already swept its lane, so the closing beat shares
+		# that victim set and never hits a body the dash passed through twice.
+		var victims: Dictionary = {}
+		if bool(effect.get("path_damage", false)):
+			victims = runner.active_victims
+		runner.combat.ability_strike(radius, arc, damage,
+			float(effect.get("stagger", 0.0)), ring, not ring, victims)
+	if id.begins_with("shield_"):
+		# The shield face is the weapon, so the impact sits on the boss instead
+		# of a crescent that never matched the hands.
+		AbilityFx.shield_impact(self, rig.global_position + forward * 0.95 + Vector3.UP * 1.05,
+			forward, radius, id == "shield_slam")
+		if ring:
+			AbilityFx.ground_shockwave(self, rig.global_position, radius)
+		return
+	if ring:
+		AbilityFx.spin_burst(self, rig.global_position, radius)
+		AbilityFx.blade_trail(self, rig, 0.30)
+	elif id == "double_slash":
+		AbilityFx.blade_trail(self, rig, 0.24)
+	elif id == "lunge_thrust":
+		AbilityFx.blade_trail(self, rig, 0.18)
+	else:
+		var cues: Array = definition.get("cues", [])
+		var alternate := 1.0 if index % 2 == 0 else -1.0
+		if cues.size() <= 1:
+			alternate = 0.0
+		AbilityFx.slash_arc(self, rig.global_position, forward.rotated(Vector3.UP, 0.32 * alternate),
+			radius, minf(arc, 200.0), AbilityFx.STEEL)
+
+
+## Backstab: the blink cue smokes the old spot and, on the authority only,
+## teleports behind the preflight target; the stab cue spends 2x dagger damage
+## on the body the caster is now behind.
+func _ability_backstab(runner, cue: String, damage: float, authoritative: bool) -> void:
+	var rig = runner.rig
+	var actor = runner.actor
+	var target: Node3D = null
+	if actor != null and is_instance_valid(actor) and actor.has_meta("backstab_target"):
+		var resolved = actor.get_meta("backstab_target")
+		if is_instance_valid(resolved) and resolved is Node3D:
+			target = resolved
+	var forward: Vector3 = runner.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	if cue == "blink":
+		AbilityFx.smoke_puff(self, rig.global_position, 1.0, true)
+		if not authoritative or target == null:
+			# Replicas never move themselves: the host's snapshot carries the
+			# new position and only the smoke reads on this peer.
+			return
+		var spot: Dictionary = BackstabAbility.behind_spot(get_world_3d().direct_space_state, target)
+		if not bool(spot.get("ok", false)):
+			return
+		var body = _backstab_body(actor)
+		if body != null and is_instance_valid(body):
+			BackstabAbility.blink(body, spot.position, float(spot.yaw))
+		AbilityFx.smoke_puff(self, rig.global_position, 1.0, true)
+		return
+	if cue != "stab":
+		return
+	if target == null:
+		target = _backstab_target(actor)
+	if target != null and authoritative and target.get("alive") != false:
+		var body = _backstab_body(actor)
+		var source_slot := int(actor.get("slot")) if actor != null and actor.get("slot") != null else -1
+		BackstabAbility.strike(body, target, damage, source_slot)
+	if target != null:
+		AbilityFx.backstab_flash(self, target.global_position - forward * 0.35 + Vector3.UP * 1.15, forward)
+
 
 func use_consumable(kind: String) -> void:
 	if not Archer.CONSUMABLE_DATA.has(kind):
@@ -1569,6 +1867,7 @@ func _create_seat(slot: int, peer_id: int, authoritative: bool, seat_name: Strin
 	seat.collision_mask = 1 | 2
 	seat.combat.target_mask = 2
 	seat.combat.damage_enabled = authoritative
+	_bind_ability_cues(seat.ability)
 	_seats[slot] = seat
 	_rebuild_seat_list()
 	return seat
@@ -1986,6 +2285,15 @@ func _apply_seat_action(slot: int, action: String, value: Variant, aim_tick: int
 		"ability":
 			if typeof(value) != TYPE_INT or int(value) < 0 or int(value) >= AbilityRules.SLOT_COUNT:
 				return
+			var seat_definition: Dictionary = seat.ability.definition(int(value))
+			if not seat.ability.active and seat.alive and not seat_definition.is_empty():
+				# The host resolves the target from the seat's replicated aim so
+				# a backstab without one never spends the seat's stamina.
+				var refusal: String = _prepare_backstab(seat, seat_definition)
+				if not refusal.is_empty():
+					if int(slot) == local_slot:
+						hud.show_feedback(refusal,1.6)
+					return
 			seat.try_ability(int(value))
 		"armor":
 			if typeof(value) != TYPE_DICTIONARY:
@@ -2111,13 +2419,13 @@ func _on_seat_thrown(slot: int, origin: Vector3, direction: Vector3, speed: floa
 	_world_throw.rpc(origin,direction,speed,weapon_name,weapon_index,slot)
 
 
-func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true) -> void:
+func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true, pierce_count: int = 0) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = source_slot
 	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
-	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin)
+	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin,pierce_count)
 	arrow.impacted.connect(_on_arrow_impact)
 	for index in range(arrows.size() - 1, -1, -1):
 		if not is_instance_valid(arrows[index]):

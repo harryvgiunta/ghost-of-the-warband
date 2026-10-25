@@ -594,7 +594,9 @@ func _shoot_arrow() -> void:
 	target.y += 0.5*4.0*flight*flight
 	var direction := (target-origin).normalized()
 	var arrow := Arrow.new()
-	arrow.hit_mask = 1 | 4
+	# Layer 8 is the shield: a raised or carried shield intercepts the shaft
+	# before it reaches the body behind it.
+	arrow.hit_mask = 1 | 4 | 8
 	get_parent().add_child(arrow)
 	arrow.launch(origin,direction,30.0,_attack_damage,[get_rid()],origin)
 	arrow_fired.emit(origin,direction,30.0,_attack_damage)

@@ -207,7 +207,19 @@
     "Sword_Overhead": 1.2666666666666666,
     "Dagger_Stab": 0.5,
     "Sword_Block_Loop_OneHand": 1.9833333333333334,
-    "Sword_Block_Loop": 1.9833333333333334
+    "Sword_Block_Loop": 1.9833333333333334,
+    "Bow_Barrage": 1.15,
+    "Bow_Triple_Volley": 1.0,
+    "Bow_Piercing_Shot": 1.25,
+    "Sword_Double_Slash": 1.0,
+    "Sword_Lunge_Thrust": 0.95,
+    "Sword_Spin_Slash": 0.3166666667,
+    "Staff_Fireball_Cast": 1.2,
+    "Staff_Bone_Spear_Cast": 1.15,
+    "Shield_Bash": 0.8,
+    "Shield_Charge": 1.15,
+    "Shield_Ground_Slam": 1.1,
+    "Dagger_Backstab": 0.9
   },
   "authoring_fps": 60,
   "gres_height_scale": 0.5092428046251969,
@@ -442,5 +454,125 @@
     "bandage_frames": 180,
     "bandage_description": "Left forearm raised across the sternum; right hand makes two wrapping loops around it.",
     "potion_description": "Right hand raises a bottle to the mouth, hand and head tip for the drink, then lower."
+  },
+  "ability_authoring": {
+    "authoring_fps": 60,
+    "source": "tools/prepare_ability_animations.py",
+    "merge": "tools/glb_animation_merge.py copies only these clips into the shipped GLB",
+    "clips": {
+      "Bow_Barrage": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Bow_Triple_Volley": {
+        "duration": 1.0,
+        "frames": 61,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Bow_Piercing_Shot": {
+        "duration": 1.25,
+        "frames": 76,
+        "weapon": "bow",
+        "two_handed": false,
+        "proxy": "bow"
+      },
+      "Sword_Double_Slash": {
+        "duration": 1.0,
+        "frames": 61,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Sword_Lunge_Thrust": {
+        "duration": 0.95,
+        "frames": 58,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Sword_Spin_Slash": {
+        "duration": 0.3166666667,
+        "frames": 20,
+        "weapon": "sword",
+        "two_handed": true,
+        "proxy": "sword"
+      },
+      "Dagger_Backstab": {
+        "duration": 0.9,
+        "frames": 55,
+        "weapon": "dagger",
+        "two_handed": false,
+        "proxy": "dagger"
+      },
+      "Staff_Fireball_Cast": {
+        "duration": 1.2,
+        "frames": 73,
+        "weapon": "staff",
+        "two_handed": true,
+        "proxy": "staff"
+      },
+      "Staff_Bone_Spear_Cast": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "staff",
+        "two_handed": true,
+        "proxy": "staff"
+      },
+      "Shield_Bash": {
+        "duration": 0.8,
+        "frames": 49,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      },
+      "Shield_Charge": {
+        "duration": 1.15,
+        "frames": 70,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      },
+      "Shield_Ground_Slam": {
+        "duration": 1.1,
+        "frames": 67,
+        "weapon": "shield",
+        "two_handed": false,
+        "proxy": "shield"
+      }
+    },
+    "durations": {
+      "Bow_Barrage": 1.15,
+      "Bow_Triple_Volley": 1.0,
+      "Bow_Piercing_Shot": 1.25,
+      "Sword_Double_Slash": 1.0,
+      "Sword_Lunge_Thrust": 0.95,
+      "Sword_Spin_Slash": 0.3166666667,
+      "Dagger_Backstab": 0.9,
+      "Staff_Fireball_Cast": 1.2,
+      "Staff_Bone_Spear_Cast": 1.15,
+      "Shield_Bash": 0.8,
+      "Shield_Charge": 1.15,
+      "Shield_Ground_Slam": 1.1
+    },
+    "runtime_overrides": {
+      "bow": "Both bow arms and the bow aim are solved procedurally at runtime from the draw curve, and an archery stance is planted. The authored bow-arm poses are presentation only; the lower body, pelvis and spine rhythm stay authored.",
+      "sword": "The blade follows hand_r * sword_grip; a hand basis of aim * inverse(sword_grip) points the blade at the authored world direction. Greatsword and staff are two-handed: the support (left) hand is authored onto the grip and is not re-solved during abilities.",
+      "staff": "The staff is socketed on hand_r and runs along its local -Z from the grip; the support hand is authored onto the shaft 0.32 m along the handle.",
+      "shield": "The shield is carried on the left forearm automatically; the left arm is authored to raise, punch or slam the shield face.",
+      "spin_slash": "The runtime adds a full 360 degree model turn over Sword_Spin_Slash (blade trail starts at 0.20, damage at 0.50). The clip authors only a fast low wide pivot with the greatsword extended horizontally from 0.15 to 0.85 of the clip, compact feet on the floor and a small weight shift, never a full turn or a stride.",
+      "lunge_thrust": "The controller travels 1.78 m over the first 0.24 s. The lead-foot step, pelvis travel and weight transfer are authored inside 0.02-0.24 s, the level thrust lands at 0.42 and holds, then the clip recovers; both hands stay on the hilt.",
+      "dagger_backstab": "The actor is teleported behind the target at 0.20. Frames 0-0.20 are a gathering crouch and a compressed blink tucked low; 0.30-0.55 is the arrival plunge straight down-forward with the off hand guarding, impact at 0.50, recovery by 0.90. No forward dash is authored.",
+      "blend": "Every clip starts and ends at the Idle_Loop frame-0 pose so the 0.12 s runtime blend does not pop. The root bone is never moved.",
+      "feet": "Legs are authored as ankle targets; the runtime re-solves knees to terrain. Ankles stay at their shipped 84-86 mm height and only leave it for deliberate step lifts.",
+      "barrage_beats": "Six draw-release pulses peaking at 0.22, 0.34, 0.46, 0.58, 0.70 and 0.82 s with visible weight pulses and small recoils.",
+      "volley_beats": "One draw releasing at 0.48 s.",
+      "piercing_beats": "A long heavy draw releasing at 0.72 s."
+    },
+    "qa_renders": ".runtime/ability_anim/<clip>_sheet.png (t=0, 25, 50, 75, 100 %), <clip>_side_sheet.png (right-side profile) and <clip>_strip.png for the reworked sword/dagger clips"
   }
 }

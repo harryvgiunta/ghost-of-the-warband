@@ -20,6 +20,18 @@ func _ready() -> void:
 	sounds["block"] = _synthesize(0.22, 170.0, 0.5, 82.0)
 	sounds["heal"] = _synthesize(0.42, 660.0, 0.03, 990.0)
 	sounds["charge"] = _synthesize(0.55, 118.0, 0.62, 640.0)
+	# Item skills: a short library so each weapon reads with its own voice.
+	sounds["barrage"] = _synthesize(0.16, 260.0, 0.55, 120.0)
+	sounds["volley"] = _synthesize(0.24, 220.0, 0.50, 92.0)
+	sounds["pierce"] = _synthesize(0.34, 320.0, 0.40, 74.0)
+	sounds["slash"] = _synthesize(0.20, 420.0, 0.58, 130.0)
+	sounds["lunge"] = _synthesize(0.26, 190.0, 0.52, 82.0)
+	sounds["spin"] = _synthesize(0.52, 124.0, 0.48, 380.0)
+	sounds["backstab"] = _synthesize(0.22, 240.0, 0.66, 980.0)
+	sounds["fire"] = _synthesize(0.62, 96.0, 0.78, 46.0)
+	sounds["bone"] = _synthesize(0.36, 540.0, 0.30, 180.0)
+	sounds["bash"] = _synthesize(0.30, 160.0, 0.44, 88.0)
+	sounds["slam"] = _synthesize(0.58, 74.0, 0.70, 34.0)
 
 func play_sound(sound: String) -> void:
 	if muted:
