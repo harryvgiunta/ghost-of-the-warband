@@ -95,6 +95,10 @@ var _entering_scene := false
 var _aim_query := PhysicsRayQueryParameters3D.new()
 var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
+var _blood_field = null
+var _feet_blood := 0.0
+var _foot_peak: Array[float] = [0.0, 0.0]
+var _foot_print_gap: Array[float] = [0.0, 0.0]
 
 func _ready() -> void:
 	_read_arguments()
@@ -385,6 +389,7 @@ func _physics_process(delta: float) -> void:
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
 	slide.after_move(player,actual_velocity)
 	_collect_loot(delta)
+	_update_bloody_feet(delta)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)
@@ -416,6 +421,53 @@ func _sample_floor(point: Vector3) -> float:
 	_floor_query.to = point - Vector3(0, 2.4, 0)
 	var hit := get_world_3d().direct_space_state.intersect_ray(_floor_query)
 	return float(hit.position.y) if not hit.is_empty() else player.global_position.y
+
+## Bloody footprints: a foot that comes down while the ranger is standing in a
+## death pool leaves a print on the floor. `_feet_blood` is how much blood is
+## still on the boots; every step uses some of it up.
+func _update_bloody_feet(delta: float) -> void:
+	_feet_blood = maxf(_feet_blood - delta * 0.01, 0.0)
+	_foot_print_gap[0] = maxf(_foot_print_gap[0] - delta, 0.0)
+	_foot_print_gap[1] = maxf(_foot_print_gap[1] - delta, 0.0)
+	var field = _blood_field if is_instance_valid(_blood_field) else null
+	if field == null:
+		# The per-scene field is created on the first wound, so resolve it once
+		# instead of doing a node lookup every physics frame.
+		var scene := get_tree().current_scene
+		field = scene.get_node_or_null("BloodField") if scene != null else null
+		_blood_field = field
+		if field == null:
+			return
+	if not player.is_on_floor():
+		_foot_peak[0] = 0.0
+		_foot_peak[1] = 0.0
+		return
+	var joints: Dictionary = archer.get_joint_positions()
+	var feet := [joints.get("left_foot", player.global_position),
+		joints.get("right_foot", player.global_position)]
+	for probe in feet:
+		if field.is_in_blood(probe):
+			_feet_blood = 1.0
+			break
+	for side in 2:
+		var foot: Vector3 = feet[side]
+		var peak: float = _foot_peak[side]
+		# Track the lift; the print lands when the foot comes back down.
+		if foot.y > peak:
+			_foot_peak[side] = foot.y
+			continue
+		if peak <= 0.0 or foot.y >= peak - 0.05:
+			continue
+		_foot_peak[side] = 0.0
+		# Run and walk clips bob a foot several times per stride; one print per
+		# footfall is the trail, a smear of them is not.
+		if _feet_blood <= 0.0 or _foot_print_gap[side] > 0.0:
+			continue
+		var travel := player.velocity
+		travel.y = 0.0
+		field.footprint(foot, travel, _feet_blood)
+		_feet_blood = maxf(_feet_blood - 0.15, 0.0)
+		_foot_print_gap[side] = 0.30
 
 func _update_camera(delta: float) -> void:
 	var focus_height: float = 1.05 if inspecting else cover.camera_height()

@@ -6,9 +6,8 @@ extends RefCounted
 ## capsule, so this class measures the real garment once per rig: every visible
 ## skinned-mesh vertex is binned into its dominant bone and stored as a radial
 ## profile around that bone's rest axis, while primitive-built rigs are measured
-## as their own triangle soup. A thinned whole-garment sample then corrects each
-## splash onto the outermost layer in the current pose. BloodField lays its
-## stain patches out on those measurements.
+## as their own triangle soup. BloodField lays its stain patches out on those
+## measurements, projecting every patch vertex onto the shell.
 ##
 ## Everything here is presentation. A failed measurement only means no body
 ## blood for that rig; it never gates damage.
@@ -17,12 +16,9 @@ const ANGLE_BUCKETS := 24
 const AXIAL_BANDS := 12
 const CELLS := ANGLE_BUCKETS * AXIAL_BANDS
 const MAX_SAMPLED_VERTICES := 16000
-## Whole-garment samples kept for the pose correction and for finding the outer
-## layer under a splash.
-const OUTER_SAMPLES := 1400
 const CACHE_LIMIT := 96
 ## The stain sits this far off the measured surface so it never z-fights cloth.
-const LIFT := 0.005
+const LIFT := 0.003
 
 static var _cache: Dictionary = {}
 
@@ -102,125 +98,7 @@ static func anchor_for(carrier: Dictionary) -> Node3D:
 	var node: Node3D = carrier.node
 	return node if is_instance_valid(node) else null
 
-## Skins the garment sample into the bone's current pose, in bone space. This is
-## how a splash finds the outer layer (belt over hip, sleeve over arm) instead of
-## trusting a rest-pose estimate that a blended skin pulls away from.
-static func prepare_pose(carrier: Dictionary) -> void:
-	carrier.pose_outer = PackedVector3Array()
-	if str(carrier.kind) != "bone":
-		return
-	var skeleton: Skeleton3D = carrier.skeleton
-	var outer: Dictionary = carrier.outer
-	if not is_instance_valid(skeleton) or outer.is_empty():
-		return
-	var cloud: PackedVector3Array = outer.positions
-	var bones: PackedInt32Array = outer.bones
-	var weights: PackedFloat32Array = outer.weights
-	if cloud.is_empty() or bones.size() < 4:
-		return
-	var into_local: Transform3D = (skeleton.global_transform \
-		* skeleton.get_bone_global_pose(int(carrier.index))).affine_inverse()
-	var deltas := {}
-	var posed := PackedVector3Array()
-	posed.resize(cloud.size())
-	for index in cloud.size():
-		var point := Vector3.ZERO
-		for slot in 4:
-			var weight := weights[index * 4 + slot]
-			if weight <= 0.0:
-				continue
-			var bone := bones[index * 4 + slot]
-			if bone < 0:
-				continue
-			var delta: Transform3D
-			if deltas.has(bone):
-				delta = deltas[bone]
-			else:
-				delta = skeleton.get_bone_global_pose(bone) \
-					* skeleton.get_bone_global_rest(bone).affine_inverse()
-				deltas[bone] = delta
-			point += (delta * cloud[index]) * weight
-		posed[index] = into_local * point
-	carrier.pose_outer = posed
-
-# --- patch geometry --------------------------------------------------------
-
-## How far the outermost garment sits beyond the profile at the patch centre.
-## Applied to the whole patch, so blood lands on the layer that will hide it.
-static func _outer_shift(carrier: Dictionary, center_local: Vector3) -> float:
-	var cloud: PackedVector3Array = carrier.pose_outer
-	if cloud.is_empty():
-		return 0.0
-	var axis: Vector3 = carrier.axis
-	var center_h: float = center_local.dot(axis)
-	var planar: Vector3 = center_local - axis * center_h
-	var center_radius := planar.length()
-	var center_angle: float = atan2(planar.dot(carrier.v), planar.dot(carrier.u))
-	var best := 0.0
-	for point in cloud:
-		var h: float = point.dot(axis)
-		if absf(h - center_h) > 0.06:
-			continue
-		var radial: Vector3 = point - axis * h
-		var radius := radial.length()
-		if radius <= center_radius:
-			continue
-		var angle: float = atan2(radial.dot(carrier.v), radial.dot(carrier.u))
-		if absf(wrapf(angle - center_angle, -PI, PI)) > 0.45:
-			continue
-		best = maxf(best, radius - center_radius)
-	# Two centimetres covers cloth, leather and a mail layer; a larger lift made
-	# small droplets hover off shoulder plates as thin red cards at the
-	# silhouette.
-	return minf(best, 0.02)
-
-## Local-space surface points spread over the cloth the carrier owns. The blow
-## itself comes first; the rest scatter across the garment so one hit reads as
-## blood on the clothes from every side, not a single stamp.
-static func cluster(carrier: Dictionary, count: int, rng: RandomNumberGenerator,
-		origin: Vector3) -> Array[Vector3]:
-	var points: Array[Vector3] = []
-	if str(carrier.kind) != "bone":
-		# A primitive limb is small, so the splashes ring the blow instead of
-		# running along a strip.
-		var half: Vector3 = carrier.half
-		var reach := maxf(minf(half.x, minf(half.y, half.z)), 0.02)
-		points.append(origin)
-		for index in count - 1:
-			var direction := Vector3(rng.randf_range(-1.0, 1.0),
-				rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
-			if direction.length_squared() < 0.0001:
-				direction = Vector3.UP
-			points.append(origin + direction.normalized() * reach
-				* rng.randf_range(0.25, 0.95))
-		return points
-	var axis: Vector3 = carrier.axis
-	var low: float = carrier.low
-	var high: float = carrier.high
-	var planar: Vector3 = origin - axis * origin.dot(axis)
-	var angle0: float = rng.randf() * TAU if planar.length_squared() < 0.0004 \
-		else atan2(planar.dot(carrier.v), planar.dot(carrier.u))
-	var h0 := clampf(origin.dot(axis), low, high)
-	var first := _surface_at(carrier, h0, angle0 + rng.randf_range(-0.2, 0.2))
-	if first != Vector3.INF:
-		points.append(first)
-	var golden := 2.399963
-	for index in count - 1:
-		var h := lerpf(low, high, (float(index) + rng.randf_range(0.1, 0.9))
-			/ float(maxi(count - 1, 1)))
-		var angle := angle0 + golden * float(index + 1) + rng.randf_range(-0.3, 0.3)
-		var point := _surface_at(carrier, h, angle)
-		if point != Vector3.INF:
-			points.append(point)
-	return points
-
-static func _surface_at(carrier: Dictionary, h: float, angle: float) -> Vector3:
-	var radius := _shell_radius(carrier, h, angle)
-	if radius < 0.0:
-		return Vector3.INF
-	var axis: Vector3 = carrier.axis
-	var radial: Vector3 = carrier.u * cos(angle) + carrier.v * sin(angle)
-	return axis * h + radial * radius
+# --- patch geometry ---------------------------------------------------------
 
 ## Largest half-extents that still fit the measured cloth, so a patch never
 ## turns into a flat sheet by running off the end of its strip.
@@ -249,9 +127,8 @@ static func surface_point(carrier: Dictionary, local_point: Vector3,
 		var radius := _shell_radius(carrier, h, angle)
 		if radius < 0.0:
 			return {}
-		var outward: float = carrier.get("outward", 0.0)
 		var radial: Vector3 = carrier.u * cos(angle) + carrier.v * sin(angle)
-		return {"point": axis * h + radial * (radius + outward + lift),
+		return {"point": axis * h + radial * (radius + lift),
 			"normal": radial}
 	var tris: PackedVector3Array = _primitive_tris(carrier)
 	if tris.is_empty():
@@ -267,14 +144,15 @@ static func surface_point(carrier: Dictionary, local_point: Vector3,
 	hit.point = (hit.point as Vector3) + normal * lift
 	return hit
 
-## Appends one stain patch: an irregular textured disc bent onto the surface.
-## `half_up` runs along the patch's long (usually vertical) axis, `half_wide`
-## across it. UVs map the whole splat texture across the patch.
+## Appends one stain patch: a small grid whose every vertex is projected onto
+## the measured surface, so the sheet hugs a curved garment instead of floating
+## in the tangent plane. Because each vertex sits on the shell (only `lift`
+## above it), the patch reads as a flat colour stain, not a 3D card. A vertex
+## with no cloth collapses onto the patch centre rather than hanging in the air.
+## `half_up` runs along the patch's long axis, `half_wide` across it.
 static func add_patch(tool: SurfaceTool, carrier: Dictionary, center_local: Vector3,
 		up_local: Vector3, half_up: float, half_wide: float, rings: int,
 		segments: int, rotate: float = 0.0, lift: float = LIFT) -> bool:
-	if str(carrier.kind) == "bone":
-		carrier["outward"] = _outer_shift(carrier, center_local)
 	var middle := surface_point(carrier, center_local, lift)
 	if middle.is_empty():
 		return false
@@ -338,8 +216,7 @@ static func add_patch(tool: SurfaceTool, carrier: Dictionary, center_local: Vect
 # --- bone profiles ---------------------------------------------------------
 
 static func _measure(rig: Node3D) -> Dictionary:
-	var body := {"rig": rig, "skeleton": null, "bones": {}, "primitives": [],
-		"outer": {}}
+	var body := {"rig": rig, "skeleton": null, "bones": {}, "primitives": []}
 	var meshes := _mesh_instances(rig)
 	var skeleton := _find_skeleton(rig)
 	if skeleton != null:
@@ -350,19 +227,13 @@ static func _measure(rig: Node3D) -> Dictionary:
 				skinned.append(mesh_node)
 		if not skinned.is_empty():
 			body.skeleton = skeleton
-			var measured := _measure_bones(skeleton, skinned)
-			body.bones = measured.bones
-			body.outer = measured.outer
-			# One shared whole-garment sample for every bone: the pose correction
-			# has to see the outer layer, whatever bone owns this stain.
-			for profile in body.bones.values():
-				(profile as Dictionary)["outer"] = measured.outer
+			body.bones = _measure_bones(skeleton, skinned).bones
 	if body.bones.is_empty():
 		body.primitives = _primitive_list(meshes)
 	return body
 
 static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
-	var empty := {"bones": {}, "outer": {}}
+	var empty := {"bones": {}}
 	var bone_count := skeleton.get_bone_count()
 	if bone_count <= 0:
 		return empty
@@ -532,7 +403,6 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 			% ANGLE_BUCKETS
 		var cell := bone * CELLS + band * ANGLE_BUCKETS + bucket
 		peaks[cell] = maxf(peaks[cell], record_radius[index])
-	var outer := _whole_garment(positions, bones, weights)
 	var profiles := {}
 	for bone in bone_count:
 		if lows[bone] == INF:
@@ -557,28 +427,9 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 			"peak": peak,
 			"radii": peaks.slice(bone * CELLS, bone * CELLS + CELLS),
 		}
-	return {"bones": profiles, "outer": outer}
-
-## A thin whole-garment sample used to find the outer layer under a splash and
-## to move stains with the blended skin instead of a single rigid bone.
-static func _whole_garment(positions: PackedVector3Array, bones: PackedInt32Array,
-		weights: PackedFloat32Array) -> Dictionary:
-	var stride := maxi(1, int(ceil(float(positions.size()) / float(OUTER_SAMPLES))))
-	var out_positions := PackedVector3Array()
-	var out_bones := PackedInt32Array()
-	var out_weights := PackedFloat32Array()
-	for index in range(0, positions.size(), stride):
-		out_positions.append(positions[index])
-		for slot in 4:
-			out_bones.append(bones[index * 4 + slot])
-			out_weights.append(weights[index * 4 + slot])
-	return {"positions": out_positions, "bones": out_bones,
-		"weights": out_weights}
+	return {"bones": profiles}
 
 ## Rest-pose radius of the measured shell at a height along the bone axis and a
-## specific angle, interpolated only across cells that actually hold cloth.
-## Negative means the blow has no fabric under it.
-
 ## specific angle, interpolated only across cells that actually hold cloth.
 ## Negative means the blow has no fabric under it.
 static func _shell_radius(carrier: Dictionary, h: float, angle: float) -> float:
