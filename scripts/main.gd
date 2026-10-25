@@ -7,6 +7,7 @@ const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
+const LootRules = preload("res://scripts/loot_rules.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -1288,9 +1289,11 @@ func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 	if enemy.has_method("held_weapon_id"):
 		held_id = str(enemy.held_weapon_id())
 	if not held_id.is_empty():
-		# A weapon-carrying devil leaves the actual piece it was holding.
-		_spawn_loot(held_id, drop_at)
-	elif (kills + drop_kind) % 2 == 0:
+		# A weapon-carrying devil leaves the actual piece it was holding, on a
+		# tenth of the old drop rate.
+		if LootRules.drops():
+			_spawn_loot(held_id, drop_at)
+	elif (kills + drop_kind) % 2 == 0 and LootRules.drops():
 		var item_id := str(LOOT_SEQUENCE[_loot_cursor % LOOT_SEQUENCE.size()])
 		_loot_cursor += 1
 		_spawn_loot(item_id, drop_at)

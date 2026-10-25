@@ -577,11 +577,17 @@ func _test_frontier_loot() -> void:
 	if cinder != null:
 		cinder.devil_weapon = "sword"
 		var pickups_before: int = game.loot_pickups.size()
-		cinder.take_damage(99999.0,-1)
+		# Loot now rolls at one tenth, so drive the authoritative kill path until
+		# the roll lands; the mapping it produces is what this test owns.
+		seed(20261025)
 		var dropped := false
-		for drop_node in game.loot_pickups:
-			if is_instance_valid(drop_node) and str(drop_node.item_id) == "sword_short":
-				dropped = true
-		check(game.loot_pickups.size() == pickups_before + 1 and dropped,"A sword devil drops its shortsword on the ground")
+		for attempt in 240:
+			game._on_enemy_defeated(cinder,6)
+			for drop_node in game.loot_pickups:
+				if is_instance_valid(drop_node) and str(drop_node.item_id) == "sword_short":
+					dropped = true
+			if dropped:
+				break
+		check(dropped and game.loot_pickups.size() == pickups_before + 1,"A sword devil's held shortsword is the loot when the roll lands")
 	game.queue_free()
 	await process_frame

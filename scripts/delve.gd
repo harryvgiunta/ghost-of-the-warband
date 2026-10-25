@@ -14,6 +14,7 @@ extends Node3D
 const Actor = preload("res://scripts/delve_actor.gd")
 const Devil = preload("res://scripts/delve_devil.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
+const LootRules = preload("res://scripts/loot_rules.gd")
 const Chest = preload("res://scripts/delve_chest.gd")
 const World = preload("res://scripts/delve_world.gd")
 const Hud = preload("res://scripts/delve_hud.gd")
@@ -931,6 +932,9 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 			if typeof(value) == TYPE_BOOL:
 				actor.combat.stop()
 				actor.rig.set_shield(value)
+		"consume":
+			if typeof(value) == TYPE_STRING and value in ["bandage","potion"]:
+				actor.try_consume(value)
 		"ability":
 			if typeof(value) != TYPE_INT or int(value) < 0 or int(value) >= AbilityRules.SLOT_COUNT:
 				return
@@ -1046,6 +1050,8 @@ func _drop_devil_weapon(devil) -> void:
 		return
 	var item_id := str(devil.held_weapon_id())
 	if item_id.is_empty() or not State.ITEMS.has(item_id):
+		return
+	if not LootRules.drops():
 		return
 	var at := _drop_floor(devil.global_position)
 	_spawn_weapon_pickup(item_id,at)
@@ -1412,6 +1418,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
+			KEY_6: send_action("consume","bandage")
+			KEY_7: send_action("consume","potion")
 			KEY_TAB: _quick_swap()
 			KEY_C:
 				if not _cursor_free:
@@ -1650,46 +1658,59 @@ func _wave_total_for(kind: String, room_cycle: int) -> int:
 		return WAVE2_TOTAL + 3 * cycles
 	return WAVE1_TOTAL + 2 * cycles
 
-## Cycle one is deliberately plain: sixteen imps and ten devils, no court
-## devils and no clones. From cycle two the ladder mixes species and clones.
-func _wave_roles(kind: String, total: int) -> Array:
+## Cycle one's base is deliberately plain: sixteen imps and ten devils. Every
+## wave, cycle one included, then adds the five court devils and the clones on
+## top of that base, interleaved through the schedule.
+func _wave_roles(kind: String, base_total: int) -> Array:
 	var roles: Array = []
 	if int(world.cycle) <= 1:
-		var imps := mini(16,total)
+		var imps := mini(16,base_total)
 		for index in imps:
 			roles.append(Devil.ROLE_IMP)
-		for index in total - imps:
+		for index in base_total - imps:
 			roles.append(Devil.ROLE_DEVIL)
-		return roles
-	if kind == World.ROOM_OSSUARY:
-		var heavy := mini(maxi(2,int(round(float(total) * 0.2))),total)
-		var brutes := mini(maxi(2,int(round(float(total) * 0.3))),total - heavy)
+	elif kind == World.ROOM_OSSUARY:
+		var heavy := mini(maxi(2,int(round(float(base_total) * 0.2))),base_total)
+		var brutes := mini(maxi(2,int(round(float(base_total) * 0.3))),base_total - heavy)
 		for index in heavy:
 			roles.append(Devil.ROLE_IMP)
-		for index in total - heavy - brutes:
+		for index in base_total - heavy - brutes:
 			roles.append(Devil.ROLE_BONEFIEND)
 		for index in brutes:
 			roles.append(Devil.ROLE_BRUTE)
 	else:
-		var devils := mini(maxi(2,total / 4),total)
-		for index in total - devils:
+		var devils := mini(maxi(2,base_total / 4),base_total)
+		for index in base_total - devils:
 			roles.append(Devil.ROLE_IMP)
 		for index in devils:
 			roles.append(Devil.ROLE_DEVIL)
-	var taken := {}
-	var species := mini(Devil.SPECIES_ROLES.size(),total)
-	for index in species:
-		var at := int(floor((float(index) + 0.5) * float(total) / float(species)))
-		taken[mini(at,total - 1)] = true
-		roles[mini(at,total - 1)] = str(Devil.SPECIES_ROLES[index])
-	var clones := mini(1 + int(world.cycle),4)
-	for index in clones:
-		var at := int(floor((float(index) + 0.5) * float(total) / float(clones)))
-		while taken.has(at):
-			at = (at + 1) % total
-		taken[at] = true
-		roles[at] = Devil.ROLE_RANGER
-	return roles
+	var extras: Array = []
+	for role in Devil.SPECIES_ROLES:
+		extras.append(str(role))
+	for index in mini(1 + int(world.cycle),4):
+		extras.append(Devil.ROLE_RANGER)
+	return _interleave(roles,extras)
+
+
+## Spreads the extras evenly through the base ladder instead of stacking them
+## all at the end of the late-weighted spawn schedule.
+func _interleave(roles: Array, extras: Array) -> Array:
+	if roles.is_empty() or extras.is_empty():
+		var only := roles.duplicate()
+		only.append_array(extras)
+		return only
+	var merged: Array = []
+	var gap := float(roles.size()) / float(extras.size())
+	var extra_index := 0
+	for index in roles.size():
+		while extra_index < extras.size() and float(index) + 0.5 >= gap * float(extra_index):
+			merged.append(extras[extra_index])
+			extra_index += 1
+		merged.append(roles[index])
+	while extra_index < extras.size():
+		merged.append(extras[extra_index])
+		extra_index += 1
+	return merged
 
 func _wave_weapon(role: String, role_index: int) -> String:
 	if role == Devil.ROLE_RANGER or Devil.SPECIES_ROLES.has(role):
@@ -1708,10 +1729,11 @@ func _build_wave_plan() -> void:
 	_wave_cursor = 0
 	_wave_clock = 0.0
 	var kind := str(world.room_kind)
-	var total := _wave_total_for(kind,int(world.cycle))
+	var base_total := _wave_total_for(kind,int(world.cycle))
+	var roles := _wave_roles(kind,base_total)
+	var total := roles.size()
 	wave_total = total
 	var duration := _wave_duration(kind)
-	var roles := _wave_roles(kind,total)
 	var picked: Array = []
 	var role_counts: Dictionary = {}
 	for index in roles.size():
@@ -2032,7 +2054,8 @@ func _on_chest_opened() -> void:
 	chest_open = true
 	_chest_event.rpc()
 	var gold := 40 + 30 * depth
-	var item_id := _reward_item()
+	# The cache still pays its gold; the item is the tenth-of-the-old-rate roll.
+	var item_id := _reward_item() if LootRules.drops() else ""
 	_grant_reward(depth,gold,item_id)
 	_reward_event.rpc(depth,gold,item_id)
 	print("DELVE_CHEST_OPEN depth=%d gold=%d item=%s" % [depth,gold,item_id])
