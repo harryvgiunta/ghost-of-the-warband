@@ -15,12 +15,18 @@ const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const Stamina = preload("res://scripts/stamina.gd")
+const MAX_HEALTH := 100.0
+const WALK_SPEED := 5.5
 var slot := 0
 var peer_id := 0
 var is_bot := true
 var display_name := "Bot"
 var rig
 var combat
+var ability
 var roll
 var dodge
 var slide
@@ -32,7 +38,7 @@ var peek_view_right := Vector3.RIGHT
 var peek_shoulder := 1
 var aim_snapshot_tick := -1
 var _exposure_tick := -1
-var health := 100.0
+var health := MAX_HEALTH
 var weapon_blood := 0.0
 var alive := true
 var kills := 0
@@ -44,7 +50,7 @@ var spawn_point := Vector3.ZERO
 var move_direction := Vector2.ZERO
 var run_requested := false
 var jump_requested := false
-var stamina := 100.0
+var stamina := Stamina.MAX
 var _exhausted := false
 var consume_kind := ""
 var _consume_elapsed := 0.0
@@ -99,6 +105,9 @@ func _ready() -> void:
 	combat.target_mask = 4
 	combat.source_id = slot
 	combat.damage_enabled = false
+	ability = AbilityRunner.new()
+	add_child(ability)
+	ability.setup(self,rig,combat,WALK_SPEED)
 	roll = DodgeRoll.new()
 	add_child(roll)
 	dodge = DodgeStep.new()
@@ -142,10 +151,11 @@ func revive() -> void:
 	jump_requested = false
 	input_age = 0.0
 	reset_stance()
-	health = 100.0
+	health = MAX_HEALTH
 	weapon_blood = 0.0
-	stamina = 100.0
+	stamina = Stamina.MAX
 	_exhausted = false
+	ability.reset()
 	consume_kind = ""
 	_consume_elapsed = 0.0
 	_heal_remaining = 0.0
@@ -172,10 +182,15 @@ func revive() -> void:
 	collision_mask = 1
 	rig.visible = true
 
+func try_ability(slot: int = 0) -> Dictionary:
+	if not authoritative or not alive:
+		return {"ok": false, "message": "You are down."}
+	return ability.activate(slot)
+
 func press_jump(roll_requested: bool) -> void:
 	var grounded := is_on_floor()
 	peek_requested = false
-	if not alive or not cover.prepare_jump():
+	if not alive or ability.active or not cover.prepare_jump():
 		return
 	_exposure_tick = -1
 	combat.stop()
@@ -237,7 +252,7 @@ func stagger(seconds: float) -> void:
 	velocity.z = 0.0
 
 func try_step(direction: Vector3) -> bool:
-	if not authoritative or not alive or combat.stagger_time > 0.0:
+	if not authoritative or not alive or combat.stagger_time > 0.0 or ability.active:
 		return false
 	var planar := Vector3(direction.x,0.0,direction.z)
 	if planar.length_squared() < 0.0001:
@@ -260,6 +275,8 @@ func set_crouch(requested: bool) -> void:
 		rig.set_slide(-1.0,Vector3.FORWARD)
 	if not alive or not is_on_floor() or roll.active:
 		return
+	if requested and ability.active:
+		return
 	if requested and not cover.crouch_requested:
 		var sprinting: bool = run_requested and not _exhausted and stamina > 1 and move_direction.length_squared() > 0.01
 		if slide.try_start(self,cover,sprinting,roll.active):
@@ -269,7 +286,7 @@ func set_crouch(requested: bool) -> void:
 func toggle_cover(preferred_direction: Vector3) -> void:
 	if cover.active:
 		leave_cover()
-	elif alive and is_on_floor() and not roll.active and cover.try_enter(preferred_direction):
+	elif alive and is_on_floor() and not roll.active and not ability.active and cover.try_enter(preferred_direction):
 		slide.reset()
 		rig.set_slide(-1.0,Vector3.FORWARD)
 		_exposure_tick = -1
@@ -337,7 +354,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
 	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
-		var seconds: float = combat.stagger_from_damage(applied)
+		var seconds: float = combat.stagger_from_damage(applied,MAX_HEALTH)
 		rig.set_hit_react(seconds)
 		dodge.reset()
 	if health <= 0:
@@ -357,7 +374,7 @@ func try_consume(kind: String) -> bool:
 		return false
 	if not Archer.CONSUMABLE_DATA.has(kind) or health >= 99.999:
 		return false
-	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active:
+	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active or ability.active:
 		return false
 	combat.stop()
 	if not rig.begin_consumable(kind):
@@ -428,6 +445,13 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		combat.stop_block()
 	roll.advance(delta,is_on_floor())
 	dodge.advance(delta,is_on_floor())
+	ability.advance(delta)
+	if ability.active:
+		move_direction = Vector2.ZERO
+		run_requested = false
+		jump_requested = false
+		peek_requested = false
+		slide.reset()
 	if is_bot:
 		_bot_step(delta,actors)
 	elif input_age > 0.65:
@@ -446,12 +470,12 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		combat.stop_block()
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
-	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01
-	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
-	stamina = clampf(stamina + delta * stamina_rate,0,100)
-	if stamina <= 1:
+	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01 and not ability.active
+	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND)
+	stamina = clampf(stamina + delta * stamina_rate,0,Stamina.MAX)
+	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_exhausted = true
-	elif stamina >= 25:
+	elif stamina >= Stamina.SPRINT_RESUME:
 		_exhausted = false
 	var was_in_cover: bool = cover.active
 	update_combat_cover_side()
@@ -482,6 +506,11 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		var separation := _separation_velocity(actors)
 		velocity.x += separation.x
 		velocity.z += separation.z
+	if ability.active:
+		var charge_velocity: Vector3 = ability.velocity()
+		velocity.x = charge_velocity.x
+		velocity.z = charge_velocity.z
+		jump_requested = false
 	if jump_requested:
 		velocity.y = 7.0
 	elif is_on_floor():
@@ -610,6 +639,7 @@ func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
 		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
 		"weapon_blood":weapon_blood,
+		"stamina":stamina,"ability":ability.snapshot(),
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
 		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
 
@@ -635,6 +665,8 @@ func apply_snapshot(state: Dictionary) -> void:
 	_received_pose = true
 	velocity = state.velocity
 	health = state.health
+	stamina = float(state.get("stamina",stamina))
+	ability.apply_snapshot(state.get("ability",{}))
 	weapon_blood = float(state.get("weapon_blood",weapon_blood))
 	var fresh_weapon_blood := 0.0
 	if not authoritative and had_pose and not replaced and weapon_blood-previous_weapon_blood > 0.01:

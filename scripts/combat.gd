@@ -14,9 +14,18 @@ const BASE_DAMAGE := [30.0, 38.0, 50.0]
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
+# Attack interruption is a roll against the share of max health a hit removed.
+# A chip under the floor never breaks a swing; a hit at the certain fraction
+# always does; the chance ramps linearly between, so a pack of small enemies
+# can be traded through while a big hit still lands with weight.
+const HIT_STAGGER_FLOOR_FRACTION := 0.05
+const HIT_STAGGER_CERTAIN_FRACTION := 0.50
 const HIT_STAGGER_MIN := 0.08
 const HIT_STAGGER_MAX := 0.62
-const HIT_STAGGER_PER_DAMAGE := 0.012
+const HIT_STAGGER_PER_FRACTION := 1.2
+# The rig's recoil is presentation only: it rides the same curve but stays
+# short enough that a shrugged-off chip still reads as a hit, not a stagger.
+const HIT_REACT_MAX := 0.42
 const BLOCK_STAMINA := 22.0
 const DAGGER_BLOCK_STAMINA := 30.0
 const SHIELD_BLOCK_STAMINA := 18.0
@@ -318,11 +327,21 @@ func block_stamina_cost() -> float:
 		return SHIELD_BLOCK_STAMINA
 	return DAGGER_BLOCK_STAMINA if rig.weapon == "dagger" else BLOCK_STAMINA
 
-func stagger_from_damage(amount: float) -> float:
-	# Heavier hits interrupt longer. The minimum keeps a glancing chip from
-	# feeling weightless, while the cap leaves a counter window after a
-	# greatsword hit instead of chaining a second free hit.
-	var seconds := clampf(HIT_STAGGER_MIN+maxf(amount,0.0)*HIT_STAGGER_PER_DAMAGE,HIT_STAGGER_MIN,HIT_STAGGER_MAX)
+static func stagger_chance(amount: float, max_health: float = 100.0) -> float:
+	if max_health <= 0.0:
+		return 1.0
+	var fraction := maxf(amount,0.0)/max_health
+	return clampf((fraction-HIT_STAGGER_FLOOR_FRACTION) \
+		/(HIT_STAGGER_CERTAIN_FRACTION-HIT_STAGGER_FLOOR_FRACTION),0.0,1.0)
+
+func stagger_from_damage(amount: float, max_health: float = 100.0) -> float:
+	# Returns the rig's visible recoil in every case. Only a landed roll also
+	# cancels the swing, guard and movement: the fraction of max health carries
+	# the weight, so 5% chips are traded through and 50% hits always interrupt.
+	var fraction := maxf(amount,0.0)/max_health if max_health > 0.0 else 1.0
+	var seconds := clampf(HIT_STAGGER_MIN+fraction*HIT_STAGGER_PER_FRACTION,HIT_STAGGER_MIN,HIT_STAGGER_MAX)
+	if randf() >= stagger_chance(amount,max_health):
+		return minf(seconds,HIT_REACT_MAX)
 	stagger(seconds)
 	return seconds
 
@@ -341,6 +360,8 @@ func stagger(seconds: float) -> void:
 	melee_progress = 1.0
 	if is_instance_valid(rig) and rig.is_melee():
 		rig.cancel_draw()
+	if is_instance_valid(rig) and rig.is_ability():
+		rig.cancel_ability()
 
 func release_draw() -> void:
 	if rig.phase not in ["DRAWING", "HOLDING"] or _release_pending:
@@ -389,6 +410,8 @@ func stop() -> void:
 		state.exclude.clear()
 	stop_block()
 	rig.cancel_draw()
+	if rig.is_ability():
+		rig.cancel_ability()
 	_sync_display_progress()
 
 func wants_cover_exposure() -> bool:

@@ -173,6 +173,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click left mouse while dual wielding | Left-hand diagonal cut from the left |
 | Click right mouse while dual wielding | Right-hand diagonal cut from the right; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
+| Shift + 1 | **Charge**: lunge forward at 200% walk speed for one second; costs 10 stamina with a 2.5 s cooldown |
 | G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
 | I | Open or close the in-world inventory (15 backpack slots plus the ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
 | P | Open or close the equipment paperdoll (ten equipped slots); while open it owns the cursor and blocks movement, attacks and interactions |
@@ -181,7 +182,13 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
 
-**1 always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail reduces incoming damage by 15%, plate by 30%; mixed sets add the pieces actually worn. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
+### Abilities and stamina
+
+The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and a **SHIFT + 1** ability slot with its icon, stamina cost and cooldown.
+
+Abilities are data-driven by `scripts/ability_rules.gd`. A definition carries an id, slot, keybind, stamina cost, cooldown, duration, speed scale, animation clip, forward lean, sound and icon; `scripts/ability_runner.gd` owns the shared eligibility, spend, cooldown and committed-travel state. The first ability is **Charge**: grounded and out of any other action, it snaps facing and drives the ranger forward for **1 s** at **11 m/s** (200% of the 5.5 m/s walk), spending **10 stamina**. It plays the authored sprint cycle with a forward charging lean. A hit that staggers cancels it; a 5% chip does not, so the charge survives a pack of small attackers. Arena and delve validate the action on the host and replicate the active ability through the existing animation phase and snapshot; every client hears the whoosh.
+
+**1 (without Shift) always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail reduces incoming damage by 15%, plate by 30%; mixed sets add the pieces actually worn. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
 
 ## Running slide
 
@@ -312,7 +319,7 @@ Remote fighters use **snapshot interpolation** rather than chasing the newest pa
 
 Every hit spawns a **scrolling world-space damage number** that rises, drifts and fades; headshots are larger and gold, damage you take is red, and lethal blows are orange. Arena clients derive the number from the authoritative health delta in each snapshot, so all peers see it without a new network message.
 
-Taking damage applies a **hit stagger** of `0.08 s + 0.012 s per damage`, capped at **0.62 s**. A light dagger hit interrupts briefly; a greatsword or headshot interrupts longer. The victim's movement input, guard, draw, throw and swing are interrupted, the torso and head recoil visibly, and the cap still leaves a counter window. The recoil replicates through the animation phase as `STAGGER` without adding a snapshot field.
+Taking damage rolls an **attack interruption** against the share of max health the hit removed. A hit under **5%** never breaks a swing; a hit at **50%** or more always does; the chance ramps linearly between, so three small enemies can be traded through while a heavy hit lands with weight. A landed roll staggers for `0.08 s + 1.2 s × damage share of max health`, capped at **0.62 s**. The victim's movement input, guard, draw, throw and swing are interrupted, the torso and head recoil visibly, and the cap still leaves a counter window. A shrugged-off hit still rocks the pose and cancels a consumable but leaves the swing running. The recoil replicates through the animation phase as `STAGGER` without adding a snapshot field.
 
 Fighters no longer hard-collide with each other. Their capsules have a **soft separation** that only pushes when centres are inside **0.46 m**, which lets two players close to stabbing distance without being shoved off their aim. World geometry, cover, blades and projectiles still collide normally.
 
@@ -462,11 +469,12 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/consumable_regression.gd
 & $Godot --headless --path . --script res://tests/blood_regression.gd
 & $Godot --headless --path . --script res://tests/corpse_regression.gd
+& $Godot --headless --path . --script res://tests/ability_regression.gd
 ```
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
 
-`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold.
+`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold. `ability_regression.gd` checks the charge definition and 1000-stamina pool, committed travel and animation/replication, chip versus half-health cancellation, rejection cases, the snapshot budget, the Shift + 1 frontier binding and the arena host action.
 
 `delve_regression.gd` checks the endless loop: the fall-in start, the altar phase, a sealed scaled wave, the clear delay, cache spawn, rope descent, floor-hole opening, chest rewards, depth-two recycling with three devils, and the rope return to town. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the wave and cache, and both observe the descent into depth two.
 

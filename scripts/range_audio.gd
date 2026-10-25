@@ -19,6 +19,7 @@ func _ready() -> void:
 	sounds["parry"] = _synthesize(0.36, 1480.0, 0.14, 2350.0)
 	sounds["block"] = _synthesize(0.22, 170.0, 0.5, 82.0)
 	sounds["heal"] = _synthesize(0.42, 660.0, 0.03, 990.0)
+	sounds["charge"] = _synthesize(0.55, 118.0, 0.62, 640.0)
 
 func play_sound(sound: String) -> void:
 	if muted:
@@ -26,7 +27,7 @@ func play_sound(sound: String) -> void:
 	var voice := voices[voice_index]
 	voice_index = (voice_index + 1) % voices.size()
 	voice.stream = sounds[sound]
-	voice.volume_db = -5.0 if sound == "clang" else -9.0 if sound == "parry" else -13.0
+	voice.volume_db = -5.0 if sound == "clang" else -9.0 if sound in ["parry","charge"] else -13.0
 	voice.play()
 
 func _synthesize(duration: float, frequency: float, noise: float, end_frequency: float) -> AudioStreamWAV:

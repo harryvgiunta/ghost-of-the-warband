@@ -8,6 +8,7 @@ const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -494,7 +495,14 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 		return
 	_snapshot_ticks[slot] = tick
 	last_snapshot_tick = maxi(last_snapshot_tick,tick)
+	var previous_ability := str(actors[slot].ability.active_id)
 	actors[slot].apply_snapshot(state)
+	var current_ability := str(actors[slot].ability.active_id)
+	if actors[slot].ability.active and current_ability != previous_ability:
+		var definition := AbilityRules.by_slot(int(actors[slot].ability.active_slot))
+		var sound := str(definition.get("sound",""))
+		if not sound.is_empty():
+			audio.play_sound(sound)
 
 func send_action(action: String, value: Variant = null) -> void:
 	if local_slot < 0:
@@ -633,6 +641,15 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		"consume":
 			if typeof(value) == TYPE_STRING and value in ["bandage","potion"]:
 				actor.try_consume(value)
+		"ability":
+			if typeof(value) != TYPE_INT or int(value) < 0 or int(value) >= AbilityRules.SLOT_COUNT:
+				return
+			var outcome: Dictionary = actor.try_ability(int(value))
+			if bool(outcome.get("ok",false)):
+				var definition: Dictionary = outcome.get("definition",{})
+				var sound := str(definition.get("sound",""))
+				if not sound.is_empty():
+					audio.play_sound(sound)
 		"armor":
 			if typeof(value) != TYPE_DICTIONARY:
 				return
@@ -762,7 +779,8 @@ func _process(delta: float) -> void:
 		"shield":actor.rig.shield_equipped,
 		"left_melee":actor.rig.melee_progress_for("left"),"right_melee":actor.rig.melee_progress_for("right"),
 		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
-		"attack_parry":actor.rig.weapon == "dual" and actor.rig.in_strike_window()})
+		"attack_parry":actor.rig.weapon == "dual" and actor.rig.in_strike_window(),
+		"ability":actor.ability.hud_state(0)})
 	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched,actor.rig.slide_progress >= 0.0)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
@@ -930,7 +948,11 @@ func _unhandled_input(event: InputEvent) -> void:
 						_world_ui.open_equipment()
 			return
 		match event.keycode:
-			KEY_1: send_action("weapon","bow")
+			KEY_1:
+				if event.shift_pressed:
+					send_action("ability",0)
+				else:
+					send_action("weapon","bow")
 			KEY_2: send_action("weapon","sword")
 			KEY_3: send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)

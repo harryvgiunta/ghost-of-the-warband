@@ -53,6 +53,7 @@ TESTS = [
     "consumable_regression",
     "blood_regression",
     "corpse_regression",
+    "ability_regression"
 ]
 FIXED_FPS = {"cover_movement_regression", "weapon_input_regression"}
 TIMEOUT = 120.0

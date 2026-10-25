@@ -9,6 +9,9 @@ const DevilMob = preload("res://scripts/devil_mob.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const Stamina = preload("res://scripts/stamina.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -22,6 +25,7 @@ const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 const PICKUP_RADIUS := 1.6
 const FULL_MESSAGE_INTERVAL := 2.5
+const MAX_HEALTH := 100.0
 # Deterministic frontier drops: every entry is a real PlayerState item id and the
 # first eight cover all eight equipment categories the paperdoll understands.
 const LOOT_SEQUENCE := [
@@ -41,6 +45,7 @@ var _delve_host := false
 var _delve_port := 7777
 var _delve_name := ""
 var combat
+var ability
 var roll
 var step
 var slide
@@ -58,8 +63,8 @@ var thrown_weapons: Array[Node3D] = []
 var loot_pickups: Array[Node3D] = []
 var _loot_cursor := 0
 var _full_message_cooldown := 0.0
-var health := 100.0
-var stamina := 100.0
+var health := MAX_HEALTH
+var stamina := Stamina.MAX
 var _consume_kind := ""
 var _consume_time := 0.0
 var _heal_remaining := 0.0
@@ -135,6 +140,9 @@ func _ready() -> void:
 	add_child(cover)
 	cover.setup(player,collider)
 	combat.cover = cover
+	ability = AbilityRunner.new()
+	add_child(ability)
+	ability.setup(self,archer,combat,WALK_SPEED)
 	camera = Camera3D.new()
 	camera.name = "AdventureCamera"
 	camera.fov = 59.0
@@ -302,6 +310,7 @@ func _drop_field_loot(item_id: String) -> void:
 func _physics_process(delta: float) -> void:
 	roll.advance(delta,player.is_on_floor())
 	step.advance(delta,player.is_on_floor())
+	ability.advance(delta)
 	var input_vector := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
@@ -317,13 +326,16 @@ func _physics_process(delta: float) -> void:
 	if combat.stagger_time > 0.0:
 		input_vector = Vector2.ZERO
 		step.active = false
-	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == ""
+	if ability.active:
+		input_vector = Vector2.ZERO
+		slide.reset()
+	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == "" and not ability.active
 	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
-	var stamina_rate: float = 0.0 if combat.blocking else (-19.0 if running or slide.active else 13.0)
-	stamina = clampf(stamina + delta * stamina_rate, 0.0, 100.0)
-	if stamina <= 1.0:
+	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND)
+	stamina = clampf(stamina + delta * stamina_rate, 0.0, Stamina.MAX)
+	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_sprint_exhausted = true
-	elif stamina >= 25.0:
+	elif stamina >= Stamina.SPRINT_RESUME:
 		_sprint_exhausted = false
 	var camera_right := Vector3(cos(camera_yaw), 0, -sin(camera_yaw))
 	var camera_back := Vector3(sin(camera_yaw), 0, cos(camera_yaw))
@@ -350,6 +362,11 @@ func _physics_process(delta: float) -> void:
 	if roll.active:
 		player.velocity.x = roll.direction.x * DodgeRoll.SPEED
 		player.velocity.z = roll.direction.z * DodgeRoll.SPEED
+	if ability.active:
+		var charge_velocity: Vector3 = ability.velocity()
+		player.velocity.x = charge_velocity.x
+		player.velocity.z = charge_velocity.z
+		_jump_requested = false
 	if _jump_requested and not inspecting and not hud.map_open:
 		player.velocity.y = 7.0
 	elif player.is_on_floor():
@@ -390,7 +407,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time)
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -490,7 +507,7 @@ func begin_attack(hand: String = "right", variant: String = "") -> void:
 		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger","dual"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
 
 func quick_step(side: int) -> void:
-	if inspecting or hud.map_open or _cursor_free or side == 0 or combat.stagger_time > 0.0:
+	if inspecting or hud.map_open or _cursor_free or side == 0 or combat.stagger_time > 0.0 or ability.active:
 		return
 	_cancel_consumable()
 	var direction: Vector3 = Vector3(cos(camera_yaw),0,-sin(camera_yaw))*signf(float(side))
@@ -556,7 +573,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _ui_open():
 			return
 		match event.keycode:
-			KEY_1: equip_weapon("bow")
+			KEY_1:
+				if event.shift_pressed:
+					activate_ability(0)
+				else:
+					equip_weapon("bow")
 			KEY_2: equip_weapon("sword")
 			KEY_3: equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
@@ -646,6 +667,8 @@ func cancel_input() -> void:
 	_orbiting = false
 	_peek_requested = false
 	_cancel_consumable()
+	if is_instance_valid(ability):
+		ability.cancel()
 	combat.stop()
 
 func equip_bow(index: int) -> void:
@@ -680,7 +703,7 @@ func equip_shield(value: bool) -> void:
 	audio.play_sound("equip")
 
 func toggle_cover() -> void:
-	if inspecting or hud.map_open or _cursor_free:
+	if inspecting or hud.map_open or _cursor_free or ability.active:
 		return
 	_cancel_consumable()
 	cancel_input()
@@ -695,7 +718,7 @@ func toggle_cover() -> void:
 		hud.show_feedback("Move closer to a tree, wall or solid debris and stand on the ground.")
 
 func toggle_crouch() -> void:
-	if inspecting or hud.map_open or _cursor_free or not player.is_on_floor() or roll.active:
+	if inspecting or hud.map_open or _cursor_free or not player.is_on_floor() or roll.active or ability.active:
 		return
 	_cancel_consumable()
 	var requested: bool = not cover.crouch_requested
@@ -707,7 +730,7 @@ func toggle_crouch() -> void:
 	cover.crouch_requested = requested
 
 func press_jump(roll_requested: bool) -> void:
-	if inspecting or hud.map_open or _cursor_free:
+	if inspecting or hud.map_open or _cursor_free or ability.active:
 		return
 	_cancel_consumable()
 	var grounded := player.is_on_floor()
@@ -734,6 +757,26 @@ func _armor_summary() -> String:
 func _update_loadout() -> void:
 	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
 
+func activate_ability(slot: int) -> void:
+	if inspecting or hud.map_open or _cursor_free or _ui_open():
+		return
+	if not is_instance_valid(ability) or ability.active:
+		return
+	var reason: String = ability.blocker(slot)
+	if not reason.is_empty():
+		hud.show_feedback(reason,1.6)
+		return
+	cancel_input()
+	var outcome: Dictionary = ability.activate(slot)
+	if not bool(outcome.get("ok",false)):
+		hud.show_feedback(str(outcome.get("message","That ability is not ready.")),1.6)
+		return
+	var definition: Dictionary = outcome.get("definition",{})
+	var sound := str(definition.get("sound",""))
+	if not sound.is_empty():
+		audio.play_sound(sound)
+	hud.show_feedback("%s  /  -%d stamina" % [str(definition.get("name","")),int(float(definition.get("stamina_cost",0.0)))],1.2)
+
 func use_consumable(kind: String) -> void:
 	if not Archer.CONSUMABLE_DATA.has(kind):
 		return
@@ -749,7 +792,7 @@ func use_consumable(kind: String) -> void:
 	if combat.stagger_time > 0.0:
 		hud.show_feedback("Recover your footing before using %s." % String(data.name).to_lower())
 		return
-	if not player.is_on_floor() or roll.active or slide.active:
+	if not player.is_on_floor() or roll.active or slide.active or ability.active:
 		hud.show_feedback("Stand on solid ground to use %s." % String(data.name).to_lower())
 		return
 	cancel_input()
@@ -873,8 +916,8 @@ func interact() -> void:
 		"portal":
 			_enter_arena()
 		"camp":
-			health = 100.0
-			stamina = 100.0
+			health = MAX_HEALTH
+			stamina = Stamina.MAX
 			hud.show_feedback("Rested. The town is waiting.")
 		"waystone":
 			activated[_interaction_id] = true
@@ -969,7 +1012,7 @@ func take_damage(amount: float, react: bool = true) -> void:
 	var applied: float = amount * (1.0 - archer.armor_reduction())
 	health = maxf(0.0, health - applied)
 	if react:
-		var seconds: float = combat.stagger_from_damage(applied)
+		var seconds: float = combat.stagger_from_damage(applied,MAX_HEALTH)
 		archer.set_hit_react(seconds)
 		step.reset()
 	DamageNumbers.spawn(self,player.global_position,applied,"self",false,health <= 0.0)
@@ -999,9 +1042,10 @@ func return_to_camp() -> void:
 	archer.set_roll(-1.0,Vector3.FORWARD)
 	player.global_position = world.player_spawn + Vector3(0, 0.25, 0)
 	player.velocity = Vector3.ZERO
-	health = 100.0
-	stamina = 100.0
+	health = MAX_HEALTH
+	stamina = Stamina.MAX
 	_sprint_exhausted = false
+	ability.reset()
 	inspecting = false
 	hud.set_inspecting(false)
 	camera_yaw = 0.22

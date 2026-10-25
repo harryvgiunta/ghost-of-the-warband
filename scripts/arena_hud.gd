@@ -14,6 +14,7 @@ signal shield_selected(active: bool)
 signal consumable_selected(kind: String)
 
 const UI = preload("res://scripts/hud.gd")
+const AbilitySlot = preload("res://scripts/ability_slot.gd")
 var reticle := Vector2.ZERO
 var reticle_visible := false
 var lobby: Panel
@@ -31,6 +32,7 @@ var toast_label: Label
 var _toast_time := 0.0
 var _cover_status: Label
 var bar: ProgressBar
+var _ability_slot
 var bow_buttons: Array[Button] = []
 var armor_buttons: Array[Button] = []
 var _armor_pieces: Dictionary = {}
@@ -114,6 +116,11 @@ func _ready() -> void:
 	health_label = _ui._label(bottom,"",Vector2(18,10),16,UI.TEAL)
 	attack_label = _ui._label(bottom,"",Vector2(18,35),14,UI.CREAM)
 	bar = _ui._bar(bottom,Vector2(18,73),Vector2(604,8),UI.GOLD)
+	_ability_slot = AbilitySlot.new()
+	_ability_slot.position = Vector2(24,-143)
+	_ability_slot.configure(0)
+	_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT,true)
+	match_ui.add_child(_ability_slot)
 	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(620,116))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
@@ -180,7 +187,7 @@ func _ready() -> void:
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1  Charge   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -219,7 +226,14 @@ func update_match(state: Dictionary) -> void:
 	var left_melee := float(state.get("left_melee",1.0))
 	var right_melee := float(state.get("right_melee",1.0))
 	var consume_time := float(state.get("phase_time",0.0))
-	if state.phase == "BANDAGE":
+	var ability_state: Dictionary = state.get("ability",{})
+	_ability_slot.update_state(ability_state)
+	if state.phase == "ABILITY":
+		var charge_ratio := 0.0
+		if not ability_state.is_empty():
+			charge_ratio = clampf(float(ability_state.get("elapsed",0.0))/maxf(float(ability_state.get("duration",1.0)),0.001),0.0,1.0)
+		attack_label.text = "CHARGING FORWARD  %d%%  /  SHIFT + 1" % int(charge_ratio * 100.0)
+	elif state.phase == "BANDAGE":
 		attack_label.text = "WRAPPING BANDAGE  %d%%  /  STAND STILL" % int(clampf(consume_time/3.0,0.0,1.0)*100.0)
 	elif state.phase == "DRINK":
 		attack_label.text = "DRINKING POTION  %d%%" % int(clampf(consume_time/0.5,0.0,1.0)*100.0)
@@ -266,7 +280,12 @@ func update_match(state: Dictionary) -> void:
 			attack_label.text = "UNARMED / PRESS P TO EQUIP"
 		else:
 			attack_label.text = "READY / LMB DIAGONAL BY SHOULDER / WHEEL UP STAB / WHEEL DOWN OVERHEAD"
-	if state.phase == "BANDAGE":
+	if state.phase == "ABILITY":
+		var charge_ratio := 0.0
+		if not ability_state.is_empty():
+			charge_ratio = clampf(float(ability_state.get("elapsed",0.0))/maxf(float(ability_state.get("duration",1.0)),0.001),0.0,1.0)
+		bar.value = charge_ratio * 100.0
+	elif state.phase == "BANDAGE":
 		bar.value = clampf(consume_time/3.0,0.0,1.0) * 100.0
 	elif state.phase == "DRINK":
 		bar.value = clampf(consume_time/0.5,0.0,1.0) * 100.0

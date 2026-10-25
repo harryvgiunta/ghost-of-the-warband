@@ -4,6 +4,8 @@ extends Control
 signal hub_requested
 signal surface_requested
 
+const AbilitySlot = preload("res://scripts/ability_slot.gd")
+const Stamina = preload("res://scripts/stamina.gd")
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
@@ -35,6 +37,7 @@ var _row_boxes: Array[HBoxContainer] = []
 var _health_bar: ProgressBar
 var _stamina_bar: ProgressBar
 var _stamina_label: Label
+var _ability_slot
 var _equipment_label: Label
 var _readiness_label: Label
 var _prompt_panel: Panel
@@ -148,8 +151,14 @@ func _build_vitals() -> void:
 	vitals_label.size = Vector2(272, 18)
 	_health_bar = _bar(vitals, Vector2(14, 32), Vector2(272, 10), TEAL)
 	_stamina_bar = _bar(vitals, Vector2(14, 52), Vector2(272, 6), GOLD)
-	_stamina_label = _label(vitals, "STAMINA  100 / 100", Vector2(14, 62), 10, MUTED)
+	_stamina_bar.max_value = Stamina.MAX
+	_stamina_label = _label(vitals, "STAMINA  %d / %d" % [int(Stamina.MAX),int(Stamina.MAX)], Vector2(14, 62), 10, MUTED)
 	_stamina_label.size = Vector2(272, 14)
+	_ability_slot = AbilitySlot.new()
+	_ability_slot.position = Vector2(332, -196)
+	_ability_slot.configure(0)
+	_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
+	add_child(_ability_slot)
 	_equipment_label = _label(vitals, "", Vector2(14, 82), 11, GOLD)
 	_equipment_label.size = Vector2(272, 16)
 	_equipment_label.clip_text = true
@@ -309,11 +318,13 @@ func _ensure_party_rows(count: int) -> void:
 func update_local(state: Dictionary) -> void:
 	_ensure_ui()
 	var health := float(state.get("health", 100.0))
-	var stamina := float(state.get("stamina", 100.0))
+	var stamina := float(state.get("stamina", Stamina.MAX))
 	vitals_label.text = "HEALTH  %d / 100" % int(health)
 	_health_bar.value = clampf(health, 0.0, 100.0)
-	_stamina_bar.value = clampf(stamina, 0.0, 100.0)
-	_stamina_label.text = "STAMINA  %d / 100" % int(stamina)
+	_stamina_bar.value = clampf(stamina, 0.0, Stamina.MAX)
+	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(Stamina.MAX)]
+	var ability_state: Dictionary = state.get("ability",{})
+	_ability_slot.update_state(ability_state)
 	var weapon := str(state.get("weapon", "")).to_upper()
 	var movement := str(state.get("movement", "OPEN")).to_upper()
 	if weapon.is_empty():
@@ -326,6 +337,8 @@ func update_local(state: Dictionary) -> void:
 	var progress := float(state.get("attack_progress", 1.0))
 	var interval := maxf(0.001, float(state.get("attack_interval", 0.0)))
 	var readiness := _readiness_line(phase, draw, progress, interval, blocking, parry)
+	if phase == "ABILITY":
+		readiness = "CHARGING FORWARD  /  SHIFT + 1"
 	var left := float(state.get("left", 1.0))
 	var right := float(state.get("right", 1.0))
 	if left < 0.999999 or right < 0.999999:

@@ -226,9 +226,10 @@ func run() -> void:
 	game._on_enemy_attack(enemy,13.0)
 	check(game.health == 100.0 and enemy.state == "STAGGER", "Frontier parry prevents damage and staggers the wolf or sentinel")
 	await create_timer(0.30).timeout
+	var stamina_before: float = game.stamina
 	game._on_enemy_attack(enemy,13.0)
 	check(game.health == 100.0, "Frontier held block prevents damage")
-	check(game.stamina < 100.0, "Frontier standard block spends stamina")
+	check(is_equal_approx(game.stamina,stamina_before-Combat.BLOCK_STAMINA), "Frontier standard block spends one stamina chunk")
 	check(not game.combat.blocking or game.combat.block_time > Combat.PARRY_WINDOW, "Frontier guard timer advanced past the parry window")
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_RIGHT

@@ -16,6 +16,7 @@ const Staff = preload("res://scripts/staff.gd")
 const FocusItem = preload("res://scripts/focus_item.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
@@ -225,6 +226,11 @@ var _step_progress := -1.0
 var _step_direction := Vector3.RIGHT
 var _step_facing_hold := 0.0
 var _hit_react := 0.0
+var ability_id := ""
+var ability_clip := ""
+var ability_duration := 1.0
+var ability_slot := -1
+var ability_lean := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
 var _offhand_weapon_basis := Basis.IDENTITY
@@ -429,6 +435,47 @@ func cancel_consumable() -> void:
 
 func is_consuming() -> bool:
 	return phase in ["BANDAGE","DRINK"]
+
+func begin_ability(slot: int, id: String, clip: String, seconds: float, direction: Vector3) -> void:
+	if not _built:
+		return
+	ability_slot = slot
+	ability_id = id
+	ability_clip = clip if _player.has_animation(clip) else "Sprint_Loop"
+	ability_duration = maxf(seconds,0.01)
+	ability_lean = float(AbilityRules.by_slot(slot).get("lean",0.0))
+	phase = "ABILITY"
+	_phase_time = 0.0
+	draw_amount = 0.0
+	charge_frozen = false
+	_blocking = false
+	_clear_melee()
+	consumable_kind = ""
+	var planar := Vector3(direction.x,0.0,direction.z)
+	if planar.length_squared() > 0.000001:
+		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
+	_update_pose(0.0)
+
+func is_ability() -> bool:
+	return phase == "ABILITY"
+
+func ability_progress() -> float:
+	return clampf(_phase_time/maxf(ability_duration,0.01),0.0,1.0)
+
+func cancel_ability() -> void:
+	if phase != "ABILITY":
+		return
+	_reset_ability_state()
+	_update_pose(0.0)
+
+func _reset_ability_state() -> void:
+	phase = "READY"
+	_phase_time = 0.0
+	ability_id = ""
+	ability_clip = ""
+	ability_duration = 1.0
+	ability_slot = -1
+	ability_lean = 0.0
 
 func _update_consumable_props() -> void:
 	if _bandage_prop == null or _potion_prop == null:
@@ -1204,6 +1251,10 @@ func get_animation_state() -> Dictionary:
 		var variant_code := MELEE_VARIANTS.find(_left_variant)
 		var elapsed_code := int(round(_left_melee_time*1000.0))+1 if _left_melee_time >= 0.0 else 0
 		melee_secondary = float((elapsed_code << 2) | variant_code)
+	elif is_ability():
+		# The slot rides in the existing draw scalar; time carries the elapsed
+		# ability clock, so a new ability needs no extra snapshot key.
+		melee_secondary = float(ability_slot+1)
 	var presentation := "GUARD" if _blocking else phase
 	var presentation_time := _phase_time
 	if _hit_react > 0.0001 and phase == "READY" and not _blocking:
@@ -1260,6 +1311,20 @@ func apply_animation_state(state: Dictionary) -> void:
 		_sync_primary_hand()
 		draw_amount = 0.0
 		_hit_react = 0.0
+	elif replicated_phase == "ABILITY":
+		var incoming_slot := maxi(int(round(float(state.draw)))-1,0)
+		var definition := AbilityRules.by_slot(incoming_slot)
+		ability_slot = incoming_slot
+		ability_id = str(definition.get("id",""))
+		ability_clip = str(definition.get("animation","Sprint_Loop"))
+		ability_duration = maxf(float(definition.get("duration",1.0)),0.01)
+		ability_lean = float(definition.get("lean",0.0))
+		phase = "ABILITY"
+		_phase_time = float(state.time)
+		draw_amount = 0.0
+		consumable_kind = ""
+		_hit_react = 0.0
+		_clear_melee()
 	elif replicated_phase == "STAGGER":
 		_left_melee_time = -1.0
 		_right_melee_time = -1.0
@@ -1463,6 +1528,10 @@ func _advance_step(delta: float) -> void:
 		"BANDAGE","DRINK":
 			var consume_length := float(CONSUMABLE_DATA.get(consumable_kind, {}).get("seconds", 0.0))
 			_phase_time = minf(_phase_time, consume_length)
+		"ABILITY":
+			_phase_time = minf(_phase_time, ability_duration)
+	if phase == "ABILITY" and _phase_time >= ability_duration-0.000001:
+		_reset_ability_state()
 	if phase in ["RECOVER","T_RECOVER"] and _phase_time >= RECOVER_SECONDS-0.000001:
 		phase = "READY"
 		_phase_time = 0.0
@@ -1559,6 +1628,7 @@ func _update_pose(delta: float) -> void:
 	var stepping := _grounded and _step_progress >= 0.0 and _roll_progress < 0.0 and not sliding
 	# The quick step owns its own planted lunge; the forward locomotion cycle
 	# would read as a sprint in the step direction instead of a side step.
+	var ability := phase == "ABILITY"
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var consuming := is_consuming()
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
@@ -1574,7 +1644,7 @@ func _update_pose(delta: float) -> void:
 		diagonal_id = (1 if _melee_hand == "right" else 3)+(1 if melee_variant(_melee_hand) == "diagonal_left" else 0)
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
 	var archery := _archery_weight() if drawing else 0.0
-	if _roll_progress < 0.0 and not consuming and (phase != "READY" or _cover_active):
+	if _roll_progress < 0.0 and not consuming and not ability and (phase != "READY" or _cover_active):
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
 			var yaw := atan2(-offset.x,-offset.z)
@@ -1602,6 +1672,9 @@ func _update_pose(delta: float) -> void:
 	elif consuming:
 		clip = str(CONSUMABLE_DATA.get(consumable_kind, {}).get("clip","Idle_Loop"))
 		time = clampf(_phase_time,0.0,_player.get_animation(clip).length)
+	elif ability:
+		clip = ability_clip if _player.has_animation(ability_clip) else "Sprint_Loop"
+		time = ability_progress()*_player.get_animation(clip).length
 	elif drawing:
 		time = 0.0
 	elif guarding:
@@ -1694,6 +1767,8 @@ func _update_pose(delta: float) -> void:
 		_apply_cover_lean()
 	_apply_melee_swing_path()
 	_apply_hit_react_pose()
+	if ability:
+		_apply_ability_pose()
 	if _grounded and _roll_progress < 0.0:
 		if drawing and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
@@ -2272,6 +2347,27 @@ func _two_hand_wrist_target(target: Vector3, primary: Vector3, primary_radius: f
 		radial = forward-axis*forward.dot(axis)
 	var radius := sqrt(maxf(0.0,primary_radius*primary_radius-along*along))
 	return centre+radial.normalized()*radius
+
+func _apply_ability_pose() -> void:
+	# The authored sprint carries the legs; this overlay drops the chest and
+	# hips over the lead foot and lifts the gaze so the charge reads as weight
+	# moving forward instead of a normal sprint.
+	var progress := ability_progress()
+	var weight := smoothstep(0.0,0.16,progress)*(1.0-smoothstep(0.78,1.0,progress))
+	if weight <= 0.0001 or ability_lean <= 0.0001:
+		return
+	var spine := _bone_world(_bones.spine_01)
+	spine.basis = Basis(global_basis.x,-ability_lean*weight)*spine.basis
+	_set_bone_world(_bones.spine_01,spine)
+	var chest := _bone_world(_bones.spine_03)
+	chest.basis = Basis(global_basis.x,-ability_lean*0.5*weight)*chest.basis
+	_set_bone_world(_bones.spine_03,chest)
+	var head := _bone_world(_bones.Head)
+	head.basis = Basis(global_basis.x,ability_lean*1.1*weight)*head.basis
+	_set_bone_world(_bones.Head,head)
+	var pelvis := _bone_world(_bones.pelvis)
+	pelvis.origin -= global_basis.z*ability_lean*0.22*weight
+	_set_bone_world(_bones.pelvis,pelvis)
 
 func _apply_hit_react_pose() -> void:
 	if _hit_react <= 0.0001 or _roll_progress >= 0.0 or phase != "READY" or _blocking:

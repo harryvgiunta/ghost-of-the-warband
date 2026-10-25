@@ -67,17 +67,30 @@ func run() -> void:
 	var extended: Vector3 = attacker.rig.get_blade_tip("right")
 	var stab_line: Vector3 = (attacker.combat.aim_point-chamber).normalized()
 	check((extended-chamber).dot(stab_line) > 0.18,"The stab blade travels along the crosshair line")
-	# Damage-scaled stagger: heavier hits interrupt longer but not forever.
+	# Attack interruption rolls against the share of max health the hit removed:
+	# a 5% chip never breaks a swing, a 50% hit always does.
 	var victim = fighter(world,1,Vector3(20,0,0))
-	victim.health = 100.0
-	victim.take_damage(14.0,4,false)
-	var light_stagger: float = victim.combat.stagger_time
-	victim.combat.stagger_time = 0.0
+	victim.rig.set_weapon("sword")
+	victim.rig.set_sword(0)
+	check(Combat.stagger_chance(5.0,100.0) <= 0.0001,"A 5% chip cannot interrupt")
+	check(Combat.stagger_chance(25.0,100.0) > 0.3 and Combat.stagger_chance(25.0,100.0) < 0.6,"Interruption chance ramps with the damage share")
+	check(Combat.stagger_chance(50.0,100.0) >= 1.0,"Half of max health always interrupts")
+	check(Combat.stagger_chance(75.0,100.0) >= 1.0,"Interruption stays certain above the half-health anchor")
+	reset_swing(victim)
+	check(victim.combat.begin_melee("right","overhead"),"The hit victim starts a swing")
+	advance(victim,0.15)
+	var swing_progress: float = victim.combat.right_melee_progress
+	victim.take_damage(5.0,4,false)
+	check(victim.combat.stagger_time == 0.0,"A 5% chip does not stagger")
+	check(victim.rig._hit_react > 0.0,"A shrugged chip still rocks the rig")
+	check(victim.rig.phase.begins_with("MELEE") and victim.combat.right_melee_progress >= swing_progress,"The swing continues through a chip")
+	victim.take_damage(5.0,4,false)
+	check(victim.combat.stagger_time == 0.0 and victim.rig.phase.begins_with("MELEE"),"A second chip is also swung through")
 	victim.health = 100.0
 	victim.take_damage(50.0,4,false)
-	var heavy_stagger: float = victim.combat.stagger_time
-	check(light_stagger > 0.1 and heavy_stagger > light_stagger,"Taking damage staggers, and heavier damage staggers longer")
-	check(heavy_stagger <= Combat.HIT_STAGGER_MAX+0.0001,"Hit stagger stays bounded")
+	check(victim.combat.stagger_time > 0.1,"Half of max health interrupts the swing")
+	check(victim.rig.phase == "READY","The interrupted swing returns to neutral")
+	check(victim.combat.stagger_time <= Combat.HIT_STAGGER_MAX+0.0001,"Hit stagger stays bounded")
 	var react_state: Dictionary = victim.rig.get_animation_state()
 	check(str(react_state.phase) == "STAGGER" and float(react_state.time) > 0.0,"A hit presents the stagger phase with its remaining time")
 	var flinch_replica := Archer.new()

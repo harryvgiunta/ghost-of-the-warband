@@ -4,6 +4,7 @@ extends SceneTree
 const Actor = preload("res://scripts/arena_actor.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Combat = preload("res://scripts/combat.gd")
+const Stamina = preload("res://scripts/stamina.gd")
 const STEP := 1.0 / 240.0
 const START_HEALTH := 500.0
 var failures := 0
@@ -247,11 +248,12 @@ func run() -> void:
 	defender.rig.set_weapon("sword")
 	await settle()
 	reset_swing()
+	defender.stamina = Stamina.MAX
 	defender.combat.start_block(Vector3.BACK)
 	defender.combat.advance(0.4)
 	attacker.combat.begin_melee("right","diagonal_right")
 	advance(1.0)
-	check(defender.health == 100.0 and defender.stamina == 100.0-Combat.BLOCK_STAMINA,
+	check(defender.health == 100.0 and defender.stamina == Stamina.MAX-Combat.BLOCK_STAMINA,
 		"A diagonal cleave honors a held guard and spends stamina only once")
 	reset_swing()
 	defender.combat.stop_block()
