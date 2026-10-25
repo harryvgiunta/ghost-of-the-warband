@@ -13,10 +13,14 @@ const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
+const MobSenses = preload("res://scripts/mob_senses.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
-const DEVIL_AGGRO := 30.0
-const DEVIL_LEASH := 48.0
+## How far each kind can see. Distance alone never starts a fight: the mob has
+## to have the ranger in its forward cone with a clear line of sight, and it
+## keeps hunting for `MobSenses.MEMORY_SECONDS` after losing that view.
+const WILD_SIGHT := 23.0
+const DEVIL_SIGHT := 30.0
 const DEVIL_WINDUP := 0.30
 const DEVIL_STRIKE := 0.16
 const DEVIL_RECOVER := 0.30
@@ -48,6 +52,8 @@ var _arms: Array[Node3D] = []
 var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
+var _senses := MobSenses.new()
+var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
 var _orbit_radius := 4.0
@@ -75,6 +81,14 @@ var _target: CharacterBody3D
 func _ready() -> void:
 	name = "BriarWolf" if kind == 0 else ("CinderDevil" if kind == 2 else "RuinSentinel")
 	home = global_position
+	# Watch the road: spawn facing the arriving ranger, like the newer mob
+	# families do. Without a facing the sight cone would stare down -Z forever
+	# and a whole pack could miss a ranger standing beside it.
+	if is_instance_valid(player):
+		var facing := player.global_position - global_position
+		facing.y = 0.0
+		if facing.length_squared() > 0.0001:
+			rotation.y = atan2(-facing.x, -facing.z)
 	max_health = 38.0 if kind == 0 else (DEVIL_HEALTH if kind == 2 else 82.0)
 	health = max_health
 	collision_layer = 2
@@ -109,6 +123,9 @@ func _ready() -> void:
 	_warning = Geo.cylinder(self, warning_radius, warning_radius, 0.018, Vector3(0, 0.035, 0), warning_material, 32)
 	_warning.visible = false
 	_query.collision_mask = 1
+	# Any wilderness mob answers a neighbour's alarm, so one shot at a wolf
+	# brings the rest of the pack and the devils standing nearby.
+	add_to_group(MobSenses.GROUP)
 	if kind == 2:
 		add_to_group("cinder_devils")
 		_dodge = DodgeStep.new()
@@ -247,17 +264,22 @@ func _physics_process(delta: float) -> void:
 		return
 	if not alive:
 		return
-	_target = _resolve_target()
-	if not is_instance_valid(_target):
+	# Sight and the pursuit memory decide aggression for the wolf, the sentinel
+	# and the cinder devil exactly as they do for the newer mob families.
+	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
+		_eye_height(), Callable(self, "_is_hostile"))
+	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
+	if not is_instance_valid(_target) and not pursuit:
 		return
 	if kind == 2:
-		_step_devil(delta)
+		_step_devil(delta, pursuit)
 		return
 	_state_time += delta
-	var displacement := _target.global_position - global_position
+	var focus := _senses.focus() if pursuit else _target.global_position
+	var displacement := focus - global_position
 	displacement.y = 0.0
 	var distance := displacement.length()
-	var target_safe := Vector2(_target.position.x - safe_center.x, _target.position.z - safe_center.z).length() < 19.0
+	var target_safe := MobSenses.in_safe_ring(safe_center, focus)
 	var target_direction := Vector3.ZERO
 	var speed := 3.1 if kind == 0 else 2.2
 	if state == "STAGGER":
@@ -277,10 +299,14 @@ func _physics_process(delta: float) -> void:
 		if _state_time > 0.85:
 			state = "IDLE"
 	else:
-		if not target_safe and distance < 23.0 and global_position.distance_to(home) < 38.0:
+		if pursuit and not target_safe:
 			state = "CHASE"
 			target_direction = displacement.normalized()
-			if distance < 1.65:
+			if not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
+				# Standing over the last sighting: sweep the ground.
+				rotation.y += sin(_state_time * 1.5) * delta * 1.7
+				target_direction = Vector3.ZERO
+			elif _senses.seen and distance < 1.65:
 				state = "WINDUP"
 				_state_time = 0.0
 				_warning.visible = true
@@ -314,6 +340,37 @@ func _resolve_target() -> CharacterBody3D:
 			best = candidate
 	return best if is_instance_valid(best) else player
 
+
+## Everyone this mob could hunt: the local ranger plus every host seat.
+func _candidates() -> Array:
+	var list: Array = []
+	for candidate in targets:
+		if is_instance_valid(candidate) and not list.has(candidate):
+			list.append(candidate)
+	if is_instance_valid(player) and not list.has(player):
+		list.append(player)
+	return list
+
+
+func _sight_range() -> float:
+	return DEVIL_SIGHT if kind == 2 else WILD_SIGHT
+
+
+## Eye height follows the authored body: the wolf looks out low, the sentinel
+## looks out of its carved head.
+func _eye_height() -> float:
+	var height := 1.9 if kind == 1 else 0.95
+	if kind == 2:
+		height = 0.90
+	return maxf(0.6, height * MobSenses.EYE_HEIGHT_FRACTION)
+
+
+## Huntable rangers: alive and outside the town's safe ring.
+func _is_hostile(candidate: Node3D) -> bool:
+	if not is_instance_valid(candidate) or candidate.get("alive") == false:
+		return false
+	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
+
 func _update_cosmetics(delta: float) -> void:
 	if kind == 0:
 		var actual_velocity := get_real_velocity()
@@ -331,18 +388,18 @@ func _update_cosmetics(delta: float) -> void:
 	for arm in _arms:
 		arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
 
-func _step_devil(delta: float) -> void:
+func _step_devil(delta: float, pursuit: bool) -> void:
 	_state_time += delta
 	_dodge.advance(delta,is_on_floor())
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
 	_slide_cooldown = maxf(0.0,_slide_cooldown-delta)
-	var to_target := _target.global_position-global_position
+	var focus := _senses.focus()
+	var to_target := focus-global_position
 	to_target.y = 0.0
 	var distance := to_target.length()
-	var target_safe := Vector2(_target.position.x-safe_center.x,_target.position.z-safe_center.z).length() < 19.0
-	var aggro := not target_safe and distance < DEVIL_AGGRO and global_position.distance_to(home) < DEVIL_LEASH
+	var aggro := pursuit and not MobSenses.in_safe_ring(safe_center, focus)
 	if not aggro:
 		if state != "RETURN":
 			_enter_devil_state("RETURN")
@@ -426,7 +483,10 @@ func _step_devil(delta: float) -> void:
 			if _state_time >= DEVIL_RECOVER:
 				_enter_devil_state("CIRCLE")
 		_:
-			_devil_circle(delta,distance,to_target)
+			if _senses.seen:
+				_devil_circle(delta,distance,to_target)
+			else:
+				_devil_hunt(delta)
 	var was_grounded := is_on_floor()
 	if _dodge.active:
 		var step_velocity: Vector3 = _dodge.velocity()
@@ -482,10 +542,24 @@ func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 		direction += to_player.normalized()*0.8
 	_move_intent = _steer_devil(_devil_with_separation(direction))
 	_move_speed = 6.8
-	_face_intent = _move_intent
+	# A circling predator keeps its eyes on the quarry; facing the orbit
+	# direction would swing the ranger out of the sight cone every lap.
+	_face_intent = to_player
 	if _decision_timer <= 0.0:
 		_decision_timer = 0.38+_rng.randf()*0.35
 		_devil_choose(distance,to_player)
+
+## Lost sight but still remembers: run down the last known spot, then scan.
+func _devil_hunt(delta: float) -> void:
+	var offset := _senses.last_seen-global_position
+	offset.y = 0.0
+	if offset.length() > MobSenses.ARRIVE_DISTANCE:
+		_move_intent = _steer_devil(_devil_with_separation(offset.normalized()))
+		_move_speed = 5.2
+		_face_intent = _move_intent
+		return
+	rotation.y += sin(_state_time*1.5)*delta*1.7
+	_face_intent = -global_basis.z
 
 func _devil_choose(distance: float, to_player: Vector3) -> void:
 	if not is_on_floor():
@@ -680,6 +754,38 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		_enter_dead(true)
+		return
+	_respond_to_attack()
+
+
+## The projectile, blade or spell that landed names itself here before it
+## applies damage, so the mob can turn on an archer it never saw.
+func note_attacker(attacker: Node3D) -> void:
+	_attacker = attacker
+
+
+## A landed blow always starts the fight, and the cry pulls the neighbours in.
+func _respond_to_attack() -> void:
+	var attacker: Node3D = _attacker if is_instance_valid(_attacker) else null
+	_attacker = null
+	if attacker != null and not _is_hostile(attacker):
+		return
+	if attacker == null:
+		var nearest := _resolve_target()
+		if not is_instance_valid(nearest) or not _is_hostile(nearest):
+			return
+		attacker = nearest
+	_senses.notice(attacker,attacker.global_position)
+	MobSenses.alert_pack(self,attacker,_senses.last_seen)
+
+
+## A neighbour was struck within earshot: take up the hunt where it last saw.
+func hear_alert(attacker: Node3D, at: Vector3) -> void:
+	if not alive or replica:
+		return
+	if is_instance_valid(attacker) and not _is_hostile(attacker):
+		return
+	_senses.notice(attacker,at)
 
 ## The local death: collision off, the authored collapse, then the shared hold.
 ## Replicas call it with `announce = false` so the kill stays on the host.

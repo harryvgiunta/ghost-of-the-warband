@@ -23,6 +23,8 @@ var source_id := -1
 var hit_mask := 1 | 2
 var authoritative_damage := true
 var source_rig
+## The caster's body; mobs read it through `note_attacker`.
+var shooter: Node3D
 var attacker_position := Vector3.ZERO
 var visual_only := false
 var _query := PhysicsRayQueryParameters3D.new()
@@ -120,6 +122,8 @@ func _handle_hit(hit: Dictionary, next: Vector3) -> void:
 
 func _apply_direct(unit: Node3D, at: Vector3) -> void:
 	var direction := velocity.normalized()
+	if is_instance_valid(shooter) and unit.has_method("note_attacker"):
+		unit.note_attacker(shooter)
 	if unit.has_method("receive_melee"):
 		unit.receive_melee(damage, source_id, attacker_position, false)
 	else:

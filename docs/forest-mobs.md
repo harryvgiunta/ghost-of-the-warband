@@ -181,6 +181,12 @@ derived from the sampled height field with a per-surface strength from
   the striking hand (`hand_r`) so a claw comes away wet.
 - Death clears collision immediately and hands the body to
   `scripts/corpse_hold.gd` (the shared five-minute corpse lifetime).
+- Aggression is shared with the devils: `scripts/mob_senses.gd` gives every
+  forest mob a 140° sight cone at its profile's `sight` range (22–32 m), a
+  line-of-sight ray against terrain and trees, a 15 s pursuit memory after the
+  view is lost, and a 12 m pack alarm when one of them is struck by an arrow.
+  Walking up behind an unaware mob stays possible; provoking one pulls in the
+  neighbours. The town's safe ring is filtered out of every sighting and alert.
 - The threshold trio spawns about 14 m ahead of the south gate, inside the
   town's 19 m safe ring, so all three are inspectable immediately and idle
   until the ranger leaves the ring. Threshold positions are offsets from

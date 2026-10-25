@@ -19,6 +19,8 @@ var flying := true
 var age := 0.0
 var damage := 0.0
 var source_id := -1
+## The body that threw this weapon; mobs read it through `note_attacker`.
+var shooter: Node3D
 var hit_mask := 1 | 2
 var authoritative_damage := true
 var _visual: Node3D
@@ -66,6 +68,8 @@ func _physics_process(delta: float) -> void:
 		if hit_enemy:
 			if authoritative_damage:
 				var headshot := Hitbox.is_headshot(collider as Node, hit.position)
+				if is_instance_valid(shooter) and collider.has_method("note_attacker"):
+					collider.note_attacker(shooter)
 				collider.take_damage(damage, source_id, headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, headshot)
 			visible = false

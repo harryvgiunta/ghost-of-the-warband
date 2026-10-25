@@ -197,6 +197,13 @@ runtime carries only values glTF cannot express.
   battlefield littered instead of erasing bodies after four seconds. Corpses
   keep no collision, so wave and aggro filters that read `alive` ignore them.
 
+- The `aggro` profile key is now `sight`: aggression is owned by
+  `scripts/mob_senses.gd`, not by a distance radius. A devil fights only what
+  it can see (140° cone, its `sight` range, a clear chest/head ray) and keeps
+  hunting for 15 s after losing the view. A landed arrow, blade or spell names
+  its archer through `note_attacker()`, and the cry alerts every `wild_mobs`
+  mob within 12 m. The old home `leash` is gone.
+
 ## Verification gates
 
 `tests/devil_mobs_regression.gd` loads each GLB and checks:
