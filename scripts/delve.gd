@@ -1,13 +1,14 @@
 extends Node3D
 ## Host-authoritative controller for "The Sunken Delve".
 ##
-## One sealed chamber that never ends: the party drops through the ceiling,
-## touches the altar, breaks a scaled wave of cinder devils, loots the cache,
-## then either climbs the rope to town or drops through the floor into a deeper
-## depth. The same room is recycled, so every run is the same geometry with a
-## higher `depth`. Networking follows the arena: the host simulates every body,
-## clients send input and action intents, and snapshots drive the replicas. All
-## run decisions travel as a reliable run state so the HUD and caches cannot
+## A chain of ritual chambers that never ends: the party drops through the
+## ceiling, touches the altar, wakes the pentagram, survives the summoned wave,
+## loots the cache, then either climbs the rope to town or drops through the
+## floor into a deeper depth. Odd depths are the sanctuary, even depths the
+## ossuary pit; each depth rebuilds the same footprint with a new palette cycle.
+## Networking follows the arena: the host simulates every body, clients send
+## input and action intents, and snapshots drive the replicas. All run decisions
+## travel as a reliable run state so the HUD, the FX and the caches cannot
 ## drift apart.
 
 const Actor = preload("res://scripts/delve_actor.gd")
@@ -31,16 +32,25 @@ const INTERACT_RANGE := 4.0
 const PICKUP_RADIUS := 1.6
 const DROP_FULL_INTERVAL := 2.5
 const CHEST_RANGE := 3.5
-const DEVIL_TRICKLE := 1.4
 const CLEAR_DELAY := 2.2
 const SNAPSHOT_INTERVAL := 0.05
 const RUN_STATE_INTERVAL := 0.2
 const MAX_SHOTS := 128
 const AUTO_BEGIN_DELAY := 2.0
 const HOOK_KILL_DELAY := 2.0
-const MAX_DEPTH_ENEMIES := 8
-const BASE_DEPTH_ENEMIES := 2
-const WEAPON_CYCLE := ["claw","dagger","sword"]
+# Summoning ritual and wave schedule. Odd depths are the sanctuary, even depths
+# the ossuary, and each room alternates through a fresh palette cycle.
+const RITUAL_SECONDS := 3.2
+const WAVE1_TOTAL := 10
+const WAVE1_SECONDS := 30.0
+const WAVE2_TOTAL := 20
+const WAVE2_SECONDS := 40.0
+const SPAWN_CURVE := 0.6
+const SPAWN_PLAYER_CLEARANCE := 3.0
+const SPAWN_MUTUAL_CLEARANCE := 1.6
+const DROP_LAND_Y := 1.5
+const DROP_GRACE := 0.3
+const RUSH_TIME_SCALE := 8.0
 # Cache loot climbs in tiers. The depth picks the tier; run_seed + depth picks
 # the exact piece, so every peer agrees without sharing an RNG.
 const LOOT_TIERS := [
@@ -65,6 +75,9 @@ var chest_ready := false
 var chest_open := false
 var rope_lowered := false
 var hole_open := false
+var wave_total := 0
+var wave_number := 1
+var spawn_time_scale := 1.0
 var run_seed := 0
 var server_tick := 0
 var last_snapshot_tick := -1
@@ -84,8 +97,13 @@ var _elapsed := 0.0
 var _mode_elapsed := 0.0
 var _wave_elapsed := 0.0
 var _clear_timer := 0.0
-var _spawn_timer := 0.0
-var _spawn_queue: Array = []
+var _wave_plan: Array = []
+var _wave_cursor := 0
+var _wave_clock := 0.0
+var _ritual_elapsed := 0.0
+var _ritual_progress := 0.0
+var _drop_elapsed := 0.0
+var _waves_started := 0
 var _next_devil_id := 1
 var _devil_nodes: Dictionary = {}
 var _devil_dead_ids: Dictionary = {}
@@ -206,6 +224,9 @@ func _read_arguments() -> void:
 			_auto_start = true
 		elif argument == "--delve-kill-wave":
 			_kill_wave_hook = true
+		elif argument == "--delve-rush":
+			# Only the spawn clock is compressed; the ritual still plays out.
+			spawn_time_scale = RUSH_TIME_SCALE
 	var session_port := int(pending.get("port", port))
 	var session_name := str(pending.get("name", player_name))
 	var final_port := port if port_set else session_port
@@ -264,6 +285,9 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 	_peer_slots[1] = 0
 	_player_name = _safe_name(player_name)
 	run_seed = randi()
+	# A re-host in the same scene may follow an ossuary run; start the rebuild
+	# on the sanctuary so depth one always has its altar.
+	world.apply_room(World.ROOM_SANCTUARY,1)
 	_on_devils_reset_local()
 	for actor in actors:
 		actor.authoritative = true
@@ -349,8 +373,13 @@ func leave_game() -> void:
 	_elapsed = 0.0
 	_wave_elapsed = 0.0
 	_clear_timer = 0.0
-	_spawn_timer = 0.0
-	_spawn_queue.clear()
+	_wave_plan.clear()
+	_wave_cursor = 0
+	_wave_clock = 0.0
+	_ritual_elapsed = 0.0
+	_ritual_progress = 0.0
+	_drop_elapsed = 0.0
+	_waves_started = 0
 	_auto_fired = false
 	_kill_fired = false
 	_next_devil_id = 1
@@ -365,6 +394,8 @@ func leave_game() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	phase = "ALTAR"
 	depth = 1
+	wave_total = 0
+	wave_number = 1
 	chest_ready = false
 	chest_open = false
 	rope_lowered = false
@@ -395,6 +426,8 @@ func leave_game() -> void:
 		world.set_sealed(false)
 		world.set_rope_lowered(false)
 		world.set_hole_open(false)
+		_apply_world_ritual(false,0.0)
+		world.set_beacons(false,false,false)
 
 func _connection_ended(message: String) -> void:
 	if not is_inside_tree():
@@ -1091,9 +1124,15 @@ func _prompt_text() -> String:
 	var pos: Vector3 = actor.global_position
 	match phase:
 		"ALTAR":
-			if pos.distance_to(world.altar_position) <= INTERACT_RANGE:
+			if world.has_altar() and pos.distance_to(world.altar_position) <= INTERACT_RANGE:
 				return "G  TOUCH THE ALTAR"
-			return "Walk to the altar to begin depth %d" % depth
+			if world.has_altar():
+				return "Walk to the altar to begin depth %d" % depth
+			return ""
+		"RITUAL":
+			return "The pentagram wakes - %d devils are coming" % wave_total
+		"DROP":
+			return "The pit is swallowing the party"
 		"WAVE":
 			var remaining := _remaining_enemies()
 			if network_role == "client":
@@ -1439,33 +1478,75 @@ func _exit_tree() -> void:
 func begin_wave() -> void:
 	if network_role != "host" or phase != "ALTAR":
 		return
-	_start_wave()
+	if not world.has_altar():
+		return
+	_begin_ritual()
+
+## The sanctuary altar wakes the pentagram: the room seals, the demonic ritual
+## plays, and the whole wave is planned up front so every peer agrees on what
+## is coming before the first imp surfaces.
+func _begin_ritual() -> void:
+	if network_role != "host":
+		return
+	world.set_sealed(true)
+	_wave_elapsed = 0.0
+	_wave_clock = 0.0
+	_ritual_elapsed = 0.0
+	_ritual_progress = 0.0
+	_drop_elapsed = 0.0
+	_kill_fired = false
+	wave_number = _waves_started + 1
+	_build_wave_plan()
+	_set_phase("RITUAL")
+	hud.show_banner("WAVE %d" % wave_number,2.0)
+	print("DELVE_RITUAL_START room=%s total=%d" % [str(world.room_kind),wave_total])
+	_sync_run_state()
 
 func descend_next_depth() -> void:
 	if network_role != "host" or phase != "CLEARED":
 		return
 	depth += 1
+	var kind := _room_kind(depth)
+	var room_cycle := _room_cycle(depth)
 	_clear_devils()
 	_remove_chest()
 	chest_ready = false
 	chest_open = false
 	rope_lowered = false
 	hole_open = false
-	world.set_rope_lowered(false)
-	world.set_hole_open(false)
-	world.set_sealed(false)
 	_clear_timer = 0.0
 	_wave_elapsed = 0.0
-	_spawn_timer = 0.0
-	_spawn_queue.clear()
+	_wave_clock = 0.0
+	_ritual_elapsed = 0.0
+	_ritual_progress = 0.0
+	_drop_elapsed = 0.0
+	_wave_plan.clear()
+	_wave_cursor = 0
+	wave_total = 0
 	_kill_fired = false
 	_auto_fired = false
 	_mode_elapsed = 0.0
+	# The world rebuilds both rooms on the same footprint, keeps the altar,
+	# rope and hole coordinates, swaps the palette for the new cycle and
+	# resets the sealed barriers, rope, hole and beacons.
+	world.apply_room(kind,room_cycle)
 	_drop_party()
-	_set_phase("ALTAR")
 	hud.show_banner("DEPTH %d" % depth,2.5)
-	print("DELVE_DEPTH_DESCEND depth=%d" % depth)
+	if world.has_altar():
+		_set_phase("ALTAR")
+	else:
+		# The ossuary has no altar: the summoning resumes as soon as the party
+		# has landed on the floor of the pit.
+		_set_phase("DROP")
+		print("DELVE_DROP room=%s" % kind)
+	print("DELVE_DEPTH_DESCEND depth=%d room=%s cycle=%d" % [depth,kind,room_cycle])
 	_sync_run_state()
+
+func _room_kind(value: int) -> String:
+	return World.ROOM_SANCTUARY if value % 2 == 1 else World.ROOM_OSSUARY
+
+func _room_cycle(value: int) -> int:
+	return (value + 1) / 2
 
 func ascend_to_surface() -> void:
 	if network_role != "host":
@@ -1506,41 +1587,177 @@ func reach_phase() -> Dictionary:
 	return state
 
 func _start_wave() -> void:
-	_clear_devils()
-	_remove_chest()
-	chest_ready = false
-	chest_open = false
-	rope_lowered = false
-	hole_open = false
-	world.set_rope_lowered(false)
-	world.set_hole_open(false)
-	world.set_sealed(true)
-	_clear_timer = 0.0
+	_ritual_progress = 1.0
+	_wave_clock = 0.0
 	_wave_elapsed = 0.0
 	_kill_fired = false
-	_spawn_timer = 0.0
-	_spawn_queue.clear()
-	var count := mini(BASE_DEPTH_ENEMIES + (depth - 1),MAX_DEPTH_ENEMIES)
-	var spawn_count: int = maxi(1,world.enemy_spawns.size())
-	var arch_offset: int = (absi(run_seed) + depth) % spawn_count
-	var arch_stride: int = maxi(1, spawn_count / count)
-	for index in count:
-		var weapon := str(WEAPON_CYCLE[(depth - 1 + index) % WEAPON_CYCLE.size()])
-		_spawn_queue.append({"weapon":weapon, "spawn":(arch_offset + index * arch_stride) % spawn_count})
+	_waves_started += 1
 	_set_phase("WAVE")
-	hud.show_banner("DEPTH %d" % depth,2.0)
-	print("DELVE_DEPTH_START depth=%d mobs=%d" % [depth,count])
+	print("DELVE_DEPTH_START depth=%d mobs=%d" % [depth,wave_total])
+	print("DELVE_WAVE_START room=%s wave=%d total=%d" % [str(world.room_kind),wave_number,wave_total])
 	_sync_run_state()
+
+## Public HUD/test surface: copies of the planned entries, in spawn order.
+func wave_plan() -> Array:
+	var plan: Array = []
+	for entry in _wave_plan:
+		plan.append({
+			"role":str(entry.get("role",Devil.ROLE_DEVIL)),
+			"weapon":str(entry.get("weapon","claw")),
+			"at":float(entry.get("at",0.0)),
+			"position":Vector3(entry.get("position",Vector3.ZERO))
+		})
+	return plan
+
+func _wave_duration(kind: String) -> float:
+	return WAVE2_SECONDS if kind == World.ROOM_OSSUARY else WAVE1_SECONDS
+
+func _wave_total_for(kind: String, room_cycle: int) -> int:
+	var cycles := maxi(1,room_cycle) - 1
+	if kind == World.ROOM_OSSUARY:
+		return WAVE2_TOTAL + 3 * cycles
+	return WAVE1_TOTAL + 2 * cycles
+
+## Roles escalate from the cheap imps to the elites that close the wave.
+func _wave_roles(kind: String, total: int) -> Array:
+	var roles: Array = []
+	if kind == World.ROOM_OSSUARY:
+		var imps := mini(maxi(2,int(round(float(total) * 0.2))),total)
+		var brutes := mini(maxi(2,int(round(float(total) * 0.3))),total - imps)
+		for index in imps:
+			roles.append(Devil.ROLE_IMP)
+		for index in total - imps - brutes:
+			roles.append(Devil.ROLE_BONEFIEND)
+		for index in brutes:
+			roles.append(Devil.ROLE_BRUTE)
+		return roles
+	var devils := mini(maxi(2,total / 4),total)
+	for index in total - devils:
+		roles.append(Devil.ROLE_IMP)
+	for index in devils:
+		roles.append(Devil.ROLE_DEVIL)
+	return roles
+
+func _wave_weapon(role: String, role_index: int) -> String:
+	if role == Devil.ROLE_IMP:
+		return "claw" if role_index % 2 == 0 else "dagger"
+	if role == Devil.ROLE_DEVIL:
+		return "dagger" if role_index % 2 == 0 else "sword"
+	return "sword"
+
+## Late-weighted schedule: `at = duration * (i / (total - 1)) ^ SPAWN_CURVE`,
+## so the early ritual beat is quiet and the wave piles up as it closes.
+func _build_wave_plan() -> void:
+	_wave_plan.clear()
+	_wave_cursor = 0
+	_wave_clock = 0.0
+	var kind := str(world.room_kind)
+	var total := _wave_total_for(kind,int(world.cycle))
+	wave_total = total
+	var duration := _wave_duration(kind)
+	var roles := _wave_roles(kind,total)
+	var picked: Array = []
+	var role_counts: Dictionary = {}
+	for index in roles.size():
+		var role := str(roles[index])
+		var role_index := int(role_counts.get(role,0))
+		role_counts[role] = role_index + 1
+		var progress := float(index) / float(maxi(total - 1,1))
+		var point := _wave_spawn_point(index,picked)
+		picked.append(point)
+		_wave_plan.append({
+			"role":role,
+			"weapon":_wave_weapon(role,role_index),
+			"at":duration * pow(progress,SPAWN_CURVE),
+			"position":point,
+			"facing":_face_nearest_ranger(point)
+		})
+
+## Deterministic random floor point for one wave entry. The seed mixes the run
+## seed, the depth and the entry index, so a replayed run and every peer agree.
+## Candidates that crowd a standing ranger or a sibling spawn are rejected; if
+## the floor is that saturated the roomiest candidate still wins, so the wave
+## always surfaces instead of stalling.
+func _wave_spawn_point(index: int, picked: Array) -> Vector3:
+	var candidates: Array = world.spawn_points
+	if candidates.is_empty():
+		return world.altar_position
+	var rng := RandomNumberGenerator.new()
+	rng.seed = absi(run_seed) + depth * 7919 + index * 104729
+	var start := rng.randi_range(0,candidates.size() - 1)
+	var roomiest: Vector3 = candidates[start]
+	var best := -1.0
+	for offset in candidates.size():
+		var point: Vector3 = candidates[(start + offset) % candidates.size()]
+		var clearance := _spawn_clearance(point,picked)
+		if clearance >= 0.0:
+			return point
+		if clearance > best:
+			best = clearance
+			roomiest = point
+	return roomiest
+
+## Negative when a candidate is too close to a standing ranger or to a spawn
+## already claimed by this wave; otherwise its nearest-neighbour distance.
+func _spawn_clearance(point: Vector3, picked: Array) -> float:
+	var clearance := 1.0e9
+	for actor in actors:
+		if actor.peer_id <= 0 or not actor.alive:
+			continue
+		var gap := _flat_distance(point,actor.global_position)
+		if gap < SPAWN_PLAYER_CLEARANCE:
+			return -1.0
+		clearance = minf(clearance,gap)
+	for other in picked:
+		var gap := _flat_distance(point,other)
+		if gap < SPAWN_MUTUAL_CLEARANCE:
+			return -1.0
+		clearance = minf(clearance,gap)
+	return clearance
+
+func _flat_distance(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x,a.z - b.z).length()
+
+func _face_nearest_ranger(point: Vector3) -> Vector3:
+	var nearest: Variant = null
+	var best := 1.0e9
+	for actor in actors:
+		if actor.peer_id <= 0 or not actor.alive:
+			continue
+		var gap := _flat_distance(point,actor.global_position)
+		if gap < best:
+			best = gap
+			nearest = actor
+	if nearest == null:
+		return Vector3.FORWARD
+	var facing: Vector3 = nearest.global_position - point
+	facing.y = 0.0
+	if facing.length_squared() < 0.0001:
+		return Vector3.FORWARD
+	return facing.normalized()
 
 func _advance_host_state(delta: float) -> void:
 	match phase:
+		"RITUAL":
+			_ritual_elapsed += delta
+			_ritual_progress = clampf(_ritual_elapsed / RITUAL_SECONDS,0.0,1.0)
+			world.set_ritual(true,_ritual_progress)
+			if _ritual_elapsed >= RITUAL_SECONDS:
+				_start_wave()
+		"DROP":
+			# The ossuary summoning starts once every survivor is on the floor.
+			_drop_elapsed += delta
+			if _drop_elapsed >= DROP_GRACE and _party_landed():
+				_begin_ritual()
 		"WAVE":
 			_wave_elapsed += delta
-			_spawn_timer -= delta
-			while not _spawn_queue.is_empty() and _spawn_timer <= 0.0:
-				var entry: Dictionary = _spawn_queue.pop_front()
-				_spawn_devil(str(entry.get("weapon","claw")),int(entry.get("spawn",0)))
-				_spawn_timer += DEVIL_TRICKLE
+			_wave_clock += delta * spawn_time_scale
+			while _wave_cursor < _wave_plan.size():
+				var entry: Dictionary = _wave_plan[_wave_cursor]
+				if float(entry.get("at",0.0)) > _wave_clock:
+					break
+				_spawn_devil(entry)
+				_wave_cursor += 1
 		"CLEARED":
 			if chest_ready:
 				return
@@ -1553,27 +1770,32 @@ func _advance_host_state(delta: float) -> void:
 				hole_open = true
 				world.set_rope_lowered(true)
 				world.set_hole_open(true)
+				_refresh_beacons()
 				hud.set_status("The cache is ready. Climb the rope or drop through the floor.",3.0)
 				print("DELVE_CACHE_READY depth=%d" % depth)
 				_sync_run_state()
 		_:
 			pass
 
-func _spawn_devil(weapon: String, spawn_index: int) -> void:
-	if world.enemy_spawns.is_empty():
-		return
-	var entry: Dictionary = world.enemy_spawns[clampi(spawn_index,0,world.enemy_spawns.size()-1)]
-	var spawn_point: Vector3 = entry.get("position",Vector3.ZERO)
-	var facing: Vector3 = entry.get("facing",Vector3.FORWARD)
+func _party_landed() -> bool:
+	for actor in actors:
+		if actor.peer_id <= 0 or not actor.alive:
+			continue
+		if actor.global_position.y >= DROP_LAND_Y:
+			return false
+	return true
+
+func _spawn_devil(entry: Dictionary) -> void:
+	var role := str(entry.get("role",Devil.ROLE_DEVIL))
+	var weapon := str(entry.get("weapon","claw"))
+	var point: Vector3 = entry.get("position",world.altar_position)
+	var facing: Vector3 = entry.get("facing",Vector3.ZERO)
 	var devil = Devil.new()
 	devil.name = "Devil%d" % _next_devil_id
 	add_child(devil)
-	devil.configure(_next_devil_id,weapon,depth)
+	devil.configure(_next_devil_id,weapon,depth,role)
 	devil.authoritative = true
-	devil.global_position = spawn_point
-	var flat := Vector3(facing.x,0.0,facing.z)
-	if flat.length_squared() > 0.0001:
-		devil.look_at(devil.global_position + flat.normalized(),Vector3.UP)
+	devil.spawn_at(point,facing)
 	devil.died.connect(_on_devil_died)
 	devil.struck.connect(_on_devil_struck)
 	devils.append(devil)
@@ -1592,7 +1814,7 @@ func _depth_cleared() -> void:
 func _check_depth_cleared() -> void:
 	if phase != "WAVE":
 		return
-	if not _spawn_queue.is_empty():
+	if _wave_cursor < _wave_plan.size():
 		return
 	for devil in devils:
 		if is_instance_valid(devil) and devil.alive:
@@ -1612,7 +1834,7 @@ func _check_hole_descent() -> void:
 func _remaining_enemies() -> int:
 	if phase != "WAVE":
 		return 0
-	return _spawn_queue.size() + _live_devil_count()
+	return maxi(0,_wave_plan.size() - _wave_cursor) + _live_devil_count()
 
 func _live_devil_count() -> int:
 	var count := 0
@@ -1670,7 +1892,8 @@ func _devil_snapshots(tick: int, states: Array) -> void:
 				continue
 			var created = Devil.new()
 			add_child(created)
-			created.configure(id,str(state.get("weapon","claw")),int(state.get("depth",depth)))
+			created.configure(id,str(state.get("weapon","claw")),int(state.get("depth",depth)),
+				str(state.get("role",Devil.ROLE_DEVIL)))
 			created.authoritative = false
 			_devil_nodes[id] = created
 			node = created
@@ -1761,8 +1984,19 @@ func _run_state(state: Dictionary) -> void:
 func _apply_run_state(state: Dictionary) -> void:
 	var previous_phase := phase
 	var previous_depth := depth
+	var room := str(state.get("room",str(world.room_kind)))
+	if room != World.ROOM_SANCTUARY and room != World.ROOM_OSSUARY:
+		room = str(world.room_kind)
+	var room_cycle := maxi(1,int(state.get("cycle",int(world.cycle))))
+	if room != str(world.room_kind) or room_cycle != int(world.cycle):
+		# Both rooms share one footprint; the rebuild also drops the sealed
+		# barriers, the rope, the hole and the beacons, so reapply them below.
+		world.apply_room(room,room_cycle)
 	phase = str(state.get("phase",phase))
 	depth = maxi(1,int(state.get("depth",depth)))
+	wave_total = maxi(0,int(state.get("wave_total",wave_total)))
+	wave_number = maxi(1,int(state.get("wave_number",wave_number)))
+	_ritual_progress = clampf(float(state.get("ritual",_ritual_progress)),0.0,1.0)
 	chest_ready = bool(state.get("chest_ready",chest_ready))
 	chest_open = bool(state.get("chest_open",chest_open))
 	rope_lowered = bool(state.get("rope_lowered",rope_lowered))
@@ -1777,6 +2011,8 @@ func _apply_run_state(state: Dictionary) -> void:
 	world.set_sealed(bool(state.get("sealed",false)))
 	world.set_rope_lowered(rope_lowered)
 	world.set_hole_open(hole_open)
+	_apply_world_ritual(bool(state.get("pentagram",_pentagram_lit())),_ritual_progress_value())
+	_refresh_beacons()
 	var party: Variant = state.get("party",[])
 	var active_slots: Dictionary = {}
 	if party is Array:
@@ -1804,10 +2040,10 @@ func _apply_run_state(state: Dictionary) -> void:
 		_set_cursor_free(true)
 	if phase != previous_phase:
 		match phase:
-			"ALTAR":
+			"ALTAR", "DROP":
 				hud.show_banner("DEPTH %d" % depth,2.0)
-			"WAVE":
-				hud.show_banner("DEPTH %d" % depth,2.0)
+			"RITUAL":
+				hud.show_banner("WAVE %d" % wave_number,2.0)
 			"CLEARED":
 				hud.show_banner("DEPTH %d CLEARED" % depth,2.0)
 			"GAME_OVER":
@@ -1824,6 +2060,9 @@ func _run_state_dict() -> Dictionary:
 			"alive":actor.alive, "peer":actor.peer_id, "downed":not actor.alive})
 	return {
 		"phase":phase, "depth":depth,
+		"room":str(world.room_kind), "cycle":int(world.cycle),
+		"ritual":_ritual_progress_value(), "pentagram":_pentagram_lit(),
+		"wave_total":wave_total, "wave_number":wave_number,
 		"remaining":_remaining_enemies(),
 		"timer":maxf(0.0,_clear_timer) if phase == "CLEARED" else 0.0,
 		"sealed":bool(world.sealed), "chest_ready":chest_ready, "chest_open":chest_open,
@@ -1839,16 +2078,44 @@ func _sync_run_state() -> void:
 func _set_phase(value: String) -> void:
 	phase = value
 	print("DELVE_PHASE phase=%s depth=%d" % [phase,depth])
+	_apply_world_ritual(_pentagram_lit(),_ritual_progress_value())
+	_refresh_beacons()
 	if phase == "GAME_OVER":
 		if _ui_open():
 			_world_ui.close()
 		_set_cursor_free(true)
 		hud.show_game_over("The delve has claimed the party.")
 
+## The pentagram burns through the ritual and the wave it summons, then rests.
+func _pentagram_lit() -> bool:
+	return phase == "RITUAL" or phase == "WAVE"
+
+func _ritual_progress_value() -> float:
+	if phase == "RITUAL":
+		return clampf(_ritual_progress,0.0,1.0)
+	if phase == "WAVE":
+		return 1.0
+	return 0.0
+
+func _apply_world_ritual(pentagram_active: bool, progress: float) -> void:
+	if pentagram_active:
+		world.set_pentagram(true,1.0)
+		world.set_ritual(true,clampf(progress,0.0,1.0))
+	else:
+		world.set_pentagram(false)
+		world.set_ritual(false,0.0)
+
+## Beacons mark only what the party can actually act on right now.
+func _refresh_beacons() -> void:
+	var altar: bool = phase == "ALTAR" and bool(world.has_altar())
+	var rope := phase == "CLEARED" and bool(world.is_rope_lowered())
+	var hole := phase == "CLEARED" and bool(world.is_hole_open())
+	world.set_beacons(altar,rope,hole)
+
 func _check_party_wipe() -> void:
 	if network_role != "host":
 		return
-	if phase != "WAVE" and phase != "CLEARED":
+	if phase != "RITUAL" and phase != "DROP" and phase != "WAVE" and phase != "CLEARED":
 		return
 	var active := 0
 	var standing := 0
@@ -1890,7 +2157,7 @@ func _host_interact(slot: int) -> void:
 	var pos: Vector3 = actor.global_position
 	match phase:
 		"ALTAR":
-			if pos.distance_to(world.altar_position) <= INTERACT_RANGE:
+			if world.has_altar() and pos.distance_to(world.altar_position) <= INTERACT_RANGE:
 				begin_wave()
 		"CLEARED":
 			if chest_ready and not chest_open and is_instance_valid(chest) \
