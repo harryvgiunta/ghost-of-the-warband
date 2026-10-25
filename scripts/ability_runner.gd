@@ -1,12 +1,14 @@
 extends Node
 ## Per-actor ability lifecycle: eligibility, stamina spend, cooldown, committed
-## travel and the rig's ability animation.
+## travel, timed effect cues and the rig's ability animation.
 ##
-## The runner never applies damage. An ability effect belongs to the definition
-## and the scene that owns authority; this class only owns the shared state that
-## the frontier, arena and delve must agree on.
+## The runner never applies damage. A cue is a named beat in the definition
+## (`cues`); the scene that owns authority turns it into arrows, a blast or a
+## sector of damage. Item-granted definitions are resolved from the rig's
+## current hands, so equipping a different weapon changes the skill.
 
 signal activated(id: String, definition: Dictionary)
+signal cue(id: String, cue: String, index: int)
 signal finished(id: String)
 
 const AbilityRules = preload("res://scripts/ability_rules.gd")
@@ -18,11 +20,15 @@ var base_speed := 5.5
 var active := false
 var active_id := ""
 var active_slot := -1
+var active_definition: Dictionary = {}
 var elapsed := 0.0
 var duration := 0.0
 var speed := 0.0
+var travel_seconds := 0.0
 var direction := Vector3.FORWARD
 var cooldowns := PackedFloat32Array()
+var _cue_index := 0
+var _grant_ids: Array[String] = []
 
 
 func setup(owner_actor, owner_rig, owner_combat, walk_speed: float) -> void:
@@ -32,17 +38,25 @@ func setup(owner_actor, owner_rig, owner_combat, walk_speed: float) -> void:
 	base_speed = maxf(walk_speed, 0.1)
 	cooldowns.resize(AbilityRules.SLOT_COUNT)
 	cooldowns.fill(0.0)
+	_grant_ids.resize(AbilityRules.SLOT_COUNT)
+	_grant_ids.fill("")
+	_refresh_grants()
+
+
+func definition(slot: int) -> Dictionary:
+	return AbilityRules.definition_for(rig, slot)
 
 
 func blocker(slot: int = 0) -> String:
-	var definition := AbilityRules.by_slot(slot)
+	var definition := definition(slot)
 	if definition.is_empty():
-		return "No ability is bound to that slot."
+		return "That hand grants no skill."
 	return _blocker(definition, slot)
 
 
 func activate(slot: int = 0) -> Dictionary:
-	var definition := AbilityRules.by_slot(slot)
+	_refresh_grants()
+	var definition := definition(slot)
 	var reason := blocker(slot)
 	if not reason.is_empty():
 		return {"ok": false, "message": reason}
@@ -57,12 +71,16 @@ func activate(slot: int = 0) -> Dictionary:
 	active = true
 	active_id = str(definition.id)
 	active_slot = slot
+	active_definition = definition
 	elapsed = 0.0
 	duration = maxf(float(definition.duration), 0.01)
-	speed = base_speed * maxf(float(definition.speed_scale), 0.0)
+	travel_seconds = clampf(float(definition.get("travel_seconds", definition.duration)), 0.0, duration)
+	speed = base_speed * maxf(float(definition.get("speed_scale", 0.0)), 0.0)
 	direction = facing.normalized()
-	rig.begin_ability(slot, active_id, str(definition.animation), duration, direction)
+	_cue_index = 0
+	rig.begin_ability(definition, direction)
 	activated.emit(active_id, definition)
+	_emit_due_cues()
 	return {"ok": true, "definition": definition}
 
 
@@ -95,6 +113,7 @@ func _blocker(definition: Dictionary, slot: int) -> String:
 func advance(delta: float) -> void:
 	for index in cooldowns.size():
 		cooldowns[index] = maxf(0.0, cooldowns[index] - delta)
+	_refresh_grants()
 	if not active:
 		return
 	if not is_instance_valid(rig) or not rig.is_ability() \
@@ -103,10 +122,34 @@ func advance(delta: float) -> void:
 		_finish()
 		return
 	elapsed += delta
+	_emit_due_cues()
 	if elapsed >= duration:
 		if rig.is_ability():
 			rig.cancel_ability()
 		_finish()
+
+
+## A weapon swap cancels the trailing cooldown of the weapon being put away.
+## That keeps a testing session able to fire every skill back to back; the
+## cost prevents swap-spam from being a free damage loop.
+func _refresh_grants() -> void:
+	if not is_instance_valid(rig):
+		return
+	var grants := AbilityRules.granted(rig)
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		var id := str(grants[slot].get("id", ""))
+		if id != _grant_ids[slot]:
+			_grant_ids[slot] = id
+			if slot < cooldowns.size():
+				cooldowns[slot] = 0.0
+
+
+func _emit_due_cues() -> void:
+	var cues: Array = active_definition.get("cues", [])
+	while _cue_index < cues.size() and elapsed >= float(cues[_cue_index].get("at", 0.0)):
+		var beat: Dictionary = cues[_cue_index]
+		cue.emit(active_id, str(beat.get("cue", "")), _cue_index)
+		_cue_index += 1
 
 
 func cancel() -> void:
@@ -121,20 +164,23 @@ func reset() -> void:
 	active = false
 	active_id = ""
 	active_slot = -1
+	active_definition = {}
 	elapsed = 0.0
 	duration = 0.0
 	speed = 0.0
+	travel_seconds = 0.0
+	_cue_index = 0
 	cooldowns.fill(0.0)
 	if is_instance_valid(rig) and rig.is_ability():
 		rig.cancel_ability()
 
 
 func velocity() -> Vector3:
-	return direction * speed if active else Vector3.ZERO
+	return direction * speed if active and elapsed <= travel_seconds else Vector3.ZERO
 
 
 func hud_state(slot: int = 0) -> Dictionary:
-	var definition := AbilityRules.by_slot(slot)
+	var definition := definition(slot)
 	if definition.is_empty():
 		return {}
 	var cost := float(definition.stamina_cost)
@@ -143,6 +189,7 @@ func hud_state(slot: int = 0) -> Dictionary:
 		"id": str(definition.id),
 		"name": str(definition.name),
 		"key": str(definition.key),
+		"item": str(definition.get("item", "")),
 		"active": active and active_slot == slot,
 		"elapsed": elapsed if active_slot == slot else 0.0,
 		"duration": duration if active_slot == slot else float(definition.duration),
@@ -153,9 +200,11 @@ func hud_state(slot: int = 0) -> Dictionary:
 
 
 func snapshot() -> Dictionary:
+	var index := AbilityRules.index_of(active_id) if active else -1
 	return {
 		"active": active,
 		"slot": active_slot,
+		"ability": index,
 		"time": elapsed,
 		"duration": duration,
 		"cooldowns": Array(cooldowns),
@@ -165,9 +214,22 @@ func snapshot() -> Dictionary:
 func apply_snapshot(state: Dictionary) -> void:
 	active = bool(state.get("active", false))
 	active_slot = int(state.get("slot", -1))
-	active_id = str(AbilityRules.by_slot(active_slot).get("id", "")) if active else ""
+	active_id = ""
+	active_definition = {}
+	if active:
+		var index := int(state.get("ability", -1))
+		if index >= 0:
+			active_definition = AbilityRules.by_index(index)
+			active_id = str(active_definition.get("id", ""))
 	elapsed = float(state.get("time", 0.0))
 	duration = float(state.get("duration", 0.0))
+	# A replica must not replay cues the host already fired before the first
+	# snapshot of this activation arrived.
+	_cue_index = 0
+	if active:
+		var cues: Array = active_definition.get("cues", [])
+		while _cue_index < cues.size() and elapsed >= float(cues[_cue_index].get("at", 0.0)):
+			_cue_index += 1
 	var values: Variant = state.get("cooldowns", [])
 	if values is Array:
 		for index in mini(cooldowns.size(), values.size()):
@@ -181,7 +243,10 @@ func _finish() -> void:
 	active = false
 	active_id = ""
 	active_slot = -1
+	active_definition = {}
 	elapsed = 0.0
 	duration = 0.0
 	speed = 0.0
+	travel_seconds = 0.0
+	_cue_index = 0
 	finished.emit(ended)

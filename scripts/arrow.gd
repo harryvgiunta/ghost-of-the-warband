@@ -14,7 +14,10 @@ var damage := 0.0
 var source_id := -1
 var hit_mask := 1 | 2
 var authoritative_damage := true
+var pierce := 0
 var _query := PhysicsRayQueryParameters3D.new()
+var _exclude: Array[RID] = []
+var _pierced: Dictionary = {}
 var _visual: Node3D
 var _visual_start := Vector3.ZERO
 var _spawn_position := Vector3.ZERO
@@ -27,12 +30,14 @@ func _ready() -> void:
 	add_child(_visual)
 	_query.collision_mask = hit_mask
 
-func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_start: Vector3 = Vector3.INF) -> void:
+func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_start: Vector3 = Vector3.INF, pierce_count: int = 0) -> void:
 	global_position = origin
 	velocity = direction.normalized() * speed
 	damage = shot_damage
+	pierce = maxi(pierce_count,0)
 	_query.collision_mask = hit_mask
-	_query.exclude = excluded
+	_exclude = excluded.duplicate()
+	_query.exclude = _exclude
 	look_at(global_position + direction, Vector3.UP)
 	_spawn_position = origin
 	_visual_start = visual_start
@@ -55,12 +60,28 @@ func _physics_process(delta: float) -> void:
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
 	if not hit.is_empty():
 		global_position = hit.position
-		flying = false
 		var collider: Object = hit.collider
 		var is_shield := collider.has_method("is_shield")
 		var damage_target: Object = collider.get_meta("ironwood_damage_target") if collider.has_meta("ironwood_damage_target") else null
 		var hit_player := damage_target != null and is_instance_valid(damage_target) and damage_target.has_method("take_damage")
 		var hit_enemy := collider.has_method("take_damage") and not is_shield
+		# A piercing shot punches through intact bodies. Every peer consumes the
+		# same budget; only the authority applies damage, but the visual line is
+		# identical.
+		if hit_enemy and not hit_player and pierce > 0 and not _pierced.has(hit.collider_id):
+			var pierced_headshot: bool = Hitbox.is_headshot(collider as Node, hit.position)
+			if authoritative_damage:
+				collider.take_damage(damage, source_id, pierced_headshot)
+				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
+			pierce -= 1
+			_pierced[hit.collider_id] = true
+			if not _exclude.has(hit.rid):
+				_exclude.append(hit.rid)
+			_query.exclude = _exclude
+			global_position = hit.position + velocity.normalized() * 0.06
+			impacted.emit(true, hit.position)
+			return
+		flying = false
 		var applied_hit := false
 		var headshot := false
 		if authoritative_damage:

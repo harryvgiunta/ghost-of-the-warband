@@ -122,13 +122,13 @@ func _ready() -> void:
 	_label.no_depth_test = true
 	add_child(_label)
 	var colors := [Color("70c4cb"),Color("e4a75f"),Color("bfa1dc"),Color("86c48a")]
-	_label.modulate = colors[slot]
+	_label.modulate = colors[slot % colors.size()]
 	var circle := TorusMesh.new()
 	circle.inner_radius = 0.38
 	circle.outer_radius = 0.43
 	circle.rings = 24
 	circle.ring_segments = 6
-	_ground_ring = Geo.mesh_node(self,circle,Geo.material(colors[slot]),Vector3(0,0.025,0))
+	_ground_ring = Geo.mesh_node(self,circle,Geo.material(colors[slot % colors.size()]),Vector3(0,0.025,0))
 
 func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) -> void:
 	peer_id = owner_id

@@ -184,7 +184,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click left mouse while dual wielding | Left-hand diagonal cut from the left |
 | Click right mouse while dual wielding | Right-hand diagonal cut from the right; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| Shift + 1 | **Charge**: lunge forward at 200% walk speed for one second; costs 10 stamina with a 2.5 s cooldown |
+| Shift + 1 / Shift + 2 | Cast the skill granted by the equipped main hand / off-hand shield; each costs 1 stamina for testing |
 | G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
 | I | Open or close the in-world inventory (15 backpack slots plus the ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
 | P | Open or close the equipment paperdoll (ten equipped slots); while open it owns the cursor and blocks movement, attacks and interactions |
@@ -195,9 +195,26 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 
 ### Abilities and stamina
 
-The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and a **SHIFT + 1** ability slot with its icon, stamina cost and cooldown.
+The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and two ability slots: **SHIFT + 1** for the main hand and **SHIFT + 2** for the off-hand shield, each with its icon, stamina cost and cooldown.
 
-Abilities are data-driven by `scripts/ability_rules.gd`. A definition carries an id, slot, keybind, stamina cost, cooldown, duration, speed scale, animation clip, forward lean, sound and icon; `scripts/ability_runner.gd` owns the shared eligibility, spend, cooldown and committed-travel state. The first ability is **Charge**: grounded and out of any other action, it snaps facing and drives the ranger forward for **1 s** at **11 m/s** (200% of the 5.5 m/s walk), spending **10 stamina**. It plays the authored sprint cycle with a forward charging lean. A hit that staggers cancels it; a 5% chip does not, so the charge survives a pack of small attackers. Arena and delve validate the action on the host and replicate the active ability through the existing animation phase and snapshot; every client hears the whoosh.
+Abilities are data-driven and item-granted by `scripts/ability_rules.gd`: equipping a weapon grants its skill to the main hand, and equipping a shield grants its skill to the off hand. A definition carries the granting item, hand slot, keybind, stamina cost, cooldown, durations, travel window, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
+
+| Main hand | Skill | Effect |
+| --- | --- | --- |
+| Shortbow | **BARRAGE** | Six rapid arrows at 50% damage with a horizontal spread |
+| Recurve | **TRIPLE FAN VOLLEY** | Three arrows in one wide fan at 70% damage |
+| Longbow | **LONG PIERCING SHOT** | One heavy arrow at 200% that punches through three bodies |
+| Shortsword | **DOUBLE SLASH** | Two fast front-arc cuts at 90% each |
+| Arming sword | **LUNGING THRUST** | A stepping lunge into a 180% thrust |
+| Greatsword | **SPINNING AOE SPIN** | One full turn that cuts everything within 2.9 m |
+| Iron Dagger | **DASH STAB** | A dash that ends in a 220% dagger thrust |
+| Ember Staff | **FIREBALL** | A burning orb that bursts for 80 damage in a 3 m blast |
+| Bone Staff | **BONE SPEAR** | A spectral lance at 180% that impales three bodies |
+| Buckler (off hand) | **SHIELD BASH** | A boss-first shove that damages and staggers the front arc |
+| Kite Shield (off hand) | **SHIELD CHARGE** | A shield-first drive that bowls over the front arc |
+| Tower Shield (off hand) | **GROUND SHIELD SLAM** | A ground slam that damages and staggers everything within 2.9 m |
+
+Barrage, volley and piercing shots solve both bow arms from a data draw curve, so every shot visibly reaches full draw and releases on its cue. The greatsword spin turns the visual model a full turn while the data-ring damages all around; replicas derive the same turn from the ability clock. Arena, delve and the open world validate the action on the host and replicate the active ability, cooldowns and animation through the existing actor snapshots; effect cues are clock-driven on every peer, and only the host applies damage and projectiles.
 
 **1 (without Shift) always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail reduces incoming damage by 15%, plate by 30%; mixed sets add the pieces actually worn. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
 
@@ -485,11 +502,12 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/blood_regression.gd
 & $Godot --headless --path . --script res://tests/corpse_regression.gd
 & $Godot --headless --path . --script res://tests/ability_regression.gd
+& $Godot --headless --path . --script res://tests/weapon_abilities_regression.gd
 ```
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
 
-`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold. `ability_regression.gd` checks the charge definition and 1000-stamina pool, committed travel and animation/replication, chip versus half-health cancellation, rejection cases, the snapshot budget, the Shift + 1 frontier binding and the arena host action.
+`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold. `ability_regression.gd` checks the item-granted definitions, the shortbow Barrage grant, both hand slots, trivial stamina spend, cooldown swap reset, cue timing, the 1000-stamina pool, rejection cases, the packed ability index across animation/snapshot replication, the snapshot budget, the Shift + 1 / Shift + 2 frontier bindings, both HUD slots and the hosted arena cue landing real damage. `weapon_abilities_regression.gd` covers all twelve catalog weapon/shield skills, their effect data and icons/sounds, radial/arc/block/blast damage, the fireball and bone-spear projectiles, Barrage and piercing end-to-end damage, the spin dust ring and the MTU budget.
 
 `delve_regression.gd` checks the endless loop: the fall-in start, the sanctuary altar phase, the pentagram ritual, the cycle-one **33-enemy** wave (sixteen imps, ten devils, all five court devils and two clones) from random spawn points, the delve's bandage/potion keys and heal, the cycle-two growth with three crimson clones (imported rigs, court-scaled health, complete head and strike anchors), the clear delay, cache spawn, rope and floor-hole beacons, chest rewards, the Ossuary Pit's 33 enemies, depth-three sanctuary recycling with a new palette, and the rope return to town. `ranger_clone_regression.gd` covers the frontier's four clones: red-black tint, random main hands and armor, the arena-bot range discipline, the guard reaction, a real bow release, the one-time reward and corpse, and both snapshot shapes. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the ritual, room, wave and cache, the client builds the species and clone replicas, and both observe the descent into the ossuary. `world_network_regression.gd` runs two real ENet processes for the open world: the host opens the town/frontier, the client joins seat one, both mobs and rangers replicate, the client's weapon/jump/melee intents drive its host-authoritative ranger, damage and health reach both peers, the host's mob arrow and loot drop appear on the client, every client mob is a host-driven replica, and the seat is freed when the client leaves.
 

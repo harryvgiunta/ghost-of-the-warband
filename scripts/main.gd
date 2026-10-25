@@ -13,6 +13,8 @@ const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
+const SpellProjectile = preload("res://scripts/spell_projectile.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
@@ -181,6 +183,7 @@ func _ready() -> void:
 	ability = AbilityRunner.new()
 	add_child(ability)
 	ability.setup(self,archer,combat,WALK_SPEED)
+	_bind_ability_cues(ability)
 	_anchor_player = player
 	_anchor_rig = archer
 	_anchor_combat = combat
@@ -492,7 +495,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0))
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0), ability.hud_state(1))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -695,7 +698,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					activate_ability(0)
 				else:
 					equip_weapon("bow")
-			KEY_2: equip_weapon("sword")
+			KEY_2:
+				if event.shift_pressed:
+					activate_ability(1)
+				else:
+					equip_weapon("sword")
 			KEY_3: equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
@@ -932,6 +939,134 @@ func activate_ability(slot: int) -> void:
 	if not sound.is_empty():
 		audio.play_sound(sound)
 	hud.show_feedback("%s  /  -%d stamina" % [str(definition.get("name","")),int(float(definition.get("stamina_cost",0.0)))],1.2)
+
+func _bind_ability_cues(runner) -> void:
+	if runner == null or not is_instance_valid(runner):
+		return
+	if not runner.cue.is_connected(_on_ability_cue):
+		runner.cue.connect(_on_ability_cue.bind(runner))
+
+
+func _ability_authority(runner) -> bool:
+	if network_role == "client":
+		return false
+	if runner != null and is_instance_valid(runner.actor) and runner.actor.get("authoritative") != null:
+		return bool(runner.actor.authoritative)
+	return true
+
+
+func _on_ability_cue(id: String, _cue: String, index: int, runner) -> void:
+	if not is_instance_valid(runner) or not runner.active or str(runner.active_id) != id:
+		return
+	var definition: Dictionary = runner.active_definition
+	if definition.is_empty():
+		return
+	var rig = runner.rig
+	if rig == null or not is_instance_valid(rig):
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var authoritative := _ability_authority(runner)
+	var damage: float = AbilityRules.damage_for(definition, rig)
+	match str(effect.get("kind", "")):
+		"barrage", "volley", "piercing_shot":
+			_ability_shots(runner, definition, index, damage, authoritative)
+		"projectile":
+			_ability_spell(runner, definition, damage, authoritative)
+		"melee_arc", "melee_ring":
+			_ability_melee(runner, definition, index, damage, authoritative)
+
+
+func _ability_shots(runner, definition: Dictionary, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var kind := str(effect.get("kind", ""))
+	var rig = runner.rig
+	var aim: Vector3 = runner.combat.aim_point
+	var origin: Vector3 = rig.get_arrow_origin()
+	var base := aim - origin
+	if base.length_squared() < 0.0001:
+		base = -rig.global_basis.z
+	var shots := int(effect.get("shots", 1)) if kind == "volley" else 1
+	var speed := float(Archer.BOW_DATA[clampi(int(rig.bow_index), 0, 2)].speed) \
+		* float(effect.get("arrow_speed_scale", 1.0))
+	var pierce := int(effect.get("pierce", 0))
+	for shot in shots:
+		var pattern_index := index if kind == "barrage" else shot
+		var offsets := AbilityFx.shot_offsets(definition, pattern_index)
+		var direction := AbilityFx.rotate_direction(base, offsets.x, offsets.y)
+		var excluded: Array[RID] = []
+		if runner.actor is CollisionObject3D:
+			excluded.append(runner.actor.get_rid())
+		var source_slot := int(runner.actor.get("slot")) if runner.actor.get("slot") != null else -1
+		_spawn_arrow(origin, direction, speed, damage, excluded, origin, source_slot, authoritative, pierce)
+	if runner.actor == player:
+		audio.play_sound("release")
+
+
+func _ability_spell(runner, definition: Dictionary, damage: float,
+		authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = runner.rig
+	var origin: Vector3 = rig.cast_origin()
+	var aim: Vector3 = runner.combat.aim_point
+	var direction := aim - origin
+	if direction.length_squared() < 0.0001:
+		direction = -rig.global_basis.z
+	var spell := SpellProjectile.new()
+	spell.kind = str(effect.get("projectile", "fireball"))
+	spell.hit_mask = 1 | 2 | 8
+	add_child(spell)
+	var excluded: Array[RID] = []
+	if runner.actor is CollisionObject3D:
+		excluded.append(runner.actor.get_rid())
+	spell.launch(origin, direction, float(effect.get("speed", 22.0)), damage,
+		excluded, spell.hit_mask, authoritative, rig.global_position,
+		float(effect.get("radius", 0.0)), int(effect.get("pierce", 0)))
+	spell.source_rig = rig
+	spell.set_meta("stagger", float(effect.get("stagger", 0.0)))
+	if authoritative:
+		spell.detonated.connect(_on_spell_detonated.bind(spell, runner.combat))
+
+
+func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref) -> void:
+	if not is_instance_valid(spell) or not is_instance_valid(combat_ref):
+		return
+	if spell.blast_radius <= 0.0:
+		return
+	combat_ref.ability_blast(centre, spell.blast_radius, spell.damage,
+		float(spell.get_meta("stagger", 0.0)))
+
+
+func _ability_melee(runner, definition: Dictionary, index: int,
+		damage: float, authoritative: bool) -> void:
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = runner.rig
+	var radius := float(effect.get("radius", 1.7))
+	var arc := float(effect.get("arc_degrees", 360.0))
+	var ring := str(effect.get("kind", "")) == "melee_ring" or arc >= 359.0
+	var forward: Vector3 = runner.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	if authoritative:
+		runner.combat.ability_strike(radius, arc, damage,
+			float(effect.get("stagger", 0.0)), ring, not ring)
+	if ring:
+		if str(runner.active_id) == "spin_slash":
+			AbilityFx.spin_dust(self, rig.global_position, radius)
+		else:
+			AbilityFx.ground_shockwave(self, rig.global_position, radius)
+	else:
+		var cues: Array = definition.get("cues", [])
+		var alternate := 1.0 if index % 2 == 0 else -1.0
+		if cues.size() <= 1:
+			alternate = 0.0
+		var arc_forward := forward.rotated(Vector3.UP, 0.32 * alternate)
+		var tilt := 32.0 * alternate if str(definition.get("id", "")) == "double_slash" else 0.0
+		AbilityFx.slash_arc(self, rig.global_position, arc_forward, radius, minf(arc, 200.0),AbilityFx.STEEL,tilt)
+
 
 func use_consumable(kind: String) -> void:
 	if not Archer.CONSUMABLE_DATA.has(kind):
@@ -1558,6 +1693,7 @@ func _create_seat(slot: int, peer_id: int, authoritative: bool, seat_name: Strin
 	seat.collision_mask = 1 | 2
 	seat.combat.target_mask = 2
 	seat.combat.damage_enabled = authoritative
+	_bind_ability_cues(seat.ability)
 	_seats[slot] = seat
 	_rebuild_seat_list()
 	return seat
@@ -2100,13 +2236,13 @@ func _on_seat_thrown(slot: int, origin: Vector3, direction: Vector3, speed: floa
 	_world_throw.rpc(origin,direction,speed,weapon_name,weapon_index,slot)
 
 
-func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true) -> void:
+func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true, pierce_count: int = 0) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = source_slot
 	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
-	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin)
+	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin,pierce_count)
 	arrow.impacted.connect(_on_arrow_impact)
 	for index in range(arrows.size() - 1, -1, -1):
 		if not is_instance_valid(arrows[index]):
