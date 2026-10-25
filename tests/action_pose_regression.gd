@@ -21,6 +21,10 @@ func check_limbs(rig: Node3D, joints: Dictionary) -> void:
 			var rest_length: float = rig.skeleton.get_bone_rest(bone).origin.length()
 			check(absf(joints[side+"_"+segment[0]].distance_to(joints[side+"_"+segment[1]])-rest_length)<0.002,"Animation preserves the imported bone lengths and connected joints")
 
+## Chest centre between the shoulder joints, used for the torso lean measure.
+func _test_chest(joints: Dictionary, _rig: Node3D) -> Vector3:
+	return (joints.left_shoulder+joints.right_shoulder)*0.5
+
 func check_two_hand_grip(rig: Node3D) -> void:
 	var handle_start: Vector3 = rig.active_sword.global_position
 	var handle_end: Vector3 = rig.active_sword.to_global(Vector3(0,0,0.31))
@@ -75,6 +79,17 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	rig.set_locomotion(Vector3.ZERO,true)
 	rig.advance_animation(0.4)
 	check(rig.begin_melee(hand,variant),"The %s %s diagonal cut starts" % [hand,variant])
+	var stance_left: Vector3 = rig.get_joint_positions().left_foot
+	var stance_right: Vector3 = rig.get_joint_positions().right_foot
+	var foot_drift := 0.0
+	var lean_low := INF
+	var lean_high := -INF
+	var carry_forward: Vector3 = -rig.global_basis.z
+	carry_forward.y = 0.0
+	carry_forward = carry_forward.normalized()
+	var carry_shoulder: Vector3 = rig.get_joint_positions()[hand+"_shoulder"]
+	var carry_tip: float = (rig.get_blade_tip(hand)-carry_shoulder).dot(carry_forward)
+	var windup_tip := -INF
 	var window: Vector2 = rig._melee_window(hand)
 	var duration: float = rig.melee_seconds(hand)
 	var arm_side := "right" if hand == "right" else "left"
@@ -97,6 +112,8 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 	var load_wrist_forward := INF
 	var entry_forward := 0.0
 	var exit_forward := 0.0
+	var chain: Array[Dictionary] = []
+	var head_gaze := INF
 	for frame in int(ceil(duration*120.0))+1:
 		rig.advance_animation(1.0/120.0)
 		var joints: Dictionary = rig.get_joint_positions()
@@ -124,6 +141,7 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 			var load_shoulder: Vector3 = joints[arm_side+"_shoulder"]
 			var load_wrist: Vector3 = joints[arm_side+"_wrist"]
 			load_tip_forward = (rig.get_blade_tip(hand)-rig.global_position).dot(swing_forward)
+			windup_tip = maxf(windup_tip,(rig.get_blade_tip(hand)-load_shoulder).dot(swing_forward))
 			load_wrist_up = load_wrist.y-load_shoulder.y
 			load_wrist_forward = (load_wrist-load_shoulder).dot(swing_forward)
 		if time >= window.x and time <= window.y:
@@ -133,11 +151,17 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 			var right_bend: float = (joints.right_hip-joints.right_knee).angle_to(joints.right_ankle-joints.right_knee)
 			bent_knees = bent_knees or (left_bend+right_bend)*0.5 < deg_to_rad(125.0)
 			driven_hips = hips
-			var lead: Vector3 = joints.left_foot if variant == "diagonal_right" else joints.right_foot
-			var trail: Vector3 = joints.right_foot if variant == "diagonal_right" else joints.left_foot
-			finish_stance = (lead-trail).dot(-rig.global_basis.z)
+			finish_stance = absf((joints.left_foot-joints.right_foot).dot(-rig.global_basis.z))
 			if size == 2 and hand == "right" and not dagger:
 				check_two_hand_grip(rig)
+			var left_drift: Vector3 = joints.left_foot-stance_left
+			left_drift.y = 0.0
+			var right_drift: Vector3 = joints.right_foot-stance_right
+			right_drift.y = 0.0
+			foot_drift = maxf(foot_drift,maxf(left_drift.length(),right_drift.length()))
+			var torso_lean := atan2((_test_chest(joints,rig)-hips).dot(swing_forward),(_test_chest(joints,rig)-hips).y)
+			lean_low = minf(lean_low,torso_lean)
+			lean_high = maxf(lean_high,torso_lean)
 			if not in_window:
 				in_window = true
 				entry = tip
@@ -148,20 +172,72 @@ func check_diagonal(rig: Node3D, size: int, variant: String, hand: String = "rig
 			exit = tip
 			exit_forward = (tip-rig.global_position).dot(swing_forward)
 			previous_azimuth = azimuth
+			# Kinetic chain telemetry: hip line, hilt direction and blade
+			# azimuth in the swing frame, plus the head's own gaze.
+			var swing_right: Vector3 = swing_forward.cross(Vector3.UP)
+			var hip_dir: Vector3 = joints.right_hip-joints.left_hip
+			hip_dir.y = 0.0
+			var hand_dir: Vector3 = joints[arm_side+"_wrist"]-rig.global_position
+			hand_dir.y = 0.0
+			var hip_turn := atan2(hip_dir.dot(swing_forward),hip_dir.dot(swing_right))
+			var chest_dir: Vector3 = joints.right_shoulder-joints.left_shoulder
+			chest_dir.y = 0.0
+			var head_forward: Vector3 = rig._bone_world(rig._bones.Head).basis.z
+			head_gaze = minf(head_gaze,head_forward.dot(swing_forward))
+			chain.append({
+				"pelvis":hip_turn,
+				"chest":atan2(chest_dir.dot(swing_forward),chest_dir.dot(swing_right)),
+				"hand":atan2(hand_dir.dot(swing_right),hand_dir.dot(swing_forward)),
+				"tip":azimuth,
+				"hilt":(joints[arm_side+"_wrist"]-rig.global_position).dot(swing_right),
+			})
 	check(load_wrist_up>0.18,"The diagonal cocks the wrist above the shoulder before cutting (up %.3f, size %d %s %s)" % [load_wrist_up,size,hand,variant])
 	check(load_tip_forward<0.05,"The diagonal backswing loads the blade behind the body plane (tip %.3f, wrist up %.3f, size %d %s %s)" % [load_tip_forward,load_wrist_up,size,hand,variant])
 	var two_hand_load := size == 2 and hand == "right" and not dagger
 	check(load_wrist_forward<(0.40 if two_hand_load else 0.18),"The diagonal draws the hand back instead of extending it forward (f %.3f, size %d %s %s)" % [load_wrist_forward,size,hand,variant])
+	# The wind-up leaves the weapon where the carry holds it: it lifts and pulls
+	# back into the cock. A tip that leads forward first reads as presenting the
+	# sword before the swing.
+	check(windup_tip-carry_tip<0.15,"The wind-up lifts the weapon out of its carry instead of pushing it forward past the shoulder (%.3f m, size %d %s %s)" % [windup_tip-carry_tip,size,hand,variant])
 	check(exit_forward-entry_forward>0.30,"The backswing releases forward through the active cut")
 	check(absf(swept)>deg_to_rad(105.0),"Diagonal blade traverses a broad frontal arc")
 	check(swept < 0.0 if variant == "diagonal_right" else swept > 0.0,"Opposite diagonal variants mirror the cut direction")
 	check(entry.y-exit.y > 0.35,"The active stroke descends instead of sweeping a level plane")
 	check(entry.distance_to(exit) > (0.7 if dagger else 1.2+0.5*size),"The blade follows a size-scaled cross-front path")
 	check(lowest > 0.25 and highest < 2.7,"The diagonal stays above the actor-relative floor and below an implausible high load")
+	# The kinetic chain: hips, then chest, then hand, then the blade tip. At the
+	# frame where the hand is halfway across the body the hips must already be
+	# through their unwind, and the tip must still be catching up.
+	var tip_span := wrapf(float(chain[-1].tip)-float(chain[0].tip),-PI,PI)
+	var hand_span := wrapf(float(chain[-1].hand)-float(chain[0].hand),-PI,PI)
+	var half_tip := INF
+	for sample in chain:
+		var hand_fraction: float = clampf(wrapf(float(sample.hand)-float(chain[0].hand),-PI,PI)/hand_span,0.0,1.0)
+		if hand_fraction < 0.5:
+			continue
+		half_tip = clampf(wrapf(float(sample.tip)-float(chain[0].tip),-PI,PI)/tip_span,0.0,1.0)
+		break
+	check(half_tip <= 0.5,"The blade tip lags the hilt so it arrives at the end of the arc (tip %.2f, size %d %s %s)" % [half_tip,size,hand,variant])
+	# The body drives the cut: the hips and chest carry a real share of the
+	# turn instead of the arm orbiting a dead torso.
+	var hip_turn := 0.0
+	var chest_turn := 0.0
+	for index in range(1,chain.size()):
+		hip_turn += wrapf(float(chain[index].pelvis)-float(chain[index-1].pelvis),-PI,PI)
+		chest_turn += wrapf(float(chain[index].chest)-float(chain[index-1].chest),-PI,PI)
+	check(absf(hip_turn)>deg_to_rad(20.0),"The pelvis turns through the strike instead of holding still (%.0f deg, size %d %s %s)" % [rad_to_deg(absf(hip_turn)),size,hand,variant])
+	check(absf(chest_turn)>deg_to_rad(35.0),"The chest unwinds past the target with the cut (%.0f deg, size %d %s %s)" % [rad_to_deg(absf(chest_turn)),size,hand,variant])
+	check(signf(chest_turn)==signf(hip_turn),"The chest follows the hips in the same direction (%.0f/%.0f deg, size %d %s %s)" % [rad_to_deg(chest_turn),rad_to_deg(hip_turn),size,hand,variant])
+	var hilt_travel := absf(float(chain[-1].hilt)-float(chain[0].hilt))
+	check(hilt_travel>0.20,"The hilt travels across the body instead of orbiting one hip (%.2f m, size %d %s %s)" % [hilt_travel,size,hand,variant])
+	check(head_gaze>0.62,"The head keeps the target in view instead of dropping through the strike (gaze %.2f, size %d %s %s)" % [head_gaze,size,hand,variant])
 	check(pelvis_high-pelvis_low>0.10,"Diagonal body motion lowers and raises the hips, rather than making an idle-sized bob")
 	check(bent_knees,"The active stroke is driven through flexed knees, not locked upright legs")
-	check((driven_hips-loaded_hips).dot(-rig.global_basis.z)>0.15,"The hips transfer weight forward from the loaded leg through the cut")
-	check(finish_stance>0.10,"Mirrored cuts finish braced over the matching leading foot")
+	check(foot_drift<0.06,"The feet stay planted in the stance they started in instead of stepping through the cut (%.2f m, size %d %s %s)" % [foot_drift,size,hand,variant])
+	check(lean_low>-0.06,"The strike never leans the torso backwards (low %.0f deg, size %d %s %s)" % [rad_to_deg(lean_low),size,hand,variant])
+	check(lean_high>deg_to_rad(4.0),"The strike drives the chest forward over the stance (high %.0f deg, size %d %s %s)" % [rad_to_deg(lean_high),size,hand,variant])
+	check((driven_hips-loaded_hips).dot(-rig.global_basis.z)>0.02,"The hips shift weight forward from the loaded leg through the cut")
+	check(finish_stance>0.25,"The stance stays staggered through the cut instead of squaring up")
 	check(rig.phase == "READY","The diagonal cut and both hands recover to ready")
 	return entry.distance_to(exit)
 
@@ -175,6 +251,9 @@ func check_staff_diagonal(rig: Node3D) -> void:
 	var idle_center := (idle_base+idle_tip)*0.5
 	var idle_right: Vector3 = rig.get_joint_positions().right_wrist
 	check(idle_right.distance_to(idle_center)<0.35,"The staff grip sits around the shaft middle, not at one end")
+	var forward: Vector3 = -rig.global_basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
 	for variant in ["diagonal_right","diagonal_left"]:
 		rig.set_staff(0,true)
 		check(rig.begin_melee("right",variant),"The staff starts its %s cut" % variant)
@@ -185,6 +264,9 @@ func check_staff_diagonal(rig: Node3D) -> void:
 		var max_separation := 0.0
 		var both_ends := false
 		var elapsed := 0.0
+		var lead_end := Vector3.ZERO
+		var butt_end := Vector3.ZERO
+		var grip_end := Vector3.ZERO
 		while elapsed < rig.melee_seconds("right")+0.05:
 			rig.advance_animation(1.0/120.0)
 			elapsed += 1.0/120.0
@@ -204,10 +286,19 @@ func check_staff_diagonal(rig: Node3D) -> void:
 				var separation := left.distance_to(right)
 				min_separation = minf(min_separation,separation)
 				max_separation = maxf(max_separation,separation)
+				lead_end = tip
+				butt_end = base
+				grip_end = right
 		check(max_center<0.35,"The %s staff swing keeps the right hand at the shaft middle" % variant)
 		check(max_axis<0.12,"The %s staff swing keeps the support hand on the shaft (%.3f)" % [variant,max_axis])
 		check(min_separation>0.20 and max_separation<0.45,"The %s staff hands stay spaced around the middle" % variant)
 		check(both_ends,"The %s staff extends on both sides of the grip" % variant)
+		# A middle-gripped staff counterweights: the leading end finishes ahead
+		# and low while the rear end swings up and behind the hands. A hilt at
+		# one end of the weapon cannot produce that shape.
+		check((lead_end-grip_end).dot(forward)>0.20,"The %s staff leads the strike with its far end (%.2f)" % [variant,(lead_end-grip_end).dot(forward)])
+		check((butt_end-grip_end).dot(forward)<0.05,"The %s staff rear end counterweights behind the hands (%.2f)" % [variant,(butt_end-grip_end).dot(forward)])
+		check(butt_end.y>grip_end.y,"The %s staff rear end rides above the grip at the follow-through (%.2f/%.2f)" % [variant,butt_end.y,grip_end.y])
 		check(rig.phase=="READY","The %s staff cut recovers to ready" % variant)
 	rig.set_staff(0,false)
 
