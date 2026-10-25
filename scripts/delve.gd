@@ -50,15 +50,14 @@ const HOOK_KILL_DELAY := 2.0
 # Summoning ritual and wave schedule. Odd depths are the sanctuary, even depths
 # the ossuary, and each room alternates through a fresh palette cycle.
 const RITUAL_SECONDS := 3.2
-## Whole-wave budget, every body included: half the old 26-mob ladder, so a run
-## fields about half the monsters it used to. The court devils and the clones
-## are drawn from this budget instead of being stacked on top of it.
-const WAVE1_ENEMIES := 17
+## Whole-wave budget, every body included: ten enemies on wave one and five more
+## every wave after it (10, 15, 20, 25, 30, 35 ...), whatever the room. The court
+## devils and the clones are drawn from this budget instead of being stacked on
+## top of it, so `wave_total` is exactly the ramp.
+const WAVE_FIRST_ENEMIES := 10
+const WAVE_STEP := 5
 const WAVE1_SECONDS := 30.0
-const WAVE2_ENEMIES := 17
 const WAVE2_SECONDS := 40.0
-const WAVE1_GROWTH := 1
-const WAVE2_GROWTH := 2
 ## The crimson clones are the heaviest body in the chamber, so they hold the end
 ## of the schedule and only enlist from the third wave of the run.
 const CLONE_FIRST_WAVE := 3
@@ -1886,12 +1885,10 @@ func wave_plan() -> Array:
 func _wave_duration(kind: String) -> float:
 	return WAVE2_SECONDS if kind == World.ROOM_OSSUARY else WAVE1_SECONDS
 
-## The wave budget: half the old base ladder plus half its per-cycle growth.
-func _wave_total_for(kind: String, room_cycle: int) -> int:
-	var cycles := maxi(1,room_cycle) - 1
-	if kind == World.ROOM_OSSUARY:
-		return WAVE2_ENEMIES + WAVE2_GROWTH * cycles
-	return WAVE1_ENEMIES + WAVE1_GROWTH * cycles
+## The wave budget: ten enemies on the run's first wave, five more each wave.
+## The room kind picks the window length and the composition, never the count.
+func _wave_total_for() -> int:
+	return WAVE_FIRST_ENEMIES + WAVE_STEP * maxi(0,wave_number - 1)
 
 ## One budget, one composition: the five court devils and the crimson clones are
 ## set pieces drawn from the wave total, and the plain ladder fills the rest, so
@@ -1978,7 +1975,7 @@ func _build_wave_plan() -> void:
 	_wave_cursor = 0
 	_wave_clock = 0.0
 	var kind := str(world.room_kind)
-	var budget := _wave_total_for(kind,int(world.cycle))
+	var budget := _wave_total_for()
 	var roles := _wave_roles(kind,budget)
 	var total := roles.size()
 	wave_total = total
