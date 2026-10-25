@@ -177,6 +177,10 @@ func _host_run() -> void:
 		check(bool(cleared_report.get("chest",false)),"The client sees the cache")
 		check(bool(cleared_report.get("rope",false)) and bool(cleared_report.get("hole",false)),"The client sees the rope and hole open")
 		check(bool(cleared_report.get("host_alive",false)),"The client sees the host alive")
+		var client_roles: Array = cleared_report.get("roles",[])
+		for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
+			check(client_roles.has(role),"The client replicates the %s" % role)
+		check(bool(cleared_report.get("species_visuals",false)),"The client builds the imported species rigs")
 
 	game.open_chest()
 	check(game.chest_open,"The host opens the cache")
@@ -230,6 +234,8 @@ func _client_run(port: int) -> void:
 	print("DELVE_NET_CLIENT joined slot=",game.local_slot)
 	var saw_wave := false
 	var devils_seen := 0
+	var roles_seen := {}
+	var species_visuals := true
 	var ritual_seen := 0.0
 	var pentagram_seen := false
 	var cleared_sent := false
@@ -256,6 +262,10 @@ func _client_run(port: int) -> void:
 			for devil in game._devil_nodes.values():
 				if is_instance_valid(devil) and devil.alive:
 					replicas += 1
+					var role := str(devil.role())
+					roles_seen[role] = true
+					if role in ["hell_goat","succubus","spawn","beast","gargoyle"] and str(devil._visual_kind) != "mob":
+						species_visuals = false
 			if replicas > 0:
 				saw_wave = true
 				devils_seen = maxi(devils_seen,replicas)
@@ -266,7 +276,8 @@ func _client_run(port: int) -> void:
 				"saw_wave":saw_wave,"devils":devils_seen,"phase":game.phase,"depth":game.depth,
 				"chest":is_instance_valid(game.chest),"host_alive":game.actors[0].alive,
 				"room":str(game.world.room_kind),"ritual":ritual_seen,"pentagram":pentagram_seen,
-				"rope":game.world.is_rope_lowered(),"hole":game.world.is_hole_open()})
+				"rope":game.world.is_rope_lowered(),"hole":game.world.is_hole_open(),
+				"roles":roles_seen.keys(),"species_visuals":species_visuals})
 		if cleared_sent and is_instance_valid(game.chest) and game.chest.is_opened() and not open_sent:
 			open_sent = true
 			_trace("sending open report")

@@ -11,6 +11,8 @@ signal struck(target, amount, position, outcome)
 
 const Geo = preload("res://scripts/geo.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
+const DevilMob = preload("res://scripts/devil_mob.gd")
+const SpeciesVisual = preload("res://scripts/devil_mob_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -30,6 +32,15 @@ const ROLE_IMP := "imp"
 const ROLE_DEVIL := "devil"
 const ROLE_BONEFIEND := "bonefiend"
 const ROLE_BRUTE := "brute"
+## The five imported devils that open the frontier's starting court. They keep
+## their authored GLB, proportions and claw cadence; only health and damage take
+## the depth curve. `devil_mob.gd` remains the one profile table.
+const ROLE_HELL_GOAT := "hell_goat"
+const ROLE_SUCCUBUS := "succubus"
+const ROLE_SPAWN := "spawn"
+const ROLE_BEAST := "beast"
+const ROLE_GARGOYLE := "gargoyle"
+const SPECIES_ROLES := [ROLE_HELL_GOAT,ROLE_SUCCUBUS,ROLE_SPAWN,ROLE_BEAST,ROLE_GARGOYLE]
 
 ## Role baselines, before the depth scaling that `configure` layers on top.
 ## `scale` drives every dimension: rig, capsule, warning disc, reach anchors
@@ -51,6 +62,13 @@ const PROFILES := {
 
 ## Multiplier applied to the role damage baseline by the held weapon.
 const WEAPON_DAMAGE := {"claw": 1.0, "dagger": 0.75, "sword": 1.35}
+
+## The frontier's starting-court devils are tuned for a solo ranger's opening
+## field, so the delve brings them in at a court scale that sits between the
+## imps and the bonefiends at depth one instead of multiplying the wave by four.
+## The depth curve still grows them at the same rate as every other role.
+const COURT_HEALTH_SCALE := 0.45
+const COURT_DAMAGE_SCALE := 0.65
 
 const WINDUP_SECONDS := 0.38
 const STRIKE_SECONDS := 0.14
@@ -88,10 +106,18 @@ var state := STATE_EMERGE
 
 var _role := ROLE_DEVIL
 var _body_scale := 1.0
+var _body_radius := BODY_RADIUS
+var _body_height := BODY_HEIGHT
+var _aim_height := AIM_HEIGHT
+var _blood_size := BLOOD_SIZE
 var _emerge_seconds := 0.35
 var _warning_radius := 1.6
 var _cooldown_min := 0.9
 var _cooldown_max := 1.3
+var _windup_seconds := WINDUP_SECONDS
+var _strike_seconds := STRIKE_SECONDS
+var _strike_hit_time := STRIKE_HIT_TIME
+var _recover_seconds := RECOVER_SECONDS
 var _state_time := 0.0
 var _attack_damage := 8.0
 var _attack_reach := 1.9
@@ -102,7 +128,8 @@ var _death_handled := false
 var _received_pose := false
 var _net_position := Vector3.ZERO
 var _rng := RandomNumberGenerator.new()
-var _visual: DevilVisual
+var _visual
+var _visual_kind := ""
 var _warning: MeshInstance3D
 var _collider: CollisionShape3D
 var _shape: CapsuleShape3D
@@ -125,12 +152,9 @@ func _ready() -> void:
 	_collider = CollisionShape3D.new()
 	_collider.shape = _shape
 	add_child(_collider)
-	_visual = DevilVisual.new()
-	_visual.name = "DevilVisual"
-	add_child(_visual)
-	_visual.set_weapon(devil_weapon)
-	# A flat emissive disc telegraphs the strike window on the floor. The mesh
-	# is authored at radius 1.0 and scaled to the role warning radius.
+	# The visual follows the role, which arrives in `configure`, so the correct
+	# rig (procedural Cinder devil or an imported starting-court species) is
+	# built once instead of being swapped after the body already exists.
 	var warning_material := Geo.material(Color(0.95,0.22,0.08,0.34))
 	warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	warning_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -151,8 +175,6 @@ func configure(next_id: int, weapon: String, next_depth: int, role: String = ROL
 	if not WEAPON_DAMAGE.has(devil_weapon):
 		devil_weapon = "claw"
 	_apply_role(str(role).to_lower())
-	if is_instance_valid(_visual):
-		_visual.set_weapon(devil_weapon)
 	# Per-enemy randomness: two devils in a wave never share a swing rhythm.
 	_rng.seed = 4409 + maxi(enemy_id,0) * 277
 	_attack_cooldown = 0.30 + _rng.randf() * 0.35
@@ -196,6 +218,8 @@ func role() -> String:
 
 
 func display_name() -> String:
+	if SPECIES_ROLES.has(_role):
+		return str(DevilMob.PROFILES[_role]["display"])
 	return str(PROFILES[_role]["display"])
 
 
@@ -203,10 +227,24 @@ func display_name() -> String:
 ## heavier, faster devils; speed growth is capped so they keep telegraphing
 ## instead of teleporting past the strike window.
 func _apply_role(next_role: String) -> void:
-	_role = next_role if PROFILES.has(next_role) else ROLE_DEVIL
-	var profile: Dictionary = PROFILES[_role]
+	var known := PROFILES.has(next_role) or SPECIES_ROLES.has(next_role)
+	_role = next_role if known else ROLE_DEVIL
 	var step := float(maxi(1,depth) - 1)
+	if SPECIES_ROLES.has(_role):
+		_apply_species(step)
+	else:
+		_apply_depth_role(step)
+	_ensure_visual()
+	_refresh_metrics()
+
+
+func _apply_depth_role(step: float) -> void:
+	var profile: Dictionary = PROFILES[_role]
 	_body_scale = float(profile["scale"])
+	_body_radius = BODY_RADIUS * _body_scale
+	_body_height = BODY_HEIGHT * _body_scale
+	_aim_height = AIM_HEIGHT * _body_scale
+	_blood_size = BLOOD_SIZE * _body_scale
 	_warning_radius = float(profile["warning"])
 	_emerge_seconds = float(profile["emerge"])
 	_cooldown_min = float(profile["cooldown_min"])
@@ -216,22 +254,98 @@ func _apply_role(next_role: String) -> void:
 	_attack_damage *= 1.0 + 0.15 * step
 	max_health = float(profile["health"]) * (1.0 + 0.28 * step)
 	chase_speed = float(profile["speed"]) * minf(1.35, 1.0 + 0.03 * step)
-	_refresh_metrics()
+	_windup_seconds = WINDUP_SECONDS
+	_strike_seconds = STRIKE_SECONDS
+	_strike_hit_time = STRIKE_HIT_TIME
+	_recover_seconds = RECOVER_SECONDS
 
 
-## Pushes the role scale into every physical measurement: capsule, rig, warning
-## disc and sigil. Reach, aim and head anchors derive from `_body_scale` on read.
+## The five starting-court species keep their authored proportions, claw reach
+## and attack clips; the depth curve touches health, damage and speed only.
+func _apply_species(step: float) -> void:
+	devil_weapon = "claw"
+	var profile: Dictionary = DevilMob.PROFILES[_role]
+	_body_radius = float(profile["radius"])
+	_body_height = maxf(float(profile["height"]), _body_radius * 2.0 + 0.02)
+	_body_scale = _body_height / BODY_HEIGHT
+	_aim_height = float(profile["aim"])
+	_blood_size = float(profile["blood"])
+	_warning_radius = clampf(float(profile["reach"]) * 0.85, 0.9, 2.2)
+	_emerge_seconds = 0.5
+	_windup_seconds = float(profile["windup"])
+	_strike_seconds = float(profile["strike"])
+	_strike_hit_time = _strike_seconds * 0.34
+	_recover_seconds = float(profile["recover"])
+	_cooldown_min = float(profile["cooldown"])
+	_cooldown_max = _cooldown_min * 1.3
+	_attack_reach = float(profile["reach"])
+	_attack_damage = float(profile["damage"]) * COURT_DAMAGE_SCALE * (1.0 + 0.15 * step)
+	max_health = float(profile["health"]) * COURT_HEALTH_SCALE * (1.0 + 0.28 * step)
+	chase_speed = float(profile["run_speed"]) * minf(1.35, 1.0 + 0.03 * step)
+
+
+## Builds the rig the current role needs. Imported species load their authored
+## GLB through `DevilMobVisual`; the four depth roles keep the procedural rig.
+func _ensure_visual() -> void:
+	var wanted := "mob" if SPECIES_ROLES.has(_role) else "procedural"
+	if _visual_kind == wanted and is_instance_valid(_visual):
+		return
+	if is_instance_valid(_visual):
+		_visual.queue_free()
+		_visual = null
+	if wanted == "mob":
+		var species := SpeciesVisual.new()
+		species.name = "DevilMobVisual"
+		species.mob_id = _role
+		species.profile = DevilMob.PROFILES[_role]
+		add_child(species)
+		_visual = species
+	else:
+		var demon := DevilVisual.new()
+		demon.name = "DevilVisual"
+		add_child(demon)
+		_visual = demon
+		demon.set_weapon(devil_weapon)
+	_visual_kind = wanted
+
+
+## Pushes the role metrics into every physical measurement: capsule, rig,
+## warning disc and sigil. The imported rigs already carry authored scale.
 func _refresh_metrics() -> void:
 	if is_instance_valid(_shape):
-		_shape.radius = BODY_RADIUS * _body_scale
-		_shape.height = BODY_HEIGHT * _body_scale
+		_shape.radius = _body_radius
+		_shape.height = _body_height
 	if is_instance_valid(_collider):
-		_collider.position.y = BODY_HEIGHT * _body_scale * 0.5
+		_collider.position.y = _body_height * 0.5
 	if is_instance_valid(_visual):
-		_visual.scale = Vector3.ONE * _body_scale
+		_visual.scale = Vector3.ONE if _visual_kind == "mob" else Vector3.ONE * _body_scale
 	if is_instance_valid(_warning):
 		_warning.scale = Vector3(_warning_radius,1.0,_warning_radius)
 	_update_emerge_fx()
+
+
+## The imported rigs animate authored IDLE/CIRCLE/attack clips; the delve's
+## EMERGE and CHASE names map onto those two locomotion states.
+func _mob_state() -> String:
+	if state == STATE_EMERGE:
+		return "IDLE"
+	if state == STATE_CHASE:
+		return "CIRCLE"
+	return state
+
+
+func _present_motion(actual: Vector3, grounded: bool) -> void:
+	if is_instance_valid(_visual):
+		_visual.set_motion(actual,grounded)
+
+
+func _present_state() -> void:
+	if not is_instance_valid(_visual):
+		return
+	if _visual_kind == "mob":
+		_visual.set_combat(_mob_state(),_state_time)
+	else:
+		_visual.set_action(state,_state_time)
 
 
 func _build_emerge_fx() -> void:
@@ -332,21 +446,21 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 		STATE_WINDUP:
 			if distance < INF:
 				face_intent = to_target.normalized()
-			if _state_time >= WINDUP_SECONDS:
+			if _state_time >= _windup_seconds:
 				_enter(STATE_STRIKE)
 		STATE_STRIKE:
 			if distance < INF:
 				face_intent = to_target.normalized()
-			if not _struck and _state_time >= STRIKE_HIT_TIME:
+			if not _struck and _state_time >= _strike_hit_time:
 				_struck = true
 				_strike()
-			if _state_time >= STRIKE_SECONDS:
+			if _state_time >= _strike_seconds:
 				_attack_cooldown = _rng.randf_range(_cooldown_min,_cooldown_max)
 				_enter(STATE_RECOVER)
 		STATE_RECOVER:
 			if distance < INF:
 				face_intent = to_target.normalized()
-			if _state_time >= RECOVER_SECONDS:
+			if _state_time >= _recover_seconds:
 				_enter(STATE_CHASE)
 		STATE_STAGGER:
 			if _state_time >= STAGGER_SECONDS:
@@ -371,9 +485,8 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 	position.x = clampf(position.x,-LIMIT,LIMIT)
 	position.z = clampf(position.z,-LIMIT,LIMIT)
 	var actual := (global_position-before)/maxf(delta,0.0001)
-	if is_instance_valid(_visual):
-		_visual.set_motion(actual,is_on_floor())
-		_visual.set_action(state,_state_time)
+	_present_motion(actual,is_on_floor())
+	_present_state()
 
 
 func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
@@ -403,8 +516,6 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	if next_role != _role or next_weapon != devil_weapon:
 		devil_weapon = next_weapon
 		_apply_role(next_role)
-		if is_instance_valid(_visual):
-			_visual.set_weapon(devil_weapon)
 	health = float(snapshot_state.get("health",health))
 	if had_pose and previous_health-health > 0.01:
 		# Replicas never apply damage; the health delta is their only hit signal.
@@ -412,8 +523,7 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 			false,health <= 0.0,blood_scale())
 	state = str(snapshot_state.get("state",state))
 	_state_time = float(snapshot_state.get("time",_state_time))
-	if is_instance_valid(_visual):
-		_visual.set_action(state,_state_time)
+	_present_state()
 	var next_position: Vector3 = snapshot_state.get("pos",_net_position)
 	_net_position = next_position
 	if not _received_pose or position.distance_squared_to(next_position) > 36.0:
@@ -431,19 +541,18 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 
 func blood_rig() -> Node3D:
 	if is_instance_valid(_visual):
-		var anchor := _visual.blood_anchor()
+		var anchor: Node3D = _visual.blood_anchor()
 		if is_instance_valid(anchor):
 			return anchor
 	return self
 
 func blood_scale() -> float:
-	return BLOOD_SIZE * _body_scale
+	return _blood_size
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
-	if is_instance_valid(_visual):
+	if _visual_kind != "mob" and is_instance_valid(_visual):
 		return _visual.weapon_anchor()
 	return null
-
 
 func blood_strike_point() -> Vector3:
 	if is_instance_valid(_visual):
@@ -451,7 +560,7 @@ func blood_strike_point() -> Vector3:
 	return get_aim_position()
 
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0,AIM_HEIGHT * _body_scale,0)
+	return global_position + Vector3(0,_aim_height,0)
 
 
 func head_hitbox_center() -> Vector3:
@@ -461,6 +570,8 @@ func head_hitbox_center() -> Vector3:
 
 
 func head_hit_profile() -> Vector2:
+	if _visual_kind == "mob" and is_instance_valid(_visual):
+		return _visual.head_hit_profile()
 	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT) * _body_scale
 
 
@@ -479,9 +590,8 @@ func _process(delta: float) -> void:
 	if state != STATE_DEAD:
 		position = position.lerp(_net_position,clampf(delta*12.0,0.0,1.0))
 	if is_instance_valid(_visual):
-		var motion := (position-before)/maxf(delta,0.0001)
-		_visual.set_motion(motion,true)
-		_visual.set_action(state,_state_time)
+		_present_motion((position-before)/maxf(delta,0.0001),true)
+		_present_state()
 
 
 func _begin_windup() -> void:
@@ -544,9 +654,12 @@ func _die(announce: bool) -> void:
 	if is_instance_valid(_warning):
 		_warning.visible = false
 	if is_instance_valid(_visual):
-		_visual.set_weapon("claw")
-		_visual.set_action(STATE_DEAD,0.0)
-		_visual.die()
+		if _visual_kind == "mob":
+			_visual.die()
+		else:
+			_visual.set_weapon("claw")
+			_visual.set_action(STATE_DEAD,0.0)
+			_visual.die()
 	_update_emerge_fx()
 	if announce:
 		died.emit(self)

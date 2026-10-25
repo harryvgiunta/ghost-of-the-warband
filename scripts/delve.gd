@@ -1640,7 +1640,9 @@ func _wave_total_for(kind: String, room_cycle: int) -> int:
 		return WAVE2_TOTAL + 3 * cycles
 	return WAVE1_TOTAL + 2 * cycles
 
-## Roles escalate from the cheap imps to the elites that close the wave.
+## Roles escalate from the cheap imps to the elites that close the wave. The
+## five starting-court species are scattered through that ladder, so every wave
+## fields one of each instead of arriving as a single late clump.
 func _wave_roles(kind: String, total: int) -> Array:
 	var roles: Array = []
 	if kind == World.ROOM_OSSUARY:
@@ -1652,15 +1654,22 @@ func _wave_roles(kind: String, total: int) -> Array:
 			roles.append(Devil.ROLE_BONEFIEND)
 		for index in brutes:
 			roles.append(Devil.ROLE_BRUTE)
-		return roles
-	var devils := mini(maxi(2,total / 4),total)
-	for index in total - devils:
-		roles.append(Devil.ROLE_IMP)
-	for index in devils:
-		roles.append(Devil.ROLE_DEVIL)
+	else:
+		var devils := mini(maxi(2,total / 4),total)
+		for index in total - devils:
+			roles.append(Devil.ROLE_IMP)
+		for index in devils:
+			roles.append(Devil.ROLE_DEVIL)
+	var species := mini(Devil.SPECIES_ROLES.size(),total)
+	for index in species:
+		var at := int(floor((float(index) + 0.5) * float(total) / float(species)))
+		roles[mini(at,total - 1)] = str(Devil.SPECIES_ROLES[index])
 	return roles
 
 func _wave_weapon(role: String, role_index: int) -> String:
+	if Devil.SPECIES_ROLES.has(role):
+		# The imported court fights bare-handed; nothing to drop.
+		return "claw"
 	if role == Devil.ROLE_IMP:
 		return "claw" if role_index % 2 == 0 else "dagger"
 	if role == Devil.ROLE_DEVIL:
