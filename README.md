@@ -1,6 +1,6 @@
 # Ironwood — Town, Frontier, Arena and the Endless Sunken Delve
 
-A Godot 4 third-person action game with one in-game world: a main menu, a walkable PvE town with three keepers, a stash and an arena portal, a seamless woodland frontier, a four-combatant multiplayer arena, and an endless two-room survival delve beneath the town. The ranger carries a **15-slot backpack**, a **20-slot stash** and **ten independent equipment slots**. A textured, rigged male Ranger with authored human animation, swappable bows, swords, daggers, shields, staffs, foci and jewelry, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
+A Godot 4 third-person action game with one in-game world: a main menu, a walkable PvE town with three keepers, a stash and an arena portal, a seamless woodland frontier, an **open world you can host for up to four rangers** (town and frontier together), a four-combatant multiplayer arena, and an endless two-room survival delve beneath the town. The ranger carries a **15-slot backpack**, a **20-slot stash** and **ten independent equipment slots**. A textured, rigged male Ranger with authored human animation, swappable bows, swords, daggers, shields, staffs, foci and jewelry, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
 ## Windows quick start
 
@@ -17,21 +17,23 @@ cd ironwood-arena
 
 The launchers import the bundled character assets before starting the game, so a fresh checkout does not need an existing `.godot` cache. Subsequent launches reuse imported assets. Blender is not required to play.
 
-- **Play.cmd:** opens the main menu (**Start New Game**, **Load Saved Game**, **Join Game**).
+- **Play.cmd:** opens the main menu (**Start New Game**, **Load Saved Game**, **Host Open World**, **Join Game**).
 - **Arena.cmd:** opens the standalone multiplayer lobby directly, or solo practice against bots. Its **Return to Town** button loads the PvE town.
+- **Host World.cmd:** starts the town/frontier as an open world on UDP 7777 with your Windows user name, so friends can join without a delve or arena. **Host Open World** in the main menu does the same on the remembered port.
 - **Host Tailscale.cmd:** starts the town/frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** and jump into the Sunken Delve hatch to host on that port. Friends join with the main menu's **Join Game** form, choosing **Delve party**.
 
 Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `title.tscn`, `main.tscn`, `arena.tscn` or `delve.tscn`; the Windows setup script does not install engines for those platforms.
 
 ## Main menu and the town
 
-Every launch opens the **main menu** with exactly three doors:
+Every launch opens the **main menu** with four doors:
 
 | Menu action | Result |
 | --- | --- |
 | **Start New Game** | Resets the ranger to the starter kit, purse and empty stash, then starts at the south gate of Hearthstead. |
 | **Load Saved Game** | Restores `user://player_state.json` and starts at the town gate. Disabled when no save exists. |
-| **Join Game** | Opens the cached name/address/port form, chooses an **arena match** or **delve party**, and joins that host. |
+| **Host Open World** | Opens the current town and frontier as a four-ranger host on the remembered UDP port (default 7777). Friends join it with **Join Game**. |
+| **Join Game** | Opens the cached name/address/port form and joins an **arena match**, **delve party** or **open world**. |
 
 There is no out-of-game depot. **Hearthstead** is the staging town inside the open PvE world, and every service is a real object you walk up to and press **G** on:
 
@@ -101,6 +103,12 @@ In a match, the arena's session panel lists five slot buttons (**HEAD / CHEST / 
 
 All players should use the same current checkout and be connected to a tailnet that permits them to reach the host.
 
+### Open world (shared town and frontier)
+
+Press **Host Open World** in the main menu, or run `Host World.cmd`, to open the PvE town and frontier on UDP 7777. The HUD's top-left line reports the session (`OPEN WORLD / UDP 7777 / 2 RANGERS`). Friends pick **Join Game → Open world**, enter the host's Tailscale IP and the port from that line, and arrive at the Hearthstead gate as their own saved ranger. Up to four rangers share the world.
+
+The host is authoritative for every ranger and mob. Clients send movement, aim and action intents, never damage, charge or positions. Mobs chase and strike the nearest ranger; kills, arrows, thrown weapons, loot drops, waystone restorations and gold are replicated to every peer. Keepers, the stash and the backpack stay **per player**: each peer trades against its own `user://player_state.json`, and a world drop is granted to whichever ranger picks it up on their own machine. Only the host can restore a waystone or step into the arena portal; a client that falls through the inn hatch leaves the open world and starts its own delve. If the host leaves or changes scene, clients see the connection message and continue alone with live mobs. There is no host migration.
+
 ### Host
 
 ```powershell
@@ -131,7 +139,7 @@ The delve uses the same ENet transport. A delve host needs no lobby: the party f
 
 ### Connection troubleshooting
 
-- Confirm the host is actually hosting: in an arena match rather than merely the lobby, or for a delve after the hatch/descend press rather than still standing in the frontier or on the landing.
+- Confirm the host is actually hosting: an open-world session shows `OPEN WORLD / UDP <port> / N RANGERS` at the top left; for an arena it must be in a match rather than merely the lobby, and for a delve after the hatch/descend press rather than still standing in the frontier or on the landing.
 - Run `tailscale ping HOST_TAILSCALE_IP` from the joining PC. This checks tailnet connectivity, not the game's UDP port.
 - Permit UDP **7777** in any custom tailnet access policy and allow the host executable through its local firewall.
 - If necessary, run `Allow Tailscale Host.ps1` in an elevated PowerShell on the **host only**. It creates a narrowly scoped rule for this engine, UDP 7777, the Tailscale adapter, and Tailscale IPv4 addresses. It is optional and never runs automatically.
@@ -466,6 +474,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/delve_regression.gd
 & $Godot --headless --path . --script res://tests/delve_entry_regression.gd
 & $Godot --headless --path . --script res://tests/delve_network_regression.gd
+& $Godot --headless --path . --script res://tests/world_network_regression.gd
 & $Godot --headless --path . --script res://tests/consumable_regression.gd
 & $Godot --headless --path . --script res://tests/blood_regression.gd
 & $Godot --headless --path . --script res://tests/corpse_regression.gd
@@ -476,7 +485,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 
 `blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold. `ability_regression.gd` checks the charge definition and 1000-stamina pool, committed travel and animation/replication, chip versus half-health cancellation, rejection cases, the snapshot budget, the Shift + 1 frontier binding and the arena host action.
 
-`delve_regression.gd` checks the endless loop: the fall-in start, the sanctuary altar phase, the pentagram ritual, a 10-enemy late-weighted wave from random spawn points, the clear delay, cache spawn, rope and floor-hole beacons, chest rewards, the Ossuary Pit (20 stronger enemies, immediate start after landing), depth-three sanctuary recycling with a new palette, and the rope return to town. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the ritual, room, wave and cache, and both observe the descent into the ossuary.
+`delve_regression.gd` checks the endless loop: the fall-in start, the sanctuary altar phase, the pentagram ritual, a 10-enemy late-weighted wave from random spawn points, the clear delay, cache spawn, rope and floor-hole beacons, chest rewards, the Ossuary Pit (20 stronger enemies, immediate start after landing), depth-three sanctuary recycling with a new palette, and the rope return to town. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the ritual, room, wave and cache, and both observe the descent into the ossuary. `world_network_regression.gd` runs two real ENet processes for the open world: the host opens the town/frontier, the client joins seat one, both mobs and rangers replicate, the client's weapon/jump/melee intents drive its host-authoritative ranger, damage and health reach both peers, the host's mob arrow and loot drop appear on the client, every client mob is a host-driven replica, and the seat is freed when the client leaves.
 
 `world_ui_regression.gd` drives the in-world **I/P kit** in the real delve and arena scenes. It checks that **I** opens the backpack and frees the cursor, that **P** opens the paperdoll, that an equip updates `PlayerState` and the live rig (`Archer.apply_loadout`), that `Escape` closes the kit and recaptures the mouse, and that arena drops fall back to the persistent ground list. `town_services_regression.gd` walks the PvE town: the three keeper counters, the stash chest, the arena portal, the open hatch cell, the town-gate spawn, I/P panel switching, vendor buying, stash transfers and unarmed world drops. `title_menu_regression.gd` covers Start New Game, Load Saved Game, the disabled-load state and the cached Join form.
 

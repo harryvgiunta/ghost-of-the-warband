@@ -21,11 +21,19 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const WorldUI = preload("res://scripts/world_ui.gd")
+const Seat = preload("res://scripts/arena_actor.gd")
+const SeatLoadout = preload("res://scripts/seat_loadout.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 const PICKUP_RADIUS := 1.6
 const FULL_MESSAGE_INTERVAL := 2.5
 const MAX_HEALTH := 100.0
+const WORLD_SEATS := 4
+const NET_TICK := 0.05
+const ENEMY_TICK := 0.0667
+const ENEMY_CHUNK := 5
+const ENEMY_RELEVANCE := 70.0
 # Deterministic frontier drops: every entry is a real PlayerState item id and the
 # first eight cover all eight equipment categories the paperdoll understands.
 const LOOT_SEQUENCE := [
@@ -44,6 +52,34 @@ var _player_state
 var _delve_host := false
 var _delve_port := 7777
 var _delve_name := ""
+var _world_host := false
+var _world_join := ""
+var _world_port := 7777
+var _world_name := ""
+var network_role := "offline"
+var local_slot := -1
+var server_tick := 0
+var _player_name := "Ranger"
+var _endpoint := ""
+var _peer_slots: Dictionary = {}
+var _seats: Dictionary = {}
+var _seat_list: Array = []
+var _enemies_by_index: Array = []
+var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
+var _join_elapsed := 0.0
+var _send_elapsed := 0.0
+var _enemy_elapsed := 0.0
+var _enemy_sends := 0
+var _client_aim := Vector3.ZERO
+var _client_aim_origin := Vector3.ZERO
+var _client_aim_origin_valid := false
+var _local_anchor_swapped := false
+var _client_dead_notified := false
+var _anchor_player: CharacterBody3D
+var _anchor_rig
+var _anchor_combat
+var _anchor_cover
+var _anchor_ability
 var combat
 var ability
 var roll
@@ -143,6 +179,11 @@ func _ready() -> void:
 	ability = AbilityRunner.new()
 	add_child(ability)
 	ability.setup(self,archer,combat,WALK_SPEED)
+	_anchor_player = player
+	_anchor_rig = archer
+	_anchor_combat = combat
+	_anchor_cover = cover
+	_anchor_ability = ability
 	camera = Camera3D.new()
 	camera.name = "AdventureCamera"
 	camera.fov = 59.0
@@ -191,6 +232,8 @@ func _ready() -> void:
 		add_child(enemy)
 		enemy.defeated.connect(_on_enemy_defeated)
 		enemy.attacked.connect(_on_enemy_attack)
+		if enemy.kind == 2:
+			enemy.arrow_fired.connect(_on_mob_arrow)
 		enemies.append(enemy)
 	for record: Dictionary in world.devil_spawns:
 		var devil := DevilMob.new()
@@ -202,6 +245,8 @@ func _ready() -> void:
 		devil.defeated.connect(_on_enemy_defeated)
 		devil.attacked.connect(_on_enemy_attack)
 		enemies.append(devil)
+	_enemies_by_index = enemies.duplicate()
+	_setup_network()
 	_update_camera(1.0)
 	hud.show_feedback("The old waystones have gone dark. Follow the trails north.")
 	print("IRONWOOD_WORLD_READY enemies=%d waystones=3 terrain=290m" % enemies.size())
@@ -220,6 +265,14 @@ func _read_arguments() -> void:
 			_delve_port = clampi(args[index + 1].to_int(), 1024, 65535)
 		elif argument == "--delve-name" and index + 1 < args.size():
 			_delve_name = str(args[index + 1]).strip_edges()
+		elif argument == "--world-host":
+			_world_host = true
+		elif argument == "--world-port" and index + 1 < args.size():
+			_world_port = clampi(args[index + 1].to_int(), 1024, 65535)
+		elif argument == "--world-name" and index + 1 < args.size():
+			_world_name = str(args[index + 1]).strip_edges()
+		elif argument == "--world-join" and index + 1 < args.size():
+			_world_join = str(args[index + 1]).strip_edges()
 
 
 func _build_world_ui() -> void:
@@ -275,6 +328,10 @@ func _on_ui_closed() -> void:
 func _on_ui_loadout_changed() -> void:
 	if _player_state == null:
 		return
+	if _client():
+		send_action("loadout",_local_loadout())
+		_refresh_backpack()
+		return
 	cancel_input()
 	archer.apply_loadout(_player_state.loadout())
 	_update_loadout()
@@ -290,6 +347,12 @@ func quick_swap() -> void:
 	if not bool(result.get("ok", false)):
 		hud.show_feedback(str(result.get("message", "No quick swap set.")), 2.0)
 		return
+	if _client():
+		send_action("loadout",_local_loadout())
+		_refresh_backpack()
+		audio.play_sound("equip")
+		hud.show_feedback(str(result.get("message", "Swapped weapons.")), 1.5)
+		return
 	cancel_input()
 	archer.apply_loadout(_player_state.loadout())
 	_update_loadout()
@@ -303,11 +366,14 @@ func _drop_field_loot(item_id: String) -> void:
 	# unarmed so the drop lands at the ranger's feet without an instant re-pickup.
 	if item_id.is_empty():
 		return
-	_spawn_loot(item_id,player.global_position,false)
+	_spawn_loot(item_id,player.global_position,false,false)
 	hud.show_feedback("%s dropped" % _loot_display_name(item_id),2.0)
 
 
 func _physics_process(delta: float) -> void:
+	if network_role == "client":
+		_client_step(delta)
+		return
 	roll.advance(delta,player.is_on_floor())
 	step.advance(delta,player.is_on_floor())
 	ability.advance(delta)
@@ -398,6 +464,10 @@ func _physics_process(delta: float) -> void:
 		_enter_delve()
 	elif player.position.y < -25.0:
 		return_to_camp()
+	if _entering_scene:
+		return
+	if network_role == "host":
+		_host_network_step(delta)
 
 func _process(delta: float) -> void:
 	shoulder_camera.update(delta)
@@ -442,8 +512,11 @@ func _set_cursor_free(value: bool) -> void:
 func update_crosshair_aim() -> void:
 	_update_camera(0.0)
 	if inspecting:
-		combat.set_aim(player.global_position + Vector3(0,1.7,0) - archer.global_basis.z * 30.0)
+		var inspection_aim: Vector3 = player.global_position + Vector3(0,1.7,0) - archer.global_basis.z * 30.0
+		combat.set_aim(inspection_aim)
 		combat.clear_camera_ray()
+		_client_aim = inspection_aim
+		_client_aim_origin_valid = false
 		return
 	var center := get_viewport().get_visible_rect().size * 0.5
 	var ray_origin := camera.project_ray_origin(center)
@@ -466,6 +539,9 @@ func update_crosshair_aim() -> void:
 	var aim: Vector3 = hit.position if not hit.is_empty() else _aim_query.to
 	combat.set_aim(aim)
 	combat.set_camera_ray(ray_origin,ray_direction)
+	_client_aim = aim
+	_client_aim_origin = ray_origin
+	_client_aim_origin_valid = true
 
 func _update_combat_cover_side() -> void:
 	cover.view_right = _peek_right
@@ -485,6 +561,15 @@ func _diagonal_variant() -> String:
 
 func begin_attack(hand: String = "right", variant: String = "") -> void:
 	if hud.map_open or _ui_open():
+		return
+	if _client():
+		if archer.weapon in ["sword","dagger","dual"]:
+			var swing := variant
+			if swing.is_empty():
+				swing = "diagonal_left" if hand == "left" and archer.weapon == "dual" else _diagonal_variant()
+			send_action("melee",{"hand":hand if archer.weapon == "dual" else "right","variant":swing,"aim":_client_aim})
+		else:
+			send_action("draw",_client_aim)
 		return
 	_cancel_consumable()
 	_capture_attack_cover_side()
@@ -507,9 +592,13 @@ func begin_attack(hand: String = "right", variant: String = "") -> void:
 		hud.show_feedback("Finish recovery and stand on solid ground." if archer.weapon in ["sword","dagger","dual"] else "Finish recovery, stand on solid ground, and use a clear cover edge or top.")
 
 func quick_step(side: int) -> void:
-	if inspecting or hud.map_open or _cursor_free or side == 0 or combat.stagger_time > 0.0 or ability.active:
+	if inspecting or hud.map_open or _cursor_free or side == 0:
 		return
-	_cancel_consumable()
+	if _client():
+		send_action("step",Vector3(cos(camera_yaw),0,-sin(camera_yaw))*signf(float(side)))
+		return
+	if combat.stagger_time > 0.0 or ability.active:
+		return
 	var direction: Vector3 = Vector3(cos(camera_yaw),0,-sin(camera_yaw))*signf(float(side))
 	if not step.try_step(direction,player.is_on_floor(),roll.active):
 		return
@@ -523,10 +612,13 @@ func quick_step(side: int) -> void:
 func begin_throw_attack() -> void:
 	if hud.map_open or _ui_open():
 		return
-	_cancel_consumable()
 	if archer.weapon not in ["sword","dagger","dual"]:
 		hud.show_feedback("Equip a sword with 2 or the dagger with 3 to throw.")
 		return
+	if _client():
+		send_action("throw",_client_aim)
+		return
+	_cancel_consumable()
 	_capture_attack_cover_side()
 	update_crosshair_aim()
 	if not combat.begin_throw():
@@ -538,17 +630,27 @@ func _input(event: InputEvent) -> void:
 			_mouse_drawing = false
 			_update_combat_cover_side()
 			update_crosshair_aim()
-			combat.release_draw()
+			if _client():
+				send_action("release",_client_aim)
+			else:
+				combat.release_draw()
 	if event is InputEventKey and event.keycode == KEY_T and not event.pressed:
 		if _throw_held:
 			_throw_held = false
 			_update_combat_cover_side()
 			update_crosshair_aim()
-			combat.release_throw()
+			if _client():
+				send_action("throw_release",_client_aim)
+			else:
+				combat.release_throw()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		_orbiting = false
 		_peek_requested = false
-		combat.stop_block()
+		if _client():
+			send_action("block",{"pressed":false,"forward":Vector3(-sin(camera_yaw),0,-cos(camera_yaw))})
+			send_action("peek",{"pressed":false,"right":Vector3(cos(camera_yaw),0,-sin(camera_yaw)),"side":shoulder_camera.side})
+		else:
+			combat.stop_block()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -631,7 +733,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_cursor_free(false)
 				_peek_requested = cover.active
 				_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
-				if not combat.start_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))) and not cover.active:
+				if _client():
+					if cover.active:
+						send_action("peek",{"pressed":true,"right":_peek_right,"side":shoulder_camera.side})
+					else:
+						send_action("block",{"pressed":true,"forward":Vector3(-sin(camera_yaw),0,-cos(camera_yaw))})
+				elif not combat.start_block(Vector3(-sin(camera_yaw),0,-cos(camera_yaw))) and not cover.active:
 					hud.show_feedback("Equip a sword or dagger with 2 or 3, stand still and finish recovery to guard.")
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			if event.ctrl_pressed:
@@ -670,13 +777,21 @@ func cancel_input() -> void:
 	if is_instance_valid(ability):
 		ability.cancel()
 	combat.stop()
+	if _client():
+		send_action("stop")
 
 func equip_bow(index: int) -> void:
+	if _client():
+		send_action("bow",index)
+		return
 	cancel_input()
 	archer.set_bow(index)
 	audio.play_sound("equip")
 
 func equip_sword(index: int) -> void:
+	if _client():
+		send_action("sword",index)
+		return
 	cancel_input()
 	archer.set_sword(index)
 	audio.play_sound("equip")
@@ -688,6 +803,9 @@ func equip_weapon(value: String) -> void:
 		elif archer.sword_index == 2:
 			hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Press P to change the kit.")
 			return
+	if _client():
+		send_action("weapon",value)
+		return
 	cancel_input()
 	if not archer.set_weapon(value):
 		hud.show_feedback("Dual wield needs a one-handed sword and an off-hand dagger or sword. Press P to change the kit.")
@@ -695,6 +813,9 @@ func equip_weapon(value: String) -> void:
 	audio.play_sound("equip")
 
 func equip_shield(value: bool) -> void:
+	if _client():
+		send_action("shield",value)
+		return
 	if value and not archer.can_equip_shield():
 		hud.show_feedback("Shield fits the dagger or the medium arming sword.")
 		return
@@ -703,9 +824,13 @@ func equip_shield(value: bool) -> void:
 	audio.play_sound("equip")
 
 func toggle_cover() -> void:
-	if inspecting or hud.map_open or _cursor_free or ability.active:
+	if inspecting or hud.map_open or _cursor_free:
 		return
-	_cancel_consumable()
+	if _client():
+		send_action("cover",Vector3(-sin(camera_yaw),0,-cos(camera_yaw)))
+		return
+	if ability.active:
+		return
 	cancel_input()
 	_peek_right = Vector3(cos(camera_yaw),0,-sin(camera_yaw))
 	_update_combat_cover_side()
@@ -718,7 +843,12 @@ func toggle_cover() -> void:
 		hud.show_feedback("Move closer to a tree, wall or solid debris and stand on the ground.")
 
 func toggle_crouch() -> void:
-	if inspecting or hud.map_open or _cursor_free or not player.is_on_floor() or roll.active or ability.active:
+	if inspecting or hud.map_open or _cursor_free:
+		return
+	if _client():
+		send_action("crouch",not cover.crouch_requested)
+		return
+	if not player.is_on_floor() or roll.active or ability.active:
 		return
 	_cancel_consumable()
 	var requested: bool = not cover.crouch_requested
@@ -730,7 +860,12 @@ func toggle_crouch() -> void:
 	cover.crouch_requested = requested
 
 func press_jump(roll_requested: bool) -> void:
-	if inspecting or hud.map_open or _cursor_free or ability.active:
+	if inspecting or hud.map_open or _cursor_free:
+		return
+	if _client():
+		send_action("jump",roll_requested)
+		return
+	if ability.active:
 		return
 	_cancel_consumable()
 	var grounded := player.is_on_floor()
@@ -747,6 +882,9 @@ func press_jump(roll_requested: bool) -> void:
 		cancel_input()
 
 func equip_armor_slot(slot: String, set_index: int) -> void:
+	if _client():
+		send_action("armor",{"slot":slot,"set":set_index})
+		return
 	cancel_input()
 	archer.set_armor_piece(slot,set_index)
 	audio.play_sound("equip")
@@ -759,6 +897,9 @@ func _update_loadout() -> void:
 
 func activate_ability(slot: int) -> void:
 	if inspecting or hud.map_open or _cursor_free or _ui_open():
+		return
+	if _client():
+		send_action("ability",slot)
 		return
 	if not is_instance_valid(ability) or ability.active:
 		return
@@ -785,6 +926,9 @@ func use_consumable(kind: String) -> void:
 		hud.show_feedback("Already using %s." % String(Archer.CONSUMABLE_DATA[_consume_kind].name))
 		return
 	if inspecting or hud.map_open or _cursor_free or _ui_open():
+		return
+	if _client():
+		send_action("consume",kind)
 		return
 	if health >= 99.999:
 		hud.show_feedback("Health is already full.")
@@ -914,19 +1058,34 @@ func interact() -> void:
 		"stash":
 			world_ui.open_stash()
 		"portal":
+			if _client():
+				hud.show_feedback("The host opens the arena from their own session.",3.0)
+				return
 			_enter_arena()
 		"camp":
+			if _client():
+				send_action("rest")
+				hud.show_feedback("Resting at the campfire.",1.5)
+				return
 			health = MAX_HEALTH
 			stamina = Stamina.MAX
 			hud.show_feedback("Rested. The town is waiting.")
 		"waystone":
+			if _client():
+				hud.show_feedback("Only the host can restore the frontier waystones.",3.0)
+				return
 			activated[_interaction_id] = true
 			world.activate_interactable(_interaction_id)
 			_award_gold(25)
+			if network_role == "host":
+				_world_waystone.rpc(_interaction_id)
+				_world_reward.rpc(25)
 			audio.play_sound("bullseye")
 			hud.show_feedback("Waystone restored  /  +25 gold")
 			if activated.size() == 3:
 				_award_gold(100)
+				if network_role == "host":
+					_world_reward.rpc(100)
 				hud.show_feedback("FRONTIER RESTORED  /  All three waystones lit  /  +100 gold", 6.0)
 
 func _preferred_name() -> String:
@@ -942,6 +1101,7 @@ func _enter_arena() -> void:
 		return
 	_entering_scene = true
 	cancel_input()
+	_close_network()
 	if _ui_open():
 		world_ui.close()
 	if _player_state != null:
@@ -960,6 +1120,7 @@ func _enter_delve() -> void:
 		return
 	_entering_scene = true
 	cancel_input()
+	_close_network()
 	if _ui_open():
 		world_ui.close()
 	if _player_state != null:
@@ -972,8 +1133,11 @@ func _enter_delve() -> void:
 		session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
 	get_tree().change_scene_to_file("res://delve.tscn")
 
-func _on_enemy_attack(attacker, amount: float) -> void:
+func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if not is_instance_valid(attacker) or not attacker.alive:
+		return
+	if victim != null and victim != player:
+		_receive_seat_attack(attacker,amount,victim)
 		return
 	var outcome: int = combat.resolve_melee_defense(attacker.global_position)
 	if outcome == Combat.DEFENSE_PARRY:
@@ -1007,6 +1171,22 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 		player.global_position - attacker.global_position,amount,false)
 	BloodFx.stain_attacker(attacker,amount)
 
+func _receive_seat_attack(attacker, amount: float, seat) -> void:
+	if not is_instance_valid(seat):
+		return
+	var outcome: int = seat.receive_melee(amount,-1,attacker.global_position)
+	if outcome == Combat.DEFENSE_PARRY:
+		attacker.stagger(Combat.PARRY_STAGGER)
+		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"parry")
+		audio.play_sound("parry")
+		return
+	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
+		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"block")
+		audio.play_sound("block")
+		return
+	BloodFx.impact(attacker,seat.global_position + Vector3(0,1.1,0),seat.global_position - attacker.global_position,amount,false)
+	BloodFx.stain_attacker(attacker,amount)
+
 func take_damage(amount: float, react: bool = true) -> void:
 	_cancel_consumable()
 	var applied: float = amount * (1.0 - archer.armor_reduction())
@@ -1026,6 +1206,9 @@ func take_damage(amount: float, react: bool = true) -> void:
 		hud.show_feedback("You fell. Recovered at the village campfire.", 4.0)
 
 func return_to_camp() -> void:
+	if _client():
+		send_action("respawn")
+		return
 	cancel_input()
 	_cancel_consumable()
 	_heal_remaining = 0.0
@@ -1056,21 +1239,13 @@ func return_to_camp() -> void:
 	_set_cursor_free(false)
 
 func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
-	var arrow := Arrow.new()
-	add_child(arrow)
 	var shot_damage := Combat.damage_for(archer.bow_index, charge)
 	var excluded: Array[RID] = [player.get_rid()]
 	if is_instance_valid(archer.active_shield):
 		excluded.append(archer.active_shield.get_rid())
-	arrow.hit_mask = 1 | 2 | 8
-	arrow.launch(origin, direction, speed, shot_damage, excluded, archer.last_arrow_visual_origin)
-	arrow.impacted.connect(_on_arrow_impact)
-	for index in range(arrows.size() - 1, -1, -1):
-		if not is_instance_valid(arrows[index]):
-			arrows.remove_at(index)
-	arrows.append(arrow)
-	if arrows.size() > 32:
-		arrows.pop_front().queue_free()
+	_spawn_arrow(origin,direction,speed,shot_damage,excluded,archer.last_arrow_visual_origin,0)
+	if network_role == "host":
+		_world_arrow.rpc(origin,direction,speed,archer.last_arrow_visual_origin,0)
 	shots += 1
 	audio.play_sound("release")
 
@@ -1079,21 +1254,11 @@ func _on_arrow_impact(enemy_hit: bool, _position: Vector3) -> void:
 		audio.play_sound("hit")
 
 func _on_weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
-	var thrown := Thrown.new()
-	thrown.weapon = weapon_name
-	thrown.weapon_index = weapon_index
-	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
-	add_child(thrown)
 	var shot_damage := Combat.throw_damage(weapon_name,weapon_index,charge)
 	var excluded: Array[RID] = [player.get_rid()]
-	thrown.launch(origin, direction, speed, shot_damage, excluded)
-	thrown.impacted.connect(_on_arrow_impact)
-	for index in range(thrown_weapons.size() - 1, -1, -1):
-		if not is_instance_valid(thrown_weapons[index]):
-			thrown_weapons.remove_at(index)
-	thrown_weapons.append(thrown)
-	if thrown_weapons.size() > 32:
-		thrown_weapons.pop_front().queue_free()
+	_spawn_thrown(origin,direction,speed,shot_damage,weapon_name,weapon_index,excluded,0)
+	if network_role == "host":
+		_world_throw.rpc(origin,direction,speed,weapon_name,weapon_index,0)
 	audio.play_sound("release")
 
 func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
@@ -1102,8 +1267,9 @@ func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 	var kind_value = enemy.get("kind")
 	var drop_kind: int = int(kind_value) if kind_value != null else 0
 	var drop_at: Vector3 = enemy.global_position
+	var display_name := str(enemy.get_display_name())
 	enemies.erase(enemy)
-	hud.show_feedback("%s defeated  /  +%d gold" % [enemy.get_display_name(), reward])
+	hud.show_feedback("%s defeated  /  +%d gold" % [display_name, reward])
 	var held_id := ""
 	if enemy.has_method("held_weapon_id"):
 		held_id = str(enemy.held_weapon_id())
@@ -1114,8 +1280,10 @@ func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 		var item_id := str(LOOT_SEQUENCE[_loot_cursor % LOOT_SEQUENCE.size()])
 		_loot_cursor += 1
 		_spawn_loot(item_id, drop_at)
+	if network_role == "host":
+		_world_kill.rpc(reward,display_name)
 
-func _spawn_loot(item_id: String, at: Vector3, armed := true) -> Node3D:
+func _spawn_loot(item_id: String, at: Vector3, armed := true, broadcast := true) -> Node3D:
 	var pickup := LootPickup.new()
 	pickup.name = "Loot_" + item_id
 	pickup.setup(item_id, _loot_display_name(item_id))
@@ -1123,6 +1291,8 @@ func _spawn_loot(item_id: String, at: Vector3, armed := true) -> Node3D:
 	pickup.position = _drop_floor(at)
 	add_child(pickup)
 	loot_pickups.append(pickup)
+	if broadcast and network_role == "host":
+		_world_loot.rpc(item_id,pickup.position,armed)
 	return pickup
 
 func _drop_floor(at: Vector3) -> Vector3:
@@ -1183,3 +1353,823 @@ func _award_gold(amount: int) -> void:
 	gold += amount
 	if _player_state != null:
 		_player_state.add_credits(amount)
+
+
+## Open world (PvE town and frontier): the host simulates every ranger, enemy
+## and pickup. Clients send movement/action intents and render replicated
+## seats, mobs and projectiles. Each peer keeps its own PlayerState save.
+
+func _setup_network() -> void:
+	multiplayer.peer_connected.connect(_peer_connected)
+	multiplayer.peer_disconnected.connect(_peer_disconnected)
+	multiplayer.connected_to_server.connect(_connected)
+	multiplayer.connection_failed.connect(func(): _join_failed("Could not join. Check the address, UDP port and host capacity (four rangers)."))
+	multiplayer.server_disconnected.connect(func(): _connection_ended("The host closed the open world. You are alone now."))
+	var session := get_node_or_null("/root/Session")
+	var pending: Dictionary = session.take() if session != null else {}
+	var mode := str(pending.get("mode",""))
+	var pending_name := str(pending.get("name","")).strip_edges()
+	_player_name = _safe_player_name(pending_name if not pending_name.is_empty() else _world_name if not _world_name.is_empty() else _preferred_name())
+	if not _world_join.is_empty():
+		join_world(_world_join,_world_port)
+	elif _world_host:
+		host_world(_world_port,_player_name)
+	elif mode == "world-host":
+		host_world(int(pending.get("port",_world_port)),_player_name)
+	elif mode == "world-join":
+		join_world(str(pending.get("address","127.0.0.1")),int(pending.get("port",7777)))
+
+
+func host_world(port: int, player_name: String) -> void:
+	if port < 1024 or port > 65535:
+		hud.show_feedback("Choose a UDP port between 1024 and 65535.",4.0)
+		return
+	var peer := ENetMultiplayerPeer.new()
+	var error := peer.create_server(port,WORLD_SEATS - 1)
+	if error != OK:
+		hud.show_feedback("Could not open the world on UDP %d: %s" % [port,error_string(error)],6.0)
+		print("WORLD_HOST_FAILED port=",port," error=",error_string(error))
+		return
+	multiplayer.multiplayer_peer = peer
+	network_role = "host"
+	local_slot = 0
+	_player_name = _safe_player_name(player_name)
+	_endpoint = "UDP %d" % port
+	_update_session_line()
+	hud.show_feedback("Open world on %s  /  friends: Join Game, Open world" % _endpoint,8.0)
+	print("WORLD_HOST_READY port=",port)
+
+
+func join_world(address: String, port: int) -> void:
+	address = address.strip_edges()
+	if address.is_empty() or port < 1024 or port > 65535:
+		hud.show_feedback("Enter the host's address and a UDP port between 1024 and 65535.",4.0)
+		return
+	var peer := ENetMultiplayerPeer.new()
+	var error := peer.create_client(address,port)
+	if error != OK:
+		hud.show_feedback("Could not start the connection: " + error_string(error),4.0)
+		return
+	multiplayer.multiplayer_peer = peer
+	network_role = "client"
+	local_slot = -1
+	_join_elapsed = 0.0
+	_set_replicas(true)
+	_endpoint = "%s:%d" % [address,port]
+	hud.show_feedback("Connecting to %s..." % _endpoint,4.0)
+
+
+func _connected() -> void:
+	if network_role != "client":
+		return
+	multiplayer.multiplayer_peer.get_peer(1).set_timeout(32,2000,5000)
+	_world_register.rpc_id(1,_player_name,_local_loadout())
+
+
+func _join_failed(message: String) -> void:
+	if network_role != "client" or local_slot >= 0:
+		return
+	_close_network()
+	_set_replicas(false)
+	hud.show_feedback(message + "  Playing alone.",6.0)
+	print("WORLD_JOIN_FAILED")
+
+
+func _connection_ended(message: String) -> void:
+	if network_role == "offline":
+		return
+	var last_position: Vector3 = player.global_position if is_instance_valid(player) else world.player_spawn
+	_close_network()
+	_set_replicas(false)
+	_restore_anchor(last_position)
+	hud.show_feedback(message,6.0)
+	print("WORLD_CONNECTION_LOST")
+
+
+func _close_network() -> void:
+	if _local_anchor_swapped:
+		_restore_anchor(player.global_position if is_instance_valid(player) else world.player_spawn)
+	network_role = "offline"
+	local_slot = -1
+	if multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		multiplayer.multiplayer_peer.close()
+	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	for slot in _seats.keys():
+		var seat = _seats[slot]
+		if is_instance_valid(seat):
+			seat.queue_free()
+	_seats.clear()
+	_seat_list.clear()
+	_peer_slots.clear()
+	server_tick = 0
+	_send_elapsed = 0.0
+	_enemy_elapsed = 0.0
+	_update_session_line()
+
+
+func _restore_anchor(at: Vector3) -> void:
+	if not _local_anchor_swapped:
+		return
+	player = _anchor_player
+	archer = _anchor_rig
+	combat = _anchor_combat
+	cover = _anchor_cover
+	ability = _anchor_ability
+	_local_anchor_swapped = false
+	_anchor_player.visible = true
+	_anchor_player.process_mode = Node.PROCESS_MODE_INHERIT
+	_anchor_player.global_position = at + Vector3(0,0.25,0)
+	_anchor_player.velocity = Vector3.ZERO
+	_anchor_player.collision_layer = 4
+	_anchor_player.collision_mask = 1 | 2
+	if world_ui != null:
+		world_ui.rebind(_anchor_rig)
+	_update_loadout()
+
+
+func _peer_connected(peer_id: int) -> void:
+	if network_role != "host":
+		return
+	multiplayer.multiplayer_peer.get_peer(peer_id).set_timeout(32,2000,5000)
+	var slot := _free_seat_slot()
+	if slot < 0:
+		multiplayer.multiplayer_peer.disconnect_peer(peer_id)
+		return
+	_peer_slots[peer_id] = slot
+	_create_seat(slot,peer_id,true,"Joining ranger")
+	_world_accept.rpc_id(peer_id,slot)
+	_broadcast_roster()
+	_update_session_line()
+	print("WORLD_PEER_JOINED slot=",slot," rangers=",get_human_count())
+
+
+func _peer_disconnected(peer_id: int) -> void:
+	if network_role != "host" or not _peer_slots.has(peer_id):
+		return
+	var slot := int(_peer_slots[peer_id])
+	_peer_slots.erase(peer_id)
+	if _seats.has(slot):
+		var seat = _seats[slot]
+		if is_instance_valid(seat):
+			seat.queue_free()
+		_seats.erase(slot)
+	_rebuild_seat_list()
+	_broadcast_roster()
+	_update_session_line()
+	print("WORLD_PEER_LEFT slot=",slot," rangers=",get_human_count())
+
+
+func _free_seat_slot() -> int:
+	for slot in range(1,WORLD_SEATS):
+		if not _peer_slots.values().has(slot):
+			return slot
+	return -1
+
+
+func _create_seat(slot: int, peer_id: int, authoritative: bool, seat_name: String) -> Node3D:
+	var seat = Seat.new()
+	seat.slot = slot
+	seat.authoritative = authoritative
+	seat.is_bot = false
+	seat.bounds = world.WORLD_LIMIT - 2.0
+	seat.name = "Ranger%d" % slot
+	seat.process_priority = -10
+	add_child(seat)
+	seat.fired.connect(_on_seat_fired)
+	seat.thrown_weapon.connect(_on_seat_thrown)
+	seat.configure(peer_id,false,_safe_player_name(seat_name),world.player_spawn + Vector3(0.75*float(slot),0.15,0.75*float(slot)))
+	seat.collision_mask = 1 | 2
+	seat.combat.target_mask = 2
+	seat.combat.damage_enabled = authoritative
+	_seats[slot] = seat
+	_rebuild_seat_list()
+	return seat
+
+
+func _rebuild_seat_list() -> void:
+	_seat_list.clear()
+	var slots := _seats.keys()
+	slots.sort()
+	for slot in slots:
+		if is_instance_valid(_seats[slot]):
+			_seat_list.append(_seats[slot])
+
+
+func _broadcast_roster() -> void:
+	if network_role != "host":
+		return
+	var entries: Array = [{"slot":0,"name":_player_name}]
+	for slot in _seats.keys():
+		var seat = _seats[slot]
+		if is_instance_valid(seat):
+			entries.append({"slot":int(slot),"name":str(seat.display_name)})
+	entries.sort_custom(func(a,b): return int(a.slot) < int(b.slot))
+	_world_roster.rpc(entries)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_roster(entries: Array) -> void:
+	if network_role != "client":
+		return
+	var seen := {}
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var slot := int(entry.get("slot",-1))
+		if slot < 0 or slot >= WORLD_SEATS:
+			continue
+		seen[slot] = true
+		var seat_name := _safe_player_name(str(entry.get("name","Ranger")))
+		if _seats.has(slot) and is_instance_valid(_seats[slot]):
+			_seats[slot].display_name = seat_name
+		else:
+			_create_seat(slot,0,false,seat_name)
+			if slot == local_slot:
+				_bind_local_seat()
+	for slot in _seats.keys():
+		if seen.has(slot):
+			continue
+		var seat = _seats[slot]
+		if is_instance_valid(seat):
+			seat.queue_free()
+		_seats.erase(slot)
+	_rebuild_seat_list()
+	_update_session_line()
+
+
+@rpc("authority","call_remote","reliable")
+func _world_accept(slot: int) -> void:
+	if network_role != "client" or slot < 1 or slot >= WORLD_SEATS:
+		return
+	local_slot = slot
+	_snapshot_ticks[slot] = -1
+	_join_elapsed = 0.0
+	if not _seats.has(slot) or not is_instance_valid(_seats[slot]):
+		_create_seat(slot,0,false,_player_name)
+	_seats[slot].interp_delay = 0.05
+	_bind_local_seat()
+	hud.show_feedback("Joined the open world.",3.0)
+	print("WORLD_CLIENT_READY slot=",slot)
+
+
+@rpc("any_peer","call_remote","reliable")
+func _world_register(player_name: String, loadout: Dictionary) -> void:
+	if network_role != "host":
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not _peer_slots.has(sender):
+		return
+	var slot := int(_peer_slots[sender])
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	seat.display_name = _safe_player_name(player_name)
+	SeatLoadout.apply(seat.rig,loadout)
+	_broadcast_roster()
+
+
+func _bind_local_seat() -> void:
+	var seat = _seats.get(local_slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	player = seat
+	archer = seat.rig
+	combat = seat.combat
+	cover = seat.cover
+	ability = seat.ability
+	seat.is_local = true
+	_local_anchor_swapped = true
+	health = seat.health
+	stamina = seat.stamina
+	_anchor_player.visible = false
+	_anchor_player.collision_layer = 0
+	_anchor_player.collision_mask = 0
+	_anchor_player.process_mode = Node.PROCESS_MODE_DISABLED
+	if world_ui != null:
+		world_ui.rebind(seat.rig)
+	if not seat.rig.loadout_changed.is_connected(_update_loadout):
+		seat.rig.loadout_changed.connect(_update_loadout)
+	_update_loadout()
+	_refresh_backpack()
+	camera_focus = seat.global_position + Vector3.UP * 1.05
+	_camera_ready = false
+
+
+func _update_session_line() -> void:
+	if hud == null:
+		return
+	if network_role == "offline":
+		hud.set_session("")
+		return
+	var count := get_human_count()
+	hud.set_session("OPEN WORLD  /  %s  /  %d RANGER%s" % [_endpoint,count,"" if count == 1 else "S"])
+
+
+func get_human_count() -> int:
+	if network_role == "host":
+		return 1 + _peer_slots.size()
+	if network_role == "client":
+		return maxi(1,_seats.size())
+	return 0
+
+
+func _set_replicas(value: bool) -> void:
+	for enemy in _enemies_by_index:
+		if is_instance_valid(enemy):
+			enemy.replica = value
+
+
+func _client() -> bool:
+	return network_role == "client" and local_slot >= 0
+
+
+func _safe_player_name(value: String) -> String:
+	var clean := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
+	return "Ranger" if clean.is_empty() else clean
+
+
+func _local_loadout() -> Dictionary:
+	if _player_state == null:
+		return {}
+	return {
+		"main":str(_player_state.main_item()),
+		"off":str(_player_state.off_item()),
+		"bow":int(_player_state.equipped_index("bow")),
+		"sword":int(_player_state.equipped_index("sword")),
+		"armor":ArmorData.pack(_player_state.equipped_pieces()),
+	}
+
+
+func _client_step(delta: float) -> void:
+	if local_slot < 0:
+		_join_elapsed += delta
+		if _join_elapsed > 6.0:
+			_join_failed("Connection timed out. The host may be offline, full, or blocked by a firewall.")
+		return
+	_collect_loot(delta)
+	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
+		_enter_delve()
+		return
+	if player.position.y < -25.0:
+		send_action("respawn")
+	_send_elapsed += delta
+	if _send_elapsed < NET_TICK:
+		return
+	_send_elapsed = fmod(_send_elapsed,NET_TICK)
+	update_crosshair_aim()
+	var left := float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT))
+	var right_key := float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT))
+	var forward := float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN))
+	var back_key := float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP))
+	var motion := Vector2(left - right_key,forward - back_key)
+	if motion.length() > 1.0:
+		motion = motion.normalized()
+	if inspecting or hud.map_open or _cursor_free or _ui_open():
+		motion = Vector2.ZERO
+	var camera_right := Vector2(cos(camera_yaw),-sin(camera_yaw))
+	var camera_back := Vector2(sin(camera_yaw),cos(camera_yaw))
+	var direction := camera_right * motion.x + camera_back * motion.y
+	var running: bool = Input.is_physical_key_pressed(KEY_SHIFT) and not _ui_open() and not hud.map_open
+	_world_move.rpc_id(1,direction,running,_client_aim,_snapshot_ticks[local_slot],_client_aim_origin if _client_aim_origin_valid else null)
+
+
+func _host_network_step(delta: float) -> void:
+	if _peer_slots.is_empty():
+		return
+	server_tick += 1
+	var bodies: Array[CharacterBody3D] = [player]
+	for seat in _seat_list:
+		if is_instance_valid(seat) and seat.alive:
+			bodies.append(seat)
+	for enemy in enemies:
+		if is_instance_valid(enemy):
+			enemy.targets = bodies
+	for seat in _seat_list.duplicate():
+		if is_instance_valid(seat):
+			seat.step(delta,_seat_list,server_tick)
+	_send_elapsed += delta
+	if _send_elapsed >= NET_TICK:
+		_send_elapsed = fmod(_send_elapsed,NET_TICK)
+		_send_seat_snapshots()
+	_enemy_elapsed += delta
+	if _enemy_elapsed >= ENEMY_TICK:
+		_enemy_elapsed = fmod(_enemy_elapsed,ENEMY_TICK)
+		_send_enemy_snapshots()
+
+
+func _send_seat_snapshots() -> void:
+	_snapshot_ticks[0] = server_tick
+	_world_seat.rpc(server_tick,0,_local_seat_snapshot())
+	for seat in _seat_list:
+		if not is_instance_valid(seat):
+			continue
+		_snapshot_ticks[seat.slot] = server_tick
+		_world_seat.rpc(server_tick,seat.slot,seat.snapshot())
+
+
+func _local_seat_snapshot() -> Dictionary:
+	return {"slot":0,"peer":1,"bot":false,"name":_player_name,
+		"position":player.global_position,"velocity":player.velocity,
+		"health":health,"alive":health > 0.0,"kills":kills,"deaths":respawns,"respawn":0.0,
+		"bow":archer.bow_index,
+		"armor":archer.armor_bits() | (ArmorData.SHIELD_BIT if archer.shield_equipped else 0),
+		"sword":archer.sword_index,"weapon":archer.weapon,
+		"gear":Seat.gear_bits_for(archer),"weapon_blood":0.0,
+		"stamina":stamina,"ability":ability.snapshot(),
+		"animation":archer.get_animation_state(),"progress":combat.attack_progress,
+		"movement":combat.movement_mode,"interval":combat.get_attack_interval(),
+		"aim":combat.aim_point,"grounded":player.is_on_floor(),"cover":cover.snapshot()}
+
+
+@rpc("authority","call_remote","unreliable")
+func _world_seat(tick: int, slot: int, state: Dictionary) -> void:
+	if network_role != "client" or slot < 0 or slot >= WORLD_SEATS or tick <= _snapshot_ticks[slot]:
+		return
+	_snapshot_ticks[slot] = tick
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	seat.apply_snapshot(state)
+	if slot != local_slot:
+		return
+	if seat.health < health - 0.01:
+		hud.flash_damage()
+		audio.play_sound("hit")
+	health = seat.health
+	stamina = seat.stamina
+	if not seat.alive and not _client_dead_notified:
+		_client_dead_notified = true
+		hud.show_feedback("You fell. Recovering at the town gate.",3.0)
+	elif seat.alive and _client_dead_notified:
+		_client_dead_notified = false
+
+
+@rpc("any_peer","call_remote","unreliable_ordered")
+func _world_move(direction: Vector2, running: bool, aim: Vector3, aim_tick: Variant, aim_origin: Variant = null) -> void:
+	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not _peer_slots.has(sender):
+		return
+	var slot := int(_peer_slots[sender])
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	if not direction.is_finite() or not _set_seat_aim(slot,aim,int(aim_tick),aim_origin):
+		return
+	seat.move_direction = direction.limit_length()
+	seat.run_requested = running
+	seat.input_age = 0.0
+
+
+func send_action(action: String, value: Variant = null) -> void:
+	if not _client():
+		return
+	var origin: Variant = _client_aim_origin if _client_aim_origin_valid and action in ["draw","release","throw","throw_release","melee"] else null
+	_world_action.rpc_id(1,action,value,_snapshot_ticks[local_slot],origin)
+
+
+@rpc("any_peer","call_remote","reliable")
+func _world_action(action: String, value: Variant, aim_tick: Variant, aim_origin: Variant = null) -> void:
+	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not _peer_slots.has(sender):
+		return
+	var slot := int(_peer_slots[sender])
+	if action == "loadout":
+		var seat = _seats.get(slot)
+		if seat != null and is_instance_valid(seat) and typeof(value) == TYPE_DICTIONARY:
+			SeatLoadout.apply(seat.rig,value)
+		return
+	if int(aim_tick) > _snapshot_ticks[slot]:
+		return
+	_apply_seat_action(slot,action,value,int(aim_tick),aim_origin)
+
+
+func _apply_seat_action(slot: int, action: String, value: Variant, aim_tick: int = -1, aim_origin: Variant = null) -> void:
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	if action == "respawn":
+		seat.revive()
+		return
+	if action == "rest":
+		if _near_camp(seat.global_position):
+			seat.health = MAX_HEALTH
+			seat.stamina = Stamina.MAX
+		return
+	if not seat.alive:
+		return
+	match action:
+		"draw":
+			if typeof(value) == TYPE_VECTOR3 and _set_seat_aim(slot,value,aim_tick,aim_origin):
+				seat.update_combat_cover_side()
+				seat.combat.begin_draw()
+		"melee":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			var aim = value.get("aim")
+			var hand := str(value.get("hand","right"))
+			var variant := str(value.get("variant","overhead"))
+			if typeof(aim) != TYPE_VECTOR3 or hand not in ["left","right"] \
+					or variant not in ["overhead","diagonal_left","diagonal_right","stab"]:
+				return
+			if _set_seat_aim(slot,aim,aim_tick,aim_origin):
+				seat.update_combat_cover_side()
+				seat.combat.begin_melee(hand,variant)
+		"release":
+			if typeof(value) == TYPE_VECTOR3 and _set_seat_aim(slot,value,aim_tick,aim_origin):
+				seat.update_combat_cover_side()
+				seat.combat.release_draw()
+		"throw":
+			if typeof(value) == TYPE_VECTOR3 and _set_seat_aim(slot,value,aim_tick,aim_origin):
+				seat.update_combat_cover_side()
+				seat.combat.begin_throw()
+		"throw_release":
+			if typeof(value) == TYPE_VECTOR3 and _set_seat_aim(slot,value,aim_tick,aim_origin):
+				seat.update_combat_cover_side()
+				seat.combat.release_throw()
+		"step":
+			if typeof(value) != TYPE_VECTOR3:
+				return
+			var direction: Vector3 = value
+			if not direction.is_finite() or absf(direction.y) > 0.01:
+				return
+			var flat := Vector3(direction.x,0,direction.z)
+			if absf(flat.length()-1.0) > 0.1:
+				return
+			seat.try_step(flat)
+		"jump":
+			if typeof(value) == TYPE_BOOL:
+				seat.press_jump(value)
+		"cover":
+			if typeof(value) == TYPE_VECTOR3 and value.is_finite() and value.length_squared() > 0.01 and value.length_squared() <= 1000000.0:
+				seat.toggle_cover(value.normalized())
+		"crouch":
+			if typeof(value) == TYPE_BOOL:
+				seat.set_crouch(value)
+		"block":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("pressed")) != TYPE_BOOL or typeof(value.get("forward")) != TYPE_VECTOR3:
+				return
+			var forward: Vector3 = value.forward
+			if not forward.is_finite() or (value.pressed and forward.length_squared() < 0.25):
+				return
+			seat.set_block(value.pressed,Vector3(forward.x,0,forward.z))
+		"peek":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("pressed")) != TYPE_BOOL or typeof(value.get("right")) != TYPE_VECTOR3 or typeof(value.get("side")) != TYPE_INT:
+				return
+			var right: Vector3 = value.right
+			if not right.is_finite() or absf(right.y) > 0.01 or absf(right.length_squared()-1.0) > 0.01 or value.side not in [-1,1]:
+				return
+			seat.peek_requested = value.pressed
+			seat.peek_view_right = Vector3(right.x,0,right.z).normalized()
+			seat.peek_shoulder = value.side
+			seat.update_combat_cover_side()
+		"stop":
+			seat.combat.stop()
+		"bow":
+			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
+				seat.rig.set_bow(value)
+		"sword":
+			if typeof(value) == TYPE_INT and value >= 0 and value < 3:
+				seat.rig.set_sword(value)
+		"weapon":
+			if typeof(value) == TYPE_STRING and value in ["bow","sword","dagger","dual"]:
+				var requested := str(value)
+				if requested == "dual":
+					if seat.rig.weapon == "dual":
+						requested = "sword"
+					elif seat.rig.sword_index == 2:
+						return
+				seat.combat.stop()
+				seat.rig.set_weapon(requested)
+		"shield":
+			if typeof(value) == TYPE_BOOL:
+				seat.combat.stop()
+				seat.rig.set_shield(value)
+		"consume":
+			if typeof(value) == TYPE_STRING and value in ["bandage","potion"]:
+				seat.try_consume(value)
+		"ability":
+			if typeof(value) != TYPE_INT or int(value) < 0 or int(value) >= AbilityRules.SLOT_COUNT:
+				return
+			seat.try_ability(int(value))
+		"armor":
+			if typeof(value) != TYPE_DICTIONARY:
+				return
+			if typeof(value.get("slot")) != TYPE_STRING or typeof(value.get("set")) != TYPE_INT:
+				return
+			var armor_slot := str(value.slot)
+			var armor_set := int(value.set)
+			if armor_slot in ArmorData.SLOTS and armor_set >= 0 and armor_set < ArmorData.SET_IDS.size():
+				seat.rig.set_armor_piece(armor_slot,armor_set)
+
+
+func _set_seat_aim(slot: int, point: Vector3, aim_tick: int = -1, aim_origin: Variant = null) -> bool:
+	if not point.is_finite() or point.length_squared() > 1000000.0:
+		return false
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat):
+		return false
+	if aim_tick >= 0:
+		if aim_tick > _snapshot_ticks[slot]:
+			return false
+		if aim_tick < seat.aim_snapshot_tick:
+			return true
+		seat.aim_snapshot_tick = aim_tick
+	seat.update_cover_aim_readiness()
+	seat.combat.set_aim(point)
+	if typeof(aim_origin) == TYPE_VECTOR3:
+		var origin: Vector3 = aim_origin
+		var ray: Vector3 = point-origin
+		if origin.is_finite() and origin.distance_squared_to(seat.global_position) <= 144.0 \
+				and ray.is_finite() and ray.length_squared() > 0.01:
+			seat.combat.set_camera_ray(origin,ray)
+		else:
+			seat.combat.clear_camera_ray()
+	else:
+		seat.combat.clear_camera_ray()
+	if seat.combat.blocking:
+		var facing: Vector3 = point - seat.global_position
+		facing.y = 0.0
+		if facing.length_squared() > 0.000001:
+			seat.combat.face_block(facing)
+	return true
+
+
+func _near_camp(point: Vector3) -> bool:
+	for item: Dictionary in world.interactables:
+		if str(item.kind) == "camp":
+			return point.distance_to(item.position) <= 3.8
+	return false
+
+
+func _enemy_relevant(enemy: Node3D) -> bool:
+	if not _near_ranger(enemy.global_position):
+		return false
+	if enemy.alive:
+		return true
+	return _enemy_sends % 5 == 0
+
+
+func _near_ranger(point: Vector3) -> bool:
+	if is_instance_valid(player) and player.global_position.distance_squared_to(point) <= ENEMY_RELEVANCE * ENEMY_RELEVANCE:
+		return true
+	for seat in _seat_list:
+		if is_instance_valid(seat) and seat.global_position.distance_squared_to(point) <= ENEMY_RELEVANCE * ENEMY_RELEVANCE:
+			return true
+	return false
+
+
+func _send_enemy_snapshots() -> void:
+	_enemy_sends += 1
+	var chunk: Array = []
+	for index in _enemies_by_index.size():
+		var enemy = _enemies_by_index[index]
+		if not is_instance_valid(enemy) or not _enemy_relevant(enemy):
+			continue
+		var state: Dictionary = enemy.snapshot()
+		state["i"] = index
+		chunk.append(state)
+		if chunk.size() >= ENEMY_CHUNK:
+			_world_mobs.rpc(chunk)
+			chunk = []
+	if not chunk.is_empty():
+		_world_mobs.rpc(chunk)
+
+
+@rpc("authority","call_remote","unreliable")
+func _world_mobs(states: Array) -> void:
+	if network_role != "client":
+		return
+	for entry in states:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var index := int(entry.get("i",-1))
+		if index < 0 or index >= _enemies_by_index.size():
+			continue
+		var enemy = _enemies_by_index[index]
+		if is_instance_valid(enemy):
+			enemy.apply_snapshot(entry)
+
+
+func _on_seat_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
+	if network_role != "host":
+		return
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat) or not seat.alive:
+		return
+	var damage := Combat.damage_for(seat.rig.bow_index,charge)
+	_spawn_arrow(origin,direction,speed,damage,[seat.get_rid()],seat.rig.last_arrow_visual_origin,slot)
+	_world_arrow.rpc(origin,direction,speed,seat.rig.last_arrow_visual_origin,slot)
+	shots += 1
+
+
+func _on_seat_thrown(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
+	if network_role != "host":
+		return
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat) or not seat.alive:
+		return
+	var damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	_spawn_thrown(origin,direction,speed,damage,weapon_name,weapon_index,[seat.get_rid()],slot)
+	_world_throw.rpc(origin,direction,speed,weapon_name,weapon_index,slot)
+
+
+func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true) -> void:
+	var arrow := Arrow.new()
+	arrow.source_id = source_slot
+	arrow.hit_mask = 1 | 2 | 8
+	arrow.authoritative_damage = authoritative
+	add_child(arrow)
+	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin)
+	arrow.impacted.connect(_on_arrow_impact)
+	for index in range(arrows.size() - 1, -1, -1):
+		if not is_instance_valid(arrows[index]):
+			arrows.remove_at(index)
+	arrows.append(arrow)
+	if arrows.size() > 32:
+		arrows.pop_front().queue_free()
+
+
+func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, weapon_name: String, weapon_index: int, excluded: Array[RID], source_slot: int = -1, authoritative: bool = true) -> void:
+	var thrown := Thrown.new()
+	thrown.weapon = weapon_name
+	thrown.weapon_index = weapon_index
+	thrown.source_id = source_slot
+	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
+	thrown.authoritative_damage = authoritative
+	add_child(thrown)
+	thrown.launch(origin,direction,speed,shot_damage,excluded)
+	thrown.impacted.connect(_on_arrow_impact)
+	for index in range(thrown_weapons.size() - 1, -1, -1):
+		if not is_instance_valid(thrown_weapons[index]):
+			thrown_weapons.remove_at(index)
+	thrown_weapons.append(thrown)
+	if thrown_weapons.size() > 32:
+		thrown_weapons.pop_front().queue_free()
+
+
+@rpc("authority","call_remote","reliable")
+func _world_arrow(origin: Vector3, direction: Vector3, speed: float, visual_origin: Variant, slot: int) -> void:
+	if network_role != "client":
+		return
+	var start: Vector3 = visual_origin if typeof(visual_origin) == TYPE_VECTOR3 else Vector3.INF
+	_spawn_arrow(origin,direction,speed,0.0,[],start,slot,false)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_throw(origin: Vector3, direction: Vector3, speed: float, weapon_name: String, weapon_index: int, slot: int) -> void:
+	if network_role != "client":
+		return
+	_spawn_thrown(origin,direction,speed,0.0,weapon_name,weapon_index,[],slot,false)
+
+
+func _on_mob_arrow(origin: Vector3, direction: Vector3, speed: float, _damage: float) -> void:
+	if network_role == "host":
+		_world_mob_arrow.rpc(origin,direction,speed)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_mob_arrow(origin: Vector3, direction: Vector3, speed: float) -> void:
+	if network_role != "client":
+		return
+	_spawn_arrow(origin,direction,speed,0.0,[],Vector3.INF,-1,false)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_loot(item_id: String, at: Vector3, armed: bool) -> void:
+	if network_role != "client":
+		return
+	_spawn_loot(item_id,at,armed,false)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_kill(reward: int, display: String) -> void:
+	if network_role != "client":
+		return
+	kills += 1
+	_award_gold(reward)
+	hud.show_feedback("%s defeated  /  +%d gold" % [display,reward])
+
+
+@rpc("authority","call_remote","reliable")
+func _world_reward(amount: int) -> void:
+	if network_role != "client":
+		return
+	_award_gold(amount)
+
+
+@rpc("authority","call_remote","reliable")
+func _world_waystone(id: String) -> void:
+	if network_role != "client":
+		return
+	activated[id] = true
+	world.activate_interactable(id)
+	audio.play_sound("bullseye")
+	hud.show_feedback("Waystone restored",2.0)

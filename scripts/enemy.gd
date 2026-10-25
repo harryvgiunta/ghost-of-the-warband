@@ -1,7 +1,8 @@
 extends CharacterBody3D
 
 signal defeated(enemy: Node3D, reward: int)
-signal attacked(attacker: CharacterBody3D, amount: float)
+signal attacked(attacker: CharacterBody3D, amount: float, victim: CharacterBody3D)
+signal arrow_fired(origin: Vector3, direction: Vector3, speed: float, damage: float)
 
 const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
@@ -27,6 +28,8 @@ var kind := 0
 var pack_index := -1
 var devil_weapon := "claw"
 var player: CharacterBody3D
+var targets: Array[CharacterBody3D] = []
+var replica := false
 var safe_center := Vector3.ZERO
 var health := 38.0
 var max_health := 38.0
@@ -67,6 +70,7 @@ var shots_fired := 0
 var _move_intent := Vector3.ZERO
 var _move_speed := 0.0
 var _face_intent := Vector3.FORWARD
+var _target: CharacterBody3D
 
 func _ready() -> void:
 	name = "BriarWolf" if kind == 0 else ("CinderDevil" if kind == 2 else "RuinSentinel")
@@ -237,16 +241,23 @@ func head_hit_profile() -> Vector2:
 
 
 func _physics_process(delta: float) -> void:
-	if not alive or not is_instance_valid(player):
+	if replica:
+		if kind == 1:
+			_update_cosmetics(delta)
+		return
+	if not alive:
+		return
+	_target = _resolve_target()
+	if not is_instance_valid(_target):
 		return
 	if kind == 2:
 		_step_devil(delta)
 		return
 	_state_time += delta
-	var displacement := player.global_position - global_position
+	var displacement := _target.global_position - global_position
 	displacement.y = 0.0
 	var distance := displacement.length()
-	var player_safe := Vector2(player.position.x - safe_center.x, player.position.z - safe_center.z).length() < 19.0
+	var target_safe := Vector2(_target.position.x - safe_center.x, _target.position.z - safe_center.z).length() < 19.0
 	var target_direction := Vector3.ZERO
 	var speed := 3.1 if kind == 0 else 2.2
 	if state == "STAGGER":
@@ -255,8 +266,8 @@ func _physics_process(delta: float) -> void:
 			_state_time = 0.0
 	elif state == "WINDUP":
 		if _state_time >= 0.65:
-			if distance < 2.1 and not player_safe and absf(player.position.y - position.y) < 1.7:
-				attacked.emit(self,13.0 if kind == 0 else 23.0)
+			if distance < 2.1 and not target_safe and absf(_target.position.y - position.y) < 1.7:
+				attacked.emit(self,13.0 if kind == 0 else 23.0,_target)
 			# A parry can synchronously replace the attack with STAGGER.
 			if state == "WINDUP":
 				state = "RECOVER"
@@ -266,7 +277,7 @@ func _physics_process(delta: float) -> void:
 		if _state_time > 0.85:
 			state = "IDLE"
 	else:
-		if not player_safe and distance < 23.0 and global_position.distance_to(home) < 38.0:
+		if not target_safe and distance < 23.0 and global_position.distance_to(home) < 38.0:
 			state = "CHASE"
 			target_direction = displacement.normalized()
 			if distance < 1.65:
@@ -288,19 +299,37 @@ func _physics_process(delta: float) -> void:
 	velocity.z = move_toward(velocity.z, target_direction.z * speed, delta * 12.0)
 	velocity.y = -1.0 if is_on_floor() else velocity.y - 18.0 * delta
 	move_and_slide()
+	_update_cosmetics(delta)
+
+func _resolve_target() -> CharacterBody3D:
+	var nearest := INF
+	var best: CharacterBody3D = null
+	for candidate in targets:
+		if not is_instance_valid(candidate) or candidate.get("alive") == false:
+			continue
+		var offset := candidate.global_position - global_position
+		var planar := offset.x * offset.x + offset.z * offset.z
+		if planar < nearest:
+			nearest = planar
+			best = candidate
+	return best if is_instance_valid(best) else player
+
+func _update_cosmetics(delta: float) -> void:
 	if kind == 0:
 		var actual_velocity := get_real_velocity()
 		_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
 		_wolf.set_combat(state, _state_time)
-	else:
-		var moving := Vector2(velocity.x, velocity.z).length()
-		_walk_time += delta * moving * 2.4
-		_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
-		for index in _legs.size():
-			var offset := PI if index % 2 == 0 else 0.0
-			_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
-		for arm in _arms:
-			arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
+		return
+	if kind != 1:
+		return
+	var moving := Vector2(velocity.x, velocity.z).length()
+	_walk_time += delta * moving * 2.4
+	_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
+	for index in _legs.size():
+		var offset := PI if index % 2 == 0 else 0.0
+		_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
+	for arm in _arms:
+		arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
 
 func _step_devil(delta: float) -> void:
 	_state_time += delta
@@ -309,11 +338,11 @@ func _step_devil(delta: float) -> void:
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
 	_slide_cooldown = maxf(0.0,_slide_cooldown-delta)
-	var to_player := player.global_position-global_position
-	to_player.y = 0.0
-	var distance := to_player.length()
-	var player_safe := Vector2(player.position.x-safe_center.x,player.position.z-safe_center.z).length() < 19.0
-	var aggro := not player_safe and distance < DEVIL_AGGRO and global_position.distance_to(home) < DEVIL_LEASH
+	var to_target := _target.global_position-global_position
+	to_target.y = 0.0
+	var distance := to_target.length()
+	var target_safe := Vector2(_target.position.x-safe_center.x,_target.position.z-safe_center.z).length() < 19.0
+	var aggro := not target_safe and distance < DEVIL_AGGRO and global_position.distance_to(home) < DEVIL_LEASH
 	if not aggro:
 		if state != "RETURN":
 			_enter_devil_state("RETURN")
@@ -335,7 +364,7 @@ func _step_devil(delta: float) -> void:
 				_enter_devil_state("CIRCLE")
 		"STEP":
 			if distance > 0.001:
-				_face_intent = to_player.normalized()
+				_face_intent = to_target.normalized()
 			if not _dodge.active:
 				_enter_devil_state("CIRCLE")
 		"SLIDE":
@@ -355,8 +384,8 @@ func _step_devil(delta: float) -> void:
 					_enter_devil_state("CIRCLE")
 		"DIVE":
 			if distance > 0.001:
-				_face_intent = to_player.normalized()
-			var predicted := player.global_position+player.velocity*0.16
+				_face_intent = to_target.normalized()
+			var predicted := _target.global_position+_target.velocity*0.16
 			var dive_offset := predicted-global_position
 			dive_offset.y = 0.0
 			if dive_offset.length_squared() > 0.0001:
@@ -366,21 +395,21 @@ func _step_devil(delta: float) -> void:
 				_devil_begin_windup(_attack_damage)
 		"WINDUP":
 			if distance > 0.001:
-				_face_intent = to_player.normalized()
+				_face_intent = to_target.normalized()
 			if _state_time >= DEVIL_WINDUP:
 				_enter_devil_state("STRIKE")
 		"STRIKE":
 			if distance > 0.001:
-				_face_intent = to_player.normalized()
+				_face_intent = to_target.normalized()
 			if not _struck and _state_time >= 0.080:
 				_struck = true
-				_devil_strike(distance,to_player)
+				_devil_strike(distance,to_target)
 			if _state_time >= DEVIL_STRIKE:
 				_attack_cooldown = 0.75+_rng.randf()*0.70
 				_enter_devil_state("RECOVER")
 		"SHOOT":
 			if distance > 0.001:
-				_face_intent = to_player.normalized()
+				_face_intent = to_target.normalized()
 			if not _shot_fired and _state_time >= 0.30:
 				_shot_fired = true
 				_shoot_arrow()
@@ -389,15 +418,15 @@ func _step_devil(delta: float) -> void:
 				_enter_devil_state("RECOVER")
 		"RECOVER":
 			if distance > 0.001:
-				var retreat := -to_player.normalized()
-				var tangent := Vector3(-to_player.z,0.0,to_player.x).normalized()*_orbit_dir
+				var retreat := -to_target.normalized()
+				var tangent := Vector3(-to_target.z,0.0,to_target.x).normalized()*_orbit_dir
 				_move_intent = _steer_devil((retreat+tangent*0.7).normalized())
 				_move_speed = 4.8
 				_face_intent = _move_intent
 			if _state_time >= DEVIL_RECOVER:
 				_enter_devil_state("CIRCLE")
 		_:
-			_devil_circle(delta,distance,to_player)
+			_devil_circle(delta,distance,to_target)
 	var was_grounded := is_on_floor()
 	if _dodge.active:
 		var step_velocity: Vector3 = _dodge.velocity()
@@ -439,7 +468,7 @@ func _step_devil(delta: float) -> void:
 
 func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 	_orbit_angle += _orbit_dir*delta*(1.65+0.40*sin(_orbit_phase+_state_time*0.8))
-	var predicted := player.global_position+player.velocity*0.10
+	var predicted := _target.global_position+_target.velocity*0.10
 	var radius := _orbit_radius+sin(_orbit_phase+_state_time*0.7)*0.55
 	var ring := predicted+Vector3(cos(_orbit_angle),0.0,sin(_orbit_angle))*radius
 	var offset := ring-global_position
@@ -534,10 +563,10 @@ func _devil_begin_windup(damage: float) -> void:
 	_attack_damage = damage
 	_struck = false
 	_enter_devil_state("WINDUP")
-	var to_player := player.global_position-global_position
-	to_player.y = 0.0
-	if to_player.length_squared() > 0.0001:
-		_face_intent = to_player.normalized()
+	var to_target := _target.global_position-global_position
+	to_target.y = 0.0
+	if to_target.length_squared() > 0.0001:
+		_face_intent = to_target.normalized()
 
 func _enter_devil_state(next: String) -> void:
 	state = next
@@ -546,21 +575,21 @@ func _enter_devil_state(next: String) -> void:
 	_warning.visible = next == "WINDUP"
 
 func _devil_strike(distance: float, to_player: Vector3) -> void:
-	if distance > _attack_reach or absf(player.global_position.y-global_position.y) > 1.25:
+	if distance > _attack_reach or absf(_target.global_position.y-global_position.y) > 1.25:
 		return
 	if to_player.length_squared() > 0.0001 and (-global_basis.z).dot(to_player.normalized()) < 0.15:
 		return
 	_query.from = global_position+Vector3(0,0.5,0)
-	_query.to = player.global_position+Vector3(0,0.7,0)
+	_query.to = _target.global_position+Vector3(0,0.7,0)
 	if not get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
 		return
-	attacked.emit(self,_attack_damage)
+	attacked.emit(self,_attack_damage,_target)
 
 func _shoot_arrow() -> void:
-	if not is_instance_valid(player) or get_parent() == null:
+	if not is_instance_valid(_target) or get_parent() == null:
 		return
 	var origin: Vector3 = _devil.get_bow_origin()
-	var target := player.global_position+Vector3(0,1.0,0)+player.velocity*0.12
+	var target := _target.global_position+Vector3(0,1.0,0)+_target.velocity*0.12
 	var flight := origin.distance_to(target)/30.0
 	target.y += 0.5*4.0*flight*flight
 	var direction := (target-origin).normalized()
@@ -568,13 +597,14 @@ func _shoot_arrow() -> void:
 	arrow.hit_mask = 1 | 4
 	get_parent().add_child(arrow)
 	arrow.launch(origin,direction,30.0,_attack_damage,[get_rid()],origin)
+	arrow_fired.emit(origin,direction,30.0,_attack_damage)
 	shots_fired += 1
 
 func _devil_has_los() -> bool:
-	if not is_instance_valid(player):
+	if not is_instance_valid(_target):
 		return false
 	_query.from = global_position+Vector3(0,0.55,0)
-	_query.to = player.global_position+Vector3(0,0.85,0)
+	_query.to = _target.global_position+Vector3(0,0.85,0)
 	return get_world_3d().direct_space_state.intersect_ray(_query).is_empty()
 
 func _devil_with_separation(direction: Vector3) -> Vector3:
@@ -647,28 +677,93 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
-		alive = false
-		state = "DEAD"
-		_warning.visible = false
-		set_deferred("collision_layer", 0)
-		set_deferred("collision_mask", 0)
-		if kind == 2 and is_instance_valid(_devil):
-			# The dropped pickup owns the weapon now; keep it out of the corpse.
-			_devil.set_weapon("claw")
+		_enter_dead(true)
+
+## The local death: collision off, the authored collapse, then the shared hold.
+## Replicas call it with `announce = false` so the kill stays on the host.
+func _enter_dead(announce: bool) -> void:
+	alive = false
+	state = "DEAD"
+	_warning.visible = false
+	set_deferred("collision_layer", 0)
+	set_deferred("collision_mask", 0)
+	if kind == 2 and is_instance_valid(_devil):
+		# The dropped pickup owns the weapon now; keep it out of the corpse.
+		_devil.set_weapon("claw")
+	if announce:
 		defeated.emit(self, 8 if kind == 0 else (6 if kind == 2 else 18))
-		# Collapse first, then hold the corpse for the shared five minutes.
-		var death_tween := create_tween()
-		if kind == 0:
-			_wolf.die()
-			# 0.45 s authored collapse, then the corpse is held; only the visual
-			# container shrinks, never the CharacterBody root.
-			death_tween.tween_interval(0.45)
-			CorpseHold.append(death_tween, self, _body)
-		elif kind == 2:
-			_devil.die()
-			# The devil flops in its own 0.55 s pose before the corpse hold.
-			death_tween.tween_interval(0.55)
-			CorpseHold.append(death_tween, self, _body)
-		else:
-			death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
-			CorpseHold.append(death_tween, self, _body)
+	# Collapse first, then hold the corpse for the shared five minutes.
+	var death_tween := create_tween()
+	if kind == 0:
+		_wolf.die()
+		# 0.45 s authored collapse, then the corpse is held; only the visual
+		# container shrinks, never the CharacterBody root.
+		death_tween.tween_interval(0.45)
+		CorpseHold.append(death_tween, self, _body)
+	elif kind == 2:
+		_devil.die()
+		# The devil flops in its own 0.55 s pose before the corpse hold.
+		death_tween.tween_interval(0.55)
+		CorpseHold.append(death_tween, self, _body)
+	else:
+		death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
+		CorpseHold.append(death_tween, self, _body)
+
+func snapshot() -> Dictionary:
+	return {
+		"p": global_position,
+		"y": rotation.y,
+		"v": velocity,
+		"g": is_on_floor(),
+		"s": state,
+		"t": _state_time,
+		"h": health,
+		"a": alive,
+		"x": _packed_pose(),
+	}
+
+func _packed_pose() -> Vector4:
+	if kind != 2:
+		return Vector4.ZERO
+	if state == "STEP":
+		return Vector4(_dodge.progress if _dodge.active else -1.0,
+			_dodge.direction.x,_dodge.direction.z,-1.0)
+	if state == "SLIDE":
+		return Vector4(_dodge.progress if _dodge.active else -1.0,
+			_slide_direction.x,_slide_direction.z,
+			clampf(_slide_time/DEVIL_SLIDE_SECONDS,0.0,1.0))
+	return Vector4(-1,0,0,-1)
+
+## Presentation-side mirror of the host's mob: the host owns AI, damage and
+## arrows, so a replica only replays the snapshot it was handed.
+func apply_snapshot(state: Dictionary) -> void:
+	var previous_health := health
+	var was_alive := alive
+	global_position = state.p
+	rotation.y = state.y
+	self.state = state.s
+	_state_time = state.t
+	health = state.h
+	alive = state.a
+	velocity = state.v
+	var grounded: bool = state.g
+	var pose: Vector4 = state.x
+	_warning.visible = self.state == "WINDUP"
+	if kind == 0:
+		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
+		_wolf.set_combat(self.state,_state_time)
+	elif kind == 1:
+		_update_cosmetics(0.0)
+	else:
+		_devil.set_motion(velocity,grounded)
+		_devil.set_action(self.state,_state_time)
+		_devil.set_step(pose.x,Vector3(pose.y,0.0,pose.z))
+		_devil.set_slide(pose.w)
+	if health < previous_health:
+		var applied: float = previous_health - health
+		DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",false,health <= 0.0)
+		BloodFx.wound(self,blood_rig(),get_aim_position(),applied,false,
+			health <= 0.0,blood_scale())
+	if was_alive and not alive:
+		_enter_dead(false)
+

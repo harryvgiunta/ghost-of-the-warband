@@ -616,6 +616,9 @@ func _floor_height(point: Vector3) -> float:
 	return float(hit.position.y) if not hit.is_empty() else global_position.y
 
 func gear_bits() -> int:
+	return gear_bits_for(rig)
+
+static func gear_bits_for(rig) -> int:
 	# Ten compact bits for the paperdoll presentation that the bow/sword/armor
 	# fields cannot carry: off-hand weapon, staff, focus and shield silhouette.
 	var bits := 0

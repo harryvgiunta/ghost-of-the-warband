@@ -34,7 +34,7 @@ func load_cache() -> void:
 	if saved_port >= 1024 and saved_port <= 65535:
 		port = saved_port
 	var saved_mode := str(data.get("mode","arena"))
-	if saved_mode in ["arena","delve"]:
+	if saved_mode in ["arena","delve","world"]:
 		mode = saved_mode
 
 func remember(next_name: String, next_address: String, next_port: int, next_mode: String = "") -> void:
@@ -44,7 +44,7 @@ func remember(next_name: String, next_address: String, next_port: int, next_mode
 		address = clean_address
 	if next_port >= 1024 and next_port <= 65535:
 		port = next_port
-	if next_mode in ["arena","delve"]:
+	if next_mode in ["arena","delve","world"]:
 		mode = next_mode
 	save_cache()
 

@@ -69,7 +69,7 @@ func run() -> void:
 
 	var hits: Array[float] = []
 	for devil in devils:
-		devil.attacked.connect(func(_attacker, amount): hits.append(amount))
+		devil.attacked.connect(func(_attacker, amount, _victim): hits.append(amount))
 		start.append(devil.global_position)
 	var seen := {}
 	var step_frames := 0

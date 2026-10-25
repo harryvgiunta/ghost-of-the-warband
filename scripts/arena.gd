@@ -11,8 +11,7 @@ const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
-const State = preload("res://scripts/player_state.gd")
-const Rules = preload("res://scripts/equipment_rules.gd")
+const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 var actors: Array = []
 var local_slot := -1
@@ -287,47 +286,10 @@ func _local_loadout() -> Dictionary:
 		"armor":ArmorData.pack(node.equipped_pieces()),
 	}
 
-func _catalog_hand(value: Variant, slot: String) -> String:
-	# Seat loadouts come off the wire: only real gear legal for that hand.
-	if typeof(value) != TYPE_STRING:
-		return ""
-	var id := str(value)
-	var item: Dictionary = State.ITEMS.get(id,{})
-	if item.is_empty() or not Rules.allowed(item,slot):
-		return ""
-	return id
-
 func _apply_loadout(slot: int, loadout: Dictionary) -> void:
-	if slot < 0 or slot >= actors.size() or loadout.is_empty():
+	if slot < 0 or slot >= actors.size():
 		return
-	var actor = actors[slot]
-	var bow: Variant = loadout.get("bow")
-	var sword: Variant = loadout.get("sword")
-	var armor: Variant = loadout.get("armor")
-	var bow_ok := typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2
-	var sword_ok := typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2
-	var armor_ok := typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023
-	var main_raw: Variant = loadout.get("main")
-	var off_raw: Variant = loadout.get("off")
-	var main := _catalog_hand(main_raw,"main")
-	var off := _catalog_hand(off_raw,"off")
-	var hands_present := loadout.has("main") or loadout.has("off")
-	var main_ok := not loadout.has("main") or (typeof(main_raw) == TYPE_STRING and (str(main_raw).is_empty() or not main.is_empty()))
-	var off_ok := not loadout.has("off") or (typeof(off_raw) == TYPE_STRING and (str(off_raw).is_empty() or not off.is_empty()))
-	if hands_present and main_ok and off_ok:
-		# Hub kits carry the whole paperdoll; the state script derives the
-		# weapon mode, staff, focus, shield and off-hand from the validated ids.
-		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
-		# hand falls through instead of wiping a valid seat.
-		var pieces: Dictionary = ArmorData.unpack(int(armor) & 1023) if armor_ok else actor.rig.armor_pieces.duplicate()
-		actor.rig.apply_loadout(State.build_loadout(main,off,pieces))
-		return
-	if bow_ok:
-		actor.rig.set_bow(int(bow))
-	if sword_ok:
-		actor.rig.set_sword(int(sword))
-	if armor_ok:
-		actor.rig.set_armor_bits(int(armor))
+	SeatLoadout.apply(actors[slot].rig,loadout)
 
 func get_human_count() -> int:
 	var count := 0

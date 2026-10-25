@@ -27,6 +27,7 @@ var _weapon := "bow"
 var _shield_equipped := false
 var _armor_pieces: Dictionary = {}
 var _region: Label
+var _session: Label
 var _quest: Label
 var _health_label: Label
 var _gold_label: Label
@@ -74,6 +75,7 @@ func _ready() -> void:
 	var title := _panel(self, Vector2(24, 22), Vector2(300, 88))
 	_label(title, "IRONWOOD  " + str(ProjectSettings.get_setting("application/config/version")), Vector2(17, 11), 25, CREAM)
 	_region = _label(title, "The frontier", Vector2(18, 49), 16, GOLD)
+	_session = _label(title, "", Vector2(18, 70), 10, MUTED)
 	var quest_panel := _panel(self, Vector2(-340, 22), Vector2(316, 154))
 	quest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT, true)
 	_label(quest_panel, "WORLD QUEST  /  THE LOST WAYSTONES", Vector2(16, 13), 11, GOLD)
@@ -240,6 +242,10 @@ func update_world_position(position_at: Vector3, yaw: float, activated: Dictiona
 func set_interaction(text: String) -> void:
 	_interaction_panel.visible = not text.is_empty()
 	_interaction.text = text
+
+func set_session(text: String) -> void:
+	if _session != null:
+		_session.text = text
 
 func set_inspecting(_value: bool) -> void:
 	pass

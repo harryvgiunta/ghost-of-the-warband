@@ -1,9 +1,10 @@
 extends Control
-## The main menu. Three doors only: begin a new journey, continue the saved
-## one, or join a hosted arena match. Everything else happens inside the world.
+## The main menu. Four doors only: begin a new journey, continue the saved one,
+## host your own open world, or join one. Everything else happens inside the world.
 
 signal start_requested
 signal load_requested
+signal host_requested
 signal join_requested
 
 const StateScript = preload("res://scripts/player_state.gd")
@@ -20,6 +21,7 @@ var session
 var _status: Label
 var start_button: Button
 var _load_button: Button
+var host_world_button: Button
 var join_button: Button
 var _join_layer: Control
 var _name_input: LineEdit
@@ -96,13 +98,16 @@ func _build() -> void:
 	_load_button = _button(frame,"LOAD SAVED GAME",Vector2(28,412),Vector2(462,58))
 	_load_button.add_theme_font_size_override("font_size",19)
 	_load_button.pressed.connect(_load_saved_game)
-	join_button = _button(frame,"JOIN GAME",Vector2(28,484),Vector2(462,58))
+	host_world_button = _button(frame,"HOST OPEN WORLD",Vector2(28,484),Vector2(462,58))
+	host_world_button.add_theme_font_size_override("font_size",19)
+	host_world_button.pressed.connect(_host_open_world)
+	join_button = _button(frame,"JOIN GAME",Vector2(28,556),Vector2(462,58))
 	join_button.add_theme_font_size_override("font_size",19)
 	join_button.pressed.connect(_open_join)
-	_status = _label(frame,"",Vector2(28,566),13,TEAL)
+	_status = _label(frame,"",Vector2(28,616),13,TEAL)
 	_status.size = Vector2(462,44)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Close",Vector2(28,648),11,MUTED)
+	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Close",Vector2(28,668),11,MUTED)
 	footer.size = Vector2(462,40)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
@@ -131,7 +136,7 @@ func _build_join_layer() -> void:
 	panel.add_theme_stylebox_override("panel",_style(Color(0.038,0.078,0.096,0.98),Color("3f5b60"),10))
 	_join_layer.add_child(panel)
 	_label(panel,"JOIN GAME",Vector2(24,18),26,GOLD)
-	var hint := _label(panel,"Choose an arena match or a delve party. All values are remembered.",Vector2(24,54),11,MUTED)
+	var hint := _label(panel,"Choose an arena match, a delve party or the open world. All values are remembered.",Vector2(24,54),11,MUTED)
 	hint.size = Vector2(432,32)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var cache := get_node_or_null("/root/NetCache")
@@ -147,7 +152,8 @@ func _build_join_layer() -> void:
 	_join_mode.size = Vector2(200,40)
 	_join_mode.add_item("Arena match",0)
 	_join_mode.add_item("Delve party",1)
-	_join_mode.selected = 1 if cached_mode == "delve" else 0
+	_join_mode.add_item("Open world",2)
+	_join_mode.selected = 2 if cached_mode == "world" else 1 if cached_mode == "delve" else 0
 	panel.add_child(_join_mode)
 	_label(panel,"YOUR NAME",Vector2(250,96),10,GOLD)
 	_name_input = LineEdit.new()
@@ -250,6 +256,22 @@ func _load_saved_game() -> void:
 	load_requested.emit()
 	get_tree().change_scene_to_file("res://main.tscn")
 
+func _host_open_world() -> void:
+	var cache := get_node_or_null("/root/NetCache")
+	var port := _default_port
+	var player_name := _default_name
+	if cache != null:
+		port = int(cache.port)
+		player_name = str(cache.player_name)
+	if session != null:
+		session.arm_world("world-host","127.0.0.1",port,player_name)
+	if cache != null:
+		cache.remember(player_name,"",port,"world")
+	_set_status("Opening your world on UDP %d..." % port)
+	print("IRONWOOD_HOST_WORLD port=%d" % port)
+	host_requested.emit()
+	get_tree().change_scene_to_file("res://main.tscn")
+
 func _open_join() -> void:
 	_join_layer.visible = true
 	_form_error.text = ""
@@ -273,20 +295,27 @@ func _confirm_join() -> void:
 	if player_name.is_empty():
 		player_name = "Ranger"
 	var cache := get_node_or_null("/root/NetCache")
-	var join_mode := "delve" if _join_mode.selected == 1 else "arena"
+	var join_mode := "arena"
+	if _join_mode.selected == 1:
+		join_mode = "delve"
+	elif _join_mode.selected == 2:
+		join_mode = "world"
 	if cache != null:
 		cache.remember(player_name,address,port,join_mode)
 	if state != null:
 		state.save_state()
 	if session != null:
-		if join_mode == "delve":
+		if join_mode == "world":
+			session.arm_world("world-join",address,port,player_name)
+		elif join_mode == "delve":
 			session.arm_delve("delve-join",address,port,player_name)
 		else:
 			session.arm_arena("client",address,port,player_name)
 	_set_status("Joining %s:%d..." % [address,port])
 	print("IRONWOOD_JOIN mode=%s address=%s port=%d name=%s" % [join_mode,address,port,player_name])
 	join_requested.emit()
-	get_tree().change_scene_to_file("res://delve.tscn" if join_mode == "delve" else "res://arena.tscn")
+	var scene_path := "res://main.tscn" if join_mode == "world" else "res://delve.tscn" if join_mode == "delve" else "res://arena.tscn"
+	get_tree().change_scene_to_file(scene_path)
 
 func _set_status(message: String, color: Color = TEAL) -> void:
 	if _status == null:

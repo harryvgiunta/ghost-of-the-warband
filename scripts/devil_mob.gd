@@ -8,7 +8,7 @@ extends CharacterBody3D
 ## frontier combat, parry/block, damage numbers and loot paths are unchanged.
 
 signal defeated(enemy: Node3D, reward: int)
-signal attacked(attacker: CharacterBody3D, amount: float)
+signal attacked(attacker: CharacterBody3D, amount: float, victim: CharacterBody3D)
 
 const Visual = preload("res://scripts/devil_mob_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
@@ -77,6 +77,8 @@ var mob_id := "hell_goat"
 var profile: Dictionary = {}
 var kind := 3
 var player: CharacterBody3D
+var targets: Array[CharacterBody3D] = []
+var replica := false
 var safe_center := Vector3.ZERO
 var home := Vector3.ZERO
 var health := 50.0
@@ -97,6 +99,7 @@ var _visual
 var _body: Node3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
+var _target: CharacterBody3D
 
 
 func _ready() -> void:
@@ -141,17 +144,20 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not alive or not is_instance_valid(player):
+	if replica or not alive:
+		return
+	_target = _resolve_target()
+	if not is_instance_valid(_target):
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
-	var to_player := player.global_position - global_position
-	to_player.y = 0.0
-	var distance := to_player.length()
-	var direction := to_player.normalized() if distance > 0.001 else Vector3.FORWARD
-	var player_safe := Vector2(player.position.x - safe_center.x,
-		player.position.z - safe_center.z).length() < 19.0
-	var aggro := (not player_safe) and distance < float(profile.aggro) \
+	var to_target := _target.global_position - global_position
+	to_target.y = 0.0
+	var distance := to_target.length()
+	var direction := to_target.normalized() if distance > 0.001 else Vector3.FORWARD
+	var target_safe := Vector2(_target.position.x - safe_center.x,
+		_target.position.z - safe_center.z).length() < 19.0
+	var aggro := (not target_safe) and distance < float(profile.aggro) \
 		and global_position.distance_to(home) < float(profile.leash)
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
@@ -243,10 +249,10 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	var orbit := float(profile.orbit)
 	var closing := _attack_cooldown <= 0.0
 	var radius := maxf(1.1, reach * 0.82) if closing else orbit
-	var angle := atan2(global_position.z - player.global_position.z,
-		global_position.x - player.global_position.x)
+	var angle := atan2(global_position.z - _target.global_position.z,
+		global_position.x - _target.global_position.x)
 	angle += _strafe_dir * delta * float(profile.strafe) * (1.15 + 0.25 * sin(_state_time * 0.9))
-	var ring := player.global_position + Vector3(cos(angle), 0.0, sin(angle)) * radius
+	var ring := _target.global_position + Vector3(cos(angle), 0.0, sin(angle)) * radius
 	var offset := ring - global_position
 	offset.y = 0.0
 	var desired := offset.normalized() if offset.length_squared() > 0.0001 else direction
@@ -261,12 +267,25 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 
 
 func _resolve_strike() -> void:
-	var to_player := player.global_position - global_position
-	to_player.y = 0.0
+	var to_target := _target.global_position - global_position
+	to_target.y = 0.0
 	var spent := _state_time / maxf(0.01, float(profile.strike))
 	var reach := float(profile.reach) * (1.0 + 0.18 * spent)
-	if to_player.length() <= reach and absf(player.global_position.y - global_position.y) < 2.4:
-		attacked.emit(self, float(profile.damage))
+	if to_target.length() <= reach and absf(_target.global_position.y - global_position.y) < 2.4:
+		attacked.emit(self, float(profile.damage), _target)
+
+func _resolve_target() -> CharacterBody3D:
+	var nearest := INF
+	var best: CharacterBody3D = null
+	for candidate in targets:
+		if not is_instance_valid(candidate) or candidate.get("alive") == false:
+			continue
+		var offset := candidate.global_position - global_position
+		var planar := offset.x * offset.x + offset.z * offset.z
+		if planar < nearest:
+			nearest = planar
+			best = candidate
+	return best if is_instance_valid(best) else player
 
 
 func _separate() -> void:
@@ -341,10 +360,12 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,
 		health <= 0.0, blood_scale())
 	if health <= 0.0:
-		_die()
+		_enter_dead(true)
 
 
-func _die() -> void:
+## The local death: the authored pose, stopped collision and the shared hold.
+## Replicas call it with `announce = false` so gold and the kill stay on the host.
+func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_struck = true
@@ -352,9 +373,48 @@ func _die() -> void:
 	set_deferred("collision_mask", 0)
 	if is_instance_valid(_visual):
 		_visual.die()
-	defeated.emit(self, int(profile.gold))
+	if announce:
+		defeated.emit(self, int(profile.gold))
 	# Hold the authored death pose for the shared five minutes, then dissolve.
 	CorpseHold.hold(self, _body)
+
+
+func snapshot() -> Dictionary:
+	return {
+		"p": global_position,
+		"y": rotation.y,
+		"v": velocity,
+		"g": is_on_floor(),
+		"s": state,
+		"t": _state_time,
+		"h": health,
+		"a": alive,
+		"x": Vector4.ZERO,
+	}
+
+
+## Presentation-side mirror of the host's mob: the host owns AI, damage and
+## gold, so a replica only replays the snapshot it was handed.
+func apply_snapshot(state: Dictionary) -> void:
+	var previous_health := health
+	var was_alive := alive
+	global_position = state.p
+	rotation.y = state.y
+	self.state = state.s
+	_state_time = state.t
+	health = state.h
+	alive = state.a
+	velocity = state.v
+	if is_instance_valid(_visual):
+		_visual.set_motion(velocity, state.g)
+		_visual.set_combat(self.state, _state_time)
+	if health < previous_health:
+		var applied: float = previous_health - health
+		DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", false, health <= 0.0)
+		BloodFx.wound(self, blood_rig(), get_aim_position(), applied, false,
+			health <= 0.0, blood_scale())
+	if was_alive and not alive:
+		_enter_dead(false)
 
 
 func get_aim_position() -> Vector3:

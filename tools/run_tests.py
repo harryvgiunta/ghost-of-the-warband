@@ -50,6 +50,7 @@ TESTS = [
     "delve_regression",
     "delve_entry_regression",
     "delve_network_regression",
+    "world_network_regression",
     "consumable_regression",
     "blood_regression",
     "corpse_regression",

@@ -20,6 +20,9 @@ func arm_arena(next_mode: String, next_address: String, next_port: int, next_nam
 func arm_delve(next_mode: String, next_address: String, next_port: int, next_name: String) -> void:
 	arm_arena(next_mode,next_address,next_port,next_name)
 
+func arm_world(next_mode: String, next_address: String, next_port: int, next_name: String) -> void:
+	arm_arena(next_mode,next_address,next_port,next_name)
+
 func has_request() -> bool:
 	return mode != ""
 
