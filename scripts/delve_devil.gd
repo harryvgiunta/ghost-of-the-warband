@@ -64,6 +64,24 @@ const PROFILES := {
 ## Multiplier applied to the role damage baseline by the held weapon.
 const WEAPON_DAMAGE := {"claw": 1.0, "dagger": 0.75, "sword": 1.35}
 
+## Easy-to-hard ordering of every role the delve can summon. The ladder roles
+## follow their scaled health and damage; the court devils sit at 0.45 health and
+## 0.65 damage of their frontier baselines, which drops the spawn and the
+## succubus under a cinder devil; a crimson clone brings a player rig, armor and
+## a bow, so it closes the wave. `delve.gd` schedules its spawns by this order.
+const ROLE_DIFFICULTY := {
+	ROLE_IMP: 0,
+	ROLE_SPAWN: 1,
+	ROLE_DEVIL: 2,
+	ROLE_SUCCUBUS: 3,
+	ROLE_HELL_GOAT: 4,
+	ROLE_BONEFIEND: 5,
+	ROLE_GARGOYLE: 6,
+	ROLE_BEAST: 7,
+	ROLE_BRUTE: 8,
+	ROLE_RANGER: 9,
+}
+
 ## The frontier's starting-court devils are tuned for a solo ranger's opening
 ## field, so the delve brings them in at a court scale that sits between the
 ## imps and the bonefiends at depth one instead of multiplying the wave by four.
