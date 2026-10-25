@@ -43,7 +43,7 @@ photogrammetry scan, paid pack or restricted file is used.
 | `assets/characters/devils/ironwood_<mob>.json` | Measured bones, bounds, clips, materials, head zone |
 | `assets/characters/devils/ironwood_<mob>.glb.import` | Godot import settings (embedded images, 60 Hz sampling) |
 | `scripts/devil_mob_visual.gd` | Presentation-only clip sampler, attack impact mapping, material tuning |
-| `scripts/devil_mob.gd` | Gameplay AI, collision, damage, parries, gold, corpse hold |
+| `scripts/devil_mob.gd` | Gameplay AI, collision, damage, parries, gold, blood, five-minute corpse hold |
 | `scripts/range_world.gd` | 16 `devil_spawns`, including the five-mob starting court |
 | `tests/devil_mobs_regression.gd` | Asset, visual, gameplay, head-zone and frontier coverage |
 
@@ -170,6 +170,30 @@ runtime carries only values glTF cannot express.
 - Hit/death are full-skeleton bakes from the idle pose; the death action gets a
   grounded pelvis drop. Root translation stays zero, which the regression
   checks at the start, midpoint and end of every clip.
+
+## Blood and corpses
+
+- Every one of the five mobs bleeds. `take_damage` calls
+  `BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,
+  health <= 0.0, blood_scale())`; `blood_rig()` returns
+  `DevilMobVisual.blood_anchor()`, the imported GLB root, so `BloodSurface`
+  measures the skinned mesh and stains ride its bones. The empty `_body`
+  container is only a fallback.
+- `PROFILES` carries a per-mob `"blood"` scale (spawn 0.55, succubus 0.95,
+  goat 1.05, gargoyle 1.20, beast 1.35) that sizes the soak, the floor
+  spatter and the death pool. A lethal hit adds the pool under the falling
+  body through the same shared field.
+- These mobs fight with natural weapons, so `blood_weapon_anchor()` is absent
+  and `BloodFx.stain_attacker` falls through to `blood_strike_point()` →
+  `DevilMobVisual.strike_hand_position()` (`hand_r`, then `front_paw_r` for the
+  quadruped beast, then `head`). The limb that landed the blow comes away
+  bloodied; an armed cinder devil stains its held blade instead.
+- Death clears collision immediately and hands the body to
+  `scripts/corpse_hold.gd`: the authored death pose is held for
+  `CorpseHold.SECONDS` (300 s) before a short dissolve frees the node. The
+  frontier, delve and arena share that one lifetime, so a fight leaves the
+  battlefield littered instead of erasing bodies after four seconds. Corpses
+  keep no collision, so wave and aggro filters that read `alive` ignore them.
 
 ## Verification gates
 

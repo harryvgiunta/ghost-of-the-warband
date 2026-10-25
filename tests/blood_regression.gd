@@ -66,8 +66,9 @@ func run() -> void:
 	root.add_child(lone)
 	var at := stub.global_position + Vector3(0.0, 1.0, 0.0)
 	lone.wound(stub, at, 30.0, false, false, 1.0)
-	check(lone.stain_count() == 2, "A body hit leaves a wound and a floor splat")
-	check(lone.surface_stain_count() == 1, "The floor splat is registered as a surface stain")
+	check(lone.stain_count() >= 3, "A body hit leaves a wound and spatter around it")
+	check(lone.surface_stain_count() >= 2,
+		"A body hit speckles the floor instead of one tidy disc")
 	check(_count_meta(stub, "wound") == 1, "The wound is parented to the target rig")
 	var normal_vertices := _latest_wound_vertices(stub)
 	lone.clear_all()
@@ -90,18 +91,19 @@ func run() -> void:
 	lone.clear_all()
 	await process_frame
 	lone.wound(stub, at, 30.0, false, false, 1.0)
+	var created: int = lone.stain_count()
 	var stain: Dictionary = lone._stains[0]
 	var stain_node: Node3D = stain.node
 	check(is_equal_approx(float(stain.life), 60.0), "The registered stain records a 60 s life")
 	lone.advance(56.9)
-	check(lone.stain_count() == 2 and stain_node.visible, "Blood is fully present before the fade window")
+	check(lone.stain_count() == created and stain_node.visible, "Blood is fully present before the fade window")
 	check(is_equal_approx((stain_node as GeometryInstance3D).transparency, 0.0),
 		"Blood is fully opaque before the fade window")
 	lone.advance(2.0)
 	check((stain_node as GeometryInstance3D).transparency > 0.0,
 		"Blood fades over the final three seconds")
 	lone.advance(1.0)
-	check(lone.stain_count() == 2, "Blood survives at 59.9 seconds")
+	check(lone.stain_count() == created, "Blood survives at 59.9 seconds")
 	lone.advance(0.2)
 	check(lone.stain_count() == 0, "Blood is released after sixty seconds")
 	check(stain_node.is_queued_for_deletion(), "The expired stain node is queued for deletion")
@@ -197,6 +199,53 @@ func run() -> void:
 	await process_frame
 	check(_count_meta(field, "pool") >= 1, "A lethal hit leaves a persistent pool")
 	check(_count_meta(devil, "wound") >= 2, "A lethal hit floods the body with wounds")
+
+	# Every mob bleeds, stone sentinel included.
+	var sentinel = Enemy.new()
+	sentinel.kind = 1
+	sentinel.position = game.player.global_position + Vector3(-1.8, 0.12, 0.0)
+	game.add_child(sentinel)
+	await physics_frame
+	await process_frame
+	var sentinel_stains: int = field.stain_count()
+	sentinel.take_damage(14.0, -1)
+	await process_frame
+	check(field.stain_count() > sentinel_stains, "The stone sentinel bleeds when hit")
+	check(_count_meta(sentinel, "wound") > 0, "The sentinel's stone body takes blood")
+
+	# --- imported devil packs: the five frontier demons bleed -----------------
+	var mob = load("res://scripts/devil_mob.gd").new()
+	mob.mob_id = "spawn"
+	mob.player = game.player
+	mob.position = game.player.global_position + Vector3(0.0, 0.12, 2.6)
+	game.add_child(mob)
+	await physics_frame
+	await process_frame
+	var mob_stains: int = field.stain_count()
+	mob.take_damage(9.0, -1)
+	await process_frame
+	check(field.stain_count() > mob_stains, "An imported devil wound spatters the field")
+	check(_count_meta(mob, "wound") > 0, "An imported devil takes body blood")
+	check(mob.blood_rig() != mob._body,
+		"The imported devil measures its skinned body, not the empty container")
+	check(mob.blood_scale() < 1.0, "The smallest devil bleeds less than a wolf")
+	check(mob.blood_strike_point().distance_to(mob.global_position) < 2.5,
+		"The strike point sits on the devil's own body")
+	BloodFx.stain_attacker(mob, 9.0)
+	await process_frame
+	check(_count_meta(mob, "wound") > 1,
+		"A devil that causes blood gets bloody where it struck")
+	mob.take_damage(999.0, -1)
+	await process_frame
+	check(_count_meta(field, "pool") >= 1, "A slain devil leaves a pool under the corpse")
+
+	# A blade contact marks the scenery around the victim, not only its body.
+	var impact_before: int = field.surface_stain_count()
+	field.impact(game.player.global_position + Vector3(0.0, 1.2, 0.0),
+		Vector3.FORWARD, 42.0, false)
+	await process_frame
+	check(field.surface_stain_count() > impact_before,
+		"A contact flings blood onto the ground and walls around it")
 
 	# World budget recycles oldest splats instead of growing without bound.
 	field.max_surface_stains = 4

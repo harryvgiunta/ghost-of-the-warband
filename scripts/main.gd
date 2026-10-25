@@ -959,10 +959,10 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 		return
 	take_damage(amount)
 	# The unmitigated contact is the only branch that spilled blood. The attacker
-	# may carry a claw (no weapon stain) or a dagger/sword/bow.
+	# may carry a blade or a bare claw; `stain_attacker` owns both cases.
 	BloodFx.impact(attacker,player.global_position + Vector3(0,1.1,0),
 		player.global_position - attacker.global_position,amount,false)
-	BloodFx.stain_weapon(attacker,amount)
+	BloodFx.stain_attacker(attacker,amount)
 
 func take_damage(amount: float, react: bool = true) -> void:
 	_cancel_consumable()

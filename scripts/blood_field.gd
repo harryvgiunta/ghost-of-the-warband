@@ -14,7 +14,7 @@ const PATCH_RINGS := 2
 ## splashes into the single mesh each wound owns.
 const BODY_RINGS := 5
 const BODY_SEGMENTS := 5
-const MAX_BURSTS := 10
+const MAX_BURSTS := 14
 const MAX_BODY_STAINS := 10
 const MAX_WEAPON_STAINS := 8
 const GROUND_MASK := 1
@@ -39,20 +39,58 @@ func _process(delta: float) -> void:
 
 # --- public field API ------------------------------------------------------
 
-## Directional spray at a real blade/projectile contact plus a splat when the
-## blow stops against nearby scenery. Body blood comes from `wound`.
+## Directional spray at a real blade/projectile contact plus flung droplets that
+## mark the ground and walls around it. Body blood comes from `wound`.
 func impact(at: Vector3, direction: Vector3, amount: float, headshot: bool) -> void:
 	var dir := direction
 	if dir.length_squared() < 0.000001:
 		dir = Vector3.UP
 	dir = dir.normalized()
-	_spawn_burst(at, dir, amount, 1.0)
+	var weight := clampf(amount, 4.0, 60.0)
+	_spawn_burst(at, dir, weight, 1.0 + (0.25 if headshot else 0.0))
+	# The blow itself leaves a splat where it stopped against scenery.
 	var hit := _ray(at - dir * 0.02, at + dir * 0.55, GROUND_MASK)
-	if hit.is_empty():
-		return
-	var normal: Vector3 = hit.normal
-	if absf(normal.y) < 0.72:
-		_spawn_patch(hit.position, normal, 0.20 + minf(amount, 50.0) * 0.006, false)
+	if not hit.is_empty():
+		var normal: Vector3 = hit.normal
+		if absf(normal.y) < 0.72:
+			_spawn_patch(hit.position, normal, 0.20 + weight * 0.006, false)
+	_fling(at, dir, weight, headshot)
+
+## Flung droplets: short rays away from the contact, each leaving a small patch
+## where it lands. A hit reads as a splash only when the blood also hits the
+## floor and wall around the victim, not a single decal pinned under it.
+func _fling(at: Vector3, direction: Vector3, amount: float, headshot: bool) -> void:
+	var radius := clampf(0.06 + amount * 0.0045, 0.07, 0.30)
+	var reach := 1.25 + minf(amount, 60.0) * 0.016
+	var up := Vector3.UP if absf(direction.y) < 0.94 else Vector3.RIGHT
+	var side := direction.cross(up)
+	if side.length_squared() < 0.0001:
+		side = direction.cross(Vector3.RIGHT)
+	side = side.normalized()
+	var lift := side.cross(direction).normalized()
+	# The drops that fall straight off the blade, so every contact marks the
+	# floor beneath it even when the fan finds no wall.
+	var below := _ray(at, at + Vector3.DOWN * (0.9 + minf(amount, 40.0) * 0.01),
+		GROUND_MASK)
+	if not below.is_empty():
+		var floor_normal: Vector3 = below.normal
+		_spawn_patch(below.position, floor_normal, radius * 0.62, false)
+	var count := 3
+	if amount >= 20.0:
+		count += 1
+	if headshot:
+		count += 1
+	for index in count:
+		var spin := _rng.randf() * TAU
+		var tilt := _rng.randf_range(0.16, 0.78)
+		var flung := (direction * cos(tilt) \
+			+ (side * cos(spin) + lift * sin(spin)) * sin(tilt)).normalized()
+		var hit := _ray(at, at + flung * reach * _rng.randf_range(0.55, 1.0),
+			GROUND_MASK)
+		if hit.is_empty():
+			continue
+		var normal: Vector3 = hit.normal
+		_spawn_patch(hit.position, normal, radius * _rng.randf_range(0.45, 1.0), false)
 
 ## Damage that actually landed: body coating, floor spatter, and the death
 ## pool. `rig` may be null for a target with no visible body.
@@ -67,6 +105,14 @@ func wound(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 		_spawn_pool(at, size_scale)
 		_spawn_burst(at + Vector3(0.0, 0.12 * size_scale, 0.0), Vector3.UP,
 			maxf(amount, 24.0) * 1.6, size_scale * 1.25, 0.55)
+
+## Someone else's blood on this body: the claw, paw or muzzle that struck. No
+## floor decal — the victim's `wound` already owns the ground.
+func bloodied(rig: Node3D, at: Vector3, amount: float, scale: float) -> void:
+	var size_scale := clampf(scale, 0.35, 2.5)
+	if is_instance_valid(rig):
+		_stain_body(rig, at, amount, false, false, size_scale)
+	_spawn_burst(at, Vector3.UP, maxf(amount, 6.0) * 0.7, size_scale * 0.65, 0.45)
 
 ## Wet coating on the blade that dealt the blow. Parented to the weapon node so
 ## it tracks every swing and socket change.
@@ -474,9 +520,20 @@ func _basis_yz(y_dir: Vector3, z_dir: Vector3) -> Basis:
 
 # --- floor patches ---------------------------------------------------------
 
+## One main splat under the wound plus smaller satellites around it, so the
+## floor around a hit is speckled instead of carrying a single tidy disc.
 func _ground_splat(at: Vector3, radius: float) -> void:
-	var offset := Vector3(_rng.randf_range(-0.20, 0.20), 0.0,
-		_rng.randf_range(-0.20, 0.20))
+	var specks := 2
+	if radius >= 0.30:
+		specks += 1
+	for index in specks + 1:
+		var spread := 0.20 if index == 0 else _rng.randf_range(0.26, 0.95)
+		var speck := radius if index == 0 else radius * _rng.randf_range(0.16, 0.44)
+		_ground_patch(at, speck, spread)
+
+func _ground_patch(at: Vector3, radius: float, spread: float) -> void:
+	var offset := Vector3(_rng.randf_range(-spread, spread), 0.0,
+		_rng.randf_range(-spread, spread))
 	var hit := _ray(at + Vector3(0.0, 0.8, 0.0) + offset,
 		at + Vector3(0.0, -3.0, 0.0) + offset, GROUND_MASK)
 	if hit.is_empty():
@@ -595,18 +652,18 @@ func _spawn_burst(at: Vector3, direction: Vector3, amount: float, scale: float,
 	var burst := CPUParticles3D.new()
 	burst.name = "BloodSpray"
 	burst.one_shot = true
-	burst.amount = clampi(int(round(16.0 + amount * 1.6)), 18, 80)
-	burst.lifetime = _rng.randf_range(0.34, 0.62)
-	burst.explosiveness = 0.95
+	burst.amount = clampi(int(round(26.0 + amount * 2.2)), 28, 120)
+	burst.lifetime = _rng.randf_range(0.42, 0.80)
+	burst.explosiveness = 0.92
 	burst.direction = (direction + Vector3.UP * up_bias).normalized()
-	burst.spread = 48.0
-	burst.initial_velocity_min = 1.2 * scale
-	burst.initial_velocity_max = 3.6 * scale
-	burst.gravity = Vector3(0.0, -9.8, 0.0)
-	# Motes, not marbles: a droplet at this scale reads as spray, while a
-	# centimetre sphere reads as beading paint.
-	burst.scale_amount_min = 0.0015 * scale
-	burst.scale_amount_max = 0.0035 * scale
+	burst.spread = 58.0
+	burst.initial_velocity_min = 1.7 * scale
+	burst.initial_velocity_max = 4.4 * scale
+	burst.gravity = Vector3(0.0, -10.4, 0.0)
+	# Drops, not motes: sub-millimetre specks vanished against the terrain, so
+	# the spray uses pebble-to-marble droplets that read at combat distance.
+	burst.scale_amount_min = 0.005 * scale
+	burst.scale_amount_max = 0.012 * scale
 	burst.mesh = BloodFx.drop_mesh()
 	burst.material_override = BloodFx.drop_material()
 	burst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

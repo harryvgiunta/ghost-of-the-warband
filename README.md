@@ -320,7 +320,7 @@ The title menu and arena lobby remember the **last player name, host address, UD
 
 ## Blood and wounds
 
-This is an 18+ game: unmitigated damage now leaves persistent gore. Every real contact throws a fine spray of droplets from the wound, soaks blood into the victim's clothes, marks the attacker's drawn blade, and drops spatter on the floor beneath the hit. Lethal blows add an arterial burst and a growing pool under the corpse. Blocked, parried and weak-blocked hits draw no impact spray; only weak blocks still leave the half damage's wound.
+This is an 18+ game: unmitigated damage now leaves persistent gore. **Every mob bleeds** — the Briar wolf, the stone Ruin sentinel, cinder devil packs, the five imported devils and the delve devils all take body stains, floor spatter and a death pool; the ranger does too. A real contact throws a spray of droplets from the wound, flings smaller drops onto the ground and walls around the victim, speckles the floor beneath it, soaks blood into the victim's clothes, and marks the attacker: a drawn blade takes a coating, while a claw, paw or muzzle takes a soak on the limb that struck. Lethal blows add an arterial burst and a growing pool under the corpse. Blocked, parried and weak-blocked hits draw no impact spray; only weak blocks still leave the half damage's wound. A defeated body then **lies where it fell for five minutes** (`scripts/corpse_hold.gd`) holding its authored death pose, before a short dissolve frees it.
 
 Blood is laid on the garment, not beside it. `scripts/blood_surface.gd` measures a rig once — every visible skinned-mesh vertex is binned into its dominant bone as a radial profile of the cloth around that bone — and keeps a thinned sample of the whole garment. A wound scatters several textured splashes across that measured strip, then uses the current pose to find the **outermost** layer under each splash and lifts it clear, so a belt, a sleeve cuff or a second armour layer cannot swallow the stain. Primitive-built fighters (the cinder devil, the ruin sentinel) are measured as their own triangles instead. An arrow carries only a short wet smear behind its head, never a blade-sized coating. Stains ride the nearest skeleton bone, so they travel with the limb.
 
@@ -387,7 +387,7 @@ They are built from the same licensed CC0 Quaternius sources as the ranger — t
 
 The result is the ranger's authored PBR quality on a demon silhouette rather than a procedural blob.
 
-`scripts/devil_mob_visual.gd` is presentation only: it samples the clips, scales cadence from actual post-collision movement, and maps the physics attack clock onto the authored impact frame. `scripts/devil_mob.gd` owns the shared state machine, per-mob profiles, collision, damage, parries/staggers, gold and the corpse hold. The existing frontier loot rotation and HUD feedback are unchanged.
+`scripts/devil_mob_visual.gd` is presentation only: it samples the clips, scales cadence from actual post-collision movement, and maps the physics attack clock onto the authored impact frame. `scripts/devil_mob.gd` owns the shared state machine, per-mob profiles, collision, damage, parries/staggers, gold, blood and the five-minute corpse hold. The existing frontier loot rotation and HUD feedback are unchanged.
 
 The full authoring workflow, budgets and gates are documented in [docs/devil-mobs.md](docs/devil-mobs.md). Rebuild all five assets with:
 
@@ -461,9 +461,12 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/delve_network_regression.gd
 & $Godot --headless --path . --script res://tests/consumable_regression.gd
 & $Godot --headless --path . --script res://tests/blood_regression.gd
+& $Godot --headless --path . --script res://tests/corpse_regression.gd
 ```
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
+
+`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the five imported devils, the stone sentinel and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a sentinel, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, keep their authored death pose, stop colliding, and dissolve through the shared five-minute hold.
 
 `delve_regression.gd` checks the endless loop: the fall-in start, the altar phase, a sealed scaled wave, the clear delay, cache spawn, rope descent, floor-hole opening, chest rewards, depth-two recycling with three devils, and the rope return to town. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the wave and cache, and both observe the descent into depth two.
 

@@ -15,6 +15,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 
 const STATE_EMERGE := "EMERGE"
@@ -39,7 +40,6 @@ const CHASE_SPEED := 3.4
 const SEPARATION_RADIUS := 1.15
 const LIMIT := 16.0
 const WARNING_RADIUS := 1.6
-const CORPSE_SECONDS := 2.2
 
 var authoritative := false
 var alive := true
@@ -274,6 +274,12 @@ func blood_weapon_anchor(_hand: String = "") -> Node3D:
 		return _visual.weapon_anchor()
 	return null
 
+
+func blood_strike_point() -> Vector3:
+	if is_instance_valid(_visual):
+		return _visual.strike_hand_position()
+	return get_aim_position()
+
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,0.55,0)
 
@@ -348,7 +354,7 @@ func _strike() -> void:
 	if outcome == Combat.DEFENSE_NONE and target is Node3D:
 		BloodFx.impact(self,(target as Node3D).get_aim_position(),to_target,
 			_attack_damage,false)
-		BloodFx.stain_weapon_node(blood_weapon_anchor(),_attack_damage,blood_scale())
+		BloodFx.stain_attacker(self,_attack_damage)
 	if outcome == Combat.DEFENSE_PARRY:
 		_enter(STATE_STAGGER)
 
@@ -372,9 +378,7 @@ func _die(announce: bool) -> void:
 	if announce:
 		died.emit(self)
 	if is_inside_tree():
-		var tween := create_tween()
-		tween.tween_interval(CORPSE_SECONDS)
-		tween.tween_callback(queue_free)
+		CorpseHold.hold(self, _visual if is_instance_valid(_visual) else self)
 
 
 func _nearest_target(actors: Array):

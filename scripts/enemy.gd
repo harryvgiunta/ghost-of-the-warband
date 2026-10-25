@@ -5,6 +5,7 @@ signal attacked(attacker: CharacterBody3D, amount: float)
 
 const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -200,6 +201,15 @@ func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
 		return _devil.weapon_anchor()
 	return null
+
+## The limb or muzzle that landed the blow, for the blood it carried away: a
+## wolf's jaws, the cinder devil's raking hand, the sentinel's stone fist.
+func blood_strike_point() -> Vector3:
+	if kind == 0 and is_instance_valid(_wolf):
+		return _wolf.head_hitbox_center()
+	if kind == 2 and is_instance_valid(_devil):
+		return _devil.strike_hand_position()
+	return get_aim_position()
 
 func get_display_name() -> String:
 	return "Briar wolf" if kind == 0 else ("Cinder devil" if kind == 2 else "Ruin sentinel")
@@ -632,10 +642,10 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
-	if kind != 1:
-		# The Ruin sentinel is stone; only flesh-and-blood bodies bleed.
-		BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
-			health <= 0.0,blood_scale())
+	# Every mob bleeds: wolf, stone sentinel and devil all carry blood in this
+	# world, so a landed hit always reads on the body and on the floor.
+	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
+		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		alive = false
 		state = "DEAD"
@@ -646,23 +656,19 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 			# The dropped pickup owns the weapon now; keep it out of the corpse.
 			_devil.set_weapon("claw")
 		defeated.emit(self, 8 if kind == 0 else (6 if kind == 2 else 18))
+		# Collapse first, then hold the corpse for the shared five minutes.
 		var death_tween := create_tween()
 		if kind == 0:
 			_wolf.die()
-			# 0.45 s authored collapse + 4.0 s held corpse, then shrink only the
-			# visual container; the CharacterBody root stays identity-scaled.
-			death_tween.tween_interval(4.45)
-			death_tween.tween_property(_body, "scale", Vector3.ONE * 0.01, 0.4)
-			death_tween.tween_callback(queue_free)
+			# 0.45 s authored collapse, then the corpse is held; only the visual
+			# container shrinks, never the CharacterBody root.
+			death_tween.tween_interval(0.45)
+			CorpseHold.append(death_tween, self, _body)
 		elif kind == 2:
 			_devil.die()
-			# The devil flops in its own 0.55 s pose; hold the corpse, then shrink
-			# the visual container without scaling the CharacterBody root.
-			death_tween.tween_interval(4.05)
-			death_tween.tween_property(_body, "scale", Vector3.ONE * 0.01, 0.35)
-			death_tween.tween_callback(queue_free)
+			# The devil flops in its own 0.55 s pose before the corpse hold.
+			death_tween.tween_interval(0.55)
+			CorpseHold.append(death_tween, self, _body)
 		else:
 			death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
-			death_tween.tween_interval(4.0)
-			death_tween.tween_property(self, "scale", Vector3.ONE * 0.01, 0.4)
-			death_tween.tween_callback(queue_free)
+			CorpseHold.append(death_tween, self, _body)

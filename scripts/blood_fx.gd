@@ -42,6 +42,38 @@ static func wound(parent: Node, rig: Node3D, at: Vector3, amount: float,
 	if field != null:
 		field.wound(rig, at, amount, headshot, lethal, scale)
 
+## Blood from someone else landing on this body: the limb of a clawed or fanged
+## attacker, with no second floor decal under it.
+static func bloodied(parent: Node, rig: Node3D, at: Vector3, amount: float,
+		scale: float = 1.0) -> void:
+	if amount <= 0.0:
+		return
+	var field := field_for(parent)
+	if field != null:
+		field.bloodied(rig, at, amount, scale)
+
+## The mob that landed the blow wears the result. A held blade takes a coating
+## through `blood_weapon_anchor`; a natural weapon takes a soak on the claw,
+## paw or muzzle that struck.
+static func stain_attacker(attacker: Node, amount: float) -> void:
+	if not is_instance_valid(attacker) or amount <= 0.0:
+		return
+	var scale := 1.0
+	if attacker.has_method("blood_scale"):
+		scale = float(attacker.blood_scale())
+	if attacker.has_method("blood_weapon_anchor"):
+		var weapon: Node3D = attacker.blood_weapon_anchor()
+		if is_instance_valid(weapon):
+			stain_weapon_node(weapon, amount, scale)
+			return
+	if not attacker.has_method("blood_rig") \
+			or not attacker.has_method("blood_strike_point"):
+		return
+	var rig = attacker.blood_rig()
+	if not is_instance_valid(rig):
+		return
+	bloodied(attacker, rig, attacker.blood_strike_point(), amount * 0.85, scale)
+
 static func stain_weapon(rig: Node, amount: float, hand: String = "") -> void:
 	if not is_instance_valid(rig) or amount <= 0.0:
 		return

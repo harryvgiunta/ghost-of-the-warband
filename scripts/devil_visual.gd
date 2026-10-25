@@ -208,6 +208,12 @@ func weapon_anchor() -> Node3D:
 		return _melee_weapon
 	return null
 
+## World point of the right hand: a clawed devil carries blood away on it.
+func strike_hand_position() -> Vector3:
+	if is_instance_valid(_hand_r):
+		return _hand_r.global_position
+	return global_position
+
 func get_bow_origin() -> Vector3:
 	if is_instance_valid(_bow):
 		return _bow.get_arrow_origin()

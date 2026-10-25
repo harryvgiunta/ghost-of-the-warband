@@ -76,6 +76,7 @@ var _instance: Node3D
 var _player: AnimationPlayer
 var _skeleton: Skeleton3D
 var _head_bone := -1
+var _strike_bone := -1
 var _clip := ""
 var _speed := 0.0
 var _grounded := true
@@ -109,6 +110,13 @@ func _ready() -> void:
 		push_error("Devil visual is missing its AnimationPlayer or Skeleton3D: " + mob_id)
 		return
 	_head_bone = _skeleton.find_bone("head")
+	# The limb that lands the blow: hand for the bipeds, front paw for the
+	# quadruped beast, head as the last resort.
+	_strike_bone = _skeleton.find_bone("hand_r")
+	if _strike_bone < 0:
+		_strike_bone = _skeleton.find_bone("front_paw_r")
+	if _strike_bone < 0:
+		_strike_bone = _head_bone
 	for key in ["idle", "walk", "run", "attack", "hit", "death"]:
 		if not _player.has_animation(str(_data[key])):
 			push_error("Devil visual is missing clip %s for %s" % [_data[key], mob_id])
@@ -208,6 +216,24 @@ func head_hitbox_center() -> Vector3:
 
 func head_hit_profile() -> Vector2:
 	return Vector2(float(_data.get("head_radius", 0.25)), float(_data.get("head_half", 0.12)))
+
+
+## Skinned body the blood field measures: the imported GLB root owns the
+## Skeleton3D and the skinned mesh, so stains are placed on the real cloth.
+func blood_anchor() -> Node3D:
+	if is_instance_valid(_instance):
+		return _instance
+	return self
+
+
+## World point of the limb that landed the blow, so a claw comes away wet.
+func strike_hand_position() -> Vector3:
+	if _skeleton == null:
+		return global_position
+	var index := _strike_bone if _strike_bone >= 0 else _head_bone
+	if index < 0:
+		return global_position
+	return _skeleton.global_transform * _skeleton.get_bone_global_pose(index).origin
 
 
 func get_clip_name() -> String:

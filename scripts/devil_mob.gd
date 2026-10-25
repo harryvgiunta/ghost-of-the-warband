@@ -13,6 +13,8 @@ signal attacked(attacker: CharacterBody3D, amount: float)
 const Visual = preload("res://scripts/devil_mob_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
+const CorpseHold = preload("res://scripts/corpse_hold.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -27,7 +29,7 @@ const PROFILES := {
 		"radius": 0.45, "height": 2.00, "aim": 1.65,
 		"windup": 0.45, "strike": 0.18, "recover": 0.55,
 		"cooldown": 1.35, "lunge": 6.2, "turn": 9.0,
-		"behaviour": "charger", "strafe": 0.9,
+		"behaviour": "charger", "strafe": 0.9, "blood": 1.05,
 	},
 	"succubus": {
 		"display": "Succubus", "kind": 4,
@@ -37,7 +39,7 @@ const PROFILES := {
 		"radius": 0.32, "height": 2.05, "aim": 1.50,
 		"windup": 0.36, "strike": 0.15, "recover": 0.45,
 		"cooldown": 1.15, "lunge": 7.0, "turn": 10.0,
-		"behaviour": "flyer", "strafe": 1.10,
+		"behaviour": "flyer", "strafe": 1.10, "blood": 0.95,
 	},
 	"spawn": {
 		"display": "Devil spawn", "kind": 5,
@@ -47,7 +49,7 @@ const PROFILES := {
 		"radius": 0.30, "height": 1.05, "aim": 0.75,
 		"windup": 0.30, "strike": 0.14, "recover": 0.40,
 		"cooldown": 0.90, "lunge": 8.0, "turn": 12.0,
-		"behaviour": "crawler", "strafe": 1.50,
+		"behaviour": "crawler", "strafe": 1.50, "blood": 0.55,
 	},
 	"beast": {
 		"display": "Hell beast", "kind": 6,
@@ -57,7 +59,7 @@ const PROFILES := {
 		"radius": 0.55, "height": 1.65, "aim": 1.15,
 		"windup": 0.65, "strike": 0.22, "recover": 0.70,
 		"cooldown": 2.00, "lunge": 5.5, "turn": 5.5,
-		"behaviour": "brute", "strafe": 0.2,
+		"behaviour": "brute", "strafe": 0.2, "blood": 1.35,
 	},
 	"gargoyle": {
 		"display": "Gargoyle", "kind": 7,
@@ -67,7 +69,7 @@ const PROFILES := {
 		"radius": 0.70, "height": 3.05, "aim": 2.35,
 		"windup": 0.75, "strike": 0.24, "recover": 0.85,
 		"cooldown": 2.20, "lunge": 3.2, "turn": 4.5,
-		"behaviour": "sentinel", "strafe": 0.0,
+		"behaviour": "sentinel", "strafe": 0.0, "blood": 1.20,
 	},
 }
 
@@ -336,6 +338,8 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", headshot, health <= 0.0)
+	BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,
+		health <= 0.0, blood_scale())
 	if health <= 0.0:
 		_die()
 
@@ -349,14 +353,33 @@ func _die() -> void:
 	if is_instance_valid(_visual):
 		_visual.die()
 	defeated.emit(self, int(profile.gold))
-	var tween := create_tween()
-	tween.tween_interval(4.2)
-	tween.tween_property(_body, "scale", Vector3.ONE * 0.01, 0.4)
-	tween.tween_callback(queue_free)
+	# Hold the authored death pose for the shared five minutes, then dissolve.
+	CorpseHold.hold(self, _body)
 
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0.0, float(profile.get("aim", 1.0)), 0.0)
+
+
+## The imported body that the blood field measures for cloth stains.
+func blood_rig() -> Node3D:
+	if is_instance_valid(_visual):
+		var anchor: Node3D = _visual.blood_anchor()
+		if is_instance_valid(anchor):
+			return anchor
+	return _body
+
+
+func blood_scale() -> float:
+	return float(profile.get("blood", 1.0))
+
+
+## These mobs fight with claws: nothing to stain, but the striking hand still
+## comes away wet when the blow lands.
+func blood_strike_point() -> Vector3:
+	if is_instance_valid(_visual):
+		return _visual.strike_hand_position()
+	return get_aim_position()
 
 
 func get_display_name() -> String:
