@@ -21,6 +21,7 @@ static var _pool_texture: Texture2D
 static var _patch_materials: Array[StandardMaterial3D] = []
 static var _soak_materials: Array[StandardMaterial3D] = []
 static var _pool_material: StandardMaterial3D
+static var _footprint_material: StandardMaterial3D
 static var _blot_material: StandardMaterial3D
 static var _blot_mesh: SphereMesh
 static var _drop_mesh: SphereMesh
@@ -177,9 +178,9 @@ static func patch_material(variant: int = -1) -> StandardMaterial3D:
 		variant = randi() % SPLAT_VARIANTS
 	return _patch_materials[clampi(variant, 0, _patch_materials.size() - 1)]
 
-## Blood soaked into cloth or hide: the same organic splat shape as the ground
-## spatter, but lit, matte and double-sided so it reads as a stain on fabric
-## instead of a wet bubble sitting on top of it.
+## Blood soaked into cloth or hide: a flat unshaded dye with a crisp rim, so a
+## stain reads as colour on the garment instead of a lit blob sitting on top of
+## it.
 static func soak_material(variant: int = -1) -> StandardMaterial3D:
 	_prepare()
 	if variant < 0:
@@ -189,6 +190,13 @@ static func soak_material(variant: int = -1) -> StandardMaterial3D:
 static func pool_material() -> StandardMaterial3D:
 	_prepare()
 	return _pool_material
+
+## Solid unshaded blood for footprints: the patch geometry is the foot shape,
+## so a flat colour (not a circular splat texture) is what makes it read as a
+## foot instead of a blob.
+static func footprint_material() -> StandardMaterial3D:
+	_prepare()
+	return _footprint_material
 
 static func blot_material() -> StandardMaterial3D:
 	_prepare()
@@ -248,17 +256,16 @@ static func _prepare() -> void:
 		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		material.render_priority = 0
 		_patch_materials.append(material)
-		# Lit, rough and slightly varied per variant: wet cloth darkens the dye
-		# and dries toward a dull brown-red, never a glossy blister.
+		# Unshaded flat colour: the stain reads as a dye on the cloth, not a
+		# lit blob. A lit dark-red patch on a dark hood vanishes in shadow.
 		var soak := StandardMaterial3D.new()
 		soak.albedo_texture = _build_body_texture(0x9E37 + variant * 0x1F3)
 		soak.albedo_color = [Color(1.0, 0.90, 0.88), Color(0.94, 0.80, 0.76),
 			Color(0.86, 0.70, 0.66)][variant]
 		soak.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		soak.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		soak.cull_mode = BaseMaterial3D.CULL_DISABLED
 		soak.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		soak.roughness = 0.62
-		soak.metallic = 0.0
 		soak.render_priority = 1
 		_soak_materials.append(soak)
 	_pool_texture = _build_texture(0xB100D, true)
@@ -268,6 +275,12 @@ static func _prepare() -> void:
 	_pool_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_pool_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_pool_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_footprint_material = StandardMaterial3D.new()
+	_footprint_material.albedo_texture = _build_foot_texture()
+	_footprint_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_footprint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_footprint_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_footprint_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 
 ## Builds a soft, irregular blood splat with a dark core and flung droplets.
 ## Deterministic per seed so the authored artwork stays stable.
@@ -312,10 +325,10 @@ static func _build_texture(seed_value: int, pool: bool) -> ImageTexture:
 	image.generate_mipmaps()
 	return ImageTexture.create_from_image(image)
 
-## Soaked cloth, not a dropped blob: a torn, wicking core that fills most of the
-## patch with a ragged edge, plus round droplets scattered across it. No long
-## radial spikes — at the centimetre sizes a wound uses, those read as thin red
-## slivers stuck to the character instead of spatter.
+## Soaked cloth, not a dropped blob: a solid flat dye filling most of the patch
+## with a thin crisp rim, plus a few faint specks at the edge. No ragged wicking
+## or soft alpha ramp — at the centimetre sizes a wound uses, those read as a
+## feathered bib rather than blood on the garment.
 static func _build_body_texture(seed_value: int) -> ImageTexture:
 	var size := 192
 	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -339,31 +352,97 @@ static func _build_body_texture(seed_value: int) -> ImageTexture:
 		for x in size:
 			var point := Vector2(float(x) + 0.5, float(y) + 0.5)
 			var offset := point - center
-			# Warp the radius so the stain bleeds unevenly into the weave.
-			var pull := warp.get_noise_2d(float(x), float(y)) * 0.18
+			# A light warp keeps the rim organic without bleeding it into a
+			# feathered edge.
+			var pull := warp.get_noise_2d(float(x), float(y)) * 0.08
 			var radial := clampf(1.0 - offset.length() / reach - pull, 0.0, 1.0)
 			if radial <= 0.0:
 				continue
 			var grain := (noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
-			var alpha := smoothstep(0.04, 0.30, radial * (0.55 + grain * 0.95))
+			# Flat dye, not a feathered bleed: a solid core with a thin, crisp
+			# edge. The grain only nudges the rim so the stain is not a perfect
+			# disc; it no longer erodes the fill into ragged soft edges.
+			var edge := radial * (0.90 + grain * 0.20)
+			var alpha := smoothstep(0.0, 0.10, edge)
 			if alpha <= 0.004:
 				continue
 			# A wet core of fresh crimson; the wicking rim dries toward oxblood.
-			var shade := 0.58 + 0.42 * smoothstep(0.0, 0.85, radial)
-			var color := Color((0.395 + 0.060 * grain) * shade,
-				(0.043 + 0.014 * grain) * shade,
-				(0.034 + 0.012 * grain) * shade, alpha)
+			# Unshaded, so these values are what the eye sees: kept a step below
+			# pure saturation so the stain sits on the cloth instead of glowing.
+			var shade := 0.65 + 0.35 * smoothstep(0.0, 0.85, radial)
+			var color := Color((0.44 + 0.07 * grain) * shade,
+				(0.042 + 0.013 * grain) * shade,
+				(0.034 + 0.010 * grain) * shade, alpha)
 			image.set_pixel(x, y, color)
-	# Round droplets, kept inside the patch bounds instead of flying off it.
-	for index in 110:
+	# A few small specks at the rim, kept flat and faint so they read as
+	# spatter on the cloth, not separate blobs floating off it.
+	for index in 24:
 		var angle := rng.randf() * TAU
-		var distance := reach * rng.randf_range(0.45, 1.02)
+		var distance := reach * rng.randf_range(0.55, 1.0)
 		var at := center + Vector2(cos(angle), sin(angle)) * distance
-		var radius := rng.randf_range(0.55, 1.8)
+		var radius := rng.randf_range(0.4, 1.0)
 		var shade := rng.randf_range(0.42, 0.80)
 		_paint_disc(image, at, radius,
 			Color(0.390 * shade + 0.02, 0.040 * shade, 0.032 * shade,
-				rng.randf_range(0.45, 0.95)))
+				rng.randf_range(0.25, 0.55)))
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+## A footprint: a wide rounded forefoot (ball) at the toe and a smaller heel at
+## the back, joined by a thin arch. Texture x runs heel-to-toe, y across the
+## foot. Tread grooves (shoe lugs) and noise spottiness break up the shape so
+## it reads as a real print, not a perfect vector foot.
+##
+## The canvas is 2.5:1 — the same ratio as the 25 cm x 10 cm patch `footprint`
+## lays down — so the drawn foot fills the geometry instead of painting a small
+## blob in the middle of a stretched quad, and pixels stay square on the ground.
+static func _build_foot_texture() -> ImageTexture:
+	var size := Vector2i(200, 80)
+	var image := Image.create(size.x, size.y, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 0, 0, 0))
+	var blood := Color(0.42, 0.03, 0.025, 1.0)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xF007
+	var tread := FastNoiseLite.new()
+	tread.seed = 0x77
+	tread.frequency = 0.11
+	tread.fractal_octaves = 2
+	var spot := FastNoiseLite.new()
+	spot.seed = 0x51A7
+	spot.frequency = 0.09
+	spot.fractal_octaves = 3
+	# Three ellipses: forefoot (ball) at the toe, heel at the back, arch between.
+	var fore := Vector2(0.70, 0.5)
+	var fore_r := Vector2(0.24, 0.46)
+	var heel := Vector2(0.20, 0.5)
+	var heel_r := Vector2(0.18, 0.36)
+	var arch := Vector2(0.45, 0.5)
+	var arch_r := Vector2(0.13, 0.22)
+	for y in size.y:
+		for x in size.x:
+			var p := Vector2((float(x) + 0.5) / float(size.x),
+				(float(y) + 0.5) / float(size.y))
+			var d_fore := ((p - fore) / fore_r).length()
+			var d_heel := ((p - heel) / heel_r).length()
+			var d_arch := ((p - arch) / arch_r).length()
+			var d := minf(minf(d_fore, d_heel), d_arch)
+			if d >= 1.0:
+				continue
+			var alpha := smoothstep(0.0, 0.18, clampf(1.0 - d, 0.0, 1.0))
+			# Tread grooves: bands across the foot (varying heel-to-toe) thin the
+			# print where a shoe sole has gaps, without cutting it apart.
+			var groove := tread.get_noise_2d(float(x) * 0.5, float(y) * 0.12)
+			if groove > 0.45:
+				alpha *= 0.55
+			# Spottiness: blotchy noise so the blood is not a perfect fill.
+			var blotch := (spot.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
+			alpha *= 0.80 + blotch * 0.30
+			# A few random dry specks where the blood did not reach.
+			if rng.randf() < 0.015:
+				alpha *= 0.5
+			if alpha <= 0.01:
+				continue
+			image.set_pixel(x, y, Color(blood.r, blood.g, blood.b, alpha))
 	image.generate_mipmaps()
 	return ImageTexture.create_from_image(image)
 
