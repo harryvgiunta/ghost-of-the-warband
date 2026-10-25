@@ -169,7 +169,10 @@ static func _outer_shift(carrier: Dictionary, center_local: Vector3) -> float:
 		if absf(wrapf(angle - center_angle, -PI, PI)) > 0.45:
 			continue
 		best = maxf(best, radius - center_radius)
-	return minf(best, 0.05)
+	# Two centimetres covers cloth, leather and a mail layer; a larger lift made
+	# small droplets hover off shoulder plates as thin red cards at the
+	# silhouette.
+	return minf(best, 0.02)
 
 ## Local-space surface points spread over the cloth the carrier owns. The blow
 ## itself comes first; the rest scatter across the garment so one hit reads as
@@ -235,9 +238,11 @@ static func surface_point(carrier: Dictionary, local_point: Vector3,
 		lift: float = LIFT) -> Dictionary:
 	if str(carrier.kind) == "bone":
 		var axis: Vector3 = carrier.axis
-		var h: float = local_point.dot(axis)
-		var limit := maxf(0.05, (float(carrier.high) - float(carrier.low)) * 0.5)
-		h = clampf(h, float(carrier.low) - limit, float(carrier.high) + limit)
+		# Never extrapolate past the measured strip: a patch edge beyond the
+		# crown or the cuff used to ring the air around the head and read as
+		# red feathers. Samples clamp to the last measured band instead.
+		var h: float = clampf(local_point.dot(axis), float(carrier.low),
+			float(carrier.high))
 		var planar: Vector3 = local_point - axis * h
 		var angle: float = 0.0 if planar.length_squared() < 0.000001 \
 			else atan2(planar.dot(carrier.v), planar.dot(carrier.u))
@@ -300,7 +305,9 @@ static func add_patch(tool: SurfaceTool, carrier: Dictionary, center_local: Vect
 			var point := origin
 			var vertex_normal := normal
 			if projected.is_empty():
-				point = origin + up * (along * half_up) + across * (sideways * half_wide)
+				# A sample with no cloth collapses onto the patch centre instead
+				# of floating beside the body as a flat card.
+				point = origin
 				misses += 1
 			else:
 				point = projected.point

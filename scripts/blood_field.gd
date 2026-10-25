@@ -123,11 +123,13 @@ func wound(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 			maxf(amount, 24.0) * 1.6, size_scale * 1.25, 0.55)
 
 ## Someone else's blood on this body: the claw, paw or muzzle that struck. No
-## floor decal — the victim's `wound` already owns the ground.
+## floor decal — the victim's `wound` already owns the ground. The scatter stays
+## local to the point that was hit, so a douse lands on the face of the body
+## instead of the whole spine strip.
 func bloodied(rig: Node3D, at: Vector3, amount: float, scale: float) -> void:
 	var size_scale := clampf(scale, 0.35, 2.5)
 	if is_instance_valid(rig):
-		_stain_body(rig, at, amount, false, false, size_scale)
+		_stain_body(rig, at, amount, false, false, size_scale, true)
 	_spawn_burst(at, Vector3.UP, maxf(amount, 6.0) * 0.7, size_scale * 0.65, 0.45)
 
 ## Wet coating on the blade that dealt the blow. Parented to the weapon node so
@@ -329,7 +331,7 @@ func _release_attachment(node: Node) -> void:
 # --- body and weapon stains ------------------------------------------------
 
 func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
-		lethal: bool, scale: float) -> void:
+		lethal: bool, scale: float, localized: bool = false) -> void:
 	var body := BloodSurface.body_for(rig)
 	if body.is_empty():
 		return
@@ -350,42 +352,78 @@ func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 	var down := BloodSurface.down_local(carrier)
 	var lift := BloodSurface.LIFT * clampf(scale, 0.6, 2.2)
 	# Severity sets both the size of the soak and how many separate splashes
-	# land: one hard blow soaks the whole panel, a graze only freckles it.
-	var base := clampf(0.034 + amount * 0.0028, 0.038, 0.150) * scale
-	var splashes := 4
+	# land. Sizes stay small and varied: one huge splat reads as a red bib,
+	# while a scatter of specks and droplets reads as spatter.
+	var base := clampf(0.016 + amount * 0.0014, 0.020, 0.070) * scale
+	var splashes := 7
 	if amount >= 14.0:
-		splashes += 1
-	if amount >= 26.0:
-		splashes += 1
-	if headshot:
 		splashes += 2
-	if lethal:
+	if amount >= 26.0:
+		splashes += 2
+	if headshot:
 		splashes += 3
+	if lethal:
+		splashes += 4
+	if localized:
+		# A douse is dense and local: all of it lands where the blood hit.
+		splashes += 6
 	# The splashes are laid out on the measured cloth itself, not around it:
 	# a hit has to be readable on the clothes from every side of the fight.
 	var limit := BloodSurface.patch_extent(carrier)
-	var points := BloodSurface.cluster(carrier, splashes, _rng, center)
+	var points: Array[Vector3] = []
+	if localized:
+		var reach := maxf(base * 2.0, 0.02)
+		points.append(center)
+		for index in splashes - 1:
+			var direction := Vector3(_rng.randf_range(-1.0, 1.0),
+				_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0))
+			if direction.length_squared() < 0.0001:
+				direction = Vector3.UP
+			points.append(center + direction.normalized() * reach
+				* _rng.randf_range(0.12, 1.0))
+	else:
+		points = BloodSurface.cluster(carrier, splashes, _rng, center)
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var placed := 0
 	for index in points.size():
-		var half_up := minf(base * _rng.randf_range(0.70, 1.55), limit.x)
-		var half_wide := minf(base * _rng.randf_range(0.50, 1.05), limit.y)
+		var spread := _rng.randf_range(0.22, 0.9)
 		if index == 0:
-			half_up = minf(base, limit.x)
-			half_wide = minf(base * 0.92, limit.y)
+			spread = 0.9
+		elif _rng.randf() < 0.35:
+			# A third of the droplets are tiny: the speckle is what sells it.
+			spread *= 0.45
+		var half_up := minf(base * spread * _rng.randf_range(0.85, 1.12),
+			limit.x * 0.6)
+		var half_wide := minf(base * spread * _rng.randf_range(0.70, 1.0),
+			limit.y * 0.55)
 		if BloodSurface.add_patch(tool, carrier, points[index], down, half_up,
 				half_wide, BODY_RINGS, BODY_SEGMENTS, _rng.randf() * TAU, lift):
 			placed += 1
+	# Fine spray where the blood actually hit, not only the strip-wide scatter:
+	# the eye reads a splash from small specks around one soak.
+	for index in 10:
+		var direction := Vector3(_rng.randf_range(-1.0, 1.0),
+			_rng.randf_range(-1.0, 1.0), _rng.randf_range(-1.0, 1.0))
+		if direction.length_squared() < 0.0001:
+			continue
+		var fleck_at: Vector3 = center + direction.normalized() \
+			* base * _rng.randf_range(0.5, 2.4)
+		var fleck := base * _rng.randf_range(0.10, 0.24)
+		if BloodSurface.add_patch(tool, carrier, fleck_at, down, fleck,
+				fleck * _rng.randf_range(0.70, 1.0), BODY_RINGS, 3,
+				_rng.randf() * TAU, lift):
+			placed += 1
 	# Gravity runs: narrow streaks under the first splash, the way blood wicks
-	# down a belt or a sleeve instead of pooling on it.
+	# down a belt or a sleeve. They overlap that splash and stop at the cloth's
+	# last measured band instead of running off the limb.
 	if not points.is_empty():
 		var runs := 1 if amount < 26.0 else 2
 		for index in runs:
-			var half_run := minf(base * _rng.randf_range(1.1, 2.2), limit.x * 1.8)
-			var start: Vector3 = points[0] + down * (half_run + limit.x * 0.3)
+			var half_run := minf(base * _rng.randf_range(0.8, 1.5), limit.x * 0.55)
+			var start: Vector3 = points[0] + down * (half_run * 0.45)
 			if BloodSurface.add_patch(tool, carrier, start, down, half_run,
-					minf(base * _rng.randf_range(0.11, 0.19), limit.y * 0.3),
+					minf(base * _rng.randf_range(0.10, 0.16), limit.y * 0.22),
 					BODY_RINGS, 2, _rng.randf_range(-0.25, 0.25), lift):
 				placed += 1
 	if placed == 0:

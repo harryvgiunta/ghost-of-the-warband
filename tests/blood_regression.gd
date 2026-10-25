@@ -300,6 +300,24 @@ func run() -> void:
 	check(_count_meta(game.archer, "wound") > killer_wounds,
 		"A melee kill splatters blood onto the killer's body")
 
+	# Stains clamp to the measured garment instead of ringing the air past it.
+	var BloodSurface = load("res://scripts/blood_surface.gd")
+	var archer_body: Dictionary = BloodSurface.body_for(game.archer)
+	check(not archer_body.bones.is_empty(),
+		"The ranger exposes measured bone carriers")
+	var chest_carrier: Dictionary = BloodSurface.nearest_carrier(archer_body,
+		game.player.global_position + Vector3(0.0, 1.35, 0.0))
+	check(not chest_carrier.is_empty(), "A chest carrier exists for the stain clamp")
+	if not chest_carrier.is_empty():
+		var strip_axis: Vector3 = chest_carrier.axis
+		var beyond: Vector3 = strip_axis * (float(chest_carrier.high) + 0.6)
+		var projected: Dictionary = BloodSurface.surface_point(chest_carrier,
+			beyond, 0.0)
+		check(not projected.is_empty(), "A sample past the end still projects")
+		check((projected.point as Vector3).dot(strip_axis) \
+			<= float(chest_carrier.high) + 0.001,
+			"Stains clamp to the measured strip instead of floating past it")
+
 	# A blade contact marks the scenery around the victim, not only its body.
 	var impact_before: int = field.surface_stain_count()
 	field.impact(game.player.global_position + Vector3(0.0, 1.2, 0.0),

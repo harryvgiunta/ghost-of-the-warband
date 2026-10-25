@@ -312,59 +312,58 @@ static func _build_texture(seed_value: int, pool: bool) -> ImageTexture:
 	image.generate_mipmaps()
 	return ImageTexture.create_from_image(image)
 
-## Soaked cloth, not a dropped blob: a torn, wicking edge, a darker dried rim
-## and a spray of stretch specks flung along the strike.
+## Soaked cloth, not a dropped blob: a torn, wicking core that fills most of the
+## patch with a ragged edge, plus round droplets scattered across it. No long
+## radial spikes — at the centimetre sizes a wound uses, those read as thin red
+## slivers stuck to the character instead of spatter.
 static func _build_body_texture(seed_value: int) -> ImageTexture:
-	var size := 160
+	var size := 192
 	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0, 0, 0, 0))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var noise := FastNoiseLite.new()
 	noise.seed = seed_value
-	noise.frequency = 0.085
+	noise.frequency = 0.075
 	noise.fractal_octaves = 4
 	noise.fractal_gain = 0.55
 	var warp := FastNoiseLite.new()
 	warp.seed = seed_value + 977
-	warp.frequency = 0.028
+	warp.frequency = 0.024
 	warp.fractal_octaves = 2
 	var center := Vector2(float(size), float(size)) * 0.5
-	var reach := float(size) * 0.34
+	# The core covers most of the patch: the texture is the stain, not a dot in
+	# the middle with vanishing edges.
+	var reach := float(size) * 0.46
 	for y in size:
 		for x in size:
 			var point := Vector2(float(x) + 0.5, float(y) + 0.5)
 			var offset := point - center
 			# Warp the radius so the stain bleeds unevenly into the weave.
-			var pull := warp.get_noise_2d(float(x), float(y)) * 0.22
+			var pull := warp.get_noise_2d(float(x), float(y)) * 0.18
 			var radial := clampf(1.0 - offset.length() / reach - pull, 0.0, 1.0)
 			if radial <= 0.0:
 				continue
 			var grain := (noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
-			var alpha := smoothstep(0.05, 0.46, radial * (0.34 + grain * 1.30))
+			var alpha := smoothstep(0.04, 0.30, radial * (0.55 + grain * 0.95))
 			if alpha <= 0.004:
 				continue
 			# A wet core of fresh crimson; the wicking rim dries toward oxblood.
-			var shade := 0.55 + 0.45 * smoothstep(0.0, 0.85, radial)
+			var shade := 0.58 + 0.42 * smoothstep(0.0, 0.85, radial)
 			var color := Color((0.395 + 0.060 * grain) * shade,
 				(0.043 + 0.014 * grain) * shade,
 				(0.034 + 0.012 * grain) * shade, alpha)
 			image.set_pixel(x, y, color)
-	for index in 74:
+	# Round droplets, kept inside the patch bounds instead of flying off it.
+	for index in 110:
 		var angle := rng.randf() * TAU
-		var distance := reach * rng.randf_range(0.55, 1.55)
+		var distance := reach * rng.randf_range(0.45, 1.02)
 		var at := center + Vector2(cos(angle), sin(angle)) * distance
-		var stretch := rng.randf_range(1.0, 3.2)
-		var along := Vector2(cos(angle + PI * 0.5), sin(angle + PI * 0.5))
-		var radius := rng.randf_range(0.6, 1.9)
-		var shade := rng.randf_range(0.40, 0.78)
-		var tint := Color(0.390 * shade + 0.02, 0.040 * shade, 0.032 * shade)
-		var steps := int(ceil(stretch))
-		for step in steps:
-			_paint_disc(image, at + along * (float(step) * radius * 0.85),
-				radius * (1.0 - 0.18 * float(step)),
-				Color(tint.r, tint.g, tint.b,
-					rng.randf_range(0.30, 0.90) * (1.0 - 0.2 * float(step))))
+		var radius := rng.randf_range(0.55, 1.8)
+		var shade := rng.randf_range(0.42, 0.80)
+		_paint_disc(image, at, radius,
+			Color(0.390 * shade + 0.02, 0.040 * shade, 0.032 * shade,
+				rng.randf_range(0.45, 0.95)))
 	image.generate_mipmaps()
 	return ImageTexture.create_from_image(image)
 
