@@ -108,6 +108,41 @@ func run() -> void:
 	check(lone.stain_count() == 0, "Blood is released after sixty seconds")
 	check(stain_node.is_queued_for_deletion(), "The expired stain node is queued for deletion")
 
+	# --- death pooling -------------------------------------------------------
+	lone.clear_all()
+	await process_frame
+	lone.wound(stub, at, 34.0, false, true, 1.0)
+	await process_frame
+	var pool_nodes := []
+	for child in lone.find_children("*", "", true, false):
+		if child.has_meta("blood_stain") and str(child.get_meta("blood_stain")) == "pool":
+			pool_nodes.append(child)
+	check(pool_nodes.size() >= 3, "A death pools blood with lobes draining past the body")
+	check(is_equal_approx(BloodFx.POOL_LIFETIME, 300.0),
+		"A pool lasts as long as the five-minute corpse")
+	var pool_scale: float = (pool_nodes[0] as Node3D).scale.x
+	await pause(1.2)
+	check((pool_nodes[0] as Node3D).scale.x > pool_scale, "The pool keeps spreading")
+	lone.advance(70.0)
+	await process_frame
+	check(lone.surface_stain_count() == 0, "The sixty-second spatter has expired by now")
+	check(_count_meta(lone, "pool") >= 2, "The pool remains after the spatter expires")
+	lone.advance(240.0)
+	await process_frame
+	check(_count_meta(lone, "pool") == 0, "The pool is released with the five-minute corpse")
+
+	# Pools are never evicted by the spatter render budget.
+	lone.clear_all()
+	await process_frame
+	lone.wound(stub, at, 34.0, false, true, 1.0)
+	lone.max_surface_stains = 2
+	for index in 6:
+		lone.wound(stub, at, 10.0, false, false, 1.0)
+	check(lone.surface_stain_count() <= 2, "Surface spatter honours its own budget")
+	check(_count_meta(lone, "pool") >= 2, "Spatter recycling never evicts the death pool")
+	lone.max_surface_stains = 160
+	lone.clear_all()
+
 	# --- weapon coating ------------------------------------------------------
 	await process_frame
 	BloodFx.stain_weapon_node(stub_sword, 44.0, 1.0)
@@ -238,6 +273,32 @@ func run() -> void:
 	mob.take_damage(999.0, -1)
 	await process_frame
 	check(_count_meta(field, "pool") >= 1, "A slain devil leaves a pool under the corpse")
+
+	# --- the killer wears the kill -------------------------------------------
+	var victim = load("res://scripts/devil_mob.gd").new()
+	victim.mob_id = "spawn"
+	victim.position = game.player.global_position + Vector3(0.0, 0.12, -1.2)
+	game.add_child(victim)
+	await physics_frame
+	await process_frame
+	victim.health = 1.0
+	# The earlier 17-damage block left the ranger in hit stagger; a swing needs
+	# a recovered, grounded body.
+	await create_timer(0.6).timeout
+	game.combat.stagger_time = 0.0
+	game.archer.set_hit_react(0.0)
+	game.player.rotation.y = 0.0
+	game.combat.set_aim(victim.get_aim_position())
+	var killer_wounds: int = _count_meta(game.archer, "wound")
+	var swing_started: bool = game.combat.begin_melee("right", "overhead")
+	for tick in 30:
+		await create_timer(0.05).timeout
+		if not victim.alive:
+			break
+	check(swing_started, "The killer-spatter fixture starts a sword swing")
+	check(not victim.alive, "The fixture kill lands")
+	check(_count_meta(game.archer, "wound") > killer_wounds,
+		"A melee kill splatters blood onto the killer's body")
 
 	# A blade contact marks the scenery around the victim, not only its body.
 	var impact_before: int = field.surface_stain_count()

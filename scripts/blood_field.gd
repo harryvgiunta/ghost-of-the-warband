@@ -1,8 +1,10 @@
 extends Node3D
 ## Owns every blood stain in one scene: surface patches, body and weapon
-## coatings, and the short-lived spray bursts. Stains live for 60 seconds,
-## fade over the last three, and are recycled oldest-first when a busy fight
-## exceeds the render budget. Created lazily by `BloodFx.field_for`.
+## coatings, and the short-lived spray bursts. Spatter, body and weapon stains
+## live for 60 seconds, fade over the last three, and are recycled oldest-first
+## when a busy fight exceeds the render budget. Death pools are the exception:
+## they take their own budget and live for the corpse's five minutes. Created
+## lazily by `BloodFx.field_for`.
 
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodSurface = preload("res://scripts/blood_surface.gd")
@@ -17,11 +19,22 @@ const BODY_SEGMENTS := 5
 const MAX_BURSTS := 14
 const MAX_BODY_STAINS := 10
 const MAX_WEAPON_STAINS := 8
+## Death pools are the most important stains in a fight, so they get their own
+## budget: the sixty-second spatter recycling never evicts the pool a corpse
+## is lying in. One death lays a main pool plus two draining lobes, so sixty
+## meshes cover twenty corpses at once — more than a five-minute frontier fight
+## leaves behind.
+const MAX_POOLS := 60
 const GROUND_MASK := 1
 const PATCH_LIFT := 0.012
+## Death pools cover a whole body, so they use a denser conformed grid than the
+## spatter patches; a coarse grid would clip through terrain humps at this size.
+const POOL_RINGS := 4
+const POOL_SEGMENTS := 16
 
 var max_surface_stains := 160
 var lifetime := BloodFx.LIFETIME
+var pool_lifetime := BloodFx.POOL_LIFETIME
 var _stains: Array[Dictionary] = []
 ## Visible-armor signature per rig: when the cloth underneath changes, the stains
 ## measured against the old surface are dropped instead of floating off it.
@@ -29,6 +42,9 @@ var _body_signatures: Dictionary = {}
 var _bursts: Array[Dictionary] = []
 var _rng := RandomNumberGenerator.new()
 var _query := PhysicsRayQueryParameters3D.new()
+## Distinct owner key for pools so `_enforce_cap` counts them separately from
+## the surface spatter. Never a tree node.
+var _pool_owner := RefCounted.new()
 
 func _ready() -> void:
 	_rng.seed = 0xB100D
@@ -195,7 +211,7 @@ func stain_weapon(anchor: Node3D, amount: float, scale: float) -> void:
 	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	anchor.add_child(node)
 	node.position = center
-	_register_stain(node, anchor, "group", MAX_WEAPON_STAINS)
+	_register_stain(node, anchor, "group", MAX_WEAPON_STAINS, lifetime)
 
 func surface_stain_count() -> int:
 	var count := 0
@@ -255,13 +271,14 @@ func _apply_fade(stain: Dictionary, factor: float) -> void:
 	else:
 		(node as Node3D).scale = (stain.scale as Vector3) * maxf(factor, 0.001)
 
-func _register_stain(node: Node, stain_owner: Node, kind: String, cap: int) -> void:
+func _register_stain(node: Node, stain_owner, kind: String, cap: int,
+		life: float) -> void:
 	var entry := {"node": node, "owner": stain_owner, "kind": kind, "age": 0.0,
-		"life": lifetime, "scale": (node as Node3D).scale if node is Node3D else Vector3.ONE}
+		"life": life, "scale": (node as Node3D).scale if node is Node3D else Vector3.ONE}
 	_stains.append(entry)
 	_enforce_cap(stain_owner, cap)
 
-func _enforce_cap(stain_owner: Node, cap: int) -> void:
+func _enforce_cap(stain_owner, cap: int) -> void:
 	var count := 0
 	for stain in _stains:
 		if stain.owner != stain_owner or not is_instance_valid(stain.node):
@@ -385,7 +402,7 @@ func _stain_body(rig: Node3D, at: Vector3, amount: float, headshot: bool,
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	anchor.add_child(node)
-	_register_stain(node, rig, "soak", MAX_BODY_STAINS)
+	_register_stain(node, rig, "soak", MAX_BODY_STAINS, lifetime)
 
 ## An arrow carries a smear, not a blade coating: a wet skim on the shaft just
 ## behind the head and two specks. Sized from the shaft, never the fletching.
@@ -442,7 +459,7 @@ func stain_projectile(anchor: Node3D, amount: float) -> void:
 	node.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	anchor.add_child(node)
 	node.position = center
-	_register_stain(node, anchor, "group", MAX_WEAPON_STAINS)
+	_register_stain(node, anchor, "group", MAX_WEAPON_STAINS, lifetime)
 
 ## Lays a small textured band around a thin shaft so the stain curves with it.
 func _wrap_shaft(tool: SurfaceTool, center: Vector3, normal: Vector3,
@@ -543,21 +560,49 @@ func _ground_patch(at: Vector3, radius: float, spread: float) -> void:
 		return
 	_spawn_patch(hit.position, normal, radius, false)
 
+## Blood pooling under a corpse: a main pool wide enough to read around the
+## body's silhouette, then two lobes draining out from under the body. Pools
+## live for `pool_lifetime` (five minutes, matching the corpse) instead of the
+## sixty-second spatter lifetime, and have their own render budget.
 func _spawn_pool(at: Vector3, scale: float) -> void:
 	var hit := _ray(at + Vector3(0.0, 0.6, 0.0), at + Vector3(0.0, -3.0, 0.0),
 		GROUND_MASK)
 	if hit.is_empty() or (hit.normal as Vector3).y < 0.35:
 		return
-	var pool := _spawn_patch(hit.position, hit.normal, 0.46 * scale, true)
-	pool.scale = Vector3.ONE * 0.30
+	_grow_pool(hit.position, hit.normal, 0.74 * scale, 0.28, 1.1, true)
+	# The lobes creep out past the corpse so the pool is visible from above the
+	# body, the way blood keeps running out of a body that has stopped moving.
+	for index in 2:
+		var angle := _rng.randf() * TAU
+		var distance := _rng.randf_range(0.75, 1.35) * scale
+		var offset := Vector3(cos(angle), 0.0, sin(angle)) * distance
+		var lobe := _ray(at + Vector3(0.0, 0.6, 0.0) + offset,
+			at + Vector3(0.0, -3.0, 0.0) + offset, GROUND_MASK)
+		if lobe.is_empty() or (lobe.normal as Vector3).y < 0.35:
+			continue
+		_grow_pool(lobe.position, lobe.normal,
+			_rng.randf_range(0.20, 0.30) * scale, 0.30,
+			_rng.randf_range(1.8, 3.2), false)
+
+func _grow_pool(center: Vector3, normal: Vector3, radius: float,
+		start_scale: float, seconds: float, creep: bool) -> MeshInstance3D:
+	var pool := _spawn_patch(center, normal, radius, true)
+	pool.scale = Vector3.ONE * start_scale
 	var tween := pool.create_tween()
-	tween.tween_property(pool, "scale", Vector3.ONE, 0.95) \
+	tween.tween_property(pool, "scale", Vector3.ONE, seconds) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if creep:
+		tween.tween_property(pool, "scale", Vector3.ONE * 1.18, 12.0) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	return pool
 
 func _spawn_patch(center: Vector3, normal: Vector3, radius: float,
 		pool: bool) -> MeshInstance3D:
 	var variant := _rng.randi() % BloodFx.SPLAT_VARIANTS
-	var mesh := _conform_patch(center, normal, radius, variant * 37 + _rng.randi() % 97)
+	var mesh := _conform_patch(center, normal, radius,
+		variant * 37 + _rng.randi() % 97,
+		POOL_RINGS if pool else PATCH_RINGS,
+		POOL_SEGMENTS if pool else PATCH_SEGMENTS)
 	var patch := MeshInstance3D.new()
 	patch.name = "BloodPool" if pool else "BloodSplat"
 	patch.set_meta("blood_stain", "pool" if pool else "splat")
@@ -568,13 +613,17 @@ func _spawn_patch(center: Vector3, normal: Vector3, radius: float,
 	patch.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	patch.position = center
 	add_child(patch)
-	_register_stain(patch, null, "patch", max_surface_stains)
+	if pool:
+		_register_stain(patch, _pool_owner, "patch", MAX_POOLS, pool_lifetime)
+	else:
+		_register_stain(patch, null, "patch", max_surface_stains, lifetime)
 	return patch
 
 ## Builds a small radial patch whose vertices are dropped onto the real surface
 ## so blood follows slopes and steps instead of clipping through the ground.
 func _conform_patch(center: Vector3, normal: Vector3, radius: float,
-		phase_seed: int) -> ArrayMesh:
+		phase_seed: int, rings: int = PATCH_RINGS,
+		segments: int = PATCH_SEGMENTS) -> ArrayMesh:
 	var up := normal.normalized()
 	var side := up.cross(Vector3.FORWARD)
 	if side.length_squared() < 0.001:
@@ -590,11 +639,11 @@ func _conform_patch(center: Vector3, normal: Vector3, radius: float,
 	normals.append(up)
 	uvs.append(Vector2(0.5, 0.5))
 	var ring_starts: Array[int] = []
-	for ring in range(1, PATCH_RINGS + 1):
-		var fraction := float(ring) / float(PATCH_RINGS)
+	for ring in range(1, rings + 1):
+		var fraction := float(ring) / float(rings)
 		ring_starts.append(vertices.size())
-		for segment in PATCH_SEGMENTS:
-			var angle := TAU * float(segment) / float(PATCH_SEGMENTS) + phase
+		for segment in segments:
+			var angle := TAU * float(segment) / float(segments) + phase
 			var tangent := side * cos(angle) + back * sin(angle)
 			var target := center + tangent * radius * fraction
 			var hit := _ray(target + up * 0.9, target - up * 0.75, GROUND_MASK)
@@ -607,15 +656,15 @@ func _conform_patch(center: Vector3, normal: Vector3, radius: float,
 			normals.append(up)
 			uvs.append(Vector2(0.5, 0.5) + Vector2(cos(angle), sin(angle)) * 0.5 * fraction)
 	var first_ring := ring_starts[0]
-	for segment in PATCH_SEGMENTS:
+	for segment in segments:
 		indices.append(0)
 		indices.append(first_ring + segment)
-		indices.append(first_ring + (segment + 1) % PATCH_SEGMENTS)
-	for ring in range(1, PATCH_RINGS):
+		indices.append(first_ring + (segment + 1) % segments)
+	for ring in range(1, rings):
 		var inner := ring_starts[ring - 1]
 		var outer := ring_starts[ring]
-		for segment in PATCH_SEGMENTS:
-			var next := (segment + 1) % PATCH_SEGMENTS
+		for segment in segments:
+			var next := (segment + 1) % segments
 			indices.append(inner + segment)
 			indices.append(outer + segment)
 			indices.append(inner + next)

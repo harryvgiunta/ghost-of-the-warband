@@ -718,6 +718,15 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		BloodFx.stain_weapon(rig,damage,hand)
 		if actor.has_method("note_weapon_blood"):
 			actor.note_weapon_blood(damage)
+		if _unit_is_dead(unit):
+			# The kill throws blood back over the body that landed it.
+			BloodFx.spatter_kill(actor,rig,at,damage)
+
+func _unit_is_dead(unit: Node) -> bool:
+	var flag = unit.get("alive")
+	if flag != null:
+		return not bool(flag)
+	return unit.has_method("is_dead") and bool(unit.is_dead())
 
 func _can_clash_with(unit: Node, target_combat) -> bool:
 	if target_combat == self or not is_instance_valid(target_combat) \

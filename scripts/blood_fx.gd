@@ -5,12 +5,15 @@ extends RefCounted
 ## `Decal` nodes. Ground blood is therefore a small mesh patch conformed to the
 ## surface by physics rays, while body and weapon blood are bone- or
 ## weapon-parented wet blotches. A per-scene `BloodField` owns the 60-second
-## lifetime, the fade and the render budget. Damage authority never changes:
-## every call here is cosmetic and safe to skip on a peer that did not apply
-## the damage.
+## spatter lifetime, the five-minute death pools, the fade and the render
+## budget. Damage authority never changes: every call here is cosmetic and safe
+## to skip on a peer that did not apply the damage.
 
 const LIFETIME := 60.0
 const FADE_SECONDS := 3.0
+## Pooled blood outlives the spray: it stays under a body for as long as the
+## corpse lies there (`scripts/corpse_hold.gd` holds corpses for five minutes).
+const POOL_LIFETIME := 300.0
 const SPLAT_VARIANTS := 3
 
 static var _splat_textures: Array[Texture2D] = []
@@ -51,6 +54,37 @@ static func bloodied(parent: Node, rig: Node3D, at: Vector3, amount: float,
 	var field := field_for(parent)
 	if field != null:
 		field.bloodied(rig, at, amount, scale)
+
+## A melee kill throws the victim's blood back over the killer: chest and face
+## are doused, scaled by how close the blow landed. Only a real melee kill calls
+## this — a distant arrow or throw leaves the shooter clean.
+static func spatter_kill(attacker: Node3D, rig: Node3D, contact: Vector3,
+		amount: float) -> void:
+	if not is_instance_valid(attacker) or not is_instance_valid(rig) \
+			or amount <= 0.0:
+		return
+	var field := field_for(attacker)
+	if field == null:
+		return
+	var offset := contact - attacker.global_position
+	offset.y = 0.0
+	var distance := offset.length()
+	var forward := offset / distance if distance > 0.001 \
+		else -attacker.global_basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = Vector3.FORWARD
+	forward = forward.normalized()
+	var reach := clampf(1.7 / maxf(distance, 0.35), 0.5, 1.0)
+	var scale := 1.0
+	if attacker.has_method("blood_scale"):
+		scale = float(attacker.blood_scale())
+	var chest: Vector3 = attacker.global_position + Vector3.UP * 1.15 \
+		+ forward * 0.22
+	var face: Vector3 = attacker.global_position + Vector3.UP * 1.62 \
+		+ forward * 0.14
+	field.bloodied(rig, chest, amount * reach, scale)
+	field.bloodied(rig, face, amount * reach * 0.65, scale)
 
 ## The mob that landed the blow wears the result. A held blade takes a coating
 ## through `blood_weapon_anchor`; a natural weapon takes a soak on the claw,

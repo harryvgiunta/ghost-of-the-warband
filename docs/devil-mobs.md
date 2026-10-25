@@ -181,8 +181,10 @@ runtime carries only values glTF cannot express.
   container is only a fallback.
 - `PROFILES` carries a per-mob `"blood"` scale (spawn 0.55, succubus 0.95,
   goat 1.05, gargoyle 1.20, beast 1.35) that sizes the soak, the floor
-  spatter and the death pool. A lethal hit adds the pool under the falling
-  body through the same shared field.
+  spatter and the death pool. A lethal hit adds a growing pool plus two
+  draining lobes under the falling body; pools live for `BloodFx.POOL_LIFETIME`
+  (300 s, the same clock as the corpse) in their own 60-pool budget, so the
+  60-second spatter recycling never erases them.
 - These mobs fight with natural weapons, so `blood_weapon_anchor()` is absent
   and `BloodFx.stain_attacker` falls through to `blood_strike_point()` →
   `DevilMobVisual.strike_hand_position()` (`hand_r`, then `front_paw_r` for the
