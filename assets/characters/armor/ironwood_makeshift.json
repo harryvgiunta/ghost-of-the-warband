@@ -1,0 +1,2556 @@
+{
+  "asset": "ironwood_makeshift.glb",
+  "set": "makeshift",
+  "display": "Makeshift",
+  "skeleton": "Armature/Skeleton3D",
+  "bone_count": 65,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "spine_03",
+    "neck_01",
+    "Head",
+    "clavicle_l",
+    "upperarm_l",
+    "lowerarm_l",
+    "hand_l",
+    "index_01_l",
+    "index_02_l",
+    "index_03_l",
+    "index_04_leaf_l",
+    "middle_01_l",
+    "middle_02_l",
+    "middle_03_l",
+    "middle_04_leaf_l",
+    "pinky_01_l",
+    "pinky_02_l",
+    "pinky_03_l",
+    "pinky_04_leaf_l",
+    "ring_01_l",
+    "ring_02_l",
+    "ring_03_l",
+    "ring_04_leaf_l",
+    "thumb_01_l",
+    "thumb_02_l",
+    "thumb_03_l",
+    "thumb_04_leaf_l",
+    "clavicle_r",
+    "upperarm_r",
+    "lowerarm_r",
+    "hand_r",
+    "index_01_r",
+    "index_02_r",
+    "index_03_r",
+    "index_04_leaf_r",
+    "middle_01_r",
+    "middle_02_r",
+    "middle_03_r",
+    "middle_04_leaf_r",
+    "pinky_01_r",
+    "pinky_02_r",
+    "pinky_03_r",
+    "pinky_04_leaf_r",
+    "ring_01_r",
+    "ring_02_r",
+    "ring_03_r",
+    "ring_04_leaf_r",
+    "thumb_01_r",
+    "thumb_02_r",
+    "thumb_03_r",
+    "thumb_04_leaf_r",
+    "thigh_l",
+    "calf_l",
+    "foot_l",
+    "ball_l",
+    "ball_leaf_l",
+    "thigh_r",
+    "calf_r",
+    "foot_r",
+    "ball_r",
+    "ball_leaf_r"
+  ],
+  "slots": [
+    "head",
+    "chest",
+    "hands",
+    "legs",
+    "feet"
+  ],
+  "pieces": {
+    "Armor_Makeshift_Head": {
+      "slot": "head",
+      "bones": [
+        "Head"
+      ],
+      "triangles": 4656,
+      "bounds_min": [
+        -0.16,
+        1.6261,
+        -0.33239
+      ],
+      "bounds_max": [
+        0.16037,
+        2.17007,
+        0.23867
+      ],
+      "vertices": 4561
+    },
+    "Armor_Makeshift_Chest": {
+      "slot": "chest",
+      "bones": [
+        "lowerarm_l",
+        "lowerarm_r",
+        "pelvis",
+        "spine_01",
+        "spine_02",
+        "spine_03",
+        "upperarm_l",
+        "upperarm_r"
+      ],
+      "triangles": 5484,
+      "bounds_min": [
+        -0.51966,
+        0.87613,
+        -0.26757
+      ],
+      "bounds_max": [
+        0.51966,
+        1.5674,
+        0.21945
+      ],
+      "vertices": 5241
+    },
+    "Armor_Makeshift_Hands": {
+      "slot": "hands",
+      "bones": [
+        "hand_l",
+        "hand_r",
+        "lowerarm_l",
+        "lowerarm_r"
+      ],
+      "triangles": 2172,
+      "bounds_min": [
+        -0.87374,
+        1.37387,
+        -0.15535
+      ],
+      "bounds_max": [
+        0.87374,
+        1.56151,
+        0.01831
+      ],
+      "vertices": 2286
+    },
+    "Armor_Makeshift_Legs": {
+      "slot": "legs",
+      "bones": [
+        "calf_l",
+        "calf_r",
+        "pelvis",
+        "thigh_l",
+        "thigh_r"
+      ],
+      "triangles": 2584,
+      "bounds_min": [
+        -0.20607,
+        0.22414,
+        -0.17701
+      ],
+      "bounds_max": [
+        0.22405,
+        1.02299,
+        0.17791
+      ],
+      "vertices": 2351
+    },
+    "Armor_Makeshift_Feet": {
+      "slot": "feet",
+      "bones": [
+        "ball_l",
+        "ball_r",
+        "calf_l",
+        "calf_r",
+        "foot_l",
+        "foot_r"
+      ],
+      "triangles": 2836,
+      "bounds_min": [
+        -0.2091,
+        -0.02,
+        -0.20703
+      ],
+      "bounds_max": [
+        0.20511,
+        0.27097,
+        0.22645
+      ],
+      "vertices": 2542
+    }
+  },
+  "total_triangles": 17732,
+  "triangle_budget": 22000,
+  "materials": [
+    "Makeshift_Leather",
+    "Makeshift_Bone",
+    "Makeshift_Antler"
+  ],
+  "embedded_images": 9,
+  "image_mime_types": [
+    "image/png"
+  ],
+  "animations": [],
+  "forward": [
+    0,
+    0,
+    1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_height": 1.86504,
+  "clearance": {
+    "rest": {
+      "Armor_Makeshift_Head": {
+        "MS_Skull_Cap": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 8.22
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 48.04
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 112.46
+          }
+        },
+        "MS_Helm_Rim": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 20.69
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 59.53
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 125.58
+          }
+        },
+        "MS_Helm_Brow": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 33.18
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 86.3
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 210.4
+          }
+        },
+        "MS_Helm_Lining": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 19.33
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 57.3
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 100.72
+          }
+        },
+        "MS_Helm_Ridge": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 23.74
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 92.1
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 145.88
+          }
+        },
+        "MS_Helm_Scute_0": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 36.14
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 115.81
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 272.3
+          }
+        },
+        "MS_Helm_Scute_1": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 26.11
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 110.92
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 297.39
+          }
+        },
+        "MS_Helm_Scute_2": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 47.29
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 132.98
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 199.28
+          }
+        },
+        "MS_Helm_Scute_3": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 29.97
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 140.53
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 253.04
+          }
+        },
+        "MS_Helm_Socket_L": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 11.04
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 97.06
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 197.67
+          }
+        },
+        "MS_Antler_L": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 8.27
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 100.49
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 220.18
+          }
+        },
+        "MS_Helm_Socket_R": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.71
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 95.59
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 197.6
+          }
+        },
+        "MS_Antler_R": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 8.16
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 101.97
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 220.1
+          }
+        },
+        "MS_Helm_Stud_0": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 66.45
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 124.03
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 263.04
+          }
+        },
+        "MS_Helm_Stud_1": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 63.16
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 132.13
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 274.07
+          }
+        },
+        "MS_Helm_Stud_2": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 67.85
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 125.3
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 262.28
+          }
+        }
+      },
+      "Armor_Makeshift_Chest": {
+        "MS_Vest": {
+          "Male_Ranger_Body": {
+            "intersections": 654,
+            "max_depth_mm": 30.44,
+            "nearest_mm": 0.22
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 26.2
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 28,
+            "max_depth_mm": 6.49,
+            "nearest_mm": 0.96
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 273.41
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 207,
+            "max_depth_mm": 3.19,
+            "nearest_mm": 0.11
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 263,
+            "max_depth_mm": 3.95,
+            "nearest_mm": 0.29
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 53.26
+          }
+        },
+        "MS_Rib_0_L": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.32
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 31.38
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 317.58
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 441.72
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 132.49
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 75.68
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 378.44
+          }
+        },
+        "MS_Rib_0_R": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 10.74
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 33.01
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 317.26
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 441.51
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 130.43
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 72.16
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 527.18
+          }
+        },
+        "MS_Rib_1_L": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 9.84
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 55.46
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 267.56
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 413.04
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 80.98
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 25.79
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 327.35
+          }
+        },
+        "MS_Rib_1_R": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 8.1
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 48.49
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 267.8
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 411.48
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 79.31
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 22.28
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 477.16
+          }
+        },
+        "MS_Rib_2_L": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 10.12
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 79.18
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 217.2
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 388.59
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 29.11
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 39,
+            "max_depth_mm": 2.31,
+            "nearest_mm": 1.11
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 279.56
+          }
+        },
+        "MS_Rib_2_R": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 14.7
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 79.44
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 216.53
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 383.38
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 29.0
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 3.85
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 436.15
+          }
+        },
+        "MS_Rib_3_L": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 12.33
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 121.03
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 165.23
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 362.78
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 38,
+            "max_depth_mm": 2.34,
+            "nearest_mm": 0.55
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 5.66
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 229.75
+          }
+        },
+        "MS_Rib_3_R": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 12.8
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 117.7
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 165.13
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 361.23
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 3.17
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 4.06
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 396.78
+          }
+        },
+        "MS_Rib_4_L": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 12.67
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 169.33
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 113.84
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 322.27
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 7.11
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 39.38
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 174.57
+          }
+        },
+        "MS_Rib_4_R": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.06
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 166.28
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 113.73
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 321.5
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 11.38
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 39.67
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 360.26
+          }
+        },
+        "MS_Sternum": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 25.27
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 59.68
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 195.21
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 474.38
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 30,
+            "max_depth_mm": 0.72,
+            "nearest_mm": 2.44
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 40,
+            "max_depth_mm": 0.77,
+            "nearest_mm": 1.06
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 260.93
+          }
+        },
+        "MS_Sternum_Boss_0": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 28.08
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 58.05
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 379.45
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 593.41
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 126.06
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 68.74
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 456.51
+          }
+        },
+        "MS_Sternum_Boss_1": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 27.9
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 91.79
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 311.7
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 552.19
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 48.6
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.77
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 389.79
+          }
+        },
+        "MS_Sternum_Boss_2": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 26.55
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 157.92
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 251.36
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 517.39
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 25,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.65
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 18.61
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 328.78
+          }
+        },
+        "MS_Spine_Ridge": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 20.34
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 52.81
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 160.45
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 457.37
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 10,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 8.94
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 8,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.51
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 210.32
+          }
+        },
+        "MS_Spine_Scute_0": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 27.95
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 84.22
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 441.79
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 607.13
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 229.42
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 179.19
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 496.45
+          }
+        },
+        "MS_Spine_Scute_1": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 27.21
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 62.07
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 370.22
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 555.02
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 152.39
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 102.92
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 433.48
+          }
+        },
+        "MS_Spine_Scute_2": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 25.69
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 56.84
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 303.0
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 519.08
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 71.85
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 22.76
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 375.65
+          }
+        },
+        "MS_Spine_Scute_3": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 19.28
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 111.21
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 242.79
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 485.53
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 2.68
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 14,
+            "max_depth_mm": 2.16,
+            "nearest_mm": 0.39
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 326.71
+          }
+        },
+        "MS_Spine_Scute_4": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 20.49
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 177.34
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 201.55
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 463.03
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 21.68
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 64.58
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 274.6
+          }
+        },
+        "MS_Spine_Scute_5": {
+          "Male_Ranger_Body": {
+            "intersections": 16,
+            "max_depth_mm": 4.29,
+            "nearest_mm": 3.45
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 239.28
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 157.05
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 444.69
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 67.26
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 122.99
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 228.71
+          }
+        },
+        "MS_Spaulder_R": {
+          "Male_Ranger_Body": {
+            "intersections": 153,
+            "max_depth_mm": 9.57,
+            "nearest_mm": 0.1
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 389.3
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 83,
+            "max_depth_mm": 30.1,
+            "nearest_mm": 1.81
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 173.97
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 215.47
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 272.68
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 240.64
+          }
+        },
+        "MS_Shoulder_Strap": {
+          "Male_Ranger_Body": {
+            "intersections": 120,
+            "max_depth_mm": 9.28,
+            "nearest_mm": 0.1
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 235.87
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 35,
+            "max_depth_mm": 5.58,
+            "nearest_mm": 1.81
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 270.45
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 62.54
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 115.76
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 80,
+            "max_depth_mm": 4.59,
+            "nearest_mm": 0.4
+          }
+        },
+        "MS_Shoulder_Buckle": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 6.12
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 495.75
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.88
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 273.71
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 321.57
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 377.63
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 32,
+            "max_depth_mm": 3.9,
+            "nearest_mm": 0.03
+          }
+        },
+        "MS_Lace_0": {
+          "Male_Ranger_Body": {
+            "intersections": 20,
+            "max_depth_mm": 1.39,
+            "nearest_mm": 0.49
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 260.39
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 160.22
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 456.48
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 71.97
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 122.35
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 175.2
+          }
+        },
+        "MS_Lace_1": {
+          "Male_Ranger_Body": {
+            "intersections": 21,
+            "max_depth_mm": 0.81,
+            "nearest_mm": 0.89
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 261.22
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 161.03
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 456.24
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 67.96
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 119.63
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 188.18
+          }
+        },
+        "MS_Eyelet_0": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 41.44
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 262.35
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 210.08
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 486.94
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 68.64
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 120.25
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 289.54
+          }
+        },
+        "MS_Eyelet_1": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 48.45
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 294.05
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 215.47
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 490.02
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 105.33
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 154.7
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 264.95
+          }
+        },
+        "MS_Eyelet_2": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 26.98
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 309.39
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 189.81
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 474.46
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 115.01
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 169.54
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 258.01
+          }
+        },
+        "MS_Eyelet_3": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.87
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 330.32
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 174.0
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 464.3
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 140.52
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 195.97
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 213.28
+          }
+        },
+        "MS_Eyelet_4": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 15.07
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 351.73
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 164.55
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 458.69
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 162.22
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 218.85
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 216.83
+          }
+        },
+        "MS_Eyelet_5": {
+          "Male_Ranger_Body": {
+            "intersections": 39,
+            "max_depth_mm": 1.43,
+            "nearest_mm": 0.4
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 374.18
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 155.18
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 450.29
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 189.9
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 246.57
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 173.12
+          }
+        },
+        "MS_Hem_0": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 11.3
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 36.49
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 414.48
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 497.13
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 236.19
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 179.79
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 471.48
+          }
+        },
+        "MS_Hem_1": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 23.62
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 71.83
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 451.14
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 595.08
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 248.42
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 194.9
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 504.11
+          }
+        },
+        "MS_Hem_2": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.33
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 56.08
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 428.43
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 537.76
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 245.48
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 190.66
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 579.53
+          }
+        },
+        "MS_Hem_3": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 10.96
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 27.93
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 411.94
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 489.09
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 228.52
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 170.43
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 625.34
+          }
+        },
+        "MS_Hem_4": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.17
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 45.53
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 426.93
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 562.07
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 226.42
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 168.4
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 584.86
+          }
+        },
+        "MS_Hem_5": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 16.1
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 68.72
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 446.4
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 622.28
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 220.75
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 163.37
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 514.08
+          }
+        },
+        "MS_Hem_6": {
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 12.35
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 28.33
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 416.65
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 509.97
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 228.66
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 171.47
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 470.21
+          }
+        },
+        "MS_Sleeve_L": {
+          "Male_Ranger_Body": {
+            "intersections": 114,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.34
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 348.57
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 220,
+            "max_depth_mm": 27.46,
+            "nearest_mm": 1.48
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 316,
+            "max_depth_mm": 27.42,
+            "nearest_mm": 0.92
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 187.48
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 234.33
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 400,
+            "max_depth_mm": 5.8,
+            "nearest_mm": 0.03
+          }
+        },
+        "MS_Sleeve_R": {
+          "Male_Ranger_Body": {
+            "intersections": 114,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.43
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 348.7
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 214,
+            "max_depth_mm": 27.12,
+            "nearest_mm": 1.3
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 317,
+            "max_depth_mm": 26.85,
+            "nearest_mm": 0.83
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 185.73
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 231.87
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 326.16
+          }
+        }
+      },
+      "Armor_Makeshift_Hands": {
+        "MS_Bracer_L": {},
+        "MS_Wrap_L_0": {},
+        "MS_Wrap_L_1": {},
+        "MS_Wrap_L_2": {},
+        "MS_Knuckles_L": {},
+        "MS_Knuckle_Spike_L_0": {},
+        "MS_Knuckle_Spike_L_1": {},
+        "MS_Knuckle_Spike_L_2": {},
+        "MS_Knuckle_Spike_L_3": {},
+        "MS_Wrist_Spur_L": {},
+        "MS_Bracer_R": {},
+        "MS_Wrap_R_0": {},
+        "MS_Wrap_R_1": {},
+        "MS_Wrap_R_2": {},
+        "MS_Knuckles_R": {},
+        "MS_Knuckle_Spike_R_0": {},
+        "MS_Knuckle_Spike_R_1": {},
+        "MS_Knuckle_Spike_R_2": {},
+        "MS_Knuckle_Spike_R_3": {},
+        "MS_Wrist_Spur_R": {}
+      },
+      "Armor_Makeshift_Legs": {
+        "MS_Legging_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 86,
+            "max_depth_mm": 23.39,
+            "nearest_mm": 2.58
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 80,
+            "max_depth_mm": 6.18,
+            "nearest_mm": 0.18
+          },
+          "Male_Ranger_Body": {
+            "intersections": 89,
+            "max_depth_mm": 22.26,
+            "nearest_mm": 0.32
+          }
+        },
+        "MS_Knee_Cap_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 4.4
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 51.26
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 312.13
+          }
+        },
+        "MS_Knee_Lame_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 9.8
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 163.1
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 254.72
+          }
+        },
+        "MS_Knee_Stud_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 31.92
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 101.15
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 342.7
+          }
+        },
+        "MS_Thigh_Strap_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 20,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.23
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 384.85
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 38.99
+          }
+        },
+        "MS_Legging_R": {
+          "Male_Ranger_Legs": {
+            "intersections": 87,
+            "max_depth_mm": 23.89,
+            "nearest_mm": 3.18
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 66,
+            "max_depth_mm": 6.32,
+            "nearest_mm": 0.54
+          },
+          "Male_Ranger_Body": {
+            "intersections": 81,
+            "max_depth_mm": 18.63,
+            "nearest_mm": 0.02
+          }
+        },
+        "MS_Knee_Cap_R": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 2.94
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 51.07
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 315.29
+          }
+        },
+        "MS_Knee_Lame_R": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 10.69
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 163.29
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 255.14
+          }
+        },
+        "MS_Knee_Stud_R": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 32.01
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 101.34
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 343.19
+          }
+        },
+        "MS_Thigh_Strap_R": {
+          "Male_Ranger_Legs": {
+            "intersections": 26,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.23
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 384.18
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 39.51
+          }
+        },
+        "MS_Shin_Plate_L": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 9.64
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 41,
+            "max_depth_mm": 1.35,
+            "nearest_mm": 0.65
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 414.04
+          }
+        },
+        "MS_Loin_Panel": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 18.47
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 137.44
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.11
+          }
+        },
+        "MS_Loin_Stud": {
+          "Male_Ranger_Legs": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 37.61
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 511.51
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 10.13
+          }
+        }
+      },
+      "Armor_Makeshift_Feet": {
+        "MS_Boot_L": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 2.44
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 6.3
+          }
+        },
+        "MS_Toe_Cap_L_0": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.14
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 86.54
+          }
+        },
+        "MS_Toe_Cap_L_1": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 17.53
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 73.65
+          }
+        },
+        "MS_Heel_Spur_L": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 3.13
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 17.29
+          }
+        },
+        "MS_Ankle_Strap_L_0": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.86
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 25.18
+          }
+        },
+        "MS_Ankle_Strap_L_1": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 28.95
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 27.16
+          }
+        },
+        "MS_Boot_R": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 5.54
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 7.7
+          }
+        },
+        "MS_Toe_Cap_R_0": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 17.53
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 73.65
+          }
+        },
+        "MS_Toe_Cap_R_1": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.14
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 86.54
+          }
+        },
+        "MS_Heel_Spur_R": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 2.22
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 17.35
+          }
+        },
+        "MS_Ankle_Strap_R_0": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 13.75
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 24.94
+          }
+        },
+        "MS_Ankle_Strap_R_1": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 24.86
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 21.79
+          }
+        }
+      }
+    },
+    "idle": {
+      "Armor_Makeshift_Head": {
+        "Armor_Makeshift_Head": {
+          "Male_Ranger_Head_Hood": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 5.78
+          },
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 48.17
+          },
+          "Male_Ranger_Body": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 89.89
+          }
+        }
+      },
+      "Armor_Makeshift_Chest": {
+        "Armor_Makeshift_Chest": {
+          "Male_Ranger_Body": {
+            "intersections": 1058,
+            "max_depth_mm": 86.62,
+            "nearest_mm": 0.04
+          },
+          "Male_Ranger_Legs": {
+            "intersections": 7,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.07
+          },
+          "Male_Ranger_Arms": {
+            "intersections": 864,
+            "max_depth_mm": 36.95,
+            "nearest_mm": 0.15
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 659,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.05
+          },
+          "Male_Ranger_Body_Belt_1": {
+            "intersections": 358,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.04
+          },
+          "Male_Ranger_Body_Belt_2": {
+            "intersections": 395,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.1
+          },
+          "Male_Ranger_Acc_Pauldron": {
+            "intersections": 392,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.33
+          }
+        }
+      },
+      "Armor_Makeshift_Hands": {
+        "Armor_Makeshift_Hands": {}
+      },
+      "Armor_Makeshift_Legs": {
+        "Armor_Makeshift_Legs": {
+          "Male_Ranger_Legs": {
+            "intersections": 270,
+            "max_depth_mm": 76.42,
+            "nearest_mm": 0.1
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 140,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.08
+          },
+          "Male_Ranger_Body": {
+            "intersections": 172,
+            "max_depth_mm": 30.72,
+            "nearest_mm": 1.12
+          }
+        }
+      },
+      "Armor_Makeshift_Feet": {
+        "Armor_Makeshift_Feet": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 2.09
+          },
+          "Ranger_Base_Calf": {
+            "intersections": 0,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 5.68
+          }
+        }
+      }
+    },
+    "idle_frame": 15,
+    "reported_intersections": 8541,
+    "gated_refs": {
+      "head": [
+        "Male_Ranger_Head_Hood",
+        "Ranger_Head_SuperHero_Male"
+      ],
+      "chest": [],
+      "hands": [],
+      "legs": [],
+      "feet": [
+        "Male_Ranger_Feet_Boots",
+        "Ranger_Base_Calf"
+      ]
+    },
+    "note": "Every piece is measured against the ranger's own surfaces in the bind pose and at idle frame 15. Crossings with 'gated_refs' fail the build; the rest are reported because those meshes belong to slots this kit replaces (one piece per slot), and because a garment wrapped around a trousered limb necessarily dips into the hidden volume beside the limb. max_depth_mm is only meaningful within a few millimetres of a surface."
+  },
+  "authoring_fps": 60,
+  "source": "original procedural work authored by tools/prepare_makeshift_armor.py; no third-party model or texture",
+  "reproducer": "python tools/build_makeshift_armor.py"
+}

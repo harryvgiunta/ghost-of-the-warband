@@ -329,3 +329,72 @@ Final shipped hashes:
   ironwood_spawn.json SHA-256: 53e216811dbb905abe6814b3a5860f51a4e9ca4a33cb233e95c6fa6066853ddf
   ironwood_succubus.glb SHA-256: df7605ef10544cdc56bb6e6091a51b0518f1d8325e0b41e09282b7ca1dc44660
   ironwood_succubus.json SHA-256: d81d9bb3bcdf6439bc025ebcfe90d034adb23620a6ecb199e500d2a2bf4afdf6
+
+IRONWOOD UNHOLY FOREST MOBS AND MAKESHIFT GEAR — ORIGINAL PROCEDURAL WORK
+
+The three Unholy Forest mobs (Hollow warden, Ossuary stalker, Gallowsroot) and
+the five-piece Makeshift starter set are original procedural work authored for
+this repository. They do not derive from any third-party model, texture or
+motion, and the Quaternius/Gres CC0 sources documented above are not build
+inputs for them. No generated image, photogrammetry scan, paid pack or
+restricted file is included. The supplied design-reference artwork informed
+silhouette, palette and proportion only; it is not redistributed and is not a
+build input.
+
+Authoring sources:
+  tools/prepare_forest_mobs.py       geometry, rigs, skinning, clips, export
+  tools/forest_surface.py            analytic PBR surface fields
+  tools/forest_styles.py             recipes, palettes, clip timings
+  tools/prepare_makeshift_armor.py   the five Makeshift armour pieces
+Authoring tool: Blender 5.1.2, scene unit metres, 60 fps, deterministic seeds.
+Runtime engine: Godot 4.7.2.
+
+Runtime outputs:
+  assets/characters/forest/ironwood_hollow_warden.glb   + .json + .glb.import
+  assets/characters/forest/ironwood_ossuary_stalker.glb + .json + .glb.import
+  assets/characters/forest/ironwood_gallowsroot.glb     + .json + .glb.import
+  assets/characters/armor/ironwood_makeshift.glb        + .json
+
+Design: the warden is a hooded thing of grave-cloth; the stalker and the
+Gallowsroot are people in costumes — a human body dressed in ragged sackcloth,
+hide and stitched-on bone or bark, with a carved mask and antlers lashed to a
+brow band.
+
+Every forest mesh is one joined skinned surface with one PBR material per
+surface (albedo + normal + roughness, plus emissive maps on the glowing
+surfaces), all embedded in the GLB. Exported forward is -Z, up is +Y, and the
+feet sit at y = 0. Measured assets:
+
+  Hollow warden    30,234 tris  43 bones  6 materials  19 images  height 3.76 m
+  Ossuary stalker  49,214 tris  43 bones  6 materials  18 images  height 2.47 m
+  Gallowsroot      46,538 tris  35 bones  8 materials  25 images  height 2.89 m
+
+The Makeshift set is bone over cured hide (17,732 tris, 65 bones, 3 materials,
+9 embedded images) and guards nothing by design: it changes what the ranger
+looks like, not what a blow costs.
+
+Authored clips (60 Hz baked, in-place, stationary root):
+  <Mob>_Idle / Walk / Run   loop; loop modes are applied by the runtime
+  <Mob>_Attack              one-shot, authored impact at the gameplay damage frame
+  <Mob>_Hit                 one-shot stagger pose
+  <Mob>_Death               one-shot collapse, held by the corpse controller
+
+These assets are distributed under CC0 1.0 Universal, the same dedication linked
+at the top of this file, to match the project's existing character assets.
+
+Reproduce with:
+  python tools/build_forest.py all
+  python tools/build_makeshift_armor.py
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+  Godot_v4.7.2-stable_win64_console.exe --headless --path . \
+      --script res://tests/forest_mobs_regression.gd
+
+GLB SHA-256:
+  ironwood_hollow_warden.glb   4df807b8b3adaa8e7f728b65f15519c24f7353a639697fbc8bb88433b26fa74c
+  ironwood_hollow_warden.json  1185da9f5ea0d89ed57e61cc950bf202b90c3cae7ed995cacc846820dafb81f7
+  ironwood_ossuary_stalker.glb   f5a4ea5e2d5688b53d36b20f773bbfc6a321afe4842f1e73429f38cb2b924f36
+  ironwood_ossuary_stalker.json  60e8b265972f37b88d0ac766ef7b0c42c35967fcefe53fb826dbe87a34c1b7a0
+  ironwood_gallowsroot.glb   4a5e09949357204668029ab23adc69a43c4b4bfc3ba5fae81255a4633c5ca1e2
+  ironwood_gallowsroot.json  71e13f050779c7d2fa853e686ddc15af7337a4f019e76b35be675be007837b6a
+  ironwood_makeshift.glb   f1b798d4346833942958f84d62af8516d00006b5d3f407153c784a25e99ade6f
+  ironwood_makeshift.json  1d6f810e1ab8f5a4c391a44c719ccaeef28d4d504dcff374a56a3141ad381062

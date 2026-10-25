@@ -1,0 +1,134 @@
+{
+  "asset": "ironwood_ossuary_stalker.glb",
+  "mob": "ossuary_stalker",
+  "display": "Ossuary stalker",
+  "skeleton": "ForestArmature/Skeleton3D",
+  "bone_count": 43,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "antler_l",
+    "antler_l2",
+    "antler_r",
+    "antler_r2",
+    "clavicle_l",
+    "upper_arm_l",
+    "lower_arm_l",
+    "hand_l",
+    "finger_l_1",
+    "finger_l_2",
+    "finger_l_3",
+    "clavicle_r",
+    "upper_arm_r",
+    "lower_arm_r",
+    "hand_r",
+    "finger_r_1",
+    "finger_r_2",
+    "finger_r_3",
+    "thigh_l",
+    "shin_l",
+    "foot_l",
+    "toe_l",
+    "thigh_r",
+    "shin_r",
+    "foot_r",
+    "toe_r",
+    "shroud_f1",
+    "shroud_f2",
+    "shroud_b1",
+    "shroud_b2",
+    "shroud_l1",
+    "shroud_l2",
+    "shroud_r1",
+    "shroud_r2"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.4747334122657776,
+    0.00983743742108345,
+    -0.25727716088294983
+  ],
+  "rest_bounds_max": [
+    0.5010597705841064,
+    2.475210428237915,
+    0.26748067140579224
+  ],
+  "mesh_triangles": 49214,
+  "materials": [
+    "Forest_Leather",
+    "Forest_Cloth",
+    "Forest_Void",
+    "Forest_Bone",
+    "Forest_Antler",
+    "Forest_Moss"
+  ],
+  "embedded_images": 18,
+  "clips": {
+    "idle": {
+      "name": "Stalker_Idle",
+      "duration": 2.4,
+      "loop": true
+    },
+    "walk": {
+      "name": "Stalker_Walk",
+      "duration": 1.1,
+      "loop": true,
+      "stride": 0.86,
+      "duty": 0.55
+    },
+    "run": {
+      "name": "Stalker_Run",
+      "duration": 0.7,
+      "loop": true,
+      "stride": 1.68,
+      "duty": 0.4
+    },
+    "attack": {
+      "name": "Stalker_Attack",
+      "duration": 1.25,
+      "loop": false,
+      "impact": 0.55
+    },
+    "hit": {
+      "name": "Stalker_Hit",
+      "duration": 0.4,
+      "loop": false,
+      "impact": 0.1
+    },
+    "death": {
+      "name": "Stalker_Death",
+      "duration": 1.1,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Stalker_Idle": 2.4,
+    "Stalker_Walk": 1.1,
+    "Stalker_Run": 0.7,
+    "Stalker_Attack": 1.25,
+    "Stalker_Hit": 0.4,
+    "Stalker_Death": 1.1
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "root_translation_drift": 0.0,
+  "source": "Original procedural work authored by tools/prepare_forest_mobs.py from tools/forest_surface.py and tools/forest_styles.py; no third-party model, texture or motion. The supplied design sheet was inspiration only.",
+  "reproducer": "python tools/build_forest.py ossuary_stalker"
+}

@@ -1,0 +1,67 @@
+"""Rebuild the Makeshift armor set (one Blender process, then a measured summary).
+
+Usage:
+    python tools/build_makeshift_armor.py
+
+Override the Blender executable with IRONWOOD_BLENDER when the installed path
+differs.  The Blender stage fails the process (``--python-exit-code 1``) when a
+piece is unweighted, claims a bone the ranger skeleton does not have, leaves an
+empty vertex group, breaks the triangle budget or clips the body; this wrapper
+then re-raises with the same non-zero exit.
+
+After a rebuild, reimport in Godot and check the kit on the rig:
+
+    $Godot = '.\\.runtime\\godot\\Godot_v4.7.2-stable_win64_console.exe'
+    & $Godot --headless --editor --path . --import
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_BLENDER = Path(r"C:/Program Files/Blender Foundation/Blender 5.1/blender.exe")
+OUTPUT = ROOT / "assets" / "characters" / "armor" / "ironwood_makeshift.glb"
+
+
+def blender_path() -> Path:
+    override = os.environ.get("IRONWOOD_BLENDER")
+    candidate = Path(override) if override else DEFAULT_BLENDER
+    if not candidate.exists():
+        raise SystemExit(f"Blender not found at {candidate}; set IRONWOOD_BLENDER")
+    return candidate
+
+
+def main() -> None:
+    command = [
+        str(blender_path()),
+        "--background",
+        "--python-exit-code", "1",
+        "--python", str(ROOT / "tools" / "prepare_makeshift_armor.py"),
+    ]
+    print("BUILD_MAKESHIFT", flush=True)
+    result = subprocess.run(command, cwd=ROOT, text=True, encoding="utf-8", errors="replace")
+    if result.returncode != 0:
+        raise SystemExit(f"Blender failed for the Makeshift set ({result.returncode})")
+    metadata_path = OUTPUT.with_suffix(".json")
+    if not metadata_path.exists():
+        raise SystemExit(f"Missing metadata: {metadata_path}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    for name, piece in metadata["pieces"].items():
+        print(
+            f"MAKESHIFT_OK {name} slot={piece['slot']} tris={piece['triangles']} "
+            f"bones={','.join(piece['bones'])}"
+        )
+    print(
+        f"MAKESHIFT_TOTAL tris={metadata['total_triangles']} "
+        f"budget={metadata['triangle_budget']} bones={metadata['bone_count']} "
+        f"images={metadata['embedded_images']} materials={len(metadata['materials'])}"
+    )
+
+
+if __name__ == "__main__":
+    main()

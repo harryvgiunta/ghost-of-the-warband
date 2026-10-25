@@ -1,0 +1,134 @@
+{
+  "asset": "ironwood_hollow_warden.glb",
+  "mob": "hollow_warden",
+  "display": "Hollow warden",
+  "skeleton": "ForestArmature/Skeleton3D",
+  "bone_count": 43,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "antler_l",
+    "antler_l2",
+    "antler_r",
+    "antler_r2",
+    "clavicle_l",
+    "upper_arm_l",
+    "lower_arm_l",
+    "hand_l",
+    "finger_l_1",
+    "finger_l_2",
+    "finger_l_3",
+    "clavicle_r",
+    "upper_arm_r",
+    "lower_arm_r",
+    "hand_r",
+    "finger_r_1",
+    "finger_r_2",
+    "finger_r_3",
+    "thigh_l",
+    "shin_l",
+    "foot_l",
+    "toe_l",
+    "thigh_r",
+    "shin_r",
+    "foot_r",
+    "toe_r",
+    "robe_f1",
+    "robe_f2",
+    "robe_b1",
+    "robe_b2",
+    "robe_l1",
+    "robe_l2",
+    "robe_r1",
+    "robe_r2"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.7869275212287903,
+    -0.0041152904741466045,
+    -0.5428665280342102
+  ],
+  "rest_bounds_max": [
+    0.9509974718093872,
+    3.759425401687622,
+    0.5439026355743408
+  ],
+  "mesh_triangles": 30234,
+  "materials": [
+    "Forest_Cloth",
+    "Forest_Void",
+    "Forest_Ember",
+    "Forest_Bone",
+    "Forest_Antler",
+    "Forest_Moss"
+  ],
+  "embedded_images": 19,
+  "clips": {
+    "idle": {
+      "name": "Warden_Idle",
+      "duration": 2.8,
+      "loop": true
+    },
+    "walk": {
+      "name": "Warden_Walk",
+      "duration": 1.4,
+      "loop": true,
+      "stride": 0.92,
+      "duty": 0.58
+    },
+    "run": {
+      "name": "Warden_Run",
+      "duration": 0.8,
+      "loop": true,
+      "stride": 1.72,
+      "duty": 0.42
+    },
+    "attack": {
+      "name": "Warden_Attack",
+      "duration": 1.6,
+      "loop": false,
+      "impact": 0.78
+    },
+    "hit": {
+      "name": "Warden_Hit",
+      "duration": 0.5,
+      "loop": false,
+      "impact": 0.12
+    },
+    "death": {
+      "name": "Warden_Death",
+      "duration": 1.45,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Warden_Idle": 2.8,
+    "Warden_Walk": 1.4,
+    "Warden_Run": 0.8,
+    "Warden_Attack": 1.6,
+    "Warden_Hit": 0.5,
+    "Warden_Death": 1.45
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "root_translation_drift": 0.0,
+  "source": "Original procedural work authored by tools/prepare_forest_mobs.py from tools/forest_surface.py and tools/forest_styles.py; no third-party model, texture or motion. The supplied design sheet was inspiration only.",
+  "reproducer": "python tools/build_forest.py hollow_warden"
+}

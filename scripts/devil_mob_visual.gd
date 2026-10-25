@@ -94,20 +94,21 @@ var _hover_time := 0.0
 
 
 func _ready() -> void:
-	if not SCENES.has(mob_id):
-		push_error("Unknown devil mob: " + mob_id)
+	var scenes := _scenes()
+	if not scenes.has(mob_id):
+		push_error("Unknown mob: " + mob_id)
 		return
-	_data = DATA[mob_id]
-	var packed: PackedScene = load(SCENES[mob_id])
+	_data = _data_table()[mob_id]
+	var packed: PackedScene = load(str(scenes[mob_id]))
 	if packed == null:
-		push_error("Missing devil scene: " + SCENES[mob_id])
+		push_error("Missing mob scene: " + str(scenes[mob_id]))
 		return
 	_instance = packed.instantiate()
 	add_child(_instance)
 	_player = _instance.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	_skeleton = _instance.find_child("Skeleton3D", true, false) as Skeleton3D
 	if _player == null or _skeleton == null:
-		push_error("Devil visual is missing its AnimationPlayer or Skeleton3D: " + mob_id)
+		push_error("Mob visual is missing its AnimationPlayer or Skeleton3D: " + mob_id)
 		return
 	_head_bone = _skeleton.find_bone("head")
 	# The limb that lands the blow: hand for the bipeds, front paw for the
@@ -119,7 +120,7 @@ func _ready() -> void:
 		_strike_bone = _head_bone
 	for key in ["idle", "walk", "run", "attack", "hit", "death"]:
 		if not _player.has_animation(str(_data[key])):
-			push_error("Devil visual is missing clip %s for %s" % [_data[key], mob_id])
+			push_error("Mob visual is missing clip %s for %s" % [_data[key], mob_id])
 			return
 	for key in ["idle", "walk", "run"]:
 		_player.get_animation(str(_data[key])).loop_mode = Animation.LOOP_LINEAR
@@ -130,6 +131,16 @@ func _ready() -> void:
 	_player.play(_clip, 0.0)
 	_player.speed_scale = 1.0
 	_tune_materials()
+
+
+## Virtual so a second mobset reuses this sampler instead of forking it:
+## scripts/forest_mob_visual.gd overrides both tables.
+func _scenes() -> Dictionary:
+	return SCENES
+
+
+func _data_table() -> Dictionary:
+	return DATA
 
 
 func _tune_materials() -> void:

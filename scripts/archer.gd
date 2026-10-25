@@ -105,6 +105,10 @@ static var _profile: Dictionary = JSON.parse_string(FileAccess.get_file_as_strin
 
 var bow_index := 1
 var sword_index := 1
+## Model family for the held blades: "" is forged steel, "makeshift" is the
+## salvage cleaver/shiv the Unholy Forest set is themed on.
+var sword_skin := ""
+var dagger_skin := ""
 var armor_pieces := {"head":0, "chest":0, "hands":0, "legs":0, "feet":0}
 var weapon := "bow"
 ## The paperdoll main-hand category. Empty hands cannot be dual-wielded; a bow
@@ -380,6 +384,46 @@ func _build_equipment() -> void:
 		Geo.beam(_quiver,Vector3(x,0.18,z),Vector3(x,0.47,z),0.004,trim,6)
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
 	_build_armor_meshes()
+	_attach_makeshift_armor()
+
+
+## The salvage starter set ships as its own skinned GLB bound to a copy of this
+## rig's skeleton, so adding a set never means rebuilding the hero asset. Each
+## piece names the slot it covers; the runtime repoints its skin at the live
+## skeleton and registers it exactly like the sets inside the ranger GLB.
+const MAKESHIFT_ARMOR_SCENE := "res://assets/characters/armor/ironwood_makeshift.glb"
+const MAKESHIFT_ARMOR_PIECES := {
+	"head":"Armor_Makeshift_Head", "chest":"Armor_Makeshift_Chest",
+	"hands":"Armor_Makeshift_Hands", "legs":"Armor_Makeshift_Legs",
+	"feet":"Armor_Makeshift_Feet",
+}
+
+
+func _attach_makeshift_armor() -> void:
+	var set_index := ArmorData.SET_IDS.find("makeshift")
+	if set_index < 0:
+		return
+	if not ResourceLoader.exists(MAKESHIFT_ARMOR_SCENE):
+		push_error("Missing Makeshift armour asset: " + MAKESHIFT_ARMOR_SCENE)
+		return
+	var packed := load(MAKESHIFT_ARMOR_SCENE) as PackedScene
+	if packed == null:
+		push_error("Makeshift armour asset is not a scene: " + MAKESHIFT_ARMOR_SCENE)
+		return
+	var instance := packed.instantiate() as Node3D
+	_model.add_child(instance)
+	# The imported pieces hang off their own skeleton node; leave that hierarchy
+	# alone (a hidden parent hides the pieces) and only repoint each skin.
+	for slot: String in MAKESHIFT_ARMOR_PIECES:
+		var piece_name := str(MAKESHIFT_ARMOR_PIECES[slot])
+		var piece := instance.find_child(piece_name, true, false) as MeshInstance3D
+		if piece == null:
+			push_error("Makeshift armour piece is missing: " + piece_name)
+			continue
+		piece.skeleton = piece.get_path_to(skeleton)
+		piece.visible = false
+		if _armor_meshes.has(slot):
+			_armor_meshes[slot][set_index].append(piece)
 
 func _build_consumable_props() -> void:
 	var cloth := Geo.material(Color("ddd6c2"))
@@ -542,9 +586,29 @@ func set_sword(index: int) -> void:
 	if not _built:
 		return
 	active_sword = _swords[sword_index]
+	_set_blade_skin(active_sword, sword_skin if sword_index == 0 else "")
 	_sync_weapon_visibility()
 	_update_pose(0.0)
 	loadout_changed.emit()
+
+## Swap the held blade's model family without changing its combat profile: the
+## salvage cleaver and shiv are class-equivalent to the iron pieces.
+func set_blade_skins(sword_family: String, dagger_family: String) -> void:
+	sword_skin = sword_family
+	dagger_skin = dagger_family
+	if not _built:
+		return
+	for index in _swords.size():
+		_set_blade_skin(_swords[index], sword_skin if index == 0 else "")
+	_set_blade_skin(active_dagger, dagger_skin)
+
+
+## The blade scripts own set_skin(); the rig only holds Node3D references, so
+## this is a dynamic call rather than a typed one.
+func _set_blade_skin(node: Node3D, family: String) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	node.call("set_skin", family)
 
 func set_weapon(value: String) -> bool:
 	cancel_consumable()
@@ -586,10 +650,13 @@ func apply_loadout(loadout: Dictionary) -> void:
 	# and the matching pose. Pure presentation; every setter keeps its own
 	# legality checks, so a malformed dict degrades instead of crashing.
 	var mode := str(loadout.get("weapon",""))
+	var main_id := str(loadout.get("main",""))
+	var off_id := str(loadout.get("off",""))
+	set_blade_skins("makeshift" if main_id == "sword_makeshift" else "",
+		"makeshift" if main_id == "dagger_makeshift" or off_id == "dagger_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))
 	var sword_value := int(loadout.get("sword",0))
-	var off_id := str(loadout.get("off",""))
 	var shield_on := bool(loadout.get("shield",false))
 	set_armor_pieces(loadout.get("armor",{}))
 	set_staff(0,false)
@@ -843,7 +910,7 @@ func set_armor(index: int) -> void:
 	loadout_changed.emit()
 
 func set_armor_bits(bits: int) -> void:
-	set_armor_pieces(ArmorData.unpack(bits & 1023))
+	set_armor_pieces(ArmorData.unpack(bits & ArmorData.PIECE_MASK))
 
 func armor_bits() -> int:
 	return ArmorData.pack(armor_pieces)

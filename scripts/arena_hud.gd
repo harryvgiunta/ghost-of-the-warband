@@ -292,7 +292,7 @@ func update_match(state: Dictionary) -> void:
 	else:
 		bar.value = float(state.draw if (drawing or throwing) else state.attack_progress) * 100.0
 	respawn_label.text = "RESPAWNING IN %.1f" % float(state.respawn) if float(state.respawn) > 0 else ""
-	_armor_pieces = ArmorData.unpack(int(state.armor) & 1023)
+	_armor_pieces = ArmorData.unpack(int(state.armor) & ArmorData.PIECE_MASK)
 	for index in ArmorData.SLOTS.size():
 		var slot: String = ArmorData.SLOTS[index]
 		armor_buttons[index].text = "%s\n%s" % [ArmorData.slot_label(slot).to_upper().left(5),ArmorData.set_abbreviation(int(_armor_pieces.get(slot,0)))]

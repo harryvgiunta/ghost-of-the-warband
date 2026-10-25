@@ -25,6 +25,9 @@ var enemy_spawns: Array[Dictionary] = []
 ## Authored devil-court placements. Kept separate from `enemy_spawns` so the
 ## existing wolf/sentinel/cinder spawn contract stays a stable 36 entries.
 var devil_spawns: Array[Dictionary] = []
+## Unholy Forest placements. A third table for the same reason: the legacy 36
+## and the 16 devils stay measured contracts, and these mobs own the woodland.
+var forest_spawns: Array[Dictionary] = []
 ## Crimson ranger clones: player-rig patrols with random kits.
 var ranger_spawns: Array[Dictionary] = []
 var interactables: Array[Dictionary] = []
@@ -91,6 +94,7 @@ func _ready() -> void:
 	_build_waystone("ridge", "Suncrest Waystone", Vector2(-15, -100))
 	_build_enemy_spawns()
 	_build_devil_spawns()
+	_build_forest_spawns()
 	_build_ranger_spawns()
 	_build_woodland()
 	_build_backdrop_trees()
@@ -104,6 +108,7 @@ func _ready() -> void:
 	generation_stats["paths"] = map_paths.size()
 	generation_stats["enemies"] = enemy_spawns.size()
 	generation_stats["devils"] = devil_spawns.size()
+	generation_stats["forests"] = forest_spawns.size()
 	generation_stats["rangers"] = ranger_spawns.size()
 	generation_stats["texture_count"] = TextureLibrary.texture_count()
 	generation_stats["world_style"] = style.id
@@ -774,6 +779,48 @@ func _build_devil_spawns() -> void:
 			"position": _ground(point.x, point.y)})
 
 
+## The Unholy Forest owns the woodland. Three mobs hold it: the hollow warden
+## on the lanes, the ossuary stalker in the deep stands, and the gallowsroot
+## standing over the clearings like felled timber that got up again.
+##
+## The threshold trio sits inside the town's 19 m safe ring beside the devil
+## court, in an arc about 12 m ahead of the south gate, so the new mobset is
+## inspectable at once and stays idle until the ranger leaves the ring.
+func _build_forest_spawns() -> void:
+	# Offsets from the south gate, so the trio stays ~14 m ahead of the spawn
+	# inside the 19 m safe ring no matter how the terrain is sampled.
+	for record in [
+		{"mob": "hollow_warden", "at": Vector2(town_entry.x + 6.5, town_entry.z - 13.5)},
+		{"mob": "ossuary_stalker", "at": Vector2(town_entry.x, town_entry.z - 14.5)},
+		{"mob": "gallowsroot", "at": Vector2(town_entry.x - 6.5, town_entry.z - 13.5)},
+	]:
+		var point: Vector2 = record.at
+		forest_spawns.append({"mob": str(record.mob), "position": _ground(point.x, point.y)})
+	# The rest are distributed by habitat: stalkers hunt the deep western
+	# stands, wardens and roots hold the meadows, the eastern fringe and the
+	# northern shoulder where the woodland is densest.
+	for record in [
+		{"mob": "ossuary_stalker", "at": Vector2(-34, 6)},
+		{"mob": "ossuary_stalker", "at": Vector2(-46, -4)},
+		{"mob": "hollow_warden", "at": Vector2(-58, -16)},
+		{"mob": "ossuary_stalker", "at": Vector2(-30, -22)},
+		{"mob": "gallowsroot", "at": Vector2(-44, -34)},
+		{"mob": "hollow_warden", "at": Vector2(-58, -44)},
+		{"mob": "gallowsroot", "at": Vector2(-20, 62)},
+		{"mob": "ossuary_stalker", "at": Vector2(-34, 70)},
+		{"mob": "hollow_warden", "at": Vector2(-48, 58)},
+		{"mob": "ossuary_stalker", "at": Vector2(26, 16)},
+		{"mob": "gallowsroot", "at": Vector2(38, 4)},
+		{"mob": "hollow_warden", "at": Vector2(50, -8)},
+		{"mob": "gallowsroot", "at": Vector2(20, 64)},
+		{"mob": "hollow_warden", "at": Vector2(34, 58)},
+		{"mob": "ossuary_stalker", "at": Vector2(-24, 24)},
+		{"mob": "gallowsroot", "at": Vector2(-8, 74)},
+	]:
+		var point: Vector2 = record.at
+		forest_spawns.append({"mob": str(record.mob), "position": _ground(point.x, point.y)})
+
+
 ## Four crimson clone patrols hold the outer trails, away from the town's safe
 ## ring so the gate and the keepers stay a safe haven.
 func _build_ranger_spawns() -> void:
@@ -801,6 +848,10 @@ func _reserved(point: Vector2, margin: float) -> bool:
 		if point.distance_to(Vector2(location.x, location.z)) < 3.0:
 			return true
 	for entry in devil_spawns:
+		var location: Vector3 = entry["position"]
+		if point.distance_to(Vector2(location.x, location.z)) < 4.5:
+			return true
+	for entry in forest_spawns:
 		var location: Vector3 = entry["position"]
 		if point.distance_to(Vector2(location.x, location.z)) < 4.5:
 			return true

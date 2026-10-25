@@ -6,6 +6,7 @@ const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
+const ForestMob = preload("res://scripts/forest_mob.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
 const LootRules = preload("res://scripts/loot_rules.gd")
 const Hud = preload("res://scripts/hud.gd")
@@ -247,6 +248,16 @@ func _ready() -> void:
 		devil.defeated.connect(_on_enemy_defeated)
 		devil.attacked.connect(_on_enemy_attack)
 		enemies.append(devil)
+	for record: Dictionary in world.forest_spawns:
+		var forest := ForestMob.new()
+		forest.mob_id = str(record.mob)
+		forest.position = record.position + Vector3(0, 0.12, 0)
+		forest.player = player
+		forest.safe_center = world.player_spawn
+		add_child(forest)
+		forest.defeated.connect(_on_enemy_defeated)
+		forest.attacked.connect(_on_enemy_attack)
+		enemies.append(forest)
 	for index in world.ranger_spawns.size():
 		var record: Dictionary = world.ranger_spawns[index]
 		var clone := RangerClone.new()

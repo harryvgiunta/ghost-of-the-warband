@@ -1,0 +1,128 @@
+{
+  "asset": "ironwood_gallowsroot.glb",
+  "mob": "gallowsroot",
+  "display": "Gallowsroot",
+  "skeleton": "ForestArmature/Skeleton3D",
+  "bone_count": 35,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "crown_l",
+    "crown_l2",
+    "crown_r",
+    "crown_r2",
+    "clavicle_l",
+    "upper_arm_l",
+    "lower_arm_l",
+    "hand_l",
+    "finger_l_1",
+    "finger_l_2",
+    "finger_l_3",
+    "clavicle_r",
+    "upper_arm_r",
+    "lower_arm_r",
+    "hand_r",
+    "finger_r_1",
+    "finger_r_2",
+    "finger_r_3",
+    "thigh_l",
+    "shin_l",
+    "foot_l",
+    "toe_l",
+    "thigh_r",
+    "shin_r",
+    "foot_r",
+    "toe_r"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.7157046794891357,
+    0.004235451575368643,
+    -0.35497069358825684
+  ],
+  "rest_bounds_max": [
+    0.5959964394569397,
+    2.8953657150268555,
+    0.3634082078933716
+  ],
+  "mesh_triangles": 46538,
+  "materials": [
+    "Forest_Leather",
+    "Forest_Cloth",
+    "Forest_Bark",
+    "Forest_Void",
+    "Forest_Ember",
+    "Forest_Antler",
+    "Forest_Bone",
+    "Forest_Moss"
+  ],
+  "embedded_images": 25,
+  "clips": {
+    "idle": {
+      "name": "Gallowsroot_Idle",
+      "duration": 3.2,
+      "loop": true
+    },
+    "walk": {
+      "name": "Gallowsroot_Walk",
+      "duration": 1.8,
+      "loop": true,
+      "stride": 1.35,
+      "duty": 0.6
+    },
+    "run": {
+      "name": "Gallowsroot_Run",
+      "duration": 1,
+      "loop": true,
+      "stride": 2.4,
+      "duty": 0.46
+    },
+    "attack": {
+      "name": "Gallowsroot_Attack",
+      "duration": 2.1,
+      "loop": false,
+      "impact": 1.05
+    },
+    "hit": {
+      "name": "Gallowsroot_Hit",
+      "duration": 0.6,
+      "loop": false,
+      "impact": 0.14
+    },
+    "death": {
+      "name": "Gallowsroot_Death",
+      "duration": 1.8,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Gallowsroot_Idle": 3.2,
+    "Gallowsroot_Walk": 1.8,
+    "Gallowsroot_Run": 1,
+    "Gallowsroot_Attack": 2.1,
+    "Gallowsroot_Hit": 0.6,
+    "Gallowsroot_Death": 1.8
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 6,
+  "root_translation_drift": 0.0,
+  "source": "Original procedural work authored by tools/prepare_forest_mobs.py from tools/forest_surface.py and tools/forest_styles.py; no third-party model, texture or motion. The supplied design sheet was inspiration only.",
+  "reproducer": "python tools/build_forest.py gallowsroot"
+}

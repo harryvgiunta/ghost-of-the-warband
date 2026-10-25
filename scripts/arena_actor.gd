@@ -686,7 +686,7 @@ func apply_snapshot(state: Dictionary) -> void:
 	collision_mask = 1 if alive else 0
 	if rig.bow_index != int(state.bow):
 		rig.set_bow(int(state.bow))
-	var armor_bits := int(state.armor) & 1023
+	var armor_bits := int(state.armor) & ArmorData.PIECE_MASK
 	var shield_state := (int(state.armor) & ArmorData.SHIELD_BIT) != 0
 	if rig.armor_bits() != armor_bits:
 		rig.set_armor_bits(armor_bits)

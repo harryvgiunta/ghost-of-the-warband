@@ -501,7 +501,7 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 	var armor: Variant = loadout.get("armor")
 	var bow_ok := typeof(bow) == TYPE_INT and int(bow) >= 0 and int(bow) <= 2
 	var sword_ok := typeof(sword) == TYPE_INT and int(sword) >= 0 and int(sword) <= 2
-	var armor_ok := typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= 1023
+	var armor_ok := typeof(armor) == TYPE_INT and int(armor) >= 0 and int(armor) <= ArmorData.PIECE_MASK
 	var main_raw: Variant = loadout.get("main")
 	var off_raw: Variant = loadout.get("off")
 	var main := _catalog_hand(main_raw,"main")
@@ -514,7 +514,7 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 		# weapon mode, staff, focus, shield and off-hand from the validated ids.
 		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
 		# hand falls through instead of wiping a valid seat.
-		var pieces: Dictionary = ArmorData.unpack(int(armor) & 1023) if armor_ok else actor.rig.armor_pieces.duplicate()
+		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else actor.rig.armor_pieces.duplicate()
 		actor.rig.apply_loadout(State.build_loadout(main,off,pieces))
 		return
 	if bow_ok:

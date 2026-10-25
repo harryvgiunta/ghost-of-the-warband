@@ -61,13 +61,13 @@ func _test_taxonomy() -> void:
 	check(state.equipped.size() == Rules.SLOTS.size(),"The ranger has exactly ten equipment slots")
 	for slot in Rules.SLOTS:
 		check(state.equipped.has(slot),"Equipment exposes the %s slot" % slot)
-	check(state.equipped_id("head") == "armor_leather_head","The leather hood starts equipped")
-	check(state.equipped_id("feet") == "armor_leather_feet","The leather boots start equipped")
+	check(state.equipped_id("head") == "armor_makeshift_head","The Makeshift antler helm starts equipped")
+	check(state.equipped_id("feet") == "armor_makeshift_feet","The Makeshift root boots start equipped")
 	check(state.main_item() == "bow_short" and state.off_item().is_empty(),"The shortbow starts in the main hand with an empty off hand")
 	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size(),"The starter backpack holds every catalog weapon")
 	for item_id: String in StateScript.STARTING_INVENTORY:
 		check(state.inventory.has(item_id),"The starter backpack contains %s" % item_id)
-	check(state.inventory.size() == 12,"The catalog exposes twelve weapons")
+	check(state.inventory.size() == 12,"The catalog exposes twelve starter weapons")
 	check(state.credits == StateScript.STARTING_CREDITS,"The starter purse is unchanged")
 	for item_id: String in StateScript.ITEMS:
 		var item: Dictionary = StateScript.ITEMS[item_id]
@@ -212,7 +212,8 @@ func _test_hand_rules() -> void:
 	result = state.equip_from_inventory(_find("armor_mail_chest"))
 	check(bool(result.ok),"A mail chest equips")
 	check(state.equipped_id("chest") == "armor_mail_chest","The mail chest occupies only the chest slot")
-	check(state.equipped_id("head") == "armor_leather_head","The leather hood stays equipped")
+	check(state.equipped_id("head") == "armor_makeshift_head","The Makeshift helm stays equipped")
+	# The salvage skin guards nothing, so the mail chest alone contributes.
 	check(is_equal_approx(state.armor_reduction(),0.05),"Only the mail chest contributes guard")
 	check(state.inventory.count("armor_mail_chest") == 1,"The backpack keeps a spare copy")
 

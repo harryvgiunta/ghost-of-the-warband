@@ -34,6 +34,8 @@ TESTS = [
     "wolf_regression",
     "devil_regression",
     "devil_mobs_regression",
+    "forest_mobs_regression",
+    "makeshift_gear_regression",
     "swing_reach_regression",
     "block_clash_regression",
     "hitbox_regression",
@@ -59,6 +61,12 @@ TESTS = [
 ]
 FIXED_FPS = {"cover_movement_regression", "weapon_input_regression"}
 TIMEOUT = 120.0
+## Wall-clock ceilings where the flat budget no longer fits. The frontier
+## simulates 75 mobs (36 legacy, 16 devils, 19 Unholy Forest, 4 clones); the two
+## fixed-fps tests drive real movement through every one of them at a fixed
+## 240 Hz clock, so their wall time scales with frontier cost, not with test
+## content. Measured standalone after the forest mobset landed: 217 s.
+TIMEOUTS = {"weapon_input_regression": 480.0, "cover_movement_regression": 300.0}
 
 
 def engine_path() -> str:
@@ -83,7 +91,8 @@ def run_one(test: str, engine: str, retry: bool = False) -> tuple:
     args += ["--path", str(ROOT), "--script", f"res://tests/{test}.gd"]
     started = time.time()
     try:
-        process = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True, timeout=TIMEOUT)
+        process = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True,
+                                 timeout=TIMEOUTS.get(test, TIMEOUT))
         output = process.stdout + process.stderr
         code = process.returncode
     except subprocess.TimeoutExpired as error:

@@ -420,6 +420,60 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 
 Tinted source maps, authored PBR maps, preview renders and capture sheets are written to the ignored `.runtime/devil-source/<mob>/` workspace; source archives stay in `.runtime/character-source/`. Keep each shipped GLB, its adjacent JSON and its `.glb.import` together; import settings embed the textures and sample animation at 60 Hz.
 
+## Unholy Forest
+
+Three mobs own the woodland outside Hearthstead: the **Hollow warden** (hooded
+grave-cloth atop a hole in the world, two ember eyes and a branching antler rack
+growing out of its crown), the **Ossuary stalker** (a hooded human in a fitted
+sackcloth tunic and torn skirt — carved bone mask with empty black sockets,
+antlers lashed to a brow band) and the
+**Gallowsroot** (a big man in a long tattered coat with bark plates strapped over
+it, a carved wooden mask with an ember slit, branches lashed to a brow band, bark
+mitts and boots). Their placements live in
+`RangeWorld.forest_spawns`, a third table beside the legacy 36 `enemy_spawns` and
+the 16 `devil_spawns`. Three of the nineteen spawns sit inside the town's safe
+ring about 14 m ahead of the south gate, so all three are inspectable at once and
+stay idle until the ranger leaves the ring.
+
+They are **original procedural work**, not source-based: `tools/prepare_forest_mobs.py`
+authors every mesh, rig and clip in Blender, and `tools/forest_surface.py`
+rasterises seven analytic PBR surfaces (bark, cloth, bone, antler, moss, void and
+the emissive ember) into per-material UV atlases, so fissures, weave and bone
+grain are continuous across seams and carry texel-scale detail. No third-party
+model, texture or motion is used and nothing has to be downloaded to rebuild them.
+
+Each mob ships one imported GLB with a real skinned mesh (30k / 49k / 47k
+triangles), six baked 60 Hz clips (idle, walk, run, attack, hit, death) with a
+stationary root and planted-foot locomotion solved with two-bone leg IK, and its
+own measured JSON. `scripts/forest_mob_visual.gd` is presentation only and maps
+the physics attack clock onto the authored impact frame; `scripts/forest_mob.gd`
+reuses the devil state machine through its virtual profile/group/visual hooks, so
+there is one AI, not two.
+
+The same set supplies the **Makeshift** starter gear: the salvage armour the
+ranger begins in — bone over cured hide, matching the stalker's kit, with a bone
+antler helm, a hide vest under bone rib bars, hide bracers with bone knuckle
+spikes, hide leggings with bone knee cops and hide boots with bone toe caps —
+and the salvage blades the smith sells beside the forged kit (a knapped flint
+cleaver and a ground-rib shiv). Makeshift is set index 4 in
+`scripts/armor_data.gd`; five sets need three bits per slot, so
+`ArmorData.PIECE_MASK` and `ArmorData.SHIELD_BIT` are one shared contract across
+the HUD, the arena, the delve and host-authoritative snapshots.
+
+The workflow, budgets and gates are documented in
+[docs/forest-mobs.md](docs/forest-mobs.md). Rebuild with:
+
+```powershell
+python tools/build_forest.py all
+$Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
+& $Godot --headless --editor --path . --import
+& $Godot --headless --path . --script res://tests/forest_mobs_regression.gd
+```
+
+Captures and baked atlases land in the ignored `.runtime/forest-source/<mob>/`
+workspace. Keep each shipped GLB, its adjacent JSON and its `.glb.import`
+together; the import settings embed the textures and sample animation at 60 Hz.
+
 ## Update
 
 **Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. Current windows show **0.4.0** in the HUD, and `Play.cmd` opens the main menu.

@@ -103,11 +103,12 @@ var _target: CharacterBody3D
 
 
 func _ready() -> void:
-	if not PROFILES.has(mob_id):
-		push_error("Unknown devil mob id: " + mob_id)
+	var table := _profiles()
+	if not table.has(mob_id):
+		push_error("Unknown mob id: " + mob_id)
 		return
-	profile = (PROFILES[mob_id] as Dictionary).duplicate(true)
-	name = "Devil_" + mob_id
+	profile = (table[mob_id] as Dictionary).duplicate(true)
+	name = _node_prefix() + mob_id
 	kind = int(profile.kind)
 	max_health = float(profile.health)
 	health = max_health
@@ -130,17 +131,36 @@ func _ready() -> void:
 	add_child(collision)
 	_body = Node3D.new()
 	add_child(_body)
-	_visual = Visual.new()
+	_visual = _visual_script().new()
 	_visual.mob_id = mob_id
 	_visual.profile = profile
 	_body.add_child(_visual)
-	add_to_group("devil_mobs")
+	add_to_group(_group_name())
 	_query.collision_mask = 1
 	_rng.seed = 7919 + int(absf(global_position.x) * 13.0) + int(absf(global_position.z) * 7.0)
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
+
+
+## The profile table and the identity hooks are virtual so a second mobset can
+## reuse this state machine instead of forking it. The five devils keep the
+## defaults; scripts/forest_mob.gd overrides them.
+func _profiles() -> Dictionary:
+	return PROFILES
+
+
+func _group_name() -> String:
+	return "devil_mobs"
+
+
+func _node_prefix() -> String:
+	return "Devil_"
+
+
+func _visual_script():
+	return Visual
 
 
 func _physics_process(delta: float) -> void:
@@ -290,7 +310,7 @@ func _resolve_target() -> CharacterBody3D:
 
 func _separate() -> void:
 	var push := Vector3.ZERO
-	for other in get_tree().get_nodes_in_group("devil_mobs"):
+	for other in get_tree().get_nodes_in_group(_group_name()):
 		if other == self or not is_instance_valid(other) or not bool(other.get("alive")):
 			continue
 		var offset: Vector3 = global_position - other.global_position
