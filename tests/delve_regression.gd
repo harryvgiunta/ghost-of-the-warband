@@ -94,6 +94,7 @@ func _clear_wave(delve, timeout: float) -> Dictionary:
 	var seen: Dictionary = {}
 	var species_health: Dictionary = {}
 	var species_probe := true
+	var ranger_probe := true
 	var spawned := 0
 	var sealed_seen := false
 	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
@@ -116,6 +117,11 @@ func _clear_wave(delve, timeout: float) -> Dictionary:
 							or not devil.blood_strike_point().is_finite() \
 							or devil.get_aim_position().y <= devil.global_position.y:
 						species_probe = false
+				elif role == "ranger":
+					var clone_kind = devil.get("kind")
+					if clone_kind == null or int(clone_kind) != 8 or not is_instance_valid(devil.rig) \
+							or int(devil.collision_layer) != 2 or str(devil.held_weapon_id()).is_empty():
+						ranger_probe = false
 				var spawn_index := _nearest_spawn(delve.world,devil.global_position)
 				if spawn_index >= 0:
 					points[spawn_index] = true
@@ -125,10 +131,10 @@ func _clear_wave(delve, timeout: float) -> Dictionary:
 		await process_frame
 	return {"cleared":delve.phase == "CLEARED", "spawned":spawned, "roles":roles,
 		"points":points.size(), "sealed_seen":sealed_seen, "species_health":species_health,
-		"species_probe":species_probe}
+		"species_probe":species_probe, "ranger_probe":ranger_probe}
 
 func _check_first_plan(delve, plan: Array) -> void:
-	check(plan.size() == 10,"The first wave plans ten enemies")
+	check(plan.size() == 26,"The first wave plans twenty-six enemies")
 	var previous_at := -1.0
 	var ordered := true
 	var early := 0
@@ -136,10 +142,6 @@ func _check_first_plan(delve, plan: Array) -> void:
 	var kinds_ok := true
 	var imps := 0
 	var devils := 0
-	var species := 0
-	var species_seen := {}
-	var first_species := -1
-	var last_species := -1
 	var placed := true
 	for index in plan.size():
 		var entry: Dictionary = plan[index]
@@ -156,24 +158,16 @@ func _check_first_plan(delve, plan: Array) -> void:
 			imps += 1
 		elif role == "devil":
 			devils += 1
-		elif role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
-			species += 1
-			species_seen[role] = true
-			if first_species < 0:
-				first_species = index
-			last_species = index
 		else:
 			kinds_ok = false
 		if not _point_on_spawn(delve.world,entry.get("position")):
 			placed = false
 	check(ordered,"The wave plan is ordered by spawn time")
-	check(early <= 4 and opening >= 1,"The spawn times are weighted to the back of the window")
+	check(early <= 8 and opening >= 1,"The spawn times are weighted to the back of the window")
 	var last_entry: Dictionary = plan[plan.size() - 1]
 	check(absf(float(last_entry.get("at",0.0)) - 30.0) <= 0.01,"The last spawn lands on the thirty second mark")
-	check(kinds_ok,"The first wave fields imps, devils and the starting-court species")
-	check(imps == 4 and devils == 1 and species == 5,"The first wave mixes four imps, one devil and five court devils")
-	check(species_seen.size() == 5,"Every starting-court devil appears in the first wave")
-	check(first_species < plan.size() / 2 and last_species > plan.size() / 2,"Court devils are scattered through the wave")
+	check(kinds_ok,"Cycle one fields only imps and devils")
+	check(imps == 16 and devils == 10,"Cycle one is sixteen imps and ten devils")
 	check(placed,"Every planned spawn sits on a chamber spawn point")
 
 func run() -> void:
@@ -219,24 +213,17 @@ func run() -> void:
 	check(ritual_advanced,"The ritual progress keeps climbing")
 	var wave_one := await _wait_until(func(): return delve.phase == "WAVE",6.0)
 	check(wave_one,"The ritual ends into the first wave")
-	check(delve.wave_total == 10,"The first wave holds ten enemies")
+	check(delve.wave_total == 26,"The first wave holds twenty-six enemies")
 	check(_ritual_progress(delve) >= 0.99,"The ritual completes when the wave starts")
 
 	var observed: Dictionary = await _clear_wave(delve,WAVE_DEADLINE)
 	check(bool(observed["cleared"]),"Clearing every devil ends the wave")
 	check(observed["sealed_seen"],"The room stays sealed for the whole wave")
 	check(not delve.world.sealed,"Clearing the wave unseals the room")
-	check(int(observed["spawned"]) == 10,"Every planned devil reached the floor")
+	check(int(observed["spawned"]) == 26,"Every planned devil reached the floor")
 	var roles_one: Dictionary = observed["roles"]
-	check(int(roles_one.get("imp",0)) > 0,"Imps spawn in the first wave")
-	check(int(roles_one.get("devil",0)) > 0,"Devils spawn in the first wave")
-	for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
-		check(int(roles_one.get(role,0)) == 1,"The first wave spawns one %s" % role)
-	var species_base := {"hell_goat":72.0, "succubus":46.0, "spawn":22.0, "beast":130.0, "gargoyle":110.0}
-	for role in species_base.keys():
-		var expected := float(species_base[role]) * 0.45
-		check(absf(float(observed["species_health"].get(role,-1.0)) - expected) < 0.01,"The %s enters the delve at its court-scaled frontier health" % role)
-	check(bool(observed["species_probe"]),"Every court devil runs its imported rig, head zone and strike hand")
+	check(int(roles_one.get("imp",0)) == 16 and int(roles_one.get("devil",0)) == 10,"The first wave spawns sixteen imps and ten devils")
+	check(roles_one.size() == 2,"Cycle one keeps court devils and clones out")
 	check(int(observed["points"]) >= 5,"The wave emerged from distinct spawn points across the room")
 
 	check(not delve.world.is_pentagram_active(),"The pentagram dims when the wave clears")
@@ -274,28 +261,17 @@ func run() -> void:
 	check(drop_ritual,"Landing in the ossuary starts its ritual")
 	var wave_two := await _wait_until(func(): return delve.phase == "WAVE",PHASE_DEADLINE)
 	check(wave_two,"The ossuary ritual ends into its wave")
-	check(delve.wave_total == 20,"The ossuary fields twenty enemies")
+	check(delve.wave_total == 26,"The ossuary fields twenty-six enemies")
 	var plan_two: Array = delve.wave_plan()
-	check(plan_two.size() == 20,"The ossuary plan holds twenty enemies")
+	check(plan_two.size() == 26,"The ossuary plan holds twenty-six enemies")
 	var roles_two := _role_counts(plan_two)
-	check(int(roles_two.get("imp",0)) == 3 and int(roles_two.get("brute",0)) == 4 and int(roles_two.get("bonefiend",0)) == 8,"The ossuary mixes imps, brutes and bonefiends")
-	for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
-		check(int(roles_two.get(role,0)) == 1,"The ossuary fields one %s" % role)
-	var last_imp := -1
-	var first_elite := -1
-	for index in plan_two.size():
-		var entry: Dictionary = plan_two[index]
-		var role := str(entry.get("role",""))
-		if role == "imp":
-			last_imp = index
-		elif role in ["bonefiend","brute"] and first_elite < 0:
-			first_elite = index
-	check(last_imp >= 0 and first_elite > last_imp,"The ossuary sends its elites after the imps")
+	check(int(roles_two.get("imp",0)) == 16 and int(roles_two.get("devil",0)) == 10,"The ossuary cycle one is sixteen imps and ten devils")
+	check(roles_two.size() == 2,"The ossuary cycle one keeps the court and clones out")
 
 	var observed_two: Dictionary = await _clear_wave(delve,WAVE_DEADLINE)
 	check(bool(observed_two["cleared"]),"The ossuary can be cleared")
 	check(not delve.world.sealed,"Clearing the ossuary unseals it")
-	check(int(observed_two["spawned"]) == 20,"Every ossuary enemy reached the floor")
+	check(int(observed_two["spawned"]) == 26,"Every ossuary enemy reached the floor")
 	var cache_two := await _wait_until(func(): return delve.chest_ready and is_instance_valid(delve.chest),CACHE_DEADLINE)
 	check(cache_two,"The ossuary offers its own cache")
 
@@ -314,8 +290,23 @@ func run() -> void:
 	delve.begin_wave()
 	var wave_three := await _wait_until(func(): return delve.phase == "WAVE",PHASE_DEADLINE)
 	check(wave_three,"The recycled sanctuary runs its own ritual")
+	check(delve.wave_total == 28,"Cycle two scales to twenty-eight enemies")
+	var plan_three: Array = delve.wave_plan()
+	check(plan_three.size() == 28,"The cycle-two plan holds twenty-eight enemies")
+	var roles_three := _role_counts(plan_three)
+	check(int(roles_three.get("ranger",0)) == 3,"Cycle two sends three ranger clones")
+	for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
+		check(int(roles_three.get(role,0)) == 1,"Cycle two fields one %s" % role)
+	check(int(roles_three.get("imp",0)) > 0 and int(roles_three.get("devil",0)) > 0,"The cycle-two ladder keeps imps and devils")
 	var observed_three: Dictionary = await _clear_wave(delve,WAVE_DEADLINE)
 	check(bool(observed_three["cleared"]),"The recycled sanctuary can be cleared")
+	check(int(observed_three["roles"].get("ranger",0)) == 3,"Every clone reached the floor")
+	check(bool(observed_three["ranger_probe"]),"Clones carry their rig, body layer and rolled weapon")
+	var species_base := {"hell_goat":72.0, "succubus":46.0, "spawn":22.0, "beast":130.0, "gargoyle":110.0}
+	for role in species_base.keys():
+		var expected := float(species_base[role]) * 0.45 * (1.0 + 0.28 * 2.0)
+		check(absf(float(observed_three["species_health"].get(role,-1.0)) - expected) < 0.01,"The %s scales with depth three" % role)
+	check(bool(observed_three["species_probe"]),"The court devils keep their imported rigs at depth three")
 	var cache_three := await _wait_until(func(): return delve.chest_ready,CACHE_DEADLINE)
 	check(cache_three,"The recycled sanctuary offers a cache")
 

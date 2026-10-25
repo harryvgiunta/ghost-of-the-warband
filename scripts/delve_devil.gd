@@ -40,6 +40,7 @@ const ROLE_SUCCUBUS := "succubus"
 const ROLE_SPAWN := "spawn"
 const ROLE_BEAST := "beast"
 const ROLE_GARGOYLE := "gargoyle"
+const ROLE_RANGER := "ranger"
 const SPECIES_ROLES := [ROLE_HELL_GOAT,ROLE_SUCCUBUS,ROLE_SPAWN,ROLE_BEAST,ROLE_GARGOYLE]
 
 ## Role baselines, before the depth scaling that `configure` layers on top.

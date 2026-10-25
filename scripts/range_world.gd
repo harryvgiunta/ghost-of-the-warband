@@ -25,6 +25,8 @@ var enemy_spawns: Array[Dictionary] = []
 ## Authored devil-court placements. Kept separate from `enemy_spawns` so the
 ## existing wolf/sentinel/cinder spawn contract stays a stable 36 entries.
 var devil_spawns: Array[Dictionary] = []
+## Crimson ranger clones: player-rig patrols with random kits.
+var ranger_spawns: Array[Dictionary] = []
 var interactables: Array[Dictionary] = []
 var landmarks: Array[Dictionary] = []
 var map_paths: Array[PackedVector3Array] = []
@@ -89,6 +91,7 @@ func _ready() -> void:
 	_build_waystone("ridge", "Suncrest Waystone", Vector2(-15, -100))
 	_build_enemy_spawns()
 	_build_devil_spawns()
+	_build_ranger_spawns()
 	_build_woodland()
 	_build_backdrop_trees()
 	_build_rocks()
@@ -101,6 +104,7 @@ func _ready() -> void:
 	generation_stats["paths"] = map_paths.size()
 	generation_stats["enemies"] = enemy_spawns.size()
 	generation_stats["devils"] = devil_spawns.size()
+	generation_stats["rangers"] = ranger_spawns.size()
 	generation_stats["texture_count"] = TextureLibrary.texture_count()
 	generation_stats["world_style"] = style.id
 
@@ -768,6 +772,13 @@ func _build_devil_spawns() -> void:
 		var point: Vector2 = record.at
 		devil_spawns.append({"mob": str(record.mob),
 			"position": _ground(point.x, point.y)})
+
+
+## Four crimson clone patrols hold the outer trails, away from the town's safe
+## ring so the gate and the keepers stay a safe haven.
+func _build_ranger_spawns() -> void:
+	for point in [Vector2(-34, -8), Vector2(28, -52), Vector2(-12, -62), Vector2(46, 22)]:
+		ranger_spawns.append({"position": _ground(point.x, point.y)})
 
 
 func _reserved(point: Vector2, margin: float) -> bool:

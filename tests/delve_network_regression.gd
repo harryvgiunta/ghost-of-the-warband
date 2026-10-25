@@ -101,6 +101,8 @@ class Report:
 func _store_report(payload: Dictionary) -> void:
 	if payload.has("client_error"):
 		reports["client_error"] = str(payload["client_error"])
+	elif bool(payload.get("depth3",false)):
+		reports["depth3"] = payload
 	elif bool(payload.get("depth2",false)):
 		reports["depth2"] = payload
 	elif bool(payload.get("open",false)):
@@ -143,16 +145,16 @@ func _host_run() -> void:
 	var ritual := await _wait_until(func(): return game.phase == "RITUAL",5.0)
 	check(ritual,"Touching the altar starts the ritual")
 	check(game.world.is_pentagram_active(),"The pentagram burns for the ritual")
-	check(game.wave_plan().size() == 10,"The first wave plan holds ten enemies")
+	check(game.wave_plan().size() == 26,"The first wave plan holds twenty-six enemies")
 	var wave := await _wait_until(func(): return game.phase == "WAVE" and not game.devils.is_empty(),8.0)
 	check(wave,"The ritual ends into the replicated wave")
-	check(game.wave_total == 10,"The first wave totals ten enemies")
+	check(game.wave_total == 26,"The first wave totals twenty-six enemies")
 
-	var observed: Dictionary = await _clear_host_wave(game,25.0)
+	var observed: Dictionary = await _clear_host_wave(game,40.0)
 	check(bool(observed["cleared"]),"The host breaks the wave and reaches the cache phase")
 	check(bool(observed["sealed_seen"]),"The room stays sealed during the wave")
 	check(not game.world.sealed,"Clearing the wave unseals the room")
-	check(int(observed["spawned"]) == 10,"Every planned devil spawned on the host")
+	check(int(observed["spawned"]) == 26,"Every planned devil spawned on the host")
 	var cached := await _wait_until(func(): return game.phase == "CLEARED" and game.chest_ready and is_instance_valid(game.chest),8.0)
 	check(cached,"The host spawns the cache after the clear delay")
 	check(not game.world.is_pentagram_active(),"The pentagram dims when the wave clears")
@@ -178,9 +180,8 @@ func _host_run() -> void:
 		check(bool(cleared_report.get("rope",false)) and bool(cleared_report.get("hole",false)),"The client sees the rope and hole open")
 		check(bool(cleared_report.get("host_alive",false)),"The client sees the host alive")
 		var client_roles: Array = cleared_report.get("roles",[])
-		for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
-			check(client_roles.has(role),"The client replicates the %s" % role)
-		check(bool(cleared_report.get("species_visuals",false)),"The client builds the imported species rigs")
+		check(client_roles.has("imp") and client_roles.has("devil"),"The client replicates the cycle-one imps and devils")
+		check(not client_roles.has("ranger") and not client_roles.has("hell_goat"),"Cycle one keeps clones and court devils out")
 
 	game.open_chest()
 	check(game.chest_open,"The host opens the cache")
@@ -204,6 +205,24 @@ func _host_run() -> void:
 		var client_phase := str(depth_report.get("phase",""))
 		check(client_phase == "DROP" or client_phase == "RITUAL" or client_phase == "WAVE","The client leaves the altar phase behind")
 		check(not bool(depth_report.get("rope",true)) and not bool(depth_report.get("hole",true)),"The next round keeps the rope and hole closed")
+
+	var ossuary_wave := await _wait_until(func(): return game.phase == "WAVE",20.0)
+	check(ossuary_wave,"The ossuary starts its 26-enemy wave")
+	var observed_two: Dictionary = await _clear_host_wave(game,45.0)
+	check(bool(observed_two["cleared"]),"The host clears the ossuary")
+	game.descend_next_depth()
+	check(game.depth == 3 and str(game.world.room_kind) == "sanctuary","The host reaches the cycle-two sanctuary")
+	game.begin_wave()
+	var wave_three := await _wait_until(func(): return game.phase == "WAVE",10.0)
+	check(wave_three,"The cycle-two sanctuary starts its wave")
+	var client_depth3 := await _wait_until(func(): return reports.has("depth3") or reports.has("client_error"),45.0)
+	check(client_depth3,"The client observes the cycle-two wave")
+	if reports.has("depth3"):
+		var roles_three: Array = reports["depth3"].get("roles",[])
+		for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
+			check(roles_three.has(role),"The client replicates the %s in cycle two" % role)
+		check(roles_three.has("ranger"),"The client replicates the crimson ranger clone")
+		check(bool(reports["depth3"].get("species_visuals",false)),"The client builds the imported species rigs in cycle two")
 
 	await _print_and_quit()
 
@@ -241,8 +260,9 @@ func _client_run(port: int) -> void:
 	var cleared_sent := false
 	var open_sent := false
 	var depth_sent := false
+	var depth3_sent := false
 	var last_phase := ""
-	var deadline := Time.get_ticks_msec() + 30000
+	var deadline := Time.get_ticks_msec() + 150000
 	while Time.get_ticks_msec() < deadline:
 		if game.world != null:
 			ritual_seen = maxf(ritual_seen,float(_run_state(game).get("ritual",0.0)))
@@ -291,7 +311,18 @@ func _client_run(port: int) -> void:
 				"room":str(game.world.room_kind),
 				"rope":game.world.is_rope_lowered(),"hole":game.world.is_hole_open()})
 			await create_timer(0.6).timeout
-			break
+		if depth_sent and game.depth == 3 and game.phase == "WAVE" and not depth3_sent:
+			var species_count := 0
+			for role in ["hell_goat","succubus","spawn","beast","gargoyle"]:
+				if roles_seen.has(role):
+					species_count += 1
+			if species_count >= 5 and roles_seen.has("ranger"):
+				depth3_sent = true
+				_trace("sending depth3 report")
+				report.submit.rpc_id(1,{"depth3":true,"roles":roles_seen.keys(),
+					"species_visuals":species_visuals})
+				await create_timer(0.6).timeout
+				break
 		await process_frame
 	if not cleared_sent:
 		_trace("failed to reach cleared; phase=" + str(game.phase))

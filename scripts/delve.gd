@@ -13,6 +13,7 @@ extends Node3D
 
 const Actor = preload("res://scripts/delve_actor.gd")
 const Devil = preload("res://scripts/delve_devil.gd")
+const RangerClone = preload("res://scripts/ranger_clone.gd")
 const Chest = preload("res://scripts/delve_chest.gd")
 const World = preload("res://scripts/delve_world.gd")
 const Hud = preload("res://scripts/delve_hud.gd")
@@ -42,9 +43,9 @@ const HOOK_KILL_DELAY := 2.0
 # Summoning ritual and wave schedule. Odd depths are the sanctuary, even depths
 # the ossuary, and each room alternates through a fresh palette cycle.
 const RITUAL_SECONDS := 3.2
-const WAVE1_TOTAL := 10
+const WAVE1_TOTAL := 26
 const WAVE1_SECONDS := 30.0
-const WAVE2_TOTAL := 20
+const WAVE2_TOTAL := 26
 const WAVE2_SECONDS := 40.0
 const SPAWN_CURVE := 0.6
 const SPAWN_PLAYER_CLEARANCE := 3.0
@@ -109,6 +110,7 @@ var _next_devil_id := 1
 var _devil_nodes: Dictionary = {}
 var _devil_dead_ids: Dictionary = {}
 var _last_devil_tick := -1
+var _last_clone_tick := -1
 var _auto_start := false
 var _kill_wave_hook := false
 var _exit_after := 0.0
@@ -697,11 +699,19 @@ func _physics_process(delta: float) -> void:
 					_receive_snapshot.rpc(server_tick,actor.slot,actor.snapshot())
 					_snapshot_ticks[actor.slot] = server_tick
 			var states: Array = []
+			var clone_states: Array = []
 			for devil in devils:
-				if is_instance_valid(devil):
+				if not is_instance_valid(devil):
+					continue
+				var clone_kind = devil.get("kind")
+				if clone_kind != null and int(clone_kind) == RangerClone.KIND:
+					clone_states.append(devil.snapshot())
+				else:
 					states.append(devil.snapshot())
 			if not states.is_empty():
 				_devil_snapshots.rpc(server_tick,states)
+			if not clone_states.is_empty():
+				_clone_snapshots.rpc(server_tick,clone_states)
 		_run_send_elapsed += delta
 		if _run_send_elapsed >= RUN_STATE_INTERVAL:
 			_run_send_elapsed = fmod(_run_send_elapsed,RUN_STATE_INTERVAL)
@@ -1640,17 +1650,23 @@ func _wave_total_for(kind: String, room_cycle: int) -> int:
 		return WAVE2_TOTAL + 3 * cycles
 	return WAVE1_TOTAL + 2 * cycles
 
-## Roles escalate from the cheap imps to the elites that close the wave. The
-## five starting-court species are scattered through that ladder, so every wave
-## fields one of each instead of arriving as a single late clump.
+## Cycle one is deliberately plain: sixteen imps and ten devils, no court
+## devils and no clones. From cycle two the ladder mixes species and clones.
 func _wave_roles(kind: String, total: int) -> Array:
 	var roles: Array = []
-	if kind == World.ROOM_OSSUARY:
-		var imps := mini(maxi(2,int(round(float(total) * 0.2))),total)
-		var brutes := mini(maxi(2,int(round(float(total) * 0.3))),total - imps)
+	if int(world.cycle) <= 1:
+		var imps := mini(16,total)
 		for index in imps:
 			roles.append(Devil.ROLE_IMP)
-		for index in total - imps - brutes:
+		for index in total - imps:
+			roles.append(Devil.ROLE_DEVIL)
+		return roles
+	if kind == World.ROOM_OSSUARY:
+		var heavy := mini(maxi(2,int(round(float(total) * 0.2))),total)
+		var brutes := mini(maxi(2,int(round(float(total) * 0.3))),total - heavy)
+		for index in heavy:
+			roles.append(Devil.ROLE_IMP)
+		for index in total - heavy - brutes:
 			roles.append(Devil.ROLE_BONEFIEND)
 		for index in brutes:
 			roles.append(Devil.ROLE_BRUTE)
@@ -1660,15 +1676,24 @@ func _wave_roles(kind: String, total: int) -> Array:
 			roles.append(Devil.ROLE_IMP)
 		for index in devils:
 			roles.append(Devil.ROLE_DEVIL)
+	var taken := {}
 	var species := mini(Devil.SPECIES_ROLES.size(),total)
 	for index in species:
 		var at := int(floor((float(index) + 0.5) * float(total) / float(species)))
+		taken[mini(at,total - 1)] = true
 		roles[mini(at,total - 1)] = str(Devil.SPECIES_ROLES[index])
+	var clones := mini(1 + int(world.cycle),4)
+	for index in clones:
+		var at := int(floor((float(index) + 0.5) * float(total) / float(clones)))
+		while taken.has(at):
+			at = (at + 1) % total
+		taken[at] = true
+		roles[at] = Devil.ROLE_RANGER
 	return roles
 
 func _wave_weapon(role: String, role_index: int) -> String:
-	if Devil.SPECIES_ROLES.has(role):
-		# The imported court fights bare-handed; nothing to drop.
+	if role == Devil.ROLE_RANGER or Devil.SPECIES_ROLES.has(role):
+		# Both pick their own kit; the clone rolls a random paperdoll.
 		return "claw"
 	if role == Devil.ROLE_IMP:
 		return "claw" if role_index % 2 == 0 else "dagger"
@@ -1821,6 +1846,19 @@ func _spawn_devil(entry: Dictionary) -> void:
 	var weapon := str(entry.get("weapon","claw"))
 	var point: Vector3 = entry.get("position",world.altar_position)
 	var facing: Vector3 = entry.get("facing",Vector3.ZERO)
+	if role == Devil.ROLE_RANGER:
+		var clone := RangerClone.new()
+		clone.name = "RangerClone%d" % _next_devil_id
+		clone.bounds = Devil.LIMIT
+		add_child(clone)
+		clone.configure(_next_devil_id,depth,true,"direct")
+		clone.spawn_at(point,facing)
+		clone.died.connect(_on_devil_died)
+		clone.struck.connect(_on_devil_struck)
+		clone.arrow_fired.connect(_on_clone_arrow)
+		devils.append(clone)
+		_next_devil_id += 1
+		return
 	var devil = Devil.new()
 	devil.name = "Devil%d" % _next_devil_id
 	add_child(devil)
@@ -1903,6 +1941,49 @@ func _on_devils_reset_local() -> void:
 	_devil_nodes.clear()
 	_devil_dead_ids.clear()
 	_last_devil_tick = -1
+
+@rpc("authority","call_remote","unreliable")
+func _clone_snapshots(tick: int, states: Array) -> void:
+	if network_role != "client" or tick <= _last_clone_tick:
+		return
+	_last_clone_tick = tick
+	for state in states:
+		if typeof(state) != TYPE_DICTIONARY:
+			continue
+		var id := int(state.get("id",0))
+		var state_alive := bool(state.get("alive",true))
+		if not state_alive:
+			_devil_dead_ids[id] = true
+		var node = _devil_nodes.get(id)
+		if node == null or not is_instance_valid(node):
+			if not state_alive:
+				continue
+			var created := RangerClone.new()
+			created.name = "RangerClone%d" % id
+			add_child(created)
+			created.configure(id,int(state.get("depth",depth)),false,"direct")
+			created.apply_snapshot(state)
+			_devil_nodes[id] = created
+			continue
+		node.apply_snapshot(state)
+
+
+func _on_clone_arrow(origin: Vector3, direction: Vector3, speed: float, _damage: float) -> void:
+	if network_role != "host":
+		return
+	_clone_arrow_event.rpc(origin,direction,speed)
+
+
+@rpc("authority","call_remote","reliable")
+func _clone_arrow_event(origin: Vector3, direction: Vector3, speed: float) -> void:
+	if network_role != "client":
+		return
+	var arrow := Arrow.new()
+	arrow.hit_mask = 1 | 4
+	arrow.authoritative_damage = false
+	add_child(arrow)
+	arrow.launch(origin,direction,speed,0.0,[])
+
 
 @rpc("authority","call_remote","unreliable")
 func _devil_snapshots(tick: int, states: Array) -> void:

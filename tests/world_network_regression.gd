@@ -120,6 +120,17 @@ func _host_run() -> void:
 		return
 	chosen.take_damage(5.0,-1)
 	var expected_health: float = chosen.health
+	var host_clone = null
+	for enemy in game._enemies_by_index:
+		if int(enemy.get("kind")) == 8:
+			host_clone = enemy
+			break
+	check(host_clone != null,"The frontier hosts ranger clones")
+	if host_clone != null:
+		host_clone.global_position = game.player.global_position + Vector3(-6.0,0.1,10.0)
+		host_clone.home = host_clone.global_position
+		host_clone.velocity = Vector3.ZERO
+		host_clone.auto_ai = false
 	game.player.global_position += Vector3(2.5,0.0,0.0)
 	seat.global_position += Vector3(0.0,0.0,2.5)
 	seat.take_damage(20.0,-1)
@@ -159,6 +170,11 @@ func _host_run() -> void:
 		check(int(data.get("loot",0)) >= 1,"The client spawns the host's dropped loot")
 		check(int(data.get("arrows",0)) >= 1,"The client renders the host's mob arrow")
 		check(bool(data.get("replicas",false)),"Every client mob is a host-driven replica")
+		check(int(data.get("clone_count",0)) == 4,"The client builds all four ranger clones")
+		check(bool(data.get("clone_replica",false)),"Clones are host-driven replicas on the client")
+		var clone_pos: Vector3 = data.get("clone_pos",Vector3.ZERO)
+		if host_clone != null:
+			check(clone_pos.distance_to(host_clone.global_position) < 0.8,"The client follows the host clone position (%s vs %s)" % [clone_pos,host_clone.global_position])
 		check(str(data.get("weapon","")) == "sword","The client sees its replicated sword")
 		check(float(data.get("host_health",100.0)) < 99.9,"The client sees the host ranger's damaged health")
 
@@ -232,9 +248,15 @@ func _client_run(port: int) -> void:
 	seats.sort()
 	var enemy = game._enemies_by_index[watch_index] if watch_index < game._enemies_by_index.size() else null
 	var replicas := true
+	var clone_replica = null
+	var clone_count := 0
 	for entry in game._enemies_by_index:
 		if not bool(entry.replica):
 			replicas = false
+		if int(entry.get("kind")) == 8:
+			clone_count += 1
+			if clone_replica == null:
+				clone_replica = entry
 	var payload := {"world":true,"slot":game.local_slot,"seats":seats,
 		"host_pos":game._seats[0].global_position if game._seats.has(0) else Vector3.ZERO,
 		"own_pos":game.player.global_position,"health":game.health,
@@ -244,6 +266,9 @@ func _client_run(port: int) -> void:
 		"loot":game.loot_pickups.size(),"arrows":game.arrows.size(),
 		"replicas":replicas,"hud":str(game.hud._session.text),
 		"weapon":str(game._seats[1].rig.weapon),
+		"clone_count":clone_count,
+		"clone_replica":bool(clone_replica.replica) if clone_replica != null else false,
+		"clone_pos":clone_replica.global_position if clone_replica != null else Vector3.ZERO,
 		"host_health":float(game._seats[0].health)}
 	print("WORLD_NET_CLIENT report slot=",game.local_slot," health=",game.health," loot=",game.loot_pickups.size())
 	report.submit.rpc_id(1,payload)

@@ -6,6 +6,7 @@ const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
+const RangerClone = preload("res://scripts/ranger_clone.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -245,6 +246,19 @@ func _ready() -> void:
 		devil.defeated.connect(_on_enemy_defeated)
 		devil.attacked.connect(_on_enemy_attack)
 		enemies.append(devil)
+	for index in world.ranger_spawns.size():
+		var record: Dictionary = world.ranger_spawns[index]
+		var clone := RangerClone.new()
+		clone.name = "RangerClone%d" % index
+		clone.bounds = world.WORLD_LIMIT - 2.0
+		clone.fallback_target = player
+		add_child(clone)
+		clone.configure(index,1,true,"scene")
+		clone.spawn_at(record.position + Vector3(0, 0.12, 0))
+		clone.defeated.connect(_on_enemy_defeated)
+		clone.attacked.connect(_on_enemy_attack)
+		clone.arrow_fired.connect(_on_mob_arrow)
+		enemies.append(clone)
 	_enemies_by_index = enemies.duplicate()
 	_setup_network()
 	_update_camera(1.0)
@@ -2036,7 +2050,9 @@ func _send_enemy_snapshots() -> void:
 		var state: Dictionary = enemy.snapshot()
 		state["i"] = index
 		chunk.append(state)
-		if chunk.size() >= ENEMY_CHUNK:
+		# A clone carries its pose dictionary; send it alone so a mixed chunk
+		# cannot push the datagram over ENet's MTU.
+		if chunk.size() >= ENEMY_CHUNK or int(state.get("kind",0)) == RangerClone.KIND:
 			_world_mobs.rpc(chunk)
 			chunk = []
 	if not chunk.is_empty():
