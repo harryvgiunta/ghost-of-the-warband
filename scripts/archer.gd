@@ -459,6 +459,12 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	_clear_melee()
 	consumable_kind = ""
 	var planar := Vector3(direction.x,0.0,direction.z)
+	if not ability_draw_curve.is_empty():
+		# A bow skill fires down the crosshair, not down the heading that was
+		# carried into the keypress: turn onto the aim before the first frame.
+		var offset := _aim_point-global_position
+		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
+			planar = Vector3(offset.x,0.0,offset.z)
 	if planar.length_squared() > 0.000001:
 		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
 	_update_pose(0.0)
@@ -468,6 +474,14 @@ func is_ability() -> bool:
 
 func ability_progress() -> float:
 	return clampf(_phase_time/maxf(ability_duration,0.01),0.0,1.0)
+
+## A release cue fires from the owning scene before this rig's own pose step,
+## so a shot would read the previous frame's hand origin. Solve the pose on
+## demand after the aim moved, keeping the shaft on the live crosshair.
+func refresh_bow_pose() -> void:
+	if not _built:
+		return
+	_update_pose(0.0)
 
 func cancel_ability() -> void:
 	if phase != "ABILITY":
@@ -1692,6 +1706,13 @@ func _update_pose(delta: float) -> void:
 				var tucked_yaw := atan2(-_cover_normal.x,-_cover_normal.z)
 				yaw = lerp_angle(tucked_yaw,yaw,smoothstep(0.0,1.0,_cover_lean.length()))
 			global_basis = Basis(Vector3.UP,yaw)
+	# Bow skills ride the crosshair: the body turns onto the aim on every pose
+	# solve, so each release cue leaves from the stance the player is looking
+	# through instead of the heading the skill began with.
+	if bow_ability and _roll_progress < 0.0:
+		var aim_offset := _aim_point-global_position
+		if Vector2(aim_offset.x,aim_offset.z).length_squared() > 0.0001:
+			global_basis = Basis(Vector3.UP,atan2(-aim_offset.x,-aim_offset.z))
 	# These nodes are rotation-only. Repeated Euler setters preserve extracted
 	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
 	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery+_ability_spin_yaw())

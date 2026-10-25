@@ -187,7 +187,7 @@ func _build_fireball() -> void:
 	_light.light_energy = 2.4
 	add_child(_light)
 
-	_trail = AbilityFx.spark_particles(AbilityFx.FIRE, 44, 0.4, 1.8, 0.38, 0.05, false)
+	_trail = AbilityFx.soft_spark_particles(AbilityFx.FIRE, 44, 0.4, 1.8, 0.38, 0.05, false)
 	_trail.emitting = true
 	_trail.emission_sphere_radius = 0.1
 	add_child(_trail)
@@ -219,7 +219,7 @@ func _build_bone_spear() -> void:
 	_visual.add_child(ghost_node)
 	_light = AbilityFx.flash_light(AbilityFx.BONE, 1.6, 3.5)
 	add_child(_light)
-	_trail = AbilityFx.spark_particles(AbilityFx.BONE, 40, 0.3, 1.4, 0.42, 0.045, false)
+	_trail = AbilityFx.soft_spark_particles(AbilityFx.BONE, 40, 0.3, 1.4, 0.42, 0.045, false)
 	_trail.emitting = true
 	_trail.emission_sphere_radius = 0.08
 	add_child(_trail)

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cq0oe65d6bjrn"
-path="res://.godot/imported/dash_stab.png-6fef7ec76fe7e962496ee7abb3faba5a.ctex"
+uid="uid://cmn3cevpwm5u4"
+path="res://.godot/imported/backstab.png-2120222d866ae62f6dd3522dc037e852.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/abilities/dash_stab.png"
-dest_files=["res://.godot/imported/dash_stab.png-6fef7ec76fe7e962496ee7abb3faba5a.ctex"]
+source_file="res://assets/ui/abilities/backstab.png"
+dest_files=["res://.godot/imported/backstab.png-2120222d866ae62f6dd3522dc037e852.ctex"]
 
 [params]
 

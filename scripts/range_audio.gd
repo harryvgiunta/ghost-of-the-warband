@@ -27,7 +27,7 @@ func _ready() -> void:
 	sounds["slash"] = _synthesize(0.20, 420.0, 0.58, 130.0)
 	sounds["lunge"] = _synthesize(0.26, 190.0, 0.52, 82.0)
 	sounds["spin"] = _synthesize(0.52, 124.0, 0.48, 380.0)
-	sounds["dash"] = _synthesize(0.16, 380.0, 0.72, 840.0)
+	sounds["backstab"] = _synthesize(0.22, 240.0, 0.66, 980.0)
 	sounds["fire"] = _synthesize(0.62, 96.0, 0.78, 46.0)
 	sounds["bone"] = _synthesize(0.36, 540.0, 0.30, 180.0)
 	sounds["bash"] = _synthesize(0.30, 160.0, 0.44, 88.0)

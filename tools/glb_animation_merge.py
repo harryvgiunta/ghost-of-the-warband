@@ -46,20 +46,24 @@ def clip_durations(document):
             for animation in document.get('animations', [])}
 
 
-def merge_clips(base_path, authored_path, clip_names):
+def merge_clips(base_path, authored_path, clip_names, remove_clips=()):
     """Replace/append only `clip_names` from `authored_path` inside `base_path`.
 
     Validates that node order matches, copies the referenced accessors into the
-    base binary chunk, then rewrites the base file. Returns the list of merged
-    clip names in authored order.
+    base binary chunk, then rewrites the base file. `remove_clips` names are
+    dropped from the base first, which retires renamed clips. Every animation
+    not named in either set is left untouched. Returns the merged names in
+    authored order.
     """
     clip_names = set(clip_names)
+    remove_clips = set(remove_clips)
     base, base_binary = read_glb(base_path)
     authored, authored_binary = read_glb(authored_path)
     if [n.get('name') for n in base['nodes']] != [n.get('name') for n in authored['nodes']]:
         raise RuntimeError('Authored GLB node order differs from the shipped rig')
     base_names = [n.get('name') for n in base['nodes']]
-    base['animations'] = [a for a in base.get('animations', []) if a.get('name') not in clip_names]
+    drop = clip_names | remove_clips
+    base['animations'] = [a for a in base.get('animations', []) if a.get('name') not in drop]
     merged = []
     for animation in authored.get('animations', []):
         if animation.get('name') not in clip_names:

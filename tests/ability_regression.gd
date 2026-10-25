@@ -77,7 +77,7 @@ func run() -> void:
 	var audio := Audio.new()
 	root.add_child(audio)
 	check(audio.sounds.has("barrage"), "The Barrage sound is synthesized and registered")
-	for id in ["volley","pierce","slash","lunge","spin","dash","fire","bone","bash","slam"]:
+	for id in ["volley","pierce","slash","lunge","spin","backstab","fire","bone","bash","slam"]:
 		check(audio.sounds.has(id), "The %s sound is synthesized and registered" % id)
 
 	# Activation: spend, ownership, HUD, cues and the committed clock.

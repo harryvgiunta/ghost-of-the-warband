@@ -251,6 +251,19 @@ func stagger(seconds: float) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 
+## Host-authoritative blink used by the dagger backstab. The body appears at
+## `point` facing `yaw` on the same simulation tick; the interpolation buffer
+## is emptied so a remote peer snaps to the new pose instead of sliding there.
+func teleport_to(point: Vector3, yaw: float) -> void:
+	if not authoritative:
+		return
+	global_position = point
+	velocity = Vector3.ZERO
+	_target_position = global_position
+	_states.clear()
+	if is_instance_valid(rig):
+		rig.global_basis = Basis(Vector3.UP, yaw)
+
 func try_step(direction: Vector3) -> bool:
 	if not authoritative or not alive or combat.stagger_time > 0.0 or ability.active:
 		return false

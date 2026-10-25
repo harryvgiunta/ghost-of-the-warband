@@ -125,6 +125,37 @@ def speed_lines(draw: ImageDraw.ImageDraw, x0: float, y0: float, x1: float,
                   fill=color, width=u(2.2))
 
 
+def fade_layer(image: Image.Image, alpha: float) -> Image.Image:
+    """Scale a whole layer's alpha so it composites as light, not paint.
+
+    ImageDraw writes pixels directly, so overlapping translucent shapes on the
+    base canvas punch holes instead of stacking. Motion light goes on its own
+    layer, gets faded once, and is alpha-composited over the solid glyphs.
+    """
+    image.putalpha(image.getchannel("A").point(lambda value: int(value * alpha)))
+    return image
+
+
+def sweep(draw: ImageDraw.ImageDraw, cx: float, cy: float, radius: float,
+          spread: float, start: float, width: float, color) -> None:
+    """A tapered crescent: thick behind, vanishing to points at both tips."""
+    import math
+    steps = 56
+    outer: list[tuple[int, int]] = []
+    inner: list[tuple[int, int]] = []
+    for index in range(steps + 1):
+        t = index / steps
+        angle = math.radians(start + spread * t)
+        taper = math.sin(math.pi * t) ** 0.6
+        outer_r = radius + width * taper * 0.5
+        inner_r = radius - width * taper * 0.5
+        outer.append((u(cx + math.cos(angle) * outer_r),
+                      u(cy + math.sin(angle) * outer_r)))
+        inner.append((u(cx + math.cos(angle) * inner_r),
+                      u(cy + math.sin(angle) * inner_r)))
+    draw.polygon(outer + inner[::-1], fill=color)
+
+
 def build_charge() -> Image.Image:
     image, draw = canvas()
     for offset, length, width in ((26, 24, 5), (48, 20, 4), (70, 15, 3)):
@@ -190,27 +221,74 @@ def build_lunge_thrust() -> Image.Image:
 
 def build_spin_slash() -> Image.Image:
     image, draw = canvas()
-    for start, end, color, width in ((-150, -20, GOLD, 6), (-10, 120, TEAL, 5),
-                                      (130, 250, GOLD_DIM, 4)):
-        draw.arc([u(12), u(12), u(116), u(116)], start=start, end=end,
-                 fill=color, width=u(width))
     import math
-    for angle in (-20, 120, 250):
+    # Motion light goes on its own layer: two crossed crescents for the full
+    # turn, a bright leading edge and a few radial ticks.
+    glow, gdraw = canvas()
+    sweep(gdraw, 64, 62, 45.0, 208.0, -166.0, 19.0, GOLD)
+    sweep(gdraw, 64, 62, 33.0, 188.0, 4.0, 12.0, TEAL)
+    sweep(gdraw, 64, 62, 52.0, 104.0, -74.0, 5.0, CREAM)
+    image.alpha_composite(fade_layer(glow, 0.6))
+    for index in range(7):
+        angle = math.radians(-148 + index * 31)
+        x0, y0 = 64 + math.cos(angle) * 47, 62 + math.sin(angle) * 47
+        x1, y1 = 64 + math.cos(angle) * 59, 62 + math.sin(angle) * 59
+        draw.line([(u(x0), u(y0)), (u(x1), u(y1))], fill=TEAL, width=u(2))
+    # The blade that is sweeping: bright current frame plus a dim ghost of the
+    # previous one, so the icon reads as rotation instead of a ring.
+    blade(draw, 24, 98, -1.02, 60, 5, CREAM)
+    blade(draw, 40, 102, -1.36, 42, 3, GOLD_DIM)
+    for angle, radius in ((-166.0, 45.0), (42.0, 45.0), (-74.0, 52.0)):
         tip = math.radians(angle)
-        x, y = 64 + math.cos(tip) * 50, 64 + math.sin(tip) * 50
-        draw.ellipse([u(x - 5), u(y - 5), u(x + 5), u(y + 5)], fill=CREAM)
-    blade(draw, 42, 82, -0.7, 40, 4, CREAM)
+        x, y = 64 + math.cos(tip) * radius, 62 + math.sin(tip) * radius
+        draw.ellipse([u(x - 3.4), u(y - 3.4), u(x + 3.4), u(y + 3.4)], fill=CREAM)
     return image.resize((SIZE, SIZE), Image.LANCZOS)
 
 
-def build_dash_stab() -> Image.Image:
+def build_backstab() -> Image.Image:
     image, draw = canvas()
-    for index in range(4):
-        y = 30 + index * 20
-        draw.line([(u(4 + index * 4), u(y)), (u(46 + index * 6), u(y))],
-                  fill=TEAL_DIM, width=u(3))
-    blade(draw, 46, 66, -0.18, 62, 5, CREAM)
-    draw.polygon([(u(96), u(66)), (u(118), u(50)), (u(110), u(74))], fill=TEAL)
+    import math
+    # Target seen from behind: a dark hood and shoulders, rim-lit on the far
+    # side so the silhouette reads as facing away.
+    draw.polygon([
+        (u(54), u(44)),
+        (u(90), u(44)),
+        (u(100), u(70)),
+        (u(96), u(120)),
+        (u(48), u(120)),
+        (u(44), u(70)),
+    ], fill=INK)
+    draw.ellipse([u(60), u(24), u(90), u(54)], fill=INK)
+    draw.arc([u(60), u(24), u(90), u(54)], start=-72, end=68, fill=TEAL_DIM, width=u(3))
+    draw.arc([u(52), u(44), u(100), u(118)], start=-64, end=64, fill=TEAL_DIM, width=u(3))
+    # Rising smoke off the wound, thin and translucent.
+    wisp, wdraw = canvas()
+    for index in range(3):
+        x0 = 40 - index * 8
+        top = 10 + index * 9
+        wdraw.arc([u(x0 - 9), u(top), u(x0 + 18), u(top + 40)],
+                  start=110, end=255, fill=TEAL_DIM if index != 1 else GOLD_DIM,
+                  width=u(2.6))
+    image.alpha_composite(fade_layer(wisp, 0.55))
+    # The plunge: a bright dagger driven down into the back, with the grip above
+    # the shoulder and a soft red smear along the thrust line.
+    smear, sdraw = canvas()
+    sdraw.line([(u(14), u(10)), (u(56), u(42))], fill=EMBER, width=u(5))
+    sdraw.line([(u(20), u(6)), (u(50), u(30))], fill=EMBER_HOT, width=u(2))
+    image.alpha_composite(fade_layer(smear, 0.55))
+    blade(draw, 24, 20, 0.66, 48, 4.2, CREAM)
+    draw.line([(u(16), u(14)), (u(24), u(20))], fill=GOLD_DIM, width=u(6))
+    draw.ellipse([u(11), u(9), u(21), u(19)], fill=GOLD)
+    # Impact: red-hot core with alternating gold spikes.
+    tipx, tipy = 62.0, 48.0
+    for index in range(8):
+        angle = math.radians(index * 45.0 + 14.0)
+        reach = 15.0 if index % 2 == 0 else 9.0
+        draw.line([(u(tipx + math.cos(angle) * 4.0), u(tipy + math.sin(angle) * 4.0)),
+                   (u(tipx + math.cos(angle) * reach), u(tipy + math.sin(angle) * reach))],
+                  fill=EMBER if index % 2 == 0 else GOLD, width=u(2.6))
+    draw.ellipse([u(tipx - 6.0), u(tipy - 6.0), u(tipx + 6.0), u(tipy + 6.0)], fill=EMBER)
+    draw.ellipse([u(tipx - 3.0), u(tipy - 3.0), u(tipx + 3.0), u(tipy + 3.0)], fill=EMBER_HOT)
     return image.resize((SIZE, SIZE), Image.LANCZOS)
 
 
@@ -287,7 +365,7 @@ BUILDERS = {
     "double_slash": build_double_slash,
     "lunge_thrust": build_lunge_thrust,
     "spin_slash": build_spin_slash,
-    "dash_stab": build_dash_stab,
+    "backstab": build_backstab,
     "fireball": build_fireball,
     "bone_spear": build_bone_spear,
     "shield_bash": build_shield_bash,

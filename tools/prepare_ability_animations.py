@@ -57,10 +57,10 @@ CLIPS = [
     ('Bow_Barrage', 1.15, None, 'bow'),
     ('Bow_Triple_Volley', 1.0, None, 'bow'),
     ('Bow_Piercing_Shot', 1.25, None, 'bow'),
-    ('Sword_Double_Slash', 1.1, None, 'sword'),
-    ('Sword_Lunge_Thrust', 1.0, None, 'sword'),
-    ('Sword_Spin_Slash', 1.35, None, 'sword'),
-    ('Dagger_Dash_Stab', 0.85, None, 'dagger'),
+    ('Sword_Double_Slash', 1.0, None, 'sword'),
+    ('Sword_Lunge_Thrust', 0.95, None, 'sword'),
+    ('Sword_Spin_Slash', 0.95, None, 'sword'),
+    ('Dagger_Backstab', 0.9, None, 'dagger'),
     ('Staff_Fireball_Cast', 1.2, None, 'staff'),
     ('Staff_Bone_Spear_Cast', 1.15, None, 'staff'),
     ('Shield_Bash', 0.8, None, 'shield'),
@@ -68,6 +68,10 @@ CLIPS = [
     ('Shield_Ground_Slam', 1.1, None, 'shield'),
 ]
 AUTHORED = {name for name, _s, _b, _k in CLIPS}
+# Clips re-authored in this pass. Everything else already in the shipped GLB is
+# left byte-for-byte untouched, so the merge copies only these.
+REWORKED = ('Sword_Double_Slash', 'Sword_Lunge_Thrust', 'Sword_Spin_Slash', 'Dagger_Backstab')
+RETIRED = {'Dagger_Dash_Stab'}
 
 for action in list(bpy.data.actions):
     if action.name in AUTHORED or action.name.startswith(tuple(name + '.' for name in AUTHORED)):
@@ -480,169 +484,205 @@ def build_piercing(t):
 # for this rig means a box roughly x -0.22..0.10, y -0.31..0.06, z 1.08..1.60.
 # The blade does the reaching; the hands stay near the chest.
 def build_double_slash(t):
-    p = pose(weight=envelope(t, 0.10, 0.16))
+    p = pose(weight=envelope(t, 0.08, 0.14))
+    # Cut 1 lands at 0.26 (high-right -> low-left), cut 2 at 0.52
+    # (low-left -> high-right). Hip and chest lead every change of direction.
     p['wrist_r'] = track(t, [
         (0.00, BASE_WRIST['r']),
-        (0.10, Vector((-0.160, 0.020, 1.500))),
-        (0.22, Vector((-0.180, 0.060, 1.540))),
-        (0.40, Vector((0.020, -0.240, 1.160))),
-        (0.48, Vector((0.060, -0.180, 1.100))),
-        (0.60, Vector((-0.020, -0.220, 1.380))),
-        (0.80, Vector((-0.220, -0.160, 1.280))),
-        (0.90, Vector((-0.220, -0.100, 1.240))),
+        (0.09, Vector((-0.145, 0.010, 1.470))),
+        (0.19, Vector((-0.175, 0.050, 1.505))),
+        (0.26, Vector((0.005, -0.250, 1.235))),
+        (0.33, Vector((0.045, -0.190, 1.140))),
+        (0.41, Vector((0.060, -0.150, 1.115))),
+        (0.52, Vector((-0.100, -0.255, 1.340))),
+        (0.60, Vector((-0.160, -0.195, 1.445))),
+        (0.72, Vector((-0.180, -0.120, 1.330))),
+        (0.86, Vector((-0.200, -0.060, 1.240))),
         (1.00, BASE_WRIST['r']),
     ])
     blade = track(t, [
         (0.00, Vector((0.10, 0.30, 0.95))),
-        (0.10, Vector((-0.42, 0.34, 0.84))),
-        (0.22, Vector((-0.50, 0.40, 0.77))),
-        (0.40, Vector((0.62, -0.55, -0.56))),
-        (0.48, Vector((0.80, -0.35, -0.48))),
-        (0.60, Vector((0.90, -0.35, 0.10))),
-        (0.80, Vector((-0.88, -0.40, 0.15))),
-        (0.90, Vector((-0.70, -0.50, 0.42))),
+        (0.09, Vector((-0.48, 0.34, 0.81))),
+        (0.19, Vector((-0.55, 0.42, 0.72))),
+        (0.26, Vector((0.55, -0.62, -0.55))),
+        (0.33, Vector((0.78, -0.38, -0.50))),
+        (0.41, Vector((0.55, 0.14, -0.82))),
+        (0.52, Vector((-0.45, -0.78, 0.44))),
+        (0.60, Vector((-0.65, -0.50, 0.57))),
+        (0.72, Vector((-0.35, -0.32, 0.88))),
+        (0.86, Vector((-0.10, -0.10, 0.99))),
         (1.00, Vector((0.10, 0.30, 0.95))),
     ])
     p['handq_r'] = hand_for_direction(blade)
     p['support'] = SWORD_SUPPORT
-    p['elbow_l'] = Vector((0.34, 0.06, 1.24))
+    p['elbow_l'] = Vector((0.34, 0.04, 1.24))
     p['elbow_r'] = Vector((-0.40, 0.10, 1.34))
-    p['yaw'] = track(t, [(0.00, 0.0), (0.10, -18.0), (0.22, -25.0), (0.40, 16.0), (0.48, 24.0),
-                         (0.60, 20.0), (0.80, -26.0), (0.90, -16.0), (1.00, 0.0)])
-    p['lean'] = track(t, [(0.00, 0.0), (0.10, -4.0), (0.22, -5.0), (0.40, 13.0), (0.48, 15.0),
-                          (0.60, 5.0), (0.80, 14.0), (0.90, 7.0), (1.00, 0.0)])
-    p['drop'] = track(t, [(0.00, 0.0), (0.22, 0.025), (0.40, 0.075), (0.48, 0.085),
-                          (0.60, 0.045), (0.80, 0.075), (0.90, 0.040), (1.00, 0.0)])
-    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.22, 0.025), (0.40, -0.045), (0.60, 0.0),
-                                 (0.80, -0.050), (1.0, 0.0)]), 0.0)
+    p['yaw'] = track(t, [(0.00, 0.0), (0.09, -16.0), (0.19, -24.0), (0.26, 22.0), (0.33, 26.0),
+                         (0.41, 20.0), (0.52, -22.0), (0.60, -26.0), (0.72, -14.0),
+                         (0.86, -6.0), (1.00, 0.0)])
+    p['lean'] = track(t, [(0.00, 0.0), (0.09, -5.0), (0.19, -7.0), (0.26, 15.0), (0.33, 17.0),
+                          (0.41, 10.0), (0.52, 14.0), (0.60, 16.0), (0.72, 6.0),
+                          (0.86, 2.0), (1.00, 0.0)])
+    p['drop'] = track(t, [(0.00, 0.0), (0.19, 0.020), (0.26, 0.080), (0.41, 0.070), (0.52, 0.080),
+                          (0.60, 0.075), (0.72, 0.045), (0.86, 0.020), (1.00, 0.0)])
+    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.19, 0.025), (0.26, -0.050), (0.41, -0.020),
+                                 (0.52, -0.055), (0.60, -0.045), (0.80, 0.0), (1.0, 0.0)]), 0.0)
     p['head_yaw'] = -0.30 * p['yaw']
-    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.020, -0.040, 0.0))
-    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.030, 0.030, 0.0))
+    p['head_pitch'] = track(t, [(0.0, 0.0), (0.19, -3.0), (0.28, 4.0), (0.52, -2.0), (0.80, 0.0), (1.0, 0.0)])
+    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.025, -0.045, 0.0))
+    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.035, 0.030, 0.0))
+    p['foot_yaw_l'] = 8.0
     return p
 
 
 def build_lunge_thrust(t):
-    p = pose(weight=envelope(t, 0.10, 0.18))
-    step = track(t, [(0.00, 0.0), (0.18, 0.0), (0.30, 0.55), (0.44, 1.0), (0.62, 1.0),
-                     (0.84, 0.0), (1.00, 0.0)])
-    lift = track(t, [(0.00, 0.0), (0.20, 0.0), (0.30, 0.06), (0.42, 0.0), (0.78, 0.0),
-                     (0.86, 0.05), (0.94, 0.0), (1.00, 0.0)])
+    # The controller travels 1.78 m over the first 0.24 s, so the lead-foot
+    # step and the pelvis travel are authored inside 0.02-0.24 and then held:
+    # the body must not glide first and step later.
+    p = pose(weight=envelope(t, 0.05, 0.16))
+    step = track(t, [(0.00, 0.0), (0.02, 0.10), (0.10, 0.70), (0.20, 1.0), (0.72, 1.0),
+                     (0.92, 0.0), (1.00, 0.0)])
+    lift = track(t, [(0.00, 0.0), (0.02, 0.05), (0.10, 0.075), (0.18, 0.0), (0.80, 0.0),
+                     (0.88, 0.05), (0.96, 0.0), (1.00, 0.0)])
     p['wrist_r'] = track(t, [
         (0.00, BASE_WRIST['r']),
-        (0.12, Vector((-0.200, -0.010, 1.240))),
-        (0.28, Vector((-0.220, 0.030, 1.200))),
-        (0.44, Vector((0.000, -0.300, 1.320))),
-        (0.56, Vector((0.000, -0.310, 1.320))),
-        (0.70, Vector((-0.120, -0.180, 1.260))),
+        (0.08, Vector((-0.195, -0.020, 1.190))),
+        (0.20, Vector((-0.205, -0.075, 1.155))),
+        (0.30, Vector((-0.115, -0.175, 1.230))),
+        (0.42, Vector((0.000, -0.300, 1.310))),
+        (0.55, Vector((0.000, -0.310, 1.305))),
+        (0.68, Vector((-0.060, -0.240, 1.285))),
+        (0.80, Vector((-0.150, -0.120, 1.240))),
         (1.00, BASE_WRIST['r']),
     ])
     blade = track(t, [
         (0.00, Vector((0.10, 0.30, 0.95))),
-        (0.12, Vector((0.06, -0.95, 0.30))),
-        (0.28, Vector((0.08, -0.99, 0.10))),
-        (0.44, Vector((0.01, -1.00, 0.04))),
-        (0.56, Vector((0.01, -0.99, 0.10))),
-        (0.70, Vector((0.06, -0.95, 0.30))),
+        (0.08, Vector((0.05, -0.96, 0.27))),
+        (0.20, Vector((0.04, -0.99, 0.12))),
+        (0.30, Vector((0.02, -1.00, 0.06))),
+        (0.42, Vector((0.01, -1.00, 0.02))),
+        (0.55, Vector((0.01, -1.00, 0.02))),
+        (0.68, Vector((0.03, -0.99, 0.10))),
+        (0.80, Vector((0.06, -0.94, 0.33))),
         (1.00, Vector((0.10, 0.30, 0.95))),
     ])
     p['handq_r'] = hand_for_direction(blade)
     p['support'] = SWORD_SUPPORT
-    p['elbow_l'] = Vector((0.34, 0.02, 1.28))
-    p['elbow_r'] = Vector((-0.38, 0.16, 1.30))
-    p['yaw'] = track(t, [(0.00, 0.0), (0.12, -10.0), (0.28, -14.0), (0.44, -2.0), (0.56, -1.0),
-                         (0.72, -7.0), (1.00, 0.0)])
-    p['lean'] = track(t, [(0.00, 0.0), (0.12, -3.0), (0.28, 3.0), (0.44, 16.0), (0.56, 17.0),
-                          (0.72, 8.0), (1.00, 0.0)])
-    p['drop'] = track(t, [(0.00, 0.0), (0.28, 0.030), (0.44, 0.120), (0.60, 0.125),
-                          (0.78, 0.045), (1.00, 0.0)])
-    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.28, 0.020), (0.44, -0.165), (0.62, -0.150),
-                                 (0.82, 0.0), (1.0, 0.0)]), 0.0)
+    p['elbow_l'] = Vector((0.34, 0.00, 1.28))
+    p['elbow_r'] = Vector((-0.38, 0.14, 1.28))
+    p['yaw'] = track(t, [(0.00, 0.0), (0.08, -8.0), (0.20, -14.0), (0.42, -2.0), (0.55, -1.0),
+                         (0.70, -6.0), (0.86, -3.0), (1.00, 0.0)])
+    p['lean'] = track(t, [(0.00, 0.0), (0.10, 7.0), (0.20, 9.0), (0.30, 13.0), (0.42, 17.0),
+                          (0.58, 18.0), (0.72, 11.0), (0.86, 5.0), (1.00, 0.0)])
+    p['drop'] = track(t, [(0.00, 0.0), (0.10, 0.070), (0.20, 0.115), (0.42, 0.130), (0.58, 0.130),
+                          (0.74, 0.080), (0.88, 0.030), (1.00, 0.0)])
+    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.02, -0.030), (0.12, -0.150), (0.22, -0.205),
+                                 (0.60, -0.205), (0.78, -0.110), (0.92, 0.0), (1.0, 0.0)]), 0.0)
     p['head_yaw'] = -0.25 * p['yaw']
-    p['head_pitch'] = track(t, [(0.0, 0.0), (0.26, 3.0), (0.46, -6.0), (0.74, -2.0), (1.0, 0.0)])
+    p['head_pitch'] = track(t, [(0.0, 0.0), (0.20, 4.0), (0.42, -6.0), (0.62, -5.0), (0.84, 0.0), (1.0, 0.0)])
     p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.020, -0.360 * step, lift))
-    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.020, 0.0, 0.0))
-    p['foot_yaw_r'] = -12.0 * step
+    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.025, 0.040 * step, 0.0))
+    p['foot_yaw_r'] = -14.0 * step
     return p
 
 
 def build_spin_slash(t):
-    p = pose(weight=envelope(t, 0.12, 0.20))
-    sink = track(t, [(0.00, 0.0), (0.18, 0.85), (0.34, 1.0), (0.78, 1.0), (0.92, 0.5), (1.00, 0.0)])
-    angle = track(t, [(0.00, -10.0), (0.18, -78.0), (0.36, -46.0), (0.52, 6.0),
-                      (0.68, 46.0), (0.80, 78.0), (0.90, 44.0), (1.00, -10.0)])
+    # Fast low pivot: the blade is airborne and horizontal from 0.15 to 0.85 of
+    # the clip while the runtime adds the 360 degree model turn (trail at 0.20,
+    # damage at 0.50). Compact feet, no stride, both soles on the floor.
+    p = pose(weight=envelope(t, 0.10, 0.14))
+    sink = track(t, [(0.00, 0.0), (0.10, 0.85), (0.20, 1.0), (0.80, 1.0), (0.90, 0.5), (1.00, 0.0)])
+    angle = track(t, [(0.00, -14.0), (0.15, -80.0), (0.32, -32.0), (0.50, 4.0),
+                      (0.68, 46.0), (0.85, 84.0), (0.93, 30.0), (1.00, -14.0)])
     p['wrist_r'] = track(t, [
         (0.00, BASE_WRIST['r']),
-        (0.18, Vector((-0.200, -0.040, 1.340))),
-        (0.36, Vector((-0.160, -0.180, 1.280))),
-        (0.52, Vector((0.000, -0.280, 1.240))),
-        (0.68, Vector((0.080, -0.240, 1.220))),
-        (0.80, Vector((0.100, -0.140, 1.200))),
-        (0.90, Vector((0.020, -0.060, 1.240))),
+        (0.15, Vector((-0.205, -0.050, 1.310))),
+        (0.32, Vector((-0.140, -0.215, 1.270))),
+        (0.50, Vector((0.000, -0.275, 1.245))),
+        (0.68, Vector((0.070, -0.225, 1.225))),
+        (0.85, Vector((0.100, -0.120, 1.205))),
         (1.00, BASE_WRIST['r']),
     ])
-    blade = Vector((math.sin(math.radians(angle)), -math.cos(math.radians(angle)), 0.030)).normalized()
+    blade = Vector((math.sin(math.radians(angle)), -math.cos(math.radians(angle)), 0.020)).normalized()
     p['handq_r'] = hand_for_direction(blade)
     p['support'] = SWORD_SUPPORT
-    p['elbow_l'] = Vector((0.34, 0.02, 1.22))
-    p['elbow_r'] = Vector((-0.38, 0.12, 1.26))
-    p['drop'] = 0.105 * sink
-    p['yaw'] = 0.36 * angle
-    p['lean'] = 7.0 * sink
-    p['side'] = -2.5 * sink
-    p['shift'] = (0.070 * math.sin(math.radians(angle)), 0.0, 0.0)
+    p['elbow_l'] = Vector((0.34, 0.02, 1.24))
+    p['elbow_r'] = Vector((-0.38, 0.12, 1.27))
+    p['drop'] = 0.100 * sink
+    p['yaw'] = 0.32 * angle
+    p['lean'] = 8.0 * sink
+    p['side'] = -2.0 * sink
+    p['shift'] = (0.055 * math.sin(math.radians(angle)), 0.0, 0.0)
     p['head_yaw'] = -0.45 * p['yaw']
-    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.085 * sink, -0.050 * sink, 0.0))
-    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.085 * sink, 0.025 * sink, 0.0))
-    p['foot_yaw_r'] = -20.0 * sink
+    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.085 * sink, -0.045 * sink, 0.0))
+    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.085 * sink, 0.020 * sink, 0.0))
+    p['foot_yaw_r'] = -22.0 * sink
     return p
 
 
 # --- Dagger ---------------------------------------------------------------- #
-def build_dash_stab(t):
-    p = pose(weight=envelope(t, 0.10, 0.17))
-    step = track(t, [(0.00, 0.0), (0.16, 0.0), (0.28, 0.6), (0.40, 1.0), (0.60, 1.0),
-                     (0.82, 0.0), (1.00, 0.0)])
-    lift = track(t, [(0.00, 0.0), (0.20, 0.0), (0.28, 0.055), (0.38, 0.0), (0.80, 0.0),
-                     (0.88, 0.045), (0.96, 0.0), (1.00, 0.0)])
+def build_dagger_backstab(t):
+    # Gathering crouch (0-0.20), a compressed blink at 0.20, then the arrival:
+    # the actor is teleported behind the target at 0.20, so 0.30-0.55 must read
+    # as a plunge straight down-forward from a low, tucked body, never as a dash.
+    p = pose(weight=envelope(t, 0.06, 0.14))
+    blink = track(t, [(0.00, 0.0), (0.06, 0.45), (0.13, 0.85), (0.20, 1.0), (0.30, 0.75),
+                      (0.42, 0.30), (0.60, 0.20), (0.80, 0.15), (1.00, 0.0)])
+    plunge = track(t, [(0.00, 0.0), (0.24, 0.0), (0.30, 0.35), (0.40, 0.85), (0.50, 1.0),
+                       (0.60, 0.95), (0.72, 0.40), (0.86, 0.0), (1.00, 0.0)])
     p['wrist_r'] = track(t, [
         (0.00, BASE_WRIST['r']),
-        (0.14, Vector((-0.255, 0.045, 1.205))),
-        (0.26, Vector((-0.235, 0.110, 1.190))),
-        (0.40, Vector((-0.075, -0.320, 1.245))),
-        (0.54, Vector((-0.080, -0.340, 1.230))),
-        (0.70, Vector((-0.205, -0.150, 1.160))),
+        (0.08, Vector((-0.190, -0.010, 1.150))),
+        (0.20, Vector((-0.175, 0.020, 1.080))),
+        (0.30, Vector((-0.120, -0.120, 1.120))),
+        (0.40, Vector((-0.020, -0.270, 1.100))),
+        (0.50, Vector((0.010, -0.300, 1.060))),
+        (0.60, Vector((0.010, -0.290, 1.075))),
+        (0.72, Vector((-0.090, -0.170, 1.150))),
+        (0.86, Vector((-0.200, -0.050, 1.180))),
         (1.00, BASE_WRIST['r']),
     ])
     blade = track(t, [
         (0.00, Vector((0.10, 0.30, 0.95))),
-        (0.14, Vector((0.08, -0.96, 0.26))),
-        (0.26, Vector((0.10, -0.99, 0.05))),
-        (0.40, Vector((0.03, -1.00, 0.00))),
-        (0.54, Vector((0.03, -0.99, 0.06))),
-        (0.70, Vector((0.08, -0.96, 0.24))),
+        (0.08, Vector((0.06, -0.90, 0.42))),
+        (0.20, Vector((0.04, -0.62, 0.78))),
+        (0.30, Vector((0.05, -0.86, -0.50))),
+        (0.40, Vector((0.04, -0.82, -0.57))),
+        (0.50, Vector((0.04, -0.79, -0.61))),
+        (0.60, Vector((0.05, -0.82, -0.57))),
+        (0.72, Vector((0.07, -0.90, 0.42))),
+        (0.86, Vector((0.09, -0.94, 0.33))),
         (1.00, Vector((0.10, 0.30, 0.95))),
     ])
     p['handq_r'] = hand_for_direction(blade)
+    # Left hand guards in front of the chest, then pins the target space.
     p['wrist_l'] = track(t, [
         (0.00, BASE_WRIST['l']),
-        (0.30, Vector((0.395, 0.075, 1.245))),
-        (0.60, Vector((0.375, 0.110, 1.220))),
+        (0.12, Vector((0.180, -0.190, 1.180))),
+        (0.20, Vector((0.150, -0.120, 1.115))),
+        (0.40, Vector((0.190, -0.280, 1.170))),
+        (0.56, Vector((0.205, -0.300, 1.160))),
+        (0.72, Vector((0.230, -0.200, 1.200))),
+        (0.88, Vector((0.290, -0.090, 1.120))),
         (1.00, BASE_WRIST['l']),
     ])
-    p['elbow_l'] = Vector((0.52, 0.16, 1.24))
-    p['elbow_r'] = Vector((-0.40, 0.18, 1.30))
-    p['yaw'] = track(t, [(0.00, 0.0), (0.14, -6.0), (0.26, -14.0), (0.40, -6.0), (0.56, -4.0),
-                         (0.74, -8.0), (1.00, 0.0)])
-    p['lean'] = track(t, [(0.00, 0.0), (0.14, 3.0), (0.26, 1.0), (0.40, 16.0), (0.54, 17.0),
-                          (0.72, 6.0), (1.00, 0.0)])
-    p['drop'] = track(t, [(0.00, 0.0), (0.26, 0.045), (0.40, 0.090), (0.56, 0.085),
-                          (0.76, 0.030), (1.00, 0.0)])
-    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.26, 0.020), (0.40, -0.125), (0.62, -0.100),
-                                 (0.84, 0.0), (1.0, 0.0)]), 0.0)
-    p['head_pitch'] = track(t, [(0.0, 0.0), (0.26, 3.0), (0.42, -6.0), (0.72, -1.0), (1.0, 0.0)])
-    p['head_yaw'] = -0.35 * p['yaw']
-    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.010, -0.300 * step, lift))
-    p['ankle_r'] = BASE_ANKLE['r'] + Vector((0.0, 0.030 * step, 0.0))
+    p['elbow_l'] = Vector((0.42, -0.02, 1.16))
+    p['elbow_r'] = Vector((-0.38, 0.10, 1.18))
+    p['yaw'] = track(t, [(0.00, 0.0), (0.08, 8.0), (0.20, 12.0), (0.32, -4.0), (0.50, -8.0),
+                         (0.62, -7.0), (0.80, 0.0), (1.00, 0.0)])
+    p['lean'] = track(t, [(0.00, 0.0), (0.08, 12.0), (0.20, 24.0), (0.32, 20.0), (0.50, 26.0),
+                          (0.62, 25.0), (0.80, 10.0), (1.00, 0.0)])
+    p['drop'] = track(t, [(0.00, 0.0), (0.08, 0.080), (0.20, 0.165), (0.32, 0.140), (0.50, 0.175),
+                          (0.62, 0.165), (0.80, 0.070), (1.00, 0.0)])
+    p['shift'] = (0.0, track(t, [(0.0, 0.0), (0.08, -0.020), (0.20, 0.010), (0.32, -0.045),
+                                 (0.50, -0.060), (0.66, -0.040), (0.86, 0.0), (1.0, 0.0)]), 0.0)
+    p['side'] = 3.0 * blink
+    p['head_pitch'] = track(t, [(0.0, 0.0), (0.14, -8.0), (0.24, 6.0), (0.42, 10.0), (0.60, 8.0),
+                                (0.78, 2.0), (1.0, 0.0)])
+    p['head_yaw'] = -0.30 * p['yaw']
+    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.030 * blink, -0.120 * plunge, 0.0))
+    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.030 * blink, 0.045 * plunge, 0.0))
+    p['foot_yaw_r'] = -10.0 * blink
     return p
 
 
@@ -863,7 +903,7 @@ BUILDERS = {
     'Sword_Double_Slash': build_double_slash,
     'Sword_Lunge_Thrust': build_lunge_thrust,
     'Sword_Spin_Slash': build_spin_slash,
-    'Dagger_Dash_Stab': build_dash_stab,
+    'Dagger_Backstab': build_dagger_backstab,
     'Staff_Fireball_Cast': build_fireball,
     'Staff_Bone_Spear_Cast': build_bone_spear,
     'Shield_Bash': build_shield_bash,
@@ -1070,6 +1110,9 @@ QA_VIEWS = {
     'front': Vector((-1.78, -2.42, 1.60)),
     # Front three-quarter from the character's left (+X) for the shield/bow.
     'alt': Vector((1.95, -2.30, 1.58)),
+    # Straight right-side profile: reads thrust level, sweep height and foot
+    # clearance without foreshortening.
+    'side': Vector((-3.05, -0.55, 1.42)),
 }
 
 
@@ -1177,10 +1220,9 @@ qa_objects = []
 if RENDER_QA:
     QA_DIR.mkdir(parents=True, exist_ok=True)
     qa_objects = setup_qa_scene()
-    for name, _seconds, _builder, _kind in CLIPS:
+    for name in REWORKED:
         render_clip(name, (0.0, 0.25, 0.5, 0.75, 1.0))
-        render_clip(name, (0.0, 0.25, 0.5, 0.75, 1.0), view='alt')
-    for name in ('Bow_Barrage', 'Sword_Spin_Slash', 'Staff_Fireball_Cast'):
+        render_clip(name, (0.0, 0.25, 0.5, 0.75, 1.0), view='side')
         render_clip(name, tuple(i / 5.0 for i in range(6)), strip=True)
 
 # QA-only geometry never reaches the export.
@@ -1228,10 +1270,10 @@ bpy.ops.export_scene.gltf(
     export_force_sampling=True, export_frame_range=False, export_yup=True,
     export_materials='EXPORT', export_image_format='AUTO', export_skins=True)
 
-merged = merge_clips(GLB, TEMP, AUTHORED)
-TEMP.unlink()
-if sorted(merged) != sorted(AUTHORED):
+merged = merge_clips(GLB, TEMP, set(REWORKED), remove_clips=RETIRED)
+if sorted(merged) != sorted(REWORKED):
     raise RuntimeError(f'Authored clip mismatch: {sorted(merged)}')
+TEMP.unlink()
 
 document, _binary = read_glb(GLB)
 durations = clip_durations(document)
@@ -1249,13 +1291,17 @@ for name, seconds, _builder, _kind in CLIPS:
 metadata = json.loads(METADATA.read_text(encoding='utf-8'))
 for name, seconds, _builder, _kind in CLIPS:
     metadata['animations'][name] = round(float(durations[name]), 10)
+for retired in RETIRED:
+    metadata['animations'].pop(retired, None)
 
 RUNTIME_OVERRIDES = {
     'bow': 'Both bow arms and the bow aim are solved procedurally at runtime from the draw curve, and an archery stance is planted. The authored bow-arm poses are presentation only; the lower body, pelvis and spine rhythm stay authored.',
     'sword': 'The blade follows hand_r * sword_grip; a hand basis of aim * inverse(sword_grip) points the blade at the authored world direction. Greatsword and staff are two-handed: the support (left) hand is authored onto the grip and is not re-solved during abilities.',
     'staff': 'The staff is socketed on hand_r and runs along its local -Z from the grip; the support hand is authored onto the shaft 0.32 m along the handle.',
     'shield': 'The shield is carried on the left forearm automatically; the left arm is authored to raise, punch or slam the shield face.',
-    'spin_slash': 'The runtime rotates the visual model a full 360 degrees from 10% to 86% of Sword_Spin_Slash. The clip authors only a low wide pivot stance with a horizontal sweep arc and a committed weight shift, never a full turn.',
+    'spin_slash': 'The runtime adds a full 360 degree model turn over Sword_Spin_Slash (blade trail starts at 0.20, damage at 0.50). The clip authors only a fast low wide pivot with the greatsword extended horizontally from 0.15 to 0.85 of the clip, compact feet on the floor and a small weight shift, never a full turn or a stride.',
+    'lunge_thrust': 'The controller travels 1.78 m over the first 0.24 s. The lead-foot step, pelvis travel and weight transfer are authored inside 0.02-0.24 s, the level thrust lands at 0.42 and holds, then the clip recovers; both hands stay on the hilt.',
+    'dagger_backstab': 'The actor is teleported behind the target at 0.20. Frames 0-0.20 are a gathering crouch and a compressed blink tucked low; 0.30-0.55 is the arrival plunge straight down-forward with the off hand guarding, impact at 0.50, recovery by 0.90. No forward dash is authored.',
     'blend': 'Every clip starts and ends at the Idle_Loop frame-0 pose so the 0.12 s runtime blend does not pop. The root bone is never moved.',
     'feet': 'Legs are authored as ankle targets; the runtime re-solves knees to terrain. Ankles stay at their shipped 84-86 mm height and only leave it for deliberate step lifts.',
     'barrage_beats': 'Six draw-release pulses peaking at 0.22, 0.34, 0.46, 0.58, 0.70 and 0.82 s with visible weight pulses and small recoils.',
@@ -1278,7 +1324,7 @@ metadata['ability_authoring'] = {
     'clips': clip_rows,
     'durations': {name: round(float(durations[name]), 10) for name, _s, _b, _k in CLIPS},
     'runtime_overrides': RUNTIME_OVERRIDES,
-    'qa_renders': '.runtime/ability_anim/<clip>_sheet.png (t=0, 25, 50, 75, 100 %), <clip>_strip.png for Bow_Barrage, Sword_Spin_Slash, Staff_Fireball_Cast',
+    'qa_renders': '.runtime/ability_anim/<clip>_sheet.png (t=0, 25, 50, 75, 100 %), <clip>_side_sheet.png (right-side profile) and <clip>_strip.png for the reworked sword/dagger clips',
 }
 METADATA.write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
 print('ABILITY_CLIPS', {name: round(durations[name], 4) for name in sorted(AUTHORED)})
