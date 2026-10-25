@@ -7,6 +7,7 @@ signal clash(position: Vector3)
 signal defense_resolved(defender_slot: int, position: Vector3, parried: bool)
 
 const Archer = preload("res://scripts/archer.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
@@ -710,6 +711,13 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		_block_feedback(unit,at,false,hand)
 	elif outcome == DEFENSE_WEAK_BLOCK:
 		_block_feedback(unit,at,false,hand,false)
+	else:
+		# Unmitigated contact: directional spray at the wound and the blade
+		# that opened it. The target's take_damage owns body and floor blood.
+		BloodFx.impact(actor,at,at-actor.global_position,damage,headshot)
+		BloodFx.stain_weapon(rig,damage,hand)
+		if actor.has_method("note_weapon_blood"):
+			actor.note_weapon_blood(damage)
 
 func _can_clash_with(unit: Node, target_combat) -> bool:
 	if target_combat == self or not is_instance_valid(target_combat) \

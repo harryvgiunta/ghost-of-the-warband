@@ -9,6 +9,7 @@ const DevilMob = preload("res://scripts/devil_mob.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Combat = preload("res://scripts/combat.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
@@ -957,6 +958,11 @@ func _on_enemy_attack(attacker, amount: float) -> void:
 			hud.show_feedback("BLOCKED  /  -%d stamina" % int(cost),1.0)
 		return
 	take_damage(amount)
+	# The unmitigated contact is the only branch that spilled blood. The attacker
+	# may carry a claw (no weapon stain) or a dagger/sword/bow.
+	BloodFx.impact(attacker,player.global_position + Vector3(0,1.1,0),
+		player.global_position - attacker.global_position,amount,false)
+	BloodFx.stain_weapon(attacker,amount)
 
 func take_damage(amount: float, react: bool = true) -> void:
 	_cancel_consumable()
@@ -967,6 +973,8 @@ func take_damage(amount: float, react: bool = true) -> void:
 		archer.set_hit_react(seconds)
 		step.reset()
 	DamageNumbers.spawn(self,player.global_position,applied,"self",false,health <= 0.0)
+	BloodFx.wound(self,archer,player.global_position + Vector3(0,1.05,0),applied,
+		false,health <= 0.0,1.0)
 	audio.play_sound("hit")
 	hud.flash_damage()
 	if health <= 0.0:

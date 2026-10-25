@@ -200,6 +200,14 @@ func set_weapon(role: String) -> void:
 			bow.set_arrow_visible(false)
 			_bow = bow
 
+func blood_anchor() -> Node3D:
+	return _rig if is_instance_valid(_rig) else self
+
+func weapon_anchor() -> Node3D:
+	if is_instance_valid(_melee_weapon) and _melee_weapon.visible:
+		return _melee_weapon
+	return null
+
 func get_bow_origin() -> Vector3:
 	if is_instance_valid(_bow):
 		return _bow.get_arrow_origin()

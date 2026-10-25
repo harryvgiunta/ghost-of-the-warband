@@ -703,6 +703,22 @@ func _sync_weapon_visibility() -> void:
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and not consuming and is_visible_in_tree())
 
+## Hand-above weapon node used for blood coating. Only the weapon actually
+## drawn in that hand is stained, so a stowed sword keeps its clean steel.
+func blood_weapon_anchor(hand: String = "") -> Node3D:
+	if staff_active and is_instance_valid(active_staff) and active_staff.visible:
+		return active_staff
+	if weapon == "dual" and hand == "left":
+		return active_off_weapon if is_instance_valid(active_off_weapon) \
+			and active_off_weapon.visible else null
+	if weapon == "dagger":
+		return active_dagger if is_instance_valid(active_dagger) \
+			and active_dagger.visible else null
+	if weapon in ["sword","dual"]:
+		return active_sword if is_instance_valid(active_sword) \
+			and active_sword.visible else null
+	return null
+
 func _build_armor_meshes() -> void:
 	# The imported leather outfit is split across the same five slots as the
 	# generated shells.  Arrows/head/face/hair stay outside every group.

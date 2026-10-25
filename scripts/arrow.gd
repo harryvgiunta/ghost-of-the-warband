@@ -3,6 +3,7 @@ extends Node3D
 signal impacted(enemy_hit: bool, impact_position: Vector3)
 
 const Bow = preload("res://scripts/bow.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const VISUAL_BLEND_SECONDS := 0.12
@@ -60,19 +61,27 @@ func _physics_process(delta: float) -> void:
 		var damage_target: Object = collider.get_meta("ironwood_damage_target") if collider.has_meta("ironwood_damage_target") else null
 		var hit_player := damage_target != null and is_instance_valid(damage_target) and damage_target.has_method("take_damage")
 		var hit_enemy := collider.has_method("take_damage") and not is_shield
+		var applied_hit := false
+		var headshot := false
 		if authoritative_damage:
 			if hit_player:
 				# The frontier controller owns the player's two-argument
 				# take_damage; the bare CharacterBody has no damage method.
 				damage_target.take_damage(damage)
+				applied_hit = true
 			elif hit_enemy:
-				collider.take_damage(damage, source_id, Hitbox.is_headshot(collider as Node, hit.position))
+				headshot = Hitbox.is_headshot(collider as Node, hit.position)
+				collider.take_damage(damage, source_id, headshot)
+				applied_hit = true
+		if applied_hit:
+			BloodFx.impact(self, hit.position, velocity, damage, headshot)
 		# A shield intercepts the arrow without transferring damage to its
 		# owner. Players and shields keep the shaft so it visibly sticks where
 		# it landed; the arrow still times out with the existing age limit.
 		if (is_shield or collider.has_meta("ironwood_player")) and collider is Node3D:
 			reparent(collider as Node3D, true)
 			visible = true
+			BloodFx.stain_projectile(_visual, damage)
 		elif hit_enemy:
 			visible = false
 		_visual_elapsed = VISUAL_BLEND_SECONDS

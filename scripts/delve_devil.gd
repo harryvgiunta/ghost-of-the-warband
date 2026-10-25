@@ -14,6 +14,7 @@ const DevilVisual = preload("res://scripts/devil_visual.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 
 const STATE_EMERGE := "EMERGE"
@@ -213,6 +214,8 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0,health-applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
+	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
+		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		_die(true)
 
@@ -224,6 +227,8 @@ func snapshot() -> Dictionary:
 
 func apply_snapshot(snapshot_state: Dictionary) -> void:
 	authoritative = false
+	var had_pose := _received_pose
+	var previous_health := health
 	enemy_id = int(snapshot_state.get("id",enemy_id))
 	var next_weapon := str(snapshot_state.get("weapon",devil_weapon))
 	if next_weapon != devil_weapon:
@@ -231,6 +236,10 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 		if is_instance_valid(_visual):
 			_visual.set_weapon(devil_weapon)
 	health = float(snapshot_state.get("health",health))
+	if had_pose and previous_health-health > 0.01:
+		# Replicas never apply damage; the health delta is their only hit signal.
+		BloodFx.wound(self,blood_rig(),get_aim_position(),previous_health-health,
+			false,health <= 0.0,blood_scale())
 	state = str(snapshot_state.get("state",state))
 	_state_time = float(snapshot_state.get("time",_state_time))
 	if is_instance_valid(_visual):
@@ -249,6 +258,21 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	elif not _death_handled:
 		alive = true
 
+
+func blood_rig() -> Node3D:
+	if is_instance_valid(_visual):
+		var anchor := _visual.blood_anchor()
+		if is_instance_valid(anchor):
+			return anchor
+	return self
+
+func blood_scale() -> float:
+	return 0.75
+
+func blood_weapon_anchor(_hand: String = "") -> Node3D:
+	if is_instance_valid(_visual):
+		return _visual.weapon_anchor()
+	return null
 
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0,0.55,0)
@@ -321,6 +345,10 @@ func _strike() -> void:
 	elif target.has_method("take_damage"):
 		target.take_damage(_attack_damage,20+enemy_id)
 	struck.emit(target,_attack_damage,global_position,outcome)
+	if outcome == Combat.DEFENSE_NONE and target is Node3D:
+		BloodFx.impact(self,(target as Node3D).get_aim_position(),to_target,
+			_attack_damage,false)
+		BloodFx.stain_weapon_node(blood_weapon_anchor(),_attack_damage,blood_scale())
 	if outcome == Combat.DEFENSE_PARRY:
 		_enter(STATE_STAGGER)
 
