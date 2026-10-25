@@ -7,6 +7,7 @@ signal killed(slot: int, source: int)
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const BloodyFeet = preload("res://scripts/bloody_feet.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -68,6 +69,8 @@ const INTERP_HISTORY := 0.9
 const INTERP_EXTRAPOLATION := 0.15
 var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
+## Prints a bloody trail when this body walks out of a death pool.
+var _bloody_feet := BloodyFeet.new()
 
 func _ready() -> void:
 	set_meta("ironwood_player", true)
@@ -565,6 +568,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(actual,running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
+	_bloody_feet.update(delta,self,rig)
 
 ## A travelling skill sweeps the lane it has just crossed: after the body moved
 ## for the tick, every body inside the path arc takes one hit. The activation's

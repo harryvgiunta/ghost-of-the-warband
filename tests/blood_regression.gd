@@ -131,6 +131,23 @@ func run() -> void:
 	await process_frame
 	check(_count_meta(lone, "pool") == 0, "The pool is released with the five-minute corpse")
 
+	# --- bloody footprints ---------------------------------------------------
+	lone.clear_all()
+	await process_frame
+	lone.wound(stub, at, 34.0, false, true, 1.0)
+	await process_frame
+	var ground := Vector3(at.x, 0.0, at.z)
+	check(lone.is_in_blood(ground), "Standing in a death pool counts as standing in blood")
+	check(not lone.is_in_blood(ground + Vector3.UP * 2.0),
+		"A body two metres above the pool is not standing in it")
+	lone.footprint(ground, Vector3.RIGHT, 1.0)
+	await process_frame
+	check(_count_meta(lone, "footprint") == 1, "One bloody step leaves one print")
+	check(lone.surface_stain_count() > 0, "A print shares the floor-spatter budget")
+	lone.advance(61.0)
+	await process_frame
+	check(_count_meta(lone, "footprint") == 0, "Footprints fade with the sixty-second spatter")
+
 	# Pools are never evicted by the spatter render budget.
 	lone.clear_all()
 	await process_frame
