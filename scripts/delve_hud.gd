@@ -16,6 +16,7 @@ const MAX_PARTY_ROWS := 8
 
 var reticle := Vector2.ZERO
 var reticle_visible := false
+var caption_label: Label
 var wave_label: Label
 var phase_label: Label
 var prompt_label: Label
@@ -94,13 +95,13 @@ func _build() -> void:
 func _build_run_panels() -> void:
 	var run := _panel(self, Vector2(-200, 14), Vector2(400, 92))
 	run.set_anchors_preset(Control.PRESET_CENTER_TOP, true)
-	var caption := _label(run, "THE SUNKEN DELVE", Vector2.ZERO, 10, GOLD)
-	caption.size = Vector2(400, 16)
-	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	wave_label = _label(run, "DEPTH 1", Vector2(0, 17), 24, CREAM)
+	caption_label = _label(run, "THE SUNKEN DELVE", Vector2.ZERO, 10, GOLD)
+	caption_label.size = Vector2(400, 16)
+	caption_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wave_label = _label(run, "DEPTH 1  WAVE 1", Vector2(0, 17), 24, CREAM)
 	wave_label.size = Vector2(400, 32)
 	wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	phase_label = _label(run, "TOUCH THE ALTAR", Vector2(0, 54), 13, TEAL)
+	phase_label = _label(run, "TOUCH THE ALTAR TO BEGIN", Vector2(0, 54), 13, TEAL)
 	phase_label.size = Vector2(400, 26)
 	phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	phase_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -246,21 +247,34 @@ func update_run(state: Dictionary) -> void:
 	_role = "HOST" if int(state.get("local_slot", -1)) == 0 else "CLIENT"
 	_refresh_endpoint()
 	var depth := maxi(1, int(state.get("depth", 1)))
+	var wave := maxi(1, int(state.get("wave_number", 1)))
 	var phase := str(state.get("phase", "ALTAR"))
-	wave_label.text = "DEPTH %d" % depth
+	caption_label.text = _room_caption(str(state.get("room", "sanctuary")))
+	wave_label.text = "DEPTH %d  WAVE %d" % [depth, wave]
 	phase_label.text = _phase_line(state, phase)
 	var phase_color := CREAM
-	if phase == "GAME_OVER":
+	if phase == "GAME_OVER" or phase == "RITUAL" or phase == "DROP":
 		phase_color = GOLD
 	elif phase == "CLEARED":
 		phase_color = TEAL
 	phase_label.add_theme_color_override("font_color", phase_color)
 	_update_party(state)
 
+func _room_caption(room: String) -> String:
+	if room == "ossuary":
+		return "THE OSSUARY PIT"
+	return "THE SUNKEN DELVE"
+
 func _phase_line(state: Dictionary, phase: String) -> String:
 	match phase:
 		"ALTAR":
-			return "TOUCH THE ALTAR"
+			if str(state.get("room", "sanctuary")) == "ossuary":
+				return "THE SUMMONING CONTINUES"
+			return "TOUCH THE ALTAR TO BEGIN"
+		"RITUAL":
+			return "THE PENTAGRAM WAKES - %d INCOMING" % int(state.get("wave_total", 0))
+		"DROP":
+			return "FALLING INTO THE PIT"
 		"WAVE":
 			var remaining := int(state.get("remaining", 0))
 			var sealed := bool(state.get("sealed", true))

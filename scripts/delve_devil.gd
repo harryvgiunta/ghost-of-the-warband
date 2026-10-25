@@ -26,35 +26,75 @@ const STATE_RECOVER := "RECOVER"
 const STATE_STAGGER := "STAGGER"
 const STATE_DEAD := "DEAD"
 
-const MAX_HEALTH := 24.0
-const EMERGE_SECONDS := 0.35
+const ROLE_IMP := "imp"
+const ROLE_DEVIL := "devil"
+const ROLE_BONEFIEND := "bonefiend"
+const ROLE_BRUTE := "brute"
+
+## Role baselines, before the depth scaling that `configure` layers on top.
+## `scale` drives every dimension: rig, capsule, warning disc, reach anchors
+## and blood size. `warning` and `emerge` are already in meters/seconds.
+const PROFILES := {
+	"imp": {"display": "Imp", "scale": 0.62, "health": 12.0, "damage": 5.0,
+		"speed": 4.3, "reach": 1.6, "emerge": 0.55, "warning": 1.05,
+		"cooldown_min": 0.80, "cooldown_max": 1.15},
+	"devil": {"display": "Cinder devil", "scale": 1.00, "health": 24.0, "damage": 8.0,
+		"speed": 3.4, "reach": 1.9, "emerge": 0.35, "warning": 1.60,
+		"cooldown_min": 0.90, "cooldown_max": 1.30},
+	"bonefiend": {"display": "Bonefiend", "scale": 1.15, "health": 42.0, "damage": 13.0,
+		"speed": 3.5, "reach": 2.15, "emerge": 0.50, "warning": 1.75,
+		"cooldown_min": 0.85, "cooldown_max": 1.20},
+	"brute": {"display": "Charnel brute", "scale": 1.38, "health": 78.0, "damage": 20.0,
+		"speed": 2.9, "reach": 2.45, "emerge": 0.65, "warning": 2.00,
+		"cooldown_min": 1.00, "cooldown_max": 1.45},
+}
+
+## Multiplier applied to the role damage baseline by the held weapon.
+const WEAPON_DAMAGE := {"claw": 1.0, "dagger": 0.75, "sword": 1.35}
+
 const WINDUP_SECONDS := 0.38
 const STRIKE_SECONDS := 0.14
 const STRIKE_HIT_TIME := 0.06
 const RECOVER_SECONDS := 0.55
 const STAGGER_SECONDS := 0.8
-const ATTACK_RANGE := 1.9
-const ATTACK_COOLDOWN_MIN := 0.9
-const ATTACK_COOLDOWN_MAX := 1.3
-const CHASE_SPEED := 3.4
 const SEPARATION_RADIUS := 1.15
 const LIMIT := 16.0
-const WARNING_RADIUS := 1.6
+
+# Body proportions at role scale 1.0 (the Cinder devil profile).
+const BODY_RADIUS := 0.22
+const BODY_HEIGHT := 0.90
+const AIM_HEIGHT := 0.55
+const HEAD_HEIGHT := 0.78
+const BLOOD_SIZE := 0.75
+const STRIKE_HEIGHT := 0.45
+# Emerge sigil at role scale 1.0. The torus radius is authored at 0.95 of the
+# mesh scale so the ring reads at its nominal radius.
+const EMERGE_RING_RADIUS := 0.95
+const EMERGE_COLUMN_RADIUS := 0.30
+const EMERGE_COLUMN_HEIGHT := 1.15
 
 var authoritative := false
 var alive := true
-var health := MAX_HEALTH
-var max_health := MAX_HEALTH
+# Devil-profile baselines; `configure` replaces them with the role and depth
+# numbers before the first snapshot arrives.
+var health := 24.0
+var max_health := 24.0
 var enemy_id := 0
 var devil_weapon := "claw"
 var depth := 1
-var chase_speed := CHASE_SPEED
+var chase_speed := 3.4
 var target = null
 var state := STATE_EMERGE
 
+var _role := ROLE_DEVIL
+var _body_scale := 1.0
+var _emerge_seconds := 0.35
+var _warning_radius := 1.6
+var _cooldown_min := 0.9
+var _cooldown_max := 1.3
 var _state_time := 0.0
 var _attack_damage := 8.0
-var _attack_reach := ATTACK_RANGE
+var _attack_reach := 1.9
 var _attack_cooldown := 0.0
 var _struck := false
 var _side_bias := 1.0
@@ -64,6 +104,14 @@ var _net_position := Vector3.ZERO
 var _rng := RandomNumberGenerator.new()
 var _visual: DevilVisual
 var _warning: MeshInstance3D
+var _collider: CollisionShape3D
+var _shape: CapsuleShape3D
+var _emerge: Node3D
+var _emerge_ring: MeshInstance3D
+var _emerge_column: MeshInstance3D
+var _emerge_light: OmniLight3D
+var _ring_material: StandardMaterial3D
+var _column_material: StandardMaterial3D
 var _query := PhysicsRayQueryParameters3D.new()
 
 
@@ -73,51 +121,36 @@ func _ready() -> void:
 	collision_mask = 1
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
-	var shape := CapsuleShape3D.new()
-	shape.radius = 0.22
-	shape.height = 0.90
-	var collider := CollisionShape3D.new()
-	collider.shape = shape
-	collider.position.y = shape.height * 0.5
-	add_child(collider)
+	_shape = CapsuleShape3D.new()
+	_collider = CollisionShape3D.new()
+	_collider.shape = _shape
+	add_child(_collider)
 	_visual = DevilVisual.new()
 	_visual.name = "DevilVisual"
 	add_child(_visual)
 	_visual.set_weapon(devil_weapon)
-	# A flat emissive disc telegraphs the strike window on the floor.
+	# A flat emissive disc telegraphs the strike window on the floor. The mesh
+	# is authored at radius 1.0 and scaled to the role warning radius.
 	var warning_material := Geo.material(Color(0.95,0.22,0.08,0.34))
 	warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	warning_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	warning_material.emission_enabled = true
 	warning_material.emission = Color("ff3b16")
 	warning_material.emission_energy_multiplier = 2.2
-	_warning = Geo.cylinder(self,WARNING_RADIUS,WARNING_RADIUS,0.02,Vector3(0,0.035,0),warning_material,40)
+	_warning = Geo.cylinder(self,1.0,1.0,0.02,Vector3(0,0.035,0),warning_material,40)
 	_warning.visible = false
+	_build_emerge_fx()
+	_refresh_metrics()
 	_query.collision_mask = 1
 
 
-func configure(next_id: int, weapon: String, next_depth: int) -> void:
+func configure(next_id: int, weapon: String, next_depth: int, role: String = ROLE_DEVIL) -> void:
 	enemy_id = next_id
 	depth = maxi(1, next_depth)
 	devil_weapon = str(weapon).to_lower()
-	if devil_weapon not in ["claw","dagger","sword"]:
+	if not WEAPON_DAMAGE.has(devil_weapon):
 		devil_weapon = "claw"
-	match devil_weapon:
-		"dagger":
-			_attack_damage = 6.0
-			_attack_reach = 1.9
-		"sword":
-			_attack_damage = 11.0
-			_attack_reach = 2.1
-		_:
-			_attack_damage = 8.0
-			_attack_reach = 1.9
-	# Deeper chambers breed heavier, faster devils. Speed growth is capped so
-	# they keep telegraphing instead of teleporting past the strike window.
-	var step := float(depth - 1)
-	max_health = MAX_HEALTH * (1.0 + 0.28 * step)
-	_attack_damage *= 1.0 + 0.15 * step
-	chase_speed = CHASE_SPEED * minf(1.35, 1.0 + 0.03 * step)
+	_apply_role(str(role).to_lower())
 	if is_instance_valid(_visual):
 		_visual.set_weapon(devil_weapon)
 	# Per-enemy randomness: two devils in a wave never share a swing rhythm.
@@ -132,6 +165,141 @@ func configure(next_id: int, weapon: String, next_depth: int) -> void:
 	_state_time = 0.0
 	if is_instance_valid(_warning):
 		_warning.visible = false
+	_update_emerge_fx()
+
+
+func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
+	global_position = point
+	_net_position = point
+	_received_pose = true
+	var flat := Vector3(facing.x,0.0,facing.z)
+	if flat.length_squared() > 0.0001:
+		rotation.y = atan2(-flat.x,-flat.z)
+	velocity = Vector3.ZERO
+	alive = true
+	health = max_health
+	_death_handled = false
+	_struck = false
+	target = null
+	collision_layer = 2
+	collision_mask = 1
+	_attack_cooldown = 0.30 + _rng.randf() * 0.35
+	state = STATE_EMERGE
+	_state_time = 0.0
+	if is_instance_valid(_warning):
+		_warning.visible = false
+	_update_emerge_fx()
+
+
+func role() -> String:
+	return _role
+
+
+func display_name() -> String:
+	return str(PROFILES[_role]["display"])
+
+
+## Applies the role profile plus the depth curve. Deeper chambers breed
+## heavier, faster devils; speed growth is capped so they keep telegraphing
+## instead of teleporting past the strike window.
+func _apply_role(next_role: String) -> void:
+	_role = next_role if PROFILES.has(next_role) else ROLE_DEVIL
+	var profile: Dictionary = PROFILES[_role]
+	var step := float(maxi(1,depth) - 1)
+	_body_scale = float(profile["scale"])
+	_warning_radius = float(profile["warning"])
+	_emerge_seconds = float(profile["emerge"])
+	_cooldown_min = float(profile["cooldown_min"])
+	_cooldown_max = float(profile["cooldown_max"])
+	_attack_reach = float(profile["reach"])
+	_attack_damage = float(profile["damage"]) * float(WEAPON_DAMAGE.get(devil_weapon,1.0))
+	_attack_damage *= 1.0 + 0.15 * step
+	max_health = float(profile["health"]) * (1.0 + 0.28 * step)
+	chase_speed = float(profile["speed"]) * minf(1.35, 1.0 + 0.03 * step)
+	_refresh_metrics()
+
+
+## Pushes the role scale into every physical measurement: capsule, rig, warning
+## disc and sigil. Reach, aim and head anchors derive from `_body_scale` on read.
+func _refresh_metrics() -> void:
+	if is_instance_valid(_shape):
+		_shape.radius = BODY_RADIUS * _body_scale
+		_shape.height = BODY_HEIGHT * _body_scale
+	if is_instance_valid(_collider):
+		_collider.position.y = BODY_HEIGHT * _body_scale * 0.5
+	if is_instance_valid(_visual):
+		_visual.scale = Vector3.ONE * _body_scale
+	if is_instance_valid(_warning):
+		_warning.scale = Vector3(_warning_radius,1.0,_warning_radius)
+	_update_emerge_fx()
+
+
+func _build_emerge_fx() -> void:
+	_emerge = Node3D.new()
+	_emerge.name = "EmergeSigil"
+	_emerge.visible = false
+	add_child(_emerge)
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.90
+	ring.outer_radius = 1.0
+	ring.rings = 12
+	ring.ring_segments = 40
+	_ring_material = Geo.material(Color(1.0,0.42,0.12,0.85))
+	_ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_ring_material.emission_enabled = true
+	_ring_material.emission = Color("ff5a1e")
+	_ring_material.emission_energy_multiplier = 2.0
+	_emerge_ring = Geo.mesh_node(_emerge,ring,_ring_material,Vector3(0,0.03,0))
+	var column := CylinderMesh.new()
+	column.bottom_radius = 1.0
+	column.top_radius = 0.55
+	column.height = 1.0
+	column.radial_segments = 16
+	_column_material = Geo.material(Color(1.0,0.48,0.16,0.5))
+	_column_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_column_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_column_material.emission_enabled = true
+	_column_material.emission = Color("ff7a2a")
+	_column_material.emission_energy_multiplier = 1.8
+	_emerge_column = Geo.mesh_node(_emerge,column,_column_material,Vector3.ZERO)
+	_emerge_light = OmniLight3D.new()
+	_emerge_light.light_color = Color("ff6a24")
+	_emerge_light.light_energy = 0.0
+	_emerge.add_child(_emerge_light)
+
+
+## Presentation only: the sigil follows the state clock, so host and replicas
+## fade it together and it never gates gameplay or authority.
+func _update_emerge_fx() -> void:
+	if not is_instance_valid(_emerge):
+		return
+	if state != STATE_EMERGE or not (authoritative or _received_pose):
+		_emerge.visible = false
+		return
+	var progress := clampf(_state_time / maxf(_emerge_seconds,0.05),0.0,1.0)
+	_emerge.visible = true
+	_place_emerge_fx(progress,1.0-progress,sin(progress*PI))
+
+
+func _place_emerge_fx(progress: float, fade: float, bloom: float) -> void:
+	var ring_scale := EMERGE_RING_RADIUS * _body_scale / 0.95 * (0.72 + 0.36 * progress)
+	_emerge_ring.scale = Vector3(ring_scale,0.22,ring_scale)
+	var height := EMERGE_COLUMN_HEIGHT * _body_scale * (0.45 + 0.55 * progress)
+	_emerge_column.scale = Vector3(EMERGE_COLUMN_RADIUS * _body_scale,height,
+		EMERGE_COLUMN_RADIUS * _body_scale)
+	_emerge_column.position.y = height * 0.5
+	_emerge_light.position.y = height * 0.6
+	_emerge_light.omni_range = 3.0 * _body_scale
+	_emerge_light.light_energy = 2.4 * fade
+	var ring_color := _ring_material.albedo_color
+	ring_color.a = 0.85 * fade
+	_ring_material.albedo_color = ring_color
+	_ring_material.emission_energy_multiplier = 1.2 + 2.4 * bloom
+	var column_color := _column_material.albedo_color
+	column_color.a = 0.5 * fade
+	_column_material.albedo_color = column_color
+	_column_material.emission_energy_multiplier = 1.0 + 2.6 * bloom
 
 
 func step(delta: float, actors: Array = [], peers: Array = []) -> void:
@@ -153,10 +321,10 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 	var face_intent := Vector3.ZERO
 	match state:
 		STATE_EMERGE:
-			if _state_time >= EMERGE_SECONDS:
+			if _state_time >= _emerge_seconds:
 				_enter(STATE_CHASE)
 		STATE_CHASE:
-			if distance <= ATTACK_RANGE and _attack_cooldown <= 0.0:
+			if distance <= _attack_reach and _attack_cooldown <= 0.0:
 				_begin_windup()
 			elif distance < INF:
 				move_intent = _steer(_with_separation(to_target.normalized(),peers))
@@ -173,7 +341,7 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 				_struck = true
 				_strike()
 			if _state_time >= STRIKE_SECONDS:
-				_attack_cooldown = _rng.randf_range(ATTACK_COOLDOWN_MIN,ATTACK_COOLDOWN_MAX)
+				_attack_cooldown = _rng.randf_range(_cooldown_min,_cooldown_max)
 				_enter(STATE_RECOVER)
 		STATE_RECOVER:
 			if distance < INF:
@@ -222,7 +390,7 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 
 func snapshot() -> Dictionary:
 	return {"id":enemy_id,"pos":position,"yaw":rotation.y,"state":state,"time":_state_time,
-		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth}
+		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth,"role":_role}
 
 
 func apply_snapshot(snapshot_state: Dictionary) -> void:
@@ -230,9 +398,11 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	var had_pose := _received_pose
 	var previous_health := health
 	enemy_id = int(snapshot_state.get("id",enemy_id))
+	var next_role := str(snapshot_state.get("role",_role))
 	var next_weapon := str(snapshot_state.get("weapon",devil_weapon))
-	if next_weapon != devil_weapon:
+	if next_role != _role or next_weapon != devil_weapon:
 		devil_weapon = next_weapon
+		_apply_role(next_role)
 		if is_instance_valid(_visual):
 			_visual.set_weapon(devil_weapon)
 	health = float(snapshot_state.get("health",health))
@@ -267,7 +437,7 @@ func blood_rig() -> Node3D:
 	return self
 
 func blood_scale() -> float:
-	return 0.75
+	return BLOOD_SIZE * _body_scale
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if is_instance_valid(_visual):
@@ -281,27 +451,28 @@ func blood_strike_point() -> Vector3:
 	return get_aim_position()
 
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0,0.55,0)
+	return global_position + Vector3(0,AIM_HEIGHT * _body_scale,0)
 
 
 func head_hitbox_center() -> Vector3:
 	if is_instance_valid(_visual):
 		return _visual.head_hitbox_center()
-	return global_position + Vector3(0,0.78,0)
+	return global_position + Vector3(0,HEAD_HEIGHT * _body_scale,0)
 
 
 func head_hit_profile() -> Vector2:
-	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT) * _body_scale
 
 
 func get_display_name() -> String:
-	return "Cinder devil"
+	return display_name()
 
 func held_weapon_id() -> String:
 	return HeldWeapon.item_id(devil_weapon)
 
 
 func _process(delta: float) -> void:
+	_update_emerge_fx()
 	if authoritative or not _received_pose:
 		return
 	var before := position
@@ -328,6 +499,7 @@ func _enter(next_state: String) -> void:
 	_state_time = 0.0
 	if is_instance_valid(_warning):
 		_warning.visible = next_state == STATE_WINDUP
+	_update_emerge_fx()
 
 
 func _strike() -> void:
@@ -341,7 +513,7 @@ func _strike() -> void:
 		var facing := -global_basis.z
 		if facing.dot(to_target.normalized()) < 0.0:
 			return
-	_query.from = global_position + Vector3(0,0.45,0)
+	_query.from = global_position + Vector3(0,STRIKE_HEIGHT * _body_scale,0)
 	_query.to = target.global_position + Vector3(0,0.6,0)
 	if not get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
 		return
@@ -375,6 +547,7 @@ func _die(announce: bool) -> void:
 		_visual.set_weapon("claw")
 		_visual.set_action(STATE_DEAD,0.0)
 		_visual.die()
+	_update_emerge_fx()
 	if announce:
 		died.emit(self)
 	if is_inside_tree():
@@ -427,7 +600,7 @@ func _steer(direction: Vector3) -> Vector3:
 	if direction.length_squared() < 0.0001:
 		return Vector3.ZERO
 	var planar := Vector3(direction.x,0.0,direction.z).normalized()
-	_query.from = global_position + Vector3(0,0.45,0)
+	_query.from = global_position + Vector3(0,STRIKE_HEIGHT * _body_scale,0)
 	_query.to = _query.from + planar*1.4
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
 	if hit.is_empty():
