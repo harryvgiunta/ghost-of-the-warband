@@ -365,6 +365,23 @@ func _ready() -> void:
 	_apply_armor_visibility()
 	_update_pose(0.0)
 
+## Death hand-off for a corpse ragdoll: the skeleton goes fully limp, so the
+## Archer's separately transformed props (bows, swords, shield, quiver,
+## consumables) and bone-riding blood attachments can no longer follow it.
+## Hide them and stop the physics-clock animation before the skin is simulated.
+func enter_corpse_pose() -> void:
+	set_physics_process(false)
+	for child in get_children():
+		if child == _model:
+			continue
+		if child is Node3D:
+			(child as Node3D).visible = false
+	if skeleton != null:
+		for child in skeleton.get_children():
+			if child is BoneAttachment3D:
+				(child as BoneAttachment3D).visible = false
+
+
 func _find_node_of_type(root: Node, type_name: String) -> Node:
 	if root.is_class(type_name):
 		return root

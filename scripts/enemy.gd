@@ -7,6 +7,7 @@ signal arrow_fired(origin: Vector3, direction: Vector3, speed: float, damage: fl
 const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const DevilVisual = preload("res://scripts/devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -246,6 +247,7 @@ func _physics_process(delta: float) -> void:
 			_update_cosmetics(delta)
 		return
 	if not alive:
+		CorpsePhysics.settle_root(self, delta)
 		return
 	_target = _resolve_target()
 	if not is_instance_valid(_target):
@@ -681,14 +683,18 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 	if health <= 0.0:
 		_enter_dead(true)
 
-## The local death: collision off, the authored collapse, then the shared hold.
-## Replicas call it with `announce = false` so the kill stays on the host.
+## The local death: combat collision off, gravity on, the limp collapse, then
+## the shared hold. Replicas call it with `announce = false` so the kill stays
+## on the host.
 func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_warning.visible = false
+	# Layer 0 stops the corpse blocking bodies and arrows; mask 1 lets the dead
+	# root keep falling onto the world if the mob died mid-leap.
 	set_deferred("collision_layer", 0)
-	set_deferred("collision_mask", 0)
+	set_deferred("collision_mask", 1)
+	velocity = Vector3.ZERO
 	if kind == 2 and is_instance_valid(_devil):
 		# The dropped pickup owns the weapon now; keep it out of the corpse.
 		_devil.set_weapon("claw")
@@ -697,14 +703,13 @@ func _enter_dead(announce: bool) -> void:
 	# Collapse first, then hold the corpse for the shared five minutes.
 	var death_tween := create_tween()
 	if kind == 0:
+		# The wolf's imported skeleton ragdolls limp from its current pose.
 		_wolf.die()
-		# 0.45 s authored collapse, then the corpse is held; only the visual
-		# container shrinks, never the CharacterBody root.
 		death_tween.tween_interval(0.45)
 		CorpseHold.append(death_tween, self, _body)
 	elif kind == 2:
+		# The procedural cinder keeps its authored flop; the root still falls.
 		_devil.die()
-		# The devil flops in its own 0.55 s pose before the corpse hold.
 		death_tween.tween_interval(0.55)
 		CorpseHold.append(death_tween, self, _body)
 	else:

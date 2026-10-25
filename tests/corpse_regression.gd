@@ -28,6 +28,7 @@ func run() -> void:
 	var watchdog := create_timer(90.0)
 	watchdog.timeout.connect(_on_watchdog)
 	var CorpseHold = load("res://scripts/corpse_hold.gd")
+	var CorpsePhysics = load("res://scripts/corpse_physics.gd")
 	var Enemy = load("res://scripts/enemy.gd")
 	var Mob = load("res://scripts/devil_mob.gd")
 	var DelveDevil = load("res://scripts/delve_devil.gd")
@@ -63,12 +64,15 @@ func run() -> void:
 	pack.mob_id = "hell_goat"
 	var delve = DelveDevil.new()
 	delve.configure(1, "claw", 1)
+	var delve_species = DelveDevil.new()
+	delve_species.configure(2, "claw", 1, "hell_goat")
 	var corpses := [
 		["Briar wolf", wolf, Vector3(-6.0, 0.12, 0.0)],
 		["Ruin sentinel", sentinel, Vector3(-3.0, 0.12, 0.0)],
 		["Cinder devil", cinder, Vector3(0.0, 0.12, 0.0)],
 		["Hellish goat man", pack, Vector3(3.0, 0.12, 0.0)],
 		["Delve devil", delve, Vector3(6.0, 0.12, 0.0)],
+		["Delve goat", delve_species, Vector3(9.0, 0.12, 0.0)],
 	]
 	for entry in corpses:
 		var body = entry[1]
@@ -85,8 +89,28 @@ func run() -> void:
 		await physics_frame
 		check(not body.alive, label + " dies")
 		check(body.collision_layer == 0, label + " corpse stops colliding")
+		check(body.collision_mask == 1, label + " corpse still catches the world floor")
 		check((body as Node3D).scale.is_equal_approx(Vector3.ONE),
 			label + " corpse root keeps its scale while it is held")
+	# Rigged mobs hand their skeleton to the shared ragdoll; the procedural
+	# cinder and sentinel keep their authored collapse and only fall by root.
+	check(CorpsePhysics.is_limp(wolf._wolf), "The wolf corpse is a physical ragdoll")
+	check(CorpsePhysics.is_limp(pack._visual), "An imported devil corpse is a physical ragdoll")
+	check(CorpsePhysics.is_limp(delve_species._visual), "A delve species corpse is a physical ragdoll")
+	check(not CorpsePhysics.is_limp(delve._visual), "A procedural corpse keeps its authored collapse")
+	check(not CorpsePhysics.is_limp(sentinel._body), "The primitive sentinel has no skeleton to ragdoll")
+	var wolf_sim := wolf._wolf.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
+	var wolf_bones := wolf_sim.get_child_count() if wolf_sim != null else 0
+	check(wolf_bones >= 10, "The wolf ragdoll builds its driven bone chain")
+	var goat_skeleton := pack._visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	var eye_bone := goat_skeleton.find_bone("neutral_bone")
+	var goat_head := goat_skeleton.find_bone("Head")
+	check(eye_bone >= 0 and goat_skeleton.get_bone_parent(eye_bone) == goat_head,
+		"The goat's stray eye bone is adopted by the head before simulation")
+	if wolf_sim != null:
+		var first_bone := wolf_sim.get_child(0) as PhysicalBone3D
+		check(first_bone.collision_layer == 0 and first_bone.collision_mask == 1,
+			"Corpse bones stop blocking fighters while still colliding with the world")
 
 	# The authored poses are held, not reset by a fake delete.
 	check(wolf._wolf.is_dead(), "The wolf holds its authored death pose")
@@ -95,6 +119,21 @@ func run() -> void:
 	check(delve._visual.is_dead(), "A delve devil holds its authored death pose")
 	await pause(0.6)
 	check(sentinel._body.rotation.z > 0.1, "The sentinel collapses onto its side")
+
+	# Corpses obey gravity even when killed in the air: the primitive root and
+	# the rigged limbs both reach the floor instead of hanging at the death spot.
+	var falling_guard = Enemy.new()
+	falling_guard.kind = 1
+	falling_guard.position = Vector3(-9.0, 5.0, 0.0)
+	fixture.add_child(falling_guard)
+	await physics_frame
+	await physics_frame
+	falling_guard.take_damage(99999.0, 0, false)
+	await pause(1.6)
+	check(falling_guard.global_position.y < 0.6,
+		"A sentinel killed in the air falls to the ground")
+	check(sentinel.global_position.y < 0.6,
+		"A grounded corpse settles on the floor")
 
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.
@@ -108,6 +147,14 @@ func run() -> void:
 			label + " corpse stays in the scene instead of being unparented")
 		check(is_instance_valid(body) and body.collision_layer == 0,
 			label + " corpse never re-enables collision")
+	# The ragdoll retires after settling and leaves its baked pose in place.
+	check(not CorpsePhysics.is_limp(wolf._wolf), "The wolf ragdoll retires after settling")
+	check(not CorpsePhysics.is_limp(pack._visual), "The imported devil ragdoll retires after settling")
+	var baked_head := _bone_world(wolf._wolf, "head")
+	check(baked_head.y < 0.8, "The settled wolf corpse lies on the ground")
+	await pause(0.4)
+	var held_head := _bone_world(wolf._wolf, "head")
+	check(held_head.distance_to(baked_head) < 0.05, "The settled limp pose is held for the corpse lifetime")
 
 	# The shared hold dissolves and frees at the end of its clock.
 	var stand_in := Node3D.new()
@@ -125,6 +172,16 @@ func run() -> void:
 	await process_frame
 	print("CORPSE_REGRESSION checks=%d failures=%d" % [checks, failures])
 	quit(0 if failures == 0 else 1)
+
+
+func _bone_world(visual: Node3D, bone_name: String) -> Vector3:
+	var skeleton := visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	if skeleton == null:
+		return Vector3.ZERO
+	var bone := skeleton.find_bone(bone_name)
+	if bone < 0:
+		return Vector3.ZERO
+	return skeleton.get_global_transform() * skeleton.get_bone_global_pose(bone).origin
 
 
 func _on_watchdog() -> void:

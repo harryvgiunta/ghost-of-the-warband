@@ -5,6 +5,7 @@ extends SceneTree
 const TestSave := "user://ranger_clone_regression_state.json"
 const Clone = preload("res://scripts/ranger_clone.gd")
 const CombatScript = preload("res://scripts/combat.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 
 
 class DummyTarget:
@@ -134,6 +135,20 @@ func run() -> void:
 	check(int(rewards[0]) == Clone.GOLD,"The clone pays its reward once")
 	doomed.take_damage(999.0,-1)
 	check(int(rewards[0]) == Clone.GOLD,"A dead clone cannot pay twice")
+	check(CorpsePhysics.is_limp(doomed._body),"The clone corpse goes limp in a physical ragdoll")
+	var corpse_arm: int = doomed.rig.skeleton.find_bone("hand_r")
+	var corpse_bone: PhysicalBone3D = null
+	var simulator := doomed.rig.skeleton.get_node_or_null("CorpseRagdoll") as PhysicalBoneSimulator3D
+	if simulator != null:
+		for child in simulator.get_children():
+			if child is PhysicalBone3D and (child as PhysicalBone3D).get_bone_id() == corpse_arm:
+				corpse_bone = child as PhysicalBone3D
+	check(corpse_bone != null,"The clone's arm is part of its ragdoll")
+	var hand_start := corpse_bone.global_position.y if corpse_bone != null else 0.0
+	await create_timer(1.5).timeout
+	if corpse_bone != null:
+		check(corpse_bone.global_position.y < hand_start - 0.2,"A limp clone falls under gravity")
+	check(doomed.collision_mask == 1,"A clone corpse still catches the world floor")
 
 	# Snapshot round-trip for the frontier shape and the delve shape.
 	var source = clones[3]

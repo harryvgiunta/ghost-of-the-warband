@@ -190,12 +190,17 @@ runtime carries only values glTF cannot express.
   `DevilMobVisual.strike_hand_position()` (`hand_r`, then `front_paw_r` for the
   quadruped beast, then `head`). The limb that landed the blow comes away
   bloodied; an armed cinder devil stains its held blade instead.
-- Death clears collision immediately and hands the body to
-  `scripts/corpse_hold.gd`: the authored death pose is held for
-  `CorpseHold.SECONDS` (300 s) before a short dissolve frees the node. The
-  frontier, delve and arena share that one lifetime, so a fight leaves the
-  battlefield littered instead of erasing bodies after four seconds. Corpses
-  keep no collision, so wave and aggro filters that read `alive` ignore them.
+- Death clears blocking collision, keeps the world mask, and hands the body
+  to `scripts/corpse_physics.gd`: the dead CharacterBody falls under gravity
+  and the imported skeleton becomes a Godot `PhysicalBoneSimulator3D` ragdoll
+  driven by the authored bone chain. The death clip is no longer played; the
+  ragdoll collapses from the lethal pose, settles, bakes its final pose into
+  the skeleton, and retires its rigid bodies. `scripts/corpse_hold.gd` then
+  holds the limp body for `CorpseHold.SECONDS` (300 s) before a short dissolve
+  frees the node. The frontier, delve and arena share that one lifetime, so a
+  fight leaves the battlefield littered instead of erasing bodies after four
+  seconds. Corpses keep no blocking collision, so wave and aggro filters that
+  read `alive` ignore them.
 
 ## Verification gates
 

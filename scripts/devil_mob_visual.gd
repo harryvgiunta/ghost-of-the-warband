@@ -2,10 +2,16 @@ extends Node3D
 
 ## Presentation-only controller for the imported devil mobs.
 ##
+## The authored idle/walk/run/attack/hit clips animate the rig; death hands the
+## skeleton to `CorpsePhysics`, which replaces the final death clip with a limp
+## ragdoll that falls under gravity.
+##
 ## Gameplay owns root motion, damage and death. This node samples the authored
 ## GLB clips, maps the six gameplay states onto idle/walk/run/attack/hit/death,
 ## and adjusts the physics-clock attack playback so the authored impact frame
 ## always coincides with the gameplay strike.
+
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 
 const SCENES := {
 	"hell_goat": "res://assets/characters/devils/ironwood_hell_goat.glb",
@@ -211,10 +217,12 @@ func die() -> void:
 	_attack_playing = false
 	_hit_playing = false
 	_death_time = 0.0
-	_death_held = false
+	# The authored death pose gives way to the shared ragdoll. Pausing the
+	# player first pins the lethal pose the physical bones are built from.
+	_death_held = true
 	_clip = str(_data["death"])
-	_player.speed_scale = 1.0
-	_player.play(_clip, 0.06)
+	_player.pause()
+	CorpsePhysics.start_limp(self)
 
 
 func head_hitbox_center() -> Vector3:

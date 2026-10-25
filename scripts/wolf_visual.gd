@@ -5,6 +5,7 @@ extends Node3D
 ## the authored clips and holds the final corpse pose.
 
 const Hitbox = preload("res://scripts/hitbox.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
 const IDLE_CLIP := "Wolf_Idle_Loop"
 const TROT_CLIP := "Wolf_Trot_Loop"
@@ -74,11 +75,14 @@ func die() -> void:
 	_dead = true
 	_attack_playing = false
 	_death_time = 0.0
-	_death_held = false
+	# The authored death clip is replaced by the corpse ragdoll: the pinned
+	# animation pose is captured at the lethal frame, then the skeleton goes
+	# limp. The clip name stays for the presentation contract and tests.
+	_death_held = true
 	_clip = DEATH_CLIP
 	if _player:
-		_player.speed_scale = 1.0
-		_player.play(DEATH_CLIP, 0.08)
+		_player.pause()
+	CorpsePhysics.start_limp(self)
 
 
 func head_hitbox_center() -> Vector3:

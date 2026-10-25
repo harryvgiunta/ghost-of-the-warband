@@ -18,6 +18,7 @@ const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 
 const STATE_EMERGE := "EMERGE"
@@ -583,6 +584,15 @@ func held_weapon_id() -> String:
 	return HeldWeapon.item_id(devil_weapon)
 
 
+## The delve advances living devils through `step`; a dead one still owns its
+## own fall so a corpse killed during a leap reaches the chamber floor.
+func _physics_process(delta: float) -> void:
+	if not authoritative:
+		return
+	if not alive:
+		CorpsePhysics.settle_root(self, delta)
+
+
 func _process(delta: float) -> void:
 	_update_emerge_fx()
 	if authoritative or not _received_pose:
@@ -651,7 +661,7 @@ func _die(announce: bool) -> void:
 	_state_time = 0.0
 	velocity = Vector3.ZERO
 	collision_layer = 0
-	collision_mask = 0
+	collision_mask = 1
 	if is_instance_valid(_warning):
 		_warning.visible = false
 	if is_instance_valid(_visual):

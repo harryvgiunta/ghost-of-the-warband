@@ -3,6 +3,7 @@ extends SceneTree
 const WOLF := preload("res://assets/characters/ironwood_wolf.glb")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const Enemy = preload("res://scripts/enemy.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 
 var failures := 0
 var checks := 0
@@ -103,16 +104,36 @@ func run() -> void:
 	check(jaw_open.angle_to(jaw_impact) > 0.25, "Bite closes between windup and the 0.65 s impact")
 	check(jaw_impact_origin.z < visual_skeleton.get_bone_global_rest(jaw_bone).origin.z - 0.06, "Bite drives the jaw forward at impact")
 	visual.die()
-	await create_timer(0.55).timeout
-	visual_skeleton.force_update_all_bone_transforms()
-	var dead_head: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
 	check(visual.is_dead(), "Wolf visual enters its death state")
-	check(visual.get_clip_name() == "Wolf_Death", "Death clip is selected")
-	check(dead_head.y < 0.6, "Authored death collapses the body to the ground")
+	check(visual.get_clip_name() == "Wolf_Death", "Death clip name is kept for presentation")
+	check(CorpsePhysics.is_limp(visual), "Wolf corpse hands its skeleton to the physical ragdoll")
+	var simulator := visual_skeleton.get_node_or_null("CorpseRagdoll") as PhysicalBoneSimulator3D
+	check(simulator != null and simulator.get_child_count() >= 10,
+		"Wolf corpse builds a physical bone chain")
+	var head_bone := visual_skeleton.find_bone("head")
+	var head_physical: PhysicalBone3D = null
+	if simulator != null:
+		for child in simulator.get_children():
+			if child is PhysicalBone3D and (child as PhysicalBone3D).get_bone_id() == head_bone:
+				head_physical = child as PhysicalBone3D
+	check(head_physical != null, "Wolf head is part of the ragdoll")
+	await create_timer(1.5).timeout
+	if head_physical != null:
+		check(head_physical.global_position.y < 0.6,
+			"Limp wolf falls onto the ground under gravity")
+		check(head_physical.collision_layer == 0 and head_physical.collision_mask == 1,
+			"Corpse bones stop blocking bodies while still catching the world")
+	var deadline := Time.get_ticks_msec() + 8000
+	while CorpsePhysics.is_limp(visual) and Time.get_ticks_msec() < deadline:
+		await create_timer(0.2).timeout
+	check(not CorpsePhysics.is_limp(visual), "Ragdoll settles and bakes within the corpse window")
+	visual_skeleton.force_update_all_bone_transforms()
+	var dead_head: Vector3 = visual_skeleton.get_bone_global_pose(head_bone).origin
+	check(dead_head.y < 0.6, "Baked limp pose keeps the body on the ground")
 	await create_timer(0.25).timeout
 	visual_skeleton.force_update_all_bone_transforms()
-	var held_head: Vector3 = visual_skeleton.get_bone_global_pose(visual_skeleton.find_bone("head")).origin
-	check(held_head.distance_to(dead_head) < 0.01, "Final corpse pose is held after the death clip ends")
+	var held_head: Vector3 = visual_skeleton.get_bone_global_pose(head_bone).origin
+	check(held_head.distance_to(dead_head) < 0.05, "Baked corpse pose is held after the ragdoll retires")
 	visual.queue_free()
 	await process_frame
 

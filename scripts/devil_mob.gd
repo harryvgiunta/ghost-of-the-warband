@@ -15,6 +15,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -164,7 +165,10 @@ func _visual_script():
 
 
 func _physics_process(delta: float) -> void:
-	if replica or not alive:
+	if replica:
+		return
+	if not alive:
+		CorpsePhysics.settle_root(self, delta)
 		return
 	_target = _resolve_target()
 	if not is_instance_valid(_target):
@@ -383,14 +387,16 @@ func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void
 		_enter_dead(true)
 
 
-## The local death: the authored pose, stopped collision and the shared hold.
-## Replicas call it with `announce = false` so gold and the kill stay on the host.
+## The local death: stopped combat collision, falling root, the limp ragdoll
+## and the shared hold. Replicas call it with `announce = false` so gold and the
+## kill stay on the host.
 func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_struck = true
 	set_deferred("collision_layer", 0)
-	set_deferred("collision_mask", 0)
+	set_deferred("collision_mask", 1)
+	velocity = Vector3.ZERO
 	if is_instance_valid(_visual):
 		_visual.die()
 	if announce:

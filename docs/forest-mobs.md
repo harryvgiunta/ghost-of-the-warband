@@ -179,8 +179,10 @@ derived from the sampled height field with a per-surface strength from
 - These are natural-weapon mobs: `held_weapon_id()` is empty, so a kill pays
   gold and the standard alternating loot roll, and `blood_strike_point()` is
   the striking hand (`hand_r`) so a claw comes away wet.
-- Death clears collision immediately and hands the body to
-  `scripts/corpse_hold.gd` (the shared five-minute corpse lifetime).
+- Death clears blocking collision, keeps the world mask, and hands the imported
+  skeleton to `scripts/corpse_physics.gd` (the shared limp ragdoll), then to
+  `scripts/corpse_hold.gd` for the five-minute corpse lifetime. The corpse
+  falls under gravity, settles, and keeps the baked limp pose.
 - The threshold trio spawns about 14 m ahead of the south gate, inside the
   town's 19 m safe ring, so all three are inspectable immediately and idle
   until the ranger leaves the ring. Threshold positions are offsets from
@@ -206,7 +208,7 @@ derived from the sampled height field with a per-surface strength from
 - visual controller selection through idle → walk → run → attack → hit →
   death, head hitbox and profile, and a skinned blood anchor;
 - gameplay: own kind, display name, natural weapons, `forest_mobs` group
-  membership (and not `devil_mobs`), gold on death, held corpse pose;
+  membership (and not `devil_mobs`), gold on death, limp physical corpse pose;
 - AI closing from six metres into an attack state;
 - the frontier: 19 `forest_spawns`, the unchanged 36 legacy `enemy_spawns` and
   16 `devil_spawns`, 19 live forest mobs across kinds 9–11, and the threshold

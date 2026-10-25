@@ -23,6 +23,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
+const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Stamina = preload("res://scripts/stamina.gd")
@@ -270,9 +271,11 @@ func _tint_rig() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if replica or not authoritative or not auto_ai:
-		return
 	if not alive:
+		if authoritative and not replica:
+			CorpsePhysics.settle_root(self, delta)
+		return
+	if replica or not authoritative or not auto_ai:
 		return
 	dodge.advance(delta,is_on_floor())
 	_step_ai(delta,targets)
@@ -583,14 +586,24 @@ func _die(announce: bool) -> void:
 	state = "DEAD"
 	velocity = Vector3.ZERO
 	collision_layer = 0
-	collision_mask = 0
+	collision_mask = 1
 	combat.stop()
 	dodge.reset()
 	if is_instance_valid(rig):
 		rig.set_step(-1.0,Vector3.FORWARD)
 		rig.set_hit_react(0.0)
-	if is_instance_valid(_body):
-		var fall := create_tween()
+		# Stop the Archer's physics-clock animation and hide its loose props
+		# before its skeleton is handed to the ragdoll; snapshots only mirror
+		# state on dead replicas.
+		rig.enter_corpse_pose()
+	var limp = CorpsePhysics.start_limp(_body) if is_instance_valid(_body) else null
+	var fall: Tween
+	if limp != null:
+		fall = create_tween()
+		fall.tween_interval(0.5)
+		CorpseHold.append(fall,self,_body)
+	elif is_instance_valid(_body):
+		fall = create_tween()
 		fall.tween_property(_body,"rotation:z",PI * 0.47,0.5)
 		CorpseHold.append(fall,self,_body)
 	if announce:
