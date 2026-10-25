@@ -217,6 +217,20 @@ func run() -> void:
 	check(is_equal_approx(float(twin.get("duration",0.0)),1.0), "Double slash lasts 1.0 s")
 	check(twin.cues.size() == 2, "Double slash keeps both cuts")
 	check(is_equal_approx(float(twin.cues[0].at),0.26) and is_equal_approx(float(twin.cues[1].at),0.52), "Double slash cuts at 0.26 and 0.52 s")
+	# The buckler shove reads as a headbutt, and every travelling skill follows
+	# the crosshair instead of the heading the key was pressed from.
+	check(str(AbilityRules.by_item("shield_buckler",1).get("name","")) == "HEADBUTT", "The buckler skill is the headbutt")
+	check(str(AbilityRules.by_id("shield_bash").get("name","")) == "HEADBUTT", "The headbutt keeps its slot id")
+	for aimed_id in ["lunge_thrust","shield_bash","shield_charge"]:
+		check(AbilityRules.follows_aim(AbilityRules.by_id(str(aimed_id))), "%s travels down the crosshair" % aimed_id)
+	for planted_id in ["double_slash","spin_slash","shield_slam","barrage","fireball"]:
+		check(not AbilityRules.follows_aim(AbilityRules.by_id(str(planted_id))), "%s is not an aim dash" % planted_id)
+	for melee_id in ["double_slash","lunge_thrust","spin_slash","backstab","shield_bash","shield_charge","shield_slam"]:
+		check(AbilityRules.is_melee(AbilityRules.by_id(str(melee_id))), "%s swings the equipped blade" % melee_id)
+	for standing_id in ["double_slash","lunge_thrust","spin_slash","backstab","shield_bash","shield_charge","shield_slam","charge"]:
+		check(AbilityRules.needs_standing(AbilityRules.by_id(str(standing_id))), "%s needs the standing stance" % standing_id)
+	for cast_id in ["barrage","triple_volley","piercing_shot","fireball","bone_spear"]:
+		check(not AbilityRules.needs_standing(AbilityRules.by_id(str(cast_id))), "%s may layer over a crouch" % cast_id)
 	var reel: Dictionary = AbilityRules.by_item("sword_great",0)
 	check(is_equal_approx(float(reel.get("duration",0.0)),0.3166667), "The spin lasts a third of its old time")
 	check(is_equal_approx(float(reel.get("cooldown",0.0)),1.0), "The spin cools for 1.0 s")
@@ -377,6 +391,37 @@ func run() -> void:
 	check(is_equal_approx(near_body.health,31.6) and is_equal_approx(far_body.health,31.6),
 		"The closing thrust does not hit the passed bodies again")
 	lunger.ability.reset()
+	await drive_fighter(lunger,4)
+
+	# The dash follows the crosshair, not the heading the key was pressed from.
+	lunger.rig.global_rotation.y = 0.0
+	lunger.combat.grounded = true
+	lunger.combat.set_aim(lunger.global_position+Vector3(-12.0,1.2,0.0))
+	check(bool(lunger.try_ability(0).get("ok",false)), "The fighter starts an off-axis lunge")
+	var dash: Vector3 = lunger.ability.direction
+	check(dash.x < -0.995 and absf(dash.z) < 0.02, "The lunge dashes down the crosshair")
+	check(absf(wrapf(lunger.rig.global_rotation.y-atan2(12.0,0.0),-PI,PI)) < deg_to_rad(5.0),
+		"The lunge turns the body onto the crosshair")
+	lunger.ability.reset()
+	await drive_fighter(lunger,4)
+
+	# A melee skill cancels a crouch and plays standing; the cast keeps the
+	# crouch layer because its arms are solved separately.
+	var slasher := fighter(motion_world,25,Vector3(-6,0,10))
+	equip(slasher.rig,"sword_short")
+	await drive_fighter(slasher,10)
+	slasher.combat.grounded = true
+	slasher.set_crouch(true)
+	await drive_fighter(slasher,40)
+	check(slasher.cover.crouch_requested and slasher.cover.crouch_amount > 0.9, "The fighter crouches first")
+	check(bool(slasher.try_ability(0).get("ok",false)), "A melee skill starts from a crouch")
+	check(not slasher.cover.crouch_requested and not slasher.cover.crouched, "The melee skill cancels the crouch")
+	check(slasher.cover.crouch_amount < 0.001, "The stance snaps upright for the skill")
+	check(slasher.rig._crouch_amount < 0.001, "The rig drops the crouch blend")
+	check(slasher.rig.phase == "ABILITY" and slasher.rig.ability_clip == "Sword_Double_Slash",
+		"The authored clip owns the standing pose")
+	slasher.ability.reset()
+	await drive_fighter(slasher,4)
 	motion_world.queue_free()
 	await process_frame
 
@@ -399,6 +444,9 @@ func run() -> void:
 	AbilityFx.smoke_puff(cue_fx,caster.global_position,1.0,true)
 	AbilityFx.backstab_flash(cue_fx,caster.global_position,Vector3.FORWARD)
 	check(cue_fx.get_child_count() >= 5, "The spin burst, shield impact, smoke and backstab flash build their nodes")
+	var blink: Node = cue_fx.get_node_or_null("AbilityBlinkBurst")
+	check(blink != null and blink.get_child_count() >= 130,
+		"The backstab blink builds five times the original 26 billboards")
 
 	# End-to-end frontier wiring: a spin cue damages a real mob, Barrage spawns
 	# arrows, and the fireball's blast hurts a body at the impact.

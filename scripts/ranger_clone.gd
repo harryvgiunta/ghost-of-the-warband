@@ -467,7 +467,8 @@ func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge:
 	var damage := Combat.damage_for(rig.bow_index,charge)
 	var arrow := Arrow.new()
 	arrow.source_id = combat.source_id
-	arrow.hit_mask = 1 | 4
+	# Layer 8 is the shield: a raised or carried shield takes the shaft first.
+	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = true
 	get_parent().add_child(arrow)
 	var excluded: Array[RID] = [get_rid()]

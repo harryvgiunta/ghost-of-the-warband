@@ -986,7 +986,9 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 		return
 	var arrow := Arrow.new()
 	arrow.source_id = slot
-	arrow.hit_mask = 1 | 2
+	# Layer 8 is the shield: an enemy clone or a party member's raised shield
+	# takes the shaft before the body behind it.
+	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
 	var excluded: Array[RID] = [actors[slot].get_rid()]
@@ -2222,7 +2224,7 @@ func _clone_arrow_event(origin: Vector3, direction: Vector3, speed: float) -> vo
 	if network_role != "client":
 		return
 	var arrow := Arrow.new()
-	arrow.hit_mask = 1 | 4
+	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = false
 	add_child(arrow)
 	arrow.launch(origin,direction,speed,0.0,[])

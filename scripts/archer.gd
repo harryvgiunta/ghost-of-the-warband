@@ -39,6 +39,14 @@ const STAFF_DATA = [
 	{"name":"Ember staff", "length":1.75},
 	{"name":"Bone staff", "length":1.60},
 ]
+## A shield skill presents the disc ahead of the body. These are the minimum
+## plane distances in front of the chest and head bones: the skinned chest
+## reaches 0.29 m from the spine and every helmet 0.28 m from the head bone, so
+## the disc sits just ahead of both and a clip that draws the hand back cannot
+## carry the boss through the torso or the helmet.
+const ABILITY_SHIELD_CHEST_CLEAR := 0.34
+const ABILITY_SHIELD_HEAD_CLEAR := 0.34
+const ABILITY_SHIELD_LEG_CLEAR := 0.60
 ## Every standard cut starts with a real backswing: the hands cock up behind
 ## the striking shoulder while the chest winds away from the target, then the
 ## hilt crosses the centre line and the tip whips through the sector past it.
@@ -466,9 +474,17 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	_clear_melee()
 	consumable_kind = ""
 	var planar := Vector3(direction.x,0.0,direction.z)
-	if not ability_draw_curve.is_empty():
-		# A bow skill fires down the crosshair, not down the heading that was
-		# carried into the keypress: turn onto the aim before the first frame.
+	# A blade skill or dash is performed standing, and the controller has already
+	# stood the capsule up. Drop the leftover crouch blend so the authored clip
+	# owns every bone from the first frame instead of being covered by the crouch
+	# pose.
+	if AbilityRules.needs_standing(definition):
+		_crouch_amount = 0.0
+		_slide_weight = 0.0
+	if not ability_draw_curve.is_empty() or AbilityRules.follows_aim(definition):
+		# Aim-directed skills are performed down the crosshair, not down the
+		# heading that was carried into the keypress: turn onto the aim before
+		# the first frame so the dash and its blade trail leave along it.
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
 			planar = Vector3(offset.x,0.0,offset.z)
@@ -1778,6 +1794,10 @@ func _update_pose(delta: float) -> void:
 		_display_weapon = weapon
 		_display_drawing = drawing
 		_display_diagonal = diagonal_id
+	# A blade skill or dash is performed standing. A replicated crouch that has
+	# not finished clearing yet must not cover its authored clip.
+	if _crouch_amount > 0.0 and _ability_needs_standing():
+		_crouch_amount = 0.0
 	var crouching := _crouch_amount > 0.0 and _roll_progress < 0.0
 	var leaning := _cover_active and not _cover_lean.is_zero_approx() and _roll_progress < 0.0
 	if leaning:
@@ -2431,6 +2451,9 @@ func _two_hand_wrist_target(target: Vector3, primary: Vector3, primary_radius: f
 func _ability_bow() -> bool:
 	return phase == "ABILITY" and weapon == "bow" and not ability_draw_curve.is_empty()
 
+func _ability_needs_standing() -> bool:
+	return phase == "ABILITY" and AbilityRules.needs_standing(AbilityRules.by_id(ability_id))
+
 func _sample_ability_draw() -> float:
 	if ability_draw_curve.is_empty():
 		return 0.0
@@ -2633,8 +2656,32 @@ func _update_shield_pose() -> void:
 			forward.y = 0.0
 		forward = forward.normalized()
 		var hand := _bone_world(_arms[0][2])
-		var center := hand.origin+forward*(0.10+size_delta*0.4)+Vector3.UP*0.03
 		var basis := Basis.looking_at(forward,Vector3.UP)
+		var center := hand.origin+forward*(0.10+size_delta*0.4)+Vector3.UP*0.03
+		# The shove is driven from the body, not from the wrist: a clip that
+		# draws the hand back to the chest would carry the disc through the
+		# torso and the helmet. Push the disc out until its plane clears the
+		# chest and head, and solve the arm onto the pushed wrist.
+		var chest := _bone_world(_bones.spine_03).origin
+		var head := _bone_world(_bones.Head).origin
+		var needed := maxf((chest-global_position).dot(forward)+ABILITY_SHIELD_CHEST_CLEAR,
+			(head-global_position).dot(forward)+ABILITY_SHIELD_HEAD_CLEAR)
+		# A low shield (the ground slam) passes the legs, not the head, so the
+		# bones that actually share its height set the clearing distance.
+		var gated := shield_radius*0.8+0.15
+		for side in 2:
+			for joint in 2:
+				var leg := _bone_world(_legs[side][joint]).origin
+				if absf(center.y-leg.y) > gated:
+					continue
+				needed = maxf(needed,(leg-global_position).dot(forward)+ABILITY_SHIELD_LEG_CLEAR)
+		var ahead := (center-global_position).dot(forward)
+		if ahead < needed:
+			center += forward*(needed-ahead)
+			var shoulder := _bone_world(_arms[0][0]).origin
+			var elbow := _bone_world(_arms[0][1]).origin
+			var pole := elbow-(shoulder+hand.origin)*0.5
+			_solve_limb(_arms[0],center-forward*0.12-Vector3.UP*0.03,basis,pole)
 		active_shield.global_transform = Transform3D(basis,center)
 		return
 	if _blocking:

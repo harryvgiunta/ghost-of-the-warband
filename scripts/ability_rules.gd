@@ -14,6 +14,11 @@ extends RefCounted
 ## casts, the unarmed charge, the backstab blink) stops the walk dead; a melee
 ## skill with `move` keeps the normal walking input and only overrides it while
 ## `travel_seconds` commits the owner to a step.
+##
+## `aim` decides where a committed step goes: the dash turns the body onto the
+## live crosshair and travels down that line instead of the heading the key was
+## pressed from. Every skill that travels (the lunge, the boss shove, the shield
+## charge) declares it; a planted skill needs no direction.
 
 const SLOT_COUNT := 2
 ## Temporary testing cost: every weapon skill spends a trivial stamina sliver
@@ -39,6 +44,10 @@ const BOW_ITEMS := ["bow_short", "bow_recurve", "bow_long"]
 const SWORD_ITEMS := ["sword_short", "sword_arming", "sword_great"]
 const STAFF_ITEMS := ["staff_fire", "staff_bone"]
 const SHIELD_ITEMS := ["shield_buckler", "shield_kite", "shield_tower"]
+## Effect kinds that swing the body's own weapon. They play their authored
+## blade clip over the whole skeleton, so the stance has to be upright before
+## they start; a cast can layer over a crouch, a cut cannot.
+const MELEE_EFFECTS := ["melee_arc", "melee_ring", "backstab"]
 
 const ABILITIES := [
 	{
@@ -182,6 +191,7 @@ const ABILITIES := [
 		"speed_scale": 4.05,
 		"sound": "lunge",
 		"move": true,
+		"aim": true,
 		"animation": "Sword_Lunge_Thrust",
 		"lean": 0.12,
 		"icon": "res://assets/ui/abilities/lunge_thrust.png",
@@ -295,7 +305,7 @@ const ABILITIES := [
 	},
 	{
 		"id": "shield_bash",
-		"name": "SHIELD BASH",
+		"name": "HEADBUTT",
 		"item": "shield_buckler",
 		"slot": 1,
 		"key": "SHIFT + 2",
@@ -306,10 +316,11 @@ const ABILITIES := [
 		"speed_scale": 0.55,
 		"sound": "bash",
 		"move": true,
+		"aim": true,
 		"animation": "Shield_Bash",
 		"lean": 0.10,
 		"icon": "res://assets/ui/abilities/shield_bash.png",
-		"description": "A short boss-first shove that staggers the front arc.",
+		"description": "A short head-first shove that staggers the front arc.",
 		"effect": {"kind": "melee_arc", "damage_scale": 1.5, "arc_degrees": 100.0,
 			"radius": 1.7, "stagger": 0.55},
 		"cues": [{"at": 0.26, "cue": "arc"}],
@@ -326,6 +337,7 @@ const ABILITIES := [
 		"travel_seconds": 0.48,
 		"speed_scale": 1.65,
 		"move": true,
+		"aim": true,
 		"sound": "charge",
 		"animation": "Shield_Charge",
 		"lean": 0.14,
@@ -377,6 +389,24 @@ static func _static_init() -> void:
 
 static func by_id(id: String) -> Dictionary:
 	return _by_id.get(id, {})
+
+
+## A melee skill swings the equipped blade, so it can only be performed
+## standing: the crouch overlay would replace the authored clip's arms.
+static func is_melee(definition: Dictionary) -> bool:
+	return MELEE_EFFECTS.has(str(definition.get("effect", {}).get("kind", "")))
+
+
+## Skills that cannot be performed from a crouch. A blade swings over the whole
+## skeleton, and a committed dash would slide a folded-over body along the
+## floor; only the planted casts keep the crouch layer.
+static func needs_standing(definition: Dictionary) -> bool:
+	return is_melee(definition) or float(definition.get("speed_scale", 0.0)) > 0.0
+
+
+## A committed step travels down the crosshair instead of the body's heading.
+static func follows_aim(definition: Dictionary) -> bool:
+	return bool(definition.get("aim", false))
 
 
 static func by_item(item_id: String, slot: int = 0) -> Dictionary:

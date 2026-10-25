@@ -64,11 +64,13 @@ func activate(slot: int = 0) -> Dictionary:
 	var reason := blocker(slot)
 	if not reason.is_empty():
 		return {"ok": false, "message": reason}
+	# A blade skill or a committed dash needs an upright stance: cancel the
+	# crouch first and only spend the cost once the body can actually stand.
+	if AbilityRules.needs_standing(definition) and not _stand_before_melee():
+		return {"ok": false, "message": "Not enough headroom to stand for %s."
+			% str(definition.name).capitalize()}
 	var cost := float(definition.stamina_cost)
-	var facing: Vector3 = -rig.global_basis.z
-	facing.y = 0.0
-	if facing.length_squared() < 0.000001:
-		facing = Vector3.FORWARD
+	var facing := _facing(definition)
 	actor.stamina = maxf(0.0, float(actor.stamina) - cost)
 	if slot >= 0 and slot < cooldowns.size():
 		cooldowns[slot] = float(definition.cooldown)
@@ -81,12 +83,37 @@ func activate(slot: int = 0) -> Dictionary:
 	duration = maxf(float(definition.duration), 0.01)
 	travel_seconds = clampf(float(definition.get("travel_seconds", definition.duration)), 0.0, duration)
 	speed = base_speed * maxf(float(definition.get("speed_scale", 0.0)), 0.0)
-	direction = facing.normalized()
+	direction = facing
 	_cue_index = 0
 	rig.begin_ability(definition, direction)
 	activated.emit(active_id, definition)
 	_emit_due_cues()
 	return {"ok": true, "definition": definition}
+
+
+## The line the skill is performed down. A travelling skill follows the live
+## crosshair, so the dash lands where the player is looking; everything else
+## keeps the heading the key was pressed from. The direction is locked for the
+## activation, so the committed step never curves with the mouse.
+func _facing(definition: Dictionary) -> Vector3:
+	var facing: Vector3 = -rig.global_basis.z
+	facing.y = 0.0
+	if AbilityRules.follows_aim(definition) and is_instance_valid(combat):
+		var offset: Vector3 = combat.aim_point - rig.global_position
+		offset.y = 0.0
+		if offset.length_squared() > 0.000001:
+			facing = offset
+	if facing.length_squared() < 0.000001:
+		return Vector3.FORWARD
+	return facing.normalized()
+
+
+## A skill that cannot be performed from a crouch stands the owner up first. The rig drops its own crouch blend in `begin_ability`;
+## the controller owns the capsule, the camera height and the crouch intent.
+func _stand_before_melee() -> bool:
+	if is_instance_valid(combat) and is_instance_valid(combat.cover):
+		return combat.cover.force_stand()
+	return true
 
 
 func _blocker(definition: Dictionary, slot: int) -> String:

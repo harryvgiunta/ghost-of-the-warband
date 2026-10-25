@@ -13,6 +13,9 @@ const STEEL := Color("e9f2ff")
 const DUST := Color("c9b18a")
 const EMBER_RED := Color("e8503c")
 const HOT_WHITE := Color("fff6e4")
+## Billboards in the backstab blink cloud. Five times the original 26, so the
+## burst genuinely engulfs the ranger at both ends of the blink.
+const BLINK_PUFFS := 130
 
 ## Cached procedural sprites. Both are generated once from fixed seeds so every
 ## peer that triggers an effect gets the same image.
@@ -687,8 +690,8 @@ static func blade_trail(parent: Node3D, rig, seconds: float, color: Color = STEE
 
 
 ## Backstab blink beat. With `dark` it is the engulfing burst: a near-black cloud
-## of 22-28 soft billboards, ~2.4 m wide and ~2.2 m tall, that swallows the body
-## at the departure and arrival points. Otherwise it is a quick warm dust poof.
+## of 130 soft billboards, ~4 m wide and ~3.6 m tall, that swallows the body at
+## the departure and arrival points. Otherwise it is a quick warm dust poof.
 ## Either way a thin vertical streak marks the displacement.
 static func smoke_puff(parent: Node3D, at: Vector3, scale: float = 1.0,
 		dark: bool = true) -> void:
@@ -704,9 +707,11 @@ static func smoke_puff(parent: Node3D, at: Vector3, scale: float = 1.0,
 
 
 ## Near-black cloud that hides the ranger for a blink. Puff centres sit inside the
-## body volume (a centred fill, not a ring), and 26 heavily overlapping soft
-## billboards keep the interior solid: charcoal 0.06-0.13 albedo with a faint
+## body volume (a centred fill, not a ring), and `BLINK_PUFFS` heavily overlapping
+## soft billboards keep the interior solid: charcoal 0.06-0.13 albedo with a faint
 ## violet-grey rim. Swells in 0.25 s, holds briefly and is mostly gone by 0.7 s.
+## The billboards share one quad mesh and carry their own `material_override`, so
+## the only per-puff resources are the tint and its fade tween.
 static func _blink_burst(parent: Node3D, at: Vector3, scale: float) -> void:
 	if not is_instance_valid(parent):
 		return
@@ -716,15 +721,16 @@ static func _blink_burst(parent: Node3D, at: Vector3, scale: float) -> void:
 	root.global_position = at
 	var body := maxf(scale, 0.2)
 	var texture := smoke_texture()
-	var count := 26
-	for index in count:
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	for index in BLINK_PUFFS:
 		var h1 := _hash_unit(index, 11)
 		var h2 := _hash_unit(index, 29)
 		var h3 := _hash_unit(index, 47)
 		var h4 := _hash_unit(index, 71)
 		var angle := TAU * h1
-		var radius := (0.04 + 0.40 * h2 * h2) * body
-		var lift := (0.48 + 0.95 * h3) * body
+		var radius := (0.04 + 0.68 * h2 * h2) * body
+		var lift := (0.48 + 1.60 * h3) * body
 		var shade := 0.06 + 0.07 * h4
 		var tint := Color(shade, shade, shade * 1.08)
 		if index % 5 == 0:
@@ -733,11 +739,9 @@ static func _blink_burst(parent: Node3D, at: Vector3, scale: float) -> void:
 			tint = Color(0.09, 0.11, 0.13)
 		var puff := MeshInstance3D.new()
 		puff.name = "Puff"
-		var quad := QuadMesh.new()
-		quad.size = Vector2.ONE
 		var material := sprite_material(texture, false, Color(tint.r, tint.g, tint.b, 0.0))
-		quad.material = material
 		puff.mesh = quad
+		puff.material_override = material
 		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var start := Vector3(cos(angle) * radius, lift, sin(angle) * radius)
 		puff.position = start
@@ -745,8 +749,8 @@ static func _blink_burst(parent: Node3D, at: Vector3, scale: float) -> void:
 		root.add_child(puff)
 		var peak := body * (0.9 + 0.6 * h1)
 		var alpha := 0.55 + 0.10 * h2
-		var end := start + Vector3(cos(angle) * 0.16, 0.12 + 0.14 * h2,
-			sin(angle) * 0.16)
+		var end := start + Vector3(cos(angle) * 0.26, 0.12 + 0.24 * h2,
+			sin(angle) * 0.26)
 		var tween := puff.create_tween()
 		tween.tween_interval(0.06 * h4)
 		tween.set_parallel(true)
