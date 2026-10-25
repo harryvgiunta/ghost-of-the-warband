@@ -59,7 +59,7 @@ CLIPS = [
     ('Bow_Piercing_Shot', 1.25, None, 'bow'),
     ('Sword_Double_Slash', 1.0, None, 'sword'),
     ('Sword_Lunge_Thrust', 0.95, None, 'sword'),
-    ('Sword_Spin_Slash', 0.95, None, 'sword'),
+    ('Sword_Spin_Slash', 0.3166667, None, 'sword'),
     ('Dagger_Backstab', 0.9, None, 'dagger'),
     ('Staff_Fireball_Cast', 1.2, None, 'staff'),
     ('Staff_Bone_Spear_Cast', 1.15, None, 'staff'),
@@ -69,8 +69,10 @@ CLIPS = [
 ]
 AUTHORED = {name for name, _s, _b, _k in CLIPS}
 # Clips re-authored in this pass. Everything else already in the shipped GLB is
-# left byte-for-byte untouched, so the merge copies only these.
-REWORKED = ('Sword_Double_Slash', 'Sword_Lunge_Thrust', 'Sword_Spin_Slash', 'Dagger_Backstab')
+# left byte-for-byte untouched, so the merge copies only these. The spin is
+# 3x compressed in time: 19 frames (0.3166667 s) with the same normalized
+# tracks, because the runtime's 360 degree turn and trail are time-scaled too.
+REWORKED = ('Sword_Spin_Slash',)
 RETIRED = {'Dagger_Dash_Stab'}
 
 for action in list(bpy.data.actions):

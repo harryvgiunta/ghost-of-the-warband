@@ -234,6 +234,11 @@ var ability_index := -1
 var ability_lean := 0.0
 var ability_spin := 0.0
 var ability_draw_curve: Array = []
+## Move-enabled abilities keep their authored upper body while the legs layer
+## the normal locomotion cycle under them. `ability_travel` marks the committed
+## lunge/charge window whose authored full-body travel must survive unchanged.
+var ability_move := false
+var ability_travel := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
 var _offhand_weapon_basis := Basis.IDENTITY
@@ -451,6 +456,8 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	ability_lean = float(definition.get("lean",0.0))
 	ability_spin = float(definition.get("spin",0.0))
 	ability_draw_curve = definition.get("bow_draw", [])
+	ability_move = bool(definition.get("move",false))
+	ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 	phase = "ABILITY"
 	_phase_time = 0.0
 	draw_amount = 0.0
@@ -471,6 +478,10 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 
 func is_ability() -> bool:
 	return phase == "ABILITY"
+
+## Move-enabled skills may keep walking under their authored upper body.
+func ability_allows_movement() -> bool:
+	return phase == "ABILITY" and ability_move
 
 func ability_progress() -> float:
 	return clampf(_phase_time/maxf(ability_duration,0.01),0.0,1.0)
@@ -500,6 +511,8 @@ func _reset_ability_state() -> void:
 	ability_lean = 0.0
 	ability_spin = 0.0
 	ability_draw_curve = []
+	ability_move = false
+	ability_travel = 0.0
 
 func _update_consumable_props() -> void:
 	if _bandage_prop == null or _potion_prop == null:
@@ -1362,6 +1375,8 @@ func apply_animation_state(state: Dictionary) -> void:
 		ability_lean = float(definition.get("lean",0.0))
 		ability_spin = float(definition.get("spin",0.0))
 		ability_draw_curve = definition.get("bow_draw", [])
+		ability_move = bool(definition.get("move",false))
+		ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 		phase = "ABILITY"
 		_phase_time = float(state.time)
 		draw_amount = 0.0
@@ -1682,6 +1697,10 @@ func _update_pose(delta: float) -> void:
 	var bow_ability := ability and weapon == "bow" and not ability_draw_curve.is_empty()
 	if bow_ability:
 		draw_amount = _sample_ability_draw()
+	# A move-enabled skill keeps playing its authored upper body while the legs
+	# layer the normal locomotion cycle. The committed travel window of a lunge
+	# or shield charge is exempt: its authored full-body clip owns the pose.
+	var moving_ability := ability and ability_move and (ability_travel <= 0.0 or _phase_time >= ability_travel)
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var consuming := is_consuming()
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
@@ -1690,7 +1709,7 @@ func _update_pose(delta: float) -> void:
 	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing and not consuming
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
-	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming
+	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming or moving_ability
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var diagonal_body := is_diagonal_swing(_melee_hand)
 	var diagonal_id := 0

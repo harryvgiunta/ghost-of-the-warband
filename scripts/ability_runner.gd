@@ -26,6 +26,10 @@ var duration := 0.0
 var speed := 0.0
 var travel_seconds := 0.0
 var direction := Vector3.FORWARD
+## Bodies already struck during this activation. A travelling skill sweeps the
+## lane every tick and shares this set with its closing beat, so each body is
+## only ever hit once per activation.
+var active_victims: Dictionary = {}
 var cooldowns := PackedFloat32Array()
 var _cue_index := 0
 var _grant_ids: Array[String] = []
@@ -72,6 +76,7 @@ func activate(slot: int = 0) -> Dictionary:
 	active_id = str(definition.id)
 	active_slot = slot
 	active_definition = definition
+	active_victims.clear()
 	elapsed = 0.0
 	duration = maxf(float(definition.duration), 0.01)
 	travel_seconds = clampf(float(definition.get("travel_seconds", definition.duration)), 0.0, duration)
@@ -165,6 +170,7 @@ func reset() -> void:
 	active_id = ""
 	active_slot = -1
 	active_definition = {}
+	active_victims.clear()
 	elapsed = 0.0
 	duration = 0.0
 	speed = 0.0
@@ -177,6 +183,13 @@ func reset() -> void:
 
 func velocity() -> Vector3:
 	return direction * speed if active and elapsed <= travel_seconds else Vector3.ZERO
+
+
+## Melee skills keep the owner's walking input; ranged casts, the unarmed
+## charge and the backstab blink plant the feet for the duration. Controllers
+## ask this instead of `active` before they drop the movement intent.
+func allows_movement() -> bool:
+	return active and bool(active_definition.get("move", false))
 
 
 func hud_state(slot: int = 0) -> Dictionary:
@@ -244,6 +257,7 @@ func _finish() -> void:
 	active_id = ""
 	active_slot = -1
 	active_definition = {}
+	active_victims.clear()
 	elapsed = 0.0
 	duration = 0.0
 	speed = 0.0

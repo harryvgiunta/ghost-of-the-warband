@@ -419,7 +419,7 @@ func _physics_process(delta: float) -> void:
 	if combat.stagger_time > 0.0:
 		input_vector = Vector2.ZERO
 		step.active = false
-	if ability.active:
+	if ability.active and not ability.allows_movement():
 		input_vector = Vector2.ZERO
 		slide.reset()
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == "" and not ability.active
@@ -456,10 +456,22 @@ func _physics_process(delta: float) -> void:
 		player.velocity.x = roll.direction.x * DodgeRoll.SPEED
 		player.velocity.z = roll.direction.z * DodgeRoll.SPEED
 	if ability.active:
-		var charge_velocity: Vector3 = ability.velocity()
-		player.velocity.x = charge_velocity.x
-		player.velocity.z = charge_velocity.z
+		# A melee skill keeps the walk computed above; a planted skill stops
+		# dead. Either way a committed travel window wins over both.
 		_jump_requested = false
+		var ability_velocity: Vector3 = ability.velocity()
+		if not ability_velocity.is_zero_approx():
+			player.velocity.x = ability_velocity.x
+			player.velocity.z = ability_velocity.z
+		elif not ability.allows_movement():
+			player.velocity.x = 0.0
+			player.velocity.z = 0.0
+		else:
+			# Hand the dash back to the feet: the walk target caps the residual
+			# travel instead of gliding a lane past the authored distance.
+			var walked := Vector2(player.velocity.x, player.velocity.z).limit_length(speed)
+			player.velocity.x = walked.x
+			player.velocity.z = walked.y
 	if _jump_requested and not inspecting and not hud.map_open:
 		player.velocity.y = 7.0
 	elif player.is_on_floor():
@@ -475,6 +487,8 @@ func _physics_process(delta: float) -> void:
 	var limit: float = world.WORLD_LIMIT - 2.0
 	player.position.x = clampf(player.position.x, -limit, limit)
 	player.position.z = clampf(player.position.z, -limit, limit)
+	# The lunge cuts the lane it just crossed, measured after the move.
+	_ability_path_strike(ability)
 	var actual_velocity := (player.global_position - previous_position) / maxf(delta, 0.0001)
 	slide.after_move(player,actual_velocity)
 	_collect_loot(delta)
@@ -1098,6 +1112,23 @@ func _on_spell_detonated(centre: Vector3, _direction: Vector3, spell, combat_ref
 		float(spell.get_meta("stagger", 0.0)))
 
 
+## A travelling skill sweeps the lane it has just crossed: after the body moved
+## for the tick, every body inside the path arc takes one hit. The activation's
+## victim set is shared with the closing thrust beat, so no body is hit twice.
+func _ability_path_strike(runner) -> void:
+	if not is_instance_valid(runner) or not runner.active:
+		return
+	var effect: Dictionary = runner.active_definition.get("effect", {})
+	if not bool(effect.get("path_damage", false)):
+		return
+	if float(runner.elapsed) > float(runner.travel_seconds) + 0.02:
+		return
+	runner.combat.ability_strike(float(effect.get("path_radius", 1.0)),
+		float(effect.get("path_arc_degrees", 180.0)),
+		AbilityRules.damage_for(runner.active_definition, runner.rig),
+		float(effect.get("stagger", 0.0)), false, false, runner.active_victims)
+
+
 func _ability_melee(runner, definition: Dictionary, cue: String, index: int,
 		damage: float, authoritative: bool) -> void:
 	var effect: Dictionary = definition.get("effect", {})
@@ -1117,9 +1148,19 @@ func _ability_melee(runner, definition: Dictionary, cue: String, index: int,
 	if cue == "wind":
 		AbilityFx.blade_trail(self, rig, 0.55)
 		return
+	# The lunge's dash beat marks the takeoff with its wake; the thrust cue,
+	# not the dash, spends the hit.
+	if cue == "dash":
+		AbilityFx.lunge_wake(self, rig, 0.40)
+		return
 	if authoritative:
+		# A travelling skill already swept its lane, so the closing beat shares
+		# that victim set and never hits a body the dash passed through twice.
+		var victims: Dictionary = {}
+		if bool(effect.get("path_damage", false)):
+			victims = runner.active_victims
 		runner.combat.ability_strike(radius, arc, damage,
-			float(effect.get("stagger", 0.0)), ring, not ring)
+			float(effect.get("stagger", 0.0)), ring, not ring, victims)
 	if id.begins_with("shield_"):
 		# The shield face is the weapon, so the impact sits on the boss instead
 		# of a crescent that never matched the hands.

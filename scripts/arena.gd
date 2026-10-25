@@ -772,9 +772,19 @@ func _arena_ability_melee(actor, definition: Dictionary, cue: String, index: int
 	if cue == "wind":
 		AbilityFx.blade_trail(self, rig, 0.55)
 		return
+	# The lunge's dash beat marks the takeoff with its wake; the thrust cue,
+	# not the dash, spends the hit.
+	if cue == "dash":
+		AbilityFx.lunge_wake(self, rig, 0.40)
+		return
 	if authoritative:
+		# A travelling skill already swept its lane, so the closing beat shares
+		# that victim set and never hits a body the dash passed through twice.
+		var victims: Dictionary = {}
+		if bool(effect.get("path_damage", false)):
+			victims = actor.ability.active_victims
 		actor.combat.ability_strike(radius, arc, damage,
-			float(effect.get("stagger", 0.0)), ring, not ring)
+			float(effect.get("stagger", 0.0)), ring, not ring, victims)
 	if id.begins_with("shield_"):
 		# The shield face is the weapon, so the impact sits on the boss instead
 		# of a crescent that never matched the hands.

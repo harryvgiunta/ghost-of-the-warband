@@ -64,6 +64,27 @@ func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
 	return actor
 
 
+## The frontier reads held physical keys, so a test must press them the way a
+## player does rather than poking the controller.
+func key(code: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.physical_keycode = code
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+
+## Ticks one authoritative arena fighter the way the host loop does: a fresh
+## movement intent every frame, then the seat's own step.
+func drive_fighter(actor, frames: int, motion: Vector2 = Vector2.ZERO) -> void:
+	for frame in frames:
+		await physics_frame
+		actor.move_direction = motion
+		actor.run_requested = false
+		actor.input_age = 0.0
+		actor.step(1.0/60.0,[actor])
+
+
 ## Frontier skills fire down the live crosshair, so a test that wants a shot on
 ## a body points the camera at it exactly as a player would: the centre ray has
 ## to pass through the target. The camera orbits the focus, so solve the yaw and
@@ -111,6 +132,7 @@ func run() -> void:
 		check(not str(definition.get("animation","")).is_empty(), "%s names its clip" % item_id)
 		check(not str(definition.get("sound","")).is_empty(), "%s names its sound" % item_id)
 		check(not str(definition.get("description","")).is_empty(), "%s describes itself" % item_id)
+		check(definition.has("move"), "%s declares whether the owner can walk" % item_id)
 		check(not seen.has(expected), "%s has a unique id" % item_id)
 		seen[expected] = true
 		var icon: Texture2D = AbilityRules.icon_texture(expected)
@@ -177,22 +199,37 @@ func run() -> void:
 	var lunge: Dictionary = AbilityRules.by_item("sword_arming",0)
 	check(is_equal_approx(float(lunge.get("duration",0.0)),0.95), "Lunge lasts 0.95 s")
 	check(is_equal_approx(float(lunge.get("travel_seconds",0.0)),0.24), "Lunge steps for 0.24 s")
-	check(is_equal_approx(float(lunge.get("speed_scale",0.0)),1.35), "Lunge moves at 135%")
-	check(is_equal_approx(float(lunge.cues[0].at),0.42), "The lunge thrust lands at 0.42 s")
+	check(is_equal_approx(float(lunge.get("speed_scale",0.0)),4.05), "Lunge dashes at 405%")
+	check(is_equal_approx(float(lunge.get("speed_scale",0.0)) * 5.5 * float(lunge.get("travel_seconds",0.0)),5.346),
+		"The long lunge covers its authored 5.34 m")
+	check(lunge.cues.size() == 2, "The lunge wakes the dash then thrusts")
+	check(str(lunge.cues[0].cue) == "dash" and is_equal_approx(float(lunge.cues[0].at),0.0), "The lunge wakes at the takeoff")
+	check(str(lunge.cues[1].cue) == "arc" and is_equal_approx(float(lunge.cues[1].at),0.42), "The lunge thrust lands at 0.42 s")
+	check(bool(lunge.effect.get("path_damage",false)), "The lunge damages the lane it crosses")
+	check(is_equal_approx(float(lunge.effect.get("path_radius",0.0)),1.35), "The lunge lane is 1.35 m wide")
+	check(is_equal_approx(float(lunge.effect.get("path_arc_degrees",0.0)),170.0), "The lunge lane sweeps a wide front")
+	check(is_equal_approx(float(lunge.effect.get("dash_distance",0.0)),5.34), "The lunge declares its dash distance")
 	check(is_equal_approx(float(lunge.effect.damage_scale),1.8), "Lunge keeps its 1.8x damage")
 	check(is_equal_approx(float(lunge.effect.arc_degrees),55.0), "Lunge keeps its narrow arc")
 	check(is_equal_approx(float(lunge.effect.radius),2.45), "Lunge keeps its reach")
+	check(is_equal_approx(AbilityRules.damage_for(lunge,rig),68.4), "The lunge hits for 68.4")
 	var twin: Dictionary = AbilityRules.by_item("sword_short",0)
 	check(is_equal_approx(float(twin.get("duration",0.0)),1.0), "Double slash lasts 1.0 s")
 	check(twin.cues.size() == 2, "Double slash keeps both cuts")
 	check(is_equal_approx(float(twin.cues[0].at),0.26) and is_equal_approx(float(twin.cues[1].at),0.52), "Double slash cuts at 0.26 and 0.52 s")
 	var reel: Dictionary = AbilityRules.by_item("sword_great",0)
-	check(is_equal_approx(float(reel.get("duration",0.0)),0.95), "The spin lasts 0.95 s")
-	check(is_equal_approx(float(reel.get("cooldown",0.0)),1.3), "The spin cools for 1.3 s")
+	check(is_equal_approx(float(reel.get("duration",0.0)),0.3166667), "The spin lasts a third of its old time")
+	check(is_equal_approx(float(reel.get("cooldown",0.0)),1.0), "The spin cools for 1.0 s")
 	check(is_equal_approx(float(reel.get("spin",0.0)),1.0), "The spin keeps its full turn")
 	check(reel.cues.size() == 2, "The spin winds then rings")
-	check(str(reel.cues[0].cue) == "wind" and is_equal_approx(float(reel.cues[0].at),0.20), "The spin winds at 0.2 s")
-	check(str(reel.cues[1].cue) == "ring" and is_equal_approx(float(reel.cues[1].at),0.50), "The spin rings at 0.5 s")
+	check(str(reel.cues[0].cue) == "wind" and is_equal_approx(float(reel.cues[0].at),0.06), "The spin winds at 0.06 s")
+	check(str(reel.cues[1].cue) == "ring" and is_equal_approx(float(reel.cues[1].at),0.16), "The spin rings at 0.16 s")
+	# Feet: melee skills keep the walk; ranged casts and the committed charge
+	# and backstab stay planted.
+	for walking_id in ["double_slash","lunge_thrust","spin_slash","shield_bash","shield_charge","shield_slam"]:
+		check(bool(AbilityRules.by_id(str(walking_id)).get("move",false)), "%s keeps the owner walking" % walking_id)
+	for planted_id in ["barrage","triple_volley","piercing_shot","fireball","bone_spear","charge","backstab"]:
+		check(not bool(AbilityRules.by_id(str(planted_id)).get("move",true)), "%s keeps the owner planted" % planted_id)
 
 	var audio := Audio.new()
 	root.add_child(audio)
@@ -273,6 +310,76 @@ func run() -> void:
 	check(cues.size() == 1 and str(cues[0][1]) == "cast", "The fireball release cue fires at 0.5 s")
 	caster.ability.advance(1.0)
 
+	# Feet, arena host: a melee skill keeps the walking intent and a bow cast
+	# plants the fighter. Fighters never hard-collide with each other and the
+	# seat mask only sees the world, so the travel measured here is pure walk.
+	var motion_world := Node3D.new()
+	root.add_child(motion_world)
+	var ground_body := StaticBody3D.new()
+	ground_body.collision_layer = 1
+	ground_body.collision_mask = 0
+	ground_body.position = Vector3(0,-0.5,0)
+	var ground_collider := CollisionShape3D.new()
+	var ground_box := BoxShape3D.new()
+	ground_box.size = Vector3(160,1,160)
+	ground_collider.shape = ground_box
+	ground_body.add_child(ground_collider)
+	motion_world.add_child(ground_body)
+	var walker := fighter(motion_world,20,Vector3.ZERO)
+	var bowman := fighter(motion_world,21,Vector3(0,0,30))
+	equip(walker.rig,"sword_short")
+	equip(bowman.rig,"bow_short")
+	await drive_fighter(walker,4)
+	await drive_fighter(bowman,4)
+	walker.combat.grounded = true
+	bowman.combat.grounded = true
+	var walk_start: Vector3 = walker.global_position
+	check(bool(walker.try_ability(0).get("ok",false)), "A grounded fighter starts Double Slash")
+	check(walker.ability.allows_movement(), "Double Slash lets the fighter walk")
+	await drive_fighter(walker,24,Vector2(1,0))
+	var walked: float = Vector2(walker.global_position.x-walk_start.x,
+		walker.global_position.z-walk_start.z).length()
+	check(walker.ability.active, "Double Slash still runs after 0.4 s")
+	check(walked > 0.7, "A melee skill keeps the fighter walking")
+	walker.ability.reset()
+	await drive_fighter(walker,4)
+	var plant_start: Vector3 = bowman.global_position
+	check(bool(bowman.try_ability(0).get("ok",false)), "A grounded fighter starts Barrage")
+	check(not bowman.ability.allows_movement(), "Barrage keeps the fighter planted")
+	await drive_fighter(bowman,24,Vector2(1,0))
+	var planted: float = Vector2(bowman.global_position.x-plant_start.x,
+		bowman.global_position.z-plant_start.z).length()
+	check(bowman.ability.active, "Barrage still runs after 0.4 s")
+	check(planted < 0.05, "A bow skill keeps the fighter planted")
+	bowman.ability.reset()
+	await drive_fighter(bowman,4)
+
+	# Lunge, arena host: the dash cuts every body in its lane exactly once and
+	# the closing thrust cannot hit those bodies again.
+	var lunger := fighter(motion_world,22,Vector3(0,0,10))
+	var near_body := fighter(motion_world,23,Vector3(2,0,10))
+	var far_body := fighter(motion_world,24,Vector3(4,0,10))
+	equip(lunger.rig,"sword_arming")
+	await drive_fighter(lunger,4)
+	lunger.combat.grounded = true
+	lunger.rig.global_rotation.y = atan2(-1.0,0.0)
+	lunger.combat.set_aim(Vector3(60,1.2,10))
+	var dash_start: Vector3 = lunger.global_position
+	check(bool(lunger.try_ability(0).get("ok",false)), "The fighter starts the long lunge")
+	await drive_fighter(lunger,18)
+	var dashed: float = Vector2(lunger.global_position.x-dash_start.x,
+		lunger.global_position.z-dash_start.z).length()
+	check(lunger.ability.active, "The lunge still runs after the dash")
+	check(dashed >= 3.5 and dashed < 7.0, "The lunge carries the fighter down its 5.34 m lane")
+	check(is_equal_approx(near_body.health,31.6), "The lane cuts the near body once")
+	check(is_equal_approx(far_body.health,31.6), "The lane cuts the far body once")
+	await drive_fighter(lunger,20)
+	check(is_equal_approx(near_body.health,31.6) and is_equal_approx(far_body.health,31.6),
+		"The closing thrust does not hit the passed bodies again")
+	lunger.ability.reset()
+	motion_world.queue_free()
+	await process_frame
+
 	# Effect helpers stay constructible in a live tree.
 	var fx := Node3D.new()
 	root.add_child(fx)
@@ -314,7 +421,7 @@ func run() -> void:
 	var health_before: float = sentinel.health
 	var spin_outcome: Dictionary = game.ability.activate(0)
 	check(bool(spin_outcome.get("ok", false)), "The frontier starts the greatsword spin")
-	await create_timer(0.85).timeout
+	await create_timer(0.45).timeout
 	check(sentinel.health < health_before, "The spin cue damages a frontier mob")
 	check(is_equal_approx(health_before - sentinel.health, 70.0), "The spin lands its full 70 on an unarmored mob")
 	sentinel.queue_free()
@@ -484,6 +591,125 @@ func run() -> void:
 	check(is_equal_approx(stalked_health - stalked.health, 28.0), "The stab lands 28 on an unarmored sentinel")
 	check(not game.ability.active, "Backstab finishes on its own clock")
 	stalked.queue_free()
+	await process_frame
+
+	# Frontier feet: a held walk keeps going through a melee skill and stops
+	# dead for a bow cast. The spawn is the one spot these tests know is open,
+	# so the walk is measured from there with the camera back on its start yaw.
+	game.ability.reset()
+	game.stamina = Stamina.MAX
+	equip(game.archer, "sword_short")
+	game._update_loadout()
+	key(KEY_W, false)
+	game.player.global_position = game.world.player_spawn
+	game.player.velocity = Vector3.ZERO
+	game.camera_yaw = 0.22
+	game.camera_pitch = 0.08
+	await create_timer(0.2).timeout
+	key(KEY_W, true)
+	await create_timer(0.25).timeout
+	var walk_anchor: Vector3 = game.player.global_position
+	game.activate_ability(0)
+	check(game.ability.active and str(game.ability.active_id) == "double_slash",
+		"The frontier starts Double Slash while walking")
+	check(game.ability.allows_movement(), "Double Slash allows frontier movement")
+	await create_timer(0.4).timeout
+	var melee_travel: float = Vector2(game.player.global_position.x-walk_anchor.x,
+		game.player.global_position.z-walk_anchor.z).length()
+	check(game.ability.active, "Double Slash still runs after 0.4 s")
+	check(melee_travel > 0.5, "A melee skill keeps the frontier walk")
+	key(KEY_W, false)
+	game.ability.reset()
+	await physics_frame
+
+	equip(game.archer, "bow_short")
+	game._update_loadout()
+	game.ability.reset()
+	game.stamina = Stamina.MAX
+	await physics_frame
+	key(KEY_W, true)
+	await create_timer(0.25).timeout
+	var plant_anchor: Vector3 = game.player.global_position
+	game.activate_ability(0)
+	check(game.ability.active and not game.ability.allows_movement(),
+		"Barrage keeps the frontier ranger planted")
+	await create_timer(0.4).timeout
+	var planted_travel: float = Vector2(game.player.global_position.x-plant_anchor.x,
+		game.player.global_position.z-plant_anchor.z).length()
+	check(game.ability.active, "Barrage still runs after 0.4 s")
+	check(planted_travel < 0.05, "A bow skill keeps the frontier ranger planted")
+	key(KEY_W, false)
+	game.ability.reset()
+	await physics_frame
+
+	# Frontier lunge: the dash passes a lane of bodies and cuts each exactly
+	# once. Bodies stop blocking the lane (the skill cuts through them) while
+	# terrain still does, so take the flattest heading around the spawn.
+	game.ability.reset()
+	game.stamina = Stamina.MAX
+	equip(game.archer, "sword_arming")
+	game._update_loadout()
+	game.player.global_position = game.world.player_spawn
+	game.player.velocity = Vector3.ZERO
+	await create_timer(0.2).timeout
+	var lane_start: Vector3 = game.player.global_position
+	var lane: Vector3 = Vector3.FORWARD
+	var flattest := INF
+	for heading_step in 12:
+		var heading: Vector3 = Basis(Vector3.UP,TAU*float(heading_step)/12.0) * Vector3.FORWARD
+		var spread := 0.0
+		for sample in 6:
+			var probe_point: Vector3 = lane_start + heading * (float(sample+1) * 1.2)
+			spread = maxf(spread,absf(game.world.terrain_height(probe_point.x,probe_point.z) - lane_start.y))
+		if spread < flattest:
+			flattest = spread
+			lane = heading
+	var lane_yaw := atan2(-lane.x,-lane.z)
+	var lane_near := Enemy.new()
+	lane_near.kind = 1
+	lane_near.player = game.player
+	lane_near.safe_center = game.world.player_spawn
+	lane_near.position = lane_start + lane * 2.0 + Vector3(0, 0.1, 0)
+	game.add_child(lane_near)
+	lane_near.set_physics_process(false)
+	lane_near.set_process(false)
+	var lane_far := Enemy.new()
+	lane_far.kind = 1
+	lane_far.player = game.player
+	lane_far.safe_center = game.world.player_spawn
+	lane_far.position = lane_start + lane * 4.0 + Vector3(0, 0.1, 0)
+	game.add_child(lane_far)
+	lane_far.set_physics_process(false)
+	lane_far.set_process(false)
+	await physics_frame
+	game.camera_yaw = lane_yaw
+	game.camera_pitch = 0.0
+	game._update_camera(1.0)
+	game.update_crosshair_aim()
+	game.archer.global_rotation.y = lane_yaw
+	game.player.collision_mask = 1
+	var lane_before: Vector3 = game.player.global_position
+	var lane_near_before: float = lane_near.health
+	var lane_far_before: float = lane_far.health
+	game.activate_ability(0)
+	check(game.ability.active and str(game.ability.active_id) == "lunge_thrust",
+		"The frontier starts the long lunge")
+	await create_timer(0.3).timeout
+	var lane_travel: float = Vector2(game.player.global_position.x-lane_before.x,
+		game.player.global_position.z-lane_before.z).length()
+	check(game.ability.active, "The lunge still runs after the dash")
+	check(lane_travel >= 3.5, "The long lunge carries the ranger down its lane")
+	check(is_equal_approx(lane_near_before - lane_near.health,68.4),
+		"The pass-through cuts the near body once")
+	check(is_equal_approx(lane_far_before - lane_far.health,68.4),
+		"The pass-through cuts the far body once")
+	await create_timer(0.7).timeout
+	check(is_equal_approx(lane_near_before - lane_near.health,68.4)
+		and is_equal_approx(lane_far_before - lane_far.health,68.4),
+		"The closing thrust does not hit the passed bodies again")
+	game.player.collision_mask = 1 | 2
+	lane_near.queue_free()
+	lane_far.queue_free()
 	await process_frame
 
 	# Bone spear: the spell projectile punches through two actor bodies.

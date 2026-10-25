@@ -753,13 +753,15 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 ## One radial beat of an item skill: an arc in front of the body or a full
 ## ring around it. Reuses the melee contact path so blocks, armor, blood and
 ## damage numbers behave exactly like an authored swing. Returns victims hit.
+## `victims` is shared across every beat of one activation (a travelling lunge
+## sweeps the same dictionary each tick), so no body is ever struck twice.
 func ability_strike(radius: float, arc_degrees: float, damage: float,
 		stagger_seconds: float = 0.0, ring: bool = false,
-		require_sight: bool = true) -> int:
+		require_sight: bool = true, victims: Dictionary = {}) -> int:
 	if not is_instance_valid(actor):
 		return 0
 	return _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
-		stagger_seconds,arc_degrees,ring,require_sight)
+		stagger_seconds,arc_degrees,ring,require_sight,victims)
 
 ## A blast centred away from the caster (a fireball burst). Sight is ignored:
 ## the explosion owns the space it fills.
@@ -770,7 +772,7 @@ func ability_blast(centre: Vector3, radius: float, damage: float,
 
 func _ability_area(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float, arc_degrees: float, ring: bool,
-		require_sight: bool) -> int:
+		require_sight: bool, victims: Dictionary = {}) -> int:
 	if not damage_enabled or not is_instance_valid(actor) or not is_instance_valid(rig):
 		return 0
 	if actor.get("alive") == false or radius <= 0.0:
@@ -778,7 +780,7 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 	var state := {
 		"active": true, "blocked": false, "weapon": rig.weapon,
 		"damage": damage, "diagonal": false, "reach": radius,
-		"victims": {}, "exclude": [actor.get_rid()],
+		"victims": victims, "exclude": [actor.get_rid()],
 	}
 	var forward: Vector3 = aim_point-actor.global_position
 	forward.y = 0.0
@@ -794,7 +796,7 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 	_blast_query.exclude = state.exclude
 	var space := actor.get_world_3d().direct_space_state
 	var hits := space.intersect_shape(_blast_query,MAX_CLEAVE_CONTACTS)
-	var victims := 0
+	var hit_count := 0
 	for hit in hits:
 		var unit = hit.collider
 		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
@@ -816,14 +818,14 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 				continue
 		state.exclude.append(hit.rid)
 		var outcome := _resolve_melee_contact("right",state,unit,contact,false)
-		victims += 1
+		hit_count += 1
 		if outcome == DEFENSE_NONE and stagger_seconds > 0.0:
 			var target_combat = unit.get("combat")
 			if is_instance_valid(target_combat) and target_combat.has_method("stagger"):
 				target_combat.stagger(stagger_seconds)
 			elif unit.has_method("stagger"):
 				unit.stagger(stagger_seconds)
-	return victims
+	return hit_count
 
 func _unit_is_dead(unit: Node) -> bool:
 	var flag = unit.get("alive")

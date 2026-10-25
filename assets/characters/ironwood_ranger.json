@@ -213,7 +213,7 @@
     "Bow_Piercing_Shot": 1.25,
     "Sword_Double_Slash": 1.0,
     "Sword_Lunge_Thrust": 0.95,
-    "Sword_Spin_Slash": 0.95,
+    "Sword_Spin_Slash": 0.3166666667,
     "Staff_Fireball_Cast": 1.2,
     "Staff_Bone_Spear_Cast": 1.15,
     "Shield_Bash": 0.8,
@@ -496,8 +496,8 @@
         "proxy": "sword"
       },
       "Sword_Spin_Slash": {
-        "duration": 0.95,
-        "frames": 58,
+        "duration": 0.3166666667,
+        "frames": 20,
         "weapon": "sword",
         "two_handed": true,
         "proxy": "sword"
@@ -551,7 +551,7 @@
       "Bow_Piercing_Shot": 1.25,
       "Sword_Double_Slash": 1.0,
       "Sword_Lunge_Thrust": 0.95,
-      "Sword_Spin_Slash": 0.95,
+      "Sword_Spin_Slash": 0.3166666667,
       "Dagger_Backstab": 0.9,
       "Staff_Fireball_Cast": 1.2,
       "Staff_Bone_Spear_Cast": 1.15,

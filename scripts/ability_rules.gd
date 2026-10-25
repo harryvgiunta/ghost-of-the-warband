@@ -9,6 +9,11 @@ extends RefCounted
 ##
 ## Slot 0 is the main hand, slot 1 the off hand. The granted ability follows
 ## the weapon the rig is actually holding, so a session weapon key changes it.
+##
+## `move` decides what the feet do for the duration. A planted skill (ranged
+## casts, the unarmed charge, the backstab blink) stops the walk dead; a melee
+## skill with `move` keeps the normal walking input and only overrides it while
+## `travel_seconds` commits the owner to a step.
 
 const SLOT_COUNT := 2
 ## Temporary testing cost: every weapon skill spends a trivial stamina sliver
@@ -47,6 +52,7 @@ const ABILITIES := [
 		"duration": 1.0,
 		"travel_seconds": 1.0,
 		"speed_scale": 2.0,
+		"move": false,
 		"sound": "charge",
 		"animation": "Sprint_Loop",
 		"lean": 0.18,
@@ -65,6 +71,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "barrage",
+		"move": false,
 		"animation": "Bow_Barrage",
 		"lean": 0.0,
 		"icon": "res://assets/ui/abilities/barrage.png",
@@ -103,6 +110,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "volley",
+		"move": false,
 		"animation": "Bow_Triple_Volley",
 		"lean": 0.0,
 		"icon": "res://assets/ui/abilities/triple_volley.png",
@@ -126,6 +134,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "pierce",
+		"move": false,
 		"animation": "Bow_Piercing_Shot",
 		"lean": 0.0,
 		"icon": "res://assets/ui/abilities/piercing_shot.png",
@@ -148,6 +157,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "slash",
+		"move": true,
 		"animation": "Sword_Double_Slash",
 		"lean": 0.05,
 		"icon": "res://assets/ui/abilities/double_slash.png",
@@ -169,15 +179,24 @@ const ABILITIES := [
 		"cooldown": 1.3,
 		"duration": 0.95,
 		"travel_seconds": 0.24,
-		"speed_scale": 1.35,
+		"speed_scale": 4.05,
 		"sound": "lunge",
+		"move": true,
 		"animation": "Sword_Lunge_Thrust",
 		"lean": 0.12,
 		"icon": "res://assets/ui/abilities/lunge_thrust.png",
-		"description": "A stepping lunge into a deep thrust.",
+		"description": "A long dash that cuts through everything in its lane.",
+		# The dash sweeps its lane every tick it travels, so a body it passes
+		# through is hit once; the thrust at the end measures the old 2.45 m
+		# reach with the same shared victim set.
 		"effect": {"kind": "melee_arc", "damage_scale": 1.8, "arc_degrees": 55.0,
-			"radius": 2.45, "stagger": 0.25},
-		"cues": [{"at": 0.42, "cue": "arc"}],
+			"radius": 2.45, "stagger": 0.25, "path_damage": true,
+			"path_radius": 1.35, "path_arc_degrees": 170.0,
+			"dash_distance": 5.34},
+		"cues": [
+			{"at": 0.0, "cue": "dash"},
+			{"at": 0.42, "cue": "arc"},
+		],
 	},
 	{
 		"id": "spin_slash",
@@ -186,11 +205,12 @@ const ABILITIES := [
 		"slot": 0,
 		"key": "SHIFT + 1",
 		"stamina_cost": TEST_STAMINA_COST,
-		"cooldown": 1.3,
-		"duration": 0.95,
+		"cooldown": 1.0,
+		"duration": 0.3166667,
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "spin",
+		"move": true,
 		"animation": "Sword_Spin_Slash",
 		"lean": 0.04,
 		"spin": 1.0,
@@ -198,10 +218,11 @@ const ABILITIES := [
 		"description": "One full turn that cuts everything around you.",
 		"effect": {"kind": "melee_ring", "damage_scale": 1.4, "radius": 2.9,
 			"stagger": 0.2},
-		# The wind-up gathers the blade before the ring cue spends the hit.
+		# The wind-up gathers the blade before the ring cue spends the hit. The
+		# whole turn lasts a third of its old time, so the beats crowd the start.
 		"cues": [
-			{"at": 0.20, "cue": "wind"},
-			{"at": 0.50, "cue": "ring"},
+			{"at": 0.06, "cue": "wind"},
+			{"at": 0.16, "cue": "ring"},
 		],
 	},
 	{
@@ -216,6 +237,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "backstab",
+		"move": false,
 		"animation": "Dagger_Backstab",
 		"lean": 0.16,
 		"icon": "res://assets/ui/abilities/backstab.png",
@@ -241,6 +263,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "fire",
+		"move": false,
 		"animation": "Staff_Fireball_Cast",
 		"lean": -0.04,
 		"icon": "res://assets/ui/abilities/fireball.png",
@@ -261,6 +284,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "bone",
+		"move": false,
 		"animation": "Staff_Bone_Spear_Cast",
 		"lean": 0.0,
 		"icon": "res://assets/ui/abilities/bone_spear.png",
@@ -281,6 +305,7 @@ const ABILITIES := [
 		"travel_seconds": 0.16,
 		"speed_scale": 0.55,
 		"sound": "bash",
+		"move": true,
 		"animation": "Shield_Bash",
 		"lean": 0.10,
 		"icon": "res://assets/ui/abilities/shield_bash.png",
@@ -300,6 +325,7 @@ const ABILITIES := [
 		"duration": 1.15,
 		"travel_seconds": 0.48,
 		"speed_scale": 1.65,
+		"move": true,
 		"sound": "charge",
 		"animation": "Shield_Charge",
 		"lean": 0.14,
@@ -324,6 +350,7 @@ const ABILITIES := [
 		"travel_seconds": 0.0,
 		"speed_scale": 0.0,
 		"sound": "slam",
+		"move": true,
 		"animation": "Shield_Ground_Slam",
 		"lean": 0.16,
 		"icon": "res://assets/ui/abilities/shield_slam.png",

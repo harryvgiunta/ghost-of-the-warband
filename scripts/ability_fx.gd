@@ -3,6 +3,7 @@ extends RefCounted
 ## bone bursts. Nothing here changes damage; scenes call it on every peer.
 
 const BladeTrail = preload("res://scripts/blade_trail.gd")
+const LungeWake = preload("res://scripts/lunge_wake.gd")
 
 const FIRE := Color("ff8a3c")
 const FIRE_CORE := Color("ffd9a0")
@@ -592,7 +593,7 @@ static func ribbon_material(color: Color) -> StandardMaterial3D:
 ## on top of it.
 static func _smoke_cloud(parent: Node3D, at: Vector3, scale: float, dark: bool,
 		amount: int, lifetime: float, flow: Vector3 = Vector3.ZERO,
-		start_delay: float = 0.0, inner: float = 0.0, palette: int = -1) -> void:
+		start_delay: float = 0.0, inner: float = 0.0) -> void:
 	if not is_instance_valid(parent):
 		return
 	var root := Node3D.new()
@@ -606,7 +607,7 @@ static func _smoke_cloud(parent: Node3D, at: Vector3, scale: float, dark: bool,
 	var body := maxf(scale, 0.2)
 	var motion := clampf(body, 0.35, 1.6)
 	var spread := 0.42 * body
-	var mode := palette if palette >= 0 else (1 if dark else 0)
+	var mode := 1 if dark else 0
 	for index in count:
 		var h1 := _hash_unit(index, 11)
 		var h2 := _hash_unit(index, 29)
@@ -628,7 +629,7 @@ static func _smoke_cloud(parent: Node3D, at: Vector3, scale: float, dark: bool,
 		puff.scale = Vector3.ONE * 0.9
 		root.add_child(puff)
 		var peak := body * (1.5 + 1.3 * h2)
-		var alpha := 0.42 if mode == 2 else (0.44 if dark else 0.32)
+		var alpha := 0.44 if dark else 0.32
 		var drift := Vector3(cos(angle), 0.0, sin(angle)) * (0.22 + 0.5 * h2) * motion
 		if pushed:
 			drift += push * (0.35 + 0.5 * h1) * motion
@@ -656,28 +657,18 @@ static func _hash_unit(index: int, salt: int) -> float:
 	return float(value & 0xFFFF) / 65535.0
 
 
-## Warm grey ash (0), charcoal with violet and teal edge (1), or the light
-## grey-violet blink poof (2), which must never read as an ink blot.
-static func _smoke_tint(index: int, palette: int) -> Color:
-	match palette:
-		1:
-			match index % 3:
-				0:
-					return Color(0.10, 0.09, 0.12)
-				1:
-					return Color(0.26, 0.17, 0.34)
-				_:
-					return Color(0.12, 0.29, 0.31)
-		2:
-			match index % 3:
-				0:
-					return Color(0.62, 0.59, 0.68)
-				1:
-					return Color(0.55, 0.48, 0.72)
-				_:
-					return Color(0.45, 0.62, 0.66)
-		_:
-			return Color(0.50, 0.47, 0.43) if index % 3 == 0 else Color(0.56, 0.53, 0.49)
+## Warm grey ash (0) or charcoal with a violet and teal edge (1). The engulfing
+## blink cloud builds its own near-black palette.
+static func _smoke_tint(index: int, mode: int) -> Color:
+	if mode == 1:
+		match index % 3:
+			0:
+				return Color(0.10, 0.09, 0.12)
+			1:
+				return Color(0.26, 0.17, 0.34)
+			_:
+				return Color(0.12, 0.29, 0.31)
+	return Color(0.50, 0.47, 0.43) if index % 3 == 0 else Color(0.56, 0.53, 0.49)
 
 
 # --- Ability cues -----------------------------------------------------------
@@ -695,36 +686,101 @@ static func blade_trail(parent: Node3D, rig, seconds: float, color: Color = STEE
 	trail.start(rig, seconds, color)
 
 
-## Quick blink poof for the backstab's departure and arrival beats: 14 light
-## grey-violet billboards inside a ~1.1 m footprint, gone in about half a second,
-## plus a thin violet blink streak. A pair of these reads as a step, not as a
-## smoke bomb. `dark` selects the cool grey-violet palette, otherwise warm grey.
+## Backstab blink beat. With `dark` it is the engulfing burst: a near-black cloud
+## of 22-28 soft billboards, ~2.4 m wide and ~2.2 m tall, that swallows the body
+## at the departure and arrival points. Otherwise it is a quick warm dust poof.
+## Either way a thin vertical streak marks the displacement.
 static func smoke_puff(parent: Node3D, at: Vector3, scale: float = 1.0,
 		dark: bool = true) -> void:
 	if not is_instance_valid(parent):
 		return
 	var size := maxf(scale, 0.2)
-	_smoke_cloud(parent, at, 0.3 * size, dark, 14, 0.55, Vector3.ZERO, 0.0,
-		0.06 * size, 2 if dark else 0)
-	_blink_streak(parent, at, size)
+	if dark:
+		_blink_burst(parent, at, size)
+	else:
+		_smoke_cloud(parent, at, 0.3 * size, false, 14, 0.55, Vector3.ZERO, 0.0,
+			0.06 * size)
+	_blink_streak(parent, at, size, dark)
+
+
+## Near-black cloud that hides the ranger for a blink. Puff centres sit inside the
+## body volume (a centred fill, not a ring), and 26 heavily overlapping soft
+## billboards keep the interior solid: charcoal 0.06-0.13 albedo with a faint
+## violet-grey rim. Swells in 0.25 s, holds briefly and is mostly gone by 0.7 s.
+static func _blink_burst(parent: Node3D, at: Vector3, scale: float) -> void:
+	if not is_instance_valid(parent):
+		return
+	var root := Node3D.new()
+	root.name = "AbilityBlinkBurst"
+	parent.add_child(root)
+	root.global_position = at
+	var body := maxf(scale, 0.2)
+	var texture := smoke_texture()
+	var count := 26
+	for index in count:
+		var h1 := _hash_unit(index, 11)
+		var h2 := _hash_unit(index, 29)
+		var h3 := _hash_unit(index, 47)
+		var h4 := _hash_unit(index, 71)
+		var angle := TAU * h1
+		var radius := (0.04 + 0.40 * h2 * h2) * body
+		var lift := (0.48 + 0.95 * h3) * body
+		var shade := 0.06 + 0.07 * h4
+		var tint := Color(shade, shade, shade * 1.08)
+		if index % 5 == 0:
+			tint = Color(0.13, 0.11, 0.17)
+		elif index % 7 == 0:
+			tint = Color(0.09, 0.11, 0.13)
+		var puff := MeshInstance3D.new()
+		puff.name = "Puff"
+		var quad := QuadMesh.new()
+		quad.size = Vector2.ONE
+		var material := sprite_material(texture, false, Color(tint.r, tint.g, tint.b, 0.0))
+		quad.material = material
+		puff.mesh = quad
+		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var start := Vector3(cos(angle) * radius, lift, sin(angle) * radius)
+		puff.position = start
+		puff.scale = Vector3.ONE * 0.5
+		root.add_child(puff)
+		var peak := body * (0.9 + 0.6 * h1)
+		var alpha := 0.55 + 0.10 * h2
+		var end := start + Vector3(cos(angle) * 0.16, 0.12 + 0.14 * h2,
+			sin(angle) * 0.16)
+		var tween := puff.create_tween()
+		tween.tween_interval(0.06 * h4)
+		tween.set_parallel(true)
+		tween.tween_property(material, "albedo_color",
+			Color(tint.r, tint.g, tint.b, alpha), 0.12)
+		tween.tween_property(puff, "scale", Vector3.ONE * peak, 0.25)
+		tween.tween_property(puff, "position", end, 0.25)
+		tween.set_parallel(false)
+		tween.tween_interval(0.1)
+		tween.tween_property(material, "albedo_color",
+			Color(tint.r, tint.g, tint.b, 0.0), 0.38)
+	var timer := root.create_tween()
+	timer.tween_interval(0.95)
+	timer.tween_callback(root.queue_free)
 
 
 ## Thin vertical flash that sells the step. Additive and short, so it reads as a
-## displacement line and never hides the body.
-static func _blink_streak(parent: Node3D, at: Vector3, scale: float) -> void:
+## displacement line and never hides the body. Charcoal violet for the blink.
+static func _blink_streak(parent: Node3D, at: Vector3, scale: float,
+		dark: bool) -> void:
 	var root := Node3D.new()
 	root.name = "AbilityBlinkStreak"
 	parent.add_child(root)
 	root.global_position = at
+	var tint := Color(0.42, 0.34, 0.56) if dark else Color(0.70, 0.62, 0.98)
 	var streak := sprite_flash(root, Vector3(0.0, 0.75 * scale, 0.0),
-		Vector2(0.16, 1.5) * scale, Color(0.70, 0.62, 0.98, 0.0))
+		Vector2(0.16, 1.5) * scale, Color(tint.r, tint.g, tint.b, 0.0))
 	var material := sprite_tint(streak)
 	var tween := root.create_tween()
-	tween.tween_property(material, "albedo_color", Color(0.70, 0.62, 0.98, 0.5), 0.04)
+	tween.tween_property(material, "albedo_color", Color(tint.r, tint.g, tint.b, 0.45), 0.04)
 	tween.tween_interval(0.08)
 	tween.set_parallel(true)
 	tween.tween_property(streak, "scale", Vector3(0.4, 1.0, 1.0), 0.3)
-	tween.tween_property(material, "albedo_color", Color(0.70, 0.62, 0.98, 0.0), 0.3)
+	tween.tween_property(material, "albedo_color", Color(tint.r, tint.g, tint.b, 0.0), 0.3)
 	tween.chain().tween_callback(root.queue_free)
 
 
@@ -977,3 +1033,80 @@ static func backstab_flash(parent: Node3D, at: Vector3, forward: Vector3) -> voi
 	tween.tween_interval(0.4)
 	tween.tween_callback(root.queue_free)
 	_smoke_cloud(parent, at + Vector3.UP * 0.12, 0.3, true, 8, 0.85)
+
+
+# --- Charge wake ------------------------------------------------------------
+
+## Fast, low wake for the lunging thrust: ground dust under the stride, a short
+## skid smear, thin horizontal speed streaks trailing the body in their own
+## additive layer, and a few fading afterimage wisps at hip and chest height.
+## Every piece is a camera-facing billboard, so nothing vanishes edge-on at the
+## speed the dash moves. Presentation only: no damage, no authority, and the
+## driver frees itself shortly after the charge.
+static func lunge_wake(parent: Node3D, rig, seconds: float) -> void:
+	if not is_instance_valid(parent) or not is_instance_valid(rig):
+		return
+	if not (rig is Node3D):
+		return
+	var wake = LungeWake.new()
+	parent.add_child(wake)
+	var target := parent
+	wake.start(rig, seconds, func(kind: int, at: Vector3, forward: Vector3,
+			index: int) -> void:
+		_lunge_beat(target, kind, at, forward, index))
+
+
+## One emission beat of the charge wake. 0 = ground dust, 1 = afterimage wisp,
+## 2 = skid smear; 1 and 2 also drop a speed streak so the trailing band reads.
+static func _lunge_beat(parent: Node3D, kind: int, at: Vector3, forward: Vector3,
+		index: int) -> void:
+	if not is_instance_valid(parent):
+		return
+	var behind := -forward
+	if kind == 0:
+		var size := 1.05 + 0.30 * _hash_unit(index, 13)
+		var alpha := 0.50 + 0.08 * float(index % 2)
+		_fading_sprite(parent, at + Vector3.UP * 0.1 + behind * 0.25,
+			Vector2.ONE * size, Color(0.82, 0.74, 0.60), alpha, 1.2, 0.45, false)
+		return
+	var lift := 0.72 if index % 2 == 0 else 1.15
+	if kind == 2:
+		_fading_sprite(parent, at + Vector3.UP * 0.05 + behind * 0.15,
+			Vector2(1.6, 0.25), Color(0.78, 0.70, 0.55), 0.55, 1.15, 0.4, false)
+		lift = 0.55
+	else:
+		_fading_sprite(parent, at + Vector3.UP * lift + behind * 0.28,
+			Vector2.ONE * 1.0, Color(0.84, 0.80, 0.70), 0.32, 1.25, 0.4, false)
+	_fading_sprite(parent, at + Vector3.UP * (lift + 0.08) + behind * 0.55,
+		Vector2(2.5, 0.10), Color(1.0, 0.95, 0.82), 0.5, 1.05, 0.28, true)
+
+
+## Tiny grow-and-fade billboard sprite that owns its node and frees it. `size` is
+## the final footprint, `grow` the scale it swells to, `life` the whole life.
+static func _fading_sprite(parent: Node3D, at: Vector3, size: Vector2, tint: Color,
+		peak: float, grow: float, life: float, additive: bool) -> void:
+	var holder := Node3D.new()
+	holder.name = "WakeSprite"
+	# force_readable_name: duplicates must stay findable by name for QA probes.
+	parent.add_child(holder, true)
+	holder.global_position = at
+	var quad := QuadMesh.new()
+	quad.size = size
+	var material := sprite_material(soft_dot_texture() if additive else smoke_texture(),
+		additive, Color(tint.r, tint.g, tint.b, 0.0))
+	quad.material = material
+	var sprite := MeshInstance3D.new()
+	sprite.name = "Sprite"
+	sprite.mesh = quad
+	sprite.scale = Vector3.ONE * 0.6
+	sprite.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(sprite)
+	var tween := holder.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(material, "albedo_color",
+		Color(tint.r, tint.g, tint.b, peak), minf(life * 0.3, 0.08))
+	tween.tween_property(sprite, "scale", Vector3.ONE * grow, life * 0.6)
+	tween.set_parallel(false)
+	tween.tween_property(material, "albedo_color",
+		Color(tint.r, tint.g, tint.b, 0.0), life * 0.4)
+	tween.tween_callback(holder.queue_free)

@@ -460,11 +460,14 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	dodge.advance(delta,is_on_floor())
 	ability.advance(delta)
 	if ability.active:
-		move_direction = Vector2.ZERO
+		# A melee skill keeps the walking intent, but sprint, jump, peek and
+		# slide stay off for the duration. Any other skill plants the fighter.
 		run_requested = false
 		jump_requested = false
 		peek_requested = false
 		slide.reset()
+		if not ability.allows_movement():
+			move_direction = Vector2.ZERO
 	if is_bot:
 		_bot_step(delta,actors)
 	elif input_age > 0.65:
@@ -498,6 +501,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	elif _exposure_tick < 0:
 		_exposure_tick = simulation_tick
 	update_cover_aim_readiness()
+	var walk_speed := 2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5
 	if slide.active:
 		velocity.x = slide_velocity.x
 		velocity.z = slide_velocity.z
@@ -505,9 +509,8 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		velocity.x = cover_velocity.x
 		velocity.z = cover_velocity.z
 	else:
-		var speed := 2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5
-		velocity.x = move_toward(velocity.x,direction.x*speed,35*delta)
-		velocity.z = move_toward(velocity.z,direction.z*speed,35*delta)
+		velocity.x = move_toward(velocity.x,direction.x*walk_speed,35*delta)
+		velocity.z = move_toward(velocity.z,direction.z*walk_speed,35*delta)
 	if dodge.active:
 		var step_velocity: Vector3 = dodge.velocity()
 		velocity.x = step_velocity.x
@@ -520,10 +523,22 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		velocity.x += separation.x
 		velocity.z += separation.z
 	if ability.active:
-		var charge_velocity: Vector3 = ability.velocity()
-		velocity.x = charge_velocity.x
-		velocity.z = charge_velocity.z
+		# Committed travel replaces the walk while it lasts; otherwise a moving
+		# melee skill keeps the normal velocity and a planted one holds still.
 		jump_requested = false
+		var ability_velocity: Vector3 = ability.velocity()
+		if not ability_velocity.is_zero_approx():
+			velocity.x = ability_velocity.x
+			velocity.z = ability_velocity.z
+		elif not ability.allows_movement():
+			velocity.x = 0.0
+			velocity.z = 0.0
+		else:
+			# Hand the dash back to the feet: the walk target caps the residual
+			# travel instead of gliding a lane past the authored distance.
+			var walked := Vector2(velocity.x,velocity.z).limit_length(walk_speed)
+			velocity.x = walked.x
+			velocity.z = walked.y
 	if jump_requested:
 		velocity.y = 7.0
 	elif is_on_floor():
@@ -538,6 +553,9 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	move_and_slide()
 	position.x = clampf(position.x,-bounds,bounds)
 	position.z = clampf(position.z,-bounds,bounds)
+	# The lunge cuts the lane it just crossed, measured after the move.
+	if ability.active:
+		_sweep_ability_path()
 	var actual := (position-before)/maxf(delta,0.0001)
 	slide.after_move(self,actual)
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
@@ -547,6 +565,20 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(actual,running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
+
+## A travelling skill sweeps the lane it has just crossed: after the body moved
+## for the tick, every body inside the path arc takes one hit. The activation's
+## victim set is shared with the closing thrust beat, so no body is hit twice.
+func _sweep_ability_path() -> void:
+	var effect: Dictionary = ability.active_definition.get("effect", {})
+	if not bool(effect.get("path_damage", false)):
+		return
+	if ability.elapsed > ability.travel_seconds + 0.02:
+		return
+	combat.ability_strike(float(effect.get("path_radius", 1.0)),
+		float(effect.get("path_arc_degrees", 180.0)),
+		AbilityRules.damage_for(ability.active_definition,rig),
+		float(effect.get("stagger", 0.0)),false,false,ability.active_victims)
 
 func _separation_velocity(actors: Array) -> Vector3:
 	# Hard fighter capsules would stop centres 0.6 m apart and shove a close
