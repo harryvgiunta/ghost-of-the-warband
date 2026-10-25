@@ -39,6 +39,14 @@ const STAFF_DATA = [
 	{"name":"Ember staff", "length":1.75},
 	{"name":"Bone staff", "length":1.60},
 ]
+## A shield skill presents the disc ahead of the body. These are the minimum
+## plane distances in front of the chest and head bones: the skinned chest
+## reaches 0.29 m from the spine and every helmet 0.28 m from the head bone, so
+## the disc sits just ahead of both and a clip that draws the hand back cannot
+## carry the boss through the torso or the helmet.
+const ABILITY_SHIELD_CHEST_CLEAR := 0.34
+const ABILITY_SHIELD_HEAD_CLEAR := 0.34
+const ABILITY_SHIELD_LEG_CLEAR := 0.60
 ## Every standard cut starts with a real backswing: the hands cock up behind
 ## the striking shoulder while the chest winds away from the target, then the
 ## hilt crosses the centre line and the tip whips through the sector past it.
@@ -230,7 +238,15 @@ var ability_id := ""
 var ability_clip := ""
 var ability_duration := 1.0
 var ability_slot := -1
+var ability_index := -1
 var ability_lean := 0.0
+var ability_spin := 0.0
+var ability_draw_curve: Array = []
+## Move-enabled abilities keep their authored upper body while the legs layer
+## the normal locomotion cycle under them. `ability_travel` marks the committed
+## lunge/charge window whose authored full-body travel must survive unchanged.
+var ability_move := false
+var ability_travel := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
 var _offhand_weapon_basis := Basis.IDENTITY
@@ -436,14 +452,20 @@ func cancel_consumable() -> void:
 func is_consuming() -> bool:
 	return phase in ["BANDAGE","DRINK"]
 
-func begin_ability(slot: int, id: String, clip: String, seconds: float, direction: Vector3) -> void:
-	if not _built:
+func begin_ability(definition: Dictionary, direction: Vector3) -> void:
+	if not _built or definition.is_empty():
 		return
-	ability_slot = slot
-	ability_id = id
+	var clip := str(definition.get("animation", "Sprint_Loop"))
+	ability_slot = int(definition.get("slot", 0))
+	ability_index = AbilityRules.index_of(str(definition.get("id", "")))
+	ability_id = str(definition.get("id", ""))
 	ability_clip = clip if _player.has_animation(clip) else "Sprint_Loop"
-	ability_duration = maxf(seconds,0.01)
-	ability_lean = float(AbilityRules.by_slot(slot).get("lean",0.0))
+	ability_duration = maxf(float(definition.get("duration", 1.0)),0.01)
+	ability_lean = float(definition.get("lean",0.0))
+	ability_spin = float(definition.get("spin",0.0))
+	ability_draw_curve = definition.get("bow_draw", [])
+	ability_move = bool(definition.get("move",false))
+	ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 	phase = "ABILITY"
 	_phase_time = 0.0
 	draw_amount = 0.0
@@ -452,6 +474,20 @@ func begin_ability(slot: int, id: String, clip: String, seconds: float, directio
 	_clear_melee()
 	consumable_kind = ""
 	var planar := Vector3(direction.x,0.0,direction.z)
+	# A blade skill or dash is performed standing, and the controller has already
+	# stood the capsule up. Drop the leftover crouch blend so the authored clip
+	# owns every bone from the first frame instead of being covered by the crouch
+	# pose.
+	if AbilityRules.needs_standing(definition):
+		_crouch_amount = 0.0
+		_slide_weight = 0.0
+	if not ability_draw_curve.is_empty() or AbilityRules.follows_aim(definition):
+		# Aim-directed skills are performed down the crosshair, not down the
+		# heading that was carried into the keypress: turn onto the aim before
+		# the first frame so the dash and its blade trail leave along it.
+		var offset := _aim_point-global_position
+		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
+			planar = Vector3(offset.x,0.0,offset.z)
 	if planar.length_squared() > 0.000001:
 		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
 	_update_pose(0.0)
@@ -459,8 +495,20 @@ func begin_ability(slot: int, id: String, clip: String, seconds: float, directio
 func is_ability() -> bool:
 	return phase == "ABILITY"
 
+## Move-enabled skills may keep walking under their authored upper body.
+func ability_allows_movement() -> bool:
+	return phase == "ABILITY" and ability_move
+
 func ability_progress() -> float:
 	return clampf(_phase_time/maxf(ability_duration,0.01),0.0,1.0)
+
+## A release cue fires from the owning scene before this rig's own pose step,
+## so a shot would read the previous frame's hand origin. Solve the pose on
+## demand after the aim moved, keeping the shaft on the live crosshair.
+func refresh_bow_pose() -> void:
+	if not _built:
+		return
+	_update_pose(0.0)
 
 func cancel_ability() -> void:
 	if phase != "ABILITY":
@@ -475,7 +523,12 @@ func _reset_ability_state() -> void:
 	ability_clip = ""
 	ability_duration = 1.0
 	ability_slot = -1
+	ability_index = -1
 	ability_lean = 0.0
+	ability_spin = 0.0
+	ability_draw_curve = []
+	ability_move = false
+	ability_travel = 0.0
 
 func _update_consumable_props() -> void:
 	if _bandage_prop == null or _potion_prop == null:
@@ -1080,6 +1133,19 @@ func get_throw_origin() -> Vector3:
 		return active_staff.global_position
 	return active_sword.global_position
 
+func cast_origin() -> Vector3:
+	# The staff mesh runs down its local -Z from the grip; the live ember/bone
+	# head sits near the far end. Spells leave from there instead of the wrist.
+	if _staff_shown() and active_staff != null:
+		# The staff mesh runs from local z=-0.09 down its blade length; the
+		# socket already carries the middle-grip offset, so the live head is
+		# only ~0.7 m in front of the hand.
+		var head := -0.09-float(active_staff.blade_length)
+		return active_staff.to_global(Vector3(0.0, 0.0, head))
+	if weapon == "bow" and active_bow != null:
+		return active_bow.get_arrow_origin()
+	return get_throw_origin()
+
 func get_recovery_progress() -> float:
 	var duration := RELEASE_SECONDS + RECOVER_SECONDS
 	if phase in ["RELEASE","T_RELEASE"]:
@@ -1252,9 +1318,10 @@ func get_animation_state() -> Dictionary:
 		var elapsed_code := int(round(_left_melee_time*1000.0))+1 if _left_melee_time >= 0.0 else 0
 		melee_secondary = float((elapsed_code << 2) | variant_code)
 	elif is_ability():
-		# The slot rides in the existing draw scalar; time carries the elapsed
-		# ability clock, so a new ability needs no extra snapshot key.
-		melee_secondary = float(ability_slot+1)
+		# Slot (1..2, low two bits) and the ability's table index (high bits)
+		# ride in the existing draw scalar; time carries the elapsed clock, so
+		# item-granted clips replicate without another snapshot key.
+		melee_secondary = float(((maxi(ability_index,0)+1) << 2) | (ability_slot+1))
 	var presentation := "GUARD" if _blocking else phase
 	var presentation_time := _phase_time
 	if _hit_react > 0.0001 and phase == "READY" and not _blocking:
@@ -1312,13 +1379,20 @@ func apply_animation_state(state: Dictionary) -> void:
 		draw_amount = 0.0
 		_hit_react = 0.0
 	elif replicated_phase == "ABILITY":
-		var incoming_slot := maxi(int(round(float(state.draw)))-1,0)
-		var definition := AbilityRules.by_slot(incoming_slot)
+		var packed := int(round(float(state.draw)))
+		var incoming_slot := maxi((packed & 3)-1,0)
+		var incoming_index := (packed >> 2)-1
+		var definition := AbilityRules.by_index(incoming_index)
 		ability_slot = incoming_slot
+		ability_index = incoming_index
 		ability_id = str(definition.get("id",""))
 		ability_clip = str(definition.get("animation","Sprint_Loop"))
 		ability_duration = maxf(float(definition.get("duration",1.0)),0.01)
 		ability_lean = float(definition.get("lean",0.0))
+		ability_spin = float(definition.get("spin",0.0))
+		ability_draw_curve = definition.get("bow_draw", [])
+		ability_move = bool(definition.get("move",false))
+		ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
 		phase = "ABILITY"
 		_phase_time = float(state.time)
 		draw_amount = 0.0
@@ -1593,6 +1667,11 @@ func _throw_clip_time() -> float:
 	return lerpf(strike_end,float(clip.duration),smoothstep(0.0,RECOVER_SECONDS,_phase_time))
 
 func _archery_weight() -> float:
+	if phase == "ABILITY":
+		if ability_draw_curve.is_empty():
+			return 0.0
+		var progress := ability_progress()
+		return smoothstep(0.0,0.10,progress)*(1.0-smoothstep(0.86,0.99,progress))
 	if phase == "DRAWING":
 		return smoothstep(0.0,RAISE_SECONDS,_phase_time)
 	if phase == "HOLDING":
@@ -1629,21 +1708,31 @@ func _update_pose(delta: float) -> void:
 	# The quick step owns its own planted lunge; the forward locomotion cycle
 	# would read as a sprint in the step direction instead of a side step.
 	var ability := phase == "ABILITY"
+	# Bow skills decode their draw strength from data; both arms are then solved
+	# by the shared archery pose, so the bow aims and releases on cue.
+	var bow_ability := ability and weapon == "bow" and not ability_draw_curve.is_empty()
+	if bow_ability:
+		draw_amount = _sample_ability_draw()
+	# A move-enabled skill keeps playing its authored upper body while the legs
+	# layer the normal locomotion cycle. The committed travel window of a lunge
+	# or shield charge is exempt: its authored full-body clip owns the pose.
+	var moving_ability := ability and ability_move and (ability_travel <= 0.0 or _phase_time >= ability_travel)
 	var moving := _grounded and speed > 0.1 and _roll_progress < 0.0 and not sliding and not stepping
 	var consuming := is_consuming()
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
+	var aim_bow := drawing or bow_ability
 	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
 	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing and not consuming
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
-	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming
+	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming or moving_ability
 	var layer_lower_body := action and (moving or (guarding and _landing_weight > 0.0))
 	var diagonal_body := is_diagonal_swing(_melee_hand)
 	var diagonal_id := 0
 	if diagonal_body:
 		diagonal_id = (1 if _melee_hand == "right" else 3)+(1 if melee_variant(_melee_hand) == "diagonal_left" else 0)
 	var lower_clip := (_locomotion_clip(speed) if moving else "Jump_Land") if layer_lower_body else ""
-	var archery := _archery_weight() if drawing else 0.0
+	var archery := _archery_weight() if aim_bow else 0.0
 	if _roll_progress < 0.0 and not consuming and not ability and (phase != "READY" or _cover_active):
 		var offset := _aim_point-global_position
 		if Vector2(offset.x,offset.z).length_squared() > 0.0001:
@@ -1652,9 +1741,16 @@ func _update_pose(delta: float) -> void:
 				var tucked_yaw := atan2(-_cover_normal.x,-_cover_normal.z)
 				yaw = lerp_angle(tucked_yaw,yaw,smoothstep(0.0,1.0,_cover_lean.length()))
 			global_basis = Basis(Vector3.UP,yaw)
+	# Bow skills ride the crosshair: the body turns onto the aim on every pose
+	# solve, so each release cue leaves from the stance the player is looking
+	# through instead of the heading the skill began with.
+	if bow_ability and _roll_progress < 0.0:
+		var aim_offset := _aim_point-global_position
+		if Vector2(aim_offset.x,aim_offset.z).length_squared() > 0.0001:
+			global_basis = Basis(Vector3.UP,atan2(-aim_offset.x,-aim_offset.z))
 	# These nodes are rotation-only. Repeated Euler setters preserve extracted
 	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
-	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery)
+	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery+_ability_spin_yaw())
 	_model.position = Vector3.ZERO
 	var clip := ("Sword_Idle_OneHand" if weapon in ["sword","dagger"] or weapon == "dual" else "Idle_Loop")
 	if weapon == "sword" and (sword_index == 2 or _staff_shown()):
@@ -1698,6 +1794,10 @@ func _update_pose(delta: float) -> void:
 		_display_weapon = weapon
 		_display_drawing = drawing
 		_display_diagonal = diagonal_id
+	# A blade skill or dash is performed standing. A replicated crouch that has
+	# not finished clearing yet must not cover its authored clip.
+	if _crouch_amount > 0.0 and _ability_needs_standing():
+		_crouch_amount = 0.0
 	var crouching := _crouch_amount > 0.0 and _roll_progress < 0.0
 	var leaning := _cover_active and not _cover_lean.is_zero_approx() and _roll_progress < 0.0
 	if leaning:
@@ -1770,14 +1870,14 @@ func _update_pose(delta: float) -> void:
 	if ability:
 		_apply_ability_pose()
 	if _grounded and _roll_progress < 0.0:
-		if drawing and not moving:
+		if aim_bow and not moving:
 			_plant_archery_feet(archery*(1.0-_slide_weight) if sliding else archery)
 		if sliding:
 			_apply_slide_pose(drawing or is_melee() or throwing or coupled_carry or _blocking or weapon == "dual" or consuming)
 		if _step_progress >= 0.0 and not is_melee() and not throwing:
 			_apply_step_pose()
 		_place_feet()
-	if drawing:
+	if aim_bow:
 		var head := _bone_world(_bones.Head)
 		head.basis = Basis(Vector3.UP,-STANCE_YAW*archery)*head.basis
 		_set_bone_world(_bones.Head,head)
@@ -1794,7 +1894,7 @@ func _update_pose(delta: float) -> void:
 			_apply_diagonal_arm_path(hand)
 	_update_shield_pose()
 	if weapon == "bow":
-		_update_bow_pose(drawing)
+		_update_bow_pose(aim_bow)
 	elif weapon != "none":
 		_update_hand_contacts()
 		var right_hand := _bone_world(_arms[1][2])
@@ -2348,6 +2448,40 @@ func _two_hand_wrist_target(target: Vector3, primary: Vector3, primary_radius: f
 	var radius := sqrt(maxf(0.0,primary_radius*primary_radius-along*along))
 	return centre+radial.normalized()*radius
 
+func _ability_bow() -> bool:
+	return phase == "ABILITY" and weapon == "bow" and not ability_draw_curve.is_empty()
+
+func _ability_needs_standing() -> bool:
+	return phase == "ABILITY" and AbilityRules.needs_standing(AbilityRules.by_id(ability_id))
+
+func _sample_ability_draw() -> float:
+	if ability_draw_curve.is_empty():
+		return 0.0
+	var progress := ability_progress()
+	var first: Array = ability_draw_curve[0]
+	if progress <= float(first[0]):
+		return clampf(float(first[1]),0.0,1.0)
+	for index in range(1,ability_draw_curve.size()):
+		var previous: Array = ability_draw_curve[index-1]
+		var current: Array = ability_draw_curve[index]
+		if progress <= float(current[0]):
+			var span := maxf(float(current[0])-float(previous[0]),0.000001)
+			# A release key is nearly instantaneous; a smoothstep here would
+			# smear the snap, so keep the interpolation linear.
+			return clampf(lerpf(float(previous[1]),float(current[1]),(progress-float(previous[0]))/span),0.0,1.0)
+	var last: Array = ability_draw_curve[ability_draw_curve.size()-1]
+	return clampf(float(last[1]),0.0,1.0)
+
+func _ability_spin_yaw() -> float:
+	# The spin is presentation-only and derived from the phase clock, so a
+	# replica reproduces the same turn without extra network state. The clip
+	# carries the stance and the blade extension; the model turns underneath it.
+	if phase != "ABILITY" or ability_spin == 0.0:
+		return 0.0
+	var progress := ability_progress()
+	var turn := smoothstep(0.10,0.86,progress)
+	return TAU*ability_spin*turn
+
 func _apply_ability_pose() -> void:
 	# The authored sprint carries the legs; this overlay drops the chest and
 	# hips over the lead foot and lifts the gaze so the charge reads as weight
@@ -2511,6 +2645,45 @@ func _update_shield_pose() -> void:
 	if active_shield.has_method("radius"):
 		shield_radius = float(active_shield.radius())
 	var size_delta := shield_radius-0.36
+	# A shield skill presents the boss toward the target. The carried pose
+	# hangs it flat against the outside of the forearm, which would read as an
+	# edge-first shove if the authored arm came up in front.
+	if phase == "ABILITY" and ability_slot == 1:
+		var forward := _aim_point-global_position
+		forward.y = 0.0
+		if forward.length_squared() < 0.0001:
+			forward = -global_basis.z
+			forward.y = 0.0
+		forward = forward.normalized()
+		var hand := _bone_world(_arms[0][2])
+		var basis := Basis.looking_at(forward,Vector3.UP)
+		var center := hand.origin+forward*(0.10+size_delta*0.4)+Vector3.UP*0.03
+		# The shove is driven from the body, not from the wrist: a clip that
+		# draws the hand back to the chest would carry the disc through the
+		# torso and the helmet. Push the disc out until its plane clears the
+		# chest and head, and solve the arm onto the pushed wrist.
+		var chest := _bone_world(_bones.spine_03).origin
+		var head := _bone_world(_bones.Head).origin
+		var needed := maxf((chest-global_position).dot(forward)+ABILITY_SHIELD_CHEST_CLEAR,
+			(head-global_position).dot(forward)+ABILITY_SHIELD_HEAD_CLEAR)
+		# A low shield (the ground slam) passes the legs, not the head, so the
+		# bones that actually share its height set the clearing distance.
+		var gated := shield_radius*0.8+0.15
+		for side in 2:
+			for joint in 2:
+				var leg := _bone_world(_legs[side][joint]).origin
+				if absf(center.y-leg.y) > gated:
+					continue
+				needed = maxf(needed,(leg-global_position).dot(forward)+ABILITY_SHIELD_LEG_CLEAR)
+		var ahead := (center-global_position).dot(forward)
+		if ahead < needed:
+			center += forward*(needed-ahead)
+			var shoulder := _bone_world(_arms[0][0]).origin
+			var elbow := _bone_world(_arms[0][1]).origin
+			var pole := elbow-(shoulder+hand.origin)*0.5
+			_solve_limb(_arms[0],center-forward*0.12-Vector3.UP*0.03,basis,pole)
+		active_shield.global_transform = Transform3D(basis,center)
+		return
 	if _blocking:
 		var forward := _block_forward
 		forward.y = 0.0
@@ -2616,7 +2789,9 @@ func _update_bow_pose(drawing: bool) -> void:
 	else:
 		active_bow.global_transform = Transform3D(bow_basis,grip)
 		active_bow.set_draw(0.0)
-	active_bow.set_arrow_visible(_roll_progress < 0.0 and (phase in ["READY","DRAWING","HOLDING"] or (phase == "RECOVER" and _phase_time >= 0.68)))
+	active_bow.set_arrow_visible(_roll_progress < 0.0 and (phase in ["READY","DRAWING","HOLDING"] \
+		or (phase == "RECOVER" and _phase_time >= 0.68) \
+		or (phase == "ABILITY" and not ability_draw_curve.is_empty() and draw_amount > 0.03)))
 	_update_hand_contacts()
 
 func _jaw_anchor() -> Vector3:

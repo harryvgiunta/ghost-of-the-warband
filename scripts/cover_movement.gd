@@ -128,6 +128,21 @@ func reset() -> void:
 	crouch_amount = 0.0
 	_apply_height()
 
+## A skill that cannot be performed from a crouch stands the owner up. Clear the
+## crouch intent and snap the capsule upright so the authored clip owns the whole
+## body; refuse when the ceiling cannot take the standing capsule, so the caller
+## can block the skill instead of playing it folded over.
+func force_stand() -> bool:
+	if not crouched and not crouch_requested and crouch_amount <= 0.0:
+		return true
+	if _body != null and not _can_stand():
+		return false
+	crouch_requested = false
+	crouched = false
+	crouch_amount = 0.0
+	_apply_height()
+	return true
+
 func step(delta: float, desired_direction: Vector3, wants_peek: bool, shoulder: int, fast: bool = false) -> Vector3:
 	if not active:
 		_update_stance(delta,crouch_requested)

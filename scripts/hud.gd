@@ -40,6 +40,7 @@ var _stamina_bar: ProgressBar
 var _stamina_label: Label
 var _charge_bar: ProgressBar
 var _ability_slot
+var _off_ability_slot
 var _interaction_panel: Panel
 var _interaction: Label
 var _feedback: Label
@@ -101,12 +102,17 @@ func _ready() -> void:
 	_ability_slot.configure(0)
 	_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	add_child(_ability_slot)
+	_off_ability_slot = AbilitySlot.new()
+	_off_ability_slot.position = Vector2(436, -154)
+	_off_ability_slot.configure(1)
+	_off_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
+	add_child(_off_ability_slot)
 	var backpack := _panel(self, Vector2(-216, -243), Vector2(192, 30))
 	backpack.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	backpack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_backpack_label = _label(backpack, "BACKPACK  0 / 15", Vector2(12, 6), 12, TEAL)
-	var charge := _panel(self, Vector2(-260, -133), Vector2(520, 101))
-	charge.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
+	var charge := _panel(self, Vector2(540, -133), Vector2(520, 101))
+	charge.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
 	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
@@ -130,7 +136,7 @@ func _ready() -> void:
 	var camp_button := _button(self, "R   RETURN TO TOWN", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1  Charge   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2  Weapon Skill   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
@@ -141,21 +147,26 @@ func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array
 	_interactables = interactables
 	_world_limit = limit
 
-func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0, consume_kind: String = "", consume_time: float = 0.0, ability_state: Dictionary = {}) -> void:
+func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0, consume_kind: String = "", consume_time: float = 0.0, ability_state: Dictionary = {}, off_ability_state: Dictionary = {}) -> void:
 	_region.text = region
 	_health_label.text = "HEALTH  %d / 100" % int(health)
 	_health_bar.value = health
 	_stamina_bar.value = stamina
 	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(Stamina.MAX)]
 	_ability_slot.update_state(ability_state)
+	if is_instance_valid(_off_ability_slot):
+		_off_ability_slot.update_state(off_ability_state)
 	_gold_label.text = "%d GOLD  /  %d FOES" % [gold, kills]
 	_charge_bar.value = draw_amount * 100.0 if phase_name in ["DRAWING", "HOLDING", "T_DRAW", "T_HOLD"] else progress * 100.0
 	if phase_name == "ABILITY":
 		var charge_ratio := 0.0
-		if not ability_state.is_empty():
-			charge_ratio = clampf(float(ability_state.get("elapsed",0.0))/maxf(float(ability_state.get("duration",1.0)),0.001),0.0,1.0)
+		var active_state := ability_state
+		if active_state.is_empty() or not bool(active_state.get("active", false)):
+			active_state = off_ability_state
+		if not active_state.is_empty():
+			charge_ratio = clampf(float(active_state.get("elapsed",0.0))/maxf(float(active_state.get("duration",1.0)),0.001),0.0,1.0)
 		_charge_bar.value = charge_ratio * 100.0
-		_phase.text = "CHARGING FORWARD  %d%%  /  SHIFT + 1" % int(charge_ratio * 100.0)
+		_phase.text = "%s  %d%%  /  %s" % [str(active_state.get("name", "SKILL")), int(charge_ratio * 100.0), str(active_state.get("key", ""))]
 	elif phase_name == "BANDAGE" or consume_kind == "bandage":
 		_charge_bar.value = clampf(consume_time/3.0,0.0,1.0)*100.0
 		_phase.text = "WRAPPING BANDAGE  %d%%  /  STAND STILL" % int(clampf(consume_time/3.0,0.0,1.0)*100.0)

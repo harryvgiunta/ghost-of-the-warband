@@ -39,6 +39,7 @@ var _health_bar: ProgressBar
 var _stamina_bar: ProgressBar
 var _stamina_label: Label
 var _ability_slot
+var _off_ability_slot
 var _equipment_label: Label
 var _readiness_label: Label
 var _prompt_panel: Panel
@@ -160,6 +161,11 @@ func _build_vitals() -> void:
 	_ability_slot.configure(0)
 	_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	add_child(_ability_slot)
+	_off_ability_slot = AbilitySlot.new()
+	_off_ability_slot.position = Vector2(436, -196)
+	_off_ability_slot.configure(1)
+	_off_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
+	add_child(_off_ability_slot)
 	_equipment_label = _label(vitals, "", Vector2(14, 82), 11, GOLD)
 	_equipment_label.size = Vector2(272, 16)
 	_equipment_label.clip_text = true
@@ -338,7 +344,10 @@ func update_local(state: Dictionary) -> void:
 	_stamina_bar.value = clampf(stamina, 0.0, Stamina.MAX)
 	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(Stamina.MAX)]
 	var ability_state: Dictionary = state.get("ability",{})
+	var off_ability_state: Dictionary = state.get("ability_off",{})
 	_ability_slot.update_state(ability_state)
+	if is_instance_valid(_off_ability_slot):
+		_off_ability_slot.update_state(off_ability_state)
 	var weapon := str(state.get("weapon", "")).to_upper()
 	var movement := str(state.get("movement", "OPEN")).to_upper()
 	if weapon.is_empty():
@@ -352,7 +361,11 @@ func update_local(state: Dictionary) -> void:
 	var interval := maxf(0.001, float(state.get("attack_interval", 0.0)))
 	var readiness := _readiness_line(phase, draw, progress, interval, blocking, parry)
 	if phase == "ABILITY":
-		readiness = "CHARGING FORWARD  /  SHIFT + 1"
+		var active_state := ability_state
+		if active_state.is_empty() or not bool(active_state.get("active", false)):
+			active_state = off_ability_state
+		var ratio := clampf(float(active_state.get("elapsed", 0.0)) / maxf(float(active_state.get("duration", 1.0)), 0.001), 0.0, 1.0)
+		readiness = "%s  %d%%  /  %s" % [str(active_state.get("name", "SKILL")), int(ratio * 100.0), str(active_state.get("key", ""))]
 	var left := float(state.get("left", 1.0))
 	var right := float(state.get("right", 1.0))
 	if left < 0.999999 or right < 0.999999:

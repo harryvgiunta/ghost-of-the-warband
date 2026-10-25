@@ -82,6 +82,8 @@ var _cleave_query := PhysicsShapeQueryParameters3D.new()
 var _cleave_shape := CylinderShape3D.new()
 var _melee_query := PhysicsShapeQueryParameters3D.new()
 var _melee_shape := CapsuleShape3D.new()
+var _blast_query := PhysicsShapeQueryParameters3D.new()
+var _blast_shape := SphereShape3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 # Camera projectile lanes include fighters; melee occlusion is scenery-only.
 var _melee_sight_query := PhysicsRayQueryParameters3D.new()
@@ -135,6 +137,8 @@ func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	_melee_query.margin = 0.001
 	_cleave_query.shape = _cleave_shape
 	_cleave_query.margin = 0.0
+	_blast_query.shape = _blast_shape
+	_blast_query.margin = 0.0
 	_melee_sight_query.collision_mask = 1
 	_melee_sight_query.hit_from_inside = true
 	_shaft_shape.radius = 0.01
@@ -716,11 +720,11 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 		state.blocked = true
 
 func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
-		at: Vector3, headshot: bool) -> void:
+		at: Vector3, headshot: bool) -> int:
 	var target_combat = unit.get("combat")
 	if is_instance_valid(target_combat) and _can_clash_with(unit,target_combat):
 		_resolve_clash(unit,target_combat,at)
-		return
+		return DEFENSE_NONE
 	state.victims[unit.get_instance_id()] = true
 	var damage: float = state.damage
 	var outcome := DEFENSE_NONE
@@ -744,6 +748,84 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		if _unit_is_dead(unit):
 			# The kill throws blood back over the body that landed it.
 			BloodFx.spatter_kill(actor,rig,at,damage)
+	return outcome
+
+## One radial beat of an item skill: an arc in front of the body or a full
+## ring around it. Reuses the melee contact path so blocks, armor, blood and
+## damage numbers behave exactly like an authored swing. Returns victims hit.
+## `victims` is shared across every beat of one activation (a travelling lunge
+## sweeps the same dictionary each tick), so no body is ever struck twice.
+func ability_strike(radius: float, arc_degrees: float, damage: float,
+		stagger_seconds: float = 0.0, ring: bool = false,
+		require_sight: bool = true, victims: Dictionary = {}) -> int:
+	if not is_instance_valid(actor):
+		return 0
+	return _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
+		stagger_seconds,arc_degrees,ring,require_sight,victims)
+
+## A blast centred away from the caster (a fireball burst). Sight is ignored:
+## the explosion owns the space it fills.
+func ability_blast(centre: Vector3, radius: float, damage: float,
+		stagger_seconds: float = 0.0) -> int:
+	return _ability_area(centre,radius,damage,stagger_seconds,360.0,true,false)
+
+
+func _ability_area(centre: Vector3, radius: float, damage: float,
+		stagger_seconds: float, arc_degrees: float, ring: bool,
+		require_sight: bool, victims: Dictionary = {}) -> int:
+	if not damage_enabled or not is_instance_valid(actor) or not is_instance_valid(rig):
+		return 0
+	if actor.get("alive") == false or radius <= 0.0:
+		return 0
+	var state := {
+		"active": true, "blocked": false, "weapon": rig.weapon,
+		"damage": damage, "diagonal": false, "reach": radius,
+		"victims": victims, "exclude": [actor.get_rid()],
+	}
+	var forward: Vector3 = aim_point-actor.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	var half := deg_to_rad(clampf(arc_degrees,0.0,360.0))*0.5
+	_blast_shape.radius = radius
+	_blast_query.transform = Transform3D(Basis.IDENTITY,centre)
+	_blast_query.collision_mask = target_mask
+	_blast_query.exclude = state.exclude
+	var space := actor.get_world_3d().direct_space_state
+	var hits := space.intersect_shape(_blast_query,MAX_CLEAVE_CONTACTS)
+	var hit_count := 0
+	for hit in hits:
+		var unit = hit.collider
+		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
+				or unit.get("alive") != true or state.victims.has(unit.get_instance_id()):
+			continue
+		var offset: Vector3 = unit.global_position-actor.global_position
+		offset.y = 0.0
+		if not ring and float(arc_degrees) < 359.5:
+			var angle := atan2(offset.dot(right),offset.dot(forward))
+			if absf(angle) > half:
+				continue
+		var contact: Vector3 = unit.get_aim_position() if unit.has_method("get_aim_position") \
+			else unit.global_position
+		if require_sight:
+			_melee_sight_query.from = actor.global_position+Vector3(0,1.1-0.45*rig._crouch_amount,0)
+			_melee_sight_query.to = contact
+			_melee_sight_query.exclude = state.exclude
+			if not space.intersect_ray(_melee_sight_query).is_empty():
+				continue
+		state.exclude.append(hit.rid)
+		var outcome := _resolve_melee_contact("right",state,unit,contact,false)
+		hit_count += 1
+		if outcome == DEFENSE_NONE and stagger_seconds > 0.0:
+			var target_combat = unit.get("combat")
+			if is_instance_valid(target_combat) and target_combat.has_method("stagger"):
+				target_combat.stagger(stagger_seconds)
+			elif unit.has_method("stagger"):
+				unit.stagger(stagger_seconds)
+	return hit_count
 
 func _unit_is_dead(unit: Node) -> bool:
 	var flag = unit.get("alive")

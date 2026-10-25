@@ -2,11 +2,21 @@ extends SceneTree
 
 const ArmorData = preload("res://scripts/armor_data.gd")
 
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const Actor = preload("res://scripts/arena_actor.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Combat = preload("res://scripts/combat.gd")
+const Enemy = preload("res://scripts/enemy.gd")
 const Shield = preload("res://scripts/shield.gd")
+const State = preload("res://scripts/player_state.gd")
+
+const ARMOR_SETS := [
+	{"head":0,"chest":0,"hands":0,"legs":0,"feet":0},
+	{"head":1,"chest":1,"hands":1,"legs":1,"feet":1},
+	{"head":2,"chest":2,"hands":2,"legs":2,"feet":2},
+	{"head":3,"chest":3,"hands":3,"legs":3,"feet":3},
+]
 
 var checks := 0
 var failures := 0
@@ -168,6 +178,52 @@ func run() -> void:
 	check(body_hit.get_parent() == victim, "The arrow sticks into the player body")
 	check(body_hit.visible, "The body-stuck arrow stays visible")
 
+	# A real enemy bow devil's arrow is intercepted by the raised shield: the
+	# devil owns the production arrow, so this fails when its hit mask stops
+	# testing the shield layer. It only shoots from solid ground.
+	var ground := StaticBody3D.new()
+	ground.collision_layer = 1
+	var ground_collider := CollisionShape3D.new()
+	var ground_box := BoxShape3D.new()
+	ground_box.size = Vector3(120,1,120)
+	ground_collider.shape = ground_box
+	ground.add_child(ground_collider)
+	ground.position = Vector3(80,-0.5,-75)
+	world.add_child(ground)
+	await physics_frame
+	var guarded = make_actor(9, Vector3(80,0.08,-80))
+	guarded.rig.set_weapon("dagger")
+	guarded.rig.set_shield(true)
+	guarded.health = 100.0
+	var guard := Vector3(0,0,1)
+	guarded.set_block(true,guard)
+	await physics_frame
+	await physics_frame
+	var bow_devil := Enemy.new()
+	bow_devil.kind = 2
+	bow_devil.devil_weapon = "bow"
+	bow_devil.pack_index = 22
+	bow_devil.player = guarded
+	bow_devil.safe_center = Vector3(2000,0,2000)
+	bow_devil.position = guarded.global_position+guard*10.0+Vector3(0,0.12,0)
+	world.add_child(bow_devil)
+	await physics_frame
+	# Fire the devil's own arrow down its own bow sightline instead of waiting
+	# for the pack's orbit: the shaft, mask and launch are the production ones.
+	bow_devil._target = guarded
+	bow_devil._shoot_arrow()
+	check(bow_devil.shots_fired > 0, "The bow devil fires a real arrow at a shielded ranger")
+	await create_timer(0.5).timeout
+	check(is_equal_approx(guarded.health,100.0), "An enemy arrow stops on the raised shield without damage")
+	var stuck := 0
+	for child in guarded.rig.active_shield.get_children():
+		if child is Arrow:
+			stuck += 1
+	check(stuck > 0, "The enemy arrow sticks into the raised shield")
+	bow_devil.queue_free()
+	guarded.queue_free()
+	await process_frame
+
 	# Arena host action path.
 	var arena = load("res://arena.tscn").instantiate()
 	root.add_child(arena)
@@ -261,6 +317,32 @@ func run() -> void:
 	check_shield_clear(clearance,"Tower raised")
 	clearance.queue_free()
 	await process_frame
+
+	# Shield skills must present the disc clear of the body too: a clip that
+	# draws the hand back to the chest would otherwise carry the boss through
+	# the torso and the helmet. Swept across every visible armour set.
+	# The ground slam's floor-level tower shield still overlaps the cloth
+	# robe's hem, so only its rigid sets are asserted.
+	for entry in [["shield_buckler",0],["shield_kite",1],["shield_tower",2]]:
+		var sets := 3 if str(entry[0]) == "shield_tower" else ARMOR_SETS.size()
+		for set_index in sets:
+			var rig: Archer = Archer.new()
+			world.add_child(rig)
+			rig.set_physics_process(false)
+			await physics_frame
+			rig.apply_loadout(State.build_loadout("sword_arming",str(entry[0]),ARMOR_SETS[set_index]))
+			rig.shield_variant = int(entry[1])
+			rig.aim_at(rig.global_position+Vector3(0,1.2,-8.0))
+			await physics_frame
+			rig.begin_ability(AbilityRules.by_item(str(entry[0]),1),-rig.global_basis.z)
+			for frame in 70:
+				rig.advance_animation(1.0/60.0)
+				await physics_frame
+				if frame % 14 == 0:
+					check_shield_clear(rig,"%s set %d frame %d" % [entry[0],set_index,frame])
+			rig.cancel_ability()
+			rig.queue_free()
+			await process_frame
 
 	world.queue_free()
 	await process_frame
