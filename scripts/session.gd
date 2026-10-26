@@ -6,9 +6,19 @@ extends Node
 ## in-session party hand-off: an open-world host can tell every connected peer
 ## to follow it into the delve without tearing down the ENet peer.
 
-## Emitted on a client when the session authority leads the party into another
-## scene. The current scene decides how to hand its player over.
+## Emitted on a client when the session authority leads it into another scene.
+## The current scene decides how to hand its player over.
 signal party_descent(next_port: int)
+## Emitted on the authority when a connected rider asks to follow the party down.
+signal descent_requested(from_peer: int)
+## Emitted on a client when the authority refuses that request.
+signal descent_refused(reason: String)
+## Emitted on a client when the open world's authority has entered the delve.
+## The frontier stops replicating (nothing there is simulated any more) but stays
+## walkable, so the player reaches the hatch and descends on its own terms.
+signal host_entered_delve(next_port: int)
+## Emitted on a client when the party is back in the open world.
+signal delve_returned
 
 const DEFAULT_PORT := 7777
 
@@ -16,6 +26,9 @@ var mode := ""
 var address := "127.0.0.1"
 var port := DEFAULT_PORT
 var player_name := "Ranger"
+## The port of the delve the party is currently below in, or 0 while the
+## authority is in the open world. Survives the scene change with the autoload.
+var delve_open_port := 0
 
 func arm_arena(next_mode: String, next_address: String, next_port: int, next_name: String) -> void:
 	mode = next_mode
@@ -42,9 +55,43 @@ func take() -> Dictionary:
 func clear() -> void:
 	mode = ""
 
-## The open-world host broadcasts this before it leaves the frontier. The RPC
-## lives on this autoload because /root/Session exists in every scene; a Main
-## or Delve node path would be gone by the time the packet is serviced.
+## The authority sends this to one peer when it leads it into the delve. The RPC
+## lives on this autoload because /root/Session exists in every scene; a Main or
+## Delve node path would be gone by the time the packet is serviced.
 @rpc("authority","call_remote","reliable")
 func descend_party(next_port: int) -> void:
 	party_descent.emit(clampi(next_port,1024,65535))
+
+
+## A rider asks the authority for passage down instead of tearing the party
+## apart. Answered per peer by `descend_party` or `refuse_descent`.
+@rpc("any_peer","call_remote","reliable")
+func request_descent() -> void:
+	var sender := multiplayer.get_remote_sender_id() if multiplayer != null else 0
+	if sender > 0:
+		descent_requested.emit(sender)
+
+
+@rpc("authority","call_remote","reliable")
+func refuse_descent(reason: String) -> void:
+	descent_refused.emit(reason.strip_edges().left(120))
+
+
+## The open world's authority has gone below. Clients keep the connection and
+## the town, but the frontier stops being simulated until the party returns.
+@rpc("authority","call_remote","reliable")
+func delve_open(next_port: int) -> void:
+	delve_open_port = clampi(next_port,1024,65535)
+	host_entered_delve.emit(delve_open_port)
+
+
+func clear_delve_open() -> void:
+	delve_open_port = 0
+
+
+## The party took the rope: every peer is back in the open world and the
+## frontier's own simulation resumes, so the town is live again.
+@rpc("authority","call_remote","reliable")
+func close_delve() -> void:
+	delve_open_port = 0
+	delve_returned.emit()

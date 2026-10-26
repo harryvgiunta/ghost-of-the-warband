@@ -26,6 +26,13 @@ var surface_button: Button
 var hub_button: Button
 var endpoint_label: Label
 var vitals_label: Label
+## The party gate: while the delve waits on rangers who are still outside, this
+## screen owns the middle of the view instead of the altar prompt.
+var waiting_layer: Control
+
+var _waiting_body: Label
+var _waiting_names: Label
+var _waiting_hint: Label
 
 var _endpoint := ""
 var _role := "CLIENT"
@@ -90,6 +97,7 @@ func _build() -> void:
 	_build_prompt()
 	_build_banner()
 	_build_toast()
+	_build_waiting()
 	_build_game_over()
 	var swap_hint := _label(self, "TAB  SWAP WEAPONS", Vector2(-190, -38), 11, MUTED)
 	swap_hint.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
@@ -209,6 +217,37 @@ func _build_toast() -> void:
 	_toast_label.size = Vector2(336, 20)
 	_toast_panel.visible = false
 
+## A soft shade keeps the room readable while the gate is closed: the player can
+## still walk the landing, and the party list stays legible behind the box.
+func _build_waiting() -> void:
+	waiting_layer = Control.new()
+	waiting_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	waiting_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	waiting_layer.visible = false
+	add_child(waiting_layer)
+	var shade := ColorRect.new()
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0.016, 0.043, 0.055, 0.4)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	waiting_layer.add_child(shade)
+	var box := _panel(waiting_layer, Vector2(-300, -134), Vector2(600, 268))
+	box.set_anchors_preset(Control.PRESET_CENTER, true)
+	var title := _label(box, "WAITING FOR THE PARTY", Vector2(24, 26), 26, GOLD)
+	title.size = Vector2(552, 36)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_waiting_body = _label(box, "", Vector2(24, 78), 15, CREAM)
+	_waiting_body.size = Vector2(552, 24)
+	_waiting_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_waiting_names = _label(box, "", Vector2(24, 114), 12, TEAL)
+	_waiting_names.size = Vector2(552, 76)
+	_waiting_names.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_waiting_names.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_waiting_hint = _label(box, "", Vector2(24, 202), 12, MUTED)
+	_waiting_hint.size = Vector2(552, 44)
+	_waiting_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_waiting_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+
 func _build_game_over() -> void:
 	game_over_layer = Control.new()
 	game_over_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -267,12 +306,41 @@ func update_run(state: Dictionary) -> void:
 	wave_label.text = "DEPTH %d  WAVE %d" % [depth, wave]
 	phase_label.text = _phase_line(state, phase)
 	var phase_color := CREAM
-	if phase == "GAME_OVER" or phase == "RITUAL" or phase == "DROP":
+	if phase == "WAITING" or phase == "GAME_OVER" or phase == "RITUAL" or phase == "DROP":
 		phase_color = GOLD
 	elif phase == "CLEARED":
 		phase_color = TEAL
 	phase_label.add_theme_color_override("font_color", phase_color)
 	_update_party(state)
+	_update_waiting(state, phase)
+
+
+## The waiting screen is pure run state: the host counts the peers still outside
+## and every seeded client reads that count, so both views agree.
+func _update_waiting(state: Dictionary, phase: String) -> void:
+	if waiting_layer == null:
+		return
+	if phase != "WAITING":
+		waiting_layer.visible = false
+		return
+	waiting_layer.visible = true
+	var waiting := maxi(0, int(state.get("waiting", 0)))
+	var host := int(state.get("local_slot", -1)) == 0
+	_waiting_body.text = ("Waiting for %d ranger%s to join the delve." % [waiting, "" if waiting == 1 else "s"]) \
+		if waiting > 0 else "Every connected ranger is in the delve."
+	var names: Array[String] = []
+	var party: Variant = state.get("party", [])
+	if party is Array:
+		for row in party:
+			if typeof(row) != TYPE_DICTIONARY:
+				continue
+			var member := str(row.get("name", "RANGER"))
+			if not bool(row.get("alive", true)):
+				member += " (down)"
+			names.append(member)
+	_waiting_names.text = ("IN THE DELVE: " + ", ".join(names)) if not names.is_empty() else "NO ONE IS IN THE DELVE YET"
+	_waiting_hint.text = "Enter begins without them. The descent stays asleep until the party is assembled." \
+		if host else "The host opens the descent once the party is assembled."
 
 func _room_caption(room: String) -> String:
 	if room == "ossuary":
@@ -281,6 +349,9 @@ func _room_caption(room: String) -> String:
 
 func _phase_line(state: Dictionary, phase: String) -> String:
 	match phase:
+		"WAITING":
+			var pending := maxi(0, int(state.get("waiting", 0)))
+			return ("WAITING FOR THE PARTY - %d STILL OUTSIDE" % pending) if pending > 0 else "PARTY ASSEMBLED"
 		"ALTAR":
 			if str(state.get("room", "sanctuary")) == "ossuary":
 				return "THE SUMMONING CONTINUES"

@@ -98,11 +98,19 @@ var _pentagram_active := false
 var _solids := 0
 var _lights := 0
 var _torches := 0
+var _built := false
 
 
 func _ready() -> void:
 	# Geometry belongs to apply_room(); _ready only prepares the materials.
 	_ensure_materials()
+
+
+## False until apply_room() has authored this world's geometry. A controller
+## must build the room before it draws a frame, and a client's first run state
+## only has to rebuild when the host is on a different room or cycle.
+func is_built() -> bool:
+	return _built
 
 
 ## Rebuilds the whole room for `kind` at palette `room_cycle`. Idempotent: the
@@ -131,6 +139,7 @@ func apply_room(kind: String, room_cycle: int) -> void:
 	set_hole_open(false, true)
 	set_pentagram(false, 0.0)
 	set_beacons(false, false, false)
+	_built = true
 
 
 func room_title() -> String:

@@ -118,6 +118,9 @@ var _client_aim_origin_valid := false
 var _local_anchor_swapped := false
 var _client_dead_notified := false
 var _descent_refusal_cooldown := 0.0
+## Non-zero while the open world's authority is below in the delve: this scene
+## keeps its geometry and its walk but has no simulation behind it.
+var _delve_open_port := 0
 var _anchor_player: CharacterBody3D
 var _anchor_rig
 var _anchor_combat
@@ -195,15 +198,28 @@ var _aim_query := PhysicsRayQueryParameters3D.new()
 var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
 var _bloody_feet := BloodyFeet.new()
+## The whole frontier — world, ranger, mobs, camera, effects — lives under this
+## one node, so a run that opens inside this session can freeze it whole and
+## hand it back exactly as it was left.
+var _frontier: Node3D
+var _ui_layer: CanvasLayer
+var _frontier_environment: WorldEnvironment
+var _frontier_environment_parent: Node
+var _frontier_bodies: Dictionary = {}
+## The disposable run running inside this session, or null in the open world.
+var _delve_inner: Node = null
 
 func _ready() -> void:
 	_read_arguments()
+	_frontier = Node3D.new()
+	_frontier.name = "Frontier"
+	add_child(_frontier)
 	_player_state = get_node_or_null("/root/PlayerState")
 	_aim_query.collision_mask = 1 | 2
 	_floor_query.collision_mask = 1
 	world = World.new()
 	world.name = "IronwoodFrontier"
-	add_child(world)
+	_frontier.add_child(world)
 	player = CharacterBody3D.new()
 	player.name = "Player"
 	player.set_meta("ironwood_player", true)
@@ -219,13 +235,13 @@ func _ready() -> void:
 	collider.position.y = 0.90
 	collider.shape = capsule
 	player.add_child(collider)
-	add_child(player)
+	_frontier.add_child(player)
 	player.global_position = world.player_spawn + Vector3(0, 0.15, 0)
 	archer = Archer.new()
 	player.add_child(archer)
 	archer.set_ground_sampler(_sample_floor)
 	combat = Combat.new()
-	add_child(combat)
+	_frontier.add_child(combat)
 	combat.setup(archer, player.position + Vector3(0, 1.4, -24))
 	combat.shot.connect(_on_arrow_released)
 	combat.thrown.connect(_on_weapon_thrown)
@@ -234,17 +250,17 @@ func _ready() -> void:
 	# id its arrows do and the skull trinkets can pay the killer.
 	combat.source_id = 0
 	roll = DodgeRoll.new()
-	add_child(roll)
+	_frontier.add_child(roll)
 	step = DodgeStep.new()
-	add_child(step)
+	_frontier.add_child(step)
 	slide = RunningSlide.new()
-	add_child(slide)
+	_frontier.add_child(slide)
 	cover = CoverMovement.new()
-	add_child(cover)
+	_frontier.add_child(cover)
 	cover.setup(player,collider)
 	combat.cover = cover
 	ability = AbilityRunner.new()
-	add_child(ability)
+	_frontier.add_child(ability)
 	ability.setup(self,archer,combat,WALK_SPEED)
 	_bind_ability_cues(ability)
 	_anchor_player = player
@@ -258,10 +274,11 @@ func _ready() -> void:
 	camera.near = 0.08
 	camera.far = 450.0
 	camera.current = true
-	add_child(camera)
+	_frontier.add_child(camera)
 	audio = Audio.new()
-	add_child(audio)
+	_frontier.add_child(audio)
 	var layer := CanvasLayer.new()
+	_ui_layer = layer
 	add_child(layer)
 	hud = Hud.new()
 	layer.add_child(hud)
@@ -298,7 +315,7 @@ func _ready() -> void:
 		enemy.position = record.position + Vector3(0, 0.12, 0)
 		enemy.player = player
 		enemy.safe_center = world.player_spawn
-		add_child(enemy)
+		_frontier.add_child(enemy)
 		enemy.defeated.connect(_on_enemy_defeated)
 		enemy.attacked.connect(_on_enemy_attack)
 		if enemy.kind == 2:
@@ -310,7 +327,7 @@ func _ready() -> void:
 		devil.position = record.position + Vector3(0, 0.12, 0)
 		devil.player = player
 		devil.safe_center = world.player_spawn
-		add_child(devil)
+		_frontier.add_child(devil)
 		devil.defeated.connect(_on_enemy_defeated)
 		devil.attacked.connect(_on_enemy_attack)
 		enemies.append(devil)
@@ -320,7 +337,7 @@ func _ready() -> void:
 		forest.position = record.position + Vector3(0, 0.12, 0)
 		forest.player = player
 		forest.safe_center = world.player_spawn
-		add_child(forest)
+		_frontier.add_child(forest)
 		forest.defeated.connect(_on_enemy_defeated)
 		forest.attacked.connect(_on_enemy_attack)
 		enemies.append(forest)
@@ -330,7 +347,7 @@ func _ready() -> void:
 		clone.name = "RangerClone%d" % index
 		clone.bounds = world.WORLD_LIMIT - 2.0
 		clone.fallback_target = player
-		add_child(clone)
+		_frontier.add_child(clone)
 		clone.configure(index,1,true,"scene")
 		clone.spawn_at(record.position + Vector3(0, 0.12, 0))
 		clone.defeated.connect(_on_enemy_defeated)
@@ -342,6 +359,11 @@ func _ready() -> void:
 	# everything else (a sentinel on its post, a clone patrol) roams alone.
 	MobWander.assign_all(enemies,WILD_PACK_RADIUS)
 	_enemies_by_index = enemies.duplicate()
+	# The sky belongs to the frontier; a run inside this session detaches it so
+	# the chamber's own environment takes over.
+	_frontier_environment = _find_environment(_frontier)
+	if _frontier_environment != null:
+		_frontier_environment_parent = _frontier_environment.get_parent()
 	_setup_network()
 	_update_camera(1.0)
 	hud.show_feedback("The old waystones have gone dark. Follow the trails north.")
@@ -545,6 +567,9 @@ func _drop_field_loot(item_id: String) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _delve_inner != null:
+		# A run is open inside this session: the frontier is frozen in place.
+		return
 	if _link.held > 0:
 		_link.release(Time.get_ticks_msec()/1000.0)
 	if _net_diag:
@@ -660,6 +685,9 @@ func _physics_process(delta: float) -> void:
 	combat.advance(delta)
 	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
 		_enter_delve()
+		# The run owns the world from this frame on: the frontier must not step,
+		# collide or send anything behind it.
+		return
 	elif player.position.y < -25.0:
 		return_to_camp()
 	if _entering_scene:
@@ -696,6 +724,8 @@ func _diag_step(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _delve_inner != null:
+		return
 	shoulder_camera.update(delta)
 	_update_camera(delta)
 	if _mouse_drawing or _throw_held or _peek_requested or combat.wants_cover_exposure() or archer.charge_frozen or archer.is_ability():
@@ -893,6 +923,8 @@ func _input(event: InputEvent) -> void:
 			combat.stop_block()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _delve_inner != null:
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		# The in-world kit always answers I, P and Escape first so it can close
 		# without leaking keys into movement, attacks or the waystone prompts.
@@ -1013,6 +1045,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			camera_pitch = clampf(camera_pitch + change.y * 0.004, -0.10, 1.05)
 
 func _notification(what: int) -> void:
+	if _delve_inner != null:
+		return
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and is_instance_valid(archer):
 		_set_cursor_free(true)
 
@@ -1296,7 +1330,7 @@ func _ability_spell(runner, definition: Dictionary, damage: float,
 	spell.kind = str(effect.get("projectile", "fireball"))
 	spell.hit_mask = 1 | 2 | 8
 	spell.shooter = runner.actor if runner.actor is Node3D else null
-	add_child(spell)
+	_frontier.add_child(spell)
 	var excluded: Array[RID] = []
 	if runner.actor is CollisionObject3D:
 		excluded.append(runner.actor.get_rid())
@@ -1632,7 +1666,7 @@ func _enter_arena() -> void:
 	get_tree().change_scene_to_file("res://arena.tscn")
 
 func _enter_delve() -> void:
-	if _entering_scene:
+	if _entering_scene or _delve_inner != null:
 		return
 	_entering_scene = true
 	cancel_input()
@@ -1640,51 +1674,191 @@ func _enter_delve() -> void:
 		world_ui.close()
 	if _player_state != null:
 		_player_state.save_state()
-	# A world host keeps the name it opened the world with; a solo fall may use
-	# the remembered delve or network name.
-	var player_name := _player_name if network_role == "host" else _preferred_name()
 	var session := get_node_or_null("/root/Session")
-	if network_role == "host":
-		# Keep the live ENet server and its port: the party follows the host's
-		# fall into a hosted delve instead of being dropped for a solo run.
-		if session != null:
-			session.arm_delve("delve-carry-host","127.0.0.1",_world_port,player_name)
-			session.descend_party.rpc(_world_port)
-	else:
-		_close_network()
-		if session != null:
-			# Host Tailscale.cmd launches the frontier with --delve-host, so the
-			# hatch fall is what actually opens the hosted party on that port.
-			session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
-	get_tree().change_scene_to_file("res://delve.tscn")
+	if network_role == "host" and session != null:
+		# This session keeps its ENet server: the riders still upstairs hear the
+		# delve is open and decide for themselves when to come down.
+		session.delve_open.rpc(_world_port)
+	# A host or a client opens the run inside the session it already owns; a
+	# solo or Host-Tailscale frontier has no server yet, so the run opens one.
+	_open_delve_inner("host" if network_role != "client" else "client",
+		_delve_port if network_role == "offline" else _world_port)
+	_entering_scene = false
 
 
-## A rider cannot migrate the party by dropping alone. The host's authority
-## keeps the session together; the local repl can only ask the host to lift the
-## seat back out, so this view just reports it until the snapshot corrects.
-func _refuse_client_descent() -> void:
+## Instances the delve inside this running session. The frontier is frozen, not
+## destroyed, so the rope hands back exactly the state it was left in and the
+## party never reconnects.
+func _open_delve_inner(role: String, port: int) -> void:
+	if _delve_inner != null or not is_inside_tree():
+		return
+	var delve: Node = load("res://delve.tscn").instantiate()
+	delve.name = "Delve"
+	delve.inner = true
+	delve.inner_role = role
+	delve.inner_owns_peer = network_role == "offline"
+	delve.inner_find_port = network_role == "offline" and not _delve_host
+	delve.inner_port = clampi(port,1024,65535)
+	delve.inner_address = _world_address
+	delve.inner_name = _player_name if network_role != "offline" else _preferred_name()
+	delve.left_inner.connect(_on_delve_left)
+	_suspend_frontier()
+	add_child(delve)
+	_delve_inner = delve
+	print("WORLD_DELVE_INNER role=%s port=%d" % [role,delve.inner_port])
+
+
+## Freezes the frontier in place: it keeps every body, mob, pickup and waystone,
+## but stops simulating, drawing and colliding so a run inside this session owns
+## the visible world.
+func _suspend_frontier() -> void:
+	_frontier.process_mode = Node.PROCESS_MODE_DISABLED
+	_frontier.visible = false
+	if _ui_layer != null:
+		_ui_layer.visible = false
+	if world_ui != null:
+		world_ui.visible = false
+	if _frontier_environment != null and _frontier_environment.get_parent() != null:
+		_frontier_environment.get_parent().remove_child(_frontier_environment)
+	_mute_frontier_bodies(_frontier,true)
+
+
+## Hands the session back. Nothing is rebuilt: the party's seats, the mobs, the
+## loot on the ground and the waystones are the same objects they were before.
+func _resume_frontier() -> void:
+	_restore_frontier_bodies()
+	if _frontier_environment != null and _frontier_environment.get_parent() == null \
+			and _frontier_environment_parent != null and is_instance_valid(_frontier_environment_parent):
+		_frontier_environment_parent.add_child(_frontier_environment)
+	_frontier.visible = true
+	_frontier.process_mode = Node.PROCESS_MODE_INHERIT
+	if _ui_layer != null:
+		_ui_layer.visible = true
+	if world_ui != null:
+		world_ui.visible = true
+	camera.current = true
+	_entering_scene = false
+	# The fall that opened the run left the ranger inside the hatch cell; step
+	# back onto the inn floor so the same hatch does not open it again.
+	player.global_position = Vector3(16.0,3.45,44.0)
+	player.velocity = Vector3.ZERO
+	_camera_ready = false
+	_update_camera(0.0)
+	_set_cursor_free(false)
+	hud.show_feedback("Back in the world. The frontier is as you left it.",4.0)
+	print("WORLD_DELVE_INNER_LEFT")
+
+
+## The run ended; drop the instance and give the session back.
+func _on_delve_left() -> void:
+	if not is_instance_valid(_delve_inner):
+		return
+	var delve := _delve_inner
+	_delve_inner = null
+	if delve.get_parent() == self:
+		delve.queue_free()
+	_resume_frontier()
+
+
+func _mute_frontier_bodies(node: Node, mute: bool) -> void:
+	if node is CollisionObject3D:
+		var body: CollisionObject3D = node
+		if mute:
+			_frontier_bodies[body] = Vector2i(body.collision_layer,body.collision_mask)
+			body.collision_layer = 0
+			body.collision_mask = 0
+	for child in node.get_children():
+		_mute_frontier_bodies(child,mute)
+
+
+func _restore_frontier_bodies() -> void:
+	for body in _frontier_bodies.keys():
+		if is_instance_valid(body):
+			var saved: Vector2i = _frontier_bodies[body]
+			body.collision_layer = saved.x
+			body.collision_mask = saved.y
+	_frontier_bodies.clear()
+
+
+func _find_environment(root: Node) -> WorldEnvironment:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is WorldEnvironment:
+			return node
+		for child in node.get_children():
+			stack.push_back(child)
+	return null
+
+
+## A rider cannot migrate the party by dropping alone: the ENet server belongs to
+## the host's process, so this asks for passage down and lets the authority
+## answer (lead this peer in, or refuse while it holds the town).
+func _request_delve_descent() -> void:
 	if _descent_refusal_cooldown > 0.0:
 		return
 	_descent_refusal_cooldown = 2.0
 	cancel_input()
-	hud.show_feedback("Only the host can lead the party into the delve.",3.0)
+	var session := get_node_or_null("/root/Session")
+	if session == null:
+		hud.show_feedback("Only a hosted party can enter the delve.",3.0)
+		return
+	session.request_descent.rpc_id(1)
+	hud.show_feedback("Asking the host for passage down...",3.0)
 
 
-## The open-world host leads the whole party into the delve. This runs on a
-## client when the host's reliable /root/Session RPC arrives, so the ENet peer
-## the two peers already share is adopted by the delve scene instead of closed.
+## The authority holds the town, so nothing may open the delve yet.
+func _on_descent_requested(peer_id: int) -> void:
+	# While a run is open inside this session its own authority answers.
+	if network_role != "host" or peer_id <= 1 or _delve_inner != null:
+		return
+	if not multiplayer.get_peers().has(peer_id):
+		return
+	var session := get_node_or_null("/root/Session")
+	if session != null:
+		session.refuse_descent.rpc_id(peer_id,"The host has not opened the delve yet. Jump in together.")
+
+
+func _on_descent_refused(reason: String) -> void:
+	if network_role != "client" or reason.strip_edges().is_empty():
+		return
+	hud.show_feedback(reason,3.5)
+
+
+## The host went below, so this frontier has no authority behind it any more.
+## The town stays walkable and the hatch is the way down: the rider chooses.
+func _on_host_entered_delve(port: int) -> void:
+	if network_role != "client":
+		return
+	_delve_open_port = port
+	hud.show_feedback("The host is in the delve. Walk into the Wayfarer Inn hatch to join.",8.0)
+	print("WORLD_DELVE_OPEN port=%d" % port)
+
+
+## The party came back through the rope: the session is simulated again, so the
+## frontier resumes talking to its authority instead of walking a dead town.
+func _on_delve_returned() -> void:
+	if network_role != "client":
+		return
+	_delve_open_port = 0
+	hud.show_feedback("The party is back in the world.",4.0)
+
+
+## The authority leads this one rider into the delve. This runs on a client when
+## the host's reliable /root/Session RPC arrives, so the ENet peer the two peers
+## already share is adopted by the delve scene instead of closed. Nobody else is
+## moved: every rider descends on its own request.
 func _on_party_descent(port: int) -> void:
-	if _entering_scene or network_role != "client":
+	if _entering_scene or network_role != "client" or _delve_inner != null:
 		return
 	_entering_scene = true
+	_delve_open_port = 0
 	if _ui_open():
 		world_ui.close()
 	if _player_state != null:
 		_player_state.save_state()
-	var session := get_node_or_null("/root/Session")
-	if session != null:
-		session.arm_delve("delve-carry-client",_world_address,port,_player_name)
-	get_tree().change_scene_to_file("res://delve.tscn")
+	_open_delve_inner("client",port)
+	_entering_scene = false
 
 func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if not is_instance_valid(attacker) or not attacker.alive:
@@ -1853,7 +2027,7 @@ func _spawn_loot(item_id: String, at: Vector3, armed := true, broadcast := true)
 	pickup.setup(item_id, _loot_display_name(item_id))
 	pickup.set_armed(armed)
 	pickup.position = _drop_floor(at)
-	add_child(pickup)
+	_frontier.add_child(pickup)
 	loot_pickups.append(pickup)
 	if broadcast and network_role == "host":
 		_world_loot.rpc(item_id,pickup.position,armed)
@@ -1931,8 +2105,17 @@ func _setup_network() -> void:
 	multiplayer.connection_failed.connect(func(): _join_failed("Could not join. Check the address, UDP port and host capacity (four rangers)."))
 	multiplayer.server_disconnected.connect(func(): _connection_ended("The host closed the open world. You are alone now."))
 	var session := get_node_or_null("/root/Session")
-	if session != null and not session.party_descent.is_connected(_on_party_descent):
-		session.party_descent.connect(_on_party_descent)
+	if session != null:
+		if not session.party_descent.is_connected(_on_party_descent):
+			session.party_descent.connect(_on_party_descent)
+		if not session.descent_requested.is_connected(_on_descent_requested):
+			session.descent_requested.connect(_on_descent_requested)
+		if not session.descent_refused.is_connected(_on_descent_refused):
+			session.descent_refused.connect(_on_descent_refused)
+		if not session.host_entered_delve.is_connected(_on_host_entered_delve):
+			session.host_entered_delve.connect(_on_host_entered_delve)
+		if not session.delve_returned.is_connected(_on_delve_returned):
+			session.delve_returned.connect(_on_delve_returned)
 	var pending: Dictionary = session.take() if session != null else {}
 	var mode := str(pending.get("mode",""))
 	var pending_name := str(pending.get("name","")).strip_edges()
@@ -1982,6 +2165,7 @@ func join_world(address: String, port: int) -> void:
 	multiplayer.multiplayer_peer = peer
 	network_role = "client"
 	local_slot = -1
+	_delve_open_port = 0
 	_join_elapsed = 0.0
 	_set_replicas(true)
 	_endpoint = "%s:%d" % [address,port]
@@ -2022,6 +2206,10 @@ func _close_network() -> void:
 		_restore_anchor(player.global_position if is_instance_valid(player) else world.player_spawn)
 	network_role = "offline"
 	local_slot = -1
+	_delve_open_port = 0
+	var session := get_node_or_null("/root/Session")
+	if session != null:
+		session.clear_delve_open()
 	if multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -2076,6 +2264,12 @@ func _peer_connected(peer_id: int) -> void:
 	_world_accept.rpc_id(peer_id,slot)
 	_broadcast_roster()
 	_update_session_line()
+	if _delve_inner != null:
+		# The party is below: this rider can still reach the hatch and ask to
+		# follow, so it needs the port the session is running on.
+		var session := get_node_or_null("/root/Session")
+		if session != null:
+			session.delve_open.rpc_id(peer_id,_world_port)
 	print("WORLD_PEER_JOINED slot=",slot," rangers=",get_human_count())
 
 
@@ -2110,7 +2304,7 @@ func _create_seat(slot: int, peer_id: int, authoritative: bool, seat_name: Strin
 	seat.bounds = world.WORLD_LIMIT - 2.0
 	seat.name = "Ranger%d" % slot
 	seat.process_priority = -10
-	add_child(seat)
+	_frontier.add_child(seat)
 	seat.fired.connect(_on_seat_fired)
 	seat.thrown_weapon.connect(_on_seat_thrown)
 	seat.configure(peer_id,false,_safe_player_name(seat_name),world.player_spawn + Vector3(0.75*float(slot),0.15,0.75*float(slot)))
@@ -2316,9 +2510,9 @@ func _client_step(delta: float) -> void:
 	if _descent_refusal_cooldown > 0.0:
 		_descent_refusal_cooldown = maxf(0.0,_descent_refusal_cooldown-delta)
 	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
-		_refuse_client_descent()
+		_request_delve_descent()
 		return
-	if player.position.y < -25.0:
+	if player.position.y < -25.0 and _delve_open_port == 0:
 		send_action("respawn")
 	update_crosshair_aim()
 	var left := float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT))
@@ -2344,6 +2538,10 @@ func _client_step(delta: float) -> void:
 	var view := _view_tick()
 	seat.update_input(direction,running,view)
 	seat.predicted_step(delta,_seat_list)
+	if _delve_open_port > 0:
+		# The authority is in the delve: this walk is local, so the rider can
+		# still reach the hatch. Nothing here is sent to a scene that is gone.
+		return
 	_world_move.rpc_id(1,direction,running,_client_aim,_snapshot_ticks[local_slot],
 		_client_aim_origin if _client_aim_origin_valid else null,seat.latest_prediction_seq(),view,
 		seat.input_history())
@@ -2389,7 +2587,7 @@ func _rescue_seat_from_hatch(seat) -> void:
 	seat.global_position = Vector3(16.0,3.45,44.0)
 	seat.velocity = Vector3.ZERO
 	if int(seat.peer_id) > 1:
-		_world_notice.rpc_id(int(seat.peer_id),"Only the host can lead the party into the delve.")
+		_world_notice.rpc_id(int(seat.peer_id),"The host has not opened the delve yet. Jump in together.")
 
 
 func _send_seat_snapshots() -> void:
@@ -2489,13 +2687,17 @@ func _apply_world_move(slot: int, direction: Vector2, running: bool, aim: Varian
 
 
 func send_action(action: String, value: Variant = null) -> void:
-	if not _client():
+	if not _client() or _delve_inner != null:
 		return
 	# Locomotion intents start on this frame; combat, kits and skills stay
 	# authoritative so a client never guesses its own hit.
 	var seat = _seats.get(local_slot)
 	if seat != null and is_instance_valid(seat):
 		seat.predict_action(action,value)
+	if _delve_open_port > 0:
+		# The authority left this scene for the delve; a reliable intent sent to
+		# a missing node would only be dropped on the wire.
+		return
 	var origin: Variant = _client_aim_origin if _client_aim_origin_valid and action in ["draw","release","throw","throw_release","melee"] else null
 	_world_action.rpc_id(1,action,value,_snapshot_ticks[local_slot],origin)
 
@@ -2823,7 +3025,7 @@ func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage
 	arrow.shooter = _shooter_for_slot(source_slot) if authoritative else null
 	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
-	add_child(arrow)
+	_frontier.add_child(arrow)
 	arrow.launch(origin,direction,speed,shot_damage,excluded,visual_origin,pierce_count)
 	arrow.impacted.connect(_on_arrow_impact)
 	for index in range(arrows.size() - 1, -1, -1):
@@ -2845,7 +3047,7 @@ func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damag
 	thrown.shooter = _shooter_for_slot(source_slot)
 	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
 	thrown.authoritative_damage = authoritative
-	add_child(thrown)
+	_frontier.add_child(thrown)
 	thrown.launch(origin,direction,speed,shot_damage,excluded)
 	thrown.impacted.connect(_on_arrow_impact)
 	for index in range(thrown_weapons.size() - 1, -1, -1):

@@ -16,6 +16,14 @@ func check(condition: bool, message: String) -> void:
 		push_error(message)
 		print("TOWN_FAIL  ",message)
 
+func _wait_delve_gone(game, timeout: float = 5.0) -> bool:
+	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		if game._delve_inner == null:
+			return true
+		await create_timer(0.05).timeout
+	return game._delve_inner == null
+
 func _initialize() -> void:
 	call_deferred("run")
 
@@ -147,9 +155,17 @@ func run() -> void:
 	check(not game.get_world_3d().direct_space_state.intersect_ray(floor_query).is_empty(),"The inn floor around the hatch is solid")
 	game._enter_delve()
 	await create_timer(0.5).timeout
-	check(current_scene != null and current_scene.scene_file_path == "res://delve.tscn","Falling through the hatch loads the delve")
-	if current_scene != null and current_scene.get("phase") != null:
-		check(str(current_scene.phase) == "ALTAR","The delve starts at the altar phase")
+	check(is_instance_valid(game) and game.is_inside_tree(),"Entering the hatch keeps the session loaded")
+	var delve = game._delve_inner
+	check(delve != null and is_instance_valid(delve),"Entering the hatch opens the delve inside the session")
+	if is_instance_valid(delve):
+		check(String(delve.get_path()) == "/root/Ironwood/Delve","The run is an inner instance of the town session")
+		check(str(delve.phase) == "ALTAR","The delve starts at the altar phase")
+		check(not game._frontier.visible,"The town is frozen behind the run")
+		delve._set_phase("CLEARED")
+		delve.ascend_to_surface()
+		check(await _wait_delve_gone(game),"The rope hands the town back")
+		check(game._frontier.visible and game._ui_layer.visible,"The town is live again after the rope")
 
 	state.reset(false)
 	_remove_test_save()

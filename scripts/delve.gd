@@ -117,8 +117,29 @@ var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
 var _clock = NetReplication.NetClock.new()
 ## One second of body poses so a client's swing resolves against its view.
 var _lag = LagCompensation.new()
+## Signals the session that owns this run that it is over and the frontier may
+## take the world back. The instance is disposable: nothing in it survives.
+signal left_inner
+
+## Set by the session that opened this run: the delve is an inner, disposable
+## instance of a running open world, not a session of its own.
+var inner := false
+var inner_role := "host"
+var inner_owns_peer := false
+var inner_find_port := false
+var inner_port := 0
+var inner_address := ""
+var inner_name := "Ranger"
+## True only when this run created the ENet peer it talks on. A carried peer
+## belongs to the open world and must be left exactly as it is.
+var _owns_peer := false
+
 var _player_name := "Ranger"
 var _endpoint := ""
+## The UDP port this host answers on; the party hand-off quotes it back.
+var _port := 0
+## Connected peers that have not been seated in this delve yet.
+var _waiting_pending := 0
 var _remote_state: Dictionary = {}
 var _join_elapsed := 0.0
 var _send_elapsed := 0.0
@@ -170,7 +191,10 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	world = World.new()
 	add_child(world)
-	world.set_sealed(false)
+	# Geometry exists only after apply_room(), so every role opens on the
+	# sanctuary: a client must never sit in an empty chamber while its first
+	# run state is in flight, and a host re-hosting on depth one reuses it.
+	world.apply_room(World.ROOM_SANCTUARY,1)
 	for index in 4:
 		var actor := Actor.new()
 		actor.slot = index
@@ -224,7 +248,24 @@ func _ready() -> void:
 	multiplayer.connected_to_server.connect(_connected)
 	multiplayer.connection_failed.connect(func(): _connection_ended("Could not join. Check the address, UDP port and host capacity (four delvers)."))
 	multiplayer.server_disconnected.connect(func(): _connection_ended("The host disconnected. Host a new delve or join another party."))
-	call_deferred("_read_arguments")
+	var session := get_node_or_null("/root/Session")
+	if session != null and not session.descent_requested.is_connected(_on_descent_requested):
+		session.descent_requested.connect(_on_descent_requested)
+	call_deferred("_begin_entry")
+
+
+## An inner instance is opened by the session it lives in, so it never reads
+## launch arguments: the session tells it the role and port before `_ready`.
+func _begin_entry() -> void:
+	if not inner:
+		_read_arguments()
+		return
+	if inner_role == "client":
+		adopt_client(inner_address,inner_port,inner_name)
+	elif inner_owns_peer:
+		host_game(inner_port,inner_name,inner_find_port)
+	else:
+		adopt_host(inner_port,inner_name)
 
 func _read_arguments() -> void:
 	var pending: Dictionary = {}
@@ -283,10 +324,6 @@ func _read_arguments() -> void:
 				host_game(final_port,final_name,false)
 			"delve-join", "delve-client":
 				join_game(str(pending.get("address", address)),final_port,final_name)
-			"delve-carry-host":
-				adopt_host(final_port,final_name)
-			"delve-carry-client":
-				adopt_client(str(pending.get("address",address)),final_port,final_name)
 
 func host_game(port: int, player_name: String, find_open_port: bool = false) -> void:
 	leave_game()
@@ -318,6 +355,7 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 		hud.set_status("Could not host on UDP %d: %s" % [port,error_string(error)])
 		return
 	multiplayer.multiplayer_peer = peer
+	_owns_peer = true
 	_begin_host(port,player_name)
 
 
@@ -330,6 +368,7 @@ func adopt_host(port: int, player_name: String) -> void:
 		# of leaving the faller stranded offline.
 		host_game(port,player_name,false)
 		return
+	_owns_peer = false
 	_begin_host(port,player_name)
 	print("DELVE_HOST_CARRIED port=%d" % port)
 
@@ -337,6 +376,7 @@ func adopt_host(port: int, player_name: String) -> void:
 func _begin_host(port: int, player_name: String) -> void:
 	network_role = "host"
 	local_slot = 0
+	_port = port
 	# Clients already connected by the open world send `_register`; they are
 	# seated from that message because `peer_connected` fired before this scene.
 	_peer_slots.clear()
@@ -344,8 +384,10 @@ func _begin_host(port: int, player_name: String) -> void:
 	_player_name = _safe_name(player_name)
 	run_seed = randi()
 	# A re-host in the same scene may follow an ossuary run; start the rebuild
-	# on the sanctuary so depth one always has its altar.
-	world.apply_room(World.ROOM_SANCTUARY,1)
+	# on the sanctuary so depth one always has its altar. A freshly loaded scene
+	# already drew it in `_ready`, so only a different room is rebuilt.
+	if not world.is_built() or str(world.room_kind) != World.ROOM_SANCTUARY or int(world.cycle) != 1:
+		world.apply_room(World.ROOM_SANCTUARY,1)
 	_on_devils_reset_local()
 	for actor in actors:
 		actor.authoritative = true
@@ -371,7 +413,6 @@ func _begin_host(port: int, player_name: String) -> void:
 			addresses.append(address)
 	_endpoint = "UDP %d / LAN %s / same PC 127.0.0.1" % [port,", ".join(addresses)]
 	hud.configure(_endpoint)
-	hud.set_status("Touch the altar to begin the descent.",2.5)
 	_set_cursor_free(false)
 	_remember_network(_player_name,"",port)
 	_apply_loadout(0,_local_loadout())
@@ -379,10 +420,19 @@ func _begin_host(port: int, player_name: String) -> void:
 	_mode_elapsed = 0.0
 	_auto_fired = false
 	_drop_party()
-	_set_phase("ALTAR")
+	# Every peer still connected to this server is part of the party that came
+	# down: the room stays asleep until all of them have arrived, so the first
+	# rider waits instead of dragging or abandoning anyone.
+	_refresh_waiting()
+	if _waiting_pending == 0:
+		_set_phase("ALTAR")
+		hud.set_status("Touch the altar to begin the descent.",2.5)
+	else:
+		_set_phase("WAITING")
+		hud.set_status("Waiting for the party to join the delve.",4.0)
 	hud.show_banner("DEPTH %d" % depth,2.0)
 	_sync_run_state()
-	print("DELVE_HOST_READY port=%d" % port)
+	print("DELVE_HOST_READY port=%d waiting=%d" % [port,_waiting_pending])
 
 func join_game(address: String, port: int, player_name: String) -> void:
 	leave_game()
@@ -398,6 +448,7 @@ func join_game(address: String, port: int, player_name: String) -> void:
 		hud.set_status("Could not start connection: " + error_string(error))
 		return
 	multiplayer.multiplayer_peer = peer
+	_owns_peer = true
 	network_role = "client"
 	_join_elapsed = 0.0
 	hud.configure(_endpoint)
@@ -417,6 +468,7 @@ func adopt_client(address: String, port: int, player_name: String) -> void:
 	_player_name = _safe_name(player_name)
 	_endpoint = "%s:%d" % [address.strip_edges(),port]
 	_remember_network(_player_name,address.strip_edges(),port)
+	_owns_peer = false
 	network_role = "client"
 	local_slot = -1
 	_carry_client = true
@@ -424,7 +476,7 @@ func adopt_client(address: String, port: int, player_name: String) -> void:
 	_register_retry = REGISTER_RETRY
 	peer.get_peer(1).set_timeout(32,2000,5000)
 	hud.configure(_endpoint)
-	hud.set_status("Following the party into the delve...")
+	hud.set_status("Entering the delve...")
 	print("DELVE_CLIENT_CARRIED %s:%d" % [address.strip_edges(),port])
 
 func leave_game() -> void:
@@ -438,9 +490,10 @@ func leave_game() -> void:
 		if _world_ui.is_open():
 			_world_ui.close()
 		_world_ui.rebind(null)
-	if multiplayer.multiplayer_peer != null:
+	if _owns_peer and multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
-	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
+	_owns_peer = false
 	_peer_slots.clear()
 	_remote_state.clear()
 	_snapshot_ticks.fill(-1)
@@ -515,20 +568,100 @@ func leave_game() -> void:
 func _connection_ended(message: String) -> void:
 	if not is_inside_tree():
 		return
+	if inner:
+		# The session's server is gone; the frontier resumes without it.
+		hud.show_connection_lost(message)
+		_end_inner()
+		return
 	leave_game()
 	hud.show_connection_lost(message)
 	print("DELVE_CONNECTION_ENDED %s" % message)
 
 func _hub() -> void:
-	leave_game()
-	get_tree().change_scene_to_file("res://main.tscn")
+	_end_run()
 
 func _on_surface_requested() -> void:
 	if network_role == "host" and phase == "CLEARED":
 		ascend_to_surface()
 		return
+	if inner and network_role != "host":
+		# The run is one party's: a rider asks the authority to end it.
+		_surface_request.rpc_id(1)
+		return
+	_end_run()
+
+
+## Ends the run for the whole party: announce the exit once, then hand the world
+## back locally. An inner instance gives the frozen session back untouched; a
+## standalone delve returns to its town.
+func _end_run() -> void:
+	if network_role == "host":
+		_announce_exit()
+	_leave_session()
+
+
+## Reliable, sent before anything is torn down: the peer survives an inner run,
+## and a standalone rope keeps its old poll window before the peer closes.
+func _announce_exit() -> void:
+	if network_role != "host":
+		return
+	if inner:
+		var session := get_node_or_null("/root/Session")
+		if session != null:
+			session.close_delve.rpc()
+		_leave_event.rpc()
+	elif phase == "CLEARED":
+		_leave_event.rpc()
+
+
+@rpc("authority","call_remote","reliable")
+func _leave_event() -> void:
+	if network_role == "host":
+		return
+	print("DELVE_RETURN_SURFACE")
+	_leave_session()
+
+
+func _leave_session() -> void:
+	if inner:
+		leave_game()
+		_end_inner()
+		return
 	leave_game()
 	get_tree().change_scene_to_file("res://main.tscn")
+
+
+## A rider asking to end the run. The party leaves together: only the authority
+## hands the world back, and its frontier is the one everyone shares.
+@rpc("any_peer","call_remote","reliable")
+func _surface_request() -> void:
+	if network_role != "host" or _sender_id() <= 1:
+		return
+	_end_run()
+
+
+func _end_inner() -> void:
+	hud.visible = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	left_inner.emit()
+
+
+## A rider who stayed in Hearthstead asks for passage down. This scene owns the
+## authority side of the open world, so it answers by leading that one peer into
+## the delve on the same ENet connection; the rest of the party is untouched.
+func _on_descent_requested(peer_id: int) -> void:
+	if network_role != "host" or peer_id <= 1 or _peer_slots.has(peer_id):
+		return
+	if not multiplayer.get_peers().has(peer_id):
+		return
+	var session := get_node_or_null("/root/Session")
+	if session == null:
+		return
+	if phase == "GAME_OVER":
+		session.refuse_descent.rpc_id(peer_id,"The delve is over. Return to town.")
+		return
+	session.descend_party.rpc_id(peer_id,_port)
+	print("DELVE_LEAD_PEER peer=%d phase=%s" % [peer_id,phase])
 
 func _find_open_port(start: int) -> int:
 	var last := mini(start+15,65535)
@@ -554,6 +687,9 @@ func _safe_name(value: String) -> String:
 	return "Ranger" if result.is_empty() else result
 
 func _remember_network(player_name: String, address: String, port: int) -> void:
+	if inner:
+		# The remembered address belongs to the open world, not to this run.
+		return
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
 		cache.remember(player_name,address,port,"delve")
@@ -624,8 +760,52 @@ func get_human_count() -> int:
 			count += 1
 	return count
 
+
+## Peers still connected to this server that have not been seated here yet: the
+## open world keeps its ENet connections through the fall, so a rider who stayed
+## in Hearthstead is still a party member the delve is waiting on. The count is
+## cached because the HUD reads it every frame.
+func _refresh_waiting() -> void:
+	if network_role != "host":
+		_waiting_pending = 0
+		return
+	var count := 0
+	for peer_id in multiplayer.get_peers():
+		if not _peer_slots.has(peer_id):
+			count += 1
+	_waiting_pending = count
+
+
+## Rangers still outside the delve. The client reads this from the run state.
+func waiting_count() -> int:
+	if network_role == "host":
+		return _waiting_pending if phase == "WAITING" else 0
+	if phase != "WAITING":
+		return 0
+	return maxi(0,int(_remote_state.get("waiting",0)))
+
+
+## Opens the room the moment the last pending ranger is seated, or when a host
+## chooses to go on alone. Every other phase transition already syncs the run.
+func open_room(force: bool = false) -> void:
+	if network_role != "host" or phase != "WAITING":
+		return
+	if not force and _waiting_pending > 0:
+		return
+	hud.show_banner("PARTY ASSEMBLED",2.0)
+	hud.set_status("The party is assembled. The descent is ready.",3.0)
+	_set_phase("ALTAR" if world.has_altar() else "DROP")
+	print("DELVE_PARTY_ASSEMBLED humans=%d pending=%d" % [get_human_count(),_waiting_pending])
+	_sync_run_state()
+
+
 func _peer_connected(peer_id: int) -> void:
 	if network_role != "host" or _peer_slots.has(peer_id):
+		return
+	_refresh_waiting()
+	if inner:
+		# A peer of the outer session is seated here only when its own instance
+		# registers: until it is led down there is no Delve node to answer.
 		return
 	_seat_peer(peer_id,"Ranger")
 
@@ -652,17 +832,23 @@ func _seat_peer(peer_id: int, player_name: String) -> void:
 	_run_state.rpc_id(peer_id,_run_state_dict())
 	_broadcast_names()
 	print("DELVE_PEER_JOINED slot=%d humans=%d" % [slot,get_human_count()])
+	_refresh_waiting()
+	open_room()
 
 func _peer_disconnected(peer_id: int) -> void:
-	if network_role != "host" or not _peer_slots.has(peer_id):
+	if network_role != "host":
 		return
-	var slot: int = _peer_slots[peer_id]
-	_peer_slots.erase(peer_id)
-	_deactivate_slot(slot)
-	_slot_cleared.rpc(slot)
-	_broadcast_names()
-	print("DELVE_PEER_LEFT slot=%d humans=%d" % [slot,get_human_count()])
-	_check_party_wipe()
+	if _peer_slots.has(peer_id):
+		var slot: int = _peer_slots[peer_id]
+		_peer_slots.erase(peer_id)
+		_deactivate_slot(slot)
+		_slot_cleared.rpc(slot)
+		_broadcast_names()
+		print("DELVE_PEER_LEFT slot=%d humans=%d" % [slot,get_human_count()])
+		_check_party_wipe()
+	_refresh_waiting()
+	# The ranger who was being waited on is gone; the survivors go on.
+	open_room()
 
 func _lowest_free_slot() -> int:
 	for slot in range(1,actors.size()):
@@ -781,6 +967,7 @@ func _accept(slot: int) -> void:
 	hud.configure(_endpoint)
 	_bind_ui_rig()
 	_set_cursor_free(false)
+	hud.set_status("Joined the delve.",2.5)
 	print("DELVE_CLIENT_READY slot=%d" % slot)
 
 func _physics_process(delta: float) -> void:
@@ -1579,6 +1766,13 @@ func _prompt_text() -> String:
 	var actor = actors[local_slot]
 	var pos: Vector3 = actor.global_position
 	match phase:
+		"WAITING":
+			var pending := waiting_count()
+			if pending <= 0:
+				return ""
+			if network_role == "host":
+				return "Waiting for %d ranger%s — Enter begins without them" % [pending, "" if pending == 1 else "s"]
+			return "Waiting for %d more ranger%s to reach the delve" % [pending, "" if pending == 1 else "s"]
 		"ALTAR":
 			if world.has_altar() and pos.distance_to(world.altar_position) <= INTERACT_RANGE:
 				return "G  TOUCH THE ALTAR"
@@ -1831,6 +2025,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						_world_ui.open_equipment()
 			return
 		match event.keycode:
+			KEY_ENTER:
+				# A host never has to wait on a rider who may never arrive.
+				if phase == "WAITING" and network_role == "host":
+					open_room(true)
 			KEY_1:
 				if event.shift_pressed:
 					send_action("ability",0)
@@ -1937,9 +2135,12 @@ func _notification(what: int) -> void:
 		_set_cursor_free(true)
 
 func _exit_tree() -> void:
-	if multiplayer != null and multiplayer.multiplayer_peer != null:
+	# A carried peer belongs to the open world this run was opened inside, and
+	# so does the cursor: the frontier that opened this run takes them both back.
+	if _owns_peer and multiplayer != null and multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if not inner:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 # --------------------------------------------------------------------------
 # Run flow
@@ -2023,19 +2224,11 @@ func ascend_to_surface() -> void:
 		return
 	if phase != "CLEARED":
 		return
-	_ascend_event.rpc()
 	print("DELVE_RETURN_SURFACE")
+	_announce_exit()
 	# Give ENet a couple of polls to flush the reliable departure before this
-	# controller closes its peer on the way out.
-	get_tree().create_timer(0.25).timeout.connect(_change_scene_to_surface,CONNECT_ONE_SHOT)
-
-@rpc("authority","call_remote","reliable")
-func _ascend_event() -> void:
-	print("DELVE_RETURN_SURFACE")
-	_change_scene_to_surface()
-
-func _change_scene_to_surface() -> void:
-	get_tree().change_scene_to_file("res://main.tscn")
+	# controller hands the session back (or closes its peer on the way out).
+	get_tree().create_timer(0.25).timeout.connect(_leave_session,CONNECT_ONE_SHOT)
 
 func open_chest() -> void:
 	if network_role != "host" or phase != "CLEARED":
@@ -2568,7 +2761,7 @@ func _apply_run_state(state: Dictionary) -> void:
 	if room != World.ROOM_SANCTUARY and room != World.ROOM_OSSUARY:
 		room = str(world.room_kind)
 	var room_cycle := maxi(1,int(state.get("cycle",int(world.cycle))))
-	if room != str(world.room_kind) or room_cycle != int(world.cycle):
+	if not world.is_built() or room != str(world.room_kind) or room_cycle != int(world.cycle):
 		# Both rooms share one footprint; the rebuild also drops the sealed
 		# barriers, the rope, the hole and the beacons, so reapply them below.
 		world.apply_room(room,room_cycle)
@@ -2620,6 +2813,8 @@ func _apply_run_state(state: Dictionary) -> void:
 		_set_cursor_free(true)
 	if phase != previous_phase:
 		match phase:
+			"WAITING":
+				hud.show_banner("WAITING FOR THE PARTY",2.5)
 			"ALTAR", "DROP":
 				hud.show_banner("DEPTH %d" % depth,2.0)
 			"RITUAL":
@@ -2644,6 +2839,7 @@ func _run_state_dict() -> Dictionary:
 		"ritual":_ritual_progress_value(), "pentagram":_pentagram_lit(),
 		"wave_total":wave_total, "wave_number":wave_number,
 		"remaining":_remaining_enemies(),
+		"waiting":waiting_count(),
 		"timer":maxf(0.0,_clear_timer) if phase == "CLEARED" else 0.0,
 		"sealed":bool(world.sealed), "chest_ready":chest_ready, "chest_open":chest_open,
 		"rope_lowered":bool(world.is_rope_lowered()), "hole_open":bool(world.is_hole_open()),
