@@ -420,7 +420,10 @@ func _refresh_paperdoll() -> void:
 			button.tooltip_text = state.item_name(item_id)
 		button.set_pressed_no_signal(_location == "paperdoll" and _slot == slot_name)
 	if _quick_label != null:
-		_quick_label.text = "QUICK SWAP (TAB)  •  %s" % state.quick_set_label()
+		var quick_text := "QUICK SWAP (TAB)  •  %s" % state.quick_set_label()
+		if state.has_quick_return():
+			quick_text += "  ↔  %s" % state.quick_return_label()
+		_quick_label.text = quick_text
 
 func _refresh_backpack() -> void:
 	for index in backpack_buttons.size():

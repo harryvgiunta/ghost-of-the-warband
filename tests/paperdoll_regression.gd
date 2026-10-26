@@ -141,21 +141,41 @@ func _test_taxonomy() -> void:
 func _test_quick_swap() -> void:
 	state.reset()
 	check(state.quick_set_label() == "Shortsword + Buckler","The quick swap defaults to the starter sword and buckler")
+	check(state.quick_return_label() == "Shortbow","The other side of TAB starts as the equipped starter bow")
 	var before: int = state.inventory.size()
 	var result: Dictionary = state.quick_swap()
 	check(bool(result.ok),"TAB swaps the bow for the bound melee pair")
 	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","The bound main and off hand equip together")
 	check(state.inventory.has("bow_short") and not state.inventory.has("sword_short") and not state.inventory.has("shield_buckler"),"The displaced bow trades places with the melee pair")
 	check(state.inventory.size() == before - 1,"The two-hand melee pair and one bow keep the backpack count honest")
-	check(state.quick_main() == "bow_short" and state.quick_off().is_empty(),"The outgoing bow becomes the new quick set")
+	check(state.quick_main() == "sword_short" and state.quick_off() == "shield_buckler","The bound pair stays bound after a swap")
 	result = state.quick_swap()
 	check(bool(result.ok) and state.main_item() == "bow_short" and state.off_item().is_empty(),"TAB toggles back to the bow")
 	check(state.inventory.has("sword_short") and state.inventory.has("shield_buckler"),"The melee pair returns to the backpack")
+
+	# The reported break: binding the pair already in hand (or equipping the
+	# bound pair by hand) used to leave TAB holding the pair it was meant to
+	# swap to, so every press was refused.
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "sword_short","TAB reaches the bound pair again")
+	result = state.bind_quick_from_equipped()
+	check(bool(result.ok),"BIND SWAP accepts the pair already in hand")
+	check(state.quick_set_label() == "Shortsword + Buckler","Binding the pair in hand keeps it on TAB")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "bow_short","TAB still toggles after binding the pair it was holding")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "sword_short","...and toggles straight back")
+	check(bool(state.equip_from_inventory(_find("bow_short")).ok),"The bow equips by hand")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "sword_short","TAB moved off a hand-equipped bound pair")
+	result = state.quick_swap()
+	check(bool(result.ok) and state.main_item() == "bow_short","TAB toggles between the two bound pairs only")
 
 	result = state.equip_from_inventory(_find("sword_great"))
 	check(bool(result.ok) and state.main_item() == "sword_great","The greatsword equips for a custom bind")
 	result = state.bind_quick_from_equipped()
 	check(bool(result.ok) and state.quick_main() == "sword_great" and state.quick_off().is_empty(),"BIND SWAP stores the current pair")
+	check(state.quick_return_label() == "Shortsword + Buckler","The pair bound before it becomes the other side")
 	result = state.equip_from_inventory(_find("bow_short"))
 	check(bool(result.ok) and state.main_item() == "bow_short","The bow re-equips after binding")
 	result = state.quick_swap()
@@ -362,6 +382,7 @@ func _test_persistence() -> void:
 	state.floor_items.assign(["staff_fire","focus_tome"])
 	state.inventory.append("sword_arming")
 	state.quick = {"main":"sword_great", "off":""}
+	state.quick_back = {"main":"bow_long", "off":""}
 	state.save_state()
 	var loaded = StateScript.new()
 	loaded.save_path = TEST_SAVE
@@ -371,6 +392,7 @@ func _test_persistence() -> void:
 	check(loaded.equipped_id("ring1") == "ring_copper" and loaded.equipped_id("ring2") == "ring_silver","Rings survive a reload")
 	check(loaded.main_item() == "bow_short" and loaded.off_item().is_empty(),"The bow loadout survives a reload")
 	check(loaded.quick_main() == "sword_great" and loaded.quick_off().is_empty(),"The quick swap pair survives a reload")
+	check(loaded.quick_return_main() == "bow_long","The other side of the TAB toggle survives a reload")
 	check(PackedStringArray(loaded.floor_items) == PackedStringArray(state.floor_items),"Floor items survive a reload")
 	loaded.free()
 
@@ -412,6 +434,42 @@ func _test_persistence() -> void:
 	check(not v2_state.inventory.has("bow_long") and not v2_state.inventory.has("armor_mail_chest"),"Version-2 equipped copies are peeled from the backpack")
 	v2_state.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(v2_path))
+
+	# Version 4 stored a single quick pair. When that pair was the one in hand,
+	# TAB aimed at what it was already holding and every press was refused.
+	var v4_path := "user://paperdoll_v4.json"
+	var v4 := FileAccess.open(v4_path,FileAccess.WRITE)
+	v4.store_string(JSON.stringify({"version":4,"credits":90,
+		"inventory":["bow_short","sword_short","shield_buckler"],"stash":[],
+		"equipped":{"main":"bow_short","off":""},
+		"quick":{"main":"bow_short","off":""}}))
+	v4.close()
+	var dead = StateScript.new()
+	dead.save_path = v4_path
+	dead.load_state()
+	check(dead.quick_set_label() == "Shortsword + Buckler","A version-4 pair equal to the hands is replaced by a carried alternate")
+	check(dead.quick_return_label() == "Shortbow","...and the pair in hand becomes the other side")
+	var rescued: Dictionary = dead.quick_swap()
+	check(bool(rescued.ok) and dead.main_item() == "sword_short","The repaired toggle swaps")
+	rescued = dead.quick_swap()
+	check(bool(rescued.ok) and dead.main_item() == "bow_short","...and toggles back")
+	dead.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(v4_path))
+
+	# A version-4 save whose stored pair was not in hand already had a real
+	# toggle: the pair in hand was its other side.
+	var v4_live := FileAccess.open(v4_path,FileAccess.WRITE)
+	v4_live.store_string(JSON.stringify({"version":4,"credits":90,
+		"inventory":["bow_short","sword_short","shield_buckler"],"stash":[],
+		"equipped":{"main":"sword_short","off":"shield_buckler"},
+		"quick":{"main":"bow_short","off":""}}))
+	v4_live.close()
+	var live = StateScript.new()
+	live.save_path = v4_path
+	live.load_state()
+	check(live.quick_main() == "bow_short" and live.quick_return_label() == "Shortsword + Buckler","A version-4 toggle keeps the pair that was in hand as its other side")
+	live.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(v4_path))
 
 func _test_rig_loadouts() -> void:
 	var rig = Archer.new()

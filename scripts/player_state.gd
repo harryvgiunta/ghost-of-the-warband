@@ -16,7 +16,7 @@ const STASH_CAPACITY := 20
 ## A new-game purse large enough to buy any keeper stock outright.
 const STARTING_CREDITS := 99999
 const SELL_RATE := 0.6
-const SAVE_VERSION := 4
+const SAVE_VERSION := 5
 const DEFAULT_SAVE_PATH := "user://player_state.json"
 
 const ITEMS := {
@@ -409,9 +409,13 @@ const STARTING_INVENTORY := [
 	"staff_fire","staff_bone",
 	"shield_buckler","shield_kite","shield_tower",
 ]
-## One bound alternate hand pair. TAB moves the active pair into this slot and
-## equips the stored pair; the displaced pair becomes the new quick set.
+## TAB toggles between two hand pairs: `quick` is one side (BIND SWAP stores the
+## pair in hand here) and `quick_back` the other. One stored pair was not a
+## toggle - it left TAB holding the pair it was supposed to swap to and unable
+## to move at all - so both sides persist and the toggle never collapses when
+## the player equips either pair by hand.
 const QUICK_DEFAULT := {"main":"sword_short", "off":"shield_buckler"}
+const QUICK_RETURN_DEFAULT := {"main":"bow_short", "off":""}
 
 const DEFAULTS := {
 	"head":"armor_makeshift_head", "chest":"armor_makeshift_chest", "hands":"armor_makeshift_hands",
@@ -425,6 +429,7 @@ var stash: Array[String] = []
 var floor_items: Array[String] = []
 var equipped: Dictionary = DEFAULTS.duplicate()
 var quick: Dictionary = QUICK_DEFAULT.duplicate()
+var quick_back: Dictionary = QUICK_RETURN_DEFAULT.duplicate()
 var save_path := DEFAULT_SAVE_PATH
 
 func _ready() -> void:
@@ -733,30 +738,61 @@ func quick_main() -> String:
 func quick_off() -> String:
 	return str(quick.get("off", ""))
 
+func quick_return_main() -> String:
+	return str(quick_back.get("main", ""))
+
+func quick_return_off() -> String:
+	return str(quick_back.get("off", ""))
+
 func quick_set_label() -> String:
 	return _hand_pair_label(quick_main(), quick_off())
 
+func quick_return_label() -> String:
+	return _hand_pair_label(quick_return_main(), quick_return_off())
+
+## One bound side is enough to swap: the target is whichever bound pair is not
+## already in hand.
 func has_quick_set() -> bool:
-	return not quick_main().is_empty() or not quick_off().is_empty()
+	return _pair_bound(quick) or _pair_bound(quick_back)
 
-## Store the exact main/off pair currently equipped as the TAB alternate.
+func has_quick_return() -> bool:
+	return _pair_bound(quick_back)
+
+## Store the pair currently equipped as one side of the TAB toggle. The pair
+## bound before it becomes the other side, so the very next press moves
+## instead of reporting that the key is already satisfied.
 func bind_quick_from_equipped() -> Dictionary:
-	if main_item().is_empty() and off_item().is_empty():
+	var hands := _hands_pair()
+	if not _pair_bound(hands):
 		return {"ok":false, "message":"Equip a weapon pair before binding the quick swap."}
-	quick = {"main":main_item(), "off":off_item()}
+	var previous := quick.duplicate()
+	quick = hands
+	if not _pair_matches(previous, hands):
+		quick_back = previous
+	elif _pair_matches(quick_back, hands):
+		quick_back = {}
 	_commit()
-	return {"ok":true, "message":"Bound %s to TAB." % quick_set_label()}
+	if not _pair_bound(quick_back):
+		return {"ok":true, "message":"Bound %s to TAB." % quick_set_label()}
+	return {"ok":true, "message":"Bound %s to TAB. It toggles with %s." % [quick_set_label(), quick_return_label()]}
 
-## Swap the active hands with the bound pair. Both pairs live in the same
-## carried pool (backpack plus equipped hands), so no gear is created or lost.
-## The outgoing pair becomes the new bound set and TAB toggles back.
+## Swap the active hands for the other side of the toggle. Both pairs live in
+## the same carried pool (backpack plus equipped hands), so no gear is created
+## or lost, and the toggle itself is untouched: equipping either pair by hand
+## never collapses TAB into the one pair it is already holding.
 func quick_swap() -> Dictionary:
-	var target_main := quick_main()
-	var target_off := quick_off()
-	if target_main.is_empty() and target_off.is_empty():
+	if not has_quick_set():
 		return {"ok":false, "message":"No quick swap set is bound. Open the paperdoll and bind one."}
-	if target_main == main_item() and target_off == off_item():
-		return {"ok":false, "message":"Already holding the quick swap set."}
+	var hands := _hands_pair()
+	var target: Dictionary = quick
+	if _pair_matches(hands, quick):
+		target = quick_back
+	elif _pair_matches(hands, quick_back):
+		target = quick
+	if not _pair_bound(target):
+		return {"ok":false, "message":"No second set is bound. Equip another pair and press BIND SWAP."}
+	var target_main := str(target.get("main", ""))
+	var target_off := str(target.get("off", ""))
 	var target_main_item: Dictionary = _item(target_main)
 	var target_off_item: Dictionary = _item(target_off)
 	if not target_main.is_empty() and not EquipmentRules.allowed(target_main_item, "main"):
@@ -779,14 +815,47 @@ func quick_swap() -> Dictionary:
 		pool.remove_at(found)
 	if pool.size() > INVENTORY_CAPACITY:
 		return {"ok":false, "message":"Backpack full (%d / %d). Make room before swapping." % [pool.size(), INVENTORY_CAPACITY]}
-	var outgoing_main := main_item()
-	var outgoing_off := off_item()
 	equipped["main"] = target_main
 	equipped["off"] = target_off
 	inventory = pool
-	quick = {"main":outgoing_main, "off":outgoing_off}
 	_commit()
-	return {"ok":true, "message":"Swapped to %s." % quick_set_label()}
+	return {"ok":true, "message":"Swapped to %s." % _hand_pair_label(target_main, target_off)}
+
+func _hands_pair() -> Dictionary:
+	return {"main":main_item(), "off":off_item()}
+
+func _pair_bound(pair: Dictionary) -> bool:
+	return not str(pair.get("main", "")).is_empty() or not str(pair.get("off", "")).is_empty()
+
+## Value equality: two dictionaries built from the same ids are not the same
+## object, and every toggle decision asks about the ids.
+func _pair_matches(a: Dictionary, b: Dictionary) -> bool:
+	return str(a.get("main", "")) == str(b.get("main", "")) \
+		and str(a.get("off", "")) == str(b.get("off", ""))
+
+## Drop ids the slot cannot take, and an off hand under a two-hander.
+func _legal_pair(value: Variant) -> Dictionary:
+	var source: Dictionary = value if typeof(value) == TYPE_DICTIONARY else {}
+	var main_id := str(source.get("main", ""))
+	var off_id := str(source.get("off", ""))
+	if main_id.is_empty() or not EquipmentRules.allowed(_item(main_id), "main"):
+		main_id = ""
+	if off_id.is_empty() or not EquipmentRules.allowed(_item(off_id), "off"):
+		off_id = ""
+	if EquipmentRules.two_handed(_item(main_id)):
+		off_id = ""
+	return {"main":main_id, "off":off_id}
+
+## The first carried pair that can lead a hand. Deterministic: the starter pack
+## lists bows first, so a salvaged toggle never picks a random weapon.
+func _first_carried_pair(exclude: Dictionary) -> Dictionary:
+	for item_id in inventory:
+		var candidate := {"main":str(item_id), "off":""}
+		if _pair_matches(candidate, exclude):
+			continue
+		if EquipmentRules.allowed(_item(str(item_id)), "main"):
+			return candidate
+	return {}
 
 func _hand_pair_label(main_id: String, off_id: String) -> String:
 	var parts := PackedStringArray()
@@ -803,6 +872,7 @@ func reset(persist: bool = true) -> void:
 	floor_items.clear()
 	equipped = DEFAULTS.duplicate()
 	quick = QUICK_DEFAULT.duplicate()
+	quick_back = QUICK_RETURN_DEFAULT.duplicate()
 	if persist:
 		_commit()
 	else:
@@ -1002,6 +1072,7 @@ func save_state() -> void:
 		"stash":stash,
 		"equipped":equipped,
 		"quick":quick,
+		"quick_back":quick_back,
 		"floor":floor_items,
 	}))
 	file.close()
@@ -1023,17 +1094,17 @@ func load_state() -> void:
 	floor_items = _read_list(data.get("floor", []), 0)
 	equipped = DEFAULTS.duplicate()
 	quick = QUICK_DEFAULT.duplicate()
+	quick_back = QUICK_RETURN_DEFAULT.duplicate()
 	var saved_equipped: Variant = data.get("equipped", {})
 	if typeof(saved_equipped) == TYPE_DICTIONARY:
 		if version >= 3:
 			_load_equipped_v3(saved_equipped)
 		else:
 			_load_equipped_legacy(saved_equipped)
-	var saved_quick: Variant = data.get("quick", {})
-	if typeof(saved_quick) == TYPE_DICTIONARY:
-		_load_quick(saved_quick)
 	_normalize_equipped()
+	_load_quick(data)
 	_normalize_quick()
+	_repair_quick()
 	changed.emit()
 
 func _read_list(value: Variant, limit: int) -> Array[String]:
@@ -1136,23 +1207,42 @@ func _normalize_equipped() -> void:
 		equipped["off"] = ""
 		_give_to_inventory(displaced)
 
-## A saved quick pair must stay legal: unknown or wrong-hand ids are dropped,
-## and a two-handed main hand cannot keep a paired off hand.
+## Both sides of the TAB toggle are validated like the hands themselves: an
+## unknown or wrong-hand id is dropped, and a two-handed main hand cannot keep
+## a paired off hand.
 func _load_quick(saved: Dictionary) -> void:
-	var main_id := str(saved.get("main", ""))
-	var off_id := str(saved.get("off", ""))
-	quick = {
-		"main": main_id if not main_id.is_empty() and EquipmentRules.allowed(_item(main_id), "main") else "",
-		"off": off_id if not off_id.is_empty() and EquipmentRules.allowed(_item(off_id), "off") else "",
-	}
+	var hands := _hands_pair()
+	if saved.has("quick"):
+		quick = _legal_pair(saved.get("quick"))
+	if saved.has("quick_back"):
+		quick_back = _legal_pair(saved.get("quick_back"))
+	elif saved.has("quick") and not _pair_matches(quick, hands):
+		# Version 4 and older stored only the pair a swap aimed at. The other
+		# side of that toggle was the pair in hand, which is still equipped.
+		quick_back = hands
 
 func _normalize_quick() -> void:
-	var main_id := quick_main()
-	var off_id := quick_off()
-	if not main_id.is_empty() and not EquipmentRules.allowed(_item(main_id), "main"):
-		main_id = ""
-	if not off_id.is_empty() and not EquipmentRules.allowed(_item(off_id), "off"):
-		off_id = ""
-	if EquipmentRules.two_handed(_item(main_id)):
-		off_id = ""
-	quick = {"main":main_id, "off":off_id}
+	quick = _legal_pair(quick)
+	quick_back = _legal_pair(quick_back)
+	if _pair_matches(quick, quick_back):
+		quick_back = {}
+	elif not _pair_bound(quick):
+		# TAB aims at `quick`; a save that only kept the other side is rotated
+		# rather than dropped.
+		quick = quick_back
+		quick_back = {}
+
+## Builds before the toggle had two sides rebound the stored pair to whatever
+## was in hand, so a swap aimed TAB at the pair it already held and refused
+## every press. Give those saves a real toggle again: the hands become one
+## side and a carried pair the other.
+func _repair_quick() -> void:
+	var hands := _hands_pair()
+	if not _pair_matches(quick, hands):
+		return
+	if _pair_bound(quick_back) and not _pair_matches(quick_back, hands):
+		return
+	quick_back = hands
+	quick = _legal_pair(QUICK_DEFAULT)
+	if not _pair_bound(quick) or _pair_matches(quick, hands):
+		quick = _first_carried_pair(hands)

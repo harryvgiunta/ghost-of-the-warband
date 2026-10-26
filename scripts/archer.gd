@@ -20,6 +20,7 @@ const AbilityRules = preload("res://scripts/ability_rules.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const EnergyShield = preload("res://scripts/energy_shield.gd")
+const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
@@ -178,6 +179,10 @@ var _motion_time := 0.0
 var _locomotion_phase := 0.0
 var _air_time := 0.0
 var _landing_weight := 0.0
+## Set by apply_animation_state(): this rig is posed from the wire, so the one
+## clock a sample cannot drive from the pose alone - the flip - runs locally
+## between samples. set_roll() clears it for a body that owns its roll clock.
+var _pose_from_snapshots := false
 var _release_draw := 0.0
 var _release_charge := 0.0
 var _release_raise := 0.0
@@ -1371,6 +1376,9 @@ func aim_at(world_point: Vector3) -> void:
 		_update_pose(0.0)
 
 func set_roll(progress: float, direction: Vector3) -> void:
+	# An authoritative roll clock: this body is posed locally, so a snapshot may
+	# not advance it a second time.
+	_pose_from_snapshots = false
 	_roll_progress = progress
 	if progress >= 0.0:
 		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
@@ -1470,6 +1478,9 @@ const ANIMATION_KEYS := ["phase","draw","charge_frozen","time","aim",
 	"air_time","landing"]
 ## Position of "roll" in ANIMATION_KEYS, read per replica without a search.
 const ANIM_ROLL := 12
+## A replicated flip this far from the local roll progress is a new roll, not
+## one 20 Hz sample of drift (one sample of the 0.68 s flip is 0.074).
+const REPLICATED_ROLL_SLACK := 0.15
 
 func pack_animation_state(state: Dictionary) -> Array:
 	var packed: Array = []
@@ -1630,7 +1641,16 @@ func apply_animation_state(state: Variant) -> void:
 		_step_direction = travel.normalized() if travel.length_squared() > 0.0625 else global_basis.x
 	else:
 		_step_progress = -1.0
-	_roll_progress = float(state.roll)
+	# This pose arrived on the wire. The flip is the one clock that has to keep
+	# turning between samples: the roll pose is a single continuous turn, so
+	# holding the last 20 Hz value froze the body for two frames in three. The
+	# loops (motion, stride, air, landing) already advance in _advance_motion(),
+	# and the wire stays their authority.
+	_pose_from_snapshots = true
+	var replicated_roll := float(state.roll)
+	_roll_progress = replicated_roll if replicated_roll < 0.0 \
+		or replicated_roll < _roll_progress-REPLICATED_ROLL_SLACK \
+		else maxf(_roll_progress, replicated_roll)
 	var slide: Vector4 = state.slide
 	slide_progress = slide.x
 	_slide_direction = Vector3(slide.y,0.0,slide.z)
@@ -1763,6 +1783,10 @@ func _advance_melee_step(delta: float) -> void:
 
 func _advance_motion(delta: float) -> void:
 	_motion_time += delta
+	if _roll_progress >= 0.0 and _pose_from_snapshots:
+		# A flip is one continuous turn. Run it on the frame clock so the pose
+		# moves every frame; the next snapshot only corrects the value.
+		_roll_progress = minf(1.0,_roll_progress+delta/DodgeRoll.DURATION)
 	var slide_target := 1.0 if slide_progress >= 0.0 else 0.0
 	_slide_weight = move_toward(_slide_weight,slide_target,delta/BLEND_SECONDS) if _grounded and _roll_progress < 0.0 and not _cover_active else 0.0
 	if _grounded and slide_progress < 0.0:
