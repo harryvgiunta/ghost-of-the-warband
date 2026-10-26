@@ -109,7 +109,9 @@ func run() -> void:
 		"Cinder devils use the authored 2.15 m capsule")
 	check(first._devil != null and first._body.get_child_count() == 1,
 		"Cinder devils attach the imported visual")
-	check(first.head_hit_profile() == Vector2(0.26,0.16), "The horned head keeps its authored hit profile")
+	var devil_zone: Vector2 = first.head_hit_profile()
+	check(is_equal_approx(devil_zone.y,0.16) and devil_zone.x >= 0.34,
+		"The horned head zone keeps its authored height and reaches the capsule surface")
 	var head_height: float = first.head_hitbox_center().y-first.global_position.y
 	check(head_height > 1.55 and head_height < 2.15, "The head zone sits on the animated skull")
 	check(is_equal_approx(first.get_aim_position().y-first.global_position.y,1.25),

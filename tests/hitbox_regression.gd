@@ -3,6 +3,8 @@ extends SceneTree
 const Actor = preload("res://scripts/arena_actor.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Enemy = preload("res://scripts/enemy.gd")
+const DevilMob = preload("res://scripts/devil_mob.gd")
+const ForestMob = preload("res://scripts/forest_mob.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const STEP := 1.0 / 240.0
 
@@ -113,6 +115,45 @@ func run() -> void:
 	check(is_equal_approx(wolf.health, 18.0), "Wolf head damage doubles")
 	wolf.take_damage(10.0, 0, false)
 	check(is_equal_approx(wolf.health, 8.0), "Wolf body damage stays base")
+
+	# --- Imported mob families: a capsule-surface hit at head height doubles.
+	# These bodies carry authored head radii narrower than their own capsules,
+	# so the band is widened to the surface an arrow actually stops on.
+	var succubus = DevilMob.new()
+	succubus.mob_id = "succubus"
+	succubus.position = Vector3(0, 0.05, 24)
+	world.add_child(succubus)
+	var stalker = ForestMob.new()
+	stalker.mob_id = "ossuary_stalker"
+	stalker.position = Vector3(8, 0.05, 24)
+	world.add_child(stalker)
+	await physics_frame
+	await physics_frame
+	await process_frame
+	var succubus_head: Vector3 = succubus.head_hitbox_center()
+	var succubus_radius := float(DevilMob.PROFILES["succubus"]["radius"])
+	var succubus_front := Vector3(succubus_head.x, succubus_head.y, succubus.global_position.z - succubus_radius)
+	check(succubus.head_hit_profile().x >= succubus_radius,
+		"The devil head band reaches its own capsule surface")
+	check(Hitbox.is_headshot(succubus, succubus_front),
+		"A capsule-surface hit at head height is a headshot on a devil")
+	check(not Hitbox.is_headshot(succubus, Vector3(succubus_head.x,
+		succubus.global_position.y + 0.9, succubus.global_position.z - succubus_radius)),
+		"A capsule-surface hit at chest height is body on a devil")
+	var succubus_before: float = succubus.health
+	succubus.take_damage(5.0, 0, true)
+	check(is_equal_approx(succubus.health, succubus_before - 10.0), "Devil head damage doubles")
+	var stalker_head: Vector3 = stalker.head_hitbox_center()
+	var stalker_radius := float(ForestMob.FOREST_PROFILES["ossuary_stalker"]["radius"])
+	var stalker_front := Vector3(stalker_head.x, stalker_head.y, stalker.global_position.z - stalker_radius)
+	check(Hitbox.is_headshot(stalker, stalker_front),
+		"A capsule-surface hit at head height is a headshot on a forest mob")
+	var stalker_before: float = stalker.health
+	stalker.take_damage(5.0, 0, true)
+	check(is_equal_approx(stalker.health, stalker_before - 10.0), "Forest head damage doubles")
+	succubus.queue_free()
+	stalker.queue_free()
+	await process_frame
 
 	# --- Real arrow path: the projectile passes the hit point. ---
 	var shooter_target = fighter(world, 1, Vector3(20, 0, 0))

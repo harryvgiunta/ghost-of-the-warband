@@ -16,6 +16,7 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 ## How far each kind can see. Distance alone never starts a fight: the mob has
@@ -30,6 +31,10 @@ const DEVIL_SLIDE_SECONDS := 0.46
 const DEVIL_DAMAGE := 8.0
 const DEVIL_LEAP_DAMAGE := 10.0
 const DEVIL_MAX_ATTACKERS := 3
+## The physical capsules these bodies ride, declared once so the head zone can
+## never be narrower than the surface an arrow actually stops on.
+const WOLF_BODY_RADIUS := 0.40
+const DEVIL_BODY_RADIUS := 0.34
 var kind := 0
 var pack_index := -1
 var devil_weapon := "claw"
@@ -60,6 +65,7 @@ var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _senses := MobSenses.new()
+var _steering := MobSteering.new()
 var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
@@ -104,12 +110,12 @@ func _ready() -> void:
 	floor_max_angle = deg_to_rad(46.0)
 	var shape := CapsuleShape3D.new()
 	if kind == 0:
-		shape.radius = 0.40
+		shape.radius = WOLF_BODY_RADIUS
 		shape.height = 0.95
 	else:
 		# The authored cinder devil stands 2.11 m to the crown: a gaunt frame
 		# on a 2.15 m capsule, not the 0.9 m primitive imp it replaced.
-		shape.radius = 0.34
+		shape.radius = DEVIL_BODY_RADIUS
 		shape.height = 2.15
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
@@ -171,6 +177,8 @@ func _ready() -> void:
 			if start.length_squared() > 0.0001:
 				_orbit_angle = atan2(start.z,start.x)+float(seeded)*0.62
 		state = "CIRCLE"
+	# A pack that meets the same barrier splits around both of its sides.
+	_steering.bias = _orbit_dir
 
 func _build_wolf_visual() -> void:
 	_wolf = WolfVisual.new()
@@ -225,8 +233,10 @@ func head_hitbox_center() -> Vector3:
 	return get_aim_position()
 func head_hit_profile() -> Vector2:
 	if kind == 0:
-		return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
-	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
+		return Vector2(Hitbox.head_zone_radius(Hitbox.WOLF_HEAD_RADIUS, WOLF_BODY_RADIUS),
+			Hitbox.WOLF_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.head_zone_radius(Hitbox.DEVIL_HEAD_RADIUS, DEVIL_BODY_RADIUS),
+		Hitbox.DEVIL_HEAD_HALF_HEIGHT)
 
 
 func _physics_process(delta: float) -> void:
@@ -273,7 +283,10 @@ func _physics_process(delta: float) -> void:
 		if pursuit and not target_safe:
 			state = "CHASE"
 			target_direction = displacement.normalized()
-			if not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
+			if _senses.hunt > 0.0 and not _senses.seen:
+				# Enraged by a landed blow: keep closing until it is seen.
+				target_direction = displacement.normalized()
+			elif not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
 				# Standing over the last sighting: sweep the ground.
 				rotation.y += sin(_state_time * 1.5) * delta * 1.7
 				target_direction = Vector3.ZERO
@@ -507,8 +520,9 @@ func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 		_devil_choose(distance,to_player)
 
 ## Lost sight but still remembers: run down the last known spot, then scan.
+## An enraged devil follows the ranger that hit it instead of the old sighting.
 func _devil_hunt(delta: float) -> void:
-	var offset := _senses.last_seen-global_position
+	var offset := _senses.focus()-global_position
 	offset.y = 0.0
 	if offset.length() > MobSenses.ARRIVE_DISTANCE:
 		_move_intent = _steer_devil(_devil_with_separation(offset.normalized()))
@@ -664,26 +678,10 @@ func _pack_attackers() -> int:
 	return count
 
 func _steer_devil(direction: Vector3) -> Vector3:
-	_query.from = global_position+Vector3(0,0.45,0)
-	_query.to = _query.from+direction*1.25
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP,1.0)
-	_query.to = _query.from+left*1.35
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP,-1.0)
+	return _steering.steer(self, direction, 0.45)
 
 func _steer(direction: Vector3) -> Vector3:
-	_query.from = global_position + Vector3(0, 0.65, 0)
-	_query.to = _query.from + direction * 1.7
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP, 1.05)
-	_query.to = _query.from + left * 1.8
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP, -1.05)
+	return _steering.steer(self, direction, 0.65)
 
 func stagger(seconds: float) -> void:
 	if not alive:
@@ -749,7 +747,7 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	if is_instance_valid(attacker) and not _is_hostile(attacker):
 		return
-	_senses.notice(attacker,at)
+	_senses.hear(attacker,at)
 
 ## Feeds one authoritative pose into the render buffer. The first packet and
 ## any teleport restart the buffer; everything else interpolates.

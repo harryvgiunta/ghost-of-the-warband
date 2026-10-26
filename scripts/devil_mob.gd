@@ -18,6 +18,7 @@ const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -106,10 +107,10 @@ var _move_speed := 0.0
 var _strafe_dir := 1.0
 var _visual
 var _body: Node3D
-var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
 var _senses := MobSenses.new()
+var _steering := MobSteering.new()
 var _attacker: Node3D
 
 
@@ -150,9 +151,10 @@ func _ready() -> void:
 	# One shared group for every wilderness mob: a struck mob's cry reaches
 	# whatever is close enough to hear it.
 	add_to_group(MobSenses.GROUP)
-	_query.collision_mask = 1
 	_rng.seed = 7919 + int(absf(global_position.x) * 13.0) + int(absf(global_position.z) * 7.0)
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
+	# A pack that meets the same barrier splits around both of its sides.
+	_steering.bias = _strafe_dir
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
@@ -313,12 +315,20 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 
 
 ## Lost sight but still remembers: run down the place the ranger was last
-## seen, then sweep the ground while the pursuit timer runs out.
+## seen, then sweep the ground while the pursuit timer runs out. A ranger that
+## landed a blow is followed live instead - it knows where its attacker is.
 func _hunt(delta: float) -> void:
-	var offset := _senses.last_seen - global_position
+	var focus := _senses.focus()
+	var offset := focus - global_position
 	offset.y = 0.0
 	if offset.length() > MobSenses.ARRIVE_DISTANCE:
 		_move_intent = _steer(offset.normalized())
+		_move_speed = float(profile.run_speed)
+		_face_intent = _move_intent
+		return
+	if _senses.hunt > 0.0 and is_instance_valid(_senses.target):
+		# Enraged and standing on the quarry: keep pressing until it is seen.
+		_move_intent = _steer((_senses.target.global_position - global_position).normalized())
 		_move_speed = float(profile.run_speed)
 		_face_intent = _move_intent
 		return
@@ -415,17 +425,7 @@ func _drive(delta: float) -> void:
 
 
 func _steer(direction: Vector3) -> Vector3:
-	if direction.length_squared() < 0.0001:
-		return direction
-	_query.from = global_position + Vector3(0.0, float(profile.height) * 0.45, 0.0)
-	_query.to = _query.from + direction.normalized() * 1.55
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP, 1.0)
-	_query.to = _query.from + left * 1.7
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP, -1.0)
+	return _steering.steer(self, direction, float(profile.height) * 0.45)
 
 
 func stagger(seconds: float) -> void:
@@ -488,7 +488,7 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	if is_instance_valid(attacker) and not _is_hostile(attacker):
 		return
-	_senses.notice(attacker, at)
+	_senses.hear(attacker, at)
 
 
 ## The local death: stopped combat collision, falling root, the limp ragdoll
@@ -615,9 +615,13 @@ func head_hitbox_center() -> Vector3:
 
 
 func head_hit_profile() -> Vector2:
+	var authored := Vector2(0.25, 0.12)
 	if is_instance_valid(_visual):
-		return _visual.head_hit_profile()
-	return Vector2(0.25, 0.12)
+		authored = _visual.head_hit_profile()
+	# The zone is a band across the body, so it can never be narrower than the
+	# capsule the arrow actually stops on.
+	return Vector2(Hitbox.head_zone_radius(authored.x, float(profile.get("radius", 0.3))),
+		authored.y)
 
 
 func is_dead() -> bool:

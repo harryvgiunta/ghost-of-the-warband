@@ -29,6 +29,8 @@ const DodgeStep = preload("res://scripts/dodge_step.gd")
 const CoverMovement = preload("res://scripts/cover_movement.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const State = preload("res://scripts/player_state.gd")
+const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
 
 const MAX_HEALTH := 100.0
 const GOLD := 14
@@ -36,6 +38,12 @@ const KIND := 8
 const BODY_RADIUS := 0.30
 const BODY_HEIGHT := 1.80
 const STRIKE_PROGRESS := 0.38
+## Inside this distance the clone puts the bow away and closes to blade reach,
+## so a party is never kept at arm's length by a circling archer.
+const BLADE_RANGE := 11.0
+## The bow only fires backwards of this: closer than that the clone advances
+## through its own shot lane instead of backing off.
+const BOW_MIN_RANGE := 6.0
 
 const MAIN_POOL := [
 	"bow_short","bow_recurve","bow_long",
@@ -92,6 +100,12 @@ var _collider: CollisionShape3D
 var _shape: CapsuleShape3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _floor_query := PhysicsRayQueryParameters3D.new()
+var _steering := MobSteering.new()
+## The cry the pack raised or the blow that named its striker. The clone hunts
+## those bodies past its aggro range and leash until the clocks run out.
+var _senses := MobSenses.new()
+## Whether this clone has already called the pack to the fight.
+var _woke := false
 
 
 func _ready() -> void:
@@ -131,6 +145,9 @@ func _ready() -> void:
 	add_child(dodge)
 	_query.collision_mask = 1
 	_floor_query.collision_mask = 1
+	# Clones answer and raise the same pack alarm as every other wilderness
+	# body, so a woken wave fights together.
+	add_to_group(MobSenses.GROUP)
 
 
 ## `mode` is `"scene"` for the frontier and `"direct"` for the delve.
@@ -141,6 +158,7 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	replica = not is_authoritative
 	attack_mode = mode
 	auto_ai = mode == "scene"
+	_steering.bias = 1.0 if clone_id % 2 == 0 else -1.0
 	aggro_range = 40.0 if mode == "direct" else 30.0
 	leash = 60.0 if mode == "direct" else 42.0
 	_roll_loadout()
@@ -168,6 +186,9 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
 	_net_position = global_position
 	_received_pose = false
+	_steering.reset()
+	_senses.clear()
+	_woke = false
 	_body.rotation = Vector3.ZERO
 	_body.position = Vector3.ZERO
 	_body.visible = true
@@ -190,6 +211,9 @@ func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	collision_layer = 2
 	collision_mask = 1
 	_target = null
+	_steering.reset()
+	_senses.clear()
+	_woke = false
 	var flat := Vector3(facing.x,0.0,facing.z)
 	if flat.length_squared() > 0.0001:
 		rotation.y = atan2(-flat.x,-flat.z)
@@ -303,6 +327,7 @@ func _step_ai(delta: float, candidates: Array) -> void:
 	_guard_cooldown = maxf(0.0,_guard_cooldown - delta)
 	_step_cooldown = maxf(0.0,_step_cooldown - delta)
 	_retarget -= delta
+	_senses.age(delta)
 	stamina = minf(Stamina.MAX,stamina + Stamina.REGEN_PER_SECOND * delta)
 	combat.advance(delta)
 	if _swing_pending and combat.attack_progress >= STRIKE_PROGRESS:
@@ -314,6 +339,12 @@ func _step_ai(delta: float, candidates: Array) -> void:
 	if _retarget <= 0.0 or not _engaged(_target):
 		_target = _nearest(roster)
 		_retarget = 0.35
+	if _engaged(_target):
+		if not _woke:
+			_woke = true
+			MobSenses.alert_pack(self,_target,_target.global_position)
+	else:
+		_woke = false
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	if not _engaged(_target):
@@ -350,7 +381,7 @@ func _step_ai(delta: float, candidates: Array) -> void:
 			tangent = -tangent
 		if dodge.try_step(tangent,is_on_floor(),false):
 			_step_cooldown = 1.6
-	var want_bow := distance > 9.0
+	var want_bow := distance > BLADE_RANGE
 	if combat.attack_progress >= 0.999 and not combat.blocking:
 		if want_bow and rig.weapon != "bow":
 			rig.set_weapon("bow")
@@ -398,19 +429,22 @@ func _present(actual: Vector3) -> void:
 	combat.set_motion(actual,actual.length() > 0.4,is_on_floor())
 
 
+## The bow is a walking weapon here: the clone closes the gap between shots
+## instead of orbiting at range, and only plants its feet while the string is
+## drawn. A ranger who holds a corridor cannot be circled forever.
 func _bow_step(distance: float, direction: Vector3) -> void:
-	if distance < 7.0:
+	if distance < BOW_MIN_RANGE:
 		_move_intent = -direction
 		_move_speed = 5.4
-	elif distance > 22.0:
-		_move_intent = direction
-		_move_speed = 5.6
-	else:
-		var tangent := Vector3(-direction.z,0.0,direction.x)
+	elif rig.draw_amount > 0.0 or rig.phase in ["DRAWING","HOLDING"]:
+		var tangent := Vector3(-direction.z,0.0,direction.x) * 0.35
 		if clone_id % 2 != 0:
 			tangent = -tangent
-		_move_intent = tangent
-		_move_speed = 3.0
+		_move_intent = _steer(tangent)
+		_move_speed = 1.4
+	else:
+		_move_intent = _steer(direction)
+		_move_speed = 4.6
 	if combat.can_draw() and _has_sight(_target):
 		combat.begin_draw()
 	elif rig.draw_amount >= 0.92 and rig.phase in ["DRAWING","HOLDING"]:
@@ -419,7 +453,7 @@ func _bow_step(distance: float, direction: Vector3) -> void:
 
 func _blade_step(distance: float, direction: Vector3) -> void:
 	var reach: float = rig.melee_reach("right")
-	if distance > reach * 0.92:
+	if distance > reach * 0.80:
 		_move_intent = _steer(direction)
 		_move_speed = 5.8
 	else:
@@ -478,6 +512,7 @@ func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge:
 	var damage := Combat.damage_for(rig.bow_index,charge)
 	var arrow := Arrow.new()
 	arrow.source_id = combat.source_id
+	arrow.shooter = self
 	# Layer 8 is the shield: a raised or carried shield takes the shaft first.
 	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = true
@@ -654,6 +689,10 @@ func _nearest(candidates: Array):
 func _within_aggro(candidate) -> bool:
 	if not is_instance_valid(candidate):
 		return false
+	# A landed blow is a fight the clone cannot lose by distance: it walks the
+	# whole way to whoever hit it, past the aggro range and past its leash.
+	if _senses.aggressive() and candidate == _senses.target:
+		return true
 	if global_position.distance_to(candidate.global_position) > aggro_range:
 		return false
 	return global_position.distance_to(home) <= leash
@@ -708,16 +747,30 @@ func _has_sight(candidate) -> bool:
 
 
 func _steer(direction: Vector3) -> Vector3:
-	if direction.length_squared() < 0.0001:
-		return Vector3.ZERO
-	_query.from = global_position + Vector3(0,0.9,0)
-	_query.to = _query.from + direction * 1.5
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var tangent := Vector3(-direction.z,0.0,direction.x)
-	if clone_id % 2 != 0:
-		tangent = -tangent
-	return (tangent + direction * 0.35).normalized()
+	return _steering.steer(self,direction,0.9)
+
+
+## A landed blow names its striker before it applies damage. The clone takes up
+## the fight wherever the ranger runs to, exactly like every wilderness mob.
+func note_attacker(attacker: Node3D) -> void:
+	if not alive or replica or not is_instance_valid(attacker):
+		return
+	_senses.notice(attacker,attacker.global_position)
+	_target = attacker
+	_retarget = 0.0
+	_woke = true
+	MobSenses.alert_pack(self,attacker,attacker.global_position)
+
+
+## A neighbour woke or was struck within earshot: take up the same hunt.
+func hear_alert(attacker: Node3D, at: Vector3) -> void:
+	if not alive or replica:
+		return
+	if is_instance_valid(attacker) and attacker is CharacterBody3D:
+		_target = attacker
+		_senses.hear(attacker, at)
+		if _target_alive(_target):
+			_woke = true
 
 
 func _floor_height(point: Vector3) -> float:

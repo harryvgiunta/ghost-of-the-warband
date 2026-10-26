@@ -1138,6 +1138,9 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 		return
 	var arrow := Arrow.new()
 	arrow.source_id = slot
+	# The body that released it: a struck mob reads this through
+	# `note_attacker` and turns on the archer wherever it is standing.
+	arrow.shooter = actors[slot]
 	# Layer 8 is the shield: an enemy clone or a party member's raised shield
 	# takes the shaft before the body behind it.
 	arrow.hit_mask = 1 | 2 | 8
@@ -1260,6 +1263,7 @@ func _delve_ability_spell(actor, definition: Dictionary, damage: float,
 		direction = -rig.global_basis.z
 	var spell := SpellProjectile.new()
 	spell.kind = str(effect.get("projectile", "fireball"))
+	spell.shooter = actor
 	spell.hit_mask = 1 | 2 | 8
 	add_child(spell)
 	var excluded: Array[RID] = [actor.get_rid()]
@@ -1418,6 +1422,7 @@ func _spawn_thrown(slot: int, origin: Vector3, direction: Vector3, speed: float,
 		return
 	var thrown := Thrown.new()
 	thrown.source_id = slot
+	thrown.shooter = actors[slot] if authoritative else null
 	thrown.weapon = weapon_name
 	thrown.weapon_index = weapon_index
 	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
