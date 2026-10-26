@@ -10,6 +10,7 @@ const WorldEnvironmentKit = preload("res://scripts/world/environment_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const CampKit = preload("res://scripts/world/camp_kit.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
+const BushKit = preload("res://scripts/world/bush_kit.gd")
 const WORLD_LIMIT := 145.0
 const GRID_STEP := 2.0
 const GRID_CELLS := 145
@@ -22,8 +23,10 @@ const GRASS_SEED := 93617
 const TREE_SEED := 73109
 # The Unholy Forest camp sits at the end of the wardens' trail, deep in the
 # western stand. Its charm band dresses the trees on the way in.
-const CAMP_CHARM_BAND := Vector2(4.0, 22.0)
+const CAMP_CHARM_BAND := Vector2(3.0, 30.0)
 const CAMP_CHARMS_SEED := 5150
+const BUSH_SEED := 61803
+const BUSH_PER_ATLAS := 460
 
 var player_spawn: Vector3 = Vector3(0.0, 3.0, 35.0)
 var town_entry: Vector3 = Vector3(0.0, 3.0, 47.0)
@@ -128,6 +131,7 @@ func _ready() -> void:
 	_build_woodland()
 	_build_backdrop_trees()
 	_build_rocks()
+	_build_bushes()
 	_build_ground_cover()
 	_build_signposts()
 	generation_stats["terrain_vertices"] = GRID_SIDE * GRID_SIDE
@@ -470,17 +474,22 @@ func _build_forest_camp() -> void:
 	# --- five shelters, each mouth turned to the fire ---------------------
 	# the trail arrives from the north-east, so that whole sector stays open: the
 	# fire and the arch sit in the gap and the shelters ring the rest
+	# the camp is split into clusters rather than one ring: three dens west, two
+	# south, a hunter's den out in the trees, and the witch work spread round the
+	# fire on every side
 	var shelters: Array[Dictionary] = [
-		{"at": Vector2(-100.4, -18.4), "seed": 401, "width": 2.9, "depth": 2.1,
+		{"at": Vector2(-104.2, -19.2), "seed": 401, "width": 2.9, "depth": 2.1,
 			"height": 1.62, "style": "lean_to"},
-		{"at": Vector2(-103.4, -19.4), "seed": 403, "width": 2.4, "depth": 1.9,
+		{"at": Vector2(-105.8, -22.6), "seed": 403, "width": 2.4, "depth": 1.9,
 			"height": 1.44, "style": "a_frame"},
-		{"at": Vector2(-104.6, -23.2), "seed": 405, "width": 2.1, "depth": 1.7,
+		{"at": Vector2(-104.0, -25.6), "seed": 405, "width": 2.1, "depth": 1.7,
 			"height": 1.26, "style": "collapsed"},
-		{"at": Vector2(-100.6, -26.6), "seed": 407, "width": 2.2, "depth": 1.8,
+		{"at": Vector2(-99.2, -27.8), "seed": 407, "width": 2.2, "depth": 1.8,
 			"height": 1.34, "style": "lean_to"},
-		{"at": Vector2(-97.0, -25.6), "seed": 409, "width": 1.9, "depth": 1.6,
+		{"at": Vector2(-95.8, -26.2), "seed": 409, "width": 1.9, "depth": 1.6,
 			"height": 1.20, "style": "a_frame"},
+		{"at": Vector2(-111.0, -30.0), "seed": 411, "width": 2.0, "depth": 1.7,
+			"height": 1.24, "style": "collapsed"},
 	]
 	for i in range(shelters.size()):
 		var record: Dictionary = shelters[i]
@@ -492,79 +501,94 @@ func _build_forest_camp() -> void:
 			"height": float(record["height"]), "style": String(record["style"]),
 		})
 		_reserve_camp_ground(shelter.position, 1.75)
-		# a charm hung off each shelter's eave
-		var eave := shelter.position + Vector3(0.85, float(record["height"]) + 0.10, 0.35)
-		_camp_hangers += 1
-		CampKit.add_hanging(clutter, mats, eave, float(record["seed"]) * 0.3, 431 + i, 0.8)
+		for k in range(2):
+			var eave := shelter.position + Vector3(0.55 + float(k) * 0.65,
+				float(record["height"]) + 0.08, 0.35)
+			_camp_hangers += 1
+			CampKit.add_hanging(clutter, mats, eave, float(record["seed"]) * 0.3 + float(k),
+				431 + i * 3 + k, 0.85)
 	generation_stats["camp_shelters"] = shelters.size()
 	# --- the fire, the middle of the camp ---------------------------------
 	var fire := _site_root("CampFire", CAMPSITE)
-	CampKit.fire_ring(fire, mats, 411)
+	CampKit.fire_ring(fire, mats, 407)
 	_reserve_camp_ground(fire.position, 1.15)
-	# --- the stick-work that makes the woods wrong ------------------------
-	var arch := _site_root("CampBoneArch", Vector2(-95.2, -18.4), _face_yaw(Vector2(-95.2, -18.4), CAMPSITE))
+	# --- the ritual cluster, north of the fire ----------------------------
+	var arch := _site_root("CampBoneArch", Vector2(-95.2, -18.6),
+		_face_yaw(Vector2(-95.2, -18.6), CAMPSITE))
 	CampKit.bone_arch(arch, mats, _solids, 1.6, 2.4, 413)
 	_reserve_camp_ground(arch.position, 1.9)
-	var web := _site_root("CampCharmWeb", Vector2(-98.9, -17.6), 0.7)
-	CampKit.charm_web(web, mats, _solids, 2.6, 1.95, 415)
-	_reserve_camp_ground(web.position, 1.7)
-	var effigy := _site_root("CampWickerEffigy", Vector2(-104.6, -23.9), _face_yaw(Vector2(-104.6, -23.9), CAMPSITE))
+	for i in range(2):
+		var web_point: Vector2 = [Vector2(-105.0, -17.8), Vector2(-96.2, -29.8)][i]
+		var web := _site_root("CampCharmWeb%d" % i, web_point, 0.7 + float(i) * 1.4)
+		CampKit.charm_web(web, mats, _solids, 2.6, 1.95, 415 + i * 2)
+		_reserve_camp_ground(web.position, 1.7)
+	var effigy := _site_root("CampWickerEffigy", Vector2(-105.2, -16.2),
+		_face_yaw(Vector2(-105.2, -16.2), CAMPSITE))
 	CampKit.wicker_effigy(effigy, mats, _solids, 417)
 	_reserve_camp_ground(effigy.position, 1.0)
-	for i in range(2):
-		var rag_point: Vector2 = [Vector2(-104.8, -18.0), Vector2(-96.2, -27.3)][i]
+	for i in range(3):
+		var rag_point: Vector2 = [Vector2(-108.0, -18.4), Vector2(-93.6, -17.6),
+			Vector2(-107.4, -28.6)][i]
 		var rag := _site_root("CampRagTree%d" % i, rag_point, float(i) * 1.7)
 		CampKit.rag_tree(rag, mats, _solids, 419 + i * 2)
 		_reserve_camp_ground(rag.position, 1.1)
-	# --- what they dragged in ---------------------------------------------
-	for record in [
-		{"at": Vector2(-95.0, -22.2), "yaw": 1.1, "seed": 423},
-		{"at": Vector2(-99.4, -29.2), "yaw": -0.4, "seed": 425},
-	]:
+	# --- work cluster, east and south ------------------------------------
+	for i in range(2):
+		var record: Dictionary = [
+			{"at": Vector2(-94.6, -22.8), "yaw": 1.1, "seed": 423},
+			{"at": Vector2(-98.0, -30.2), "yaw": -0.4, "seed": 425},
+		][i]
 		var point: Vector2 = record["at"]
 		var rack := _site_root("CampDryingRack%d" % int(record["seed"]), point, float(record["yaw"]))
 		CampKit.drying_rack(rack, mats, _solids, int(record["seed"]))
 		_reserve_camp_ground(rack.position, 1.25)
-	for record in [
-		{"at": Vector2(-95.6, -27.4), "yaw": 0.7, "seed": 427},
-		{"at": Vector2(-104.4, -20.2), "yaw": 2.3, "seed": 429},
-	]:
+	for i in range(2):
+		var record: Dictionary = [
+			{"at": Vector2(-93.2, -19.6), "yaw": 0.7, "seed": 427},
+			{"at": Vector2(-96.4, -24.6), "yaw": 2.3, "seed": 429},
+		][i]
 		var point: Vector2 = record["at"]
 		var drift := _site_root("CampDriftwood%d" % int(record["seed"]), point, float(record["yaw"]))
 		CampKit.driftwood_pile(drift, mats, _solids, int(record["seed"]))
 		_reserve_camp_ground(drift.position, 1.35)
 	# --- the small stuff, merged into one batch ---------------------------
-	CampKit.skull_ring(clutter, mats, _ground(-100.4, -27.8), 1.7, 7, 431)
-	for record in [
-		{"at": Vector2(-103.0, -24.6), "yaw": 0.9, "seed": 433},
-		{"at": Vector2(-98.2, -20.2), "yaw": 2.4, "seed": 435},
-	]:
+	CampKit.skull_ring(clutter, mats, _ground(-101.0, -16.4), 1.7, 7, 431)
+	for i in range(3):
+		var record: Dictionary = [
+			{"at": Vector2(-99.4, -15.0), "yaw": 0.9, "seed": 433},
+			{"at": Vector2(-108.2, -21.4), "yaw": 2.4, "seed": 435},
+			{"at": Vector2(-93.4, -24.6), "yaw": 1.4, "seed": 436},
+		][i]
 		CampKit.straw_doll(clutter, mats, _ground(record["at"].x, record["at"].y),
 			float(record["yaw"]), int(record["seed"]))
-	for record in [
-		{"at": Vector2(-95.8, -25.4), "yaw": 1.6, "seed": 437},
-		{"at": Vector2(-104.0, -19.0), "yaw": 0.2, "seed": 439},
-		{"at": Vector2(-98.0, -26.6), "yaw": 2.9, "seed": 441},
-	]:
+	for i in range(4):
+		var record: Dictionary = [
+			{"at": Vector2(-97.4, -15.4), "yaw": 1.6, "seed": 437},
+			{"at": Vector2(-103.6, -14.0), "yaw": 0.2, "seed": 439},
+			{"at": Vector2(-106.6, -19.4), "yaw": 2.9, "seed": 441},
+			{"at": Vector2(-92.6, -20.8), "yaw": 3.4, "seed": 442},
+		][i]
 		CampKit.mask_stake(clutter, mats, _ground(record["at"].x, record["at"].y),
 			float(record["yaw"]), int(record["seed"]))
-	CampKit.offering_stone(clutter, mats, _ground(-101.8, -23.6), 0.6, 443)
-	CampKit.bone_heap(clutter, mats, _ground(-97.6, -22.0), 1.1, 445)
-	CampKit.pot_stack(clutter, mats, _ground(-99.0, -20.4), 2.0, 447)
-	CampKit.pot_stack(clutter, mats, _ground(-102.0, -20.4), 0.4, 449)
-	CampKit.cauldron(clutter, mats, _ground(-98.6, -23.6), 1.8, 0.9)
-	CampKit.skull_stakes(clutter, mats, _ground(-95.8, -20.6), 2.4, 3, 0.8, 451)
-	CampKit.brush_screen(clutter, mats, _ground(-100.6, -16.4), 0.2, 4.2, 453)
-	CampKit.brush_screen(clutter, mats, _ground(-106.4, -23.4), 1.5, 3.6, 455)
-	CampKit.add_idol(clutter, mats, _ground(-99.6, -25.8),
-		_face_yaw(Vector2(-99.6, -25.8), CAMPSITE), 1.0, 457)
-	for spot in [Vector2(-95.0, -22.2), Vector2(-99.4, -29.2), Vector2(-95.6, -27.4),
-			Vector2(-104.4, -20.2), Vector2(-100.4, -27.8), Vector2(-103.0, -24.6),
-			Vector2(-98.2, -20.2), Vector2(-95.8, -25.4), Vector2(-104.0, -19.0),
-			Vector2(-98.0, -26.6), Vector2(-101.8, -23.6), Vector2(-97.6, -22.0),
-			Vector2(-99.0, -20.4), Vector2(-102.0, -20.4), Vector2(-98.6, -23.6),
-			Vector2(-95.8, -20.6), Vector2(-100.6, -16.4), Vector2(-106.4, -23.4),
-			Vector2(-99.6, -25.8)]:
+	CampKit.offering_stone(clutter, mats, _ground(-102.6, -14.8), 0.6, 443)
+	CampKit.bone_heap(clutter, mats, _ground(-102.8, -19.2), 1.1, 445)
+	CampKit.pot_stack(clutter, mats, _ground(-98.4, -23.4), 2.0, 447)
+	CampKit.pot_stack(clutter, mats, _ground(-102.4, -25.8), 0.4, 449)
+	CampKit.chopping_block(clutter, mats, _ground(-101.6, -25.0), 0.9)
+	CampKit.cauldron(clutter, mats, _ground(-98.2, -20.6), 1.8, 0.9)
+	CampKit.skull_stakes(clutter, mats, _ground(-94.0, -27.6), 2.4, 3, 0.8, 451)
+	CampKit.brush_screen(clutter, mats, _ground(-98.6, -14.4), 0.2, 4.2, 453)
+	CampKit.brush_screen(clutter, mats, _ground(-108.6, -26.0), 1.5, 3.6, 455)
+	CampKit.add_idol(clutter, mats, _ground(-97.2, -28.8),
+		_face_yaw(Vector2(-97.2, -28.8), CAMPSITE), 1.0, 457)
+	for spot in [Vector2(-94.6, -22.8), Vector2(-98.0, -30.2), Vector2(-93.2, -19.6),
+			Vector2(-96.4, -24.6), Vector2(-101.0, -16.4), Vector2(-99.4, -15.0),
+			Vector2(-108.2, -21.4), Vector2(-93.4, -24.6), Vector2(-97.4, -15.4),
+			Vector2(-103.6, -14.0), Vector2(-106.6, -19.4), Vector2(-92.6, -20.8),
+			Vector2(-102.6, -14.8), Vector2(-102.8, -19.2), Vector2(-98.4, -23.4),
+			Vector2(-102.4, -25.8), Vector2(-101.6, -25.0), Vector2(-98.2, -20.6),
+			Vector2(-94.0, -27.6), Vector2(-98.6, -14.4), Vector2(-108.6, -26.0),
+			Vector2(-97.2, -28.8)]:
 		_reserve_camp_ground(_ground(spot.x, spot.y), 0.85)
 	clutter.commit(_world_root("CampDoodads"), "CampDoodadBatch", true)
 
@@ -700,12 +724,12 @@ func _build_camp_charms() -> void:
 	for record in _camp_charm_trees:
 		var base: Vector3 = record["position"]
 		var tree_height: float = record["height"]
-		var count := 1 + (1 if rng.randf() < 0.5 else 0)
+		var count := 2 + (1 if rng.randf() < 0.6 else 0) + (1 if rng.randf() < 0.3 else 0)
 		for i in range(count):
-			var at := base + Vector3(rng.randf_range(-0.95, 0.95),
-				tree_height * rng.randf_range(0.26, 0.48), rng.randf_range(-0.95, 0.95))
+			var at := base + Vector3(rng.randf_range(-1.15, 1.15),
+				tree_height * rng.randf_range(0.18, 0.62), rng.randf_range(-1.15, 1.15))
 			CampKit.add_hanging(charms, mats, at, rng.randf_range(0.0, TAU),
-				4000 + hung * 17, rng.randf_range(1.1, 1.5))
+				4000 + hung * 17, rng.randf_range(1.0, 1.6))
 			hung += 1
 	if hung > 0:
 		charms.commit(_world_root("CampTreeCharms"), "CampCharmBatch", false)
@@ -1353,7 +1377,7 @@ func _build_woodland() -> void:
 		# is hashed from the position so the forest's own RNG never shifts
 		var camp_distance := point.distance_to(CAMPSITE)
 		if camp_distance > CAMP_CHARM_BAND.x and camp_distance < CAMP_CHARM_BAND.y:
-			if _camp_charm_roll(point) < 0.78:
+			if _camp_charm_roll(point) < 0.94:
 				_camp_charm_trees.append({"position": base, "height": tree_height})
 		var village_distance := point.distance_to(VILLAGE)
 		if village_distance > VILLAGE_RADIUS + 2.0 and village_distance < VILLAGE_RADIUS + 11.0:
@@ -1433,6 +1457,56 @@ func _build_backdrop_trees() -> void:
 					TextureLibrary.foliage_material_tuned(String(variant["leaves_texture"]), variant["wind"]),
 					buckets[variant_index], TREE_CHUNK, {"cast_shadow": false})
 	generation_stats["backdrop_trees"] = placed
+
+
+## Woodland undergrowth: bushes of leaf cards, thickest round the camp and along
+## the footpaths, thin out in the open. Presentation only - no collision.
+func _build_bushes() -> void:
+	var atlases: Array[String] = []
+	var winds: Dictionary = {}
+	var pools: Dictionary = {}
+	for species in style.trees:
+		for variant in _variants_for(species):
+			if variant.get("leaves") == null:
+				continue
+			var atlas := String(variant["leaves_texture"])
+			if winds.has(atlas):
+				continue
+			atlases.append(atlas)
+			winds[atlas] = species.get("wind", Vector2(0.08, 1.0))
+			pools[atlas] = species.get("tints", [])
+	if atlases.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = BUSH_SEED
+	var placed := 0
+	for atlas in atlases:
+		var variants := BushKit.build_variants(atlas, BUSH_SEED + _stable_seed(atlas))
+		var buckets: Array = []
+		for variant in variants:
+			buckets.append([] as Array[Dictionary])
+		for i in range(BUSH_PER_ATLAS):
+			var point := Vector2(rng.randf_range(-118, 118), rng.randf_range(-118, 112))
+			if _reserved(point, 3.0) or _camp_reserved(point):
+				continue
+			var near_camp := point.distance_to(CAMPSITE) < 34.0
+			var near_path := _footpath_distance(point.x, point.y) < 26.0
+			if rng.randf() > (0.92 if near_camp or near_path else 0.62):
+				continue
+			var base := _ground(point.x, point.y)
+			var scale_at := rng.randf_range(0.80, 1.50)
+			var index := rng.randi_range(0, variants.size() - 1)
+			(buckets[index] as Array[Dictionary]).append({
+				"transform": Transform3D(Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(
+					Vector3(scale_at, scale_at * rng.randf_range(0.8, 1.25), scale_at)), base),
+				"color": _pick_color(pools.get(atlas, []), Color.WHITE),
+			})
+			placed += 1
+		for index in range(variants.size()):
+			WorldScatter.batch(self, "Bush_%s_%d" % [atlas, index], variants[index]["mesh"],
+				TextureLibrary.foliage_material_tuned(atlas, winds.get(atlas, Vector2(0.08, 1.0))),
+				buckets[index], TREE_CHUNK, {"cast_shadow": true, "visible_end": 82.0})
+	generation_stats["bushes"] = placed
 
 
 func _build_ground_cover() -> void:

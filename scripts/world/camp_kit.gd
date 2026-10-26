@@ -17,7 +17,7 @@ const Geo = preload("res://scripts/geo.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 
 ## How many hanging-charm shapes `add_hanging` can pick from.
-const HANGING_VARIANTS := 8
+const HANGING_VARIANTS := 11
 
 ## The two sides of anything mirrored.
 const SIDES: Array[float] = [-1.0, 1.0]
@@ -405,8 +405,14 @@ static func add_hanging(m: Merged, mats: Dictionary, top: Vector3, yaw: float, s
 			_rag_fetish(m, mats, knot, rng)
 		6:
 			_rib_bundle(m, mats, knot, rng)
-		_:
+		7:
 			_rune_board(m, mats, knot, rng)
+		8:
+			_cloth_strips(m, mats, knot, rng)
+		9:
+			_bone_mobile(m, mats, knot, rng)
+		_:
+			_mask_chime(m, mats, knot, rng)
 	m.group = saved
 	return rope_len
 
@@ -485,6 +491,53 @@ static func _rib_bundle(m: Merged, mats: Dictionary, knot: Vector3, rng: RandomN
 		add_beam(m, root, bend, 0.014, mats["bone"], 3, 0.011)
 		add_beam(m, bend, tip, 0.011, mats["bone"], 3, 0.006)
 	add_box(m, Vector3(0.18, 0.26, 0.02), spine_b + Vector3(0.0, 0.08, 0.05), mats["hide_dark"], 0.2)
+
+
+## A bound bundle of cloth and feathers, the wardens' ordinary charm.
+static func _cloth_strips(m: Merged, mats: Dictionary, knot: Vector3, rng: RandomNumberGenerator) -> void:
+	add_beam(m, knot, knot + Vector3(0.0, -0.10, 0.0), 0.012, mats["rag"], 3)
+	var hub := knot + Vector3(0.0, -0.12, 0.0)
+	add_ball(m, 0.045, hub, mats["rag"], Vector3.ONE, 5, 3)
+	for i in range(8):
+		var a := TAU * float(i) / 8.0 + rng.randf_range(-0.2, 0.2)
+		var length := rng.randf_range(0.20, 0.55)
+		var out := Vector3(cos(a) * 0.05, 0.0, sin(a) * 0.05)
+		add_box(m, Vector3(0.035, length, 0.012), hub + out + Vector3(0.0, -length * 0.5, 0.0),
+			mats["rag"] if i % 2 else mats["feather"], a, 0.0, rng.randf_range(-0.25, 0.25))
+		if i % 3 == 0:
+			add_ball(m, 0.018, hub + out + Vector3(0.0, -length - 0.03, 0.0), mats["bone"],
+				Vector3.ONE, 4, 3)
+
+
+## A crossbar of bones on strings, swinging at different lengths.
+static func _bone_mobile(m: Merged, mats: Dictionary, knot: Vector3, rng: RandomNumberGenerator) -> void:
+	var bar := knot + Vector3(0.0, -0.16, 0.0)
+	add_beam(m, bar + Vector3(-0.22, 0.0, 0.0), bar + Vector3(0.22, 0.0, 0.0), 0.014,
+		mats["twig_dark"], 3)
+	for i in range(3):
+		var start := bar + Vector3(-0.18 + float(i) * 0.18, 0.0, 0.0)
+		var drop := rng.randf_range(0.18, 0.42)
+		var low := start + Vector3(0.0, -drop, 0.0)
+		add_beam(m, start, low, 0.007, mats["rag"], 3)
+		add_beam(m, low, low + Vector3(rng.randf_range(-0.04, 0.04), -0.20, rng.randf_range(-0.04, 0.04)),
+			0.021, mats["bone"], 4, 0.013)
+		add_ball(m, 0.026, low, mats["bone"], Vector3.ONE, 5, 3)
+	add_skull(m, mats, bar + Vector3(0.26, -0.30, 0.0), rng.randf_range(0.0, TAU), 0.38, false)
+
+
+## Two little masks and a bone clapper, strung together.
+static func _mask_chime(m: Merged, mats: Dictionary, knot: Vector3, rng: RandomNumberGenerator) -> void:
+	add_beam(m, knot, knot + Vector3(0.0, -0.14, 0.0), 0.010, mats["rag"], 3)
+	for i in range(2):
+		var at := knot + Vector3(-0.10 + float(i) * 0.20, -0.30 - float(i) * 0.16, 0.0)
+		add_box(m, Vector3(0.16, 0.20, 0.05), at, mats["drift"], rng.randf_range(-0.3, 0.3), 0.0,
+			rng.randf_range(-0.15, 0.15))
+		add_ball(m, 0.022, at + Vector3(0.04, 0.03, -0.04), mats["ash"], Vector3(1.0, 0.7, 0.4), 4, 3)
+		add_ball(m, 0.022, at + Vector3(-0.04, 0.03, -0.04), mats["ash"], Vector3(1.0, 0.7, 0.4), 4, 3)
+		add_box(m, Vector3(0.07, 0.02, 0.02), at + Vector3(0.0, -0.05, -0.04), mats["ochre"])
+		add_beam(m, knot + Vector3(-0.10 + float(i) * 0.20, -0.14, 0.0), at, 0.007, mats["rag"], 3)
+	add_beam(m, knot + Vector3(0.0, -0.12, 0.0), knot + Vector3(0.02, -0.52, 0.0), 0.016,
+		mats["bone"], 4, 0.010)
 
 
 static func _rune_board(m: Merged, mats: Dictionary, knot: Vector3, rng: RandomNumberGenerator) -> void:
@@ -1015,6 +1068,20 @@ static func cauldron(m: Merged, mats: Dictionary, at: Vector3, yaw: float, s: fl
 		var a := TAU * float(i) / 3.0 + 0.5
 		add_ball(m, 0.045, Vector3(cos(a) * 0.22, 0.08, sin(a) * 0.22), mats["ember"],
 			Vector3(1.0, 0.6, 1.0), 5, 3)
+	m.group = saved
+
+
+## A stump used as a block, a flint flake and a stone hammer - no steel here.
+static func chopping_block(m: Merged, mats: Dictionary, at: Vector3, yaw: float) -> void:
+	var saved := m.push(_xf(at, yaw, 0.0, 0.0, 1.0))
+	m.add(_cyl_mesh(0.34, 0.30, 0.44, 8), _xf(Vector3(0.0, 0.22, 0.0)), mats["bark"])
+	add_ring(m, Vector3(0.0, 0.44, 0.0), 0.0, 0.28, 0.34, mats["drift_dark"], 0.0, 10, 3)
+	add_box(m, Vector3(0.16, 0.03, 0.10), Vector3(0.06, 0.47, -0.05), mats["char"], 0.4)
+	add_ball(m, 0.09, Vector3(-0.26, 0.09, 0.16), mats["stone"], Vector3(1.0, 0.8, 1.0), 6, 4)
+	add_beam(m, Vector3(-0.26, 0.10, 0.16), Vector3(-0.52, 0.20, 0.34), 0.022, mats["twig"], 3, 0.012)
+	for i in range(4):
+		add_ball(m, 0.032, Vector3(-0.20 + float(i) * 0.08, 0.03, 0.42 + float(i) * 0.05),
+			mats["bone"], Vector3.ONE, 4, 3)
 	m.group = saved
 
 

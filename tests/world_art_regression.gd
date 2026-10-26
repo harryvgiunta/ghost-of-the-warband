@@ -238,14 +238,14 @@ func _check_camp(frontier) -> void:
 	check(frontier.get_node_or_null("CampFire/CampFireLight") is OmniLight3D,
 		"the camp fire must light the camp")
 	for node_name in ["CampDoodads", "CampTreeCharms", "TrailDoodads", "CampBoneArch",
-			"CampCharmWeb", "CampWickerEffigy", "CampRagTree0", "TrailHeadArch",
+			"CampCharmWeb0", "CampWickerEffigy", "CampRagTree0", "TrailHeadArch",
 			"TrailRagTree0"]:
 		check(frontier.get_node_or_null(node_name) != null, node_name + " must exist")
-	check(int(stats.get("camp_shelters", 0)) == 5, "the camp has five shelters")
+	check(int(stats.get("camp_shelters", 0)) == 6, "the camp has six shelters in clusters")
 	check(int(stats.get("trail_marks", 0)) == 8, "the trail carries eight marks of witch work")
-	check(int(stats.get("camp_hangers", 0)) >= 12,
-		"the camp must hang its charms (%d)" % int(stats.get("camp_hangers", 0)))
-	check(int(stats.get("camp_charm_trees", 0)) >= 6,
+	check(int(stats.get("camp_hangers", 0)) >= 180,
+		"the camp must hang its charms everywhere (%d)" % int(stats.get("camp_hangers", 0)))
+	check(int(stats.get("camp_charm_trees", 0)) >= 40,
 		"the trees at the camp must carry charms (%d)" % int(stats.get("camp_charm_trees", 0)))
 	# the camp is a trek away, not a shed behind the keepers
 	var camp_point := Vector2(-100.0, -22.0)
@@ -295,7 +295,7 @@ func _check_camp(frontier) -> void:
 	check(frontier.get_node_or_null("WatchfallFortress") == null, "the Watchfall fortress is gone")
 	check(frontier.get_node_or_null("SuncrestShrine") == null, "the Suncrest shrine is gone")
 	# small enough that a child built it: no shelter reads as a building
-	for i in range(5):
+	for i in range(6):
 		var shelter: Node = frontier.get_node_or_null("TwigShelter%d" % i)
 		check(shelter != null, "shelter %d must stand" % i)
 		if shelter == null:
@@ -308,6 +308,8 @@ func _check_camp(frontier) -> void:
 		check(bounds.size.x <= 4.0 and bounds.size.z <= 3.4,
 			"shelter %d must stay small (%.1f x %.1f)" % [i, bounds.size.x, bounds.size.z])
 		check(bounds.size.y <= 2.2, "shelter %d must be lower than a doorway" % i)
+	check(int(stats.get("bushes", 0)) >= 300,
+		"the woods need undergrowth (%d bushes)" % int(stats.get("bushes", 0)))
 	# the camp sits in the woodland: trunks stand right there with it
 	var trees_at_camp := 0
 	var solids: Node = frontier.get_node_or_null("FrontierSolidObstacles")
