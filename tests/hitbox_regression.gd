@@ -2,6 +2,7 @@ extends SceneTree
 
 const Actor = preload("res://scripts/arena_actor.gd")
 const Arrow = preload("res://scripts/arrow.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const STEP := 1.0 / 240.0
@@ -18,12 +19,21 @@ func check(condition: bool, message: String) -> void:
 		failures += 1
 		push_error(message)
 
+## Every rig here starts bare so the zone math is exact; the armor-channel
+## block below puts a real kit back on.
+func strip(actor) -> void:
+	var bare := {}
+	for slot in ArmorData.SLOTS:
+		bare[slot] = ArmorData.NONE
+	actor.rig.set_armor_pieces(bare)
+
 func fighter(parent: Node3D, slot: int, at: Vector3):
 	var actor := Actor.new()
 	actor.slot = slot
 	actor.authoritative = true
 	parent.add_child(actor)
 	actor.configure(slot + 1, false, "Regression", at)
+	strip(actor)
 	actor.set_process(false)
 	actor.rig.set_process(false)
 	actor.rig.set_physics_process(false)
@@ -62,11 +72,49 @@ func run() -> void:
 	target.health = 100.0
 	target.take_damage(20.0, 1)
 	check(is_equal_approx(target.health, 80.0), "Damage without a hit zone stays body")
+
+	# Armor runs on two channels: a helmet guards head hits, the four body
+	# pieces guard everything else. Each row is the base figure.
+	target.health = 100.0
+	target.rig.set_armor(0)
+	target.take_damage(20.0, 1, true)
+	check(is_equal_approx(target.health, 68.0), "A leather helm takes 20% off a headshot")
+	target.health = 100.0
+	target.take_damage(20.0, 1, false)
+	check(is_equal_approx(target.health, 82.0), "A leather body kit takes 10% off a body hit")
 	target.health = 100.0
 	target.rig.set_armor(1)
 	target.take_damage(20.0, 1, true)
-	check(is_equal_approx(target.health, 66.0), "Head multiplier applies before armor reduction")
-	target.rig.set_armor(0)
+	check(is_equal_approx(target.health, 72.0), "A mail helm takes 30% off a headshot")
+	target.health = 100.0
+	target.take_damage(20.0, 1, false)
+	check(is_equal_approx(target.health, 85.0), "A mail body kit takes 25% off a body hit")
+	target.health = 100.0
+	target.rig.set_armor(2)
+	target.take_damage(20.0, 1, true)
+	check(is_equal_approx(target.health, 80.0),
+		"A 50% plate helm turns a headshot back into a normal hit")
+	target.health = 100.0
+	target.take_damage(20.0, 1, false)
+	check(is_equal_approx(target.health, 86.0), "A plate body kit takes 30% off a body hit")
+	# Mixed kits: the helmet decides a head hit, the body pieces decide the rest.
+	target.rig.set_armor_pieces({"head":2, "chest":0, "hands":0, "legs":0, "feet":0})
+	target.health = 100.0
+	target.take_damage(20.0, 1, true)
+	check(is_equal_approx(target.health, 80.0), "A plate helm guards a head hit over a leather body")
+	target.health = 100.0
+	target.take_damage(20.0, 1, false)
+	check(is_equal_approx(target.health, 82.0), "The leather body under that helm stays at 10%")
+	# A slot with no piece guards nothing on its channel.
+	strip(target)
+	target.rig.set_armor_piece("head", 2)
+	target.health = 100.0
+	target.take_damage(20.0, 1, true)
+	check(is_equal_approx(target.health, 80.0), "A lone helmet still turns the headshot into a normal hit")
+	target.health = 100.0
+	target.take_damage(20.0, 1, false)
+	check(is_equal_approx(target.health, 80.0), "A lone helmet leaves the body unguarded")
+	strip(target)
 	target.health = 100.0
 	target.authoritative = false
 	target.take_damage(20.0, 1, true)

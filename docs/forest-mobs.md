@@ -246,9 +246,10 @@ forged kit. It is the forest's own material language applied to worn gear.
   each skin at the live ranger skeleton and registers it per slot, so the set
   comes and goes with `_apply_armor_visibility()` exactly like the four forged
   sets. Do not hide the imported skeleton node: the pieces hang off it.
-- **Guard** — the salvage skin is a tier-0 starter set: it changes what the
-  ranger looks like, not what a blow costs. Ranger leather and Makeshift both
-  guard 0%; mail and plate are the sets that matter.
+- **Guard** — the salvage skin is now a real starter set on both reduction
+  channels: Makeshift and Ranger leather guard **20% against head hits and 10%
+  across the body**. Mail is 30% / 25% and plate 50% / 30%; the helmet answers
+  the 2x head zone on its own.
 - **Blades** — `sword_makeshift` (split branch haft, knapped flint edge, sinew
   lashing) and `dagger_makeshift` (ground rib, hide wrap, chipped stone tied at
   the guard). They are class-equivalent to the iron pieces: the HUD stats are

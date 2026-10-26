@@ -537,7 +537,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		return
 	_cancel_consumable()
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
-		* (1.0 - rig.damage_reduction())
+		* (1.0 - rig.damage_reduction(headshot))
 	applied = _absorb_with_ward(applied)
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)

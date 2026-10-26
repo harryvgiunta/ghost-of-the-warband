@@ -497,7 +497,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, _react: 
 	if not alive or replica:
 		return
 	last_hitter = source_id
-	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
+	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.damage_reduction(headshot))
 	health = maxf(0.0,health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,health <= 0.0,blood_scale())
