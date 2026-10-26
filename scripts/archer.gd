@@ -18,6 +18,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const ItemPassives = preload("res://scripts/item_passives.gd")
 const EnergyShield = preload("res://scripts/energy_shield.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
@@ -1069,7 +1070,9 @@ func _duration_for(hand: String, variant: String) -> float:
 		base = 0.42 if dagger else float(DIAGONAL_SECONDS[size])
 	elif variant == "stab" or dagger:
 		base = float(DAGGER_DATA.seconds)
-	return base/maxf(attack_rate(),0.01)
+	# Trinket haste and the held item's passive compose as one rate, so the
+	# same wheel-up lunge is fast for every hand that carries a shank.
+	return base/maxf(attack_rate()*variant_attack_rate(hand,variant),0.01)
 
 func _valid_variant(variant: String) -> bool:
 	return variant in MELEE_VARIANTS
@@ -1194,6 +1197,23 @@ func throw_scale() -> float:
 ## Rate multiplier: a 1.0 s draw becomes `1.0 / attack_rate()` seconds.
 func attack_rate() -> float:
 	return TrinketStats.attack_rate(trinket_stats)
+
+## The weapon class one hand is actually swinging, or "" when that hand is
+## empty or holding a bow. The class — not the catalog id — decides a passive,
+## because it is the level every replica already knows from the wire.
+func swing_weapon_class(hand: String) -> String:
+	if hand == "left":
+		return off_weapon_kind if off_weapon_active else ""
+	if weapon == "dagger":
+		return "dagger"
+	if weapon == "sword" or weapon == "dual":
+		return "staff" if staff_active else "sword"
+	return ""
+
+## The swung weapon's attack-rate multiplier for one melee variant (1.0 when it
+## grants nothing). `attack_rate()` composes with it as a second rate.
+func variant_attack_rate(hand: String, variant: String) -> float:
+	return ItemPassives.variant_rate(swing_weapon_class(hand),variant)
 
 func move_scale() -> float:
 	return TrinketStats.move_scale(trinket_stats)
@@ -1804,13 +1824,13 @@ func _melee_window(hand: String = "") -> Vector2:
 	if is_diagonal_swing(key):
 		return Vector2(SWING_LOAD_END,SWING_FOLLOW_END)*melee_seconds(key)
 	if key == "left" or weapon == "dagger" or (key == "right" and _right_variant == "stab"):
+		# The authored stab is sampled across the hand's actual swing, so a
+		# haste trinket or a weapon passive carries its strike window with it
+		# instead of leaving the drive running past the recovery.
 		var clip: Dictionary = _profile.clips.stab
-		var scale := 1.0
-		if key == "left":
-			# The authored stab is 0.5 s; an off-hand sword keeps the same
-			# proportion of its longer swing instead of hitting too early.
-			scale = _left_melee_duration / maxf(float(clip.duration),0.0001)
-		return Vector2(float(clip.strike_start),float(clip.strike_end)) * scale
+		var hand_seconds := _left_melee_duration if key == "left" else melee_seconds(key)
+		return Vector2(float(clip.strike_start),float(clip.strike_end)) \
+			* (hand_seconds/maxf(float(clip.duration),0.0001))
 	var duration := _right_melee_duration if _right_melee_time >= 0.0 else float(SWORD_DATA[sword_index].seconds)
 	var cut_seconds := 0.22+0.04*sword_index
 	var windup := (duration-cut_seconds)*0.55

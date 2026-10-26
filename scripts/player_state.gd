@@ -8,6 +8,7 @@ signal changed
 const ArmorData = preload("res://scripts/armor_data.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const ItemPassives = preload("res://scripts/item_passives.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 
 const INVENTORY_CAPACITY := 15
@@ -46,7 +47,7 @@ const ITEMS := {
 	"dagger_iron": {"name":"Iron Dagger", "short":"Dagger", "kind":"dagger", "index":0, "price":70,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A short iron blade balanced for the off hand",
-		"detail":"14 damage / 0.5 s stab / 1.2 m reach / weak guard"},
+		"detail":"14 damage / 0.5 s stab / 1.2 m reach / weak guard / +200% forward stab"},
 	"sword_makeshift": {"name":"Makeshift Cleaver", "short":"Msh Cleaver", "kind":"sword", "index":0, "price":6,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A split branch with a knapped flint edge, bound in sinew",
@@ -54,7 +55,7 @@ const ITEMS := {
 	"dagger_makeshift": {"name":"Makeshift Shiv", "short":"Msh Shiv", "kind":"dagger", "index":0, "price":4,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A snapped rib ground to a point and wrapped in hide",
-		"detail":"14 damage / 0.5 s stab / 1.2 m reach / weak guard / off-hand legal"},
+		"detail":"14 damage / 0.5 s stab / 1.2 m reach / weak guard / +200% forward stab / off-hand legal"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -533,6 +534,7 @@ func item_stat_rows(id: String) -> Array:
 		var reach := float(stats.get("reach", 0.0))
 		if reach > 0.0:
 			rows.append({"label":"REACH", "value":"%.1f m" % reach})
+		rows.append_array(ItemPassives.effect_rows(kind,float(stats.get("attack",0.0))))
 	elif category == "shield":
 		rows.append({"label":"BLOCK", "value":"Full front"})
 		rows.append({"label":"STAMINA", "value":"%d per block" % item_block_stamina(id)})
@@ -569,6 +571,9 @@ func item_compact_stats(id: String) -> String:
 		var high := int(round(damage * Hitbox.HEAD_MULTIPLIER))
 		parts.append("DMG %d–%d" % [int(round(damage)), high])
 		parts.append("SPEED %.1f s" % float(stats.get("attack", 0.0)))
+		var passive := ItemPassives.effect_summary(str(item.get("kind", "")))
+		if not passive.is_empty():
+			parts.append("PASSIVE " + passive)
 	elif category == "shield":
 		parts.append("BLOCK %d STAM" % item_block_stamina(id))
 	elif category == "armor":
