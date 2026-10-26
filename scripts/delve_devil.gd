@@ -21,6 +21,8 @@ const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
+const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
 
 const STATE_EMERGE := "EMERGE"
 const STATE_CHASE := "CHASE"
@@ -167,6 +169,12 @@ var _emerge_light: OmniLight3D
 var _ring_material: StandardMaterial3D
 var _column_material: StandardMaterial3D
 var _query := PhysicsRayQueryParameters3D.new()
+## The ranger that landed the last blow, read by `take_damage`.
+var _attacker: Node3D
+## Whether this devil has already called the room to the fight.
+var _woke := false
+var _senses := MobSenses.new()
+var _steering := MobSteering.new()
 
 
 func _ready() -> void:
@@ -193,6 +201,9 @@ func _ready() -> void:
 	_build_emerge_fx()
 	_refresh_metrics()
 	_query.collision_mask = 1
+	# One group for every wilderness body: a devil's cry wakes the room, and a
+	# ranger's blow wakes whatever stands beside it.
+	add_to_group(MobSenses.GROUP)
 
 
 func configure(next_id: int, weapon: String, next_depth: int, role: String = ROLE_DEVIL) -> void:
@@ -206,6 +217,7 @@ func configure(next_id: int, weapon: String, next_depth: int, role: String = ROL
 	_rng.seed = 4409 + maxi(enemy_id,0) * 277
 	_attack_cooldown = 0.30 + _rng.randf() * 0.35
 	_side_bias = 1.0 if maxi(enemy_id,0) % 2 == 0 else -1.0
+	_steering.bias = _side_bias
 	health = max_health
 	alive = true
 	_death_handled = false
@@ -450,10 +462,12 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
+	_senses.age(delta)
 	# Pick the closest survivor while chasing so a swing is never redirected
 	# mid-windup by a second player stepping closer.
 	if state == STATE_CHASE or state == STATE_EMERGE or not _target_alive(target):
 		target = _nearest_target(actors)
+		_wake_pack()
 	var to_target := Vector3.ZERO
 	var distance := INF
 	if _target_alive(target):
@@ -533,6 +547,46 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		_die(true)
+		return
+	_respond_to_attack()
+
+
+## The projectile, blade or spell that landed names itself here before it
+## applies damage, so the devil turns on an archer it never saw.
+func note_attacker(attacker: Node3D) -> void:
+	_attacker = attacker
+
+
+## Any landed blow gives this devil the fight and pulls its neighbours in.
+func _respond_to_attack() -> void:
+	var attacker: Node3D = _attacker if is_instance_valid(_attacker) else null
+	_attacker = null
+	if not is_instance_valid(attacker):
+		return
+	if attacker is CharacterBody3D:
+		target = attacker
+	_senses.notice(attacker, attacker.global_position)
+	_woke = true
+	MobSenses.alert_pack(self, attacker, attacker.global_position)
+
+
+## A neighbour was struck or woke within earshot: join the same hunt.
+func hear_alert(attacker: Node3D, at: Vector3) -> void:
+	if not alive or not authoritative:
+		return
+	if is_instance_valid(attacker) and attacker is CharacterBody3D:
+		target = attacker
+	_senses.hear(attacker, at)
+	_woke = true
+
+
+## The first ranger this devil goes for wakes the room: a sealed wave fights as
+## one pack, not as a queue of duelists.
+func _wake_pack() -> void:
+	if _woke or not _target_alive(target):
+		return
+	_woke = true
+	MobSenses.alert_pack(self, target, target.global_position)
 
 
 func snapshot() -> Dictionary:
@@ -611,9 +665,12 @@ func head_hitbox_center() -> Vector3:
 
 
 func head_hit_profile() -> Vector2:
+	var authored := Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT) * _body_scale
 	if _visual_kind == "mob" and is_instance_valid(_visual):
-		return _visual.head_hit_profile()
-	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT) * _body_scale
+		authored = _visual.head_hit_profile()
+	# A band across the body is never narrower than the surface an arrow stops
+	# on, so a shaft landing on the head height of the capsule is a headshot.
+	return Vector2(Hitbox.head_zone_radius(authored.x, _body_radius), authored.y)
 
 
 func get_display_name() -> String:
@@ -763,23 +820,4 @@ func _with_separation(direction: Vector3, peers: Array) -> Vector3:
 
 
 func _steer(direction: Vector3) -> Vector3:
-	if direction.length_squared() < 0.0001:
-		return Vector3.ZERO
-	var planar := Vector3(direction.x,0.0,direction.z).normalized()
-	_query.from = global_position + Vector3(0,STRIKE_HEIGHT * _body_scale,0)
-	_query.to = _query.from + planar*1.4
-	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
-	if hit.is_empty():
-		return planar
-	# Glide around the pillar: blend along its surface normal with the desired
-	# heading, using a per-enemy side bias so both devils do not pick one edge.
-	var normal: Vector3 = hit.normal
-	var tangent := normal.cross(Vector3.UP)
-	if tangent.length_squared() < 0.0001:
-		tangent = Vector3.RIGHT
-	tangent = tangent.normalized()*_side_bias
-	var blended := (tangent + planar*0.35).normalized()
-	_query.to = _query.from + blended*1.3
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return blended
-	return (planar*0.35-tangent).normalized()
+	return _steering.steer(self, direction, STRIKE_HEIGHT * _body_scale)

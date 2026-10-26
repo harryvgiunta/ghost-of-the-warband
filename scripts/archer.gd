@@ -1649,6 +1649,17 @@ func get_stance_forward() -> Vector3:
 	var pose := _bone_world(_bones.spine_03)
 	return (pose.basis * skeleton.get_bone_global_rest(_bones.spine_03).basis.inverse()).z.normalized()
 
+## Range budget from the frontier: a clone past the shadow distance stops
+## casting into the four directional splits. Only the clone's own rig is
+## affected; the player's rig never receives this call.
+func set_shadow_casting(casting: bool) -> void:
+	var setting := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casting \
+		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for node in find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		mesh.cast_shadow = setting
+
+
 func head_hitbox_center() -> Vector3:
 	if not _built:
 		return global_position + Vector3(0, Hitbox.HUMAN_HEAD_OFFSET + 1.6, 0)

@@ -49,6 +49,8 @@ func run() -> void:
 	await _check_memory_floor(player)
 	await _check_pursuit_after_lost_sight(player)
 	await _check_pack_alarm(player)
+	await _check_wake_on_sight(player)
+	await _check_hit_from_anywhere(player)
 	await _check_backstab_from_behind(player)
 	await _check_legacy_wolf(player)
 	await _check_safe_ring(player)
@@ -191,6 +193,66 @@ func _check_pack_alarm(player: CharacterBody3D) -> void:
 	_clear(neighbour)
 	_clear(distant)
 	_clear(arrow)
+
+
+## A mob that sights a ranger wakes its neighbours inside `SHOUT_RADIUS`, so a
+## pack opens the fight together instead of watching one of its own die.
+func _check_wake_on_sight(player: CharacterBody3D) -> void:
+	var looker = _spawn("hell_goat", Vector3(0.0, 0.05, 0.0), player)
+	var neighbour = _spawn("hell_goat", Vector3(4.0, 0.05, 0.0), player)
+	var distant = _spawn("hell_goat", Vector3(0.0, 0.05, 40.0), player)
+	# Everybody faces away from the ranger, so nobody can sight it yet.
+	looker.rotation.y = PI
+	neighbour.rotation.y = PI
+	distant.rotation.y = PI
+	player.global_position = Vector3(0.0, 0.0, -6.0)
+	await _frames(10)
+	check(not bool(looker._senses.aggressive()), "the pack is calm while nobody faces the ranger")
+	check(not bool(neighbour._senses.aggressive()), "a neighbour facing away is calm too")
+	# Turn one of them onto the ranger: sight alone must wake the neighbour.
+	looker.rotation.y = 0.0
+	await _frames(3)
+	check(bool(looker._senses.seen), "the mob facing the ranger sees it")
+	check(bool(neighbour._senses.aggressive()), "a neighbour inside earshot wakes with the sighting")
+	check(neighbour._senses.target == player, "the woken neighbour hunts the same ranger")
+	check(not bool(distant._senses.aggressive()), "a mob outside earshot stays calm")
+	_clear(looker)
+	_clear(neighbour)
+	_clear(distant)
+	await _frames(2)
+
+
+## Shot from behind a barrier, far outside the sight range: the mob knows who
+## hit it, walks the whole way there and goes around what is in the way.
+func _check_hit_from_anywhere(player: CharacterBody3D) -> void:
+	var mob = _spawn("hell_goat", Vector3(0.0, 0.05, 0.0), player)
+	mob.rotation.y = PI
+	var wall := _wall(Vector3(0.0, 1.5, -4.0), Vector3(7.0, 3.0, 0.5))
+	player.global_position = Vector3(0.0, 0.0, -14.0)
+	await _frames(10)
+	check(not bool(mob._senses.seen), "the barrier hides the ranger from this mob")
+	check(not bool(mob._senses.aggressive()), "an unseen ranger starts nothing on its own")
+	# A landed blow, named exactly like `combat.gd` names it.
+	mob.note_attacker(player)
+	mob.take_damage(6.0, 0)
+	await _frames(4)
+	check(bool(mob._senses.aggressive()), "a landed blow starts the fight from any distance")
+	check(mob._senses.hunt > 0.0, "a struck mob carries an enraged pursuit, not a sighting memory")
+	var reached := false
+	var detoured := false
+	var deadline := Time.get_ticks_msec() + 14000
+	while Time.get_ticks_msec() < deadline:
+		await physics_frame
+		if absf(mob.global_position.x) > 3.6:
+			detoured = true
+		if mob.global_position.distance_to(player.global_position) < 2.6:
+			reached = true
+			break
+	check(detoured, "the mob walks around the barrier instead of grinding into it")
+	check(reached, "a struck mob crosses the whole distance and reaches the ranger")
+	_clear(mob)
+	_clear(wall)
+	await _frames(2)
 
 
 ## Sneaking: unseen from behind, the dagger lands for full effect; the wound

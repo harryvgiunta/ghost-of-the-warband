@@ -6,6 +6,8 @@ const TestSave := "user://ranger_clone_regression_state.json"
 const Clone = preload("res://scripts/ranger_clone.gd")
 const CombatScript = preload("res://scripts/combat.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const CloneActor = preload("res://scripts/arena_actor.gd")
+const ArrowScript = preload("res://scripts/arrow.gd")
 
 
 class DummyTarget:
@@ -110,9 +112,11 @@ func run() -> void:
 	dummy.queue_free()
 	check(guarded,"The clone reacts to an incoming swing with a guard")
 
-	# Bow discipline: a distant clone draws and releases a real arrow.
+	# Bow discipline: a distant clone draws and releases a real arrow while it
+	# walks the gap down. Outside `BLADE_RANGE` the bow is the weapon; inside it
+	# the clone puts the blade away and closes, which is the whole point.
 	var archer = clones[1]
-	archer.global_position = game.player.global_position + Vector3(0.0,0.1,14.0)
+	archer.global_position = game.player.global_position + Vector3(0.0,0.1,20.0)
 	archer.home = archer.global_position
 	archer.combat.stop()
 	archer._attack_cooldown = 0.0
@@ -120,11 +124,96 @@ func run() -> void:
 	archer.arrow_fired.connect(func(_origin: Vector3, _direction: Vector3, _speed: float, _damage: float) -> void:
 		arrows[0] += 1)
 	var shot := await _wait_until(func(): return arrows[0] > 0,6.0)
-	if shot:
-		archer.global_position = game.player.global_position + Vector3(-40.0,0.1,40.0)
-		archer.combat.stop()
 	check(shot,"A distant clone draws and releases an arrow")
-	check(archer.rig.weapon == "bow","The clone switches to the bow beyond nine metres")
+	check(archer.rig.weapon == "bow","The clone fights with the bow outside blade range")
+	var closed := await _wait_until(func(): return _gap(archer) <= Clone.BLADE_RANGE,8.0)
+	check(closed,"A clone that shoots from range still walks the gap down")
+	check(archer.rig.weapon != "bow" or archer.combat.attack_progress < 0.999,
+		"The clone leaves the bow behind once it is inside blade range")
+	archer.global_position = game.player.global_position + Vector3(-40.0,0.1,40.0)
+
+	# A blow from far outside the aggro range still gives the clone the fight:
+	# nothing escapes by running.
+	var provoked = clones[2]
+	provoked.global_position = game.player.global_position + Vector3(0.0,0.1,55.0)
+	provoked.home = provoked.global_position
+	provoked.targets = []
+	provoked.fallback_target = game.player
+	provoked._target = null
+	check(not provoked._within_aggro(game.player),"A clone ignores a ranger beyond its aggro range")
+	provoked.note_attacker(game.player)
+	check(provoked._within_aggro(game.player),"A landed blow reaches a clone past its aggro range")
+	var came := await _wait_until(func(): return _gap(provoked) < 45.0,8.0)
+	check(came,"A struck clone walks the whole way to the ranger that shot it")
+	provoked.global_position = game.player.global_position + Vector3(40.0,0.1,-40.0)
+	provoked._senses.clear()
+
+	# A crimson clone's arrow is an ordinary shaft: a raised shield stops it.
+	# The lane is built on a bare platform well above the frontier so the shot
+	# is judged by the guard and the body, never by scenery between them.
+	var lane_root := Node3D.new()
+	lane_root.position = Vector3(0.0,300.0,0.0)
+	root.add_child(lane_root)
+	var plate := StaticBody3D.new()
+	plate.collision_layer = 1
+	var plate_shape := CollisionShape3D.new()
+	var plate_box := BoxShape3D.new()
+	plate_box.size = Vector3(60.0,1.0,60.0)
+	plate_shape.shape = plate_box
+	plate.add_child(plate_shape)
+	plate.position = Vector3(0.0,-0.5,0.0)
+	lane_root.add_child(plate)
+	await physics_frame
+	var shield_target = CloneActor.new()
+	lane_root.add_child(shield_target)
+	shield_target.slot = 9
+	shield_target.authoritative = true
+	shield_target.configure(9,false,"Shield Probe",Vector3(0.0,0.1,0.0))
+	shield_target.set_process(false)
+	shield_target.rig.set_process(false)
+	shield_target.rig.set_physics_process(false)
+	shield_target.combat.set_motion(Vector3.ZERO,false,true)
+	shield_target.rig.set_weapon("sword")
+	shield_target.rig.set_shield(true)
+	shield_target.health = 100.0
+	await physics_frame
+	shield_target.set_block(true,Vector3(0,0,-1))
+	await physics_frame
+	await physics_frame
+	var bow_clone = clones[3]
+	bow_clone.rig.set_weapon("bow")
+	var base: Vector3 = lane_root.global_position
+	var lane: Vector3 = base + Vector3(0.0,1.18,-12.0)
+	var chest: Vector3 = base + Vector3(0.0,1.18,0.0)
+	bow_clone._on_bow_released(lane,(chest-lane).normalized(),80.0,1.0)
+	await create_timer(0.4).timeout
+	var stuck := 0
+	for child in shield_target.rig.active_shield.get_children():
+		if child is ArrowScript:
+			stuck += 1
+	check(is_equal_approx(shield_target.health,100.0),"A clone arrow stops on a raised shield without damage")
+	check(stuck > 0,"The clone arrow sticks into the raised shield")
+	shield_target.queue_free()
+	await process_frame
+	# The same shot down the same lane on a body with no shield: the arrow is
+	# an ordinary shaft, not something the guard merely failed to notice.
+	var bare_target = CloneActor.new()
+	lane_root.add_child(bare_target)
+	bare_target.slot = 10
+	bare_target.authoritative = true
+	bare_target.configure(10,false,"Bare Probe",Vector3(0.0,0.1,0.0))
+	bare_target.set_process(false)
+	bare_target.rig.set_process(false)
+	bare_target.rig.set_physics_process(false)
+	bare_target.combat.set_motion(Vector3.ZERO,false,true)
+	await physics_frame
+	await physics_frame
+	bare_target.health = 100.0
+	bow_clone._on_bow_released(lane,(chest-lane).normalized(),80.0,1.0)
+	await create_timer(0.4).timeout
+	check(bare_target.health < 100.0,"The same clone arrow damages an unguarded ranger")
+	lane_root.queue_free()
+	await process_frame
 
 	# Death: one reward, one corpse, no second payout.
 	var doomed = clones[2]
@@ -184,6 +273,9 @@ func run() -> void:
 	_remove_test_save()
 	print("RANGER_CLONE_REGRESSION checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
+
+func _gap(clone) -> float:
+	return clone.global_position.distance_to(game.player.global_position)
 
 func _is_tinted(clone) -> bool:
 	for node in clone.rig.find_children("*","MeshInstance3D",true,false):

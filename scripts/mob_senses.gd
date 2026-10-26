@@ -11,8 +11,13 @@ extends RefCounted
 ##   - Losing the line of sight never drops aggression. The mob keeps hunting
 ##     the last place it saw its quarry for `MEMORY_SECONDS` (15 s, the
 ##     required floor) and only then walks home.
-##   - A landed blow always gives a mob the fight: `notice()` on any damage
-##     path, plus `alert_pack()` so the neighbours that heard the cry join.
+##   - A landed blow is not a sighting: `notice()` starts an enraged pursuit
+##     (`hunt`, `HUNT_SECONDS`) that tracks the striker's live position, so a
+##     mob hit from any distance comes for you and never expires while it is
+##     still out of sight.
+##   - Awakening is contagious. A mob that first sights a ranger, and any mob
+##     that is hit, raises `alert_pack()`: every neighbour inside
+##     `SHOUT_RADIUS` takes up the same hunt through `hear_alert()`.
 ##
 ## Every mob joins `GROUP`; that is the only thing alerting needs. Senses are
 ## host-side gameplay state: replicas replay a snapshot and never run this.
@@ -22,9 +27,14 @@ const GROUP := "wild_mobs"
 ## Seconds of pursuit from the last sighting. The requirement is "at least 15
 ## seconds", so this is the floor and never an instant reset.
 const MEMORY_SECONDS := 15.0
+## A landed blow is not a sighting. The victim knows exactly who hit it, so it
+## walks the whole way there: this is how long that hunt survives without a
+## fresh sighting, which covers any distance inside the world.
+const HUNT_SECONDS := 90.0
 ## The full cone is twice this: 140 degrees of view, 220 degrees of blind spot.
 const HALF_FOV_DEGREES := 70.0
-## A struck mob's cry reaches this far, so a pack answers as one.
+## A struck mob's cry reaches this far, so a pack answers as one. A mob that
+## sights a ranger wakes the same radius: the pack opens the fight together.
 const SHOUT_RADIUS := 12.0
 ## The town's safe ring. Mobs never hunt a ranger standing inside it.
 const SAFE_RING := 19.0
@@ -45,8 +55,15 @@ var target: CharacterBody3D
 var last_seen := Vector3.ZERO
 ## Seconds of pursuit left after the last sighting.
 var memory := 0.0
+## Seconds of an enraged pursuit left after a landed blow. Unlike the memory
+## clock this one tracks the live body: a mob that was hit comes for you
+## wherever you run, and the hunt only ends when it sees you or the clock runs
+## out.
+var hunt := 0.0
 ## True only on frames with a clear, in-cone view.
 var seen := false
+## True on the tick the pursuit began, so the pack can be woken with it.
+var woke := false
 
 var _query := PhysicsRayQueryParameters3D.new()
 
@@ -56,28 +73,31 @@ func _init() -> void:
 
 
 func aggressive() -> bool:
-	return memory > 0.0
+	return memory > 0.0 or hunt > 0.0
 
 
-## Where the mob should head: the live body only while it can actually see it,
-## otherwise the place it last saw one. Steering never follows a target through
-## a wall.
+## Where the mob should head: the live body only while it can actually see it
+## (or while it is enraged by a blow), otherwise the place it last saw one.
+## Steering never follows a target through a wall on a mere sighting.
 func focus() -> Vector3:
-	if seen and is_instance_valid(target):
+	if is_instance_valid(target) and (seen or hunt > 0.0):
 		return target.global_position
 	return last_seen
 
 
-## One AI tick. Refreshes the pursuit timer, looks for the nearest visible
+## One AI tick. Refreshes the pursuit timers, looks for the nearest visible
 ## candidate and returns whether the mob is aggressive. `accept` is an optional
 ## per-candidate filter (the mobs pass their safe-ring rule).
 func step(owner: Node3D, candidates: Array, delta: float, sight_range: float,
 		eye_height: float, accept := Callable()) -> bool:
 	memory = maxf(0.0, memory - delta)
+	hunt = maxf(0.0, hunt - delta)
 	seen = false
+	woke = false
 	if not is_instance_valid(owner) or sight_range <= 0.0:
 		clear()
 		return false
+	var began := not aggressive()
 	var best: CharacterBody3D = null
 	var best_distance := INF
 	# Keep the remembered target if it is still in view, then let any nearer
@@ -102,21 +122,52 @@ func step(owner: Node3D, candidates: Array, delta: float, sight_range: float,
 		last_seen = best.global_position
 		memory = MEMORY_SECONDS
 		seen = true
+		# Finding the quarry ends the enraged pursuit: sight is better.
+		hunt = 0.0
+		if began:
+			woke = true
+			alert_pack(owner, best, best.global_position)
 		return true
 	if not is_instance_valid(target) or not _accepted(target, accept):
 		clear()
 		return false
-	return memory > 0.0
+	return aggressive()
 
 
 ## A blow landed. The mob turns on whoever delivered it even if that ranger is
-## behind a tree or out of the cone: being hit is not something you can miss.
+## behind a tree, out of the cone or across the valley: being hit is not
+## something you can miss, and it does not expire while the ranger is unseen.
 func notice(attacker: Node3D, at: Vector3) -> void:
 	if attacker is CharacterBody3D:
 		target = attacker
 		last_seen = attacker.global_position
+		hunt = HUNT_SECONDS
 	else:
 		last_seen = at
+	memory = MEMORY_SECONDS
+	seen = false
+
+
+## Age both clocks without a sight check. Bodies that hunt by proximity (the
+## crimson clones, the sealed delve wave) still retire their alarms here, and
+## the target is dropped once both clocks are spent.
+func age(delta: float) -> void:
+	memory = maxf(0.0, memory - delta)
+	hunt = maxf(0.0, hunt - delta)
+	# No sight query ran this tick, so this body saw nothing: it hunts the place
+	# it last believed in rather than a live body behind a hill.
+	seen = false
+	if memory <= 0.0 and hunt <= 0.0:
+		clear()
+
+
+## A neighbour's cry. The pack takes up the hunt where the alarm was raised,
+## with the same memory clock as a sighting - not the enraged pursuit a landed
+## blow starts, because nothing hit this mob.
+func hear(attacker: Node3D, at: Vector3) -> void:
+	if attacker is CharacterBody3D:
+		target = attacker
+	last_seen = at if at.is_finite() else last_seen
 	memory = MEMORY_SECONDS
 	seen = false
 
@@ -125,7 +176,9 @@ func clear() -> void:
 	target = null
 	last_seen = Vector3.ZERO
 	memory = 0.0
+	hunt = 0.0
 	seen = false
+	woke = false
 
 
 ## Cone, range and line of sight, in that order: the cheap rejections first.
@@ -181,6 +234,26 @@ static func alert_pack(struck: Node3D, attacker: Node3D, at: Vector3,
 		if other.get("alive") == false:
 			continue
 		if other.global_position.distance_to(struck.global_position) > radius:
+			continue
+		if not other.has_method("hear_alert"):
+			continue
+		other.hear_alert(attacker, at)
+		alerted += 1
+	return alerted
+
+
+## A pack fights as one group. Unlike the earshot cry above this ignores
+## distance: every member of `pack_group` takes up the hunt wherever it stands,
+## which is what keeps a band of beasts from watching one of its own die.
+static func alert_packmates(struck: Node3D, attacker: Node3D, at: Vector3,
+		pack_group: String) -> int:
+	if pack_group.is_empty() or not is_instance_valid(struck) or not struck.is_inside_tree():
+		return 0
+	var alerted := 0
+	for other in struck.get_tree().get_nodes_in_group(pack_group):
+		if other == struck or not is_instance_valid(other):
+			continue
+		if other.get("alive") == false:
 			continue
 		if not other.has_method("hear_alert"):
 			continue

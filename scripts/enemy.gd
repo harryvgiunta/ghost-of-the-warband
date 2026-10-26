@@ -16,6 +16,9 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
+const MobWander = preload("res://scripts/mob_wander.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 ## How far each kind can see. Distance alone never starts a fight: the mob has
@@ -30,6 +33,10 @@ const DEVIL_SLIDE_SECONDS := 0.46
 const DEVIL_DAMAGE := 8.0
 const DEVIL_LEAP_DAMAGE := 10.0
 const DEVIL_MAX_ATTACKERS := 3
+## The physical capsules these bodies ride, declared once so the head zone can
+## never be narrower than the surface an arrow actually stops on.
+const WOLF_BODY_RADIUS := 0.40
+const DEVIL_BODY_RADIUS := 0.34
 var kind := 0
 var pack_index := -1
 var devil_weapon := "claw"
@@ -60,6 +67,13 @@ var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _senses := MobSenses.new()
+var _steering := MobSteering.new()
+## The patch this body keeps to when it is calm.
+var _wander := MobWander.new()
+## Tick budget: the further from the nearest ranger, the rarer the tick.
+var _lod := MobLod.new()
+## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
+var _present_band := -1
 var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
@@ -99,17 +113,24 @@ func _ready() -> void:
 	max_health = 38.0 if kind == 0 else DEVIL_HEALTH
 	health = max_health
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# World and ranger bodies only: mobs do not collide with each other (see
+	# `devil_mob._ready`).
+	collision_mask = 1 | 4
+	# One slide per move (see `devil_mob._ready`).
+	max_slides = 2
+	# A body on a slope must keep its horizontal motion: the default stop
+	# cancels it the moment the ground tilts, which read as crawling.
+	floor_stop_on_slope = false
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	var shape := CapsuleShape3D.new()
 	if kind == 0:
-		shape.radius = 0.40
+		shape.radius = WOLF_BODY_RADIUS
 		shape.height = 0.95
 	else:
 		# The authored cinder devil stands 2.11 m to the crown: a gaunt frame
 		# on a 2.15 m capsule, not the 0.9 m primitive imp it replaced.
-		shape.radius = 0.34
+		shape.radius = DEVIL_BODY_RADIUS
 		shape.height = 2.15
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
@@ -171,6 +192,9 @@ func _ready() -> void:
 			if start.length_squared() > 0.0001:
 				_orbit_angle = atan2(start.z,start.x)+float(seeded)*0.62
 		state = "CIRCLE"
+	# A pack that meets the same barrier splits around both of its sides.
+	_steering.bias = _orbit_dir
+	_lod = MobLod.new(int(absf(global_position.x) * 11.0 + absf(global_position.z) * 5.0))
 
 func _build_wolf_visual() -> void:
 	_wolf = WolfVisual.new()
@@ -225,8 +249,10 @@ func head_hitbox_center() -> Vector3:
 	return get_aim_position()
 func head_hit_profile() -> Vector2:
 	if kind == 0:
-		return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
-	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
+		return Vector2(Hitbox.head_zone_radius(Hitbox.WOLF_HEAD_RADIUS, WOLF_BODY_RADIUS),
+			Hitbox.WOLF_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.head_zone_radius(Hitbox.DEVIL_HEAD_RADIUS, DEVIL_BODY_RADIUS),
+		Hitbox.DEVIL_HEAD_HALF_HEIGHT)
 
 
 func _physics_process(delta: float) -> void:
@@ -235,12 +261,27 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	var nearest := _nearest_ranger()
+	_cull_presentation(nearest)
+	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
+	if budget <= 0.0:
+		return
+	delta = budget
 	# Sight and the pursuit memory decide aggression for the wolf and the
-	# cinder devil exactly as they do for the newer mob families.
-	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+	# cinder devil exactly as they do for the newer mob families. Below the
+	# sight range there is nobody to look for, so that tick skips its rays.
+	var pursuit := false
+	if nearest <= _sight_range():
+		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
+			_eye_height(), Callable(self, "_is_hostile"))
+	else:
+		_senses.age(delta)
+		pursuit = _senses.aggressive()
+	if _senses.woke:
+		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
 	if not is_instance_valid(_target) and not pursuit:
+		_calm_tick(delta)
 		return
 	if kind == 2:
 		_step_devil(delta, pursuit)
@@ -273,7 +314,10 @@ func _physics_process(delta: float) -> void:
 		if pursuit and not target_safe:
 			state = "CHASE"
 			target_direction = displacement.normalized()
-			if not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
+			if _senses.hunt > 0.0 and not _senses.seen:
+				# Enraged by a landed blow: keep closing until it is seen.
+				target_direction = displacement.normalized()
+			elif not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
 				# Standing over the last sighting: sweep the ground.
 				rotation.y += sin(_state_time * 1.5) * delta * 1.7
 				target_direction = Vector3.ZERO
@@ -283,20 +327,47 @@ func _physics_process(delta: float) -> void:
 				_warning.visible = true
 				target_direction = Vector3.ZERO
 		else:
-			state = "IDLE"
-			var to_home := home - global_position
-			to_home.y = 0.0
-			if to_home.length() > 1.0:
-				target_direction = to_home.normalized()
-				speed = 2.0
-	if target_direction.length_squared() > 0.1:
-		target_direction = _steer(target_direction)
-		rotation.y = lerp_angle(rotation.y, atan2(-target_direction.x, -target_direction.z), minf(delta * 8.0, 1.0))
-	velocity.x = move_toward(velocity.x, target_direction.x * speed, delta * 12.0)
-	velocity.z = move_toward(velocity.z, target_direction.z * speed, delta * 12.0)
-	velocity.y = -1.0 if is_on_floor() else velocity.y - 18.0 * delta
-	move_and_slide()
+			# Calm: keep to the pack's patch, walking the shared goal and
+			# resting when it arrives.
+			var wander := _wander.step(self)
+			var outside := _wander.outside(self)
+			state = "RETURN" if outside else "IDLE"
+			if wander.length_squared() > 0.0001:
+				target_direction = wander
+				speed = 2.6 if outside else 1.7
+	_drive_wolf(delta, target_direction, speed)
+
+## The wolf's shared motion tail: steer around obstacles, drive, present.
+func _drive_wolf(delta: float, direction: Vector3, speed: float) -> void:
+	if direction.length_squared() > 0.1:
+		direction = _steer(direction)
+		rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(delta * 8.0, 1.0))
+	velocity.x = move_toward(velocity.x, direction.x * speed, delta * 12.0)
+	velocity.z = move_toward(velocity.z, direction.z * speed, delta * 12.0)
+	velocity.y = 0.0 if is_on_floor() else velocity.y - 18.0 * delta
+	MobLod.move(self, delta)
 	_update_cosmetics(delta)
+
+
+## Nothing in sight and nothing remembered: keep the patch alive. Without this
+## tick a calm body never moved at all, because the state machine below only
+## runs once a target exists.
+func _calm_tick(delta: float) -> void:
+	if kind == 2:
+		# The cinder devil's own machine has a calm RETURN branch already.
+		_step_devil(delta, false)
+		return
+	_state_time += delta
+	var wander := _wander.step(self)
+	var outside := _wander.outside(self)
+	state = "RETURN" if outside else "IDLE"
+	var direction := Vector3.ZERO
+	var speed := 0.0
+	if wander.length_squared() > 0.0001:
+		direction = wander
+		speed = 2.6 if outside else 1.7
+	_drive_wolf(delta, direction, speed)
+
 
 func _resolve_target() -> CharacterBody3D:
 	var nearest := INF
@@ -340,6 +411,50 @@ func _is_hostile(candidate: Node3D) -> bool:
 		return false
 	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
 
+
+## Wolves hunt in bands and cinder devils keep their packs; both keep a shared
+## patch. Nothing in this family is a lone post-holder.
+func wanders_packed() -> bool:
+	return true
+
+
+func wander_radius() -> float:
+	return 10.0 if kind == 0 else 12.0
+
+
+func pack_family() -> String:
+	return "wolf" if kind == 0 else "cinder_devil"
+
+
+## Distance to the closest ranger, for the tick budget.
+func _nearest_ranger() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_squared_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_squared_to(candidate.global_position))
+	if best == INF:
+		return INF
+	return sqrt(best)
+
+
+## Far bodies stop evaluating animation tracks; the skeleton keeps its last
+## pose, which at that distance is a few pixels.
+func _cull_presentation(nearest: float) -> void:
+	var band := MobLod.band(nearest)
+	if band == _present_band:
+		return
+	_present_band = band
+	if kind == 0 and is_instance_valid(_wolf) and _wolf.has_method("set_distance"):
+		_wolf.set_distance(nearest)
+	elif is_instance_valid(_devil) and _devil.has_method("set_distance"):
+		_devil.set_distance(nearest)
+
+
+func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
+	_wander.assign(shared, ring_slot, pack_group)
+
 func _update_cosmetics(_delta: float) -> void:
 	var actual_velocity := get_real_velocity()
 	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
@@ -367,11 +482,11 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	_face_intent = Vector3.FORWARD
 	match state:
 		"RETURN":
-			var home_offset := home-global_position
-			home_offset.y = 0.0
-			if home_offset.length() > 1.4:
-				_move_intent = _steer_devil(home_offset.normalized())
-				_move_speed = 6.0
+			# Calm: keep to the pack's patch. Outside it, hurry home.
+			var wander := _wander.step(self)
+			if wander.length_squared() > 0.0001:
+				_move_intent = _steer_devil(wander)
+				_move_speed = 4.6 if _wander.outside(self) else 1.8
 				_face_intent = _move_intent
 		"STAGGER":
 			if _state_time >= _stagger_duration:
@@ -461,7 +576,7 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 		velocity.x = move_toward(velocity.x,target.x,control*delta)
 		velocity.z = move_toward(velocity.z,target.z,control*delta)
 	if was_grounded and velocity.y <= 0.0:
-		velocity.y = -1.0
+		velocity.y = 0.0
 	elif not was_grounded:
 		velocity.y -= 18.0*delta
 	var facing := _face_intent
@@ -470,7 +585,7 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	if facing.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(delta*12.0,1.0))
 	var before := global_position
-	move_and_slide()
+	MobLod.move(self, delta)
 	var actual := (global_position-before)/maxf(delta,0.0001)
 	if state == "LEAP" and not was_grounded and is_on_floor() and _leap_air_time > 0.18:
 		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
@@ -507,8 +622,9 @@ func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 		_devil_choose(distance,to_player)
 
 ## Lost sight but still remembers: run down the last known spot, then scan.
+## An enraged devil follows the ranger that hit it instead of the old sighting.
 func _devil_hunt(delta: float) -> void:
-	var offset := _senses.last_seen-global_position
+	var offset := _senses.focus()-global_position
 	offset.y = 0.0
 	if offset.length() > MobSenses.ARRIVE_DISTANCE:
 		_move_intent = _steer_devil(_devil_with_separation(offset.normalized()))
@@ -664,26 +780,10 @@ func _pack_attackers() -> int:
 	return count
 
 func _steer_devil(direction: Vector3) -> Vector3:
-	_query.from = global_position+Vector3(0,0.45,0)
-	_query.to = _query.from+direction*1.25
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP,1.0)
-	_query.to = _query.from+left*1.35
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP,-1.0)
+	return _steering.steer(self, direction, 0.45)
 
 func _steer(direction: Vector3) -> Vector3:
-	_query.from = global_position + Vector3(0, 0.65, 0)
-	_query.to = _query.from + direction * 1.7
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP, 1.05)
-	_query.to = _query.from + left * 1.8
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP, -1.05)
+	return _steering.steer(self, direction, 0.65)
 
 func stagger(seconds: float) -> void:
 	if not alive:
@@ -741,6 +841,7 @@ func _respond_to_attack() -> void:
 		attacker = nearest
 	_senses.notice(attacker,attacker.global_position)
 	MobSenses.alert_pack(self,attacker,_senses.last_seen)
+	MobSenses.alert_packmates(self,attacker,_senses.last_seen,_wander.group)
 
 
 ## A neighbour was struck within earshot: take up the hunt where it last saw.
@@ -749,7 +850,7 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	if is_instance_valid(attacker) and not _is_hostile(attacker):
 		return
-	_senses.notice(attacker,at)
+	_senses.hear(attacker,at)
 
 ## Feeds one authoritative pose into the render buffer. The first packet and
 ## any teleport restart the buffer; everything else interpolates.

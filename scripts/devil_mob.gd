@@ -18,6 +18,9 @@ const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const MobSteering = preload("res://scripts/mob_steering.gd")
+const MobWander = preload("res://scripts/mob_wander.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -33,6 +36,7 @@ const PROFILES := {
 		"windup": 0.45, "strike": 0.18, "recover": 0.55,
 		"cooldown": 1.35, "lunge": 6.2, "turn": 9.0,
 		"behaviour": "charger", "strafe": 0.9, "blood": 1.05,
+		"packed": true, "roam": 6.0,
 	},
 	"succubus": {
 		"display": "Succubus", "kind": 4,
@@ -43,6 +47,7 @@ const PROFILES := {
 		"windup": 0.36, "strike": 0.15, "recover": 0.45,
 		"cooldown": 1.15, "lunge": 7.0, "turn": 10.0,
 		"behaviour": "flyer", "strafe": 1.10, "blood": 0.95,
+		"packed": true, "roam": 7.0,
 	},
 	"spawn": {
 		"display": "Devil spawn", "kind": 5,
@@ -53,6 +58,7 @@ const PROFILES := {
 		"windup": 0.30, "strike": 0.14, "recover": 0.40,
 		"cooldown": 0.90, "lunge": 8.0, "turn": 12.0,
 		"behaviour": "crawler", "strafe": 1.50, "blood": 0.55,
+		"packed": true, "roam": 5.0,
 	},
 	"beast": {
 		"display": "Hell beast", "kind": 6,
@@ -63,6 +69,7 @@ const PROFILES := {
 		"windup": 0.65, "strike": 0.22, "recover": 0.70,
 		"cooldown": 2.00, "lunge": 5.5, "turn": 5.5,
 		"behaviour": "brute", "strafe": 0.2, "blood": 1.35,
+		"packed": true, "roam": 8.0,
 	},
 	"gargoyle": {
 		"display": "Gargoyle", "kind": 7,
@@ -73,6 +80,7 @@ const PROFILES := {
 		"windup": 0.75, "strike": 0.24, "recover": 0.85,
 		"cooldown": 2.20, "lunge": 3.2, "turn": 4.5,
 		"behaviour": "sentinel", "strafe": 0.0, "blood": 1.20,
+		"packed": false, "roam": 4.0,
 	},
 }
 
@@ -106,10 +114,16 @@ var _move_speed := 0.0
 var _strafe_dir := 1.0
 var _visual
 var _body: Node3D
-var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
 var _senses := MobSenses.new()
+var _steering := MobSteering.new()
+## The patch this body keeps to when it is calm: its own, or the pack's.
+var _wander := MobWander.new()
+## Tick budget: the further from the nearest ranger, the rarer the tick.
+var _lod := MobLod.new()
+## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
+var _present_band := -1
 var _attacker: Node3D
 
 
@@ -130,7 +144,18 @@ func _ready() -> void:
 		if facing.length_squared() > 0.0001:
 			rotation.y = atan2(-facing.x, -facing.z)
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# World and ranger bodies only. Mob-against-mob collision made every swept
+	# move test seventy-four other capsules; the soft separation pass already
+	# keeps a pack apart, so the physics query stays about the terrain.
+	collision_mask = 1 | 4
+	# One slide per move. A body on uneven ground reports three contacts and the
+	# solver used to resolve each of them (~118 us a move instead of ~49 us);
+	# the steering below already picks a lane around obstacles, so one resolve
+	# is enough and the next tick continues along it.
+	max_slides = 2
+	# A body on a slope must keep its horizontal motion: the default stop
+	# cancels it the moment the ground tilts, which read as crawling.
+	floor_stop_on_slope = false
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	var shape := CapsuleShape3D.new()
@@ -150,9 +175,11 @@ func _ready() -> void:
 	# One shared group for every wilderness mob: a struck mob's cry reaches
 	# whatever is close enough to hear it.
 	add_to_group(MobSenses.GROUP)
-	_query.collision_mask = 1
 	_rng.seed = 7919 + int(absf(global_position.x) * 13.0) + int(absf(global_position.z) * 7.0)
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
+	# A pack that meets the same barrier splits around both of its sides.
+	_steering.bias = _strafe_dir
+	_lod = MobLod.new(int(absf(global_position.x) * 7.0 + absf(global_position.z) * 13.0))
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
@@ -183,12 +210,28 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	var nearest := _nearest_ranger()
+	_cull_presentation(nearest)
+	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
+	if budget <= 0.0:
+		return
+	delta = budget
 	# Sight, not proximity, decides whether this mob is in a fight. Losing the
-	# view keeps the pursuit alive for `MEMORY_SECONDS`.
-	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+	# view keeps the pursuit alive for `MEMORY_SECONDS`. Nothing further away
+	# than its sight range can be seen, so that tick skips the sight rays.
+	var pursuit := false
+	if nearest <= _sight_range():
+		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
+			_eye_height(), Callable(self, "_is_hostile"))
+	else:
+		_senses.age(delta)
+		pursuit = _senses.aggressive()
+	if _senses.woke:
+		# The first sighting of a pack's member is the pack's sighting.
+		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
 	if not is_instance_valid(_target) and not pursuit:
+		_calm_tick(delta)
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
@@ -254,21 +297,80 @@ func _physics_process(delta: float) -> void:
 	_visual.set_combat(state, _state_time)
 
 
+## Distance to the closest ranger, for the tick budget. Walks the two slots
+## `_candidates()` would build, without building it.
+func _nearest_ranger() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_squared_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_squared_to(candidate.global_position))
+	if best == INF:
+		return INF
+	return sqrt(best)
+
+
+## Far bodies stop evaluating animation tracks and locomotion presentation; the
+## skeleton keeps its last pose, which at that distance is a few pixels.
+func _cull_presentation(nearest: float) -> void:
+	var band := MobLod.band(nearest)
+	if band == _present_band:
+		return
+	_present_band = band
+	if is_instance_valid(_visual) and _visual.has_method("set_distance"):
+		_visual.set_distance(nearest)
+
+
+## Nothing in sight and nothing remembered: keep the patch alive. This is the
+## tick that used to freeze a calm mob - with no target the whole state machine
+## was skipped, so a body that spawned at rest never moved again.
+func _calm_tick(delta: float) -> void:
+	if profile.is_empty():
+		# `_ready` refuses an unknown mob id; never tick a body without a profile.
+		return
+	_state_time += delta
+	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	_move_intent = Vector3.ZERO
+	_move_speed = 0.0
+	_face_intent = Vector3.ZERO
+	_return_home(delta)
+	if _present_band > 1:
+		# Nothing at this distance can see the pose: skip the cluster pass and
+		# the locomotion presentation entirely.
+		_move_intent = _move_intent.normalized() if _move_speed > 0.0 else Vector3.ZERO
+		_drive(delta)
+		return
+	_separate()
+	_drive(delta)
+	if is_instance_valid(_visual):
+		_visual.set_motion(get_real_velocity(), is_on_floor())
+		_visual.set_combat(state, _state_time)
+
+
 func _enter(next_state: String, reset_time := true) -> void:
 	state = next_state
 	if reset_time:
 		_state_time = 0.0
 
 
-func _return_home(delta: float) -> void:
-	var offset := home - global_position
-	offset.y = 0.0
-	if offset.length() > 1.2:
-		_move_intent = _steer(offset.normalized())
-		_move_speed = float(profile.walk_speed)
+## Calm: the mob keeps its patch. It walks to the territory's current goal at
+## its own walk speed, rests when it arrives, and hurries home if a chase left
+## it outside.
+func _return_home(_delta: float) -> void:
+	var direction := _wander.step(self)
+	var outside := _wander.outside(self)
+	if direction.length_squared() > 0.0001:
+		_move_intent = _steer(direction)
+		_move_speed = float(profile.walk_speed) * (2.2 if outside else 1.0)
 		_face_intent = _move_intent
-	elif state != "IDLE":
-		_enter("IDLE")
+		if state != ("RETURN" if outside else "IDLE"):
+			_enter("RETURN" if outside else "IDLE", false)
+		return
+	_move_intent = Vector3.ZERO
+	_move_speed = 0.0
+	if state != "IDLE":
+		_enter("IDLE", false)
 
 
 func _circle(delta: float, distance: float, direction: Vector3) -> void:
@@ -313,12 +415,20 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 
 
 ## Lost sight but still remembers: run down the place the ranger was last
-## seen, then sweep the ground while the pursuit timer runs out.
+## seen, then sweep the ground while the pursuit timer runs out. A ranger that
+## landed a blow is followed live instead - it knows where its attacker is.
 func _hunt(delta: float) -> void:
-	var offset := _senses.last_seen - global_position
+	var focus := _senses.focus()
+	var offset := focus - global_position
 	offset.y = 0.0
 	if offset.length() > MobSenses.ARRIVE_DISTANCE:
 		_move_intent = _steer(offset.normalized())
+		_move_speed = float(profile.run_speed)
+		_face_intent = _move_intent
+		return
+	if _senses.hunt > 0.0 and is_instance_valid(_senses.target):
+		# Enraged and standing on the quarry: keep pressing until it is seen.
+		_move_intent = _steer((_senses.target.global_position - global_position).normalized())
 		_move_speed = float(profile.run_speed)
 		_face_intent = _move_intent
 		return
@@ -365,6 +475,27 @@ func _sight_range() -> float:
 	return float(profile.get("sight", 0.0))
 
 
+## Whether this species moves as a band. A sentinel on its post does not.
+func wanders_packed() -> bool:
+	return bool(profile.get("packed", true))
+
+
+## How far a calm body strays from where it spawned.
+func wander_radius() -> float:
+	return float(profile.get("roam", 7.0))
+
+
+## A band is one species: the court's five species stand together but never
+## merge into a single pack.
+func pack_family() -> String:
+	return mob_id
+
+
+## Called by the world once every mob is placed: pack members share one patch.
+func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
+	_wander.assign(shared, ring_slot, pack_group)
+
+
 func _eye_height() -> float:
 	return maxf(0.7, float(profile.get("height", 1.8)) * MobSenses.EYE_HEIGHT_FRACTION)
 
@@ -405,27 +536,19 @@ func _drive(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, desired.x, control * delta)
 	velocity.z = move_toward(velocity.z, desired.z, control * delta)
 	if is_on_floor() and velocity.y <= 0.0:
-		velocity.y = -1.0
+		# Zero, not a press: floor snapping keeps the body attached, and a
+		# downward velocity spent a slide of the sweep (half the ground covered).
+		velocity.y = 0.0
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
 	if _face_intent.length_squared() > 0.0001 and state != "STAGGER":
 		rotation.y = lerp_angle(rotation.y, atan2(-_face_intent.x, -_face_intent.z),
 			minf(delta * float(profile.turn), 1.0))
-	move_and_slide()
+	MobLod.move(self, delta)
 
 
 func _steer(direction: Vector3) -> Vector3:
-	if direction.length_squared() < 0.0001:
-		return direction
-	_query.from = global_position + Vector3(0.0, float(profile.height) * 0.45, 0.0)
-	_query.to = _query.from + direction.normalized() * 1.55
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return direction
-	var left := direction.rotated(Vector3.UP, 1.0)
-	_query.to = _query.from + left * 1.7
-	if get_world_3d().direct_space_state.intersect_ray(_query).is_empty():
-		return left
-	return direction.rotated(Vector3.UP, -1.0)
+	return _steering.steer(self, direction, float(profile.height) * 0.45)
 
 
 func stagger(seconds: float) -> void:
@@ -480,6 +603,7 @@ func _respond_to_attack() -> void:
 		attacker = nearest
 	_senses.notice(attacker, attacker.global_position)
 	MobSenses.alert_pack(self, attacker, _senses.last_seen)
+	MobSenses.alert_packmates(self, attacker, _senses.last_seen, _wander.group)
 
 
 ## A neighbour was struck within earshot: take up the hunt where it last saw.
@@ -488,7 +612,7 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	if is_instance_valid(attacker) and not _is_hostile(attacker):
 		return
-	_senses.notice(attacker, at)
+	_senses.hear(attacker, at)
 
 
 ## The local death: stopped combat collision, falling root, the limp ragdoll
@@ -615,9 +739,13 @@ func head_hitbox_center() -> Vector3:
 
 
 func head_hit_profile() -> Vector2:
+	var authored := Vector2(0.25, 0.12)
 	if is_instance_valid(_visual):
-		return _visual.head_hit_profile()
-	return Vector2(0.25, 0.12)
+		authored = _visual.head_hit_profile()
+	# The zone is a band across the body, so it can never be narrower than the
+	# capsule the arrow actually stops on.
+	return Vector2(Hitbox.head_zone_radius(authored.x, float(profile.get("radius", 0.3))),
+		authored.y)
 
 
 func is_dead() -> bool:

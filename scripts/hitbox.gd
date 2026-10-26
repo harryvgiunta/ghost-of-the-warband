@@ -27,10 +27,21 @@ const WOLF_HEAD_HALF_HEIGHT := 0.18
 ## the animated head bone.
 const DEVIL_HEAD_RADIUS := 0.26
 const DEVIL_HEAD_HALF_HEIGHT := 0.16
+## The head zone is a band across the body, so it is never narrower than the
+## capsule an arrow actually stops on: a shaft that lands on the surface at
+## head height has hit the head.
+const HEAD_SURFACE_MARGIN := 0.05
 
 
 static func damage_multiplier(headshot: bool) -> float:
 	return HEAD_MULTIPLIER if headshot else BODY_MULTIPLIER
+
+
+## The zone radius for a body: the authored radius, widened to cover the
+## capsule surface at head height. Authored radii that reach past the capsule
+## (a muzzle, a wolf skull) still win.
+static func head_zone_radius(authored: float, body_radius: float) -> float:
+	return maxf(authored, body_radius + HEAD_SURFACE_MARGIN)
 
 
 static func is_headshot(target: Node, point: Vector3) -> bool:

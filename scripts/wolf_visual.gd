@@ -4,6 +4,7 @@ extends Node3D
 ## root motion, state timer, damage and death lifecycle; this node samples the
 ## authored clips and hands the dead skeleton to the shared corpse ragdoll.
 
+const MobLod = preload("res://scripts/mob_lod.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
@@ -18,6 +19,7 @@ const ATTACK_RECOVERY := 0.85
 const DEATH_DURATION := 0.45
 const MOVE_THRESHOLD := 0.18
 
+var _instance: Node3D
 var _player: AnimationPlayer
 var _skeleton: Skeleton3D
 var _head_bone := -1
@@ -33,6 +35,7 @@ var _death_held := false
 
 func _ready() -> void:
 	var scene := WOLF_SCENE.instantiate()
+	_instance = scene
 	add_child(scene)
 	_player = scene.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	_skeleton = scene.find_child("Skeleton3D", true, false) as Skeleton3D
@@ -83,6 +86,12 @@ func die(direction: Vector3 = Vector3.ZERO) -> void:
 	if _player:
 		_player.pause()
 	CorpsePhysics.start_limp(self, direction)
+
+
+## Range budget for this body: animation tracks stop past
+## `MobLod.ANIMATE_DISTANCE`, the shadow pass past `MobLod.SHADOW_DISTANCE`.
+func set_distance(distance: float) -> void:
+	MobLod.present(_instance, _player, distance)
 
 
 func head_hitbox_center() -> Vector3:

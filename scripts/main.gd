@@ -8,6 +8,7 @@ const Enemy = preload("res://scripts/enemy.gd")
 const DevilMob = preload("res://scripts/devil_mob.gd")
 const ForestMob = preload("res://scripts/forest_mob.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
+const MobWander = preload("res://scripts/mob_wander.gd")
 const LootRules = preload("res://scripts/loot_rules.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
@@ -50,6 +51,9 @@ const ENEMY_TICK := 0.0667
 ## The longest rewind the host performs for one client action: half a second.
 const MAX_LAG_TICKS := 30
 const ENEMY_RELEVANCE := 70.0
+## Bodies of one wilderness family that spawned this close share a territory
+## and wander as one band. Wider than a skirmish, narrower than a habitat.
+const WILD_PACK_RADIUS := 14.0
 # Deterministic frontier drops: every entry is a real PlayerState item id and the
 # first eight cover all eight equipment categories the paperdoll understands.
 const LOOT_SEQUENCE := [
@@ -333,6 +337,10 @@ func _ready() -> void:
 		clone.attacked.connect(_on_enemy_attack)
 		clone.arrow_fired.connect(_on_mob_arrow)
 		enemies.append(clone)
+	# Every wilderness body now knows the patch it belongs to. Mobs that pack
+	# and spawned together share one territory, so a band wanders as a band;
+	# everything else (a sentinel on its post, a clone patrol) roams alone.
+	MobWander.assign_all(enemies,WILD_PACK_RADIUS)
 	_enemies_by_index = enemies.duplicate()
 	_setup_network()
 	_update_camera(1.0)
