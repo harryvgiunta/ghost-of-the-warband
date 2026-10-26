@@ -44,7 +44,7 @@ func run() -> void:
 	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size() and state.credits == StateScript.STARTING_CREDITS,"Starter kit loads")
 	check(game.world.player_spawn.distance_to(Vector3(0,3,47)) < 0.05,"New game spawns at the town gate")
 	check(game.world.interactables.size() == 10,"Town exposes camp, delve, three keepers, stash, portal and three waystones")
-	check(game.world.landmarks.size() == 6,"The map gains the delve landmark")
+	check(game.world.landmarks.size() == 7,"The map gains the delve and the wardens' camp landmarks")
 
 	var vendors := []
 	for item in game.world.interactables:

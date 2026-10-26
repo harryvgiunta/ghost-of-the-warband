@@ -17,6 +17,7 @@ const GRASS_SHADER: Shader = preload("res://scripts/world/shaders/grass.gdshader
 const TERRAIN_SHADER: Shader = preload("res://scripts/world/shaders/terrain.gdshader")
 const GROUND_SHADER: Shader = preload("res://scripts/world/shaders/ground.gdshader")
 const WATER_SHADER: Shader = preload("res://scripts/world/shaders/water.gdshader")
+const FLAME_SHADER: Shader = preload("res://scripts/world/shaders/flame.gdshader")
 
 # Atlas layouts, in cells. `inset` is the transparent gutter around each cell in
 # pixels (8 px per side = the contracted 16 px gutter between neighbours).
@@ -28,6 +29,7 @@ const ATLAS_LAYOUTS := {
 	"grass_meadow": {"cols": 2, "rows": 2, "inset": 0},
 	"flowers": {"cols": 4, "rows": 2, "inset": 0},
 	"fern": {"cols": 2, "rows": 2, "inset": 0},
+	"flame": {"cols": 2, "rows": 2, "inset": 8},
 }
 
 const BUILDING_KINDS := {
@@ -36,6 +38,9 @@ const BUILDING_KINDS := {
 	"plaster": "plaster",
 	"roof": "roof_shingles",
 	"stone": "stone_blocks",
+	"thatch": "thatch",
+	"hide": "hide",
+	"bone": "bone",
 }
 
 # Triplanar repeats per metre for each building kind.
@@ -45,6 +50,9 @@ const BUILDING_SCALE := {
 	"plaster": 0.4,
 	"roof": 0.9,
 	"stone": 0.55,
+	"thatch": 0.70,
+	"hide": 0.90,
+	"bone": 2.1,
 }
 
 static var _textures: Dictionary = {}
@@ -198,6 +206,49 @@ static func ground_material(style: WorldStyle) -> ShaderMaterial:
 	return material
 
 
+## Bark material with an explicit albedo tint, for dead wood and split stakes.
+## Same tiling and normal as `bark_material`, but the tint is authoritative
+## instead of the per-instance vertex colour.
+static func bark_material_tinted(bark_id: String, tint: Color) -> StandardMaterial3D:
+	var key := "bark:%s:%s" % [bark_id, tint.to_html(false)]
+	if _materials.has(key):
+		return _materials[key]
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture(bark_id)
+	material.albedo_color = tint
+	material.normal_enabled = true
+	material.normal_texture = _normal_texture(bark_id)
+	material.normal_scale = 0.8
+	material.roughness = 0.95
+	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
+## Granite surface for single carved props (fire stones, plinths): the boulder
+## albedo and normal in world space, tinted instead of instance-coloured.
+static func granite_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
+	var key := "granite:%s" % tint.to_html(false)
+	if _materials.has(key):
+		return _materials[key]
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture("rock")
+	material.albedo_color = tint
+	material.uv1_triplanar = true
+	material.uv1_world_triplanar = true
+	material.uv1_triplanar_sharpness = 0.80
+	material.uv1_scale = Vector3(0.9, 0.9, 0.9)
+	material.normal_enabled = true
+	material.normal_texture = _normal_texture("rock")
+	material.normal_scale = 1.0
+	material.roughness = 0.92
+	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
 ## Rock material: world-triplanar granite with a normal map, tintable per instance.
 static func rock_material() -> StandardMaterial3D:
 	var key := "rock"
@@ -240,7 +291,29 @@ static func building_material(kind: String, tint: Color = Color.WHITE) -> Standa
 	var scale_at := float(BUILDING_SCALE.get(kind, 0.6))
 	material.uv1_scale = Vector3(scale_at, scale_at, scale_at)
 	material.roughness = 0.85
+	# Kinds that author a matching normal map (thatch, hide, bone) get relief;
+	# the plank/plaster/stone kinds stay flat until they author one too.
+	var normal := _optional_texture(id + "_n")
+	if normal != null:
+		material.normal_enabled = true
+		material.normal_texture = normal
+		material.normal_scale = 0.9
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
+## Animated flame cards: the authored 2x2 tongue atlas cycled by the flame shader.
+static func flame_material() -> ShaderMaterial:
+	var key := "flame"
+	if _materials.has(key):
+		return _materials[key]
+	var material := ShaderMaterial.new()
+	material.shader = FLAME_SHADER
+	material.set_shader_parameter("albedo_texture", texture("flame"))
+	material.set_shader_parameter("frame_rate", 11.0)
+	material.set_shader_parameter("glow", 1.35)
+	material.set_shader_parameter("waver", 0.016)
 	_materials[key] = material
 	return material
 

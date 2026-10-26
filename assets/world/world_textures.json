@@ -2,8 +2,8 @@
  "generator": "tools/world_textures.py",
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
- "file_count": 28,
- "total_bytes": 8935129,
+ "file_count": 35,
+ "total_bytes": 9493755,
  "textures": [
   {
    "id": "sky_frontier",
@@ -290,6 +290,58 @@
    "n_version": null,
    "kind": "building",
    "description": "Ashlar stone block coursing with mortar joints and pits."
+  },
+  {
+   "id": "thatch",
+   "file": "thatch.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "thatch_n.png",
+   "kind": "building",
+   "description": "Dry reed thatch in tied courses with straw strands and cord bindings."
+  },
+  {
+   "id": "hide",
+   "file": "hide.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "hide_n.png",
+   "kind": "building",
+   "description": "Stretched hair-side hide, mottled brown with sinew-stitched seams."
+  },
+  {
+   "id": "bone",
+   "file": "bone.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "bone_n.png",
+   "kind": "prop",
+   "description": "Weathered animal bone: ivory field, hairline crazing and grime."
+  },
+  {
+   "id": "flame",
+   "file": "flame.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "atlas",
+   "n_version": null,
+   "kind": "effect",
+   "description": "2x2 flame tongue cards: orange body, yellow mid, hot core, soft tips."
   },
   {
    "id": "water_normal",
