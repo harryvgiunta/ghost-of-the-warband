@@ -31,6 +31,7 @@ const Stamina = preload("res://scripts/stamina.gd")
 const State = preload("res://scripts/player_state.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
+const MobWander = preload("res://scripts/mob_wander.gd")
 
 const MAX_HEALTH := 100.0
 const GOLD := 14
@@ -104,6 +105,8 @@ var _steering := MobSteering.new()
 ## The cry the pack raised or the blow that named its striker. The clone hunts
 ## those bodies past its aggro range and leash until the clocks run out.
 var _senses := MobSenses.new()
+## The stretch of trail this clone patrols when nothing is in sight.
+var _wander := MobWander.new()
 ## Whether this clone has already called the pack to the fight.
 var _woke := false
 
@@ -188,6 +191,7 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	_received_pose = false
 	_steering.reset()
 	_senses.clear()
+	_wander.reset()
 	_woke = false
 	_body.rotation = Vector3.ZERO
 	_body.position = Vector3.ZERO
@@ -213,6 +217,7 @@ func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	_target = null
 	_steering.reset()
 	_senses.clear()
+	_wander.reset()
 	_woke = false
 	var flat := Vector3(facing.x,0.0,facing.z)
 	if flat.length_squared() > 0.0001:
@@ -262,6 +267,24 @@ func blood_weapon_anchor(_hand: String = "") -> Node3D:
 ## The catalog id the clone would leave behind: its main-hand piece.
 func held_weapon_id() -> String:
 	return _main_item
+
+
+## A patrol is one ranger, not a band: two clones never share a patch.
+func wanders_packed() -> bool:
+	return false
+
+
+## How far the patrol strays from the spot it was posted to.
+func wander_radius() -> float:
+	return 15.0
+
+
+func pack_family() -> String:
+	return "ranger"
+
+
+func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
+	_wander.assign(shared, ring_slot, pack_group)
 
 
 func _roll_loadout() -> void:
@@ -343,22 +366,26 @@ func _step_ai(delta: float, candidates: Array) -> void:
 		if not _woke:
 			_woke = true
 			MobSenses.alert_pack(self,_target,_target.global_position)
+			MobSenses.alert_packmates(self,_target,_target.global_position,_wander.group)
 	else:
 		_woke = false
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	if not _engaged(_target):
 		_target = null
-		state = "IDLE"
 		if combat.blocking:
 			combat.stop_block()
-		combat.stop()
-		var return_to: Vector3 = home - global_position
-		return_to.y = 0.0
-		if return_to.length() > 1.5:
-			_move_intent = _steer(return_to.normalized())
-			_move_speed = 3.4
-		_apply_motion(delta,_move_intent)
+		# A calm clone walks its patrol: the trail it was posted to, not a
+		# statue on one spot.
+		var outside: bool = _wander.outside(self)
+		var patrol: Vector3 = _wander.step(self)
+		state = "RETURN" if outside else "IDLE"
+		if patrol.length_squared() > 0.0001:
+			_move_intent = _steer(patrol)
+			_move_speed = 4.2 if outside else 2.6
+			_apply_motion(delta,_move_intent)
+		else:
+			_apply_motion(delta,Vector3.ZERO)
 		return
 	var to_target: Vector3 = _target.global_position - global_position
 	to_target.y = 0.0

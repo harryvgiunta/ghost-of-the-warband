@@ -27,6 +27,7 @@ const FOREST_PROFILES := {
 		"windup": 0.55, "strike": 0.20, "recover": 0.65,
 		"cooldown": 1.50, "lunge": 5.6, "turn": 8.0,
 		"behaviour": "charger", "strafe": 0.85, "blood": 1.00,
+		"packed": true, "roam": 6.0,
 	},
 	"ossuary_stalker": {
 		"display": "Ossuary stalker", "kind": 10,
@@ -37,6 +38,7 @@ const FOREST_PROFILES := {
 		"windup": 0.30, "strike": 0.13, "recover": 0.42,
 		"cooldown": 1.00, "lunge": 7.6, "turn": 11.0,
 		"behaviour": "crawler", "strafe": 1.30, "blood": 0.80,
+		"packed": true, "roam": 7.0,
 	},
 	"gallowsroot": {
 		"display": "Gallowsroot", "kind": 11,
@@ -47,6 +49,7 @@ const FOREST_PROFILES := {
 		"windup": 0.85, "strike": 0.26, "recover": 0.95,
 		"cooldown": 2.40, "lunge": 3.4, "turn": 5.0,
 		"behaviour": "brute", "strafe": 0.0, "blood": 1.50,
+		"packed": false, "roam": 3.0,
 	},
 }
 

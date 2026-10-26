@@ -239,6 +239,26 @@ static func alert_pack(struck: Node3D, attacker: Node3D, at: Vector3,
 	return alerted
 
 
+## A pack fights as one group. Unlike the earshot cry above this ignores
+## distance: every member of `pack_group` takes up the hunt wherever it stands,
+## which is what keeps a band of beasts from watching one of its own die.
+static func alert_packmates(struck: Node3D, attacker: Node3D, at: Vector3,
+		pack_group: String) -> int:
+	if pack_group.is_empty() or not is_instance_valid(struck) or not struck.is_inside_tree():
+		return 0
+	var alerted := 0
+	for other in struck.get_tree().get_nodes_in_group(pack_group):
+		if other == struck or not is_instance_valid(other):
+			continue
+		if other.get("alive") == false:
+			continue
+		if not other.has_method("hear_alert"):
+			continue
+		other.hear_alert(attacker, at)
+		alerted += 1
+	return alerted
+
+
 ## True for a ranger the mob is allowed to hunt: alive and outside the town's
 ## safe ring. Both mob families use this for sight, alerts and responses.
 static func in_safe_ring(safe_center: Vector3, point: Vector3) -> bool:

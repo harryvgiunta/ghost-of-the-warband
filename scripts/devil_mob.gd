@@ -19,6 +19,7 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
+const MobWander = preload("res://scripts/mob_wander.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -34,6 +35,7 @@ const PROFILES := {
 		"windup": 0.45, "strike": 0.18, "recover": 0.55,
 		"cooldown": 1.35, "lunge": 6.2, "turn": 9.0,
 		"behaviour": "charger", "strafe": 0.9, "blood": 1.05,
+		"packed": true, "roam": 6.0,
 	},
 	"succubus": {
 		"display": "Succubus", "kind": 4,
@@ -44,6 +46,7 @@ const PROFILES := {
 		"windup": 0.36, "strike": 0.15, "recover": 0.45,
 		"cooldown": 1.15, "lunge": 7.0, "turn": 10.0,
 		"behaviour": "flyer", "strafe": 1.10, "blood": 0.95,
+		"packed": true, "roam": 7.0,
 	},
 	"spawn": {
 		"display": "Devil spawn", "kind": 5,
@@ -54,6 +57,7 @@ const PROFILES := {
 		"windup": 0.30, "strike": 0.14, "recover": 0.40,
 		"cooldown": 0.90, "lunge": 8.0, "turn": 12.0,
 		"behaviour": "crawler", "strafe": 1.50, "blood": 0.55,
+		"packed": true, "roam": 5.0,
 	},
 	"beast": {
 		"display": "Hell beast", "kind": 6,
@@ -64,6 +68,7 @@ const PROFILES := {
 		"windup": 0.65, "strike": 0.22, "recover": 0.70,
 		"cooldown": 2.00, "lunge": 5.5, "turn": 5.5,
 		"behaviour": "brute", "strafe": 0.2, "blood": 1.35,
+		"packed": true, "roam": 8.0,
 	},
 	"gargoyle": {
 		"display": "Gargoyle", "kind": 7,
@@ -74,6 +79,7 @@ const PROFILES := {
 		"windup": 0.75, "strike": 0.24, "recover": 0.85,
 		"cooldown": 2.20, "lunge": 3.2, "turn": 4.5,
 		"behaviour": "sentinel", "strafe": 0.0, "blood": 1.20,
+		"packed": false, "roam": 4.0,
 	},
 }
 
@@ -111,6 +117,8 @@ var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
 var _senses := MobSenses.new()
 var _steering := MobSteering.new()
+## The patch this body keeps to when it is calm: its own, or the pack's.
+var _wander := MobWander.new()
 var _attacker: Node3D
 
 
@@ -189,8 +197,12 @@ func _physics_process(delta: float) -> void:
 	# view keeps the pursuit alive for `MEMORY_SECONDS`.
 	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
 		_eye_height(), Callable(self, "_is_hostile"))
+	if _senses.woke:
+		# The first sighting of a pack's member is the pack's sighting.
+		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
 	if not is_instance_valid(_target) and not pursuit:
+		_calm_tick(delta)
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
@@ -256,21 +268,49 @@ func _physics_process(delta: float) -> void:
 	_visual.set_combat(state, _state_time)
 
 
+## Nothing in sight and nothing remembered: keep the patch alive. This is the
+## tick that used to freeze a calm mob - with no target the whole state machine
+## was skipped, so a body that spawned at rest never moved again.
+func _calm_tick(delta: float) -> void:
+	if profile.is_empty():
+		# `_ready` refuses an unknown mob id; never tick a body without a profile.
+		return
+	_state_time += delta
+	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	_move_intent = Vector3.ZERO
+	_move_speed = 0.0
+	_face_intent = Vector3.ZERO
+	_return_home(delta)
+	_separate()
+	_drive(delta)
+	if is_instance_valid(_visual):
+		_visual.set_motion(get_real_velocity(), is_on_floor())
+		_visual.set_combat(state, _state_time)
+
+
 func _enter(next_state: String, reset_time := true) -> void:
 	state = next_state
 	if reset_time:
 		_state_time = 0.0
 
 
-func _return_home(delta: float) -> void:
-	var offset := home - global_position
-	offset.y = 0.0
-	if offset.length() > 1.2:
-		_move_intent = _steer(offset.normalized())
-		_move_speed = float(profile.walk_speed)
+## Calm: the mob keeps its patch. It walks to the territory's current goal at
+## its own walk speed, rests when it arrives, and hurries home if a chase left
+## it outside.
+func _return_home(_delta: float) -> void:
+	var direction := _wander.step(self)
+	var outside := _wander.outside(self)
+	if direction.length_squared() > 0.0001:
+		_move_intent = _steer(direction)
+		_move_speed = float(profile.walk_speed) * (2.2 if outside else 1.0)
 		_face_intent = _move_intent
-	elif state != "IDLE":
-		_enter("IDLE")
+		if state != ("RETURN" if outside else "IDLE"):
+			_enter("RETURN" if outside else "IDLE", false)
+		return
+	_move_intent = Vector3.ZERO
+	_move_speed = 0.0
+	if state != "IDLE":
+		_enter("IDLE", false)
 
 
 func _circle(delta: float, distance: float, direction: Vector3) -> void:
@@ -373,6 +413,27 @@ func _candidates() -> Array:
 ## How far this profile can see. Distance alone never starts a fight.
 func _sight_range() -> float:
 	return float(profile.get("sight", 0.0))
+
+
+## Whether this species moves as a band. A sentinel on its post does not.
+func wanders_packed() -> bool:
+	return bool(profile.get("packed", true))
+
+
+## How far a calm body strays from where it spawned.
+func wander_radius() -> float:
+	return float(profile.get("roam", 7.0))
+
+
+## A band is one species: the court's five species stand together but never
+## merge into a single pack.
+func pack_family() -> String:
+	return mob_id
+
+
+## Called by the world once every mob is placed: pack members share one patch.
+func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
+	_wander.assign(shared, ring_slot, pack_group)
 
 
 func _eye_height() -> float:
@@ -480,6 +541,7 @@ func _respond_to_attack() -> void:
 		attacker = nearest
 	_senses.notice(attacker, attacker.global_position)
 	MobSenses.alert_pack(self, attacker, _senses.last_seen)
+	MobSenses.alert_packmates(self, attacker, _senses.last_seen, _wander.group)
 
 
 ## A neighbour was struck within earshot: take up the hunt where it last saw.
