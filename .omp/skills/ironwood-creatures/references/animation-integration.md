@@ -53,7 +53,7 @@ Use phase `p` in `[0,1)`; LF/RF are left/right forepaws, LH/RH left/right hindpa
 Current `enemy.gd` timings and conditions to preserve:
 
 - Enter `WINDUP` from eligible pursuit at horizontal distance `< 1.65`; reset `_state_time=0`, show `_warning`, request zero target velocity (the root still decelerates through its existing movement code).
-- At `_state_time >= 0.65`, check horizontal distance `< 2.1`, `not player_safe`, and vertical separation `< 1.7`, then emit `damaged_player` once (13 for wolf, 23 for sentinel). Enter `RECOVER`, reset `_state_time=0`, hide warning.
+- At `_state_time >= 0.65`, check horizontal distance `< 2.1`, `not player_safe`, and vertical separation `< 1.7`, then emit `damaged_player` once (13 for the wolf). Enter `RECOVER`, reset `_state_time=0`, hide warning.
 - Exit recovery only when `_state_time > 0.85`. Preserve these exact comparisons and the existing frame-boundary behavior. Do not change damage to mesh contact, distance bands, animation callbacks, or a new hitbox as part of a visual overhaul.
 
 Author the single attack clip with these starting landmarks:
@@ -87,15 +87,15 @@ Constrain pelvis/chest vertical and tilt adjustments to plausible reach; distrib
 
 ## 5. Wolf-only cutover in `enemy.gd`
 
-The cutover is implemented. Preserve these invariants when changing the wolf or sentinel; the historical primitive path must not return.
+The cutover is implemented. Preserve these invariants when changing the wolf; the historical primitive path must not return.
 
-1. In `_ready()`, preserve root identity/position, wolf health 38, layer 2, mask `1 | 2 | 4`, floor snap 0.6, max floor angle 46 degrees, capsule radius 0.40/height 0.95 and centre y=height/2, warning geometry, and `_query.collision_mask=1`. Keep sentinel health/capsule values and `_build_guardian()` unchanged. Attach the new visual only for `kind == 0`.
+1. In `_ready()`, preserve root identity/position, wolf health 38, layer 2, mask `1 | 2 | 4`, floor snap 0.6, max floor angle 46 degrees, capsule radius 0.40/height 0.95 and centre y=height/2, warning geometry, and `_query.collision_mask=1`. Attach the new visual only for `kind == 0`; the cinder devil's own capsule (radius 0.34/height 2.15) belongs to its kind branch and must not leak into wolf tuning.
 2. `_build_wolf_visual()` attaches `scripts/wolf_visual.gd`; the old `_build_wolf()` primitive construction is gone. Do not reintroduce a primitive fallback wolf or a second animation driver. `_body` remains the wolf visual container.
-3. Wolf no longer participates in the `_walk_time`/sine `_legs`/`_body.position.y` animation or arm windup. Those arrays and bob remain sentinel-only inside the `kind != 0` branch. `Geo` still serves sentinel/warning construction, so do not remove its preload indiscriminately.
+3. Wolf no longer participates in the `_walk_time`/sine limb/`_body.position.y` animation or arm windup; those fields went with the retired primitive path. `Geo` still builds the warning ring, so do not remove its preload indiscriminately.
 4. Keep `_steer`, safe-area check, return-home behavior, chase speed 3.1/return speed 2.0, acceleration 12, gravity 18, facing interpolation, warning/damage signals and `get_display_name()` unchanged. Aggression is no longer a radius: `scripts/mob_senses.gd` owns the cone, the sight range (`WILD_SIGHT` 23 m), the line-of-sight rays and the 15 s pursuit memory, and the old home `leash` is gone — do not reintroduce either check. Keep `get_aim_position()` at y=0.68 for the baseline unless the user explicitly approves a gameplay geometry change. Review external callers before introducing an interface.
-5. In `take_damage()`, preserve damage labels, one-time `alive` guard, state DEAD, warning hide, deferred collision disable, and `defeated.emit(self, 8)` for wolf / 18 for sentinel. The wolf branch calls `_wolf.die()`, holds the authored collapse for 4.0 seconds, then shrinks `_body` for 0.4 seconds and `queue_free()`s on the original 0.45+4.0+0.4 s lifecycle. The CharacterBody root stays identity-scaled. Sentinel's existing rotation tween remains its own branch.
+5. In `take_damage()`, preserve damage labels, one-time `alive` guard, state DEAD, warning hide, deferred collision disable, and `defeated.emit(self, 8)` for the wolf / 6 for the cinder devil. The wolf branch calls `_wolf.die()`, holds the authored collapse for 4.0 seconds, then shrinks `_body` for 0.4 seconds and `queue_free()`s on the original 0.45+4.0+0.4 s lifecycle. The CharacterBody root stays identity-scaled. The cinder devil branch calls `_devil.die()` and holds its 0.90 s authored collapse before the same corpse path.
 6. `_physics_process()` returns immediately when `not alive`; therefore a wolf visual sampled only from that function would freeze at the first death frame. Give the visual controller an explicit dead-state update path/own clock, or update presentation before the early return while preserving the AI return. Do not re-enable dead AI, collision, reward emission, or locomotion to make the animation run.
-7. Keep the wolf and sentinel branches separate. Do not leave two animation systems fighting over the imported rig, and do not alter the sentinel to “simplify” the branch split.
+7. Keep the wolf and cinder devil branches separate. Do not leave two animation systems fighting over one imported rig, and do not fold one mob's presentation into the other to “simplify” the branch split.
 
 ## 6. Export/import and runtime inspection gates
 
@@ -115,6 +115,6 @@ The cutover is implemented. Preserve these invariants when changing the wolf or 
 | Wolf sinks after repeated transitions | Authored pose snapshot before corrections, stale solved pose reuse and duplicate pose processing; never add an upward offset every switch |
 | Rotation interpolation errors after sustained movement | Rotation-only nodes accumulating extracted scale, mixed scale/rotation ownership and invalid rest frames; construct the intended unit rotation at its producer, not a blanket orthonormalize-at-error patch |
 | Attack impact looks late | Exported impact landmark, transition blending and sampling from new gameplay state/timer; do not move damage into a clip event |
-| Death is frozen or rolls twice | Dead early return, dual animation clocks and leftover `_body.rotation:z` tween in wolf branch |
+| Death is frozen or rolls twice | Dead early return, two animation clocks and a leftover rotation or scale tween fighting the imported collapse |
 | Trot loops pop or paws hop at wrap | Endpoint derivatives, double-held last sample, mismatched contact phase and incorrectly inferred loop settings |
-| Sentinel regresses | Shared `_body`/`_legs`/Geo/tween edits escaped the kind branch; restore its original behavior rather than creating new sentinel motion |
+| Cinder devil regresses | Shared `_body`/warning/`Geo`/death edits escaped the kind branch; restore the affected branch rather than adding the missing motion to the other mob |

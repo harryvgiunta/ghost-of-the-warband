@@ -2666,6 +2666,13 @@ def apply_pose(mob: str, values: dict, fold_legs: dict | None = None) -> None:
         if f"crown_{side}2" in bones:
             set_world_rotation(bones[f"crown_{side}2"],
                                world_quaternion(pitch * 0.7, yaw * 0.5, roll * 0.8))
+    # A barbed tail, where the mob has one: an absolute pitch per segment, so a
+    # mob without tail bones (all three forest mobs) skips this untouched.
+    if "tail_01" in bones:
+        for index, angle in enumerate(values.get("tail", (0.0, 0.0, 0.0))):
+            name = f"tail_0{index + 1}"
+            if name in bones:
+                set_axis_rotation(bones[name], float(angle))
     bpy.context.view_layer.update()
     if values.get("solve_feet", True):
         for side in ("l", "r"):

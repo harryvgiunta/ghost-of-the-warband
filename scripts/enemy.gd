@@ -8,7 +8,7 @@ const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
-const DevilVisual = preload("res://scripts/devil_visual.gd")
+const DevilVisual = preload("res://scripts/cinder_devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
@@ -45,13 +45,10 @@ var home := Vector3.ZERO
 var state := "IDLE"
 var _state_time := 0.0
 var _stagger_duration := 0.0
-var _walk_time := 0.0
 var _body: Node3D
 var _wolf: WolfVisual
 var _devil: DevilVisual
 var _dodge
-var _legs: Array[Node3D] = []
-var _arms: Array[Node3D] = []
 var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
@@ -82,7 +79,7 @@ var _face_intent := Vector3.FORWARD
 var _target: CharacterBody3D
 
 func _ready() -> void:
-	name = "BriarWolf" if kind == 0 else ("CinderDevil" if kind == 2 else "RuinSentinel")
+	name = "BriarWolf" if kind == 0 else "CinderDevil"
 	home = global_position
 	# Watch the road: spawn facing the arriving ranger, like the newer mob
 	# families do. Without a facing the sight cone would stare down -Z forever
@@ -92,7 +89,7 @@ func _ready() -> void:
 		facing.y = 0.0
 		if facing.length_squared() > 0.0001:
 			rotation.y = atan2(-facing.x, -facing.z)
-	max_health = 38.0 if kind == 0 else (DEVIL_HEALTH if kind == 2 else 82.0)
+	max_health = 38.0 if kind == 0 else DEVIL_HEALTH
 	health = max_health
 	collision_layer = 2
 	collision_mask = 1 | 2 | 4
@@ -102,12 +99,11 @@ func _ready() -> void:
 	if kind == 0:
 		shape.radius = 0.40
 		shape.height = 0.95
-	elif kind == 2:
-		shape.radius = 0.22
-		shape.height = 0.90
 	else:
-		shape.radius = 0.48
-		shape.height = 1.9
+		# The authored cinder devil stands 2.11 m to the crown: a gaunt frame
+		# on a 2.15 m capsule, not the 0.9 m primitive imp it replaced.
+		shape.radius = 0.34
+		shape.height = 2.15
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
 	collision.position.y = shape.height * 0.5
@@ -116,10 +112,8 @@ func _ready() -> void:
 	add_child(_body)
 	if kind == 0:
 		_build_wolf_visual()
-	elif kind == 2:
-		_build_devil_visual()
 	else:
-		_build_guardian()
+		_build_devil_visual()
 	var warning_radius := 0.85 if kind == 2 else 1.5
 	var warning_material := Geo.material(Color(0.95, 0.22, 0.08, 0.38))
 	warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -181,35 +175,8 @@ func _build_devil_visual() -> void:
 	_devil.name = "DevilVisual"
 	_body.add_child(_devil)
 
-func _build_guardian() -> void:
-	var stone := Geo.material(Color("65747a"), 0.1)
-	var edge := Geo.material(Color("3e4c54"))
-	var core := Geo.material(Color("d77847"), 0.2)
-	core.emission_enabled = true
-	core.emission = Color("c25629")
-	core.emission_energy_multiplier = 1.1
-	Geo.sphere(_body, 0.55, Vector3(0, 1.20, 0), stone, Vector3(1, 1.1, 0.7))
-	Geo.box(_body, Vector3(0.62, 0.31, 0.42), Vector3(0, 0.78, 0), edge)
-	Geo.sphere(_body, 0.28, Vector3(0, 1.92, -0.02), stone, Vector3(0.85, 1.05, 0.9))
-	Geo.box(_body, Vector3(0.23, 0.06, 0.04), Vector3(0, 1.96, -0.26), core)
-	Geo.sphere(_body, 0.13, Vector3(0, 1.32, -0.35), core, Vector3(1, 1.25, 0.4))
-	for side in [-1.0, 1.0]:
-		var leg := Node3D.new()
-		leg.position = Vector3(side * 0.24, 0.81, 0)
-		_body.add_child(leg)
-		_legs.append(leg)
-		Geo.cylinder(leg, 0.15, 0.18, 0.55, Vector3(0, -0.30, 0), stone, 6)
-		Geo.box(leg, Vector3(0.33, 0.20, 0.43), Vector3(0, -0.68, -0.10), edge)
-		var arm := Node3D.new()
-		arm.position = Vector3(side * 0.48, 1.49, 0)
-		_body.add_child(arm)
-		_arms.append(arm)
-		Geo.sphere(arm, 0.23, Vector3.ZERO, stone)
-		Geo.cylinder(arm, 0.14, 0.17, 0.44, Vector3(0, -0.28, 0), stone, 7)
-		Geo.sphere(arm, 0.22, Vector3(0, -0.60, -0.04), edge, Vector3(1, 1.2, 1))
-
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0, 0.68 if kind == 0 else (0.55 if kind == 2 else 1.28), 0)
+	return global_position + Vector3(0, 0.68 if kind == 0 else 1.25, 0)
 
 func blood_rig() -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
@@ -219,7 +186,7 @@ func blood_rig() -> Node3D:
 	return _body
 
 func blood_scale() -> float:
-	return 1.35 if kind == 0 else (0.75 if kind == 2 else 1.0)
+	return 1.35 if kind == 0 else 1.20
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
@@ -227,7 +194,7 @@ func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	return null
 
 ## The limb or muzzle that landed the blow, for the blood it carried away: a
-## wolf's jaws, the cinder devil's raking hand, the sentinel's stone fist.
+## wolf's jaws or the cinder devil's raking hand.
 func blood_strike_point() -> Vector3:
 	if kind == 0 and is_instance_valid(_wolf):
 		return _wolf.head_hitbox_center()
@@ -236,39 +203,32 @@ func blood_strike_point() -> Vector3:
 	return get_aim_position()
 
 func get_display_name() -> String:
-	return "Briar wolf" if kind == 0 else ("Cinder devil" if kind == 2 else "Ruin sentinel")
+	return "Briar wolf" if kind == 0 else "Cinder devil"
 
-## The catalog id of the weapon this mob carries; empty for wolves, sentinels
-## and claw devils that hold nothing.
+## The catalog id of the weapon this mob carries; empty for wolves and claw
+## devils that hold nothing.
 func held_weapon_id() -> String:
 	return HeldWeapon.item_id(devil_weapon) if kind == 2 else ""
 
 func head_hitbox_center() -> Vector3:
 	if kind == 0 and is_instance_valid(_wolf):
 		return _wolf.head_hitbox_center()
-	if kind == 2 and is_instance_valid(_devil):
+	if is_instance_valid(_devil):
 		return _devil.head_hitbox_center()
-	if is_instance_valid(_body):
-		return _body.to_global(Vector3(0,1.92,-0.02))
 	return get_aim_position()
-
 func head_hit_profile() -> Vector2:
 	if kind == 0:
 		return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
-	if kind == 2:
-		return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
-	return Vector2(Hitbox.SENTINEL_HEAD_RADIUS,Hitbox.SENTINEL_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
 
 
 func _physics_process(delta: float) -> void:
 	if replica:
-		if kind == 1:
-			_update_cosmetics(delta)
 		return
 	if not alive:
 		return
-	# Sight and the pursuit memory decide aggression for the wolf, the sentinel
-	# and the cinder devil exactly as they do for the newer mob families.
+	# Sight and the pursuit memory decide aggression for the wolf and the
+	# cinder devil exactly as they do for the newer mob families.
 	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
 		_eye_height(), Callable(self, "_is_hostile"))
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
@@ -284,7 +244,7 @@ func _physics_process(delta: float) -> void:
 	var distance := displacement.length()
 	var target_safe := MobSenses.in_safe_ring(safe_center, focus)
 	var target_direction := Vector3.ZERO
-	var speed := 3.1 if kind == 0 else 2.2
+	var speed := 3.1
 	if state == "STAGGER":
 		if _state_time >= _stagger_duration:
 			state = "IDLE"
@@ -292,7 +252,7 @@ func _physics_process(delta: float) -> void:
 	elif state == "WINDUP":
 		if _state_time >= 0.65:
 			if distance < 2.1 and not target_safe and absf(_target.position.y - position.y) < 1.7:
-				attacked.emit(self,13.0 if kind == 0 else 23.0,_target)
+				attacked.emit(self,13.0,_target)
 			# A parry can synchronously replace the attack with STAGGER.
 			if state == "WINDUP":
 				state = "RECOVER"
@@ -359,12 +319,10 @@ func _sight_range() -> float:
 	return DEVIL_SIGHT if kind == 2 else WILD_SIGHT
 
 
-## Eye height follows the authored body: the wolf looks out low, the sentinel
-## looks out of its carved head.
+## Eye height follows the authored body: the wolf looks out low, the cinder
+## devil looks out of its horned skull about two metres up.
 func _eye_height() -> float:
-	var height := 1.9 if kind == 1 else 0.95
-	if kind == 2:
-		height = 0.90
+	var height := 0.95 if kind == 0 else 2.15
 	return maxf(0.6, height * MobSenses.EYE_HEIGHT_FRACTION)
 
 
@@ -374,22 +332,10 @@ func _is_hostile(candidate: Node3D) -> bool:
 		return false
 	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
 
-func _update_cosmetics(delta: float) -> void:
-	if kind == 0:
-		var actual_velocity := get_real_velocity()
-		_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
-		_wolf.set_combat(state, _state_time)
-		return
-	if kind != 1:
-		return
-	var moving := Vector2(velocity.x, velocity.z).length()
-	_walk_time += delta * moving * 2.4
-	_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
-	for index in _legs.size():
-		var offset := PI if index % 2 == 0 else 0.0
-		_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
-	for arm in _arms:
-		arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
+func _update_cosmetics(_delta: float) -> void:
+	var actual_velocity := get_real_velocity()
+	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
+	_wolf.set_combat(state, _state_time)
 
 func _step_devil(delta: float, pursuit: bool) -> void:
 	_state_time += delta
@@ -752,7 +698,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
-	# Every mob bleeds: wolf, stone sentinel and devil all carry blood in this
+	# Every mob bleeds: the wolf and the cinder devil both carry blood in this
 	# world, so a landed hit always reads on the body and on the floor.
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
 		health <= 0.0,blood_scale())
@@ -803,7 +749,7 @@ func _enter_dead(announce: bool) -> void:
 		# The dropped pickup owns the weapon now; keep it out of the corpse.
 		_devil.set_weapon("claw")
 	if announce:
-		defeated.emit(self, 8 if kind == 0 else (6 if kind == 2 else 18))
+		defeated.emit(self, 8 if kind == 0 else 6)
 	# Collapse first, then hold the corpse for the shared five minutes.
 	var death_tween := create_tween()
 	if kind == 0:
@@ -812,13 +758,10 @@ func _enter_dead(announce: bool) -> void:
 		# container shrinks, never the CharacterBody root.
 		death_tween.tween_interval(0.45)
 		CorpseHold.append(death_tween, self, _body)
-	elif kind == 2:
-		_devil.die()
-		# The devil flops in its own 0.55 s pose before the corpse hold.
-		death_tween.tween_interval(0.55)
-		CorpseHold.append(death_tween, self, _body)
 	else:
-		death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
+		_devil.die()
+		# The devil goes down on its own 0.90 s clip before the corpse hold.
+		death_tween.tween_interval(0.90)
 		CorpseHold.append(death_tween, self, _body)
 
 func snapshot() -> Dictionary:
@@ -864,8 +807,6 @@ func apply_snapshot(state: Dictionary) -> void:
 	if kind == 0:
 		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
 		_wolf.set_combat(self.state,_state_time)
-	elif kind == 1:
-		_update_cosmetics(0.0)
 	else:
 		_devil.set_motion(velocity,grounded)
 		_devil.set_action(self.state,_state_time)

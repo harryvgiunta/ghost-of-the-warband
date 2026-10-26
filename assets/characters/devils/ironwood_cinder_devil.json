@@ -1,0 +1,139 @@
+{
+  "asset": "ironwood_cinder_devil.glb",
+  "mob": "cinder_devil",
+  "display": "Cinder devil",
+  "summary": "A gaunt charred horror with embers burning in a split ribcage.",
+  "skeleton": "CinderArmature/Skeleton3D",
+  "bone_count": 38,
+  "bone_names": [
+    "root",
+    "pelvis",
+    "spine_01",
+    "spine_02",
+    "chest",
+    "neck_01",
+    "neck_02",
+    "head",
+    "jaw",
+    "crown_l",
+    "crown_l2",
+    "crown_r",
+    "crown_r2",
+    "clavicle_l",
+    "upper_arm_l",
+    "lower_arm_l",
+    "hand_l",
+    "finger_l_1",
+    "finger_l_2",
+    "finger_l_3",
+    "clavicle_r",
+    "upper_arm_r",
+    "lower_arm_r",
+    "hand_r",
+    "finger_r_1",
+    "finger_r_2",
+    "finger_r_3",
+    "thigh_l",
+    "shin_l",
+    "foot_l",
+    "toe_l",
+    "thigh_r",
+    "shin_r",
+    "foot_r",
+    "toe_r",
+    "tail_01",
+    "tail_02",
+    "tail_03"
+  ],
+  "forward": [
+    0,
+    0,
+    -1
+  ],
+  "up": [
+    0,
+    1,
+    0
+  ],
+  "unit": "metres",
+  "rest_bounds_min": [
+    -0.38898202776908875,
+    0.006657739169895649,
+    -0.4408031105995178
+  ],
+  "rest_bounds_max": [
+    0.38895851373672485,
+    2.2415690422058105,
+    0.5048384070396423
+  ],
+  "mesh_triangles": 43468,
+  "materials": [
+    "Cinder_Char",
+    "Cinder_Bone",
+    "Cinder_Void",
+    "Cinder_Ember",
+    "Cinder_Horn",
+    "Cinder_Ash",
+    "Cinder_Cloth",
+    "Cinder_Leather"
+  ],
+  "embedded_images": 26,
+  "clips": {
+    "idle": {
+      "name": "Cinder_Idle",
+      "duration": 2.2,
+      "loop": true
+    },
+    "walk": {
+      "name": "Cinder_Walk",
+      "duration": 0.9,
+      "loop": true,
+      "stride": 0.78,
+      "duty": 0.56
+    },
+    "run": {
+      "name": "Cinder_Run",
+      "duration": 0.6166666666666667,
+      "loop": true,
+      "stride": 1.62,
+      "duty": 0.4
+    },
+    "attack": {
+      "name": "Cinder_Attack",
+      "duration": 0.8,
+      "loop": false,
+      "impact": 0.38
+    },
+    "shoot": {
+      "name": "Cinder_Shoot",
+      "duration": 0.55,
+      "loop": false,
+      "impact": 0.3
+    },
+    "hit": {
+      "name": "Cinder_Hit",
+      "duration": 0.36666666666666664,
+      "loop": false,
+      "impact": 0.1
+    },
+    "death": {
+      "name": "Cinder_Death",
+      "duration": 0.9,
+      "loop": false
+    }
+  },
+  "animations": {
+    "Cinder_Idle": 2.2,
+    "Cinder_Walk": 0.9,
+    "Cinder_Run": 0.6166666666666667,
+    "Cinder_Attack": 0.8,
+    "Cinder_Shoot": 0.55,
+    "Cinder_Hit": 0.36666666666666664,
+    "Cinder_Death": 0.9
+  },
+  "authoring_fps": 60,
+  "root_translation_channels": 7,
+  "root_translation_drift": 0.0,
+  "source": "Original procedural work authored by tools/prepare_cinder_devil.py from tools/cinder_devil_surface.py and tools/cinder_devil_styles.py on the shared tools/prepare_forest_mobs.py machinery; no third-party model, texture or motion.",
+  "reproducer": "python tools/build_cinder_devil.py"
+}

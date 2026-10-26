@@ -54,8 +54,6 @@ func run() -> void:
 
 	var wolf = Enemy.new()
 	wolf.kind = 0
-	var sentinel = Enemy.new()
-	sentinel.kind = 1
 	var cinder = Enemy.new()
 	cinder.kind = 2
 	cinder.devil_weapon = "claw"
@@ -65,7 +63,6 @@ func run() -> void:
 	delve.configure(1, "claw", 1)
 	var corpses := [
 		["Briar wolf", wolf, Vector3(-6.0, 0.12, 0.0)],
-		["Ruin sentinel", sentinel, Vector3(-3.0, 0.12, 0.0)],
 		["Cinder devil", cinder, Vector3(0.0, 0.12, 0.0)],
 		["Hellish goat man", pack, Vector3(3.0, 0.12, 0.0)],
 		["Delve devil", delve, Vector3(6.0, 0.12, 0.0)],
@@ -93,8 +90,6 @@ func run() -> void:
 	check(cinder._devil.is_dead(), "The cinder devil holds its authored death pose")
 	check(pack._visual.is_dead(), "An imported devil holds its authored death pose")
 	check(delve._visual.is_dead(), "A delve devil holds its authored death pose")
-	await pause(0.6)
-	check(sentinel._body.rotation.z > 0.1, "The sentinel collapses onto its side")
 
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.

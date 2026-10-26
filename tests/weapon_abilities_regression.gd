@@ -453,26 +453,30 @@ func run() -> void:
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await create_timer(0.8).timeout
-	var sentinel := Enemy.new()
-	sentinel.kind = 1
-	sentinel.player = game.player
-	sentinel.safe_center = game.world.player_spawn
-	sentinel.position = game.player.global_position + facing(game) * 2.2 + Vector3(0, 0.1, 0)
-	game.add_child(sentinel)
-	sentinel.set_physics_process(false)
-	sentinel.set_process(false)
+	var mob := Enemy.new()
+	mob.kind = 0
+	mob.player = game.player
+	mob.safe_center = game.world.player_spawn
+	mob.position = game.player.global_position + facing(game) * 2.2 + Vector3(0, 0.1, 0)
+	game.add_child(mob)
+	# The spin lands 70, well past a wolf's 38, so give this body room to take
+	# the blow whole instead of letting the health clamp swallow the number.
+	mob.max_health = 200.0
+	mob.health = 200.0
+	mob.set_physics_process(false)
+	mob.set_process(false)
 	equip(game.archer, "sword_great")
 	game._update_loadout()
-	game.combat.set_aim(sentinel.get_aim_position())
-	game.archer.aim_at(sentinel.get_aim_position())
+	game.combat.set_aim(mob.get_aim_position())
+	game.archer.aim_at(mob.get_aim_position())
 	await physics_frame
-	var health_before: float = sentinel.health
+	var health_before: float = mob.health
 	var spin_outcome: Dictionary = game.ability.activate(0)
 	check(bool(spin_outcome.get("ok", false)), "The frontier starts the greatsword spin")
 	await create_timer(0.45).timeout
-	check(sentinel.health < health_before, "The spin cue damages a frontier mob")
-	check(is_equal_approx(health_before - sentinel.health, 70.0), "The spin lands its full 70 on an unarmored mob")
-	sentinel.queue_free()
+	check(mob.health < health_before, "The spin cue damages a frontier mob")
+	check(is_equal_approx(health_before - mob.health, 70.0), "The spin lands its full 70 on an unarmored mob")
+	mob.queue_free()
 	await process_frame
 
 	var wolf := Enemy.new()
@@ -515,12 +519,13 @@ func run() -> void:
 	var ray_origin: Vector3 = game.camera.project_ray_origin(view_center)
 	var ray_normal: Vector3 = game.camera.project_ray_normal(view_center)
 	var flank := Enemy.new()
-	flank.kind = 1
+	flank.kind = 0
 	flank.player = game.player
 	flank.safe_center = game.world.player_spawn
-	# The sentinel capsule is 1.9 m tall from its origin, so 0.9 m below the ray
-	# centres it on the crosshair rather than floating the body off the line.
-	flank.position = ray_origin + ray_normal * 6.0 - Vector3(0.0, 0.9, 0.0)
+	# The wolf capsule rises 0.95 m from its origin, so 0.475 m below the ray
+	# centres the body on the crosshair. Its aim point sits at +0.68 m, leaving
+	# 0.205 m of that metre the crosshair check allows.
+	flank.position = ray_origin + ray_normal * 6.0 - Vector3(0.0, 0.475, 0.0)
 	game.add_child(flank)
 	flank.set_physics_process(false)
 	flank.set_process(false)
@@ -546,7 +551,7 @@ func run() -> void:
 	await process_frame
 
 	var blast_target := Enemy.new()
-	blast_target.kind = 1
+	blast_target.kind = 0
 	blast_target.player = game.player
 	blast_target.safe_center = game.world.player_spawn
 	blast_target.position = game.player.global_position + facing(game) * 4.5 + Vector3(0, 0.1, 0)
@@ -571,7 +576,7 @@ func run() -> void:
 	# Piercing shot: one arrow damages two bodies in line and keeps flying.
 	var pike_line: Vector3 = facing(game)
 	var pike_near := Enemy.new()
-	pike_near.kind = 1
+	pike_near.kind = 0
 	pike_near.player = game.player
 	pike_near.safe_center = game.world.player_spawn
 	pike_near.position = game.player.global_position + pike_line * 4.0 + Vector3(0, 0.1, 0)
@@ -579,7 +584,7 @@ func run() -> void:
 	pike_near.set_physics_process(false)
 	pike_near.set_process(false)
 	var pike_far := Enemy.new()
-	pike_far.kind = 1
+	pike_far.kind = 0
 	pike_far.player = game.player
 	pike_far.safe_center = game.world.player_spawn
 	pike_far.position = game.player.global_position + pike_line * 6.0 + Vector3(0, 0.1, 0)
@@ -589,9 +594,12 @@ func run() -> void:
 	equip(game.archer, "bow_long")
 	game._update_loadout()
 	game.ability.reset()
-	aim_camera_at(game, pike_far.get_aim_position())
-	game.combat.set_aim(pike_far.get_aim_position())
-	game.archer.aim_at(pike_far.get_aim_position())
+	# A wolf capsule tops out at 1.05 m, so a crosshair line over the far body
+	# skims the near one's crown. Take the near wolf instead and let the shot
+	# pierce through to the far wolf standing in the same line.
+	aim_camera_at(game, pike_near.get_aim_position())
+	game.combat.set_aim(pike_near.get_aim_position())
+	game.archer.aim_at(pike_near.get_aim_position())
 	await physics_frame
 	var pike_near_health: float = pike_near.health
 	var pike_far_health: float = pike_far.health
@@ -607,12 +615,16 @@ func run() -> void:
 	# Backstab: the caster blinks behind the aimed body on the authority and the
 	# stab spends twice the dagger damage on the back it is now facing.
 	var stalked := Enemy.new()
-	stalked.kind = 1
+	stalked.kind = 0
 	stalked.player = game.player
 	stalked.safe_center = game.world.player_spawn
 	var stalk_line: Vector3 = facing(game)
 	stalked.position = game.player.global_position + stalk_line * 2.5 + Vector3(0, 0.1, 0)
 	game.add_child(stalked)
+	# A wolf's 38 already covers the 28 the stab lands, but pin the body higher
+	# still so no clamp can shorten the asserted number.
+	stalked.max_health = 200.0
+	stalked.health = 200.0
 	stalked.set_physics_process(false)
 	stalked.set_process(false)
 	# Looking away: its back is toward the archer, which is where the blink fits.
@@ -636,7 +648,7 @@ func run() -> void:
 	var stalked_forward: Vector3 = -stalked.global_basis.z
 	stalked_forward.y = 0.0
 	check(behind_offset.dot(stalked_forward.normalized()) < 0.0, "The caster lands behind the target")
-	check(is_equal_approx(stalked_health - stalked.health, 28.0), "The stab lands 28 on an unarmored sentinel")
+	check(is_equal_approx(stalked_health - stalked.health, 28.0), "The stab lands 28 on an unarmored wolf")
 	check(not game.ability.active, "Backstab finishes on its own clock")
 	stalked.queue_free()
 	await process_frame
@@ -714,19 +726,25 @@ func run() -> void:
 			lane = heading
 	var lane_yaw := atan2(-lane.x,-lane.z)
 	var lane_near := Enemy.new()
-	lane_near.kind = 1
+	lane_near.kind = 0
 	lane_near.player = game.player
 	lane_near.safe_center = game.world.player_spawn
 	lane_near.position = lane_start + lane * 2.0 + Vector3(0, 0.1, 0)
 	game.add_child(lane_near)
+	# The lane cuts 68.4 from each body, past a wolf's 38, so both need room to
+	# report the whole hit instead of clamping at zero.
+	lane_near.max_health = 200.0
+	lane_near.health = 200.0
 	lane_near.set_physics_process(false)
 	lane_near.set_process(false)
 	var lane_far := Enemy.new()
-	lane_far.kind = 1
+	lane_far.kind = 0
 	lane_far.player = game.player
 	lane_far.safe_center = game.world.player_spawn
 	lane_far.position = lane_start + lane * 4.0 + Vector3(0, 0.1, 0)
 	game.add_child(lane_far)
+	lane_far.max_health = 200.0
+	lane_far.health = 200.0
 	lane_far.set_physics_process(false)
 	lane_far.set_process(false)
 	await physics_frame

@@ -82,11 +82,11 @@ func run() -> void:
 	target.rig.set_cover(false, Vector3.ZERO, 0.0, false, Vector3.ZERO)
 	target.rig.advance_animation(STEP)
 
-	# --- Frontier enemies: sentinel and wolf zones. ---
-	var sentinel = Enemy.new()
-	sentinel.kind = 1
-	sentinel.position = Vector3(12, 0, 0)
-	world.add_child(sentinel)
+	# --- Frontier enemies: cinder devil and wolf zones. ---
+	var devil = Enemy.new()
+	devil.kind = 2
+	devil.position = Vector3(12, 0, 0)
+	world.add_child(devil)
 	var wolf = Enemy.new()
 	wolf.kind = 0
 	wolf.position = Vector3(-12, 0, 0)
@@ -94,14 +94,15 @@ func run() -> void:
 	await physics_frame
 	await physics_frame
 	await process_frame
-	var sentinel_head: Vector3 = sentinel.head_hitbox_center()
-	check(sentinel_head.y > 1.7, "The sentinel head zone sits on the stone head")
-	check(Hitbox.is_headshot(sentinel, sentinel_head), "The sentinel head is a head zone")
-	check(not Hitbox.is_headshot(sentinel, sentinel.global_position + Vector3(0, 1.0, 0)), "The sentinel torso is body")
-	sentinel.take_damage(10.0, 0, true)
-	check(is_equal_approx(sentinel.health, 62.0), "Sentinel head damage doubles")
-	sentinel.take_damage(10.0, 0, false)
-	check(is_equal_approx(sentinel.health, 52.0), "Sentinel body damage stays base")
+	check(is_equal_approx(devil.max_health, 24.0), "The cinder devil carries its twenty-four health pool")
+	var devil_head: Vector3 = devil.head_hitbox_center()
+	check(devil_head.y > 1.5, "The cinder devil head zone rides the imported head bone above the shoulders")
+	check(Hitbox.is_headshot(devil, devil_head), "The cinder devil head is a head zone")
+	check(not Hitbox.is_headshot(devil, devil.global_position + Vector3(0, 1.0, 0)), "The cinder devil torso is body")
+	devil.take_damage(5.0, 0, true)
+	check(is_equal_approx(devil.health, 14.0), "Cinder devil head damage doubles")
+	devil.take_damage(5.0, 0, false)
+	check(is_equal_approx(devil.health, 9.0), "Cinder devil body damage stays base")
 
 	var wolf_head: Vector3 = wolf.head_hitbox_center()
 	check(wolf_head.y > 0.8 and wolf_head.z < wolf.global_position.z - 0.4, "The wolf head zone follows the imported head bone")

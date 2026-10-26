@@ -90,7 +90,7 @@ func run() -> void:
 		for angle in [-65.0,0.0,65.0]:
 			crowd.append(target_on_arc(distance,angle))
 	crowd.append(target_at(Vector3(0,0,-0.25)))
-	crowd.append(target_at(Vector3(0.6,0,-1.0),1))
+	crowd.append(target_at(Vector3(0.6,0,-1.0)))
 	var rear = target_at(Vector3(0,0,1.0))
 	var far = target_at(Vector3(0,0,-2.30))
 	var above = target_at(Vector3(0,3.0,-1.0))
@@ -177,8 +177,11 @@ func run() -> void:
 				check((enemy.health < START_HEALTH) == (size == 2),"Only the greatsword reaches the 2.55 m ring")
 	await clear_targets()
 
-	var staff_edge = target_on_arc(1.72,0)
-	var staff_far = target_on_arc(2.1,0)
+	# Staff reach is measured to the body surface, so the probe distance has to
+	# include the cinder devil's 0.34 m capsule radius. 1.84 - 0.34 = 1.50 m is
+	# the bone staff's limit and just inside the ember staff's 1.60 m.
+	var staff_edge = target_on_arc(1.84,0)
+	var staff_far = target_on_arc(2.22,0)
 	await settle()
 	for staff_index in 2:
 		attacker.rig.set_staff(staff_index,true)
