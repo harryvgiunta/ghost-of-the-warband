@@ -31,6 +31,7 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
+const Seat = preload("res://scripts/seat_loadout.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 ## Delve devils answer the backstab preflight; the players' layer is 4.
@@ -50,10 +51,20 @@ const HOOK_KILL_DELAY := 2.0
 # Summoning ritual and wave schedule. Odd depths are the sanctuary, even depths
 # the ossuary, and each room alternates through a fresh palette cycle.
 const RITUAL_SECONDS := 3.2
-const WAVE1_TOTAL := 26
+## Whole-wave budget, every body included: ten enemies on wave one and five more
+## every wave after it (10, 15, 20, 25, 30, 35 ...), whatever the room. The court
+## devils and the clones are drawn from this budget instead of being stacked on
+## top of it, so `wave_total` is exactly the ramp.
+const WAVE_FIRST_ENEMIES := 10
+const WAVE_STEP := 5
 const WAVE1_SECONDS := 30.0
-const WAVE2_TOTAL := 26
 const WAVE2_SECONDS := 40.0
+## The crimson clones are the heaviest body in the chamber, so they hold the end
+## of the schedule and only enlist from the third wave of the run.
+const CLONE_FIRST_WAVE := 3
+const CLONE_MAX := 4
+## Cycle one's plain ladder keeps the old imps-to-devils ratio (16:10).
+const CYCLE_ONE_IMP_SHARE := 0.62
 const SPAWN_CURVE := 0.6
 const SPAWN_PLAYER_CLEARANCE := 3.0
 const SPAWN_MUTUAL_CLEARANCE := 1.6
@@ -487,6 +498,7 @@ func _local_loadout() -> Dictionary:
 		"bow":int(node.equipped_index("bow")),
 		"sword":int(node.equipped_index("sword")),
 		"armor":ArmorData.pack(node.equipped_pieces()),
+		"trinkets":node.trinkets(),
 	}
 
 func _catalog_hand(value: Variant, slot: String) -> String:
@@ -522,7 +534,9 @@ func _apply_loadout(slot: int, loadout: Dictionary) -> void:
 		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
 		# hand falls through instead of wiping a valid seat.
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else actor.rig.armor_pieces.duplicate()
-		actor.rig.apply_loadout(State.build_loadout(main,off,pieces))
+		var worn := Seat.trinkets(loadout.get("trinkets"))
+		worn["off"] = off
+		actor.rig.apply_loadout(State.build_loadout(main,off,pieces,worn))
 		return
 	if bow_ok:
 		actor.rig.set_bow(int(bow))
@@ -975,7 +989,8 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	if network_role != "host":
 		return
-	var damage := Combat.damage_for(actors[slot].rig.bow_index,charge)
+	var damage := Combat.damage_for(actors[slot].rig.bow_index,charge,
+		actors[slot].rig.ranged_scale())
 	var visual_origin: Vector3 = actors[slot].rig.last_arrow_visual_origin
 	_spawn_arrow(slot,origin,direction,speed,damage,true,visual_origin)
 	_arrow_event.rpc(slot,origin,direction,speed,visual_origin)
@@ -1217,7 +1232,8 @@ func _arrow_event(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 func _on_thrown_weapon(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
 	if network_role != "host":
 		return
-	var damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	var damage := Combat.throw_damage(weapon_name,weapon_index,charge,
+		actors[slot].rig.throw_scale())
 	_spawn_thrown(slot,origin,direction,speed,weapon_name,weapon_index,damage,true)
 	_throw_event.rpc(slot,origin,direction,speed,weapon_name,weapon_index)
 	throws_fired += 1
@@ -1259,6 +1275,11 @@ func _on_actor_fell(_slot: int, _source_id: int) -> void:
 func _on_devil_died(devil) -> void:
 	if network_role != "host":
 		return
+	var killer := -1
+	if is_instance_valid(devil) and devil.get("last_hitter") != null:
+		killer = int(devil.last_hitter)
+	if killer >= 0 and killer < actors.size():
+		actors[killer].apply_kill_refill()
 	_drop_devil_weapon(devil)
 	_check_depth_cleared()
 
@@ -1368,6 +1389,8 @@ func _local_state(actor) -> Dictionary:
 		"left":actor.rig.melee_progress_for("left"), "right":actor.rig.melee_progress_for("right"),
 		"downed":not actor.alive, "sealed":bool(world.sealed), "run_phase":phase,
 		"ability":actor.ability.hud_state(0), "ability_off":actor.ability.hud_state(1),
+		"ability_trinket":actor.ability.hud_state(2),
+		"max_health":actor.max_health, "max_stamina":actor.max_stamina,
 	}
 
 func _prompt_text() -> String:
@@ -1638,7 +1661,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					send_action("ability",1)
 				else:
 					send_action("weapon","sword")
-			KEY_3: send_action("weapon","dagger")
+			KEY_3:
+				if event.shift_pressed:
+					send_action("ability",2)
+				else:
+					send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
 			KEY_6: send_action("consume","bandage")
@@ -1875,65 +1902,77 @@ func wave_plan() -> Array:
 func _wave_duration(kind: String) -> float:
 	return WAVE2_SECONDS if kind == World.ROOM_OSSUARY else WAVE1_SECONDS
 
-func _wave_total_for(kind: String, room_cycle: int) -> int:
-	var cycles := maxi(1,room_cycle) - 1
-	if kind == World.ROOM_OSSUARY:
-		return WAVE2_TOTAL + 3 * cycles
-	return WAVE1_TOTAL + 2 * cycles
+## The wave budget: ten enemies on the run's first wave, five more each wave.
+## The room kind picks the window length and the composition, never the count.
+func _wave_total_for() -> int:
+	return WAVE_FIRST_ENEMIES + WAVE_STEP * maxi(0,wave_number - 1)
 
-## Cycle one's base is deliberately plain: sixteen imps and ten devils. Every
-## wave, cycle one included, then adds the five court devils and the clones on
-## top of that base, interleaved through the schedule.
-func _wave_roles(kind: String, base_total: int) -> Array:
+## One budget, one composition: the five court devils and the crimson clones are
+## set pieces drawn from the wave total, and the plain ladder fills the rest, so
+## `wave_total` is the number of bodies the room fields. Cycle one's ladder is
+## deliberately plain - imps and cinder devils in the old 16:10 ratio - and the
+## deeper cycles trade imps for bonefiends and brutes in the ossuary, devils in
+## the sanctuary. The list comes back ordered easy to hard: see `_easy_first`.
+func _wave_roles(kind: String, total: int) -> Array:
+	var extras: Array = []
+	for role in Devil.SPECIES_ROLES:
+		extras.append(str(role))
+	for index in _clone_count():
+		extras.append(Devil.ROLE_RANGER)
+	var ladder := maxi(1,total - extras.size())
 	var roles: Array = []
 	if int(world.cycle) <= 1:
-		var imps := mini(16,base_total)
+		var imps := clampi(int(round(float(ladder) * CYCLE_ONE_IMP_SHARE)),1,ladder)
 		for index in imps:
 			roles.append(Devil.ROLE_IMP)
-		for index in base_total - imps:
+		for index in ladder - imps:
 			roles.append(Devil.ROLE_DEVIL)
 	elif kind == World.ROOM_OSSUARY:
-		var heavy := mini(maxi(2,int(round(float(base_total) * 0.2))),base_total)
-		var brutes := mini(maxi(2,int(round(float(base_total) * 0.3))),base_total - heavy)
+		var heavy := mini(maxi(2,int(round(float(ladder) * 0.2))),ladder)
+		var brutes := mini(maxi(2,int(round(float(ladder) * 0.3))),ladder - heavy)
 		for index in heavy:
 			roles.append(Devil.ROLE_IMP)
-		for index in base_total - heavy - brutes:
+		for index in ladder - heavy - brutes:
 			roles.append(Devil.ROLE_BONEFIEND)
 		for index in brutes:
 			roles.append(Devil.ROLE_BRUTE)
 	else:
-		var devils := mini(maxi(2,base_total / 4),base_total)
-		for index in base_total - devils:
+		var devils := mini(maxi(2,ladder / 4),ladder)
+		for index in ladder - devils:
 			roles.append(Devil.ROLE_IMP)
 		for index in devils:
 			roles.append(Devil.ROLE_DEVIL)
-	var extras: Array = []
-	for role in Devil.SPECIES_ROLES:
-		extras.append(str(role))
-	for index in mini(1 + int(world.cycle),4):
-		extras.append(Devil.ROLE_RANGER)
-	return _interleave(roles,extras)
+	roles.append_array(extras)
+	return _easy_first(roles)
 
+## How many crimson clones join this wave: none before `CLONE_FIRST_WAVE`, one on
+## that wave, then one more per wave up to `CLONE_MAX`.
+func _clone_count() -> int:
+	return clampi(wave_number - CLONE_FIRST_WAVE + 1,0,CLONE_MAX)
 
-## Spreads the extras evenly through the base ladder instead of stacking them
-## all at the end of the late-weighted spawn schedule.
-func _interleave(roles: Array, extras: Array) -> Array:
-	if roles.is_empty() or extras.is_empty():
-		var only := roles.duplicate()
-		only.append_array(extras)
-		return only
-	var merged: Array = []
-	var gap := float(roles.size()) / float(extras.size())
-	var extra_index := 0
+## Sorts a wave's roles from the lightest body to the heaviest, so the ritual's
+## opening seconds are imps and the court devils and clones arrive as the room
+## closes. Ties keep their composition order, which keeps the schedule stable.
+func _easy_first(roles: Array) -> Array:
+	var ranked: Array = []
 	for index in roles.size():
-		while extra_index < extras.size() and float(index) + 0.5 >= gap * float(extra_index):
-			merged.append(extras[extra_index])
-			extra_index += 1
-		merged.append(roles[index])
-	while extra_index < extras.size():
-		merged.append(extras[extra_index])
-		extra_index += 1
-	return merged
+		var role := str(roles[index])
+		ranked.append({
+			"role": role,
+			"tier": int(Devil.ROLE_DIFFICULTY.get(role,Devil.ROLE_DIFFICULTY.size())),
+			"index": index
+		})
+	ranked.sort_custom(_compare_difficulty)
+	var ordered: Array = []
+	for entry in ranked:
+		ordered.append(str(entry.get("role",Devil.ROLE_DEVIL)))
+	return ordered
+
+## Stable by construction: the composition index breaks every tier tie.
+func _compare_difficulty(a: Dictionary, b: Dictionary) -> bool:
+	if int(a.get("tier",0)) != int(b.get("tier",0)):
+		return int(a.get("tier",0)) < int(b.get("tier",0))
+	return int(a.get("index",0)) < int(b.get("index",0))
 
 func _wave_weapon(role: String, role_index: int) -> String:
 	if role == Devil.ROLE_RANGER or Devil.SPECIES_ROLES.has(role):
@@ -1945,15 +1984,16 @@ func _wave_weapon(role: String, role_index: int) -> String:
 		return "dagger" if role_index % 2 == 0 else "sword"
 	return "sword"
 
-## Late-weighted schedule: `at = duration * (i / (total - 1)) ^ SPAWN_CURVE`,
-## so the early ritual beat is quiet and the wave piles up as it closes.
+## Late-weighted schedule over an easy-first ladder:
+## `at = duration * (i / (total - 1)) ^ SPAWN_CURVE`, with the roles already
+## sorted light to heavy, so the room opens on imps and the heavies close it.
 func _build_wave_plan() -> void:
 	_wave_plan.clear()
 	_wave_cursor = 0
 	_wave_clock = 0.0
 	var kind := str(world.room_kind)
-	var base_total := _wave_total_for(kind,int(world.cycle))
-	var roles := _wave_roles(kind,base_total)
+	var budget := _wave_total_for()
+	var roles := _wave_roles(kind,budget)
 	var total := roles.size()
 	wave_total = total
 	var duration := _wave_duration(kind)
@@ -2414,7 +2454,7 @@ func _run_state_dict() -> Dictionary:
 	for actor in actors:
 		if actor.peer_id <= 0:
 			continue
-		party.append({"slot":actor.slot, "name":actor.display_name, "health":actor.health,
+		party.append({"slot":actor.slot, "name":actor.display_name, "health":actor.health, "max_health":actor.max_health,
 			"alive":actor.alive, "peer":actor.peer_id, "downed":not actor.alive})
 	return {
 		"phase":phase, "depth":depth,

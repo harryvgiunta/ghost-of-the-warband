@@ -496,7 +496,11 @@ func _test_world_kit() -> void:
 	check(game.world_ui.paperdoll_buttons.size() == 10,"The in-world kit renders ten paperdoll slots")
 	check(game.world_ui.backpack_buttons.size() == StateScript.INVENTORY_CAPACITY,"The in-world kit buffers every backpack slot")
 	check(game.world_ui.stash_buttons.size() == 20,"The stash panel renders twenty slots")
-	check(game.world_ui.stock_buttons.size() == 28,"The vendor list buffers twenty-eight stock rows")
+	var largest_stock := 0
+	for vendor: Dictionary in StateScript.VENDORS:
+		largest_stock = maxi(largest_stock,(vendor.stock as Array).size())
+	check(game.world_ui.stock_buttons.size() == largest_stock,"The vendor list buffers every stock row")
+	check(largest_stock > 28,"The quartermaster sells more than the old fixed pool")
 	check(game.world_ui.paperdoll_panel.visible and not game.world_ui.inventory_panel.visible,"Equipment shows only the paperdoll")
 	check(game.world_ui.paperdoll_buttons[0].text.begins_with("HEAD"),"The first paperdoll slot is the head")
 	check(game.world_ui.paperdoll_buttons[8].text.begins_with("MAIN HAND"),"The ninth paperdoll slot is the main hand")

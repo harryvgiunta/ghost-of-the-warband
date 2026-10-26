@@ -44,8 +44,10 @@ func configure(slot: int) -> void:
 	_cooldown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_cooldown.visible = false
 	_key = _label(Vector2(6,64),Vector2(84,13),10,MUTED)
-	_name = _label(Vector2(6,78),Vector2(60,14),10,GOLD)
-	_cost = _label(Vector2(52,78),Vector2(38,14),10,GOLD)
+	# The name owns the bottom row so a long skill name is not clipped; the
+	# cost rides the icon's top-right corner instead.
+	_name = _label(Vector2(6,78),Vector2(88,14),10,GOLD)
+	_cost = _label(Vector2(66,8),Vector2(26,12),9,GOLD)
 	_cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	visible = false
 

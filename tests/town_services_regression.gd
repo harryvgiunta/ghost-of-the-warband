@@ -41,7 +41,7 @@ func run() -> void:
 	for enemy in game.enemies:
 		enemy.set_physics_process(false)
 
-	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size() and state.credits == 200,"Starter kit loads")
+	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size() and state.credits == StateScript.STARTING_CREDITS,"Starter kit loads")
 	check(game.world.player_spawn.distance_to(Vector3(0,3,47)) < 0.05,"New game spawns at the town gate")
 	check(game.world.interactables.size() == 10,"Town exposes camp, delve, three keepers, stash, portal and three waystones")
 	check(game.world.landmarks.size() == 6,"The map gains the delve landmark")
@@ -63,7 +63,7 @@ func run() -> void:
 		check(game._interaction_kind == "vendor" and game._interaction_vendor == index,"Vendor %d is the nearest prompt" % index)
 		game.interact()
 		check(game.world_ui.is_open() and game.world_ui.active_view() == "vendor","Talking to vendor %d opens their stock" % index)
-		check(game.world_ui.stock_buttons.size() == 28,"Vendor stock renders its rows")
+		check(game.world_ui.stock_buttons.size() >= (StateScript.VENDORS[index].stock as Array).size(),"Vendor stock renders every row")
 		game.world_ui.close()
 		check(not game.world_ui.is_open(),"Closing the shop works")
 

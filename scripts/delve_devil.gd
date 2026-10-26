@@ -65,6 +65,24 @@ const PROFILES := {
 ## Multiplier applied to the role damage baseline by the held weapon.
 const WEAPON_DAMAGE := {"claw": 1.0, "dagger": 0.75, "sword": 1.35}
 
+## Easy-to-hard ordering of every role the delve can summon. The ladder roles
+## follow their scaled health and damage; the court devils sit at 0.45 health and
+## 0.65 damage of their frontier baselines, which drops the spawn and the
+## succubus under a cinder devil; a crimson clone brings a player rig, armor and
+## a bow, so it closes the wave. `delve.gd` schedules its spawns by this order.
+const ROLE_DIFFICULTY := {
+	ROLE_IMP: 0,
+	ROLE_SPAWN: 1,
+	ROLE_DEVIL: 2,
+	ROLE_SUCCUBUS: 3,
+	ROLE_HELL_GOAT: 4,
+	ROLE_BONEFIEND: 5,
+	ROLE_GARGOYLE: 6,
+	ROLE_BEAST: 7,
+	ROLE_BRUTE: 8,
+	ROLE_RANGER: 9,
+}
+
 ## The frontier's starting-court devils are tuned for a solo ranger's opening
 ## field, so the delve brings them in at a court scale that sits between the
 ## imps and the bonefiends at depth one instead of multiplying the wave by four.
@@ -100,6 +118,9 @@ var _impact_force := Vector3.ZERO
 # numbers before the first snapshot arrives.
 var health := 24.0
 var max_health := 24.0
+## Slot of the ranger whose damage landed last; the delve reads it on death so
+## off-hand skull trinkets only pay out to the killer.
+var last_hitter := -1
 var enemy_id := 0
 var devil_weapon := "claw"
 var depth := 1
@@ -498,9 +519,10 @@ func note_impact(force: Vector3) -> void:
 	_impact_force = Vector3(force.x, 0.0, force.z)
 
 
-func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0,health-applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)

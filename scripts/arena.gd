@@ -291,6 +291,7 @@ func _local_loadout() -> Dictionary:
 		"bow":int(node.equipped_index("bow")),
 		"sword":int(node.equipped_index("sword")),
 		"armor":ArmorData.pack(node.equipped_pieces()),
+		"trinkets":node.trinkets(),
 	}
 
 func _apply_loadout(slot: int, loadout: Dictionary) -> void:
@@ -641,7 +642,8 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
 	if network_role != "host":
 		return
-	var damage := Combat.damage_for(actors[slot].rig.bow_index,charge)
+	var damage := Combat.damage_for(actors[slot].rig.bow_index,charge,
+		actors[slot].rig.ranged_scale())
 	var visual_origin: Vector3 = actors[slot].rig.last_arrow_visual_origin
 	_spawn_arrow(slot,origin,direction,speed,damage,true,visual_origin)
 	_arrow_event.rpc(slot,origin,direction,speed,visual_origin)
@@ -877,7 +879,8 @@ func _arrow_event(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 func _on_thrown_weapon(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
 	if network_role != "host":
 		return
-	var damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	var damage := Combat.throw_damage(weapon_name,weapon_index,charge,
+		actors[slot].rig.throw_scale())
 	_spawn_thrown(slot,origin,direction,speed,weapon_name,weapon_index,damage,true)
 	_throw_event.rpc(slot,origin,direction,speed,weapon_name,weapon_index)
 	throws_fired += 1
@@ -938,6 +941,7 @@ func _clash_event(position: Vector3) -> void:
 func _on_killed(slot: int, source: int) -> void:
 	if network_role == "host" and source >= 0 and source < 4 and source != slot:
 		actors[source].kills += 1
+		actors[source].apply_kill_refill()
 		print("ARENA_KILL source=",source," victim=",slot)
 
 func _process(delta: float) -> void:
@@ -959,7 +963,9 @@ func _process(delta: float) -> void:
 		"left_melee":actor.rig.melee_progress_for("left"),"right_melee":actor.rig.melee_progress_for("right"),
 		"blocking":actor.combat.blocking,"parry":actor.authoritative and actor.combat.blocking and not actor.rig.shield_equipped and actor.combat.block_time <= Combat.PARRY_WINDOW,
 		"attack_parry":actor.rig.weapon == "dual" and actor.rig.in_strike_window(),
-		"ability":actor.ability.hud_state(0),"ability_off":actor.ability.hud_state(1)})
+		"ability":actor.ability.hud_state(0),"ability_off":actor.ability.hud_state(1),
+		"ability_trinket":actor.ability.hud_state(2),
+		"max_health":actor.max_health})
 	hud.update_cover(actor.cover.active,actor.cover.low,actor.cover.peeking,_shoulder_camera.side,actor.cover.crouched,actor.rig.slide_progress >= 0.0)
 	hud.reticle_visible = actor.alive and not _cursor_free
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
@@ -1137,7 +1143,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					send_action("ability",1)
 				else:
 					send_action("weapon","sword")
-			KEY_3: send_action("weapon","dagger")
+			KEY_3:
+				if event.shift_pressed:
+					send_action("ability",2)
+				else:
+					send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
 			KEY_TAB: _quick_swap()

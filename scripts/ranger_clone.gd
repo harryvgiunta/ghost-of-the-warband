@@ -56,6 +56,8 @@ var alive := true
 var _impact_force := Vector3.ZERO
 var health := MAX_HEALTH
 var max_health := MAX_HEALTH
+## Slot of the ranger whose damage landed last (see `enemy.gd.last_hitter`).
+var last_hitter := -1
 var stamina := Stamina.MAX
 var state := "IDLE"
 var targets: Array = []
@@ -488,9 +490,10 @@ func note_impact(force: Vector3) -> void:
 	_impact_force = Vector3(force.x, 0.0, force.z)
 
 
-func take_damage(amount: float, _source_id: int, headshot: bool = false, _react: bool = true) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false, _react: bool = true) -> void:
 	if not alive or replica:
 		return
+	last_hitter = source_id
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
 	health = maxf(0.0,health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)

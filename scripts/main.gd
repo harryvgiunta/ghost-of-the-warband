@@ -18,6 +18,7 @@ const AbilityFx = preload("res://scripts/ability_fx.gd")
 const SpellProjectile = preload("res://scripts/spell_projectile.gd")
 const BackstabAbility = preload("res://scripts/backstab_ability.gd")
 const Stamina = preload("res://scripts/stamina.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
@@ -112,6 +113,16 @@ var _loot_cursor := 0
 var _full_message_cooldown := 0.0
 var health := MAX_HEALTH
 var stamina := Stamina.MAX
+var max_health := MAX_HEALTH
+var max_stamina := Stamina.MAX
+## Worn trinket kit and its summed modifiers, mirrored from the rig.
+var trinkets: Dictionary = {"neck":"", "ring1":"", "ring2":"", "off":""}
+var trinket_stats: Dictionary = {}
+## Energy Shield ward: while it runs, `ward_absorb` of every hit is paid from
+## stamina at `ward_stamina_scale` times that share instead of from health.
+var ward_seconds := 0.0
+var ward_absorb := 0.5
+var ward_stamina_scale := 2.0
 var _consume_kind := ""
 var _consume_time := 0.0
 var _heal_remaining := 0.0
@@ -178,6 +189,9 @@ func _ready() -> void:
 	combat.shot.connect(_on_arrow_released)
 	combat.thrown.connect(_on_weapon_thrown)
 	combat.actor = player
+	# The frontier's own ranger is seat 0, so melee kills carry the same slot
+	# id its arrows do and the skull trinkets can pay the killer.
+	combat.source_id = 0
 	roll = DodgeRoll.new()
 	add_child(roll)
 	step = DodgeStep.new()
@@ -224,6 +238,7 @@ func _ready() -> void:
 	hud.equipment_requested.connect(toggle_equipment)
 	if _player_state != null:
 		archer.apply_loadout(_player_state.loadout())
+		_sync_trinket_limits()
 		gold = int(_player_state.credits)
 	else:
 		archer.set_bow(0)
@@ -366,12 +381,84 @@ func _on_ui_loadout_changed() -> void:
 		return
 	if _client():
 		send_action("loadout",_local_loadout())
+		# The host owns the authoritative seat; the client's own replica still
+		# needs the worn kit for its bar maxima and its gold share.
+		var seat = _seats.get(local_slot)
+		if seat != null and is_instance_valid(seat):
+			seat.apply_trinkets(_player_state.trinkets())
 		_refresh_backpack()
 		return
 	cancel_input()
 	archer.apply_loadout(_player_state.loadout())
+	_sync_trinket_limits()
 	_update_loadout()
 	_refresh_backpack()
+
+
+## Worn trinkets change the maxima, movement, damage and stagger resistance.
+## The rig holds the aggregated table; this body mirrors what the HUD reads.
+func _sync_trinket_limits() -> void:
+	if not is_instance_valid(archer):
+		return
+	trinkets = archer.trinkets.duplicate()
+	trinket_stats = archer.trinket_stats.duplicate()
+	max_health = TrinketStats.max_health(MAX_HEALTH, trinket_stats)
+	max_stamina = TrinketStats.max_stamina(Stamina.MAX, trinket_stats)
+	health = minf(health, max_health)
+	stamina = minf(stamina, max_stamina)
+	combat.stagger_scale = TrinketStats.stagger_scale(trinket_stats)
+	if hud != null:
+		hud.set_limits(max_health, max_stamina)
+
+
+## Energy Shield: the runner calls this on a successful ward activation.
+func start_ward(definition: Dictionary) -> void:
+	var effect := AbilityRules.ward(definition)
+	if effect.is_empty():
+		return
+	ward_seconds = float(effect.get("seconds", 60.0))
+	ward_absorb = clampf(float(effect.get("absorb", 0.5)), 0.0, 1.0)
+	ward_stamina_scale = maxf(1.0, float(effect.get("stamina_scale", 2.0)))
+	archer.set_ward(true)
+
+## Returns the damage that still reaches health after the ward's swap.
+func _absorb_with_ward(applied: float) -> float:
+	if ward_seconds <= 0.0 or applied <= 0.0:
+		return applied
+	var price: float = applied * ward_absorb * ward_stamina_scale
+	var paid: float = minf(price, stamina)
+	if paid <= 0.0:
+		return applied
+	stamina -= paid
+	return applied - paid / ward_stamina_scale
+
+func _tick_ward(delta: float) -> void:
+	if ward_seconds <= 0.0:
+		return
+	ward_seconds = maxf(0.0, ward_seconds - delta)
+	if ward_seconds <= 0.0:
+		archer.set_ward(false)
+
+
+## The off-hand skulls pay out on every kill this body makes. A remote seat's
+## kill is healed on the host's copy of that seat, so it replicates normally.
+func _grant_kill_refill(killer: int) -> void:
+	if killer < 0:
+		return
+	if killer == _local_seat_id():
+		_apply_kill_refill()
+		return
+	var seat = _seats.get(killer)
+	if seat != null and is_instance_valid(seat) and seat.has_method("apply_kill_refill"):
+		seat.apply_kill_refill()
+
+func _apply_kill_refill() -> void:
+	var heal := float(trinket_stats.get("heal_on_kill", 0.0))
+	var gain := float(trinket_stats.get("stamina_on_kill", 0.0))
+	if heal > 0.0:
+		health = minf(max_health, health + heal)
+	if gain > 0.0:
+		stamina = minf(max_stamina, stamina + gain)
 
 
 ## TAB swaps the active hands with the bound paperdoll pair. The displaced
@@ -417,6 +504,7 @@ func _physics_process(delta: float) -> void:
 	if archer.is_ability():
 		update_crosshair_aim()
 	ability.advance(delta)
+	_tick_ward(delta)
 	var input_vector := Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP)))
@@ -436,9 +524,9 @@ func _physics_process(delta: float) -> void:
 		input_vector = Vector2.ZERO
 		slide.reset()
 	var running: bool = (cover.active or not cover.crouched and not cover.crouch_requested) and Input.is_physical_key_pressed(KEY_SHIFT) and not _sprint_exhausted and stamina > 1.0 and input_vector.length_squared() > 0.1 and _consume_kind == "" and not ability.active
-	var speed := 2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED
-	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND)
-	stamina = clampf(stamina + delta * stamina_rate, 0.0, Stamina.MAX)
+	var speed: float = (2.2 if not cover.active and (cover.crouched or cover.crouch_requested) else SPRINT_SPEED if running else WALK_SPEED) * float(archer.move_scale())
+	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND * TrinketStats.stamina_regen(trinket_stats))
+	stamina = clampf(stamina + delta * stamina_rate, 0.0, max_stamina)
 	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_sprint_exhausted = true
 	elif stamina >= Stamina.SPRINT_RESUME:
@@ -532,7 +620,7 @@ func _process(delta: float) -> void:
 	_update_interaction()
 	hud.reticle_visible = not _cursor_free and not inspecting and not hud.map_open
 	hud.reticle = get_viewport().get_visible_rect().size * 0.5
-	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0), ability.hud_state(1))
+	hud.update_status(health, stamina, gold, kills, archer.phase, archer.draw_amount, world.region_at(player.position), combat.get_attack_interval(), combat.attack_progress, combat.movement_mode, combat.blocking, combat.blocking and combat.block_time <= Combat.PARRY_WINDOW, archer.melee_progress_for("left"), archer.melee_progress_for("right"), _consume_kind, _consume_time, ability.hud_state(0), ability.hud_state(1), ability.hud_state(2))
 	hud.update_world_position(player.position, archer.global_rotation.y, activated)
 	hud.update_cover(cover.active,cover.low,cover.peeking,shoulder_camera.side,cover.crouched,slide.active)
 
@@ -740,7 +828,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					activate_ability(1)
 				else:
 					equip_weapon("sword")
-			KEY_3: equip_weapon("dagger")
+			KEY_3:
+				if event.shift_pressed:
+					activate_ability(2)
+				else:
+					equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
 			KEY_TAB: quick_swap()
@@ -1254,7 +1346,7 @@ func use_consumable(kind: String) -> void:
 	if _client():
 		send_action("consume",kind)
 		return
-	if health >= 99.999:
+	if health >= max_health-0.001:
 		hud.show_feedback("Health is already full.")
 		return
 	if combat.stagger_time > 0.0:
@@ -1303,7 +1395,7 @@ func _advance_consumable(delta: float) -> void:
 		_heal_remaining = maxf(0.0,_heal_remaining-amount)
 
 func _heal(amount: float) -> void:
-	health = minf(100.0,health+amount)
+	health = minf(max_health,health+amount)
 
 func _cancel_consumable() -> void:
 	if _consume_kind != "":
@@ -1391,8 +1483,8 @@ func interact() -> void:
 				send_action("rest")
 				hud.show_feedback("Resting at the campfire.",1.5)
 				return
-			health = MAX_HEALTH
-			stamina = Stamina.MAX
+			health = max_health
+			stamina = max_stamina
 			hud.show_feedback("Rested. The town is waiting.")
 		"waystone":
 			if _client():
@@ -1513,10 +1605,11 @@ func _receive_seat_attack(attacker, amount: float, seat) -> void:
 
 func take_damage(amount: float, react: bool = true) -> void:
 	_cancel_consumable()
-	var applied: float = amount * (1.0 - archer.armor_reduction())
+	var applied: float = amount * (1.0 - archer.damage_reduction())
+	applied = _absorb_with_ward(applied)
 	health = maxf(0.0, health - applied)
 	if react:
-		var seconds: float = combat.stagger_from_damage(applied,MAX_HEALTH)
+		var seconds: float = combat.stagger_from_damage(applied,max_health)
 		archer.set_hit_react(seconds)
 		step.reset()
 	DamageNumbers.spawn(self,player.global_position,applied,"self",false,health <= 0.0)
@@ -1549,8 +1642,10 @@ func return_to_camp() -> void:
 	archer.set_roll(-1.0,Vector3.FORWARD)
 	player.global_position = world.player_spawn + Vector3(0, 0.25, 0)
 	player.velocity = Vector3.ZERO
-	health = MAX_HEALTH
-	stamina = Stamina.MAX
+	health = max_health
+	stamina = max_stamina
+	ward_seconds = 0.0
+	archer.set_ward(false)
 	_sprint_exhausted = false
 	ability.reset()
 	inspecting = false
@@ -1563,7 +1658,7 @@ func return_to_camp() -> void:
 	_set_cursor_free(false)
 
 func _on_arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
-	var shot_damage := Combat.damage_for(archer.bow_index, charge)
+	var shot_damage := Combat.damage_for(archer.bow_index, charge, archer.ranged_scale())
 	var excluded: Array[RID] = [player.get_rid()]
 	if is_instance_valid(archer.active_shield):
 		excluded.append(archer.active_shield.get_rid())
@@ -1578,7 +1673,7 @@ func _on_arrow_impact(enemy_hit: bool, _position: Vector3) -> void:
 		audio.play_sound("hit")
 
 func _on_weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon_name: String, weapon_index: int) -> void:
-	var shot_damage := Combat.throw_damage(weapon_name,weapon_index,charge)
+	var shot_damage := Combat.throw_damage(weapon_name,weapon_index,charge,archer.throw_scale())
 	var excluded: Array[RID] = [player.get_rid()]
 	_spawn_thrown(origin,direction,speed,shot_damage,weapon_name,weapon_index,excluded,0)
 	if network_role == "host":
@@ -1586,6 +1681,12 @@ func _on_weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge
 	audio.play_sound("release")
 
 func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
+	var killer := -1
+	if enemy.get("last_hitter") != null:
+		killer = int(enemy.last_hitter)
+	_grant_kill_refill(killer)
+	if killer == _local_seat_id():
+		reward = int(round(float(reward) * TrinketStats.gold_scale(trinket_stats)))
 	_award_gold(reward)
 	kills += 1
 	var kind_value = enemy.get("kind")
@@ -1607,7 +1708,7 @@ func _on_enemy_defeated(enemy: Node3D, reward: int) -> void:
 		_loot_cursor += 1
 		_spawn_loot(item_id, drop_at)
 	if network_role == "host":
-		_world_kill.rpc(reward,display_name)
+		_world_kill.rpc(reward,display_name,killer)
 
 func _spawn_loot(item_id: String, at: Vector3, armed := true, broadcast := true) -> Node3D:
 	var pickup := LootPickup.new()
@@ -1966,8 +2067,17 @@ func _bind_local_seat() -> void:
 	ability = seat.ability
 	seat.is_local = true
 	_local_anchor_swapped = true
+	# The client still owns its own saved kit; the seat's copies of it drive the
+	# bar maxima while every hit, charge and kill stays host-authoritative.
+	if _player_state != null:
+		seat.apply_trinkets(_player_state.trinkets())
 	health = seat.health
 	stamina = seat.stamina
+	max_health = seat.max_health
+	max_stamina = seat.max_stamina
+	trinket_stats = seat.trinket_stats.duplicate()
+	if hud != null:
+		hud.set_limits(max_health, max_stamina)
 	_anchor_player.visible = false
 	_anchor_player.collision_layer = 0
 	_anchor_player.collision_mask = 0
@@ -2010,6 +2120,12 @@ func _client() -> bool:
 	return network_role == "client" and local_slot >= 0
 
 
+## The seat this peer owns. Offline play is seat 0 with no network peer, and a
+## joined client learns its slot from the host's accept.
+func _local_seat_id() -> int:
+	return local_slot if local_slot >= 0 else 0
+
+
 func _safe_player_name(value: String) -> String:
 	var clean := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
 	return "Ranger" if clean.is_empty() else clean
@@ -2024,6 +2140,7 @@ func _local_loadout() -> Dictionary:
 		"bow":int(_player_state.equipped_index("bow")),
 		"sword":int(_player_state.equipped_index("sword")),
 		"armor":ArmorData.pack(_player_state.equipped_pieces()),
+		"trinkets":_player_state.trinkets(),
 	}
 
 
@@ -2097,7 +2214,8 @@ func _send_seat_snapshots() -> void:
 func _local_seat_snapshot() -> Dictionary:
 	return {"slot":0,"peer":1,"bot":false,"name":_player_name,
 		"position":player.global_position,"velocity":player.velocity,
-		"health":health,"alive":health > 0.0,"kills":kills,"deaths":respawns,"respawn":0.0,
+		"health":health,"maxh":max_health,"ward":ward_seconds,
+		"alive":health > 0.0,"kills":kills,"deaths":respawns,"respawn":0.0,
 		"bow":archer.bow_index,
 		"armor":archer.armor_bits() | (ArmorData.SHIELD_BIT if archer.shield_equipped else 0),
 		"sword":archer.sword_index,"weapon":archer.weapon,
@@ -2124,6 +2242,10 @@ func _world_seat(tick: int, slot: int, state: Dictionary) -> void:
 		audio.play_sound("hit")
 	health = seat.health
 	stamina = seat.stamina
+	max_health = seat.max_health
+	max_stamina = seat.max_stamina
+	trinket_stats = seat.trinket_stats.duplicate()
+	hud.set_limits(max_health, max_stamina)
 	if not seat.alive and not _client_dead_notified:
 		_client_dead_notified = true
 		hud.show_feedback("You fell. Recovering at the town gate.",3.0)
@@ -2183,8 +2305,8 @@ func _apply_seat_action(slot: int, action: String, value: Variant, aim_tick: int
 		return
 	if action == "rest":
 		if _near_camp(seat.global_position):
-			seat.health = MAX_HEALTH
-			seat.stamina = Stamina.MAX
+			seat.health = seat.max_health
+			seat.stamina = seat.max_stamina
 		return
 	if not seat.alive:
 		return
@@ -2488,9 +2610,11 @@ func _world_loot(item_id: String, at: Vector3, armed: bool) -> void:
 
 
 @rpc("authority","call_remote","reliable")
-func _world_kill(reward: int, display: String) -> void:
+func _world_kill(reward: int, display: String, killer: int = -1) -> void:
 	if network_role != "client":
 		return
+	if killer == _local_seat_id():
+		reward = int(round(float(reward) * TrinketStats.gold_scale(trinket_stats)))
 	kills += 1
 	_award_gold(reward)
 	hud.show_feedback("%s defeated  /  +%d gold" % [display,reward])

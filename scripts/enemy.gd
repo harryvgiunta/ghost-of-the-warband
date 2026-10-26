@@ -34,6 +34,9 @@ var replica := false
 var safe_center := Vector3.ZERO
 var health := 38.0
 var max_health := 38.0
+## Slot of the ranger whose damage landed last; the frontier reads it on death
+## so off-hand skull trinkets only pay out to the killer.
+var last_hitter := -1
 var alive := true
 var _impact_force := Vector3.ZERO
 var home := Vector3.ZERO
@@ -677,9 +680,10 @@ func note_impact(force: Vector3) -> void:
 	_impact_force = Vector3(force.x, 0.0, force.z)
 
 
-func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
