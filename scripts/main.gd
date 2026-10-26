@@ -32,6 +32,7 @@ const WorldUI = preload("res://scripts/world_ui.gd")
 const Seat = preload("res://scripts/arena_actor.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const NetLimits = preload("res://scripts/net_limits.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 ## A backstab needs a live body under the crosshair: frontier enemies sit on
@@ -44,7 +45,6 @@ const MAX_HEALTH := 100.0
 const WORLD_SEATS := 4
 const NET_TICK := 0.05
 const ENEMY_TICK := 0.0667
-const ENEMY_CHUNK := 5
 const ENEMY_RELEVANCE := 70.0
 # Deterministic frontier drops: every entry is a real PlayerState item id and the
 # first eight cover all eight equipment categories the paperdoll understands.
@@ -67,6 +67,7 @@ var _delve_name := ""
 var _world_host := false
 var _world_join := ""
 var _world_port := 7777
+var _world_address := "127.0.0.1"
 var _world_name := ""
 var network_role := "offline"
 var local_slot := -1
@@ -87,6 +88,7 @@ var _client_aim_origin := Vector3.ZERO
 var _client_aim_origin_valid := false
 var _local_anchor_swapped := false
 var _client_dead_notified := false
+var _descent_refusal_cooldown := 0.0
 var _anchor_player: CharacterBody3D
 var _anchor_rig
 var _anchor_combat
@@ -1537,17 +1539,54 @@ func _enter_delve() -> void:
 		return
 	_entering_scene = true
 	cancel_input()
-	_close_network()
 	if _ui_open():
 		world_ui.close()
 	if _player_state != null:
 		_player_state.save_state()
-	var player_name := _preferred_name()
+	# A world host keeps the name it opened the world with; a solo fall may use
+	# the remembered delve or network name.
+	var player_name := _player_name if network_role == "host" else _preferred_name()
+	var session := get_node_or_null("/root/Session")
+	if network_role == "host":
+		# Keep the live ENet server and its port: the party follows the host's
+		# fall into a hosted delve instead of being dropped for a solo run.
+		if session != null:
+			session.arm_delve("delve-carry-host","127.0.0.1",_world_port,player_name)
+			session.descend_party.rpc(_world_port)
+	else:
+		_close_network()
+		if session != null:
+			# Host Tailscale.cmd launches the frontier with --delve-host, so the
+			# hatch fall is what actually opens the hosted party on that port.
+			session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
+	get_tree().change_scene_to_file("res://delve.tscn")
+
+
+## A rider cannot migrate the party by dropping alone. The host's authority
+## keeps the session together; the local repl can only ask the host to lift the
+## seat back out, so this view just reports it until the snapshot corrects.
+func _refuse_client_descent() -> void:
+	if _descent_refusal_cooldown > 0.0:
+		return
+	_descent_refusal_cooldown = 2.0
+	cancel_input()
+	hud.show_feedback("Only the host can lead the party into the delve.",3.0)
+
+
+## The open-world host leads the whole party into the delve. This runs on a
+## client when the host's reliable /root/Session RPC arrives, so the ENet peer
+## the two peers already share is adopted by the delve scene instead of closed.
+func _on_party_descent(port: int) -> void:
+	if _entering_scene or network_role != "client":
+		return
+	_entering_scene = true
+	if _ui_open():
+		world_ui.close()
+	if _player_state != null:
+		_player_state.save_state()
 	var session := get_node_or_null("/root/Session")
 	if session != null:
-		# Host Tailscale.cmd launches the frontier with --delve-host, so the
-		# hatch fall is what actually opens the hosted party on that port.
-		session.arm_delve("delve-host" if _delve_host else "delve-solo","127.0.0.1",_delve_port,player_name)
+		session.arm_delve("delve-carry-client",_world_address,port,_player_name)
 	get_tree().change_scene_to_file("res://delve.tscn")
 
 func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
@@ -1794,6 +1833,8 @@ func _setup_network() -> void:
 	multiplayer.connection_failed.connect(func(): _join_failed("Could not join. Check the address, UDP port and host capacity (four rangers)."))
 	multiplayer.server_disconnected.connect(func(): _connection_ended("The host closed the open world. You are alone now."))
 	var session := get_node_or_null("/root/Session")
+	if session != null and not session.party_descent.is_connected(_on_party_descent):
+		session.party_descent.connect(_on_party_descent)
 	var pending: Dictionary = session.take() if session != null else {}
 	var mode := str(pending.get("mode",""))
 	var pending_name := str(pending.get("name","")).strip_edges()
@@ -1823,6 +1864,8 @@ func host_world(port: int, player_name: String) -> void:
 	local_slot = 0
 	_player_name = _safe_player_name(player_name)
 	_endpoint = "UDP %d" % port
+	_world_address = "127.0.0.1"
+	_world_port = port
 	_update_session_line()
 	hud.show_feedback("Open world on %s  /  friends: Join Game, Open world" % _endpoint,8.0)
 	print("WORLD_HOST_READY port=",port)
@@ -1844,6 +1887,8 @@ func join_world(address: String, port: int) -> void:
 	_join_elapsed = 0.0
 	_set_replicas(true)
 	_endpoint = "%s:%d" % [address,port]
+	_world_address = address
+	_world_port = port
 	hud.show_feedback("Connecting to %s..." % _endpoint,4.0)
 
 
@@ -2152,8 +2197,10 @@ func _client_step(delta: float) -> void:
 			_join_failed("Connection timed out. The host may be offline, full, or blocked by a firewall.")
 		return
 	_collect_loot(delta)
+	if _descent_refusal_cooldown > 0.0:
+		_descent_refusal_cooldown = maxf(0.0,_descent_refusal_cooldown-delta)
 	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
-		_enter_delve()
+		_refuse_client_descent()
 		return
 	if player.position.y < -25.0:
 		send_action("respawn")
@@ -2192,6 +2239,7 @@ func _host_network_step(delta: float) -> void:
 	for seat in _seat_list.duplicate():
 		if is_instance_valid(seat):
 			seat.step(delta,_seat_list,server_tick)
+			_rescue_seat_from_hatch(seat)
 	_send_elapsed += delta
 	if _send_elapsed >= NET_TICK:
 		_send_elapsed = fmod(_send_elapsed,NET_TICK)
@@ -2200,6 +2248,20 @@ func _host_network_step(delta: float) -> void:
 	if _enemy_elapsed >= ENEMY_TICK:
 		_enemy_elapsed = fmod(_enemy_elapsed,ENEMY_TICK)
 		_send_enemy_snapshots()
+
+
+## Only the session authority may open the party's route down. A rider whose
+## seat drops into the hatch alone is set back on the inn floor before the open
+## world's client-side trigger would tear the party apart.
+func _rescue_seat_from_hatch(seat) -> void:
+	if not is_instance_valid(seat) or not seat.alive:
+		return
+	if seat.global_position.y >= 2.6 or not world.is_over_delve_hatch(seat.global_position):
+		return
+	seat.global_position = Vector3(16.0,3.45,44.0)
+	seat.velocity = Vector3.ZERO
+	if int(seat.peer_id) > 1:
+		_world_notice.rpc_id(int(seat.peer_id),"Only the host can lead the party into the delve.")
 
 
 func _send_seat_snapshots() -> void:
@@ -2487,21 +2549,18 @@ func _near_ranger(point: Vector3) -> bool:
 
 func _send_enemy_snapshots() -> void:
 	_enemy_sends += 1
-	var chunk: Array = []
+	var states: Array = []
 	for index in _enemies_by_index.size():
 		var enemy = _enemies_by_index[index]
 		if not is_instance_valid(enemy) or not _enemy_relevant(enemy):
 			continue
 		var state: Dictionary = enemy.snapshot()
 		state["i"] = index
-		chunk.append(state)
-		# A clone carries its pose dictionary; send it alone so a mixed chunk
-		# cannot push the datagram over ENet's MTU.
-		if chunk.size() >= ENEMY_CHUNK or int(state.get("kind",0)) == RangerClone.KIND:
-			_world_mobs.rpc(chunk)
-			chunk = []
-	if not chunk.is_empty():
-		_world_mobs.rpc(chunk)
+		states.append(state)
+	# Byte-budgeted, not count-chunked: five busy mobs already encode past the
+	# clamped payload, so the packer decides how many ride in one datagram.
+	for batch in NetLimits.batches(states):
+		_world_mobs.rpc(batch)
 
 
 @rpc("authority","call_remote","unreliable")
@@ -2589,6 +2648,13 @@ func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damag
 	thrown_weapons.append(thrown)
 	if thrown_weapons.size() > 32:
 		thrown_weapons.pop_front().queue_free()
+
+
+@rpc("authority","call_remote","reliable")
+func _world_notice(text: String) -> void:
+	if network_role != "client":
+		return
+	hud.show_feedback(text,3.0)
 
 
 @rpc("authority","call_remote","reliable")

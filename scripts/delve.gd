@@ -34,6 +34,7 @@ const Rules = preload("res://scripts/equipment_rules.gd")
 const Seat = preload("res://scripts/seat_loadout.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
+const NetLimits = preload("res://scripts/net_limits.gd")
 ## Delve devils answer the backstab preflight; the players' layer is 4.
 const BACKSTAB_MASK := 2
 const BACKSTAB_RANGE := 8.0
@@ -45,6 +46,7 @@ const CHEST_RANGE := 3.5
 const CLEAR_DELAY := 2.2
 const SNAPSHOT_INTERVAL := 0.05
 const RUN_STATE_INTERVAL := 0.2
+const REGISTER_RETRY := 0.25
 const MAX_SHOTS := 128
 const AUTO_BEGIN_DELAY := 2.0
 const HOOK_KILL_DELAY := 2.0
@@ -112,6 +114,8 @@ var _endpoint := ""
 var _remote_state: Dictionary = {}
 var _join_elapsed := 0.0
 var _send_elapsed := 0.0
+var _carry_client := false
+var _register_retry := 0.0
 var _run_send_elapsed := 0.0
 var _elapsed := 0.0
 var _mode_elapsed := 0.0
@@ -270,6 +274,10 @@ func _read_arguments() -> void:
 				host_game(final_port,final_name,false)
 			"delve-join", "delve-client":
 				join_game(str(pending.get("address", address)),final_port,final_name)
+			"delve-carry-host":
+				adopt_host(final_port,final_name)
+			"delve-carry-client":
+				adopt_client(str(pending.get("address",address)),final_port,final_name)
 
 func host_game(port: int, player_name: String, find_open_port: bool = false) -> void:
 	leave_game()
@@ -301,8 +309,27 @@ func host_game(port: int, player_name: String, find_open_port: bool = false) -> 
 		hud.set_status("Could not host on UDP %d: %s" % [port,error_string(error)])
 		return
 	multiplayer.multiplayer_peer = peer
+	_begin_host(port,player_name)
+
+
+## Adopt the ENet server the open world was already hosting. The party and the
+## bound port survive the scene change; only the simulation scene is rebuilt.
+func adopt_host(port: int, player_name: String) -> void:
+	var peer := multiplayer.multiplayer_peer
+	if not (peer is ENetMultiplayerPeer) or peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+		# The peer is gone (closed elsewhere); open a fresh delve host instead
+		# of leaving the faller stranded offline.
+		host_game(port,player_name,false)
+		return
+	_begin_host(port,player_name)
+	print("DELVE_HOST_CARRIED port=%d" % port)
+
+
+func _begin_host(port: int, player_name: String) -> void:
 	network_role = "host"
 	local_slot = 0
+	# Clients already connected by the open world send `_register`; they are
+	# seated from that message because `peer_connected` fired before this scene.
 	_peer_slots.clear()
 	_peer_slots[1] = 0
 	_player_name = _safe_name(player_name)
@@ -368,6 +395,29 @@ func join_game(address: String, port: int, player_name: String) -> void:
 	hud.set_status("Connecting to " + _endpoint + "...")
 	print("DELVE_JOIN_ATTEMPT %s:%d" % [address.strip_edges(),port])
 
+
+## Adopt the live ENet client the open world already had. The connection to the
+## host stays up; registration is retried until the host's delve scene answers,
+## because `connected_to_server` fired before this scene existed.
+func adopt_client(address: String, port: int, player_name: String) -> void:
+	var peer := multiplayer.multiplayer_peer
+	if not (peer is ENetMultiplayerPeer) or peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+		# The peer is gone (closed elsewhere): fall back to a normal join.
+		join_game(address,port,player_name)
+		return
+	_player_name = _safe_name(player_name)
+	_endpoint = "%s:%d" % [address.strip_edges(),port]
+	_remember_network(_player_name,address.strip_edges(),port)
+	network_role = "client"
+	local_slot = -1
+	_carry_client = true
+	_join_elapsed = 0.0
+	_register_retry = REGISTER_RETRY
+	peer.get_peer(1).set_timeout(32,2000,5000)
+	hud.configure(_endpoint)
+	hud.set_status("Following the party into the delve...")
+	print("DELVE_CLIENT_CARRIED %s:%d" % [address.strip_edges(),port])
+
 func leave_game() -> void:
 	# A server-disconnected signal can arrive while the scene is being freed;
 	# there is no MultiplayerAPI left to close at that point.
@@ -391,6 +441,8 @@ func leave_game() -> void:
 	_send_elapsed = 0.0
 	_run_send_elapsed = 0.0
 	_join_elapsed = 0.0
+	_carry_client = false
+	_register_retry = 0.0
 	_mode_elapsed = 0.0
 	_elapsed = 0.0
 	_wave_elapsed = 0.0
@@ -555,9 +607,15 @@ func get_human_count() -> int:
 	return count
 
 func _peer_connected(peer_id: int) -> void:
-	if network_role != "host":
+	if network_role != "host" or _peer_slots.has(peer_id):
 		return
-	multiplayer.multiplayer_peer.get_peer(peer_id).set_timeout(32,2000,5000)
+	_seat_peer(peer_id,"Ranger")
+
+
+func _seat_peer(peer_id: int, player_name: String) -> void:
+	var connection = multiplayer.multiplayer_peer.get_peer(peer_id)
+	if connection != null:
+		connection.set_timeout(32,2000,5000)
 	var slot := _lowest_free_slot()
 	if slot < 0:
 		multiplayer.multiplayer_peer.disconnect_peer(peer_id)
@@ -565,7 +623,7 @@ func _peer_connected(peer_id: int) -> void:
 	_peer_slots[peer_id] = slot
 	var actor = actors[slot]
 	actor.authoritative = true
-	actor.configure(peer_id,false,"Ranger",_join_spawn(slot))
+	actor.configure(peer_id,false,_safe_name(player_name),_join_spawn(slot))
 	actor.visible = true
 	actor.is_local = false
 	actor.collision_layer = 4
@@ -649,6 +707,12 @@ func _register(player_name: String, loadout: Dictionary) -> void:
 	if network_role != "host":
 		return
 	var sender := multiplayer.get_remote_sender_id()
+	if sender <= 1:
+		return
+	if not _peer_slots.has(sender):
+		# A party carried in from the open world was already connected when
+		# this scene loaded, so `peer_connected` never fired for it.
+		_seat_peer(sender,_safe_name(player_name))
 	if _peer_slots.has(sender):
 		var slot := int(_peer_slots[sender])
 		actors[slot].display_name = _safe_name(player_name)
@@ -659,6 +723,7 @@ func _accept(slot: int) -> void:
 	if network_role != "client" or slot < 1 or slot > 3:
 		return
 	local_slot = slot
+	_carry_client = false
 	_next_swing_side = 0
 	var join_point := _join_spawn(slot)
 	_camera_yaw = atan2(join_point.x,join_point.z)
@@ -681,6 +746,11 @@ func _physics_process(delta: float) -> void:
 		return
 	if network_role == "client" and local_slot < 0:
 		_join_elapsed += delta
+		if _carry_client:
+			_register_retry -= delta
+			if _register_retry <= 0.0:
+				_register_retry = REGISTER_RETRY
+				_register.rpc_id(1,_player_name,_local_loadout())
 		if _join_elapsed > 6.0:
 			_connection_ended("Connection timed out. The host may be offline, full, or blocked by a firewall.")
 		return
@@ -731,9 +801,13 @@ func _physics_process(delta: float) -> void:
 				else:
 					states.append(devil.snapshot())
 			if not states.is_empty():
-				_devil_snapshots.rpc(server_tick,states)
+				# A full wave encodes to several kilobytes; split it into
+				# datagrams that stay inside the clamped payload.
+				for batch in NetLimits.batches(states,[server_tick]):
+					_devil_snapshots.rpc(server_tick,batch)
 			if not clone_states.is_empty():
-				_clone_snapshots.rpc(server_tick,clone_states)
+				for batch in NetLimits.batches(clone_states,[server_tick]):
+					_clone_snapshots.rpc(server_tick,batch)
 		_run_send_elapsed += delta
 		if _run_send_elapsed >= RUN_STATE_INTERVAL:
 			_run_send_elapsed = fmod(_run_send_elapsed,RUN_STATE_INTERVAL)
@@ -2229,7 +2303,7 @@ func _on_devils_reset_local() -> void:
 
 @rpc("authority","call_remote","unreliable")
 func _clone_snapshots(tick: int, states: Array) -> void:
-	if network_role != "client" or tick <= _last_clone_tick:
+	if network_role != "client" or tick < _last_clone_tick:
 		return
 	_last_clone_tick = tick
 	for state in states:
@@ -2272,7 +2346,9 @@ func _clone_arrow_event(origin: Vector3, direction: Vector3, speed: float) -> vo
 
 @rpc("authority","call_remote","unreliable")
 func _devil_snapshots(tick: int, states: Array) -> void:
-	if network_role != "client" or tick <= _last_devil_tick:
+	# One wave now arrives as several datagrams with the same tick, so only an
+	# older tick is stale; applying a batch twice is idempotent.
+	if network_role != "client" or tick < _last_devil_tick:
 		return
 	_last_devil_tick = tick
 	for state in states:

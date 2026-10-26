@@ -53,6 +53,7 @@ TESTS = [
     "delve_entry_regression",
     "delve_network_regression",
     "world_network_regression",
+    "open_world_delve_regression",
     "ranger_clone_regression",
     "consumable_regression",
     "blood_regression",
