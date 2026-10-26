@@ -40,6 +40,7 @@ TESTS = [
     "block_clash_regression",
     "hitbox_regression",
     "dagger_regression",
+    "item_passives_regression",
     "throw_regression",
     "shield_regression",
     "title_menu_regression",
