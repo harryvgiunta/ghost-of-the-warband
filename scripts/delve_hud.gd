@@ -40,6 +40,7 @@ var _stamina_bar: ProgressBar
 var _stamina_label: Label
 var _ability_slot
 var _off_ability_slot
+var _trinket_ability_slot
 var _equipment_label: Label
 var _readiness_label: Label
 var _prompt_panel: Panel
@@ -166,6 +167,13 @@ func _build_vitals() -> void:
 	_off_ability_slot.configure(1)
 	_off_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	add_child(_off_ability_slot)
+	# The prompt panel owns the row's last tile slot at this anchor, so the
+	# trinket tile sits one row up instead of under it.
+	_trinket_ability_slot = AbilitySlot.new()
+	_trinket_ability_slot.position = Vector2(540, -300)
+	_trinket_ability_slot.configure(2)
+	_trinket_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
+	add_child(_trinket_ability_slot)
 	_equipment_label = _label(vitals, "", Vector2(14, 82), 11, GOLD)
 	_equipment_label.size = Vector2(272, 16)
 	_equipment_label.clip_text = true
@@ -312,6 +320,7 @@ func _update_party(state: Dictionary) -> void:
 		_ensure_party_rows(used + 1)
 		var row: Dictionary = member
 		var health := float(row.get("health", 100.0))
+		var row_max := maxf(1.0, float(row.get("max_health", 100.0)))
 		var alive := bool(row.get("alive", true)) and health > 0.0
 		var is_local := bool(row.get("is_local", false))
 		if not is_local and local_slot >= 0:
@@ -319,7 +328,8 @@ func _update_party(state: Dictionary) -> void:
 		var display_name := str(row.get("name", "RANGER"))
 		_row_names[used].text = ("> " if is_local else "  ") + display_name
 		_row_names[used].add_theme_color_override("font_color", GOLD if (is_local and alive) else (MUTED if not alive else CREAM))
-		_row_bars[used].value = clampf(health, 0.0, 100.0)
+		_row_bars[used].max_value = row_max
+		_row_bars[used].value = clampf(health, 0.0, row_max)
 		_row_states[used].text = "FALLEN" if not alive else "%d" % int(health)
 		_row_states[used].add_theme_color_override("font_color", MUTED if not alive else TEAL)
 		_row_boxes[used].visible = true
@@ -339,15 +349,22 @@ func update_local(state: Dictionary) -> void:
 	_ensure_ui()
 	var health := float(state.get("health", 100.0))
 	var stamina := float(state.get("stamina", Stamina.MAX))
-	vitals_label.text = "HEALTH  %d / 100" % int(health)
-	_health_bar.value = clampf(health, 0.0, 100.0)
-	_stamina_bar.value = clampf(stamina, 0.0, Stamina.MAX)
-	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(Stamina.MAX)]
+	var max_health := maxf(1.0, float(state.get("max_health", 100.0)))
+	var max_stamina := maxf(1.0, float(state.get("max_stamina", Stamina.MAX)))
+	vitals_label.text = "HEALTH  %d / %d" % [int(health),int(round(max_health))]
+	_health_bar.max_value = max_health
+	_health_bar.value = clampf(health, 0.0, max_health)
+	_stamina_bar.max_value = max_stamina
+	_stamina_bar.value = clampf(stamina, 0.0, max_stamina)
+	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(round(max_stamina))]
 	var ability_state: Dictionary = state.get("ability",{})
 	var off_ability_state: Dictionary = state.get("ability_off",{})
+	var trinket_ability_state: Dictionary = state.get("ability_trinket",{})
 	_ability_slot.update_state(ability_state)
 	if is_instance_valid(_off_ability_slot):
 		_off_ability_slot.update_state(off_ability_state)
+	if is_instance_valid(_trinket_ability_slot):
+		_trinket_ability_slot.update_state(trinket_ability_state)
 	var weapon := str(state.get("weapon", "")).to_upper()
 	var movement := str(state.get("movement", "OPEN")).to_upper()
 	if weapon.is_empty():
@@ -364,6 +381,8 @@ func update_local(state: Dictionary) -> void:
 		var active_state := ability_state
 		if active_state.is_empty() or not bool(active_state.get("active", false)):
 			active_state = off_ability_state
+		if active_state.is_empty() or not bool(active_state.get("active", false)):
+			active_state = trinket_ability_state
 		var ratio := clampf(float(active_state.get("elapsed", 0.0)) / maxf(float(active_state.get("duration", 1.0)), 0.001), 0.0, 1.0)
 		readiness = "%s  %d%%  /  %s" % [str(active_state.get("name", "SKILL")), int(ratio * 100.0), str(active_state.get("key", ""))]
 	var left := float(state.get("left", 1.0))

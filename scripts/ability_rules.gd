@@ -7,8 +7,10 @@ extends RefCounted
 ## authority and the current base movement speed. Add a new entry here, an icon
 ## beside it, and the same HUD/input/network path works for the next ability.
 ##
-## Slot 0 is the main hand, slot 1 the off hand. The granted ability follows
-## the weapon the rig is actually holding, so a session weapon key changes it.
+## Slot 0 is the main hand, slot 1 the off hand, slot 2 the trinket slot
+## (necklace first, then ring 1, then ring 2). The granted ability follows the
+## weapon the rig is actually holding, so a session weapon key changes it.
+## A trinket grant is worn rather than held, so it survives every weapon swap.
 ##
 ## `move` decides what the feet do for the duration. A planted skill (ranged
 ## casts, the unarmed charge, the backstab blink) stops the walk dead; a melee
@@ -20,7 +22,8 @@ extends RefCounted
 ## pressed from. Every skill that travels (the lunge, the boss shove, the shield
 ## charge) declares it; a planted skill needs no direction.
 
-const SLOT_COUNT := 2
+const SLOT_COUNT := 3
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 ## Temporary testing cost: every weapon skill spends a trivial stamina sliver
 ## so the effect can be exercised back to back. The legacy unarmed charge keeps
 ## its original price.
@@ -371,6 +374,50 @@ const ABILITIES := [
 			"stagger": 0.65},
 		"cues": [{"at": 0.50, "cue": "ring"}],
 	},
+	{
+		# Worn trinkets own the third slot. The ring is not held, so this skill
+		# is available with any weapon loadout.
+		"id": "dash",
+		"name": "DASH",
+		"item": "ring_dash",
+		"slot": 2,
+		"key": "SHIFT + 3",
+		"stamina_cost": 10.0,
+		"cooldown": 2.5,
+		"duration": 1.0,
+		"travel_seconds": 1.0,
+		"speed_scale": 2.0,
+		"move": false,
+		"aim": true,
+		"sound": "charge",
+		"animation": "Sprint_Loop",
+		"lean": 0.18,
+		"icon": "res://assets/ui/abilities/dash.png",
+		"description": "Sprint down the crosshair at double speed for one second.",
+	},
+	{
+		"id": "energy_shield",
+		"name": "ENERGY SHIELD",
+		"item": "neck_shield",
+		"slot": 2,
+		"key": "SHIFT + 3",
+		"stamina_cost": 8.0,
+		"cooldown": 30.0,
+		"duration": 0.9,
+		"travel_seconds": 0.0,
+		"speed_scale": 0.0,
+		"sound": "ward",
+		"move": true,
+		"animation": "Staff_Fireball_Cast",
+		"lean": -0.03,
+		"icon": "res://assets/ui/abilities/energy_shield.png",
+		"description": "A humming ward for one minute: half of every hit is paid in stamina.",
+		# The ward is a timed body state, not a beat of damage: `absorb` is the
+		# share of a hit moved onto stamina at `stamina_scale` times the cost.
+		"effect": {"kind": "ward", "absorb": 0.5, "stamina_scale": 2.0,
+			"seconds": 60.0},
+		"cues": [{"at": 0.42, "cue": "ward"}],
+	},
 ]
 
 static var _icon_cache: Dictionary = {}
@@ -454,15 +501,27 @@ static func off_item(rig) -> String:
 	return SHIELD_ITEMS[clampi(int(rig.shield_variant), 0, SHIELD_ITEMS.size() - 1)]
 
 
-## Both hands' current grants. A hand with no grant resolves to an empty dict.
-## An empty main hand keeps the legacy unarmed charge.
+## Both hands' current grants plus the worn trinket's grant. A slot with no
+## grant resolves to an empty dict. An empty main hand keeps the legacy unarmed
+## charge. The trinket slot prefers the necklace, then ring 1, then ring 2.
 static func granted(rig) -> Array:
 	if not is_instance_valid(rig):
-		return [{}, {}]
+		return [{}, {}, {}]
 	var main := main_item(rig)
 	var off := off_item(rig)
+	var trinket := trinket_item(rig)
 	var main_definition := by_item(main, 0) if not main.is_empty() else by_id("charge")
-	return [main_definition, by_item(off, 1) if not off.is_empty() else {}]
+	return [main_definition, by_item(off, 1) if not off.is_empty() else {},
+		by_item(trinket, 2) if not trinket.is_empty() else {}]
+
+
+static func trinket_item(rig) -> String:
+	if not is_instance_valid(rig):
+		return ""
+	var kit: Variant = rig.get("trinkets")
+	if kit is Dictionary:
+		return TrinketStats.ability_item(kit)
+	return ""
 
 
 static func definition_for(rig, slot: int) -> Dictionary:
@@ -479,7 +538,48 @@ static func damage_for(definition: Dictionary, rig) -> float:
 		item = main_item(rig)
 	var base := float(ITEM_DAMAGE.get(item, 0.0))
 	var effect: Dictionary = definition.get("effect", {})
-	return base * float(effect.get("damage_scale", 1.0))
+	var damage := base * float(effect.get("damage_scale", 1.0))
+	if not is_instance_valid(rig):
+		return damage
+	# Ranged trinkets scale arrows and spells; melee trinkets scale blade
+	# skills and the backstab. Every scene reads this one function, so the
+	# frontier, the arena and the delve cannot drift apart.
+	match str(effect.get("kind", "")):
+		"barrage", "volley", "piercing_shot", "projectile":
+			return damage * ranged_scale(rig)
+		"melee_arc", "melee_ring", "backstab":
+			return damage * melee_scale(rig)
+	return damage
+
+
+## The echo trinkets shorten every skill's cooldown.
+static func cooldown_scale(rig) -> float:
+	if not is_instance_valid(rig):
+		return 1.0
+	var stats: Variant = rig.get("trinket_stats")
+	if stats is Dictionary:
+		return TrinketStats.cooldown_scale(stats)
+	return 1.0
+
+
+static func ranged_scale(rig) -> float:
+	if not is_instance_valid(rig) or not rig.has_method("ranged_scale"):
+		return 1.0
+	return float(rig.ranged_scale())
+
+
+static func melee_scale(rig) -> float:
+	if not is_instance_valid(rig) or not rig.has_method("melee_scale"):
+		return 1.0
+	return float(rig.melee_scale())
+
+
+## The ward block of a definition, or {} for every other skill.
+static func ward(definition: Dictionary) -> Dictionary:
+	var effect: Dictionary = definition.get("effect", {})
+	if str(effect.get("kind", "")) != "ward":
+		return {}
+	return effect
 
 
 static func icon_texture(id: String) -> Texture2D:

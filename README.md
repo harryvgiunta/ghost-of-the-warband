@@ -47,7 +47,7 @@ There is no out-of-game depot. **Hearthstead** is the staging town inside the op
 | **Hearthstead Campfire** | Town square | Restores health and stamina |
 | **Sunken Delve hatch** | Inside the Wayfarer Inn | A real hole in the floor: jump in to fall into the delve |
 
-The starter kit is the five Ranger leather pieces plus the shortbow in the main hand, **every catalog weapon in the backpack**: three bows, three swords, the iron dagger, two staffs and three shields, and 200 credits. The tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**. Bought gear needs a free backpack slot; selling pays 60% of the purchase price.
+The starter kit is the five Ranger leather pieces plus the shortbow in the main hand, **every catalog weapon in the backpack**: three bows, three swords, the iron dagger, two staffs and three shields, and **99,999** credits. The tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**. Bought gear needs a free backpack slot; selling pays 60% of the purchase price.
 
 Press **I** anywhere in the world to open the **inventory** (15 backpack slots plus the ground strip). Press **P** to open the **equipment paperdoll** (10 equipment slots: head, chest, hands, legs, feet, neck, ring 1, ring 2, main hand and off-hand). Right-click a backpack item to equip it to its natural slot, a paperdoll item to return it to the pack, a stash item to take it, or a ground item to pick it up. While a keeper or the stash is open, the same overlay adds their stock or the 20-slot stash beside the pack; **EQUIP**, **TO STASH**, **TO INVENTORY**, **SELL** and **DROP** act on the selected piece. Drag-free controls: click a slot, then use the action buttons.
 
@@ -68,9 +68,9 @@ Loot is tuned to **a tenth of its old rate**: a weapon-carrying devil leaves the
 | Bow | Main hand only | Shortbow, recurve, longbow |
 | Staff | Main hand only; locks the off-hand | Ember Staff, Bone Staff |
 | Shield | Off-hand only | Buckler, kite shield, tower shield |
-| Focus | Off-hand only | Ash Tome, Bone Skull |
+| Focus | Off-hand only | Ash Tome, Bone Skull, Skull of Life, Skull of Death |
 | Armor | Its own head / chest / hands / legs / feet slot | Leather, mail, plate and Emberweave pieces |
-| Jewelry | Neck, or either ring slot | Ember Charm, Bone Talisman, three rings |
+| Jewelry | Neck, or either ring slot | Ember Charm, Amulet of Energy Shield, seventeen rings |
 
 - Right-click routing sends one-handers to the **main hand**, shields and foci to the **off-hand**, armor to its own slot, a necklace to the neck and a ring to the first empty ring slot (then ring 1). Alt+right-click and drags onto a slot choose the hand explicitly.
 - Equipping a two-handed weapon, bow or staff **overrides both hands**: an existing main-hand and off-hand item are both returned to the backpack. If the backpack has room for only one, the second displaced item lands on the floor.
@@ -78,6 +78,36 @@ Loot is tuned to **a tenth of its old rate**: a weapon-carrying devil leaves the
 - Two one-handers may occupy the main and off hand together. The loadout enters dual wield only when a one-handed sword is in the main hand and a dagger or another one-handed sword is in the off hand, with no shield, focus or staff involved.
 - The shield pairs with **any one-handed sword or the dagger**, including the shortsword. A bow, greatsword, staff or dual wield stows it. Staffs keep the greatsword's damage and swing clock but use their own **middle grip**, shaft length and 1.6/1.5 m cleave reach; foci are held and cosmetic.
 - Dragging between two paperdoll slots moves a piece into an empty legal slot or swaps two pieces. Illegal moves (a ring to the neck, a two-hander to the off-hand) are rejected. Unequipping returns a piece to the backpack; dropping it sends it to the floor.
+
+### Trinkets: necklaces, rings and the held skulls
+
+A **neck** piece, either **ring** and the **off hand** can change the ranger's numbers. `scripts/trinket_stats.gd` is the single table; the controllers only read its aggregate, so a new trinket is one catalog row plus one entry there.
+
+| Slot | Item | Effect |
+| --- | --- | --- |
+| Neck | **Amulet of Energy Shield** | Grants **ENERGY SHIELD** on **SHIFT + 3**: a yellow bubble that absorbs **50%** of every hit and takes **twice** that share from stamina instead. Lasts **60 s**, the bubble pops when the pool cannot pay |
+| Ring | **Ring of Dash** | Grants **DASH** on **SHIFT + 3** (double speed for 1 s, down the crosshair) |
+| Off hand | **Skull of Life** | **+15 life** on every kill you land |
+| Off hand | **Skull of Death** | **+15 stamina** on every kill you land |
+| Ring | **Ring of Health** | +25 max health |
+| Ring | **Ring of Ironhide** | +20 max health, +2% damage reduction |
+| Ring | **Ring of Ranged Damage** | +10% ranged damage (arrows, bow skills, spells) |
+| Ring | **Ring of Melee Damage** | +10% melee damage (blades, blade skills, backstab) |
+| Ring | **Ring of Throwing** | +25% thrown weapon damage |
+| Ring | **Ring of the Swift** | +8% movement speed |
+| Ring | **Ring of Haste** | +12% attack speed (bow draw and swing clocks) |
+| Ring | **Ring of Vigor** | +150 max stamina |
+| Ring | **Ring of the Tide** | +30% stamina regeneration |
+| Ring | **Ring of Warding** | +6% damage reduction, added to the armor total |
+| Ring | **Ring of Grit** | -25% stagger suffered |
+| Ring | **Ring of Bounty** | +25% gold from kills |
+| Ring | **Ring of Echoes** | -15% skill cooldown |
+
+- The three worn trinkets add up: two health rings and the ironhide band give **145** max health on a 100 base.
+- The **necklace wins the third ability slot**, then ring 1, then ring 2, so a kit always resolves one skill deterministically. A stat-only ring leaves that tile hidden and **SHIFT + 3** inert.
+- **Skulls pay out in the frontier, the arena and the delve** — the killer is recorded on every mob, and only that ranger's own skulls refill. Both skulls are off-hand holds, so they are unavailable while a bow, staff, greatsword, shield or dual-wield pair is out.
+- The plain **Ember Charm**, **Bone Talisman** and the three cheap rings remain flavor pieces with no combat effect.
+- Health and stamina maxima are per-actor now: **125/125** and **1150** read that way on every HUD, and a removed ring clamps the live pool back down instead of leaving an over-full bar.
 
 ### Looting in the frontier
 
@@ -98,7 +128,7 @@ Armor is equipped **per slot**, so a cloth hood can sit over a mail hauberk, lea
 
 The leather outfit is the imported Ranger mesh split by region; mail is riveted ring weave, plate is blackened articulated steel, and Emberweave is a layered mage robe with a torn hem and brass trim. Each piece renders on the same 65-bone skeleton as the ranger and follows the authored idle, draw, swing, crouch, slide, roll and cover poses. A dark hose underlayer fills the shin whenever the short leather trousers are mixed with short sabatons.
 
-Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The town Quartermaster sells all 20 pieces alongside the two foci, two necklaces and three rings; old whole-set items from earlier saves are migrated to the five slots on load.
+Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The town Quartermaster sells all 20 pieces alongside the four foci, three necklaces and seventeen rings; old whole-set items from earlier saves are migrated to the five slots on load.
 
 In a match, the arena's session panel lists five slot buttons (**HEAD / CHEST / HANDS / LEGS / FEET**). Click a slot to cycle Leather → Mail → Plate → Cloth for that session. Session changes are not written back; only the equipment paperdoll's pieces persist.
 
@@ -184,7 +214,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 | Click left mouse while dual wielding | Left-hand diagonal cut from the left |
 | Click right mouse while dual wielding | Right-hand diagonal cut from the right; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| Shift + 1 / Shift + 2 | Cast the skill granted by the equipped main hand / off-hand shield; each costs 1 stamina for testing |
+| Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill granted by the equipped main hand / off-hand shield / worn trinket; each costs 1 stamina for testing |
 | G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
 | I | Open or close the in-world inventory (15 backpack slots plus the ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
 | P | Open or close the equipment paperdoll (ten equipped slots); while open it owns the cursor and blocks movement, attacks and interactions |
@@ -195,9 +225,9 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 
 ### Abilities and stamina
 
-The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and two ability slots: **SHIFT + 1** for the main hand and **SHIFT + 2** for the off-hand shield, each with its icon, stamina cost and cooldown.
+The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and three ability slots: **SHIFT + 1** for the main hand, **SHIFT + 2** for the off-hand shield and **SHIFT + 3** for the worn trinket, each with its icon, stamina cost and cooldown.
 
-Abilities are data-driven and item-granted by `scripts/ability_rules.gd`: equipping a weapon grants its skill to the main hand, and equipping a shield grants its skill to the off hand. A definition carries the granting item, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
+Abilities are data-driven and item-granted by `scripts/ability_rules.gd`: equipping a weapon grants its skill to the main hand, equipping a shield grants its skill to the off hand, and wearing the amulet or the dash ring grants its skill to the trinket slot. A definition carries the granting item, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
 
 `move` decides what the feet do. **Double Slash, Lunging Thrust, Spinning AOE Spin, Headbutt, Shield Charge and Ground Shield Slam** keep normal walking input; **Barrage, Triple Fan Volley, Long Piercing Shot, Fireball, Bone Spear**, the unarmed **Charge** and **Backstab** stay planted. Committed travel still wins during its window (**0.24 s** lunge, **0.16 s** headbutt, **0.48 s** shield charge), and the walk resumes once it ends; no ability allows sprinting or jumping. A definition's `aim` flag makes that committed step travel down the live crosshair instead of the heading the key was pressed from, so the lunge, the headbutt and the shield charge all turn the body onto the crosshair and dash along it. Skills that cannot be performed from a crouch — every blade, shield and dagger skill plus the unarmed Charge — are performed standing: activating one cancels a manual crouch, snaps the capsule upright and only spends the skill once the body has headroom to stand, so the authored clip always owns the whole pose. The planted bow and staff casts still layer over a crouch.
 
@@ -562,6 +592,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/ability_regression.gd
 & $Godot --headless --path . --script res://tests/weapon_abilities_regression.gd
 & $Godot --headless --path . --script res://tests/backstab_regression.gd
+& $Godot --headless --path . --script res://tests/trinkets_regression.gd
 ```
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
