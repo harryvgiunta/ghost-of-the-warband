@@ -210,7 +210,7 @@ func set_combat(state: String, time: float) -> void:
 	_select_locomotion()
 
 
-func die() -> void:
+func die(direction: Vector3 = Vector3.ZERO) -> void:
 	if _dead or _player == null:
 		return
 	_dead = true
@@ -222,7 +222,7 @@ func die() -> void:
 	_death_held = true
 	_clip = str(_data["death"])
 	_player.pause()
-	CorpsePhysics.start_limp(self)
+	CorpsePhysics.start_limp(self, direction)
 
 
 func head_hitbox_center() -> Vector3:

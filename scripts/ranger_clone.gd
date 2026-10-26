@@ -584,6 +584,7 @@ func _die(announce: bool) -> void:
 	_death_handled = true
 	alive = false
 	state = "DEAD"
+	var fall_dir := CorpsePhysics.fall_direction(self, velocity)
 	velocity = Vector3.ZERO
 	collision_layer = 0
 	collision_mask = 1
@@ -596,7 +597,7 @@ func _die(announce: bool) -> void:
 		# before its skeleton is handed to the ragdoll; snapshots only mirror
 		# state on dead replicas.
 		rig.enter_corpse_pose()
-	var limp = CorpsePhysics.start_limp(_body) if is_instance_valid(_body) else null
+	var limp = CorpsePhysics.start_limp(_body, fall_dir) if is_instance_valid(_body) else null
 	var fall: Tween
 	if limp != null:
 		fall = create_tween()

@@ -4,11 +4,13 @@ extends RefCounted
 ## Two layers share one path:
 ## - every dead CharacterBody keeps falling to the ground with only the world
 ##   collision mask, so a mob killed mid-leap cannot hang in the air;
-## - a rigged presentation gets a Godot `PhysicalBoneSimulator3D` ragdoll built
-##   from the bone chain it already has. The authored death clip is replaced by
-##   real falling limbs. The simulation settles, its pose is baked into the
-##   skeleton, and the rigid bodies are freed, so five-minute corpses cost
-##   nothing after the fall.
+## - a rigged presentation gets a Godot `PhysicalBoneSimulator3D` ragdoll. The
+##   pelvis carries the whole torso as one rigid collision body (spine, chest
+##   and neck follow it), while the head and limbs are pin-jointed physical
+##   bones. That keeps a corpse's silhouette when it topples instead of folding
+##   into a heap. The authored death clip is replaced by the fall; the
+##   simulation settles, its pose is baked into the skeleton, and the rigid
+##   bodies are freed, so five-minute corpses cost nothing after the fall.
 ##
 ## The ragdoll is presentation only: it never owns damage, loot or authority.
 ## Both host and replica build their own from the replicated death position.
@@ -36,10 +38,12 @@ static func settle_root(host: CharacterBody3D, delta: float) -> void:
 	host.move_and_slide()
 
 
-## Turns the skeleton under `visual` into a limp physical body. Returns the
-## simulator, or null when the presentation has no skeleton (procedural mobs
-## keep their authored collapse, and the root gravity above still applies).
-static func start_limp(visual: Node3D) -> PhysicalBoneSimulator3D:
+## Turns the skeleton under `visual` into a limp physical body. `fall` is the
+## world direction the body should topple; zero lets the corpse pick a stable
+## backward-side lean from its spawn point. Returns the simulator, or null when
+## the presentation has no skeleton (procedural mobs keep their authored
+## collapse, and the root gravity above still applies).
+static func start_limp(visual: Node3D, fall: Vector3 = Vector3.ZERO) -> PhysicalBoneSimulator3D:
 	var skeleton := _find_skeleton(visual)
 	if skeleton == null:
 		return null
@@ -77,10 +81,54 @@ static func start_limp(visual: Node3D) -> PhysicalBoneSimulator3D:
 			ancestor = skeleton.get_bone_parent(ancestor)
 		physical.joint_type = PhysicalBone3D.JOINT_TYPE_PIN if jointed \
 			else PhysicalBone3D.JOINT_TYPE_NONE
+	_add_torso_shapes(simulator, skeleton)
 	skeleton.set_meta("corpse_ragdoll", simulator)
 	simulator.physical_bones_start_simulation()
+	_apply_topple(simulator, visual, fall)
 	_poll(simulator, skeleton, 0.0, 0)
 	return simulator
+
+
+## A body killed on its feet has no lateral momentum, so a free ragdoll folds
+## straight down and looks like it is melting. Every death gets a deterministic
+## topple direction and a shove through the upper torso, so the corpse falls
+## over onto a side or its face like a body should.
+static func fall_direction(host: Node3D, motion: Vector3) -> Vector3:
+	var flat := Vector3(motion.x, 0.0, motion.z)
+	if flat.length_squared() > 0.64:
+		return flat.normalized()
+	var seed := int(absf(host.global_position.x) * 37.0 \
+		+ absf(host.global_position.z) * 19.0 + absf(host.global_position.y) * 7.0)
+	var side := -1.0 if seed % 2 == 0 else 1.0
+	var basis := host.global_basis.orthonormalized()
+	return (basis.z + basis.x * side * 0.85).normalized()
+
+
+static func _apply_topple(simulator: PhysicalBoneSimulator3D, visual: Node3D,
+		fall: Vector3) -> void:
+	var direction := Vector3(fall.x, 0.0, fall.z)
+	if direction.length_squared() < 0.04:
+		direction = fall_direction(visual, Vector3.ZERO)
+	direction = direction.normalized()
+	var head: PhysicalBone3D = null
+	var pelvis: PhysicalBone3D = null
+	for child in simulator.get_children():
+		if not child is PhysicalBone3D:
+			continue
+		var physical := child as PhysicalBone3D
+		var bone_name := str(physical.bone_name).to_lower()
+		if bone_name == "head":
+			head = physical
+		elif bone_name == "pelvis":
+			pelvis = physical
+	var axis := Vector3.UP.cross(direction)
+	# Rotate the free pelvis root so the whole body goes over, then add a
+	# smaller shove through the head so it does not just slide on its feet.
+	if pelvis != null:
+		pelvis.angular_velocity += axis * 1.9
+		pelvis.apply_central_impulse(direction * pelvis.mass * 0.5)
+	if head != null:
+		head.apply_central_impulse(direction * head.mass * 1.1)
 
 
 ## True while the visible bones are still driven by physics.
@@ -234,11 +282,7 @@ static func _is_candidate(skeleton: Skeleton3D, index: int) -> bool:
 
 
 static func _wanted(lower: String) -> bool:
-	if lower == "pelvis" or lower == "chest" or lower == "head":
-		return true
-	if lower.begins_with("spine"):
-		return true
-	if lower.begins_with("neck_"):
+	if lower == "pelvis" or lower == "head":
 		return true
 	if lower.begins_with("upperarm") or lower.begins_with("upper_arm"):
 		return true
@@ -261,13 +305,104 @@ static func _wanted(lower: String) -> bool:
 	return lower.begins_with("wing_01") or lower.begins_with("wing_02")
 
 
+static func _radius_for(lower: String, half: float) -> float:
+	var radius: float
+	if lower == "pelvis" or lower == "chest" or lower.begins_with("spine"):
+		radius = half * 0.9
+	elif lower == "head":
+		radius = half * 0.9
+	elif lower.begins_with("neck_"):
+		radius = half * 0.8
+	elif lower.begins_with("upper") or lower.begins_with("thigh_"):
+		radius = half * 0.5
+	elif lower.begins_with("lower") or lower.begins_with("calf_") \
+			or lower.begins_with("shin_") or lower.begins_with("hock_"):
+		radius = half * 0.45
+	elif lower.begins_with("hand_") or lower.begins_with("foot_") \
+			or lower.begins_with("front_paw"):
+		radius = half * 0.5
+	else:
+		radius = half * 0.35
+	return clampf(minf(radius, half * 0.95), 0.028, 0.16)
+
+
+static func _mass_for(lower: String) -> float:
+	if lower == "pelvis":
+		return 4.0
+	if lower == "head":
+		return 1.6
+	if lower.begins_with("upper") or lower.begins_with("thigh_"):
+		return 1.6
+	if lower.begins_with("lower") or lower.begins_with("calf_") \
+			or lower.begins_with("shin_") or lower.begins_with("hock_"):
+		return 1.2
+	if lower.begins_with("hand_") or lower.begins_with("foot_") \
+			or lower.begins_with("front_paw"):
+		return 0.5
+	return 0.4
+
+
+## The torso is one rigid body: pelvis, spine, chest and neck move together,
+## so a corpse topples like a body instead of folding into a pile. The skipped
+## torso bones still need their volume in the collision shape, or the mesh lies
+## through the floor. Their capsules are attached to the pelvis body.
+static func _add_torso_shapes(simulator: PhysicalBoneSimulator3D,
+		skeleton: Skeleton3D) -> void:
+	var pelvis_id := skeleton.find_bone("pelvis")
+	var pelvis_body: PhysicalBone3D = null
+	for child in simulator.get_children():
+		if child is PhysicalBone3D and (child as PhysicalBone3D).get_bone_id() == pelvis_id:
+			pelvis_body = child as PhysicalBone3D
+			break
+	if pelvis_body == null:
+		return
+	var root_pose := skeleton.get_global_transform() \
+		* skeleton.get_bone_global_pose(pelvis_id) * pelvis_body.body_offset
+	for index in skeleton.get_bone_count():
+		var lower := skeleton.get_bone_name(index).to_lower()
+		if not _is_torso(lower):
+			continue
+		var children := skeleton.get_bone_children(index)
+		if children.is_empty():
+			continue
+		var offset := skeleton.get_bone_pose(children[0]).origin
+		var half := offset.length() * 0.5
+		if half < 0.008:
+			continue
+		var radius := _radius_for(lower, half)
+		var capsule := CapsuleShape3D.new()
+		capsule.height = maxf(half * 2.0, radius * 2.0)
+		capsule.radius = radius
+		var collision := CollisionShape3D.new()
+		collision.shape = capsule
+		var body_pose := skeleton.get_global_transform() \
+			* skeleton.get_bone_global_pose(index) * _body_transform(offset, half)
+		collision.transform = root_pose.affine_inverse() * body_pose
+		pelvis_body.add_child(collision)
+
+
+static func _is_torso(lower: String) -> bool:
+	return lower == "chest" or lower.begins_with("spine") \
+		or lower.begins_with("neck_")
+
+
+static func _body_transform(offset: Vector3, half: float) -> Transform3D:
+	var up := Vector3.UP
+	if up.cross(offset).length_squared() < 0.000001:
+		up = Vector3.FORWARD
+	var basis := Basis.looking_at(offset, up)
+	return Transform3D(basis, basis * Vector3(0.0, 0.0, -half))
+
+
 static func _build_bone(entry: Array) -> PhysicalBone3D:
 	var bone_name := str(entry[0])
+	var lower := bone_name.to_lower()
 	var offset: Vector3 = entry[2]
 	var half: float = entry[3]
+	var radius := _radius_for(lower, half)
 	var capsule := CapsuleShape3D.new()
-	capsule.height = half * 2.0
-	capsule.radius = maxf(half * 0.22, 0.02)
+	capsule.height = maxf(half * 2.0, radius * 2.0)
+	capsule.radius = radius
 	var collision := CollisionShape3D.new()
 	collision.shape = capsule
 	collision.transform = Transform3D(
@@ -276,18 +411,14 @@ static func _build_bone(entry: Array) -> PhysicalBone3D:
 	var physical := PhysicalBone3D.new()
 	physical.name = "CorpseBone_" + bone_name
 	physical.add_child(collision)
-	var up := Vector3.UP
-	if up.cross(offset).length_squared() < 0.000001:
-		up = Vector3.FORWARD
-	var basis := Basis.looking_at(offset, up)
-	physical.body_offset = Transform3D(basis, basis * Vector3(0.0, 0.0, -half))
+	physical.body_offset = _body_transform(offset, half)
 	physical.joint_offset = Transform3D(Basis.IDENTITY,
 		Vector3(0.0, 0.0, half))
 	# Layer 0: a corpse never blocks a ranger, arrow or another mob. Mask 1:
 	# it still collides with the terrain that catches it.
 	physical.collision_layer = 0
 	physical.collision_mask = 1
-	physical.mass = 1.0
+	physical.mass = _mass_for(lower)
 	physical.can_sleep = true
 	physical.linear_damp_mode = PhysicalBone3D.DAMP_MODE_REPLACE
 	physical.linear_damp = 0.08

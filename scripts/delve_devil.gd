@@ -659,6 +659,7 @@ func _die(announce: bool) -> void:
 	alive = false
 	state = STATE_DEAD
 	_state_time = 0.0
+	var fall := CorpsePhysics.fall_direction(self, velocity)
 	velocity = Vector3.ZERO
 	collision_layer = 0
 	collision_mask = 1
@@ -666,7 +667,7 @@ func _die(announce: bool) -> void:
 		_warning.visible = false
 	if is_instance_valid(_visual):
 		if _visual_kind == "mob":
-			_visual.die()
+			_visual.die(fall)
 		else:
 			_visual.set_weapon("claw")
 			_visual.set_action(STATE_DEAD,0.0)

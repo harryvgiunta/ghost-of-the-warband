@@ -690,6 +690,7 @@ func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_warning.visible = false
+	var fall := CorpsePhysics.fall_direction(self, velocity)
 	# Layer 0 stops the corpse blocking bodies and arrows; mask 1 lets the dead
 	# root keep falling onto the world if the mob died mid-leap.
 	set_deferred("collision_layer", 0)
@@ -704,7 +705,7 @@ func _enter_dead(announce: bool) -> void:
 	var death_tween := create_tween()
 	if kind == 0:
 		# The wolf's imported skeleton ragdolls limp from its current pose.
-		_wolf.die()
+		_wolf.die(fall)
 		death_tween.tween_interval(0.45)
 		CorpseHold.append(death_tween, self, _body)
 	elif kind == 2:

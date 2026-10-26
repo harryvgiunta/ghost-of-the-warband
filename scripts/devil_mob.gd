@@ -394,11 +394,12 @@ func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_struck = true
+	var fall := CorpsePhysics.fall_direction(self, velocity)
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	velocity = Vector3.ZERO
 	if is_instance_valid(_visual):
-		_visual.die()
+		_visual.die(fall)
 	if announce:
 		defeated.emit(self, int(profile.gold))
 	# Hold the authored death pose for the shared five minutes, then dissolve.

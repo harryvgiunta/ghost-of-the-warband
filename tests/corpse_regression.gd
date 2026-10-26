@@ -151,7 +151,21 @@ func run() -> void:
 	check(not CorpsePhysics.is_limp(wolf._wolf), "The wolf ragdoll retires after settling")
 	check(not CorpsePhysics.is_limp(pack._visual), "The imported devil ragdoll retires after settling")
 	var baked_head := _bone_world(wolf._wolf, "head")
-	check(baked_head.y < 0.8, "The settled wolf corpse lies on the ground")
+	var baked_pelvis := _bone_world(wolf._wolf, "pelvis")
+	check(baked_head.y < 0.8 and baked_pelvis.y < 0.8,
+		"The settled wolf corpse lies on the ground")
+	var wolf_spread := Vector2(baked_head.x - baked_pelvis.x,
+		baked_head.z - baked_pelvis.z).length()
+	check(wolf_spread > 0.3,
+		"The wolf torso stays extended instead of folding into a pile")
+	var goat_head_world := _bone_world(pack._visual, "Head")
+	var goat_pelvis_world := _bone_world(pack._visual, "pelvis")
+	check(goat_head_world.y < 0.6 and goat_pelvis_world.y < 0.6,
+		"The goat corpse lies on the ground")
+	var goat_spread := Vector2(goat_head_world.x - goat_pelvis_world.x,
+		goat_head_world.z - goat_pelvis_world.z).length()
+	check(goat_spread > 0.35,
+		"The goat torso topples as one body instead of melting in place")
 	await pause(0.4)
 	var held_head := _bone_world(wolf._wolf, "head")
 	check(held_head.distance_to(baked_head) < 0.05, "The settled limp pose is held for the corpse lifetime")
