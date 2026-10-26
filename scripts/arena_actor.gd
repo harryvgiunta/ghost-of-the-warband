@@ -19,8 +19,13 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
 const Stamina = preload("res://scripts/stamina.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const MAX_HEALTH := 100.0
 const WALK_SPEED := 5.5
+## Packed focus silhouettes in the `gear` snapshot field: three bits, so the
+## two skull trinkets get their own glow on every peer.
+const FOCUS_CODES := {"tome":1, "skull":2, "skull_life":3, "skull_death":4}
+const FOCUS_KINDS := {1:"tome", 2:"skull", 3:"skull_life", 4:"skull_death"}
 var slot := 0
 var peer_id := 0
 var is_bot := true
@@ -40,6 +45,7 @@ var peek_shoulder := 1
 var aim_snapshot_tick := -1
 var _exposure_tick := -1
 var health := MAX_HEALTH
+var max_health := MAX_HEALTH
 var weapon_blood := 0.0
 var alive := true
 var kills := 0
@@ -52,6 +58,15 @@ var move_direction := Vector2.ZERO
 var run_requested := false
 var jump_requested := false
 var stamina := Stamina.MAX
+var max_stamina := Stamina.MAX
+## Worn trinket kit and its summed modifiers (see `TrinketStats`).
+var trinkets: Dictionary = {"neck":"", "ring1":"", "ring2":"", "off":""}
+var trinket_stats: Dictionary = {}
+## Energy Shield ward: while it runs, `absorb` of every hit is paid from
+## stamina at `stamina_scale` times that share instead of from health.
+var ward_seconds := 0.0
+var ward_absorb := 0.5
+var ward_stamina_scale := 2.0
 var _exhausted := false
 var consume_kind := ""
 var _consume_elapsed := 0.0
@@ -111,6 +126,9 @@ func _ready() -> void:
 	ability = AbilityRunner.new()
 	add_child(ability)
 	ability.setup(self,rig,combat,WALK_SPEED)
+	# A wire kit (or a mid-match paperdoll change) lands on the rig; the body
+	# follows it into its maxima and its stagger resistance.
+	rig.loadout_changed.connect(_sync_trinket_limits)
 	roll = DodgeRoll.new()
 	add_child(roll)
 	dodge = DodgeStep.new()
@@ -154,9 +172,11 @@ func revive() -> void:
 	jump_requested = false
 	input_age = 0.0
 	reset_stance()
-	health = MAX_HEALTH
+	health = max_health
 	weapon_blood = 0.0
-	stamina = Stamina.MAX
+	stamina = max_stamina
+	ward_seconds = 0.0
+	rig.set_ward(false)
 	_exhausted = false
 	ability.reset()
 	consume_kind = ""
@@ -361,16 +381,76 @@ func note_weapon_blood(amount: float) -> void:
 	# they render for this fighter. Purely cosmetic.
 	weapon_blood += maxf(amount, 0.0)
 
+## Apply a seat's worn trinket kit. Recomputes the maxima and clamps the live
+## pools so a mid-match ring change cannot leave an over-full bar.
+func apply_trinkets(kit: Dictionary) -> void:
+	if is_instance_valid(rig):
+		rig.apply_trinkets(kit)
+	_sync_trinket_limits()
+
+func _sync_trinket_limits() -> void:
+	if not is_instance_valid(rig):
+		return
+	trinkets = rig.trinkets.duplicate()
+	trinket_stats = rig.trinket_stats.duplicate()
+	max_health = TrinketStats.max_health(MAX_HEALTH, trinket_stats)
+	max_stamina = TrinketStats.max_stamina(Stamina.MAX, trinket_stats)
+	health = minf(health, max_health)
+	stamina = minf(stamina, max_stamina)
+	combat.stagger_scale = TrinketStats.stagger_scale(trinket_stats)
+
+func get_trinket_stats() -> Dictionary:
+	return trinket_stats
+
+## Off-hand skulls: the wearer refills on every kill this body makes.
+func apply_kill_refill() -> void:
+	var heal := float(trinket_stats.get("heal_on_kill", 0.0))
+	var gain := float(trinket_stats.get("stamina_on_kill", 0.0))
+	if heal > 0.0:
+		health = minf(max_health, health + heal)
+	if gain > 0.0:
+		stamina = minf(max_stamina, stamina + gain)
+
+## Start the Energy Shield ward from a successful activation.
+func start_ward(definition: Dictionary) -> void:
+	var effect := AbilityRules.ward(definition)
+	if effect.is_empty():
+		return
+	ward_seconds = float(effect.get("seconds", 60.0))
+	ward_absorb = clampf(float(effect.get("absorb", 0.5)), 0.0, 1.0)
+	ward_stamina_scale = maxf(1.0, float(effect.get("stamina_scale", 2.0)))
+	rig.set_ward(true)
+
+## Returns the damage that still reaches health after the ward's swap.
+func _absorb_with_ward(applied: float) -> float:
+	if ward_seconds <= 0.0 or applied <= 0.0:
+		return applied
+	var price: float = applied * ward_absorb * ward_stamina_scale
+	var paid: float = minf(price, stamina)
+	if paid <= 0.0:
+		return applied
+	stamina -= paid
+	return applied - paid / ward_stamina_scale
+
+func _tick_ward(delta: float) -> void:
+	if ward_seconds <= 0.0:
+		return
+	ward_seconds = maxf(0.0, ward_seconds - delta)
+	if ward_seconds <= 0.0:
+		rig.set_ward(false)
+
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
 	_cancel_consumable()
-	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.armor_reduction())
+	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
+		* (1.0 - rig.damage_reduction())
+	applied = _absorb_with_ward(applied)
 	health = maxf(0,health - applied)
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
 	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
-		var seconds: float = combat.stagger_from_damage(applied,MAX_HEALTH)
+		var seconds: float = combat.stagger_from_damage(applied,max_health)
 		rig.set_hit_react(seconds)
 		dodge.reset()
 	if health <= 0:
@@ -388,7 +468,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 func try_consume(kind: String) -> bool:
 	if not authoritative or not alive or consume_kind != "":
 		return false
-	if not Archer.CONSUMABLE_DATA.has(kind) or health >= 99.999:
+	if not Archer.CONSUMABLE_DATA.has(kind) or health >= max_health-0.001:
 		return false
 	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active or ability.active:
 		return false
@@ -416,10 +496,10 @@ func _advance_consumable(delta: float) -> void:
 					_heal_remaining = float(data.heal)
 					_heal_rate = float(data.heal)/maxf(float(data.heal_seconds),0.001)
 				else:
-					health = minf(100.0,health+float(data.heal))
+					health = minf(max_health,health+float(data.heal))
 	if _heal_remaining > 0.0:
 		var amount := minf(_heal_rate*delta,_heal_remaining)
-		health = minf(100.0,health+amount)
+		health = minf(max_health,health+amount)
 		_heal_remaining = maxf(0.0,_heal_remaining-amount)
 
 func _cancel_consumable() -> void:
@@ -462,6 +542,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	roll.advance(delta,is_on_floor())
 	dodge.advance(delta,is_on_floor())
 	ability.advance(delta)
+	_tick_ward(delta)
 	if ability.active:
 		# A melee skill keeps the walking intent, but sprint, jump, peek and
 		# slide stay off for the duration. Any other skill plants the fighter.
@@ -490,8 +571,8 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01 and not ability.active
-	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND)
-	stamina = clampf(stamina + delta * stamina_rate,0,Stamina.MAX)
+	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND * TrinketStats.stamina_regen(trinket_stats))
+	stamina = clampf(stamina + delta * stamina_rate,0,max_stamina)
 	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_exhausted = true
 	elif stamina >= Stamina.SPRINT_RESUME:
@@ -504,7 +585,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	elif _exposure_tick < 0:
 		_exposure_tick = simulation_tick
 	update_cover_aim_readiness()
-	var walk_speed := 2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5
+	var walk_speed: float = (2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5) * float(rig.move_scale())
 	if slide.active:
 		velocity.x = slide_velocity.x
 		velocity.z = slide_velocity.z
@@ -681,15 +762,15 @@ static func gear_bits_for(rig) -> int:
 	bits |= (int(rig.staff_index) & 1) << 4
 	var focus_code := 0
 	if rig.focus_active:
-		focus_code = 1 if rig.focus_kind == "tome" else 2
-	bits |= (focus_code & 3) << 5
-	bits |= (int(rig.focus_index) & 1) << 7
-	bits |= (int(rig.shield_variant) & 3) << 8
+		focus_code = FOCUS_CODES.get(str(rig.focus_kind),2)
+	bits |= (focus_code & 7) << 5
+	bits |= (int(rig.focus_index) & 1) << 8
+	bits |= (int(rig.shield_variant) & 3) << 9
 	return bits
 
 func snapshot() -> Dictionary:
 	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
-		"health":health,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
+		"health":health,"maxh":max_health,"ward":ward_seconds,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
 		"weapon_blood":weapon_blood,
 		"stamina":stamina,"ability":ability.snapshot(),
 		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
@@ -717,6 +798,10 @@ func apply_snapshot(state: Dictionary) -> void:
 	_received_pose = true
 	velocity = state.velocity
 	health = state.health
+	max_health = float(state.get("maxh",max_health))
+	ward_seconds = float(state.get("ward",ward_seconds))
+	if is_instance_valid(rig):
+		rig.set_ward(ward_seconds > 0.0)
 	stamina = float(state.get("stamina",stamina))
 	ability.apply_snapshot(state.get("ability",{}))
 	weapon_blood = float(state.get("weapon_blood",weapon_blood))
@@ -749,13 +834,13 @@ func apply_snapshot(state: Dictionary) -> void:
 		_gear_bits = gear
 		var off_active := (gear & 1) != 0
 		var off_kind := "sword" if (gear & 2) != 0 else "dagger"
-		var focus_code := (gear >> 5) & 3
-		var focus_kind := "" if focus_code == 0 else ("tome" if focus_code == 1 else "skull")
+		var focus_code := (gear >> 5) & 7
+		var focus_kind := str(FOCUS_KINDS.get(focus_code,""))
 		# Arm the off hand before the weapon mode so a replicated dual loadout
 		# can actually enter dual; the staff is restored last because set_sword()
 		# deliberately stows it.
-		rig.set_off_focus(focus_kind,(gear >> 7) & 1,focus_code != 0)
-		rig.set_shield_variant((gear >> 8) & 3)
+		rig.set_off_focus(focus_kind,(gear >> 8) & 1,focus_code != 0)
+		rig.set_shield_variant((gear >> 9) & 3)
 		rig.set_off_weapon(off_kind,(gear >> 2) & 1,off_active)
 	if rig.weapon != str(state.weapon):
 		rig.set_weapon(str(state.weapon))

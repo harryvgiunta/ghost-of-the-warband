@@ -116,6 +116,9 @@ var alive := true
 # numbers before the first snapshot arrives.
 var health := 24.0
 var max_health := 24.0
+## Slot of the ranger whose damage landed last; the delve reads it on death so
+## off-hand skull trinkets only pay out to the killer.
+var last_hitter := -1
 var enemy_id := 0
 var devil_weapon := "claw"
 var depth := 1
@@ -508,9 +511,10 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 	_present_state()
 
 
-func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0,health-applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)

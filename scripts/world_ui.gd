@@ -338,6 +338,12 @@ func build_inventory(parent: Node) -> void:
 	_floor_scroll.add_child(_floor_list)
 	_label(inventory_panel,"I  INVENTORY  /  P  EQUIPMENT  /  TAB  SWAP\nG  interact with a keeper or chest",Vector2(16,284),11,MUTED)
 
+static func stock_row_count() -> int:
+	var largest := 0
+	for vendor in StateScript.VENDORS:
+		largest = maxi(largest, (vendor.stock as Array).size())
+	return largest
+
 func build_side(parent: Node) -> void:
 	side_panel = _panel(parent,Vector2(500,110),Vector2(900,390))
 	_side_title = _label(side_panel,"",Vector2(16,10),12,GOLD)
@@ -360,7 +366,9 @@ func build_side(parent: Node) -> void:
 	_stock_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stock_list.add_theme_constant_override("separation",4)
 	_stock_scroll.add_child(_stock_list)
-	for index in 28:
+	# One row per keeper stock entry: the pool is sized from the largest vendor
+	# so a longer list can never silently lose its last pieces.
+	for index in stock_row_count():
 		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(820,32),12)
 		button.custom_minimum_size = Vector2(0,32)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL

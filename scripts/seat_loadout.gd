@@ -7,6 +7,8 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 
+const TRINKET_SLOTS := ["neck", "ring1", "ring2"]
+
 static func hand(value: Variant, slot: String) -> String:
 	if typeof(value) != TYPE_STRING:
 		return ""
@@ -15,6 +17,17 @@ static func hand(value: Variant, slot: String) -> String:
 	if item.is_empty() or not Rules.allowed(item,slot):
 		return ""
 	return id
+
+## The worn kit travels beside the hands. Each id must be a real catalog item
+## legal in its slot; anything else becomes an empty slot.
+static func trinkets(value: Variant) -> Dictionary:
+	var kit := {"neck":"", "ring1":"", "ring2":"", "off":""}
+	if typeof(value) != TYPE_DICTIONARY:
+		return kit
+	var source: Dictionary = value
+	for slot in TRINKET_SLOTS:
+		kit[slot] = hand(source.get(slot,""),slot)
+	return kit
 
 static func apply(rig, loadout: Dictionary) -> void:
 	if rig == null or loadout.is_empty():
@@ -29,6 +42,8 @@ static func apply(rig, loadout: Dictionary) -> void:
 	var off_raw: Variant = loadout.get("off")
 	var main := hand(main_raw,"main")
 	var off := hand(off_raw,"off")
+	var worn := trinkets(loadout.get("trinkets"))
+	worn["off"] = off
 	var hands_present := loadout.has("main") or loadout.has("off")
 	var main_ok := not loadout.has("main") or (typeof(main_raw) == TYPE_STRING and (str(main_raw).is_empty() or not main.is_empty()))
 	var off_ok := not loadout.has("off") or (typeof(off_raw) == TYPE_STRING and (str(off_raw).is_empty() or not off.is_empty()))
@@ -38,8 +53,10 @@ static func apply(rig, loadout: Dictionary) -> void:
 		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
 		# hand falls through instead of wiping a valid seat.
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else rig.armor_pieces.duplicate()
-		rig.apply_loadout(State.build_loadout(main,off,pieces))
+		rig.apply_loadout(State.build_loadout(main,off,pieces,worn))
 		return
+	# A kit that omits the hands still carries its worn trinkets.
+	rig.apply_trinkets(worn)
 	if bow_ok:
 		rig.set_bow(int(bow))
 	if sword_ok:

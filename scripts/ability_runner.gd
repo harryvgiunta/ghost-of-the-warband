@@ -73,7 +73,7 @@ func activate(slot: int = 0) -> Dictionary:
 	var facing := _facing(definition)
 	actor.stamina = maxf(0.0, float(actor.stamina) - cost)
 	if slot >= 0 and slot < cooldowns.size():
-		cooldowns[slot] = float(definition.cooldown)
+		cooldowns[slot] = float(definition.cooldown) * AbilityRules.cooldown_scale(rig)
 	active = true
 	active_id = str(definition.id)
 	active_slot = slot
@@ -85,6 +85,10 @@ func activate(slot: int = 0) -> Dictionary:
 	speed = base_speed * maxf(float(definition.get("speed_scale", 0.0)), 0.0)
 	direction = facing
 	_cue_index = 0
+	# A timed body state (the energy shield) starts with the activation; the
+	# owner applies it so the reward and the bubble cannot disagree.
+	if actor != null and is_instance_valid(actor) and actor.has_method("start_ward"):
+		actor.start_ward(definition)
 	rig.begin_ability(definition, direction)
 	activated.emit(active_id, definition)
 	_emit_due_cues()

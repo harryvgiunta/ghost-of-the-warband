@@ -7,11 +7,13 @@ signal changed
 
 const ArmorData = preload("res://scripts/armor_data.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 
 const INVENTORY_CAPACITY := 15
 const STASH_CAPACITY := 20
-const STARTING_CREDITS := 200
+## A new-game purse large enough to buy any keeper stock outright.
+const STARTING_CREDITS := 99999
 const SELL_RATE := 0.6
 const SAVE_VERSION := 4
 const DEFAULT_SAVE_PATH := "user://player_state.json"
@@ -81,6 +83,14 @@ const ITEMS := {
 		"category":"focus", "slot":"off", "focus":"skull",
 		"summary":"A bleached skull bound in copper wire",
 		"detail":"Off hand only / a heavy focus for a staff"},
+	"focus_skull_life": {"name":"Skull of Life", "short":"Life Skull", "kind":"focus", "index":2, "price":260,
+		"category":"focus", "slot":"off", "focus":"skull_life",
+		"summary":"A skull with green coals sunk in its sockets",
+		"detail":"Off hand only / +15 life on every kill"},
+	"focus_skull_death": {"name":"Skull of Death", "short":"Death Skull", "kind":"focus", "index":3, "price":260,
+		"category":"focus", "slot":"off", "focus":"skull_death",
+		"summary":"A skull lit violet from the inside",
+		"detail":"Off hand only / +15 stamina on every kill"},
 	"neck_ember": {"name":"Ember Charm", "short":"Ember Chm", "kind":"neck", "index":0, "price":120,
 		"category":"jewelry", "slot":"neck",
 		"summary":"A warm cinder on a leather cord",
@@ -89,6 +99,10 @@ const ITEMS := {
 		"category":"jewelry", "slot":"neck",
 		"summary":"A knuckle of something old on a thong",
 		"detail":"Neck only / a quiet ward against the dark"},
+	"neck_shield": {"name":"Amulet of Energy Shield", "short":"Shield Amulet", "kind":"neck", "index":2, "price":340,
+		"category":"jewelry", "slot":"neck",
+		"summary":"A yellow lodestone humming on a woven cord",
+		"detail":"Neck only / grants Energy Shield (SHIFT + 3) / 1 min"},
 	"ring_copper": {"name":"Copper Ring", "short":"Cu Ring", "kind":"ring", "index":0, "price":40,
 		"category":"jewelry", "slot":"ring",
 		"summary":"A soft hammered band",
@@ -101,6 +115,62 @@ const ITEMS := {
 		"category":"jewelry", "slot":"ring",
 		"summary":"A dark stone set in old gold",
 		"detail":"Ring slot only / fits either hand"},
+	"ring_dash": {"name":"Ring of Dash", "short":"Dash Ring", "kind":"ring", "index":3, "price":260,
+		"category":"jewelry", "slot":"ring",
+		"summary":"A cold iron band that leans the moment you look away",
+		"detail":"Ring slot only / grants the Dash skill (SHIFT + 3)"},
+	"ring_health": {"name":"Ring of Health", "short":"Health Ring", "kind":"ring", "index":4, "price":180,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Warm as a pulse you can hold",
+		"detail":"Ring slot only / +25 max health"},
+	"ring_ranged": {"name":"Ring of Ranged Damage", "short":"Range Ring", "kind":"ring", "index":5, "price":210,
+		"category":"jewelry", "slot":"ring",
+		"summary":"A knapped obsidian flake in a horn setting",
+		"detail":"Ring slot only / +10% ranged damage"},
+	"ring_melee": {"name":"Ring of Melee Damage", "short":"Melee Ring", "kind":"ring", "index":6, "price":210,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Iron from a broken blade, worn smooth",
+		"detail":"Ring slot only / +10% melee damage"},
+	"ring_swift": {"name":"Ring of the Swift", "short":"Swift Ring", "kind":"ring", "index":7, "price":200,
+		"category":"jewelry", "slot":"ring",
+		"summary":"It is always a little ahead of your hand",
+		"detail":"Ring slot only / +8% movement speed"},
+	"ring_haste": {"name":"Ring of Haste", "short":"Haste Ring", "kind":"ring", "index":8, "price":240,
+		"category":"jewelry", "slot":"ring",
+		"summary":"The gold never quite settles",
+		"detail":"Ring slot only / +12% attack speed"},
+	"ring_vigor": {"name":"Ring of Vigor", "short":"Vigor Ring", "kind":"ring", "index":9, "price":200,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Set with a seed that refuses to dry",
+		"detail":"Ring slot only / +150 max stamina"},
+	"ring_tide": {"name":"Ring of the Tide", "short":"Tide Ring", "kind":"ring", "index":10, "price":170,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Green enamel over a spiral of wire",
+		"detail":"Ring slot only / +30% stamina regeneration"},
+	"ring_ward": {"name":"Ring of Warding", "short":"Ward Ring", "kind":"ring", "index":11, "price":230,
+		"category":"jewelry", "slot":"ring",
+		"summary":"A ring of blackened silver that rings when struck",
+		"detail":"Ring slot only / +6% damage reduction"},
+	"ring_bounty": {"name":"Ring of Bounty", "short":"Bounty Ring", "kind":"ring", "index":12, "price":180,
+		"category":"jewelry", "slot":"ring",
+		"summary":"A merchant's seal melted into a band",
+		"detail":"Ring slot only / +25% gold from kills"},
+	"ring_thrower": {"name":"Ring of Throwing", "short":"Throw Ring", "kind":"ring", "index":13, "price":190,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Balanced so well it argues with your wrist",
+		"detail":"Ring slot only / +25% thrown damage"},
+	"ring_echo": {"name":"Ring of Echoes", "short":"Echo Ring", "kind":"ring", "index":14, "price":230,
+		"category":"jewelry", "slot":"ring",
+		"summary":"A hollow band that answers a half-breath late",
+		"detail":"Ring slot only / -15% skill cooldown"},
+	"ring_ironhide": {"name":"Ring of Ironhide", "short":"Iron Ring", "kind":"ring", "index":15, "price":150,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Three links of a mail shirt that lost the rest",
+		"detail":"Ring slot only / +20 max health / +2% damage reduction"},
+	"ring_grit": {"name":"Ring of Grit", "short":"Grit Ring", "kind":"ring", "index":16, "price":190,
+		"category":"jewelry", "slot":"ring",
+		"summary":"Leather and wire, chewed flat",
+		"detail":"Ring slot only / -25% stagger suffered"},
 	"armor_leather_head": {"name":"Leather Hood", "short":"L Hood", "kind":"head", "index":0, "set":0, "price":10,
 		"category":"armor", "slot":"head",
 		"summary":"A soft hood stained by the road",
@@ -259,6 +329,23 @@ const ITEM_QUOTES := {
 	"ring_copper": "Turned green by good intentions.",
 	"ring_silver": "Thornwork outside, soft heart inside.",
 	"ring_blood": "The stone is dark. The gold is older.",
+	"neck_shield": "A hum you feel in your teeth before the hit lands.",
+	"focus_skull_life": "It keeps the last breath. Politely.",
+	"focus_skull_death": "It keeps the last step. Greedily.",
+	"ring_dash": "Never the first to arrive; always the first to leave.",
+	"ring_health": "A second heartbeat that answers for you.",
+	"ring_ranged": "Squint once with it on and you will not miss twice.",
+	"ring_melee": "The forge remembers what the blade forgot.",
+	"ring_swift": "The road notices it before you do.",
+	"ring_haste": "Every blow arrives a heartbeat early.",
+	"ring_vigor": "It has never once suggested you sit down.",
+	"ring_tide": "Rest comes back faster than it should.",
+	"ring_ward": "It rings, and the wound does not.",
+	"ring_bounty": "Purse first, corpse after.",
+	"ring_thrower": "It trusts the air more than your grip.",
+	"ring_echo": "The skill remembers itself.",
+	"ring_ironhide": "Small armor. Real opinions.",
+	"ring_grit": "Shakes once, then refuses entirely.",
 	"armor_leather_head": "Hides the face, keeps the gossip.",
 	"armor_leather_chest": "Smells of rain, smoke and questionable decisions.",
 	"armor_leather_hands": "Fingers free for bowstrings and bad ideas.",
@@ -304,7 +391,11 @@ const VENDORS := [
 		"armor_mail_head","armor_mail_chest","armor_mail_hands","armor_mail_legs","armor_mail_feet",
 		"armor_plate_head","armor_plate_chest","armor_plate_hands","armor_plate_legs","armor_plate_feet",
 		"armor_cloth_head","armor_cloth_chest","armor_cloth_hands","armor_cloth_legs","armor_cloth_feet",
-		"focus_tome","focus_skull","neck_ember","neck_bone","ring_copper","ring_silver","ring_blood",
+		"focus_tome","focus_skull","neck_ember","neck_bone","neck_shield",
+		"ring_copper","ring_silver","ring_blood","ring_dash","ring_health","ring_ranged",
+		"ring_melee","ring_swift","ring_haste","ring_vigor","ring_tide","ring_ward",
+		"ring_bounty","ring_thrower","ring_echo","ring_ironhide","ring_grit",
+		"focus_skull_life","focus_skull_death",
 	]},
 ]
 
@@ -448,9 +539,20 @@ func item_stat_rows(id: String) -> Array:
 	elif category == "armor":
 		rows.append({"label":"GUARD", "value":"%d%%" % item_guard_percent(id)})
 	elif category == "focus":
-		rows.append({"label":"EFFECT", "value":"Cosmetic off-hand"})
+		var focus_rows := TrinketStats.effect_rows(id)
+		if focus_rows.is_empty():
+			rows.append({"label":"EFFECT", "value":"Cosmetic off-hand"})
+		else:
+			rows.append_array(focus_rows)
 	elif category == "jewelry":
-		rows.append({"label":"EFFECT", "value":"No combat effect"})
+		var jewelry_rows := TrinketStats.effect_rows(id)
+		if jewelry_rows.is_empty():
+			rows.append({"label":"EFFECT", "value":"No combat effect"})
+		else:
+			rows.append_array(jewelry_rows)
+		var grant := TrinketStats.grant_for(id)
+		if not grant.is_empty():
+			rows.append({"label":"SKILL", "value":"SHIFT + 3  /  %s" % grant.replace("_", " ").to_upper()})
 	return rows
 
 ## One-line version for the compact inspector header.
@@ -469,9 +571,11 @@ func item_compact_stats(id: String) -> String:
 	elif category == "armor":
 		parts.append("GUARD %d%%" % item_guard_percent(id))
 	elif category == "focus":
-		parts.append("COSMETIC")
+		var focus_text := TrinketStats.effect_summary(id)
+		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")
 	elif category == "jewelry":
-		parts.append("NO EFFECT")
+		var jewelry_text := TrinketStats.effect_summary(id)
+		parts.append(jewelry_text if not jewelry_text.is_empty() else "NO EFFECT")
 	return "  •  ".join(parts)
 
 func can_equip_in(id: String, slot: String) -> bool:
@@ -526,6 +630,14 @@ func equipped_pieces() -> Dictionary:
 func armor_reduction() -> float:
 	return ArmorData.reduction(equipped_pieces())
 
+## The four equipment ids the trinket table reads: neck, both rings and the
+## off hand (the skulls carry their kill effects there).
+func trinkets() -> Dictionary:
+	return TrinketStats.kit(equipped)
+
+func trinket_stats() -> Dictionary:
+	return TrinketStats.sum(trinkets())
+
 func is_equipped(id: String) -> bool:
 	if id.is_empty():
 		return false
@@ -550,7 +662,8 @@ func owned_in_stash(id: String) -> int:
 
 ## Build the exact loadout shape consumed by Archer.apply_loadout(), arena and
 ## delve. Pure: derives everything from the ids and the armor index map.
-static func build_loadout(main_id: String, off_id: String, armor_pieces: Dictionary) -> Dictionary:
+static func build_loadout(main_id: String, off_id: String, armor_pieces: Dictionary,
+		trinket_ids: Dictionary = {}) -> Dictionary:
 	var armor := {}
 	for slot in ArmorData.SLOTS:
 		armor[slot] = int(armor_pieces.get(slot, 0))
@@ -590,10 +703,12 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"main":main_id, "off":off_id, "weapon":weapon,
 		"bow":bow, "sword":sword, "staff":staff,
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
+		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
+			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
 	}
 
 func loadout() -> Dictionary:
-	return build_loadout(main_item(), off_item(), equipped_pieces())
+	return build_loadout(main_item(), off_item(), equipped_pieces(), equipped)
 
 func quick_main() -> String:
 	return str(quick.get("main", ""))

@@ -17,6 +17,8 @@ const FocusItem = preload("res://scripts/focus_item.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const EnergyShield = preload("res://scripts/energy_shield.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
@@ -149,6 +151,11 @@ var off_weapon_active := true
 var focus_kind := ""
 var focus_index := 0
 var focus_active := false
+## Worn trinket kit ({neck, ring1, ring2, off}) and its summed modifiers.
+## Presentation never reads these; the damage/timing getters below do.
+var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
+var trinket_stats := {}
+var _ward: EnergyShield
 var skeleton: Skeleton3D
 var _phase_time := 0.0
 var _roll_progress := -1.0
@@ -603,7 +610,7 @@ func _build_weapon_visuals() -> void:
 		add_child(staff)
 		staff.visible = false
 		_staffs.append(staff)
-	for kind in ["tome", "skull"]:
+	for kind in ["tome", "skull", "skull_life", "skull_death"]:
 		var focus := FocusItem.new()
 		focus.focus_kind = kind
 		add_child(focus)
@@ -705,6 +712,7 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var mode := str(loadout.get("weapon",""))
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
+	apply_trinkets(loadout.get("trinkets",{}))
 	set_blade_skins("makeshift" if main_id == "sword_makeshift" else "",
 		"makeshift" if main_id == "dagger_makeshift" or off_id == "dagger_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
@@ -780,8 +788,8 @@ func set_off_weapon(kind: String, index: int, active: bool) -> void:
 	loadout_changed.emit()
 
 func set_off_focus(kind: String, index: int, active: bool) -> void:
-	focus_kind = kind if kind in ["tome","skull"] else ""
-	focus_index = clampi(index,0,1)
+	focus_kind = kind if kind in ["tome","skull","skull_life","skull_death"] else ""
+	focus_index = clampi(index,0,3)
 	focus_active = active and not focus_kind.is_empty()
 	active_focus = _focus_items.get(focus_kind,null) if focus_active else null
 	if focus_active and weapon == "dual":
@@ -1032,11 +1040,12 @@ func _sync_primary_hand() -> void:
 func _duration_for(hand: String, variant: String) -> float:
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
 	var size := off_weapon_index if hand == "left" else sword_index
+	var base := float(SWORD_DATA[size].seconds)
 	if variant in ["diagonal_left","diagonal_right"]:
-		return 0.42 if dagger else float(DIAGONAL_SECONDS[size])
-	if variant == "stab" or dagger:
-		return float(DAGGER_DATA.seconds)
-	return float(SWORD_DATA[size].seconds)
+		base = 0.42 if dagger else float(DIAGONAL_SECONDS[size])
+	elif variant == "stab" or dagger:
+		base = float(DAGGER_DATA.seconds)
+	return base/maxf(attack_rate(),0.01)
 
 func _valid_variant(variant: String) -> bool:
 	return variant in MELEE_VARIANTS
@@ -1137,11 +1146,45 @@ func melee_seconds(hand: String = "") -> float:
 
 func melee_damage(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
+	var base := float(SWORD_DATA[sword_index].damage)
 	if key == "left":
-		return float(_off_profile().damage)
-	if weapon == "dagger":
-		return float(DAGGER_DATA.damage)
-	return float(SWORD_DATA[sword_index].damage)
+		base = float(_off_profile().damage)
+	elif weapon == "dagger":
+		base = float(DAGGER_DATA.damage)
+	return base*melee_scale()
+
+## Trinket modifiers read by the controllers, `Combat` and the ability cues.
+func apply_trinkets(kit: Dictionary) -> void:
+	trinkets = TrinketStats.kit(kit)
+	trinket_stats = TrinketStats.sum(trinkets)
+
+func melee_scale() -> float:
+	return TrinketStats.damage_scale(trinket_stats,"melee_damage")
+
+func ranged_scale() -> float:
+	return TrinketStats.damage_scale(trinket_stats,"ranged_damage")
+
+func throw_scale() -> float:
+	return TrinketStats.damage_scale(trinket_stats,"throw_damage")
+
+## Rate multiplier: a 1.0 s draw becomes `1.0 / attack_rate()` seconds.
+func attack_rate() -> float:
+	return TrinketStats.attack_rate(trinket_stats)
+
+func move_scale() -> float:
+	return TrinketStats.move_scale(trinket_stats)
+
+func damage_reduction() -> float:
+	return TrinketStats.damage_reduction(armor_reduction(),trinket_stats)
+
+## The yellow ward bubble. Presentation only: the absorbing share lives on the
+## actor that owns the health.
+func set_ward(active: bool) -> void:
+	if active and not is_instance_valid(_ward):
+		_ward = EnergyShield.new()
+		add_child(_ward)
+	if is_instance_valid(_ward):
+		_ward.visible = active
 
 func melee_reach(hand: String = "") -> float:
 	var key := hand if hand in ["left","right"] else _melee_hand
@@ -1181,11 +1224,12 @@ func begin_throw() -> bool:
 	return true
 
 func charge_seconds() -> float:
+	var base := float(SWORD_DATA[sword_index].seconds)
 	if weapon == "bow":
-		return float(BOW_DATA[bow_index].draw_seconds)
-	if weapon == "dagger":
-		return float(DAGGER_DATA.seconds)
-	return float(SWORD_DATA[sword_index].seconds)
+		base = float(BOW_DATA[bow_index].draw_seconds)
+	elif weapon == "dagger":
+		base = float(DAGGER_DATA.seconds)
+	return base/maxf(attack_rate(),0.01)
 
 func throw_weapon_name() -> String:
 	return "dagger" if weapon == "dagger" else "sword"
@@ -1642,7 +1686,7 @@ func _advance_step(delta: float) -> void:
 	match phase:
 		"DRAWING":
 			if not charge_frozen:
-				draw_amount = minf(1.0,draw_amount+delta/float(BOW_DATA[bow_index].draw_seconds))
+				draw_amount = minf(1.0,draw_amount+delta/maxf(charge_seconds(),0.001))
 			if draw_amount >= 1.0-0.000001:
 				draw_amount = 1.0
 				phase = "HOLDING"
