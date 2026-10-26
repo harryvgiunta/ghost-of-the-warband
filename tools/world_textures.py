@@ -1517,12 +1517,44 @@ def make_bone(w=256, h=256):
     return base, height
 
 
-VILLAGE_STRENGTH = {"thatch": 6.0, "hide": 3.0, "bone": 3.0}
+VILLAGE_STRENGTH = {"thatch": 6.0, "hide": 3.0, "bone": 3.0, "wattle": 2.5}
+
+
+def make_wattle(w=256, h=256):
+    """Woven withy panel: upright rods laced through horizontal binders."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    bars_x, bars_y = 8.0, 4.0
+    px, py = w / bars_x, h / bars_y
+    lx = np.mod(X, px)
+    ly = np.mod(Y, py)
+    # a rounded rod profile, then a smooth braid wave that decides which rod lies
+    # on top. A hard checkerboard flipped the pattern at the wrap; this cosine
+    # weave is continuous and still reads as over-and-under lacing.
+    profile_x = np.sin(math.pi * lx / px) ** 0.6
+    profile_y = np.sin(math.pi * ly / py) ** 0.6
+    braid = 0.5 + 0.5 * np.cos(2.0 * math.pi * (X / (px * 2.0) + Y / (py * 2.0)))
+    weave = np.clip(profile_x * (0.58 + 0.42 * braid)
+                    + profile_y * (0.58 + 0.42 * (1.0 - braid)) * 0.85, 0.0, 1.0)
+    grain = fbm(w, h, 30, 8, SEED + 441, octaves=4)
+    fine = fbm(w, h, 120, 40, SEED + 442, octaves=3)
+    tone = fbm(w, h, 6, 6, SEED + 443, octaves=3)
+
+    base = mix(rgb(126, 102, 68), rgb(172, 146, 104), stretch(tone, 4, 96))
+    base *= (0.62 + 0.55 * weave)[..., None]
+    base *= (0.92 + 0.16 * grain + 0.05 * (fine - 0.5))[..., None]
+    # the shadowed gap where no rod covers the panel
+    gap = np.clip(1.0 - weave * 1.55, 0.0, 1.0)
+    base = mix(base, rgb(46, 36, 26), gap * 0.55)
+
+    height = 0.22 + 0.62 * weave + 0.06 * (grain - 0.5)
+    return base, height
 
 
 def make_village_surface(kind):
     """Bushcraft surfaces for the village props: albedo + tangent normal."""
-    fn = {"thatch": make_thatch, "hide": make_hide, "bone": make_bone}[kind]
+    fn = {"thatch": make_thatch, "hide": make_hide, "bone": make_bone,
+          "wattle": make_wattle}[kind]
     alb, height = fn()
     norm = normal_from_height(height, VILLAGE_STRENGTH[kind])
     return to_image(alb, "RGB"), to_image(norm, "RGB")
@@ -1599,7 +1631,7 @@ def ascii_preview(img, width=110, aspect=0.48, title="", gamma=1.0):
 # ---------------------------------------------------------------------------
 
 BARK_IDS = ("bark_oak", "bark_pine", "bark_birch", "bark_dead")
-VILLAGE_IDS = ("thatch", "hide", "bone")
+VILLAGE_IDS = ("thatch", "hide", "bone", "wattle")
 ATLAS_LAYOUT = {
     "leaves_broadleaf": (2, 2), "leaves_amber": (2, 2),
     "leaves_birch": (2, 2), "needles_pine": (2, 2),
@@ -1687,6 +1719,9 @@ ASSETS = [
     dict(id="bone", file="bone.png", size=(256, 256), channels=3,
          tiling="both", n_version="bone_n.png", kind="prop",
          description="Weathered animal bone: ivory field, hairline crazing and grime."),
+    dict(id="wattle", file="wattle.png", size=(256, 256), channels=3,
+         tiling="both", n_version="wattle_n.png", kind="building",
+         description="Woven withy panel: upright rods laced through horizontal binders."),
     dict(id="flame", file="flame.png", size=(512, 512), channels=4,
          tiling="atlas", n_version=None, kind="effect",
          description="2x2 flame tongue cards: orange body, yellow mid, hot core, soft tips."),
@@ -1700,7 +1735,7 @@ NORMALS = {
     "bark_birch_n.png": ("bark_birch", 3.0), "bark_dead_n.png": ("bark_dead", 5.0),
     "rock_n.png": ("rock", 5.0),
     "thatch_n.png": ("thatch", 6.0), "hide_n.png": ("hide", 3.0),
-    "bone_n.png": ("bone", 3.0),
+    "bone_n.png": ("bone", 3.0), "wattle_n.png": ("wattle", 2.5),
 }
 
 LICENSE_TEXT = """IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE

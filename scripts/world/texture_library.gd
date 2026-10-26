@@ -41,6 +41,7 @@ const BUILDING_KINDS := {
 	"thatch": "thatch",
 	"hide": "hide",
 	"bone": "bone",
+	"wattle": "wattle",
 }
 
 # Triplanar repeats per metre for each building kind.
@@ -53,6 +54,7 @@ const BUILDING_SCALE := {
 	"thatch": 0.70,
 	"hide": 0.90,
 	"bone": 2.1,
+	"wattle": 1.30,
 }
 
 static var _textures: Dictionary = {}

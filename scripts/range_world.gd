@@ -9,6 +9,7 @@ const GrassField = preload("res://scripts/world/grass_field.gd")
 const WorldEnvironmentKit = preload("res://scripts/world/environment_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const CampKit = preload("res://scripts/world/camp_kit.gd")
+const VillageKit = preload("res://scripts/world/village_kit.gd")
 const WORLD_LIMIT := 145.0
 const GRID_STEP := 2.0
 const GRID_CELLS := 145
@@ -58,6 +59,15 @@ const TRAIL: PackedVector3Array = [
 ]
 const TRAIL_START := Vector2(-15.0, 21.0)
 const CAMPSITE := Vector2(-100.0, -22.0)
+
+# Gallowgarth: the wardens' village in the north-eastern woods, on its own
+# footpath off the ruin road. Bigger than the camp, still nobody's town.
+const VILLAGE := Vector2(58.0, 22.0)
+const VILLAGE_PATH: PackedVector3Array = [
+	Vector3(12, 3.0, -10), Vector3(26, 3.6, -2), Vector3(40, 4.8, 8),
+	Vector3(52, 6.0, 16), Vector3(58, 6.6, 22),
+]
+const VILLAGE_RADIUS := 15.0
 var _heights := PackedFloat32Array()
 var _rng := RandomNumberGenerator.new()
 var _solids: StaticBody3D
@@ -106,6 +116,7 @@ func _ready() -> void:
 	_build_village()
 	_build_forest_camp()
 	_build_trail_marks()
+	_build_warden_village()
 	_build_water_and_bridge()
 	_build_waystone("forest", "Heartwood Waystone", Vector2(-55, -25))
 	_build_waystone("ruins", "Watchfall Waystone", Vector2(55, -60))
@@ -156,25 +167,32 @@ func _route_sample(x: float, z: float) -> Vector2:
 	return Vector2(nearest, grade)
 
 
-## Distance to, and designed grade of, the wardens' trail at a point.
-func _trail_near(x: float, z: float) -> Vector2:
+## Distance to, and designed grade of, one footpath polyline at a point.
+func _path_near(route: PackedVector3Array, x: float, z: float) -> Vector2:
 	var query := Vector2(x, z)
 	var nearest: float = INF
 	var grade := 4.2
-	for i in range(TRAIL.size() - 1):
-		var a := Vector2(TRAIL[i].x, TRAIL[i].z)
-		var b := Vector2(TRAIL[i + 1].x, TRAIL[i + 1].z)
+	for i in range(route.size() - 1):
+		var a := Vector2(route[i].x, route[i].z)
+		var b := Vector2(route[i + 1].x, route[i + 1].z)
 		var span := b - a
 		var along: float = clampf((query - a).dot(span) / span.length_squared(), 0.0, 1.0)
 		var distance: float = query.distance_to(a + span * along)
 		if distance < nearest:
 			nearest = distance
-			grade = lerpf(TRAIL[i].y, TRAIL[i + 1].y, along)
+			grade = lerpf(route[i].y, route[i + 1].y, along)
 	return Vector2(nearest, grade)
 
 
-func _trail_distance(x: float, z: float) -> float:
-	return _trail_near(x, z).x
+## Nearest footpath (camp trail or village path) distance and grade.
+func _footpath_near(x: float, z: float) -> Vector2:
+	var best := _path_near(TRAIL, x, z)
+	var other := _path_near(VILLAGE_PATH, x, z)
+	return other if other.x < best.x else best
+
+
+func _footpath_distance(x: float, z: float) -> float:
+	return _footpath_near(x, z).x
 
 
 func _raw_height(x: float, z: float) -> float:
@@ -183,11 +201,11 @@ func _raw_height(x: float, z: float) -> float:
 	height += 5.5 * exp(-((x - 87.0) * (x - 87.0) / 1000.0 + (z + 45.0) * (z + 45.0) / 2600.0))
 	var route := _route_sample(x, z)
 	height = lerpf(height, route.y, 1.0 - smoothstep(3.8, 10.0, route.x))
-	var trail := _trail_near(x, z)
+	var trail := _footpath_near(x, z)
 	height = lerpf(height, trail.y, 1.0 - smoothstep(2.4, 8.0, trail.x))
 	# Broad, flat usable clearings, rather than foundations hovering over hills.
 	for clearing in [Vector4(0, 32, 3, 26), Vector4(-55, -25, 4, 11), Vector4(55, -60, 7, 20),
-			Vector4(-15, -100, 18, 10), Vector4(-100, -22, 4.2, 8)]:
+			Vector4(-15, -100, 18, 10), Vector4(-100, -22, 4.2, 8), Vector4(58, 22, 6.6, 13)]:
 		var distance: float = Vector2(x - clearing.x, z - clearing.y).length()
 		height = lerpf(height, clearing.z, 1.0 - smoothstep(clearing.w, clearing.w + 9.0, distance))
 	# A real depression under the pond and bridge. Roads stop at the bridge abutments.
@@ -249,7 +267,7 @@ func _build_terrain() -> void:
 				color = color.lerp(Color(0.86, 0.84, 0.76), clampf((-z - 75.0) / 65.0, 0.0, 0.6))
 			var road_distance: float = _route_sample(x, z).x
 			var dirt: float = 1.0 - smoothstep(1.5, 3.4, road_distance)
-			dirt = maxf(dirt, 1.0 - smoothstep(0.7, 2.0, _trail_distance(x, z)))
+			dirt = maxf(dirt, 1.0 - smoothstep(0.7, 2.0, _footpath_distance(x, z)))
 			color = color.lerp(Color(1.0, 0.95, 0.84), dirt)
 			if height < 1.0:
 				color = Color(0.62, 0.58, 0.48)
@@ -260,6 +278,12 @@ func _build_terrain() -> void:
 				var worn: float = 1.0 - smoothstep(2.5, 7.5, camp_distance)
 				color = color.lerp(Color(0.62, 0.55, 0.44), worn * 0.55)
 				dirt = maxf(dirt, worn * 0.65)
+			# Gallowgarth's floor is trodden bare inside its own fence
+			var village_distance: float = Vector2(x, z).distance_to(VILLAGE)
+			if village_distance < VILLAGE_RADIUS + 4.0:
+				var trodden: float = 1.0 - smoothstep(6.0, VILLAGE_RADIUS + 4.0, village_distance)
+				color = color.lerp(Color(0.60, 0.53, 0.42), trodden * 0.80)
+				dirt = maxf(dirt, trodden * 0.85)
 			color = color.lerp(Color(0.80, 0.82, 0.84), smoothstep(120.0, 140.0, maxf(absf(x), absf(z))))
 			color.a = dirt
 			colors[index] = color
@@ -309,7 +333,7 @@ func _build_map_data() -> void:
 		["Hearthstead", Vector2(0, 35)], ["Heartwood", Vector2(-55, -25)],
 		["Watchfall Ruins", Vector2(55, -60)], ["Suncrest Ridge", Vector2(-15, -100)],
 		["Willow Bridge", Vector2(22, -10)], ["The Sunken Delve", Vector2(16, 42)],
-		["The Wardens' Camp", CAMPSITE],
+		["The Wardens' Camp", CAMPSITE], ["Gallowgarth", VILLAGE],
 	]:
 		var point: Vector2 = entry[1]
 		var location := _ground(point.x, point.y)
@@ -338,6 +362,16 @@ func _build_map_data() -> void:
 			trail_points.append(point)
 	trail_points.append(_ground(TRAIL[TRAIL.size() - 1].x, TRAIL[TRAIL.size() - 1].z))
 	map_paths.append(trail_points)
+	var village_points := PackedVector3Array()
+	for i in range(VILLAGE_PATH.size() - 1):
+		var count: int = maxi(1, int(ceil(VILLAGE_PATH[i].distance_to(VILLAGE_PATH[i + 1]) / 2.0)))
+		for step in range(count):
+			var point: Vector3 = VILLAGE_PATH[i].lerp(VILLAGE_PATH[i + 1], float(step) / float(count))
+			point.y = terrain_height(point.x, point.z)
+			village_points.append(point)
+	village_points.append(_ground(VILLAGE_PATH[VILLAGE_PATH.size() - 1].x,
+		VILLAGE_PATH[VILLAGE_PATH.size() - 1].z))
+	map_paths.append(village_points)
 
 
 func region_at(world_position: Vector3) -> String:
@@ -346,6 +380,8 @@ func region_at(world_position: Vector3) -> String:
 		return "Hearthstead · Safe Haven"
 	if p.distance_to(CAMPSITE) < 15.0:
 		return "The Wardens' Camp"
+	if p.distance_to(VILLAGE) < VILLAGE_RADIUS + 5.0:
+		return "Gallowgarth"
 	if p.distance_to(Vector2(22, -10)) < 18.0:
 		return "Willowwater Crossing"
 	if p.distance_to(Vector2(55, -60)) < 26.0:
@@ -449,7 +485,7 @@ func _build_forest_camp() -> void:
 	for i in range(shelters.size()):
 		var record: Dictionary = shelters[i]
 		var point: Vector2 = record["at"]
-		var shelter := _camp_root("TwigShelter%d" % i, point, _face_yaw(point, CAMPSITE))
+		var shelter := _site_root("TwigShelter%d" % i, point, _face_yaw(point, CAMPSITE))
 		CampKit.twig_shelter(shelter, mats, _solids, {
 			"seed": int(record["seed"]), "name": "TwigShelterMesh",
 			"width": float(record["width"]), "depth": float(record["depth"]),
@@ -462,22 +498,22 @@ func _build_forest_camp() -> void:
 		CampKit.add_hanging(clutter, mats, eave, float(record["seed"]) * 0.3, 431 + i, 0.8)
 	generation_stats["camp_shelters"] = shelters.size()
 	# --- the fire, the middle of the camp ---------------------------------
-	var fire := _camp_root("CampFire", CAMPSITE)
+	var fire := _site_root("CampFire", CAMPSITE)
 	CampKit.fire_ring(fire, mats, 411)
 	_reserve_camp_ground(fire.position, 1.15)
 	# --- the stick-work that makes the woods wrong ------------------------
-	var arch := _camp_root("CampBoneArch", Vector2(-95.2, -18.4), _face_yaw(Vector2(-95.2, -18.4), CAMPSITE))
+	var arch := _site_root("CampBoneArch", Vector2(-95.2, -18.4), _face_yaw(Vector2(-95.2, -18.4), CAMPSITE))
 	CampKit.bone_arch(arch, mats, _solids, 1.6, 2.4, 413)
 	_reserve_camp_ground(arch.position, 1.9)
-	var web := _camp_root("CampCharmWeb", Vector2(-98.9, -17.6), 0.7)
+	var web := _site_root("CampCharmWeb", Vector2(-98.9, -17.6), 0.7)
 	CampKit.charm_web(web, mats, _solids, 2.6, 1.95, 415)
 	_reserve_camp_ground(web.position, 1.7)
-	var effigy := _camp_root("CampWickerEffigy", Vector2(-104.6, -23.9), _face_yaw(Vector2(-104.6, -23.9), CAMPSITE))
+	var effigy := _site_root("CampWickerEffigy", Vector2(-104.6, -23.9), _face_yaw(Vector2(-104.6, -23.9), CAMPSITE))
 	CampKit.wicker_effigy(effigy, mats, _solids, 417)
 	_reserve_camp_ground(effigy.position, 1.0)
 	for i in range(2):
 		var rag_point: Vector2 = [Vector2(-104.8, -18.0), Vector2(-96.2, -27.3)][i]
-		var rag := _camp_root("CampRagTree%d" % i, rag_point, float(i) * 1.7)
+		var rag := _site_root("CampRagTree%d" % i, rag_point, float(i) * 1.7)
 		CampKit.rag_tree(rag, mats, _solids, 419 + i * 2)
 		_reserve_camp_ground(rag.position, 1.1)
 	# --- what they dragged in ---------------------------------------------
@@ -486,7 +522,7 @@ func _build_forest_camp() -> void:
 		{"at": Vector2(-99.4, -29.2), "yaw": -0.4, "seed": 425},
 	]:
 		var point: Vector2 = record["at"]
-		var rack := _camp_root("CampDryingRack%d" % int(record["seed"]), point, float(record["yaw"]))
+		var rack := _site_root("CampDryingRack%d" % int(record["seed"]), point, float(record["yaw"]))
 		CampKit.drying_rack(rack, mats, _solids, int(record["seed"]))
 		_reserve_camp_ground(rack.position, 1.25)
 	for record in [
@@ -494,7 +530,7 @@ func _build_forest_camp() -> void:
 		{"at": Vector2(-104.4, -20.2), "yaw": 2.3, "seed": 429},
 	]:
 		var point: Vector2 = record["at"]
-		var drift := _camp_root("CampDriftwood%d" % int(record["seed"]), point, float(record["yaw"]))
+		var drift := _site_root("CampDriftwood%d" % int(record["seed"]), point, float(record["yaw"]))
 		CampKit.driftwood_pile(drift, mats, _solids, int(record["seed"]))
 		_reserve_camp_ground(drift.position, 1.35)
 	# --- the small stuff, merged into one batch ---------------------------
@@ -540,7 +576,7 @@ func _build_trail_marks() -> void:
 	var clutter := CampKit.Merged.new()
 	# an arch straddling the path just past the town, so the way in is obvious
 	var head_dir := (Vector2(-34.0, 20.0) - Vector2(-15.0, 21.0)).normalized()
-	var head_arch := _camp_root("TrailHeadArch", Vector2(-24.5, 20.4),
+	var head_arch := _site_root("TrailHeadArch", Vector2(-24.5, 20.4),
 		atan2(-head_dir.x, -head_dir.y))
 	CampKit.bone_arch(head_arch, mats, _solids, 2.2, 2.5, 599)
 	_reserve_camp_ground(head_arch.position, 2.6)
@@ -564,15 +600,15 @@ func _build_trail_marks() -> void:
 		var yaw := _face_yaw(at, point)
 		match String(record["kind"]):
 			"arch":
-				var arch := _camp_root("TrailBoneArch%d" % built, at, yaw)
+				var arch := _site_root("TrailBoneArch%d" % built, at, yaw)
 				CampKit.bone_arch(arch, mats, _solids, 1.5, 2.2, int(record["seed"]))
 				_reserve_camp_ground(arch.position, 1.8)
 			"rag":
-				var rag := _camp_root("TrailRagTree%d" % built, at, yaw)
+				var rag := _site_root("TrailRagTree%d" % built, at, yaw)
 				CampKit.rag_tree(rag, mats, _solids, int(record["seed"]))
 				_reserve_camp_ground(rag.position, 1.1)
 			"web":
-				var web := _camp_root("TrailCharmWeb%d" % built, at, yaw)
+				var web := _site_root("TrailCharmWeb%d" % built, at, yaw)
 				CampKit.charm_web(web, mats, _solids, 2.4, 1.8, int(record["seed"]))
 				_reserve_camp_ground(web.position, 1.6)
 			"masks":
@@ -620,8 +656,8 @@ func _trail_sample(t: float) -> Dictionary:
 	return {"point": TRAIL_START, "direction": Vector2.LEFT}
 
 
-## A camp prop planted on the terrain, posed by yaw.
-func _camp_root(label: String, point: Vector2, yaw: float = 0.0) -> Node3D:
+## A camp or village prop planted on the terrain, posed by yaw.
+func _site_root(label: String, point: Vector2, yaw: float = 0.0) -> Node3D:
 	var root := _root_at(label, _ground(point.x, point.y))
 	root.rotation.y = yaw
 	return root
@@ -684,6 +720,115 @@ func _camp_charm_roll(point: Vector2) -> float:
 	var value := int(floor(point.x * 8.0)) * 92821 + int(floor(point.y * 8.0)) * 68917 + CAMP_CHARMS_SEED
 	value = (value ^ (value >> 13)) * 1274126177
 	return float(absi(value) % 1000) / 1000.0
+
+
+## Gallowgarth: the wardens' village, at the end of its own footpath in the
+## north-eastern woods. This is where the full village kit lives - a stake
+## palisade, an antler gate, stick longhouses, round wattle huts, totems, a great
+## firepit and an offering ground - while the deep camp keeps its cruder set.
+func _build_warden_village() -> void:
+	var mats := VillageKit.materials()
+	var clutter := VillageKit.Merged.new()
+	var centre := VILLAGE
+	var gate_angle := -3.0 * PI / 4.0
+
+	# --- the fence, and a gate straddling the footpath ---------------------
+	var stakes := VillageKit.palisade(_world_root("GallowgarthPalisade"), mats, _solids, centre,
+		VILLAGE_RADIUS, [gate_angle, PI / 4.0], Callable(self, "_ground"), 21)
+	generation_stats["village_stakes"] = stakes
+	var entry := centre + Vector2(sin(gate_angle), cos(gate_angle)) * VILLAGE_RADIUS
+	VillageKit.gate(_site_root("GallowgarthGate", entry, gate_angle), mats, _solids, 3.4, 4.3, 23)
+	var back := centre + Vector2(sin(PI / 4.0), cos(PI / 4.0)) * VILLAGE_RADIUS
+	VillageKit.skull_stakes(clutter, mats, _ground(back.x, back.y), PI / 4.0 + PI, 3, 0.9, 25)
+
+	# --- the great firepit, the middle of the village ---------------------
+	VillageKit.great_pit(_site_root("GallowgarthFirepit", centre), mats, _solids, 3.2, 27)
+
+	# --- three stick longhouses -------------------------------------------
+	for i in range(3):
+		var record: Dictionary = [
+			{"rel": Vector2(-8.5, 5.5), "seed": 31, "pitch": 0.54},
+			{"rel": Vector2(8.0, 5.0), "seed": 33, "pitch": 0.58},
+			{"rel": Vector2(0.0, -9.0), "seed": 35, "pitch": 0.50},
+		][i]
+		var point: Vector2 = centre + (record["rel"] as Vector2)
+		var home := _site_root("WardenHut%d" % i, point, _face_yaw(point, centre))
+		VillageKit.keeper_hut(home, mats, _solids, {
+			"seed": int(record["seed"]), "name": "WardenHutShell", "pitch": float(record["pitch"]),
+		})
+	generation_stats["village_huts"] = 3
+
+	# --- three round wattle dwellings -------------------------------------
+	for i in range(3):
+		var record: Dictionary = [
+			{"rel": Vector2(-11.0, -3.0), "seed": 37},
+			{"rel": Vector2(11.0, -2.0), "seed": 39},
+			{"rel": Vector2(-6.0, 10.5), "seed": 41},
+		][i]
+		var point: Vector2 = centre + (record["rel"] as Vector2)
+		var house := _site_root("WattleHouse%d" % i, point, _face_yaw(point, centre))
+		VillageKit.wattle_hut(house, mats, _solids, 2.2, 2.35, int(record["seed"]))
+	generation_stats["village_round_huts"] = 3
+
+	# --- totems, the offering ground, an effigy, a gallows tree -----------
+	for i in range(3):
+		var record: Dictionary = [
+			{"at": entry + Vector2(-0.707, 0.707) * 3.9, "height": 4.4, "seed": 43},
+			{"at": entry + Vector2(0.707, -0.707) * 3.9, "height": 4.0, "seed": 45},
+			{"at": centre + Vector2(3.5, -3.5), "height": 4.6, "seed": 47},
+		][i]
+		var point: Vector2 = record["at"]
+		var pole := _site_root("WardenTotem%d" % i, point, _face_yaw(point, centre))
+		VillageKit.totem(pole, mats, _solids, float(record["height"]), int(record["seed"]))
+	var offering_at := centre + Vector2(-2.0, 11.0)
+	VillageKit.sacrifice_ground(_site_root("GallowgarthOffering", offering_at,
+		_face_yaw(offering_at, centre)), mats, _solids, 49)
+	var effigy_at := centre + Vector2(9.0, -9.0)
+	VillageKit.effigy(_site_root("GallowgarthEffigy", effigy_at, _face_yaw(effigy_at, centre)),
+		mats, _solids, 51)
+	var gallows_at := centre + Vector2(-11.5, 8.5)
+	var hung := VillageKit.gallows_tree(clutter, mats, _solids, _ground(gallows_at.x, gallows_at.y),
+		0.8, 53)
+
+	# --- frames, racks and stores -----------------------------------------
+	VillageKit.trader_frame(_site_root("GallowgarthFrame", centre + Vector2(6.0, 0.5), 0.4),
+		mats, _solids, 55)
+	for i in range(2):
+		var record: Dictionary = [
+			{"rel": Vector2(-11.0, 3.0), "yaw": 1.1, "seed": 57},
+			{"rel": Vector2(4.0, -12.0), "yaw": -0.5, "seed": 59},
+		][i]
+		var point: Vector2 = centre + (record["rel"] as Vector2)
+		VillageKit.drying_rack(_site_root("GallowgarthRack%d" % int(record["seed"]), point,
+			float(record["yaw"])), mats, _solids, int(record["seed"]))
+	for i in range(2):
+		var record: Dictionary = [
+			{"rel": Vector2(-6.0, -11.5), "yaw": 0.6, "seed": 61},
+			{"rel": Vector2(12.0, 4.0), "yaw": 2.1, "seed": 63},
+		][i]
+		var point: Vector2 = centre + (record["rel"] as Vector2)
+		VillageKit.woodpile(_site_root("GallowgarthWood%d" % int(record["seed"]), point,
+			float(record["yaw"])), mats, _solids, int(record["seed"]))
+
+	# --- the small stuff, merged into one batch ---------------------------
+	VillageKit.chopping_block(clutter, mats, _ground(centre.x + 4.6, centre.y + 2.6), 0.5)
+	VillageKit.pot_stack(clutter, mats, _ground(centre.x - 4.2, centre.y + 3.4), 1.2, 65)
+	VillageKit.pot_stack(clutter, mats, _ground(centre.x + 2.4, centre.y + 4.6), 2.7, 67)
+	VillageKit.bone_heap(clutter, mats, _ground(centre.x - 3.0, centre.y - 2.8), 1.6, 69)
+	VillageKit.cauldron(clutter, mats, _ground(centre.x + 2.0, centre.y - 4.0), 0.8, 0.95)
+	VillageKit.skull_stakes(clutter, mats, _ground(centre.x - 12.5, centre.y + 1.0), 1.4, 4, 0.85, 71)
+	for i in range(4):
+		var angle := TAU * float(i) / 4.0 + PI * 0.25
+		var spot := centre + Vector2(sin(angle), cos(angle)) * 5.6
+		VillageKit.add_figurine(clutter, mats, _ground(spot.x, spot.y), _face_yaw(spot, centre),
+			1.0, i % 2, 73 + i)
+	for i in range(3):
+		var angle := TAU * float(i) / 3.0 + 0.6
+		var spot := centre + Vector2(sin(angle), cos(angle)) * 4.2
+		VillageKit.add_hanging(clutter, mats, _ground(spot.x, spot.y) + Vector3(0.0, 2.6, 0.0),
+			angle, 81 + i, 0.9)
+	clutter.commit(_world_root("GallowgarthDoodads"), "GallowgarthBatch", true)
+	generation_stats["village_hangers"] = hung + 3
 
 
 func _build_town_services(forester: Node3D, fletcher: Node3D, store: Node3D) -> void:
@@ -1115,11 +1260,15 @@ func _reserved(point: Vector2, margin: float) -> bool:
 		return true
 	if _route_sample(point.x, point.y).x < margin:
 		return true
-	if _trail_distance(point.x, point.y) < 3.1:
+	if _footpath_distance(point.x, point.y) < 3.1:
 		return true
 	if point.distance_to(Vector2(0, 32)) < 29.0:
 		return true
 	if _camp_reserved(point):
+		return true
+	if point.distance_to(VILLAGE) < VILLAGE_RADIUS - 1.0:
+		return true
+	if point.distance_to(VILLAGE) < VILLAGE_RADIUS + 1.5:
 		return true
 	if Vector2((point.x - 22.0) / 13.0, (point.y + 10.0) / 38.0).length() < 1.0:
 		return true
@@ -1205,6 +1354,10 @@ func _build_woodland() -> void:
 		var camp_distance := point.distance_to(CAMPSITE)
 		if camp_distance > CAMP_CHARM_BAND.x and camp_distance < CAMP_CHARM_BAND.y:
 			if _camp_charm_roll(point) < 0.78:
+				_camp_charm_trees.append({"position": base, "height": tree_height})
+		var village_distance := point.distance_to(VILLAGE)
+		if village_distance > VILLAGE_RADIUS + 2.0 and village_distance < VILLAGE_RADIUS + 11.0:
+			if _camp_charm_roll(point + Vector2(31.0, 17.0)) < 0.66:
 				_camp_charm_trees.append({"position": base, "height": tree_height})
 	# Batch each species/variant pair once; WorldScatter splits it into 44 m chunks.
 	var variant_total := 0
@@ -1299,7 +1452,7 @@ func _grass_reserved(point: Vector2) -> bool:
 		return true
 	if _route_sample(point.x, point.y).x < 2.1:
 		return true
-	if _trail_distance(point.x, point.y) < 1.5:
+	if _footpath_distance(point.x, point.y) < 1.5:
 		return true
 	if Vector2((point.x - 22.0) / 11.5, (point.y + 10.0) / 35.5).length() < 1.02:
 		return true
@@ -1381,7 +1534,8 @@ func _build_signposts() -> void:
 		[Vector2(3.8, 5), "HEARTWOOD  ←\nWATCHFALL  →"],
 		[Vector2(-50, -57), "SUNCREST  ↑"],
 		[Vector2(36, -13), "HEARTHSTEAD  ←"],
-		[Vector2(-19.6, 22.4), "THE WARDENS' CAMP  →"]
+		[Vector2(-19.6, 22.4), "THE WARDENS' CAMP  →"],
+		[Vector2(17.0, -6.0), "GALLOWGARTH  →"]
 	]:
 		var point: Vector2 = entry[0]
 		var root := _root_at("TrailSign", _ground(point.x, point.y))

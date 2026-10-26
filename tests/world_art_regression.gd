@@ -196,8 +196,8 @@ func _check_frontier() -> void:
 	# Gameplay data is updated for the in-game town, not removed.
 	check(frontier.interactables.size() == 10, "camp, three keepers, stash, portal, delve and three waystones are interactive")
 	check(frontier.enemy_spawns.size() == 36, "all enemy spawns must survive the art pass")
-	check(frontier.map_paths.size() == 6 and frontier.landmarks.size() == 7,
-		"map data tracks the town, the delve and the wardens' trail")
+	check(frontier.map_paths.size() == 7 and frontier.landmarks.size() == 8,
+		"map data tracks the town, the delve, the trail and the village path")
 	check(frontier.player_spawn.distance_to(Vector3(0, frontier.terrain_height(0, 47), 47)) < 0.02,
 		"the new journey spawns at the town gate")
 	await _check_camp(frontier)
@@ -209,6 +209,17 @@ func _check_frontier() -> void:
 ## Structure only - the look needs rendered inspection.
 func _check_camp(frontier) -> void:
 	var stats: Dictionary = frontier.generation_stats
+	# one physics step so the camp and village colliders reach the broadphase
+	await physics_frame
+	await physics_frame
+	var space: PhysicsDirectSpaceState3D = frontier.get_world_3d().direct_space_state
+	var probe := CapsuleShape3D.new()
+	probe.radius = 0.34
+	probe.height = 1.75
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = probe
+	query.collision_mask = 1
+	query.exclude = []
 	for id in ["thatch", "hide", "bone", "flame"]:
 		var map := TextureLibrary.texture(id)
 		check(map != null and map.get_width() > 0, "camp surface '%s' must load" % id)
@@ -247,6 +258,39 @@ func _check_camp(frontier) -> void:
 		if String(entry.get("name", "")) == "The Wardens' Camp":
 			camp_landmarks += 1
 	check(camp_landmarks == 1, "the camp must appear on the map")
+	# Gallowgarth: the wardens' village, out on its own footpath in the north-east
+	for node_name in ["GallowgarthPalisade", "GallowgarthGate", "GallowgarthFirepit",
+			"GallowgarthOffering", "GallowgarthDoodads", "GallowgarthEffigy",
+			"GallowgarthFrame", "WardenHut0", "WardenHut2",
+			"WattleHouse0", "WattleHouse2", "WardenTotem0", "WardenTotem2"]:
+		check(frontier.get_node_or_null(node_name) != null, node_name + " must exist")
+	check(int(stats.get("village_stakes", 0)) >= 120,
+		"the village needs a real stake palisade (%d)" % int(stats.get("village_stakes", 0)))
+	check(int(stats.get("village_huts", 0)) == 3 and int(stats.get("village_round_huts", 0)) == 3,
+		"the village has three stick longhouses and three round huts")
+	check(int(stats.get("village_hangers", 0)) >= 5,
+		"the village hangs its charms (%d)" % int(stats.get("village_hangers", 0)))
+	var village := Vector2(58.0, 22.0)
+	check(village.distance_to(Vector2(0.0, 32.0)) > 40.0, "the village must sit out in the woods")
+	check(frontier.region_at(Vector3(village.x, 6.6, village.y)) == "Gallowgarth",
+		"the village must be its own region")
+	var village_landmarks := 0
+	for entry: Dictionary in frontier.landmarks:
+		if String(entry.get("name", "")) == "Gallowgarth":
+			village_landmarks += 1
+	check(village_landmarks == 1, "the village must appear on the map")
+	# its gate line and fire ground are walkable, the fence is not
+	var gate_at := village + Vector2(sin(-3.0 * PI / 4.0), cos(-3.0 * PI / 4.0)) * 15.0
+	query.transform = Transform3D(Basis(),
+		Vector3(gate_at.x, frontier.terrain_height(gate_at.x, gate_at.y) + 1.05, gate_at.y))
+	check(space.intersect_shape(query, 1).is_empty(), "the village gate line must stay walkable")
+	query.transform = Transform3D(Basis(),
+		Vector3(village.x, frontier.terrain_height(village.x, village.y) + 1.05, village.y))
+	check(space.intersect_shape(query, 1).is_empty(), "the village fire ground must stay walkable")
+	query.transform = Transform3D(Basis(),
+		Vector3(village.x, frontier.terrain_height(village.x, village.y + 15.0) + 1.3, village.y + 15.0))
+	check(not space.intersect_shape(query, 1).is_empty(),
+		"the village palisade must block the same probe")
 	# the castle and the shrine are gone, and their clearings with them
 	check(frontier.get_node_or_null("WatchfallFortress") == null, "the Watchfall fortress is gone")
 	check(frontier.get_node_or_null("SuncrestShrine") == null, "the Suncrest shrine is gone")
@@ -279,16 +323,6 @@ func _check_camp(frontier) -> void:
 				trees_at_camp += 1
 	check(trees_at_camp >= 8, "the camp must sit amongst trees (%d trunks within 16 m)" % trees_at_camp)
 	# the fire ground is walkable, and the effigy's stake is solid
-	await physics_frame
-	await physics_frame
-	var space: PhysicsDirectSpaceState3D = frontier.get_world_3d().direct_space_state
-	var probe := CapsuleShape3D.new()
-	probe.radius = 0.34
-	probe.height = 1.75
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = probe
-	query.collision_mask = 1
-	query.exclude = []
 	var fire_at := Vector3(camp_point.x, frontier.terrain_height(camp_point.x, camp_point.y) + 1.05,
 		camp_point.y)
 	query.transform = Transform3D(Basis(), fire_at)

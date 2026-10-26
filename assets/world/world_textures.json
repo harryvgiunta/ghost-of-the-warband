@@ -2,8 +2,8 @@
  "generator": "tools/world_textures.py",
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
- "file_count": 35,
- "total_bytes": 9493755,
+ "file_count": 37,
+ "total_bytes": 9577703,
  "textures": [
   {
    "id": "sky_frontier",
@@ -329,6 +329,19 @@
    "n_version": "bone_n.png",
    "kind": "prop",
    "description": "Weathered animal bone: ivory field, hairline crazing and grime."
+  },
+  {
+   "id": "wattle",
+   "file": "wattle.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "wattle_n.png",
+   "kind": "building",
+   "description": "Woven withy panel: upright rods laced through horizontal binders."
   },
   {
    "id": "flame",
