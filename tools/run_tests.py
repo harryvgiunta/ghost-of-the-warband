@@ -53,6 +53,9 @@ TESTS = [
     "delve_entry_regression",
     "delve_network_regression",
     "world_network_regression",
+    "open_world_combat_regression",
+    "net_prediction_regression",
+    "net_limits_regression",
     "open_world_delve_regression",
     "ranger_clone_regression",
     "consumable_regression",
@@ -70,7 +73,8 @@ TIMEOUT = 120.0
 ## fixed-fps tests drive real movement through every one of them at a fixed
 ## 240 Hz clock, so their wall time scales with frontier cost, not with test
 ## content. Measured standalone after the forest mobset landed: 217 s.
-TIMEOUTS = {"weapon_input_regression": 480.0, "cover_movement_regression": 300.0}
+TIMEOUTS = {"weapon_input_regression": 480.0, "cover_movement_regression": 300.0,
+            "open_world_combat_regression": 240.0}
 
 
 def engine_path() -> str:

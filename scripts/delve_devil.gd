@@ -18,6 +18,7 @@ const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 
@@ -151,6 +152,8 @@ var _side_bias := 1.0
 var _death_handled := false
 var _received_pose := false
 var _net_position := Vector3.ZERO
+## Buffered server states for the replica's delayed render (see `enemy.gd`).
+var _timeline = NetReplication.mob_timeline()
 var _rng := RandomNumberGenerator.new()
 var _visual
 var _visual_kind := ""
@@ -537,7 +540,7 @@ func snapshot() -> Dictionary:
 		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth,"role":_role}
 
 
-func apply_snapshot(snapshot_state: Dictionary) -> void:
+func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
 	authoritative = false
 	var had_pose := _received_pose
 	var previous_health := health
@@ -557,10 +560,17 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	_present_state()
 	var next_position: Vector3 = snapshot_state.get("pos",_net_position)
 	_net_position = next_position
-	if not _received_pose or position.distance_squared_to(next_position) > 36.0:
+	var at := tick if tick >= 0 else _timeline.newest_tick() + 1
+	var now := Time.get_ticks_msec()/1000.0
+	var yaw := float(snapshot_state.get("yaw",rotation.y))
+	if not _received_pose:
+		_timeline.reset_to(next_position,Vector3.ZERO,yaw,at,now)
 		position = next_position
-	_received_pose = true
-	rotation.y = float(snapshot_state.get("yaw",rotation.y))
+		rotation.y = yaw
+		_received_pose = true
+	else:
+		_timeline.push(at,next_position,Vector3.ZERO,yaw,now)
+		rotation.y = _timeline.sample().yaw
 	var next_alive := bool(snapshot_state.get("alive",alive))
 	if is_instance_valid(_warning):
 		_warning.visible = next_alive and state == STATE_WINDUP
@@ -628,7 +638,8 @@ func _process(delta: float) -> void:
 		return
 	var before := position
 	if state != STATE_DEAD:
-		position = position.lerp(_net_position,clampf(delta*12.0,0.0,1.0))
+		_timeline.advance(delta)
+		position = _timeline.sample().pos
 	if is_instance_valid(_visual):
 		_present_motion((position-before)/maxf(delta,0.0001),true)
 		_present_state()

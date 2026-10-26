@@ -35,6 +35,8 @@ const Seat = preload("res://scripts/seat_loadout.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
+const LagCompensation = preload("res://scripts/lag_compensation.gd")
 ## Delve devils answer the backstab preflight; the players' layer is 4.
 const BACKSTAB_MASK := 2
 const BACKSTAB_RANGE := 8.0
@@ -45,6 +47,8 @@ const DROP_FULL_INTERVAL := 2.5
 const CHEST_RANGE := 3.5
 const CLEAR_DELAY := 2.2
 const SNAPSHOT_INTERVAL := 0.05
+## The longest rewind the host performs for one client action: half a second.
+const MAX_LAG_TICKS := 30
 const RUN_STATE_INTERVAL := 0.2
 const REGISTER_RETRY := 0.25
 const MAX_SHOTS := 128
@@ -109,6 +113,10 @@ var throws_fired := 0
 
 var _peer_slots: Dictionary = {}
 var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
+## The server tick this client draws the world at, learned from arrivals.
+var _clock = NetReplication.NetClock.new()
+## One second of body poses so a client's swing resolves against its view.
+var _lag = LagCompensation.new()
 var _player_name := "Ranger"
 var _endpoint := ""
 var _remote_state: Dictionary = {}
@@ -170,6 +178,7 @@ func _ready() -> void:
 		add_child(actor)
 		actor.bounds = float(World.LIMIT) - 0.4
 		actor.interp_delay = 0.12
+		actor.combat.lag_rewind = _lag
 		actor.authoritative = false
 		actor.visible = false
 		actor.alive = false
@@ -531,6 +540,15 @@ func _find_open_port(start: int) -> int:
 			return candidate
 	return 0
 
+## The peer whose RPC is in flight, or -1 once this node has left the tree: a
+## scene hand-off can deliver one last intent to a session that is already gone.
+func _sender_id() -> int:
+	var api := multiplayer
+	if api == null:
+		return -1
+	return api.get_remote_sender_id()
+
+
 func _safe_name(value: String) -> String:
 	var result := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
 	return "Ranger" if result.is_empty() else result
@@ -632,6 +650,7 @@ func _seat_peer(peer_id: int, player_name: String) -> void:
 	actor.combat.damage_enabled = true
 	_accept.rpc_id(peer_id,slot)
 	_run_state.rpc_id(peer_id,_run_state_dict())
+	_broadcast_names()
 	print("DELVE_PEER_JOINED slot=%d humans=%d" % [slot,get_human_count()])
 
 func _peer_disconnected(peer_id: int) -> void:
@@ -641,6 +660,7 @@ func _peer_disconnected(peer_id: int) -> void:
 	_peer_slots.erase(peer_id)
 	_deactivate_slot(slot)
 	_slot_cleared.rpc(slot)
+	_broadcast_names()
 	print("DELVE_PEER_LEFT slot=%d humans=%d" % [slot,get_human_count()])
 	_check_party_wipe()
 
@@ -696,6 +716,25 @@ func _slot_cleared(slot: int) -> void:
 	actors[slot].collision_layer = 0
 	actors[slot].collision_mask = 0
 
+## Fighter names are static for a run, so they ride one reliable roster
+## message on join/leave instead of every 20 Hz fighter datagram.
+func _name_list() -> Array:
+	var names: Array = []
+	for actor in actors:
+		names.append(actor.display_name)
+	return names
+
+func _broadcast_names() -> void:
+	if network_role == "host":
+		_names.rpc(_name_list())
+
+@rpc("authority","call_remote","reliable")
+func _names(names: Array) -> void:
+	if network_role != "client":
+		return
+	for index in mini(names.size(),actors.size()):
+		actors[index].display_name = str(names[index])
+
 func _connected() -> void:
 	if network_role != "client":
 		return
@@ -706,7 +745,7 @@ func _connected() -> void:
 func _register(player_name: String, loadout: Dictionary) -> void:
 	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if sender <= 1:
 		return
 	if not _peer_slots.has(sender):
@@ -717,6 +756,7 @@ func _register(player_name: String, loadout: Dictionary) -> void:
 		var slot := int(_peer_slots[sender])
 		actors[slot].display_name = _safe_name(player_name)
 		_apply_loadout(slot,loadout)
+		_broadcast_names()
 
 @rpc("authority","call_remote","reliable")
 func _accept(slot: int) -> void:
@@ -730,12 +770,14 @@ func _accept(slot: int) -> void:
 	for actor in actors:
 		actor.authoritative = false
 		actor.is_local = actor.slot == slot
+		actor.predicting = actor.slot == slot
 		actor.combat.damage_enabled = false
 		actor.combat.target_mask = 2
 		if actor.slot != slot:
 			actor.visible = false
 	actors[slot].visible = true
 	actors[slot].interp_delay = 0.05
+	_clock.configure(60.0,actors[(slot+1)%4].interp_delay)
 	hud.configure(_endpoint)
 	_bind_ui_rig()
 	_set_cursor_free(false)
@@ -770,12 +812,20 @@ func _physics_process(delta: float) -> void:
 		var aim_origin: Variant = _aim_origin if _aim_origin_valid else null
 		if network_role == "host":
 			_set_movement(local_slot,direction,running,aim,-1,aim_origin)
-		elif _send_elapsed >= SNAPSHOT_INTERVAL:
-			_move_input.rpc_id(1,direction,running,aim,_snapshot_ticks[local_slot],aim_origin)
+		elif network_role == "client":
+			# Prediction: this peer integrates the frame it is about to send.
+			_clock.advance(delta)
+			var local = actors[local_slot]
+			var view := _view_tick()
+			local.update_input(direction,running,view)
+			local.predicted_step(delta,actors)
+			_move_input.rpc_id(1,direction,running,aim,_snapshot_ticks[local_slot],aim_origin,
+				local.latest_prediction_seq(),view,local.input_history())
 	if network_role == "host":
 		server_tick += 1
 		for actor in actors:
 			if actor.peer_id > 0:
+				actor.combat.lag_tick = server_tick
 				actor.step(delta,actors,server_tick)
 		if phase == "WAVE":
 			var live := _live_devils()
@@ -785,6 +835,7 @@ func _physics_process(delta: float) -> void:
 		_advance_host_state(delta)
 		_check_hole_descent()
 		_check_party_wipe()
+		_lag.record(server_tick,_lag_bodies())
 		if _send_elapsed >= SNAPSHOT_INTERVAL:
 			for actor in actors:
 				if actor.peer_id > 0:
@@ -815,14 +866,14 @@ func _physics_process(delta: float) -> void:
 	if _send_elapsed >= SNAPSHOT_INTERVAL:
 		_send_elapsed = fmod(_send_elapsed,SNAPSHOT_INTERVAL)
 
-func _set_movement(slot: int, direction: Vector2, running: bool, aim: Vector3, aim_tick: int = -1, aim_origin: Variant = null) -> void:
+func _set_movement(slot: int, direction: Vector2, running: bool, aim: Variant = null, aim_tick: int = -1, aim_origin: Variant = null, seq: int = -1, view: int = -1, history: Array = []) -> void:
 	if slot < 0 or slot >= actors.size():
 		return
-	if not direction.is_finite() or not _set_aim(slot,aim,aim_tick,aim_origin):
+	if not direction.is_finite():
 		return
-	actors[slot].move_direction = direction.limit_length()
-	actors[slot].run_requested = running
-	actors[slot].input_age = 0
+	if aim != null and not _set_aim(slot,aim,aim_tick,aim_origin):
+		return
+	actors[slot].accept_network_input(direction,running,seq,view,history)
 
 func _set_aim(slot: int, point: Vector3, aim_tick: int = -1, aim_origin: Variant = null) -> bool:
 	if not point.is_finite() or point.length_squared() > 1000000.0:
@@ -856,12 +907,17 @@ func _set_aim(slot: int, point: Vector3, aim_tick: int = -1, aim_origin: Variant
 	return true
 
 @rpc("any_peer","call_remote","unreliable_ordered")
-func _move_input(direction: Vector2, running: bool, aim: Vector3, aim_tick: Variant, aim_origin: Variant = null) -> void:
-	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
+func _move_input(direction: Vector2, running: bool, aim: Variant, aim_tick: Variant, aim_origin: Variant = null, seq: Variant = -1, view: Variant = -1, history: Array = []) -> void:
+	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
-	if _peer_slots.has(sender):
-		_set_movement(int(_peer_slots[sender]),direction,running,aim,aim_tick,aim_origin)
+	var sender := _sender_id()
+	if not _peer_slots.has(sender):
+		return
+	var aim_point: Variant = aim if typeof(aim) == TYPE_VECTOR3 and typeof(aim_tick) == TYPE_INT else null
+	_set_movement(int(_peer_slots[sender]),direction,running,aim_point,
+		int(aim_tick) if typeof(aim_tick) == TYPE_INT else -1,aim_origin,
+		int(seq) if typeof(seq) == TYPE_INT else -1,int(view) if typeof(view) == TYPE_INT else -1,
+		history if typeof(history) == TYPE_ARRAY else [])
 
 @rpc("authority","call_remote","unreliable")
 func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
@@ -869,8 +925,10 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 		return
 	_snapshot_ticks[slot] = tick
 	last_snapshot_tick = maxi(last_snapshot_tick,tick)
+	if slot == local_slot:
+		_clock.ingest(tick,Time.get_ticks_msec()/1000.0)
 	var previous_ability := str(actors[slot].ability.active_id)
-	actors[slot].apply_snapshot(state)
+	actors[slot].apply_snapshot(state,tick,actors)
 	var current_ability := str(actors[slot].ability.active_id)
 	if actors[slot].ability.active and current_ability != previous_ability:
 		var definition := AbilityRules.by_id(current_ability)
@@ -897,13 +955,16 @@ func send_action(action: String, value: Variant = null) -> void:
 	if network_role == "host":
 		_apply_action(local_slot,action,value,-1,aim_origin)
 	elif network_role == "client":
+		# Locomotion intents start on this frame; combat and skills stay
+		# authoritative so a client never guesses its own hit.
+		actors[local_slot].predict_action(action,value)
 		_action_input.rpc_id(1,action,value,_snapshot_ticks[local_slot],aim_origin)
 
 @rpc("any_peer","call_remote","reliable")
 func _action_input(action: String, value: Variant, aim_tick: Variant, aim_origin: Variant = null) -> void:
 	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if not _peer_slots.has(sender):
 		return
 	var slot := int(_peer_slots[sender])
@@ -933,6 +994,8 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		return
 	if not actor.alive:
 		return
+	# Every damage-capable intent carries the tick its owner was drawing.
+	_arm_lag(actor)
 	match action:
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
@@ -1079,6 +1142,9 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 	# takes the shaft before the body behind it.
 	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
+	if authoritative:
+		arrow.lag_comp = _lag
+		arrow.lag_ticks = _shooter_lag(slot)
 	add_child(arrow)
 	var excluded: Array[RID] = [actors[slot].get_rid()]
 	if is_instance_valid(actors[slot].rig.active_shield):
@@ -1094,6 +1160,41 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 			oldest.queue_free()
 	if slot == local_slot:
 		audio.play_sound("release")
+
+## The bodies a client's action may hit: the party and every live devil.
+func _lag_bodies() -> Array:
+	var bodies: Array = []
+	for actor in actors:
+		bodies.append(actor)
+	for devil in devils:
+		if is_instance_valid(devil):
+			bodies.append(devil)
+	return bodies
+
+
+## The server tick this peer is currently drawing; its aim and swings are judged
+## against that world, not the present one.
+func _view_tick() -> int:
+	if _clock.newest_tick() >= 0:
+		return _clock.render_tick()
+	return maxi(0,_snapshot_ticks[local_slot])
+
+
+## Arms one fighter's damage window with the rewind its owner needs.
+func _arm_lag(actor) -> void:
+	actor.combat.lag_tick = server_tick
+	actor.combat.lag_ticks = int(actor.lag_ticks(server_tick,MAX_LAG_TICKS)) if int(actor.peer_id) > 1 else 0
+
+
+## How many ticks behind the host the shooter was drawing when it released.
+func _shooter_lag(slot: int) -> int:
+	if slot < 0 or slot >= actors.size():
+		return 0
+	var actor = actors[slot]
+	if int(actor.peer_id) <= 1:
+		return 0
+	return int(actor.lag_ticks(server_tick,MAX_LAG_TICKS))
+
 
 func _ability_authority(actor) -> bool:
 	return network_role != "client" and actor != null and is_instance_valid(actor) \
@@ -2321,10 +2422,10 @@ func _clone_snapshots(tick: int, states: Array) -> void:
 			created.name = "RangerClone%d" % id
 			add_child(created)
 			created.configure(id,int(state.get("depth",depth)),false,"direct")
-			created.apply_snapshot(state)
+			created.apply_snapshot(state,tick)
 			_devil_nodes[id] = created
 			continue
-		node.apply_snapshot(state)
+		node.apply_snapshot(state,tick)
 
 
 func _on_clone_arrow(origin: Vector3, direction: Vector3, speed: float, _damage: float) -> void:
@@ -2370,7 +2471,7 @@ func _devil_snapshots(tick: int, states: Array) -> void:
 			created.authoritative = false
 			_devil_nodes[id] = created
 			node = created
-		node.apply_snapshot(state)
+		node.apply_snapshot(state,tick)
 
 func _spawn_chest() -> void:
 	if is_instance_valid(chest):

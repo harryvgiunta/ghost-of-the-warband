@@ -20,6 +20,7 @@ const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const MAX_HEALTH := 100.0
 const WALK_SPEED := 5.5
 ## Packed focus silhouettes in the `gear` snapshot field: three bits, so the
@@ -53,6 +54,9 @@ var deaths := 0
 var respawn := 0.0
 var authoritative := false
 var is_local := false
+## True on the one peer that owns this body over the wire: it integrates its
+## own movement immediately and reconciles against the host's acknowledgements.
+var predicting := false
 var spawn_point := Vector3.ZERO
 var move_direction := Vector2.ZERO
 var run_requested := false
@@ -75,13 +79,90 @@ var _heal_rate := 0.0
 var input_age := 0.0
 var _label: Label3D
 var _ground_ring: MeshInstance3D
-var _target_position := Vector3.ZERO
 var _received_pose := false
-var _states: Array[Dictionary] = []
 var _gear_bits := -1
-const INTERP_BUFFER_LIMIT := 32
-const INTERP_HISTORY := 0.9
-const INTERP_EXTRAPOLATION := 0.15
+## The owning peer's unacknowledged movement frames and the local body it
+## integrates them into. Empty for every host-side or remote fighter.
+var _prediction = NetReplication.InputRing.new()
+## The remote fighter's server states, played back a short delay behind the
+## host so uneven packet arrivals render as motion instead of jumps.
+var _timeline = NetReplication.SnapshotTimeline.new()
+var _predicted_last := false
+var _timeline_ready := false
+## The last movement frame this body consumed as authority, and the state it
+## held before using it. A correction replays this peer's later frames from it.
+var _pending_seq := -1
+## The newest acknowledgement, kept for the next physics frame. A correction
+## sweeps collision per replayed frame, so it must not run inside an RPC
+## callback (the idle frame) where the body's motion state is mid-frame.
+var _pending_state: Dictionary = {}
+## Client movement frames the authority has received but not simulated yet.
+var _input_queue: Array = []
+## True when this tick consumed one of them; false leaves the pose untouched.
+var _frame_consumed := false
+## True once a peer's numbered frames drive this body. Only then does a tick
+## with no frame hold the pose: a body this scene drives itself (the host's own
+## fighter, a bot, a fixture) has no frame stream and simulates every tick.
+var frame_driven := false
+var ack_seq := -1
+var ack_position := Vector3.ZERO
+var ack_velocity := Vector3.ZERO
+## The server tick this peer drew the world at when it last acted.
+var view_tick := -1
+## Measured reconciliation: how far the prediction had drifted at the last
+## authoritative packet, and how many corrections/replayed frames it took.
+var prediction_drift := 0.0
+## How far the rig is drawn from its body after a correction. The simulation
+## takes the authoritative pose at once (the acknowledgement compares absolute
+## poses, so a partially corrected body re-reports its own glide as drift), and
+## this offset is what the eye sees: the model starts where it stood and travels
+## to the corrected pose over a few frames.
+var _rig_offset := Vector3.ZERO
+## Where the model is actually drawn in world space, rate-limited toward
+## `global_position + _rig_offset` so no correction can hop it.
+var _rig_drawn := Vector3.ZERO
+var _rig_drawn_ready := false
+## The last sixty-four reconciliations: the frame acknowledged, the pose this
+## peer had predicted for the following frame, the authoritative pose and the
+## distance between them. The network regression prints the ones that moved.
+var history: Array = []
+var prediction_corrections := 0
+var _last_motion := Vector3.ZERO
+var _last_running := false
+## A predicted body's own translation only matches the host within this
+## tolerance; anything above it is replayed from the authoritative state. A
+## standing body still lands within half a walking frame, so the floor absorbs
+## the tick of phase rather than half a step.
+const RECONCILE_DISTANCE := 0.05
+## Every frame of disagreement worth this many frames of the body's own travel
+## is phase, not error: the authority names a tick, and a tick either side of
+## the client's frame is a legitimate few centimetres. Correcting that would
+## yank the body backwards on every packet.
+const RECONCILE_SLACK_FRAMES := 2.0
+## Ceiling on the smoothed tolerance, so a fast body still corrects a real shove.
+const RECONCILE_MAX_DISTANCE := 0.25
+## How fast the model closes a correction, in metres per second, and the widest
+## offset it will hold. A drag of up to a metre reads as the character stepping
+## into place instead of a pop.
+const RIG_GLIDE_SPEED := 4.0
+const RIG_GLIDE_LIMIT := 2.0
+## The most the drawn model may move in one frame. It also has to keep up with a
+## walking body, so this is well above a stride and well below a pop.
+const RIG_DRAW_STEP := 0.35
+## The most the model may trail its body, in metres. Beyond this the offset is
+## stale (a death, a revive, a scene hand-off) and is dropped instead of glided.
+const RIG_DRAW_LIMIT := 2.5
+## Movement frames each packet repeats behind its own. A frame the transport
+## drops would otherwise cost its travel forever: the authority keeps walking
+## short of the peer that sent it.
+const INPUT_REDUNDANCY := 3
+## Unconsumed client input frames the authority buffers. Two frames can arrive
+## in one poll burst (a host under load runs two physics ticks per idle frame);
+## holding them makes the authority apply each frame exactly once, in order, so
+## the acknowledgement keeps naming the frame the client numbered. The cap is
+## the longest stall worth replaying — 0.2 s of frames — because a frame dropped
+## here loses its travel for good and shows up later as a correction.
+const INPUT_QUEUE_LIMIT := 12
 var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 ## Prints a bloody trail when this body walks out of a death pool.
@@ -163,9 +244,20 @@ func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) ->
 
 func revive() -> void:
 	position = spawn_point + Vector3(0,0.08,0)
-	_target_position = position
+	_timeline.reset_to(position)
+	_timeline_ready = false
+	_predicted_last = false
+	_prediction.clear()
+	_pending_seq = -1
+	_pending_state = {}
+	ack_seq = -1
+	_input_queue.clear()
+	_frame_consumed = false
+	frame_driven = false
+	_rig_offset = Vector3.ZERO
+	_rig_drawn = position
+	_rig_drawn_ready = false
 	_received_pose = false
-	_states.clear()
 	velocity = Vector3.ZERO
 	move_direction = Vector2.ZERO
 	run_requested = false
@@ -282,13 +374,14 @@ func teleport_to(point: Vector3, yaw: float) -> void:
 		return
 	global_position = point
 	velocity = Vector3.ZERO
-	_target_position = global_position
-	_states.clear()
+	_timeline.reset_to(point,Vector3.ZERO,yaw)
 	if is_instance_valid(rig):
 		rig.global_basis = Basis(Vector3.UP, yaw)
 
 func try_step(direction: Vector3) -> bool:
-	if not authoritative or not alive or combat.stagger_time > 0.0 or ability.active:
+	if not authoritative and not predicting:
+		return false
+	if not alive or combat.stagger_time > 0.0 or ability.active:
 		return false
 	var planar := Vector3(direction.x,0.0,direction.z)
 	if planar.length_squared() < 0.0001:
@@ -524,25 +617,35 @@ func update_cover_aim_readiness() -> void:
 		or (_exposure_tick >= 0 and aim_snapshot_tick >= _exposure_tick)
 
 func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
-	if not authoritative:
+	if not authoritative and not predicting:
 		return
 	if not alive:
-		respawn = maxf(0,respawn-delta)
-		if respawn <= 0:
-			revive()
+		# Only the authority owns the respawn clock; a replica learns its state
+		# from the snapshots it is handed.
+		if authoritative:
+			respawn = maxf(0,respawn-delta)
+			if respawn <= 0:
+				revive()
 		return
 	input_age += delta
-	_advance_consumable(delta)
-	if consume_kind != "":
-		move_direction = Vector2.ZERO
-		run_requested = false
-		jump_requested = false
-		peek_requested = false
-		combat.stop_block()
+	if authoritative:
+		# Every authoritative body consumes its queued intent, including the
+		# host's own fighter (which queues one local frame per tick with no
+		# sequence number). `frame_driven` only decides whether a tick with an
+		# empty queue may hold the pose.
+		_frame_consumed = _consume_input_frame()
+		_advance_consumable(delta)
+		if consume_kind != "":
+			move_direction = Vector2.ZERO
+			run_requested = false
+			jump_requested = false
+			peek_requested = false
+			combat.stop_block()
 	roll.advance(delta,is_on_floor())
 	dodge.advance(delta,is_on_floor())
-	ability.advance(delta)
-	_tick_ward(delta)
+	if authoritative:
+		ability.advance(delta)
+		_tick_ward(delta)
 	if ability.active:
 		# A melee skill keeps the walking intent, but sprint, jump, peek and
 		# slide stay off for the duration. Any other skill plants the fighter.
@@ -568,6 +671,48 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		jump_requested = false
 		peek_requested = false
 		combat.stop_block()
+	var motion := {}
+	if authoritative and frame_driven and not _frame_consumed:
+		# A tick the peer that owns this body sent no frame for. Repeating the
+		# last intent would walk the body ahead of the frames that own it, and
+		# every invented frame comes back as a correction that yanks its owner
+		# forward. A body this scene drives itself (the host's own fighter, a
+		# bot, a fixture) has no frame stream and simulates every tick.
+		_hold_position(delta)
+	else:
+		motion = _resolve_motion(delta,actors,simulation_tick)
+		_integrate(delta,motion,actors,true)
+		# The model trails a correction by a few frames while the body is exact.
+		# Both the predicting peer and the authority pose their rig here.
+		_glide_rig(delta)
+		if authoritative:
+			# Client frames that arrived behind this tick's one are the same kind
+			# of intent: simulate each exactly once, oldest first, so a host that
+			# runs slower than its peer never falls permanently behind the input
+			# it was sent. The acknowledgement names the newest frame consumed.
+			_drain_input_backlog(motion,actors)
+		# The acknowledgement names the state the frame that consumed this
+		# client frame produced, so its owner replays from exactly here.
+		_commit_acknowledgement()
+	if not authoritative:
+		# The owning peer integrates its own translation; its rig stays on the
+		# authoritative animation state so prediction never invents a pose.
+		_prediction.push(motion)
+		return
+	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
+	rig.set_slide(slide.progress if slide.active else -1.0,slide.direction)
+	rig.set_step(dodge.progress if dodge.active else -1.0,dodge.direction)
+	rig.set_locomotion(_last_motion,is_on_floor() and not roll.active)
+	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
+	combat.set_motion(_last_motion,_last_running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
+	combat.advance(delta)
+	_bloody_feet.update(delta,self,rig)
+
+## One tick's movement intent: the walk target plus every velocity the state
+## machines produced, in the single order the authority and a predicting peer
+## share. The record is what `_integrate` consumes, so a rollback can replay a
+## frame without advancing a state machine twice.
+func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dictionary:
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01 and not ability.active
@@ -586,70 +731,373 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		_exposure_tick = simulation_tick
 	update_cover_aim_readiness()
 	var walk_speed: float = (2.2 if cover.crouched or cover.crouch_requested else 8.5 if running else 5.5) * float(rig.move_scale())
+	var committed: Variant = null
 	if slide.active:
-		velocity.x = slide_velocity.x
-		velocity.z = slide_velocity.z
+		committed = slide_velocity
 	elif was_in_cover:
-		velocity.x = cover_velocity.x
-		velocity.z = cover_velocity.z
-	else:
-		velocity.x = move_toward(velocity.x,direction.x*walk_speed,35*delta)
-		velocity.z = move_toward(velocity.z,direction.z*walk_speed,35*delta)
+		committed = cover_velocity
 	if dodge.active:
 		var step_velocity: Vector3 = dodge.velocity()
-		velocity.x = step_velocity.x
-		velocity.z = step_velocity.z
+		committed = step_velocity
 	if roll.active:
-		velocity.x = roll.direction.x * DodgeRoll.SPEED
-		velocity.z = roll.direction.z * DodgeRoll.SPEED
-	if not was_in_cover and not roll.active:
-		var separation := _separation_velocity(actors)
-		velocity.x += separation.x
-		velocity.z += separation.z
+		committed = Vector3(roll.direction.x * DodgeRoll.SPEED,0.0,roll.direction.z * DodgeRoll.SPEED)
+	var record := {"dir": Vector2(direction.x,direction.z), "run": running, "speed": walk_speed,
+		"replace": committed, "cap": 0.0,
+		"separation": not was_in_cover and not roll.active,
+		"jump": jump_requested, "takeoff": roll.takeoff_pending, "delta": delta,
+		# The pose this frame started from: the authority reports the same pose
+		# for the same frame, so the two are directly comparable.
+		"pos": position}
+	_last_running = running
 	if ability.active:
 		# Committed travel replaces the walk while it lasts; otherwise a moving
 		# melee skill keeps the normal velocity and a planted one holds still.
 		jump_requested = false
 		var ability_velocity: Vector3 = ability.velocity()
 		if not ability_velocity.is_zero_approx():
-			velocity.x = ability_velocity.x
-			velocity.z = ability_velocity.z
+			record["replace"] = ability_velocity
 		elif not ability.allows_movement():
-			velocity.x = 0.0
-			velocity.z = 0.0
+			record["replace"] = Vector3.ZERO
 		else:
 			# Hand the dash back to the feet: the walk target caps the residual
 			# travel instead of gliding a lane past the authored distance.
-			var walked := Vector2(velocity.x,velocity.z).limit_length(walk_speed)
-			velocity.x = walked.x
-			velocity.z = walked.y
-	if jump_requested:
+			record["cap"] = walk_speed
+	record["jump"] = jump_requested
+	return record
+
+## Applies one motion record. `live` is the running simulation: replay passes
+## false so a correction re-moves the body without advancing any clock.
+func _integrate(delta: float, record: Dictionary, actors: Array, live: bool) -> void:
+	var committed: Variant = record.get("replace")
+	if committed != null:
+		var fixed: Vector3 = committed
+		velocity.x = fixed.x
+		velocity.z = fixed.z
+	else:
+		var aim_direction: Vector2 = record.dir
+		var walk_speed := float(record.get("speed",WALK_SPEED))
+		velocity.x = move_toward(velocity.x,aim_direction.x*walk_speed,35*delta)
+		velocity.z = move_toward(velocity.z,aim_direction.y*walk_speed,35*delta)
+	if bool(record.get("separation",false)):
+		var separation := _separation_velocity(actors)
+		velocity.x += separation.x
+		velocity.z += separation.z
+	var cap := float(record.get("cap",0.0))
+	if cap > 0.0:
+		var walked := Vector2(velocity.x,velocity.z).limit_length(cap)
+		velocity.x = walked.x
+		velocity.z = walked.y
+	if bool(record.get("jump",false)):
 		velocity.y = 7.0
 	elif is_on_floor():
 		velocity.y = -1.0
 	else:
 		velocity.y -= 20*delta
-	if roll.takeoff_pending:
+	if bool(record.get("takeoff",false)):
 		velocity.y = maxf(velocity.y,6.0)
+	if live:
+		jump_requested = false
 		roll.takeoff_pending = false
-	jump_requested = false
 	var before := position
-	move_and_slide()
+	# A replay is arithmetic, never a physics move. `move_and_slide()` outside
+	# the physics frame integrates against the *idle* frame's delta and asks the
+	# physics server about a body state its last tick produced, so replaying a
+	# handful of frames inside one correction multiplies the travel by however
+	# long the render frame took and launches the body — the classic
+	# re-simulation trap. Integrate the record's velocity directly instead.
+	if live:
+		move_and_slide()
+		# The lunge cuts the lane it just crossed, measured after the move.
+		if authoritative and ability.active:
+			_sweep_ability_path()
+	else:
+		# A replay is a swept move, not a physics step: `move_and_collide` takes
+		# the motion explicitly, so it collides exactly like the live move
+		# without depending on which frame the callback ran in, and sliding the
+		# remainder along the surface keeps a blocked body where its owner's
+		# blocked body was.
+		var motion := velocity*delta
+		if motion.length_squared() > 0.0000001:
+			var collision := move_and_collide(motion)
+			if collision != null:
+				var slid := motion.slide(collision.get_normal())
+				if slid.length_squared() > 0.0000001:
+					move_and_collide(slid)
 	position.x = clampf(position.x,-bounds,bounds)
 	position.z = clampf(position.z,-bounds,bounds)
-	# The lunge cuts the lane it just crossed, measured after the move.
-	if ability.active:
-		_sweep_ability_path()
 	var actual := (position-before)/maxf(delta,0.0001)
-	slide.after_move(self,actual)
-	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
-	rig.set_slide(slide.progress if slide.active else -1.0,slide.direction)
-	rig.set_step(dodge.progress if dodge.active else -1.0,dodge.direction)
-	rig.set_locomotion(actual,is_on_floor() and not roll.active)
-	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
-	combat.set_motion(actual,running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
-	combat.advance(delta)
-	_bloody_feet.update(delta,self,rig)
+	if live:
+		slide.after_move(self,actual)
+	_last_motion = actual
+
+## Draws the model from its pre-correction pose to the corrected one. The body
+## itself is already authoritative; only the presentation lags for a few frames.
+## Anchors the drawn model to the body again and forgets any outstanding glide.
+## Called whenever this peer stops predicting (death, cover) and whenever the
+## anchor could not possibly be a glide: a stale anchor is what leaves the model
+## standing at an old corpse while the body is somewhere else.
+func _reset_rig_glide() -> void:
+	_rig_offset = Vector3.ZERO
+	_rig_drawn = global_position
+	_rig_drawn_ready = false
+	if is_instance_valid(rig) and not rig.position.is_zero_approx():
+		rig.position = Vector3.ZERO
+
+
+func _glide_rig(delta: float) -> void:
+	var wanted := global_position + _rig_offset
+	if not _rig_drawn_ready:
+		# First correction of a run: begin where the model already stood, so the
+		# correction cannot hop it.
+		_rig_drawn = rig.global_position
+		_rig_drawn_ready = true
+	_rig_drawn = _rig_drawn.move_toward(wanted,RIG_DRAW_STEP)
+	_rig_offset = _rig_offset.move_toward(Vector3.ZERO,RIG_GLIDE_SPEED*maxf(delta,0.0))
+	if _rig_offset.is_zero_approx():
+		_rig_offset = Vector3.ZERO
+	if _rig_drawn.distance_squared_to(global_position) < 0.000001:
+		_rig_drawn = global_position
+		_rig_drawn_ready = false
+		rig.position = Vector3.ZERO
+		return
+	# A model this far from its body is not gliding, it is stale: anchor it.
+	if _rig_drawn.distance_to(global_position) > RIG_DRAW_LIMIT:
+		_reset_rig_glide()
+		return
+	rig.position = to_local(_rig_drawn)
+
+## -- prediction and reconciliation ---------------------------------------
+
+## The authority's acknowledgement point: the pose produced by the frame that
+## consumed the newest client input. A correcting peer replays its own later
+## frames from exactly here and compares its own frame `ack + 1` against it.
+func _commit_acknowledgement() -> void:
+	if _pending_seq < 0:
+		return
+	ack_seq = _pending_seq
+	ack_position = position
+	ack_velocity = velocity
+	_pending_seq = -1
+
+## Host side of the movement stream: queue the client's simulated frame. The
+## authority pops exactly one per tick in `_consume_input_frame()`, so the pose
+## it acknowledges always belongs to the same numbered frame the client
+## recorded, and the frames behind the newest fill any gap a lost datagram left.
+func accept_network_input(direction: Vector2, running: bool, seq: int = -1, view: int = -1,
+		history: Array = []) -> void:
+	if not direction.is_finite():
+		return
+	if view >= 0:
+		view_tick = view
+	if seq >= 0:
+		frame_driven = true
+		# A frame the authority has already simulated can never be a fresh
+		# intent: `unreliable_ordered` and a repeated send can both re-deliver.
+		if seq <= ack_seq:
+			return
+		# Frames repeated behind this one fill the gaps a lost datagram left.
+		for entry in history:
+			if typeof(entry) != TYPE_ARRAY or (entry as Array).size() < 3:
+				continue
+			var past := int(entry[0])
+			if past <= ack_seq or past >= seq:
+				continue
+			if not _input_queue.is_empty() and past <= int(_input_queue[-1].seq):
+				continue
+			_queue_input_frame(Vector2(entry[1]),bool(entry[2]),past)
+		if not _input_queue.is_empty() and seq <= int(_input_queue[-1].seq):
+			return
+	_queue_input_frame(direction,running,seq)
+
+func _queue_input_frame(direction: Vector2, running: bool, seq: int) -> void:
+	_input_queue.append({"dir": direction.limit_length(), "run": running, "seq": seq})
+	while _input_queue.size() > INPUT_QUEUE_LIMIT:
+		# A stalled or saturated stream: keep the freshest frames so the body
+		# follows the input the player is actually holding.
+		_input_queue.pop_front()
+
+## One frame of client intent becomes this tick's movement, and the frame it
+## came from becomes the acknowledgement the next snapshot carries.
+func _consume_input_frame() -> bool:
+	if _input_queue.is_empty():
+		return false
+	var frame: Dictionary = _input_queue.pop_front()
+	_apply_input_frame(frame)
+	return true
+
+## A tick with no client frame: keep the pose. Gravity and the floor still
+## settle the body, and the walk velocity is preserved so the next frame
+## continues from the momentum the peer's own body has.
+func _hold_position(delta: float) -> void:
+	velocity.y = -1.0 if is_on_floor() else velocity.y-20.0*delta
+	var held_x := velocity.x
+	var held_z := velocity.z
+	velocity.x = 0.0
+	velocity.z = 0.0
+	move_and_slide()
+	velocity.x = held_x
+	velocity.z = held_z
+
+## Frames still queued after this tick's own: motion only. Their clocks have
+## already advanced this tick, so they are integrated the way a correction
+## replays a frame — translation, no state machine, no second jump.
+func _drain_input_backlog(motion: Dictionary, actors: Array) -> void:
+	while not _input_queue.is_empty():
+		var frame: Dictionary = _input_queue.pop_front()
+		_apply_input_frame(frame)
+		var record := motion.duplicate()
+		record["dir"] = frame.dir
+		record["jump"] = false
+		record["takeoff"] = false
+		_integrate(float(record.get("delta",1.0/60.0)),record,actors,false)
+
+func _apply_input_frame(frame: Dictionary) -> void:
+	move_direction = frame.dir
+	run_requested = bool(frame.run)
+	input_age = 0.0
+	var seq := int(frame.seq)
+	if seq > ack_seq:
+		_pending_seq = seq
+
+## This peer's own input for the frame it is about to simulate.
+func update_input(direction: Vector2, running: bool, view: int = -1) -> void:
+	move_direction = direction.limit_length()
+	run_requested = running
+	input_age = 0.0
+	if view >= 0:
+		view_tick = view
+
+func latest_prediction_seq() -> int:
+	return _prediction.latest_seq()
+
+## The newest `count` unacknowledged frames, oldest first, as `[seq, dir, run]`
+## blocks. Each movement packet repeats them so one lost datagram cannot leave
+## the authority permanently short of this peer's travel.
+func input_history(count: int = INPUT_REDUNDANCY) -> Array:
+	var out: Array = []
+	var records: Array = _prediction.records
+	var start := maxi(0,records.size() - maxi(count,0) - 1)
+	for index in range(start,records.size() - 1):
+		var record: Dictionary = records[index]
+		out.append([int(record.seq),Vector2(record.dir),bool(record.get("run",false))])
+	return out
+
+## Client-side mirror of the locomotion intents: the owning peer applies the
+## same state change it just sent, so a jump, roll, dodge or cover attach starts
+## on the frame the key went down instead of a round trip later. Combat, kits,
+## consumables and skills stay authority-only, so no client ever guesses a hit.
+func predict_action(action: String, value: Variant) -> void:
+	if not predicting or not alive:
+		return
+	match action:
+		"jump":
+			if typeof(value) == TYPE_BOOL:
+				press_jump(value)
+		"step":
+			if typeof(value) != TYPE_VECTOR3:
+				return
+			var direction: Vector3 = value
+			if not direction.is_finite() or absf(direction.y) > 0.01:
+				return
+			var flat := Vector3(direction.x,0,direction.z)
+			if absf(flat.length()-1.0) > 0.1:
+				return
+			try_step(flat)
+
+
+## One frame of the owning peer's own movement: the same `step()` the authority
+## runs for this body, minus damage, combat clocks, consumables and kits. The
+## resolved motion frame is recorded for replay.
+func predicted_step(delta: float, actors: Array) -> void:
+	if not prediction_active():
+		return
+	input_age = 0.0
+	if not _pending_state.is_empty():
+		var state := _pending_state
+		_pending_state = {}
+		reconcile(state,actors)
+	step(delta,actors)
+
+
+## True while this peer owns and integrates the body itself. Cover is a
+## host-driven stance: the attached slide, the crouch transition and the exposure
+## timing all belong to the authority, so the body is rendered from its replicated
+## state until it detaches.
+func prediction_active() -> bool:
+	return predicting and alive and not cover.active
+
+## Rebuilds the present-day pose from the authority's acknowledgement plus the
+## frames it has not seen yet. Skipping the replay when the prediction already
+## matched keeps a steady stream from nudging the body at all.
+func reconcile(state: Dictionary, actors: Array) -> void:
+	var packed: Variant = state.get("ack",null)
+	if typeof(packed) != TYPE_ARRAY or (packed as Array).size() < 3:
+		return
+	var block: Array = packed
+	var ack := int(block[0])
+	if ack < 0:
+		return
+	# One acknowledgement is reconciled once. Every snapshot the authority sends
+	# while it has no fresh input repeats the last frame it consumed, and a
+	# reordered datagram can re-deliver an older one: correcting for it again
+	# would apply the same verdict twice.
+	if ack <= int(_prediction.acked):
+		return
+	var pose: Vector3 = block[1]
+	var sent_velocity: Vector3 = block[2]
+	# The authority's pose is the one *after* frame `ack`; this peer recorded the
+	# pose its own frame `ack + 1` started from, so the two name the same instant.
+	var predicted: Dictionary = _prediction.record_at(ack + 1)
+	if predicted.is_empty():
+		_prediction.acknowledge(ack)
+		prediction_drift = 0.0
+		return
+	prediction_drift = (predicted.get("pos",pose) as Vector3).distance_to(pose)
+	if history.size() < 64:
+		history.append({"ack":ack, "drift":prediction_drift, "predicted":predicted.get("pos",pose),
+			"actual":pose, "latest":_prediction.latest_seq()})
+	if prediction_drift <= reconcile_tolerance():
+		_prediction.acknowledge(ack)
+		return
+	prediction_corrections += 1
+	# The verdict is a displacement, not a pose: `pose` minus the pose this peer
+	# recorded for the same instant is how far its own simulation is from the
+	# authority's. Applying that to the present body corrects the error without
+	# replaying the unacknowledged window, whose re-swept path can never match
+	# the collisions and slopes the live frames actually met — every mismatch
+	# there came back as a pop of the whole window. The window is dropped so the
+	# next acknowledgement compares against the corrected path.
+	var shift: Vector3 = pose - (predicted.get("pos",pose) as Vector3)
+	if not _rig_drawn_ready:
+		# Anchor the model to the pose it is actually drawn at *before* the body
+		# takes the authority's: anchoring after the shift would hop it.
+		_rig_drawn = position
+		_rig_drawn_ready = true
+	position += shift
+	velocity = sent_velocity
+	_prediction.acknowledge(_prediction.latest_seq())
+	if shift.length() > RIG_DRAW_LIMIT:
+		# A revive, a blink, a hatch rescue: the body changed place, so the model
+		# does too. There is nothing to glide over.
+		_reset_rig_glide()
+		return
+	# The model glides over what the body took in one frame.
+	_rig_offset = (_rig_offset - shift).limit_length(RIG_GLIDE_LIMIT)
+
+## The disagreement worth correcting: a couple of frames of the body's own
+## travel, so a tick of phase between the peer's frame numbering and the
+## authority's tick is absorbed instead of snapping the body backwards.
+func reconcile_tolerance() -> float:
+	var travel: float = _last_motion.length() * get_physics_process_delta_time()
+	return clampf(maxf(RECONCILE_DISTANCE,travel*RECONCILE_SLACK_FRAMES),
+		RECONCILE_DISTANCE,RECONCILE_MAX_DISTANCE)
+
+## How far behind the host this peer was drawing the world when it acted, in
+## ticks. The host rewinds its hitboxes by exactly this much.
+func lag_ticks(server_tick: int, limit: int) -> int:
+	if view_tick < 0 or server_tick < 0:
+		return 0
+	return clampi(server_tick - view_tick,0,limit)
 
 ## A travelling skill sweeps the lane it has just crossed: after the body moved
 ## for the tick, every body inside the path arc takes one hit. The activation's
@@ -769,34 +1217,34 @@ static func gear_bits_for(rig) -> int:
 	return bits
 
 func snapshot() -> Dictionary:
-	return {"slot":slot,"peer":peer_id,"bot":is_bot,"name":display_name,"position":position,"velocity":velocity,
+	var state := {"slot":slot,"peer":peer_id,"position":position,"velocity":velocity,
 		"health":health,"maxh":max_health,"ward":ward_seconds,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
 		"weapon_blood":weapon_blood,
-		"stamina":stamina,"ability":ability.snapshot(),
-		"animation":rig.get_animation_state(),"progress":combat.attack_progress,"movement":combat.movement_mode,
-		"interval":combat.get_attack_interval(),"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.snapshot()}
+		"stamina":stamina,"ability":ability.pack_snapshot(),
+		"animation":rig.pack_animation_state(rig.get_animation_state()),"progress":combat.attack_progress,"movement":combat.movement_mode,
+		"aim":combat.aim_point,"grounded":is_on_floor(),"cover":cover.pack_snapshot()}
+	# Only a body driven by a remote peer carries an acknowledgement: the pose
+	# its owner replays from plus the frame that pose precedes.
+	if ack_seq >= 0:
+		# One positional block, like every other wire value: the acknowledgement
+		# rides inside the clamped datagram beside an already-full snapshot.
+		state["ack"] = [ack_seq, ack_position, ack_velocity]
+	return state
 
-func apply_snapshot(state: Dictionary) -> void:
-	var replaced := peer_id != int(state.peer) or is_bot != bool(state.bot)
+func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> void:
+	# A bot seat has no peer: peer 0 is the wire form of `is_bot`.
+	var incoming_bot := int(state.peer) == 0
+	var replaced := peer_id != int(state.peer) or is_bot != incoming_bot
 	peer_id = int(state.peer)
-	is_bot = bool(state.bot)
-	display_name = str(state.name)
+	is_bot = incoming_bot
+	# The name is static for the match and arrives with the roster, not the tick.
+	if state.has("name"):
+		display_name = str(state.name)
 	var previous_health := health
 	var previous_weapon_blood := weapon_blood
 	var had_pose := _received_pose
-	var target: Vector3 = state.position
-	_target_position = target
-	var now := Time.get_ticks_msec()/1000.0
-	_states.append({"time":now,"position":target,"velocity":state.velocity})
-	while _states.size() > INTERP_BUFFER_LIMIT:
-		_states.pop_front()
-	while _states.size() > 2 and float(_states[0].time) < now-INTERP_HISTORY:
-		_states.pop_front()
-	if replaced or not _received_pose or position.distance_squared_to(target) > 36:
-		position = target
-	_states[-1] = {"time":now,"position":target,"velocity":state.velocity}
+	_ingest_pose(state,tick,actors,replaced)
 	_received_pose = true
-	velocity = state.velocity
 	health = state.health
 	max_health = float(state.get("maxh",max_health))
 	ward_seconds = float(state.get("ward",ward_seconds))
@@ -852,9 +1300,10 @@ func apply_snapshot(state: Dictionary) -> void:
 		BloodFx.stain_weapon(rig,fresh_weapon_blood)
 	cover.apply_snapshot(state.cover)
 	if not alive:
+		_reset_rig_glide()
 		reset_stance()
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
-	rig.set_locomotion(velocity,bool(state.grounded) and float(state.animation.roll) < 0)
+	rig.set_locomotion(velocity,bool(state.grounded) and Archer.animation_roll(state.animation) < 0)
 	rig.apply_animation_state(state.animation)
 	combat.attack_progress = state.progress
 	combat.movement_mode = state.movement
@@ -863,37 +1312,59 @@ func apply_snapshot(state: Dictionary) -> void:
 	# Guard timing stays host-authoritative; a replica HUD shows GUARDING rather
 	# than inventing a parry window from snapshot arrival time.
 	combat.block_time = 0.0
+	if prediction_active():
+		# The owning peer never advances the combat clock, so the only movement
+		# gate it cannot derive locally — a stagger — is read off the pose it
+		# was handed. STAGGER carries the remaining reaction in its time field,
+		# and apply_animation_state() has already turned it into _hit_react.
+		combat.stagger_time = rig._hit_react
 
-func _interpolate_position(render_time: float) -> Vector3:
-	if _states.is_empty():
-		return _target_position
-	var newest: Dictionary = _states[-1]
-	if render_time >= float(newest.time):
-		# Snapshot starved: carry the last authoritative velocity briefly, then
-		# hold. Never invent a long extrapolation that can rewind a hit.
-		var extra := minf(render_time-float(newest.time),INTERP_EXTRAPOLATION)
-		return Vector3(newest.position)+Vector3(newest.velocity)*extra
-	var oldest: Dictionary = _states[0]
-	if render_time <= float(oldest.time):
-		var first_point: Vector3 = oldest.position
-		return first_point
-	for index in range(1,_states.size()):
-		var after: Dictionary = _states[index]
-		if render_time > float(after.time):
-			continue
-		var before: Dictionary = _states[index-1]
-		var span := maxf(float(after.time)-float(before.time),0.001)
-		var weight := clampf((render_time-float(before.time))/span,0.0,1.0)
-		var from_point: Vector3 = before.position
-		var to_point: Vector3 = after.position
-		return from_point.lerp(to_point,weight)
-	var last_point: Vector3 = newest.position
-	return last_point
+## Routes one authoritative pose. A predicting body reconciles against the
+## acknowledgement; every other body feeds the delay buffer its render reads.
+func _ingest_pose(state: Dictionary, tick: int, actors: Array, replaced: bool) -> void:
+	var active := prediction_active()
+	if active != _predicted_last:
+		# Handing the body between the local prediction and the buffered view:
+		# restart the buffer where the body actually stands, so neither mode
+		# starts by dragging it. The drawn model is anchored here too, or the
+		# pose it was drawn at before a death would still be chasing it.
+		_reset_rig_glide()
+		_timeline.reset_to(position,velocity,0.0,_pose_tick(tick),_pose_now())
+		_timeline_ready = false
+		_predicted_last = active
+	var target: Vector3 = state.position
+	var sent_velocity: Vector3 = state.velocity
+	if active:
+		_pending_state = state
+		return
+	_pending_state = {}
+	_timeline.floor_delay_ticks = clampf(interp_delay/_timeline.tick_seconds,
+		NetReplication.SnapshotTimeline.MIN_DELAY_TICKS,
+		NetReplication.SnapshotTimeline.MAX_DELAY_TICKS)
+	# A fighter walks at most 0.14 m in a tick: anything past a stride is a
+	# blink, a revive or a scene hand-off, and the view must cut to it.
+	_timeline.discontinuity_metres = 0.75
+	if replaced or not _timeline_ready:
+		_timeline.reset_to(target,sent_velocity,0.0,_pose_tick(tick),_pose_now())
+		_timeline_ready = true
+		position = target
+		velocity = sent_velocity
+		return
+	_timeline.push(_pose_tick(tick),target,sent_velocity,0.0,_pose_now())
+	velocity = sent_velocity
+
+func _pose_now() -> float:
+	return Time.get_ticks_msec()/1000.0
+
+func _pose_tick(tick: int) -> int:
+	return tick if tick >= 0 else _timeline.newest_tick() + 1
 
 func _process(delta: float) -> void:
-	if not authoritative and _received_pose:
-		var render_time := Time.get_ticks_msec()/1000.0-interp_delay
-		position = _interpolate_position(render_time)
+	if not authoritative and _received_pose and not prediction_active():
+		_timeline.advance(delta)
+		var sample: Dictionary = _timeline.sample()
+		position = sample.pos
+		velocity = sample.vel
 	_label.text = "%s%s  %d" % [display_name," [BOT]" if is_bot else "",int(health)]
 	_ground_ring.visible = alive
 	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)

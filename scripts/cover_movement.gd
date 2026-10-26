@@ -296,11 +296,31 @@ func _firing_corridor_clear(point: Vector3, height: float, forward: Vector3) -> 
 func camera_height() -> float:
 	return lerpf(1.5,0.95,crouch_amount)
 
+## Wire order of the replicated cover state; the snapshot carries values only.
+const SNAPSHOT_KEYS := ["active","normal","low","peeking","lean",
+	"crouch_requested","crouched","crouch_amount"]
+
+func pack_snapshot() -> Array:
+	var state := snapshot()
+	var packed: Array = []
+	packed.resize(SNAPSHOT_KEYS.size())
+	for index in SNAPSHOT_KEYS.size():
+		packed[index] = state.get(SNAPSHOT_KEYS[index])
+	return packed
+
+static func unpack_snapshot(packed: Array) -> Dictionary:
+	var state := {}
+	for index in mini(SNAPSHOT_KEYS.size(),packed.size()):
+		state[SNAPSHOT_KEYS[index]] = packed[index]
+	return state
+
 func snapshot() -> Dictionary:
 	return {"active":active,"normal":normal,"low":low,"peeking":peeking,"lean":lean,
 		"crouch_requested":crouch_requested,"crouched":crouched,"crouch_amount":crouch_amount}
 
-func apply_snapshot(state: Dictionary) -> void:
+func apply_snapshot(state: Variant) -> void:
+	if typeof(state) == TYPE_ARRAY:
+		state = unpack_snapshot(state)
 	active = bool(state.active)
 	normal = state.normal
 	low = bool(state.low)

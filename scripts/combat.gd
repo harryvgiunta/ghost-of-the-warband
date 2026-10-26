@@ -64,6 +64,12 @@ var _pending_throw := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
+## Backward reconciliation: the host's hitbox history, the rewind its owner
+## needs for this fighter and the tick the host is simulating right now.
+## `lag_ticks` is 0 for every body the host drives itself.
+var lag_rewind = null
+var lag_ticks := 0
+var lag_tick := 0
 ## Incoming stagger multiplier from worn trinkets (1.0 is unmodified).
 var stagger_scale := 1.0
 # The last validated camera-ray muzzle. Arrows leave along this line instead of
@@ -563,11 +569,19 @@ func _can_damage_melee(hand: String, state: Dictionary) -> bool:
 		and rig.weapon == state.weapon and rig.has_melee(hand) \
 		and rig._roll_progress < 0.0
 
+## Resolves one blade sample against the present world, then against the world
+## the client's owner was drawing: a body that stepped out of the cut since the
+## shooter's frame still takes the blow it saw land.
 func _on_melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3,
 		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
 	var state := _swing_state(hand)
 	if not _can_damage_melee(hand,state) or radius <= 0.0:
 		return
+	_sweep_blade(hand,state,previous_base,previous_tip,current_base,current_tip,radius)
+	_lag_melee_strike(hand,state,current_base,current_tip,radius)
+
+func _sweep_blade(hand: String, state: Dictionary, previous_base: Vector3, previous_tip: Vector3,
+		current_base: Vector3, current_tip: Vector3, radius: float) -> void:
 	if state.diagonal:
 		_sweep_cleave(hand,state)
 		return
@@ -708,6 +722,12 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
 				or unit.get("alive") != true or state.victims.has(unit.get_instance_id()):
 			continue
+		# A contact the shooter's own frame could not have produced is not a hit:
+		# the body was never under their blade.
+		if lag_ticks > 0 and is_instance_valid(lag_rewind) \
+				and lag_rewind.refuses(unit.get_instance_id(),lag_tick - lag_ticks,
+					base_to,tip_to,radius):
+			continue
 		# The contact is on the actual blade query, never an actor-centered hit
 		# fallback. This ray also prevents a windup starting through thin cover.
 		_melee_sight_query.from = actor.global_position + Vector3(0, 1.1, 0)
@@ -722,6 +742,60 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 		# An authored animation may continue beyond a wall; it must not resume
 		# damage on the far side in the next sample of this same swing.
 		state.blocked = true
+
+## Adds the victims this blade sample had in the world the client was drawing.
+## Everything downstream is the ordinary contact path, so blocks, parries, blood
+## and damage numbers behave exactly as they do for a present-time hit.
+func _lag_melee_strike(hand: String, state: Dictionary, base: Vector3, tip: Vector3,
+		radius: float) -> void:
+	if lag_ticks <= 0 or not is_instance_valid(lag_rewind) or not damage_enabled:
+		return
+	var tick := lag_tick - lag_ticks
+	var space := actor.get_world_3d().direct_space_state
+	var forward: Vector3 = aim_point-actor.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	var low := -PI
+	var high := PI
+	if state.diagonal:
+		var cut: float = rig.melee_cut_curve(hand)
+		var angle_from: float = state.side * lerpf(state.half_angle,-state.half_angle,state.cut)
+		var angle_to: float = state.side * lerpf(state.half_angle,-state.half_angle,cut)
+		low = maxf(-PI*0.5,minf(angle_from,angle_to)-CLEAVE_ANGLE_PADDING)
+		high = minf(PI*0.5,maxf(angle_from,angle_to)+CLEAVE_ANGLE_PADDING)
+	for candidate in lag_rewind.candidates(tick):
+		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
+			continue
+		if candidate.get("alive") != true:
+			continue
+		if state.victims.has(candidate.get_instance_id()) or state.exclude.has(candidate.get_rid()):
+			continue
+		var historical: Vector3 = lag_rewind.position_at(candidate.get_instance_id(),tick)
+		if not historical.is_finite():
+			continue
+		if state.diagonal:
+			var offset: Vector3 = historical-actor.global_position
+			offset.y = 0.0
+			if offset.length() > state.reach+0.45:
+				continue
+			var angle := atan2(offset.dot(right),offset.dot(forward))
+			if angle < low or angle > high:
+				continue
+		elif not lag_rewind.segment_hits(candidate.get_instance_id(),tick,base,tip,radius):
+			continue
+		var contact: Vector3 = historical+Vector3.UP*1.1
+		_melee_sight_query.from = actor.global_position + Vector3(0, 1.1, 0)
+		_melee_sight_query.to = contact
+		_melee_sight_query.exclude = state.exclude
+		if not space.intersect_ray(_melee_sight_query).is_empty():
+			continue
+		state.exclude.append(candidate.get_rid())
+		_resolve_melee_contact(hand,state,candidate,contact,false)
+
 
 func _impact_force(state: Dictionary, at: Vector3, unit: Node3D) -> Vector3:
 	var style := str(state.get("variant", "overhead"))
@@ -786,14 +860,80 @@ func ability_strike(radius: float, arc_degrees: float, damage: float,
 		require_sight: bool = true, victims: Dictionary = {}) -> int:
 	if not is_instance_valid(actor):
 		return 0
-	return _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
+	var struck := _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
 		stagger_seconds,arc_degrees,ring,require_sight,victims)
+	struck += _lag_area_strike(actor.global_position+Vector3.UP*0.95,radius,damage,
+		stagger_seconds,arc_degrees,ring,require_sight,victims)
+	return struck
 
 ## A blast centred away from the caster (a fireball burst). Sight is ignored:
 ## the explosion owns the space it fills.
 func ability_blast(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float = 0.0) -> int:
-	return _ability_area(centre,radius,damage,stagger_seconds,360.0,true,false)
+	var struck := _ability_area(centre,radius,damage,stagger_seconds,360.0,true,false)
+	struck += _lag_area_strike(centre,radius,damage,stagger_seconds,360.0,true,false)
+	return struck
+
+
+## The same radial beat against the bodies as their owner last saw them.
+func _lag_area_strike(centre: Vector3, radius: float, damage: float,
+		stagger_seconds: float, arc_degrees: float, ring: bool,
+		require_sight: bool, victims: Dictionary = {}) -> int:
+	if lag_ticks <= 0 or not is_instance_valid(lag_rewind) or not damage_enabled:
+		return 0
+	if not is_instance_valid(actor) or actor.get("alive") == false or radius <= 0.0:
+		return 0
+	var tick := lag_tick - lag_ticks
+	var space := actor.get_world_3d().direct_space_state
+	var forward: Vector3 = aim_point-actor.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	var half := deg_to_rad(clampf(arc_degrees,0.0,360.0))*0.5
+	var struck := 0
+	for candidate in lag_rewind.candidates(tick):
+		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
+			continue
+		if candidate == actor or candidate.get("alive") != true:
+			continue
+		if victims.has(candidate.get_instance_id()) or candidate.get_rid() == actor.get_rid():
+			continue
+		var historical: Vector3 = lag_rewind.position_at(candidate.get_instance_id(),tick)
+		if not historical.is_finite():
+			continue
+		if not lag_rewind.sphere_hits(candidate.get_instance_id(),tick,centre,radius):
+			continue
+		if not ring and arc_degrees < 359.5:
+			var offset: Vector3 = historical-actor.global_position
+			offset.y = 0.0
+			if absf(atan2(offset.dot(right),offset.dot(forward))) > half:
+				continue
+		var contact: Vector3 = historical+Vector3.UP*0.95
+		if require_sight:
+			_melee_sight_query.from = actor.global_position+Vector3(0,1.1-0.45*rig._crouch_amount,0)
+			_melee_sight_query.to = contact
+			_melee_sight_query.exclude = [actor.get_rid()]
+			if not space.intersect_ray(_melee_sight_query).is_empty():
+				continue
+		victims[candidate.get_instance_id()] = true
+		var state := {
+			"active": true, "blocked": false, "weapon": rig.weapon,
+			"damage": damage, "diagonal": false, "reach": radius,
+			"victims": victims, "exclude": [actor.get_rid()],
+			"variant": "ability", "force_origin": centre,
+		}
+		_resolve_melee_contact("right",state,candidate,contact,false)
+		struck += 1
+		if stagger_seconds > 0.0:
+			var target_combat = candidate.get("combat")
+			if is_instance_valid(target_combat) and target_combat.has_method("stagger"):
+				target_combat.stagger(stagger_seconds)
+			elif candidate.has_method("stagger"):
+				candidate.stagger(stagger_seconds)
+	return struck
 
 
 func _ability_area(centre: Vector3, radius: float, damage: float,

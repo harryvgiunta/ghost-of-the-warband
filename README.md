@@ -181,6 +181,31 @@ The delve uses the same ENet transport. A delve host needs no lobby: the party f
 
 See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/firewall-ports).
 
+### Networking configuration
+
+There is no separate config file. The session hand-off lives in `scripts/session.gd` (default UDP **7777**), the remembered player name, address, port and join mode in `scripts/net_cache.gd` (`user://net_cache.json`), and each mode creates its own `ENetMultiplayerPeer`: the open world in `main.gd` (`world-host`/`world-join`, host + 3 peers), the arena in `arena.gd` (4 fighters), the delve in `delve.gd`. Fighters snapshot at **20 Hz**, frontier mobs at **15 Hz**, and a whole delve wave shares one tick across as many datagrams as it needs.
+
+Every packet is clamped by `scripts/net_limits.gd`: **1200-byte `MTU`**, a **1100-byte payload budget** after the RPC/ENet envelope. Godot exposes no MTU setting on `ENetMultiplayerPeer` (and `SceneMultiplayer.max_sync_packet_size` only governs `MultiplayerSynchronizer`, which this project does not use), so the clamp is applied where payloads are built — multi-body batches are sized by encoded bytes rather than a fixed body count, and the fighter snapshot's animation, cover and ability blocks travel as value arrays instead of keyed dictionaries. A maximal-name fighter snapshot measures **~1.07 KB**, the heaviest mob or clone **~0.6 KB**, and a 30-body delve wave splits into 4 datagrams. `tests/net_limits_regression.gd` fails if any of them crosses the budget.
+
+### Prediction, reconciliation and lag compensation
+
+Movement is **client-side predicted and server reconciled** (`scripts/net_replication.gd`, `scripts/lag_compensation.gd`). The peer that owns a ranger integrates its own movement frame immediately — the same `_resolve_motion`/`_integrate` pair the host runs — and records every frame in a bounded ring buffer. Each intent carries its frame number, the server tick the peer was drawing, and the previous three frames, so a dropped datagram cannot leave the host permanently short of that peer's travel. The host queues the frames and simulates exactly one per tick, draining any backlog in the same tick; a tick that brought no frame holds the pose instead of repeating the last intent, because a repeated intent walks the authority ahead of the frames that own the body and every invented frame comes back as a correction. It then acknowledges the newest consumed frame with the pose that frame produced.
+
+The owner compares its own recorded pose for the following frame. Agreement within a couple of frames of its own travel — the steady state, since the authority names a tick and a tick either side of the peer's frame is legitimate — moves nothing. A larger disagreement is applied as a **displacement**: the authority's pose minus the pose this peer recorded for the same instant, added to the present body, with the unacknowledged ring dropped. It is not re-simulated frame by frame: replaying from the authoritative pose cannot reproduce a path the local simulation produced through collisions and slopes the replay never met, and every mismatch came back as a pop of the whole window. Nothing here calls `move_and_slide()` — outside the physics frame it integrates against the idle frame's delta, which is what launched bodies across the map — and the correction is applied inside the physics frame rather than in the RPC callback. A body a peer's frames drive also **holds** its pose on a tick that brought no frame (repeating the last intent walked it ahead of the frames that own it), and each movement packet repeats the previous three frames so a lost datagram cannot leave the host permanently short of that travel.
+
+What the player sees is separated from that: the model is drawn at its previous pose and moved toward the corrected one at most 0.35 m a frame, so a correction reads as the character stepping into place. The third-person boom zooms toward its collision-resolved length at 18 m/s in and 5 m/s out instead of adopting it, because snapping it in whenever a trunk crossed the line and back out when it cleared shook the whole view. Under a simulated 80 ms ± 15 ms link with a mob on the ranger, the model moves at most 0.17–0.35 m a frame, the boom at most 1.5 m, and the body (which takes the authority's verdict at once) at most ~1.4 m.
+
+Everyone else is drawn **in the past**: a fighter, mob, devil or clone keeps a short buffer of server states and renders a delay behind the newest one, interpolating between two known poses and dead-reckoning along the last velocity when a packet drops. The playout clock is nudged toward its delay target (widening the delay when arrivals are irregular) rather than snapped, so a late packet slows the body for a moment instead of teleporting it; only a genuine discontinuity — a revive, a backstab blink, a scene hand-off — restarts the buffer. Mobs derive a velocity from their own sample spacing when the wire carries none, so a stream without velocities still extrapolates.
+
+Localhost hides all of this: at 0.1 ms the past and the present are the same frame, so broken prediction, interpolation and rewind look correct. `--net-lag <ms>` with `--net-jitter <ms>` turns on `NetReplication.LagQueue`, which holds every high-frequency stream (`_world_move`, `_world_action`, `_world_seat`, `_world_mobs`) for that long before applying it. `--net-diag` prints one `NET_DIAG` line a second — role, slot, corrections, drift, the worst model and boom step of that second, unacknowledged frames — so a report from a real match carries numbers. Pass the flags to both peers:
+
+```
+Play.cmd res://main.tscn -- --world-host --world-port 7777 --world-name "you" --net-lag 80 --net-jitter 15
+Play.cmd res://main.tscn -- --world-join 100.101.102.103 --world-port 7777 --net-lag 80 --net-jitter 15
+```
+
+Strikes are judged against the world the client saw. The host records one second of every damageable body's real capsule, and an action that arrives with its owner's view tick is resolved first against the present world and then against that history: a body that stepped out of the cut still takes the blow it saw land, and a precision contact the shooter's own frame cannot explain is refused. Projectiles carry the shooter's view lag and check it at impact, so a shaft only stops on a body that was under it on the shooter's screen. `tests/net_prediction_regression.gd` drives the real primitives and two real ENet processes; `tests/world_network_regression.gd` checks the open-world client predicts and is acknowledged.
+
 ## Controls
 
 | Control | Action |
@@ -620,6 +645,8 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/delve_entry_regression.gd
 & $Godot --headless --path . --script res://tests/delve_network_regression.gd
 & $Godot --headless --path . --script res://tests/world_network_regression.gd
+& $Godot --headless --path . --script res://tests/net_prediction_regression.gd
+& $Godot --headless --path . --script res://tests/open_world_combat_regression.gd
 & $Godot --headless --path . --script res://tests/open_world_delve_regression.gd
 & $Godot --headless --path . --script res://tests/ranger_clone_regression.gd
 & $Godot --headless --path . --script res://tests/consumable_regression.gd

@@ -6,6 +6,7 @@ extends SceneTree
 const Actor = preload("res://scripts/arena_actor.gd")
 const Archer = preload("res://scripts/archer.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilityRunner = preload("res://scripts/ability_runner.gd")
 const Audio = preload("res://scripts/range_audio.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -157,7 +158,7 @@ func run() -> void:
 	check(bool(host.try_ability(0).get("ok",false)), "The greatsword starts its spin")
 	var packed: Dictionary = host.snapshot()
 	check(packed.has("stamina") and packed.has("ability"), "Snapshots carry stamina and ability state")
-	check(int(packed.ability.get("ability",-1)) == AbilityRules.index_of("spin_slash"), "Snapshots carry the ability index")
+	check(int(AbilityRunner.unpack_snapshot(packed.ability).get("ability",-1)) == AbilityRules.index_of("spin_slash"), "Snapshots carry the ability index")
 	check(JSON.stringify(packed).to_utf8_buffer().size() < 1100, "The fighter snapshot stays below the ENet MTU budget")
 	var replica = Actor.new()
 	replica.slot = 1

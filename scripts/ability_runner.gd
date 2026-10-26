@@ -243,6 +243,25 @@ func hud_state(slot: int = 0) -> Dictionary:
 	}
 
 
+## Wire order of the replicated ability state; values only, no key strings.
+const SNAPSHOT_KEYS := ["active","slot","ability","time","duration","cooldowns","heading"]
+
+func pack_snapshot() -> Array:
+	# Same values snapshot() builds (the ability index is computed, not a
+	# property), so the packed array cannot drift from the dictionary.
+	var state := snapshot()
+	var packed: Array = []
+	packed.resize(SNAPSHOT_KEYS.size())
+	for index in SNAPSHOT_KEYS.size():
+		packed[index] = state.get(SNAPSHOT_KEYS[index])
+	return packed
+
+static func unpack_snapshot(packed: Array) -> Dictionary:
+	var state := {}
+	for index in mini(SNAPSHOT_KEYS.size(),packed.size()):
+		state[SNAPSHOT_KEYS[index]] = packed[index]
+	return state
+
 func snapshot() -> Dictionary:
 	var index := AbilityRules.index_of(active_id) if active else -1
 	return {
@@ -252,10 +271,15 @@ func snapshot() -> Dictionary:
 		"time": elapsed,
 		"duration": duration,
 		"cooldowns": Array(cooldowns),
+		# The committed heading is what lets a predicting peer integrate the
+		# same dash instead of being dragged along by corrections.
+		"heading": direction,
 	}
 
 
-func apply_snapshot(state: Dictionary) -> void:
+func apply_snapshot(state: Variant) -> void:
+	if typeof(state) == TYPE_ARRAY:
+		state = unpack_snapshot(state)
 	active = bool(state.get("active", false))
 	active_slot = int(state.get("slot", -1))
 	active_id = ""
@@ -267,6 +291,16 @@ func apply_snapshot(state: Dictionary) -> void:
 			active_id = str(active_definition.get("id", ""))
 	elapsed = float(state.get("time", 0.0))
 	duration = float(state.get("duration", 0.0))
+	if active and not active_definition.is_empty():
+		# Rebuild the travel window a replica never computed itself: the same
+		# speed, distance window and heading the authority is integrating.
+		travel_seconds = clampf(float(active_definition.get("travel_seconds", duration)), 0.0, duration)
+		speed = base_speed * maxf(float(active_definition.get("speed_scale", 0.0)), 0.0)
+		var heading: Variant = state.get("heading", null)
+		if typeof(heading) == TYPE_VECTOR3 and Vector3(heading).length_squared() > 0.000001:
+			var flat := Vector3(heading.x, 0.0, heading.z)
+			if flat.length_squared() > 0.000001:
+				direction = flat.normalized()
 	# A replica must not replay cues the host already fired before the first
 	# snapshot of this activation arrived.
 	_cue_index = 0

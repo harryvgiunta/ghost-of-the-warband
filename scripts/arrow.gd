@@ -19,6 +19,10 @@ var shooter: Node3D
 var hit_mask := 1 | 2
 var authoritative_damage := true
 var pierce := 0
+## Backward reconciliation for a shaft a client released: how far behind the
+## host that peer was drawing, and the history to rewind targets to.
+var lag_comp = null
+var lag_ticks := 0
 var _query := PhysicsRayQueryParameters3D.new()
 var _exclude: Array[RID] = []
 var _pierced: Dictionary = {}
@@ -58,10 +62,24 @@ func _physics_process(delta: float) -> void:
 		return
 	var next := global_position + velocity * delta + GRAVITY * (0.5 * delta * delta)
 	velocity += GRAVITY * delta
-	_query.from = global_position
+	var from := global_position
+	_query.from = from
 	_query.to = next
 	# Sweep the physical arrow tip against terrain, props and enemy bodies.
 	var hit := get_world_3d().direct_space_state.intersect_ray(_query)
+	if not hit.is_empty() and authoritative_damage and lag_comp != null and lag_ticks > 0:
+		# The impact is judged against the body the shooter saw, not the body
+		# that has moved on since. A shaft their screen showed missing passes
+		# through here and keeps flying.
+		if lag_comp.refuses(int(hit.collider_id),lag_comp.latest_tick() - lag_ticks,
+				from,next,0.02):
+			global_position = next
+			look_at(global_position + velocity, Vector3.UP)
+			_place_visual()
+			return
+	if hit.is_empty() and authoritative_damage and lag_comp != null and lag_ticks > 0:
+		if _lag_historical_hit(from,next):
+			return
 	if not hit.is_empty():
 		global_position = hit.position
 		var collider: Object = hit.collider
@@ -122,6 +140,35 @@ func _physics_process(delta: float) -> void:
 	_place_visual()
 	if age > 8.0 or global_position.y < -30.0:
 		queue_free()
+
+## A body the shooter's frame put under this swept shaft, resolved now. The
+## first such body takes the impact exactly like a present-time hit would.
+func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
+	var tick: int = lag_comp.latest_tick() - lag_ticks
+	for candidate in lag_comp.candidates(tick):
+		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
+			continue
+		if candidate.get("alive") != true or candidate.has_meta("ironwood_player"):
+			continue
+		if _exclude.has(candidate.get_rid()) \
+				or not lag_comp.segment_hits(candidate.get_instance_id(),tick,from,to,0.02):
+			continue
+		var point: Vector3 = lag_comp.position_at(candidate.get_instance_id(),tick)
+		if not point.is_finite():
+			continue
+		global_position = to
+		flying = false
+		visible = false
+		if authoritative_damage:
+			var headshot := Hitbox.is_headshot(candidate,point+Vector3.UP*1.1)
+			_note_attacker(candidate)
+			_note_impact(candidate)
+			candidate.take_damage(damage,source_id,headshot)
+			BloodFx.impact(self,point,velocity,damage,headshot)
+		impacted.emit(true,point)
+		return true
+	return false
+
 
 ## Hands the shooter to a mob that implements `note_attacker` before the blow
 ## lands. Bodies that do not care (arena fighters, the player) are untouched.

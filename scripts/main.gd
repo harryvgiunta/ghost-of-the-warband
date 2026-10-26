@@ -33,6 +33,8 @@ const Seat = preload("res://scripts/arena_actor.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
+const LagCompensation = preload("res://scripts/lag_compensation.gd")
 const WALK_SPEED := 5.5
 const SPRINT_SPEED := 8.5
 ## A backstab needs a live body under the crosshair: frontier enemies sit on
@@ -45,6 +47,8 @@ const MAX_HEALTH := 100.0
 const WORLD_SEATS := 4
 const NET_TICK := 0.05
 const ENEMY_TICK := 0.0667
+## The longest rewind the host performs for one client action: half a second.
+const MAX_LAG_TICKS := 30
 const ENEMY_RELEVANCE := 70.0
 # Deterministic frontier drops: every entry is a real PlayerState item id and the
 # first eight cover all eight equipment categories the paperdoll understands.
@@ -69,6 +73,19 @@ var _world_join := ""
 var _world_port := 7777
 var _world_address := "127.0.0.1"
 var _world_name := ""
+## One-way simulated link delay and its spread, in seconds (see `LagQueue`).
+var _link_lag := 0.0
+var _link_jitter := 0.0
+## `--net-diag` prints one line a second of what the netcode is doing, so a
+## report from a real match carries numbers instead of "it feels jittery".
+var _net_diag := false
+var _diag_elapsed := 0.0
+var _diag_corrections := 0
+var _diag_rig_step := 0.0
+var _diag_boom_step := 0.0
+var _diag_drift := 0.0
+var _diag_previous_rig := Vector3.INF
+var _diag_previous_boom := -1.0
 var network_role := "offline"
 var local_slot := -1
 var server_tick := 0
@@ -79,6 +96,14 @@ var _seats: Dictionary = {}
 var _seat_list: Array = []
 var _enemies_by_index: Array = []
 var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
+## The server tick this client draws the world at, learned from arrivals.
+var _clock = NetReplication.NetClock.new()
+## One second of mob poses so a client's swing resolves against its view.
+var _lag = LagCompensation.new()
+## Simulated link quality for QC (`--net-lag`, `--net-jitter`): the
+## high-frequency streams are held this long before they are applied. Disabled
+## unless the flags are passed, and then each handler costs one comparison.
+var _link = NetReplication.LagQueue.new()
 var _join_elapsed := 0.0
 var _send_elapsed := 0.0
 var _enemy_elapsed := 0.0
@@ -139,6 +164,16 @@ var inspecting := false
 var camera_yaw := 0.22
 var camera_pitch := 0.08
 var camera_distance := 4.5
+## How fast the third-person boom may shorten and lengthen, in metres per
+## second. A resolved collision shortens the boom instantly; zooming it at a
+## bounded speed keeps a passing trunk from shaking the whole view.
+const CAMERA_BOOM_IN := 18.0
+const CAMERA_BOOM_OUT := 5.0
+## The boom length actually used. The camera collision resolves a shorter boom
+## the instant scenery crosses the line behind the ranger, but snapping it back
+## out the moment that scenery clears reads as the whole view jumping; it eases
+## out instead. -1 means "no previous frame, take the resolved length".
+var _camera_boom := -1.0
 var camera_focus := Vector3.ZERO
 var _camera_ready := false
 var _orbiting := false
@@ -326,6 +361,12 @@ func _read_arguments() -> void:
 			_world_name = str(args[index + 1]).strip_edges()
 		elif argument == "--world-join" and index + 1 < args.size():
 			_world_join = str(args[index + 1]).strip_edges()
+		elif argument == "--net-lag" and index + 1 < args.size():
+			_link_lag = maxf(0.0,float(args[index + 1].to_float())/1000.0)
+		elif argument == "--net-jitter" and index + 1 < args.size():
+			_link_jitter = maxf(0.0,float(args[index + 1].to_float())/1000.0)
+		elif argument == "--net-diag":
+			_net_diag = true
 
 
 func _build_world_ui() -> void:
@@ -496,6 +537,10 @@ func _drop_field_loot(item_id: String) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _link.held > 0:
+		_link.release(Time.get_ticks_msec()/1000.0)
+	if _net_diag:
+		_diag_step(delta)
 	if network_role == "client":
 		_client_step(delta)
 		return
@@ -614,6 +659,34 @@ func _physics_process(delta: float) -> void:
 	if network_role == "host":
 		_host_network_step(delta)
 
+## One line a second: the numbers that decide whether a session feels smooth.
+func _diag_step(delta: float) -> void:
+	var seat = _seats.get(_local_seat_id())
+	if seat == null or not is_instance_valid(seat):
+		return
+	var boom: float = camera.global_position.distance_to(camera_focus)
+	if seat.prediction_corrections != _diag_corrections:
+		_diag_corrections = seat.prediction_corrections
+		_diag_drift = maxf(_diag_drift,seat.prediction_drift)
+	if _diag_previous_rig != Vector3.INF:
+		_diag_rig_step = maxf(_diag_rig_step,seat.rig.global_position.distance_to(_diag_previous_rig))
+		if _diag_previous_boom >= 0.0:
+			_diag_boom_step = maxf(_diag_boom_step,absf(boom-_diag_previous_boom))
+	_diag_previous_rig = seat.rig.global_position
+	_diag_previous_boom = boom
+	_diag_elapsed += delta
+	if _diag_elapsed < 1.0:
+		return
+	print("NET_DIAG role=%s slot=%d predicting=%s corrections=%d drift=%.2f rig_step=%.2f boom_step=%.2f unacked=%d held=%d health=%.0f" % [
+		network_role,_local_seat_id(),str(seat.prediction_active()),seat.prediction_corrections,
+		_diag_drift,_diag_rig_step,_diag_boom_step,
+		seat._prediction.next_seq-int(seat._prediction.acked),_link.held,health])
+	_diag_elapsed = 0.0
+	_diag_rig_step = 0.0
+	_diag_boom_step = 0.0
+	_diag_drift = 0.0
+
+
 func _process(delta: float) -> void:
 	shoulder_camera.update(delta)
 	_update_camera(delta)
@@ -638,7 +711,21 @@ func _update_camera(delta: float) -> void:
 	var factor := 1.0 if not _camera_ready else 1.0 - exp(-delta * 10.0)
 	camera_focus = camera_focus.lerp(desired_focus, factor)
 	var back := Vector3(sin(camera_yaw) * cos(camera_pitch), sin(camera_pitch), cos(camera_yaw) * cos(camera_pitch))
-	camera.global_position = shoulder_camera.resolve(get_world_3d().direct_space_state,camera_focus,back,camera_distance,inspecting)
+	var resolved := shoulder_camera.resolve(get_world_3d().direct_space_state,camera_focus,back,camera_distance,inspecting)
+	var reach := resolved-camera_focus
+	var allowed := reach.length()
+	if _camera_boom < 0.0:
+		_camera_boom = allowed
+	elif allowed < 0.0001:
+		_camera_boom = allowed
+	else:
+		# Both directions are zoomed at a bounded speed: a boom that snapped in
+		# whenever a trunk crossed the line and popped back out when it cleared
+		# read as the whole view shaking, which is worse than a frame of
+		# see-through on a thin trunk. Pulling in is much faster than easing out.
+		var speed := CAMERA_BOOM_IN if allowed < _camera_boom else CAMERA_BOOM_OUT
+		_camera_boom = move_toward(_camera_boom,allowed,speed*maxf(delta,0.0))
+	camera.global_position = camera_focus + reach.normalized()*_camera_boom
 	if inspecting:
 		if camera.global_position.distance_squared_to(camera_focus) > 0.01:
 			camera.look_at(camera_focus)
@@ -1827,6 +1914,7 @@ func _award_gold(amount: int) -> void:
 ## seats, mobs and projectiles. Each peer keeps its own PlayerState save.
 
 func _setup_network() -> void:
+	_link.configure(_link_lag,_link_jitter)
 	multiplayer.peer_connected.connect(_peer_connected)
 	multiplayer.peer_disconnected.connect(_peer_disconnected)
 	multiplayer.connected_to_server.connect(_connected)
@@ -1930,6 +2018,7 @@ func _close_network() -> void:
 	for slot in _seats.keys():
 		var seat = _seats[slot]
 		if is_instance_valid(seat):
+			seat.predicting = false
 			seat.queue_free()
 	_seats.clear()
 	_seat_list.clear()
@@ -1937,6 +2026,9 @@ func _close_network() -> void:
 	server_tick = 0
 	_send_elapsed = 0.0
 	_enemy_elapsed = 0.0
+	_clock.clear()
+	_lag.clear()
+	_link.clear()
 	_update_session_line()
 
 
@@ -1951,6 +2043,7 @@ func _restore_anchor(at: Vector3) -> void:
 	_local_anchor_swapped = false
 	_anchor_player.visible = true
 	_anchor_player.process_mode = Node.PROCESS_MODE_INHERIT
+	_camera_boom = -1.0
 	_anchor_player.global_position = at + Vector3(0,0.25,0)
 	_anchor_player.velocity = Vector3.ZERO
 	_anchor_player.collision_layer = 4
@@ -2014,6 +2107,7 @@ func _create_seat(slot: int, peer_id: int, authoritative: bool, seat_name: Strin
 	seat.collision_mask = 1 | 2
 	seat.combat.target_mask = 2
 	seat.combat.damage_enabled = authoritative
+	seat.combat.lag_rewind = _lag
 	_bind_ability_cues(seat.ability)
 	_seats[slot] = seat
 	_rebuild_seat_list()
@@ -2081,6 +2175,7 @@ func _world_accept(slot: int) -> void:
 	if not _seats.has(slot) or not is_instance_valid(_seats[slot]):
 		_create_seat(slot,0,false,_player_name)
 	_seats[slot].interp_delay = 0.05
+	_clock.configure(60.0,0.12)
 	_bind_local_seat()
 	hud.show_feedback("Joined the open world.",3.0)
 	print("WORLD_CLIENT_READY slot=",slot)
@@ -2090,7 +2185,7 @@ func _world_accept(slot: int) -> void:
 func _world_register(player_name: String, loadout: Dictionary) -> void:
 	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if not _peer_slots.has(sender):
 		return
 	var slot := int(_peer_slots[sender])
@@ -2112,6 +2207,7 @@ func _bind_local_seat() -> void:
 	cover = seat.cover
 	ability = seat.ability
 	seat.is_local = true
+	seat.predicting = true
 	_local_anchor_swapped = true
 	# The client still owns its own saved kit; the seat's copies of it drive the
 	# bar maxima while every hit, charge and kill stays host-authoritative.
@@ -2136,6 +2232,7 @@ func _bind_local_seat() -> void:
 	_refresh_backpack()
 	camera_focus = seat.global_position + Vector3.UP * 1.05
 	_camera_ready = false
+	_camera_boom = -1.0
 
 
 func _update_session_line() -> void:
@@ -2172,6 +2269,15 @@ func _local_seat_id() -> int:
 	return local_slot if local_slot >= 0 else 0
 
 
+## The peer whose RPC is in flight, or -1 once this node has left the tree: a
+## scene hand-off can deliver one last intent to a session that is already gone.
+func _sender_id() -> int:
+	var api := multiplayer
+	if api == null:
+		return -1
+	return api.get_remote_sender_id()
+
+
 func _safe_player_name(value: String) -> String:
 	var clean := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
 	return "Ranger" if clean.is_empty() else clean
@@ -2204,10 +2310,6 @@ func _client_step(delta: float) -> void:
 		return
 	if player.position.y < -25.0:
 		send_action("respawn")
-	_send_elapsed += delta
-	if _send_elapsed < NET_TICK:
-		return
-	_send_elapsed = fmod(_send_elapsed,NET_TICK)
 	update_crosshair_aim()
 	var left := float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT))
 	var right_key := float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT))
@@ -2222,7 +2324,19 @@ func _client_step(delta: float) -> void:
 	var camera_back := Vector2(sin(camera_yaw),cos(camera_yaw))
 	var direction := camera_right * motion.x + camera_back * motion.y
 	var running: bool = Input.is_physical_key_pressed(KEY_SHIFT) and not _ui_open() and not hud.map_open
-	_world_move.rpc_id(1,direction,running,_client_aim,_snapshot_ticks[local_slot],_client_aim_origin if _client_aim_origin_valid else null)
+	# Prediction: this frame is integrated here and sent as its own frame, so the
+	# host repeats exactly the intent the player is acting on rather than a
+	# 20 Hz sample of it. The acknowledgement comes back on the next snapshot.
+	_clock.advance(delta)
+	var seat = _seats.get(local_slot)
+	if seat == null or not is_instance_valid(seat):
+		return
+	var view := _view_tick()
+	seat.update_input(direction,running,view)
+	seat.predicted_step(delta,_seat_list)
+	_world_move.rpc_id(1,direction,running,_client_aim,_snapshot_ticks[local_slot],
+		_client_aim_origin if _client_aim_origin_valid else null,seat.latest_prediction_seq(),view,
+		seat.input_history())
 
 
 func _host_network_step(delta: float) -> void:
@@ -2238,8 +2352,12 @@ func _host_network_step(delta: float) -> void:
 			enemy.targets = bodies
 	for seat in _seat_list.duplicate():
 		if is_instance_valid(seat):
+			seat.combat.lag_tick = server_tick
 			seat.step(delta,_seat_list,server_tick)
 			_rescue_seat_from_hatch(seat)
+	# One second of mob poses, recorded before any client intent this tick can
+	# be resolved against them.
+	_lag.record(server_tick,_enemies_by_index)
 	_send_elapsed += delta
 	if _send_elapsed >= NET_TICK:
 		_send_elapsed = fmod(_send_elapsed,NET_TICK)
@@ -2275,7 +2393,7 @@ func _send_seat_snapshots() -> void:
 
 
 func _local_seat_snapshot() -> Dictionary:
-	return {"slot":0,"peer":1,"bot":false,"name":_player_name,
+	return {"slot":0,"peer":1,
 		"position":player.global_position,"velocity":player.velocity,
 		"health":health,"maxh":max_health,"ward":ward_seconds,
 		"alive":health > 0.0,"kills":kills,"deaths":respawns,"respawn":0.0,
@@ -2283,21 +2401,32 @@ func _local_seat_snapshot() -> Dictionary:
 		"armor":archer.armor_bits() | (ArmorData.SHIELD_BIT if archer.shield_equipped else 0),
 		"sword":archer.sword_index,"weapon":archer.weapon,
 		"gear":Seat.gear_bits_for(archer),"weapon_blood":0.0,
-		"stamina":stamina,"ability":ability.snapshot(),
-		"animation":archer.get_animation_state(),"progress":combat.attack_progress,
-		"movement":combat.movement_mode,"interval":combat.get_attack_interval(),
-		"aim":combat.aim_point,"grounded":player.is_on_floor(),"cover":cover.snapshot()}
+		"stamina":stamina,"ability":ability.pack_snapshot(),
+		"animation":archer.pack_animation_state(archer.get_animation_state()),"progress":combat.attack_progress,
+		"movement":combat.movement_mode,
+		"aim":combat.aim_point,"grounded":player.is_on_floor(),"cover":cover.pack_snapshot()}
 
 
 @rpc("authority","call_remote","unreliable")
 func _world_seat(tick: int, slot: int, state: Dictionary) -> void:
-	if network_role != "client" or slot < 0 or slot >= WORLD_SEATS or tick <= _snapshot_ticks[slot]:
+	if network_role != "client" or slot < 0 or slot >= WORLD_SEATS:
+		return
+	if _link.active():
+		_link.defer(func(): _apply_world_seat(tick,slot,state))
+		return
+	_apply_world_seat(tick,slot,state)
+
+
+func _apply_world_seat(tick: int, slot: int, state: Dictionary) -> void:
+	if tick <= _snapshot_ticks[slot]:
 		return
 	_snapshot_ticks[slot] = tick
 	var seat = _seats.get(slot)
 	if seat == null or not is_instance_valid(seat):
 		return
-	seat.apply_snapshot(state)
+	if slot == local_slot:
+		_clock.ingest(tick,Time.get_ticks_msec()/1000.0)
+	seat.apply_snapshot(state,tick,_seat_list)
 	if slot != local_slot:
 		return
 	if seat.health < health - 0.01:
@@ -2317,46 +2446,96 @@ func _world_seat(tick: int, slot: int, state: Dictionary) -> void:
 
 
 @rpc("any_peer","call_remote","unreliable_ordered")
-func _world_move(direction: Vector2, running: bool, aim: Vector3, aim_tick: Variant, aim_origin: Variant = null) -> void:
-	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
+func _world_move(direction: Vector2, running: bool, aim: Variant, aim_tick: Variant, aim_origin: Variant = null, seq: Variant = -1, view: Variant = -1, history: Array = []) -> void:
+	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if not _peer_slots.has(sender):
 		return
 	var slot := int(_peer_slots[sender])
+	if _link.active():
+		_link.defer(func(): _apply_world_move(slot,direction,running,aim,aim_tick,aim_origin,seq,view,history))
+		return
+	_apply_world_move(slot,direction,running,aim,aim_tick,aim_origin,seq,view,history)
+
+
+func _apply_world_move(slot: int, direction: Vector2, running: bool, aim: Variant,
+		aim_tick: Variant, aim_origin: Variant, seq: Variant, view: Variant,
+		history: Array = []) -> void:
 	var seat = _seats.get(slot)
 	if seat == null or not is_instance_valid(seat):
 		return
-	if not direction.is_finite() or not _set_seat_aim(slot,aim,int(aim_tick),aim_origin):
+	if not direction.is_finite():
 		return
-	seat.move_direction = direction.limit_length()
-	seat.run_requested = running
-	seat.input_age = 0.0
+	# A frame without an aim sample still drives movement; only an aim that
+	# fails validation leaves the previous point in place.
+	if typeof(aim) == TYPE_VECTOR3 and typeof(aim_tick) == TYPE_INT \
+			and not _set_seat_aim(slot,aim,int(aim_tick),aim_origin):
+		return
+	seat.accept_network_input(direction,running,
+		int(seq) if typeof(seq) == TYPE_INT else -1,
+		int(view) if typeof(view) == TYPE_INT else -1,
+		history if typeof(history) == TYPE_ARRAY else [])
 
 
 func send_action(action: String, value: Variant = null) -> void:
 	if not _client():
 		return
+	# Locomotion intents start on this frame; combat, kits and skills stay
+	# authoritative so a client never guesses its own hit.
+	var seat = _seats.get(local_slot)
+	if seat != null and is_instance_valid(seat):
+		seat.predict_action(action,value)
 	var origin: Variant = _client_aim_origin if _client_aim_origin_valid and action in ["draw","release","throw","throw_release","melee"] else null
 	_world_action.rpc_id(1,action,value,_snapshot_ticks[local_slot],origin)
+
+
+## The server tick this peer is currently drawing; its aim and swings are judged
+## against that world, not the present one.
+func _view_tick() -> int:
+	if _clock.newest_tick() >= 0:
+		return _clock.render_tick()
+	return maxi(0,_snapshot_ticks[local_slot])
+
+
+## Arms one seat's damage window with the rewind its owner needs.
+func _arm_seat_lag(seat) -> void:
+	seat.combat.lag_tick = server_tick
+	seat.combat.lag_ticks = int(seat.lag_ticks(server_tick,MAX_LAG_TICKS)) if int(seat.peer_id) > 1 else 0
+
+
+## How many ticks behind the host an archer was drawing when it released.
+func _shooter_lag(slot: int) -> int:
+	var seat = _seats.get(slot)
+	if seat == null or not is_instance_valid(seat) or int(seat.peer_id) <= 1:
+		return 0
+	return int(seat.lag_ticks(server_tick,MAX_LAG_TICKS))
 
 
 @rpc("any_peer","call_remote","reliable")
 func _world_action(action: String, value: Variant, aim_tick: Variant, aim_origin: Variant = null) -> void:
 	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if not _peer_slots.has(sender):
 		return
 	var slot := int(_peer_slots[sender])
+	if _link.active():
+		_link.defer(func(): _apply_world_action(slot,action,value,int(aim_tick),aim_origin))
+		return
+	_apply_world_action(slot,action,value,int(aim_tick),aim_origin)
+
+
+func _apply_world_action(slot: int, action: String, value: Variant, aim_tick: int,
+		aim_origin: Variant) -> void:
 	if action == "loadout":
 		var seat = _seats.get(slot)
 		if seat != null and is_instance_valid(seat) and typeof(value) == TYPE_DICTIONARY:
 			SeatLoadout.apply(seat.rig,value)
 		return
-	if int(aim_tick) > _snapshot_ticks[slot]:
+	if aim_tick > _snapshot_ticks[slot]:
 		return
-	_apply_seat_action(slot,action,value,int(aim_tick),aim_origin)
+	_apply_seat_action(slot,action,value,aim_tick,aim_origin)
 
 
 func _apply_seat_action(slot: int, action: String, value: Variant, aim_tick: int = -1, aim_origin: Variant = null) -> void:
@@ -2373,6 +2552,9 @@ func _apply_seat_action(slot: int, action: String, value: Variant, aim_tick: int
 		return
 	if not seat.alive:
 		return
+	# Every damage-capable intent carries the tick its owner was drawing, so the
+	# host can rewind the mobs that peer actually saw.
+	_arm_seat_lag(seat)
 	match action:
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_seat_aim(slot,value,aim_tick,aim_origin):
@@ -2559,14 +2741,22 @@ func _send_enemy_snapshots() -> void:
 		states.append(state)
 	# Byte-budgeted, not count-chunked: five busy mobs already encode past the
 	# clamped payload, so the packer decides how many ride in one datagram.
-	for batch in NetLimits.batches(states):
-		_world_mobs.rpc(batch)
+	for batch in NetLimits.batches(states,[server_tick]):
+		_world_mobs.rpc(server_tick,batch)
 
 
 @rpc("authority","call_remote","unreliable")
-func _world_mobs(states: Array) -> void:
+func _world_mobs(tick: int, states: Array) -> void:
 	if network_role != "client":
 		return
+	if _link.active():
+		_link.defer(func(): _apply_world_mobs(tick,states))
+		return
+	_apply_world_mobs(tick,states)
+
+
+func _apply_world_mobs(tick: int, states: Array) -> void:
+	_clock.ingest(tick,Time.get_ticks_msec()/1000.0)
 	for entry in states:
 		if typeof(entry) != TYPE_DICTIONARY:
 			continue
@@ -2575,7 +2765,7 @@ func _world_mobs(states: Array) -> void:
 			continue
 		var enemy = _enemies_by_index[index]
 		if is_instance_valid(enemy):
-			enemy.apply_snapshot(entry)
+			enemy.apply_snapshot(entry,tick)
 
 
 func _on_seat_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
@@ -2615,6 +2805,9 @@ func _shooter_for_slot(slot: int) -> Node3D:
 func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true, pierce_count: int = 0) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = source_slot
+	if authoritative and source_slot >= 0:
+		arrow.lag_comp = _lag
+		arrow.lag_ticks = _shooter_lag(source_slot)
 	# Mob tracers and client visuals are spawned with `authoritative = false`;
 	# their `slot` is not a ranger seat, so they never name a shooter.
 	arrow.shooter = _shooter_for_slot(source_slot) if authoritative else null
@@ -2636,6 +2829,9 @@ func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damag
 	thrown.weapon = weapon_name
 	thrown.weapon_index = weapon_index
 	thrown.source_id = source_slot
+	if authoritative and source_slot >= 0:
+		thrown.lag_comp = _lag
+		thrown.lag_ticks = _shooter_lag(source_slot)
 	thrown.shooter = _shooter_for_slot(source_slot)
 	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
 	thrown.authoritative_damage = authoritative

@@ -20,6 +20,12 @@ window/size/window_height_override=800
 window/stretch/mode="canvas_items"
 window/size/resizable=true
 
+[physics]
+; Every netcode tick is a physics tick on every machine: the peer's frame
+; numbering, the authority's acknowledgement and the interpolation delays are
+; all counted in these ticks, so a 144 Hz client and a 60 Hz host must agree.
+common/physics_ticks_per_second=60
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"

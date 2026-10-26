@@ -124,20 +124,24 @@ func run() -> void:
 	var state_a: Dictionary = host.snapshot()
 	state_a.position = Vector3(0,0,0)
 	state_a.velocity = Vector3(2,0,0)
-	replica.apply_snapshot(state_a)
+	replica.apply_snapshot(state_a,100)
 	await create_timer(0.06).timeout
 	var state_b: Dictionary = host.snapshot()
-	state_b.position = Vector3(2,0,0)
-	state_b.velocity = Vector3(2,0,0)
-	replica.apply_snapshot(state_b)
-	check(replica._states.size() >= 2,"The replica buffers more than the newest snapshot")
-	if replica._states.size() >= 2:
-		var t0: float = float(replica._states[0].time)
-		var t1: float = float(replica._states[-1].time)
-		var middle: Vector3 = replica._interpolate_position((t0+t1)*0.5)
-		check(middle.x > 0.6 and middle.x < 1.4,"Interpolation samples between received snapshots")
-		var extrapolated: Vector3 = replica._interpolate_position(t1+0.05)
-		check(extrapolated.x > 2.0 and extrapolated.x < 2.2,"Short extrapolation carries velocity without a jump")
+	# A real fighter's stride: 0.35 m over three ticks is a 7 m/s sprint, which
+	# the render buffer must interpolate rather than treat as a teleport.
+	state_b.position = Vector3(0.35,0,0)
+	state_b.velocity = Vector3(4,0,0)
+	replica.apply_snapshot(state_b,103)
+	check(replica._timeline.samples.size() >= 2,"The replica buffers more than the newest snapshot")
+	if replica._timeline.samples.size() >= 2:
+		var earliest: Dictionary = replica._timeline.samples[0]
+		var newest: Dictionary = replica._timeline.samples[-1]
+		replica._timeline.playout = (float(earliest.tick)+float(newest.tick))*0.5
+		var middle: Vector3 = replica._timeline.sample().pos
+		check(middle.x > 0.12 and middle.x < 0.24,"Interpolation samples between received snapshots")
+		replica._timeline.playout = float(newest.tick)+3.0
+		var extrapolated: Vector3 = replica._timeline.sample().pos
+		check(extrapolated.x > 0.35 and extrapolated.x < 0.65,"Short extrapolation carries velocity without a jump")
 	# Net cache round-trips the player's name and host endpoint.
 	var cache = NetCacheScript.new()
 	cache.save_path = "user://net_cache_regression.json"

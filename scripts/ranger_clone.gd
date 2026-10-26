@@ -18,6 +18,7 @@ signal struck(target, amount: float, position: Vector3, outcome)
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
@@ -83,6 +84,8 @@ var _move_intent := Vector3.ZERO
 var _move_speed := 0.0
 var _net_position := Vector3.ZERO
 var _received_pose := false
+## Buffered server states for the replica's delayed render (see `enemy.gd`).
+var _timeline = NetReplication.mob_timeline()
 var _death_handled := false
 var _body: Node3D
 var _collider: CollisionShape3D
@@ -535,7 +538,7 @@ func stagger(seconds: float) -> void:
 
 
 func snapshot() -> Dictionary:
-	var rig_state: Dictionary = rig.get_animation_state() if is_instance_valid(rig) else {}
+	var rig_state: Array = rig.pack_animation_state(rig.get_animation_state()) if is_instance_valid(rig) else []
 	if attack_mode == "direct":
 		return {"kind":KIND,"id":clone_id,"role":"ranger","pos":global_position,"yaw":rotation.y,
 			"state":state,"time":_state_time,"health":health,"alive":alive,
@@ -546,7 +549,7 @@ func snapshot() -> Dictionary:
 		"anim":rig_state}
 
 
-func apply_snapshot(snapshot_state: Dictionary) -> void:
+func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
 	authoritative = false
 	replica = true
 	auto_ai = false
@@ -555,10 +558,18 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	clone_id = int(snapshot_state.get("id",clone_id))
 	var next_position: Vector3 = snapshot_state.get("pos",snapshot_state.get("p",_net_position))
 	_net_position = next_position
-	if not had_pose or position.distance_squared_to(next_position) > 36.0:
+	var next_velocity: Vector3 = snapshot_state.get("v",velocity)
+	var yaw := float(snapshot_state.get("yaw",snapshot_state.get("y",rotation.y)))
+	var at := tick if tick >= 0 else _timeline.newest_tick() + 1
+	var now := Time.get_ticks_msec()/1000.0
+	if not had_pose:
+		_timeline.reset_to(next_position,next_velocity,yaw,at,now)
 		position = next_position
-	_received_pose = true
-	rotation.y = float(snapshot_state.get("yaw",snapshot_state.get("y",rotation.y)))
+		rotation.y = yaw
+		_received_pose = true
+	else:
+		_timeline.push(at,next_position,next_velocity,yaw,now)
+		rotation.y = _timeline.sample().yaw
 	velocity = snapshot_state.get("v",velocity)
 	max_health = float(snapshot_state.get("max_health",max_health))
 	health = float(snapshot_state.get("health",snapshot_state.get("h",health)))
@@ -568,7 +579,7 @@ func apply_snapshot(snapshot_state: Dictionary) -> void:
 	var weapon := str(snapshot_state.get("weapon",""))
 	if weapon in ["bow","sword","dagger"] and str(rig.weapon) != weapon:
 		rig.set_weapon(weapon)
-	if snapshot_state.has("anim") and typeof(snapshot_state.anim) == TYPE_DICTIONARY:
+	if snapshot_state.has("anim") and typeof(snapshot_state.anim) in [TYPE_DICTIONARY,TYPE_ARRAY]:
 		rig.apply_animation_state(snapshot_state.anim)
 	if had_pose and previous_health - health > 0.01:
 		BloodFx.wound(self,blood_rig(),get_aim_position(),previous_health - health,
@@ -583,7 +594,9 @@ func _process(delta: float) -> void:
 	if not replica or not alive or not _received_pose:
 		return
 	var before := position
-	position = position.lerp(_net_position,clampf(delta * 12.0,0.0,1.0))
+	_timeline.advance(delta)
+	var sample: Dictionary = _timeline.sample()
+	position = sample.pos
 	if is_instance_valid(rig):
 		rig.set_locomotion((position - before)/maxf(delta,0.0001),true)
 

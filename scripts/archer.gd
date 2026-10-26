@@ -1434,6 +1434,38 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 func set_ground_sampler(sampler: Callable) -> void:
 	_ground_sampler = sampler
 
+## Wire order of the replicated animation state. The snapshot carries the
+## values positionally: eighteen key strings cost more than the fields they
+## name, and one fighter datagram must stay inside the clamped payload.
+const ANIMATION_KEYS := ["phase","draw","charge_frozen","time","aim",
+	"release_draw","release_charge","release_raise","release_grip","release_contact",
+	"release_rotation","yaw","roll","slide","motion_time","locomotion_phase",
+	"air_time","landing"]
+## Position of "roll" in ANIMATION_KEYS, read per replica without a search.
+const ANIM_ROLL := 12
+
+func pack_animation_state(state: Dictionary) -> Array:
+	var packed: Array = []
+	packed.resize(ANIMATION_KEYS.size())
+	for index in ANIMATION_KEYS.size():
+		packed[index] = state.get(ANIMATION_KEYS[index])
+	return packed
+
+static func unpack_animation_state(packed: Array) -> Dictionary:
+	var state := {}
+	for index in mini(ANIMATION_KEYS.size(),packed.size()):
+		state[ANIMATION_KEYS[index]] = packed[index]
+	return state
+
+## The roll clock of a wire state or a local dictionary.
+static func animation_roll(state: Variant) -> float:
+	if typeof(state) == TYPE_ARRAY:
+		var packed: Array = state
+		return float(packed[ANIM_ROLL]) if packed.size() > ANIM_ROLL else -1.0
+	if typeof(state) == TYPE_DICTIONARY:
+		return float((state as Dictionary).get("roll",-1.0))
+	return -1.0
+
 func get_animation_state() -> Dictionary:
 	# Roll facing already travels in yaw; compact slide state also fits maximum-length names.
 	# Guard rides in the presentation phase instead of another payload field:
@@ -1470,7 +1502,11 @@ func get_animation_state() -> Dictionary:
 		"slide":Vector4(slide_progress,_slide_direction.x,_slide_direction.z,_slide_weight),
 		"motion_time":_motion_time,"locomotion_phase":_locomotion_phase,"air_time":_air_time,"landing":_landing_weight}
 
-func apply_animation_state(state: Dictionary) -> void:
+func apply_animation_state(state: Variant) -> void:
+	# The wire carries the packed values; local callers and tests hand in the
+	# dictionary get_animation_state() builds.
+	if typeof(state) == TYPE_ARRAY:
+		state = unpack_animation_state(state)
 	var replicated_phase := str(state.phase)
 	var guard_phase := replicated_phase == "GUARD"
 	var step_phase := replicated_phase == "STEP"
@@ -1481,11 +1517,13 @@ func apply_animation_state(state: Dictionary) -> void:
 		var incoming_left: String = MELEE_VARIANTS[packed & 3]
 		if incoming_left != _left_variant:
 			_swing_start_valid[0] = false
+			_swing_stance_valid = false
 		_left_variant = incoming_left
 		_left_melee_duration = _duration_for("left",_left_variant)
 		var elapsed_code := packed >> 2
 		if _left_melee_time < 0.0 or (elapsed_code > 0 and float(elapsed_code-1)/1000.0 < _left_melee_time-0.02):
 			_swing_start_valid[0] = false
+			_swing_stance_valid = false
 		if replicated_phase == "MELEE_L":
 			_left_melee_time = float(state.time)
 			_right_melee_time = -1.0
@@ -1499,6 +1537,7 @@ func apply_animation_state(state: Dictionary) -> void:
 				incoming_variant = "stab"
 			if _right_melee_time < 0.0 or incoming_variant != _right_variant or float(state.time) < _right_melee_time-0.02:
 				_swing_start_valid[1] = false
+				_swing_stance_valid = false
 			_right_variant = incoming_variant
 			_right_melee_duration = _duration_for("right",_right_variant)
 			_right_melee_time = float(state.time)
@@ -1538,6 +1577,7 @@ func apply_animation_state(state: Dictionary) -> void:
 	else:
 		_left_melee_time = -1.0
 		_right_melee_time = -1.0
+		_swing_stance_valid = false
 		phase = "READY" if guard_phase or step_phase else replicated_phase
 		_melee_hand = "right"
 		_phase_time = 0.0 if guard_phase or step_phase else float(state.time)

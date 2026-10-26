@@ -12,6 +12,7 @@ const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const DevilVisual = preload("res://scripts/cinder_devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
@@ -35,6 +36,10 @@ var devil_weapon := "claw"
 var player: CharacterBody3D
 var targets: Array[CharacterBody3D] = []
 var replica := false
+## Buffered server states: a replica renders a short delay behind the host so
+## uneven packets read as motion, and dead-reckons when the buffer runs dry.
+var _timeline = NetReplication.mob_timeline()
+var _received_pose := false
 var safe_center := Vector3.ZERO
 var health := 38.0
 var max_health := 38.0
@@ -746,6 +751,33 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	_senses.notice(attacker,at)
 
+## Feeds one authoritative pose into the render buffer. The first packet and
+## any teleport restart the buffer; everything else interpolates.
+func _ingest_pose(state: Dictionary, tick: int) -> void:
+	var point: Vector3 = state.p
+	var yaw := float(state.y)
+	var speed: Vector3 = state.v
+	var at := tick if tick >= 0 else _timeline.newest_tick() + 1
+	var now := Time.get_ticks_msec()/1000.0
+	if not _received_pose:
+		_timeline.reset_to(point,speed,yaw,at,now)
+		global_position = point
+		rotation.y = yaw
+		_received_pose = true
+		return
+	_timeline.push(at,point,speed,yaw,now)
+	rotation.y = _timeline.sample().yaw
+
+
+func _process(delta: float) -> void:
+	if not replica or not alive or not _received_pose:
+		return
+	_timeline.advance(delta)
+	var sample: Dictionary = _timeline.sample()
+	global_position = sample.pos
+	rotation.y = sample.yaw
+
+
 ## The local death: combat collision off, gravity on, the limp collapse, then
 ## the shared hold. Replicas call it with `announce = false` so the kill stays
 ## on the host.
@@ -805,11 +837,10 @@ func _packed_pose() -> Vector4:
 
 ## Presentation-side mirror of the host's mob: the host owns AI, damage and
 ## arrows, so a replica only replays the snapshot it was handed.
-func apply_snapshot(state: Dictionary) -> void:
+func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	var previous_health := health
 	var was_alive := alive
-	global_position = state.p
-	rotation.y = state.y
+	_ingest_pose(state,tick)
 	self.state = state.s
 	_state_time = state.t
 	health = state.h

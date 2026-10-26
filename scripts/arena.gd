@@ -16,9 +16,14 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
+const LagCompensation = preload("res://scripts/lag_compensation.gd")
 ## A backstab picks its body from the layer the fighters spar on.
 const BACKSTAB_MASK := 4
 const BACKSTAB_RANGE := 8.0
+## The longest rewind the host will ever perform for one client action.
+const MAX_LAG_TICKS := 30
+const SNAPSHOT_INTERVAL := 0.05
 var actors: Array = []
 var local_slot := -1
 var network_role := "offline"
@@ -34,6 +39,10 @@ var camera: Camera3D
 var _peer_slots: Dictionary = {}
 # Per actor: newest snapshot sent by the host or applied by this client.
 var _snapshot_ticks := PackedInt32Array([-1,-1,-1,-1])
+## The server tick this client draws the world at, learned from arrivals.
+var _clock = NetReplication.NetClock.new()
+## One second of hitbox poses so a client's swing resolves against its view.
+var _lag = LagCompensation.new()
 var _player_name := "Ranger"
 var _endpoint := ""
 var _join_elapsed := 0.0
@@ -66,6 +75,7 @@ func _ready() -> void:
 		actor.configure(0,true,"Bot %d" % (index+1),world.spawn_points[index])
 		actor.bounds = World.LIMIT-0.3
 		actor.interp_delay = 0.12
+		actor.combat.lag_rewind = _lag
 		actor.fired.connect(_on_fired)
 		actor.thrown_weapon.connect(_on_thrown_weapon)
 		actor.killed.connect(_on_killed)
@@ -247,6 +257,7 @@ func leave_game() -> void:
 		actor.reset_stance()
 		actor.authoritative = false
 		actor.is_local = false
+		actor.predicting = false
 		actor.combat.damage_enabled = false
 		actor.visible = false
 		actor.collision_layer = 0
@@ -271,6 +282,15 @@ func _find_open_port(start: int) -> int:
 		if error == OK:
 			return candidate
 	return 0
+
+## The peer whose RPC is in flight, or -1 once this node has left the tree: a
+## scene hand-off can deliver one last intent to a session that is already gone.
+func _sender_id() -> int:
+	var api := multiplayer
+	if api == null:
+		return -1
+	return api.get_remote_sender_id()
+
 
 func _safe_name(value: String) -> String:
 	var result := value.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
@@ -316,6 +336,7 @@ func _peer_connected(peer_id: int) -> void:
 			actor.configure(peer_id,false,"Joining ranger",world.spawn_points[actor.slot])
 			_peer_slots[peer_id] = actor.slot
 			_accept.rpc_id(peer_id,actor.slot)
+			_broadcast_names()
 			print("ARENA_PEER_JOINED slot=",actor.slot," humans=",get_human_count())
 			return
 	multiplayer.multiplayer_peer.disconnect_peer(peer_id)
@@ -327,6 +348,7 @@ func _peer_disconnected(peer_id: int) -> void:
 	_peer_slots.erase(peer_id)
 	_clear_slot_arrows(slot)
 	actors[slot].configure(0,true,"Bot %d" % slot,world.spawn_points[slot])
+	_broadcast_names()
 	print("ARENA_BOT_RESTORED slot=",slot," humans=",get_human_count())
 
 func _clear_slot_arrows(slot: int) -> void:
@@ -353,11 +375,12 @@ func _connected() -> void:
 func _register(player_name: String, loadout: Dictionary) -> void:
 	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if _peer_slots.has(sender):
 		var slot := int(_peer_slots[sender])
 		actors[slot].display_name = _safe_name(player_name)
 		_apply_loadout(slot,loadout)
+		_broadcast_names()
 
 @rpc("authority","call_remote","reliable")
 func _accept(slot: int) -> void:
@@ -370,11 +393,35 @@ func _accept(slot: int) -> void:
 		actor.authoritative = false
 		actor.visible = true
 		actor.is_local = actor.slot == slot
+		actor.predicting = actor.slot == slot
 	actors[slot].interp_delay = 0.05
+	actors[slot].revive()
+	# The view clock names the tick this peer draws remote fighters at, which is
+	# what its aim and swings are rewound to.
+	_clock.configure(60.0,actors[(slot+1)%4].interp_delay)
 	hud.show_match(_player_name,_endpoint)
 	_bind_ui_rig()
 	_set_cursor_free(false)
 	print("ARENA_CLIENT_READY slot=",slot)
+
+## Fighter names are static for a match, so they ride one reliable roster
+## message on join/leave instead of every 20 Hz fighter datagram.
+func _name_list() -> Array:
+	var names: Array = []
+	for actor in actors:
+		names.append(actor.display_name)
+	return names
+
+func _broadcast_names() -> void:
+	if network_role == "host":
+		_names.rpc(_name_list())
+
+@rpc("authority","call_remote","reliable")
+func _names(names: Array) -> void:
+	if network_role != "client":
+		return
+	for index in mini(names.size(),actors.size()):
+		actors[index].display_name = str(names[index])
 
 func _physics_process(delta: float) -> void:
 	if network_role == "offline":
@@ -399,26 +446,38 @@ func _physics_process(delta: float) -> void:
 		var aim_origin: Variant = _aim_origin if _aim_origin_valid else null
 		if network_role == "host":
 			_set_movement(local_slot,direction,running,aim,-1,aim_origin)
-		elif _send_elapsed >= 0.05:
-			_move_input.rpc_id(1,direction,running,aim,_snapshot_ticks[local_slot],aim_origin)
+		elif network_role == "client":
+			# Prediction: this peer integrates the frame it is about to send, so
+			# the fighter moves on the key, not a round trip later. The authority
+			# receives every frame and acknowledges the newest one it consumed.
+			_clock.advance(delta)
+			var local = actors[local_slot]
+			var view := _view_tick()
+			local.update_input(direction,running,view)
+			local.predicted_step(delta,actors)
+			_move_input.rpc_id(1,direction,running,aim,_snapshot_ticks[local_slot],aim_origin,
+				local.latest_prediction_seq(),view,local.input_history())
 	if network_role == "host":
 		server_tick += 1
 		for actor in actors:
+			actor.combat.lag_tick = server_tick
 			actor.step(delta,actors,server_tick)
-		if _send_elapsed >= 0.05:
+		_lag.record(server_tick,actors)
+		if _send_elapsed >= SNAPSHOT_INTERVAL:
 			# One fighter per datagram stays below ENet's MTU without fragmentation.
 			for actor in actors:
 				_receive_snapshot.rpc(server_tick,actor.slot,actor.snapshot())
 				_snapshot_ticks[actor.slot] = server_tick
-	if _send_elapsed >= 0.05:
-		_send_elapsed = fmod(_send_elapsed,0.05)
+			_send_elapsed = fmod(_send_elapsed,SNAPSHOT_INTERVAL)
 
-func _set_movement(slot: int, direction: Vector2, running: bool, aim: Vector3, aim_tick: int = -1, aim_origin: Variant = null) -> void:
-	if not direction.is_finite() or not _set_aim(slot,aim,aim_tick,aim_origin):
+func _set_movement(slot: int, direction: Vector2, running: bool, aim: Variant = null, aim_tick: int = -1, aim_origin: Variant = null, seq: int = -1, view: int = -1, history: Array = []) -> void:
+	if not direction.is_finite():
 		return
-	actors[slot].move_direction = direction.limit_length()
-	actors[slot].run_requested = running
-	actors[slot].input_age = 0
+	# Movement is never dropped because a frame carried no aim; only an aim
+	# sample that fails validation leaves the previous point in place.
+	if aim != null and not _set_aim(slot,aim,aim_tick,aim_origin):
+		return
+	actors[slot].accept_network_input(direction,running,seq,view,history)
 
 func _set_aim(slot: int, point: Vector3, aim_tick: int = -1, aim_origin: Variant = null) -> bool:
 	if not point.is_finite() or point.length_squared() > 1000000.0:
@@ -452,12 +511,17 @@ func _set_aim(slot: int, point: Vector3, aim_tick: int = -1, aim_origin: Variant
 	return true
 
 @rpc("any_peer","call_remote","unreliable_ordered")
-func _move_input(direction: Vector2, running: bool, aim: Vector3, aim_tick: Variant, aim_origin: Variant = null) -> void:
-	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
+func _move_input(direction: Vector2, running: bool, aim: Variant, aim_tick: Variant, aim_origin: Variant = null, seq: Variant = -1, view: Variant = -1, history: Array = []) -> void:
+	if network_role != "host":
 		return
-	var sender := multiplayer.get_remote_sender_id()
-	if _peer_slots.has(sender):
-		_set_movement(int(_peer_slots[sender]),direction,running,aim,aim_tick,aim_origin)
+	var sender := _sender_id()
+	if not _peer_slots.has(sender):
+		return
+	var aim_point: Variant = aim if typeof(aim) == TYPE_VECTOR3 and typeof(aim_tick) == TYPE_INT else null
+	_set_movement(int(_peer_slots[sender]),direction,running,aim_point,
+		int(aim_tick) if typeof(aim_tick) == TYPE_INT else -1,aim_origin,
+		int(seq) if typeof(seq) == TYPE_INT else -1,int(view) if typeof(view) == TYPE_INT else -1,
+		history if typeof(history) == TYPE_ARRAY else [])
 
 @rpc("authority","call_remote","unreliable")
 func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
@@ -465,14 +529,32 @@ func _receive_snapshot(tick: int, slot: int, state: Dictionary) -> void:
 		return
 	_snapshot_ticks[slot] = tick
 	last_snapshot_tick = maxi(last_snapshot_tick,tick)
+	if slot == local_slot:
+		_clock.ingest(tick,Time.get_ticks_msec()/1000.0)
 	var previous_ability := str(actors[slot].ability.active_id)
-	actors[slot].apply_snapshot(state)
+	actors[slot].apply_snapshot(state,tick,actors)
 	var current_ability := str(actors[slot].ability.active_id)
 	if actors[slot].ability.active and current_ability != previous_ability:
 		var definition := AbilityRules.by_id(current_ability)
 		var sound := str(definition.get("sound",""))
 		if not sound.is_empty():
 			audio.play_sound(sound)
+
+## The server tick this peer is currently drawing, which is what its aim and
+## its swings must be judged against. Falls back to the newest acknowledgement
+## before the first remote sample arrives.
+func _view_tick() -> int:
+	if _clock.newest_tick() >= 0:
+		return _clock.render_tick()
+	return maxi(0,_snapshot_ticks[local_slot])
+
+
+## Arms one fighter's damage window with the rewind its owner needs: how far
+## behind the host that peer was drawing when it pressed the button.
+func _arm_lag(actor) -> void:
+	actor.combat.lag_tick = server_tick
+	actor.combat.lag_ticks = int(actor.lag_ticks(server_tick,MAX_LAG_TICKS)) if int(actor.peer_id) > 1 else 0
+
 
 func send_action(action: String, value: Variant = null) -> void:
 	if local_slot < 0:
@@ -487,13 +569,16 @@ func send_action(action: String, value: Variant = null) -> void:
 	if network_role == "host":
 		_apply_action(local_slot,action,value,-1,aim_origin)
 	elif network_role == "client":
+		# Locomotion intents start on this frame; combat and kits stay
+		# authoritative so a client can never guess its own parry or damage.
+		actors[local_slot].predict_action(action,value)
 		_action_input.rpc_id(1,action,value,_snapshot_ticks[local_slot],aim_origin)
 
 @rpc("any_peer","call_remote","reliable")
 func _action_input(action: String, value: Variant, aim_tick: Variant, aim_origin: Variant = null) -> void:
 	if network_role != "host" or typeof(aim_tick) != TYPE_INT:
 		return
-	var sender := multiplayer.get_remote_sender_id()
+	var sender := _sender_id()
 	if _peer_slots.has(sender):
 		var slot := int(_peer_slots[sender])
 		if action == "loadout":
@@ -514,6 +599,9 @@ func _apply_action(slot: int, action: String, value: Variant, aim_tick: int = -1
 		return
 	if not actor.alive:
 		return
+	# Every damage-capable intent carries the tick its owner was drawing, so the
+	# host can rewind the targets the client actually saw.
+	_arm_lag(actor)
 	match action:
 		"draw":
 			if typeof(value) == TYPE_VECTOR3 and _set_aim(slot,value,aim_tick,aim_origin):
@@ -652,6 +740,11 @@ func _on_fired(slot: int, origin: Vector3, direction: Vector3, speed: float, cha
 func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, damage: float, authoritative: bool, visual_origin: Vector3 = Vector3.INF, pierce_count: int = 0) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = slot
+	if authoritative:
+		# A projectile resolves its impact long after launch, so it carries the
+		# shooter's view lag instead of a fixed rewind tick.
+		arrow.lag_comp = _lag
+		arrow.lag_ticks = _shooter_lag(slot)
 	arrow.hit_mask = 1 | 4 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
@@ -667,6 +760,16 @@ func _spawn_arrow(slot: int, origin: Vector3, direction: Vector3, speed: float, 
 		projectiles.pop_front().queue_free()
 	if slot == local_slot:
 		audio.play_sound("release")
+
+## How many ticks behind the host the shooter was drawing when it released.
+func _shooter_lag(slot: int) -> int:
+	if slot < 0 or slot >= actors.size():
+		return 0
+	var actor = actors[slot]
+	if int(actor.peer_id) <= 1:
+		return 0
+	return int(actor.lag_ticks(server_tick,MAX_LAG_TICKS))
+
 
 func _ability_authority(actor) -> bool:
 	return network_role != "client" and actor != null and is_instance_valid(actor) \

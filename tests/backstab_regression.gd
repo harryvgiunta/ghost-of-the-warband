@@ -150,9 +150,9 @@ func run() -> void:
 	check(not mover.combat.blocking, "blink drops the raised guard")
 	check(mover.velocity.is_equal_approx(Vector3.ZERO),
 		"blink zeroes the actor's velocity")
-	check(mover._states.is_empty(), "blink clears the interpolation history")
-	check(mover._target_position.is_equal_approx(mover.global_position),
-		"blink rebases the authoritative target position")
+	check(mover._timeline.samples.size() <= 1, "blink clears the interpolation history")
+	check((mover._timeline.samples[-1].pos as Vector3).is_equal_approx(mover.global_position),
+		"blink rebases the authoritative render pose")
 	var mover_facing: Vector3 = -mover.rig.global_basis.z
 	mover_facing.y = 0.0
 	check(mover_facing.normalized().dot(to_victim) > 0.99,

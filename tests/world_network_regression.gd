@@ -176,6 +176,25 @@ func _host_run() -> void:
 		if host_clone != null:
 			check(clone_pos.distance_to(host_clone.global_position) < 0.8,"The client follows the host clone position (%s vs %s)" % [clone_pos,host_clone.global_position])
 		check(str(data.get("weapon","")) == "sword","The client sees its replicated sword")
+		var prediction: Dictionary = data.get("prediction",{})
+		check(bool(prediction.get("predicting",false)),
+			"The open-world client owns and predicts its own ranger")
+		check(int(prediction.get("first_move",99)) <= 2,
+			"The open-world ranger moves on the frame its key went down")
+		check(float(prediction.get("walked",0.0)) > 0.5,
+			"The predicted open-world ranger really moved")
+		check(float(prediction.get("worst_step",99.0)) < 0.30,
+			"The open-world prediction never jumps (%s)" % str(prediction.get("worst_step")))
+		check(int(prediction.get("acked",-1)) > 0,
+			"The host acknowledges the open-world client's frames")
+		print("WORLD_PRED_KEYS health=",data.get("health")," weapon=",data.get("weapon"),
+			" host_health=",data.get("host_health")," own_pos=",data.get("own_pos"))
+		var seat_one = game._seats.get(1)
+		print("WORLD_PRED_DIAG client=",prediction," host ack=",
+			seat_one.ack_seq if is_instance_valid(seat_one) else "none",
+			" pending=",seat_one._pending_seq if is_instance_valid(seat_one) else "none",
+			" age=",seat_one.input_age if is_instance_valid(seat_one) else "none",
+			" authoritative=",seat_one.authoritative if is_instance_valid(seat_one) else "none")
 		check(float(data.get("host_health",100.0)) < 99.9,"The client sees the host ranger's damaged health")
 
 	var left := await _wait_until(func(): return game.get_human_count() == 1,10.0)
@@ -219,6 +238,7 @@ func _client_run(port: int) -> void:
 		await _finish_client(1)
 		return
 	game.send_action("weapon","sword")
+	await create_timer(0.2).timeout
 	var deadline := Time.get_ticks_msec() + 20000
 	while watch_index < 0 and Time.get_ticks_msec() < deadline:
 		await process_frame
@@ -226,6 +246,49 @@ func _client_run(port: int) -> void:
 		report.submit.rpc_id(1,{"client_error":"probe timeout"})
 		await _finish_client(1)
 		return
+
+	# Prediction: the joined ranger must move on the frame its key goes down,
+	# before any round trip, and stay smooth afterwards.
+	var own_seat = game._seats.get(game.local_slot)
+	var corrections_before: int = own_seat.prediction_corrections if own_seat != null else 0
+	var walk_before: Vector3 = game.player.global_position
+	var steps: Array = []
+	var first_move := -1
+	var hold := InputEventKey.new()
+	hold.keycode = KEY_D
+	hold.physical_keycode = KEY_D
+	hold.pressed = true
+	Input.parse_input_event(hold)
+	Input.flush_buffered_events()
+	for index in 40:
+		await physics_frame
+		steps.append(game.player.global_position)
+		if first_move < 0 and steps.size() > 1 and (steps[-1] as Vector3).distance_to(steps[0]) > 0.008:
+			first_move = steps.size() - 1
+	var release := InputEventKey.new()
+	release.keycode = KEY_D
+	release.physical_keycode = KEY_D
+	release.pressed = false
+	Input.parse_input_event(release)
+	Input.flush_buffered_events()
+	var worst_step := 0.0
+	for index in range(1,steps.size()):
+		worst_step = maxf(worst_step,(steps[index] as Vector3).distance_to(steps[index-1]))
+	# The frontier host simulates every mob in the valley, so give its
+	# acknowledgement time to land instead of measuring only the walk's window.
+	var ack_deadline := Time.get_ticks_msec() + 3000
+	while own_seat != null and int(own_seat._prediction.acked) < 0 \
+			and Time.get_ticks_msec() < ack_deadline:
+		await process_frame
+	var prediction := {
+		"predicting":bool(own_seat.predicting) if own_seat != null else false,
+		"first_move":first_move,
+		"walked":game.player.global_position.distance_to(walk_before),
+		"worst_step":worst_step,
+		"acked":int(own_seat._prediction.acked) if own_seat != null else -1,
+		"corrections":(own_seat.prediction_corrections-corrections_before) if own_seat != null else -1,
+	}
+	_trace("prediction " + str(prediction))
 	var jump := InputEventKey.new()
 	jump.keycode = KEY_SPACE
 	jump.physical_keycode = KEY_SPACE
@@ -257,7 +320,7 @@ func _client_run(port: int) -> void:
 			clone_count += 1
 			if clone_replica == null:
 				clone_replica = entry
-	var payload := {"world":true,"slot":game.local_slot,"seats":seats,
+	var payload := {"world":true,"slot":game.local_slot,"seats":seats,"prediction":prediction,
 		"host_pos":game._seats[0].global_position if game._seats.has(0) else Vector3.ZERO,
 		"own_pos":game.player.global_position,"health":game.health,
 		"enemy_health":float(enemy.health) if enemy != null else -1.0,
