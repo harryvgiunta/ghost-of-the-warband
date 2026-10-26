@@ -78,8 +78,6 @@ func run() -> void:
 
 	var wolf = Enemy.new()
 	wolf.kind = 0
-	var sentinel = Enemy.new()
-	sentinel.kind = 1
 	var cinder = Enemy.new()
 	cinder.kind = 2
 	cinder.devil_weapon = "claw"
@@ -92,7 +90,6 @@ func run() -> void:
 	pack.note_impact(Vector3(1.0, 0.0, 0.0))
 	var corpses := [
 		["Briar wolf", wolf, Vector3(-6.0, 0.12, 0.0)],
-		["Ruin sentinel", sentinel, Vector3(-3.0, 0.12, 0.0)],
 		["Cinder devil", cinder, Vector3(0.0, 0.12, 0.0)],
 		["Hellish goat man", pack, Vector3(3.0, 0.12, 0.0)],
 		["Delve devil", delve, Vector3(6.0, 0.12, 0.0)],
@@ -128,13 +125,13 @@ func run() -> void:
 					and (goat_pelvis_body.linear_velocity.x > 0.05
 						or goat_pelvis_body.angular_velocity.z < -0.05),
 				"A killing blow's force drives the corpse along its direction")
-	# Rigged mobs hand their skeleton to the shared ragdoll; the procedural
-	# cinder and sentinel keep their authored collapse and only fall by root.
+	# Rigged mobs hand their skeleton to the shared ragdoll; only the procedural
+	# depth-role devils keep their authored collapse and fall by root.
 	check(CorpsePhysics.is_limp(wolf._wolf), "The wolf corpse is a physical ragdoll")
+	check(CorpsePhysics.is_limp(cinder._devil), "The cinder corpse is a physical ragdoll")
 	check(CorpsePhysics.is_limp(pack._visual), "An imported devil corpse is a physical ragdoll")
 	check(CorpsePhysics.is_limp(delve_species._visual), "A delve species corpse is a physical ragdoll")
 	check(not CorpsePhysics.is_limp(delve._visual), "A procedural corpse keeps its authored collapse")
-	check(not CorpsePhysics.is_limp(sentinel._body), "The primitive sentinel has no skeleton to ragdoll")
 	var wolf_sim := wolf._wolf.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
 	var wolf_bones := wolf_sim.get_child_count() if wolf_sim != null else 0
 	check(wolf_bones >= 10, "The wolf ragdoll builds its driven bone chain")
@@ -151,26 +148,24 @@ func run() -> void:
 
 	# The authored poses are held, not reset by a fake delete.
 	check(wolf._wolf.is_dead(), "The wolf enters its corpse ragdoll")
-	check(cinder._devil.is_dead(), "The cinder devil holds its death pose")
+	check(cinder._devil.is_dead(), "The cinder devil enters its corpse ragdoll")
 	check(pack._visual.is_dead(), "An imported devil enters its corpse ragdoll")
 	check(delve._visual.is_dead(), "A delve devil holds its death pose")
-	await pause(0.6)
-	check(sentinel._body.rotation.z > 0.1, "The sentinel collapses onto its side")
 
 	# Corpses obey gravity even when killed in the air: the primitive root and
 	# the rigged limbs both reach the floor instead of hanging at the death spot.
-	var falling_guard = Enemy.new()
-	falling_guard.kind = 1
-	falling_guard.position = Vector3(-9.0, 5.0, 0.0)
-	fixture.add_child(falling_guard)
+	var falling_proc = DelveDevil.new()
+	falling_proc.configure(9, "claw", 1)
+	falling_proc.position = Vector3(-9.0, 5.0, 0.0)
+	fixture.add_child(falling_proc)
 	await physics_frame
 	await physics_frame
-	falling_guard.take_damage(99999.0, 0, false)
+	falling_proc.take_damage(99999.0, 0, false)
 	await pause(1.6)
-	check(falling_guard.global_position.y < 0.6,
-		"A sentinel killed in the air falls to the ground")
-	check(sentinel.global_position.y < 0.6,
-		"A grounded corpse settles on the floor")
+	check(falling_proc.global_position.y < 0.6,
+		"A procedural devil killed in the air falls to the ground")
+	check(not CorpsePhysics.is_limp(falling_proc._visual),
+		"The procedural delve corpse has no physical skeleton")
 
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.

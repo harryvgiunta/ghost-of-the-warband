@@ -1196,6 +1196,7 @@ func _ability_spell(runner, definition: Dictionary, damage: float,
 	var spell := SpellProjectile.new()
 	spell.kind = str(effect.get("projectile", "fireball"))
 	spell.hit_mask = 1 | 2 | 8
+	spell.shooter = runner.actor if runner.actor is Node3D else null
 	add_child(spell)
 	var excluded: Array[RID] = []
 	if runner.actor is CollisionObject3D:
@@ -2541,9 +2542,23 @@ func _on_seat_thrown(slot: int, origin: Vector3, direction: Vector3, speed: floa
 	_world_throw.rpc(origin,direction,speed,weapon_name,weapon_index,slot)
 
 
+## The ranger body behind a shot slot: the local ranger for slot 0/-1 and the
+## matching host seat otherwise. Projectiles hand this to a mob's
+## `note_attacker`, so a ranged hit always names the archer that fired it.
+func _shooter_for_slot(slot: int) -> Node3D:
+	if slot > 0:
+		var seat = _seats.get(slot)
+		if is_instance_valid(seat):
+			return seat as Node3D
+	return player
+
+
 func _spawn_arrow(origin: Vector3, direction: Vector3, speed: float, shot_damage: float, excluded: Array[RID], visual_origin: Vector3 = Vector3.INF, source_slot: int = -1, authoritative: bool = true, pierce_count: int = 0) -> void:
 	var arrow := Arrow.new()
 	arrow.source_id = source_slot
+	# Mob tracers and client visuals are spawned with `authoritative = false`;
+	# their `slot` is not a ranger seat, so they never name a shooter.
+	arrow.shooter = _shooter_for_slot(source_slot) if authoritative else null
 	arrow.hit_mask = 1 | 2 | 8
 	arrow.authoritative_damage = authoritative
 	add_child(arrow)
@@ -2562,6 +2577,7 @@ func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damag
 	thrown.weapon = weapon_name
 	thrown.weapon_index = weapon_index
 	thrown.source_id = source_slot
+	thrown.shooter = _shooter_for_slot(source_slot)
 	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
 	thrown.authoritative_damage = authoritative
 	add_child(thrown)

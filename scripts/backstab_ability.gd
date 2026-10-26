@@ -176,6 +176,8 @@ static func strike(actor: Node3D, target: Node3D, damage: float,
 	if _is_dead(target):
 		return 0.0
 	var before: Variant = _health_of(target)
+	if target.has_method("note_attacker"):
+		target.note_attacker(actor)
 	if target.has_method("note_impact"):
 		target.note_impact(ImpactRules.radial_force(actor.global_position, target.global_position))
 	target.take_damage(damage, source_id, false)

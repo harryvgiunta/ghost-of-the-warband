@@ -44,7 +44,7 @@ func run() -> void:
 	var stub := Node3D.new()
 	fixture.add_child(stub)
 	# A primitive body for the stain to lie on: the fixture rig has no skeleton,
-	# which is exactly the devil/sentinel path.
+	# which is exactly the path the delve's primitive depth roles take.
 	var stub_body := MeshInstance3D.new()
 	var stub_sphere := SphereMesh.new()
 	stub_sphere.radius = 1.0
@@ -251,19 +251,6 @@ func run() -> void:
 	await process_frame
 	check(_count_meta(field, "pool") >= 1, "A lethal hit leaves a persistent pool")
 	check(_count_meta(devil, "wound") >= 2, "A lethal hit floods the body with wounds")
-
-	# Every mob bleeds, stone sentinel included.
-	var sentinel = Enemy.new()
-	sentinel.kind = 1
-	sentinel.position = game.player.global_position + Vector3(-1.8, 0.12, 0.0)
-	game.add_child(sentinel)
-	await physics_frame
-	await process_frame
-	var sentinel_stains: int = field.stain_count()
-	sentinel.take_damage(14.0, -1)
-	await process_frame
-	check(field.stain_count() > sentinel_stains, "The stone sentinel bleeds when hit")
-	check(_count_meta(sentinel, "wound") > 0, "The sentinel's stone body takes blood")
 
 	# --- imported devil packs: the five frontier demons bleed -----------------
 	var mob = load("res://scripts/devil_mob.gd").new()

@@ -16,6 +16,7 @@ const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const MobSenses = preload("res://scripts/mob_senses.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -26,7 +27,7 @@ const PROFILES := {
 		"display": "Hellish goat man", "kind": 3,
 		"health": 72.0, "damage": 13.0, "reach": 2.05,
 		"walk_speed": 1.50, "run_speed": 4.00, "orbit": 5.5,
-		"aggro": 30.0, "leash": 50.0, "gold": 10,
+		"sight": 30.0, "gold": 10,
 		"radius": 0.45, "height": 2.00, "aim": 1.65,
 		"windup": 0.45, "strike": 0.18, "recover": 0.55,
 		"cooldown": 1.35, "lunge": 6.2, "turn": 9.0,
@@ -36,7 +37,7 @@ const PROFILES := {
 		"display": "Succubus", "kind": 4,
 		"health": 46.0, "damage": 9.0, "reach": 1.85,
 		"walk_speed": 1.40, "run_speed": 4.20, "orbit": 6.5,
-		"aggro": 28.0, "leash": 44.0, "gold": 9,
+		"sight": 28.0, "gold": 9,
 		"radius": 0.32, "height": 2.05, "aim": 1.50,
 		"windup": 0.36, "strike": 0.15, "recover": 0.45,
 		"cooldown": 1.15, "lunge": 7.0, "turn": 10.0,
@@ -46,7 +47,7 @@ const PROFILES := {
 		"display": "Devil spawn", "kind": 5,
 		"health": 22.0, "damage": 6.0, "reach": 1.45,
 		"walk_speed": 1.30, "run_speed": 4.60, "orbit": 4.0,
-		"aggro": 26.0, "leash": 40.0, "gold": 5,
+		"sight": 26.0, "gold": 5,
 		"radius": 0.30, "height": 1.05, "aim": 0.75,
 		"windup": 0.30, "strike": 0.14, "recover": 0.40,
 		"cooldown": 0.90, "lunge": 8.0, "turn": 12.0,
@@ -56,7 +57,7 @@ const PROFILES := {
 		"display": "Hell beast", "kind": 6,
 		"health": 130.0, "damage": 20.0, "reach": 2.50,
 		"walk_speed": 1.40, "run_speed": 3.80, "orbit": 4.0,
-		"aggro": 26.0, "leash": 40.0, "gold": 16,
+		"sight": 26.0, "gold": 16,
 		"radius": 0.55, "height": 1.65, "aim": 1.15,
 		"windup": 0.65, "strike": 0.22, "recover": 0.70,
 		"cooldown": 2.00, "lunge": 5.5, "turn": 5.5,
@@ -66,7 +67,7 @@ const PROFILES := {
 		"display": "Gargoyle", "kind": 7,
 		"health": 110.0, "damage": 17.0, "reach": 3.30,
 		"walk_speed": 1.00, "run_speed": 2.80, "orbit": 4.8,
-		"aggro": 18.0, "leash": 28.0, "gold": 14,
+		"sight": 18.0, "gold": 14,
 		"radius": 0.70, "height": 3.05, "aim": 2.35,
 		"windup": 0.75, "strike": 0.24, "recover": 0.85,
 		"cooldown": 2.20, "lunge": 3.2, "turn": 4.5,
@@ -104,6 +105,8 @@ var _body: Node3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
+var _senses := MobSenses.new()
+var _attacker: Node3D
 
 
 func _ready() -> void:
@@ -140,6 +143,9 @@ func _ready() -> void:
 	_visual.profile = profile
 	_body.add_child(_visual)
 	add_to_group(_group_name())
+	# One shared group for every wilderness mob: a struck mob's cry reaches
+	# whatever is close enough to hear it.
+	add_to_group(MobSenses.GROUP)
 	_query.collision_mask = 1
 	_rng.seed = 7919 + int(absf(global_position.x) * 13.0) + int(absf(global_position.z) * 7.0)
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
@@ -173,22 +179,27 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
-	_target = _resolve_target()
-	if not is_instance_valid(_target):
+	# Sight, not proximity, decides whether this mob is in a fight. Losing the
+	# view keeps the pursuit alive for `MEMORY_SECONDS`.
+	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
+		_eye_height(), Callable(self, "_is_hostile"))
+	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
+	if not is_instance_valid(_target) and not pursuit:
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
-	var to_target := _target.global_position - global_position
+	var focus := _senses.focus() if pursuit else _target.global_position
+	var to_target := focus - global_position
 	to_target.y = 0.0
 	var distance := to_target.length()
 	var direction := to_target.normalized() if distance > 0.001 else Vector3.FORWARD
-	var target_safe := Vector2(_target.position.x - safe_center.x,
-		_target.position.z - safe_center.z).length() < 19.0
-	var aggro := (not target_safe) and distance < float(profile.aggro) \
-		and global_position.distance_to(home) < float(profile.leash)
+	# Town peace: a ranger inside the safe ring is never hunted, alerted or not.
+	var aggro := pursuit and not MobSenses.in_safe_ring(safe_center, focus)
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
-	_face_intent = direction
+	# Only an aware mob turns toward its quarry. A calm mob keeps the facing it
+	# had, so walking up behind it stays possible.
+	_face_intent = Vector3.ZERO
 	match state:
 		"IDLE":
 			if aggro:
@@ -257,6 +268,10 @@ func _return_home(delta: float) -> void:
 
 
 func _circle(delta: float, distance: float, direction: Vector3) -> void:
+	# Sight is gone but the pursuit memory is not: hunt the last known spot.
+	if not _senses.seen:
+		_hunt(delta)
+		return
 	var reach := float(profile.reach)
 	if distance <= reach + 1.15 and _attack_cooldown <= 0.0:
 		_enter("WINDUP")
@@ -293,6 +308,21 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	_face_intent = direction
 
 
+## Lost sight but still remembers: run down the place the ranger was last
+## seen, then sweep the ground while the pursuit timer runs out.
+func _hunt(delta: float) -> void:
+	var offset := _senses.last_seen - global_position
+	offset.y = 0.0
+	if offset.length() > MobSenses.ARRIVE_DISTANCE:
+		_move_intent = _steer(offset.normalized())
+		_move_speed = float(profile.run_speed)
+		_face_intent = _move_intent
+		return
+	# Standing over the last sighting: scan the ground instead of freezing.
+	rotation.y += sin(_state_time * 1.5) * delta * 1.7
+	_face_intent = -global_basis.z
+
+
 func _resolve_strike() -> void:
 	var to_target := _target.global_position - global_position
 	to_target.y = 0.0
@@ -313,6 +343,33 @@ func _resolve_target() -> CharacterBody3D:
 			nearest = planar
 			best = candidate
 	return best if is_instance_valid(best) else player
+
+
+## Everyone this mob could hunt: the local ranger plus every host seat.
+func _candidates() -> Array:
+	var list: Array = []
+	for candidate in targets:
+		if is_instance_valid(candidate) and not list.has(candidate):
+			list.append(candidate)
+	if is_instance_valid(player) and not list.has(player):
+		list.append(player)
+	return list
+
+
+## How far this profile can see. Distance alone never starts a fight.
+func _sight_range() -> float:
+	return float(profile.get("sight", 0.0))
+
+
+func _eye_height() -> float:
+	return maxf(0.7, float(profile.get("height", 1.8)) * MobSenses.EYE_HEIGHT_FRACTION)
+
+
+## Huntable rangers: alive and outside the town's safe ring.
+func _is_hostile(candidate: Node3D) -> bool:
+	if not is_instance_valid(candidate) or candidate.get("alive") == false:
+		return false
+	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
 
 
 func _separate() -> void:
@@ -393,6 +450,41 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 		health <= 0.0, blood_scale())
 	if health <= 0.0:
 		_enter_dead(true)
+		return
+	_respond_to_attack()
+
+
+## The projectile, blade or spell that landed names itself here before it
+## applies damage, so this mob knows who to turn on even when the blow came
+## out of the dark.
+func note_attacker(attacker: Node3D) -> void:
+	_attacker = attacker
+
+
+## Any landed blow gives the mob the fight, and the cry pulls the neighbours
+## inside `MobSenses.SHOUT_RADIUS` into the same hunt.
+func _respond_to_attack() -> void:
+	var attacker: Node3D = _attacker if is_instance_valid(_attacker) else null
+	_attacker = null
+	if attacker != null and not _is_hostile(attacker):
+		return
+	if attacker == null:
+		# Unattributed damage (no shooter named): the nearest ranger will do.
+		var nearest := _resolve_target()
+		if not is_instance_valid(nearest) or not _is_hostile(nearest):
+			return
+		attacker = nearest
+	_senses.notice(attacker, attacker.global_position)
+	MobSenses.alert_pack(self, attacker, _senses.last_seen)
+
+
+## A neighbour was struck within earshot: take up the hunt where it last saw.
+func hear_alert(attacker: Node3D, at: Vector3) -> void:
+	if not alive or replica:
+		return
+	if is_instance_valid(attacker) and not _is_hostile(attacker):
+		return
+	_senses.notice(attacker, at)
 
 
 ## The local death: stopped combat collision, falling root, the limp ragdoll

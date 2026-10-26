@@ -9,15 +9,19 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
-const DevilVisual = preload("res://scripts/devil_visual.gd")
+const DevilVisual = preload("res://scripts/cinder_devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
+const MobSenses = preload("res://scripts/mob_senses.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
-const DEVIL_AGGRO := 30.0
-const DEVIL_LEASH := 48.0
+## How far each kind can see. Distance alone never starts a fight: the mob has
+## to have the ranger in its forward cone with a clear line of sight, and it
+## keeps hunting for `MobSenses.MEMORY_SECONDS` after losing that view.
+const WILD_SIGHT := 23.0
+const DEVIL_SIGHT := 30.0
 const DEVIL_WINDUP := 0.30
 const DEVIL_STRIKE := 0.16
 const DEVIL_RECOVER := 0.30
@@ -43,16 +47,15 @@ var home := Vector3.ZERO
 var state := "IDLE"
 var _state_time := 0.0
 var _stagger_duration := 0.0
-var _walk_time := 0.0
 var _body: Node3D
 var _wolf: WolfVisual
 var _devil: DevilVisual
 var _dodge
-var _legs: Array[Node3D] = []
-var _arms: Array[Node3D] = []
 var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
 var _rng := RandomNumberGenerator.new()
+var _senses := MobSenses.new()
+var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
 var _orbit_radius := 4.0
@@ -78,9 +81,17 @@ var _face_intent := Vector3.FORWARD
 var _target: CharacterBody3D
 
 func _ready() -> void:
-	name = "BriarWolf" if kind == 0 else ("CinderDevil" if kind == 2 else "RuinSentinel")
+	name = "BriarWolf" if kind == 0 else "CinderDevil"
 	home = global_position
-	max_health = 38.0 if kind == 0 else (DEVIL_HEALTH if kind == 2 else 82.0)
+	# Watch the road: spawn facing the arriving ranger, like the newer mob
+	# families do. Without a facing the sight cone would stare down -Z forever
+	# and a whole pack could miss a ranger standing beside it.
+	if is_instance_valid(player):
+		var facing := player.global_position - global_position
+		facing.y = 0.0
+		if facing.length_squared() > 0.0001:
+			rotation.y = atan2(-facing.x, -facing.z)
+	max_health = 38.0 if kind == 0 else DEVIL_HEALTH
 	health = max_health
 	collision_layer = 2
 	collision_mask = 1 | 2 | 4
@@ -90,12 +101,11 @@ func _ready() -> void:
 	if kind == 0:
 		shape.radius = 0.40
 		shape.height = 0.95
-	elif kind == 2:
-		shape.radius = 0.22
-		shape.height = 0.90
 	else:
-		shape.radius = 0.48
-		shape.height = 1.9
+		# The authored cinder devil stands 2.11 m to the crown: a gaunt frame
+		# on a 2.15 m capsule, not the 0.9 m primitive imp it replaced.
+		shape.radius = 0.34
+		shape.height = 2.15
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
 	collision.position.y = shape.height * 0.5
@@ -104,16 +114,17 @@ func _ready() -> void:
 	add_child(_body)
 	if kind == 0:
 		_build_wolf_visual()
-	elif kind == 2:
-		_build_devil_visual()
 	else:
-		_build_guardian()
+		_build_devil_visual()
 	var warning_radius := 0.85 if kind == 2 else 1.5
 	var warning_material := Geo.material(Color(0.95, 0.22, 0.08, 0.38))
 	warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_warning = Geo.cylinder(self, warning_radius, warning_radius, 0.018, Vector3(0, 0.035, 0), warning_material, 32)
 	_warning.visible = false
 	_query.collision_mask = 1
+	# Any wilderness mob answers a neighbour's alarm, so one shot at a wolf
+	# brings the rest of the pack and the devils standing nearby.
+	add_to_group(MobSenses.GROUP)
 	if kind == 2:
 		add_to_group("cinder_devils")
 		_dodge = DodgeStep.new()
@@ -166,35 +177,8 @@ func _build_devil_visual() -> void:
 	_devil.name = "DevilVisual"
 	_body.add_child(_devil)
 
-func _build_guardian() -> void:
-	var stone := Geo.material(Color("65747a"), 0.1)
-	var edge := Geo.material(Color("3e4c54"))
-	var core := Geo.material(Color("d77847"), 0.2)
-	core.emission_enabled = true
-	core.emission = Color("c25629")
-	core.emission_energy_multiplier = 1.1
-	Geo.sphere(_body, 0.55, Vector3(0, 1.20, 0), stone, Vector3(1, 1.1, 0.7))
-	Geo.box(_body, Vector3(0.62, 0.31, 0.42), Vector3(0, 0.78, 0), edge)
-	Geo.sphere(_body, 0.28, Vector3(0, 1.92, -0.02), stone, Vector3(0.85, 1.05, 0.9))
-	Geo.box(_body, Vector3(0.23, 0.06, 0.04), Vector3(0, 1.96, -0.26), core)
-	Geo.sphere(_body, 0.13, Vector3(0, 1.32, -0.35), core, Vector3(1, 1.25, 0.4))
-	for side in [-1.0, 1.0]:
-		var leg := Node3D.new()
-		leg.position = Vector3(side * 0.24, 0.81, 0)
-		_body.add_child(leg)
-		_legs.append(leg)
-		Geo.cylinder(leg, 0.15, 0.18, 0.55, Vector3(0, -0.30, 0), stone, 6)
-		Geo.box(leg, Vector3(0.33, 0.20, 0.43), Vector3(0, -0.68, -0.10), edge)
-		var arm := Node3D.new()
-		arm.position = Vector3(side * 0.48, 1.49, 0)
-		_body.add_child(arm)
-		_arms.append(arm)
-		Geo.sphere(arm, 0.23, Vector3.ZERO, stone)
-		Geo.cylinder(arm, 0.14, 0.17, 0.44, Vector3(0, -0.28, 0), stone, 7)
-		Geo.sphere(arm, 0.22, Vector3(0, -0.60, -0.04), edge, Vector3(1, 1.2, 1))
-
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0, 0.68 if kind == 0 else (0.55 if kind == 2 else 1.28), 0)
+	return global_position + Vector3(0, 0.68 if kind == 0 else 1.25, 0)
 
 func blood_rig() -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
@@ -204,7 +188,7 @@ func blood_rig() -> Node3D:
 	return _body
 
 func blood_scale() -> float:
-	return 1.35 if kind == 0 else (0.75 if kind == 2 else 1.0)
+	return 1.35 if kind == 0 else 1.20
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
@@ -212,7 +196,7 @@ func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	return null
 
 ## The limb or muzzle that landed the blow, for the blood it carried away: a
-## wolf's jaws, the cinder devil's raking hand, the sentinel's stone fist.
+## wolf's jaws or the cinder devil's raking hand.
 func blood_strike_point() -> Vector3:
 	if kind == 0 and is_instance_valid(_wolf):
 		return _wolf.head_hitbox_center()
@@ -221,51 +205,49 @@ func blood_strike_point() -> Vector3:
 	return get_aim_position()
 
 func get_display_name() -> String:
-	return "Briar wolf" if kind == 0 else ("Cinder devil" if kind == 2 else "Ruin sentinel")
+	return "Briar wolf" if kind == 0 else "Cinder devil"
 
-## The catalog id of the weapon this mob carries; empty for wolves, sentinels
-## and claw devils that hold nothing.
+## The catalog id of the weapon this mob carries; empty for wolves and claw
+## devils that hold nothing.
 func held_weapon_id() -> String:
 	return HeldWeapon.item_id(devil_weapon) if kind == 2 else ""
 
 func head_hitbox_center() -> Vector3:
 	if kind == 0 and is_instance_valid(_wolf):
 		return _wolf.head_hitbox_center()
-	if kind == 2 and is_instance_valid(_devil):
+	if is_instance_valid(_devil):
 		return _devil.head_hitbox_center()
-	if is_instance_valid(_body):
-		return _body.to_global(Vector3(0,1.92,-0.02))
 	return get_aim_position()
-
 func head_hit_profile() -> Vector2:
 	if kind == 0:
 		return Vector2(Hitbox.WOLF_HEAD_RADIUS,Hitbox.WOLF_HEAD_HALF_HEIGHT)
-	if kind == 2:
-		return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
-	return Vector2(Hitbox.SENTINEL_HEAD_RADIUS,Hitbox.SENTINEL_HEAD_HALF_HEIGHT)
+	return Vector2(Hitbox.DEVIL_HEAD_RADIUS,Hitbox.DEVIL_HEAD_HALF_HEIGHT)
 
 
 func _physics_process(delta: float) -> void:
 	if replica:
-		if kind == 1:
-			_update_cosmetics(delta)
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
-	_target = _resolve_target()
-	if not is_instance_valid(_target):
+	# Sight and the pursuit memory decide aggression for the wolf and the
+	# cinder devil exactly as they do for the newer mob families.
+	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
+		_eye_height(), Callable(self, "_is_hostile"))
+	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
+	if not is_instance_valid(_target) and not pursuit:
 		return
 	if kind == 2:
-		_step_devil(delta)
+		_step_devil(delta, pursuit)
 		return
 	_state_time += delta
-	var displacement := _target.global_position - global_position
+	var focus := _senses.focus() if pursuit else _target.global_position
+	var displacement := focus - global_position
 	displacement.y = 0.0
 	var distance := displacement.length()
-	var target_safe := Vector2(_target.position.x - safe_center.x, _target.position.z - safe_center.z).length() < 19.0
+	var target_safe := MobSenses.in_safe_ring(safe_center, focus)
 	var target_direction := Vector3.ZERO
-	var speed := 3.1 if kind == 0 else 2.2
+	var speed := 3.1
 	if state == "STAGGER":
 		if _state_time >= _stagger_duration:
 			state = "IDLE"
@@ -273,7 +255,7 @@ func _physics_process(delta: float) -> void:
 	elif state == "WINDUP":
 		if _state_time >= 0.65:
 			if distance < 2.1 and not target_safe and absf(_target.position.y - position.y) < 1.7:
-				attacked.emit(self,13.0 if kind == 0 else 23.0,_target)
+				attacked.emit(self,13.0,_target)
 			# A parry can synchronously replace the attack with STAGGER.
 			if state == "WINDUP":
 				state = "RECOVER"
@@ -283,10 +265,14 @@ func _physics_process(delta: float) -> void:
 		if _state_time > 0.85:
 			state = "IDLE"
 	else:
-		if not target_safe and distance < 23.0 and global_position.distance_to(home) < 38.0:
+		if pursuit and not target_safe:
 			state = "CHASE"
 			target_direction = displacement.normalized()
-			if distance < 1.65:
+			if not _senses.seen and distance < MobSenses.ARRIVE_DISTANCE:
+				# Standing over the last sighting: sweep the ground.
+				rotation.y += sin(_state_time * 1.5) * delta * 1.7
+				target_direction = Vector3.ZERO
+			elif _senses.seen and distance < 1.65:
 				state = "WINDUP"
 				_state_time = 0.0
 				_warning.visible = true
@@ -320,35 +306,52 @@ func _resolve_target() -> CharacterBody3D:
 			best = candidate
 	return best if is_instance_valid(best) else player
 
-func _update_cosmetics(delta: float) -> void:
-	if kind == 0:
-		var actual_velocity := get_real_velocity()
-		_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
-		_wolf.set_combat(state, _state_time)
-		return
-	if kind != 1:
-		return
-	var moving := Vector2(velocity.x, velocity.z).length()
-	_walk_time += delta * moving * 2.4
-	_body.position.y = absf(sin(_walk_time * 2.0)) * 0.035 * minf(moving, 1.0)
-	for index in _legs.size():
-		var offset := PI if index % 2 == 0 else 0.0
-		_legs[index].rotation.x = sin(_walk_time + offset) * minf(moving * 0.2, 0.48)
-	for arm in _arms:
-		arm.rotation.x = -0.9 * sin(clampf(_state_time / 0.65, 0, 1) * PI * 0.5) if state == "WINDUP" else 0.0
 
-func _step_devil(delta: float) -> void:
+## Everyone this mob could hunt: the local ranger plus every host seat.
+func _candidates() -> Array:
+	var list: Array = []
+	for candidate in targets:
+		if is_instance_valid(candidate) and not list.has(candidate):
+			list.append(candidate)
+	if is_instance_valid(player) and not list.has(player):
+		list.append(player)
+	return list
+
+
+func _sight_range() -> float:
+	return DEVIL_SIGHT if kind == 2 else WILD_SIGHT
+
+
+## Eye height follows the authored body: the wolf looks out low, the cinder
+## devil looks out of its horned skull about two metres up.
+func _eye_height() -> float:
+	var height := 0.95 if kind == 0 else 2.15
+	return maxf(0.6, height * MobSenses.EYE_HEIGHT_FRACTION)
+
+
+## Huntable rangers: alive and outside the town's safe ring.
+func _is_hostile(candidate: Node3D) -> bool:
+	if not is_instance_valid(candidate) or candidate.get("alive") == false:
+		return false
+	return not MobSenses.in_safe_ring(safe_center, candidate.global_position)
+
+func _update_cosmetics(_delta: float) -> void:
+	var actual_velocity := get_real_velocity()
+	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
+	_wolf.set_combat(state, _state_time)
+
+func _step_devil(delta: float, pursuit: bool) -> void:
 	_state_time += delta
 	_dodge.advance(delta,is_on_floor())
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
 	_slide_cooldown = maxf(0.0,_slide_cooldown-delta)
-	var to_target := _target.global_position-global_position
+	var focus := _senses.focus()
+	var to_target := focus-global_position
 	to_target.y = 0.0
 	var distance := to_target.length()
-	var target_safe := Vector2(_target.position.x-safe_center.x,_target.position.z-safe_center.z).length() < 19.0
-	var aggro := not target_safe and distance < DEVIL_AGGRO and global_position.distance_to(home) < DEVIL_LEASH
+	var aggro := pursuit and not MobSenses.in_safe_ring(safe_center, focus)
 	if not aggro:
 		if state != "RETURN":
 			_enter_devil_state("RETURN")
@@ -432,7 +435,10 @@ func _step_devil(delta: float) -> void:
 			if _state_time >= DEVIL_RECOVER:
 				_enter_devil_state("CIRCLE")
 		_:
-			_devil_circle(delta,distance,to_target)
+			if _senses.seen:
+				_devil_circle(delta,distance,to_target)
+			else:
+				_devil_hunt(delta)
 	var was_grounded := is_on_floor()
 	if _dodge.active:
 		var step_velocity: Vector3 = _dodge.velocity()
@@ -488,10 +494,24 @@ func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 		direction += to_player.normalized()*0.8
 	_move_intent = _steer_devil(_devil_with_separation(direction))
 	_move_speed = 6.8
-	_face_intent = _move_intent
+	# A circling predator keeps its eyes on the quarry; facing the orbit
+	# direction would swing the ranger out of the sight cone every lap.
+	_face_intent = to_player
 	if _decision_timer <= 0.0:
 		_decision_timer = 0.38+_rng.randf()*0.35
 		_devil_choose(distance,to_player)
+
+## Lost sight but still remembers: run down the last known spot, then scan.
+func _devil_hunt(delta: float) -> void:
+	var offset := _senses.last_seen-global_position
+	offset.y = 0.0
+	if offset.length() > MobSenses.ARRIVE_DISTANCE:
+		_move_intent = _steer_devil(_devil_with_separation(offset.normalized()))
+		_move_speed = 5.2
+		_face_intent = _move_intent
+		return
+	rotation.y += sin(_state_time*1.5)*delta*1.7
+	_face_intent = -global_basis.z
 
 func _devil_choose(distance: float, to_player: Vector3) -> void:
 	if not is_on_floor():
@@ -687,12 +707,44 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(),get_aim_position(),applied,"hit",headshot,health <= 0.0)
-	# Every mob bleeds: wolf, stone sentinel and devil all carry blood in this
+	# Every mob bleeds: the wolf and the cinder devil both carry blood in this
 	# world, so a landed hit always reads on the body and on the floor.
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		_enter_dead(true)
+		return
+	_respond_to_attack()
+
+
+## The projectile, blade or spell that landed names itself here before it
+## applies damage, so the mob can turn on an archer it never saw.
+func note_attacker(attacker: Node3D) -> void:
+	_attacker = attacker
+
+
+## A landed blow always starts the fight, and the cry pulls the neighbours in.
+func _respond_to_attack() -> void:
+	var attacker: Node3D = _attacker if is_instance_valid(_attacker) else null
+	_attacker = null
+	if attacker != null and not _is_hostile(attacker):
+		return
+	if attacker == null:
+		var nearest := _resolve_target()
+		if not is_instance_valid(nearest) or not _is_hostile(nearest):
+			return
+		attacker = nearest
+	_senses.notice(attacker,attacker.global_position)
+	MobSenses.alert_pack(self,attacker,_senses.last_seen)
+
+
+## A neighbour was struck within earshot: take up the hunt where it last saw.
+func hear_alert(attacker: Node3D, at: Vector3) -> void:
+	if not alive or replica:
+		return
+	if is_instance_valid(attacker) and not _is_hostile(attacker):
+		return
+	_senses.notice(attacker,at)
 
 ## The local death: combat collision off, gravity on, the limp collapse, then
 ## the shared hold. Replicas call it with `announce = false` so the kill stays
@@ -712,7 +764,7 @@ func _enter_dead(announce: bool) -> void:
 		# The dropped pickup owns the weapon now; keep it out of the corpse.
 		_devil.set_weapon("claw")
 	if announce:
-		defeated.emit(self, 8 if kind == 0 else (6 if kind == 2 else 18))
+		defeated.emit(self, 8 if kind == 0 else 6)
 	# Collapse first, then hold the corpse for the shared five minutes.
 	var death_tween := create_tween()
 	if kind == 0:
@@ -720,13 +772,10 @@ func _enter_dead(announce: bool) -> void:
 		_wolf.die(fall)
 		death_tween.tween_interval(0.45)
 		CorpseHold.append(death_tween, self, _body)
-	elif kind == 2:
-		# The procedural cinder keeps its authored flop; the root still falls.
-		_devil.die()
-		death_tween.tween_interval(0.55)
-		CorpseHold.append(death_tween, self, _body)
 	else:
-		death_tween.tween_property(_body, "rotation:z", PI * 0.48, 0.45)
+		# The imported cinder's skeleton ragdolls from its lethal pose.
+		_devil.die(fall)
+		death_tween.tween_interval(0.90)
 		CorpseHold.append(death_tween, self, _body)
 
 func snapshot() -> Dictionary:
@@ -772,8 +821,6 @@ func apply_snapshot(state: Dictionary) -> void:
 	if kind == 0:
 		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
 		_wolf.set_combat(self.state,_state_time)
-	elif kind == 1:
-		_update_cosmetics(0.0)
 	else:
 		_devil.set_motion(velocity,grounded)
 		_devil.set_action(self.state,_state_time)

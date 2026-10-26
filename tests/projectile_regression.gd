@@ -25,7 +25,7 @@ func run() -> void:
 	arena = Node3D.new()
 	root.add_child(arena)
 	var enemy := Enemy.new()
-	enemy.kind = 1
+	enemy.kind = 0
 	enemy.position = Vector3(0, 0, -3)
 	arena.add_child(enemy)
 	enemy.defeated.connect(func(_enemy, _reward): defeats += 1)

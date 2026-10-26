@@ -205,7 +205,7 @@ func run() -> void:
 	advance(3.0)
 	reset_pair()
 
-	# Frontier: the wolf/sentinel strike signal resolves through the same guard.
+	# Frontier: the wolf strike signal resolves through the same guard.
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await create_timer(0.4).timeout
@@ -224,7 +224,7 @@ func run() -> void:
 	await process_frame
 	check(game.combat.blocking, "Frontier right-click raises a sword guard")
 	game._on_enemy_attack(enemy,13.0)
-	check(game.health == 100.0 and enemy.state == "STAGGER", "Frontier parry prevents damage and staggers the wolf or sentinel")
+	check(game.health == 100.0 and enemy.state == "STAGGER", "Frontier parry prevents damage and staggers the wolf")
 	await create_timer(0.30).timeout
 	var stamina_before: float = game.stamina
 	game._on_enemy_attack(enemy,13.0)

@@ -6,6 +6,11 @@ same quality route as the ranger: licensed CC0 Quaternius human bases, outfits,
 hair and skeleton clips, with original devil anatomy, materials, rig additions
 and attack/death authoring on top.
 
+A sixth — the **Cinder devil** pack enemy — is shipped on the original
+procedural route described in [The Cinder devil](#the-cinder-devil-original-route)
+below: no source download, every mesh, atlas and clip authored in this
+repository. The pack AI, its capsule and its weapon roles are unchanged.
+
 The earlier procedural metaball pass was retired. It produced complete assets,
 but its smooth blob anatomy and packed single-atlas surfaces did not reach the
 ranger's authored PBR detail. The current pipeline keeps the deterministic,
@@ -204,6 +209,128 @@ runtime carries only values glTF cannot express.
   fight leaves the battlefield littered instead of erasing bodies after four
   seconds. Corpses keep no blocking collision, so wave and aggro filters that
   read `alive` ignore them.
+
+- The `aggro` profile key is now `sight`: aggression is owned by
+  `scripts/mob_senses.gd`, not by a distance radius. A devil fights only what
+  it can see (140° cone, its `sight` range, a clear chest/head ray) and keeps
+  hunting for 15 s after losing the view. A landed arrow, blade or spell names
+  its archer through `note_attacker()`, and the cry alerts every `wild_mobs`
+  mob within 12 m. The old home `leash` is gone.
+
+## The Cinder devil (original route)
+
+The frontier pack enemy used to be a half-metre figure assembled at runtime
+from `scripts/geo.gd` spheres. It is now an authored creature. The CC0
+Quaternius archives that the five mobs above rebuild from are not present in a
+clean checkout, so this mob does **not** use the source route: like the Unholy
+Forest set it is authored from nothing, by a deterministic Blender script, with
+every map rasterised from analytic fields.
+
+It shares one authoring implementation with the forest mobset.
+`tools/prepare_cinder_devil.py` imports `tools/prepare_forest_mobs.py` and
+rebinds its `styles`/`surfaces`/`SEED`/`FPS` globals to the cinder modules, so
+rig building, envelope skinning, the per-material atlas bake, clip baking, the
+GLB export, metadata measurement and the capture passes are literally the same
+code path. Nothing is forked.
+
+| Surface | Purpose |
+| --- | --- |
+| `tools/cinder_devil_styles.py` | Recipe: surfaces, atlas sizes, clips, strides, palettes, output path |
+| `tools/cinder_devil_surface.py` | `char`, `ash`, `horn` fields plus cinder-specific `ember`/`void`; the rest delegates to `tools/forest_surface.py` |
+| `tools/prepare_cinder_devil.py` | Geometry, rig, weights, seven clips, GLB + JSON export, captures |
+| `tools/build_cinder_devil.py` | One-command rebuild |
+| `assets/characters/devils/ironwood_cinder_devil.glb` | Runtime skinned, animated, textured mesh |
+| `assets/characters/devils/ironwood_cinder_devil.json` | Measured bounds, bones, clips, materials, root drift |
+| `scripts/cinder_devil_visual.gd` | Presentation-only clip sampler and weapon sockets |
+| `scripts/enemy.gd` (`kind == 2`) | Pack AI, collision, damage, arrows, gold, corpse hold |
+
+Build:
+
+```powershell
+python tools/build_cinder_devil.py
+```
+
+Then reimport and run `tests/devil_regression.gd` with the managed engine.
+Ignored intermediates live in `.runtime/cinder-source/cinder_devil/`
+(`textures/`, `captures/`, the source `.blend`).
+
+### Shipped budget
+
+Measured from the imported GLB:
+
+| Mob | Height | Triangles | Bones | Materials | Images |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cinder devil | 2.242 m | 43,366 | 38 | 8 | 26 |
+
+Height is the horn tips; the crown is at 2.11 m, which is what the gameplay
+profile's 2.15 m capsule covers. Soles sit at y ≈ 0.007 and the root
+translation drift is 0.
+
+### Clips
+
+Seven clips, baked at 60 Hz, in place, stationary root. The runtime owns loop
+modes (`scripts/cinder_devil_visual.gd`), because Godot's glTF importer strips
+a trailing `_Loop` from animation names.
+
+| Clip | Name | Duration | Loop | Impact |
+| --- | --- | ---: | --- | ---: |
+| Idle | `Cinder_Idle` | 2.200 | yes | — |
+| Walk | `Cinder_Walk` | 0.900 | yes | — |
+| Run | `Cinder_Run` | 0.617 | yes | — |
+| Attack | `Cinder_Attack` | 0.800 | no | 0.380 |
+| Shoot | `Cinder_Shoot` | 0.550 | no | 0.300 |
+| Hit | `Cinder_Hit` | 0.367 | no | 0.100 |
+| Death | `Cinder_Death` | 0.900 | no | — |
+
+The two impacts are the gameplay clock, not decoration: the pack AI's
+`WINDUP` is 0.30 s and its strike frame is 0.08 s in, so damage lands at
+0.38 s — where the authored rake is; the bow state spawns its arrow at 0.30 s,
+which is the draw clip's release. `shoot` is the extra clip the primitives
+never needed, because a bow-armed pack member needs a draw pose.
+
+### Materials
+
+Eight authored surfaces, each with its own atlas and all three PBR maps:
+
+- **Char** 2048² — carbonised hide: heat-cracked plates, soot seams, granular
+  crust, and a weak emissive map so the deepest fissures still smoulder.
+- **Ash** 1024² — the pale crust that settles on shoulders, upper back, skull
+  crest, forearms and shins.
+- **Horn** 1024² — keratin: growth rings, longitudinal striae and a coarse
+  crack network, dark at the root and dull at the tip. Never ivory.
+- **Bone** 1024² — ribs, spine ridge, teeth, claws.
+- **Void** 512² — the inside of the maw and the eye sockets, black with a faint
+  warm floor.
+- **Ember** 512² — throat, sternum cavity, back seams, eyes and the split
+  cranium. Its field is location-independent (turbulent heat, not a radial
+  iris), because one material has to glow convincingly in sockets at 2.0 m and
+  in a sternum at 1.5 m.
+- **Cloth** and **Leather** 1024² — hanging burnt tatters and the hide straps.
+
+The four frontier-material names are prefixed `Cinder_` so a reimport cannot
+collide with the forest set's `Forest_*`.
+
+### Runtime contract
+
+- `scripts/enemy.gd` `kind == 2` is unchanged in behaviour: orbit slots, the
+  shared `DodgeStep`, slides, leaps, dives, the three-attacker cap, kiting bow
+  devils, the `cinder_devils` group and the six-gold death. Only presentation
+  and body geometry changed.
+- Geometry: capsule radius 0.34 / height 2.15, aim point +1.25 m, head profile
+  `Vector2(0.26, 0.16)`, blood scale 1.20.
+- `blood_rig()` returns the imported GLB root, so stains ride the real
+  `Skeleton3D` instead of being measured off primitive triangles.
+- The **Sunken Delve's** four primitive depth roles (imp, devil, bonefiend,
+  brute) still use `scripts/devil_visual.gd`; they are deliberately cheap,
+  depth-scaled fodder and `delve_regression.gd` asserts they stay primitive.
+
+### Retirement note
+
+The **Ruin sentinel** (`kind == 1`) was removed with this cutover: its capsule,
+primitive geometry, head-zone constants, spawn placements and every regression
+fixture are gone. `RangeWorld.enemy_spawns` still holds 36 placements — the
+five former sentinel slots around the Watchfall Ruins, the Suncrest shrine and
+the northern approach are now wolves, so those objectives stay defended.
 
 ## Verification gates
 

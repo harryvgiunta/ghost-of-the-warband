@@ -748,6 +748,10 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 	state.victims[unit.get_instance_id()] = true
 	var damage: float = state.damage
 	var outcome := DEFENSE_NONE
+	# Name the striker before the blow lands so a mob can turn on the ranger
+	# that hit it, even a backstab it never saw coming.
+	if is_instance_valid(actor) and unit.has_method("note_attacker"):
+		unit.note_attacker(actor)
 	if unit.has_method("note_impact"):
 		unit.note_impact(_impact_force(state, at, unit))
 	if unit.has_method("receive_melee"):

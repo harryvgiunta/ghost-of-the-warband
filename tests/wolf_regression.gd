@@ -151,7 +151,7 @@ func run() -> void:
 	visual.queue_free()
 	await process_frame
 
-	# Enemy cutover: wolf presentation only, sentinel primitives untouched.
+	# Enemy cutover: wolf presentation only, built from the imported visual.
 	var dummy_player := CharacterBody3D.new()
 	world.add_child(dummy_player)
 	dummy_player.position = Vector3(0, 0, 0)
@@ -164,7 +164,6 @@ func run() -> void:
 	await physics_frame
 	await physics_frame
 	check(wolf_enemy._wolf != null, "Wolf enemy attaches its imported visual")
-	check(wolf_enemy._legs.is_empty() and wolf_enemy._arms.is_empty(), "Wolf no longer creates primitive limb nodes")
 	check(wolf_enemy._body.get_child_count() == 1 and wolf_enemy._body.get_child(0) == wolf_enemy._wolf, "Wolf body contains only the imported visual")
 	wolf_enemy.take_damage(999.0, 0)
 	await create_timer(0.55).timeout
@@ -173,18 +172,6 @@ func run() -> void:
 	wolf_enemy.queue_free()
 	await process_frame
 
-	var sentinel := Enemy.new()
-	sentinel.kind = 1
-	sentinel.position = Vector3(6, 0, 0)
-	world.add_child(sentinel)
-	await physics_frame
-	await physics_frame
-	check(sentinel._wolf == null, "Sentinel does not attach the wolf visual")
-	check(sentinel._legs.size() == 2 and sentinel._arms.size() == 2, "Sentinel keeps its primitive limb presentation")
-	sentinel.take_damage(999.0, 0)
-	await create_timer(0.55).timeout
-	check(sentinel._body.rotation.z > 1.0, "Sentinel keeps its existing death roll")
-	sentinel.queue_free()
 	world.queue_free()
 	await process_frame
 	print("WOLF_REGRESSION checks=", checks, " failures=", failures)

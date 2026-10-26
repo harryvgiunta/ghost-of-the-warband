@@ -13,6 +13,9 @@ var flying := true
 var age := 0.0
 var damage := 0.0
 var source_id := -1
+## The body that released this shaft. Mobs read it through `note_attacker` so
+## a ranged hit from cover still names the archer.
+var shooter: Node3D
 var hit_mask := 1 | 2
 var authoritative_damage := true
 var pierce := 0
@@ -72,6 +75,7 @@ func _physics_process(delta: float) -> void:
 		if hit_enemy and not hit_player and pierce > 0 and not _pierced.has(hit.collider_id):
 			var pierced_headshot: bool = Hitbox.is_headshot(collider as Node, hit.position)
 			if authoritative_damage:
+				_note_attacker(collider)
 				_note_impact(collider)
 				collider.take_damage(damage, source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
@@ -94,6 +98,7 @@ func _physics_process(delta: float) -> void:
 				applied_hit = true
 			elif hit_enemy:
 				headshot = Hitbox.is_headshot(collider as Node, hit.position)
+				_note_attacker(collider)
 				_note_impact(collider)
 				collider.take_damage(damage, source_id, headshot)
 				applied_hit = true
@@ -118,10 +123,19 @@ func _physics_process(delta: float) -> void:
 	if age > 8.0 or global_position.y < -30.0:
 		queue_free()
 
+## Hands the shooter to a mob that implements `note_attacker` before the blow
+## lands. Bodies that do not care (arena fighters, the player) are untouched.
+func _note_attacker(collider: Object) -> void:
+	if not is_instance_valid(shooter) or not is_instance_valid(collider):
+		return
+	if collider.has_method("note_attacker"):
+		collider.note_attacker(shooter)
+
+
+## The arrow's flight direction is the corpse's fall force.
 func _note_impact(collider: Object) -> void:
 	if collider != null and collider.has_method("note_impact"):
 		collider.note_impact(ImpactRules.projectile_force(velocity))
-
 
 func _place_visual() -> void:
 	if not is_instance_valid(_visual):

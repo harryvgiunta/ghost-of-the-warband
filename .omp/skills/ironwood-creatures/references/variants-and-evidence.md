@@ -80,7 +80,7 @@ Run the actual changed scene, not just a model viewer. Exercise:
 3. Attack entry/telegraph/0.65 s hit/recovery; player remains in range, escapes before impact, enters safe area, and has excessive vertical separation. Existing damage decisions and one-hit/recovery behavior stay unchanged. Frame-step/record hit time alongside the rendered bite; don't infer synchronization from clip names.
 4. Lethal damage in idle, locomotion, windup and recovery. Verify immediate authority cancellation, exactly one reward, collision shutdown, complete visible death animation despite the dead early return, held corpse and original removal timing. Do not replay queued attacks after death.
 5. Flat ground, ordinary slopes, uneven ground and edges. Verify body height, four-paw contact, no sinking/drift after repeated state transitions and no stretching. Test repeated transition cycles long enough to expose cumulative authored/solved-pose contamination.
-6. Sentinel spawn, chase, windup/damage, recovery and death. Its primitives, limb/arm motion, health/damage/reward/collider and timing remain unchanged. A wolf improvement that deletes shared sentinel behavior fails acceptance.
+6. Cinder devil spawn, pack orbit, windup/damage, recovery and death. Its imported visual, role profiles, head zone, health/damage/reward/collider and timing remain unchanged. A wolf improvement that deletes shared frontier behavior fails acceptance.
 7. Bow/projectile and melee interaction with the wolf through the existing paths, aim label placement, collision with other enemies/world and safe-zone behavior. If a future change touches shared arena/replication code, exercise the affected modes and host/client authority; do not claim wolves already participate in arena networking without checking callers.
 
 Supplement rendered play with deterministic assertions for real state boundaries, animation names/durations, root/bone invariants, repeat transitions, death ticking and material isolation when implementing those features. Existing humanoid regressions do not automatically validate a quadruped. Run the relevant project regressions after integration when the implementation assignment authorizes verification, and report only those actually exercised.
@@ -95,7 +95,7 @@ Tools: observed Blender/Godot versions; commands actually run; exit/error observ
 Asset: mesh/material/bone counts; units/axes; root scale; bounds; skeleton/animation paths
 Clips: actual names, durations/loops, stride and contact table; impact/recovery landmarks
 Integration: physics/AI owner, sampling clock, authored-before-correction ordering,
-             preserved sentinel and damage/death contracts; removed obsolete wolf paths
+             preserved cinder devil and damage/death contracts; removed obsolete wolf paths
 Variants (if requested): size/coat data, measured geometry/aim/contact, material isolation,
                          complete combination matrix with observed results
 Evidence: rendered contact sheet/video paths; real gameplay scenarios and observations
