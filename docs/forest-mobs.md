@@ -173,9 +173,9 @@ derived from the sampled height field with a per-surface strength from
   `_profiles()`, `_group_name()`, `_node_prefix()` and `_visual_script()` hooks.
   One state machine (IDLE/RETURN/CIRCLE/WINDUP/STRIKE/RECOVER/STAGGER/DEAD)
   drives both mobsets; the devils keep their defaults.
-- Kinds are 9 (warden), 10 (stalker) and 11 (gallowsroot): 0–2 are the
-  wolf/sentinel/cinder mobs, 3–7 the devils, and 8 is `RangerClone.KIND`, so the
-  forest set continues past the clone rather than colliding with it.
+- Kinds are 9 (warden), 10 (stalker) and 11 (gallowsroot): 0 is the wolf, 2
+  the cinder devil, 3–7 the devils, and 8 is `RangerClone.KIND`, so the forest
+  set continues past the clone rather than colliding with it.
 - These are natural-weapon mobs: `held_weapon_id()` is empty, so a kill pays
   gold and the standard alternating loot roll, and `blood_strike_point()` is
   the striking hand (`hand_r`) so a claw comes away wet.

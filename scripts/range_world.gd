@@ -23,7 +23,7 @@ var player_spawn: Vector3 = Vector3(0.0, 3.0, 35.0)
 var town_entry: Vector3 = Vector3(0.0, 3.0, 47.0)
 var enemy_spawns: Array[Dictionary] = []
 ## Authored devil-court placements. Kept separate from `enemy_spawns` so the
-## existing wolf/sentinel/cinder spawn contract stays a stable 36 entries.
+## existing wolf/cinder spawn contract stays a stable 36 entries.
 var devil_spawns: Array[Dictionary] = []
 ## Unholy Forest placements. A third table for the same reason: the legacy 36
 ## and the 16 devils stay measured contracts, and these mobs own the woodland.
@@ -715,14 +715,17 @@ func activate_interactable(id: String) -> void:
 
 func _build_enemy_spawns() -> void:
 	# Clear ground near roads; objective defenders, wilderness hunters and devil packs.
+	# The Watchfall Ruins, Suncrest shrine and northern approach guards are wolves:
+	# the Ruin sentinel they used to place was retired with the imported cinder
+	# devil cutover, and the objectives stay defended.
 	for entry in [
 		Vector3(-49, 0, -20), Vector3(-61, 0, -30),
-		Vector3(49, 1, -56), Vector3(61, 1, -65),
-		Vector3(-9, 1, -96), Vector3(-21, 1, -98),
+		Vector3(49, 0, -56), Vector3(61, 0, -65),
+		Vector3(-9, 0, -96), Vector3(-21, 0, -98),
 		Vector3(-27, 0, -1), Vector3(-39, 0, -16), Vector3(-62, 0, -48),
 		Vector3(-48, 0, -68), Vector3(-35, 0, -82),
 		Vector3(40, 0, -23), Vector3(62, 0, -33), Vector3(75, 0, -48),
-		Vector3(35, 1, -80), Vector3(8, 0, -91)
+		Vector3(35, 0, -80), Vector3(8, 0, -91)
 	]:
 		enemy_spawns.append({"position": _ground(entry.x, entry.z), "kind": int(entry.y)})
 	# Cinder devil packs. The village glade pack sits just outside the camp's

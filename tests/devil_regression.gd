@@ -1,10 +1,14 @@
 extends SceneTree
 ## Cinder devil packs must circle and flank rather than charge in a line, mix
 ## leaps, slides and shared quick steps, and commit at most three attackers.
+## The presentation is the imported GLB: seven authored clips, a 2.1 m frame
+## and a skinned body the blood field can measure.
 
 const Enemy = preload("res://scripts/enemy.gd")
-const DevilVisual = preload("res://scripts/devil_visual.gd")
+const DevilVisual = preload("res://scripts/cinder_devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
+
+const CLIP_KEYS := ["idle", "walk", "run", "attack", "shoot", "hit", "death"]
 
 var failures := 0
 var checks := 0
@@ -38,6 +42,50 @@ func run() -> void:
 	dummy.position = Vector3(0,0.05,0)
 	world.add_child(dummy)
 
+	# --- the asset ---------------------------------------------------------
+	var visual := DevilVisual.new()
+	world.add_child(visual)
+	await process_frame
+	check(visual._skeleton != null and visual._player != null,
+		"The cinder devil loads the imported skeleton and its AnimationPlayer")
+	var player: AnimationPlayer = visual._player
+	for key in CLIP_KEYS:
+		check(player.has_animation(str(DevilVisual.CLIPS[key])),
+			"The imported cinder devil carries the %s clip" % key)
+	for key in ["idle", "walk", "run"]:
+		check(player.get_animation(str(DevilVisual.CLIPS[key])).loop_mode == Animation.LOOP_LINEAR,
+			"%s loops" % key)
+	for key in ["attack", "shoot", "hit", "death"]:
+		check(player.get_animation(str(DevilVisual.CLIPS[key])).loop_mode == Animation.LOOP_NONE,
+			"%s is a one-shot clip" % key)
+	check(is_equal_approx(player.get_animation("Cinder_Attack").length, 0.80),
+		"The attack clip is the authored 0.80 s")
+	check(is_equal_approx(player.get_animation("Cinder_Shoot").length, 0.55),
+		"The draw clip is the authored 0.55 s")
+
+	var mesh_bounds := AABB()
+	var first_mesh := true
+	var surface_count := 0
+	for mesh in visual.find_children("*","MeshInstance3D",true,false):
+		var node := mesh as MeshInstance3D
+		surface_count += node.mesh.get_surface_count()
+		var box: AABB = node.global_transform*node.get_aabb()
+		if first_mesh:
+			mesh_bounds = box
+			first_mesh = false
+		else:
+			mesh_bounds = mesh_bounds.merge(box)
+	check(mesh_bounds.size.y > 2.0 and mesh_bounds.size.y < 2.8,
+		"The authored frame stands over two metres tall")
+	check(mesh_bounds.position.y > -0.03 and mesh_bounds.position.y < 0.05,
+		"The devil's soles rest on the ground plane")
+	check(surface_count == 8, "The mesh carries one surface per authored material")
+
+	# The blood field measures a real skinned body, not a triangle soup.
+	check(visual.blood_anchor() != visual and visual.blood_anchor().find_child("Skeleton3D", true, false) != null,
+		"Blood stains ride the imported skeleton")
+
+	# --- the pack AI -------------------------------------------------------
 	var devils: Array = []
 	var start: Array[Vector3] = []
 	for index in 5:
@@ -55,14 +103,17 @@ func run() -> void:
 
 	var first = devils[0]
 	var capsule := first.get_child(0) as CollisionShape3D
-	check(first.get_display_name() == "Cinder devil", "The new enemy is named Cinder devil")
+	check(first.get_display_name() == "Cinder devil", "The pack enemy is named Cinder devil")
 	check(is_equal_approx(first.max_health,24.0), "Cinder devils are fragile at 24 health")
-	check(capsule != null and is_equal_approx(capsule.shape.radius,0.22) and is_equal_approx(capsule.shape.height,0.90), "Cinder devils use the half-height 0.9 m capsule")
-	check(first._devil != null and first._body.get_child_count() == 1, "Cinder devils attach the procedural visual")
-	check(first._devil.get_height() > 0.9 and first._devil.get_height() < 1.1, "The devil visual stays half-size")
-	check(first.head_hit_profile() == Vector2(0.17,0.10), "The horned head keeps its compact hit profile")
+	check(capsule != null and is_equal_approx(capsule.shape.radius,0.34) and is_equal_approx(capsule.shape.height,2.15),
+		"Cinder devils use the authored 2.15 m capsule")
+	check(first._devil != null and first._body.get_child_count() == 1,
+		"Cinder devils attach the imported visual")
+	check(first.head_hit_profile() == Vector2(0.26,0.16), "The horned head keeps its authored hit profile")
 	var head_height: float = first.head_hitbox_center().y-first.global_position.y
-	check(head_height > 0.6 and head_height < 1.0, "The head zone sits on the animated head, not the body centre")
+	check(head_height > 1.55 and head_height < 2.15, "The head zone sits on the animated skull")
+	check(is_equal_approx(first.get_aim_position().y-first.global_position.y,1.25),
+		"Aim resolves at the chest of the taller frame")
 	check(first._dodge != null, "Cinder devils own a shared quick-step controller")
 	check(is_equal_approx(first._dodge.travel,DodgeStep.TRAVEL*0.5), "Devil side steps cover half the player distance")
 	check(is_equal_approx(first._dodge.duration,0.22), "Devil side steps use the quicker 0.22 s timing")
@@ -123,6 +174,7 @@ func run() -> void:
 		devil.queue_free()
 	await process_frame
 
+	# --- weapon roles ------------------------------------------------------
 	var dagger_devil := Enemy.new()
 	dagger_devil.kind = 2
 	dagger_devil.devil_weapon = "dagger"
@@ -133,7 +185,7 @@ func run() -> void:
 	world.add_child(dagger_devil)
 	dagger_devil.set_physics_process(false)
 	await process_frame
-	check(dagger_devil._devil._weapon_role == "dagger" and dagger_devil._devil._melee_weapon != null, "Dagger devils hold a dagger mesh")
+	check(dagger_devil._devil._weapon == "dagger" and dagger_devil._devil._melee != null, "Dagger devils hold a dagger mesh")
 	check(dagger_devil.held_weapon_id() == "dagger_iron", "Dagger devils drop the iron dagger")
 	check(is_equal_approx(dagger_devil._attack_damage,6.0) and is_equal_approx(dagger_devil._attack_reach,1.6), "Daggers use the short 6-damage reach profile")
 	var sword_devil := Enemy.new()
@@ -146,7 +198,7 @@ func run() -> void:
 	world.add_child(sword_devil)
 	sword_devil.set_physics_process(false)
 	await process_frame
-	check(sword_devil._devil._weapon_role == "sword" and sword_devil._devil._melee_weapon != null, "Sword devils hold a short sword mesh")
+	check(sword_devil._devil._weapon == "sword" and sword_devil._devil._melee != null, "Sword devils hold a short sword mesh")
 	check(sword_devil.held_weapon_id() == "sword_short", "Sword devils drop the shortsword")
 	check(is_equal_approx(sword_devil._attack_damage,11.0) and is_equal_approx(sword_devil._attack_reach,2.0), "Short swords use the longer 11-damage reach profile")
 	var bow_devil := Enemy.new()
@@ -158,7 +210,7 @@ func run() -> void:
 	bow_devil.position = Vector3(9,0.12,9)
 	world.add_child(bow_devil)
 	await physics_frame
-	check(bow_devil._devil._weapon_role == "bow" and bow_devil._devil._bow != null, "Bow devils hold a bow mesh")
+	check(bow_devil._devil._weapon == "bow" and bow_devil._devil._bow != null, "Bow devils hold a bow mesh")
 	check(bow_devil.held_weapon_id() == "bow_recurve", "Bow devils drop the recurve bow")
 	check(is_equal_approx(bow_devil._attack_damage,7.0) and is_equal_approx(bow_devil._attack_reach,0.0), "Bow devils use the 7-damage ranged profile")
 	var saw_shoot := false
@@ -173,6 +225,7 @@ func run() -> void:
 	bow_devil.queue_free()
 	await process_frame
 
+	# --- death -------------------------------------------------------------
 	var doomed := Enemy.new()
 	doomed.kind = 2
 	doomed.pack_index = 5
@@ -184,47 +237,47 @@ func run() -> void:
 	await physics_frame
 	doomed.take_damage(999.0,0)
 	check(not doomed.alive and doomed.state == "DEAD", "Lethal damage puts a devil into its death state")
-	check(doomed._devil.is_dead(), "The devil visual routes death through its own flop")
+	check(doomed._devil.is_dead(), "The devil visual routes death through its authored clip")
 	check(reward_received == 6, "A Cinder devil awards six gold")
 	check(doomed.held_weapon_id().is_empty(), "A claw devil drops no weapon")
 	await create_timer(0.6).timeout
-	check(doomed._devil._death_time > 0.5, "The devil death pose advances even while the corpse is held")
+	check(doomed._devil._death_time > 0.4, "The devil death clip advances even while the corpse is held")
 
-	var visual := DevilVisual.new()
-	world.add_child(visual)
-	await process_frame
-	var mesh_bounds := AABB()
-	var first_mesh := true
-	for mesh in visual.find_children("*","MeshInstance3D",true,false):
-		var box: AABB = mesh.global_transform*mesh.get_aabb()
-		if first_mesh:
-			mesh_bounds = box
-			first_mesh = false
-		else:
-			mesh_bounds = mesh_bounds.merge(box)
-	check(mesh_bounds.size.y > 0.9 and mesh_bounds.size.y < 1.1, "The devil mesh stays half-size at about 0.94 m")
-	check(mesh_bounds.position.y > -0.02 and mesh_bounds.position.y < 0.03, "The devil's feet sit on the ground plane")
-	visual.set_action("WINDUP",0.34)
+	# --- clip selection and posture ---------------------------------------
+	visual.set_action("WINDUP",0.15)
 	visual._process(0.016)
-	check(visual._arm_r.rotation.x < -1.5 and visual._torso.rotation.y < -0.3, "Windup coils the claw and shoulders")
-	visual.set_action("STRIKE",0.16)
+	check(visual.get_clip_name() == "Cinder_Attack", "Windup plays the authored attack clip")
+	var windup_at: float = visual._player.current_animation_position
+	check(windup_at > 0.10 and windup_at < 0.32, "Windup seeks into the authored rear-back, ahead of the impact")
+	visual.set_action("STRIKE",0.08)
 	visual._process(0.016)
-	check(visual._arm_r.rotation.x > 0.8 and visual._torso.rotation.y > 0.3, "Strike drives the claw across the body")
+	check(visual._player.current_animation_position >= 0.38, "The strike frame reaches the authored impact at 0.38 s")
+	visual.set_action("SHOOT",0.30)
+	visual._process(0.016)
+	check(visual.get_clip_name() == "Cinder_Shoot", "The bow state plays the draw clip")
+	check(visual._player.current_animation_position >= 0.28, "The draw clip reaches its release frame")
+	visual.set_action("STAGGER",0.10)
+	visual._process(0.016)
+	check(visual.get_clip_name() == "Cinder_Hit", "A stagger plays the authored hit flinch")
 	visual.set_action("CIRCLE",0.0)
-	visual.set_step(0.5,Vector3.LEFT)
+	visual.set_step(0.5,Vector3.RIGHT)
 	visual._process(0.016)
-	check(visual._pelvis.rotation.y > 0.4 and visual._torso.rotation.y > 0.7, "A quick step opens the hips and shoulders into the travel")
-	check(visual._leg_l.rotation.z > 0.2 and visual._leg_r.rotation.z < -0.05, "The leading foot reaches out of the wide stance")
-	visual.set_step(-1,Vector3.LEFT)
+	check(absf(visual._instance.rotation.z) > 0.02, "A quick step leans the body onto the lead foot")
+	visual.set_step(-1,Vector3.RIGHT)
 	visual.set_slide(1.0)
-	for frame in 10:
+	for frame in 12:
 		visual._process(0.016)
-	check(visual._rig.position.y < -0.1 and visual._rig.rotation.x > 0.25, "The slide drops and leans the body back")
+	check(visual._instance.position.y < -0.12 and visual._instance.rotation.x > 0.25, "The slide drops and pitches the body")
+	visual.set_slide(-1)
+	var standing_head: float = visual.head_hitbox_center().y
 	visual.die()
-	for frame in 40:
+	for frame in 80:
 		visual._process(0.016)
-	check(visual._rig.rotation.z > 1.0, "The devil death flops the body onto its side")
-	check(visual.head_hitbox_center().y < 0.3, "The head follows the corpse onto the ground")
+	check(visual.get_clip_name() == "Cinder_Death", "Death plays the authored collapse")
+	check(visual._death_held, "The death clip holds its final pose")
+	check(standing_head - visual.head_hitbox_center().y > 0.6,
+		"The head drops over half a metre as the corpse goes down")
+
 	world.queue_free()
 	await process_frame
 	print("DEVIL_REGRESSION checks=", checks, " failures=", failures)
