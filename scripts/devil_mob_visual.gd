@@ -11,6 +11,7 @@ extends Node3D
 ## and adjusts the physics-clock attack playback so the authored impact frame
 ## always coincides with the gameplay strike.
 
+const MobLod = preload("res://scripts/mob_lod.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 
 const SCENES := {
@@ -168,6 +169,13 @@ func _tune_materials() -> void:
 					tuned.subsurf_scatter_enabled = true
 					tuned.subsurf_scatter_strength = 0.06
 				node.set_surface_override_material(surface, tuned)
+
+
+## Range budget for this body: animation tracks stop past
+## `MobLod.ANIMATE_DISTANCE`, the shadow pass past `MobLod.SHADOW_DISTANCE`.
+## Called only when the band flips, never per frame.
+func set_distance(distance: float) -> void:
+	MobLod.present(_instance, _player, distance)
 
 
 func set_motion(velocity: Vector3, grounded: bool) -> void:

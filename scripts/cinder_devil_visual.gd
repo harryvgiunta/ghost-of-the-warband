@@ -13,6 +13,7 @@ extends Node3D
 ## Godot's glTF importer strips a trailing `_Loop`, so loop modes are applied
 ## here rather than inferred from the asset.
 
+const MobLod = preload("res://scripts/mob_lod.gd")
 const Dagger = preload("res://scripts/dagger.gd")
 const Sword = preload("res://scripts/sword.gd")
 const Bow = preload("res://scripts/bow.gd")
@@ -246,6 +247,12 @@ func get_clip_name() -> String:
 
 # ---------------------------------------------------------------------------
 # Presentation probes read by enemy.gd, hitbox and the blood field
+
+
+## Range budget for this body: animation tracks stop past
+## `MobLod.ANIMATE_DISTANCE`, the shadow pass past `MobLod.SHADOW_DISTANCE`.
+func set_distance(distance: float) -> void:
+	MobLod.present(_instance, _player, distance)
 
 
 func head_hitbox_center() -> Vector3:

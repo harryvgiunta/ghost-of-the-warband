@@ -20,6 +20,7 @@ const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -119,6 +120,10 @@ var _senses := MobSenses.new()
 var _steering := MobSteering.new()
 ## The patch this body keeps to when it is calm: its own, or the pack's.
 var _wander := MobWander.new()
+## Tick budget: the further from the nearest ranger, the rarer the tick.
+var _lod := MobLod.new()
+## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
+var _present_band := -1
 var _attacker: Node3D
 
 
@@ -139,7 +144,18 @@ func _ready() -> void:
 		if facing.length_squared() > 0.0001:
 			rotation.y = atan2(-facing.x, -facing.z)
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# World and ranger bodies only. Mob-against-mob collision made every swept
+	# move test seventy-four other capsules; the soft separation pass already
+	# keeps a pack apart, so the physics query stays about the terrain.
+	collision_mask = 1 | 4
+	# One slide per move. A body on uneven ground reports three contacts and the
+	# solver used to resolve each of them (~118 us a move instead of ~49 us);
+	# the steering below already picks a lane around obstacles, so one resolve
+	# is enough and the next tick continues along it.
+	max_slides = 2
+	# A body on a slope must keep its horizontal motion: the default stop
+	# cancels it the moment the ground tilts, which read as crawling.
+	floor_stop_on_slope = false
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	var shape := CapsuleShape3D.new()
@@ -163,6 +179,7 @@ func _ready() -> void:
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
 	# A pack that meets the same barrier splits around both of its sides.
 	_steering.bias = _strafe_dir
+	_lod = MobLod.new(int(absf(global_position.x) * 7.0 + absf(global_position.z) * 13.0))
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
@@ -193,10 +210,22 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	var nearest := _nearest_ranger()
+	_cull_presentation(nearest)
+	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
+	if budget <= 0.0:
+		return
+	delta = budget
 	# Sight, not proximity, decides whether this mob is in a fight. Losing the
-	# view keeps the pursuit alive for `MEMORY_SECONDS`.
-	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+	# view keeps the pursuit alive for `MEMORY_SECONDS`. Nothing further away
+	# than its sight range can be seen, so that tick skips the sight rays.
+	var pursuit := false
+	if nearest <= _sight_range():
+		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
+			_eye_height(), Callable(self, "_is_hostile"))
+	else:
+		_senses.age(delta)
+		pursuit = _senses.aggressive()
 	if _senses.woke:
 		# The first sighting of a pack's member is the pack's sighting.
 		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
@@ -268,6 +297,31 @@ func _physics_process(delta: float) -> void:
 	_visual.set_combat(state, _state_time)
 
 
+## Distance to the closest ranger, for the tick budget. Walks the two slots
+## `_candidates()` would build, without building it.
+func _nearest_ranger() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_squared_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_squared_to(candidate.global_position))
+	if best == INF:
+		return INF
+	return sqrt(best)
+
+
+## Far bodies stop evaluating animation tracks and locomotion presentation; the
+## skeleton keeps its last pose, which at that distance is a few pixels.
+func _cull_presentation(nearest: float) -> void:
+	var band := MobLod.band(nearest)
+	if band == _present_band:
+		return
+	_present_band = band
+	if is_instance_valid(_visual) and _visual.has_method("set_distance"):
+		_visual.set_distance(nearest)
+
+
 ## Nothing in sight and nothing remembered: keep the patch alive. This is the
 ## tick that used to freeze a calm mob - with no target the whole state machine
 ## was skipped, so a body that spawned at rest never moved again.
@@ -281,6 +335,12 @@ func _calm_tick(delta: float) -> void:
 	_move_speed = 0.0
 	_face_intent = Vector3.ZERO
 	_return_home(delta)
+	if _present_band > 1:
+		# Nothing at this distance can see the pose: skip the cluster pass and
+		# the locomotion presentation entirely.
+		_move_intent = _move_intent.normalized() if _move_speed > 0.0 else Vector3.ZERO
+		_drive(delta)
+		return
 	_separate()
 	_drive(delta)
 	if is_instance_valid(_visual):
@@ -476,13 +536,15 @@ func _drive(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, desired.x, control * delta)
 	velocity.z = move_toward(velocity.z, desired.z, control * delta)
 	if is_on_floor() and velocity.y <= 0.0:
-		velocity.y = -1.0
+		# Zero, not a press: floor snapping keeps the body attached, and a
+		# downward velocity spent a slide of the sweep (half the ground covered).
+		velocity.y = 0.0
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
 	if _face_intent.length_squared() > 0.0001 and state != "STAGGER":
 		rotation.y = lerp_angle(rotation.y, atan2(-_face_intent.x, -_face_intent.z),
 			minf(delta * float(profile.turn), 1.0))
-	move_and_slide()
+	MobLod.move(self, delta)
 
 
 func _steer(direction: Vector3) -> Vector3:

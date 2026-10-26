@@ -32,6 +32,7 @@ const State = preload("res://scripts/player_state.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 
 const MAX_HEALTH := 100.0
 const GOLD := 14
@@ -107,6 +108,10 @@ var _steering := MobSteering.new()
 var _senses := MobSenses.new()
 ## The stretch of trail this clone patrols when nothing is in sight.
 var _wander := MobWander.new()
+## Tick budget: the further from the nearest ranger, the rarer the tick.
+var _lod := MobLod.new()
+## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
+var _present_band := -1
 ## Whether this clone has already called the pack to the fight.
 var _woke := false
 
@@ -115,6 +120,11 @@ func _ready() -> void:
 	name = "RangerClone"
 	collision_layer = 2
 	collision_mask = 1
+	# One slide per move: the clone steers its own lane.
+	max_slides = 2
+	# A body on a slope must keep its horizontal motion: the default stop
+	# cancels it the moment the ground tilts, which read as crawling.
+	floor_stop_on_slope = false
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	_shape = CapsuleShape3D.new()
@@ -162,6 +172,7 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	attack_mode = mode
 	auto_ai = mode == "scene"
 	_steering.bias = 1.0 if clone_id % 2 == 0 else -1.0
+	_lod = MobLod.new(clone_id * 3)
 	aggro_range = 40.0 if mode == "direct" else 30.0
 	leash = 60.0 if mode == "direct" else 42.0
 	_roll_loadout()
@@ -283,6 +294,35 @@ func pack_family() -> String:
 	return "ranger"
 
 
+## Distance to the closest ranger, for the tick budget.
+func _nearest_ranger() -> float:
+	var best := INF
+	if is_instance_valid(fallback_target):
+		best = global_position.distance_squared_to(fallback_target.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_squared_to(candidate.global_position))
+	if best == INF:
+		return INF
+	return sqrt(best)
+
+
+## Far clones stop sampling the player rig; it keeps its last pose.
+func _cull_presentation(nearest: float) -> void:
+	var band := MobLod.band(nearest)
+	if band == _present_band:
+		return
+	_present_band = band
+	if not is_instance_valid(rig):
+		return
+	# The rig is the heaviest body in the world: stop sampling it and stop its
+	# shadow pass at range instead of hiding it, which would pop.
+	rig.set_physics_process(band < 2)
+	rig.set_process(band < 2)
+	if rig.has_method("set_shadow_casting"):
+		rig.set_shadow_casting(band == 0)
+
+
 func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
 	_wander.assign(shared, ring_slot, pack_group)
 
@@ -332,6 +372,12 @@ func _physics_process(delta: float) -> void:
 		return
 	if replica or not authoritative or not auto_ai:
 		return
+	var nearest := _nearest_ranger()
+	_cull_presentation(nearest)
+	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
+	if budget <= 0.0:
+		return
+	delta = budget
 	dodge.advance(delta,is_on_floor())
 	_step_ai(delta,targets)
 
@@ -434,13 +480,13 @@ func _apply_motion(delta: float, facing_direction: Vector3) -> void:
 		velocity.x = move_toward(velocity.x,desired.x,control * delta)
 		velocity.z = move_toward(velocity.z,desired.z,control * delta)
 	if is_on_floor() and velocity.y <= 0.0:
-		velocity.y = -1.0
+		velocity.y = 0.0
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
 	if facing_direction.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing_direction.x,-facing_direction.z),minf(delta * 10.0,1.0))
 	var before := global_position
-	move_and_slide()
+	MobLod.move(self, delta)
 	position.x = clampf(position.x,-bounds,bounds)
 	position.z = clampf(position.z,-bounds,bounds)
 	var actual := (global_position - before) / maxf(delta,0.0001)

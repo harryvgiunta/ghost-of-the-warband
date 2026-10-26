@@ -33,6 +33,9 @@ var bias := 1.0
 
 var _hold := 0.0
 var _stuck := 0.0
+## The detour heading that worked last time, re-validated with one ray before
+## the whole fan is searched again.
+var _heading := Vector3.ZERO
 var _last := Vector3.ZERO
 var _tracked := false
 var _moving := false
@@ -45,6 +48,7 @@ func _init(mask: int = 1) -> void:
 
 func reset() -> void:
 	side = 0.0
+	_heading = Vector3.ZERO
 	_hold = 0.0
 	_stuck = 0.0
 	_tracked = false
@@ -72,22 +76,31 @@ func steer(owner: Node3D, desired: Vector3, probe_height: float) -> Vector3:
 		side = 0.0
 	_moving = true
 	var lane := PROBE if _stuck <= 0.0 else WIDE_PROBE
-	if _clear(owner, planar, probe_height, lane):
+	# The straight lane first: two rays, the common case.
+	if _clear(owner, planar, probe_height, lane, true):
+		_heading = Vector3.ZERO
 		return planar
+	# Then the detour that worked on the last tick: one ray instead of a fan.
+	if _heading.length_squared() > 0.0001 and _clear(owner, _heading, probe_height, lane, false):
+		return _heading
 	if side == 0.0:
 		side = bias
 		_hold = HOLD_SECONDS
 	# Prefer the committed side, then the mirror, then the next wider heading.
+	# Fan candidates test one band only: the chest lane already showed whether
+	# a wall is there, and a low barrier is caught by the straight check above.
 	for angle in FAN_DEGREES:
 		for signed in [side, -side]:
 			var candidate := planar.rotated(Vector3.UP, float(signed) * deg_to_rad(float(angle)))
-			if _clear(owner, candidate, probe_height, lane):
+			if _clear(owner, candidate, probe_height, lane, false):
+				_heading = candidate
 				_hold = HOLD_SECONDS
 				return candidate
 	# Nothing in the fan is clear: slide along the widest heading and let the
 	# stuck detector widen the search on the next tick.
 	_hold = HOLD_SECONDS
-	return planar.rotated(Vector3.UP, side * deg_to_rad(float(FAN_DEGREES[FAN_DEGREES.size() - 1])))
+	_heading = planar.rotated(Vector3.UP, side * deg_to_rad(float(FAN_DEGREES[FAN_DEGREES.size() - 1])))
+	return _heading
 
 
 func _tick_delta(owner: Node3D) -> float:
@@ -114,16 +127,21 @@ func _measure_progress(owner: Node3D, delta: float) -> void:
 	_tracked = true
 
 
-## Two samples per heading: the chest lane and a higher one, so a low barrier
-## and a tall wall are both seen.
-func _clear(owner: Node3D, direction: Vector3, probe_height: float, lane: float) -> bool:
+## `two_bands` samples the chest lane and a higher one, so a low barrier and a
+## tall wall are both seen in the one query that decides straight travel. The
+## fan after it tests the chest band alone.
+func _clear(owner: Node3D, direction: Vector3, probe_height: float, lane: float,
+		two_bands: bool = true) -> bool:
 	if not is_instance_valid(owner):
 		return false
 	var space := owner.get_world_3d().direct_space_state
 	var base := owner.global_position + Vector3(0.0, probe_height, 0.0)
-	for lift in [0.0, UPPER_LIFT]:
-		_query.from = base + Vector3(0.0, lift, 0.0)
-		_query.to = _query.from + direction * lane
-		if not space.intersect_ray(_query).is_empty():
-			return false
-	return true
+	_query.from = base
+	_query.to = base + direction * lane
+	if not space.intersect_ray(_query).is_empty():
+		return false
+	if not two_bands:
+		return true
+	_query.from = base + Vector3(0.0, UPPER_LIFT, 0.0)
+	_query.to = _query.from + direction * lane
+	return space.intersect_ray(_query).is_empty()

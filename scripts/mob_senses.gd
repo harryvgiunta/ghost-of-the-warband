@@ -154,6 +154,9 @@ func notice(attacker: Node3D, at: Vector3) -> void:
 func age(delta: float) -> void:
 	memory = maxf(0.0, memory - delta)
 	hunt = maxf(0.0, hunt - delta)
+	# No sight query ran this tick, so this body saw nothing: it hunts the place
+	# it last believed in rather than a live body behind a hill.
+	seen = false
 	if memory <= 0.0 and hunt <= 0.0:
 		clear()
 

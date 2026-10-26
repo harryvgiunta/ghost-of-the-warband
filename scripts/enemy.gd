@@ -18,6 +18,7 @@ const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
+const MobLod = preload("res://scripts/mob_lod.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const DEVIL_HEALTH := 24.0
 ## How far each kind can see. Distance alone never starts a fight: the mob has
@@ -69,6 +70,10 @@ var _senses := MobSenses.new()
 var _steering := MobSteering.new()
 ## The patch this body keeps to when it is calm.
 var _wander := MobWander.new()
+## Tick budget: the further from the nearest ranger, the rarer the tick.
+var _lod := MobLod.new()
+## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
+var _present_band := -1
 var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
@@ -108,7 +113,14 @@ func _ready() -> void:
 	max_health = 38.0 if kind == 0 else DEVIL_HEALTH
 	health = max_health
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4
+	# World and ranger bodies only: mobs do not collide with each other (see
+	# `devil_mob._ready`).
+	collision_mask = 1 | 4
+	# One slide per move (see `devil_mob._ready`).
+	max_slides = 2
+	# A body on a slope must keep its horizontal motion: the default stop
+	# cancels it the moment the ground tilts, which read as crawling.
+	floor_stop_on_slope = false
 	floor_snap_length = 0.6
 	floor_max_angle = deg_to_rad(46.0)
 	var shape := CapsuleShape3D.new()
@@ -182,6 +194,7 @@ func _ready() -> void:
 		state = "CIRCLE"
 	# A pack that meets the same barrier splits around both of its sides.
 	_steering.bias = _orbit_dir
+	_lod = MobLod.new(int(absf(global_position.x) * 11.0 + absf(global_position.z) * 5.0))
 
 func _build_wolf_visual() -> void:
 	_wolf = WolfVisual.new()
@@ -248,10 +261,22 @@ func _physics_process(delta: float) -> void:
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 		return
+	var nearest := _nearest_ranger()
+	_cull_presentation(nearest)
+	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
+	if budget <= 0.0:
+		return
+	delta = budget
 	# Sight and the pursuit memory decide aggression for the wolf and the
-	# cinder devil exactly as they do for the newer mob families.
-	var pursuit := _senses.step(self, _candidates(), delta, _sight_range(),
-		_eye_height(), Callable(self, "_is_hostile"))
+	# cinder devil exactly as they do for the newer mob families. Below the
+	# sight range there is nobody to look for, so that tick skips its rays.
+	var pursuit := false
+	if nearest <= _sight_range():
+		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
+			_eye_height(), Callable(self, "_is_hostile"))
+	else:
+		_senses.age(delta)
+		pursuit = _senses.aggressive()
 	if _senses.woke:
 		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
 	_target = _senses.target if is_instance_valid(_senses.target) else _resolve_target()
@@ -319,8 +344,8 @@ func _drive_wolf(delta: float, direction: Vector3, speed: float) -> void:
 		rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(delta * 8.0, 1.0))
 	velocity.x = move_toward(velocity.x, direction.x * speed, delta * 12.0)
 	velocity.z = move_toward(velocity.z, direction.z * speed, delta * 12.0)
-	velocity.y = -1.0 if is_on_floor() else velocity.y - 18.0 * delta
-	move_and_slide()
+	velocity.y = 0.0 if is_on_floor() else velocity.y - 18.0 * delta
+	MobLod.move(self, delta)
 	_update_cosmetics(delta)
 
 
@@ -399,6 +424,32 @@ func wander_radius() -> float:
 
 func pack_family() -> String:
 	return "wolf" if kind == 0 else "cinder_devil"
+
+
+## Distance to the closest ranger, for the tick budget.
+func _nearest_ranger() -> float:
+	var best := INF
+	if is_instance_valid(player):
+		best = global_position.distance_squared_to(player.global_position)
+	for candidate in targets:
+		if is_instance_valid(candidate):
+			best = minf(best, global_position.distance_squared_to(candidate.global_position))
+	if best == INF:
+		return INF
+	return sqrt(best)
+
+
+## Far bodies stop evaluating animation tracks; the skeleton keeps its last
+## pose, which at that distance is a few pixels.
+func _cull_presentation(nearest: float) -> void:
+	var band := MobLod.band(nearest)
+	if band == _present_band:
+		return
+	_present_band = band
+	if kind == 0 and is_instance_valid(_wolf) and _wolf.has_method("set_distance"):
+		_wolf.set_distance(nearest)
+	elif is_instance_valid(_devil) and _devil.has_method("set_distance"):
+		_devil.set_distance(nearest)
 
 
 func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
@@ -525,7 +576,7 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 		velocity.x = move_toward(velocity.x,target.x,control*delta)
 		velocity.z = move_toward(velocity.z,target.z,control*delta)
 	if was_grounded and velocity.y <= 0.0:
-		velocity.y = -1.0
+		velocity.y = 0.0
 	elif not was_grounded:
 		velocity.y -= 18.0*delta
 	var facing := _face_intent
@@ -534,7 +585,7 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	if facing.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(delta*12.0,1.0))
 	var before := global_position
-	move_and_slide()
+	MobLod.move(self, delta)
 	var actual := (global_position-before)/maxf(delta,0.0001)
 	if state == "LEAP" and not was_grounded and is_on_floor() and _leap_air_time > 0.18:
 		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
