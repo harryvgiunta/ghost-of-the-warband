@@ -196,11 +196,144 @@ func _check_frontier() -> void:
 	# Gameplay data is updated for the in-game town, not removed.
 	check(frontier.interactables.size() == 10, "camp, three keepers, stash, portal, delve and three waystones are interactive")
 	check(frontier.enemy_spawns.size() == 36, "all enemy spawns must survive the art pass")
-	check(frontier.map_paths.size() == 5 and frontier.landmarks.size() == 6, "map data tracks the town and the delve")
+	check(frontier.map_paths.size() == 7 and frontier.landmarks.size() == 8,
+		"map data tracks the town, the delve, the trail and the village path")
 	check(frontier.player_spawn.distance_to(Vector3(0, frontier.terrain_height(0, 47), 47)) < 0.02,
 		"the new journey spawns at the town gate")
+	await _check_camp(frontier)
 	game.queue_free()
 	await process_frame
+
+## The Unholy Forest camp: authored surfaces, a handful of child-sized stick
+## shelters hidden in the trees, charms on those trees, and a fire in the middle.
+## Structure only - the look needs rendered inspection.
+func _check_camp(frontier) -> void:
+	var stats: Dictionary = frontier.generation_stats
+	# one physics step so the camp and village colliders reach the broadphase
+	await physics_frame
+	await physics_frame
+	var space: PhysicsDirectSpaceState3D = frontier.get_world_3d().direct_space_state
+	var probe := CapsuleShape3D.new()
+	probe.radius = 0.34
+	probe.height = 1.75
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = probe
+	query.collision_mask = 1
+	query.exclude = []
+	for id in ["thatch", "hide", "bone", "flame"]:
+		var map := TextureLibrary.texture(id)
+		check(map != null and map.get_width() > 0, "camp surface '%s' must load" % id)
+	check(TextureLibrary.texture("flame").get_width() == 512
+		and TextureLibrary.cell_count("flame") == 4, "the flame atlas must carry four tongues")
+	for kind in ["thatch", "hide", "bone"]:
+		var material := TextureLibrary.building_material(kind)
+		check(material.albedo_texture != null and material.normal_texture != null,
+			"camp surface '%s' must be textured with a normal map" % kind)
+	check(TextureLibrary.granite_material(Color("8a8070")).uv1_world_triplanar,
+		"camp stone must be world-triplanar granite")
+	var flame := TextureLibrary.flame_material()
+	check(flame.shader != null and flame.get_shader_parameter("albedo_texture") != null,
+		"the camp fire must run the flame shader")
+	# the camp exists, and it is a camp, not a settlement
+	check(frontier.get_node_or_null("CampFire/CampFireLight") is OmniLight3D,
+		"the camp fire must light the camp")
+	for node_name in ["CampDoodads", "CampTreeCharms", "TrailDoodads", "CampBoneArch",
+			"CampCharmWeb0", "CampWickerEffigy", "CampRagTree0", "TrailHeadArch",
+			"TrailRagTree0"]:
+		check(frontier.get_node_or_null(node_name) != null, node_name + " must exist")
+	check(int(stats.get("camp_shelters", 0)) == 6, "the camp has six shelters in clusters")
+	check(int(stats.get("trail_marks", 0)) == 8, "the trail carries eight marks of witch work")
+	check(int(stats.get("camp_hangers", 0)) >= 180,
+		"the camp must hang its charms everywhere (%d)" % int(stats.get("camp_hangers", 0)))
+	check(int(stats.get("camp_charm_trees", 0)) >= 40,
+		"the trees at the camp must carry charms (%d)" % int(stats.get("camp_charm_trees", 0)))
+	# the camp is a trek away, not a shed behind the keepers
+	var camp_point := Vector2(-100.0, -22.0)
+	var from_town: float = camp_point.distance_to(Vector2(0.0, 32.0))
+	check(from_town > 90.0, "the camp must sit deep in the woods (%.0f m out)" % from_town)
+	check(frontier.region_at(Vector3(camp_point.x, 4.0, camp_point.y)) == "The Wardens' Camp",
+		"the camp must be its own region")
+	var camp_landmarks := 0
+	for entry: Dictionary in frontier.landmarks:
+		if String(entry.get("name", "")) == "The Wardens' Camp":
+			camp_landmarks += 1
+	check(camp_landmarks == 1, "the camp must appear on the map")
+	# Gallowgarth: the wardens' village, out on its own footpath in the north-east
+	for node_name in ["GallowgarthPalisade", "GallowgarthGate", "GallowgarthFirepit",
+			"GallowgarthOffering", "GallowgarthDoodads", "GallowgarthEffigy",
+			"GallowgarthFrame", "WardenHut0", "WardenHut2",
+			"WattleHouse0", "WattleHouse2", "WardenTotem0", "WardenTotem2"]:
+		check(frontier.get_node_or_null(node_name) != null, node_name + " must exist")
+	check(int(stats.get("village_stakes", 0)) >= 120,
+		"the village needs a real stake palisade (%d)" % int(stats.get("village_stakes", 0)))
+	check(int(stats.get("village_huts", 0)) == 3 and int(stats.get("village_round_huts", 0)) == 3,
+		"the village has three stick longhouses and three round huts")
+	check(int(stats.get("village_hangers", 0)) >= 5,
+		"the village hangs its charms (%d)" % int(stats.get("village_hangers", 0)))
+	var village := Vector2(58.0, 22.0)
+	check(village.distance_to(Vector2(0.0, 32.0)) > 40.0, "the village must sit out in the woods")
+	check(frontier.region_at(Vector3(village.x, 6.6, village.y)) == "Gallowgarth",
+		"the village must be its own region")
+	var village_landmarks := 0
+	for entry: Dictionary in frontier.landmarks:
+		if String(entry.get("name", "")) == "Gallowgarth":
+			village_landmarks += 1
+	check(village_landmarks == 1, "the village must appear on the map")
+	# its gate line and fire ground are walkable, the fence is not
+	var gate_at := village + Vector2(sin(-3.0 * PI / 4.0), cos(-3.0 * PI / 4.0)) * 15.0
+	query.transform = Transform3D(Basis(),
+		Vector3(gate_at.x, frontier.terrain_height(gate_at.x, gate_at.y) + 1.05, gate_at.y))
+	check(space.intersect_shape(query, 1).is_empty(), "the village gate line must stay walkable")
+	query.transform = Transform3D(Basis(),
+		Vector3(village.x, frontier.terrain_height(village.x, village.y) + 1.05, village.y))
+	check(space.intersect_shape(query, 1).is_empty(), "the village fire ground must stay walkable")
+	query.transform = Transform3D(Basis(),
+		Vector3(village.x, frontier.terrain_height(village.x, village.y + 15.0) + 1.3, village.y + 15.0))
+	check(not space.intersect_shape(query, 1).is_empty(),
+		"the village palisade must block the same probe")
+	# the castle and the shrine are gone, and their clearings with them
+	check(frontier.get_node_or_null("WatchfallFortress") == null, "the Watchfall fortress is gone")
+	check(frontier.get_node_or_null("SuncrestShrine") == null, "the Suncrest shrine is gone")
+	# small enough that a child built it: no shelter reads as a building
+	for i in range(6):
+		var shelter: Node = frontier.get_node_or_null("TwigShelter%d" % i)
+		check(shelter != null, "shelter %d must stand" % i)
+		if shelter == null:
+			continue
+		var mesh_node: MeshInstance3D = shelter.get_node_or_null("TwigShelterMesh") as MeshInstance3D
+		check(mesh_node != null and mesh_node.mesh != null, "shelter %d must keep its mesh" % i)
+		if mesh_node == null or mesh_node.mesh == null:
+			continue
+		var bounds: AABB = mesh_node.mesh.get_aabb()
+		check(bounds.size.x <= 4.0 and bounds.size.z <= 3.4,
+			"shelter %d must stay small (%.1f x %.1f)" % [i, bounds.size.x, bounds.size.z])
+		check(bounds.size.y <= 2.2, "shelter %d must be lower than a doorway" % i)
+	check(int(stats.get("bushes", 0)) >= 300,
+		"the woods need undergrowth (%d bushes)" % int(stats.get("bushes", 0)))
+	# the camp sits in the woodland: trunks stand right there with it
+	var trees_at_camp := 0
+	var solids: Node = frontier.get_node_or_null("FrontierSolidObstacles")
+	if solids != null:
+		for shape_node in solids.get_children():
+			if not (shape_node is CollisionShape3D):
+				continue
+			var shape := (shape_node as CollisionShape3D).shape
+			if not (shape is CylinderShape3D):
+				continue
+			var at: Vector3 = (shape_node as CollisionShape3D).position
+			if Vector2(at.x, at.z).distance_to(camp_point) < 16.0:
+				trees_at_camp += 1
+	check(trees_at_camp >= 8, "the camp must sit amongst trees (%d trunks within 16 m)" % trees_at_camp)
+	# the fire ground is walkable, and the effigy's stake is solid
+	var fire_at := Vector3(camp_point.x, frontier.terrain_height(camp_point.x, camp_point.y) + 1.05,
+		camp_point.y)
+	query.transform = Transform3D(Basis(), fire_at)
+	check(space.intersect_shape(query, 1).is_empty(), "the camp fire ground must stay walkable")
+	var stake := Vector3(-104.6, frontier.terrain_height(-104.6, -23.9) + 0.7, -23.9)
+	query.transform = Transform3D(Basis(), stake)
+	check(not space.intersect_shape(query, 1).is_empty(),
+		"the camp probe must detect the effigy's stake")
+
 
 func _check_arena() -> void:
 	var arena = ArenaWorld.new()

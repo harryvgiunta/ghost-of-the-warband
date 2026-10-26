@@ -1423,6 +1423,188 @@ def make_stone_blocks(w=256, h=256):
     return base
 
 
+def make_thatch(w=256, h=256):
+    """Dry reed thatch in four tied courses: straw laid along u, dark hems, cord bindings."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    courses = 4.0
+    course_h = h / courses
+    ly = np.mod(Y, course_h)
+    # Hem shadow at both course boundaries, so the repeat joins like any other row.
+    edge = np.minimum(ly, course_h - ly)
+    lap = np.exp(-((edge / 4.5) ** 2))
+
+    # Straw strands run along u: high frequency in v, low in u.
+    strand = fbm(w, h, 2, 88, SEED + 411, octaves=4)
+    strand2 = fbm(w, h, 1, 190, SEED + 412, octaves=3)
+    fine = fbm(w, h, 70, 150, SEED + 413, octaves=3)
+    nib = smoothstep(0.70, 0.88, fbm(w, h, 26, 150, SEED + 414, octaves=2))
+    weather = smoothstep(0.62, 0.84, fbm(w, h, 5, 8, SEED + 415, octaves=3))
+
+    base = mix(rgb(188, 160, 104), rgb(230, 208, 156), stretch(strand2, 4, 96))
+    base = mix(base, rgb(160, 132, 78), (1.0 - strand) * 0.45)
+    base *= (0.92 + 0.16 * fine)[..., None]
+    base = mix(base, rgb(246, 228, 176), smoothstep(0.55, 0.95, strand2) * 0.22)
+    base = mix(base, rgb(96, 78, 46), np.clip(lap * 0.80 + nib * 0.35, 0, 1))
+    base = mix(base, rgb(122, 124, 92), weather * 0.30)
+
+    # Binding cords every half width, wobbling so they read as hand-tied.
+    wobble = (fbm(w, h, 5, 3, SEED + 416, octaves=2) - 0.5) * 7.0
+    cord_x = np.mod(X + wobble, w / 2.0)
+    cord = 1.0 - smoothstep(1.3, 3.6, np.minimum(cord_x, w / 2.0 - cord_x))
+    base = mix(base, rgb(74, 58, 34), cord * 0.62)
+    # A dark knot where each tie crosses a course hem.
+    base = mix(base, rgb(58, 46, 28), cord * lap * 0.55)
+
+    height = (0.55 + 0.30 * stretch(strand2, 4, 96) + 0.10 * fine
+              - 0.30 * lap - 0.10 * nib + 0.16 * cord)
+    return base, height
+
+
+def make_hide(w=256, h=256):
+    """Stretched hair-side hide: mottled patches, hair streaks and stitched seams."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    mottle = fbm(w, h, 5, 5, SEED + 421, octaves=4)
+    patch = fbm(w, h, 3, 3, SEED + 422, octaves=3)
+    # hair runs down the hide, so the streaks are fast across u and slow in v
+    hair = fbm(w, h, 130, 3, SEED + 423, octaves=3)
+    hair2 = fbm(w, h, 4, 130, SEED + 424, octaves=2)
+    fine = fbm(w, h, 120, 120, SEED + 425, octaves=3)
+    grime = smoothstep(0.66, 0.88, fbm(w, h, 7, 6, SEED + 426, octaves=3))
+
+    base = mix(rgb(138, 112, 86), rgb(178, 152, 120), stretch(mottle, 4, 96))
+    base = mix(base, rgb(110, 86, 64), stretch(patch, 8, 92) * 0.35)
+    base *= (0.90 + 0.20 * hair + 0.06 * (hair2 - 0.5) + 0.05 * (fine - 0.5))[..., None]
+    base = mix(base, rgb(200, 182, 152), smoothstep(0.70, 0.95, mottle) * 0.30)
+
+    # One seam direction only, periodic so a seam never stops at the wrap. A grid
+    # of seams in both axes read as sawn boards instead of stretched hide.
+    wob_a = (fbm(w, h, 4, 2, SEED + 427, octaves=2) - 0.5) * 6.0
+    seam_u = np.mod(X + wob_a + 16.0, w / 2.0)
+    seam_u_d = np.minimum(seam_u, w / 2.0 - seam_u)
+    seam = 1.0 - smoothstep(0.9, 2.6, seam_u_d)
+    # Sinew stitches: short dashes crossing the seam.
+    dash_u = 1.0 - smoothstep(1.6, 2.8, np.minimum(np.mod(X + wob_a, 8.0), 8.0 - np.mod(X + wob_a, 8.0)))
+    stitch = dash_u * (1.0 - smoothstep(1.0, 3.2, seam_u_d))
+    base = mix(base, rgb(70, 52, 38), seam * 0.55)
+    base = mix(base, rgb(216, 200, 168), stitch * 0.55)
+    base = mix(base, rgb(96, 88, 66), grime * 0.25)
+
+    height = (0.55 + 0.10 * (hair - 0.5) + 0.05 * (fine - 0.5)
+              - 0.22 * seam + 0.10 * stitch)
+    return base, height
+
+
+def make_bone(w=256, h=256):
+    """Weathered animal bone: ivory field, hairline crazing, pores and dark grime."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    craze = smoothstep(0.64, 0.44, fbm(w, h, 22, 34, SEED + 431, octaves=5, ridge=True))
+    split = smoothstep(0.70, 0.50, fbm(w, h, 9, 12, SEED + 432, octaves=4, ridge=True))
+    pores = smoothstep(0.78, 0.88, fbm(w, h, 110, 110, SEED + 433, octaves=2))
+    tone = fbm(w, h, 6, 6, SEED + 434, octaves=3)
+    fine = fbm(w, h, 160, 160, SEED + 435, octaves=3)
+    yellow = smoothstep(0.60, 0.88, fbm(w, h, 4, 3, SEED + 436, octaves=3))
+
+    base = mix(rgb(198, 190, 168), rgb(238, 233, 214), stretch(tone, 4, 96))
+    base = mix(base, rgb(176, 168, 128), yellow * 0.35)
+    base *= (0.96 + 0.08 * fine)[..., None]
+    base = mix(base, rgb(112, 104, 86),
+               np.clip(craze * 0.45 + split * 0.35 + pores * 0.30, 0, 1))
+
+    height = 0.60 - 0.22 * craze - 0.26 * split - 0.22 * pores + 0.06 * (fine - 0.5)
+    return base, height
+
+
+VILLAGE_STRENGTH = {"thatch": 6.0, "hide": 3.0, "bone": 3.0, "wattle": 2.5}
+
+
+def make_wattle(w=256, h=256):
+    """Woven withy panel: upright rods laced through horizontal binders."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    bars_x, bars_y = 8.0, 4.0
+    px, py = w / bars_x, h / bars_y
+    lx = np.mod(X, px)
+    ly = np.mod(Y, py)
+    # a rounded rod profile, then a smooth braid wave that decides which rod lies
+    # on top. A hard checkerboard flipped the pattern at the wrap; this cosine
+    # weave is continuous and still reads as over-and-under lacing.
+    profile_x = np.sin(math.pi * lx / px) ** 0.6
+    profile_y = np.sin(math.pi * ly / py) ** 0.6
+    braid = 0.5 + 0.5 * np.cos(2.0 * math.pi * (X / (px * 2.0) + Y / (py * 2.0)))
+    weave = np.clip(profile_x * (0.58 + 0.42 * braid)
+                    + profile_y * (0.58 + 0.42 * (1.0 - braid)) * 0.85, 0.0, 1.0)
+    grain = fbm(w, h, 30, 8, SEED + 441, octaves=4)
+    fine = fbm(w, h, 120, 40, SEED + 442, octaves=3)
+    tone = fbm(w, h, 6, 6, SEED + 443, octaves=3)
+
+    base = mix(rgb(126, 102, 68), rgb(172, 146, 104), stretch(tone, 4, 96))
+    base *= (0.62 + 0.55 * weave)[..., None]
+    base *= (0.92 + 0.16 * grain + 0.05 * (fine - 0.5))[..., None]
+    # the shadowed gap where no rod covers the panel
+    gap = np.clip(1.0 - weave * 1.55, 0.0, 1.0)
+    base = mix(base, rgb(46, 36, 26), gap * 0.55)
+
+    height = 0.22 + 0.62 * weave + 0.06 * (grain - 0.5)
+    return base, height
+
+
+def make_village_surface(kind):
+    """Bushcraft surfaces for the village props: albedo + tangent normal."""
+    fn = {"thatch": make_thatch, "hide": make_hide, "bone": make_bone,
+          "wattle": make_wattle}[kind]
+    alb, height = fn()
+    norm = normal_from_height(height, VILLAGE_STRENGTH[kind])
+    return to_image(alb, "RGB"), to_image(norm, "RGB")
+
+
+# ---------------------------------------------------------------------------
+# fire: a 2x2 atlas of flame tongues cycled by shaders/flame.gdshader
+# ---------------------------------------------------------------------------
+
+
+def _flame_outline(length, width, n=24, bulge=0.35):
+    """Flame silhouette: wide flat base, bulging low body, tapering tip."""
+    right = []
+    for t in np.linspace(0.0, 0.985, n):
+        taper = (1.0 - t) ** 0.75
+        w = width * taper * (1.0 + bulge * math.sin(math.pi * t))
+        right.append((max(w, 0.5), -length * t))
+    left = [(-x, y) for x, y in right]
+    return right + [(0.0, -length)] + left[::-1]
+
+
+def _flame_cell(size, seed, tongues):
+    ss = 4
+    img = _new_cell(size, ss)
+    d = ImageDraw.Draw(img)
+    rng = np.random.default_rng(seed)
+    span = size * ss
+    base_y = span * 0.95
+    # warm floor glow first, then three tapering layers from cool to hot
+    d.polygon(_ellipse_pts(span * 0.5, base_y - span * 0.015, span * 0.34, span * 0.05),
+              fill=(255, 150, 66, 190))
+    for scale, colour in ((1.0, (255, 124, 40, 205)), (0.76, (255, 170, 66, 238)),
+                          (0.46, (255, 226, 168, 255))):
+        for i in range(tongues):
+            centre = i - (tongues - 1) / 2.0
+            length = (0.86 - 0.10 * abs(centre)) * span * scale
+            width = span * 0.105 * scale * float(rng.uniform(0.82, 1.18))
+            angle = float(rng.uniform(-0.16, 0.16)) + centre * 0.10 * scale
+            pts = _rot(_flame_outline(length, width), angle,
+                       span * 0.5 + centre * span * 0.115 * scale, base_y)
+            d.polygon(pts, fill=colour)
+    return _finish_cell(img, size, edge=0.10, width=0.72)
+
+
+def make_flame(size=232):
+    """Four authored flame tongues (2x2 atlas) for the village firepit cards."""
+    cells = [_flame_cell(size, SEED + 900 + i, count) for i, count in enumerate((2, 3, 2, 4))]
+    return compose_atlas(cells, 2, 2)[0]
+
+
 # ---------------------------------------------------------------------------
 # inspection helpers
 # ---------------------------------------------------------------------------
@@ -1449,10 +1631,12 @@ def ascii_preview(img, width=110, aspect=0.48, title="", gamma=1.0):
 # ---------------------------------------------------------------------------
 
 BARK_IDS = ("bark_oak", "bark_pine", "bark_birch", "bark_dead")
+VILLAGE_IDS = ("thatch", "hide", "bone", "wattle")
 ATLAS_LAYOUT = {
     "leaves_broadleaf": (2, 2), "leaves_amber": (2, 2),
     "leaves_birch": (2, 2), "needles_pine": (2, 2),
     "grass_meadow": (2, 2), "fern": (2, 2), "flowers": (4, 2),
+    "flame": (2, 2),
 }
 
 ASSETS = [
@@ -1526,6 +1710,21 @@ ASSETS = [
     dict(id="stone_blocks", file="stone_blocks.png", size=(256, 256), channels=3,
          tiling="both", n_version=None, kind="building",
          description="Ashlar stone block coursing with mortar joints and pits."),
+    dict(id="thatch", file="thatch.png", size=(256, 256), channels=3,
+         tiling="both", n_version="thatch_n.png", kind="building",
+         description="Dry reed thatch in tied courses with straw strands and cord bindings."),
+    dict(id="hide", file="hide.png", size=(256, 256), channels=3,
+         tiling="both", n_version="hide_n.png", kind="building",
+         description="Stretched hair-side hide, mottled brown with sinew-stitched seams."),
+    dict(id="bone", file="bone.png", size=(256, 256), channels=3,
+         tiling="both", n_version="bone_n.png", kind="prop",
+         description="Weathered animal bone: ivory field, hairline crazing and grime."),
+    dict(id="wattle", file="wattle.png", size=(256, 256), channels=3,
+         tiling="both", n_version="wattle_n.png", kind="building",
+         description="Woven withy panel: upright rods laced through horizontal binders."),
+    dict(id="flame", file="flame.png", size=(512, 512), channels=4,
+         tiling="atlas", n_version=None, kind="effect",
+         description="2x2 flame tongue cards: orange body, yellow mid, hot core, soft tips."),
     dict(id="water_normal", file="water_normal.png", size=(512, 512), channels=3,
          tiling="both", n_version=None, kind="effect",
          description="Tileable animated ripple normal map (OpenGL +Y up)."),
@@ -1535,6 +1734,8 @@ NORMALS = {
     "bark_oak_n.png": ("bark_oak", 6.0), "bark_pine_n.png": ("bark_pine", 5.0),
     "bark_birch_n.png": ("bark_birch", 3.0), "bark_dead_n.png": ("bark_dead", 5.0),
     "rock_n.png": ("rock", 5.0),
+    "thatch_n.png": ("thatch", 6.0), "hide_n.png": ("hide", 3.0),
+    "bone_n.png": ("bone", 3.0), "wattle_n.png": ("wattle", 2.5),
 }
 
 LICENSE_TEXT = """IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
@@ -1551,7 +1752,8 @@ maps are derived from authored height fields in the OpenGL convention
 
 Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
 alpha atlases, terrain detail and macro variation, rock and water normals,
-and building materials (planks, timber, plaster, shingles, stone).
+building materials (planks, timber, plaster, shingles, stone) and the
+forest-camp surfaces (thatch, hide, bone) and the flame atlas.
 
 The textures are distributed under CC0 1.0 Universal (Public Domain
 Dedication), the same dedication used by the character assets in this
@@ -1805,6 +2007,8 @@ def build_all(only=None):
         out["fern.png"] = compose_atlas(make_fern(), 2, 2)[0]
     if _want(only, "flowers"):
         out["flowers.png"] = make_flowers()
+    if _want(only, "flame"):
+        out["flame.png"] = make_flame()
 
     if _want(only, "terrain_grass"):
         out["terrain_grass.png"] = make_terrain_grass()
@@ -1828,6 +2032,11 @@ def build_all(only=None):
         out["roof_shingles.png"] = to_image(make_roof_shingles(), "RGB")
     if _want(only, "stone_blocks"):
         out["stone_blocks.png"] = to_image(make_stone_blocks(), "RGB")
+    for vid in VILLAGE_IDS:
+        if _want(only, vid):
+            alb, nrm = make_village_surface(vid)
+            out[f"{vid}.png"] = alb
+            out[f"{vid}_n.png"] = nrm
     if _want(only, "water_normal"):
         out["water_normal.png"] = make_water_normal()
     return out

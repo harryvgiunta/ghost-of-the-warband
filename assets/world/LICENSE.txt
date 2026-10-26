@@ -12,7 +12,8 @@ maps are derived from authored height fields in the OpenGL convention
 
 Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
 alpha atlases, terrain detail and macro variation, rock and water normals,
-and building materials (planks, timber, plaster, shingles, stone).
+building materials (planks, timber, plaster, shingles, stone) and the
+forest-camp surfaces (thatch, hide, bone) and the flame atlas.
 
 The textures are distributed under CC0 1.0 Universal (Public Domain
 Dedication), the same dedication used by the character assets in this

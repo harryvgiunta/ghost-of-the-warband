@@ -329,8 +329,8 @@ collide with the forest set's `Forest_*`.
 The **Ruin sentinel** (`kind == 1`) was removed with this cutover: its capsule,
 primitive geometry, head-zone constants, spawn placements and every regression
 fixture are gone. `RangeWorld.enemy_spawns` still holds 36 placements — the
-five former sentinel slots around the Watchfall Ruins, the Suncrest shrine and
-the northern approach are now wolves, so those objectives stay defended.
+five former sentinel slots around the Watchfall clearing, the Suncrest ridge and
+the northern approach are now wolves, so those waystones stay defended.
 
 ## Verification gates
 

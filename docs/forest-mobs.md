@@ -1,7 +1,7 @@
 # Unholy Forest mobset
 
 Three frontier mobs — **Hollow warden**, **Ossuary stalker** and **Gallowsroot** —
-own the woodland outside Hearthstead. They are original procedural work: no
+own the woodland outside Hearthstead, and keep a small camp out among the trees west of the road. They are original procedural work: no
 third-party model, texture or motion is used, and the supplied design sheet
 was ink-and-wash inspiration only (not redistributed, not a build input).
 
