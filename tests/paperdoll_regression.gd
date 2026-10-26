@@ -171,6 +171,16 @@ func _test_quick_swap() -> void:
 
 func _test_hand_rules() -> void:
 	state.reset()
+	# A slot with no piece wears nothing on its channel; the body kit is
+	# untouched, and the helm can go back on.
+	var head_guard: float = state.head_reduction()
+	var body_guard: float = state.body_reduction()
+	check(head_guard > 0.0 and body_guard > 0.0,"The starter Makeshift kit guards both channels")
+	check(bool(state.unequip_to_backpack("head").ok),"A helm can return to the backpack")
+	check(is_equal_approx(state.head_reduction(),0.0),"An empty head slot guards nothing")
+	check(is_equal_approx(state.body_reduction(),body_guard),"The body channel ignores the helm")
+	check(bool(state.equip_from_inventory(_find("armor_makeshift_head")).ok),"The helm re-equips")
+	check(is_equal_approx(state.head_reduction(),head_guard),"The head channel comes back with it")
 	var sword := _find("sword_short")
 	check(sword >= 0,"The starter sword is in the backpack")
 	var result: Dictionary = state.equip_from_inventory(sword)
@@ -213,8 +223,18 @@ func _test_hand_rules() -> void:
 	check(bool(result.ok),"A mail chest equips")
 	check(state.equipped_id("chest") == "armor_mail_chest","The mail chest occupies only the chest slot")
 	check(state.equipped_id("head") == "armor_makeshift_head","The Makeshift helm stays equipped")
-	# The salvage skin guards nothing, so the mail chest alone contributes.
-	check(is_equal_approx(state.armor_reduction(),0.05),"Only the mail chest contributes guard")
+	# The worn pieces fill two channels: the Makeshift helm keeps its own head
+	# figure, the four body pieces add up, and the mail chest replaces one.
+	var makeshift := ArmorData.SET_IDS.find("makeshift")
+	check(is_equal_approx(state.head_reduction(),ArmorData.reduction_for(makeshift,"head")),
+		"The Makeshift helm keeps its head figure")
+	check(is_equal_approx(state.body_reduction(),
+			ArmorData.reduction_for(1,"chest") + ArmorData.reduction_for(makeshift,"legs")
+			+ 2.0 * ArmorData.reduction_for(makeshift,"hands")),
+		"The body channel adds exactly the worn pieces")
+	check(is_equal_approx(state.body_reduction(),
+			0.10 + ArmorData.reduction_for(1,"chest") - ArmorData.reduction_for(makeshift,"chest")),
+		"A mail chest moves the full kit off the Makeshift body figure")
 	check(state.inventory.count("armor_mail_chest") == 1,"The backpack keeps a spare copy")
 
 func _test_overflow_and_off_override() -> void:

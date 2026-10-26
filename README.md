@@ -119,16 +119,16 @@ Dropping gear from the **inventory** (**I**) in town, the frontier or the delve 
 
 Armor is equipped **per slot**, so a cloth hood can sit over a mail hauberk, leather gloves and plate legs. Every set supplies a head, chest, hands, legs and feet piece:
 
-| Set | Head | Chest | Hands | Legs | Feet | Full-set guard |
-| --- | --- | --- | --- | --- | --- | --- |
-| Ranger leather | Hood 10 | Jerkin 15 | Gloves 8 | Trousers 12 | Boots 10 | 0% |
-| Sentinel mail | Coif 35 | Hauberk 55 | Mittens 25 | Chausses 40 | Sabatons 25 | 15% |
-| Warden plate | Sallet 65 | Cuirass 90 | Gauntlets 45 | Cuisses 80 | Sabatons 40 | 30% |
-| Emberweave cloth | Hood 25 | Robe 45 | Wraps 20 | Skirt 35 | Boots 15 | 0% |
+| Set | Head | Chest | Hands | Legs | Feet | Head guard | Body guard |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Ranger leather | Hood | Jerkin | Gloves | Trousers | Boots | 20% | 10% |
+| Sentinel mail | Coif | Hauberk | Mittens | Chausses | Sabatons | 30% | 25% |
+| Warden plate | Sallet | Cuirass | Gauntlets | Cuisses | Sabatons | 50% | 30% |
+| Emberweave cloth | Hood | Robe | Wraps | Skirt | Boots | 5% | 5% |
 
 The leather outfit is the imported Ranger mesh split by region; mail is riveted ring weave, plate is blackened articulated steel, and Emberweave is a layered mage robe with a torn hem and brass trim. Each piece renders on the same 65-bone skeleton as the ranger and follows the authored idle, draw, swing, crouch, slide, roll and cover poses. A dark hose underlayer fills the shin whenever the short leather trousers are mixed with short sabatons.
 
-Each piece contributes its own guard: mail head 3% / chest 5% / hands 2% / legs 3% / feet 2%; plate head 7% / chest 9% / hands 4% / legs 6% / feet 4%. Mixed kits add the pieces actually worn, capped at 45%. The town Quartermaster sells all 20 pieces alongside the four foci, three necklaces and seventeen rings; old whole-set items from earlier saves are migrated to the five slots on load.
+Reduction runs on **two channels**. The helmet alone answers a **head** hit, which is what makes the head zone readable: a 50% plate sallet turns a **2x headshot back into a normal hit**, a 30% mail coif leaves **1.4x** and a 5% cloth hood **1.9x**. The other four pieces add up for **every other hit** — chest and legs carry 1/2.6 of the set's body figure each, hands and feet 0.3/2.6 — so full plate adds 11.5% + 11.5% + 3.5% + 3.5% = **30%**, full mail 9.6% + 9.6% + 2.9% + 2.9% = **25%**, and a mixed kit adds exactly the pieces worn. Trinket guard is added to whichever channel a hit uses and capped at **60%**. An empty slot still shows the leather base layer but guards nothing. The town Quartermaster sells all 20 pieces alongside the four foci, three necklaces and seventeen rings; old whole-set items from earlier saves are migrated to the five slots on load.
 
 In a match, the arena's session panel lists five slot buttons (**HEAD / CHEST / HANDS / LEGS / FEET**). Click a slot to cycle Leather → Mail → Plate → Cloth for that session. Session changes are not written back; only the equipment paperdoll's pieces persist.
 
@@ -275,7 +275,7 @@ Barrage, volley and piercing shots solve both bow arms from a data draw curve, s
 
 **Bow skills turn the body onto the live crosshair** before the shot, and every arrow leaves along that line with the authored spread, so an off-axis target is solved by facing it rather than by floating the pose. The arming sword's **LUNGING THRUST**, the buckler **HEADBUTT** and the kite **SHIELD CHARGE** do the same before their committed step, so the dash lands where the player is pointing rather than where the body happened to be facing. The dagger's **BACKSTAB** needs a body under the crosshair within **8 m**: it preflights that target, teleports the ranger behind it at **0.20 s** inside a large black charcoal smoke cloud (roughly **4 m** wide and **3.6 m** tall, built from **130** soft billboards that last about **0.8 s**; the ranger is clear of it by about **0.7 s**), then plunges for double dagger damage (**28**) at **0.50 s** in a 0.9 s skill, bypassing a raised front guard. The blink lands behind the foe's back, so a front guard never covers the hit.
 
-**1 (without Shift) always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail reduces incoming damage by 15%, plate by 30%; mixed sets add the pieces actually worn. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
+**1 (without Shift) always equips the selected bow; 2 always equips the selected sword; 3 equips the single dagger; 4 equips or stows the shield; 5 toggles dual wield; TAB toggles the bound quick-swap pair. No number key changes size.** The equipment paperdoll's main and off hands determine the starting kit for a session; these keys then change only the current match, while TAB reads and writes the persistent pair in every mode. **I** is the backpack and **P** is the equipment paperdoll in all three modes. The shield is legal with **any one-handed sword or the dagger**, including the shortsword; switching to a greatsword, staff, bow or dual wield stows it. Mail is a 30% helmet and a 25% body kit, plate 50% and 30%; mixed sets add the pieces actually worn, and a helmet only answers head hits. The town's keepers and stash are the only places to buy or store gear; the arena portal and the delve hatch are the two other ways out of town.
 
 ## Running slide
 
@@ -319,9 +319,9 @@ Both shoulder views aim at the world point under the crosshair, independently of
 arrow damage = bow base damage × clamp(draw amount, 0, 1)
 ```
 
-Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. Armor applies its normal reduction afterward. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
+Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. The hit's own armor channel applies afterward: the helmet on a head hit, the body kit on the rest. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
 
-Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus the frontier wolf and cinder devil, and the multiplier is resolved before armor. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
+Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus the frontier wolf and cinder devil, and a head hit resolves the helmet's **head guard** instead of the body kit, so plate's 50% sallet brings a headshot back down to a normal hit. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
 
 The charge bar and bowstring animation fill together over the bow's full draw duration, including raising the bow. Release whenever you want: a large bow held for **1.5 seconds deals 50% damage**; holding it for 3 seconds gives full damage.
 

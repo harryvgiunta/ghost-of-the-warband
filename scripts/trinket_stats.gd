@@ -28,8 +28,8 @@ const DEFAULT := {
 	"stamina_on_kill": 0.0,
 }
 
-## The guard a trinket can add on top of the armor sets. Armor alone clamps at
-## `ArmorData.MAX_REDUCTION`; the trinket ceiling leaves room for both.
+## The guard a trinket can add to one armor channel. Armor's own figures peak
+## at 50% (head) and 30% (body); the channel ceiling applies once they add up.
 const GUARD_CAP := 0.60
 
 const STATS := {
@@ -157,8 +157,9 @@ static func stagger_scale(stats: Dictionary) -> float:
 	return clampf(1.0 - float(stats.get("stagger", 0.0)), 0.0, 1.0)
 
 
-## Armor and trinkets share one damage-reduction number. Armor alone keeps its
-## own 45% ceiling; the combined figure may only reach `GUARD_CAP`.
+## Trinket guard rides on one armor channel at a time: the head channel on a
+## head hit, the body channel on every other hit. Each channel is clamped once
+## the armor figure and the worn guard are added.
 static func damage_reduction(armor_reduction: float, stats: Dictionary) -> float:
 	return clampf(maxf(armor_reduction, 0.0) + float(stats.get("guard", 0.0)), 0.0, GUARD_CAP)
 

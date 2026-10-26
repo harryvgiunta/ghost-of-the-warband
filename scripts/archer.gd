@@ -119,7 +119,8 @@ var sword_index := 1
 ## salvage cleaver/shiv the Unholy Forest set is themed on.
 var sword_skin := ""
 var dagger_skin := ""
-var armor_pieces := {"head":0, "chest":0, "hands":0, "legs":0, "feet":0}
+var armor_pieces := {"head":ArmorData.NONE, "chest":ArmorData.NONE, "hands":ArmorData.NONE,
+	"legs":ArmorData.NONE, "feet":ArmorData.NONE}
 var weapon := "bow"
 ## The paperdoll main-hand category. Empty hands cannot be dual-wielded; a bow
 ## or dagger may still hand the session back to the selected one-handed sword.
@@ -954,8 +955,10 @@ func _build_armor_meshes() -> void:
 					_armor_meshes[slot][set_index].append(node)
 
 func _apply_armor_visibility() -> void:
+	# An empty slot keeps the imported leather outfit on screen as the base
+	# layer; the reduction still follows the paperdoll, not the mesh.
 	for slot in ArmorData.SLOTS:
-		var active := int(armor_pieces.get(slot,0))
+		var active := maxi(int(armor_pieces.get(slot,0)), 0)
 		for set_index: int in _armor_meshes.get(slot,{}):
 			for node: Node3D in _armor_meshes[slot][set_index]:
 				node.visible = set_index == active
@@ -964,7 +967,7 @@ func set_armor_piece(slot: String, set_index: int) -> void:
 	cancel_consumable()
 	if slot not in ArmorData.SLOTS:
 		return
-	armor_pieces[slot] = clampi(set_index,0,ArmorData.SET_IDS.size()-1)
+	armor_pieces[slot] = clampi(set_index,ArmorData.NONE,ArmorData.SET_IDS.size()-1)
 	if _built:
 		_apply_armor_visibility()
 	loadout_changed.emit()
@@ -972,7 +975,7 @@ func set_armor_piece(slot: String, set_index: int) -> void:
 func set_armor_pieces(pieces: Dictionary) -> void:
 	cancel_consumable()
 	for slot in ArmorData.SLOTS:
-		armor_pieces[slot] = clampi(int(pieces.get(slot,0)),0,ArmorData.SET_IDS.size()-1)
+		armor_pieces[slot] = clampi(int(pieces.get(slot,ArmorData.NONE)),ArmorData.NONE,ArmorData.SET_IDS.size()-1)
 	if _built:
 		_apply_armor_visibility()
 	loadout_changed.emit()
@@ -994,10 +997,14 @@ func armor_bits() -> int:
 	return ArmorData.pack(armor_pieces)
 
 func armor_piece(slot: String) -> int:
-	return int(armor_pieces.get(slot,0))
+	return int(armor_pieces.get(slot,ArmorData.NONE))
 
-func armor_reduction() -> float:
-	return ArmorData.reduction(armor_pieces)
+## The armor-only figure for one hit: a head hit resolves the helmet alone,
+## every other hit the four body pieces. Trinket guard rides on top in
+## `damage_reduction`.
+func armor_reduction(headshot: bool = false) -> float:
+	return ArmorData.head_reduction(armor_pieces) if headshot \
+		else ArmorData.body_reduction(armor_pieces)
 
 func can_equip_shield() -> bool:
 	# Any one-handed sword or the dagger can carry the shield; the 2H
@@ -1191,8 +1198,8 @@ func attack_rate() -> float:
 func move_scale() -> float:
 	return TrinketStats.move_scale(trinket_stats)
 
-func damage_reduction() -> float:
-	return TrinketStats.damage_reduction(armor_reduction(),trinket_stats)
+func damage_reduction(headshot: bool = false) -> float:
+	return TrinketStats.damage_reduction(armor_reduction(headshot),trinket_stats)
 
 ## The yellow ward bubble. Presentation only: the absorbing share lives on the
 ## actor that owns the health.

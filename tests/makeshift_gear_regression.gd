@@ -69,12 +69,50 @@ func _check_catalog() -> void:
 		for other in ArmorData.SLOTS:
 			check(int(unpacked[other]) == set_index,
 				"Packing round-trips " + other + " at the Makeshift set index")
-	check(is_equal_approx(ArmorData.reduction({}), 0.0), "No armour guards nothing")
-	var full_makeshift := {}
+	# Two channels: the helmet alone on a head hit, the four body pieces summed
+	# on every other hit. Each row is the base figure before trinket guard.
+	var rows := {
+		"leather":[0.20, 0.10], "mail":[0.30, 0.25], "plate":[0.50, 0.30],
+		"cloth":[0.05, 0.05], "makeshift":[0.20, 0.10]}
+	check(is_equal_approx(ArmorData.head_reduction({}), 0.0) \
+			and is_equal_approx(ArmorData.body_reduction({}), 0.0),
+		"An empty kit guards nothing")
+	check(is_equal_approx(ArmorData.BODY_WEIGHT_TOTAL, 2.6),
+		"The body split's divisor matches its weights")
+	for set_name: String in rows:
+		var row_index: int = ArmorData.SET_IDS.find(set_name)
+		var full := {}
+		for slot in ArmorData.SLOTS:
+			full[slot] = row_index
+		check(is_equal_approx(ArmorData.head_reduction(full), rows[set_name][0]),
+			set_name + " helmets guard their head figure")
+		check(is_equal_approx(ArmorData.body_reduction(full), rows[set_name][1]),
+			set_name + " body pieces add up to the body figure")
+		# The body split: chest and legs match, hands and feet are 30% of them.
+		var chest := ArmorData.reduction_for(row_index, "chest")
+		check(is_equal_approx(ArmorData.reduction_for(row_index, "legs"), chest),
+			set_name + " legs match the chest figure")
+		check(is_equal_approx(ArmorData.reduction_for(row_index, "hands"), chest * 0.3),
+			set_name + " hands are 30% of the chest figure")
+		check(is_equal_approx(ArmorData.reduction_for(row_index, "feet"), chest * 0.3),
+			set_name + " feet are 30% of the chest figure")
+		check(is_equal_approx(ArmorData.body_reduction({"head":row_index}), 0.0),
+			set_name + " helm adds nothing to the body channel")
+		var body_only := full.duplicate()
+		body_only["head"] = ArmorData.NONE
+		check(is_equal_approx(ArmorData.head_reduction(body_only), 0.0),
+			set_name + " body pieces add nothing to the head channel")
+	# An empty slot packs into the spare three-bit codes and reads back empty.
+	var empty := {}
 	for slot in ArmorData.SLOTS:
-		full_makeshift[slot] = set_index
-	check(is_equal_approx(ArmorData.reduction(full_makeshift), 0.0),
-		"The salvage skin is the tier-0 starter set: it guards nothing")
+		empty[slot] = ArmorData.NONE
+	var empty_back := ArmorData.unpack(ArmorData.pack(empty))
+	for slot in ArmorData.SLOTS:
+		check(int(empty_back[slot]) == ArmorData.NONE,
+			"An empty " + slot + " slot survives packing")
+	check(is_equal_approx(ArmorData.head_reduction(empty_back), 0.0) \
+			and is_equal_approx(ArmorData.body_reduction(empty_back), 0.0),
+		"Empty slots still guard nothing after the round trip")
 	# The starter kit is the salvage set, and the blades are on the smith.
 	var defaults: Dictionary = StateScript.DEFAULTS
 	for slot in ArmorData.SLOTS:
@@ -91,11 +129,19 @@ func _check_catalog() -> void:
 	for slot in ArmorData.SLOTS:
 		check((quartermaster.stock as Array).has(ArmorData.item_id(set_index, slot)),
 			"The quartermaster stocks the salvage " + slot)
-	# A salvage chest swapped for a mail one changes guard by exactly the mail row.
-	var mixed := full_makeshift.duplicate()
+	# A salvage chest swapped for a mail one changes the body figure by exactly
+	# the difference between the two chest pieces; the helm is untouched.
+	var full_makeshift := {}
+	for slot in ArmorData.SLOTS:
+		full_makeshift[slot] = set_index
+	var mixed: Dictionary = full_makeshift.duplicate()
 	mixed["chest"] = ArmorData.SET_IDS.find("mail")
-	check(is_equal_approx(ArmorData.reduction(mixed), ArmorData.reduction_for(1, "chest")),
-		"Guard comes only from the forged piece")
+	check(is_equal_approx(ArmorData.body_reduction(mixed),
+			ArmorData.body_reduction(full_makeshift) - ArmorData.reduction_for(set_index,"chest")
+			+ ArmorData.reduction_for(1,"chest")),
+		"Only the swapped chest changes the body figure")
+	check(is_equal_approx(ArmorData.head_reduction(mixed), ArmorData.head_reduction(full_makeshift)),
+		"A body swap leaves the helmet channel alone")
 
 
 func _check_asset() -> void:

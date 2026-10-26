@@ -174,103 +174,103 @@ const ITEMS := {
 	"armor_leather_head": {"name":"Leather Hood", "short":"L Hood", "kind":"head", "index":0, "set":0, "price":10,
 		"category":"armor", "slot":"head",
 		"summary":"A soft hood stained by the road",
-		"detail":"0% guard / no mobility penalty"},
+		"detail":"No mobility penalty"},
 	"armor_leather_chest": {"name":"Leather Jerkin", "short":"L Jerkin", "kind":"chest", "index":0, "set":0, "price":15,
 		"category":"armor", "slot":"chest",
 		"summary":"Cured hide over a wool shirt",
-		"detail":"0% guard / the road-worn ranger cut"},
+		"detail":"The road-worn ranger cut"},
 	"armor_leather_hands": {"name":"Leather Gloves", "short":"L Gloves", "kind":"hands", "index":0, "set":0, "price":8,
 		"category":"armor", "slot":"hands",
 		"summary":"Close-fitting riding gloves",
-		"detail":"0% guard / fingers stay free for the string"},
+		"detail":"Fingers stay free for the string"},
 	"armor_leather_legs": {"name":"Leather Trousers", "short":"L Trousers", "kind":"legs", "index":0, "set":0, "price":12,
 		"category":"armor", "slot":"legs",
 		"summary":"Reinforced leather leggings",
-		"detail":"0% guard / full stride"},
+		"detail":"Full stride"},
 	"armor_leather_feet": {"name":"Leather Boots", "short":"L Boots", "kind":"feet", "index":0, "set":0, "price":10,
 		"category":"armor", "slot":"feet",
 		"summary":"Tall boots with cracked soles",
-		"detail":"0% guard / quiet footing"},
+		"detail":"Quiet footing"},
 	"armor_mail_head": {"name":"Mail Coif", "short":"M Coif", "kind":"head", "index":1, "set":1, "price":35,
 		"category":"armor", "slot":"head",
 		"summary":"Riveted rings draped over the shoulders",
-		"detail":"3% guard / rings cover the neck"},
+		"detail":"Rings cover the neck"},
 	"armor_mail_chest": {"name":"Mail Hauberk", "short":"M Hauberk", "kind":"chest", "index":1, "set":1, "price":55,
 		"category":"armor", "slot":"chest",
 		"summary":"A heavy hauberk split for riding",
-		"detail":"5% guard / sleeves and skirt"},
+		"detail":"Sleeves and skirt"},
 	"armor_mail_hands": {"name":"Mail Mittens", "short":"M Mittens", "kind":"hands", "index":1, "set":1, "price":25,
 		"category":"armor", "slot":"hands",
 		"summary":"Ring mittens with leather palms",
-		"detail":"2% guard / grip stays usable"},
+		"detail":"Grip stays usable"},
 	"armor_mail_legs": {"name":"Mail Chausses", "short":"M Chausses", "kind":"legs", "index":1, "set":1, "price":40,
 		"category":"armor", "slot":"legs",
 		"summary":"Riveted leg hose with leather straps",
-		"detail":"3% guard / flexible across the knee"},
+		"detail":"Flexible across the knee"},
 	"armor_mail_feet": {"name":"Mail Sabatons", "short":"M Sabatons", "kind":"feet", "index":1, "set":1, "price":25,
 		"category":"armor", "slot":"feet",
 		"summary":"Ring shoes over stitched leather soles",
-		"detail":"2% guard / quiet under mail"},
+		"detail":"Quiet under mail"},
 	"armor_plate_head": {"name":"Warden Sallet", "short":"P Sallet", "kind":"head", "index":2, "set":2, "price":65,
 		"category":"armor", "slot":"head",
 		"summary":"Blackened steel sallet with a raised brow",
-		"detail":"7% guard / open face for the bow"},
+		"detail":"Open face for the bow"},
 	"armor_plate_chest": {"name":"Warden Cuirass", "short":"P Cuirass", "kind":"chest", "index":2, "set":2, "price":90,
 		"category":"armor", "slot":"chest",
 		"summary":"Articulated breast, back and faulds",
-		"detail":"9% guard / the wardens’ blackened steel"},
+		"detail":"The wardens’ blackened steel"},
 	"armor_plate_hands": {"name":"Warden Gauntlets", "short":"P Gauntlets", "kind":"hands", "index":2, "set":2, "price":45,
 		"category":"armor", "slot":"hands",
 		"summary":"Articulated finger lames and cuff",
-		"detail":"4% guard / a closed grip around a hilt"},
+		"detail":"A closed grip around a hilt"},
 	"armor_plate_legs": {"name":"Warden Cuisses", "short":"P Cuisses", "kind":"legs", "index":2, "set":2, "price":80,
 		"category":"armor", "slot":"legs",
 		"summary":"Cuisses, poleyns, greaves and tassets",
-		"detail":"6% guard / heavy but planted"},
+		"detail":"Heavy but planted"},
 	"armor_plate_feet": {"name":"Warden Sabatons", "short":"P Sabatons", "kind":"feet", "index":2, "set":2, "price":40,
 		"category":"armor", "slot":"feet",
 		"summary":"Pointed steel lames over the foot",
-		"detail":"4% guard / weighted heel"},
+		"detail":"Weighted heel"},
 	"armor_cloth_head": {"name":"Emberweave Hood", "short":"C Hood", "kind":"head", "index":3, "set":3, "price":25,
 		"category":"armor", "slot":"head",
 		"summary":"A deep hood with a tattered mantle",
-		"detail":"0% guard / shadow for the face"},
+		"detail":"Shadow for the face"},
 	"armor_cloth_chest": {"name":"Emberweave Robe", "short":"C Robe", "kind":"chest", "index":3, "set":3, "price":45,
 		"category":"armor", "slot":"chest",
 		"summary":"Layered cloth with wide sleeves",
-		"detail":"0% guard / woven for long marches"},
+		"detail":"Woven for long marches"},
 	"armor_cloth_hands": {"name":"Emberweave Wraps", "short":"C Wraps", "kind":"hands", "index":3, "set":3, "price":20,
 		"category":"armor", "slot":"hands",
 		"summary":"Cloth wraps over fingerless gloves",
-		"detail":"0% guard / chalk and candle wax"},
+		"detail":"Chalk and candle wax"},
 	"armor_cloth_legs": {"name":"Emberweave Skirt", "short":"C Skirt", "kind":"legs", "index":3, "set":3, "price":35,
 		"category":"armor", "slot":"legs",
 		"summary":"A long split skirt with a torn hem",
-		"detail":"0% guard / moves with the stride"},
+		"detail":"Moves with the stride"},
 	"armor_cloth_feet": {"name":"Emberweave Boots", "short":"C Boots", "kind":"feet", "index":3, "set":3, "price":15,
 		"category":"armor", "slot":"feet",
 		"summary":"Soft boots with cloth cuffs",
-		"detail":"0% guard / made for quiet steps"},
+		"detail":"Made for quiet steps"},
 	"armor_makeshift_head": {"name":"Makeshift Antler Helm", "short":"Msh Helm", "kind":"head", "index":4, "set":4, "price":6,
 		"category":"armor", "slot":"head",
 		"summary":"A bark shell crowned with a split antler",
-		"detail":"0% guard / salvage bones lashed over the crown"},
+		"detail":"Salvage bones lashed over the crown"},
 	"armor_makeshift_chest": {"name":"Makeshift Bark Cuirass", "short":"Msh Cuirass", "kind":"chest", "index":4, "set":4, "price":9,
 		"category":"armor", "slot":"chest",
 		"summary":"Laced bark plates over a cured hide vest",
-		"detail":"0% guard / the first thing the forest gives back"},
+		"detail":"The first thing the forest gives back"},
 	"armor_makeshift_hands": {"name":"Makeshift Thorn Gauntlets", "short":"Msh Gauntlets", "kind":"hands", "index":4, "set":4, "price":5,
 		"category":"armor", "slot":"hands",
 		"summary":"Hide wraps studded with bone thorns",
-		"detail":"0% guard / thorns out, fingers free"},
+		"detail":"Thorns out, fingers free"},
 	"armor_makeshift_legs": {"name":"Makeshift Hide Leggings", "short":"Msh Leggings", "kind":"legs", "index":4, "set":4, "price":7,
 		"category":"armor", "slot":"legs",
 		"summary":"Hide leggings strapped with bark knee plates",
-		"detail":"0% guard / kneel in the briar, get up again"},
+		"detail":"Kneel in the briar, get up again"},
 	"armor_makeshift_feet": {"name":"Makeshift Root Boots", "short":"Msh Boots", "kind":"feet", "index":4, "set":4, "price":5,
 		"category":"armor", "slot":"feet",
 		"summary":"Bark soles held on by living root straps",
-		"detail":"0% guard / split toe, quiet footing"},
+		"detail":"Split toe, quiet footing"},
 	"armor_leather": {"name":"Ranger leather", "short":"Ranger set", "kind":"armor", "index":0, "set":0, "price":55,
 		"category":"armor_bundle",
 		"summary":"The road-worn ranger outfit",
@@ -537,7 +537,10 @@ func item_stat_rows(id: String) -> Array:
 		rows.append({"label":"BLOCK", "value":"Full front"})
 		rows.append({"label":"STAMINA", "value":"%d per block" % item_block_stamina(id)})
 	elif category == "armor":
-		rows.append({"label":"GUARD", "value":"%d%%" % item_guard_percent(id)})
+		if str(item.get("kind", "")) == "head":
+			rows.append({"label":"HEAD GUARD", "value":"%d%%" % item_guard_percent(id)})
+		else:
+			rows.append({"label":"BODY GUARD", "value":"+%d%%" % item_guard_percent(id)})
 	elif category == "focus":
 		var focus_rows := TrinketStats.effect_rows(id)
 		if focus_rows.is_empty():
@@ -569,7 +572,8 @@ func item_compact_stats(id: String) -> String:
 	elif category == "shield":
 		parts.append("BLOCK %d STAM" % item_block_stamina(id))
 	elif category == "armor":
-		parts.append("GUARD %d%%" % item_guard_percent(id))
+		parts.append(("HEAD %d%%" if str(item.get("kind", "")) == "head" else "BODY +%d%%") \
+			% item_guard_percent(id))
 	elif category == "focus":
 		var focus_text := TrinketStats.effect_summary(id)
 		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")
@@ -608,6 +612,9 @@ func equipped_id(kind: String) -> String:
 	return ""
 
 func equipped_index(kind: String) -> int:
+	if kind in ArmorData.SLOTS:
+		var armor_id := equipped_id(kind)
+		return int(_item(armor_id).get("index", 0)) if not armor_id.is_empty() else ArmorData.NONE
 	if kind in EquipmentRules.SLOTS:
 		return int(_item(equipped_id(kind)).get("index", 0))
 	var main := _item(main_item())
@@ -627,8 +634,13 @@ func equipped_pieces() -> Dictionary:
 		pieces[slot] = equipped_index(slot)
 	return pieces
 
-func armor_reduction() -> float:
-	return ArmorData.reduction(equipped_pieces())
+## Armor-only channels: the helmet on a head hit, the body pieces on anything
+## else. Trinket guard is not included here; the rig adds it per hit.
+func head_reduction() -> float:
+	return ArmorData.head_reduction(equipped_pieces())
+
+func body_reduction() -> float:
+	return ArmorData.body_reduction(equipped_pieces())
 
 ## The four equipment ids the trinket table reads: neck, both rings and the
 ## off hand (the skulls carry their kill effects there).
@@ -666,7 +678,7 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		trinket_ids: Dictionary = {}) -> Dictionary:
 	var armor := {}
 	for slot in ArmorData.SLOTS:
-		armor[slot] = int(armor_pieces.get(slot, 0))
+		armor[slot] = int(armor_pieces.get(slot, ArmorData.NONE))
 	var main: Dictionary = ITEMS.get(main_id, {})
 	var main_category := str(main.get("category", ""))
 	var main_kind := str(main.get("kind", ""))

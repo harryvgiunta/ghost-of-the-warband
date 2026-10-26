@@ -18,7 +18,9 @@ const ArenaHud = preload("res://scripts/arena_hud.gd")
 const DelveHud = preload("res://scripts/delve_hud.gd")
 
 const TEST_SAVE := "user://trinkets_regression_state.json"
-const ZERO_ARMOR := {"head":0, "chest":0, "hands":0, "legs":0, "feet":0}
+## Unarmored: an empty piece map wears nothing on either channel, so the ward
+## and damage arithmetic below is measured against the raw hit.
+const ZERO_ARMOR := {}
 
 var checks := 0
 var failures := 0

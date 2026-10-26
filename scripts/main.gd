@@ -1130,7 +1130,9 @@ func equip_armor_slot(slot: String, set_index: int) -> void:
 	audio.play_sound("equip")
 
 func _armor_summary() -> String:
-	return "%d%% GUARD" % int(round(archer.armor_reduction() * 100.0))
+	return "HEAD %d%% / BODY %d%%" % [
+		int(round(archer.armor_reduction(true) * 100.0)),
+		int(round(archer.armor_reduction(false) * 100.0))]
 
 func _update_loadout() -> void:
 	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
@@ -1732,7 +1734,7 @@ func _receive_seat_attack(attacker, amount: float, seat) -> void:
 
 func take_damage(amount: float, react: bool = true) -> void:
 	_cancel_consumable()
-	var applied: float = amount * (1.0 - archer.damage_reduction())
+	var applied: float = amount * (1.0 - archer.damage_reduction(false))
 	applied = _absorb_with_ward(applied)
 	health = maxf(0.0, health - applied)
 	if react:

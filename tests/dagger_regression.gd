@@ -210,7 +210,8 @@ func run() -> void:
 	check(game.combat.start_block(Vector3(0, 0, -1)), "Frontier accepts a dagger guard")
 	var enemy_state: String = enemy.state
 	game._on_enemy_attack(enemy, 20.0)
-	check(is_equal_approx(game.health, 100.0 - 20.0 * Combat.WEAK_BLOCK_DAMAGE_SCALE), "Frontier weak block only halves an enemy hit")
+	var body_guard: float = game.archer.damage_reduction(false)
+	check(is_equal_approx(game.health, 100.0 - 20.0 * Combat.WEAK_BLOCK_DAMAGE_SCALE * (1.0 - body_guard)), "Frontier weak block only halves an enemy hit")
 	check(is_equal_approx(game.stamina, 100.0 - Combat.DAGGER_BLOCK_STAMINA), "Frontier weak block spends the dagger stamina chunk")
 	check(enemy.state == enemy_state, "Frontier weak block does not stagger the enemy")
 
