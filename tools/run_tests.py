@@ -59,7 +59,8 @@ TESTS = [
     "corpse_regression",
     "ability_regression",
     "weapon_abilities_regression",
-    "backstab_regression"
+    "backstab_regression",
+    "trinkets_regression"
 ]
 FIXED_FPS = {"cover_movement_regression", "weapon_input_regression"}
 TIMEOUT = 120.0

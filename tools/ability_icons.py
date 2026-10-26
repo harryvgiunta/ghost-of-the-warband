@@ -357,6 +357,34 @@ def build_shield_slam() -> Image.Image:
     return image.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+def build_dash() -> Image.Image:
+    """A hard forward sprint: motion light behind two gold chevrons."""
+    image, draw = canvas()
+    motion, mdraw = canvas()
+    for index in range(3):
+        y = 40 + index * 24
+        mdraw.line([(u(6), u(y)), (u(44 - index * 6), u(y))], fill=TEAL,
+                   width=u(4 - index * 0.6))
+    image.alpha_composite(fade_layer(motion, 0.55))
+    chevron(draw, 46, 64, 46, 16, 12, GOLD)
+    chevron(draw, 78, 64, 34, 12, 9, GOLD_DIM)
+    draw.ellipse([u(104), u(52), u(120), u(68)], fill=TEAL_DIM)
+    return image.resize((SIZE, SIZE), Image.LANCZOS)
+
+
+def build_energy_shield() -> Image.Image:
+    """A yellow ward bubble: bright rim, hot core, a shield rune inside."""
+    image, draw = canvas()
+    glow, gdraw = canvas()
+    gdraw.ellipse([u(10), u(10), u(118), u(118)], fill=(255, 214, 96, 120))
+    gdraw.ellipse([u(20), u(20), u(108), u(108)], fill=(255, 236, 170, 90))
+    image.alpha_composite(fade_layer(glow, 0.75))
+    draw.ellipse([u(14), u(14), u(114), u(114)], outline=GOLD, width=u(6))
+    draw.arc([u(24), u(24), u(104), u(104)], start=196, end=344, fill=CREAM, width=u(3))
+    shield_shape(draw, 64, 62, 22, (255, 226, 140, 255))
+    return image.resize((SIZE, SIZE), Image.LANCZOS)
+
+
 BUILDERS = {
     "charge": build_charge,
     "barrage": build_barrage,
@@ -371,6 +399,8 @@ BUILDERS = {
     "shield_bash": build_shield_bash,
     "shield_charge": build_shield_charge,
     "shield_slam": build_shield_slam,
+    "dash": build_dash,
+    "energy_shield": build_energy_shield,
 }
 
 

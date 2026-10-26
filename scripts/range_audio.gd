@@ -32,6 +32,8 @@ func _ready() -> void:
 	sounds["bone"] = _synthesize(0.36, 540.0, 0.30, 180.0)
 	sounds["bash"] = _synthesize(0.30, 160.0, 0.44, 88.0)
 	sounds["slam"] = _synthesize(0.58, 74.0, 0.70, 34.0)
+	# A rising shimmer for the ward: no noise, so it reads as energy not impact.
+	sounds["ward"] = _synthesize(0.44, 720.0, 0.05, 1180.0)
 
 func play_sound(sound: String) -> void:
 	if muted:

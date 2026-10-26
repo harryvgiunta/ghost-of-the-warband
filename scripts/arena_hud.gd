@@ -34,6 +34,7 @@ var _cover_status: Label
 var bar: ProgressBar
 var _ability_slot
 var _off_ability_slot
+var _trinket_ability_slot
 var bow_buttons: Array[Button] = []
 var armor_buttons: Array[Button] = []
 var _armor_pieces: Dictionary = {}
@@ -127,6 +128,11 @@ func _ready() -> void:
 	_off_ability_slot.configure(1)
 	_off_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT,true)
 	match_ui.add_child(_off_ability_slot)
+	_trinket_ability_slot = AbilitySlot.new()
+	_trinket_ability_slot.position = Vector2(232,-143)
+	_trinket_ability_slot.configure(2)
+	_trinket_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT,true)
+	match_ui.add_child(_trinket_ability_slot)
 	var cover_panel := _ui._panel(match_ui,Vector2(24,145),Vector2(620,116))
 	cover_panel.set_anchors_preset(Control.PRESET_TOP_LEFT,true)
 	_cover_status = _ui._label(cover_panel,"OPEN / RIGHT SHOULDER",Vector2(15,10),12,UI.MUTED)
@@ -193,7 +199,7 @@ func _ready() -> void:
 	var leave := _ui._button(match_ui,"LEAVE MATCH",Vector2(-200,-83),Vector2(176,40))
 	leave.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT,true)
 	leave.pressed.connect(func(): leave_requested.emit())
-	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2  Weapon Skill   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
+	var hints := _ui._label(match_ui,"MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2 / 3  Skills   I  Inventory   P  Equipment",Vector2(-610,-25),11,UI.CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM,true)
 	show_lobby()
 
@@ -226,7 +232,7 @@ func update_match(state: Dictionary) -> void:
 		var prefix := "> " if int(row.slot) == int(state.local_slot) else "   "
 		lines.append("%s%s [%s]   %d / %d" % [prefix,str(row.name).left(12),"BOT" if row.bot else "P",int(row.kills),int(row.deaths)])
 	roster.text = "\n".join(lines)
-	health_label.text = "HEALTH  %d / 100   /   %s" % [int(state.health),str(state.movement)]
+	health_label.text = "HEALTH  %d / %d   /   %s" % [int(state.health),int(round(float(state.get("max_health",100.0)))),str(state.movement)]
 	var drawing: bool = state.phase in ["DRAWING","HOLDING"]
 	var throwing: bool = state.phase in ["T_DRAW","T_HOLD"]
 	var left_melee := float(state.get("left_melee",1.0))
@@ -234,14 +240,19 @@ func update_match(state: Dictionary) -> void:
 	var consume_time := float(state.get("phase_time",0.0))
 	var ability_state: Dictionary = state.get("ability",{})
 	var off_ability_state: Dictionary = state.get("ability_off",{})
+	var trinket_ability_state: Dictionary = state.get("ability_trinket",{})
 	_ability_slot.update_state(ability_state)
 	if is_instance_valid(_off_ability_slot):
 		_off_ability_slot.update_state(off_ability_state)
+	if is_instance_valid(_trinket_ability_slot):
+		_trinket_ability_slot.update_state(trinket_ability_state)
 	if state.phase == "ABILITY":
 		var charge_ratio := 0.0
 		var active_state := ability_state
 		if active_state.is_empty() or not bool(active_state.get("active", false)):
 			active_state = off_ability_state
+		if active_state.is_empty() or not bool(active_state.get("active", false)):
+			active_state = trinket_ability_state
 		if not active_state.is_empty():
 			charge_ratio = clampf(float(active_state.get("elapsed",0.0))/maxf(float(active_state.get("duration",1.0)),0.001),0.0,1.0)
 		attack_label.text = "%s  %d%%  /  %s" % [str(active_state.get("name", "SKILL")), int(charge_ratio * 100.0), str(active_state.get("key", ""))]

@@ -41,6 +41,7 @@ var _stamina_label: Label
 var _charge_bar: ProgressBar
 var _ability_slot
 var _off_ability_slot
+var _trinket_ability_slot
 var _interaction_panel: Panel
 var _interaction: Label
 var _feedback: Label
@@ -55,6 +56,10 @@ var _paths: Array[PackedVector3Array] = []
 var _interactables: Array[Dictionary] = []
 var _world_limit := 145.0
 var _map_style: StyleBoxFlat
+## Worn-trinket maxima. The bars and the labels share them so a +25 health ring
+## reads as 125/125 rather than an over-full bar.
+var _max_health := 100.0
+var _max_stamina := Stamina.MAX
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -93,8 +98,9 @@ func _ready() -> void:
 	vitals.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_health_label = _label(vitals, "HEALTH  100 / 100", Vector2(16, 12), 13, CREAM)
 	_health_bar = _bar(vitals, Vector2(16, 37), Vector2(268, 11), Color("72b58b"))
+	_health_bar.max_value = _max_health
 	_stamina_bar = _bar(vitals, Vector2(16, 58), Vector2(268, 5), GOLD)
-	_stamina_bar.max_value = Stamina.MAX
+	_stamina_bar.max_value = _max_stamina
 	_stamina_label = _label(vitals, "STAMINA  %d / %d" % [int(Stamina.MAX),int(Stamina.MAX)], Vector2(16, 70), 10, MUTED)
 	_gold_label = _label(vitals, "0 GOLD  /  0 FOES", Vector2(16, 91), 13, GOLD)
 	_ability_slot = AbilitySlot.new()
@@ -107,14 +113,19 @@ func _ready() -> void:
 	_off_ability_slot.configure(1)
 	_off_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	add_child(_off_ability_slot)
+	_trinket_ability_slot = AbilitySlot.new()
+	_trinket_ability_slot.position = Vector2(540, -154)
+	_trinket_ability_slot.configure(2)
+	_trinket_ability_slot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
+	add_child(_trinket_ability_slot)
 	var backpack := _panel(self, Vector2(-216, -243), Vector2(192, 30))
 	backpack.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	backpack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_backpack_label = _label(backpack, "BACKPACK  0 / 15", Vector2(12, 6), 12, TEAL)
-	var charge := _panel(self, Vector2(540, -133), Vector2(520, 101))
+	var charge := _panel(self, Vector2(648, -133), Vector2(412, 101))
 	charge.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
 	_phase = _label(charge, "", Vector2(17, 12), 13, CREAM)
-	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(486, 8), GOLD)
+	_charge_bar = _bar(charge, Vector2(17, 41), Vector2(378, 8), GOLD)
 	_loadout = _label(charge, "", Vector2(17, 63), 13, MUTED)
 	var cover_panel := _panel(self, Vector2(24, -289), Vector2(620, 116))
 	cover_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT, true)
@@ -136,10 +147,18 @@ func _ready() -> void:
 	var camp_button := _button(self, "R   RETURN TO TOWN", Vector2(-216, -75), Vector2(192, 35))
 	camp_button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT, true)
 	camp_button.pressed.connect(func(): camp_requested.emit())
-	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2  Weapon Skill   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
+	var hints := _label(self, "MOUSE  Aim   LMB  Draw / diagonal cut   WHEEL UP  Stab   WHEEL DOWN  Overhead   Q / E  Step   HOLD T  Throw   1-5  Gear   TAB  Swap   6 / 7  Consumables   SHIFT + SPACE  Roll   SHIFT + 1 / 2 / 3  Skills   G  Interact   I  Inventory   P  Equipment", Vector2(-600, -23), 11, CREAM)
 	hints.set_anchors_preset(Control.PRESET_CENTER_BOTTOM, true)
 	hints.add_theme_color_override("font_shadow_color", Color("10242b"))
 	hints.add_theme_constant_override("shadow_outline_size", 3)
+
+func set_limits(max_health: float, max_stamina: float) -> void:
+	_max_health = maxf(1.0,max_health)
+	_max_stamina = maxf(1.0,max_stamina)
+	if _health_bar != null:
+		_health_bar.max_value = _max_health
+	if _stamina_bar != null:
+		_stamina_bar.max_value = _max_stamina
 
 func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array], interactables: Array[Dictionary], limit: float) -> void:
 	_landmarks = landmarks
@@ -147,15 +166,17 @@ func configure_map(landmarks: Array[Dictionary], paths: Array[PackedVector3Array
 	_interactables = interactables
 	_world_limit = limit
 
-func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0, consume_kind: String = "", consume_time: float = 0.0, ability_state: Dictionary = {}, off_ability_state: Dictionary = {}) -> void:
+func update_status(health: float, stamina: float, gold: int, kills: int, phase_name: String, draw_amount: float, region: String, interval: float, progress: float, movement: String, blocking: bool = false, parry_ready: bool = false, left_melee: float = 1.0, right_melee: float = 1.0, consume_kind: String = "", consume_time: float = 0.0, ability_state: Dictionary = {}, off_ability_state: Dictionary = {}, trinket_ability_state: Dictionary = {}) -> void:
 	_region.text = region
-	_health_label.text = "HEALTH  %d / 100" % int(health)
+	_health_label.text = "HEALTH  %d / %d" % [int(health),int(round(_max_health))]
 	_health_bar.value = health
 	_stamina_bar.value = stamina
-	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(Stamina.MAX)]
+	_stamina_label.text = "STAMINA  %d / %d" % [int(stamina),int(round(_max_stamina))]
 	_ability_slot.update_state(ability_state)
 	if is_instance_valid(_off_ability_slot):
 		_off_ability_slot.update_state(off_ability_state)
+	if is_instance_valid(_trinket_ability_slot):
+		_trinket_ability_slot.update_state(trinket_ability_state)
 	_gold_label.text = "%d GOLD  /  %d FOES" % [gold, kills]
 	_charge_bar.value = draw_amount * 100.0 if phase_name in ["DRAWING", "HOLDING", "T_DRAW", "T_HOLD"] else progress * 100.0
 	if phase_name == "ABILITY":
@@ -163,6 +184,8 @@ func update_status(health: float, stamina: float, gold: int, kills: int, phase_n
 		var active_state := ability_state
 		if active_state.is_empty() or not bool(active_state.get("active", false)):
 			active_state = off_ability_state
+		if active_state.is_empty() or not bool(active_state.get("active", false)):
+			active_state = trinket_ability_state
 		if not active_state.is_empty():
 			charge_ratio = clampf(float(active_state.get("elapsed",0.0))/maxf(float(active_state.get("duration",1.0)),0.001),0.0,1.0)
 		_charge_bar.value = charge_ratio * 100.0

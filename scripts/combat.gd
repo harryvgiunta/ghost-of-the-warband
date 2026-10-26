@@ -63,6 +63,8 @@ var _pending_throw := false
 var target_mask := 2
 var source_id := -1
 var damage_enabled := true
+## Incoming stagger multiplier from worn trinkets (1.0 is unmodified).
+var stagger_scale := 1.0
 # The last validated camera-ray muzzle. Arrows leave along this line instead of
 # converging from the animated bow tip to the crosshair point.
 var launch_origin := Vector3.INF
@@ -343,7 +345,7 @@ func stagger_from_damage(amount: float, max_health: float = 100.0) -> float:
 	# cancels the swing, guard and movement: the fraction of max health carries
 	# the weight, so 5% chips are traded through and 50% hits always interrupt.
 	var fraction := maxf(amount,0.0)/max_health if max_health > 0.0 else 1.0
-	var seconds := clampf(HIT_STAGGER_MIN+fraction*HIT_STAGGER_PER_FRACTION,HIT_STAGGER_MIN,HIT_STAGGER_MAX)
+	var seconds := clampf(HIT_STAGGER_MIN+fraction*HIT_STAGGER_PER_FRACTION,HIT_STAGGER_MIN,HIT_STAGGER_MAX) * clampf(stagger_scale,0.0,1.0)
 	if randf() >= stagger_chance(amount,max_health):
 		return minf(seconds,HIT_REACT_MAX)
 	stagger(seconds)
@@ -1014,13 +1016,15 @@ func update_aim() -> void:
 	# a compensated ballistic solution. Gravity acts after the arrow is released.
 	rig.aim_at(aim_point)
 
-static func damage_for(bow_index: int, charge: float) -> float:
-	return float(BASE_DAMAGE[bow_index]) * clampf(charge, 0.0, 1.0)
+## `scale` is the shooter's trinket multiplier; enemies pass nothing.
+static func damage_for(bow_index: int, charge: float, scale: float = 1.0) -> float:
+	return float(BASE_DAMAGE[bow_index]) * clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
 
-static func throw_damage(weapon_name: String, weapon_index: int, charge: float) -> float:
+static func throw_damage(weapon_name: String, weapon_index: int, charge: float,
+		scale: float = 1.0) -> float:
 	var base := float(Archer.DAGGER_DATA.damage) if weapon_name == "dagger" \
 		else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].damage)
-	return base * clampf(charge, 0.0, 1.0)
+	return base * clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
 
 
 func _on_rig_shot(origin: Vector3, direction: Vector3, speed: float, charge: float) -> void:
