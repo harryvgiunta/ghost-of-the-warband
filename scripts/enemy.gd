@@ -35,6 +35,7 @@ var safe_center := Vector3.ZERO
 var health := 38.0
 var max_health := 38.0
 var alive := true
+var _impact_force := Vector3.ZERO
 var home := Vector3.ZERO
 var state := "IDLE"
 var _state_time := 0.0
@@ -670,6 +671,12 @@ func stagger(seconds: float) -> void:
 		_slide_time = 0.0
 		_attack_cooldown = maxf(_attack_cooldown,0.45)
 
+## The killing blow's style/angle force, recorded by the damage source. It is
+## only read at death; a miss does not matter.
+func note_impact(force: Vector3) -> void:
+	_impact_force = Vector3(force.x, 0.0, force.z)
+
+
 func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
@@ -690,7 +697,8 @@ func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_warning.visible = false
-	var fall := CorpsePhysics.fall_direction(self, velocity)
+	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \
+		else CorpsePhysics.fall_direction(self, velocity)
 	# Layer 0 stops the corpse blocking bodies and arrows; mask 1 lets the dead
 	# root keep falling onto the world if the mob died mid-leap.
 	set_deferred("collision_layer", 0)

@@ -181,8 +181,8 @@ derived from the sampled height field with a per-surface strength from
   the striking hand (`hand_r`) so a claw comes away wet.
 - Death clears blocking collision, keeps the world mask, and hands the imported
   skeleton to `scripts/corpse_physics.gd` (the shared torso-rigid, limb-limp
-  ragdoll plus topple), then to `scripts/corpse_hold.gd` for the five-minute
-  corpse lifetime. The corpse falls under gravity, settles, and keeps the baked
+  ragdoll plus attack-style topple), then to `scripts/corpse_hold.gd` for the
+  five-minute corpse lifetime. The corpse falls under gravity, settles, and keeps the baked
   limp pose.
 - The threshold trio spawns about 14 m ahead of the south gate, inside the
   town's 19 m safe ring, so all three are inspectable immediately and idle

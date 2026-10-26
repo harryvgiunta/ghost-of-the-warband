@@ -2,10 +2,11 @@ extends RefCounted
 ## How long a defeated mob stays where it fell.
 ##
 ## Every mob kind shares one lifetime so a fight leaves a battlefield instead of
-## a row of four-second ghosts; the corpse keeps its authored death pose and its
-## final blood pools for the whole five minutes, then dissolves. The dissolve
-## shrinks a presentation container, never the CharacterBody root, so any late
-## ray or loot query on the root keeps its identity transform.
+## a row of four-second ghosts; the corpse keeps its settled ragdoll pose (or
+## its authored collapse for procedural bodies) and its final blood pools for
+## the whole five minutes, then dissolves. The dissolve shrinks a presentation
+## container, never the CharacterBody root, so any late ray or loot query on
+## the root keeps its identity transform.
 
 ## Five minutes by default. Callers may pass a shorter delay for a scripted
 ## encounter, but the shared default is what the frontier, delve and arena

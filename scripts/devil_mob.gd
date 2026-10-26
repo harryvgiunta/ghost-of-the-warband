@@ -85,6 +85,7 @@ var home := Vector3.ZERO
 var health := 50.0
 var max_health := 50.0
 var alive := true
+var _impact_force := Vector3.ZERO
 var state := "IDLE"
 
 var _state_time := 0.0
@@ -375,6 +376,10 @@ func stagger(seconds: float) -> void:
 	velocity.z = 0.0
 
 
+func note_impact(force: Vector3) -> void:
+	_impact_force = Vector3(force.x, 0.0, force.z)
+
+
 func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
@@ -394,7 +399,8 @@ func _enter_dead(announce: bool) -> void:
 	alive = false
 	state = "DEAD"
 	_struck = true
-	var fall := CorpsePhysics.fall_direction(self, velocity)
+	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \
+		else CorpsePhysics.fall_direction(self, velocity)
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	velocity = Vector3.ZERO

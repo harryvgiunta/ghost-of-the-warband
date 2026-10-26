@@ -5,10 +5,10 @@ extends RefCounted
 ## - every dead CharacterBody keeps falling to the ground with only the world
 ##   collision mask, so a mob killed mid-leap cannot hang in the air;
 ## - a rigged presentation gets a Godot `PhysicalBoneSimulator3D` ragdoll. The
-##   pelvis carries the whole torso as one rigid collision body (spine, chest
-##   and neck follow it), while the head and limbs are pin-jointed physical
-##   bones. That keeps a corpse's silhouette when it topples instead of folding
-##   into a heap. The authored death clip is replaced by the fall; the
+##   pelvis carries the whole torso and head as one rigid collision body, while
+##   the limbs are pin-jointed physical bones. That keeps a corpse's silhouette
+##   when it topples instead of folding into a heap, and stops the head spinning
+##   on a free neck joint. The authored death clip is replaced by the fall; the
 ##   simulation settles, its pose is baked into the skeleton, and the rigid
 ##   bodies are freed, so five-minute corpses cost nothing after the fall.
 ##
@@ -107,28 +107,25 @@ static func fall_direction(host: Node3D, motion: Vector3) -> Vector3:
 static func _apply_topple(simulator: PhysicalBoneSimulator3D, visual: Node3D,
 		fall: Vector3) -> void:
 	var direction := Vector3(fall.x, 0.0, fall.z)
+	var push := 1.0
 	if direction.length_squared() < 0.04:
 		direction = fall_direction(visual, Vector3.ZERO)
+	else:
+		push = clampf(direction.length(), 0.8, 1.25)
 	direction = direction.normalized()
-	var head: PhysicalBone3D = null
 	var pelvis: PhysicalBone3D = null
 	for child in simulator.get_children():
-		if not child is PhysicalBone3D:
-			continue
-		var physical := child as PhysicalBone3D
-		var bone_name := str(physical.bone_name).to_lower()
-		if bone_name == "head":
-			head = physical
-		elif bone_name == "pelvis":
-			pelvis = physical
+		if child is PhysicalBone3D \
+				and str((child as PhysicalBone3D).bone_name).to_lower() == "pelvis":
+			pelvis = child as PhysicalBone3D
+			break
+	if pelvis == null:
+		return
+	# Rotate the free pelvis root so the rigid torso goes over in the blow's
+	# direction; the head is part of that torso, so it cannot spin on its own.
 	var axis := Vector3.UP.cross(direction)
-	# Rotate the free pelvis root so the whole body goes over, then add a
-	# smaller shove through the head so it does not just slide on its feet.
-	if pelvis != null:
-		pelvis.angular_velocity += axis * 1.9
-		pelvis.apply_central_impulse(direction * pelvis.mass * 0.5)
-	if head != null:
-		head.apply_central_impulse(direction * head.mass * 1.1)
+	pelvis.angular_velocity += axis * (1.7 * push)
+	pelvis.apply_central_impulse(direction * pelvis.mass * 0.45 * push)
 
 
 ## True while the visible bones are still driven by physics.
@@ -172,6 +169,13 @@ static func _adopt_stray_bones(skeleton: Skeleton3D, visual: Node3D) -> void:
 			selected[index] = true
 	if selected.is_empty():
 		return
+	# A stray leaf may need to ride a non-simulated torso bone (the hell goat's
+	# eyes belong to the head). Physical bones and rigid torso/head bones are
+	# all valid parents.
+	var anchors := selected.duplicate()
+	for index in skeleton.get_bone_count():
+		if _is_torso(skeleton.get_bone_name(index).to_lower()):
+			anchors[index] = true
 	# Only leaf bones outside every simulated chain can float. Most rigs have
 	# none, so they pay no mesh scan at all.
 	var strays := {}
@@ -230,8 +234,11 @@ static func _adopt_stray_bones(skeleton: Skeleton3D, visual: Node3D) -> void:
 		var centroid := weighted / total
 		var target := -1
 		var best := INF
-		for candidate in selected.keys():
-			var point: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(candidate).origin
+		for candidate in anchors.keys():
+			# Bind geometry is authored in the rest pose, so pick its parent
+			# from rest-space anchors: the choice cannot drift with animation.
+			var point: Vector3 = skeleton.global_transform \
+				* skeleton.get_bone_global_rest(candidate).origin
 			var distance := point.distance_squared_to(centroid)
 			if distance < best:
 				best = distance
@@ -282,7 +289,7 @@ static func _is_candidate(skeleton: Skeleton3D, index: int) -> bool:
 
 
 static func _wanted(lower: String) -> bool:
-	if lower == "pelvis" or lower == "head":
+	if lower == "pelvis":
 		return true
 	if lower.begins_with("upperarm") or lower.begins_with("upper_arm"):
 		return true
@@ -329,8 +336,6 @@ static func _radius_for(lower: String, half: float) -> float:
 static func _mass_for(lower: String) -> float:
 	if lower == "pelvis":
 		return 4.0
-	if lower == "head":
-		return 1.6
 	if lower.begins_with("upper") or lower.begins_with("thigh_"):
 		return 1.6
 	if lower.begins_with("lower") or lower.begins_with("calf_") \
@@ -342,10 +347,11 @@ static func _mass_for(lower: String) -> float:
 	return 0.4
 
 
-## The torso is one rigid body: pelvis, spine, chest and neck move together,
-## so a corpse topples like a body instead of folding into a pile. The skipped
-## torso bones still need their volume in the collision shape, or the mesh lies
-## through the floor. Their capsules are attached to the pelvis body.
+## The torso is one rigid body: pelvis, spine, chest, neck and head move
+## together, so a corpse topples like a body instead of folding into a pile and
+## the head cannot spin. Those skipped bones still need their volume in the
+## collision shape, or the mesh lies through the floor; their capsules are
+## attached to the pelvis body.
 static func _add_torso_shapes(simulator: PhysicalBoneSimulator3D,
 		skeleton: Skeleton3D) -> void:
 	var pelvis_id := skeleton.find_bone("pelvis")
@@ -382,7 +388,7 @@ static func _add_torso_shapes(simulator: PhysicalBoneSimulator3D,
 
 
 static func _is_torso(lower: String) -> bool:
-	return lower == "chest" or lower.begins_with("spine") \
+	return lower == "chest" or lower == "head" or lower.begins_with("spine") \
 		or lower.begins_with("neck_")
 
 

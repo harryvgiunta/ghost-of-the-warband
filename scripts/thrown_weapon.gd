@@ -9,6 +9,7 @@ const Sword = preload("res://scripts/sword.gd")
 const Dagger = preload("res://scripts/dagger.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const ImpactRules = preload("res://scripts/impact_rules.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const SPIN_SPEED := 11.0
 var weapon := "sword"
@@ -66,6 +67,8 @@ func _physics_process(delta: float) -> void:
 		if hit_enemy:
 			if authoritative_damage:
 				var headshot := Hitbox.is_headshot(collider as Node, hit.position)
+				if collider.has_method("note_impact"):
+					collider.note_impact(ImpactRules.projectile_force(velocity))
 				collider.take_damage(damage, source_id, headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, headshot)
 			visible = false

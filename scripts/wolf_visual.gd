@@ -1,8 +1,8 @@
 extends Node3D
 
 ## Presentation-only controller for the imported Briar wolf. Gameplay owns the
-## root motion, state timer, damage and death lifecycle; this node only samples
-## the authored clips and holds the final corpse pose.
+## root motion, state timer, damage and death lifecycle; this node samples the
+## authored clips and hands the dead skeleton to the shared corpse ragdoll.
 
 const Hitbox = preload("res://scripts/hitbox.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")

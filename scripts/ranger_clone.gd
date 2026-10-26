@@ -53,6 +53,7 @@ var auto_ai := true
 var attack_mode := "scene"
 var bounds := 143.0
 var alive := true
+var _impact_force := Vector3.ZERO
 var health := MAX_HEALTH
 var max_health := MAX_HEALTH
 var stamina := Stamina.MAX
@@ -145,6 +146,7 @@ func configure(id: int, next_depth: int, is_authoritative: bool, mode: String = 
 	state = "IDLE"
 	_state_time = 0.0
 	_death_handled = false
+	_impact_force = Vector3.ZERO
 	_swing_pending = false
 	_swing_count = 0
 	_target = null
@@ -176,6 +178,7 @@ func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	health = max_health
 	stamina = Stamina.MAX
 	_death_handled = false
+	_impact_force = Vector3.ZERO
 	_swing_pending = false
 	state = "IDLE"
 	_state_time = 0.0
@@ -481,6 +484,10 @@ func _on_bow_released(origin: Vector3, direction: Vector3, speed: float, charge:
 	arrow_fired.emit(origin,direction,speed,damage)
 
 
+func note_impact(force: Vector3) -> void:
+	_impact_force = Vector3(force.x, 0.0, force.z)
+
+
 func take_damage(amount: float, _source_id: int, headshot: bool = false, _react: bool = true) -> void:
 	if not alive or replica:
 		return
@@ -584,7 +591,8 @@ func _die(announce: bool) -> void:
 	_death_handled = true
 	alive = false
 	state = "DEAD"
-	var fall_dir := CorpsePhysics.fall_direction(self, velocity)
+	var fall_dir := _impact_force if _impact_force.length_squared() > 0.0001 \
+		else CorpsePhysics.fall_direction(self, velocity)
 	velocity = Vector3.ZERO
 	collision_layer = 0
 	collision_mask = 1

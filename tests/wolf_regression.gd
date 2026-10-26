@@ -103,6 +103,11 @@ func run() -> void:
 	check(visual.get_clip_name() == "Wolf_Attack", "Windup starts the authored attack clip")
 	check(jaw_open.angle_to(jaw_impact) > 0.25, "Bite closes between windup and the 0.65 s impact")
 	check(jaw_impact_origin.z < visual_skeleton.get_bone_global_rest(jaw_bone).origin.z - 0.06, "Bite drives the jaw forward at impact")
+	visual_skeleton.force_update_all_bone_transforms()
+	var head_bone := visual_skeleton.find_bone("head")
+	var pelvis_bone := visual_skeleton.find_bone("pelvis")
+	var standing_head_pelvis: float = visual_skeleton.get_bone_global_pose(head_bone).origin.distance_to(
+		visual_skeleton.get_bone_global_pose(pelvis_bone).origin)
 	visual.die()
 	check(visual.is_dead(), "Wolf visual enters its death state")
 	check(visual.get_clip_name() == "Wolf_Death", "Death clip name is kept for presentation")
@@ -110,18 +115,24 @@ func run() -> void:
 	var simulator := visual_skeleton.get_node_or_null("CorpseRagdoll") as PhysicalBoneSimulator3D
 	check(simulator != null and simulator.get_child_count() >= 10,
 		"Wolf corpse builds a physical bone chain")
-	var head_bone := visual_skeleton.find_bone("head")
 	var head_physical: PhysicalBone3D = null
+	var pelvis_physical: PhysicalBone3D = null
 	if simulator != null:
 		for child in simulator.get_children():
-			if child is PhysicalBone3D and (child as PhysicalBone3D).get_bone_id() == head_bone:
-				head_physical = child as PhysicalBone3D
-	check(head_physical != null, "Wolf head is part of the ragdoll")
+			if not child is PhysicalBone3D:
+				continue
+			var physical := child as PhysicalBone3D
+			if physical.get_bone_id() == head_bone:
+				head_physical = physical
+			elif physical.get_bone_id() == pelvis_bone:
+				pelvis_physical = physical
+	check(head_physical == null, "Wolf head is welded into the rigid torso and cannot spin")
+	check(pelvis_physical != null, "Wolf pelvis drives the rigid torso ragdoll")
 	await create_timer(1.5).timeout
-	if head_physical != null:
-		check(head_physical.global_position.y < 0.6,
+	if pelvis_physical != null:
+		check(pelvis_physical.global_position.y < 0.6,
 			"Limp wolf falls onto the ground under gravity")
-		check(head_physical.collision_layer == 0 and head_physical.collision_mask == 1,
+		check(pelvis_physical.collision_layer == 0 and pelvis_physical.collision_mask == 1,
 			"Corpse bones stop blocking bodies while still catching the world")
 	var deadline := Time.get_ticks_msec() + 8000
 	while CorpsePhysics.is_limp(visual) and Time.get_ticks_msec() < deadline:
@@ -129,7 +140,10 @@ func run() -> void:
 	check(not CorpsePhysics.is_limp(visual), "Ragdoll settles and bakes within the corpse window")
 	visual_skeleton.force_update_all_bone_transforms()
 	var dead_head: Vector3 = visual_skeleton.get_bone_global_pose(head_bone).origin
+	var dead_pelvis: Vector3 = visual_skeleton.get_bone_global_pose(pelvis_bone).origin
 	check(dead_head.y < 0.6, "Baked limp pose keeps the body on the ground")
+	check(absf(dead_head.distance_to(dead_pelvis) - standing_head_pelvis) < 0.03,
+		"The head keeps its torso offset instead of spinning")
 	await create_timer(0.25).timeout
 	visual_skeleton.force_update_all_bone_transforms()
 	var held_head: Vector3 = visual_skeleton.get_bone_global_pose(head_bone).origin

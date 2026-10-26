@@ -5,6 +5,7 @@ signal impacted(enemy_hit: bool, impact_position: Vector3)
 const Bow = preload("res://scripts/bow.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const ImpactRules = preload("res://scripts/impact_rules.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const VISUAL_BLEND_SECONDS := 0.12
 var velocity := Vector3.ZERO
@@ -71,6 +72,7 @@ func _physics_process(delta: float) -> void:
 		if hit_enemy and not hit_player and pierce > 0 and not _pierced.has(hit.collider_id):
 			var pierced_headshot: bool = Hitbox.is_headshot(collider as Node, hit.position)
 			if authoritative_damage:
+				_note_impact(collider)
 				collider.take_damage(damage, source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
 			pierce -= 1
@@ -92,6 +94,7 @@ func _physics_process(delta: float) -> void:
 				applied_hit = true
 			elif hit_enemy:
 				headshot = Hitbox.is_headshot(collider as Node, hit.position)
+				_note_impact(collider)
 				collider.take_damage(damage, source_id, headshot)
 				applied_hit = true
 		if applied_hit:
@@ -114,6 +117,11 @@ func _physics_process(delta: float) -> void:
 	_place_visual()
 	if age > 8.0 or global_position.y < -30.0:
 		queue_free()
+
+func _note_impact(collider: Object) -> void:
+	if collider != null and collider.has_method("note_impact"):
+		collider.note_impact(ImpactRules.projectile_force(velocity))
+
 
 func _place_visual() -> void:
 	if not is_instance_valid(_visual):

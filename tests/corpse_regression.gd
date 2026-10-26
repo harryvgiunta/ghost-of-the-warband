@@ -1,8 +1,8 @@
 extends SceneTree
 ## Corpse regression: every mob kind keeps its corpse where it fell for the
-## shared five-minute default instead of vanishing after a few seconds, keeps
-## its authored death pose, stops colliding, and still dissolves and frees
-## through the one shared hold path when its clock runs out.
+## shared five-minute default instead of vanishing after a few seconds, falls
+## under gravity, settles into a held pose, stops blocking collision, and still
+## dissolves and frees through the one shared hold path when its clock runs out.
 
 var failures := 0
 var checks := 0
@@ -29,6 +29,7 @@ func run() -> void:
 	watchdog.timeout.connect(_on_watchdog)
 	var CorpseHold = load("res://scripts/corpse_hold.gd")
 	var CorpsePhysics = load("res://scripts/corpse_physics.gd")
+	var ImpactRules = load("res://scripts/impact_rules.gd")
 	var Enemy = load("res://scripts/enemy.gd")
 	var Mob = load("res://scripts/devil_mob.gd")
 	var DelveDevil = load("res://scripts/delve_devil.gd")
@@ -37,6 +38,28 @@ func run() -> void:
 		"A corpse lies in the world for five minutes by default")
 	check(CorpseHold.DISSOLVE_SECONDS > 0.0 and CorpseHold.DISSOLVE_SECONDS < 2.0,
 		"The corpse frees itself through a short dissolve, never a pop")
+
+	# Attack-style force: a right diagonal sends the victim left across the
+	# blade travel, its mirror sends it right, overhead pushes away and an
+	# arrow keeps its flight direction.
+	var forward := Vector3(0.0, 0.0, -1.0)
+	var right := forward.cross(Vector3.UP)
+	var contact := Vector3.ZERO + forward * 1.5
+	var right_cut: Vector3 = ImpactRules.melee_force(Vector3.ZERO, forward, right,
+		contact, "diagonal_right", 1.0)
+	var left_cut: Vector3 = ImpactRules.melee_force(Vector3.ZERO, forward, right,
+		contact, "diagonal_left", -1.0)
+	var overhead: Vector3 = ImpactRules.melee_force(Vector3.ZERO, forward, right,
+		contact, "overhead", 1.0)
+	var arrow: Vector3 = ImpactRules.projectile_force(Vector3(1.0, 0.0, 0.0))
+	check(right_cut.dot(right) < -0.5,
+		"A right-hand diagonal shoves the victim left across the swing")
+	check(left_cut.dot(right) > 0.5,
+		"A left-hand diagonal shoves the victim right across the swing")
+	check(overhead.dot(forward) > 0.8,
+		"An overhead shoves the victim away from the attacker")
+	check(arrow.length() > 0.1 and arrow.normalized().x > 0.9,
+		"A projectile keeps its travel direction as the corpse force")
 
 	var fixture := Node3D.new()
 	fixture.name = "CorpseFixture"
@@ -66,6 +89,7 @@ func run() -> void:
 	delve.configure(1, "claw", 1)
 	var delve_species = DelveDevil.new()
 	delve_species.configure(2, "claw", 1, "hell_goat")
+	pack.note_impact(Vector3(1.0, 0.0, 0.0))
 	var corpses := [
 		["Briar wolf", wolf, Vector3(-6.0, 0.12, 0.0)],
 		["Ruin sentinel", sentinel, Vector3(-3.0, 0.12, 0.0)],
@@ -92,6 +116,18 @@ func run() -> void:
 		check(body.collision_mask == 1, label + " corpse still catches the world floor")
 		check((body as Node3D).scale.is_equal_approx(Vector3.ONE),
 			label + " corpse root keeps its scale while it is held")
+		if body == pack:
+			var goat_sim := pack._visual.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
+			var goat_pelvis_body: PhysicalBone3D = null
+			if goat_sim != null:
+				for child in goat_sim.get_children():
+					if child is PhysicalBone3D \
+							and str((child as PhysicalBone3D).bone_name).to_lower() == "pelvis":
+						goat_pelvis_body = child as PhysicalBone3D
+			check(goat_pelvis_body != null
+					and (goat_pelvis_body.linear_velocity.x > 0.05
+						or goat_pelvis_body.angular_velocity.z < -0.05),
+				"A killing blow's force drives the corpse along its direction")
 	# Rigged mobs hand their skeleton to the shared ragdoll; the procedural
 	# cinder and sentinel keep their authored collapse and only fall by root.
 	check(CorpsePhysics.is_limp(wolf._wolf), "The wolf corpse is a physical ragdoll")
@@ -104,8 +140,9 @@ func run() -> void:
 	check(wolf_bones >= 10, "The wolf ragdoll builds its driven bone chain")
 	var goat_skeleton := pack._visual.find_child("Skeleton3D", true, false) as Skeleton3D
 	var eye_bone := goat_skeleton.find_bone("neutral_bone")
-	var goat_head := goat_skeleton.find_bone("Head")
-	check(eye_bone >= 0 and goat_skeleton.get_bone_parent(eye_bone) == goat_head,
+	var eye_parent := goat_skeleton.get_bone_name(goat_skeleton.get_bone_parent(eye_bone)) \
+		if eye_bone >= 0 else ""
+	check(eye_parent in ["Head", "head"],
 		"The goat's stray eye bone is adopted by the head before simulation")
 	if wolf_sim != null:
 		var first_bone := wolf_sim.get_child(0) as PhysicalBone3D
@@ -113,10 +150,10 @@ func run() -> void:
 			"Corpse bones stop blocking fighters while still colliding with the world")
 
 	# The authored poses are held, not reset by a fake delete.
-	check(wolf._wolf.is_dead(), "The wolf holds its authored death pose")
-	check(cinder._devil.is_dead(), "The cinder devil holds its authored death pose")
-	check(pack._visual.is_dead(), "An imported devil holds its authored death pose")
-	check(delve._visual.is_dead(), "A delve devil holds its authored death pose")
+	check(wolf._wolf.is_dead(), "The wolf enters its corpse ragdoll")
+	check(cinder._devil.is_dead(), "The cinder devil holds its death pose")
+	check(pack._visual.is_dead(), "An imported devil enters its corpse ragdoll")
+	check(delve._visual.is_dead(), "A delve devil holds its death pose")
 	await pause(0.6)
 	check(sentinel._body.rotation.z > 0.1, "The sentinel collapses onto its side")
 
@@ -166,6 +203,7 @@ func run() -> void:
 		goat_head_world.z - goat_pelvis_world.z).length()
 	check(goat_spread > 0.35,
 		"The goat torso topples as one body instead of melting in place")
+
 	await pause(0.4)
 	var held_head := _bone_world(wolf._wolf, "head")
 	check(held_head.distance_to(baked_head) < 0.05, "The settled limp pose is held for the corpse lifetime")

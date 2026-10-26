@@ -95,6 +95,7 @@ const EMERGE_COLUMN_HEIGHT := 1.15
 
 var authoritative := false
 var alive := true
+var _impact_force := Vector3.ZERO
 # Devil-profile baselines; `configure` replaces them with the role and depth
 # numbers before the first snapshot arrives.
 var health := 24.0
@@ -184,6 +185,7 @@ func configure(next_id: int, weapon: String, next_depth: int, role: String = ROL
 	health = max_health
 	alive = true
 	_death_handled = false
+	_impact_force = Vector3.ZERO
 	_struck = false
 	state = STATE_EMERGE
 	_state_time = 0.0
@@ -203,6 +205,7 @@ func spawn_at(point: Vector3, facing: Vector3 = Vector3.ZERO) -> void:
 	alive = true
 	health = max_health
 	_death_handled = false
+	_impact_force = Vector3.ZERO
 	_struck = false
 	target = null
 	collision_layer = 2
@@ -491,6 +494,10 @@ func step(delta: float, actors: Array = [], peers: Array = []) -> void:
 	_present_state()
 
 
+func note_impact(force: Vector3) -> void:
+	_impact_force = Vector3(force.x, 0.0, force.z)
+
+
 func take_damage(amount: float, _source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
@@ -659,7 +666,8 @@ func _die(announce: bool) -> void:
 	alive = false
 	state = STATE_DEAD
 	_state_time = 0.0
-	var fall := CorpsePhysics.fall_direction(self, velocity)
+	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \
+		else CorpsePhysics.fall_direction(self, velocity)
 	velocity = Vector3.ZERO
 	collision_layer = 0
 	collision_mask = 1

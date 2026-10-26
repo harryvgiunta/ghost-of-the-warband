@@ -316,6 +316,12 @@ func run() -> void:
 	check(not victim.alive, "The fixture kill lands")
 	check(_count_meta(game.archer, "wound") > killer_wounds,
 		"A melee kill splatters blood onto the killer's body")
+	var kill_force: Vector3 = victim._impact_force
+	var hit_direction: Vector3 = victim.global_position - game.player.global_position
+	hit_direction.y = 0.0
+	hit_direction = hit_direction.normalized()
+	check(kill_force.length() > 0.1 and kill_force.normalized().dot(hit_direction) > 0.7,
+		"The killing overhead records a corpse force away from the attacker")
 
 	# Stains clamp to the measured garment instead of ringing the air past it.
 	var BloodSurface = load("res://scripts/blood_surface.gd")

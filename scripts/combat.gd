@@ -10,6 +10,7 @@ const Archer = preload("res://scripts/archer.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const ImpactRules = preload("res://scripts/impact_rules.gd")
 const BASE_DAMAGE := [30.0, 38.0, 50.0]
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
@@ -541,6 +542,7 @@ func _on_melee_started(hand: String) -> void:
 	state.diagonal = rig.is_diagonal_swing(hand)
 	state.reach = rig.melee_reach(hand)
 	state.half_angle = rig.melee_half_angle(hand)
+	state.variant = rig.melee_variant(hand)
 	state.side = 1.0 if rig.melee_variant(hand) == "diagonal_right" else -1.0
 	state.cut = 0.0
 	state.victims.clear()
@@ -719,6 +721,22 @@ func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dicti
 		# damage on the far side in the next sample of this same swing.
 		state.blocked = true
 
+func _impact_force(state: Dictionary, at: Vector3, unit: Node3D) -> Vector3:
+	var style := str(state.get("variant", "overhead"))
+	if style == "ability":
+		var origin: Vector3 = state.get("force_origin", actor.global_position)
+		return ImpactRules.radial_force(origin, unit.global_position)
+	var forward: Vector3 = aim_point - actor.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+		forward.y = 0.0
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	return ImpactRules.melee_force(actor.global_position, forward, right, at, style,
+		float(state.get("side", 1.0)))
+
+
 func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		at: Vector3, headshot: bool) -> int:
 	var target_combat = unit.get("combat")
@@ -728,6 +746,8 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 	state.victims[unit.get_instance_id()] = true
 	var damage: float = state.damage
 	var outcome := DEFENSE_NONE
+	if unit.has_method("note_impact"):
+		unit.note_impact(_impact_force(state, at, unit))
 	if unit.has_method("receive_melee"):
 		outcome = int(unit.receive_melee(damage,source_id,actor.global_position,headshot))
 	else:
@@ -781,6 +801,7 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 		"active": true, "blocked": false, "weapon": rig.weapon,
 		"damage": damage, "diagonal": false, "reach": radius,
 		"victims": victims, "exclude": [actor.get_rid()],
+		"variant": "ability", "force_origin": centre,
 	}
 	var forward: Vector3 = aim_point-actor.global_position
 	forward.y = 0.0

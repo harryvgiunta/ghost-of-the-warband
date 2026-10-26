@@ -12,6 +12,7 @@ extends RefCounted
 ## not consulted. Armor, damage numbers, body blood and death handling still
 ## live in the target's own `take_damage`.
 
+const ImpactRules = preload("res://scripts/impact_rules.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 
 ## Sphere around the crosshair contact that captures the body under it.
@@ -175,6 +176,8 @@ static func strike(actor: Node3D, target: Node3D, damage: float,
 	if _is_dead(target):
 		return 0.0
 	var before: Variant = _health_of(target)
+	if target.has_method("note_impact"):
+		target.note_impact(ImpactRules.radial_force(actor.global_position, target.global_position))
 	target.take_damage(damage, source_id, false)
 	var applied := damage
 	var after: Variant = _health_of(target)

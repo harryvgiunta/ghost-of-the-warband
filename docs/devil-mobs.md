@@ -193,10 +193,11 @@ runtime carries only values glTF cannot express.
 - Death clears blocking collision, keeps the world mask, and hands the body
   to `scripts/corpse_physics.gd`: the dead CharacterBody falls under gravity
   and the imported skeleton becomes a Godot `PhysicalBoneSimulator3D` ragdoll.
-  The pelvis carries the torso as one rigid collision body so the silhouette
-  stays extended, while the head and limbs are pin-jointed; a deterministic
-  topple direction plus a pelvis/head shove makes the body fall onto a side or
-  its face. The death clip is no longer played; the ragdoll settles, bakes its
+  The pelvis carries the torso and head as one rigid collision body so the
+  silhouette stays extended and the head cannot spin, while the limbs are
+  pin-jointed. Killing blows record a style/angle force through
+  `scripts/impact_rules.gd`; a pelvis shove in that direction makes the body
+  fall onto a side or its face. The death clip is no longer played; the ragdoll settles, bakes its
   final pose into the skeleton, and retires its rigid bodies. `scripts/corpse_hold.gd` then
   holds the limp body for `CorpseHold.SECONDS` (300 s) before a short dissolve
   frees the node. The frontier, delve and arena share that one lifetime, so a

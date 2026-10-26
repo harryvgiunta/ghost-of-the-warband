@@ -9,6 +9,7 @@ signal impacted(enemy_hit: bool, position: Vector3)
 const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
+const ImpactRules = preload("res://scripts/impact_rules.gd")
 
 const GRAVITY := Vector3(0.0, -1.6, 0.0)
 
@@ -120,6 +121,8 @@ func _handle_hit(hit: Dictionary, next: Vector3) -> void:
 
 func _apply_direct(unit: Node3D, at: Vector3) -> void:
 	var direction := velocity.normalized()
+	if unit.has_method("note_impact"):
+		unit.note_impact(ImpactRules.projectile_force(direction, ImpactRules.SPELL_STRENGTH))
 	if unit.has_method("receive_melee"):
 		unit.receive_melee(damage, source_id, attacker_position, false)
 	else:
