@@ -48,7 +48,7 @@ func run() -> void:
 	check(game.service_at(desk) == "quartermaster", "the desk resolves as the quartermaster")
 	check(game.interact_at(1, desk) == "quartermaster", "G opens the quartermaster")
 	check(game.quartermaster.is_open(), "the shop is open")
-	check(game.quartermaster.stock_rows().size() == 10, "ten base pieces are stocked")
+	check(game.quartermaster.stock_rows().size() == 11, "eleven base pieces are stocked (the torch included)")
 
 	var rows: Array[Dictionary] = game.quartermaster.stock_rows()
 	var sword_row: Dictionary = {}

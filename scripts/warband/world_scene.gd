@@ -41,6 +41,7 @@ const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
+const TorchScript = preload("res://scripts/warband/torch_light.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
@@ -391,6 +392,11 @@ func _seat_warband() -> void:
 		actor.combat.target_mask = 2
 		actor.bounds = BODY_BOUNDS
 		_wire_crawl(actor)
+		# A worn hand torch is light, and light belongs to the body carrying it.
+		if merc_id > 0:
+			var torch := TorchScript.new()
+			actor.add_child(torch)
+			torch.setup(actor, merc_id, warband)
 	if squad != null:
 		squad.squad_ids = squad_ids
 	if revive != null:

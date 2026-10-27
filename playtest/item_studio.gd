@@ -97,6 +97,17 @@ func _build_stage() -> void:
 func _render_all() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 	var ids: Array = StateScript.ITEMS.keys()
+	# `-- --only <item id>` re-shoots one icon without rewriting the other sixty.
+	var args := OS.get_cmdline_user_args()
+	var at_index := args.find("--only")
+	if at_index >= 0 and at_index + 1 < args.size():
+		var only := str(args[at_index + 1])
+		if not StateScript.ITEMS.has(only):
+			print("ITEM_ICON unknown item %s" % only)
+			return
+		await _render_item(only, "%s/%s.png" % [OUT_DIR, only])
+		print("ITEM_ICON 1/1 %s" % only)
+		return
 	for index in ids.size():
 		var item_id := str(ids[index])
 		await _render_item(item_id,"%s/%s.png" % [OUT_DIR,item_id])
@@ -116,6 +127,10 @@ func _render_item(item_id: String, output: String) -> void:
 	var slot := str(item.get("slot",""))
 	if category == "armor" and slot in ["hands","feet"]:
 		await _render_pair(item,slot,output)
+		return
+	if str(item.get("kind", "")) == "torch":
+		_apply_torch(item_id)
+		await _capture_alpha(Vector3(0.0, 0.0, 0.0), 0.42, Vector3(0.35, 0.18, -1.0), output)
 		return
 	match category:
 		"armor":
@@ -201,6 +216,18 @@ func _clear_display_art() -> void:
 		if str(child.name) == "ItemIconArt":
 			_rig.remove_child(child)
 			child.queue_free()
+
+
+## A hand torch has no held model: its whole look is the brand and its flame, so
+## the studio builds the same visual the world hangs off a hand.
+func _apply_torch(_item_id: String) -> void:
+	TrinketArt.clear(_rig.skeleton)
+	_clear_display_art()
+	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
+	_hide_character()
+	var art: Node3D = preload("res://scripts/warband/torch_light.gd").build_visual(907)
+	art.name = "ItemIconArt"
+	_rig.add_child(art)
 
 
 func _apply_jewelry(item_id: String, slot: String) -> void:

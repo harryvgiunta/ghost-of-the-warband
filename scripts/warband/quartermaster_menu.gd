@@ -15,7 +15,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const STOCK := [
 	"sword_short", "dagger_iron", "bow_short", "shield_buckler",
 	"armor_leather_head", "armor_leather_chest", "armor_mail_chest",
-	"ring_copper", "ring_health", "focus_tome",
+	"ring_copper", "ring_health", "focus_tome", "torch_hand",
 ]
 
 const PANEL_SIZE := Vector2(440, 560)
