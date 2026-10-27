@@ -29,6 +29,8 @@ const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
+const CampKit = preload("res://scripts/world/camp_kit.gd")
+const FireFx = preload("res://scripts/world/fire_fx.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Geo = preload("res://scripts/geo.gd")
@@ -185,6 +187,8 @@ var _hint_text := ""
 
 var _ground_mat: StandardMaterial3D
 var _wood_mat: StandardMaterial3D
+## Cached flame-shader material for the camp's torches and the gate braziers.
+var _torch_flame: Material = null
 var _iron_mat: StandardMaterial3D
 var _stone_mat: StandardMaterial3D
 
@@ -456,11 +460,11 @@ func _build_night() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.02, 0.03, 0.05)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.10, 0.12, 0.18)
-	env.ambient_light_energy = 1.05
+	env.ambient_light_color = Color(0.125, 0.15, 0.205)
+	env.ambient_light_energy = 1.9
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.07, 0.11)
-	env.fog_density = 0.018
+	env.fog_light_color = Color(0.06, 0.08, 0.12)
+	env.fog_density = 0.014
 	env.fog_sky_affect = 0.0
 	var world_env := WorldEnvironment.new()
 	world_env.name = "Night"
@@ -480,13 +484,21 @@ func _build_gate() -> void:
 	for side in [-1.0, 1.0]:
 		_solid_box(Vector3(0.5, 4.6, 0.5), Vector3(side * 3.0, 2.3, YARD_FRONT), _wood_mat)
 		Geo.cylinder(self, 0.42, 0.34, 0.2, Vector3(side * 3.0, 4.55, YARD_FRONT), _iron_mat, 8)
-		Geo.sphere(self, 0.22, Vector3(side * 3.0, 4.85, YARD_FRONT), _flame_material())
+		var flame := Node3D.new()
+		flame.name = "GateFlame"
+		flame.position = Vector3(side * 3.0, 4.5, YARD_FRONT)
+		add_child(flame)
+		var cards := CampKit.Merged.new()
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(side * 11.0) + 41
+		FireFx.flame_cards(cards, _flame_cards(), rng, 0.5, 0.06)
+		cards.commit(flame, "Cards", false)
 		var light := OmniLight3D.new()
 		light.name = "GateLight"
 		light.position = Vector3(side * 3.0, 4.6, YARD_FRONT)
 		light.light_color = Color(1.0, 0.62, 0.28)
-		light.light_energy = 2.2
-		light.omni_range = 14.0
+		light.light_energy = 3.0
+		light.omni_range = 16.0
 		add_child(light)
 	Geo.box(self, Vector3(7.4, 0.5, 0.5), Vector3(0, 4.8, YARD_FRONT), _wood_mat)
 	var label := Label3D.new()
@@ -498,23 +510,31 @@ func _build_gate() -> void:
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	add_child(label)
 
-func _flame_material() -> StandardMaterial3D:
-	var mat := Geo.material(Color(1.0, 0.62, 0.24))
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.48, 0.12)
-	mat.emission_energy_multiplier = 3.0
-	return mat
+func _flame_cards() -> Material:
+	if _torch_flame == null:
+		_torch_flame = CampKit.materials()["flame"]
+	return _torch_flame
 
 func _torch(at: Vector3, scale: float) -> void:
 	Geo.cylinder(self, 0.11 * scale, 0.08 * scale, 2.6, at + Vector3(0, 1.3, 0), _wood_mat, 8)
-	Geo.sphere(self, 0.17 * scale, at + Vector3(0, 2.72, 0), _flame_material())
+	# The flame is the world's own cards on the shared flame shader, not a glowing
+	# ball: the camp gate and the road have to burn the same way.
+	var host := Node3D.new()
+	host.name = "TorchFlame"
+	host.position = at
+	add_child(host)
+	var batch := CampKit.Merged.new()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(absf(at.x) * 31.0 + absf(at.z) * 17.0) + 7
+	FireFx.flame_cards(batch, _flame_cards(), rng, 0.44 * scale, 2.56)
+	batch.commit(host, "Cards", false)
 	var light := OmniLight3D.new()
 	light.name = "Torch"
-	light.position = at + Vector3(0, 2.6, 0)
+	light.position = at + Vector3(0, 2.72, 0)
 	light.light_color = Color(1.0, 0.56, 0.22)
-	light.light_energy = 2.4 * scale + 0.6
-	light.omni_range = 15.0
-	light.omni_attenuation = 1.3
+	light.light_energy = 3.0 * scale + 0.8
+	light.omni_range = 17.0
+	light.omni_attenuation = 1.0
 	add_child(light)
 
 ## One cage: a slab floor, four corner posts, fixed bars on three sides, and a

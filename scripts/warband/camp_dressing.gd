@@ -397,8 +397,8 @@ static func _build_altar(root: Root, scene: Node3D, mats: Dictionary,
 	light.name = "ColdAltarLight"
 	light.position = at + Vector3(0.0, 1.90, 0.0)
 	light.light_color = Color(0.42, 0.58, 1.0)
-	light.light_energy = 1.5
-	light.omni_range = 10.0
+	light.light_energy = 2.2
+	light.omni_range = 13.0
 	light.omni_attenuation = 1.2
 	light.shadow_enabled = false
 	holder.add_child(light)
@@ -448,8 +448,8 @@ static func _build_braziers(root: Root, mats: Dictionary, iron: Dictionary) -> v
 		light.name = "BrazierLight"
 		light.position = Vector3(0.0, 1.62, 0.0)
 		light.light_color = Color(1.0, 0.58, 0.24)
-		light.light_energy = 1.9
-		light.omni_range = 11.0
+		light.light_energy = 3.0
+		light.omni_range = 15.0
 		light.omni_attenuation = 1.35
 		light.flicker = 0.30
 		node.add_child(light)
