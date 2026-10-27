@@ -298,8 +298,9 @@ Short version of the latest tuning (all in the code, all covered by
   orbit 1.9); the first pair is bare, and **six armed watchers** come through the
   gate when they die, each dropping the weapon it held;
 - the escape needs all **eight** watchers down and no longer asks for loot;
-- the camp arch is **not a teleport**: it opens a 286 m run through dark voodoo
-  woods (48 torches, hanging charms and gibbets, a pair of watchers per clearing)
-  and the town gate waits at the far end;
+- the whole campaign is **one world**: `scenes/warband_world.tscn` holds the cages
+  in a torch-lit clearing in the wood, a 286 m trail through it and a town cut into
+  the same trees at the far end. There is no door key and no load between them —
+  you walk — and the only scene change left is deploying to the arena;
 - the camp yard is **60 x 68 m** inside a 100 x 140 m floor with an invisible
   catch floor, so nothing can fall out of the world.

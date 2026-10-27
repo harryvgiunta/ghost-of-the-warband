@@ -24,6 +24,11 @@ work. The design/contract document is `docs/warband.md`; the repo skill
 
 ## 1. What the game is now (player-facing loop)
 
+The campaign is **one world** — `scenes/warband_world.tscn`, one scene, one soul
+controller. The cages stand in a clearing inside the dark wood; the wood runs 286 m
+to a town cut into the same trees. Nothing between them is a door: walking is the
+only way from one to the next, and no key loads a scene.
+
 1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
    keys; it closes on CONTINUE / G / Enter / Escape.
@@ -32,27 +37,30 @@ work. The design/contract document is `docs/warband.md`; the repo skill
 3. **Latches.** Walk to each of the four cages and press **G**. Each cage opens
    individually; freed prisoners become **squad AI**: they pick up the steel on
    the ground by themselves and charge the watchers.
-4. **The fight.** Two bare antlered watchers; when both fall, **six armed
-   watchers run in through the gate** (each drops the weapon it holds). Watchers
-   have 72 health, run at 5.6 m/s and hunt aggressively.
-5. **The road.** Walk into the camp arch and press **G** and the gate opens onto
-   a 286 m lane of dark voodoo forest — 48 torches down both verges, ironoak and
-   hollow snags, rag trees and gallows trees with charms strung across the lane,
-   wicker effigies, skull stakes, cauldrons, braziers, straw, blood and cart ruts.
-   The squad runs it with you; two armed watchers start on your body and a pair
-   waits in each of the three clearings. It is a long run, and it is the escape.
-6. **Town.** The lane ends at the town gate; press **G** there. Shared infinite
+4. **The fight.** Two bare antlered watchers in the clearing; when both fall,
+   **six armed watchers come out of the trees** (each drops the weapon it holds).
+   Watchers have 72 health, run at 5.6 m/s and hunt aggressively. Eight kills open
+   the way.
+5. **The wood.** There is no gate to open: the clearing's mouth leads onto a 286 m
+   trail through the same wood — 48 torches down both verges, ironoak and hollow
+   snags, rag trees and gallows trees with charms strung across the track, wicker
+   effigies, skull stakes, cauldrons, braziers, straw, blood and cart ruts. The
+   squad runs it with you; two armed watchers start on your body and a pair waits
+   in each of the three clearings.
+6. **Town.** The trail ends at a town built into the trees: a wooden road sign
+   over its gate, the fire ring, the stalls, and the services — shared infinite
    stash, Sacrificial Altar (unbind / distil 5:1 / brand), Gold recruiter,
    Quartermaster (buy base gear into the stash), and the expedition gate (deploy
-   up to 8 → arena).
-7. **Arena/expedition.** An empty deployment line builds the sandbox brawls
-   (bubble demo); a deployed line builds a real five-wave expedition against
-   cultists with the Bilewarden at the end, with survivors physically looting the
-   field. `Enter` back to town.
+   up to 8 → arena). You walk in. Nothing asks for a key.
+7. **Arena/expedition.** The one scene change left in the campaign: deploying
+   loads the arena. An empty deployment line builds the sandbox brawls (bubble
+   demo); a deployed line builds a real five-wave expedition against cultists with
+   the Bilewarden at the end, with survivors physically looting the field.
+   `Enter` comes back to the world at the town end.
 
 HUD keys: `[`/`]` cycle body, F1–F8 named body, TAB warband screen, P paperdoll,
 G interact, K manual loot (unadvertised; the squad loots itself), E revive,
-R branded skill, B end battle, Enter town.
+R branded skill.
 
 ---
 
@@ -71,9 +79,11 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | Loot | `loot_vacuum.gd`, `warband_pickup.gd`, `soldier_loot_run.gd` |
 | Crafting | `sacrificial_altar.gd`, `altar_menu.gd`, `quartermaster_menu.gd` |
 | UI | `warband_hud.gd`, `warband_screen.gd`, `warband_paperdoll.gd`, `tutorial_card.gd` |
-| Scenes | `scenes/cage_escape.tscn` + `cage_escape.gd` + `tutorial_sequencer.gd` + `cage_watcher.gd`; `scenes/town_hub.tscn` + `town_hub.gd` + `expedition_gate.gd`; `admin_arena.tscn` + `admin_arena.gd` |
-| Enemies | `cultist_guard.gd`, `enemy_waves.gd`, `cage_watcher.gd` (extends the forest mob) |
-| The road | `scenes/escape_run.tscn` + `escape_run.gd` (bodies, squad, pursuers, the two endings) + `run_forest.gd` (the 286 m lane and its dressing, returns `{lane, length, width, torches, arch, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared with the cage) |
+| World | `scenes/warband_world.tscn` + `world_scene.gd`: the one campaign scene. Owns the soul controller, camera, HUD, warband screen, paperdoll, tutorial card, loot vacuum, crawl, revive, brand runner and the single floor; builds the three areas and hands each the same controller. `GameFlow.world_start` says where the warband is put down ("camp" on a new game, "town" for a resumed save or the arena's return) |
+| Areas | `cage_escape.gd` (the camp clearing: cages, latches, sequencer, watchers, the six that come out of the trees), `escape_run.gd` (the trail: pursuers and its two endings), `town_hub.gd` (the square: stalls, stash, altar, keeper, expedition gate). Each takes `host` — the world — and in `host != null` mode builds only its own content: no controller, no HUD, no environment, no door |
+| Camp clearing | `camp_clearing.gd`: the camp as a clearing in the woods — treeline, 196 trees and 155 bushes round the edge, a broken stake fence (10 runs, 357 stakes), 17 torches, the mouth onto the trail |
+| The trail | `run_forest.gd` (the 286 m lane and its dressing, returns `{lane, length, width, torches, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared by both areas) |
+| Scenes (previews) | `scenes/cage_escape.tscn` and `scenes/town_hub.tscn` stay as area previews for the art and quartermaster tests; the campaign does not load them. `admin_arena.tscn` is the one scene change left |
 | Netcode | `warband_session.gd` (+ `possession_sync.gd`) |
 | Flow | `game_flow.gd` (the only thing that changes scene) |
 
@@ -125,13 +135,17 @@ Integration seams deliberately placed in the base game:
 15. **The rescuer is not moved for the player** and **loot is not announced** —
     both were explicit player requests. Do not reintroduce auto-possession or
     pickup feeds.
-16. **The arch opens the road; the road is walkable.** The camp gate never
-    teleports again: `G` there emits `scenes/escape_run.tscn`, and the run's own
-    gate emits town. `run_forest.gd` must keep returning a lane a body can
-    actually traverse — `escape_run_regression` drives a body end to end and
-    fails if it leaves the walkable width or stops closing on the arch, so a prop
-    or a wall box that narrows the corridor is a test failure, not a matter of
-    taste.
+16. **One world, and the only travel is a walk.** `scenes/warband_world.tscn` is
+    the campaign: camp, trail and town share one scene, one soul controller, one
+    HUD and one floor. No key loads a scene to travel — `G` is an interaction
+    (latch, stash, altar, keeper, deploy), never a door — and the only scene change
+    left is deploying to the arena. Areas never build a controller, a HUD, an
+    environment or a door of their own: they take `host`. `run_forest.gd` must keep
+    returning a lane a body can actually traverse, and `warband_world_regression`
+    drives 359 m from the cage line to the town square asserting that
+    `current_scene`, `GameFlow.transitions` and `scene_requested` are untouched — a
+    prop, a wall box or a bounds clamp that narrows the world is a test failure,
+    not a matter of taste.
 
 ### Tuning knobs (one place each)
 
@@ -142,11 +156,15 @@ Integration seams deliberately placed in the base game:
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
 | Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
-| Yard size | `cage_escape.gd::YARD_*` | 60 × 68 m inside 100 × 140 |
-| The road: length, width, torches | `run_forest.gd` | 286 m lane, 11 m walkable, 48 torches every 12 m a side (3.4 energy / 16 m), 763→826 nodes |
-| The road: pursuers | `escape_run.gd::WATCHER_*`, `run_forest.gd` clearing posts | 8 armed watchers — 2 on the soul at spawn, a pair in each clearing |
-| The road: town ground | `escape_run.gd::safe_center` | the town arch — the last ~19 m of the lane is safe ground |
-| The road: both endings | `escape_run.gd::ARCH_RADIUS`, `WIPE_BEAT` | G at the arch → town; a wipe waits 2.5 s → town, nobody revived, nothing gathered |
+| Clearing size | `camp_dressing.gd` (`YARD_*`), `camp_clearing.gd` | 60 × 68 m of clear ground, treeline immediately outside, 10 fence runs / 357 stakes |
+| Camp torches | `cage_escape.gd::CAMP_TORCHES` | 17 (cages, mouth, both flanks, the rim) |
+| The trail: length, width, torches | `run_forest.gd` | 286 m, 11 m walkable, 48 torches every 12 m a side (3.4 energy / 16 m) |
+| The world: night | `run_forest.gd::night_style()` | ambient 2.5, sun 0.55, fog 0.012, filmic, saturation 0.80 |
+| The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd`, clearing posts | 16 in one hostile list: 2 in the clearing, 6 out of the trees, 8 on the trail |
+| The world: budget | `warband_world_regression.gd` caps | nodes ≤ 4600 (now 3901), draws ≤ 420 (323), shapes ≤ 900 (518), lights ≤ 110 (88) |
+| The world: walk | `warband_world_regression.gd` | 359 m cage line → town square, 66.4 s of game time, 0 scene changes |
+| Town lanterns | `town_dressing.gd` | 4 posts, 3.2 energy / 15 m, attenuation 1.1 |
+| Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the town end of the world; nobody revived, nothing gathered |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
 | Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
 
@@ -179,16 +197,17 @@ Integration seams deliberately placed in the base game:
 | `warband_ui_regression` | 99 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
-| `town_hub_regression` | 58 | services, hire, deploy, paperdoll |
-| `cage_escape_regression` | 159 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six runners, drops, arch opens the road |
-| `escape_run_regression` | 116 | the arch's one door, a 286 m walkable lane (52.8 s driven end to end), art budget, 8 hunters, both endings |
+| `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
+| `cage_escape_regression` | 158 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six out of the trees, drops, the mouth |
+| `escape_run_regression` | 115 | the trail as an area: 286 m walkable lane, art budget, 8 hunters, both endings |
+| `warband_world_regression` | 172 | one scene and one controller, the camp in the trees, the lesson, 359 m camp → town with no scene change, the services at the far end, budget |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
 | `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
 | `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
-| `game_flow_regression` | 22 | cage → town → arena → town on one save |
+| `game_flow_regression` | 22 | world → arena → world on one save |
 | `admin_arena_regression` | 98 | bubble, downed, revive, loot, altar, screen, two peers |
 | `quartermaster_regression` | 20 | keeper price, purse, refusal |
 | `warband_session_regression` | 49 | two real ENet processes |
@@ -204,7 +223,8 @@ Run the gate (31 tests, none of them socket tests running concurrently):
 GODOT=./.runtime/godot/Godot_v4.7.2-stable_win64_console.exe
 OUT=C:/tmp/gres; rm -rf "$OUT"; mkdir -p "$OUT"
 LIST="warband_contract possession downed_revive combat_bubble altar stash_autoloot
-warband_ui branded_abilities enemy_waves town_hub cage_escape escape_run expedition
+warband_ui branded_abilities enemy_waves town_hub cage_escape escape_run
+warband_world expedition
 expedition_director game_flow admin_arena quartermaster branded_world warband_art
 run_persistence gameplay combat_expansion net_limits world_art mob_aggro paperdoll
 town_services title_menu world_ui hitbox block_clash draw_combat ranger_clone"
