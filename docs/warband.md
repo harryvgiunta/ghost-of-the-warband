@@ -279,3 +279,24 @@ what exposed the engine fog trap above.
 unrelated to this subsystem: `arena.tscn`'s lobby renders over a bright sky and
 reads washed out at this camera, while the admin arena (same world kit) renders
 correctly after the fog fix.
+
+## 10. Current state (read this before changing anything)
+
+The shipped loop, the decision log, the test inventory and the next-phase
+worktree briefs live in **`docs/warband-handoff.md`**. Start a session there: it
+names the commit, the engine/test commands, the twelve rules that must not be
+regressed, the Godot traps already paid for, and the Phase 3 parallel plan.
+
+Short version of the latest tuning (all in the code, all covered by
+`tests/cage_escape_regression.gd`):
+
+- the fifth prisoner is **not** forced into the soul; the player takes him (F5 /
+  `[` / `]`) and no latch opens before that;
+- each cage is cut individually with **G**, then the freed squad arms itself from
+  the ground and attacks the watchers on its own, silently;
+- watchers carry **72 health** and hunt aggressively (run 5.6 m/s, sight 60,
+  orbit 1.9); the first pair is bare, and **six armed watchers** come through the
+  gate when they die, each dropping the weapon it held;
+- the escape needs all **eight** watchers down and no longer asks for loot;
+- the camp yard is **60 x 68 m** inside a 100 x 140 m floor with an invisible
+  catch floor, so nothing can fall out of the world.

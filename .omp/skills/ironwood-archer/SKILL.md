@@ -518,16 +518,26 @@ difference. `docs/warband.md` is the contract document; this note is the map.
 | UI | `WarbandHud` (body + squad rows + prompts), `WarbandScreen` (`TAB`, click-to-control, recruiter), `WarbandPaperdoll` (`P`, equip from the collective stash) |
 | Branded skills | `BrandedSkills` table + `BrandedRunner` (six sigils, tier power, stamina/cooldown); the arena binds `R` |
 | Enemies | `CultistGuard` (crimson, faction filter, no arena respawn) + `EnemyWaves` (deterministic 3/4/5 cultists, escalating kits, `step(delta, bodies)` then `controller.physics_step`) |
-| Scenes | `scenes/cage_escape.tscn` (four cages, rescuer, gate), `scenes/town_hub.tscn` (stash/altar/recruiter/gate), `admin_arena.tscn` (sandbox brawls when the deployment line is empty, a three-wave expedition when it is not) |
+| Scenes | `scenes/cage_escape.tscn` (four cages, rescuer you must enter yourself, four G-cut latches, two bare + six armed watchers, gate), `scenes/town_hub.tscn` (stash/altar/recruiter/quartermaster/gate), `admin_arena.tscn` (sandbox brawls when the deployment line is empty, a three-wave expedition when it is not) |
+| Tutorial | `TutorialCard` (modal, pauses the tree, CONTINUE / G / Enter / Escape) + `TutorialSequencer` (CAGED → ALL_SEEN → RESCUER_ARRIVED → FREED → ESCAPING → TOWN). `note_rescuer_taken()` changes the objective; pre-FREED kills are refused and reconciled by `note_battle_state()`; **no loot step is advertised** |
+| Squad AI | `cage_escape.gd::_drive_allies`: freed prisoners silently arm themselves from drops (`auto_equip` + `controller.refresh_gear`) and charge the nearest watcher; the player's body is never driven |
+| Camp watchers | `CageWatcher` extends the forest mob: 72 health, 5 damage, run 5.6, sight 60, orbit 1.9; `arm(item)` puts a catalog blade on `hand_r`, `take_weapon_item()` drops it; `hunt(target)` forces an aggressive pursuit |
+| Camp ground | 60 x 68 m walled yard inside a 100 x 140 m floor plus an invisible catch floor; the gate is set in the front wall and reinforcements spawn outside it |
 | Flow | autoload `GameFlow` (`scripts/warband/game_flow.gd`) is the only thing that changes scene; each scene declares one `scene_requested(path)` door and calls `GameFlow.bind(self)`; `GameFlow.active` is false in tests |
 | Netcode | `WarbandSession` over ENet: `--warband-host <port>` / `--warband-join <addr> <port>` on `admin_arena.tscn`; host-authoritative ownership, 20 Hz body snapshots through `NetLimits`, guest prediction |
 
-Tests (all headless, `tests/warband_*`, `tests/*_regression.gd` below): contract
-161, possession 236, downed_revive 67, combat_bubble 73, altar 112, stash_autoloot
-170, warband_ui 95, branded_abilities 114, enemy_waves 108, town_hub 58,
-cage_escape 80, expedition 18, game_flow 22, admin_arena 98, warband_session 49
+Tests (all headless, `tests/*_regression.gd`): contract 180, possession 236,
+downed_revive 67, combat_bubble 73, altar 112, stash_autoloot 170, warband_ui 99,
+branded_abilities 114, enemy_waves 108, town_hub 58, cage_escape 158,
+expedition 18, game_flow 22, admin_arena 98, quartermaster 20, warband_session 49
 (two real ENet processes). Run one with
 `& .\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/<name>.gd`.
+
+Hard-won rules (see `docs/warband-handoff.md` for the full list): `seat_loadout()`
+is a spawn snapshot, use `controller.refresh_gear(merc_id)` for live gear;
+`ArenaActor` targets layer 4 by default, scenes fighting mobs set
+`combat.target_mask = 2`; `Environment.fog_mode` resets `fog_density`; a scene door
+must never be bound while `GameFlow.active` is false in a test.
 
 Presentation traps found the hard way: `Environment.fog_mode` in Godot 4.7 resets
 `fog_density` to 1.0, so `scripts/world/environment_kit.gd` writes the density

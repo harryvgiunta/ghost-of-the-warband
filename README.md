@@ -57,8 +57,9 @@ difference - and the warband is the thing that survives a battle.
 `--warband-join <address> <port>` to join. The host is authoritative for every
 body, ownership transfers are validated by the soul router (one peer per body,
 living bodies only), and each peer predicts the body it is inside. See
-`docs/warband.md` for the architecture and `tests/warband_session_regression.gd`
-for the two-process proof.
+`docs/warband.md` for the architecture, `docs/warband-handoff.md` for the current
+state and the next-phase plan, and `tests/warband_session_regression.gd` for the
+two-process proof.
 
 ## Windows quick start
 
