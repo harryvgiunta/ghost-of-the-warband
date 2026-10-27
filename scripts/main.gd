@@ -169,6 +169,11 @@ var _consume_time := 0.0
 var _heal_remaining := 0.0
 var _heal_rate := 0.0
 var _sprint_exhausted := false
+## Ghost of the Warband: the frontier body's share of the 10% overkill rule. A
+## lethal hit that overkills by at most the contract's threshold leaves the
+## ranger on the ground at zero health instead of sending it home; only a
+## heavier blow reaches `return_to_camp`.
+var downed := false
 var gold := 0
 var kills := 0
 var shots := 0
@@ -1957,6 +1962,11 @@ func _on_party_descent(port: int) -> void:
 func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if not is_instance_valid(attacker) or not attacker.alive:
 		return
+	# Ghost of the Warband: a downed body is out of the fight. The mobs look for a
+	# standing target instead of finishing the body they just put down; a blow
+	# that does land on one is a finisher, and `receive_melee` owns that rule.
+	if downed or (victim != null and victim != player and bool(victim.get("downed"))):
+		return
 	if victim != null and victim != player:
 		_receive_seat_attack(attacker,amount,victim)
 		return
@@ -2013,9 +2023,29 @@ func take_damage(amount: float, react: bool = true) -> void:
 	# the victim is standing in (`scripts/warband/damage_scaler.gd`). A human
 	# body is always in an active bubble, so this is 1.0 for players.
 	amount = WarbandDamage.scale(amount, self)
+	# Ghost of the Warband: a body that has its health back (a bandage, a potion,
+	# the campfire) is on its feet again; only a zero-health body stays downed.
+	if downed and health > 0.0:
+		downed = false
+	if downed:
+		# Ghost of the Warband: a blow on a downed body is a finisher, not damage.
+		# The contract's threshold sends the ranger home; anything lighter is
+		# shrugged off, exactly as it is on an arena fighter.
+		if DownedRules.finishes(max_health, amount):
+			downed = false
+			respawns += 1
+			_note("player_fell", {"respawns": respawns, "gold": gold, "position": player.global_position,
+				"role": network_role, "inside_delve": _delve_inner != null})
+			return_to_camp()
+			hud.show_feedback("You fell. Recovered at the village campfire.", 4.0)
+		return
 	_cancel_consumable()
 	var applied: float = amount * (1.0 - archer.damage_reduction(false))
 	applied = _absorb_with_ward(applied)
+	# Ghost of the Warband: the same contract authority the arena actor uses
+	# decides whether this hit leaves the ranger standing, DOWNED or dead, so the
+	# two bodies cannot drift apart on the 10% rule.
+	var outcome: Dictionary = DownedRules.resolve(health, max_health, applied)
 	health = maxf(0.0, health - applied)
 	if react:
 		var seconds: float = combat.stagger_from_damage(applied,max_health)
@@ -2026,12 +2056,18 @@ func take_damage(amount: float, react: bool = true) -> void:
 		false,health <= 0.0,1.0)
 	audio.play_sound("hit")
 	hud.flash_damage()
-	if health <= 0.0:
+	if bool(outcome.died):
 		respawns += 1
 		_note("player_fell", {"respawns": respawns, "gold": gold, "position": player.global_position,
 			"role": network_role, "inside_delve": _delve_inner != null})
 		return_to_camp()
 		hud.show_feedback("You fell. Recovered at the village campfire.", 4.0)
+	elif bool(outcome.downed):
+		# Ghost of the Warband: the blow overkilled by <= 10%, so the ranger goes
+		# down at zero health instead of being sent home. The campfire key is the
+		# way out of the frontier body until the warband's revive reaches it.
+		downed = true
+		hud.show_feedback("DOWNED  /  R falls back to the campfire", 4.0)
 
 func return_to_camp() -> void:
 	if _client():
@@ -2677,9 +2713,14 @@ func _host_network_step(delta: float) -> void:
 	if _peer_slots.is_empty():
 		return
 	server_tick += 1
-	var bodies: Array[CharacterBody3D] = [player]
+	# Ghost of the Warband: mobs hunt bodies that are standing. A downed body is
+	# still alive and still in the scene, so `alive` alone would keep it hunted
+	# and the revive that follows would be impossible to hold.
+	var bodies: Array[CharacterBody3D] = []
+	if not downed:
+		bodies.append(player)
 	for seat in _seat_list:
-		if is_instance_valid(seat) and seat.alive:
+		if is_instance_valid(seat) and seat.alive and not seat.downed:
 			bodies.append(seat)
 	for enemy in enemies:
 		if is_instance_valid(enemy):
