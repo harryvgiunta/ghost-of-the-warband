@@ -26,6 +26,7 @@ const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
+const BrandHudScript = preload("res://scripts/warband/branded_hud.gd")
 const WavesScript = preload("res://scripts/warband/enemy_waves.gd")
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const LootRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
@@ -585,6 +586,7 @@ func _build_ui() -> void:
 	hud.name = "WarbandHud"
 	layer.add_child(hud)
 	hud.configure(warband)
+	BrandHudScript.attach(self)
 	screen = ScreenScript.new()
 	screen.name = "WarbandScreen"
 	add_child(screen)
@@ -620,6 +622,7 @@ func _attach_brand() -> void:
 		return
 	var main_id: String = str(warband.roster.equipped_of(merc_id).get("main", ""))
 	branded.attach(actor, warband.cruor.brand_of(main_id))
+	if has_node("BrandedHud"): $BrandedHud.set_runner(branded)
 
 func _activate_brand() -> void:
 	if branded == null:
