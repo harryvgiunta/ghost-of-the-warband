@@ -51,6 +51,8 @@ var engaged := false
 ## that sidestep lasts.
 const BLOCKED_SECONDS := 0.35
 const SIDESTEP_SECONDS := 0.55
+## How clear the field has to be before a squadmate bends over a corpse.
+const LOOT_CLEAR_METRES := 22.0
 
 ## per merc_id: {last, stuck, side, sign}
 var _track: Dictionary = {}
@@ -100,7 +102,18 @@ func drive(delta: float) -> void:
 		if watcher != null:
 			_fight(actor, watcher, track)
 			continue
-		# 3. No fight: an escort closes up on the soul, a holding squad stands.
+		# 3. Nothing hostile close: check the bodies. A squad strips the field when
+		#    the fighting has stopped, never mid-swing.
+		if _clear_of_hostiles(actor):
+			var spoil = _nearest_pickup(actor)
+			if spoil != null:
+				if actor.global_position.distance_to(spoil.global_position) <= loot_reach:
+					_hold(actor)
+					_take(actor, merc_id, spoil)
+				else:
+					_advance(actor, spoil.global_position, track)
+				continue
+		# 4. No fight: an escort closes up on the soul, a holding squad stands.
 		if following and is_instance_valid(player_body):
 			var gap: Vector3 = player_body.global_position - actor.global_position
 			gap.y = 0.0
@@ -213,6 +226,18 @@ func _nearest_pickup(actor):
 	return best
 
 
+## True when no living cultist is close enough to interrupt a body bending over a
+## corpse. `LOOT_CLEAR_METRES` is wider than the reach, so a squad does not strip
+## gear in the middle of a ring.
+func _clear_of_hostiles(actor) -> bool:
+	for watcher in watchers:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		if actor.global_position.distance_to(watcher.global_position) <= LOOT_CLEAR_METRES:
+			return false
+	return true
+
+
 func _nearest_watcher(actor):
 	var best = null
 	var best_distance := engage_radius
@@ -249,6 +274,11 @@ func _fight(actor, watcher, track: Dictionary) -> void:
 		var variant := "stab" if str(actor.rig.weapon) == "dagger" else "overhead"
 		actor.combat.begin_melee("right", variant)
 		engaged = true
+	elif float(actor.combat.clash_cooldown) > 0.30:
+		# Recovery is spent drifting around the cultist, not standing in its face.
+		# A braced cultist turns most of a blow, so the fight is won by taking the
+		# openings (after its strike, or on a stagger) rather than by pressing.
+		_circle(actor, to, track)
 
 
 ## Step toward `point`, or sideways for a moment when the body has been leaning
@@ -288,6 +318,20 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 
 func _hold(actor) -> void:
 	actor.accept_network_input(Vector2.ZERO, false)
+
+
+## Walk a half-step around the target. Every third ally takes the other way, so a
+## squad of three does not orbit in lockstep.
+func _circle(actor, to: Vector3, track: Dictionary) -> void:
+	var flat := Vector3(to.x, 0.0, to.z)
+	if flat.length_squared() < 0.0001:
+		return
+	var side := float(track.get("circle_side", 0.0))
+	if is_zero_approx(side):
+		side = 1.0 if actor.get_instance_id() % 2 == 0 else -1.0
+		track["circle_side"] = side
+	var across: Vector3 = flat.normalized().cross(Vector3.UP) * side
+	actor.accept_network_input(Vector2(across.x, across.z), false)
 
 
 ## A squadmate takes a drop for themselves: the vacuum books the piece into the

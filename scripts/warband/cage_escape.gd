@@ -281,10 +281,12 @@ func seed_warband() -> void:
 
 ## The rags every prisoner in this camp is wearing, and nothing in their hands.
 func _dress_rags(merc_id: int) -> void:
-	for slot in ArmorData.SLOTS:
-		var armor_id := "armor_makeshift_%s" % slot
-		if State.ITEMS.has(armor_id):
-			warband.roster.equip(merc_id, slot, armor_id)
+	# One brown sack and nothing else: the warband starts as bodies, not fighters.
+	# Head, hands, legs and feet are bare, and no hand carries a weapon - every
+	# piece they fight in comes off a corpse.
+	var garb := "armor_makeshift_chest"
+	if State.ITEMS.has(garb):
+		warband.roster.equip(merc_id, "chest", garb)
 
 
 ## Put the bodies the scene spawned at the cages, point their swords at the wood
@@ -571,13 +573,17 @@ func _rescuer_jog() -> void:
 func _install_watchers() -> void:
 	for index in GATE_WATCHERS.size():
 		var spec: Dictionary = GATE_WATCHERS[index]
-		_add_watcher(spec["post"], "CampWatcher%d" % (guards.size() + 1))
+		# Corvin's pair are the thinned ones: a shiv ends them quickly.
+		_add_watcher(spec["post"], "CampWatcher%d" % (guards.size() + 1), "",
+			WatcherScript.PAIR_HEALTH)
 
 
-func _add_watcher(at: Vector3, label: String, weapon: String = "") -> Node3D:
+func _add_watcher(at: Vector3, label: String, weapon: String = "",
+		health: float = WatcherScript.HARDENED_HEALTH) -> Node3D:
 	var watcher := WatcherScript.new()
 	watcher.name = label
 	watcher.mob_id = "hollow_warden"
+	watcher.health_pool = health
 	watcher.position = at
 	add_child(watcher)
 	watcher.global_position = at
@@ -615,10 +621,17 @@ func _maintain_watchers() -> void:
 func _on_watcher_defeated(enemy, _reward: int) -> void:
 	if sequencer != null:
 		sequencer.note_guard_killed()
-	if is_instance_valid(enemy) and enemy.has_method("take_weapon_item"):
-		var item_id := str(enemy.take_weapon_item())
-		if not item_id.is_empty():
-			_spawn_pickup(item_id, enemy.global_position + Vector3(0.3, 0.0, 0.2))
+	# A corpse is worth checking: everything it carried lands where it fell.
+	if is_instance_valid(enemy) and enemy.has_method("gear_items"):
+		var gear: Array = enemy.gear_items()
+		for index in gear.size():
+			var item_id := str(gear[index])
+			if item_id.is_empty():
+				continue
+			_spawn_pickup(item_id, enemy.global_position
+				+ Vector3(0.3 + 0.28 * float(index), 0.0, 0.2))
+		if enemy.has_method("take_weapon_item"):
+			enemy.take_weapon_item()
 	# The pair falling is what clears Corvin's hands: if the soul is already in
 	# him, the latches go the moment the second one drops.
 	_maybe_cut_latches()

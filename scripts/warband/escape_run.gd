@@ -21,6 +21,9 @@ const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 
 ## What each cultist carries, in spawn order. Every one of them drops it.
+## What a road cultist wears under its blade: cult rags the warband can take.
+const CULTIST_RAGS := ["armor_makeshift_chest", "armor_leather_chest",
+	"armor_mail_chest", "armor_cloth_chest"]
 const CULTIST_ARMS := [
 	"sword_arming", "dagger_iron", "sword_short", "sword_short",
 	"dagger_iron", "sword_arming", "sword_short", "dagger_iron",
@@ -133,6 +136,8 @@ func _spawn_cultist(at: Vector3) -> void:
 	watcher.defeated.connect(_on_cultist_defeated)
 	watcher.attacked.connect(_on_cultist_attack)
 	watcher.arm(str(CULTIST_ARMS[guards.size() % CULTIST_ARMS.size()]))
+	# A rag on its back, so a corpse is worth crossing the road for.
+	watcher.armor_items = [str(CULTIST_RAGS[guards.size() % CULTIST_RAGS.size()])]
 	guards.append(watcher)
 	host.guards.append(watcher)
 
@@ -157,10 +162,17 @@ func wake_road(prey) -> void:
 ## Each one drops the weapon it held, exactly as the camp's watchers do.
 func _on_cultist_defeated(enemy, _reward: int) -> void:
 	_kills += 1
-	if is_instance_valid(enemy) and enemy.has_method("take_weapon_item"):
-		var item_id := str(enemy.take_weapon_item())
-		if not item_id.is_empty():
-			host.spawn_pickup(item_id, enemy.global_position + Vector3(0.3, 0.0, 0.2))
+	# The corpse is checked, not just the hand: the blade and whatever rag it wore.
+	if is_instance_valid(enemy) and enemy.has_method("gear_items"):
+		var gear: Array = enemy.gear_items()
+		for index in gear.size():
+			var item_id := str(gear[index])
+			if item_id.is_empty():
+				continue
+			host.spawn_pickup(item_id, enemy.global_position
+				+ Vector3(0.3 + 0.28 * float(index), 0.0, 0.2))
+		if enemy.has_method("take_weapon_item"):
+			enemy.take_weapon_item()
 	if host.hud != null and not guards.is_empty():
 		host.hud.set_status("A cultist falls on the trail (%d of %d)." % [_kills, guards.size()], 2.0)
 

@@ -131,6 +131,15 @@ var _attacker: Node3D
 ## ring and shuts the attack gate between the few blows a far body is allowed.
 var warband_passive := false
 var _warband_guard := 0.0
+## A guarding body refuses to trade and takes a quarter off every blow it eats
+## while the guard is up. The mob raises it itself between its own swings, so a
+## fight is a conversation of openings rather than two blades passing through each
+## other.
+const GUARD_REDUCTION := 0.35
+const GUARD_HOLD := 0.35
+## Opt-in, and only the warband's cultists opt in: the frontier's mobs keep the
+## fight they were tuned for.
+var guard_between_swings := false
 
 
 func _ready() -> void:
@@ -243,6 +252,13 @@ func _physics_process(delta: float) -> void:
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
 	# Ghost of the Warband: the brain's guard window rides the cooldown clock.
 	_warband_guard = maxf(0.0, _warband_guard - delta)
+	# Between its own swings a cultist is not wide open: it keeps its guard up
+	# while it re-arms. That is what makes a swing an opening instead of a rhythm.
+	# It is braced for most of its cycle and opens for the half second before it
+	# can swing again: a cultist is something you catch off its guard, not something
+	# you out-trade, and that is what makes the fight last.
+	if guard_between_swings and _attack_cooldown > 0.30:
+		_warband_guard = maxf(_warband_guard, GUARD_HOLD)
 	var focus := _senses.focus() if pursuit else _target.global_position
 	var to_target := focus - global_position
 	to_target.y = 0.0
@@ -638,6 +654,11 @@ func warband_stance(passive: bool) -> void:
 
 
 ## Ghost of the Warband: hold the attack gate shut for `seconds`; the newest
+## A raised guard: the body refuses to trade and turns most of what lands on it.
+func guard_up() -> bool:
+	return guard_between_swings and _warband_guard > 0.0
+
+
 ## order wins, so `warband_guard(0.0)` is how the brain opens a swing window.
 func warband_guard(seconds: float) -> void:
 	_warband_guard = maxf(0.0, seconds)
@@ -656,6 +677,10 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	mob_wake()
 	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
+	# A raised guard turns most of the blow: you have to catch the cultist with
+	# its blade down (its strike, or the moment its guard breaks on a stagger).
+	if guard_between_swings and _warband_guard > 0.0:
+		applied *= GUARD_REDUCTION
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", headshot, health <= 0.0)
 	BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,

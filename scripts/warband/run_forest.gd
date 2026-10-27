@@ -958,7 +958,9 @@ static func _build_fires(root: Root, path: Path) -> void:
 	for clearing in root.clearings:
 		var at := path.total * float(CLEARING_FRACTIONS[index])
 		var side := -1.0 if index % 2 == 0 else 1.0
-		var point := path.verge(at, side * (HALF_WIDTH - 1.4))
+		# On the verge, never in the walkable band: a fire ring is solid, and a body
+		# hugging the inside of a bend must not jam on one.
+		var point := path.verge(at, side * (HALF_WIDTH + 1.1))
 		var host := _host(group, Vector3(point.x, 0.0, point.z), 0.0)
 		host.name = "CampFire%d" % (index + 1)
 		CampKit.fire_ring(host, mats, SEED + 5 + index * 3)

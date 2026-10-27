@@ -20,6 +20,7 @@ extends SceneTree
 ## rescuer arrives, a kill before the fight, loot before the squad is out. None of
 ## them may advance a state or throw.
 
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
@@ -163,11 +164,16 @@ func check_spawn() -> void:
 		"the fifth prisoner is not caged")
 	for merc_id in warband.roster.ids():
 		var gear: Dictionary = warband.roster.equipped_of(merc_id)
-		var rags := true
-		for slot in ["head", "chest", "hands", "legs", "feet"]:
-			if not str(gear.get(slot, "")).begins_with("armor_makeshift_"):
-				rags = false
-		check(rags, "%s wears rags" % warband.roster.name_of(merc_id))
+		# The warband starts naked in a sack: one brown garment over the chest and
+		# nothing on head, hands, legs or feet - they fight in what they strip off
+		# the dead.
+		check(str(gear.get("chest", "")) == "armor_makeshift_chest",
+			"%s wears the sack" % warband.roster.name_of(merc_id))
+		var bare := true
+		for slot in ["head", "hands", "legs", "feet"]:
+			if not str(gear.get(slot, "")).is_empty():
+				bare = false
+		check(bare, "%s is otherwise bare" % warband.roster.name_of(merc_id))
 		if merc_id != camp.rescuer_id:
 			check(str(gear.get("main", "")).is_empty(),
 				"prisoner %s is unarmed" % warband.roster.name_of(merc_id))
@@ -187,8 +193,8 @@ func check_spawn() -> void:
 	check(camp.guards.size() == 2, "two watchers hold the clearing")
 	for watcher in camp.guards:
 		check(bool(watcher.get("alive")), "a watcher stands on its feet")
-		check(is_equal_approx(float(watcher.max_health), 72.0),
-			"the watcher carries 72 health, got %s" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), WatcherScript.PAIR_HEALTH),
+			"the pair Corvin fights are the thinned ones, got %s" % str(watcher.max_health))
 		check(str(watcher.name).begins_with("Forest_"), "the watcher is the woodland mob (%s)" % watcher.name)
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(camp.pickups().size() == 3, "three cultist weapons lie on the walk")
@@ -533,9 +539,16 @@ func check_out_and_ambush() -> void:
 		for stab in 5:
 			stabbable.take_damage(14.0, 0)
 			check(bool(stabbable.get("alive")),
-				"stab %d of 6 leaves a watcher standing" % (stab + 1))
-		stabbable.take_damage(14.0, 0)
-		check(not bool(stabbable.get("alive")), "the sixth stab puts a watcher down")
+				"stab %d of 6 leaves a hardened watcher standing" % (stab + 1))
+		# A hardened watcher is twice the old pool and guards between its swings,
+		# so the last stabs land for less: count them instead of assuming a number.
+		var stabs := 5
+		while bool(stabbable.get("alive")) and stabs < 40:
+			stabbable.take_damage(14.0, 0)
+			stabs += 1
+		check(not bool(stabbable.get("alive")),
+			"a hardened watcher goes down after %d stabs" % stabs)
+		check(stabs >= 8, "and it takes real work to put one down (%d stabs)" % stabs)
 
 	# They are pointed at the squad, not left standing in the dark.
 	var runner = null
@@ -572,7 +585,7 @@ func check_out_and_ambush() -> void:
 	for index in range(2, camp.guards.size()):
 		var watcher = camp.guards[index]
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
+			watcher.take_damage(4000.0, 0)
 	var dropped := await await_condition(
 		func() -> bool: return game.pickups.size() >= drops_before + 6, 6.0, "the dropped weapons")
 	check(dropped, "the six weapons are on the floor (%d spawned)" % (game.pickups.size() - drops_before))

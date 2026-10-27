@@ -28,7 +28,9 @@ const TEST_SAVE := "user://escape_run_state.json"
 const WARBAND_SAVE := "user://escape_run_warband.json"
 const WORLD := "res://scenes/warband_world.tscn"
 ## How long the walk may take before the test calls it a hang.
-const WALK_LIMIT := 70.0
+## A watchdog against a hang, not a performance budget: nine hundred metres of
+## ground is ~170 s of game time and the headless frame rate is not the game's.
+const WALK_LIMIT := 260.0
 ## The walk is played at this speed multiplier so a quarter-kilometre run fits in
 ## a regression; the recorded time is the game time the lane cost at 1x.
 const WALK_SCALE := 3.0
@@ -148,7 +150,7 @@ func check_the_world() -> void:
 	# way the camp opens them now and no caged body stays clamped behind one.
 	for watcher in game.camp.guards.duplicate():
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
+			watcher.take_damage(4000.0, 0)
 	game.controller.direct(1, game.camp.rescuer_id)
 	_dismiss_card()
 	check(game.camp.cages_open(), "taking Corvin cut every latch (%d of %d)"
@@ -267,8 +269,8 @@ func check_pursuers() -> void:
 			visible += 1
 		if bool(watcher.hunting()) and is_instance_valid(watcher.player):
 			hunting += 1
-		check(is_equal_approx(float(watcher.max_health), 72.0),
-			"a road cultist carries 72 health, got %s" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), 144.0),
+			"a road cultist carries twice the old pool, got %s" % str(watcher.max_health))
 		check(watcher.global_position.y > -1.0, "a cultist stands on the lane")
 		check(watcher.safe_center.is_equal_approx(game.trail.town_gate()),
 			"the town's gate is the safe ring, so nobody is hunted inside it")

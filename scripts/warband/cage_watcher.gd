@@ -15,16 +15,44 @@ extends "res://scripts/forest_mob.gd"
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
 
-## Twice the old pool: a shiv (14) now needs six stabs, and the fight is long
-## enough for the squad and the second wave to trade real blows.
-const WATCHER_HEALTH := 72.0
+## The pair Corvin puts down are thinned mooks; everything else that holds the
+## road is twice what a camp watcher used to be (a shiv needs a dozen stabs).
+const PAIR_HEALTH := 44.0
+const HARDENED_HEALTH := 144.0
 const WATCHER_DAMAGE := 5.0
+## Set before the body enters the tree. The two the rescuer fights are weak; the
+## rest are hardened.
+var health_pool := HARDENED_HEALTH
 
 ## The catalog weapon this watcher carries, or "" for a bare one. Set by the
 ## scene when the second wave comes through the gate; the scene spawns it as a
 ## drop when the body falls.
 var weapon_item := ""
+## Armour the cultist was wearing. A corpse is worth checking: this is what the
+## squad or the player finds on it once the fighting stops.
+var armor_items: Array[String] = []
 var _weapon_socket: Node3D = null
+
+## Every warband cultist guards between its own swings; the frontier's mobs do not
+## opt in, so the base game keeps the fight it was tuned for.
+func _ready() -> void:
+	super()
+	# Only the hardened cultists brace. The pair Corvin puts down are mooks: they
+	# are cheaper to kill than to out-wait.
+	guard_between_swings = health_pool >= HARDENED_HEALTH
+
+
+## Everything worth taking off this body: the blade in its hand and the rag on
+## its back. The scene spawns each as a drop where it fell.
+func gear_items() -> Array[String]:
+	var out: Array[String] = []
+	if not weapon_item.is_empty():
+		out.append(weapon_item)
+	for piece in armor_items:
+		if not piece.is_empty():
+			out.append(piece)
+	return out
+
 
 ## Put a blade in the watcher's right hand. The forest rig has a real `hand_r`
 ## bone, so the weapon follows the authored swing; a rig without one keeps the
@@ -99,7 +127,7 @@ func _profiles() -> Dictionary:
 		return table
 	var warden: Dictionary = (table["hollow_warden"] as Dictionary).duplicate(true)
 	warden["display"] = "Camp watcher"
-	warden["health"] = WATCHER_HEALTH
+	warden["health"] = health_pool
 	warden["damage"] = WATCHER_DAMAGE
 	warden["cooldown"] = 1.1
 	warden["windup"] = 0.42

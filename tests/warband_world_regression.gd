@@ -25,6 +25,7 @@ extends SceneTree
 ##   6. **The budget.** One world is one scene: nodes, multimesh draws, lights and
 ##      collision shapes are counted and bounded.
 
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const ArenaScript = preload("res://scripts/admin_arena.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
@@ -294,8 +295,8 @@ func check_camp_in_the_woods() -> void:
 		"forty cultists hold the trail and are on the same hostile list (%d in all)"
 		% game.guards.size())
 	for watcher in game.camp.guards:
-		check(is_equal_approx(float(watcher.max_health), 72.0),
-			"the camp watcher carries 72 health (%s)" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), WatcherScript.PAIR_HEALTH),
+			"the pair Corvin fights carry the thin pool (%s)" % str(watcher.max_health))
 		check(watcher.global_position.y > -1.0, "the watcher stands on the ground")
 
 
@@ -497,10 +498,10 @@ func check_walk() -> void:
 	# ambush is the opening's own fight and is cleared with it.
 	for watcher in game.trail.guards:
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
+			watcher.take_damage(4000.0, 0)
 	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
+			watcher.take_damage(4000.0, 0)
 	await create_timer(0.4).timeout
 	check(game.trail.cultists_alive() == 0, "the trail can be cleared (%d left)"
 		% game.trail.cultists_alive())
