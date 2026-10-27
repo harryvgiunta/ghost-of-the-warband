@@ -1,6 +1,6 @@
 extends Node
 ## Autoload `Warband`: the persistent soul, the roster, the infinite stash, the
-## Cruor ledger and the recruiter, in one place.
+## Cruor ledger, the recruiter and the battle ledger, in one place.
 ##
 ## Ghost of the Warband is a possession game, so the thing that survives a
 ## battle is not a character: it is the warband. This node owns that state and
@@ -20,11 +20,16 @@ const SoulScript = preload("res://scripts/warband/soul_router.gd")
 const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
+## The battle ledger record; see "run reports" in the persistence section.
+const RunReportScript = preload("res://scripts/warband/run_report.gd")
 
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
 
-const SAVE_VERSION := 1
+## Additive save format. v2 added the run history (`runs`) and the lifetime
+## totals (`run_totals`); a v1 file still loads, with no reports and zeroed
+## totals, because every reader of those fields defaults.
+const SAVE_VERSION := 2
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 
 var roster: WarbandRoster = RosterScript.new()
@@ -44,6 +49,9 @@ var revive_channels: Dictionary = {}  # peer_id -> {merc_id, seconds}
 
 func _ready() -> void:
 	set_process(false)
+	# The battle ledger is fed by watching the field, so it needs `node_added`
+	# from the first frame; see "run reports" in the persistence section.
+	_ensure_run_watch()
 
 # --- purse -----------------------------------------------------------------
 
@@ -279,6 +287,8 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	seeded = false
 	possession.clear()
 	revive_channels.clear()
+	# A new campaign has no history to show (the persistence section owns it).
+	_reset_run_records()
 	_notify()
 
 func _notify() -> void:
@@ -293,6 +303,8 @@ func to_dict() -> Dictionary:
 		"roster": roster.to_dict(),
 		"stash": stash.to_dict(),
 		"cruor": cruor.to_dict(),
+		"runs": _run_history.duplicate(true),
+		"run_totals": RunReportScript.sanitize_totals(run_totals),
 	}
 
 func from_dict(data: Dictionary) -> void:
@@ -301,10 +313,20 @@ func from_dict(data: Dictionary) -> void:
 	cruor.from_dict(data.get("cruor", {}))
 	deployment_cap = clampi(int(data.get("deployment_cap", Contracts.MAX_DEPLOYMENT_CAP)),
 		1, Contracts.MAX_DEPLOYMENT_CAP)
+	# A v1 save has neither field; both readers answer "nothing fought yet".
+	_load_run_history(data.get("runs", []))
+	run_totals = RunReportScript.sanitize_totals(data.get("run_totals", {}))
+	# No reward is ever re-applied here. The purse and the essence wallet already
+	# hold what a battle paid; the history is a ledger of that, never a second
+	# payment, so a save/load cycle cannot pay a run twice.
 	seeded = roster.count() > 0
 	_notify()
 
+## Leaving the field is the moment a battle becomes history: `GameFlow.goto()`
+## and every scene's `_exit_tree()` call this, so the report is written with the
+## roster the arena mirrored at 0.4 s intervals still in place.
 func save_state() -> void:
+	_close_open_run()
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
 		push_warning("Warband: cannot write %s" % save_path)
@@ -335,3 +357,278 @@ func describe() -> String:
 	return "mercs=%d alive=%d deployed=%d cap=%d gold=%d cruor=%d brands=%d stash=%d" % [
 		roster.count(), roster.alive_count(), roster.deployed_count(), deployment_cap,
 		gold(), cruor.total(), cruor.brands.size(), stash.pooled_total()]
+
+# --- run reports (persistence) ---------------------------------------------
+#
+# A battle becomes history without every scene having to remember to file it:
+# `Warband` watches the tree for the two node types an expedition is built from -
+# `EnemyWaves` (which paces the cult and knows every wave it fielded) and
+# `CultistGuard` (whose death signal is the kill count) - so the admin arena and
+# the expedition director both feed the same ledger with no wiring of their own.
+# A scene may call `begin_run()`/`note_run()`/`finish_run()` itself when it wants
+# to be explicit; the record is idempotent and one battle is one entry.
+#
+# Nothing here pays. Gold and cruor are read back out of the wallets at the end
+# of the run, so a reward is paid exactly once, by whoever pays it, and a reload
+# replays the ledger without touching a purse.
+
+## The battle being recorded, or `null` between battles.
+var run = null
+## Lifetime counters; `RunReport.TOTAL_FIELDS` is the full list.
+var run_totals: Dictionary = RunReportScript.blank_totals()
+## Newest last, at most `RunReport.HISTORY_LIMIT` entries.
+var _run_history: Array[Dictionary] = []
+## Transient run bookkeeping. None of it is saved: a reload in the middle of a
+## battle is not a battle result.
+## The spawner last bound to the open record, so the close can read its own tally
+## (never dereferenced without `is_instance_valid`: it dies with the scene).
+var _run_waves: Node = null
+var _run_wave_count := 0
+var _run_cleared_waves := 0
+var _run_kills := 0
+var _run_notes: Dictionary = {}
+var _run_body_ids: Array[int] = []
+var _run_gold_start := 0
+var _run_cruor_start := 0
+var _run_items_start := 0
+
+## Listen for the field. Connected once from `_ready()`; `node_added` is the only
+## hook that can see a battle start in a scene this autoload does not own.
+func _ensure_run_watch() -> void:
+	var tree := get_tree()
+	if tree == null or tree.node_added.is_connected(_on_node_added):
+		return
+	tree.node_added.connect(_on_node_added)
+
+func _on_node_added(node: Node) -> void:
+	if node == null:
+		return
+	if node is EnemyWaves:
+		_attach_waves(node)
+	elif node is CultistGuard and run != null:
+		_watch_guard(node)
+
+func _attach_waves(waves: Node) -> void:
+	if run == null:
+		begin_run(RunReportScript.MODE_EXPEDITION, waves)
+		return
+	# A director that fields more than one spawner is still one battle: keep the
+	# record and let the same watcher count the new node's waves and guards.
+	_bind_waves(waves)
+
+func _bind_waves(waves: Node) -> void:
+	if waves == null or not is_instance_valid(waves):
+		return
+	_run_waves = waves
+	if waves.has_signal("wave_started") \
+			and not waves.is_connected("wave_started", _on_run_wave_started):
+		waves.wave_started.connect(_on_run_wave_started)
+	if waves.has_signal("wave_cleared") \
+			and not waves.is_connected("wave_cleared", _on_run_wave_cleared):
+		waves.wave_cleared.connect(_on_run_wave_cleared)
+	if waves.has_method("guards"):
+		for guard in waves.guards():
+			_watch_guard(guard)
+
+func _watch_guard(guard: Node) -> void:
+	if guard == null or not is_instance_valid(guard):
+		return
+	if not guard.has_signal("killed") or guard.is_connected("killed", _on_run_guard_killed):
+		return
+	guard.killed.connect(_on_run_guard_killed)
+
+func _on_run_wave_started(index: int, _count: int) -> void:
+	_run_wave_count = maxi(_run_wave_count, index + 1)
+
+func _on_run_wave_cleared(_index: int) -> void:
+	_run_cleared_waves += 1
+
+func _on_run_guard_killed(_slot: int, _source: int) -> void:
+	_run_kills += 1
+
+## Open a record for the battle about to happen. `waves` is optional: when it is
+## given, this node reads the wave count and the kills off it. Returns the live
+## record; calling twice answers the same one.
+func begin_run(mode: String = "expedition", waves = null) -> RunReportScript:
+	if run != null:
+		return run
+	run = RunReportScript.new()
+	run.mode = mode
+	run.start()
+	_run_wave_count = 0
+	_run_cleared_waves = 0
+	_run_kills = 0
+	_run_notes.clear()
+	_run_gold_start = gold()
+	_run_cruor_start = cruor.total()
+	_run_items_start = _item_count()
+	_run_body_ids = deployed_merc_ids()
+	if _run_body_ids.is_empty():
+		# No deployment line (a debug field): the bodies the warband owns still
+		# get their outcome recorded, so a report is never empty of people.
+		_run_body_ids = roster.ids()
+	if waves != null and is_instance_valid(waves):
+		_bind_waves(waves)
+	_notify()
+	return run
+
+## Let the scene be explicit about a count this node cannot see by itself. The
+## last call wins for `kills`/`items`; `waves`/`waves_cleared` keep whichever is
+## larger, so a scene can only add detail, never shrink the record.
+func note_run(kind: String, amount: int = 1) -> void:
+	if run == null or amount == 0:
+		return
+	var key := str(kind)
+	if not key in ["kills", "items", "waves", "waves_cleared"]:
+		return
+	_run_notes[key] = int(_run_notes.get(key, 0)) + amount
+
+## Close the record and file it: outcome, stamps, the bodies' real health and the
+## purse delta. Returns the filed payload. An empty `outcome` is derived from the
+## record (nobody standing = a wipe; every wave broken = a clear).
+func finish_run(outcome: String = "") -> Dictionary:
+	if run == null:
+		return {}
+	var report: RunReportScript = run
+	var now := int(Time.get_unix_time_from_system())
+	report.ended_at = now
+	report.seconds = maxi(0, now - report.started_at)
+	# The spawner's own tally is the authority on its field: a director that fields
+	# guest bodies this node cannot classify (an escort, a boss) still has them
+	# counted, and a scene that retired a wave without a death cannot inflate it.
+	var wave_kills := _run_kills
+	var waves_fielded := _run_wave_count
+	if _run_waves != null and is_instance_valid(_run_waves):
+		if _run_waves.has_method("total_cleared"):
+			wave_kills = maxi(wave_kills, int(_run_waves.total_cleared()))
+		if _run_waves.has_method("wave"):
+			waves_fielded = maxi(waves_fielded, int(_run_waves.wave()) + 1)
+	report.waves = maxi(waves_fielded, int(_run_notes.get("waves", 0)))
+	report.waves_cleared = maxi(_run_cleared_waves, int(_run_notes.get("waves_cleared", 0)))
+	report.kills = int(_run_notes.get("kills", wave_kills))
+	report.items = int(_run_notes.get("items", maxi(0, _item_count() - _run_items_start)))
+	# The wallets are the truth of what the run paid; the ledger only records it.
+	report.gold = maxi(0, gold() - _run_gold_start)
+	report.cruor = maxi(0, cruor.total() - _run_cruor_start)
+	report.bodies = _snapshot_bodies()
+	report.outcome = outcome if str(outcome) in RunReportScript.OUTCOMES \
+		else _derive_outcome(report)
+	var payload: Dictionary = report.to_dict()
+	_run_history.append(payload)
+	_trim_run_history()
+	RunReportScript.tally(run_totals, payload)
+	_clear_run_state()
+	_notify()
+	return payload.duplicate(true)
+
+## Drop the record without filing it (a new campaign is not a battle result).
+func cancel_run() -> void:
+	if run == null:
+		return
+	_clear_run_state()
+	_notify()
+
+func run_open() -> bool:
+	return run != null
+
+## The newest filed report, or an empty dictionary.
+func last_run() -> Dictionary:
+	return {} if _run_history.is_empty() else _run_history.back().duplicate(true)
+
+## Oldest first; at most `RunReport.HISTORY_LIMIT` entries.
+func run_history() -> Array[Dictionary]:
+	return _run_history.duplicate(true)
+
+## The lifetime counters (`runs`, `wins`, `wipes`, `best_wave`, and the sums).
+func run_record() -> Dictionary:
+	return run_totals.duplicate(true)
+
+## What the warband holds in gear: the shared stash plus every worn piece. The
+## difference across a battle is what the field yielded, without needing the loot
+## vacuum - a piece taken and worn still counts exactly once.
+func _item_count() -> int:
+	var total := stash.pooled_total()
+	for merc in roster.records():
+		var gear: Variant = merc.get("equipped", {})
+		if not gear is Dictionary:
+			continue
+		for slot in gear:
+			if not str(gear[slot]).is_empty():
+				total += 1
+	return total
+
+## The bodies that took the field, as the roster holds them right now: the arena
+## mirrors health and downed state into it every 0.4 s, so this is the truth at
+## the moment the field is left.
+func _snapshot_bodies() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for entry in _run_body_ids:
+		var merc_id := int(entry)
+		if not roster.has(merc_id):
+			continue
+		out.append({
+			"name": roster.name_of(merc_id),
+			"health": roundf(roster.health_of(merc_id) * 10.0) / 10.0,
+			"max_health": roster.max_health_of(merc_id),
+			"state": RunReportScript.state_key(roster.state_of(merc_id)),
+		})
+	return out
+
+func _derive_outcome(report: RunReportScript) -> String:
+	var standing := 0
+	for body in report.bodies:
+		if str(body.get("state", "")) == RunReportScript.STATE_ALIVE:
+			standing += 1
+	if report.bodies.is_empty():
+		return RunReportScript.OUTCOME_ABANDONED
+	if standing == 0:
+		# Nobody on their feet: the warband is down, whatever the field looked like.
+		return RunReportScript.OUTCOME_WIPED
+	if report.waves > 0 and report.waves_cleared >= report.waves:
+		return RunReportScript.OUTCOME_CLEARED
+	return RunReportScript.OUTCOME_ABANDONED
+
+func _close_open_run() -> void:
+	if run != null:
+		finish_run()
+
+func _clear_run_state() -> void:
+	run = null
+	_run_waves = null
+	_run_wave_count = 0
+	_run_cleared_waves = 0
+	_run_kills = 0
+	_run_notes.clear()
+	_run_body_ids.clear()
+	_run_gold_start = 0
+	_run_cruor_start = 0
+	_run_items_start = 0
+
+## A brand-new campaign starts with no ledger. Called by `reset_state()`; a save
+## written before the reset still holds the old history, which is what a load
+## restores.
+func _reset_run_records() -> void:
+	_clear_run_state()
+	_run_history.clear()
+	run_totals = RunReportScript.blank_totals()
+
+## Keep only the newest entries, whichever order the file was written in.
+func _trim_run_history() -> void:
+	while _run_history.size() > RunReportScript.HISTORY_LIMIT:
+		_run_history.remove_at(0)
+
+func _load_run_history(saved: Variant) -> void:
+	_run_history.clear()
+	if saved is Array:
+		for entry in saved as Array:
+			if entry is Dictionary:
+				_run_history.append(_clean_report(entry))
+	_trim_run_history()
+
+## One saved entry read through the record's own sanitiser, so a hand-edited or
+## older file is normalised (ints stay ints, states stay known) instead of
+## poisoning the history with whatever JSON held.
+func _clean_report(data: Dictionary) -> Dictionary:
+	var report = RunReportScript.new()
+	report.read_dict(data)
+	return report.to_dict()

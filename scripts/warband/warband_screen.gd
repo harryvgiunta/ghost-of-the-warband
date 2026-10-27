@@ -19,6 +19,7 @@ signal possess_requested(merc_id: int)
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Vendor = preload("res://scripts/warband/mercenary_vendor.gd")
 const State = preload("res://scripts/player_state.gd")
+const RunReportScript = preload("res://scripts/warband/run_report.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -38,6 +39,11 @@ var rows: Dictionary = {}
 var gold_label: Label
 var deployed_label: Label
 var value_label: Label
+## The LAST RUN block: the filed battle's counts, the bodies' outcomes and the
+## lifetime record. Empty until the warband has fought something.
+var last_run_label: Label
+var run_bodies_label: Label
+var record_label: Label
 ## Recruiter board: the three fresh names currently offered, and the button that
 ## swears each one in.
 var hire_names: Array[String] = []
@@ -102,6 +108,7 @@ func refresh() -> void:
 		return
 	_sync_rows()
 	_refresh_header()
+	_refresh_runs()
 	_refresh_recruiter()
 
 func set_status(message: String) -> void:
@@ -184,6 +191,8 @@ func _ensure_built() -> void:
 	gold_label = _label(head, "", 14, GOLD)
 	deployed_label = _label(head, "", 14, TEAL)
 	value_label = _label(head, "", 14, MUTED)
+	column.add_child(HSeparator.new())
+	_build_run_block(column)
 	column.add_child(HSeparator.new())
 	_label(column, "MERCENARY / HEALTH / STATE / GEAR / CONTROL", 11, MUTED)
 	_rows_box = VBoxContainer.new()
@@ -344,6 +353,74 @@ func _refresh_header() -> void:
 	deployed_label.text = "%d / %d deployed" % [
 		int(_warband.roster.deployed_count()), int(_warband.deployment_cap)]
 	value_label.text = "%d warband value" % int(_warband.total_value())
+
+# --- last run --------------------------------------------------------------
+
+## The smallest honest record of the last battle: one row of counts, the bodies
+## that fought, and the warband's lifetime tally. Every number comes out of the
+## filed report (`Warband.last_run()`) or the lifetime counters; the panel never
+## keeps a copy of its own.
+func _build_run_block(parent: Node) -> void:
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 14)
+	parent.add_child(head)
+	var title := _label(head, "LAST RUN", 15, AMBER)
+	title.custom_minimum_size = Vector2(96, 0)
+	last_run_label = _label(head, "", 13, CREAM)
+	last_run_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	last_run_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	run_bodies_label = _label(parent, "", 12, MUTED)
+	run_bodies_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	record_label = _label(parent, "", 12, TEAL)
+
+func _refresh_runs() -> void:
+	if last_run_label == null:
+		return
+	if _warband == null or not _warband.has_method("last_run"):
+		last_run_label.text = "No battle recorded yet."
+		run_bodies_label.text = ""
+		record_label.text = ""
+		return
+	var report: Dictionary = _warband.last_run()
+	if report.is_empty():
+		last_run_label.text = "No battle recorded yet."
+		run_bodies_label.text = ""
+	else:
+		last_run_label.text = "%s  ·  %d of %d waves cleared  ·  %d kills  ·  %d items  ·  %d gold  ·  %d cruor  ·  %s" % [
+			RunReportScript.outcome_label(str(report.get("outcome", ""))),
+			int(report.get("waves_cleared", 0)), int(report.get("waves", 0)),
+			int(report.get("kills", 0)), int(report.get("items", 0)),
+			int(report.get("gold", 0)), int(report.get("cruor", 0)),
+			RunReportScript.stamp_text(int(report.get("ended_at", 0)))]
+		run_bodies_label.text = _body_line(report.get("bodies", []))
+	record_label.text = _record_line(_warband.run_record())
+
+func _record_line(totals: Dictionary) -> String:
+	var runs := int(totals.get("runs", 0))
+	if runs <= 0:
+		return "WARBAND RECORD  no battles fought yet"
+	return "WARBAND RECORD  %d run(s)  ·  %d clear(s)  ·  %d wipe(s)  ·  best wave %d" % [
+		runs, int(totals.get("wins", 0)), int(totals.get("wipes", 0)),
+		int(totals.get("best_wave", 0))]
+
+## `Aldous 62/100 · Brine downed · Cael dead` - the survivors' real health and
+## the state each body left the field in.
+func _body_line(bodies: Variant) -> String:
+	if not bodies is Array:
+		return ""
+	var line := ""
+	for entry in bodies as Array:
+		if not entry is Dictionary:
+			continue
+		var body: Dictionary = entry
+		var part := str(body.get("name", "Unknown"))
+		if str(body.get("state", "")) == RunReportScript.STATE_ALIVE:
+			part += " %d/%d" % [roundi(float(body.get("health", 0.0))),
+				roundi(float(body.get("max_health", 0.0)))]
+		else:
+			part += " " + str(body.get("state", ""))
+		line += ("  ·  " if not line.is_empty() else "") + part
+	return line
 
 # --- recruiter -------------------------------------------------------------
 
