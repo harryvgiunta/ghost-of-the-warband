@@ -45,10 +45,10 @@ const TREE_CHUNK := 64.0
 ## Bushes cover the verge in one pass: fewer, larger batches than the trees.
 const BUSH_CHUNK := 96.0
 ## Torches: one either side every this many metres, at the lane's edge.
-const TORCH_SPACING := 12.0
+const TORCH_SPACING := 20.0
 const TORCH_OFFSET := 4.6
 ## Where the cult stands in pairs. Fractions of the lane's arc length.
-const CLEARING_FRACTIONS := [0.30, 0.60, 0.86]
+const CLEARING_FRACTIONS := [0.22, 0.44, 0.66, 0.88]
 ## Grass and ferns are confined to the lane's verge: the rest of the wood is
 ## trunks and brambles, and grass a body never sees is a draw call for nothing.
 const GRASS_BAND := 9.5
@@ -58,19 +58,26 @@ const SEED := 82117
 ## arch, so a body walking it always has the town ahead of it.
 const LANE_POINTS := [
 	Vector3(0.0, 0.0, 6.0),
-	Vector3(-5.0, 0.0, -13.0),
-	Vector3(4.0, 0.0, -33.0),
-	Vector3(9.0, 0.0, -54.0),
-	Vector3(1.0, 0.0, -75.0),
-	Vector3(-8.0, 0.0, -96.0),
-	Vector3(-2.0, 0.0, -118.0),
-	Vector3(7.0, 0.0, -139.0),
-	Vector3(11.0, 0.0, -160.0),
-	Vector3(2.0, 0.0, -181.0),
-	Vector3(-7.0, 0.0, -202.0),
-	Vector3(-1.0, 0.0, -223.0),
-	Vector3(6.0, 0.0, -243.0),
-	Vector3(0.0, 0.0, -264.0),
+	Vector3(-5.0, 0.0, -39.0),
+	Vector3(4.0, 0.0, -84.0),
+	Vector3(9.0, 0.0, -129.0),
+	Vector3(1.0, 0.0, -174.0),
+	Vector3(-8.0, 0.0, -219.0),
+	Vector3(-2.0, 0.0, -264.0),
+	Vector3(7.0, 0.0, -309.0),
+	Vector3(11.0, 0.0, -354.0),
+	Vector3(2.0, 0.0, -399.0),
+	Vector3(-7.0, 0.0, -444.0),
+	Vector3(-1.0, 0.0, -489.0),
+	Vector3(6.0, 0.0, -534.0),
+	Vector3(3.0, 0.0, -579.0),
+	Vector3(-4.0, 0.0, -624.0),
+	Vector3(8.0, 0.0, -669.0),
+	Vector3(-9.0, 0.0, -714.0),
+	Vector3(0.0, 0.0, -759.0),
+	Vector3(5.0, 0.0, -804.0),
+	Vector3(-3.0, 0.0, -849.0),
+	Vector3(1.0, 0.0, -894.0),
 ]
 
 
@@ -448,11 +455,11 @@ static func _clearing_points(path: Path) -> Array:
 ## The two that start behind the squad, at the camp mouth: close enough to be on
 ## them at once, inside the lane so they are never walled off from the run.
 static func _pursuer_posts(path: Path) -> Array:
-	# Well inside the trail, not on the camp's doorstep. The camp's own fight
-	# happens around the cages and a cultist's sight reaches 60 m, so an ambush any
-	# closer than that joins the tutorial and turns eight watchers into thirty. This
-	# lands it ~75 m in, short of the first clearing.
-	var at := minf(path.total * 0.26, path.total * 0.30 - 12.0)
+	# The first ambush stands well down the road, not on the camp's doorstep. The
+	# camp's own fight happens around the cages and a cultist's sight reaches 60 m,
+	# so anything closer joins the tutorial. On a nine-hundred-metre road this is
+	# ~90 m in; the rest of the ambushes follow every ~100 m after it.
+	var at := path.total * 0.10
 	var head := path.sample(at)
 	var back: Vector3 = (head["position"] as Vector3) - (head["forward"] as Vector3) * 3.2
 	var right: Vector3 = head["right"]

@@ -15,7 +15,7 @@ extends SceneTree
 ##      four latches -> eight kills -> ESCAPING, with every out-of-order beat
 ##      refused and no latch opening before the rescuer's body is taken.
 ##   4. **Walking is the only travel.** A real body is driven out of the clearing,
-##      down the 286 m trail and into the town square: no scene is requested, no
+##      down the 915 m trail and into the town square: no scene is requested, no
 ##      transition is made, the scene object never changes, the body never leaves
 ##      the walkable ground, and the walk is timed.
 ##   5. **The town end is the town.** The stash, the altar, the recruiter and the
@@ -34,7 +34,7 @@ const WORLD := "res://scenes/warband_world.tscn"
 ## The rescuer's walk and the second wave both have to happen inside this.
 const JOG_TIMEOUT := 16.0
 ## How long the driven walk may take before the test calls it a hang.
-const WALK_LIMIT := 90.0
+const WALK_LIMIT := 200.0
 ## The walk is played at three times the simulation per second so a quarter of a
 ## kilometre fits in a regression; the recorded time is game time at 1x.
 const WALK_SCALE := 3.0
@@ -282,8 +282,8 @@ func check_camp_in_the_woods() -> void:
 	# field before the first latch and the road's cultists are down the lane.
 	var camp_guards: int = game.camp.guards.size()
 	check(camp_guards == 2, "two watchers hold the clearing (%d)" % camp_guards)
-	check(game.guards.size() == camp_guards + 80,
-		"eighty cultists hold the trail and are on the same hostile list (%d in all)"
+	check(game.guards.size() == camp_guards + 40,
+		"forty cultists hold the trail and are on the same hostile list (%d in all)"
 		% game.guards.size())
 	for watcher in game.camp.guards:
 		check(is_equal_approx(float(watcher.max_health), 72.0),
@@ -419,7 +419,7 @@ func check_lesson() -> void:
 			% [index, watcher.global_position.y])
 	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
 	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
-	check(game.guards.size() == 88, "the world's hostile list holds all eighty-eight (%d)" % game.guards.size())
+	check(game.guards.size() == 48, "the world's hostile list holds all forty-eight (%d)" % game.guards.size())
 
 	# ...and eight kills open the way.
 	for watcher in game.camp.guards.duplicate():
@@ -603,16 +603,17 @@ func check_budget() -> void:
 	var draws := int(readout["draws"])
 	var shapes := int(readout["shapes"])
 	var lights := int(readout["lights"])
-	# One world is one scene: 60 x 68 m of clearing, 286 m of trail, a square and
-	# eighty-eight watchers all in one tree. These are the numbers it holds itself to.
-	# The node cap carries the cult: a watcher is a body and a rig, so eighty extra
-	# of them cost nodes without costing draw calls - draws stay flat at 323.
-	check(nodes <= 4900, "the world stays inside its node budget (%d)" % nodes)
-	check(draws <= 420, "the world stays inside its draw budget (%d multimesh)" % draws)
-	check(shapes <= 900, "the world stays inside its collision budget (%d shapes)" % shapes)
-	check(lights <= 110, "the world stays inside its light budget (%d)" % lights)
-	check(int(readout["guards"]) == 88, "all eighty-eight watchers are on the list (%d)" % int(readout["guards"]))
-	check(float(readout["lane_length"]) >= 240.0 and float(readout["lane_length"]) <= 300.0,
+	# One world is one scene: 60 x 68 m of clearing, 915 m of trail, a square and
+	# forty-eight watchers all in one tree. These are the numbers it holds itself to.
+	# A nine-hundred-metre road is a lot of trees, torches and collision: the caps
+	# follow what one world of that size actually costs (measured 5391 / 674 /
+	# 1174 / 133), not a number chosen before the road existed.
+	check(nodes <= 5600, "the world stays inside its node budget (%d)" % nodes)
+	check(draws <= 760, "the world stays inside its draw budget (%d multimesh)" % draws)
+	check(shapes <= 1300, "the world stays inside its collision budget (%d shapes)" % shapes)
+	check(lights <= 170, "the world stays inside its light budget (%d)" % lights)
+	check(int(readout["guards"]) == 48, "all forty-eight watchers are on the list (%d)" % int(readout["guards"]))
+	check(float(readout["lane_length"]) >= 860.0 and float(readout["lane_length"]) <= 980.0,
 		"the trail is a long run (%.1f m)" % float(readout["lane_length"]))
 	print("WORLD_BUDGET nodes=%d draws=%d meshes=%d lights=%d shapes=%d guards=%d"
 		% [nodes, draws, int(readout["meshes"]), lights, shapes, int(readout["guards"])])

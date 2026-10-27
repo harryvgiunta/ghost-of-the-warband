@@ -55,15 +55,15 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const TOWN_BEHIND := 30.0
 ## The floor under everything: wider than the clearing, the lane and the square
 ## put together, so no body ever walks off the edge of the world (rule 12).
-const FLOOR_HALF_WIDTH := 96.0
-const FLOOR_FRONT := -402.0
+const FLOOR_HALF_WIDTH := 120.0
+const FLOOR_FRONT := -1010.0
 const FLOOR_BACK := 60.0
 ## How close a body has to stand to something to loot it by hand.
 const LOOT_REACH := 2.6
 ## `ArenaActor` clamps a body to a square around the world origin, and the town
 ## stands 342 m south of the camp: this is the whole map, with room to spare. A
 ## bound that fitted one area would wall the world in halfway down the trail.
-const BODY_BOUNDS := 380.0
+const BODY_BOUNDS := 1000.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0

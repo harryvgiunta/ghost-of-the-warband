@@ -156,8 +156,8 @@ func check_the_world() -> void:
 		"the camp reaches the escape (%s)" % game.camp.sequencer.state_name())
 	var soul = game.controller.active_body(1)
 	check(soul != null, "the soul is seated in a body when the trail opens")
-	check(soul != null and game.trail.guards.size() == 80,
-		"eighty cultists hold the trail (%d)" % game.trail.guards.size())
+	check(soul != null and game.trail.guards.size() == 40,
+		"forty cultists hold the trail (%d)" % game.trail.guards.size())
 	# Where they stand is what matters (asserted with the lane, below): a mob's
 	# `player` field is its current quarry, not a spawn-time script.
 
@@ -172,7 +172,7 @@ func check_lane() -> void:
 	var length := float(forest["length"])
 	check(absf(measured - length) <= 0.01,
 		"the reported length is the summed waypoints (%.2f vs %.2f)" % [length, measured])
-	check(length >= 240.0 and length <= 300.0, "the lane is a long run (%.1f m)" % length)
+	check(length >= 860.0 and length <= 980.0, "the lane is a long run (%.1f m)" % length)
 	var width := float(forest["width"])
 	check(width >= 9.0 and width <= 12.0, "the lane is %.1f m wide" % width)
 	var torches: Array = forest["torches"]
@@ -241,8 +241,8 @@ func check_art() -> void:
 		"the wood and its walls are solid (%d shapes)" % solids.get_child_count())
 	var draws := int(stats.get("draws", 0))
 	var nodes := int(stats.get("nodes", 0))
-	check(draws <= 250, "the lane stays inside its draw budget (%d multimesh)" % draws)
-	check(nodes <= 900, "the lane stays inside its node budget (%d nodes)" % nodes)
+	check(draws <= 700, "the lane stays inside its draw budget (%d multimesh)" % draws)
+	check(nodes <= 2600, "the lane stays inside its node budget (%d nodes)" % nodes)
 	print("ESCAPE_RUN_ART trees=%d bushes=%d rocks=%d grass=%d nodes=%d draws=%d shapes=%d"
 		% [int(stats.get("trees", 0)), int(stats.get("bushes", 0)), int(stats.get("rocks", 0)),
 			int(stats.get("grass", 0)), nodes, draws, solids.get_child_count()])
@@ -268,7 +268,7 @@ func check_pursuers() -> void:
 	check(armed == game.trail.guards.size(), "every cultist holds a weapon (%d/%d)"
 		% [armed, game.trail.guards.size()])
 	check(visible >= 6, "the blade is in its hand (%d visible)" % visible)
-	check(hunting >= 2, "the cult is hunting the warband (%d hunting)" % hunting)
+	check(hunting == 0, "nobody is handed a target from across the wood (%d hunting)" % hunting)
 	# The ambush stands well inside the trail rather than on the camp's doorstep:
 	# a cultist sees 60 m, so anything closer joins the tutorial's own fight.
 	var start: Vector3 = game.trail.forest["start"]
@@ -278,11 +278,11 @@ func check_pursuers() -> void:
 		var distance := _flat(watcher.global_position, start)
 		if distance <= 60.0:
 			near += 1
-		if distance < 200.0:
+		if distance < 250.0:
 			far += 1
 	check(near == 0, "nobody stands within sight of the camp's mouth (%d within 60 m)"
 		% near)
-	check(far >= 20, "the cult is still on the road (%d within 200 m)" % far)
+	check(far >= 12, "the cult is still on the road (%d within 250 m)" % far)
 	check(game.squad != null and game.squad.following, "the squad is an escort once the camp is clear")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")
