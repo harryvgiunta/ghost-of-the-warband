@@ -29,6 +29,7 @@ const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
+const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Geo = preload("res://scripts/geo.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -133,18 +134,18 @@ const STEP_CARDS := {
 		"footnote": "The watchers are slow and light. Hold RMB to block, then stab.",
 	},
 	4: {  # ESCAPING
-		"kicker": "STEP 5  /  THE GATE",
-		"title": "The way is open",
-		"body": "Walk into the gate arch at the north end of the camp and press G.",
-		"keys": "G  leave the camp for town",
-		"footnote": "The town is where the warband lives between battles.",
+		"kicker": "STEP 5  /  THE ROAD",
+		"title": "The way out is a road, not a door",
+		"body": "The arch opens on the drowned wood: a long road of torchlight, rags and bones, with the cult in it. The squad comes with you. The town is at the far end - you are not there yet.",
+		"keys": "G  open the arch and run the road",
+		"footnote": "Run the lane, fight what blocks it, take the town road at the far gate.",
 	},
 }
 
-## Where the escape leads. The town hub is another worktree's file, so the path
-## is resolved when the gate opens instead of preloaded here; if neither exists
-## the player simply stays in the camp with the gate standing open.
-const TOWN_PATHS := ["res://town_hub.tscn", "res://scenes/town_hub.tscn"]
+## Where the arch leads: the run through the wood. One constant, because a door
+## that resolves its own destination is a door that can quietly go somewhere
+## else - and this one used to finish the escape instead of starting it.
+const ESCAPE_RUN := "res://scenes/escape_run.tscn"
 
 var warband
 var controller
@@ -155,6 +156,9 @@ var screen
 var paperdoll
 var loot
 var revive
+## The shared squad behaviour: freed prisoners arming themselves and fighting the
+## watchers is `squad_drive.gd`, the same implementation the escape run uses.
+var squad
 var camera: Camera3D
 var bodies: Array = []
 var guards: Array = []
@@ -171,8 +175,6 @@ var _reviving := false
 var _cage_open: Array[bool] = []   # per cage, in CAGE_POSTS order
 var _watchers_awake := false
 var _card_state := -1
-## Set the first time a freed ally swings at a watcher; the regression reads it.
-var _ally_engaged := false
 ## Steel taken by anyone, counted across the whole tutorial so a squadmate's
 ## pickup during the latches still counts once the fight starts.
 var _steel_taken := 0
@@ -225,6 +227,7 @@ func _ready() -> void:
 	revive.set_bodies(bodies)
 	_build_loot()
 	_build_watchers()
+	_build_squad()
 	_build_ui()
 	_cage_open.clear()
 	for index in caged_ids.size():
@@ -720,74 +723,15 @@ func _on_pickup_taken(_pickup) -> void:
 ## squadmate's job is "loot, then close on a watcher", and the watchers are mobs
 ## the arena bot cannot see.
 func _drive_allies(_delta: float) -> void:
-	if controller == null or sequencer == null:
+	if controller == null or sequencer == null or squad == null:
 		return
 	if sequencer.state() == SequencerScript.State.CAGED \
 			or sequencer.state() == SequencerScript.State.ALL_SEEN:
 		return
-	var player_body = controller.active_body(1)
-	for merc_id in squad_ids:
-		if not _is_free_ally(int(merc_id)):
-			continue
-		var actor = controller.body_of(int(merc_id))
-		if actor == null or not is_instance_valid(actor):
-			continue
-		if actor == player_body:
-			continue
-		if not bool(actor.get("alive")) or bool(actor.get("downed")):
-			_hold(actor)
-			continue
-		actor.combat.damage_enabled = true
-		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
-		var roster_armed := not str(gear.get("main", "")).is_empty() \
-			or not str(gear.get("off", "")).is_empty()
-		# A body whose roster says armed but whose hands are empty is wearing a
-		# stale loadout: re-dress it once before deciding it cannot fight.
-		if roster_armed and not _holds_weapon(actor):
-			_refresh_rig(int(merc_id))
-		var armed := roster_armed and _holds_weapon(actor)
-		# 1. An unarmed prisoner looks for steel first.
-		if not armed:
-			var pickup = _nearest_pickup_for(actor)
-			if pickup != null:
-				if actor.global_position.distance_to(pickup.global_position) <= 1.5:
-					_hold(actor)
-					_ally_take(actor, int(merc_id), pickup)
-				else:
-					_move_towards(actor, pickup.global_position)
-				continue
-		# 2. Armed, or nothing left to grab: go at the watchers.
-		var watcher = _nearest_watcher(actor)
-		if watcher == null:
-			_hold(actor)
-			continue
-		var to: Vector3 = watcher.global_position - actor.global_position
-		to.y = 0.0
-		var distance := to.length()
-		actor.combat.set_aim(watcher.get_aim_position())
-		if distance > 2.0:
-			_move_towards(actor, watcher.global_position)
-			continue
-		_hold(actor)
-		if actor.rig.weapon == "bow":
-			if actor.combat.can_draw():
-				actor.combat.begin_draw()
-			elif actor.rig.draw_amount >= 0.85:
-				actor.combat.release_draw()
-		elif actor.combat.clash_cooldown <= 0.0:
-			actor.combat.begin_melee()
-			_ally_engaged = true
-
-## Whether the body is actually swinging something: the rig, not the roster.
-func _holds_weapon(actor) -> bool:
-	if actor == null or not is_instance_valid(actor):
-		return false
-	if str(actor.rig.weapon) in ["sword", "dagger", "dual", "bow"]:
-		return true
-	return bool(actor.rig.staff_active) or bool(actor.rig.off_weapon_active)
+	squad.drive(_delta)
 
 ## A body that is out of its cage and standing in the squad, or the rescuer once
-## he has arrived. The player's own body is filtered by the caller.
+## he has arrived. The player's own body is filtered by the module.
 func _is_free_ally(merc_id: int) -> bool:
 	var index := caged_ids.find(merc_id)
 	if index >= 0:
@@ -796,58 +740,10 @@ func _is_free_ally(merc_id: int) -> bool:
 	# the shiv until the latches are cut, so he can never steal the beat by
 	# charging the watchers on his own.
 	return sequencer.state() == SequencerScript.State.FREED \
-		or sequencer.state() == SequencerScript.State.ESCAPING \
-		or sequencer.state() == SequencerScript.State.TOWN
-
-func _move_towards(actor, point: Vector3) -> void:
-	var to: Vector3 = point - actor.global_position
-	to.y = 0.0
-	if to.length_squared() <= 0.0001:
-		_hold(actor)
-		return
-	var direction := to.normalized()
-	actor.accept_network_input(Vector2(direction.x, direction.z), true)
+		or sequencer.state() == SequencerScript.State.ESCAPING
 
 func _hold(actor) -> void:
 	actor.accept_network_input(Vector2.ZERO, false)
-
-func _nearest_pickup_for(actor):
-	var best = null
-	var best_distance := 40.0
-	for pickup in _pickups:
-		if not is_instance_valid(pickup) or bool(pickup.collected):
-			continue
-		var distance: float = actor.global_position.distance_to(pickup.global_position)
-		if distance < best_distance:
-			best_distance = distance
-			best = pickup
-	return best
-
-func _nearest_watcher(actor):
-	var best = null
-	var best_distance := 60.0
-	for watcher in guards:
-		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
-			continue
-		var distance: float = actor.global_position.distance_to(watcher.global_position)
-		if distance < best_distance:
-			best_distance = distance
-			best = watcher
-	return best
-
-## A squadmate takes a drop for themselves: the vacuum books it and the piece is
-## worn by that body (the player's pickup rule would arm the soul instead).
-func _ally_take(actor, merc_id: int, pickup) -> void:
-	var item_id := str(pickup.item_id)
-	var result: Dictionary = loot.quick_loot(pickup, 0)
-	if not bool(result.get("ok", false)):
-		return
-	# Silent: the squad arming itself is the point, not a feed to read. The
-	# roster is the truth, but the body in the yard still holds the old kit -
-	# re-dress the live rig or a squadmate "carries" a sword it never draws.
-	warband.auto_equip(merc_id, item_id)
-	_refresh_rig(merc_id)
-	actor.combat.stop()
 
 ## Re-apply a mercenary's current roster kit to the body standing in the scene.
 func _refresh_rig(merc_id: int) -> void:
@@ -881,28 +777,13 @@ func steel_taken() -> int:
 	return _steel_taken
 
 ## How many freed allies are holding a weapon, and whether any has swung at a
-## watcher. Both are read by the regression.
+## watcher. Both are read by the regression, and both are the shared squad
+## module's answers: the cage does not keep a second count of its own.
 func allies_armed() -> int:
-	var count := 0
-	var player_body = controller.active_body(1)
-	for merc_id in squad_ids:
-		if not _is_free_ally(int(merc_id)):
-			continue
-		var actor = controller.body_of(int(merc_id))
-		if actor == null or not bool(actor.get("alive")):
-			continue
-		# The soul's own body is not an ally: its gear is the player's business.
-		if actor == player_body:
-			continue
-		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
-		var in_roster := not str(gear.get("main", "")).is_empty() \
-			or not str(gear.get("off", "")).is_empty()
-		if in_roster and _holds_weapon(actor):
-			count += 1
-	return count
+	return squad.armed_count() if squad != null else 0
 
 func ally_engaged() -> bool:
-	return _ally_engaged
+	return squad != null and squad.engaged
 
 # --- the watchers ----------------------------------------------------------
 
@@ -922,31 +803,28 @@ func _build_watchers() -> void:
 		watcher.attacked.connect(_on_watcher_attack)
 		guards.append(watcher)
 
-## Keep the watchers pointed at whichever body the soul is wearing and, once the
-## first cage is open, let them know the camp is awake.
-func _maintain_watchers(delta: float) -> void:
+## The freed squad's behaviour is one shared module, not a cage-only copy: the
+## scene hands it the prisoners that are out, the steel on the ground and the
+## watchers, and the module drives them. The cage never sets `following`: a freed
+## prisoner has nowhere to escort anyone and fights where it stands.
+func _build_squad() -> void:
+	squad = SquadDriveScript.new()
+	squad.setup(warband, controller, loot)
+	squad.squad_ids = squad_ids
+	squad.watchers = guards
+	squad.pickups = _pickups
+	squad.following = false
+	squad.engage_radius = 60.0
+	squad.eligible = Callable(self, "_is_free_ally")
+
+## Keep the watchers pointed at whichever body is the closest threat and, once
+## the first cage is open, let them know the camp is awake. The retargeting is the
+## shared squad module's, so a watcher in the camp and a watcher on the road are
+## aimed by one piece of code.
+func _maintain_watchers(_delta: float) -> void:
 	if guards.is_empty():
 		return
-	# Watchers hunt whoever is closest to each of them once the squad is loose: a
-	# freed prisoner is a real threat, not a spectator.
-	for watcher in guards:
-		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
-			continue
-		var nearest = null
-		var best := INF
-		for body in bodies:
-			if not is_instance_valid(body) or not bool(body.get("alive")) or bool(body.get("downed")):
-				continue
-			var distance: float = body.global_position.distance_to(watcher.global_position)
-			if distance < best:
-				best = distance
-				nearest = body
-		if nearest != null and is_instance_valid(nearest):
-			watcher.player = nearest
-			# A watcher that has calmed down is pointed at the squad again: the
-			# camp is a fight, not a patrol.
-			if not bool(watcher.hunting()):
-				watcher.hunt(nearest)
+	SquadDriveScript.retarget(guards, bodies)
 	if cages_open_count() > 0 and not _watchers_awake:
 		_watchers_awake = true
 		for watcher in guards:
@@ -1045,19 +923,9 @@ func _on_rescuer_ready(merc_id: int) -> void:
 		hud.set_status("Corvin is through with the shiv. Press F5 (or [ ]) to take his body.", 6.0)
 
 func _on_gate_ready() -> void:
-	var path := town_scene_path()
 	if hud != null:
-		hud.set_status("The gate is open. Out of the camp.", 6.0)
-	scene_requested.emit(path)
-
-## Where the escape leads: whichever of the town hub paths this build actually
-## has, so the hand-off works whichever worktree landed the file. Nothing is
-## loaded here and the player is never moved out of the camp by this scene.
-func town_scene_path() -> String:
-	for path in TOWN_PATHS:
-		if ResourceLoader.exists(str(path)):
-			return str(path)
-	return str(TOWN_PATHS[TOWN_PATHS.size() - 1])
+		hud.set_status("The arch opens on the wood. The road to town is a long one.", 6.0)
+	scene_requested.emit(ESCAPE_RUN)
 
 ## The gate is a door, not a trigger: the player walks into the arch and presses
 ## G, exactly like every other object in this game.
@@ -1267,7 +1135,7 @@ func _update_prompt() -> void:
 			text = "G - cut the latch" if controller.merc_for_peer(1) == rescuer_id \
 				else "F5  -  take Corvin's body"
 		elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
-			text = "G - leave the camp"
+			text = "G - open the road"
 		else:
 			text = sequencer.objective()
 	# The objective is rebuilt from live counters every frame; the label is only
@@ -1286,7 +1154,7 @@ func _update_hint() -> void:
 	if _revive_target() != null:
 		text = "Hold E - revive the downed body beside you   ·   G - cut a latch"
 	elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
-		text = "G - leave the camp for town"
+		text = "G - open the arch onto the road   ·   it is a long run to town"
 	elif _cage_in_reach() >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
 		if controller.merc_for_peer(1) != rescuer_id:
 			text = "F5  or  [ ]  -  take Corvin's body: only his shiv cuts a latch"

@@ -372,8 +372,8 @@ func check_fight_and_gate() -> void:
 		local.global_position = game.GATE_POINT
 		await physics_frame
 		game._try_interact()
-		check(game.sequencer.state() != SequencerScript.State.TOWN,
-			"the gate is shut while a watcher lives")
+		check(game.sequencer.state() == SequencerScript.State.FREED,
+			"the gate is shut while a watcher lives (%s)" % game.sequencer.state_name())
 		check(requested_paths.is_empty(), "no scene was requested early")
 
 	# The freed squad takes over: they grab the steel and charge the watchers.
@@ -450,17 +450,21 @@ func check_fight_and_gate() -> void:
 	check(game.sequencer.guards_down() == 8, "all eight watchers are down (%d)"
 		% game.sequencer.guards_down())
 
-	# Walk out: the arch is a door, so the player presses G inside it.
-	check(game.sequencer.hint().contains("gate"), "the hint names the gate")
+	# Walk out: the arch is a door, so the player presses G inside it - and the
+	# arch opens the road through the wood, not the town. The lesson is not over
+	# at the camp gate any more; the run that scene starts is what reaches town.
+	check(game.sequencer.hint().contains("arch"), "the hint names the arch")
 	local.global_position = game.GATE_POINT
 	await physics_frame
 	game._try_interact()
 	await physics_frame
-	check(game.sequencer.state() == SequencerScript.State.TOWN,
-		"G in the arch ends the tutorial (%s)" % game.sequencer.state_name())
-	check(not game.sequencer.note_gate_reached(), "the gate only opens once")
-	check(requested_paths.size() == 1, "the scene was asked for the town exactly once")
+	check(game.sequencer.state() == SequencerScript.State.ESCAPING,
+		"G in the arch opens the road without ending the lesson (%s)"
+		% game.sequencer.state_name())
+	check(not game.sequencer.note_gate_reached(), "the arch only opens once")
+	check(requested_paths.size() == 1, "exactly one scene was requested at the arch")
 	if not requested_paths.is_empty():
 		var path := str(requested_paths[0])
-		check(path == game.town_scene_path(), "the requested path is the resolved town path")
-		check(path.ends_with("town_hub.tscn"), "the requested path names the town hub (%s)" % path)
+		check(path == game.ESCAPE_RUN, "the requested path is the run (%s)" % path)
+		check(path.ends_with("escape_run.tscn"), "the requested path names the escape run")
+		check(not path.ends_with("town_hub.tscn"), "the camp arch no longer hands over the town")

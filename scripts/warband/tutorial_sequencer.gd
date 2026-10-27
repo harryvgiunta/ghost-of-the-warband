@@ -8,7 +8,9 @@ extends Node
 ##   2. the fifth prisoner jogs in with a shiv and the soul is forced into him;
 ##   3. walk to each cage and press G to cut its latch - four latches, four cages;
 ##   4. take the cultist steel and put down the two antlered watchers;
-##   5. walk into the gate and press G to leave for town.
+##   5. walk into the gate and press G to open the road - the camp arch is not the
+##      end of the lesson. The road through the wood is, and the lesson ends where
+##      the road does: `escape_run.gd` hands the warband to town.
 ##
 ## This node owns no scene lookups - no bodies, no labels, no nodes. The scene
 ## feeds it facts and it answers with a state, one objective line, one key hint
@@ -22,7 +24,7 @@ signal state_changed(state: int, objective: String)
 signal rescuer_ready(merc_id: int)
 signal gate_ready()
 
-enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING, TOWN }
+enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING }
 
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
@@ -78,8 +80,6 @@ static func state_name_of(value: int) -> String:
 			return "freed"
 		State.ESCAPING:
 			return "escaping"
-		State.TOWN:
-			return "town"
 	return "unknown"
 
 ## What the HUD shows. Read fresh on every call, so the counters are never a
@@ -97,9 +97,7 @@ func objective() -> String:
 		State.FREED:
 			return "Put down the watchers   %d/%d" % [_guards_down, GUARD_COUNT]
 		State.ESCAPING:
-			return "The way is clear. Walk into the gate and press G."
-		State.TOWN:
-			return "The gate is open. Out of the camp."
+			return "The way is clear. Walk into the arch and press G - it opens the road."
 	return ""
 
 ## The key line under the objective: exactly what to press, this beat. Every
@@ -118,9 +116,7 @@ func hint() -> String:
 		State.FREED:
 			return "LMB / RMB - fight   ·   E - revive   ·   the squad arms itself"
 		State.ESCAPING:
-			return "Walk to the gate and press G - leave for town"
-		State.TOWN:
-			return ""
+			return "G - open the arch   ·   the road through the wood leads to town"
 	return ""
 
 func seen_count() -> int:
@@ -229,11 +225,14 @@ func note_battle_state(guards_down: int, weapons: int) -> void:
 ## The freed body stepped into the gate arch and pressed G. Only meaningful once
 ## the fight is over; a body leaning on the gate during the lesson advances
 ## nothing.
+##
+## The arch is the camp's way out, not the end of the lesson: it opens the road,
+## so the state stays ESCAPING and only the door signal fires. The road itself is
+## `escape_run.gd`'s, and that scene is what reaches town.
 func note_gate_reached() -> bool:
 	if _state != State.ESCAPING or _gate_noted:
 		return false
 	_gate_noted = true
-	_transition(State.TOWN)
 	gate_ready.emit()
 	return true
 
