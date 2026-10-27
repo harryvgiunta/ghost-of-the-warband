@@ -16,6 +16,7 @@ extends "res://scripts/arena_actor.gd"
 ## instead of shadowing it.
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
+const Branded = preload("res://scripts/warband/branded_skills.gd")
 
 ## Everyone the cult fields carries this tag; `is_allied` compares it, so any
 ## future cult body joins the pack by wearing the tag alone.
@@ -39,6 +40,13 @@ var kit: Dictionary = {}
 ## One material shared by every mesh under this guard's rig, so the paint costs
 ## one resource per guard and never recolours another body's surfaces.
 var cult_material: StandardMaterial3D = null
+## The sigil this guard's blade carries for this battle, or `{}`. Brands in
+## Warband are item properties kept in the warband's ledger; a cult anointment is
+## not the warband's to keep, so it lives on the body that carries it, dies with
+## the body, and never touches `Warband.cruor`. Phase 4 owns teaching a cultist to
+## *cast* it - this body only tells the field that the steel is anointed.
+var brand: Dictionary = {}
+var _sigil_label: Label3D = null
 
 ## Dress the guard from the cult's catalog: a main hand, the off hand the
 ## contract allows with it, and one armor set. The off hand is dropped for a
@@ -54,6 +62,29 @@ func apply_kit(main_id: String, off_id: String, armor_set: String) -> void:
 	kit = {"main": main_id, "off": off, "armor": armor_set, "pieces": pieces.duplicate()}
 	rig.apply_loadout(State.build_loadout(main_id, off, pieces))
 	_paint()
+
+## Anoint the steel this guard is already holding. `spec` is `{tier, ability}`;
+## any item id it names is ignored, because the brand belongs to the blade in the
+## guard's hands and to nothing else. An unknown ability leaves the guard plain.
+func set_brand(spec: Dictionary) -> void:
+	var ability := str(spec.get("ability", ""))
+	if ability.is_empty() or Branded.definition(ability).is_empty():
+		return
+	var held := str(kit.get("main", ""))
+	if held.is_empty():
+		return
+	var tier := int(spec.get("tier", Contracts.CruorTier.T1_RITUAL_TALLOW))
+	brand = {"item": held, "tier": tier, "ability": ability,
+		"name": Branded.ability_name(ability), "line": Branded.tier_line(ability, tier)}
+	_show_sigil()
+
+## The brand this guard carries, or `{}`.
+func brand_of() -> Dictionary:
+	return brand
+
+## The line drawn under the nameplate, or "" for an ordinary guard.
+func brand_line() -> String:
+	return str(brand.get("line", ""))
 
 ## On their feet: alive and not bleeding out. A downed cultist is a body to step
 ## over, not a fighter, so the wave manager counts it as neither.
@@ -93,6 +124,23 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 ## shared arena behaviour so a guard fights exactly like a warband bot.
 func _bot_step(delta: float, actors: Array) -> void:
 	super._bot_step(delta, opponents(actors))
+
+## Draw the sigil under the nameplate. A label of its own, because the arena
+## rewrites the nameplate ("name  health") every frame; this one is written once
+## and never fights it.
+func _show_sigil() -> void:
+	if _sigil_label == null:
+		_sigil_label = Label3D.new()
+		_sigil_label.name = "BrandedSigil"
+		_sigil_label.position.y = 2.02
+		_sigil_label.font_size = 26
+		_sigil_label.pixel_size = 0.006
+		_sigil_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_sigil_label.no_depth_test = true
+		_sigil_label.modulate = Color(0.95, 0.35, 0.34)
+		add_child(_sigil_label)
+	_sigil_label.text = brand_line()
+	_sigil_label.visible = not brand.is_empty()
 
 ## Paint every mesh under the rig with the cult's single material. Run after the
 ## kit: the rig builds all three bows and swords in `_ready`, so no weapon mesh

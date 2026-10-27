@@ -27,6 +27,8 @@ const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const WavesScript = preload("res://scripts/warband/enemy_waves.gd")
+const DirectorScript = preload("res://scripts/warband/expedition_director.gd")
+const CruorCatalogScript = preload("res://scripts/warband/cruor_catalog.gd")
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const LootRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -45,10 +47,9 @@ const ALTAR_POINT := Vector3(-4.0, 0.0, 18.0)
 const LOOT_REACH := 2.6
 const INTERACT_REACH := 3.0
 const TOWN_SCENE := "res://scenes/town_hub.tscn"
-## Three waves and a breathing gap: enough to read as an expedition, short enough
-## that the loop can be walked in a few minutes.
-const MAX_WAVES := 3
-const WAVE_GAP := 2.5
+## The expedition's pacing lives in `ExpeditionDirector`: five waves, a two second
+## breathing gap and the Bilewarden's wave. This scene only fields the cult (the
+## `EnemyWaves` spawner) and reacts to what the director reports.
 ## What a dead cultist leaves behind, in rotation.
 const GUARD_LOOT := ["sword_arming", "shield_kite", "armor_mail_chest", "ring_blood", "bow_recurve"]
 
@@ -107,9 +108,9 @@ var bot_mercs: Array[int] = []
 ## A real battle (deployed line, cultist waves) instead of the sandbox brawls.
 var expedition := false
 var waves
+var director
 var loot_run
 var session
-var _next_wave_elapsed := -1.0
 var _guard_loot_cursor := 0
 ## Set while the end-of-battle loot run is walking the field.
 var _loot_running := false
@@ -239,14 +240,8 @@ func _physics_process(delta: float) -> void:
 		var foe = pair[1]
 		if is_instance_valid(body) and is_instance_valid(foe) and Damage.is_passive(body):
 			body.combat.set_aim(foe.get_aim_position())
-	if expedition:
-		if waves != null:
-			waves.step(delta, bodies)
-		if _next_wave_elapsed > 0.0:
-			_next_wave_elapsed -= delta
-			if _next_wave_elapsed <= 0.0:
-				_next_wave_elapsed = -1.0
-				_start_wave(int(waves.wave()) + 1)
+	if expedition and director != null:
+		director.step(delta, bodies)
 	for brain in brains:
 		if is_instance_valid(brain):
 			brain.step(delta)
@@ -425,9 +420,15 @@ func _wire_waves() -> void:
 	waves.name = "Waves"
 	add_child(waves)
 	waves.setup(controller, self, _wave_points(), Callable(self, "warband_bodies"))
-	waves.wave_started.connect(_on_wave_started)
-	waves.wave_cleared.connect(_on_wave_cleared)
-	_start_wave(0)
+	director = DirectorScript.new()
+	director.name = "Director"
+	add_child(director)
+	director.setup(controller, warband, waves, loot, self)
+	director.wave_started.connect(_on_wave_started)
+	director.wave_cleared.connect(_on_wave_cleared)
+	director.expedition_cleared.connect(_on_expedition_cleared)
+	director.expedition_wiped.connect(_on_expedition_wiped)
+	director.begin()
 
 ## The warband as the cult sees it (EnemyWaves asks for this when stepped empty).
 func warband_bodies() -> Array:
@@ -437,25 +438,43 @@ func warband_bodies() -> Array:
 			out.append(actor)
 	return out
 
-func _start_wave(index: int) -> void:
-	if waves == null:
-		return
-	var spawned: Array = waves.start_wave(index)
-	for guard in spawned:
+## A wave walked in. The guard loot hooks are bound here rather than at spawn
+## time: the director owns the spawning now, and only the wave on the field is
+## worth looting, so every body the waves just fielded is the whole list.
+func _on_wave_started(index: int, count: int) -> void:
+	for guard in waves.guards():
 		if is_instance_valid(guard):
 			guard.killed.connect(_on_guard_killed.bind(guard))
-
-func _on_wave_started(index: int, count: int) -> void:
 	if hud != null:
-		hud.set_status("Wave %d of %d - %d cultists" % [index + 1, MAX_WAVES, count], 3.0)
+		hud.set_status("Wave %d of %d - %d cultists" % [index + 1, director.wave_count(), count], 3.0)
 
 func _on_wave_cleared(index: int) -> void:
-	if index + 1 >= MAX_WAVES:
-		_end_battle("The expedition is cleared.")
+	# The final wave's news is the director's `expedition_cleared` signal, not a
+	# "they are coming again" line about a cult that no longer exists.
+	if hud == null or index + 1 >= director.wave_count():
 		return
-	_next_wave_elapsed = WAVE_GAP
-	if hud != null:
-		hud.set_status("Wave %d broken. They are coming again." % (index + 1), WAVE_GAP)
+	hud.set_status("Wave %d broken. They are coming again." % (index + 1), DirectorScript.GAP_SECONDS)
+
+## The fifth wave fell: the purse has already been paid by the director, so the
+## scene only names the price and sends the survivors to walk the field.
+func _on_expedition_cleared(summary: Dictionary) -> void:
+	_end_battle("The expedition is cleared - %s." % _reward_line(summary))
+
+## Nobody in the warband is on their feet. Nothing is paid and nothing is
+## gathered: the dead keep their steel.
+func _on_expedition_wiped(summary: Dictionary) -> void:
+	_end_battle("The warband is down with %d cultists on the field." % int(summary.get("kills", 0)),
+		false)
+
+## "175 gold, 5 Ritual Tallow, 1 Black Bile" - the one line the clear prints.
+func _reward_line(summary: Dictionary) -> String:
+	var parts: Array[String] = ["%d gold" % int(summary.get("gold", 0))]
+	var cruor: Dictionary = summary.get("cruor", {})
+	for tier in cruor:
+		var amount := int(cruor[tier])
+		if amount > 0:
+			parts.append("%d %s" % [amount, CruorCatalogScript.tier_name(int(tier))])
+	return ", ".join(parts)
 
 ## A dead cultist leaves its kit on the ground for the survivors to walk to.
 func _on_guard_killed(_slot: int, _source: int, guard) -> void:
@@ -729,6 +748,7 @@ func _try_quick_loot() -> void:
 	var result: Dictionary = loot.quick_loot(nearest, 1)
 	if bool(result.get("ok", false)):
 		_refresh_rig(controller.merc_for_peer(1))
+		_note_loot(1)
 	hud.set_status(str(result.get("message", "")), 2.0)
 
 func _try_interact() -> void:
@@ -834,7 +854,7 @@ func _standing_count(group: Array) -> int:
 			count += 1
 	return count
 
-func _end_battle(reason: String) -> void:
+func _end_battle(reason: String, allow_loot: bool = true) -> void:
 	if _battle_over:
 		return
 	_battle_over = true
@@ -843,8 +863,9 @@ func _end_battle(reason: String) -> void:
 		if is_instance_valid(body) and bool(body.get("alive")) and not bool(body.get("downed")):
 			survivors.append(body)
 	# A real expedition ends with the survivors physically walking the field
-	# before the vacuum books what they pick up; the sandbox books it at once.
-	if expedition and not _loot_running and not loot.pickups().is_empty():
+	# before the vacuum books what they pick up; the sandbox books it at once. A
+	# wipe has no survivors at all, so it pays for no jog it cannot make.
+	if expedition and allow_loot and not _loot_running and not loot.pickups().is_empty():
 		_loot_running = true
 		loot_run = LootRunScript.new()
 		loot_run.name = "LootRun"
@@ -856,6 +877,7 @@ func _end_battle(reason: String) -> void:
 			hud.set_status("%s  The survivors are looting the field." % reason, 6.0)
 		return
 	var sweep: Dictionary = loot.sweep(survivors)
+	_note_loot(int(sweep.get("collected", 0)))
 	if hud != null:
 		hud.set_status("%s  %d items gathered." % [reason, int(sweep.get("collected", 0))], 6.0)
 	if screen != null:
@@ -864,11 +886,18 @@ func _end_battle(reason: String) -> void:
 func _on_loot_run_finished(collected: int, survivors: Array) -> void:
 	_loot_running = false
 	var sweep: Dictionary = loot.sweep(survivors)
+	_note_loot(collected + int(sweep.get("collected", 0)))
 	if hud != null:
 		hud.set_status("%d items gathered, %d left on the field." % [
 			collected + int(sweep.get("collected", 0)), loot.pickups().size()], 6.0)
 	if screen != null:
 		screen.refresh()
+
+## Tell the expedition director what the field actually gathered, so the mission
+## summary and the shared stash cannot disagree about the run.
+func _note_loot(count: int) -> void:
+	if director != null:
+		director.note_loot(count)
 
 ## Leave the field: the town after a battle, a refusal before it.
 func _request_return() -> void:
