@@ -128,6 +128,11 @@ func describe() -> String:
 
 # --- internals -------------------------------------------------------------
 
+## The drops a scene can offer to a player right now, in spawn order. Prompts and
+## quick-loot both read this instead of walking the tree themselves.
+func pickups() -> Array[WarbandPickup]:
+	return _live_pickups()
+
 ## Every drop this vacuum still owns, one entry per node: the ones it spawned plus
 ## any pickup sitting under the root, so a scene that drops its own loot is swept
 ## too. Also prunes the spawned list so a freed drop is never walked again.

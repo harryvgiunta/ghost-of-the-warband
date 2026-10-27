@@ -1345,7 +1345,10 @@ func _bot_step(_delta: float, actors: Array) -> void:
 	var nearest = null
 	var distance := INF
 	for other in actors:
-		if other == self or not other.alive:
+		# Ghost of the Warband: a Downed body is not a threat and not a target.
+		# Without this an AI squad executes its own crawling allies with the next
+		# swing, which makes the whole Downed state meaningless.
+		if other == self or not other.alive or other.get("downed") == true:
 			continue
 		var candidate: float = position.distance_squared_to(other.position)
 		if candidate < distance:
