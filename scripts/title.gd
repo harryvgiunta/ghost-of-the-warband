@@ -107,7 +107,7 @@ func _build() -> void:
 	_status = _label(frame,"",Vector2(28,616),13,TEAL)
 	_status.size = Vector2(462,44)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Close",Vector2(28,668),11,MUTED)
+	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Menu / Save / Quit",Vector2(28,668),11,MUTED)
 	footer.size = Vector2(462,40)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 

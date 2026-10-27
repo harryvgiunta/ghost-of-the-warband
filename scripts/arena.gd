@@ -16,6 +16,7 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
+const PauseMenu = preload("res://scripts/pause_menu.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
 ## A backstab picks its body from the layer the fighters spar on.
@@ -61,6 +62,7 @@ var _query := PhysicsRayQueryParameters3D.new()
 var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
 var _world_ui
+var pause_menu
 
 func _ready() -> void:
 	name = "Arena"
@@ -117,6 +119,7 @@ func _ready() -> void:
 		_world_ui.loadout_changed.connect(_on_ui_loadout_changed)
 		# No world-drop handler: arena drops fall back to the persistent floor list.
 		_world_ui.configure(player_state,get_node_or_null("/root/Session"),null,Callable(),true)
+	_build_pause_menu()
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 4
@@ -1082,15 +1085,62 @@ func _update_game_camera() -> void:
 	camera.look_at(camera.position-back)
 
 func _set_cursor_free(value: bool) -> void:
-	_cursor_free = value
+	# The menu owns the pointer while it is up; a scene path that recaptures on
+	# its own must not steal it back.
+	_cursor_free = value or _pause_open()
 	if value:
 		_cancel_draw_input()
 		_peek_held = false
 		_send_peek_input()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _cursor_free else Input.MOUSE_MODE_CAPTURED
 
 func _ui_open() -> bool:
 	return _world_ui != null and _world_ui.is_open()
+
+
+## Escape brings this up in a match: the pointer leaves the fight, the match
+## keeps running for everyone else, and both ways out of the scene are one click.
+func _build_pause_menu() -> void:
+	pause_menu = PauseMenu.new()
+	pause_menu.name = "PauseMenu"
+	add_child(pause_menu)
+	pause_menu.configure("LEAVE MATCH")
+	pause_menu.resumed.connect(_on_menu_resumed)
+	pause_menu.exit_requested.connect(_on_menu_exit)
+	pause_menu.quit_requested.connect(leave_game)
+
+
+func _pause_open() -> bool:
+	return pause_menu != null and pause_menu.is_open()
+
+
+func _open_menu() -> void:
+	if pause_menu == null:
+		return
+	_cancel_draw_input()
+	_peek_held = false
+	_send_peek_input()
+	pause_menu.open()
+	if _ui_open():
+		_world_ui.close()
+	_set_cursor_free(true)
+
+
+func _close_menu() -> void:
+	if pause_menu != null:
+		pause_menu.close()
+
+
+func _on_menu_resumed() -> void:
+	# Back to the fight only when there is still a fight to return to.
+	if network_role == "offline" or local_slot < 0:
+		return
+	_set_cursor_free(false)
+
+
+func _on_menu_exit() -> void:
+	leave_game()
+	_close_menu()
 
 func _on_ui_opened() -> void:
 	# A menu opens with the pointer free and any held draw or throw cancelled.
@@ -1235,6 +1285,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					else:
 						_world_ui.open_equipment()
 			return
+		if _pause_open():
+			if event.keycode == KEY_ESCAPE:
+				_close_menu()
+			return
 		match event.keycode:
 			KEY_1:
 				if event.shift_pressed:
@@ -1279,7 +1333,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q: _send_step(-1)
 			KEY_E: _send_step(1)
 			KEY_ESCAPE:
-				_set_cursor_free(not _cursor_free)
+				_open_menu()
 			KEY_I:
 				if _world_ui != null:
 					_world_ui.open_inventory()
@@ -1294,7 +1348,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
-	if _ui_open():
+	if _ui_open() or _pause_open():
 		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon

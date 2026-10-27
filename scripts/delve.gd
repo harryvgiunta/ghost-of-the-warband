@@ -34,6 +34,7 @@ const Rules = preload("res://scripts/equipment_rules.gd")
 const Seat = preload("res://scripts/seat_loadout.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const FieldInventoryScript = preload("res://scripts/world_ui.gd")
+const PauseMenu = preload("res://scripts/pause_menu.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
@@ -182,6 +183,7 @@ var _aim_origin := Vector3.ZERO
 var _aim_origin_valid := false
 var loot_pickups: Array = []
 var _world_ui
+var pause_menu
 var _player_state
 var _drop_query := PhysicsRayQueryParameters3D.new()
 var _loot_message_cooldown := 0.0
@@ -239,6 +241,7 @@ func _ready() -> void:
 		_world_ui.closed.connect(_on_ui_closed)
 		_world_ui.loadout_changed.connect(_on_ui_loadout_changed)
 		_world_ui.configure(_player_state,get_node_or_null("/root/Session"),null,Callable(self,"_drop_world_item"),true)
+	_build_pause_menu()
 	audio = Audio.new()
 	add_child(audio)
 	_query.collision_mask = 1 | 2
@@ -1808,15 +1811,64 @@ func _update_game_camera() -> void:
 	camera.look_at(camera.position-back)
 
 func _set_cursor_free(value: bool) -> void:
-	_cursor_free = value
+	# The menu owns the pointer while it is up; a scene path that recaptures on
+	# its own must not steal it back.
+	_cursor_free = value or _pause_open()
 	if value:
 		_cancel_draw_input()
 		_peek_held = false
 		_send_peek_input()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _cursor_free else Input.MOUSE_MODE_CAPTURED
 
 func _ui_open() -> bool:
 	return _world_ui != null and _world_ui.is_open()
+
+
+## Escape brings up the same quick menu as the town: a run has no pointer of its
+## own, and the surface is the only way out.
+func _build_pause_menu() -> void:
+	pause_menu = PauseMenu.new()
+	pause_menu.name = "PauseMenu"
+	add_child(pause_menu)
+	pause_menu.configure("RETURN TO SURFACE")
+	pause_menu.resumed.connect(_on_menu_resumed)
+	pause_menu.exit_requested.connect(_on_menu_exit)
+	pause_menu.quit_requested.connect(leave_game)
+
+
+func _pause_open() -> bool:
+	return pause_menu != null and pause_menu.is_open()
+
+
+func _open_menu() -> void:
+	if pause_menu == null:
+		return
+	_cancel_draw_input()
+	_peek_held = false
+	_send_peek_input()
+	pause_menu.open()
+	if _ui_open():
+		_world_ui.close()
+	_set_cursor_free(true)
+
+
+func _close_menu() -> void:
+	if pause_menu != null:
+		pause_menu.close()
+
+
+func _on_menu_resumed() -> void:
+	# The lobby, a dead run and a dropped connection keep the pointer.
+	if network_role == "offline" or local_slot < 0 or phase == "GAME_OVER":
+		return
+	_set_cursor_free(false)
+
+
+func _on_menu_exit() -> void:
+	# The surface request is the party's exit: a host ends the run for everyone,
+	# a rider asks the authority for passage up.
+	_on_surface_requested()
+	_close_menu()
 
 func _on_ui_opened() -> void:
 	# A menu opens with the pointer free and any held draw or throw cancelled.
@@ -2024,6 +2076,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					else:
 						_world_ui.open_equipment()
 			return
+		if _pause_open():
+			if event.keycode == KEY_ESCAPE:
+				_close_menu()
+			return
 		match event.keycode:
 			KEY_ENTER:
 				# A host never has to wait on a rider who may never arrive.
@@ -2075,7 +2131,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not _cursor_free:
 					send_action("interact")
 			KEY_ESCAPE:
-				_set_cursor_free(not _cursor_free)
+				_open_menu()
 			KEY_I:
 				if _world_ui != null:
 					_world_ui.open_inventory()
@@ -2090,7 +2146,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_cursor_free(false)
 				_throw_held = true
 				send_action("throw",_crosshair_aim())
-	if _ui_open():
+	if _ui_open() or _pause_open():
 		return
 	if event is InputEventMouseButton and event.pressed:
 		var weapon: String = actors[local_slot].rig.weapon

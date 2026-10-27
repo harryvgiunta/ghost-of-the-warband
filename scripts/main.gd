@@ -30,6 +30,7 @@ const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const LootPickup = preload("res://scripts/loot_pickup.gd")
 const WorldUI = preload("res://scripts/world_ui.gd")
+const PauseMenu = preload("res://scripts/pause_menu.gd")
 const Seat = preload("res://scripts/arena_actor.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
@@ -67,6 +68,7 @@ var world
 var archer
 var hud
 var world_ui
+var pause_menu
 var audio
 var _player_state
 var _delve_host := false
@@ -307,6 +309,7 @@ func _ready() -> void:
 	_update_loadout()
 	_refresh_backpack()
 	_build_world_ui()
+	_build_pause_menu()
 	for record: Dictionary in world.enemy_spawns:
 		var enemy := Enemy.new()
 		enemy.kind = int(record.kind)
@@ -412,6 +415,62 @@ func _build_world_ui() -> void:
 
 func _ui_open() -> bool:
 	return world_ui != null and world_ui.is_open()
+
+
+## The quick menu is a scene overlay, not a kit: it never mutates PlayerState and
+## the world behind it keeps simulating, because the same scene may be hosting.
+func _build_pause_menu() -> void:
+	pause_menu = PauseMenu.new()
+	pause_menu.name = "PauseMenu"
+	add_child(pause_menu)
+	pause_menu.configure("EXIT TO TITLE")
+	pause_menu.resumed.connect(_on_menu_resumed)
+	pause_menu.exit_requested.connect(_on_menu_exit)
+	pause_menu.quit_requested.connect(_on_menu_quit)
+
+
+func _pause_open() -> bool:
+	return pause_menu != null and pause_menu.is_open()
+
+
+## Escape, a lost host or a stuck pointer all land here: close whatever owns the
+## keyboard, then hand the pointer to the menu. The reason is shown at its top so
+## a guest whose host vanished knows why it opened.
+func _open_menu(message: String = "") -> void:
+	if pause_menu == null:
+		return
+	cancel_input()
+	if inspecting:
+		toggle_view()
+	pause_menu.open(message)
+	if _ui_open():
+		world_ui.close()
+	hud.close_panels()
+	_set_cursor_free(true)
+
+
+func _close_menu() -> void:
+	if pause_menu != null:
+		pause_menu.close()
+
+
+func _on_menu_resumed() -> void:
+	_set_cursor_free(false)
+
+
+func _on_menu_exit() -> void:
+	# The world has no lobby: leaving it means the title menu, with the session
+	# closed so a host's guests are released instead of waiting for a timeout.
+	if _player_state != null:
+		_player_state.save_state()
+	_close_network()
+	get_tree().change_scene_to_file("res://title.tscn")
+
+
+func _on_menu_quit() -> void:
+	# Quit is deferred by the menu itself; closing the peer here is what makes a
+	# host's exit instant for everyone still linked to it.
+	_close_network()
 
 
 func toggle_inventory() -> void:
@@ -683,7 +742,7 @@ func _physics_process(delta: float) -> void:
 	if _mouse_drawing or _throw_held or combat.wants_cover_exposure() or archer.charge_frozen:
 		update_crosshair_aim()
 	combat.advance(delta)
-	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
+	if not _entering_scene and not _pause_open() and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
 		_enter_delve()
 		# The run owns the world from this frame on: the frontier must not step,
 		# collide or send anything behind it.
@@ -774,10 +833,13 @@ func _update_camera(delta: float) -> void:
 
 
 func _set_cursor_free(value: bool) -> void:
-	_cursor_free = value
+	# The menu holds the pointer and the keyboard until it closes: a scene path
+	# that recaptures on its own (a return to camp, a resumed frontier) must not
+	# do it behind the menu.
+	_cursor_free = value or _pause_open()
 	if value:
 		cancel_input()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if value else Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _cursor_free else Input.MOUSE_MODE_CAPTURED
 
 func update_crosshair_aim() -> void:
 	_update_camera(0.0)
@@ -926,6 +988,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _delve_inner != null:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		# The quick menu owns the keyboard while it is up, so a kit cannot open
+		# behind it and Escape always closes the topmost surface.
+		if _pause_open():
+			if event.keycode == KEY_ESCAPE:
+				_close_menu()
+			return
 		# The in-world kit always answers I, P and Escape first so it can close
 		# without leaking keys into movement, attacks or the waystone prompts.
 		if event.keycode == KEY_I:
@@ -938,11 +1006,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _ui_open():
 				world_ui.close()
 				return
-			cancel_input()
-			if inspecting:
-				toggle_view()
-			hud.close_panels()
-			_set_cursor_free(true)
+			_open_menu()
 			return
 		if _ui_open():
 			return
@@ -991,7 +1055,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not _throw_held:
 					_throw_held = true
 					begin_throw_attack()
-	if _ui_open():
+	if _ui_open() or _pause_open():
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -1773,10 +1837,19 @@ func _mute_frontier_bodies(node: Node, mute: bool) -> void:
 
 func _restore_frontier_bodies() -> void:
 	for body in _frontier_bodies.keys():
-		if is_instance_valid(body):
-			var saved: Vector2i = _frontier_bodies[body]
-			body.collision_layer = saved.x
-			body.collision_mask = saved.y
+		if not is_instance_valid(body):
+			continue
+		var saved: Vector2i = _frontier_bodies[body]
+		if body == player and not _local_anchor_swapped:
+			# A guest whose host vanished while it stood below has already been
+			# handed its own body back; the frozen snapshot was taken while that
+			# body was swapped out with collision off, so honouring it here would
+			# drop a standing ranger through the world for good.
+			body.collision_layer = 4
+			body.collision_mask = 1 | 2
+			continue
+		body.collision_layer = saved.x
+		body.collision_mask = saved.y
 	_frontier_bodies.clear()
 
 
@@ -2198,6 +2271,9 @@ func _connection_ended(message: String) -> void:
 	_set_replicas(false)
 	_restore_anchor(last_position)
 	hud.show_feedback(message,6.0)
+	# A guest that just lost its authority gets the way out on screen: no key
+	# press, no falling body to chase.
+	_open_menu(message)
 	print("WORLD_CONNECTION_LOST")
 
 
@@ -2509,7 +2585,7 @@ func _client_step(delta: float) -> void:
 	_collect_loot(delta)
 	if _descent_refusal_cooldown > 0.0:
 		_descent_refusal_cooldown = maxf(0.0,_descent_refusal_cooldown-delta)
-	if not _entering_scene and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
+	if not _entering_scene and not _pause_open() and world.is_over_delve_hatch(player.global_position) and player.global_position.y < 2.25:
 		_request_delve_descent()
 		return
 	if player.position.y < -25.0 and _delve_open_port == 0:

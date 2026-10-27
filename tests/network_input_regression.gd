@@ -601,7 +601,6 @@ func client_run(port: int) -> void:
 				var rig = arena.actors[1].rig
 				match completed:
 					1:
-						await key(KEY_ESCAPE)
 						arena.send_action("bow",2)
 						arena.send_action("sword",0)
 						await pause(0.15)
@@ -613,7 +612,6 @@ func client_run(port: int) -> void:
 						check(rig.weapon=="bow","Remote key 1 equips bow")
 						arena.send_action("bow",1)
 						await pause(0.15)
-						await key(KEY_ESCAPE)
 						await aim(Vector3(-3,1.2,-4))
 						await mouse(root.get_visible_rect().size*0.5,true)
 						await pause(0.40)
@@ -623,11 +621,9 @@ func client_run(port: int) -> void:
 						await mouse(root.get_visible_rect().size*0.5,false)
 						report.result.rpc_id(1,"released",{})
 					3:
-						await key(KEY_ESCAPE)
 						arena.send_action("sword",2)
 						await pause(0.15)
 						await key(KEY_2)
-						await key(KEY_ESCAPE)
 						await aim(Vector3(0,1.2,0))
 						await mouse(root.get_visible_rect().size*0.5,true)
 						await mouse(root.get_visible_rect().size*0.5,false)
