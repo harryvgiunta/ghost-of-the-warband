@@ -166,8 +166,8 @@ func check_spawn() -> void:
 	check(game.guards.size() == 2, "two watchers hold the gate")
 	for watcher in game.guards:
 		check(bool(watcher.get("alive")), "a watcher stands on its feet")
-		check(is_equal_approx(float(watcher.max_health), 36.0),
-			"the watcher is thinned to 36 health, got %s" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), 72.0),
+			"the watcher carries 72 health, got %s" % str(watcher.max_health))
 		check(str(watcher.name).begins_with("Forest_"), "the watcher is the woodland mob (%s)" % watcher.name)
 	check(game.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(game.pickups().size() == 3, "three cultist weapons lie on the walk")
@@ -296,14 +296,13 @@ func check_latches() -> void:
 		game._try_interact()
 		dismiss_card("latch %d" % (index + 1))
 		if index == 0:
-			# A watcher is three stab-widths of health, not a boss.
+			# 72 health against a 14-damage shiv: five stabs are not enough.
 			var early = game.guards[0]
+			for stab in 5:
+				early.take_damage(14.0, 0)
+				check(bool(early.get("alive")), "stab %d of 6 leaves a watcher standing" % (stab + 1))
 			early.take_damage(14.0, 0)
-			check(bool(early.get("alive")), "one stab leaves a watcher standing")
-			early.take_damage(14.0, 0)
-			check(bool(early.get("alive")), "two stabs still leave it standing")
-			early.take_damage(14.0, 0)
-			check(not bool(early.get("alive")), "the third stab puts a watcher down")
+			check(not bool(early.get("alive")), "the sixth stab puts a watcher down")
 			# ...and it fell while the squad is still caged, so it is not progress.
 			check(game.sequencer.guards_down() == 0,
 				"a kill before the squad is out is not progress")
@@ -400,9 +399,10 @@ func check_fight_and_gate() -> void:
 	check(hurt, "an ally's swing actually wounds a watcher")
 
 	# The first pair falling calls the second wave through the gate.
+	var drops_before: int = game.pickups().size()
 	var wave_two := await await_condition(
-		func() -> bool: return game.guards.size() == 6, 12.0, "the second wave")
-	check(wave_two, "four more watchers come through the gate (%d guards)" % game.guards.size())
+		func() -> bool: return game.guards.size() == 8, 12.0, "the second wave")
+	check(wave_two, "six more watchers come through the gate (%d guards)" % game.guards.size())
 	await create_timer(0.6).timeout
 	var armed_reinforcements := 0
 	var visible_blades := 0
@@ -415,24 +415,39 @@ func check_fight_and_gate() -> void:
 			visible_blades += 1
 		check(watcher.global_position.y > -1.0,
 			"reinforcement %d did not fall off the ledge (y=%.2f)" % [index, watcher.global_position.y])
-	check(armed_reinforcements == 4, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
-	check(visible_blades == 4, "and the blade is in its hand (%d)" % visible_blades)
+	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
+	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
+
+	# They run the squad down instead of standing outside the gate.
+	var runner = null
+	for index in range(2, game.guards.size()):
+		if is_instance_valid(game.guards[index]) and bool(game.guards[index].get("alive")):
+			runner = game.guards[index]
+			break
+	var prey = game._nearest_standing_body(runner.global_position)
+	var gap_before: float = runner.global_position.distance_to(prey.global_position)
+	await create_timer(1.1).timeout
+	check(is_instance_valid(runner) and bool(runner.get("alive")), "the runner is still alive")
+	var gap_after: float = runner.global_position.distance_to(prey.global_position)
+	check(gap_after < gap_before - 2.5, "the reinforcements run straight in (%.1f m -> %.1f m)"
+		% [gap_before, gap_after])
 
 	# Each one drops the weapon it was holding.
-	var drops_before: int = game.pickups().size()
 	for index in range(2, game.guards.size()):
 		var watcher = game.guards[index]
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(60.0, 0)
-	await create_timer(0.3).timeout
-	check(game.pickups().size() >= drops_before + 4,
-		"the four weapons are on the floor (%d spawned)" % (game.pickups().size() - drops_before))
+			watcher.take_damage(200.0, 0)
+	var dropped := await await_condition(
+		func() -> bool: return game.pickups().size() >= drops_before + 6,
+		5.0, "the dropped weapons")
+	check(dropped, "the six weapons are on the floor (%d spawned)"
+		% (game.pickups().size() - drops_before))
 
 	var escaped := await await_condition(
 		func() -> bool: return game.sequencer.state() == SequencerScript.State.ESCAPING,
 		14.0, "the escape opening")
 	check(escaped, "the squad's fight opens the escape (%s)" % game.sequencer.state_name())
-	check(game.sequencer.guards_down() == 6, "all six watchers are down (%d)"
+	check(game.sequencer.guards_down() == 8, "all eight watchers are down (%d)"
 		% game.sequencer.guards_down())
 
 	# Walk out: the arch is a door, so the player presses G inside it.

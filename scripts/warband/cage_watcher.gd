@@ -15,9 +15,9 @@ extends "res://scripts/forest_mob.gd"
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
 
-## Three stabs of a makeshift shiv (14) with no headshot is 42, so 36 health
-## leaves a little room for a weak block or a miss without a fourth swing.
-const WATCHER_HEALTH := 36.0
+## Twice the old pool: a shiv (14) now needs six stabs, and the fight is long
+## enough for the squad and the second wave to trade real blows.
+const WATCHER_HEALTH := 72.0
 const WATCHER_DAMAGE := 5.0
 
 ## The catalog weapon this watcher carries, or "" for a bare one. Set by the
@@ -64,6 +64,20 @@ func arm(item_id: String) -> void:
 	socket.add_child(guard)
 	_weapon_socket = socket
 
+## Commit to a body and run straight at it. The camp calls this on spawn and
+## whenever a watcher calms down, so the pack never stands around waiting to be
+## noticed: `hear_alert` gives the senses a target without needing line of sight.
+func hunt(target: Node3D) -> void:
+	if not alive or is_instance_valid(target) == false:
+		return
+	player = target
+	if not _senses.aggressive():
+		hear_alert(target, target.global_position)
+
+## True while this watcher has a live pursuit.
+func hunting() -> bool:
+	return _senses.aggressive()
+
 ## Take the carried weapon off the body (the scene drops it) and clear the hand.
 ## True while a blade is actually attached to the hand bone (the rig has one).
 func has_weapon_visual() -> bool:
@@ -87,12 +101,15 @@ func _profiles() -> Dictionary:
 	warden["display"] = "Camp watcher"
 	warden["health"] = WATCHER_HEALTH
 	warden["damage"] = WATCHER_DAMAGE
-	warden["cooldown"] = 2.4
-	warden["windup"] = 0.45
-	warden["recover"] = 0.55
-	warden["sight"] = 18.0
+	warden["cooldown"] = 1.1
+	warden["windup"] = 0.42
+	warden["recover"] = 0.45
+	warden["sight"] = 60.0
 	warden["gold"] = 0
 	warden["packed"] = false
-	warden["run_speed"] = 3.2
+	# A camp watcher does not circle: it runs the body down.
+	warden["run_speed"] = 5.6
+	warden["walk_speed"] = 2.2
+	warden["orbit"] = 1.9
 	table["hollow_warden"] = warden
 	return table

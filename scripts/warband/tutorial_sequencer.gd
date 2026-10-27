@@ -27,8 +27,8 @@ enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING, TOWN }
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
 ## Gate watchers that have to fall before the escape is on: the first pair and
-## the four armed ones that come through when they die.
-const GUARD_COUNT := 6
+## the six armed ones that come through when they die.
+const GUARD_COUNT := 8
 
 ## The loose prisoner's mercenary id, set through `begin()`.
 var rescuer_merc_id := -1

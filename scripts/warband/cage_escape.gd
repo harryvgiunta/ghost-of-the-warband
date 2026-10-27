@@ -78,12 +78,15 @@ const GATE_WATCHERS := [
 ]
 ## The second wave: four armed watchers through the gate once the first pair is
 ## down. Each carries the weapon it drops.
-const REINFORCEMENTS := ["sword_short", "dagger_iron", "sword_arming", "sword_short"]
+const REINFORCEMENTS := [
+	"sword_short", "dagger_iron", "sword_arming",
+	"sword_short", "dagger_iron", "sword_arming",
+]
 const REINFORCE_DELAY := 2.5
-## Outside the gate, on the ground, walking in through the gap.
+## Outside the gate, on the ground, running in through the gap.
 const REINFORCE_POSTS := [
-	Vector3(-2.6, 0.1, -48.0), Vector3(-0.9, 0.1, -49.0),
-	Vector3(0.9, 0.1, -49.0), Vector3(2.6, 0.1, -48.0),
+	Vector3(-3.4, 0.1, -48.0), Vector3(-2.0, 0.1, -49.0), Vector3(-0.7, 0.1, -50.0),
+	Vector3(0.7, 0.1, -50.0), Vector3(2.0, 0.1, -49.0), Vector3(3.4, 0.1, -48.0),
 ]
 
 ## The one hit a watcher needs to land for the lesson: light, and telegraphed.
@@ -851,6 +854,19 @@ func _refresh_rig(merc_id: int) -> void:
 		return
 	controller.refresh_gear(merc_id)
 
+## The nearest standing squad body to a point; the reinforcements are aimed here.
+func _nearest_standing_body(point: Vector3):
+	var best = null
+	var best_distance := INF
+	for body in bodies:
+		if not is_instance_valid(body) or not bool(body.get("alive")) or bool(body.get("downed")):
+			continue
+		var distance: float = body.global_position.distance_to(point)
+		if distance < best_distance:
+			best_distance = distance
+			best = body
+	return best
+
 ## Watchers that are no longer standing.
 func watchers_down() -> int:
 	var down := 0
@@ -926,6 +942,10 @@ func _maintain_watchers(delta: float) -> void:
 				nearest = body
 		if nearest != null and is_instance_valid(nearest):
 			watcher.player = nearest
+			# A watcher that has calmed down is pointed at the squad again: the
+			# camp is a fight, not a patrol.
+			if not bool(watcher.hunting()):
+				watcher.hunt(nearest)
 	if cages_open_count() > 0 and not _watchers_awake:
 		_watchers_awake = true
 		for watcher in guards:
@@ -947,12 +967,14 @@ func _on_watcher_defeated(enemy, _reward: int) -> void:
 		_reinforcements = true
 		_reinforce_in = REINFORCE_DELAY
 		if hud != null:
-			hud.set_status("The gate blackens: four armed watchers come through.", 3.0)
+			hud.set_status("The gate blackens: six armed watchers come through.", 3.0)
 	_update_hint()
 
-## The second wave: four watchers through the gate, each carrying the weapon it
-## will drop when it falls.
+## The second wave: six watchers through the gate, each carrying the weapon it
+## will drop when it falls. They are pointed at the warband on the frame they
+## exist, so they charge in instead of waiting to spot somebody.
 func _spawn_reinforcements() -> void:
+	var prey = _nearest_standing_body(REINFORCE_POSTS[2])
 	for index in REINFORCEMENTS.size():
 		var post: Vector3 = REINFORCE_POSTS[index % REINFORCE_POSTS.size()]
 		var watcher := WatcherScript.new()
@@ -960,12 +982,12 @@ func _spawn_reinforcements() -> void:
 		watcher.mob_id = "hollow_warden"
 		add_child(watcher)
 		watcher.global_position = post
-		watcher.player = controller.active_body(1)
 		watcher.defeated.connect(_on_watcher_defeated)
 		watcher.attacked.connect(_on_watcher_attack)
 		watcher.arm(str(REINFORCEMENTS[index]))
-		watcher.mob_wake()
 		guards.append(watcher)
+		if prey != null:
+			watcher.hunt(prey)
 
 ## A watcher's swing lands on the warband body it was hunting. The mob emits the
 ## blow; the scene applies it through the body's own guard, exactly like the
