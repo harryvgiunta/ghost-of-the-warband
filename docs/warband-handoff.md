@@ -129,7 +129,7 @@ Integration seams deliberately placed in the base game:
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
 | Yard size | `cage_escape.gd::YARD_*` | 60 × 68 m inside 100 × 140 |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
-| Expedition waves | `enemy_waves.gd` | 3 → 6 guards, three tiers |
+| Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
 
 ### Godot gotchas found the hard way
 
@@ -162,7 +162,12 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 58 | services, hire, deploy, paperdoll |
 | `cage_escape_regression` | 158 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six runners, drops, gate |
-| `expedition_regression` | 18 | deployed line, three waves, loot run, return |
+| `expedition_regression` | 42 | deployed line, five waves, loot run, return |
+| `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
+| `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
+| `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
+| `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
+| `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
 | `game_flow_regression` | 22 | cage → town → arena → town on one save |
 | `admin_arena_regression` | 98 | bubble, downed, revive, loot, altar, screen, two peers |
 | `quartermaster_regression` | 20 | keeper price, purse, refusal |
@@ -173,22 +178,53 @@ Relevant legacy tests that must stay green when touching shared files:
 `paperdoll`, `town_services`, `title_menu`, `world_ui`, `hitbox`, `block_clash`,
 `draw_combat`, `ranger_clone`.
 
-Run them all with:
+Run the gate (31 tests, none of them socket tests running concurrently):
 
 ```bash
-for t in $(ls tests/*_regression.gd | sed 's#tests/##; s#\.gd##'); do
-  ./.runtime/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path . \
-    --script "res://tests/$t.gd" 2>&1 | grep -E "_REGRESSION checks=|_REGRESSION failures=" | tail -1
+GODOT=./.runtime/godot/Godot_v4.7.2-stable_win64_console.exe
+OUT=C:/tmp/gres; rm -rf "$OUT"; mkdir -p "$OUT"
+LIST="warband_contract possession downed_revive combat_bubble altar stash_autoloot
+warband_ui branded_abilities enemy_waves town_hub cage_escape expedition
+expedition_director game_flow admin_arena quartermaster branded_world warband_art
+run_persistence gameplay combat_expansion net_limits world_art mob_aggro paperdoll
+town_services title_menu world_ui hitbox block_clash draw_combat ranger_clone"
+n=0
+for t in $LIST; do
+  $GODOT --headless --path . --script "res://tests/${t}_regression.gd" > "$OUT/$t.txt" 2>&1 &
+  n=$((n+1)); [ $((n % 12)) -eq 0 ] && wait
+done; wait
+grep -l "failures=[1-9]" "$OUT"/*.txt || echo "gate green"
+# then the socket tests, one at a time (they bind ports):
+for t in warband_session warband_lobby; do
+  $GODOT --headless --path . --script "res://tests/${t}_regression.gd" | tail -1
 done
 ```
+
+**Measure before you wait.** Twelve at a time takes ~90 s for the whole gate on
+this machine; six at a time took minutes because the long tests are long, not
+because the short ones are. `gameplay`, `world_art` and `title_menu` print
+`<NAME>_REGRESSION failures=0` without a `checks=` counter — that is not a
+missing result. Never run all 66 `tests/*_regression.gd` as a per-merge gate;
+that is the pre-merge full suite, once, at the end.
 
 ---
 
 ## 5. Known gaps / rough edges
 
-- **No lobby UI for the warband netcode.** Host/join is command-line only; both
-  machines must load the same warband save (the session replicates bodies, not the
-  roster or stash).
+- **Both machines must load the same warband save.** The session replicates the
+  bodies, not the roster or stash, so a peer with a different save renders the
+  same seats but its own gear and health.
+- **A guest cannot hurt anything yet.** `WarbandSession` replicates the warband's
+  bodies (20 Hz snapshots) and nothing else: a guest's swings are refused locally
+  (`damage_enabled` is false for a replica, by the base game's own rule) and there
+  is no melee-intent channel to the host, while the cultists a guest sees are its
+  own local `EnemyWaves` — the host's cultists never reach it. The lobby makes
+  this reachable by a normal player, so say it plainly: hosting works, being the
+  guest is a spectator with a body until the intent channel and a mob snapshot
+  channel land. This is the same missing ack channel listed under prediction.
+- **Cultists carry a brand but cannot cast it.** The Bilewarden's sigil is
+  identity, kit provenance and a field label (`CultistGuard.brand`) — a
+  `BrandedRunner` on a cultist is Phase 4.
 - **Prediction has no ack.** `PossessionSync` sends direction, not frame numbers,
   so a guest's copy can be ~0.4 m off the host's (the session test asserts the
   bound, plus no jumps). Fixing it needs a sequenced input channel in
@@ -213,11 +249,18 @@ The workflow that produced the current build: a Phase-0 contract commit on
 `main`, then N isolated `git worktree`s (one branch each), one agent per
 worktree, merge into `main` in order, run the gate suite. See §8 for commands.
 
-### Phase 3 (suggested): depth, rewards and multiplayer UX
+### Phase 3 (landed): depth, rewards and multiplayer UX
 
-Copy-paste briefs for these five worktrees are in
-**`docs/warband-phase3-briefs.md`** (shared context, per-worktree task, gate
-checklist).
+All five worktrees are merged and gated. The briefs stay in
+**`docs/warband-phase3-briefs.md`** as the record of what each branch owned.
+
+What landed: the expedition is five director-paced waves (3/4/4/5/6) ending in a
+Bilewarden at double health, with a once-only gold/essence payout and a mission
+summary; the arena HUD shows the soul's sigil (tier line, cost, cooldown) and `R`
+works there; the title screen hosts and joins a warband battle and the ENet peer
+lives under `GameFlow` so it survives the hand-off; the camp and the town are
+dressed from the world kits; and every battle is filed in the warband's save with
+a bounded history and lifetime totals shown on the roster screen.
 
 | Worktree | Owns (create/edit ONLY these) | Deliverable / acceptance |
 | --- | --- | --- |
@@ -227,17 +270,30 @@ checklist).
 | `wt-15-camp-and-town-art` | `scripts/warband/camp_dressing.gd`, `scripts/warband/town_dressing.gd`, `tests/warband_art_regression.gd` | Authored-looking camp (cage bars, gibbets, cult banners, ember lights) and town (awning, signpost text, fire), using `Geo`/`TextureLibrary` and the existing world kits; the cage/town tests keep passing and `world_art_regression` stays green. No new collisions inside the play space. |
 | `wt-16-run-persistence` | `scripts/warband/run_report.gd`, `tests/run_persistence_regression.gd`, `warband_state.gd` §persistence only | Battle results written to the warband save: roster health/downed at the moment of leaving, gold earned, Cruor earned, a per-run record (wins, wipes, best wave) shown on the roster screen; loading restores it. Test saves mid-run state, reloads, and compares. |
 
-**Gate 3:** merge 12–16, then verify in one session: cage → town (hire/gear/brand)
-→ expedition with the director's waves and boss → rewards → save/reload → host a
-second peer and take a body. Update `docs/warband.md` and this file's status
-section with the new test counts.
+**Gate 3:** merged in the order 13 → 14 → 15 → 12 → 16 (13 and 14 touch no file
+12 owns; 12 and 16 each needed one integration fix), gate green after the batch:
+the 31-test gate in §4 plus the two socket tests. One integration defect was
+caught and fixed at the merge: the report test was written against the
+three-wave arena and now walks the director's five.
+
+Still open from Gate 3, and the reason it is written down rather than hidden: the
+**rendered** playthrough (a real window: cards pause, F5 takes Corvin, four
+latches, the squad fights, six armed watchers, gate → woods → town) and the
+**two-peer** lobby run were never exercised on a display in this session — every
+check above is headless. Do that first in the next session.
 
 ### Phase 4 (later)
 
+- **Make a guest a participant**: a mob snapshot channel (cultists and watchers
+  are the guest's own local spawn today) and a melee/ability intent channel, so
+  the second peer fights instead of watching. Same work as the prediction ack.
+- Cult brands that cast: give `CultistGuard` a `BrandedRunner` so the
+  Bilewarden's `shockwave_cleave` is a mechanic, not a label.
 - Campaign levels reusing the warband loop (the base game's `docs/storyline.md`
   beats mapped onto warband expeditions).
-- Real input sequencing for guest prediction (ack channel).
-- Audio: cage ambience, gate crowd, impact layers for the squad.
+- The run through the woods wants a mid-run beat: a shrine or a camp the squad
+  can be pinned at, not only three clearings of pursuit.
+- Audio: cage ambience, gate crowd, impact layers for the squad, the woods.
 - Balancing pass driven by a bot-only headless run (win rates per wave count).
 
 ---

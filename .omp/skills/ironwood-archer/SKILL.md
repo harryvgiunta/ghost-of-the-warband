@@ -524,14 +524,21 @@ difference. `docs/warband.md` is the contract document; this note is the map.
 | Camp watchers | `CageWatcher` extends the forest mob: 72 health, 5 damage, run 5.6, sight 60, orbit 1.9; `arm(item)` puts a catalog blade on `hand_r`, `take_weapon_item()` drops it; `hunt(target)` forces an aggressive pursuit |
 | Camp ground | 60 x 68 m walled yard inside a 100 x 140 m floor plus an invisible catch floor; the gate is set in the front wall and reinforcements spawn outside it |
 | Flow | autoload `GameFlow` (`scripts/warband/game_flow.gd`) is the only thing that changes scene; each scene declares one `scene_requested(path)` door and calls `GameFlow.bind(self)`; `GameFlow.active` is false in tests |
-| Netcode | `WarbandSession` over ENet: `--warband-host <port>` / `--warband-join <addr> <port>` on `admin_arena.tscn`; host-authoritative ownership, 20 Hz body snapshots through `NetLimits`, guest prediction |
+| Netcode | `WarbandSession` over ENet: `--warband-host <port>` / `--warband-join <addr> <port>` on `admin_arena.tscn`, or the title lobby; host-authoritative ownership, 20 Hz body snapshots through `NetLimits`, guest prediction |
+| Expedition director | `scripts/warband/expedition_director.gd`: five waves (3/4/4/5/6) paced on top of one `EnemyWaves` node 2 s apart, kit tiers by wave, the Bilewarden at wave 5 (2× health, a `CultistGuard.brand` that stays on the body — never in `warband.cruor.brands`, which is the altar's ledger), one 175-gold/6-essence payout on a clear and nothing on a wipe, and the mission summary `{waves, kills, items, gold, cruor}` |
+| Branded tile | `scripts/warband/branded_hud.gd`: `BrandedHud` on its own `CanvasLayer` above `WarbandHud` — tier line, stamina cost and a cooldown bar where a full bar and `READY` are the same fact; polled every frame from `BrandedRunner.brand()`/`cooldown_left()` so a rebind or a looted main hand cannot leave a stale number; hidden when the piece is unbranded |
+| Battle ledger | `scripts/warband/run_report.gd` + `Warband` persistence (save version 2): one record per battle (waves, kills, items, purse/essence delta, per-body outcome) in a 20-deep history plus lifetime totals, shown as `LAST RUN` on the roster screen; the record reads the wallets and never pays, so a reload cannot pay twice |
+| Lobby | `scripts/warband/warband_lobby.gd` + the `GameFlow` link: the title's HOST/JOIN WARBAND stores intent in `GameFlow`, the ENet peer lives at `/root/GameFlow/WarbandLink` so it survives the hand-off, `bind(scene)` re-seats it, a guest is declared a replica before its first body is dressed |
+| Camp and town dressing | `scripts/warband/camp_dressing.gd` (padlocks, chains, straw, bone charms, six standards, two gibbets outside the wall, altar dressing, four ember braziers, straw/blood/ruts) and `town_dressing.gd` (awnings and hanging goods, stash roof, fingerpost, fire ring, lanterns) — assembly through `CampKit`/`VillageKit`/`FireFx` merges, no new assets, nothing solid inside the play space; one call line each in `cage_escape.gd`/`town_hub.gd` |
 
 Tests (all headless, `tests/*_regression.gd`): contract 180, possession 236,
 downed_revive 67, combat_bubble 73, altar 112, stash_autoloot 170, warband_ui 99,
-branded_abilities 114, enemy_waves 108, town_hub 58, cage_escape 158,
-expedition 18, game_flow 22, admin_arena 98, quartermaster 20, warband_session 49
-(two real ENet processes). Run one with
+branded_abilities 114, branded_world 48, enemy_waves 108, town_hub 58,
+cage_escape 158, expedition 42, expedition_director 154, game_flow 22,
+admin_arena 98, quartermaster 20, warband_art 192, warband_lobby 56,
+run_persistence 196, warband_session 49 (two real ENet processes). Run one with
 `& .\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/<name>.gd`.
+Run the 31-test gate twelve at a time (~90 s); keep the two socket tests serial.
 
 Hard-won rules (see `docs/warband-handoff.md` for the full list): `seat_loadout()`
 is a spawn snapshot, use `controller.refresh_gear(merc_id)` for live gear;
