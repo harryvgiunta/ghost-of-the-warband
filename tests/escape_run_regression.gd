@@ -263,11 +263,13 @@ func check_art() -> void:
 	var solids: StaticBody3D = game.forest["root"].solids
 	check(solids.get_child_count() >= 280,
 		"the wood and its walls are solid (%d shapes)" % solids.get_child_count())
-	# The budget: a lane is one scene, not a draw-call catalogue.
+	# The budget: a lane is one scene, not a draw-call catalogue. The node cap
+	# leaves room for the torch line itself - 48 torches is a host, a merged post
+	# and a light each, and the lights are what make 286 m of night walkable.
 	var draws := int(stats.get("draws", 0))
 	var nodes := int(stats.get("nodes", 0))
 	check(draws <= 250, "the lane stays inside its draw budget (%d multimesh)" % draws)
-	check(nodes <= 800, "the lane stays inside its node budget (%d nodes)" % nodes)
+	check(nodes <= 900, "the lane stays inside its node budget (%d nodes)" % nodes)
 	print("ESCAPE_RUN_ART trees=%d bushes=%d rocks=%d grass=%d nodes=%d draws=%d shapes=%d"
 		% [int(stats.get("trees", 0)), int(stats.get("bushes", 0)), int(stats.get("rocks", 0)),
 			int(stats.get("grass", 0)), nodes, draws, solids.get_child_count()])

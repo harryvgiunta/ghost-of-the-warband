@@ -45,7 +45,7 @@ const TREE_CHUNK := 64.0
 ## Bushes cover the verge in one pass: fewer, larger batches than the trees.
 const BUSH_CHUNK := 96.0
 ## Torches: one either side every this many metres, at the lane's edge.
-const TORCH_SPACING := 20.0
+const TORCH_SPACING := 12.0
 const TORCH_OFFSET := 4.6
 ## Where the cult stands in pairs. Fractions of the lane's arc length.
 const CLEARING_FRACTIONS := [0.30, 0.60, 0.86]
@@ -236,14 +236,14 @@ static func _style() -> WorldStyle:
 		"energy": 0.10,
 		"sun_rotation": Vector3(-58.0, -34.0, 0.0),
 		"sun_color": Color(0.54, 0.62, 0.88),
-		"sun_energy": 0.30,
+		"sun_energy": 0.42,
 		"sun_shadow_distance": 70.0,
-		"ambient_color": Color(0.09, 0.11, 0.16),
-		"ambient_energy": 1.15,
+		"ambient_color": Color(0.125, 0.15, 0.205),
+		"ambient_energy": 2.0,
 		"use_sky_ambient": false,
 		"fog_mode": "exponential",
-		"fog_color": Color(0.045, 0.06, 0.09),
-		"fog_density": 0.020,
+		"fog_color": Color(0.05, 0.065, 0.095),
+		"fog_density": 0.016,
 		"fog_sun_scatter": 0.0,
 		"fog_sky_affect": 0.0,
 		"fog_aerial_perspective": 0.0,
@@ -261,8 +261,8 @@ static func _style() -> WorldStyle:
 		"dirt_tile": 5.0,
 		"rock_tile": 4.0,
 		"macro_tile": 24.0,
-		"grass_tint": Color("2c3524"),
-		"dirt_tint": Color("3b3126"),
+		"grass_tint": Color("333d29"),
+		"dirt_tint": Color("4a3f30"),
 		"rock_tint": Color("33312b"),
 		"detail_strength": 0.55,
 		"detail_fade": Vector2(70.0, 120.0),
@@ -742,9 +742,9 @@ static func _torch(group: Node3D, mats: Dictionary, iron: Dictionary, at: Vector
 	light.name = "TorchLight"
 	light.position = Vector3(0.05, 2.62, 0.02)
 	light.light_color = Color(1.0, 0.56, 0.22)
-	light.light_energy = 2.6
-	light.omni_range = 13.0
-	light.omni_attenuation = 1.35
+	light.light_energy = 3.4
+	light.omni_range = 16.0
+	light.omni_attenuation = 1.0
 	light.flicker = 0.26
 	light.shadow_enabled = false
 	host.add_child(light)
