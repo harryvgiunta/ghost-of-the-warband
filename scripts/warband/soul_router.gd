@@ -148,7 +148,8 @@ func request_transfer(peer_id: int, target_body_id: int) -> Dictionary:
 	target["occupied_by_peer_id"] = peer_id
 	target["last_owner_peer_id"] = peer_id
 	_peer_body[peer_id] = target_body_id
-	body_released.emit(peer_id, current_id) if current_id != -1 else null
+	if current_id != -1:
+		body_released.emit(peer_id, current_id)
 	body_possessed.emit(peer_id, target_body_id)
 	return {"ok": true, "message": "You are inside %s." % _label(target_body_id),
 		"body_id": target_body_id, "previous_body_id": current_id, "reason": REASON_NONE}
