@@ -446,6 +446,7 @@ func _build_world() -> void:
 	_torch(Vector3(14.0, 0, -30.0), 0.8)
 	_torch(Vector3(-14.0, 0, 16.0), 0.8)
 	_torch(Vector3(14.0, 0, 16.0), 0.8)
+	preload("res://scripts/warband/camp_dressing.gd").build(self)
 
 func _build_night() -> void:
 	var env := Environment.new()
