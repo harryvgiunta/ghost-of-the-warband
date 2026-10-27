@@ -77,6 +77,10 @@ var _present_band := -1
 ## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
 var dormant := false
 var _attacker: Node3D
+## Ghost of the Warband: the far-fight stance `PassiveDuelBrain` drives - the
+## body holds its ring and guards between blows.
+var warband_passive := false
+var _warband_guard := 0.0
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
 var _orbit_radius := 4.0
@@ -289,6 +293,8 @@ func _physics_process(delta: float) -> void:
 		_step_devil(delta, pursuit)
 		return
 	_state_time += delta
+	# Ghost of the Warband: the wolf's guard window, ticked on the same clock.
+	_warband_guard = maxf(0.0, _warband_guard - delta)
 	var focus := _senses.focus() if pursuit else _target.global_position
 	var displacement := focus - global_position
 	displacement.y = 0.0
@@ -323,10 +329,15 @@ func _physics_process(delta: float) -> void:
 				# Standing over the last sighting: sweep the ground.
 				rotation.y += sin(_state_time * 1.5) * delta * 1.7
 				target_direction = Vector3.ZERO
-			elif _senses.seen and distance < 1.65:
+			elif _senses.seen and distance < 1.65 and _warband_guard <= 0.0:
 				state = "WINDUP"
 				_state_time = 0.0
 				_warning.visible = true
+				target_direction = Vector3.ZERO
+			elif warband_passive and distance < 2.6:
+				# Ghost of the Warband: a passive wolf holds its ring instead of
+				# leaning into the quarry.
+				state = "CHASE"
 				target_direction = Vector3.ZERO
 		else:
 			# Calm: keep to the pack's patch, walking the shared goal and
@@ -516,6 +527,8 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	_state_time += delta
 	_dodge.advance(delta,is_on_floor())
 	_attack_cooldown = maxf(0.0,_attack_cooldown-delta)
+	# Ghost of the Warband: the brain's guard window shares the cooldown clock.
+	_warband_guard = maxf(0.0,_warband_guard-delta)
 	_decision_timer -= delta
 	_leap_cooldown = maxf(0.0,_leap_cooldown-delta)
 	_slide_cooldown = maxf(0.0,_slide_cooldown-delta)
@@ -659,6 +672,9 @@ func _devil_circle(delta: float, distance: float, to_player: Vector3) -> void:
 	offset.y = 0.0
 	var direction := offset.normalized() if offset.length_squared() > 0.0001 else Vector3.FORWARD
 	var retreat_at := 7.5 if devil_weapon == "bow" else 2.4
+	# Ghost of the Warband: a passive body guards from a wider ring.
+	if warband_passive:
+		retreat_at = maxf(retreat_at, 3.4)
 	var close_at := 13.0 if devil_weapon == "bow" else 9.0
 	if distance < retreat_at:
 		direction -= to_player.normalized()*1.0
@@ -688,6 +704,10 @@ func _devil_hunt(delta: float) -> void:
 
 func _devil_choose(distance: float, to_player: Vector3) -> void:
 	if not is_on_floor():
+		return
+	# Ghost of the Warband: a guarded body commits to no attack - dive, leap or
+	# shot - and keeps circling instead.
+	if _warband_guard > 0.0:
 		return
 	var roll := _rng.randf()
 	if devil_weapon == "bow":
@@ -851,6 +871,20 @@ func stagger(seconds: float) -> void:
 		_dodge.reset()
 		_slide_time = 0.0
 		_attack_cooldown = maxf(_attack_cooldown,0.45)
+
+
+## Ghost of the Warband: the far-fight stance switch used by `PassiveDuelBrain`.
+## Dropping the stance drops the guard, so a body entering a bubble fights at once.
+func warband_stance(passive: bool) -> void:
+	warband_passive = passive
+	if not passive:
+		_warband_guard = 0.0
+
+
+## Ghost of the Warband: hold the attack gate shut for `seconds`; the newest
+## order wins, so `warband_guard(0.0)` is how the brain opens a swing window.
+func warband_guard(seconds: float) -> void:
+	_warband_guard = maxf(0.0, seconds)
 
 ## The killing blow's style/angle force, recorded by the damage source. It is
 ## only read at death; a miss does not matter.
