@@ -17,6 +17,7 @@ extends Node3D
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
+const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
@@ -38,6 +39,7 @@ const BODY_BOUNDS := 16.0
 const STASH_POINT := Vector3(-8.0, 0.0, 4.0)
 const ALTAR_POINT := Vector3(8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
+const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const GATE_POINT := Vector3(8.0, 0.0, -6.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 
@@ -81,6 +83,8 @@ var altar: SacrificialAltar
 var gate: GateScript
 var stash_chest: Node3D
 var recruiter_desk: Node3D
+var quartermaster_desk: Node3D
+var quartermaster
 var signpost: Node3D
 var fire_light: OmniLight3D
 var flame: MeshInstance3D
@@ -332,6 +336,7 @@ func _build_services() -> void:
 
 	stash_chest = _build_stash_chest()
 	recruiter_desk = _build_recruiter_desk()
+	quartermaster_desk = _build_quartermaster_desk()
 	signpost = _build_signpost()
 
 	gate = GateScript.new()
@@ -379,6 +384,30 @@ func _build_recruiter_desk() -> Node3D:
 	desk.add_child(_label("RECRUITER", Vector3(0.0, 1.7, 0.0), Color(0.96, 0.74, 0.42)))
 	return desk
 
+## The keeper's counter: plain steel into the collective stash for gold. The
+## desk is the recruiter's twin, so the square reads as one market.
+func _build_quartermaster_desk() -> Node3D:
+	var desk := Node3D.new()
+	desk.name = "QuartermasterDesk"
+	desk.position = QUARTERMASTER_POINT
+	add_child(desk)
+	Geo.box(desk, Vector3(2.0, 0.12, 0.9), Vector3(0.0, 0.92, 0.0), _wood)
+	for x in [-0.82, 0.82]:
+		Geo.box(desk, Vector3(0.14, 0.86, 0.8), Vector3(x, 0.43, 0.0), _wood)
+	Geo.box(desk, Vector3(0.5, 0.08, 0.24), Vector3(-0.35, 1.02, 0.0),
+		Geo.material(Color(0.42, 0.44, 0.46), 0.7, 0.35))
+	Geo.box(desk, Vector3(0.24, 0.24, 0.3), Vector3(0.5, 1.06, 0.0),
+		Geo.material(Color(0.55, 0.44, 0.28), 0.3, 0.7))
+	var lamp := OmniLight3D.new()
+	lamp.name = "DeskLamp"
+	lamp.light_color = Color(0.78, 0.84, 1.0)
+	lamp.light_energy = 0.95
+	lamp.omni_range = 5.0
+	lamp.position = Vector3(0.0, 1.5, 0.0)
+	desk.add_child(lamp)
+	desk.add_child(_label("QUARTERMASTER", Vector3(0.0, 1.7, 0.0), Color(0.78, 0.86, 0.96)))
+	return desk
+
 func _build_signpost() -> Node3D:
 	var post := Node3D.new()
 	post.name = "Signpost"
@@ -422,6 +451,10 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	quartermaster = QuartermasterScript.new()
+	quartermaster.name = "Quartermaster"
+	add_child(quartermaster)
+	quartermaster.configure(warband)
 
 # --- interaction -----------------------------------------------------------
 
@@ -454,6 +487,10 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			var hint := "Hire from the recruiter board: HIRE swears a new body for gold."
 			screen.set_status(hint)
 			hud.set_status(hint, 5.0)
+		"quartermaster":
+			_hide_panels()
+			quartermaster.open()
+			hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
 		"gate":
 			var gate_state: Dictionary = gate.prompt(peer_id)
 			hud.set_status(str(gate_state.get("message", "")), 5.0)
@@ -465,6 +502,7 @@ func service_at(point: Vector3) -> String:
 		{"id": "stash", "point": stash_chest.global_position, "reach": SERVICE_REACH},
 		{"id": "altar", "point": altar.global_position, "reach": altar.interact_range},
 		{"id": "recruiter", "point": recruiter_desk.global_position, "reach": SERVICE_REACH},
+		{"id": "quartermaster", "point": quartermaster_desk.global_position, "reach": SERVICE_REACH},
 		{"id": "gate", "point": gate.global_position, "reach": gate.open_radius},
 	]
 	var best := ""
@@ -519,11 +557,14 @@ func _hide_panels() -> void:
 		paperdoll.close()
 	if altar != null and altar.is_open():
 		altar.close()
+	if quartermaster != null and quartermaster.is_open():
+		quartermaster.close()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
-		or (altar != null and altar.is_open())
+		or (altar != null and altar.is_open()) \
+		or (quartermaster != null and quartermaster.is_open())
 
 # --- seeding ---------------------------------------------------------------
 

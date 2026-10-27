@@ -19,8 +19,9 @@ difference - and the warband is the thing that survives a battle.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons
-  with active sigils), the **Gold recruiter** (up to the deployment cap of 8) and
-  the **expedition gate** (pick up to 8 bodies, then launch).
+  with active sigils), the **Gold recruiter** (bodies up to the deployment cap of
+  8), the **quartermaster** (plain steel bought into the shared stash) and the
+  **expedition gate** (pick up to 8 bodies, then launch).
 - **The field:** cultist waves in three escalating size/kit tiers. Combat near a
   human-possessed body is real (100% damage); every fight more than ~30 m from
   any human runs as a convincing background brawl at **10% damage**, so distant

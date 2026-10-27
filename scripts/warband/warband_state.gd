@@ -18,6 +18,7 @@ const CruorScript = preload("res://scripts/warband/cruor_manager.gd")
 const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
 const SoulScript = preload("res://scripts/warband/soul_router.gd")
 const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
+const State = preload("res://scripts/player_state.gd")
 
 const SAVE_VERSION := 1
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
@@ -80,6 +81,25 @@ func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
 	var merc_id := roster.create(merc_name, equipped)
 	_notify()
 	return merc_id
+
+## Buy one catalog item into the shared stash with gold. The price is the same
+## keeper price the paperdoll and the stash sort use, so nothing can disagree
+## about what a piece is worth.
+func buy_gear(item_id: String) -> Dictionary:
+	var item: Dictionary = State.ITEMS.get(item_id, {})
+	if item.is_empty():
+		return {"ok": false, "message": "The quartermaster does not stock that.", "item_id": item_id, "cost": 0}
+	var cost := int(item.get("price", 0))
+	if cost <= 0:
+		return {"ok": false, "message": "That piece has no price.", "item_id": item_id, "cost": 0}
+	if not spend_gold(cost):
+		return {"ok": false, "item_id": item_id, "cost": cost,
+			"message": "You need %d gold; you have %d." % [cost, gold()]}
+	stash.add(item_id, 1)
+	_notify()
+	return {"ok": true, "item_id": item_id, "cost": cost,
+		"message": "Bought %s for %d gold into the shared stash." % [
+			str(item.get("name", item_id)), cost]}
 
 func hire(merc_name: String = "") -> Dictionary:
 	var state := get_node_or_null("/root/PlayerState")

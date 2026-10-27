@@ -102,6 +102,15 @@ func occupied_by(body_id: int) -> int:
 		return 0
 	return int(record.get("occupied_by_peer_id", 0))
 
+## Every peer currently wearing a body, in id order. A scene asks this to build
+## the bubble's human list without knowing how many friends joined.
+func peers() -> Array[int]:
+	var out: Array[int] = []
+	for peer_id in _peer_body:
+		out.append(int(peer_id))
+	out.sort()
+	return out
+
 func body_of(peer_id: int) -> int:
 	return int(_peer_body.get(peer_id, -1))
 

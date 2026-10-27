@@ -481,16 +481,16 @@ func _wire_bubble() -> void:
 		_wire_waves()
 	_update_humans()
 
+## Every body a human is inside is a bubble centre, so two friends open two
+## active zones and a fourth opens four - the scaling the design asks for.
 func _update_humans() -> void:
-	if bubble == null:
+	if bubble == null or warband == null:
 		return
 	var humans: Array = []
-	var local_body = controller.active_body(1) if controller != null else null
-	if local_body != null:
-		humans.append(local_body)
-	var remote_body = controller.body_for_peer(2) if controller != null else null
-	if remote_body != null and remote_body != local_body:
-		humans.append(remote_body)
+	for peer_id in warband.souls.peers():
+		var actor = controller.body_for_peer(int(peer_id)) if controller != null else null
+		if actor != null and is_instance_valid(actor) and not humans.has(actor):
+			humans.append(actor)
 	bubble.set_humans(humans)
 
 ## One brain per duellist, paired inside its own brawl. The brain decides stance

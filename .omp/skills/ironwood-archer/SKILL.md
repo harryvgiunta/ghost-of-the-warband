@@ -498,6 +498,43 @@ For shared combat, rig, or network changes, run the complete set after integrati
 
 Tests are not visual proof. Launch the actual changed scene and exercise its input. For animation changes, inspect rendered frames at opposing stride phases and during draw/release/recovery; check weapon contact, feet, terrain, and HUD. A temporary SceneTree script can instantiate `main.tscn` or `arena.tscn`, inject `InputEventKey`/mouse events, await `RenderingServer.frame_post_draw`, and save viewport images. Restore window focus and captured mouse-look before automated movement: a focus-out notification can intentionally suppress movement. Remove temporary scripts after verification.
 
+## Ghost of the Warband (possession campaign)
+
+A second game mode on the same engine, forked as its own persistent warband. There
+is no main character: the player is a soul that enters any living mercenary. Every
+mercenary has identical base stats (100 health, 1000 stamina); gear is the only
+difference. `docs/warband.md` is the contract document; this note is the map.
+
+| Surface | Implementation |
+| --- | --- |
+| Shared contract | `scripts/warband/warband_contracts.gd` (`WarbandContracts`): the ten slots mapped onto the existing `head/chest/hands/legs/feet/neck/ring1/ring2/main/off` ids, `WeaponSubType`, `CruorTier`, `HealthState`, `CombatSimState`, `resolve_damage` (10% overkill), `finishes_downed`, tuning constants (5 s revive, 30 m bubble/34 m exit, cap 8, 5:1 distilling) |
+| Persistent warband | autoload `Warband` (`scripts/warband/warband_state.gd`) over `WarbandRoster`, `SoulRouter`, `WarbandStash` (infinite, value-sorted, equipped tags), `WarbandCruor`/`CruorCatalog`, `WarbandVendor`; gold is the existing `PlayerState.credits`; own save `user://warband_state.json` |
+| Possession | `PossessionController` (+ `PossessionCamera`, `PossessionSync`) drives real `ArenaActor` bodies; `SoulRouter` is the one-peer-per-body authority and refuses downed/dead bodies; auto-eject on downed/death; hotkeys `[`/`]`, `F1..F8` |
+| Combat bubble | `WarbandBubbleManager` sets `CombatSimState` per victim from the nearest human body (30 m in, 34 m out); `WarbandDamage.scale(amount, self)` is already called at the top of every `take_damage` funnel (frontier player, `ArenaActor`, `devil_mob`/`forest_mob`, `enemy`, `ranger_clone`) - never add a second multiplier |
+| Passive choreography | `PassiveDuelBrain` (guard/circle/occasional swing at 10%) for both mobs and `ArenaActor` fighters; for fighters call `brain.step(delta)` before `controller.physics_step(delta)` |
+| Downed | `DownedRules` + `ArenaActor.health_state/downed/enter_downed/revive_from_downed`, `CrawlToSafety`, `ReviveChannel` (5 s, human only); a downed body is not an AI target |
+| Loot | `WarbandLoot` (`spawn/quick_loot/sweep/pickups`) and `WarbandPickup`; `SoldierLootRun` walks survivors to drops before the sweep |
+| Altar | `SacrificialAltar` + `AltarMenu` (unbind, distil, brand) over the real wallet |
+| UI | `WarbandHud` (body + squad rows + prompts), `WarbandScreen` (`TAB`, click-to-control, recruiter), `WarbandPaperdoll` (`P`, equip from the collective stash) |
+| Branded skills | `BrandedSkills` table + `BrandedRunner` (six sigils, tier power, stamina/cooldown); the arena binds `R` |
+| Enemies | `CultistGuard` (crimson, faction filter, no arena respawn) + `EnemyWaves` (deterministic 3/4/5 cultists, escalating kits, `step(delta, bodies)` then `controller.physics_step`) |
+| Scenes | `scenes/cage_escape.tscn` (four cages, rescuer, gate), `scenes/town_hub.tscn` (stash/altar/recruiter/gate), `admin_arena.tscn` (sandbox brawls when the deployment line is empty, a three-wave expedition when it is not) |
+| Flow | autoload `GameFlow` (`scripts/warband/game_flow.gd`) is the only thing that changes scene; each scene declares one `scene_requested(path)` door and calls `GameFlow.bind(self)`; `GameFlow.active` is false in tests |
+| Netcode | `WarbandSession` over ENet: `--warband-host <port>` / `--warband-join <addr> <port>` on `admin_arena.tscn`; host-authoritative ownership, 20 Hz body snapshots through `NetLimits`, guest prediction |
+
+Tests (all headless, `tests/warband_*`, `tests/*_regression.gd` below): contract
+161, possession 236, downed_revive 67, combat_bubble 73, altar 112, stash_autoloot
+170, warband_ui 95, branded_abilities 114, enemy_waves 108, town_hub 58,
+cage_escape 80, expedition 18, game_flow 22, admin_arena 98, warband_session 49
+(two real ENet processes). Run one with
+`& .\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/<name>.gd`.
+
+Presentation traps found the hard way: `Environment.fog_mode` in Godot 4.7 resets
+`fog_density` to 1.0, so `scripts/world/environment_kit.gd` writes the density
+last (before that every exponential-fog style, the arena included, was a
+white-out); and a shoulder camera behind a cover tree is pulled in by its own
+occlusion ray, so a mode's spawn ring has to leave the boom room.
+
 ## Restart and delivery
 
 Godot keeps loaded scripts in memory. When asked to restart, identify processes by executable path and project arguments, preserve their scene/network arguments, close only this repo's game instances gracefully, and relaunch them. Do not kill unrelated Godot editors/games or silently force-kill a nonresponsive process. Restarting clears session-only frontier progress and disconnects a running match; reconnect clients to a restarted host.
