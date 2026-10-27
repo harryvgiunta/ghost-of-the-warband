@@ -22,6 +22,7 @@ signal scene_requested(path: String)
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
+const CardScript = preload("res://scripts/warband/tutorial_card.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
@@ -76,6 +77,46 @@ const WEAPON_DROPS := [
 	["dagger_iron", Vector3(4.4, 0.15, -10.0)],
 	["sword_arming", Vector3(-4.6, 0.15, -16.5)],
 ]
+## One big card per beat. The card pauses the game, so every line has to be
+## worth reading: the lesson, then the exact keys, then one way out.
+const STEP_CARDS := {
+	0: {  # CAGED
+		"kicker": "STEP 1  /  THE CAGES",
+		"title": "You are a soul, not a body",
+		"body": "Four prisoners hang in this camp, and your soul can enter any living body. Shift between them: that is the whole game.",
+		"keys": "F1  F2  F3  F4        or        [  ]        enter another prisoner",
+		"footnote": "Press G, Enter or click CONTINUE to play. TAB opens the warband, P your gear.",
+	},
+	1: {  # ALL_SEEN
+		"kicker": "STEP 2  /  THE SHIV",
+		"title": "All four seen - here he comes",
+		"body": "The fifth prisoner is loose, and he is running for the cages with a knife.",
+		"keys": "Wait for him",
+		"footnote": "Close this card to let him arrive.",
+	},
+	2: {  # RESCUER_ARRIVED
+		"kicker": "STEP 3  /  THE LATCHES",
+		"title": "Corvin has the shiv",
+		"body": "You are in his body now. Walk to each cage and cut its latch. Four cages, four latches - and the watchers wake when the first one falls.",
+		"keys": "F5  take Corvin        ·        G  cut a latch",
+		"footnote": "Only Corvin's body carries the shiv, so only his hands can open a cage.",
+	},
+	3: {  # FREED
+		"kicker": "STEP 4  /  ARM YOURSELF",
+		"title": "The squad is out. Take their steel.",
+		"body": "Loot the cultist weapons with K - a picked-up blade goes straight into your hands. Then put down the two watchers at the gate: three stabs each.",
+		"keys": "K  loot        ·        LMB / RMB  fight        ·        E  revive",
+		"footnote": "The watchers are slow and light. Hold RMB to block, then stab.",
+	},
+	4: {  # ESCAPING
+		"kicker": "STEP 5  /  THE GATE",
+		"title": "The way is open",
+		"body": "Walk into the gate arch at the north end of the camp and press G.",
+		"keys": "G  leave the camp for town",
+		"footnote": "The town is where the warband lives between battles.",
+	},
+}
+
 ## Where the escape leads. The town hub is another worktree's file, so the path
 ## is resolved when the gate opens instead of preloaded here; if neither exists
 ## the player simply stays in the camp with the gate standing open.
@@ -85,6 +126,7 @@ var warband
 var controller
 var sequencer
 var hud
+var card
 var screen
 var paperdoll
 var loot
@@ -104,6 +146,7 @@ var _jogging := false
 var _reviving := false
 var _cage_open: Array[bool] = []   # per cage, in CAGE_POSTS order
 var _watchers_awake := false
+var _card_state := -1
 var _prompt_text := ""
 var _hint_text := ""
 
@@ -161,6 +204,7 @@ func _ready() -> void:
 	sequencer.announce()
 	if not caged_ids.is_empty():
 		controller.direct(1, caged_ids[0])
+	_push_card(sequencer.state())
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow != null:
@@ -648,7 +692,20 @@ func _on_watcher_attack(attacker, amount: float, victim) -> void:
 
 # --- sequencer -------------------------------------------------------------
 
+## Raise the beat's card (once). The card pauses the game; the player reads it,
+## presses G or clicks CONTINUE, and the lesson starts where it left off.
+func _push_card(state: int) -> void:
+	if card == null or state == _card_state:
+		return
+	if not STEP_CARDS.has(state):
+		return
+	_card_state = state
+	var content: Dictionary = STEP_CARDS[state]
+	card.show_step("step_%d" % state, str(content["kicker"]), str(content["title"]),
+		str(content["body"]), str(content["keys"]), str(content["footnote"]))
+
 func _on_state_changed(state: int, objective: String) -> void:
+	_push_card(state)
 	if hud != null:
 		# The tutorial line lives top-centre for six seconds; the crosshair
 		# prompt keeps the standing instruction between banners.
@@ -941,3 +998,6 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	card = CardScript.new()
+	card.name = "TutorialCard"
+	add_child(card)

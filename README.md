@@ -12,11 +12,13 @@ difference - and the warband is the thing that survives a battle.
 - **Start here:** the title menu's **GHOST OF THE WARBAND** opens the cages (a
   fresh warband) or resumes a saved one in the town. The mode has its own save
   (`user://warband_state.json`); the ranger's kit is untouched.
-- **The four cages:** shift between all four prisoners to learn the controls,
-  then a fifth prisoner in sacrificial rags runs in with a shiv and the soul is
-  forced into him. Walk to each cage and press **G** to cut its latch (four
-  latches, four cages), loot the cultist steel, put down the two antlered camp
-  watchers (three dagger stabs each) and press **G** in the gate arch to leave.
+- **The four cages:** every beat opens a full-size tutorial card that **pauses
+  the game** and names the keys in large type; it closes on its **CONTINUE**
+  button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
+  prisoner in sacrificial rags runs in with a shiv and the soul is forced into
+  him. Walk to each cage and press **G** to cut its latch (four latches, four
+  cages), loot the cultist steel, put down the two antlered camp watchers (three
+  dagger stabs each) and press **G** in the gate arch to leave.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons

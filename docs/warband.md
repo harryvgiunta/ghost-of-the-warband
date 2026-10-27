@@ -192,6 +192,7 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | --- | --- |
 | `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages clamped one body each, the rescuer's scripted jog and forced possession, **one latch per cage cut with G**, two antlered camp watchers, three weapon drops that snap into the soul's hands, the gate door (G) |
 | `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body |
+| `scripts/warband/tutorial_card.gd` (`TutorialCard`) | the modal step card: large title/body/keys, **pauses the tree** while open, one CONTINUE button (or G / Enter / Escape), restores the previous pause and mouse state on close |
 | `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
 | `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
 | `scenes/town_hub.tscn` + `scripts/warband/town_hub.gd` | dusk square, campfire, stash chest, altar, recruiter desk, gate; `interact_at(peer, point)` resolves the nearest service; one `scene_requested` door |
@@ -258,9 +259,15 @@ what exposed the engine fog trap above.
   a looted piece straight into the soul's hands when that slot is empty or the
   new piece is worth more than what is worn there; anything else stays in the
   stash. The post-battle sweep never auto-equips.
-- Every scene names its keys on a standing hint line (`WarbandHud.set_hint`): the
-  tutorial's per-beat hint comes from `TutorialSequencer.hint()`, the town names
-  its screens and the counter you stand at, the field names the fight verbs. One engine quirk is pre-existing and
+- Every scene names its keys on a standing hint line (`WarbandHud.set_hint`, 16 px
+  under a 20 px prompt): the tutorial's per-beat hint comes from
+  `TutorialSequencer.hint()`, the town names its screens and the counter you stand
+  at, the field names the fight verbs.
+- The cage tutorial raises a `TutorialCard` on each new beat. The card is modal
+  and pauses the tree (`PROCESS_MODE_ALWAYS` so its own button still works), shows
+  the lesson at 34/20/24 px, and closes on CONTINUE / G / Enter / Escape. A card
+  never re-opens for a beat already read, and `GameFlow.goto` clears any pause
+  before a scene hand-off. One engine quirk is pre-existing and
 unrelated to this subsystem: `arena.tscn`'s lobby renders over a bright sky and
 reads washed out at this camera, while the admin arena (same world kit) renders
 correctly after the fog fix.

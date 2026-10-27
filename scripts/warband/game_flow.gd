@@ -82,4 +82,7 @@ func goto(path: String) -> void:
 	var tree := get_tree()
 	if tree == null:
 		return
+	# A tutorial card may be holding the tree still; the next scene must not
+	# open paused behind it.
+	tree.paused = false
 	tree.call_deferred("change_scene_to_file", path)

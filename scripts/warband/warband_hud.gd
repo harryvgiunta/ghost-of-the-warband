@@ -53,6 +53,10 @@ func set_body(body, merc_name: String = "", merc_id: int = -1) -> void:
 		_merc_id = _roster_id_for(body)
 	if _merc_id >= 0 and merc_name.is_empty() and _warband != null:
 		_merc_name = _warband.roster.name_of(_merc_id)
+	# Paint now: a tutorial card pauses the tree before `_process` ever runs, and
+	# a body panel that reads "No body" behind it is a lie.
+	_refresh_body()
+	_refresh_squad()
 
 ## The standing key line: what to press on this beat ("G - cut the latch",
 ## "R - Rending Strike"). Unlike the prompt it does not vanish on its own, so a
@@ -153,7 +157,7 @@ func _build() -> void:
 	_hint_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_hint_label.position = Vector2(-310, -154)
 	_hint_label.custom_minimum_size = Vector2(620, 0)
-	_hint_label.add_theme_font_size_override("font_size", 12)
+	_hint_label.add_theme_font_size_override("font_size", 16)
 	_hint_label.add_theme_color_override("font_color", Color(0.82, 0.78, 0.62))
 	_hint_label.visible = false
 	root_control.add_child(_hint_label)
@@ -164,6 +168,7 @@ func _build() -> void:
 	_prompt_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_prompt_label.position = Vector2(-180, -120)
 	_prompt_label.custom_minimum_size = Vector2(360, 0)
+	_prompt_label.add_theme_font_size_override("font_size", 20)
 	_prompt_label.visible = false
 	root_control.add_child(_prompt_label)
 
@@ -173,6 +178,7 @@ func _build() -> void:
 	_status_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_status_label.position = Vector2(-200, 90)
 	_status_label.custom_minimum_size = Vector2(400, 0)
+	_status_label.add_theme_font_size_override("font_size", 20)
 	_status_label.visible = false
 	root_control.add_child(_status_label)
 

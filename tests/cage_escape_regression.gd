@@ -76,6 +76,7 @@ func run() -> void:
 	game.sequencer.state_changed.connect(_on_state_changed)
 	game.scene_requested.connect(_on_scene_requested)
 
+	dismiss_card("the opening card")
 	check_spawn()
 	await check_clamp()
 	check_refusals()
@@ -116,6 +117,16 @@ func state_count(value: int) -> int:
 		if int(entry[0]) == value:
 			total += 1
 	return total
+
+## The tutorial card is modal and pauses the tree. A test plays the player: if a
+## card is up, it must be pausing, and closing it must resume.
+func dismiss_card(label: String) -> void:
+	if game == null or game.card == null or not game.card.is_open():
+		return
+	check(paused, "the card holds the game still (%s)" % label)
+	check(not game.card.step().is_empty(), "the card names its step (%s)" % label)
+	game.card.close()
+	check(not paused, "closing the card resumes the game (%s)" % label)
 
 func flat_range(from: Vector3, to: Vector3) -> float:
 	return Vector2(from.x - to.x, from.z - to.z).length()
@@ -213,6 +224,7 @@ func check_see_all() -> void:
 	game.controller.direct(1, int(ids[3]))
 	check(game.sequencer.seen_count() == 4 and game.sequencer.state() == SequencerScript.State.ALL_SEEN,
 		"re-entering seen bodies does not advance the tutorial")
+	dismiss_card("all four seen")
 
 # --- the rescuer -----------------------------------------------------------
 
@@ -235,6 +247,7 @@ func check_rescuer() -> void:
 	var rescuer = game.controller.body_of(game.rescuer_id)
 	check(rescuer != null and flat_range(rescuer.global_position, game.JOG_TARGET) < 4.0,
 		"the rescuer is standing at the cages")
+	dismiss_card("the rescuer's card")
 
 # --- one latch at a time ---------------------------------------------------
 
@@ -261,6 +274,7 @@ func check_latches() -> void:
 		await physics_frame
 		await physics_frame
 		game._try_interact()
+		dismiss_card("latch %d" % (index + 1))
 		await physics_frame
 		check(game.cages_open_count() == index + 1,
 			"latch %d of 4 is cut (%d)" % [index + 1, game.cages_open_count()])
@@ -340,6 +354,7 @@ func check_fight_and_gate() -> void:
 			guard.take_damage(40.0, 0)
 			check(not bool(guard.get("alive")), "watcher %s is down" % str(guard.name))
 	check(game.sequencer.guards_down() == 2, "both kills were counted")
+	dismiss_card("the escape card")
 	check(game.sequencer.state() == SequencerScript.State.ESCAPING,
 		"steel plus two kills opens the escape (%s)" % game.sequencer.state_name())
 	check(game.sequencer.objective().contains("gate"), "the objective points at the gate")
