@@ -112,6 +112,8 @@ var _wander := MobWander.new()
 var _lod := MobLod.new()
 ## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
 var _present_band := -1
+## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
+var dormant := false
 ## Whether this clone has already called the pack to the fight.
 var _woke := false
 
@@ -323,6 +325,55 @@ func _cull_presentation(nearest: float) -> void:
 		rig.set_shadow_casting(band == 0)
 
 
+## The culler's only call into a parked body: one distance check per sweep.
+## The pursuit, the bow ladder, the rig sampling and the swept move are all
+## behind the physics process `mob_sleep` turns off.
+func mob_lod_sweep() -> void:
+	if not alive:
+		return
+	var nearest := _nearest_ranger()
+	if not MobLod.dormant(nearest, dormant):
+		if dormant:
+			mob_wake()
+		return
+	if dormant:
+		return
+	if replica or _may_sleep():
+		mob_sleep()
+
+
+## Only a calm body with its feet down may park. A clone that is hunting has to
+## keep running, and one parked mid-air would hang there. A replica runs no AI
+## at all, so it parks on distance alone.
+func _may_sleep() -> bool:
+	return not _senses.aggressive() and is_on_floor()
+
+
+## Parked: the clone keeps its loadout, health, patrol and corpse, and loses its
+## physics process and its draw call. Nothing outside `MobSenses` can see it
+## from here, and the frontier's fog is opaque well before it.
+func mob_sleep() -> void:
+	if dormant:
+		return
+	dormant = true
+	if not replica:
+		# Nothing banked from before the sleep; the first frame back is granted.
+		_lod.resume()
+		set_physics_process(false)
+	visible = false
+
+
+func mob_wake() -> void:
+	if not dormant:
+		return
+	dormant = false
+	_lod.resume()
+	set_physics_process(true)
+	visible = true
+	# Re-apply the presentation band for the distance it woke at.
+	_present_band = -1
+
+
 func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
 	_wander.assign(shared, ring_slot, pack_group)
 
@@ -366,6 +417,8 @@ func _tint_rig() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if dormant:
+		return
 	if not alive:
 		if authoritative and not replica:
 			CorpsePhysics.settle_root(self, delta)
@@ -604,6 +657,8 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false, _react: bool = true) -> void:
 	if not alive or replica:
 		return
+	# Being hit is not something a parked body can miss: it wakes and turns.
+	mob_wake()
 	last_hitter = source_id
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) * (1.0 - rig.damage_reduction(headshot))
 	health = maxf(0.0,health - applied)
@@ -617,6 +672,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, _react: 
 func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
 	if not alive or replica:
 		return Combat.DEFENSE_NONE
+	mob_wake()
 	var outcome: int = combat.resolve_melee_defense(attacker_position)
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
@@ -638,6 +694,7 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 func stagger(seconds: float) -> void:
 	if not alive:
 		return
+	mob_wake()
 	combat.stagger(seconds)
 	rig.set_hit_react(seconds)
 	dodge.reset()
@@ -839,6 +896,7 @@ func note_attacker(attacker: Node3D) -> void:
 func hear_alert(attacker: Node3D, at: Vector3) -> void:
 	if not alive or replica:
 		return
+	mob_wake()
 	if is_instance_valid(attacker) and attacker is CharacterBody3D:
 		_target = attacker
 		_senses.hear(attacker, at)

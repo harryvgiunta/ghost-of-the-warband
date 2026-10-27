@@ -74,6 +74,8 @@ var _wander := MobWander.new()
 var _lod := MobLod.new()
 ## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
 var _present_band := -1
+## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
+var dormant := false
 var _attacker: Node3D
 var _orbit_angle := 0.0
 var _orbit_dir := 1.0
@@ -256,7 +258,7 @@ func head_hit_profile() -> Vector2:
 
 
 func _physics_process(delta: float) -> void:
-	if replica:
+	if dormant or replica:
 		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
@@ -450,6 +452,56 @@ func _cull_presentation(nearest: float) -> void:
 		_wolf.set_distance(nearest)
 	elif is_instance_valid(_devil) and _devil.has_method("set_distance"):
 		_devil.set_distance(nearest)
+
+
+## The culler's only call into a parked body: one distance check per sweep.
+## Sight rays, steering, the state machine, the swept move and the skinning are
+## all behind the physics process `mob_sleep` turns off.
+func mob_lod_sweep() -> void:
+	if not alive:
+		return
+	var nearest := _nearest_ranger()
+	if not MobLod.dormant(nearest, dormant):
+		if dormant:
+			mob_wake()
+		return
+	if dormant:
+		return
+	if replica or _may_sleep():
+		mob_sleep()
+
+
+## Only a calm body with its feet down may park. A body that is hunting has to
+## keep running (that is the whole point of the pursuit memory), and one frozen
+## mid-leap would hang in the air until a ranger walked back. A replica runs no
+## AI at all, so it parks on distance alone.
+func _may_sleep() -> bool:
+	return not _senses.aggressive() and is_on_floor()
+
+
+## Parked: the body keeps its position, health, pack, gold and corpse, and
+## loses its physics process and its draw call. Nothing outside `MobSenses` can
+## see it from here, and the frontier's fog is opaque well before it.
+func mob_sleep() -> void:
+	if dormant:
+		return
+	dormant = true
+	if not replica:
+		# Nothing banked from before the sleep; the first frame back is granted.
+		_lod.resume()
+		set_physics_process(false)
+	visible = false
+
+
+func mob_wake() -> void:
+	if not dormant:
+		return
+	dormant = false
+	_lod.resume()
+	set_physics_process(true)
+	visible = true
+	# Re-apply the presentation band for the distance it woke at.
+	_present_band = -1
 
 
 func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
@@ -788,6 +840,7 @@ func _steer(direction: Vector3) -> Vector3:
 func stagger(seconds: float) -> void:
 	if not alive:
 		return
+	mob_wake()
 	state = "STAGGER"
 	_state_time = 0.0
 	_stagger_duration = maxf(0.0,seconds)
@@ -808,6 +861,8 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	# Being hit is not something a parked body can miss: it wakes and turns.
+	mob_wake()
 	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0, health - applied)
@@ -850,6 +905,9 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 		return
 	if is_instance_valid(attacker) and not _is_hostile(attacker):
 		return
+	# A pack answers its own cry: the hunt is the gameplay, so the body comes
+	# back for it and parks again when the pursuit clock runs out.
+	mob_wake()
 	_senses.hear(attacker,at)
 
 ## Feeds one authoritative pose into the render buffer. The first packet and

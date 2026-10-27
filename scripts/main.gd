@@ -9,6 +9,7 @@ const DevilMob = preload("res://scripts/devil_mob.gd")
 const ForestMob = preload("res://scripts/forest_mob.gd")
 const RangerClone = preload("res://scripts/ranger_clone.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
+const MobCuller = preload("res://scripts/mob_culler.gd")
 const LootRules = preload("res://scripts/loot_rules.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
@@ -52,6 +53,10 @@ const ENEMY_TICK := 0.0667
 ## The longest rewind the host performs for one client action: half a second.
 const MAX_LAG_TICKS := 30
 const ENEMY_RELEVANCE := 70.0
+## The frontier's fog is fully opaque before this (`WorldStyle.frontier`), so
+## the camera stops there: nothing past it could be seen, and nothing past it
+## is drawn.
+const VIEW_FAR := 175.0
 ## Bodies of one wilderness family that spawned this close share a territory
 ## and wander as one band. Wider than a skirmish, narrower than a habitat.
 const WILD_PACK_RADIUS := 14.0
@@ -274,7 +279,7 @@ func _ready() -> void:
 	camera.name = "AdventureCamera"
 	camera.fov = 59.0
 	camera.near = 0.08
-	camera.far = 450.0
+	camera.far = VIEW_FAR
 	camera.current = true
 	_frontier.add_child(camera)
 	audio = Audio.new()
@@ -361,6 +366,12 @@ func _ready() -> void:
 	# and spawned together share one territory, so a band wanders as a band;
 	# everything else (a sentinel on its post, a clone patrol) roams alone.
 	MobWander.assign_all(enemies,WILD_PACK_RADIUS)
+	# One sweep parks every wilderness body past the fog wall: a mob that is
+	# invisible keeps its post, its health and its pack, and stops costing a
+	# tick, a draw call and a skinning pass until a ranger comes back.
+	var culler := MobCuller.new()
+	culler.name = "MobCuller"
+	_frontier.add_child(culler)
 	_enemies_by_index = enemies.duplicate()
 	# The sky belongs to the frontier; a run inside this session detaches it so
 	# the chamber's own environment takes over.
