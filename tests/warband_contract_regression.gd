@@ -47,6 +47,7 @@ func run() -> void:
 	check_overkill()
 	check_scaler()
 	check_roster()
+	check_souls()
 	check_stash(state, warband)
 	check_cruor(state, warband)
 	check_vendor(state, warband)
@@ -138,6 +139,58 @@ func check_scaler() -> void:
 	Damage.prune()
 	check(Damage.registered_count() == 0, "prune drops a freed body")
 	Damage.reset()
+
+# --- souls -----------------------------------------------------------------
+
+func check_souls() -> void:
+	var RouterScript = preload("res://scripts/warband/soul_router.gd")
+	var router = RouterScript.new()
+	var nodes: Array[Node3D] = []
+	for index in 3:
+		var node := Node3D.new()
+		root.add_child(node)
+		nodes.append(node)
+		router.register_body(10 + index, node, "Body %d" % index)
+	check(router.body_ids() == [10, 11, 12], "bodies are registered in id order")
+
+	var entered := router.request_transfer(1, 10)
+	check(entered["ok"], "peer one enters body ten")
+	check(router.occupied_by(10) == 1, "the lock names the peer")
+	check(router.body_of(1) == 10, "the peer knows its body")
+	var stolen := router.request_transfer(2, 10)
+	check(stolen["ok"] == false and str(stolen["reason"]) == RouterScript.REASON_OCCUPIED,
+		"a second peer cannot enter an occupied body")
+	check(router.body_of(2) == -1, "a refused transfer leaves the second peer bodiless")
+	check(router.request_transfer(2, 11)["ok"], "peer two takes a free body")
+
+	var move := router.request_transfer(1, 12)
+	check(move["ok"] and int(move["previous_body_id"]) == 10, "a move releases the old body")
+	check(router.occupied_by(10) == 0, "the old body is free")
+	var back := router.cycle(1, -1)
+	check(back["ok"] and router.body_of(1) == 10, "cycling backwards takes the lower free body")
+	var forward := router.cycle(2, 1)
+	check(forward["ok"] and router.body_of(2) == 12, "cycling forwards takes the higher free body")
+
+	# A body that stops being alive ejects its soul and cannot be entered.
+	router.set_body_state(12, Contracts.HealthState.DOWNED)
+	check(router.body_of(2) == -1, "a downed body ejects its soul")
+	check(router.request_transfer(2, 12)["ok"] == false, "a downed body cannot be entered")
+	router.set_body_state(12, Contracts.HealthState.DEAD)
+	check(router.body_ids().has(12), "a dead body is still registered for the HUD")
+	check(router.possessable_ids() == [11], "only living free bodies are possessable")
+
+	# The last survivor keeps its body rather than being cycled away.
+	router.release_peer(2)
+	router.release_peer(1)
+	check(router.request_transfer(3, 11)["ok"], "peer three takes the last free body")
+	router.set_body_state(10, Contracts.HealthState.DEAD)
+	var only := router.cycle(3, 1)
+	check(only["ok"] and router.body_of(3) == 11, "the only standing body is not cycled away")
+
+	router.clear()
+	for node in nodes:
+		node.free()
+	check(router.body_ids().is_empty(), "clear empties the registry")
 
 # --- roster ----------------------------------------------------------------
 

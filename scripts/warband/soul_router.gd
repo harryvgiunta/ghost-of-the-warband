@@ -148,7 +148,8 @@ func request_transfer(peer_id: int, target_body_id: int) -> Dictionary:
 	target["occupied_by_peer_id"] = peer_id
 	target["last_owner_peer_id"] = peer_id
 	_peer_body[peer_id] = target_body_id
-	body_released.emit(peer_id, current_id) if current_id != -1 else null
+	if current_id != -1:
+		body_released.emit(peer_id, current_id)
 	body_possessed.emit(peer_id, target_body_id)
 	return {"ok": true, "message": "You are inside %s." % _label(target_body_id),
 		"body_id": target_body_id, "previous_body_id": current_id, "reason": REASON_NONE}
@@ -203,28 +204,35 @@ func possessable_ids() -> Array[int]:
 	return out
 
 ## Next/previous living body for the hotkey cycle. `direction` is +1 or -1.
-## Returns the same `request_transfer` payload; a refusal leaves the soul put.
-func cycle(peer_id: int, direction: int = 1, include_self: bool = false) -> Dictionary:
-	var candidates := possessable_ids()
+## The ring is the sorted set of living, unoccupied bodies, so cycling is stable
+## whatever spawned first; a soul that holds the only surviving body stays put
+## instead of failing. Returns the same `request_transfer` payload; a refusal
+## leaves the soul where it is.
+func cycle(peer_id: int, direction: int = 1) -> Dictionary:
 	var current := body_of(peer_id)
+	var candidates := possessable_ids()
 	if candidates.is_empty():
+		if current != -1 and body_state(current) == Contracts.HealthState.ALIVE:
+			return {"ok": true, "message": "You are the only body standing.",
+				"body_id": current, "previous_body_id": current, "reason": REASON_NONE}
 		return {"ok": false, "message": "No living body is free to enter.",
 			"body_id": current, "previous_body_id": current, "reason": REASON_DEAD}
-	if not include_self and candidates.size() <= 1 and candidates.has(current):
-		return {"ok": true, "message": "You are the only body standing.", "body_id": current,
-			"previous_body_id": current, "reason": REASON_NONE}
-	var step := 1 if direction >= 0 else -1
-	var index := candidates.find(current)
+	candidates.sort()
 	var target := candidates[0]
-	if index == -1:
-		target = candidates[0] if step > 0 else candidates[candidates.size() - 1]
-	else:
-		var size := candidates.size()
-		for offset in range(1, size + 1):
-			var probe := candidates[posmod(index + step * offset, size)]
-			if probe != current or size == 1:
-				target = probe
+	if direction >= 0:
+		for body_id in candidates:
+			if body_id > current:
+				target = body_id
 				break
+	else:
+		target = candidates[candidates.size() - 1]
+		for index in range(candidates.size() - 1, -1, -1):
+			if candidates[index] < current:
+				target = candidates[index]
+				break
+	if target == current:
+		return {"ok": true, "message": "You are the only body standing.",
+			"body_id": current, "previous_body_id": current, "reason": REASON_NONE}
 	return request_transfer(peer_id, target)
 
 func clear() -> void:
