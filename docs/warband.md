@@ -148,3 +148,40 @@ Tests are SceneTree scripts: accumulate `checks`/`failures`, `quit(0|1)`.
 Visual proof still requires launching the scene: a regression test is not a
 rendered frame. Avoid editing `tests/warband_contract_regression.gd` to make a
 failure pass; fix the contract instead.
+
+## 8. Shipped in Phase 1 (merged and green)
+
+| Module | Public surface |
+| --- | --- |
+| `scripts/warband/possession_controller.gd` (`PossessionController`) | `setup(warband, camera, bodies_root)`, `spawn_mercenaries(points, authoritative)`, `activate/cycle/direct(peer, merc_id)`, `active_body(peer := 0)`, `body_of/merc_of/merc_for_peer`, `set_bot`, `living_merc_ids()`, `physics_step(delta)` (with `auto_simulate = false`), `release_local()`, signals `possession_changed`, `possession_released`, `transfer_refused` |
+| `scripts/warband/possession_camera.gd` (`PossessionCamera`) | adopts the mode's `Camera3D`, `follow(body, snap)`, `swoop_to(body, seconds)`, `rotate_view`, `aim_ray()`, `follow_point()` |
+| `scripts/warband/possession_sync.gd` (`PossessionSync`) | host-authoritative transfer RPCs plus `server_apply(peer, merc_id)` |
+| `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`) | `setup(radius, exit_radius)`, `set_humans`, `track/untrack`, `sim_state_of`, `clear`, `sim_changed` |
+| `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
+| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` | `DownedRules.*`, `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress` |
+| `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups`, `WarbandPickup.collect/blocked_for/label_text` |
+| `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu`, `AltarMenu.configure/unbind_rows/distill_rows/brand_rows` |
+| `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash |
+| `scripts/warband/warband_hud.gd` (`WarbandHud`) | body panel, squad rows, prompts, status banners |
+| `scripts/admin_arena.gd` + `admin_arena.tscn` | the gate scene: two three-body brawls 42 m apart, eight roster bodies, two souls, the altar, the stash chest, battlefield loot |
+
+### Gate 1 result
+
+`tests/admin_arena_regression.gd` - 90 checks, 0 failures: 10% far / 100% near,
+real guards and swings in the passive brawl, a just-lethal hit Downing and
+crawling, a heavy hit killing, a five-second human revive at half health with AI
+refused, the value-sorted sweep, the altar wallet, the warband-screen click and
+the two-peer body lock. `tests/warband_session_regression.gd` covers the real
+ENet session (Phase 2).
+
+The full Phase 1 library suite (`warband_contract`, `possession`, `downed_revive`,
+`combat_bubble`, `altar`, `stash_autoloot`, `warband_ui`, `admin_arena`) is green,
+as are the pre-existing regressions the shared edits could break (`gameplay`,
+`combat_expansion`, `net_limits`, `mob_aggro`, `world_art`, `ranger_clone`,
+`hitbox`, `paperdoll`, `town_services`, `block_clash`, `draw_combat`).
+
+### One engine trap worth remembering
+
+Assigning `Environment.fog_mode` in Godot 4.7 resets `fog_density` to `1.0`.
+`scripts/world/environment_kit.gd` now writes the density after the mode; before
+that fix every exponential-fog style (the arena) rendered as a white-out.
