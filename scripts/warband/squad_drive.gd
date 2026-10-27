@@ -137,7 +137,14 @@ func armed_count() -> int:
 ## Point every living watcher at the nearest standing squad body and put it on
 ## the hunt. Shared because a watcher that has calmed down is a scene bug in both
 ## the camp and the run, and the answer is the same in both.
-static func retarget(watchers: Array, bodies: Array) -> void:
+##
+## `radius` bounds how far a watcher will take a *new* target. In the one world
+## the camp's guards, the six that come out of the trees and the road's cultists
+## all live on one list, so without a bound a watcher in the clearing would run
+## the whole 286 m of trail after a squad that had already left it - and the
+## road's cultists would come up to the town to fight. A watcher already hunting
+## is left alone: this only decides who it notices.
+static func retarget(watchers: Array, bodies: Array, radius: float = INF) -> void:
 	for watcher in watchers:
 		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
@@ -153,6 +160,8 @@ static func retarget(watchers: Array, bodies: Array) -> void:
 				best = distance
 				nearest = body
 		if nearest == null:
+			continue
+		if radius < INF and watcher.global_position.distance_to(nearest.global_position) > radius:
 			continue
 		watcher.player = nearest
 		# `hunt` only re-arms the senses when the pursuit lapsed, so calling it

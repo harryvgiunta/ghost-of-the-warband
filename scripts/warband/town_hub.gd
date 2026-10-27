@@ -16,6 +16,9 @@ extends Node3D
 ## fixtures (`set_bot(false)`), so the square never brawls on its own.
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
+const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
+const RunForestScript = preload("res://scripts/warband/run_forest.gd")
+const VillageKit = preload("res://scripts/world/village_kit.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
@@ -32,7 +35,13 @@ const WarbandState = preload("res://scripts/warband/warband_state.gd")
 ## keeps its own (larger) `open_radius`.
 const SERVICE_REACH := 3.0
 const WALL_RADIUS := 18.0
+## The gap in the north wall the trail comes in through.
+const NORTH_GATE_HALF := 5.0
+## How far a body may stray from the fire in the standalone square.
 const BODY_BOUNDS := 16.0
+## How deep the wood the settlement is cut into runs outside its walls.
+const WOOD_DEPTH := 20.0
+const TOWN_WOOD_SEED := 7717
 
 ## The four services, arranged so no two rings overlap: walking the square always
 ## names exactly one thing.
@@ -73,6 +82,16 @@ const TOWN_SPARES := [
 ## forwards it, so the game-flow owner binds a single signal per scene.
 signal scene_requested(path: String)
 
+## The world scene that embeds this town, or null when the town stands alone.
+## Set before the node enters the tree.
+##
+## Embedded, the town is the far end of one continuous world: the world owns the
+## bodies, the camera, the HUD and the night, the town's north wall is the gate
+## the trail comes in through, and the square is cut into the same wood the
+## clearing stands in. Alone, this is the square as its own scene - the preview
+## the art and quartermaster regressions load.
+var host: Node3D = null
+
 var warband: WarbandState
 var camera: Camera3D
 var controller
@@ -86,6 +105,8 @@ var recruiter_desk: Node3D
 var quartermaster_desk: Node3D
 var quartermaster
 var signpost: Node3D
+## The treeline around the square: `{trees, bushes, wall}` from the wood planner.
+var wood: Dictionary = {}
 var fire_light: OmniLight3D
 var flame: MeshInstance3D
 var bodies: Array = []
@@ -102,35 +123,83 @@ func _ready() -> void:
 		push_error("TownHub needs the Warband autoload")
 		return
 	_build_materials()
-	_seed_warband()
-	_build_environment()
+	if host == null:
+		seed_warband()
+		_build_environment()
 	_build_square()
-	_build_body_layer()
+	if host == null:
+		_build_body_layer()
 	_build_services()
-	_build_ui()
-	controller.possession_changed.connect(_on_possession_changed)
-	controller.transfer_refused.connect(_on_transfer_refused)
-	controller.possession_released.connect(_on_possession_released)
-	_enter_first_body()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	var flow := get_node_or_null("/root/GameFlow")
-	if flow != null:
-		flow.bind(self)
-	print("TOWN_HUB_READY bodies=%d gold=%d" % [bodies.size(), warband.gold()])
+	_build_wood()
+	if host == null:
+		_build_ui()
+		controller.possession_changed.connect(_on_possession_changed)
+		controller.transfer_refused.connect(_on_transfer_refused)
+		controller.possession_released.connect(_on_possession_released)
+		_enter_first_body()
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		var flow := get_node_or_null("/root/GameFlow")
+		if flow != null:
+			flow.bind(self)
+		print("TOWN_HUB_READY bodies=%d gold=%d" % [bodies.size(), warband.gold()])
 
+
+## Adopt the pieces the world owns. The world calls this once, after the town is
+## in the tree and before the warband is placed here.
+func embed(world: Node3D) -> void:
+	host = world
+	warband = world.warband
+	controller = world.controller
+	hud = world.hud
+	screen = world.screen
+	paperdoll = world.paperdoll
+	if gate != null:
+		gate.setup(warband, controller)
+
+
+## Where the warband stands when the campaign starts in the town.
+func spawn_posts() -> Array[Vector3]:
+	return _spawn_points()
+
+
+## Seat the bodies the world spawned around the fire. The square shows the whole
+## living warband, so a battle line left behind by a previous expedition is
+## cleared here and written again at the gate.
+func place_warband(bodies_in: Array) -> void:
+	warband.roster.clear_deployment()
+	bodies = bodies_in
+	for actor in bodies:
+		if not is_instance_valid(actor):
+			continue
+		var merc_id := int(controller.merc_of(actor))
+		var index := bodies.find(actor)
+		var post: Vector3 = SPAWN_POSTS[index % SPAWN_POSTS.size()]
+		actor.global_position = global_position + post
+		actor.spawn_point = global_position + post
+		# The square is not a battle: an unpossessed bot would pick the nearest
+		# mercenary as a target and brawl around the fire.
+		controller.set_bot(merc_id, false)
+
+
+## Embedded, the world steps the bodies and writes the one HUD: the square only
+## answers questions about what stands where.
 func _physics_process(delta: float) -> void:
-	if controller == null:
+	if controller == null or host != null:
 		return
 	controller.physics_step(delta)
 	_update_prompt()
 	_update_hint()
 
 func _process(_delta: float) -> void:
+	if host != null:
+		return
 	var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
 	if Input.mouse_mode != wanted:
 		Input.mouse_mode = wanted
 
 func _unhandled_input(event: InputEvent) -> void:
+	if host != null:
+		return
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:
@@ -200,39 +269,94 @@ func _build_square() -> void:
 	_build_campfire()
 
 func _build_ground() -> void:
-	var ground := StaticBody3D.new()
-	ground.name = "Ground"
-	add_child(ground)
-	var slab := BoxShape3D.new()
-	slab.size = Vector3(WALL_RADIUS * 2.4, 0.6, WALL_RADIUS * 2.4)
-	var shape := CollisionShape3D.new()
-	shape.shape = slab
-	shape.position = Vector3(0.0, -0.3, 0.0)
-	ground.add_child(shape)
-	Geo.box(ground, slab.size, Vector3(0.0, -0.3, 0.0), _earth)
+	# The world scene owns one floor for the whole map; a second slab under the
+	# square would only z-fight with it.
+	if host == null:
+		var ground := StaticBody3D.new()
+		ground.name = "Ground"
+		add_child(ground)
+		var slab := BoxShape3D.new()
+		slab.size = Vector3(WALL_RADIUS * 2.4, 0.6, WALL_RADIUS * 2.4)
+		var shape := CollisionShape3D.new()
+		shape.shape = slab
+		shape.position = Vector3(0.0, -0.3, 0.0)
+		ground.add_child(shape)
+		Geo.box(ground, slab.size, Vector3(0.0, -0.3, 0.0), _earth)
 	# Worn flagstones: the middle of the square is paved, the ring stays dirt.
 	Geo.box(self, Vector3(23.0, 0.08, 19.0), Vector3(0.0, 0.02, 0.0), _stone)
 
+## The square's edge. Three sides are the settlement's wall; the fourth - the
+## north side, the one the trail comes in through - is two stubs and the gate
+## frame a body walks between. That is the whole difference between the town as a
+## room and the town as the far end of the wood.
 func _build_walls() -> void:
-	for index in 4:
-		var side := Node3D.new()
-		side.name = "Wall%d" % index
-		side.rotation.y = float(index) * PI * 0.5
-		add_child(side)
-		var z := -WALL_RADIUS
-		Geo.box(side, Vector3(WALL_RADIUS * 2.0 + 1.4, 1.8, 0.7), Vector3(0.0, 0.9, z), _stone)
-		Geo.box(side, Vector3(WALL_RADIUS * 2.0 + 1.4, 0.22, 1.0), Vector3(0.0, 1.9, z), _wood)
-		for step in 7:
-			var x := -WALL_RADIUS + 6.0 * float(step)
-			Geo.cylinder(side, 0.22, 0.18, 3.4, Vector3(x, 1.7, z), _wood, 8)
-		var body := StaticBody3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(WALL_RADIUS * 2.0 + 1.4, 3.4, 0.7)
-		var shape := CollisionShape3D.new()
-		shape.shape = box
-		shape.position = Vector3(0.0, 1.7, z)
-		body.add_child(shape)
-		side.add_child(body)
+	var span := WALL_RADIUS * 2.0 + 1.4
+	_wall(Vector3(0.0, 0.0, -WALL_RADIUS), span, 0.0)
+	_wall(Vector3(-WALL_RADIUS, 0.0, 0.0), span, PI * 0.5)
+	_wall(Vector3(WALL_RADIUS, 0.0, 0.0), span, PI * 0.5)
+	var stub := (WALL_RADIUS + 0.7 - NORTH_GATE_HALF)
+	_wall(Vector3(-(NORTH_GATE_HALF + stub * 0.5), 0.0, WALL_RADIUS), stub, 0.0)
+	_wall(Vector3(NORTH_GATE_HALF + stub * 0.5, 0.0, WALL_RADIUS), stub, 0.0)
+	_build_north_gate()
+
+func _wall(at: Vector3, span: float, yaw: float) -> void:
+	var side := Node3D.new()
+	side.name = "Wall%d" % get_child_count()
+	side.position = at
+	side.rotation.y = yaw
+	add_child(side)
+	var z := 0.0
+	Geo.box(side, Vector3(span, 1.8, 0.7), Vector3(0.0, 0.9, z), _stone)
+	Geo.box(side, Vector3(span, 0.22, 1.0), Vector3(0.0, 1.9, z), _wood)
+	for step in int(span / 6.0) + 1:
+		var x := -span * 0.5 + 6.0 * float(step)
+		if absf(x) > span * 0.5:
+			continue
+		Geo.cylinder(side, 0.22, 0.18, 3.4, Vector3(x, 1.7, z), _wood, 8)
+	var body := StaticBody3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(span, 3.4, 0.7)
+	var shape := CollisionShape3D.new()
+	shape.shape = box
+	shape.position = Vector3(0.0, 1.7, z)
+	body.add_child(shape)
+	side.add_child(body)
+
+## The gate the trail comes in through: the village kit's own frame, so the town
+## reads as a settlement cut into the same world as the clearing it began in.
+func _build_north_gate() -> void:
+	var gate := Node3D.new()
+	gate.name = "NorthGate"
+	gate.position = Vector3(0.0, 0.0, WALL_RADIUS)
+	add_child(gate)
+	var body := StaticBody3D.new()
+	body.name = "GateCollision"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	gate.add_child(body)
+	VillageKit.gate(gate, VillageKit.materials(), body, NORTH_GATE_HALF, 4.6, 19)
+	var label := Label3D.new()
+	label.name = "GateSign"
+	label.text = "THE WOOD ROAD"
+	label.font_size = 56
+	label.pixel_size = 0.006
+	label.modulate = Color(0.96, 0.82, 0.56)
+	label.position = Vector3(0.0, 4.9, 0.2)
+	gate.add_child(label)
+
+## The wood the settlement is cut into: the same treeline the clearing has, with
+## one gap where the road comes in.
+func _build_wood() -> void:
+	var solids := StaticBody3D.new()
+	solids.name = "TownWoodCollision"
+	solids.collision_layer = 1
+	solids.collision_mask = 0
+	add_child(solids)
+	var mouth := Rect2(-NORTH_GATE_HALF - 1.5, WALL_RADIUS - 2.0,
+		(NORTH_GATE_HALF + 1.5) * 2.0, WOOD_DEPTH + 12.0)
+	wood = ClearingScript.plant_wood(self, RunForestScript.night_style(),
+		Rect2(-WALL_RADIUS, -WALL_RADIUS, WALL_RADIUS * 2.0, WALL_RADIUS * 2.0),
+		WOOD_DEPTH, [mouth], [], TOWN_WOOD_SEED, solids, "TownWood")
 
 func _build_campfire() -> void:
 	var fire := Node3D.new()
@@ -347,6 +471,12 @@ func _build_services() -> void:
 	gate.setup(warband, controller)
 	# The square has exactly one door, whatever asks to leave by it.
 	gate.scene_requested.connect(func(path: String): scene_requested.emit(path))
+	# The keeper's counter is a service, not scenery of the HUD: the world embeds
+	# the square without building the town's own panels.
+	quartermaster = QuartermasterScript.new()
+	quartermaster.name = "Quartermaster"
+	add_child(quartermaster)
+	quartermaster.configure(warband)
 	preload("res://scripts/warband/town_dressing.gd").build(self)
 
 func _build_stash_chest() -> Node3D:
@@ -454,10 +584,6 @@ func _build_ui() -> void:
 	add_child(paperdoll)
 	paperdoll.configure(warband)
 	paperdoll.changed.connect(_on_paperdoll_changed)
-	quartermaster = QuartermasterScript.new()
-	quartermaster.name = "Quartermaster"
-	add_child(quartermaster)
-	quartermaster.configure(warband)
 
 # --- interaction -----------------------------------------------------------
 
@@ -499,6 +625,27 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			hud.set_status(str(gate_state.get("message", "")), 5.0)
 	return service
 
+## Whether a body is standing on the square's ground at all (the walls plus a
+## stride): what decides whether the town's key line or the trail's is the one
+## worth showing.
+func in_square(actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	var local: Vector3 = actor.global_position - global_position
+	return absf(local.x) <= WALL_RADIUS + 2.0 and absf(local.z) <= WALL_RADIUS + 2.0
+
+
+## Whether one of the square's panels is open (the world owns the input, the
+## square owns the panels it opens).
+func panels_open() -> bool:
+	return _panel_open()
+
+
+## Close whatever the square opened, for the world's one `ESC` and `TAB`.
+func close_panels() -> void:
+	_hide_panels()
+
+
 ## The nearest service whose ring holds `point`, or `""`.
 func service_at(point: Vector3) -> String:
 	var entries: Array[Dictionary] = [
@@ -527,6 +674,8 @@ func service_point(service: String) -> Vector3:
 			return altar.global_position
 		"recruiter":
 			return recruiter_desk.global_position
+		"quartermaster":
+			return quartermaster_desk.global_position
 		"gate":
 			return gate.global_position
 	return Vector3.ZERO
@@ -542,10 +691,9 @@ func _on_paperdoll_changed() -> void:
 ## so it always names them, plus whatever counter the body is standing at.
 var _hint_text := ""
 
-func _update_hint() -> void:
-	if hud == null or controller == null:
-		return
-	var actor = controller.active_body(1)
+## The key line for the square, or "" when the body is nowhere near a counter.
+## The world writes it to the one HUD; a town standing alone writes it itself.
+func hint_line(actor) -> String:
 	var service := ""
 	if actor != null and is_instance_valid(actor):
 		service = service_at(actor.global_position)
@@ -561,6 +709,31 @@ func _update_hint() -> void:
 			text = "G - buy plain steel into the shared stash"
 		"gate":
 			text = "G - launch an expedition with the line you deployed"
+	return text
+
+
+## The crosshair prompt for the counter the body stands at, or "".
+func prompt_line(actor) -> String:
+	if actor == null or not is_instance_valid(actor):
+		return ""
+	match service_at(actor.global_position):
+		"stash":
+			return "G - shared stash"
+		"altar":
+			return "G - Sacrificial Altar"
+		"recruiter":
+			return "G - Gold recruiter"
+		"quartermaster":
+			return "G - quartermaster"
+		"gate":
+			return "G - expedition gate"
+	return ""
+
+
+func _update_hint() -> void:
+	if hud == null or controller == null:
+		return
+	var text := hint_line(controller.active_body(1))
 	if text != _hint_text:
 		_hint_text = text
 		hud.set_hint(text)
@@ -571,21 +744,7 @@ func _update_prompt() -> void:
 	if _panel_open():
 		hud.set_prompt("")
 		return
-	var actor = controller.active_body(1)
-	if actor == null or not is_instance_valid(actor):
-		hud.set_prompt("")
-		return
-	match service_at(actor.global_position):
-		"stash":
-			hud.set_prompt("G - shared stash")
-		"altar":
-			hud.set_prompt("G - Sacrificial Altar")
-		"recruiter":
-			hud.set_prompt("G - Gold recruiter")
-		"gate":
-			hud.set_prompt("G - expedition gate")
-		_:
-			hud.set_prompt("")
+	hud.set_prompt(prompt_line(controller.active_body(1)))
 
 func _hide_panels() -> void:
 	if screen != null and screen.is_open():
@@ -606,8 +765,10 @@ func _panel_open() -> bool:
 # --- seeding ---------------------------------------------------------------
 
 ## A first-run warband, so the square is playable before an expedition. An
-## existing warband (from a save or the cage) is never touched.
-func _seed_warband() -> void:
+## existing warband (from a save or the camp) is never touched. The world calls
+## this only when the campaign starts in the town; a camp start has already
+## dressed its prisoners.
+func seed_warband() -> void:
 	if not warband.roster.is_empty():
 		return
 	for entry in TOWN_LINEUP:

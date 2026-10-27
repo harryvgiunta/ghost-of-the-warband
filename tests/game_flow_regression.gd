@@ -12,8 +12,10 @@ const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
 const TEST_SAVE := "user://game_flow_state.json"
 const WARBAND_SAVE := "user://game_flow_warband.json"
-const CAGE := "res://scenes/cage_escape.tscn"
-const TOWN := "res://scenes/town_hub.tscn"
+## The campaign is one world now: the cages, the trail and the town are the same
+## scene, entered at the camp for a fresh run and at the town for a return.
+const CAGE := "res://scenes/warband_world.tscn"
+const TOWN := "res://scenes/warband_world.tscn"
 const ARENA := "res://admin_arena.tscn"
 
 var flow

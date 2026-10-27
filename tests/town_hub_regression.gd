@@ -1,13 +1,19 @@
 extends SceneTree
-## The town hub on real bodies: the square builds, the services resolve from a
-## point, the recruiter hires and refuses at the cap, the paperdoll moves gear
-## between one mercenary and the collective pool, and the expedition gate writes
-## the battle line and asks for the next scene.
+## The town end of the one world, on real bodies: the square builds at the far end
+## of the trail, the five services resolve from a point, the recruiter hires and
+## refuses at the cap, the paperdoll moves gear between one mercenary and the
+## collective pool, and the expedition gate writes the battle line and asks for
+## the arena.
+##
+## The town is no longer a scene of its own in the campaign; it is loaded here by
+## asking the world to put the warband down at its town end, which is exactly what
+## a resumed save and the field's return do.
 
 const State = preload("res://scripts/player_state.gd")
 
 const TEST_SAVE := "user://town_hub_state.json"
 const WARBAND_SAVE := "user://town_hub_warband.json"
+const WORLD := "res://scenes/warband_world.tscn"
 
 var game
 var state
@@ -38,10 +44,13 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
+	var flow = root.get_node("GameFlow")
+	flow.active = false
+	flow.world_start = "town"
 
-	game = load("res://scenes/town_hub.tscn").instantiate()
+	game = load(WORLD).instantiate()
 	if game == null:
-		check(false, "the town hub scene loads")
+		check(false, "the world scene loads")
 		print("TOWN_HUB_REGRESSION checks=", checks, " failures=", failures)
 		quit(1)
 		return
@@ -57,6 +66,7 @@ func run() -> void:
 	if game != null and is_instance_valid(game):
 		game.queue_free()
 	await process_frame
+	root.get_node("GameFlow").world_start = "camp"
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
 	print("TOWN_HUB_REGRESSION checks=", checks, " failures=", failures)
@@ -65,6 +75,9 @@ func run() -> void:
 # --- the square ------------------------------------------------------------
 
 func check_square() -> void:
+	check(game.start_area == "town", "the world put the warband down at the town end (%s)" % game.start_area)
+	check(game.camp != null and game.trail != null,
+		"the camp and the trail are the same world, 300 m up the road")
 	check(warband.roster.count() >= 5, "the hub seeds a warband (%d)" % warband.roster.count())
 	check(game.bodies.size() >= 5, "at least five bodies stand in the square (%d)" % game.bodies.size())
 	check(game.bodies.size() <= warband.deployment_cap,
@@ -74,8 +87,9 @@ func check_square() -> void:
 	if actor != null and is_instance_valid(actor):
 		check(bool(actor.get("alive")) and not bool(actor.get("downed")),
 			"the body the player is inside is living")
-		check(actor.global_position.distance_to(Vector3.ZERO) < 8.0,
-			"the body starts in the square (%.1f m from the fire)" % actor.global_position.length())
+		check(actor.global_position.distance_to(game.town.global_position) < 8.0,
+			"the body starts in the square (%.1f m from the fire)"
+			% actor.global_position.distance_to(game.town.global_position))
 	var merc_id: int = game.controller.merc_for_peer(1)
 	check(merc_id > 0 and warband.souls.occupied_by(merc_id) == 1,
 		"the router says peer one holds that body")
@@ -102,7 +116,7 @@ func check_square() -> void:
 		var point: Vector3 = game.service_point(service)
 		var named: String = game.service_at(point)
 		check(named == service, "the %s ring resolves to itself (got '%s')" % [service, named])
-	check(game.service_at(Vector3.ZERO) == "", "the fire is not a service")
+	check(game.service_at(game.town.global_position) == "", "the fire is not a service")
 
 # --- stash and paperdoll ---------------------------------------------------
 

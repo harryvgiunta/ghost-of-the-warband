@@ -11,9 +11,15 @@ extends Node
 ## campaign button, which is what keeps every scene regression able to emit its
 ## door signal without the tree moving underneath it.
 
-const CAGE_SCENE := "res://scenes/cage_escape.tscn"
-const TOWN_SCENE := "res://scenes/town_hub.tscn"
+## The campaign is one world: the camp, the trail through the wood and the town
+## all stand in this one scene, and walking is the only way between them.
+const WORLD_SCENE := "res://scenes/warband_world.tscn"
 const ARENA_SCENE := "res://admin_arena.tscn"
+## The arena was written against the old town scene's path and still asks for it.
+## There is no separate town scene in the campaign any more, so that path means
+## "the world, at the town end" - the arena hands the survivors back into the
+## square they marched out of.
+const ARENA_RETURN := "res://scenes/town_hub.tscn"
 
 const WarbandSessionScript := preload("res://scripts/warband/warband_session.gd")
 const WarbandLobbyScript := preload("res://scripts/warband/warband_lobby.gd")
@@ -30,6 +36,10 @@ signal warband_intent_changed(intent: Dictionary)
 
 var active := false
 var last_scene := ""
+## Where the world puts the warband down when it opens: `"camp"` for a fresh run
+## (the cages), `"town"` for a resumed save or the field's return. The world reads
+## it once, in its own `_ready`.
+var world_start := "camp"
 var transitions := 0
 ## The lobby's last request: `{mode, address, port, name, scene}`. It stays here
 ## (not in the menu) so the flow - the only thing that outlives the menu - can
@@ -54,11 +64,13 @@ func enter_warband() -> void:
 		return
 	active = true
 	if warband.load_state() and warband.roster.count() > 0:
-		goto(TOWN_SCENE)
+		world_start = "town"
+		goto(WORLD_SCENE)
 		return
 	warband.reset_state()
 	warband.save_state()
-	goto(CAGE_SCENE)
+	world_start = "camp"
+	goto(WORLD_SCENE)
 
 ## A brand-new campaign: the four cages, whatever the save says.
 func start_campaign() -> void:
@@ -67,12 +79,15 @@ func start_campaign() -> void:
 	if warband != null:
 		warband.reset_state()
 		warband.save_state()
-	goto(CAGE_SCENE)
+	world_start = "camp"
+	goto(WORLD_SCENE)
 
-## Go straight to the hub (debug door, and where a resumed campaign lands).
+## Go straight to the town end of the world (debug door, and where a resumed
+## campaign lands).
 func enter_town() -> void:
 	active = true
-	goto(TOWN_SCENE)
+	world_start = "town"
+	goto(WORLD_SCENE)
 
 func launch_expedition() -> void:
 	active = true
@@ -93,6 +108,14 @@ func bind(scene: Node) -> void:
 
 func _on_scene_requested(path: String) -> void:
 	if not active:
+		return
+	# A door that asks for the world is not the campaign's opening: the opening is
+	# the title's own call, which says where to put the warband down. Everything
+	# that arrives through a scene door - the field's return above all - comes back
+	# into the world at the town end, where the square and the gate are.
+	if path == ARENA_RETURN or path == WORLD_SCENE:
+		world_start = "town"
+		goto(WORLD_SCENE)
 		return
 	goto(path)
 
