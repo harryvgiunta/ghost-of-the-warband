@@ -58,6 +58,12 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
    `ESCAPING`, the rest notice by sight. A **Hand Torch** (45 gold from the
    quartermaster, off hand) is the answer to the dark: worn, it burns in your hand
    and lights 26 m of wood around you.
+
+   The squad fights for you: it swings the moment its blade is free, holds a guard
+   in the gap between swings, and now and then takes a beat to guard and circle
+   before coming back in. A downed cultist is worth checking — it drops the blade
+   it held and the rag on its back, and once nothing hostile is within 22 m the
+   squad walks the field and strips it.
 6. **Town.** The trail ends at a town built into the trees: a wooden road sign
    over its gate, the fire ring, the stalls, and the services — shared infinite
    stash, Sacrificial Altar (unbind / distil 5:1 / brand), Gold recruiter,
@@ -169,6 +175,14 @@ Integration seams deliberately placed in the base game:
     and that frame spawns the six armed watchers; `GUARD_COUNT` is a tally, not a
     gate. The road never spawns a cultist with a quarry: `wake_road` hands a third
     of each ring the soul at the leaving, and the rest notice by sight.
+21. **Nothing solid stands in the walkable band.** Torches sit on the verge (6.4 m
+    from the centre), the lane walls follow the curve rather than the waypoint
+    chords, and arch posts go out at `HALF_WIDTH + 1.6`. A 0.2 m post on the centre
+    line stops a body dead, and the road's own regression walks it to prove that.
+22. **The squad attacks; circling is punctuation.** The party swings the moment
+    its blade is free and holds a guard between swings. It breaks off to circle
+    only after a few swings and only sometimes, and it blocks while it circles -
+    a squad that orbits while being hit is the failure this rule exists to stop.
 20. **No body gets a private health pool.** Every mercenary is 100 health, the NPC
     rescuer included — a `RESCUER_HEALTH` bump was tried and removed: it breaks
     the equal-stats contract and carries into the roster. If a scripted fight is
@@ -184,14 +198,18 @@ Integration seams deliberately placed in the base game:
 
 | Knob | Where | Now |
 | --- | --- | --- |
-| Watcher health / damage / speed / sight / orbit | `cage_watcher.gd::_profiles()` | 72 / 5 / 5.6 / 60 / 1.9 |
+| Watcher pools | `cage_watcher.gd` | pair 44 (no guard), everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
 | Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
 | Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 (Corvin's pair + the six at the leaving); a tally, no longer a gate |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
 | Clearing size | `camp_dressing.gd` (`YARD_*`), `camp_clearing.gd` | 60 × 68 m of clear ground, treeline immediately outside, 10 fence runs / 357 stakes |
 | Camp torches | `cage_escape.gd::CAMP_TORCHES` | 17 (cages, mouth, both flanks, the rim) |
-| The trail: length, width, torches | `run_forest.gd` | **915 m** (21 waypoints), 11 m walkable, torches every 20 m a side (~90), 3.4 energy / 16 m |
+| The trail: length, width, torches | `run_forest.gd` | **915 m** (21 waypoints), 11 m walkable, torches every 20 m a side at 6.4 m — on the verge, never in the band |
+| Mob guard | `devil_mob.gd::GUARD_REDUCTION`, `cage_watcher.gd` | braced most of its cycle, 65% of a blow turned; warband cultists only (`guard_between_swings`) |
+| Squad rhythm | `squad_drive.gd` | swing the moment the blade is free, guard in the gap, and after 3+ swings a 35% chance to guard-and-circle for 0.6-1.2 s |
+| Party start | `cage_escape.gd::_dress_rags` | one brown sack on the chest, nothing else, no weapon anywhere |
+| Corpse loot | `cage_watcher.gd::gear_items`, `squad_drive.gd::LOOT_CLEAR_METRES` | a cultist drops its blade and its rag; the squad strips the field only when no hostile is within 22 m |
 | The world: night | `run_forest.gd::night_style()` | ambient 2.5, sun 0.55, fog 0.012, filmic, saturation 0.80 |
 | The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd::ROAD_PER_POST`, `run_forest.gd::CLEARING_FRACTIONS` | 48 in one hostile list: 2 in the clearing, 6 out of the trees at `ESCAPING`, 40 on the road (4 per post, 10 posts: first at 10% of the lane, then 22/44/66/88%). Nobody carries a spawn-time quarry; `wake_road` gives a third of each ring the soul at the leaving |
 | Hand torch | `torch_light.gd` | off hand, 45 gold, 7.5 energy / 26 m / attenuation 1.0, polled every 0.2 s |
@@ -232,7 +250,7 @@ Integration seams deliberately placed in the base game:
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
-| `cage_escape_regression` | 191 | cards/pause, Corvin killing the pair unattended, the four latches falling when the soul enters him (G does nothing), the squad arming, 72 HP watchers, the six at the mouth, drops |
+| `cage_escape_regression` | 197 | cards/pause, Corvin killing the pair unattended, the four latches falling when the soul enters him (G does nothing), the squad arming, 72 HP watchers, the six at the mouth, drops |
 | `escape_run_regression` | 242 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
 | `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 174 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |

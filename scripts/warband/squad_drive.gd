@@ -40,6 +40,10 @@ var eligible := Callable()
 var following := false
 ## How far behind the soul an escorting ally may fall before it closes up.
 var follow_slack := 3.2
+## Deterministic across runs: the rhythm looks unscripted without making a
+## regression flaky.
+var _rng := RandomNumberGenerator.new()
+var _rng_seeded := false
 var engage_radius := 60.0
 ## How close an ally must stand to swing.
 var reach := 2.0
@@ -53,6 +57,13 @@ const BLOCKED_SECONDS := 0.35
 const SIDESTEP_SECONDS := 0.55
 ## How clear the field has to be before a squadmate bends over a corpse.
 const LOOT_CLEAR_METRES := 22.0
+## The pressure rhythm: this many swings, then a chance to break off, guard and
+## walk the circle for a beat before coming back in. Circling is punctuation, not
+## a stance - a squad that only ever circles is a squad getting hit.
+const SWINGS_BEFORE_CIRCLE := 3
+const CIRCLE_CHANCE := 0.35
+const CIRCLE_MIN := 0.6
+const CIRCLE_MAX := 1.2
 
 ## per merc_id: {last, stuck, side, sign}
 var _track: Dictionary = {}
@@ -258,33 +269,50 @@ func _fight(actor, watcher, track: Dictionary) -> void:
 	to.y = 0.0
 	var distance := to.length()
 	actor.combat.set_aim(watcher.get_aim_position())
-	if distance > reach:
+	# Nothing circles: the squad walks into the cult and stays on it. A body that
+	# steps back and forth while a cultist hits it reads as a spectator, and the
+	# squad's job is to be the reason the player is not alone in here.
+	if distance > reach * 0.92:
+		actor.combat.stop_block()
 		_advance(actor, watcher.global_position, track)
 		return
-	_hold(actor)
 	if str(actor.rig.weapon) == "bow":
+		_hold(actor)
 		if actor.combat.can_draw():
 			actor.combat.begin_draw()
 		elif float(actor.rig.draw_amount) >= 0.85:
 			actor.combat.release_draw()
-	elif float(actor.combat.clash_cooldown) <= 0.0:
+		return
+	# A break-off beat: guard up, walk the circle, come back in. It happens after a
+	# few swings and not every time, so it reads as a fighter resetting rather than
+	# as a body that will not fight.
+	if float(track.get("circle", 0.0)) > 0.0:
+		actor.combat.start_block(to.normalized())
+		_circle(actor, to, track)
+		return
+	# The rhythm of a fight: swing the moment the blade is free, and hold the guard
+	# in the gap rather than standing in the open taking the counter.
+	if float(actor.combat.clash_cooldown) <= 0.0:
+		actor.combat.stop_block()
 		# A dagger swings its stab, not the overhead chop: that is the variant the
 		# item's own passive speeds up (Prison shank, +200%), and it is what makes
 		# a shiv a shiv. Every other blade keeps the overhead.
 		var variant := "stab" if str(actor.rig.weapon) == "dagger" else "overhead"
 		actor.combat.begin_melee("right", variant)
 		engaged = true
-	elif float(actor.combat.clash_cooldown) > 0.30:
-		# Recovery is spent drifting around the cultist, not standing in its face.
-		# A braced cultist turns most of a blow, so the fight is won by taking the
-		# openings (after its strike, or on a stagger) rather than by pressing.
-		_circle(actor, to, track)
+		track["swings"] = int(track.get("swings", 0)) + 1
+		if int(track["swings"]) >= SWINGS_BEFORE_CIRCLE and _rng.randf() < CIRCLE_CHANCE:
+			track["swings"] = 0
+			track["circle"] = _rng.randf_range(CIRCLE_MIN, CIRCLE_MAX)
+		return
+	actor.combat.start_block(to.normalized())
+	# Walk the last half metre in while the guard is up: pressure, not orbiting.
+	if distance > reach * 0.55:
+		_advance(actor, watcher.global_position, track)
+	else:
+		_hold(actor)
 
 
-## Step toward `point`, or sideways for a moment when the body has been leaning
-## on something it cannot pass. A wall or a trunk stops a shoulder-driven runner
-## dead, and a squadmate pinned against the lane's edge would stand there for the
-## rest of the run; one sidestep gets it round and back on the line.
 func _advance(actor, point: Vector3, track: Dictionary) -> void:
 	var to: Vector3 = point - actor.global_position
 	to.y = 0.0
@@ -301,9 +329,14 @@ func _advance(actor, point: Vector3, track: Dictionary) -> void:
 ## and the remainder of a sidestep once it starts one. The sign alternates, so a
 ## body caught between two things tries both ways round instead of one forever.
 func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
+	if not _rng_seeded:
+		_rng_seeded = true
+		_rng.seed = 9173
 	if not _track.has(merc_id):
-		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0, "sign": 1.0}
+		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0,
+			"sign": 1.0, "swings": 0, "circle": 0.0}
 	var track: Dictionary = _track[merc_id]
+	track["circle"] = maxf(0.0, float(track.get("circle", 0.0)) - delta)
 	var moved: float = actor.global_position.distance_to(track["last"])
 	track["last"] = actor.global_position
 	var wanted: bool = Vector2(actor.move_direction).length_squared() > 0.01

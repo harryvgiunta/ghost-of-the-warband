@@ -44,9 +44,10 @@ const VERGE := 22.0
 const TREE_CHUNK := 64.0
 ## Bushes cover the verge in one pass: fewer, larger batches than the trees.
 const BUSH_CHUNK := 96.0
-## Torches: one either side every this many metres, at the lane's edge.
+## Torches: one either side every this many metres, on the verge - outside the
+## walkable band, because a staked post is solid and a body must never jam on one.
 const TORCH_SPACING := 20.0
-const TORCH_OFFSET := 4.6
+const TORCH_OFFSET := 6.4
 ## Where the cult stands in pairs. Fractions of the lane's arc length.
 const CLEARING_FRACTIONS := [0.22, 0.44, 0.66, 0.88]
 ## Grass and ferns are confined to the lane's verge: the rest of the wood is
@@ -545,17 +546,24 @@ static func _build_lane_walls(root: Root, path: Path, closed_start: bool = true,
 	walls.collision_layer = 1
 	walls.collision_mask = 0
 	root.add_child(walls)
-	for index in range(path.points.size() - 1):
-		var from := path.points[index]
-		var to := path.points[index + 1]
-		var span := to.distance_to(from)
-		var forward := (to - from) / maxf(0.0001, span)
+	# The walls follow the curve, not the waypoint chords. A box laid along a 45 m
+	# chord on the inside of a bend swings its far end into the walkable band and
+	# stops a body dead in the middle of the road - which is exactly what happened.
+	var step := 15.0
+	var at := 0.0
+	while at < path.total:
+		var here: Dictionary = path.sample(at)
+		var next: Dictionary = path.sample(minf(at + step, path.total))
+		var from: Vector3 = here["position"]
+		var to: Vector3 = next["position"]
+		var span := from.distance_to(to)
+		var forward: Vector3 = (to - from) / maxf(0.0001, span)
 		var right := Vector3(forward.z, 0.0, -forward.x)
-		# Overlap the segment ends: a corner must not open a gap.
-		var length := span + 1.6
 		for side in [-1.0, 1.0]:
-			_wall_segment(walls, (from + to) * 0.5 + right * side * (HALF_WIDTH + WALL_OFFSET),
-				length, _yaw_facing(forward))
+			_wall_segment(walls, (from + to) * 0.5
+				+ right * side * (HALF_WIDTH + WALL_OFFSET + 1.2),
+				span + 1.2, _yaw_facing(forward))
+		at += step
 	if not closed_start and not closed_end:
 		return
 	# The camp end and the town end are closed when the lane stands alone; the
@@ -901,7 +909,7 @@ static func _build_hanging(root: Root, path: Path) -> void:
 		var frame := path.sample(at)
 		var host := _host(group, frame["position"], _yaw_spanning(frame["forward"]))
 		host.name = "BoneArch%d" % (index + 1)
-		CampKit.bone_arch(host, mats, root.solids, HALF_WIDTH + 0.4, 3.2, SEED + 61 + index * 3)
+		CampKit.bone_arch(host, mats, root.solids, HALF_WIDTH + 1.6, 3.2, SEED + 61 + index * 3)
 	root.stats["hanging"] = 7 + 3 + 4 + 2 + 2
 
 

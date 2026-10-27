@@ -352,6 +352,8 @@ func check_walk() -> void:
 	var worst_step := 0.0
 	var index := 1
 	var ticks := 0
+	var last_gap := 9999.0
+	var stall_ticks := 0
 	var started := Time.get_ticks_msec()
 	Engine.physics_ticks_per_second = 180
 	Engine.time_scale = WALK_SCALE
@@ -377,6 +379,16 @@ func check_walk() -> void:
 		previous = gap
 		if gap <= 3.0:
 			break
+		# A player steps around a post; a straight-line driver pushes into it and
+		# stays there. Sidestep for a beat whenever the ground stops being made.
+		if absf(gap - last_gap) < 0.05:
+			stall_ticks += 1
+		else:
+			stall_ticks = 0
+		last_gap = gap
+		if stall_ticks > 40:
+			body.accept_network_input(Vector2(-direction.z, direction.x)
+				* (1.0 if int(ticks / 40) % 2 == 0 else -1.0), false)
 	Engine.time_scale = 1.0
 	Engine.physics_ticks_per_second = 60
 	game.controller.input_enabled = true
