@@ -143,18 +143,25 @@ func check_the_world() -> void:
 	_dismiss_card()
 	game.camp.sequencer.note_rescuer_arrived()
 	_dismiss_card()
-	game.camp.sequencer.note_rescuer_taken()
-	# The latches are opened the way the camp opens them, so the caged bodies are
-	# really free: a soul left clamped in its cage cannot be the body that walks.
-	for index in game.camp.caged_ids.size():
-		game.camp._open_cage(index)
+	# The pair standing over the cages fall, then the soul itself steps into
+	# Corvin: those are the two facts that cut the latches, so the cages open the
+	# way the camp opens them now and no caged body stays clamped behind one.
+	for watcher in game.camp.guards.duplicate():
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(400.0, 0)
+	game.controller.direct(1, game.camp.rescuer_id)
 	_dismiss_card()
-	for index in SequencerScript.GUARD_COUNT:
-		game.camp.sequencer.note_guard_killed()
+	check(game.camp.cages_open(), "taking Corvin cut every latch (%d of %d)"
+		% [game.camp.cages_open_count(), game.camp.caged_ids.size()])
+	# The escape is the walk out: the soul crosses the mouth and the wood answers.
+	var soul = game.controller.active_body(1)
+	soul.global_position = game.camp.GATE_POINT + Vector3(0.0, 0.2, 0.0)
+	await physics_frame
+	await physics_frame
 	_dismiss_card()
 	check(game.camp.sequencer.state() == SequencerScript.State.ESCAPING,
 		"the camp reaches the escape (%s)" % game.camp.sequencer.state_name())
-	var soul = game.controller.active_body(1)
+	soul = game.controller.active_body(1)
 	check(soul != null, "the soul is seated in a body when the trail opens")
 	check(soul != null and game.trail.guards.size() == 40,
 		"forty cultists hold the trail (%d)" % game.trail.guards.size())
@@ -268,7 +275,12 @@ func check_pursuers() -> void:
 	check(armed == game.trail.guards.size(), "every cultist holds a weapon (%d/%d)"
 		% [armed, game.trail.guards.size()])
 	check(visible >= 6, "the blade is in its hand (%d visible)" % visible)
-	check(hunting == 0, "nobody is handed a target from across the wood (%d hunting)" % hunting)
+	# The road answers the *leaving*: when the squad steps out of the clearing a
+	# third of every ring is handed the soul, and no more. A cultist with a quarry
+	# from spawn walks ninety metres into the camp's own fight.
+	check(hunting <= int(game.trail.guards.size() / 3) + 1,
+		"only the leaving hands the road a quarry (%d of %d hunting)"
+		% [hunting, game.trail.guards.size()])
 	# The ambush stands well inside the trail rather than on the camp's doorstep:
 	# a cultist sees 60 m, so anything closer joins the tutorial's own fight.
 	var start: Vector3 = game.trail.forest["start"]

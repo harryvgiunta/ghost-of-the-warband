@@ -34,23 +34,30 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
 1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
    keys; it closes on CONTINUE / G / Enter / Escape.
-2. **The rescuer.** Corvin runs in with a shiv and **stands still**. The player
-   must take his body themselves (F5 or `[` / `]`); no latch opens before that.
-3. **Latches.** Walk to each of the four cages and press **G**. Each cage opens
-   individually; freed prisoners become **squad AI**: they pick up the steel on
-   the ground by themselves and charge the watchers.
-4. **The fight.** Two bare antlered watchers in the clearing; when both fall,
-   **six armed watchers come out of the trees** (each drops the weapon it holds).
-   Watchers have 72 health, run at 5.6 m/s and hunt aggressively. Eight kills open
-   the way.
-5. **The wood.** There is no gate to open: the clearing's mouth leads onto a 286 m
-   trail through the same wood — 48 torches down both verges, ironoak and hollow
-   snags, rag trees and gallows trees with charms strung across the track, wicker
-   effigies, skull stakes, cauldrons, braziers, straw, blood and cart ruts. The
-   squad runs it with you, and **eighty** armed cultists hold it: ten at each of
-   its eight posts, the ambush post already locked onto you. A **Hand Torch** (45
-   gold from the quartermaster, off hand) is the answer to the dark: worn, it burns
-   in your hand and lights 26 m of wood around you.
+2. **Corvin.** After the fourth sighting he jogs in with a shiv (~3.6 s) and
+   **does not stand still**: he goes at the two camp watchers and kills them
+   himself, 15 s or so of fight that the player watches from a cage. He is on the
+   same hundred health as everybody else and survives on the shiv's own passive
+   (a dagger swings its stab, and Prison shank is +200% on the stab).
+3. **The latches are his, taken with his body.** The player takes him (`F5` or
+   `[` `]` — never automatic) and **that is the cut**: all four latches open, the
+   doors lift, the freed prisoners become squad AI and arm themselves from the
+   steel on the ground. `G` does nothing to a cage. Take him before the pair are
+   down and he keeps fighting; the cages open when the clearing is clear.
+4. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
+   and **six armed watchers come out of the trees** (each drops its weapon) as the
+   state turns to `ESCAPING`. There is no kill quota to open the way; there is no
+   gate.
+5. **The wood.** The mouth leads onto a **915 m** road through the same wood —
+   torches down both verges every 20 m, ironoak and hollow snags, rag trees and
+   gallows trees with charms strung across the track, wicker effigies, skull
+   stakes, cauldrons, braziers, straw, blood and cart ruts. The squad runs it with
+   you. **Forty** armed cultists hold it: four at each of ten posts, spaced about
+   100 m apart from ~90 m in to 800 m out — and none of them is handed a target at
+   spawn. The road answers the leaving: a third of every ring takes the soul at
+   `ESCAPING`, the rest notice by sight. A **Hand Torch** (45 gold from the
+   quartermaster, off hand) is the answer to the dark: worn, it burns in your hand
+   and lights 26 m of wood around you.
 6. **Town.** The trail ends at a town built into the trees: a wooden road sign
    over its gate, the fire ring, the stalls, and the services — shared infinite
    stash, Sacrificial Altar (unbind / distil 5:1 / brand), Gold recruiter,
@@ -155,6 +162,18 @@ Integration seams deliberately placed in the base game:
     cages; `enter_warband()` is the resume path and is not what the title calls.
     `title_menu_regression` pins it with a saved warband that must not survive the
     click.
+19. **The cages fall to taking Corvin, and the ambush is the leaving.** There is
+    no latch key: `G` does nothing to a cage, and the four latches are cut in the
+    same call that puts the soul in his body (`_maybe_cut_latches` needs the soul
+    *in him* and no watcher standing). `ESCAPING` is the body crossing the mouth,
+    and that frame spawns the six armed watchers; `GUARD_COUNT` is a tally, not a
+    gate. The road never spawns a cultist with a quarry: `wake_road` hands a third
+    of each ring the soul at the leaving, and the rest notice by sight.
+20. **No body gets a private health pool.** Every mercenary is 100 health, the NPC
+    rescuer included — a `RESCUER_HEALTH` bump was tried and removed: it breaks
+    the equal-stats contract and carries into the roster. If a scripted fight is
+    too costly, fix the fight (the shiv's stab passive is what makes a shiv work),
+    not the pool.
 18. **The hand torch is one module and one brightness.** `torch_light.gd` owns the
     item's visual (shared with the icon studio through `build_visual`) and its light
     (7.5 energy, 26 m, warm): a carried torch has to be brighter than the trail's
@@ -168,16 +187,16 @@ Integration seams deliberately placed in the base game:
 | Watcher health / damage / speed / sight / orbit | `cage_watcher.gd::_profiles()` | 72 / 5 / 5.6 / 60 / 1.9 |
 | Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
-| Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 |
+| Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 (Corvin's pair + the six at the leaving); a tally, no longer a gate |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
 | Clearing size | `camp_dressing.gd` (`YARD_*`), `camp_clearing.gd` | 60 × 68 m of clear ground, treeline immediately outside, 10 fence runs / 357 stakes |
 | Camp torches | `cage_escape.gd::CAMP_TORCHES` | 17 (cages, mouth, both flanks, the rim) |
-| The trail: length, width, torches | `run_forest.gd` | 286 m, 11 m walkable, 48 torches every 12 m a side (3.4 energy / 16 m) |
+| The trail: length, width, torches | `run_forest.gd` | **915 m** (21 waypoints), 11 m walkable, torches every 20 m a side (~90), 3.4 energy / 16 m |
 | The world: night | `run_forest.gd::night_style()` | ambient 2.5, sun 0.55, fog 0.012, filmic, saturation 0.80 |
-| The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd::ROAD_PER_POST`, `run_forest.gd::_pursuer_posts` | 88 in one hostile list: 2 in the clearing, 6 out of the trees, 80 on the trail (10 per post, 8 posts); the ambush post stands ~22 m into the trail, never on the camp's doorstep |
+| The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd::ROAD_PER_POST`, `run_forest.gd::CLEARING_FRACTIONS` | 48 in one hostile list: 2 in the clearing, 6 out of the trees at `ESCAPING`, 40 on the road (4 per post, 10 posts: first at 10% of the lane, then 22/44/66/88%). Nobody carries a spawn-time quarry; `wake_road` gives a third of each ring the soul at the leaving |
 | Hand torch | `torch_light.gd` | off hand, 45 gold, 7.5 energy / 26 m / attenuation 1.0, polled every 0.2 s |
-| The world: budget | `warband_world_regression.gd` caps | nodes ≤ 4900 (now 4748), draws ≤ 420 (323), shapes ≤ 900 (590), lights ≤ 110 (88) |
-| The world: walk | `warband_world_regression.gd` | 359 m cage line → town square, 66.4 s of game time, 0 scene changes |
+| The world: budget | `warband_world_regression.gd` caps | nodes ≤ 5600 (now 5386), draws ≤ 760 (674), shapes ≤ 1300 (1174), lights ≤ 170 (133) |
+| The world: walk | `warband_world_regression.gd` | 42 m opening + 947 m road = 989 m cage line → town square, 174.6 s of game time, 0 scene changes |
 | Town lanterns | `town_dressing.gd` | 4 posts, 3.2 energy / 15 m, attenuation 1.1 |
 | Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the town end of the world; nobody revived, nothing gathered |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
@@ -213,10 +232,10 @@ Integration seams deliberately placed in the base game:
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
-| `cage_escape_regression` | 158 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six out of the trees, drops, the mouth |
-| `escape_run_regression` | 400 | the trail as an area: 286 m walkable lane, art budget, 80 hunters clear of the camp, both endings |
+| `cage_escape_regression` | 191 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six out of the trees, drops, the mouth |
+| `escape_run_regression` | 242 | the trail as an area: 286 m walkable lane, art budget, 80 hunters clear of the camp, both endings |
 | `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 172 | one scene and one controller, the camp in the trees, the lesson, 359 m camp → town with no scene change, the services at the far end, budget |
+| `warband_world_regression` | 174 | one scene and one controller, the camp in the trees, the lesson, 359 m camp → town with no scene change, the services at the far end, budget |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |

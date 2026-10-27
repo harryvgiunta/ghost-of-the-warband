@@ -19,10 +19,14 @@ extends Node3D
 ##     clearing is otherwise only visible as a quarter of the world.
 ##
 ## What the camp owns: the four cages and their latches, the clamp that keeps a
-## caged soul in its cage, the rescuer's jog, the two watchers and the six armed
-## reinforcements out of the trees, the sequencer's beats and the cards that
-## explain them. What it never owns in the world: the bodies, the camera, the HUD
-## prompt, the revive channel or the loot vacuum.
+## caged soul in its cage, the rescuer's jog and the two watchers he puts down
+## himself, the six armed watchers that answer the squad leaving, the sequencer's
+## beats and the cards that explain them. What it never owns in the world: the
+## bodies, the camera, the HUD prompt, the revive channel or the loot vacuum.
+##
+## The opening is four beats and none of them is a key hunt: see the four bodies,
+## watch Corvin take the pair, step into him so he can cut all four latches, then
+## walk the squad out through the mouth - which is the ambush.
 ##
 ## The geometry is `camp_clearing.gd` (fence, wood, cages, fire) and the dressing
 ## is `camp_dressing.gd` (padlocks, banners, gibbets, braziers, litter). The
@@ -77,19 +81,22 @@ const CAMP_TORCHES := [
 
 ## The two gate watchers: the antlered hollow warden silhouette, thinned in
 ## `cage_watcher.gd` so three dagger stabs end one. They stand between the cages
-## and the mouth, turn on the squad when the first latch goes, and are slow
-## enough to learn to block.
+## and the mouth, turn on Corvin the moment he turns on them, and are slow enough
+## that his shiv finishes the pair without the player's help.
 const GATE_WATCHERS := [
 	{"post": Vector3(-4.2, 0.1, -20.5)},
 	{"post": Vector3(4.2, 0.1, -20.5)},
 ]
-## The second wave: six armed watchers out of the trees at the clearing's mouth
-## once the first pair is down. Each carries the weapon it drops.
+## The second wave: six armed watchers out of the trees at the clearing's mouth,
+## and the ambush the whole opening is walking towards. They come when the squad
+## steps out through the mouth - the trees answer the leaving, not a kill count.
+## Each carries the weapon it drops.
 const REINFORCEMENTS := [
 	"sword_short", "dagger_iron", "sword_arming",
 	"sword_short", "dagger_iron", "sword_arming",
 ]
-const REINFORCE_DELAY := 2.5
+## How close the soul's body has to be to the mouth for the wood to answer it.
+const ESCAPE_RADIUS := 6.0
 ## On the trail side of the mouth, coming down out of the trees into the clearing.
 const REINFORCE_POSTS := [
 	Vector3(-3.4, 0.1, -48.0), Vector3(-2.0, 0.1, -49.0), Vector3(-0.7, 0.1, -50.0),
@@ -108,7 +115,9 @@ const WEAPON_DROPS := [
 	["sword_arming", Vector3(-4.6, 0.15, -16.5)],
 ]
 ## One big card per beat. The card pauses the game, so every line has to be
-## worth reading: the lesson, then the exact keys, then the one way out.
+## worth reading: the lesson, then the exact keys, then the one way out. No card
+## asks the player to open a cage or to put the pair down: Corvin does both, and
+## the player's beat is his body.
 const STEP_CARDS := {
 	0: {  # CAGED
 		"kicker": "STEP 1  /  THE CAGES",
@@ -120,33 +129,34 @@ const STEP_CARDS := {
 	1: {  # ALL_SEEN
 		"kicker": "STEP 2  /  THE SHIV",
 		"title": "All four seen - here he comes",
-		"body": "The fifth prisoner is loose, and he is running for the cages with a knife.",
-		"keys": "Wait for him",
-		"footnote": "Close this card to let him arrive.",
+		"body": "The fifth prisoner is loose, and he is running for the cages with a knife. He is not here to talk: he goes straight at the two watchers, and he puts them down himself.",
+		"keys": "Watch him work",
+		"footnote": "Close this card and let him arrive - you do not have to help.",
 	},
 	2: {  # RESCUER_ARRIVED
 		"kicker": "STEP 3  /  THE LATCHES",
-		"title": "Corvin has the shiv",
-		"body": "He is through with the shiv and he is not moving. Take his body yourself, then walk to each cage and cut its latch. Four cages, four latches - and the watchers wake when the first one falls.",
-		"keys": "F5  or  [ ]  take Corvin        ·        G  cut a latch",
-		"footnote": "Nothing happens until you are in his body: only his hands carry the shiv.",
+		"title": "Take his body and every cage opens",
+		"body": "Only Corvin's hands carry the shiv, and only his hands cut a latch. Step into him: the moment your soul is in his body he cuts all four latches at once and the squad is out - and armed off the steel on the ground.",
+		"keys": "F5  or  [ ]  -  take Corvin's body",
+		"footnote": "Nothing opens while you are still in a cage, and nothing opens while a watcher is still standing over them.",
 	},
 	3: {  # FREED
-		"kicker": "STEP 4  /  ARM YOURSELF",
-		"title": "The squad is out. Hold the clearing.",
-		"body": "The squad arms itself from the dead - you do not have to loot anything. Put down the watchers in front of you: three stabs each, and six more come out of the trees when the first two fall.",
-		"keys": "LMB / RMB  fight        ·        E  revive",
-		"footnote": "The watchers are slow and light. Hold RMB to block, then stab.",
+		"kicker": "STEP 4  /  OUT",
+		"title": "Four cages open, five bodies on their feet",
+		"body": "The squad arms itself from the dead - you do not have to loot anything. There is nothing left to fight in the clearing: the way on is the mouth in the fence at the far end of the yard.",
+		"keys": "W A S D  -  walk out through the mouth",
+		"footnote": "Whatever is standing in those trees comes when you leave, not before.",
 	},
 	4: {  # ESCAPING
 		"kicker": "STEP 5  /  THE TRAIL",
-		"title": "The way out is the trail through the wood",
-		"body": "The clearing's mouth opens onto a trail of torchlight, rags and bones, cut through the dark wood. The squad comes with you and the town is at the far end of it. There is no door to open and nowhere to be carried - you walk it.",
-		"keys": "W A S D  -  walk the trail        ·        the squad follows",
+		"title": "The trees answer: run the trail",
+		"body": "Six armed watchers step out of the treeline behind you and the trail through the wood is held the whole way down. The squad comes with you and the town is at the far end of it. There is no door to open and nowhere to be carried - you walk it.",
+		"keys": "W A S D  -  walk the trail        ·        LMB / RMB  -  fight",
 		"footnote": "The town's counters, its altar and its expedition gate are at the far end, on foot.",
 	},
 }
 
+## Corvin's own constitution. He is not a wretch behind bars: he kept his shiv,
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
@@ -187,8 +197,6 @@ var _cage_open: Array[bool] = []     # per cage, in CAGE_POSTS order
 var _watchers_awake := false
 var _card_state := -1
 var _steel_taken := 0
-var _reinforcements := false
-var _reinforce_in := -1.0
 var _prompt_text := ""
 var _hint_text := ""
 var _lesson := false
@@ -297,6 +305,10 @@ func place_warband(bodies_in: Array) -> void:
 		controller.set_bot(merc_id, false)
 	for merc_id in caged_ids:
 		_cage_anchors[merc_id] = _post_for(merc_id)
+	# The rescuer stays on the same hundred every mercenary has: an NPC with a
+	# private pool would break the contract and carry the extra health into the
+	# roster. He survives the pair on the shiv's own passive instead (see the
+	# squad's dagger variant), not on a bigger pool.
 	for drop in WEAPON_DROPS:
 		_spawn_pickup(str(drop[0]), drop[1])
 
@@ -325,8 +337,12 @@ func lesson_running() -> bool:
 
 
 ## Whether this mercenary is free to act as a squadmate: a prisoner whose latch
-## has been cut, or anybody who was never in a cage. The rescuer is the player's
-## beat, not the AI's, until the squad is out (rule 9).
+## has been cut, or anybody who was never in a cage. Corvin is still not an
+## escort - nobody is ever put in his body for the player - but the pair standing
+## over the cages are his, and he takes them on through the squad's own module.
+## That module leaves the body the player is inside alone, so the moment the soul
+## steps into him the hands are the player's. Once the pair are down and the cages
+## still shut he holds: the trail's cultists are not his to chase.
 func is_free(merc_id: int) -> bool:
 	if merc_id <= 0:
 		return false
@@ -336,26 +352,10 @@ func is_free(merc_id: int) -> bool:
 	if index >= 0:
 		return index < _cage_open.size() and bool(_cage_open[index])
 	if merc_id == rescuer_id:
+		if sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
+			return watchers_down() < GATE_WATCHERS.size()
 		return sequencer.state() == SequencerScript.State.FREED \
 			or sequencer.state() == SequencerScript.State.ESCAPING
-	return true
-
-
-## `G` at the camp: cut the latch in reach, or say why not. Returns true when the
-## camp answered, so the world's one interaction handler can fall through to the
-## town and to the loot on the ground.
-func try_interact() -> bool:
-	if not lesson_running():
-		return false
-	if sequencer.state() != SequencerScript.State.RESCUER_ARRIVED:
-		return false
-	var index := _cage_in_reach()
-	if index < 0:
-		return false
-	if controller.merc_for_peer(1) != rescuer_id:
-		_set_status("Only Corvin has the shiv. Press F5 to take his body.", 3.0)
-		return true
-	_open_cage(index)
 	return true
 
 
@@ -368,27 +368,21 @@ func prompt_line(actor) -> String:
 		# The lesson is over: the world's own line - the trail and the metres to
 		# the town - is what a body needs then, not a stale instruction.
 		return ""
-	if _cage_in_reach() >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
-		return "G - cut the latch" if controller.merc_for_peer(1) == rescuer_id \
-			else "F5  -  take Corvin's body"
 	return sequencer.objective()
 
 
-## The lesson's key line, or "" when the body is not the camp's business.
+## The lesson's key line, or "" when the body is not the camp's business. There
+## is no key to press in the clearing: the beat is a possession and then a walk.
 func hint_line(actor) -> String:
 	if not lesson_running() or actor == null or not is_instance_valid(actor):
 		return ""
 	if not _in_camp(actor) and sequencer.state() != SequencerScript.State.ESCAPING:
 		return ""
-	if _cage_in_reach() >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
-		if controller.merc_for_peer(1) != rescuer_id:
-			return "F5  or  [ ]  -  take Corvin's body: only his shiv cuts a latch"
-		return "G - cut this cage's latch   (%d of %d opened)" % [
-			cages_open_count(), caged_ids.size()]
 	return sequencer.hint()
 
 
-## How many latches the player has cut, 0..4.
+## How many latches have been cut, 0..4. They all go at once, so this is the
+## squad's out-or-in answer, not a progress bar.
 func cages_open_count() -> int:
 	var count := 0
 	for open in _cage_open:
@@ -461,13 +455,9 @@ func _physics_process(delta: float) -> void:
 	if not lesson_running() or controller == null:
 		return
 	_rescuer_jog()
-	if _reinforce_in > 0.0:
-		_reinforce_in -= delta
-		if _reinforce_in <= 0.0:
-			_reinforce_in = -1.0
-			_spawn_reinforcements()
 	_maintain_watchers()
 	_clamp_caged_bodies()
+	_check_escape()
 
 
 # --- the clearing ----------------------------------------------------------
@@ -603,17 +593,23 @@ func _add_watcher(at: Vector3, label: String, weapon: String = "") -> Node3D:
 	return watcher
 
 
-## Keep the camp's watchers pointed at whichever body is the closest threat - the
-## world's one hostile driver does the aiming - and, once the first cage is open,
-## let them know the camp is awake.
+## The pair wake the moment Corvin is at the cages - he is going straight at them,
+## and a watcher that waited to be noticed would be a prop. They take him as their
+## quarry, which is also what keeps them off the caged bodies while he works, and
+## the squad module that runs him swings back.
 func _maintain_watchers() -> void:
-	if guards.is_empty():
+	if guards.is_empty() or _watchers_awake:
 		return
-	if cages_open_count() > 0 and not _watchers_awake:
-		_watchers_awake = true
-		for watcher in guards:
-			if is_instance_valid(watcher) and bool(watcher.get("alive")):
-				watcher.mob_wake()
+	if sequencer == null or sequencer.state() != SequencerScript.State.RESCUER_ARRIVED:
+		return
+	_watchers_awake = true
+	var prey = controller.body_of(rescuer_id) if controller != null else null
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		watcher.mob_wake()
+		if prey != null and is_instance_valid(prey):
+			watcher.hunt(prey)
 
 
 func _on_watcher_defeated(enemy, _reward: int) -> void:
@@ -623,15 +619,13 @@ func _on_watcher_defeated(enemy, _reward: int) -> void:
 		var item_id := str(enemy.take_weapon_item())
 		if not item_id.is_empty():
 			_spawn_pickup(item_id, enemy.global_position + Vector3(0.3, 0.0, 0.2))
-	# The wood answers the first pair: six armed watchers come in off the trail.
-	if watchers_down() >= 2 and not _reinforcements:
-		_reinforcements = true
-		_reinforce_in = REINFORCE_DELAY
-		_set_status("Something moves in the trees: six armed watchers come in.", 3.0)
+	# The pair falling is what clears Corvin's hands: if the soul is already in
+	# him, the latches go the moment the second one drops.
+	_maybe_cut_latches()
 
 
-## The second wave: six watchers out of the treeline at the mouth, each carrying
-## the weapon it will drop when it falls. They are pointed at the warband on the
+## The ambush: six watchers out of the treeline at the mouth, each carrying the
+## weapon it will drop when it falls. They are pointed at the nearest body on the
 ## frame they exist, so they charge in instead of waiting to spot somebody.
 func _spawn_reinforcements() -> void:
 	var prey = nearest_standing_body(REINFORCE_POSTS[2])
@@ -691,12 +685,8 @@ func _on_state_changed(state: int, objective: String) -> void:
 	if hud != null:
 		hud.set_status(objective, 6.0)
 	_write_prompt(objective, objective)
-	# Entering the fight reconciles kills and steel the squad already landed
-	# while the cages were still being cut.
-	if state == SequencerScript.State.FREED:
-		sequencer.note_battle_state(watchers_down(), _steel_taken)
-		if squad != null:
-			squad.following = false
+	if state == SequencerScript.State.FREED and squad != null:
+		squad.following = false
 	match state:
 		SequencerScript.State.ALL_SEEN:
 			_jogging = true
@@ -710,16 +700,16 @@ func _on_state_changed(state: int, objective: String) -> void:
 				screen.refresh()
 
 
-## The rescuer is through and stands still: the soul is NOT moved for the player.
-## Taking his body is the beat - F5 or [ ] - and no latch opens until Corvin's
-## hands are the player's hands.
+## The rescuer is at the cages with the shiv, and he does not wait there: the
+## squad module takes him over on the next frame and he goes at the pair. The
+## soul is NOT moved into him for the player - taking his body is the beat.
 func _on_rescuer_ready(merc_id: int) -> void:
 	_jogging = false
 	var actor = controller.body_of(merc_id) if controller != null else null
 	if actor != null and is_instance_valid(actor):
 		actor.accept_network_input(Vector2.ZERO, false)
 	if hud != null:
-		hud.set_status("Corvin is through with the shiv. Press F5 (or [ ]) to take his body.", 6.0)
+		hud.set_status("Corvin is at the watchers. Press F5 (or [ ]) to take his body.", 6.0)
 
 
 ## A possession happened. The world owns the controller, so it calls this even
@@ -731,41 +721,65 @@ func note_possession(merc_id: int) -> void:
 		sequencer.note_body_entered(merc_id)
 	if merc_id == rescuer_id:
 		sequencer.note_rescuer_taken()
+		_maybe_cut_latches()
 
 
 # --- the latches -----------------------------------------------------------
 
-## The cage whose bars are closest to the standing body while it is still shut,
-## or -1.
-func _cage_in_reach() -> int:
-	if controller == null:
-		return -1
-	var actor = controller.active_body(1)
-	if actor == null or not is_instance_valid(actor):
-		return -1
-	var best := -1
-	var best_distance := 3.2
+## All four latches, at once. This is the beat the whole opening builds to: the
+## soul is in Corvin's hands and the pair that stood over the cages is down, so
+## every door lifts, every prisoner is booked free and the squad arms itself off
+## the steel on the ground.
+func _cut_latches() -> void:
+	var cut := 0
 	for index in caged_ids.size():
 		if index < _cage_open.size() and bool(_cage_open[index]):
 			continue
-		var anchor: Vector3 = CAGE_POSTS[index]
-		var flat := Vector3(actor.global_position.x - anchor.x, 0.0, actor.global_position.z - anchor.z)
-		if flat.length() <= best_distance:
-			best_distance = flat.length()
-			best = index
-	return best
+		_cage_open[index] = true
+		if sequencer != null:
+			sequencer.note_cage_opened(index)
+		cut += 1
+	if cut > 0:
+		_set_status("Four latches fall at once. The squad is out and arming itself.", 4.0)
 
 
-## Cut one latch. Only the rescuer carries the shiv, so only his body can open a
-## cage - which is the reason the soul has to be taken in the first place.
-func _open_cage(index: int) -> void:
-	if index < 0 or index >= _cage_open.size() or bool(_cage_open[index]):
+## The latches need both halves of the beat: the soul is in Corvin's body right
+## now, and no watcher is left standing over the cages. A shiv in a body the
+## player left behind frees nobody, and standing in a cage frees nobody at all.
+func _maybe_cut_latches() -> void:
+	if sequencer == null or cages_open():
 		return
-	_cage_open[index] = true
-	sequencer.note_cage_opened(index)
-	var who: String = warband.roster.name_of(int(caged_ids[index]))
-	_set_status("Latch cut. %s is free (%d/%d)." % [who, cages_open_count(),
-		caged_ids.size()], 3.0)
+	if sequencer.state() != SequencerScript.State.RESCUER_ARRIVED:
+		return
+	if controller == null or controller.merc_for_peer(1) != rescuer_id:
+		return
+	if watchers_down() < GATE_WATCHERS.size():
+		return
+	_cut_latches()
+
+
+## The ambush is the leaving. Once the squad is out, the soul's body reaching the
+## mouth is what calls the wood down: the state turns and the six walk out of the
+## trees on the same frame.
+func _check_escape() -> void:
+	if sequencer == null or sequencer.state() != SequencerScript.State.FREED:
+		return
+	var actor = controller.active_body(1) if controller != null else null
+	if actor == null or not is_instance_valid(actor):
+		return
+	var flat := Vector2(actor.global_position.x - GATE_POINT.x,
+		actor.global_position.z - GATE_POINT.z)
+	if flat.length() > ESCAPE_RADIUS:
+		return
+	if not sequencer.note_escaped():
+		return
+	_spawn_reinforcements()
+	# The road's own eighty were holding their posts through the whole opening;
+	# the same leaving that brings the six out of the trees puts them on the
+	# squad's heels.
+	if host != null and host.get("trail") != null:
+		host.trail.wake_road(actor)
+	_set_status("The trees answer: six armed watchers come out of the dark.", 4.0)
 
 
 # --- the prompt ------------------------------------------------------------

@@ -591,11 +591,10 @@ func _all_bodies_out() -> bool:
 
 # --- interaction -----------------------------------------------------------
 
-## The one `G`: a cage latch in the camp, a counter in the town, a piece of steel
-## at your feet - in that order, because that is the order a body meets them.
+## The one `G`: a counter in the town, or a piece of steel at your feet. There is
+## nothing to press in the camp - a cage latch is not a key, it is Corvin's hands -
+## and the trail is walked, not opened.
 func _try_interact() -> void:
-	if camp != null and camp.try_interact():
-		return
 	var actor = controller.active_body(1)
 	if actor == null or not is_instance_valid(actor):
 		if hud != null:

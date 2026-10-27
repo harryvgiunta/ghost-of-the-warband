@@ -243,7 +243,11 @@ func _fight(actor, watcher, track: Dictionary) -> void:
 		elif float(actor.rig.draw_amount) >= 0.85:
 			actor.combat.release_draw()
 	elif float(actor.combat.clash_cooldown) <= 0.0:
-		actor.combat.begin_melee()
+		# A dagger swings its stab, not the overhead chop: that is the variant the
+		# item's own passive speeds up (Prison shank, +200%), and it is what makes
+		# a shiv a shiv. Every other blade keeps the overhead.
+		var variant := "stab" if str(actor.rig.weapon) == "dagger" else "overhead"
+		actor.combat.begin_melee("right", variant)
 		engaged = true
 
 
