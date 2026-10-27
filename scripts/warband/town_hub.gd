@@ -18,7 +18,6 @@ extends Node3D
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
-const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
@@ -536,10 +535,7 @@ func service_point(service: String) -> Vector3:
 func _on_paperdoll_changed() -> void:
 	if paperdoll == null or paperdoll.selected_merc <= 0:
 		return
-	var actor = controller.body_of(paperdoll.selected_merc)
-	if actor == null or not is_instance_valid(actor):
-		return
-	SeatLoadout.apply(actor.rig, controller.seat_loadout(paperdoll.selected_merc))
+	controller.refresh_gear(paperdoll.selected_merc)
 
 ## The key line for the square. The town is where a player learns the two screens,
 ## so it always names them, plus whatever counter the body is standing at.

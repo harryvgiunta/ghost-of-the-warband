@@ -26,7 +26,6 @@ const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
-const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const WavesScript = preload("res://scripts/warband/enemy_waves.gd")
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const LootRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
@@ -782,10 +781,7 @@ func _update_prompt() -> void:
 func _refresh_rig(merc_id: int) -> void:
 	if controller == null or merc_id <= 0:
 		return
-	var actor = controller.body_of(merc_id)
-	if actor == null or not is_instance_valid(actor):
-		return
-	SeatLoadout.apply(actor.rig, controller.seat_loadout(merc_id))
+	controller.refresh_gear(merc_id)
 
 ## Which mercenary a picked-up piece should be worn by, or -1.
 func _loot_owner(peer_id: int) -> int:

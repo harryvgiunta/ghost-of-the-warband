@@ -193,6 +193,23 @@ func note_weapon_looted() -> bool:
 	_check_escape()
 	return true
 
+## Reconcile the fight with what is already true. A squadmate can put a watcher
+## down (or take the steel) while the player is still cutting the last latches;
+## `note_guard_killed` refuses those as progress because the squad is not out
+## yet, so the scene hands the running totals over the moment FREED begins.
+## Monotonic: it can only raise a counter, never rewind one.
+func note_battle_state(guards_down: int, weapons: int) -> void:
+	if _state != State.FREED:
+		return
+	var before := _guards_down * 1000 + _weapons
+	_guards_down = clampi(maxi(_guards_down, guards_down), 0, GUARD_COUNT)
+	_weapons = maxi(_weapons, weapons)
+	# Silent when nothing moved: `_check_escape` announces, and a listener that
+	# calls back in on every announce would otherwise recurse forever.
+	if _guards_down * 1000 + _weapons == before:
+		return
+	_check_escape()
+
 ## The freed body stepped into the gate arch and pressed G. Only meaningful once
 ## the fight is over; a body leaning on the gate during the lesson advances
 ## nothing.

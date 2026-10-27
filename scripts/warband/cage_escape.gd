@@ -71,6 +71,10 @@ const GATE_WATCHERS := [
 ]
 ## The one hit a watcher needs to land for the lesson: light, and telegraphed.
 const WATCHER_SOURCE := 90
+## What a sword in this camp is allowed to bite: the watchers' physics layer.
+## `ArenaActor` defaults to 4 (other fighters); a warband body that kept that
+## mask swings through every mob in the game and damages nothing.
+const WATCHER_LAYER := 2
 ## Cultist steel along the walk from the cages to the gate.
 const WEAPON_DROPS := [
 	["sword_short", Vector3(-0.8, 0.15, -0.5)],
@@ -149,6 +153,9 @@ var _watchers_awake := false
 var _card_state := -1
 ## Set the first time a freed ally swings at a watcher; the regression reads it.
 var _ally_engaged := false
+## Steel taken by anyone, counted across the whole tutorial so a squadmate's
+## pickup during the latches still counts once the fight starts.
+var _steel_taken := 0
 var _prompt_text := ""
 var _hint_text := ""
 
@@ -343,6 +350,10 @@ func _place_bodies() -> void:
 		actor.global_position = post
 		actor.spawn_point = post
 		actor.bounds = 60.0
+		# `ArenaActor` is born hostile only to other arena bodies (layer 4). This
+		# camp's enemies are the wilderness watchers (layer 2), and the squad must
+		# never cut its own fighters, so the swords look at the mob layer only.
+		actor.combat.target_mask = WATCHER_LAYER
 		# Nobody in this camp fights on their own: the prisoners are the lesson
 		# and the rescuer is the script. Only the two guards are bots.
 		controller.set_bot(merc_id, false)
@@ -636,6 +647,7 @@ func _loot_owner(peer_id: int) -> int:
 	return controller.merc_for_peer(peer_id)
 
 func _on_pickup_taken(pickup) -> void:
+	_steel_taken += 1
 	sequencer.note_weapon_looted()
 	if hud != null and pickup != null:
 		hud.set_status("%s is in hand." % str(pickup.label_text()), 2.5)
@@ -669,8 +681,13 @@ func _drive_allies(_delta: float) -> void:
 			continue
 		actor.combat.damage_enabled = true
 		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
-		var armed := not str(gear.get("main", "")).is_empty() \
+		var roster_armed := not str(gear.get("main", "")).is_empty() \
 			or not str(gear.get("off", "")).is_empty()
+		# A body whose roster says armed but whose hands are empty is wearing a
+		# stale loadout: re-dress it once before deciding it cannot fight.
+		if roster_armed and not _holds_weapon(actor):
+			_refresh_rig(int(merc_id))
+		var armed := roster_armed and _holds_weapon(actor)
 		# 1. An unarmed prisoner looks for steel first.
 		if not armed:
 			var pickup = _nearest_pickup_for(actor)
@@ -702,6 +719,14 @@ func _drive_allies(_delta: float) -> void:
 		elif actor.combat.clash_cooldown <= 0.0:
 			actor.combat.begin_melee()
 			_ally_engaged = true
+
+## Whether the body is actually swinging something: the rig, not the roster.
+func _holds_weapon(actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	if str(actor.rig.weapon) in ["sword", "dagger", "dual", "bow"]:
+		return true
+	return bool(actor.rig.staff_active) or bool(actor.rig.off_weapon_active)
 
 ## A body that is out of its cage and standing in the squad, or the rescuer once
 ## he has arrived. The player's own body is filtered by the caller.
@@ -768,10 +793,19 @@ func _ally_take(actor, merc_id: int, pickup) -> void:
 func _refresh_rig(merc_id: int) -> void:
 	if controller == null or merc_id <= 0:
 		return
-	var actor = controller.body_of(merc_id)
-	if actor == null or not is_instance_valid(actor):
-		return
-	SeatLoadout.apply(actor.rig, controller.seat_loadout(merc_id))
+	controller.refresh_gear(merc_id)
+
+## Watchers that are no longer standing.
+func watchers_down() -> int:
+	var down := 0
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			down += 1
+	return down
+
+## Steel the squad has picked up, whoever picked it up.
+func steel_taken() -> int:
+	return _steel_taken
 
 ## How many freed allies are holding a weapon, and whether any has swung at a
 ## watcher. Both are read by the regression.
@@ -790,9 +824,7 @@ func allies_armed() -> int:
 		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
 		var in_roster := not str(gear.get("main", "")).is_empty() \
 			or not str(gear.get("off", "")).is_empty()
-		var in_hand := str(actor.rig.weapon) != "" or bool(actor.rig.off_weapon_active) \
-			or bool(actor.rig.staff_active) or bool(actor.rig.shield_equipped)
-		if in_roster and in_hand:
+		if in_roster and _holds_weapon(actor):
 			count += 1
 	return count
 
@@ -886,6 +918,10 @@ func _on_state_changed(state: int, objective: String) -> void:
 		_prompt_text = objective
 		hud.set_prompt(objective)
 		_update_hint()
+	# Entering the fight reconciles kills and steel the squad already landed
+	# while the cages were still being cut.
+	if state == SequencerScript.State.FREED:
+		sequencer.note_battle_state(watchers_down(), _steel_taken)
 	match state:
 		SequencerScript.State.ALL_SEEN:
 			_jogging = true

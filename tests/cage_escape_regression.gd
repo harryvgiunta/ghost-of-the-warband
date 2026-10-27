@@ -275,6 +275,18 @@ func check_latches() -> void:
 		await physics_frame
 		game._try_interact()
 		dismiss_card("latch %d" % (index + 1))
+		if index == 0:
+			# A watcher is three stab-widths of health, not a boss.
+			var early = game.guards[0]
+			early.take_damage(14.0, 0)
+			check(bool(early.get("alive")), "one stab leaves a watcher standing")
+			early.take_damage(14.0, 0)
+			check(bool(early.get("alive")), "two stabs still leave it standing")
+			early.take_damage(14.0, 0)
+			check(not bool(early.get("alive")), "the third stab puts a watcher down")
+			# ...and it fell while the squad is still caged, so it is not progress.
+			check(game.sequencer.guards_down() == 0,
+				"a kill before the squad is out is not progress")
 		await physics_frame
 		check(game.cages_open_count() == index + 1,
 			"latch %d of 4 is cut (%d)" % [index + 1, game.cages_open_count()])
@@ -288,6 +300,8 @@ func check_latches() -> void:
 		"the fourth latch frees the squad (%s)" % game.sequencer.state_name())
 	check(game.sequencer.cages_opened() == 4, "the sequencer counted four cages")
 	check(not game.sequencer.note_cage_opened(0), "a latch only counts once")
+	check(game.sequencer.guards_down() == 1,
+		"the kill landed before the squad was out is reconciled on FREED")
 
 # --- the freed squad -------------------------------------------------------
 
@@ -303,6 +317,14 @@ func check_freed_walk() -> void:
 
 # --- the fight and the gate ------------------------------------------------
 
+## True once the watcher is hurt or gone: the proof that a squad swing landed.
+func _watcher_hurt(watcher) -> bool:
+	if not is_instance_valid(watcher):
+		return true
+	if not bool(watcher.get("alive")):
+		return true
+	return float(watcher.get("health")) < float(watcher.get("max_health"))
+
 ## Poll a condition while playing the player: any tutorial card that opens during
 ## the wait is read and closed, so the scene keeps moving.
 func await_condition(predicate: Callable, timeout: float, label: String) -> bool:
@@ -316,29 +338,24 @@ func await_condition(predicate: Callable, timeout: float, label: String) -> bool
 	return bool(predicate.call())
 
 func check_fight_and_gate() -> void:
-	check(game.sequencer.state() == SequencerScript.State.FREED, "the fight starts with the squad free")
+	check(game.sequencer.guards_down() == 1,
+		"the pre-latch kill is reconciled when the squad comes out (%d)" % game.sequencer.guards_down())
 	var local = game.controller.active_body(1)
 	check(local != null, "the soul still has a body for the fight")
 
-	# A watcher is a few stabs, not a boss.
-	var first = game.guards[0]
-	first.take_damage(14.0, 0)
-	check(bool(first.get("alive")), "one stab leaves a watcher standing")
-	first.take_damage(14.0, 0)
-	check(bool(first.get("alive")), "two stabs still leave it standing")
-	first.take_damage(14.0, 0)
-	check(not bool(first.get("alive")), "the third stab puts a watcher down")
-	check(game.sequencer.guards_down() == 1, "the kill was counted")
-	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"one watcher down is not the escape")
-
-	# The gate refuses a body while the last watcher is standing.
-	local.global_position = game.GATE_POINT
-	await physics_frame
-	game._try_interact()
-	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"the gate is shut while a watcher lives")
-	check(requested_paths.is_empty(), "no scene was requested early")
+	# The gate refuses a body while a watcher is still standing.
+	var last_watcher = null
+	for watcher in game.guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			last_watcher = watcher
+			break
+	if last_watcher != null:
+		local.global_position = game.GATE_POINT
+		await physics_frame
+		game._try_interact()
+		check(game.sequencer.state() != SequencerScript.State.TOWN,
+			"the gate is shut while a watcher lives")
+		check(requested_paths.is_empty(), "no scene was requested early")
 
 	# The freed squad takes over: they grab the steel and charge the watchers.
 	var armed := await await_condition(
@@ -353,16 +370,21 @@ func check_fight_and_gate() -> void:
 
 	var engaged := await await_condition(
 		func() -> bool: return game.ally_engaged(), 16.0, "the squad charging")
-	check(engaged, "an armed ally closes on the last watcher and swings")
+	check(engaged, "an armed ally closes on a watcher and swings")
 
-	# Whatever the squad has not finished, the test finishes so the flow can end.
-	for watcher in game.guards:
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(60.0, 0)
-	dismiss_card("the escape card")
+	# A swing that never lands is the regression this guards: the only way an
+	# ally can "attack" without hurting is an armed roster over an unarmed rig,
+	# or a blade aimed at a layer the mobs do not live on.
+	var hurt := await await_condition(
+		func() -> bool: return _watcher_hurt(last_watcher), 14.0, "the squad landing blows")
+	check(hurt, "an ally's swing actually wounds a watcher")
+
+	# Steel plus two kills opens the escape, whoever landed them.
+	var escaped := await await_condition(
+		func() -> bool: return game.sequencer.state() == SequencerScript.State.ESCAPING,
+		14.0, "the escape opening")
+	check(escaped, "the squad's fight opens the escape (%s)" % game.sequencer.state_name())
 	check(game.sequencer.guards_down() == 2, "both watchers are down")
-	check(game.sequencer.state() == SequencerScript.State.ESCAPING,
-		"steel plus two kills opens the escape (%s)" % game.sequencer.state_name())
 
 	# Walk out: the arch is a door, so the player presses G inside it.
 	check(game.sequencer.hint().contains("gate"), "the hint names the gate")

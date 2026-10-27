@@ -241,9 +241,23 @@ func merc_for_peer(peer_id: int) -> int:
 	return merc_of(body_for_peer(peer_id))
 
 ## The exact seat loadout applied to a mercenary's rig.
+## The seat loadout *as it was applied at spawn*. It is the wire shape a scene
+## registers, not the current kit: once a piece is looted or the paperdoll moves
+## gear, `refresh_gear()` is what puts the new kit on the body.
 func seat_loadout(merc_id: int) -> Dictionary:
 	var loadout: Dictionary = _loadouts.get(merc_id, {})
 	return loadout.duplicate()
+
+## Re-read a mercenary's roster kit and put it on the live body. Pickups, the
+## paperdoll and the recruiter all change the roster while a scene is running;
+## without this the body keeps whatever it was born with, which reads as "the
+## weapon did not go into my hands" (and as an AI that will not swing).
+func refresh_gear(merc_id: int) -> bool:
+	var actor := body_of(merc_id)
+	if actor == null or not is_instance_valid(actor):
+		return false
+	_apply_gear(actor, merc_id)
+	return true
 
 ## Living bodies in roster order: what `F1`..`F8` count.
 func living_merc_ids() -> Array[int]:
