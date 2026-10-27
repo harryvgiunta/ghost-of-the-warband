@@ -185,3 +185,62 @@ as are the pre-existing regressions the shared edits could break (`gameplay`,
 Assigning `Environment.fog_mode` in Godot 4.7 resets `fog_density` to `1.0`.
 `scripts/world/environment_kit.gd` now writes the density after the mode; before
 that fix every exponential-fog style (the arena) rendered as a white-out.
+
+## 9. Shipped in Phase 2 (merged and green)
+
+| Module | Surface |
+| --- | --- |
+| `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages, caged-body clamps, the rescuer's scripted jog and forced possession, two cultist guards, three weapon drops, the gate door |
+| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`, out-of-order calls refused, objective text |
+| `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
+| `scenes/town_hub.tscn` + `scripts/warband/town_hub.gd` | dusk square, campfire, stash chest, altar, recruiter desk, gate; `interact_at(peer, point)` resolves the nearest service; one `scene_requested` door |
+| `scripts/warband/expedition_gate.gd` (`ExpeditionGate`) | `prompt`, `deploy_and_launch(ids)`, `return_to_town()` |
+| `scripts/warband/cultist_guard.gd` (`CultistGuard`) | crimson cultist body, faction filter so guards never fight each other, no arena respawn |
+| `scripts/warband/enemy_waves.gd` (`EnemyWaves`) | deterministic waves (3, +1 per wave, capped at 6) with escalating kits, `wave_started/wave_cleared`, `guards()`, `field()`, `living()` |
+| `scripts/warband/soldier_loot_run.gd` (`SoldierLootRun`) | survivors physically jog to the drops, then the vacuum books them |
+| `scripts/warband/warband_session.gd` (`WarbandSession`) | real ENet host/join, body ownership broadcast, 20 Hz body snapshots, guest prediction, AI fallback on leave |
+| `scripts/warband/game_flow.gd` (autoload `GameFlow`) | the only thing that changes scene; `enter_warband()`, `start_campaign()`, `enter_town()`, `launch_expedition()`, `bind(scene)` |
+| `admin_arena.tscn` | doubles as the Play Arena: an empty deployment line builds the two sandbox brawls, a deployed line builds a real expedition against the cult (three waves, guard loot, soldier loot run, `Enter` back to town) |
+
+The arena decides the mode from the warband's own deployment line: the town gate
+writes `Warband.deploy_battle(ids)`, so the field never needs a second flag.
+
+### The loop, as wired
+
+`title -> GameFlow.enter_warband()` -> **cages** (`TutorialSequencer` through the
+four bodies, the rescuer, the gate) -> **town** (stash, altar, recruiter, gate) ->
+**arena expedition** (three waves, the field sweeps itself) -> **town** (`Enter`).
+Every hand-off goes through one `scene_requested(path)` signal per scene, bound to
+`GameFlow`; a scene never loads another scene. `GameFlow.active` is false until
+the campaign door is used, which is why every scene regression can emit its door
+without being teleported out of the test.
+
+### Multiplayer
+
+`admin_arena.tscn` with `--warband-host <port>` hosts; `--warband-join <address>
+<port>` joins. Both machines must carry the same warband save (same roster ids),
+exactly as the arena's seats already require a shared roster. The host is
+authoritative for every body; a client asks to enter a body and the host's soul
+router answers (one peer per body, alive only), then broadcasts the ownership map.
+Bodies are served at 20 Hz through `NetLimits.batches`, the guest predicts the
+body it is inside, and a leaving peer's body falls back to its own AI.
+
+### Gate 2 result
+
+| Test | Result |
+| --- | --- |
+| `cage_escape_regression` | 80 checks, 0 failures |
+| `town_hub_regression` | 58 checks, 0 failures |
+| `expedition_regression` | 18 checks, 0 failures |
+| `game_flow_regression` | 22 checks, 0 failures (four real scene transitions on one save) |
+| `branded_abilities_regression` | 114 checks, 0 failures |
+| `enemy_waves_regression` | 108 checks, 0 failures |
+| `warband_session_regression` | 49 checks, 0 failures (two real ENet processes) |
+| `admin_arena_regression` | 98 checks, 0 failures (sandbox gate + the branded verb) |
+
+Rendered inspection (not just headless): the cage camp, the town square and the
+arena were each launched with a real window and captured; the arena capture is
+what exposed the engine fog trap above. One engine quirk is pre-existing and
+unrelated to this subsystem: `arena.tscn`'s lobby renders over a bright sky and
+reads washed out at this camera, while the admin arena (same world kit) renders
+correctly after the fog fix.

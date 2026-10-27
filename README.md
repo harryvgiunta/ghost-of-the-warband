@@ -2,6 +2,57 @@
 
 A Godot 4 third-person action game with one in-game world: a main menu, a walkable PvE town with three keepers, a stash and an arena portal, a seamless woodland frontier, an **open world you can host for up to four rangers** (town and frontier together), a four-combatant multiplayer arena, and an endless two-room survival delve beneath the town. The ranger carries a **60-slot backpack**, a **20-slot stash** and **ten independent equipment slots**. A textured, rigged male Ranger with authored human animation, swappable bows, swords, daggers, shields, staffs, foci and jewelry, dual wield and armor, free-aim archery, thrown swords and daggers, contact-driven melee attacks, and directional jump-rolls.
 
+## Ghost of the Warband (possession campaign)
+
+The same engine, a second game on top of it. There is no main character: you are
+a floating soul that enters any living mercenary of your warband. Every mercenary
+has identical base stats - **100 health, 1000 stamina**, gear is the only
+difference - and the warband is the thing that survives a battle.
+
+- **Start here:** the title menu's **GHOST OF THE WARBAND** opens the cages (a
+  fresh warband) or resumes a saved one in the town. The mode has its own save
+  (`user://warband_state.json`); the ranger's kit is untouched.
+- **The four cages:** shift between all four prisoners to learn the controls,
+  then a fifth prisoner in sacrificial rags cuts the squad out with a dagger.
+  You are forced into the rescuer, the cages open, and you loot cultist steel and
+  fight to the gate.
+- **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
+  pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
+  (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons
+  with active sigils), the **Gold recruiter** (up to the deployment cap of 8) and
+  the **expedition gate** (pick up to 8 bodies, then launch).
+- **The field:** cultist waves in three escalating size/kit tiers. Combat near a
+  human-possessed body is real (100% damage); every fight more than ~30 m from
+  any human runs as a convincing background brawl at **10% damage**, so distant
+  squads do not wipe each other off-screen. Walk over and it goes live.
+- **Downed, not dead:** a hit that overkills by **10% of max health or less**
+  leaves a mercenary Downed at 0 health - crawling backwards to cover, bleeding
+  out in 30 s. Only a human holds the **5 s revive** (E); AI never revives. A
+  heavier hit kills outright.
+- **Loot:** quick-loot during the fight (K); when the field goes quiet the
+  surviving soldiers physically jog to the drops before everything lands in the
+  value-sorted shared stash.
+
+| Key | Warband mode |
+| --- | --- |
+| `[` / `]` | previous / next living, unoccupied body |
+| `F1`..`F8` | enter a named body directly |
+| `TAB` | warband screen (health, downed state, gear, click to control, hiring) |
+| `P` | mercenary paperdoll over the shared stash |
+| `G` | use the altar / stash / recruiter / expedition gate you stand at |
+| `K` | quick-loot the drop at your feet |
+| `E` (hold) | revive the downed body beside you |
+| `R` | fire the branded ability on your weapon |
+| `B` | end the battle (sweep the field) |
+| `Enter` | return to town once the field is quiet |
+
+**Multiplayer:** launch the arena with `--warband-host <port>` to host and
+`--warband-join <address> <port>` to join. The host is authoritative for every
+body, ownership transfers are validated by the soul router (one peer per body,
+living bodies only), and each peer predicts the body it is inside. See
+`docs/warband.md` for the architecture and `tests/warband_session_regression.gd`
+for the two-process proof.
+
 ## Windows quick start
 
 Requires Windows x64, PowerShell, and [Git](https://git-scm.com/download/win). No Godot installation, Node.js, paid assets, or game account is required.
