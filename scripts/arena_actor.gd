@@ -3,6 +3,11 @@ extends CharacterBody3D
 signal fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float)
 signal thrown_weapon(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float, weapon: String, weapon_index: int)
 signal killed(slot: int, source: int)
+# Ghost of the Warband: a lethal blow that overkills by at most the contract's
+# 10% knocks the body DOWNED instead of killing it. These bracket that state so
+# the HUD, the crawl and the revive channel never have to poll for it.
+signal downed_started(slot: int)
+signal downed_ended(slot: int)
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -52,6 +57,22 @@ var alive := true
 var kills := 0
 var deaths := 0
 var respawn := 0.0
+# Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
+# true while DOWNED - the body keeps its collision, its model and its claim on
+# the slot, and only a finisher or the bleed clock kills it - so every existing
+# `alive` check keeps its meaning.
+var health_state := WarbandContracts.HealthState.ALIVE
+var downed := false
+## Seconds spent on the ground; the bleed clock reads this and nothing else.
+var downed_seconds := 0.0
+## The slot that put this body down, credited if it bleeds out.
+var downed_by := -1
+## Where that blow came from: the crawl aims the opposite way.
+var downed_threat := Vector3.ZERO
+var downed_threat_known := false
+## A safe anchor the crawl biases toward (a friendly body, a patch of cover).
+var safe_anchor := Vector3.ZERO
+var safe_anchor_known := false
 var authoritative := false
 var is_local := false
 ## True on the one peer that owns this body over the wire: it integrates its
@@ -280,6 +301,14 @@ func revive() -> void:
 	_heal_remaining = 0.0
 	_heal_rate = 0.0
 	alive = true
+	# Ghost of the Warband: a respawn also clears the downed state - a body that
+	# really died takes the arena's three-second path, never both.
+	health_state = WarbandContracts.HealthState.ALIVE
+	downed = false
+	downed_seconds = 0.0
+	downed_by = -1
+	downed_threat_known = false
+	safe_anchor_known = false
 	respawn = 0.0
 	combat.stop()
 	combat.clear_camera_ray()
@@ -318,15 +347,141 @@ func _restore_body_collision() -> void:
 	collision_layer = _body_layer if _body_layer >= 0 else 4
 	collision_mask = _body_mask if _body_mask >= 0 else 1
 
+## Ghost of the Warband: a blow overkilled by at most 10% knocks this body down
+## instead of killing it.
+##
+## The body keeps its collision and its model on purpose: it is still an
+## obstacle, still finishable and still the thing a human walks over to pick up.
+## What stops is intent - no swing in flight, no ability, no guard, no walk - and
+## the bleed clock starts. Nothing here touches `alive`, so the respawn timer,
+## the snapshot and every existing "is this body there" check are unchanged.
+func enter_downed(source_id: int = -1) -> void:
+	if downed or not alive:
+		return
+	health = 0.0
+	downed = true
+	health_state = WarbandContracts.HealthState.DOWNED
+	downed_seconds = 0.0
+	downed_by = source_id
+	velocity = Vector3.ZERO
+	move_direction = Vector2.ZERO
+	run_requested = false
+	jump_requested = false
+	ability.reset()
+	roll.reset()
+	dodge.reset()
+	slide.reset()
+	# A knocked-down fighter is not mid-swing and not staggered: the stance reset
+	# clears the attack progress, the guard and the flinch in one place.
+	combat.stagger_time = 0.0
+	reset_stance()
+	_restore_body_collision()
+	_reset_rig_glide()
+	rig.visible = true
+	downed_started.emit(slot)
+
+## Ghost of the Warband: stand back up out of DOWNED with the contract's share of
+## max health. The arena's `revive()` stays the respawn path for a body that
+## actually died; these two never run for the same body at once.
+func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTION) -> void:
+	if not downed or not alive:
+		return
+	downed = false
+	downed_seconds = 0.0
+	downed_by = -1
+	downed_threat_known = false
+	safe_anchor_known = false
+	health_state = WarbandContracts.HealthState.ALIVE
+	health = DownedRules.revive_health(max_health, fraction)
+	velocity = Vector3.ZERO
+	combat.stagger_time = 0.0
+	reset_stance()
+	roll.reset()
+	dodge.reset()
+	# The blow that put this body down also set its flinch; a fighter standing up
+	# into a full-length stagger would refuse every input for a second.
+	rig.set_hit_react(0.0)
+	_restore_body_collision()
+	_reset_rig_glide()
+	rig.visible = true
+	downed_ended.emit(slot)
+
+## Where the blow that put this body down came from. `receive_melee` is the one
+## funnel that knows the attacker's body, so the crawl's bearing comes from it.
+func note_threat(point: Vector3) -> void:
+	if point.is_finite():
+		downed_threat = point
+		downed_threat_known = true
+
+## The safe anchor the crawl biases toward. A non-finite point clears it.
+func set_safe_anchor(point: Vector3) -> void:
+	safe_anchor = point
+	safe_anchor_known = point.is_finite()
+
+func clear_safe_anchor() -> void:
+	safe_anchor_known = false
+
+## The point this body drags itself toward while downed: away from the blow,
+## biased toward the safe anchor. Its own position when it has nothing to crawl
+## away from, or when it is not downed at all.
+func downed_crawl_target() -> Vector3:
+	if not downed:
+		return global_position
+	return DownedRules.crawl_target(global_position, downed_threat, downed_threat_known,
+		safe_anchor, safe_anchor_known)
+
+## Ghost of the Warband: one frame of the downed crawl, moved through the body's
+## own capsule so a wall, tree or crate stops it instead of being ghosted
+## through. Never moves a body that is not downed.
+func crawl_step(point: Vector3, speed: float, delta: float) -> void:
+	if not downed or not alive:
+		return
+	var travel := Vector3(point.x - position.x, 0.0, point.z - position.z)
+	var distance := travel.length()
+	var step_length := minf(distance, maxf(speed, 0.0) * maxf(delta, 0.0))
+	if step_length <= 0.0:
+		velocity.x = 0.0
+		velocity.z = 0.0
+		return
+	travel = travel / distance * step_length
+	# `move_and_slide` advances by `velocity * delta`, so the velocity that
+	# produces exactly this frame's step is the step over the frame's delta.
+	velocity.x = travel.x / maxf(delta, 0.0001)
+	velocity.z = travel.z / maxf(delta, 0.0001)
+	velocity.y = 0.0
+	move_and_slide()
+	position.x = clampf(position.x, -bounds, bounds)
+	position.z = clampf(position.z, -bounds, bounds)
+
+## The one death path: the respawn clock, the death stat, the hidden corpse and
+## the kill credit. A finisher, the bleed clock and a lethal blow all land here,
+## so a body that dies is a body that died the same way whatever put it down.
+func _die(source_id: int) -> void:
+	health = 0.0
+	alive = false
+	downed = false
+	downed_seconds = 0.0
+	downed_threat_known = false
+	health_state = WarbandContracts.HealthState.DEAD
+	respawn = 3.0
+	deaths += 1
+	combat.stop()
+	reset_stance()
+	roll.reset()
+	_store_body_collision()
+	_reset_rig_glide()
+	rig.visible = false
+	killed.emit(slot, source_id)
+
 func try_ability(slot: int = 0) -> Dictionary:
-	if not authoritative or not alive:
+	if not authoritative or not alive or downed:
 		return {"ok": false, "message": "You are down."}
 	return ability.activate(slot)
 
 func press_jump(roll_requested: bool) -> void:
 	var grounded := is_on_floor()
 	peek_requested = false
-	if not alive or ability.active or not cover.prepare_jump():
+	if not alive or downed or ability.active or not cover.prepare_jump():
 		return
 	_exposure_tick = -1
 	combat.stop()
@@ -340,7 +495,7 @@ func press_jump(roll_requested: bool) -> void:
 		combat.stop()
 
 func set_block(pressed: bool, forward: Vector3) -> void:
-	if not authoritative or not alive:
+	if not authoritative or not alive or downed:
 		return
 	if pressed:
 		combat.start_block(forward)
@@ -350,6 +505,15 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
 	if not authoritative or not alive or source_id == slot:
 		return Combat.DEFENSE_NONE
+	if downed:
+		# Ghost of the Warband: a body on the ground cannot guard, so the blow is
+		# not a defence roll at all. `take_damage` owns the downed rule and turns
+		# it into the contract's finisher check - a heavy strike ends the body, a
+		# light one is shrugged off.
+		take_damage(amount,source_id,headshot,false)
+		return Combat.DEFENSE_NONE
+	# The blow's own bearing, kept for the crawl if it puts this body down.
+	note_threat(attacker_position)
 	var outcome: int = combat.resolve_melee_defense(attacker_position)
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
@@ -436,7 +600,7 @@ func set_crouch(requested: bool) -> void:
 func toggle_cover(preferred_direction: Vector3) -> void:
 	if cover.active:
 		leave_cover()
-	elif alive and is_on_floor() and not roll.active and not ability.active and cover.try_enter(preferred_direction):
+	elif alive and not downed and is_on_floor() and not roll.active and not ability.active and cover.try_enter(preferred_direction):
 		slide.reset()
 		rig.set_slide(-1.0,Vector3.FORWARD)
 		_exposure_tick = -1
@@ -558,30 +722,35 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		return
 	# Ghost of the Warband: one scale, at the funnel, from the victim's bubble.
 	amount = WarbandDamage.scale(amount, self)
+	if downed:
+		# Ghost of the Warband: a blow on a downed body is a finisher, not damage.
+		# The contract's own threshold ends it; chip damage (including the 10% a
+		# passive-simulated fight lands) is shrugged off.
+		if DownedRules.finishes(max_health, amount):
+			_die(source_id)
+		return
 	_cancel_consumable()
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
 		* (1.0 - rig.damage_reduction(headshot))
 	applied = _absorb_with_ward(applied)
-	health = maxf(0,health - applied)
+	# Ghost of the Warband: the contract's single 10% overkill authority decides
+	# whether this hit leaves the body standing, drops it DOWNED or kills it.
+	# Nothing here re-derives the threshold.
+	var outcome: Dictionary = DownedRules.resolve(health, max_health, applied)
+	health = maxf(0.0, float(outcome.health))
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
 	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
 		var seconds: float = combat.stagger_from_damage(applied,max_health)
 		rig.set_hit_react(seconds)
 		dodge.reset()
-	if health <= 0:
-		alive = false
-		respawn = 3.0
-		deaths += 1
-		combat.stop()
-		reset_stance()
-		roll.reset()
-		_store_body_collision()
-		rig.visible = false
-		killed.emit(slot,source_id)
+	if bool(outcome.died):
+		_die(source_id)
+	elif bool(outcome.downed):
+		enter_downed(source_id)
 
 func try_consume(kind: String) -> bool:
-	if not authoritative or not alive or consume_kind != "":
+	if not authoritative or not alive or downed or consume_kind != "":
 		return false
 	if not Archer.CONSUMABLE_DATA.has(kind) or health >= max_health-0.001:
 		return false
@@ -648,6 +817,16 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 			respawn = maxf(0,respawn-delta)
 			if respawn <= 0:
 				revive()
+		return
+	if downed:
+		# Ghost of the Warband: a downed body keeps its ground and its collision
+		# but has no intent - nothing here advances a swing, an ability or a
+		# step. The bleed clock is the only thing that ticks, and the crawl node
+		# (if the scene gave this body one) owns whatever motion it makes.
+		if authoritative:
+			downed_seconds += delta
+			if DownedRules.bled_out(downed_seconds):
+				_die(downed_by)
 		return
 	input_age += delta
 	if authoritative:
@@ -1282,6 +1461,24 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 		DamageNumbers.spawn(get_parent(),global_position,previous_health-health,"self" if is_local else "hit",false,health <= 0.0)
 		BloodFx.wound(self,rig,get_aim_position(),previous_health-health,false,health <= 0.0,1.0)
 	alive = state.alive
+	# Ghost of the Warband: the wire carries no separate downed flag. A body at
+	# zero health that is still alive is exactly what the host wrote when a blow
+	# only overkilled by the contract's threshold, so a replica reads it back
+	# instead of standing up a body the authority has on the ground.
+	var incoming_downed: bool = alive and health <= 0.0
+	if incoming_downed != downed:
+		downed = incoming_downed
+		downed_seconds = 0.0
+		if not alive:
+			health_state = WarbandContracts.HealthState.DEAD
+		elif downed:
+			health_state = WarbandContracts.HealthState.DOWNED
+		else:
+			health_state = WarbandContracts.HealthState.ALIVE
+		if downed:
+			downed_started.emit(slot)
+		else:
+			downed_ended.emit(slot)
 	kills = state.kills
 	deaths = state.deaths
 	respawn = state.respawn
