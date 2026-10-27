@@ -593,14 +593,14 @@ func _apply_kill_refill() -> void:
 		stamina = minf(max_stamina, stamina + gain)
 
 
-## TAB swaps the active hands with the bound paperdoll pair. The displaced
-## pair becomes the new quick set, so the same key toggles back.
-func quick_swap() -> void:
+## TAB brings up the other weapon set. Each set keeps its own pair, so the
+## weapon you equipped after the last swap comes back with its set.
+func swap_weapon_set() -> void:
 	if _player_state == null or inspecting or hud.map_open or _cursor_free or _ui_open():
 		return
-	var result: Dictionary = _player_state.quick_swap()
+	var result: Dictionary = _player_state.swap_weapon_set()
 	if not bool(result.get("ok", false)):
-		hud.show_feedback(str(result.get("message", "No quick swap set.")), 2.0)
+		hud.show_feedback(str(result.get("message", "No weapon set to swap.")), 2.0)
 		return
 	if _client():
 		send_action("loadout",_local_loadout())
@@ -1028,7 +1028,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					equip_weapon("dagger")
 			KEY_4: equip_shield(not archer.shield_equipped)
 			KEY_5: equip_weapon("dual")
-			KEY_TAB: quick_swap()
+			KEY_TAB: swap_weapon_set()
 			KEY_6: use_consumable("bandage")
 			KEY_7: use_consumable("potion")
 			KEY_C: toggle_crouch()

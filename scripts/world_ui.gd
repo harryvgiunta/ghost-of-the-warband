@@ -50,7 +50,7 @@ var _detail_header: Label
 var _detail_meta: Label
 var _detail_text: Label
 var _detail_hint: Label
-var _quick_label: Label
+var _set_labels: Array[Label] = []
 var _primary: Button
 var _secondary: Button
 var _tertiary: Button
@@ -158,7 +158,7 @@ func _open_view(next: String) -> void:
 		"inventory":
 			set_status("INVENTORY  /  right-click a piece to equip it.")
 		"equipment":
-			set_status("EQUIPMENT  /  right-click a slot to return it to the pack.  TAB swaps the bound pair.")
+			set_status("EQUIPMENT  /  right-click a slot to return it to the pack.  TAB swaps the two weapon sets.")
 		"stash":
 			set_status("STASH  /  move pieces between the pack and the chest.")
 		"vendor":
@@ -309,10 +309,12 @@ func build_paperdoll(parent: Node) -> void:
 		var row := index / 2
 		var button := _make_slot(paperdoll_panel,"paperdoll",-1,slot_name,Vector2(16+column*202,52+row*52),Vector2(196,44),11)
 		paperdoll_buttons.append(button)
-	_quick_label = _label(paperdoll_panel,"",Vector2(16,312),10,TEAL)
-	_quick_label.size = Vector2(398,16)
-	_quick_label.clip_text = true
-	_label(paperdoll_panel,"TAB swaps. Select main/off, then BIND SWAP.",Vector2(16,330),10,MUTED)
+	for index in StateScript.WEAPON_SET_COUNT:
+		var set_label := _label(paperdoll_panel,"",Vector2(16,306+index*14),10,TEAL)
+		set_label.size = Vector2(398,14)
+		set_label.clip_text = true
+		_set_labels.append(set_label)
+	_label(paperdoll_panel,"TAB swaps the two weapon sets. Equipping fills the active one.",Vector2(16,338),10,MUTED)
 
 func build_inventory(parent: Node) -> void:
 	inventory_panel = _panel(parent,Vector2(40,110),Vector2(430,390))
@@ -419,11 +421,11 @@ func _refresh_paperdoll() -> void:
 			button.text = "%s  •  %s" % [label.to_upper(),state.item_short(item_id)]
 			button.tooltip_text = state.item_name(item_id)
 		button.set_pressed_no_signal(_location == "paperdoll" and _slot == slot_name)
-	if _quick_label != null:
-		var quick_text := "QUICK SWAP (TAB)  •  %s" % state.quick_set_label()
-		if state.has_quick_return():
-			quick_text += "  ↔  %s" % state.quick_return_label()
-		_quick_label.text = quick_text
+	for index in _set_labels.size():
+		var active: bool = index == int(state.active_weapon_set())
+		var label: Label = _set_labels[index]
+		label.text = "SET %d  •  %s%s" % [index + 1, str(state.weapon_set_label(index)), "   (ACTIVE)" if active else ""]
+		label.add_theme_color_override("font_color",GOLD if active else TEAL)
 
 func _refresh_backpack() -> void:
 	for index in backpack_buttons.size():
@@ -544,12 +546,12 @@ func _refresh_selection() -> void:
 			_primary.tooltip_text = "Return this piece to the backpack."
 			if _slot == "main" or _slot == "off":
 				_secondary.visible = true
-				_secondary.text = "BIND SWAP"
-				_secondary.tooltip_text = "Store the current main and off hand as the TAB swap set."
+				_secondary.text = "SWAP SET"
+				_secondary.tooltip_text = "Bring up the other weapon set."
 			if _drop_handler.is_valid() or in_town:
 				_tertiary.visible = true
 				_tertiary.text = "DROP"
-			_detail_hint.text = "Right-click returns it to the backpack. TAB swaps the bound pair."
+			_detail_hint.text = "Right-click returns it to the backpack. Equipping rewrites the active set."
 		"stash":
 			_primary.visible = true
 			_primary.text = "TO INVENTORY"
@@ -642,9 +644,7 @@ func _on_secondary() -> void:
 	if state == null:
 		return
 	if _location == "paperdoll":
-		var result: Dictionary = state.bind_quick_from_equipped()
-		refresh()
-		set_status(str(result.get("message","")))
+		_resolve(state.swap_weapon_set())
 		return
 	if _location == "backpack":
 		if view == "stash":

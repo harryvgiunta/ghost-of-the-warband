@@ -39,7 +39,7 @@ func run() -> void:
 	state.save_path = TEST_SAVE
 	state.reset()
 	_test_taxonomy()
-	_test_quick_swap()
+	_test_weapon_sets()
 	_test_hand_rules()
 	_test_overflow_and_off_override()
 	_test_dual_and_jewelry()
@@ -138,56 +138,98 @@ func _test_taxonomy() -> void:
 	var off_weapon: Dictionary = StateScript.build_loadout("sword_short","dagger_iron",{})
 	check(str(off_weapon.off_weapon.kind) == "dagger","An off-hand dagger marks the off weapon")
 
-func _test_quick_swap() -> void:
+func _test_weapon_sets() -> void:
 	state.reset()
-	check(state.quick_set_label() == "Shortsword + Buckler","The quick swap defaults to the starter sword and buckler")
-	check(state.quick_return_label() == "Shortbow","The other side of TAB starts as the equipped starter bow")
+	check(state.weapon_sets.size() == StateScript.WEAPON_SET_COUNT,"Every player owns two weapon set slots")
+	check(state.active_weapon_set() == 0,"Set 1 is the active set at the start")
+	check(state.weapon_set_label(0) == "Shortbow","Set 1 starts on the equipped starter bow")
+	check(state.weapon_set_label(1) == "Shortsword + Buckler","Set 2 starts on the starter sword and buckler")
+	var bow_carried := _carried("bow_short")
+	var sword_carried := _carried("sword_short")
 	var before: int = state.inventory.size()
-	var result: Dictionary = state.quick_swap()
-	check(bool(result.ok),"TAB swaps the bow for the bound melee pair")
-	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","The bound main and off hand equip together")
-	check(state.inventory.has("bow_short") and not state.inventory.has("sword_short") and not state.inventory.has("shield_buckler"),"The displaced bow trades places with the melee pair")
+	var result: Dictionary = state.swap_weapon_set()
+	check(bool(result.ok),"TAB brings up the other weapon set")
+	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","Both hands change together")
+	check(state.active_weapon_set() == 1,"Set 2 is active after the swap")
+	check(state.inventory.has("bow_short") and not state.inventory.has("sword_short") and not state.inventory.has("shield_buckler"),"The bow trades places with the melee pair")
 	check(state.inventory.size() == before - 1,"The two-hand melee pair and one bow keep the backpack count honest")
-	check(state.quick_main() == "sword_short" and state.quick_off() == "shield_buckler","The bound pair stays bound after a swap")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "bow_short" and state.off_item().is_empty(),"TAB toggles back to the bow")
+	check(state.weapon_set_label(0) == "Shortbow","The set left behind remembers the bow")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "bow_short" and state.off_item().is_empty(),"TAB brings Set 1 back")
+	check(state.active_weapon_set() == 0,"Set 1 is active again")
 	check(state.inventory.has("sword_short") and state.inventory.has("shield_buckler"),"The melee pair returns to the backpack")
+	check(_carried("bow_short") == bow_carried and _carried("sword_short") == sword_carried,"A swap never duplicates or loses a weapon")
 
-	# The reported break: binding the pair already in hand (or equipping the
-	# bound pair by hand) used to leave TAB holding the pair it was meant to
-	# swap to, so every press was refused.
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "sword_short","TAB reaches the bound pair again")
-	result = state.bind_quick_from_equipped()
-	check(bool(result.ok),"BIND SWAP accepts the pair already in hand")
-	check(state.quick_set_label() == "Shortsword + Buckler","Binding the pair in hand keeps it on TAB")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "bow_short","TAB still toggles after binding the pair it was holding")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "sword_short","...and toggles straight back")
-	check(bool(state.equip_from_inventory(_find("bow_short")).ok),"The bow equips by hand")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "sword_short","TAB moved off a hand-equipped bound pair")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "bow_short","TAB toggles between the two bound pairs only")
+	# Equipping something different rewrites the active set and leaves the
+	# weapon waiting in the other set exactly where it was.
+	result = state.equip_from_inventory(_find("staff_fire"))
+	check(bool(result.ok) and state.main_item() == "staff_fire","The ember staff equips by hand")
+	check(state.weapon_set_label(0) == "Ember Staff","The active set now holds the staff")
+	check(state.weapon_set_label(1) == "Shortsword + Buckler","The other set still remembers its pair")
+	check(state.inventory.has("bow_short"),"The replaced bow returns to the backpack")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "sword_short","TAB reaches the set the player left alone")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "staff_fire","TAB brings the newly equipped weapon back")
 
+	# A hand change made while the other set is active lands in that set.
+	result = state.swap_weapon_set()
+	check(state.active_weapon_set() == 1,"Set 2 is active again")
+	result = state.unequip_to_backpack("off")
+	check(bool(result.ok),"The buckler comes off")
+	result = state.equip_from_inventory(_find("dagger_iron"))
+	check(bool(result.ok) and state.main_item() == "dagger_iron","The dagger equips into Set 2")
+	check(state.weapon_set_label(1) == "Iron Dagger","Set 2 remembers the dagger")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "staff_fire","Set 1 kept the staff across that change")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "dagger_iron","Set 2 kept the dagger")
+
+	# A two-hander fills its own set's main hand and leaves that set with no
+	# off hand; the other set is untouched.
 	result = state.equip_from_inventory(_find("sword_great"))
-	check(bool(result.ok) and state.main_item() == "sword_great","The greatsword equips for a custom bind")
-	result = state.bind_quick_from_equipped()
-	check(bool(result.ok) and state.quick_main() == "sword_great" and state.quick_off().is_empty(),"BIND SWAP stores the current pair")
-	check(state.quick_return_label() == "Shortsword + Buckler","The pair bound before it becomes the other side")
-	result = state.equip_from_inventory(_find("bow_short"))
-	check(bool(result.ok) and state.main_item() == "bow_short","The bow re-equips after binding")
-	result = state.quick_swap()
-	check(bool(result.ok) and state.main_item() == "sword_great" and state.off_item().is_empty(),"TAB equips the bound two-hander")
-	check(state.inventory.has("bow_short"),"The bow returns to the backpack")
+	check(bool(result.ok) and state.main_item() == "sword_great","The greatsword equips into Set 2")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "staff_fire","Set 1 survives the two-hander")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "sword_great" and state.off_item().is_empty(),"Set 2 keeps the greatsword")
 
-	state.quick = {"main":"staff_fire", "off":""}
-	var staff := _find("staff_fire")
-	check(staff >= 0,"The ember staff is carried")
-	state.move_to_stash(staff)
-	result = state.quick_swap()
-	check(not bool(result.ok) and str(result.get("message","")).contains("not carried"),"A stashed quick-swap weapon blocks the swap")
+	# An emptied set is still a real set: TAB leaves the ranger unarmed.
+	state.reset()
+	result = state.unequip_to_backpack("main")
+	check(bool(result.ok) and state.main_item().is_empty(),"Set 1 can be emptied")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item() == "sword_short","Set 2 still swaps in")
+	result = state.swap_weapon_set()
+	check(bool(result.ok) and state.main_item().is_empty(),"TAB reaches the emptied set")
+	check(state.active_weapon_set() == 0,"The emptied set is the active one")
+
+	state.unequip_to_backpack("main")
+	state.swap_weapon_set()
+	state.unequip_to_backpack("main")
+	state.unequip_to_backpack("off")
+	result = state.swap_weapon_set()
+	check(not bool(result.ok) and str(result.get("message","")).contains("empty"),"Two empty sets refuse the swap")
+
+	# Both sets have to be carried: a stashed piece blocks the swap and leaves
+	# the hands and the active set alone.
+	state.reset()
+	result = state.move_to_stash(_find("shield_buckler"))
+	check(bool(result.ok),"The buckler moves to the stash")
+	result = state.swap_weapon_set()
+	check(not bool(result.ok) and str(result.get("message","")).contains("not carried"),"A stashed set weapon blocks the swap")
+	check(state.main_item() == "bow_short" and state.active_weapon_set() == 0,"A refused swap changes nothing")
+
+func _carried(item_id: String) -> int:
+	var count := 0
+	if state.main_item() == item_id:
+		count += 1
+	if state.off_item() == item_id:
+		count += 1
+	for entry in state.inventory:
+		if entry == item_id:
+			count += 1
+	return count
 
 func _test_hand_rules() -> void:
 	state.reset()
@@ -381,8 +423,11 @@ func _test_persistence() -> void:
 	state.equipped["ring2"] = "ring_silver"
 	state.floor_items.assign(["staff_fire","focus_tome"])
 	state.inventory.append("sword_arming")
-	state.quick = {"main":"sword_great", "off":""}
-	state.quick_back = {"main":"bow_long", "off":""}
+	# The hands are the active set, so a save writes them as Set 1 and keeps
+	# whatever the other slot remembers.
+	state.equipped["main"] = "sword_great"
+	state.equipped["off"] = ""
+	state.weapon_sets[1] = {"main":"bow_long", "off":""}
 	state.save_state()
 	var loaded = StateScript.new()
 	loaded.save_path = TEST_SAVE
@@ -390,9 +435,10 @@ func _test_persistence() -> void:
 	check(loaded.credits == 321,"Credits survive a version-3 reload")
 	check(loaded.equipped_id("neck") == "neck_ember","Neck jewelry survives a reload")
 	check(loaded.equipped_id("ring1") == "ring_copper" and loaded.equipped_id("ring2") == "ring_silver","Rings survive a reload")
-	check(loaded.main_item() == "bow_short" and loaded.off_item().is_empty(),"The bow loadout survives a reload")
-	check(loaded.quick_main() == "sword_great" and loaded.quick_off().is_empty(),"The quick swap pair survives a reload")
-	check(loaded.quick_return_main() == "bow_long","The other side of the TAB toggle survives a reload")
+	check(loaded.main_item() == "sword_great" and loaded.off_item().is_empty(),"The active set survives a reload")
+	check(loaded.weapon_set_label(0) == "Greatsword","Set 1 is the pair that was in hand")
+	check(loaded.weapon_set_label(1) == "Longbow","Set 2 survives a reload")
+	check(loaded.active_weapon_set() == 0,"The active set index survives a reload")
 	check(PackedStringArray(loaded.floor_items) == PackedStringArray(state.floor_items),"Floor items survive a reload")
 	loaded.free()
 
@@ -436,7 +482,8 @@ func _test_persistence() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(v2_path))
 
 	# Version 4 stored a single quick pair. When that pair was the one in hand,
-	# TAB aimed at what it was already holding and every press was refused.
+	# the save carried no real second side at all, so migration gives the still
+	# carried starter melee set the second slot.
 	var v4_path := "user://paperdoll_v4.json"
 	var v4 := FileAccess.open(v4_path,FileAccess.WRITE)
 	v4.store_string(JSON.stringify({"version":4,"credits":90,
@@ -447,17 +494,17 @@ func _test_persistence() -> void:
 	var dead = StateScript.new()
 	dead.save_path = v4_path
 	dead.load_state()
-	check(dead.quick_set_label() == "Shortsword + Buckler","A version-4 pair equal to the hands is replaced by a carried alternate")
-	check(dead.quick_return_label() == "Shortbow","...and the pair in hand becomes the other side")
-	var rescued: Dictionary = dead.quick_swap()
-	check(bool(rescued.ok) and dead.main_item() == "sword_short","The repaired toggle swaps")
-	rescued = dead.quick_swap()
-	check(bool(rescued.ok) and dead.main_item() == "bow_short","...and toggles back")
+	check(dead.weapon_set_label(1) == "Shortsword + Buckler","A version-4 pair equal to the hands leaves the carried melee set as Set 2")
+	check(dead.weapon_set_label(0) == "Shortbow","...and the pair in hand stays Set 1")
+	var rescued: Dictionary = dead.swap_weapon_set()
+	check(bool(rescued.ok) and dead.main_item() == "sword_short","The migrated toggle swaps")
+	rescued = dead.swap_weapon_set()
+	check(bool(rescued.ok) and dead.main_item() == "bow_short","...and swaps back")
 	dead.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(v4_path))
 
-	# A version-4 save whose stored pair was not in hand already had a real
-	# toggle: the pair in hand was its other side.
+	# A version-4 save whose stored pair was not in hand already had two sides:
+	# the pair in hand becomes the active set, the stored one the other.
 	var v4_live := FileAccess.open(v4_path,FileAccess.WRITE)
 	v4_live.store_string(JSON.stringify({"version":4,"credits":90,
 		"inventory":["bow_short","sword_short","shield_buckler"],"stash":[],
@@ -467,9 +514,35 @@ func _test_persistence() -> void:
 	var live = StateScript.new()
 	live.save_path = v4_path
 	live.load_state()
-	check(live.quick_main() == "bow_short" and live.quick_return_label() == "Shortsword + Buckler","A version-4 toggle keeps the pair that was in hand as its other side")
+	check(live.weapon_set_label(0) == "Shortsword + Buckler","A version-4 save keeps the pair in hand as the active set")
+	check(live.weapon_set_label(1) == "Shortbow","...and the stored pair as the other set")
+	check(live.active_weapon_set() == 0,"The pair in hand is the active set after migration")
 	live.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(v4_path))
+
+	# A version-5 save stored both sides of the old toggle. The pair in hand
+	# becomes the active set and the other side stays reachable by TAB.
+	var v5_path := "user://paperdoll_v5.json"
+	var v5 := FileAccess.open(v5_path,FileAccess.WRITE)
+	v5.store_string(JSON.stringify({"version":5,"credits":120,
+		"inventory":["bow_short","sword_great"],"stash":[],
+		"equipped":{"main":"sword_short","off":"shield_buckler"},
+		"quick":{"main":"sword_great","off":""},
+		"quick_back":{"main":"sword_short","off":"shield_buckler"},
+		"floor":[]}))
+	v5.close()
+	var toggle = StateScript.new()
+	toggle.save_path = v5_path
+	toggle.load_state()
+	check(toggle.weapon_set_label(0) == "Shortsword + Buckler","A version-5 save keeps the pair in hand as Set 1")
+	check(toggle.weapon_set_label(1) == "Greatsword","...and the other stored side as Set 2")
+	check(toggle.active_weapon_set() == 0,"The pair in hand is active after migration")
+	var migrated: Dictionary = toggle.swap_weapon_set()
+	check(bool(migrated.ok) and toggle.main_item() == "sword_great","TAB reaches the migrated second set")
+	migrated = toggle.swap_weapon_set()
+	check(bool(migrated.ok) and toggle.main_item() == "sword_short","...and swaps back")
+	toggle.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(v5_path))
 
 func _test_rig_loadouts() -> void:
 	var rig = Archer.new()
@@ -608,8 +681,16 @@ func _test_world_kit() -> void:
 	tab.physical_keycode = KEY_TAB
 	tab.pressed = true
 	game._unhandled_input(tab)
-	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","TAB equips the bound pair")
-	check(game.archer.weapon == "sword" and game.archer.shield_equipped,"TAB applies the bound pair to the live rig")
+	check(state.main_item() == "sword_short" and state.off_item() == "shield_buckler","TAB brings up the other weapon set")
+	check(game.archer.weapon == "sword" and game.archer.shield_equipped,"TAB applies the other set to the live rig")
+	# The paperdoll's SWAP SET button is the clickable form of TAB.
+	game.world_ui.open_equipment()
+	game.world_ui._location = "paperdoll"
+	game.world_ui._slot = "main"
+	game.world_ui._on_secondary()
+	check(state.main_item().is_empty() and state.active_weapon_set() == 0,"SWAP SET brings the emptied first set up")
+	check(game.archer.weapon != "sword","The live rig follows the paperdoll swap")
+	game.world_ui.close()
 	game.queue_free()
 	await process_frame
 
