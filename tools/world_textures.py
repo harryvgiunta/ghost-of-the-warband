@@ -1250,6 +1250,46 @@ def make_rock(w=512, h=512):
     return to_image(np.clip(base, 0, 1), "RGB"), to_image(norm, "RGB")
 
 
+def make_granite(w=512, h=512):
+    """Natural granite for scattered boulders.
+
+    Deliberately not cellular-coursed: a boulder wrapped in paving-stone cells
+    reads as quarried masonry. This is broken stone still carrying its own
+    mineral - quartz and feldspar speckle over broad tonal mottling, weathered
+    veins, moss gathering in the cracks and the odd lichen crust.
+    """
+    big = fbm(w, h, 4, 4, SEED + 361, octaves=4)
+    mid = fbm(w, h, 22, 22, SEED + 362, octaves=4)
+    grain = fbm(w, h, 150, 150, SEED + 363, octaves=3)
+    speck = fbm(w, h, 320, 320, SEED + 364, octaves=2)
+    ridge = 1.0 - np.abs(2.0 * fbm(w, h, 34, 34, SEED + 365, octaves=4) - 1.0)
+    vein = smoothstep(0.88, 0.995, ridge)
+
+    base = mix(rgb(126, 128, 122), rgb(154, 154, 145), big)
+    base = mix(base, rgb(112, 118, 124), smoothstep(0.46, 0.78, mid) * 0.32)
+    base = mix(base, rgb(158, 148, 132), smoothstep(0.58, 0.86, 1.0 - mid) * 0.26)
+    quartz = smoothstep(0.64, 0.80, speck)
+    mica = smoothstep(0.64, 0.82, 1.0 - speck)
+    base = mix(base, rgb(198, 198, 188), quartz * 0.45)
+    base = mix(base, rgb(78, 80, 76), mica * 0.40)
+    base *= (0.92 + 0.16 * grain)[..., None]
+    base = mix(base, rgb(98, 100, 96), vein * 0.50)
+
+    moss_field = fbm(w, h, 6, 6, SEED + 366, octaves=4)
+    moss = smoothstep(0.56, 0.80, moss_field * 0.75 + smoothstep(0.55, 0.95, ridge) * 0.45)
+    moss *= smoothstep(0.25, 0.6, fbm(w, h, 40, 40, SEED + 367, octaves=3))
+    base = mix(base, rgb(86, 104, 64), moss * 0.42)
+    lichen = smoothstep(0.70, 0.86, fbm(w, h, 90, 90, SEED + 368, octaves=3))
+    base = mix(base, rgb(178, 180, 156), lichen * 0.22)
+
+    # Keep the height field smooth: speckle belongs in the albedo only. A normal
+    # map built from per-pixel mineral noise tilts every fragment away from the
+    # sun and turns granite into charcoal.
+    height = (0.5 + 0.16 * grain - 0.26 * vein - 0.05 * (moss_field - 0.5))
+    norm = normal_from_height(height, 1.15)
+    return to_image(np.clip(base, 0, 1), "RGB"), to_image(norm, "RGB")
+
+
 def make_water_normal(w=512, h=512):
     X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
     Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
@@ -1576,31 +1616,91 @@ def _flame_outline(length, width, n=24, bulge=0.35):
     return right + [(0.0, -length)] + left[::-1]
 
 
+def _flame_tongues(span, seed, tongues):
+    """Tongue geometry shared by every layer of one cell, in supersampled px."""
+    rng = np.random.default_rng(seed)
+    layout = []
+    for i in range(tongues):
+        centre = i - (tongues - 1) / 2.0
+        layout.append({
+            "length": (0.80 - 0.10 * abs(centre)) * span * float(rng.uniform(0.86, 1.10)),
+            "width": span * 0.098 * float(rng.uniform(0.84, 1.16)),
+            "angle": float(rng.uniform(-0.15, 0.15)) + centre * 0.085,
+            "centre": centre,
+        })
+    return layout
+
+
+def _flame_layer(span, layout, stops, alpha, blur, scale, seed, bend):
+    """One soft-edged flame sheath: rendered as a blurred alpha mask carrying a
+    vertical colour ramp, so the tongue has a hot base, an orange body and a
+    translucent tip instead of a flat filled polygon."""
+    mask = Image.new("L", (span, span), 0)
+    draw = ImageDraw.Draw(mask)
+    rng = np.random.default_rng(seed + int(scale * 977))
+    base_y = span * 0.965
+    for tongue in layout:
+        length = float(tongue["length"]) * scale
+        width = float(tongue["width"]) * scale
+        angle = float(tongue["angle"]) * (0.4 + 0.6 * scale)
+        ox = span * 0.5 + float(tongue["centre"]) * span * 0.115 * scale
+        pts = _flame_outline(length, width, n=40)
+        # Each sheath bends a little differently: layered tongues read as a
+        # flicker frozen at one instant, not as one shape scaled three times.
+        pts = [(x + bend * math.sin((y / max(length, 1.0)) * 2.4) * span * 0.02, y) for x, y in pts]
+        draw.polygon(_rot(pts, angle, ox, base_y), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(blur * 4.0))
+    alpha_arr = np.asarray(mask, np.float32) / 255.0
+    # The tip loses density: fire thins out where it stops being fuel-fed.
+    ys = np.linspace(0.0, 1.0, span, dtype=np.float32)[:, None]
+    alpha_arr *= (0.35 + 0.65 * smoothstep(0.0, 0.55, ys))
+    ramp = _vertical_ramp(span, stops)
+    rgb = np.broadcast_to(ramp[:, None, :], (span, span, 3)) * 255.0
+    rgba = np.dstack([rgb, np.clip(alpha_arr * alpha, 0.0, 1.0) * 255.0])
+    return Image.fromarray(np.clip(rgba, 0, 255).astype(np.uint8), "RGBA")
+
+
+def _vertical_ramp(height, stops):
+    """Colour ramp down the cell: `stops` are (y fraction from top, (r, g, b) 0-1)."""
+    ys = np.linspace(0.0, 1.0, height, dtype=np.float32)
+    xs = [stop[0] for stop in stops]
+    out = np.zeros((height, 3), np.float32)
+    for channel in range(3):
+        values = [stop[1][channel] for stop in stops]
+        out[:, channel] = np.interp(ys, xs, values)
+    return out
+
+
 def _flame_cell(size, seed, tongues):
     ss = 4
-    img = _new_cell(size, ss)
-    d = ImageDraw.Draw(img)
-    rng = np.random.default_rng(seed)
     span = size * ss
-    base_y = span * 0.95
-    # warm floor glow first, then three tapering layers from cool to hot
-    d.polygon(_ellipse_pts(span * 0.5, base_y - span * 0.015, span * 0.34, span * 0.05),
-              fill=(255, 150, 66, 190))
-    for scale, colour in ((1.0, (255, 124, 40, 205)), (0.76, (255, 170, 66, 238)),
-                          (0.46, (255, 226, 168, 255))):
-        for i in range(tongues):
-            centre = i - (tongues - 1) / 2.0
-            length = (0.86 - 0.10 * abs(centre)) * span * scale
-            width = span * 0.105 * scale * float(rng.uniform(0.82, 1.18))
-            angle = float(rng.uniform(-0.16, 0.16)) + centre * 0.10 * scale
-            pts = _rot(_flame_outline(length, width), angle,
-                       span * 0.5 + centre * span * 0.115 * scale, base_y)
-            d.polygon(pts, fill=colour)
-    return _finish_cell(img, size, edge=0.10, width=0.72)
+    layout = _flame_tongues(span, seed, tongues)
+    img = Image.new("RGBA", (span, span), (0, 0, 0, 0))
+    # The bed of coals the tongue grows out of: a wide, very soft glow.
+    bed = Image.new("RGBA", (span, span), (0, 0, 0, 0))
+    bed_draw = ImageDraw.Draw(bed)
+    bed_draw.polygon(_ellipse_pts(span * 0.5, span * 0.945, span * 0.36, span * 0.055),
+                     fill=(255, 138, 52, 150))
+    bed = bed.filter(ImageFilter.GaussianBlur(span * 0.028))
+    img = Image.alpha_composite(img, bed)
+    # Three nested sheaths: deep body, hot middle, white core.
+    sheaths = (
+        (((0.00, (0.72, 0.16, 0.03)), (0.62, (1.00, 0.42, 0.07)), (1.00, (1.00, 0.72, 0.32))),
+         0.46, 6.0, 1.00, 0.9),
+        (((0.00, (0.98, 0.42, 0.06)), (0.58, (1.00, 0.68, 0.18)), (1.00, (1.00, 0.88, 0.56))),
+         0.78, 3.4, 0.78, -0.6),
+        (((0.10, (1.00, 0.78, 0.34)), (0.55, (1.00, 0.94, 0.72)), (1.00, (1.00, 1.00, 0.93))),
+         1.00, 1.8, 0.48, 0.25),
+    )
+    for stops, alpha, blur, scale, bend in sheaths:
+        layer = _flame_layer(span, layout, list(stops), alpha, blur, scale, seed, bend)
+        img = Image.alpha_composite(img, layer)
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def make_flame(size=232):
-    """Four authored flame tongues (2x2 atlas) for the village firepit cards."""
+    """Four flame tongues (2x2 atlas) of soft, gradient fire for the firepit
+    cards: a coal bed, an orange body and a white core, each thinned at the tip."""
     cells = [_flame_cell(size, SEED + 900 + i, count) for i, count in enumerate((2, 3, 2, 4))]
     return compose_atlas(cells, 2, 2)[0]
 
@@ -1694,7 +1794,8 @@ ASSETS = [
          description="Low-frequency grey-green mottling for macro terrain variation."),
     dict(id="rock", file="rock.png", size=(512, 512), channels=3, tiling="both",
          n_version="rock_n.png", kind="prop",
-         description="Seamless granite boulder surface with moss and lichen."),
+         description="Seamless jointed rock face with moss and lichen: carved stonework, "
+                     "dungeon walls and prop blocks. Scattered boulders use 'granite'."),
     dict(id="wood_planks", file="wood_planks.png", size=(256, 256), channels=3,
          tiling="both", n_version=None, kind="building",
          description="Warm horizontal timber planks with staggered butt joints."),
@@ -1722,6 +1823,11 @@ ASSETS = [
     dict(id="wattle", file="wattle.png", size=(256, 256), channels=3,
          tiling="both", n_version="wattle_n.png", kind="building",
          description="Woven withy panel: upright rods laced through horizontal binders."),
+    dict(id="granite", file="granite.png", size=(512, 512), channels=3, tiling="both",
+         n_version="granite_n.png", kind="stone",
+         description="Natural grey granite for scattered boulders: quartz and feldspar "
+                     "speckle over tonal mottling, weathered veins, moss in the cracks. "
+                     "No coursing - carved stone uses the 'rock' surface."),
     dict(id="flame", file="flame.png", size=(512, 512), channels=4,
          tiling="atlas", n_version=None, kind="effect",
          description="2x2 flame tongue cards: orange body, yellow mid, hot core, soft tips."),
@@ -2007,6 +2113,11 @@ def build_all(only=None):
         out["fern.png"] = compose_atlas(make_fern(), 2, 2)[0]
     if _want(only, "flowers"):
         out["flowers.png"] = make_flowers()
+    if _want(only, "granite"):
+        albedo, normal = make_granite()
+        out["granite.png"] = albedo
+        out["granite_n.png"] = normal
+
     if _want(only, "flame"):
         out["flame.png"] = make_flame()
 

@@ -50,17 +50,26 @@ const SPECIES_ROLES := [ROLE_HELL_GOAT,ROLE_SUCCUBUS,ROLE_SPAWN,ROLE_BEAST,ROLE_
 ## Role baselines, before the depth scaling that `configure` layers on top.
 ## `scale` drives every dimension: rig, capsule, warning disc, reach anchors
 ## and blood size. `warning` and `emerge` are already in meters/seconds.
+##
+## All four ladder roles are the same red devil rig at four sizes, so the scale
+## ladder is the difficulty ladder and must stay strictly increasing. The imp and
+## the cinder devil used to stand at 0.62 and 1.00 of a half-size body, which read
+## as knee-high next to the imported court devils (2.0 m) and the ranger (1.8 m);
+## the whole ladder is now doubled, the two red devils exactly as asked and the
+## two above them with it, so a bonefiend never appears shorter than the cinder
+## devil it outranks. Scale 1.0 is a 0.90 m body, so these land at 1.1 m, 1.8 m,
+## 2.1 m and 2.5 m to the horn tips.
 const PROFILES := {
-	"imp": {"display": "Imp", "scale": 0.62, "health": 12.0, "damage": 5.0,
+	"imp": {"display": "Imp", "scale": 1.24, "health": 12.0, "damage": 5.0,
 		"speed": 4.3, "reach": 1.6, "emerge": 0.55, "warning": 1.05,
 		"cooldown_min": 0.80, "cooldown_max": 1.15},
-	"devil": {"display": "Cinder devil", "scale": 1.00, "health": 24.0, "damage": 8.0,
+	"devil": {"display": "Cinder devil", "scale": 2.00, "health": 24.0, "damage": 8.0,
 		"speed": 3.4, "reach": 1.9, "emerge": 0.35, "warning": 1.60,
 		"cooldown_min": 0.90, "cooldown_max": 1.30},
-	"bonefiend": {"display": "Bonefiend", "scale": 1.15, "health": 42.0, "damage": 13.0,
+	"bonefiend": {"display": "Bonefiend", "scale": 2.30, "health": 42.0, "damage": 13.0,
 		"speed": 3.5, "reach": 2.15, "emerge": 0.50, "warning": 1.75,
 		"cooldown_min": 0.85, "cooldown_max": 1.20},
-	"brute": {"display": "Charnel brute", "scale": 1.38, "health": 78.0, "damage": 20.0,
+	"brute": {"display": "Charnel brute", "scale": 2.76, "health": 78.0, "damage": 20.0,
 		"speed": 2.9, "reach": 2.45, "emerge": 0.65, "warning": 2.00,
 		"cooldown_min": 1.00, "cooldown_max": 1.45},
 }
@@ -98,7 +107,10 @@ const STRIKE_SECONDS := 0.14
 const STRIKE_HIT_TIME := 0.06
 const RECOVER_SECONDS := 0.55
 const STAGGER_SECONDS := 0.8
-const SEPARATION_RADIUS := 1.15
+## Pack spacing, in metres between body centres. The doubled roles carry up to a
+## 0.61 m capsule radius, so the old 1.15 m let two devils stand inside each
+## other.
+const SEPARATION_RADIUS := 1.90
 const LIMIT := 16.0
 
 # Body proportions at role scale 1.0 (the Cinder devil profile).

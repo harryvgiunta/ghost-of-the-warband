@@ -193,6 +193,7 @@ func _check_frontier() -> void:
 	check(not pebbles.is_empty(), "pebbles must dress the paths")
 	var boulders := _multimeshes(frontier, "Boulder_")
 	check(not boulders.is_empty(), "boulders must use the batched textured rock")
+	_check_stone(boulders, stats)
 	# Gameplay data is updated for the in-game town, not removed.
 	check(frontier.interactables.size() == 10, "camp, three keepers, stash, portal, delve and three waystones are interactive")
 	check(frontier.enemy_spawns.size() == 36, "all enemy spawns must survive the art pass")
@@ -234,6 +235,29 @@ func _check_camp(frontier) -> void:
 	var flame := TextureLibrary.flame_material()
 	check(flame.shader != null and flame.get_shader_parameter("albedo_texture") != null,
 		"the camp fire must run the flame shader")
+	# The live fire: cards with their own baked phase, embers, and a lamp that
+	# wanders instead of sitting at a constant energy.
+	var fire_mesh := frontier.get_node_or_null("CampFire/CampFire") as MeshInstance3D
+	check(fire_mesh != null, "the camp fire must keep its merged mesh")
+	var flame_surface := -1
+	if fire_mesh != null and fire_mesh.mesh != null:
+		for index in range(fire_mesh.mesh.get_surface_count()):
+			if fire_mesh.mesh.surface_get_material(index) == flame:
+				flame_surface = index
+				break
+	check(flame_surface >= 0, "the camp fire must author its flame cards on the flame material")
+	if flame_surface >= 0:
+		var flame_arrays: Array = fire_mesh.mesh.surface_get_arrays(flame_surface)
+		var phases: PackedColorArray = flame_arrays[Mesh.ARRAY_COLOR]
+		check(phases.size() >= 36, "the fire must build its full ring of cards (%d vertices)" % phases.size())
+		var distinct := {}
+		for colour in phases:
+			distinct[colour.to_rgba32()] = true
+		check(distinct.size() >= 5, "every flame card must carry its own phase (%d)" % distinct.size())
+	check(frontier.get_node_or_null("CampFire/FireEmbers") is CPUParticles3D,
+		"the camp fire must throw embers")
+	check(frontier.get_node_or_null("CampFire/CampFireLight") is FireFlicker,
+		"the camp fire lamp must breathe with the flame")
 	# the camp exists, and it is a camp, not a settlement
 	check(frontier.get_node_or_null("CampFire/CampFireLight") is OmniLight3D,
 		"the camp fire must light the camp")
@@ -333,6 +357,49 @@ func _check_camp(frontier) -> void:
 	query.transform = Transform3D(Basis(), stake)
 	check(not space.intersect_shape(query, 1).is_empty(),
 		"the camp probe must detect the effigy's stake")
+
+
+## Rock variety and bedding: authored silhouettes rather than one repeated
+## polygon, each normalised to a metre of half-width, cut on a flat fracture face
+## and sized on its own.
+func _check_stone(boulders: Array[MultiMeshInstance3D], stats: Dictionary) -> void:
+	var meshes := {}
+	var total := 0
+	for node in boulders:
+		var mesh: Mesh = node.multimesh.mesh
+		check(mesh != null, "a boulder batch must carry a mesh")
+		if mesh == null:
+			continue
+		var rid := mesh.get_rid()
+		if not meshes.has(rid):
+			meshes[rid] = true
+			var arrays: Array = mesh.surface_get_arrays(0)
+			var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			check(not vertices.is_empty(), "a boulder variant must have geometry")
+			var half := 0.0
+			var low := INF
+			for vertex in vertices:
+				half = maxf(half, maxf(absf(vertex.x), absf(vertex.z)))
+				low = minf(low, vertex.y)
+			check(absf(half - 1.0) < 0.06,
+				"a boulder variant must be normalised to a 1 m half-extent (%.2f)" % half)
+			# A closed, solid mass: the signed tetrahedron sum catches a shell or a
+			# mesh that collapsed to plates, which is what a bad deformation does.
+			var volume := 0.0
+			for index in range(0, vertices.size(), 3):
+				volume += vertices[index].dot(vertices[index + 1].cross(vertices[index + 2])) / 6.0
+			var box := mesh.get_aabb().size
+			check(absf(volume) > 0.2 * box.x * box.y * box.z,
+				"a boulder variant must be a solid mass (%.3f m3 inside %.3f)" %
+				[absf(volume), box.x * box.y * box.z])
+		total += node.multimesh.instance_count
+	check(meshes.size() >= 6, "boulders must come from at least six authored silhouettes (%d)" % meshes.size())
+	check(total >= 60, "the frontier must dress itself with stone (%d boulders)" % total)
+	# MultiMesh instance data lives in the renderer, so headless cannot read the
+	# transforms back; the placement records the spread it actually used.
+	var span: Vector2 = stats.get("rock_span", Vector2.ZERO)
+	check(span.y > span.x * 3.0,
+		"boulders must vary in size instead of sharing one scale (%.2f to %.2f)" % [span.x, span.y])
 
 
 func _check_arena() -> void:

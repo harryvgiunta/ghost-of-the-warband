@@ -1,8 +1,9 @@
 extends Node3D
-## Presentation-only controller for the half-size Cinder devil.
+## Presentation-only controller for the procedural Cinder devil.
 ## The enemy owns root motion, attacks, health and death timing. This node
-## builds a compact humanoid from primitives and layers the pack's actions:
-## run, leap, slide, side step, claw windup/strike and death flop.
+## builds the red devil from primitives at scale 1.0 (a 0.90 m body, so the delve
+## roles land between 1.1 m and 2.5 m to the horn tips) and layers the pack's
+## actions: run, leap, slide, side step, claw windup/strike and death flop.
 
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")

@@ -177,13 +177,13 @@ static func frontier() -> WorldStyle:
 		# ignores these entries so it only returns grass/flower/fern counts.
 		"rocks": {
 			"texture": "rock", "count": 90, "range": 80.0, "chunk_size": 24.0,
-			"radius": 120.0, "scale": Vector2(0.6, 2.0), "y_scale": Vector2(0.4, 0.9),
-			"tints": [Color.WHITE, Color("cfd6c8"), Color("bcc4b6")],
+			"radius": 120.0, "scale": Vector2(0.55, 1.7), "y_scale": Vector2(0.4, 0.9),
+			"tints": [Color("a8aca1"), Color("9a9e94"), Color("b3b7ac"), Color("8e9288")],
 		},
 		"pebbles": {
 			"texture": "rock", "count": 150, "range": 45.0, "chunk_size": 16.0,
 			"radius": 118.0, "scale": Vector2(0.12, 0.34), "y_scale": Vector2(0.5, 0.8),
-			"tints": [Color("ded8c8"), Color("c4beac"), Color.WHITE],
+			"tints": [Color("b4ae9e"), Color("a49e8e"), Color("c2bcae")],
 		},
 	}
 	style.props = {
@@ -280,8 +280,8 @@ static func arena() -> WorldStyle:
 		},
 		"rocks": {
 			"texture": "rock", "count": 26, "range": 60.0, "chunk_size": 24.0,
-			"radius": 34.0, "scale": Vector2(0.6, 1.8), "y_scale": Vector2(0.4, 0.8),
-			"tints": [Color.WHITE, Color("cfd6c8")],
+			"radius": 34.0, "scale": Vector2(0.55, 1.5), "y_scale": Vector2(0.4, 0.8),
+			"tints": [Color("a8aca1"), Color("9a9e94")],
 		},
 		"pebbles": {
 			"texture": "rock", "count": 60, "range": 40.0, "chunk_size": 16.0,

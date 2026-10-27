@@ -47,6 +47,7 @@ static func materials() -> Dictionary:
 	m["hide_dark"] = TextureLibrary.building_material("hide", Color("7c6144"))
 	m["bone"] = TextureLibrary.building_material("bone", Color("b6ab8d"))
 	m["stone"] = TextureLibrary.granite_material(Color("8a8070"))
+	m["boulder_stone"] = TextureLibrary.boulder_material(Color("b6b2a6"))
 	m["ash"] = Geo.material(Color("2f2925"), 0.0, 0.96)
 	m["char"] = Geo.material(Color("171412"), 0.0, 0.98)
 	m["clay"] = Geo.material(Color("7a5236"), 0.02, 0.95)
@@ -55,8 +56,8 @@ static func materials() -> Dictionary:
 	m["ochre"] = Geo.material(Color("59241a"), 0.02, 0.94)
 	m["moss"] = Geo.material(Color("455536"), 0.0, 0.95)
 	m["feather"] = Geo.material(Color("3d352c"), 0.0, 0.85)
-	m["ember"] = _glow(Color("ff8a3c"), Color("ff5a12"), 1.8)
-	m["fire_core"] = _glow(Color("ffd08a"), Color("ff8a2a"), 2.2)
+	m["ember"] = _glow(Color("ff8a3c"), Color("ff5a12"), 1.5)
+	m["fire_core"] = _glow(Color("ff9a4a"), Color("ff6a1c"), 1.15)
 	m["flame"] = TextureLibrary.flame_material()
 	_mats = m
 	return m
@@ -126,19 +127,6 @@ static func _ring_mesh(inner: float, outer: float, rings: int, segments: int) ->
 	mesh.outer_radius = outer
 	mesh.rings = maxi(3, rings)
 	mesh.ring_segments = maxi(3, segments)
-	_prims[key] = mesh
-	return mesh
-
-
-## A card in the XY plane facing +Z: the flame billboards.
-static func _quad_mesh(size: Vector2) -> PlaneMesh:
-	var key := "q%.3f,%.3f" % [size.x, size.y]
-	var cached: Mesh = _prims.get(key)
-	if cached != null:
-		return cached as PlaneMesh
-	var mesh := PlaneMesh.new()
-	mesh.size = size
-	mesh.orientation = PlaneMesh.FACE_Z
 	_prims[key] = mesh
 	return mesh
 
@@ -900,32 +888,33 @@ static func fire_ring(host: Node3D, mats: Dictionary, seed: int = 3) -> void:
 	var m := Merged.new()
 	var radius := 0.62
 	add_cyl_disc(m, radius, 0.05, Vector3(0.0, 0.025, 0.0), mats["ash"], 14)
+	# The ring: river stones of different shapes, each bedded into the ash.
+	var stones: Array[ArrayMesh] = []
+	for variant in range(4):
+		stones.append(RockKit.mesh("cobble", 811 + variant * 29))
 	for i in range(9):
 		var a := TAU * float(i) / 9.0 + rng.randf_range(-0.14, 0.14)
 		var at := radius + rng.randf_range(-0.04, 0.06)
-		var size_at := rng.randf_range(0.13, 0.24)
-		add_ball(m, size_at, Vector3(cos(a) * at, size_at * 0.32, sin(a) * at), mats["stone"],
-			Vector3(1.0, rng.randf_range(0.5, 0.75), 1.0), 6, 4)
+		var stone: ArrayMesh = stones[i % stones.size()]
+		RockKit.add_stone(m, mats["boulder_stone"], stone,
+			Vector3(cos(a) * at, 0.05, sin(a) * at), rng.randf_range(0.14, 0.24),
+			rng.randf_range(0.0, TAU), 0.56, rng.randf_range(-0.18, 0.18))
 	for i in range(3):
 		var a := TAU * float(i) / 3.0 + 0.6
 		add_beam(m, Vector3(cos(a) * 0.08, 0.09, sin(a) * 0.08),
 			Vector3(cos(a) * 0.45, 0.06, sin(a) * 0.45), 0.042, mats["char"], 4, 0.028)
 	add_ball(m, 0.11, Vector3(0.0, 0.09, 0.0), mats["fire_core"], Vector3(1.0, 0.5, 1.0), 8, 4)
-	for i in range(3):
-		var a := TAU * float(i) / 3.0 + 0.35
-		var card_h := rng.randf_range(0.42, 0.72)
-		var card_w := rng.randf_range(0.32, 0.48)
-		for k in range(2):
-			m.add(_quad_mesh(Vector2(card_w, card_h)),
-				_xf(Vector3(cos(a) * 0.09, 0.10 + card_h * 0.5, sin(a) * 0.09), a + float(k) * PI * 0.5),
-				mats["flame"])
+	FireFx.flame_cards(m, mats["flame"], rng, 1.15, 0.08)
 	m.commit(host, "CampFire")
-	var light := OmniLight3D.new()
+	FireFx.embers(host, 0.10, 0.40, 24)
+	FireFx.smoke(host, Vector3(0.0, 1.15, 0.0), 0.22, 10)
+	var light := FireFlicker.new()
 	light.name = "CampFireLight"
 	light.position = Vector3(0.0, 0.55, 0.0)
 	light.light_color = Color("ffb271")
 	light.light_energy = 1.1
 	light.omni_range = 6.5
+	light.flicker = 0.26
 	host.add_child(light)
 
 

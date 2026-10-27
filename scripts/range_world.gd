@@ -1583,61 +1583,163 @@ func _grass_reserved(point: Vector2) -> bool:
 	return false
 
 
+## Natural stone. `RockKit` authors the silhouettes (rounded boulders, bedding
+## slabs, ledged outcrops, standing spires), this scatters them in loose clusters
+## so they read as rock breaking out of the ground rather than props dropped in a
+## grid: every rock is sized on its own, bedded at its own angle and set into the
+## terrain by a fraction of its own height.
 func _build_rocks() -> void:
-	var variants: Array = []
-	for index in range(3):
-		var mesh := SphereMesh.new()
-		mesh.radius = 1.0
-		mesh.height = 1.65
-		mesh.radial_segments = 7
-		mesh.rings = 4
-		variants.append(mesh)
-	var boulders: Array = [ [] as Array[Dictionary], [] as Array[Dictionary], [] as Array[Dictionary] ]
-	var tints: Array = style.ground_cover.get("rocks", {}).get("tints", [])
-	for i in range(72):
-		var point := Vector2(_rng.randf_range(-124, 124), _rng.randf_range(-124, 112))
-		if _reserved(point, 7.0):
+	var config: Dictionary = style.ground_cover.get("rocks", {})
+	var tints: Array = config.get("tints", [])
+	var target: int = maxi(1, int(config.get("count", 72)))
+	var sizes: Vector2 = config.get("scale", Vector2(0.6, 2.0))
+	var variants: Array[Dictionary] = _rock_variants()
+	var buckets: Array = []
+	for index in range(variants.size()):
+		buckets.append([] as Array[Dictionary])
+	var placed := 0
+	var smallest := INF
+	var largest := 0.0
+	# The frontier's reserved zones (town, camp, village, roads, dens) reject a lot
+	# of attempts, so the cluster pass keeps going until the target is met.
+	for _cluster in range(target * 3):
+		if placed >= target:
+			break
+		var centre := Vector2(_rng.randf_range(-120.0, 120.0), _rng.randf_range(-120.0, 108.0))
+		if _reserved(centre, 9.0):
 			continue
-		var base := _ground(point.x, point.y)
-		var radius: float = _rng.randf_range(0.7, 2.1)
-		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3(
-			radius * _rng.randf_range(0.95, 1.3),
-			radius * _rng.randf_range(0.55, 0.9),
-			radius * _rng.randf_range(0.95, 1.3)))
-		var scale_y := basis.get_scale().y
-		var xform := Transform3D(basis, base + Vector3(0, scale_y * 0.825, 0))
-		var bucket: Array[Dictionary] = boulders[i % 3]
-		bucket.append({"transform": xform, "color": _pick_color(tints, Color.WHITE)})
-		var shape := SphereShape3D.new()
-		shape.radius = maxf(basis.get_scale().x, basis.get_scale().z) * 0.92
-		var collision := CollisionShape3D.new()
-		collision.shape = shape
-		collision.position = xform.origin
-		_solids.add_child(collision)
+		var spread: float = _rng.randf_range(1.8, 7.5)
+		var members: int = mini(target - placed, _rng.randi_range(1, 5))
+		for _member in range(members):
+			var angle: float = _rng.randf_range(0.0, TAU)
+			var point := centre + Vector2(cos(angle), sin(angle)) * (spread * sqrt(_rng.randf()))
+			# Reserve the rock's own footprint, not a fixed margin: a 3 m outcrop
+			# must not overhang the trail.
+			if _reserved(point, 3.4 + sizes.y):
+				continue
+			var stone_radius := _place_rock(point, variants, buckets, sizes, tints)
+			smallest = minf(smallest, stone_radius)
+			largest = maxf(largest, stone_radius)
+			placed += 1
+	for index in range(variants.size()):
+		WorldScatter.batch(self, "Boulder_%d" % index, variants[index]["mesh"], _rock_material,
+			buckets[index], 64.0, {"cast_shadow": true})
+	# Loose stone: the same generator at a hand's width, dropped where it fell.
+	var pebble_meshes: Array[ArrayMesh] = []
+	var pebbles: Array = []
 	for index in range(3):
-		WorldScatter.batch(self, "Boulder_%d" % index, variants[index], _rock_material, boulders[index], 48.0,
-			{"cast_shadow": true})
-	var pebble_mesh := SphereMesh.new()
-	pebble_mesh.radius = 1.0
-	pebble_mesh.height = 1.25
-	pebble_mesh.radial_segments = 6
-	pebble_mesh.rings = 3
+		pebble_meshes.append(RockKit.mesh("cobble", 6301 + index * 53))
+		pebbles.append([] as Array[Dictionary])
 	var pebble_tints: Array = style.ground_cover.get("pebbles", {}).get("tints", [])
-	var pebbles: Array[Dictionary] = []
-	for i in range(220):
-		var point := Vector2(_rng.randf_range(-118, 118), _rng.randf_range(-118, 112))
+	for _i in range(260):
+		var point := Vector2(_rng.randf_range(-118.0, 118.0), _rng.randf_range(-118.0, 112.0))
 		if _reserved(point, 4.5):
 			continue
-		var base := _ground(point.x, point.y)
-		var size_at := _rng.randf_range(0.09, 0.28)
-		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU)).scaled(Vector3(size_at, size_at * 0.7, size_at))
-		pebbles.append({
-			"transform": Transform3D(basis, base + Vector3(0, size_at * 0.44, 0)),
+		var slot: int = _rng.randi_range(0, pebble_meshes.size() - 1)
+		var size_at: float = _rng.randf_range(0.09, 0.30)
+		var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU))
+		basis = basis * Basis(Vector3.RIGHT, _rng.randf_range(-0.4, 0.4))
+		basis = basis.scaled_local(Vector3(size_at, size_at * _rng.randf_range(0.6, 0.9), size_at))
+		var bounds: AABB = Transform3D(basis, Vector3.ZERO) * pebble_meshes[slot].get_aabb()
+		var ground := terrain_height(point.x, point.y)
+		(pebbles[slot] as Array[Dictionary]).append({
+			"transform": Transform3D(basis,
+				Vector3(point.x, ground - size_at * _rng.randf_range(0.10, 0.24) - bounds.position.y, point.y)),
 			"color": _pick_color(pebble_tints, Color.WHITE),
 		})
-	WorldScatter.batch(self, "Pebbles", pebble_mesh, _rock_material, pebbles, 32.0,
-		{"visible_end": 52.0, "cast_shadow": false})
-	generation_stats["rocks"] = 72
+	for index in range(pebble_meshes.size()):
+		WorldScatter.batch(self, "Pebbles_%d" % index, pebble_meshes[index], _rock_material,
+			pebbles[index], 32.0, {"visible_end": 52.0, "cast_shadow": false})
+	generation_stats["rocks"] = placed
+	# The spread of placed half-widths: the art contract is that the field is
+	# sized independently, not one polygon at one scale.
+	generation_stats["rock_span"] = Vector2(smallest, largest)
+
+
+## Eight authored silhouettes (three rounded boulders, two bedding slabs, two
+## ledged outcrops, one spire). Each variant keeps its own hull so the collision
+## always matches the stone that is drawn.
+func _rock_variants() -> Array[Dictionary]:
+	var variants: Array[Dictionary] = []
+	for kind in ["boulder", "boulder", "slab", "outcrop", "spire", "boulder", "slab", "outcrop"]:
+		var stone: ArrayMesh = RockKit.mesh(String(kind), 2711 + variants.size() * 37)
+		variants.append({
+			"index": variants.size(),
+			"mesh": stone,
+			"vertices": stone.surface_get_arrays(0)[Mesh.ARRAY_VERTEX],
+			"shape": stone.create_convex_shape(true, true),
+		})
+	return variants
+
+
+## Sizes one rock, beds it at its own angle and sets it into the terrain by a
+## fraction of its own height. Returns the half-width it was given.
+func _place_rock(point: Vector2, variants: Array[Dictionary], buckets: Array,
+		sizes: Vector2, tints: Array) -> float:
+	var variant: Dictionary = variants[_rng.randi_range(0, variants.size() - 1)]
+	var stone: ArrayMesh = variant["mesh"]
+	var radius: float = _rng.randf_range(sizes.x, sizes.y)
+	# A few boulders are the size of a wagon: variety wants outliers, not a
+	# uniform field of one size.
+	if _rng.randf() < 0.14:
+		radius *= _rng.randf_range(1.12, 1.45)
+	var stretch := Vector3(_rng.randf_range(0.82, 1.28), _rng.randf_range(0.70, 1.12),
+		_rng.randf_range(0.82, 1.28)) * radius
+	var basis := Basis(Vector3.UP, _rng.randf_range(0.0, TAU))
+	# Nothing in the wild sits level: rocks tumble and bed at an angle. Big slabs
+	# tilt less than cobbles, or a 4 m plate lifts a corner clear of the hill.
+	var tilt := 0.34 / (1.0 + radius)
+	basis = basis * Basis(Vector3.RIGHT, _rng.randf_range(-tilt, tilt))
+	basis = basis * Basis(Vector3.BACK, _rng.randf_range(-tilt * 0.85, tilt * 0.85))
+	basis = basis.scaled_local(stretch)
+	# The transformed AABB is padded, so bedding a rock on its lowest corner leaves
+	# it hanging by the padding. Measure the real geometry instead: the exact
+	# lowest vertex, the exact height and the real footprint the terrain is
+	# sampled under.
+	var lowest := INF
+	var highest := -INF
+	var half_x := 0.0
+	var half_z := 0.0
+	for vertex in variant["vertices"]:
+		var world_vertex: Vector3 = basis * (vertex as Vector3)
+		lowest = minf(lowest, world_vertex.y)
+		highest = maxf(highest, world_vertex.y)
+		half_x = maxf(half_x, absf(world_vertex.x))
+		half_z = maxf(half_z, absf(world_vertex.z))
+	var extent := highest - lowest
+	# The base sits below the LOWEST ground under the rock: on a slope the uphill
+	# side is then buried even deeper, and no underside ever shows.
+	# Half embedded, the way granite shows: the base sits a third to a half of the
+	# rock's height below the lowest ground under it, so the crest still reads and
+	# no cut face ever comes up for air.
+	# Thin stone still needs a floor under it: a flat outcrop buried by a fifth of
+	# its own height shows its fracture face above the grass on a slope.
+	var bury: float = maxf(extent * _rng.randf_range(0.34, 0.56), 0.28)
+	var base_y := _lowest_ground(point, half_x, half_z) - bury
+	var xform := Transform3D(basis, Vector3(point.x, base_y - lowest, point.y))
+	(buckets[int(variant["index"])] as Array[Dictionary]).append({
+		"transform": xform, "color": _pick_color(tints, Color.WHITE)})
+	if radius >= 0.55:
+		var collision := CollisionShape3D.new()
+		collision.shape = variant["shape"]
+		collision.transform = xform
+		_solids.add_child(collision)
+	return radius
+
+
+## Lowest terrain height under a footprint, so a rock bedded on a slope is buried
+## on its uphill side instead of hanging in the air.
+func _lowest_ground(point: Vector2, half_x: float, half_z: float) -> float:
+	# Nine samples: the centre, the four axis extremes and the four corners. A
+	# five-point cross misses the saddles a wide rock straddles, and a saddle is
+	# exactly where a cut face comes up for air.
+	var lowest := terrain_height(point.x, point.y)
+	for offset in [Vector2(half_x, 0.0), Vector2(-half_x, 0.0), Vector2(0.0, half_z),
+			Vector2(0.0, -half_z), Vector2(half_x, half_z), Vector2(half_x, -half_z),
+			Vector2(-half_x, half_z), Vector2(-half_x, -half_z)]:
+		lowest = minf(lowest, terrain_height(point.x + offset.x, point.y + offset.y))
+	return lowest
+
 
 
 func _build_signposts() -> void:

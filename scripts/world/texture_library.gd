@@ -251,23 +251,47 @@ static func granite_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
 	return material
 
 
-## Rock material: world-triplanar granite with a normal map, tintable per instance.
+## Natural granite, tintable per instance: the scattered boulders and everything
+## else that is just broken stone. World-triplanar, so no mesh needs UVs.
 static func rock_material() -> StandardMaterial3D:
 	var key := "rock"
 	if _materials.has(key):
 		return _materials[key]
 	var material := StandardMaterial3D.new()
-	material.albedo_texture = texture("rock")
+	material.albedo_texture = texture("granite")
 	material.albedo_color = Color.WHITE
 	material.vertex_color_use_as_albedo = true
 	material.uv1_triplanar = true
 	material.uv1_world_triplanar = true
 	material.uv1_triplanar_sharpness = 0.85
-	material.uv1_scale = Vector3(0.4, 0.4, 0.4)
+	material.uv1_scale = Vector3(0.6, 0.6, 0.6)
 	material.normal_enabled = true
-	material.normal_texture = _normal_texture("rock")
+	material.normal_texture = _normal_texture("granite")
 	material.normal_scale = 1.0
 	material.roughness = 0.92
+	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
+## The same natural granite baked to one tint, for props merged into a kit mesh
+## (fire-ring stones, kerbs) where there is no instance colour to spend.
+static func boulder_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
+	var key := "boulder:%s" % tint.to_html(false)
+	if _materials.has(key):
+		return _materials[key]
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture("granite")
+	material.albedo_color = tint
+	material.uv1_triplanar = true
+	material.uv1_world_triplanar = true
+	material.uv1_triplanar_sharpness = 0.85
+	material.uv1_scale = Vector3(0.9, 0.9, 0.9)
+	material.normal_enabled = true
+	material.normal_texture = _normal_texture("granite")
+	material.normal_scale = 1.0
+	material.roughness = 0.93
 	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_materials[key] = material
@@ -305,7 +329,9 @@ static func building_material(kind: String, tint: Color = Color.WHITE) -> Standa
 	return material
 
 
-## Animated flame cards: the authored 2x2 tongue atlas cycled by the flame shader.
+## Animated flame cards: the authored 2x2 tongue atlas driven by the flame
+## shader. Every animation knob lives in the shader's own defaults, so the fire
+## is tuned in one place.
 static func flame_material() -> ShaderMaterial:
 	var key := "flame"
 	if _materials.has(key):
@@ -313,9 +339,6 @@ static func flame_material() -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = FLAME_SHADER
 	material.set_shader_parameter("albedo_texture", texture("flame"))
-	material.set_shader_parameter("frame_rate", 11.0)
-	material.set_shader_parameter("glow", 1.35)
-	material.set_shader_parameter("waver", 0.016)
 	_materials[key] = material
 	return material
 
