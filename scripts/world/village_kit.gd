@@ -49,6 +49,7 @@ static func materials() -> Dictionary:
 	m["hide_wall"] = TextureLibrary.building_material("hide", Color("a8875f"))
 	m["bone"] = TextureLibrary.building_material("bone", Color("b6ab8d"))
 	m["stone"] = TextureLibrary.granite_material(Color("8a8070"))
+	m["boulder_stone"] = TextureLibrary.boulder_material(Color("b6b2a6"))
 	m["daub"] = TextureLibrary.building_material("plaster", Color("54483a"))
 	m["ash"] = Geo.material(Color("241e19"), 0.0, 1.0)
 	m["char"] = Geo.material(Color("171412"), 0.0, 0.98)
@@ -60,9 +61,9 @@ static func materials() -> Dictionary:
 	m["wicker"] = TextureLibrary.building_material("timber", Color("8a7550"))
 	m["moss"] = Geo.material(Color("455536"), 0.0, 0.95)
 	m["feather"] = Geo.material(Color("3d352c"), 0.0, 0.85)
-	m["ember"] = _glow(Color("ff8a3c"), Color("ff5a12"), 2.0)
+	m["ember"] = _glow(Color("ff8a3c"), Color("ff5a12"), 1.5)
 	m["flame"] = TextureLibrary.flame_material()
-	m["fire_core"] = _glow(Color("ffd08a"), Color("ff8a2a"), 2.6)
+	m["fire_core"] = _glow(Color("ff9a4a"), Color("ff6a1c"), 1.15)
 	m["rune"] = _glow(Color("6e2018"), Color("c8452a"), 0.7)
 	_mats = m
 	return m
@@ -132,19 +133,6 @@ static func _ring_mesh(inner: float, outer: float, rings: int, segments: int) ->
 	mesh.outer_radius = outer
 	mesh.rings = maxi(3, rings)
 	mesh.ring_segments = maxi(3, segments)
-	_prims[key] = mesh
-	return mesh
-
-
-## A card in the XY plane facing +Z: the flame billboards.
-static func _quad_mesh(size: Vector2) -> PlaneMesh:
-	var key := "q%.3f,%.3f" % [size.x, size.y]
-	var cached: Mesh = _prims.get(key)
-	if cached != null:
-		return cached as PlaneMesh
-	var mesh := PlaneMesh.new()
-	mesh.size = size
-	mesh.orientation = PlaneMesh.FACE_Z
 	_prims[key] = mesh
 	return mesh
 
@@ -525,15 +513,16 @@ static func great_pit(host: Node3D, mats: Dictionary, solids: StaticBody3D,
 		add_beam(m, Vector3(cos(a) * r, 0.12, sin(a) * r),
 			Vector3(cos(a) * r + rng.randf_range(-0.3, 0.3), 0.12,
 				sin(a) * r + rng.randf_range(-0.3, 0.3)), 0.028, mats["bone"], 3, 0.014)
-	# a continuous kerb of rounded fire stones, not scattered blocks
+	# a continuous kerb of bedded fire stones, each one its own shape
+	var kerb_stones: Array[ArrayMesh] = []
+	for variant in range(4):
+		kerb_stones.append(RockKit.mesh("cobble", 907 + variant * 41))
 	for i in range(40):
 		var a := TAU * float(i) / 40.0 + rng.randf_range(-0.04, 0.04)
 		var ring_r := radius - 0.02 + rng.randf_range(-0.05, 0.05)
-		var width := rng.randf_range(0.30, 0.46)
-		var tall := rng.randf_range(0.16, 0.26)
-		var depth := rng.randf_range(0.30, 0.46)
-		add_ball(m, width, Vector3(cos(a) * ring_r, tall * 0.34, sin(a) * ring_r), mats["stone"],
-			Vector3(1.0, tall / width, depth / width), 8, 5)
+		RockKit.add_stone(m, mats["boulder_stone"], kerb_stones[i % kerb_stones.size()],
+			Vector3(cos(a) * ring_r, 0.24, sin(a) * ring_r), rng.randf_range(0.17, 0.25),
+			a + rng.randf_range(-0.5, 0.5), 0.60, rng.randf_range(-0.16, 0.16))
 	# charred logs in the fireplace
 	for i in range(5):
 		var a := TAU * float(i) / 5.0 + 0.4
@@ -541,21 +530,9 @@ static func great_pit(host: Node3D, mats: Dictionary, solids: StaticBody3D,
 		var outer := Vector3(cos(a) * (radius - 0.95), 0.18, sin(a) * (radius - 0.95))
 		add_beam(m, inner, outer, rng.randf_range(0.10, 0.15), mats["char"], 6, 0.07)
 		add_ball(m, 0.13, outer, mats["ash"], Vector3(1.0, 0.7, 1.0), 6, 4)
-	# fire: a hot core under crossed cards of the authored flame tongues
-	add_ball(m, 0.36, Vector3(0.0, 0.26, 0.0), mats["fire_core"], Vector3(1.0, 0.42, 1.0), 10, 5)
-	for i in range(3):
-		var a := TAU * float(i) / 3.0 + 0.35
-		var card_h := rng.randf_range(1.55, 2.30)
-		var card_w := rng.randf_range(0.95, 1.30)
-		var at := Vector3(cos(a) * 0.22, 0.16 + card_h * 0.5, sin(a) * 0.22)
-		for k in range(2):
-			m.add(_quad_mesh(Vector2(card_w, card_h)), _xf(at, a + float(k) * PI * 0.5), mats["flame"])
-	for i in range(2):
-		var a := TAU * float(i) / 2.0 + 1.2
-		var card_h := rng.randf_range(0.80, 1.20)
-		var card_w := rng.randf_range(0.60, 0.85)
-		m.add(_quad_mesh(Vector2(card_w, card_h)),
-			_xf(Vector3(cos(a) * 0.44, 0.18 + card_h * 0.5, sin(a) * 0.44), a + 0.4), mats["flame"])
+	# fire: a hot core under the authored tongues, each card with its own phase
+	add_ball(m, 0.32, Vector3(0.0, 0.24, 0.0), mats["fire_core"], Vector3(1.0, 0.42, 1.0), 10, 5)
+	FireFx.flame_cards(m, mats["flame"], rng, 2.85, 0.16)
 	for i in range(7):
 		var a := TAU * float(i) / 7.0
 		add_ball(m, rng.randf_range(0.035, 0.07), Vector3(cos(a) * rng.randf_range(0.6, 2.2), 0.16,
@@ -587,7 +564,9 @@ static func great_pit(host: Node3D, mats: Dictionary, solids: StaticBody3D,
 		add_beam(m, at + Vector3(-1.15, 0.0, 0.22), at + Vector3(1.15, 0.0, 0.22), 0.22, mats["bark"], 7, 0.20)
 		add_beam(m, at + Vector3(-1.15, 0.0, -0.20), at + Vector3(1.15, 0.0, -0.20), 0.20, mats["bark"], 7, 0.18)
 	m.commit(host, "GreatFirepitPit")
-	var light := OmniLight3D.new()
+	FireFx.embers(host, 0.16, 0.95, 46)
+	FireFx.smoke(host, Vector3(0.0, 2.80, 0.0), 0.45, 16)
+	var light := FireFlicker.new()
 	light.name = "FirepitLight"
 	light.position = Vector3(0.0, 1.5, 0.0)
 	light.light_color = Color("ffb271")

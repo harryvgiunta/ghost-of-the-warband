@@ -2,8 +2,8 @@
  "generator": "tools/world_textures.py",
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
- "file_count": 37,
- "total_bytes": 9577703,
+ "file_count": 39,
+ "total_bytes": 10449352,
  "textures": [
   {
    "id": "sky_frontier",
@@ -224,7 +224,7 @@
    "tiling": "both",
    "n_version": "rock_n.png",
    "kind": "prop",
-   "description": "Seamless granite boulder surface with moss and lichen."
+   "description": "Seamless jointed rock face with moss and lichen: carved stonework, dungeon walls and prop blocks. Scattered boulders use 'granite'."
   },
   {
    "id": "wood_planks",
@@ -342,6 +342,19 @@
    "n_version": "wattle_n.png",
    "kind": "building",
    "description": "Woven withy panel: upright rods laced through horizontal binders."
+  },
+  {
+   "id": "granite",
+   "file": "granite.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 3,
+   "tiling": "both",
+   "n_version": "granite_n.png",
+   "kind": "stone",
+   "description": "Natural grey granite for scattered boulders: quartz and feldspar speckle over tonal mottling, weathered veins, moss in the cracks. No coursing - carved stone uses the 'rock' surface."
   },
   {
    "id": "flame",
