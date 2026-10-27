@@ -238,12 +238,26 @@ func check_rescuer() -> void:
 		"the rescuer's arrival hands over the shiv (%s)" % game.sequencer.state_name())
 	check(state_count(SequencerScript.State.RESCUER_ARRIVED) == 1,
 		"RESCUER_ARRIVED is entered exactly once")
-	check(game.controller.merc_for_peer(1) == game.rescuer_id,
-		"the soul is forced into the rescuer's body")
-	check(not game.cages_open(), "the cages are still shut: the player has to cut them")
+	# The card and the instruction name the key; the game must not press it.
+	check(game.controller.merc_for_peer(1) != game.rescuer_id,
+		"the soul is NOT moved into the rescuer for the player")
+	check(not game.sequencer.rescuer_taken(), "the rescuer has not been taken yet")
 	check(game.cages_open_count() == 0, "no latch is cut for free")
+	var arrived_objective: String = game.sequencer.objective()
+	check(arrived_objective.contains("F5") and arrived_objective.contains("[ ]"),
+		"the objective names both keys, got %s" % arrived_objective)
+	check(game.sequencer.hint().contains("F5"), "the hint names F5")
+	dismiss_card("the rescuer's card")
+	# The player takes the body: F5 in the game, `direct` here.
+	var take: Dictionary = game.controller.direct(1, game.rescuer_id)
+	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
+	check(game.controller.merc_for_peer(1) == game.rescuer_id,
+		"the soul is in Corvin's body after F5")
+	check(game.sequencer.rescuer_taken(), "the sequencer saw the player take the body")
+	check(not game.sequencer.note_rescuer_taken(), "taking the body only counts once")
+	check(game.sequencer.objective().contains("latch"),
+		"the objective moves on to the latches, got %s" % game.sequencer.objective())
 	check(game.sequencer.hint().contains("G"), "the hint names the latch key")
-	check(not game.sequencer.note_cage_opened(0) == false, "the first latch is accepted")
 	var rescuer = game.controller.body_of(game.rescuer_id)
 	check(rescuer != null and flat_range(rescuer.global_position, game.JOG_TARGET) < 4.0,
 		"the rescuer is standing at the cages")

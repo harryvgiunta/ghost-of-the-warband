@@ -41,6 +41,7 @@ var _opened: Array[int] = []
 var _guards_down := 0
 var _weapons := 0
 var _rescuer_noted := false
+var _rescuer_taken := false
 var _gate_noted := false
 
 ## Announce the opening state. Idempotent: re-entering the camp (or a scene that
@@ -91,7 +92,9 @@ func objective() -> String:
 		State.ALL_SEEN:
 			return "All four seen. The fifth prisoner is coming."
 		State.RESCUER_ARRIVED:
-			return "Take his body (F5), then cut each latch with G   %d/%d" % [_opened.size(), PRISONER_COUNT]
+			if not _rescuer_taken:
+				return "Corvin is through. Take his body - F5 or [ ]."
+			return "Cut each latch with G   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
 			return "Take the cultist steel (K) and put down the watchers   steel %d  watchers %d/%d" \
 				% [_weapons, _guards_down, GUARD_COUNT]
@@ -111,7 +114,9 @@ func hint() -> String:
 		State.ALL_SEEN:
 			return "Stay in a body - Corvin is walking in with the shiv."
 		State.RESCUER_ARRIVED:
-			return "F5 - take Corvin   ·   walk to a cage and press G to cut its latch"
+			if not _rescuer_taken:
+				return "F5 or [ ] - take Corvin's body   ·   then G at a cage to cut its latch"
+			return "G - cut this cage's latch   ·   walk to each cage"
 		State.FREED:
 			return "K - pick up the steel (it goes straight into your hands)   ·   LMB / RMB - fight   ·   E - revive"
 		State.ESCAPING:
@@ -161,6 +166,19 @@ func note_rescuer_arrived() -> bool:
 	_transition(State.RESCUER_ARRIVED)
 	rescuer_ready.emit(rescuer_merc_id)
 	return true
+
+## The soul actually entered the rescuer's body. The tutorial never moves it
+## there for you: the card and the objective both name the key, and until this
+## fires no latch can be cut.
+func note_rescuer_taken() -> bool:
+	if _state != State.RESCUER_ARRIVED or _rescuer_taken:
+		return false
+	_rescuer_taken = true
+	announce()
+	return true
+
+func rescuer_taken() -> bool:
+	return _rescuer_taken
 
 ## One cage latch was cut by the player. A cage counts once; the fourth opens the
 ## squad and starts the fight.

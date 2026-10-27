@@ -101,9 +101,9 @@ const STEP_CARDS := {
 	2: {  # RESCUER_ARRIVED
 		"kicker": "STEP 3  /  THE LATCHES",
 		"title": "Corvin has the shiv",
-		"body": "You are in his body now. Walk to each cage and cut its latch. Four cages, four latches - and the watchers wake when the first one falls.",
-		"keys": "F5  take Corvin        ·        G  cut a latch",
-		"footnote": "Only Corvin's body carries the shiv, so only his hands can open a cage.",
+		"body": "He is through with the shiv and he is not moving. Take his body yourself, then walk to each cage and cut its latch. Four cages, four latches - and the watchers wake when the first one falls.",
+		"keys": "F5  or  [ ]  take Corvin        ·        G  cut a latch",
+		"footnote": "Nothing happens until you are in his body: only his hands carry the shiv.",
 	},
 	3: {  # FREED
 		"kicker": "STEP 4  /  ARM YOURSELF",
@@ -734,8 +734,12 @@ func _is_free_ally(merc_id: int) -> bool:
 	var index := caged_ids.find(merc_id)
 	if index >= 0:
 		return index < _cage_open.size() and bool(_cage_open[index])
-	return sequencer.state() != SequencerScript.State.CAGED \
-		and sequencer.state() != SequencerScript.State.ALL_SEEN
+	# The rescuer is the player's objective, not a squadmate: he stands still with
+	# the shiv until the latches are cut, so he can never steal the beat by
+	# charging the watchers on his own.
+	return sequencer.state() == SequencerScript.State.FREED \
+		or sequencer.state() == SequencerScript.State.ESCAPING \
+		or sequencer.state() == SequencerScript.State.TOWN
 
 func _move_towards(actor, point: Vector3) -> void:
 	var to: Vector3 = point - actor.global_position
@@ -929,16 +933,14 @@ func _on_state_changed(state: int, objective: String) -> void:
 			if screen != null:
 				screen.refresh()
 
-## The rescuer is through: his body is the one with a blade, so the soul goes
-## into him whether the player reached for a hotkey or not. He does not free four
-## cages with one cut - the player walks to each cage and presses G.
+## The rescuer is through and stands still: the soul is NOT moved for the player.
+## Taking his body is the beat - F5 or [ ] - and no latch opens until Corvin's
+## hands are the player's hands.
 func _on_rescuer_ready(merc_id: int) -> void:
 	_jogging = false
-	controller.direct(1, merc_id)
+	_hold(controller.body_of(merc_id))
 	if hud != null:
-		var actor = controller.active_body(1)
-		hud.set_body(actor, warband.roster.name_of(merc_id), merc_id)
-		hud.set_status("Corvin holds the shiv. Walk to each cage and press G.", 6.0)
+		hud.set_status("Corvin is through with the shiv. Press F5 (or [ ]) to take his body.", 6.0)
 
 func _on_gate_ready() -> void:
 	var path := town_scene_path()
@@ -972,6 +974,8 @@ func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 		hud.set_body(controller.active_body(1), warband.roster.name_of(merc_id), merc_id)
 	if caged_ids.has(merc_id):
 		sequencer.note_body_entered(merc_id)
+	if merc_id == rescuer_id:
+		sequencer.note_rescuer_taken()
 
 func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
 	if hud != null:
@@ -1161,7 +1165,8 @@ func _update_prompt() -> void:
 		if pickup != null:
 			text = "K - loot %s" % str(pickup.label_text())
 		elif cage >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
-			text = "G - cut the latch"
+			text = "G - cut the latch" if controller.merc_for_peer(1) == rescuer_id \
+				else "F5  -  take Corvin's body"
 		elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
 			text = "G - leave the camp"
 		else:
@@ -1184,8 +1189,11 @@ func _update_hint() -> void:
 	elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
 		text = "G - leave the camp for town"
 	elif _cage_in_reach() >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
-		text = "G - cut this cage's latch   (%d of %d opened)" % [
-			cages_open_count(), caged_ids.size()]
+		if controller.merc_for_peer(1) != rescuer_id:
+			text = "F5  or  [ ]  -  take Corvin's body: only his shiv cuts a latch"
+		else:
+			text = "G - cut this cage's latch   (%d of %d opened)" % [
+				cages_open_count(), caged_ids.size()]
 	if text != _hint_text:
 		_hint_text = text
 		hud.set_hint(text)
