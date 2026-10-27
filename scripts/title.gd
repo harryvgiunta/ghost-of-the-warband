@@ -9,6 +9,7 @@ signal join_requested
 
 const StateScript = preload("res://scripts/player_state.gd")
 const SessionScript = preload("res://scripts/session.gd")
+const LobbyScript = preload("res://scripts/warband/warband_lobby.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -24,6 +25,10 @@ var _load_button: Button
 var host_world_button: Button
 var join_button: Button
 var _join_layer: Control
+## The warband's host/join panel, beside the four doors. It talks to `GameFlow`
+## directly: the socket belongs to the flow (the one node that survives the
+## hand-off), so the menu only has to remember what was typed.
+var lobby
 var _name_input: LineEdit
 var _join_mode: OptionButton
 var _address_input: LineEdit
@@ -121,10 +126,17 @@ func _build() -> void:
 
 	var ranger := Label.new()
 	ranger.text = "II"
-	ranger.position = Vector2(874,236)
+	ranger.position = Vector2(1128,492)
 	ranger.add_theme_font_size_override("font_size",164)
 	ranger.add_theme_color_override("font_color",Color(0.35,0.55,0.53,0.16))
 	add_child(ranger)
+	# Ghost of the Warband's two doors. The panel sits beside the four above
+	# rather than inside them because a warband battle is its own mode: it starts
+	# a possession session, not a seat in the arena or the open world.
+	lobby = LobbyScript.new()
+	lobby.name = "WarbandLobby"
+	lobby.position = Vector2(624,92)
+	add_child(lobby)
 	_build_join_layer()
 
 func _enter_warband() -> void:
