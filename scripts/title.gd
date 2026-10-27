@@ -139,13 +139,6 @@ func _build_join_layer() -> void:
 	var hint := _label(panel,"Choose an arena match, a delve party or the open world. All values are remembered.",Vector2(24,54),11,MUTED)
 	hint.size = Vector2(432,32)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var cache := get_node_or_null("/root/NetCache")
-	var cached_mode := "arena"
-	if cache != null:
-		_default_name = str(cache.player_name)
-		_default_address = str(cache.address)
-		_default_port = int(cache.port)
-		cached_mode = str(cache.mode)
 	_label(panel,"MODE",Vector2(24,96),10,GOLD)
 	_join_mode = OptionButton.new()
 	_join_mode.position = Vector2(24,116)
@@ -153,20 +146,17 @@ func _build_join_layer() -> void:
 	_join_mode.add_item("Arena match",0)
 	_join_mode.add_item("Delve party",1)
 	_join_mode.add_item("Open world",2)
-	_join_mode.selected = 2 if cached_mode == "world" else 1 if cached_mode == "delve" else 0
 	panel.add_child(_join_mode)
 	_label(panel,"YOUR NAME",Vector2(250,96),10,GOLD)
 	_name_input = LineEdit.new()
 	_name_input.position = Vector2(250,116)
 	_name_input.size = Vector2(206,40)
 	_name_input.max_length = 16
-	_name_input.text = _default_name
 	panel.add_child(_name_input)
 	_label(panel,"HOST ADDRESS",Vector2(24,168),10,GOLD)
 	_address_input = LineEdit.new()
 	_address_input.position = Vector2(24,188)
 	_address_input.size = Vector2(300,40)
-	_address_input.text = _default_address
 	panel.add_child(_address_input)
 	_label(panel,"UDP PORT",Vector2(340,168),10,GOLD)
 	_port_input = SpinBox.new()
@@ -174,7 +164,6 @@ func _build_join_layer() -> void:
 	_port_input.size = Vector2(116,40)
 	_port_input.min_value = 1024
 	_port_input.max_value = 65535
-	_port_input.value = _default_port
 	panel.add_child(_port_input)
 	var confirm := _button(panel,"JOIN",Vector2(24,258),Vector2(214,44))
 	confirm.pressed.connect(_confirm_join)
@@ -183,6 +172,31 @@ func _build_join_layer() -> void:
 	_form_error = _label(panel,"",Vector2(24,318),11,WARN)
 	_form_error.size = Vector2(432,54)
 	_form_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sync_join_form()
+
+
+## Fills the form from the cache *now*. Reading it once in `_ready` froze the
+## name, address, port and door at whatever the app started with, so a session
+## that hosted or joined something else kept offering dead values.
+func _sync_join_form() -> void:
+	var cached_name := _default_name
+	var cached_address := _default_address
+	var cached_port := _default_port
+	var cached_mode := "arena"
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		cached_name = str(cache.player_name)
+		cached_address = str(cache.address)
+		cached_port = int(cache.port)
+		cached_mode = str(cache.mode)
+	if _name_input != null:
+		_name_input.text = cached_name
+	if _address_input != null:
+		_address_input.text = cached_address
+	if _port_input != null:
+		_port_input.value = clampi(cached_port,1024,65535)
+	if _join_mode != null:
+		_join_mode.selected = 2 if cached_mode == "world" else 1 if cached_mode == "delve" else 0
 
 func _style(color: Color, border: Color, radius: int) -> StyleBoxFlat:
 	var result := StyleBoxFlat.new()
@@ -261,18 +275,22 @@ func _host_open_world() -> void:
 	var port := _default_port
 	var player_name := _default_name
 	if cache != null:
-		port = int(cache.port)
+		# The host socket uses its own port. The guest-side `port` is what a
+		# friend typed last, and letting it open the world is how a host ended up
+		# serving a port nobody else knew about.
+		port = int(cache.host_port)
 		player_name = str(cache.player_name)
 	if session != null:
 		session.arm_world("world-host","127.0.0.1",port,player_name)
 	if cache != null:
-		cache.remember(player_name,"",port,"world")
-	_set_status("Opening your world on UDP %d..." % port)
+		cache.remember_host(player_name,port)
+	_set_status("Opening your world on UDP %d. Friends use this port." % port)
 	print("IRONWOOD_HOST_WORLD port=%d" % port)
 	host_requested.emit()
 	get_tree().change_scene_to_file("res://main.tscn")
 
 func _open_join() -> void:
+	_sync_join_form()
 	_join_layer.visible = true
 	_form_error.text = ""
 	_name_input.grab_focus()

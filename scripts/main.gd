@@ -2221,8 +2221,17 @@ func host_world(port: int, player_name: String) -> void:
 	_world_address = "127.0.0.1"
 	_world_port = port
 	_update_session_line()
-	hud.show_feedback("Open world on %s  /  friends: Join Game, Open world" % _endpoint,8.0)
-	print("WORLD_HOST_READY port=",port)
+	# The host is the only peer that can read the tailnet/LAN address, so state
+	# every interface a friend could type next to the port they must match.
+	var addresses := PackedStringArray()
+	for address in IP.get_local_addresses():
+		if address.contains(".") and not address.begins_with("127.") and not address.begins_with("169.254."):
+			addresses.append(address)
+	var detail := "same PC 127.0.0.1"
+	if not addresses.is_empty():
+		detail = "%s / same PC 127.0.0.1" % ", ".join(addresses)
+	hud.show_feedback("Open world on UDP %d  /  join at %s  /  friends: Join Game, Open world, this port" % [port,detail],12.0)
+	print("WORLD_HOST_READY port=",port," addresses=",", ".join(addresses))
 
 
 func join_world(address: String, port: int) -> void:
@@ -2257,10 +2266,11 @@ func _connected() -> void:
 func _join_failed(message: String) -> void:
 	if network_role != "client" or local_slot >= 0:
 		return
+	var endpoint := _endpoint
 	_close_network()
 	_set_replicas(false)
-	hud.show_feedback(message + "  Playing alone.",6.0)
-	print("WORLD_JOIN_FAILED")
+	hud.show_feedback("%s  [%s]  Playing alone." % [message,endpoint],8.0)
+	print("WORLD_JOIN_FAILED endpoint=",endpoint)
 
 
 func _connection_ended(message: String) -> void:
@@ -2580,7 +2590,7 @@ func _client_step(delta: float) -> void:
 	if local_slot < 0:
 		_join_elapsed += delta
 		if _join_elapsed > 6.0:
-			_join_failed("Connection timed out. The host may be offline, full, or blocked by a firewall.")
+			_join_failed("Connection timed out. Check the host's UDP port, address and firewall.")
 		return
 	_collect_loot(delta)
 	if _descent_refusal_cooldown > 0.0:

@@ -2,6 +2,7 @@ extends SceneTree
 ## Main menu: new game, load saved game, join game with cached network defaults.
 
 const TEST_SAVE := "user://title_menu_state.json"
+const NetCacheScript = preload("res://scripts/net_cache.gd")
 
 var state
 var checks := 0
@@ -84,23 +85,24 @@ func run() -> void:
 	check(title._name_input.text == "CachedRanger" and title._address_input.text == "100.64.0.12" and int(title._port_input.value) == 7999,"Join restores cached details")
 	check(title._join_mode.selected == 1,"Join restores the cached delve mode")
 	check(title._join_mode.get_item_text(2) == "Open world","Join offers the open world mode")
+	# The form reads the cache when it opens, not once at startup: a value written
+	# after the title was built must show up on the next open.
+	cache.remember("FreshRanger","100.64.0.44",8111,"world")
+	title._close_join()
+	title._open_join()
+	check(title._name_input.text == "FreshRanger" and title._address_input.text == "100.64.0.44" and int(title._port_input.value) == 8111,"Join rereads the cache every time the form opens")
+	check(title._join_mode.selected == 2,"Join rereads the cached open world mode")
 	title._close_join()
 	check(not title._join_layer.visible,"Join can be cancelled")
 	title.queue_free()
 	await process_frame
-	cache.remember("CachedRanger","100.64.0.12",7999,"world")
-	title = load("res://title.tscn").instantiate()
-	root.add_child(title)
-	await process_frame
-	title._open_join()
-	check(title._join_mode.selected == 2,"Join restores the cached open world mode")
-	title._close_join()
-	title.queue_free()
-	await process_frame
 	cache.reset()
 
-	# Hosting the open world arms a world host on the cached port and leaves the save alone.
-	cache.remember("HostRanger","127.0.0.1",8123,"arena")
+	# Hosting the open world opens its own port and leaves the guest-side endpoint
+	# alone. A remembered join port must never move the host socket: that is how a
+	# host served a port no friend had and still accepted a same-PC second instance.
+	cache.remember("HostRanger","100.64.0.12",8123,"arena")
+	check(cache.host_port == 7777,"The open-world port starts at 7777")
 	var session = root.get_node("Session")
 	var credits_before := int(state.credits)
 	var inventory_before: int = state.inventory.size()
@@ -111,11 +113,29 @@ func run() -> void:
 	session.clear()
 	title.host_world_button.pressed.emit()
 	check(session.mode == "world-host","Hosting the open world arms a world host")
-	check(session.port == 8123 and session.address == "127.0.0.1" and session.player_name == "HostRanger","Hosting the open world uses the cached port, address and name")
+	check(session.port == 7777 and session.address == "127.0.0.1" and session.player_name == "HostRanger","Hosting opens the open-world port, never the last join port")
 	check(cache.mode == "world","Hosting the open world remembers the world mode")
-	check(title._status.text.contains("UDP 8123"),"Hosting the open world reports the UDP port")
+	check(cache.port == 8123 and cache.address == "100.64.0.12","Hosting leaves the remembered join endpoint untouched")
+	check(cache.host_port == 7777,"Hosting remembers its own open-world port")
+	check(title._status.text.contains("UDP 7777"),"Hosting the open world reports the UDP port")
 	check(int(state.credits) == credits_before and state.inventory.size() == inventory_before and state.stash.size() == stash_before,"Hosting the open world leaves the save alone")
 	check(current_scene == null,"Hosting the open world enters no scene during the test")
+
+	# Both values survive a restart, and an older cache has no host port at all.
+	var reloaded = NetCacheScript.new()
+	reloaded.save_path = cache.save_path
+	reloaded.load_cache()
+	check(reloaded.host_port == 7777 and reloaded.port == 8123 and reloaded.address == "100.64.0.12","The open-world port survives a restart without moving the join port")
+	reloaded.free()
+	var legacy_file := FileAccess.open("user://net_cache_legacy.json",FileAccess.WRITE)
+	legacy_file.store_string('{"version":1,"player_name":"Legacy","address":"100.64.0.7","port":52140,"mode":"world"}')
+	legacy_file.close()
+	var legacy = NetCacheScript.new()
+	legacy.save_path = "user://net_cache_legacy.json"
+	legacy.load_cache()
+	check(legacy.port == 52140 and legacy.host_port == 7777,"A version-1 cache keeps its join port and defaults the open-world port to 7777")
+	legacy.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://net_cache_legacy.json"))
 
 	session.clear()
 	state.reset(false)

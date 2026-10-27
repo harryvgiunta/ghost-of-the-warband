@@ -19,7 +19,7 @@ The launchers import the bundled character assets before starting the game, so a
 
 - **Play.cmd:** opens the main menu (**Start New Game**, **Load Saved Game**, **Host Open World**, **Join Game**).
 - **Arena.cmd:** opens the standalone multiplayer lobby directly, or solo practice against bots. Its **Return to Town** button loads the PvE town.
-- **Host World.cmd:** starts the town/frontier as an open world on UDP 7777 with your Windows user name, so friends can join without a delve or arena. **Host Open World** in the main menu does the same on the remembered port.
+- **Host World.cmd:** starts the town/frontier as an open world on UDP 7777 with your Windows user name, so friends can join without a delve or arena. **Host Open World** in the main menu does the same on the open-world port (7777 unless a previous host opened another one).
 - **Host Tailscale.cmd:** starts the town/frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** and jump into the Sunken Delve hatch to host on that port. Friends join with the main menu's **Join Game** form, choosing **Delve party**.
 
 Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `title.tscn`, `main.tscn`, `arena.tscn` or `delve.tscn`; the Windows setup script does not install engines for those platforms.
@@ -32,8 +32,8 @@ Every launch opens the **main menu** with four doors:
 | --- | --- |
 | **Start New Game** | Resets the ranger to the starter kit, purse and empty stash, then starts at the south gate of Hearthstead. |
 | **Load Saved Game** | Restores `user://player_state.json` and starts at the town gate. Disabled when no save exists. |
-| **Host Open World** | Opens the current town and frontier as a four-ranger host on the remembered UDP port (default 7777). Friends join it with **Join Game**. |
-| **Join Game** | Opens the cached name/address/port form and joins an **arena match**, **delve party** or **open world**. |
+| **Host Open World** | Opens the current town and frontier as a four-ranger host on the **open-world UDP port** (7777 by default). A port remembered from an earlier join never moves it; the host's line names the port and every address a friend can type. Friends join it with **Join Game**. |
+| **Join Game** | Opens the name/address/port/mode form, reread from the cache each time it opens, and joins an **arena match**, **delve party** or **open world**. |
 
 There is no out-of-game depot. **Hearthstead** is the staging town inside the open PvE world, and every service is a real object you walk up to and press **G** on:
 
@@ -138,7 +138,7 @@ All players should use the same current checkout and be connected to a tailnet t
 
 ### Open world (shared town and frontier)
 
-Press **Host Open World** in the main menu, or run `Host World.cmd`, to open the PvE town and frontier on UDP 7777. The HUD's top-left line reports the session (`OPEN WORLD / UDP 7777 / 2 RANGERS`). Friends pick **Join Game → Open world**, enter the host's Tailscale IP and the port from that line, and arrive at the Hearthstead gate as their own saved ranger. Up to four rangers share the world. If the host's session disappears — the game closed or the connection dropped — the guest keeps playing alone: its own ranger is handed back standing where the seat was, the frontier resumes with no authority, and the quick menu opens with the reason at its top so **SAVE GAME** or **EXIT GAME** is one click away. A guest that was following the host below in the delve keeps its collision and comes back up on the inn landing.
+Press **Host Open World** in the main menu, or run `Host World.cmd`, to open the PvE town and frontier on UDP 7777. The opening message and the HUD's top-left line report the session and the port (`OPEN WORLD / UDP 7777 / 2 RANGERS`), and the message also lists every address a friend can type (the tailnet `100.x`, the LAN address, and `127.0.0.1` for a second instance on the host). Friends pick **Join Game → Open world**, enter the host's Tailscale IP and the port from that message, and arrive at the Hearthstead gate as their own saved ranger. Up to four rangers share the world. If the host's session disappears — the game closed or the connection dropped — the guest keeps playing alone: its own ranger is handed back standing where the seat was, the frontier resumes with no authority, and the quick menu opens with the reason at its top so **SAVE GAME** or **EXIT GAME** is one click away. A guest that was following the host below in the delve keeps its collision and comes back up on the inn landing.
 
 The host is authoritative for every ranger and mob. Clients send movement, aim and action intents, never damage, charge or positions. Mobs chase and strike the nearest ranger they can see (sight cone, range, line of sight and a 15 s pursuit memory; see `scripts/mob_senses.gd`); kills, arrows, thrown weapons, loot drops, waystone restorations and gold are replicated to every peer. Keepers, the stash and the backpack stay **per player**: each peer trades against its own `user://player_state.json`, and a world drop is granted to whichever ranger picks it up on their own machine. Only the host can restore a waystone or step into the arena portal. The hatch is host-led but never drags anyone: when the host drops through the inn hatch, the delve opens **inside the same session**, the frontier freezes in place behind it, and the host waits on a **waiting screen** that counts the rangers still upstairs. Riders stay in Hearthstead with the town fully rendered, walk to the Wayfarer Inn themselves and drop into the hatch to be led down on the connection they already have; the altar (or the ossuary pit) only wakes once nobody is left outside. Taking the rope (or ending the run from the game-over screen) drops the instance and resumes the frontier exactly as it was frozen — same mobs, same loot, same waystones, same peer, same party. **Enter** lets a host begin without a rider who never arrives. A rider who drops in while the host is still holding the town is asked to jump in together and is set back on the inn floor. If the host closes the game, clients see the connection message and continue alone with live mobs. There is no host migration.
 
@@ -173,6 +173,8 @@ The delve uses the same ENet transport. A delve host needs no lobby: the party f
 ### Connection troubleshooting
 
 - Confirm the host is actually hosting: an open-world session shows `OPEN WORLD / UDP <port> / N RANGERS` at the top left; for an arena it must be in a match rather than merely the lobby, and for a delve after the hatch/descend press rather than still standing in the frontier or on the landing.
+- Compare the **UDP port** in that line with the port in the joining form. They must match; a timeout names the address and port it tried in brackets (`Connection timed out… [100.64.0.9:7777]`).
+- Pick the door the host is actually running: **Open world** for **Host Open World**, **Delve party** for a delve host, **Arena match** for `Arena.cmd`. A client on the wrong door connects to the port and then sits in an empty scene of its own.
 - Run `tailscale ping HOST_TAILSCALE_IP` from the joining PC. This checks tailnet connectivity, not the game's UDP port.
 - Permit UDP **7777** in any custom tailnet access policy and allow the host executable through its local firewall.
 - If necessary, run `Allow Tailscale Host.ps1` in an elevated PowerShell on the **host only**. It creates a narrowly scoped rule for this engine, UDP 7777, the Tailscale adapter, and Tailscale IPv4 addresses. It is optional and never runs automatically.
@@ -183,7 +185,7 @@ See [Tailscale's firewall guidance](https://tailscale.com/docs/reference/faq/fir
 
 ### Networking configuration
 
-There is no separate config file. The session hand-off lives in `scripts/session.gd` (default UDP **7777**), the remembered player name, address, port and join mode in `scripts/net_cache.gd` (`user://net_cache.json`), and each mode creates its own `ENetMultiplayerPeer`: the open world in `main.gd` (`world-host`/`world-join`, host + 3 peers), the arena in `arena.gd` (4 fighters), the delve in `delve.gd`. Fighters snapshot at **20 Hz**, frontier mobs at **15 Hz**, and a whole delve wave shares one tick across as many datagrams as it needs.
+There is no separate config file. The session hand-off lives in `scripts/session.gd` (default UDP **7777**), the remembered player name, join address, join port, join mode and open-world host port in `scripts/net_cache.gd` (`user://net_cache.json`), and each mode creates its own `ENetMultiplayerPeer`: the open world in `main.gd` (`world-host`/`world-join`, host + 3 peers), the arena in `arena.gd` (4 fighters), the delve in `delve.gd`. Fighters snapshot at **20 Hz**, frontier mobs at **15 Hz**, and a whole delve wave shares one tick across as many datagrams as it needs.
 
 Every packet is clamped by `scripts/net_limits.gd`: **1200-byte `MTU`**, a **1100-byte payload budget** after the RPC/ENet envelope. Godot exposes no MTU setting on `ENetMultiplayerPeer` (and `SceneMultiplayer.max_sync_packet_size` only governs `MultiplayerSynchronizer`, which this project does not use), so the clamp is applied where payloads are built — multi-body batches are sized by encoded bytes rather than a fixed body count, and the fighter snapshot's animation, cover and ability blocks travel as value arrays instead of keyed dictionaries. A maximal-name fighter snapshot measures **~1.07 KB**, the heaviest mob or clone **~0.6 KB**, and a 30-body delve wave splits into 4 datagrams. `tests/net_limits_regression.gd` fails if any of them crosses the budget.
 
@@ -412,7 +414,7 @@ Taking damage rolls an **attack interruption** against the share of max health t
 
 Fighters no longer hard-collide with each other. Their capsules have a **soft separation** that only pushes when centres are inside **0.46 m**, which lets two players close to stabbing distance without being shoved off their aim. World geometry, cover, blades and projectiles still collide normally.
 
-The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values.
+The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values. **Join Game** rereads that file every time the form opens, so a session that hosted or joined something else never leaves stale values on screen. **Host Open World** writes its own `host_port` instead, which is why a remembered join port cannot move the host socket onto a port nobody else knows.
 
 ## Blood and wounds
 
