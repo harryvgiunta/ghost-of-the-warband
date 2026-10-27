@@ -347,6 +347,7 @@ func _build_services() -> void:
 	gate.setup(warband, controller)
 	# The square has exactly one door, whatever asks to leave by it.
 	gate.scene_requested.connect(func(path: String): scene_requested.emit(path))
+	preload("res://scripts/warband/town_dressing.gd").build(self)
 
 func _build_stash_chest() -> Node3D:
 	var chest := Node3D.new()
