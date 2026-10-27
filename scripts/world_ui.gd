@@ -603,12 +603,15 @@ func _refresh_paperdoll() -> void:
 			var trinket_label := _trinket_labels[index - 5]
 			trinket_label.text = state.item_short(item_id).to_upper() if not item_id.is_empty() else "EMPTY"
 			trinket_label.add_theme_color_override("font_color",CREAM if not item_id.is_empty() else MUTED)
+			button.display_name = state.item_name(item_id) if not item_id.is_empty() else ""
 			button.tooltip_text = state.item_name(item_id) if not item_id.is_empty() else "%s — nothing equipped" % label
 		elif item_id.is_empty():
 			button.text = "%s  •  EMPTY" % label.to_upper()
+			button.display_name = ""
 			button.tooltip_text = "%s — nothing equipped" % label
 		else:
 			button.text = "%s  •  %s" % [label.to_upper(),state.item_short(item_id)]
+			button.display_name = state.item_name(item_id)
 			button.tooltip_text = state.item_name(item_id)
 		var held := _is_held("paperdoll",-1,slot_name)
 		button.set_pressed_no_signal(held or (_location == "paperdoll" and _slot == slot_name))
@@ -628,11 +631,13 @@ func _refresh_backpack() -> void:
 			var icon := ItemArt.texture(item_id)
 			button.icon = icon
 			button.text = "" if icon != null else state.item_short(item_id)
+			button.display_name = state.item_name(item_id)
 			button.tooltip_text = state.item_name(item_id)
 		else:
 			button.item = ""
 			button.icon = null
 			button.text = ""
+			button.display_name = ""
 			button.tooltip_text = ""
 		var held := _is_held("backpack",index,"")
 		button.set_pressed_no_signal(held or (_location == "backpack" and index == _index))
@@ -648,11 +653,13 @@ func _refresh_stash() -> void:
 			var icon := ItemArt.texture(item_id)
 			button.icon = icon
 			button.text = "   " + state.item_name(item_id)
+			button.display_name = state.item_name(item_id)
 			button.tooltip_text = state.item_name(item_id)
 		else:
 			button.item = ""
 			button.icon = null
 			button.text = ""
+			button.display_name = ""
 			button.tooltip_text = ""
 		var held := _is_held("stash",index,"")
 		button.set_pressed_no_signal(held or (_location == "stash" and index == _index))
@@ -674,6 +681,7 @@ func _refresh_floor() -> void:
 		button.expand_icon = false
 		button.add_theme_constant_override("icon_max_width",22)
 		button.text = "  " + state.item_short(item_id)
+		button.display_name = state.item_name(item_id)
 		button.tooltip_text = state.item_name(item_id)
 		var held := _is_held("floor",index,"")
 		button.set_pressed_no_signal(held or (_location == "floor" and index == _index))
@@ -695,6 +703,7 @@ func _refresh_stock() -> void:
 			button.item = item_id
 			button.icon = ItemArt.texture(item_id)
 			button.text = "  %s   %d c" % [state.item_name(item_id),state.item_price(item_id)]
+			button.display_name = state.item_name(item_id)
 			button.tooltip_text = state.item_detail(item_id)
 			button.set_pressed_no_signal(_location == "stock" and _stock_item == item_id)
 			button.modulate = Color.WHITE

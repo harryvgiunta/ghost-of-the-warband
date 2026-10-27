@@ -12,6 +12,9 @@ const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
 const MIN_WIDTH := 240.0
+## The panel margin is 12 px each side; wrapping must be measured at the
+## inner width or a Label reports a one-character-wide, screen-tall minimum.
+const CONTENT_WIDTH := MIN_WIDTH - 24.0
 
 var state
 var _italic: SystemFont
@@ -20,6 +23,11 @@ var _italic: SystemFont
 func configure(player_state,item_id: String) -> void:
 	state = player_state
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# A tooltip is shown inside Godot's tooltip container: without SHRINK the
+	# panel is stretched to the container's full height and a two-line card
+	# becomes a screen-tall black column. Keep both axes at the content size.
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	custom_minimum_size = Vector2(MIN_WIDTH,0)
 	add_theme_stylebox_override("panel",_panel_style())
 	var card_theme := Theme.new()
@@ -36,10 +44,13 @@ func configure(player_state,item_id: String) -> void:
 	margin.add_theme_constant_override("margin_top",11)
 	margin.add_theme_constant_override("margin_bottom",11)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_child(margin)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation",4)
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	column.custom_minimum_size.x = CONTENT_WIDTH
 	margin.add_child(column)
 	_title(column,state.item_name(item_id))
 	_type_line(column,state.item_type_text(item_id))
@@ -77,6 +88,7 @@ func _title(parent: Node,text: String) -> void:
 	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = CONTENT_WIDTH
 	label.add_theme_font_size_override("font_size",20)
 	label.add_theme_color_override("font_color",GOLD)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -88,6 +100,7 @@ func _type_line(parent: Node,text: String) -> void:
 	label.text = "Type:  " + text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = CONTENT_WIDTH
 	label.add_theme_font_size_override("font_size",9)
 	label.add_theme_color_override("font_color",MUTED)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -140,6 +153,7 @@ func _extra(parent: Node,label_text: String,value_text: String) -> void:
 	line.text = text
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	line.custom_minimum_size.x = CONTENT_WIDTH - 16.0
 	line.add_theme_font_size_override("font_size",11)
 	line.add_theme_color_override("font_color",TEAL)
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -151,6 +165,7 @@ func _quote(parent: Node,text: String) -> void:
 	label.text = "“%s”" % text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = CONTENT_WIDTH
 	label.add_theme_font_override("font",_italic)
 	label.add_theme_font_size_override("font_size",12)
 	label.add_theme_color_override("font_color",Color("c9b98f"))

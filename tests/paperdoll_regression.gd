@@ -623,6 +623,14 @@ func _test_world_kit() -> void:
 	check(armor_text.contains("BODY GUARD"),"An armour card keeps its guard modifier")
 	check(armor_card.custom_minimum_size.x <= 260.0,"The hover card stays content-sized")
 	armor_card.free()
+	# The custom tooltip is measured at the card's real content width; a Label
+	# wrapped at zero width otherwise reports a screen-tall minimum.
+	var hover_slot = game.world_ui.backpack_buttons[0]
+	var hover_card = hover_slot._make_custom_tooltip(hover_slot.tooltip_text)
+	check(hover_card is Control,"A hovered slot builds the custom tooltip control")
+	var hover_min: Vector2 = (hover_card as Control).get_combined_minimum_size()
+	check(hover_min.x < 400.0 and hover_min.y < 400.0,"The tooltip control is content-sized, not screen-tall")
+	hover_card.free()
 	check(game.world_ui._stat_values["defense"].text == "%d%%" % state.defense_percent(),"The summary shows the worn damage reduction")
 	card.free()
 	shield_card.free()

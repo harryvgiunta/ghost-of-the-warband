@@ -12,6 +12,7 @@ var area := ""
 var index := -1
 var slot := ""
 var item := ""
+var display_name := ""
 var drag_enabled := true
 ## Optional (item_id, area) -> Control builder supplied by the hub.
 var tooltip_builder: Callable
@@ -40,7 +41,7 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		row.add_child(art)
 	var label := Label.new()
-	label.text = tooltip_text if not tooltip_text.is_empty() else text
+	label.text = display_name if not display_name.is_empty() else (tooltip_text if not tooltip_text.is_empty() else text)
 	label.add_theme_font_size_override("font_size",11)
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
