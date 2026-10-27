@@ -2009,6 +2009,10 @@ func _receive_seat_attack(attacker, amount: float, seat) -> void:
 	BloodFx.stain_attacker(attacker,amount)
 
 func take_damage(amount: float, react: bool = true) -> void:
+	# Ghost of the Warband: a hit is scaled once, here, by the proximity bubble
+	# the victim is standing in (`scripts/warband/damage_scaler.gd`). A human
+	# body is always in an active bubble, so this is 1.0 for players.
+	amount = WarbandDamage.scale(amount, self)
 	_cancel_consumable()
 	var applied: float = amount * (1.0 - archer.damage_reduction(false))
 	applied = _absorb_with_ward(applied)

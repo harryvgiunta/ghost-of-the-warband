@@ -657,6 +657,8 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false, _react: bool = true) -> void:
 	if not alive or replica:
 		return
+	# Ghost of the Warband: the far fight runs at 10% (`WarbandDamage`).
+	amount = WarbandDamage.scale(amount, self)
 	# Being hit is not something a parked body can miss: it wakes and turns.
 	mob_wake()
 	last_hitter = source_id

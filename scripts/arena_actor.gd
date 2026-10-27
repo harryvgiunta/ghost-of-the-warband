@@ -556,6 +556,8 @@ func _tick_ward(delta: float) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
+	# Ghost of the Warband: one scale, at the funnel, from the victim's bubble.
+	amount = WarbandDamage.scale(amount, self)
 	_cancel_consumable()
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
 		* (1.0 - rig.damage_reduction(headshot))
