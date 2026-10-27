@@ -2011,6 +2011,10 @@ func return_to_camp() -> void:
 		send_action("respawn")
 		return
 	cancel_input()
+	# The killing blow staggered this body, and the teleport does not wait out a
+	# stagger: without this the first clicks after a death do nothing.
+	combat.stagger_time = 0.0
+	archer.reset_attack_state()
 	_cancel_consumable()
 	_heal_remaining = 0.0
 	_heal_rate = 0.0

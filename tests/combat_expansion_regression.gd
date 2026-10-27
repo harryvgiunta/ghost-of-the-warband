@@ -101,6 +101,67 @@ func run() -> void:
 	check(flinch_replica._hit_react > 0.0 and flinch_replica.phase == "READY","A replica decodes the hit flinch without entering a gameplay phase")
 	flinch_replica.advance_animation(1.0)
 	check(flinch_replica._hit_react == 0.0,"Replica flinch expires on its animation clock")
+	# A lethal blow staggers the body it kills, and a dead body never drains
+	# that clock. The revive has to hand back a fighter that attacks on its
+	# first click and keeps the collision its scene configured.
+	var doomed = fighter(world,4,Vector3(-20,0,0))
+	doomed.rig.set_weapon("bow")
+	doomed.collision_mask = 1 | 2
+	doomed.health = 1.0
+	doomed.take_damage(50.0,9,false)
+	check(not doomed.alive,"A lethal blow downs the fighter")
+	check(doomed.collision_layer == 0 and doomed.collision_mask == 0,"A dead body leaves the collision layers")
+	check(doomed.combat.stagger_time > 0.0,"The killing blow staggers the body it kills")
+	doomed.revive()
+	check(doomed.alive,"The revive brings the fighter back")
+	check(doomed.combat.stagger_time == 0.0,"A revived fighter is not still staggered by the blow that killed it")
+	check(doomed.rig.phase == "READY","A revived fighter stands in the neutral phase")
+	check(doomed.collision_layer == 4 and doomed.collision_mask == 1 | 2,
+		"The revive restores the collision the scene configured")
+	check(doomed.combat.begin_draw(),"A revived archer draws on its first click")
+	reset_swing(doomed)
+	doomed.rig.set_weapon("sword")
+	doomed.rig.set_sword(0)
+	check(doomed.combat.begin_melee("right","overhead"),"A revived swordsman swings on its first click")
+	# A swing, a half-drawn bow or a shot's recovery that was running at the
+	# moment of death must not survive it either.
+	var mid_swing = fighter(world,5,Vector3(-40,0,0))
+	mid_swing.rig.set_weapon("sword")
+	mid_swing.rig.set_sword(0)
+	reset_swing(mid_swing)
+	check(mid_swing.combat.begin_melee("right","overhead"),"The doomed swordsman starts a swing")
+	advance(mid_swing,0.1)
+	mid_swing.health = 1.0
+	mid_swing.take_damage(50.0,9,false)
+	mid_swing.revive()
+	check(mid_swing.rig.phase == "READY" and not mid_swing.rig.is_melee(),"The swing does not outlive the death")
+	check(mid_swing.combat.begin_melee("right","overhead"),"...and the revived body still swings")
+	var mid_draw = fighter(world,6,Vector3(-60,0,0))
+	mid_draw.rig.set_weapon("bow")
+	reset_swing(mid_draw)
+	check(mid_draw.combat.begin_draw(),"The doomed archer starts drawing")
+	advance(mid_draw,0.4)
+	check(mid_draw.rig.phase == "DRAWING","The draw is still mid-charge")
+	mid_draw.health = 1.0
+	mid_draw.take_damage(50.0,9,false)
+	mid_draw.revive()
+	check(mid_draw.rig.phase == "READY" and mid_draw.rig.draw_amount == 0.0,"A half-drawn bow does not outlive the death")
+	check(mid_draw.combat.begin_draw(),"...and the revived body still draws")
+	var mid_recover = fighter(world,7,Vector3(-80,0,0))
+	mid_recover.rig.set_weapon("bow")
+	mid_recover.rig.set_bow(0)
+	reset_swing(mid_recover)
+	check(mid_recover.combat.begin_draw(),"The doomed archer draws a full shot")
+	advance(mid_recover,1.05)
+	check(mid_recover.rig.phase == "HOLDING","The shortbow reaches full draw (phase=%s draw=%.3f charge=%.3f weapon=%s)" % [mid_recover.rig.phase,mid_recover.rig.draw_amount,mid_recover.rig.charge_seconds(),mid_recover.rig.weapon])
+	mid_recover.combat.release_draw()
+	advance(mid_recover,0.35)
+	check(mid_recover.rig.phase == "RECOVER","The released shot is in its recovery (phase=%s draw=%.3f)" % [mid_recover.rig.phase,mid_recover.rig.draw_amount])
+	mid_recover.health = 1.0
+	mid_recover.take_damage(50.0,9,false)
+	mid_recover.revive()
+	check(mid_recover.rig.phase == "READY","A shot's recovery does not outlive the death")
+	check(mid_recover.combat.begin_draw(),"...and the revived body still draws")
 	# Bodies are soft: overlapping fighters are separated gently instead of
 	# being shoved to the old hard-capsule distance.
 	var first = fighter(world,2,Vector3(0,0,0))
