@@ -1370,6 +1370,24 @@ func cancel_draw() -> void:
 	_phase_time = 0.0
 	_update_pose(0.0)
 
+## A revived body must attack on its first click. A draw, a swing, a release,
+## a recovery, a raised guard or a consumable channel that was running when the
+## ranger died would otherwise outlive the death (those release and recovery
+## phases are the ones `cancel_draw()` leaves alone) and block `can_draw()` and
+## `begin_melee()`.
+func reset_attack_state() -> void:
+	charge_frozen = false
+	cancel_consumable()
+	_clear_melee()
+	draw_amount = 0.0
+	_release_draw = 0.0
+	_release_charge = 0.0
+	_phase_time = 0.0
+	if is_ability():
+		_reset_ability_state()
+	phase = "READY"
+	_update_pose(0.0)
+
 func aim_at(world_point: Vector3) -> void:
 	_aim_point = world_point
 	if _built and phase != "READY":

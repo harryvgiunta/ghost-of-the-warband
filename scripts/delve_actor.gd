@@ -45,8 +45,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		combat.stop()
 		reset_stance()
 		roll.reset()
-		collision_layer = 0
-		collision_mask = 0
+		_store_body_collision()
 		rig.visible = false
 		fell.emit(slot,source_id)
 		killed.emit(slot,source_id)

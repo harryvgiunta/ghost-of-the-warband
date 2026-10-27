@@ -197,6 +197,22 @@ func _host_run() -> void:
 			" authoritative=",seat_one.authoritative if is_instance_valid(seat_one) else "none")
 		check(float(data.get("host_health",100.0)) < 99.9,"The client sees the host ranger's damaged health")
 
+	# A resurrected guest attacks again with its first click: the killing blow's
+	# stagger used to outlive the death and swallow the next press.
+	if is_instance_valid(game._seats.get(1)):
+		game._seats[1].take_damage(500.0,0)
+	var downed := await _wait_until(func(): return game._seats.has(1) and not game._seats[1].alive,5.0)
+	check(downed,"A lethal blow downs the guest's ranger")
+	var came_back := await _wait_until(func(): return game._seats.has(1) and game._seats[1].alive,12.0)
+	check(came_back,"The downed guest comes back")
+	var attacked_again := false
+	var strike_deadline := Time.get_ticks_msec() + 8000
+	while Time.get_ticks_msec() < strike_deadline and not attacked_again:
+		if game._seats.has(1) and is_instance_valid(game._seats[1]):
+			attacked_again = str(game._seats[1].rig.phase) != "READY"
+		await process_frame
+	check(attacked_again,"The revived guest's first click still swings")
+
 	var left := await _wait_until(func(): return game.get_human_count() == 1,10.0)
 	check(left,"The host frees the seat when the client leaves")
 	check(not game._seats.has(1),"The departing ranger node is removed")
@@ -336,6 +352,24 @@ func _client_run(port: int) -> void:
 	print("WORLD_NET_CLIENT report slot=",game.local_slot," health=",game.health," loot=",game.loot_pickups.size())
 	report.submit.rpc_id(1,payload)
 	await create_timer(0.5).timeout
+	# Come back from a death and attack again with the first click.
+	var downed := await _wait_until(func(): return game._seats.has(game.local_slot) and not game._seats[game.local_slot].alive,8.0)
+	_trace("client downed=" + str(downed))
+	var came_back := await _wait_until(func(): return game._seats.has(game.local_slot) and game._seats[game.local_slot].alive,12.0)
+	_trace("client alive again=" + str(came_back))
+	if came_back:
+		var press := InputEventMouseButton.new()
+		press.button_index = MOUSE_BUTTON_LEFT
+		press.pressed = true
+		game._input(press)
+		game._unhandled_input(press)
+		await create_timer(0.6).timeout
+		var lift := InputEventMouseButton.new()
+		lift.button_index = MOUSE_BUTTON_LEFT
+		lift.pressed = false
+		game._input(lift)
+		game._unhandled_input(lift)
+		await create_timer(0.8).timeout
 	await _finish_client(0)
 
 func _finish_client(code: int) -> void:

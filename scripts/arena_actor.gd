@@ -77,6 +77,10 @@ var _consume_elapsed := 0.0
 var _heal_remaining := 0.0
 var _heal_rate := 0.0
 var input_age := 0.0
+## The collision a scene configured for this body, kept across death so the
+## revive can restore it instead of guessing one kit for every mode.
+var _body_layer := -1
+var _body_mask := -1
 var _label: Label3D
 var _ground_ring: MeshInstance3D
 var _received_pose := false
@@ -279,6 +283,10 @@ func revive() -> void:
 	respawn = 0.0
 	combat.stop()
 	combat.clear_camera_ray()
+	# The blow that killed this body also staggered it, and a dead body never
+	# drains that clock: a revived ranger would stand there for the rest of the
+	# killing blow's stagger, refusing every left click.
+	combat.stagger_time = 0.0
 	roll.reset()
 	dodge.reset()
 	rig.set_hit_react(0.0)
@@ -288,14 +296,27 @@ func revive() -> void:
 	combat.left_melee_progress = 1.0
 	combat.right_melee_progress = 1.0
 	combat.melee_progress = 1.0
-	rig._clear_melee()
+	rig.reset_attack_state()
 	rig._sync_primary_hand()
-	rig.draw_amount = 0.0
 	rig.global_rotation.y = atan2(spawn_point.x,spawn_point.z)
 	combat.aim_point = Vector3(0,1.2,0)
-	collision_layer = 4
-	collision_mask = 1
+	_restore_body_collision()
 	rig.visible = true
+
+## A dying body keeps the collision its scene configured, because the revive
+## has to put it back: the frontier ranger collides with mob layer 2 and the
+## arena/delve fighters with the world only.
+func _store_body_collision() -> void:
+	_body_layer = collision_layer
+	_body_mask = collision_mask
+	collision_layer = 0
+	collision_mask = 0
+
+func _restore_body_collision() -> void:
+	# A body downed by a blow keeps the collision its scene configured; one that
+	# a lobby or round reset parked keeps the arena's fighter kit.
+	collision_layer = _body_layer if _body_layer >= 0 else 4
+	collision_mask = _body_mask if _body_mask >= 0 else 1
 
 func try_ability(slot: int = 0) -> Dictionary:
 	if not authoritative or not alive:
@@ -553,8 +574,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		combat.stop()
 		reset_stance()
 		roll.reset()
-		collision_layer = 0
-		collision_mask = 0
+		_store_body_collision()
 		rig.visible = false
 		killed.emit(slot,source_id)
 

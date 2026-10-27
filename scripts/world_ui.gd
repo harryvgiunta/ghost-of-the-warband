@@ -194,7 +194,7 @@ func _open_view(next: String) -> void:
 		(StateScript.VENDORS[_vendor].tag if next == "vendor" else "THE RANGER'S KIT")
 	match next:
 		"inventory","equipment":
-			_mode_hint("EQUIPMENT  •  click to pick up, click to place  •  drag or right-click for quick moves")
+			_mode_hint("EQUIPMENT  •  click to pick up, click to place  •  drag or right-click for quick moves  •  TAB swaps the two weapon sets")
 		"stash":
 			_mode_hint("STASH  •  click a pack piece then a stash cell, or a stashed piece then a pack cell")
 		"vendor":
@@ -616,9 +616,9 @@ func _refresh_paperdoll() -> void:
 		var held := _is_held("paperdoll",-1,slot_name)
 		button.set_pressed_no_signal(held or (_location == "paperdoll" and _slot == slot_name))
 		button.modulate = Color(1.25,1.15,0.80,1.0) if held else Color.WHITE
-	_quick_label.text = "TAB  " + state.quick_set_label()
-	if state.has_quick_return():
-		_quick_label.text += "  ↔  " + state.quick_return_label()
+	# The stage shows the hands; the line under it names what TAB brings up.
+	var other: int = 1 - int(state.active_weapon_set())
+	_quick_label.text = "TAB  ↔  SET %d  •  %s" % [other + 1, str(state.weapon_set_label(other))]
 
 func _refresh_backpack() -> void:
 	for index in backpack_buttons.size():
@@ -782,11 +782,12 @@ func _refresh_selection() -> void:
 			_primary.tooltip_text = "Return this piece to the backpack."
 			if _slot == "main" or _slot == "off":
 				_secondary.visible = true
-				_secondary.text = "BIND SWAP"
-				_secondary.tooltip_text = "Store the current main and off hand as the TAB swap set."
+				_secondary.text = "SWAP SET"
+				_secondary.tooltip_text = "Bring up the other weapon set."
 			if _drop_handler.is_valid() or in_town:
 				_tertiary.visible = true
 				_tertiary.text = "DROP"
+
 		"stash":
 			_primary.visible = true
 			_primary.text = "TO INVENTORY"
@@ -1009,9 +1010,7 @@ func _on_secondary() -> void:
 		return
 	_clear_held()
 	if _location == "paperdoll":
-		var result: Dictionary = state.bind_quick_from_equipped()
-		refresh()
-		set_status(str(result.get("message","")))
+		_resolve(state.swap_weapon_set())
 		return
 	if _location == "backpack":
 		if view == "stash":

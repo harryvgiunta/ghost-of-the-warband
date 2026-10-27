@@ -1178,17 +1178,17 @@ func _on_ui_loadout_changed() -> void:
 		# its snapshots stay the presentation authority for everyone else.
 		send_action("loadout",_local_loadout())
 
-## TAB toggles the persistent hand pair; the host rebuilds the seat from the
+## TAB brings up the other weapon set; the host rebuilds the seat from the
 ## same loadout action used by the paperdoll.
-func _quick_swap() -> void:
+func _swap_weapon_set() -> void:
 	if _ui_open():
 		return
 	var node: Variant = get_node_or_null("/root/PlayerState")
 	if node == null:
 		return
-	var result: Dictionary = node.quick_swap()
+	var result: Dictionary = node.swap_weapon_set()
 	if not bool(result.get("ok", false)):
-		hud.flash_status(str(result.get("message", "No quick swap set.")))
+		hud.flash_status(str(result.get("message", "No weapon set to swap.")))
 		return
 	_cancel_draw_input()
 	_on_ui_loadout_changed()
@@ -1312,7 +1312,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					send_action("weapon","dagger")
 			KEY_4: send_action("shield",not actors[local_slot].rig.shield_equipped)
 			KEY_5: send_action("weapon","dual")
-			KEY_TAB: _quick_swap()
+			KEY_TAB: _swap_weapon_set()
 			KEY_6: send_action("consume","bandage")
 			KEY_7: send_action("consume","potion")
 			KEY_C:
