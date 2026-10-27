@@ -7,6 +7,15 @@ extends Node
 ## with shivs, wave 1 is four with steel, wave 2 is five mixing bows and shields,
 ## and the count caps at six. Nothing here rolls a global RNG.
 ##
+## A scene that paces its own expedition may override either half of that: pass a
+## `count` and the wave is that wide instead of `BASE_GUARDS + wave`, and pass
+## `guests` and extra bodies (a boss, its escort pair) stand in the same roster as
+## the rolled guards - they count toward `living()`, they hold the wave open until
+## they fall, and `total_cleared()` tallies them. A guest is a dictionary
+## `{name, main, off, armor, health_scale, brand, boss}`; `health_scale` is applied
+## after the kit, because the rig syncs the maxima from the trinket stats, and
+## `brand` is a `{tier, ability}` sigil the body carries for this battle only.
+##
 ## ## The call order a scene needs
 ##
 ## Guards are their own `ArenaActor` bodies, so they integrate themselves:
@@ -57,6 +66,9 @@ var _wave_size := 0
 var _cleared := false
 var _total_cleared := 0
 var _tick := 0
+## The guest a wave was asked to crown (the expedition's boss), so a scene can
+## name him without guessing which body in the roster is the big one.
+var _boss: CultistGuard = null
 
 ## Point the waves at a scene: the soul controller that owns the warband bodies,
 ## the node guards are parented to, the ring of spawn points, and a callable that
@@ -70,7 +82,10 @@ func setup(controller, parent_node: Node3D, spawn_points: Array[Vector3],
 
 ## Field a wave. Whatever is left of the previous wave is retired first, so a
 ## scene can restart or skip ahead without stacking two waves in one yard.
-func start_wave(index: int = 0) -> Array[CultistGuard]:
+##
+## `count` below zero keeps the derived width (`BASE_GUARDS + index`, capped);
+## `guests` are extra bodies fielded beside the rolled guards, in the same wave.
+func start_wave(index: int = 0, count: int = -1, guests: Array = []) -> Array[CultistGuard]:
 	if _parent == null:
 		push_error("EnemyWaves: setup() before start_wave()")
 		var empty: Array[CultistGuard] = []
@@ -78,13 +93,23 @@ func start_wave(index: int = 0) -> Array[CultistGuard]:
 	_retire()
 	_wave = maxi(index, 0)
 	_cleared = false
+	_boss = null
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WAVE_SEED + _wave * 7919
-	var count := mini(BASE_GUARDS + _wave, MAX_GUARDS)
+	var width := mini(BASE_GUARDS + _wave, MAX_GUARDS) if count < 0 else maxi(count, 0)
 	var tier: Dictionary = KITS[mini(_wave, KITS.size() - 1)]
 	var spawned: Array[CultistGuard] = []
-	for index_in_wave in count:
+	for index_in_wave in width:
 		var guard := _spawn_guard(index_in_wave, tier, rng)
+		_guards.append(guard)
+		spawned.append(guard)
+	for guest in guests:
+		if not (guest is Dictionary):
+			continue
+		var spec: Dictionary = guest
+		var guard := _spawn_guard(spawned.size(), tier, rng, spec)
+		if bool(spec.get("boss", false)):
+			_boss = guard
 		_guards.append(guard)
 		spawned.append(guard)
 	_wave_size = spawned.size()
@@ -122,6 +147,15 @@ func living() -> int:
 func wave() -> int:
 	return _wave
 
+## How many bodies the wave on the field was worth, guests included.
+func wave_size() -> int:
+	return _wave_size
+
+## The guest crowned as this wave's boss, or null. The waves do not care what a
+## boss is; they only remember which guest claimed the crown.
+func boss() -> CultistGuard:
+	return _boss if is_instance_valid(_boss) else null
+
 ## Cultists put down across every wave this node has fielded.
 func total_cleared() -> int:
 	return _total_cleared
@@ -135,7 +169,8 @@ func clear() -> void:
 
 # --- internals -------------------------------------------------------------
 
-func _spawn_guard(index_in_wave: int, tier: Dictionary, rng: RandomNumberGenerator) -> CultistGuard:
+func _spawn_guard(index_in_wave: int, tier: Dictionary, rng: RandomNumberGenerator,
+		spec: Dictionary = {}) -> CultistGuard:
 	var guard := GuardScript.new()
 	guard.name = "CultistGuard%02d" % (index_in_wave + 1)
 	# The slot is assigned before the tree sees it: `_ready` reads it for the
@@ -145,10 +180,30 @@ func _spawn_guard(index_in_wave: int, tier: Dictionary, rng: RandomNumberGenerat
 	_parent.add_child(guard)
 	guard.authoritative = true
 	guard.combat.damage_enabled = true
+	var guest_name := str(spec.get("name", ""))
 	var name_index := rng.randi_range(0, GuardScript.NAMES.size() - 1)
-	guard.configure(0, true, str(GuardScript.NAMES[name_index]), _spawn_point(index_in_wave))
-	var kit := _roll_kit(index_in_wave, tier, rng)
-	guard.apply_kit(str(kit["main"]), str(kit["off"]), str(kit["armor"]))
+	guard.configure(0, true, guest_name if not guest_name.is_empty() else str(GuardScript.NAMES[name_index]),
+		_spawn_point(index_in_wave))
+	# A guest brings its own kit and its own name; a rolled guard takes the tier's.
+	var kit: Dictionary = spec if not spec.is_empty() else _roll_kit(index_in_wave, tier, rng)
+	guard.apply_kit(str(kit.get("main", "")), str(kit.get("off", "")), str(kit.get("armor", "makeshift")))
+	# A guest may be worth more than one body. The rig re-derives `max_health`
+	# from its trinket table on every loadout change (`rig.loadout_changed` ->
+	# `_sync_trinket_limits`), so the bonus is added to that table instead of being
+	# stamped on `max_health` once: every later sync then computes the guest's
+	# total by itself, and no weapon swap silently halves the boss.
+	var health_scale := float(spec.get("health_scale", 1.0)) if not spec.is_empty() else 1.0
+	if not is_equal_approx(health_scale, 1.0):
+		var bonus := guard.max_health * (health_scale - 1.0)
+		var stats: Dictionary = guard.rig.trinket_stats
+		stats["health"] = float(stats.get("health", 0.0)) + bonus
+		guard.max_health += bonus
+		guard.health = guard.max_health
+	# An anointed guest carries its sigil on the body, after the kit so it is
+	# stamped on the steel the guard is actually holding.
+	var brand_spec: Variant = spec.get("brand", {})
+	if brand_spec is Dictionary and not (brand_spec as Dictionary).is_empty():
+		guard.set_brand(brand_spec)
 	guard.killed.connect(_on_guard_killed.bind(guard))
 	guard.downed_started.connect(_on_guard_state_changed)
 	guard.downed_ended.connect(_on_guard_state_changed)
@@ -227,6 +282,7 @@ func _retire() -> void:
 			guard.queue_free()
 	_guards.clear()
 	_counted.clear()
+	_boss = null
 
 func _on_guard_killed(_slot: int, _source: int, guard: CultistGuard) -> void:
 	if is_instance_valid(guard):

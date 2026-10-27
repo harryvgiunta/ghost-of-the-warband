@@ -10,6 +10,7 @@ extends SceneTree
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const State = preload("res://scripts/player_state.gd")
+const DirectorScript = preload("res://scripts/warband/expedition_director.gd")
 
 const TEST_SAVE := "user://expedition_state.json"
 const WARBAND_SAVE := "user://expedition_warband.json"
@@ -78,9 +79,11 @@ func run() -> void:
 	check(game.expedition, "a deployment line makes this a real battle")
 	check(game.bodies.size() == 4, "only the deployed line takes the field (%d)" % game.bodies.size())
 	check(game.waves != null, "the cult walks in")
-	if game.waves == null:
+	check(game.director != null, "the expedition is paced by a director")
+	if game.waves == null or game.director == null:
 		_finish()
 		return
+	check(game.director.wave_count() == 5, "the expedition is five waves")
 	check(game.waves.living() == 3, "wave one is three cultists")
 	check(game.groups.is_empty(), "the sandbox brawls are not built")
 
@@ -93,15 +96,40 @@ func run() -> void:
 		await create_timer(3.5).timeout
 		check(body.health < before, "a cultist guard takes health off a warband body")
 
-	var first_cleared := await _clear_wave()
-	check(first_cleared, "wave one is cleared")
-	check(game.loot.pickups().size() >= 3, "the dead cultists left gear (%d)" % game.loot.pickups().size())
+	# The director's curve, walked in order. Every wave but the first arrives on
+	# the breathing gap alone, and four waves are not the end of the expedition.
+	var curve := [3, 4, 4, 5]
+	for index in curve.size():
+		if index > 0:
+			check(await _wait_wave(index), "wave %d arrives on its own" % (index + 1))
+		check(game.director.wave_index() == index, "the director is on wave %d" % (index + 1))
+		check(game.waves.living() == int(curve[index]),
+			"wave %d is %d cultists (%d)" % [index + 1, int(curve[index]), game.waves.living()])
+		check(await _clear_wave(), "wave %d is cleared" % (index + 1))
+		check(not game._battle_over, "wave %d does not end the expedition" % (index + 1))
+		if index == 0:
+			check(game.loot.pickups().size() >= 3,
+				"the dead cultists left gear (%d)" % game.loot.pickups().size())
 
-	check(await _wait_wave(1), "wave two arrives on its own")
-	check(game.waves.living() == 4, "wave two is four cultists")
-	await _clear_wave()
-	check(await _wait_wave(2), "wave three arrives")
-	check(game.waves.living() == 5, "wave three is five cultists")
+	# Wave five is the Bilewarden's: three acolytes, two escorts and the boss.
+	check(await _wait_wave(4), "the Bilewarden's wave arrives")
+	check(game.waves.living() == 6, "wave five is six bodies (%d)" % game.waves.living())
+	var boss = game.director.boss()
+	check(boss != null, "wave five fields the Bilewarden")
+	if boss != null:
+		check(is_equal_approx(float(boss.max_health), 2.0 * Contracts.BASE_MAX_HEALTH),
+			"the Bilewarden has double a guard's health (%.0f)" % float(boss.max_health))
+		var brand: Dictionary = boss.brand_of()
+		check(not brand.is_empty(), "the Bilewarden's blade carries a brand")
+		check(str(brand.get("item", "")) == str(boss.kit.get("main", "")),
+			"the brand sits on the steel he holds (%s)" % str(brand.get("item", "")))
+		check(warband.cruor.brand_of(str(boss.kit.get("main", ""))).is_empty(),
+			"and the cult anointment never reaches the warband's ledger")
+	var escorts := 0
+	for escort in game.waves.guards():
+		if str(escort.display_name) in DirectorScript.ESCORT_NAMES:
+			escorts += 1
+	check(escorts == 2, "two escorts flank the Bilewarden (%d)" % escorts)
 
 	# Stand the survivors near the cult so the loot jog is a short one.
 	for actor in game.bodies:
@@ -109,7 +137,7 @@ func run() -> void:
 			actor.global_position = Vector3(actor.global_position.x, 0.1, -10.0)
 	var stash_before: int = warband.stash.pooled_total()
 	await _clear_wave()
-	check(game._battle_over, "clearing the last wave ends the expedition")
+	check(game._battle_over, "clearing the fifth wave ends the expedition")
 	check(game._loot_running, "the survivors are sent to loot the field")
 	var jogged := await _wait_until(func(): return not game._loot_running, 20.0)
 	check(jogged, "the loot run finishes")
