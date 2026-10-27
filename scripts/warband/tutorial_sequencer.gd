@@ -5,14 +5,14 @@ extends Node
 ## Four prisoners hang in one corner of the world, a fifth is loose, and the way
 ## out is a walk. The order is the lesson:
 ##   1. shift the soul through all four caged bodies (that is the whole premise);
-##   2. the fifth prisoner jogs in with a shiv and stands still: taking his body
-##      is the player's beat;
-##   3. walk to each cage and press G to cut its latch - four latches, four cages;
-##   4. take the cultist steel and put down the two antlered watchers, then the six
-##      that come out of the trees;
-##   5. the escape: the clearing's mouth opens onto the trail through the wood,
-##      and the town is at the far end of it. There is no door to press and no
-##      scene to change - ESCAPING is where this machine ends.
+##   2. the fifth prisoner jogs in with a shiv and kills the two watchers himself:
+##      taking his body is the player's beat, and theirs is nothing;
+##   3. the soul steps into him - that is what cuts all four latches at once, and
+##      no latch moves while the pair are still standing over the cages;
+##   4. the squad is out and arming itself off the ground;
+##   5. the escape: the soul walking through the clearing's mouth is what turns
+##      the trees loose on the squad. There is no door to press and no kill quota
+##      to fill - ESCAPING is where this machine ends.
 ##
 ## This node owns no scene lookups - no bodies, no labels, no nodes. The scene
 ## feeds it facts and it answers with a state, one objective line, one key hint
@@ -29,8 +29,9 @@ enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING }
 
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
-## Gate watchers that have to fall before the escape is on: the first pair and
-## the six armed ones that come through when they die.
+## The watchers the wood fields at the camp: the pair Corvin puts down and the six
+## that come out of the trees as the squad leaves. The tally is the objective's -
+## it does not gate the escape, because the leaving is the ambush.
 const GUARD_COUNT := 8
 
 ## The loose prisoner's mercenary id, set through `begin()`.
@@ -92,17 +93,18 @@ func objective() -> String:
 			return "All four seen. The fifth prisoner is coming."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "Corvin is through. Take his body - F5 or [ ]."
-			return "Cut each latch with G   %d/%d" % [_opened.size(), PRISONER_COUNT]
+				return "Corvin is at the watchers. Take his body - F5 or [ ]."
+			return "Put the pair down. Every latch goes when they fall."
 		State.FREED:
-			return "Put down the watchers   %d/%d" % [_guards_down, GUARD_COUNT]
+			return "Out and armed. Walk out through the mouth   ·   watchers down %d/%d" \
+				% [_guards_down, GUARD_COUNT]
 		State.ESCAPING:
-			return "The way is clear. The trail through the wood leads to town."
+			return "The trees answer. Run the trail - the town is at the far end."
 	return ""
 
 ## The key line under the objective: exactly what to press, this beat. Every
-## step names its own key, because a tutorial that says "free the squad" and not
-## "G" has taught nothing.
+## step names its own key, because a tutorial that says "take his body" and not
+## "F5" has taught nothing. No step names a latch key: latches are not pressed.
 func hint() -> String:
 	match _state:
 		State.CAGED:
@@ -111,10 +113,10 @@ func hint() -> String:
 			return "Stay in a body - Corvin is walking in with the shiv."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "F5 or [ ] - take Corvin's body   ·   then G at a cage to cut its latch"
-			return "G - cut this cage's latch   ·   walk to each cage"
+				return "F5 or [ ] - take Corvin's body   ·   he cuts every latch himself"
+			return "LMB / RMB - fight the pair   ·   the latches go when they are down"
 		State.FREED:
-			return "LMB / RMB - fight   ·   E - revive   ·   the squad arms itself"
+			return "W A S D - walk out through the mouth   ·   the squad arms itself"
 		State.ESCAPING:
 			return "W A S D - walk the trail   ·   the town is at the far end of the wood"
 	return ""
@@ -151,8 +153,9 @@ func note_body_entered(merc_id: int) -> bool:
 		announce()
 	return true
 
-## The fifth prisoner reached the cages. Refused unless all four bodies were
-## seen first, and only ever once. The scene forces the soul into him next.
+## The fifth prisoner reached the cages: the pair are his now, and the soul is
+## still where the player left it. Refused unless all four bodies were seen
+## first, and only ever once.
 func note_rescuer_arrived() -> bool:
 	if _state != State.ALL_SEEN or _rescuer_noted:
 		return false
@@ -162,8 +165,8 @@ func note_rescuer_arrived() -> bool:
 	return true
 
 ## The soul actually entered the rescuer's body. The tutorial never moves it
-## there for you: the card and the objective both name the key, and until this
-## fires no latch can be cut.
+## there for you: the card and the objective both name the key, and this is what
+## cuts the latches (the scene holds them until the pair are down).
 func note_rescuer_taken() -> bool:
 	if _state != State.RESCUER_ARRIVED or _rescuer_taken:
 		return false
@@ -174,8 +177,8 @@ func note_rescuer_taken() -> bool:
 func rescuer_taken() -> bool:
 	return _rescuer_taken
 
-## One cage latch was cut by the player. A cage counts once; the fourth opens the
-## squad and starts the fight.
+## A cage latch was cut. The scene cuts all four in one act when the soul is in
+## Corvin's hands; a cage still counts once, and the fourth opens the squad.
 func note_cage_opened(index: int) -> bool:
 	if _state != State.RESCUER_ARRIVED or index < 0 or index >= PRISONER_COUNT:
 		return false
@@ -188,47 +191,33 @@ func note_cage_opened(index: int) -> bool:
 		announce()
 	return true
 
-## A gate watcher died. Counted only during the fight; a kill before the squad is
-## out is a scene bug, not progress.
+## A watcher died. Corvin's own kills count - he puts the first pair down himself
+## and the tally has to read true - so anything from the moment he is at the cages
+## on is progress. Nothing counts before the fight starts.
 func note_guard_killed() -> bool:
-	if _state != State.FREED or _guards_down >= GUARD_COUNT:
+	if _state == State.CAGED or _state == State.ALL_SEEN:
+		return false
+	if _guards_down >= GUARD_COUNT:
 		return false
 	_guards_down += 1
-	_check_escape()
+	announce()
 	return true
 
 ## A cultist weapon left the battlefield in a soul's hands.
 func note_weapon_looted() -> bool:
-	if _state != State.FREED:
+	if _state == State.CAGED or _state == State.ALL_SEEN:
 		return false
 	_weapons += 1
-	_check_escape()
+	announce()
 	return true
 
-## Reconcile the fight with what is already true. A squadmate can put a watcher
-## down (or take the steel) while the player is still cutting the last latches;
-## `note_guard_killed` refuses those as progress because the squad is not out
-## yet, so the scene hands the running totals over the moment FREED begins.
-## Monotonic: it can only raise a counter, never rewind one.
-func note_battle_state(guards_down: int, weapons: int) -> void:
+## The soul walked out of the clearing's mouth. This - not a body count - is the
+## escape: the scene answers it by turning the wood loose on the squad.
+func note_escaped() -> bool:
 	if _state != State.FREED:
-		return
-	var before := _guards_down * 1000 + _weapons
-	_guards_down = clampi(maxi(_guards_down, guards_down), 0, GUARD_COUNT)
-	_weapons = maxi(_weapons, weapons)
-	# Silent when nothing moved: `_check_escape` announces, and a listener that
-	# calls back in on every announce would otherwise recurse forever.
-	if _guards_down * 1000 + _weapons == before:
-		return
-	_check_escape()
-
-func _check_escape() -> void:
-	if _state != State.FREED:
-		return
-	if _guards_down >= GUARD_COUNT:
-		_transition(State.ESCAPING)
-	else:
-		announce()
+		return false
+	_transition(State.ESCAPING)
+	return true
 
 func _transition(next: int) -> void:
 	if next == _state:

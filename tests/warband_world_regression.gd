@@ -11,9 +11,10 @@ extends SceneTree
 ##      undergrowth on every side, a broken stake fence where the palisade stood,
 ##      the four cages with their own anchors, and 60 x 68 m of open ground - more
 ##      than the 45 x 40 m a six-watcher fight and a squad need.
-##   3. **The lesson still works.** CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> F5 ->
-##      four latches -> eight kills -> ESCAPING, with every out-of-order beat
-##      refused and no latch opening before the rescuer's body is taken.
+##   3. **The lesson still works.** CAGED -> ALL_SEEN -> Corvin kills the pair ->
+##      F5 -> all four latches at once -> the squad out and armed -> walking out
+##      of the mouth is ESCAPING and the six come out of the trees, with every
+##      out-of-order beat refused and no key opening a cage.
 ##   4. **Walking is the only travel.** A real body is driven out of the clearing,
 ##      down the 286 m trail and into the town square: no scene is requested, no
 ##      transition is made, the scene object never changes, the body never leaves
@@ -31,15 +32,17 @@ const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TEST_SAVE := "user://warband_world_state.json"
 const WARBAND_SAVE := "user://warband_world_warband.json"
 const WORLD := "res://scenes/warband_world.tscn"
-## The rescuer's walk and the second wave both have to happen inside this.
+## The rescuer's walk and his fight have to happen inside this.
 const JOG_TIMEOUT := 16.0
+## How long the shiv may take to put the pair down before the test calls it a hang.
+const PAIR_TIMEOUT := 40.0
 ## How long the driven walk may take before the test calls it a hang.
 const WALK_LIMIT := 90.0
 ## The walk is played at three times the simulation per second so a quarter of a
 ## kilometre fits in a regression; the recorded time is game time at 1x.
 const WALK_SCALE := 3.0
-## Where the body starts the walk: in front of the cage line.
-const WALK_START := Vector3(-2.6, 0.2, 4.0)
+## Where the campaign's walk begins: the cage line the soul wakes on.
+const CAGE_LINE := Vector3(-2.6, 0.2, 6.0)
 
 var game
 var flow
@@ -49,6 +52,10 @@ var checks := 0
 var failures := 0
 var state_log: Array = []
 var requested: Array = []
+## Ground the opening itself walks: the cages to the mouth, which the ambush
+## interrupts. Counted into the campaign's 359 m below so the number the docs
+## quote is the whole walk, not the half of it the walk test times.
+var opening_metres := 0.0
 
 
 func check(condition: bool, message: String) -> void:
@@ -110,6 +117,7 @@ func run() -> void:
 	check_one_of_each()
 	check_camp_in_the_woods()
 	await check_lesson()
+	await check_leaving()
 	await check_walk()
 	await check_town_end()
 	check_budget()
@@ -330,7 +338,8 @@ func check_lesson() -> void:
 	check(state_count(SequencerScript.State.ALL_SEEN) == 1, "ALL_SEEN is entered exactly once")
 	dismiss_card("all four seen")
 
-	# The rescuer jogs in and stands still. The soul is NOT moved for the player.
+	# Corvin jogs in, and he does not stand there: the pair are his. The soul is
+	# NOT moved for the player - taking his body is the beat.
 	var arrived := await await_condition(
 		func() -> bool: return game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 		JOG_TIMEOUT, "the rescuer's walk")
@@ -344,67 +353,112 @@ func check_lesson() -> void:
 	check(game.camp.sequencer.objective().contains("F5"), "the objective names the key")
 	dismiss_card("the rescuer's card")
 
-	# A prisoner at their own bars is refused: only Corvin's hands carry the shiv.
+	# `G` is not a latch key any more: a body at the bars opens nothing.
 	var first_cage: Vector3 = game.camp.CAGE_POSTS[0]
 	var prisoner = game.controller.body_of(int(ids[2]))
 	prisoner.global_position = first_cage + Vector3(0.0, 0.1, 0.3)
 	await physics_frame
 	game._try_interact()
-	check(game.camp.cages_open_count() == 0, "only the rescuer's shiv opens a cage")
+	check(game.camp.cages_open_count() == 0, "G does not open a cage")
 	check(game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"a refused latch changes nothing")
+		"and the lesson stays where it was")
 
-	# The player takes the body - F5 in the game, `direct` here - and only then
-	# does a latch open.
+	# Corvin puts the pair down himself. The player is in a cage for all of it.
+	var pair := await await_condition(
+		func() -> bool: return game.camp.watchers_down() >= 2, PAIR_TIMEOUT, "the pair falling")
+	check(pair, "Corvin puts both watchers down himself (%d of 2)" % game.camp.watchers_down())
+	check(game.camp.ally_engaged(), "he swung: the squad's own module landed the blows")
+	check(game.camp.sequencer.guards_down() == 2,
+		"his two kills count on the tally (%d)" % game.camp.sequencer.guards_down())
+	check(game.controller.merc_for_peer(1) != game.camp.rescuer_id,
+		"the player never had to touch them")
+	check(game.camp.cages_open_count() == 0, "the pair falling cuts nothing by itself")
+
+	# The soul takes the body - F5 in the game, `direct` here - and that is the
+	# latch beat: all four at once, and the squad out.
 	var take: Dictionary = game.controller.direct(1, game.camp.rescuer_id)
 	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
 	check(game.camp.sequencer.rescuer_taken(), "the sequencer saw the player take the body")
-	var rescuer = game.controller.body_of(game.camp.rescuer_id)
-	for index in ids.size():
-		var cage: Vector3 = game.camp.CAGE_POSTS[index]
-		rescuer.global_position = cage + Vector3(0.0, 0.1, 0.4)
-		await physics_frame
-		await physics_frame
-		game._try_interact()
-		dismiss_card("latch %d" % (index + 1))
-		if index == 0:
-			# 72 health against a 14-damage shiv: five stabs are not enough.
-			var early = game.camp.guards[0]
-			for stab in 5:
-				early.take_damage(14.0, 0)
-				check(bool(early.get("alive")), "stab %d of 6 leaves a watcher standing" % (stab + 1))
-			early.take_damage(14.0, 0)
-			check(not bool(early.get("alive")), "the sixth stab puts a watcher down")
-			check(game.camp.sequencer.guards_down() == 0,
-				"a kill before the squad is out is not progress")
-		await physics_frame
-		check(game.camp.cages_open_count() == index + 1,
-			"latch %d of 4 is cut (%d)" % [index + 1, game.camp.cages_open_count()])
-		check(not game.camp.is_cage_clamped(int(ids[index])),
-			"cage %d stopped clamping its prisoner" % (index + 1))
+	check(game.camp.cages_open_count() == 4,
+		"taking him cuts all four latches at once (%d)" % game.camp.cages_open_count())
 	check(game.camp.cages_open(), "all four latches are cut")
+	check(state_count(SequencerScript.State.FREED) == 1, "FREED is entered exactly once")
 	check(game.camp.sequencer.state() == SequencerScript.State.FREED,
 		"the fourth latch frees the squad (%s)" % game.camp.sequencer.state_name())
-	check(game.camp.sequencer.guards_down() == 1,
-		"the kill landed before the squad was out is reconciled on FREED")
+	for index in ids.size():
+		check(not game.camp.is_cage_clamped(int(ids[index])),
+			"cage %d stopped clamping its prisoner" % (index + 1))
+	check(game.camp.sequencer.objective().contains("2/8"),
+		"the tally reads true against the eight (%s)" % game.camp.sequencer.objective())
+	dismiss_card("the freed card")
 
-	# The freed squad arms itself off the ground and charges - silently.
+	# The freed squad arms itself off the ground - silently, with no loot step.
 	var armed := await await_condition(
 		func() -> bool: return game.camp.allies_armed() >= 1, 16.0, "the squad arming")
 	check(armed, "a freed ally picks a weapon off the ground and holds it")
-	var engaged := await await_condition(
-		func() -> bool: return game.camp.ally_engaged(), 18.0, "the squad charging")
-	check(engaged, "an armed ally closes on a watcher and swings")
+	check(game.camp.pickups().size() == 3, "the three cultist drops lie where they were (%d)"
+		% game.camp.pickups().size())
 
-	# The first pair falling calls six armed watchers out of the trees.
-	for watcher in game.camp.guards.duplicate():
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
-	var wave_two := await await_condition(
-		func() -> bool: return game.camp.guards.size() == 8, 14.0, "the second wave")
-	check(wave_two, "six more watchers come out of the trees (%d camp watchers)"
+
+# --- 3b. the leaving is the ambush ---------------------------------------
+
+## ESCAPING is not a body count: it is the soul walking out of the clearing. The
+## ground from the cages to the mouth is walked here, timed, and the six come out
+## of the trees on the frame the mouth is crossed.
+func check_leaving() -> void:
+	var local = game.controller.active_body(1)
+	check(local != null, "the soul still has a body for the walk out")
+	# The campaign's walk starts at the cage line the soul woke on. The ground
+	# between there and the mouth is covered by the opening itself - Corvin's run
+	# at the pair, then the walk out - so it is banked here and the lane's metres
+	# are added on top: one walk from the cages to the square, not two halves.
+	opening_metres = flat_range(local.global_position, CAGE_LINE)
+	check(game.camp.guards.size() == 2,
+		"the clearing holds no more watchers than the pair (%d)" % game.camp.guards.size())
+	check(game.camp.sequencer.state() == SequencerScript.State.FREED,
+		"the clearing is held, not escaped (%s)" % game.camp.sequencer.state_name())
+	game.controller.input_enabled = false
+	await physics_frame
+	var ticks := 0
+	var last: Vector3 = local.global_position
+	var mouth_started := Time.get_ticks_msec()
+	Engine.physics_ticks_per_second = 180
+	Engine.time_scale = WALK_SCALE
+	while ticks < 9000:
+		if game.camp.sequencer.state() == SequencerScript.State.ESCAPING:
+			break
+		var to: Vector3 = game.camp.GATE_POINT - local.global_position
+		to.y = 0.0
+		if to.length() <= 0.8:
+			break
+		var direction := to.normalized()
+		local.accept_network_input(Vector2(direction.x, direction.z), true)
+		await physics_frame
+		ticks += 1
+		opening_metres += flat_range(last, local.global_position)
+		last = local.global_position
+	Engine.time_scale = 1.0
+	Engine.physics_ticks_per_second = 60
+	game.controller.input_enabled = true
+	var real_seconds := float(Time.get_ticks_msec() - mouth_started) / 1000.0
+	var game_seconds := float(ticks) / 60.0
+	check(game.camp.sequencer.state() == SequencerScript.State.ESCAPING,
+		"walking out through the mouth is the escape (%s)" % game.camp.sequencer.state_name())
+	check(state_count(SequencerScript.State.ESCAPING) == 1, "ESCAPING is entered exactly once")
+	check(game.camp.sequencer.guards_down() == 2,
+		"the escape is not a kill quota: only Corvin's pair are down (%d)"
+		% game.camp.sequencer.guards_down())
+	check(game.camp.sequencer.hint().contains("trail"),
+		"the escape's key line names the trail (%s)" % game.camp.sequencer.hint())
+	check(game.squad.following, "the squad turns escort the moment the trees answer")
+	print("WORLD_OPENING metres=%.0f game_seconds=%.1f real_seconds=%.1f"
+		% [opening_metres, game_seconds, real_seconds])
+
+	# Six armed watchers out of the trees on that frame.
+	check(game.camp.guards.size() == 8, "six more watchers come out of the trees (%d camp watchers)"
 		% game.camp.guards.size())
 	await create_timer(0.6).timeout
+	dismiss_card("the ambush")
 	var armed_reinforcements := 0
 	var visible_blades := 0
 	for index in range(2, game.camp.guards.size()):
@@ -421,26 +475,16 @@ func check_lesson() -> void:
 	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
 	check(game.guards.size() == 88, "the world's hostile list holds all eighty-eight (%d)" % game.guards.size())
 
-	# ...and eight kills open the way.
-	for watcher in game.camp.guards.duplicate():
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(400.0, 0)
-	var escaped := await await_condition(
-		func() -> bool: return game.camp.sequencer.state() == SequencerScript.State.ESCAPING,
-		10.0, "the escape opening")
-	check(escaped, "eight kills open the way (%s)" % game.camp.sequencer.state_name())
-	check(game.camp.sequencer.guards_down() == 8,
-		"all eight watchers are down (%d)" % game.camp.sequencer.guards_down())
-	check(game.squad.following, "the squad turns escort once the clearing is clear")
-	check(game.camp.sequencer.hint().contains("trail"),
-		"the escape's key line names the trail (%s)" % game.camp.sequencer.hint())
 
 
 # --- 4. walk the whole world ----------------------------------------------
 
 ## The proof that there is no travel scene any more: one body, driven with real
-## movement, from the cage line to the town square, with the scene, the flow and
-## the walkable floor watched the whole way.
+## movement, from where the opening leaves it - the wrong side of the clearing's
+## mouth, with the ambush the whole opening warned about on its heels - down the
+## trail and into the town square, with the scene, the flow and the walkable floor
+## watched the whole way. The ground the opening itself walks is added in, so the
+## distance the docs quote is the campaign's, not this half of it.
 func check_walk() -> void:
 	var lane: PackedVector3Array = game.trail.forest["lane"]
 	var path = game.trail.forest["path"]
@@ -449,8 +493,12 @@ func check_walk() -> void:
 	var half := float(game.trail.forest["width"]) * 0.5
 	var body = game.controller.active_body(1)
 	check(body != null, "the soul still has a body for the walk")
-	# Clear the road first: the walk proves the ground, not the fight.
+	# Clear the road first: the walk proves the ground, not the fight. The camp's
+	# ambush is the opening's own fight and is cleared with it.
 	for watcher in game.trail.guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(400.0, 0)
+	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			watcher.take_damage(400.0, 0)
 	await create_timer(0.4).timeout
@@ -460,13 +508,14 @@ func check_walk() -> void:
 		"every cultist dropped the weapon it held (%d on the ground, %d taken)"
 		% [game.trail.pickups_left(), game.camp.steel_taken()])
 
-	body.global_position = WALK_START
+	# No teleport: the body is where the ambush left it, and it walks on from there.
+	check(flat_range(body.global_position, game.camp.GATE_POINT) <= game.camp.ESCAPE_RADIUS + 1.0,
+		"the walk begins at the mouth the ambush opened (%.1f m)"
+		% flat_range(body.global_position, game.camp.GATE_POINT))
 	game.controller.input_enabled = false
 	await physics_frame
 
 	var waypoints: Array[Vector3] = []
-	waypoints.append(Vector3(0.0, 0.2, -10.0))
-	waypoints.append(game.camp.GATE_POINT + Vector3(0.0, 0.2, 0.0))
 	for index in range(1, lane.size()):
 		waypoints.append(lane[index])
 	waypoints.append(town_gate + Vector3(0.0, 0.2, 0.0))
@@ -524,14 +573,20 @@ func check_walk() -> void:
 		"the body reached the town square (%.2f m from the fire)"
 		% flat_range(body.global_position, town_at))
 	check(real_seconds < WALK_LIMIT, "the walk finished inside the watchdog (%.1f s real)" % real_seconds)
-	check(travelled >= 330.0, "the walk is a real one (%.0f m of ground)" % travelled)
+	# The campaign's walk is the opening's ground plus the lane's: the cages to the
+	# mouth is the first 50 m of it, and it is walked by the same body.
+	check(travelled >= 300.0, "the trail half of the walk is a real one (%.0f m of ground)"
+		% travelled)
+	check(opening_metres + travelled >= 350.0,
+		"the campaign is one walk from the cages to the square (%.0f m)"
+		% (opening_metres + travelled))
 	check(game.town.in_square(body), "the body stands on the square's own ground")
 	# The prompt counts the trail down on the way and names the town at the end.
 	check(game.prompt_text().begins_with("REACH THE TOWN") or game.prompt_text().is_empty()
 			or game.prompt_text().contains("G -"),
 		"the prompt names the town, not a door (%s)" % game.prompt_text())
-	print("WORLD_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f lateral=%.2f"
-		% [game_seconds, real_seconds, ticks, travelled, worst_lateral])
+	print("WORLD_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f opening=%.0f lateral=%.2f"
+		% [game_seconds, real_seconds, ticks, travelled, opening_metres, worst_lateral])
 
 
 ## Whether a point is on ground a body is meant to stand on: the clearing, the

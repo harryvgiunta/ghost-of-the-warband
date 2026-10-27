@@ -42,6 +42,8 @@ var forest: Dictionary = {}
 var guards: Array = []
 
 var _kills := 0
+## True once the road has been put on the squad's heels (`wake_road`).
+var _woken := false
 
 
 ## Build the lane under this node and put the cult on it. `options` is handed
@@ -96,35 +98,30 @@ func pickups_left() -> int:
 const ROAD_PER_POST := 10
 
 ## Two behind the squad at the mouth of the lane and a pair in each clearing: one
-## ring per post, all armed, all hunting.
+## ring per post, all armed. Nobody is handed a quarry here - a cultist that
+## started hunting from its spawn point would run the 90 m back into the camp and
+## turn the opening's own fight into a massacre. The road answers the leaving
+## (`wake_road`), and after that the wood's own senses do the noticing.
 func _build_cultists() -> void:
-	var soul = host.controller.active_body(1)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7717
-	# The ambush post sits a little way down the trail: it does not start locked
-	# onto the soul, because the camp's own fight happens at the mouth. Whoever
-	# walks past it is noticed by the same senses as the rest of the road.
 	for post in forest.get("pursuer_posts", []) as Array:
-		_spawn_ring(post as Vector3, soul, rng, false)
+		_spawn_ring(post as Vector3, rng)
 	for post in forest.get("clearing_posts", []) as Array:
-		_spawn_ring(post as Vector3, null, rng, false)
+		_spawn_ring(post as Vector3, rng)
 
 
 ## A post's worth of cult, packed around the post but inside the walkable band:
 ## the ring never reaches past the lane's walls, so nobody spawns inside a trunk.
-func _spawn_ring(at: Vector3, prey, rng: RandomNumberGenerator, all_prey: bool) -> void:
+func _spawn_ring(at: Vector3, rng: RandomNumberGenerator) -> void:
 	for index in ROAD_PER_POST:
 		var angle := TAU * float(index) / float(ROAD_PER_POST)
 		var radius := rng.randf_range(1.0, 3.2)
 		var point := at + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-		# Outside the ambush post only every third one starts already locked onto
-		# the soul: the rest have to notice the squad, which is what makes the
-		# trail feel hunted rather than scripted.
-		var locked = prey if (all_prey or index % 3 == 0) else null
-		_spawn_cultist(point, locked)
+		_spawn_cultist(point)
 
 
-func _spawn_cultist(at: Vector3, prey) -> void:
+func _spawn_cultist(at: Vector3) -> void:
 	var watcher := WatcherScript.new()
 	watcher.name = "RoadWatcher%d" % (guards.size() + 1)
 	watcher.mob_id = "hollow_warden"
@@ -136,11 +133,25 @@ func _spawn_cultist(at: Vector3, prey) -> void:
 	watcher.defeated.connect(_on_cultist_defeated)
 	watcher.attacked.connect(_on_cultist_attack)
 	watcher.arm(str(CULTIST_ARMS[guards.size() % CULTIST_ARMS.size()]))
-	var target = prey if is_instance_valid(prey) else host.nearest_standing_body(at)
-	if target != null:
-		watcher.hunt(target)
 	guards.append(watcher)
 	host.guards.append(watcher)
+
+
+## The road answers the leaving: the moment the squad steps out of the clearing a
+## third of every ring takes the soul and comes up the lane after it, and the rest
+## have to notice the squad by sight - which is what makes the trail feel hunted
+## rather than scripted. Called by the camp on ESCAPING; a campaign that starts in
+## the town never calls it, and the road is then just a road with a cult on it.
+func wake_road(prey) -> void:
+	if _woken or not is_instance_valid(prey):
+		return
+	_woken = true
+	for index in guards.size():
+		if index % 3 != 0:
+			continue
+		var watcher = guards[index]
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.hunt(prey)
 
 
 ## Each one drops the weapon it held, exactly as the camp's watchers do.
