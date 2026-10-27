@@ -47,6 +47,7 @@ func open(message: String = "") -> void:
 	_notice.visible = not message.is_empty()
 	_status.text = ""
 	_refresh_display()
+	_note("open", {"notice": message, "exit_label": _exit_label})
 	# The menu is the reason the pointer is free; clicking it must never move
 	# the camera or swing a weapon.
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -69,9 +70,11 @@ func is_fullscreen() -> bool:
 func save_journey() -> bool:
 	var state := get_node_or_null("/root/PlayerState")
 	if state == null or not state.has_method("save_state"):
+		_note("save_skipped")
 		set_status("Nothing to save in this scene.")
 		return false
 	state.save_state()
+	_note("save", {"credits": int(state.credits), "inventory": state.inventory.size()})
 	set_status("Journey saved  /  %d c  /  %d items" % [int(state.credits),state.inventory.size()])
 	return true
 
@@ -109,7 +112,9 @@ func _build() -> void:
 	display_button = _button(panel,"DISPLAY",Vector2(26,254),Vector2(408,46))
 	display_button.pressed.connect(_toggle_display)
 	exit_button = _button(panel,_exit_label,Vector2(26,310),Vector2(408,46))
-	exit_button.pressed.connect(func(): exit_requested.emit())
+	exit_button.pressed.connect(func():
+		_note("exit_requested", {"label": _exit_label})
+		exit_requested.emit())
 	quit_button = _button(panel,"EXIT GAME",Vector2(26,366),Vector2(408,46))
 	quit_button.pressed.connect(_quit)
 	var hint := _label(panel,"Esc closes this menu. The world keeps running behind it.",Vector2(26,424),11,MUTED)
@@ -132,6 +137,7 @@ func _toggle_display() -> void:
 	else:
 		window.mode = Window.MODE_FULLSCREEN
 	_refresh_display()
+	_note("display", {"mode": window.mode, "fullscreen": is_fullscreen(), "headless": DisplayServer.get_name() == "headless"})
 	# The window is the authority: a platform that refuses the switch (a
 	# headless run, a compositor that ignores it) keeps the label honest.
 	if is_fullscreen():
@@ -142,9 +148,16 @@ func _toggle_display() -> void:
 func _quit() -> void:
 	# The journey is written first: quitting is the one exit with no scene
 	# hand-off to save on the way out.
+	_note("quit")
 	save_journey()
 	quit_requested.emit()
 	get_tree().quit()
+
+
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("menu", message, data)
 
 func _theme() -> Theme:
 	var result := Theme.new()

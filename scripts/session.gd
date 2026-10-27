@@ -37,6 +37,7 @@ func arm_arena(next_mode: String, next_address: String, next_port: int, next_nam
 	player_name = next_name.strip_edges()
 	if player_name.is_empty():
 		player_name = "Ranger"
+	_note("session_armed", {"mode": mode, "address": address, "port": port, "name": player_name})
 
 func arm_delve(next_mode: String, next_address: String, next_port: int, next_name: String) -> void:
 	arm_arena(next_mode,next_address,next_port,next_name)
@@ -53,6 +54,8 @@ func take() -> Dictionary:
 	return request
 
 func clear() -> void:
+	if not mode.is_empty():
+		_note("session_cleared", {"mode": mode, "port": port})
 	mode = ""
 
 ## The authority sends this to one peer when it leads it into the delve. The RPC
@@ -60,6 +63,7 @@ func clear() -> void:
 ## Delve node path would be gone by the time the packet is serviced.
 @rpc("authority","call_remote","reliable")
 func descend_party(next_port: int) -> void:
+	_note("party_descent", {"port": next_port})
 	party_descent.emit(clampi(next_port,1024,65535))
 
 
@@ -69,11 +73,13 @@ func descend_party(next_port: int) -> void:
 func request_descent() -> void:
 	var sender := multiplayer.get_remote_sender_id() if multiplayer != null else 0
 	if sender > 0:
+		_note("descent_requested", {"peer": sender})
 		descent_requested.emit(sender)
 
 
 @rpc("authority","call_remote","reliable")
 func refuse_descent(reason: String) -> void:
+	_note("descent_refused", {"reason": reason.strip_edges().left(120)})
 	descent_refused.emit(reason.strip_edges().left(120))
 
 
@@ -82,10 +88,13 @@ func refuse_descent(reason: String) -> void:
 @rpc("authority","call_remote","reliable")
 func delve_open(next_port: int) -> void:
 	delve_open_port = clampi(next_port,1024,65535)
+	_note("delve_open", {"port": delve_open_port})
 	host_entered_delve.emit(delve_open_port)
 
 
 func clear_delve_open() -> void:
+	if delve_open_port != 0:
+		_note("delve_open_cleared", {"port": delve_open_port})
 	delve_open_port = 0
 
 
@@ -94,4 +103,14 @@ func clear_delve_open() -> void:
 @rpc("authority","call_remote","reliable")
 func close_delve() -> void:
 	delve_open_port = 0
+	_note("delve_closed")
 	delve_returned.emit()
+
+
+## The logger lives on /root and is always loaded in this project; the lookup is
+## still optional so a script-only harness that skips autoloads cannot break a
+## scene hand-off.
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("net", message, data)

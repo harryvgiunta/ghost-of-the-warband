@@ -857,6 +857,12 @@ func _first_carried_pair(exclude: Dictionary) -> Dictionary:
 			return candidate
 	return {}
 
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("state", message, data)
+
+
 func _hand_pair_label(main_id: String, off_id: String) -> String:
 	var parts := PackedStringArray()
 	if not main_id.is_empty():
@@ -866,6 +872,7 @@ func _hand_pair_label(main_id: String, off_id: String) -> String:
 	return " + ".join(parts) if not parts.is_empty() else "Unarmed"
 
 func reset(persist: bool = true) -> void:
+	_note("reset", {"persist": persist, "path": save_path})
 	credits = STARTING_CREDITS
 	inventory.assign(STARTING_INVENTORY)
 	stash.clear()
@@ -1063,6 +1070,7 @@ func _give_to_inventory(item_id: String) -> void:
 func save_state() -> void:
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
+		_note("save_failed", {"path": save_path, "error": error_string(FileAccess.get_open_error())})
 		push_warning("Could not write player state to %s" % save_path)
 		return
 	file.store_string(JSON.stringify({
@@ -1076,13 +1084,17 @@ func save_state() -> void:
 		"floor":floor_items,
 	}))
 	file.close()
+	_note("save", {"path": save_path, "credits": credits, "inventory": inventory.size(),
+		"stash": stash.size(), "floor": floor_items.size(), "version": SAVE_VERSION})
 
 func load_state() -> void:
 	if not FileAccess.file_exists(save_path):
+		_note("load_missing", {"path": save_path})
 		reset(false)
 		return
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(save_path))
 	if typeof(parsed) != TYPE_DICTIONARY:
+		_note("load_failed", {"path": save_path})
 		push_warning("Ignoring unreadable player state at %s" % save_path)
 		reset(false)
 		return
@@ -1105,6 +1117,8 @@ func load_state() -> void:
 	_load_quick(data)
 	_normalize_quick()
 	_repair_quick()
+	_note("load", {"path": save_path, "version": version, "credits": credits,
+		"inventory": inventory.size(), "stash": stash.size(), "floor": floor_items.size()})
 	changed.emit()
 
 func _read_list(value: Variant, limit: int) -> Array[String]:

@@ -8,6 +8,7 @@ config/features=PackedStringArray("4.4", "GL Compatibility")
 config/description="A seamless woodland town and frontier, a four-seat arena and an endless survival delve beneath Hearthstead."
 
 [autoload]
+Log="*res://scripts/log.gd"
 PlayerState="*res://scripts/player_state.gd"
 Session="*res://scripts/session.gd"
 NetCache="*res://scripts/net_cache.gd"

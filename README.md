@@ -607,6 +607,24 @@ Captures and baked atlases land in the ignored `.runtime/forest-source/<mob>/`
 workspace. Keep each shipped GLB, its adjacent JSON and its `.glb.import`
 together; the import settings embed the textures and sample animation at 60 Hz.
 
+## Logs and crash reports
+
+Every run writes its own session under `user://logs/sessions/`: a machine-readable
+`.jsonl` stream, a readable `.log` mirror, a boot-environment card and a
+two-second heartbeat marker. When a run ends without its clean marker, the next
+launch reconstructs a report in `user://logs/crashes/` with the environment, the
+last state sample, breadcrumbs, recent engine errors and their GDScript stacks,
+and the tail of the archived log. The main menu shows a crash notice with buttons
+to open the folder and the newest report.
+
+On Windows the folder is `%APPDATA%\Godot\app_userdata\IRONWOOD - The Frontier\logs`;
+the exact path is printed at boot. Logs are local and never uploaded. Use
+`--no-log`, `--log-level=…`, `--log-dir=…`, `--log-verbose`, `--log-keep=N` or
+`--no-hang-watch` to control a run, or the matching `IRONWOOD_LOG*` environment
+variables. Multi-instance runs are safe: a live host or client is never reported
+as crashed. Full file and report anatomy, retention and the `Log.event`
+integration API: [docs/logging.md](docs/logging.md).
+
 ## Update
 
 **Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. Current windows show **0.4.0** in the HUD, and `Play.cmd` opens the main menu.
@@ -659,6 +677,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 & $Godot --headless --path . --script res://tests/block_clash_regression.gd
 & $Godot --headless --path . --script res://tests/hitbox_regression.gd
 & $Godot --headless --path . --script res://tests/title_menu_regression.gd
+& $Godot --headless --path . --script res://tests/logging_regression.gd
 & $Godot --headless --path . --script res://tests/town_services_regression.gd
 & $Godot --headless --path . --script res://tests/paperdoll_regression.gd
 & $Godot --headless --path . --script res://tests/world_ui_regression.gd

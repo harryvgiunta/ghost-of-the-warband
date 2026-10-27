@@ -268,6 +268,7 @@ func leave_game() -> void:
 	hud.show_lobby()
 
 func _connection_ended(message: String) -> void:
+	_note("connection_ended", {"message": message, "role": network_role})
 	leave_game()
 	hud.set_status(message)
 	print("ARENA_CONNECTION_ENDED ",message)
@@ -341,6 +342,7 @@ func _peer_connected(peer_id: int) -> void:
 			_accept.rpc_id(peer_id,actor.slot)
 			_broadcast_names()
 			print("ARENA_PEER_JOINED slot=",actor.slot," humans=",get_human_count())
+			_note("peer_joined", {"peer": peer_id, "slot": actor.slot, "humans": get_human_count()})
 			return
 	multiplayer.multiplayer_peer.disconnect_peer(peer_id)
 
@@ -353,6 +355,7 @@ func _peer_disconnected(peer_id: int) -> void:
 	actors[slot].configure(0,true,"Bot %d" % slot,world.spawn_points[slot])
 	_broadcast_names()
 	print("ARENA_BOT_RESTORED slot=",slot," humans=",get_human_count())
+	_note("peer_left", {"peer": peer_id, "slot": slot, "humans": get_human_count()})
 
 func _clear_slot_arrows(slot: int) -> void:
 	for index in range(projectiles.size()-1,-1,-1):
@@ -373,6 +376,7 @@ func _clear_remote_arrows(slot: int) -> void:
 func _connected() -> void:
 	multiplayer.multiplayer_peer.get_peer(1).set_timeout(32,2000,5000)
 	_register.rpc_id(1,_player_name,_local_loadout())
+	_note("connected", {"peers": multiplayer.get_peers().size(), "endpoint": _endpoint})
 
 @rpc("any_peer","call_remote","reliable")
 func _register(player_name: String, loadout: Dictionary) -> void:
@@ -1049,6 +1053,7 @@ func _on_killed(slot: int, source: int) -> void:
 		actors[source].kills += 1
 		actors[source].apply_kill_refill()
 		print("ARENA_KILL source=",source," victim=",slot)
+		_note("kill", {"source": source, "victim": slot})
 
 func _process(delta: float) -> void:
 	if local_slot < 0:
@@ -1395,3 +1400,9 @@ func _notification(what: int) -> void:
 func _exit_tree() -> void:
 	multiplayer.multiplayer_peer.close()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("arena", message, data)

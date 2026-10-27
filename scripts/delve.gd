@@ -571,6 +571,7 @@ func leave_game() -> void:
 func _connection_ended(message: String) -> void:
 	if not is_inside_tree():
 		return
+	_note("connection_ended", {"message": message, "role": network_role, "inner": inner, "depth": depth, "phase": phase})
 	if inner:
 		# The session's server is gone; the frontier resumes without it.
 		hud.show_connection_lost(message)
@@ -584,6 +585,7 @@ func _hub() -> void:
 	_end_run()
 
 func _on_surface_requested() -> void:
+	_note("surface_requested", {"role": network_role, "inner": inner, "phase": phase, "depth": depth})
 	if network_role == "host" and phase == "CLEARED":
 		ascend_to_surface()
 		return
@@ -598,6 +600,7 @@ func _on_surface_requested() -> void:
 ## back locally. An inner instance gives the frozen session back untouched; a
 ## standalone delve returns to its town.
 func _end_run() -> void:
+	_note("run_end", {"role": network_role, "inner": inner, "phase": phase, "depth": depth})
 	if network_role == "host":
 		_announce_exit()
 	_leave_session()
@@ -835,6 +838,7 @@ func _seat_peer(peer_id: int, player_name: String) -> void:
 	_run_state.rpc_id(peer_id,_run_state_dict())
 	_broadcast_names()
 	print("DELVE_PEER_JOINED slot=%d humans=%d" % [slot,get_human_count()])
+	_note("peer_joined", {"peer": peer_id, "slot": slot, "humans": get_human_count(), "depth": depth, "phase": phase})
 	_refresh_waiting()
 	open_room()
 
@@ -848,6 +852,7 @@ func _peer_disconnected(peer_id: int) -> void:
 		_slot_cleared.rpc(slot)
 		_broadcast_names()
 		print("DELVE_PEER_LEFT slot=%d humans=%d" % [slot,get_human_count()])
+		_note("peer_left", {"peer": peer_id, "slot": slot, "humans": get_human_count(), "depth": depth, "phase": phase})
 		_check_party_wipe()
 	_refresh_waiting()
 	# The ranger who was being waited on is gone; the survivors go on.
@@ -929,6 +934,7 @@ func _connected() -> void:
 		return
 	multiplayer.multiplayer_peer.get_peer(1).set_timeout(32,2000,5000)
 	_register.rpc_id(1,_player_name,_local_loadout())
+	_note("connected", {"peers": multiplayer.get_peers().size(), "endpoint": _endpoint})
 
 @rpc("any_peer","call_remote","reliable")
 func _register(player_name: String, loadout: Dictionary) -> void:
@@ -2235,6 +2241,7 @@ func descend_next_depth() -> void:
 	depth += 1
 	var kind := _room_kind(depth)
 	var room_cycle := _room_cycle(depth)
+	_note("descend", {"depth": depth, "room": kind, "cycle": room_cycle})
 	_clear_devils()
 	_remove_chest()
 	chest_ready = false
@@ -2295,6 +2302,7 @@ func open_chest() -> void:
 		_spawn_chest()
 	if not is_instance_valid(chest):
 		return
+	_note("chest_open", {"depth": depth, "cycle": int(world.cycle), "wave": wave_number})
 	chest.open(false)
 	_on_chest_opened()
 
@@ -2314,6 +2322,8 @@ func _start_wave() -> void:
 	_set_phase("WAVE")
 	print("DELVE_DEPTH_START depth=%d mobs=%d" % [depth,wave_total])
 	print("DELVE_WAVE_START room=%s wave=%d total=%d" % [str(world.room_kind),wave_number,wave_total])
+	_note("wave_start", {"depth": depth, "room": str(world.room_kind), "wave": wave_number,
+		"total": wave_total, "cycle": int(world.cycle), "humans": get_human_count()})
 	_sync_run_state()
 
 ## Public HUD/test surface: copies of the planned entries, in spawn order.
@@ -2908,6 +2918,7 @@ func _sync_run_state() -> void:
 	_run_state.rpc(_run_state_dict())
 
 func _set_phase(value: String) -> void:
+	_note("phase", {"from": phase, "to": value, "depth": depth, "room": str(world.room_kind), "wave": wave_number})
 	phase = value
 	print("DELVE_PHASE phase=%s depth=%d" % [phase,depth])
 	_apply_world_ritual(_pentagram_lit(),_ritual_progress_value())
@@ -2963,6 +2974,7 @@ func _check_party_wipe() -> void:
 func _game_over() -> void:
 	if phase == "GAME_OVER":
 		return
+	_note("party_wipe", {"depth": depth, "phase": phase, "wave": wave_number, "humans": get_human_count()})
 	_set_phase("GAME_OVER")
 	for actor in actors:
 		actor.combat.stop()
@@ -3005,3 +3017,9 @@ func _host_interact(slot: int) -> void:
 				descend_next_depth()
 		_:
 			pass
+
+
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("delve", message, data)

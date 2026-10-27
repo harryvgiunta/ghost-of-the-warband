@@ -371,6 +371,7 @@ func _ready() -> void:
 	_update_camera(1.0)
 	hud.show_feedback("The old waystones have gone dark. Follow the trails north.")
 	print("IRONWOOD_WORLD_READY enemies=%d waystones=3 terrain=290m" % enemies.size())
+	_note("frontier_ready", {"enemies": enemies.size(), "role": network_role, "name": _player_name})
 	_set_cursor_free(false)
 
 
@@ -463,6 +464,7 @@ func _on_menu_exit() -> void:
 	# closed so a host's guests are released instead of waiting for a timeout.
 	if _player_state != null:
 		_player_state.save_state()
+	_note("exit_to_title", {"role": network_role})
 	_close_network()
 	get_tree().change_scene_to_file("res://title.tscn")
 
@@ -1727,6 +1729,7 @@ func _enter_arena() -> void:
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
 		cache.remember(player_name,"",7777,"arena")
+	_note("enter_arena", {"role": network_role, "name": player_name})
 	get_tree().change_scene_to_file("res://arena.tscn")
 
 func _enter_delve() -> void:
@@ -1743,8 +1746,9 @@ func _enter_delve() -> void:
 		# This session keeps its ENet server: the riders still upstairs hear the
 		# delve is open and decide for themselves when to come down.
 		session.delve_open.rpc(_world_port)
-	# A host or a client opens the run inside the session it already owns; a
-	# solo or Host-Tailscale frontier has no server yet, so the run opens one.
+	# A host or a client opens the run inside the session it already owns; a solo
+	# or Host-Tailscale frontier has no server yet, so the run opens one.
+	_note("enter_delve", {"role": network_role, "port": _delve_port if network_role == "offline" else _world_port})
 	_open_delve_inner("host" if network_role != "client" else "client",
 		_delve_port if network_role == "offline" else _world_port)
 	_entering_scene = false
@@ -1770,6 +1774,7 @@ func _open_delve_inner(role: String, port: int) -> void:
 	add_child(delve)
 	_delve_inner = delve
 	print("WORLD_DELVE_INNER role=%s port=%d" % [role,delve.inner_port])
+	_note("inner_delve_open", {"role": role, "port": delve.inner_port, "own_peer": delve.inner_owns_peer})
 
 
 ## Freezes the frontier in place: it keeps every body, mob, pickup and waystone,
@@ -1887,6 +1892,7 @@ func _on_descent_requested(peer_id: int) -> void:
 		return
 	if not multiplayer.get_peers().has(peer_id):
 		return
+	_note("descent_requested", {"peer": peer_id})
 	var session := get_node_or_null("/root/Session")
 	if session != null:
 		session.refuse_descent.rpc_id(peer_id,"The host has not opened the delve yet. Jump in together.")
@@ -1895,6 +1901,7 @@ func _on_descent_requested(peer_id: int) -> void:
 func _on_descent_refused(reason: String) -> void:
 	if network_role != "client" or reason.strip_edges().is_empty():
 		return
+	_note("descent_refused", {"reason": reason})
 	hud.show_feedback(reason,3.5)
 
 
@@ -1906,6 +1913,7 @@ func _on_host_entered_delve(port: int) -> void:
 	_delve_open_port = port
 	hud.show_feedback("The host is in the delve. Walk into the Wayfarer Inn hatch to join.",8.0)
 	print("WORLD_DELVE_OPEN port=%d" % port)
+	_note("host_entered_delve", {"port": port})
 
 
 ## The party came back through the rope: the session is simulated again, so the
@@ -1914,6 +1922,7 @@ func _on_delve_returned() -> void:
 	if network_role != "client":
 		return
 	_delve_open_port = 0
+	_note("party_returned")
 	hud.show_feedback("The party is back in the world.",4.0)
 
 
@@ -1924,6 +1933,7 @@ func _on_delve_returned() -> void:
 func _on_party_descent(port: int) -> void:
 	if _entering_scene or network_role != "client" or _delve_inner != null:
 		return
+	_note("party_descent", {"port": port})
 	_entering_scene = true
 	_delve_open_port = 0
 	if _ui_open():
@@ -2003,6 +2013,8 @@ func take_damage(amount: float, react: bool = true) -> void:
 	hud.flash_damage()
 	if health <= 0.0:
 		respawns += 1
+		_note("player_fell", {"respawns": respawns, "gold": gold, "position": player.global_position,
+			"role": network_role, "inside_delve": _delve_inner != null})
 		return_to_camp()
 		hud.show_feedback("You fell. Recovered at the village campfire.", 4.0)
 
@@ -2212,6 +2224,7 @@ func host_world(port: int, player_name: String) -> void:
 	if error != OK:
 		hud.show_feedback("Could not open the world on UDP %d: %s" % [port,error_string(error)],6.0)
 		print("WORLD_HOST_FAILED port=",port," error=",error_string(error))
+		_note("host_failed", {"port": port, "error": error_string(error)})
 		return
 	multiplayer.multiplayer_peer = peer
 	network_role = "host"
@@ -2232,6 +2245,7 @@ func host_world(port: int, player_name: String) -> void:
 		detail = "%s / same PC 127.0.0.1" % ", ".join(addresses)
 	hud.show_feedback("Open world on UDP %d  /  join at %s  /  friends: Join Game, Open world, this port" % [port,detail],12.0)
 	print("WORLD_HOST_READY port=",port," addresses=",", ".join(addresses))
+	_note("host_ready", {"port": port, "name": _player_name, "seats": WORLD_SEATS - 1, "addresses": Array(addresses)})
 
 
 func join_world(address: String, port: int) -> void:
@@ -2243,6 +2257,7 @@ func join_world(address: String, port: int) -> void:
 	var error := peer.create_client(address,port)
 	if error != OK:
 		hud.show_feedback("Could not start the connection: " + error_string(error),4.0)
+		_note("join_failed", {"address": address, "port": port, "error": error_string(error)})
 		return
 	multiplayer.multiplayer_peer = peer
 	network_role = "client"
@@ -2254,6 +2269,7 @@ func join_world(address: String, port: int) -> void:
 	_world_address = address
 	_world_port = port
 	hud.show_feedback("Connecting to %s..." % _endpoint,4.0)
+	_note("join_pending", {"address": address, "port": port, "name": _player_name})
 
 
 func _connected() -> void:
@@ -2261,6 +2277,7 @@ func _connected() -> void:
 		return
 	multiplayer.multiplayer_peer.get_peer(1).set_timeout(32,2000,5000)
 	_world_register.rpc_id(1,_player_name,_local_loadout())
+	_note("connected", {"peers": multiplayer.get_peers().size(), "endpoint": _endpoint})
 
 
 func _join_failed(message: String) -> void:
@@ -2271,12 +2288,14 @@ func _join_failed(message: String) -> void:
 	_set_replicas(false)
 	hud.show_feedback("%s  [%s]  Playing alone." % [message,endpoint],8.0)
 	print("WORLD_JOIN_FAILED endpoint=",endpoint)
+	_note("connection_failed", {"endpoint": endpoint, "message": message})
 
 
 func _connection_ended(message: String) -> void:
 	if network_role == "offline":
 		return
 	var last_position: Vector3 = player.global_position if is_instance_valid(player) else world.player_spawn
+	_note("connection_lost", {"endpoint": _endpoint, "message": message, "position": last_position})
 	_close_network()
 	_set_replicas(false)
 	_restore_anchor(last_position)
@@ -2357,6 +2376,7 @@ func _peer_connected(peer_id: int) -> void:
 		if session != null:
 			session.delve_open.rpc_id(peer_id,_world_port)
 	print("WORLD_PEER_JOINED slot=",slot," rangers=",get_human_count())
+	_note("peer_joined", {"peer": peer_id, "slot": slot, "humans": get_human_count()})
 
 
 func _peer_disconnected(peer_id: int) -> void:
@@ -2373,6 +2393,7 @@ func _peer_disconnected(peer_id: int) -> void:
 	_broadcast_roster()
 	_update_session_line()
 	print("WORLD_PEER_LEFT slot=",slot," rangers=",get_human_count())
+	_note("peer_left", {"peer": peer_id, "slot": slot, "humans": get_human_count()})
 
 
 func _free_seat_slot() -> int:
@@ -3211,3 +3232,9 @@ func _world_waystone(id: String) -> void:
 	world.activate_interactable(id)
 	audio.play_sound("bullseye")
 	hud.show_feedback("Waystone restored",2.0)
+
+
+func _note(message: String, data: Dictionary = {}) -> void:
+	var log := get_node_or_null("/root/Log")
+	if log != null:
+		log.event("game", message, data)

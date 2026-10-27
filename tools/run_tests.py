@@ -44,6 +44,7 @@ TESTS = [
     "throw_regression",
     "shield_regression",
     "title_menu_regression",
+    "logging_regression",
     "town_services_regression",
     "paperdoll_regression",
     "world_ui_regression",
