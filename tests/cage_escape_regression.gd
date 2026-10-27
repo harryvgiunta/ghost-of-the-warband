@@ -393,12 +393,38 @@ func check_fight_and_gate() -> void:
 		func() -> bool: return _watcher_hurt(last_watcher), 14.0, "the squad landing blows")
 	check(hurt, "an ally's swing actually wounds a watcher")
 
-	# Steel plus two kills opens the escape, whoever landed them.
+	# The first pair falling calls the second wave through the gate.
+	var wave_two := await await_condition(
+		func() -> bool: return game.guards.size() == 6, 12.0, "the second wave")
+	check(wave_two, "four more watchers come through the gate (%d guards)" % game.guards.size())
+	var armed_reinforcements := 0
+	var visible_blades := 0
+	for index in range(2, game.guards.size()):
+		var watcher = game.guards[index]
+		check(bool(watcher.get("alive")), "reinforcement %d is on its feet" % index)
+		if str(watcher.weapon_item) in ["sword_short", "dagger_iron", "sword_arming"]:
+			armed_reinforcements += 1
+		if watcher.has_weapon_visual():
+			visible_blades += 1
+	check(armed_reinforcements == 4, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
+	check(visible_blades == 4, "and the blade is in its hand (%d)" % visible_blades)
+
+	# Each one drops the weapon it was holding.
+	var drops_before: int = game.pickups().size()
+	for index in range(2, game.guards.size()):
+		var watcher = game.guards[index]
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(60.0, 0)
+	await create_timer(0.3).timeout
+	check(game.pickups().size() >= drops_before + 4,
+		"the four weapons are on the floor (%d spawned)" % (game.pickups().size() - drops_before))
+
 	var escaped := await await_condition(
 		func() -> bool: return game.sequencer.state() == SequencerScript.State.ESCAPING,
 		14.0, "the escape opening")
 	check(escaped, "the squad's fight opens the escape (%s)" % game.sequencer.state_name())
-	check(game.sequencer.guards_down() == 2, "both watchers are down")
+	check(game.sequencer.guards_down() == 6, "all six watchers are down (%d)"
+		% game.sequencer.guards_down())
 
 	# Walk out: the arch is a door, so the player presses G inside it.
 	check(game.sequencer.hint().contains("gate"), "the hint names the gate")

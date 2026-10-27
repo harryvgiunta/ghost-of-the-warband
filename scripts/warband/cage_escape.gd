@@ -69,6 +69,15 @@ const GATE_WATCHERS := [
 	{"post": Vector3(-4.2, 0.1, -20.5)},
 	{"post": Vector3(4.2, 0.1, -20.5)},
 ]
+## The second wave: four armed watchers through the gate once the first pair is
+## down. Each carries the weapon it drops.
+const REINFORCEMENTS := ["sword_short", "dagger_iron", "sword_arming", "sword_short"]
+const REINFORCE_DELAY := 2.5
+const REINFORCE_POSTS := [
+	Vector3(-2.6, 0.1, -31.0), Vector3(-0.9, 0.1, -32.0),
+	Vector3(0.9, 0.1, -32.0), Vector3(2.6, 0.1, -31.0),
+]
+
 ## The one hit a watcher needs to land for the lesson: light, and telegraphed.
 const WATCHER_SOURCE := 90
 ## What a sword in this camp is allowed to bite: the watchers' physics layer.
@@ -107,9 +116,9 @@ const STEP_CARDS := {
 	},
 	3: {  # FREED
 		"kicker": "STEP 4  /  ARM YOURSELF",
-		"title": "The squad is out. Take their steel.",
-		"body": "Loot the cultist weapons with K - a picked-up blade goes straight into your hands. Then put down the two watchers at the gate: three stabs each.",
-		"keys": "K  loot        ·        LMB / RMB  fight        ·        E  revive",
+		"title": "The squad is out. Hold the gate.",
+		"body": "The squad arms itself from the dead - you do not have to loot anything. Put down the watchers at the gate: three stabs each, and four more come through when the first two fall.",
+		"keys": "LMB / RMB  fight        ·        E  revive",
 		"footnote": "The watchers are slow and light. Hold RMB to block, then stab.",
 	},
 	4: {  # ESCAPING
@@ -156,6 +165,8 @@ var _ally_engaged := false
 ## Steel taken by anyone, counted across the whole tutorial so a squadmate's
 ## pickup during the latches still counts once the fight starts.
 var _steel_taken := 0
+var _reinforcements := false
+var _reinforce_in := -1.0
 var _prompt_text := ""
 var _hint_text := ""
 
@@ -234,6 +245,11 @@ func _physics_process(delta: float) -> void:
 	if controller == null:
 		return
 	_rescuer_jog()
+	if _reinforce_in > 0.0:
+		_reinforce_in -= delta
+		if _reinforce_in <= 0.0:
+			_reinforce_in = -1.0
+			_spawn_reinforcements()
 	_drive_allies(delta)
 	controller.physics_step(delta)
 	_maintain_watchers(delta)
@@ -646,11 +662,11 @@ func _loot_owner(peer_id: int) -> int:
 		return -1
 	return controller.merc_for_peer(peer_id)
 
-func _on_pickup_taken(pickup) -> void:
+## A pickup left the floor (a squadmate's or the player's). Counted silently:
+## the escape no longer asks the player to loot anything.
+func _on_pickup_taken(_pickup) -> void:
 	_steel_taken += 1
 	sequencer.note_weapon_looted()
-	if hud != null and pickup != null:
-		hud.set_status("%s is in hand." % str(pickup.label_text()), 2.5)
 	if screen != null:
 		screen.refresh()
 
@@ -784,13 +800,11 @@ func _ally_take(actor, merc_id: int, pickup) -> void:
 	var result: Dictionary = loot.quick_loot(pickup, 0)
 	if not bool(result.get("ok", false)):
 		return
-	var auto: Dictionary = warband.auto_equip(merc_id, item_id)
-	# The roster is the truth, but the body in the yard still holds the old kit:
+	# Silent: the squad arming itself is the point, not a feed to read. The
+	# roster is the truth, but the body in the yard still holds the old kit -
 	# re-dress the live rig or a squadmate "carries" a sword it never draws.
+	warband.auto_equip(merc_id, item_id)
 	_refresh_rig(merc_id)
-	if bool(auto.get("ok", false)) and hud != null:
-		hud.set_status("%s takes the %s." % [warband.roster.name_of(merc_id),
-			State.ITEMS.get(item_id, {}).get("name", item_id)], 2.5)
 	actor.combat.stop()
 
 ## Re-apply a mercenary's current roster kit to the body standing in the scene.
@@ -858,22 +872,22 @@ func _build_watchers() -> void:
 func _maintain_watchers(delta: float) -> void:
 	if guards.is_empty():
 		return
-	# Watchers hunt whoever is closest once the squad is loose: a freed prisoner
-	# is a real threat, not a spectator.
-	var nearest = controller.active_body(1)
-	var best := INF
-	for body in bodies:
-		if not is_instance_valid(body) or not bool(body.get("alive")) or bool(body.get("downed")):
+	# Watchers hunt whoever is closest to each of them once the squad is loose: a
+	# freed prisoner is a real threat, not a spectator.
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
-		var distance: float = body.global_position.distance_to(guards[0].global_position) \
-			if is_instance_valid(guards[0]) else 0.0
-		if distance < best:
-			best = distance
-			nearest = body
-	if nearest != null and is_instance_valid(nearest):
-		for watcher in guards:
-			if is_instance_valid(watcher) and bool(watcher.get("alive")):
-				watcher.player = nearest
+		var nearest = null
+		var best := INF
+		for body in bodies:
+			if not is_instance_valid(body) or not bool(body.get("alive")) or bool(body.get("downed")):
+				continue
+			var distance: float = body.global_position.distance_to(watcher.global_position)
+			if distance < best:
+				best = distance
+				nearest = body
+		if nearest != null and is_instance_valid(nearest):
+			watcher.player = nearest
 	if cages_open_count() > 0 and not _watchers_awake:
 		_watchers_awake = true
 		for watcher in guards:
@@ -883,10 +897,37 @@ func _maintain_watchers(delta: float) -> void:
 
 func _on_watcher_defeated(enemy, _reward: int) -> void:
 	sequencer.note_guard_killed()
-	if hud != null and is_instance_valid(enemy):
-		hud.set_status("The watcher folds. One left." if sequencer.guards_down() == 1
-			else "Both watchers are down.", 3.0)
+	if is_instance_valid(enemy) and enemy.has_method("take_weapon_item"):
+		var item_id := str(enemy.take_weapon_item())
+		if not item_id.is_empty():
+			var pickup = loot.spawn(item_id, enemy.global_position + Vector3(0.3, 0.0, 0.2))
+			if pickup != null:
+				pickup.taken.connect(_on_pickup_taken)
+				_pickups.append(pickup)
+	# The gate answers the first pair: four armed watchers come through.
+	if watchers_down() >= 2 and not _reinforcements:
+		_reinforcements = true
+		_reinforce_in = REINFORCE_DELAY
+		if hud != null:
+			hud.set_status("The gate blackens: four armed watchers come through.", 3.0)
 	_update_hint()
+
+## The second wave: four watchers through the gate, each carrying the weapon it
+## will drop when it falls.
+func _spawn_reinforcements() -> void:
+	for index in REINFORCEMENTS.size():
+		var post: Vector3 = REINFORCE_POSTS[index % REINFORCE_POSTS.size()]
+		var watcher := WatcherScript.new()
+		watcher.name = "CampWatcher%d" % (guards.size() + 1)
+		watcher.mob_id = "hollow_warden"
+		add_child(watcher)
+		watcher.global_position = post
+		watcher.player = controller.active_body(1)
+		watcher.defeated.connect(_on_watcher_defeated)
+		watcher.attacked.connect(_on_watcher_attack)
+		watcher.arm(str(REINFORCEMENTS[index]))
+		watcher.mob_wake()
+		guards.append(watcher)
 
 ## A watcher's swing lands on the warband body it was hunting. The mob emits the
 ## blow; the scene applies it through the body's own guard, exactly like the
@@ -1160,11 +1201,8 @@ func _update_prompt() -> void:
 	if target != null:
 		text = "Hold E - revive %s" % warband.roster.name_of(int(controller.merc_of(target)))
 	else:
-		var pickup = _nearest_pickup()
 		var cage: int = _cage_in_reach()
-		if pickup != null:
-			text = "K - loot %s" % str(pickup.label_text())
-		elif cage >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
+		if cage >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
 			text = "G - cut the latch" if controller.merc_for_peer(1) == rescuer_id \
 				else "F5  -  take Corvin's body"
 		elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:

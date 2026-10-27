@@ -192,9 +192,9 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | --- | --- |
 | `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages clamped one body each, the rescuer's scripted jog and **the body you have to enter yourself** (F5 / `[ ]`, he stands still until then and no latch opens), **one latch per cage cut with G**, two antlered camp watchers, three weapon drops that snap into the soul's hands, the gate door (G) |
 | squad AI (`_drive_allies` in `cage_escape.gd`) | a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`, re-dressed with `refresh_gear`), then runs at the nearest watcher, aims and swings on layer 2; the player's own body is never driven, the rescuer joins in if the soul leaves him. Watchers hunt the nearest standing body, not just the soul. Kills or pickups that land while the cages are still being cut are refused as progress and then reconciled by `TutorialSequencer.note_battle_state()` when FREED begins, so a fast squad cannot dead-end the tutorial. |
-| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body |
+| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body. `arm(item_id)` puts a catalog blade on the rig's `hand_r` bone, and `take_weapon_item()` hands it back so the scene can drop it. |
 | `scripts/warband/tutorial_card.gd` (`TutorialCard`) | the modal step card: large title/body/keys, **pauses the tree** while open, one CONTINUE button (or G / Enter / Escape), restores the previous pause and mouse state on close |
-| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; `note_rescuer_taken()` (the objective changes from "F5 or [ ]" to the latch count only once the player is in the body), four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
+| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; six watchers in total (the first pair, then four armed reinforcements), no loot requirement in the objective; `note_rescuer_taken()` (the objective changes from "F5 or [ ]" to the latch count only once the player is in the body), four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
 | `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
 | `scenes/town_hub.tscn` + `scripts/warband/town_hub.gd` | dusk square, campfire, stash chest, altar, recruiter desk, gate; `interact_at(peer, point)` resolves the nearest service; one `scene_requested` door |
 | `scripts/warband/expedition_gate.gd` (`ExpeditionGate`) | `prompt`, `deploy_and_launch(ids)`, `return_to_town()` |
@@ -267,6 +267,10 @@ what exposed the engine fog trap above.
   under a 20 px prompt): the tutorial's per-beat hint comes from
   `TutorialSequencer.hint()`, the town names its screens and the counter you stand
   at, the field names the fight verbs.
+- The opening fight is six watchers: the first pair are bare, the four that come
+  through when they die each carry a catalog blade (`arm`) and drop it on death.
+  The squad loots silently - the HUD never announces a pickup and the objective
+  never asks for one.
 - The cage tutorial raises a `TutorialCard` on each new beat. The card is modal
   and pauses the tree (`PROCESS_MODE_ALWAYS` so its own button still works), shows
   the lesson at 34/20/24 px, and closes on CONTINUE / G / Enter / Escape. A card

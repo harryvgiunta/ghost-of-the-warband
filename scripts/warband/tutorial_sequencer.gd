@@ -26,10 +26,9 @@ enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING, TOWN }
 
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
-## Gate watchers that have to fall before the escape is on.
-const GUARD_COUNT := 2
-## Cultist steel that has to be in hand: one piece is enough to arm a soul.
-const REQUIRED_WEAPONS := 1
+## Gate watchers that have to fall before the escape is on: the first pair and
+## the four armed ones that come through when they die.
+const GUARD_COUNT := 6
 
 ## The loose prisoner's mercenary id, set through `begin()`.
 var rescuer_merc_id := -1
@@ -96,8 +95,7 @@ func objective() -> String:
 				return "Corvin is through. Take his body - F5 or [ ]."
 			return "Cut each latch with G   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
-			return "Take the cultist steel (K) and put down the watchers   steel %d  watchers %d/%d" \
-				% [_weapons, _guards_down, GUARD_COUNT]
+			return "Put down the watchers   %d/%d" % [_guards_down, GUARD_COUNT]
 		State.ESCAPING:
 			return "The way is clear. Walk into the gate and press G."
 		State.TOWN:
@@ -118,7 +116,7 @@ func hint() -> String:
 				return "F5 or [ ] - take Corvin's body   ·   then G at a cage to cut its latch"
 			return "G - cut this cage's latch   ·   walk to each cage"
 		State.FREED:
-			return "K - pick up the steel (it goes straight into your hands)   ·   LMB / RMB - fight   ·   E - revive"
+			return "LMB / RMB - fight   ·   E - revive   ·   the squad arms itself"
 		State.ESCAPING:
 			return "Walk to the gate and press G - leave for town"
 		State.TOWN:
@@ -242,7 +240,7 @@ func note_gate_reached() -> bool:
 func _check_escape() -> void:
 	if _state != State.FREED:
 		return
-	if _guards_down >= GUARD_COUNT and _weapons >= REQUIRED_WEAPONS:
+	if _guards_down >= GUARD_COUNT:
 		_transition(State.ESCAPING)
 	else:
 		announce()
