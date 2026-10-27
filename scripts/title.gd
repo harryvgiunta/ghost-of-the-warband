@@ -95,28 +95,28 @@ func _build() -> void:
 	blurb.size = Vector2(462,48)
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.add_theme_color_override("font_shadow_color",Color("081418"))
-	start_button = _button(frame,"START NEW GAME",Vector2(28,340),Vector2(462,58))
+	start_button = _button(frame,"START NEW GAME",Vector2(28,316),Vector2(462,58))
 	start_button.add_theme_font_size_override("font_size",19)
 	start_button.pressed.connect(_start_new_game)
-	_load_button = _button(frame,"LOAD SAVED GAME",Vector2(28,412),Vector2(462,58))
+	_load_button = _button(frame,"LOAD SAVED GAME",Vector2(28,388),Vector2(462,58))
 	_load_button.add_theme_font_size_override("font_size",19)
 	_load_button.pressed.connect(_load_saved_game)
-	host_world_button = _button(frame,"HOST OPEN WORLD",Vector2(28,484),Vector2(462,58))
+	host_world_button = _button(frame,"HOST OPEN WORLD",Vector2(28,460),Vector2(462,58))
 	host_world_button.add_theme_font_size_override("font_size",19)
 	host_world_button.pressed.connect(_host_open_world)
-	join_button = _button(frame,"JOIN GAME",Vector2(28,556),Vector2(462,58))
+	join_button = _button(frame,"JOIN GAME",Vector2(28,532),Vector2(462,58))
 	join_button.add_theme_font_size_override("font_size",19)
 	join_button.pressed.connect(_open_join)
 	# Ghost of the Warband: the possession campaign, a separate persistent warband
 	# with its own save, entered from the cages or resumed in the town.
-	var warband_button := _button(frame,"GHOST OF THE WARBAND",Vector2(28,628),Vector2(462,58))
+	var warband_button := _button(frame,"GHOST OF THE WARBAND",Vector2(28,604),Vector2(462,54))
 	warband_button.add_theme_font_size_override("font_size",18)
 	warband_button.pressed.connect(_enter_warband)
-	_status = _label(frame,"",Vector2(28,616),13,TEAL)
+	_status = _label(frame,"",Vector2(28,662),13,TEAL)
 	_status.size = Vector2(462,44)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Menu / Save / Quit",Vector2(28,668),11,MUTED)
-	footer.size = Vector2(462,40)
+	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Menu / Save / Quit",Vector2(28,684),10,MUTED)
+	footer.size = Vector2(462,28)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	var ranger := Label.new()
