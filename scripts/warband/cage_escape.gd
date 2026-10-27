@@ -154,6 +154,9 @@ func _ready() -> void:
 	if not caged_ids.is_empty():
 		controller.direct(1, caged_ids[0])
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		flow.bind(self)
 
 func _process(delta: float) -> void:
 	if controller == null:

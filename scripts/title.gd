@@ -107,6 +107,11 @@ func _build() -> void:
 	join_button = _button(frame,"JOIN GAME",Vector2(28,556),Vector2(462,58))
 	join_button.add_theme_font_size_override("font_size",19)
 	join_button.pressed.connect(_open_join)
+	# Ghost of the Warband: the possession campaign, a separate persistent warband
+	# with its own save, entered from the cages or resumed in the town.
+	var warband_button := _button(frame,"GHOST OF THE WARBAND",Vector2(28,628),Vector2(462,58))
+	warband_button.add_theme_font_size_override("font_size",18)
+	warband_button.pressed.connect(_enter_warband)
 	_status = _label(frame,"",Vector2(28,616),13,TEAL)
 	_status.size = Vector2(462,44)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -121,6 +126,11 @@ func _build() -> void:
 	ranger.add_theme_color_override("font_color",Color(0.35,0.55,0.53,0.16))
 	add_child(ranger)
 	_build_join_layer()
+
+func _enter_warband() -> void:
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		flow.enter_warband()
 
 func _build_join_layer() -> void:
 	_join_layer = Control.new()

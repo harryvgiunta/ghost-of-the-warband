@@ -56,6 +56,7 @@ func run() -> void:
 	game.set_sparring(false)
 	game.set_choreography(false)
 
+	await check_brand()
 	await check_bubble()
 	await check_passive_fight()
 	check_loot()
@@ -100,6 +101,31 @@ func check_spawn() -> void:
 		check(actor.max_health == Contracts.BASE_MAX_HEALTH, "identical base health")
 	check(distinct_hands.size() >= 4, "the line carries more than one kind of weapon")
 	check(game.controller.active_body(1) != null, "the local soul starts inside a body")
+
+# --- branded skill ----------------------------------------------------------
+
+func check_brand() -> void:
+	check(game.branded != null, "the scene owns a brand runner")
+	var payload: Dictionary = game.branded.brand()
+	check(not payload.is_empty(), "the starting weapon carries a sigil")
+	check(str(payload.get("ability", "")) == "rending_strike",
+		"a branded sword grants Rending Strike (%s)" % str(payload.get("ability", "")))
+	var body = game.controller.active_body(1)
+	var target = game.groups[1][0]
+	var home: Vector3 = target.global_position
+	target.global_position = body.global_position + (-body.global_basis.z) * 1.6
+	await process_frame
+	var before: float = target.health
+	var ready: Dictionary = game.branded.can_activate()
+	check(bool(ready.get("ok", false)), "the sigil is ready (%s)" % str(ready.get("reason", "")))
+	check(game.branded.activate(), "pressing R fires the sigil")
+	await create_timer(0.45).timeout
+	check(target.health < before, "the branded strike wounds the body in front")
+	check(game.branded.cooldown_left() > 0.0, "and the sigil goes on cooldown")
+	check(game.branded.can_activate()["ok"] == false, "a second press is refused")
+	# Put the body back on its post so the bubble checks start from the layout.
+	target.global_position = home
+	await create_timer(0.5).timeout
 
 # --- bubble -----------------------------------------------------------------
 
@@ -164,7 +190,7 @@ func check_passive_fight() -> void:
 	check(swing_seen, "and still swings, so it does not read as frozen")
 	# Zero is legitimate (a brawl that blocks every exchange trades nothing), but
 	# the 10% cap must keep six seconds of fighting from shredding a body.
-	check(damage_taken < 40.0, "10% damage cannot shred a body in six seconds (%.1f)" % damage_taken)
+	check(damage_taken < 40.0, "10%% damage cannot shred a body in six seconds (%.1f)" % damage_taken)
 	var standing := 0
 	for body in watched:
 		if is_instance_valid(body) and bool(body.get("alive")) and not bool(body.get("downed")):

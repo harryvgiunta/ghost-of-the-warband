@@ -25,6 +25,10 @@ const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
+const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
+const WavesScript = preload("res://scripts/warband/enemy_waves.gd")
+const SessionScript = preload("res://scripts/warband/warband_session.gd")
+const LootRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -40,6 +44,17 @@ const STASH_POINT := Vector3(4.0, 0.0, 18.0)
 const ALTAR_POINT := Vector3(-4.0, 0.0, 18.0)
 const LOOT_REACH := 2.6
 const INTERACT_REACH := 3.0
+const TOWN_SCENE := "res://scenes/town_hub.tscn"
+## Three waves and a breathing gap: enough to read as an expedition, short enough
+## that the loop can be walked in a few minutes.
+const MAX_WAVES := 3
+const WAVE_GAP := 2.5
+## What a dead cultist leaves behind, in rotation.
+const GUARD_LOOT := ["sword_arming", "shield_kite", "armor_mail_chest", "ring_blood", "bow_recurve"]
+
+## The scene asks to be replaced (town after an expedition, the arena after a
+## deployment). The game-flow owner connects this; the scene never loads itself.
+signal scene_requested(path: String)
 
 ## The eight trial mercenaries: identical bodies, different gear. Two of them
 ## carry a legal off hand for the human souls, the rest are line troops.
@@ -73,6 +88,7 @@ var paperdoll
 var altar
 var loot
 var revive
+var branded
 var stash_crate: Node3D
 var bodies: Array = []
 var brains: Array = []
@@ -88,6 +104,16 @@ var _loot_spawned := false
 ## a test - or an admin - makes the field deterministic.
 var sparring := true
 var bot_mercs: Array[int] = []
+## A real battle (deployed line, cultist waves) instead of the sandbox brawls.
+var expedition := false
+var waves
+var loot_run
+var session
+var _next_wave_elapsed := -1.0
+var _guard_loot_cursor := 0
+## Set while the end-of-battle loot run is walking the field.
+var _loot_running := false
+var _roster_sync_elapsed := 0.0
 
 func _ready() -> void:
 	warband = get_node_or_null("/root/Warband")
@@ -95,6 +121,9 @@ func _ready() -> void:
 		push_error("AdminArena needs the Warband autoload")
 		return
 	_seed_warband()
+	# A deployment line in the warband means this is an expedition; an empty one
+	# means the sandbox. The town's gate is what writes the line.
+	expedition = not warband.deployed_merc_ids().is_empty()
 	world = WorldScript.new()
 	world.name = "Arena"
 	add_child(world)
@@ -112,8 +141,12 @@ func _ready() -> void:
 	controller.auto_simulate = false
 	add_child(controller)
 	controller.setup(warband, camera, self)
-	bodies = controller.spawn_mercenaries(_spawn_points(), true)
-	_layout_groups()
+	if expedition:
+		bodies = controller.spawn_mercenaries(_muster_points(), true)
+		_layout_muster()
+	else:
+		bodies = controller.spawn_mercenaries(_spawn_points(), true)
+		_layout_groups()
 	_wire_bubble()
 	_wire_brains()
 	_wire_crawl()
@@ -128,6 +161,9 @@ func _ready() -> void:
 	_spawn_battlefield_loot()
 	_build_services()
 	_build_ui()
+	branded = BrandedScript.new()
+	branded.name = "Branded"
+	add_child(branded)
 	controller.possession_changed.connect(_on_possession_changed)
 	controller.transfer_refused.connect(_on_transfer_refused)
 	controller.possession_released.connect(_on_possession_released)
@@ -135,8 +171,59 @@ func _ready() -> void:
 	if first > 0:
 		controller.direct(1, first)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		flow.bind(self)
+	_boot_session()
 	print("ADMIN_ARENA_READY bodies=%d groups=%d bubble=%.0f" % [bodies.size(), groups.size(),
 		bubble.bubble_radius if bubble != null else 0.0])
+
+## Two friends on one field. A warband battle is launched with
+## `--warband-host <port>` on the host and `--warband-join <address> <port>` on the
+## guest; both machines must load the same warband save, exactly as the arena's
+## seats already require a shared roster. The session owns the wire, this scene
+## keeps owning the field.
+func _boot_session() -> void:
+	var args := OS.get_cmdline_user_args()
+	var host_port := _arg_after(args, "--warband-host")
+	var join_at := args.find("--warband-join")
+	if host_port <= 0 and join_at < 0:
+		return
+	session = SessionScript.new()
+	session.name = "WarbandSession"
+	add_child(session)
+	session.setup(controller, warband)
+	session.peer_joined.connect(func(peer_id: int):
+		print("ADMIN_ARENA_PEER joined=%d" % peer_id)
+		_update_humans())
+	session.peer_left.connect(func(peer_id: int):
+		print("ADMIN_ARENA_PEER left=%d" % peer_id)
+		_update_humans())
+	session.ownership_changed.connect(func(_map: Dictionary): _update_humans())
+	if host_port > 0:
+		session.host(host_port, "Host")
+		if hud != null:
+			hud.set_status("Hosting a warband battle on UDP %d" % host_port, 6.0)
+		print("ADMIN_ARENA_SESSION host port=%d" % host_port)
+		return
+	var address := str(args[join_at + 1]) if join_at + 1 < args.size() else "127.0.0.1"
+	var port := int(args[join_at + 2]) if join_at + 2 < args.size() else 7779
+	session.join(address, port, "Guest")
+	if hud != null:
+		hud.set_status("Joining %s:%d" % [address, port], 6.0)
+	print("ADMIN_ARENA_SESSION join address=%s port=%d" % [address, port])
+
+func _arg_after(args: PackedStringArray, flag: String) -> int:
+	var index := args.find(flag)
+	if index < 0 or index + 1 >= args.size():
+		return 0
+	return int(args[index + 1])
+
+func _exit_tree() -> void:
+	if session != null:
+		session.leave()
+	if warband != null:
+		warband.save_state()
 
 func _physics_process(delta: float) -> void:
 	if controller == null:
@@ -151,14 +238,44 @@ func _physics_process(delta: float) -> void:
 		var foe = pair[1]
 		if is_instance_valid(body) and is_instance_valid(foe) and Damage.is_passive(body):
 			body.combat.set_aim(foe.get_aim_position())
+	if expedition:
+		if waves != null:
+			waves.step(delta, bodies)
+		if _next_wave_elapsed > 0.0:
+			_next_wave_elapsed -= delta
+			if _next_wave_elapsed <= 0.0:
+				_next_wave_elapsed = -1.0
+				_start_wave(int(waves.wave()) + 1)
 	for brain in brains:
 		if is_instance_valid(brain):
 			brain.step(delta)
 	controller.physics_step(delta)
+	_sync_roster(delta)
 	_update_humans()
 	_tick_revive(delta)
 	_update_prompt()
 	_check_battle_end(delta)
+
+## Mirror the live bodies into the roster, so the warband screen shows real
+## health and downed state during the battle and the next scene loads the truth.
+func _sync_roster(delta: float) -> void:
+	_roster_sync_elapsed += delta
+	if _roster_sync_elapsed < 0.4:
+		return
+	_roster_sync_elapsed = 0.0
+	for actor in bodies:
+		if not is_instance_valid(actor):
+			continue
+		var merc_id: int = controller.merc_of(actor)
+		if merc_id <= 0:
+			continue
+		var state := Contracts.HealthState.ALIVE
+		if bool(actor.get("downed")):
+			state = Contracts.HealthState.DOWNED
+		elif not bool(actor.get("alive")):
+			state = Contracts.HealthState.DEAD
+		warband.roster.set_health(merc_id, float(actor.get("health")))
+		warband.roster.set_state(merc_id, state)
 
 func _process(_delta: float) -> void:
 	var panel_open: bool = _panel_open()
@@ -196,6 +313,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		KEY_B:
 			_end_battle("You call the field.")
+			get_viewport().set_input_as_handled()
+		KEY_R:
+			_activate_brand()
+			get_viewport().set_input_as_handled()
+		KEY_ENTER, KEY_KP_ENTER:
+			_request_return()
 			get_viewport().set_input_as_handled()
 
 ## The revive key needs to win over the arena's quick-step binding, so the key
@@ -264,6 +387,82 @@ func _apply_bot_flags() -> void:
 	for merc_id in bot_mercs:
 		controller.set_bot(int(merc_id), sparring)
 
+## Where a deployed line musters: a short rank in front of the altar, so the
+## whole warband stands inside one bubble at the start of the battle.
+func _muster_points() -> Array[Vector3]:
+	var points: Array[Vector3] = []
+	for index in maxi(1, warband.deployed_merc_ids().size()):
+		points.append(Vector3(-5.0 + 2.4 * index, 0.0, 16.0))
+	return points
+
+func _layout_muster() -> void:
+	var spots := _muster_points()
+	for index in bodies.size():
+		var actor = bodies[index]
+		if not is_instance_valid(actor):
+			continue
+		var spot: Vector3 = spots[index % spots.size()]
+		actor.global_position = spot + Vector3(0, 0.1, 0)
+		actor.spawn_point = spot
+		actor.bounds = 31.0
+		var merc_id: int = controller.merc_of(actor)
+		if merc_id > 0:
+			controller.set_bot(merc_id, false)
+
+## The cult half of the field: guards walk in from the far treeline.
+func _wave_points() -> Array[Vector3]:
+	var points: Array[Vector3] = []
+	for index in 8:
+		var x := -21.0 + float(index % 4) * 14.0
+		var z := -18.0 - float(index / 4) * 4.0
+		points.append(Vector3(x, 0.0, z))
+	return points
+
+func _wire_waves() -> void:
+	waves = WavesScript.new()
+	waves.name = "Waves"
+	add_child(waves)
+	waves.setup(controller, self, _wave_points(), Callable(self, "warband_bodies"))
+	waves.wave_started.connect(_on_wave_started)
+	waves.wave_cleared.connect(_on_wave_cleared)
+	_start_wave(0)
+
+## The warband as the cult sees it (EnemyWaves asks for this when stepped empty).
+func warband_bodies() -> Array:
+	var out: Array = []
+	for actor in bodies:
+		if is_instance_valid(actor) and bool(actor.get("alive")):
+			out.append(actor)
+	return out
+
+func _start_wave(index: int) -> void:
+	if waves == null:
+		return
+	var spawned: Array = waves.start_wave(index)
+	for guard in spawned:
+		if is_instance_valid(guard):
+			guard.killed.connect(_on_guard_killed.bind(guard))
+
+func _on_wave_started(index: int, count: int) -> void:
+	if hud != null:
+		hud.set_status("Wave %d of %d - %d cultists" % [index + 1, MAX_WAVES, count], 3.0)
+
+func _on_wave_cleared(index: int) -> void:
+	if index + 1 >= MAX_WAVES:
+		_end_battle("The expedition is cleared.")
+		return
+	_next_wave_elapsed = WAVE_GAP
+	if hud != null:
+		hud.set_status("Wave %d broken. They are coming again." % (index + 1), WAVE_GAP)
+
+## A dead cultist leaves its kit on the ground for the survivors to walk to.
+func _on_guard_killed(_slot: int, _source: int, guard) -> void:
+	if not is_instance_valid(guard):
+		return
+	var item_id := str(GUARD_LOOT[_guard_loot_cursor % GUARD_LOOT.size()])
+	_guard_loot_cursor += 1
+	loot.spawn(item_id, guard.global_position + Vector3(0.35, 0.0, 0.35))
+
 func _player_mercenary(index: int) -> int:
 	var ids: Array = controller.living_merc_ids()
 	var slot := SQUAD_SIZE * 2 + index
@@ -278,6 +477,8 @@ func _wire_bubble() -> void:
 	bubble.setup()
 	for actor in bodies:
 		bubble.track(actor)
+	if expedition:
+		_wire_waves()
 	_update_humans()
 
 func _update_humans() -> void:
@@ -398,8 +599,35 @@ func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 	if hud != null and peer_id == 1:
 		var actor = controller.active_body(1)
 		hud.set_body(actor, warband.roster.name_of(merc_id), merc_id)
+	_attach_brand()
 	_update_humans()
 	_refresh_marker()
+
+## The sigil belongs to the item, not the body: every time the soul changes
+## hands, the runner is re-bound to whatever weapon that mercenary actually holds.
+func _attach_brand() -> void:
+	if branded == null:
+		return
+	var actor = controller.active_body(1)
+	var merc_id: int = controller.merc_for_peer(1)
+	if actor == null or merc_id <= 0:
+		branded.attach(null, {})
+		return
+	var main_id: String = str(warband.roster.equipped_of(merc_id).get("main", ""))
+	branded.attach(actor, warband.cruor.brand_of(main_id))
+
+func _activate_brand() -> void:
+	if branded == null:
+		return
+	var status: Dictionary = branded.can_activate()
+	if not bool(status.get("ok", false)):
+		if hud != null:
+			hud.set_status(str(status.get("reason", "No brand.")), 2.0)
+		return
+	if branded.activate():
+		var payload: Dictionary = branded.brand()
+		if hud != null:
+			hud.set_status(str(payload.get("ability", "")), 1.5)
 
 func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
 	if hud != null:
@@ -530,6 +758,11 @@ func _update_prompt() -> void:
 		if stash_crate != null and actor.global_position.distance_to(stash_crate.global_position) <= INTERACT_REACH:
 			hud.set_prompt("G - shared stash")
 			return
+	if branded != null:
+		var ready: Dictionary = branded.can_activate()
+		if bool(ready.get("ok", false)):
+			hud.set_prompt("R - %s" % str(branded.brand().get("ability", "")))
+			return
 	hud.set_prompt("")
 
 # --- battle ----------------------------------------------------------------
@@ -537,7 +770,7 @@ func _update_prompt() -> void:
 ## The battle is over when no brawler is left standing. The survivors walk the
 ## field and the vacuum takes everything into the shared stash.
 func _check_battle_end(delta: float) -> void:
-	if _battle_over or groups.is_empty():
+	if _battle_over or expedition or groups.is_empty():
 		return
 	_check_elapsed += delta
 	if _check_elapsed < 0.5:
@@ -565,11 +798,41 @@ func _end_battle(reason: String) -> void:
 	for body in bodies:
 		if is_instance_valid(body) and bool(body.get("alive")) and not bool(body.get("downed")):
 			survivors.append(body)
+	# A real expedition ends with the survivors physically walking the field
+	# before the vacuum books what they pick up; the sandbox books it at once.
+	if expedition and not _loot_running and not loot.pickups().is_empty():
+		_loot_running = true
+		loot_run = LootRunScript.new()
+		loot_run.name = "LootRun"
+		add_child(loot_run)
+		loot_run.setup(warband, loot, survivors)
+		loot_run.finished.connect(_on_loot_run_finished.bind(survivors))
+		loot_run.run(loot.pickups())
+		if hud != null:
+			hud.set_status("%s  The survivors are looting the field." % reason, 6.0)
+		return
 	var sweep: Dictionary = loot.sweep(survivors)
 	if hud != null:
 		hud.set_status("%s  %d items gathered." % [reason, int(sweep.get("collected", 0))], 6.0)
 	if screen != null:
 		screen.refresh()
+
+func _on_loot_run_finished(collected: int, survivors: Array) -> void:
+	_loot_running = false
+	var sweep: Dictionary = loot.sweep(survivors)
+	if hud != null:
+		hud.set_status("%d items gathered, %d left on the field." % [
+			collected + int(sweep.get("collected", 0)), loot.pickups().size()], 6.0)
+	if screen != null:
+		screen.refresh()
+
+## Leave the field: the town after a battle, a refusal before it.
+func _request_return() -> void:
+	if not _battle_over:
+		if hud != null:
+			hud.set_status("Finish the field first.", 2.0)
+		return
+	scene_requested.emit(TOWN_SCENE)
 
 func _refresh_marker() -> void:
 	if hud != null:
@@ -600,3 +863,6 @@ func _seed_warband() -> void:
 	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 25)
 	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 10)
 	warband.cruor.add(Contracts.CruorTier.T3_COAGULATED_CRUOR, 5)
+	# One brand on the line, so the new verb is discoverable on the first body a
+	# player is handed and the altar has something to reroll.
+	warband.cruor.brand("sword_short", Contracts.CruorTier.T3_COAGULATED_CRUOR)

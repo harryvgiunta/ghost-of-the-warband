@@ -13,6 +13,7 @@ PlayerState="*res://scripts/player_state.gd"
 Session="*res://scripts/session.gd"
 NetCache="*res://scripts/net_cache.gd"
 Warband="*res://scripts/warband/warband_state.gd"
+GameFlow="*res://scripts/warband/game_flow.gd"
 
 [display]
 window/size/viewport_width=1440

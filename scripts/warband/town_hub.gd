@@ -67,6 +67,10 @@ const TOWN_SPARES := [
 	"dagger_makeshift", "sword_makeshift",
 ]
 
+## The town's one door: the expedition gate asks to be replaced and the scene
+## forwards it, so the game-flow owner binds a single signal per scene.
+signal scene_requested(path: String)
+
 var warband: WarbandState
 var camera: Camera3D
 var controller
@@ -105,6 +109,9 @@ func _ready() -> void:
 	controller.possession_released.connect(_on_possession_released)
 	_enter_first_body()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		flow.bind(self)
 	print("TOWN_HUB_READY bodies=%d gold=%d" % [bodies.size(), warband.gold()])
 
 func _physics_process(delta: float) -> void:
@@ -332,6 +339,8 @@ func _build_services() -> void:
 	gate.position = GATE_POINT
 	add_child(gate)
 	gate.setup(warband, controller)
+	# The square has exactly one door, whatever asks to leave by it.
+	gate.scene_requested.connect(func(path: String): scene_requested.emit(path))
 
 func _build_stash_chest() -> Node3D:
 	var chest := Node3D.new()

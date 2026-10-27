@@ -102,6 +102,11 @@ func step(delta: float, bodies: Array = [], tick: int = 0) -> void:
 	_reap()
 	_refresh_cleared()
 
+## The living cultists, in spawn order, so a scene can act on them (loot, waves,
+## an admin kill switch) without reaching into the spawner.
+func guards() -> Array[CultistGuard]:
+	return _live_guards()
+
 ## The array a body should be stepped with while guards are on the field:
 ## the opponents first, then the cultists, so both factions separate properly.
 func field(bodies: Array = []) -> Array:
