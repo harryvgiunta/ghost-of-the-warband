@@ -61,14 +61,18 @@ const CAGE_CLAMP_RADIUS := 0.95
 ## How far the cage doors rise when the latches go.
 const CAGE_BAR_LIFT := 2.6
 const BAR_LIFT_SPEED := 2.2
-## The camp's nine torches: two at the cages, two at the mouth, the rest down the
-## long flanks and the walk between them.
+## The camp's torches: at the cages, at the mouth, and round the clearing's rim so
+## 60 x 68 m of ground is a lit clearing in the wood rather than a black field.
 const CAMP_TORCHES := [
 	[Vector3(-10.5, 0, 4.2), 0.9], [Vector3(10.5, 0, 4.2), 0.9],
 	[Vector3(-5.0, 0, -38.5), 1.0], [Vector3(5.0, 0, -38.5), 1.0],
 	[Vector3(0, 0, -12.0), 0.75], [Vector3(-14.0, 0, -30.0), 0.8],
 	[Vector3(14.0, 0, -30.0), 0.8], [Vector3(-14.0, 0, 16.0), 0.8],
 	[Vector3(14.0, 0, 16.0), 0.8],
+	[Vector3(-27.0, 0, 25.0), 0.85], [Vector3(27.0, 0, 25.0), 0.85],
+	[Vector3(-27.0, 0, 8.0), 0.85], [Vector3(27.0, 0, 8.0), 0.85],
+	[Vector3(-27.0, 0, -10.0), 0.85], [Vector3(27.0, 0, -10.0), 0.85],
+	[Vector3(-20.0, 0, -36.0), 0.85], [Vector3(20.0, 0, -36.0), 0.85],
 ]
 
 ## The two gate watchers: the antlered hollow warden silhouette, thinned in

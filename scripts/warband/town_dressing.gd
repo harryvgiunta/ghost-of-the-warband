@@ -417,9 +417,9 @@ static func _build_lanterns(root: Root, mats: Dictionary, own: Dictionary) -> vo
 		light.name = "LanternLight"
 		light.position = lamp
 		light.light_color = Color(1.0, 0.76, 0.44)
-		light.light_energy = 2.0
-		light.omni_range = 9.5
-		light.omni_attenuation = 1.5
+		light.light_energy = 3.2
+		light.omni_range = 15.0
+		light.omni_attenuation = 1.1
 		light.shadow_enabled = false
 		light.flicker = 0.09
 		node.add_child(light)
