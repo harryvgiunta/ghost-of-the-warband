@@ -11,7 +11,7 @@ const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 
-const INVENTORY_CAPACITY := 15
+const INVENTORY_CAPACITY := 60
 const STASH_CAPACITY := 20
 ## A new-game purse large enough to buy any keeper stock outright.
 const STARTING_CREDITS := 99999
@@ -591,6 +591,89 @@ func item_compact_stats(id: String) -> String:
 		var jewelry_text := TrinketStats.effect_summary(id)
 		parts.append(jewelry_text if not jewelry_text.is_empty() else "NO EFFECT")
 	return "  •  ".join(parts)
+
+## Hover card lines. Type / Speed / Damage are the three fixed rows; extras are
+## every remaining stat row, in the same order the inspector shows them.
+func item_type_text(id: String) -> String:
+	return item_type_line(id)
+
+func item_speed_text(id: String) -> String:
+	var seconds := item_attack_seconds(id)
+	if seconds <= 0.0:
+		return "—"
+	var verb := "draw" if item_category(id) == "bow" else ("stab" if item_kind(id) == "dagger" else "swing")
+	return "%.1f s %s" % [seconds,verb]
+
+func item_damage_text(id: String) -> String:
+	var damage := item_damage_range(id)
+	if damage == Vector2i.ZERO:
+		return "—"
+	return "%d–%d" % [damage.x,damage.y]
+
+func item_extra_rows(id: String) -> Array:
+	var rows: Array = []
+	for row: Dictionary in item_stat_rows(id):
+		if str(row.get("label","")) in ["DAMAGE","ATTACK SPEED"]:
+			continue
+		rows.append(row)
+	return rows
+
+## The paperdoll's summary panel. Base pools mirror `main.MAX_HEALTH` and
+## `Stamina.MAX`; keep them in step if either pool changes.
+const BASE_HEALTH := 100
+const BASE_STAMINA := 1000
+
+func main_attack_text() -> String:
+	var main := main_item()
+	if main.is_empty():
+		return "—"
+	var damage := item_damage_range(main)
+	if damage == Vector2i.ZERO:
+		return "—"
+	var stats := trinket_stats()
+	var key := "ranged_damage" if item_category(main) == "bow" else "melee_damage"
+	var scale := TrinketStats.damage_scale(stats,key)
+	return "%d–%d" % [int(round(float(damage.x) * scale)),int(round(float(damage.y) * scale))]
+
+func defense_percent() -> int:
+	return int(round(TrinketStats.damage_reduction(body_reduction(),trinket_stats()) * 100.0))
+
+func head_guard_percent() -> int:
+	return int(round(TrinketStats.damage_reduction(head_reduction(),trinket_stats()) * 100.0))
+
+func life_value() -> int:
+	return BASE_HEALTH + int(round(float(trinket_stats().get("health",0.0))))
+
+func stamina_value() -> int:
+	return BASE_STAMINA + int(round(float(trinket_stats().get("stamina",0.0))))
+
+## Every worn bonus that actually has a value, for the summary panel. Armor
+## guard is folded into the two channel rows; the trinket guard is already part
+## of those channels.
+func kit_bonus_rows() -> Array:
+	var stats := trinket_stats()
+	var rows: Array = []
+	rows.append({"label":"HEAD GUARD", "value":"%d%%" % head_guard_percent()})
+	rows.append({"label":"BODY GUARD", "value":"%d%%" % defense_percent()})
+	var rows_by_key := [
+		["melee_damage","MELEE DAMAGE",1.0], ["ranged_damage","RANGED DAMAGE",1.0],
+		["throw_damage","THROWN DAMAGE",1.0], ["attack_speed","ATTACK SPEED",1.0],
+		["move_speed","MOVE SPEED",1.0], ["stamina_regen","STAMINA REGEN",1.0],
+		["stagger","STAGGER RESIST",1.0], ["gold_find","KILL GOLD",1.0],
+		["cooldown","SKILL COOLDOWN",-1.0],
+	]
+	for entry: Array in rows_by_key:
+		var value := float(stats.get(str(entry[0]),0.0)) * float(entry[2])
+		if absf(value) < 0.0001:
+			continue
+		rows.append({"label":str(entry[1]), "value":"%+d%%" % int(round(value * 100.0))})
+	var heal := float(stats.get("heal_on_kill",0.0))
+	if heal > 0.0:
+		rows.append({"label":"ON KILL", "value":"+%d life" % int(round(heal))})
+	var stamina_gain := float(stats.get("stamina_on_kill",0.0))
+	if stamina_gain > 0.0:
+		rows.append({"label":"ON KILL", "value":"+%d stamina" % int(round(stamina_gain))})
+	return rows
 
 func can_equip_in(id: String, slot: String) -> bool:
 	return EquipmentRules.allowed(_item(id), slot)
