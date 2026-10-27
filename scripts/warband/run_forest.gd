@@ -159,11 +159,33 @@ class Path extends RefCounted:
 ## Builds the lane under `parent` (the scene root) and returns the layout:
 ## `{root, lane, length, width, torches, spawn_posts, arch, clearings, start,
 ## path, stats}`. Nothing here is ever rebuilt.
-static func build(parent: Node3D) -> Dictionary:
+##
+## `options` is how the lane is *placed* in the one world instead of standing on
+## its own:
+##   * `offset` - the whole lane moves as one: its first waypoint lands where the
+##     caller wants the camp's mouth, and every prop, torch, wall and collider
+##     moves with it, because they are all laid out in lane space.
+##   * `ground` (default true) - the lane's own floor, field and catch floor. The
+##     world scene owns one floor for the whole map, so it asks for none.
+##   * `closed_start` / `closed_end` (default true) - the walls that cap the lane
+##     at both ends. In the world the camp clearing is at one end and the town at
+##     the other, so neither end is walled: the lane *is* the way between them.
+##   * `arch` (default true) - the village gate and its threshold stones at the
+##     far end. The world's town builds its own gate at the edge of the square,
+##     so the lane ends where the settlement begins instead of doubling it.
+static func build(parent: Node3D, options: Dictionary = {}) -> Dictionary:
 	if parent == null:
 		return {}
+	var offset: Vector3 = options.get("offset", Vector3.ZERO)
+	var shifted := PackedVector3Array()
+	for point in LANE_POINTS:
+		shifted.append(point + offset)
 	var path := Path.new()
-	path.setup(PackedVector3Array(LANE_POINTS))
+	path.setup(shifted)
+	var with_ground := bool(options.get("ground", true))
+	var closed_start := bool(options.get("closed_start", true))
+	var closed_end := bool(options.get("closed_end", true))
+	var with_arch := bool(options.get("arch", true))
 
 	var root := Root.new()
 	root.name = "RunForest"
@@ -178,18 +200,22 @@ static func build(parent: Node3D) -> Dictionary:
 	root.pursuer_posts = _pursuer_posts(path)
 	root.clearing_posts = _clearing_posts(path)
 
-	var style := _style()
+	var style := night_style()
 	var environment: Dictionary = WorldEnvironmentKit.build(root, style)
 	root.stats["sun"] = environment.get("sun") != null
 	root.solids = _solids(root)
-	_build_ground(root, style, path)
-	_build_lane_walls(root, path)
+	if with_ground:
+		_build_ground(root, style, path)
+	else:
+		_build_catch_floor(root, path)
+	_build_lane_walls(root, path, closed_start, closed_end)
 	_build_trees(root, style, path)
 	_build_bushes(root, style, path)
 	_build_grass(root, style, path)
 	_build_rocks(root, path)
 	_build_torches(root, path)
-	_build_arch(root, path)
+	if with_arch:
+		_build_arch(root, path)
 	_build_hanging(root, path)
 	_build_omens(root, path)
 	_build_fires(root, path)
@@ -228,7 +254,11 @@ static func build(parent: Node3D) -> Dictionary:
 ## the depth fog replaced by a thick exponential haze the torches have to cut
 ## through. EnvironmentKit writes the density after the fog mode, which is the
 ## only way a density survives in Godot 4.7.
-static func _style() -> WorldStyle:
+##
+## Public because the one world is *this* night, not three: the camp clearing and
+## the town are built inside the same style, so a body that walks from the cages
+## to the square never crosses a seam in the light or the fog.
+static func night_style() -> WorldStyle:
 	var style := WorldStyle.frontier()
 	style.id = "escape_run"
 	style.sky = {
@@ -439,8 +469,9 @@ static func _clearing_posts(path: Path) -> Array:
 
 # --- ground and walls ------------------------------------------------------
 
-static func _build_ground(root: Root, style: WorldStyle, path: Path) -> void:
-	var ground := TextureLibrary.ground_material(style)
+## The lane's own footprint: its centre and extent, verges included. The world
+## scene asks for it so its single floor can cover the lane without guessing.
+static func lane_extent(path: Path) -> Dictionary:
 	var minimum := Vector2(INF, INF)
 	var maximum := Vector2(-INF, -INF)
 	for point in path.points:
@@ -448,9 +479,16 @@ static func _build_ground(root: Root, style: WorldStyle, path: Path) -> void:
 		minimum.y = minf(minimum.y, point.z)
 		maximum.x = maxf(maximum.x, point.x)
 		maximum.y = maxf(maximum.y, point.z)
-	var centre := (minimum + maximum) * 0.5
 	var size := Vector2(maxf(maximum.x - minimum.x, WIDTH), maxf(maximum.y - minimum.y, WIDTH))
 	size += Vector2(VERGE * 2.0, VERGE * 2.0)
+	return {"centre": (minimum + maximum) * 0.5, "size": size}
+
+
+static func _build_ground(root: Root, style: WorldStyle, path: Path) -> void:
+	var ground := TextureLibrary.ground_material(style)
+	var extent: Dictionary = lane_extent(path)
+	var centre: Vector2 = extent["centre"]
+	var size: Vector2 = extent["size"]
 	# One floor under the whole lane. No ledge, no seam and no hole: the run is a
 	# walk, and a walk must never fall out of the world.
 	_solid_box(root, Vector3(size.x, 0.6, size.y), Vector3(centre.x, -0.3, centre.y), ground)
@@ -458,7 +496,15 @@ static func _build_ground(root: Root, style: WorldStyle, path: Path) -> void:
 		Vector3(centre.x, -0.75, centre.y), ground)
 	field.name = "ForestField"
 	field.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# A last-resort floor: no fall is ever fatal or endless, whatever is pushed.
+	_build_catch_floor(root, path)
+
+
+## A last-resort floor: no fall is ever fatal or endless, whatever is pushed. The
+## world scene owns the map's real floor and asks only for this net.
+static func _build_catch_floor(root: Root, path: Path) -> void:
+	var extent: Dictionary = lane_extent(path)
+	var centre: Vector2 = extent["centre"]
+	var size: Vector2 = extent["size"]
 	var catch_body := StaticBody3D.new()
 	catch_body.name = "CatchFloor"
 	catch_body.position = Vector3(centre.x, -1.2, centre.y)
@@ -476,7 +522,12 @@ static func _build_ground(root: Root, style: WorldStyle, path: Path) -> void:
 ## so the corridor follows every bend, and closed at both ends. The walls sit
 ## `WALL_OFFSET` outside the walkable half-width, so nothing here is ever inside
 ## the lane a body runs.
-static func _build_lane_walls(root: Root, path: Path) -> void:
+##
+## In the world the two ends are the camp clearing and the town square, so they
+## are left open: the lane is the way between them, not a corridor with a door at
+## each end.
+static func _build_lane_walls(root: Root, path: Path, closed_start: bool = true,
+		closed_end: bool = true) -> void:
 	var walls := StaticBody3D.new()
 	walls.name = "LaneWalls"
 	walls.collision_layer = 1
@@ -493,14 +544,18 @@ static func _build_lane_walls(root: Root, path: Path) -> void:
 		for side in [-1.0, 1.0]:
 			_wall_segment(walls, (from + to) * 0.5 + right * side * (HALF_WIDTH + WALL_OFFSET),
 				length, _yaw_facing(forward))
-	# The camp end and the town end are closed too; the arch is the way through,
-	# not a hole in the walls.
+	if not closed_start and not closed_end:
+		return
+	# The camp end and the town end are closed when the lane stands alone; the
+	# arch is the way through, not a hole in the walls.
 	var head := path.sample(0.0)
 	var tail := path.sample(path.total)
-	var back: Vector3 = head["position"] - (head["forward"] as Vector3) * 5.0
-	_wall_segment(walls, back, WIDTH + 4.0, _yaw_facing(head["right"]))
-	var beyond: Vector3 = tail["position"] + (tail["forward"] as Vector3) * 9.0
-	_wall_segment(walls, beyond, WIDTH + 4.0, _yaw_facing(tail["right"]))
+	if closed_start:
+		var back: Vector3 = head["position"] - (head["forward"] as Vector3) * 5.0
+		_wall_segment(walls, back, WIDTH + 4.0, _yaw_facing(head["right"]))
+	if closed_end:
+		var beyond: Vector3 = tail["position"] + (tail["forward"] as Vector3) * 9.0
+		_wall_segment(walls, beyond, WIDTH + 4.0, _yaw_facing(tail["right"]))
 
 
 static func _wall_segment(walls: StaticBody3D, at: Vector3, length: float, yaw: float) -> void:
