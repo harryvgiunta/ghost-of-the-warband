@@ -74,8 +74,13 @@ func enter_warband() -> void:
 
 ## A brand-new campaign: the four cages, whatever the save says.
 func start_campaign() -> void:
-	var warband := get_node_or_null("/root/Warband")
 	active = true
+	# The purse is the shared wallet, so a fresh campaign has to reset the journey
+	# too: otherwise the last run's gold and pack walk into the cages with the soul.
+	var state := get_node_or_null("/root/PlayerState")
+	if state != null:
+		state.reset(true)
+	var warband := get_node_or_null("/root/Warband")
 	if warband != null:
 		warband.reset_state()
 		warband.save_state()

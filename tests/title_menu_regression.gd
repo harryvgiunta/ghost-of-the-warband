@@ -137,6 +137,36 @@ func run() -> void:
 	legacy.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://net_cache_legacy.json"))
 
+	# The warband door is a new campaign, never a resume: however the last one
+	# ended, pressing it puts a fresh warband in the cages. It used to load the
+	# save and drop the player in town, which is exactly what a player clicking
+	# "Ghost of the Warband" for a new run does not want.
+	var warband = root.get_node_or_null("Warband")
+	var flow = root.get_node_or_null("GameFlow")
+	if warband != null and flow != null:
+		title.queue_free()
+		await process_frame
+		warband.save_path = "user://title_warband.json"
+		warband.reset_state()
+		warband.add_mercenary("Old Ash")
+		warband.award_gold(500)
+		warband.save_state()
+		check(warband.roster.count() == 1, "a saved warband exists to resume")
+		flow.active = false
+		flow.world_start = "town"
+		title = load("res://title.tscn").instantiate()
+		root.add_child(title)
+		await process_frame
+		check(title.warband_button != null, "the warband door is on the title")
+		title.warband_button.pressed.emit()
+		check(flow.world_start == "camp", "the warband door starts at the cages (%s)" % flow.world_start)
+		check(warband.roster.count() == 0, "the warband door begins a fresh warband (%d bodies)"
+			% warband.roster.count())
+		check(warband.gold() == int(state.STARTING_CREDITS),
+			"a fresh warband starts on the starting purse, not the saved one (%d)" % warband.gold())
+		flow.active = false
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://title_warband.json"))
+
 	session.clear()
 	state.reset(false)
 	cache.reset()

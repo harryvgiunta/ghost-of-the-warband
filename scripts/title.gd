@@ -24,6 +24,8 @@ var start_button: Button
 var _load_button: Button
 var host_world_button: Button
 var join_button: Button
+## The possession campaign's door: a fresh warband, not a resume.
+var warband_button: Button
 var _join_layer: Control
 ## The warband's host/join panel, beside the four doors. It talks to `GameFlow`
 ## directly: the socket belongs to the flow (the one node that survives the
@@ -114,7 +116,7 @@ func _build() -> void:
 	join_button.pressed.connect(_open_join)
 	# Ghost of the Warband: the possession campaign, a separate persistent warband
 	# with its own save, entered from the cages or resumed in the town.
-	var warband_button := _button(frame,"GHOST OF THE WARBAND",Vector2(28,604),Vector2(462,54))
+	warband_button = _button(frame,"GHOST OF THE WARBAND",Vector2(28,604),Vector2(462,54))
 	warband_button.add_theme_font_size_override("font_size",18)
 	warband_button.pressed.connect(_enter_warband)
 	_status = _label(frame,"",Vector2(28,662),13,TEAL)
@@ -140,9 +142,11 @@ func _build() -> void:
 	_build_join_layer()
 
 func _enter_warband() -> void:
+	# The warband door is a new campaign, not a resume: a fresh warband, the four
+	# cages, however the last one ended. Resuming lives behind its own door.
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow != null:
-		flow.enter_warband()
+		flow.start_campaign()
 
 func _build_join_layer() -> void:
 	_join_layer = Control.new()
