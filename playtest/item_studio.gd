@@ -120,7 +120,8 @@ func _render_item(item_id: String, output: String) -> void:
 	match category:
 		"armor":
 			_apply_armor(item)
-			await _capture_region(_armor_frame(slot),output)
+			var frame := _armor_frame(slot)
+			await _capture_alpha(frame["center"],float(frame["radius"]),frame["dir"],output)
 		"armor_bundle":
 			_apply_armor_set(int(item.get("set",0)))
 			await _capture_region({"center":Vector3(0.0,1.02,0.0), "radius":1.02,
@@ -151,8 +152,17 @@ func _write_manifest(ids: Array) -> void:
 func _apply_armor(item: Dictionary) -> void:
 	var armor := _bare_armor()
 	var slot := str(item.get("slot","head"))
-	armor[slot] = int(item.get("set",0))
+	var set_index := int(item.get("set",0))
+	armor[slot] = set_index
 	_apply_pieces(armor)
+	# An armour icon is the piece itself, not the ranger's whole body: hide the
+	# base skin and every other set, then show only this slot's worn mesh.
+	for node in _rig._model.find_children("*","MeshInstance3D",true,false):
+		node.visible = false
+	for node: Node3D in _rig._armor_meshes.get(slot,{}).get(set_index,[]):
+		node.visible = true
+	if _rig._quiver != null:
+		_rig._quiver.visible = false
 
 
 func _apply_armor_set(set_index: int) -> void:

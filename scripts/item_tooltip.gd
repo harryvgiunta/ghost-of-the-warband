@@ -2,15 +2,16 @@ extends PanelContainer
 ## One hover card for every item slot in the kit UI.
 ##
 ## Typographic, like the ARPG cards this reads as: centered gold title, the
-## type line beneath it, a pair of rules around Speed and Damage, the extra
-## modifiers as bullet rows, and the item's quote in italic at the foot. The
-## slot itself already carries the screenshot, so the card stays text-only.
+## type line beneath it, Speed and Damage only when the piece is a weapon, the
+## extra modifiers as bullet rows, and the item's quote in italic at the foot.
+## The card is sized by its content (a minimum reading width, no fixed height),
+## so a short card stays short. The slot already carries the screenshot.
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
-const WIDTH := 320.0
+const MIN_WIDTH := 240.0
 
 var state
 var _italic: SystemFont
@@ -19,7 +20,7 @@ var _italic: SystemFont
 func configure(player_state,item_id: String) -> void:
 	state = player_state
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	custom_minimum_size = Vector2(WIDTH,0)
+	custom_minimum_size = Vector2(MIN_WIDTH,0)
 	add_theme_stylebox_override("panel",_panel_style())
 	var card_theme := Theme.new()
 	var font := SystemFont.new()
@@ -42,15 +43,16 @@ func configure(player_state,item_id: String) -> void:
 	margin.add_child(column)
 	_title(column,state.item_name(item_id))
 	_type_line(column,state.item_type_text(item_id))
-	_rule(column)
-	_stat(column,"Speed",state.item_speed_text(item_id))
-	_stat(column,"Damage",state.item_damage_text(item_id))
-	_rule(column)
-	_heading(column,"EXTRA MODIFIERS")
+	var category: String = str(state.item_category(item_id))
+	var weapon := category in ["1h","2h","bow","staff"]
+	if weapon:
+		_rule(column)
+		_stat(column,"Speed",state.item_speed_text(item_id))
+		_stat(column,"Damage",state.item_damage_text(item_id))
 	var extras: Array = state.item_extra_rows(item_id)
-	if extras.is_empty():
-		_extra(column,"","Nothing beyond the piece itself.")
-	else:
+	if not extras.is_empty():
+		_rule(column)
+		_heading(column,"EXTRA MODIFIERS")
 		for entry: Dictionary in extras:
 			_extra(column,str(entry.get("label","")),str(entry.get("value","")))
 	var quote: String = str(state.item_quote(item_id))

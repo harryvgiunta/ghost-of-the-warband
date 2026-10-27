@@ -30,10 +30,21 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 		return null
 	drag_started.emit()
 	var preview := PanelContainer.new()
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation",6)
+	if icon != null:
+		var art := TextureRect.new()
+		art.texture = icon
+		art.custom_minimum_size = Vector2(44,44)
+		art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(art)
 	var label := Label.new()
-	label.text = text
+	label.text = tooltip_text if not tooltip_text.is_empty() else text
 	label.add_theme_font_size_override("font_size",11)
-	preview.add_child(label)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+	preview.add_child(row)
 	set_drag_preview(preview)
 	return payload()
 

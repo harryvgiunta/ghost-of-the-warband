@@ -25,9 +25,9 @@ const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
 
 const COLUMNS := 15
-const SLOT_SIZE := Vector2(78,40)
-const SLOT_GAP := Vector2(4,4)
-const GRID_ORIGIN := Vector2(11,62)
+const SLOT_SIZE := Vector2(82,58)
+const SLOT_GAP := Vector2(6,6)
+const GRID_ORIGIN := Vector2(39,86)
 
 var state
 var session
@@ -73,6 +73,10 @@ var _location := ""
 var _index := -1
 var _slot := ""
 var _stock_item := ""
+var _held_area := ""
+var _held_index := -1
+var _held_slot := ""
+var _held_item := ""
 var _vendor := 0
 var _built := false
 var _preview_signature := ""
@@ -135,6 +139,10 @@ func close() -> void:
 	_index = -1
 	_slot = ""
 	_stock_item = ""
+	_held_area = ""
+	_held_index = -1
+	_held_slot = ""
+	_held_item = ""
 	visible = false
 	if preview != null:
 		preview.set_active(false)
@@ -143,6 +151,11 @@ func close() -> void:
 func refresh() -> void:
 	if not _built or state == null:
 		return
+	if not _held_item.is_empty() and not _held_valid():
+		_held_area = ""
+		_held_index = -1
+		_held_slot = ""
+		_held_item = ""
 	_purse.text = "%d c" % int(state.credits)
 	_backpack_count.text = "%d / %d" % [state.inventory.size(),state.INVENTORY_CAPACITY]
 	_stash_count.text = "%d / %d" % [state.stash.size(),state.STASH_CAPACITY]
@@ -168,6 +181,10 @@ func _open_view(next: String) -> void:
 	_index = -1
 	_slot = ""
 	_stock_item = ""
+	_held_area = ""
+	_held_index = -1
+	_held_slot = ""
+	_held_item = ""
 	if next in ["inventory","equipment"]:
 		_ensure_preview()
 	_refresh_visibility()
@@ -177,11 +194,11 @@ func _open_view(next: String) -> void:
 		(StateScript.VENDORS[_vendor].tag if next == "vendor" else "THE RANGER'S KIT")
 	match next:
 		"inventory","equipment":
-			_mode_hint("EQUIPMENT  •  click a slot to select, right-click to equip or return it.  Hover any piece for its card.")
+			_mode_hint("EQUIPMENT  •  click to pick up, click to place  •  drag or right-click for quick moves")
 		"stash":
-			_mode_hint("STASH  •  select a pack piece, then TO STASH; select a stashed piece, then TO INVENTORY.")
+			_mode_hint("STASH  •  click a pack piece then a stash cell, or a stashed piece then a pack cell")
 		"vendor":
-			_mode_hint("%s  •  select stock to buy, or a pack piece to sell." % StateScript.VENDORS[_vendor].name)
+			_mode_hint("%s  •  click stock to buy; click a pack piece, then SELL." % StateScript.VENDORS[_vendor].name)
 	if not was_open:
 		opened.emit()
 	visible = true
@@ -235,36 +252,17 @@ func _build() -> void:
 	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_dim.visible = false
 	root.add_child(_dim)
-	# One compact window instead of a full-screen sheet. 1120 x 640 in a
-	# 1440 x 900 viewport leaves the world dimmed around it, like a panel.
-	var shell := Control.new()
-	shell.position = Vector2(80,150)
-	shell.size = Vector2(1280,600)
-	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(shell)
-	var window := Panel.new()
-	window.position = Vector2.ZERO
-	window.size = Vector2(1280,600)
-	window.mouse_filter = Control.MOUSE_FILTER_STOP
-	window.add_theme_stylebox_override("panel",_style(Color(0.024,0.052,0.060,0.995),Color("6e5a3a"),9))
-	shell.add_child(window)
-	_title = _label(shell,"EQUIPMENT",Vector2(24,8),24,CREAM)
-	_subtitle = _label(shell,"THE RANGER'S KIT",Vector2(26,36),10,GOLD)
-	_quick_label = _label(shell,"",Vector2(330,36),9,GOLD)
-	_quick_label.size = Vector2(600,14)
-	_quick_label.clip_text = true
-	_quick_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.95))
-	_quick_label.add_theme_constant_override("shadow_offset_x",1)
-	_quick_label.add_theme_constant_override("shadow_offset_y",1)
-	_purse = _label(shell,"0 c",Vector2(1000,14),16,GOLD)
-	_purse.size = Vector2(130,24)
+	_title = _label(root,"EQUIPMENT",Vector2(32,16),26,CREAM)
+	_subtitle = _label(root,"THE RANGER'S KIT",Vector2(34,48),10,GOLD)
+	_purse = _label(root,"0 c",Vector2(1010,26),18,GOLD)
+	_purse.size = Vector2(220,26)
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	close_button = _button(shell,"CLOSE / ESC",Vector2(1138,10),Vector2(108,34))
-	close_button.add_theme_font_size_override("font_size",10)
+	close_button = _button(root,"CLOSE / ESC",Vector2(1256,18),Vector2(152,40))
+	close_button.add_theme_font_size_override("font_size",12)
 	close_button.pressed.connect(close)
-	build_equipment(shell)
-	build_backpack(shell)
-	build_side(shell)
+	build_equipment(root)
+	build_backpack(root)
+	build_side(root)
 	_refresh_visibility()
 
 func _build_theme() -> Theme:
@@ -327,10 +325,11 @@ func _make_slot(parent: Node, area: String, index: int, slot_name: String, at: V
 	result.clip_text = true
 	result.toggle_mode = true
 	result.add_theme_font_size_override("font_size",font_size)
-	result.drag_enabled = false
+	result.drag_enabled = true
 	result.tooltip_builder = Callable(self,"_item_card")
 	result.configure(area,index,slot_name,"")
 	result.right_clicked.connect(_on_right_clicked)
+	result.slot_dropped.connect(_on_slot_dropped.bind(area,index,slot_name))
 	result.pressed.connect(_on_slot_pressed.bind(area,index,slot_name))
 	parent.add_child(result)
 	return result
@@ -347,8 +346,8 @@ func _item_card(item_id: String, _area: String) -> Control:
 
 func build_equipment(parent: Node) -> void:
 	paperdoll_panel = Control.new()
-	paperdoll_panel.position = Vector2(16,50)
-	paperdoll_panel.size = Vector2(1248,280)
+	paperdoll_panel.position = Vector2(24,78)
+	paperdoll_panel.size = Vector2(1392,438)
 	paperdoll_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(paperdoll_panel)
 	_build_worn(paperdoll_panel)
@@ -357,91 +356,99 @@ func build_equipment(parent: Node) -> void:
 	_build_stats(paperdoll_panel)
 
 func _build_worn(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(0,0),Vector2(190,280))
-	_label(panel,"WORN",Vector2(10,6),10,GOLD)
-	_label(panel,"Armour, hands and boots",Vector2(10,20),9,MUTED)
+	var panel := _panel(parent,Vector2(0,0),Vector2(226,438))
+	_label(panel,"WORN",Vector2(14,10),11,GOLD)
+	_label(panel,"Armour, hands and boots",Vector2(14,27),9,MUTED)
 	for index in 5:
 		var slot_name: String = Rules.SLOTS[index]
 		var button := _make_slot(panel,"paperdoll",-1,slot_name,
-			Vector2(10,28+index*50),Vector2(170,48),11)
+			Vector2(12,44+index*78),Vector2(202,72),10)
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",46 if slot_name in ["hands","feet"] else 42)
+		button.add_theme_constant_override("icon_max_width",80 if slot_name in ["hands","feet"] else 64)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		paperdoll_buttons.append(button)
 
 func _build_character(parent: Node) -> void:
-	_character_panel = _panel(parent,Vector2(198,0),Vector2(680,280))
+	_character_panel = _panel(parent,Vector2(234,0),Vector2(742,438))
 	var backdrop := TextureRect.new()
 	backdrop.position = Vector2(6,6)
-	backdrop.size = Vector2(668,268)
+	backdrop.size = Vector2(730,426)
 	backdrop.texture = _stage_texture()
 	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	backdrop.stretch_mode = TextureRect.STRETCH_SCALE
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_character_panel.add_child(backdrop)
-	var main_button := _make_slot(_character_panel,"paperdoll",-1,"main",Vector2(12,216),Vector2(190,54),10)
+	# The preview is created on first open; the stage keeps a dark alcove until
+	# then so the panel never flashes an empty rectangle.
+	_quick_label = _label(_character_panel,"",Vector2(250,418),9,GOLD)
+	_quick_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.95))
+	_quick_label.add_theme_constant_override("shadow_offset_x",1)
+	_quick_label.add_theme_constant_override("shadow_offset_y",1)
+	_quick_label.size = Vector2(242,14)
+	_quick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quick_label.clip_text = true
+	var main_button := _make_slot(_character_panel,"paperdoll",-1,"main",Vector2(14,346),Vector2(190,74),10)
 	main_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	main_button.expand_icon = false
-	main_button.z_index = 2
-	main_button.add_theme_constant_override("icon_max_width",40)
+	main_button.add_theme_constant_override("icon_max_width",56)
 	paperdoll_buttons.append(main_button)
-	var off_button := _make_slot(_character_panel,"paperdoll",-1,"off",Vector2(478,216),Vector2(190,54),10)
+	var off_button := _make_slot(_character_panel,"paperdoll",-1,"off",Vector2(538,346),Vector2(190,74),10)
 	off_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	off_button.expand_icon = false
-	off_button.z_index = 2
-	off_button.add_theme_constant_override("icon_max_width",40)
+	off_button.add_theme_constant_override("icon_max_width",56)
 	paperdoll_buttons.append(off_button)
 
 func _build_trinkets(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(886,0),Vector2(74,280))
-	_label(panel,"TRINKETS",Vector2(4,6),8,GOLD)
+	var panel := _panel(parent,Vector2(984,0),Vector2(92,438))
+	_label(panel,"TRINKETS",Vector2(6,10),9,GOLD)
 	for offset in 3:
 		var slot_name: String = Rules.SLOTS[5+offset]
 		var button := _make_slot(panel,"paperdoll",-1,slot_name,
-			Vector2(4,28+offset*74),Vector2(66,62),8)
+			Vector2(6,42+offset*102),Vector2(80,74),9)
 		button.expand_icon = true
 		button.text = ""
+		button.tooltip_builder = Callable(self,"_item_card")
 		paperdoll_buttons.append(button)
-		var label := _label(panel,"",Vector2(4,92+offset*74),9,MUTED)
-		label.size = Vector2(66,10)
+		var label := _label(panel,"",Vector2(6,118+offset*102),8,MUTED)
+		label.size = Vector2(80,14)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.clip_text = true
 		_trinket_labels.append(label)
-	_label(panel,"HOVER FOR",Vector2(4,258),7,MUTED)
-	_label(panel,"ITS CARD",Vector2(4,268),7,MUTED)
+	_label(panel,"HOVER FOR",Vector2(6,358),7,MUTED)
+	_label(panel,"ITS CARD",Vector2(6,368),7,MUTED)
 
 func _build_stats(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(968,0),Vector2(280,280))
-	_label(panel,"RANGER",Vector2(10,6),19,CREAM)
-	_label(panel,"THE FRONTIER KIT",Vector2(11,28),9,MUTED)
+	var panel := _panel(parent,Vector2(1084,0),Vector2(308,438))
+	_label(panel,"RANGER",Vector2(16,10),20,CREAM)
+	_label(panel,"THE FRONTIER KIT",Vector2(17,38),9,MUTED)
 	var rows := [
-		{"key":"attack", "label":"Attack", "y":44},
-		{"key":"defense", "label":"Defense", "y":78},
-		{"key":"life", "label":"Life", "y":112},
-		{"key":"stamina", "label":"Stamina", "y":146},
+		{"key":"attack", "label":"Attack", "y":62},
+		{"key":"defense", "label":"Defense", "y":108},
+		{"key":"life", "label":"Life", "y":154},
+		{"key":"stamina", "label":"Stamina", "y":200},
 	]
 	for row: Dictionary in rows:
-		_label(panel,str(row["label"]),Vector2(10,float(row["y"])),10,MUTED)
-		var value := _label(panel,"—",Vector2(130,float(row["y"])-4),18,GOLD)
-		value.size = Vector2(140,26)
+		_label(panel,str(row["label"]),Vector2(16,float(row["y"])),11,MUTED)
+		var value := _label(panel,"—",Vector2(150,float(row["y"])-6),20,GOLD)
+		value.size = Vector2(142,30)
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		_stat_values[str(row["key"])] = value
 		var rule := ColorRect.new()
-		rule.position = Vector2(10,float(row["y"])+30)
-		rule.size = Vector2(260,1)
+		rule.position = Vector2(16,float(row["y"])+34)
+		rule.size = Vector2(276,1)
 		rule.color = Color("2d474d")
 		panel.add_child(rule)
-	_label(panel,"BONUSES",Vector2(10,182),9,GOLD)
+	_label(panel,"BONUSES",Vector2(16,250),9,GOLD)
 	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(10,198)
-	scroll.size = Vector2(260,64)
+	scroll.position = Vector2(16,270)
+	scroll.size = Vector2(276,146)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel.add_child(scroll)
 	_bonus_list = VBoxContainer.new()
 	_bonus_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_bonus_list.add_theme_constant_override("separation",1)
+	_bonus_list.add_theme_constant_override("separation",2)
 	scroll.add_child(_bonus_list)
-	_label(panel,"HOVER A SLOT FOR ITS CARD",Vector2(10,268),8,MUTED)
+	_label(panel,"HOVER A SLOT FOR ITS CARD",Vector2(16,418),7,MUTED)
 
 func _stage_texture() -> Texture2D:
 	var gradient := Gradient.new()
@@ -462,10 +469,12 @@ func _ensure_preview() -> void:
 	preview = CharacterPreview.new()
 	preview.name = "Preview"
 	preview.position = Vector2(6,6)
-	preview.size = Vector2(668,268)
+	preview.size = Vector2(730,426)
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	preview.built.connect(_on_preview_built)
 	_character_panel.add_child(preview)
+	if _quick_label != null:
+		_character_panel.move_child(_quick_label,_character_panel.get_child_count() - 1)
 
 func _on_preview_built() -> void:
 	if preview != null and state != null:
@@ -486,42 +495,42 @@ func _refresh_preview() -> void:
 ## Backpack
 
 func build_backpack(parent: Node) -> void:
-	inventory_panel = _panel(parent,Vector2(16,338),Vector2(1248,250))
-	_label(inventory_panel,"BACKPACK",Vector2(10,6),11,GOLD)
-	_backpack_count = _label(inventory_panel,"",Vector2(86,7),11,CREAM)
-	_backpack_count.size = Vector2(100,18)
-	_selected_label = _label(inventory_panel,"No piece selected",Vector2(186,8),10,MUTED)
-	_selected_label.size = Vector2(560,16)
+	inventory_panel = _panel(parent,Vector2(24,526),Vector2(1392,358))
+	_label(inventory_panel,"BACKPACK",Vector2(16,10),12,GOLD)
+	_backpack_count = _label(inventory_panel,"",Vector2(112,11),12,CREAM)
+	_backpack_count.size = Vector2(120,20)
+	_selected_label = _label(inventory_panel,"No piece selected",Vector2(250,13),10,MUTED)
+	_selected_label.size = Vector2(700,18)
 	_selected_label.clip_text = true
-	_primary = _button(inventory_panel,"",Vector2(826,5),Vector2(112,28))
+	_primary = _button(inventory_panel,"",Vector2(974,9),Vector2(130,30))
 	_primary.add_theme_font_size_override("font_size",11)
 	_primary.pressed.connect(_on_primary)
-	_secondary = _button(inventory_panel,"",Vector2(946,5),Vector2(112,28))
+	_secondary = _button(inventory_panel,"",Vector2(1112,9),Vector2(130,30))
 	_secondary.add_theme_font_size_override("font_size",11)
 	_secondary.pressed.connect(_on_secondary)
-	_tertiary = _button(inventory_panel,"",Vector2(1066,5),Vector2(112,28))
+	_tertiary = _button(inventory_panel,"",Vector2(1250,9),Vector2(130,30))
 	_tertiary.add_theme_font_size_override("font_size",11)
 	_tertiary.pressed.connect(_on_tertiary)
-	_floor_label = _label(inventory_panel,"GROUND  •  nothing dropped",Vector2(10,38),9,MUTED)
+	_floor_label = _label(inventory_panel,"GROUND  •  nothing dropped",Vector2(16,48),9,MUTED)
 	_floor_scroll = ScrollContainer.new()
-	_floor_scroll.position = Vector2(64,34)
-	_floor_scroll.size = Vector2(1160,24)
+	_floor_scroll.position = Vector2(82,44)
+	_floor_scroll.size = Vector2(1286,32)
 	_floor_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_floor_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	inventory_panel.add_child(_floor_scroll)
 	_floor_list = HBoxContainer.new()
-	_floor_list.add_theme_constant_override("separation",3)
+	_floor_list.add_theme_constant_override("separation",4)
 	_floor_scroll.add_child(_floor_list)
 	for index in StateScript.INVENTORY_CAPACITY:
 		var column := index % COLUMNS
 		var row := index / COLUMNS
 		var at := GRID_ORIGIN + Vector2(column * (SLOT_SIZE.x + SLOT_GAP.x),row * (SLOT_SIZE.y + SLOT_GAP.y))
-		var button := _make_slot(inventory_panel,"backpack",index,"",at,SLOT_SIZE,11)
+		var button := _make_slot(inventory_panel,"backpack",index,"",at,SLOT_SIZE,10)
 		button.expand_icon = true
 		button.text = ""
 		backpack_buttons.append(button)
-	_status = _label(inventory_panel,"",Vector2(10,236),10,TEAL)
-	_status.size = Vector2(1228,14)
+	_status = _label(inventory_panel,"",Vector2(16,334),10,TEAL)
+	_status.size = Vector2(1360,18)
 	_status.clip_text = true
 
 ## ---------------------------------------------------------------------------
@@ -534,44 +543,45 @@ static func stock_row_count() -> int:
 	return largest
 
 func build_side(parent: Node) -> void:
-	side_panel = _panel(parent,Vector2(16,50),Vector2(1248,280))
-	_side_title = _label(side_panel,"",Vector2(12,8),11,GOLD)
-	_side_sub = _label(side_panel,"",Vector2(12,24),9,MUTED)
-	_side_sub.size = Vector2(800,18)
+	side_panel = _panel(parent,Vector2(24,78),Vector2(1392,438))
+	_side_title = _label(side_panel,"",Vector2(18,12),12,GOLD)
+	_side_sub = _label(side_panel,"",Vector2(18,32),10,MUTED)
+	_side_sub.size = Vector2(1100,20)
 	_side_sub.clip_text = true
-	_stash_count = _label(side_panel,"",Vector2(1120,8),11,CREAM)
-	_stash_count.size = Vector2(110,18)
+	_stash_count = _label(side_panel,"",Vector2(1240,12),11,CREAM)
+	_stash_count.size = Vector2(130,20)
 	_stash_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	for index in 20:
 		var column := index % 5
 		var row := index / 5
 		var button := _make_slot(side_panel,"stash",index,"",
-			Vector2(33+column*238,36+row*60),Vector2(230,54),11)
+			Vector2(20+column*270,64+row*88),Vector2(260,80),11)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",40)
+		button.add_theme_constant_override("icon_max_width",56)
 		stash_buttons.append(button)
 	_stock_scroll = ScrollContainer.new()
-	_stock_scroll.position = Vector2(12,32)
-	_stock_scroll.size = Vector2(1224,166)
+	_stock_scroll.position = Vector2(18,60)
+	_stock_scroll.size = Vector2(1356,320)
 	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	side_panel.add_child(_stock_scroll)
 	_stock_list = VBoxContainer.new()
 	_stock_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_stock_list.add_theme_constant_override("separation",3)
+	_stock_list.add_theme_constant_override("separation",4)
 	_stock_scroll.add_child(_stock_list)
 	# One row per keeper stock entry: the pool is sized from the largest vendor
 	# so a longer list can never silently lose its last pieces.
 	for index in stock_row_count():
-		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(1210,28),10)
-		button.custom_minimum_size = Vector2(0,28)
+		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(1320,34),12)
+		button.custom_minimum_size = Vector2(0,34)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",20)
+		button.drag_enabled = false
+		button.add_theme_constant_override("icon_max_width",26)
 		stock_buttons.append(button)
-	_buy = _button(side_panel,"BUY",Vector2(12,204),Vector2(1224,28))
-	_buy.add_theme_font_size_override("font_size",11)
+	_buy = _button(side_panel,"BUY",Vector2(18,396),Vector2(1356,30))
+	_buy.add_theme_font_size_override("font_size",12)
 	_buy.pressed.connect(_on_buy)
 
 ## ---------------------------------------------------------------------------
@@ -600,7 +610,9 @@ func _refresh_paperdoll() -> void:
 		else:
 			button.text = "%s  •  %s" % [label.to_upper(),state.item_short(item_id)]
 			button.tooltip_text = state.item_name(item_id)
-		button.set_pressed_no_signal(_location == "paperdoll" and _slot == slot_name)
+		var held := _is_held("paperdoll",-1,slot_name)
+		button.set_pressed_no_signal(held or (_location == "paperdoll" and _slot == slot_name))
+		button.modulate = Color(1.25,1.15,0.80,1.0) if held else Color.WHITE
 	_quick_label.text = "TAB  " + state.quick_set_label()
 	if state.has_quick_return():
 		_quick_label.text += "  ↔  " + state.quick_return_label()
@@ -622,7 +634,9 @@ func _refresh_backpack() -> void:
 			button.icon = null
 			button.text = ""
 			button.tooltip_text = ""
-		button.set_pressed_no_signal(_location == "backpack" and index == _index)
+		var held := _is_held("backpack",index,"")
+		button.set_pressed_no_signal(held or (_location == "backpack" and index == _index))
+		button.modulate = Color(1.25,1.15,0.80,1.0) if held else Color.WHITE
 
 func _refresh_stash() -> void:
 	for index in stash_buttons.size():
@@ -640,7 +654,9 @@ func _refresh_stash() -> void:
 			button.icon = null
 			button.text = ""
 			button.tooltip_text = ""
-		button.set_pressed_no_signal(_location == "stash" and index == _index)
+		var held := _is_held("stash",index,"")
+		button.set_pressed_no_signal(held or (_location == "stash" and index == _index))
+		button.modulate = Color(1.25,1.15,0.80,1.0) if held else Color.WHITE
 
 func _refresh_floor() -> void:
 	for child in _floor_list.get_children():
@@ -651,15 +667,17 @@ func _refresh_floor() -> void:
 	_floor_label.text = "GROUND  •  nothing dropped" if items.is_empty() else "GROUND  •  %d piece(s)" % items.size()
 	for index in items.size():
 		var item_id: String = items[index]
-		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(120,24),8)
-		button.custom_minimum_size = Vector2(120,24)
+		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(132,30),9)
+		button.custom_minimum_size = Vector2(132,30)
 		button.item = item_id
 		button.icon = ItemArt.texture(item_id)
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",18)
+		button.add_theme_constant_override("icon_max_width",22)
 		button.text = "  " + state.item_short(item_id)
 		button.tooltip_text = state.item_name(item_id)
-		button.set_pressed_no_signal(_location == "floor" and index == _index)
+		var held := _is_held("floor",index,"")
+		button.set_pressed_no_signal(held or (_location == "floor" and index == _index))
+		button.modulate = Color(1.25,1.15,0.80,1.0) if held else Color.WHITE
 		floor_buttons.append(button)
 
 func _refresh_stock() -> void:
@@ -679,6 +697,7 @@ func _refresh_stock() -> void:
 			button.text = "  %s   %d c" % [state.item_name(item_id),state.item_price(item_id)]
 			button.tooltip_text = state.item_detail(item_id)
 			button.set_pressed_no_signal(_location == "stock" and _stock_item == item_id)
+			button.modulate = Color.WHITE
 		else:
 			button.visible = false
 			button.disabled = true
@@ -799,6 +818,25 @@ func _selected_item() -> String:
 ## Actions
 
 func _on_slot_pressed(area: String, index: int, slot_name: String) -> void:
+	var item_id := _slot_item(area,index,slot_name)
+	if not _held_item.is_empty():
+		if area == "stock":
+			set_status("Place the piece in a slot first, or click it again to put it back.")
+			return
+		_place_held(area,index,slot_name)
+		return
+	_select_slot(area,index,slot_name)
+	if not item_id.is_empty() and area != "stock":
+		_held_area = area
+		_held_index = index
+		_held_slot = slot_name
+		_held_item = item_id
+		refresh()
+		set_status("Holding %s.  Click a slot to place it, or click it again to put it back." % state.item_name(item_id))
+		return
+	_refresh_slots()
+
+func _select_slot(area: String, index: int, slot_name: String) -> void:
 	if area == "stock":
 		_location = "stock"
 		_index = index
@@ -811,6 +849,8 @@ func _on_slot_pressed(area: String, index: int, slot_name: String) -> void:
 		_location = area
 		_index = index
 		_slot = slot_name
+
+func _refresh_slots() -> void:
 	_refresh_selection()
 	_refresh_paperdoll()
 	_refresh_backpack()
@@ -818,7 +858,113 @@ func _on_slot_pressed(area: String, index: int, slot_name: String) -> void:
 	_refresh_floor()
 	_refresh_stock()
 
+func _slot_item(area: String, index: int, slot_name: String) -> String:
+	if state == null:
+		return ""
+	match area:
+		"backpack":
+			return state.inventory[index] if index >= 0 and index < state.inventory.size() else ""
+		"paperdoll":
+			return state.equipped_id(slot_name)
+		"stash":
+			return state.stash[index] if index >= 0 and index < state.stash.size() else ""
+		"floor":
+			return state.floor_items[index] if index >= 0 and index < state.floor_items.size() else ""
+		"stock":
+			var stock: Array = StateScript.VENDORS[_vendor].stock
+			return str(stock[index]) if index >= 0 and index < stock.size() else ""
+	return ""
+
+func _held_valid() -> bool:
+	if _held_item.is_empty():
+		return true
+	return _slot_item(_held_area,_held_index,_held_slot) == _held_item
+
+static func _is_same_slot(area: String, index: int, slot_name: String,
+		other_area: String, other_index: int, other_slot: String) -> bool:
+	return area == other_area and index == other_index and slot_name == other_slot
+
+func _is_held(area: String, index: int, slot_name: String) -> bool:
+	if _held_item.is_empty():
+		return false
+	if area == "paperdoll":
+		return _held_area == "paperdoll" and _held_slot == slot_name
+	return _held_area == area and _held_index == index
+
+func _clear_held() -> void:
+	_held_area = ""
+	_held_index = -1
+	_held_slot = ""
+	_held_item = ""
+
+func _place_held(target_area: String, target_index: int, target_slot: String) -> void:
+	if _held_item.is_empty():
+		return
+	if _is_same_slot(_held_area,_held_index,_held_slot,target_area,target_index,target_slot):
+		_clear_held()
+		refresh()
+		set_status("Put it back.")
+		return
+	_route_drop(_held_area,_held_index,_held_slot,_held_item,target_area,target_index,target_slot)
+
+## One routing table for both a picked-up click and a dragged piece.
+func _route_drop(source_area: String, source_index: int, source_slot: String, source_item: String,
+		target_area: String, target_index: int, target_slot: String) -> void:
+	if source_item.is_empty():
+		return
+	if _slot_item(source_area,source_index,source_slot) != source_item:
+		_clear_held()
+		refresh()
+		set_status("That piece moved.")
+		return
+	if _is_same_slot(source_area,source_index,source_slot,target_area,target_index,target_slot):
+		_clear_held()
+		refresh()
+		set_status("Put it back.")
+		return
+	if source_area == "backpack":
+		match target_area:
+			"paperdoll":
+				_resolve(state.equip_from_inventory(source_index,target_slot))
+			"stash":
+				_resolve(state.move_to_stash(source_index))
+			_:
+				set_status("Drop a backpack piece on a worn slot or the stash.")
+	elif source_area == "paperdoll":
+		match target_area:
+			"backpack":
+				_resolve(state.unequip_to_backpack(source_slot))
+			"paperdoll":
+				_resolve(state.move_equipped(source_slot,target_slot))
+			_:
+				set_status("Drop a worn piece on the backpack or another worn slot.")
+	elif source_area == "stash":
+		if target_area == "backpack":
+			_resolve(state.move_to_inventory(source_index))
+		else:
+			set_status("Take the piece to the backpack before wearing it.")
+	elif source_area == "floor":
+		if target_area == "backpack":
+			_resolve(state.pickup_floor(source_index))
+		else:
+			set_status("Pick the piece up into the backpack first.")
+	elif source_area == "stock":
+		set_status("Buy stock with the BUY button.")
+	else:
+		set_status("That piece cannot be moved there.")
+
+func _on_slot_dropped(payload: Dictionary, target_area: String, target_index: int, target_slot: String) -> void:
+	var source_area := str(payload.get("area",""))
+	var source_index := int(payload.get("index",-1))
+	var source_slot := str(payload.get("slot",""))
+	var source_item := str(payload.get("item",""))
+	_clear_held()
+	_route_drop(source_area,source_index,source_slot,source_item,target_area,target_index,target_slot)
+
 func _on_right_clicked(area: String, index: int, slot_name: String, item_id: String) -> void:
+	if not _held_item.is_empty():
+		_clear_held()
+		refresh()
 	if item_id.is_empty():
 		return
 	match area:
@@ -838,6 +984,7 @@ func _on_right_clicked(area: String, index: int, slot_name: String, item_id: Str
 func _on_primary() -> void:
 	if state == null:
 		return
+	_clear_held()
 	match _location:
 		"backpack":
 			_resolve(state.equip_from_inventory(_index,""))
@@ -851,6 +998,7 @@ func _on_primary() -> void:
 func _on_secondary() -> void:
 	if state == null:
 		return
+	_clear_held()
 	if _location == "paperdoll":
 		var result: Dictionary = state.bind_quick_from_equipped()
 		refresh()
@@ -865,6 +1013,7 @@ func _on_secondary() -> void:
 func _on_tertiary() -> void:
 	if state == null:
 		return
+	_clear_held()
 	if _location == "backpack":
 		_drop_item("backpack",_index)
 	elif _location == "paperdoll":
@@ -886,11 +1035,13 @@ func _drop_item(area: String, key: Variant) -> void:
 func _on_buy() -> void:
 	if state == null or _stock_item.is_empty():
 		return
+	_clear_held()
 	_resolve(state.buy(_stock_item))
 
 func _resolve(result: Dictionary) -> void:
 	var ok := bool(result.get("ok",false))
 	if ok:
+		_clear_held()
 		_location = ""
 		_index = -1
 		_slot = ""

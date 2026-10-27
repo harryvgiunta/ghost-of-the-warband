@@ -604,6 +604,7 @@ func _test_world_kit() -> void:
 	check(card_text.contains("EXTRA MODIFIERS"),"The hover card has an extra-modifier section")
 	check(card_text.contains("Prison shank"),"The dagger's passive is on its extra line")
 	check(card_text.contains(state.item_quote("dagger_iron")),"The hover card carries the item quote")
+	check(card_text.contains("Speed:") and card_text.contains("Damage:"),"A weapon card keeps Speed and Damage")
 	var wired_slot = game.world_ui.backpack_buttons[0]
 	var wired_card = wired_slot._make_custom_tooltip(wired_slot.tooltip_text)
 	check(wired_card is Control,"A backpack cell builds its hover card through the slot")
@@ -611,7 +612,17 @@ func _test_world_kit() -> void:
 	var shield_card = game.world_ui._item_card("shield_kite","backpack")
 	var shield_labels: Array[String] = []
 	_collect_labels(shield_card,shield_labels)
-	check("\n".join(shield_labels).contains("BLOCK"),"A shield card shows its block channel")
+	var shield_text := "\n".join(shield_labels)
+	check(shield_text.contains("BLOCK"),"A shield card shows its block channel")
+	check(not shield_text.contains("Speed:") and not shield_text.contains("Damage:"),"A shield card omits weapon lines")
+	var armor_card = game.world_ui._item_card("armor_plate_chest","backpack")
+	var armor_labels: Array[String] = []
+	_collect_labels(armor_card,armor_labels)
+	var armor_text := "\n".join(armor_labels)
+	check(not armor_text.contains("Speed:") and not armor_text.contains("Damage:"),"An armour card omits Speed and Damage")
+	check(armor_text.contains("BODY GUARD"),"An armour card keeps its guard modifier")
+	check(armor_card.custom_minimum_size.x <= 260.0,"The hover card stays content-sized")
+	armor_card.free()
 	check(game.world_ui._stat_values["defense"].text == "%d%%" % state.defense_percent(),"The summary shows the worn damage reduction")
 	card.free()
 	shield_card.free()
@@ -635,6 +646,29 @@ func _test_world_kit() -> void:
 	# Right-click unequips the main hand back into the pack.
 	game.world_ui._on_right_clicked("paperdoll",-1,"main","sword_short")
 	check(state.main_item().is_empty() and state.inventory.has("sword_short"),"Right-click unequips the paperdoll")
+	# Click-to-pick and click-to-place, then drag to the backpack.
+	var click_index: int = state.inventory.find("sword_short")
+	check(click_index >= 0,"The unequipped sword is back in the pack")
+	game.world_ui._on_slot_pressed("backpack",click_index,"")
+	check(game.world_ui._held_item == "sword_short","Clicking a backpack piece picks it up")
+	game.world_ui._on_slot_pressed("paperdoll",-1,"main")
+	check(state.main_item() == "sword_short" and game.world_ui._held_item.is_empty(),"Clicking a worn slot places the picked piece")
+	game.world_ui._on_slot_pressed("paperdoll",-1,"main")
+	check(game.world_ui._held_item == "sword_short","Clicking a worn piece picks it up")
+	game.world_ui._on_slot_pressed("paperdoll",-1,"main")
+	check(state.main_item() == "sword_short" and game.world_ui._held_item.is_empty(),"Clicking the same slot puts the piece back")
+	var drag_payload := {"area":"paperdoll", "index":-1, "slot":"main", "item":"sword_short"}
+	var drag_target = game.world_ui.backpack_buttons[0]
+	check(drag_target._can_drop_data(Vector2.ZERO,drag_payload),"A backpack cell accepts the dragged piece")
+	drag_target._drop_data(Vector2.ZERO,drag_payload)
+	check(state.main_item().is_empty() and state.inventory.has("sword_short"),"Dragging a worn piece onto the pack unequips it")
+	check(game.world_ui._held_item.is_empty(),"A drop clears the held piece")
+	var drag_index: int = state.inventory.find("sword_short")
+	var bag_payload := {"area":"backpack", "index":drag_index, "slot":"", "item":"sword_short"}
+	var hand_target = game.world_ui.paperdoll_buttons[8]
+	check(hand_target._can_drop_data(Vector2.ZERO,bag_payload),"A worn slot accepts a dragged backpack piece")
+	hand_target._drop_data(Vector2.ZERO,bag_payload)
+	check(state.main_item() == "sword_short","Dragging a backpack piece onto the main hand equips it")
 	game.world_ui.close()
 	var tab := InputEventKey.new()
 	tab.keycode = KEY_TAB
