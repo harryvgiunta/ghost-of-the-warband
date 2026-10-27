@@ -90,14 +90,37 @@ func pickups_left() -> int:
 
 # --- the cult on the road --------------------------------------------------
 
-## Two behind the squad at the mouth of the lane and a pair in each clearing:
-## eight cultists, all armed, all hunting, all dropping what they carried.
+## Ten times the road's first eight: ten cultists at each of the eight posts,
+## ringed so the trail is thick with the cult from the mouth to the town. They all
+## hunt, they all drop what they carry.
+const ROAD_PER_POST := 10
+
+## Two behind the squad at the mouth of the lane and a pair in each clearing: one
+## ring per post, all armed, all hunting.
 func _build_cultists() -> void:
 	var soul = host.controller.active_body(1)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7717
+	# The post the squad starts beside is the ambush: everything there is already
+	# locked onto the soul. The rest have to notice the squad.
 	for post in forest.get("pursuer_posts", []) as Array:
-		_spawn_cultist(post as Vector3, soul)
+		_spawn_ring(post as Vector3, soul, rng, true)
 	for post in forest.get("clearing_posts", []) as Array:
-		_spawn_cultist(post as Vector3, null)
+		_spawn_ring(post as Vector3, null, rng, false)
+
+
+## A post's worth of cult, packed around the post but inside the walkable band:
+## the ring never reaches past the lane's walls, so nobody spawns inside a trunk.
+func _spawn_ring(at: Vector3, prey, rng: RandomNumberGenerator, all_prey: bool) -> void:
+	for index in ROAD_PER_POST:
+		var angle := TAU * float(index) / float(ROAD_PER_POST)
+		var radius := rng.randf_range(1.0, 3.2)
+		var point := at + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+		# Outside the ambush post only every third one starts already locked onto
+		# the soul: the rest have to notice the squad, which is what makes the
+		# trail feel hunted rather than scripted.
+		var locked = prey if (all_prey or index % 3 == 0) else null
+		_spawn_cultist(point, locked)
 
 
 func _spawn_cultist(at: Vector3, prey) -> void:

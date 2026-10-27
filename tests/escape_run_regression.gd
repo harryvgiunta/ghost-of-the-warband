@@ -156,8 +156,8 @@ func check_the_world() -> void:
 		"the camp reaches the escape (%s)" % game.camp.sequencer.state_name())
 	var soul = game.controller.active_body(1)
 	check(soul != null, "the soul is seated in a body when the trail opens")
-	check(soul != null and game.trail.guards.size() == 8,
-		"eight cultists hold the trail (%d)" % game.trail.guards.size())
+	check(soul != null and game.trail.guards.size() == 80,
+		"eighty cultists hold the trail (%d)" % game.trail.guards.size())
 	for index in mini(2, game.trail.guards.size()):
 		check(game.trail.guards[index].player == soul,
 			"pursuer %d starts on the soul's body" % (index + 1))

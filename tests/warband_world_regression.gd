@@ -282,8 +282,8 @@ func check_camp_in_the_woods() -> void:
 	# field before the first latch and the road's cultists are down the lane.
 	var camp_guards: int = game.camp.guards.size()
 	check(camp_guards == 2, "two watchers hold the clearing (%d)" % camp_guards)
-	check(game.guards.size() == camp_guards + 8,
-		"eight cultists hold the trail and are on the same hostile list (%d in all)"
+	check(game.guards.size() == camp_guards + 80,
+		"eighty cultists hold the trail and are on the same hostile list (%d in all)"
 		% game.guards.size())
 	for watcher in game.camp.guards:
 		check(is_equal_approx(float(watcher.max_health), 72.0),
@@ -419,7 +419,7 @@ func check_lesson() -> void:
 			% [index, watcher.global_position.y])
 	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
 	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
-	check(game.guards.size() == 16, "the world's hostile list holds all sixteen (%d)" % game.guards.size())
+	check(game.guards.size() == 88, "the world's hostile list holds all eighty-eight (%d)" % game.guards.size())
 
 	# ...and eight kills open the way.
 	for watcher in game.camp.guards.duplicate():
@@ -604,12 +604,14 @@ func check_budget() -> void:
 	var shapes := int(readout["shapes"])
 	var lights := int(readout["lights"])
 	# One world is one scene: 60 x 68 m of clearing, 286 m of trail, a square and
-	# sixteen watchers all in one tree. These are the numbers it holds itself to.
-	check(nodes <= 4600, "the world stays inside its node budget (%d)" % nodes)
+	# eighty-eight watchers all in one tree. These are the numbers it holds itself to.
+	# The node cap carries the cult: a watcher is a body and a rig, so eighty extra
+	# of them cost nodes without costing draw calls - draws stay flat at 323.
+	check(nodes <= 4900, "the world stays inside its node budget (%d)" % nodes)
 	check(draws <= 420, "the world stays inside its draw budget (%d multimesh)" % draws)
 	check(shapes <= 900, "the world stays inside its collision budget (%d shapes)" % shapes)
 	check(lights <= 110, "the world stays inside its light budget (%d)" % lights)
-	check(int(readout["guards"]) == 16, "all sixteen watchers are on the list (%d)" % int(readout["guards"]))
+	check(int(readout["guards"]) == 88, "all eighty-eight watchers are on the list (%d)" % int(readout["guards"]))
 	check(float(readout["lane_length"]) >= 240.0 and float(readout["lane_length"]) <= 300.0,
 		"the trail is a long run (%.1f m)" % float(readout["lane_length"]))
 	print("WORLD_BUDGET nodes=%d draws=%d meshes=%d lights=%d shapes=%d guards=%d"
