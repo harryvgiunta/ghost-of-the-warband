@@ -1,6 +1,10 @@
 extends CanvasLayer
-## In-world kit UI. `I` shows the backpack, `P` shows the equipped paperdoll,
-## a vendor stall shows their stock, and the town stash chest shows the stash.
+## In-world kit UI. `I` and `P` both open the combined equipment screen: the
+## worn pieces on the left, a live ranger in the middle, trinkets and the kit's
+## derived stats on the right, and the 60-slot backpack underneath. A vendor
+## stall replaces the stage with its stock, and the town stash chest replaces it
+## with the strongbox; the backpack grid stays put in every view.
+##
 ## The overlay owns every PlayerState mutation and never touches the cursor; the
 ## scene decides when the pointer is free and when movement is blocked.
 
@@ -11,32 +15,41 @@ signal loadout_changed
 const StateScript = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const SlotScript = preload("res://scripts/inventory_slot.gd")
+const ItemArt = preload("res://scripts/item_art.gd")
+const ItemTooltip = preload("res://scripts/item_tooltip.gd")
+const CharacterPreview = preload("res://scripts/character_preview.gd")
+
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
-const WARN := Color("e2a06a")
+
+const COLUMNS := 15
+const SLOT_SIZE := Vector2(82,58)
+const SLOT_GAP := Vector2(6,6)
+const GRID_ORIGIN := Vector2(39,86)
 
 var state
 var session
 var rig
 var in_town := true
 var view := ""
-var paperdoll_panel: Panel
+var paperdoll_panel: Control
 var inventory_panel: Panel
 var side_panel: Panel
-var details_panel: Panel
 var close_button: Button
 var paperdoll_buttons: Array[InventorySlot] = []
 var backpack_buttons: Array[InventorySlot] = []
 var stash_buttons: Array[InventorySlot] = []
 var stock_buttons: Array[InventorySlot] = []
 var floor_buttons: Array[InventorySlot] = []
+var preview
 var _dim: ColorRect
 var _title: Label
+var _subtitle: Label
 var _purse: Label
 var _status: Label
-var _mode_title: Label
+var _selected_label: Label
 var _side_title: Label
 var _side_sub: Label
 var _backpack_count: Label
@@ -46,11 +59,10 @@ var _floor_list: HBoxContainer
 var _floor_scroll: ScrollContainer
 var _stock_scroll: ScrollContainer
 var _stock_list: VBoxContainer
-var _detail_header: Label
-var _detail_meta: Label
-var _detail_text: Label
-var _detail_hint: Label
 var _quick_label: Label
+var _stat_values: Dictionary = {}
+var _bonus_list: VBoxContainer
+var _trinket_labels: Array[Label] = []
 var _primary: Button
 var _secondary: Button
 var _tertiary: Button
@@ -63,6 +75,8 @@ var _slot := ""
 var _stock_item := ""
 var _vendor := 0
 var _built := false
+var _preview_signature := ""
+var _character_panel: Panel
 
 func configure(player_state, session_state, rig_node, drop_handler: Callable = Callable(), town := true) -> void:
 	state = player_state
@@ -122,6 +136,8 @@ func close() -> void:
 	_slot = ""
 	_stock_item = ""
 	visible = false
+	if preview != null:
+		preview.set_active(false)
 	closed.emit()
 
 func refresh() -> void:
@@ -136,6 +152,8 @@ func refresh() -> void:
 	_refresh_floor()
 	_refresh_stock()
 	_refresh_selection()
+	_refresh_stats()
+	_refresh_preview()
 
 func set_status(message: String) -> void:
 	if _status != null:
@@ -150,28 +168,30 @@ func _open_view(next: String) -> void:
 	_index = -1
 	_slot = ""
 	_stock_item = ""
+	if next in ["inventory","equipment"]:
+		_ensure_preview()
 	_refresh_visibility()
 	refresh()
-	if _mode_title != null:
-		_mode_title.text = "EQUIPMENT"
+	_title.text = _view_title()
+	_subtitle.text = "THE TOWN STRONGBOX" if next == "stash" else \
+		(StateScript.VENDORS[_vendor].tag if next == "vendor" else "THE RANGER'S KIT")
 	match next:
-		"inventory":
-			set_status("INVENTORY  /  right-click a piece to equip it.")
-		"equipment":
-			set_status("EQUIPMENT  /  right-click a slot to return it to the pack.  TAB swaps the bound pair.")
+		"inventory","equipment":
+			_mode_hint("EQUIPMENT  •  click a slot to select, right-click to equip or return it.  Hover any piece for its card.")
 		"stash":
-			set_status("STASH  /  move pieces between the pack and the chest.")
+			_mode_hint("STASH  •  select a pack piece, then TO STASH; select a stashed piece, then TO INVENTORY.")
 		"vendor":
-			set_status("%s  /  %s" % [StateScript.VENDORS[_vendor].name,StateScript.VENDORS[_vendor].line])
+			_mode_hint("%s  •  select stock to buy, or a pack piece to sell." % StateScript.VENDORS[_vendor].name)
 	if not was_open:
 		opened.emit()
 	visible = true
 
+func _mode_hint(message: String) -> void:
+	set_status(message)
+
 func _view_title() -> String:
 	match view:
-		"inventory":
-			return "INVENTORY"
-		"equipment":
+		"inventory","equipment":
 			return "EQUIPMENT"
 		"stash":
 			return "STASH"
@@ -180,26 +200,25 @@ func _view_title() -> String:
 	return ""
 
 func _refresh_visibility() -> void:
+	var kit_visible := _open and view in ["inventory","equipment"]
 	_dim.visible = _open
-	paperdoll_panel.visible = _open and view == "equipment"
-	inventory_panel.visible = _open and view in ["inventory","stash","vendor"]
+	paperdoll_panel.visible = kit_visible
+	inventory_panel.visible = _open and view in ["inventory","equipment","stash","vendor"]
 	side_panel.visible = _open and view in ["stash","vendor"]
-	details_panel.visible = _open and view != ""
 	_title.visible = _open
+	_subtitle.visible = _open
 	_purse.visible = _open
 	_status.visible = _open
 	close_button.visible = _open
-	_side_title.text = "STASH" if view == "stash" else "STOCK"
-	_side_sub.text = "The town strongbox." if view == "stash" else str(StateScript.VENDORS[_vendor].name)
+	_side_title.text = "STASH" if view == "stash" else str(StateScript.VENDORS[_vendor].tag)
+	_side_sub.text = "The town strongbox." if view == "stash" else str(StateScript.VENDORS[_vendor].line)
 	_stock_scroll.visible = view == "vendor"
 	_buy.visible = view == "vendor"
 	_stash_count.visible = view == "stash"
-	if view == "stash":
-		_side_title.text = "STASH"
-	elif view == "vendor":
-		_side_title.text = str(StateScript.VENDORS[_vendor].tag)
-	else:
-		_side_title.text = ""
+	for button in stash_buttons:
+		button.visible = view == "stash"
+	if preview != null:
+		preview.set_active(kit_visible)
 
 func _build() -> void:
 	if _built:
@@ -212,25 +231,21 @@ func _build() -> void:
 	root.theme = _build_theme()
 	_dim = ColorRect.new()
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_dim.color = Color(0.015,0.035,0.045,0.72)
+	_dim.color = Color(0.006,0.016,0.020,1.0)
 	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_dim.visible = false
 	root.add_child(_dim)
-	_title = _label(root,"IRONWOOD",Vector2(40,28),30,CREAM)
-	_purse = _label(root,"0 c",Vector2(1050,32),20,GOLD)
-	_purse.size = Vector2(180,30)
+	_title = _label(root,"EQUIPMENT",Vector2(32,16),26,CREAM)
+	_subtitle = _label(root,"THE RANGER'S KIT",Vector2(34,48),10,GOLD)
+	_purse = _label(root,"0 c",Vector2(1010,26),18,GOLD)
+	_purse.size = Vector2(220,26)
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	close_button = _button(root,"CLOSE / ESC",Vector2(1240,28),Vector2(160,40))
+	close_button = _button(root,"CLOSE / ESC",Vector2(1256,18),Vector2(152,40))
 	close_button.add_theme_font_size_override("font_size",12)
 	close_button.pressed.connect(close)
-	_status = _label(root,"",Vector2(-430,34),14,TEAL)
-	_status.set_anchors_preset(Control.PRESET_CENTER_TOP,true)
-	_status.size = Vector2(860,40)
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	build_paperdoll(root)
-	build_inventory(root)
+	build_equipment(root)
+	build_backpack(root)
 	build_side(root)
-	build_details(root)
 	_refresh_visibility()
 
 func _build_theme() -> Theme:
@@ -291,52 +306,217 @@ func _make_slot(parent: Node, area: String, index: int, slot_name: String, at: V
 	result.custom_minimum_size = size_at
 	result.focus_mode = Control.FOCUS_NONE
 	result.clip_text = true
+	result.toggle_mode = true
 	result.add_theme_font_size_override("font_size",font_size)
 	result.drag_enabled = false
+	result.tooltip_builder = Callable(self,"_item_card")
 	result.configure(area,index,slot_name,"")
 	result.right_clicked.connect(_on_right_clicked)
 	result.pressed.connect(_on_slot_pressed.bind(area,index,slot_name))
 	parent.add_child(result)
 	return result
 
-func build_paperdoll(parent: Node) -> void:
-	paperdoll_panel = _panel(parent,Vector2(40,110),Vector2(430,390))
-	_mode_title = _label(paperdoll_panel,"EQUIPMENT",Vector2(16,10),12,GOLD)
-	_label(paperdoll_panel,"Drag-free paperdoll  •  click a slot to inspect",Vector2(16,30),10,MUTED)
-	for index in Rules.SLOTS.size():
-		var slot_name: String = Rules.SLOTS[index]
-		var column := index % 2
-		var row := index / 2
-		var button := _make_slot(paperdoll_panel,"paperdoll",-1,slot_name,Vector2(16+column*202,52+row*52),Vector2(196,44),11)
-		paperdoll_buttons.append(button)
-	_quick_label = _label(paperdoll_panel,"",Vector2(16,312),10,TEAL)
-	_quick_label.size = Vector2(398,16)
-	_quick_label.clip_text = true
-	_label(paperdoll_panel,"TAB swaps. Select main/off, then BIND SWAP.",Vector2(16,330),10,MUTED)
+func _item_card(item_id: String, _area: String) -> Control:
+	if state == null:
+		return null
+	var card := ItemTooltip.new()
+	card.configure(state,item_id)
+	return card
 
-func build_inventory(parent: Node) -> void:
-	inventory_panel = _panel(parent,Vector2(40,110),Vector2(430,390))
+## ---------------------------------------------------------------------------
+## Equipment stage
+
+func build_equipment(parent: Node) -> void:
+	paperdoll_panel = Control.new()
+	paperdoll_panel.position = Vector2(24,78)
+	paperdoll_panel.size = Vector2(1392,438)
+	paperdoll_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(paperdoll_panel)
+	_build_worn(paperdoll_panel)
+	_build_trinkets(paperdoll_panel)
+	_build_character(paperdoll_panel)
+	_build_stats(paperdoll_panel)
+
+func _build_worn(parent: Node) -> void:
+	var panel := _panel(parent,Vector2(0,0),Vector2(226,438))
+	_label(panel,"WORN",Vector2(14,10),11,GOLD)
+	_label(panel,"Armour, hands and boots",Vector2(14,27),9,MUTED)
+	for index in 5:
+		var slot_name: String = Rules.SLOTS[index]
+		var button := _make_slot(panel,"paperdoll",-1,slot_name,
+			Vector2(12,44+index*78),Vector2(202,72),10)
+		button.expand_icon = false
+		button.add_theme_constant_override("icon_max_width",80 if slot_name in ["hands","feet"] else 64)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		paperdoll_buttons.append(button)
+
+func _build_character(parent: Node) -> void:
+	_character_panel = _panel(parent,Vector2(234,0),Vector2(742,438))
+	var backdrop := TextureRect.new()
+	backdrop.position = Vector2(6,6)
+	backdrop.size = Vector2(730,426)
+	backdrop.texture = _stage_texture()
+	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.stretch_mode = TextureRect.STRETCH_SCALE
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_character_panel.add_child(backdrop)
+	# The preview is created on first open; the stage keeps a dark alcove until
+	# then so the panel never flashes an empty rectangle.
+	_quick_label = _label(_character_panel,"",Vector2(250,418),9,GOLD)
+	_quick_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.95))
+	_quick_label.add_theme_constant_override("shadow_offset_x",1)
+	_quick_label.add_theme_constant_override("shadow_offset_y",1)
+	_quick_label.size = Vector2(242,14)
+	_quick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quick_label.clip_text = true
+	var main_button := _make_slot(_character_panel,"paperdoll",-1,"main",Vector2(14,346),Vector2(190,74),10)
+	main_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	main_button.expand_icon = false
+	main_button.add_theme_constant_override("icon_max_width",56)
+	paperdoll_buttons.append(main_button)
+	var off_button := _make_slot(_character_panel,"paperdoll",-1,"off",Vector2(538,346),Vector2(190,74),10)
+	off_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	off_button.expand_icon = false
+	off_button.add_theme_constant_override("icon_max_width",56)
+	paperdoll_buttons.append(off_button)
+
+func _build_trinkets(parent: Node) -> void:
+	var panel := _panel(parent,Vector2(984,0),Vector2(92,438))
+	_label(panel,"TRINKETS",Vector2(6,10),9,GOLD)
+	for offset in 3:
+		var slot_name: String = Rules.SLOTS[5+offset]
+		var button := _make_slot(panel,"paperdoll",-1,slot_name,
+			Vector2(6,42+offset*102),Vector2(80,74),9)
+		button.expand_icon = true
+		button.text = ""
+		button.tooltip_builder = Callable(self,"_item_card")
+		paperdoll_buttons.append(button)
+		var label := _label(panel,"",Vector2(6,118+offset*102),8,MUTED)
+		label.size = Vector2(80,14)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.clip_text = true
+		_trinket_labels.append(label)
+	_label(panel,"HOVER FOR",Vector2(6,358),7,MUTED)
+	_label(panel,"ITS CARD",Vector2(6,368),7,MUTED)
+
+func _build_stats(parent: Node) -> void:
+	var panel := _panel(parent,Vector2(1084,0),Vector2(308,438))
+	_label(panel,"RANGER",Vector2(16,10),20,CREAM)
+	_label(panel,"THE FRONTIER KIT",Vector2(17,38),9,MUTED)
+	var rows := [
+		{"key":"attack", "label":"Attack", "y":62},
+		{"key":"defense", "label":"Defense", "y":108},
+		{"key":"life", "label":"Life", "y":154},
+		{"key":"stamina", "label":"Stamina", "y":200},
+	]
+	for row: Dictionary in rows:
+		_label(panel,str(row["label"]),Vector2(16,float(row["y"])),11,MUTED)
+		var value := _label(panel,"—",Vector2(150,float(row["y"])-6),20,GOLD)
+		value.size = Vector2(142,30)
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_stat_values[str(row["key"])] = value
+		var rule := ColorRect.new()
+		rule.position = Vector2(16,float(row["y"])+34)
+		rule.size = Vector2(276,1)
+		rule.color = Color("2d474d")
+		panel.add_child(rule)
+	_label(panel,"BONUSES",Vector2(16,250),9,GOLD)
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(16,270)
+	scroll.size = Vector2(276,146)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+	_bonus_list = VBoxContainer.new()
+	_bonus_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bonus_list.add_theme_constant_override("separation",2)
+	scroll.add_child(_bonus_list)
+	_label(panel,"HOVER A SLOT FOR ITS CARD",Vector2(16,418),7,MUTED)
+
+func _stage_texture() -> Texture2D:
+	var gradient := Gradient.new()
+	gradient.offsets = PackedFloat32Array([0.0,0.66,1.0])
+	gradient.colors = PackedColorArray([Color("27464a"),Color("14272b"),Color("081113")])
+	var texture := GradientTexture2D.new()
+	texture.gradient = gradient
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5,0.40)
+	texture.fill_to = Vector2(1.08,0.52)
+	texture.width = 512
+	texture.height = 512
+	return texture
+
+func _ensure_preview() -> void:
+	if preview != null or _character_panel == null:
+		return
+	preview = CharacterPreview.new()
+	preview.name = "Preview"
+	preview.position = Vector2(6,6)
+	preview.size = Vector2(730,426)
+	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	preview.built.connect(_on_preview_built)
+	_character_panel.add_child(preview)
+	if _quick_label != null:
+		_character_panel.move_child(_quick_label,_character_panel.get_child_count() - 1)
+
+func _on_preview_built() -> void:
+	if preview != null and state != null:
+		preview.apply_state(state)
+		preview.set_active(paperdoll_panel != null and paperdoll_panel.visible)
+	_preview_signature = ""
+
+func _refresh_preview() -> void:
+	if preview == null or state == null:
+		return
+	var signature := JSON.stringify(state.equipped)
+	if signature == _preview_signature:
+		return
+	_preview_signature = signature
+	preview.apply_state(state)
+
+## ---------------------------------------------------------------------------
+## Backpack
+
+func build_backpack(parent: Node) -> void:
+	inventory_panel = _panel(parent,Vector2(24,526),Vector2(1392,358))
 	_label(inventory_panel,"BACKPACK",Vector2(16,10),12,GOLD)
-	_backpack_count = _label(inventory_panel,"",Vector2(250,10),12,CREAM)
-	_backpack_count.size = Vector2(164,18)
-	_backpack_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	for index in StateScript.INVENTORY_CAPACITY:
-		var column := index % 5
-		var row := index / 5
-		var button := _make_slot(inventory_panel,"backpack",index,"",Vector2(16+column*80,48+row*56),Vector2(76,48),10)
-		backpack_buttons.append(button)
-	_floor_label = _label(inventory_panel,"GROUND  •  empty",Vector2(16,216),10,MUTED)
-	_floor_label.size = Vector2(398,16)
+	_backpack_count = _label(inventory_panel,"",Vector2(112,11),12,CREAM)
+	_backpack_count.size = Vector2(120,20)
+	_selected_label = _label(inventory_panel,"No piece selected",Vector2(250,13),10,MUTED)
+	_selected_label.size = Vector2(700,18)
+	_selected_label.clip_text = true
+	_primary = _button(inventory_panel,"",Vector2(974,9),Vector2(130,30))
+	_primary.add_theme_font_size_override("font_size",11)
+	_primary.pressed.connect(_on_primary)
+	_secondary = _button(inventory_panel,"",Vector2(1112,9),Vector2(130,30))
+	_secondary.add_theme_font_size_override("font_size",11)
+	_secondary.pressed.connect(_on_secondary)
+	_tertiary = _button(inventory_panel,"",Vector2(1250,9),Vector2(130,30))
+	_tertiary.add_theme_font_size_override("font_size",11)
+	_tertiary.pressed.connect(_on_tertiary)
+	_floor_label = _label(inventory_panel,"GROUND  •  nothing dropped",Vector2(16,48),9,MUTED)
 	_floor_scroll = ScrollContainer.new()
-	_floor_scroll.position = Vector2(16,234)
-	_floor_scroll.size = Vector2(398,38)
+	_floor_scroll.position = Vector2(82,44)
+	_floor_scroll.size = Vector2(1286,32)
 	_floor_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_floor_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	inventory_panel.add_child(_floor_scroll)
 	_floor_list = HBoxContainer.new()
 	_floor_list.add_theme_constant_override("separation",4)
 	_floor_scroll.add_child(_floor_list)
-	_label(inventory_panel,"I  INVENTORY  /  P  EQUIPMENT  /  TAB  SWAP\nG  interact with a keeper or chest",Vector2(16,284),11,MUTED)
+	for index in StateScript.INVENTORY_CAPACITY:
+		var column := index % COLUMNS
+		var row := index / COLUMNS
+		var at := GRID_ORIGIN + Vector2(column * (SLOT_SIZE.x + SLOT_GAP.x),row * (SLOT_SIZE.y + SLOT_GAP.y))
+		var button := _make_slot(inventory_panel,"backpack",index,"",at,SLOT_SIZE,10)
+		button.expand_icon = true
+		button.text = ""
+		backpack_buttons.append(button)
+	_status = _label(inventory_panel,"",Vector2(16,334),10,TEAL)
+	_status.size = Vector2(1360,18)
+	_status.clip_text = true
+
+## ---------------------------------------------------------------------------
+## Stash / keeper stock
 
 static func stock_row_count() -> int:
 	var largest := 0
@@ -345,21 +525,26 @@ static func stock_row_count() -> int:
 	return largest
 
 func build_side(parent: Node) -> void:
-	side_panel = _panel(parent,Vector2(500,110),Vector2(900,390))
-	_side_title = _label(side_panel,"",Vector2(16,10),12,GOLD)
-	_side_sub = _label(side_panel,"",Vector2(16,30),11,MUTED)
-	_side_sub.size = Vector2(860,20)
-	_stash_count = _label(side_panel,"",Vector2(760,10),12,CREAM)
-	_stash_count.size = Vector2(124,18)
+	side_panel = _panel(parent,Vector2(24,78),Vector2(1392,438))
+	_side_title = _label(side_panel,"",Vector2(18,12),12,GOLD)
+	_side_sub = _label(side_panel,"",Vector2(18,32),10,MUTED)
+	_side_sub.size = Vector2(1100,20)
+	_side_sub.clip_text = true
+	_stash_count = _label(side_panel,"",Vector2(1240,12),11,CREAM)
+	_stash_count.size = Vector2(130,20)
 	_stash_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	for index in 20:
 		var column := index % 5
 		var row := index / 5
-		var button := _make_slot(side_panel,"stash",index,"",Vector2(16+column*176,58+row*58),Vector2(168,52),11)
+		var button := _make_slot(side_panel,"stash",index,"",
+			Vector2(20+column*270,64+row*88),Vector2(260,80),11)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.expand_icon = false
+		button.add_theme_constant_override("icon_max_width",56)
 		stash_buttons.append(button)
 	_stock_scroll = ScrollContainer.new()
-	_stock_scroll.position = Vector2(16,58)
-	_stock_scroll.size = Vector2(868,290)
+	_stock_scroll.position = Vector2(18,60)
+	_stock_scroll.size = Vector2(1356,320)
 	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	side_panel.add_child(_stock_scroll)
 	_stock_list = VBoxContainer.new()
@@ -369,39 +554,19 @@ func build_side(parent: Node) -> void:
 	# One row per keeper stock entry: the pool is sized from the largest vendor
 	# so a longer list can never silently lose its last pieces.
 	for index in stock_row_count():
-		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(820,32),12)
-		button.custom_minimum_size = Vector2(0,32)
+		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(1320,34),12)
+		button.custom_minimum_size = Vector2(0,34)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.expand_icon = false
+		button.add_theme_constant_override("icon_max_width",26)
 		stock_buttons.append(button)
-	_buy = _button(side_panel,"BUY",Vector2(16,358),Vector2(868,26))
+	_buy = _button(side_panel,"BUY",Vector2(18,396),Vector2(1356,30))
 	_buy.add_theme_font_size_override("font_size",12)
 	_buy.pressed.connect(_on_buy)
 
-func build_details(parent: Node) -> void:
-	details_panel = _panel(parent,Vector2(40,512),Vector2(1360,236))
-	_detail_header = _label(details_panel,"Nothing selected",Vector2(18,12),22,CREAM)
-	_detail_header.size = Vector2(940,28)
-	_detail_header.clip_text = true
-	_detail_meta = _label(details_panel,"",Vector2(18,44),12,TEAL)
-	_detail_meta.size = Vector2(940,20)
-	_detail_meta.clip_text = true
-	_detail_text = _label(details_panel,"",Vector2(18,68),12,MUTED)
-	_detail_text.size = Vector2(940,58)
-	_detail_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_detail_hint = _label(details_panel,"",Vector2(18,132),11,MUTED)
-	_detail_hint.size = Vector2(940,24)
-	_detail_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_primary = _button(details_panel,"",Vector2(990,20),Vector2(350,44))
-	_primary.add_theme_font_size_override("font_size",14)
-	_primary.pressed.connect(_on_primary)
-	_secondary = _button(details_panel,"",Vector2(990,76),Vector2(350,44))
-	_secondary.add_theme_font_size_override("font_size",14)
-	_secondary.pressed.connect(_on_secondary)
-	_tertiary = _button(details_panel,"",Vector2(990,132),Vector2(350,44))
-	_tertiary.add_theme_font_size_override("font_size",14)
-	_tertiary.pressed.connect(_on_tertiary)
-	_label(details_panel,"DROP moves the piece onto the ground. Re-pickup it from the world.",Vector2(990,184),10,MUTED)
+## ---------------------------------------------------------------------------
+## Refresh
 
 func _refresh_paperdoll() -> void:
 	for index in paperdoll_buttons.size():
@@ -411,19 +576,25 @@ func _refresh_paperdoll() -> void:
 		button.item = item_id
 		button.index = -1
 		button.slot = slot_name
+		var icon := ItemArt.texture(item_id)
+		button.icon = icon
 		var label := str(Rules.SLOT_LABELS.get(slot_name,slot_name))
-		if item_id.is_empty():
+		if index >= 5 and index <= 7:
+			button.text = ""
+			var trinket_label := _trinket_labels[index - 5]
+			trinket_label.text = state.item_short(item_id).to_upper() if not item_id.is_empty() else "EMPTY"
+			trinket_label.add_theme_color_override("font_color",CREAM if not item_id.is_empty() else MUTED)
+			button.tooltip_text = state.item_name(item_id) if not item_id.is_empty() else "%s — nothing equipped" % label
+		elif item_id.is_empty():
 			button.text = "%s  •  EMPTY" % label.to_upper()
 			button.tooltip_text = "%s — nothing equipped" % label
 		else:
 			button.text = "%s  •  %s" % [label.to_upper(),state.item_short(item_id)]
 			button.tooltip_text = state.item_name(item_id)
 		button.set_pressed_no_signal(_location == "paperdoll" and _slot == slot_name)
-	if _quick_label != null:
-		var quick_text := "QUICK SWAP (TAB)  •  %s" % state.quick_set_label()
-		if state.has_quick_return():
-			quick_text += "  ↔  %s" % state.quick_return_label()
-		_quick_label.text = quick_text
+	_quick_label.text = "TAB  " + state.quick_set_label()
+	if state.has_quick_return():
+		_quick_label.text += "  ↔  " + state.quick_return_label()
 
 func _refresh_backpack() -> void:
 	for index in backpack_buttons.size():
@@ -433,12 +604,15 @@ func _refresh_backpack() -> void:
 		if index < state.inventory.size():
 			var item_id: String = state.inventory[index]
 			button.item = item_id
-			button.text = state.item_short(item_id)
+			var icon := ItemArt.texture(item_id)
+			button.icon = icon
+			button.text = "" if icon != null else state.item_short(item_id)
 			button.tooltip_text = state.item_name(item_id)
 		else:
 			button.item = ""
-			button.text = "—"
-			button.tooltip_text = "Empty backpack slot"
+			button.icon = null
+			button.text = ""
+			button.tooltip_text = ""
 		button.set_pressed_no_signal(_location == "backpack" and index == _index)
 
 func _refresh_stash() -> void:
@@ -448,10 +622,13 @@ func _refresh_stash() -> void:
 		if index < state.stash.size():
 			var item_id: String = state.stash[index]
 			button.item = item_id
-			button.text = state.item_short(item_id)
+			var icon := ItemArt.texture(item_id)
+			button.icon = icon
+			button.text = "   " + state.item_name(item_id)
 			button.tooltip_text = state.item_name(item_id)
 		else:
 			button.item = ""
+			button.icon = null
 			button.text = ""
 			button.tooltip_text = ""
 		button.set_pressed_no_signal(_location == "stash" and index == _index)
@@ -465,10 +642,13 @@ func _refresh_floor() -> void:
 	_floor_label.text = "GROUND  •  nothing dropped" if items.is_empty() else "GROUND  •  %d piece(s)" % items.size()
 	for index in items.size():
 		var item_id: String = items[index]
-		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(112,32),10)
-		button.custom_minimum_size = Vector2(112,32)
+		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(132,30),9)
+		button.custom_minimum_size = Vector2(132,30)
 		button.item = item_id
-		button.text = state.item_short(item_id)
+		button.icon = ItemArt.texture(item_id)
+		button.expand_icon = false
+		button.add_theme_constant_override("icon_max_width",22)
+		button.text = "  " + state.item_short(item_id)
 		button.tooltip_text = state.item_name(item_id)
 		button.set_pressed_no_signal(_location == "floor" and index == _index)
 		floor_buttons.append(button)
@@ -486,39 +666,61 @@ func _refresh_stock() -> void:
 			button.disabled = false
 			button.index = index
 			button.item = item_id
-			button.text = "%s   %d c" % [state.item_name(item_id),state.item_price(item_id)]
+			button.icon = ItemArt.texture(item_id)
+			button.text = "  %s   %d c" % [state.item_name(item_id),state.item_price(item_id)]
 			button.tooltip_text = state.item_detail(item_id)
 			button.set_pressed_no_signal(_location == "stock" and _stock_item == item_id)
 		else:
 			button.visible = false
 			button.disabled = true
 			button.item = ""
+			button.icon = null
 			button.text = ""
+
+func _refresh_stats() -> void:
+	if state == null or _stat_values.is_empty():
+		return
+	_stat_values["attack"].text = state.main_attack_text()
+	_stat_values["defense"].text = "%d%%" % state.defense_percent()
+	_stat_values["life"].text = str(state.life_value())
+	_stat_values["stamina"].text = str(state.stamina_value())
+	for child in _bonus_list.get_children():
+		_bonus_list.remove_child(child)
+		child.queue_free()
+	var rows: Array = state.kit_bonus_rows()
+	if rows.is_empty():
+		var none := Label.new()
+		none.text = "No worn modifiers."
+		none.add_theme_font_size_override("font_size",10)
+		none.add_theme_color_override("font_color",MUTED)
+		_bonus_list.add_child(none)
+		return
+	for entry: Dictionary in rows:
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = str(entry.get("label",""))
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.add_theme_font_size_override("font_size",9)
+		label.add_theme_color_override("font_color",MUTED)
+		row.add_child(label)
+		var value := Label.new()
+		value.text = str(entry.get("value",""))
+		value.add_theme_font_size_override("font_size",10)
+		value.add_theme_color_override("font_color",TEAL)
+		row.add_child(value)
+		_bonus_list.add_child(row)
 
 func _refresh_selection() -> void:
 	var item_id := _selected_item()
-	if item_id.is_empty():
-		_detail_header.text = "Nothing selected"
-		_detail_meta.text = ""
-		_detail_text.text = ""
-		_detail_hint.text = "Click a slot to inspect it."
-		_primary.visible = false
-		_secondary.visible = false
-		_tertiary.visible = false
-		_buy.disabled = true
-		return
-	_detail_header.text = state.item_name(item_id)
-	var meta: String = state.item_type_line(item_id)
-	var compact: String = state.item_compact_stats(item_id)
-	if not compact.is_empty():
-		meta += "  •  " + compact
-	if _location != "stock" and state.is_equipped(item_id):
-		meta += "  •  EQUIPPED"
-	_detail_meta.text = meta
-	_detail_text.text = "%s\n“%s”" % [state.item_summary(item_id),state.item_quote(item_id)]
 	_primary.visible = false
 	_secondary.visible = false
 	_tertiary.visible = false
+	_buy.disabled = true
+	if item_id.is_empty():
+		_selected_label.text = "No piece selected"
+		return
+	_selected_label.text = "%s   •   %s" % [state.item_name(item_id),state.item_type_line(item_id)]
+	_buy.disabled = state.inventory_full() or int(state.credits) < state.item_price(item_id)
 	match _location:
 		"backpack":
 			_primary.visible = true
@@ -537,7 +739,6 @@ func _refresh_selection() -> void:
 				_tertiary.visible = true
 				_tertiary.text = "DROP"
 				_tertiary.tooltip_text = "Drop the piece on the ground."
-			_detail_hint.text = "Right-click equips automatically."
 		"paperdoll":
 			_primary.visible = true
 			_primary.text = "UNEQUIP"
@@ -549,25 +750,22 @@ func _refresh_selection() -> void:
 			if _drop_handler.is_valid() or in_town:
 				_tertiary.visible = true
 				_tertiary.text = "DROP"
-			_detail_hint.text = "Right-click returns it to the backpack. TAB swaps the bound pair."
 		"stash":
 			_primary.visible = true
 			_primary.text = "TO INVENTORY"
 			_primary.disabled = state.inventory_full()
 			_primary.tooltip_text = "Backpack is full." if state.inventory_full() else ""
-			_detail_hint.text = "Move pieces between the stash and the backpack."
 		"floor":
 			_primary.visible = true
 			_primary.text = "PICK UP"
 			_primary.disabled = state.inventory_full()
 			_primary.tooltip_text = "Backpack is full." if state.inventory_full() else ""
-			_detail_hint.text = "Ground items wait at the ranger's feet."
 		"stock":
-			_detail_hint.text = "Buy a piece with a free backpack slot."
-			_buy.disabled = state.inventory_full() or int(state.credits) < state.item_price(item_id)
 			_buy.text = "BUY  /  %d c" % state.item_price(item_id)
 	if _location != "stock":
 		_buy.disabled = true
+	if _location == "backpack" and view != "stash":
+		_secondary.visible = false
 
 func _selected_item() -> String:
 	if state == null:
@@ -587,6 +785,9 @@ func _selected_item() -> String:
 		"stock":
 			return _stock_item
 	return ""
+
+## ---------------------------------------------------------------------------
+## Actions
 
 func _on_slot_pressed(area: String, index: int, slot_name: String) -> void:
 	if area == "stock":

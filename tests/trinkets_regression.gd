@@ -138,7 +138,7 @@ func _test_vendor_stock() -> void:
 	for vendor: Dictionary in State.VENDORS:
 		largest = maxi(largest, (vendor.stock as Array).size())
 	check(largest == stock.size(), "The trinket list is the longest keeper stock")
-	check(State.INVENTORY_CAPACITY >= 15, "The backpack size is unchanged")
+	check(State.INVENTORY_CAPACITY == 60, "The backpack holds sixty single-item slots")
 
 
 func _test_aggregation() -> void:

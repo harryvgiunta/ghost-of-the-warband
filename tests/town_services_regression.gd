@@ -98,7 +98,7 @@ func run() -> void:
 	# I shows the pack; P shows the paperdoll. Equipping mutates the live kit.
 	game.toggle_inventory()
 	check(game.world_ui.is_open() and game.world_ui.active_view() == "inventory","I opens the backpack")
-	check(game.world_ui.inventory_panel.visible and not game.world_ui.paperdoll_panel.visible,"Inventory hides the paperdoll")
+	check(game.world_ui.inventory_panel.visible and game.world_ui.paperdoll_panel.visible,"I opens the combined kit")
 	var sword_index: int = state.inventory.find("sword_short")
 	check(sword_index >= 0,"The starter sword is in the pack")
 	game.world_ui._location = "backpack"
@@ -108,7 +108,7 @@ func run() -> void:
 	check(state.inventory.has("bow_short"),"The displaced bow returns to the pack")
 	game.toggle_equipment()
 	check(game.world_ui.is_open() and game.world_ui.active_view() == "equipment","P switches to the paperdoll")
-	check(game.world_ui.paperdoll_panel.visible and not game.world_ui.inventory_panel.visible,"Equipment hides the backpack")
+	check(game.world_ui.paperdoll_panel.visible and game.world_ui.inventory_panel.visible,"P opens the combined kit")
 	check(game.world_ui.paperdoll_buttons.size() == 10,"The paperdoll renders ten slots")
 	game.world_ui._location = "paperdoll"
 	game.world_ui._slot = "main"
