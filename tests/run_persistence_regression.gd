@@ -25,13 +25,16 @@ const WARBAND_SAVE := "user://run_persist_warband.json"
 const OLD_SAVE := "user://run_persist_v1.json"
 const BOUND_SAVE := "user://run_persist_bound.json"
 
-## Three bodies, three waves: 3 + 4 + 5 cultists fall, each leaving a piece.
-const WAVE_KILLS := 12
-## The arena's own five battlefield drops plus the twelve the cult leaves behind.
+## Three bodies, five waves from the director: 3 + 4 + 4 + 5 + 6 cultists fall,
+## each leaving a piece.
+const WAVE_KILLS := 22
+## The arena's own five battlefield drops plus the twenty-two the cult leaves behind.
 const FIELD_DROPS := 5
 const EXPECTED_ITEMS := WAVE_KILLS + FIELD_DROPS
-const REWARD_GOLD := 250
-const REWARD_CRUOR := 3
+## What the director pays on a clear: 25 gold a wave plus 50 for the Bilewarden,
+## one ritual tallow a wave and one black bile at the boss.
+const REWARD_GOLD := 175
+const REWARD_CRUOR := 6
 const TOWN_SCENE := "res://scenes/town_hub.tscn"
 
 const LINEUP := [
@@ -128,17 +131,20 @@ func _clear_expedition() -> void:
 	check(warband.run_open(), "Warband opens a record when the cult's waves appear")
 	check(warband.run_history().is_empty(), "an open record is not yet history")
 
+	# Walk whatever curve the director fields, rather than assuming its length:
+	# the report must describe the battle that was really fought.
+	var waves_seen := 1
 	check(await _kill_wave(), "wave one falls")
-	check(await _wait_wave(1), "wave two arrives on its own")
-	check(await _kill_wave(), "wave two falls")
-	check(await _wait_wave(2), "wave three arrives")
-	check(await _kill_wave(), "wave three falls")
+	while not game._battle_over and waves_seen < 8:
+		if not await _wait_wave(waves_seen):
+			break
+		waves_seen += 1
+		check(await _kill_wave(), "wave %d falls" % waves_seen)
 	check(game._battle_over, "the last wave ends the expedition")
+	check(waves_seen == 5, "the director fielded five waves (%d)" % waves_seen)
 
-	# The clear pays, the way the director will: through the real wallets, never
-	# through the report.
-	warband.award_gold(REWARD_GOLD)
-	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, REWARD_CRUOR)
+	# The director paid on the clear, through the real wallets and never through
+	# the report: nothing here hands the warband a second purse.
 
 	check(await _wait_until(func(): return not game._loot_running, 25.0),
 		"the survivors finish looting the field")
@@ -158,13 +164,13 @@ func _clear_expedition() -> void:
 		"the record names the expedition (%s)" % str(report.get("mode")))
 	check(str(report.get("outcome")) == RunReportScript.OUTCOME_CLEARED,
 		"a battle where the warband stands is a clear (%s)" % str(report.get("outcome")))
-	check(int(report.get("waves")) == 3, "three waves were fielded (%d)" % int(report.get("waves")))
-	check(int(report.get("waves_cleared")) == 3,
-		"three waves were broken (%d)" % int(report.get("waves_cleared")))
+	check(int(report.get("waves")) == 5, "five waves were fielded (%d)" % int(report.get("waves")))
+	check(int(report.get("waves_cleared")) == 5,
+		"five waves were broken (%d)" % int(report.get("waves_cleared")))
 	check(int(report.get("kills")) == WAVE_KILLS,
-		"the twelve cultists are counted (%d)" % int(report.get("kills")))
+		"the twenty-two cultists are counted (%d)" % int(report.get("kills")))
 	check(int(report.get("items")) == EXPECTED_ITEMS,
-		"five field drops and twelve cultist drops are booked (%d)" % int(report.get("items")))
+		"five field drops and twenty-two cultist drops are booked (%d)" % int(report.get("items")))
 	check(int(report.get("items")) == _holdings() - holdings_before,
 		"the item count matches what the warband gained (%d vs %d)" % [
 			int(report.get("items")), _holdings() - holdings_before])
@@ -188,7 +194,7 @@ func _clear_expedition() -> void:
 	check(int(totals.get("runs")) == 1, "the record counts one run")
 	check(int(totals.get("wins")) == 1, "and one clear")
 	check(int(totals.get("wipes")) == 0, "and no wipe")
-	check(int(totals.get("best_wave")) == 3, "the best wave is three (%d)" % int(totals.get("best_wave")))
+	check(int(totals.get("best_wave")) == 5, "the best wave is five (%d)" % int(totals.get("best_wave")))
 	check(int(totals.get("kills")) == WAVE_KILLS, "the kills accumulate")
 	check(int(totals.get("gold")) == REWARD_GOLD and int(totals.get("cruor")) == REWARD_CRUOR,
 		"the lifetime rewards accumulate")
@@ -245,7 +251,7 @@ func _wipe_expedition() -> void:
 	check(int(totals.get("runs")) == 2, "two runs are counted")
 	check(int(totals.get("wins")) == 1 and int(totals.get("wipes")) == 1,
 		"a wipe is tallied apart from a clear")
-	check(int(totals.get("best_wave")) == 3,
+	check(int(totals.get("best_wave")) == 5,
 		"a shorter run never lowers the best wave (%d)" % int(totals.get("best_wave")))
 	check(int(totals.get("kills")) == WAVE_KILLS + 1, "kills add up across runs")
 
@@ -407,7 +413,7 @@ func _check_screen() -> void:
 		"the block tells waves reached from waves broken (%s)" % screen.last_run_label.text)
 	check(screen.record_label.text.contains("2 run(s)"),
 		"the block shows the lifetime runs (%s)" % screen.record_label.text)
-	check(screen.record_label.text.contains("best wave 3"),
+	check(screen.record_label.text.contains("best wave 5"),
 		"the block shows the best wave (%s)" % screen.record_label.text)
 	check(screen.record_label.text.contains("1 clear(s)") and
 		screen.record_label.text.contains("1 wipe(s)"),
