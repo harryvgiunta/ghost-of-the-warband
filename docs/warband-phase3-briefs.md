@@ -185,3 +185,42 @@ May edit warband_state.gd inside the persistence section only (marked block).
    report; host a second peer in the lobby and take a body.
 5. Update `docs/warband-handoff.md` §4/§5 and the skill's test list with the new
    counts, then tag the state in the commit message.
+
+---
+
+## wt 17 — the road (added mid-phase, at the owner's request)
+
+```
+# Target
+Worktree ../gotw-wt17, branch wt-17-escape-run.
+Owns: scenes/escape_run.tscn, scripts/warband/escape_run.gd, run_forest.gd,
+squad_drive.gd, tests/escape_run_regression.gd, plus the gate hand-off in
+cage_escape.gd, the gate transition in tutorial_sequencer.gd and the gate
+assertions in tests/cage_escape_regression.gd.
+
+# Why
+The arch at the camp gate was a teleport: press G and the game skipped the escape
+it had just spent a tutorial building up to. The owner asked for a long, bloody
+run back to town through dark voodoo woods - torches everywhere, doodads, trees
+with things hanging - assembled from art the repo already ships.
+
+# Change
+- `G` at the camp arch now emits `scenes/escape_run.tscn`; the tutorial no longer
+  ends there (no TOWN state), and the run's own gate emits the town.
+- `RunForest.build(parent)` returns `{root, lane, length, width, torches,
+  spawn_posts, arch, clearings, ...}`: a 286 m lane, 11 m walkable, torches down
+  both verges, tree/bramble walls with real collision outside the lane, rag trees,
+  gallows trees, charm ropes and bone arches over the road, wicker effigies, skull
+  stakes, cauldrons, braziers, straw/blood/ruts - all from the world kits, night
+  from EnvironmentKit.
+- Eight armed `CageWatcher`s: two on the soul at spawn, a pair per clearing.
+- Both endings are one door: G at the town arch, or a wipe after 2.5 s.
+
+# Acceptance
+`escape_run_regression` 116: the arch's single door, the lane's measured length
+and width, torch count and 1:1 lights, an art/node/draw budget, a body driven the
+whole lane (52.8 s of game time, never off the walkable width, distance always
+falling), the pursuers hunting the soul, the squad following, both endings.
+`cage_escape_regression` re-pointed, not weakened. `town_hub`, `warband_art`,
+`game_flow`, `warband_contract` green.
+```

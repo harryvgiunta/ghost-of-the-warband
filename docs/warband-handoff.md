@@ -296,11 +296,18 @@ the 31-test gate in §4 plus the two socket tests. One integration defect was
 caught and fixed at the merge: the report test was written against the
 three-wave arena and now walks the director's five.
 
-Still open from Gate 3, and the reason it is written down rather than hidden: the
-**rendered** playthrough (a real window: cards pause, F5 takes Corvin, four
-latches, the squad fights, six armed watchers, gate → woods → town) and the
-**two-peer** lobby run were never exercised on a display in this session — every
-check above is headless. Do that first in the next session.
+**Gate 3, rendered:** the camp, its arch, the road (three vantages plus the
+player's own shoulder camera), the town and the expedition arena were rendered in
+a real window and looked at, which is what caught the two defects no headless
+assertion could: the road as a corridor of black (torches at 2.6 energy over 20 m
+and 1.15 ambient) and the camp as a night with no vision at all, its torches bare
+glowing spheres. Both are fixed (`a8ee1f2`, `9b1b66a`); the road now reads as a
+chain of fire and the camp as a lit holding pen.
+
+**Still not exercised on a display:** driving the tutorial with real input (cards,
+F5 taking Corvin, the four G latches, the squad fight, the six runners) and a
+second peer through the lobby. Every check for those is headless. Do that first in
+the next session.
 
 ### Phase 4 (later)
 
