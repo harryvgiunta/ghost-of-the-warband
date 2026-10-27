@@ -232,10 +232,10 @@ Integration seams deliberately placed in the base game:
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
-| `cage_escape_regression` | 191 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six out of the trees, drops, the mouth |
-| `escape_run_regression` | 242 | the trail as an area: 286 m walkable lane, art budget, 80 hunters clear of the camp, both endings |
+| `cage_escape_regression` | 191 | cards/pause, Corvin killing the pair unattended, the four latches falling when the soul enters him (G does nothing), the squad arming, 72 HP watchers, the six at the mouth, drops |
+| `escape_run_regression` | 242 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
 | `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 174 | one scene and one controller, the camp in the trees, the lesson, 359 m camp → town with no scene change, the services at the far end, budget |
+| `warband_world_regression` | 174 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
