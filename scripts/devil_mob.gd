@@ -127,6 +127,10 @@ var _present_band := -1
 ## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
 var dormant := false
 var _attacker: Node3D
+## Ghost of the Warband: the far-fight stance - `PassiveDuelBrain` widens the
+## ring and shuts the attack gate between the few blows a far body is allowed.
+var warband_passive := false
+var _warband_guard := 0.0
 
 
 func _ready() -> void:
@@ -237,6 +241,8 @@ func _physics_process(delta: float) -> void:
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	# Ghost of the Warband: the brain's guard window rides the cooldown clock.
+	_warband_guard = maxf(0.0, _warband_guard - delta)
 	var focus := _senses.focus() if pursuit else _target.global_position
 	var to_target := focus - global_position
 	to_target.y = 0.0
@@ -431,7 +437,8 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 		_hunt(delta)
 		return
 	var reach := float(profile.reach)
-	if distance <= reach + 1.15 and _attack_cooldown <= 0.0:
+	# Ghost of the Warband: a guarded body refuses to trade (the brain's window).
+	if distance <= reach + 1.15 and _attack_cooldown <= 0.0 and _warband_guard <= 0.0:
 		_enter("WINDUP")
 		return
 	var behaviour := str(profile.behaviour)
@@ -447,8 +454,12 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 			_face_intent = direction
 		return
 	var orbit := float(profile.orbit)
-	var closing := _attack_cooldown <= 0.0
+	var closing := _attack_cooldown <= 0.0 and not (warband_passive and _warband_guard > 0.0)
 	var radius := maxf(1.1, reach * 0.82) if closing else orbit
+	# Ghost of the Warband: with the gate shut the body holds a ring just outside
+	# its own swing gate, so a far duel reads as a measured circle-and-guard.
+	if warband_passive and not closing:
+		radius = reach + 1.4
 	var angle := atan2(global_position.z - _target.global_position.z,
 		global_position.x - _target.global_position.x)
 	angle += _strafe_dir * delta * float(profile.strafe) * (1.15 + 0.25 * sin(_state_time * 0.9))
@@ -463,6 +474,9 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	if closing:
 		desired_speed = float(profile.run_speed) if distance > radius + 1.4 else float(profile.walk_speed)
 	_move_speed = desired_speed
+	# Ghost of the Warband: a passive body circles at a walk, never a sprint.
+	if warband_passive:
+		_move_speed = float(profile.walk_speed)
 	_face_intent = direction
 
 
@@ -613,6 +627,20 @@ func stagger(seconds: float) -> void:
 	_struck = true
 	velocity.x = 0.0
 	velocity.z = 0.0
+
+
+## Ghost of the Warband: the far-fight stance switch used by `PassiveDuelBrain`.
+## Leaving the stance drops the guard, so a body entering a bubble fights at once.
+func warband_stance(passive: bool) -> void:
+	warband_passive = passive
+	if not passive:
+		_warband_guard = 0.0
+
+
+## Ghost of the Warband: hold the attack gate shut for `seconds`; the newest
+## order wins, so `warband_guard(0.0)` is how the brain opens a swing window.
+func warband_guard(seconds: float) -> void:
+	_warband_guard = maxf(0.0, seconds)
 
 
 func note_impact(force: Vector3) -> void:
