@@ -80,9 +80,9 @@ static func value_of(item_id: String, brand: Dictionary = {}) -> int:
 ## Row: `{item_id, name, category, value, pooled, worn, total, tags, branded}`.
 ## `worn` is `[{merc_id, merc_name, slot}]`; `tags` is the display list.
 func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
-	var by_item: Dictionary = {}
+	var by_item: Dictionary = {}   # item_id -> {pooled:int, worn:Array}
 	for item_id in _pooled:
-		by_item[str(item_id)] = int(_pooled[item_id])
+		by_item[str(item_id)] = {"pooled": int(_pooled[item_id]), "worn": []}
 	if roster != null:
 		for merc in roster.records():
 			var gear: Variant = merc.get("equipped", {})
@@ -92,18 +92,18 @@ func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
 				var worn_id := str(gear[slot])
 				if worn_id.is_empty():
 					continue
-				var entry: Variant = by_item.get(worn_id, [])
-				if not entry is Array:
-					entry = []
-				entry.append({"merc_id": int(merc.get("id", 0)),
+				var entry: Variant = by_item.get(worn_id)
+				if not entry is Dictionary:
+					entry = {"pooled": 0, "worn": []}
+					by_item[worn_id] = entry
+				(entry["worn"] as Array).append({"merc_id": int(merc.get("id", 0)),
 					"merc_name": str(merc.get("name", "Mercenary")),
 					"slot": str(slot)})
-				by_item[worn_id] = entry
 	var rows: Array[Dictionary] = []
 	for item_id in by_item:
-		var entry: Variant = by_item[item_id]
-		var worn: Array = entry if entry is Array else []
-		var pooled := 0 if entry is Array else int(entry)
+		var entry: Dictionary = by_item[item_id]
+		var worn: Array = entry["worn"]
+		var pooled := int(entry["pooled"])
 		var item: Dictionary = State.ITEMS.get(item_id, {})
 		var brand: Variant = brands.get(item_id, {})
 		var brand_payload: Dictionary = brand if brand is Dictionary else {}

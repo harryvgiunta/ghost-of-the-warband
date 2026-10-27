@@ -255,6 +255,16 @@ func check_stash(state, warband) -> void:
 	warband.unequip_merc(merc_id, "main")
 	check(stash.pooled_count("bow_short") == 2, "unequipping returns the piece")
 
+	# The same id can be both worn and spare: the row must count both.
+	warband.equip_merc(merc_id, "main", "bow_short")
+	var mixed: Dictionary = {}
+	for row in warband.stash.rows(roster, warband.cruor.brands):
+		if str(row["item_id"]) == "bow_short":
+			mixed = row
+	check(int(mixed["pooled"]) == 1, "a worn-and-spared id keeps its pooled count")
+	check((mixed["worn"] as Array).size() == 1, "and keeps its wearer tag")
+	check(int(mixed["total"]) == 2, "the row total is pooled plus worn")
+
 	# The stash is infinite: 600 copies in, all readable and sorted.
 	for index in 600:
 		stash.add("ring_copper", 1)
