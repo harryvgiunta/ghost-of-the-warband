@@ -522,6 +522,7 @@ difference. `docs/warband.md` is the contract document; this note is the map.
 | World and its areas | `world_scene.gd` builds the world (one floor, one night, `GameFlow.world_start` = "camp" or "town"); `cage_escape.gd`, `escape_run.gd` and `town_hub.gd` each take `host` — with a host they build only their own content, no controller/HUD/environment/door. `camp_clearing.gd` is the camp as a clearing in the woods (196 trees and 155 bushes round a 60 x 68 m clearing, 10 broken fence runs / 357 stakes, 17 torches, a 14 m mouth onto the trail) |
 | Tutorial | `TutorialCard` (modal, pauses the tree, CONTINUE / G / Enter / Escape) + `TutorialSequencer` (CAGED → ALL_SEEN → RESCUER_ARRIVED → FREED → ESCAPING; there is no TOWN state, the lesson ends where the road does). `note_rescuer_taken()` changes the objective; pre-FREED kills are refused and reconciled by `note_battle_state()`; **no loot step is advertised** |
 | Squad AI | `scripts/warband/squad_drive.gd`: freed prisoners silently arm themselves from drops (`auto_equip` + `controller.refresh_gear`) and charge the nearest watcher, with a blocked-sidestep when the lane wall stops them; it also owns watcher retargeting for both scenes, and the player's body is never driven |
+| Hand torch | `scripts/warband/torch_light.gd`: the off-hand catalog piece `torch_hand` (category focus, slot off, 45 gold, quartermaster stock) and the light it carries — `build_visual()` returns the brand + `FireFx` cards on the flame shader (shared with the icon studio), the node itself is a 7.5-energy, 26 m omnilight polled every 0.2 s off the roster, so any gear path lights or douses it. The world attaches one to every warband body |
 | Camp watchers | `CageWatcher` extends the forest mob: 72 health, 5 damage, run 5.6, sight 60, orbit 1.9; `arm(item)` puts a catalog blade on `hand_r`, `take_weapon_item()` drops it; `hunt(target)` forces an aggressive pursuit |
 | Camp ground | a 60 x 68 m clearing inside the wood, treeline immediately outside, a broken stake fence instead of a wall, one 96 m x 462 m world floor under camp, trail and town (the only ground, so nothing can fall out) |
 | The trail | `scripts/warband/run_forest.gd` builds the trail: the lane starts at the clearing's mouth and ends where the town begins, and the world turns off its own end walls and its gate so the three places share one space. It is: a 286 m lane, 11 m walkable, 48 torches every 12 m a side (3.4 energy, 16 m range, `FireFlicker`), ironoak/snag/briar walls with trunk colliders and per-segment wall boxes at half-width + 0.35, rag trees and gallows trees, charm ropes and bone arches over the lane, wicker effigies, skull stakes, cauldrons, braziers, straw/blood/ruts, night from `EnvironmentKit` (ambient 2.5, sun 0.55, fog 0.012, density written after the mode). `escape_run.gd` fields the trail's eight `CageWatcher`s (two on the soul at spawn and a pair in each clearing, each dropping its weapon) and no door at all: walking into the town is the ending, and a wipe hands the warband to the town end after 2.5 s. `scripts/warband/squad_drive.gd` is the one follow/fight/retarget behaviour, shared with the cage. |
@@ -536,11 +537,11 @@ difference. `docs/warband.md` is the contract document; this note is the map.
 Tests (all headless, `tests/*_regression.gd`): contract 180, possession 236,
 downed_revive 67, combat_bubble 73, altar 112, stash_autoloot 170, warband_ui 99,
 branded_abilities 114, branded_world 48, enemy_waves 108, town_hub 58,
-cage_escape 158, escape_run 115, warband_world 172, expedition 42, expedition_director 154, game_flow 22,
+cage_escape 158, escape_run 115, warband_world 172, torch_light 19, expedition 42, expedition_director 154, game_flow 22,
 admin_arena 98, quartermaster 20, warband_art 192, warband_lobby 56,
 run_persistence 196, warband_session 49 (two real ENet processes). Run one with
 `& .\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/<name>.gd`.
-Run the 32-test gate twelve at a time (~100 s); keep the two socket tests serial.
+Run the 33-test gate twelve at a time (~100 s); keep the two socket tests serial.
 
 Hard-won rules (see `docs/warband-handoff.md` for the full list): `seat_loadout()`
 is a spawn snapshot, use `controller.refresh_gear(merc_id)` for live gear;

@@ -448,7 +448,11 @@ static func _clearing_points(path: Path) -> Array:
 ## The two that start behind the squad, at the camp mouth: close enough to be on
 ## them at once, inside the lane so they are never walled off from the run.
 static func _pursuer_posts(path: Path) -> Array:
-	var head := path.sample(0.0)
+	# Inside the trail, not on the camp's doorstep: the mouth is the camp's own
+	# ground while the cages are shut, and a ring of cultists standing there
+	# fight the tutorial's watchers for the player before the escape begins.
+	var at := minf(22.0, path.total * 0.5)
+	var head := path.sample(at)
 	var back: Vector3 = (head["position"] as Vector3) - (head["forward"] as Vector3) * 3.2
 	var right: Vector3 = head["right"]
 	return [back + right * 1.9, back - right * 1.9]

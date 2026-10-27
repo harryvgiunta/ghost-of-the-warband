@@ -284,7 +284,7 @@ correctly after the fog fix.
 
 The shipped loop, the decision log, the test inventory and the next-phase
 worktree briefs live in **`docs/warband-handoff.md`**. Start a session there: it
-names the commit, the engine/test commands, the fifteen rules that must not be
+names the commit, the engine/test commands, the eighteen rules that must not be
 regressed, the Godot traps already paid for, and the phase plan.
 
 Short version of the latest tuning (all in the code, all covered by

@@ -158,9 +158,8 @@ func check_the_world() -> void:
 	check(soul != null, "the soul is seated in a body when the trail opens")
 	check(soul != null and game.trail.guards.size() == 80,
 		"eighty cultists hold the trail (%d)" % game.trail.guards.size())
-	for index in mini(2, game.trail.guards.size()):
-		check(game.trail.guards[index].player == soul,
-			"pursuer %d starts on the soul's body" % (index + 1))
+	# Where they stand is what matters (asserted with the lane, below): a mob's
+	# `player` field is its current quarry, not a spawn-time script.
 
 
 func check_lane() -> void:
@@ -270,11 +269,20 @@ func check_pursuers() -> void:
 		% [armed, game.trail.guards.size()])
 	check(visible >= 6, "the blade is in its hand (%d visible)" % visible)
 	check(hunting >= 2, "the cult is hunting the warband (%d hunting)" % hunting)
+	# The ambush stands inside the trail rather than on the camp's doorstep, so
+	# the camp's own fight is not fought for it. Its first post is ~19 m in.
 	var start: Vector3 = game.trail.forest["start"]
-	for index in mini(2, game.trail.guards.size()):
-		check(_flat(game.trail.guards[index].global_position, start) <= 8.0,
-			"pursuer %d starts at the camp mouth (%.1f m)" % [index + 1,
-				_flat(game.trail.guards[index].global_position, start)])
+	var near := 0
+	var far := 0
+	for watcher in game.trail.guards:
+		var distance := _flat(watcher.global_position, start)
+		if distance <= 30.0:
+			near += 1
+		if distance > 12.0:
+			far += 1
+	check(near >= 10 and far == game.trail.guards.size(),
+		"the whole cult stands down the trail, clear of the camp (%d within 30 m)"
+		% near)
 	check(game.squad != null and game.squad.following, "the squad is an escort once the camp is clear")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")

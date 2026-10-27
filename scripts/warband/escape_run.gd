@@ -101,10 +101,11 @@ func _build_cultists() -> void:
 	var soul = host.controller.active_body(1)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7717
-	# The post the squad starts beside is the ambush: everything there is already
-	# locked onto the soul. The rest have to notice the squad.
+	# The ambush post sits a little way down the trail: it does not start locked
+	# onto the soul, because the camp's own fight happens at the mouth. Whoever
+	# walks past it is noticed by the same senses as the rest of the road.
 	for post in forest.get("pursuer_posts", []) as Array:
-		_spawn_ring(post as Vector3, soul, rng, true)
+		_spawn_ring(post as Vector3, soul, rng, false)
 	for post in forest.get("clearing_posts", []) as Array:
 		_spawn_ring(post as Vector3, null, rng, false)
 

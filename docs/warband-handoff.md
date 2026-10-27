@@ -27,7 +27,9 @@ work. The design/contract document is `docs/warband.md`; the repo skill
 The campaign is **one world** — `scenes/warband_world.tscn`, one scene, one soul
 controller. The cages stand in a clearing inside the dark wood; the wood runs 286 m
 to a town cut into the same trees. Nothing between them is a door: walking is the
-only way from one to the next, and no key loads a scene.
+only way from one to the next, and no key loads a scene. The title's **GHOST OF THE
+WARBAND** door is a *new campaign* — it resets the warband and the shared journey
+(purse included) and opens at the cages, however the last run ended.
 
 1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
@@ -45,8 +47,10 @@ only way from one to the next, and no key loads a scene.
    trail through the same wood — 48 torches down both verges, ironoak and hollow
    snags, rag trees and gallows trees with charms strung across the track, wicker
    effigies, skull stakes, cauldrons, braziers, straw, blood and cart ruts. The
-   squad runs it with you; two armed watchers start on your body and a pair waits
-   in each of the three clearings.
+   squad runs it with you, and **eighty** armed cultists hold it: ten at each of
+   its eight posts, the ambush post already locked onto you. A **Hand Torch** (45
+   gold from the quartermaster, off hand) is the answer to the dark: worn, it burns
+   in your hand and lights 26 m of wood around you.
 6. **Town.** The trail ends at a town built into the trees: a wooden road sign
    over its gate, the fire ring, the stalls, and the services — shared infinite
    stash, Sacrificial Altar (unbind / distil 5:1 / brand), Gold recruiter,
@@ -146,6 +150,16 @@ Integration seams deliberately placed in the base game:
     `current_scene`, `GameFlow.transitions` and `scene_requested` are untouched — a
     prop, a wall box or a bounds clamp that narrows the world is a test failure,
     not a matter of taste.
+17. **The warband door is a new campaign.** `GameFlow.start_campaign()` resets the
+    warband *and* `PlayerState` (the purse is the shared wallet) and enters at the
+    cages; `enter_warband()` is the resume path and is not what the title calls.
+    `title_menu_regression` pins it with a saved warband that must not survive the
+    click.
+18. **The hand torch is one module and one brightness.** `torch_light.gd` owns the
+    item's visual (shared with the icon studio through `build_visual`) and its light
+    (7.5 energy, 26 m, warm): a carried torch has to be brighter than the trail's
+    fixed 3.4/16 m pools. It polls the roster, so every gear path — paperdoll, stash,
+    loot — lights or douses it without being told.
 
 ### Tuning knobs (one place each)
 
@@ -160,8 +174,9 @@ Integration seams deliberately placed in the base game:
 | Camp torches | `cage_escape.gd::CAMP_TORCHES` | 17 (cages, mouth, both flanks, the rim) |
 | The trail: length, width, torches | `run_forest.gd` | 286 m, 11 m walkable, 48 torches every 12 m a side (3.4 energy / 16 m) |
 | The world: night | `run_forest.gd::night_style()` | ambient 2.5, sun 0.55, fog 0.012, filmic, saturation 0.80 |
-| The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd`, clearing posts | 16 in one hostile list: 2 in the clearing, 6 out of the trees, 8 on the trail |
-| The world: budget | `warband_world_regression.gd` caps | nodes ≤ 4600 (now 3901), draws ≤ 420 (323), shapes ≤ 900 (518), lights ≤ 110 (88) |
+| The world: pursuers | `cage_escape.gd` (`GATE_WATCHERS`, `REINFORCEMENTS`), `escape_run.gd::ROAD_PER_POST`, `run_forest.gd::_pursuer_posts` | 88 in one hostile list: 2 in the clearing, 6 out of the trees, 80 on the trail (10 per post, 8 posts); the ambush post stands ~22 m into the trail, never on the camp's doorstep |
+| Hand torch | `torch_light.gd` | off hand, 45 gold, 7.5 energy / 26 m / attenuation 1.0, polled every 0.2 s |
+| The world: budget | `warband_world_regression.gd` caps | nodes ≤ 4900 (now 4748), draws ≤ 420 (323), shapes ≤ 900 (590), lights ≤ 110 (88) |
 | The world: walk | `warband_world_regression.gd` | 359 m cage line → town square, 66.4 s of game time, 0 scene changes |
 | Town lanterns | `town_dressing.gd` | 4 posts, 3.2 energy / 15 m, attenuation 1.1 |
 | Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the town end of the world; nobody revived, nothing gathered |
@@ -199,7 +214,8 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
 | `cage_escape_regression` | 158 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six out of the trees, drops, the mouth |
-| `escape_run_regression` | 115 | the trail as an area: 286 m walkable lane, art budget, 8 hunters, both endings |
+| `escape_run_regression` | 400 | the trail as an area: 286 m walkable lane, art budget, 80 hunters clear of the camp, both endings |
+| `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 172 | one scene and one controller, the camp in the trees, the lesson, 359 m camp → town with no scene change, the services at the far end, budget |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
@@ -224,7 +240,7 @@ GODOT=./.runtime/godot/Godot_v4.7.2-stable_win64_console.exe
 OUT=C:/tmp/gres; rm -rf "$OUT"; mkdir -p "$OUT"
 LIST="warband_contract possession downed_revive combat_bubble altar stash_autoloot
 warband_ui branded_abilities enemy_waves town_hub cage_escape escape_run
-warband_world expedition
+warband_world torch_light expedition
 expedition_director game_flow admin_arena quartermaster branded_world warband_art
 run_persistence gameplay combat_expansion net_limits world_art mob_aggro paperdoll
 town_services title_menu world_ui hitbox block_clash draw_combat ranger_clone"
