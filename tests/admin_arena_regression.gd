@@ -89,7 +89,7 @@ func check_spawn() -> void:
 	var a: Vector3 = game.groups[0][0].global_position
 	var b: Vector3 = game.groups[1][0].global_position
 	var gap := Vector2(a.x - b.x, a.z - b.z).length()
-	check(gap > 38.0 and gap < 46.0, "the brawls stand %.1f m apart" % gap)
+	check(gap > 44.0 and gap < 52.0, "the brawls stand %.1f m apart" % gap)
 	var distinct_hands := {}
 	for actor in game.bodies:
 		var merc_id: int = game.controller.merc_of(actor)

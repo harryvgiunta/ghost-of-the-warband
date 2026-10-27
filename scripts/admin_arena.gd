@@ -32,9 +32,9 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 
 ## The two sparring posts. Forty two metres apart: outside the 34 m bubble exit
 ## radius, so neither group starts hot, and both are inside the 33 m field.
-const SQUAD_A := Vector3(-21.0, 0.0, -6.0)
-const SQUAD_B := Vector3(21.0, 0.0, -6.0)
-const PLAYER_POSTS := [Vector3(0.0, 0.0, 24.0), Vector3(2.5, 0.0, 24.0)]
+const SQUAD_A := Vector3(-24.0, 0.0, -10.0)
+const SQUAD_B := Vector3(24.0, 0.0, -10.0)
+const PLAYER_POSTS := [Vector3(0.0, 0.0, 20.0), Vector3(2.5, 0.0, 20.0)]
 const SQUAD_SIZE := 3
 const STASH_POINT := Vector3(4.0, 0.0, 18.0)
 const ALTAR_POINT := Vector3(-4.0, 0.0, 18.0)

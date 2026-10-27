@@ -23,7 +23,8 @@ var _name_label: Label
 var _state_label: Label
 var _health_label: Label
 var _health_bar: ProgressBar
-var _squad_label: RichTextLabel
+var _squad_box: VBoxContainer
+var _squad_sig := ""
 var _purse_label: Label
 var _essence_label: Label
 var _prompt_label: Label
@@ -107,17 +108,17 @@ func _build() -> void:
 	_health_label.add_theme_font_size_override("font_size", 11)
 	column.add_child(_health_label)
 
-	_squad_label = RichTextLabel.new()
-	_squad_label.name = "Squad"
-	_squad_label.bbcode_enabled = true
-	_squad_label.fit_content = true
-	_squad_label.scroll_active = false
-	_squad_label.custom_minimum_size = Vector2(300, 0)
-	_squad_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_squad_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_squad_label.position = Vector2(18, -18)
-	_squad_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	root_control.add_child(_squad_label)
+	var squad_panel := PanelContainer.new()
+	squad_panel.name = "SquadPanel"
+	squad_panel.position = Vector2(18, 128)
+	squad_panel.custom_minimum_size = Vector2(300, 0)
+	squad_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_control.add_child(squad_panel)
+	_squad_box = VBoxContainer.new()
+	_squad_box.name = "Squad"
+	_squad_box.add_theme_constant_override("separation", 1)
+	_squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	squad_panel.add_child(_squad_box)
 
 	_purse_label = Label.new()
 	_purse_label.name = "Purse"
@@ -179,27 +180,48 @@ func _refresh_body() -> void:
 	_health_label.text = "%d / %d" % [int(round(health)), int(round(max_health))]
 
 func _refresh_squad() -> void:
-	if _squad_label == null or _warband == null:
+	if _squad_box == null or _warband == null:
 		return
-	var lines: PackedStringArray = []
 	var ids: Array[int] = _warband.roster.ids()
+	var signature := "%d|%d" % [ids.size(), _merc_id]
+	for merc_id in ids:
+		var record: Dictionary = _warband.roster.find(merc_id)
+		signature += "|%d:%d:%d" % [merc_id,
+			int(round(float(record.get("health", 0.0)))), int(record.get("state", 0))]
+	if signature == _squad_sig:
+		return
+	_squad_sig = signature
+	for child in _squad_box.get_children():
+		child.queue_free()
 	for index in ids.size():
 		var merc_id := ids[index]
 		var record: Dictionary = _warband.roster.find(merc_id)
 		if record.is_empty():
 			continue
 		var state := int(record.get("state", Contracts.HealthState.DEAD))
-		var marker := ">" if merc_id == _merc_id else " "
-		var state_tag := ""
-		if state == Contracts.HealthState.DOWNED:
-			state_tag = "  [color=#c8813a]DOWNED[/color]"
-		elif state == Contracts.HealthState.DEAD:
-			state_tag = "  [color=#8a8a8a]DEAD[/color]"
-		var hp := "%d%%" % int(round(float(record.get("health", 0.0))
-			/ maxf(1.0, float(record.get("max_health", 1.0))) * 100.0))
+		var max_hp := maxf(1.0, float(record.get("max_health", 1.0)))
+		var percent := int(round(float(record.get("health", 0.0)) / max_hp * 100.0))
 		var key := "F%d" % (index + 1) if index < 8 else "--"
-		lines.append("%s %s  %-12s %4s%s" % [marker, key, str(record.get("name", "?")), hp, state_tag])
-	_squad_label.text = "[font_size=12]%s\n[color=#9a9a9a][ / ] swap body   TAB warband   G altar/stash[/color][/font_size]" % "\n".join(lines)
+		var marker := ">" if merc_id == _merc_id else " "
+		var row := Label.new()
+		row.add_theme_font_size_override("font_size", 12)
+		var suffix := ""
+		match state:
+			Contracts.HealthState.DOWNED:
+				suffix = "  DOWNED"
+				row.modulate = Color(0.92, 0.62, 0.30)
+			Contracts.HealthState.DEAD:
+				suffix = "  DEAD"
+				row.modulate = Color(0.55, 0.55, 0.55)
+			_:
+				row.modulate = Color(0.95, 0.95, 0.95)
+		row.text = "%s %s  %-10s %3d%%%s" % [marker, key, str(record.get("name", "?")), percent, suffix]
+		_squad_box.add_child(row)
+	var hint := Label.new()
+	hint.add_theme_font_size_override("font_size", 10)
+	hint.modulate = Color(0.72, 0.72, 0.72)
+	hint.text = "[ / ] swap body   TAB warband   G altar/stash"
+	_squad_box.add_child(hint)
 
 func _refresh_purse() -> void:
 	if _purse_label == null:
