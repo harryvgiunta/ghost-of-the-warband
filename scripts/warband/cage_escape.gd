@@ -147,6 +147,8 @@ var _reviving := false
 var _cage_open: Array[bool] = []   # per cage, in CAGE_POSTS order
 var _watchers_awake := false
 var _card_state := -1
+## Set the first time a freed ally swings at a watcher; the regression reads it.
+var _ally_engaged := false
 var _prompt_text := ""
 var _hint_text := ""
 
@@ -204,8 +206,10 @@ func _ready() -> void:
 	sequencer.announce()
 	if not caged_ids.is_empty():
 		controller.direct(1, caged_ids[0])
-	_push_card(sequencer.state())
+	# Capture the mouse before the card opens: the card remembers the mode it
+	# found and restores it, and the mode it should find is the game's.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_push_card(sequencer.state())
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow != null:
 		flow.bind(self)
@@ -223,6 +227,7 @@ func _physics_process(delta: float) -> void:
 	if controller == null:
 		return
 	_rescuer_jog()
+	_drive_allies(delta)
 	controller.physics_step(delta)
 	_maintain_watchers(delta)
 	_clamp_caged_bodies()
@@ -637,6 +642,163 @@ func _on_pickup_taken(pickup) -> void:
 	if screen != null:
 		screen.refresh()
 
+# --- the freed squad's AI --------------------------------------------------
+
+## Once a cage opens, the prisoner inside it stops being scenery: they arm
+## themselves from the cultist steel on the ground and go for the watchers. This
+## is deliberately a scene driver rather than the arena's `_bot_step`, because a
+## squadmate's job is "loot, then close on a watcher", and the watchers are mobs
+## the arena bot cannot see.
+func _drive_allies(_delta: float) -> void:
+	if controller == null or sequencer == null:
+		return
+	if sequencer.state() == SequencerScript.State.CAGED \
+			or sequencer.state() == SequencerScript.State.ALL_SEEN:
+		return
+	var player_body = controller.active_body(1)
+	for merc_id in squad_ids:
+		if not _is_free_ally(int(merc_id)):
+			continue
+		var actor = controller.body_of(int(merc_id))
+		if actor == null or not is_instance_valid(actor):
+			continue
+		if actor == player_body:
+			continue
+		if not bool(actor.get("alive")) or bool(actor.get("downed")):
+			_hold(actor)
+			continue
+		actor.combat.damage_enabled = true
+		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
+		var armed := not str(gear.get("main", "")).is_empty() \
+			or not str(gear.get("off", "")).is_empty()
+		# 1. An unarmed prisoner looks for steel first.
+		if not armed:
+			var pickup = _nearest_pickup_for(actor)
+			if pickup != null:
+				if actor.global_position.distance_to(pickup.global_position) <= 1.5:
+					_hold(actor)
+					_ally_take(actor, int(merc_id), pickup)
+				else:
+					_move_towards(actor, pickup.global_position)
+				continue
+		# 2. Armed, or nothing left to grab: go at the watchers.
+		var watcher = _nearest_watcher(actor)
+		if watcher == null:
+			_hold(actor)
+			continue
+		var to: Vector3 = watcher.global_position - actor.global_position
+		to.y = 0.0
+		var distance := to.length()
+		actor.combat.set_aim(watcher.get_aim_position())
+		if distance > 2.0:
+			_move_towards(actor, watcher.global_position)
+			continue
+		_hold(actor)
+		if actor.rig.weapon == "bow":
+			if actor.combat.can_draw():
+				actor.combat.begin_draw()
+			elif actor.rig.draw_amount >= 0.85:
+				actor.combat.release_draw()
+		elif actor.combat.clash_cooldown <= 0.0:
+			actor.combat.begin_melee()
+			_ally_engaged = true
+
+## A body that is out of its cage and standing in the squad, or the rescuer once
+## he has arrived. The player's own body is filtered by the caller.
+func _is_free_ally(merc_id: int) -> bool:
+	var index := caged_ids.find(merc_id)
+	if index >= 0:
+		return index < _cage_open.size() and bool(_cage_open[index])
+	return sequencer.state() != SequencerScript.State.CAGED \
+		and sequencer.state() != SequencerScript.State.ALL_SEEN
+
+func _move_towards(actor, point: Vector3) -> void:
+	var to: Vector3 = point - actor.global_position
+	to.y = 0.0
+	if to.length_squared() <= 0.0001:
+		_hold(actor)
+		return
+	var direction := to.normalized()
+	actor.accept_network_input(Vector2(direction.x, direction.z), true)
+
+func _hold(actor) -> void:
+	actor.accept_network_input(Vector2.ZERO, false)
+
+func _nearest_pickup_for(actor):
+	var best = null
+	var best_distance := 40.0
+	for pickup in _pickups:
+		if not is_instance_valid(pickup) or bool(pickup.collected):
+			continue
+		var distance: float = actor.global_position.distance_to(pickup.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = pickup
+	return best
+
+func _nearest_watcher(actor):
+	var best = null
+	var best_distance := 60.0
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var distance: float = actor.global_position.distance_to(watcher.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = watcher
+	return best
+
+## A squadmate takes a drop for themselves: the vacuum books it and the piece is
+## worn by that body (the player's pickup rule would arm the soul instead).
+func _ally_take(actor, merc_id: int, pickup) -> void:
+	var item_id := str(pickup.item_id)
+	var result: Dictionary = loot.quick_loot(pickup, 0)
+	if not bool(result.get("ok", false)):
+		return
+	var auto: Dictionary = warband.auto_equip(merc_id, item_id)
+	# The roster is the truth, but the body in the yard still holds the old kit:
+	# re-dress the live rig or a squadmate "carries" a sword it never draws.
+	_refresh_rig(merc_id)
+	if bool(auto.get("ok", false)) and hud != null:
+		hud.set_status("%s takes the %s." % [warband.roster.name_of(merc_id),
+			State.ITEMS.get(item_id, {}).get("name", item_id)], 2.5)
+	actor.combat.stop()
+
+## Re-apply a mercenary's current roster kit to the body standing in the scene.
+func _refresh_rig(merc_id: int) -> void:
+	if controller == null or merc_id <= 0:
+		return
+	var actor = controller.body_of(merc_id)
+	if actor == null or not is_instance_valid(actor):
+		return
+	SeatLoadout.apply(actor.rig, controller.seat_loadout(merc_id))
+
+## How many freed allies are holding a weapon, and whether any has swung at a
+## watcher. Both are read by the regression.
+func allies_armed() -> int:
+	var count := 0
+	var player_body = controller.active_body(1)
+	for merc_id in squad_ids:
+		if not _is_free_ally(int(merc_id)):
+			continue
+		var actor = controller.body_of(int(merc_id))
+		if actor == null or not bool(actor.get("alive")):
+			continue
+		# The soul's own body is not an ally: its gear is the player's business.
+		if actor == player_body:
+			continue
+		var gear: Dictionary = warband.roster.equipped_of(int(merc_id))
+		var in_roster := not str(gear.get("main", "")).is_empty() \
+			or not str(gear.get("off", "")).is_empty()
+		var in_hand := str(actor.rig.weapon) != "" or bool(actor.rig.off_weapon_active) \
+			or bool(actor.rig.staff_active) or bool(actor.rig.shield_equipped)
+		if in_roster and in_hand:
+			count += 1
+	return count
+
+func ally_engaged() -> bool:
+	return _ally_engaged
+
 # --- the watchers ----------------------------------------------------------
 
 ## Two antlered watchers, not arena bodies: they are real wilderness mobs with a
@@ -660,11 +822,22 @@ func _build_watchers() -> void:
 func _maintain_watchers(delta: float) -> void:
 	if guards.is_empty():
 		return
-	var actor = controller.active_body(1)
-	if actor != null and is_instance_valid(actor):
+	# Watchers hunt whoever is closest once the squad is loose: a freed prisoner
+	# is a real threat, not a spectator.
+	var nearest = controller.active_body(1)
+	var best := INF
+	for body in bodies:
+		if not is_instance_valid(body) or not bool(body.get("alive")) or bool(body.get("downed")):
+			continue
+		var distance: float = body.global_position.distance_to(guards[0].global_position) \
+			if is_instance_valid(guards[0]) else 0.0
+		if distance < best:
+			best = distance
+			nearest = body
+	if nearest != null and is_instance_valid(nearest):
 		for watcher in guards:
 			if is_instance_valid(watcher) and bool(watcher.get("alive")):
-				watcher.player = actor
+				watcher.player = nearest
 	if cages_open_count() > 0 and not _watchers_awake:
 		_watchers_awake = true
 		for watcher in guards:
@@ -857,6 +1030,8 @@ func _try_loot() -> void:
 		hud.set_status("Nothing within reach.", 1.5)
 		return
 	var result: Dictionary = loot.quick_loot(pickup, 1)
+	if bool(result.get("ok", false)):
+		_refresh_rig(controller.merc_for_peer(1))
 	hud.set_status(str(result.get("message", "")), 2.5)
 
 ## `G` is the tutorial's one interaction key: cut a latch, take the steel at your
@@ -998,6 +1173,9 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	paperdoll.changed.connect(func() -> void:
+		if paperdoll.selected_merc > 0:
+			_refresh_rig(paperdoll.selected_merc))
 	card = CardScript.new()
 	card.name = "TutorialCard"
 	add_child(card)

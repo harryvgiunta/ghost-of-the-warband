@@ -191,6 +191,7 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | Module | Surface |
 | --- | --- |
 | `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages clamped one body each, the rescuer's scripted jog and forced possession, **one latch per cage cut with G**, two antlered camp watchers, three weapon drops that snap into the soul's hands, the gate door (G) |
+| squad AI (`_drive_allies` in `cage_escape.gd`) | a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`) and then runs at the nearest watcher, aiming and swinging; the player's own body is never driven, the rescuer joins in if the soul leaves him. Watchers hunt the nearest standing body, not just the soul. |
 | `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body |
 | `scripts/warband/tutorial_card.gd` (`TutorialCard`) | the modal step card: large title/body/keys, **pauses the tree** while open, one CONTINUE button (or G / Enter / Escape), restores the previous pause and mouse state on close |
 | `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
@@ -259,6 +260,7 @@ what exposed the engine fog trap above.
   a looted piece straight into the soul's hands when that slot is empty or the
   new piece is worth more than what is worn there; anything else stays in the
   stash. The post-battle sweep never auto-equips.
+- A looted or paperdoll-equipped piece is pushed onto the **live rig** (`SeatLoadout.apply(rig, controller.seat_loadout(merc_id))`) in the cage, the arena and the town, so gear changes are visible on the body and not only in the roster.
 - Every scene names its keys on a standing hint line (`WarbandHud.set_hint`, 16 px
   under a 20 px prompt): the tutorial's per-beat hint comes from
   `TutorialSequencer.hint()`, the town names its screens and the counter you stand

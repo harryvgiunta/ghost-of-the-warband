@@ -17,8 +17,10 @@ difference - and the warband is the thing that survives a battle.
   button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
   prisoner in sacrificial rags runs in with a shiv and the soul is forced into
   him. Walk to each cage and press **G** to cut its latch (four latches, four
-  cages), loot the cultist steel, put down the two antlered camp watchers (three
-  dagger stabs each) and press **G** in the gate arch to leave.
+  cages). The moment a cage opens, that prisoner is **taken over by squad AI**:
+  they pick the cultist steel off the ground themselves and charge the two
+  antlered camp watchers (three dagger stabs each). Press **G** in the gate arch
+  to leave.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons

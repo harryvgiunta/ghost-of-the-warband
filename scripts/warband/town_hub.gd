@@ -18,6 +18,7 @@ extends Node3D
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
+const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
@@ -452,6 +453,7 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	paperdoll.changed.connect(_on_paperdoll_changed)
 	quartermaster = QuartermasterScript.new()
 	quartermaster.name = "Quartermaster"
 	add_child(quartermaster)
@@ -528,6 +530,16 @@ func service_point(service: String) -> Vector3:
 		"gate":
 			return gate.global_position
 	return Vector3.ZERO
+
+## A paperdoll change has to reach the body standing in the square, or the
+## mercenary keeps the old kit in the only place the player can see it.
+func _on_paperdoll_changed() -> void:
+	if paperdoll == null or paperdoll.selected_merc <= 0:
+		return
+	var actor = controller.body_of(paperdoll.selected_merc)
+	if actor == null or not is_instance_valid(actor):
+		return
+	SeatLoadout.apply(actor.rig, controller.seat_loadout(paperdoll.selected_merc))
 
 ## The key line for the square. The town is where a player learns the two screens,
 ## so it always names them, plus whatever counter the body is standing at.

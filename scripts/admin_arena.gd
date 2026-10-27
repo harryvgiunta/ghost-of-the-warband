@@ -26,6 +26,7 @@ const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
+const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const WavesScript = preload("res://scripts/warband/enemy_waves.gd")
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const LootRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
@@ -594,6 +595,9 @@ func _build_ui() -> void:
 	paperdoll.name = "Paperdoll"
 	add_child(paperdoll)
 	paperdoll.configure(warband)
+	paperdoll.changed.connect(func() -> void:
+		if paperdoll.selected_merc > 0:
+			_refresh_rig(paperdoll.selected_merc))
 
 # --- possession ------------------------------------------------------------
 
@@ -724,6 +728,8 @@ func _try_quick_loot() -> void:
 		hud.set_status("Nothing within reach.", 1.5)
 		return
 	var result: Dictionary = loot.quick_loot(nearest, 1)
+	if bool(result.get("ok", false)):
+		_refresh_rig(controller.merc_for_peer(1))
 	hud.set_status(str(result.get("message", "")), 2.0)
 
 func _try_interact() -> void:
@@ -771,6 +777,16 @@ func _update_prompt() -> void:
 
 ## The battle is over when no brawler is left standing. The survivors walk the
 ## field and the vacuum takes everything into the shared stash.
+## Push a mercenary's current roster kit onto the body standing in the arena, so
+## a looted or paperdoll-equipped piece is visible in the fight.
+func _refresh_rig(merc_id: int) -> void:
+	if controller == null or merc_id <= 0:
+		return
+	var actor = controller.body_of(merc_id)
+	if actor == null or not is_instance_valid(actor):
+		return
+	SeatLoadout.apply(actor.rig, controller.seat_loadout(merc_id))
+
 ## Which mercenary a picked-up piece should be worn by, or -1.
 func _loot_owner(peer_id: int) -> int:
 	var actor = controller.body_for_peer(peer_id) if controller != null else null

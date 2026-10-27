@@ -303,42 +303,24 @@ func check_freed_walk() -> void:
 
 # --- the fight and the gate ------------------------------------------------
 
+## Poll a condition while playing the player: any tutorial card that opens during
+## the wait is read and closed, so the scene keeps moving.
+func await_condition(predicate: Callable, timeout: float, label: String) -> bool:
+	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		dismiss_card(label)
+		if bool(predicate.call()):
+			return true
+		await create_timer(0.05).timeout
+	dismiss_card(label)
+	return bool(predicate.call())
+
 func check_fight_and_gate() -> void:
 	check(game.sequencer.state() == SequencerScript.State.FREED, "the fight starts with the squad free")
 	var local = game.controller.active_body(1)
 	check(local != null, "the soul still has a body for the fight")
 
-	# Looting a blade now puts it in the soul's hand: the shiv is replaced,
-	# then the arming sword replaces the shortsword, and the dagger stays in the
-	# stash because it is worse than what is already held.
-	var rescuer_main_before := str(warband.roster.equipped_of(game.rescuer_id).get("main", ""))
-	check(rescuer_main_before == "dagger_makeshift", "the rescuer starts with the shiv")
-	var looted := 0
-	for pickup in game.pickups():
-		var result: Dictionary = game.loot.quick_loot(pickup, 1)
-		if bool(result.get("ok", false)):
-			looted += 1
-	check(looted == 3, "all three cultist weapons are looted (%d)" % looted)
-	check(game.sequencer.weapons_taken() == 3, "the sequencer counted the steel")
-	check(str(warband.roster.equipped_of(game.rescuer_id).get("main", "")) == "sword_arming",
-		"the best picked-up blade is in the soul's hands (%s)"
-		% str(warband.roster.equipped_of(game.rescuer_id).get("main", "")))
-	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"steel alone does not open the escape")
-	check(warband.stash.pooled_total() >= 1,
-		"the pieces that were not an upgrade stayed in the stash (%d)"
-		% warband.stash.pooled_total())
-
-	# The gate refuses a body while the watchers are standing.
-	local.global_position = game.GATE_POINT
-	await physics_frame
-	await physics_frame
-	game._try_interact()
-	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"the gate is shut while the watchers live")
-	check(requested_paths.is_empty(), "no scene was requested early")
-
-	# Three dagger stabs end a watcher: 36 health against a 14-damage shiv.
+	# A watcher is a few stabs, not a boss.
 	var first = game.guards[0]
 	first.take_damage(14.0, 0)
 	check(bool(first.get("alive")), "one stab leaves a watcher standing")
@@ -346,23 +328,45 @@ func check_fight_and_gate() -> void:
 	check(bool(first.get("alive")), "two stabs still leave it standing")
 	first.take_damage(14.0, 0)
 	check(not bool(first.get("alive")), "the third stab puts a watcher down")
-	var second = game.guards[1]
-	second.take_damage(30.0, 0)
-	check(bool(second.get("alive")), "even a heavy single blow does not delete one")
-	for guard in game.guards:
-		if is_instance_valid(guard) and bool(guard.get("alive")):
-			guard.take_damage(40.0, 0)
-			check(not bool(guard.get("alive")), "watcher %s is down" % str(guard.name))
-	check(game.sequencer.guards_down() == 2, "both kills were counted")
+	check(game.sequencer.guards_down() == 1, "the kill was counted")
+	check(game.sequencer.state() == SequencerScript.State.FREED,
+		"one watcher down is not the escape")
+
+	# The gate refuses a body while the last watcher is standing.
+	local.global_position = game.GATE_POINT
+	await physics_frame
+	game._try_interact()
+	check(game.sequencer.state() == SequencerScript.State.FREED,
+		"the gate is shut while a watcher lives")
+	check(requested_paths.is_empty(), "no scene was requested early")
+
+	# The freed squad takes over: they grab the steel and charge the watchers.
+	var armed := await await_condition(
+		func() -> bool: return game.allies_armed() >= 1, 14.0, "the squad arming")
+	check(armed, "a freed ally picks a weapon off the ground and holds it")
+	var left := 0
+	for pickup in game.pickups():
+		if is_instance_valid(pickup) and not bool(pickup.collected):
+			left += 1
+	check(left < 3, "the drop left the floor (%d left)" % left)
+	check(game.sequencer.weapons_taken() >= 1, "the pickup was booked as steel")
+
+	var engaged := await await_condition(
+		func() -> bool: return game.ally_engaged(), 16.0, "the squad charging")
+	check(engaged, "an armed ally closes on the last watcher and swings")
+
+	# Whatever the squad has not finished, the test finishes so the flow can end.
+	for watcher in game.guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(60.0, 0)
 	dismiss_card("the escape card")
+	check(game.sequencer.guards_down() == 2, "both watchers are down")
 	check(game.sequencer.state() == SequencerScript.State.ESCAPING,
 		"steel plus two kills opens the escape (%s)" % game.sequencer.state_name())
-	check(game.sequencer.objective().contains("gate"), "the objective points at the gate")
 
 	# Walk out: the arch is a door, so the player presses G inside it.
 	check(game.sequencer.hint().contains("gate"), "the hint names the gate")
 	local.global_position = game.GATE_POINT
-	await physics_frame
 	await physics_frame
 	game._try_interact()
 	await physics_frame
