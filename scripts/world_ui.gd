@@ -25,9 +25,9 @@ const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
 
 const COLUMNS := 15
-const SLOT_SIZE := Vector2(82,58)
-const SLOT_GAP := Vector2(6,6)
-const GRID_ORIGIN := Vector2(39,86)
+const SLOT_SIZE := Vector2(78,40)
+const SLOT_GAP := Vector2(4,4)
+const GRID_ORIGIN := Vector2(11,62)
 
 var state
 var session
@@ -235,17 +235,36 @@ func _build() -> void:
 	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_dim.visible = false
 	root.add_child(_dim)
-	_title = _label(root,"EQUIPMENT",Vector2(32,16),26,CREAM)
-	_subtitle = _label(root,"THE RANGER'S KIT",Vector2(34,48),10,GOLD)
-	_purse = _label(root,"0 c",Vector2(1010,26),18,GOLD)
-	_purse.size = Vector2(220,26)
+	# One compact window instead of a full-screen sheet. 1120 x 640 in a
+	# 1440 x 900 viewport leaves the world dimmed around it, like a panel.
+	var shell := Control.new()
+	shell.position = Vector2(80,150)
+	shell.size = Vector2(1280,600)
+	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(shell)
+	var window := Panel.new()
+	window.position = Vector2.ZERO
+	window.size = Vector2(1280,600)
+	window.mouse_filter = Control.MOUSE_FILTER_STOP
+	window.add_theme_stylebox_override("panel",_style(Color(0.024,0.052,0.060,0.995),Color("6e5a3a"),9))
+	shell.add_child(window)
+	_title = _label(shell,"EQUIPMENT",Vector2(24,8),24,CREAM)
+	_subtitle = _label(shell,"THE RANGER'S KIT",Vector2(26,36),10,GOLD)
+	_quick_label = _label(shell,"",Vector2(330,36),9,GOLD)
+	_quick_label.size = Vector2(600,14)
+	_quick_label.clip_text = true
+	_quick_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.95))
+	_quick_label.add_theme_constant_override("shadow_offset_x",1)
+	_quick_label.add_theme_constant_override("shadow_offset_y",1)
+	_purse = _label(shell,"0 c",Vector2(1000,14),16,GOLD)
+	_purse.size = Vector2(130,24)
 	_purse.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	close_button = _button(root,"CLOSE / ESC",Vector2(1256,18),Vector2(152,40))
-	close_button.add_theme_font_size_override("font_size",12)
+	close_button = _button(shell,"CLOSE / ESC",Vector2(1138,10),Vector2(108,34))
+	close_button.add_theme_font_size_override("font_size",10)
 	close_button.pressed.connect(close)
-	build_equipment(root)
-	build_backpack(root)
-	build_side(root)
+	build_equipment(shell)
+	build_backpack(shell)
+	build_side(shell)
 	_refresh_visibility()
 
 func _build_theme() -> Theme:
@@ -328,8 +347,8 @@ func _item_card(item_id: String, _area: String) -> Control:
 
 func build_equipment(parent: Node) -> void:
 	paperdoll_panel = Control.new()
-	paperdoll_panel.position = Vector2(24,78)
-	paperdoll_panel.size = Vector2(1392,438)
+	paperdoll_panel.position = Vector2(16,50)
+	paperdoll_panel.size = Vector2(1248,280)
 	paperdoll_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(paperdoll_panel)
 	_build_worn(paperdoll_panel)
@@ -338,99 +357,91 @@ func build_equipment(parent: Node) -> void:
 	_build_stats(paperdoll_panel)
 
 func _build_worn(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(0,0),Vector2(226,438))
-	_label(panel,"WORN",Vector2(14,10),11,GOLD)
-	_label(panel,"Armour, hands and boots",Vector2(14,27),9,MUTED)
+	var panel := _panel(parent,Vector2(0,0),Vector2(190,280))
+	_label(panel,"WORN",Vector2(10,6),10,GOLD)
+	_label(panel,"Armour, hands and boots",Vector2(10,20),9,MUTED)
 	for index in 5:
 		var slot_name: String = Rules.SLOTS[index]
 		var button := _make_slot(panel,"paperdoll",-1,slot_name,
-			Vector2(12,44+index*78),Vector2(202,72),10)
+			Vector2(10,28+index*50),Vector2(170,48),11)
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",80 if slot_name in ["hands","feet"] else 64)
+		button.add_theme_constant_override("icon_max_width",46 if slot_name in ["hands","feet"] else 42)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		paperdoll_buttons.append(button)
 
 func _build_character(parent: Node) -> void:
-	_character_panel = _panel(parent,Vector2(234,0),Vector2(742,438))
+	_character_panel = _panel(parent,Vector2(198,0),Vector2(680,280))
 	var backdrop := TextureRect.new()
 	backdrop.position = Vector2(6,6)
-	backdrop.size = Vector2(730,426)
+	backdrop.size = Vector2(668,268)
 	backdrop.texture = _stage_texture()
 	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	backdrop.stretch_mode = TextureRect.STRETCH_SCALE
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_character_panel.add_child(backdrop)
-	# The preview is created on first open; the stage keeps a dark alcove until
-	# then so the panel never flashes an empty rectangle.
-	_quick_label = _label(_character_panel,"",Vector2(250,418),9,GOLD)
-	_quick_label.add_theme_color_override("font_shadow_color",Color(0,0,0,0.95))
-	_quick_label.add_theme_constant_override("shadow_offset_x",1)
-	_quick_label.add_theme_constant_override("shadow_offset_y",1)
-	_quick_label.size = Vector2(242,14)
-	_quick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quick_label.clip_text = true
-	var main_button := _make_slot(_character_panel,"paperdoll",-1,"main",Vector2(14,346),Vector2(190,74),10)
+	var main_button := _make_slot(_character_panel,"paperdoll",-1,"main",Vector2(12,216),Vector2(190,54),10)
 	main_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	main_button.expand_icon = false
-	main_button.add_theme_constant_override("icon_max_width",56)
+	main_button.z_index = 2
+	main_button.add_theme_constant_override("icon_max_width",40)
 	paperdoll_buttons.append(main_button)
-	var off_button := _make_slot(_character_panel,"paperdoll",-1,"off",Vector2(538,346),Vector2(190,74),10)
+	var off_button := _make_slot(_character_panel,"paperdoll",-1,"off",Vector2(478,216),Vector2(190,54),10)
 	off_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	off_button.expand_icon = false
-	off_button.add_theme_constant_override("icon_max_width",56)
+	off_button.z_index = 2
+	off_button.add_theme_constant_override("icon_max_width",40)
 	paperdoll_buttons.append(off_button)
 
 func _build_trinkets(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(984,0),Vector2(92,438))
-	_label(panel,"TRINKETS",Vector2(6,10),9,GOLD)
+	var panel := _panel(parent,Vector2(886,0),Vector2(74,280))
+	_label(panel,"TRINKETS",Vector2(4,6),8,GOLD)
 	for offset in 3:
 		var slot_name: String = Rules.SLOTS[5+offset]
 		var button := _make_slot(panel,"paperdoll",-1,slot_name,
-			Vector2(6,42+offset*102),Vector2(80,74),9)
+			Vector2(4,28+offset*74),Vector2(66,62),8)
 		button.expand_icon = true
 		button.text = ""
-		button.tooltip_builder = Callable(self,"_item_card")
 		paperdoll_buttons.append(button)
-		var label := _label(panel,"",Vector2(6,118+offset*102),8,MUTED)
-		label.size = Vector2(80,14)
+		var label := _label(panel,"",Vector2(4,92+offset*74),9,MUTED)
+		label.size = Vector2(66,10)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.clip_text = true
 		_trinket_labels.append(label)
-	_label(panel,"HOVER FOR",Vector2(6,358),7,MUTED)
-	_label(panel,"ITS CARD",Vector2(6,368),7,MUTED)
+	_label(panel,"HOVER FOR",Vector2(4,258),7,MUTED)
+	_label(panel,"ITS CARD",Vector2(4,268),7,MUTED)
 
 func _build_stats(parent: Node) -> void:
-	var panel := _panel(parent,Vector2(1084,0),Vector2(308,438))
-	_label(panel,"RANGER",Vector2(16,10),20,CREAM)
-	_label(panel,"THE FRONTIER KIT",Vector2(17,38),9,MUTED)
+	var panel := _panel(parent,Vector2(968,0),Vector2(280,280))
+	_label(panel,"RANGER",Vector2(10,6),19,CREAM)
+	_label(panel,"THE FRONTIER KIT",Vector2(11,28),9,MUTED)
 	var rows := [
-		{"key":"attack", "label":"Attack", "y":62},
-		{"key":"defense", "label":"Defense", "y":108},
-		{"key":"life", "label":"Life", "y":154},
-		{"key":"stamina", "label":"Stamina", "y":200},
+		{"key":"attack", "label":"Attack", "y":44},
+		{"key":"defense", "label":"Defense", "y":78},
+		{"key":"life", "label":"Life", "y":112},
+		{"key":"stamina", "label":"Stamina", "y":146},
 	]
 	for row: Dictionary in rows:
-		_label(panel,str(row["label"]),Vector2(16,float(row["y"])),11,MUTED)
-		var value := _label(panel,"—",Vector2(150,float(row["y"])-6),20,GOLD)
-		value.size = Vector2(142,30)
+		_label(panel,str(row["label"]),Vector2(10,float(row["y"])),10,MUTED)
+		var value := _label(panel,"—",Vector2(130,float(row["y"])-4),18,GOLD)
+		value.size = Vector2(140,26)
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		_stat_values[str(row["key"])] = value
 		var rule := ColorRect.new()
-		rule.position = Vector2(16,float(row["y"])+34)
-		rule.size = Vector2(276,1)
+		rule.position = Vector2(10,float(row["y"])+30)
+		rule.size = Vector2(260,1)
 		rule.color = Color("2d474d")
 		panel.add_child(rule)
-	_label(panel,"BONUSES",Vector2(16,250),9,GOLD)
+	_label(panel,"BONUSES",Vector2(10,182),9,GOLD)
 	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(16,270)
-	scroll.size = Vector2(276,146)
+	scroll.position = Vector2(10,198)
+	scroll.size = Vector2(260,64)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel.add_child(scroll)
 	_bonus_list = VBoxContainer.new()
 	_bonus_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_bonus_list.add_theme_constant_override("separation",2)
+	_bonus_list.add_theme_constant_override("separation",1)
 	scroll.add_child(_bonus_list)
-	_label(panel,"HOVER A SLOT FOR ITS CARD",Vector2(16,418),7,MUTED)
+	_label(panel,"HOVER A SLOT FOR ITS CARD",Vector2(10,268),8,MUTED)
 
 func _stage_texture() -> Texture2D:
 	var gradient := Gradient.new()
@@ -451,12 +462,10 @@ func _ensure_preview() -> void:
 	preview = CharacterPreview.new()
 	preview.name = "Preview"
 	preview.position = Vector2(6,6)
-	preview.size = Vector2(730,426)
+	preview.size = Vector2(668,268)
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	preview.built.connect(_on_preview_built)
 	_character_panel.add_child(preview)
-	if _quick_label != null:
-		_character_panel.move_child(_quick_label,_character_panel.get_child_count() - 1)
 
 func _on_preview_built() -> void:
 	if preview != null and state != null:
@@ -477,42 +486,42 @@ func _refresh_preview() -> void:
 ## Backpack
 
 func build_backpack(parent: Node) -> void:
-	inventory_panel = _panel(parent,Vector2(24,526),Vector2(1392,358))
-	_label(inventory_panel,"BACKPACK",Vector2(16,10),12,GOLD)
-	_backpack_count = _label(inventory_panel,"",Vector2(112,11),12,CREAM)
-	_backpack_count.size = Vector2(120,20)
-	_selected_label = _label(inventory_panel,"No piece selected",Vector2(250,13),10,MUTED)
-	_selected_label.size = Vector2(700,18)
+	inventory_panel = _panel(parent,Vector2(16,338),Vector2(1248,250))
+	_label(inventory_panel,"BACKPACK",Vector2(10,6),11,GOLD)
+	_backpack_count = _label(inventory_panel,"",Vector2(86,7),11,CREAM)
+	_backpack_count.size = Vector2(100,18)
+	_selected_label = _label(inventory_panel,"No piece selected",Vector2(186,8),10,MUTED)
+	_selected_label.size = Vector2(560,16)
 	_selected_label.clip_text = true
-	_primary = _button(inventory_panel,"",Vector2(974,9),Vector2(130,30))
+	_primary = _button(inventory_panel,"",Vector2(826,5),Vector2(112,28))
 	_primary.add_theme_font_size_override("font_size",11)
 	_primary.pressed.connect(_on_primary)
-	_secondary = _button(inventory_panel,"",Vector2(1112,9),Vector2(130,30))
+	_secondary = _button(inventory_panel,"",Vector2(946,5),Vector2(112,28))
 	_secondary.add_theme_font_size_override("font_size",11)
 	_secondary.pressed.connect(_on_secondary)
-	_tertiary = _button(inventory_panel,"",Vector2(1250,9),Vector2(130,30))
+	_tertiary = _button(inventory_panel,"",Vector2(1066,5),Vector2(112,28))
 	_tertiary.add_theme_font_size_override("font_size",11)
 	_tertiary.pressed.connect(_on_tertiary)
-	_floor_label = _label(inventory_panel,"GROUND  •  nothing dropped",Vector2(16,48),9,MUTED)
+	_floor_label = _label(inventory_panel,"GROUND  •  nothing dropped",Vector2(10,38),9,MUTED)
 	_floor_scroll = ScrollContainer.new()
-	_floor_scroll.position = Vector2(82,44)
-	_floor_scroll.size = Vector2(1286,32)
+	_floor_scroll.position = Vector2(64,34)
+	_floor_scroll.size = Vector2(1160,24)
 	_floor_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_floor_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	inventory_panel.add_child(_floor_scroll)
 	_floor_list = HBoxContainer.new()
-	_floor_list.add_theme_constant_override("separation",4)
+	_floor_list.add_theme_constant_override("separation",3)
 	_floor_scroll.add_child(_floor_list)
 	for index in StateScript.INVENTORY_CAPACITY:
 		var column := index % COLUMNS
 		var row := index / COLUMNS
 		var at := GRID_ORIGIN + Vector2(column * (SLOT_SIZE.x + SLOT_GAP.x),row * (SLOT_SIZE.y + SLOT_GAP.y))
-		var button := _make_slot(inventory_panel,"backpack",index,"",at,SLOT_SIZE,10)
+		var button := _make_slot(inventory_panel,"backpack",index,"",at,SLOT_SIZE,11)
 		button.expand_icon = true
 		button.text = ""
 		backpack_buttons.append(button)
-	_status = _label(inventory_panel,"",Vector2(16,334),10,TEAL)
-	_status.size = Vector2(1360,18)
+	_status = _label(inventory_panel,"",Vector2(10,236),10,TEAL)
+	_status.size = Vector2(1228,14)
 	_status.clip_text = true
 
 ## ---------------------------------------------------------------------------
@@ -525,44 +534,44 @@ static func stock_row_count() -> int:
 	return largest
 
 func build_side(parent: Node) -> void:
-	side_panel = _panel(parent,Vector2(24,78),Vector2(1392,438))
-	_side_title = _label(side_panel,"",Vector2(18,12),12,GOLD)
-	_side_sub = _label(side_panel,"",Vector2(18,32),10,MUTED)
-	_side_sub.size = Vector2(1100,20)
+	side_panel = _panel(parent,Vector2(16,50),Vector2(1248,280))
+	_side_title = _label(side_panel,"",Vector2(12,8),11,GOLD)
+	_side_sub = _label(side_panel,"",Vector2(12,24),9,MUTED)
+	_side_sub.size = Vector2(800,18)
 	_side_sub.clip_text = true
-	_stash_count = _label(side_panel,"",Vector2(1240,12),11,CREAM)
-	_stash_count.size = Vector2(130,20)
+	_stash_count = _label(side_panel,"",Vector2(1120,8),11,CREAM)
+	_stash_count.size = Vector2(110,18)
 	_stash_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	for index in 20:
 		var column := index % 5
 		var row := index / 5
 		var button := _make_slot(side_panel,"stash",index,"",
-			Vector2(20+column*270,64+row*88),Vector2(260,80),11)
+			Vector2(33+column*238,36+row*60),Vector2(230,54),11)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",56)
+		button.add_theme_constant_override("icon_max_width",40)
 		stash_buttons.append(button)
 	_stock_scroll = ScrollContainer.new()
-	_stock_scroll.position = Vector2(18,60)
-	_stock_scroll.size = Vector2(1356,320)
+	_stock_scroll.position = Vector2(12,32)
+	_stock_scroll.size = Vector2(1224,166)
 	_stock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	side_panel.add_child(_stock_scroll)
 	_stock_list = VBoxContainer.new()
 	_stock_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_stock_list.add_theme_constant_override("separation",4)
+	_stock_list.add_theme_constant_override("separation",3)
 	_stock_scroll.add_child(_stock_list)
 	# One row per keeper stock entry: the pool is sized from the largest vendor
 	# so a longer list can never silently lose its last pieces.
 	for index in stock_row_count():
-		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(1320,34),12)
-		button.custom_minimum_size = Vector2(0,34)
+		var button := _make_slot(_stock_list,"stock",index,"",Vector2.ZERO,Vector2(1210,28),10)
+		button.custom_minimum_size = Vector2(0,28)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",26)
+		button.add_theme_constant_override("icon_max_width",20)
 		stock_buttons.append(button)
-	_buy = _button(side_panel,"BUY",Vector2(18,396),Vector2(1356,30))
-	_buy.add_theme_font_size_override("font_size",12)
+	_buy = _button(side_panel,"BUY",Vector2(12,204),Vector2(1224,28))
+	_buy.add_theme_font_size_override("font_size",11)
 	_buy.pressed.connect(_on_buy)
 
 ## ---------------------------------------------------------------------------
@@ -642,12 +651,12 @@ func _refresh_floor() -> void:
 	_floor_label.text = "GROUND  •  nothing dropped" if items.is_empty() else "GROUND  •  %d piece(s)" % items.size()
 	for index in items.size():
 		var item_id: String = items[index]
-		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(132,30),9)
-		button.custom_minimum_size = Vector2(132,30)
+		var button := _make_slot(_floor_list,"floor",index,"",Vector2.ZERO,Vector2(120,24),8)
+		button.custom_minimum_size = Vector2(120,24)
 		button.item = item_id
 		button.icon = ItemArt.texture(item_id)
 		button.expand_icon = false
-		button.add_theme_constant_override("icon_max_width",22)
+		button.add_theme_constant_override("icon_max_width",18)
 		button.text = "  " + state.item_short(item_id)
 		button.tooltip_text = state.item_name(item_id)
 		button.set_pressed_no_signal(_location == "floor" and index == _index)

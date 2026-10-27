@@ -10,7 +10,7 @@ const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
-const WIDTH := 352.0
+const WIDTH := 320.0
 
 var state
 var _italic: SystemFont
@@ -30,14 +30,14 @@ func configure(player_state,item_id: String) -> void:
 	_italic.font_names = PackedStringArray(["Georgia","Palatino Linotype","Times New Roman"])
 	_italic.font_italic = true
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left",16)
-	margin.add_theme_constant_override("margin_right",16)
-	margin.add_theme_constant_override("margin_top",13)
-	margin.add_theme_constant_override("margin_bottom",13)
+	margin.add_theme_constant_override("margin_left",12)
+	margin.add_theme_constant_override("margin_right",12)
+	margin.add_theme_constant_override("margin_top",11)
+	margin.add_theme_constant_override("margin_bottom",11)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(margin)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation",5)
+	column.add_theme_constant_override("separation",4)
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(column)
 	_title(column,state.item_name(item_id))
@@ -75,7 +75,7 @@ func _title(parent: Node,text: String) -> void:
 	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size",21)
+	label.add_theme_font_size_override("font_size",20)
 	label.add_theme_color_override("font_color",GOLD)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
@@ -86,7 +86,7 @@ func _type_line(parent: Node,text: String) -> void:
 	label.text = "Type:  " + text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size",10)
+	label.add_theme_font_size_override("font_size",9)
 	label.add_theme_color_override("font_color",MUTED)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
@@ -95,7 +95,7 @@ func _type_line(parent: Node,text: String) -> void:
 func _heading(parent: Node,text: String) -> void:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size",10)
+	label.add_theme_font_size_override("font_size",9)
 	label.add_theme_color_override("font_color",Color("8f7a56"))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
@@ -109,14 +109,14 @@ func _stat(parent: Node,label_text: String,value_text: String) -> void:
 	var key := Label.new()
 	key.text = label_text + ":"
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	key.add_theme_font_size_override("font_size",13)
+	key.add_theme_font_size_override("font_size",12)
 	key.add_theme_color_override("font_color",MUTED)
 	key.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(key)
 	var value := Label.new()
 	value.text = value_text
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	value.add_theme_font_size_override("font_size",15)
+	value.add_theme_font_size_override("font_size",14)
 	value.add_theme_color_override("font_color",CREAM)
 	value.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(value)
@@ -138,7 +138,7 @@ func _extra(parent: Node,label_text: String,value_text: String) -> void:
 	line.text = text
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	line.add_theme_font_size_override("font_size",12)
+	line.add_theme_font_size_override("font_size",11)
 	line.add_theme_color_override("font_color",TEAL)
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(line)
@@ -150,7 +150,7 @@ func _quote(parent: Node,text: String) -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_override("font",_italic)
-	label.add_theme_font_size_override("font_size",13)
+	label.add_theme_font_size_override("font_size",12)
 	label.add_theme_color_override("font_color",Color("c9b98f"))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(label)
