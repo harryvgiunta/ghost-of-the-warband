@@ -44,15 +44,26 @@ static func build(parent: Node3D, style: WorldStyle) -> Dictionary:
 	environment.ambient_light_sky_contribution = 1.0 if use_sky_ambient else 0.0
 
 	var fog_density := float(sky_values.get("fog_density", 0.0))
-	if fog_density > 0.0:
+	var depth_fog := String(sky_values.get("fog_mode", "exponential")) == "depth"
+	if fog_density > 0.0 or depth_fog:
 		environment.fog_enabled = true
-		environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 		environment.fog_light_color = sky_values.get("fog_color", Color("c5d0bd"))
 		environment.fog_light_energy = 0.9
 		environment.fog_density = fog_density
 		environment.fog_sun_scatter = float(sky_values.get("fog_sun_scatter", 0.25))
 		environment.fog_sky_affect = float(sky_values.get("fog_sky_affect", 0.12))
 		environment.fog_aerial_perspective = float(sky_values.get("fog_aerial_perspective", 0.35))
+		if depth_fog:
+			# A depth band rather than an all-over haze: nothing before `begin`,
+			# one smooth curve to fully opaque at `end`. The curve puts most of
+			# the fade in the far half, so the view stays readable close in and
+			# still closes off completely.
+			environment.fog_mode = Environment.FOG_MODE_DEPTH
+			environment.fog_depth_begin = float(sky_values.get("fog_depth_begin", 55.0))
+			environment.fog_depth_end = float(sky_values.get("fog_depth_end", 150.0))
+			environment.fog_depth_curve = float(sky_values.get("fog_depth_curve", 1.8))
+		else:
+			environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 
 	environment.tonemap_mode = sky_values.get("tonemap", Environment.TONE_MAPPER_FILMIC)
 	environment.tonemap_exposure = float(sky_values.get("exposure", 1.0))

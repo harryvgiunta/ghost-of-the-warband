@@ -116,8 +116,17 @@ static func frontier() -> WorldStyle:
 		"ambient_color": Color("c6d3dd"),
 		"ambient_energy": 0.52,
 		"use_sky_ambient": true,
+		# Depth fog, not the old all-over exponential haze: the near field stays
+		# clear to 65 m, then one smooth ramp reaches fully opaque haze at
+		# 145 m. Still a long view, no longer a view across the whole valley -
+		# and it is what makes parking a body at `MobLod.DORMANT_DISTANCE`
+		# invisible.
+		"fog_mode": "depth",
 		"fog_color": Color("c9d2d8"),
-		"fog_density": 0.0022,
+		"fog_density": 0.0,
+		"fog_depth_begin": 65.0,
+		"fog_depth_end": 145.0,
+		"fog_depth_curve": 2.0,
 		"fog_sun_scatter": 0.25,
 		"fog_sky_affect": 0.12,
 		"fog_aerial_perspective": 0.35,

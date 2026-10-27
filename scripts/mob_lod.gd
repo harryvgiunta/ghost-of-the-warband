@@ -11,11 +11,20 @@ extends RefCounted
 ##   mid   (<= 55 m)   every third        (12 Hz once calm)
 ##   far   (<= 95 m)   every twelfth      (5 Hz)
 ##   deep  (> 95 m)    every twenty-four  (2.5 Hz)
+##   parked (> 150 m)  never              (no tick, no draw, no state change)
 ##
 ## A skipped frame is not lost time: the pending delta is carried into the next
 ## tick, so a far body covers the same ground in coarser steps. Beyond 55 m no
 ## profile can see past 32 m, so a low-rate body can never miss a sighting it
 ## could have made, and it is far enough away that 5 Hz reads as motion.
+##
+## Past `DORMANT_DISTANCE` a low rate is still a wasted frame: nothing that far
+## away can be seen at all - the frontier's fog is opaque well before it - so a
+## body there is parked outright. It keeps its position, health, pack and
+## corpse; it stops running sight, steering, its state machine and its swept
+## move, and it stops drawing. `MobCuller` sweeps the group a few times a second
+## and the body itself decides when it may be parked (calm and standing) and
+## when a ranger has come back inside `WAKE_DISTANCE`.
 ##
 ## Presentation follows the same distance: past `ANIMATE_DISTANCE` the body
 ## stops evaluating its animation tracks (the skeleton keeps its last pose,
@@ -32,6 +41,13 @@ const DEEP_FRAMES := 24
 ## invisible at 1.5 m/s.
 const CALM_NEAR_FRAMES := 2
 const CALM_MID_FRAMES := 5
+## Past this distance the body is parked: no tick of any kind, and hidden. The
+## frontier's fog is fully opaque at 145 m (`WorldStyle.frontier`), so a body
+## leaving or entering this range is invisible either way.
+const DORMANT_DISTANCE := 150.0
+## Hysteresis: a parked body only comes back inside this, so a ranger standing
+## on the boundary cannot flip it on every sweep.
+const WAKE_DISTANCE := 128.0
 ## Past this distance animation evaluation and locomotion presentation stop.
 const ANIMATE_DISTANCE := 62.0
 ## Past this distance a body stops casting into the four shadow splits. Every
@@ -40,6 +56,9 @@ const SHADOW_DISTANCE := 30.0
 
 var _tick := 0
 var _pending := 0.0
+## Set when the body comes back from dormancy: the first `slice` after it is
+## granted whatever its band says, instead of waiting out the rest of it.
+var _fresh := false
 ## Granted slices since spawn: a diagnostic, and what the budget regression
 ## counts to prove a far body really sits frames out.
 var grants := 0
@@ -51,10 +70,24 @@ func _init(phase: int = 0) -> void:
 	_tick = absi(phase)
 
 
+## Dormancy, in one place: a parked body stays parked until it is back inside
+## `WAKE_DISTANCE`, an awake one parks at `DORMANT_DISTANCE`.
+static func dormant(nearest: float, sleeping: bool) -> bool:
+	if not is_finite(nearest):
+		return false
+	return nearest >= (WAKE_DISTANCE if sleeping else DORMANT_DISTANCE)
+
+
 ## The delta this body should integrate now, or 0.0 when it sits the frame out.
 ## `calm` is a body with nothing to fight: it walks a patch instead of playing a
 ## duel, so it may spend more frames per tick.
 func slice(nearest: float, delta: float, calm: bool = false) -> float:
+	if is_finite(nearest) and nearest >= DORMANT_DISTANCE:
+		# Parked. Bank nothing: a body must not hand the whole minute it slept
+		# to its first tick back. No ranger at all is not "far away" - a scene
+		# without a player still runs its bodies on the deepest band.
+		_pending = 0.0
+		return 0.0
 	var frames := DEEP_FRAMES
 	if nearest <= NEAR_DISTANCE:
 		frames = CALM_NEAR_FRAMES if calm else NEAR_FRAMES
@@ -62,6 +95,9 @@ func slice(nearest: float, delta: float, calm: bool = false) -> float:
 		frames = CALM_MID_FRAMES if calm else MID_FRAMES
 	elif nearest <= DEEP_DISTANCE:
 		frames = FAR_FRAMES
+	if _fresh:
+		_fresh = false
+		_tick = frames - 1
 	if frames <= 1:
 		_pending = 0.0
 		grants += 1
@@ -74,6 +110,13 @@ func slice(nearest: float, delta: float, calm: bool = false) -> float:
 	_pending = 0.0
 	grants += 1
 	return budget
+
+
+## A body that was parked starts again on its first frame, and banks nothing
+## from the sleep.
+func resume() -> void:
+	_pending = 0.0
+	_fresh = true
 
 
 ## Presentation band: 0 still casts a shadow, 1 animates without one, 2 rests.

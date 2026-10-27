@@ -43,6 +43,11 @@ func record(tick: int, bodies: Array, history_ticks: int = MAX_HISTORY_TICKS) ->
 			continue
 		if body.get("alive") == false:
 			continue
+		# A parked body is past the fog wall and never replicated, so no client
+		# can have seen it: recording its capsule would spend the host's tick on
+		# a body outside every view.
+		if body.get("dormant") == true:
+			continue
 		var capsule := capsule_of(body)
 		nodes.append(body)
 		positions.append(body.global_position)

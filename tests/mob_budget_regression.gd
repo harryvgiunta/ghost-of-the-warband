@@ -1,9 +1,14 @@
 extends SceneTree
 ## The wilderness tick budget: bands, carried time, and the one rule that makes
 ## it safe - a body on a long budget covers exactly the same ground as one
-## ticking every frame.
+## ticking every frame. Plus the end of the budget: past the fog wall a body is
+## parked outright, and the frontier test at the bottom proves a real one stops.
 
 const MobLod = preload("res://scripts/mob_lod.gd")
+
+
+## Slack inside the wake radius: bodies this close must never be parked.
+const NEAR_SLACK := 8.0
 
 
 ## A body that walks itself one direction at a fixed speed, on a budget.
@@ -52,8 +57,10 @@ func run() -> void:
 	_check_bands()
 	_check_carried_time()
 	_check_presentation_bands()
+	_check_dormancy()
 	await _check_flat_ground()
 	await _check_slope()
+	await _check_frontier_parking()
 	world.queue_free()
 	await process_frame
 	print("MOB_BUDGET_REGRESSION checks=", checks, " failures=", failures)
@@ -89,15 +96,16 @@ func _check_bands() -> void:
 	var deep := MobLod.new(0)
 	var deep_grants := 0
 	for index in 120:
-		if deep.slice(200.0, 1.0 / 60.0) > 0.0:
+		if deep.slice(MobLod.DORMANT_DISTANCE - 8.0, 1.0 / 60.0) > 0.0:
 			deep_grants += 1
-	check(deep_grants == 5, "a body at 200 m ticks every twenty-fourth frame (granted %d)" % deep_grants)
+	check(deep_grants == 5, "the deepest band ticks every twenty-fourth frame (granted %d)" % deep_grants)
 	check(deep.grants == deep_grants, "the budget counts its grants")
 
 
 ## A skipped frame is not lost time: the granted deltas still add up to a second.
 func _check_carried_time() -> void:
-	for entry in [[5.0, false], [5.0, true], [40.0, false], [70.0, false], [200.0, false]]:
+	for entry in [[5.0, false], [5.0, true], [40.0, false], [70.0, false],
+			[MobLod.DORMANT_DISTANCE - 8.0, false]]:
 		var lod := MobLod.new(3)
 		var total := 0.0
 		for index in 240:
@@ -118,14 +126,7 @@ func _check_presentation_bands() -> void:
 	mesh_instance.mesh = BoxMesh.new()
 	holder.add_child(mesh_instance)
 	var player := AnimationPlayer.new()
-	var animation := Animation.new()
-	animation.length = 1.0
-	var track := animation.add_track(Animation.TYPE_VALUE)
-	animation.track_set_path(track, NodePath(".:position"))
-	animation.value_track_set_update_mode(track, Animation.UPDATE_DISCRETE)
-	player.add_animation("idle", animation)
 	holder.add_child(player)
-	player.play("idle")
 	MobLod.present(holder, player, 10.0)
 	check(player.active, "a near body keeps evaluating its animation")
 	check(mesh_instance.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
@@ -140,6 +141,57 @@ func _check_presentation_bands() -> void:
 		"a far body casts no shadow")
 	world.remove_child(holder)
 	holder.free()
+
+
+## The end of the budget: past the park radius a body is granted nothing at
+## all, and a body that wakes banks none of the sleep.
+func _check_dormancy() -> void:
+	check(not MobLod.dormant(MobLod.DORMANT_DISTANCE - 1.0, false),
+		"a body just inside the park radius keeps ticking")
+	check(MobLod.dormant(MobLod.DORMANT_DISTANCE + 1.0, false),
+		"a body just past the park radius parks")
+	var between := (MobLod.DORMANT_DISTANCE + MobLod.WAKE_DISTANCE) * 0.5
+	check(MobLod.dormant(between, true),
+		"a parked body stays parked inside the wake radius (hysteresis)")
+	check(not MobLod.dormant(between, false),
+		"an awake body at the same distance keeps ticking")
+	check(not MobLod.dormant(MobLod.WAKE_DISTANCE - 1.0, true),
+		"a parked body wakes inside the wake radius")
+	check(not MobLod.dormant(INF, false), "a body with no ranger in the world never parks")
+	var orphan := MobLod.new(0)
+	var orphan_grants := 0
+	for index in 120:
+		if orphan.slice(INF, 1.0 / 60.0) > 0.0:
+			orphan_grants += 1
+	check(orphan_grants == 5,
+		"a scene with no ranger still ticks its bodies on the deepest band (%d)" % orphan_grants)
+	var parked := MobLod.new(0)
+	var parked_grants := 0
+	for index in 300:
+		if parked.slice(200.0, 1.0 / 60.0) > 0.0:
+			parked_grants += 1
+	check(parked_grants == 0, "a parked body is granted nothing at all (%d grants)" % parked_grants)
+	check(parked.grants == 0, "and counts no tick")
+	var deep := MobLod.new(0)
+	var deep_grants := 0
+	for index in 120:
+		if deep.slice(MobLod.DORMANT_DISTANCE - 8.0, 1.0 / 60.0) > 0.0:
+			deep_grants += 1
+	check(deep_grants == 5, "just inside the park radius a body still ticks at 2.5 Hz (%d)" % deep_grants)
+	# The sleep is not banked: the first frame back is one frame.
+	var slept := MobLod.new(0)
+	for index in 3600:
+		slept.slice(200.0, 1.0 / 60.0)
+	slept.resume()
+	var first := slept.slice(MobLod.DORMANT_DISTANCE - 8.0, 1.0 / 60.0)
+	check(absf(first - 1.0 / 60.0) < 0.0005,
+		"a body that slept a minute wakes on one normal frame (%.4f s)" % first)
+	check(slept.grants == 1, "and is granted its first tick back")
+	var near := MobLod.new(0)
+	near.resume()
+	var near_first := near.slice(5.0, 1.0 / 60.0)
+	check(absf(near_first - 1.0 / 60.0) < 0.0005,
+		"a near body that wakes integrates one frame too (%.4f s)" % near_first)
 
 
 func _plate(at: Vector3, tilt_degrees: float) -> StaticBody3D:
@@ -222,3 +274,114 @@ func _check_slope() -> void:
 	flat.queue_free()
 	sloped.queue_free()
 	await process_frame
+
+
+## The frontier itself: the fog closes the view before the park radius, the
+## camera stops with the fog, and a real mob past the wall stops running.
+func _check_frontier_parking() -> void:
+	var packed_scene := load("res://main.tscn") as PackedScene
+	check(packed_scene != null, "main.tscn loads")
+	if packed_scene == null:
+		return
+	var state = root.get_node_or_null("PlayerState")
+	if state != null:
+		state.reset(false)
+	var frontier := packed_scene.instantiate()
+	root.add_child(frontier)
+	await process_frame
+	await process_frame
+	var environment: Environment = null
+	if is_instance_valid(frontier._frontier_environment):
+		environment = frontier._frontier_environment.environment
+	check(environment != null, "the frontier builds its environment")
+	if environment != null:
+		check(environment.fog_enabled and environment.fog_mode == Environment.FOG_MODE_DEPTH,
+			"the frontier fades with depth fog, not a flat haze")
+		check(environment.fog_depth_end > environment.fog_depth_begin,
+			"the fog ramps outward (%.0f m to %.0f m)" % [environment.fog_depth_begin, environment.fog_depth_end])
+		check(environment.fog_depth_end < MobLod.DORMANT_DISTANCE,
+			"the haze is fully opaque before the park radius (%.0f m vs %.0f m)" %
+				[environment.fog_depth_end, MobLod.DORMANT_DISTANCE])
+		check(environment.fog_depth_begin >= 50.0,
+			"and the near field stays clear (%.0f m)" % environment.fog_depth_begin)
+	check(is_equal_approx(frontier.camera.far, 175.0),
+		"the camera stops with the fog (%.0f m)" % frontier.camera.far)
+	var culler := frontier.get_node_or_null("Frontier/MobCuller")
+	check(culler != null, "the frontier owns the sweep node")
+	# At the town spawn every authored body is inside the fog wall, so nothing
+	# may be parked near the ranger: that is the guard on the sweep itself.
+	await create_timer(1.2).timeout
+	var wrongly_parked := 0
+	var near_mob = null
+	for enemy in frontier.enemies:
+		if not is_instance_valid(enemy) or not bool(enemy.get("alive")):
+			continue
+		var nearest: float = enemy._nearest_ranger()
+		if nearest >= MobLod.WAKE_DISTANCE - NEAR_SLACK:
+			continue
+		if bool(enemy.get("dormant")):
+			wrongly_parked += 1
+		elif bool(enemy.is_on_floor()) and not enemy._senses.aggressive():
+			near_mob = enemy
+	check(wrongly_parked == 0, "no body inside the wake radius is parked (%d)" % wrongly_parked)
+	check(near_mob != null, "the town spawn keeps a body beside the ranger")
+	if near_mob == null:
+		frontier.queue_free()
+		await process_frame
+		return
+	# Carry one body to the far corner. A ranger 200 m away has no reason to
+	# simulate it, and it must stop dead - not tick at 2.5 Hz.
+	var spot = _ground_point(Vector3(125.0, 0.0, -125.0))
+	check(spot != null, "the far corner has ground")
+	if spot != null:
+		var traveller = near_mob
+		traveller.global_position = (spot as Vector3) + Vector3(0.0, 0.3, 0.0)
+		check(await _await_floor(traveller, 4.0), "the body lands on the far ground")
+		check(traveller._nearest_ranger() >= MobLod.DORMANT_DISTANCE,
+			"and stands past the park radius (%.0f m)" % traveller._nearest_ranger())
+		await create_timer(1.0).timeout
+		check(bool(traveller.get("dormant")), "a body past the fog wall is parked")
+		check(not traveller.is_physics_processing(), "a parked body runs no physics process")
+		check(not traveller.visible, "a parked body draws nothing")
+		var frozen: Vector3 = traveller.global_position
+		var grants_before: int = traveller._lod.grants
+		await create_timer(1.0).timeout
+		check(int(traveller._lod.grants) == grants_before,
+			"a parked body is granted no ticks (%d then %d)" %
+				[grants_before, int(traveller._lod.grants)])
+		check(traveller.global_position.distance_to(frozen) < 0.001,
+			"and it does not move while parked")
+		# Walk the ranger back in: the same body comes back and runs.
+		traveller.global_position = frontier.player.global_position + Vector3(12.0, 0.6, 0.0)
+		await create_timer(1.0).timeout
+		check(not bool(traveller.get("dormant")), "a body inside the wake radius comes back")
+		check(traveller.is_physics_processing(), "and runs its physics again")
+		check(traveller.visible, "and draws again")
+		var grants_after: int = traveller._lod.grants
+		await create_timer(0.6).timeout
+		check(int(traveller._lod.grants) > grants_after,
+			"and is granted ticks again (%d then %d)" %
+				[grants_after, int(traveller._lod.grants)])
+	frontier.queue_free()
+	await process_frame
+
+
+## Ground hit for a ray straight down, so a body can be stood somewhere real.
+func _ground_point(at: Vector3):
+	var query := PhysicsRayQueryParameters3D.create(
+		Vector3(at.x, 120.0, at.z), Vector3(at.x, -60.0, at.z), 1)
+	var hit := root.world_3d.direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return null
+	return hit.get("position")
+
+
+## Waits (up to `seconds`) for a body to report a floor: a coarse tick still
+## lands it, so this is a wait rather than an assumption.
+func _await_floor(body: Node, seconds: float) -> bool:
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		if body.is_on_floor():
+			return true
+		await physics_frame
+	return body.is_on_floor()
