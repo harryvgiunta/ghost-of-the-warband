@@ -35,13 +35,20 @@ work. The design/contract document is `docs/warband.md`; the repo skill
 4. **The fight.** Two bare antlered watchers; when both fall, **six armed
    watchers run in through the gate** (each drops the weapon it holds). Watchers
    have 72 health, run at 5.6 m/s and hunt aggressively.
-5. **Gate.** Walk into the arch and press **G** → town.
-6. **Town.** Shared infinite stash, Sacrificial Altar (unbind / distil 5:1 /
-   brand), Gold recruiter, Quartermaster (buy base gear into the stash), and the
-   expedition gate (deploy up to 8 → arena).
+5. **The road.** Walk into the camp arch and press **G** and the gate opens onto
+   a 286 m lane of dark voodoo forest — 48 torches down both verges, ironoak and
+   hollow snags, rag trees and gallows trees with charms strung across the lane,
+   wicker effigies, skull stakes, cauldrons, braziers, straw, blood and cart ruts.
+   The squad runs it with you; two armed watchers start on your body and a pair
+   waits in each of the three clearings. It is a long run, and it is the escape.
+6. **Town.** The lane ends at the town gate; press **G** there. Shared infinite
+   stash, Sacrificial Altar (unbind / distil 5:1 / brand), Gold recruiter,
+   Quartermaster (buy base gear into the stash), and the expedition gate (deploy
+   up to 8 → arena).
 7. **Arena/expedition.** An empty deployment line builds the sandbox brawls
-   (bubble demo); a deployed line builds a real 3-wave expedition against
-   cultists, with survivors physically looting the field. `Enter` back to town.
+   (bubble demo); a deployed line builds a real five-wave expedition against
+   cultists with the Bilewarden at the end, with survivors physically looting the
+   field. `Enter` back to town.
 
 HUD keys: `[`/`]` cycle body, F1–F8 named body, TAB warband screen, P paperdoll,
 G interact, K manual loot (unadvertised; the squad loots itself), E revive,
@@ -66,6 +73,7 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | UI | `warband_hud.gd`, `warband_screen.gd`, `warband_paperdoll.gd`, `tutorial_card.gd` |
 | Scenes | `scenes/cage_escape.tscn` + `cage_escape.gd` + `tutorial_sequencer.gd` + `cage_watcher.gd`; `scenes/town_hub.tscn` + `town_hub.gd` + `expedition_gate.gd`; `admin_arena.tscn` + `admin_arena.gd` |
 | Enemies | `cultist_guard.gd`, `enemy_waves.gd`, `cage_watcher.gd` (extends the forest mob) |
+| The road | `scenes/escape_run.tscn` + `escape_run.gd` (bodies, squad, pursuers, the two endings) + `run_forest.gd` (the 286 m lane and its dressing, returns `{lane, length, width, torches, arch, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared with the cage) |
 | Netcode | `warband_session.gd` (+ `possession_sync.gd`) |
 | Flow | `game_flow.gd` (the only thing that changes scene) |
 
@@ -117,6 +125,13 @@ Integration seams deliberately placed in the base game:
 15. **The rescuer is not moved for the player** and **loot is not announced** —
     both were explicit player requests. Do not reintroduce auto-possession or
     pickup feeds.
+16. **The arch opens the road; the road is walkable.** The camp gate never
+    teleports again: `G` there emits `scenes/escape_run.tscn`, and the run's own
+    gate emits town. `run_forest.gd` must keep returning a lane a body can
+    actually traverse — `escape_run_regression` drives a body end to end and
+    fails if it leaves the walkable width or stops closing on the arch, so a prop
+    or a wall box that narrows the corridor is a test failure, not a matter of
+    taste.
 
 ### Tuning knobs (one place each)
 
@@ -128,6 +143,10 @@ Integration seams deliberately placed in the base game:
 | Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
 | Yard size | `cage_escape.gd::YARD_*` | 60 × 68 m inside 100 × 140 |
+| The road: length, width, torches | `run_forest.gd` | 286 m lane, 11 m walkable, 48 torches every 12 m a side (3.4 energy / 16 m), 763→826 nodes |
+| The road: pursuers | `escape_run.gd::WATCHER_*`, `run_forest.gd` clearing posts | 8 armed watchers — 2 on the soul at spawn, a pair in each clearing |
+| The road: town ground | `escape_run.gd::safe_center` | the town arch — the last ~19 m of the lane is safe ground |
+| The road: both endings | `escape_run.gd::ARCH_RADIUS`, `WIPE_BEAT` | G at the arch → town; a wipe waits 2.5 s → town, nobody revived, nothing gathered |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
 | Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
 
@@ -161,7 +180,8 @@ Integration seams deliberately placed in the base game:
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 58 | services, hire, deploy, paperdoll |
-| `cage_escape_regression` | 158 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six runners, drops, gate |
+| `cage_escape_regression` | 159 | cards/pause, rescuer, four latches, squad AI, 72 HP watchers, six runners, drops, arch opens the road |
+| `escape_run_regression` | 116 | the arch's one door, a 286 m walkable lane (52.8 s driven end to end), art budget, 8 hunters, both endings |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
@@ -184,7 +204,7 @@ Run the gate (31 tests, none of them socket tests running concurrently):
 GODOT=./.runtime/godot/Godot_v4.7.2-stable_win64_console.exe
 OUT=C:/tmp/gres; rm -rf "$OUT"; mkdir -p "$OUT"
 LIST="warband_contract possession downed_revive combat_bubble altar stash_autoloot
-warband_ui branded_abilities enemy_waves town_hub cage_escape expedition
+warband_ui branded_abilities enemy_waves town_hub cage_escape escape_run expedition
 expedition_director game_flow admin_arena quartermaster branded_world warband_art
 run_persistence gameplay combat_expansion net_limits world_art mob_aggro paperdoll
 town_services title_menu world_ui hitbox block_clash draw_combat ranger_clone"
