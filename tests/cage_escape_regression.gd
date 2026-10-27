@@ -171,6 +171,12 @@ func check_spawn() -> void:
 		check(str(watcher.name).begins_with("Forest_"), "the watcher is the woodland mob (%s)" % watcher.name)
 	check(game.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(game.pickups().size() == 3, "three cultist weapons lie on the walk")
+	# Nothing is under the world: the yard is ground, not a ledge.
+	for body in game.bodies:
+		check(body.global_position.y > -1.0, "body %s stands on the yard" % str(body.name))
+	for watcher in game.guards:
+		check(watcher.global_position.y > -1.0, "watcher %s stands on the yard" % str(watcher.name))
+	check(game.GATE_POINT.z <= game.YARD_FRONT + 2.0, "the arch sits on the front wall")
 
 # --- the cage clamp --------------------------------------------------------
 
@@ -397,6 +403,7 @@ func check_fight_and_gate() -> void:
 	var wave_two := await await_condition(
 		func() -> bool: return game.guards.size() == 6, 12.0, "the second wave")
 	check(wave_two, "four more watchers come through the gate (%d guards)" % game.guards.size())
+	await create_timer(0.6).timeout
 	var armed_reinforcements := 0
 	var visible_blades := 0
 	for index in range(2, game.guards.size()):
@@ -406,6 +413,8 @@ func check_fight_and_gate() -> void:
 			armed_reinforcements += 1
 		if watcher.has_weapon_visual():
 			visible_blades += 1
+		check(watcher.global_position.y > -1.0,
+			"reinforcement %d did not fall off the ledge (y=%.2f)" % [index, watcher.global_position.y])
 	check(armed_reinforcements == 4, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
 	check(visible_blades == 4, "and the blade is in its hand (%d)" % visible_blades)
 

@@ -49,9 +49,16 @@ const CAGE_POSTS := [
 ]
 ## Where the loose prisoner waits: inside the gate, behind the guards.
 const RESCUER_POST := Vector3(1.4, 0.2, -23.0)
-## The arch. Walking a freed body inside `GATE_RADIUS` of it ends the tutorial.
-const GATE_POINT := Vector3(0.0, 0.0, -24.5)
-const GATE_RADIUS := 3.0
+## The arch, now set in the camp's real perimeter wall. Walking a freed body
+## inside `GATE_RADIUS` of it ends the tutorial.
+const GATE_POINT := Vector3(0.0, 0.0, -40.5)
+const GATE_RADIUS := 3.5
+## The yard: 60 x 68 m inside the palisade, with ground extending well past the
+## walls. The old 34 x 44 floor ended at the gate line, so anyone who stepped
+## through it - the reinforcements included - fell out of the world.
+const YARD_HALF_WIDTH := 30.0
+const YARD_FRONT := -42.0
+const YARD_BACK := 26.0
 ## Where the rescuer's jog ends: just in front of the cage line.
 const JOG_TARGET := Vector3(0.0, 0.0, 8.6)
 const JOG_STOP := 1.6
@@ -73,9 +80,10 @@ const GATE_WATCHERS := [
 ## down. Each carries the weapon it drops.
 const REINFORCEMENTS := ["sword_short", "dagger_iron", "sword_arming", "sword_short"]
 const REINFORCE_DELAY := 2.5
+## Outside the gate, on the ground, walking in through the gap.
 const REINFORCE_POSTS := [
-	Vector3(-2.6, 0.1, -31.0), Vector3(-0.9, 0.1, -32.0),
-	Vector3(0.9, 0.1, -32.0), Vector3(2.6, 0.1, -31.0),
+	Vector3(-2.6, 0.1, -48.0), Vector3(-0.9, 0.1, -49.0),
+	Vector3(0.9, 0.1, -49.0), Vector3(2.6, 0.1, -48.0),
 ]
 
 ## The one hit a watcher needs to land for the lesson: light, and telegraphed.
@@ -392,24 +400,35 @@ func _build_world() -> void:
 
 	_build_night()
 	# The yard floor, then the wider dark field so the horizon is not a void.
-	_solid_box(Vector3(34.0, 0.6, 44.0), Vector3(0, -0.3, -4.0), _ground_mat)
-	var field := Geo.box(self, Vector3(220.0, 0.3, 220.0), Vector3(0, -0.78, 0), _ground_mat)
+	# The floor runs well past every wall and past the gate, so a body that steps
+	# out of the palisade walks on ground instead of dropping into the dark.
+	var depth := YARD_BACK - YARD_FRONT
+	_solid_box(Vector3(100.0, 0.6, 140.0), Vector3(0, -0.3, -16.0), _ground_mat)
+	var field := Geo.box(self, Vector3(260.0, 0.3, 260.0), Vector3(0, -0.78, 0), _ground_mat)
 	field.name = "CampField"
 	field.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# A last-resort floor under everything: no fall is ever fatal or endless,
+	# even if a body is pushed through a collider.
+	_safety_floor()
 
 	# Low palisade: solid walls of logs with a gap at the gate.
 	var wall_height := 1.9
 	for side in [-1.0, 1.0]:
-		_solid_box(Vector3(0.6, wall_height, 44.0), Vector3(side * 17.0, wall_height * 0.5, -4.0), _wood_mat)
-	_solid_box(Vector3(34.0, wall_height, 0.6), Vector3(0, wall_height * 0.5, 18.0), _wood_mat)
+		_solid_box(Vector3(0.6, wall_height, depth + 0.6),
+			Vector3(side * YARD_HALF_WIDTH, wall_height * 0.5, (YARD_BACK + YARD_FRONT) * 0.5), _wood_mat)
+	_solid_box(Vector3(YARD_HALF_WIDTH * 2.0, wall_height, 0.6),
+		Vector3(0, wall_height * 0.5, YARD_BACK), _wood_mat)
 	for side in [-1.0, 1.0]:
-		_solid_box(Vector3(14.0, wall_height, 0.6), Vector3(side * 10.0, wall_height * 0.5, -26.0), _wood_mat)
+		_solid_box(Vector3(YARD_HALF_WIDTH - 5.0, wall_height, 0.6),
+			Vector3(side * (5.0 + (YARD_HALF_WIDTH - 5.0) * 0.5), wall_height * 0.5, YARD_FRONT), _wood_mat)
 	# Log tops over the walls: silhouette against the fog, no extra collision.
-	for index in 22:
+	for index in int(depth * 0.5):
 		for side in [-1.0, 1.0]:
-			Geo.cylinder(self, 0.16, 0.14, 2.3, Vector3(side * 17.0, 1.15, -24.0 + index * 2.0), _wood_mat, 6)
-	for index in 9:
-		Geo.cylinder(self, 0.16, 0.14, 2.3, Vector3(-16.0 + index * 4.0, 1.15, 18.0), _wood_mat, 6)
+			Geo.cylinder(self, 0.16, 0.14, 2.3,
+				Vector3(side * YARD_HALF_WIDTH, 1.15, YARD_FRONT + 1.0 + index * 2.0), _wood_mat, 6)
+	for index in int(YARD_HALF_WIDTH):
+		Geo.cylinder(self, 0.16, 0.14, 2.3,
+			Vector3(-YARD_HALF_WIDTH + 2.0 + index * 4.0, 1.15, YARD_BACK), _wood_mat, 6)
 
 	_build_gate()
 	for index in caged_ids.size():
@@ -417,9 +436,13 @@ func _build_world() -> void:
 	_build_props()
 	_torch(Vector3(-10.5, 0, 4.2), 0.9)
 	_torch(Vector3(10.5, 0, 4.2), 0.9)
-	_torch(Vector3(-3.0, 0, -22.5), 1.0)
-	_torch(Vector3(3.0, 0, -22.5), 1.0)
+	_torch(Vector3(-5.0, 0, -38.5), 1.0)
+	_torch(Vector3(5.0, 0, -38.5), 1.0)
 	_torch(Vector3(0, 0, -12.0), 0.75)
+	_torch(Vector3(-14.0, 0, -30.0), 0.8)
+	_torch(Vector3(14.0, 0, -30.0), 0.8)
+	_torch(Vector3(-14.0, 0, 16.0), 0.8)
+	_torch(Vector3(14.0, 0, 16.0), 0.8)
 
 func _build_night() -> void:
 	var env := Environment.new()
@@ -427,7 +450,7 @@ func _build_night() -> void:
 	env.background_color = Color(0.02, 0.03, 0.05)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.10, 0.12, 0.18)
-	env.ambient_light_energy = 0.85
+	env.ambient_light_energy = 1.05
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.05, 0.07, 0.11)
 	env.fog_density = 0.018
@@ -440,7 +463,7 @@ func _build_night() -> void:
 	var moon := DirectionalLight3D.new()
 	moon.name = "Moonlight"
 	moon.light_color = Color(0.58, 0.66, 0.92)
-	moon.light_energy = 0.34
+	moon.light_energy = 0.45
 	moon.shadow_enabled = false
 	moon.rotation_degrees = Vector3(-54, -38, 0)
 	add_child(moon)
@@ -448,20 +471,20 @@ func _build_night() -> void:
 ## The way out: two heavy posts, a crossbeam, a brazier burning on either side.
 func _build_gate() -> void:
 	for side in [-1.0, 1.0]:
-		_solid_box(Vector3(0.5, 4.6, 0.5), Vector3(side * 3.0, 2.3, -26.0), _wood_mat)
-		Geo.cylinder(self, 0.42, 0.34, 0.2, Vector3(side * 3.0, 4.55, -26.0), _iron_mat, 8)
-		Geo.sphere(self, 0.22, Vector3(side * 3.0, 4.85, -26.0), _flame_material())
+		_solid_box(Vector3(0.5, 4.6, 0.5), Vector3(side * 3.0, 2.3, YARD_FRONT), _wood_mat)
+		Geo.cylinder(self, 0.42, 0.34, 0.2, Vector3(side * 3.0, 4.55, YARD_FRONT), _iron_mat, 8)
+		Geo.sphere(self, 0.22, Vector3(side * 3.0, 4.85, YARD_FRONT), _flame_material())
 		var light := OmniLight3D.new()
 		light.name = "GateLight"
-		light.position = Vector3(side * 3.0, 4.6, -26.0)
+		light.position = Vector3(side * 3.0, 4.6, YARD_FRONT)
 		light.light_color = Color(1.0, 0.62, 0.28)
 		light.light_energy = 2.2
 		light.omni_range = 14.0
 		add_child(light)
-	Geo.box(self, Vector3(7.4, 0.5, 0.5), Vector3(0, 4.8, -26.0), _wood_mat)
+	Geo.box(self, Vector3(7.4, 0.5, 0.5), Vector3(0, 4.8, YARD_FRONT), _wood_mat)
 	var label := Label3D.new()
 	label.text = "GATE"
-	label.position = Vector3(0, 5.4, -26.0)
+	label.position = Vector3(0, 5.4, YARD_FRONT)
 	label.font_size = 96
 	label.pixel_size = 0.012
 	label.modulate = Color(1.0, 0.78, 0.5)
@@ -544,6 +567,21 @@ func _advance_cage_doors(delta: float) -> void:
 		var node: Node3D = entry["node"]
 		if is_instance_valid(node):
 			node.position.y = lift
+
+## An invisible catch floor far under the camp. The yard floor already extends
+## past every wall; this is the guarantee that nothing can fall forever.
+func _safety_floor() -> void:
+	var body := StaticBody3D.new()
+	body.name = "CatchFloor"
+	body.position = Vector3(0, -1.2, -16.0)
+	body.collision_layer = 1
+	body.collision_mask = 0
+	add_child(body)
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(400.0, 0.4, 400.0)
+	shape.shape = box
+	body.add_child(shape)
 
 func _solid_box(size: Vector3, at: Vector3, mat: Material) -> StaticBody3D:
 	var body := StaticBody3D.new()
