@@ -27,7 +27,7 @@ const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
-const ActorScript = preload("res://scripts/arena_actor.gd")
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Geo = preload("res://scripts/geo.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -61,12 +61,15 @@ const CAGE_BAR_LIFT := 2.6
 const BAR_LIFT_SPEED := 2.2
 const LOOT_REACH := 2.6
 
-## The two gate guards. Tutorial props, not the wave system: they are two real
-## `ArenaActor` bots with catalog gear and a crimson rig.
-const GATE_GUARDS := [
-	{"name": "Cultist Warden", "main": "sword_short", "set": "cloth", "post": Vector3(-4.2, 0.2, -21.5)},
-	{"name": "Cultist Throat", "main": "dagger_iron", "set": "cloth", "post": Vector3(4.2, 0.2, -21.5)},
+## The two gate watchers: the antlered hollow warden silhouette, thinned in
+## `cage_watcher.gd` so three dagger stabs end one. They stand by the gate, turn
+## on the squad when the first latch goes, and are slow enough to learn to block.
+const GATE_WATCHERS := [
+	{"post": Vector3(-4.2, 0.1, -20.5)},
+	{"post": Vector3(4.2, 0.1, -20.5)},
 ]
+## The one hit a watcher needs to land for the lesson: light, and telegraphed.
+const WATCHER_SOURCE := 90
 ## Cultist steel along the walk from the cages to the gate.
 const WEAPON_DROPS := [
 	["sword_short", Vector3(-0.8, 0.15, -0.5)],
@@ -99,8 +102,10 @@ var _pickups: Array = []
 var _guard_tick := 0
 var _jogging := false
 var _reviving := false
-var _cages_open := false
+var _cage_open: Array[bool] = []   # per cage, in CAGE_POSTS order
+var _watchers_awake := false
 var _prompt_text := ""
+var _hint_text := ""
 
 var _ground_mat: StandardMaterial3D
 var _wood_mat: StandardMaterial3D
@@ -145,8 +150,11 @@ func _ready() -> void:
 	add_child(revive)
 	revive.set_bodies(bodies)
 	_build_loot()
-	_build_guards()
+	_build_watchers()
 	_build_ui()
+	_cage_open.clear()
+	for index in caged_ids.size():
+		_cage_open.append(false)
 	controller.possession_changed.connect(_on_possession_changed)
 	controller.transfer_refused.connect(_on_transfer_refused)
 	controller.possession_released.connect(_on_possession_released)
@@ -172,11 +180,11 @@ func _physics_process(delta: float) -> void:
 		return
 	_rescuer_jog()
 	controller.physics_step(delta)
-	_step_guards(delta)
+	_maintain_watchers(delta)
 	_clamp_caged_bodies()
 	_tick_revive(delta)
 	_update_prompt()
-	_check_gate()
+	_update_hint()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
@@ -343,7 +351,7 @@ func _build_night() -> void:
 	env.background_color = Color(0.02, 0.03, 0.05)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.10, 0.12, 0.18)
-	env.ambient_light_energy = 0.55
+	env.ambient_light_energy = 0.85
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.05, 0.07, 0.11)
 	env.fog_density = 0.018
@@ -356,7 +364,7 @@ func _build_night() -> void:
 	var moon := DirectionalLight3D.new()
 	moon.name = "Moonlight"
 	moon.light_color = Color(0.58, 0.66, 0.92)
-	moon.light_energy = 0.20
+	moon.light_energy = 0.34
 	moon.shadow_enabled = false
 	moon.rotation_degrees = Vector3(-54, -38, 0)
 	add_child(moon)
@@ -452,9 +460,10 @@ func _build_props() -> void:
 
 func _advance_cage_doors(delta: float) -> void:
 	var step := BAR_LIFT_SPEED * delta
-	var target := CAGE_BAR_LIFT if _cages_open else 0.0
-	for entry in _cage_doors:
-		var lift := move_toward(float(entry["lift"]), target, step)
+	for index in _cage_doors.size():
+		var entry: Dictionary = _cage_doors[index]
+		var open := index < _cage_open.size() and bool(_cage_open[index])
+		var lift := move_toward(float(entry["lift"]), CAGE_BAR_LIFT if open else 0.0, step)
 		entry["lift"] = lift
 		var node: Node3D = entry["node"]
 		if is_instance_valid(node):
@@ -483,10 +492,11 @@ func _solid_box(size: Vector3, at: Vector3, mat: Material) -> StaticBody3D:
 ## Possession moves the soul, not the cage: this is the only thing that makes the
 ## first beat a tutorial instead of four free bodies.
 func _clamp_caged_bodies() -> void:
-	if _cages_open:
-		return
-	for merc_id in caged_ids:
-		var actor = controller.body_of(int(merc_id))
+	for index in caged_ids.size():
+		if index < _cage_open.size() and bool(_cage_open[index]):
+			continue
+		var merc_id := int(caged_ids[index])
+		var actor = controller.body_of(merc_id)
 		if actor == null or not is_instance_valid(actor):
 			continue
 		var anchor: Vector3 = _cage_anchors.get(int(merc_id), actor.global_position)
@@ -503,13 +513,27 @@ func pickups() -> Array:
 	return _pickups.duplicate()
 
 func is_cage_clamped(merc_id: int) -> bool:
-	return caged_ids.has(merc_id) and not _cages_open
+	var index := caged_ids.find(merc_id)
+	if index < 0:
+		return false
+	return index >= _cage_open.size() or not bool(_cage_open[index])
 
 func cage_anchor_for(merc_id: int) -> Vector3:
 	return _cage_anchors.get(merc_id, Vector3.ZERO)
 
 func cages_open() -> bool:
-	return _cages_open
+	for open in _cage_open:
+		if not bool(open):
+			return false
+	return not _cage_open.is_empty()
+
+## How many latches the player has cut, 0..4.
+func cages_open_count() -> int:
+	var count := 0
+	for open in _cage_open:
+		if bool(open):
+			count += 1
+	return count
 
 ## The fourth prisoner seen starts the rescuer's walk. He is not a bot: the scene
 ## drives his legs with the same authoritative input frame a peer would send, so
@@ -545,11 +569,22 @@ func _build_loot() -> void:
 	loot.name = "Loot"
 	add_child(loot)
 	loot.setup(warband, self)
+	# A hand pickup snaps into the soul's hands when it is a real upgrade.
+	loot.equip_target = Callable(self, "_loot_owner")
 	for drop in WEAPON_DROPS:
 		var pickup = loot.spawn(str(drop[0]), drop[1])
 		if pickup != null:
 			pickup.taken.connect(_on_pickup_taken)
 			_pickups.append(pickup)
+
+## Which mercenary a picked-up piece should be worn by, or -1.
+func _loot_owner(peer_id: int) -> int:
+	var actor = controller.body_for_peer(peer_id)
+	if actor == null or not is_instance_valid(actor):
+		return -1
+	if not bool(actor.get("alive")) or bool(actor.get("downed")):
+		return -1
+	return controller.merc_for_peer(peer_id)
 
 func _on_pickup_taken(pickup) -> void:
 	sequencer.note_weapon_looted()
@@ -558,82 +593,58 @@ func _on_pickup_taken(pickup) -> void:
 	if screen != null:
 		screen.refresh()
 
-# --- the guards ------------------------------------------------------------
+# --- the watchers ----------------------------------------------------------
 
-## Two real bodies, not wave enemies: they stand at the gate, they only turn to
-## hunt once the latch goes, and a dead one is never stepped again (which is also
-## what keeps the arena's respawn clock from reviving a tutorial prop).
-func _build_guards() -> void:
-	for index in GATE_GUARDS.size():
-		var spec: Dictionary = GATE_GUARDS[index]
-		var actor := ActorScript.new()
-		actor.slot = 100 + index
-		actor.name = "Guard%d" % (index + 1)
-		actor.authoritative = true
-		add_child(actor)
-		actor.configure(0, true, str(spec["name"]), spec["post"])
-		actor.global_position = spec["post"]
-		actor.spawn_point = spec["post"]
-		actor.bounds = 60.0
-		SeatLoadout.apply(actor.rig, _cultist_loadout(str(spec["main"]), str(spec["set"])))
-		_tint_cultist(actor.rig)
-		actor.killed.connect(_on_guard_killed.bind(actor))
-		guards.append(actor)
+## Two antlered watchers, not arena bodies: they are real wilderness mobs with a
+## camp profile (`cage_watcher.gd`), so they read as the wood's own creatures and
+## die in a few stabs. They only turn to hunt once the first latch goes.
+func _build_watchers() -> void:
+	for index in GATE_WATCHERS.size():
+		var spec: Dictionary = GATE_WATCHERS[index]
+		var watcher := WatcherScript.new()
+		watcher.name = "CampWatcher%d" % (index + 1)
+		watcher.mob_id = "hollow_warden"
+		add_child(watcher)
+		watcher.global_position = spec["post"]
+		watcher.player = controller.active_body(1)
+		watcher.defeated.connect(_on_watcher_defeated)
+		watcher.attacked.connect(_on_watcher_attack)
+		guards.append(watcher)
 
-func _cultist_loadout(main_id: String, set_id: String) -> Dictionary:
-	var pieces := {}
-	for slot in ArmorData.SLOTS:
-		var armor_id := "armor_%s_%s" % [set_id, slot]
-		pieces[slot] = int(State.ITEMS.get(armor_id, {}).get("set", ArmorData.NONE))
-	var main_item: Dictionary = State.ITEMS.get(main_id, {})
-	var category := str(main_item.get("category", ""))
-	var sword_index := 0
-	if category == "staff":
-		sword_index = 2
-	elif str(main_item.get("kind", "")) == "sword" and category in ["1h", "2h"]:
-		sword_index = int(main_item.get("index", 0))
-	return {
-		"main": main_id,
-		"off": "",
-		"bow": 0,
-		"sword": sword_index,
-		"armor": ArmorData.pack(pieces),
-		"trinkets": {"neck": "", "ring1": "", "ring2": "", "off": ""},
-	}
-
-## Crimson over the whole rig, one duplicated material per surface so the two
-## guards (and every other body in the camp) keep their own cloth.
-func _tint_cultist(rig) -> void:
-	if rig == null or not is_instance_valid(rig):
+## Keep the watchers pointed at whichever body the soul is wearing and, once the
+## first cage is open, let them know the camp is awake.
+func _maintain_watchers(delta: float) -> void:
+	if guards.is_empty():
 		return
-	for node in rig.find_children("*", "MeshInstance3D", true, false):
-		var mesh := node as MeshInstance3D
-		if mesh == null or mesh.mesh == null:
-			continue
-		for surface in mesh.mesh.get_surface_count():
-			var source := mesh.get_active_material(surface)
-			if source is StandardMaterial3D:
-				var tuned := (source as StandardMaterial3D).duplicate() as StandardMaterial3D
-				tuned.albedo_color = Color(0.26, 0.03, 0.04)
-				tuned.emission_enabled = true
-				tuned.emission = Color(0.52, 0.02, 0.02)
-				tuned.emission_energy_multiplier = 0.35
-				mesh.set_surface_override_material(surface, tuned)
-
-func _step_guards(delta: float) -> void:
-	if guards.is_empty() or not _cages_open:
-		return
+	var actor = controller.active_body(1)
+	if actor != null and is_instance_valid(actor):
+		for watcher in guards:
+			if is_instance_valid(watcher) and bool(watcher.get("alive")):
+				watcher.player = actor
+	if cages_open_count() > 0 and not _watchers_awake:
+		_watchers_awake = true
+		for watcher in guards:
+			if is_instance_valid(watcher) and bool(watcher.get("alive")):
+				watcher.mob_wake()
 	_guard_tick += 1
-	for actor in guards:
-		if not is_instance_valid(actor) or not actor.alive:
-			continue
-		actor.combat.lag_tick = _guard_tick
-		actor.step(delta, bodies, _guard_tick)
 
-func _on_guard_killed(_slot: int, _source: int, actor) -> void:
+func _on_watcher_defeated(enemy, _reward: int) -> void:
 	sequencer.note_guard_killed()
-	if hud != null and is_instance_valid(actor):
-		hud.set_status("%s is down." % str(actor.display_name), 2.5)
+	if hud != null and is_instance_valid(enemy):
+		hud.set_status("The watcher folds. One left." if sequencer.guards_down() == 1
+			else "Both watchers are down.", 3.0)
+	_update_hint()
+
+## A watcher's swing lands on the warband body it was hunting. The mob emits the
+## blow; the scene applies it through the body's own guard, exactly like the
+## frontier's `_on_enemy_attack`.
+func _on_watcher_attack(attacker, amount: float, victim) -> void:
+	if not is_instance_valid(attacker) or not is_instance_valid(victim):
+		return
+	if victim.has_method("receive_melee"):
+		victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position)
+	elif victim.has_method("take_damage"):
+		victim.take_damage(amount, WATCHER_SOURCE)
 
 # --- sequencer -------------------------------------------------------------
 
@@ -644,6 +655,7 @@ func _on_state_changed(state: int, objective: String) -> void:
 		hud.set_status(objective, 6.0)
 		_prompt_text = objective
 		hud.set_prompt(objective)
+		_update_hint()
 	match state:
 		SequencerScript.State.ALL_SEEN:
 			_jogging = true
@@ -652,16 +664,15 @@ func _on_state_changed(state: int, objective: String) -> void:
 				screen.refresh()
 
 ## The rescuer is through: his body is the one with a blade, so the soul goes
-## into him whether the player reached for a hotkey or not, and the cage doors
-## climb. Only then is the squad freed.
+## into him whether the player reached for a hotkey or not. He does not free four
+## cages with one cut - the player walks to each cage and presses G.
 func _on_rescuer_ready(merc_id: int) -> void:
 	_jogging = false
-	_cages_open = true
 	controller.direct(1, merc_id)
-	sequencer.note_freed()
 	if hud != null:
 		var actor = controller.active_body(1)
 		hud.set_body(actor, warband.roster.name_of(merc_id), merc_id)
+		hud.set_status("Corvin holds the shiv. Walk to each cage and press G.", 6.0)
 
 func _on_gate_ready() -> void:
 	var path := town_scene_path()
@@ -678,15 +689,15 @@ func town_scene_path() -> String:
 			return str(path)
 	return str(TOWN_PATHS[TOWN_PATHS.size() - 1])
 
-func _check_gate() -> void:
-	if sequencer.state() != SequencerScript.State.ESCAPING:
-		return
+## The gate is a door, not a trigger: the player walks into the arch and presses
+## G, exactly like every other object in this game.
+func _gate_in_reach() -> bool:
 	var actor = controller.active_body(1)
 	if actor == null or not is_instance_valid(actor):
-		return
-	var flat := Vector3(actor.global_position.x - GATE_POINT.x, 0.0, actor.global_position.z - GATE_POINT.z)
-	if flat.length() <= GATE_RADIUS:
-		sequencer.note_gate_reached()
+		return false
+	var flat := Vector3(actor.global_position.x - GATE_POINT.x, 0.0,
+		actor.global_position.z - GATE_POINT.z)
+	return flat.length() <= GATE_RADIUS
 
 # --- possession ------------------------------------------------------------
 
@@ -791,21 +802,71 @@ func _try_loot() -> void:
 	var result: Dictionary = loot.quick_loot(pickup, 1)
 	hud.set_status(str(result.get("message", "")), 2.5)
 
-## `G` is the tutorial's "what now" key: inside reach it takes the steel in front
-## of you, otherwise it repeats the objective instead of doing nothing at all.
+## `G` is the tutorial's one interaction key: cut a latch, take the steel at your
+## feet, or leave through the arch. Anything else repeats the objective.
 func _try_interact() -> void:
+	if _try_cage_latch():
+		return
 	var pickup = _nearest_pickup()
 	if pickup != null:
 		_try_loot()
 		return
+	if sequencer.state() == SequencerScript.State.ESCAPING and _gate_in_reach():
+		sequencer.note_gate_reached()
+		return
+	if sequencer.state() == SequencerScript.State.ESCAPING:
+		hud.set_status("Walk into the gate arch, then press G.", 3.0)
+		return
 	hud.set_status(sequencer.objective(), 4.0)
+
+## The cage whose bars are closest to `point` while it is still shut, or -1.
+func _cage_in_reach():
+	var actor = controller.active_body(1)
+	if actor == null or not is_instance_valid(actor):
+		return -1
+	var best := -1
+	var best_distance := 3.2
+	for index in caged_ids.size():
+		if index < _cage_open.size() and bool(_cage_open[index]):
+			continue
+		var anchor: Vector3 = CAGE_POSTS[index]
+		var flat := Vector3(actor.global_position.x - anchor.x, 0.0, actor.global_position.z - anchor.z)
+		if flat.length() <= best_distance:
+			best_distance = flat.length()
+			best = index
+	return best
+
+## Cut one latch. Only the rescuer carries the shiv, so only his body can open a
+## cage - which is the reason the soul is forced into him in the first place.
+func _try_cage_latch() -> bool:
+	if sequencer.state() != SequencerScript.State.RESCUER_ARRIVED:
+		return false
+	var index: int = _cage_in_reach()
+	if index < 0:
+		return false
+	if controller.merc_for_peer(1) != rescuer_id:
+		hud.set_status("Only Corvin has the shiv. Press F5 to take his body.", 3.0)
+		return true
+	_open_cage(index)
+	return true
+
+func _open_cage(index: int) -> void:
+	if index < 0 or index >= _cage_open.size() or bool(_cage_open[index]):
+		return
+	_cage_open[index] = true
+	sequencer.note_cage_opened(index)
+	var name: String = warband.roster.name_of(int(caged_ids[index]))
+	if hud != null:
+		hud.set_status("Latch cut. %s is free (%d/%d)." % [name,
+			cages_open_count(), caged_ids.size()], 3.0)
+	_update_hint()
 
 ## `B` closes the fight out: the survivors walk the camp and the drops go to the
 ## shared stash. Refused while a guard is still on his feet, which is the one
 ## thing the tutorial must not shortcut.
 func _try_finish_fight() -> void:
-	if not _cages_open:
-		hud.set_status("The latches are still shut.", 2.0)
+	if not cages_open():
+		hud.set_status("The latches are still shut (%d/4)." % cages_open_count(), 2.0)
 		return
 	if sequencer.guards_down() < guards.size():
 		hud.set_status("The guards still hold the gate.", 2.0)
@@ -828,8 +889,13 @@ func _update_prompt() -> void:
 		text = "Hold E - revive %s" % warband.roster.name_of(int(controller.merc_of(target)))
 	else:
 		var pickup = _nearest_pickup()
+		var cage: int = _cage_in_reach()
 		if pickup != null:
 			text = "K - loot %s" % str(pickup.label_text())
+		elif cage >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
+			text = "G - cut the latch"
+		elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
+			text = "G - leave the camp"
 		else:
 			text = sequencer.objective()
 	# The objective is rebuilt from live counters every frame; the label is only
@@ -837,6 +903,24 @@ func _update_prompt() -> void:
 	if text != _prompt_text:
 		_prompt_text = text
 		hud.set_prompt(text)
+
+## The standing key line: the sequencer's beat hint, refined by whatever the body
+## is standing next to. Rebuilt every frame and only written when it changes, so
+## a player who looks away can always find the next button.
+func _update_hint() -> void:
+	if hud == null or sequencer == null:
+		return
+	var text: String = sequencer.hint()
+	if _revive_target() != null:
+		text = "Hold E - revive the downed body beside you   ·   G - cut a latch"
+	elif _gate_in_reach() and sequencer.state() == SequencerScript.State.ESCAPING:
+		text = "G - leave the camp for town"
+	elif _cage_in_reach() >= 0 and sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
+		text = "G - cut this cage's latch   (%d of %d opened)" % [
+			cages_open_count(), caged_ids.size()]
+	if text != _hint_text:
+		_hint_text = text
+		hud.set_hint(text)
 
 # --- ui --------------------------------------------------------------------
 

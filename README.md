@@ -13,9 +13,10 @@ difference - and the warband is the thing that survives a battle.
   fresh warband) or resumes a saved one in the town. The mode has its own save
   (`user://warband_state.json`); the ranger's kit is untouched.
 - **The four cages:** shift between all four prisoners to learn the controls,
-  then a fifth prisoner in sacrificial rags cuts the squad out with a dagger.
-  You are forced into the rescuer, the cages open, and you loot cultist steel and
-  fight to the gate.
+  then a fifth prisoner in sacrificial rags runs in with a shiv and the soul is
+  forced into him. Walk to each cage and press **G** to cut its latch (four
+  latches, four cages), loot the cultist steel, put down the two antlered camp
+  watchers (three dagger stabs each) and press **G** in the gate arch to leave.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons
@@ -30,17 +31,18 @@ difference - and the warband is the thing that survives a battle.
   leaves a mercenary Downed at 0 health - crawling backwards to cover, bleeding
   out in 30 s. Only a human holds the **5 s revive** (E); AI never revives. A
   heavier hit kills outright.
-- **Loot:** quick-loot during the fight (K); when the field goes quiet the
-  surviving soldiers physically jog to the drops before everything lands in the
-  value-sorted shared stash.
+- **Loot:** quick-loot during the fight (K). A picked-up piece goes straight into
+  the soul's hands when it fills an empty slot or beats what is worn there, and
+  otherwise into the shared stash. When the field goes quiet the surviving
+  soldiers physically jog to the drops before everything lands in the stash.
 
 | Key | Warband mode |
 | --- | --- |
 | `[` / `]` | previous / next living, unoccupied body |
 | `F1`..`F8` | enter a named body directly |
 | `TAB` | warband screen (health, downed state, gear, click to control, hiring) |
-| `P` | mercenary paperdoll over the shared stash |
-| `G` | use the altar / stash / recruiter / expedition gate you stand at |
+| `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off; click a piece another mercenary wears to hand it over) |
+| `G` | cut a cage latch, use the altar / stash / quartermaster / recruiter / expedition gate you stand at, or leave through the gate |
 | `K` | quick-loot the drop at your feet |
 | `E` (hold) | revive the downed body beside you |
 | `R` | fire the branded ability on your weapon |

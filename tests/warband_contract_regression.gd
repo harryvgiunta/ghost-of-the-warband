@@ -47,6 +47,7 @@ func run() -> void:
 	check_overkill()
 	check_scaler()
 	check_roster()
+	check_gear_transfer(state, warband)
 	check_souls()
 	check_stash(state, warband)
 	check_cruor(state, warband)
@@ -139,6 +140,71 @@ func check_scaler() -> void:
 	Damage.prune()
 	check(Damage.registered_count() == 0, "prune drops a freed body")
 	Damage.reset()
+
+# --- gear hand-offs --------------------------------------------------------
+
+## The stash is one pool: a piece another mercenary wears must be transferable,
+## a piece can move between slots on the same body, and a pickup can snap into a
+## hand when it is the better blade. Nothing in these moves may lose an item.
+func check_gear_transfer(_state, warband) -> void:
+	warband.reset_state()
+	var roster = warband.roster
+	var stash = warband.stash
+	var ash: int = warband.add_mercenary("Ash")
+	var corvin: int = warband.add_mercenary("Corvin")
+	# Only the rescuer's shiv exists: the exact shape of the tutorial.
+	roster.equip(corvin, "main", "dagger_makeshift")
+	var before_total: int = warband.total_value()
+
+	var hand: Dictionary = warband.equip_merc(ash, "main", "dagger_makeshift")
+	check(bool(hand.get("ok", false)), "a worn dagger can be handed to another body: %s"
+		% str(hand.get("message", "")))
+	check(str(roster.equipped_of(ash).get("main", "")) == "dagger_makeshift",
+		"the receiving body now holds it")
+	check(str(roster.equipped_of(corvin).get("main", "")) == "",
+		"the giver no longer wears it")
+	check(warband.total_value() == before_total, "a hand-off loses no value")
+
+	# Moving the same piece between slots on one body is legal too.
+	var moved: Dictionary = warband.equip_merc(ash, "off", "dagger_makeshift")
+	check(bool(moved.get("ok", false)), "the same dagger moves to the off hand")
+	check(str(roster.equipped_of(ash).get("main", "")) == "",
+		"the main hand is empty after the move")
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+		"the off hand holds it")
+
+	# An unowned piece is still refused.
+	var unowned: Dictionary = warband.equip_merc(ash, "main", "sword_great")
+	check(unowned.get("ok") == false, "a piece nobody owns is refused")
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+		"a refused equip leaves the body alone")
+
+	# A pickup snaps into a hand only when it beats what is already there.
+	stash.add("sword_short", 1)
+	var empty_hand: Dictionary = warband.auto_equip(ash, "sword_short")
+	check(bool(empty_hand.get("ok", false)), "a looted blade fills an empty main hand")
+	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
+		"the shortsword is worn")
+	stash.add("dagger_iron", 1)
+	var worse: Dictionary = warband.auto_equip(ash, "dagger_iron")
+	check(worse.get("ok") == false, "a piece no better than the worn one stays in the stash")
+	check(warband.stash.pooled_count("dagger_iron") == 1, "and it is still owned")
+	stash.add("sword_arming", 1)
+	var better: Dictionary = warband.auto_equip(ash, "sword_arming")
+	check(bool(better.get("ok", false)), "a better blade goes straight into the hand")
+	check(str(roster.equipped_of(ash).get("main", "")) == "sword_arming",
+		"the arming sword replaced the shortsword")
+	check(warband.stash.pooled_count("sword_short") == 1,
+		"the displaced shortsword returns to the pool")
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+		"the off hand is untouched by a main-hand upgrade")
+
+	# Unarmed bodies get the first thing they pick up.
+	var bram: int = warband.add_mercenary("Bram")
+	stash.add("bow_short", 1)
+	var first: Dictionary = warband.auto_equip(bram, "bow_short")
+	check(bool(first.get("ok", false)), "an unarmed body takes the first weapon it loots")
+	check(str(roster.equipped_of(bram).get("main", "")) == "bow_short", "the bow is in hand")
 
 # --- souls -----------------------------------------------------------------
 

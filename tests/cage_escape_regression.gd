@@ -4,10 +4,12 @@ extends SceneTree
 ## Proves the lesson in the order a player meets it: five rags prisoners spawn,
 ## four of them in cages with the soul already inside one; every caged body sits
 ## clamped inside its own cage; shifting the soul through all four in a scrambled
-## order advances the sequencer exactly once; the fifth prisoner jogs in, the
-## soul is forced into his body and the cage doors climb; the freed squad loots
-## the cultist steel and kills both gate guards, which opens the escape; and only
-## then does standing in the gate arch finish the tutorial and ask for the town.
+## order advances the sequencer exactly once; the fifth prisoner jogs in and the
+## soul is forced into his body; the player then walks to each of the four cages
+## and presses G, one latch at a time; the freed squad loots the cultist steel
+## (which snaps into the rescuer's hands) and puts down both antlered watchers in
+## three stabs each, which opens the escape; and only then does G in the gate
+## arch finish the tutorial and ask for the town.
 ##
 ## Every out-of-order event is fired at the machine first: freeing before the
 ## rescuer arrives, the gate before the fight is over, and kills or loot before
@@ -79,6 +81,7 @@ func run() -> void:
 	check_refusals()
 	check_see_all()
 	await check_rescuer()
+	await check_latches()
 	await check_freed_walk()
 	await check_fight_and_gate()
 
@@ -149,9 +152,13 @@ func check_spawn() -> void:
 	check(game.sequencer.objective() == "Shift your soul between the four prisoners   1/4",
 		"the opening objective reads as a possession instruction")
 	check(not game.cages_open(), "the cages are still shut")
-	for guard in game.guards:
-		check(bool(guard.get("alive")) and bool(guard.get("is_bot")), "a gate guard stands on his feet")
-	check(game.guards.size() == 2, "two guards hold the gate")
+	check(game.guards.size() == 2, "two watchers hold the gate")
+	for watcher in game.guards:
+		check(bool(watcher.get("alive")), "a watcher stands on its feet")
+		check(is_equal_approx(float(watcher.max_health), 36.0),
+			"the watcher is thinned to 36 health, got %s" % str(watcher.max_health))
+		check(str(watcher.name).begins_with("Forest_"), "the watcher is the woodland mob (%s)" % watcher.name)
+	check(game.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(game.pickups().size() == 3, "three cultist weapons lie on the walk")
 
 # --- the cage clamp --------------------------------------------------------
@@ -173,7 +180,7 @@ func check_clamp() -> void:
 
 func check_refusals() -> void:
 	var before: int = game.sequencer.state()
-	check(not game.sequencer.note_freed(), "freeing is refused before the rescuer arrives")
+	check(not game.sequencer.note_cage_opened(0), "a latch is refused before the rescuer arrives")
 	check(not game.sequencer.note_rescuer_arrived(), "the rescuer cannot arrive before all four seen")
 	check(not game.sequencer.note_gate_reached(), "the gate is refused before the escape is on")
 	check(not game.sequencer.note_guard_killed(), "a guard death before the fight is not progress")
@@ -215,17 +222,58 @@ func check_rescuer() -> void:
 		await create_timer(0.1).timeout
 		waited += 0.1
 	check(waited < JOG_TIMEOUT, "the rescuer walked to the cages in %.1f s" % waited)
-	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"the rescuer's arrival frees the squad (%s)" % game.sequencer.state_name())
+	check(game.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
+		"the rescuer's arrival hands over the shiv (%s)" % game.sequencer.state_name())
 	check(state_count(SequencerScript.State.RESCUER_ARRIVED) == 1,
 		"RESCUER_ARRIVED is entered exactly once")
 	check(game.controller.merc_for_peer(1) == game.rescuer_id,
 		"the soul is forced into the rescuer's body")
-	check(game.cages_open(), "the cages are open")
-	check(not game.sequencer.note_freed(), "freeing twice is refused")
+	check(not game.cages_open(), "the cages are still shut: the player has to cut them")
+	check(game.cages_open_count() == 0, "no latch is cut for free")
+	check(game.sequencer.hint().contains("G"), "the hint names the latch key")
+	check(not game.sequencer.note_cage_opened(0) == false, "the first latch is accepted")
 	var rescuer = game.controller.body_of(game.rescuer_id)
 	check(rescuer != null and flat_range(rescuer.global_position, game.JOG_TARGET) < 4.0,
 		"the rescuer is standing at the cages")
+
+# --- one latch at a time ---------------------------------------------------
+
+## Every cage is opened by walking to it and pressing G, and only the rescuer's
+## body carries the shiv: a prisoner pressing G at their own bars is refused.
+func check_latches() -> void:
+	var rescuer = game.controller.body_of(game.rescuer_id)
+	var first_cage: Vector3 = game.CAGE_POSTS[0]
+	# A prisoner cannot cut a latch, even standing at it.
+	game.controller.direct(1, int(game.caged_ids[2]))
+	var prisoner = game.controller.body_of(int(game.caged_ids[2]))
+	prisoner.global_position = first_cage + Vector3(0.0, 0.1, 0.3)
+	await physics_frame
+	game._try_interact()
+	check(game.cages_open_count() == 0, "only the rescuer's shiv opens a cage")
+	check(game.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
+		"a refused latch changes nothing")
+
+	game.controller.direct(1, game.rescuer_id)
+	rescuer = game.controller.body_of(game.rescuer_id)
+	for index in game.caged_ids.size():
+		var cage: Vector3 = game.CAGE_POSTS[index]
+		rescuer.global_position = cage + Vector3(0.0, 0.1, 0.4)
+		await physics_frame
+		await physics_frame
+		game._try_interact()
+		await physics_frame
+		check(game.cages_open_count() == index + 1,
+			"latch %d of 4 is cut (%d)" % [index + 1, game.cages_open_count()])
+		check(not game.is_cage_clamped(int(game.caged_ids[index])),
+			"cage %d stopped clamping its prisoner" % (index + 1))
+		if index + 1 < game.caged_ids.size():
+			check(game.is_cage_clamped(int(game.caged_ids[index + 1])),
+				"the next cage is still shut")
+	check(game.cages_open(), "all four latches are cut")
+	check(game.sequencer.state() == SequencerScript.State.FREED,
+		"the fourth latch frees the squad (%s)" % game.sequencer.state_name())
+	check(game.sequencer.cages_opened() == 4, "the sequencer counted four cages")
+	check(not game.sequencer.note_cage_opened(0), "a latch only counts once")
 
 # --- the freed squad -------------------------------------------------------
 
@@ -246,6 +294,11 @@ func check_fight_and_gate() -> void:
 	var local = game.controller.active_body(1)
 	check(local != null, "the soul still has a body for the fight")
 
+	# Looting a blade now puts it in the soul's hand: the shiv is replaced,
+	# then the arming sword replaces the shortsword, and the dagger stays in the
+	# stash because it is worse than what is already held.
+	var rescuer_main_before := str(warband.roster.equipped_of(game.rescuer_id).get("main", ""))
+	check(rescuer_main_before == "dagger_makeshift", "the rescuer starts with the shiv")
 	var looted := 0
 	for pickup in game.pickups():
 		var result: Dictionary = game.loot.quick_loot(pickup, 1)
@@ -253,35 +306,53 @@ func check_fight_and_gate() -> void:
 			looted += 1
 	check(looted == 3, "all three cultist weapons are looted (%d)" % looted)
 	check(game.sequencer.weapons_taken() == 3, "the sequencer counted the steel")
+	check(str(warband.roster.equipped_of(game.rescuer_id).get("main", "")) == "sword_arming",
+		"the best picked-up blade is in the soul's hands (%s)"
+		% str(warband.roster.equipped_of(game.rescuer_id).get("main", "")))
 	check(game.sequencer.state() == SequencerScript.State.FREED,
 		"steel alone does not open the escape")
-	check(warband.stash.pooled_total() >= 3,
-		"the loot landed in the shared stash (%d)" % warband.stash.pooled_total())
+	check(warband.stash.pooled_total() >= 1,
+		"the pieces that were not an upgrade stayed in the stash (%d)"
+		% warband.stash.pooled_total())
 
-	# The gate refuses a body while the guards are standing.
+	# The gate refuses a body while the watchers are standing.
 	local.global_position = game.GATE_POINT
 	await physics_frame
 	await physics_frame
+	game._try_interact()
 	check(game.sequencer.state() == SequencerScript.State.FREED,
-		"the gate is shut while the guards live")
+		"the gate is shut while the watchers live")
 	check(requested_paths.is_empty(), "no scene was requested early")
 
+	# Three dagger stabs end a watcher: 36 health against a 14-damage shiv.
+	var first = game.guards[0]
+	first.take_damage(14.0, 0)
+	check(bool(first.get("alive")), "one stab leaves a watcher standing")
+	first.take_damage(14.0, 0)
+	check(bool(first.get("alive")), "two stabs still leave it standing")
+	first.take_damage(14.0, 0)
+	check(not bool(first.get("alive")), "the third stab puts a watcher down")
+	var second = game.guards[1]
+	second.take_damage(30.0, 0)
+	check(bool(second.get("alive")), "even a heavy single blow does not delete one")
 	for guard in game.guards:
-		guard.take_damage(400.0, 0)
-		check(not bool(guard.get("alive")), "guard %s is down" % str(guard.display_name))
+		if is_instance_valid(guard) and bool(guard.get("alive")):
+			guard.take_damage(40.0, 0)
+			check(not bool(guard.get("alive")), "watcher %s is down" % str(guard.name))
 	check(game.sequencer.guards_down() == 2, "both kills were counted")
 	check(game.sequencer.state() == SequencerScript.State.ESCAPING,
 		"steel plus two kills opens the escape (%s)" % game.sequencer.state_name())
 	check(game.sequencer.objective().contains("gate"), "the objective points at the gate")
 
-	# Walk out: the gate arch is the only exit.
-	local.global_position = Vector3(0.0, 0.2, 6.0)
-	await physics_frame
+	# Walk out: the arch is a door, so the player presses G inside it.
+	check(game.sequencer.hint().contains("gate"), "the hint names the gate")
 	local.global_position = game.GATE_POINT
 	await physics_frame
 	await physics_frame
+	game._try_interact()
+	await physics_frame
 	check(game.sequencer.state() == SequencerScript.State.TOWN,
-		"standing in the arch ends the tutorial (%s)" % game.sequencer.state_name())
+		"G in the arch ends the tutorial (%s)" % game.sequencer.state_name())
 	check(not game.sequencer.note_gate_reached(), "the gate only opens once")
 	check(requested_paths.size() == 1, "the scene was asked for the town exactly once")
 	if not requested_paths.is_empty():

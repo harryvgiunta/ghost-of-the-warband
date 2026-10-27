@@ -244,7 +244,22 @@ func _check_paperdoll() -> void:
 	var tagged := _stash_row(doll, "shield_buckler")
 	check(not tagged.is_empty(), "the worn shield is still on the list")
 	check(int(tagged["pooled"]) == 0, "a worn piece has no free copy")
-	check(tagged["button"].disabled, "a worn piece cannot be equipped from the list")
+	# The stash is one pool, so a piece another body wears is a hand-off, not a
+	# locked row: clicking it takes it off that body and puts it on this one.
+	check(not tagged["button"].disabled, "a worn piece can be handed over from the list")
+	tagged["button"].pressed.emit()
+	check(str(warband.roster.equipped_of(other).get("off", "")) == "shield_buckler",
+		"clicking the worn row dresses the selected mercenary")
+	check(str(warband.roster.equipped_of(first).get("off", "")) == "",
+		"and takes it off the mercenary who wore it")
+	check(warband.stash.pooled_count("shield_buckler") == 0,
+		"a hand-off leaves no copy in the pool")
+	# Hand it straight back so the rest of the checks start where they expected.
+	doll.picker_buttons[first].pressed.emit()
+	doll._on_stash_pressed("shield_buckler")
+	check(str(warband.roster.equipped_of(first).get("off", "")) == "shield_buckler",
+		"and the piece can be handed straight back")
+	doll.picker_buttons[other].pressed.emit()
 	var tag_lines: Array = tagged["tags"]
 	check(tag_lines.size() == 1, "the worn piece carries one tag, got %s" % str(tag_lines))
 	check(str(tag_lines[0]).contains("Equipped") and str(tag_lines[0]).contains("Aldous"),

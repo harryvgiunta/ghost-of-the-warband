@@ -3,20 +3,20 @@ extends Node
 ## GHOST OF THE WARBAND: the opening tutorial's one state machine.
 ##
 ## Four prisoners hang in the cultist camp, a fifth is loose and the gate is the
-## only way out. The order is the lesson: shift the soul through all four caged
-## bodies, wait for the man with the shiv, then take his body, loot the steel and
-## kill the two gate guards before the gate will let anyone leave.
+## only way out. The order is the lesson:
+##   1. shift the soul through all four caged bodies (that is the whole premise);
+##   2. the fifth prisoner jogs in with a shiv and the soul is forced into him;
+##   3. walk to each cage and press G to cut its latch - four latches, four cages;
+##   4. take the cultist steel and put down the two antlered watchers;
+##   5. walk into the gate and press G to leave for town.
 ##
 ## This node owns no scene lookups - no bodies, no labels, no nodes. The scene
-## feeds it facts (`note_body_entered`, `note_guard_killed`, ...) and it answers
-## with a state, one objective line and three signals. Every transition is
-## guarded, so a scene that fires events early (a stray `note_gate_reached`, a
-## freed call before the rescuer ever arrived) is ignored instead of throwing the
-## tutorial out of sequence.
+## feeds it facts and it answers with a state, one objective line, one key hint
+## and three signals. Every transition is guarded, so a scene that fires events
+## early is ignored instead of throwing the tutorial out of sequence.
 ##
 ## Facts arrive at most once per name: a possessed body re-entered twice, a drop
-## collected by a sweep and by hand, or two guard deaths landing on one frame all
-## still count once.
+## collected twice, or two kills landing on one frame all still count once.
 
 signal state_changed(state: int, objective: String)
 signal rescuer_ready(merc_id: int)
@@ -26,7 +26,7 @@ enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING, TOWN }
 
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
-## Gate guards that have to fall before the escape is on.
+## Gate watchers that have to fall before the escape is on.
 const GUARD_COUNT := 2
 ## Cultist steel that has to be in hand: one piece is enough to arm a soul.
 const REQUIRED_WEAPONS := 1
@@ -37,9 +37,9 @@ var rescuer_merc_id := -1
 var _state := State.CAGED
 var _started := false
 var _seen: Array[int] = []
+var _opened: Array[int] = []
 var _guards_down := 0
 var _weapons := 0
-var _freed_called := false
 var _rescuer_noted := false
 var _gate_noted := false
 
@@ -53,7 +53,7 @@ func begin(rescuer_id: int = -1) -> void:
 	announce()
 
 ## Re-emit the current state and objective so the HUD can redraw after a count
-## changed without a transition ("1/4 prisoners seen").
+## changed without a transition ("2/4 latches cut").
 func announce() -> void:
 	state_changed.emit(_state, objective())
 
@@ -89,20 +89,48 @@ func objective() -> String:
 		State.CAGED:
 			return "Shift your soul between the four prisoners   %d/%d" % [_seen.size(), PRISONER_COUNT]
 		State.ALL_SEEN:
-			return "All four seen. The fifth prisoner is working the latches."
+			return "All four seen. The fifth prisoner is coming."
 		State.RESCUER_ARRIVED:
-			return "He is through. Take his body."
+			return "Take his body (F5), then cut each latch with G   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
-			return "Take the cultist steel and put down the gate guards   steel %d  guards %d/%d" \
+			return "Take the cultist steel (K) and put down the watchers   steel %d  watchers %d/%d" \
 				% [_weapons, _guards_down, GUARD_COUNT]
 		State.ESCAPING:
-			return "Both guards are down. Walk into the gate."
+			return "The way is clear. Walk into the gate and press G."
 		State.TOWN:
 			return "The gate is open. Out of the camp."
 	return ""
 
+## The key line under the objective: exactly what to press, this beat. Every
+## step names its own key, because a tutorial that says "free the squad" and not
+## "G" has taught nothing.
+func hint() -> String:
+	match _state:
+		State.CAGED:
+			return "[ ] or F1..F4 - enter another prisoner   ·   TAB - warband   ·   P - gear"
+		State.ALL_SEEN:
+			return "Stay in a body - Corvin is walking in with the shiv."
+		State.RESCUER_ARRIVED:
+			return "F5 - take Corvin   ·   walk to a cage and press G to cut its latch"
+		State.FREED:
+			return "K - pick up the steel (it goes straight into your hands)   ·   LMB / RMB - fight   ·   E - revive"
+		State.ESCAPING:
+			return "Walk to the gate and press G - leave for town"
+		State.TOWN:
+			return ""
+	return ""
+
 func seen_count() -> int:
 	return _seen.size()
+
+func cages_opened() -> int:
+	return _opened.size()
+
+func opened_cages() -> Array[int]:
+	return _opened.duplicate()
+
+func is_cage_opened(index: int) -> bool:
+	return _opened.has(index)
 
 func guards_down() -> int:
 	return _guards_down
@@ -125,7 +153,7 @@ func note_body_entered(merc_id: int) -> bool:
 	return true
 
 ## The fifth prisoner reached the cages. Refused unless all four bodies were
-## seen first, and only ever once.
+## seen first, and only ever once. The scene forces the soul into him next.
 func note_rescuer_arrived() -> bool:
 	if _state != State.ALL_SEEN or _rescuer_noted:
 		return false
@@ -134,16 +162,21 @@ func note_rescuer_arrived() -> bool:
 	rescuer_ready.emit(rescuer_merc_id)
 	return true
 
-## The cages are open. The scene calls this after the rescuer's latch, never
-## before: freeing the squad is what the whole first beat pays for.
-func note_freed() -> bool:
-	if _state != State.RESCUER_ARRIVED or _freed_called:
+## One cage latch was cut by the player. A cage counts once; the fourth opens the
+## squad and starts the fight.
+func note_cage_opened(index: int) -> bool:
+	if _state != State.RESCUER_ARRIVED or index < 0 or index >= PRISONER_COUNT:
 		return false
-	_freed_called = true
-	_transition(State.FREED)
+	if _opened.has(index):
+		return false
+	_opened.append(index)
+	if _opened.size() >= PRISONER_COUNT:
+		_transition(State.FREED)
+	else:
+		announce()
 	return true
 
-## A gate guard died. Counted only during the fight; a kill before the squad is
+## A gate watcher died. Counted only during the fight; a kill before the squad is
 ## out is a scene bug, not progress.
 func note_guard_killed() -> bool:
 	if _state != State.FREED or _guards_down >= GUARD_COUNT:
@@ -160,8 +193,9 @@ func note_weapon_looted() -> bool:
 	_check_escape()
 	return true
 
-## The freed body stepped into the gate arch. Only meaningful once the fight is
-## over; a body leaning on the gate during the lesson advances nothing.
+## The freed body stepped into the gate arch and pressed G. Only meaningful once
+## the fight is over; a body leaning on the gate during the lesson advances
+## nothing.
 func note_gate_reached() -> bool:
 	if _state != State.ESCAPING or _gate_noted:
 		return false

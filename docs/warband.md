@@ -190,8 +190,9 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 
 | Module | Surface |
 | --- | --- |
-| `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages, caged-body clamps, the rescuer's scripted jog and forced possession, two cultist guards, three weapon drops, the gate door |
-| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`, out-of-order calls refused, objective text |
+| `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp, four cages clamped one body each, the rescuer's scripted jog and forced possession, **one latch per cage cut with G**, two antlered camp watchers, three weapon drops that snap into the soul's hands, the gate door (G) |
+| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body |
+| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
 | `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
 | `scenes/town_hub.tscn` + `scripts/warband/town_hub.gd` | dusk square, campfire, stash chest, altar, recruiter desk, gate; `interact_at(peer, point)` resolves the nearest service; one `scene_requested` door |
 | `scripts/warband/expedition_gate.gd` (`ExpeditionGate`) | `prompt`, `deploy_and_launch(ids)`, `return_to_town()` |
@@ -209,7 +210,8 @@ writes `Warband.deploy_battle(ids)`, so the field never needs a second flag.
 ### The loop, as wired
 
 `title -> GameFlow.enter_warband()` -> **cages** (`TutorialSequencer` through the
-four bodies, the rescuer, the gate) -> **town** (stash, altar, recruiter, gate) ->
+four bodies, the forced rescuer, four G-cut latches, the watchers, G at the gate)
+-> **town** (stash, altar, recruiter, quartermaster, gate) ->
 **arena expedition** (three waves, the field sweeps itself) -> **town** (`Enter`).
 Every hand-off goes through one `scene_requested(path)` signal per scene, bound to
 `GameFlow`; a scene never loads another scene. `GameFlow.active` is false until
@@ -242,7 +244,23 @@ body it is inside, and a leaving peer's body falls back to its own AI.
 
 Rendered inspection (not just headless): the cage camp, the town square and the
 arena were each launched with a real window and captured; the arena capture is
-what exposed the engine fog trap above. One engine quirk is pre-existing and
+what exposed the engine fog trap above.
+
+### Gear rules (the stash is one pool)
+
+- `Warband.equip_merc(id, slot, item_id)` equips from the pool **or takes a worn
+  copy off whoever holds it**: handing the rescuer's only shiv to a prisoner is a
+  transfer, and a piece can also move between slots on the same body. A refused
+  equip never pockets somebody else's gear.
+- The paperdoll therefore never disables a worn row: clicking it hands the piece
+  over. Clicking a worn slot takes it off.
+- `Warband.auto_equip(id, item_id)` (used by `WarbandLoot` on a hand pickup) puts
+  a looted piece straight into the soul's hands when that slot is empty or the
+  new piece is worth more than what is worn there; anything else stays in the
+  stash. The post-battle sweep never auto-equips.
+- Every scene names its keys on a standing hint line (`WarbandHud.set_hint`): the
+  tutorial's per-beat hint comes from `TutorialSequencer.hint()`, the town names
+  its screens and the counter you stand at, the field names the fight verbs. One engine quirk is pre-existing and
 unrelated to this subsystem: `arena.tscn`'s lobby renders over a bright sky and
 reads washed out at this camera, while the admin arena (same world kit) renders
 correctly after the fog fix.

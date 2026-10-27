@@ -14,6 +14,7 @@ extends Node
 
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const State = preload("res://scripts/player_state.gd")
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
 ## How far one survivor reaches on the battlefield. Generous on purpose: a drop
 ## is only left behind when it is nowhere near any living body.
@@ -22,6 +23,10 @@ const BATTLE_REACH := 60.0
 ## The warband this vacuum feeds. Kept untyped because `Warband` is an autoload
 ## script with no class name of its own.
 var _warband = null
+## Answers "which mercenary is this peer inside right now?" (-1 for none). When
+## it answers, a hand pickup snaps into that body's hands instead of only landing
+## in the stash: looting a blade is how a soul gets armed.
+var equip_target := Callable()
 ## Where drops are parented. Null means the vacuum's own parent or the scene.
 var _pickups_root: Node3D = null
 ## Drops this node made, including any whose parent is not under the root, so a
@@ -77,8 +82,25 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1) -> Dictionary:
 	_gathered.append(item_id)
 	pickup.collect()
 	_notify_warband()
-	return {"ok": true, "item_id": item_id,
-		"message": "%s goes into the shared stash." % WarbandPickup.item_name(item_id)}
+	var message := "%s goes into the shared stash." % WarbandPickup.item_name(item_id)
+	var merc_id := _equip_owner(collector_peer)
+	if merc_id > 0 and _warband != null:
+		var auto: Dictionary = _warband.auto_equip(merc_id, item_id)
+		if bool(auto.get("ok", false)):
+			message = "%s goes to %s (%s)." % [WarbandPickup.item_name(item_id),
+				_warband.roster.name_of(merc_id),
+				Contracts.slot_id_label(str(auto.get("slot", "")))]
+	return {"ok": true, "item_id": item_id, "message": message}
+
+## The mercenary the pickup should be worn by, or -1. A callable that throws or
+## answers nonsense simply means "keep it in the stash".
+func _equip_owner(peer_id: int) -> int:
+	if not equip_target.is_valid():
+		return -1
+	var answer: Variant = equip_target.call(peer_id)
+	if typeof(answer) != TYPE_INT:
+		return -1
+	return int(answer)
 
 ## The end-of-battle sweep. Every drop under the root (plus every drop this node
 ## made itself) that a survivor can reach moves into the shared stash and leaves

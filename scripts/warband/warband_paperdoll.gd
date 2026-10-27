@@ -78,6 +78,7 @@ func open(merc_id: int = -1) -> void:
 		target = selected_merc if _warband != null and _warband.roster.has(selected_merc) \
 			else _first_merc_id()
 	select_merc(target, false)
+	set_status(USAGE_HINT)
 
 func close() -> void:
 	if not _open:
@@ -87,6 +88,9 @@ func close() -> void:
 
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
+## The one instruction the screen needs: how to move a piece, in either direction.
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it (another body's piece is a hand-off)."
+
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _warband != null and _warband.roster.has(merc_id) else -1
 	_slot_chosen = false
@@ -341,12 +345,14 @@ func _make_stash_row(item_id: String) -> Dictionary:
 
 func _apply_stash_row(control: Dictionary, data: Dictionary, free_count: int) -> void:
 	var button: Button = control["button"]
-	button.text = "%s  /  %d gold  /  free x%d" % [
-		str(data.get("name", data.get("item_id", ""))), int(data.get("value", 0)), free_count]
-	# A row with nothing free is a piece someone is wearing: it stays visible and
-	# tagged, but there is nothing to equip from it.
-	button.disabled = free_count <= 0
-	button.tooltip_text = "" if free_count > 0 else "Every copy is worn."
+	var worn_text := "free x%d" % free_count if free_count > 0 else "worn"
+	button.text = "%s  /  %d gold  /  %s" % [
+		str(data.get("name", data.get("item_id", ""))), int(data.get("value", 0)), worn_text]
+	# The stash is one pool: a piece another mercenary is wearing can be taken
+	# and handed over, so the row stays clickable and says where it is.
+	button.disabled = false
+	button.tooltip_text = "Click to wear it here." if free_count > 0 \
+		else "Worn by someone else: click to take it and wear it here."
 	(control["tag"] as Label).text = ", ".join(PackedStringArray(_tag_lines(data.get("tags", []))))
 
 ## `WarbandStash.rows()` tags read "<merc> <slot>"; the panel prefixes them so a
@@ -379,6 +385,9 @@ func _on_stash_pressed(item_id: String) -> void:
 		return
 	var result: Dictionary = _warband.equip_merc(selected_merc, slot_id, item_id)
 	set_status(str(result.get("message", "")))
+	# One click dresses one piece: the next row routes by its own natural slot
+	# instead of reusing the slot that happened to be selected before.
+	_slot_chosen = false
 	refresh()
 	changed.emit()
 

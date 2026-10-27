@@ -123,6 +123,7 @@ func _physics_process(delta: float) -> void:
 		return
 	controller.physics_step(delta)
 	_update_prompt()
+	_update_hint()
 
 func _process(_delta: float) -> void:
 	var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
@@ -527,6 +528,33 @@ func service_point(service: String) -> Vector3:
 		"gate":
 			return gate.global_position
 	return Vector3.ZERO
+
+## The key line for the square. The town is where a player learns the two screens,
+## so it always names them, plus whatever counter the body is standing at.
+var _hint_text := ""
+
+func _update_hint() -> void:
+	if hud == null or controller == null:
+		return
+	var actor = controller.active_body(1)
+	var service := ""
+	if actor != null and is_instance_valid(actor):
+		service = service_at(actor.global_position)
+	var text := "TAB - warband   ·   P - stash and gear   ·   G - use what you stand at"
+	match service:
+		"stash":
+			text = "G - shared stash and paperdoll   ·   TAB - warband"
+		"altar":
+			text = "G - the Sacrificial Altar (unbind / distil / brand)"
+		"recruiter":
+			text = "G - hire a new body for gold (up to the cap)"
+		"quartermaster":
+			text = "G - buy plain steel into the shared stash"
+		"gate":
+			text = "G - launch an expedition with the line you deployed"
+	if text != _hint_text:
+		_hint_text = text
+		hud.set_hint(text)
 
 func _update_prompt() -> void:
 	if hud == null:

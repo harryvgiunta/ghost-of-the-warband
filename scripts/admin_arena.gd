@@ -158,6 +158,7 @@ func _ready() -> void:
 	loot.name = "Loot"
 	add_child(loot)
 	loot.setup(warband, self)
+	loot.equip_target = Callable(self, "_loot_owner")
 	_spawn_battlefield_loot()
 	_build_services()
 	_build_ui()
@@ -254,6 +255,7 @@ func _physics_process(delta: float) -> void:
 	_update_humans()
 	_tick_revive(delta)
 	_update_prompt()
+	_update_hint()
 	_check_battle_end(delta)
 
 ## Mirror the live bodies into the roster, so the warband screen shows real
@@ -769,6 +771,36 @@ func _update_prompt() -> void:
 
 ## The battle is over when no brawler is left standing. The survivors walk the
 ## field and the vacuum takes everything into the shared stash.
+## Which mercenary a picked-up piece should be worn by, or -1.
+func _loot_owner(peer_id: int) -> int:
+	var actor = controller.body_for_peer(peer_id) if controller != null else null
+	if actor == null or not is_instance_valid(actor):
+		return -1
+	if not bool(actor.get("alive")) or bool(actor.get("downed")):
+		return -1
+	return controller.merc_for_peer(peer_id)
+
+## The standing key line for the field: the fight verbs first, then the mode's
+## own doorway, then the body/screen keys.
+var _hint_text := ""
+
+func _update_hint() -> void:
+	if hud == null:
+		return
+	var text := "TAB - warband   ·   P - gear   ·   [ ] / F1..F8 - take another body"
+	if expedition:
+		text = "LMB / RMB - fight   ·   R - branded sigil   ·   K - loot   ·   B - end the field"
+	if _revive_target() != null:
+		text = "Hold E - revive the downed body beside you   ·   B - end the field"
+	elif _battle_over:
+		text = "Enter - back to town"
+	elif branded != null and bool(branded.can_activate().get("ok", false)):
+		text = "R - %s   ·   LMB / RMB - fight   ·   K - loot   ·   [ ] - swap body" \
+			% str(branded.brand().get("ability", ""))
+	if text != _hint_text:
+		_hint_text = text
+		hud.set_hint(text)
+
 func _check_battle_end(delta: float) -> void:
 	if _battle_over or expedition or groups.is_empty():
 		return

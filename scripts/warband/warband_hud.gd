@@ -28,6 +28,7 @@ var _squad_sig := ""
 var _purse_label: Label
 var _essence_label: Label
 var _prompt_label: Label
+var _hint_label: Label
 var _status_label: Label
 var _status_seconds := 0.0
 
@@ -52,6 +53,15 @@ func set_body(body, merc_name: String = "", merc_id: int = -1) -> void:
 		_merc_id = _roster_id_for(body)
 	if _merc_id >= 0 and merc_name.is_empty() and _warband != null:
 		_merc_name = _warband.roster.name_of(_merc_id)
+
+## The standing key line: what to press on this beat ("G - cut the latch",
+## "R - Rending Strike"). Unlike the prompt it does not vanish on its own, so a
+## player who looks away for a second can find the controls again.
+func set_hint(text: String) -> void:
+	if _hint_label == null:
+		return
+	_hint_label.text = text
+	_hint_label.visible = not text.is_empty()
 
 ## One line under the crosshair: "Hold E to revive Dorn", "K - loot Shortsword".
 func set_prompt(text: String) -> void:
@@ -136,6 +146,17 @@ func _build() -> void:
 	_essence_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_essence_label.add_theme_font_size_override("font_size", 12)
 	root_control.add_child(_essence_label)
+
+	_hint_label = Label.new()
+	_hint_label.name = "Hint"
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_hint_label.position = Vector2(-310, -154)
+	_hint_label.custom_minimum_size = Vector2(620, 0)
+	_hint_label.add_theme_font_size_override("font_size", 12)
+	_hint_label.add_theme_color_override("font_color", Color(0.82, 0.78, 0.62))
+	_hint_label.visible = false
+	root_control.add_child(_hint_label)
 
 	_prompt_label = Label.new()
 	_prompt_label.name = "Prompt"

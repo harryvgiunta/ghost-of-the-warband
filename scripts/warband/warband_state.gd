@@ -19,6 +19,10 @@ const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
 const SoulScript = preload("res://scripts/warband/soul_router.gd")
 const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
+const EquipmentRules = preload("res://scripts/equipment_rules.gd")
+
+## Item categories a body can wear; the same list `EquipmentRules` enforces.
+const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
 
 const SAVE_VERSION := 1
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
@@ -115,11 +119,30 @@ func hire_cost() -> int:
 ## Equip a mercenary straight from the collective stash. The piece is looked up
 ## by catalog id; anything displaced returns to the pool, so no item is ever
 ## lost by equipping.
+## Equip a mercenary from the collective stash. The stash is one pool, so a
+## piece another mercenary is already wearing is a *transfer*, not a refusal:
+## the wearer is stripped and the piece walks across. Without that rule the only
+## dagger in a fresh warband could never be handed from the rescuer to a
+## prisoner, which is exactly what the first scene asks the player to do.
 func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
+	if item_id.is_empty():
+		return {"ok": false, "message": "Choose a piece of gear.", "displaced": {}}
+	var gear := roster.equipped_of(merc_id)
+	if str(gear.get(slot_id, "")) == item_id:
+		return {"ok": true, "message": "%s is already worn there." % roster.name_of(merc_id),
+			"displaced": {}}
+	var moved_from := ""
 	if stash.pooled_count(item_id) <= 0:
-		return {"ok": false, "message": "That piece is not free in the stash.", "displaced": {}}
+		var taken := _strip_worn(item_id)
+		if not bool(taken.get("ok", false)):
+			return {"ok": false, "message": "You do not own that piece yet.", "displaced": {}}
+		moved_from = str(taken.get("from", ""))
 	var result := roster.equip(merc_id, slot_id, item_id)
 	if not bool(result.get("ok", false)):
+		# Put the stripped piece back where it came from: a refused equip must
+		# not quietly pocket somebody else's gear.
+		if not moved_from.is_empty():
+			stash.remove(item_id, 1)
 		return result
 	stash.remove(item_id, 1)
 	var displaced: Dictionary = result.get("displaced", {})
@@ -127,8 +150,56 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
 		var old_id := str(displaced[slot])
 		if not old_id.is_empty():
 			stash.add(old_id, 1)
+	if not moved_from.is_empty():
+		result["message"] = "%s taken from %s." % [str(result.get("message", "")), moved_from]
 	_notify()
 	return result
+
+## Take one worn copy of `item_id` off whichever mercenary holds it and drop it
+## into the pool. Returns `{ok, from}` where `from` names the mercenary.
+func _strip_worn(item_id: String) -> Dictionary:
+	for merc in roster.records():
+		var gear: Variant = merc.get("equipped", {})
+		if not gear is Dictionary:
+			continue
+		for slot in gear:
+			if str(gear[slot]) != item_id:
+				continue
+			var merc_id := int(merc.get("id", 0))
+			var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(str(slot))]
+			if roster.unequip(merc_id, str(slot)) != item_id:
+				continue
+			stash.add(item_id, 1)
+			return {"ok": true, "from": label}
+	return {"ok": false, "from": ""}
+
+## The piece a loot pickup should snap into the soul's hands if it can. It only
+## takes a slot that is empty or holds something clearly cheaper, so a player
+## never loses a good blade to a lucky drop; anything else stays in the stash.
+## Returns `{ok, slot, displaced, message}`.
+func auto_equip(merc_id: int, item_id: String) -> Dictionary:
+	var item: Dictionary = State.ITEMS.get(item_id, {})
+	if item.is_empty() or merc_id <= 0:
+		return {"ok": false, "message": "", "slot": ""}
+	if not str(item.get("category", "")) in EQUIPPABLE_CATEGORIES:
+		return {"ok": false, "message": "", "slot": ""}
+	if not roster.is_alive(merc_id):
+		return {"ok": false, "message": "", "slot": ""}
+	var gear := roster.equipped_of(merc_id)
+	var slot_id := EquipmentRules.auto_slot(item, gear)
+	if slot_id.is_empty():
+		return {"ok": false, "message": "", "slot": ""}
+	var worn := str(gear.get(slot_id, ""))
+	if not worn.is_empty():
+		var worn_price := WarbandStash.value_of(worn, cruor.brand_of(worn))
+		var new_price := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+		if new_price <= worn_price:
+			return {"ok": false, "message": "", "slot": slot_id}
+	var result := equip_merc(merc_id, slot_id, item_id)
+	if not bool(result.get("ok", false)):
+		return {"ok": false, "message": str(result.get("message", "")), "slot": slot_id}
+	return {"ok": true, "slot": slot_id, "message": str(result.get("message", "")),
+		"displaced": result.get("displaced", {})}
 
 ## Strip a worn piece back into the pool.
 func unequip_merc(merc_id: int, slot_id: String) -> String:
