@@ -269,20 +269,20 @@ func check_pursuers() -> void:
 		% [armed, game.trail.guards.size()])
 	check(visible >= 6, "the blade is in its hand (%d visible)" % visible)
 	check(hunting >= 2, "the cult is hunting the warband (%d hunting)" % hunting)
-	# The ambush stands inside the trail rather than on the camp's doorstep, so
-	# the camp's own fight is not fought for it. Its first post is ~19 m in.
+	# The ambush stands well inside the trail rather than on the camp's doorstep:
+	# a cultist sees 60 m, so anything closer joins the tutorial's own fight.
 	var start: Vector3 = game.trail.forest["start"]
 	var near := 0
 	var far := 0
 	for watcher in game.trail.guards:
 		var distance := _flat(watcher.global_position, start)
-		if distance <= 30.0:
+		if distance <= 60.0:
 			near += 1
-		if distance > 12.0:
+		if distance < 200.0:
 			far += 1
-	check(near >= 10 and far == game.trail.guards.size(),
-		"the whole cult stands down the trail, clear of the camp (%d within 30 m)"
+	check(near == 0, "nobody stands within sight of the camp's mouth (%d within 60 m)"
 		% near)
+	check(far >= 20, "the cult is still on the road (%d within 200 m)" % far)
 	check(game.squad != null and game.squad.following, "the squad is an escort once the camp is clear")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")
