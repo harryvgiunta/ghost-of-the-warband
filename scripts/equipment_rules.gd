@@ -8,7 +8,10 @@ const SLOT_LABELS := {
 	"head":"Head", "chest":"Chest", "hands":"Hands", "legs":"Legs", "feet":"Boots",
 	"neck":"Neck", "ring1":"Ring 1", "ring2":"Ring 2", "main":"Main Hand", "off":"Off-Hand",
 }
-const CATEGORIES := ["1h","2h","bow","staff","shield","focus","armor","jewelry","armor_bundle"]
+## Every category the catalog uses. `armor_bundle` and `misc` are carried, never
+## worn: a bundle of mail is a purchase, and a bandage is a dressing.
+const CATEGORIES := ["1h","2h","bow","staff","shield","focus","armor","jewelry",
+	"armor_bundle","misc"]
 const EQUIPPABLE := ["1h","2h","bow","staff","shield","focus","armor","jewelry"]
 const TWO_HANDED := ["2h","bow","staff"]
 

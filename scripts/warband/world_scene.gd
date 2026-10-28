@@ -44,6 +44,7 @@ const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 ## gear and a dead body's pockets are the same panel, so every equip path, the
 ## change signal and `is_open()` are unchanged.
 const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
+const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
 const CardScript = preload("res://scripts/warband/tutorial_card.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
@@ -434,6 +435,12 @@ func _seat_warband() -> void:
 		actor.combat.target_mask = 2
 		actor.bounds = BODY_BOUNDS
 		_wire_crawl(actor)
+		# A body that goes down lets go of its steel. Both the knock-down and the
+		# bleed-out walk the same hook, so a body that dies without ever being
+		# downed (a finisher, a lethal blow) drops exactly as one that fell does.
+		if merc_id > 0:
+			actor.downed_started.connect(_on_body_downed.bind(actor, merc_id))
+			actor.killed.connect(_on_body_killed.bind(actor, merc_id))
 		# A worn hand torch is light, and light belongs to the body carrying it.
 		if merc_id > 0:
 			var torch := TorchScript.new()
@@ -552,6 +559,44 @@ func spawn_pickup(item_id: String, at: Vector3) -> void:
 		return
 	pickup.taken.connect(_on_pickup_taken)
 	pickups.append(pickup)
+
+
+## A fallen enemy lets go of what it was holding. The piece comes out of its
+## hand, lands on the dirt in front of the body, and joins the one loot list a
+## soul reaches with `K` and a squadmate walks to. What the body still wears is
+## the corpse screen's, so nothing is on offer twice.
+func drop_held_weapon(enemy) -> bool:
+	var item_id: String = GearDropScript.strip_enemy(enemy)
+	if item_id.is_empty():
+		return false
+	var at: Vector3 = (enemy as Node3D).global_position
+	spawn_pickup(item_id, GearDropScript.drop_point(at, GearDropScript.forward_of(enemy)))
+	return true
+
+
+## A warband body on the floor drops what it was holding. The roster is what
+## dresses a body, so emptying the two hand slots *is* the unequip: the piece is
+## not booked into the stash, it is lying beside the body, where a soul can take
+## it back with `K` or an ally can pick it up - and where it stays if nobody does.
+func drop_merc_gear(actor, merc_id: int) -> void:
+	if warband == null or merc_id <= 0 or not is_instance_valid(actor):
+		return
+	var ids: Array[String] = GearDropScript.strip_hands(warband, merc_id)
+	if ids.is_empty():
+		return
+	var point: Vector3 = (actor as Node3D).global_position
+	var at := GearDropScript.drop_point(point, GearDropScript.forward_of(actor))
+	for item_id in ids:
+		spawn_pickup(item_id, at)
+	controller.refresh_gear(merc_id)
+
+
+func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
+	drop_merc_gear(actor, merc_id)
+
+
+func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
+	drop_merc_gear(actor, merc_id)
 
 
 func _on_pickup_taken(_pickup) -> void:

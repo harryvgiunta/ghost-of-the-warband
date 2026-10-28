@@ -75,6 +75,10 @@ const ITEMS := {
 		"category":"shield", "slot":"off",
 		"summary":"Planks off a hut wall, lashed to a forearm",
 		"detail":"Off hand only / light front block / pairs with a one-hander"},
+	"bandage_linen": {"name":"Linen Bandage", "short":"Bandage", "kind":"bandage", "index":0, "price":6,
+		"category":"misc", "slot":"", "heal":0.3,
+		"summary":"A strip of boiled linen, folded and tied off",
+		"detail":"Field dressing / not worn / closes a wound in the shared stash"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -373,6 +377,7 @@ const ITEM_QUOTES := {
 	"club_makeshift": "The root was doing fine until it met you.",
 	"branch_heavy": "Two hands, one tree, no plan.",
 	"shield_wood": "A hut wall with opinions.",
+	"bandage_linen": "Boiled, folded, and worth more than the knife that made it.",
 	"staff_fire": "Keeps a little of the campfire angry for you.",
 	"staff_bone": "Grandmother's shinbone, promoted to management.",
 	"shield_buckler": "A dinner plate with ambitions.",
@@ -474,15 +479,6 @@ const VENDORS := [
 	]},
 ]
 
-## Every weapon in the catalog starts in the backpack. The shortbow is also the
-## starting main hand, so one spare remains in the pack for the second set.
-const STARTING_INVENTORY := [
-	"bow_short","bow_recurve","bow_long",
-	"sword_short","sword_arming","sword_great",
-	"dagger_iron",
-	"staff_fire","staff_bone",
-	"shield_buckler","shield_kite","shield_tower",
-]
 ## TAB is a two-slot weapon swap. Every player carries two complete weapon
 ## sets - a main hand and an off hand each - and exactly one is active: the
 ## hands hold its pair. Equipping, unequipping or dropping a weapon rewrites
@@ -635,6 +631,12 @@ func item_stat_rows(id: String) -> Array:
 			rows.append({"label":"EFFECT", "value":"Cosmetic off-hand"})
 		else:
 			rows.append_array(focus_rows)
+	elif category == "misc":
+		# A dressing is the one carried piece with an effect of its own: it is
+		# spent by a squadmate binding its wounds, never worn.
+		rows.append({"label":"WOUND", "value":"+%d%% health" % int(round(
+			float(item.get("heal", 0.0)) * 100.0))})
+		rows.append({"label":"USE", "value":"A squadmate, in the open"})
 	elif category == "jewelry":
 		var jewelry_rows := TrinketStats.effect_rows(id)
 		if jewelry_rows.is_empty():
@@ -665,6 +667,8 @@ func item_compact_stats(id: String) -> String:
 	elif category == "armor":
 		parts.append(("HEAD %d%%" if str(item.get("kind", "")) == "head" else "BODY +%d%%") \
 			% item_guard_percent(id))
+	elif category == "misc":
+		parts.append("HEAL %d%%" % int(round(float(item.get("heal", 0.0)) * 100.0)))
 	elif category == "focus":
 		var focus_text := TrinketStats.effect_summary(id)
 		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")
@@ -992,10 +996,13 @@ func _hand_pair_label(main_id: String, off_id: String) -> String:
 		parts.append(item_name(off_id))
 	return " + ".join(parts) if not parts.is_empty() else "Unarmed"
 
+## A new journey starts with an empty pack. The catalog is what a keeper will
+## sell you and what the world drops: nothing of it is handed over for free, so a
+## fresh player owns exactly what they have walked to and picked up.
 func reset(persist: bool = true) -> void:
 	_note("reset", {"persist": persist, "path": save_path})
 	credits = STARTING_CREDITS
-	inventory.assign(STARTING_INVENTORY)
+	inventory.clear()
 	stash.clear()
 	floor_items.clear()
 	equipped = DEFAULTS.duplicate()

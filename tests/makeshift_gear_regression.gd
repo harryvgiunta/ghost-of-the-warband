@@ -122,7 +122,7 @@ func _check_catalog() -> void:
 	for slot in ArmorData.SLOTS:
 		check(str(defaults.get(slot, "")) == ArmorData.item_id(set_index, slot),
 			"The starting " + slot + " is the Makeshift piece")
-	check(not StateScript.STARTING_INVENTORY.has("sword_makeshift"),
+	check(not StateScript.DEFAULTS.has("main") or str(StateScript.DEFAULTS.get("main", "")) != "sword_makeshift",
 		"The salvage cleaver is bought, not starter luggage")
 	var smith: Dictionary = StateScript.VENDORS[1]
 	var tier := ["dagger_ironwood", "bow_twig", "club_makeshift", "branch_heavy", "shield_wood"]

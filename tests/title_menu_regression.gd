@@ -32,8 +32,8 @@ func run() -> void:
 	var title = load("res://title.tscn").instantiate()
 	root.add_child(title)
 	await process_frame
-	check(title.start_button.text == "START NEW GAME","Start New Game is the first door")
-	check(title._load_button.text == "LOAD SAVED GAME","Load Saved Game is the second door")
+	check(title.start_button.text == "NEW CAMPAIGN","Start New Game is the first door")
+	check(title._load_button.text == "CONTINUE","Load Saved Game is the second door")
 	check(title.host_world_button.text == "HOST OPEN WORLD","Host Open World is the third door")
 	check(title.join_button.text == "JOIN GAME","Join Game is the fourth door")
 	check(title.start_button.visible and title._load_button.visible and title.host_world_button.visible and title.join_button.visible,"All four menu actions are visible")
@@ -67,7 +67,7 @@ func run() -> void:
 	await process_frame
 	title._start_new_game()
 	await create_timer(0.6).timeout
-	check(int(state.credits) == state.STARTING_CREDITS and state.inventory.size() == state.STARTING_INVENTORY.size() and state.stash.is_empty(),"New game restores the starter kit")
+	check(int(state.credits) == state.STARTING_CREDITS and state.inventory.is_empty() and state.stash.is_empty(),"New game starts with an empty pack and an empty stash")
 	check(current_scene != null and current_scene.scene_file_path == "res://main.tscn","New game enters the town")
 	if current_scene != null and current_scene.get("world") != null:
 		check(current_scene.world.player_spawn.distance_to(Vector3(0,3,47)) < 0.05,"New games start at the town gate")

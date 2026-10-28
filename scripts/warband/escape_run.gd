@@ -27,9 +27,12 @@ const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 ## What a road cultist wears under its blade: cult rags the warband can take.
 const CULTIST_RAGS := ["armor_makeshift_chest", "armor_leather_chest",
 	"armor_mail_chest", "armor_cloth_chest"]
+## The road's cultists carry the salvage tier, not forged steel: a road that hands
+## every fanatic a smithed arming sword makes a mob into a knight, and a knight's
+## blade off a murdered cultist is worth more than the whole camp put together.
 const CULTIST_ARMS := [
-	"sword_arming", "dagger_iron", "sword_short", "sword_short",
-	"dagger_iron", "sword_arming", "sword_short", "dagger_iron",
+	"club_makeshift", "dagger_ironwood", "branch_heavy", "club_makeshift",
+	"dagger_ironwood", "club_makeshift", "branch_heavy", "dagger_ironwood",
 ]
 ## The cultists' damage source id, so a blow is booked against the wood and never
 ## against a squadmate's slot.
@@ -166,9 +169,13 @@ func wake_road(prey) -> void:
 ## lists what the body was carrying.
 func _on_cultist_defeated(enemy, _reward: int) -> void:
 	_kills += 1
-	if is_instance_valid(enemy) and host != null and host.loot != null \
-			and host.loot.has_method("register_corpse"):
-		host.loot.register_corpse(enemy)
+	# The blade it was swinging falls out of its hand and lies where a body can
+	# take it: the trail's cultists feed the squad's arming and the player's K.
+	if is_instance_valid(enemy) and host != null:
+		if host.has_method("drop_held_weapon"):
+			host.drop_held_weapon(enemy)
+		if host.loot != null and host.loot.has_method("register_corpse"):
+			host.loot.register_corpse(enemy)
 	if host.hud != null and not guards.is_empty():
 		host.hud.set_status("A cultist falls on the trail (%d of %d)." % [_kills, guards.size()], 2.0)
 

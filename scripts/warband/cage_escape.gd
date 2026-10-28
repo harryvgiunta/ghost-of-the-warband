@@ -684,14 +684,25 @@ func _maintain_watchers() -> void:
 func _on_watcher_defeated(enemy, _reward: int) -> void:
 	if sequencer != null:
 		sequencer.note_guard_killed()
-	# The body itself is the loot: one record in the vacuum, read off the enemy as
-	# it fell. Nothing is also dumped on the floor, or the same blade would be on
-	# offer twice, and nothing is taken out of its hand - the corpse screen lists
-	# what it was holding.
-	if is_instance_valid(enemy) and loot != null and loot.has_method("register_corpse"):
-		loot.register_corpse(enemy)
+	# The steel comes out of its hand and lands in the dirt: a watcher that falls
+	# leaves the piece it was swinging where a body can pick it up with K, and
+	# the squad can see it. What is left on the body is the rag it wore, which is
+	# the corpse screen's business.
+	if is_instance_valid(enemy) and loot != null:
+		_drop_held_weapon(enemy)
+		if loot.has_method("register_corpse"):
+			loot.register_corpse(enemy)
 	# Nothing opens on a death: the latches are the player's own walk from cage to
 	# cage, and a corpse in the dirt has never cut one.
+
+
+## Take the catalog piece out of a fallen body's hand and put it on the ground
+## beside it, through the world that owns the one loot list.
+func _drop_held_weapon(enemy) -> bool:
+	if host != null and host.has_method("drop_held_weapon"):
+		return bool(host.drop_held_weapon(enemy))
+	return false
+
 
 
 ## The ambush: six watchers out of the wood past the mouth, each carrying the

@@ -133,6 +133,12 @@ func _render_item(item_id: String, output: String) -> void:
 		await _capture_alpha(Vector3(0.0, 0.0, 0.0), 0.42, Vector3(0.35, 0.18, -1.0), output)
 		return
 	match category:
+		"misc":
+			# A carried piece is worn nowhere, so there is no model to shoot:
+			# the studio builds the thing itself, the same folded cloth the
+			# world's drop shows.
+			_apply_carried(item_id)
+			await _capture_alpha(Vector3.ZERO, 0.17, Vector3(0.42, 0.34, -1.0), output)
 		"armor":
 			_apply_armor(item)
 			var frame := _armor_frame(slot)
@@ -238,6 +244,41 @@ func _apply_torch(_item_id: String) -> void:
 	var art: Node3D = preload("res://scripts/warband/torch_light.gd").build_visual(907)
 	art.name = "ItemIconArt"
 	_rig.add_child(art)
+
+
+## A carried piece: a roll of boiled linen, banded and folded, in the hand's
+## place at the icon's own centre.
+func _apply_carried(_item_id: String) -> void:
+	TrinketArt.clear(_rig.skeleton)
+	_clear_display_art()
+	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
+	_hide_character()
+	var art := Node3D.new()
+	art.name = "ItemIconArt"
+	_rig.add_child(art)
+	var cloth := StandardMaterial3D.new()
+	cloth.albedo_color = Color("c9bfa6")
+	cloth.roughness = 0.9
+	var roll_mesh := CylinderMesh.new()
+	roll_mesh.top_radius = 0.055
+	roll_mesh.bottom_radius = 0.055
+	roll_mesh.height = 0.20
+	roll_mesh.radial_segments = 20
+	var roll := MeshInstance3D.new()
+	roll.mesh = roll_mesh
+	roll.material_override = cloth
+	roll.rotation_degrees = Vector3(0.0, 0.0, 74.0)
+	art.add_child(roll)
+	var band_mesh := BoxMesh.new()
+	band_mesh.size = Vector3(0.018, 0.128, 0.128)
+	var band := MeshInstance3D.new()
+	band.mesh = band_mesh
+	band.material_override = StandardMaterial3D.new()
+	(band.material_override as StandardMaterial3D).albedo_color = Color("8d7f63")
+	(band.material_override as StandardMaterial3D).roughness = 0.82
+	band.rotation_degrees = Vector3(0.0, 0.0, 74.0)
+	band.position = Vector3(-0.02, 0.0, 0.0)
+	art.add_child(band)
 
 
 func _apply_jewelry(item_id: String, slot: String) -> void:

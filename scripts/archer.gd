@@ -1122,6 +1122,11 @@ func _build_armor_meshes() -> void:
 		"Male_Ranger_Arms": "chest",
 		"Male_Ranger_Arms_Bracer": "hands",
 		"Male_Ranger_Legs": "legs",
+		# The calf wraps are the leather legs set's own cloth. Left outside every
+		# slot they stayed on screen under a prisoner's bare legs, and every bare
+		# leg had to be inflated to sit outside them - which is why the warband's
+		# legs were lumpy columns instead of legs.
+		"Ranger_Base_Calf": "legs",
 		"Male_Ranger_Feet_Boots": "feet",
 	}
 	for slot in ArmorData.SLOTS:

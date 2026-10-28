@@ -10,6 +10,7 @@ const StateScript = preload("res://scripts/player_state.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const PickupScript = preload("res://scripts/warband/warband_pickup.gd")
+const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
 
 const TEST_SAVE := "user://stash_autoloot_state.json"
 
@@ -63,6 +64,7 @@ func run() -> void:
 	_loot.setup(warband, _field)
 
 	check_drops_and_quick_loot()
+	await check_gear_drop()
 	await check_dropper_lock()
 	check_no_survivors()
 	await check_sweep()
@@ -94,6 +96,78 @@ func check_coverage() -> void:
 			continue
 		check(by_subtype.has(subtype), "a %s exists: %s" % [
 			str(Contracts.WEAPON_LABELS[subtype]), str(by_subtype.get(subtype, "none"))])
+
+# --- what a body lets go of when it falls --------------------------------
+
+## A body that goes down drops what it was *holding*, into the world, and the piece
+## is not quietly banked: the roster's hands empty, the stash does not grow, and
+## the thing on the ground is a lying object with a name plate - no part of it
+## floating or turning, because that is what a drop is not.
+func check_gear_drop() -> void:
+	var merc_id: int = _warband.add_mercenary("Dropper")
+	_warband.roster.equip(merc_id, "main", "sword_arming")
+	_warband.roster.equip(merc_id, "off", "shield_buckler")
+	var stash_before: int = _warband.stash.pooled_total()
+	var fell: Array[String] = GearDropScript.strip_hands(_warband, merc_id)
+	check(fell == ["shield_buckler", "sword_arming"],
+		"both hands empty, off hand first, got %s" % str(fell))
+	var gear: Dictionary = _warband.roster.equipped_of(merc_id)
+	check(str(gear.get("main", "")).is_empty() and str(gear.get("off", "")).is_empty(),
+		"the roster is the ground truth and its hands are empty")
+	check(_warband.stash.pooled_total() == stash_before,
+		"a dropped piece is on the floor, not in the stash")
+	check(GearDropScript.strip_hands(_warband, merc_id).is_empty(),
+		"a second strip finds nothing to take")
+
+	var body := Vector3(6.0, 0.0, 6.0)
+	var at: Vector3 = GearDropScript.drop_point(body, Vector3.FORWARD, 0.55)
+	check(at.z < body.z - 0.5 and absf(at.y - body.y) < 0.001,
+		"the piece lands in front of the body, on its own ground (%s)" % str(at))
+	# A battlefield of this check's own: the main vacuum's haul ledger is what the
+	# battle report and the sweep checks are counted against.
+	var field := Node3D.new()
+	field.name = "DropField"
+	root.add_child(field)
+	var vacuum = LootScript.new()
+	vacuum.name = "DropLoot"
+	root.add_child(vacuum)
+	vacuum.setup(_warband, field)
+	var drop := vacuum.spawn(fell[1], at)
+	check(drop != null and is_instance_valid(drop), "the dropped blade is a real node")
+	if drop == null:
+		return
+	check(str(drop.item_id) == "sword_arming", "it keeps the catalog id it was held by")
+	check(PickupScript.is_weapon("sword_arming") and not PickupScript.is_weapon("armor_cloth_chest"),
+		"a blade is a weapon and a rag is not")
+	var tall := _tallest_part(drop)
+	check(tall <= 0.25, "every part of the drop lies on the ground (%.2f m tall)" % tall)
+	var first: Transform3D = _part_transform(drop)
+	await _frames(4)
+	var later: Transform3D = _part_transform(drop)
+	check(first.is_equal_approx(later), "a drop does not spin, bob or float while it lies there")
+
+	# The round trip a player makes with `K`: the piece walks back out of the world
+	# and into the warband's hands.
+	var back: Dictionary = vacuum.quick_loot(drop, 0)
+	check(bool(back.get("ok", false)), "a drop on the floor can be picked back up")
+	check(_warband.stash.pooled_count("sword_arming") == 1,
+		"and the piece is a stash row again")
+
+	# The dressing the squad fights with is a catalog piece, not worn gear: it goes
+	# into the stash and stays there, which is what a field bandage is for.
+	check(StateScript.ITEMS.has("bandage_linen"), "the catalog carries a linen bandage")
+	check(str(StateScript.ITEMS["bandage_linen"].get("category", "")) == "misc",
+		"a bandage is not a worn slot")
+	check(Rules.auto_slot(StateScript.ITEMS["bandage_linen"], {}).is_empty(),
+		"and no hand or armour slot will ever take one")
+
+	# Leave the warband exactly as this test found it: the later checks count the
+	# stash and the roster.
+	_warband.stash.remove("sword_arming", 1)
+	_warband.roster.remove(merc_id)
+	field.queue_free()
+	vacuum.queue_free()
+
 
 # --- drops and the instant pick -------------------------------------------
 
@@ -425,6 +499,28 @@ func _has_mesh(pickup: WarbandPickup) -> bool:
 		if child is MeshInstance3D and (child as MeshInstance3D).mesh != null:
 			return true
 	return false
+
+## How far above the drop's own origin its highest part stands.
+func _tallest_part(pickup: WarbandPickup) -> float:
+	# The name plate floats on purpose; the piece under it does not.
+	var top := 0.0
+	for child in pickup.get_children():
+		if child is Node3D and not (child is Label3D):
+			top = maxf(top, (child as Node3D).global_position.y - pickup.global_position.y)
+	return top
+
+
+func _part_transform(pickup: WarbandPickup) -> Transform3D:
+	for child in pickup.get_children():
+		if child is Node3D and not (child is Label3D):
+			return (child as Node3D).global_transform
+	return pickup.global_transform
+
+
+func _frames(count: int) -> void:
+	for _i in count:
+		await physics_frame
+
 
 func _has_label(pickup: WarbandPickup) -> bool:
 	for child in pickup.get_children():

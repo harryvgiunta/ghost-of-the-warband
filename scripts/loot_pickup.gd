@@ -1,11 +1,17 @@
 extends Node3D
 ## Presentation-only world drop. main.gd grants the item to PlayerState when the
 ## ranger walks close; this node owns the category-shaped mesh and the name plate.
+##
+## A drop is a thing on the ground. The piece is built upright - a blade along
+## its own +Y, the way it is carried - and then laid on its side by the holder,
+## so what a ranger walks up to is steel in the dirt with a plate over it. It
+## does not hover, and it does not turn: an item spinning on its point was a
+## shop turntable, not a weapon somebody dropped.
 
-const PIVOT_HEIGHT := 0.36
-const BOB_HEIGHT := 0.055
-const BOB_SPEED := 2.1
-const SPIN_SPEED := 0.85
+## How far the piece's own axis sits above the floor once it is laid down: a
+## laid blade is its own thickness off the dirt, not its length.
+const LAY_HEIGHT := 0.022
+const LABEL_HEIGHT := 0.46
 
 var item_id := ""
 var display_name := ""
@@ -14,7 +20,6 @@ var display_name := ""
 var armed := true
 var _pivot: Node3D
 var _label: Label3D
-var _time := 0.0
 var _built := false
 
 func setup(id: String, name: String) -> void:
@@ -38,12 +43,16 @@ func _ensure_built() -> void:
 func _build() -> void:
 	_pivot = Node3D.new()
 	_pivot.name = "Drop"
-	_pivot.position.y = PIVOT_HEIGHT
+	# The shapes are authored the way the piece is carried - a blade up its own
+	# +Y - so the holder is what lays it on the ground, and the floor is what
+	# decides the height: no part of the piece ends up under the terrain.
+	_pivot.rotation.x = -PI * 0.5
+	_pivot.position.y = LAY_HEIGHT
 	add_child(_pivot)
 	_build_shape(_category())
 	_label = Label3D.new()
 	_label.text = display_name
-	_label.position = Vector3(0, PIVOT_HEIGHT + 0.82, 0)
+	_label.position = Vector3(0, LABEL_HEIGHT, 0)
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label.font_size = 48
 	_label.pixel_size = 0.0038
@@ -51,14 +60,6 @@ func _build() -> void:
 	_label.modulate = Color("f3ecd8")
 	_label.outline_modulate = Color(0.02, 0.05, 0.06, 0.92)
 	add_child(_label)
-
-func _process(delta: float) -> void:
-	_time += delta
-	if _pivot != null:
-		_pivot.position.y = PIVOT_HEIGHT + sin(_time * BOB_SPEED) * BOB_HEIGHT
-		_pivot.rotation.y = wrapf(_pivot.rotation.y + delta * SPIN_SPEED, 0.0, TAU)
-	if _label != null:
-		_label.position.y = PIVOT_HEIGHT + 0.82 + sin(_time * BOB_SPEED) * BOB_HEIGHT * 0.5
 
 func _category() -> String:
 	var state := get_node_or_null("/root/PlayerState")

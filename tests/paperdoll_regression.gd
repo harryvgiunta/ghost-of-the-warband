@@ -10,6 +10,16 @@ const Combat = preload("res://scripts/combat.gd")
 const Actor = preload("res://scripts/arena_actor.gd")
 const TEST_SAVE := "user://paperdoll_regression_state.json"
 
+## The pack this test works with. A new journey starts with an empty backpack, so
+## a regression that is about the paperdoll has to bring its own kit instead of
+## borrowing the starter one.
+const TEST_KIT := [
+	"bow_short","bow_recurve","bow_long",
+	"sword_short","sword_arming","sword_great",
+	"dagger_iron","staff_fire","staff_bone","shield_buckler",
+	"shield_kite","shield_tower",
+]
+
 var state
 var checks := 0
 var failures := 0
@@ -40,6 +50,7 @@ func run() -> void:
 	state.save_path = TEST_SAVE
 	state.reset()
 	_test_taxonomy()
+	_stock_pack()
 	_test_weapon_sets()
 	_test_hand_rules()
 	_test_overflow_and_off_override()
@@ -55,6 +66,13 @@ func run() -> void:
 	print("PAPERDOLL_REGRESSION checks=",checks," failures=",failures)
 	quit(0 if failures == 0 else 1)
 
+## Give the pack the pieces the paperdoll checks put on and take off.
+func _stock_pack() -> void:
+	for item_id in TEST_KIT:
+		if not state.inventory.has(item_id):
+			state.inventory.append(item_id)
+
+
 func _find(item_id: String) -> int:
 	return state.inventory.find(item_id)
 
@@ -65,10 +83,7 @@ func _test_taxonomy() -> void:
 	check(state.equipped_id("head") == "armor_makeshift_head","The Makeshift antler helm starts equipped")
 	check(state.equipped_id("feet") == "armor_makeshift_feet","The Makeshift root boots start equipped")
 	check(state.main_item() == "bow_short" and state.off_item().is_empty(),"The shortbow starts in the main hand with an empty off hand")
-	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size(),"The starter backpack holds every catalog weapon")
-	for item_id: String in StateScript.STARTING_INVENTORY:
-		check(state.inventory.has(item_id),"The starter backpack contains %s" % item_id)
-	check(state.inventory.size() == 12,"The catalog exposes twelve starter weapons")
+	check(state.inventory.is_empty(),"A new journey starts with an empty backpack")
 	check(state.credits == StateScript.STARTING_CREDITS,"The starter purse is unchanged")
 	for item_id: String in StateScript.ITEMS:
 		var item: Dictionary = StateScript.ITEMS[item_id]
@@ -143,6 +158,7 @@ func _test_taxonomy() -> void:
 
 func _test_weapon_sets() -> void:
 	state.reset()
+	_stock_pack()
 	check(state.weapon_sets.size() == StateScript.WEAPON_SET_COUNT,"Every player owns two weapon set slots")
 	check(state.active_weapon_set() == 0,"Set 1 is the active set at the start")
 	check(state.weapon_set_label(0) == "Shortbow","Set 1 starts on the equipped starter bow")
@@ -199,6 +215,7 @@ func _test_weapon_sets() -> void:
 
 	# An emptied set is still a real set: TAB leaves the ranger unarmed.
 	state.reset()
+	_stock_pack()
 	result = state.unequip_to_backpack("main")
 	check(bool(result.ok) and state.main_item().is_empty(),"Set 1 can be emptied")
 	result = state.swap_weapon_set()
@@ -217,6 +234,7 @@ func _test_weapon_sets() -> void:
 	# Both sets have to be carried: a stashed piece blocks the swap and leaves
 	# the hands and the active set alone.
 	state.reset()
+	_stock_pack()
 	result = state.move_to_stash(_find("shield_buckler"))
 	check(bool(result.ok),"The buckler moves to the stash")
 	result = state.swap_weapon_set()
@@ -236,6 +254,7 @@ func _carried(item_id: String) -> int:
 
 func _test_hand_rules() -> void:
 	state.reset()
+	_stock_pack()
 	# A slot with no piece wears nothing on its channel; the body kit is
 	# untouched, and the helm can go back on.
 	var head_guard: float = state.head_reduction()
@@ -304,6 +323,7 @@ func _test_hand_rules() -> void:
 
 func _test_overflow_and_off_override() -> void:
 	state.reset()
+	_stock_pack()
 	state.credits = 100000
 	check(bool(state.buy("sword_great").ok),"The overflow test buys a greatsword")
 	# Fill the backpack completely, with the greatsword in the last slot.
@@ -336,6 +356,7 @@ func _test_overflow_and_off_override() -> void:
 
 func _test_dual_and_jewelry() -> void:
 	state.reset()
+	_stock_pack()
 	# Main sword + off dagger is the routing contract; the rig decides the pose.
 	state.inventory.append("sword_short")
 	state.inventory.append("dagger_iron")
@@ -379,6 +400,7 @@ func _test_dual_and_jewelry() -> void:
 
 	# Auto-routing fills ring1, then ring2, then replaces ring1.
 	state.reset()
+	_stock_pack()
 	state.equipped["ring1"] = ""
 	state.equipped["ring2"] = ""
 	state.inventory.append("ring_copper")
@@ -394,6 +416,7 @@ func _test_dual_and_jewelry() -> void:
 
 func _test_drop_and_pickup() -> void:
 	state.reset()
+	_stock_pack()
 	var sword := _find("sword_short")
 	var result: Dictionary = state.drop_from_inventory(sword)
 	check(bool(result.ok),"A backpack item can be dropped")
@@ -420,6 +443,7 @@ func _test_drop_and_pickup() -> void:
 
 func _test_persistence() -> void:
 	state.reset()
+	_stock_pack()
 	state.credits = 321
 	state.equipped["neck"] = "neck_ember"
 	state.equipped["ring1"] = "ring_copper"
@@ -640,6 +664,7 @@ func _test_gear_replication() -> void:
 
 func _test_world_kit() -> void:
 	state.reset()
+	_stock_pack()
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await create_timer(0.5).timeout
@@ -774,6 +799,7 @@ func _test_world_kit() -> void:
 
 func _test_frontier_loot() -> void:
 	state.reset()
+	_stock_pack()
 	state.equipped["main"] = "sword_short"
 	state.equipped["off"] = "shield_buckler"
 	state.equipped["head"] = "armor_mail_head"

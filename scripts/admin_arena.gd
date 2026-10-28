@@ -52,7 +52,7 @@ const TOWN_SCENE := "res://scenes/town_hub.tscn"
 ## breathing gap and the Bilewarden's wave. This scene only fields the cult (the
 ## `EnemyWaves` spawner) and reacts to what the director reports.
 ## What a dead cultist leaves behind, in rotation.
-const GUARD_LOOT := ["sword_arming", "shield_kite", "armor_mail_chest", "ring_blood", "bow_recurve"]
+const GUARD_LOOT := ["club_makeshift", "shield_wood", "dagger_ironwood", "branch_heavy", "bow_twig"]
 
 ## The scene asks to be replaced (town after an expedition, the arena after a
 ## deployment). The game-flow owner connects this; the scene never loads itself.

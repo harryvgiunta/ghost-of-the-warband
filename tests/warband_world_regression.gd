@@ -125,10 +125,64 @@ func run() -> void:
 	await check_leaving()
 	await check_walk()
 	await check_town_end()
+	check_down_drops_steel()
 	check_budget()
 	check_doors()
 
 	_finish()
+
+
+## A warband body that goes down lets go of what it was holding, into the one
+## floor list a soul takes back with `K`. Measured here, in the live world, because
+## the wiring is the part that could silently break: `downed_started` has to reach
+## the roster and the loot vacuum on the same frame the body falls.
+func check_down_drops_steel() -> void:
+	var victim = null
+	var merc_id := 0
+	for body in game.bodies:
+		if not is_instance_valid(body) or body == game.controller.active_body(1):
+			continue
+		if not bool(body.get("alive")) or bool(body.get("downed")):
+			continue
+		victim = body
+		merc_id = game.controller.merc_of(body)
+		break
+	check(victim != null, "a warband body is standing to drop its steel")
+	if victim == null:
+		return
+	var gear: Dictionary = warband.roster.equipped_of(merc_id)
+	var held: Array[String] = []
+	for slot in ["off", "main"]:
+		if not str(gear.get(slot, "")).is_empty():
+			held.append(str(gear.get(slot, "")))
+	var floor_before: int = game.pickups.size()
+	var at: Vector3 = victim.global_position
+	victim.enter_downed(0)
+	check(bool(victim.downed), "the body is on the floor")
+	if not held.is_empty():
+		check(game.pickups.size() == floor_before + held.size(),
+			"the floor gains what it was holding (%d for %d)"
+			% [game.pickups.size() - floor_before, held.size()])
+		var dropped: Dictionary = {}
+		for index in range(floor_before, game.pickups.size()):
+			var piece = game.pickups[index]
+			if is_instance_valid(piece):
+				dropped[str(piece.item_id)] = piece
+		for item_id in held:
+			check(dropped.has(item_id), "the piece it held is on the floor (%s)" % item_id)
+		for item_id in dropped:
+			check(victim.global_position.distance_to((dropped[item_id] as Node3D).global_position) <= 1.2,
+				"and it lies beside the body (%s, %.2f m)" % [item_id,
+					victim.global_position.distance_to((dropped[item_id] as Node3D).global_position)])
+	var after: Dictionary = warband.roster.equipped_of(merc_id)
+	check(str(after.get("main", "")).is_empty() and str(after.get("off", "")).is_empty(),
+		"the roster's hands are empty after the fall")
+	check(str(victim.rig.weapon) == "none" or str(victim.rig.weapon).is_empty(),
+		"and the body in the world is not holding it either (%s)" % str(victim.rig.weapon))
+	# A second fall (the bleed-out death) must not drop the same piece twice.
+	var floor_mid: int = game.pickups.size()
+	victim._die(0)
+	check(game.pickups.size() == floor_mid, "the death of an already-dropped body adds no second blade")
 
 
 func _on_watchdog() -> void:
@@ -527,8 +581,16 @@ func check_lesson() -> void:
 	var armed := await await_condition(
 		func() -> bool: return game.camp.allies_armed() >= 1, 16.0, "the squad arming")
 	check(armed, "a freed ally picks a weapon off the ground and holds it")
-	check(game.camp.pickups().size() == 3, "the three cultist drops lie where they were (%d)"
-		% game.camp.pickups().size())
+	# The three cultist drops are still there, plus a blade for each of the pair
+	# Corvin put down: a fallen watcher's steel leaves its hand and lands on the
+	# dirt beside it.
+	var fallen_pair := 0
+	for watcher in game.camp.guards:
+		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
+			fallen_pair += 1
+	check(game.camp.pickups().size() == 3 + fallen_pair,
+		"three drops plus one blade per fallen watcher lie where they were (%d for %d fallen)"
+		% [game.camp.pickups().size(), fallen_pair])
 
 
 # --- 3b. the leaving is the ambush ---------------------------------------

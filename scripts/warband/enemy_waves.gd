@@ -44,14 +44,15 @@ const MAX_GUARDS := 6
 const FIRST_GUARD_SLOT := 100
 ## Fixed per-wave seed: same index, same kits, on every machine and every run.
 const WAVE_SEED := 70510
-## Kit escalation, one tier per wave until the last one holds. Wave 0 is knives
-## and salvage, wave 1 draws forged steel behind a buckler, wave 2 adds archers
-## behind kite shields.
+## Kit escalation, one tier per wave until the last one holds - and every tier is
+## the salvage the wood gives up: a shiv, then clubs and a plank shield, then a
+## whole limb and a green branch bow. A cult guard with a smithed arming sword was
+## a knight in rags, and its corpse was worth more than the expedition paid.
 const KITS := [
 	{"mains": ["dagger_ironwood"], "offs": [""], "armor": "makeshift"},
-	{"mains": ["sword_short", "sword_arming"], "offs": ["", "shield_buckler"], "armor": "leather"},
-	{"mains": ["bow_short", "sword_short", "sword_arming"],
-		"offs": ["", "shield_buckler", "shield_kite"], "armor": "mail"},
+	{"mains": ["club_makeshift", "dagger_ironwood"], "offs": ["", "shield_wood"], "armor": "makeshift"},
+	{"mains": ["branch_heavy", "bow_twig", "club_makeshift"],
+		"offs": ["", "shield_wood"], "armor": "makeshift"},
 ]
 
 var _controller = null

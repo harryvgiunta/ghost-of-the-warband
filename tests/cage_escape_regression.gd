@@ -591,8 +591,15 @@ func await_condition(predicate: Callable, timeout: float, label: String) -> bool
 	return bool(predicate.call())
 
 func check_out_and_ambush() -> void:
-	# Nothing was looted for the player: the three cultist drops are still there.
-	check(camp.pickups().size() == 3, "the three cultist drops are still on the walk (%d)"
+	# Nothing was looted for the player: the three cultist drops are still there,
+	# plus one blade for each of the pair Corvin put down - a fallen watcher's
+	# steel leaves its hand and lands on the dirt beside it.
+	var standing_pair := 0
+	for watcher in camp.guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			standing_pair += 1
+	check(camp.pickups().size() == 3 + (2 - standing_pair),
+		"three drops and one blade per fallen watcher lie on the walk (%d)"
 		% camp.pickups().size())
 	var armed := await await_condition(
 		func() -> bool: return _prisoner_armed() >= 1, 14.0, "the squad arming")
@@ -658,7 +665,6 @@ func check_out_and_ambush() -> void:
 	var expected_guards: int = 2 + CampScript.AMBUSH_COUNT
 	check(camp.guards.size() == expected_guards,
 		"the ambush comes out of the trees (%d camp watchers of %d)" % [camp.guards.size(), expected_guards])
-	var drops_before: int = game.pickups.size()
 	var armed_reinforcements := 0
 	var visible_blades := 0
 	for index in range(2, camp.guards.size()):
@@ -730,12 +736,37 @@ func check_out_and_ambush() -> void:
 	var hurt := await await_condition(ambush_hurt, 14.0, "the squad landing blows")
 	check(hurt, "the freed squad's steel lands on the ambush")
 
-	# Every fallen body is a corpse on the vacuum's registry, not a heap of loose
-	# steel: nothing new is dumped on the floor when one of them goes down.
+	# A fallen body's steel lands beside it. The corpse keeps the rag and the
+	# dressing it wore; the blade it was swinging is a drop on the dirt, at the
+	# body's own ground, carrying the id it was holding.
+	var fell_with_steel := 0
 	for index in range(2, camp.guards.size()):
 		var watcher = camp.guards[index]
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(4000.0, 0)
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var held := str(watcher.weapon_item)
+		var at: Vector3 = watcher.global_position
+		var floor_before: int = game.pickups.size()
+		watcher.take_damage(4000.0, 0)
+		await create_timer(0.1).timeout
+		if held.is_empty():
+			continue
+		check(game.pickups.size() == floor_before + 1,
+			"a fallen watcher leaves one blade on the floor (%d)" % (game.pickups.size() - floor_before))
+		if game.pickups.size() > floor_before:
+			var drop = game.pickups[game.pickups.size() - 1]
+			# The squad may have walked it away inside the same beat, which is the
+			# looting working rather than a missing drop.
+			if not is_instance_valid(drop):
+				fell_with_steel += 1
+				continue
+			check(str(drop.item_id) == held, "and it is the blade it held (%s)" % str(drop.item_id))
+			check(flat_range(drop.global_position, at) <= 1.2,
+				"lying beside the body (%.2f m)" % flat_range(drop.global_position, at))
+			check(absf(drop.global_position.y - at.y) < 0.6,
+				"on the body's own ground (%.2f vs %.2f)" % [drop.global_position.y, at.y])
+		fell_with_steel += 1
+	check(fell_with_steel >= 1, "at least one ambusher fell holding steel (%d)" % fell_with_steel)
 	await create_timer(0.2).timeout
 	var corpse_ids: Array = game.loot.corpse_ids()
 	var with_gear := 0
@@ -749,8 +780,13 @@ func check_out_and_ambush() -> void:
 	check(game.loot.registered_corpses() >= CampScript.AMBUSH_COUNT,
 		"every fallen ambusher registered as a corpse (%d of %d)"
 		% [game.loot.registered_corpses(), CampScript.AMBUSH_COUNT])
-	check(game.pickups.size() == drops_before,
-		"and no corpse also dumps its kit on the floor (%d)" % (game.pickups.size() - drops_before))
+	# A corpse never holds a second copy of the blade that fell: the steel is on
+	# the floor and the body keeps the rag it was wearing.
+	for corpse_id in corpse_ids:
+		for item_id in game.loot.corpse_items(int(corpse_id)):
+			check(not str(item_id) in ["club_makeshift", "dagger_ironwood",
+					"branch_heavy", "bow_twig"],
+				"a corpse carries no blade, the steel is on the floor (%s)" % str(item_id))
 	check(camp.sequencer.guards_down() == 2 + CampScript.AMBUSH_COUNT,
 		"the tally reaches the whole camp (%d)" % camp.sequencer.guards_down())
 	check(requested_paths.is_empty(), "walking out of the camp requests no scene (%s)"

@@ -146,6 +146,10 @@ var health_pool := HARDENED_HEALTH
 var weapon_item := ""
 ## Armour a corpse is carrying. A scene may overwrite it (the road does).
 var armor_items: Array[String] = []
+## What else is on the body when it falls: a dressing, a bundle, whatever the
+## scene put there. It is not worn gear, so it never shows on the model - it is
+## only ever offered to whoever searches the corpse.
+var carried: Array[String] = []
 
 ## Scene dials on this body's fight, set at spawn and read by the swing loop.
 ## They exist because the same body is a duelist in one wave and an ambusher
@@ -192,6 +196,7 @@ func _ready() -> void:
 	collision_layer = WATCHER_LAYER
 	_shape_body()
 	_stamp_armor_items()
+	_stamp_carried()
 	if weapon_item.is_empty():
 		weapon_item = str(variant.get("main", ""))
 	_apply_weapon()
@@ -290,6 +295,9 @@ func gear_items() -> Array[String]:
 	if not weapon_item.is_empty():
 		out.append(weapon_item)
 	for piece in armor_items:
+		if not piece.is_empty():
+			out.append(piece)
+	for piece in carried:
 		if not piece.is_empty():
 			out.append(piece)
 	return out
@@ -538,6 +546,17 @@ func _shape_body() -> void:
 func _apply_weapon() -> void:
 	if is_instance_valid(_visual):
 		_visual.set_held_weapon(weapon_item)
+
+
+## Every other body walked the table with a field dressing tied at its belt: the
+## squad's medicine is looted off the mobs it kills, never handed out. The split is
+## the variant's own ordinal, so the same watcher always carries the same kit.
+const CARRIED_BANDAGE := "bandage_linen"
+
+func _stamp_carried() -> void:
+	carried.clear()
+	if _variant_slot % 2 == 0:
+		carried.append(CARRIED_BANDAGE)
 
 
 func _stamp_armor_items() -> void:

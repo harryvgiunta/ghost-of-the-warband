@@ -336,23 +336,44 @@ func check_gear() -> void:
 			armoured = raw
 	check(armoured != null, "one watcher wears a salvage set")
 	check(bare != null, "one watcher wears nothing but the creature it is")
+	# The corpse's kit is the blade, the rag it wore and whatever it carried - a
+	# bandage on every second body, which is where the squad's field medicine comes
+	# from. Nothing else is on a watcher.
+	var carried_bandages := 0
+	for raw in _samples:
+		if raw.gear_items().has("bandage_linen"):
+			carried_bandages += 1
 	if armoured != null:
 		var gear: Array = armoured.gear_items()
 		check(gear.has(str(armoured.weapon_item)), "the corpse lists the blade")
 		var set_name := str(armoured.variant.get("armor", ""))
 		var pieces := 0
+		var dressings := 0
 		for item_id in gear:
 			check(Catalog.ITEMS.has(str(item_id)), "corpse gear is catalog gear (%s)" % str(item_id))
 			if str(item_id).begins_with("armor_%s_" % set_name):
 				pieces += 1
+			if str(item_id) == "bandage_linen":
+				dressings += 1
 		check(pieces >= 1, "the corpse lists the worn %s pieces (%d)" % [set_name, pieces])
-		check(gear.size() == pieces + 1,
-			"gear is the blade plus the worn pieces (%d of %d)" % [gear.size(), pieces])
+		check(dressings <= 1, "a body carries at most one dressing (%d)" % dressings)
+		check(gear.size() == pieces + 1 + dressings,
+			"gear is the blade, the worn pieces and the dressing (%d of %d)"
+			% [gear.size(), pieces + 1 + dressings])
 		check(ArmorData.SET_IDS.has(set_name), "the armour set is a catalog set (%s)" % set_name)
 	if bare != null:
 		var bare_gear: Array = bare.gear_items()
-		check(bare_gear.size() == 1 and bare_gear[0] == str(bare.weapon_item),
-			"an unarmoured watcher drops only its blade (%s)" % str(bare_gear))
+		check(bare_gear.has(str(bare.weapon_item)),
+			"an unarmoured watcher drops its blade (%s)" % str(bare_gear))
+		for item_id in bare_gear:
+			if str(item_id) != str(bare.weapon_item):
+				check(str(item_id) == "bandage_linen",
+					"and nothing but a dressing rides beside it (%s)" % str(item_id))
+	# Half the variants walk the table with a field dressing: that is where the
+	# squad's medicine comes from, so some of the sample must be carrying one.
+	check(carried_bandages > 0 and carried_bandages < _samples.size(),
+		"the dressings are carried by some bodies and not others (%d of %d)"
+		% [carried_bandages, _samples.size()])
 
 # --- the fight -------------------------------------------------------------
 

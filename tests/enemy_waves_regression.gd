@@ -233,20 +233,24 @@ func check_wave_two() -> Array:
 		"wave_started reports the bigger wave, got %s" % str(_started))
 	check(_waves.total_cleared() == 3, "the cleared tally survives the new wave")
 
-	var forged := 0
-	var armored := true
-	var leathers := ArmorData.SET_IDS.find("leather")
+	# The whole cult is the salvage tier: a mob with a smithed arming sword was a
+	# knight in rags, and a knight's blade off a cultist corpse out-valued the
+	# battle. A later wave is more bodies and better salvage, never forged steel.
+	var salvage := 0
+	var makeshifts := 0
+	var tier := ["dagger_ironwood", "club_makeshift", "branch_heavy", "bow_twig"]
 	for guard in guards:
 		var main_id := str(guard.kit.get("main", ""))
 		check(StateScript.ITEMS.has(main_id), "wave 2 gear is catalog gear, got %s" % main_id)
-		if main_id in ["sword_short", "sword_arming", "bow_short"]:
-			forged += 1
-		if str(guard.kit.get("armor", "")) != "leather":
-			armored = false
-		check(int(guard.rig.armor_pieces.get("chest", ArmorData.NONE)) == leathers,
-			"wave 2 wears leather on the rig")
-	check(forged == guards.size(), "wave 2 has left the shivs behind, got %d forged" % forged)
-	check(armored, "the second wave has traded salvage for forged leather")
+		if main_id in tier:
+			salvage += 1
+		if str(guard.kit.get("armor", "")) == "makeshift":
+			makeshifts += 1
+		check(int(guard.rig.armor_pieces.get("chest", ArmorData.NONE))
+			== ArmorData.SET_IDS.find("makeshift"),
+			"wave 2 wears salvage on the rig")
+	check(salvage == guards.size(), "wave 2 carries only the salvage tier, got %d" % salvage)
+	check(makeshifts == guards.size(), "and wears the salvage it cut for itself")
 	check(guards.size() > 3, "the second wave is measurably bigger than the first")
 
 	# Determinism: the same index rolls the same kits, on any run.

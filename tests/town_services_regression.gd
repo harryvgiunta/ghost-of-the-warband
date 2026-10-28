@@ -49,7 +49,10 @@ func run() -> void:
 	for enemy in game.enemies:
 		enemy.set_physics_process(false)
 
-	check(state.inventory.size() == StateScript.STARTING_INVENTORY.size() and state.credits == StateScript.STARTING_CREDITS,"Starter kit loads")
+	check(state.inventory.is_empty() and state.credits == StateScript.STARTING_CREDITS,"A new journey starts with an empty pack")
+	# A new journey starts empty, so the pack this test shops with is its own.
+	for item_id in ["bow_short", "sword_short", "shield_buckler", "dagger_iron"]:
+		state.inventory.append(item_id)
 	check(game.world.player_spawn.distance_to(Vector3(0,3,47)) < 0.05,"New game spawns at the town gate")
 	check(game.world.interactables.size() == 10,"Town exposes camp, delve, three keepers, stash, portal and three waystones")
 	check(game.world.landmarks.size() == 8,"The map gains the delve, the camp and the village landmarks")

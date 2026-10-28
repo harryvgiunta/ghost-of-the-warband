@@ -123,21 +123,42 @@ TORSO_INSET = 0.012
 # never cross the ring above it and no column can cut into another.  The
 # measured body is only used for the sleeve and leg envelopes, which follow
 # their bones.  Aspect is the front-to-back flattening of every ring.
-BODY_ASPECT = 0.76
+# Front-to-back flattening of every torso ring. A body is not a barrel: at the
+# old 0.76 the shirt was 0.33 m deep at the waist and the figure read as a sack.
+BODY_ASPECT = 0.68
 BODY_CENTRE_Y = 0.012
-SHIRT_PROFILE = ((0.918, 0.206), (0.960, 0.199), (1.040, 0.191), (1.160, 0.201),
-                 (1.300, 0.216), (1.400, 0.209), (1.470, 0.198), (1.515, 0.170),
-                 (1.548, 0.120), (1.572, 0.092), (1.586, 0.086))
-SKIN_PROFILE = ((0.900, 0.176), (0.960, 0.169), (1.040, 0.161), (1.160, 0.171),
-                (1.300, 0.186), (1.400, 0.179), (1.470, 0.168), (1.515, 0.140),
-                (1.548, 0.086), (1.572, 0.064), (1.596, 0.060))
+# A chest, a waist and a hip - in that order. The widest point is the chest at
+# 1.30 (0.384 m across), the narrowest the waist at 1.04 (0.320 m), and the hem
+# sits on the hip at 0.918 (0.348 m). The old table was a straight barrel from
+# hem to chest and only tapered over the last 60 mm, which is what a man built
+# like a barrel under a shirt looks like.
+SHIRT_PROFILE = ((0.918, 0.174), (0.960, 0.170), (1.040, 0.160), (1.160, 0.172),
+                 (1.300, 0.192), (1.400, 0.188), (1.470, 0.176), (1.515, 0.150),
+                 (1.548, 0.112), (1.572, 0.086), (1.586, 0.080))
+# The skin under it, 13-14 mm inside the cloth everywhere except at the neck,
+# where the two rings converge on the same collar.
+SKIN_PROFILE = ((0.900, 0.160), (0.960, 0.156), (1.040, 0.146), (1.160, 0.158),
+                (1.300, 0.178), (1.400, 0.174), (1.470, 0.162), (1.515, 0.136),
+                (1.548, 0.084), (1.572, 0.062), (1.596, 0.058))
 SHIRT_HEM_Z, SHIRT_NECK_Z = 0.918, 1.586
 SKIN_HEM_Z, SKIN_NECK_Z = 0.900, 1.596
-COLLAR_Z = (1.560, 1.596)
+# The collar stops under the jaw. At 1.596 it was a cuff round the chin, which
+# ate the neck and made the head read as a knob on the shirt.
+COLLAR_Z = (1.545, 1.578)
 # Shorts: a hip tube with two leg tubes starting inside it.
 SHORTS_HIP_Z = (0.930, 1.062)
 SHORTS_LEG_Z = (0.700, 0.995)
-SHORTS_LEG_RADIUS = (0.108, 0.096)
+SHORTS_LEG_RADIUS = (0.100, 0.090)
+## The shorts' own sections, shared by the cloth and the skin clamp inside it:
+## one hip tube 0.35 m across and 0.25 m deep, two leg tubes 2 mm apart per side.
+# The hip tube tops out under the shirt's hem (0.918), so it is a hip that is
+# always covered: it sits inside the cloth instead of poking through it as the
+# black band the wider tube made.
+SHORTS_HIP_RADIUS = (0.158, 0.164)
+SHORTS_HIP_ASPECT = 0.72
+SHORTS_HIP_CENTRE_Y = 0.020
+SHORTS_LEG_CENTRE = Vector((0.0, 0.097, 0.045))
+SHORTS_LEG_ASPECT = 0.90
 ARM_INSET = 0.009
 # The ankle is where the leg tube hands over to the foot's own shell: the tube
 # ends inside the foot, at the narrowest radius the two can share.
@@ -151,7 +172,13 @@ SOCK_INSET = 0.006
 SHIRT_INSET = -0.018
 SHIRT_HEM = 0.925
 SLEEVE_FROM, SLEEVE_TO = -0.300, 0.420
-SLEEVE_RADIUS = (0.076, 0.058)
+# The sleeve is a deltoid, not a pipe: it swells over the shoulder, holds
+# through the upper arm and pulls in at the cuff. `t` runs 0 at the shoulder
+# joint to 1 at the wrist.
+SLEEVE_PROFILE = ((0.000, 0.068), (0.120, 0.066), (0.260, 0.061),
+                  (0.360, 0.055), (0.420, 0.052))
+# The bare forearm below the cuff: a belly at the elbow, a taper to the wrist.
+FOREARM_BELLY, FOREARM_TAPER = 0.11, 0.34
 # The palm the fingers grow out of: the arm tube's section at the knuckles.
 HAND_RADIUS = (0.048, 0.026)
 HAND_CENTRE = Vector((0.0, 0.062, 1.450))
@@ -782,6 +809,14 @@ def arm_axis(side: float, t: float) -> tuple[Vector, float, float]:
     centre = Vector((a.x + (b.x - a.x) * t, cy, cz))
     inset = ARM_INSET + 0.003 * mobs.smoothstep(0.40, 0.90, t)
     skin_radius = max(0.028, min(0.068, radius - inset))
+    # A bare arm is not a pipe. The forearm swells just below the cuff and tapers
+    # to the wrist, and a whisper of a bicep sits under the sleeve, so the limb
+    # reads as a limb from the side as well as from the front. Both are rolled
+    # into one radius, so no ring can cross another.
+    swell = 1.0 + FOREARM_BELLY * math.exp(-(((t - 0.58) / 0.16) ** 2))
+    swell -= FOREARM_TAPER * 0.30 * mobs.smoothstep(0.80, 1.02, t)
+    swell += 0.05 * math.exp(-(((t - 0.30) / 0.12) ** 2))
+    skin_radius *= max(0.80, swell)
     ry = rz = skin_radius
     blend = mobs.smoothstep(0.86, 1.10, t)
     if blend > 0.0:
@@ -814,8 +849,8 @@ def radial_shell(name, profile, z0: float, z1: float, cols: int, rows: int, mate
 
 
 def sleeve_radius(t: float) -> float:
-    share = (t - SLEEVE_FROM) / (SLEEVE_TO - SLEEVE_FROM)
-    return SLEEVE_RADIUS[0] + (SLEEVE_RADIUS[1] - SLEEVE_RADIUS[0]) * min(1.0, max(0.0, share))
+    """The cloth radius of the sleeve at a point along the arm."""
+    return mobs.keyed(max(0.0, min(t, SLEEVE_TO)), SLEEVE_PROFILE)
 
 
 def build_chest(material_of) -> list[Part]:
@@ -896,7 +931,7 @@ def build_chest(material_of) -> list[Part]:
     def collar_sample(u, v):
         theta = TAU * u
         z = COLLAR_Z[0] + (COLLAR_Z[1] - COLLAR_Z[0]) * v
-        radius = mobs.keyed(z, SHIRT_PROFILE) + 0.011
+        radius = mobs.keyed(z, SHIRT_PROFILE) + 0.008
         return Vector((math.cos(theta) * radius,
                        BODY_CENTRE_Y + math.sin(theta) * radius * BODY_ASPECT, z))
 
@@ -923,7 +958,7 @@ def clamp_inside_shorts(point: Vector, side: float) -> Vector:
     if SHORTS_LEG_Z[0] - 0.020 <= z <= SHORTS_LEG_Z[1]:
         share = min(1.0, max(0.0, (z - SHORTS_LEG_Z[0]) / (SHORTS_LEG_Z[1] - SHORTS_LEG_Z[0])))
         radius = SHORTS_LEG_RADIUS[1] + (SHORTS_LEG_RADIUS[0] - SHORTS_LEG_RADIUS[1]) * share
-        cx, cy, aspect = side * 0.095, 0.045, 0.95
+        cx, cy, aspect = side * SHORTS_LEG_CENTRE.y, SHORTS_LEG_CENTRE.z, SHORTS_LEG_ASPECT
         dx, dy = x - cx, (y - cy) / aspect
         distance = math.hypot(dx, dy)
         limit = radius - 0.017
@@ -932,9 +967,9 @@ def clamp_inside_shorts(point: Vector, side: float) -> Vector:
             x, y = cx + dx * scale, cy + dy * scale * aspect
     if SHORTS_HIP_Z[0] <= z <= SHORTS_HIP_Z[1]:
         share = (z - SHORTS_HIP_Z[0]) / (SHORTS_HIP_Z[1] - SHORTS_HIP_Z[0])
-        radius = 0.196 + 0.010 * share
-        aspect = 0.78
-        cy = 0.020
+        radius = SHORTS_HIP_RADIUS[0] + (SHORTS_HIP_RADIUS[1] - SHORTS_HIP_RADIUS[0]) * share
+        aspect = SHORTS_HIP_ASPECT
+        cy = SHORTS_HIP_CENTRE_Y
         dx, dy = x, (y - cy) / aspect
         distance = math.hypot(dx, dy)
         limit = radius - 0.015
@@ -948,19 +983,20 @@ def build_legs(material_of) -> list[Part]:
     """Legs and feet as skin, with tight shorts over the hips and thighs."""
     measure = MEASURE
     parts: list[Part] = []
-    leg_refs = ["Male_Ranger_Legs", "Ranger_Base_Calf"]
+    # The ranger's own leg cloth only. The calf wraps belong to the leather legs
+    # slot, so they are hidden under this set and the bare leg no longer has to
+    # be inflated around them.
+    leg_refs = ["Male_Ranger_Legs"]
 
     for side in (1.0, -1.0):
         tag = "l" if side > 0 else "r"
         x_range = (0.018, 0.340) if side > 0 else (-0.340, -0.018)
+        # Smoothing over three neighbours: the source legs are sparse, and an
+        # unsmoothed sector ring is what gave the bare leg its lumps.
         leg_ring = measure.sector_table(leg_refs, LEG_BOTTOM, LEG_Z1, 0.012, sectors=28,
-                                        x_range=x_range, half=0.016, smooth=1)
-        # Ranger_Base_Calf is not part of any armour slot, so it is on screen
-        # under every set: the bare leg has to sit outside it, not inside it.
-        sock_ring = measure.sector_table(["Ranger_Base_Calf"], 0.090, 0.490, 0.012, sectors=28,
-                                         x_range=x_range, half=0.016, smooth=1)
+                                        x_range=x_range, half=0.016, smooth=3)
 
-        def leg_sample(u, v, side=side, leg_ring=leg_ring, sock_ring=sock_ring):
+        def leg_sample(u, v, side=side, leg_ring=leg_ring):
             z = LEG_BOTTOM + (LEG_Z1 - LEG_BOTTOM) * v
             theta = TAU * u
             cx, cy, radius = leg_ring.ring(z, theta)
@@ -971,15 +1007,11 @@ def build_legs(material_of) -> list[Part]:
             # the radius the foot's ankle ring already covers.
             share = 1.0 - mobs.smoothstep(LEG_BOTTOM, 0.235, z)
             reach += (ANKLE_RADIUS - reach) * share
-            # Ranger_Base_Calf is never hidden by any slot, so it is on screen
-            # under this set too: the bare leg has to be wider than it, and the
-            # floor is applied after the ankle taper so the taper cannot dive
-            # back inside the sock.
-            if z < 0.620:
-                reach = max(reach, sock_ring.ring(min(max(z, 0.093), 0.481), theta)[2] + 0.006)
-            wobble = 1.0 + math.sin(theta * 2.0 + z * 6.0 + side) * 0.006
-            point = Vector((cx + math.cos(theta) * reach * wobble,
-                            cy + math.sin(theta) * reach * wobble, z))
+            # A smooth taper, no per-ring wobble: a leg is one surface from hip
+            # to ankle, and the noise term this used to carry is exactly what
+            # read as lumpy.
+            point = Vector((cx + math.cos(theta) * reach,
+                            cy + math.sin(theta) * reach, z))
             return clamp_inside_shorts(point, side)
 
         parts.append(Part(salvage.surface_grid(f"NAKED_Leg_{tag.upper()}", 18, 20, leg_sample,
@@ -987,7 +1019,7 @@ def build_legs(material_of) -> list[Part]:
                                                axis=Vector((side * 0.09, 0.05, 0.60))),
                           "skin", leg_weights))
 
-        ankle = max(sock_ring.ring(ANKLE_Z, step * TAU / 8.0)[2] for step in range(8)) + 0.006
+        ankle = max(leg_ring.ring(ANKLE_Z, step * TAU / 8.0)[2] for step in range(8)) + 0.006
         parts.append(Part(build_foot(side, ankle, material_of), "skin", foot_weights))
 
     # Shorts: a hip tube plus two leg tubes that start inside it.  Both are
@@ -996,8 +1028,12 @@ def build_legs(material_of) -> list[Part]:
     def hip_sample(u, v):
         theta = TAU * u
         z = SHORTS_HIP_Z[0] + (SHORTS_HIP_Z[1] - SHORTS_HIP_Z[0]) * v
-        radius = 0.196 + 0.010 * v
-        return Vector((math.cos(theta) * radius, 0.020 + math.sin(theta) * radius * 0.78, z))
+        # The hip is wider than the waist and flatter than a drum: 0.35 m across
+        # and 0.25 m deep, instead of the old 0.41 m tube that stood wider than
+        # the chest it hung under.
+        radius = SHORTS_HIP_RADIUS[0] + (SHORTS_HIP_RADIUS[1] - SHORTS_HIP_RADIUS[0]) * v
+        return Vector((math.cos(theta) * radius,
+                       SHORTS_HIP_CENTRE_Y + math.sin(theta) * radius * SHORTS_HIP_ASPECT, z))
 
     parts.append(Part(salvage.surface_grid("NAKED_Shorts_Hip", 28, 4, hip_sample,
                                            cloth(material_of), thickness=0.006,
@@ -1011,8 +1047,8 @@ def build_legs(material_of) -> list[Part]:
             theta = TAU * u
             z = SHORTS_LEG_Z[0] + (SHORTS_LEG_Z[1] - SHORTS_LEG_Z[0]) * v
             radius = SHORTS_LEG_RADIUS[1] + (SHORTS_LEG_RADIUS[0] - SHORTS_LEG_RADIUS[1]) * v
-            return Vector((side * 0.095 + math.cos(theta) * radius,
-                           0.045 + math.sin(theta) * radius * 0.95, z))
+            return Vector((side * SHORTS_LEG_CENTRE.y + math.cos(theta) * radius,
+                           SHORTS_LEG_CENTRE.z + math.sin(theta) * radius * SHORTS_LEG_ASPECT, z))
 
         parts.append(Part(salvage.surface_grid(f"NAKED_Shorts_{tag.upper()}", 16, 5,
                                                leg_short_sample, cloth(material_of),

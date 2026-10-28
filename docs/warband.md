@@ -300,7 +300,45 @@ Short version of the latest tuning (all in the code, all covered by
   watchers on its own, silently, through the shared squad ladder;
 - watchers are rigged, varied bodies (see the `CageWatcher` row), they hunt the
   nearest standing body, and **six more come out of the trees** as the squad
-  leaves the camp; every corpse keeps its kit and registers with the loot vacuum;
+  leaves the camp;
+- **the steel falls out of the hand**: a body that dies - a watcher or a cultist -
+  drops the catalog piece it was swinging onto the dirt in front of it, and that
+  drop joins the one loot list (`WarbandGearDrop.strip_enemy` /
+  `world_scene.drop_held_weapon`). What the corpse keeps is the rag on its back
+  and whatever it carried, so nothing is on offer twice, and the blade is taken
+  back with `K` (or walked to by a squadmate) instead of being read off a panel;
+- **a body on the floor lets go of its own steel**: `ArenaActor.downed_started`
+  and `killed` both walk `WarbandGearDrop.strip_hands` through
+  `world_scene.drop_merc_gear`, which empties the two hand slots on the roster and
+  puts each piece on the ground beside the body. A dropped piece is *not* booked
+  into the stash - it is on the floor until somebody picks it up - and the body is
+  re-dressed (`refresh_gear`) so its hands are visibly empty;
+- **a drop is a thing lying on the ground**: `WarbandPickup` draws the catalog
+  piece - a blade on its side, a bow curved on the dirt, a shield face down, a
+  bundle folded - with the name plate floating over it, and nothing bobs, spins or
+  floats. The shared frontier drop (`scripts/loot_pickup.gd`) follows the same
+  rule: its shape is authored up the piece's own axis and laid down by its holder;
+- **the cult is the salvage tier**: watchers and the trail's cultists carry
+  `MAKESHIFT_TIER` (`dagger_ironwood`, `club_makeshift`, `branch_heavy`,
+  `bow_twig`, `shield_wood`) and the expedition's waves escalate by more bodies and
+  better salvage, never by forged arming swords - a mob with a smithed blade was a
+  knight in rags whose corpse out-valued the battle;
+- **field medicine**: `bandage_linen` is a catalog piece (category `misc`, so no
+  slot will ever wear it). Half the watcher variants carry one as `carried` gear,
+  so it reaches the shared stash through the corpse registry like any other loot.
+  A hurt ally below `BANDAGE_HEALTH_SHARE` (70%) with one in the stash binds its
+  wounds for `BANDAGE_SECONDS` (1.8 s) once no hostile is inside
+  `LOOT_CLEAR_METRES` (22 m): the dressing leaves the stash, the body gets
+  `BANDAGE_HEAL_SHARE` (30%) of its own pool back, and the roster is written on the
+  same frame. An interrupted channel spends nothing. `tests/squad_medicine_regression.gd`;
+- **the squad stands off**: an ally closes to `STANDOFF` 1.45 m and no further,
+  walks itself back out if the press carries it inside `MIN_GAP` 0.95 m, and jogs
+  only past `RUN_GAP` 7 m. The old ladder walked to the mob's own origin on every
+  frame and ran the last metres in, which is why the squad read as a bulldozer
+  shoving the pack across the clearing;
+- an unarmed ally looks for **steel** first - a weapon on the ground inside
+  `SEARCH_METRES`, or a blade still on a corpse (`WarbandGearDrop`/`take_from_corpse`)
+  - and does not cross the clearing for a rag, a ring or a bundle;
 - the opening does not ask for loot, and the escape is a walk, not a quota;
 - the whole campaign is **one world**: `scenes/warband_world.tscn` holds the cages
   in a camp pocket **deep in the wood**, 170 m of ordinary forest between the camp
@@ -335,6 +373,8 @@ allowed to grow to ten minutes.
 | `warband_world_regression` 198 | one world, one controller, the ground, the 1,117 m walk, the budget (~65 s: the only long test) |
 | `watcher_variants_regression` 587 | the variant table, makeshift-only kits, a landed blow through `attacked`, the guard/stagger/crouch rules, and the warden's three swings + block + stagger + crouch clips |
 | `corpse_loot_regression` 110 | the corpse registry, one booking path, the corpse screen |
+| `stash_autoloot_regression` 185 | real drops, quick-loot, the sweep, the stash, the gear-drop rule (both hands empty, nothing banked, a lying piece that never moves) |
+| `squad_medicine_regression` 22 | the ally's bandage: the gate, the seconds, the spend, the interrupt, the roster write |
 | `downed_bleedout_regression` 46 | the prone pose, the drip, 30 s to DEAD, revive clears it |
 
 - the camp is a **40 x 52 m ragged pocket** - broken stakes, three twig shelters,
