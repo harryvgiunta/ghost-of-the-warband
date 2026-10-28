@@ -29,6 +29,7 @@ extends SceneTree
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
+const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const ArenaScript = preload("res://scripts/admin_arena.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -450,7 +451,8 @@ func check_lesson() -> void:
 	check(game.camp.sequencer.seen_count() == 1, "the starting body counts as seen")
 	check(game.camp.sequencer.objective().contains("1/4"), "the objective counts the seen bodies")
 	check(not game.camp.cages_open(), "the cages are still shut")
-	check(game.camp.pickups().size() == 3, "three cultist weapons lie on the walk (%d)"
+	check(game.camp.pickups().size() == 4,
+		"three cultist weapons and the rescuer's shiv lie on the walk (%d)"
 		% game.camp.pickups().size())
 
 	# A caged soul cannot leave its cage: possession moves the soul, not the bars.
@@ -484,8 +486,9 @@ func check_lesson() -> void:
 	check(state_count(SequencerScript.State.ALL_SEEN) == 1, "ALL_SEEN is entered exactly once")
 	dismiss_card("all four seen")
 
-	# Corvin jogs in, and he does not stand there: the pair are his. The soul is
-	# NOT moved for the player - taking his body is the beat.
+	# Corvin jogs in with empty hands and stops at the cage line: the pair are the
+	# player's fight now, not his. The soul is NOT moved for the player - taking his
+	# body is the beat.
 	var arrived := await await_condition(
 		func() -> bool: return game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 		JOG_TIMEOUT, "the rescuer's walk")
@@ -497,6 +500,14 @@ func check_lesson() -> void:
 	check(not game.camp.sequencer.rescuer_taken(), "the rescuer has not been taken yet")
 	check(game.camp.cages_open_count() == 0, "no latch is cut for free")
 	check(game.camp.sequencer.objective().contains("F5"), "the objective names the key")
+	var walked_in = game.controller.body_of(game.camp.rescuer_id)
+	check(not game.camp.holds_blade(walked_in),
+		"the rescuer walked in with nothing in his hands")
+	var sleeping := 0
+	for watcher in game.camp.guards:
+		if is_instance_valid(watcher) and bool(watcher.hunting()):
+			sleeping += 1
+	check(sleeping == 0, "nothing hunts before the player is armed (%d hunting)" % sleeping)
 	dismiss_card("the rescuer's card")
 
 	# A body at the bars with bare hands is told what is missing, and opens nothing.
@@ -514,47 +525,47 @@ func check_lesson() -> void:
 	check(game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 		"and the lesson stays where it was")
 
-	# Corvin puts the pair down himself. The player is in a cage for all of it.
-	var pair_waited := 0.0
-	while game.camp.watchers_down() < 2 and pair_waited < PAIR_TIMEOUT:
-		dismiss_card("the pair falling")
-		await create_timer(0.5).timeout
-		pair_waited += 0.5
-		if int(pair_waited * 2.0) % 10 == 0:
-			var corvin = game.controller.body_of(game.camp.rescuer_id)
-			var foes: Array = []
-			for foe in game.camp.guards:
-				if is_instance_valid(foe):
-					foes.append("%.0f/%.0f" % [float(foe.get("health")),
-						float(foe.get("max_health"))])
-			print("WORLD_PAIR t=%.1f down=%d corvin=%s rig=%s pose=%s free=%s engaged=%s pos=%s foes=%s"
-				% [pair_waited, game.camp.watchers_down(),
-				"none" if corvin == null else "alive=%s downed=%s hp=%.0f" % [
-					str(corvin.get("alive")), str(corvin.get("downed")),
-					float(corvin.get("health"))],
-				"none" if corvin == null else str(corvin.rig.weapon),
-				"none" if corvin == null else str(corvin.rig.phase),
-				str(game.camp.is_free(game.camp.rescuer_id)), str(game.squad.engaged),
-				"none" if corvin == null else "%.1f,%.1f" % [
-					corvin.global_position.x, corvin.global_position.z],
-				str(foes)])
-	var pair: bool = game.camp.watchers_down() >= 2
-	check(pair, "Corvin puts both watchers down himself (%d of 2)" % game.camp.watchers_down())
-	check(game.camp.ally_engaged(), "he swung: the squad's own module landed the blows")
-	check(game.camp.sequencer.guards_down() == 2,
-		"his two kills count on the tally (%d)" % game.camp.sequencer.guards_down())
-	check(game.controller.merc_for_peer(1) != game.camp.rescuer_id,
-		"the player never had to touch them")
-	check(game.camp.cages_open_count() == 0, "the pair falling cuts nothing by itself")
-
-	# The soul takes the body - F5 in the game, `direct` here - and the player walks
-	# the cage line cutting one latch per press. Only the fourth frees the squad.
+	# The first fight is the player's: take the body, walk to the shiv, take it, and
+	# put the pair down. This regression is about the world around that fight, so
+	# the melee itself is left to `cage_escape_regression` and the pair fall through
+	# the same damage path a landed swing ends in.
 	var take: Dictionary = game.controller.direct(1, game.camp.rescuer_id)
 	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
 	check(game.camp.sequencer.rescuer_taken(), "the sequencer saw the player take the body")
 	check(game.camp.cages_open_count() == 0, "taking him cuts no latch by itself")
+	check(game.camp.duel.step() == DuelScript.Step.MOVE,
+		"taking him starts the first fight's lesson at the feet (%s)"
+		% game.camp.duel.step_name())
+	dismiss_card("the walking card")
 	var cutter = game.controller.active_body(1)
+	check(not game.camp.holds_blade(cutter), "his hands are empty until the shiv is taken")
+	cutter.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	await physics_frame
+	await physics_frame
+	check(game.camp.duel.step() == DuelScript.Step.FETCH,
+		"standing over the shiv asks for the pickup (%s)" % game.camp.duel.step_name())
+	dismiss_card("the pickup card")
+	game._try_loot()
 	check(game.camp.holds_blade(cutter), "and the shiv is in the player's hands")
+	var pair_woke := await await_condition(
+		func() -> bool:
+			for watcher in game.camp.guards:
+				if is_instance_valid(watcher) and bool(watcher.hunting()):
+					return true
+			return false, 8.0, "the pair waking")
+	check(pair_woke, "the pair wake on the body that took the shiv")
+	dismiss_card("the pair waking")
+	for watcher in game.camp.guards.duplicate():
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(1000.0, 0)
+	await physics_frame
+	check(game.camp.watchers_down() == 2, "the pair are down (%d)" % game.camp.watchers_down())
+	check(game.camp.sequencer.guards_down() == 2,
+		"both kills count on the tally (%d)" % game.camp.sequencer.guards_down())
+	check(game.camp.cages_open_count() == 0, "the pair falling cuts nothing by itself")
+
+	# The player walks the cage line cutting one latch per press. Only the fourth
+	# frees the squad.
 	for index in game.camp.CAGE_POSTS.size():
 		var post: Vector3 = game.camp.CAGE_POSTS[index]
 		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
@@ -588,8 +599,8 @@ func check_lesson() -> void:
 	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
 			fallen_pair += 1
-	check(game.camp.pickups().size() == 3 + fallen_pair,
-		"three drops plus one blade per fallen watcher lie where they were (%d for %d fallen)"
+	check(game.camp.pickups().size() == 4 + fallen_pair,
+		"three drops, the shiv and one blade per fallen watcher lie where they were (%d for %d fallen)"
 		% [game.camp.pickups().size(), fallen_pair])
 
 

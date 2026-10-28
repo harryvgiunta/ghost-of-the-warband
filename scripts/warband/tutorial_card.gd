@@ -30,7 +30,17 @@ const INK_SOFT := LedgerThemeScript.INK_SOFT
 const INK_MUTED := LedgerThemeScript.INK_MUTED
 const BLOOD := LedgerThemeScript.BLOOD
 
-const ROMAN := ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
+const ROMAN := ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+## The stamps at the foot mark how far through the chapter a beat is. The warband
+## opening is nine cards long now that the first fight teaches its own three, so
+## the rail carries one stamp per card.
+const STAMP_COUNT := 9
+
+## The tokens the card draws as a carved key tile. A token with an underscore is
+## one key with a two-word name: `WHEEL_UP` prints WHEEL UP on a single tile.
+const KEYS := ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "G", "P", "K", "R",
+	"TAB", "ESC", "ENTER", "SPACE", "SHIFT", "CTRL", "LMB", "RMB", "MOUSE",
+	"WHEEL_UP", "WHEEL_DOWN", "W", "A", "S", "D", "[", "]"]
 
 var _built := false
 var _open := false
@@ -187,7 +197,7 @@ func _ensure_built() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	column.add_child(row)
-	for index in 5:
+	for index in STAMP_COUNT:
 		var stamp := TextureRect.new()
 		stamp.texture = _stamp_texture(false)
 		stamp.custom_minimum_size = Vector2(16, 16)
@@ -211,9 +221,11 @@ func _fill_keys(text: String) -> void:
 		_keys_row.remove_child(child)
 		child.queue_free()
 	for token in text.split(" ", false):
-		var clean := token.to_upper().trim_suffix(",")
-		if _is_key(clean):
-			_keys_row.add_child(LedgerKeycapScript.new(token))
+		# A key is written in capitals in the copy, so a lowercase word that happens
+		# to spell one ("a", "w", "d") stays prose instead of turning into a tile.
+		var clean := token.trim_suffix(",")
+		if clean == clean.to_upper() and _is_key(clean):
+			_keys_row.add_child(LedgerKeycapScript.new(clean.replace("_", " ")))
 			continue
 		var word := _label(KEY_SIZE, INK_MUTED if token in ["\u2014", "\u00b7"] else INK_SOFT)
 		word.text = token
@@ -225,8 +237,7 @@ func _fill_keys(text: String) -> void:
 func _is_key(token: String) -> bool:
 	if token != token.to_upper():
 		return false
-	return token in ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "G", "P",
-		"TAB", "ESC", "ENTER", "SHIFT", "LMB", "RMB", "W", "A", "S", "D", "[", "]"]
+	return KEYS.has(token)
 
 
 func _label(font_size: int, color: Color) -> Label:

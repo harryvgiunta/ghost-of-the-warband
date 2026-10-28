@@ -34,18 +34,36 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
 1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
    keys; it closes on CONTINUE / G / Enter / Escape.
-2. **Corvin.** After the fourth sighting he jogs in with a shiv (~3.6 s) and
-   **does not stand still**: he goes at the two camp watchers and kills them
-   himself, 15 s or so of fight that the player watches from a cage. He is on the
-   same hundred health as everybody else and survives on the shiv's own passive
-   (a dagger swings its stab, and Prison shank is +200% on the stab).
-3. **The latches are his, taken with his body.** The player takes him (`F5` or
-   `[` `]` — never automatic) and **that is the cut**: all four latches open, the
-   doors lift, the freed prisoners become squad AI and arm themselves from the
-   steel on the ground. `G` does nothing to a cage. Take him before the pair are
-   down and he keeps fighting; the cages open when the clearing is clear.
-4. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
-   and **six armed watchers come out of the trees** (each drops its weapon) as the
+2. **Corvin arrives with empty hands.** After the fourth sighting he jogs in
+   (~3.6 s) and stops at the cage line: the pair took his shiv off him at the
+   mouth and threw it in the dirt. He fights nothing and nothing fights him - the
+   first fight is the player's, and it is taught while it happens
+   (`scripts/warband/duel_lesson.gd`, four cards):
+   * **the feet** — the moment the soul enters him: W A S D / SHIFT / SPACE /
+     mouse, and where the shiv lies;
+   * **the steel** — walking onto the shiv opens the card that names `K`; taking
+     it is what arms the body and what wakes the pair;
+   * **the cuts** — the player's first swing: LMB diagonal, `WHEEL UP` stab
+     (Prison shank: +200%, 0.167 s), `WHEEL DOWN` overhead;
+   * **the guard** — the second watcher's first windup, held still mid-swing:
+     hold RMB. A dagger only softens a blow (`DEFENSE_WEAK_BLOCK`), so the card
+     says a guard is a moment, not a wall.
+   The cards pause the tree, so a new player reads each one with the club frozen
+   in the air. The pair are the softest bodies in the game: 21 health (two
+   shiv stabs), `blow_scale` 0.5, `windup_scale` 2.4 (a 1.3 s telegraph),
+   `swing_gap_scale` 2.2 and `guard_scale` 0.
+3. **The latches, cut by hand.** One latch per cage with `G` in a body holding a
+   blade (`LATCH_REACH` 2.2 m) — nothing opens on a possession, a kill or a body
+   count. The fourth latch lifts the doors, turns the freed prisoners into squad
+   AI and they arm themselves from the steel on the ground.
+4. **The fallen.** The first squadmate to go down within 12 m of the player's body
+   raises the one unnumbered card (`lesson_revive`): **HOLD G** - not a tap - for
+   five seconds brings a body back from DOWNED, and a blow that lands on the
+   reviver breaks the channel. The bleed clock is 30 s and any blow at or above
+   10% of the pool ends the body outright. The card is pushed from
+   `world_scene._on_body_downed`, so the camp and the trail share it.
+5. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
+   and **four armed watchers come out of the trees** (each drops its weapon) as the
    state turns to `ESCAPING`. There is no kill quota to open the way; there is no
    gate.
 5. **The wood.** The mouth leads onto a **915 m** road through the same wood —
@@ -203,7 +221,7 @@ Integration seams deliberately placed in the base game:
 
 | Knob | Where | Now |
 | --- | --- | --- |
-| Watcher pools | `cage_watcher.gd` | pair 44 (no guard), everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
+| Watcher pools | `cage_watcher.gd` | pair 30 with `blow_scale` 0.5 and `windup_scale` 2.4 (`PAIR_*` in `cage_escape.gd`), everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
 | Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
 | Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 (Corvin's pair + the six at the leaving); a tally, no longer a gate |
@@ -255,10 +273,11 @@ Integration seams deliberately placed in the base game:
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
-| `cage_escape_regression` | 197 | cards/pause, Corvin killing the pair unattended, the four latches falling when the soul enters him (G does nothing), the squad arming, 72 HP watchers, the six at the mouth, drops |
-| `escape_run_regression` | 242 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
+| `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
+| `cage_escape_regression` | 327 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
+| `escape_run_regression` | 170 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
 | `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 174 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
+| `warband_world_regression` | 220 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |

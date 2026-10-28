@@ -6,23 +6,24 @@ extends SceneTree
 ## owns the lesson inside it: five rags prisoners spawn in the camp, four of them
 ## in cages with the soul already inside one; every caged body sits clamped in its
 ## own cage; shifting the soul through all four in a scrambled order advances the
-## sequencer exactly once; the fifth prisoner jogs in, goes straight at the two
-## watchers and puts both of them down himself - the player never touches them;
-## then the player takes his body and cuts the four latches one cage at a time
-## with `G`, and nothing opens without that walk. Bare hands at a padlock are told
-## so. The fourth latch is what puts the squad on its feet. Walking the body out of
-## the camp through the gap in the trees spawns the six armed watchers out of the
-## wood and turns the state to ESCAPING - the leaving is the ambush, not a kill
-## quota. The last section walks the body out of the camp, which is what replaced
-## the arch, and checks the road is a long run of wood away rather than the other
-## side of the hedge.
+## sequencer exactly once; the fifth prisoner jogs in with empty hands - the pair
+## took his shiv and threw it in the dirt - and stops there, because the fight is
+## the player's. Taking his body starts the first fight's lesson: walk to the shiv
+## (the card names W A S D), take it with `K`, swing once (the card names the three
+## cuts), and hold `RMB` on the second watcher's windup (the card names the guard).
+## The pair then fall for real, the tally books both, and the player cuts the four
+## latches one cage at a time with `G`. Bare hands at a padlock are told so. The
+## fourth latch is what puts the squad on its feet. Walking the body out of the
+## camp through the gap in the trees spawns the six armed watchers out of the wood
+## and turns the state to ESCAPING - the leaving is the ambush, not a kill quota.
 ##
 ## Every out-of-order event is fired at the machine first: a cage opened on the
-## first beat, a kill before the fight, loot before the squad is out. None of them
-## may advance a state or throw.
+## first beat, a kill before the fight, loot before the squad is out, a guard with
+## no card behind it. None of them may advance a state or throw.
 
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
@@ -31,8 +32,6 @@ const WARBAND_SAVE := "user://cage_escape_warband.json"
 const WORLD := "res://scenes/warband_world.tscn"
 ## How long the rescuer's walk may take before the test calls it a hang.
 const JOG_TIMEOUT := 16.0
-## How long the shiv takes to put the pair down, measured rather than assumed.
-const PAIR_TIMEOUT := 40.0
 
 var game
 var camp
@@ -106,11 +105,14 @@ func run() -> void:
 	await check_rescuer()
 	print("CAGE_PHASE rescuer %d ms" % (Time.get_ticks_msec() - _phase_start))
 	_phase_start = Time.get_ticks_msec()
-	await check_pair_kill()
-	print("CAGE_PHASE pair %d ms" % (Time.get_ticks_msec() - _phase_start))
+	await check_duel()
+	print("CAGE_PHASE duel %d ms" % (Time.get_ticks_msec() - _phase_start))
 	_phase_start = Time.get_ticks_msec()
 	await check_latches()
 	print("CAGE_PHASE latches %d ms" % (Time.get_ticks_msec() - _phase_start))
+	_phase_start = Time.get_ticks_msec()
+	await check_revive_lesson()
+	print("CAGE_PHASE revive %d ms" % (Time.get_ticks_msec() - _phase_start))
 	_phase_start = Time.get_ticks_msec()
 	await check_freed_walk()
 	await check_out_and_ambush()
@@ -193,8 +195,16 @@ func check_spawn() -> void:
 		if merc_id != camp.rescuer_id:
 			check(str(gear.get("main", "")).is_empty(),
 				"prisoner %s is unarmed" % warband.roster.name_of(merc_id))
-	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", "")) == "dagger_ironwood",
-		"the rescuer carries the ironwood shiv")
+	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", "")).is_empty(),
+		"the rescuer arrives with empty hands")
+	check(str(warband.roster.equipped_of(camp.rescuer_id).get("off", "")).is_empty(),
+		"and nothing in his off hand either")
+	var lesson_shiv = camp.get("_shiv_pickup")
+	check(lesson_shiv != null and is_instance_valid(lesson_shiv),
+		"his ironwood shiv lies on the dirt for the player to take")
+	check(lesson_shiv != null and str(lesson_shiv.item_id) == camp.LESSON_SHIV,
+		"and it is the shiv, not a stray club (%s)"
+		% ("" if lesson_shiv == null else str(lesson_shiv.item_id)))
 	for merc_id in camp.caged_ids:
 		check(game.controller.body_of(merc_id) != null, "caged mercenary %d has a body" % merc_id)
 	var local = game.controller.active_body(1)
@@ -218,7 +228,9 @@ func check_spawn() -> void:
 		check(str(watcher.get("mob_id")) == "hollow_warden",
 			"the watcher is the antlered warden body, not a ranger clone")
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
-	check(camp.pickups().size() == 3, "three cultist weapons lie on the walk")
+	check(camp.pickups().size() == 4,
+		"three cultist weapons and the rescuer's shiv lie on the walk (%d)"
+		% camp.pickups().size())
 	# Nothing is under the world: the clearing is ground, not a ledge.
 	for body in game.bodies:
 		check(body.global_position.y > -1.0, "body %s stands on the clearing" % str(body.name))
@@ -238,7 +250,8 @@ func check_spawn() -> void:
 
 ## The tutorial stays - cards, objectives, key lines - and says only what happens
 ## now. Every step names the real key for the real action: no card claims a latch
-## opens itself, and no card advertises `G` before `G` has anything to do.
+## opens itself, and no card hands the pair to somebody else, because the fight is
+## the player's own now.
 func check_cards() -> void:
 	var cards: Dictionary = camp.STEP_CARDS
 	check(cards.size() == 5, "the opening has one card per beat (%d)" % cards.size())
@@ -250,23 +263,39 @@ func check_cards() -> void:
 		check(not lower.contains("opens at once") and not lower.contains("all four latches at once")
 				and not lower.contains("he cuts all four") and not lower.contains("latches fall"),
 			"card %d never claims a latch opens itself (%s)" % [int(state), text])
-		check(not lower.contains("put down the watchers")
-				and not lower.contains("you put the pair down"),
-			"card %d never hands the player the pair" % int(state))
+		check(not lower.contains("puts them down himself")
+				and not lower.contains("puts them down for you"),
+			"card %d never promises the pair are somebody else's kill" % int(state))
 		# `G` is only named where it cuts a latch.
 		if int(state) < 2:
 			check(not lower.contains("g at a cage") and not lower.contains("g  -"),
 				"card %d never advertises an interact key it has no use for (%s)"
 				% [int(state), text])
-	var latch_card: Dictionary = cards[2]
-	var latch_text := "%s %s" % [latch_card["body"], latch_card["keys"]]
-	check(str(latch_card["keys"]).contains("G") and latch_text.to_lower().contains("cut"),
-		"the latch card names G and what it cuts (%s)" % latch_text)
-	check(latch_text.to_lower().contains("f5"), "and names the key that takes his body")
+	var body_card: Dictionary = cards[2]
+	var body_text := "%s %s" % [body_card["body"], body_card["keys"]]
+	check(str(body_card["keys"]).contains("F5"), "the body card names the key that takes him")
+	check(body_text.to_lower().contains("shiv"), "and sends the player to his shiv")
+	check(body_text.to_lower().contains("cut") and body_text.to_lower().contains("g"),
+		"and says the latches come after it with G (%s)" % body_text)
 	var out_card := str(cards[3]["body"]).to_lower()
 	check(out_card.contains("gap in the trees"), "the freed card sends the squad out between trees")
 	check(out_card.contains("wood"), "and says the way on is wood, not a road")
 	check(not out_card.contains("watchers wake"), "and no longer promises a fight in the camp")
+	# The first fight's own four cards: the feet, the steel, the cuts, the guard.
+	check(camp.DUEL_CARDS.size() == 4, "the first fight has four cards (%d)"
+		% camp.DUEL_CARDS.size())
+	var feet: Dictionary = camp.DUEL_CARDS[0]
+	check(str(feet["keys"]).contains("W A S D"), "the first card teaches walking")
+	check(str(feet["keys"]).contains("SHIFT"), "and running")
+	var steel: Dictionary = camp.DUEL_CARDS[1]
+	check(str(steel["keys"]).contains("K"), "the second card names the pickup key")
+	var cuts: Dictionary = camp.DUEL_CARDS[2]
+	for token in ["LMB", "WHEEL_UP", "WHEEL_DOWN"]:
+		check(str(cuts["keys"]).contains(token), "the cuts card names %s" % token)
+	var guard: Dictionary = camp.DUEL_CARDS[3]
+	check(str(guard["keys"]).contains("RMB"), "the guard card names RMB")
+	check(str(guard["body"]).to_lower().contains("hold"),
+		"and says the guard is held, not tapped")
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(not camp.sequencer.hint().contains("cut a latch"),
 		"and never a latch key while the latches are not the beat")
@@ -366,11 +395,11 @@ func check_rescuer() -> void:
 	var arrived_objective: String = camp.sequencer.objective()
 	check(arrived_objective.contains("F5") and arrived_objective.contains("[ ]"),
 		"the objective names both keys, got %s" % arrived_objective)
-	check(arrived_objective.contains("0/4"),
-		"and counts the latches cut out of four, got %s" % arrived_objective)
+	check(arrived_objective.to_lower().contains("shiv"),
+		"and sends the player to his shiv, got %s" % arrived_objective)
 	check(camp.sequencer.hint().contains("F5"), "the hint names F5")
-	check(camp.sequencer.hint().contains("cut a latch") and camp.sequencer.hint().contains("G"),
-		"and names the key that cuts one, got %s" % camp.sequencer.hint())
+	check(camp.sequencer.hint().contains("K"),
+		"and names the key that takes a weapon off the ground, got %s" % camp.sequencer.hint())
 	dismiss_card("the rescuer's card")
 
 	# Bare hands cut nothing: the soul is still in a caged body with no blade, and a
@@ -378,9 +407,6 @@ func check_rescuer() -> void:
 	var soul = game.controller.active_body(1)
 	var soul_id: int = game.controller.merc_for_peer(1)
 	var own_cage: int = camp.caged_ids.find(soul_id)
-	# The first latch is the first cage, whatever cage the soul happens to be in:
-	# the walk the lesson teaches is left to right along the line.
-	var at_cage: Vector3 = camp.CAGE_POSTS[0]
 	check(own_cage >= 0, "the soul is still in one of the cages")
 	await physics_frame
 	check(camp.latch_target(soul) == own_cage, "its own latch is in reach through the bars")
@@ -393,8 +419,10 @@ func check_rescuer() -> void:
 	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 		"and the lesson stays where it was")
 
-	# Corvin's hands carry the camp's only blade: taking him is what makes a latch
-	# possible at all - and even then it is one cage per press, not four at once.
+	# Taking Corvin is the beat that hands the player a body, and nothing more: his
+	# hands are empty, because the pair took his shiv off him and threw it in the
+	# dirt. The first fight's lesson starts on that frame and holds the game still
+	# for the walk it asks for.
 	var take: Dictionary = game.controller.direct(1, camp.rescuer_id)
 	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
 	check(game.controller.merc_for_peer(1) == camp.rescuer_id,
@@ -405,74 +433,172 @@ func check_rescuer() -> void:
 	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 		"the lesson still wants the walk (%s)" % camp.sequencer.state_name())
 	var cutter = game.controller.active_body(1)
-	check(camp.holds_blade(cutter), "the shiv is in the player's hands")
-	cutter.global_position = Vector3(at_cage.x, 0.2, at_cage.z + 2.6)
+	check(not camp.holds_blade(cutter), "his hands are empty until the shiv is taken")
+	check(camp.duel != null, "the first fight's lesson is built with the camp")
+	check(float(camp.SHIV_CARD_RADIUS) <= float(load("res://scripts/warband/world_scene.gd").LOOT_REACH),
+		"the pickup card opens no farther off than the key that takes it reaches")
+	check(camp.duel.step() == DuelScript.Step.MOVE,
+		"taking him starts the lesson at the feet (%s)" % camp.duel.step_name())
+	check(game.card != null and game.card.is_open() and game.card.step() == "step_3",
+		"the walking card is the chapter's fourth (%s)"
+		% ("" if game.card == null else game.card.step()))
+	check(str(camp.hint_line(cutter)).contains("W A S D"),
+		"and its key line teaches walking (%s)" % str(camp.hint_line(cutter)))
+	# Nothing hunts an empty-handed body: the pair wake on the shiv, not on a beat.
+	for watcher in camp.guards:
+		check(not bool(watcher.hunting()), "the pair do not hunt an unarmed body")
+	check(camp.watchers_down() == 0, "both watchers are still standing")
+	dismiss_card("the walking card")
+
+# --- the first fight -------------------------------------------------------
+
+## Walk onto the shiv, take it, and fight the pair with the keys the cards name.
+## Every card here is raised by the fight itself - a step onto the shiv, a swing,
+## the second watcher's windup - and every one of them holds the game still.
+func check_duel() -> void:
+	var cutter = game.controller.active_body(1)
+	check(cutter != null and game.controller.merc_for_peer(1) == camp.rescuer_id,
+		"the soul is still in Corvin's body for the fight")
+	# 1. The walk. The card that asks for `K` opens on the approach, never on a
+	#    timer, and the pair stay asleep until the player is armed.
+	cutter.global_position = camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
 	await physics_frame
-	# The press cuts the cage the body is actually standing at, so the assertion
-	# follows that cage instead of assuming the soul's own one is nearest.
-	var target: int = camp.latch_target(cutter)
-	check(target >= 0, "there is a closed latch in reach")
-	game._try_interact()
-	check(camp.cages_open_count() == 1, "G at a cage cuts exactly that one latch (%d)"
-		% camp.cages_open_count())
-	check(camp.sequencer.opened_cages() == [0], "and it is the first cage that opened (%s)"
-		% str(camp.sequencer.opened_cages()))
-	check(camp.sequencer.cages_opened() == 1, "the sequencer booked the one latch")
-	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"and one latch does not loose the squad (%s)" % camp.sequencer.state_name())
-	check(not camp.is_cage_clamped(int(camp.caged_ids[target])),
-		"the prisoner in the cut cage is out of the clamp")
-	for index in camp.caged_ids.size():
-		if index == target:
+	await physics_frame
+	check(camp.duel.step() == DuelScript.Step.FETCH,
+		"standing over the shiv asks for the pickup (%s)" % camp.duel.step_name())
+	check(game.card != null and game.card.is_open() and game.card.step() == "step_4",
+		"the pickup card is the chapter's fifth (%s)"
+		% ("" if game.card == null else game.card.step()))
+	check(str(camp.hint_line(cutter)).contains("K"),
+		"and its key line names K (%s)" % str(camp.hint_line(cutter)))
+	for watcher in camp.guards:
+		check(not bool(watcher.hunting()), "nothing hunts the body on its way to the shiv")
+	dismiss_card("the pickup card")
+	# 2. Take it with the key the card named.
+	game._try_loot()
+	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", ""))
+			== camp.LESSON_SHIV, "K puts the ironwood shiv in his main hand")
+	check(camp.holds_blade(cutter), "and the body is holding a blade")
+	check(camp.duel.step() == DuelScript.Step.FIGHT,
+		"taking the shiv starts the fight (%s)" % camp.duel.step_name())
+	# 3. The pair wake on that frame, and never before it.
+	var woke := await await_condition(
+		func() -> bool: return _hunting_watchers() > 0, 8.0, "the pair waking")
+	check(woke, "the pair turn on the body holding the shiv (%d hunting)"
+		% _hunting_watchers())
+	# 4. The first cut is where the three cuts get named.
+	await click_until_swing(cutter)
+	check(camp.duel.swing_card(), "the player's first cut raises the swings card")
+	check(game.card != null and game.card.is_open(),
+		"and the game is held still for it")
+	if game.card != null and game.card.is_open():
+		check(game.card.step() == "step_5", "the cuts card is the chapter's sixth (%s)"
+			% game.card.step())
+	dismiss_card("the swings card")
+	# 5. The second watcher's windup is where the guard is taught: stand in front
+	#    of it and let it raise its club.
+	var second = camp.guards[1] if camp.guards.size() > 1 else null
+	check(second != null and is_instance_valid(second), "the pair has a second body")
+	if second != null and is_instance_valid(second):
+		cutter.global_position = (second as Node3D).global_position + Vector3(0.0, 0.1, 1.7)
+	var wind := await await_condition(
+		func() -> bool: return bool(camp.duel.guard_card()), 12.0, "the guard card")
+	check(wind, "the second watcher's swing teaches the guard")
+	if game.card != null and game.card.is_open():
+		check(game.card.step() == "step_6", "the guard card is the chapter's seventh (%s)"
+			% game.card.step())
+		dismiss_card("the guard card")
+	# 6. Hold the guard and let the club come down on it. The press is repeated
+	#    because a body still landing cannot raise its blade.
+	var guarded := false
+	var guard_frames := 0
+	while guard_frames < 300:
+		if not bool(cutter.combat.blocking):
+			var press := InputEventMouseButton.new()
+			press.button_index = MOUSE_BUTTON_RIGHT
+			press.pressed = true
+			game.controller._mouse_press(press)
+		if bool(camp.duel.guarded()):
+			guarded = true
+			break
+		await physics_frame
+		guard_frames += 1
+	check(guarded, "a blow that lands on a raised blade finishes the lesson (%s)"
+		% camp.duel.step_name())
+	check(camp.duel.step() == DuelScript.Step.DONE,
+		"and the lesson hands the keys back (%s)" % camp.duel.step_name())
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_RIGHT
+	release.pressed = false
+	game.controller._mouse_release(release)
+	# 7. The pair fall to the player's own blade - the whole point of the lesson.
+	#    Two stabs of a 21-health watcher, thrown from the real input path, with the
+	#    body walked back into reach between cuts because the pair keep closing.
+	var kills := 0
+	for watcher in camp.guards.duplicate():
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
-		check(camp.is_cage_clamped(int(camp.caged_ids[index])),
-			"cage %d still holds its own" % index)
-	# The same press at the same cage opens nothing more.
-	game._try_interact()
-	check(camp.cages_open_count() == 1, "a second press at a cut cage opens nothing more")
-	# The soul is the player's to place: back into a cage, and the opening goes on
-	# with Corvin free of the player's hands and the module driving him again.
-	game.controller.direct(1, int(camp.caged_ids[1]))
+		for attempt in 8:
+			if not bool(watcher.get("alive")):
+				break
+			(cutter as Node3D).global_position = (watcher as Node3D).global_position \
+				+ Vector3(0.0, 0.1, 1.0)
+			await physics_frame
+			await click_until_swing(cutter)
+			await create_timer(0.5).timeout
+		check(not bool(watcher.get("alive")),
+			"the pair fall to the player's blade (%s at %.0f health)"
+			% [str(watcher.name), float(watcher.get("health"))])
+		kills += 1
 	await physics_frame
-
-# --- the pair, and the shiv -----------------------------------------------
-
-## Corvin goes at the pair and puts both of them down. The player's soul waits in
-## a cage through all of it and the tallies have to read true.
-func check_pair_kill() -> void:
-	var soul = game.controller.active_body(1)
-	var soul_id: int = game.controller.merc_for_peer(1)
-	check(camp.caged_ids.has(soul_id), "the player's soul waited in a cage")
-	var soul_at: Vector3 = soul.global_position
-	var started := Time.get_ticks_msec()
-	var down := await await_condition(
-		func() -> bool: return camp.watchers_down() >= 2, PAIR_TIMEOUT, "the pair falling")
-	var seconds := float(Time.get_ticks_msec() - started) / 1000.0
-	check(down, "Corvin puts both watchers down himself (%d of 2 in %.1f s)"
-		% [camp.watchers_down(), seconds])
+	check(kills == 2, "both watchers were fought by the player (%d)" % kills)
+	check(bool(cutter.get("alive")) and not bool(cutter.get("downed")),
+		"and the player's body is still standing (%.0f health)" % float(cutter.get("health")))
 	check(camp.watchers_down() == 2, "exactly the pair falls (%d)" % camp.watchers_down())
-	check(camp.ally_engaged(), "he swung: the squad's own module landed the blows")
 	check(camp.sequencer.guards_down() == 2,
-		"his two kills count on the tally (%d)" % camp.sequencer.guards_down())
-	check(game.controller.merc_for_peer(1) == soul_id
-			and flat_range(soul.global_position, soul_at) < 3.0,
-		"the player's body never left its cage")
-	check(camp.cages_open_count() == 1,
-		"the pair falling cuts no further latch (%d)" % camp.cages_open_count())
-	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"the lesson still waits for the walk round the cages (%s)" % camp.sequencer.state_name())
-	check(camp.sequencer.rescuer_taken(), "and the soul's earlier step still counts")
-	print("CAGE_PAIR seconds=%.1f watchers_down=%d" % [seconds, camp.watchers_down()])
+		"both kills count on the tally (%d)" % camp.sequencer.guards_down())
+	check(camp.duel.step() == DuelScript.Step.DONE,
+		"the lesson is over when the pair are down (%s)" % camp.duel.step_name())
+	check(str(camp.prompt_line(cutter)).contains("latch"),
+		"and the HUD asks for the latches again (%s)" % str(camp.prompt_line(cutter)))
+	check(camp.sequencer.rescuer_taken(), "the soul's earlier step still counts")
+
+## How many of the camp's watchers are actually hunting.
+func _hunting_watchers() -> int:
+	var count := 0
+	for watcher in camp.guards:
+		if is_instance_valid(watcher) and bool(watcher.hunting()):
+			count += 1
+	return count
+
+## One left click through the real input path, retried until the body actually
+## swings: a click while the body is still landing, or mid-cut, is refused by the
+## combat layer and is not a failure of the lesson.
+func click_until_swing(cutter) -> void:
+	var budget := 240
+	while budget > 0:
+		if bool(cutter.combat.grounded) and bool(cutter.rig.can_begin_melee("right")):
+			var press := InputEventMouseButton.new()
+			press.button_index = MOUSE_BUTTON_LEFT
+			press.pressed = true
+			game.controller._mouse_press(press)
+			if bool(cutter.rig.is_melee()):
+				return
+		await physics_frame
+		budget -= 1
+	check(false, "the player's click started a cut")
 
 # --- the latches -----------------------------------------------------------
 
 ## The walk the opening builds to: one cage, one press, one latch, one door - and
 ## the fourth cut is what puts the squad on its feet.
 func check_latches() -> void:
-	var take: Dictionary = game.controller.direct(1, camp.rescuer_id)
-	check(bool(take.get("ok", false)), "the rescuer's body can be entered again")
-	check(camp.cages_open_count() == 1,
-		"taking him again cuts no further latch (%d)" % camp.cages_open_count())
+	check(game.controller.merc_for_peer(1) == camp.rescuer_id,
+		"the soul is in Corvin's body for the latches")
+	var cutter = game.controller.active_body(1)
+	check(camp.holds_blade(cutter), "and the shiv is in his hands")
+	check(camp.cages_open_count() == 0,
+		"the pair falling cut no latch by itself (%d)" % camp.cages_open_count())
 	var doors: Array = camp.clearing.get("doors", [])
 	check(doors.size() == 4, "the camp has four cage doors (%d)" % doors.size())
 	# The ground in front of every cage has to be walkable: a latch is worked from
@@ -482,8 +608,7 @@ func check_latches() -> void:
 		var blocked := _geometry_at(Vector3(approach.x, 0.9, approach.z + 2.6), 0.55)
 		check(blocked.is_empty(), "cage %d's approach is clear ground (%s)"
 			% [index + 1, str(blocked)])
-	var cutter = game.controller.active_body(1)
-	for index in range(1, camp.CAGE_POSTS.size()):
+	for index in camp.CAGE_POSTS.size():
 		var post: Vector3 = camp.CAGE_POSTS[index]
 		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
 		await physics_frame
@@ -525,6 +650,42 @@ func check_latches() -> void:
 		"the camp's tally counts the pair and the ambush (%d)" % SequencerScript.GUARD_COUNT)
 	check(camp.sequencer.objective().contains("2/%d" % SequencerScript.GUARD_COUNT),
 		"the tally counts Corvin's pair against the camp (%s)" % camp.sequencer.objective())
+
+# --- the fallen ------------------------------------------------------------
+
+## A squadmate going down at the player's feet raises the one unnumbered card:
+## `G` held for five seconds brings a body back, and that has to be taught the
+## first time it can be used, wherever it happens. The body is stripped first so
+## the drop it leaves behind is not mistaken for the lesson's own steel.
+func check_revive_lesson() -> void:
+	var ally_id: int = int(camp.caged_ids[2])
+	warband.roster.unequip(ally_id, "main")
+	warband.roster.unequip(ally_id, "off")
+	game.controller.refresh_gear(ally_id)
+	var ally = game.controller.body_of(ally_id)
+	var soul = game.controller.active_body(1)
+	check(ally != null and soul != null, "there is a body to fall and a body to fall next to")
+	ally.global_position = soul.global_position + Vector3(1.4, 0.0, 0.0)
+	await physics_frame
+	var floor_before: int = camp.pickups().size()
+	ally.enter_downed(0)
+	await physics_frame
+	check(game.card != null and game.card.is_open(),
+		"a squadmate falling at the player's feet opens the revive lesson")
+	check(game.card.step() == "lesson_revive",
+		"it is the one unnumbered card (%s)" % ("" if game.card == null else game.card.step()))
+	check(paused, "and it holds the game still, bleed clock included")
+	check(camp.pickups().size() == floor_before,
+		"an empty-handed body leaves nothing on the dirt (%d for %d)"
+		% [camp.pickups().size(), floor_before])
+	dismiss_card("the revive card")
+	await physics_frame
+	var prompt := str(game.get("_prompt_text"))
+	check(prompt.to_upper().contains("HOLD G"),
+		"the HUD then asks for the hold over the body (%s)" % prompt)
+	check(prompt.contains(warband.roster.name_of(ally_id).to_upper()),
+		"and names the body that needs it (%s)" % prompt)
+
 
 # --- the freed squad -------------------------------------------------------
 
@@ -592,14 +753,15 @@ func await_condition(predicate: Callable, timeout: float, label: String) -> bool
 
 func check_out_and_ambush() -> void:
 	# Nothing was looted for the player: the three cultist drops are still there,
-	# plus one blade for each of the pair Corvin put down - a fallen watcher's
-	# steel leaves its hand and lands on the dirt beside it.
+	# plus the shiv the lesson put on the dirt, plus one blade for each of the pair
+	# the player put down - a fallen watcher's steel leaves its hand and lands on
+	# the dirt beside it.
 	var standing_pair := 0
 	for watcher in camp.guards:
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			standing_pair += 1
-	check(camp.pickups().size() == 3 + (2 - standing_pair),
-		"three drops and one blade per fallen watcher lie on the walk (%d)"
+	check(camp.pickups().size() == 4 + (2 - standing_pair),
+		"three drops, the shiv and one blade per fallen watcher lie on the walk (%d)"
 		% camp.pickups().size())
 	var armed := await await_condition(
 		func() -> bool: return _prisoner_armed() >= 1, 14.0, "the squad arming")

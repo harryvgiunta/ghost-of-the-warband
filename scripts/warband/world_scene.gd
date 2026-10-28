@@ -82,6 +82,20 @@ const TRAIL_OBJECTIVE := "REACH THE TOWN"
 const TRAIL_HINT := "The squad follows you   ·   TAB - warband   ·   P - gear"
 ## The key line under a prompt that names the revive hold.
 const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
+## The band a fallen squadmate is taught in: close enough that the player is in
+## the fight that put them down, wide enough that the card does not wait for a
+## body to fall at their feet.
+const REVIVE_LESSON_RADIUS := 12.0
+const REVIVE_LESSON_STEP := "lesson_revive"
+## The one card that is not a beat of a chapter: a squadmate going down can
+## happen anywhere, in the camp or a mile down the trail, so it carries no numeral.
+const REVIVE_LESSON := {
+	"kicker": "THE FALLEN  /  THE WARBAND",
+	"title": "A squadmate is down - bring them back",
+	"body": "A body on its chest is not dead yet. It bleeds for thirty seconds, and for every one of them it can be brought back: stand over your squadmate and HOLD G - not a tap. Five full seconds, and a blow that lands on you breaks the channel.",
+	"keys": "HOLD G  -  five seconds on a fallen body",
+	"footnote": "Let go and the work is lost. A body that bleeds out keeps its date with the dirt: the roster will not stand it back up.",
+}
 
 var warband
 var flow
@@ -569,14 +583,15 @@ func nearest_standing_body(point: Vector3):
 
 ## One weapon on the ground, in the one vacuum. The camp's watchers and the
 ## trail's cultists both drop through here.
-func spawn_pickup(item_id: String, at: Vector3) -> void:
+func spawn_pickup(item_id: String, at: Vector3):
 	if loot == null or item_id.is_empty():
-		return
+		return null
 	var pickup = loot.spawn(item_id, at)
 	if pickup == null:
-		return
+		return null
 	pickup.taken.connect(_on_pickup_taken)
 	pickups.append(pickup)
+	return pickup
 
 
 ## A fallen enemy lets go of what it was holding. The piece comes out of its
@@ -611,15 +626,41 @@ func drop_merc_gear(actor, merc_id: int) -> void:
 
 func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	drop_merc_gear(actor, merc_id)
+	_push_revive_card(actor)
+
+
+## The first squadmate to go down near the player teaches the channel. A body on
+## its chest is not dead: it bleeds for thirty seconds, and `G` held for five
+## brings it back. The card holds the game still - the bleed clock with it - so
+## the whole rule can be read while the body is still worth standing over.
+func _push_revive_card(actor) -> void:
+	if card == null or card.has_shown(REVIVE_LESSON_STEP):
+		return
+	if controller == null or revive == null:
+		return
+	if actor == null or not is_instance_valid(actor):
+		return
+	if not bool(actor.get("downed")) or not bool(actor.get("alive")):
+		return
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul) or soul == actor:
+		return
+	if not bool(soul.get("alive")) or bool(soul.get("downed")):
+		return
+	if soul.global_position.distance_to(actor.global_position) > REVIVE_LESSON_RADIUS:
+		return
+	card.show_step(REVIVE_LESSON_STEP, str(REVIVE_LESSON["kicker"]),
+		str(REVIVE_LESSON["title"]), str(REVIVE_LESSON["body"]),
+		str(REVIVE_LESSON["keys"]), str(REVIVE_LESSON["footnote"]))
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
 	drop_merc_gear(actor, merc_id)
 
 
-func _on_pickup_taken(_pickup) -> void:
+func _on_pickup_taken(pickup) -> void:
 	if camp != null:
-		camp.note_pickup()
+		camp.note_pickup(pickup)
 	if screen != null:
 		screen.refresh()
 

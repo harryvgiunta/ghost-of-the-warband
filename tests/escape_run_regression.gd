@@ -22,6 +22,7 @@ extends SceneTree
 ##      gathers nothing, and makes no transition.
 
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
@@ -159,6 +160,15 @@ func check_the_world() -> void:
 	_dismiss_card()
 	check(not game.camp.cages_open(), "taking Corvin cuts nothing by itself")
 	var cutter = game.controller.active_body(1)
+	check(not game.camp.holds_blade(cutter), "his hands are empty until the shiv is taken")
+	# The first weapon in the game is on the dirt: the body walks onto it and takes
+	# it with `K`, and only then is there a blade to cut a latch with.
+	cutter.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	await physics_frame
+	await physics_frame
+	_dismiss_card()
+	game._try_loot()
+	check(game.camp.holds_blade(cutter), "K puts the ironwood shiv in his hands")
 	for index in game.camp.CAGE_POSTS.size():
 		var post: Vector3 = game.camp.CAGE_POSTS[index]
 		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
@@ -303,8 +313,9 @@ func check_pursuers() -> void:
 			visible += 1
 		if bool(watcher.hunting()) and is_instance_valid(watcher.player):
 			hunting += 1
-		check(is_equal_approx(float(watcher.max_health), 101.0),
-			"a road cultist carries the warden's hardened pool, got %s" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), float(WatcherScript.HARDENED_HEALTH)),
+			"a road cultist carries the hardened pool (%s of %s)"
+			% [str(watcher.max_health), str(WatcherScript.HARDENED_HEALTH)])
 		check(watcher.global_position.y > -1.0, "a cultist stands on the lane")
 		check(watcher.safe_center.is_equal_approx(game.trail.town_gate()),
 			"the town's gate is the safe ring, so nobody is hunted inside it")

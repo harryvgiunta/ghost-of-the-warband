@@ -13,17 +13,23 @@ difference - and the warband is the thing that survives a battle.
   fresh warband) or resumes a saved one in the town. The mode has its own save
   (`user://warband_state.json`); the ranger's kit is untouched.
 - **The four cages:** every beat opens a full-size tutorial card that **pauses
-  the game** and names the keys in large type; it closes on its **CONTINUE**
+  the game** and names the keys as carved key tiles; it closes on its **CONTINUE**
   button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
-  prisoner in sacrificial rags runs in with a shiv - and **you take his body
-  yourself** (F5 or `[ ]`); nothing happens until you are in it - taking him only
-  gives you hands. Walk to each cage and press **G** to cut its own latch: four
-  latches, four presses, and bare hands are refused. The moment a cage opens that
-  prisoner is **taken over by squad AI**: they pick the makeshift steel off the
-  ground themselves and go at the two camp watchers, who are rigged, armed,
-  varied bodies now (three ironwood stabs end the pair). There is no gate: the
-  camp is a ragged pocket **deep in the wood**, and the way out is a long walk
-  through the trees before the trail's first torch.
+  prisoner in sacrificial rags runs in **empty-handed** - the pair took his shiv
+  off him and threw it in the dirt - and **you take his body yourself** (F5 or
+  `[ ]`). Nothing fights for you: the first fight is taught while it happens, one
+  card per thing you need - the walk (`W A S D`, `SHIFT`, `SPACE`, mouse), the
+  ironwood shiv on the ground (**K**), the three cuts (**LMB** diagonal,
+  **WHEEL UP** stab, **WHEEL DOWN** overhead) on your first swing, and the guard
+  (**hold RMB**) on the second watcher's raised club. The pair sleep until you are
+  armed and they are the softest bodies in the game: a long telegraph, half their
+  blow, no guard. Then walk to each cage and press **G** to cut its own latch:
+  four latches, four presses, and bare hands are refused. A squadmate who goes
+  down raises one more card, wherever it happens - **hold G** for five seconds and
+  they stand back up. The moment a cage opens, that prisoner is **taken over by
+  squad AI** and picks the makeshift steel off the ground itself. There is no
+  gate: the camp is a ragged pocket **deep in the wood**, and the way out is a
+  long walk through the trees before the trail's first torch.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons

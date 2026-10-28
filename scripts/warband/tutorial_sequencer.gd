@@ -5,10 +5,12 @@ extends Node
 ## Four prisoners hang in one corner of the world, a fifth is loose, and the way
 ## out is a walk. The order is the lesson:
 ##   1. shift the soul through all four caged bodies (that is the whole premise);
-##   2. the fifth prisoner jogs in with a shiv and kills the two watchers himself:
-##      taking his body is the player's beat, and theirs is nothing;
-##   3. the soul steps into him - the only hands in the camp carrying a blade -
-##      and the player walks cage to cage cutting one latch at a time;
+##   2. the fifth prisoner jogs in with empty hands - the pair took his shiv off
+##      him at the mouth - and stops at the cage line: taking his body is the
+##      player's beat, and nothing fights for them;
+##   3. the soul steps into him, and the first fight's lesson (`duel_lesson.gd`)
+##      takes over: walk, pick the shiv out of the dirt, cut, and guard. Then the
+##      player walks cage to cage cutting one latch at a time;
 ##   4. the fourth latch is the squad out and arming itself off the ground;
 ##   5. the escape: the soul walking out through the gap in the trees is what
 ##      turns the wood loose on the squad. There is no door to press and no kill
@@ -94,8 +96,7 @@ func objective() -> String:
 			return "All four seen. The fifth prisoner is coming."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "Corvin is at the cages. Take his body - F5 or [ ] - then cut the latches   %d/%d" \
-					% [_opened.size(), PRISONER_COUNT]
+				return "Corvin is at the cage line with empty hands. Take his body - F5 or [ ] - and get his shiv back."
 			return "Cut a latch at each cage   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
 			return "Out and armed. Walk out through the mouth   ·   watchers down %d/%d" \
@@ -113,10 +114,10 @@ func hint() -> String:
 		State.CAGED:
 			return "[ ] or F1..F4 - enter another prisoner   ·   TAB - warband   ·   P - gear"
 		State.ALL_SEEN:
-			return "Stay in a body - Corvin is walking in with the shiv."
+			return "Stay in a body - Corvin is walking in with empty hands."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "F5 or [ ] - take Corvin's body   ·   G  -  cut a latch"
+				return "F5 or [ ] - take Corvin's body   ·   K  -  take a weapon off the ground"
 			return "G  -  cut a latch  ·  %d of %d cages" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
 			return "W A S D - walk out through the mouth   ·   the squad arms itself"

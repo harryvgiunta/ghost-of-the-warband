@@ -295,7 +295,7 @@ func _physics_process(delta: float) -> void:
 				_circle(delta, distance, direction)
 		"WINDUP":
 			_face_intent = direction
-			if _state_time >= float(profile.windup):
+			if _state_time >= _windup_seconds():
 				_strike_direction = direction
 				_face_intent = direction
 				_struck = false
@@ -437,6 +437,14 @@ func _enter(next_state: String, reset_time := true) -> void:
 	state = next_state
 	if reset_time:
 		_state_time = 0.0
+
+
+## Seconds from the swing being chosen to the blade coming down. The profile owns
+## the number; a body that is a lesson rather than a fight stretches it (the cage
+## watcher's `windup_scale`), because the telegraph is the only thing a new player
+## can answer.
+func _windup_seconds() -> float:
+	return float(profile.get("windup", 0.45))
 
 
 ## Calm: the mob keeps its patch. It walks to the territory's current goal at

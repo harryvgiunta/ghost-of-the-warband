@@ -20,16 +20,20 @@ extends Node3D
 ##     is otherwise only visible as a quarter of the world.
 ##
 ## What the camp owns: the four cages and their latches, the clamp that keeps a
-## caged soul in its cage, the rescuer's jog and the two watchers he puts down
-## himself, the six armed watchers that answer the squad leaving, the sequencer's
-## beats and the cards that explain them. What it never owns in the world: the
-## bodies, the camera, the HUD prompt, the revive channel or the loot vacuum.
+## caged soul in its cage, the rescuer's jog, the shiv lying in the dirt and the
+## two watchers the player puts down with it, the six armed watchers that answer
+## the squad leaving, the sequencer's beats, the first fight's own lesson
+## (`duel_lesson.gd`) and the cards that explain them. What it never owns in the
+## world: the bodies, the camera, the HUD prompt, the revive channel or the loot
+## vacuum.
 ##
-## The opening is four beats, and the third one is the player's hands: see the
-## four bodies, watch Corvin take the pair, step into him for the only blade in
-## the camp, then walk cage to cage cutting one latch each with `G`. Nothing opens
-## on its own, and the fourth latch is what puts the squad on its feet. Past the
-## mouth is trees for `CAMP_TO_ROAD_METRES` before the trail's first torch.
+## The opening is five beats, and the third one is the player's hands: see the
+## four bodies, watch Corvin come in empty-handed, step into him, take his shiv
+## out of the dirt, put the pair down with it - walking, the three cuts and the
+## guard are taught as the fight needs them, with the game held still - then walk
+## cage to cage cutting one latch each with `G`. Nothing opens on its own, and the
+## fourth latch is what puts the squad on its feet. Past the mouth is trees for
+## `CAMP_TO_ROAD_METRES` before the trail's first torch.
 ##
 ## The geometry is `camp_clearing.gd` (wood, ragged stakes, cages, huts, fire) and
 ## the dressing is `camp_dressing.gd` (padlocks, banners, gibbets, braziers,
@@ -51,6 +55,17 @@ const CAGE_POSTS := [
 ]
 ## Where the loose prisoner waits: between the cages and the watchers.
 const RESCUER_POST := Vector3(1.4, 0.2, -23.0)
+## Corvin's shiv, on the dirt. The pair took it off him at the mouth and threw it
+## up the pocket, so the first weapon the player ever holds is a thing on the
+## ground to be picked up with `K` - a short walk from his post, clear of both
+## watchers, and on the spine the lesson is walked on.
+const LESSON_SHIV := "dagger_ironwood"
+const SHIV_POST := Vector3(1.4, 0.15, -16.0)
+## How close the body has to come to the shiv before the card that asks for `K`
+## opens. It matches the world's own loot reach (`world_scene.LOOT_REACH`), so the
+## card is up on exactly the frames `K` works: a new player reads it, presses `K`,
+## and never meets a "too far away" line in between.
+const SHIV_CARD_RADIUS := 2.6
 ## The way out: not a gate and not a road - the gap the wood leaves between its
 ## trees at the camp's front line. Past it is nothing but wood for
 ## `CAMP_TO_ROAD_METRES`.
@@ -92,18 +107,30 @@ const CAMP_TORCHES := [
 ]
 
 ## The two gate watchers: wardens out of the same kit as the rest of the wood, but
-## the camp's own mooks. They stand between the cages and the mouth, turn on Corvin
-## the moment he turns on them, and are thinned here so his shiv finishes the pair
-## without the player's help.
+## the camp's own mooks and the player's first fight. They stand between the cages
+## and the mouth, sleep until a body is holding the shiv, and then come at that
+## body.
 ##
-## A watcher now fights like the body it is - its variant's blade, its variant's
-## guard - so the pair's pool and blow are the camp's numbers, not the wild's:
-## `PAIR_LESSON_HEALTH` is two stabs of the ironwood shiv (10 damage each), and
-## `PAIR_BLOW_SCALE` halves what the pair lands, because two of them swinging at
-## once would otherwise put Corvin down before the fourth stab. The six that come
-## out of the wood afterwards keep the hardened pool and their full blows.
+## They are the softest thing in the game on purpose, because everything about the
+## first fight is being taught while it happens:
+##
+##   * `PAIR_LESSON_HEALTH` 21 is two stabs of the ironwood shiv (10 a hit);
+##   * `PAIR_BLOW_SCALE` 0.5 halves what they land, so a body can be hit twice and
+##     keep reading the cards;
+##   * `PAIR_WINDUP_SCALE` 2.4 stretches the 0.55 s windup to 1.3 s: that long
+##     raised club is the window the guard card is written for, and a windup the
+##     wood actually uses cannot be answered by somebody reading a card;
+##   * `PAIR_SWING_GAP_SCALE` 2.2 waits 3.3 s between swings;
+##   * `PAIR_GUARD_SCALE` 0 never braces, so the player's cuts always land and a
+##     new player is never looking at a watcher with its guard up.
+##
+## The four that come out of the wood afterwards keep the hardened pool, their
+## own guard and their full blows.
 const PAIR_LESSON_HEALTH := 21.0
 const PAIR_BLOW_SCALE := 0.5
+const PAIR_WINDUP_SCALE := 2.4
+const PAIR_SWING_GAP_SCALE := 2.2
+const PAIR_GUARD_SCALE := 0.0
 const GATE_WATCHERS := [
 	{"post": Vector3(-4.2, 0.1, -20.5)},
 	{"post": Vector3(4.2, 0.1, -20.5)},
@@ -168,35 +195,74 @@ const STEP_CARDS := {
 	1: {  # ALL_SEEN
 		"kicker": "STEP 2  /  THE SHIV",
 		"title": "All four seen - here he comes",
-		"body": "The fifth prisoner is loose, and he is running for the cages with a knife. He is not here to talk: he goes straight at the two watchers, and he puts them down himself.",
-		"keys": "Watch him work",
-		"footnote": "Close this card and let him arrive - you do not have to help.",
+		"body": "The fifth prisoner is loose, and he is running for the cages with nothing in his hands: the pair took his shiv off him at the mouth and threw it in the dirt. He stops at the cage line and needs a body - and the only soul free to walk is yours.",
+		"keys": "Watch him come in",
+		"footnote": "Close this card and let him arrive. He does not fight them alone: that is your job now.",
 	},
 	2: {  # RESCUER_ARRIVED
-		"kicker": "STEP 3  /  THE LATCHES",
-		"title": "Four cages, four latches, one shiv",
-		"body": "No cage opens by itself: somebody has to stand at each one and cut its latch. Only Corvin kept a blade. Take his body, then walk the cage line and cut them one at a time.",
-		"keys": "F5  or  [ ]  -  take Corvin        ·        G at a cage  -  cut its latch",
+		"kicker": "STEP 3  /  THE BODY",
+		"title": "Take his body, take back his shiv",
+		"body": "Corvin is at the cage line with empty hands. Step into him with F5: you walk his legs, you swing his arms. His ironwood shiv is lying in the dirt up the pocket - take it, put the two watchers down, and then cut one latch at each cage with G.",
+		"keys": "F5  or  [ ]  -  take Corvin",
 		"footnote": "One latch per cage, four in all, and bare hands on a padlock cut nothing.",
 	},
 	3: {  # FREED
-		"kicker": "STEP 4  /  OUT",
+		"kicker": "STEP 8  /  OUT",
 		"title": "Four latches cut, five bodies on their feet",
 		"body": "The squad arms itself from what lies in the camp - you do not have to loot anything. The way on is the gap in the trees at the far end of the pocket: no road, just wood, and the trail's first torch is a long run off.",
 		"keys": "W A S D  -  walk out through the gap in the trees",
 		"footnote": "Whatever is standing in those trees comes when you leave, not before.",
 	},
 	4: {  # ESCAPING
-		"kicker": "STEP 5  /  THE TRAIL",
+		"kicker": "STEP 9  /  THE TRAIL",
 		"title": "The trees answer: run for the road",
-		"body": "Six armed watchers step out of the wood behind you, and the trail is held the whole way down. The squad comes with you. There is no door to open and nowhere to be carried - you run it.",
+		"body": "Four armed watchers step out of the wood behind you, and the trail is held the whole way down. The squad comes with you. There is no door to open and nowhere to be carried - you run it.",
 		"keys": "W A S D  -  run the wood        ·        LMB / RMB  -  fight",
 		"footnote": "The road is a long run through the trees; the town's counters, altar and expedition gate are at its far end, on foot.",
 	},
 }
 
-## Corvin's own constitution. He is not a wretch behind bars: he kept his shiv,
+## The first fight, one card per thing a new player has to be told, in
+## `DuelLesson.Card` order: the feet, the steel, the three cuts, the guard. Every
+## one of them is raised by a fact in the fight (a possession, a step onto the
+## shiv, a swing, the second watcher's windup) and never by a timer, and each one
+## holds the game still while it is read. Their numerals continue the opening's
+## count: the camp's own cards are I-III, these are IV-VII, and OUT and the TRAIL
+## close the chapter at VIII and IX.
+const DUEL_CARDS := [
+	{  # Card.MOVE - the soul is in Corvin and nothing is hunting him yet.
+		"kicker": "STEP 4  /  THE FEET",
+		"title": "You have his body - now walk it",
+		"body": "W A S D walks, SHIFT runs, SPACE jumps, and the mouse turns your head. Corvin's shiv is lying in the dirt up the pocket, a few paces from where he stopped. Nothing is awake to stop you walking to it.",
+		"keys": "W A S D  -  walk        ·        SHIFT  -  run        ·        SPACE  -  jump        ·        MOUSE  -  look",
+		"footnote": "Walk onto the shiv. The game holds still while a card is open, so read this as slowly as you like.",
+	},
+	{  # Card.FETCH - standing over the shiv.
+		"kicker": "STEP 5  /  THE STEEL",
+		"title": "Take the shiv off the dirt",
+		"body": "A piece on the ground is a body's to take. Stand over the ironwood shiv and press K: it goes straight into your hands, and with it the two watchers and all four cage latches.",
+		"keys": "K  -  take the ironwood shiv",
+		"footnote": "The pair wake the moment you are armed. They are slow and they hit half as hard as the wood does - and their guard never comes up.",
+	},
+	{  # Card.SWING - the player's first cut.
+		"kicker": "STEP 6  /  THE CUT",
+		"title": "Three ways to swing a blade",
+		"body": "LMB is the heavy diagonal cut, and it alternates sides on its own. MOUSE WHEEL UP is a straight stab - a shiv stabs far faster than it chops - and MOUSE WHEEL DOWN is an overhead chop. Every cut spends stamina; standing off a moment gives it back.",
+		"keys": "LMB  -  cut        ·        WHEEL_UP  -  stab        ·        WHEEL_DOWN  -  overhead",
+		"footnote": "Three stabs put one watcher down. Keep the pair in front of you: a blade behind you meets nothing at all.",
+	},
+	{  # Card.GUARD - the second watcher starts its swing.
+		"kicker": "STEP 7  /  THE GUARD",
+		"title": "The second one is swinging at you",
+		"body": "Hold RMB to raise your guard. A blow that lands on it is mostly smothered - a shiv only softens one, so a guard is a moment, not a wall. You cannot cut and guard at once: let go to swing again.",
+		"keys": "HOLD RMB  -  guard        ·        let go  -  swing",
+		"footnote": "The card froze him mid-swing. Close it, hold RMB, and let his club come down on the guard.",
+	},
+]
+
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
+const CombatScript = preload("res://scripts/combat.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const DressingScript = preload("res://scripts/warband/camp_dressing.gd")
@@ -211,6 +277,9 @@ var host: Node3D = null
 var warband
 var controller
 var sequencer
+## The first fight's lesson: the body, the shiv, the cuts, the guard. Built with
+## the sequencer and dormant until the soul steps into Corvin.
+var duel
 var hud
 var screen
 var paperdoll
@@ -231,10 +300,16 @@ var clearing: Dictionary = {}
 var _cage_anchors: Dictionary = {}   # merc_id -> the cage centre it is held in
 var _cage_doors: Array = []          # [{node, lift}, ...]
 var _pickups: Array = []
+## The one drop the lesson owns: `LESSON_SHIV` on the dirt at `SHIV_POST`. Taking
+## it is what arms the player and what wakes the pair.
+var _shiv_pickup
 var _jogging := false
 var _cage_open: Array[bool] = []     # per cage, in CAGE_POSTS order
 var _watchers_awake := false
 var _card_state := -1
+## The duel card currently up, so a beat that re-announces itself cannot re-raise
+## a card the player has already read.
+var _duel_card := -1
 var _steel_taken := 0
 var _prompt_text := ""
 var _hint_text := ""
@@ -281,13 +356,14 @@ func spawn_posts() -> Array[Vector3]:
 	return points
 
 
-## Dress an empty warband as the prison squad (four in rags, the rescuer with a
-## shiv) and mark it as the line this camp fields. A warband that already has
-## bodies keeps them; a thin one is topped up with prisoners rather than bending
-## the lesson around it.
+## Dress an empty warband as the prison squad (four in rags, and the rescuer with
+## nothing in his hands) and mark it as the line this camp fields. A warband that
+## already has bodies keeps them; a thin one is topped up with prisoners rather
+## than bending the lesson around it.
 func seed_warband() -> void:
 	var living: Array = warband.alive_merc_ids()
-	if living.is_empty():
+	var fresh := living.is_empty()
+	if fresh:
 		for prisoner in PRISONER_NAMES:
 			var merc_id: int = warband.add_mercenary(str(prisoner))
 			_dress_rags(merc_id)
@@ -295,7 +371,6 @@ func seed_warband() -> void:
 			warband.roster.unequip(merc_id, "off")
 		var rescuer: int = warband.add_mercenary(RESCUER_NAME)
 		_dress_rags(rescuer)
-		warband.roster.equip(rescuer, "main", "dagger_ironwood")
 		living = warband.alive_merc_ids()
 	else:
 		while living.size() < SQUAD_SIZE:
@@ -306,9 +381,15 @@ func seed_warband() -> void:
 	for index in SQUAD_SIZE:
 		squad_ids.append(int(living[index]))
 	rescuer_id = squad_ids[RESCUER_INDEX]
-	var main_id := str(warband.roster.equipped_of(rescuer_id).get("main", ""))
-	if main_id.is_empty():
-		warband.roster.equip(rescuer_id, "main", "dagger_ironwood")
+	# On a new campaign the rescuer's hands are empty on purpose: the camp's only
+	# blade is `LESSON_SHIV` on the dirt, and taking it with `K` is the beat that
+	# arms the player and wakes the pair. A rescuer who arrived holding it would
+	# have nothing to teach, and the fight would be his instead of the player's.
+	# A warband that already stood him up keeps whatever it gave him, and the duel
+	# skips the fetch (see `note_possession`).
+	if fresh:
+		warband.roster.unequip(rescuer_id, "main")
+		warband.roster.unequip(rescuer_id, "off")
 	caged_ids.clear()
 	for index in PRISONER_COUNT:
 		caged_ids.append(squad_ids[index])
@@ -349,15 +430,20 @@ func place_warband(bodies_in: Array) -> void:
 		_cage_anchors[merc_id] = _post_for(merc_id)
 	# The rescuer stays on the same hundred every mercenary has: an NPC with a
 	# private pool would break the contract and carry the extra health into the
-	# roster. He survives the pair on the shiv's own passive instead (see the
-	# squad's dagger variant), not on a bigger pool.
+	# roster. He survives the pair on the player's hands - the shiv's own passive
+	# (Prison shank) is what makes its stab fast enough to answer a raised club -
+	# and not on a bigger pool.
 	for drop in WEAPON_DROPS:
 		_spawn_pickup(str(drop[0]), drop[1])
+	# And the shiv itself, lying where the pair threw it: the first weapon in the
+	# game and the beat the duel lesson is built around.
+	_shiv_pickup = _spawn_pickup(LESSON_SHIV, SHIV_POST)
 
 
-## Start the lesson: the sequencer, the cards and the beat that opens the game.
-## Only the camp the campaign *starts* in does this. A camp the warband walks
-## back to later keeps its cages, its guards and nothing else.
+## Start the lesson: the sequencer, the first fight's own lesson, the cards and
+## the beat that opens the game. Only the camp the campaign *starts* in does this.
+## A camp the warband walks back to later keeps its cages, its guards and nothing
+## else.
 func begin_lesson() -> void:
 	if _lesson or caged_ids.is_empty():
 		return
@@ -369,6 +455,11 @@ func begin_lesson() -> void:
 	sequencer.rescuer_ready.connect(_on_rescuer_ready)
 	sequencer.begin(rescuer_id)
 	sequencer.announce()
+	duel = DuelScript.new()
+	duel.name = "Duel"
+	add_child(duel)
+	duel.card_wanted.connect(_on_duel_card)
+	duel.step_changed.connect(_on_duel_step)
 	controller.direct(1, caged_ids[0])
 	_push_card(sequencer.state())
 
@@ -379,12 +470,12 @@ func lesson_running() -> bool:
 
 
 ## Whether this mercenary is free to act as a squadmate: a prisoner whose latch
-## has been cut, or anybody who was never in a cage. Corvin is still not an
-## escort - nobody is ever put in his body for the player - but the pair standing
-## over the cages are his, and he takes them on through the squad's own module.
-## That module leaves the body the player is inside alone, so the moment the soul
-## steps into him the hands are the player's. Once the pair are down and the
-## latches still shut he holds: the trail's cultists are not his to chase.
+## has been cut, or anybody who was never in a cage. Corvin is never one of them
+## while the camp's lesson runs: his body is the player's beat, and the pair
+## standing over the cages are the player's to fight - not the squad's. A scene
+## that let the module swing for him would take the first fight (and the three
+## lessons inside it) away from the hands they are meant for. Once the squad is
+## out he is an escort like the rest.
 func is_free(merc_id: int) -> bool:
 	if merc_id <= 0:
 		return false
@@ -394,18 +485,20 @@ func is_free(merc_id: int) -> bool:
 	if index >= 0:
 		return index < _cage_open.size() and bool(_cage_open[index])
 	if merc_id == rescuer_id:
-		if sequencer.state() == SequencerScript.State.RESCUER_ARRIVED:
-			return watchers_down() < GATE_WATCHERS.size()
 		return sequencer.state() == SequencerScript.State.FREED \
 			or sequencer.state() == SequencerScript.State.ESCAPING
 	return true
 
 
 ## The lesson's prompt line, or "" when the camp has nothing to say about where
-## the body stands. The world writes it to the one HUD.
+## the body stands. The world writes it to the one HUD. The first fight's lesson
+## outranks the sequencer: while it is teaching - walk, take the shiv, swing,
+## guard - the line has to be about that, not about latches.
 func prompt_line(actor) -> String:
 	if not lesson_running() or actor == null or not is_instance_valid(actor):
 		return ""
+	if duel != null and duel.active():
+		return duel.objective()
 	if sequencer.state() == SequencerScript.State.ESCAPING:
 		# The lesson is over: the world's own line - the trail and the metres to
 		# the town - is what a body needs then, not a stale instruction.
@@ -417,6 +510,8 @@ func prompt_line(actor) -> String:
 func hint_line(actor) -> String:
 	if not lesson_running() or actor == null or not is_instance_valid(actor):
 		return ""
+	if duel != null and duel.active():
+		return duel.hint()
 	if not _in_camp(actor) and sequencer.state() != SequencerScript.State.ESCAPING:
 		return ""
 	return sequencer.hint()
@@ -469,20 +564,22 @@ func allies_armed() -> int:
 	return squad.armed_count() if squad != null else 0
 
 
-func ally_engaged() -> bool:
-	return squad != null and squad.engaged
-
-
 func pickups() -> Array:
 	return _pickups
 
 
 ## A pickup left the floor (a squadmate's or the player's). Counted silently: the
-## escape never asks the player to loot anything.
-func note_pickup() -> void:
+## escape never asks the player to loot anything - but the shiv the lesson put on
+## the dirt is the exception, because taking it is what arms the player and wakes
+## the pair.
+func note_pickup(pickup = null) -> void:
 	_steel_taken += 1
 	if sequencer != null:
 		sequencer.note_weapon_looted()
+	if duel != null and pickup != null and is_instance_valid(pickup) \
+			and pickup == _shiv_pickup:
+		if duel.note_shiv_taken():
+			_set_status("The ironwood shiv is in your hand. The pair are awake.", 4.0)
 	if screen != null:
 		screen.refresh()
 
@@ -498,6 +595,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_rescuer_jog()
 	_maintain_watchers()
+	_duel_tick()
 	_clamp_caged_bodies()
 	_check_escape()
 
@@ -597,11 +695,12 @@ func _in_camp(actor) -> bool:
 
 
 ## Spawn a piece of cultist steel into the world's one loot vacuum.
-func _spawn_pickup(item_id: String, at: Vector3) -> void:
+func _spawn_pickup(item_id: String, at: Vector3):
 	if item_id.is_empty():
-		return
+		return null
 	if host != null:
-		host.spawn_pickup(item_id, at)
+		return host.spawn_pickup(item_id, at)
+	return null
 
 
 # --- the squad and the rescuer ---------------------------------------------
@@ -629,16 +728,36 @@ func _rescuer_jog() -> void:
 
 # --- the watchers ----------------------------------------------------------
 
+## Turn a watcher loose on the wood: a mob standing on the town's ring is still
+## inside a body's safe ground, so a watcher that kept the default centre would
+## stand its post while a blade came at it. Until this is called - the pair before
+## the lesson, anything nobody has woken - the camp is quiet ground and the mob
+## engages nobody. `escape_run` points its road watchers at the same gate.
+func _loose_watcher(watcher) -> void:
+	watcher.safe_center = _safe_center()
+
+
+## The town's own ring, which is the only one this camp is near.
+func _safe_center() -> Vector3:
+	if host != null and host.has_method("lane_end"):
+		return host.lane_end()
+	return Vector3(0.0, 0.0, -100000.0)
+
+
 ## The two watchers between the cages and the mouth: real wilderness mobs with a
 ## camp profile (`cage_watcher.gd`), so they read as the wood's own creatures and
 ## die in a few stabs. They only turn to hunt once the first latch goes.
 func _install_watchers() -> void:
 	for index in GATE_WATCHERS.size():
 		var spec: Dictionary = GATE_WATCHERS[index]
-		# Corvin's pair are the lesson's mooks: three shiv stabs each, half blows.
+		# The pair are the lesson's mooks: three shiv stabs each, half blows, a
+		# long telegraph before each swing, and no guard to break through.
 		var watcher := _add_watcher(spec["post"],
 			"CampWatcher%d" % (guards.size() + 1), "", PAIR_LESSON_HEALTH)
 		watcher.blow_scale = PAIR_BLOW_SCALE
+		watcher.windup_scale = PAIR_WINDUP_SCALE
+		watcher.swing_gap_scale = PAIR_SWING_GAP_SCALE
+		watcher.guard_scale = PAIR_GUARD_SCALE
 
 
 func _add_watcher(at: Vector3, label: String, weapon: String = "",
@@ -662,21 +781,26 @@ func _add_watcher(at: Vector3, label: String, weapon: String = "",
 	return watcher
 
 
-## The pair wake the moment Corvin is at the cages - he is going straight at them,
-## and a watcher that waited to be noticed would be a prop. They take him as their
-## quarry, which is also what keeps them off the caged bodies while he works, and
-## the squad module that runs him swings back. Waking has nothing to do with a
-## latch: a player who walks up to the cages is already in the fight.
+## The pair wake the moment a body is holding the shiv, and not one frame before:
+## the lesson walks the player to the weapon first, and two watchers coming at an
+## empty-handed body would be the opposite of a tutorial. They take the body that
+## is actually driven by a soul - the one that took their quarry's blade - as the
+## quarry, which is also what keeps them off the caged prisoners.
 func _maintain_watchers() -> void:
 	if guards.is_empty() or _watchers_awake:
 		return
 	if sequencer == null or sequencer.state() != SequencerScript.State.RESCUER_ARRIVED:
 		return
+	if duel == null or not duel.fighting():
+		return
 	_watchers_awake = true
-	var prey = controller.body_of(rescuer_id) if controller != null else null
+	var prey = controller.active_body(1) if controller != null else null
+	if prey == null or not is_instance_valid(prey):
+		prey = controller.body_of(rescuer_id) if controller != null else null
 	for watcher in guards:
 		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
+		_loose_watcher(watcher)
 		watcher.mob_wake()
 		if prey != null and is_instance_valid(prey):
 			watcher.hunt(prey)
@@ -685,6 +809,8 @@ func _maintain_watchers() -> void:
 func _on_watcher_defeated(enemy, _reward: int) -> void:
 	if sequencer != null:
 		sequencer.note_guard_killed()
+	if duel != null and watchers_down() >= GATE_WATCHERS.size():
+		duel.note_fight_over()
 	# The steel comes out of its hand and lands in the dirt: a watcher that falls
 	# leaves the piece it was swinging where a body can pick it up with K, and
 	# the squad can see it. What is left on the body is the rag it wore, which is
@@ -719,6 +845,7 @@ func _spawn_reinforcements() -> void:
 		watcher.blow_scale = AMBUSH_BLOW_SCALE
 		watcher.guard_scale = AMBUSH_GUARD_SCALE
 		watcher.swing_gap_scale = AMBUSH_SWING_GAP_SCALE
+		_loose_watcher(watcher)
 		if prey != null:
 			watcher.hunt(prey)
 
@@ -741,23 +868,39 @@ func nearest_standing_body(point: Vector3):
 
 ## A watcher's swing lands on the warband body it was hunting. The mob emits the
 ## blow; the scene applies it through the body's own guard, exactly like the
-## frontier's `_on_enemy_attack`.
+## frontier's `_on_enemy_attack`. The guard's answer is what the first fight
+## lesson is waiting for: a blow that lands on a raised blade is the player's
+## proof that the card was worth reading.
 func _on_watcher_attack(attacker, amount: float, victim) -> void:
 	if not is_instance_valid(attacker) or not is_instance_valid(victim):
 		return
 	# The blow already carries the body's own `blow_scale` - the pair lands half a
 	# swing, the ambush lands half a swing, a hardened body lands all of it - so
 	# the scene weighs nobody a second time here.
+	var outcome := -1
 	if victim.has_method("receive_melee"):
-		victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position)
+		outcome = int(victim.receive_melee(amount, WATCHER_SOURCE,
+			attacker.global_position))
 	elif victim.has_method("take_damage"):
 		victim.take_damage(amount, WATCHER_SOURCE)
+	if outcome >= 0 and controller != null and victim == controller.active_body(1) \
+			and duel != null and duel.fighting():
+		if outcome == CombatScript.DEFENSE_BLOCK or outcome == CombatScript.DEFENSE_WEAK_BLOCK:
+			if duel.note_guarded():
+				_set_status("Your guard holds. The pair are yours to finish.", 3.0)
+			else:
+				_set_status("Blocked - a shiv softens a blow, it does not stop one.", 2.5)
+		elif outcome == CombatScript.DEFENSE_PARRY:
+			_set_status("Parried - the blow slides off your blade.", 2.5)
 
 
 # --- sequencer -------------------------------------------------------------
 
 ## Raise the beat's card (once). The card pauses the game; the player reads it,
 ## presses Enter or clicks CONTINUE, and the lesson starts where it left off.
+## The first fight's four cards sit between THE BODY and OUT, so the camp's own
+## last two beats take the numerals after them: I-III here, IV-VII in the duel,
+## VIII-IX for the leaving.
 func _push_card(state: int) -> void:
 	if card == null or state == _card_state:
 		return
@@ -765,8 +908,24 @@ func _push_card(state: int) -> void:
 		return
 	_card_state = state
 	var content: Dictionary = STEP_CARDS[state]
-	card.show_step("step_%d" % state, str(content["kicker"]), str(content["title"]),
+	var index := state if state <= SequencerScript.State.RESCUER_ARRIVED else state + 4
+	card.show_step("step_%d" % index, str(content["kicker"]), str(content["title"]),
 		str(content["body"]), str(content["keys"]), str(content["footnote"]))
+
+
+## One card of the first fight, raised on the fact that asked for it. The numeral
+## continues the opening's count: the camp's body card is III, so the feet are IV
+## and the guard VII.
+func _push_duel_card(slot: int) -> void:
+	if card == null or slot < 0 or slot >= DUEL_CARDS.size():
+		return
+	if slot == _duel_card:
+		return
+	_duel_card = slot
+	var content: Dictionary = DUEL_CARDS[slot]
+	card.show_step("step_%d" % (slot + 3), str(content["kicker"]),
+		str(content["title"]), str(content["body"]), str(content["keys"]),
+		str(content["footnote"]))
 
 
 func _on_state_changed(state: int, objective: String) -> void:
@@ -785,6 +944,7 @@ func _on_state_changed(state: int, objective: String) -> void:
 			if controller != null and controller.merc_for_peer(1) == rescuer_id \
 					and sequencer != null:
 				sequencer.note_rescuer_taken()
+				_begin_duel()
 		SequencerScript.State.ESCAPING:
 			# The squad stops holding the camp and runs the wood with the soul:
 			# the same module, one escort clause.
@@ -795,27 +955,155 @@ func _on_state_changed(state: int, objective: String) -> void:
 				screen.refresh()
 
 
-## The rescuer is at the cages with the shiv, and he does not wait there: the
-## squad module takes him over on the next frame and he goes at the pair. The
-## soul is NOT moved into him for the player - taking his body is the beat.
+## The rescuer is at the cage line with empty hands, and he stops there: the pair
+## are not his to fight any more, and nothing moves his legs until a soul does.
+## The soul is NOT moved into him for the player - taking his body is the beat.
 func _on_rescuer_ready(merc_id: int) -> void:
 	_jogging = false
 	var actor = controller.body_of(merc_id) if controller != null else null
 	if actor != null and is_instance_valid(actor):
 		actor.accept_network_input(Vector2.ZERO, false)
 	if hud != null:
-		hud.set_status("Corvin is at the cages. Press F5 (or [ ]) to take his body - then G at each cage.", 6.0)
+		hud.set_status("Corvin is at the cage line with empty hands. Press F5 (or [ ]) to take his body.", 6.0)
 
 
 ## A possession happened. The world owns the controller, so it calls this even
-## when the camp's lesson is not running; only the lesson reads it.
+## when the camp's lesson is not running; only the lesson reads it. Stepping into
+## the rescuer is the beat that starts the first fight's lesson.
 func note_possession(merc_id: int) -> void:
 	if sequencer == null:
 		return
 	if caged_ids.has(merc_id):
 		sequencer.note_body_entered(merc_id)
 	if merc_id == rescuer_id:
-		sequencer.note_rescuer_taken()
+		# The first fight's lesson belongs to the beat that owns his body. A soul
+		# that steps into him earlier (a body swap while the cages still hold the
+		# others) takes his hands and nothing else: `note_rescuer_taken` refuses,
+		# so the camp keeps its sleepers and its card count intact.
+		if sequencer.note_rescuer_taken():
+			_begin_duel()
+
+
+# --- the first fight's lesson ----------------------------------------------
+
+## A soul stepped into the rescuer: the lesson starts here, on the frame the
+## hands become the player's. A body that already holds a blade (a campaign that
+## came back to the camp armed) skips the fetch - there is nothing on the dirt to
+## teach it.
+func _begin_duel() -> void:
+	if duel == null:
+		return
+	duel.note_taken()
+	if duel.step() != DuelScript.Step.MOVE:
+		return
+	_watch_player_swings()
+	var actor = controller.body_of(rescuer_id) if controller != null else null
+	if actor != null and is_instance_valid(actor) and holds_blade(actor):
+		duel.note_shiv_taken()
+
+
+## Listen to the body's own rig: one signal per cut, whichever hand swings, and
+## the same signal the combat layer resolves damage from.
+func _watch_player_swings() -> void:
+	var actor = controller.active_body(1) if controller != null else null
+	if actor == null or not is_instance_valid(actor):
+		return
+	var rig = actor.get("rig")
+	if rig == null or not is_instance_valid(rig):
+		return
+	if not rig.melee_started.is_connected(_on_player_swing):
+		rig.melee_started.connect(_on_player_swing)
+
+
+## The player cut at something. The first cut is where the three cuts get named;
+## the watcher it was aimed at becomes the swings card's subject, which is what
+## leaves the *other* one to teach the guard.
+func _on_player_swing(_hand: String) -> void:
+	if duel == null or not duel.fighting() or duel.swing_card():
+		return
+	var watcher = _nearest_watcher(controller.active_body(1))
+	duel.note_swing(0 if watcher == null else watcher.get_instance_id())
+
+
+## The nearest standing watcher of the camp's to a body, or null.
+func _nearest_watcher(actor):
+	if actor == null or not is_instance_valid(actor):
+		return null
+	var best = null
+	var best_gap := INF
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var gap: float = actor.global_position.distance_to(watcher.global_position)
+		if gap < best_gap:
+			best_gap = gap
+			best = watcher
+	return best
+
+
+## The duel's two polls, both things nobody emits a signal for: the body standing
+## on the shiv (the card that says `K`) and a watcher's windup (the card that says
+## `RMB`). A card that is still up pauses the tree, so neither the walk nor the
+## swing advances while this reads.
+func _duel_tick() -> void:
+	if duel == null:
+		return
+	if card != null and card.is_open():
+		return
+	if duel.step() == DuelScript.Step.MOVE:
+		var walker = controller.active_body(1) if controller != null else null
+		if walker == null or not is_instance_valid(walker):
+			return
+		if _shiv_pickup == null or not is_instance_valid(_shiv_pickup) \
+				or bool(_shiv_pickup.get("collected")):
+			return
+		var gap: float = walker.global_position.distance_to(_shiv_pickup.global_position)
+		if gap <= SHIV_CARD_RADIUS:
+			duel.note_shiv_near()
+		return
+	if duel.step() != DuelScript.Step.FIGHT:
+		return
+	var body = controller.body_of(rescuer_id) if controller != null else null
+	if body == null or not is_instance_valid(body) or not bool(body.get("alive")) \
+			or bool(body.get("downed")):
+		# The lesson's own body is on the floor. Whatever happens next - a revive,
+		# a body swap, the wipe - the cards have taught what they can, and the HUD
+		# goes back to the camp's line instead of nagging a body that cannot read it.
+		duel.note_fight_over()
+		return
+	var alive := 0
+	var winding = null
+	for watcher in guards:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		alive += 1
+		if winding == null and str(watcher.get("state")) == "WINDUP":
+			winding = watcher
+	if alive <= 0:
+		duel.note_fight_over()
+		return
+	if winding != null and not duel.guard_card():
+		duel.note_windup(winding.get_instance_id(), alive)
+
+
+## A duel card was asked for: raise it, once.
+func _on_duel_card(slot: int) -> void:
+	_push_duel_card(slot)
+
+
+## A duel beat changed. The HUD's prompt and key line are polled by the world
+## every frame; the status line is the one thing worth writing at the frame it
+## changes, because it names the next action in a single sentence.
+func _on_duel_step(step: int) -> void:
+	match step:
+		DuelScript.Step.MOVE:
+			_set_status("His body is yours. His shiv is lying in the dirt up the pocket.", 4.0)
+		DuelScript.Step.FETCH:
+			_set_status("Stand over the shiv and press K to take it.", 4.0)
+		DuelScript.Step.FIGHT:
+			_set_status("The pair are awake. They swing slowly - read them.", 3.5)
+		DuelScript.Step.DONE:
+			_set_status("The pair are down. Cut a latch at each cage with G.", 5.0)
 
 
 # --- the latches -----------------------------------------------------------

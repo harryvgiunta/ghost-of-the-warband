@@ -100,6 +100,7 @@ WARBAND_TESTS = [
     "enemy_waves_regression",
     "watcher_variants_regression",
     "town_hub_regression",
+    "duel_lesson_regression",
     "cage_escape_regression",
     "escape_run_regression",
     "warband_world_regression",

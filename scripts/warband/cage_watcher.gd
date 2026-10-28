@@ -35,8 +35,8 @@ const Catalog = preload("res://scripts/player_state.gd")
 ## scene forgets to set.
 const WARDEN_ID := "hollow_warden"
 
-## The pair Corvin puts down are thinned bodies; everything else that holds the
-## road is twice what a camp watcher used to be.
+## The pair the lesson fields are thinned bodies; everything else that holds the
+## road is a hard body. Both are 30% under their old pools (31/101).
 const PAIR_HEALTH := 31.0
 const HARDENED_HEALTH := 101.0
 
@@ -155,10 +155,12 @@ var carried: Array[String] = []
 ## They exist because the same body is a duelist in one wave and an ambusher
 ## taken by surprise in the next, and those are not the same fight:
 ## `blow_scale` multiplies what a landed swing takes off, `guard_scale` how often
-## it braces at all, and `swing_gap_scale` how long it waits between swings.
+## it braces at all, `swing_gap_scale` how long it waits between swings, and
+## `windup_scale` how long the raised club hangs before it comes down.
 var blow_scale := 1.0
 var guard_scale := 1.0
 var swing_gap_scale := 1.0
+var windup_scale := 1.0
 
 ## The resolved table entry for this body. Read by the regression and by anything
 ## that wants to know what a watcher brought.
@@ -483,6 +485,13 @@ func _choose_attack() -> void:
 ## scene's dial. The scene applies it through the victim's guard.
 func _strike_damage() -> float:
 	return float(profile.get("damage", 0.0)) * blow_scale
+
+
+## The telegraph, stretched for a body that is teaching rather than fighting: a
+## raised club that hangs for 1.3 s is the window the guard card is written for,
+## and the wood's own 0.55 s cannot be answered by somebody reading a card.
+func _windup_seconds() -> float:
+	return super() * maxf(0.0, windup_scale)
 
 
 ## The beat between two swings: the profile's own cycle, stretched by the dial a
