@@ -37,8 +37,8 @@ const WARDEN_ID := "hollow_warden"
 
 ## The pair Corvin puts down are thinned bodies; everything else that holds the
 ## road is twice what a camp watcher used to be.
-const PAIR_HEALTH := 44.0
-const HARDENED_HEALTH := 144.0
+const PAIR_HEALTH := 31.0
+const HARDENED_HEALTH := 101.0
 
 ## The makeshift tier, in catalog order. No forged steel is allowed in the camp,
 ## so this is the whole pool a variant may name - and the twig bow is in it

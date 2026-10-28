@@ -98,11 +98,11 @@ const CAMP_TORCHES := [
 ##
 ## A watcher now fights like the body it is - its variant's blade, its variant's
 ## guard - so the pair's pool and blow are the camp's numbers, not the wild's:
-## `PAIR_LESSON_HEALTH` is three stabs of the ironwood shiv (10 damage each), and
+## `PAIR_LESSON_HEALTH` is two stabs of the ironwood shiv (10 damage each), and
 ## `PAIR_BLOW_SCALE` halves what the pair lands, because two of them swinging at
 ## once would otherwise put Corvin down before the fourth stab. The six that come
 ## out of the wood afterwards keep the hardened pool and their full blows.
-const PAIR_LESSON_HEALTH := 30.0
+const PAIR_LESSON_HEALTH := 21.0
 const PAIR_BLOW_SCALE := 0.5
 const GATE_WATCHERS := [
 	{"post": Vector3(-4.2, 0.1, -20.5)},
@@ -115,7 +115,8 @@ const GATE_WATCHERS := [
 ## weapons should win this fight:
 ##
 ##   * four of them, not six, and never armoured;
-##   * `AMBUSH_HEALTH` 60, so two ironwood stabs or three club hits put one down;
+##   * `AMBUSH_HEALTH` 42, so four ironwood stabs - half again what a camp watcher
+##     had before the 30% cut - put one down;
 ##   * `AMBUSH_BLOW_SCALE` 0.5, so a club lands 3, a shiv 5 and a branch 7;
 ##   * `AMBUSH_GUARD_SCALE` 0.45 and `AMBUSH_SWING_GAP_SCALE` 1.9, so they swing
 ##     late and rarely turtle - an ambusher that trades blows is a fight, one that
@@ -124,7 +125,7 @@ const GATE_WATCHERS := [
 ## Everything they carry is the makeshift tier: there is no forged steel anywhere
 ## in this wood.
 const AMBUSH_COUNT := 4
-const AMBUSH_HEALTH := 60.0
+const AMBUSH_HEALTH := 42.0
 const AMBUSH_BLOW_SCALE := 0.5
 const AMBUSH_GUARD_SCALE := 0.45
 const AMBUSH_SWING_GAP_SCALE := 1.9

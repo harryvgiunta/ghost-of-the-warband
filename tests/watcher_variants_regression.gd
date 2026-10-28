@@ -499,7 +499,10 @@ func check_fight() -> void:
 		"and ten percent of the body is the other half of the rule")
 	staggered.take_damage(2.0, 90)
 	check(staggered.state != "STAGGER", "a chip is traded through, not staggered on")
-	staggered.take_damage(threshold, 90)
+	# Twice the threshold, not exactly it: the blow passes through the body's own
+	# guard before it lands, so a hit aimed at the line can arrive under it. The
+	# rule itself is measured above; this is that a real blow staggers.
+	staggered.take_damage(threshold * 2.0, 90)
 	check(staggered.state == "STAGGER", "a real blow staggers the body (%s)" % staggered.state)
 	check(not staggered.guard_up(), "and cancels the guard it was holding")
 	check(staggered.alive, "the staggered body is still standing")

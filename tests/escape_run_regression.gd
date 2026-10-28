@@ -303,8 +303,8 @@ func check_pursuers() -> void:
 			visible += 1
 		if bool(watcher.hunting()) and is_instance_valid(watcher.player):
 			hunting += 1
-		check(is_equal_approx(float(watcher.max_health), 144.0),
-			"a road cultist carries twice the old pool, got %s" % str(watcher.max_health))
+		check(is_equal_approx(float(watcher.max_health), 101.0),
+			"a road cultist carries the warden's hardened pool, got %s" % str(watcher.max_health))
 		check(watcher.global_position.y > -1.0, "a cultist stands on the lane")
 		check(watcher.safe_center.is_equal_approx(game.trail.town_gate()),
 			"the town's gate is the safe ring, so nobody is hunted inside it")
