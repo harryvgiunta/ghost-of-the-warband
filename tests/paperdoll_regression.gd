@@ -73,6 +73,12 @@ func _stock_pack() -> void:
 			state.inventory.append(item_id)
 
 
+## Whether every mesh of one slot's set is on screen.
+func _visible(rig, slot: String, set_index: int) -> bool:
+	var nodes: Array = rig._armor_meshes.get(slot, {}).get(set_index, [])
+	return not nodes.is_empty() and (nodes[0] as Node3D).visible
+
+
 func _find(item_id: String) -> int:
 	return state.inventory.find(item_id)
 
@@ -577,6 +583,25 @@ func _test_rig_loadouts() -> void:
 	await process_frame
 	await process_frame
 	check(rig._built,"The ranger rig builds for loadout coverage")
+
+	# Layers: an empty slot draws the naked body, and a worn set draws over it. A
+	# prisoner with nothing on must not be a man in the imported green leather,
+	# which is what an empty slot used to fall through to; the quiver is kit, not a
+	# body part, so it appears with the bow and leaves with it.
+	var bare_index: int = ArmorData.SET_IDS.find("naked")
+	var leather_index: int = ArmorData.SET_IDS.find("leather")
+	var empty_armor := {}
+	for slot in ArmorData.SLOTS:
+		empty_armor[slot] = ArmorData.NONE
+	rig.apply_loadout(StateScript.build_loadout("", "", empty_armor))
+	check(_visible(rig, "chest", bare_index), "an empty chest draws the naked body")
+	check(not _visible(rig, "chest", leather_index), "and never the imported leather outfit")
+	check(not rig._quiver.visible, "a body with no bow carries no quiver")
+	rig.apply_loadout(StateScript.build_loadout("bow_short", "", empty_armor))
+	check(rig._quiver.visible, "the quiver appears with the bow")
+	rig.apply_loadout(StateScript.build_loadout("club_makeshift", "", empty_armor))
+	check(not rig._quiver.visible, "and leaves with it")
+
 	var armor := {"head":0,"chest":0,"hands":0,"legs":0,"feet":0}
 	rig.apply_loadout(StateScript.build_loadout("bow_short","",armor))
 	check(rig.weapon == "bow","A bow loadout enters bow mode")

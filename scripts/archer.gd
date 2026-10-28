@@ -38,7 +38,7 @@ const SWORD_DATA = [
 	{"name":"Arming sword", "seconds":2.0, "length":1.05, "reach":2.1, "damage":38.0, "throw_speed":28.0, "two_handed":false},
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0, "two_handed":true},
 	{"name":"Club", "seconds":0.9, "length":0.68, "reach":1.7, "damage":6.0, "throw_speed":20.0, "two_handed":false},
-	{"name":"Heavy tree branch", "seconds":1.6, "length":1.55, "reach":2.3, "damage":15.0, "throw_speed":16.0, "two_handed":true},
+	{"name":"Heavy tree branch", "seconds":1.6, "length":1.16, "reach":2.0, "damage":15.0, "throw_speed":16.0, "two_handed":true},
 ]
 ## Dagger profiles in catalog `index` order: the forged iron blade, then the
 ## whittled ironwood shiv the makeshift tier fields.
@@ -1091,6 +1091,10 @@ func _sync_weapon_visibility() -> void:
 	var focus_shown := focus_active and _focus_supported() and not consuming
 	for key: String in _focus_items:
 		_focus_items[key].visible = focus_shown and key == focus_kind
+	# The quiver is a piece of kit, not a body part: a prisoner with a club on its
+	# shoulder is not carrying arrows. It appears with the bow and leaves with it.
+	if _quiver != null:
+		_quiver.visible = weapon == "bow" and not consuming
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and not consuming and is_visible_in_tree())
 
@@ -1158,13 +1162,26 @@ func _build_armor_meshes() -> void:
 					_armor_meshes[slot][set_index].append(node)
 
 func _apply_armor_visibility() -> void:
-	# An empty slot keeps the imported leather outfit on screen as the base
-	# layer; the reduction still follows the paperdoll, not the mesh.
+	# Two body layers, and which one is drawn is decided by the chest - the slot
+	# that carries the whole torso, both arms and the hands.
+	#
+	#   * a bare or rag-covered chest draws the **naked** body: bare skin, the old
+	#     shirt and the shorts. A prisoner with nothing on is a body, not a man in
+	#     full green leather, which is what an empty slot used to fall through to;
+	#   * any other chest draws the imported ranger outfit as the base the forged
+	#     sets are cut over, so mail and plate keep the sleeves and trousers their
+	#     pieces were fitted around.
+	#
+	# Whichever layer is base, the slot's own set still draws on top of it, so a
+	# prisoner in mail trousers is a bare body with mail on the legs.
+	var bare := ArmorData.SET_IDS.find("naked")
+	var chest := int(armor_pieces.get("chest", ArmorData.NONE))
+	var base := bare if chest < 0 or chest == bare else 0
 	for slot in ArmorData.SLOTS:
-		var active := maxi(int(armor_pieces.get(slot,0)), 0)
+		var worn := int(armor_pieces.get(slot, ArmorData.NONE))
 		for set_index: int in _armor_meshes.get(slot,{}):
 			for node: Node3D in _armor_meshes[slot][set_index]:
-				node.visible = set_index == active
+				node.visible = set_index == base or set_index == worn
 
 func set_armor_piece(slot: String, set_index: int) -> void:
 	cancel_consumable()

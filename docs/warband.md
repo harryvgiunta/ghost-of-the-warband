@@ -331,11 +331,30 @@ Short version of the latest tuning (all in the code, all covered by
   `LOOT_CLEAR_METRES` (22 m): the dressing leaves the stash, the body gets
   `BANDAGE_HEAL_SHARE` (30%) of its own pool back, and the roster is written on the
   same frame. An interrupted channel spends nothing. `tests/squad_medicine_regression.gd`;
+- **two body layers, and the chest picks one**: `Archer._apply_armor_visibility`
+  draws the **naked** body (bare skin, old shirt, shorts) when the chest slot is
+  empty or naked, and the imported ranger outfit as the base the forged sets were
+  fitted around when it is anything else. Every slot still draws its own worn set
+  on top, so a prisoner in mail trousers is a bare body with mail on the legs. An
+  empty slot used to fall through to the imported leather outfit, which made a
+  naked body a man in full green leather;
+- **the quiver is kit**: `Archer._sync_weapon_visibility` shows it only while a bow
+  is in the hands, so a prisoner with a club is not carrying arrows;
+- **the branch is a two-hander held like one**: `Sword.BRANCH_GRIP_INSET` 0.20 m
+  puts the fist up the limb instead of on its butt end, and the profile is
+  `length` 1.16 / `reach` 2.0 / 1.6 s swing (`Items` detail and `ITEM_STATS` keep
+  the same 2.0 m reach);
 - **the squad stands off**: an ally closes to `STANDOFF` 1.45 m and no further,
   walks itself back out if the press carries it inside `MIN_GAP` 0.95 m, and jogs
   only past `RUN_GAP` 7 m. The old ladder walked to the mob's own origin on every
   frame and ran the last metres in, which is why the squad read as a bulldozer
   shoving the pack across the clearing;
+- **personal space and roaming**: every movement intent `_steer` writes is pushed
+  apart from squadmates and the soul inside `PERSONAL_SPACE` 1.45 m, an escort
+  stands on its own slot of a ring around the soul (`_escort_post`, slot from its
+  place in `squad_ids`) instead of on the soul, and an ally with nothing to do
+  drifts around its post in short steps (`_idle_roam`, 0.30-0.95 m re-rolled every
+  1.6-3.4 s). A squad with nothing to do used to stand as one knot;
 - an unarmed ally looks for **steel** first - a weapon on the ground inside
   `SEARCH_METRES`, or a blade still on a corpse (`WarbandGearDrop`/`take_from_corpse`)
   - and does not cross the clearing for a rag, a ring or a bundle;

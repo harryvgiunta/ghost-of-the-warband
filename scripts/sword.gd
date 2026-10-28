@@ -70,6 +70,10 @@ func _build_steel() -> void:
 	Geo.sphere(self,0.043,Vector3(0,0,grip_length-0.02),gold)
 
 
+## How far up the limb a two-handed grip sits. The hand is the node's origin, so
+## this is how much butt hangs behind it.
+const BRANCH_GRIP_INSET := 0.20
+
 ## A split branch hafted with a knapped flint edge, lashed in sinew. Every part
 ## is deliberately crooked: nothing here was cut square.
 func _build_makeshift() -> void:
@@ -177,18 +181,25 @@ func _build_branch() -> void:
 	var leaf := Geo.material(Color("37472c"), 0.0, 0.92)
 	var cord := Geo.material(Color("8d7852"), 0.0, 0.88)
 	var span := maxf(blade_length, 0.5)
+	# A two-handed limb is gripped a hand's width up from the butt, not at the very
+	# end: the butt sticks out behind the fist the way a real branch does, and the
+	# mass of the limb runs out in front of both hands.
+	var holder := Node3D.new()
+	holder.name = "Limb"
+	holder.position = Vector3(0.0, 0.0, BRANCH_GRIP_INSET)
+	add_child(holder)
 	# The limb: one long crooked mass, thicker toward the far end.
-	var near := Geo.cylinder(self, 0.036, 0.050, span * 0.52,
+	var near := Geo.cylinder(holder, 0.036, 0.050, span * 0.52,
 		Vector3(0.0, 0.0, -0.02 - span * 0.24), bark, 9)
 	near.name = "Blade"
 	near.rotation.x = PI / 2.0
 	near.rotation.z = 0.04
-	var far := Geo.cylinder(self, 0.050, 0.034, span * 0.46,
+	var far := Geo.cylinder(holder, 0.050, 0.034, span * 0.46,
 		Vector3(0.030, 0.014, -0.05 - span * 0.68), bark, 9)
 	far.rotation.x = PI / 2.0
 	far.rotation.z = 0.10
 	# The split end where it came off the trunk.
-	var split := Geo.box(self, Vector3(0.082, 0.036, 0.080),
+	var split := Geo.box(holder, Vector3(0.082, 0.036, 0.080),
 		Vector3(0.052, 0.020, -0.02 - span * 0.94), heart)
 	split.rotation.y = 0.24
 	split.rotation.z = 0.16
@@ -196,25 +207,25 @@ func _build_branch() -> void:
 	for index in 3:
 		var root := Vector3(0.028 - 0.01 * float(index), 0.012,
 			-0.16 - float(index) * span * 0.22)
-		var stub := Geo.beam(self, root,
+		var stub := Geo.beam(holder, root,
 			root + Vector3(0.10 * (1.0 if index % 2 == 0 else -0.8), 0.07, -0.05),
 			0.022, bark_light, 6)
 		stub.name = "Stub%d" % index
 	# Bark plates along the whole length, and a knot the size of a fist.
 	for index in 6:
-		var plate := Geo.cylinder(self, 0.046, 0.046, 0.055,
+		var plate := Geo.cylinder(holder, 0.046, 0.046, 0.055,
 			Vector3(0.004 * float(index % 2), 0.004, -0.11 - float(index) * span * 0.14),
 			bark_light, 8)
 		plate.rotation.x = PI / 2.0
 		plate.rotation.z = 0.1 * float(index % 3) - 0.1
-	Geo.sphere(self, 0.038, Vector3(-0.038, 0.022, -0.30 - span * 0.18), heart,
+	Geo.sphere(holder, 0.038, Vector3(-0.038, 0.022, -0.30 - span * 0.18), heart,
 		Vector3(1.0, 0.8, 1.2))
 	# Two hands: a cord wrap at each grip, and a rag tied mid-shaft.
 	for at in [0.02, -0.10 - span * 0.16]:
-		var wrap := Geo.cylinder(self, 0.036, 0.036, 0.10,
+		var wrap := Geo.cylinder(holder, 0.036, 0.036, 0.10,
 			Vector3(0.0, 0.0, at), cord, 9)
 		wrap.rotation.x = PI / 2.0
-	var rag := Geo.box(self, Vector3(0.010, 0.085, 0.030),
+	var rag := Geo.box(holder, Vector3(0.010, 0.085, 0.030),
 		Vector3(-0.040, -0.030, -0.44 - span * 0.10), leaf)
 	rag.rotation.z = 0.5
 	rag.rotation.y = 0.3

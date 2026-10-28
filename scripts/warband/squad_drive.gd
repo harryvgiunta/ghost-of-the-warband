@@ -66,6 +66,29 @@ const MIN_GAP := 0.95
 ## Past this gap a body jogs; inside it, it walks in. A wolf-trot into contact is
 ## what made the squad read as a bulldozer.
 const RUN_GAP := 7.0
+## Personal space. Every step a squadmate takes is pushed apart from the bodies
+## around it, so four allies with nothing to do stand as four bodies instead of
+## one knot: a crowd that ends up inside itself is the same bug as a body that
+## leans on a mob.
+const PERSONAL_SPACE := 1.45
+const PERSONAL_WEIGHT := 0.9
+## How far the shove may bend a step: never more than this share of the step it
+## rides on, so a body always keeps most of the way it meant to go.
+const PUSH_SHARE := 0.75
+const PUSH_CAP := 0.55
+## An escort stands on its own slot around the soul rather than on the soul: the
+## ring is what spreads the squad out on the walk instead of stacking it.
+const ESCORT_RINGS := 2
+const ESCORT_SLOT_GAP := 1.35
+## Idle bodies take small steps around their own post - shorter than a walk, and
+## re-rolled every couple of seconds - so a waiting squad drifts instead of
+## freezing in a heap.
+const ROAM_MIN := 1.6
+const ROAM_MAX := 3.4
+const ROAM_RADIUS_MIN := 0.30
+const ROAM_RADIUS_MAX := 0.95
+const ROAM_INTENT := 0.42
+const ROAM_STOP := 0.14
 ## True for the rest of the scene once an ally has swung at a watcher.
 var engaged := false
 ## A hurt ally binds its wounds once the field is quiet: the bandage is a catalog
@@ -132,7 +155,7 @@ const RESET_SHUFFLE := 0.40
 ## dressing clock is one of them: a bandage takes its seconds wherever the body
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
 ## that keeps running behind a fight.
-const TRACK_CLOCKS := ["state_left", "step_left", "side", "heal_left"]
+const TRACK_CLOCKS := ["state_left", "step_left", "side", "heal_left", "roam_left"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
 ## hand can hold at all is the union plus a bow, which the squad's `_armed` test
@@ -231,14 +254,17 @@ func drive(delta: float) -> void:
 					else:
 						_advance(actor, at, track, loot_reach)
 					continue
-		# 4. No fight: an escort closes up on the soul, a holding squad stands.
+		# 4. No fight: an escort stands on its own slot in the ring around the
+		#    soul, and a squad with nowhere to be roams its own post in small
+		#    steps. Nobody walks onto the soul, and nothing stands still.
 		if following and is_instance_valid(player_body):
-			var gap: Vector3 = player_body.global_position - actor.global_position
+			var post := _escort_post(actor, track)
+			var gap: Vector3 = post - actor.global_position
 			gap.y = 0.0
-			if gap.length() > follow_slack:
-				_advance(actor, player_body.global_position, track, follow_slack)
+			if gap.length() > 0.45:
+				_advance(actor, post, track)
 				continue
-		_hold(actor)
+		_idle_roam(actor, track)
 
 
 
@@ -749,7 +775,111 @@ func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) ->
 func _steer(actor, direction: Vector3, track: Dictionary, running: bool) -> void:
 	if float(track.get("side", 0.0)) > 0.0:
 		direction = direction.cross(Vector3.UP) * float(track.get("sign", 1.0))
+	# Every step is pushed apart from the bodies around it. This is the one place
+	# the whole module writes movement, so the personal space applies to the fight,
+	# the walk to a drop, the escort and the idle drift alike.
+	#
+	# The push is capped below the step it rides on, never just added: a body's
+	# move direction is a *direction and a share of its walk speed*
+	# (`ArenaActor._integrate` scales velocity by it), so an uncapped shove from a
+	# queue of squadmates behind one ally cancels that ally's travel outright. A
+	# squad in single file stalled at the camp mouth that way, 1 km behind the
+	# soul, with every body still on its feet and pushing.
+	var push := _separation(actor, int(track.get("merc_id", 0))) * PERSONAL_WEIGHT
+	var cap := minf(PUSH_CAP, direction.length() * PUSH_SHARE)
+	if push.length() > cap:
+		push = push.normalized() * cap
+	direction += push
+	if direction.length_squared() <= 0.0001:
+		actor.accept_network_input(Vector2.ZERO, false)
+		return
 	actor.accept_network_input(Vector2(direction.x, direction.z).limit_length(), running)
+
+
+## The push away from every squadmate (and the soul) inside `PERSONAL_SPACE`, as
+## a flat direction. Zero when a body has room, which is the usual case.
+func _separation(actor, merc_id: int) -> Vector3:
+	var away := Vector3.ZERO
+	if controller == null or not is_instance_valid(actor):
+		return away
+	var here: Vector3 = (actor as Node3D).global_position
+	var others: Array = []
+	for raw_id in squad_ids:
+		var other_id := int(raw_id)
+		if other_id == merc_id or not _is_free(other_id):
+			continue
+		var other = controller.body_of(other_id)
+		if is_instance_valid(other) and other != actor:
+			others.append(other)
+	if is_instance_valid(player_body) and player_body != actor:
+		others.append(player_body)
+	for other in others:
+		if not is_instance_valid(other) or not bool(other.get("alive")) or bool(other.get("downed")):
+			continue
+		var delta: Vector3 = here - (other as Node3D).global_position
+		delta.y = 0.0
+		var distance := delta.length()
+		if distance >= PERSONAL_SPACE:
+			continue
+		if distance <= 0.02:
+			# Two bodies in the same spot: pick a side from the ids, never from the
+			# wall clock, so the same pair always parts the same way.
+			var angle := TAU * float((merc_id * 7 + int(other_id_hint(other))) % 12) / 12.0
+			away += Vector3(cos(angle), 0.0, sin(angle)) * 1.4
+			continue
+		away += delta / distance * (1.0 - distance / PERSONAL_SPACE) * 1.4
+	return away
+
+
+## A stable number for a body with no mercenary id of its own (the soul's body may
+## be any of ours): its node name is enough to split a stack.
+func other_id_hint(body) -> int:
+	var merc := int(controller.merc_of(body)) if controller != null else 0
+	if merc > 0:
+		return merc
+	return absi(str(body.name).hash()) % 12
+
+
+## Where an escort stands: its own slot on a ring around the soul. The slot comes
+## from the body's place in the squad order, so two allies never claim the same
+## spot and the ring itself is what spreads the squad on the walk.
+func _escort_post(actor, track: Dictionary) -> Vector3:
+	var soul: Vector3 = (player_body as Node3D).global_position
+	var merc_id := int(track.get("merc_id", 0))
+	var slot := 0
+	var count := maxi(squad_ids.size(), 1)
+	for index in squad_ids.size():
+		if int(squad_ids[index]) == merc_id:
+			slot = index
+			break
+	var ring := 1 + int(slot / ESCORT_RINGS) % 2
+	var angle := TAU * float(slot % maxi(ESCORT_RINGS * 2, 1)) / float(maxi(ESCORT_RINGS * 2, 1))
+	var radius := follow_slack + ESCORT_SLOT_GAP * float(ring) * 0.5
+	var post := soul + Vector3(cos(angle), 0.0, sin(angle)) * radius
+	# The soul moves; the slot follows it, not the other way round, and an ally
+	# with the same slot keeps `count` bodies apart from its neighbour by the ring.
+	if count > 4:
+		post += Vector3(cos(angle + 0.7), 0.0, sin(angle + 0.7)) * ESCORT_SLOT_GAP * 0.35
+	return post
+
+
+## Nothing to fight, nothing to fetch: drift around the post in short steps. Every
+## step is re-rolled when its clock runs out, so a waiting squad reads as bodies
+## shifting their weight rather than statues in a row.
+func _idle_roam(actor, track: Dictionary) -> void:
+	if float(track.get("roam_left", 0.0)) <= 0.0 or not track.has("roam_to"):
+		track["roam_left"] = _rng.randf_range(ROAM_MIN, ROAM_MAX)
+		var angle := _rng.randf_range(0.0, TAU)
+		var reach := _rng.randf_range(ROAM_RADIUS_MIN, ROAM_RADIUS_MAX)
+		var here: Vector3 = (actor as Node3D).global_position
+		track["roam_to"] = here + Vector3(cos(angle), 0.0, sin(angle)) * reach
+	var target: Vector3 = track.get("roam_to", (actor as Node3D).global_position)
+	var to: Vector3 = target - (actor as Node3D).global_position
+	to.y = 0.0
+	if to.length() <= ROAM_STOP:
+		_hold(actor)
+		return
+	_steer(actor, to.normalized() * ROAM_INTENT, track, false)
 
 
 ## Blocked-detection for one ally, plus the fight clocks and this body's own rolls.
@@ -764,7 +894,8 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 	if not _track.has(merc_id):
 		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0,
 			"sign": 1.0, "state": FIGHT_CLOSE, "state_left": 0.0, "step_left": 0.0,
-			"heal_left": 0.0, "bandaging": false,
+			"heal_left": 0.0, "bandaging": false, "merc_id": merc_id,
+			"roam_left": 0.0, "roam_to": actor.global_position,
 			"swings_left": 0, "swing_due": false,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]
