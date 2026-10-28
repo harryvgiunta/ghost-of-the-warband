@@ -20,8 +20,9 @@ difference - and the warband is the thing that survives a battle.
   `[ ]`). Nothing fights for you: the first fight is taught while it happens, one
   card per thing you need - the walk (`W A S D`, `SHIFT`, `SPACE`, mouse), the
   ironwood shiv on the ground (**K**), the three cuts (**LMB** diagonal,
-  **WHEEL UP** stab, **WHEEL DOWN** overhead) on your first swing, and the guard
-  (**hold RMB**) on the second watcher's raised club. The pair sleep until you are
+  **WHEEL UP** stab, **WHEEL DOWN** overhead) the instant the shiv is in your
+  hand, and the guard (**hold RMB**) on the second watcher's raised club. Every
+  one of them freezes the game while you read it. The pair sleep until you are
   armed and they are the softest bodies in the game: a long telegraph, half their
   blow, no guard. Then walk to each cage and press **G** to cut its own latch:
   four latches, four presses, and bare hands are refused. A squadmate who goes

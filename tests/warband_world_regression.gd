@@ -547,6 +547,10 @@ func check_lesson() -> void:
 	dismiss_card("the pickup card")
 	game._try_loot()
 	check(game.camp.holds_blade(cutter), "and the shiv is in the player's hands")
+	check(game.card != null and game.card.is_open() and game.card.step() == "step_5",
+		"and taking it holds the game still for the cuts card (%s)"
+		% ("" if game.card == null else game.card.step()))
+	dismiss_card("the cuts card")
 	var pair_woke := await await_condition(
 		func() -> bool:
 			for watcher in game.camp.guards:

@@ -43,8 +43,9 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
      mouse, and where the shiv lies;
    * **the steel** — walking onto the shiv opens the card that names `K`; taking
      it is what arms the body and what wakes the pair;
-   * **the cuts** — the player's first swing: LMB diagonal, `WHEEL UP` stab
-     (Prison shank: +200%, 0.167 s), `WHEEL DOWN` overhead;
+   * **the cuts** — raised on the same frame the shiv enters the hand, before the
+     pair get one frame to close in: LMB diagonal, `WHEEL UP` stab (Prison shank:
+     +200%, 0.167 s), `WHEEL DOWN` overhead;
    * **the guard** — the second watcher's first windup, held still mid-swing:
      hold RMB. A dagger only softens a blow (`DEFENSE_WEAK_BLOCK`), so the card
      says a guard is a moment, not a wall.

@@ -247,9 +247,9 @@ const DUEL_CARDS := [
 	{  # Card.SWING - the player's first cut.
 		"kicker": "STEP 6  /  THE CUT",
 		"title": "Three ways to swing a blade",
-		"body": "LMB is the heavy diagonal cut, and it alternates sides on its own. MOUSE WHEEL UP is a straight stab - a shiv stabs far faster than it chops - and MOUSE WHEEL DOWN is an overhead chop. Every cut spends stamina; standing off a moment gives it back.",
+		"body": "The shiv is yours, and the pair are awake. LMB is the heavy diagonal cut, and it alternates sides on its own. MOUSE WHEEL UP is a straight stab - a shiv stabs far faster than it chops - and MOUSE WHEEL DOWN is an overhead chop. Every cut spends stamina; standing off a moment gives it back.",
 		"keys": "LMB  -  cut        ·        WHEEL_UP  -  stab        ·        WHEEL_DOWN  -  overhead",
-		"footnote": "Three stabs put one watcher down. Keep the pair in front of you: a blade behind you meets nothing at all.",
+		"footnote": "Two stabs put one watcher down. Keep the pair in front of you: a blade behind you meets nothing at all.",
 	},
 	{  # Card.GUARD - the second watcher starts its swing.
 		"kicker": "STEP 7  /  THE GUARD",
@@ -310,6 +310,8 @@ var _card_state := -1
 ## The duel card currently up, so a beat that re-announces itself cannot re-raise
 ## a card the player has already read.
 var _duel_card := -1
+## The watcher whose windup raised the guard card: the body the card is taught on.
+var _guard_teacher: WeakRef = null
 var _steel_taken := 0
 var _prompt_text := ""
 var _hint_text := ""
@@ -996,33 +998,9 @@ func _begin_duel() -> void:
 	duel.note_taken()
 	if duel.step() != DuelScript.Step.MOVE:
 		return
-	_watch_player_swings()
 	var actor = controller.body_of(rescuer_id) if controller != null else null
 	if actor != null and is_instance_valid(actor) and holds_blade(actor):
 		duel.note_shiv_taken()
-
-
-## Listen to the body's own rig: one signal per cut, whichever hand swings, and
-## the same signal the combat layer resolves damage from.
-func _watch_player_swings() -> void:
-	var actor = controller.active_body(1) if controller != null else null
-	if actor == null or not is_instance_valid(actor):
-		return
-	var rig = actor.get("rig")
-	if rig == null or not is_instance_valid(rig):
-		return
-	if not rig.melee_started.is_connected(_on_player_swing):
-		rig.melee_started.connect(_on_player_swing)
-
-
-## The player cut at something. The first cut is where the three cuts get named;
-## the watcher it was aimed at becomes the swings card's subject, which is what
-## leaves the *other* one to teach the guard.
-func _on_player_swing(_hand: String) -> void:
-	if duel == null or not duel.fighting() or duel.swing_card():
-		return
-	var watcher = _nearest_watcher(controller.active_body(1))
-	duel.note_swing(0 if watcher == null else watcher.get_instance_id())
 
 
 ## The nearest standing watcher of the camp's to a body, or null.
@@ -1083,7 +1061,57 @@ func _duel_tick() -> void:
 		duel.note_fight_over()
 		return
 	if winding != null and not duel.guard_card():
-		duel.note_windup(winding.get_instance_id(), alive)
+		if duel.note_windup(winding.get_instance_id(), alive):
+			# The card is up and the tree is frozen: this is the one safe frame to
+			# put the teacher inside its own strike reach, so the blow the player is
+			# asked to guard actually arrives.
+			_guard_teacher = weakref(winding)
+			_close_guard_teacher()
+
+
+## Slide the watcher teaching the guard into its own strike reach, along the
+## bearing it already holds. A warden chooses its swing from `reach + TRADE_REACH`
+## (3.5 m) and does not walk the gap during the windup, while the blow only lands
+## at `reach` (2.35 m, 2.49 m by the strike) - so the card the player is told to
+## answer would otherwise be a swing that falls short. Done while the card holds
+## the tree still, so nothing is seen moving.
+func _close_guard_teacher() -> void:
+	var body = controller.active_body(1) if controller != null else null
+	if body == null or not is_instance_valid(body):
+		return
+	var teacher = _guard_teacher.get_ref() if _guard_teacher != null else null
+	if teacher == null or not is_instance_valid(teacher):
+		return
+	if _strike_would_land(teacher, body):
+		return
+	var offset: Vector3 = (teacher as Node3D).global_position - (body as Node3D).global_position
+	offset.y = 0.0
+	if offset.length_squared() < 0.0001:
+		return
+	var profile = teacher.get("profile")
+	if not (profile is Dictionary):
+		return
+	var reach := float((profile as Dictionary).get("reach", 0.0))
+	if reach <= 0.0:
+		return
+	(teacher as Node3D).global_position = (body as Node3D).global_position \
+		+ offset.normalized() * reach * 0.8
+
+
+## Whether the blow a watcher is winding up would actually arrive from where it
+## stands.
+func _strike_would_land(watcher, body) -> bool:
+	if watcher == null or not is_instance_valid(watcher):
+		return false
+	if body == null or not is_instance_valid(body):
+		return false
+	var profile = watcher.get("profile")
+	if not (profile is Dictionary):
+		return false
+	var reach := float((profile as Dictionary).get("reach", 0.0))
+	if reach <= 0.0:
+		return false
+	return watcher.global_position.distance_to(body.global_position) <= reach
 
 
 ## A duel card was asked for: raise it, once.
@@ -1101,7 +1129,7 @@ func _on_duel_step(step: int) -> void:
 		DuelScript.Step.FETCH:
 			_set_status("Stand over the shiv and press K to take it.", 4.0)
 		DuelScript.Step.FIGHT:
-			_set_status("The pair are awake. They swing slowly - read them.", 3.5)
+			_set_status("The pair are awake. Your cuts are on the card - read it, then swing.", 4.5)
 		DuelScript.Step.DONE:
 			_set_status("The pair are down. Cut a latch at each cage with G.", 5.0)
 

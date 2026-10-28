@@ -169,6 +169,8 @@ func check_the_world() -> void:
 	_dismiss_card()
 	game._try_loot()
 	check(game.camp.holds_blade(cutter), "K puts the ironwood shiv in his hands")
+	# Taking it freezes the game for the cuts card; this regression wants the trail.
+	_dismiss_card()
 	for index in game.camp.CAGE_POSTS.size():
 		var post: Vector3 = game.camp.CAGE_POSTS[index]
 		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)

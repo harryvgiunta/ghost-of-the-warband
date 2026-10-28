@@ -481,29 +481,33 @@ func check_duel() -> void:
 	check(camp.holds_blade(cutter), "and the body is holding a blade")
 	check(camp.duel.step() == DuelScript.Step.FIGHT,
 		"taking the shiv starts the fight (%s)" % camp.duel.step_name())
-	# 3. The pair wake on that frame, and never before it.
+	# 3. The pickup itself is the freeze: the three cuts are named on the frame the
+	#    shiv enters the hand, before the pair are given one frame to close in.
+	check(camp.duel.cuts_card(), "the pickup raises the cuts card")
+	check(game.card != null and game.card.is_open(),
+		"and the game is held still on that frame")
+	check(paused, "the tree is paused, not just the card")
+	if game.card != null and game.card.is_open():
+		check(game.card.step() == "step_5", "the cuts card is the chapter's sixth (%s)"
+			% game.card.step())
+		check(int(game.card.get("_keys_row").get_child_count()) >= 3,
+			"and it draws the three cut keys as tiles")
+	check(str(camp.hint_line(cutter)).contains("LMB"),
+		"while the key line teaches the cut (%s)" % str(camp.hint_line(cutter)))
+	check(_hunting_watchers() == 0, "and nothing has moved on the body still reading (%d hunting)"
+		% _hunting_watchers())
+	dismiss_card("the cuts card")
+	# 4. The pair wake once the card is closed, and not a frame earlier.
 	var woke := await await_condition(
 		func() -> bool: return _hunting_watchers() > 0, 8.0, "the pair waking")
 	check(woke, "the pair turn on the body holding the shiv (%d hunting)"
 		% _hunting_watchers())
-	# 4. The first cut is where the three cuts get named.
-	await click_until_swing(cutter)
-	check(camp.duel.swing_card(), "the player's first cut raises the swings card")
-	check(game.card != null and game.card.is_open(),
-		"and the game is held still for it")
-	if game.card != null and game.card.is_open():
-		check(game.card.step() == "step_5", "the cuts card is the chapter's sixth (%s)"
-			% game.card.step())
-	dismiss_card("the swings card")
-	# 5. The second watcher's windup is where the guard is taught: stand in front
-	#    of it and let it raise its club.
-	var second = camp.guards[1] if camp.guards.size() > 1 else null
-	check(second != null and is_instance_valid(second), "the pair has a second body")
-	if second != null and is_instance_valid(second):
-		cutter.global_position = (second as Node3D).global_position + Vector3(0.0, 0.1, 1.7)
+	# 5. The second of the pair to raise its club is where the guard is taught: the
+	#    pair walk on the body on their own, so the card comes off their windups.
 	var wind := await await_condition(
-		func() -> bool: return bool(camp.duel.guard_card()), 12.0, "the guard card")
-	check(wind, "the second watcher's swing teaches the guard")
+		func() -> bool: return bool(camp.duel.guard_card()), 16.0, "the guard card")
+	check(wind, "a watcher's windup teaches the guard (%d hunting, %s)"
+		% [_hunting_watchers(), camp.duel.step_name()])
 	if game.card != null and game.card.is_open():
 		check(game.card.step() == "step_6", "the guard card is the chapter's seventh (%s)"
 			% game.card.step())
@@ -512,7 +516,7 @@ func check_duel() -> void:
 	#    because a body still landing cannot raise its blade.
 	var guarded := false
 	var guard_frames := 0
-	while guard_frames < 300:
+	while guard_frames < 900:
 		if not bool(cutter.combat.blocking):
 			var press := InputEventMouseButton.new()
 			press.button_index = MOUSE_BUTTON_RIGHT

@@ -32,12 +32,12 @@ enum Step { DORMANT, MOVE, FETCH, FIGHT, DONE }
 enum Card { MOVE, FETCH, SWING, GUARD }
 
 var _step := Step.DORMANT
-var _swing_card := false
+var _cuts_card := false
 var _guard_card := false
 var _guarded := false
-## The watcher the swings card was about. The guard lesson belongs to the other
-## one - unless only one is left standing, and then it is his too.
-var _swing_target := 0
+## The watcher whose windup opened the exchange. The guard lesson belongs to the
+## other one - unless only one is left standing, and then it is his as well.
+var _first_windup := 0
 
 ## The soul stepped into the rescuer. This is the first beat and the only way in.
 func note_taken() -> bool:
@@ -55,31 +55,29 @@ func note_shiv_near() -> bool:
 	card_wanted.emit(Card.FETCH)
 	return true
 
-## The shiv left the dirt and went into a hand: the pair may wake. This is the
-## only thing that starts the fight - a body without a weapon is not asked to
-## walk into two watchers.
+## The shiv left the dirt and went into a hand. That is the frame the cuts are
+## taught on - the moment a new player is armed is the moment they ask how to
+## swing - so the card is raised here, before the pair are given a single frame to
+## close in. The fight may wake from this point and not before.
 func note_shiv_taken() -> bool:
 	if _step != Step.MOVE and _step != Step.FETCH:
 		return false
+	_cuts_card = true
 	_set_step(Step.FIGHT)
-	return true
-
-## The player swung. The first cut is where the three cuts are named.
-func note_swing(watcher_id: int = 0) -> bool:
-	if _step != Step.FIGHT or _swing_card:
-		return false
-	_swing_card = true
-	_swing_target = watcher_id
 	card_wanted.emit(Card.SWING)
 	return true
 
-## A watcher's windup started. The guard card is written for the *second* of the
-## pair: the one the swings card was not about. `pair_alive` is how many of the
-## pair are still standing, so the last survivor can teach it too.
+## A watcher's windup started. The guard card belongs to the *second* of the pair:
+## the first body to raise its club opens the exchange and the other one is the
+## one the card is written for. With a single watcher left standing it teaches the
+## card itself, because there is no second. `pair_alive` is how many of the pair
+## are still up.
 func note_windup(watcher_id: int, pair_alive: int = 2) -> bool:
 	if _step != Step.FIGHT or _guard_card or _guarded:
 		return false
-	if watcher_id == _swing_target and pair_alive > 1:
+	if _first_windup == 0:
+		_first_windup = watcher_id
+	if watcher_id == _first_windup and pair_alive > 1:
 		return false
 	_guard_card = true
 	card_wanted.emit(Card.GUARD)
@@ -136,14 +134,12 @@ func armed() -> bool:
 func guarded() -> bool:
 	return _guarded
 
-func swing_card() -> bool:
-	return _swing_card
+## Whether the three cuts have been named (they are, the moment the shiv is taken).
+func cuts_card() -> bool:
+	return _cuts_card
 
 func guard_card() -> bool:
 	return _guard_card
-
-func swing_target() -> int:
-	return _swing_target
 
 ## The one line above the crosshair while this lesson runs. Read fresh on every
 ## call, so a beat that changed a count cannot leave a stale label behind.
@@ -154,8 +150,6 @@ func objective() -> String:
 		Step.FETCH:
 			return "Take the ironwood shiv off the ground."
 		Step.FIGHT:
-			if not _swing_card:
-				return "The pair are awake. Put the first one down."
 			if _guard_card and not _guarded:
 				return "The second watcher is on you. Raise your guard."
 			return "Put the pair down. Latches come after."
@@ -169,20 +163,18 @@ func hint() -> String:
 		Step.FETCH:
 			return "K  -  take the ironwood shiv"
 		Step.FIGHT:
-			if not _swing_card:
-				return "LMB  -  cut   ·   the pair will close on you"
 			if _guard_card and not _guarded:
 				return "HOLD RMB  -  guard   ·   let go to swing again"
-			return "LMB  -  cut   ·   WHEEL_UP  -  stab   ·   WHEEL_DOWN  -  overhead"
+			return "LMB  -  cut   ·   WHEEL_UP  -  stab   ·   WHEEL_DOWN  -  overhead   ·   HOLD RMB  -  guard"
 	return ""
 
 ## Forget every beat (a fresh campaign starts the lesson again).
 func reset() -> void:
 	_step = Step.DORMANT
-	_swing_card = false
+	_cuts_card = false
 	_guard_card = false
 	_guarded = false
-	_swing_target = 0
+	_first_windup = 0
 
 func _set_step(next: int) -> void:
 	if next == _step:

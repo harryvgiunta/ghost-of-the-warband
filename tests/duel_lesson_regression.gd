@@ -47,7 +47,6 @@ func run() -> void:
 		"with nothing to say on the HUD")
 	check(not lesson.note_shiv_near(), "a step onto the shiv before the body is not progress")
 	check(not lesson.note_shiv_taken(), "and neither is a pickup")
-	check(not lesson.note_swing(1), "nor a swing, wherever it came from")
 	check(not lesson.note_guarded(), "nor a guard")
 	check(cards.is_empty(), "and no card was asked for (%s)" % str(cards))
 
@@ -75,20 +74,18 @@ func run() -> void:
 	check(lesson.step() == DuelScript.Step.FIGHT and lesson.fighting(),
 		"and only now may the pair wake (%s)" % lesson.step_name())
 	check(lesson.armed(), "the lesson knows the player is armed")
-	check(not lesson.swing_card(), "no swing has been thrown yet")
-	check(lesson.note_swing(77), "the first cut asks for the cuts card")
-	check(lesson.swing_card() and lesson.swing_target() == 77,
-		"and remembers the watcher it was aimed at")
+	check(lesson.cuts_card(), "the pickup itself asks for the cuts card")
 	check(cards.size() == 3 and cards[2] == DuelScript.Card.SWING,
 		"the cuts card is the third one asked for (%s)" % str(cards))
 	check(lesson.hint().contains("LMB"), "which names the cut")
 	check(lesson.hint().contains("WHEEL_UP") and lesson.hint().contains("WHEEL_DOWN"),
 		"and both wheel swings (%s)" % lesson.hint())
-	check(not lesson.note_swing(77), "the cuts card is asked for once")
+	check(lesson.hint().contains("RMB"), "and the guard it can already use")
+	check(not lesson.note_shiv_taken(), "the cuts card is asked for once")
 
 	# --- the guard ----------------------------------------------------------
 	check(not lesson.note_windup(77, 2),
-		"the watcher the cut was aimed at does not teach the guard while its partner stands")
+		"the first watcher to wind up does not teach the guard while its partner stands")
 	check(not lesson.guard_card(), "so no guard card was asked for")
 	check(lesson.note_windup(88, 2), "the second watcher's windup does")
 	check(lesson.guard_card(), "and the guard card is up")
@@ -112,7 +109,6 @@ func run() -> void:
 	root.add_child(last)
 	last.note_taken()
 	last.note_shiv_taken()
-	last.note_swing(11)
 	check(not last.note_windup(11, 2),
 		"the survivor of a full pair waits its turn to teach the guard")
 	check(last.note_windup(11, 1),
@@ -128,12 +124,13 @@ func run() -> void:
 	check(carried.note_shiv_taken(),
 		"a body that already holds a blade skips the pickup beat")
 	check(carried.step() == DuelScript.Step.FIGHT, "and goes straight to the fight")
+	check(carried.cuts_card(), "with the cuts card raised on that same frame")
 
 	# --- reset -------------------------------------------------------------
 	lesson.reset()
 	check(lesson.step() == DuelScript.Step.DORMANT and not lesson.fighting(),
 		"reset puts the lesson back on the first beat")
-	check(not lesson.swing_card() and not lesson.guard_card() and not lesson.guarded(),
+	check(not lesson.cuts_card() and not lesson.guard_card() and not lesson.guarded(),
 		"and forgets every card the player had already read")
 	check(lesson.note_taken(), "a fresh campaign starts it again")
 
