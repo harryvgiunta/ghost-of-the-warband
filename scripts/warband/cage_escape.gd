@@ -55,12 +55,17 @@ const CAGE_POSTS := [
 ]
 ## Where the loose prisoner waits: between the cages and the watchers.
 const RESCUER_POST := Vector3(1.4, 0.2, -23.0)
-## Corvin's shiv, on the dirt. The pair took it off him at the mouth and threw it
-## up the pocket, so the first weapon the player ever holds is a thing on the
-## ground to be picked up with `K` - a short walk from his post, clear of both
-## watchers, and on the spine the lesson is walked on.
+## Corvin's shiv, on the dirt at the foot of the cold altar - the stone he jogs
+## past on his way to the cages, and the one lit place at the back of the camp. The
+## pair threw it there, so the first weapon the player ever holds is a thing on the
+## ground a few paces behind where his body lands, picked up with `K`, and marked
+## by `lesson_arrow.gd` until it is taken.
+##
+## It sits inside the altar's ring of skull-topped sticks (radius 3.05 m) and clear
+## of the four cold candles (1.9 m) and the bone heap beside the steps, so the
+## gold arrow has dark dirt under it rather than stone.
 const LESSON_SHIV := "dagger_ironwood"
-const SHIV_POST := Vector3(1.4, 0.15, -16.0)
+const SHIV_POST := Vector3(-2.15, 0.15, 11.0)
 ## How close the body has to come to the shiv before the card that asks for `K`
 ## opens. It matches the world's own loot reach (`world_scene.LOOT_REACH`), so the
 ## card is up on exactly the frames `K` works: a new player reads it, presses `K`,
@@ -202,7 +207,7 @@ const STEP_CARDS := {
 	2: {  # RESCUER_ARRIVED
 		"kicker": "STEP 3  /  THE BODY",
 		"title": "Take his body, take back his shiv",
-		"body": "Corvin is at the cage line with empty hands. Step into him with F5: you walk his legs, you swing his arms. His ironwood shiv is lying in the dirt up the pocket - take it, put the two watchers down, and then cut one latch at each cage with G.",
+		"body": "Corvin is at the cage line with empty hands. Step into him with F5: you walk his legs, you swing his arms. His ironwood shiv is lying on the dirt at the cold altar behind him - take it, put the two watchers down, and then cut one latch at each cage with G.",
 		"keys": "F5  or  [ ]  -  take Corvin",
 		"footnote": "One latch per cage, four in all, and bare hands on a padlock cut nothing.",
 	},
@@ -233,7 +238,7 @@ const DUEL_CARDS := [
 	{  # Card.MOVE - the soul is in Corvin and nothing is hunting him yet.
 		"kicker": "STEP 4  /  THE FEET",
 		"title": "You have his body - now walk it",
-		"body": "W A S D walks, SHIFT runs, SPACE jumps, and the mouse turns your head. Corvin's shiv is lying in the dirt up the pocket, a few paces from where he stopped. Nothing is awake to stop you walking to it.",
+		"body": "W A S D walks, SHIFT runs, SPACE jumps, and the mouse turns your head. Corvin's shiv is lying on the dirt at the foot of the cold altar, a few paces behind where he stopped - it has a gold arrow over it. Nothing is awake to stop you walking to it.",
 		"keys": "W A S D  -  walk        ·        SHIFT  -  run        ·        SPACE  -  jump        ·        MOUSE  -  look",
 		"footnote": "Walk onto the shiv. The game holds still while a card is open, so read this as slowly as you like.",
 	},
@@ -1160,7 +1165,7 @@ func _on_duel_card(slot: int) -> void:
 func _on_duel_step(step: int) -> void:
 	match step:
 		DuelScript.Step.MOVE:
-			_set_status("His body is yours. His shiv is lying in the dirt up the pocket.", 4.0)
+			_set_status("His body is yours. His shiv is on the dirt at the cold altar.", 4.0)
 		DuelScript.Step.FETCH:
 			_set_status("Stand over the shiv and press K to take it.", 4.0)
 		DuelScript.Step.FIGHT:

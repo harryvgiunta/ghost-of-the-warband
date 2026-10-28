@@ -2,9 +2,9 @@ class_name LessonArrow
 extends Node3D
 ## GHOST OF THE WARBAND: the pointing hand for a thing the lesson wants walked to.
 ##
-## The first fight's shiv lies in the dirt seven metres up the pocket, and "walk to
-## your shiv" is not a place: a body standing at the cage line is looking at a dark
-## pocket, two sleepers and a card. This is a big warm gold arrow - unshaded, so it
+## The first fight's shiv lies on the dirt at the foot of the cold altar, a few
+## paces behind where Corvin stops, and "walk to your shiv" is not a place: a body
+## that has just taken his hands is looking at a dark yard, two sleepers and a card. This is a big warm gold arrow - unshaded, so it
 ## reads at any distance and in the camp's night - hanging above the item with a
 ## slow roll and a bob. It carries no text: the pickup already floats its own name.
 ##

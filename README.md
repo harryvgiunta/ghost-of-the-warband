@@ -16,8 +16,8 @@ difference - and the warband is the thing that survives a battle.
   the game** and names the keys as carved key tiles; it closes on its **CONTINUE**
   button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
   prisoner in sacrificial rags runs in **empty-handed** - the pair took his shiv
-  off him and threw it in the dirt - and **you take his body yourself** (F5 or
-  `[ ]`). Nothing fights for you: the first fight is taught while it happens, one
+  off him and threw it down at the camp's cold altar - and **you take his body
+  yourself** (F5 or `[ ]`). Nothing fights for you: the first fight is taught while it happens, one
   card per thing you need - the walk (`W A S D`, `SHIFT`, `SPACE`, mouse), the
   ironwood shiv on the ground (**K**), the three cuts (**LMB** diagonal,
   **WHEEL UP** stab, **WHEEL DOWN** overhead) the instant the shiv is in your

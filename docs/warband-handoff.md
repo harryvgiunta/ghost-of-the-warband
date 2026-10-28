@@ -35,8 +35,9 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
    keys; it closes on CONTINUE / G / Enter / Escape.
 2. **Corvin arrives with empty hands.** After the fourth sighting he jogs in
-   (~3.6 s) and stops at the cage line: the pair took his shiv off him at the
-   mouth and threw it in the dirt. He fights nothing and nothing fights him - the
+   (~3.6 s) and stops in front of the cold altar: the pair took his shiv off him
+   at the mouth and threw it down at the altar's left foot (`SHIV_POST`
+   (-2.15, 0.15, 11.0), inside its ring of skull sticks and clear of the candles). He fights nothing and nothing fights him - the
    first fight is the player's, and it is taught while it happens
    (`scripts/warband/duel_lesson.gd`, four cards):
    * **the feet** — the moment the soul enters him: W A S D / SHIFT / SPACE /

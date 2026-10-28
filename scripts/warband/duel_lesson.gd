@@ -10,7 +10,8 @@ extends Node
 ##
 ##   1. **MOVE** - the soul is in his body, and walking is the first thing a new
 ##      player needs. Nothing hunts them yet.
-##   2. **FETCH** - the shiv lies a few paces up the pocket. Pressing `K` over it
+##   2. **FETCH** - the shiv lies a few paces off, on the dirt by the cold altar.
+##      Pressing `K` over it
 ##      is the whole lesson; the warband takes the piece into that body's hands.
 ##   3. **SWING** - the moment the player swings is the moment to name the three
 ##      cuts, because that is when the question is being asked.
@@ -146,7 +147,7 @@ func guard_card() -> bool:
 func objective() -> String:
 	match _step:
 		Step.MOVE:
-			return "Your shiv lies in the dirt up the pocket. Walk to it."
+			return "Your shiv lies on the dirt at the cold altar. Walk to it."
 		Step.FETCH:
 			return "Take the ironwood shiv off the ground."
 		Step.FIGHT:

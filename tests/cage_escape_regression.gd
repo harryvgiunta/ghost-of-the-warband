@@ -496,7 +496,7 @@ func check_duel() -> void:
 		"the soul is still in Corvin's body for the fight")
 	# 1. The walk. The card that asks for `K` opens on the approach, never on a
 	#    timer, and the pair stay asleep until the player is armed.
-	cutter.global_position = camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	cutter.global_position = camp.SHIV_POST + Vector3(0.0, 0.35, -1.8)
 	await physics_frame
 	await physics_frame
 	check(camp.duel.step() == DuelScript.Step.FETCH,
@@ -540,8 +540,10 @@ func check_duel() -> void:
 		func() -> bool: return _hunting_watchers() > 0, 8.0, "the pair waking")
 	check(woke, "the pair turn on the body holding the shiv (%d hunting)"
 		% _hunting_watchers())
-	# 5. The second of the pair to raise its club is where the guard is taught: the
-	#    pair walk on the body on their own, so the card comes off their windups.
+	# 5. The altar is a yard away from their posts, so the player meets them: the
+	#    same walk a player makes after the cuts card closes.
+	cutter.global_position = Vector3(0.0, 0.3, -18.0)
+	#    The second of the pair to raise its club is where the guard is taught.
 	var wind := await await_condition(
 		func() -> bool: return bool(camp.duel.guard_card()), 16.0, "the guard card")
 	check(wind, "a watcher's windup teaches the guard (%d hunting, %s)"
