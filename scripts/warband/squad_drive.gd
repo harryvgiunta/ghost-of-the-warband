@@ -82,11 +82,22 @@ const PUSH_CAP := 0.55
 ## ring is what spreads the squad out on the walk instead of stacking it.
 const ESCORT_RINGS := 2
 const ESCORT_SLOT_GAP := 1.35
-## Idle bodies take small steps around their own post - shorter than a walk, and
-## re-rolled every couple of seconds - so a waiting squad drifts instead of
-## freezing in a heap.
-const ROAM_MIN := 2.6
-const ROAM_MAX := 4.6
+## The escort's arrival band. An ally walks to its post only when it is further
+## than `ESCORT_ENGAGE` from it and stops `ESCORT_STANDOFF` short, so it arrives
+## and stays. Without the band a body walked to its post, overshot it by the
+## walk's own stopping distance, turned round and paced back: measured on a still
+## soul with no enemies at all, four allies covered 40-53 m apiece in ten seconds
+## and ended 12-20 m from where they started - walking in circles.
+const ESCORT_ENGAGE := 1.9
+const ESCORT_STANDOFF := 0.85
+## Idle bodies take one short step and then stand: a waiting squad drifts instead of
+## freezing in a heap, and stands still in between instead of pacing. Measured from
+## the other direction - a squad that stepped whenever its clock ran out never
+## stopped moving, and continuous small steps around a post read as circling.
+const ROAM_STEP_MIN := 0.35
+const ROAM_STEP_MAX := 0.60
+const ROAM_REST_MIN := 2.5
+const ROAM_REST_MAX := 5.0
 const ROAM_RADIUS_MIN := 0.20
 const ROAM_RADIUS_MAX := 0.55
 const ROAM_INTENT := 0.30
@@ -172,7 +183,8 @@ const TURN_RATE := 320.0
 ## dressing clock is one of them: a bandage takes its seconds wherever the body
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
 ## that keeps running behind a fight.
-const TRACK_CLOCKS := ["state_left", "step_left", "side", "heal_left", "roam_left"]
+const TRACK_CLOCKS := ["state_left", "step_left", "side", "heal_left", "roam_left",
+	"rest_left"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
 ## hand can hold at all is the union plus a bow, which the squad's `_armed` test
@@ -291,9 +303,12 @@ func drive(delta: float) -> void:
 			var post := _escort_post(actor, track)
 			var gap: Vector3 = post - actor.global_position
 			gap.y = 0.0
-			if gap.length() > 0.45:
-				_advance(actor, post, track)
+			var walking := bool(track.get("to_post", false))
+			if gap.length() > (ESCORT_STANDOFF if walking else ESCORT_ENGAGE):
+				track["to_post"] = true
+				_advance(actor, post, track, ESCORT_STANDOFF)
 				continue
+			track["to_post"] = false
 		_idle_roam(actor, track)
 
 
@@ -993,16 +1008,26 @@ func _escort_post(actor, track: Dictionary) -> Vector3:
 ## step is re-rolled when its clock runs out, so a waiting squad reads as bodies
 ## shifting their weight rather than statues in a row.
 func _idle_roam(actor, track: Dictionary) -> void:
-	if float(track.get("roam_left", 0.0)) <= 0.0 or not track.has("roam_to"):
-		track["roam_left"] = _rng.randf_range(ROAM_MIN, ROAM_MAX)
+	# One step, then a rest. The step clock runs only while the body is stepping;
+	# when it expires the body stands until the rest expires, and only then picks
+	# the next step. A squad that re-rolled a step the moment the last one ended
+	# never stopped walking, and small steps around a post are a circle.
+	if float(track.get("roam_left", 0.0)) <= 0.0:
+		_hold(actor)
+		if float(track.get("rest_left", 0.0)) > 0.0:
+			return
+		track["roam_left"] = _rng.randf_range(ROAM_STEP_MIN, ROAM_STEP_MAX)
+		track["rest_left"] = _rng.randf_range(ROAM_REST_MIN, ROAM_REST_MAX)
 		var angle := _rng.randf_range(0.0, TAU)
 		var reach := _rng.randf_range(ROAM_RADIUS_MIN, ROAM_RADIUS_MAX)
 		var here: Vector3 = (actor as Node3D).global_position
 		track["roam_to"] = here + Vector3(cos(angle), 0.0, sin(angle)) * reach
+		return
 	var target: Vector3 = track.get("roam_to", (actor as Node3D).global_position)
 	var to: Vector3 = target - (actor as Node3D).global_position
 	to.y = 0.0
 	if to.length() <= ROAM_STOP:
+		# Arrived early: the rest of the step clock is spent standing.
 		_hold(actor)
 		return
 	_steer(actor, to.normalized() * ROAM_INTENT, track, false)
@@ -1021,7 +1046,8 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0,
 			"sign": 1.0, "state": FIGHT_CLOSE, "state_left": 0.0, "step_left": 0.0,
 			"heal_left": 0.0, "bandaging": false, "merc_id": merc_id,
-			"roam_left": 0.0, "roam_to": actor.global_position, "delta": delta,
+			"roam_left": 0.0, "rest_left": 0.0, "to_post": false,
+			"roam_to": actor.global_position, "delta": delta,
 			"swings_left": 0, "swing_due": false,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]

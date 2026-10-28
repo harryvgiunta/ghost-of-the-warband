@@ -389,8 +389,15 @@ Short version of the latest tuning (all in the code, all covered by
   apart from squadmates and the soul inside `PERSONAL_SPACE` 1.45 m, an escort
   stands on its own slot of a ring around the soul (`_escort_post`, slot from its
   place in `squad_ids`) instead of on the soul, and an ally with nothing to do
-  drifts around its post in short steps (`_idle_roam`, 0.30-0.95 m re-rolled every
-  1.6-3.4 s). A squad with nothing to do used to stand as one knot;
+  takes one short step and then a rest (`_idle_roam`: `ROAM_STEP_MIN/MAX` 0.35-0.60 s
+  of stepping, then `ROAM_REST_MIN/MAX` 2.5-5.0 s standing). An escort also keeps
+  an arrival band - walk to its post only beyond `ESCORT_ENGAGE` 1.9 m, stop
+  `ESCORT_STANDOFF` 0.85 m short - because a body that walked to its post and
+  overshot it by the walk's own stopping distance paced back and forth for ever:
+  measured on a still soul with no enemies, four allies covered 40-53 m apiece in
+  ten seconds and ended 12-20 m from where they started. After the band and the
+  rest, the same measurement is 0.9-1.8 m in ten seconds. A squad with nothing to
+  do used to stand as one knot - and then, for a while, to walk in circles;
 - an unarmed ally looks for **steel** first - a weapon on the ground inside
   `SEARCH_METRES`, or a blade still on a corpse (`WarbandGearDrop`/`take_from_corpse`)
   - and does not cross the clearing for a rag, a ring or a bundle;
