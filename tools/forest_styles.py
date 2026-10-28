@@ -93,6 +93,11 @@ MOBS: dict[str, dict] = {
             "attack": {"duration": 1.600, "loop": False, "impact": 0.780},
             "hit": {"duration": 0.500, "loop": False, "impact": 0.120},
             "death": {"duration": 1.450, "loop": False},
+            "attack_slash": {"duration": 1.350, "loop": False, "impact": 0.660},
+            "attack_stab": {"duration": 1.100, "loop": False, "impact": 0.500},
+            "block": {"duration": 1.200, "loop": True},
+            "stagger": {"duration": 0.600, "loop": False},
+            "crouch": {"duration": 2.400, "loop": True},
         },
         "stride": {"walk": 0.92, "run": 1.72},
         "duty": {"walk": 0.58, "run": 0.42},
@@ -274,15 +279,18 @@ MOB_ORDER = ["hollow_warden", "ossuary_stalker", "gallowsroot"]
 
 
 def clip_name(mob: str, key: str) -> str:
-    """``Warden_Idle``, ``Stalker_Attack``, ``Gallowsroot_Death``.
+    """``Warden_Idle``, ``Stalker_Attack``, ``Warden_Attack_Slash``.
 
-    No ``_Loop`` suffix: Godot's glTF importer strips a trailing ``_Loop`` from
-    animation names, so a suffix-based name would silently import as a
-    different name than the metadata records. Loop semantics live in the
-    adjacent JSON and are applied by the runtime controller.
+    Every underscore-separated word is capitalised, so a compound key names the
+    same clip here, in the GLB and in the metadata. No ``_Loop`` suffix: Godot's
+    glTF importer strips a trailing ``_Loop`` from animation names, so a
+    suffix-based name would silently import as a different name than the
+    metadata records. Loop semantics live in the adjacent JSON and are applied
+    by the runtime controller.
     """
     prefix = MOBS[mob]["prefix"]
-    return f"{prefix}_{key.capitalize()}"
+    words = "_".join(word.capitalize() for word in key.split("_"))
+    return f"{prefix}_{words}"
 
 
 def mob_dir(mob: str) -> Path:

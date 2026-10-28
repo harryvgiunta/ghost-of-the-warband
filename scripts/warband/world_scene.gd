@@ -7,7 +7,8 @@ extends Node3D
 ## answer: the camp in the deep wood (with the four cages in it), the trail
 ## through the wood, and the town with its counters, its altar and its expedition
 ## gate all stand in **one coordinate space**, and the only way between them is to
-## walk.
+## walk. They also stand on **one ground**: `terrain.gd`'s heightfield, with the
+## camp pocket and the town square padded flat into a rolling forest floor.
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
@@ -18,10 +19,11 @@ extends Node3D
 ##   * `Camp` - `cage_escape.gd`: the ragged pocket in the wood, the cages, the
 ##     lesson. No fence and no road: a camp with trees standing in it, and a gap
 ##     in those trees at its front line.
-##   * `Trail` - `escape_run.gd`: the 915 m lane through the wood, with the forty
-##     cultists on it. Its first waypoint is `Camp.CAMP_TO_ROAD_METRES` of
-##     ordinary wood past the camp's mouth, so the road is a long run and not the
-##     other side of a hedge.
+##   * `Trail` - `escape_run.gd`: the 915 m way through the wood, with the twenty
+##     cultists on it. There is no lane: a faint worn line between trunks that
+##     stand in it, marked by a pair of torches every twelve metres. Its first
+##     waypoint is `Camp.CAMP_TO_ROAD_METRES` of ordinary wood past the camp's
+##     mouth, so the way on is a long walk and not the other side of a hedge.
 ##   * `Town` - `town_hub.gd`: the square at the far end, walled on three sides,
 ##     open where the trail comes in.
 ##
@@ -55,16 +57,14 @@ const TownScript = preload("res://scripts/warband/town_hub.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
-const TextureLibrary = preload("res://scripts/world/texture_library.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 ## How far past the lane's far end the town square stands. The lane ends at the
 ## town's north gate; the square's centre is this far beyond it.
 const TOWN_BEHIND := 30.0
-## The floor under everything: wide enough for the camp's whole wood, the lane and
-## the square, so no body ever walks off the edge of the world (rule 12).
-const FLOOR_HALF_WIDTH := 210.0
-const FLOOR_FRONT := -1240.0
-const FLOOR_BACK := 240.0
+## Half the town's flat pad: the square's walls plus a stride, so a body standing
+## on any part of the square is standing on level ground.
+const TOWN_PAD := 23.0
 ## How close a body has to stand to something to loot it by hand.
 const LOOT_REACH := 2.6
 ## `ArenaActor` clamps a body to a square around the world origin, and the town
@@ -99,7 +99,7 @@ var trail
 var town
 var bodies: Array = []
 ## Every hostile in the world, in one list: the camp's watchers, the six that come
-## out of the trees, and the road's cultists. Found by `SquadDrive.retarget` and
+## out of the trees, and the trail's cultists. Found by `SquadDrive.retarget` and
 ## by the squad's fight, appended to by the areas that spawn them.
 var guards: Array = []
 ## Every weapon on the ground, in one list, for the one loot vacuum.
@@ -115,6 +115,11 @@ var _hint_text := ""
 var _roster_elapsed := 0.0
 var _wipe_beat := -1.0
 var _wiped := false
+## What the heightfield was baked to: `{triangles, cell, min, max}`.
+var _terrain: Dictionary = {}
+## Where the town square stands, worked out before the ground so its pad can be
+## cut into the field.
+var _town_at := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -124,7 +129,7 @@ func _ready() -> void:
 		return
 	flow = get_node_or_null("/root/GameFlow")
 	start_area = _wanted_start()
-	_build_floor()
+	_build_ground()
 	_build_camera()
 	_build_soul()
 	_build_ui()
@@ -219,46 +224,70 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-# --- the world's floor and its night ---------------------------------------
+# --- the world's ground and its night --------------------------------------
 
-## One floor under the camp, the trail and the town, and one net under that. The
-## lane asks for no floor of its own and the town asks for no slab: this is the
-## only ground in the world, which is the only way three places can share it.
-func _build_floor() -> void:
+## The ground the camp, the trail and the town all stand on: one heightfield
+## (`terrain.gd`), baked once, with one trimesh collider and one `height_at` the
+## whole world samples. The camp pocket and the town square are padded flat inside
+## it; the walk between them rolls over the wood's own rises and hollows.
+##
+## Under it, the net: a catch floor below the lowest point of the field, so a body
+## pushed through a collider lands somewhere rather than falling out of the map.
+func _build_ground() -> void:
 	var style: WorldStyle = RunForestScript.night_style()
-	var ground: Material = TextureLibrary.ground_material(style)
-	var centre := Vector3(0.0, -0.3, (FLOOR_FRONT + FLOOR_BACK) * 0.5)
-	var size := Vector3(FLOOR_HALF_WIDTH * 2.0, 0.6, FLOOR_BACK - FLOOR_FRONT)
-	var floor_body := StaticBody3D.new()
-	floor_body.name = "WorldFloor"
-	floor_body.position = centre
-	floor_body.collision_layer = 1
-	floor_body.collision_mask = 0
-	add_child(floor_body)
-	var mesh := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh.mesh = box
-	mesh.material_override = ground
-	mesh.name = "WorldGround"
-	floor_body.add_child(mesh)
-	var shape := CollisionShape3D.new()
-	var box_shape := BoxShape3D.new()
-	box_shape.size = size
-	shape.shape = box_shape
-	floor_body.add_child(shape)
-	# The net: nothing is ever lost, whatever is pushed through a collider.
+	_town_at = lane_end() + Vector3(0.0, 0.0, -TOWN_BEHIND)
+	var pads := [
+		{"rect": Rect2(-CampScript.YARD_HALF_WIDTH, CampScript.YARD_FRONT,
+			CampScript.YARD_HALF_WIDTH * 2.0,
+			CampScript.YARD_BACK - CampScript.YARD_FRONT),
+			"y": TerrainScript.PAD_Y, "blend": 14.0},
+		{"rect": Rect2(_town_at.x - TOWN_PAD, _town_at.z - TOWN_PAD,
+			TOWN_PAD * 2.0, TOWN_PAD * 2.0), "y": TerrainScript.PAD_Y, "blend": 16.0},
+	]
+	# What feet have worn: the gap in the camp's wood and the line of torches. The
+	# far side of the town's square is paved, so nothing there needs a path.
+	var worn := [
+		{"points": _corridor_line(), "half_width": 2.6},
+		{"points": _lane_line(), "half_width": 3.2},
+	]
+	_terrain = TerrainScript.build(self, style, pads, worn)
+	# The net: a slab under the strip's lowest point, as wide and as long as the
+	# field it protects. Nothing that slips through the mesh is ever lost.
 	var net := StaticBody3D.new()
 	net.name = "CatchFloor"
-	net.position = Vector3(0.0, -1.6, (FLOOR_FRONT + FLOOR_BACK) * 0.5)
+	net.position = Vector3(
+		TerrainScript.ORIGIN.x + float(TerrainScript.COLS) * TerrainScript.CELL * 0.5,
+		TerrainScript.floor_bottom() - 2.0,
+		TerrainScript.ORIGIN.y + float(TerrainScript.ROWS) * TerrainScript.CELL * 0.5)
 	net.collision_layer = 1
 	net.collision_mask = 0
 	add_child(net)
 	var net_shape := CollisionShape3D.new()
 	var net_box := BoxShape3D.new()
-	net_box.size = Vector3(FLOOR_HALF_WIDTH * 2.0 + 120.0, 0.4, FLOOR_BACK - FLOOR_FRONT + 120.0)
+	net_box.size = Vector3(float(TerrainScript.COLS) * TerrainScript.CELL + 120.0, 0.4,
+		float(TerrainScript.ROWS) * TerrainScript.CELL + 120.0)
 	net_shape.shape = net_box
 	net.add_child(net_shape)
+
+
+## The worn line between the camp's mouth and the lane's first waypoint, in world
+## space: the ground's only idea of where the way out is.
+func _corridor_line() -> PackedVector3Array:
+	var line := PackedVector3Array()
+	line.append(CampScript.GATE_POINT)
+	line.append(Vector3(CampScript.GATE_POINT.x, 0.0,
+		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES))
+	return line
+
+
+## The lane, in world space, so the trodden ground follows the same line the
+## torches and the trunks do.
+func _lane_line() -> PackedVector3Array:
+	var offset := trail_offset()
+	var line := PackedVector3Array()
+	for point in RunForestScript.LANE_POINTS:
+		line.append((point as Vector3) + offset)
+	return line
 
 
 func _build_camera() -> void:
@@ -344,7 +373,7 @@ func _build_areas() -> void:
 	town = TownScript.new()
 	town.name = "Town"
 	town.host = self
-	town.position = lane_end() + Vector3(0.0, 0.0, -TOWN_BEHIND)
+	town.position = _town_at
 	add_child(town)
 	town.embed(self)
 	# The expedition gate is the only door the campaign has left.
@@ -360,20 +389,18 @@ func _attach_trail() -> void:
 	trail.attach(self, {
 		"offset": trail_offset(),
 		"ground": false,
-		"closed_start": false,
-		"closed_end": false,
 		"arch": false,
 	})
 
 
 ## Where the lane's first waypoint lands: not the camp's mouth, but
 ## `Camp.CAMP_TO_ROAD_METRES` of ordinary wood past it. The camp owns that number
-## and the geometry builds the corridor through the trees to match it, so the road
-## cannot creep up on the cages again.
+## and the geometry builds the corridor through the trees to match it, so the way
+## out cannot creep up on the cages again.
 func trail_offset() -> Vector3:
-	var road_start := Vector3(CampScript.GATE_POINT.x, 0.0,
+	var trail_start := Vector3(CampScript.GATE_POINT.x, 0.0,
 		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES)
-	return road_start - (RunForestScript.LANE_POINTS[0] as Vector3)
+	return trail_start - (RunForestScript.LANE_POINTS[0] as Vector3)
 
 
 ## Where the lane's last waypoint lands: the town's own gate.
@@ -437,7 +464,7 @@ func _wire_crawl(actor) -> void:
 	crawl.set_friends(bodies)
 
 
-## The squad is `squad_drive.gd` - the same one module the cage and the road always
+## The squad is `squad_drive.gd` - the same one module the cage and the trail always
 ## shared. In the camp it holds the clearing; once the lesson is over the camp
 ## tells it to escort the soul down the trail.
 func _build_squad() -> void:
@@ -770,7 +797,7 @@ func _update_prompt() -> void:
 	var actor = controller.active_body(1)
 	var text := ""
 	# The counter under the body's nose wins over the camp's lesson, and the
-	# lesson wins over the road: a body can only be standing in one of them.
+	# lesson wins over the trail: a body can only be standing in one of them.
 	if town != null and town.in_square(actor):
 		text = town.prompt_line(actor)
 	if text.is_empty() and camp != null:
@@ -781,7 +808,7 @@ func _update_prompt() -> void:
 	_write_prompt(text, _hint_text)
 
 
-## The key line: the lesson's, or the counter's, or the road's.
+## The key line: the lesson's, or the counter's, or the trail's.
 func _update_hint() -> void:
 	if hud == null or controller == null:
 		return
@@ -903,6 +930,10 @@ func stats() -> Dictionary:
 		"torches": (trail.forest.get("torches", []) as Array).size() if trail != null else 0,
 		"town_wood": int(town.wood.get("trees", 0)) if town != null else 0,
 		"town_at": town.global_position if town != null else Vector3.ZERO,
+		"terrain_tris": int(_terrain.get("triangles", 0)),
+		"terrain_cell": float(_terrain.get("cell", 0.0)),
+		"height_min": float(_terrain.get("min", 0.0)),
+		"height_max": float(_terrain.get("max", 0.0)),
 	}
 
 
@@ -952,8 +983,10 @@ func _wanted_start() -> String:
 
 func _announce() -> void:
 	var readout: Dictionary = stats()
-	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f road=%.0fm torches=%d trees=%d nodes=%d draws=%d shapes=%d"
+	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f road=%.0fm torches=%d trees=%d nodes=%d draws=%d shapes=%d ground=%.1f..%.1fm/%d tris"
 		% [start_area, bodies.size(), guards.size(), float(readout["lane_length"]),
 			float(readout["camp_to_road"]), int(readout["torches"]),
 			int(readout["clearing_trees"]) + int(readout["town_wood"]),
-			int(readout["nodes"]), int(readout["draws"]), int(readout["shapes"])])
+			int(readout["nodes"]), int(readout["draws"]), int(readout["shapes"]),
+			float(readout["height_min"]), float(readout["height_max"]),
+			int(readout["terrain_tris"])])

@@ -140,6 +140,11 @@ const GUARD_HOLD := 0.35
 ## Opt-in, and only the warband's cultists opt in: the frontier's mobs keep the
 ## fight they were tuned for.
 var guard_between_swings := false
+## Seconds left on a rolled guard window (`brace`). A braced body refuses to
+## trade: it holds its guard instead of swinging, and drops out of it into the
+## swing when the window closes. The cultists brace on their own clock; the
+## camp's watchers roll for it once an exchange.
+var _braced := 0.0
 
 
 func _ready() -> void:
@@ -252,6 +257,7 @@ func _physics_process(delta: float) -> void:
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
 	# Ghost of the Warband: the brain's guard window rides the cooldown clock.
 	_warband_guard = maxf(0.0, _warband_guard - delta)
+	_braced = maxf(0.0, _braced - delta)
 	# Between its own swings a cultist is not wide open: it keeps its guard up
 	# while it re-arms. That is what makes a swing an opening instead of a rhythm.
 	# It is braced for most of its cycle and opens for the half second before it
@@ -265,7 +271,7 @@ func _physics_process(delta: float) -> void:
 	var distance := to_target.length()
 	var direction := to_target.normalized() if distance > 0.001 else Vector3.FORWARD
 	# Town peace: a ranger inside the safe ring is never hunted, alerted or not.
-	var aggro := pursuit and not MobSenses.in_safe_ring(safe_center, focus)
+	var aggro := pursuit and _aggro_allowed(focus)
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	# Only an aware mob turns toward its quarry. A calm mob keeps the facing it
@@ -301,7 +307,7 @@ func _physics_process(delta: float) -> void:
 				_resolve_strike()
 			if _state_time >= float(profile.strike):
 				_enter("RECOVER")
-				_attack_cooldown = float(profile.cooldown)
+				_attack_cooldown = _cooldown_seconds()
 		"RECOVER":
 			var retreat := -direction
 			var tangent := Vector3(-direction.z, 0.0, direction.x) * _strafe_dir
@@ -319,6 +325,7 @@ func _physics_process(delta: float) -> void:
 	_drive(delta)
 	_visual.set_motion(get_real_velocity(), is_on_floor())
 	_visual.set_combat(state, _state_time)
+	_visual.set_poise(_present_blocking(), _present_crouch())
 
 
 ## Distance to the closest ranger, for the tick budget. Walks the two slots
@@ -405,6 +412,9 @@ func _calm_tick(delta: float) -> void:
 		return
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
+	# The guard window is a beat in an exchange, not a state: it runs out even
+	# when there is nothing left to fight.
+	_braced = maxf(0.0, _braced - delta)
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	_face_intent = Vector3.ZERO
@@ -420,6 +430,7 @@ func _calm_tick(delta: float) -> void:
 	if is_instance_valid(_visual):
 		_visual.set_motion(get_real_velocity(), is_on_floor())
 		_visual.set_combat(state, _state_time)
+		_visual.set_poise(_present_blocking(), _present_crouch())
 
 
 func _enter(next_state: String, reset_time := true) -> void:
@@ -453,8 +464,10 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 		_hunt(delta)
 		return
 	var reach := float(profile.reach)
-	# Ghost of the Warband: a guarded body refuses to trade (the brain's window).
-	if distance <= reach + 1.15 and _attack_cooldown <= 0.0 and _warband_guard <= 0.0:
+	# Ghost of the Warband: a guarded body refuses to trade (the brain's window,
+	# or a rolled one the body itself braced into).
+	if distance <= reach + 1.15 and _attack_cooldown <= 0.0 and not guard_up():
+		_choose_attack()
 		_enter("WINDUP")
 		return
 	var behaviour := str(profile.behaviour)
@@ -525,7 +538,7 @@ func _resolve_strike() -> void:
 	var spent := _state_time / maxf(0.01, float(profile.strike))
 	var reach := float(profile.reach) * (1.0 + 0.18 * spent)
 	if to_target.length() <= reach and absf(_target.global_position.y - global_position.y) < 2.4:
-		attacked.emit(self, float(profile.damage), _target)
+		attacked.emit(self, _strike_damage(), _target)
 
 func _resolve_target() -> CharacterBody3D:
 	var nearest := INF
@@ -653,15 +666,62 @@ func warband_stance(passive: bool) -> void:
 		_warband_guard = 0.0
 
 
-## Ghost of the Warband: hold the attack gate shut for `seconds`; the newest
-## A raised guard: the body refuses to trade and turns most of what lands on it.
+## Open this body's own guard window for `seconds`: it holds the guard instead of
+## swinging, and the next completed cooldown drops straight into the swing. The
+## cultists' clock is `warband_guard`; this is the same gate a body can roll for
+## itself, which is how the camp's watchers block sometimes and never always.
+func brace(seconds: float) -> void:
+	_braced = maxf(_braced, seconds)
+
+
+## A raised guard: the body refuses to trade. Whoever owns the window - the
+## brain's clock or the body's own roll - the swing gate reads this one answer.
 func guard_up() -> bool:
+	if _braced > 0.0:
+		return true
 	return guard_between_swings and _warband_guard > 0.0
 
 
+## Ghost of the Warband: hold the attack gate shut for `seconds`; the newest
 ## order wins, so `warband_guard(0.0)` is how the brain opens a swing window.
 func warband_guard(seconds: float) -> void:
 	_warband_guard = maxf(0.0, seconds)
+
+
+# --- identity hooks --------------------------------------------------------
+
+## The swing the windup that is starting will play. A body with one attack says
+## nothing; a body with several names one and the sampler plays it.
+func _choose_attack() -> void:
+	pass
+
+
+## What one landed strike takes off. A body whose arm matters more than its
+## profile says so here instead of after the blow has been emitted.
+func _strike_damage() -> float:
+	return float(profile.damage)
+
+
+## The beat between two swings. A scene may own this as a dial - a body that
+## swings too often is not the same fight as one that does not.
+func _cooldown_seconds() -> float:
+	return float(profile.cooldown)
+
+
+## Whether a body at `focus` may be fought: the town's safe ring shuts every
+## fight down, however the pursuit started.
+func _aggro_allowed(focus: Vector3) -> bool:
+	return not MobSenses.in_safe_ring(safe_center, focus)
+
+
+## What the body is holding up, for the sampler. The devils neither brace nor
+## crouch; a body that does answers here.
+func _present_blocking() -> bool:
+	return false
+
+
+func _present_crouch() -> bool:
+	return false
 
 
 func note_impact(force: Vector3) -> void:
@@ -803,6 +863,7 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	if is_instance_valid(_visual):
 		_visual.set_motion(velocity, state.g)
 		_visual.set_combat(self.state, _state_time)
+		_visual.set_poise(_present_blocking(), _present_crouch())
 	if health < previous_health:
 		var applied: float = previous_health - health
 		DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", false, health <= 0.0)

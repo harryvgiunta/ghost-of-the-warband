@@ -20,6 +20,7 @@ extends Node3D
 ## roster left exactly as it fell, which the world records.
 
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 
 ## What each cultist carries, in spawn order. Every one of them drops it.
@@ -109,14 +110,17 @@ func _build_cultists() -> void:
 		_spawn_ring(post as Vector3, rng)
 
 
-## A post's worth of cult, packed around the post but inside the walkable band:
-## the ring never reaches past the lane's walls, so nobody spawns inside a trunk.
+## A post's worth of cult, packed around the post inside the clear line: the ring
+## stays within `RunForestScript.CLEAR_HALF`, which is the band the wood keeps free
+## of trunks, so nobody spawns inside a tree. The post's own height is discarded -
+## the ring is placed on the ground once, never on top of an already-grounded post.
 func _spawn_ring(at: Vector3, rng: RandomNumberGenerator) -> void:
+	var centre := Vector3(at.x, 0.0, at.z)
 	for index in ROAD_PER_POST:
-		var angle := TAU * float(index) / float(ROAD_PER_POST)
-		var radius := rng.randf_range(1.0, 3.2)
-		var point := at + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-		_spawn_cultist(point)
+		var angle := TAU * float(index) / float(ROAD_PER_POST) + rng.randf_range(-0.4, 0.4)
+		var radius := rng.randf_range(0.8, 2.2)
+		var point := centre + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+		_spawn_cultist(TerrainScript.grounded(point))
 
 
 func _spawn_cultist(at: Vector3) -> void:

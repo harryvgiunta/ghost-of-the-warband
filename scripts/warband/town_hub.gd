@@ -269,8 +269,9 @@ func _build_square() -> void:
 	_build_campfire()
 
 func _build_ground() -> void:
-	# The world scene owns one floor for the whole map; a second slab under the
-	# square would only z-fight with it.
+	# The world scene owns one ground for the whole map - a heightfield with this
+	# square padded flat into it - so the square's own props keep standing at y = 0
+	# and a second slab would only z-fight with the field.
 	if host == null:
 		var ground := StaticBody3D.new()
 		ground.name = "Ground"

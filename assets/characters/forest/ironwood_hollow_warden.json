@@ -116,6 +116,33 @@
       "name": "Warden_Death",
       "duration": 1.45,
       "loop": false
+    },
+    "attack_slash": {
+      "name": "Warden_Attack_Slash",
+      "duration": 1.35,
+      "loop": false,
+      "impact": 0.66
+    },
+    "attack_stab": {
+      "name": "Warden_Attack_Stab",
+      "duration": 1.1,
+      "loop": false,
+      "impact": 0.5
+    },
+    "block": {
+      "name": "Warden_Block",
+      "duration": 1.2,
+      "loop": true
+    },
+    "stagger": {
+      "name": "Warden_Stagger",
+      "duration": 0.6,
+      "loop": false
+    },
+    "crouch": {
+      "name": "Warden_Crouch",
+      "duration": 2.4,
+      "loop": true
     }
   },
   "animations": {
@@ -124,10 +151,15 @@
     "Warden_Run": 0.8,
     "Warden_Attack": 1.6,
     "Warden_Hit": 0.5,
-    "Warden_Death": 1.45
+    "Warden_Death": 1.45,
+    "Warden_Attack_Slash": 1.35,
+    "Warden_Attack_Stab": 1.1,
+    "Warden_Block": 1.2,
+    "Warden_Stagger": 0.6,
+    "Warden_Crouch": 2.4
   },
   "authoring_fps": 60,
-  "root_translation_channels": 6,
+  "root_translation_channels": 11,
   "root_translation_drift": 0.0,
   "source": "Original procedural work authored by tools/prepare_forest_mobs.py from tools/forest_surface.py and tools/forest_styles.py; no third-party model, texture or motion. The supplied design sheet was inspiration only.",
   "reproducer": "python tools/build_forest.py hollow_warden"

@@ -29,6 +29,7 @@ extends RefCounted
 ##    the two ever drift apart.
 
 const Geo = preload("res://scripts/geo.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 ## The pocket this dressing is laid out inside. Mirrors `cage_escape.gd`'s
 ## `YARD_HALF_WIDTH` / `YARD_FRONT` / `YARD_BACK`; the regression compares them.
@@ -177,6 +178,7 @@ static func _straw(m, mats: Dictionary, at: Vector3, rng: RandomNumberGenerator,
 		var angle := rng.randf_range(0.0, TAU)
 		var foot := at + Vector3(cos(angle) * rng.randf_range(0.0, spread), 0.0,
 			sin(angle) * rng.randf_range(0.0, spread))
+		foot = TerrainScript.grounded(foot)
 		var tip := foot + Vector3(cos(angle) * rng.randf_range(0.12, 0.36),
 			rng.randf_range(0.05, 0.24), sin(angle) * rng.randf_range(0.12, 0.34))
 		CampKit.add_beam(m, foot, tip, rng.randf_range(0.009, 0.019),
@@ -255,7 +257,7 @@ static func _build_cage_hardware(root: Root, scene: Node3D, mats: Dictionary,
 static func _build_banners(root: Root, mats: Dictionary) -> void:
 	var holder := _group(root, "Banners")
 	for index in BANNER_POSTS.size():
-		var at: Vector3 = BANNER_POSTS[index]
+		var at: Vector3 = TerrainScript.grounded(BANNER_POSTS[index])
 		var m := CampKit.Merged.new()
 		m.base = Transform3D(Basis(Vector3.UP, _inward(at)), at)
 		CampKit.add_beam(m, Vector3(0.0, -0.15, 0.0), Vector3(0.05, 3.55, 0.02), 0.055,
@@ -299,7 +301,7 @@ static func _build_banners(root: Root, mats: Dictionary) -> void:
 static func _build_gibbets(root: Root, mats: Dictionary, iron: Dictionary) -> void:
 	var holder := _group(root, "Gibbets")
 	for index in GIBBET_POSTS.size():
-		var at: Vector3 = GIBBET_POSTS[index]
+		var at: Vector3 = TerrainScript.grounded(GIBBET_POSTS[index])
 		var m := CampKit.Merged.new()
 		m.base = Transform3D(Basis(Vector3.UP, _inward(at)), at)
 		for side in [-1.0, 1.0]:
@@ -416,7 +418,7 @@ static func _build_altar(root: Root, scene: Node3D, mats: Dictionary,
 static func _build_braziers(root: Root, mats: Dictionary, iron: Dictionary) -> void:
 	var holder := _group(root, "Braziers")
 	for index in BRAZIER_POSTS.size():
-		var at: Vector3 = BRAZIER_POSTS[index]
+		var at: Vector3 = TerrainScript.grounded(BRAZIER_POSTS[index])
 		var node := Node3D.new()
 		node.name = "Brazier%d" % (index + 1)
 		node.position = at
@@ -469,22 +471,24 @@ static func _build_scatter(root: Root, mats: Dictionary, iron: Dictionary) -> vo
 	rng.seed = 1471
 	var straw := CampKit.Merged.new()
 	for post in STRAW_POSTS:
-		_straw(straw, mats, post, rng, 0.55, 9)
+		_straw(straw, mats, TerrainScript.grounded(post), rng, 0.55, 9)
 	straw.commit(holder, "StrawScatter", false)
 	var blood := CampKit.Merged.new()
 	for post in BLOOD_POSTS:
-		CampKit.add_ball(blood, rng.randf_range(0.52, 0.95), post + Vector3(0.0, 0.02, 0.0),
+		CampKit.add_ball(blood, rng.randf_range(0.52, 0.95),
+			TerrainScript.grounded(post) + Vector3(0.0, 0.02, 0.0),
 			iron["blood"], Vector3(1.0, 0.03, rng.randf_range(0.70, 1.0)), 10, 3)
 	blood.commit(holder, "BloodStains", false)
 	var ruts := CampKit.Merged.new()
 	var length := RUT_FROM - RUT_TO
 	var centre := (RUT_FROM + RUT_TO) * 0.5
+	var rut_y := TerrainScript.height_at(0.0, centre)
 	for side in [-1.0, 1.0]:
 		CampKit.add_box(ruts, Vector3(0.30, 0.030, length),
-			Vector3(side * RUT_HALF_TRACK, 0.012, centre), iron["rut"])
+			Vector3(side * RUT_HALF_TRACK, rut_y + 0.012, centre), iron["rut"])
 	ruts.commit(holder, "CartRuts", false)
 	for post in STRAW_POSTS:
-		_record(root, "Straw", post, 0.42, false)
+		_record(root, "Straw", TerrainScript.grounded(post), 0.42, false)
 	for post in BLOOD_POSTS:
-		_record(root, "Blood", post, 0.75, false)
-	_record(root, "CartRuts", Vector3(0.0, 0.0, centre), 0.50, false)
+		_record(root, "Blood", TerrainScript.grounded(post), 0.75, false)
+	_record(root, "CartRuts", Vector3(0.0, rut_y, centre), 0.50, false)

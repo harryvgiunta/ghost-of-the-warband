@@ -27,6 +27,13 @@ const FOLLOW_PITCH := 0.26
 const MIN_DISTANCE := 0.55
 ## Clearance kept off the geometry that pulled the camera in.
 const SURFACE_MARGIN := 0.28
+## How fast the boom may pull in and how slowly it is allowed back out. A tree
+## passing between the eye and the body makes the raw ray distance jump by metres
+## from one frame to the next; snapping to it reads as the world shaking, which is
+## exactly what a running body through the wood looked like. Pulling in quickly
+## keeps the trunk from clipping through, easing out is what stops the jitter.
+const BOOM_IN_RATE := 30.0
+const BOOM_OUT_RATE := 3.5
 ## A pulled-in camera never drops below this height over the body's feet.
 const MIN_HEIGHT := 0.9
 ## Default length of the body-to-body arc.
@@ -42,6 +49,11 @@ var pitch := FOLLOW_PITCH
 
 var _target: Actor
 var _swooping := false
+## The current smoothed boom length, -1 until the first frame resolves one.
+var _boom := -1.0
+## The frame delta the last `update()` was given, so `_resolved` can ease on the
+## same clock the caller uses (it is also called from `follow_point()`).
+var _delta := 1.0 / 60.0
 var _swoop_from := Vector3.ZERO
 var _swoop_left := 0.0
 var _swoop_total := 0.0
@@ -129,6 +141,7 @@ func rotate_view(delta_yaw: float, delta_pitch: float) -> void:
 
 ## The arc and the follow both run from here, once per controller frame.
 func update(delta: float) -> void:
+	_delta = clampf(delta, 0.0, 0.1)
 	_ensure_camera()
 	if camera == null:
 		return
@@ -214,12 +227,19 @@ func _resolved(wanted: Vector3) -> Vector3:
 	var excluded: Array[RID] = [body.get_rid()]
 	_query.exclude = excluded
 	var hit := space.intersect_ray(_query)
-	var point := wanted
+	var wanted_length := anchor.distance_to(wanted)
+	var free_length := wanted_length
 	if not hit.is_empty():
-		var direction: Vector3 = (wanted - anchor).normalized()
-		var reach := maxf(0.0, anchor.distance_to(hit.position) - SURFACE_MARGIN)
-		reach = clampf(reach, MIN_DISTANCE, maxf(MIN_DISTANCE, anchor.distance_to(wanted)))
-		point = anchor + direction * reach
+		free_length = anchor.distance_to(hit.position) - SURFACE_MARGIN
+		free_length = clampf(free_length, MIN_DISTANCE, maxf(MIN_DISTANCE, wanted_length))
+	if _boom < 0.0:
+		_boom = free_length
+	else:
+		var rate := BOOM_IN_RATE if free_length < _boom else BOOM_OUT_RATE
+		_boom = move_toward(_boom, free_length, rate * _delta)
+	var direction: Vector3 = (wanted - anchor).normalized() if wanted_length > 0.0001 \
+		else Vector3.BACK
+	var point: Vector3 = anchor + direction * _boom
 	# A boom pulled flat against the ground would look through the body's knees.
 	point.y = maxf(point.y, body.global_position.y + MIN_HEIGHT)
 	return point

@@ -111,6 +111,7 @@ WARBAND_TESTS = [
     "quartermaster_regression",
     "warband_art_regression",
     "run_persistence_regression",
+    "warband_swing_clock_regression",
 ]
 ## ENet tests: two real processes on one machine, so they never share the pool.
 SERIAL = ["warband_lobby_regression", "warband_session_regression"]
@@ -118,7 +119,8 @@ SERIAL = ["warband_lobby_regression", "warband_session_regression"]
 ## can instead of at the wall clock, which is the difference between 90 s and 40 s;
 ## their assertions are distances and states, not frame counts.
 FIXED_FPS = {"cover_movement_regression", "weapon_input_regression",
-             "warband_world_regression", "escape_run_regression"}
+             "warband_world_regression", "escape_run_regression",
+             "warband_swing_clock_regression"}
 ## How many Godot processes run at once. One process per test sounds fastest and
 ## is not: on a real desktop the pool thrashes and the borderline tests - the ones
 ## that walk a thousand metres of world in real time - start missing their own

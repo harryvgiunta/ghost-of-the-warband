@@ -10,9 +10,28 @@ extends Node3D
 ## GLB clips, maps the six gameplay states onto idle/walk/run/attack/hit/death,
 ## and adjusts the physics-clock attack playback so the authored impact frame
 ## always coincides with the gameplay strike.
+##
+## The table entry may name more than the six: `attacks` is a dictionary of
+## named swings (each with its own clip, duration and impact, so a lunge and a
+## sweep each land on their own frame), `block` a guard loop, `stagger` the
+## one-shot a heavy blow drives the body back onto and `crouch` the stance it
+## rests in. A body that names none of them is the same single-swing mob it was,
+## and the sampler is the only place that knows the difference - controllers say
+## what the body is doing (`set_attack`, `set_poise`) and the table decides how
+## that looks. A catalog piece in the hand (`set_held_weapon`) and the body's own
+## paint (`set_tint`) are the other two things a variant can change without
+## forking any of this.
 
 const MobLod = preload("res://scripts/mob_lod.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const Sword = preload("res://scripts/sword.gd")
+const Dagger = preload("res://scripts/dagger.gd")
+const Bow = preload("res://scripts/bow.gd")
+## The catalog, so a mob holds the piece its id names rather than a shape that
+## only resembles it, and the rig's own weapon dimensions, so the club in a
+## warden's hand is the club the warband swings.
+const Catalog = preload("res://scripts/player_state.gd")
+const Archer = preload("res://scripts/archer.gd")
 
 const SCENES := {
 	"hell_goat": "res://assets/characters/devils/ironwood_hell_goat.glb",
@@ -98,6 +117,23 @@ var _dead := false
 var _death_time := 0.0
 var _death_held := false
 var _hover_time := 0.0
+## The named swing the next windup plays ("" is the body's single attack).
+var _attack := ""
+## The stance the controller asked for: a held guard, a crouched rest.
+var _blocking := false
+var _crouched := false
+## The per-body paint. Every surface material is duplicated for this instance in
+## `_tune_materials`, so tinting one warden cannot repaint the one beside it.
+var _tint := Color.WHITE
+var _paint: Array[StandardMaterial3D] = []
+var _paint_base: Array[Color] = []
+## The catalog piece in the hand, the bone attachment that follows the hand and
+## the fitted grip under it.
+var _held_item := ""
+var _held: Node3D
+var _hold: BoneAttachment3D
+var _grip: Node3D
+var _grip_scale := 1.0
 
 
 func _ready() -> void:
@@ -106,6 +142,9 @@ func _ready() -> void:
 		push_error("Unknown mob: " + mob_id)
 		return
 	_data = _data_table()[mob_id]
+	# The weapon models are authored for a ranger's palm; a body whose hand is
+	# bigger says so in its own entry rather than every call passing it in.
+	_grip_scale = maxf(0.1, float(_data.get("grip_scale", 1.0)))
 	var packed: PackedScene = load(str(scenes[mob_id]))
 	if packed == null:
 		push_error("Missing mob scene: " + str(scenes[mob_id]))
@@ -133,6 +172,19 @@ func _ready() -> void:
 		_player.get_animation(str(_data[key])).loop_mode = Animation.LOOP_LINEAR
 	for key in ["attack", "hit", "death"]:
 		_player.get_animation(str(_data[key])).loop_mode = Animation.LOOP_NONE
+	# The optional vocabulary: a body that authors several swings, a guard, a
+	# stagger or a crouch names them in its own table entry. A body that names
+	# none - every devil, the stalker, the root - stays the single-swing mob it
+	# always was, and the loop semantics are set here because the importer does
+	# not carry them.
+	for name in attack_names():
+		if has_clip(attack_clip(name)):
+			_player.get_animation(attack_clip(name)).loop_mode = Animation.LOOP_NONE
+	for clip in [block_clip(), crouch_clip()]:
+		if has_clip(clip):
+			_player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+	if has_clip(stagger_clip()):
+		_player.get_animation(stagger_clip()).loop_mode = Animation.LOOP_NONE
 	_hit_duration = _player.get_animation(str(_data["hit"])).length
 	_clip = str(_data["idle"])
 	_player.play(_clip, 0.0)
@@ -150,9 +202,208 @@ func _data_table() -> Dictionary:
 	return DATA
 
 
+# --- the authored vocabulary ----------------------------------------------
+
+## The swings this body authors, by name. Empty for a mob that has one swing:
+## the table's single `attack` is then the whole of its vocabulary.
+func attack_names() -> Array[String]:
+	var out: Array[String] = []
+	for name in (_data.get("attacks", {}) as Dictionary).keys():
+		out.append(str(name))
+	out.sort()
+	return out
+
+
+## The clip a named swing plays, or "" when the body does not author it.
+func attack_clip(name: String) -> String:
+	var authored: Dictionary = _data.get("attacks", {})
+	return str((authored.get(name, {}) as Dictionary).get("clip", ""))
+
+
+## The guard loop this body holds, or "" when it has no guard of its own.
+func block_clip() -> String:
+	return str(_data.get("block", ""))
+
+
+## The one-shot a heavy blow drives the body back onto. A mob with no stagger of
+## its own takes the hit react: the same recoil, shorter.
+func stagger_clip() -> String:
+	return str(_data.get("stagger", _data.get("hit", "")))
+
+
+## The stance this body rests in, or "" when it never crouches.
+func crouch_clip() -> String:
+	return str(_data.get("crouch", ""))
+
+
+## Whether the imported player carries `clip` at all. The table promises the
+## names; this is the asset keeping the promise. Playback falls back on its own,
+## so nothing silent happens at runtime - the regression is what fails when a
+## promised clip is not baked.
+func has_clip(clip: String) -> bool:
+	return _player != null and not clip.is_empty() and _player.has_animation(clip)
+
+
+## Choose what the next windup plays: "" is the body's single authored attack,
+## a name from `attack_names()` is one of several.
+func set_attack(name: String) -> void:
+	_attack = name
+
+
+func current_attack() -> String:
+	return _attack
+
+
+## The stance the controller wants: a held guard and a crouched rest.
+## `_select_locomotion` picks the authored clip for both, so a controller only
+## says what the body is doing and the sampler decides how it looks.
+func set_poise(blocking: bool, crouched: bool) -> void:
+	if blocking == _blocking and crouched == _crouched:
+		return
+	_blocking = blocking
+	_crouched = crouched
+	if _dead or _attack_playing or _hit_playing:
+		return
+	_select_locomotion()
+
+
+## The paint this body wears. Each instance owns duplicates of its surfaces, so a
+## tint is the body's own and the body beside it keeps its colour.
+func set_tint(tint: Color) -> void:
+	_tint = tint
+	for index in _paint.size():
+		_paint[index].albedo_color = _paint_base[index] * tint
+
+
+func tint() -> Color:
+	return _tint
+
+
+# --- the piece in the hand -------------------------------------------------
+
+## Put a catalog piece in this body's right hand. The model is the one the
+## warband holds - `Sword`/`Dagger`/`Bow` built from the catalog's own kind and
+## index - hung off the hand bone so it follows every authored clip, and the
+## physical bones the corpse becomes. `""` leaves the hand empty.
+func set_held_weapon(item_id: String) -> void:
+	if item_id == _held_item:
+		return
+	_held_item = item_id
+	if _held != null and is_instance_valid(_held):
+		_held.queue_free()
+	_held = null
+	if item_id.is_empty():
+		return
+	var item: Dictionary = Catalog.ITEMS.get(item_id, {})
+	if item.is_empty():
+		return
+	var kind := str(item.get("kind", ""))
+	var piece: Node3D = _weapon_node(kind, int(item.get("index", 0)))
+	if piece == null:
+		return
+	var hand := _hand(kind)
+	if hand == null:
+		piece.queue_free()
+		return
+	hand.add_child(piece)
+	piece.scale = Vector3.ONE * _grip_scale
+	# A piece in a mob's hand is carried, not used: a bow is not nocked until it
+	# is drawn, and nothing here draws one.
+	if piece.has_method("set_arrow_visible"):
+		piece.set_arrow_visible(false)
+	_held = piece
+
+
+## The catalog id the hand is actually holding, or "" when it is empty.
+func held_item() -> String:
+	return _held_item if _held != null else ""
+
+
+func _weapon_node(kind: String, index: int) -> Node3D:
+	match kind:
+		"sword":
+			var sword = Sword.new()
+			sword.sword_kind = index
+			sword.blade_length = float(Archer.SWORD_DATA[
+				clampi(index, 0, Archer.SWORD_DATA.size() - 1)].length)
+			return sword
+		"dagger":
+			var dagger = Dagger.new()
+			dagger.dagger_kind = index
+			dagger.blade_length = float(Archer.dagger_profile(index).length)
+			return dagger
+		"bow":
+			var bow = Bow.new()
+			bow.bow_kind = index
+			bow.bow_length = float(Archer.BOW_DATA[
+				clampi(index, 0, Archer.BOW_DATA.size() - 1)].length)
+			return bow
+	return null
+
+
+## The hand bone's attachment and the grip under it, built on first use.
+##
+## A `BoneAttachment3D` rewrites its own transform from the bone every frame, so
+## a rotation set on it is discarded: the grip therefore lives on a child. The
+## attachment follows the hand (including the limp physical bones the corpse
+## becomes) and the grip owns the rotation and offset that put a catalog piece -
+## authored for the warband's socket, haft down its own -Z with the grip at the
+## origin - into this creature's fist, aimed by its own table entry.
+func _hand(kind: String) -> Node3D:
+	if _grip == null or not is_instance_valid(_grip):
+		if _skeleton == null or _strike_bone < 0:
+			return null
+		_hold = BoneAttachment3D.new()
+		_hold.name = "HeldWeapon"
+		_hold.bone_name = _skeleton.get_bone_name(_strike_bone)
+		_skeleton.add_child(_hold)
+		_grip = Node3D.new()
+		_grip.name = "Grip"
+		_hold.add_child(_grip)
+	_apply_grip(kind)
+	return _grip
+
+
+## The grip the entry gives this kind of piece: the flat `grip_*` keys are every
+## piece's, and `grips` overrides them per catalog kind - a bow's limbs are its
+## own +Y, so it cannot share the aim that puts a club's haft down the fist.
+func _apply_grip(kind: String) -> void:
+	var override: Dictionary = (_data.get("grips", {}) as Dictionary).get(kind, {})
+	_grip.position = override.get("offset", _data.get("grip_offset", Vector3.ZERO))
+	var degrees: Vector3 = override.get("rotation", _data.get("grip_rotation", Vector3.ZERO))
+	_grip.basis = Basis.from_euler(Vector3(deg_to_rad(degrees.x), deg_to_rad(degrees.y),
+		deg_to_rad(degrees.z)), EULER_ORDER_XYZ)
+
+
+## The swing the current windup plays, with its authored impact and length. A
+## body with one attack falls back to its single entry, so nothing that never
+## asked for a named swing changes.
+func _attack_entry() -> Dictionary:
+	var authored: Dictionary = _data.get("attacks", {})
+	var entry: Dictionary = authored.get(_attack, {})
+	if entry.is_empty() or not has_clip(str(entry.get("clip", ""))):
+		return {"clip": _data["attack"], "duration": _data["duration"],
+			"impact": _data["impact"]}
+	return entry
+
+
+func _block_target() -> String:
+	return block_clip() if has_clip(block_clip()) else str(_data["idle"])
+
+
+func _crouch_target() -> String:
+	return crouch_clip() if has_clip(crouch_clip()) else str(_data["idle"])
+
+
+func _stagger_target() -> String:
+	return stagger_clip() if has_clip(stagger_clip()) else str(_data["hit"])
+
+
 func _tune_materials() -> void:
 	if _instance == null:
 		return
+	_paint.clear()
+	_paint_base.clear()
 	for mesh_instance in _instance.find_children("*", "MeshInstance3D", true, false):
 		var node := mesh_instance as MeshInstance3D
 		for surface in node.mesh.get_surface_count():
@@ -169,6 +420,8 @@ func _tune_materials() -> void:
 					tuned.subsurf_scatter_enabled = true
 					tuned.subsurf_scatter_strength = 0.06
 				node.set_surface_override_material(surface, tuned)
+				_paint.append(tuned)
+				_paint_base.append(tuned.albedo_color)
 
 
 ## Range budget for this body: animation tracks stop past
@@ -200,7 +453,8 @@ func set_combat(state: String, time: float) -> void:
 			_attack_playing = false
 			_hit_playing = true
 			_hit_time = 0.0
-			_clip = str(_data["hit"])
+			_clip = _stagger_target()
+			_hit_duration = _player.get_animation(_clip).length
 			_player.speed_scale = 1.0
 			_player.play(_clip, 0.06)
 		return
@@ -209,7 +463,7 @@ func set_combat(state: String, time: float) -> void:
 			_hit_playing = false
 		if not _attack_playing:
 			_attack_playing = true
-			_clip = str(_data["attack"])
+			_clip = str(_attack_entry()["clip"])
 			_player.speed_scale = 1.0
 			_player.play(_clip, 0.05)
 		return
@@ -299,8 +553,11 @@ func _process(delta: float) -> void:
 func _seek_attack() -> void:
 	if profile.is_empty():
 		return
-	var impact := float(_data.get("impact", 0.6))
-	var total := float(_data.get("duration", 1.4))
+	var entry := _attack_entry()
+	var impact := float(entry.get("impact", 0.6))
+	# The clip's own length is the timeline the strike pose is authored on, so a
+	# short lunge and a long sweep each land on their own impact frame.
+	var total := maxf(0.05, _player.get_animation(_clip).length)
 	var windup := maxf(0.05, float(profile.get("windup", 0.45)))
 	var strike := maxf(0.05, float(profile.get("strike", 0.18)))
 	var recover := maxf(0.05, float(profile.get("recover", 0.55)))
@@ -318,7 +575,11 @@ func _seek_attack() -> void:
 func _select_locomotion() -> void:
 	var target := str(_data["idle"])
 	var scale := 1.0
-	if _speed > MOVE_THRESHOLD:
+	if _blocking:
+		# The guard is a stance, not a step: the authored block loop holds while
+		# the window is open, and the feet are the body's business.
+		target = _block_target()
+	elif _speed > MOVE_THRESHOLD:
 		var threshold := float(_data.get("run_threshold", 2.0))
 		if _speed >= threshold:
 			target = str(_data["run"])
@@ -326,6 +587,10 @@ func _select_locomotion() -> void:
 		else:
 			target = str(_data["walk"])
 			scale = clampf(_speed / maxf(0.1, float(_data["walk_speed"])), 0.55, 1.9)
+	elif _crouched:
+		# A crouched body standing still rests low: the crouch IS its idle, and it
+		# stands up for the swing (the attack states take the clip).
+		target = _crouch_target()
 	if _clip != target:
 		_clip = target
 		_player.play(target, 0.18)

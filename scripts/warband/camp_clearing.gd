@@ -7,14 +7,14 @@ extends RefCounted
 ## It is now what a holding pen in a drowned wood actually is: no fence line and no
 ## grass boundary at all, trees standing *inside* the camp's own footprint, a
 ## handful of rickety shelters and one fire ring around the cages, and a long
-## stretch of ordinary wood between the gap in the trees and the road's first
+## stretch of ordinary wood between the gap in the trees and the trail's first
 ## torch. Nothing about the way out reads as a road.
 ##
 ## This module is geometry only. `cage_escape.gd` owns the lesson - the sequencer,
 ## the four latches, the watchers and the reinforcements - and the world owns the
 ## bodies, the camera and the HUD. What comes back from `build()` is what a scene
 ## needs to *use* this place: the cage doors it lifts, the clear ground it
-## measured, the corridor it cut to the road, the collision it planted, and the
+## measured, the corridor it cut through the wood, the collision it planted, and the
 ## flame material its torches share with the trail.
 ##
 ## Three rules hold it together, the same three the dressing modules keep:
@@ -26,15 +26,17 @@ extends RefCounted
 ##    out of the camp crosses no seam in the light.
 ## 2. **The wood is solid where it is walked, the ground is not a ledge.** The
 ##    trees a body can reach carry trunk colliders and the band's outer edge is
-##    walled behind them, exactly as `run_forest.gd` walls the lane; the pocket's
-##    own floor is the world's, never a second slab. Deep in the wood the trees are
-##    batched props, not thousands of colliders.
+##    walled behind them; the pocket's own floor is the world's heightfield, never
+##    a second slab, and every tree, shelter, prop and torch is lifted onto that
+##    heightfield by `terrain.gd`. Deep in the wood the trees are batched props,
+##    not thousands of colliders.
 ## 3. **The caller owns the layout.** The pocket's bounds, the cage posts, the
-##    mouth, the distance to the road and the spans that must stay clear are
+##    mouth, the distance to the trail and the spans that must stay clear are
 ##    handed in by the camp (which hands them on from the dressing module, so the
 ##    two can never drift), never invented here.
 
 const Geo = preload("res://scripts/geo.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const CampKit = preload("res://scripts/world/camp_kit.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
 const FireFlicker = preload("res://scripts/world/fire_flicker.gd")
@@ -47,23 +49,25 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 ## Deterministic: a rebuilt world is the same world.
 const SEED := 4137
 ## How deep the wood runs outside the pocket: the sides, the back and the whole of
-## the way to the road. The camp sits in a wood, not in a clearing with a treeline
+## the way to the trail. The camp sits in a wood, not in a clearing with a treeline
 ## painted behind it.
 const WOOD_DEPTH := 170.0
 ## How far out the trees a body can reach keep trunk colliders. Past this the wood
 ## is batched props: a forest is not 4000 collision shapes.
-const SOLID_WOOD_DEPTH := 24.0
+const SOLID_WOOD_DEPTH := 18.0
 ## Square metres per tree and per bush: dense in the near ring - what a body reads
 ## at arm's length - and thinner in the deep wood, which only has to close the
-## horizon through the fog without turning into a collider for every trunk.
-const TREE_AREA := 180.0
-const FAR_TREE_AREA := 840.0
-const BUSH_AREA := 260.0
-const FAR_BUSH_AREA := 1800.0
+## horizon through the fog without turning into a collider for every trunk. The
+## wood is twice as thick as the treeline it grew out of: a camp lost in it, not a
+## camp with a hedge round it.
+const TREE_AREA := 96.0
+const FAR_TREE_AREA := 430.0
+const BUSH_AREA := 140.0
+const FAR_BUSH_AREA := 950.0
 ## Trees planted inside the pocket's own footprint - the camp is *in* the wood -
 ## but only in a rim round its edge, so the wood intrudes on the camp without
 ## standing in the middle of the ground a body has to fight and walk on.
-const INTERIOR_TREE_AREA := 60.0
+const INTERIOR_TREE_AREA := 34.0
 const INTERIOR_RIM := 5.0
 const INTERIOR_BUSH_RIM := 9.0
 ## Chunk sizes for the batched wood. Wider chunks than the lane's, because this
@@ -76,8 +80,9 @@ const STAKE_SPACING := 1.35
 const STAKE_HEIGHT := 1.5
 const WALL_HEIGHT := 3.0
 ## How wide the corridor cut through the wood runs, either side of its wandering
-## centre. Wider than the lane, because this is a gap between trees and not a road.
-const CORRIDOR_HALF := 6.5
+## centre. A gap between trees a body can walk abreast in - not a road, and not a
+## fifteen-metre avenue.
+const CORRIDOR_HALF := 4.5
 ## The walk the lesson is played on, handed to the planting as keep-out circles by
 ## the camp: cage to cage, then down the pocket to the mouth.
 const WALK_SPINE := [
@@ -149,7 +154,7 @@ static func build(parent: Node3D, layout: Dictionary, style: WorldStyle) -> Dict
 	_build_props(parent, mats)
 
 	# The corridor: the way out of the camp, and the long run of ordinary wood
-	# between the mouth and the road's first waypoint. It wanders, because a
+	# between the mouth and the trail's first waypoint. It wanders, because a
 	# straight cut through trees is a road and this is a gap in the wood.
 	var corridor := _corridor(mouth, mouth_half, to_road)
 	var pocket := Rect2(-half, front, half * 2.0, back - front)
@@ -241,7 +246,7 @@ static func plant_wood(parent: Node3D, style: WorldStyle, clearing: Rect2, depth
 		var variant: Dictionary = record["variant"]
 		var species: Dictionary = record["species"]
 		var scale_at := rng.randf_range(0.85, 1.45)
-		var at := Vector3(point.x, 0.0, point.y)
+		var at := TerrainScript.grounded(Vector3(point.x, 0.0, point.y))
 		var xform := Transform3D(Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(
 			Vector3.ONE * scale_at), at)
 		(record["trunks"] as Array[Dictionary]).append({
@@ -302,7 +307,7 @@ static func plant_wood(parent: Node3D, style: WorldStyle, clearing: Rect2, depth
 			(buckets[slot] as Array[Dictionary]).append({
 				"transform": Transform3D(Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(
 					Vector3(scale_at, scale_at * rng.randf_range(0.8, 1.2), scale_at)),
-					Vector3(point.x, 0.0, point.y)),
+					TerrainScript.grounded(Vector3(point.x, 0.0, point.y))),
 				"color": Color(rng.randf_range(0.62, 0.86), rng.randf_range(0.66, 0.9),
 					rng.randf_range(0.58, 0.82), 1.0),
 			})
@@ -507,7 +512,9 @@ static func _wall_segment(solids: Node3D, at: Vector3, size: Vector3, yaw: float
 	shape.size = size
 	var collision := CollisionShape3D.new()
 	collision.shape = shape
-	collision.position = at
+	# The wall follows the ground: a segment laid at y = 0 on a rise would leave a
+	# step a body could crawl over, and in a hollow a gap under it.
+	collision.position = TerrainScript.grounded(at)
 	collision.rotation.y = yaw
 	solids.add_child(collision)
 
@@ -515,7 +522,7 @@ static func _wall_segment(solids: Node3D, at: Vector3, size: Vector3, yaw: float
 # --- the way out -----------------------------------------------------------
 
 ## The corridor through the trees: one throat at the mouth, a wandering run of
-## gaps the length of `to_road`, and a last bite that reaches the road's first
+## gaps the length of `to_road`, and a last bite that reaches the trail's first
 ## waypoint. Every rect is a hole the wood is not planted in and the wall ring is
 ## cut for, so the only way out of the camp is a walk between trees.
 static func _corridor(mouth: Vector3, mouth_half: float, to_road: float) -> Array:
@@ -575,15 +582,16 @@ static func _build_ragged_boundary(root: Node3D, mats: Dictionary, pocket: Rect2
 		if rng.randf() < 0.12:
 			height *= 0.34
 		var lean := Vector3(rng.randf_range(-0.22, 0.22), 0.0, rng.randf_range(-0.22, 0.22))
-		CampKit.add_beam(merged, Vector3(foot.x, -0.12, foot.y),
-			Vector3(foot.x + lean.x, height, foot.y + lean.z),
+		var foot_y := TerrainScript.height_at(foot.x, foot.y)
+		CampKit.add_beam(merged, Vector3(foot.x, foot_y - 0.12, foot.y),
+			Vector3(foot.x + lean.x, foot_y + height, foot.y + lean.z),
 			rng.randf_range(0.075, 0.115), wood, 6, 0.045)
 		if rng.randf() < 0.3:
-			CampKit.add_hanging(merged, mats, Vector3(foot.x, height * 0.82, foot.y),
+			CampKit.add_hanging(merged, mats, Vector3(foot.x, foot_y + height * 0.82, foot.y),
 				rng.randf_range(0.0, TAU), SEED + 900 + index, 0.62)
 		elif rng.randf() < 0.25:
-			CampKit.add_beam(merged, Vector3(foot.x - 0.55, height * 0.68, foot.y),
-				Vector3(foot.x + 0.5, height * 0.72, foot.y + 0.1), 0.03, rag, 3)
+			CampKit.add_beam(merged, Vector3(foot.x - 0.55, foot_y + height * 0.68, foot.y),
+				Vector3(foot.x + 0.5, foot_y + height * 0.72, foot.y + 0.1), 0.03, rag, 3)
 		stakes += 1
 	merged.commit(group, "Stakes")
 	return stakes
@@ -602,7 +610,7 @@ static func _build_shelters(root: Node3D, solids: StaticBody3D, mats: Dictionary
 		var spec: Dictionary = HUTS[index]
 		var host := Node3D.new()
 		host.name = "Hut%d" % (index + 1)
-		host.position = spec["post"]
+		host.position = TerrainScript.grounded(spec["post"])
 		host.rotation.y = float(spec["yaw"])
 		group.add_child(host)
 		CampKit.twig_shelter(host, mats, solids, {
@@ -618,7 +626,7 @@ static func _build_shelters(root: Node3D, solids: StaticBody3D, mats: Dictionary
 static func _build_fire(root: Node3D, mats: Dictionary) -> void:
 	var host := Node3D.new()
 	host.name = "CampFire"
-	host.position = FIRE_POST
+	host.position = TerrainScript.grounded(FIRE_POST)
 	root.add_child(host)
 	CampKit.fire_ring(host, mats, SEED + 17)
 	# The logs somebody dragged up to sit on, and a heap of split kindling. Local
@@ -651,14 +659,14 @@ static func _build_junk(root: Node3D, mats: Dictionary) -> void:
 	group.name = "CampJunk"
 	root.add_child(group)
 	var m := CampKit.Merged.new()
-	CampKit.pot_stack(m, mats, Vector3(-9.4, 0.0, 2.2), 0.4, 61)
-	CampKit.pot_stack(m, mats, Vector3(9.8, 0.0, -9.5), -1.1, 67)
-	CampKit.bone_heap(m, mats, Vector3(10.2, 0.0, 7.4), 1.3, 71)
-	CampKit.bone_heap(m, mats, Vector3(-10.6, 0.0, -15.0), -0.6, 73)
-	CampKit.mask_stake(m, mats, Vector3(9.4, 0.0, -2.4), -0.4, 79)
-	CampKit.mask_stake(m, mats, Vector3(-9.2, 0.0, -12.0), 0.9, 83)
-	CampKit.add_hanging(m, mats, Vector3(9.4, 1.72, -2.4), -0.4, 87, 0.8)
-	CampKit.add_hanging(m, mats, Vector3(-9.2, 1.68, -12.0), 0.9, 89, 0.7)
+	CampKit.pot_stack(m, mats, TerrainScript.grounded(Vector3(-9.4, 0.0, 2.2)), 0.4, 61)
+	CampKit.pot_stack(m, mats, TerrainScript.grounded(Vector3(9.8, 0.0, -9.5)), -1.1, 67)
+	CampKit.bone_heap(m, mats, TerrainScript.grounded(Vector3(10.2, 0.0, 7.4)), 1.3, 71)
+	CampKit.bone_heap(m, mats, TerrainScript.grounded(Vector3(-10.6, 0.0, -15.0)), -0.6, 73)
+	CampKit.mask_stake(m, mats, TerrainScript.grounded(Vector3(9.4, 0.0, -2.4)), -0.4, 79)
+	CampKit.mask_stake(m, mats, TerrainScript.grounded(Vector3(-9.2, 0.0, -12.0)), 0.9, 83)
+	CampKit.add_hanging(m, mats, TerrainScript.grounded(Vector3(9.4, 1.72, -2.4)), -0.4, 87, 0.8)
+	CampKit.add_hanging(m, mats, TerrainScript.grounded(Vector3(-9.2, 1.68, -12.0)), 0.9, 89, 0.7)
 	m.commit(group, "Junk")
 
 
@@ -697,7 +705,7 @@ static func _build_ground(root: Node3D, style: WorldStyle, pocket: Rect2,
 		var top := rng.randf_range(0.02, 0.05)
 		m.add(disc, Transform3D(Basis.IDENTITY.scaled(
 			Vector3(radius, top, radius * rng.randf_range(0.75, 1.15))),
-			Vector3(at.x, top * 0.5, at.z)), dirt)
+			TerrainScript.grounded(Vector3(at.x, top * 0.5, at.z))), dirt)
 	m.commit(group, "CampDirt", false)
 
 
@@ -726,8 +734,8 @@ static func _build_wood_litter(root: Node3D, band: Rect2, pocket: Rect2, gaps: A
 		if pocket.has_point(point) and rng.randf() < 0.75:
 			continue
 		RockKit.add_stone(boulders, rock, stones[index % stones.size()],
-			Vector3(point.x, 0.0, point.y), rng.randf_range(0.35, 1.5),
-			rng.randf_range(0.0, TAU), rng.randf_range(0.34, 0.62),
+			TerrainScript.grounded(Vector3(point.x, 0.0, point.y)),
+			rng.randf_range(0.35, 1.5), rng.randf_range(0.0, TAU), rng.randf_range(0.34, 0.62),
 			rng.randf_range(-0.22, 0.22))
 	boulders.commit(group, "Outcrops")
 
@@ -738,7 +746,7 @@ static func _build_wood_litter(root: Node3D, band: Rect2, pocket: Rect2, gaps: A
 			continue
 		var angle := rng.randf_range(0.0, TAU)
 		var length := rng.randf_range(1.6, 5.4)
-		var foot := Vector3(point.x, rng.randf_range(0.05, 0.28), point.y)
+		var foot := TerrainScript.grounded(Vector3(point.x, rng.randf_range(0.05, 0.28), point.y))
 		var tip := foot + Vector3(cos(angle) * length, rng.randf_range(-0.2, 0.3),
 			sin(angle) * length)
 		CampKit.add_beam(deadfall, foot, tip, rng.randf_range(0.10, 0.26),
@@ -750,7 +758,7 @@ static func _build_wood_litter(root: Node3D, band: Rect2, pocket: Rect2, gaps: A
 		var point := _sample(rng, band.grow(-SOLID_WOOD_DEPTH * 0.5))
 		if _blocked(point, gaps, keep_clear):
 			continue
-		CampKit.brush_screen(brush, mats, Vector3(point.x, 0.0, point.y),
+		CampKit.brush_screen(brush, mats, TerrainScript.grounded(Vector3(point.x, 0.0, point.y)),
 			rng.randf_range(0.0, TAU), rng.randf_range(2.2, 4.4), SEED + 300 + index)
 	brush.commit(group, "Brambles")
 
@@ -759,18 +767,19 @@ static func _build_wood_litter(root: Node3D, band: Rect2, pocket: Rect2, gaps: A
 		var point := _sample(rng, band)
 		if _blocked(point, gaps, keep_clear):
 			continue
+		var foot := TerrainScript.grounded(Vector3(point.x, 0.0, point.y))
 		match index % 4:
 			0:
-				CampKit.offering_stone(doodads, mats, Vector3(point.x, 0.0, point.y),
+				CampKit.offering_stone(doodads, mats, foot,
 					rng.randf_range(0.0, TAU), SEED + 400 + index)
 			1:
-				CampKit.pot_stack(doodads, mats, Vector3(point.x, 0.0, point.y),
+				CampKit.pot_stack(doodads, mats, foot,
 					rng.randf_range(0.0, TAU), SEED + 420 + index)
 			2:
-				CampKit.bone_heap(doodads, mats, Vector3(point.x, 0.0, point.y),
+				CampKit.bone_heap(doodads, mats, foot,
 					rng.randf_range(0.0, TAU), SEED + 440 + index)
 			_:
-				CampKit.skull_stakes(doodads, mats, Vector3(point.x, 0.0, point.y),
+				CampKit.skull_stakes(doodads, mats, foot,
 					rng.randf_range(0.0, TAU), 3, 0.7, SEED + 460 + index)
 	doodads.commit(group, "Doodads")
 
@@ -786,7 +795,7 @@ static func _build_cage(parent: Node3D, index: int, at: Vector3, mats: Dictionar
 	var wood: Material = mats["drift_dark"]
 	var cage := Node3D.new()
 	cage.name = "Cage%d" % (index + 1)
-	cage.position = Vector3(at.x, 0.0, at.z)
+	cage.position = TerrainScript.grounded(Vector3(at.x, 0.0, at.z))
 	parent.add_child(cage)
 	Geo.box(cage, Vector3(2.5, 0.1, 2.5), Vector3(0, -0.03, 0), wood)
 	for sx in [-1.0, 1.0]:
@@ -818,14 +827,17 @@ static func _build_props(parent: Node3D, mats: Dictionary) -> void:
 	group.name = "CampProps"
 	parent.add_child(group)
 	for index in PROP_POSTS.size():
+		var post: Vector3 = PROP_POSTS[index]
 		var crate := Geo.box(group, Vector3(0.9, 0.9, 0.9),
-			PROP_POSTS[index] + Vector3(0, 0.45, 0), wood)
+			TerrainScript.grounded(post) + Vector3(0, 0.45, 0), wood)
 		crate.rotation.y = 0.17 * float(index) - 0.3
 	for point in BARREL_POSTS:
-		Geo.cylinder(group, 0.36, 0.32, 0.95, point + Vector3(0, 0.48, 0), wood, 12)
+		var barrel: Vector3 = point
+		Geo.cylinder(group, 0.36, 0.32, 0.95,
+			TerrainScript.grounded(barrel) + Vector3(0, 0.48, 0), wood, 12)
 	var altar := Node3D.new()
 	altar.name = "ColdAltar"
-	altar.position = Vector3(0, 0, 12.5)
+	altar.position = TerrainScript.grounded(Vector3(0, 0, 12.5))
 	parent.add_child(altar)
 	Geo.box(altar, Vector3(2.6, 0.9, 1.3), Vector3(0, 0.45, 0), stone)
 	Geo.box(altar, Vector3(3.0, 0.18, 1.6), Vector3(0, 0.99, 0), stone)
@@ -850,7 +862,7 @@ static func _build_torches(root: Node3D, torches: Array, mats: Dictionary) -> vo
 		var scale_at := float(entry[1])
 		var host := Node3D.new()
 		host.name = "Torch%d" % (index + 1)
-		host.position = Vector3(at.x, 0.0, at.z)
+		host.position = TerrainScript.grounded(Vector3(at.x, 0.0, at.z))
 		group.add_child(host)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = SEED + 101 + index * 29

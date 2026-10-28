@@ -186,6 +186,16 @@ func has_corpse(corpse_id: int) -> bool:
 
 ## Every body still worth searching, oldest first. A stripped body stays out of
 ## this list, so a caller that walks it never re-offers a finished corpse.
+## How many fallen bodies the registry has taken in this battle, whether or not
+## somebody has already emptied them. `corpse_ids()` only names the ones still
+## holding something, which is what a searcher wants; this is what a test or a
+## battle report wants, because the squad strips corpses on its own and a body can
+## be emptied before anything else looks at it.
+func registered_corpses() -> int:
+	_prune_corpses()
+	return _corpses.size()
+
+
 func corpse_ids() -> Array[int]:
 	_prune_corpses()
 	var out: Array[int] = []

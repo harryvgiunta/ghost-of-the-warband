@@ -85,7 +85,11 @@ static func build(parent: Node3D, style: WorldStyle) -> Dictionary:
 	sun.rotation_degrees = sky_values.get("sun_rotation", Vector3(-48.0, -32.0, 0.0))
 	sun.light_color = sky_values.get("sun_color", Color("ffe2b3"))
 	sun.light_energy = float(sky_values.get("sun_energy", 1.0))
-	sun.shadow_enabled = true
+	# Every style except the warband's wood keeps the sun's shadow map. The wood
+	# turns it off: at night the canopy shadowed a forest floor into a black sheet,
+	# and a black sheet cannot show the ground rising and falling - which is the
+	# point of the terrain under it.
+	sun.shadow_enabled = bool(sky_values.get("sun_shadows", true))
 	# Four splits give crisp trunk shadows near the player and still cover the
 	# whole draw distance; the visibility budget only shadows trees/props.
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS

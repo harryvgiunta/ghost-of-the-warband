@@ -2587,6 +2587,224 @@ def warden_death(t: float) -> dict:
     return values
 
 
+def offset_pose(stance: dict, deltas: dict, amount: float) -> dict:
+    """Layer a scaled delta table onto an authored stance.
+
+    Tuples add element-wise, vectors add, and the ``arm``/``finger``/``robe``/
+    ``feet`` tables recurse. Keys the deltas never mention pass through, and a
+    zero ``amount`` reproduces the stance exactly, which is how a one-shot
+    recoil returns to the idle frame it has to blend back into.
+    """
+    values = dict(stance)
+    for key, delta in deltas.items():
+        base = values.get(key)
+        if isinstance(delta, dict):
+            values[key] = offset_pose(base if isinstance(base, dict) else {}, delta, amount)
+        elif isinstance(delta, Vector):
+            values[key] = (base if isinstance(base, Vector) else Vector((0.0, 0.0, 0.0))) + delta * amount
+        elif isinstance(base, tuple):
+            values[key] = tuple(a + b * amount for a, b in zip(base, delta))
+        else:
+            values[key] = float(base or 0.0) + float(delta) * amount
+    return values
+
+
+def warden_attack_slash(t: float) -> dict:
+    """A wide horizontal sweep: the antler crown and a bladed haft lead the arc.
+
+    The coil loads the body onto its right heel, the crown and the blade carry
+    the sweep across the front, and the follow-through unwinds into the stance.
+    Impact sits on 0.66 s, where the crown and the hand are both at full travel.
+    """
+    coil = keyed(t, [(0.0, 0.0), (0.16, 0.72), (0.30, 1.0), (0.42, 0.45),
+                     (0.56, 0.10), (0.66, 0.0), (1.35, 0.0)])
+    sweep = keyed(t, [(0.0, 0.0), (0.30, 0.0), (0.42, 0.22), (0.54, 0.68), (0.66, 1.0),
+                      (0.80, 0.86), (0.98, 0.38), (1.20, 0.10), (1.35, 0.0)])
+    drop = keyed(t, [(0.0, 0.0), (0.30, 0.35), (0.54, 0.70), (0.66, 0.90),
+                     (0.90, 0.30), (1.35, 0.0)])
+    step = keyed(t, [(0.0, 0.0), (0.30, 0.08), (0.66, 0.16), (1.00, 0.06), (1.35, 0.0)])
+    values = warden_base()
+    values.update({
+        "pelvis_offset": Vector((0.04 * sweep - 0.03 * coil, 0.05 * sweep, -0.06 * drop)),
+        "pelvis_pitch": -0.05 * coil + 0.06 * sweep,
+        "pelvis_roll": -0.06 * coil + 0.08 * sweep,
+        "pelvis_yaw": 0.30 * coil - 0.34 * sweep,
+        "spine1": (0.02 * coil - 0.03 * sweep, 0.16 * coil - 0.18 * sweep, 0.03 * coil - 0.04 * sweep),
+        "spine2": (0.02 * coil - 0.04 * sweep, 0.19 * coil - 0.21 * sweep, 0.03 * coil - 0.04 * sweep),
+        "chest_pose": (0.03 * coil - 0.05 * sweep, 0.24 * coil - 0.28 * sweep, 0.04 * coil - 0.05 * sweep),
+        "neck1": (-0.04 * coil + 0.03 * sweep, -0.12 * coil + 0.14 * sweep, 0.0),
+        "neck2": (-0.05 * coil + 0.03 * sweep, -0.14 * coil + 0.16 * sweep, 0.0),
+        "head_pose": (-0.07 * coil + 0.05 * sweep, -0.18 * coil + 0.20 * sweep, 0.03 * sweep),
+        "jaw_open": 0.10 + 0.45 * max(coil, sweep),
+        "arm": {
+            "l": (0.05 - 0.35 * coil + 0.30 * sweep, 0.05 + 0.20 * coil - 0.30 * sweep,
+                  -0.20 * coil + 0.15 * sweep, 0.40 * coil + 0.30 * sweep, 0.25 * sweep),
+            "r": (0.10 - 0.75 * coil + 0.65 * sweep, 0.55 * coil - 0.85 * sweep,
+                  0.35 * coil + 0.15 * sweep, 0.55 * coil + 0.55 * sweep,
+                  1.15 + 0.25 * coil + 0.35 * sweep),
+        },
+        "finger": {"l": 0.55 + 0.45 * max(coil, sweep), "r": 1.30 + 0.15 * coil},
+        "antler": (-0.10 * coil - 0.06 * sweep, 0.45 * coil - 0.60 * sweep, 0.0),
+        "robe": {
+            "f": (0.18 * coil + 0.30 * sweep, 0.18 * coil + 0.36 * sweep),
+            "b": (-0.14 * coil - 0.24 * sweep, -0.14 * coil - 0.30 * sweep),
+            "l": (0.0, 0.16 * sweep - 0.10 * coil),
+            "r": (0.0, 0.16 * coil - 0.10 * sweep),
+        },
+    })
+    values["feet"]["r"] = (step, 0.0, 0.0)
+    values["feet"]["l"] = (-0.10 * step, 0.0, 0.0)
+    return values
+
+
+def warden_attack_stab(t: float) -> dict:
+    """A committed lunge: the haft cocks under the shoulder, the body drops onto
+    the front foot and the point drives forward. Impact 0.50 s."""
+    cock = keyed(t, [(0.0, 0.0), (0.14, 0.55), (0.30, 1.0), (0.42, 0.30), (0.50, 0.0), (1.10, 0.0)])
+    drive = keyed(t, [(0.0, 0.0), (0.24, 0.0), (0.38, 0.35), (0.50, 1.0),
+                      (0.62, 0.92), (0.80, 0.45), (0.96, 0.16), (1.10, 0.0)])
+    lunge = keyed(t, [(0.0, 0.0), (0.24, 0.10), (0.42, 0.55), (0.50, 1.0),
+                      (0.66, 0.94), (0.86, 0.45), (1.10, 0.0)])
+    values = warden_base()
+    values.update({
+        "pelvis_offset": Vector((0.02 * drive, 0.16 * lunge - 0.05 * cock, -0.07 * lunge)),
+        "pelvis_pitch": -0.04 * cock + 0.08 * drive,
+        "pelvis_roll": -0.03 * drive,
+        "pelvis_yaw": 0.22 * cock - 0.26 * drive,
+        "spine1": (0.02 * cock - 0.03 * drive, 0.12 * cock - 0.14 * drive, 0.02 * cock),
+        "spine2": (0.02 * cock - 0.05 * drive, 0.14 * cock - 0.17 * drive, 0.02 * cock),
+        "chest_pose": (0.03 * cock - 0.07 * drive, 0.18 * cock - 0.22 * drive, 0.03 * cock),
+        "neck1": (-0.06 * cock + 0.04 * drive, -0.08 * cock + 0.10 * drive, 0.0),
+        "neck2": (-0.07 * cock + 0.05 * drive, -0.09 * cock + 0.11 * drive, 0.0),
+        "head_pose": (-0.10 * cock + 0.08 * drive, -0.12 * cock + 0.14 * drive, 0.0),
+        "jaw_open": 0.12 + 0.42 * drive,
+        "arm": {
+            "l": (0.05 - 0.20 * cock + 0.25 * drive, 0.05 + 0.15 * cock - 0.22 * drive,
+                  -0.15 * cock + 0.10 * drive, 0.35 * cock + 0.25 * drive, 0.15 * drive),
+            "r": (0.10 - 0.60 * cock + 1.05 * drive, 0.35 * cock - 0.30 * drive,
+                  0.20 * cock + 0.10 * drive, 0.75 * cock + 0.25 * drive,
+                  1.35 + 0.15 * cock + 0.30 * drive),
+        },
+        "finger": {"l": 0.60, "r": 1.35},
+        "antler": (-0.12 * cock - 0.10 * drive, 0.20 * cock - 0.24 * drive, 0.0),
+        "robe": {
+            "f": (-0.10 * cock + 0.26 * drive, -0.12 * cock + 0.32 * drive),
+            "b": (0.14 * cock - 0.22 * drive, 0.18 * cock - 0.28 * drive),
+            "l": (0.0, 0.10 * cock),
+            "r": (0.0, 0.10 * cock),
+        },
+    })
+    values["feet"]["r"] = (0.30 * lunge, 0.0, 0.0)
+    values["feet"]["l"] = (-0.04 * lunge - 0.08 * cock, 0.0, 0.0)
+    return values
+
+
+def warden_block(t: float) -> dict:
+    """A holdable guard: weight back, the haft carried across the chest, the
+    crown lowered over it, and a shallow breath the runtime can loop."""
+    duration = styles.MOBS["hollow_warden"]["clips"]["block"]["duration"]
+    phase = (t / duration) % 1.0
+    breath = math.sin(phase * math.tau)
+    values = warden_base()
+    values.update({
+        "pelvis_offset": Vector((0.0, -0.05, -0.05 + 0.006 * breath)),
+        "pelvis_pitch": 0.06 + 0.01 * breath,
+        "pelvis_roll": 0.02 * breath,
+        "pelvis_yaw": -0.06,
+        "spine1": (0.03 + 0.010 * breath, -0.04, 0.0),
+        "spine2": (0.04 + 0.012 * breath, -0.05, 0.0),
+        "chest_pose": (0.05 + 0.014 * breath, -0.06, 0.01 * breath),
+        "neck1": (-0.05 - 0.008 * breath, 0.03, 0.0),
+        "neck2": (-0.06 - 0.006 * breath, 0.04, 0.0),
+        "head_pose": (-0.08 - 0.006 * breath, 0.05, 0.0),
+        "jaw_open": 0.06 + 0.03 * breath,
+        "arm": {
+            "l": (0.80 + 0.018 * breath, 0.40, -0.25, 1.30 + 0.020 * breath, 2.20),
+            "r": (0.75 + 0.018 * breath, -0.35, 0.25, 1.35 + 0.020 * breath, 2.35),
+        },
+        "finger": {"l": 1.25, "r": 1.35},
+        "antler": (-0.30 - 0.02 * breath, 0.05, 0.0),
+        "robe": {
+            "f": (0.10 + 0.02 * breath, 0.14),
+            "b": (-0.10 - 0.02 * breath, -0.14),
+            "l": (0.0, 0.04 * breath),
+            "r": (0.0, 0.04 * breath),
+        },
+    })
+    values["feet"]["r"] = (0.14, 0.0, 0.0)
+    values["feet"]["l"] = (-0.10, 0.0, 0.0)
+    return values
+
+
+def warden_stagger(t: float) -> dict:
+    """A one-shot recoil: shoulders driven back, head snapped, feet catching up.
+
+    Authored as a delta over the first frame of the idle, so the last frame is
+    that idle stance exactly and the runtime can cut the clip short anywhere.
+    """
+    recoil = keyed(t, [(0.0, 0.0), (0.09, 1.0), (0.20, 0.86), (0.32, 0.50),
+                       (0.44, 0.20), (0.60, 0.0)])
+    deltas = {
+        "pelvis_offset": Vector((0.0, -0.11, -0.01)),
+        "pelvis_pitch": 0.10,
+        "pelvis_roll": 0.05,
+        "pelvis_yaw": -0.07,
+        "spine1": (0.16, 0.0, 0.04),
+        "spine2": (0.20, 0.0, 0.05),
+        "chest_pose": (0.28, -0.05, 0.06),
+        "neck1": (0.14, 0.0, 0.0),
+        "neck2": (0.16, 0.0, 0.0),
+        "head_pose": (0.32, -0.09, 0.10),
+        "jaw_open": 0.55,
+        "arm": {"l": (0.28, 0.0, -0.45, 0.10, 0.30), "r": (0.32, 0.0, 0.45, 0.15, 0.35)},
+        "finger": {"l": 0.40, "r": 0.35},
+        "antler": (0.24, 0.0, 0.0),
+        "robe": {"f": (0.20, 0.26), "b": (-0.22, -0.28), "l": (0.22, 0.28), "r": (0.22, 0.28)},
+    }
+    values = offset_pose(warden_idle(0.0), deltas, recoil)
+    values["feet"]["l"] = (-0.18 * recoil, 0.035 * recoil, 0.0)
+    values["feet"]["r"] = (0.04 * recoil, 0.0, 0.0)
+    return values
+
+
+def warden_crouch(t: float) -> dict:
+    """A loopable low stalk: knees bent over a planted stance, the crown
+    levelled forward, the haft carried ready across the body."""
+    duration = styles.MOBS["hollow_warden"]["clips"]["crouch"]["duration"]
+    phase = (t / duration) % 1.0
+    sway = math.sin(phase * math.tau)
+    breath = math.sin(phase * math.tau * 2.0)
+    values = warden_base()
+    values.update({
+        "pelvis_offset": Vector((0.01 * sway, 0.02, -0.17 + 0.012 * breath)),
+        "pelvis_pitch": -0.20,
+        "pelvis_roll": 0.02 * sway,
+        "pelvis_yaw": 0.04 * sway,
+        "spine1": (-0.13 + 0.008 * breath, 0.02 * sway, 0.0),
+        "spine2": (-0.16 + 0.010 * breath, 0.02 * sway, 0.0),
+        "chest_pose": (-0.19 + 0.012 * breath, 0.03 * sway, 0.01 * sway),
+        "neck1": (0.12, -0.02 * sway, 0.0),
+        "neck2": (0.13, -0.02 * sway, 0.0),
+        "head_pose": (0.14 + 0.008 * breath, -0.03 * sway, 0.0),
+        "jaw_open": 0.05 + 0.03 * breath,
+        "arm": {
+            "l": (0.62 + 0.015 * breath, 0.30, -0.22, 0.80, 1.15),
+            "r": (0.55 + 0.015 * breath, -0.30, 0.24, 0.90, 1.35),
+        },
+        "finger": {"l": 1.15, "r": 1.30},
+        "antler": (-0.34 - 0.02 * breath, 0.04 * sway, 0.0),
+        "robe": {
+            "f": (1.00 + 0.02 * breath, 1.06),
+            "b": (-0.98 - 0.02 * breath, -1.04),
+            "l": (0.95, 1.05),
+            "r": (0.95, 1.05),
+        },
+    })
+    values["feet"]["r"] = (0.20, 0.0, 0.0)
+    values["feet"]["l"] = (-0.16, 0.0, 0.0)
+    return values
+
+
 ARM_CHAINS = {
     "hollow_warden": ("clavicle_{side}", "upper_arm_{side}", "lower_arm_{side}", "hand_{side}"),
     "ossuary_stalker": ("clavicle_{side}", "upper_arm_{side}", "lower_arm_{side}", "hand_{side}"),
@@ -3089,6 +3307,11 @@ CLIP_FUNCTIONS = {
         "attack": warden_attack,
         "hit": warden_hit,
         "death": warden_death,
+        "attack_slash": warden_attack_slash,
+        "attack_stab": warden_attack_stab,
+        "block": warden_block,
+        "stagger": warden_stagger,
+        "crouch": warden_crouch,
     },
     "ossuary_stalker": {
         "idle": stalker_idle,
@@ -3113,7 +3336,7 @@ def build_actions(mob: str) -> list[bpy.types.Action]:
     RIG.animation_data_create()
     RIG.animation_data.use_nla = False
     actions = []
-    for key in ("idle", "walk", "run", "attack", "hit", "death"):
+    for key in styles.MOBS[mob]["clips"]:
         actions.append(bake_clip(mob, key, CLIP_FUNCTIONS[mob][key], ground=(key == "death")))
     return actions
 
@@ -3207,7 +3430,7 @@ def write_metadata(mob: str, output: Path) -> dict:
                 )
     spec = styles.MOBS[mob]
     clips = {}
-    for key in ("idle", "walk", "run", "attack", "hit", "death"):
+    for key in spec["clips"]:
         name = styles.clip_name(mob, key)
         entry = {
             "name": name,
@@ -3328,11 +3551,19 @@ def render_captures(mob: str, source: Path, actions: list[bpy.types.Action], met
         "walk": [(0.25, "side"), (0.55, "side"), (0.85, "side"), (0.25, "threeq")],
         "run": [(0.20, "side"), (0.45, "side"), (0.70, "threeq")],
         "attack": [(0.35, "threeq"), (0.62, "threeq"), (0.86, "threeq")],
+        "attack_slash": [(0.28, "front"), (0.50, "threeq"), (0.66, "threeq")],
+        "attack_stab": [(0.28, "side"), (0.50, "threeq"), (0.78, "side")],
+        "block": [(0.30, "front"), (0.30, "threeq")],
+        "stagger": [(0.12, "threeq"), (0.34, "side")],
+        "crouch": [(0.60, "side"), (0.60, "threeq")],
         "hit": [(0.12, "threeq"), (0.30, "threeq")],
         "death": [(0.40, "threeq"), (0.80, "threeq"), (1.20, "side")],
     }
     form_set = {"idle": [(0.0, "front"), (0.0, "threeq")],
                 "attack": [(0.62, "threeq")],
+                "attack_slash": [(0.66, "threeq")],
+                "block": [(0.30, "front")],
+                "crouch": [(0.60, "side")],
                 "death": [(1.20, "side")]}
     beauty_set = {"idle": [(0.0, "threeq"), (0.0, "closeup")]}
 
@@ -3393,10 +3624,12 @@ def _add_area_light(name: str, location: Vector, colour, energy: float, size: fl
 def main() -> None:
     argv = sys.argv
     argv = argv[argv.index("--") + 1:] if "--" in argv else []
-    mob = argv[0] if argv else "hollow_warden"
+    flags = {item for item in argv if item.startswith("--")}
+    arguments = [item for item in argv if not item.startswith("--")]
+    mob = arguments[0] if arguments else "hollow_warden"
     if mob not in styles.MOBS:
         raise SystemExit(f"unknown mob {mob}")
-    output = Path(argv[1]).resolve() if len(argv) > 1 else styles.asset_path(mob)
+    output = Path(arguments[1]).resolve() if len(arguments) > 1 else styles.asset_path(mob)
     source = styles.mob_dir(mob)
     source.mkdir(parents=True, exist_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -3418,7 +3651,10 @@ def main() -> None:
     actions = build_actions(mob)
     setup_nla_and_export(actions, output)
     metadata = write_metadata(mob, output)
-    render_captures(mob, source, actions, metadata)
+    # Captures are a review pass, not part of the asset: a rebuild that only
+    # needs the GLB and its JSON skips the render stage with --no-captures.
+    if "--no-captures" not in flags:
+        render_captures(mob, source, actions, metadata)
     bpy.ops.wm.save_as_mainfile(filepath=str(source / f"ironwood_{mob}_source.blend"))
     print("FOREST_DONE", json.dumps({
         "mob": mob,

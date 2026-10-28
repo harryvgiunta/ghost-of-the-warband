@@ -15,8 +15,11 @@ const MOBS := {
 			"idle": "Warden_Idle", "walk": "Warden_Walk",
 			"run": "Warden_Run", "attack": "Warden_Attack",
 			"hit": "Warden_Hit", "death": "Warden_Death",
+			"attack_slash": "Warden_Attack_Slash", "attack_stab": "Warden_Attack_Stab",
+			"block": "Warden_Block", "stagger": "Warden_Stagger",
+			"crouch": "Warden_Crouch",
 		},
-		"durations": [2.8, 1.4, 0.8, 1.6, 0.5, 1.45],
+		"durations": [2.8, 1.4, 0.8, 1.6, 0.5, 1.45, 1.35, 1.1, 1.2, 0.6, 2.4],
 		# The antler rack is part of the silhouette: this mob has to be
 		# unmistakably taller than a ranger before it is even close.
 		"height": [3.3, 4.1], "span": [1.4, 2.3],
@@ -107,13 +110,15 @@ func _check_asset(world_root: Node3D, mob_id: String) -> void:
 		instance.queue_free()
 		return
 	var names := player.get_animation_list()
-	check(names.size() == 6, mob_id + " exports exactly six clips (found %d)" % names.size())
+	check(names.size() == spec.clips.size(),
+		"%s exports exactly the %d named clips (found %d)" % [mob_id, spec.clips.size(), names.size()])
+	var order: Array = spec.clips.keys()
 	for key in spec.clips:
 		var clip_name: String = spec.clips[key]
 		check(clip_name in names, mob_id + " has clip " + clip_name)
 		if clip_name in names:
 			var duration: float = player.get_animation(clip_name).length
-			var expected := float(spec.durations[["idle", "walk", "run", "attack", "hit", "death"].find(key)])
+			var expected := float(spec.durations[order.find(key)])
 			check(absf(duration - expected) < 0.08,
 				"%s %s duration %.3f is close to %.3f" % [mob_id, clip_name, duration, expected])
 	var bone_count := skeleton.get_bone_count()
@@ -231,7 +236,8 @@ func _check_visual(world_root: Node3D, mob_id: String) -> void:
 	check(visual.get_clip_name() == MOBS[mob_id].clips.attack, mob_id + " windup selects attack")
 	visual.set_combat("STAGGER", 0.0)
 	await process_frame
-	check(visual.get_clip_name() == MOBS[mob_id].clips.hit, mob_id + " stagger selects hit")
+	var stagger_clip: String = str(MOBS[mob_id].clips.get("stagger", MOBS[mob_id].clips.hit))
+	check(visual.get_clip_name() == stagger_clip, mob_id + " stagger selects " + stagger_clip)
 	visual.die()
 	await process_frame
 	check(visual.get_clip_name() == MOBS[mob_id].clips.death, mob_id + " death selects the death clip")

@@ -23,6 +23,7 @@ extends SceneTree
 
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 const TEST_SAVE := "user://escape_run_state.json"
 const WARBAND_SAVE := "user://escape_run_warband.json"
@@ -34,6 +35,9 @@ const WALK_LIMIT := 260.0
 ## The walk is played at this speed multiplier so a quarter-kilometre run fits in
 ## a regression; the recorded time is the game time the lane cost at 1x.
 const WALK_SCALE := 3.0
+## How long the escort is given to close on the soul at the far end, in scaled
+## seconds: it walks the wood behind the soul rather than a lane.
+const FOLLOW_S := 40.0
 
 var state
 var warband
@@ -212,25 +216,43 @@ func check_lane() -> void:
 			if child is OmniLight3D:
 				lights += 1
 	check(lights == torches.size(), "every torch carries its own light (%d/%d)" % [lights, torches.size()])
-	# No wall between the clearing and the lane, and none at the town's end: the
-	# corridor is the way through, not a room with a door at each end.
-	var head: Vector3 = lane[0]
-	var tail: Vector3 = lane[lane.size() - 1]
-	var walls: StaticBody3D = forest["root"].get_node_or_null("LaneWalls")
-	check(walls != null, "the lane walls exist")
-	var blocking_mouth := 0
-	var blocking_town := 0
-	if walls != null:
-		for child in walls.get_children():
-			var at: Vector3 = (child as CollisionShape3D).position
-			if at.distance_to(head) < 6.0:
-				blocking_mouth += 1
-			if at.distance_to(tail) < 10.0:
-				blocking_town += 1
-	check(blocking_mouth == 0, "nothing caps the lane at the camp's mouth (%d)" % blocking_mouth)
-	check(blocking_town == 0, "nothing caps the lane at the town's gate (%d)" % blocking_town)
 	print("ESCAPE_RUN_LANE length=%.1f width=%.1f torches=%d waypoints=%d"
 		% [length, width, torches.size(), lane.size()])
+	# There is no lane any more: no wall down either verge, no corridor cut through
+	# the wood. What keeps the way passable is the clear line round its centre,
+	# measured where a body actually walks - a ray either side at chest and shoulder
+	# height, never inside 1.25 m of the centre line, so the narrowest gap a body
+	# meets is 2.5 m. An arch it walks under is not a pinch; a trunk is.
+	check(forest["root"].get_node_or_null("LaneWalls") == null,
+		"the lane has no wall geometry to walk between")
+	check(forest["root"].get_node_or_null("ForestField") == null,
+		"the lane builds no band of its own on the world's ground")
+	var space: PhysicsDirectSpaceState3D = game.get_world_3d().direct_space_state
+	var path = forest["path"]
+	var probe := PhysicsRayQueryParameters3D.new()
+	probe.collision_mask = 1
+	var clearance := INF
+	var tightest := Vector3.ZERO
+	var samples := 480
+	for index in samples:
+		var frame: Dictionary = path.sample(float(length) * float(index) / float(samples))
+		var base: Vector3 = TerrainScript.grounded(frame["position"])
+		for height in [1.35, 1.9]:
+			var from := base + Vector3(0.0, float(height), 0.0)
+			for side in [-1.0, 1.0]:
+				probe.from = from
+				probe.to = from + (frame["right"] as Vector3) * side * 2.6
+				var hit: Dictionary = space.intersect_ray(probe)
+				var gap := 2.6
+				if not hit.is_empty():
+					gap = _flat(hit["position"] as Vector3, from)
+				if gap < clearance:
+					clearance = gap
+					tightest = from
+	check(clearance >= 1.25,
+		"the centre line keeps 2.5 m clear end to end (%.2f m at %.1f,%.1f)"
+		% [clearance, tightest.x, tightest.z])
+	print("ESCAPE_RUN_CLEAR half_width=%.2f tightest=%s" % [clearance, str(tightest)])
 
 
 func check_art() -> void:
@@ -424,7 +446,10 @@ func check_follow() -> void:
 	var waited := 0.0
 	Engine.physics_ticks_per_second = 180
 	Engine.time_scale = WALK_SCALE
-	while near < needed and waited < 26.0:
+	# The escort walks a forest, not a lane: it cuts corners, pushes past trunks and
+	# comes up the rises behind the soul, so it is allowed a longer catch-up than the
+	# flat corridor it used to run down.
+	while near < needed and waited < FOLLOW_S:
 		await create_timer(0.1).timeout
 		waited += 0.1
 		near = 0

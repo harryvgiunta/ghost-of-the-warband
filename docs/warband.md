@@ -193,7 +193,7 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | --- | --- |
 | `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp **deep in the wood**: a ragged 40 x 52 m pocket (`YARD_HALF_WIDTH` 20, front -30, back 22) with no wall and no gate - a broken stake ring, three twig shelters, a fire ring and junk, trees standing inside the pocket, and 170 m of ordinary forest (`CAMP_TO_ROAD_METRES`) before the trail's first torch. Four cages clamped one body each; the rescuer's scripted jog and **the body you have to enter yourself** (F5 / `[ ]`); **one latch per cage, cut by hand with G within `LATCH_REACH` 2.2 m and only with a blade in hand** (`interact`/`latch_target`/`open_latch` - nothing opens on a possession or a kill); two camp watchers; three makeshift-tier drops on the ground; the leaving is a walk out of the trees |
 | squad AI (`scripts/warband/squad_drive.gd`) | the one module both areas share: a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`, re-dressed with `refresh_gear`), then runs at the nearest watcher and fights on layer 2 through one explicit ladder - close / swing / guard / circle / reset - resolved on every frame, with the exchange rolled once when the blade frees (55-70% guard for 0.35-0.80 s, guard dropping into the blow), 1-3 swings then a 0.25-0.55 s short rugged circle re-rolled per step, and only `sword`/`dagger` allowed to guard. Escort clause when nothing is hostile; the field is stripped once `_clear_of_hostiles` at the drop or corpse (22 m), drops through `quick_loot` and bodies through `register_corpse`/`corpse_at`/`claim_corpse`. The player's own body is never driven. |
-| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | a ranger-rigged `ArenaActor` (`extends CultistGuard`), so a watcher swings the authored clips, blocks, staggers and crouches; `PAIR_HEALTH` 44 / `HARDENED_HEALTH` 144, `WATCHER_LAYER` 2. A deterministic 12-entry variant table (`VARIANTS`, `variant_index_for(mob_id, node_name)`) varies scale 0.88-1.12, build, hunch, paint and armour subset; every main hand comes from the makeshift tier only (`MAKESHIFT_MAINS`), with `shield_wood` or a second shiv allowed off-hand. `arm(item_id)`/`take_weapon_item()`/`gear_items()` keep the mob surface the scenes call, the swing-locked contact emits `attacked`, and every death emits `defeated` exactly once through `enter_downed` -> `_die` (mobs do not bleed out). |
+| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the wood's **antlered hollow warden** (`extends ForestMob` → `DevilMob`, `WARDEN_ID` "hollow_warden"), so the camp is guarded by the silhouette the mode is about - and it swings, blocks, staggers and crouches on baked clips. `PAIR_HEALTH` 44 / `HARDENED_HEALTH` 144, `WATCHER_LAYER` 2, pack `camp_watchers`, sight 60. A deterministic 12-entry `VARIANTS` table (seeded by `mob_id` + the node's ordinal) varies a paint multiplied into the body's own PBR surfaces, a uniform silhouette scale 0.88-1.30, a main hand from `MAKESHIFT_TIER`, a favourite swing, a guard share and a crouch. `arm(item_id)` builds the real catalog model (`sword.gd`/`dagger.gd`/`bow.gd`) onto the `hand_r` bone through a `Grip` child of the `BoneAttachment3D` (the attachment rewrites its own transform from the bone every frame, so a grip set on it is discarded) driven by the per-mob `grip_offset`/`grip_rotation`/`grip_scale` entry in `scripts/forest_mob_visual.gd`, with a per-kind `grips.bow` override so a bow stands upright and `take_weapon_item()` strips it; `gear_items()` lists the blade plus the worn salvage. Per windup it picks `Warden_Attack` / `Warden_Attack_Slash` / `Warden_Attack_Stab`; one guard roll per exchange (`guard_chance()` = variant share × `guard_scale`, capped 0.9) plays `Warden_Block` and holds instead of trading, then drops into the swing; any blow at or above `max(STAGGER_FLOOR 6, STAGGER_SHARE 10 % of health)` plays `Warden_Stagger` and cancels swing, guard and step; `Warden_Crouch` is the stance while waiting on the cooldown or hurt. The three scene dials (`blow_scale`, `guard_scale`, `swing_gap_scale`) weight the blow, the guard share and the cooldown; the strike emits `attacked(self, profile damage × blow_scale, victim)` and a death emits `defeated` exactly once |
 | `scripts/warband/tutorial_card.gd` (`TutorialCard`) | the modal step card: large title/body/keys, **pauses the tree** while open, one CONTINUE button (or G / Enter / Escape), restores the previous pause and mouse state on close |
 | `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING` (there is no TOWN state: the lesson ends where the road does); eight watchers in total (the pair Corvin puts down, then six out of the trees), no loot requirement in the objective; `note_rescuer_taken()` changes the objective to the latch count; **four separate latches, one per `G` press** (`note_cage_opened`, which no longer requires a prior beat and frees the squad only at four); out-of-order calls refused; objective **and** a per-beat key hint (`hint()`) |
 | `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
@@ -304,9 +304,18 @@ Short version of the latest tuning (all in the code, all covered by
 - the opening does not ask for loot, and the escape is a walk, not a quota;
 - the whole campaign is **one world**: `scenes/warband_world.tscn` holds the cages
   in a camp pocket **deep in the wood**, 170 m of ordinary forest between the camp
-  and the trail head, a 915 m trail through the trees and a town cut into the same
+  and the trail head, a 915 m way through the trees and a town cut into the same
   trees at the far end. There is no door key and no load between them — you walk —
   and the only scene change left is deploying to the arena;
+- the world stands on **one heightfield** (`scripts/warband/terrain.gd`): three
+  octaves of value noise on a fixed seed, ±1.9 m over 64/40/31 m wavelengths, baked
+  as one `ArrayMesh` (25,440 triangles, 7 m grid) with one trimesh collider and a
+  `height_at()` every prop samples. The camp pocket and the town square are padded
+  flat and blended into the slope; the walk between them is not. There is no lane:
+  the way through the wood is a faint worn line marked by a **pair of torches every
+  12 m** (152 lights), with trunks standing in the walked band and a 3.1 m clear
+  line down its middle, so a body always has 2.5 m to pass through.
+
 ### Running the tests
 
 `python tools/run_tests.py` is the **warband** suite - the game - one pool of
@@ -322,12 +331,13 @@ allowed to grow to ten minutes.
 | test | what it owns |
 | --- | --- |
 | `cage_escape_regression` 263 | the camp, the four latches, the pair, the doors, the corridor to the road |
-| `escape_run_regression` 248 | the road, its cult, and the ambush that follows the leaving |
-| `warband_world_regression` 198 | one world, one controller, the 1,117 m walk, the budget (~85 s: the only long test) |
-| `watcher_variants_regression` 357 | the variant table, makeshift-only kits, block/stagger/crouch clips |
+| `escape_run_regression` 248 | the way through the wood, its cult, and the ambush that follows the leaving |
+| `warband_world_regression` 198 | one world, one controller, the ground, the 1,117 m walk, the budget (~65 s: the only long test) |
+| `watcher_variants_regression` 587 | the variant table, makeshift-only kits, a landed blow through `attacked`, the guard/stagger/crouch rules, and the warden's three swings + block + stagger + crouch clips |
 | `corpse_loot_regression` 110 | the corpse registry, one booking path, the corpse screen |
 | `downed_bleedout_regression` 46 | the prone pose, the drip, 30 s to DEAD, revive clears it |
 
 - the camp is a **40 x 52 m ragged pocket** - broken stakes, three twig shelters,
-  a fire ring, trees inside the footprint - inside a 420 x 1480 m floor with an
-  invisible catch floor, so nothing can fall out of the world.
+  a fire ring, trees inside the footprint - padded flat into the world's heightfield
+  (420 x 1484 m, with an invisible catch floor under its lowest point), so the cages
+  stand level and nothing can fall out of the world.

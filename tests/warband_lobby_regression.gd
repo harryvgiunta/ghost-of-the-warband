@@ -180,10 +180,19 @@ func _host_run() -> void:
 	check(title.lobby.host_button.text == "HOST WARBAND", "The lobby's first door is HOST WARBAND")
 	check(title.lobby.join_button.text == "JOIN WARBAND", "The lobby's second door is JOIN WARBAND")
 	check(int(title.lobby.port_input.value) == port, "The lobby takes the port it was given")
-	check(title.start_button.text == "START NEW GAME" and title.join_button.text == "JOIN GAME",
-		"The four existing doors are untouched beside the lobby")
-	check(not title._load_button.disabled or title._load_button.text == "LOAD SAVED GAME",
-		"The load door still explains itself")
+	# The lobby is one door beside the others, and none of the others moved: this is
+	# the title's door set, not its wording, so a re-labelled button is not a
+	# regression and a removed one is.
+	var doors := [title.start_button, title._load_button, title.host_world_button,
+		title.join_button, title.warband_button, title._lobby_button]
+	for index in doors.size():
+		check(doors[index] != null and doors[index].is_visible_in_tree(),
+			"title door %d is still on screen" % (index + 1))
+	check(title.join_button.text == "JOIN GAME" and title._lobby_button.text == "WARBAND LOBBY",
+		"the join door and the lobby keep their names")
+	check(title._load_button.disabled == not title._load_button.disabled
+			or title._load_button.text == "CONTINUE" or title._load_button.text == "LOAD SAVED GAME",
+		"The load door still explains itself (%s)" % title._load_button.text)
 
 	title.lobby.host_button.pressed.emit()
 	arena = await _wait_scene(ARENA, 40.0)

@@ -7,6 +7,10 @@ extends "res://scripts/devil_mob_visual.gd"
 ## authored attack so the strike pose lands on the damage frame. Only the
 ## asset paths, measured clip table and head-zone extents differ.
 ##
+## The warden's entry also names the clips it alone authors - three swings, a
+## guard loop, a stagger and a crouch - so one sampler drives the mobset and the
+## camp's armed watchers without a second copy of the playback rules.
+##
 ## These values mirror the adjacent GLB metadata; tests/forest_mobs_regression.gd
 ## compares them against the imported assets.
 
@@ -23,6 +27,36 @@ const FOREST_DATA := {
 		"hit": "Warden_Hit", "death": "Warden_Death",
 		"walk_speed": 1.35, "run_speed": 3.60, "run_threshold": 2.10,
 		"impact": 0.78, "duration": 1.60,
+		# The warden is the one mob with a vocabulary: an overhead, a sweeping cut
+		# and a lunging thrust, each landing on its own authored frame; a guard it
+		# can hold for a window, a recoil a real blow drives out of it, and a
+		# stalking crouch it rests in. The camp's watchers pick between them per
+		# variant. `attack` above stays the single swing a caller gets when it
+		# names none, and the fallback when the asset has not baked the others.
+		"attacks": {
+			"overhead": {"clip": "Warden_Attack", "duration": 1.60, "impact": 0.78},
+			"slash": {"clip": "Warden_Attack_Slash", "duration": 1.35, "impact": 0.66},
+			"stab": {"clip": "Warden_Attack_Stab", "duration": 1.10, "impact": 0.50},
+		},
+		"block": "Warden_Block",
+		"stagger": "Warden_Stagger",
+		"crouch": "Warden_Crouch",
+		# The hand that holds a club is not a ranger's. A held piece is authored
+		# for the warband's socket (haft down its own -Z, grip at the origin) and
+		# the warden's hand bone runs down the arm, so the grip is fitted to the
+		# bone - forward, a third of the way down and out past the fist, clear of
+		# the robe at rest and through the windup and impact frames - and sized to
+		# the creature's palm. Units: metres in bone space, degrees (XYZ order).
+		"grip_scale": 1.70,
+		"grip_offset": Vector3(-0.0084, 0.0404, 0.046),
+		"grip_rotation": Vector3(137.512, 8.255, 11.131),
+		# A bow's limbs are its own +Y, so the aim that puts a club's haft down the
+		# fist lays a bow on its side. A piece that needs its own grip says so in
+		# the same entry, and the sampler uses it for that kind only.
+		"grips": {
+			"bow": {"offset": Vector3(-0.0516, 0.043, 0.4307),
+				"rotation": Vector3(162.526, 37.472, 7.321)},
+		},
 		"head_offset": Vector3.ZERO,
 		"head_radius": 0.200, "head_half": 0.140, "organic": false, "hover": 0.0,
 	},

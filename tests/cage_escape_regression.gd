@@ -23,6 +23,7 @@ extends SceneTree
 
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
 const TEST_SAVE := "user://cage_escape_state.json"
@@ -214,7 +215,8 @@ func check_spawn() -> void:
 			"and never thicker than the camp's own thinned pool")
 		check(str(watcher.name).begins_with("CampWatcher"),
 			"the watcher is a camp body (%s)" % watcher.name)
-		check(watcher.get("rig") != null, "the watcher is a rigged body, not a mob silhouette")
+		check(str(watcher.get("mob_id")) == "hollow_warden",
+			"the watcher is the antlered warden body, not a ranger clone")
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(camp.pickups().size() == 3, "three cultist weapons lie on the walk")
 	# Nothing is under the world: the clearing is ground, not a ledge.
@@ -519,9 +521,10 @@ func check_latches() -> void:
 		if is_instance_valid(door) and (door as Node3D).position.y >= camp.CAGE_BAR_LIFT - 0.2:
 			lifted += 1
 	check(lifted == 4, "every cage door rose when its latch went (%d of 4)" % lifted)
-	check(SequencerScript.GUARD_COUNT == 8, "the camp's tally is still eight watchers")
-	check(camp.sequencer.objective().contains("2/8"),
-		"the tally counts Corvin's pair against the eight (%s)" % camp.sequencer.objective())
+	check(SequencerScript.GUARD_COUNT == 2 + CampScript.AMBUSH_COUNT,
+		"the camp's tally counts the pair and the ambush (%d)" % SequencerScript.GUARD_COUNT)
+	check(camp.sequencer.objective().contains("2/%d" % SequencerScript.GUARD_COUNT),
+		"the tally counts Corvin's pair against the camp (%s)" % camp.sequencer.objective())
 
 # --- the freed squad -------------------------------------------------------
 
@@ -652,8 +655,9 @@ func check_out_and_ambush() -> void:
 			flat_range(Vector3(0.0, 0.0, -30.0), local.global_position)])
 
 	# Six armed watchers come out of the trees on that frame.
-	check(camp.guards.size() == 8, "six more watchers come out of the trees (%d camp watchers)"
-		% camp.guards.size())
+	var expected_guards: int = 2 + CampScript.AMBUSH_COUNT
+	check(camp.guards.size() == expected_guards,
+		"the ambush comes out of the trees (%d camp watchers of %d)" % [camp.guards.size(), expected_guards])
 	var drops_before: int = game.pickups.size()
 	var armed_reinforcements := 0
 	var visible_blades := 0
@@ -667,35 +671,33 @@ func check_out_and_ambush() -> void:
 			visible_blades += 1
 		check(watcher.global_position.y > -1.0,
 			"reinforcement %d did not fall out of the world (y=%.2f)" % [index, watcher.global_position.y])
-	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
-	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
+	check(armed_reinforcements == CampScript.AMBUSH_COUNT,
+		"every reinforcement carries a weapon (%d)" % armed_reinforcements)
+	check(visible_blades == CampScript.AMBUSH_COUNT,
+		"and the blade is in its hand (%d)" % visible_blades)
 
 	# A hardened watcher's pool is the camp's contract, whoever ends up putting one
-	# down, so it is measured here on the one of the six nobody has touched yet.
+	# down, so it is measured here on one of the ambushers nobody has touched yet.
 	var stabbable = null
 	for index in range(2, camp.guards.size()):
 		var fresh = camp.guards[index]
 		if is_instance_valid(fresh) and bool(fresh.get("alive")):
 			stabbable = fresh
-			# The squad is already fighting these six, so the pool is measured on a
+			# The squad is already fighting them, so the pool is measured on a
 			# body put back on its feet rather than on one nobody has reached yet.
 			stabbable.health = stabbable.max_health
 			break
-	check(stabbable != null, "one of the six is still standing to measure")
+	check(stabbable != null, "one of the ambush is still standing to measure")
 	if stabbable != null:
-		for stab in 5:
-			stabbable.take_damage(14.0, 0)
-			check(bool(stabbable.get("alive")),
-				"stab %d of 6 leaves a hardened watcher standing" % (stab + 1))
-		# A hardened watcher is twice the old pool and guards between its swings,
-		# so the last stabs land for less: count them instead of assuming a number.
-		var stabs := 5
+		# The ambush is meant to be won: sixty health is five ironwood stabs, not
+		# the twelve a hardened watcher used to take.
+		var stabs := 0
 		while bool(stabbable.get("alive")) and stabs < 40:
-			stabbable.take_damage(14.0, 0)
+			stabbable.take_damage(10.0, 0)
 			stabs += 1
 		check(not bool(stabbable.get("alive")),
-			"a hardened watcher goes down after %d stabs" % stabs)
-		check(stabs >= 8, "and it takes real work to put one down (%d stabs)" % stabs)
+			"an ambusher goes down after %d shiv stabs" % stabs)
+		check(stabs <= 7, "and it is meant to be won (%d stabs)" % stabs)
 
 	# They are pointed at the squad, not left standing in the dark.
 	var runner = null
@@ -740,12 +742,17 @@ func check_out_and_ambush() -> void:
 	for corpse_id in corpse_ids:
 		if not game.loot.corpse_items(int(corpse_id)).is_empty():
 			with_gear += 1
-	check(with_gear >= 6, "the six bodies are lootable corpses (%d of %s)"
-		% [with_gear, str(corpse_ids)])
+	# The squad strips bodies on its own once the field is quiet, so `corpse_ids()`
+	# can already be empty by the time this reads it: the contract being measured
+	# is that every fallen body went through the registry, and that nothing landed
+	# on the floor.
+	check(game.loot.registered_corpses() >= CampScript.AMBUSH_COUNT,
+		"every fallen ambusher registered as a corpse (%d of %d)"
+		% [game.loot.registered_corpses(), CampScript.AMBUSH_COUNT])
 	check(game.pickups.size() == drops_before,
 		"and no corpse also dumps its kit on the floor (%d)" % (game.pickups.size() - drops_before))
-	check(camp.sequencer.guards_down() == 8, "the tally reaches the eight (%d)"
-		% camp.sequencer.guards_down())
+	check(camp.sequencer.guards_down() == 2 + CampScript.AMBUSH_COUNT,
+		"the tally reaches the whole camp (%d)" % camp.sequencer.guards_down())
 	check(requested_paths.is_empty(), "walking out of the camp requests no scene (%s)"
 		% str(requested_paths))
 

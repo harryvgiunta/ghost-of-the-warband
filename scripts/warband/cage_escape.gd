@@ -108,13 +108,29 @@ const GATE_WATCHERS := [
 	{"post": Vector3(-4.2, 0.1, -20.5)},
 	{"post": Vector3(4.2, 0.1, -20.5)},
 ]
-## The second wave: six armed watchers out of the trees past the mouth, and the
-## ambush the whole opening is walking towards. They come when the squad steps out
-## of the camp - the trees answer the leaving, not a kill count. Everything they
-## carry is the makeshift tier: there is no forged steel anywhere in this wood.
+## The second wave: the ambush the whole opening walks towards, and the first time
+## the player faces a *group*. They come when the squad steps out of the camp - the
+## trees answer the leaving, not a kill count - and they are deliberately the
+## softest bodies in the wood, because a squad that has just been handed its first
+## weapons should win this fight:
+##
+##   * four of them, not six, and never armoured;
+##   * `AMBUSH_HEALTH` 60, so two ironwood stabs or three club hits put one down;
+##   * `AMBUSH_BLOW_SCALE` 0.5, so a club lands 3, a shiv 5 and a branch 7;
+##   * `AMBUSH_GUARD_SCALE` 0.45 and `AMBUSH_SWING_GAP_SCALE` 1.9, so they swing
+##     late and rarely turtle - an ambusher that trades blows is a fight, one that
+##     guards every exchange is a wall.
+##
+## Everything they carry is the makeshift tier: there is no forged steel anywhere
+## in this wood.
+const AMBUSH_COUNT := 4
+const AMBUSH_HEALTH := 60.0
+const AMBUSH_BLOW_SCALE := 0.5
+const AMBUSH_GUARD_SCALE := 0.45
+const AMBUSH_SWING_GAP_SCALE := 1.9
 const REINFORCEMENTS := [
-	"club_makeshift", "dagger_ironwood", "branch_heavy",
-	"club_makeshift", "bow_twig", "branch_heavy",
+	"club_makeshift", "dagger_ironwood", "club_makeshift", "bow_twig",
+	"club_makeshift", "dagger_ironwood",
 ]
 ## How close the soul's body has to be to the mouth for the wood to answer it.
 const ESCAPE_RADIUS := 6.0
@@ -619,8 +635,9 @@ func _install_watchers() -> void:
 	for index in GATE_WATCHERS.size():
 		var spec: Dictionary = GATE_WATCHERS[index]
 		# Corvin's pair are the lesson's mooks: three shiv stabs each, half blows.
-		_add_watcher(spec["post"], "CampWatcher%d" % (guards.size() + 1), "",
-			PAIR_LESSON_HEALTH)
+		var watcher := _add_watcher(spec["post"],
+			"CampWatcher%d" % (guards.size() + 1), "", PAIR_LESSON_HEALTH)
+		watcher.blow_scale = PAIR_BLOW_SCALE
 
 
 func _add_watcher(at: Vector3, label: String, weapon: String = "",
@@ -683,10 +700,13 @@ func _on_watcher_defeated(enemy, _reward: int) -> void:
 ## noticed.
 func _spawn_reinforcements() -> void:
 	var prey = nearest_standing_body(REINFORCE_POSTS[2])
-	for index in REINFORCEMENTS.size():
+	for index in AMBUSH_COUNT:
 		var post: Vector3 = REINFORCE_POSTS[index % REINFORCE_POSTS.size()]
 		var watcher := _add_watcher(post, "CampWatcher%d" % (guards.size() + 1),
-			str(REINFORCEMENTS[index]))
+			str(REINFORCEMENTS[index % REINFORCEMENTS.size()]), AMBUSH_HEALTH)
+		watcher.blow_scale = AMBUSH_BLOW_SCALE
+		watcher.guard_scale = AMBUSH_GUARD_SCALE
+		watcher.swing_gap_scale = AMBUSH_SWING_GAP_SCALE
 		if prey != null:
 			watcher.hunt(prey)
 
@@ -713,15 +733,13 @@ func nearest_standing_body(point: Vector3):
 func _on_watcher_attack(attacker, amount: float, victim) -> void:
 	if not is_instance_valid(attacker) or not is_instance_valid(victim):
 		return
-	# The pair over the cages are the lesson's mooks and hit at half weight; every
-	# watcher that comes after them lands its whole blow.
-	var blow := amount
-	if float(attacker.get("health_pool")) < WatcherScript.HARDENED_HEALTH:
-		blow *= PAIR_BLOW_SCALE
+	# The blow already carries the body's own `blow_scale` - the pair lands half a
+	# swing, the ambush lands half a swing, a hardened body lands all of it - so
+	# the scene weighs nobody a second time here.
 	if victim.has_method("receive_melee"):
-		victim.receive_melee(blow, WATCHER_SOURCE, attacker.global_position)
+		victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position)
 	elif victim.has_method("take_damage"):
-		victim.take_damage(blow, WATCHER_SOURCE)
+		victim.take_damage(amount, WATCHER_SOURCE)
 
 
 # --- sequencer -------------------------------------------------------------

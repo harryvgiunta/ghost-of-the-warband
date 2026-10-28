@@ -1311,6 +1311,13 @@ func melee_cut_progress(hand: String) -> float:
 	var time := _left_melee_time if hand == "left" else _right_melee_time
 	return clampf(time/maxf(melee_seconds(hand),0.001),0.0,1.0)
 
+## The rig's own elapsed animation time, in seconds. Every clip, every pose and
+## every recovery runs on this clock, so `Combat` measures a swing's tail on it
+## instead of on the frame delta of whoever stepped the body: a frame that never
+## reached the sim cannot hold the rig's clock still.
+func motion_seconds() -> float:
+	return _motion_time
+
 func melee_cut_curve(hand: String) -> float:
 	return _swing_chain(melee_cut_progress(hand),SWING_CHAIN_BLADE)
 

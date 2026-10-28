@@ -28,8 +28,10 @@ extends SceneTree
 
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const ArenaScript = preload("res://scripts/admin_arena.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 const TEST_SAVE := "user://warband_world_state.json"
 const WARBAND_SAVE := "user://warband_world_warband.json"
@@ -118,6 +120,7 @@ func run() -> void:
 
 	check_one_of_each()
 	check_camp_in_the_woods()
+	check_ground()
 	await check_lesson()
 	await check_leaving()
 	await check_walk()
@@ -344,6 +347,47 @@ func check_camp_in_the_woods() -> void:
 		check(watcher.global_position.y > -1.0, "the watcher stands on the ground")
 
 
+# --- 2b. the ground -------------------------------------------------------
+
+## One heightfield under the whole strip: the camp pocket and the town square
+## padded flat into it, and the walk between them rolling over real slopes. The
+## world used to lie on a single flat box; this is what replaced it.
+func check_ground() -> void:
+	var readout: Dictionary = game.stats()
+	var low := float(readout["height_min"])
+	var high := float(readout["height_max"])
+	check(int(readout["terrain_tris"]) >= 20000,
+		"the ground is one heightfield (%d triangles)" % int(readout["terrain_tris"]))
+	check(high - low >= 2.0, "the wood rises and falls (%.1f .. %.1f m)" % [low, high])
+	# The cage line stands level: four cages on one pad, no step between them.
+	var first := TerrainScript.height_at(game.camp.CAGE_POSTS[0].x, game.camp.CAGE_POSTS[0].z)
+	for post in game.camp.CAGE_POSTS:
+		var height := TerrainScript.height_at(post.x, post.z)
+		check(absf(height - first) < 0.01,
+			"the cages stand level with each other (%.3f m vs %.3f)" % [height, first])
+	# ... and so does the square.
+	var centre: Vector3 = game.town.global_position
+	var corner: Variant = null
+	for offset in [Vector3(-12.0, 0.0, -9.0), Vector3(12.0, 0.0, -9.0),
+			Vector3(-12.0, 0.0, 9.0), Vector3(12.0, 0.0, 9.0)]:
+		var height := TerrainScript.height_at(centre.x + offset.x, centre.z + offset.z)
+		if corner == null:
+			corner = height
+		check(absf(height - float(corner)) < 0.01,
+			"the square is level (%.3f m)" % height)
+	# The walk between them is not: the trail goes over the wood's own ground.
+	var low_walk := INF
+	var high_walk := -INF
+	for point in game.trail.forest["lane"]:
+		var height := TerrainScript.height_at(point.x, point.z)
+		low_walk = minf(low_walk, height)
+		high_walk = maxf(high_walk, height)
+	check(high_walk - low_walk >= 1.0,
+		"the walk between them goes over real slopes (%.1f m of relief)" % (high_walk - low_walk))
+	print("WORLD_GROUND relief=%.1f..%.1f walk=%.1f..%.1f tris=%d"
+		% [low, high, low_walk, high_walk, int(readout["terrain_tris"])])
+
+
 # --- 3. the lesson ---------------------------------------------------------
 
 func check_lesson() -> void:
@@ -475,8 +519,8 @@ func check_lesson() -> void:
 	for index in ids.size():
 		check(not game.camp.is_cage_clamped(int(ids[index])),
 			"cage %d stopped clamping its prisoner" % (index + 1))
-	check(game.camp.sequencer.objective().contains("2/8"),
-		"the tally reads true against the eight (%s)" % game.camp.sequencer.objective())
+	check(game.camp.sequencer.objective().contains("2/%d" % SequencerScript.GUARD_COUNT),
+		"the tally reads true against the camp (%s)" % game.camp.sequencer.objective())
 	dismiss_card("the freed card")
 
 	# The freed squad arms itself off the ground - silently, with no loot step.
@@ -553,8 +597,9 @@ func check_leaving() -> void:
 		% [opening_metres, game_seconds, real_seconds])
 
 	# Six armed watchers out of the trees on that frame.
-	check(game.camp.guards.size() == 8, "six more watchers come out of the trees (%d camp watchers)"
-		% game.camp.guards.size())
+	var expected_guards: int = 2 + CampScript.AMBUSH_COUNT
+	check(game.camp.guards.size() == expected_guards,
+		"the ambush comes out of the trees (%d camp watchers of %d)" % [game.camp.guards.size(), expected_guards])
 	await create_timer(0.6).timeout
 	dismiss_card("the ambush")
 	var armed_reinforcements := 0
@@ -570,10 +615,15 @@ func check_leaving() -> void:
 		check(watcher.global_position.y > -1.0,
 			"reinforcement %d did not fall out of the world (y=%.2f)"
 			% [index, watcher.global_position.y])
-	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
-	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
-	check(game.guards.size() == 28, "the world's hostile list holds all twenty-eight (%d)"
-		% game.guards.size())
+	check(armed_reinforcements == CampScript.AMBUSH_COUNT,
+		"every reinforcement carries a weapon (%d)" % armed_reinforcements)
+	check(visible_blades == CampScript.AMBUSH_COUNT,
+		"and the blade is in its hand (%d)" % visible_blades)
+	# The camp's pair plus the ambush, plus the road's twenty: one list for the whole
+	# wood, so a watcher in the camp and a cultist on the lane are the same system.
+	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20
+	check(game.guards.size() == expected_hostiles,
+		"the world's hostile list holds all %d (%d)" % [expected_hostiles, game.guards.size()])
 
 
 
@@ -785,9 +835,12 @@ func check_budget() -> void:
 	check(nodes <= 26000, "the world stays inside its node budget (%d)" % nodes)
 	check(draws <= 800, "the world stays inside its draw budget (%d multimesh)" % draws)
 	check(shapes <= 1400, "the world stays inside its collision budget (%d shapes)" % shapes)
-	check(lights <= 175, "the world stays inside its light budget (%d)" % lights)
-	check(int(readout["guards"]) == 28, "all twenty-eight watchers are on the list (%d)"
-		% int(readout["guards"]))
+	# The route is marked by fire now: a pair of torches every twelve metres is 152
+	# lights down nine hundred metres of wood, and that is the design, not creep.
+	check(lights <= 210, "the world stays inside its light budget (%d)" % lights)
+	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20
+	check(int(readout["guards"]) == hostiles,
+		"all %d watchers are on the list (%d)" % [hostiles, int(readout["guards"])])
 	check(float(readout["lane_length"]) >= 860.0 and float(readout["lane_length"]) <= 980.0,
 		"the trail is a long run (%.1f m)" % float(readout["lane_length"]))
 	print("WORLD_BUDGET nodes=%d draws=%d meshes=%d lights=%d shapes=%d guards=%d"

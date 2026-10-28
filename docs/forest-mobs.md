@@ -34,7 +34,7 @@ no download is required to rebuild any of it.
 
 | Surface | Purpose |
 | --- | --- |
-| `tools/prepare_forest_mobs.py` | Geometry, rig, skin weights, PBR atlas bake, six clips, GLB + JSON export, captures |
+| `tools/prepare_forest_mobs.py` | Geometry, rig, skin weights, PBR atlas bake, the per-mob clip set (six, or eleven on the warden), GLB + JSON export, captures (`--no-captures` to skip them) |
 | `tools/forest_surface.py` | Analytic surface fields (bark, cloth, bone, antler, moss, void, ember) and tangent normals |
 | `tools/forest_styles.py` | Mob recipes, clip timings, palettes, atlas sizes |
 | `tools/build_forest.py` | One-command rebuild for one mob or all three |
@@ -97,6 +97,23 @@ strips a trailing `_Loop` from animation names, so the clips are named
 | Hollow warden | 2.800 | 1.400 | 0.800 | 1.60 (0.78) | 0.50 | 1.45 |
 | Ossuary stalker | 2.400 | 1.100 | 0.700 | 1.25 (0.55) | 0.40 | 1.10 |
 | Gallowsroot | 3.200 | 1.800 | 1.000 | 2.10 (1.05) | 0.60 | 1.80 |
+
+The **hollow warden** carries five more, because it is the one the warband fights
+with weapons in hand (`scripts/warband/cage_watcher.gd`):
+
+| Clip | Duration | Loop | Impact |
+| --- | ---: | --- | ---: |
+| `Warden_Attack_Slash` | 1.350 | no | 0.66 |
+| `Warden_Attack_Stab` | 1.100 | no | 0.50 |
+| `Warden_Block` | 1.200 | **yes** | - |
+| `Warden_Stagger` | 0.600 | no | - |
+| `Warden_Crouch` | 2.400 | **yes** | - |
+
+The three attacks let a warden swing differently per body; the block is a loop a
+controller can hold for any window and cut into an attack; the stagger is
+authored as a delta over the idle stance so its last frame *is* the idle and it
+can be cut short anywhere; the crouch is a loopable low stalk. The other two mobs
+keep the six-clip set and the shared sampler plays them exactly as before.
 
 Attack timings are authored to the gameplay clock so
 `DevilMobVisual._seek_attack()` places the strike pose on the damage frame:
@@ -199,7 +216,8 @@ derived from the sampled height field with a per-surface strength from
 
 `tests/forest_mobs_regression.gd` loads each GLB and checks:
 
-- exactly six clips, names, durations (±0.08 s) and stationary root at clip
+- the clip set per mob (six for the stalker and the gallowsroot, eleven for the
+  warden), names, durations (±0.08 s) and stationary root at clip
   start/mid/end; the runtime controller forces loop modes on idle/walk/run and
   one-shot on attack/hit/death;
 - 24–96 bones with `root`/`pelvis`/`head`/`jaw`, head rest on the −Z forward

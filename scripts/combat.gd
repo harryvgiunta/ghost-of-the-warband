@@ -51,7 +51,7 @@ var melee_progress := 1.0:
 		# Existing callers and tests reset the single-weapon recovery through
 		# this field. Keep that behavior; per-hand dual recovery is explicit.
 		if is_instance_valid(rig) and rig.weapon != "dual":
-			right_melee_progress = value
+			_set_melee_progress("right",value)
 var movement_mode := "STANDING"
 var grounded := false
 var actor: CharacterBody3D
@@ -107,6 +107,8 @@ var right_melee_progress := 1.0
 var _left_swing_seconds := float(Archer.dagger_profile(0).seconds)
 var _right_swing_seconds := 1.0
 var _swings: Dictionary = {}
+## Rig seconds at the last write of each hand's recovery copy (see `_recovery_elapsed`).
+var _recovery_stamp := {"left":0.0, "right":0.0}
 
 func _swing_state(hand: String) -> Dictionary:
 	if not _swings.has(hand):
@@ -116,25 +118,78 @@ func _swing_state(hand: String) -> Dictionary:
 			"diagonal":false, "reach":0.0, "half_angle":0.0, "side":1.0, "cut":0.0}
 	return _swings[hand]
 
+## One swing clock: the rig's. `Combat` keeps a copy of each hand's recovery -
+## the HUD, the snapshot and `attack_progress` read it - and every gate reads
+## it through here, where it is answered off the rig instead of off a second
+## timer:
+##
+##   * a hand the rig is swinging reports the rig's own clip progress, so a cut
+##     can never outlast the animation that performs it;
+##   * a hand the rig has let go keeps only the recovery tail a weapon swap
+##     leaves behind, and that tail drains on the rig's own motion clock, not on
+##     whoever happens to step the body;
+##   * so a copy that was left behind - the body was not stepped for a while:
+##     a paused frame, a downed body, a guest's predicted body - heals on the
+##     rig's clock instead of freezing the gate shut. Before this the copy was a
+##     second clock advanced only by `ArenaActor.step`, and any frame the rig
+##     animated without stepping the body left it mid-swing for good: every
+##     click after it was refused, silently. That is the report "clicking after
+##     playing for a while makes it impossible to attack".
 func melee_progress_for(hand: String) -> float:
-	return left_melee_progress if hand == "left" else right_melee_progress
+	if is_instance_valid(rig) and rig.has_melee(hand):
+		return float(rig.melee_progress_for(hand))
+	var stored := left_melee_progress if hand == "left" else right_melee_progress
+	if stored >= 1.0 or not is_instance_valid(rig):
+		return stored
+	var seconds := _left_swing_seconds if hand == "left" else _right_swing_seconds
+	return minf(1.0,stored + _recovery_elapsed(hand) / maxf(seconds,0.001))
+
+## Rig seconds since this hand's recovery copy was last written. The copy's own
+## tail is measured on the motion clock the clip runs on, so it cannot be held
+## still by a frame that never reached `advance()`.
+func _recovery_elapsed(hand: String) -> float:
+	var now := _rig_seconds()
+	var stamp := float(_recovery_stamp.get(hand,0.0))
+	if now < stamp:
+		# A snapshot rewound the rig's animation clock. The tail restarts from
+		# here instead of waiting for the clock to climb back to its old value.
+		_recovery_stamp[hand] = now
+		return 0.0
+	return now - stamp
+
+## The rig's animation clock, or 0 for a `Combat` that was never handed one.
+func _rig_seconds() -> float:
+	return float(rig.motion_seconds()) if is_instance_valid(rig) else 0.0
 
 func _set_melee_progress(hand: String, value: float) -> void:
 	if hand == "left":
 		left_melee_progress = value
 	else:
 		right_melee_progress = value
+	_recovery_stamp[hand] = _rig_seconds()
+
+## One hand's recovery this frame: the rig's clip while it swings, its own clock
+## for the tail. A bare `Combat` with no rig falls back to draining the copy by
+## the frame delta.
+func _recovered(hand: String, delta: float) -> float:
+	if is_instance_valid(rig):
+		return melee_progress_for(hand)
+	var stored := left_melee_progress if hand == "left" else right_melee_progress
+	if stored >= 1.0:
+		return 1.0
+	var seconds := _left_swing_seconds if hand == "left" else _right_swing_seconds
+	return minf(1.0,stored + delta / maxf(seconds,0.001))
 
 func _sync_display_progress() -> void:
 	if is_instance_valid(rig) and rig.weapon == "dual":
 		if rig.has_melee("right"):
-			melee_progress = right_melee_progress
+			melee_progress = melee_progress_for("right")
 		elif rig.has_melee("left"):
-			melee_progress = left_melee_progress
+			melee_progress = melee_progress_for("left")
 		else:
-			melee_progress = minf(left_melee_progress,right_melee_progress)
+			melee_progress = minf(melee_progress_for("left"),melee_progress_for("right"))
 	else:
-		melee_progress = right_melee_progress
+		melee_progress = melee_progress_for("right")
 
 func setup(archer: Node3D, initial_aim: Vector3) -> void:
 	rig = archer
@@ -1162,12 +1217,12 @@ func advance(delta: float) -> void:
 			if not _can_release_from_cover():
 				_auto_exposure = true
 			_try_cover_release(delta)
-	# Each hand recovers independently. Sword recovery continues across weapon
-	# swaps but never gates a bow draw.
-	if left_melee_progress < 1.0:
-		left_melee_progress = minf(1.0,left_melee_progress + delta / maxf(_left_swing_seconds,0.001))
-	if right_melee_progress < 1.0:
-		right_melee_progress = minf(1.0,right_melee_progress + delta / maxf(_right_swing_seconds,0.001))
+	# Each hand recovers independently, on the rig's clock. Sword recovery
+	# continues across weapon swaps but never gates a bow draw.
+	if left_melee_progress < 1.0 or (is_instance_valid(rig) and rig.has_melee("left")):
+		_set_melee_progress("left",_recovered("left",delta))
+	if right_melee_progress < 1.0 or (is_instance_valid(rig) and rig.has_melee("right")):
+		_set_melee_progress("right",_recovered("right",delta))
 	_sync_display_progress()
 	# Bow readiness follows the actual release/re-nock animation, not a second timer.
 	if rig.weapon == "bow" or rig.phase in ["RELEASE", "RECOVER", "T_RELEASE", "T_RECOVER"]:

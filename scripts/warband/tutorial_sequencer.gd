@@ -29,10 +29,11 @@ enum State { CAGED, ALL_SEEN, RESCUER_ARRIVED, FREED, ESCAPING }
 
 ## Bodies the lesson is built around. The scene must cage exactly this many.
 const PRISONER_COUNT := 4
-## The watchers the wood fields at the camp: the pair Corvin puts down and the six
-## that come out of the trees as the squad leaves. The tally is the objective's -
-## it does not gate the escape, because the leaving is the ambush.
-const GUARD_COUNT := 8
+## The watchers the wood fields at the camp: the pair Corvin puts down and the
+## four that come out of the trees as the squad leaves (`CampScript.AMBUSH_COUNT`).
+## The tally is the objective's - it does not gate the escape, because the leaving
+## is the ambush.
+const GUARD_COUNT := 6
 
 ## The loose prisoner's mercenary id, set through `begin()`.
 var rescuer_merc_id := -1
