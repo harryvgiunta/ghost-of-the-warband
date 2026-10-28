@@ -719,10 +719,13 @@ func _refresh_preview() -> void:
 		preview.set_active(false)
 		return
 	var gear: Dictionary = _warband.roster.equipped_of(selected_merc)
-	var pieces := {}
+	# The live ranger is dressed from the *ids* the roster wears, not from a packed
+	# int: the paperdoll held item ids and passed them straight to `pack()`, which
+	# reads ints - so every slot packed as code 0 and the preview rendered the
+	# leather set whatever the body was actually wearing, including nothing at all.
+	var armor := {}
 	for slot in ArmorData.SLOTS:
-		pieces[slot] = str(gear.get(slot, ""))
-	var armor := ArmorData.unpack(ArmorData.pack(pieces))
+		armor[slot] = ArmorData.set_of_item(str(gear.get(slot, "")))
 	var worn := {
 		"neck": str(gear.get("neck", "")),
 		"ring1": str(gear.get("ring1", "")),

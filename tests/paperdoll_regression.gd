@@ -602,6 +602,23 @@ func _test_rig_loadouts() -> void:
 	rig.apply_loadout(StateScript.build_loadout("club_makeshift", "", empty_armor))
 	check(not rig._quiver.visible, "and leaves with it")
 
+	# The gear page dresses the live ranger from the roster's *item ids*, so the id
+	# has to be read back as a set index. It was not: the ids went straight into
+	# `ArmorData.pack()`, which reads ints, so every slot packed as code 0 and the
+	# preview was a man in the leather set whatever the body was wearing.
+	check(ArmorData.set_of_item("armor_naked_chest") == bare_index,
+		"a worn piece's set is read back from its id")
+	check(ArmorData.set_of_item("") == ArmorData.NONE, "an empty slot has no set")
+	check(ArmorData.set_of_item("club_makeshift") == ArmorData.NONE,
+		"and a weapon is not an armour set")
+	var page_armor := {}
+	for slot in ArmorData.SLOTS:
+		page_armor[slot] = ArmorData.set_of_item("armor_naked_%s" % slot)
+	rig.apply_loadout(StateScript.build_loadout("", "", page_armor))
+	check(_visible(rig, "chest", bare_index),
+		"the gear page's ranger wears the shirt and shorts")
+	check(not _visible(rig, "chest", leather_index), "and not the green leather outfit")
+
 	var armor := {"head":0,"chest":0,"hands":0,"legs":0,"feet":0}
 	rig.apply_loadout(StateScript.build_loadout("bow_short","",armor))
 	check(rig.weapon == "bow","A bow loadout enters bow mode")

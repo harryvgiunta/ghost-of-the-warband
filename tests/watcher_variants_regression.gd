@@ -96,6 +96,7 @@ func run() -> void:
 	await check_weapon()
 	check_arm_round_trip()
 	check_gear()
+	await check_swing_arc()
 	check_fight()
 	await check_attack()
 	await check_sampler()
@@ -374,6 +375,43 @@ func check_gear() -> void:
 	check(carried_bandages > 0 and carried_bandages < _samples.size(),
 		"the dressings are carried by some bodies and not others (%d of %d)"
 		% [carried_bandages, _samples.size()])
+
+# --- the swing -------------------------------------------------------------
+
+## The piece in the hand has to travel. The mobset's attack clips raise the weapon
+## arm and then hold it up, so the sampler lays its own arc - cock, whip, settle -
+## over the clip; a strike that leaves the club where the windup put it is a statue
+## with a club over its head, which is exactly what the camp used to have.
+func check_swing_arc() -> void:
+	var watcher = _samples[0]
+	watcher.arm("club_makeshift")
+	await physics_frame
+	var vis = watcher._visual
+	watcher.set_physics_process(false)
+	vis.set_process(false)
+	vis._snapshot_swing_base()
+	var windup := float(watcher.profile.get("windup", 0.55))
+	var strike := float(watcher.profile.get("strike", 0.20))
+	vis._combat_state = "WINDUP"
+	vis._combat_time = windup
+	vis._apply_swing()
+	await process_frame
+	var cocked: Vector3 = (vis._held as Node3D).to_global(Vector3(0.0, 0.0, -1.0))
+	vis._combat_state = "STRIKE"
+	vis._combat_time = strike
+	vis._apply_swing()
+	await process_frame
+	var landed: Vector3 = (vis._held as Node3D).to_global(Vector3(0.0, 0.0, -1.0))
+	var travel := cocked.distance_to(landed)
+	check(travel >= 1.0, "the piece travels on the swing (%.2f m)" % travel)
+	check(landed.y < cocked.y - 0.5,
+		"and the head comes down, not across (%.2f m -> %.2f m)" % [cocked.y, landed.y])
+	check(landed.y < 1.2, "the club finishes below the shoulder (%.2f m)" % landed.y)
+	watcher.set_physics_process(true)
+	vis.set_process(true)
+	vis._attack_playing = false
+	vis._combat_state = ""
+
 
 # --- the fight -------------------------------------------------------------
 

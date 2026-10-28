@@ -338,6 +338,20 @@ Short version of the latest tuning (all in the code, all covered by
   on top, so a prisoner in mail trousers is a bare body with mail on the legs. An
   empty slot used to fall through to the imported leather outfit, which made a
   naked body a man in full green leather;
+- **the watcher swings the thing it is holding**: the warden's authored attack
+  clips raise the arm and then *hold* it, so played straight the club sat over the
+  head and the blow landed with no motion. `devil_mob_visual.gd` now lays its own
+  arc over the clip on the mob's own clock - `SWING_COCK` (the club up and forward)
+  through `SWING_THROUGH` (arm down and across, club head below the shoulder) with
+  a front-loaded whip at 34% of the strike window, an `SWING_OVERSHOOT` follow
+  through and a settle - applied by *setting* the arm bones from the pose the
+  windup opened in (`process_priority` 20, after the AnimationPlayer), so the clip
+  cannot drag the club back up. The club head travels ~2 m per swing.
+  `tests/watcher_variants_regression.check_swing_arc` measures it;
+- **the gear page dresses the ranger from ids**: `ArmorData.set_of_item(id)` reads
+  the set back out of an `armor_<set>_<slot>` id. The paperdoll held item ids and
+  fed them to `ArmorData.pack()` - which reads ints - so every slot packed as code
+  0 and the preview was the leather set whatever the body wore, including nothing;
 - **the quiver is kit**: `Archer._sync_weapon_visibility` shows it only while a bow
   is in the hands, so a prisoner with a club is not carrying arrows;
 - **the branch is a two-hander held like one**: `Sword.BRANCH_GRIP_INSET` 0.20 m

@@ -129,11 +129,52 @@ var _paint: Array[StandardMaterial3D] = []
 var _paint_base: Array[Color] = []
 ## The catalog piece in the hand, the bone attachment that follows the hand and
 ## the fitted grip under it.
+## The swing the sampler lays over the clip. The mobset's attack clips raise the
+## weapon arm and then hold it up: played straight they read as a statue with a
+## club over its head, and the piece in the hand never travels. So the sampler
+## owns the arc - a cock-back through the windup, a fast whip that peaks on the
+## frame the blow lands, and a settle through the recovery - applied on top of
+## whatever the clip did, on the same clock the damage uses.
+##
+## Axes are bone-local, measured on the warden's rig: `clavicle_r` +Y lifts the
+## arm overhead, +X drops it forward, +Z crosses it behind the body.
+const SWING_COCK := {
+	"clavicle_r": Vector3(0.0, -60.0, -60.0),
+	"upperarm_r": Vector3(0.0, 0.0, -60.0),
+	"lowerarm_r": Vector3(-10.0, 0.0, 0.0),
+	"hand_r": Vector3(-40.0, 0.0, 40.0),
+	"spine_02": Vector3(0.0, 0.0, 10.0),
+	"spine_03": Vector3(0.0, 0.0, 14.0),
+}
+const SWING_THROUGH := {
+	"clavicle_r": Vector3(-70.0, 10.0, 30.0),
+	"upperarm_r": Vector3(30.0, 0.0, 40.0),
+	"lowerarm_r": Vector3(18.0, 0.0, 0.0),
+	"hand_r": Vector3(60.0, 0.0, -24.0),
+	"spine_02": Vector3(0.0, 0.0, -14.0),
+	"spine_03": Vector3(0.0, 0.0, -18.0),
+}
+## How far into the strike state the blow lands. The mob resolves its damage at
+## 34% of the strike window, and the weapon is at full extension on that frame.
+const SWING_IMPACT_SHARE := 0.34
+## How far past the through pose the follow-through carries the arm before it
+## settles: a swing that stops dead on the target reads as a pose, not a blow.
+const SWING_OVERSHOOT := 0.18
+## The rest pose every other table is interpolated against.
+const ZERO_SWING := {}
+
 var _held_item := ""
 var _held: Node3D
 var _hold: BoneAttachment3D
 var _grip: Node3D
 var _grip_scale := 1.0
+var _swing_bones: Dictionary = {}
+## The pose each swing bone had when the windup opened. The arc is authored on
+## top of that snapshot and *replaces* the clip's own arm pose while the swing
+## runs: the mobset's attack clips raise the arm and hold it, so adding to them
+## pushed the arm past vertical and the club dropped during the windup instead of
+## travelling on the strike.
+var _swing_base: Dictionary = {}
 
 
 func _ready() -> void:
@@ -157,6 +198,15 @@ func _ready() -> void:
 		push_error("Mob visual is missing its AnimationPlayer or Skeleton3D: " + mob_id)
 		return
 	_head_bone = _skeleton.find_bone("head")
+	# The swing's own bones, resolved once: a body whose rig names none of them
+	# simply gets the clip it always had.
+	for key in SWING_COCK:
+		var index := _skeleton.find_bone(str(key))
+		if index >= 0:
+			_swing_bones[str(key)] = index
+	# The overlay has to land after the AnimationPlayer has written this frame's
+	# pose, or the clip erases it: a later process priority is later in the frame.
+	process_priority = 20
 	# The limb that lands the blow: hand for the bipeds, front paw for the
 	# quadruped beast, head as the last resort.
 	_strike_bone = _skeleton.find_bone("hand_r")
@@ -466,6 +516,7 @@ func set_combat(state: String, time: float) -> void:
 			_clip = str(_attack_entry()["clip"])
 			_player.speed_scale = 1.0
 			_player.play(_clip, 0.05)
+			_snapshot_swing_base()
 		return
 	if _attack_playing:
 		_attack_playing = false
@@ -540,6 +591,7 @@ func _process(delta: float) -> void:
 		return
 	if _attack_playing:
 		_seek_attack()
+		_apply_swing()
 		return
 	if _hit_playing:
 		_hit_time += delta
@@ -548,6 +600,97 @@ func _process(delta: float) -> void:
 			_select_locomotion()
 		return
 	_select_locomotion()
+
+
+## The stance the arc is measured from: whatever pose the clip had on the frame
+## the windup opened.
+func _snapshot_swing_base() -> void:
+	_swing_base.clear()
+	if _skeleton == null:
+		return
+	for bone_name in _swing_bones:
+		var index := int(_swing_bones[bone_name])
+		_swing_base[bone_name] = _skeleton.get_bone_pose_rotation(index)
+
+
+## How far through the swing the body is: 0 at the start of the windup, 1 at the
+## end of the recovery, with the impact on its own share of the strike window.
+func _swing_phase() -> Dictionary:
+	var windup := maxf(0.01, float(profile.get("windup", 0.45)))
+	var strike := maxf(0.01, float(profile.get("strike", 0.18)))
+	var recover := maxf(0.01, float(profile.get("recover", 0.55)))
+	var impact := windup + strike * SWING_IMPACT_SHARE
+	var stagger_end := windup + strike
+	var total := windup + strike + recover
+	var elapsed := 0.0
+	match _combat_state:
+		"WINDUP":
+			elapsed = minf(_combat_time, windup)
+		"STRIKE":
+			elapsed = windup + minf(_combat_time, strike)
+		"RECOVER":
+			elapsed = windup + strike + minf(_combat_time, recover)
+		_:
+			return {}
+	return {"elapsed": elapsed, "windup": windup, "impact": impact,
+		"stagger_end": stagger_end, "total": total}
+
+
+## Where the weapon is on its arc: 0 is the stance the windup opened in, 1 is
+## fully cocked, 2 is through the target, and the follow-through overshoots to
+## `SWING_OVERSHOOT` before settling home.
+func _swing_arc(phase: Dictionary) -> float:
+	var elapsed := float(phase["elapsed"])
+	var windup := float(phase["windup"])
+	var impact := float(phase["impact"])
+	var stagger_end := float(phase["stagger_end"])
+	var total := float(phase["total"])
+	if elapsed <= windup:
+		return smoothstep(0.0, 1.0, clampf(elapsed / windup, 0.0, 1.0))
+	if elapsed <= impact:
+		# The whip is front-loaded: most of the arc is crossed in the first frames
+		# of the strike window, so the piece is already coming down on the frame the
+		# blow lands - a slow linear whip would still be at the cock when the damage
+		# resolved, and the swing would read as happening after the hit.
+		var share := clampf((elapsed - windup) / maxf(0.001, impact - windup), 0.0, 1.0)
+		return 1.0 + pow(share, 0.45)
+	if elapsed <= stagger_end:
+		var share := clampf((elapsed - impact) / maxf(0.001, stagger_end - impact), 0.0, 1.0)
+		return 2.0 + SWING_OVERSHOOT * share
+	var settle := smoothstep(0.0, 1.0,
+		clampf((elapsed - stagger_end) / maxf(0.01, total - stagger_end), 0.0, 1.0))
+	return (2.0 + SWING_OVERSHOOT) * (1.0 - settle)
+
+
+## Layer the cock-back, the whip and the follow-through over the clip: a body
+## with the swing bones and a named attack arc gets one, the single-swing mobs keep
+## their authored clip untouched.
+func _apply_swing() -> void:
+	if _swing_bones.is_empty() or _skeleton == null:
+		return
+	var phase := _swing_phase()
+	if phase.is_empty():
+		return
+	var arc := _swing_arc(phase)
+	for bone_name in _swing_bones:
+		var index := int(_swing_bones[bone_name])
+		var cock: Vector3 = SWING_COCK.get(bone_name, Vector3.ZERO)
+		var through: Vector3 = SWING_THROUGH.get(bone_name, Vector3.ZERO)
+		var angles: Vector3
+		if arc <= 1.0:
+			angles = cock * arc
+		elif arc <= 2.0:
+			angles = cock.lerp(through, arc - 1.0)
+		else:
+			angles = through * (1.0 + (arc - 2.0))
+		var base: Quaternion = _swing_base.get(bone_name,
+			_skeleton.get_bone_pose_rotation(index))
+		# Set, not add: the arc is the arm's whole pose for as long as the swing
+		# lasts, so the clip cannot drag the club back up behind the head.
+		var extra := Quaternion(Vector3.RIGHT, deg_to_rad(angles.x)) \
+			* Quaternion(Vector3.UP, deg_to_rad(angles.y)) \
+			* Quaternion(Vector3.BACK, deg_to_rad(angles.z))
+		_skeleton.set_bone_pose_rotation(index, base * extra)
 
 
 func _seek_attack() -> void:

@@ -55,6 +55,19 @@ static func set_abbreviation(index: int) -> String:
 static func item_id(set_index: int, slot: String) -> String:
 	return "armor_%s_%s" % [SET_IDS[clampi(set_index, 0, SET_IDS.size() - 1)], slot]
 
+## The set a worn piece belongs to, `NONE` for an empty slot or a piece that is
+## not armour at all. The catalogue's ids are `armor_<set>_<slot>`, which is what
+## `item_id()` writes, so this reads the id back instead of taking a dependency on
+## the item table - and it is the one conversion a caller that holds *ids* needs
+## before it can pack or dress a rig.
+static func set_of_item(item_id: String) -> int:
+	if item_id.is_empty() or not item_id.begins_with("armor_"):
+		return NONE
+	var parts := item_id.split("_")
+	if parts.size() < 3:
+		return NONE
+	return SET_IDS.find(str(parts[1]).to_lower())
+
 ## One piece's contribution: the helmet's full figure, or a body piece's slice
 ## of its set's body figure. An empty slot contributes nothing.
 static func reduction_for(set_index: int, slot: String) -> float:
