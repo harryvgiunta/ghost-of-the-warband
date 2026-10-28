@@ -598,7 +598,8 @@ const EXTERNAL_ARMOR := {
 	"naked": {
 		"scene": "res://assets/characters/armor/ironwood_naked.glb",
 		"pieces": {
-			"chest": "Armor_Naked_Chest", "legs": "Armor_Naked_Legs",
+			"chest": "Armor_Naked_Chest", "hands": "Armor_Naked_Hands",
+			"legs": "Armor_Naked_Legs", "feet": "Armor_Naked_Feet",
 		},
 	},
 }
@@ -1162,26 +1163,38 @@ func _build_armor_meshes() -> void:
 					_armor_meshes[slot][set_index].append(node)
 
 func _apply_armor_visibility() -> void:
-	# Two body layers, and which one is drawn is decided by the chest - the slot
-	# that carries the whole torso, both arms and the hands.
+	# One body layer, and it is the **naked** set: bare skin, the old shirt and
+	# the shorts. The imported leather outfit is the *leather* set's own meshes
+	# and is never an underlayer - a chest that wore mail, plate or cloth used to
+	# put the green leather hood, torso, bracers, calf wraps and boots on screen
+	# for every slot that wore nothing, so putting one piece on looked like the
+	# body reverting to leather.
 	#
-	#   * a bare or rag-covered chest draws the **naked** body: bare skin, the old
-	#     shirt and the shorts. A prisoner with nothing on is a body, not a man in
-	#     full green leather, which is what an empty slot used to fall through to;
-	#   * any other chest draws the imported ranger outfit as the base the forged
-	#     sets are cut over, so mail and plate keep the sleeves and trousers their
-	#     pieces were fitted around.
-	#
-	# Whichever layer is base, the slot's own set still draws on top of it, so a
-	# prisoner in mail trousers is a bare body with mail on the legs.
+	# So a slot draws exactly the set it wears, and the naked region underneath
+	# it only while it wears nothing. Two regions bridge two slots: the arms (the
+	# naked hands piece) and the feet. Those stay on while *either* neighbour is
+	# bare, so a hauberk with bare hands keeps its hands, mail legs with bare feet
+	# keep their feet, and no kit can leave a body without a limb.
 	var bare := ArmorData.SET_IDS.find("naked")
-	var chest := int(armor_pieces.get("chest", ArmorData.NONE))
-	var base := bare if chest < 0 or chest == bare else 0
+	var skin_on := {}
+	for slot in ArmorData.SLOTS:
+		skin_on[slot] = not _slot_covered(slot)
+	skin_on["hands"] = bool(skin_on["hands"]) or bool(skin_on["chest"])
+	skin_on["feet"] = bool(skin_on["feet"]) or bool(skin_on["legs"])
 	for slot in ArmorData.SLOTS:
 		var worn := int(armor_pieces.get(slot, ArmorData.NONE))
-		for set_index: int in _armor_meshes.get(slot,{}):
+		for set_index: int in _armor_meshes.get(slot, {}):
 			for node: Node3D in _armor_meshes[slot][set_index]:
-				node.visible = set_index == base or set_index == worn
+				node.visible = set_index == worn \
+					or (set_index == bare and bool(skin_on[slot]))
+
+## True when the slot wears a set that draws its own piece there - the piece that
+## covers the skin the naked layer would otherwise leave bare.
+func _slot_covered(slot: String) -> bool:
+	var worn := int(armor_pieces.get(slot, ArmorData.NONE))
+	if worn < 0:
+		return false
+	return not (_armor_meshes.get(slot, {}).get(worn, []) as Array).is_empty()
 
 func set_armor_piece(slot: String, set_index: int) -> void:
 	cancel_consumable()

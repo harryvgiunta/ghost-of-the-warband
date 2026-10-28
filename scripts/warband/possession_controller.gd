@@ -566,7 +566,6 @@ func apply_action(merc_id: int, action: String, value: Variant = null,
 func _perform(actor: Actor, action: String, value: Variant, origin: Variant = null) -> bool:
 	if actor == null or not is_instance_valid(actor) or not actor.alive:
 		return false
-	var rig = actor.rig
 	var combat = actor.combat
 	match action:
 		"draw":
@@ -651,31 +650,10 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 			if absf(flat.length() - 1.0) > 0.1:
 				return false
 			return actor.try_step(flat)
-		"weapon":
-			if typeof(value) != TYPE_STRING or value not in ["bow", "sword", "dagger", "dual"]:
-				return false
-			var requested := str(value)
-			if requested == "dual":
-				if rig.weapon == "dual":
-					requested = "sword"
-				elif rig.sword_index == 2:
-					return false
-			combat.stop()
-			return rig.set_weapon(requested)
-		"shield":
-			if typeof(value) != TYPE_BOOL:
-				return false
-			combat.stop()
-			rig.set_shield(bool(value))
-			return true
 		"consume":
 			if typeof(value) != TYPE_STRING or value not in ["bandage", "potion"]:
 				return false
 			return actor.try_consume(str(value))
-		"ability":
-			if typeof(value) != TYPE_INT:
-				return false
-			return bool(actor.try_ability(int(value)).get("ok", false))
 		"stop":
 			combat.stop()
 			return true
@@ -731,33 +709,16 @@ func _hotkey(keycode: int) -> bool:
 			return true
 	return false
 
-## The possessed body's bindings, mirroring `arena.gd`. Shift+1..3 are the
-## ability seats; 1..5 are the weapon modes; 6/7 the consumables.
+## The possessed body's bindings. What a body carries is its gear, so there is no
+## key that puts a weapon or a shield in its hands: `refresh_gear()` dresses the
+## body from its roster record and the paperdoll moves pieces in and out. 6/7 stay
+## the consumables.
 func _command(event: InputEventKey) -> bool:
 	var actor := active_actor
 	var yaw := camera_rig.yaw if camera_rig != null else 0.0
 	var right := Vector3(cos(yaw), 0, -sin(yaw))
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
 	match event.keycode:
-		KEY_1:
-			if event.shift_pressed:
-				_act("ability", 0)
-			else:
-				_act("weapon", "bow")
-		KEY_2:
-			if event.shift_pressed:
-				_act("ability", 1)
-			else:
-				_act("weapon", "sword")
-		KEY_3:
-			if event.shift_pressed:
-				_act("ability", 2)
-			else:
-				_act("weapon", "dagger")
-		KEY_4:
-			_act("shield", not actor.rig.shield_equipped)
-		KEY_5:
-			_act("weapon", "dual")
 		KEY_6:
 			_act("consume", "bandage")
 		KEY_7:

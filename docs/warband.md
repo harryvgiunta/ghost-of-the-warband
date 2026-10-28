@@ -337,13 +337,17 @@ Short version of the latest tuning (all in the code, all covered by
   `LOOT_CLEAR_METRES` (22 m): the dressing leaves the stash, the body gets
   `BANDAGE_HEAL_SHARE` (30%) of its own pool back, and the roster is written on the
   same frame. An interrupted channel spends nothing. `tests/squad_medicine_regression.gd`;
-- **two body layers, and the chest picks one**: `Archer._apply_armor_visibility`
-  draws the **naked** body (bare skin, old shirt, shorts) when the chest slot is
-  empty or naked, and the imported ranger outfit as the base the forged sets were
-  fitted around when it is anything else. Every slot still draws its own worn set
-  on top, so a prisoner in mail trousers is a bare body with mail on the legs. An
-  empty slot used to fall through to the imported leather outfit, which made a
-  naked body a man in full green leather;
+- **one body layer, and it is the naked set**: `Archer._apply_armor_visibility`
+  draws a slot's own worn set, and the **naked** region underneath it only while
+  that slot wears nothing: bare skin, the old shirt and the shorts. The imported
+  leather outfit is the *leather set's* meshes, never an underlayer - a chest that
+  wore mail, plate or cloth used to put the green leather hood, torso, bracers,
+  calf wraps and boots on screen for every slot that wore nothing, so putting one
+  piece on looked like the body reverting to green leather. The naked set is four
+  pieces, one per body region (`Armor_Naked_Chest`, `_Hands`, `_Legs`, `_Feet`),
+  and the arms and feet bridge two slots each, so they stay on screen while
+  *either* neighbour is bare: a hauberk with bare hands keeps its hands and mail
+  legs with bare feet keep their feet. `tools/prepare_naked_armor.py` builds it;
 - **the watcher swings the thing it is holding**: the warden's authored attack
   clips raise the arm and then *hold* it, so played straight the club sat over the
   head and the blow landed with no motion. `devil_mob_visual.gd` now lays its own

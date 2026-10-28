@@ -73,7 +73,9 @@
   ],
   "slots": [
     "chest",
-    "legs"
+    "hands",
+    "legs",
+    "feet"
   ],
   "pieces": {
     "Armor_Naked_Chest": {
@@ -81,8 +83,6 @@
       "bones": [
         "clavicle_l",
         "clavicle_r",
-        "hand_l",
-        "hand_r",
         "lowerarm_l",
         "lowerarm_r",
         "neck_01",
@@ -93,34 +93,67 @@
         "upperarm_l",
         "upperarm_r"
       ],
-      "triangles": 6040,
+      "triangles": 4576,
       "bounds_min": [
-        -0.89254,
+        -0.39885,
         0.9,
         -0.14547
       ],
       "bounds_max": [
-        0.89255,
+        0.39885,
         1.596,
         0.12147
       ],
       "bounds_bind_min": [
-        -0.89254,
+        -0.39885,
         -0.12147,
         0.9
       ],
       "bounds_bind_max": [
-        0.89255,
+        0.39885,
         0.14547,
         1.596
       ],
-      "vertices": 4373
+      "vertices": 3137
+    },
+    "Armor_Naked_Hands": {
+      "slot": "hands",
+      "bones": [
+        "clavicle_l",
+        "clavicle_r",
+        "hand_l",
+        "hand_r",
+        "lowerarm_l",
+        "lowerarm_r",
+        "upperarm_l",
+        "upperarm_r"
+      ],
+      "triangles": 1464,
+      "bounds_min": [
+        -0.89254,
+        1.39601,
+        -0.13021
+      ],
+      "bounds_max": [
+        0.89255,
+        1.53255,
+        0.0168
+      ],
+      "bounds_bind_min": [
+        -0.89254,
+        -0.0168,
+        1.39601
+      ],
+      "bounds_bind_max": [
+        0.89255,
+        0.13021,
+        1.53255
+      ],
+      "vertices": 1219
     },
     "Armor_Naked_Legs": {
       "slot": "legs",
       "bones": [
-        "ball_l",
-        "ball_r",
         "calf_l",
         "calf_r",
         "foot_l",
@@ -129,28 +162,61 @@
         "thigh_l",
         "thigh_r"
       ],
-      "triangles": 3336,
+      "triangles": 2456,
       "bounds_min": [
         -0.2,
-        0.004,
+        0.075,
         -0.15771
       ],
       "bounds_max": [
         0.2,
         1.06214,
-        0.148
+        0.10108
       ],
       "bounds_bind_min": [
         -0.2,
-        -0.148,
-        0.004
+        -0.10108,
+        0.075
       ],
       "bounds_bind_max": [
         0.2,
         0.15771,
         1.06214
       ],
-      "vertices": 2563
+      "vertices": 1795
+    },
+    "Armor_Naked_Feet": {
+      "slot": "feet",
+      "bones": [
+        "ball_l",
+        "ball_r",
+        "calf_l",
+        "calf_r",
+        "foot_l",
+        "foot_r"
+      ],
+      "triangles": 880,
+      "bounds_min": [
+        -0.17454,
+        0.004,
+        -0.12771
+      ],
+      "bounds_max": [
+        0.17454,
+        0.145,
+        0.148
+      ],
+      "bounds_bind_min": [
+        -0.17454,
+        -0.148,
+        0.004
+      ],
+      "bounds_bind_max": [
+        0.17454,
+        0.12771,
+        0.145
+      ],
+      "vertices": 690
     }
   },
   "total_triangles": 9376,
@@ -172,9 +238,9 @@
     "Naked_Cloth_roughness"
   ],
   "image_bytes": {
-    "Naked_Skin_normal": 130178,
-    "Naked_Skin_albedo": 98160,
-    "Naked_Skin_roughness": 50062,
+    "Naked_Skin_normal": 227559,
+    "Naked_Skin_albedo": 169941,
+    "Naked_Skin_roughness": 83674,
     "Naked_Cloth_normal": 26948,
     "Naked_Cloth_albedo": 203412,
     "Naked_Cloth_roughness": 93798
@@ -251,161 +317,6 @@
             "floor_z": 1.6,
             "max_depth_mm": 20.8,
             "nearest_mm": 0.0
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 36,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 9.67,
-            "nearest_mm": 4.31
-          }
-        },
-        "NAKED_Arm_L": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 80.29
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 226.57
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 227.3
-          },
-          "Male_Ranger_Body": {
-            "intersections": 16,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 0.67
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 551,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 20.95,
-            "nearest_mm": 0.01
-          }
-        },
-        "NAKED_Fingers_L": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 709.36
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 801.38
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 792.76
-          },
-          "Male_Ranger_Body": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 600.07
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 467,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 8.23,
-            "nearest_mm": 0.01
-          }
-        },
-        "NAKED_Arm_R": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 80.29
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 226.57
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 227.3
-          },
-          "Male_Ranger_Body": {
-            "intersections": 16,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 0.67
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 551,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 20.95,
-            "nearest_mm": 0.03
-          }
-        },
-        "NAKED_Fingers_R": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 709.4
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 801.81
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 793.18
-          },
-          "Male_Ranger_Body": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 600.41
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 453,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 8.18,
-            "nearest_mm": 0.04
           }
         },
         "NAKED_Shirt": {
@@ -436,87 +347,6 @@
             "floor_z": 1.6,
             "max_depth_mm": 13.97,
             "nearest_mm": 0.02
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 106,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 21.39,
-            "nearest_mm": 0.16
-          }
-        },
-        "NAKED_Sleeve_L": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 9.21
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 157.25
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 172.44
-          },
-          "Male_Ranger_Body": {
-            "intersections": 192,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 10.86,
-            "nearest_mm": 0.03
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 187,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 11.11,
-            "nearest_mm": 0.1
-          }
-        },
-        "NAKED_Sleeve_R": {
-          "Ranger_Head_SuperHero_Male": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 9.21
-          },
-          "Ranger_Head_Eyes": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 157.25
-          },
-          "Ranger_Head_Eyebrows": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 172.44
-          },
-          "Male_Ranger_Body": {
-            "intersections": 191,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 10.86,
-            "nearest_mm": 0.03
-          },
-          "Male_Ranger_Arms": {
-            "intersections": 187,
-            "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 11.11,
-            "nearest_mm": 0.1
           }
         },
         "NAKED_Collar": {
@@ -547,13 +377,132 @@
             "floor_z": 1.6,
             "max_depth_mm": 8.4,
             "nearest_mm": 0.4
-          },
-          "Male_Ranger_Arms": {
+          }
+        },
+        "NAKED_Sleeve_L": {
+          "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "above_floor": 0,
             "floor_z": 1.6,
             "max_depth_mm": 0.0,
-            "nearest_mm": 46.35
+            "nearest_mm": 9.21
+          },
+          "Ranger_Head_Eyes": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 157.25
+          },
+          "Ranger_Head_Eyebrows": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 172.44
+          },
+          "Male_Ranger_Body": {
+            "intersections": 192,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 10.86,
+            "nearest_mm": 0.03
+          }
+        },
+        "NAKED_Sleeve_R": {
+          "Ranger_Head_SuperHero_Male": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 9.21
+          },
+          "Ranger_Head_Eyes": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 157.25
+          },
+          "Ranger_Head_Eyebrows": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 172.44
+          },
+          "Male_Ranger_Body": {
+            "intersections": 191,
+            "above_floor": 0,
+            "floor_z": 1.6,
+            "max_depth_mm": 10.86,
+            "nearest_mm": 0.03
+          }
+        }
+      },
+      "Armor_Naked_Hands": {
+        "NAKED_Arm_L": {
+          "Male_Ranger_Arms": {
+            "intersections": 551,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 20.95,
+            "nearest_mm": 0.01
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 453,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 8.15,
+            "nearest_mm": 0.07
+          }
+        },
+        "NAKED_Fingers_L": {
+          "Male_Ranger_Arms": {
+            "intersections": 467,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 8.23,
+            "nearest_mm": 0.01
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 62.1
+          }
+        },
+        "NAKED_Arm_R": {
+          "Male_Ranger_Arms": {
+            "intersections": 551,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 20.95,
+            "nearest_mm": 0.03
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 442,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 8.11,
+            "nearest_mm": 0.14
+          }
+        },
+        "NAKED_Fingers_R": {
+          "Male_Ranger_Arms": {
+            "intersections": 453,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 8.18,
+            "nearest_mm": 0.04
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 0,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 0.0,
+            "nearest_mm": 62.11
           }
         }
       },
@@ -572,36 +521,6 @@
             "floor_z": null,
             "max_depth_mm": 12.28,
             "nearest_mm": 0.05
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 703,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 17.43,
-            "nearest_mm": 0.01
-          }
-        },
-        "NAKED_Foot_L": {
-          "Male_Ranger_Legs": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 277.7
-          },
-          "Ranger_Base_Calf": {
-            "intersections": 102,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 12.21,
-            "nearest_mm": 0.06
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 470,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 13.18,
-            "nearest_mm": 0.08
           }
         },
         "NAKED_Leg_R": {
@@ -618,36 +537,6 @@
             "floor_z": null,
             "max_depth_mm": 12.26,
             "nearest_mm": 0.06
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 709,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 17.43,
-            "nearest_mm": 0.01
-          }
-        },
-        "NAKED_Foot_R": {
-          "Male_Ranger_Legs": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 277.7
-          },
-          "Ranger_Base_Calf": {
-            "intersections": 102,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 12.2,
-            "nearest_mm": 0.08
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 465,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 13.18,
-            "nearest_mm": 0.08
           }
         },
         "NAKED_Shorts_Hip": {
@@ -664,13 +553,6 @@
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 449.43
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 373.47
           }
         },
         "NAKED_Shorts_L": {
@@ -687,13 +569,6 @@
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 220.47
-          },
-          "Male_Ranger_Feet_Boots": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 144.04
           }
         },
         "NAKED_Shorts_R": {
@@ -710,13 +585,26 @@
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 220.47
-          },
+          }
+        }
+      },
+      "Armor_Naked_Feet": {
+        "NAKED_Foot_L": {
           "Male_Ranger_Feet_Boots": {
-            "intersections": 0,
+            "intersections": 470,
             "above_floor": 0,
             "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 144.04
+            "max_depth_mm": 13.18,
+            "nearest_mm": 0.08
+          }
+        },
+        "NAKED_Foot_R": {
+          "Male_Ranger_Feet_Boots": {
+            "intersections": 465,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 13.18,
+            "nearest_mm": 0.08
           }
         }
       }
@@ -730,108 +618,6 @@
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 4.36
-          },
-          "NAKED_Arm_L": {
-            "intersections": 12,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 0.82
-          },
-          "NAKED_Fingers_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 611.37
-          },
-          "NAKED_Arm_R": {
-            "intersections": 12,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 0.82
-          },
-          "NAKED_Fingers_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 611.43
-          }
-        },
-        "NAKED_Sleeve_L": {
-          "NAKED_Torso": {
-            "intersections": 82,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 28.07,
-            "nearest_mm": 0.68
-          },
-          "NAKED_Arm_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 6.83
-          },
-          "NAKED_Fingers_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 402.65
-          },
-          "NAKED_Arm_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 223.58
-          },
-          "NAKED_Fingers_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 843.86
-          }
-        },
-        "NAKED_Sleeve_R": {
-          "NAKED_Torso": {
-            "intersections": 82,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 28.07,
-            "nearest_mm": 0.68
-          },
-          "NAKED_Arm_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 223.58
-          },
-          "NAKED_Fingers_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 843.8
-          },
-          "NAKED_Arm_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 6.83
-          },
-          "NAKED_Fingers_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 402.7
           }
         },
         "NAKED_Collar": {
@@ -841,34 +627,24 @@
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 11.68
-          },
-          "NAKED_Arm_L": {
-            "intersections": 0,
+          }
+        },
+        "NAKED_Sleeve_L": {
+          "NAKED_Torso": {
+            "intersections": 82,
             "above_floor": 0,
             "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 66.7
-          },
-          "NAKED_Fingers_L": {
-            "intersections": 0,
+            "max_depth_mm": 28.07,
+            "nearest_mm": 0.68
+          }
+        },
+        "NAKED_Sleeve_R": {
+          "NAKED_Torso": {
+            "intersections": 82,
             "above_floor": 0,
             "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 688.78
-          },
-          "NAKED_Arm_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 66.7
-          },
-          "NAKED_Fingers_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 689.15
+            "max_depth_mm": 28.07,
+            "nearest_mm": 0.68
           }
         }
       },
@@ -881,26 +657,12 @@
             "max_depth_mm": 4.03,
             "nearest_mm": 0.06
           },
-          "NAKED_Foot_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 784.93
-          },
           "NAKED_Leg_R": {
             "intersections": 32,
             "above_floor": 0,
             "floor_z": null,
             "max_depth_mm": 4.81,
             "nearest_mm": 0.06
-          },
-          "NAKED_Foot_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 784.93
           }
         },
         "NAKED_Shorts_L": {
@@ -911,26 +673,12 @@
             "max_depth_mm": 4.31,
             "nearest_mm": 0.03
           },
-          "NAKED_Foot_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 555.95
-          },
           "NAKED_Leg_R": {
             "intersections": 0,
             "above_floor": 0,
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 23.38
-          },
-          "NAKED_Foot_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 558.15
           }
         },
         "NAKED_Shorts_R": {
@@ -941,26 +689,12 @@
             "max_depth_mm": 0.0,
             "nearest_mm": 26.79
           },
-          "NAKED_Foot_L": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 558.15
-          },
           "NAKED_Leg_R": {
             "intersections": 44,
             "above_floor": 0,
             "floor_z": null,
             "max_depth_mm": 3.82,
             "nearest_mm": 0.29
-          },
-          "NAKED_Foot_R": {
-            "intersections": 0,
-            "above_floor": 0,
-            "floor_z": null,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 555.95
           }
         }
       }
@@ -995,12 +729,23 @@
             "floor_z": 1.6,
             "max_depth_mm": 59.14,
             "nearest_mm": 0.01
-          },
+          }
+        }
+      },
+      "Armor_Naked_Hands": {
+        "Armor_Naked_Hands": {
           "Male_Ranger_Arms": {
-            "intersections": 1582,
+            "intersections": 949,
             "above_floor": 0,
-            "floor_z": 1.6,
-            "max_depth_mm": 35.65,
+            "floor_z": null,
+            "max_depth_mm": 15.38,
+            "nearest_mm": 0.02
+          },
+          "Male_Ranger_Arms_Bracer": {
+            "intersections": 845,
+            "above_floor": 0,
+            "floor_z": null,
+            "max_depth_mm": 0.0,
             "nearest_mm": 0.02
           }
         }
@@ -1015,31 +760,37 @@
             "nearest_mm": 0.05
           },
           "Ranger_Base_Calf": {
-            "intersections": 733,
+            "intersections": 527,
             "above_floor": 0,
             "floor_z": null,
             "max_depth_mm": 0.0,
             "nearest_mm": 0.06
-          },
+          }
+        }
+      },
+      "Armor_Naked_Feet": {
+        "Armor_Naked_Feet": {
           "Male_Ranger_Feet_Boots": {
-            "intersections": 2494,
+            "intersections": 920,
             "above_floor": 0,
             "floor_z": null,
-            "max_depth_mm": 12.22,
-            "nearest_mm": 0.0
+            "max_depth_mm": 0.0,
+            "nearest_mm": 0.02
           }
         }
       }
     },
     "idle_frame": 15,
-    "reported_intersections": 18499,
+    "reported_intersections": 15638,
     "gated_refs": {
       "chest": [
         "Ranger_Head_SuperHero_Male",
         "Ranger_Head_Eyes",
         "Ranger_Head_Eyebrows"
       ],
-      "legs": []
+      "hands": [],
+      "legs": [],
+      "feet": []
     },
     "note": "Every piece is measured against the ranger's own surfaces in the bind pose and at idle frame 15. Crossings with 'gated_refs' (the face, eyes and brows, which stay on screen) fail the build. 'layers' measures the cloth against the skin under it and is reported only: a set-in sleeve and a crotch are nested into the body by design, so depth alone cannot distinguish them from a clip. max_depth_mm is only meaningful within a few millimetres of a surface."
   },

@@ -16,7 +16,8 @@ const MAKESHIFT_SCENE := "res://assets/characters/armor/ironwood_makeshift.glb"
 const MAKESHIFT_JSON := "res://assets/characters/armor/ironwood_makeshift.json"
 const NAKED_SCENE := "res://assets/characters/armor/ironwood_naked.glb"
 const NAKED_JSON := "res://assets/characters/armor/ironwood_naked.json"
-const NAKED_PIECES := ["Armor_Naked_Chest", "Armor_Naked_Legs"]
+const NAKED_PIECES := ["Armor_Naked_Chest", "Armor_Naked_Hands", "Armor_Naked_Legs",
+	"Armor_Naked_Feet"]
 const SLOT_PIECES := {
 	"head": "Armor_Makeshift_Head",
 	"chest": "Armor_Makeshift_Chest",
