@@ -608,7 +608,8 @@ func check_out_and_ambush() -> void:
 	for pickup in camp.pickups():
 		if is_instance_valid(pickup) and not bool(pickup.collected):
 			left += 1
-	check(left < 3, "the drop left the floor (%d left)" % left)
+	check(left < camp.pickups().size(), "a drop left the floor (%d of %d left)"
+		% [left, camp.pickups().size()])
 	check(camp.sequencer.weapons_taken() >= 1, "the pickup was booked as steel")
 	check(camp.sequencer.state() == SequencerScript.State.FREED,
 		"arming itself does not start the escape (%s)" % camp.sequencer.state_name())

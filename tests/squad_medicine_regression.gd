@@ -9,6 +9,7 @@ extends SceneTree
 ## with a body double standing in for a rigged mercenary.
 
 const SquadScript = preload("res://scripts/warband/squad_drive.gd")
+const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 
 const TEST_SAVE := "user://squad_medicine_state.json"
 const BANDAGE := "bandage_linen"
@@ -110,9 +111,72 @@ func run() -> void:
 	body.health = body.max_health
 	check(not _squad._wants_bandage(body, _merc_id), "a patched body stops asking")
 
+	await check_rescue()
+
 	print("SQUAD_MEDICINE_REGRESSION checks=", checks, " failures=", failures)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SAVE))
 	quit(0 if failures == 0 else 1)
+
+## The squad picks the soul up: a downed body, a clear field, an ally standing
+## over it, five seconds and a revival. An enemy in range stops the whole idea.
+func check_rescue() -> void:
+	var channel = ReviveScript.new()
+	root.add_child(channel)
+	var soul := FakeBody.new()
+	soul.name = "Soul"
+	soul.downed = true
+	root.add_child(soul)
+	var ally := FakeBody.new()
+	ally.name = "Ally"
+	ally.is_bot = true
+	root.add_child(ally)
+	ally.global_position = soul.global_position + Vector3(1.0, 0.0, 0.0)
+	channel.set_bodies([ally, soul])
+	channel.reach = 2.5
+	_squad.revive = channel
+	_squad.player_body = soul
+	var ally_id: int = _merc_id
+	_squad.squad_ids = _ids([ally_id])
+	var squad_controller := FakeController.new()
+	squad_controller.bodies = {ally_id: ally}
+	_squad.controller = squad_controller
+
+	# An enemy standing on the body: the squad fights instead of bending down.
+	var enemy := FakeWatcher.new()
+	root.add_child(enemy)
+	enemy.global_position = soul.global_position + Vector3(4.0, 0.0, 0.0)
+	_squad.watchers = [enemy]
+	check(not _squad._rescue_step(1.0 / 60.0),
+		"a hostile in the yard stops the rescue before it starts")
+	check(not channel.channeling(ReviveScript.ALLY_PEER),
+		"and no channel is open with a body on the floor")
+
+	# Clear field: the ally opens the save.
+	enemy.global_position = soul.global_position + Vector3(400.0, 0.0, 0.0)
+	check(_squad._rescue_step(1.0 / 60.0), "the nearest ally takes the rescue")
+	check(channel.channeling(ReviveScript.ALLY_PEER),
+		"and the squad's own hands open a channel")
+	for index in 60:
+		channel.tick(0.1)
+		if index == 30:
+			check(soul.downed, "three seconds in, the channel has not saved anybody")
+	check(not soul.downed, "the soul is picked up")
+	check(is_equal_approx(soul.health, soul.max_health * 0.05),
+		"a rescued body comes back on a twentieth of its pool (%.1f)" % soul.health)
+
+	# Standing: nothing to rescue, nothing left open.
+	soul.downed = false
+	_squad._rescue_step(1.0 / 60.0)
+	check(not channel.channeling(ReviveScript.ALLY_PEER),
+		"a standing body leaves no open channel")
+
+
+func _ids(values: Array) -> Array[int]:
+	var out: Array[int] = []
+	for value in values:
+		out.append(int(value))
+	return out
+
 
 func _track() -> Dictionary:
 	return {"state": 0, "state_left": 0.0, "step_left": 0.0, "heal_left": 0.0,
@@ -122,6 +186,19 @@ func _track() -> Dictionary:
 
 ## A rigged mercenary is a body, a combat clock and an intent channel; that is
 ## everything the medicine rule reads.
+class FakeController:
+	var bodies: Dictionary = {}
+
+	func body_of(merc_id: int):
+		return bodies.get(merc_id, null)
+
+	func merc_of(body) -> int:
+		for merc_id in bodies:
+			if bodies[merc_id] == body:
+				return int(merc_id)
+		return -1
+
+
 class FakeCombat:
 	func stop_block() -> void:
 		pass
@@ -135,9 +212,16 @@ class FakeBody extends Node3D:
 	var combat := FakeCombat.new()
 	var move_direction := Vector2.ZERO
 	var run_requested := false
+	var alive := true
+	var downed := false
+	var is_bot := false
 
 	func accept_network_input(_direction: Vector2, _running: bool) -> void:
 		pass
+
+	func revive_from_downed(fraction: float = 0.05) -> void:
+		downed = false
+		health = max_health * fraction
 
 class FakeWatcher extends Node3D:
 	var alive := true

@@ -284,7 +284,9 @@ func check_roster() -> void:
 	var hurt := roster.apply_damage(c, 100.0)
 	check(int(hurt["state"]) == Contracts.HealthState.DOWNED, "c downed")
 	check(roster.revive(c), "downed revives")
-	check(is_equal_approx(roster.health_of(c), Contracts.BASE_MAX_HEALTH * 0.5), "revive restores half")
+	check(is_equal_approx(roster.health_of(c),
+		Contracts.BASE_MAX_HEALTH * Contracts.REVIVE_HEALTH_FRACTION),
+		"revive restores a twentieth of the pool")
 	check(roster.apply_damage(c, 200.0)["died"], "a body at half health can be overkilled")
 
 	# Deployment cap X.

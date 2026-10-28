@@ -13,6 +13,9 @@ const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 
 const LAYER := 6
 const BAR_SIZE := Vector2(260, 10)
+## Nothing in the warband is clicked while the pointer is captured, so the
+## reticle is the only thing that says where the soul is aiming. It is drawn by
+## `Reticle` below, which carries its own measurements.
 
 var _warband = null
 var _body = null
@@ -31,6 +34,8 @@ var _prompt_label: Label
 var _hint_label: Label
 var _status_label: Label
 var _status_seconds := 0.0
+## The aim reticle, drawn at the screen centre while the mouse is captured.
+var _reticle: Control
 
 func _ready() -> void:
 	layer = LAYER
@@ -67,7 +72,7 @@ func set_hint(text: String) -> void:
 	_hint_label.text = text
 	_hint_label.visible = not text.is_empty()
 
-## One line under the crosshair: "Hold E to revive Dorn", "K - loot Shortsword".
+## One line under the crosshair: "HOLD G - PICK UP DORN", "K - loot Shortsword".
 func set_prompt(text: String) -> void:
 	if _prompt_label != null:
 		_prompt_label.text = text
@@ -82,6 +87,11 @@ func set_status(text: String, seconds: float = 2.5) -> void:
 	_status_seconds = maxf(0.0, seconds)
 
 func _process(delta: float) -> void:
+	# The reticle belongs to the aiming body, so it is up exactly while the pointer
+	# is captured: a panel opens, the cursor comes back, the crosshair goes away.
+	if _reticle != null:
+		_reticle.visible = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+			and _body != null
 	if _status_seconds > 0.0:
 		_status_seconds -= delta
 		if _status_seconds <= 0.0:
@@ -95,6 +105,12 @@ func _build() -> void:
 	root_control.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root_control)
+
+	_reticle = Reticle.new()
+	_reticle.name = "Crosshair"
+	_reticle.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_control.add_child(_reticle)
 
 	var frame := PanelContainer.new()
 	frame.name = "BodyPanel"
@@ -274,3 +290,23 @@ func _roster_id_for(body) -> int:
 		if _warband.souls.body_node(body_id) == body:
 			return int(body_id)
 	return -1
+
+
+## The crosshair itself: four arms around a dot, drawn at the centre of whatever
+## the control covers. It is a plain `Control` with its own `_draw`, so it costs a
+## handful of lines a frame and never touches the panels above it.
+class Reticle extends Control:
+	const RETICLE_ARM := 9.0
+	const RETICLE_GAP := 4.0
+	const RETICLE_WIDTH := 2.0
+	const RETICLE_COLOR := Color(0.93, 0.89, 0.82, 0.92)
+	const RETICLE_DOT := 1.6
+
+	func _draw() -> void:
+		var centre: Vector2 = size * 0.5
+		var arm := RETICLE_ARM
+		var gap := RETICLE_GAP
+		for axis in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+			draw_line(centre + axis * gap, centre + axis * (gap + arm),
+				RETICLE_COLOR, RETICLE_WIDTH, true)
+		draw_circle(centre, RETICLE_DOT, RETICLE_COLOR)

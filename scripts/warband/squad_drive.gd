@@ -32,6 +32,8 @@ extends RefCounted
 var controller
 var warband
 var loot
+## The scene's revive channel: the squad picks a downed soul up with it.
+var revive
 ## Mercenary ids this scene fields as its squad.
 var squad_ids: Array[int] = []
 ## Live arrays owned by the scene, shared by reference so a drop or a watcher
@@ -83,12 +85,12 @@ const ESCORT_SLOT_GAP := 1.35
 ## Idle bodies take small steps around their own post - shorter than a walk, and
 ## re-rolled every couple of seconds - so a waiting squad drifts instead of
 ## freezing in a heap.
-const ROAM_MIN := 1.6
-const ROAM_MAX := 3.4
-const ROAM_RADIUS_MIN := 0.30
-const ROAM_RADIUS_MAX := 0.95
-const ROAM_INTENT := 0.42
-const ROAM_STOP := 0.14
+const ROAM_MIN := 2.6
+const ROAM_MAX := 4.6
+const ROAM_RADIUS_MIN := 0.20
+const ROAM_RADIUS_MAX := 0.55
+const ROAM_INTENT := 0.30
+const ROAM_STOP := 0.12
 ## True for the rest of the scene once an ally has swung at a watcher.
 var engaged := false
 ## A hurt ally binds its wounds once the field is quiet: the bandage is a catalog
@@ -104,7 +106,9 @@ const BANDAGE_HEAL_SHARE := 0.3
 ## that sidestep lasts.
 const BLOCKED_SECONDS := 0.35
 const SIDESTEP_SECONDS := 0.55
-## How clear the field has to be before a squadmate bends over a corpse.
+## How clear the field has to be before a squadmate bends over a corpse, and
+## before it will stand over a downed body for five seconds. One rule for both:
+## a body on the floor is only worth walking to when nothing can cut you for it.
 const LOOT_CLEAR_METRES := 22.0
 ## How far an ally looks for steel on the ground or a body worth stripping. Wider
 ## than the walk-in reach: a squad crosses the clearing for a blade.
@@ -128,28 +132,41 @@ const GUARD_MIN := 0.35
 const GUARD_MAX := 0.80
 
 ## A circle is punctuation, not a stance: after 1-3 swings a body may take a few
-## short steps off the line, each rolled with its own direction and length, and
-## then lunge back in for the next blow.
+## steps off the line and then lunge back in for the next blow.
+##
+## Every window here is long and the lateral bias is small on purpose. A body's
+## facing *is* its move direction - `Archer.set_locomotion` snaps the whole rig to
+## it - so a step re-rolled every tenth of a second, with a chance of reversing,
+## spins the squad on the spot: four bodies whirling in little circles was the
+## worst reading of a fight in the game.
 const SWINGS_MIN := 1
 const SWINGS_MAX := 3
 const CIRCLE_CHANCE := 0.5
-const CIRCLE_MIN := 0.25
-const CIRCLE_MAX := 0.55
-const STEP_MIN := 0.12
-const STEP_MAX := 0.20
-## How often a step reverses a body's whole direction of travel.
-const CIRCLE_REVERSE := 0.30
-const CIRCLE_LATERAL_MIN := 0.55
-const CIRCLE_LATERAL_MAX := 1.0
-const CIRCLE_BACK_MIN := 0.25
-const CIRCLE_BACK_MAX := 0.55
+const CIRCLE_MIN := 0.55
+const CIRCLE_MAX := 0.95
+const STEP_MIN := 0.40
+const STEP_MAX := 0.70
+## A body never reverses its own feet: it picks a side when the circle opens and
+## keeps it until the exchange is over.
+const CIRCLE_REVERSE := 0.0
+const CIRCLE_LATERAL_MIN := 0.22
+const CIRCLE_LATERAL_MAX := 0.40
+const CIRCLE_BACK_MIN := 0.18
+const CIRCLE_BACK_MAX := 0.35
 
 ## The shuffle a body keeps while it holds a guard or re-forms after an exchange:
-## enough movement that it reads as working the angle rather than standing still.
+## enough movement that it reads as working the angle rather than standing still,
+## small enough that the body keeps pointing at what it is fighting.
 const GUARD_CLOSE := 0.55
-const GUARD_SHUFFLE := 0.30
+const GUARD_SHUFFLE := 0.14
 const RESET_CLOSE := 0.60
-const RESET_SHUFFLE := 0.40
+const RESET_SHUFFLE := 0.16
+## How fast a squadmate may swing its heading round, in degrees per second. The
+## intent is turned towards the wanted direction at this rate instead of being
+## taken whole, so no roll, sidestep or separation push can snap a body through
+## 90 degrees in one frame. Fast enough to come about after a knock or a break-off
+## inside half a second, far below the per-frame flips that spun the squad.
+const TURN_RATE := 320.0
 
 ## Clocks that run down for every ally, whatever it is doing this frame. The
 ## dressing clock is one of them: a bandage takes its seconds wherever the body
@@ -170,6 +187,12 @@ const DRAW_PHASES := ["DRAWING", "HOLDING"]
 ## rolls. Nothing here is read off the instance id: two allies in the same gear
 ## circle on different beats because each rolled for itself.
 var _track: Dictionary = {}
+## The mercenary standing over a downed soul this frame, or 0. The rescue owns that
+## body's intent, so the fight ladder skips it.
+var _rescuer_merc := 0
+## The heading each body is turned to this frame, so the next one can be limited
+## against it: merc_id -> flat unit vector.
+var _heading: Dictionary = {}
 
 
 ## Point the module at a warband and the controller that owns its bodies.
@@ -185,6 +208,10 @@ func drive(delta: float) -> void:
 	if controller == null or warband == null:
 		return
 	player_body = controller.active_body(1)
+	if _rescue_step(delta):
+		# The rescue has already written its rescuer's intent for this frame; the
+		# rest of the squad still gets its turn below.
+		pass
 	for raw_id in squad_ids:
 		var merc_id := int(raw_id)
 		if not _is_free(merc_id):
@@ -194,6 +221,9 @@ func drive(delta: float) -> void:
 			continue
 		# The soul's own body is the player's business, never the AI's.
 		if actor == player_body:
+			continue
+		# The alley already walking or standing over the soul is not fighting.
+		if merc_id == _rescuer_merc:
 			continue
 		if not bool(actor.get("alive")) or bool(actor.get("downed")):
 			_hold(actor)
@@ -447,6 +477,78 @@ func _strip_weapon(actor, merc_id: int, corpse_id: int) -> void:
 		controller.refresh_gear(merc_id)
 		actor.combat.stop()
 		return
+
+
+# --- the rescue ------------------------------------------------------------
+
+## The squad picks the soul up. A downed soul is not a corpse: with the field clear
+## of hostiles, the nearest ally standing on its feet walks over, stands inside the
+## revival reach and opens the scene's channel on the squad's own hands
+## (`ReviveChannel.ALLY_PEER`). Five seconds later the body stands up on a
+## twentieth of its pool - enough to walk out, not enough to fight on.
+##
+## Nothing here is announced and nothing here is a quota: a hostile inside
+## `LOOT_CLEAR_METRES` drops the work instantly, and the mercenary goes back to the
+## fight with the squad. Answers true when the rescue owns this frame.
+func _rescue_step(delta: float) -> bool:
+	_rescuer_merc = 0
+	if revive == null or not is_instance_valid(player_body):
+		return false
+	var soul = player_body
+	# The channel is only ever open because a soul is down and the field is clear;
+	# anything else closes it and the squad goes back to what it was doing.
+	if not bool(soul.get("downed")) or not bool(soul.get("alive")):
+		revive.cancel(ReviveChannel.ALLY_PEER)
+		return false
+	if not _clear_of_hostiles(soul.global_position):
+		revive.cancel(ReviveChannel.ALLY_PEER)
+		return false
+	var rescuer = _rescue_ally(soul)
+	if rescuer == null:
+		revive.cancel(ReviveChannel.ALLY_PEER)
+		return false
+	var merc_id := int(controller.merc_of(rescuer))
+	_rescuer_merc = merc_id
+	var track := _track_for(merc_id, rescuer, delta)
+	var gap: Vector3 = soul.global_position - rescuer.global_position
+	gap.y = 0.0
+	var stand := maxf(0.35, float(revive.reach) - 0.35)
+	if gap.length() > stand:
+		# Walk to the body, stopping inside the reach that opens the channel.
+		_advance(rescuer, soul.global_position, track, stand)
+		revive.cancel(ReviveChannel.ALLY_PEER)
+		return true
+	_hold(rescuer)
+	if revive.channeling(ReviveChannel.ALLY_PEER) \
+			and revive.target_of(ReviveChannel.ALLY_PEER) == soul:
+		return true
+	revive.cancel(ReviveChannel.ALLY_PEER)
+	revive.begin_ally(rescuer, soul)
+	return true
+
+
+## The ally that does the picking up: the nearest free squadmate on its feet, so
+## the body closest to the soul is the one that stops.
+func _rescue_ally(soul):
+	if controller == null:
+		return null
+	var best = null
+	var best_distance := INF
+	for raw_id in squad_ids:
+		var merc_id := int(raw_id)
+		if not _is_free(merc_id):
+			continue
+		var actor = controller.body_of(merc_id)
+		if actor == null or not is_instance_valid(actor) or actor == soul:
+			continue
+		if not bool(actor.get("alive")) or bool(actor.get("downed")):
+			continue
+		var distance: float = (actor as Node3D).global_position.distance_to(
+			(soul as Node3D).global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = actor
+	return best
 
 
 # --- field medicine --------------------------------------------------------
@@ -793,7 +895,31 @@ func _steer(actor, direction: Vector3, track: Dictionary, running: bool) -> void
 	if direction.length_squared() <= 0.0001:
 		actor.accept_network_input(Vector2.ZERO, false)
 		return
-	actor.accept_network_input(Vector2(direction.x, direction.z).limit_length(), running)
+	var speed_share := clampf(direction.length(), 0.0, 1.0)
+	var merc_id := int(track.get("merc_id", 0))
+	var heading := limited_heading(_heading.get(merc_id, Vector3.ZERO),
+		Vector3(direction.x, 0.0, direction.z), float(track.get("delta", 1.0 / 60.0)))
+	_heading[merc_id] = heading
+	actor.accept_network_input(Vector2(heading.x, heading.z) * speed_share, running)
+
+
+## The heading after one frame of turning: `wanted` approached from `current` at no
+## more than `TURN_RATE` degrees a second. Pure and deterministic, so a regression
+## can hold the cap without a live fight.
+static func limited_heading(current: Vector3, wanted: Vector3, delta: float) -> Vector3:
+	var flat_wanted := Vector3(wanted.x, 0.0, wanted.z)
+	if flat_wanted.length_squared() <= 0.000001:
+		return current
+	flat_wanted = flat_wanted.normalized()
+	var flat_current := Vector3(current.x, 0.0, current.z)
+	if flat_current.length_squared() <= 0.000001:
+		return flat_wanted
+	flat_current = flat_current.normalized()
+	var max_step := deg_to_rad(TURN_RATE) * maxf(delta, 0.0)
+	var turn := flat_current.signed_angle_to(flat_wanted, Vector3.UP)
+	if absf(turn) <= max_step:
+		return flat_wanted
+	return flat_current.rotated(Vector3.UP, signf(turn) * max_step)
 
 
 ## The push away from every squadmate (and the soul) inside `PERSONAL_SPACE`, as
@@ -895,10 +1021,11 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 		_track[merc_id] = {"last": actor.global_position, "stuck": 0.0, "side": 0.0,
 			"sign": 1.0, "state": FIGHT_CLOSE, "state_left": 0.0, "step_left": 0.0,
 			"heal_left": 0.0, "bandaging": false, "merc_id": merc_id,
-			"roam_left": 0.0, "roam_to": actor.global_position,
+			"roam_left": 0.0, "roam_to": actor.global_position, "delta": delta,
 			"swings_left": 0, "swing_due": false,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]
+	track["delta"] = delta
 	for key in TRACK_CLOCKS:
 		track[key] = maxf(0.0, float(track.get(key, 0.0)) - delta)
 	var moved: float = actor.global_position.distance_to(track["last"])

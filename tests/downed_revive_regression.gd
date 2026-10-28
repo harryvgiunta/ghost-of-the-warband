@@ -153,8 +153,9 @@ func run() -> void:
 	check(crawler.global_position.x < crawl_start.x - 0.5,"One second of physics drags the body away from the killer")
 	check(absf(crawler.global_position.z - crawl_start.z) < 0.2,"The crawl stays on its bearing instead of wandering")
 	crawler.revive_from_downed()
-	check(not crawler.downed and is_equal_approx(crawler.health,50.0),
-		"A revive stands the body up with half of max health")
+	check(not crawler.downed
+		and is_equal_approx(crawler.health, 100.0 * Contracts.REVIVE_HEALTH_FRACTION),
+		"A revive stands the body up on a twentieth of its pool")
 	check(crawler.health_state == Contracts.HealthState.ALIVE and crawler.alive,
 		"A revived body is ALIVE again")
 	check(_downed_ends == 1,"downed_ended fires on a revive")
@@ -202,7 +203,10 @@ func run() -> void:
 	var ends_before := _downed_ends
 	var finished: Dictionary = channel.tick(0.1)
 	check(not patient.downed,"One more tenth of a second revives the body")
-	check(is_equal_approx(patient.health,50.0),"A revive restores 50% of max health")
+	check(is_equal_approx(patient.health, 100.0 * Contracts.REVIVE_HEALTH_FRACTION),
+		"and the revived body comes back on a twentieth of its pool (%.1f)" % patient.health)
+	check(is_equal_approx(patient.health, WarbandContracts.REVIVE_HEALTH_FRACTION * 100.0),
+		"a revive restores the contract's share of max health")
 	check(patient.alive and patient.health_state == Contracts.HealthState.ALIVE,"The revived body is ALIVE")
 	check(not channel.channeling(1),"The channel closes when it completes")
 	check(revived.has(patient) and (finished.get("revived",[]) as Array).has(patient),
@@ -222,6 +226,33 @@ func run() -> void:
 	channel.set_bodies([healer,ai_patient])
 	check(not channel.begin(1,ai_patient),"A human cannot revive a body from across the field")
 	check(not channel.channeling(1),"A refused channel leaves nothing open")
+
+	# The squad's own hands may pick a body up: an ally channel is not a peer, so
+	# the bot refusal does not apply to it - the guard is the field being clear,
+	# which `SquadDrive` owns - and it runs the same continuous five seconds.
+	var ally_channel = Revive.new()
+	scene.add_child(ally_channel)
+	var ally_patient = make_actor(18,18,false,Vector3(0,0,70))
+	hit_from_plus_x(ally_patient,100.0)
+	var ally = make_actor(19,0,true,ally_patient.global_position + Vector3(1.2,0,0))
+	ally_channel.set_bodies([ally,ally_patient])
+	check(ally_channel.begin_ally(ally,ally_patient),"A squadmate opens a rescue on a downed ally")
+	check(ally_channel.channeling(Revive.ALLY_PEER),"the rescue is the squad's own channel")
+	ally_channel.tick(1.0)
+	check(absf(ally_channel.progress(Revive.ALLY_PEER) - 0.2) < 0.001,
+		"and it runs the human five second clock")
+	ally.global_position = ally_patient.global_position + Vector3(8.0,0,0)
+	ally_channel.tick(0.1)
+	check(not ally_channel.channeling(Revive.ALLY_PEER) and ally_patient.downed,
+		"an ally that walks off loses the rescue like anyone else")
+	ally.global_position = ally_patient.global_position + Vector3(1.2,0,0)
+	check(ally_channel.begin_ally(ally,ally_patient),"and can take it back up")
+	for tick in 60:
+		ally_channel.tick(0.1)
+	check(not ally_patient.downed,"five seconds of the squad's hands stands the body up")
+	check(is_equal_approx(ally_patient.health,
+		WarbandContracts.REVIVE_HEALTH_FRACTION * ally_patient.max_health),
+		"a rescued body comes back on a twentieth of its pool (%.1f)" % ally_patient.health)
 
 	# Breaking the channel restarts the clock: five seconds must be continuous.
 	var walker_patient = make_actor(16,16,false,Vector3(0,0,64))

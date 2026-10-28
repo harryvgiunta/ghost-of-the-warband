@@ -80,6 +80,8 @@ const AGGRO_RADIUS := 55.0
 const WIPE_BEAT := 2.5
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
 const TRAIL_HINT := "The squad follows you   ·   TAB - warband   ·   P - gear"
+## The key line under a prompt that names the revive hold.
+const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
 
 var warband
 var flow
@@ -209,12 +211,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-## `E` is the revive channel, so it is consumed before the actor layer can read
-## it as anything else, and only when there is a downed body in reach. It is not
-## `E`: since Q/E became the strafe pair, a key that is held to sidestep cannot
-## also be the key that starts a five second channel.
+## `G` held is the revive channel: hold it for `REVIVE_CHANNEL_SECONDS` (five) on a
+## downed squadmate and the body stands up on `REVIVE_HEALTH_FRACTION` of its pool.
+## The key is consumed on press only when a downed body is actually in reach, so a
+## tap of `G` still cuts a latch, opens a counter or searches a corpse when nobody
+## is on the floor beside you; releasing early drops the work and spends nothing.
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or event.echo or event.keycode != KEY_E:
+	if not (event is InputEventKey) or event.echo or event.keycode != KEY_G:
 		return
 	if event.pressed:
 		if _reviving or _revive_target() != null:
@@ -477,6 +480,9 @@ func _wire_crawl(actor) -> void:
 func _build_squad() -> void:
 	squad = SquadDriveScript.new()
 	squad.setup(warband, controller, loot)
+	# The squad's own hands can pick a downed soul up: the same channel the G key
+	# opens, keyed to the squad rather than to a peer.
+	squad.revive = revive
 	squad.squad_ids = squad_ids
 	squad.watchers = guards
 	squad.pickups = pickups
@@ -841,6 +847,13 @@ func _update_prompt() -> void:
 		return
 	var actor = controller.active_body(1)
 	var text := ""
+	# A body on the floor outranks everything else on screen: the one thing a
+	# soul can do for a squadmate is stand over it and hold the key.
+	var fallen = _revive_target()
+	if fallen != null:
+		_write_prompt("HOLD G  ·  PICK UP %s" % warband.roster.name_of(
+			int(controller.merc_of(fallen))).to_upper(), G_REVIVE_HINT)
+		return
 	# The counter under the body's nose wins over the camp's lesson, and the
 	# lesson wins over the trail: a body can only be standing in one of them.
 	if town != null and town.in_square(actor):

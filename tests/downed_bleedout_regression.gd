@@ -161,7 +161,8 @@ func run() -> void:
 	rescued.revive_from_downed()
 	check(not rescued.downed and rescued.alive,"A revive stands the body up")
 	check(rescued.health_state == Contracts.HealthState.ALIVE,"A revived body is ALIVE")
-	check(is_equal_approx(rescued.health,50.0),"A revive restores half of max health")
+	check(is_equal_approx(rescued.health, rescued.max_health * Contracts.REVIVE_HEALTH_FRACTION),
+		"A revive restores the contract's twentieth of max health (%.1f)" % rescued.health)
 	check(not rescued.rig.is_downed_pose(),"The revive clears the prone pose")
 	check(is_zero_approx(rescued.rig.blood_loss),"The revive zeroes the blood loss")
 	check(rescue_drip != null and not rescue_drip.attached(),"The revive stops the drip")

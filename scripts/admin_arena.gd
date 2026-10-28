@@ -322,7 +322,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ## The revive key needs to win over the arena's quick-step binding, so the key
 ## event is consumed here before any body-level command sees it.
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or event.echo or event.keycode != KEY_E:
+	if not (event is InputEventKey) or event.echo or event.keycode != KEY_G:
 		return
 	if event.pressed:
 		if _reviving or _revive_target() != null:

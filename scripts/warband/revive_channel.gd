@@ -8,10 +8,13 @@ extends Node
 ## throws the clock away and starts again at zero, so a five second save cannot
 ## be assembled out of short visits.
 ##
-## AI never revives. The souls router's peer `0` means "nobody inside", and an
-## `ArenaActor` with `is_bot` has no player holding a key, so both are refused
-## before a channel is ever opened - a bot dragging a body back up would quietly
-## undo the warband's whole attrition model.
+## Two kinds of hands can open a channel. A human's are keyed by its peer id and
+## opened with `begin()`; the squad's own are keyed by `ALLY_PEER` and opened with
+## `begin_ally()`. A bot body is still refused as a *peer* - peer `0` is the
+## router's "nobody" - because a soul has to be the one holding a key, but an ally
+## is allowed to pick a body up: the guard is the field, not the keyboard.
+## `SquadDrive` refuses the rescue while anything hostile is near, so a squad
+## cannot quietly undo the warband's attrition model in the middle of a fight.
 ##
 ## The node holds only the channels: `begin()` opens one, `tick(delta)` advances
 ## every open channel and reports, `progress()` reads one back for a ring or a
@@ -38,8 +41,13 @@ var bodies: Array = []
 ## that enlarges its bodies.
 var reach := Contracts.REVIVE_REACH
 
-## peer -> {target, elapsed}. One entry per peer: a human has two hands, not two
-## revive channels.
+## The channel the squad's own hands open. It sits outside the peer ids so a soul
+## can never collide with it: `0` stays "nobody inside".
+const ALLY_PEER := -1
+
+## peer -> {target, elapsed, actor?}. One entry per peer: a human has two hands,
+## not two revive channels. An ally channel carries the rescuer's own body, since
+## there is no peer to look it up from.
 var _channels: Dictionary = {}
 
 func set_bodies(list: Array) -> void:
@@ -60,6 +68,31 @@ func begin(reviver_peer: int, target_actor) -> bool:
 	_channels[reviver_peer] = {"target": target_actor, "elapsed": 0.0}
 	return true
 
+## Open a channel for the squad's own hands: `rescuer_actor` standing over a downed
+## squadmate. The reach, the downed check and the break rules are the human ones -
+## what differs is who is holding it, and that the caller is responsible for the
+## field being clear (see `SquadDrive._rescue_step`).
+func begin_ally(rescuer_actor, target_actor) -> bool:
+	if not is_instance_valid(rescuer_actor) or not is_instance_valid(target_actor):
+		return false
+	# Not `can_revive`: a squadmate IS a bot body, and that check exists to keep a
+	# keyboard-less body from opening a channel for a *soul*. Standing, revivable
+	# and inside the reach are still the rules.
+	if not _standing(rescuer_actor) or not _revivable(target_actor):
+		return false
+	if rescuer_actor.global_position.distance_to(target_actor.global_position) > reach:
+		return false
+	_channels[ALLY_PEER] = {"target": target_actor, "elapsed": 0.0, "actor": rescuer_actor}
+	return true
+
+
+## The body a channel belongs to: the rescuer itself for an ally channel, the
+## routed body for a human's.
+func _reviver_of(peer: int, channel: Dictionary):
+	if channel.has("actor"):
+		return channel["actor"]
+	return body_of(peer)
+
 ## Advance every open channel. Out-of-reach and downed revivers cancel their own
 ## channel; a completed channel stands the target up through
 ## `ArenaActor.revive_from_downed()` and emits `complete`.
@@ -72,7 +105,7 @@ func tick(delta: float) -> Dictionary:
 	for peer in _channels.keys():
 		var channel: Dictionary = _channels[peer]
 		var target = channel.target
-		var reviver = body_of(int(peer))
+		var reviver = _reviver_of(int(peer), channel)
 		var reason := _break_reason(reviver, target)
 		if reason != "":
 			_channels.erase(peer)

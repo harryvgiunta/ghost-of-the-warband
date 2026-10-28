@@ -104,6 +104,7 @@ WARBAND_TESTS = [
     "escape_run_regression",
     "warband_world_regression",
     "squad_medicine_regression",
+    "squad_steering_regression",
     "torch_light_regression",
     "expedition_regression",
     "expedition_director_regression",

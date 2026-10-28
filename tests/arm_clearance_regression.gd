@@ -59,6 +59,63 @@ func advance(seconds: float, label: String) -> void:
 		if failures>0:
 			return
 
+## The carried piece must not find its own head. A two-hander shouldered into a
+## sprint reached straight through the skull, and a club held up on the bounce
+## clipped it: the rig carries the weapon pointed at the dirt above a jog
+## (`Archer.CARRY_DEGREES` at 64), and this measures the clearance instead of
+## trusting the pose.
+func check_carry_clearance() -> void:
+	var head_bone: int = rig._bones.Head
+	# [weapon, index, tip length, must the tip end up below the head]. The
+	# greatsword is shouldered on purpose and a staff is carried coupled, so both
+	# are only held to the clearance rule; the branch and the club are what the
+	# carry exists for.
+	for entry in [["sword", 4, 1.15, true], ["sword", 3, 0.58, true],
+			["sword", 2, 1.3, false], ["staff", 0, 1.0, false]]:
+		var weapon := str(entry[0])
+		if weapon == "staff":
+			rig.set_weapon("sword")
+			rig.set_sword(0)
+			rig.set_staff(true, int(entry[1]))
+		else:
+			rig.set_staff(false, 0)
+			rig.set_weapon("sword")
+			rig.set_sword(int(entry[1]))
+		rig.set_blocking(false)
+		rig.set_cover(false, Vector3.ZERO, 0.0, false, Vector3.ZERO)
+		for index in 20:
+			rig.set_locomotion(Vector3(0, 0, -6.5), true)
+			rig.advance_animation(0.025)
+		var closest := 99.0
+		var lowest := 99.0
+		for index in 40:
+			rig.set_locomotion(Vector3(0, 0, -6.5), true)
+			rig.advance_animation(0.025)
+			var head: Vector3 = rig._bone_world(head_bone).origin
+			var held: Node3D = rig.active_staff if weapon == "staff" else rig.active_sword
+			if held == null or not is_instance_valid(held):
+				continue
+			for step in 9:
+				var point: Vector3 = held.to_global(
+					Vector3(0, 0, -float(entry[2]) * float(step) / 8.0))
+				closest = minf(closest, point.distance_to(head))
+			lowest = minf(lowest, held.to_global(Vector3(0, 0, -float(entry[2]))).y - head.y)
+		samples += 1
+		if closest < 0.24:
+			failures += 1
+			push_error("%s %d does not clear the head at a sprint (%.2f m)"
+				% [weapon, int(entry[1]), closest])
+		if bool(entry[3]) and lowest > 0.30:
+			failures += 1
+			push_error("%s %d is not pointed at the ground at a sprint (%.2f m above the head)"
+				% [weapon, int(entry[1]), lowest])
+	rig.set_staff(false, 0)
+	rig.set_weapon("sword")
+	rig.set_sword(0)
+	rig.set_locomotion(Vector3.ZERO, true)
+	rig.advance_animation(0.2)
+
+
 func run() -> void:
 	var holder := Node3D.new()
 	root.add_child(holder)
@@ -147,6 +204,8 @@ func run() -> void:
 				advance(0.8,"Moving weapon carry")
 				if failures>0:
 					break
+	if failures==0:
+		check_carry_clearance()
 	if failures==0:
 		rig.set_locomotion(Vector3.ZERO,true)
 		for size in [0,1]:

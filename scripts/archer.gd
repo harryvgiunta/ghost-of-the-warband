@@ -2182,6 +2182,10 @@ func _update_pose(delta: float) -> void:
 		return
 	_step_facing_hold = maxf(0.0,_step_facing_hold-delta)
 	var speed := Vector2(_velocity.x,_velocity.z).length()
+	# The run carry is its own eased clock: a piece that snapped down the instant a
+	# body jogged would read as a dropped weapon, so it settles over a fifth of a
+	# second and comes back up the same way.
+	_carry_blend = move_toward(_carry_blend, _carry_target(speed), delta * CARRY_RATE)
 	var sliding := _grounded and _roll_progress < 0.0 and not _cover_active and (slide_progress >= 0.0 or _slide_weight > 0.0)
 	var stepping := _grounded and _step_progress >= 0.0 and _roll_progress < 0.0 and not sliding
 	# The quick step owns its own planted lunge; the forward locomotion cycle
@@ -2383,17 +2387,18 @@ func _update_pose(delta: float) -> void:
 		_update_hand_contacts()
 		var right_hand := _bone_world(_arms[1][2])
 		if weapon == "dagger":
-			active_dagger.global_transform = right_hand * _sword_grip
+			active_dagger.global_transform = _carry_socket(right_hand * _sword_grip)
 		elif weapon == "dual":
-			active_sword.global_transform = right_hand * _sword_grip
+			active_sword.global_transform = _carry_socket(right_hand * _sword_grip)
 			if active_off_weapon != null:
-				active_off_weapon.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
+				active_off_weapon.global_transform = _carry_socket(
+					_bone_world(_arms[0][2]) * _sword_grip_left)
 		elif _staff_shown():
 			# A staff is gripped around its middle: the right hand sits just
 			# below the shaft centre and the support hand above it.
-			active_staff.global_transform = _weapon_socket(right_hand)
+			active_staff.global_transform = _carry_socket(_weapon_socket(right_hand))
 		else:
-			active_sword.global_transform = right_hand * _sword_grip
+			active_sword.global_transform = _carry_socket(right_hand * _sword_grip)
 		if active_focus != null:
 			active_focus.global_transform = _bone_world(_arms[0][2]) * _sword_grip_left
 	var chest_pose := global_transform.affine_inverse()*_bone_world(_bones.spine_03)
@@ -3304,6 +3309,42 @@ func _staff_mesh_offset() -> float:
 	var slide := smoothstep(0.0,minf(0.40,duration*0.38),time)
 	var restore := smoothstep(duration*0.78,duration,time)
 	return lerpf(middle,0.0,slide*(1.0-restore))
+
+## How far the carried piece is tipped at the dirt, in degrees, and how quickly a
+## body settles into and out of the carry.
+const CARRY_DEGREES := 64.0
+const CARRY_RATE := 5.0
+
+## The piece dropped toward the ground while the body is running. `_carry_blend`
+## rides the speed: standing or fighting it is 0 and the piece is held ready, at a
+## jog and a sprint it climbs to 1 and the whole weapon swings down out of the way.
+## A two-hander shouldered through a sprint reaches over the head and through it,
+## and the branch is long enough to find the face on the way down.
+var _carry_blend := 0.0
+
+## The socket with the run carry folded in. Nothing is turned when the blend is
+## zero, so every fighting pose keeps the authored grip exactly.
+func _carry_socket(grip: Transform3D) -> Transform3D:
+	if _carry_blend <= 0.0001:
+		return grip
+	# The haft runs down the socket's own -Z, so a rotation about its +X with a
+	# negative angle pitches the blade toward the floor in front of the body.
+	return grip * Transform3D(
+		Basis(Vector3.RIGHT, deg_to_rad(-CARRY_DEGREES * _carry_blend)), Vector3.ZERO)
+
+
+## Where the carry should be this frame: running only. A swing, a guard, a roll,
+## a slide, a consumable, cover or being on the ground all hold the piece where the
+## pose put it.
+func _carry_target(speed: float) -> float:
+	if not _grounded or phase != "READY" or weapon == "none":
+		return 0.0
+	if _blocking or _cover_active or _roll_progress >= 0.0 or slide_progress >= 0.0:
+		return 0.0
+	if is_melee() or is_consuming() or _step_progress >= 0.0:
+		return 0.0
+	return smoothstep(3.0, 6.0, speed)
+
 
 func _weapon_socket(hand_xf: Transform3D) -> Transform3D:
 	if _staff_shown():

@@ -202,4 +202,7 @@ static func finishes_downed(max_health: float, amount: float) -> bool:
 	return amount > maxf(0.0, max_health) * OVERKILL_THRESHOLD
 
 ## Health a revive restores, as a fraction of max health.
-const REVIVE_HEALTH_FRACTION := 0.5
+## What a body stands up with. A revived mercenary comes back with a twentieth of
+## its own pool: enough to walk, not enough to trade blows, so a rescue buys a
+## withdrawal rather than a second life.
+const REVIVE_HEALTH_FRACTION := 0.05

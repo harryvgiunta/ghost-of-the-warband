@@ -358,6 +358,28 @@ Short version of the latest tuning (all in the code, all covered by
   puts the fist up the limb instead of on its butt end, and the profile is
   `length` 1.16 / `reach` 2.0 / 1.6 s swing (`Items` detail and `ITEM_STATS` keep
   the same 2.0 m reach);
+- **the revive key is a hold**: `G` held for `REVIVE_CHANNEL_SECONDS` (5 s) picks a
+  downed squadmate up, and the body stands on `REVIVE_HEALTH_FRACTION` - **5%** of
+  its own pool, enough to walk out and not enough to trade. `G` is only consumed
+  on press when a downed body is actually in reach, so a tap still cuts a latch,
+  opens a counter or searches a corpse. `world_scene._input` and
+  `admin_arena._input` both bind it; releasing cancels and spends nothing;
+- **the squad rescues the soul**: `SquadDrive._rescue_step` picks the nearest
+  ally on its feet when the soul is downed and nothing hostile is inside
+  `LOOT_CLEAR_METRES` (22 m), walks it inside `revive.reach`, and opens the
+  scene's channel on the squad's own hands (`ReviveChannel.begin_ally`, keyed
+  `ALLY_PEER` - the bot refusal is for *peer* channels only). A hostile arriving,
+  the rescuer going down or walking off breaks it exactly like a human key. An
+  AI channel is never opened while a fight is on;
+- **the crosshair is back**: `WarbandHud` draws its own `Reticle` (four arms and a
+  dot) at the screen centre, visible only while the pointer is captured and the
+  soul is in a body - nothing else in the warband says where the soul is aiming;
+- **the weapon is carried low at a run**: `Archer.CARRY_DEGREES` (64) tips the
+  held piece toward the floor as speed passes a jog (`_carry_blend`, eased at
+  `CARRY_RATE`), and only then: a swing, a guard, a roll, a slide, a consumable or
+  cover all hold the authored grip. A two-hander shouldered into a sprint used to
+  reach through the head; `arm_clearance_regression.check_carry_clearance`
+  measures the shaft clearing the skull (0.10 m before, 0.35 m after);
 - **the squad stands off**: an ally closes to `STANDOFF` 1.45 m and no further,
   walks itself back out if the press carries it inside `MIN_GAP` 0.95 m, and jogs
   only past `RUN_GAP` 7 m. The old ladder walked to the mob's own origin on every
