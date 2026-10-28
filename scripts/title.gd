@@ -10,6 +10,7 @@ signal join_requested
 const StateScript = preload("res://scripts/player_state.gd")
 const SessionScript = preload("res://scripts/session.gd")
 const LobbyScript = preload("res://scripts/warband/warband_lobby.gd")
+const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -61,6 +62,7 @@ func _ready() -> void:
 	print("IRONWOOD_MENU_READY")
 
 func _build() -> void:
+	theme = LedgerThemeScript.get_theme()
 	var backdrop := ColorRect.new()
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.color = Color("08141a")
@@ -87,14 +89,15 @@ func _build() -> void:
 	var frame := Panel.new()
 	frame.position = Vector2(72,92)
 	frame.size = Vector2(520,716)
-	frame.add_theme_stylebox_override("panel",_style(Color(0.03,0.07,0.085,0.92),Color("3f5b60"),10))
+	frame.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
 	add_child(frame)
 	var rule := ColorRect.new()
 	rule.position = Vector2(28,196)
 	rule.size = Vector2(84,3)
 	rule.color = GOLD
 	frame.add_child(rule)
-	var title := _label(frame,"IRONWOOD",Vector2(26,96),62,CREAM)
+	var title := _label(frame,"IRONWOOD",Vector2(26,92),56,CREAM)
+	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	title.size = Vector2(470,74)
 	var subtitle := _label(frame,"THE FRONTIER AWAITS",Vector2(28,162),15,GOLD)
 	subtitle.size = Vector2(470,20)
@@ -103,6 +106,7 @@ func _build() -> void:
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.add_theme_color_override("font_shadow_color",Color("081418"))
 	start_button = _button(frame,"START NEW GAME",Vector2(28,316),Vector2(462,58))
+	start_button.theme_type_variation = "PrimaryButton"
 	start_button.add_theme_font_size_override("font_size",19)
 	start_button.pressed.connect(_start_new_game)
 	_load_button = _button(frame,"LOAD SAVED GAME",Vector2(28,388),Vector2(462,58))
@@ -162,7 +166,7 @@ func _build_join_layer() -> void:
 	panel.set_anchors_preset(Control.PRESET_CENTER,true)
 	panel.position = Vector2(-240,-215)
 	panel.size = Vector2(480,430)
-	panel.add_theme_stylebox_override("panel",_style(Color(0.038,0.078,0.096,0.98),Color("3f5b60"),10))
+	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
 	_join_layer.add_child(panel)
 	_label(panel,"JOIN GAME",Vector2(24,18),26,GOLD)
 	var hint := _label(panel,"Choose an arena match, a delve party or the open world. All values are remembered.",Vector2(24,54),11,MUTED)
@@ -250,17 +254,6 @@ func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2)
 	result.position = position_at
 	result.size = size_at
 	result.focus_mode = Control.FOCUS_NONE
-	var theme := Theme.new()
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["Bahnschrift","Segoe UI"])
-	theme.default_font = font
-	theme.set_color("font_color","Button",CREAM)
-	theme.set_color("font_hover_color","Button",Color.WHITE)
-	theme.set_color("font_pressed_color","Button",Color("13282f"))
-	theme.set_stylebox("normal","Button",_style(Color("243a40"),Color("456068"),7))
-	theme.set_stylebox("hover","Button",_style(Color("34545b"),GOLD,7))
-	theme.set_stylebox("pressed","Button",_style(GOLD,GOLD,7))
-	result.theme = theme
 	parent.add_child(result)
 	return result
 

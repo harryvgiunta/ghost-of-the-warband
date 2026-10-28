@@ -15,8 +15,8 @@ extends SceneTree
 ##   3. **It is walkable.** A body placed at the lane's start and driven down it
 ##      with real intent reaches the town's gate without leaving the walkable
 ##      width and without ever getting further from it. The run is timed.
-##   4. **It is a fight.** Eight armed `CageWatcher`s: two on the soul's own body
-##      and a pair in each clearing, each dropping the weapon it carried.
+##   4. **It is a fight.** Twenty armed `CageWatcher`s in pairs down the road, each
+##      leaving the body the scene registers as a corpse.
 ##   5. **No door, and a wipe is a defeat.** Reaching the far end changes nothing
 ##      and requests nothing; every body down leaves the roster exactly that way,
 ##      gathers nothing, and makes no transition.
@@ -145,15 +145,25 @@ func check_the_world() -> void:
 	_dismiss_card()
 	game.camp.sequencer.note_rescuer_arrived()
 	_dismiss_card()
-	# The pair standing over the cages fall, then the soul itself steps into
-	# Corvin: those are the two facts that cut the latches, so the cages open the
-	# way the camp opens them now and no caged body stays clamped behind one.
+	# The pair standing over the cages fall, then the soul itself steps into Corvin
+	# for the shiv and walks the cage line cutting one latch per cage - the only
+	# way a cage opens now.
 	for watcher in game.camp.guards.duplicate():
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			watcher.take_damage(4000.0, 0)
 	game.controller.direct(1, game.camp.rescuer_id)
 	_dismiss_card()
-	check(game.camp.cages_open(), "taking Corvin cut every latch (%d of %d)"
+	check(not game.camp.cages_open(), "taking Corvin cuts nothing by itself")
+	var cutter = game.controller.active_body(1)
+	for index in game.camp.CAGE_POSTS.size():
+		var post: Vector3 = game.camp.CAGE_POSTS[index]
+		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
+		await physics_frame
+		game._try_interact()
+		_dismiss_card()
+		check(game.camp.cages_open_count() == index + 1,
+			"latch %d was cut one cage at a time (%d)" % [index + 1, game.camp.cages_open_count()])
+	check(game.camp.cages_open(), "all four latches are cut (%d of %d)"
 		% [game.camp.cages_open_count(), game.camp.caged_ids.size()])
 	# The escape is the walk out: the soul crosses the mouth and the wood answers.
 	var soul = game.controller.active_body(1)
@@ -165,8 +175,8 @@ func check_the_world() -> void:
 		"the camp reaches the escape (%s)" % game.camp.sequencer.state_name())
 	soul = game.controller.active_body(1)
 	check(soul != null, "the soul is seated in a body when the trail opens")
-	check(soul != null and game.trail.guards.size() == 40,
-		"forty cultists hold the trail (%d)" % game.trail.guards.size())
+	check(soul != null and game.trail.guards.size() == 20,
+		"twenty cultists hold the trail (%d)" % game.trail.guards.size())
 	# Where they stand is what matters (asserted with the lane, below): a mob's
 	# `player` field is its current quarry, not a spawn-time script.
 
@@ -188,9 +198,11 @@ func check_lane() -> void:
 	check(torches.size() >= 24, "%d torches light the lane" % torches.size())
 	check(lane[lane.size() - 1].is_equal_approx(forest["arch"]),
 		"the reported far end is the lane's last waypoint")
-	check(_flat(lane[0], game.camp.GATE_POINT) < 0.01,
-		"the lane begins at the camp clearing's mouth (%.2f m)"
-		% _flat(lane[0], game.camp.GATE_POINT))
+	var road_gap := _flat(lane[0], game.camp.GATE_POINT)
+	check(absf(road_gap - game.camp.CAMP_TO_ROAD_METRES) < 1.0,
+		"the lane begins %.0f m of wood past the camp's mouth (%.1f m)"
+		% [game.camp.CAMP_TO_ROAD_METRES, road_gap])
+	check(road_gap >= 150.0, "and no torch of it stands in sight of the cages (%.0f m)" % road_gap)
 	check(_flat(forest["arch"], game.town.global_position) <= 40.0,
 		"the lane ends at the town (%.1f m from the square)"
 		% _flat(forest["arch"], game.town.global_position))
@@ -296,7 +308,7 @@ func check_pursuers() -> void:
 			far += 1
 	check(near == 0, "nobody stands within sight of the camp's mouth (%d within 60 m)"
 		% near)
-	check(far >= 12, "the cult is still on the road (%d within 250 m)" % far)
+	check(far >= 6, "the cult is still on the road (%d within 250 m)" % far)
 	check(game.squad != null and game.squad.following, "the squad is an escort once the camp is clear")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")
@@ -326,9 +338,9 @@ func kill_cultists() -> void:
 		await create_timer(1.6).timeout
 	check(game.trail.cultists_alive() == 0, "the trail can be cleared (%d left)"
 		% game.trail.cultists_alive())
-	check(game.trail.pickups_left() + game.camp.steel_taken() >= game.trail.guards.size(),
-		"every cultist dropped the weapon it held (%d on the ground, %d taken)"
-		% [game.trail.pickups_left(), game.camp.steel_taken()])
+	check(game.loot.corpse_ids().size() >= game.trail.guards.size(),
+		"every cultist is a lootable corpse (%d registered for %d bodies)"
+		% [game.loot.corpse_ids().size(), game.trail.guards.size()])
 
 
 # --- the walk --------------------------------------------------------------

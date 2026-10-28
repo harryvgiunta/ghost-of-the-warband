@@ -11,7 +11,9 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
-const BASE_DAMAGE := [30.0, 38.0, 50.0]
+## Bow damage at full draw, in catalog `index` order: the three forged bows
+## and the twig bow a warband starts with.
+const BASE_DAMAGE := [30.0, 38.0, 50.0, 5.0]
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
@@ -102,7 +104,7 @@ var _launch_query := PhysicsShapeQueryParameters3D.new()
 var _launch_shape := SphereShape3D.new()
 var left_melee_progress := 1.0
 var right_melee_progress := 1.0
-var _left_swing_seconds := float(Archer.DAGGER_DATA.seconds)
+var _left_swing_seconds := float(Archer.dagger_profile(0).seconds)
 var _right_swing_seconds := 1.0
 var _swings: Dictionary = {}
 
@@ -1183,12 +1185,13 @@ func update_aim() -> void:
 
 ## `scale` is the shooter's trinket multiplier; enemies pass nothing.
 static func damage_for(bow_index: int, charge: float, scale: float = 1.0) -> float:
-	return float(BASE_DAMAGE[bow_index]) * clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
+	return float(BASE_DAMAGE[clampi(bow_index, 0, BASE_DAMAGE.size() - 1)]) \
+		* clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
 
 static func throw_damage(weapon_name: String, weapon_index: int, charge: float,
 		scale: float = 1.0) -> float:
-	var base := float(Archer.DAGGER_DATA.damage) if weapon_name == "dagger" \
-		else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].damage)
+	var base := float(Archer.dagger_profile(weapon_index).damage) if weapon_name == "dagger" \
+		else float(Archer.SWORD_DATA[clampi(weapon_index,0,Archer.SWORD_DATA.size()-1)].damage)
 	return base * clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
 
 

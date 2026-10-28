@@ -16,11 +16,14 @@ difference - and the warband is the thing that survives a battle.
   the game** and names the keys in large type; it closes on its **CONTINUE**
   button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
   prisoner in sacrificial rags runs in with a shiv - and **you take his body
-  yourself** (F5 or `[ ]`); nothing happens until you are in it. Walk to each cage and press **G** to cut its latch (four latches, four
-  cages). The moment a cage opens, that prisoner is **taken over by squad AI**:
-  they pick the cultist steel off the ground themselves and charge the two
-  antlered camp watchers (three dagger stabs each). Press **G** in the gate arch
-  to leave.
+  yourself** (F5 or `[ ]`); nothing happens until you are in it - taking him only
+  gives you hands. Walk to each cage and press **G** to cut its own latch: four
+  latches, four presses, and bare hands are refused. The moment a cage opens that
+  prisoner is **taken over by squad AI**: they pick the makeshift steel off the
+  ground themselves and go at the two camp watchers, who are rigged, armed,
+  varied bodies now (three ironwood stabs end the pair). There is no gate: the
+  camp is a ragged pocket **deep in the wood**, and the way out is a long walk
+  through the trees before the trail's first torch.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons
@@ -35,6 +38,14 @@ difference - and the warband is the thing that survives a battle.
   leaves a mercenary Downed at 0 health - crawling backwards to cover, bleeding
   out in 30 s. Only a human holds the **5 s revive** (E); AI never revives. A
   heavier hit kills outright.
+- **The makeshift tier:** the wood hands out nothing better than an **Ironwood
+  Shiv** (10), a **Twig Bow** (5), a **Club** (6), a **Heavy Tree Branch** (15,
+  two-handed) and a **Wooden Shield**. Forged steel is bought later, from the
+  quartermaster, with a stash to pay for it.
+- **Bodies are lootable:** every fallen cultist and watcher is a corpse you can
+  open with **G** - their character screen, their slots, and each piece moved into
+  the infinite stash (or **TAKE ALL**). The squad strips bodies on its own once
+  the field is quiet, silently, into the same stash.
 - **Loot:** quick-loot during the fight (K). A picked-up piece goes straight into
   the soul's hands when it fills an empty slot or beats what is worn there, and
   otherwise into the shared stash. When the field goes quiet the surviving
@@ -715,6 +726,36 @@ Repo-local skills provide step-by-step instructions for coding and asset-authori
 - [Ironwood Creatures](.omp/skills/ironwood-creatures/SKILL.md): character anatomy, skeletons, skinning, authored animation, the wolf-overhaul workflow, and independent size/coat variants.
 
 OMP discovers these at session startup. Invoke `/skill:ironwood-assets` and `/skill:ironwood-creatures` for a character task, or ask an agent to read those files explicitly. The default grey wolf overhaul is implemented (`assets/characters/ironwood_wolf.glb`, `scripts/wolf_visual.gd`, `tools/prepare_wolf.py`); small/medium/big and black/grey/white variants remain a separate requested expansion.
+
+### Test budget — a hard rule
+
+**No test run may take more than a couple of minutes. Target one to two.**
+
+- A single test that cannot finish inside `TIMEOUT` 90 s is a bug in the test or
+  in what it measures, not a machine that needs more time. `tools/run_tests.py`
+  kills it at the ceiling, reports `OVER BUDGET`, and fails the run.
+- The whole run has a `TOTAL_BUDGET` of 180 s and fails the run if it is
+  exceeded. Only a release build — and this repository has no releases yet — is
+  ever an exception.
+- Run suites in parallel: `python tools/run_tests.py` is the **warband** game
+  suite by default (the campaign, roster, stash, camp, trail, cult and
+  possession layers), one pool with an isolated `APPDATA` per process, and
+  the two ENet tests serially afterwards because parallel sockets on one
+  machine produce flakes that are not the code's fault.
+- The old frontier / arena / delve suites are a **sandbox harness for the
+  shared rig and combat code**, not a shipping mode. They do not run by
+  default; use `--base` only for a change that touches that shared layer, and
+  `--only <test,...>` to run the two or three that actually cover it.
+- The band is **60-120 s per test**, 120 s being the absolute ceiling anywhere;
+  600 s or 900 s is never acceptable, not even on a release.
+- Verifying a change by hand follows the same rule: exercise the one path, look
+  at the output, and stop. Do not re-run a whole suite to confirm what a single
+  script already proved.
+- If a measurement genuinely needs more, make the measured thing cheaper first —
+  park what is off screen, drop the body count, skip impossible frames — and teach
+  the test to assert that from the cheap instrument. `weapon_input_regression`
+  and `cover_movement_regression` are the only two that drive a fixed 240 Hz
+  clock through the whole frontier, and both stay under two minutes by that rule.
 
 Run the behavior regressions after setup:
 

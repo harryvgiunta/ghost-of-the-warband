@@ -35,31 +35,43 @@ func _build() -> void:
 		wood = Geo.material(Color("b98449"))
 	elif bow_kind == 1:
 		wood = Geo.material(Color("315e64"), 0.12)
+	elif bow_kind == 3:
+		# The twig bow is green wood: pale sap under bark the hand has worn off.
+		wood = Geo.material(Color("6c7442"), 0.0, 0.92)
 	else:
 		wood = Geo.material(Color("553528"))
 	var edge := Geo.material(Color("d3aa63"), 0.48, 0.38)
 	var leather := Geo.material(Color("30251e"))
 	var cord := Geo.material(Color("e9dfbd"), 0.0, 0.95)
+	var twig := bow_kind >= 3
 	grip = Node3D.new()
 	grip.name = "Grip"
 	add_child(grip)
 	nock = Node3D.new()
 	nock.name = "Nock"
 	add_child(nock)
-	Geo.cylinder(self, 0.032, 0.032, 0.19, Vector3.ZERO, leather, 10)
-	for i in range(8):
-		Geo.cylinder(self, 0.034, 0.034, 0.009, Vector3(0, -0.081 + i * 0.023, 0), edge, 10)
+	# A sapling has no leather grip and no collars: the hand holds the wood and a
+	# single cord wrap keeps it from sliding.
+	if twig:
+		for i in range(4):
+			Geo.cylinder(self, 0.026, 0.026, 0.010, Vector3(0, -0.036 + i * 0.024, 0), cord, 10)
+	else:
+		Geo.cylinder(self, 0.032, 0.032, 0.19, Vector3.ZERO, leather, 10)
+		for i in range(8):
+			Geo.cylinder(self, 0.034, 0.034, 0.009, Vector3(0, -0.081 + i * 0.023, 0), edge, 10)
 	Geo.box(self, Vector3(0.065, 0.016, 0.047), Vector3(0.017, -0.018, -0.025), edge)
 	_points.resize((SEGMENTS + 1) * 2)
 	for side in range(2):
 		for j in range(SEGMENTS):
-			var radius: float = lerpf(0.032, 0.013, float(j) / SEGMENTS)
+			var radius: float = lerpf(0.019 if twig else 0.032, 0.009 if twig else 0.013,
+				float(j) / SEGMENTS)
 			var limb := Geo.cylinder(self, radius, radius * 0.9, 1.0, Vector3.ZERO, wood, 6)
 			_limbs.append(limb)
 		_strings.append(Geo.cylinder(self, 0.0026, 0.0026, 1.0, Vector3.ZERO, cord, 5))
 		_tip_caps.append(Geo.sphere(self, 0.021, Vector3.ZERO, edge, Vector3(0.8, 1.4, 0.8)))
 		var collar_y: float = (-1.0 if side == 0 else 1.0) * 0.115
-		Geo.cylinder(self, 0.039, 0.036, 0.045, Vector3(0, collar_y, 0), edge, 8)
+		if not twig:
+			Geo.cylinder(self, 0.039, 0.036, 0.045, Vector3(0, collar_y, 0), edge, 8)
 	if bow_kind == 1:
 		for side in [-1.0, 1.0]:
 			Geo.box(self, Vector3(0.052, 0.16, 0.018), Vector3(0, side * 0.19, -0.027), edge)

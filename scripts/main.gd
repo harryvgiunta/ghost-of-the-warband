@@ -1259,7 +1259,7 @@ func _armor_summary() -> String:
 		int(round(archer.armor_reduction(false) * 100.0))]
 
 func _update_loadout() -> void:
-	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.DAGGER_DATA, archer.shield_equipped)
+	hud.update_loadout(archer.bow_index, archer.armor_pieces, Archer.BOW_DATA[archer.bow_index], _armor_summary(), archer.sword_index, archer.weapon, Archer.SWORD_DATA[archer.sword_index], Archer.dagger_profile(archer.dagger_index), archer.shield_equipped)
 
 func activate_ability(slot: int) -> void:
 	if inspecting or hud.map_open or _cursor_free or _ui_open():
@@ -3212,7 +3212,7 @@ func _spawn_thrown(origin: Vector3, direction: Vector3, speed: float, shot_damag
 		thrown.lag_comp = _lag
 		thrown.lag_ticks = _shooter_lag(source_slot)
 	thrown.shooter = _shooter_for_slot(source_slot)
-	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
+	thrown.blade_length = float(Archer.dagger_profile(weapon_index).length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,Archer.SWORD_DATA.size()-1)].length)
 	thrown.authoritative_damage = authoritative
 	_frontier.add_child(thrown)
 	thrown.launch(origin,direction,speed,shot_damage,excluded)

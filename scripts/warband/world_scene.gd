@@ -4,9 +4,10 @@ extends Node3D
 ## There used to be three scenes with two doors between them: a cage yard that
 ## handed the squad to a road, and a road that handed them to a town. Walking was
 ## not the way anything happened - pressing G on an arch was. This scene is the
-## answer: the camp clearing (with the four cages in it), the trail through the
-## wood, and the town with its counters, its altar and its expedition gate all
-## stand in **one coordinate space**, and the only way between them is to walk.
+## answer: the camp in the deep wood (with the four cages in it), the trail
+## through the wood, and the town with its counters, its altar and its expedition
+## gate all stand in **one coordinate space**, and the only way between them is to
+## walk.
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
@@ -14,11 +15,13 @@ extends Node3D
 ## channel, the downed-crawl and the branded runner - and it builds three areas
 ## that bring only their own geometry and their own business:
 ##
-##   * `Camp` - `cage_escape.gd`: the clearing, the cages, the lesson. Its arena
-##     is 60 x 68 m of open ground inside the fence line, in the trees.
-##   * `Trail` - `escape_run.gd`: the 286 m lane through the wood, with the eight
-##     cultists on it. Its first waypoint is the clearing's mouth; there is no
-##     wall between the two.
+##   * `Camp` - `cage_escape.gd`: the ragged pocket in the wood, the cages, the
+##     lesson. No fence and no road: a camp with trees standing in it, and a gap
+##     in those trees at its front line.
+##   * `Trail` - `escape_run.gd`: the 915 m lane through the wood, with the forty
+##     cultists on it. Its first waypoint is `Camp.CAMP_TO_ROAD_METRES` of
+##     ordinary wood past the camp's mouth, so the road is a long run and not the
+##     other side of a hedge.
 ##   * `Town` - `town_hub.gd`: the square at the far end, walled on three sides,
 ##     open where the trail comes in.
 ##
@@ -27,14 +30,18 @@ extends Node3D
 ## `GameFlow`). Nothing else changes scene, and nothing about travel does.
 ##
 ## Keys: TAB warband, P paperdoll, G interact, E revive, K manual loot (never
-## advertised), R the branded sigil. The camp's lesson adds F1-F5 and `[` `]`.
+## advertised), R the branded sigil. Q and E are held to strafe, WASD to walk, so
+## neither is a press key. The camp's lesson adds F1-F5 and `[` `]`.
 
 signal scene_requested(path: String)
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
-const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+## The `P` panel is the corpse screen, which extends the paperdoll: a living body's
+## gear and a dead body's pockets are the same panel, so every equip path, the
+## change signal and `is_open()` are unchanged.
+const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
 const CardScript = preload("res://scripts/warband/tutorial_card.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
@@ -53,17 +60,18 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 ## How far past the lane's far end the town square stands. The lane ends at the
 ## town's north gate; the square's centre is this far beyond it.
 const TOWN_BEHIND := 30.0
-## The floor under everything: wider than the clearing, the lane and the square
-## put together, so no body ever walks off the edge of the world (rule 12).
-const FLOOR_HALF_WIDTH := 120.0
-const FLOOR_FRONT := -1010.0
-const FLOOR_BACK := 60.0
+## The floor under everything: wide enough for the camp's whole wood, the lane and
+## the square, so no body ever walks off the edge of the world (rule 12).
+const FLOOR_HALF_WIDTH := 210.0
+const FLOOR_FRONT := -1240.0
+const FLOOR_BACK := 240.0
 ## How close a body has to stand to something to loot it by hand.
 const LOOT_REACH := 2.6
 ## `ArenaActor` clamps a body to a square around the world origin, and the town
-## stands 342 m south of the camp: this is the whole map, with room to spare. A
-## bound that fitted one area would wall the world in halfway down the trail.
-const BODY_BOUNDS := 1000.0
+## stands well over a kilometre south of the camp: this is the whole map, with room
+## to spare. A bound that fitted one area would wall the world in halfway down the
+## trail.
+const BODY_BOUNDS := 1400.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0
@@ -195,8 +203,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-## `E` is the revive channel, so it is consumed before the actor layer can read it
-## as a step, and only when there is a downed body in reach.
+## `E` is the revive channel, so it is consumed before the actor layer can read
+## it as anything else, and only when there is a downed body in reach. It is not
+## `E`: since Q/E became the strafe pair, a key that is held to sidestep cannot
+## also be the key that starts a five second channel.
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or event.echo or event.keycode != KEY_E:
 		return
@@ -356,9 +366,14 @@ func _attach_trail() -> void:
 	})
 
 
-## Where the lane's first waypoint has to land: the clearing's mouth.
+## Where the lane's first waypoint lands: not the camp's mouth, but
+## `Camp.CAMP_TO_ROAD_METRES` of ordinary wood past it. The camp owns that number
+## and the geometry builds the corridor through the trees to match it, so the road
+## cannot creep up on the cages again.
 func trail_offset() -> Vector3:
-	return CampScript.GATE_POINT - (RunForestScript.LANE_POINTS[0] as Vector3)
+	var road_start := Vector3(CampScript.GATE_POINT.x, 0.0,
+		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES)
+	return road_start - (RunForestScript.LANE_POINTS[0] as Vector3)
 
 
 ## Where the lane's last waypoint lands: the town's own gate.
@@ -591,17 +606,27 @@ func _all_bodies_out() -> bool:
 
 # --- interaction -----------------------------------------------------------
 
-## The one `G`: a counter in the town, or a piece of steel at your feet. There is
-## nothing to press in the camp - a cage latch is not a key, it is Corvin's hands -
-## and the trail is walked, not opened.
+## The one `G`: a cage latch in the camp, a counter in the town, a corpse at your
+## feet, or a piece of steel lying loose. The camp is asked first, because its
+## latches stand in the ground a body walks on - and a camp that refused the press
+## (nothing in reach) hands it on rather than eating it.
 func _try_interact() -> void:
 	var actor = controller.active_body(1)
 	if actor == null or not is_instance_valid(actor):
 		if hud != null:
 			hud.set_status("The soul is loose. There is nobody to act with.", 2.5)
 		return
+	if camp != null and camp.interact(actor):
+		return
 	if town != null and not town.interact_at(1, actor.global_position).is_empty():
 		return
+	# A fallen body at your feet is a container: `G` opens its character screen. A
+	# body that has already given everything answers false, and the press falls
+	# through to the ordinary line.
+	if loot != null and loot.has_method("corpse_at"):
+		var corpse_id: int = loot.corpse_at(actor.global_position, LOOT_REACH)
+		if corpse_id != 0 and paperdoll.open_corpse(loot, corpse_id):
+			return
 	var pickup = _nearest_pickup()
 	if pickup != null:
 		_try_loot()
@@ -871,6 +896,8 @@ func stats() -> Dictionary:
 		"clearing": camp.clearing.get("clear", Vector2.ZERO) if camp != null else Vector2.ZERO,
 		"clearing_trees": int(camp.clearing.get("trees", 0)) if camp != null else 0,
 		"clearing_bushes": int(camp.clearing.get("bushes", 0)) if camp != null else 0,
+		"clearing_huts": int(camp.clearing.get("huts", 0)) if camp != null else 0,
+		"camp_to_road": CampScript.CAMP_TO_ROAD_METRES,
 		"lane_length": float(trail.forest.get("length", 0.0)) if trail != null else 0.0,
 		"lane_width": float(trail.forest.get("width", 0.0)) if trail != null else 0.0,
 		"torches": (trail.forest.get("torches", []) as Array).size() if trail != null else 0,
@@ -884,7 +911,7 @@ func town_gate() -> Vector3:
 	return trail.town_gate() if trail != null else Vector3.ZERO
 
 
-## The camp's clearing: 60 x 68 m of open ground inside the fence line.
+## The camp pocket's own size: a ragged pocket in the wood, not a walled yard.
 func clearing_size() -> Vector2:
 	return camp.clearing.get("clear", Vector2.ZERO) if camp != null else Vector2.ZERO
 
@@ -925,7 +952,8 @@ func _wanted_start() -> String:
 
 func _announce() -> void:
 	var readout: Dictionary = stats()
-	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f torches=%d trees=%d nodes=%d draws=%d shapes=%d"
+	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f road=%.0fm torches=%d trees=%d nodes=%d draws=%d shapes=%d"
 		% [start_area, bodies.size(), guards.size(), float(readout["lane_length"]),
-			int(readout["torches"]), int(readout["clearing_trees"]) + int(readout["town_wood"]),
+			float(readout["camp_to_road"]), int(readout["torches"]),
+			int(readout["clearing_trees"]) + int(readout["town_wood"]),
 			int(readout["nodes"]), int(readout["draws"]), int(readout["shapes"])])

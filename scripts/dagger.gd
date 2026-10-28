@@ -1,20 +1,21 @@
 extends Node3D
 ## Slim close-range dagger. Same socket axis as the swords: blade along -Z.
-## ``skin == "makeshift"`` swaps the iron blade for a ground bone shiv.
+## ``dagger_kind`` picks the object: forged iron at index 0, the whittled
+## ironwood shiv of the makeshift tier at index 1.
 
 const Geo = preload("res://scripts/geo.gd")
 var blade_length := 0.34
-var skin := ""
+var dagger_kind := 0
 
 
 func _ready() -> void:
 	_build()
 
 
-func set_skin(value: String) -> void:
-	if value == skin and get_child_count() > 0:
+func set_dagger_kind(kind: int) -> void:
+	if kind == dagger_kind and get_child_count() > 0:
 		return
-	skin = value
+	dagger_kind = kind
 	_build()
 
 
@@ -26,8 +27,8 @@ func _clear() -> void:
 
 func _build() -> void:
 	_clear()
-	if skin == "makeshift":
-		_build_makeshift()
+	if dagger_kind >= 1:
+		_build_ironwood()
 	else:
 		_build_iron()
 
@@ -56,39 +57,44 @@ func _build_iron() -> void:
 		binding.rotation.x = PI/2.0
 	Geo.sphere(self,0.027,Vector3(0,0,0.086),brass)
 
-
-## A snapped rib ground to a point: pale, slightly curved, wrapped in hide and
-## twine, with a chipped stone tied at the guard.
-func _build_makeshift() -> void:
-	var bone := Geo.material(Color("bdae92"),0.0,0.62)
-	var bone_dark := Geo.material(Color("8b7a60"),0.0,0.72)
-	var hide := Geo.material(Color("453427"),0.0,0.9)
-	var twine := Geo.material(Color("8d7852"),0.0,0.86)
-	var stone := Geo.material(Color("5d6064"),0.15,0.6)
-	var span := maxf(blade_length-0.11,0.10)
-	var shaft := Geo.cylinder(self,0.0135,0.0085,span,Vector3(0.002,0.0,-0.075-span*0.5),bone,8)
+## A split ironwood stave whittled to a point: the makeshift tier's shank. Dark,
+## dense, fire-hardened at the tip, bound in gut over a rag grip, and crooked
+## because nothing in the wood was straight to begin with. The shaft runs from
+## the grip's far end to the shoulder of the point with no seam between them.
+func _build_ironwood() -> void:
+	var wood := Geo.material(Color("33251a"), 0.0, 0.92)
+	var wood_light := Geo.material(Color("6a4c30"), 0.0, 0.88)
+	var char := Geo.material(Color("171310"), 0.0, 0.98)
+	var gut := Geo.material(Color("a89066"), 0.0, 0.86)
+	var rag := Geo.material(Color("4a3c2c"), 0.0, 0.94)
+	var tip := -maxf(blade_length, 0.22)
+	var shoulder := tip * 0.62
+	# The shank: one tapered, slightly bent length of ironwood.
+	var shaft := Geo.cylinder(self, 0.0165, 0.0090, absf(shoulder) + 0.055,
+		Vector3(0.003, 0.002, (shoulder + 0.055) * 0.5), wood, 7)
 	shaft.name = "Blade"
-	shaft.rotation.x = PI/2.0
-	shaft.rotation.z = 0.03
-	# Ground edge: a flat facet ground down one side.
-	var facet := Geo.box(self,Vector3(0.007,0.004,span*0.86),
-		Vector3(-0.008,0.0,-0.082-span*0.44),bone_dark)
-	facet.rotation.z = 0.06
-	var point := Geo.cylinder(self,0.0085,0.0,0.15,Vector3(0.002,0.0,-0.075-span),bone,5)
-	point.rotation.x = -PI/2.0
-	point.scale.z = 0.35
-	# Hide wrap over a knuckle-sized grip.
-	var grip := Geo.cylinder(self,0.017,0.020,0.115,Vector3(0.0,0.0,0.012),hide,9)
-	grip.rotation.x = PI/2.0
+	shaft.rotation.x = PI / 2.0
+	shaft.rotation.z = 0.05
+	# The point: fire-blackened, tapered off the same crooked line.
+	var point := Geo.cylinder(self, 0.0090, 0.0, absf(tip - shoulder),
+		Vector3(0.005, 0.003, (tip + shoulder) * 0.5 - 0.004), char, 5)
+	point.rotation.x = PI / 2.0
+	point.rotation.z = 0.07
+	point.scale.z = 0.45
+	# Whittle scars down one face, and the pale wood they expose.
 	for index in 3:
-		var coil := Geo.cylinder(self,0.021,0.021,0.005,
-			Vector3(0.0,0.0,-0.040 + index * 0.038),twine,9)
-		coil.rotation.x = PI/2.0
-	Geo.sphere(self,0.020,Vector3(0.0,0.0,0.074),bone,Vector3(1.0,1.0,0.8))
-	# Chip of stone tied on as a counterweight.
-	var chip := Geo.box(self,Vector3(0.016,0.020,0.026),Vector3(0.020,0.006,-0.052),stone)
-	chip.rotation.y = 0.5
-	chip.rotation.z = 0.3
-	var tie := Geo.cylinder(self,0.004,0.004,0.030,Vector3(0.010,0.004,-0.052),twine,6)
-	tie.rotation.x = PI/2.0
-	tie.rotation.z = 1.2
+		var scar := Geo.box(self, Vector3(0.005, 0.003, 0.048),
+			Vector3(-0.0075, 0.0012, shoulder * (0.22 + 0.26 * float(index))), wood_light)
+		scar.rotation.x = 0.18 - index * 0.12
+		scar.rotation.y = 0.2 - index * 0.15
+	# Rag grip, gut wraps over it, and a swollen butt knot.
+	var grip := Geo.cylinder(self, 0.019, 0.021, 0.115, Vector3(0.0, 0.0, 0.010), rag, 9)
+	grip.rotation.x = PI / 2.0
+	for index in 3:
+		var coil := Geo.cylinder(self, 0.022, 0.022, 0.006,
+			Vector3(0.0, 0.0, -0.034 + index * 0.038), gut, 9)
+		coil.rotation.x = PI / 2.0
+	Geo.sphere(self, 0.023, Vector3(0.004, 0.0, 0.072), wood_light,
+		Vector3(1.0, 0.85, 1.0))
+	var toggle := Geo.cylinder(self, 0.006, 0.004, 0.052, Vector3(0.016, 0.004, 0.050), gut, 5)
+	toggle.rotation.z = 1.35

@@ -182,7 +182,7 @@ func add_record(record: Dictionary) -> int:
 	if saved_gear is Dictionary:
 		for slot in saved_gear:
 			if str(slot) in gear:
-				gear[slot] = str(saved_gear[slot])
+				gear[slot] = State.migrate_item_id(str(saved_gear[slot]))
 	copy[KEY_EQUIPPED] = gear
 	_mercs.append(copy)
 	_next_id = maxi(_next_id, merc_id + 1)

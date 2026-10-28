@@ -48,7 +48,17 @@ func run() -> void:
 	check(game.service_at(desk) == "quartermaster", "the desk resolves as the quartermaster")
 	check(game.interact_at(1, desk) == "quartermaster", "G opens the quartermaster")
 	check(game.quartermaster.is_open(), "the shop is open")
-	check(game.quartermaster.stock_rows().size() == 11, "eleven base pieces are stocked (the torch included)")
+	check(game.quartermaster.stock_rows().size() == QuartermasterMenu.STOCK.size(),
+		"every stocked piece is on the board (%d)" % game.quartermaster.stock_rows().size())
+	for tid: String in ["dagger_ironwood", "club_makeshift", "bow_twig", "branch_heavy",
+			"shield_wood", "armor_naked_chest", "armor_naked_legs"]:
+		var found := false
+		for row in game.quartermaster.stock_rows():
+			if str(row["item_id"]) == tid:
+				found = true
+		check(found, "the quartermaster stocks " + tid)
+	check(game.quartermaster.stock_rows().size() >= 11,
+		"the original base pieces are still stocked (the torch included)")
 
 	var rows: Array[Dictionary] = game.quartermaster.stock_rows()
 	var sword_row: Dictionary = {}

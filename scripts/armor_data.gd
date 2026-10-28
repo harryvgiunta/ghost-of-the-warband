@@ -16,24 +16,28 @@ extends RefCounted
 const SLOTS := ["head", "chest", "hands", "legs", "feet"]
 const BODY_SLOTS := ["chest", "hands", "legs", "feet"]
 const SLOT_LABELS := {"head":"Head", "chest":"Chest", "hands":"Hands", "legs":"Legs", "feet":"Feet"}
-## Makeshift is the salvage set the ranger starts in; the four forged sets sit
-## on top of it. Order is the wire and HUD index, not a quality ranking.
-const SET_IDS := ["leather", "mail", "plate", "cloth", "makeshift"]
-const SET_ABBREVIATIONS := ["LEA", "MAI", "PLA", "CLO", "MSH"]
-## Three bits per slot fits five sets. The packed armour integer shares its
-## field with the shield bit, so these two constants move together.
+## `naked` is what a prisoner in the wood actually wears - an old shirt and a
+## pair of shorts - and it guards nothing. The four forged sets and the salvage
+## kit sit on top of it. Order is the wire and HUD index, not a quality ranking.
+## Three bits per slot carry eight codes, so the six named sets and the two
+## spare codes are all that field can hold.
+const SET_IDS := ["leather", "mail", "plate", "cloth", "makeshift", "naked"]
+const SET_ABBREVIATIONS := ["LEA", "MAI", "PLA", "CLO", "MSH", "NAK"]
+## Three bits per slot fits the six sets with two codes left over for NONE. The
+## packed armour integer shares its field width with the shield bit, so a seventh
+## set would need that bit to move.
 const BITS_PER_SLOT := 3
 const SLOT_MASK := (1 << BITS_PER_SLOT) - 1
 const PIECE_MASK := (1 << (5 * BITS_PER_SLOT)) - 1
 const SHIELD_BIT := 1 << (5 * BITS_PER_SLOT)
-## Empty slot. Three bits carry five set indexes, so every code above the sets
+## Empty slot. Three bits carry six set indexes, so every code above the sets
 ## is empty and a negative value packs itself into those spare codes.
 const NONE := -1
 
 ## Per set, in `SET_IDS` order: the helmet's figure against a head hit, and the
 ## body figure a complete four-piece body kit adds.
-const HEAD_REDUCTION := [0.20, 0.30, 0.50, 0.05, 0.20]
-const BODY_REDUCTION := [0.10, 0.25, 0.30, 0.05, 0.10]
+const HEAD_REDUCTION := [0.20, 0.30, 0.50, 0.05, 0.20, 0.00]
+const BODY_REDUCTION := [0.10, 0.25, 0.30, 0.05, 0.10, 0.00]
 ## Body pieces split that body figure 1 : 1 : 0.3 : 0.3 over chest, legs, hands
 ## and feet — a plate chest is 11.5%, its gauntlets 3.5% — so a mixed kit adds
 ## exactly the pieces worn and a full kit adds the row's body figure.

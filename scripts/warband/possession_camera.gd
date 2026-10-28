@@ -56,8 +56,16 @@ func _ready() -> void:
 func adopt(node: Camera3D) -> void:
 	if node == null or node == camera:
 		return
+	# The scene's own camera wins over the fallback eye this node builds for a
+	# scene that has none. Leaving the fallback behind would make two cameras
+	# current at once, which is a coin flip on which one the player looks through.
+	if is_instance_valid(camera) and camera != node and camera.get_parent() == self:
+		camera.current = false
+		remove_child(camera)
+		camera.queue_free()
 	if node.get_parent() == self:
 		camera = node
+		node.current = true
 		return
 	if node.get_parent() != null:
 		node.reparent(self, true)

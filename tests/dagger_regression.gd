@@ -74,11 +74,11 @@ func run() -> void:
 
 	check(attacker.rig._player.has_animation("Dagger_Stab"), "The rebuilt Ranger exports the authored dagger stab")
 	var stab: Dictionary = attacker.rig._profile.clips.stab
-	check(is_equal_approx(float(stab.duration), Archer.DAGGER_DATA.seconds), "The stab clip duration matches dagger attack timing")
+	check(is_equal_approx(float(stab.duration), Archer.dagger_profile(0).seconds), "The stab clip duration matches dagger attack timing")
 	check(is_equal_approx(float(stab.strike_start), 10.0/60.0) and is_equal_approx(float(stab.strike_end), 17.0/60.0), "The stab's authored forward window drives damage timing")
-	check(float(Archer.DAGGER_DATA.damage) < float(Archer.SWORD_DATA[0].damage), "The dagger deals less damage than the smallest sword")
-	check(float(Archer.DAGGER_DATA.seconds) < float(Archer.SWORD_DATA[0].seconds), "The dagger recovers faster than the smallest sword")
-	check(float(Archer.DAGGER_DATA.reach) < float(Archer.SWORD_DATA[0].reach), "The dagger is a closer-range weapon than every sword")
+	check(float(Archer.dagger_profile(0).damage) < float(Archer.SWORD_DATA[0].damage), "The dagger deals less damage than the smallest sword")
+	check(float(Archer.dagger_profile(0).seconds) < float(Archer.SWORD_DATA[0].seconds), "The dagger recovers faster than the smallest sword")
+	check(float(Archer.dagger_profile(0).reach) < float(Archer.SWORD_DATA[0].reach), "The dagger is a closer-range weapon than every sword")
 	check(attacker.rig.active_dagger.visible and not attacker.rig.active_sword.visible and not attacker.rig.active_bow.visible, "Dagger selection shows only the dagger model")
 	check(attacker.rig.melee_radius() < 0.03, "The dagger uses a thin blade contact volume")
 	# The authored thrust must actually lead with the dagger at torso height,
@@ -111,7 +111,7 @@ func run() -> void:
 	samples.clear()
 	clock = 0.0
 	check(attacker.combat.begin_melee(), "A grounded ready dagger accepts a stab")
-	advance(Archer.DAGGER_DATA.seconds + STEP)
+	advance(Archer.dagger_profile(0).seconds + STEP)
 	recording = false
 	check(not samples.is_empty(), "The authored stab emits real blade samples")
 	check(attacker.rig.phase == "READY", "The dagger returns to ready after 0.5 seconds")
@@ -135,8 +135,8 @@ func run() -> void:
 	attacker.combat.damage_enabled = true
 	clock = 0.0
 	check(attacker.combat.begin_melee(), "A second dagger stab starts after its short recovery")
-	advance(Archer.DAGGER_DATA.seconds + STEP)
-	check(is_equal_approx(victim.health, 200.0 - float(Archer.DAGGER_DATA.damage)), "A real dagger blade contact deals its small base damage once")
+	advance(Archer.dagger_profile(0).seconds + STEP)
+	check(is_equal_approx(victim.health, 200.0 - float(Archer.dagger_profile(0).damage)), "A real dagger blade contact deals its small base damage once")
 	check(attacker.combat.stagger_time == 0.0, "An unguarded dagger hit does not stagger the attacker")
 	check(attacker.combat.begin_melee(), "The dagger can immediately start another stab")
 	attacker.combat.stop()
@@ -180,9 +180,9 @@ func run() -> void:
 	clock = 0.0
 	check(attacker.combat.begin_melee(), "The attacker starts a stab into the weak guard")
 	advance(contact_time + 2.0 * STEP)
-	check(is_equal_approx(victim.health, 100.0 - float(Archer.DAGGER_DATA.damage) * Combat.WEAK_BLOCK_DAMAGE_SCALE), "A held dagger guard only halves a real stab hit")
+	check(is_equal_approx(victim.health, 100.0 - float(Archer.dagger_profile(0).damage) * Combat.WEAK_BLOCK_DAMAGE_SCALE), "A held dagger guard only halves a real stab hit")
 	check(attacker.rig.phase == "MELEE" and attacker.combat.stagger_time == 0.0, "A weak block does not neutralize or stagger the attacker")
-	advance(Archer.DAGGER_DATA.seconds)
+	advance(Archer.dagger_profile(0).seconds)
 	check(attacker.rig.phase == "READY", "The attacker's stab still completes normally")
 
 	# Switching back to a sword hides the dagger and restores full guard behavior.
@@ -233,7 +233,7 @@ func run() -> void:
 	var aim_dot := -1.0
 	var signed_drop := 0.0
 	var stab_time := 0.0
-	while stab_time < Archer.DAGGER_DATA.seconds + STEP:
+	while stab_time < Archer.dagger_profile(0).seconds + STEP:
 		game.archer.advance_animation(STEP)
 		game.combat.advance(STEP)
 		stab_time += STEP
@@ -256,7 +256,7 @@ func run() -> void:
 	game.combat.set_aim(game.player.global_position + Vector3(0, 1.5, -20.0))
 	check(game.combat.begin_melee(), "A high-aimed dagger stab starts")
 	var high_time := 0.0
-	while high_time < Archer.DAGGER_DATA.seconds + STEP:
+	while high_time < Archer.dagger_profile(0).seconds + STEP:
 		game.archer.advance_animation(STEP)
 		game.combat.advance(STEP)
 		high_time += STEP

@@ -77,9 +77,9 @@ func _check_rows_and_control() -> void:
 	check(screen.rows[alive]["name"].text == "Aldous", "the row names the mercenary")
 	check(screen.rows[downed]["name"].text == "Brine", "rows stay in roster order")
 
-	check(screen.rows[alive]["state"].text == "Alive", "the living row reads Alive")
-	check(screen.rows[downed]["state"].text == "Downed", "the downed row reads Downed")
-	check(screen.rows[dead]["state"].text == "Dead", "the dead row reads Dead")
+	check(screen.rows[alive]["state"].text == "ALIVE", "the living row reads ALIVE")
+	check(screen.rows[downed]["state"].text == "DOWNED", "the downed row reads DOWNED")
+	check(screen.rows[dead]["state"].text == "DEAD", "the dead row reads DEAD")
 	check(screen.rows[downed]["state"].get_theme_color("font_color")
 		!= screen.rows[dead]["state"].get_theme_color("font_color"),
 		"a downed row is coloured apart from a dead one")
@@ -95,8 +95,8 @@ func _check_rows_and_control() -> void:
 	check(screen.rows[dead]["deploy"].disabled, "the dead cannot be deployed")
 	check(not screen.rows[downed]["deploy"].disabled, "a downed body can still be fielded")
 
-	check(screen.gold_label.text == "1000 gold", "the header shows the purse, got %s" % screen.gold_label.text)
-	check(screen.deployed_label.text == "0 / 8 deployed",
+	check(screen.gold_label.text == "1000 G", "the header shows the purse, got %s" % screen.gold_label.text)
+	check(screen.deployed_label.text == "0 / 8 FIELDED",
 		"the header shows deployed over the cap, got %s" % screen.deployed_label.text)
 	check(screen.value_label.text.contains(str(warband.total_value())),
 		"the header shows the warband's worth, got %s" % screen.value_label.text)
@@ -143,7 +143,7 @@ func _check_refresh() -> void:
 	check(screen.rows[alive]["bar"].value == 55.0, "Warband.changed repaints the bar")
 	check(bool(warband.set_deployed(alive, true).get("ok", false)), "deploying the living body works")
 	check(screen.rows[alive]["deploy"].text == "DEPLOYED", "the deployment toggle repaints")
-	check(screen.deployed_label.text == "1 / 8 deployed",
+	check(screen.deployed_label.text == "1 / 8 FIELDED",
 		"the header counts the deployment, got %s" % screen.deployed_label.text)
 	check(screen.rows[alive]["gear"].text.contains("empty"), "the row is still the same row")
 	warband.stash.add("sword_short", 1)
@@ -306,7 +306,7 @@ func _check_recruiter() -> void:
 	check(warband.roster.count() == 2, "HIRE swears a body in")
 	check(warband.gold() == gold_before - cost, "HIRE spends exactly the hire cost")
 	check(screen.rows.size() == 2, "the roster repaints immediately")
-	check(screen.gold_label.text == "%d gold" % warband.gold(), "the purse repaints immediately")
+	check(screen.gold_label.text == "%d G" % warband.gold(), "the purse repaints immediately")
 
 	# An empty purse is refused too, and costs nothing.
 	_set_gold(0)

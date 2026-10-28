@@ -2,19 +2,21 @@ extends Node3D
 ## GHOST OF THE WARBAND: the trail through the wood, from the camp to the town.
 ##
 ## The trail is the middle of one continuous world and has no doors of its own.
-## It begins at the camp clearing's mouth - the lane's first waypoint *is* that
-## mouth, so there is no seam and no wall between them - and it ends where the
-## town's gate stands. Walking it is the only way between the two, and walking it
-## is dangerous: two armed cultists start on the soul's own body and a pair waits
-## in each clearing, so the escape is a running fight the whole way.
+## It begins a long run of ordinary wood past the camp's mouth - the lane's first
+## waypoint is `cage_escape.gd`'s `CAMP_TO_ROAD_METRES` away from it, and the camp
+## plants the wood between the two - and it ends where the town's gate stands.
+## Walking it is the only way between the two, and walking it is dangerous: two
+## armed cultists start on the soul's own body and a pair waits in each clearing,
+## so the escape is a running fight the whole way.
 ##
 ## The lane and every prop on it are `run_forest.gd`'s, built out of the world's
 ## own art kits; the bodies, the camera, the HUD, the loot vacuum and the squad
-## are the world's. This node owns the lane's *occupants*: the eight cultists, the
-## weapons they drop, and the lane's own numbers for whoever asks.
+## are the world's. This node owns the lane's *occupants*: the twenty cultists, the
+## weapons and rags they carry, the corpses they leave, and the lane's own numbers
+## for whoever asks.
 ##
 ## There is no scene request here and no wipe beat. In the one world a wipe is not
-## a hand-off to somewhere else - it is eight bodies lying in the mud and the
+## a hand-off to somewhere else - it is every body lying in the mud and the
 ## roster left exactly as it fell, which the world records.
 
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
@@ -84,26 +86,19 @@ func cultist_kills() -> int:
 	return _kills
 
 
-## Weapons of the road's that are still lying on it.
-func pickups_left() -> int:
-	var left := 0
-	for pickup in host.pickups:
-		if is_instance_valid(pickup) and not bool(pickup.collected):
-			left += 1
-	return left
-
-
 # --- the cult on the road --------------------------------------------------
 
-## Four cultists at each post, posts a long way apart. A nine-hundred-metre road
-## does not need a crowd at every metre: the ambush is the point, and forty of them
-## spread over that distance means every engagement is a small, spaced one.
-const ROAD_PER_POST := 4
+## Two cultists at each post, posts a long way apart. A nine-hundred-metre road
+## does not need a crowd at every metre: the ambush is the point, and twenty of them
+## spread over that distance means every engagement is a small, spaced one. (Four
+## a post was forty full ranger rigs in one scene - the single dearest thing in the
+## world to simulate, for a road that reads the same with half of them.)
+const ROAD_PER_POST := 2
 
-## Two behind the squad at the mouth of the lane and a pair in each clearing: one
+## Two behind the squad at the head of the lane and a pair in each clearing: one
 ## ring per post, all armed. Nobody is handed a quarry here - a cultist that
-## started hunting from its spawn point would run the 90 m back into the camp and
-## turn the opening's own fight into a massacre. The road answers the leaving
+## started hunting from its spawn point would run the whole wood back into the camp
+## and turn the opening's own fight into a massacre. The road answers the leaving
 ## (`wake_road`), and after that the wood's own senses do the noticing.
 func _build_cultists() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -142,11 +137,13 @@ func _spawn_cultist(at: Vector3) -> void:
 	host.guards.append(watcher)
 
 
-## The road answers the leaving: the moment the squad steps out of the clearing a
-## third of every ring takes the soul and comes up the lane after it, and the rest
-## have to notice the squad by sight - which is what makes the trail feel hunted
-## rather than scripted. Called by the camp on ESCAPING; a campaign that starts in
-## the town never calls it, and the road is then just a road with a cult on it.
+## The road answers the leaving: the moment the squad steps out of the camp a third
+## of every ring takes the soul and comes up the lane after it, and the rest have
+## to notice the squad by sight - which is what makes the trail feel hunted rather
+## than scripted. Called by the camp on ESCAPING - it is the ambush, not the start
+## of the road, which has been lying there a hundred and seventy metres away the
+## whole time. A campaign that starts in the town never calls it, and the road is
+## then just a road with a cult on it.
 func wake_road(prey) -> void:
 	if _woken or not is_instance_valid(prey):
 		return
@@ -159,20 +156,15 @@ func wake_road(prey) -> void:
 			watcher.hunt(prey)
 
 
-## Each one drops the weapon it held, exactly as the camp's watchers do.
+## The body stays on the trail as a lootable corpse - registered with the vacuum,
+## which reads the blade and the rag off the enemy as it fell. Nothing is dumped on
+## the ground as well, and nothing is taken out of its hand: the corpse screen
+## lists what the body was carrying.
 func _on_cultist_defeated(enemy, _reward: int) -> void:
 	_kills += 1
-	# The corpse is checked, not just the hand: the blade and whatever rag it wore.
-	if is_instance_valid(enemy) and enemy.has_method("gear_items"):
-		var gear: Array = enemy.gear_items()
-		for index in gear.size():
-			var item_id := str(gear[index])
-			if item_id.is_empty():
-				continue
-			host.spawn_pickup(item_id, enemy.global_position
-				+ Vector3(0.3 + 0.28 * float(index), 0.0, 0.2))
-		if enemy.has_method("take_weapon_item"):
-			enemy.take_weapon_item()
+	if is_instance_valid(enemy) and host != null and host.loot != null \
+			and host.loot.has_method("register_corpse"):
+		host.loot.register_corpse(enemy)
 	if host.hud != null and not guards.is_empty():
 		host.hud.set_status("A cultist falls on the trail (%d of %d)." % [_kills, guards.size()], 2.0)
 

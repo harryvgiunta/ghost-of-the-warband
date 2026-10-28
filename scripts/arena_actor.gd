@@ -13,6 +13,7 @@ const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
+const BleedDrip = preload("res://scripts/warband/bleed_drip.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -57,6 +58,10 @@ var alive := true
 var kills := 0
 var deaths := 0
 var respawn := 0.0
+## A body that stays down. The arena's round clock revives a dead fighter after
+## three seconds; a warband mercenary that bled out is gone, and its roster record
+## already says DEAD. Scenes that field bodies for good set this on creation.
+var persistent_death := false
 # Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
 # true while DOWNED - the body keeps its collision, its model and its claim on
 # the slot, and only a finisher or the bleed clock kills it - so every existing
@@ -192,6 +197,9 @@ var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 ## Prints a bloody trail when this body walks out of a death pool.
 var _bloody_feet := BloodyFeet.new()
+## The blood this body leaves on the ground while it is down. Built with the body
+## and parked until it falls, so a fight never allocates one.
+var _bleed_drip: BleedDrip
 
 func _ready() -> void:
 	set_meta("ironwood_player", true)
@@ -256,6 +264,11 @@ func _ready() -> void:
 	circle.rings = 24
 	circle.ring_segments = 6
 	_ground_ring = Geo.mesh_node(self,circle,Geo.material(colors[slot % colors.size()]),Vector3(0,0.025,0))
+	# Built and parked with the body: the drop carries its own drip, and no scene
+	# has to know that it does.
+	_bleed_drip = BleedDrip.new()
+	_bleed_drip.name = "BleedDrip"
+	add_child(_bleed_drip)
 
 func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) -> void:
 	peer_id = owner_id
@@ -309,6 +322,9 @@ func revive() -> void:
 	downed_by = -1
 	downed_threat_known = false
 	safe_anchor_known = false
+	# A respawn is the arena's way out of DEAD and out of DOWNED alike: the rig
+	# stands up and stops bleeding here exactly as it does on a revive.
+	_clear_downed_state()
 	respawn = 0.0
 	combat.stop()
 	combat.clear_camera_ray()
@@ -347,6 +363,47 @@ func _restore_body_collision() -> void:
 	collision_layer = _body_layer if _body_layer >= 0 else 4
 	collision_mask = _body_mask if _body_mask >= 0 else 1
 
+## Drops the rig into the prone drag pose and starts the drip. The state machine
+## stays in this file; what runs here is only the body's own presentation of it,
+## and every path into DOWNED calls it - the blow on the host, a replicated body
+## reading the flag off the wire - so a body on the ground always looks like one.
+func _begin_downed_state() -> void:
+	if is_instance_valid(rig):
+		# A downed body drags, it does not walk: the rig keeps whatever walk it
+		# was in when the blow landed and keeps cycling its legs under the lie.
+		# The crawl moves the body through its capsule itself, so this body's own
+		# locomotion is what has to be zeroed here.
+		rig.set_locomotion(Vector3.ZERO,true)
+		rig.blood_loss = 0.0
+		rig.set_downed(true)
+	if _bleed_drip != null:
+		_bleed_drip.attach(self)
+
+## Puts the rig back on its feet and stops the drip. Shared by the revive, the
+## arena respawn and the death, so no path can clear `downed` while leaving the
+## prone pose - or a bleeding body - behind.
+func _clear_downed_state() -> void:
+	if is_instance_valid(rig):
+		rig.set_downed(false)
+		rig.blood_loss = 0.0
+	if _bleed_drip != null:
+		_bleed_drip.detach()
+
+## How long this body has lain on the ground, as a 0..1 share of the bleed clock.
+## The rig carries it so the drip (and anything later) reads the same number the
+## clock that kills the body runs on.
+func _tick_downed_presentation(delta: float) -> void:
+	if not downed:
+		return
+	# Only the authority runs the bleed clock, because only it can kill the body.
+	# A replica reads how long it has been lying here locally, so a remote body's
+	# drip quickens too; nothing in this function decides a death.
+	if not authoritative:
+		downed_seconds = minf(downed_seconds + maxf(delta, 0.0),
+			WarbandContracts.DOWNED_BLEED_SECONDS)
+	if is_instance_valid(rig):
+		rig.blood_loss = DownedRules.bleed_fraction(downed_seconds)
+
 ## Ghost of the Warband: a blow overkilled by at most 10% knocks this body down
 ## instead of killing it.
 ##
@@ -378,6 +435,7 @@ func enter_downed(source_id: int = -1) -> void:
 	_restore_body_collision()
 	_reset_rig_glide()
 	rig.visible = true
+	_begin_downed_state()
 	downed_started.emit(slot)
 
 ## Ghost of the Warband: stand back up out of DOWNED with the contract's share of
@@ -404,6 +462,7 @@ func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTIO
 	_restore_body_collision()
 	_reset_rig_glide()
 	rig.visible = true
+	_clear_downed_state()
 	downed_ended.emit(slot)
 
 ## Where the blow that put this body down came from. `receive_melee` is the one
@@ -470,6 +529,9 @@ func _die(source_id: int) -> void:
 	roll.reset()
 	_store_body_collision()
 	_reset_rig_glide()
+	# The corpse's own pool rule takes the ground from here: the drag pose comes
+	# off and the drip stops on the frame the body dies.
+	_clear_downed_state()
 	rig.visible = false
 	killed.emit(slot, source_id)
 
@@ -813,7 +875,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	if not alive:
 		# Only the authority owns the respawn clock; a replica learns its state
 		# from the snapshots it is handed.
-		if authoritative:
+		if authoritative and not persistent_death:
 			respawn = maxf(0,respawn-delta)
 			if respawn <= 0:
 				revive()
@@ -1478,9 +1540,14 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 			health_state = WarbandContracts.HealthState.DOWNED
 		else:
 			health_state = WarbandContracts.HealthState.ALIVE
+		# The pose and the drip follow the flag here too. A remote body has to
+		# lie on the ground and bleed like the one the host put down, and the
+		# wire - which carries no presentation flag - is enough to say so.
 		if downed:
+			_begin_downed_state()
 			downed_started.emit(slot)
 		else:
+			_clear_downed_state()
 			downed_ended.emit(slot)
 	kills = state.kills
 	deaths = state.deaths
@@ -1587,6 +1654,7 @@ func _process(delta: float) -> void:
 		var sample: Dictionary = _timeline.sample()
 		position = sample.pos
 		velocity = sample.vel
+	_tick_downed_presentation(delta)
 	_label.text = "%s%s  %d" % [display_name," [BOT]" if is_bot else "",int(health)]
 	_ground_ring.visible = alive
 	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)

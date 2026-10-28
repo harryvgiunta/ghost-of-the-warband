@@ -153,30 +153,30 @@ func check_gear_transfer(_state, warband) -> void:
 	var ash: int = warband.add_mercenary("Ash")
 	var corvin: int = warband.add_mercenary("Corvin")
 	# Only the rescuer's shiv exists: the exact shape of the tutorial.
-	roster.equip(corvin, "main", "dagger_makeshift")
+	roster.equip(corvin, "main", "dagger_ironwood")
 	var before_total: int = warband.total_value()
 
-	var hand: Dictionary = warband.equip_merc(ash, "main", "dagger_makeshift")
+	var hand: Dictionary = warband.equip_merc(ash, "main", "dagger_ironwood")
 	check(bool(hand.get("ok", false)), "a worn dagger can be handed to another body: %s"
 		% str(hand.get("message", "")))
-	check(str(roster.equipped_of(ash).get("main", "")) == "dagger_makeshift",
+	check(str(roster.equipped_of(ash).get("main", "")) == "dagger_ironwood",
 		"the receiving body now holds it")
 	check(str(roster.equipped_of(corvin).get("main", "")) == "",
 		"the giver no longer wears it")
 	check(warband.total_value() == before_total, "a hand-off loses no value")
 
 	# Moving the same piece between slots on one body is legal too.
-	var moved: Dictionary = warband.equip_merc(ash, "off", "dagger_makeshift")
+	var moved: Dictionary = warband.equip_merc(ash, "off", "dagger_ironwood")
 	check(bool(moved.get("ok", false)), "the same dagger moves to the off hand")
 	check(str(roster.equipped_of(ash).get("main", "")) == "",
 		"the main hand is empty after the move")
-	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
 		"the off hand holds it")
 
 	# An unowned piece is still refused.
 	var unowned: Dictionary = warband.equip_merc(ash, "main", "sword_great")
 	check(unowned.get("ok") == false, "a piece nobody owns is refused")
-	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
 		"a refused equip leaves the body alone")
 
 	# A pickup snaps into a hand only when it beats what is already there.
@@ -196,7 +196,7 @@ func check_gear_transfer(_state, warband) -> void:
 		"the arming sword replaced the shortsword")
 	check(warband.stash.pooled_count("sword_short") == 1,
 		"the displaced shortsword returns to the pool")
-	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_makeshift",
+	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
 		"the off hand is untouched by a main-hand upgrade")
 
 	# Unarmed bodies get the first thing they pick up.
@@ -428,8 +428,8 @@ func check_cruor(state, warband) -> void:
 	check(stash.pooled_count("ring_silver") == 0, "unbinding destroys the item")
 	check(cruor.tier_count(Contracts.CruorTier.T1_RITUAL_TALLOW) == 5, "a 95-price ring yields 5 Tallow")
 	check(cruor.unbind(stash, "ring_silver")["ok"] == false, "the altar cannot eat what you do not own")
-	stash.add("dagger_makeshift", 1)
-	check(cruor.can_unbind(stash, "dagger_makeshift") == false, "junk below the magic floor is refused")
+	stash.add("dagger_ironwood", 1)
+	check(cruor.can_unbind(stash, "dagger_ironwood") == false, "junk below the magic floor is refused")
 
 	# A worn item is not spare: the altar only eats what sits in the pool.
 	var merc_id : int = warband.add_mercenary("Fenwick")

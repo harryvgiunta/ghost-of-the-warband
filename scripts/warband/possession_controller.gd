@@ -141,6 +141,9 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	var label: String = _warband.roster.name_of(merc_id)
 	actor.authoritative = authoritative
 	actor.combat.damage_enabled = authoritative
+	# The warband has no rounds: a mercenary that bleeds out stays dead, and the
+	# roster is the only thing that can bring one back.
+	actor.persistent_death = true
 	actor.configure(0, true, label, spawn)
 	_apply_gear(actor, merc_id)
 	actor.killed.connect(_on_actor_killed.bind(actor))

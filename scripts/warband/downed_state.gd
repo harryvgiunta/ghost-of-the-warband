@@ -32,6 +32,13 @@ const MIN_BEARING := 0.0001
 ## below anything a player can feel and far above the rounding, and it never lets
 ## the previous tenth of a second pass.
 const CLOCK_SLACK := 0.001
+## A body on the ground drips rather than pours: one pulse every 1.2 s when it
+## first falls, one every 0.6 s as the clock runs out, each carrying a little more
+## blood than the last.
+const DRIP_SLOW_SECONDS := 1.2
+const DRIP_FAST_SECONDS := 0.6
+const DRIP_VOLUME_MIN := 2.0
+const DRIP_VOLUME_MAX := 8.0
 
 ## One hit on a standing body. Returns the contract's
 ## `{ok, state, health, damage, overkill, downed, died}` record untouched.
@@ -53,6 +60,23 @@ static func revive_health(max_health: float, fraction: float = Contracts.REVIVE_
 ## True once a downed body has been on the ground long enough to bleed out.
 static func bled_out(seconds: float) -> bool:
 	return seconds >= Contracts.DOWNED_BLEED_SECONDS - CLOCK_SLACK
+
+## How far through the bleed clock a body is: 0 when it just fell, 1 on the frame
+## it dies. The body writes this onto the rig so the drip and any future
+## presentation read the same number as the clock that kills it.
+static func bleed_fraction(seconds: float) -> float:
+	return clampf(seconds / Contracts.DOWNED_BLEED_SECONDS, 0.0, 1.0)
+
+## Seconds between two drips. Slow while the body still has time, fast once the
+## clock is nearly out: the quickening is the only in-world sign of a timer the
+## player cannot see, so the rate carries it rather than a bar over the body.
+static func drip_interval(fraction: float) -> float:
+	return lerpf(DRIP_SLOW_SECONDS, DRIP_FAST_SECONDS, clampf(fraction, 0.0, 1.0))
+
+## Blood one drip carries, rising with the bleed fraction so the last seconds lay
+## down more than the first. A presentation weight, not damage.
+static func drip_volume(fraction: float) -> float:
+	return lerpf(DRIP_VOLUME_MIN, DRIP_VOLUME_MAX, clampf(fraction, 0.0, 1.0))
 
 ## Where a downed body drags itself: away from the blow that put it down, biased
 ## toward the nearest standing friend or a supplied safe anchor.

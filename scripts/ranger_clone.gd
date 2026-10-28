@@ -624,7 +624,7 @@ func _resolve_melee() -> void:
 
 func _melee_damage() -> float:
 	if rig.weapon == "dagger":
-		return float(Archer.DAGGER_DATA.damage)
+		return float(Archer.dagger_profile(0).damage)
 	if rig.weapon == "bow":
 		return 0.0
 	return float(Archer.SWORD_DATA[clampi(rig.sword_index,0,2)].damage)

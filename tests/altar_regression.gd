@@ -120,8 +120,8 @@ func check_unbind_list() -> void:
 	stash.add("sword_arming", 1)
 	stash.add("bow_short", 1)
 	stash.add("ring_silver", 1)
-	stash.add("dagger_makeshift", 2)
-	stash.add("sword_makeshift", 1)
+	stash.add("dagger_ironwood", 2)
+	stash.add("club_makeshift", 1)
 	stash.add("shield_buckler", 1)
 	var merc: int = warband.add_mercenary("Kettle")
 	var worn: Dictionary = warband.equip_merc(merc, "off", "shield_buckler")
@@ -138,7 +138,7 @@ func check_unbind_list() -> void:
 	check(ids == ["sword_arming", "bow_short", "ring_silver"],
 		"the list is the magic gear, value-first: %s" % str(ids))
 	check(not ids.has("shield_buckler"), "a worn piece is never unbound")
-	check(not ids.has("dagger_makeshift") and not ids.has("sword_makeshift"),
+	check(not ids.has("dagger_ironwood") and not ids.has("club_makeshift"),
 		"junk below the magic floor is never unbound")
 
 	for row in rows:

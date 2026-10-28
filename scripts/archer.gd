@@ -4,6 +4,7 @@ extends Node3D
 signal arrow_released(origin: Vector3, direction: Vector3, speed: float, charge: float)
 signal weapon_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float, weapon: String, weapon_index: int)
 signal loadout_changed()
+signal downed_pose_changed(downed: bool)
 signal melee_started(hand: String)
 signal melee_sweep(hand: String, previous_base: Vector3, previous_tip: Vector3, current_base: Vector3, current_tip: Vector3, radius: float)
 
@@ -26,13 +27,31 @@ const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
 	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":84.0, "length":1.4},
 	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":102.0, "length":1.8},
+	{"name":"Twig bow", "subtitle":"A green sapling and a length of cord", "draw_seconds":0.7, "speed":48.0, "length":0.82},
 ]
+## Melee profiles in catalog `index` order. The last two are the makeshift tier
+## a warband actually carries out of the wood: a club and a whole tree limb, both
+## slower and weaker than any forged blade. `length` is the visible blade span,
+## so a branch reaches like a greatsword while hitting like nothing.
 const SWORD_DATA = [
-	{"name":"Shortsword", "seconds":1.0, "length":0.80, "reach":1.8, "damage":30.0, "throw_speed":26.0},
-	{"name":"Arming sword", "seconds":2.0, "length":1.05, "reach":2.1, "damage":38.0, "throw_speed":28.0},
-	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0},
+	{"name":"Shortsword", "seconds":1.0, "length":0.80, "reach":1.8, "damage":30.0, "throw_speed":26.0, "two_handed":false},
+	{"name":"Arming sword", "seconds":2.0, "length":1.05, "reach":2.1, "damage":38.0, "throw_speed":28.0, "two_handed":false},
+	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0, "two_handed":true},
+	{"name":"Club", "seconds":0.9, "length":0.68, "reach":1.7, "damage":6.0, "throw_speed":20.0, "two_handed":false},
+	{"name":"Heavy tree branch", "seconds":1.6, "length":1.55, "reach":2.3, "damage":15.0, "throw_speed":16.0, "two_handed":true},
 ]
-const DAGGER_DATA = {"name":"Dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0}
+## Dagger profiles in catalog `index` order: the forged iron blade, then the
+## whittled ironwood shiv the makeshift tier fields.
+const DAGGER_DATA := [
+	{"name":"Iron dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0},
+	{"name":"Ironwood shiv", "seconds":0.55, "length":0.30, "reach":1.15, "damage":10.0, "throw_speed":26.0},
+]
+
+
+## One dagger profile by catalog index, clamped: replicas and projectiles carry
+## only an index, never an item id, so this is the one lookup they can share.
+static func dagger_profile(index: int = 0) -> Dictionary:
+	return DAGGER_DATA[clampi(index, 0, DAGGER_DATA.size() - 1)]
 const CONSUMABLE_DATA = {
 	"bandage": {"name":"Bandage", "seconds":3.0, "heal":35.0, "heal_seconds":3.0, "clip":"Bandage_Wrap", "phase":"BANDAGE"},
 	"potion": {"name":"Healing potion", "seconds":0.5, "heal":50.0, "heal_seconds":0.0, "clip":"Potion_Drink", "phase":"DRINK"},
@@ -48,13 +67,18 @@ const STAFF_DATA = [
 ## reaches 0.29 m from the spine and every helmet 0.28 m from the head bone, so
 ## the disc sits just ahead of both and a clip that draws the hand back cannot
 ## carry the boss through the torso or the helmet.
+## Buckler, kite, tower, and the lashed planks of the makeshift tier.
+const SHIELD_VARIANTS := 4
 const ABILITY_SHIELD_CHEST_CLEAR := 0.34
 const ABILITY_SHIELD_HEAD_CLEAR := 0.34
 const ABILITY_SHIELD_LEG_CLEAR := 0.60
 ## Every standard cut starts with a real backswing: the hands cock up behind
 ## the striking shoulder while the chest winds away from the target, then the
 ## hilt crosses the centre line and the tip whips through the sector past it.
-const DIAGONAL_SECONDS = [0.60,0.78,1.02]
+## One entry per sword profile, in catalog order. The makeshift tier's club is
+## the shortest cut and the limb the longest; a profile with no row of its own
+## would index past the end of these tables.
+const DIAGONAL_SECONDS = [0.60,0.78,1.02,0.55,0.92]
 ## The swing runs on one clock for every weapon: the body loads through 30% of
 ## the clip, the hips and chest snap the strike through 30-45%, the blade
 ## overshoots and is cushioned through 45-65%, and the last third eases back
@@ -90,6 +114,20 @@ const DIAGONAL_BLADE = [
 		"blade_load":2.02, "blade_cross":1.80, "tip_load":0.66, "tip_down":-0.24,
 		"pelvis_load":0.54, "pelvis_cross":0.36, "chest_load":0.98, "chest_cross":0.48,
 		"lean_load":0.15, "lean_cross":0.34, "clavicle":0.20},
+	# A club is short and top-heavy: the hilt stays closer to the body and the
+	# head rolls over rather than whipping across.
+	{"yaw_load":1.70, "yaw_cross":0.76, "rad_load":0.20, "rad_cross":0.32,
+		"fwd_load":0.00, "fwd_cross":0.28, "up_load":0.20, "up_cross":-0.26,
+		"blade_load":1.66, "blade_cross":1.56, "tip_load":0.54, "tip_down":-0.18,
+		"pelvis_load":0.38, "pelvis_cross":0.26, "chest_load":0.78, "chest_cross":0.34,
+		"lean_load":0.14, "lean_cross":0.28, "clavicle":0.14},
+	# A whole limb is a two-handed sweep: the widest arc in the table and the
+	# longest follow-through, because the far end has a metre and a half to travel.
+	{"yaw_load":2.04, "yaw_cross":1.02, "rad_load":0.34, "rad_cross":0.50,
+		"fwd_load":0.16, "fwd_cross":0.50, "up_load":0.44, "up_cross":-0.40,
+		"blade_load":2.10, "blade_cross":1.88, "tip_load":0.70, "tip_down":-0.26,
+		"pelvis_load":0.60, "pelvis_cross":0.40, "chest_load":1.02, "chest_cross":0.52,
+		"lean_load":0.16, "lean_cross":0.36, "clavicle":0.22},
 ]
 ## A staff is held around its middle, so its swing is not a sword hilt orbit:
 ## both hands stay near the shaft centre and drive forward as a piston while
@@ -106,6 +144,17 @@ const DIAGONAL_STAFF = {
 const STAFF_GRIP_DEPTH := 0.32
 const STAFF_REACH = [1.60,1.50]
 const MELEE_VARIANTS = ["overhead","diagonal_left","diagonal_right","stab"]
+## Downed: the body goes to the ground over this long, then drags itself. The
+## lie is not a hit reaction - the pelvis drops to a hand's width off the floor
+## and the whole spine lays out along the ground - so a downed body reads from
+## fifty metres and never looks like somebody standing very still.
+const DOWNED_FALL_SECONDS := 0.5
+const DOWNED_LIE_HEIGHT := 0.17
+const DOWNED_LIE_PITCH := 1.30
+const DOWNED_DRAG_SECONDS := 1.5
+## How much of the body's blood has run out, 0..1, written by the owner so the
+## drip rate speeds up as the clock runs down. Presentation only.
+var blood_loss := 0.0
 const RAISE_SECONDS := 0.30
 const RELEASE_SECONDS := 0.28
 const RECOVER_SECONDS := 0.95
@@ -117,10 +166,12 @@ static var _profile: Dictionary = JSON.parse_string(FileAccess.get_file_as_strin
 
 var bow_index := 1
 var sword_index := 1
-## Model family for the held blades: "" is forged steel, "makeshift" is the
-## salvage cleaver/shiv the Unholy Forest set is themed on.
+## Which dagger profile the rig is holding (see `DAGGER_DATA`). Replicas carry
+## this as the packed dagger index, so two shivs are never the same weapon.
+var dagger_index := 0
+## Model family for the held blade: "" is forged steel, "makeshift" is the
+## salvage cleaver. Clubs and branches pick their own mesh from `sword_kind`.
 var sword_skin := ""
-var dagger_skin := ""
 var armor_pieces := {"head":ArmorData.NONE, "chest":ArmorData.NONE, "hands":ArmorData.NONE,
 	"legs":ArmorData.NONE, "feet":ArmorData.NONE}
 var weapon := "bow"
@@ -139,6 +190,9 @@ var active_shield
 var shield_equipped := false
 var shield_variant := 1
 var consumable_kind := ""
+var downed_pose := false
+var _downed_clock := 0.0
+var _downed_blend := 0.0
 var _bandage_prop: Node3D
 var _potion_prop: Node3D
 var active_staff: Node3D
@@ -237,7 +291,7 @@ var _right_variant := "overhead"
 var _left_variant := "overhead"
 var _left_melee_time := -1.0
 var _right_melee_time := -1.0
-var _left_melee_duration := float(DAGGER_DATA.seconds)
+var _left_melee_duration := float(dagger_profile(0).seconds)
 var _right_melee_duration := 1.0
 var _swing_start_hand: Array[Transform3D] = [Transform3D.IDENTITY,Transform3D.IDENTITY]
 var _swing_start_valid: Array[bool] = [false,false]
@@ -340,19 +394,21 @@ func _ready() -> void:
 	string_hand = Node3D.new()
 	string_hand.name = "StringGrip"
 	add_child(string_hand)
-	for index in 3:
+	for index in BOW_DATA.size():
 		var bow := Bow.new()
 		bow.bow_kind = index
 		bow.bow_length = float(BOW_DATA[index].length)
 		add_child(bow)
 		_bows.append(bow)
+	for index in SWORD_DATA.size():
 		var sword := Sword.new()
 		sword.sword_kind = index
 		sword.blade_length = float(SWORD_DATA[index].length)
 		add_child(sword)
 		_swords.append(sword)
 	var dagger := Dagger.new()
-	dagger.blade_length = float(DAGGER_DATA.length)
+	dagger.dagger_kind = dagger_index
+	dagger.blade_length = float(dagger_profile(dagger_index).length)
 	add_child(dagger)
 	dagger.visible = false
 	var shield := Shield.new()
@@ -378,6 +434,97 @@ func _ready() -> void:
 	set_sword(sword_index)
 	_apply_armor_visibility()
 	_update_pose(0.0)
+
+## The body is on the ground. Called by whichever layer owns the health - the
+## arena actor, the frontier body, a warband replica - and idempotent, so a
+## snapshot that repeats the flag never restarts the fall.
+func set_downed(value: bool) -> void:
+	if value == downed_pose:
+		return
+	downed_pose = value
+	_downed_clock = 0.0
+	if value:
+		# Nothing else may own the skeleton while the body is on the floor: a
+		# held draw, a swing, a slide or a lean would all be posed on top of the
+		# lie and pull it apart.
+		cancel_consumable()
+		_clear_melee()
+		_blocking = false
+		phase = "READY"
+		draw_amount = 0.0
+		_roll_progress = -1.0
+		set_step(-1.0, Vector3.FORWARD)
+		set_slide(-1.0, Vector3.FORWARD)
+		_cover_active = false
+		_crouch_amount = 0.0
+	else:
+		_downed_blend = 0.0
+	_update_pose(0.0)
+	downed_pose_changed.emit(value)
+
+
+## True when the body is down or still falling to the floor.
+func is_downed_pose() -> bool:
+	return downed_pose or _downed_blend > 0.0
+
+
+func _advance_downed(delta: float) -> void:
+	_downed_clock += maxf(delta, 0.0)
+	var target := 1.0 if downed_pose else 0.0
+	_downed_blend = move_toward(_downed_blend, target,
+		maxf(delta, 0.0) / DOWNED_FALL_SECONDS)
+
+
+## The lie itself. Runs after every other pose solve, on top of whatever the
+## clip and the aim produced, because a body on the ground is doing none of it.
+## The fall is a blend of the standing pose into a prone one; the drag cycle
+## then pulls with one arm while the other plants, and the legs trail behind.
+func _apply_downed_pose() -> void:
+	var blend := clampf(_downed_blend, 0.0, 1.0)
+	if blend <= 0.0001:
+		return
+	var body_basis := global_transform.basis.orthonormalized()
+	var right := body_basis.x.normalized()
+	var forward := -body_basis.z.normalized()
+	var drag := fposmod(_downed_clock, DOWNED_DRAG_SECONDS) / DOWNED_DRAG_SECONDS
+	var wave := sin(drag * TAU)
+	var lie := DOWNED_LIE_PITCH * blend
+	# The pelvis leads: pitched over onto the chest and dropped to a hand's
+	# width off the floor, creeping forward as the body drags itself.
+	var pelvis := _bone_world(_bones.pelvis)
+	var target_y := global_position.y + DOWNED_LIE_HEIGHT + 0.02 * wave
+	pelvis.basis = Basis(right, -lie) * pelvis.basis
+	pelvis.origin.y = lerpf(pelvis.origin.y, target_y, blend)
+	pelvis.origin += forward * (0.18 * blend * (0.5 + 0.5 * wave))
+	_set_bone_world(_bones.pelvis, pelvis)
+	# The head comes up off the dirt and looks where the body is going.
+	var head := _bone_world(_bones.Head)
+	head.basis = Basis(right, lie * 0.62) * head.basis
+	head.basis = Basis(Vector3.UP, -0.20 * blend) * head.basis
+	_set_bone_world(_bones.Head, head)
+	# Legs: dragged behind, the offbeat knee pulled up under the hip.
+	for side in 2:
+		var sign := 1.0 if side == 0 else -1.0
+		var bend := 0.16 + 0.26 * (0.5 + 0.5 * wave * sign)
+		var thigh := _bone_world(_legs[side][0])
+		thigh.basis = thigh.basis * Basis(Vector3.RIGHT, -bend * 0.7 * blend)
+		_set_bone_world(_legs[side][0], thigh)
+		var calf := _bone_world(_legs[side][1])
+		calf.basis = calf.basis * Basis(Vector3.RIGHT, bend * 1.3 * blend)
+		_set_bone_world(_legs[side][1], calf)
+	# Arms: one pulls, the other plants. Elbows stay out, so the shoulders are
+	# never under the chest and the silhouette reads as a person, not a log.
+	for arm in 2:
+		var sign := 1.0 if arm == 0 else -1.0
+		var pull := 0.5 + 0.5 * wave * sign
+		var upper := _bone_world(_arms[arm][0])
+		upper.basis = upper.basis * Basis(Vector3.UP, 0.42 * sign * blend) \
+			* Basis(Vector3.RIGHT, lerpf(-0.55, 0.30, pull) * blend)
+		_set_bone_world(_arms[arm][0], upper)
+		var lower := _bone_world(_arms[arm][1])
+		lower.basis = lower.basis * Basis(Vector3.RIGHT, lerpf(1.45, 0.65, pull) * blend)
+		_set_bone_world(_arms[arm][1], lower)
+
 
 ## Death hand-off for a corpse ragdoll: the skeleton goes fully limp, so the
 ## Archer's separately transformed props (bows, swords, shield, quiver,
@@ -431,41 +578,67 @@ func _build_equipment() -> void:
 		Geo.beam(_quiver,Vector3(x,0.18,z),Vector3(x,0.47,z),0.004,trim,6)
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
 	_build_armor_meshes()
-	_attach_makeshift_armor()
+	_attach_external_armor()
 
 
-## The salvage starter set ships as its own skinned GLB bound to a copy of this
-## rig's skeleton, so adding a set never means rebuilding the hero asset. Each
-## piece names the slot it covers; the runtime repoints its skin at the live
-## skeleton and registers it exactly like the sets inside the ranger GLB.
-const MAKESHIFT_ARMOR_SCENE := "res://assets/characters/armor/ironwood_makeshift.glb"
-const MAKESHIFT_ARMOR_PIECES := {
-	"head":"Armor_Makeshift_Head", "chest":"Armor_Makeshift_Chest",
-	"hands":"Armor_Makeshift_Hands", "legs":"Armor_Makeshift_Legs",
-	"feet":"Armor_Makeshift_Feet",
+## Every set that ships as its own skinned GLB is bound to a copy of this rig's
+## skeleton at runtime, so adding a set never means rebuilding the hero asset.
+## Each entry names the set, the file, and the node names per slot; a slot the
+## file does not carry stays empty, which is how the naked set gets a bare head
+## and bare hands instead of a hidden copy of the leather outfit.
+const EXTERNAL_ARMOR := {
+	"makeshift": {
+		"scene": "res://assets/characters/armor/ironwood_makeshift.glb",
+		"pieces": {
+			"head": "Armor_Makeshift_Head", "chest": "Armor_Makeshift_Chest",
+			"hands": "Armor_Makeshift_Hands", "legs": "Armor_Makeshift_Legs",
+			"feet": "Armor_Makeshift_Feet",
+		},
+	},
+	"naked": {
+		"scene": "res://assets/characters/armor/ironwood_naked.glb",
+		"pieces": {
+			"chest": "Armor_Naked_Chest", "legs": "Armor_Naked_Legs",
+		},
+	},
 }
 
 
-func _attach_makeshift_armor() -> void:
-	var set_index := ArmorData.SET_IDS.find("makeshift")
+func _attach_external_armor() -> void:
+	for set_name: String in EXTERNAL_ARMOR:
+		_attach_armor_file(set_name, EXTERNAL_ARMOR[set_name] as Dictionary)
+
+
+## Sets whose asset could not be found, reported once per session: every body in
+## the world builds a rig, and a missing file would otherwise be one error per
+## body per spawn.
+static var _missing_assets: Dictionary = {}
+
+
+func _attach_armor_file(set_name: String, spec: Dictionary) -> void:
+	var set_index := ArmorData.SET_IDS.find(set_name)
 	if set_index < 0:
 		return
-	if not ResourceLoader.exists(MAKESHIFT_ARMOR_SCENE):
-		push_error("Missing Makeshift armour asset: " + MAKESHIFT_ARMOR_SCENE)
+	var path := str(spec.get("scene", ""))
+	if path.is_empty() or not ResourceLoader.exists(path):
+		if not _missing_assets.has(set_name):
+			_missing_assets[set_name] = true
+			push_error("Missing armour asset for '%s': %s" % [set_name, path])
 		return
-	var packed := load(MAKESHIFT_ARMOR_SCENE) as PackedScene
+	var packed := load(path) as PackedScene
 	if packed == null:
-		push_error("Makeshift armour asset is not a scene: " + MAKESHIFT_ARMOR_SCENE)
+		push_error("Armour asset is not a scene: " + path)
 		return
 	var instance := packed.instantiate() as Node3D
 	_model.add_child(instance)
 	# The imported pieces hang off their own skeleton node; leave that hierarchy
 	# alone (a hidden parent hides the pieces) and only repoint each skin.
-	for slot: String in MAKESHIFT_ARMOR_PIECES:
-		var piece_name := str(MAKESHIFT_ARMOR_PIECES[slot])
+	var pieces: Dictionary = spec.get("pieces", {})
+	for slot: String in pieces:
+		var piece_name := str(pieces[slot])
 		var piece := instance.find_child(piece_name, true, false) as MeshInstance3D
 		if piece == null:
-			push_error("Makeshift armour piece is missing: " + piece_name)
+			push_error("Armour piece is missing: " + piece_name)
 			continue
 		piece.skeleton = piece.get_path_to(skeleton)
 		piece.visible = false
@@ -643,7 +816,7 @@ func _build_weapon_visuals() -> void:
 
 func set_bow(index: int) -> void:
 	cancel_consumable()
-	bow_index = clampi(index,0,2)
+	bow_index = clampi(index,0,BOW_DATA.size()-1)
 	if not _built:
 		return
 	active_bow = _bows[bow_index]
@@ -660,8 +833,8 @@ func set_sword(index: int) -> void:
 	# Selecting a sword is the session hand-off away from a staff. The persistent
 	# loadout re-activates the staff after this call.
 	staff_active = false
-	sword_index = clampi(index,0,2)
-	if weapon == "dual" and sword_index == 2:
+	sword_index = clampi(index,0,SWORD_DATA.size()-1)
+	if weapon == "dual" and swings_two_handed():
 		# The greatsword needs both hands; fall back to the one-handed sword mode.
 		weapon = "sword"
 	if shield_equipped and not can_equip_shield():
@@ -675,16 +848,23 @@ func set_sword(index: int) -> void:
 	_update_pose(0.0)
 	loadout_changed.emit()
 
+## Swap the held dagger's profile: the forged iron blade or the whittled shiv.
+## The two are separate objects, so the mesh is rebuilt rather than retinted.
+func set_dagger_index(index: int) -> void:
+	dagger_index = clampi(index, 0, DAGGER_DATA.size() - 1)
+	if not _built or not is_instance_valid(active_dagger):
+		return
+	active_dagger.blade_length = float(dagger_profile(dagger_index).length)
+	active_dagger.set_dagger_kind(dagger_index)
+
 ## Swap the held blade's model family without changing its combat profile: the
-## salvage cleaver and shiv are class-equivalent to the iron pieces.
-func set_blade_skins(sword_family: String, dagger_family: String) -> void:
+## salvage cleaver is class-equivalent to the iron piece it replaces.
+func set_blade_skins(sword_family: String) -> void:
 	sword_skin = sword_family
-	dagger_skin = dagger_family
 	if not _built:
 		return
 	for index in _swords.size():
 		_set_blade_skin(_swords[index], sword_skin if index == 0 else "")
-	_set_blade_skin(active_dagger, dagger_skin)
 
 
 ## The blade scripts own set_skin(); the rig only holds Node3D references, so
@@ -737,8 +917,7 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
 	apply_trinkets(loadout.get("trinkets",{}))
-	set_blade_skins("makeshift" if main_id == "sword_makeshift" else "",
-		"makeshift" if main_id == "dagger_makeshift" or off_id == "dagger_makeshift" else "")
+	set_blade_skins("makeshift" if main_id == "sword_makeshift" or off_id == "sword_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))
 	var sword_value := int(loadout.get("sword",0))
@@ -750,6 +929,7 @@ func apply_loadout(loadout: Dictionary) -> void:
 	set_shield(false)
 	set_bow(bow_value)
 	set_sword(sword_value)
+	set_dagger_index(int(loadout.get("dagger",0)))
 	var focus: Dictionary = loadout.get("focus",{})
 	if focus.has("kind"):
 		set_off_focus(str(focus.get("kind","")),int(focus.get("index",0)),true)
@@ -827,7 +1007,7 @@ func set_off_focus(kind: String, index: int, active: bool) -> void:
 	loadout_changed.emit()
 
 func set_shield_variant(index: int) -> void:
-	shield_variant = clampi(index,0,2)
+	shield_variant = clampi(index,0,SHIELD_VARIANTS-1)
 	if active_shield != null and active_shield.has_method("set_variant"):
 		active_shield.set_variant(shield_variant)
 	if not _built:
@@ -840,6 +1020,8 @@ func _shield_variant_for(item_id: String) -> int:
 			return 0
 		"shield_tower":
 			return 2
+		"shield_wood":
+			return SHIELD_VARIANTS - 1
 	return 1
 
 func _off_weapon_mesh() -> Node3D:
@@ -852,7 +1034,7 @@ func _off_weapon_mesh() -> Node3D:
 	return null
 
 func _dual_ready() -> bool:
-	return main_hand_kind != "none" and sword_index <= 1 and staff_active == false \
+	return main_hand_kind != "none" and not swings_two_handed() and staff_active == false \
 		and not focus_active and not shield_equipped \
 		and off_weapon_active and off_weapon_kind in ["dagger","sword"]
 
@@ -862,7 +1044,17 @@ func _staff_shown() -> bool:
 func _off_profile() -> Dictionary:
 	if off_weapon_kind == "sword":
 		return SWORD_DATA[off_weapon_index]
-	return DAGGER_DATA
+	return dagger_profile(off_weapon_index)
+
+
+## The melee profile one hand swings. The off hand keeps its own dagger index,
+## so a shiv in the left hand is a shiv and the iron blade in the right is not.
+func profile_for_hand(hand: String) -> Dictionary:
+	if hand == "left":
+		return _off_profile()
+	if weapon == "dagger":
+		return dagger_profile(dagger_index)
+	return SWORD_DATA[sword_index]
 
 func _left_blade_node() -> Node3D:
 	if active_off_weapon != null:
@@ -872,7 +1064,7 @@ func _left_blade_node() -> Node3D:
 func _focus_supported() -> bool:
 	# A held focus is a two-slot loadout: one-handed main, nothing blocking or
 	# dual-wielded, and no action pose that owns the left arm.
-	if weapon not in ["sword","dagger"] or sword_index > 1:
+	if weapon not in ["sword","dagger"] or swings_two_handed():
 		return false
 	if shield_equipped or staff_active or _roll_progress >= 0.0:
 		return false
@@ -1012,10 +1204,16 @@ func armor_reduction(headshot: bool = false) -> float:
 	return ArmorData.head_reduction(armor_pieces) if headshot \
 		else ArmorData.body_reduction(armor_pieces)
 
+## True when the held blade needs both hands. Read off the profile, never off the
+## index: the makeshift tier puts one-handed pieces at 3 and a two-hander at 4.
+func swings_two_handed() -> bool:
+	return weapon in ["sword", "dual"] and bool(SWORD_DATA[clampi(sword_index, 0,
+		SWORD_DATA.size() - 1)].get("two_handed", false))
+
 func can_equip_shield() -> bool:
-	# Any one-handed sword or the dagger can carry the shield; the 2H
-	# greatsword, staff, bow and dual wield still cannot.
-	return weapon == "dagger" or (weapon == "sword" and sword_index <= 1)
+	# Any one-handed sword or the dagger can carry the shield; a two-hander, the
+	# staff, the bow and dual wield cannot.
+	return weapon == "dagger" or (weapon == "sword" and not swings_two_handed())
 
 func set_shield(active: bool) -> bool:
 	cancel_consumable()
@@ -1072,9 +1270,11 @@ func _duration_for(hand: String, variant: String) -> float:
 	var size := off_weapon_index if hand == "left" else sword_index
 	var base := float(SWORD_DATA[size].seconds)
 	if variant in ["diagonal_left","diagonal_right"]:
-		base = 0.42 if dagger else float(DIAGONAL_SECONDS[size])
+		base = 0.42 if dagger else float(DIAGONAL_SECONDS[clampi(size, 0, DIAGONAL_SECONDS.size() - 1)])
 	elif variant == "stab" or dagger:
-		base = float(DAGGER_DATA.seconds)
+		# A stab is the dagger clock, whichever hand swings it: a sword's thrust
+		# is not a sword's overhead. A dagger keeps its own profile's timing.
+		base = float(profile_for_hand(hand).seconds if dagger else dagger_profile(0).seconds)
 	# Trinket haste and the held item's passive compose as one rate, so the
 	# same wheel-up lunge is fast for every hand that carries a shank.
 	return base/maxf(attack_rate()*variant_attack_rate(hand,variant),0.01)
@@ -1173,7 +1373,7 @@ func melee_seconds(hand: String = "") -> float:
 	if _right_melee_time >= 0.0:
 		return _right_melee_duration
 	if weapon == "dagger":
-		return float(DAGGER_DATA.seconds)
+		return float(profile_for_hand(key).seconds)
 	return float(SWORD_DATA[sword_index].seconds)
 
 func melee_damage(hand: String = "") -> float:
@@ -1182,7 +1382,7 @@ func melee_damage(hand: String = "") -> float:
 	if key == "left":
 		base = float(_off_profile().damage)
 	elif weapon == "dagger":
-		base = float(DAGGER_DATA.damage)
+		base = float(profile_for_hand(key).damage)
 	return base*melee_scale()
 
 ## Trinket modifiers read by the controllers, `Combat` and the ability cues.
@@ -1240,7 +1440,7 @@ func melee_reach(hand: String = "") -> float:
 	if key == "left":
 		return float(_off_profile().reach)
 	if weapon == "dagger":
-		return float(DAGGER_DATA.reach)
+		return float(profile_for_hand(key).reach)
 	if _staff_shown():
 		return float(STAFF_REACH[staff_index])
 	return float(SWORD_DATA[sword_index].reach)
@@ -1277,14 +1477,14 @@ func charge_seconds() -> float:
 	if weapon == "bow":
 		base = float(BOW_DATA[bow_index].draw_seconds)
 	elif weapon == "dagger":
-		base = float(DAGGER_DATA.seconds)
+		base = float(profile_for_hand(_melee_hand).seconds)
 	return base/maxf(attack_rate(),0.01)
 
 func throw_weapon_name() -> String:
 	return "dagger" if weapon == "dagger" else "sword"
 
 func throw_speed() -> float:
-	return float(DAGGER_DATA.throw_speed) if weapon == "dagger" else float(SWORD_DATA[sword_index].throw_speed)
+	return float(profile_for_hand("").throw_speed) if weapon == "dagger" else float(SWORD_DATA[sword_index].throw_speed)
 
 func get_throw_origin() -> Vector3:
 	if weapon == "dagger":
@@ -1356,7 +1556,7 @@ func release_throw() -> void:
 	# Endless supply: the equipped weapon is never consumed, only a flying copy
 	# leaves the hand. Damage scales with charge exactly like a bow draw.
 	var thrown_name := throw_weapon_name()
-	weapon_thrown.emit(origin,direction,throw_speed()*lerpf(0.45,1.0,_release_charge),_release_charge,thrown_name,sword_index if thrown_name == "sword" else 0)
+	weapon_thrown.emit(origin,direction,throw_speed()*lerpf(0.45,1.0,_release_charge),_release_charge,thrown_name,sword_index if thrown_name == "sword" else dagger_index)
 	_update_pose(0.0)
 
 func cancel_draw() -> void:
@@ -1736,7 +1936,7 @@ func get_blade_tip(hand: String = "") -> Vector3:
 	if key == "left":
 		return _left_blade_node().to_global(Vector3(0,0,-float(_off_profile().length)-0.09))
 	if weapon == "dagger":
-		return active_dagger.to_global(Vector3(0,0,-float(DAGGER_DATA.length)-0.09))
+		return active_dagger.to_global(Vector3(0,0,-float(dagger_profile(dagger_index).length)-0.09))
 	if _staff_shown():
 		return active_staff.to_global(Vector3(0,0,-float(STAFF_DATA[staff_index].length)-0.09))
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
@@ -1801,6 +2001,8 @@ func _advance_melee_step(delta: float) -> void:
 
 func _advance_motion(delta: float) -> void:
 	_motion_time += delta
+	if downed_pose or _downed_blend > 0.0:
+		_advance_downed(delta)
 	if _roll_progress >= 0.0 and _pose_from_snapshots:
 		# A flip is one continuous turn. Run it on the frame clock so the pose
 		# moves every frame; the next snapshot only corrects the value.
@@ -2140,6 +2342,11 @@ func _update_pose(delta: float) -> void:
 	for hand in ["left","right"]:
 		if is_diagonal_swing(hand):
 			_apply_diagonal_arm_path(hand)
+	# The downed lie is written before the weapon and chest solve, so the club in
+	# the hand and the quiver on the back go down with the body instead of
+	# hovering where a standing rig left them.
+	if downed_pose or _downed_blend > 0.0:
+		_apply_downed_pose()
 	_update_shield_pose()
 	if weapon == "bow":
 		_update_bow_pose(aim_bow)
@@ -2293,7 +2500,8 @@ func _diagonal_swing_timeline(hand: String) -> Dictionary:
 	var size := off_weapon_index if hand == "left" else sword_index
 	var dagger := off_weapon_kind != "sword" if hand == "left" else weapon == "dagger"
 	var staff := _staff_shown()
-	var spec: Dictionary = DIAGONAL_STAFF if staff else DIAGONAL_BLADE[0 if dagger else size]
+	var spec: Dictionary = DIAGONAL_STAFF if staff else DIAGONAL_BLADE[
+		0 if dagger else clampi(size, 0, DIAGONAL_BLADE.size() - 1)]
 	# Every joint runs the same strike curve on its own clock offset, so the
 	# coil unwinds from the ground up and the blade arrives last.
 	var load := smoothstep(0.0,SWING_LOAD_END*0.92,progress)
@@ -2870,7 +3078,7 @@ func _aim_dagger_stab() -> void:
 	# pass the arm's length or the point itself (the blade's reach is 0.43).
 	var elbow := _bone_world(_arms[1][1]).origin
 	var arm_reach := shoulder.distance_to(elbow)+elbow.distance_to(hand.origin)
-	var aim_along := offset.length()-float(DAGGER_DATA.length)-0.09
+	var aim_along := offset.length()-float(dagger_profile(dagger_index).length)-0.09
 	var window := _melee_window()
 	var thrust := smoothstep(window.x*0.6,window.y,_phase_time)
 	along = lerpf(along,clampf(aim_along,along,arm_reach-0.01),thrust)

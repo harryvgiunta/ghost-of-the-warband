@@ -16,11 +16,13 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const State = preload("res://scripts/player_state.gd")
+const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
+const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 
-const CREAM := Color("eee9db")
-const MUTED := Color("a5b6b7")
-const GOLD := Color("e9bf76")
-const BLOOD := Color("c4706a")
+const CREAM := LedgerThemeScript.INK
+const MUTED := LedgerThemeScript.INK_MUTED
+const GOLD := LedgerThemeScript.BLOOD
+const BLOOD := LedgerThemeScript.BLOOD
 const INK := Color(0.07, 0.05, 0.05, 1.0)
 const FRAME_TINT := Color(0.10, 0.07, 0.07, 0.97)
 
@@ -77,6 +79,7 @@ func open() -> void:
 	_build()
 	_opened = true
 	visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
 	_free_pointer()
 
@@ -444,6 +447,7 @@ func _build() -> void:
 	_root.name = "AltarRoot"
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_root.theme = LedgerThemeScript.get_theme()
 	add_child(_root)
 
 	var shade := ColorRect.new()
@@ -453,25 +457,25 @@ func _build() -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(shade)
 
-	var frame := PanelContainer.new()
+	var frame = LedgerFrameScript.new()
 	frame.name = "AltarFrame"
+	frame.configure("The Altar", "flame")
 	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.offset_left = 90.0
-	frame.offset_top = 50.0
-	frame.offset_right = -90.0
-	frame.offset_bottom = -50.0
-	frame.add_theme_stylebox_override("panel", _style(FRAME_TINT, BLOOD.darkened(0.45), 6, 18))
+	frame.offset_left = 70.0
+	frame.offset_top = 36.0
+	frame.offset_right = -70.0
+	frame.offset_bottom = -36.0
 	_root.add_child(frame)
 
 	var column := VBoxContainer.new()
 	column.name = "Column"
-	column.add_theme_constant_override("separation", 10)
-	frame.add_child(column)
+	column.add_theme_constant_override("separation", 8)
+	frame.body.add_child(column)
 
 	var title_row := HBoxContainer.new()
 	title_row.add_theme_constant_override("separation", 12)
 	column.add_child(title_row)
-	_make_label(title_row, "SACRIFICIAL ALTAR", 18, GOLD)
+	_make_label(title_row, "THE SACRIFICE", 11, BLOOD)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(spacer)
@@ -568,11 +572,15 @@ func _build() -> void:
 	_brand_button = Button.new()
 	_brand_button.name = "BrandButton"
 	_brand_button.text = "BURN THE SIGIL"
-	_brand_button.add_theme_font_size_override("font_size", 12)
+	_brand_button.add_theme_font_size_override("font_size", 15)
+	_brand_button.theme_type_variation = "PrimaryButton"
 	_brand_button.pressed.connect(press_brand)
 	brand_column.add_child(_brand_button)
 
-	_status = _make_label(column, "", 11, MUTED)
+	var tail := Control.new()
+	tail.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(tail)
+	_status = _make_label(column, "", 12, MUTED)
 	_status.name = "Status"
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(0, 22)
@@ -580,7 +588,7 @@ func _build() -> void:
 func _make_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_font_size_override("font_size", int(round(font_size * 1.18)))
 	label.add_theme_color_override("font_color", color)
 	parent.add_child(label)
 	return label

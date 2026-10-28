@@ -24,6 +24,7 @@ func clear() -> void:
 # --- pooled storage --------------------------------------------------------
 
 func add(item_id: String, count: int = 1) -> void:
+	item_id = State.migrate_item_id(item_id)
 	if item_id.is_empty() or count <= 0:
 		return
 	_pooled[item_id] = int(_pooled.get(item_id, 0)) + count
@@ -164,5 +165,6 @@ func from_dict(data: Dictionary) -> void:
 	if saved is Dictionary:
 		for item_id in saved:
 			var count := int(saved[item_id])
-			if count > 0 and not str(item_id).is_empty():
-				_pooled[str(item_id)] = count
+			var restored := State.migrate_item_id(str(item_id))
+			if count > 0 and not restored.is_empty():
+				_pooled[restored] = count

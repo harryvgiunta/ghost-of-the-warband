@@ -1,0 +1,63 @@
+{
+  "clamp": {
+    "file": "clamp.png",
+    "margin": 24
+  },
+  "page": {
+    "file": "page.png",
+    "margin": 56
+  },
+  "plate": {
+    "margin_x": 20,
+    "margin_y": 12,
+    "variants": [
+      "iron",
+      "brass",
+      "lacquer"
+    ],
+    "states": [
+      "idle",
+      "hover",
+      "pressed",
+      "disabled"
+    ]
+  },
+  "keycap": {
+    "file": "keycap.png",
+    "margin": 16
+  },
+  "chip_margin": [
+    12,
+    8
+  ],
+  "chips": [
+    "alive",
+    "downed",
+    "dead",
+    "blood"
+  ],
+  "icons": [
+    "scroll",
+    "helm",
+    "banner",
+    "gear",
+    "flame",
+    "eye",
+    "coin",
+    "blade",
+    "shield",
+    "cuirass",
+    "gauntlet",
+    "greaves",
+    "boot",
+    "amulet",
+    "ring",
+    "bow",
+    "staff",
+    "spear",
+    "cage",
+    "chalice",
+    "key",
+    "altar"
+  ]
+}

@@ -207,7 +207,7 @@ Integration seams deliberately placed in the base game:
 | Camp torches | `cage_escape.gd::CAMP_TORCHES` | 17 (cages, mouth, both flanks, the rim) |
 | The trail: length, width, torches | `run_forest.gd` | **915 m** (21 waypoints), 11 m walkable, torches every 20 m a side at 6.4 m — on the verge, never in the band |
 | Mob guard | `devil_mob.gd::GUARD_REDUCTION`, `cage_watcher.gd` | braced most of its cycle, 65% of a blow turned; warband cultists only (`guard_between_swings`) |
-| Squad rhythm | `squad_drive.gd` | swing the moment the blade is free, guard in the gap, and after 3+ swings a 35% chance to guard-and-circle for 0.6-1.2 s |
+| Squad rhythm | `squad_drive.gd` | one per-ally ladder (close / swing / guard / circle / reset) on every frame; the exchange rolls once when the blade frees: 55-70% guard for 0.35-0.80 s, 1-3 swings then a 0.25-0.55 s short rugged circle re-rolled every 0.12-0.20 s |
 | Party start | `cage_escape.gd::_dress_rags` | one brown sack on the chest, nothing else, no weapon anywhere |
 | Corpse loot | `cage_watcher.gd::gear_items`, `squad_drive.gd::LOOT_CLEAR_METRES` | a cultist drops its blade and its rag; the squad strips the field only when no hostile is within 22 m |
 | The world: night | `run_forest.gd::night_style()` | ambient 2.5, sun 0.55, fog 0.012, filmic, saturation 0.80 |

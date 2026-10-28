@@ -10,13 +10,17 @@ const SHIELD_LAYER := 8
 ## construction and only change the silhouette and collision radius.
 const RADIUS := 0.36
 const THICKNESS := 0.06
-const VARIANT_RADII := [0.26, 0.36, 0.48]
+## Buckler, kite, tower, and the lashed planks of the makeshift tier.
+const VARIANT_RADII := [0.26, 0.36, 0.48, 0.34]
 
 var variant := 1
 var _visual: Node3D
 var _shape: CylinderShape3D
 var _kite_spine: Node3D
 var _tower_bands: Array[Node3D] = []
+## Forged fittings and the plank build: the wooden shield swaps one for the other.
+var _iron_parts: Array[Node3D] = []
+var _plank_parts: Array[Node3D] = []
 
 func _ready() -> void:
 	collision_layer = SHIELD_LAYER
@@ -53,11 +57,29 @@ func _build() -> void:
 	ring.ring_segments = 8
 	var rim := Geo.mesh_node(_visual,ring,iron,Vector3(0,0,-0.01))
 	rim.rotation.x = PI * 0.5
-	Geo.box(_visual,Vector3(0.045,RADIUS*1.55,0.022),Vector3(0,0,-0.045),iron)
-	Geo.box(_visual,Vector3(RADIUS*1.55,0.045,0.022),Vector3(0,0,-0.046),iron)
-	Geo.sphere(_visual,0.085,Vector3(0,0,-0.062),boss,Vector3(1.0,1.0,0.55))
-	Geo.cylinder(_visual,0.045,0.045,0.035,Vector3(0,0,-0.095),boss,10).rotation.x = PI * 0.5
-	Geo.box(_visual,Vector3(0.08,0.26,0.05),Vector3(0,0,0.075),grain)
+	_iron_parts.append(Geo.box(_visual,Vector3(0.045,RADIUS*1.55,0.022),Vector3(0,0,-0.045),iron))
+	_iron_parts.append(Geo.box(_visual,Vector3(RADIUS*1.55,0.045,0.022),Vector3(0,0,-0.046),iron))
+	_iron_parts.append(Geo.sphere(_visual,0.085,Vector3(0,0,-0.062),boss,Vector3(1.0,1.0,0.55)))
+	var boss_cap := Geo.cylinder(_visual,0.045,0.045,0.035,Vector3(0,0,-0.095),boss,10)
+	boss_cap.rotation.x = PI * 0.5
+	_iron_parts.append(boss_cap)
+	_iron_parts.append(Geo.box(_visual,Vector3(0.08,0.26,0.05),Vector3(0,0,0.075),grain))
+	# The makeshift shield: planks off a hut wall, a hide facing, and two lashings
+	# of cord instead of a steel rim.
+	var plank_wood := Geo.material(Color("6a5136"),0.0,0.94)
+	var plank_dark := Geo.material(Color("3f2f21"),0.0,0.96)
+	var hide := Geo.material(Color("4b3626"),0.0,0.9)
+	for index in 3:
+		var plank := Geo.box(_visual,Vector3(RADIUS*1.86,0.088,THICKNESS+0.012),
+			Vector3(0,-0.10+RADIUS*0.26*float(index)*2.0,0),plank_wood)
+		_plank_parts.append(plank)
+	var facing := Geo.cylinder(_visual,RADIUS*0.9,RADIUS*0.9,0.014,Vector3(0,0,-0.036),hide,16)
+	facing.rotation.x = PI * 0.5
+	_plank_parts.append(facing)
+	for offset in [-0.20, 0.20]:
+		var lash := Geo.box(_visual,Vector3(RADIUS*1.9,0.030,0.020),
+			Vector3(0,float(offset),-0.050),plank_dark)
+		_plank_parts.append(lash)
 	# The kite keeps a long central spine; the tower adds heavy horizontal
 	# bands. The buckler stays a plain small boss-faced disc.
 	_kite_spine = Geo.box(_visual,Vector3(0.050,RADIUS*1.24,0.030),Vector3(0,0,-0.058),iron)
@@ -74,6 +96,11 @@ func set_variant(index: int) -> void:
 		# The shared construction scales to the variant; thickness included.
 		var factor := target/RADIUS
 		_visual.scale = Vector3(factor,factor,factor)
+	var wooden := variant == 3
+	for part in _iron_parts:
+		part.visible = not wooden
+	for part in _plank_parts:
+		part.visible = wooden
 	if _kite_spine != null:
 		_kite_spine.visible = variant == 1
 	for band in _tower_bands:

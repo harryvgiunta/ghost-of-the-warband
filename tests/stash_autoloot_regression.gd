@@ -145,7 +145,7 @@ func check_drops_and_quick_loot() -> void:
 
 func check_dropper_lock() -> void:
 	var stash: WarbandStash = _warband.stash
-	var locked := _loot.spawn("dagger_makeshift", Vector3(12.0, 0.0, 0.0), false, DROPPER)
+	var locked := _loot.spawn("dagger_ironwood", Vector3(12.0, 0.0, 0.0), false, DROPPER)
 	check(locked != null, "a disarmed drop still lands in the world")
 	if locked == null:
 		return
@@ -156,15 +156,15 @@ func check_dropper_lock() -> void:
 
 	var refused := _loot.quick_loot(locked, DROPPER)
 	check(not bool(refused.get("ok", true)), "the dropper cannot take back their own drop")
-	check(stash.pooled_count("dagger_makeshift") == 0, "the refused pick keeps the stash clean")
+	check(stash.pooled_count("dagger_ironwood") == 0, "the refused pick keeps the stash clean")
 	check(not locked.collected and locked.get_parent() == _field,
 		"the blocked drop stays on the ground")
 
 	var other := _loot.quick_loot(locked, 8)
 	check(bool(other.get("ok", false)), "a second collector takes the locked drop at once")
-	check(stash.pooled_count("dagger_makeshift") == 1, "that piece reaches the shared stash")
+	check(stash.pooled_count("dagger_ironwood") == 1, "that piece reaches the shared stash")
 
-	var cooldown := _loot.spawn("sword_makeshift", Vector3(14.0, 0.0, 0.0), false, DROPPER)
+	var cooldown := _loot.spawn("club_makeshift", Vector3(14.0, 0.0, 0.0), false, DROPPER)
 	check(cooldown != null, "a second disarmed drop exists")
 	if cooldown == null:
 		return
@@ -175,7 +175,7 @@ func check_dropper_lock() -> void:
 	check(not cooldown.blocked_for(DROPPER), "the dropper is no longer blocked")
 	var retake := _loot.quick_loot(cooldown, DROPPER)
 	check(bool(retake.get("ok", false)), "the dropper may take the piece back once the lock lifts")
-	check(stash.pooled_count("sword_makeshift") == 1, "the recovered piece is in the stash")
+	check(stash.pooled_count("club_makeshift") == 1, "the recovered piece is in the stash")
 
 # --- no survivors ----------------------------------------------------------
 
@@ -236,12 +236,12 @@ func check_sweep() -> void:
 
 	for item_id in DROP_IDS:
 		check(stash.pooled_count(item_id) == 1, "%s reached the shared stash exactly once" % item_id)
-	# neck_ember + dagger_makeshift + sword_makeshift from the manual picks, the
+	# neck_ember + dagger_ironwood + sword_makeshift from the manual picks, the
 	# four swept pieces, and the worn boots are out of the pool.
 	check(stash.pooled_total() == 7, "seven pooled pieces after the sweep, got %d" % stash.pooled_total())
 
 	var expected_value := 0
-	for item_id in ["neck_ember", "dagger_makeshift", "sword_makeshift", "bow_long",
+	for item_id in ["neck_ember", "dagger_ironwood", "club_makeshift", "bow_long",
 			"sword_great", "shield_tower", "focus_skull_death"]:
 		expected_value += StashScript.value_of(item_id)
 	check(_loot.battlefield_value() == expected_value,

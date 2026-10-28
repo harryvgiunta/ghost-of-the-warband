@@ -182,7 +182,7 @@ func run() -> void:
 	victim.combat.set_motion(Vector3.ZERO, false, true)
 	check(victim.combat.start_block(Vector3(0.0, 0.0, 1.0)),
 		"the victim holds a front guard for the backstab")
-	var stab := float(Archer.DAGGER_DATA.damage) * 2.0
+	var stab := float(Archer.dagger_profile(0).damage) * 2.0
 	check(is_equal_approx(stab, 28.0), "the backstab is twice the dagger's 14 damage")
 	var applied := Backstab.strike(mover, victim, stab, 0)
 	check(is_equal_approx(applied, 28.0),

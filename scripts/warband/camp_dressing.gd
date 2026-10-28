@@ -1,17 +1,17 @@
 extends RefCounted
-## The cage camp's dressing: everything the yard is *read* from.
+## The cage camp's dressing: everything the camp is *read* from.
 ##
-## `cage_escape.gd` builds the camp's bones - the floor, the palisade, four bar
-## cages, a cold altar, nine torches - and nothing else. This module is the rest
-## of what a cult's holding pen looks like: padlocks and slack chain on the cage
-## doors, the cult's banners on the palisade, two gibbets on the approach, the
-## dressing around the cold altar, ember braziers that burn on the existing flame
-## shader, and the litter of a yard people were dragged through - straw, blood,
-## cart ruts.
+## `cage_escape.gd` builds the camp's bones - the ragged pocket in the deep wood,
+## four bar cages, three shelters, a fire ring, a cold altar - and nothing else.
+## This module is the rest of what a cult's holding pen looks like: padlocks and
+## slack chain on the cage doors, the cult's standards staked round the line, two
+## gibbets out on the way in, the dressing around the cold altar, ember braziers
+## that burn on the existing flame shader, and the litter of a camp people were
+## dragged through - straw, blood, cart ruts.
 ##
 ## Three rules hold this together.
 ##
-## 1. **Presentation only.** Nothing here is a `PhysicsBody3D`; the yard is the
+## 1. **Presentation only.** Nothing here is a `PhysicsBody3D`; the camp is the
 ##    play space and a prop must never stand where a body spawns, walks or
 ##    fights. The regression proves it: the root carries `props`, one record per
 ##    prop (`name`, `position`, `radius`, `blocks`, `zone`), and `blocks` is true
@@ -24,47 +24,47 @@ extends RefCounted
 ##    things the kits do not carry (iron, blood, rutted earth).
 ## 3. **The scene owns the layout.** Cage centres and the altar are read off the
 ##    nodes `cage_escape.gd` already placed, so a moved cage moves its hardware.
-##    Only the yard's own bounds and the free-standing posts are declared here,
+##    Only the pocket's own bounds and the free-standing posts are declared here,
 ##    and `YARD_*` mirrors the scene's constants - the regression fails loudly if
 ##    the two ever drift apart.
 
 const Geo = preload("res://scripts/geo.gd")
 
-## The yard this dressing is laid out inside. Mirrors `cage_escape.gd`'s
+## The pocket this dressing is laid out inside. Mirrors `cage_escape.gd`'s
 ## `YARD_HALF_WIDTH` / `YARD_FRONT` / `YARD_BACK`; the regression compares them.
-const YARD_HALF_WIDTH := 30.0
-const YARD_FRONT := -42.0
-const YARD_BACK := 26.0
-## The wider floor under it (100 x 140 m at z = -16). The gibbets stand outside
-## the palisade but still on ground, framing the gate the reinforcements run
-## through.
-const FLOOR_HALF_WIDTH := 50.0
-const FLOOR_FRONT := -86.0
-const FLOOR_BACK := 54.0
+const YARD_HALF_WIDTH := 20.0
+const YARD_FRONT := -30.0
+const YARD_BACK := 22.0
+## The ground under it the dressing may also stand on. The gibbets stand outside
+## the pocket but still on ground, framing the way the reinforcements come in.
+const FLOOR_HALF_WIDTH := 34.0
+const FLOOR_FRONT := -70.0
+const FLOOR_BACK := 40.0
 
 ## Four cages, in `CAGE_POSTS` order: `Cage1`..`Cage4`.
 const CAGE_COUNT := 4
 
-## Cult banners lashed to the inside of the palisade: two per side wall, two on
-## the back wall. They are hung well clear of the cage line, so the walk from the
-## cages to the gate is a corridor of cloth.
+## The cult's standards, staked in the dirt round the cage line - there is no
+## palisade left to lash them to, so each one is its own mast with guy-lines.
+## They stand well clear of the cage line, so the walk from the cages to the way
+## out is a corridor of cloth.
 const BANNER_POSTS := [
-	Vector3(-28.9, 0.0, -30.0), Vector3(-28.9, 0.0, 4.0),
-	Vector3(28.9, 0.0, -19.0), Vector3(28.9, 0.0, 15.0),
-	Vector3(-12.0, 0.0, 24.9), Vector3(12.0, 0.0, 24.9),
+	Vector3(-13.5, 0.0, 2.0), Vector3(-13.5, 0.0, -14.0),
+	Vector3(13.5, 0.0, 1.0), Vector3(13.5, 0.0, -13.0),
+	Vector3(-4.5, 0.0, 19.0), Vector3(5.0, 0.0, 19.0),
 ]
 
-## The gibbets: outside the palisade, one either side of the gate road, at the
-## far edge of the fog. Nothing of the fight ever reaches them.
+## The gibbets: out past the mouth, one either side of the way in, at the edge of
+## the fog. Nothing of the fight ever reaches them.
 const GIBBET_POSTS := [
 	Vector3(-12.5, 0.0, -46.5), Vector3(13.5, 0.0, -47.5),
 ]
 
-## Ember braziers: two flanking the gate approach inside the yard, two lighting
-## the long flanks. Each stands clear of the torches the scene already carries.
+## Ember braziers: two flanking the way out inside the pocket, two lighting the
+## long flanks. Each stands clear of the torches the scene already carries.
 const BRAZIER_POSTS := [
-	Vector3(-9.5, 0.0, -33.5), Vector3(9.5, 0.0, -33.5),
-	Vector3(-21.5, 0.0, -12.0), Vector3(21.5, 0.0, -12.0),
+	Vector3(-8.5, 0.0, -24.0), Vector3(8.5, 0.0, -24.0),
+	Vector3(-16.0, 0.0, -6.0), Vector3(16.0, 0.0, -6.0),
 ]
 
 ## Straw dragged out of the cages and never swept up: flat ground litter, so it
@@ -82,10 +82,11 @@ const BLOOD_POSTS := [
 	Vector3(-1.6, 0.0, -14.0), Vector3(6.4, 0.0, 2.2), Vector3(-8.2, 0.0, -18.5),
 ]
 
-## Cart ruts: the two tracks that run from the gate into the yard, stopping
-## short of the cage line.
+## Cart ruts: the two tracks that were cut across the camp, stopping short of the
+## cage line. The carts came a long way through the wood; the ruts are the camp's
+## own ground and go no further than its edge.
 const RUT_FROM := 4.0
-const RUT_TO := -37.0
+const RUT_TO := -26.0
 const RUT_HALF_TRACK := 1.15
 
 static var _fittings: Dictionary = {}
@@ -246,11 +247,11 @@ static func _build_cage_hardware(root: Root, scene: Node3D, mats: Dictionary,
 		_record(root, "Cage%dCharms" % (index + 1), centre + Vector3(0.0, 0.0, -1.30), 0.22, false)
 
 
-# --- the palisade ----------------------------------------------------------
+# --- the cult's standards --------------------------------------------------
 
-## The cult's banners: a mast lashed against the palisade, a crossbar, one long
-## hide standard with the ochre sigil and the tally marks, a torn strip beside
-## it and an antlered skull on top.
+## The cult's banners: a mast staked in the dirt, a crossbar, one long hide
+## standard with the ochre sigil and the tally marks, a torn strip beside it and
+## an antlered skull on top.
 static func _build_banners(root: Root, mats: Dictionary) -> void:
 	var holder := _group(root, "Banners")
 	for index in BANNER_POSTS.size():
@@ -267,11 +268,13 @@ static func _build_banners(root: Root, mats: Dictionary) -> void:
 		for side in [-1.0, 1.0]:
 			CampKit.add_ring(m, Vector3(side * 0.06, 3.27, 0.0), 0.0, 0.055, 0.085,
 				mats["rag"], PI * 0.5, 8, 3)
-		# Stays down to the wall top: the standard is tied to the palisade, not
-		# standing in the yard on its own. The wall is 0.8 m behind the mast.
-		for stay in 2:
-			CampKit.add_beam(m, Vector3(0.0, 2.05 + float(stay) * 0.90, 0.0),
-				Vector3(0.0, 1.88, -0.86), 0.015, mats["rag"], 3)
+		# Guy-lines down to the dirt either side: there is no palisade left to lash
+		# a standard to, so it stands on its own stakes and rope.
+		for side in [-1.0, 1.0]:
+			CampKit.add_beam(m, Vector3(0.0, 2.50, 0.0),
+				Vector3(side * 1.05, 0.02, -0.62), 0.015, mats["rag"], 3)
+			CampKit.add_beam(m, Vector3(side * 1.05, -0.12, -0.62),
+				Vector3(side * 1.05, 0.16, -0.60), 0.045, mats["twig_dark"], 4, 0.03)
 		# The standard itself: one long panel, one torn strip, and the sigil.
 		CampKit.add_box(m, Vector3(0.90, 1.72, 0.035), Vector3(-0.02, 2.36, 0.06),
 			mats["hide_dark"], 0.0, 0.0, -0.04)
@@ -282,7 +285,7 @@ static func _build_banners(root: Root, mats: Dictionary) -> void:
 		for mark in 3:
 			CampKit.add_box(m, Vector3(0.035, 0.24, 0.02),
 				Vector3(-0.16 + float(mark) * 0.14, 2.06, 0.086), mats["ochre"], 0.0, 0.0, 0.12)
-		# The skull that crowns it, muzzle into the yard.
+		# The skull that crowns it, muzzle into the camp.
 		CampKit.add_skull(m, mats, Vector3(0.02, 3.62, 0.04), PI, 0.62, index % 2 == 0)
 		CampKit.add_antler(m, mats, Vector3(-0.10, 3.70, 0.02), PI + 0.5, 0.7)
 		m.commit(holder, "Banner%d" % (index + 1))

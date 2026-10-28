@@ -48,7 +48,7 @@ const WAVE_SEED := 70510
 ## and salvage, wave 1 draws forged steel behind a buckler, wave 2 adds archers
 ## behind kite shields.
 const KITS := [
-	{"mains": ["dagger_makeshift", "dagger_iron"], "offs": ["", ""], "armor": "makeshift"},
+	{"mains": ["dagger_ironwood"], "offs": [""], "armor": "makeshift"},
 	{"mains": ["sword_short", "sword_arming"], "offs": ["", "shield_buckler"], "armor": "leather"},
 	{"mains": ["bow_short", "sword_short", "sword_arming"],
 		"offs": ["", "shield_buckler", "shield_kite"], "armor": "mail"},
@@ -216,7 +216,7 @@ func _spawn_guard(index_in_wave: int, tier: Dictionary, rng: RandomNumberGenerat
 ## off hand is rolled separately, and `apply_kit` drops one the main cannot
 ## legally hold.
 func _roll_kit(index_in_wave: int, tier: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
-	var mains: Array = tier.get("mains", ["dagger_makeshift"])
+	var mains: Array = tier.get("mains", ["dagger_ironwood"])
 	var offset := rng.randi_range(0, mains.size() - 1)
 	var main_id := str(mains[(offset + index_in_wave) % mains.size()])
 	var offs: Array = tier.get("offs", [])

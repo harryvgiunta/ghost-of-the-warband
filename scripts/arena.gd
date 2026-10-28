@@ -1000,7 +1000,7 @@ func _spawn_thrown(slot: int, origin: Vector3, direction: Vector3, speed: float,
 	thrown.source_id = slot
 	thrown.weapon = weapon_name
 	thrown.weapon_index = weapon_index
-	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,2)].length)
+	thrown.blade_length = float(Archer.dagger_profile(weapon_index).length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[clampi(weapon_index,0,Archer.SWORD_DATA.size()-1)].length)
 	thrown.hit_mask = 1 | 4
 	thrown.authoritative_damage = authoritative
 	add_child(thrown)

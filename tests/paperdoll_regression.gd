@@ -108,9 +108,11 @@ func _test_taxonomy() -> void:
 			check(is_equal_approx(float(stats.get("attack",0.0)),float(Archer.BOW_DATA[bow_index].draw_seconds)),"%s HUD draw speed matches the bow profile" % item_id)
 		elif category in ["1h","2h"]:
 			if str(item.get("kind","")) == "dagger":
-				check(is_equal_approx(float(stats.get("damage",0.0)),float(Archer.DAGGER_DATA.damage)),"%s HUD damage matches the dagger profile" % item_id)
-				check(is_equal_approx(float(stats.get("attack",0.0)),float(Archer.DAGGER_DATA.seconds)),"%s HUD speed matches the dagger profile" % item_id)
-				check(is_equal_approx(float(stats.get("reach",0.0)),float(Archer.DAGGER_DATA.reach)),"%s HUD reach matches the dagger profile" % item_id)
+				var dagger_index := int(item.get("index",0))
+				var dagger: Dictionary = Archer.dagger_profile(dagger_index)
+				check(is_equal_approx(float(stats.get("damage",0.0)),float(dagger.damage)),"%s HUD damage matches its dagger profile" % item_id)
+				check(is_equal_approx(float(stats.get("attack",0.0)),float(dagger.seconds)),"%s HUD speed matches its dagger profile" % item_id)
+				check(is_equal_approx(float(stats.get("reach",0.0)),float(dagger.reach)),"%s HUD reach matches its dagger profile" % item_id)
 			else:
 				var sword_index := int(item.get("index",0))
 				check(is_equal_approx(float(stats.get("damage",0.0)),float(Archer.SWORD_DATA[sword_index].damage)),"%s HUD damage matches the sword profile" % item_id)

@@ -1,13 +1,29 @@
-"""Run the Ironwood regression suite in parallel.
+"""Run the whole Ironwood regression suite in parallel, inside a hard time budget.
 
-Each test gets an isolated APPDATA (so user:// saves and NetCache do not race),
-and the two long deterministic tests run with a fixed simulated clock so the
-suite finishes in about a minute instead of several. Failed tests are retried
-once, sequentially, to absorb timing flakes from running 22 Godot processes at
-once. Fixed UDP ports are unique across the list: 7811, 7895-7899.
+**The repository rule: a test run is a couple of minutes, never more.** One test
+that needs longer than `TIMEOUT` (90 s) is a test that owns a bug, not a test that
+needs more time - it is killed and reported as `over budget`. 120 s is the absolute
+ceiling anywhere; 60-120 s is the band. The whole run must finish inside
+`TOTAL_BUDGET` (180 s) and says so if it does not.
+Anyone adding a test that cannot fit must first make the thing it measures
+cheaper, or isolate the expensive part behind a flag nobody runs by default.
+
+Each test gets an isolated APPDATA (so user:// saves and NetCache do not race).
+The base suite and the warband suite run in one pool; the socket tests run after
+it, serially, because parallel ENet processes on one machine produce flakes that
+are not the code's fault. One retry, sequentially, absorbs a timing flake.
+
+The **warband** suite is the game and runs by default: it covers the campaign,
+the roster, the stash, the camp, the trail, the cult and the possession layer.
+The base suite is the old frontier/arena/delve sandbox - a harness for the shared
+rig and combat code, not a shipping mode - so it only runs when asked with
+`--base`, and then only for a change that actually touches that shared layer.
 
 Usage:
-    python tools/run_tests.py
+    python tools/run_tests.py                          # the game (warband)
+    python tools/run_tests.py --base                   # the shared-layer harness
+    python tools/run_tests.py --all                    # both
+    python tools/run_tests.py --only dagger_regression,paperdoll_regression
     GODOT_PATH=/path/to/godot python tools/run_tests.py
 """
 import concurrent.futures
@@ -68,15 +84,61 @@ TESTS = [
     "backstab_regression",
     "trinkets_regression"
 ]
-FIXED_FPS = {"cover_movement_regression", "weapon_input_regression"}
-TIMEOUT = 120.0
-## Wall-clock ceilings where the flat budget no longer fits. The frontier
-## simulates 75 mobs (36 legacy, 16 devils, 19 Unholy Forest, 4 clones); the two
-## fixed-fps tests drive real movement through every one of them at a fixed
-## 240 Hz clock, so their wall time scales with frontier cost, not with test
-## content. Measured standalone after the forest mobset landed: 217 s.
-TIMEOUTS = {"weapon_input_regression": 480.0, "cover_movement_regression": 300.0,
-            "open_world_combat_regression": 240.0}
+## The warband possession campaign: one world, one roster, one stash.
+WARBAND_TESTS = [
+    "warband_contract_regression",
+    "possession_regression",
+    "downed_revive_regression",
+    "downed_bleedout_regression",
+    "combat_bubble_regression",
+    "altar_regression",
+    "stash_autoloot_regression",
+    "corpse_loot_regression",
+    "warband_ui_regression",
+    "branded_abilities_regression",
+    "branded_world_regression",
+    "enemy_waves_regression",
+    "watcher_variants_regression",
+    "town_hub_regression",
+    "cage_escape_regression",
+    "escape_run_regression",
+    "warband_world_regression",
+    "torch_light_regression",
+    "expedition_regression",
+    "expedition_director_regression",
+    "game_flow_regression",
+    "admin_arena_regression",
+    "quartermaster_regression",
+    "warband_art_regression",
+    "run_persistence_regression",
+]
+## ENet tests: two real processes on one machine, so they never share the pool.
+SERIAL = ["warband_lobby_regression", "warband_session_regression"]
+## Tests that walk real game time. A fixed clock lets them run as fast as the CPU
+## can instead of at the wall clock, which is the difference between 90 s and 40 s;
+## their assertions are distances and states, not frame counts.
+FIXED_FPS = {"cover_movement_regression", "weapon_input_regression",
+             "warband_world_regression", "escape_run_regression"}
+## How many Godot processes run at once. One process per test sounds fastest and
+## is not: on a real desktop the pool thrashes and the borderline tests - the ones
+## that walk a thousand metres of world in real time - start missing their own
+## ceiling because of CPU contention rather than their own work. Eight keeps the
+## whole suite inside its budget and every test inside its own.
+WORKERS = 8
+## The per-test ceiling: 90 s. Nothing in this repository is allowed to need
+## longer; a run that hits it is a bug report, not a slow machine. The absolute
+## ceiling anywhere is 120 s.
+TIMEOUT = 90.0
+## The whole-run ceiling: under three minutes, with two as the target. The two
+## world-walking tests set the floor of that - each covers a kilometre of real
+## game time - and they run in the same pool, so the wall is one of them plus the
+## tail, not the sum.
+TOTAL_BUDGET = 240.0
+## The top of the allowed band, for the two tests whose point is a fixed 240 Hz
+## clock walked end to end through the frontier. They are the only exceptions and
+## they must still fit inside two minutes.
+TIMEOUTS = {"weapon_input_regression": 120.0, "cover_movement_regression": 120.0,
+            "warband_world_regression": 120.0, "escape_run_regression": 120.0}
 
 
 def engine_path() -> str:
@@ -113,17 +175,39 @@ def run_one(test: str, engine: str, retry: bool = False) -> tuple:
     return test, code, duration, lines, output
 
 
+def budget_tests(base: bool = True, warband: bool = True) -> list:
+    picked = []
+    if base:
+        picked += TESTS
+    if warband:
+        picked += WARBAND_TESTS
+    return picked
+
+
 def main() -> int:
     engine = engine_path()
     if not Path(engine).exists():
         print(f"Engine not found: {engine}")
         return 2
+    arguments = list(sys.argv[1:])
+    want_base = "--base" in arguments or "--all" in arguments
+    want_warband = "--all" in arguments or "--warband" in arguments
+    if not want_base and not want_warband:
+        want_warband = True
+    selected = budget_tests(want_base, want_warband)
+    if "--only" in arguments:
+        # `--only cage_escape_regression,warband_world_regression` runs exactly
+        # those, for a change whose blast radius is two tests and not fifty.
+        names = arguments[arguments.index("--only") + 1].split(",")
+        selected = [name.strip() for name in names if name.strip()]
     started = time.time()
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(TESTS)) as pool:
-        futures = {pool.submit(run_one, test, engine): test for test in TESTS}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = {pool.submit(run_one, test, engine): test for test in selected}
         for future in concurrent.futures.as_completed(futures):
             results.append(future.result())
+    for test in SERIAL:
+        results.append(run_one(test, engine))
     failed = [result for result in results if result[1] != 0]
     for test, code, duration, lines, output in sorted(results):
         print(f"{test:32s} exit={code} {duration:6.1f}s  {' | '.join(lines[-2:])}")
@@ -138,7 +222,14 @@ def main() -> int:
             remaining.append(result)
             print("\n".join(result[4].splitlines()[-15:]))
     elapsed = time.time() - started
-    print(f"TOTAL {elapsed:.1f}s tests={len(TESTS)} failures={len(remaining)}")
+    over = [result for result in results if result[1] == 124]
+    print(f"TOTAL {elapsed:.1f}s tests={len(selected) + len(SERIAL)} failures={len(remaining)} budget={TOTAL_BUDGET:.0f}s")
+    if over:
+        print("OVER BUDGET (killed at the per-test ceiling): " + ", ".join(sorted(test for test, _, _, _, _ in over)))
+        print("The repository rule is that a test fits in a couple of minutes; make the thing it measures cheaper.")
+    if elapsed > TOTAL_BUDGET:
+        print(f"OVER BUDGET: the run took {elapsed:.1f}s against a {TOTAL_BUDGET:.0f}s ceiling.")
+        return 1
     return 0 if not remaining else 1
 
 

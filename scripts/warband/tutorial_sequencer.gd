@@ -7,12 +7,12 @@ extends Node
 ##   1. shift the soul through all four caged bodies (that is the whole premise);
 ##   2. the fifth prisoner jogs in with a shiv and kills the two watchers himself:
 ##      taking his body is the player's beat, and theirs is nothing;
-##   3. the soul steps into him - that is what cuts all four latches at once, and
-##      no latch moves while the pair are still standing over the cages;
-##   4. the squad is out and arming itself off the ground;
-##   5. the escape: the soul walking through the clearing's mouth is what turns
-##      the trees loose on the squad. There is no door to press and no kill quota
-##      to fill - ESCAPING is where this machine ends.
+##   3. the soul steps into him - the only hands in the camp carrying a blade -
+##      and the player walks cage to cage cutting one latch at a time;
+##   4. the fourth latch is the squad out and arming itself off the ground;
+##   5. the escape: the soul walking out through the gap in the trees is what
+##      turns the wood loose on the squad. There is no door to press and no kill
+##      quota to fill - ESCAPING is where this machine ends.
 ##
 ## This node owns no scene lookups - no bodies, no labels, no nodes. The scene
 ## feeds it facts and it answers with a state, one objective line, one key hint
@@ -93,8 +93,9 @@ func objective() -> String:
 			return "All four seen. The fifth prisoner is coming."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "Corvin is at the watchers. Take his body - F5 or [ ]."
-			return "Put the pair down. Every latch goes when they fall."
+				return "Corvin is at the cages. Take his body - F5 or [ ] - then cut the latches   %d/%d" \
+					% [_opened.size(), PRISONER_COUNT]
+			return "Cut a latch at each cage   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
 			return "Out and armed. Walk out through the mouth   ·   watchers down %d/%d" \
 				% [_guards_down, GUARD_COUNT]
@@ -104,7 +105,8 @@ func objective() -> String:
 
 ## The key line under the objective: exactly what to press, this beat. Every
 ## step names its own key, because a tutorial that says "take his body" and not
-## "F5" has taught nothing. No step names a latch key: latches are not pressed.
+## "F5" has taught nothing. `G` is only ever advertised where it cuts a latch -
+## never as a general interact key.
 func hint() -> String:
 	match _state:
 		State.CAGED:
@@ -113,12 +115,12 @@ func hint() -> String:
 			return "Stay in a body - Corvin is walking in with the shiv."
 		State.RESCUER_ARRIVED:
 			if not _rescuer_taken:
-				return "F5 or [ ] - take Corvin's body   ·   he cuts every latch himself"
-			return "LMB / RMB - fight the pair   ·   the latches go when they are down"
+				return "F5 or [ ] - take Corvin's body   ·   G  -  cut a latch"
+			return "G  -  cut a latch  ·  %d of %d cages" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
 			return "W A S D - walk out through the mouth   ·   the squad arms itself"
 		State.ESCAPING:
-			return "W A S D - walk the trail   ·   the town is at the far end of the wood"
+			return "W A S D - run the trail through the wood   ·   the town is at the far end of it"
 	return ""
 
 func seen_count() -> int:
@@ -161,12 +163,15 @@ func note_rescuer_arrived() -> bool:
 		return false
 	_rescuer_noted = true
 	_transition(State.RESCUER_ARRIVED)
+	# Four latches cut before he got here still free the squad the moment the
+	# lesson reaches the beat that owns them.
+	_maybe_free_squad()
 	rescuer_ready.emit(rescuer_merc_id)
 	return true
 
 ## The soul actually entered the rescuer's body. The tutorial never moves it
 ## there for you: the card and the objective both name the key, and this is what
-## cuts the latches (the scene holds them until the pair are down).
+## puts the camp's only blade in the player's hands.
 func note_rescuer_taken() -> bool:
 	if _state != State.RESCUER_ARRIVED or _rescuer_taken:
 		return false
@@ -177,19 +182,25 @@ func note_rescuer_taken() -> bool:
 func rescuer_taken() -> bool:
 	return _rescuer_taken
 
-## A cage latch was cut. The scene cuts all four in one act when the soul is in
-## Corvin's hands; a cage still counts once, and the fourth opens the squad.
+## A cage latch was cut, one cage at a time. A latch is a fact, not a permission,
+## so it is booked whatever beat the lesson is on - but the squad is only loosed
+## at four and only from the beat that owns them, so a player who somehow gets to
+## a cage early cuts metal and skips nothing.
 func note_cage_opened(index: int) -> bool:
-	if _state != State.RESCUER_ARRIVED or index < 0 or index >= PRISONER_COUNT:
-		return false
-	if _opened.has(index):
+	if index < 0 or index >= PRISONER_COUNT or _opened.has(index):
 		return false
 	_opened.append(index)
-	if _opened.size() >= PRISONER_COUNT:
-		_transition(State.FREED)
-	else:
-		announce()
+	announce()
+	_maybe_free_squad()
 	return true
+
+
+## Four latches and the beat that owns them: the squad is out. Called after every
+## latch and again when the rescuer arrives, so four latches cut early still free
+## the squad on the frame the lesson reaches them.
+func _maybe_free_squad() -> void:
+	if _opened.size() >= PRISONER_COUNT and _state == State.RESCUER_ARRIVED:
+		_transition(State.FREED)
 
 ## A watcher died. Corvin's own kills count - he puts the first pair down himself
 ## and the tally has to read true - so anything from the moment he is at the cages

@@ -51,7 +51,7 @@ func make_thrown(parent: Node3D, weapon_name: String, weapon_index: int) -> Thro
 	var thrown := Thrown.new()
 	thrown.weapon = weapon_name
 	thrown.weapon_index = weapon_index
-	thrown.blade_length = float(Archer.DAGGER_DATA.length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[weapon_index].length)
+	thrown.blade_length = float(Archer.dagger_profile(0).length) if weapon_name == "dagger" else float(Archer.SWORD_DATA[weapon_index].length)
 	parent.add_child(thrown)
 	return thrown
 
@@ -158,14 +158,14 @@ func rig_checks(holder: Node3D) -> void:
 				rig.set_sword(index)
 			check(combat.begin_throw(), "Every equipped sword and dagger accepts a throw")
 			var seconds: float = rig.charge_seconds()
-			var expected_seconds: float = float(Archer.DAGGER_DATA.seconds) if weapon_name == "dagger" else float(Archer.SWORD_DATA[index].seconds)
+			var expected_seconds: float = float(Archer.dagger_profile(0).seconds) if weapon_name == "dagger" else float(Archer.SWORD_DATA[index].seconds)
 			check(is_equal_approx(seconds, expected_seconds), "Throw charge duration follows the weapon size")
 			advance(rig, combat, seconds + 0.01)
 			check(rig.phase == "T_HOLD" and rig.draw_amount >= 0.999, "Holding a full charge never auto-throws")
 			var before := emitted.size()
 			combat.release_throw()
 			check(emitted.size() == before + 1, "A full charge still requires an explicit release")
-			var base: float = float(Archer.DAGGER_DATA.damage) if weapon_name == "dagger" else float(Archer.SWORD_DATA[index].damage)
+			var base: float = float(Archer.dagger_profile(0).damage) if weapon_name == "dagger" else float(Archer.SWORD_DATA[index].damage)
 			check(is_equal_approx(float(emitted[-1].charge), 1.0) and is_equal_approx(Combat.throw_damage(weapon_name, index, 1.0), base), "Full throw charge deals the weapon's base damage")
 			check(String(emitted[-1].weapon) == weapon_name and int(emitted[-1].index) == (index if weapon_name == "sword" else 0), "The thrown model and size match the equipped weapon")
 

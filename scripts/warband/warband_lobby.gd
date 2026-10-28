@@ -142,11 +142,12 @@ func _note(message: String, data: Dictionary = {}) -> void:
 # --- the panel -------------------------------------------------------------
 
 func _build() -> void:
+	theme = preload("res://scripts/ui/ledger_theme.gd").get_theme()
 	size = PANEL_SIZE
 	var panel := Panel.new()
 	panel.size = PANEL_SIZE
 	panel.add_theme_stylebox_override("panel",
-		_style(Color(0.03, 0.07, 0.085, 0.92), Color("3f5b60"), 10))
+		preload("res://scripts/ui/ledger_theme.gd").iron_panel())
 	add_child(panel)
 	var heading := _label(panel, "WARBAND LOBBY", Vector2(26, 20), 30, CREAM)
 	heading.size = Vector2(690, 38)
@@ -181,6 +182,7 @@ func _build() -> void:
 	panel.add_child(address_input)
 
 	host_button = _button(panel, "HOST WARBAND", Vector2(28, 172), Vector2(340, 46))
+	host_button.theme_type_variation = "PrimaryButton"
 	host_button.add_theme_font_size_override("font_size", 17)
 	host_button.pressed.connect(host)
 	join_button = _button(panel, "JOIN WARBAND", Vector2(384, 172), Vector2(332, 46))
@@ -222,17 +224,6 @@ func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2)
 	result.position = position_at
 	result.size = size_at
 	result.focus_mode = Control.FOCUS_NONE
-	var theme := Theme.new()
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["Bahnschrift", "Segoe UI"])
-	theme.default_font = font
-	theme.set_color("font_color", "Button", CREAM)
-	theme.set_color("font_hover_color", "Button", Color.WHITE)
-	theme.set_color("font_pressed_color", "Button", Color("13282f"))
-	theme.set_stylebox("normal", "Button", _style(Color("243a40"), Color("456068"), 7))
-	theme.set_stylebox("hover", "Button", _style(Color("34545b"), GOLD, 7))
-	theme.set_stylebox("pressed", "Button", _style(GOLD, GOLD, 7))
-	result.theme = theme
 	parent.add_child(result)
 	return result
 

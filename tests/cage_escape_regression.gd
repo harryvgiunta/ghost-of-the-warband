@@ -3,22 +3,23 @@ extends SceneTree
 ##
 ## The camp used to be a scene of its own with an arch at the end of the yard that
 ## loaded the road. It is now the first quarter of one world, and this regression
-## owns the lesson inside it: five rags prisoners spawn in the clearing, four of
-## them in cages with the soul already inside one; every caged body sits clamped
-## in its own cage; shifting the soul through all four in a scrambled order
-## advances the sequencer exactly once; the fifth prisoner jogs in, goes straight
-## at the two watchers and puts both of them down himself - the player never
-## touches them; no cage opens while the soul is still in a prisoner, and G is not
-## a latch key any more; the soul stepping into Corvin is what cuts all four
-## latches at once, and the freed squad arms itself off the ground; walking the
-## body out of the clearing through the mouth spawns the six armed watchers out of
-## the trees and turns the state to ESCAPING - the leaving is the ambush, not a
-## kill quota. The last section walks the body out of the clearing, which is what
-## replaced the arch.
+## owns the lesson inside it: five rags prisoners spawn in the camp, four of them
+## in cages with the soul already inside one; every caged body sits clamped in its
+## own cage; shifting the soul through all four in a scrambled order advances the
+## sequencer exactly once; the fifth prisoner jogs in, goes straight at the two
+## watchers and puts both of them down himself - the player never touches them;
+## then the player takes his body and cuts the four latches one cage at a time
+## with `G`, and nothing opens without that walk. Bare hands at a padlock are told
+## so. The fourth latch is what puts the squad on its feet. Walking the body out of
+## the camp through the gap in the trees spawns the six armed watchers out of the
+## wood and turns the state to ESCAPING - the leaving is the ambush, not a kill
+## quota. The last section walks the body out of the camp, which is what replaced
+## the arch, and checks the road is a long run of wood away rather than the other
+## side of the hedge.
 ##
-## Every out-of-order event is fired at the machine first: freeing before the
-## rescuer arrives, a kill before the fight, loot before the squad is out. None of
-## them may advance a state or throw.
+## Every out-of-order event is fired at the machine first: a cage opened on the
+## first beat, a kill before the fight, loot before the squad is out. None of them
+## may advance a state or throw.
 
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
@@ -39,6 +40,7 @@ var warband
 var checks := 0
 var failures := 0
 var state_log: Array = []
+var _phase_start := 0
 var requested_paths: Array = []
 
 func check(condition: bool, message: String) -> void:
@@ -80,6 +82,7 @@ func run() -> void:
 	root.add_child(watchdog)
 	watchdog.start()
 
+	_phase_start = Time.get_ticks_msec()
 	game = load(WORLD).instantiate()
 	root.add_child(game)
 	if not game.has_method("stats"):
@@ -91,17 +94,26 @@ func run() -> void:
 	camp.sequencer.state_changed.connect(_on_state_changed)
 	game.scene_requested.connect(_on_scene_requested)
 
+	print("CAGE_PHASE built %d ms" % (Time.get_ticks_msec() - _phase_start))
 	dismiss_card("the opening card")
+	_phase_start = Time.get_ticks_msec()
 	check_spawn()
 	check_cards()
 	await check_clamp()
 	check_refusals()
 	check_see_all()
 	await check_rescuer()
+	print("CAGE_PHASE rescuer %d ms" % (Time.get_ticks_msec() - _phase_start))
+	_phase_start = Time.get_ticks_msec()
 	await check_pair_kill()
+	print("CAGE_PHASE pair %d ms" % (Time.get_ticks_msec() - _phase_start))
+	_phase_start = Time.get_ticks_msec()
 	await check_latches()
+	print("CAGE_PHASE latches %d ms" % (Time.get_ticks_msec() - _phase_start))
+	_phase_start = Time.get_ticks_msec()
 	await check_freed_walk()
 	await check_out_and_ambush()
+	print("CAGE_PHASE ambush+walk %d ms" % (Time.get_ticks_msec() - _phase_start))
 
 	check(is_instance_valid(game) and game.is_inside_tree(),
 		"the player stays in the world when nothing was requested")
@@ -133,11 +145,17 @@ func _on_state_changed(new_state: int, objective: String) -> void:
 func _on_scene_requested(path: String) -> void:
 	requested_paths.append(path)
 
+## How many times the machine *entered* `value`. A state is announced again
+## whenever a counter changes while it is held (a latch, a corpse, a pickup), so a
+## bare tally would count bookkeeping as transitions.
 func state_count(value: int) -> int:
 	var total := 0
+	var previous := -1
 	for entry in state_log:
-		if int(entry[0]) == value:
+		var current := int(entry[0])
+		if current == value and previous != value:
 			total += 1
+		previous = current
 	return total
 
 ## The tutorial card is modal and pauses the tree. A test plays the player: if a
@@ -164,21 +182,18 @@ func check_spawn() -> void:
 		"the fifth prisoner is not caged")
 	for merc_id in warband.roster.ids():
 		var gear: Dictionary = warband.roster.equipped_of(merc_id)
-		# The warband starts naked in a sack: one brown garment over the chest and
-		# nothing on head, hands, legs or feet - they fight in what they strip off
-		# the dead.
-		check(str(gear.get("chest", "")) == "armor_makeshift_chest",
-			"%s wears the sack" % warband.roster.name_of(merc_id))
-		var bare := true
-		for slot in ["head", "hands", "legs", "feet"]:
-			if not str(gear.get(slot, "")).is_empty():
-				bare = false
-		check(bare, "%s is otherwise bare" % warband.roster.name_of(merc_id))
+		# The warband starts in the naked base set - an old shirt and tight shorts,
+		# and bare head, hands and feet, all of which guard nothing. They fight in
+		# what they strip off the dead or buy in town.
+		for slot in ["head", "chest", "hands", "legs", "feet"]:
+			check(str(gear.get(slot, "")) == "armor_naked_%s" % slot,
+				"%s wears the naked %s (%s)" % [warband.roster.name_of(merc_id), slot,
+					str(gear.get(slot, ""))])
 		if merc_id != camp.rescuer_id:
 			check(str(gear.get("main", "")).is_empty(),
 				"prisoner %s is unarmed" % warband.roster.name_of(merc_id))
-	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", "")) == "dagger_makeshift",
-		"the rescuer carries the shiv")
+	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", "")) == "dagger_ironwood",
+		"the rescuer carries the ironwood shiv")
 	for merc_id in camp.caged_ids:
 		check(game.controller.body_of(merc_id) != null, "caged mercenary %d has a body" % merc_id)
 	var local = game.controller.active_body(1)
@@ -193,9 +208,13 @@ func check_spawn() -> void:
 	check(camp.guards.size() == 2, "two watchers hold the clearing")
 	for watcher in camp.guards:
 		check(bool(watcher.get("alive")), "a watcher stands on its feet")
-		check(is_equal_approx(float(watcher.max_health), WatcherScript.PAIR_HEALTH),
+		check(is_equal_approx(float(watcher.max_health), float(camp.PAIR_LESSON_HEALTH)),
 			"the pair Corvin fights are the thinned ones, got %s" % str(watcher.max_health))
-		check(str(watcher.name).begins_with("Forest_"), "the watcher is the woodland mob (%s)" % watcher.name)
+		check(float(camp.PAIR_LESSON_HEALTH) <= WatcherScript.PAIR_HEALTH,
+			"and never thicker than the camp's own thinned pool")
+		check(str(watcher.name).begins_with("CampWatcher"),
+			"the watcher is a camp body (%s)" % watcher.name)
+		check(watcher.get("rig") != null, "the watcher is a rigged body, not a mob silhouette")
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
 	check(camp.pickups().size() == 3, "three cultist weapons lie on the walk")
 	# Nothing is under the world: the clearing is ground, not a ledge.
@@ -203,15 +222,21 @@ func check_spawn() -> void:
 		check(body.global_position.y > -1.0, "body %s stands on the clearing" % str(body.name))
 	for watcher in camp.guards:
 		check(watcher.global_position.y > -1.0, "watcher %s stands on the clearing" % str(watcher.name))
-	# The way out is the mouth in the fence, and the trail starts there.
+	# The way out is a gap in the trees on the camp's front line, and the road is a
+	# long run of ordinary wood past it - not the other side of a hedge.
 	check(is_equal_approx(camp.GATE_POINT.z, camp.YARD_FRONT),
-		"the mouth is on the clearing's front line (%s)" % str(camp.GATE_POINT))
+		"the way out is on the camp's front line (%s)" % str(camp.GATE_POINT))
+	check(camp.CAMP_TO_ROAD_METRES >= 150.0 and camp.CAMP_TO_ROAD_METRES <= 210.0,
+		"the road stands %d m of wood off the camp" % int(camp.CAMP_TO_ROAD_METRES))
 	var lane: PackedVector3Array = game.trail.forest["lane"]
-	check(flat_range(lane[0], camp.GATE_POINT) < 0.01,
-		"the trail's first waypoint is the clearing's mouth")
+	var road_gap := flat_range(lane[0], camp.GATE_POINT)
+	check(absf(road_gap - camp.CAMP_TO_ROAD_METRES) < 1.0,
+		"the trail's first waypoint is that far off, and not the mouth (%.1f m)" % road_gap)
+	check(road_gap >= 150.0, "no torch of the road is in sight of the cages (%.0f m)" % road_gap)
 
 ## The tutorial stays - cards, objectives, key lines - and says only what happens
-## now: no card asks for a latch key, and none hands the player the pair.
+## now. Every step names the real key for the real action: no card claims a latch
+## opens itself, and no card advertises `G` before `G` has anything to do.
 func check_cards() -> void:
 	var cards: Dictionary = camp.STEP_CARDS
 	check(cards.size() == 5, "the opening has one card per beat (%d)" % cards.size())
@@ -220,20 +245,29 @@ func check_cards() -> void:
 		var text := "%s %s %s %s" % [card["title"], card["body"], card["keys"],
 			card["footnote"]]
 		var lower := text.to_lower()
-		check(not lower.contains("g at a cage") and not lower.contains("g - cut")
-				and not lower.contains("cut a latch with g") and not lower.contains("then g"),
-			"card %d never asks for a latch key (%s)" % [int(state), text])
+		check(not lower.contains("opens at once") and not lower.contains("all four latches at once")
+				and not lower.contains("he cuts all four") and not lower.contains("latches fall"),
+			"card %d never claims a latch opens itself (%s)" % [int(state), text])
 		check(not lower.contains("put down the watchers")
 				and not lower.contains("you put the pair down"),
 			"card %d never hands the player the pair" % int(state))
-	var shiv_card := str(cards[2]["body"]).to_lower()
-	check(shiv_card.contains("all four latches") and shiv_card.contains("step into him"),
-		"the latch card is the possession card (%s)" % str(cards[2]["body"]))
+		# `G` is only named where it cuts a latch.
+		if int(state) < 2:
+			check(not lower.contains("g at a cage") and not lower.contains("g  -"),
+				"card %d never advertises an interact key it has no use for (%s)"
+				% [int(state), text])
+	var latch_card: Dictionary = cards[2]
+	var latch_text := "%s %s" % [latch_card["body"], latch_card["keys"]]
+	check(str(latch_card["keys"]).contains("G") and latch_text.to_lower().contains("cut"),
+		"the latch card names G and what it cuts (%s)" % latch_text)
+	check(latch_text.to_lower().contains("f5"), "and names the key that takes his body")
 	var out_card := str(cards[3]["body"]).to_lower()
-	check(out_card.contains("mouth"), "the freed card sends the squad to the mouth")
-	check(not out_card.contains("watchers wake"), "and no longer promises a fight in the yard")
+	check(out_card.contains("gap in the trees"), "the freed card sends the squad out between trees")
+	check(out_card.contains("wood"), "and says the way on is wood, not a road")
+	check(not out_card.contains("watchers wake"), "and no longer promises a fight in the camp")
 	check(camp.sequencer.hint().contains("F1"), "the first beat names the body keys")
-	check(not camp.sequencer.hint().contains("G -"), "and never a latch key")
+	check(not camp.sequencer.hint().contains("cut a latch"),
+		"and never a latch key while the latches are not the beat")
 
 
 # --- the cage clamp --------------------------------------------------------
@@ -254,7 +288,8 @@ func check_clamp() -> void:
 
 func check_refusals() -> void:
 	var before: int = camp.sequencer.state()
-	check(not camp.sequencer.note_cage_opened(0), "a latch is refused before the rescuer arrives")
+	check(not camp.sequencer.note_cage_opened(9), "a cage that does not exist is never booked")
+	check(not camp.sequencer.note_cage_opened(-1), "and neither is a negative index")
 	check(not camp.sequencer.note_rescuer_arrived(), "the rescuer cannot arrive before all four seen")
 	check(not camp.sequencer.note_guard_killed(), "a guard death before the fight is not progress")
 	check(not camp.sequencer.note_weapon_looted(), "loot before the cages open is not progress")
@@ -265,6 +300,28 @@ func check_refusals() -> void:
 	camp.sequencer.note_body_entered(camp.caged_ids[0])
 	check(camp.sequencer.seen_count() == 1, "re-entering a body twice counts once")
 	check(camp.sequencer.state() == SequencerScript.State.CAGED, "still caged after the refusals")
+
+	# A cage cut before the lesson reaches the latches is a fact, not a permission:
+	# it is booked, and it does not skip a beat. The live camp's machine is not
+	# touched here - the point is the sequencing guard, so it is driven on a scratch
+	# machine through the whole opening in the wrong order.
+	var scratch := SequencerScript.new()
+	scratch.begin(2)
+	for index in SequencerScript.PRISONER_COUNT:
+		scratch.note_cage_opened(SequencerScript.PRISONER_COUNT - 1 - index)
+	check(scratch.cages_opened() == SequencerScript.PRISONER_COUNT,
+		"four early latches are all booked (%d)" % scratch.cages_opened())
+	check(scratch.state() == SequencerScript.State.CAGED,
+		"four early latches skip no beat (%s)" % scratch.state_name())
+	for merc_id in [11, 12, 13, 14]:
+		scratch.note_body_entered(int(merc_id))
+	check(scratch.state() == SequencerScript.State.ALL_SEEN,
+		"the four bodies still advance the lesson once (%s)" % scratch.state_name())
+	scratch.note_rescuer_arrived()
+	check(scratch.state() == SequencerScript.State.FREED,
+		"and the squad is out the moment the beat that owns four latches arrives (%s)"
+		% scratch.state_name())
+	scratch.free()
 
 # --- seeing all four -------------------------------------------------------
 
@@ -307,39 +364,74 @@ func check_rescuer() -> void:
 	var arrived_objective: String = camp.sequencer.objective()
 	check(arrived_objective.contains("F5") and arrived_objective.contains("[ ]"),
 		"the objective names both keys, got %s" % arrived_objective)
+	check(arrived_objective.contains("0/4"),
+		"and counts the latches cut out of four, got %s" % arrived_objective)
 	check(camp.sequencer.hint().contains("F5"), "the hint names F5")
+	check(camp.sequencer.hint().contains("cut a latch") and camp.sequencer.hint().contains("G"),
+		"and names the key that cuts one, got %s" % camp.sequencer.hint())
 	dismiss_card("the rescuer's card")
 
-	# `G` is not a latch key any more. The body stands at a shut cage with the pair
-	# still up, presses it, and nothing opens.
+	# Bare hands cut nothing: the soul is still in a caged body with no blade, and a
+	# press at the bars is answered with the one line that says why.
 	var soul = game.controller.active_body(1)
+	var soul_id: int = game.controller.merc_for_peer(1)
+	var own_cage: int = camp.caged_ids.find(soul_id)
+	# The first latch is the first cage, whatever cage the soul happens to be in:
+	# the walk the lesson teaches is left to right along the line.
 	var at_cage: Vector3 = camp.CAGE_POSTS[0]
-	soul.global_position = at_cage + Vector3(0.0, 0.1, 0.4)
+	check(own_cage >= 0, "the soul is still in one of the cages")
 	await physics_frame
-	game._try_interact()
-	check(camp.cages_open_count() == 0, "G does not open a cage")
+	check(camp.latch_target(soul) == own_cage, "its own latch is in reach through the bars")
+	check(not camp.holds_blade(soul), "and the body has nothing to cut it with")
+	check(camp.interact(soul), "the camp consumes the press at a cage")
+	check(camp.cages_open_count() == 0, "G with bare hands opens no cage")
+	var status = game.hud.get("_status_label")
+	check(status != null and str(status.text).contains("Nothing to cut the latch with"),
+		"and the HUD says what is missing (%s)" % ("" if status == null else str(status.text)))
 	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"and G leaves the lesson where it was")
+		"and the lesson stays where it was")
 
-	# Taking him early frees nobody: the shiv is in the player's hands, but two
-	# watchers are still standing over the cages.
+	# Corvin's hands carry the camp's only blade: taking him is what makes a latch
+	# possible at all - and even then it is one cage per press, not four at once.
 	var take: Dictionary = game.controller.direct(1, camp.rescuer_id)
 	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
 	check(game.controller.merc_for_peer(1) == camp.rescuer_id,
 		"the soul is in Corvin's body after F5")
 	check(camp.sequencer.rescuer_taken(), "the sequencer saw the player take the body")
 	check(not camp.sequencer.note_rescuer_taken(), "taking the body only counts once")
-	check(camp.cages_open_count() == 0,
-		"no latch opens while a watcher is still standing over the cages")
+	check(camp.cages_open_count() == 0, "and taking his body cuts no latch by itself")
 	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"the pair holds the latches shut (%s)" % camp.sequencer.state_name())
-	check(camp.sequencer.objective().contains("pair"),
-		"the objective asks for the pair, got %s" % camp.sequencer.objective())
+		"the lesson still wants the walk (%s)" % camp.sequencer.state_name())
+	var cutter = game.controller.active_body(1)
+	check(camp.holds_blade(cutter), "the shiv is in the player's hands")
+	cutter.global_position = Vector3(at_cage.x, 0.2, at_cage.z + 2.6)
+	await physics_frame
+	# The press cuts the cage the body is actually standing at, so the assertion
+	# follows that cage instead of assuming the soul's own one is nearest.
+	var target: int = camp.latch_target(cutter)
+	check(target >= 0, "there is a closed latch in reach")
+	game._try_interact()
+	check(camp.cages_open_count() == 1, "G at a cage cuts exactly that one latch (%d)"
+		% camp.cages_open_count())
+	check(camp.sequencer.opened_cages() == [0], "and it is the first cage that opened (%s)"
+		% str(camp.sequencer.opened_cages()))
+	check(camp.sequencer.cages_opened() == 1, "the sequencer booked the one latch")
+	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
+		"and one latch does not loose the squad (%s)" % camp.sequencer.state_name())
+	check(not camp.is_cage_clamped(int(camp.caged_ids[target])),
+		"the prisoner in the cut cage is out of the clamp")
+	for index in camp.caged_ids.size():
+		if index == target:
+			continue
+		check(camp.is_cage_clamped(int(camp.caged_ids[index])),
+			"cage %d still holds its own" % index)
+	# The same press at the same cage opens nothing more.
+	game._try_interact()
+	check(camp.cages_open_count() == 1, "a second press at a cut cage opens nothing more")
 	# The soul is the player's to place: back into a cage, and the opening goes on
 	# with Corvin free of the player's hands and the module driving him again.
 	game.controller.direct(1, int(camp.caged_ids[1]))
 	await physics_frame
-	check(camp.cages_open_count() == 0, "leaving his body again still opens no cage")
 
 # --- the pair, and the shiv -----------------------------------------------
 
@@ -363,21 +455,55 @@ func check_pair_kill() -> void:
 	check(game.controller.merc_for_peer(1) == soul_id
 			and flat_range(soul.global_position, soul_at) < 3.0,
 		"the player's body never left its cage")
-	check(camp.cages_open_count() == 0,
-		"the pair falling does not cut a latch on its own")
+	check(camp.cages_open_count() == 1,
+		"the pair falling cuts no further latch (%d)" % camp.cages_open_count())
 	check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"the lesson still waits for the soul to step into him (%s)" % camp.sequencer.state_name())
+		"the lesson still waits for the walk round the cages (%s)" % camp.sequencer.state_name())
 	check(camp.sequencer.rescuer_taken(), "and the soul's earlier step still counts")
 	print("CAGE_PAIR seconds=%.1f watchers_down=%d" % [seconds, camp.watchers_down()])
 
 # --- the latches -----------------------------------------------------------
 
-## All four at once, on the possession: the beat this opening builds to.
+## The walk the opening builds to: one cage, one press, one latch, one door - and
+## the fourth cut is what puts the squad on its feet.
 func check_latches() -> void:
 	var take: Dictionary = game.controller.direct(1, camp.rescuer_id)
 	check(bool(take.get("ok", false)), "the rescuer's body can be entered again")
-	check(camp.cages_open_count() == 4,
-		"taking him cuts all four latches at once (%d)" % camp.cages_open_count())
+	check(camp.cages_open_count() == 1,
+		"taking him again cuts no further latch (%d)" % camp.cages_open_count())
+	var doors: Array = camp.clearing.get("doors", [])
+	check(doors.size() == 4, "the camp has four cage doors (%d)" % doors.size())
+	# The ground in front of every cage has to be walkable: a latch is worked from
+	# the dirt on its +z side, so no hut, stack, stake or trunk may stand there.
+	for index in camp.CAGE_POSTS.size():
+		var approach: Vector3 = camp.CAGE_POSTS[index]
+		var blocked := _geometry_at(Vector3(approach.x, 0.9, approach.z + 2.6), 0.55)
+		check(blocked.is_empty(), "cage %d's approach is clear ground (%s)"
+			% [index + 1, str(blocked)])
+	var cutter = game.controller.active_body(1)
+	for index in range(1, camp.CAGE_POSTS.size()):
+		var post: Vector3 = camp.CAGE_POSTS[index]
+		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
+		await physics_frame
+		var reach_gap: float = Vector2(cutter.global_position.x - post.x,
+			cutter.global_position.z - post.z).length() - float(camp.CAGE_HALF)
+		check(camp.latch_target(cutter) == index,
+			"cage %d's latch is the one in reach (body %.1f,%.1f gap %.2f target %d)"
+			% [index + 1, cutter.global_position.x, cutter.global_position.z, reach_gap,
+				camp.latch_target(cutter)])
+		game._try_interact()
+		check(camp.cages_open_count() == index + 1,
+			"cutting cage %d books %d latches (%d)" % [index + 1, index + 1, camp.cages_open_count()])
+		check(camp.sequencer.cages_opened() == index + 1,
+			"and the sequencer counts them one by one (%d)" % camp.sequencer.cages_opened())
+		if index < camp.CAGE_POSTS.size() - 1:
+			check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
+				"%d of 4 latches does not loose the squad (%s)"
+				% [index + 1, camp.sequencer.state_name()])
+	# The card that opens on the fourth latch pauses the tree, so it is read before
+	# the doors are timed: the lift is the door's own animation, not a cutscene.
+	dismiss_card("the freed card")
+	await create_timer(1.3).timeout
 	check(camp.cages_open(), "the cages are open")
 	check(camp.sequencer.cages_opened() == 4, "the sequencer booked four cages")
 	check(not camp.sequencer.note_cage_opened(0), "a latch only counts once")
@@ -387,11 +513,7 @@ func check_latches() -> void:
 	for index in camp.caged_ids.size():
 		check(not camp.is_cage_clamped(int(camp.caged_ids[index])),
 			"cage %d stopped clamping its prisoner" % (index + 1))
-	dismiss_card("the freed card")
-	# The bars lift: the clearing's four doors climb out of their frames.
-	var doors: Array = camp.clearing.get("doors", [])
-	check(doors.size() == 4, "the clearing has four cage doors (%d)" % doors.size())
-	await create_timer(1.8).timeout
+	# The bars lift: the camp's four doors climb out of their frames.
 	var lifted := 0
 	for door in doors:
 		if is_instance_valid(door) and (door as Node3D).position.y >= camp.CAGE_BAR_LIFT - 0.2:
@@ -435,6 +557,26 @@ func _prisoner_armed() -> int:
 			count += 1
 	return count
 
+## Static geometry inside a sphere at `point`. Collision layer 1 is the world, so
+## this asks what the camp built, not who happens to be standing there.
+func _geometry_at(point: Vector3, radius: float) -> Array:
+	var space: PhysicsDirectSpaceState3D = game.get_world_3d().direct_space_state
+	var shape := SphereShape3D.new()
+	shape.radius = radius
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, point)
+	query.collision_mask = 1
+	query.collide_with_areas = false
+	var hits := space.intersect_shape(query, 8)
+	var names: Array = []
+	for hit in hits:
+		var body = hit.get("collider")
+		if body is Node:
+			names.append(str((body as Node).name))
+	return names
+
+
 func await_condition(predicate: Callable, timeout: float, label: String) -> bool:
 	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
 	while Time.get_ticks_msec() < deadline:
@@ -450,7 +592,7 @@ func check_out_and_ambush() -> void:
 	check(camp.pickups().size() == 3, "the three cultist drops are still on the walk (%d)"
 		% camp.pickups().size())
 	var armed := await await_condition(
-		func() -> bool: return _prisoner_armed() >= 1, 20.0, "the squad arming")
+		func() -> bool: return _prisoner_armed() >= 1, 14.0, "the squad arming")
 	check(armed, "a freed prisoner picks a weapon off the ground and holds it")
 	var left := 0
 	for pickup in camp.pickups():
@@ -460,21 +602,23 @@ func check_out_and_ambush() -> void:
 	check(camp.sequencer.weapons_taken() >= 1, "the pickup was booked as steel")
 	check(camp.sequencer.state() == SequencerScript.State.FREED,
 		"arming itself does not start the escape (%s)" % camp.sequencer.state_name())
-	check(camp.guards.size() == 2, "the clearing holds no more watchers than the pair (%d)"
+	check(camp.guards.size() == 2, "the camp holds no more watchers than the pair (%d)"
 		% camp.guards.size())
 
-	# Leaving is the ambush: the body walks through the mouth and the trees answer.
+	# Leaving is the ambush: the body walks out through the gap in the trees and the
+	# wood answers.
 	var local = game.controller.active_body(1)
 	check(local != null, "the soul still has a body for the walk out")
 	game.controller.input_enabled = false
-	local.global_position = Vector3(0.0, 0.2, -30.0)
+	local.global_position = Vector3(0.0, 0.2, -12.0)
 	await physics_frame
 	var mouth: Vector3 = camp.GATE_POINT
 	var ticks := 0
 	var out_started := Time.get_ticks_msec()
 	Engine.physics_ticks_per_second = 180
+	Engine.max_physics_steps_per_frame = 32
 	Engine.time_scale = 3.0
-	while ticks < 4000:
+	while ticks < 2000:
 		if camp.sequencer.state() == SequencerScript.State.ESCAPING:
 			break
 		var to: Vector3 = Vector3(0.0, 0.2, mouth.z - 2.0) - local.global_position
@@ -501,6 +645,7 @@ func check_out_and_ambush() -> void:
 		"the escape is not a kill quota: only Corvin's pair are down (%d)"
 		% camp.sequencer.guards_down())
 	check(camp.sequencer.hint().contains("trail"), "the escape's key line names the trail")
+	check(camp.sequencer.hint().contains("town"), "and names the town at the far end")
 	check(not camp.sequencer.hint().to_lower().contains("arch"), "and not an arch")
 	print("CAGE_AMBUSH seconds=%.1f game_seconds=%.1f metres_out=%.0f"
 		% [walked_seconds, float(ticks) / 60.0,
@@ -515,7 +660,8 @@ func check_out_and_ambush() -> void:
 	for index in range(2, camp.guards.size()):
 		var watcher = camp.guards[index]
 		check(bool(watcher.get("alive")), "reinforcement %d is on its feet" % index)
-		if str(watcher.weapon_item) in ["sword_short", "dagger_iron", "sword_arming"]:
+		if str(watcher.weapon_item) in ["club_makeshift", "dagger_ironwood",
+				"branch_heavy", "bow_twig"]:
 			armed_reinforcements += 1
 		if watcher.has_weapon_visual():
 			visible_blades += 1
@@ -524,17 +670,18 @@ func check_out_and_ambush() -> void:
 	check(armed_reinforcements == 6, "every reinforcement carries a weapon (%d)" % armed_reinforcements)
 	check(visible_blades == 6, "and the blade is in its hand (%d)" % visible_blades)
 
-	# 72 health against a 14-damage shiv: five stabs are not enough, the sixth ends
-	# it. The watchmen's pool is the camp's contract, whoever ends up putting them
-	# down, so it is measured on the one of the six nobody has touched yet.
+	# A hardened watcher's pool is the camp's contract, whoever ends up putting one
+	# down, so it is measured here on the one of the six nobody has touched yet.
 	var stabbable = null
 	for index in range(2, camp.guards.size()):
 		var fresh = camp.guards[index]
-		if is_instance_valid(fresh) and bool(fresh.get("alive")) \
-				and is_equal_approx(float(fresh.get("health")), float(fresh.get("max_health"))):
+		if is_instance_valid(fresh) and bool(fresh.get("alive")):
 			stabbable = fresh
+			# The squad is already fighting these six, so the pool is measured on a
+			# body put back on its feet rather than on one nobody has reached yet.
+			stabbable.health = stabbable.max_health
 			break
-	check(stabbable != null, "one of the six is still untouched")
+	check(stabbable != null, "one of the six is still standing to measure")
 	if stabbable != null:
 		for stab in 5:
 			stabbable.take_damage(14.0, 0)
@@ -578,43 +725,114 @@ func check_out_and_ambush() -> void:
 			if _watcher_hurt(camp.guards[index]):
 				return true
 		return false
-	var hurt := await await_condition(ambush_hurt, 20.0, "the squad landing blows")
+	var hurt := await await_condition(ambush_hurt, 14.0, "the squad landing blows")
 	check(hurt, "the freed squad's steel lands on the ambush")
 
-	# The drops the six carry are still the six weapons they were given.
+	# Every fallen body is a corpse on the vacuum's registry, not a heap of loose
+	# steel: nothing new is dumped on the floor when one of them goes down.
 	for index in range(2, camp.guards.size()):
 		var watcher = camp.guards[index]
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			watcher.take_damage(4000.0, 0)
-	var dropped := await await_condition(
-		func() -> bool: return game.pickups.size() >= drops_before + 6, 6.0, "the dropped weapons")
-	check(dropped, "the six weapons are on the floor (%d spawned)" % (game.pickups.size() - drops_before))
+	await create_timer(0.2).timeout
+	var corpse_ids: Array = game.loot.corpse_ids()
+	var with_gear := 0
+	for corpse_id in corpse_ids:
+		if not game.loot.corpse_items(int(corpse_id)).is_empty():
+			with_gear += 1
+	check(with_gear >= 6, "the six bodies are lootable corpses (%d of %s)"
+		% [with_gear, str(corpse_ids)])
+	check(game.pickups.size() == drops_before,
+		"and no corpse also dumps its kit on the floor (%d)" % (game.pickups.size() - drops_before))
 	check(camp.sequencer.guards_down() == 8, "the tally reaches the eight (%d)"
 		% camp.sequencer.guards_down())
 	check(requested_paths.is_empty(), "walking out of the camp requests no scene (%s)"
 		% str(requested_paths))
 
-	# The way on is the trail, and it is walked, not opened.
-	local = game.controller.active_body(1)
-	game.controller.input_enabled = false
+	# The way on is a long run of wood to the head of the trail, and it is walked,
+	# not opened. The corridor the camp cut has to end on the lane's first waypoint,
+	# or the two halves of the world do not meet: proven on the geometry first.
 	var lane: PackedVector3Array = game.trail.forest["lane"]
+	var corridor: Array = camp.clearing.get("corridor", [])
+	var joins := false
+	for gap in corridor:
+		if (gap as Rect2).has_point(Vector2(lane[0].x, lane[0].z)):
+			joins = true
+			break
+	check(joins, "the camp's corridor reaches the lane's first waypoint (%.1f,%.1f)"
+		% [lane[0].x, lane[0].z])
+	# The walk proves the ground, not the fight: the ambush has already been fought,
+	# so the soul steps into whichever body is still standing and runs from there -
+	# the same thing a player does when the body they were in has been put down.
+	var runner_id := -1
+	for merc_id in game.squad_ids:
+		var candidate = game.controller.body_of(int(merc_id))
+		if candidate == null or not is_instance_valid(candidate):
+			continue
+		if bool(candidate.get("alive")) and not bool(candidate.get("downed")):
+			runner_id = int(merc_id)
+			break
+	if runner_id <= 0:
+		# Every body is down: the revive channel is what a player would use, so the
+		# walk is proven on a body brought back up rather than on nobody.
+		for merc_id in game.squad_ids:
+			var candidate = game.controller.body_of(int(merc_id))
+			if candidate != null and is_instance_valid(candidate) \
+					and bool(candidate.get("downed")) and bool(candidate.get("alive")):
+				candidate.revive_from_downed(1.0)
+				runner_id = int(merc_id)
+				break
+	check(runner_id > 0, "a body can be put on its feet for the run")
+	if runner_id > 0:
+		game.controller.direct(1, runner_id)
+	local = game.controller.active_body(1)
+	# The camp's own ground - cages to the gap in the trees - was walked by the
+	# escape above. What is measured here is the wood between the camp and the road:
+	# from the gap to the lane's first waypoint, with nothing under it but trees.
+	local.global_position = Vector3(camp.GATE_POINT.x, 0.2, camp.GATE_POINT.z + 1.0)
+	await physics_frame
+	# The walk proves the ground, not the trail's fight: the road's cultists are
+	# taken off the board first, so nothing interrupts the run between the camp and
+	# the road's first torch.
+	for watcher in game.trail.guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(4000.0, 0)
+	await create_timer(0.2).timeout
+	game.controller.input_enabled = false
 	ticks = 0
+	var corridor_stall := 0
+	var corridor_gap := flat_range(local.global_position, lane[0])
 	Engine.physics_ticks_per_second = 180
+	Engine.max_physics_steps_per_frame = 32
 	Engine.time_scale = 3.0
-	while ticks < 3000:
-		var to: Vector3 = lane[1] - local.global_position
+	while ticks < 4000:
+		var to: Vector3 = lane[0] - local.global_position
 		to.y = 0.0
 		if to.length() <= 1.6:
 			break
 		var direction := to.normalized()
-		local.accept_network_input(Vector2(direction.x, direction.z), false)
+		local.accept_network_input(Vector2(direction.x, direction.z), true)
 		await physics_frame
 		ticks += 1
+		# A body that stops making ground is a broken corridor, not a long run.
+		var gap := flat_range(local.global_position, lane[0])
+		corridor_stall = corridor_stall + 1 if gap > corridor_gap - 0.02 else 0
+		corridor_gap = gap
+		if corridor_stall > 240:
+			print("CAGE_STALL corridor stuck at %.1f,%.1f" % [local.global_position.x,
+				local.global_position.z])
+			break
 	Engine.time_scale = 1.0
 	Engine.physics_ticks_per_second = 60
 	game.controller.input_enabled = true
-	var out_of_the_clearing: bool = local.global_position.z < camp.YARD_FRONT
-	check(out_of_the_clearing, "the body walked out through the mouth (z=%.1f)" % local.global_position.z)
+	print("CAGE_PHASE corridor walk %d ms ticks=%d" % [Time.get_ticks_msec() - out_started, ticks])
+	var out_of_the_camp: bool = local.global_position.z < camp.YARD_FRONT - 20.0
+	check(out_of_the_camp, "the body walked out of the camp and into the wood (z=%.1f)"
+		% local.global_position.z)
+	check(flat_range(local.global_position, lane[0]) <= 2.0,
+		"and ran the whole stretch of wood to the head of the trail (%.1f m off, at %.1f,%.1f)"
+		% [flat_range(local.global_position, lane[0]), local.global_position.x,
+			local.global_position.z])
 	check(game.trail.forest["path"].distance_to(Vector2(local.global_position.x, local.global_position.z))
 		< float(game.trail.forest["width"]) * 0.5 + 0.6,
 		"and it is standing on the trail, not beside it")

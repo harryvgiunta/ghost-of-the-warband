@@ -76,7 +76,7 @@ const LINEUP := [
 const SPARES := [
 	"sword_arming", "shield_buckler", "bow_short", "focus_skull", "focus_tome",
 	"staff_fire", "armor_leather_head", "armor_leather_chest", "ring_copper",
-	"ring_health", "dagger_makeshift", "sword_makeshift",
+	"ring_health", "dagger_ironwood", "club_makeshift",
 ]
 
 var warband

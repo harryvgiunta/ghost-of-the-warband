@@ -75,7 +75,7 @@ const TOWN_LINEUP := [
 const TOWN_SPARES := [
 	"sword_arming", "shield_buckler", "bow_short", "focus_skull", "focus_tome",
 	"armor_leather_head", "armor_leather_chest", "ring_copper", "ring_health",
-	"dagger_makeshift", "sword_makeshift",
+	"dagger_ironwood", "club_makeshift", "branch_heavy", "shield_wood",
 ]
 
 ## The town's one door: the expedition gate asks to be replaced and the scene

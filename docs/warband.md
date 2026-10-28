@@ -21,6 +21,7 @@ every parallel worktree builds against.
 | Passive damage | `PASSIVE_DAMAGE_MULTIPLIER` | 0.10 | same |
 | Presence bubble | `DEFAULT_BUBBLE_RADIUS` / `BUBBLE_EXIT_RADIUS` | 30 m / 34 m | same |
 | Distil ratio | `CRUOR_DISTILL_RATIO` | 5:1 (625 T1 -> 1 T5) | same |
+| Bleed-out drip | `DownedRules.DRIP_SLOW_SECONDS` / `DRIP_FAST_SECONDS` / `DRIP_VOLUME_MIN` / `DRIP_VOLUME_MAX` | 1.2 s to 0.6 s, volume 2.0 to 8.0 as `bleed_fraction` runs 0..1 | `scripts/warband/downed_state.gd`, presented by `scripts/warband/bleed_drip.gd` |
 
 ## 2. What Phase 0 already ships
 
@@ -125,7 +126,7 @@ Gate checks:
 2. The far pair takes 10% damage and keeps a convincing block/circle pattern;
    walking a human body to them flips them to full damage.
 3. A hit that overkills by <= 10% downs and crawls; a heavier hit kills; holding
-   `E` for 5 s revives; AI never revives.
+   `H` for 5 s revives; AI never revives.
 4. End-of-battle sweep lands loot in the stash sorted by value; unbind, distil
    5:1 and brand all work from the same wallet the HUD shows.
 
@@ -158,8 +159,8 @@ failure pass; fix the contract instead.
 | `scripts/warband/possession_sync.gd` (`PossessionSync`) | host-authoritative transfer RPCs plus `server_apply(peer, merc_id)` |
 | `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`) | `setup(radius, exit_radius)`, `set_humans`, `track/untrack`, `sim_state_of`, `clear`, `sim_changed` |
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
-| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` | `DownedRules.*`, `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress` |
-| `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups`, `WarbandPickup.collect/blocked_for/label_text` |
+| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive, respawn and `_die` clear all of it, and `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
+| `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` / `corpse_loot_panel.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups` plus the corpse registry: `register_corpse(enemy) -> int` (one read of `gear_items()`, stable ids, the record dies with the body), `has_corpse/corpse_ids/corpse_items/corpse_value/corpse_at/corpse_position/corpse_label`, `take_from_corpse`, `take_all_from_corpse`, `claim_corpse(id, peer = 0)` (silent, the AI's entry point). Every one of them books through the same `_book_piece()`, so a piece cannot be duplicated and peer 0 never dresses a body. `CorpseLootPanel extends WarbandPaperdoll` adds `open_corpse(loot, id) -> bool`, `showing_corpse()`, `take_piece`, `take_all` and `set_title`; `G` at a corpse opens it and `P` still opens the mercenary paperdoll. `SoldierLootRun.run(pickups)` now also jogs survivors to corpses and claims each once. |
 | `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu`, `AltarMenu.configure/unbind_rows/distill_rows/brand_rows` |
 | `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash |
 | `scripts/warband/warband_hud.gd` (`WarbandHud`) | body panel, squad rows, prompts, status banners |
@@ -190,17 +191,17 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 
 | Module | Surface |
 | --- | --- |
-| `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp over a **60 x 68 m** walled yard (ground 100 x 140 m plus an invisible catch floor, so no body can fall out of the world); the gate is set in the front wall and the four armed reinforcements walk in through it from outside; four cages clamped one body each, the rescuer's scripted jog and **the body you have to enter yourself** (F5 / `[ ]`, he stands still until then and no latch opens), **one latch per cage cut with G**, two antlered camp watchers, three weapon drops that snap into the soul's hands, the gate door (G) |
-| squad AI (`_drive_allies` in `cage_escape.gd`) | a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`, re-dressed with `refresh_gear`), then runs at the nearest watcher, aims and swings on layer 2; the player's own body is never driven, the rescuer joins in if the soul leaves him. Watchers hunt the nearest standing body, not just the soul. Kills or pickups that land while the cages are still being cut are refused as progress and then reconciled by `TutorialSequencer.note_battle_state()` when FREED begins, so a fast squad cannot dead-end the tutorial. |
-| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the hollow warden silhouette with a camp profile: 36 health (three shiv stabs), 5 damage, slow telegraph; real wilderness mob, not an arena body. `arm(item_id)` puts a catalog blade on the rig's `hand_r` bone, and `take_weapon_item()` hands it back so the scene can drop it. |
+| `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | night camp **deep in the wood**: a ragged 40 x 52 m pocket (`YARD_HALF_WIDTH` 20, front -30, back 22) with no wall and no gate - a broken stake ring, three twig shelters, a fire ring and junk, trees standing inside the pocket, and 170 m of ordinary forest (`CAMP_TO_ROAD_METRES`) before the trail's first torch. Four cages clamped one body each; the rescuer's scripted jog and **the body you have to enter yourself** (F5 / `[ ]`); **one latch per cage, cut by hand with G within `LATCH_REACH` 2.2 m and only with a blade in hand** (`interact`/`latch_target`/`open_latch` - nothing opens on a possession or a kill); two camp watchers; three makeshift-tier drops on the ground; the leaving is a walk out of the trees |
+| squad AI (`scripts/warband/squad_drive.gd`) | the one module both areas share: a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`, re-dressed with `refresh_gear`), then runs at the nearest watcher and fights on layer 2 through one explicit ladder - close / swing / guard / circle / reset - resolved on every frame, with the exchange rolled once when the blade frees (55-70% guard for 0.35-0.80 s, guard dropping into the blow), 1-3 swings then a 0.25-0.55 s short rugged circle re-rolled per step, and only `sword`/`dagger` allowed to guard. Escort clause when nothing is hostile; the field is stripped once `_clear_of_hostiles` at the drop or corpse (22 m), drops through `quick_loot` and bodies through `register_corpse`/`corpse_at`/`claim_corpse`. The player's own body is never driven. |
+| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | a ranger-rigged `ArenaActor` (`extends CultistGuard`), so a watcher swings the authored clips, blocks, staggers and crouches; `PAIR_HEALTH` 44 / `HARDENED_HEALTH` 144, `WATCHER_LAYER` 2. A deterministic 12-entry variant table (`VARIANTS`, `variant_index_for(mob_id, node_name)`) varies scale 0.88-1.12, build, hunch, paint and armour subset; every main hand comes from the makeshift tier only (`MAKESHIFT_MAINS`), with `shield_wood` or a second shiv allowed off-hand. `arm(item_id)`/`take_weapon_item()`/`gear_items()` keep the mob surface the scenes call, the swing-locked contact emits `attacked`, and every death emits `defeated` exactly once through `enter_downed` -> `_die` (mobs do not bleed out). |
 | `scripts/warband/tutorial_card.gd` (`TutorialCard`) | the modal step card: large title/body/keys, **pauses the tree** while open, one CONTINUE button (or G / Enter / Escape), restores the previous pause and mouse state on close |
-| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING -> TOWN`; six watchers in total (the first pair, then four armed reinforcements), no loot requirement in the objective; `note_rescuer_taken()` (the objective changes from "F5 or [ ]" to the latch count only once the player is in the body), four separate latches (`note_cage_opened`), out-of-order calls refused, objective **and** a per-beat key hint (`hint()`) |
+| `scripts/warband/tutorial_sequencer.gd` (`TutorialSequencer`) | `CAGED -> ALL_SEEN -> RESCUER_ARRIVED -> FREED -> ESCAPING` (there is no TOWN state: the lesson ends where the road does); eight watchers in total (the pair Corvin puts down, then six out of the trees), no loot requirement in the objective; `note_rescuer_taken()` changes the objective to the latch count; **four separate latches, one per `G` press** (`note_cage_opened`, which no longer requires a prior beat and frees the squad only at four); out-of-order calls refused; objective **and** a per-beat key hint (`hint()`) |
 | `scripts/warband/branded_runner.gd` (`BrandedRunner`) + `branded_fx.gd` | the six sigils: Arrow Barrage, Shockwave Cleave, Rending Strike, Ember Storm, Hellfire Cone, Blood Ritual Ward; tier scaling, stamina, cooldown, refusal reasons |
 | `scenes/town_hub.tscn` + `scripts/warband/town_hub.gd` | dusk square, campfire, stash chest, altar, recruiter desk, gate; `interact_at(peer, point)` resolves the nearest service; one `scene_requested` door |
 | `scripts/warband/expedition_gate.gd` (`ExpeditionGate`) | `prompt`, `deploy_and_launch(ids)`, `return_to_town()` |
 | `scripts/warband/cultist_guard.gd` (`CultistGuard`) | crimson cultist body, faction filter so guards never fight each other, no arena respawn |
 | `scripts/warband/enemy_waves.gd` (`EnemyWaves`) | deterministic waves (3, +1 per wave, capped at 6) with escalating kits, `wave_started/wave_cleared`, `guards()`, `field()`, `living()` |
-| `scripts/warband/soldier_loot_run.gd` (`SoldierLootRun`) | survivors physically jog to the drops, then the vacuum books them |
+| `scripts/warband/soldier_loot_run.gd` (`SoldierLootRun`) | survivors physically jog to the drops **and to the bodies**, then the vacuum books each piece into the shared stash exactly once |
 | `scripts/warband/warband_session.gd` (`WarbandSession`) | real ENet host/join, body ownership broadcast, 20 Hz body snapshots, guest prediction, AI fallback on leave |
 | `scripts/warband/quartermaster_menu.gd` (`QuartermasterMenu`) + `Warband.buy_gear` | ten base pieces bought with gold into the collective stash; the same keeper price the stash sort uses |
 | `scripts/warband/game_flow.gd` (autoload `GameFlow`) | the only thing that changes scene; `enter_warband()`, `start_campaign()`, `enter_town()`, `launch_expedition()`, `bind(scene)` |
@@ -291,16 +292,42 @@ Short version of the latest tuning (all in the code, all covered by
 `tests/cage_escape_regression.gd`):
 
 - the fifth prisoner is **not** forced into the soul; the player takes him (F5 /
-  `[` / `]`) and no latch opens before that;
-- each cage is cut individually with **G**, then the freed squad arms itself from
-  the ground and attacks the watchers on its own, silently;
-- watchers carry **72 health** and hunt aggressively (run 5.6 m/s, sight 60,
-  orbit 1.9); the first pair is bare, and **six armed watchers** come through the
-  gate when they die, each dropping the weapon it held;
-- the escape needs all **eight** watchers down and no longer asks for loot;
+  `[` / `]`), and taking him opens nothing - a latch is cut by hand;
+- each of the four latches is cut **individually with G**, standing at that cage
+  with a blade in hand (`LATCH_REACH` 2.2 m); bare hands are refused with a status
+  line, and nothing opens on a possession or a kill;
+- once all four are cut the freed squad arms itself off the ground and attacks the
+  watchers on its own, silently, through the shared squad ladder;
+- watchers are rigged, varied bodies (see the `CageWatcher` row), they hunt the
+  nearest standing body, and **six more come out of the trees** as the squad
+  leaves the camp; every corpse keeps its kit and registers with the loot vacuum;
+- the opening does not ask for loot, and the escape is a walk, not a quota;
 - the whole campaign is **one world**: `scenes/warband_world.tscn` holds the cages
-  in a torch-lit clearing in the wood, a 286 m trail through it and a town cut into
-  the same trees at the far end. There is no door key and no load between them —
-  you walk — and the only scene change left is deploying to the arena;
-- the camp yard is **60 x 68 m** inside a 100 x 140 m floor with an invisible
-  catch floor, so nothing can fall out of the world.
+  in a camp pocket **deep in the wood**, 170 m of ordinary forest between the camp
+  and the trail head, a 915 m trail through the trees and a town cut into the same
+  trees at the far end. There is no door key and no load between them — you walk —
+  and the only scene change left is deploying to the arena;
+### Running the tests
+
+`python tools/run_tests.py` is the **warband** suite - the game - one pool of
+isolated processes, with the two ENet tests serial afterwards. The frontier,
+arena and delve suites are a sandbox harness for the shared rig and combat code;
+they run with `--base`, only when a change touches that layer.
+
+**Hard rule: a test run is a couple of minutes, never more.** Per test 90 s
+(120 s is the absolute ceiling anywhere), whole run 180 s; the runner kills a
+test at the ceiling and fails the run when the total is exceeded. Nothing here is
+allowed to grow to ten minutes.
+
+| test | what it owns |
+| --- | --- |
+| `cage_escape_regression` 263 | the camp, the four latches, the pair, the doors, the corridor to the road |
+| `escape_run_regression` 248 | the road, its cult, and the ambush that follows the leaving |
+| `warband_world_regression` 198 | one world, one controller, the 1,117 m walk, the budget (~85 s: the only long test) |
+| `watcher_variants_regression` 357 | the variant table, makeshift-only kits, block/stagger/crouch clips |
+| `corpse_loot_regression` 110 | the corpse registry, one booking path, the corpse screen |
+| `downed_bleedout_regression` 46 | the prone pose, the drip, 30 s to DEAD, revive clears it |
+
+- the camp is a **40 x 52 m ragged pocket** - broken stakes, three twig shelters,
+  a fire ring, trees inside the footprint - inside a 420 x 1480 m floor with an
+  invisible catch floor, so nothing can fall out of the world.

@@ -52,10 +52,29 @@ const ITEMS := {
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A split branch with a knapped flint edge, bound in sinew",
 		"detail":"30 damage / 1.0 s swing / 1.8 m reach / the salvage short blade"},
-	"dagger_makeshift": {"name":"Makeshift Shiv", "short":"Msh Shiv", "kind":"dagger", "index":0, "price":4,
+	# The makeshift tier: what a prisoner actually carries out of the wood. Every
+	# piece is worse than the cheapest forged steel, because the whole point of the
+	# opening is that a body is not yet a fighter.
+	"dagger_ironwood": {"name":"Ironwood Shiv", "short":"Iwd Shiv", "kind":"dagger", "index":1, "price":4,
 		"category":"1h", "grip":"1h", "slot":"main",
-		"summary":"A snapped rib ground to a point and wrapped in hide",
-		"detail":"14 damage / 0.5 s stab / 1.2 m reach / weak guard / +200% forward stab / off-hand legal"},
+		"summary":"A split ironwood stave whittled to a point and bound in gut",
+		"detail":"10 damage / 0.55 s stab / 1.15 m reach / weak guard / +200% forward stab / off-hand legal"},
+	"bow_twig": {"name":"Twig Bow", "short":"Twig Bow", "kind":"bow", "index":3, "price":3,
+		"category":"bow", "grip":"bow", "slot":"main",
+		"summary":"A green sapling and a length of cord",
+		"detail":"5 damage at full draw / 0.7 s draw / it will put an arrow in the wood"},
+	"club_makeshift": {"name":"Club", "short":"Club", "kind":"sword", "index":3, "price":4,
+		"category":"1h", "grip":"1h", "slot":"main",
+		"summary":"A knotted length of heartwood with the root still on it",
+		"detail":"6 damage / 0.9 s swing / 1.7 m reach / one hand"},
+	"branch_heavy": {"name":"Heavy Tree Branch", "short":"Hvy Branch", "kind":"sword", "index":4, "price":5,
+		"category":"2h", "grip":"2h", "slot":"main",
+		"summary":"A whole limb, bark and all, swung with both hands",
+		"detail":"15 damage / 1.6 s swing / 2.3 m reach / two-handed"},
+	"shield_wood": {"name":"Wooden Shield", "short":"Wood Shld", "kind":"shield", "index":3, "price":5,
+		"category":"shield", "slot":"off",
+		"summary":"Planks off a hut wall, lashed to a forearm",
+		"detail":"Off hand only / light front block / pairs with a one-hander"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -276,6 +295,30 @@ const ITEMS := {
 		"category":"armor", "slot":"feet",
 		"summary":"Bark soles held on by living root straps",
 		"detail":"Split toe, quiet footing"},
+	# The naked set: an old shirt and a pair of shorts, and bare skin everywhere
+	# else. It is what the warband is wearing when the game opens, it guards
+	# nothing, and the four empty-looking slots exist so a body can be undressed
+	# back to skin after looting anything better.
+	"armor_naked_head": {"name":"Bare head", "short":"Bare head", "kind":"head", "index":5, "set":5, "price":1,
+		"category":"armor", "slot":"head",
+		"summary":"Hair, and whatever the wood has left of it",
+		"detail":"No cover at all"},
+	"armor_naked_chest": {"name":"Old Shirt", "short":"Shirt", "kind":"chest", "index":5, "set":5, "price":1,
+		"category":"armor", "slot":"chest",
+		"summary":"A washed-out linen shirt, long past its owner",
+		"detail":"No cover at all / stops nothing"},
+	"armor_naked_hands": {"name":"Bare hands", "short":"Bare hands", "kind":"hands", "index":5, "set":5, "price":1,
+		"category":"armor", "slot":"hands",
+		"summary":"Rope burns, split knuckles, nothing else",
+		"detail":"No cover at all"},
+	"armor_naked_legs": {"name":"Tight Shorts", "short":"Shorts", "kind":"legs", "index":5, "set":5, "price":1,
+		"category":"armor", "slot":"legs",
+		"summary":"Coarse cloth cut off at the thigh",
+		"detail":"No cover at all / full stride"},
+	"armor_naked_feet": {"name":"Bare feet", "short":"Bare feet", "kind":"feet", "index":5, "set":5, "price":1,
+		"category":"armor", "slot":"feet",
+		"summary":"Soles hardened by every road in the wood",
+		"detail":"No cover at all"},
 	"armor_leather": {"name":"Ranger leather", "short":"Ranger set", "kind":"armor", "index":0, "set":0, "price":55,
 		"category":"armor_bundle",
 		"summary":"The road-worn ranger outfit",
@@ -303,7 +346,11 @@ const ITEM_STATS := {
 	"sword_great": {"damage":50.0, "attack":3.0, "reach":2.5},
 	"dagger_iron": {"damage":14.0, "attack":0.5, "reach":1.2},
 	"sword_makeshift": {"damage":30.0, "attack":1.0, "reach":1.8},
-	"dagger_makeshift": {"damage":14.0, "attack":0.5, "reach":1.2},
+	"dagger_ironwood": {"damage":10.0, "attack":0.55, "reach":1.15},
+	"bow_twig": {"damage":5.0, "attack":0.7},
+	"club_makeshift": {"damage":6.0, "attack":0.9, "reach":1.7},
+	"branch_heavy": {"damage":15.0, "attack":1.6, "reach":2.3},
+	"shield_wood": {"block":18},
 	"staff_fire": {"damage":50.0, "attack":3.0, "reach":1.6},
 	"staff_bone": {"damage":50.0, "attack":3.0, "reach":1.5},
 	"shield_buckler": {"block":18},
@@ -321,7 +368,11 @@ const ITEM_QUOTES := {
 	"sword_great": "A sword with a mortgage and a bad temper.",
 	"dagger_iron": "Small, honest, and always closer than you think.",
 	"sword_makeshift": "Tree branch, flint, sinew; it will do until it does not.",
-	"dagger_makeshift": "Somebody's rib. It still points where you aim it.",
+	"dagger_ironwood": "Somebody's rib. It still points where you aim it.",
+	"bow_twig": "A sapling that has not yet learned to be a bow.",
+	"club_makeshift": "The root was doing fine until it met you.",
+	"branch_heavy": "Two hands, one tree, no plan.",
+	"shield_wood": "A hut wall with opinions.",
 	"staff_fire": "Keeps a little of the campfire angry for you.",
 	"staff_bone": "Grandmother's shinbone, promoted to management.",
 	"shield_buckler": "A dinner plate with ambitions.",
@@ -377,21 +428,39 @@ const ITEM_QUOTES := {
 	"armor_makeshift_hands": "Thorns facing out, as intended.",
 	"armor_makeshift_legs": "Knees of a forest that keeps standing up.",
 	"armor_makeshift_feet": "Roots grip. That is the whole design.",
+	"armor_naked_head": "Nothing between you and the weather.",
+	"armor_naked_chest": "Somebody else's shirt, and it fits better than yours did.",
+	"armor_naked_hands": "No gloves. No excuses.",
+	"armor_naked_legs": "Short, tight, and no help at all against a blade.",
+	"armor_naked_feet": "The wood has been teaching them for years.",
 	"armor_leather": "The road-worn ranger, folded into one legacy box.",
 	"armor_mail": "A hauberk's worth of legacy, now sold by the piece.",
 	"armor_plate": "The wardens' steel, itemized and ready to be earned.",
 }
+
+## Item ids that were renamed or folded into another piece. Saves, the warband
+## stash and the roster all read ids off disk, so one table maps every dead id to
+## the piece that replaced it and nothing is silently dropped on load.
+const LEGACY_ITEM_ALIASES := {
+	"dagger_makeshift": "dagger_ironwood",
+}
+
+## The id an old save actually means. Unknown ids are returned untouched so the
+## caller's own validation stays the only gate.
+static func migrate_item_id(item_id: String) -> String:
+	return str(LEGACY_ITEM_ALIASES.get(item_id, item_id))
 
 const VENDORS := [
 	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
 		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
-		"sword_makeshift","dagger_makeshift",
+		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
 		"sword_short","sword_arming","sword_great","dagger_iron",
-		"shield_buckler","shield_kite","shield_tower",
+		"shield_buckler","shield_kite","shield_tower","shield_wood",
 	]},
 	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
+		"armor_naked_head","armor_naked_chest","armor_naked_hands","armor_naked_legs","armor_naked_feet",
 		"armor_makeshift_head","armor_makeshift_chest","armor_makeshift_hands","armor_makeshift_legs","armor_makeshift_feet",
 		"armor_leather_head","armor_leather_chest","armor_leather_hands","armor_leather_legs","armor_leather_feet",
 		"armor_mail_head","armor_mail_chest","armor_mail_hands","armor_mail_legs","armor_mail_feet",
@@ -791,6 +860,7 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 	var bow := 0
 	var sword := 0
 	var staff := -1
+	var dagger := 0
 	if main_category == "bow":
 		weapon = "bow"
 		bow = int(main.get("index", 0))
@@ -799,6 +869,7 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		sword = int(main.get("index", 0))
 	elif main_kind == "dagger":
 		weapon = "dagger"
+		dagger = int(main.get("index", 0))
 	elif main_category == "staff":
 		weapon = "sword"
 		sword = 2
@@ -818,7 +889,7 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 			off_weapon = {"kind":off_kind, "index":int(off.get("index", 0))}
 	return {
 		"main":main_id, "off":off_id, "weapon":weapon,
-		"bow":bow, "sword":sword, "staff":staff,
+		"bow":bow, "sword":sword, "staff":staff, "dagger":dagger,
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
 			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
@@ -899,8 +970,8 @@ func _pair_matches(a: Dictionary, b: Dictionary) -> bool:
 ## Drop ids the slot cannot take, and an off hand under a two-hander.
 func _legal_pair(value: Variant) -> Dictionary:
 	var source: Dictionary = value if typeof(value) == TYPE_DICTIONARY else {}
-	var main_id := str(source.get("main", ""))
-	var off_id := str(source.get("off", ""))
+	var main_id := migrate_item_id(str(source.get("main", "")))
+	var off_id := migrate_item_id(str(source.get("off", "")))
 	if main_id.is_empty() or not EquipmentRules.allowed(_item(main_id), "main"):
 		main_id = ""
 	if off_id.is_empty() or not EquipmentRules.allowed(_item(off_id), "off"):
@@ -1178,7 +1249,7 @@ func _read_list(value: Variant, limit: int) -> Array[String]:
 		return out
 	var entries: Array = value
 	for entry in entries:
-		var item_id := str(entry)
+		var item_id := migrate_item_id(str(entry))
 		if not ITEMS.has(item_id):
 			continue
 		if limit > 0 and out.size() >= limit:
@@ -1192,7 +1263,7 @@ func _load_equipped_v3(saved: Dictionary) -> void:
 	for slot in EquipmentRules.SLOTS:
 		if not saved.has(slot):
 			continue
-		var item_id := str(saved.get(slot, ""))
+		var item_id := migrate_item_id(str(saved.get(slot, "")))
 		if item_id.is_empty():
 			equipped[slot] = ""
 		elif EquipmentRules.allowed(_item(item_id), slot):

@@ -3,15 +3,24 @@ extends CanvasLayer
 ## journey to disk, switch the window between fullscreen and a window, leave the
 ## session and quit the client. It owns no simulation, so the world (and a
 ## hosted session) keeps running behind it; it only frees the pointer.
+##
+## The menu is one LedgerFrame like every other screen: the plates are the shared
+## rack, the sections are rubricated in blood ink, and the last written save is
+## set at the foot of the page.
 
 signal resumed
 signal exit_requested
 signal quit_requested
 
-const CREAM := Color("eee9db")
-const MUTED := Color("a5b6b7")
-const GOLD := Color("e9bf76")
-const TEAL := Color("72cbb6")
+const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
+const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+
+const PANEL_SIZE := Vector2(460, 600)
+const INK := LedgerThemeScript.INK
+const INK_MUTED := LedgerThemeScript.INK_MUTED
+const BLOOD := LedgerThemeScript.BLOOD
+const TEAL := LedgerThemeScript.TEAL
+const DIM := Color(0.02, 0.015, 0.01, 0.82)
 
 var resume_button: Button
 var save_button: Button
@@ -51,6 +60,8 @@ func open(message: String = "") -> void:
 	# The menu is the reason the pointer is free; clicking it must never move
 	# the camera or swing a weapon.
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if resume_button != null:
+		resume_button.grab_focus()
 
 func close() -> void:
 	if not _open:
@@ -86,49 +97,83 @@ func _build() -> void:
 	root.name = "Menu"
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
-	root.theme = _theme()
+	root.theme = LedgerThemeScript.get_theme()
 	add_child(root)
+
 	var dim := ColorRect.new()
+	dim.name = "Dim"
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.008,0.024,0.03,0.74)
+	dim.color = DIM
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(dim)
-	var panel := Panel.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER,true)
-	panel.position = Vector2(-230,-270)
-	panel.size = Vector2(460,540)
-	panel.add_theme_stylebox_override("panel",_style(Color(0.038,0.078,0.096,0.99),Color("3f5b60"),10))
-	root.add_child(panel)
-	_label(panel,"IRONWOOD",Vector2(26,20),12,GOLD)
-	_label(panel,"MENU",Vector2(24,36),32,CREAM)
-	_notice = _label(panel,"",Vector2(26,86),13,TEAL)
-	_notice.size = Vector2(408,44)
+
+	var frame = LedgerFrameScript.new()
+	frame.name = "Frame"
+	frame.configure("Menu", "gear")
+	frame.set_anchors_preset(Control.PRESET_CENTER)
+	frame.offset_left = -PANEL_SIZE.x * 0.5
+	frame.offset_right = PANEL_SIZE.x * 0.5
+	frame.offset_top = -PANEL_SIZE.y * 0.5
+	frame.offset_bottom = PANEL_SIZE.y * 0.5
+	root.add_child(frame)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 10)
+	frame.body.add_child(column)
+
+	var kicker := _label("IRONWOOD", 11, INK_MUTED)
+	column.add_child(kicker)
+	var title := _label("QUICK MENU", 32, INK)
+	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	column.add_child(title)
+
+	_notice = _label("", 12, BLOOD)
 	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_notice.custom_minimum_size = Vector2(0, 34)
 	_notice.visible = false
-	resume_button = _button(panel,"RESUME",Vector2(26,142),Vector2(408,46))
+	column.add_child(_notice)
+
+	resume_button = _button("RESUME", "PrimaryButton", 54)
 	resume_button.pressed.connect(close)
-	save_button = _button(panel,"SAVE GAME",Vector2(26,198),Vector2(408,46))
+	column.add_child(resume_button)
+	_section(column, "JOURNEY")
+
+	save_button = _button("SAVE JOURNEY", "", 48)
 	save_button.pressed.connect(save_journey)
-	display_button = _button(panel,"DISPLAY",Vector2(26,254),Vector2(408,46))
+	column.add_child(save_button)
+	display_button = _button("DISPLAY", "", 48)
 	display_button.pressed.connect(_toggle_display)
-	exit_button = _button(panel,_exit_label,Vector2(26,310),Vector2(408,46))
+	column.add_child(display_button)
+	_section(column, "LEAVE")
+
+	exit_button = _button(_exit_label, "DangerButton", 48)
 	exit_button.pressed.connect(func():
 		_note("exit_requested", {"label": _exit_label})
 		exit_requested.emit())
-	quit_button = _button(panel,"EXIT GAME",Vector2(26,366),Vector2(408,46))
+	column.add_child(exit_button)
+	quit_button = _button("EXIT GAME", "DangerButton", 48)
 	quit_button.pressed.connect(_quit)
-	var hint := _label(panel,"Esc closes this menu. The world keeps running behind it.",Vector2(26,424),11,MUTED)
-	hint.size = Vector2(408,30)
+	column.add_child(quit_button)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(spacer)
+
+	var hint := _label("Esc closes this menu. The world keeps running behind it.",
+		12, INK_MUTED)
+	hint.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status = _label(panel,"",Vector2(26,466),12,TEAL)
-	_status.size = Vector2(408,44)
+	column.add_child(hint)
+	_status = _label("", 12, TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.custom_minimum_size = Vector2(0, 30)
+	column.add_child(_status)
 	_refresh_display()
 
 func _refresh_display() -> void:
 	if display_button == null:
 		return
-	display_button.text = "DISPLAY: FULLSCREEN" if is_fullscreen() else "DISPLAY: WINDOWED"
+	display_button.text = "DISPLAY:  FULLSCREEN" if is_fullscreen() else "DISPLAY:  WINDOWED"
 
 func _toggle_display() -> void:
 	var window := get_window()
@@ -153,49 +198,28 @@ func _quit() -> void:
 	quit_requested.emit()
 	get_tree().quit()
 
-
 func _note(message: String, data: Dictionary = {}) -> void:
 	var log := get_node_or_null("/root/Log")
 	if log != null:
 		log.event("menu", message, data)
 
-func _theme() -> Theme:
-	var result := Theme.new()
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["Bahnschrift","Segoe UI"])
-	result.default_font = font
-	result.default_font_size = 15
-	result.set_color("font_color","Label",CREAM)
-	result.set_color("font_color","Button",CREAM)
-	result.set_color("font_hover_color","Button",Color.WHITE)
-	result.set_color("font_pressed_color","Button",Color("13282f"))
-	result.set_stylebox("normal","Button",_style(Color("243a40"),Color("456068"),7))
-	result.set_stylebox("hover","Button",_style(Color("34545b"),GOLD,7))
-	result.set_stylebox("pressed","Button",_style(GOLD,GOLD,7))
-	return result
+func _section(parent: Control, text: String) -> void:
+	var label := _label(text, 10, BLOOD)
+	parent.add_child(label)
 
-func _style(fill: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var result := StyleBoxFlat.new()
-	result.bg_color = fill
-	result.border_color = border
-	result.set_border_width_all(1)
-	result.set_corner_radius_all(radius)
-	return result
-
-func _label(parent: Node, text: String, at: Vector2, font_size: int, color: Color) -> Label:
+func _label(text: String, font_size: int, color: Color) -> Label:
 	var result := Label.new()
 	result.text = text
-	result.position = at
-	result.add_theme_font_size_override("font_size",font_size)
-	result.add_theme_color_override("font_color",color)
-	parent.add_child(result)
+	result.add_theme_font_size_override("font_size", font_size)
+	result.add_theme_color_override("font_color", color)
 	return result
 
-func _button(parent: Node, text: String, at: Vector2, size_at: Vector2) -> Button:
+func _button(text: String, variation: String, height: int) -> Button:
 	var result := Button.new()
 	result.text = text
-	result.position = at
-	result.size = size_at
+	if not variation.is_empty():
+		result.theme_type_variation = variation
+	result.custom_minimum_size = Vector2(0, height)
 	result.focus_mode = Control.FOCUS_NONE
-	parent.add_child(result)
+	result.add_theme_font_size_override("font_size", 15)
 	return result

@@ -1,11 +1,13 @@
 extends RefCounted
 ## The road out of the camp: the lane the warband runs to reach town.
 ##
-## The arch in the cage yard used to be a teleport. It is now the mouth of a
-## quarter-kilometre of drowned voodoo woods - one winding lane, twelve metres of
-## it walkable, torches down both sides, and the cult in the way. This module is
-## that lane's bones and dressing, and nothing else: `escape_run.gd` owns the
-## bodies, the fight and the door.
+## The arch in the cage yard used to be a teleport. It is now the far end of a
+## long run through drowned voodoo woods - one winding lane, eleven metres of it
+## walkable, torches down both sides, and the cult in the way. The lane does not
+## begin at the camp: the camp's own wood runs to meet it, and how far off it
+## stands is `cage_escape.gd`'s number, not this module's. This module is that
+## lane's bones and dressing, and nothing else: `escape_run.gd` owns the bodies,
+## the fight and the door.
 ##
 ## Three rules hold it together.
 ##
@@ -55,8 +57,10 @@ const CLEARING_FRACTIONS := [0.22, 0.44, 0.66, 0.88]
 const GRASS_BAND := 9.5
 const SEED := 82117
 
-## The lane, camp gate to town gate. It winds, but every bend still closes on the
-## arch, so a body walking it always has the town ahead of it.
+## The lane, its own first waypoint to the town gate. It winds, but every bend
+## still closes on the arch, so a body walking it always has the town ahead of it.
+## Where that first waypoint lands is the caller's `offset`: in the one world it
+## is a long run of wood past the camp's mouth, not the camp's mouth itself.
 const LANE_POINTS := [
 	Vector3(0.0, 0.0, 6.0),
 	Vector3(-5.0, 0.0, -39.0),
@@ -171,13 +175,14 @@ class Path extends RefCounted:
 ## `options` is how the lane is *placed* in the one world instead of standing on
 ## its own:
 ##   * `offset` - the whole lane moves as one: its first waypoint lands where the
-##     caller wants the camp's mouth, and every prop, torch, wall and collider
+##     caller wants the road to start, and every prop, torch, wall and collider
 ##     moves with it, because they are all laid out in lane space.
 ##   * `ground` (default true) - the lane's own floor, field and catch floor. The
 ##     world scene owns one floor for the whole map, so it asks for none.
 ##   * `closed_start` / `closed_end` (default true) - the walls that cap the lane
-##     at both ends. In the world the camp clearing is at one end and the town at
-##     the other, so neither end is walled: the lane *is* the way between them.
+##     at both ends. In the world the camp's wood is at one end and the town at
+##     the other, so neither end is walled: the wood and the lane run into each
+##     other and the walk is the way between them.
 ##   * `arch` (default true) - the village gate and its threshold stones at the
 ##     far end. The world's town builds its own gate at the edge of the square,
 ##     so the lane ends where the settlement begins instead of doubling it.

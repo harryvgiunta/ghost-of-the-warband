@@ -188,11 +188,11 @@ func run() -> void:
 	check(attacker.combat.begin_melee("left"), "A dual wielder starts the left attack")
 	check(attacker.rig.phase == "MELEE_L", "The left attack has its own replicated phase")
 	check(attacker.rig._melee_clip().name == "Dagger_Stab", "The left attack uses the authored dagger stab")
-	check(is_equal_approx(attacker.rig.melee_damage(),float(Archer.DAGGER_DATA.damage)),
+	check(is_equal_approx(attacker.rig.melee_damage(),float(Archer.dagger_profile(0).damage)),
 		"The left hand uses dagger damage")
-	check(is_equal_approx(attacker.rig.melee_seconds(),float(Archer.DAGGER_DATA.seconds)),
+	check(is_equal_approx(attacker.rig.melee_seconds(),float(Archer.dagger_profile(0).seconds)),
 		"The left hand uses dagger timing")
-	check(is_equal_approx(attacker.rig.melee_reach(),float(Archer.DAGGER_DATA.reach)),
+	check(is_equal_approx(attacker.rig.melee_reach(),float(Archer.dagger_profile(0).reach)),
 		"The left hand uses dagger reach")
 	advance(0.05)
 	var left_hand: Vector3 = attacker.rig._bone_world(attacker.rig._arms[0][2]).origin
@@ -232,7 +232,7 @@ func run() -> void:
 	samples.clear()
 	clock = 0.0
 	check(attacker.combat.begin_melee("left"), "The contact probe starts a left stab")
-	advance(Archer.DAGGER_DATA.seconds+STEP)
+	advance(Archer.dagger_profile(0).seconds+STEP)
 	recording = false
 	check(not samples.is_empty(), "The left stab emits real blade samples")
 	if samples.is_empty():
@@ -250,10 +250,10 @@ func run() -> void:
 	attacker.combat.melee_progress = 1.0
 	clock = 0.0
 	check(attacker.combat.begin_melee("left"), "A second left stab starts after recovery")
-	advance(Archer.DAGGER_DATA.seconds+STEP)
-	check(is_equal_approx(victim.health,200.0-float(Archer.DAGGER_DATA.damage)),
+	advance(Archer.dagger_profile(0).seconds+STEP)
+	check(is_equal_approx(victim.health,200.0-float(Archer.dagger_profile(0).damage)),
 		"A real left dagger contact deals its base damage once")
-	check(is_equal_approx(victim.health,200.0-float(Archer.DAGGER_DATA.damage)),
+	check(is_equal_approx(victim.health,200.0-float(Archer.dagger_profile(0).damage)),
 		"The left dagger does not damage the victim twice")
 
 	# Right attack: the equipped sword profile, and the dagger stays offhand.
@@ -342,7 +342,7 @@ func run() -> void:
 	check(attacker.combat.begin_melee("right","diagonal_right"), "The damage overlap starts the right diagonal")
 	advance(0.12)
 	var after_left: float = victim.health
-	check(after_left <= 200.0-float(Archer.DAGGER_DATA.damage),
+	check(after_left <= 200.0-float(Archer.dagger_profile(0).damage),
 		"The left dagger deals damage while the right sword is already swinging")
 	advance(0.5)
 	check(victim.health <= after_left-float(Archer.SWORD_DATA[0].damage),

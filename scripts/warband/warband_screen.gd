@@ -21,12 +21,17 @@ const Vendor = preload("res://scripts/warband/mercenary_vendor.gd")
 const State = preload("res://scripts/player_state.gd")
 const RunReportScript = preload("res://scripts/warband/run_report.gd")
 
-const CREAM := Color("eee9db")
-const MUTED := Color("a5b6b7")
-const GOLD := Color("e9bf76")
-const TEAL := Color("72cbb6")
-const AMBER := Color("d9a441")
-const DANGER := Color("c9604f")
+const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
+const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+
+const CREAM := LedgerThemeScript.INK
+const MUTED := LedgerThemeScript.INK_MUTED
+const GOLD := LedgerThemeScript.BLOOD
+const TEAL := LedgerThemeScript.TEAL
+const AMBER := Color("7c3e12")
+const DANGER := LedgerThemeScript.BLOOD
+
+const SIZE := Vector2(1090, 660)
 
 const ARMOR_SLOTS := ["head", "chest", "hands", "legs", "feet"]
 
@@ -93,6 +98,7 @@ func open() -> void:
 	_ensure_built()
 	_open = true
 	visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
 
 func close() -> void:
@@ -163,57 +169,67 @@ func _ensure_built() -> void:
 	shell.name = "WarbandScreen"
 	shell.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shell.mouse_filter = Control.MOUSE_FILTER_STOP
-	shell.theme = _theme()
+	shell.theme = LedgerThemeScript.get_theme()
 	add_child(shell)
 	var dim := ColorRect.new()
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.008, 0.024, 0.03, 0.84)
+	dim.color = Color(0.02, 0.015, 0.01, 0.84)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	shell.add_child(dim)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 26)
-	shell.add_child(margin)
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel",
-		_style(Color(0.038, 0.078, 0.096, 0.99), Color("3f5b60"), 10))
-	margin.add_child(panel)
+
+	var frame = LedgerFrameScript.new()
+	frame.name = "Frame"
+	frame.configure("Warband", "banner")
+	frame.set_anchors_preset(Control.PRESET_CENTER)
+	frame.offset_left = -SIZE.x * 0.5
+	frame.offset_right = SIZE.x * 0.5
+	frame.offset_top = -SIZE.y * 0.5
+	frame.offset_bottom = SIZE.y * 0.5
+	shell.add_child(frame)
+
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
-	panel.add_child(column)
+	frame.body.add_child(column)
 
 	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 16)
+	head.add_theme_constant_override("separation", 14)
 	column.add_child(head)
-	var title := _label(head, "WARBAND", 26, CREAM)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gold_label = _label(head, "", 14, GOLD)
-	deployed_label = _label(head, "", 14, TEAL)
-	value_label = _label(head, "", 14, MUTED)
-	column.add_child(HSeparator.new())
+	var purse := _label(head, "PURSE", 10, MUTED)
+	purse.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	gold_label = _label(head, "", 22, CREAM)
+	gold_label.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(spacer)
+	deployed_label = _label(head, "", 12, TEAL)
+	value_label = _label(head, "", 12, MUTED)
+	_section(column, "")
+
 	_build_run_block(column)
-	column.add_child(HSeparator.new())
-	_label(column, "MERCENARY / HEALTH / STATE / GEAR / CONTROL", 11, MUTED)
+	_section(column, "MERCENARY")
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 6)
 	column.add_child(_rows_box)
 	_empty_label = _label(_rows_box, "The warband is empty. Swear a body in below.", 13, MUTED)
-	column.add_child(HSeparator.new())
 
 	var recruiter_head := HBoxContainer.new()
-	recruiter_head.add_theme_constant_override("separation", 16)
+	recruiter_head.add_theme_constant_override("separation", 14)
 	column.add_child(recruiter_head)
-	var recruiter_title := _label(recruiter_head, "GOLD RECRUITER", 16, GOLD)
+	var recruiter_title := _label(recruiter_head, "GOLD RECRUITER", 17, GOLD)
+	recruiter_title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	recruiter_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_cost_label = _label(recruiter_head, "", 13, MUTED)
+	_cost_label = _label(recruiter_head, "", 11, MUTED)
 	_recruiter_box = VBoxContainer.new()
 	_recruiter_box.add_theme_constant_override("separation", 6)
 	column.add_child(_recruiter_box)
 	for index in 3:
 		_hire_rows.append(_make_hire_row(index))
-	_status = _label(column, "", 13, TEAL)
+	var tail := Control.new()
+	tail.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(tail)
+	_status = _label(column, "", 12, TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
 
 # --- rows ------------------------------------------------------------------
 
@@ -238,37 +254,43 @@ func _sync_rows() -> void:
 func _make_row(merc_id: int) -> Dictionary:
 	var root := HBoxContainer.new()
 	root.name = "Mercenary%d" % merc_id
-	root.add_theme_constant_override("separation", 10)
-	root.custom_minimum_size = Vector2(0, 32)
+	root.add_theme_constant_override("separation", 12)
+	root.custom_minimum_size = Vector2(0, 40)
 	_rows_box.add_child(root)
-	var name_label := _label(root, "", 15, CREAM)
-	name_label.custom_minimum_size = Vector2(150, 0)
+	var name_label := _label(root, "", 20, CREAM)
+	name_label.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	name_label.custom_minimum_size = Vector2(148, 0)
 	var bar := ProgressBar.new()
-	bar.custom_minimum_size = Vector2(170, 16)
+	bar.custom_minimum_size = Vector2(150, 14)
 	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	bar.show_percentage = false
 	bar.max_value = 1.0
-	bar.add_theme_stylebox_override("background", _style(Color("132a30"), Color("2c4046"), 4))
+	bar.add_theme_stylebox_override("background", _bar_style(Color("3a2e21"), Color("221a12")))
 	root.add_child(bar)
-	var health_label := _label(root, "", 13, MUTED)
-	health_label.custom_minimum_size = Vector2(84, 0)
-	var chip := _label(root, "", 13, TEAL)
-	chip.custom_minimum_size = Vector2(80, 0)
-	var gear_label := _label(root, "", 13, MUTED)
+	var health_label := _label(root, "", 12, MUTED)
+	health_label.custom_minimum_size = Vector2(74, 0)
+	var chip := _label(root, "", 11, TEAL)
+	chip.custom_minimum_size = Vector2(86, 24)
+	chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chip.add_theme_stylebox_override("normal", _chip_style(0))
+	var gear_label := _label(root, "", 12, MUTED)
 	gear_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gear_label.clip_text = true
 	var deploy := Button.new()
 	deploy.toggle_mode = true
 	deploy.focus_mode = Control.FOCUS_NONE
-	deploy.custom_minimum_size = Vector2(106, 28)
+	deploy.custom_minimum_size = Vector2(104, 30)
 	deploy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	deploy.add_theme_font_size_override("font_size", 10)
 	deploy.pressed.connect(func() -> void: _on_deploy(merc_id, deploy.button_pressed))
 	root.add_child(deploy)
 	var control := Button.new()
 	control.text = "CONTROL"
+	control.theme_type_variation = "PrimaryButton"
 	control.focus_mode = Control.FOCUS_NONE
-	control.custom_minimum_size = Vector2(112, 28)
+	control.custom_minimum_size = Vector2(112, 30)
 	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	control.add_theme_font_size_override("font_size", 10)
 	control.pressed.connect(func() -> void: _on_control(merc_id))
 	root.add_child(control)
 	return {"root": root, "name": name_label, "bar": bar, "health": health_label,
@@ -282,15 +304,16 @@ func _apply_row(merc_id: int) -> void:
 	var state := int(roster.state_of(merc_id))
 	(row["name"] as Label).text = str(roster.name_of(merc_id))
 	var chip: Label = row["state"]
-	chip.text = Contracts.state_name(state)
+	chip.text = Contracts.state_name(state).to_upper()
 	var bar: ProgressBar = row["bar"]
 	# The chip colour and the bar fill only change when the health state does;
 	# repainting every row on every warband event must not allocate styles.
 	if int(row.get("state_value", -1)) != state:
 		row["state_value"] = state
-		var color := _state_color(state)
-		chip.add_theme_color_override("font_color", color)
-		bar.add_theme_stylebox_override("fill", _style(color.darkened(0.25), color, 4))
+		chip.add_theme_color_override("font_color", _state_color(state))
+		chip.add_theme_stylebox_override("normal", _chip_style(state))
+		var fill := _bar_fill(state)
+		bar.add_theme_stylebox_override("fill", _bar_style(fill.darkened(0.25), fill))
 	var max_health := maxf(1.0, float(roster.max_health_of(merc_id)))
 	var health := clampf(float(roster.health_of(merc_id)), 0.0, max_health)
 	bar.max_value = max_health
@@ -341,18 +364,53 @@ func _state_color(state: int) -> Color:
 		Contracts.HealthState.DOWNED:
 			return AMBER
 		Contracts.HealthState.DEAD:
-			return DANGER
+			return Color("5f5a52")
 	return TEAL
+
+func _bar_fill(state: int) -> Color:
+	match state:
+		Contracts.HealthState.DOWNED:
+			return Color("a35a22")
+		Contracts.HealthState.DEAD:
+			return Color("5c544a")
+	return Color("962c22")
+
+func _chip_style(state: int) -> StyleBoxTexture:
+	var key := "alive"
+	match state:
+		Contracts.HealthState.DOWNED:
+			key = "downed"
+		Contracts.HealthState.DEAD:
+			key = "dead"
+	var box := StyleBoxTexture.new()
+	box.texture = load(LedgerThemeScript.DIR + "chip_%s.png" % key)
+	box.texture_margin_left = 12
+	box.texture_margin_right = 12
+	box.texture_margin_top = 8
+	box.texture_margin_bottom = 8
+	box.content_margin_left = 10
+	box.content_margin_right = 10
+	box.content_margin_top = 4
+	box.content_margin_bottom = 4
+	return box
+
+func _bar_style(fill: Color, border: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.border_color = border
+	box.set_border_width_all(1)
+	box.set_corner_radius_all(3)
+	return box
 
 # --- header ----------------------------------------------------------------
 
 func _refresh_header() -> void:
 	if _warband == null:
 		return
-	gold_label.text = "%d gold" % int(_warband.gold())
-	deployed_label.text = "%d / %d deployed" % [
+	gold_label.text = "%d G" % int(_warband.gold())
+	deployed_label.text = "%d / %d FIELDED" % [
 		int(_warband.roster.deployed_count()), int(_warband.deployment_cap)]
-	value_label.text = "%d warband value" % int(_warband.total_value())
+	value_label.text = "WORTH %d G" % int(_warband.total_value())
 
 # --- last run --------------------------------------------------------------
 
@@ -364,7 +422,8 @@ func _build_run_block(parent: Node) -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 14)
 	parent.add_child(head)
-	var title := _label(head, "LAST RUN", 15, AMBER)
+	var title := _label(head, "LAST RUN", 14, AMBER)
+	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	title.custom_minimum_size = Vector2(96, 0)
 	last_run_label = _label(head, "", 13, CREAM)
 	last_run_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -427,13 +486,14 @@ func _body_line(bodies: Variant) -> String:
 func _make_hire_row(index: int) -> Dictionary:
 	var root := HBoxContainer.new()
 	root.add_theme_constant_override("separation", 10)
-	var name_label := _label(root, "", 14, CREAM)
+	var name_label := _label(root, "", 15, CREAM)
 	name_label.custom_minimum_size = Vector2(150, 0)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var button := Button.new()
 	button.text = "HIRE"
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(150, 28)
+	button.custom_minimum_size = Vector2(150, 30)
+	button.add_theme_font_size_override("font_size", 11)
 	button.pressed.connect(func() -> void: _on_hire(index))
 	root.add_child(button)
 	hire_buttons.append(button)
@@ -507,28 +567,14 @@ func _on_control(merc_id: int) -> void:
 
 # --- presentation helpers --------------------------------------------------
 
-func _theme() -> Theme:
-	var result := Theme.new()
-	result.default_font = ThemeDB.fallback_font
-	result.default_font_size = 14
-	result.set_color("font_color", "Label", CREAM)
-	result.set_color("font_color", "Button", CREAM)
-	result.set_color("font_hover_color", "Button", Color.WHITE)
-	result.set_color("font_pressed_color", "Button", Color("13282f"))
-	result.set_color("font_disabled_color", "Button", Color("5b7175"))
-	result.set_stylebox("normal", "Button", _style(Color("243a40"), Color("456068"), 6))
-	result.set_stylebox("hover", "Button", _style(Color("34545b"), GOLD, 6))
-	result.set_stylebox("pressed", "Button", _style(GOLD, GOLD, 6))
-	result.set_stylebox("disabled", "Button", _style(Color("18282d"), Color("2c4046"), 6))
-	return result
-
-func _style(fill: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var result := StyleBoxFlat.new()
-	result.bg_color = fill
-	result.border_color = border
-	result.set_border_width_all(1)
-	result.set_corner_radius_all(radius)
-	return result
+func _section(parent: Node, text: String) -> void:
+	if text.is_empty():
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(0, 6)
+		parent.add_child(gap)
+		return
+	var label := _label(parent, text, 10, MUTED)
+	label.add_theme_constant_override("line_spacing", 0)
 
 func _label(parent: Node, text: String, font_size: int, color: Color) -> Label:
 	var result := Label.new()

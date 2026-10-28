@@ -1,10 +1,15 @@
 extends Node3D
 
-## Held sword. ``skin`` selects the model family: forged steel, or the salvage
-## "Makeshift" cleaver the forest creatures' own gear is built from. The socket
-## axis is shared: blade along -Z, grip at the origin.
+## Held sword. The model family comes from ``sword_kind`` - forged steel for the
+## three ranked blades, a knotted club and a whole tree limb for the makeshift
+## tier - and ``skin`` overrides it for the salvage cleaver, which shares the
+## short blade's index but not its look. The socket axis is shared: blade along
+## -Z, grip at the origin.
 
 const Geo = preload("res://scripts/geo.gd")
+## Which kinds are not steel by default. The catalog's `index` is the key, so a
+## club is a club because it is item index 3, not because a caller said so.
+const NATURAL_FAMILY := {3: "club", 4: "branch"}
 var blade_length := 0.8
 var sword_kind := 0
 var skin := ""
@@ -29,10 +34,18 @@ func _clear() -> void:
 
 func _build() -> void:
 	_clear()
-	if skin == "makeshift":
-		_build_makeshift()
-	else:
-		_build_steel()
+	var family := skin
+	if family.is_empty():
+		family = str(NATURAL_FAMILY.get(sword_kind, ""))
+	match family:
+		"makeshift":
+			_build_makeshift()
+		"club":
+			_build_club()
+		"branch":
+			_build_branch()
+		_:
+			_build_steel()
 
 
 func _build_steel() -> void:
@@ -106,3 +119,102 @@ func _build_makeshift() -> void:
 			Vector3(-0.030 + index * 0.055,0.014,-0.055),bark_light)
 		splinter.rotation.x = 0.5 - index * 0.9
 		splinter.rotation.y = 0.4 + index * 0.5
+
+## A knotted length of heartwood with the root still on it: one club, two hands
+## of a prisoner's strength, a head that is heavier than the haft so the swing
+## reads as a swing and not a stick waved about.
+func _build_club() -> void:
+	var bark := Geo.material(Color("3a2b20"), 0.0, 0.94)
+	var bark_light := Geo.material(Color("5c4534"), 0.0, 0.9)
+	var heart := Geo.material(Color("6b4a2c"), 0.0, 0.86)
+	var hide := Geo.material(Color("2b2019"), 0.0, 0.92)
+	var cord := Geo.material(Color("8d7852"), 0.0, 0.88)
+	var span := maxf(blade_length, 0.3)
+	# The haft: thick at the knot, thin at the hand, crooked all the way down.
+	var haft := Geo.cylinder(self, 0.026, 0.040, span * 0.94,
+		Vector3(0.0, 0.0, -0.04 - span * 0.44), heart, 8)
+	haft.name = "Blade"
+	haft.rotation.x = PI / 2.0
+	haft.rotation.z = 0.05
+	# The root ball at the striking end: two offset masses and a stub of a
+	# second root still hanging off it.
+	var head := Geo.sphere(self, 0.072, Vector3(0.006, 0.004, -0.06 - span * 0.9),
+		heart, Vector3(1.0, 0.86, 1.25))
+	head.name = "Head"
+	Geo.sphere(self, 0.048, Vector3(-0.012, 0.018, -0.02 - span * 0.86), bark_light,
+		Vector3(1.0, 0.8, 1.0))
+	var stub := Geo.cylinder(self, 0.020, 0.010, 0.10,
+		Vector3(0.052, 0.030, -0.05 - span * 0.78), bark_light, 6)
+	stub.rotation.z = -0.7
+	stub.rotation.x = 0.5
+	# Bark still on the haft in broken plates, and the knots the wood grew.
+	for index in 4:
+		var plate := Geo.cylinder(self, 0.030, 0.030, 0.045,
+			Vector3(0.0, 0.0, -0.10 - index * span * 0.19), bark, 7)
+		plate.rotation.x = PI / 2.0
+		plate.rotation.z = 0.12 * float(index % 2) - 0.06
+		var knot := Geo.sphere(self, 0.016,
+			Vector3(0.020 - 0.010 * float(index % 2), 0.006, -0.13 - index * span * 0.19),
+			bark_light, Vector3(1.0, 0.7, 1.0))
+		knot.rotation.z = 0.4 + index
+	# A hide grip, bound with the cord that used to hold somebody else's cage.
+	var grip := Geo.cylinder(self, 0.030, 0.033, 0.16, Vector3(0.0, 0.0, 0.03), hide, 9)
+	grip.rotation.x = PI / 2.0
+	for index in 4:
+		var wrap := Geo.cylinder(self, 0.033, 0.033, 0.007,
+			Vector3(0.0, 0.0, -0.03 + index * 0.038), cord, 9)
+		wrap.rotation.x = PI / 2.0
+	Geo.sphere(self, 0.030, Vector3(0.0, 0.0, 0.112), heart, Vector3(1.0, 0.8, 1.0))
+
+
+## A whole limb swung with both hands: long, bent, and heavy enough that a body
+## has to load the whole torso to move it. Two segments at an angle, the broken
+## stubs of the branches it grew, and a split end where it came off the tree.
+func _build_branch() -> void:
+	var bark := Geo.material(Color("43321f"), 0.0, 0.95)
+	var bark_light := Geo.material(Color("6d4f34"), 0.0, 0.9)
+	var heart := Geo.material(Color("a8834f"), 0.0, 0.82)
+	var leaf := Geo.material(Color("37472c"), 0.0, 0.92)
+	var cord := Geo.material(Color("8d7852"), 0.0, 0.88)
+	var span := maxf(blade_length, 0.5)
+	# The limb: one long crooked mass, thicker toward the far end.
+	var near := Geo.cylinder(self, 0.036, 0.050, span * 0.52,
+		Vector3(0.0, 0.0, -0.02 - span * 0.24), bark, 9)
+	near.name = "Blade"
+	near.rotation.x = PI / 2.0
+	near.rotation.z = 0.04
+	var far := Geo.cylinder(self, 0.050, 0.034, span * 0.46,
+		Vector3(0.030, 0.014, -0.05 - span * 0.68), bark, 9)
+	far.rotation.x = PI / 2.0
+	far.rotation.z = 0.10
+	# The split end where it came off the trunk.
+	var split := Geo.box(self, Vector3(0.082, 0.036, 0.080),
+		Vector3(0.052, 0.020, -0.02 - span * 0.94), heart)
+	split.rotation.y = 0.24
+	split.rotation.z = 0.16
+	# Branch stubs: the limb is not a pole, it is a limb.
+	for index in 3:
+		var root := Vector3(0.028 - 0.01 * float(index), 0.012,
+			-0.16 - float(index) * span * 0.22)
+		var stub := Geo.beam(self, root,
+			root + Vector3(0.10 * (1.0 if index % 2 == 0 else -0.8), 0.07, -0.05),
+			0.022, bark_light, 6)
+		stub.name = "Stub%d" % index
+	# Bark plates along the whole length, and a knot the size of a fist.
+	for index in 6:
+		var plate := Geo.cylinder(self, 0.046, 0.046, 0.055,
+			Vector3(0.004 * float(index % 2), 0.004, -0.11 - float(index) * span * 0.14),
+			bark_light, 8)
+		plate.rotation.x = PI / 2.0
+		plate.rotation.z = 0.1 * float(index % 3) - 0.1
+	Geo.sphere(self, 0.038, Vector3(-0.038, 0.022, -0.30 - span * 0.18), heart,
+		Vector3(1.0, 0.8, 1.2))
+	# Two hands: a cord wrap at each grip, and a rag tied mid-shaft.
+	for at in [0.02, -0.10 - span * 0.16]:
+		var wrap := Geo.cylinder(self, 0.036, 0.036, 0.10,
+			Vector3(0.0, 0.0, at), cord, 9)
+		wrap.rotation.x = PI / 2.0
+	var rag := Geo.box(self, Vector3(0.010, 0.085, 0.030),
+		Vector3(-0.040, -0.030, -0.44 - span * 0.10), leaf)
+	rag.rotation.z = 0.5
+	rag.rotation.y = 0.3

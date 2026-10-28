@@ -61,7 +61,7 @@ func _test_table() -> void:
 	check(is_equal_approx(Passives.variant_rate("sword", "stab"), 1.0), "A sword stab gains nothing from the dagger row")
 	check(is_equal_approx(Passives.variant_rate("", "stab"), 1.0), "An empty hand has no passive")
 	check(is_equal_approx(Passives.variant_rate("dagger", "nonsense"), 1.0), "An unknown variant has no passive")
-	var rows: Array = Passives.effect_rows("dagger", float(Archer.DAGGER_DATA.seconds))
+	var rows: Array = Passives.effect_rows("dagger", float(Archer.dagger_profile(0).seconds))
 	check(rows.size() == 2, "The row pair advertises the passive")
 	if rows.size() == 2:
 		check(str(rows[0].label) == "PASSIVE" and str(rows[0].value) == "Prison shank", "The passive is named")
@@ -76,7 +76,7 @@ func _test_table() -> void:
 func _test_tooltip() -> void:
 	var state := State.new()
 	state.reset(false)
-	for dagger_id in ["dagger_iron", "dagger_makeshift"]:
+	for dagger_id in ["dagger_iron", "dagger_ironwood"]:
 		var rows: Array = state.item_stat_rows(dagger_id)
 		var has_passive := false
 		var has_stab := false
@@ -176,7 +176,7 @@ func _test_rig(world: Node3D) -> void:
 	var sweeps_before := sweeps
 	advance(SHANK + STEP)
 	check(sweeps > sweeps_before, "The contact stab swept its blade")
-	check(is_equal_approx(victim.health, 200.0 - float(Archer.DAGGER_DATA.damage)),
+	check(is_equal_approx(victim.health, 200.0 - float(Archer.dagger_profile(0).damage)),
 		"A 0.167 s stab still deals one dagger hit (health %.1f, sweeps %d)" % [
 			victim.health, sweeps - sweeps_before])
 	attacker.combat.stop()
