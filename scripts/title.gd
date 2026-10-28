@@ -28,6 +28,8 @@ var join_button: Button
 ## The possession campaign's door: a fresh warband, not a resume.
 var warband_button: Button
 var _join_layer: Control
+var _lobby_layer: Control
+var _lobby_button: Button
 ## The warband's host/join panel, beside the four doors. It talks to `GameFlow`
 ## directly: the socket belongs to the flow (the one node that survives the
 ## hand-off), so the menu only has to remember what was typed.
@@ -63,87 +65,128 @@ func _ready() -> void:
 
 func _build() -> void:
 	theme = LedgerThemeScript.get_theme()
-	var backdrop := ColorRect.new()
+
+	var backdrop := TextureRect.new()
+	backdrop.name = "Backdrop"
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backdrop.color = Color("08141a")
+	backdrop.texture = load("res://assets/ui/title_backdrop.png")
+	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
-	var gradient := Gradient.new()
-	gradient.set_color(0,Color("122b31"))
-	gradient.set_color(1,Color("050b0f"))
-	gradient.add_point(0.55,Color("0a1c22"))
-	var texture := GradientTexture2D.new()
-	texture.gradient = gradient
-	texture.fill = GradientTexture2D.FILL_LINEAR
-	texture.fill_from = Vector2(0.0,0.0)
-	texture.fill_to = Vector2(1.0,1.0)
-	texture.width = 512
-	texture.height = 512
-	var wash := TextureRect.new()
-	wash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	wash.texture = texture
-	wash.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	wash.stretch_mode = TextureRect.STRETCH_SCALE
-	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(wash)
 
-	var frame := Panel.new()
-	frame.position = Vector2(72,92)
-	frame.size = Vector2(520,716)
-	frame.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
-	add_child(frame)
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.015, 0.012, 0.010, 0.40)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(dim)
+
+	var column := VBoxContainer.new()
+	column.name = "Doors"
+	column.set_anchors_preset(Control.PRESET_CENTER)
+	column.offset_left = -260
+	column.offset_right = 260
+	column.offset_top = -340
+	column.offset_bottom = 340
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 6)
+	add_child(column)
+
+	var seal := TextureRect.new()
+	seal.name = "Seal"
+	seal.texture = load(LedgerThemeScript.DIR + "seal.png")
+	seal.custom_minimum_size = Vector2(72, 72)
+	seal.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	seal.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	seal.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(seal)
+	_center_label(column, "G H O S T   O F", 22, Color(0.82, 0.75, 0.64))
+	var wordmark := _center_label(column, "THE WARBAND", 74, Color(0.95, 0.90, 0.80))
+	wordmark.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	var tagline := _center_label(column, "a soul may wear any living body", 19,
+		Color(0.78, 0.70, 0.58))
+	tagline.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
+	var breath := Control.new()
+	breath.custom_minimum_size = Vector2(0, 4)
+	column.add_child(breath)
 	var rule := ColorRect.new()
-	rule.position = Vector2(28,196)
-	rule.size = Vector2(84,3)
-	rule.color = GOLD
-	frame.add_child(rule)
-	var title := _label(frame,"IRONWOOD",Vector2(26,92),56,CREAM)
-	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
-	title.size = Vector2(470,74)
-	var subtitle := _label(frame,"THE FRONTIER AWAITS",Vector2(28,162),15,GOLD)
-	subtitle.size = Vector2(470,20)
-	var blurb := _label(frame,"One town. One wilderness. One delve that never ends.\nEverything happens in the world.",Vector2(28,232),14,MUTED)
-	blurb.size = Vector2(462,48)
-	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	blurb.add_theme_color_override("font_shadow_color",Color("081418"))
-	start_button = _button(frame,"START NEW GAME",Vector2(28,316),Vector2(462,58))
-	start_button.theme_type_variation = "PrimaryButton"
-	start_button.add_theme_font_size_override("font_size",19)
-	start_button.pressed.connect(_start_new_game)
-	_load_button = _button(frame,"LOAD SAVED GAME",Vector2(28,388),Vector2(462,58))
-	_load_button.add_theme_font_size_override("font_size",19)
-	_load_button.pressed.connect(_load_saved_game)
-	host_world_button = _button(frame,"HOST OPEN WORLD",Vector2(28,460),Vector2(462,58))
-	host_world_button.add_theme_font_size_override("font_size",19)
-	host_world_button.pressed.connect(_host_open_world)
-	join_button = _button(frame,"JOIN GAME",Vector2(28,532),Vector2(462,58))
-	join_button.add_theme_font_size_override("font_size",19)
-	join_button.pressed.connect(_open_join)
-	# Ghost of the Warband: the possession campaign, a separate persistent warband
-	# with its own save, entered from the cages or resumed in the town.
-	warband_button = _button(frame,"GHOST OF THE WARBAND",Vector2(28,604),Vector2(462,54))
-	warband_button.add_theme_font_size_override("font_size",18)
-	warband_button.pressed.connect(_enter_warband)
-	_status = _label(frame,"",Vector2(28,662),13,TEAL)
-	_status.size = Vector2(462,44)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var footer := _label(frame,"WASD  Move    LMB  Attack / Draw    G  Interact\nI  Inventory    P  Equipment    Esc  Menu / Save / Quit",Vector2(28,684),10,MUTED)
-	footer.size = Vector2(462,28)
-	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rule.custom_minimum_size = Vector2(500, 1)
+	rule.color = Color(0.58, 0.45, 0.25, 0.55)
+	rule.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(rule)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 8)
+	column.add_child(gap)
 
-	var ranger := Label.new()
-	ranger.text = "II"
-	ranger.position = Vector2(1128,492)
-	ranger.add_theme_font_size_override("font_size",164)
-	ranger.add_theme_color_override("font_color",Color(0.35,0.55,0.53,0.16))
-	add_child(ranger)
-	# Ghost of the Warband's two doors. The panel sits beside the four above
-	# rather than inside them because a warband battle is its own mode: it starts
-	# a possession session, not a seat in the arena or the open world.
+	start_button = _plate(column, "NEW CAMPAIGN", "PrimaryButton", _start_new_game)
+	_load_button = _plate(column, "CONTINUE", "", _load_saved_game)
+	host_world_button = _plate(column, "HOST OPEN WORLD", "", _host_open_world)
+	join_button = _plate(column, "JOIN GAME", "", _open_join)
+	warband_button = _plate(column, "GHOST OF THE WARBAND", "", _enter_warband)
+	_lobby_button = _plate(column, "WARBAND LOBBY", "", _toggle_lobby)
+
+	_status = _center_label(column, "", 12, LedgerThemeScript.TEAL)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var hint := _center_label(column,
+		"WASD Move   ·   LMB Attack / Draw   ·   I Inventory   ·   P Equipment   ·   Esc Menu",
+		10, Color(0.66, 0.60, 0.50))
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	# The warband's host/join panel is a door of its own: hidden until asked for,
+	# then it sits over the world like every other ledger window.
 	lobby = LobbyScript.new()
 	lobby.name = "WarbandLobby"
-	lobby.position = Vector2(624,92)
-	add_child(lobby)
+	_lobby_layer = Control.new()
+	_lobby_layer.name = "LobbyLayer"
+	_lobby_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_lobby_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_lobby_layer.visible = false
+	add_child(_lobby_layer)
+	var lobby_dim := ColorRect.new()
+	lobby_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lobby_dim.color = Color(0.015, 0.012, 0.010, 0.88)
+	lobby_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_lobby_layer.add_child(lobby_dim)
+	lobby.position = Vector2(348, 258)
+	_lobby_layer.add_child(lobby)
+	var close := Button.new()
+	close.text = "CLOSE"
+	close.position = Vector2(870, 514)
+	close.size = Vector2(194, 44)
+	close.pressed.connect(_toggle_lobby)
+	_lobby_layer.add_child(close)
 	_build_join_layer()
+
+
+func _center_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	parent.add_child(label)
+	return label
+
+
+func _plate(parent: Node, text: String, variation: String, action: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(500, 50)
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.add_theme_font_size_override("font_size", 17)
+	if not variation.is_empty():
+		button.theme_type_variation = variation
+	button.pressed.connect(action)
+	parent.add_child(button)
+	return button
+
+
+func _toggle_lobby() -> void:
+	if _lobby_layer == null:
+		return
+	_lobby_layer.visible = not _lobby_layer.visible
+
 
 func _enter_warband() -> void:
 	# The warband door is a new campaign, not a resume: a fresh warband, the four
@@ -271,7 +314,7 @@ func _build_crash_notice() -> void:
 	crash_notice = Panel.new()
 	crash_notice.position = Vector2(872, 626)
 	crash_notice.size = Vector2(496, 190)
-	crash_notice.add_theme_stylebox_override("panel",_style(Color(0.075,0.035,0.03,0.96),Color("8a4b39"),10))
+	crash_notice.add_theme_stylebox_override("panel", LedgerThemeScript.lacquer_panel())
 	add_child(crash_notice)
 	_label(crash_notice,"PREVIOUS SESSION ENDED UNEXPECTEDLY",Vector2(20,16),14,WARN)
 	var detail := _label(crash_notice,"Crash report and session log saved.\nAttach both when reporting the problem.",Vector2(20,44),12,MUTED)
@@ -404,7 +447,11 @@ func _note(message: String, data: Dictionary = {}) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		if _join_layer != null and _join_layer.visible:
-			_close_join()
-			get_viewport().set_input_as_handled()
+	if not event.is_action_pressed("ui_cancel"):
+		return
+	if _lobby_layer != null and _lobby_layer.visible:
+		_lobby_layer.visible = false
+		get_viewport().set_input_as_handled()
+	elif _join_layer != null and _join_layer.visible:
+		_close_join()
+		get_viewport().set_input_as_handled()

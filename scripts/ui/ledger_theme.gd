@@ -151,8 +151,16 @@ static func _plate(variant: String, state: String) -> StyleBoxTexture:
 
 ## A nine-slice iron slab for panels that are not the vellum page (title, lobby).
 static func iron_panel() -> StyleBoxTexture:
+	return _panel_box("plate_iron_idle.png")
+
+
+static func lacquer_panel() -> StyleBoxTexture:
+	return _panel_box("plate_lacquer_idle.png")
+
+
+static func _panel_box(file: String) -> StyleBoxTexture:
 	var box := StyleBoxTexture.new()
-	box.texture = load(DIR + "plate_iron_idle.png")
+	box.texture = load(DIR + file)
 	box.texture_margin_left = 20
 	box.texture_margin_right = 20
 	box.texture_margin_top = 12

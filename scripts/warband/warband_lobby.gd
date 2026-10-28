@@ -23,6 +23,8 @@ const PANEL_SIZE := Vector2(744, 316)
 ## 7779, so the lobby offers the same one instead of the open world's 7777.
 const DEFAULT_PORT := 7779
 
+const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
 const GOLD := Color("e9bf76")
@@ -142,14 +144,15 @@ func _note(message: String, data: Dictionary = {}) -> void:
 # --- the panel -------------------------------------------------------------
 
 func _build() -> void:
-	theme = preload("res://scripts/ui/ledger_theme.gd").get_theme()
+	theme = LedgerThemeScript.get_theme()
 	size = PANEL_SIZE
 	var panel := Panel.new()
 	panel.size = PANEL_SIZE
 	panel.add_theme_stylebox_override("panel",
-		preload("res://scripts/ui/ledger_theme.gd").iron_panel())
+		LedgerThemeScript.iron_panel())
 	add_child(panel)
-	var heading := _label(panel, "WARBAND LOBBY", Vector2(26, 20), 30, CREAM)
+	var heading := _label(panel, "WARBAND LOBBY", Vector2(26, 20), 28, CREAM)
+	heading.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	heading.size = Vector2(690, 38)
 	var subtitle := _label(panel, "Host the warband, or join a friend's field.", Vector2(28, 58), 12, MUTED)
 	subtitle.size = Vector2(690, 18)
