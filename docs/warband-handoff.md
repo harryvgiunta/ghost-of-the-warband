@@ -42,7 +42,10 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
    * **the feet** — the moment the soul enters him: W A S D / SHIFT / SPACE /
      mouse, and where the shiv lies;
    * **the steel** — walking onto the shiv opens the card that names `K`; taking
-     it is what arms the body and what wakes the pair;
+     it is what arms the body and what wakes the pair. The shiv carries a
+     `LessonArrow` (`lesson_arrow.gd`, unshaded gold, `SIZE` 1.35, bobbing and
+     rolling) from the first frame of the walk until the drop leaves the dirt, and
+     the camp's loose dagger was moved off the same walk so no decoy sits closer;
    * **the cuts** — raised on the same frame the shiv enters the hand, before the
      pair get one frame to close in: LMB diagonal, `WHEEL UP` stab (Prison shank:
      +200%, 0.167 s), `WHEEL DOWN` overhead;

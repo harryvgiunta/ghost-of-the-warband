@@ -202,6 +202,11 @@ func check_spawn() -> void:
 	var lesson_shiv = camp.get("_shiv_pickup")
 	check(lesson_shiv != null and is_instance_valid(lesson_shiv),
 		"his ironwood shiv lies on the dirt for the player to take")
+	var marker = camp.get("_shiv_marker")
+	check(marker != null and is_instance_valid(marker),
+		"a marker arrow is built over the shiv")
+	check(marker != null and not bool(marker.get("visible")),
+		"which stays out of sight until the lesson asks for the walk")
 	check(lesson_shiv != null and str(lesson_shiv.item_id) == camp.LESSON_SHIV,
 		"and it is the shiv, not a stray club (%s)"
 		% ("" if lesson_shiv == null else str(lesson_shiv.item_id)))
@@ -444,11 +449,41 @@ func check_rescuer() -> void:
 		% ("" if game.card == null else game.card.step()))
 	check(str(camp.hint_line(cutter)).contains("W A S D"),
 		"and its key line teaches walking (%s)" % str(camp.hint_line(cutter)))
+	# The walk is marked: a big gold arrow bobbing over the shiv, up while the card
+	# that asks for the walk is open (the tree is paused and `_process` is not).
+	var marker = camp.get("_shiv_marker")
+	check(marker != null and bool(marker.get("visible")),
+		"the shiv is marked the moment the walk is asked for")
+	if marker != null:
+		var shiv = camp.get("_shiv_pickup")
+		var over := flat_range((marker as Node3D).global_position,
+			(shiv as Node3D).global_position)
+		check(over <= 0.6, "the arrow hangs over the dagger itself (%.2f m off)" % over)
+		check(float((marker as Node3D).global_position.y)
+			> float((shiv as Node3D).global_position.y) + 1.0,
+			"above the piece, where it can be seen from the cage line")
+		check(str(marker.get_script().resource_path).ends_with("lesson_arrow.gd"),
+			"and it is the lesson's arrow (%s)" % str(marker.get_script().resource_path))
 	# Nothing hunts an empty-handed body: the pair wake on the shiv, not on a beat.
 	for watcher in camp.guards:
 		check(not bool(watcher.hunting()), "the pair do not hunt an unarmed body")
 	check(camp.watchers_down() == 0, "both watchers are still standing")
 	dismiss_card("the walking card")
+	# A marker that does not move is scenery: sample the bob over a few frames.
+	var first_marker = camp.get("_shiv_marker")
+	var low_y := 0.0
+	var high_y := 0.0
+	for frame in 24:
+		await physics_frame
+		if first_marker != null and is_instance_valid(first_marker):
+			var at_y := float((first_marker as Node3D).global_position.y)
+			if frame == 0:
+				low_y = at_y
+				high_y = at_y
+			low_y = minf(low_y, at_y)
+			high_y = maxf(high_y, at_y)
+	check(high_y - low_y > 0.05,
+		"the arrow bobs while it points (%.2f m of travel)" % (high_y - low_y))
 
 # --- the first fight -------------------------------------------------------
 
@@ -479,6 +514,9 @@ func check_duel() -> void:
 	check(str(warband.roster.equipped_of(camp.rescuer_id).get("main", ""))
 			== camp.LESSON_SHIV, "K puts the ironwood shiv in his main hand")
 	check(camp.holds_blade(cutter), "and the body is holding a blade")
+	var taken_marker = camp.get("_shiv_marker")
+	check(taken_marker == null or not bool(taken_marker.get("visible")),
+		"the arrow goes with the drop the moment it leaves the dirt")
 	check(camp.duel.step() == DuelScript.Step.FIGHT,
 		"taking the shiv starts the fight (%s)" % camp.duel.step_name())
 	# 3. The pickup itself is the freeze: the three cuts are named on the frame the

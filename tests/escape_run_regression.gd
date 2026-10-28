@@ -476,9 +476,30 @@ func check_follow() -> void:
 				near += 1
 	Engine.time_scale = 1.0
 	Engine.physics_ticks_per_second = 60
+	# A failure here has to say *why*: three allies left behind because they are
+	# still fighting, and three allies on the floor, are different bugs.
+	var report: Array = []
+	for merc_id in game.squad_ids:
+		if int(merc_id) == game.controller.merc_for_peer(1):
+			continue
+		var ally = game.controller.body_of(int(merc_id))
+		if ally == null or not is_instance_valid(ally):
+			report.append("%d:gone" % int(merc_id))
+			continue
+		var nearest := INF
+		for hostile in game.camp.guards:
+			if is_instance_valid(hostile) and bool(hostile.get("alive")):
+				nearest = minf(nearest, _flat((hostile as Node3D).global_position,
+					(ally as Node3D).global_position))
+		report.append("%d:%.0fm%s%s:hostile=%.0fm:move=%.1f,%.1f" % [int(merc_id),
+			_flat(ally.global_position, soul.global_position),
+			"" if bool(ally.get("alive")) else ":dead",
+			":down" if bool(ally.get("downed")) else "",
+			-1.0 if nearest == INF else nearest,
+			float(ally.get("move_direction").x), float(ally.get("move_direction").y)])
 	check(near >= needed,
-		"the squad follows the soul down the trail (%d of %d within 20 m after %.0f s)"
-		% [near, needed, waited * WALK_SCALE])
+		"the squad follows the soul down the trail (%d of %d within 20 m after %.0f s; following=%s; %s)"
+		% [near, needed, waited * WALK_SCALE, str(game.squad.following), ", ".join(report)])
 
 
 # --- the end of the trail --------------------------------------------------

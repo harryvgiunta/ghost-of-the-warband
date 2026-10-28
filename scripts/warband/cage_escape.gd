@@ -177,7 +177,7 @@ const WATCHER_LAYER := 2
 ## makeshift blades, all of them things a body can swing.
 const WEAPON_DROPS := [
 	["club_makeshift", Vector3(-0.8, 0.15, -0.5)],
-	["dagger_ironwood", Vector3(4.4, 0.15, -10.0)],
+	["dagger_ironwood", Vector3(1.4, 0.15, -27.0)],
 	["branch_heavy", Vector3(-4.6, 0.15, -16.5)],
 ]
 ## One big card per beat. The card pauses the game, so every line has to be
@@ -263,6 +263,7 @@ const DUEL_CARDS := [
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CombatScript = preload("res://scripts/combat.gd")
+const ArrowScript = preload("res://scripts/warband/lesson_arrow.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const DressingScript = preload("res://scripts/warband/camp_dressing.gd")
@@ -303,6 +304,9 @@ var _pickups: Array = []
 ## The one drop the lesson owns: `LESSON_SHIV` on the dirt at `SHIV_POST`. Taking
 ## it is what arms the player and what wakes the pair.
 var _shiv_pickup
+## The bouncing arrow over that drop, shown only while the lesson wants it walked
+## to (the movement card and the pickup card) and taken with it.
+var _shiv_marker
 var _jogging := false
 var _cage_open: Array[bool] = []     # per cage, in CAGE_POSTS order
 var _watchers_awake := false
@@ -438,8 +442,14 @@ func place_warband(bodies_in: Array) -> void:
 	for drop in WEAPON_DROPS:
 		_spawn_pickup(str(drop[0]), drop[1])
 	# And the shiv itself, lying where the pair threw it: the first weapon in the
-	# game and the beat the duel lesson is built around.
+	# game and the beat the duel lesson is built around. It gets a big gold arrow
+	# hanging over it - a body at the cage line cannot see a dagger in the dirt, and
+	# "walk to your shiv" is a place, not a sentence.
 	_shiv_pickup = _spawn_pickup(LESSON_SHIV, SHIV_POST)
+	_shiv_marker = ArrowScript.new()
+	_shiv_marker.name = "ShivMarker"
+	add_child(_shiv_marker)
+	_shiv_marker.visible = false
 
 
 ## Start the lesson: the sequencer, the first fight's own lesson, the cards and
@@ -590,6 +600,7 @@ func note_pickup(pickup = null) -> void:
 
 func _process(delta: float) -> void:
 	_advance_cage_doors(delta)
+	_update_shiv_marker()
 
 
 func _physics_process(delta: float) -> void:
@@ -988,6 +999,23 @@ func note_possession(merc_id: int) -> void:
 
 # --- the first fight's lesson ----------------------------------------------
 
+## The shiv's arrow lives exactly as long as the errand does: from the moment the
+## lesson starts asking for a walk to the moment the drop leaves the dirt. It is
+## polled rather than pushed, so a pickup taken by anybody - the player, a
+## squadmate, a sweep - takes the arrow with it.
+func _update_shiv_marker() -> void:
+	if _shiv_marker == null or not is_instance_valid(_shiv_marker):
+		return
+	var live: bool = _shiv_pickup != null and is_instance_valid(_shiv_pickup) \
+		and not bool(_shiv_pickup.get("collected"))
+	var wanted: bool = live and duel != null \
+		and (duel.step() == DuelScript.Step.MOVE or duel.step() == DuelScript.Step.FETCH)
+	if wanted != _shiv_marker.visible:
+		_shiv_marker.visible = wanted
+	if wanted:
+		_shiv_marker.anchor_at((_shiv_pickup as Node3D).global_position)
+
+
 ## A soul stepped into the rescuer: the lesson starts here, on the frame the
 ## hands become the player's. A body that already holds a blade (a campaign that
 ## came back to the camp armed) skips the fetch - there is nothing on the dirt to
@@ -1031,6 +1059,13 @@ func _duel_tick() -> void:
 	if duel.step() == DuelScript.Step.MOVE:
 		var walker = controller.active_body(1) if controller != null else null
 		if walker == null or not is_instance_valid(walker):
+			return
+		# The errand is "be armed", not "take that exact piece": a body that picked
+		# up any blade on the way - the camp leaves three on the dirt - is as armed
+		# as the lesson needs and the pair wake for it.
+		if holds_blade(walker):
+			if duel.note_shiv_taken():
+				_set_status("A blade is in your hands. The pair are awake.", 4.0)
 			return
 		if _shiv_pickup == null or not is_instance_valid(_shiv_pickup) \
 				or bool(_shiv_pickup.get("collected")):
@@ -1132,6 +1167,9 @@ func _on_duel_step(step: int) -> void:
 			_set_status("The pair are awake. Your cuts are on the card - read it, then swing.", 4.5)
 		DuelScript.Step.DONE:
 			_set_status("The pair are down. Cut a latch at each cage with G.", 5.0)
+	# The arrow is a frame behind the card otherwise: a paused tree never reaches
+	# `_process`, and the walk the card just asked for would be unmarked.
+	_update_shiv_marker()
 
 
 # --- the latches -----------------------------------------------------------
