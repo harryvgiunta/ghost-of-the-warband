@@ -10,6 +10,7 @@ extends SceneTree
 
 const SquadScript = preload("res://scripts/warband/squad_drive.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
+const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 
 const TEST_SAVE := "user://squad_medicine_state.json"
 const BANDAGE := "bandage_linen"
@@ -136,9 +137,12 @@ func check_rescue() -> void:
 	_squad.revive = channel
 	_squad.player_body = soul
 	var ally_id: int = _merc_id
-	_squad.squad_ids = _ids([ally_id])
+	# The soul is a squad member like any other: the rescue reads the squad's
+	# downed bodies, not a special "player" slot.
+	var soul_id := ally_id + 1
+	_squad.squad_ids = _ids([ally_id, soul_id])
 	var squad_controller := FakeController.new()
-	squad_controller.bodies = {ally_id: ally}
+	squad_controller.bodies = {ally_id: ally, soul_id: soul}
 	_squad.controller = squad_controller
 
 	# An enemy standing on the body: the squad fights instead of bending down.
@@ -169,6 +173,51 @@ func check_rescue() -> void:
 	_squad._rescue_step(1.0 / 60.0)
 	check(not channel.channeling(ReviveScript.ALLY_PEER),
 		"a standing body leaves no open channel")
+
+	# The soul is not the only body worth saving: with the soul standing in
+	# another body, a downed squadmate is still the squad's to pick up.
+	var other := FakeBody.new()
+	other.name = "Bram"
+	other.downed = true
+	root.add_child(other)
+	other.global_position = alley_position(soul)
+	squad_controller.bodies[soul_id + 1] = other
+	_squad.squad_ids = _ids([ally_id, soul_id, soul_id + 1])
+	ally.global_position = other.global_position + Vector3(0.8, 0.0, 0.0)
+	check(_squad._rescue_step(1.0 / 60.0), "a downed body the soul is not in still gets a rescuer")
+	check(channel.channeling(ReviveScript.ALLY_PEER)
+		and channel.target_of(ReviveScript.ALLY_PEER) == other,
+		"and the rescue names that body")
+	check_rescue_manual_crawl()
+
+
+## The soul's own crawl: nothing moves without a key, and the keys move it.
+func check_rescue_manual_crawl() -> void:
+	var body := FakeBody.new()
+	body.name = "Downed"
+	body.downed = true
+	root.add_child(body)
+	var crawl = CrawlScript.new()
+	root.add_child(crawl)
+	crawl.attach(body)
+	crawl.manual = true
+	body.move_direction = Vector2.ZERO
+	crawl._manual_step(1.0 / 60.0)
+	check(body.crawl_calls == 1 and is_zero_approx(body.last_crawl_speed),
+		"a soul's downed body does not slide with no key held")
+	body.move_direction = Vector2(1.0, 0.0)
+	crawl._manual_step(1.0 / 60.0)
+	check(body.crawl_calls == 2 and body.last_crawl_speed > 0.0,
+		"and it crawls at the contract pace when the player steers")
+	check(body.last_crawl_target.x > body.global_position.x,
+		"in the direction the player held")
+	crawl.manual = false
+	body.move_direction = Vector2.ZERO
+	check(not body.crawl_calls == 3, "the scene's own crawl is not driven by keys")
+
+
+func alley_position(body) -> Vector3:
+	return (body as Node3D).global_position + Vector3(0.0, 0.0, 0.0)
 
 
 func _ids(values: Array) -> Array[int]:
@@ -215,6 +264,15 @@ class FakeBody extends Node3D:
 	var alive := true
 	var downed := false
 	var is_bot := false
+	var rig = null
+	var crawl_calls := 0
+	var last_crawl_target := Vector3.ZERO
+	var last_crawl_speed := 0.0
+
+	func crawl_step(target: Vector3, speed: float, _delta: float) -> void:
+		crawl_calls += 1
+		last_crawl_target = target
+		last_crawl_speed = speed
 
 	func accept_network_input(_direction: Vector2, _running: bool) -> void:
 		pass

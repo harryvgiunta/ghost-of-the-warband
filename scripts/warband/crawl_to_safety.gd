@@ -27,6 +27,11 @@ var speed := Contracts.DOWNED_CRAWL_SPEED
 ## it can still see the thing that put it down. False: it turns and crawls
 ## forwards along the same bearing.
 var reverse := true
+## True while a soul is inside this body: the crawl then reads the player's own
+## intent (`ArenaActor.move_direction`) instead of dragging the body to safety,
+## and it stands still when no key is held. A body that keeps sliding under a
+## player's hands is the one thing a downed body must never do.
+var manual := false
 
 var _anchor := Vector3.ZERO
 var _has_anchor := false
@@ -86,6 +91,9 @@ func safe_point() -> Dictionary:
 func _physics_process(delta: float) -> void:
 	if not is_instance_valid(actor) or not bool(actor.downed) or not bool(actor.alive):
 		return
+	if manual:
+		_manual_step(delta)
+		return
 	var safe := safe_point()
 	# The actor computes the destination so its own `downed_crawl_target()` and
 	# this node can never disagree about where the body is going.
@@ -100,6 +108,20 @@ func _physics_process(delta: float) -> void:
 		return
 	actor.crawl_step(target, speed, delta)
 	_face(travel)
+
+## The soul's own crawl: the keys are the whole of the intent, and no key means no
+## movement. It runs at the same contract pace through the same capsule, so a wall
+## or a trunk still stops it.
+func _manual_step(delta: float) -> void:
+	var intent: Vector2 = actor.move_direction
+	if intent.length() < 0.05:
+		actor.crawl_step(actor.global_position, 0.0, delta)
+		return
+	var here: Vector3 = actor.global_position
+	var travel := Vector3(intent.x, 0.0, intent.y).normalized()
+	actor.crawl_step(here + travel * 2.0, speed, delta)
+	_face(travel)
+
 
 ## Point the model along the crawl. The rig's forward is `-basis.z`, which is
 ## the same `atan2` the locomotion code feeds `Basis(UP, yaw)`.

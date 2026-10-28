@@ -358,6 +358,15 @@ Short version of the latest tuning (all in the code, all covered by
   puts the fist up the limb instead of on its butt end, and the profile is
   `length` 1.16 / `reach` 2.0 / 1.6 s swing (`Items` detail and `ITEM_STATS` keep
   the same 2.0 m reach);
+- **a downed body keeps its soul**: `SoulRouter.set_body_state` only frees the
+  peer on `DEAD`, and `PossessionController._on_body_state_changed` only ejects on
+  `DEAD`. A player who goes down still has hands: `CrawlToSafety.manual` (set for
+  the soul's body every frame by `world_scene._sync_crawl_control`) reads the
+  player's own `move_direction` and stands still with no key held, at the same
+  `DOWNED_CRAWL_SPEED` and through the same capsule, so a wall still stops it.
+  Measured in the world: 0.00 m of drift in two idle seconds (the old auto-crawl
+  slid the body away under the player), 0.67 m while a key is held, 0.00 m after
+  release. Entering a downed body is still refused (`REASON_DOWNED`);
 - **the revive key is a hold**: `G` held for `REVIVE_CHANNEL_SECONDS` (5 s) picks a
   downed squadmate up, and the body stands on `REVIVE_HEALTH_FRACTION` - **5%** of
   its own pool, enough to walk out and not enough to trade. `G` is only consumed
@@ -365,10 +374,14 @@ Short version of the latest tuning (all in the code, all covered by
   opens a counter or searches a corpse. `world_scene._input` and
   `admin_arena._input` both bind it; releasing cancels and spends nothing;
 - **the squad rescues the soul**: `SquadDrive._rescue_step` picks the nearest
-  ally on its feet when the soul is downed and nothing hostile is inside
+  ally on its feet when a squad body is downed and nothing hostile is inside
   `LOOT_CLEAR_METRES` (22 m), walks it inside `revive.reach`, and opens the
   scene's channel on the squad's own hands (`ReviveChannel.begin_ally`, keyed
-  `ALLY_PEER` - the bot refusal is for *peer* channels only). A hostile arriving,
+  `ALLY_PEER` - the bot refusal is for *peer* channels only). `_rescue_patient`
+  reads *any* downed squadmate, preferring the body the soul is inside: the soul
+  hops bodies and a downed mercenary whose soul has moved on is still the
+  warband's to pick up. Measured in the world with the field cleared: the soul was
+  up in 5.4 s on 5% health. A hostile arriving,
   the rescuer going down or walking off breaks it exactly like a human key. An
   AI channel is never opened while a fight is on;
 - **the crosshair is back**: `WarbandHud` draws its own `Reticle` (four arms and a

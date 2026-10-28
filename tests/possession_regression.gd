@@ -336,22 +336,29 @@ func check_camera(warband, controller, merc_ids: Array[int]) -> void:
 
 # --- eject on a router state change ---------------------------------------
 
+## A downed body keeps its soul: the player crawls it themselves and waits to be
+## picked up. Only a death moves the soul out.
 func check_router_eject(warband, controller, merc_ids: Array[int]) -> void:
 	controller.activate(1, merc_ids[0])
 	var doomed := merc_ids[0]
 	warband.souls.set_body_state(doomed, Contracts.HealthState.DOWNED)
+	await physics_frame
+	check(warband.souls.body_of(1) == doomed, "a downed body keeps its soul")
+	check(warband.souls.occupied_by(doomed) == 1, "the downed body is still occupied")
+	check(controller.merc_for_peer(1) == doomed, "the peer map still names the downed body")
+	check(controller.active_actor == controller.body_of(doomed),
+		"the controller keeps riding the downed body")
+	warband.souls.set_body_state(doomed, Contracts.HealthState.DEAD)
+	await physics_frame
+	check(warband.souls.body_of(1) != doomed, "a dead body lets the soul go")
+	check(warband.souls.occupied_by(doomed) == 0, "the dead body is unoccupied")
 	var landed: int = warband.souls.body_of(1)
-	check(landed != doomed and landed > 0, "the soul left the downed body on its own")
-	check(warband.souls.occupied_by(doomed) == 0, "the downed body is unoccupied")
-	check(warband.souls.occupied_by(landed) == 1, "the new body is occupied by the same peer")
-	check(warband.souls.body_state(landed) == Contracts.HealthState.ALIVE,
-		"the soul moved to a living body")
-	check(controller.active_actor == controller.body_of(landed),
-		"the controller follows the soul to the new body")
-	check(controller.camera_rig.active_body() == controller.body_of(landed),
-		"the camera follows the soul to the new body")
-	check(controller.body_of(doomed).is_local == false, "the downed body stopped taking input")
-	check(controller.merc_for_peer(1) == landed, "the peer map names the new body")
+	if landed > 0:
+		check(warband.souls.body_state(landed) == Contracts.HealthState.ALIVE,
+			"the soul moved to a living body")
+		check(controller.active_actor == controller.body_of(landed),
+			"the controller follows the soul to the new body")
+		check(controller.merc_for_peer(1) == landed, "the peer map names the new body")
 	warband.souls.set_body_state(doomed, Contracts.HealthState.ALIVE)
 	await physics_frame
 
@@ -390,7 +397,8 @@ func check_squad_release(warband, controller, merc_ids: Array[int], events: Arra
 		held = warband.souls.body_of(1)
 	for body_id in warband.souls.body_ids():
 		if warband.souls.body_state(body_id) == Contracts.HealthState.ALIVE:
-			warband.souls.set_body_state(body_id, Contracts.HealthState.DOWNED)
+			# Dead, not downed: a downed body keeps its soul on purpose.
+			warband.souls.set_body_state(body_id, Contracts.HealthState.DEAD)
 	check(not warband.souls.is_possessed(1), "with every body gone the peer is released")
 	check(warband.possessed_by(1) == -1, "the warband mirror forgets the possession")
 	check(controller.active_actor == null, "no body takes input any more")
@@ -398,9 +406,9 @@ func check_squad_release(warband, controller, merc_ids: Array[int], events: Arra
 	check(events.size() > 0 and events[-1] == [1, -1],
 		"possession_changed reported the release to the HUD")
 	var refused: Dictionary = controller.activate(1, merc_ids[2])
-	check(not bool(refused.get("ok", false)), "a downed squad cannot be re-entered")
-	check(str(refused.get("reason", "")) == SoulRouter.REASON_DOWNED,
-		"the refusal is the downed rule")
+	check(not bool(refused.get("ok", false)), "a dead squad cannot be re-entered")
+	check(str(refused.get("reason", "")) == SoulRouter.REASON_DEAD,
+		"the refusal names death")
 	for body_id in warband.souls.body_ids():
 		warband.souls.set_body_state(body_id, Contracts.HealthState.ALIVE)
 

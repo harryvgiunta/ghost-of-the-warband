@@ -129,7 +129,11 @@ func set_body_state(body_id: int, state: int) -> void:
 	record["state"] = state
 	if previous != state:
 		body_state_changed.emit(body_id, state)
-	if state != Contracts.HealthState.ALIVE:
+	# Only a death frees the peer. A downed body keeps the soul inside it on
+	# purpose: the player crawls it themselves and an ally stands them back up, so
+	# dropping the soul the moment a body hit the floor left a player watching a
+	# body slide away with no hands on it.
+	if state == Contracts.HealthState.DEAD:
 		var owner_id := int(record.get("occupied_by_peer_id", 0))
 		if owner_id != 0:
 			release_peer(owner_id, Contracts.state_name(state))

@@ -384,10 +384,13 @@ func release_local() -> void:
 
 # --- death and auto-eject --------------------------------------------------
 
-## The router noticed a body stop being alive. Move the soul out of it this
-## frame: a player inside a downed body is the worst possible spectator.
+## The router noticed a body stop being *alive*. Only a death moves the soul out.
+## A downed body keeps its soul on purpose: the player still has hands, the crawl
+## is theirs to steer, and an ally standing over them is the way back up. Ejecting
+## a soul the moment its body hit the floor is what left a player watching a body
+## slide away on its own with no control at all.
 func _on_body_state_changed(body_id: int, state: int) -> void:
-	if state == Contracts.HealthState.ALIVE:
+	if state != Contracts.HealthState.DEAD:
 		return
 	var peer_id := _warband.souls.occupied_by(body_id) if _warband != null else 0
 	if peer_id == 0:

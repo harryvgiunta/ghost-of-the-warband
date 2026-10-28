@@ -237,11 +237,14 @@ func check_souls() -> void:
 	var forward := router.cycle(2, 1)
 	check(forward["ok"] and router.body_of(2) == 12, "cycling forwards takes the higher free body")
 
-	# A body that stops being alive ejects its soul and cannot be entered.
+	# A downed body keeps its soul - the player crawls it and an ally picks them up
+	# - but nobody may hop *into* one.
 	router.set_body_state(12, Contracts.HealthState.DOWNED)
-	check(router.body_of(2) == -1, "a downed body ejects its soul")
-	check(router.request_transfer(2, 12)["ok"] == false, "a downed body cannot be entered")
+	check(router.body_of(2) == 12, "a downed body keeps its soul")
+	check(router.request_transfer(1, 12)["ok"] == false, "a downed body cannot be entered")
+	# A death is what frees the peer.
 	router.set_body_state(12, Contracts.HealthState.DEAD)
+	check(router.body_of(2) == -1, "a dead body ejects its soul")
 	check(router.body_ids().has(12), "a dead body is still registered for the HUD")
 	check(router.possessable_ids() == [11], "only living free bodies are possessable")
 

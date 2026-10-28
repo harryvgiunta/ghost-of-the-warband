@@ -112,6 +112,7 @@ var squad_ids: Array[int] = []
 ## return). Read from `GameFlow.world_start`.
 var start_area := "camp"
 
+var _crawls: Array = []
 var _reviving := false
 var _prompt_text := ""
 var _hint_text := ""
@@ -168,6 +169,7 @@ func _physics_process(delta: float) -> void:
 		return
 	# The squad's brains write a body's intent for this frame, so they run before
 	# the controller integrates it; the watchers tick themselves.
+	_sync_crawl_control()
 	if squad != null:
 		squad.drive(delta)
 	controller.physics_step(delta)
@@ -472,6 +474,16 @@ func _wire_crawl(actor) -> void:
 	add_child(crawl)
 	crawl.attach(actor)
 	crawl.set_friends(bodies)
+	_crawls.append(crawl)
+
+
+## The body the soul is inside is the player's to crawl; every other downed body
+## is the scene's. Re-read every frame, because the soul moves between bodies.
+func _sync_crawl_control() -> void:
+	var soul = controller.active_body(1)
+	for crawl in _crawls:
+		if is_instance_valid(crawl):
+			crawl.manual = is_instance_valid(soul) and crawl.actor == soul
 
 
 ## The squad is `squad_drive.gd` - the same one module the cage and the trail always

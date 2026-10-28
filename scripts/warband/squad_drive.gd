@@ -496,55 +496,95 @@ func _strip_weapon(actor, merc_id: int, corpse_id: int) -> void:
 
 # --- the rescue ------------------------------------------------------------
 
-## The squad picks the soul up. A downed soul is not a corpse: with the field clear
-## of hostiles, the nearest ally standing on its feet walks over, stands inside the
-## revival reach and opens the scene's channel on the squad's own hands
+## The squad picks a body up. A downed squadmate is not a corpse: with the field
+## clear of hostiles, the nearest ally standing on its feet walks over, stands
+## inside the revival reach and opens the scene's channel on the squad's own hands
 ## (`ReviveChannel.ALLY_PEER`). Five seconds later the body stands up on a
 ## twentieth of its pool - enough to walk out, not enough to fight on.
+##
+## The body it saves is *any* downed squadmate's, not only the one the soul is
+## inside. The soul hops bodies as soon as it likes, and a downed mercenary whose
+## soul is elsewhere is still the warband's to pick up; when the soul is the body
+## on the floor it is simply first in line.
 ##
 ## Nothing here is announced and nothing here is a quota: a hostile inside
 ## `LOOT_CLEAR_METRES` drops the work instantly, and the mercenary goes back to the
 ## fight with the squad. Answers true when the rescue owns this frame.
 func _rescue_step(delta: float) -> bool:
 	_rescuer_merc = 0
-	if revive == null or not is_instance_valid(player_body):
+	if revive == null or controller == null:
 		return false
-	var soul = player_body
-	# The channel is only ever open because a soul is down and the field is clear;
+	var patient = _rescue_patient()
+	# The channel is only ever open because a body is down and the field is clear;
 	# anything else closes it and the squad goes back to what it was doing.
-	if not bool(soul.get("downed")) or not bool(soul.get("alive")):
+	if patient == null:
 		revive.cancel(ReviveChannel.ALLY_PEER)
 		return false
-	if not _clear_of_hostiles(soul.global_position):
+	if not _clear_of_hostiles((patient as Node3D).global_position):
 		revive.cancel(ReviveChannel.ALLY_PEER)
 		return false
-	var rescuer = _rescue_ally(soul)
+	var rescuer = _rescue_ally(patient)
 	if rescuer == null:
 		revive.cancel(ReviveChannel.ALLY_PEER)
 		return false
 	var merc_id := int(controller.merc_of(rescuer))
 	_rescuer_merc = merc_id
 	var track := _track_for(merc_id, rescuer, delta)
-	var gap: Vector3 = soul.global_position - rescuer.global_position
+	var gap: Vector3 = (patient as Node3D).global_position - (rescuer as Node3D).global_position
 	gap.y = 0.0
 	var stand := maxf(0.35, float(revive.reach) - 0.35)
 	if gap.length() > stand:
 		# Walk to the body, stopping inside the reach that opens the channel.
-		_advance(rescuer, soul.global_position, track, stand)
+		_advance(rescuer, (patient as Node3D).global_position, track, stand)
 		revive.cancel(ReviveChannel.ALLY_PEER)
 		return true
 	_hold(rescuer)
 	if revive.channeling(ReviveChannel.ALLY_PEER) \
-			and revive.target_of(ReviveChannel.ALLY_PEER) == soul:
+			and revive.target_of(ReviveChannel.ALLY_PEER) == patient:
 		return true
 	revive.cancel(ReviveChannel.ALLY_PEER)
-	revive.begin_ally(rescuer, soul)
+	revive.begin_ally(rescuer, patient)
 	return true
 
 
+## The downed squadmate to save: the body the soul is inside if it is on the floor,
+## otherwise the downed body nearest a standing ally. 0 candidates answers null.
+func _rescue_patient():
+	var candidates: Array = []
+	for raw_id in squad_ids:
+		var merc_id := int(raw_id)
+		if not _is_free(merc_id):
+			continue
+		var body = controller.body_of(merc_id)
+		if body == null or not is_instance_valid(body):
+			continue
+		if not bool(body.get("downed")) or not bool(body.get("alive")):
+			continue
+		candidates.append(body)
+	if candidates.is_empty():
+		return null
+	if is_instance_valid(player_body) and candidates.has(player_body):
+		return player_body
+	var best = null
+	var best_distance := INF
+	for body in candidates:
+		for raw_id in squad_ids:
+			var ally = controller.body_of(int(raw_id))
+			if ally == null or not is_instance_valid(ally) or ally == body:
+				continue
+			if not bool(ally.get("alive")) or bool(ally.get("downed")):
+				continue
+			var distance: float = (ally as Node3D).global_position.distance_to(
+				(body as Node3D).global_position)
+			if distance < best_distance:
+				best_distance = distance
+				best = body
+	return best if best != null else candidates[0]
+
+
 ## The ally that does the picking up: the nearest free squadmate on its feet, so
-## the body closest to the soul is the one that stops.
-func _rescue_ally(soul):
+## the body closest to the patient is the one that stops.
+func _rescue_ally(patient):
 	if controller == null:
 		return null
 	var best = null
@@ -554,12 +594,12 @@ func _rescue_ally(soul):
 		if not _is_free(merc_id):
 			continue
 		var actor = controller.body_of(merc_id)
-		if actor == null or not is_instance_valid(actor) or actor == soul:
+		if actor == null or not is_instance_valid(actor) or actor == patient:
 			continue
 		if not bool(actor.get("alive")) or bool(actor.get("downed")):
 			continue
 		var distance: float = (actor as Node3D).global_position.distance_to(
-			(soul as Node3D).global_position)
+			(patient as Node3D).global_position)
 		if distance < best_distance:
 			best_distance = distance
 			best = actor
