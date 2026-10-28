@@ -32,7 +32,7 @@ extends Node3D
 ## `GameFlow`). Nothing else changes scene, and nothing about travel does.
 ##
 ## Keys: TAB warband, P paperdoll, G interact, E revive, K manual loot (never
-## advertised), R the branded sigil. Q and E are held to strafe, WASD to walk, so
+## advertised), R the branded sigil, X shoulder swap. Q and E are held to strafe, WASD to walk, so
 ## neither is a press key. The camp's lesson adds F1-F5 and `[` `]`.
 
 signal scene_requested(path: String)
@@ -57,6 +57,14 @@ const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+## Bows and thrown steel. The warband mode had no projectile spawner at all: a
+## body could draw a bow, release it, and the arrow simply never existed. These are
+## the same classes the frontier and the arena spawn, with the campaign's target
+## layers.
+const ArrowScript = preload("res://scripts/arrow.gd")
+const ThrownScript = preload("res://scripts/thrown_weapon.gd")
+const CombatScript = preload("res://scripts/combat.gd")
+const ArcherScript = preload("res://scripts/archer.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
@@ -76,6 +84,13 @@ const BODY_BOUNDS := 1400.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0
+## What a warband missile may strike: the world (1) and the wood's own bodies (2).
+## A squadmate is deliberately not in the set - the warband's swords do not cut
+## its own, and neither do its arrows.
+const PROJECTILE_HIT_MASK := 1 | 2
+## A ceiling on live missiles, oldest freed first, so a long trail fight cannot
+## grow the tree without bound.
+const PROJECTILE_CAP := 64
 ## How long the warband lies in the mud before the world stops pretending.
 const WIPE_BEAT := 2.5
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
@@ -127,6 +142,8 @@ var squad_ids: Array[int] = []
 var start_area := "camp"
 
 var _crawls: Array = []
+## Every arrow and thrown blade in flight. Nothing else in this mode owns them.
+var projectiles: Array = []
 var _reviving := false
 var _prompt_text := ""
 var _hint_text := ""
@@ -454,6 +471,7 @@ func _seat_warband() -> void:
 		actor.combat.target_mask = 2
 		actor.bounds = BODY_BOUNDS
 		_wire_crawl(actor)
+		_wire_projectiles(actor)
 		# A body that goes down lets go of its steel. Both the knock-down and the
 		# bleed-out walk the same hook, so a body that dies without ever being
 		# downed (a finisher, a lethal blow) drops exactly as one that fell does.
@@ -478,6 +496,101 @@ func _seat_warband() -> void:
 	if start_area == "camp":
 		camp.begin_lesson()
 	_on_possession_changed(1, controller.merc_for_peer(1))
+
+
+## Every body's bowstring and throwing hand. A body that is not authoritative is
+## somebody's prediction: it draws and releases on screen, and only the simulation
+## that owns it spawns the missile that can hurt anyone.
+func _wire_projectiles(actor) -> void:
+	if actor == null or not is_instance_valid(actor):
+		return
+	var combat = actor.get("combat")
+	if combat == null:
+		return
+	if not combat.shot.is_connected(_on_body_shot):
+		combat.shot.connect(_on_body_shot.bind(actor))
+	if not combat.thrown.is_connected(_on_body_thrown):
+		combat.thrown.connect(_on_body_thrown.bind(actor))
+
+
+## A bow released. The shot leaves along the camera's crosshair ray - the same ray
+## the controller aimed the body down - and carries the bow's own charge damage.
+func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: float,
+		actor) -> void:
+	if not _projectile_authority(actor):
+		return
+	var rig = actor.rig
+	var damage := float(CombatScript.damage_for(int(rig.bow_index), charge,
+		rig.ranged_scale()))
+	var arrow := ArrowScript.new()
+	arrow.source_id = int(actor.slot)
+	arrow.shooter = actor
+	arrow.hit_mask = PROJECTILE_HIT_MASK
+	arrow.authoritative_damage = true
+	add_child(arrow)
+	arrow.launch(origin, direction, speed, damage, _projectile_exclude(actor),
+		rig.last_arrow_visual_origin, 0)
+	_keep_projectile(arrow)
+
+
+## A blade let go of mid-swing. Same authority, same layers.
+func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float,
+		weapon: String, weapon_index: int, actor) -> void:
+	if not _projectile_authority(actor):
+		return
+	var rig = actor.rig
+	var damage := float(CombatScript.throw_damage(weapon, weapon_index, charge,
+		rig.throw_scale()))
+	var thrown := ThrownScript.new()
+	thrown.weapon = weapon
+	thrown.weapon_index = weapon_index
+	thrown.source_id = int(actor.slot)
+	thrown.shooter = actor
+	thrown.hit_mask = PROJECTILE_HIT_MASK
+	thrown.authoritative_damage = true
+	if weapon == "dagger":
+		thrown.blade_length = float(ArcherScript.dagger_profile(weapon_index).length)
+	else:
+		thrown.blade_length = float(ArcherScript.SWORD_DATA[
+			clampi(weapon_index, 0, ArcherScript.SWORD_DATA.size() - 1)].length)
+	add_child(thrown)
+	thrown.launch(origin, direction, speed, damage, _projectile_exclude(actor))
+	_keep_projectile(thrown)
+
+
+## Who may spawn a live missile: only the body whose simulation is this machine's.
+func _projectile_authority(actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	if not bool(actor.get("authoritative")):
+		return false
+	return bool(actor.get("alive"))
+
+
+## The bodies and shields a shot must not hit on its first frame: the hand that
+## spent it.
+func _projectile_exclude(actor) -> Array[RID]:
+	var excluded: Array[RID] = []
+	if actor != null and is_instance_valid(actor):
+		excluded.append(actor.get_rid())
+		var shield = actor.rig.active_shield if actor.get("rig") != null else null
+		if is_instance_valid(shield):
+			excluded.append(shield.get_rid())
+	return excluded
+
+
+## Book a missile in the one list and hold the list to its cap.
+func _keep_projectile(missile) -> void:
+	if missile == null:
+		return
+	for index in range(projectiles.size() - 1, -1, -1):
+		if not is_instance_valid(projectiles[index]):
+			projectiles.remove_at(index)
+	projectiles.append(missile)
+	while projectiles.size() > PROJECTILE_CAP:
+		var oldest = projectiles.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
 
 
 func _wire_crawl(actor) -> void:

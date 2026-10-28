@@ -509,7 +509,11 @@ func aim_sample() -> Dictionary:
 		var depth := maxf(0.0, (anchor - origin).dot(direction))
 		_query.from = origin + direction * depth
 		_query.to = point
-		_query.collision_mask = 1 | 4
+		# The world and the wood's own bodies. Layer 4 is other warband bodies: a
+		# squadmate is not a crosshair target, and `combat.target_mask` agrees.
+		# Masking the mobs out here is what used to put every aim point through a
+		# watcher and into the dirt behind it.
+		_query.collision_mask = 1 | 2
 		var excluded: Array[RID] = [actor.get_rid()]
 		_query.exclude = excluded
 		var space := _bodies_root.get_world_3d().direct_space_state
@@ -764,6 +768,11 @@ func _command(event: InputEventKey) -> bool:
 			_act("crouch", not actor.cover.crouch_requested)
 		KEY_F:
 			_act("cover", forward)
+		KEY_X:
+			# Shoulder swap, as the frontier binds it: the eye crosses to the other
+			# side of the body and the crosshair keeps pointing where it pointed.
+			if camera_rig != null:
+				camera_rig.swap()
 		KEY_T:
 			_throw_held = true
 			var sample := aim_sample()

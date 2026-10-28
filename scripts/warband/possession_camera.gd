@@ -23,6 +23,11 @@ const EYE_HEIGHT := 1.65
 ## Default orbit: behind and above the body, close enough to read a blade.
 const FOLLOW_DISTANCE := 4.4
 const FOLLOW_PITCH := 0.26
+## The eye rides a shoulder, not the spine: the frontier's 0.70 m, so the reticle
+## and the body's own head are never the same point on screen.
+const SHOULDER_OFFSET := 0.70
+## How fast the eye crosses from one shoulder to the other, per second.
+const SWAP_RATE := 10.0
 ## The closest the camera may be pulled before it refuses to move in further.
 const MIN_DISTANCE := 0.55
 ## Clearance kept off the geometry that pulled the camera in.
@@ -46,6 +51,11 @@ var camera: Camera3D
 ## pitch lifts it. The controller feeds these from the mouse.
 var yaw := 0.0
 var pitch := FOLLOW_PITCH
+## Which shoulder the eye is over: 1 the body's right, -1 its left. `X` swaps it,
+## exactly as the frontier's `shoulder_camera.swap()` does.
+var side := 1
+## The eased lateral offset, so a swap crosses the body instead of cutting.
+var _offset := SHOULDER_OFFSET
 
 var _target: Actor
 var _swooping := false
@@ -134,6 +144,11 @@ func forget(body: Actor) -> void:
 	if body == _target:
 		clear()
 
+## Cross to the other shoulder. The offset eases across in `update()`, so the view
+## slides over the body's shoulder instead of snapping to the far side of it.
+func swap() -> void:
+	side = -side
+
 ## Move the eye around the body. Called with the mouse delta by the controller.
 func rotate_view(delta_yaw: float, delta_pitch: float) -> void:
 	yaw = wrapf(yaw + delta_yaw, -PI, PI)
@@ -148,6 +163,8 @@ func update(delta: float) -> void:
 	if active_body() == null:
 		_swooping = false
 		return
+	_offset = lerpf(_offset, float(side) * SHOULDER_OFFSET,
+		1.0 - exp(-SWAP_RATE * clampf(delta, 0.0, 0.1)))
 	if _swooping:
 		_swoop_left = maxf(0.0, _swoop_left - delta)
 		var travelled := 1.0 - (_swoop_left / _swoop_total)
@@ -167,12 +184,19 @@ func update(delta: float) -> void:
 func follow_point() -> Vector3:
 	return _resolved(_shoulder())
 
-## The centre ray of the view, which is the possessed body's aim.
+## The centre ray of the view, which is the possessed body's aim. Projected
+## through the screen centre rather than read off the camera basis, so the ray and
+## the drawn reticle are the same line by construction - a shoulder offset, a
+## different viewport or a zoom cannot desync them.
 func aim_ray() -> Dictionary:
 	var cam := camera
-	if cam == null or not is_instance_valid(cam):
+	if cam == null or not is_instance_valid(cam) or not cam.is_inside_tree():
 		return {"origin": global_position, "direction": -global_basis.z}
-	return {"origin": cam.global_position, "direction": -cam.global_basis.z.normalized()}
+	var centre := get_viewport().get_visible_rect().size * 0.5
+	return {
+		"origin": cam.project_ray_origin(centre),
+		"direction": cam.project_ray_normal(centre),
+	}
 
 # --- internals --------------------------------------------------------------
 
@@ -194,9 +218,19 @@ func _place(point: Vector3) -> void:
 	if camera != null:
 		camera.global_position = point
 
+## Look along the orbit, never at the body: an eye that re-centres on the head
+## cannot be aimed (the reticle would sit on the character's own skull, and the
+## pitch would fight itself). The frontier looks down `-back` for the same reason.
 func _look() -> void:
-	if camera != null:
-		camera.look_at(_focus_point(), Vector3.UP)
+	if camera == null:
+		return
+	var back := _back()
+	camera.look_at(camera.global_position - back, Vector3.UP)
+
+
+## The unit vector from the body's focus out to the eye's shoulder.
+func _back() -> Vector3:
+	return Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)).normalized()
 
 ## The point the eye should read: the body's head and shoulders, not its feet.
 func _focus_point() -> Vector3:
@@ -205,10 +239,12 @@ func _focus_point() -> Vector3:
 		return global_position
 	return body.global_position + Vector3.UP * EYE_HEIGHT
 
-## Shoulder offset for the body's centre, before occlusion.
+## The eye's wanted position: the orbit distance back along `back`, then the
+## shoulder offset across it, before occlusion.
 func _shoulder() -> Vector3:
-	var back := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
-	return _focus_point() + back.normalized() * FOLLOW_DISTANCE
+	var back := _back()
+	var right := Vector3(back.z, 0.0, -back.x).normalized()
+	return _focus_point() + back * FOLLOW_DISTANCE + right * _offset
 
 ## Pull a wanted eye position out of geometry. The ray runs from the focus to
 ## the wanted point so a wall between the two shortens the boom instead of

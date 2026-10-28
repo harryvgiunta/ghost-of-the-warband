@@ -100,7 +100,13 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
 
 HUD keys: `[`/`]` cycle body, F1–F8 named body, TAB warband screen, P paperdoll,
 G interact, K manual loot (unadvertised; the squad loots itself), E revive,
-R branded skill.
+R branded skill, X shoulder swap (the camera is 0.70 m off the spine, as the
+frontier's is - the reticle is not your own head).
+
+Bows and thrown steel spawn through `world_scene` off `combat.shot` /
+`combat.thrown` (`PROJECTILE_HIT_MASK` 1 | 2). Nothing in this mode did before:
+the arrow was never created, and `aim_sample` masked the mob layer out, so the
+crosshair resolved to the dirt behind whatever you were aiming at.
 
 ---
 
