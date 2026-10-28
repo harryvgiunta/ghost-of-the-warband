@@ -1,13 +1,25 @@
 """Author the Naked armor set on the Ranger's own skeleton.
 
 What a prisoner in the wood actually wears: an old shirt, a pair of tight
-shorts, and bare skin everywhere else.  Two pieces, exported as one GLB the
-runtime binds to its copy of the hero skeleton:
+shorts, and bare skin everywhere else.  Four pieces, one per body region, in
+one GLB the runtime binds to its copy of the hero skeleton:
 
-    Armor_Naked_Chest   torso, both arms and both hands as skin, with a
-                        short-sleeved shirt worn over the torso
-    Armor_Naked_Legs    both legs and both feet as skin, with tight shorts
-                        over the hips and upper thighs
+    Armor_Naked_Chest   the torso as skin, with the shirt and its collar over it
+    Armor_Naked_Hands   both arms as skin, the shirt's short sleeves, and the
+                        fingers -- the hand geometry of the source asset
+    Armor_Naked_Legs    both legs as skin, with tight shorts over the hips and
+                        the upper thighs
+    Armor_Naked_Feet    both feet as skin
+
+One piece per region is what lets the rig hide a single slot: a slot draws
+exactly what it wears and the region underneath it, so a body in a mail
+hauberk with bare hands keeps its hands, and one in mail legs with bare feet
+keeps its feet.  Bundling the arms into the chest (which this set used to do,
+because ``Male_Ranger_Arms`` is chest-slot geometry in the source) meant a
+partly armoured body either lost its hands or wore the whole naked torso
+through the armour.  The head, eyes, brows and hair are outside every slot and
+stay on screen, so the new skin has to match them: every colour in this file
+is read out of the Ranger's own skin materials, never invented.
 
 The garment is deliberately not fitted to the measured body.  The shirt, the
 shorts and the skin under them are surfaces of revolution about their own
@@ -16,15 +28,6 @@ cannot cross and no column can cut into another, so no pose can open a hole.
 Sleeves and shorts legs start *inside* the tube they belong to.  A loft that
 followed the source's uneven tunic rows produced valleys, and the bare body
 stood through them.
-
-The rig hides a whole slot at a time, so the chest has to carry the arms and
-the hands: the Ranger's ``Male_Ranger_Arms`` mesh is chest-slot geometry and
-its skin primitive is the only hand geometry in the source asset.  The legs
-carry the feet for the same reason -- ``Male_Ranger_Feet_Boots`` is the feet
-slot, and with nothing in that slot the naked figure would end at the ankle.
-The head, eyes, brows and hair are outside every slot and stay on screen, so
-the new skin has to match them: every colour in this file is read out of the
-Ranger's own skin materials, never invented.
 
 Usage (Blender 5.1+):
     blender --background --python-exit-code 1 --python tools/prepare_naked_armor.py
@@ -102,8 +105,9 @@ OUTPUT = ROOT / "assets" / "characters" / "armor" / "ironwood_naked.glb"
 WORKSPACE = ROOT / ".runtime" / "naked-armor"
 TEXTURES = WORKSPACE / "textures"
 
-SLOTS = ("chest", "legs")
-NODE_NAME = {"chest": "Armor_Naked_Chest", "legs": "Armor_Naked_Legs"}
+SLOTS = ("chest", "hands", "legs", "feet")
+NODE_NAME = {"chest": "Armor_Naked_Chest", "hands": "Armor_Naked_Hands",
+             "legs": "Armor_Naked_Legs", "feet": "Armor_Naked_Feet"}
 SURFACE_ORDER = ("skin", "cloth")
 MATERIAL_NAME = {"skin": "Naked_Skin", "cloth": "Naked_Cloth"}
 # Two pieces and a pair of hands: 512 is a texel every two millimetres on the
@@ -854,7 +858,12 @@ def sleeve_radius(t: float) -> float:
 
 
 def build_chest(material_of) -> list[Part]:
-    """Torso, arms and hands as skin, with a short-sleeved shirt over the torso."""
+    """The torso as skin, with a short-sleeved shirt and its collar over it.
+
+    The arms, the sleeves and the fingers are `build_hands()`: they are their
+    own region, so the hands slot can hide them without taking the torso with
+    them.
+    """
     parts: list[Part] = []
     mouth = ARM_TABLES[1.0]["a"]
     wrist = ARM_TABLES[1.0]["b"]
@@ -863,6 +872,52 @@ def build_chest(material_of) -> list[Part]:
                                    32, 18, skin(material_of)),
                       "skin", torso_weights))
 
+    # Shirt: one closed tube, its own profile 30 mm outside the skin's.
+    parts.append(Part(radial_shell("NAKED_Shirt", SHIRT_PROFILE, SHIRT_HEM_Z, SHIRT_NECK_Z,
+                                   32, 18, cloth(material_of), thickness=0.006),
+                      "cloth", torso_weights, palette="shirt"))
+
+    # Collar: a band round the shirt's neckline, just proud of it.
+    def collar_sample(u, v):
+        theta = TAU * u
+        z = COLLAR_Z[0] + (COLLAR_Z[1] - COLLAR_Z[0]) * v
+        radius = mobs.keyed(z, SHIRT_PROFILE) + 0.008
+        return Vector((math.cos(theta) * radius,
+                       BODY_CENTRE_Y + math.sin(theta) * radius * BODY_ASPECT, z))
+
+    parts.append(Part(salvage.surface_grid("NAKED_Collar", 24, 3, collar_sample,
+                                           cloth(material_of), thickness=0.004,
+                                           axis=Vector((0.0, BODY_CENTRE_Y, 1.55))),
+                      "cloth", torso_weights, palette="trim"))
+
+    # Sleeves: tapered tubes off the arm axis, starting inside the shirt tube.
+    # They are the shirt's, so they belong to the chest region: an armoured chest
+    # with bare hands then shows the hands' skin arms inside the armour's own
+    # sleeves, instead of this short sleeve pushing out through the shoulder.
+    for side in (1.0, -1.0):
+        tag = "l" if side > 0 else "r"
+        a = ARM_TABLES[side]["a"]
+
+        def sleeve_sample(u, v, side=side):
+            t = SLEEVE_FROM + (SLEEVE_TO - SLEEVE_FROM) * v
+            centre, _ry, _rz = arm_axis(side, t)
+            theta = TAU * u
+            radius = sleeve_radius(t)
+            return centre + Vector((0.0, math.cos(theta) * radius, math.sin(theta) * radius))
+
+        parts.append(Part(salvage.surface_grid(f"NAKED_Sleeve_{tag.upper()}", 14, 8, sleeve_sample,
+                                               cloth(material_of), thickness=0.006, cap_start=True,
+                                               axis=a),
+                          "cloth", arm_weights, palette="shirt"))
+
+    print("NAKED_CHEST", "shoulder", tuple(round(v, 3) for v in mouth),
+          "wrist", tuple(round(v, 3) for v in wrist))
+    return parts
+
+
+def build_hands(material_of) -> list[Part]:
+    """Both arms as skin and the fingers: the body under the shirt's sleeves."""
+    parts: list[Part] = []
     for side in (1.0, -1.0):
         tag = "l" if side > 0 else "r"
         a = ARM_TABLES[side]["a"]
@@ -905,43 +960,6 @@ def build_chest(material_of) -> list[Part]:
                                 skin(material_of), wobble=0.04, salt=3.0 + side)
         parts.append(Part(hand, "skin", lambda point, tag=tag: {f"hand_{tag}": 1.0}))
 
-    # Shirt: one closed tube, its own profile 30 mm outside the skin's.
-    parts.append(Part(radial_shell("NAKED_Shirt", SHIRT_PROFILE, SHIRT_HEM_Z, SHIRT_NECK_Z,
-                                   32, 18, cloth(material_of), thickness=0.006),
-                      "cloth", torso_weights, palette="shirt"))
-
-    # Sleeves: tapered tubes off the arm axis, starting inside the shirt tube.
-    for side in (1.0, -1.0):
-        tag = "l" if side > 0 else "r"
-        a = ARM_TABLES[side]["a"]
-
-        def sleeve_sample(u, v, side=side):
-            t = SLEEVE_FROM + (SLEEVE_TO - SLEEVE_FROM) * v
-            centre, _ry, _rz = arm_axis(side, t)
-            theta = TAU * u
-            radius = sleeve_radius(t)
-            return centre + Vector((0.0, math.cos(theta) * radius, math.sin(theta) * radius))
-
-        parts.append(Part(salvage.surface_grid(f"NAKED_Sleeve_{tag.upper()}", 14, 8, sleeve_sample,
-                                               cloth(material_of), thickness=0.006, cap_start=True,
-                                               axis=a),
-                          "cloth", arm_weights, palette="shirt"))
-
-    # Collar: a band round the shirt's neckline, just proud of it.
-    def collar_sample(u, v):
-        theta = TAU * u
-        z = COLLAR_Z[0] + (COLLAR_Z[1] - COLLAR_Z[0]) * v
-        radius = mobs.keyed(z, SHIRT_PROFILE) + 0.008
-        return Vector((math.cos(theta) * radius,
-                       BODY_CENTRE_Y + math.sin(theta) * radius * BODY_ASPECT, z))
-
-    parts.append(Part(salvage.surface_grid("NAKED_Collar", 24, 3, collar_sample,
-                                           cloth(material_of), thickness=0.004,
-                                           axis=Vector((0.0, BODY_CENTRE_Y, 1.55))),
-                      "cloth", torso_weights, palette="trim"))
-
-    print("NAKED_CHEST", "shoulder", tuple(round(v, 3) for v in mouth),
-          "wrist", tuple(round(v, 3) for v in wrist))
     return parts
 
 
@@ -979,22 +997,35 @@ def clamp_inside_shorts(point: Vector, side: float) -> Vector:
     return Vector((x, y, z))
 
 
+def leg_table(side: float):
+    """One side's leg rings, sampled off the source trousers.
+
+    Smoothing over three neighbours: the source legs are sparse, and an
+    unsmoothed sector ring is what gave the bare leg its lumps.
+    """
+    x_range = (0.018, 0.340) if side > 0 else (-0.340, -0.018)
+    return MEASURE.sector_table(["Male_Ranger_Legs"], LEG_BOTTOM, LEG_Z1, 0.012, sectors=28,
+                                x_range=x_range, half=0.016, smooth=3)
+
+
+def ankle_radius(leg_ring) -> float:
+    """The leg tube's own ankle section, so the foot shell can meet it."""
+    return max(leg_ring.ring(ANKLE_Z, step * TAU / 8.0)[2] for step in range(8)) + 0.006
+
+
 def build_legs(material_of) -> list[Part]:
-    """Legs and feet as skin, with tight shorts over the hips and thighs."""
-    measure = MEASURE
+    """Both legs as skin, with tight shorts over the hips and thighs.
+
+    The feet are `build_feet()`: their own region, so the feet slot can hide
+    them without taking the legs with them.
+    """
     parts: list[Part] = []
     # The ranger's own leg cloth only. The calf wraps belong to the leather legs
     # slot, so they are hidden under this set and the bare leg no longer has to
     # be inflated around them.
-    leg_refs = ["Male_Ranger_Legs"]
-
     for side in (1.0, -1.0):
         tag = "l" if side > 0 else "r"
-        x_range = (0.018, 0.340) if side > 0 else (-0.340, -0.018)
-        # Smoothing over three neighbours: the source legs are sparse, and an
-        # unsmoothed sector ring is what gave the bare leg its lumps.
-        leg_ring = measure.sector_table(leg_refs, LEG_BOTTOM, LEG_Z1, 0.012, sectors=28,
-                                        x_range=x_range, half=0.016, smooth=3)
+        leg_ring = leg_table(side)
 
         def leg_sample(u, v, side=side, leg_ring=leg_ring):
             z = LEG_BOTTOM + (LEG_Z1 - LEG_BOTTOM) * v
@@ -1018,9 +1049,6 @@ def build_legs(material_of) -> list[Part]:
                                                skin(material_of),
                                                axis=Vector((side * 0.09, 0.05, 0.60))),
                           "skin", leg_weights))
-
-        ankle = max(leg_ring.ring(ANKLE_Z, step * TAU / 8.0)[2] for step in range(8)) + 0.006
-        parts.append(Part(build_foot(side, ankle, material_of), "skin", foot_weights))
 
     # Shorts: a hip tube plus two leg tubes that start inside it.  Both are
     # surfaces of revolution, so nothing here can cross itself, and the leg
@@ -1056,6 +1084,15 @@ def build_legs(material_of) -> list[Part]:
                                                axis=Vector((side * 0.095, 0.045, 0.85))),
                           "cloth", shorts_weights, palette="shorts"))
 
+    return parts
+
+
+def build_feet(material_of) -> list[Part]:
+    """Both feet as skin, closed at the ankle the leg tubes meet them on."""
+    parts: list[Part] = []
+    for side in (1.0, -1.0):
+        parts.append(Part(build_foot(side, ankle_radius(leg_table(side)), material_of),
+                          "skin", foot_weights))
     return parts
 
 
@@ -1499,19 +1536,24 @@ def main() -> None:
         return materials[surface]
 
     claimed = {
-        # The chest owns the torso, the arms and the hands: the ranger's own
-        # arm mesh is chest geometry, so nothing else can carry the hands.
-        # The palm of the copied hand is weighted to the forearm (the source
-        # rigs the mitten that way and its fingers to the finger chains), so
-        # hand_l/hand_r carry no vertices of this piece.
+        # The chest is the torso, the shirt, its collar and the sleeves: the
+        # spine chain and the clavicles from the shirt, the arm chain from the
+        # sleeves.  The arms themselves are `hands`.
         "chest": ["pelvis", "spine_01", "spine_02", "spine_03", "neck_01",
                   "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r",
                   "lowerarm_l", "lowerarm_r"],
-        # The feet have to ride the legs: the feet slot is empty by contract.
+        # The arms and the fingers follow the arm chain down to the fingers.
+        # The palm of the copied hand is weighted to the forearm (the source
+        # rigs the mitten that way and its fingers to the finger chains).
+        "hands": ["clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r",
+                  "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"],
         "legs": ["pelvis", "thigh_l", "thigh_r", "calf_l", "calf_r",
-                 "foot_l", "foot_r", "ball_l", "ball_r"],
+                 "foot_l", "foot_r"],
+        # The feet ride the ankle: the foot's own shell and the ball below it.
+        "feet": ["calf_l", "calf_r", "foot_l", "foot_r", "ball_l", "ball_r"],
     }
-    builders = {"chest": build_chest, "legs": build_legs}
+    builders = {"chest": build_chest, "hands": build_hands, "legs": build_legs,
+                "feet": build_feet}
     # The face, eyes and brows are on screen whatever the armour, so a shell
     # that pokes through them is a visible defect and fails the build.  The
     # torso is allowed to meet the jaw from below -- a neck emerging from its
@@ -1519,12 +1561,16 @@ def main() -> None:
     strict_floor = {"chest": 1.600}
     strict_refs = {
         "chest": ["Ranger_Head_SuperHero_Male", "Ranger_Head_Eyes", "Ranger_Head_Eyebrows"],
+        "hands": [],
         "legs": [],
+        "feet": [],
     }
     clearance_refs = {
         "chest": ["Ranger_Head_SuperHero_Male", "Ranger_Head_Eyes", "Ranger_Head_Eyebrows",
-                  "Male_Ranger_Body", "Male_Ranger_Arms"],
-        "legs": ["Male_Ranger_Legs", "Ranger_Base_Calf", "Male_Ranger_Feet_Boots"],
+                  "Male_Ranger_Body"],
+        "hands": ["Male_Ranger_Arms", "Male_Ranger_Arms_Bracer"],
+        "legs": ["Male_Ranger_Legs", "Ranger_Base_Calf"],
+        "feet": ["Male_Ranger_Feet_Boots"],
     }
     problems: list[str] = []
     clearance: dict = {"rest": {}, "layers": {}, "idle": {}}

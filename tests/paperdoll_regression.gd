@@ -79,6 +79,15 @@ func _visible(rig, slot: String, set_index: int) -> bool:
 	return not nodes.is_empty() and (nodes[0] as Node3D).visible
 
 
+## Whether one slot's set draws nothing there - true for a set with no piece in
+## that slot, so "this slot does not wear leather" is one question, not two.
+func _hidden(rig, slot: String, set_index: int) -> bool:
+	for node: Node3D in rig._armor_meshes.get(slot, {}).get(set_index, []):
+		if node.visible:
+			return false
+	return true
+
+
 func _find(item_id: String) -> int:
 	return state.inventory.find(item_id)
 
@@ -584,18 +593,46 @@ func _test_rig_loadouts() -> void:
 	await process_frame
 	check(rig._built,"The ranger rig builds for loadout coverage")
 
-	# Layers: an empty slot draws the naked body, and a worn set draws over it. A
-	# prisoner with nothing on must not be a man in the imported green leather,
-	# which is what an empty slot used to fall through to; the quiver is kit, not a
-	# body part, so it appears with the bow and leaves with it.
+	# Layers: a slot draws the set it wears and the naked region underneath it
+	# while it wears nothing. It is never the other way round - a body in a
+	# hauberk used to be a man in the imported green leather outfit for every
+	# slot that wore nothing, so putting one piece on looked like the body
+	# reverting to leather.
 	var bare_index: int = ArmorData.SET_IDS.find("naked")
 	var leather_index: int = ArmorData.SET_IDS.find("leather")
+	var mail_index: int = ArmorData.SET_IDS.find("mail")
 	var empty_armor := {}
 	for slot in ArmorData.SLOTS:
 		empty_armor[slot] = ArmorData.NONE
 	rig.apply_loadout(StateScript.build_loadout("", "", empty_armor))
 	check(_visible(rig, "chest", bare_index), "an empty chest draws the naked body")
 	check(not _visible(rig, "chest", leather_index), "and never the imported leather outfit")
+	check(_visible(rig, "hands", bare_index) and _visible(rig, "feet", bare_index),
+		"an empty body draws the naked arms and feet")
+
+	# One worn piece covers its own slot and nothing else, and it does not stop
+	# being ready to wear the rest: the arms are the body under the hands slot,
+	# so they stay on screen while the hands are bare.
+	var hauberk := empty_armor.duplicate()
+	hauberk["chest"] = mail_index
+	rig.apply_loadout(StateScript.build_loadout("", "", hauberk))
+	check(_visible(rig, "chest", mail_index), "a worn hauberk draws itself")
+	check(not _visible(rig, "chest", bare_index), "and hides the torso skin it covers")
+	check(_visible(rig, "hands", bare_index), "...while the bare hands keep their arms")
+	check(_visible(rig, "legs", bare_index) and _visible(rig, "feet", bare_index),
+		"...and the bare legs and feet stay on screen")
+	for slot in ArmorData.SLOTS:
+		check(_hidden(rig, slot, leather_index),
+			"a worn hauberk never draws the leather outfit on the %s slot" % slot)
+
+	# A complete kit covers the body: no naked region survives underneath it.
+	var full_mail := {}
+	for slot in ArmorData.SLOTS:
+		full_mail[slot] = mail_index
+	rig.apply_loadout(StateScript.build_loadout("", "", full_mail))
+	for slot in ArmorData.SLOTS:
+		check(_visible(rig, slot, mail_index), "the full mail kit draws the %s piece" % slot)
+		check(_hidden(rig, slot, bare_index), "no naked %s under a full mail kit" % slot)
 	check(not rig._quiver.visible, "a body with no bow carries no quiver")
 	rig.apply_loadout(StateScript.build_loadout("bow_short", "", empty_armor))
 	check(rig._quiver.visible, "the quiver appears with the bow")

@@ -462,15 +462,26 @@ func check_live_input(warband, controller, merc_ids: Array[int]) -> void:
 	check(controller.active_actor == controller.body_of(ids[7]),
 		"F8 retargeted the camera and the input")
 
-	# A bow body draws on LMB through the same handler the mode calls.
+	# A bow body draws on LMB through the same handler the mode calls. What is in
+	# its hands comes from its gear: `refresh_gear` re-dresses it from the roster,
+	# and 1..5 - an admin leftover that spawned a bow, a sword, a shield and a
+	# second blade out of nothing - must not answer at all.
 	var bow_id := merc_ids[0]
+	controller.set_bot(bow_id, false)
 	controller.activate(1, bow_id)
 	for tick in 8:
 		await physics_frame
 	check(controller.active_actor != null and controller.active_actor.is_on_floor(),
 		"the possessed body is standing before it draws")
-	controller._unhandled_input(key_event(KEY_1))
-	check(controller.active_actor.rig.weapon == "bow", "1 selects the bow on the possessed body")
+	check(controller.refresh_gear(bow_id), "the roster kit re-dresses the body on demand")
+	check(controller.active_actor.rig.weapon == "bow",
+		"the shortbow is in its hands because its gear put it there")
+	for keycode in [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]:
+		controller._unhandled_input(key_event(keycode))
+	check(controller.active_actor.rig.weapon == "bow",
+		"1-5 put no weapon on the possessed body")
+	check(not controller.active_actor.rig.shield_equipped,
+		"and no shield either")
 	controller._unhandled_input(mouse_event(MOUSE_BUTTON_LEFT, true))
 	check(controller.active_actor.rig.phase in ["DRAWING", "HOLDING"],
 		"a left click starts a real bow draw on the possessed body")
