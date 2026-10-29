@@ -41,6 +41,11 @@ const LOOT_ALBEDO := Color(0.78, 0.66, 0.36)
 const STEEL_ALBEDO := Color(0.66, 0.71, 0.73)
 const HAFT_ALBEDO := Color(0.34, 0.23, 0.15)
 const CLOTH_ALBEDO := Color(0.46, 0.40, 0.31)
+## The wolf's salvage and the wardens' reagent: a briar hide, sun-bleached bone,
+## and the flat black-green of the ichor that is still moving in its vial.
+const HIDE_ALBEDO := Color(0.40, 0.31, 0.22)
+const BONE_ALBEDO := Color(0.80, 0.76, 0.64)
+const ICHOR_ALBEDO := Color(0.16, 0.22, 0.18)
 
 ## The catalog id this drop is worth; '' for an unbound drop.
 var item_id := ""
@@ -156,26 +161,31 @@ func _start_arm_timer() -> void:
 ## the point the body stood on and nothing else has to know how tall a sword is.
 func _build() -> void:
 	var category := item_category(item_id)
-	match category:
-		"1h", "2h":
-			_build_blade(category == "2h")
-		"bow":
-			_build_bow()
-		"staff":
-			_build_pole()
-		"shield":
-			_build_shield()
-		"focus":
-			if item_id == TorchScript.ITEM_ID:
-				_build_torch()
-			else:
-				_build_bundle(0.20, 0.06, 0.26)
-		"jewelry":
-			_build_ring()
-		"armor", "armor_bundle":
-			_build_bundle(0.32, 0.11, 0.26)
-		_:
-			_build_bundle(0.22, 0.09, 0.22)
+	# The wolf's salvage and the wardens' ichor are drawn as themselves - a folded
+	# hide, a splinter, a fang, a clawed paw, a stoppered vial - because a killing
+	# field full of the same anonymous bundle says nothing about what was killed.
+	# Everything else keeps the silhouette its category is drawn with.
+	if not _build_salvage():
+		match category:
+			"1h", "2h":
+				_build_blade(category == "2h")
+			"bow":
+				_build_bow()
+			"staff":
+				_build_pole()
+			"shield":
+				_build_shield()
+			"focus":
+				if item_id == TorchScript.ITEM_ID:
+					_build_torch()
+				else:
+					_build_bundle(0.20, 0.06, 0.26)
+			"jewelry":
+				_build_ring()
+			"armor", "armor_bundle":
+				_build_bundle(0.32, 0.11, 0.26)
+			_:
+				_build_bundle(0.22, 0.09, 0.22)
 	# The angle is the piece's own, taken off its id: twenty drops of one blade
 	# do not all lie pointing at the same tree, and it never changes, because a
 	# drop that turns is a drop that is floating.
@@ -289,6 +299,85 @@ func _build_ring() -> void:
 	band.rotation.x = PI * 0.5
 	band.position = Vector3(0.0, 0.016, 0.0)
 	add_child(band)
+
+
+## The salvage drops, one small shape each, all of them lying under the name plate
+## that floats at `LABEL_HEIGHT`. False for every other id, so `_build()` falls
+## through to the category silhouette.
+func _build_salvage() -> bool:
+	match item_id:
+		"wolf_pelt":
+			# A hide folded twice where it was cut free: the broad slab and the
+			# fold lying across it.
+			_box(Vector3(0.30, 0.032, 0.22), Vector3(0.0, 0.016, 0.0), HIDE_ALBEDO, 0.0)
+			_box(Vector3(0.22, 0.030, 0.15), Vector3(0.030, 0.045, 0.010), HIDE_ALBEDO, 0.0, 0.45)
+		"wolf_bone":
+			# A splinter: the shank, and the knuckle it broke away from.
+			_box(Vector3(0.22, 0.030, 0.046), Vector3(0.0, 0.015, 0.0), BONE_ALBEDO, 0.0, 0.30)
+			_box(Vector3(0.055, 0.034, 0.075), Vector3(-0.095, 0.017, -0.030), BONE_ALBEDO, 0.0, 0.30)
+		"wolf_tooth":
+			# A fang on its side: root at -X, the point away from it, and a scrap
+			# of the gum still on the root.
+			_cone(0.026, 0.13, Vector3(0.0, 0.026, 0.0), BONE_ALBEDO, 5, -PI * 0.5)
+			_box(Vector3(0.030, 0.028, 0.030), Vector3(-0.062, 0.014, 0.0), HIDE_ALBEDO, 0.0)
+		"wolf_paw":
+			# The pad, and three toes hooked into the dirt.
+			_box(Vector3(0.105, 0.032, 0.085), Vector3(0.0, 0.016, 0.0), HIDE_ALBEDO, 0.0)
+			for side in [-1.0, 0.0, 1.0]:
+				_prism(Vector3(0.026, 0.024, 0.058),
+					Vector3(0.070, 0.012, side * 0.030), BONE_ALBEDO, side * 0.25)
+		"ichor_vial":
+			_build_vial()
+		_:
+			return false
+	return true
+
+
+## The wardens' own blood, drawn off a body: a glass body lying where it rolled and
+## the cork still in the neck. Six sides keep it a vial and not a bottle.
+func _build_vial() -> void:
+	var glass := CylinderMesh.new()
+	glass.top_radius = 0.030
+	glass.bottom_radius = 0.030
+	glass.height = 0.15
+	glass.radial_segments = 6
+	glass.rings = 0
+	var body_part := MeshInstance3D.new()
+	body_part.mesh = glass
+	body_part.material_override = _material(ICHOR_ALBEDO, 0.15)
+	body_part.position = Vector3(0.0, 0.030, 0.0)
+	body_part.rotation.z = PI * 0.5
+	add_child(body_part)
+	_box(Vector3(0.030, 0.048, 0.048), Vector3(-0.082, 0.030, 0.0), HAFT_ALBEDO, 0.0)
+
+## A tapered piece on its own axis, then laid over by `tilt` - a fang's point, so
+## a tooth is not a stick with a name plate over it.
+func _cone(radius: float, length: float, at: Vector3, color: Color,
+		sides: int, tilt: float) -> void:
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = radius
+	cone.height = length
+	cone.radial_segments = sides
+	cone.rings = 0
+	var part := MeshInstance3D.new()
+	part.mesh = cone
+	part.material_override = _material(color, 0.0)
+	part.position = at
+	part.rotation.z = tilt
+	add_child(part)
+
+
+## A wedge: eight triangles, so three toes on a paw cost less than one box each.
+func _prism(size: Vector3, at: Vector3, color: Color, yaw: float) -> void:
+	var wedge := PrismMesh.new()
+	wedge.size = size
+	var part := MeshInstance3D.new()
+	part.mesh = wedge
+	part.material_override = _material(color, 0.0)
+	part.position = at
+	part.rotation.y = yaw
+	add_child(part)
 
 func _box(size: Vector3, at: Vector3, color: Color, metallic: float,
 		yaw: float = 0.0) -> void:
