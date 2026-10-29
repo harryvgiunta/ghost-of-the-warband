@@ -52,6 +52,9 @@ var follow_slack := 3.2
 ## regression flaky.
 var _rng := RandomNumberGenerator.new()
 var _rng_seeded := false
+## The soul's footprints down the road, oldest first: the line the escort walks when
+## it has been left behind.
+var _trail: Array[Vector3] = []
 var engage_radius := 60.0
 ## How close an ally must stand to swing.
 var reach := 2.0
@@ -94,6 +97,19 @@ const ESCORT_SLOT_GAP := 1.35
 ## and ended 12-20 m from where they started - walking in circles.
 const ESCORT_ENGAGE := 1.9
 const ESCORT_STANDOFF := 0.85
+## The escort's line. A body more than `ESCORT_RALLY` behind the soul walks the
+## soul's own footprints instead of pointing straight at it: the road the player
+## walked is the one stretch of wood the world guarantees is walkable, and a squad
+## that beelines at a body two hundred metres away beelines through tree rows.
+## `CRUMB_STEP` is how much ground one footprint is worth, `CRUMB_KEEP` how many
+## are held (600 m of road), and `ESCORT_RALLY` the distance at which a body stops
+## trying to hold its ring slot and starts catching up along the line.
+const CRUMB_STEP := 2.5
+const CRUMB_KEEP := 240
+const ESCORT_RALLY := 9.0
+## How far off the line a crumb may be before an ally stops trusting it: past this
+## the body is standing somewhere the soul never walked and goes its own way.
+const CRUMB_GRIP := 14.0
 ## Idle bodies take one short step and then stand: a waiting squad drifts instead of
 ## freezing in a heap, and stands still in between instead of pacing. Measured from
 ## the other direction - a squad that stepped whenever its clock ran out never
@@ -121,6 +137,18 @@ const BANDAGE_HEAL_SHARE := 0.3
 ## that sidestep lasts.
 const BLOCKED_SECONDS := 0.35
 const SIDESTEP_SECONDS := 0.55
+## How long a window is before a body is asked whether it actually got anywhere.
+## A sidestep is enough for a post or a wall; a body wedged between two trunks, or
+## two allies shouldering each other hard enough to jitter in place, swaps left for
+## right forever and never stands still - which is why the measure is NET
+## displacement over a window and not a frame-to-frame step.
+const POCKET_SECONDS := 2.0
+## Net travel, in metres, that counts as "this errand is going somewhere" over one
+## window. A jogging body covers eight; a wedged one covers a tenth of one.
+const POCKET_METRES := 0.4
+## How long the retreat lasts: long enough to clear a trunk's radius and step back
+## into the open, short enough that a squad in a scrape never looks like it flees.
+const RETREAT_SECONDS := 0.9
 ## How clear the field has to be before a squadmate bends over a corpse, and
 ## before it will stand over a downed body for five seconds. One rule for both:
 ## a body on the floor is only worth walking to when nothing can cut you for it.
@@ -201,7 +229,7 @@ const TURN_RATE := 320.0
 ## dressing clock is one of them: a bandage takes its seconds wherever the body
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
 ## that keeps running behind a fight.
-const TRACK_CLOCKS := ["state_left", "step_left", "side", "heal_left", "roam_left",
+const TRACK_CLOCKS := ["state_left", "step_left", "side", "retreat", "heal_left", "roam_left",
 	"rest_left"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
@@ -243,6 +271,7 @@ func drive(delta: float) -> void:
 	if controller == null or warband == null:
 		return
 	player_body = controller.active_body(1)
+	_drop_crumb()
 	if _rescue_step(delta):
 		# The rescue has already written its rescuer's intent for this frame; the
 		# rest of the squad still gets its turn below.
@@ -335,6 +364,16 @@ func drive(delta: float) -> void:
 		#    soul, and a squad with nowhere to be roams its own post in small
 		#    steps. Nobody walks onto the soul, and nothing stands still.
 		if following and is_instance_valid(player_body):
+			# Far behind, the soul's line outranks the ring slot: walking the way the
+			# player walked is what keeps a squad together in a wood this size.
+			var to_soul: Vector3 = (player_body as Node3D).global_position - actor.global_position
+			to_soul.y = 0.0
+			if to_soul.length() > ESCORT_RALLY:
+				var crumb: Variant = _crumb_for(actor)
+				if crumb != null:
+					track["to_post"] = true
+					_advance(actor, crumb, track, 0.9)
+					continue
 			var post := _escort_post(actor, track)
 			var gap: Vector3 = post - actor.global_position
 			gap.y = 0.0
@@ -1041,7 +1080,11 @@ func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) ->
 ## is going nowhere takes the sidestep instead, so a squadmate caught on a wall
 ## tries both ways round rather than shouldering it for the rest of the fight.
 func _steer(actor, direction: Vector3, track: Dictionary, running: bool) -> void:
-	if float(track.get("side", 0.0)) > 0.0:
+	if float(track.get("retreat", 0.0)) > 0.0:
+		# Back out of the pocket first; the sidestep and the heading wait until the
+		# body is clear of whatever it walked into.
+		direction = -direction
+	elif float(track.get("side", 0.0)) > 0.0:
 		direction = direction.cross(Vector3.UP) * float(track.get("sign", 1.0))
 	# Every step is pushed apart from the bodies around it. This is the one place
 	# the whole module writes movement, so the personal space applies to the fight,
@@ -1132,6 +1175,42 @@ func other_id_hint(body) -> int:
 	return absi(str(body.name).hash()) % 12
 
 
+## Record the soul's road one footprint at a time. Cheap on purpose: one distance
+## check per frame, an append every 2.5 m, and the oldest crumb falls off the back
+## once the line is 600 m long.
+func _drop_crumb() -> void:
+	if player_body == null or not is_instance_valid(player_body):
+		return
+	var at: Vector3 = (player_body as Node3D).global_position
+	if not _trail.is_empty() and _trail[_trail.size() - 1].distance_to(at) < CRUMB_STEP:
+		return
+	_trail.append(at)
+	while _trail.size() > CRUMB_KEEP:
+		_trail.remove_at(0)
+
+
+## The footprint an ally should walk to: the one ahead of the nearest crumb it is
+## standing on, so a body that has fallen behind rejoins the line and then follows
+## it. Null when the body is nowhere near the line the soul walked.
+func _crumb_for(actor) -> Variant:
+	if _trail.size() < 2:
+		return null
+	var here: Vector3 = (actor as Node3D).global_position
+	var best := -1
+	var best_distance := INF
+	for index in _trail.size():
+		var distance: float = _trail[index].distance_to(here)
+		if distance < best_distance:
+			best_distance = distance
+			best = index
+	if best < 0 or best_distance > CRUMB_GRIP:
+		return null
+	# One footprint ahead, never the last one underfoot: a body that aims at the
+	# crumb it is already standing on stands there.
+	var next := mini(best + 1, _trail.size() - 1)
+	return _trail[next]
+
+
 ## Where an escort stands: its own slot on a ring around the soul. The slot comes
 ## from the body's place in the squad order, so two allies never claim the same
 ## spot and the ring itself is what spreads the squad on the walk.
@@ -1200,7 +1279,8 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 			"roam_left": 0.0, "rest_left": 0.0, "to_post": false,
 			"roam_to": actor.global_position, "delta": delta,
 			"fetch_key": "", "fetch_best": 0.0, "fetch_left": 0.0,
-			"swings_left": 0, "swing_due": false,
+			"swings_left": 0, "swing_due": false, "retreat": 0.0,
+			"anchor": actor.global_position, "anchor_left": POCKET_SECONDS,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]
 	track["delta"] = delta
@@ -1214,6 +1294,23 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 		track["stuck"] = 0.0
 		track["side"] = SIDESTEP_SECONDS
 		track["sign"] = -float(track["sign"])
+	# The pocket. A sidestep answers a post; it does not answer a body shoved into a
+	# notch between two trunks, and it does not answer two allies pressing on each
+	# other hard enough to jitter in place - which is what stranded the escort at the
+	# trail's head with the whole wood still to walk. Once a window has passed the
+	# question is NET displacement: a body that wants to move and has covered next to
+	# nothing is wedged, so it backs out the way it came and tries again from there.
+	# A body in a fight is exempt: circling an opponent is a step, not a journey.
+	track["anchor_left"] = float(track.get("anchor_left", 0.0)) - delta
+	if float(track["anchor_left"]) <= 0.0:
+		var net: float = actor.global_position.distance_to(
+			track.get("anchor", actor.global_position))
+		track["anchor"] = actor.global_position
+		track["anchor_left"] = POCKET_SECONDS
+		if wanted and not bool(track.get("engaged", false)) and net < POCKET_METRES \
+				and float(track.get("retreat", 0.0)) <= 0.0:
+			track["retreat"] = RETREAT_SECONDS
+			track["side"] = 0.0
 	return track
 
 

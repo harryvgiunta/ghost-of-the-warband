@@ -36,7 +36,15 @@ const WORLD := "res://scenes/warband_world.tscn"
 const WALK_LIMIT := 260.0
 ## The walk is played at this speed multiplier so a quarter-kilometre run fits in
 ## a regression; the recorded time is the game time the lane cost at 1x.
-const WALK_SCALE := 3.0
+## The lane is a kilometre and a third now, so the walk is driven faster in real
+## time to stay inside the suite's ceiling; the assertions are distances, states
+## and game seconds, which are the campaign's own.
+const WALK_SCALE := 4.2
+## How much of the lane this test drives. The full traverse - 1,575 m, no scene
+## change - is `warband_world_regression`'s claim and it makes it once; this test
+## is the *area*: the lane is a corridor, the escort follows, and a stretch is
+## enough to prove both without paying for the second kilometre twice.
+const WALK_METRES := 420.0
 ## How long the escort is given to close on the soul at the far end, in scaled
 ## seconds: it walks the wood behind the soul rather than a lane.
 const FOLLOW_S := 40.0
@@ -355,7 +363,9 @@ func check_pursuers() -> void:
 			far += 1
 	check(near == 0, "nobody stands within sight of the camp's mouth (%d within 60 m)"
 		% near)
-	check(far >= 6, "the cult is still on the road (%d within 250 m)" % far)
+	# Two rings stand inside the first 250 m of a 1,374 m road; the rest are spaced
+	# down it. The claim is that the road is held, not that the first quarter km is.
+	check(far >= 4, "the cult is still on the road (%d within 250 m)" % far)
 	check(game.squad != null and game.squad.following, "the squad is an escort once the camp is clear")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")
@@ -406,6 +416,8 @@ func check_walk() -> void:
 	game.controller.input_enabled = false
 	await physics_frame
 	var previous := _flat(body.global_position, gate)
+	var started_gap := previous
+	var covered := 0.0
 	var worst := 0.0
 	var monotonic := true
 	var worst_step := 0.0
@@ -435,8 +447,9 @@ func check_walk() -> void:
 		if gap > previous + 0.05:
 			monotonic = false
 			worst_step = maxf(worst_step, gap - previous)
+		covered = started_gap - gap
 		previous = gap
-		if gap <= 3.0:
+		if covered >= WALK_METRES:
 			break
 		# A player steps around a post; a straight-line driver pushes into it and
 		# stays there. Sidestep for a beat whenever the ground stops being made.
@@ -455,12 +468,13 @@ func check_walk() -> void:
 	var game_seconds := float(ticks) / 60.0
 	check(monotonic, "the walk never gets further from the town (worst +%.2f m)" % worst_step)
 	check(worst <= half, "the body never leaves the %.1f m lane (%.2f m off centre)" % [half * 2.0, worst])
-	check(previous <= 4.0, "the body reached the town's gate (%.2f m)" % previous)
+	check(covered >= WALK_METRES - 5.0,
+		"the body walked its stretch of the lane (%.0f m of %.0f m)" % [covered, WALK_METRES])
 	check(ticks < 20000 and real_seconds < WALK_LIMIT,
 		"the run finished inside the watchdog (%.1f s real)" % real_seconds)
 	check(requested.is_empty(), "walking the trail requests no scene (%s)" % str(requested))
-	print("ESCAPE_RUN_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d lateral=%.2f"
-		% [game_seconds, real_seconds, ticks, worst])
+	print("ESCAPE_RUN_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f lateral=%.2f"
+		% [game_seconds, real_seconds, ticks, covered, worst])
 
 
 ## The escort: with the road clear, the squad closes on the soul wherever it is.

@@ -551,12 +551,16 @@ Short version of the latest tuning (all in the code, all covered by
 - the opening does not ask for loot, and the escape is a walk, not a quota;
 - the whole campaign is **one world**: `scenes/warband_world.tscn` holds the cages
   in a camp pocket **deep in the wood**, 170 m of ordinary forest between the camp
-  and the trail head, a 915 m way through the trees and a town cut into the same
-  trees at the far end. There is no door key and no load between them — you walk —
-  and the only scene change left is deploying to the arena;
+  and the trail head, a **1,374.6 m** way through the trees (four caged soldiers
+  beside it at fractions 0.34-0.86 and three warcamps 78-96 m off it) and a
+  **stockade town** cut into the same trees at the far end: 286 stakes, one gap, a
+  gate, eight roofs, five armoured keepers and three watch archers. There is no
+  door key and no load between them — you walk — and the only scene change left is
+  deploying to the arena;
 - the world stands on **one heightfield** (`scripts/warband/terrain.gd`): three
   octaves of value noise on a fixed seed, ±1.9 m over 64/40/31 m wavelengths, baked
-  as one `ArrayMesh` (25,440 triangles, 7 m grid) with one trimesh collider and a
+  as one `ArrayMesh` (42,658 triangles, 77 x 277 cells on a 7 m grid, x -268..271 and
+  z -1695..244) with one trimesh collider and a
   `height_at()` every prop samples. The camp pocket and the town square are padded
   flat and blended into the slope; the walk between them is not. There is no lane:
   the way through the wood is a faint worn line marked by a **pair of torches every
@@ -598,3 +602,30 @@ allowed to grow to ten minutes.
   a fire ring, trees inside the footprint - padded flat into the world's heightfield
   (420 x 1484 m, with an invisible catch floor under its lowest point), so the cages
   stand level and nothing can fall out of the world.
+
+
+## 11. The first town, the orders and the road out (shipped)
+
+The campaign now has a destination, a reason to leave it and a way to read the map
+between the two. Everything below is a module with its own regression; the numbers
+and the rules they cannot break live in `docs/warband-handoff.md` §§1-4.
+
+| Surface | Module | Contract |
+| --- | --- | --- |
+| The stockade | `scripts/warband/town_hub.gd`, `town_dressing.gd`, `town_folk.gd` | `WALL_RADIUS` 22, a `VillageKit.palisade` ring cut for one north gap and a `VillageKit.gate` in it, eight roofs (`keeper_hut` x5, `wattle_hut` x2, `trader_frame` x1) and village dressing with no colliders of its own. The same service ids, points and `G` semantics as before, plus `ichor`. Five armoured keeper bodies (`Archer` rigs, `WarbandLooks` profiles, real armor sets) stand behind their counters, unpossessable and unhittable |
+| The watch | `scripts/warband/town_guard.gd` | three static archers on the gate: nearest hostile within 26 m from the world's `guards` (or `wild_mobs`), line of sight on layer 1, 0.9 s draw, a real `arrow.gd` on the mob layer, 1.6 s cooldown. They never move or speak |
+| The ledger | `scripts/warband/quest_log.gd` | `WarbandQuests` on `Warband.quests`: `KILL` / `RESCUE` / `COLLECT` / `APPLY` / `REACH`, four rows in `DEFS`, one state and one count each, saved as `quests` in save v5. `note_kill` / `note_rescue` / `note_collected` / `note_applied` / `note_reached`; `offer` → `accept` → `turn_in` with the chain in each row's `next` |
+| The keeper who talks | `scripts/warband/quest_giver.gd`, `quest_marker.gd` | `talk(service, peer)` raises the card that teaches or hands over an order and answers false when the counter should open instead; `marker_service()` decides who wears the gold `TALK TO HIM` arrow (the recruiter while the band is short of the cap, the quartermaster when he has an order, a turn-in or a vial to explain) |
+| The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed` per cage (roster + stash dressing + ledger + HUD). A `FREE HIM` arrow rides the nearest shut cage while the order is live |
+| The warcamps | `scripts/warband/watcher_warren.gd` | 21 hollow wardens in three camps 78 / 96 / 86 m off the lane, dressed from the village kit, one `MobWander` territory each, wired to the world's kill handler so they count toward the bounty |
+| The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. `_input` reads it before the soul controller, so a click on loot is never also a swing |
+| The map | `scripts/warband/world_map.gd` | one page, `M`, no pause: the lane sampled from the trail's path, the camp ring, the walled square, hostiles, the warband and the soul's own facing, plus `host.map_markers()` (shut cages, warcamps) |
+| The bench | `scripts/warband/ichor_bench.gd` | `IchorBench.build_prop()` (furniture with the town's one cold-green light) and the panel: pooled unbranded weapons, one vial per blade, `WarbandCruor.bind()` writing the altar's own brand ledger without touching the essence wallet |
+
+The **orders** the quartermaster hands out, in chain order:
+
+1. `free_the_soldiers` — rescue four caged soldiers.
+2. `cull_the_watchers` — kill twenty hollow wardens.
+3. `find_the_crypt` — a shell: the order exists, the place does not.
+4. `bind_the_ichor` — off the chain: appears the moment a warden's vial is in the
+   shared stash, and teaches the bench that turns it into a weapon's sigil.

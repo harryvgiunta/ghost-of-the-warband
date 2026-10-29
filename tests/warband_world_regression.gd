@@ -909,6 +909,38 @@ func check_walk() -> void:
 		"the body reached the town square (%.2f m from the fire)"
 		% flat_range(body.global_position, town_at))
 	check(real_seconds < WALK_LIMIT, "the walk finished inside the watchdog (%.1f s real)" % real_seconds)
+	# The squad is an escort, not a decoration: a body left wedged on a trunk
+	# somewhere in a kilometre and a third of wood is a squad the player loses for
+	# the rest of the run. Half of the free allies must still be walking with the
+	# soul, and none may be dead.
+	var soul_id: int = int(game.controller.merc_for_peer(1))
+	var free_allies := 0
+	var alive_allies := 0
+	var farthest := 0.0
+	var report: Array[String] = []
+	for merc_id in game.squad_ids:
+		if int(merc_id) == soul_id:
+			continue
+		var ally = game.controller.body_of(int(merc_id))
+		if ally == null or not is_instance_valid(ally):
+			continue
+		free_allies += 1
+		if bool(ally.get("alive")):
+			alive_allies += 1
+		var gap: float = flat_range(ally.global_position, body.global_position)
+		farthest = maxf(farthest, gap)
+		report.append("%s %.0f m" % [warband.roster.name_of(int(merc_id)), gap])
+	check(free_allies >= 2, "the walk had a squad to lose (%d allies)" % free_allies)
+	check(alive_allies == free_allies,
+		"every ally walked out of the wood on his feet (%d of %d)" % [alive_allies, free_allies])
+	# A soul that sprints the whole 1,575 m without ever stopping is faster than an
+	# escort, and the squad is allowed to trail it - the trail's own regression is
+	# where "they arrive and stand beside you" is proved (`escape_run_regression`
+	# waits at the end of a stretch and requires three within 20 m). What this walk
+	# proves is that nobody is *lost*: a body left wedged in the camp when the soul
+	# reaches the gate is a body the player never gets back, and the difference
+	# between "trailing" and "abandoned" is the whole point.
+	check(farthest < 700.0, "no ally is stranded in the wood (%s)" % ", ".join(report))
 	# The campaign's walk is the opening's ground plus the wood plus the lane's, and
 	# the same body walks all of it.
 	check(travelled >= 850.0, "the trail half of the walk is a real one (%.0f m of ground)"

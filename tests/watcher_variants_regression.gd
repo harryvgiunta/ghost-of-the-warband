@@ -350,17 +350,23 @@ func check_gear() -> void:
 		var set_name := str(armoured.variant.get("armor", ""))
 		var pieces := 0
 		var dressings := 0
+		var reagents := 0
 		for item_id in gear:
 			check(Catalog.ITEMS.has(str(item_id)), "corpse gear is catalog gear (%s)" % str(item_id))
 			if str(item_id).begins_with("armor_%s_" % set_name):
 				pieces += 1
 			if str(item_id) == "bandage_linen":
 				dressings += 1
+			if str(item_id) == "ichor_vial":
+				reagents += 1
 		check(pieces >= 1, "the corpse lists the worn %s pieces (%d)" % [set_name, pieces])
 		check(dressings <= 1, "a body carries at most one dressing (%d)" % dressings)
-		check(gear.size() == pieces + 1 + dressings,
-			"gear is the blade, the worn pieces and the dressing (%d of %d)"
-			% [gear.size(), pieces + 1 + dressings])
+		# The warden's own ichor: the campaign's reagent, carried by the variants the
+		# table names and never by more than one body's worth.
+		check(reagents <= 1, "a body carries at most one vial of ichor (%d)" % reagents)
+		check(gear.size() == pieces + 1 + dressings + reagents,
+			"gear is the blade, the worn pieces, the dressing and the warden's vial (%d of %d)"
+			% [gear.size(), pieces + 1 + dressings + reagents])
 		check(ArmorData.SET_IDS.has(set_name), "the armour set is a catalog set (%s)" % set_name)
 	if bare != null:
 		var bare_gear: Array = bare.gear_items()
@@ -368,8 +374,8 @@ func check_gear() -> void:
 			"an unarmoured watcher drops its blade (%s)" % str(bare_gear))
 		for item_id in bare_gear:
 			if str(item_id) != str(bare.weapon_item):
-				check(str(item_id) == "bandage_linen",
-					"and nothing but a dressing rides beside it (%s)" % str(item_id))
+				check(str(item_id) in ["bandage_linen", "ichor_vial"],
+					"and nothing but a dressing or a vial rides beside it (%s)" % str(item_id))
 	# Half the variants walk the table with a field dressing: that is where the
 	# squad's medicine comes from, so some of the sample must be carrying one.
 	check(carried_bandages > 0 and carried_bandages < _samples.size(),

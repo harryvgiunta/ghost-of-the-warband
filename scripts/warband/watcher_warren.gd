@@ -64,6 +64,9 @@ const REFRESH_SECONDS := 0.5
 ## `main.gd`'s pack radius. Each camp's seven stand inside it of one another, so
 ## `assign_all` hands that camp one territory to roam.
 const PACK_RADIUS := 14.0
+## How far from its own camp a warden will take a target: past this it is a body in
+## a place, not a patrol, and the road belongs to whoever walks it.
+const LEASH_METRES := 55.0
 
 ## The world this warren is built into.
 var host: Node3D = null
@@ -248,9 +251,16 @@ func _post(centre: Vector3, camp_index: int, member: int, seed: int) -> Vector3:
 
 # --- the aim ---------------------------------------------------------------
 
-## Put the camps' aim back on the bodies that are standing right now. The free
-## bodies are the world's list, and a warden's `player` is simply the closest of
-## them: a downed body is revived, never hunted.
+## Put the camps' aim back on the bodies that are standing right now - but only
+## while they are the camp's own quarry.
+##
+## A warcamp is a place the warband goes to, not a patrol of the road: handed the
+## nearest body unconditionally, twenty-one wardens leave their patches and walk
+## the kilometre and a third of lane behind a squad that never turned off it,
+## which peels the escort off one fight at a time and is not what an order about
+## hunting grounds means. Past `LEASH_METRES` from its own camp a warden is given
+## nothing, and its pack's `MobWander` territory keeps it at home; walk within the
+## leash and the camp wakes as one.
 func _refresh() -> void:
 	if not is_instance_valid(host):
 		return
@@ -258,8 +268,31 @@ func _refresh() -> void:
 	for watcher in _mobs:
 		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
-		watcher.player = _nearest(watcher.global_position)
+		var home: Vector3 = _home_of(watcher)
+		var prey = _nearest(watcher.global_position)
+		if prey == null or (prey as Node3D).global_position.distance_to(home) > LEASH_METRES:
+			watcher.player = null
+			# `targets` is a typed `Array[CharacterBody3D]`: an untyped empty array is
+			# a refused assignment, and a refused one leaves the old quarry standing.
+			var none: Array[CharacterBody3D] = []
+			watcher.targets = none
+			continue
+		watcher.player = prey
 		watcher.targets = standing
+
+
+## The camp a body belongs to: the post it was spawned on, read back off the group
+## it was named for. A warden carries no camp reference of its own.
+func _home_of(watcher) -> Vector3:
+	var nearest := (watcher as Node3D).global_position
+	var best := INF
+	for camp in _camps:
+		var centre: Vector3 = camp.get("centre", Vector3.ZERO)
+		var distance: float = (watcher as Node3D).global_position.distance_to(centre)
+		if distance < best:
+			best = distance
+			nearest = centre
+	return nearest
 
 
 func _standing_bodies() -> Array[CharacterBody3D]:
