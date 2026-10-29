@@ -13,6 +13,11 @@ const HIRE_BASE_COST := 120
 ## Each mercenary already on the books makes the next one dearer, so a wipe
 ## costs more than a top-up and the early loop stays affordable.
 const HIRE_STEP_COST := 35
+## The town's first oaths are free: the recruiter is garrisoning a warband, not
+## selling one, and eight bodies is the deployment cap itself. Past that line the
+## old price curve applies - it is the cap that refuses a ninth body, not the
+## purse, until the cap moves.
+const FREE_HIRES := 8
 
 ## Names the recruiter cycles through, so a fresh warband reads as people.
 const NAMES := [
@@ -21,9 +26,12 @@ const NAMES := [
 	"Quill", "Rask", "Sable", "Thorn", "Ulric", "Vane", "Wren", "Ysolde",
 ]
 
-## The price of the next body, given how many are already standing.
+## The price of the next body, given how many are already standing. Zero while
+## the recruiter is still filling the first eight places.
 static func hire_cost(roster) -> int:
 	var count: int = roster.count() if roster != null else 0
+	if count < FREE_HIRES:
+		return 0
 	return HIRE_BASE_COST + HIRE_STEP_COST * count
 
 ## A replacement costs the same as a hire while the warband is under the cap.
@@ -59,6 +67,9 @@ static func hire(roster, wallet, merc_name: String = "", cap: int = Contracts.MA
 		chosen = next_name(roster)
 	wallet.add_credits(-cost)
 	var merc_id: int = roster.create(chosen)
+	if cost <= 0:
+		return {"ok": true, "merc_id": merc_id, "cost": 0,
+			"message": "%s swears to the warband. The oath costs nothing." % chosen}
 	return {"ok": true, "merc_id": merc_id, "cost": cost,
 		"message": "%s swears to the warband for %d gold." % [chosen, cost]}
 

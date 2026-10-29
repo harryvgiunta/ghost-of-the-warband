@@ -219,7 +219,7 @@ func check_recruiter() -> void:
 	check(warband.gold() == gold_before - cost,
 		"hiring spends exactly the hire cost (%d -> %d, cost %d)"
 			% [gold_before, warband.gold(), cost])
-	check(warband.hire_cost() > cost, "the next oath costs more than the last")
+	check(warband.hire_cost() == 0, "the next oath is still free under the eight")
 
 	# At the cap the board must refuse and leave the purse and roster alone.
 	while warband.roster.count() < warband.deployment_cap:

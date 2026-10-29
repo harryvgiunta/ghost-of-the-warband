@@ -316,24 +316,22 @@ func _check_recruiter() -> void:
 	check(screen.hire_names.size() == 3, "the board offers three names")
 	check(screen.hire_names.has("Aldous") == false, "the board skips names already sworn")
 	var cost: int = warband.hire_cost()
-	check(cost == 120 + 35, "the price is the vendor's, got %d" % cost)
-	check(screen.hire_buttons[0].text.contains(str(cost)), "the HIRE button names the price")
+	check(cost == 0, "the recruiter's first eight oaths are free, got %d" % cost)
+	check(screen.hire_buttons[0].text.contains("FREE"), "the HIRE button says the oath is free")
 
 	var gold_before: int = warband.gold()
 	screen.hire_buttons[0].pressed.emit()
 	check(warband.roster.count() == 2, "HIRE swears a body in")
-	check(warband.gold() == gold_before - cost, "HIRE spends exactly the hire cost")
+	check(warband.gold() == gold_before - cost, "a free HIRE takes no gold")
 	check(screen.rows.size() == 2, "the roster repaints immediately")
 	check(screen.gold_label.text == "%d G" % warband.gold(), "the purse repaints immediately")
 
-	# An empty purse is refused too, and costs nothing.
+	# An empty purse still swears a body: gold is only asked for past the eighth.
 	_set_gold(0)
 	var broke: int = warband.roster.count()
 	screen.hire_buttons[0].pressed.emit()
-	check(warband.roster.count() == broke, "no gold means no body")
-	check(warband.gold() == 0, "a refused hire takes no gold")
-	check(screen.status_text().contains("You need"),
-		"the empty purse is reported, got %s" % screen.status_text())
+	check(warband.roster.count() == broke + 1, "a free oath needs no gold")
+	check(warband.gold() == 0, "and leaves the empty purse alone")
 	_set_gold(1000)
 
 	while warband.roster.count() < warband.deployment_cap:

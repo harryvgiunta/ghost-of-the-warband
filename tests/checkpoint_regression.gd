@@ -102,7 +102,7 @@ func check_persistence() -> void:
 	if not (parsed is Dictionary):
 		return
 	var data: Dictionary = parsed
-	check(int(data.get("version", 0)) == 4, "the save version moved to 4 (%d)" % int(data.get("version", 0)))
+	check(int(data.get("version", 0)) == 5, "the save version moved to 5 (%d)" % int(data.get("version", 0)))
 	check(data.get("checkpoint", {}) is Dictionary, "the file carries a checkpoint block")
 	var stored: Dictionary = warband.sanitise_checkpoint(data.get("checkpoint", {}))
 	check(stored.get("id", "") == "trail_start", "the bookmark names the tutorial's end")

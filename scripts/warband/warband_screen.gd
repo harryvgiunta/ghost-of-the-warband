@@ -506,15 +506,21 @@ func _refresh_recruiter() -> void:
 	var offered := _fresh_names(_hire_rows.size())
 	var cost := int(_warband.hire_cost())
 	var full: bool = int(_warband.roster.count()) >= int(_warband.deployment_cap)
-	_cost_label.text = "Next oath: %d gold  /  %d of %d sworn" % [
-		cost, int(_warband.roster.count()), int(_warband.deployment_cap)]
+	# The first eight oaths cost nothing, and a board that says "0 gold" makes the
+	# player look for a catch. It says FREE.
+	if cost <= 0:
+		_cost_label.text = "Next oath: free  /  %d of %d sworn" % [
+			int(_warband.roster.count()), int(_warband.deployment_cap)]
+	else:
+		_cost_label.text = "Next oath: %d gold  /  %d of %d sworn" % [cost,
+			int(_warband.roster.count()), int(_warband.deployment_cap)]
 	hire_names.clear()
 	for index in _hire_rows.size():
 		var row: Dictionary = _hire_rows[index]
 		var candidate := offered[index] if index < offered.size() else ""
 		(row["name"] as Label).text = candidate
 		var button: Button = row["button"]
-		button.text = "HIRE  %d" % cost
+		button.text = "HIRE  FREE" if cost <= 0 else "HIRE  %d" % cost
 		# The cap is not a disabled button: pressing it must report the refusal
 		# the vendor returns, so the player learns why the board is empty.
 		button.disabled = candidate.is_empty()

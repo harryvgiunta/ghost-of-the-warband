@@ -558,25 +558,41 @@ func check_cruor(state, warband) -> void:
 func check_vendor(state, warband) -> void:
 	warband.reset_state()
 	state.credits = 1000
-	var first : int = warband.hire_cost()
+	# The first eight oaths are free: the recruiter is garrisoning a warband, not
+	# selling one, and eight bodies is the deployment cap itself.
+	check(warband.hire_cost() == 0, "the first oath is free")
 	var hired : Dictionary = warband.hire("Grist")
-	check(hired["ok"], "hiring spends gold: %s" % str(hired.get("message", "")))
+	check(hired["ok"], "hiring swears a body: %s" % str(hired.get("message", "")))
 	check(warband.roster.count() == 1, "the body joins the warband")
-	check(int(state.credits) == 1000 - first, "exactly the quoted price is spent")
-	check(warband.hire_cost() > first, "the next body costs more")
+	check(int(hired["cost"]) == 0, "and quotes nothing")
+	check(int(state.credits) == 1000, "a free oath spends no gold")
+
+	# Past the free eight the old curve is back, and every oath still costs more
+	# than the one before it.
+	while warband.roster.count() < VendorScript.FREE_HIRES:
+		warband.add_mercenary("Free %d" % warband.roster.count())
+	warband.deployment_cap = VendorScript.FREE_HIRES + 1
+	var first_paid : int = warband.hire_cost()
+	check(first_paid == VendorScript.HIRE_BASE_COST + VendorScript.HIRE_STEP_COST * VendorScript.FREE_HIRES,
+		"the ninth oath is priced again (%d)" % first_paid)
+	var paid : Dictionary = warband.hire("Hale")
+	check(paid["ok"], "a priced oath goes through while there is room")
+	check(int(state.credits) == 1000 - first_paid, "exactly the quoted price is spent")
+	check(warband.hire_cost() > first_paid, "the next body costs more")
 
 	# The cap is hard.
-	warband.deployment_cap = 2
-	warband.hire("Hale")
+	warband.deployment_cap = VendorScript.FREE_HIRES
 	var full : Dictionary = warband.hire("Ilsa")
-	check(full["ok"] == false, "the cap refuses a third body")
-	check(warband.roster.count() == 2, "the roster stays at the cap")
+	check(full["ok"] == false, "the cap refuses another body")
+	check(warband.roster.count() == VendorScript.FREE_HIRES + 1, "the roster stays where it was")
 
-	# A poor purse buys nothing.
+	# A poor purse buys nothing, once the free eight are behind it.
 	state.credits = 5
+	warband.deployment_cap = VendorScript.FREE_HIRES + 4
+	var sworn: int = warband.roster.count()
 	var poor : Dictionary = warband.hire("Jory")
 	check(poor["ok"] == false, "no gold, no blade")
-	check(warband.roster.count() == 2, "the roster is unchanged")
+	check(warband.roster.count() == sworn, "the roster is unchanged")
 	state.credits = 99999
 	warband.deployment_cap = Contracts.MAX_DEPLOYMENT_CAP
 

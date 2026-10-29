@@ -327,6 +327,7 @@ func _physics_process(delta: float) -> void:
 	# handed no target, so no local sense ever wakes it behind the host's back.
 	SquadDriveScript.retarget(_local_guards(), bodies, AGGRO_RADIUS)
 	_sync_roster(delta)
+	_sync_quests()
 	_update_prompt()
 	_update_hint()
 	_push_downed_card()
@@ -1059,8 +1060,101 @@ func _on_enemy_defeated(enemy, reward: int) -> void:
 	drop_held_weapon(enemy)
 	if loot != null and loot.has_method("register_corpse"):
 		loot.register_corpse(enemy)
+	note_kill(enemy)
 	if screen != null:
 		screen.refresh()
+
+
+# --- the campaign ledger ----------------------------------------------------
+#
+# The world is the one place that sees every hostile die, so it is the one place
+# a bounty is counted. Areas report here (`note_kill`) instead of writing to the
+# ledger themselves, and the two facts the campaign is built on - a death and a
+# body out of a cage - are the only things the world needs to know about.
+
+## The ledger, for an area that wants to read the orders.
+func campaign_quests() -> WarbandQuests:
+	return warband.quests if warband != null else null
+
+## The id a death is booked under: the mob's own `mob_id`, or the shape its class
+## declares. A body that names neither is not counted, because a bounty that
+## answers to every corpse is not a bounty.
+static func kill_id_of(enemy) -> String:
+	if enemy == null:
+		return ""
+	if "mob_id" in enemy:
+		var named := str(enemy.mob_id).strip_edges()
+		if not named.is_empty():
+			return named
+	if "kind" in enemy:
+		# `enemy.gd`: 0 briar wolf, 1 ranger clone, 2 cinder devil. The dogs of the
+		# wood answer to their own name, so a wolf bounty is a table row away.
+		match int(enemy.kind):
+			0:
+				return "briar_wolf"
+			1:
+				return "ranger_clone"
+			2:
+				return "cinder_devil"
+	return ""
+
+## Book one death on the ledger. Public because the trail's own area owns the
+## `defeated` signal of its cultists and calls this rather than duplicating the
+## purse bookkeeping.
+func note_kill(enemy) -> void:
+	if warband == null:
+		return
+	var mob_id := kill_id_of(enemy)
+	if mob_id.is_empty():
+		return
+	_announce_quests(warband.quests.note_kill(mob_id))
+
+## A soldier comes out of a cage and swears to the band: one roster record, the
+## best spare kit the shared stash holds, one mark on the ledger, one line on the
+## HUD. The area that cut the latch calls this and nothing else.
+func note_soldier_freed(merc_name: String) -> int:
+	if warband == null:
+		return -1
+	var merc_id: int = warband.add_mercenary(merc_name)
+	if merc_id <= 0:
+		return -1
+	warband.dress_recruit(merc_id)
+	var moved: Array = warband.quests.note_rescue()
+	_announce_quests(moved)
+	if hud != null:
+		var quests: WarbandQuests = warband.quests
+		if quests.is_complete("free_the_soldiers"):
+			hud.set_status("%s is out of the cage. Every name is off the roll - back to"
+				% merc_name + " the quartermaster.", 4.5)
+		elif quests.is_active("free_the_soldiers"):
+			hud.set_status("%s is out of the cage. Freed %d of %d." % [merc_name,
+				quests.progress_of("free_the_soldiers"),
+				quests.goal_count("free_the_soldiers")], 4.0)
+		else:
+			hud.set_status("%s joins the warband." % merc_name, 3.5)
+	return merc_id
+
+## Paint the ledger block. Cheap by construction: the HUD repaints only when the
+## signature of what it shows has moved.
+func _sync_quests() -> void:
+	if hud == null or warband == null:
+		return
+	hud.set_quests(warband.quests.rows())
+
+## One line for the objectives that moved this frame, read off the ledger rather
+## than recomputed here.
+func _announce_quests(moved: Array) -> void:
+	if hud == null or warband == null:
+		return
+	_sync_quests()
+	if moved.is_empty():
+		return
+	var quest_id := str(moved[0])
+	var title := str(WarbandQuests.def_of(quest_id).get("title", quest_id))
+	if warband.quests.is_complete(quest_id):
+		hud.set_status("%s  -  done. The quartermaster is waiting." % title, 4.5)
+	else:
+		hud.set_status(warband.quests.objective(), 3.0)
 
 
 ## Book a reward into the shared purse and let the strip above it hear about it.

@@ -22,19 +22,27 @@ const State = preload("res://scripts/player_state.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 ## The battle ledger record; see "run reports" in the persistence section.
 const RunReportScript = preload("res://scripts/warband/run_report.gd")
+const QuestScript = preload("res://scripts/warband/quest_log.gd")
 
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
+
+## The order a fresh body is armed in: steel first, then armour, then the
+## trinkets. `dress_recruit` walks this list and takes the dearest spare the
+## shared stash holds for each slot.
+const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "neck", "ring1", "ring2"]
 
 ## Additive save format. v2 added the run history (`runs`) and the lifetime
 ## totals (`run_totals`); v3 added each mercenary's two weapon sets (`weapon_sets`
 ## plus `active_set` per record), the pair `TAB` brings up; v4 added the
 ## checkpoint bookmark (`checkpoint`), the autosave that remembers which stretch
-## of the world the warband has already played. Older files still load: a record
-## with no sets puts the pair already in its hands in Set 1 and starts Set 2
-## empty, a v1 file has no reports and zeroed totals, and a file without a
-## checkpoint resumes at the town as it always did.
-const SAVE_VERSION := 4
+## of the world the warband has already played; v5 added the campaign ledger
+## (`quests`), the objectives the quartermaster has handed over and how far each
+## one got. Older files still load: a record with no sets puts the pair already
+## in its hands in Set 1 and starts Set 2 empty, a v1 file has no reports and
+## zeroed totals, a file without a checkpoint resumes at the town as it always
+## did, and a file without quests opens with an empty ledger.
+const SAVE_VERSION := 5
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -45,6 +53,10 @@ var roster: WarbandRoster = RosterScript.new()
 var souls: SoulRouter = SoulScript.new()
 var stash: WarbandStash = StashScript.new()
 var cruor: WarbandCruor = CruorScript.new()
+## The campaign ledger: which objectives the quartermaster has handed over and
+## how far each has got. Pure state (no scene, no node), saved with everything
+## else, so a checkpoint restores the orders as they stood.
+var quests: WarbandQuests = QuestScript.new()
 var deployment_cap: int = Contracts.MAX_DEPLOYMENT_CAP
 var save_path := DEFAULT_SAVE_PATH
 ## True when a mode has already handed this warband its starting bodies, so a
@@ -104,11 +116,57 @@ func deployed_merc_ids() -> Array[int]:
 	return roster.deployed_ids()
 
 ## Hack a body into the warband (the cage tutorial's four prisoners, the admin
-## arena's eight test bodies). No gold changes hands.
+## arena's eight test bodies, a soldier cut out of a cage). No gold changes hands.
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
 	var merc_id := roster.create(merc_name, equipped)
 	_notify()
 	return merc_id
+
+## Hand a fresh body the best kit the warband already owns.
+##
+## A body that swears with empty hands is dead weight, so a hire and a rescue
+## both walk the equipment slots in the order a fighter would fill them and take
+## the dearest spare out of the shared stash for each one. The pool is the only
+## source: nothing is minted, and anything the body was already wearing (the
+## cage's rags, a looted blade) is left alone. A two-hander locks the off hand,
+## exactly as `EquipmentRules` says it does.
+## Returns `{ok, merc_id, fitted, message}` with the ids that walked across.
+func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
+	var fitted: Array[String] = []
+	if merc_id <= 0 or not roster.is_alive(merc_id):
+		return {"ok": false, "merc_id": merc_id, "fitted": fitted, "message": ""}
+	for slot_id in slots:
+		var wanted_slot := str(slot_id)
+		var gear := roster.equipped_of(merc_id)
+		if not str(gear.get(wanted_slot, "")).is_empty():
+			continue
+		if wanted_slot == "off":
+			var main_id := str(gear.get("main", ""))
+			if Contracts.two_handed_item(State.ITEMS.get(main_id, {})):
+				continue
+		var best := ""
+		var best_value := -1
+		for item_id in stash.pooled_ids():
+			var item: Dictionary = State.ITEMS.get(str(item_id), {})
+			if not EquipmentRules.allowed(item, wanted_slot):
+				continue
+			var value := WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id)))
+			if value > best_value:
+				best_value = value
+				best = str(item_id)
+		if best.is_empty():
+			continue
+		var result := equip_merc(merc_id, wanted_slot, best)
+		if bool(result.get("ok", false)):
+			fitted.append(best)
+	if fitted.is_empty():
+		return {"ok": true, "merc_id": merc_id, "fitted": fitted,
+			"message": "%s takes the field with what the band had spare." % roster.name_of(merc_id)}
+	_notify()
+	return {"ok": true, "merc_id": merc_id, "fitted": fitted,
+		"message": "%s arms from the shared stash: %s." % [roster.name_of(merc_id),
+			", ".join(fitted.map(func(item_id: String): return str(
+				State.ITEMS.get(item_id, {}).get("name", item_id))))]}
 
 ## Buy one catalog item into the shared stash with gold. The price is the same
 ## keeper price the paperdoll and the stash sort use, so nothing can disagree
@@ -163,6 +221,15 @@ func hire(merc_name: String = "") -> Dictionary:
 	var result := WarbandVendor.hire(roster, state, merc_name, deployment_cap) if state != null \
 		else {"ok": false, "message": "The purse is missing.", "merc_id": -1, "cost": 0}
 	if bool(result.get("ok", false)):
+		# A body that swears with empty hands is dead weight: the recruiter's
+		# oath includes whatever the shared stash can spare.
+		var merc_id := int(result.get("merc_id", -1))
+		var dressed := dress_recruit(merc_id)
+		var fitted: Array = dressed.get("fitted", [])
+		if not fitted.is_empty():
+			result["fitted"] = fitted
+			result["message"] = "%s %s" % [str(result.get("message", "")),
+				str(dressed.get("message", ""))]
 		_notify()
 	return result
 
@@ -348,6 +415,7 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	stash.clear()
 	cruor.clear()
 	souls.clear()
+	quests.reset()
 	deployment_cap = maxi(1, cap)
 	seeded = false
 	possession.clear()
@@ -370,6 +438,7 @@ func to_dict() -> Dictionary:
 		"stash": stash.to_dict(),
 		"cruor": cruor.to_dict(),
 		"checkpoint": checkpoint.duplicate(true),
+		"quests": quests.to_dict(),
 		"runs": _run_history.duplicate(true),
 		"run_totals": RunReportScript.sanitize_totals(run_totals),
 	}
@@ -383,6 +452,9 @@ func from_dict(data: Dictionary) -> void:
 	# A v3 file has no checkpoint: it resumes at the town, which is what every
 	# save written before autosave existed meant.
 	checkpoint = sanitise_checkpoint(data.get("checkpoint", {}))
+	# A v4 file has no ledger: it opens with no orders, which is exactly the
+	# quartermaster's slate before he speaks.
+	quests.from_dict(QuestScript.sanitise(data.get("quests", {})))
 	# A v1 save has neither field; both readers answer "nothing fought yet".
 	_load_run_history(data.get("runs", []))
 	run_totals = RunReportScript.sanitize_totals(data.get("run_totals", {}))

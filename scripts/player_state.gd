@@ -79,6 +79,32 @@ const ITEMS := {
 		"category":"misc", "slot":"", "heal":0.3,
 		"summary":"A strip of boiled linen, folded and tied off",
 		"detail":"Field dressing / not worn / closes a wound in the shared stash"},
+	# Salvage off the briar wolves. They are carried, never worn - the warband
+	# strips a pelt in the field and the shared stash counts it - and they are
+	# what a kill is worth in the wood now that the wolves have no blade to drop.
+	"wolf_pelt": {"name":"Wolf Pelt", "short":"Pelt", "kind":"material", "index":0, "price":12,
+		"category":"misc", "slot":"", "material":"Hide",
+		"summary":"A briar pelt, still warm off the ribs",
+		"detail":"Carried in the shared stash / cut for leather and cloaks"},
+	"wolf_bone": {"name":"Wolf Bone", "short":"Bone", "kind":"material", "index":1, "price":9,
+		"category":"misc", "slot":"", "material":"Bone",
+		"summary":"A long shank split for the marrow",
+		"detail":"Carried in the shared stash / stock for hafts and charms"},
+	"wolf_tooth": {"name":"Wolf Tooth", "short":"Tooth", "kind":"material", "index":2, "price":14,
+		"category":"misc", "slot":"", "material":"Fang",
+		"summary":"One briar fang, yellow at the root",
+		"detail":"Carried in the shared stash / a ward strung on a thong"},
+	"wolf_paw": {"name":"Wolf Paw", "short":"Paw", "kind":"material", "index":3, "price":16,
+		"category":"misc", "slot":"", "material":"Trophy",
+		"summary":"Four claws on a severed paw, corded to a leather loop",
+		"detail":"Carried in the shared stash / proof of the hunt"},
+	# The watchers' own blood, drawn off a warden's body: the reagent the ichor
+	# bench works into steel. It is a carried item, not a wallet - the wallet is
+	# the altar's Cruor, and the two are deliberately different things.
+	"ichor_vial": {"name":"Warden's Ichor", "short":"Ichor", "kind":"material", "index":4, "price":60,
+		"category":"misc", "slot":"", "material":"Reagent", "reagent":true,
+		"summary":"Black ichor in a stoppered vial. It is still moving",
+		"detail":"Carried in the shared stash / bound into a weapon at the ichor bench"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -633,10 +659,16 @@ func item_stat_rows(id: String) -> Array:
 			rows.append_array(focus_rows)
 	elif category == "misc":
 		# A dressing is the one carried piece with an effect of its own: it is
-		# spent by a squadmate binding its wounds, never worn.
-		rows.append({"label":"WOUND", "value":"+%d%% health" % int(round(
-			float(item.get("heal", 0.0)) * 100.0))})
-		rows.append({"label":"USE", "value":"A squadmate, in the open"})
+		# spent by a squadmate binding its wounds, never worn. Salvage (pelts,
+		# bone, ichor) is the other kind of carried piece and states plainly that
+		# its worth is in the stash, not on a body.
+		if item.has("heal"):
+			rows.append({"label":"WOUND", "value":"+%d%% health" % int(round(
+				float(item.get("heal", 0.0)) * 100.0))})
+			rows.append({"label":"USE", "value":"A squadmate, in the open"})
+		else:
+			rows.append({"label":"MATERIAL", "value":str(item.get("material", "Salvage"))})
+			rows.append({"label":"USE", "value":"Carried in the shared stash"})
 	elif category == "jewelry":
 		var jewelry_rows := TrinketStats.effect_rows(id)
 		if jewelry_rows.is_empty():
@@ -668,7 +700,10 @@ func item_compact_stats(id: String) -> String:
 		parts.append(("HEAD %d%%" if str(item.get("kind", "")) == "head" else "BODY +%d%%") \
 			% item_guard_percent(id))
 	elif category == "misc":
-		parts.append("HEAL %d%%" % int(round(float(item.get("heal", 0.0)) * 100.0)))
+		if item.has("heal"):
+			parts.append("HEAL %d%%" % int(round(float(item.get("heal", 0.0)) * 100.0)))
+		else:
+			parts.append("MATERIAL  " + str(item.get("material", "SALVAGE")).to_upper())
 	elif category == "focus":
 		var focus_text := TrinketStats.effect_summary(id)
 		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")

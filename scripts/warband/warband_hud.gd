@@ -39,6 +39,10 @@ var _squad_box: VBoxContainer
 var _squad_sig := ""
 var _purse_label: Label
 var _essence_label: Label
+## The campaign ledger block (see `set_quests`) and the signature of what it
+## currently shows, so a repaint only happens when the objectives actually move.
+var _quest_box: VBoxContainer
+var _quest_sig := ""
 var _prompt_label: Label
 var _hint_label: Label
 var _status_label: Label
@@ -113,6 +117,67 @@ func set_status(text: String, seconds: float = 2.5) -> void:
 	_status_label.text = text
 	_status_label.visible = not text.is_empty()
 	_status_seconds = maxf(0.0, seconds)
+
+## The campaign ledger: one row per objective (`WarbandQuests.rows()`), repainted
+## only when the signature moves. An empty list puts the block away.
+func set_quests(rows: Array) -> void:
+	if _quest_box == null:
+		return
+	var signature := ""
+	for row in rows:
+		if not (row is Dictionary):
+			continue
+		signature += "%s|%s|%s|%s;" % [str(row.get("title", "")), str(row.get("line", "")),
+			str(row.get("detail", "")), str(row.get("done", false))]
+	if signature == _quest_sig:
+		return
+	_quest_sig = signature
+	for child in _quest_box.get_children():
+		# Detached before it is freed: a queued free leaves the old rows in the
+		# tree for the rest of the frame, and a reader (or a test) would still see
+		# objectives the ledger no longer holds.
+		_quest_box.remove_child(child)
+		child.queue_free()
+	var panel := _quest_box.get_parent() as Control
+	if panel != null:
+		panel.visible = not signature.is_empty()
+	if signature.is_empty():
+		return
+	for row in rows:
+		if not (row is Dictionary):
+			continue
+		var entry: Dictionary = row
+		var title := Label.new()
+		title.text = str(entry.get("title", ""))
+		title.add_theme_font_size_override("font_size", 13)
+		title.add_theme_color_override("font_color",
+			Color(0.96, 0.83, 0.55) if not bool(entry.get("done", false)) else Color(0.62, 0.86, 0.60))
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_quest_box.add_child(title)
+		var detail := Label.new()
+		detail.text = "%s   ·   %s" % [str(entry.get("line", "")), str(entry.get("detail", ""))]
+		detail.add_theme_font_size_override("font_size", 12)
+		detail.add_theme_color_override("font_color", Color(0.82, 0.79, 0.68))
+		detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_quest_box.add_child(detail)
+
+## The ledger block itself, and the text it currently carries, for a test that
+## must not read a private label.
+func quest_panel() -> Control:
+	if _quest_box == null:
+		return null
+	return _quest_box.get_parent() as Control
+
+func quest_lines() -> Array[String]:
+	var out: Array[String] = []
+	if _quest_box == null:
+		return out
+	for child in _quest_box.get_children():
+		if child is Label:
+			out.append(str((child as Label).text))
+	return out
 
 func _process(delta: float) -> void:
 	# The reticle belongs to the aiming body, so it is up exactly while the pointer
@@ -206,6 +271,25 @@ func _build() -> void:
 	_essence_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_essence_label.add_theme_font_size_override("font_size", 12)
 	root_control.add_child(_essence_label)
+
+	# The campaign ledger, under the purse: one block per objective the
+	# quartermaster has handed over, read from `WarbandQuests`. It is a tracker,
+	# not a menu - nothing here is clicked while the pointer is captured - and it
+	# stays hidden until there is an order to show.
+	var quest_panel := PanelContainer.new()
+	quest_panel.name = "QuestPanel"
+	quest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	quest_panel.position = Vector2(-20, 62)
+	quest_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	quest_panel.custom_minimum_size = Vector2(300, 0)
+	quest_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	quest_panel.visible = false
+	root_control.add_child(quest_panel)
+	_quest_box = VBoxContainer.new()
+	_quest_box.name = "Quests"
+	_quest_box.add_theme_constant_override("separation", 2)
+	_quest_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	quest_panel.add_child(_quest_box)
 
 	_hint_label = Label.new()
 	_hint_label.name = "Hint"

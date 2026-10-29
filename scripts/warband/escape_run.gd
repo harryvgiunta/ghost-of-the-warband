@@ -326,6 +326,10 @@ func _on_cultist_defeated(enemy, _reward: int) -> void:
 			host.drop_held_weapon(enemy)
 		if host.loot != null and host.loot.has_method("register_corpse"):
 			host.loot.register_corpse(enemy)
+		# The trail's cultists are the same antlered watch, so a bounty that names
+		# the hollow warden counts them wherever they fall.
+		if host.has_method("note_kill"):
+			host.note_kill(enemy)
 	if host.hud != null and not guards.is_empty():
 		host.hud.set_status("A cultist falls on the trail (%d of %d)." % [_kills, guards.size()], 2.0)
 
