@@ -45,10 +45,11 @@ const JOG_TIMEOUT := 16.0
 const PAIR_TIMEOUT := 40.0
 ## How long the driven walk may take before the test calls it a hang.
 const WALK_LIMIT := 200.0
-## The walk is played at four and a fifth times the simulation per second so a
-## kilometre and a third of trail fits in a regression; the recorded time is game
-## time at 1x, so the distance and the pace asserted below are the campaign's own.
-const WALK_SCALE := 4.2
+## The walk is played at five times the simulation per second so a kilometre and a
+## third of trail fits inside the suite's ninety-second ceiling even with the pool
+## running seven other Godots; the recorded time is game time at 1x, so the distance
+## and the pace asserted below are the campaign's own.
+const WALK_SCALE := 5.0
 ## Where the campaign's walk begins: the cage line the soul wakes on.
 const CAGE_LINE := Vector3(-2.6, 0.2, 6.0)
 
