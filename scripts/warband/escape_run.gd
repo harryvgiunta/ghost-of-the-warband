@@ -22,6 +22,8 @@ extends Node3D
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
+const CombatScript = preload("res://scripts/combat.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 ## What each cultist carries, in spawn order. Every one of them drops it.
 ## What a road cultist wears under its blade: cult rags the warband can take.
@@ -185,10 +187,17 @@ func _on_cultist_defeated(enemy, _reward: int) -> void:
 func _on_cultist_attack(attacker, amount: float, victim) -> void:
 	if not is_instance_valid(attacker) or not is_instance_valid(victim):
 		return
+	var outcome := -1
 	if victim.has_method("receive_melee"):
-		victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position)
+		outcome = int(victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position))
 	elif victim.has_method("take_damage"):
 		victim.take_damage(amount, WATCHER_SOURCE)
+		outcome = CombatScript.DEFENSE_NONE
+	if outcome == CombatScript.DEFENSE_NONE:
+		SfxScript.landed(attacker, victim.global_position + Vector3.UP)
+	elif outcome > CombatScript.DEFENSE_NONE:
+		SfxScript.defense(attacker.global_position,
+			outcome == CombatScript.DEFENSE_PARRY)
 
 
 func _flat(from: Vector3, to: Vector3) -> float:

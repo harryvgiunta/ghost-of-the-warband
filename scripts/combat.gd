@@ -8,6 +8,7 @@ signal defense_resolved(defender_slot: int, position: Vector3, parried: bool)
 
 const Archer = preload("res://scripts/archer.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
@@ -596,7 +597,23 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	_set_melee_progress(key,0.0)
 	attack_progress = 0.0
 	_sync_display_progress()
+	# The swing is heard when it is committed, not when it lands: every body
+	# that swings - the soul, an ally, a cultist, a bot in the yard - comes
+	# through here, so this is the one place a whoosh belongs. The hand matters:
+	# the off hand of a dual pair may be the dagger, and a dagger must not sound
+	# like the sword beside it.
+	SfxScript.swing(rig, _sound_point(), key)
 	return true
+
+
+## Where a swing is heard from: chest height on the body, so a listener hears a
+## body at its own distance rather than at the ground under it.
+func _sound_point() -> Vector3:
+	if is_instance_valid(actor):
+		return actor.global_position + Vector3.UP * 1.2
+	if is_instance_valid(rig):
+		return rig.global_position
+	return Vector3.ZERO
 
 func _on_melee_started(hand: String) -> void:
 	var state := _swing_state(hand)
@@ -900,6 +917,10 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		# that opened it. The target's take_damage owns body and floor blood.
 		BloodFx.impact(actor,at,at-actor.global_position,damage,headshot)
 		BloodFx.stain_weapon(rig,damage,hand)
+		# A blade opens a body; a club does not. `Sfx` reads the piece that just
+		# spent the blow, so a landed makeshift club thuds instead of cutting and
+		# a dagger's cut stays small.
+		SfxScript.landed(rig, at, hand)
 		if actor.has_method("note_weapon_blood"):
 			actor.note_weapon_blood(damage)
 		if _unit_is_dead(unit):
@@ -1096,6 +1117,7 @@ func _resolve_clash(unit: Node, target_combat, at: Vector3) -> void:
 	# Symmetric delays would make two bots re-clash forever in lockstep.
 	clash_cooldown = CLASH_BOT_DELAY
 	target_combat.clash_cooldown = 0.0
+	SfxScript.defense(at, true)
 	clash.emit(at)
 
 func abort_melee_to_neutral() -> void:
@@ -1128,6 +1150,9 @@ func _block_feedback(unit: Node, at: Vector3, parried: bool,
 		hand: String, reset_attacker: bool = true) -> void:
 	var defender_slot := int(unit.get("slot")) if unit.get("slot") != null else -1
 	defense_resolved.emit(defender_slot,at,parried)
+	# Steel met steel: the snap of a parry and the ring of a held block are the
+	# two halves of the same recording, split by how much weight the guard took.
+	SfxScript.defense(at, parried)
 	if not parried and reset_attacker:
 		# A held block knocks aside the swing that contacted it. A dual wielder's
 		# other hand keeps its own clock and can continue into the opening.

@@ -10,6 +10,7 @@ const Dagger = preload("res://scripts/dagger.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const SPIN_SPEED := 11.0
 var weapon := "sword"
@@ -49,6 +50,8 @@ func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: floa
 	damage = shot_damage
 	_query.exclude = excluded
 	look_at(global_position + direction, Vector3.UP)
+	# A blade let go of: the throw's own whoosh, from the hand that spent it.
+	SfxScript.thrown(origin)
 
 func _physics_process(delta: float) -> void:
 	age += delta

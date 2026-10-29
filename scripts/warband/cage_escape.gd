@@ -268,6 +268,7 @@ const DUEL_CARDS := [
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CombatScript = preload("res://scripts/combat.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const ArrowScript = preload("res://scripts/warband/lesson_arrow.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
@@ -901,6 +902,13 @@ func _on_watcher_attack(attacker, amount: float, victim) -> void:
 			attacker.global_position))
 	elif victim.has_method("take_damage"):
 		victim.take_damage(amount, WATCHER_SOURCE)
+	# The sound belongs to the blow, not to the lesson: a watcher's club that
+	# lands crunches (Sfx reads the piece in its hand), and one that meets a
+	# raised blade rings instead.
+	if outcome == CombatScript.DEFENSE_NONE:
+		SfxScript.landed(attacker, victim.global_position + Vector3.UP)
+	elif outcome > CombatScript.DEFENSE_NONE:
+		SfxScript.defense(attacker.global_position, outcome == CombatScript.DEFENSE_PARRY)
 	if outcome >= 0 and controller != null and victim == controller.active_body(1) \
 			and duel != null and duel.fighting():
 		if outcome == CombatScript.DEFENSE_BLOCK or outcome == CombatScript.DEFENSE_WEAK_BLOCK:

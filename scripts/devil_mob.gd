@@ -21,6 +21,7 @@ const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -437,6 +438,11 @@ func _enter(next_state: String, reset_time := true) -> void:
 	state = next_state
 	if reset_time:
 		_state_time = 0.0
+	if next_state == "STRIKE":
+		# The committed swing, heard from the body's own hand. `Sfx` reads the
+		# piece the mob carries, so a watcher's club whooshes and a two-handed
+		# piece draws the long arc.
+		SfxScript.swing(self, blood_strike_point())
 
 
 ## Seconds from the swing being chosen to the blade coming down. The profile owns

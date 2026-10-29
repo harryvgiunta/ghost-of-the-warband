@@ -14,6 +14,7 @@ signal quit_requested
 
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
 
 const PANEL_SIZE := Vector2(460, 600)
 const INK := LedgerThemeScript.INK
@@ -25,6 +26,14 @@ const DIM := Color(0.02, 0.015, 0.01, 0.82)
 var resume_button: Button
 var save_button: Button
 var display_button: Button
+var sound_button: Button
+## The sound page, one page in from the menu: the same page the campaign's
+## Escape window shows, so both ESC surfaces mix identically.
+var sound_page
+var _column: VBoxContainer
+var _sound_layer: VBoxContainer
+var _frame
+var _showing_sound := false
 var exit_button: Button
 var quit_button: Button
 var _notice: Label
@@ -50,6 +59,7 @@ func is_open() -> bool:
 
 func open(message: String = "") -> void:
 	_build()
+	_show_sound_page(false)
 	_open = true
 	visible = true
 	_notice.text = message
@@ -117,9 +127,11 @@ func _build() -> void:
 	frame.offset_bottom = PANEL_SIZE.y * 0.5
 	root.add_child(frame)
 
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	frame.body.add_child(column)
+	_column = VBoxContainer.new()
+	_column.add_theme_constant_override("separation", 10)
+	frame.body.add_child(_column)
+	var column := _column
+	_frame = frame
 
 	var kicker := _label("IRONWOOD", 11, INK_MUTED)
 	column.add_child(kicker)
@@ -144,6 +156,9 @@ func _build() -> void:
 	display_button = _button("DISPLAY", "", 48)
 	display_button.pressed.connect(_toggle_display)
 	column.add_child(display_button)
+	sound_button = _button("SOUND", "", 48)
+	sound_button.pressed.connect(_show_sound_page.bind(true))
+	column.add_child(sound_button)
 	_section(column, "LEAVE")
 
 	exit_button = _button(_exit_label, "DangerButton", 48)
@@ -168,7 +183,46 @@ func _build() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(0, 30)
 	column.add_child(_status)
+
+	_sound_layer = VBoxContainer.new()
+	_sound_layer.name = "Sound"
+	_sound_layer.add_theme_constant_override("separation", 10)
+	_sound_layer.visible = false
+	frame.body.add_child(_sound_layer)
+	_section(_sound_layer, "SOUND")
+	sound_page = SoundPageScript.new()
+	sound_page.name = "SoundPage"
+	_sound_layer.add_child(sound_page)
+	var sound_spacer := Control.new()
+	sound_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_sound_layer.add_child(sound_spacer)
+	var sound_back := _button("BACK", "", 48)
+	sound_back.pressed.connect(_show_sound_page.bind(false))
+	_sound_layer.add_child(sound_back)
 	_refresh_display()
+
+
+## Sound is one page in: the menu keeps its rows, the page takes the frame so the
+## window is never two menus deep.
+func _show_sound_page(on: bool) -> void:
+	if _column == null or _sound_layer == null:
+		return
+	_showing_sound = on
+	_column.visible = not on
+	_sound_layer.visible = on
+	if _frame != null:
+		_frame.configure("Sound" if on else "Menu", "gear")
+	if on and sound_page != null:
+		sound_page.refresh()
+
+
+func showing_sound() -> bool:
+	return _showing_sound
+
+
+## Escape while the sound page is up answers here instead of closing the menu.
+func back() -> void:
+	_show_sound_page(false)
 
 func _refresh_display() -> void:
 	if display_button == null:
