@@ -754,7 +754,7 @@ func _physics_process(delta: float) -> void:
 	slide.after_move(player,actual_velocity)
 	_collect_loot(delta)
 	_bloody_feet.update(delta,player,archer)
-	_footsteps.update(delta,player,archer)
+	_footsteps.update(delta,player,archer,true)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)

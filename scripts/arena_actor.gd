@@ -1004,7 +1004,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	combat.set_motion(_last_motion,_last_running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
 	_bloody_feet.update(delta,self,rig)
-	_footsteps.update(delta,self,rig)
+	_footsteps.update(delta,self,rig,is_local)
 
 ## One tick's movement intent: the walk target plus every velocity the state
 ## machines produced, in the single order the authority and a predicting peer

@@ -73,6 +73,12 @@ static func thrown(at: Variant = null) -> void:
 	play("throw", at)
 
 
+## One boot. The soul's own step is the full take; anybody else's is the same
+## recording heard small, and only from a few metres away.
+static func footstep(foot: Vector3, local: bool) -> void:
+	play("footstep" if local else "footstep_far", foot)
+
+
 ## What a body is swinging: `{"two_handed": bool, "blunt": bool, "dagger": bool}`.
 ##
 ## Three shapes reach this: the ranger rig (`Archer`, which knows its own catalog

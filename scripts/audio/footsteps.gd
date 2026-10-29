@@ -24,6 +24,9 @@ const MIN_GAP := 0.18
 ## A footfall further than this from the camera is not worth a voice. Feet are
 ## close-range information: past a few dozen metres the fight is what matters.
 const AUDIBLE := 28.0
+## And another body's boot is tighter still: you hear it when it is close to
+## you, which is what keeps a camp of eight from being a brigade.
+const FAR_AUDIBLE := 11.0
 
 var _peak: Array[float] = [0.0, 0.0]
 var _gap: Array[float] = [0.0, 0.0]
@@ -35,7 +38,9 @@ var _gap: Array[float] = [0.0, 0.0]
 ## `CharacterBody3D` - the engine's own method cannot be overridden - and a
 ## presentation helper that cannot be driven by a regression is a helper nobody
 ## can prove. The call sites pass the real body and rig.
-func update(delta: float, body, rig) -> void:
+## `local` is the body this machine is inside: its boots are the walk the player
+## hears as their own. Every other body's boots are the far, quiet variant.
+func update(delta: float, body, rig, local: bool = false) -> void:
 	if not is_instance_valid(body) or not is_instance_valid(rig):
 		return
 	for side in 2:
@@ -51,7 +56,8 @@ func update(delta: float, body, rig) -> void:
 		_peak[1] = 0.0
 		return
 	var camera := _camera(body)
-	if camera != null and body.global_position.distance_to(camera.global_position) > AUDIBLE:
+	var reach := AUDIBLE if local else FAR_AUDIBLE
+	if camera != null and body.global_position.distance_to(camera.global_position) > reach:
 		_peak[0] = 0.0
 		_peak[1] = 0.0
 		return
@@ -73,7 +79,7 @@ func update(delta: float, body, rig) -> void:
 		if _gap[side] > 0.0:
 			continue
 		_gap[side] = MIN_GAP
-		SfxScript.play("footstep", foot)
+		SfxScript.footstep(foot, local)
 
 
 ## The eye this body's boots are heard from, or null when it has none (a

@@ -34,6 +34,12 @@ const VOICES_2D := 6
 ## per body, and a footfall must never be the sound that gets cut when a blow
 ## needs the next voice.
 const VOICES_STEP := 6
+## The 3D shape a voice gets when its event does not ask for another: a world
+## one-shot heard across the field.
+const VOICE_UNIT_SIZE := 7.0
+const VOICE_MAX_DISTANCE := 80.0
+const VOICE_CUTOFF := 9000.0
+const VOICE_ATTENUATION := AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 ## Two identical one-shots from the same place inside this window are one
 ## contact reported twice (an attacker and a defender both noticing the blow),
 ## not two blows.
@@ -244,6 +250,7 @@ func play_event(event: String, at: Variant = null) -> void:
 		voice.volume_db = level
 		voice.pitch_scale = pitch
 		voice.stream = stream
+		_shape(voice, row)
 		voice.play()
 		return
 	var flat := _voices_2d[_voice_2d]
@@ -283,10 +290,10 @@ func _build_voices() -> void:
 		var voice := AudioStreamPlayer3D.new()
 		voice.name = "Voice3D%d" % index
 		voice.bus = BUS_SFX
-		voice.unit_size = 7.0
+		voice.unit_size = VOICE_UNIT_SIZE
 		voice.max_db = 3.0
-		voice.max_distance = 80.0
-		voice.attenuation_filter_cutoff_hz = 9000.0
+		voice.max_distance = VOICE_MAX_DISTANCE
+		voice.attenuation_filter_cutoff_hz = VOICE_CUTOFF
 		voice.panning_strength = 1.0
 		add_child(voice)
 		_voices_3d.append(voice)
@@ -359,6 +366,16 @@ func _purge_streams() -> void:
 				break
 		if not held:
 			_streams.erase(track)
+
+
+## Per-event 3D shape. The same pool serves the soul's own boots (close, full
+## range) and another body's (small, dull, gone by ten metres), so every entry
+## that overrides one of these must be able to override all four.
+func _shape(voice: AudioStreamPlayer3D, row: Dictionary) -> void:
+	voice.unit_size = float(row.get("unit_size", VOICE_UNIT_SIZE))
+	voice.max_distance = float(row.get("max_distance", VOICE_MAX_DISTANCE))
+	voice.attenuation_filter_cutoff_hz = float(row.get("cutoff", VOICE_CUTOFF))
+	voice.attenuation_model = int(row.get("attenuation", VOICE_ATTENUATION))
 
 
 func _variant_for(event: String, count: int) -> int:

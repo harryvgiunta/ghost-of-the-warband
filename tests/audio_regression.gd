@@ -300,6 +300,18 @@ func _check_footsteps() -> void:
 	check(str(SfxLibraryScript.entry("footstep").get("pool")) == "step",
 		"footfalls must use their own voice pool")
 	check(audio._voices_step.size() == 6, "the step voice pool is not built")
+	# Somebody else's boots: the same takes, heard much smaller and only close.
+	var own: Dictionary = SfxLibraryScript.entry("footstep")
+	var other: Dictionary = SfxLibraryScript.entry("footstep_far")
+	check(int(other.get("count")) == 12, "the far footstep lost its takes")
+	check(float(other.get("db")) < float(own.get("db")) - 8.0,
+		"another body's boot must be much quieter than the soul's")
+	check(float(other.get("unit_size")) < float(own.get("unit_size")),
+		"another body's boot must fall off sooner")
+	check(float(other.get("max_distance")) <= 12.0,
+		"another body's boot must be gone by a dozen metres")
+	check(int(other.get("attenuation")) == SfxLibraryScript.ATTENUATION_INVERSE_SQUARE,
+		"another body's boot must use the sharpest falloff")
 
 	var body := StubBody.new()
 	var feet := StubFeet.new()
@@ -311,7 +323,7 @@ func _check_footsteps() -> void:
 
 	audio.last_event = ""
 	feet.left = 0.30
-	steps.update(0.016, body, feet)
+	steps.update(0.016, body, feet, true)
 	check(audio.last_event == "footstep", "a planted boot made no sound")
 
 	audio.last_event = ""
@@ -323,9 +335,9 @@ func _check_footsteps() -> void:
 
 	audio.last_event = ""
 	feet.left = 0.40
-	steps.update(0.20, body, feet)
+	steps.update(0.20, body, feet, true)
 	feet.left = 0.30
-	steps.update(0.016, body, feet)
+	steps.update(0.016, body, feet, true)
 	check(audio.last_event == "footstep", "the boot went silent for good after its gap")
 
 	audio.last_event = ""
@@ -335,6 +347,17 @@ func _check_footsteps() -> void:
 	feet.left = 0.30
 	steps.update(0.016, body, feet)
 	check(audio.last_event == "", "a body in the air made a footstep")
+
+	# Another body's boot is the far, quiet take - never the soul's own.
+	var other_body := StubBody.new()
+	var other_feet := StubFeet.new()
+	var other_steps = FootstepsScript.new()
+	other_body.velocity = Vector3(2.0, 0.0, 0.0)
+	audio.last_event = ""
+	other_steps.update(0.016, other_body, other_feet, false)
+	other_feet.left = 0.30
+	other_steps.update(0.016, other_body, other_feet, false)
+	check(audio.last_event == "footstep_far", "another body's boot was not the far take")
 
 	body.on_floor = true
 	body.velocity = Vector3.ZERO

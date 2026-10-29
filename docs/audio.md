@@ -49,14 +49,30 @@ the world (a `AudioStreamPlayer3D` from a pool of twelve, `unit_size` 7 m,
 a take never repeats back to back, and each carries a small pitch spread so
 repeated blows do not read as a loop.
 
-Footsteps are the exception to the one-pool rule: `SfxLibrary` gives the
-`footstep` entry `"pool": "step"`, and the manager keeps six voices of its own
-for it (`unit_size` 4 m, 34 m cull, 6 kHz cutoff). A fight produces two steps a
-second per body, and a footfall must never be the sound that gets cut when a
-blow needs the next voice. `Footsteps` is a sibling of `bloody_feet.gd`: same
-`STEP_DROP` 0.05 m, so the print and the sound are one event seen and heard. It
-plays only for a body that is grounded, moving faster than 0.45 m/s and inside
-28 m of the camera, and the same boot cannot sound twice inside 180 ms. Two identical events from the same place
+Footsteps are the exception to the one-pool rule, and the one place the mix
+tells the player apart from everybody else. `SfxLibrary` gives both boot entries
+`"pool": "step"`, and the manager keeps six voices of its own for them, so a
+walk can never be the sound that gets cut when a blow needs the next one.
+
+| | `footstep` | `footstep_far` |
+| --- | --- | --- |
+| who | the body this machine is inside | every other body |
+| level | -16 dB | -30 dB |
+| takes | the 12 cuts, pitch 0.9-1.08 | the same 12, pitch 0.86-1.02 |
+| shape | `unit_size` 5 m, 40 m, 7 kHz | `unit_size` 2 m, 11 m, 3 kHz, inverse-square |
+| emitter gate | 28 m from the camera | 11 m from the camera |
+
+The near/far split is deliberate: eight fighters walking together at full level
+is a brigade in the player's ear, and a footfall is only information when it is
+somebody close enough to matter. `ArenaActor.is_local` (already the flag behind
+`DamageNumbers`' "self" vs "hit" number) decides which one a body makes, so the
+arena, the delve, the campaign and the frontier all answer correctly without a
+second notion of "the player".
+
+`Footsteps` is a sibling of `bloody_feet.gd`: same `STEP_DROP` 0.05 m, so the
+print and the sound are one event seen and heard. It plays only for a body that
+is grounded, moving faster than 0.45 m/s and inside the gate above, and the same
+boot cannot sound twice inside 180 ms. Two identical events from the same place
 inside 20 ms are one contact reported twice and play once.
 
 | Event | Takes | Fires when |
@@ -70,7 +86,8 @@ inside 20 ms are one contact reported twice and play once.
 | `block` | 4 | a blow landed on a held guard (`Combat._block_feedback`, the arena's replicated `_defense_event`) |
 | `parry` | 4 | a blow was parried, and on a blade-vs-blade clash (`Combat._resolve_clash`) |
 | `arrow` | 1 | an arrow launches (`Arrow.launch`, on every peer that owns one) |
-| `footstep` | 12 | a walking body's boot comes back down (`Footsteps.update`, every fighter body and the frontier ranger) |
+| `footstep` | 12 | the body this machine is inside puts its boot down (`Footsteps.update`, every fighter body and the frontier ranger) |
+| `footstep_far` | 12 | any *other* body's boot: the same takes, quiet and close-range |
 | `throw` | 3 | a blade is let go of (`ThrownWeapon.launch`) |
 
 The weapon reading is `Sfx.kind_of(source, hand)`: the ranger rig's own

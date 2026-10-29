@@ -8,6 +8,10 @@ extends RefCounted
 ## the whole of adding a variant.
 
 const DIR := "res://assets/audio/sfx/"
+## `AudioStreamPlayer3D.AttenuationModel` as this engine numbers it: inverse
+## distance is 0 and inverse square is 1, which is the falloff an entry asks for
+## when it wants to be heard only up close.
+const ATTENUATION_INVERSE_SQUARE := 1
 
 ## event -> folder, stem, takes, level (dB on the SFX bus), pitch spread.
 ## Levels follow the mix hierarchy: a landed blow is the loudest thing in a
@@ -35,8 +39,17 @@ const EVENTS := {
 		"db": -7.0, "pitch": [0.94, 1.06]},
 	# Boots, deliberately the quietest thing in the mix and on their own voice
 	# pool: a footfall is texture, and it must never steal a voice from a blow.
+	# The soul's own step is close to the ear and carries the walk.
 	"footstep": {"folder": "step", "stem": "footstep", "count": 12,
-		"db": -18.0, "pitch": [0.9, 1.08], "pool": "step"},
+		"db": -16.0, "pitch": [0.9, 1.08], "pool": "step",
+		"unit_size": 5.0, "max_distance": 40.0, "cutoff": 7000.0},
+	# Anybody else's boot: the same takes, far quieter, duller and gone by ten
+	# metres (inverse-square falloff). A camp of eight fighters must not sound
+	# like a brigade walking through the player's ear.
+	"footstep_far": {"folder": "step", "stem": "footstep", "count": 12,
+		"db": -30.0, "pitch": [0.86, 1.02], "pool": "step",
+		"unit_size": 2.0, "max_distance": 11.0, "cutoff": 3000.0,
+		"attenuation": ATTENUATION_INVERSE_SQUARE},
 }
 
 static var _cache: Dictionary = {}
