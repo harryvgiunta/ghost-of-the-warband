@@ -1012,7 +1012,8 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			# told to swear. Once the lesson is read - and always at the cap,
 			# when talk has nothing to say - `G` is the board and nothing else.
 			screen.open()
-			var hiring := "Hire from the recruiter board: HIRE swears a new body for gold."
+			var hiring := "Hire from the recruiter board: the first eight oaths cost nothing," \
+				+ " and every body arms itself out of the shared stash."
 			screen.set_status(hiring)
 			if quest_giver == null or not quest_giver.talk("recruiter", peer_id):
 				hud.set_status(hiring, 5.0)
@@ -1162,7 +1163,7 @@ func hint_line(actor) -> String:
 		"altar":
 			text = "G - the Sacrificial Altar (unbind / distil / brand)"
 		"recruiter":
-			text = "G - hire a new body for gold (up to the cap)"
+			text = "G - swear a new body (the first eight are free)"
 		"quartermaster":
 			text = "G - buy plain steel into the shared stash"
 		"ichor":

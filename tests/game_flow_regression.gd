@@ -75,7 +75,8 @@ func run() -> void:
 	var gold_before: int = warband.gold()
 	var hired: Dictionary = warband.hire("Ilsa")
 	check(bool(hired.get("ok", false)), "the town can still hire")
-	check(warband.gold() < gold_before, "hiring spends the purse")
+	check(int(hired.get("cost", -1)) == 0 and warband.gold() == gold_before,
+		"a sixth oath costs nothing: the first eight are free")
 	check(warband.roster.count() == 6, "the warband is six")
 
 	var deployed_ids: Array = warband.roster.alive_ids().slice(0, 3)

@@ -209,7 +209,7 @@ func check_lane() -> void:
 	var length := float(forest["length"])
 	check(absf(measured - length) <= 0.01,
 		"the reported length is the summed waypoints (%.2f vs %.2f)" % [length, measured])
-	check(length >= 860.0 and length <= 980.0, "the lane is a long run (%.1f m)" % length)
+	check(length >= 1250.0 and length <= 1500.0, "the lane is a long run (%.1f m)" % length)
 	var width := float(forest["width"])
 	check(width >= 9.0 and width <= 12.0, "the lane is %.1f m wide" % width)
 	var torches: Array = forest["torches"]

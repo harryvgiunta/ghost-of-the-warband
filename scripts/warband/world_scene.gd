@@ -82,20 +82,33 @@ const CombatScript = preload("res://scripts/combat.gd")
 const ArcherScript = preload("res://scripts/archer.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
+## The two places the quartermaster's orders happen: four caged soldiers strung
+## down the wood, and three warcamps of watchers near the town wall. Both take the
+## world the way an area does and build only their own content.
+const SoldierCagesScript = preload("res://scripts/warband/soldier_cages.gd")
+const WatcherWarrenScript = preload("res://scripts/warband/watcher_warren.gd")
+## The click that loots: the body ducks over a body or a drop and the warband
+## takes everything on it in one go.
+const LootHandScript = preload("res://scripts/warband/loot_hand.gd")
+## The campaign's map sheet. One page, drawn by one `_draw()`, opened with `M`.
+const WorldMapScript = preload("res://scripts/warband/world_map.gd")
 
 ## How far past the lane's far end the town square stands. The lane ends at the
 ## town's north gate; the square's centre is this far beyond it.
 const TOWN_BEHIND := 30.0
-## Half the town's flat pad: the square's walls plus a stride, so a body standing
-## on any part of the square is standing on level ground.
-const TOWN_PAD := 23.0
+## Half-size of the flat pad cut into the field for the town. It has to be wider
+## than the stockade ring (`town_hub.WALL_RADIUS`) plus the blend, or the wall
+## stakes would be planted on the field's own rolling ground.
+const TOWN_PAD := 30.0
 ## How close a body has to stand to something to loot it by hand.
 const LOOT_REACH := 2.6
 ## `ArenaActor` clamps a body to a square around the world origin, and the town
-## stands well over a kilometre south of the camp: this is the whole map, with room
-## to spare. A bound that fitted one area would wall the world in halfway down the
-## trail.
-const BODY_BOUNDS := 1400.0
+## stands more than a kilometre and a third south of the camp: this is the whole
+## map, with room to spare. A bound that fitted one area would wall the world in
+## halfway down the trail - and a bound that stops a step short of the gate is
+## worse than either, because the body simply stops walking in the middle of the
+## road and nothing on screen says why.
+const BODY_BOUNDS := 1900.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0
@@ -114,7 +127,7 @@ const PROJECTILE_CAP := 64
 ## How long the warband lies in the mud before the world stops pretending.
 const WIPE_BEAT := 2.5
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
-const TRAIL_HINT := "The squad follows you   ·   O - warband   ·   P - gear"
+const TRAIL_HINT := "The squad follows you   ·   M - map   ·   O - warband   ·   P - gear"
 ## The key line under a prompt that names the revive hold.
 const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
 ## The band a fallen squadmate is taught in: close enough that the player is in
@@ -138,14 +151,15 @@ const REVIVE_LESSON := {
 	"footnote": "Let go and the work is lost. A body that bleeds out keeps its date with the dirt: the roster will not stand it back up.",
 }
 
-## The wrong-way sign. The trail is about 1070 m long at the camp's mouth, so a
-## body is only taught the road once it has stood within 950 m of town - the
-## escape's first steps never raise it. Running back up the trail from there shows
-## the banner at 1000 m, and turning round drops it under 980: the gap between the
-## two is the sign's hysteresis, so a body on the line does not flicker.
-const WRONG_WAY_ARM_METRES := 950.0
-const WRONG_WAY_TRIGGER_METRES := 1000.0
-const WRONG_WAY_CLEAR_METRES := 980.0
+## The wrong-way sign. It measures the distance still to run, so the three numbers
+## are read off the trail's own length: the banner arms once the body has come
+## 120 m in from the camp's mouth, and it comes up once the body has carried the
+## squad 50 m back the way it came. On the 1,374 m lane that is 1,250 / 1,300 /
+## 1,280 m from the town's end - the gap between the last two is the sign's
+## hysteresis, so a body standing on the line does not flicker.
+const WRONG_WAY_ARM_METRES := 1250.0
+const WRONG_WAY_TRIGGER_METRES := 1300.0
+const WRONG_WAY_CLEAR_METRES := 1280.0
 const WRONG_WAY_TEXT := "You're running the wrong way!"
 ## How high over the gap in the trees the roadside word stands. High enough to be
 ## read from the trail's first torch, low enough not to sit in the canopy.
@@ -208,6 +222,13 @@ var squad
 ## The band between the camp's mouth and the lane. Built after the warband is
 ## seated, because a wolf's first target is a real body.
 var wilderness
+## The quartermaster's orders, where they happen: the four caged soldiers down the
+## wood, and the warcamps of watchers near the town.
+var soldier_cages
+var watcher_warren
+## The click that loots, and the campaign's map sheet.
+var loot_hand
+var world_map
 ## The three areas. Each is the same script its standalone preview uses.
 var camp
 var trail
@@ -296,6 +317,12 @@ func _ready() -> void:
 		# tree runs no physics tick to poll from.
 		if str(flow.warband_role()) == "client":
 			_become_client()
+	# The orders' ground and the map sheet come last. The cages need the lane the
+	# wood has grown and the town's wall to stand against; the warcamps need the
+	# hostile list the areas have filled; and a guest has to know it is a guest
+	# before either is fielded, because a guest fields neither.
+	_build_orders()
+	_build_map()
 
 
 func _process(delta: float) -> void:
@@ -328,6 +355,13 @@ func _physics_process(delta: float) -> void:
 	SquadDriveScript.retarget(_local_guards(), bodies, AGGRO_RADIUS)
 	_sync_roster(delta)
 	_sync_quests()
+	# The loot channel runs on the world's clock and breaks the moment a panel is
+	# over the body doing the work: a screen does not pause the tree, so nothing
+	# else would ever say the hands are needed back.
+	if loot_hand != null:
+		if _panel_open():
+			loot_hand.cancel()
+		loot_hand.tick(delta)
 	_update_prompt()
 	_update_hint()
 	_push_downed_card()
@@ -375,6 +409,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_K:
 			_try_loot()
 			get_viewport().set_input_as_handled()
+		KEY_M:
+			# One page, and it never pauses: the map is something a body reads
+			# while it keeps walking.
+			if world_map != null:
+				if _panel_open():
+					_hide_panels()
+				world_map.toggle()
+				get_viewport().set_input_as_handled()
 		KEY_R:
 			_activate_brand()
 			get_viewport().set_input_as_handled()
@@ -389,6 +431,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## tap of `G` still cuts a latch, opens a counter or searches a corpse when nobody
 ## is on the floor beside you; releasing early drops the work and spends nothing.
 func _input(event: InputEvent) -> void:
+	if _loot_click(event):
+		return
 	if not (event is InputEventKey) or event.echo or event.keycode != KEY_G:
 		return
 	if event.pressed:
@@ -545,6 +589,35 @@ func _build_loot() -> void:
 	add_child(loot)
 	loot.setup(warband, self)
 	loot.equip_target = Callable(self, "_loot_owner")
+	# The click. It lives beside the vacuum because it is the vacuum's other
+	# hand: the same booking path, started by a gesture instead of a key.
+	loot_hand = LootHandScript.new()
+	loot_hand.name = "LootHand"
+	add_child(loot_hand)
+	loot_hand.setup(self)
+
+
+## The orders' ground: four caged soldiers down the wood and three warcamps of
+## watchers near the town. Both take this world the way an area does - they are
+## built from the lane the trail has already grown - and both know to field
+## nothing on a guest, whose wood is the host's.
+func _build_orders() -> void:
+	soldier_cages = SoldierCagesScript.new()
+	soldier_cages.name = "SoldierCages"
+	add_child(soldier_cages)
+	soldier_cages.setup(self)
+	watcher_warren = WatcherWarrenScript.new()
+	watcher_warren.name = "WatcherWarren"
+	add_child(watcher_warren)
+	watcher_warren.setup(self)
+
+
+## The map sheet. `M` opens it; it draws from this world, so it is built with one.
+func _build_map() -> void:
+	world_map = WorldMapScript.new()
+	world_map.name = "WorldMap"
+	add_child(world_map)
+	world_map.configure(self)
 
 
 func _build_revive() -> void:
@@ -1109,6 +1182,21 @@ func note_kill(enemy) -> void:
 		return
 	_announce_quests(warband.quests.note_kill(mob_id))
 
+## Everything the map sheet marks beyond its own geography: every soldier still
+## shut in a cage, and every warcamp in the wood. The sheet asks and this answers;
+## nothing here draws. A place that does not exist yet - the Crypt - is a quest row
+## and never a mark, which is exactly what "there is nothing to find" means.
+func map_markers() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if soldier_cages != null and soldier_cages.has_method("marker_points"):
+		for point in soldier_cages.marker_points():
+			out.append({"position": point, "label": "CAGED SOLDIER", "kind": "rescue"})
+	if watcher_warren != null and watcher_warren.has_method("camp_points"):
+		for point in watcher_warren.camp_points():
+			out.append({"position": point, "label": "WATCHER CAMP", "kind": "hunt"})
+	return out
+
+
 ## A soldier comes out of a cage and swears to the band: one roster record, the
 ## best spare kit the shared stash holds, one mark on the ledger, one line on the
 ## HUD. The area that cut the latch calls this and nothing else.
@@ -1537,6 +1625,11 @@ func _try_interact() -> void:
 		return
 	if camp != null and camp.interact(actor):
 		return
+	# The wood's own cages stand in the ground the body walks on, exactly as the
+	# camp's do: one in reach takes the press, and one out of reach hands it on to
+	# whatever else is standing here.
+	if soldier_cages != null and soldier_cages.interact(actor):
+		return
 	if town != null and not town.interact_at(1, actor.global_position).is_empty():
 		return
 	# A fallen body at your feet is a container: `G` opens its character screen. A
@@ -1551,6 +1644,34 @@ func _try_interact() -> void:
 		_try_loot()
 		return
 	_interaction_status(actor)
+
+
+## A left click on lootable ground is the loot, not a swing.
+##
+## The world sees the press before the soul controller does (`_input` runs ahead of
+## `_unhandled_input`, and consuming the event stops it reaching the swing), so a
+## click with a body or a drop under the crosshair starts the duck-and-take and
+## nothing else; a click with nothing lootable there is left alone and lands as a
+## cut exactly as before. That is the whole difference between a game that asks you
+## to press a key per piece and one where the body works the corpse.
+func _loot_click(event: InputEvent) -> bool:
+	if loot_hand == null or controller == null:
+		return false
+	if not (event is InputEventMouseButton):
+		return false
+	var mouse := event as InputEventMouseButton
+	if mouse.button_index != MOUSE_BUTTON_LEFT or not mouse.pressed:
+		return false
+	if _panel_open() or _reviving or _wiped:
+		return false
+	var actor = controller.active_body(1)
+	if actor == null or not is_instance_valid(actor):
+		return false
+	var sample: Dictionary = controller.aim_sample()
+	if not loot_hand.try_click(actor, sample.get("point", Vector3.ZERO)):
+		return false
+	get_viewport().set_input_as_handled()
+	return true
 
 
 ## What `G` says when it found nothing to use.
@@ -1716,6 +1837,12 @@ func _update_prompt() -> void:
 		_write_prompt("HOLD G  ·  PICK UP %s" % warband.roster.name_of(
 			int(controller.merc_of(fallen))).to_upper(), G_REVIVE_HINT)
 		return
+	# A cage in reach outranks the trail's distance line and nothing else: it is
+	# the one thing standing at the body's feet wherever in the wood it is.
+	if soldier_cages != null and actor != null and is_instance_valid(actor) \
+			and soldier_cages.latch_target(actor) >= 0:
+		_write_prompt("G  -  CUT THE LATCH   ·   %d CAGE%s LEFT" % [soldier_cages.remaining(),
+			"" if soldier_cages.remaining() == 1 else "S"], "G  -  cut a cage latch")
 	# The counter under the body's nose wins over the camp's lesson, and the
 	# lesson wins over the trail: a body can only be standing in one of them.
 	if town != null and town.in_square(actor):
@@ -1905,6 +2032,10 @@ func stats() -> Dictionary:
 		"bodies": bodies.size(),
 		"guards": guards.size(),
 		"pickups": pickups.size(),
+		"cages_left": soldier_cages.remaining() if soldier_cages != null else 0,
+		"cages_freed": soldier_cages.freed() if soldier_cages != null else 0,
+		"warcamps": (watcher_warren.camps() as Array).size() if watcher_warren != null else 0,
+		"watchers_living": watcher_warren.living() if watcher_warren != null else 0,
 		"start": start_area,
 		"clearing": camp.clearing.get("clear", Vector2.ZERO) if camp != null else Vector2.ZERO,
 		"clearing_trees": int(camp.clearing.get("trees", 0)) if camp != null else 0,

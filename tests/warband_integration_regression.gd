@@ -98,6 +98,7 @@ func run() -> void:
 	await create_timer(SETTLE_SECONDS).timeout
 	check_world_pieces()
 	await check_menu()
+	await check_orders()
 	check_ally_rule()
 	_finish()
 
@@ -148,9 +149,15 @@ func check_world_pieces() -> void:
 ## Escape as the player sends it: a real key event through the input pipeline, so
 ## this proves the world's binding and not just the private method behind it.
 func _press_escape() -> void:
+	_press_key(KEY_ESCAPE)
+
+
+## One real key event through the input pipeline, so a binding is proved and not
+## just the private method behind it.
+func _press_key(keycode: int) -> void:
 	var event := InputEventKey.new()
-	event.keycode = KEY_ESCAPE
-	event.physical_keycode = KEY_ESCAPE
+	event.keycode = keycode
+	event.physical_keycode = keycode
 	event.pressed = true
 	Input.parse_input_event(event)
 
@@ -170,6 +177,68 @@ func check_menu() -> void:
 	await process_frame
 	check(not game.menu.is_open(), "a second Escape closes the menu")
 	check(not paused, "closing the menu leaves the world running")
+
+
+# --- the orders, the map and the click -------------------------------------
+
+## The three things the campaign's quests are played against, as the world builds
+## them: the cages, the warcamps, and the map sheet the player reads to find both.
+## Then the one gesture that turns a kill into loot, through the world's own press
+## path - a click on lootable ground must never also be a swing.
+func check_orders() -> void:
+	check(game.soldier_cages != null, "the world builds the cage line")
+	check(game.watcher_warren != null, "the world builds the watcher warcamps")
+	check(game.world_map != null, "the world builds the map sheet")
+	if game.soldier_cages != null:
+		check(game.soldier_cages.remaining() == 4, "four soldiers wait in the wood")
+	if game.watcher_warren != null:
+		check(game.watcher_warren.living() == game.watcher_warren.total(),
+			"every warden in the warcamps is standing")
+	var marks: Array = game.map_markers()
+	check(marks.size() >= 4, "the map is told where the orders are (%d marks)" % marks.size())
+
+	_press_key(KEY_M)
+	await process_frame
+	await process_frame
+	check(game.world_map.is_open(), "M opens the map sheet")
+	check(not paused, "the map does not pause the world")
+	_press_key(KEY_M)
+	await process_frame
+	await process_frame
+	check(not game.world_map.is_open(), "a second M closes it")
+
+	# The click that loots. A drop is put exactly under the crosshair, so the ray
+	# the world reads is the ray the test aimed down.
+	var actor = game.controller.active_body(1)
+	check(actor != null, "a body stands for the click")
+	if actor == null or game.loot_hand == null:
+		return
+	var sample: Dictionary = game.controller.aim_sample()
+	var point: Vector3 = sample.get("point", Vector3.ZERO)
+	var drop = game.spawn_pickup("wolf_pelt", point)
+	check(drop != null, "a pelt lies at the crosshair")
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	check(game._loot_click(press), "the left button begins the loot")
+	check(game.loot_hand.active(), "the body is working the ground")
+	check(game.loot_hand.target_kind() == "drop", "and it is the drop it found")
+	var waited := 0.0
+	while game.loot_hand.active() and waited < 3.0:
+		await create_timer(0.1).timeout
+		waited += 0.1
+	check(not game.loot_hand.active(), "the channel closes on its own (%.1f s)" % waited)
+	check(warband.stash.pooled_count("wolf_pelt") >= 1, "the pelt is in the shared stash")
+	check(game.loot_hand.last_summary().contains("Wolf Pelt"),
+		"and one line says what came back (%s)" % game.loot_hand.last_summary())
+
+	# Nothing under the crosshair: the world must not eat the press, or the sword
+	# could never be raised over open ground.
+	await create_timer(0.4).timeout
+	var empty := InputEventMouseButton.new()
+	empty.button_index = MOUSE_BUTTON_LEFT
+	empty.pressed = true
+	check(not game._loot_click(empty), "a press on bare ground is left to the sword")
 
 
 # --- the ally rule ---------------------------------------------------------

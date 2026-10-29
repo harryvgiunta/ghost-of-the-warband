@@ -446,13 +446,15 @@ func check_camp_in_the_woods() -> void:
 	check(int(game.camp.MOUTH_HALF_WIDTH) * 2 >= 8,
 		"the gap is walkable (%d m)" % (int(game.camp.MOUTH_HALF_WIDTH) * 2))
 	# The warband's enemies are the wood's mobs: the camp's watchers are on the
-	# field before the first latch, the road's cultists are down the lane, and the
-	# briar wolves hold the way between them - one list for all three.
+	# field before the first latch, the road's cultists are down the lane, the
+	# briar wolves hold the way between them and the quartermaster's warcamps are
+	# in the deep wood - one list for all four.
 	var camp_guards: int = game.camp.guards.size()
 	check(camp_guards == 2, "two watchers hold the camp (%d)" % camp_guards)
-	check(game.guards.size() == camp_guards + 20 + TrailScript.ARCHER_COUNT + wolves,
-		"twenty cultists and %d wolves join them on the same hostile list (%d in all)"
-		% [wolves, game.guards.size()])
+	var warcamps: int = game.watcher_warren.total() if game.watcher_warren != null else 0
+	check(game.guards.size() == camp_guards + 20 + TrailScript.ARCHER_COUNT + wolves + warcamps,
+		"twenty cultists, %d wolves and %d warcamp wardens join them on the same hostile"
+			% [wolves, warcamps] + " list (%d in all)" % game.guards.size())
 	for watcher in game.camp.guards:
 		check(is_equal_approx(float(watcher.max_health), float(game.camp.PAIR_LESSON_HEALTH)),
 			"the pair Corvin fights carry the lesson's thin pool (%s)" % str(watcher.max_health))
@@ -773,9 +775,11 @@ func check_leaving() -> void:
 	check(visible_blades == CampScript.AMBUSH_COUNT,
 		"and the blade is in its hand (%d)" % visible_blades)
 	# The camp's pair plus the ambush, plus the road's twenty and the wolves on the
-	# way out: one list for the whole wood, so a watcher in the camp, a wolf on the
-	# corridor and a cultist on the lane are the same system.
-	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves
+	# way out, plus the three warcamps the quartermaster's bounty points at: one
+	# list for the whole wood, so a watcher in the camp, a wolf on the corridor, a
+	# cultist on the lane and a warden in a warcamp are the same system.
+	var warren: int = game.watcher_warren.total() if game.watcher_warren != null else 0
+	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves + warren
 	check(game.guards.size() == expected_hostiles,
 		"the world's hostile list holds all %d (%d)" % [expected_hostiles, game.guards.size()])
 
@@ -957,6 +961,17 @@ func check_town_end() -> void:
 			"the %s counter resolves from where the body stands" % service)
 		var answered: String = game.interact_at(1, body.global_position)
 		check(answered == service, "G at the %s opens it (got '%s')" % [service, answered])
+		if game.card != null and game.card.is_open():
+			# A keeper with something to say speaks before his counter opens: the
+			# recruiter explains the free eight, and the quartermaster hands over an
+			# order - or explains the vial the squad stripped off a warden. The next
+			# press is the counter.
+			check(service == "quartermaster" or service == "recruiter",
+				"only a keeper with business speaks first (%s)" % service)
+			game.card.close()
+			await create_timer(0.1).timeout
+			check(game.interact_at(1, body.global_position) == service,
+				"the %s counter opens once he has said his piece" % service)
 		check(game._panel_open(), "the %s panel is open" % service)
 		game._hide_panels()
 		await create_timer(0.1).timeout
@@ -990,21 +1005,26 @@ func check_budget() -> void:
 	var draws := int(readout["draws"])
 	var shapes := int(readout["shapes"])
 	var lights := int(readout["lights"])
-	# One world is one scene: a camp in a 170 m wood, 915 m of trail, a square and
-	# twenty-eight watchers all in one tree. The caps follow what the deep wood and
-	# the road actually cost - a deep band batched into multimeshes, trunk colliders
-	# only in the rows a body can walk up to - and the readout below is the measured
+	# One world is one scene: a camp in a 170 m wood, a kilometre and a third of
+	# trail, the four cages and three warcamps the orders point at, a square and
+	# fifty-odd watchers all in one tree. The caps follow what the deep wood and the
+	# road actually cost - a deep band batched into multimeshes, trunk colliders only
+	# in the rows a body can walk up to - and the readout below is the measured
 	# number, so a regression that starts creeping can be narrowed from it.
 	check(nodes <= 26000, "the world stays inside its node budget (%d)" % nodes)
 	check(draws <= 800, "the world stays inside its draw budget (%d multimesh)" % draws)
 	check(shapes <= 1400, "the world stays inside its collision budget (%d shapes)" % shapes)
-	# The route is marked by fire now: a pair of torches every twelve metres is 152
-	# lights down nine hundred metres of wood, and that is the design, not creep.
+	# The route is marked by fire now: a pair of torches every eighteen metres down
+	# a kilometre and a third of wood, and that is the design, not creep. The
+	# warcamps' braziers and the town's own lanterns share the same ceiling.
 	check(lights <= 210, "the world stays inside its light budget (%d)" % lights)
-	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves
+	var warren: int = game.watcher_warren.total() if game.watcher_warren != null else 0
+	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves + warren
 	check(int(readout["guards"]) == hostiles,
 		"all %d hostiles are on the list (%d)" % [hostiles, int(readout["guards"])])
-	check(float(readout["lane_length"]) >= 860.0 and float(readout["lane_length"]) <= 980.0,
+	# The wood is a kilometre and a third of lane now: a band, not a number, so a
+	# waypoint can be nudged without a test about the art failing.
+	check(float(readout["lane_length"]) >= 1250.0 and float(readout["lane_length"]) <= 1500.0,
 		"the trail is a long run (%.1f m)" % float(readout["lane_length"]))
 	print("WORLD_BUDGET nodes=%d draws=%d meshes=%d lights=%d shapes=%d guards=%d"
 		% [nodes, draws, int(readout["meshes"]), lights, shapes, int(readout["guards"])])

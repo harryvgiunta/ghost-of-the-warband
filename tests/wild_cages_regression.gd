@@ -3,11 +3,11 @@ extends SceneTree
 ## first two orders are actually played against.
 ##
 ## The module is proved against the real campaign world rather than a stub -
-## `scenes/warband_world.tscn` is instantiated, seated and then handed the two
-## nodes exactly as the world will hand them - because every rule here is a rule
-## about the wood: the cage line's clearance from a lane a body walks, the camps'
-## distance from the town's wall, the latch on the same `G` the camp uses, and a
-## warden's death reaching the world's one kill handler.
+## `scenes/warband_world.tscn` is instantiated and the cages and camps it builds
+## itself are the ones measured - because every rule here is a rule about the wood:
+## the cage line's clearance from a lane a body walks, the camps' distance from the
+## town's wall, the latch on the same `G` the camp uses, and a warden's death
+## reaching the world's one kill handler.
 ##
 ## What is measured:
 ##
@@ -120,6 +120,15 @@ func run() -> void:
 	if body == null:
 		_finish()
 		return
+	# The world's own wiring, not a second copy: one cage line, one warren, one
+	# loot hand and one map sheet are what a campaign opens with.
+	check(game.soldier_cages != null, "the world fields the cage line")
+	check(game.watcher_warren != null, "and the watcher warren")
+	check(game.loot_hand != null, "the loot hand is built with the vacuum")
+	check(game.world_map != null, "the map sheet is built with the world")
+	check(game.map_markers().size() == 7,
+		"the map is told where the four cages and three camps are (%d)"
+			% game.map_markers().size())
 	var roster_before: int = warband.roster.count()
 
 	await _check_cages()
@@ -132,10 +141,14 @@ func run() -> void:
 # --- 1. the cage line ------------------------------------------------------
 
 func _check_cages() -> void:
-	cages = CagesScript.new()
-	cages.name = "SoldierCages"
-	game.add_child(cages)
-	cages.setup(game)
+	# The world builds the cage line itself (`_build_orders`), so this adopts the
+	# instance the campaign actually plays against instead of adding a second one
+	# beside it: a duplicated line would double the soldiers in the wood while
+	# every assertion here still passed.
+	cages = game.soldier_cages
+	check(cages != null and is_instance_valid(cages), "the world builds the cage line")
+	if cages == null:
+		return
 	check(cages.cages().size() == 4, "four cages stand on the way to town")
 	check(cages.open_cages().size() == 4, "and each of them has a shut latch")
 	check(cages.remaining() == 4, "nothing on the line is open yet")
@@ -212,10 +225,10 @@ func _check_cages() -> void:
 # --- 2. the warren ---------------------------------------------------------
 
 func _check_warren(quests) -> void:
-	warren = WarrenScript.new()
-	warren.name = "WatcherWarren"
-	game.add_child(warren)
-	warren.setup(game)
+	warren = game.watcher_warren
+	check(warren != null and is_instance_valid(warren), "the world builds the warren")
+	if warren == null:
+		return
 	await create_timer(0.6).timeout
 
 	check(warren.total() == 21, "the warren is three camps of seven (%d)" % warren.total())
