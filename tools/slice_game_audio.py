@@ -10,7 +10,8 @@ re-running it reproduces the exact tree the game ships.
     python tools/slice_game_audio.py --sources DIR   # other raw library root
 
 Every slice is trimmed to mono 48 kHz, peak-normalised to -1 dBFS with a short
-fade on both ends (a hard cut clicks), then encoded as Vorbis. Mono is not a
+fade on both ends (a hard cut clicks), then encoded as Vorbis with `-bitexact`,
+so the same window always produces the same bytes. Mono is not a
 downgrade here: the engine pans a 3D one-shot itself, and a stereo stream on an
 `AudioStreamPlayer3D` cannot be placed in the world.
 
@@ -56,6 +57,16 @@ SLICED = {
             (13.52, 13.87),
         ],
     },
+    # Dagger swing: the same thirteen takes cut to their leading third, because a
+    # dagger is not a sword swung by a smaller man - it is a flick, and the sound
+    # has to be over before a sword's would still be travelling.
+    "dagger_whoosh": {
+        "source": "427979__kinoton__short-whoosh-13x.wav",
+        "windows": [
+            (0.26, 0.40), (2.31, 2.45), (4.71, 4.85),
+            (6.86, 7.00), (9.21, 9.35), (11.46, 11.60),
+        ],
+    },
     # 2H swing: one long bamboo whoosh, the arc a two-handed piece draws.
     "long_whoosh": {
         "source": "855844__sadiquecat__whoosh-long-bamboo-stick-os-st-13.wav",
@@ -99,6 +110,7 @@ SLICED = {
 # Output folder per group. The game loads `res://assets/audio/sfx/<group>/`.
 GROUPS = {
     "short_whoosh": "swing",
+    "dagger_whoosh": "swing",
     "long_whoosh": "swing",
     "blunt": "impact",
     "slit": "impact",
@@ -129,7 +141,11 @@ def encode(samples: np.ndarray, destination: Path) -> None:
         sf.write(raw, samples, RATE, subtype="PCM_16")
         subprocess.run(
             ["ffmpeg", "-v", "error", "-y", "-i", str(raw),
-             "-c:a", "libvorbis", "-q:a", "5", str(destination)],
+             "-c:a", "libvorbis", "-q:a", "5",
+             # Without these two the Ogg muxer stamps a random stream serial and
+             # an encoder tag, so the same window re-encodes to different bytes
+             # and every re-run dirties the tree.
+             "-fflags", "+bitexact", "-map_metadata", "-1", str(destination)],
             check=True,
         )
 

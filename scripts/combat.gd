@@ -599,8 +599,10 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	_sync_display_progress()
 	# The swing is heard when it is committed, not when it lands: every body
 	# that swings - the soul, an ally, a cultist, a bot in the yard - comes
-	# through here, so this is the one place a whoosh belongs.
-	SfxScript.swing(rig, _sound_point())
+	# through here, so this is the one place a whoosh belongs. The hand matters:
+	# the off hand of a dual pair may be the dagger, and a dagger must not sound
+	# like the sword beside it.
+	SfxScript.swing(rig, _sound_point(), key)
 	return true
 
 
@@ -916,8 +918,9 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		BloodFx.impact(actor,at,at-actor.global_position,damage,headshot)
 		BloodFx.stain_weapon(rig,damage,hand)
 		# A blade opens a body; a club does not. `Sfx` reads the piece that just
-		# spent the blow, so a landed makeshift club thuds instead of cutting.
-		SfxScript.landed(rig, at)
+		# spent the blow, so a landed makeshift club thuds instead of cutting and
+		# a dagger's cut stays small.
+		SfxScript.landed(rig, at, hand)
 		if actor.has_method("note_weapon_blood"):
 			actor.note_weapon_blood(damage)
 		if _unit_is_dead(unit):

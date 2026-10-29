@@ -43,10 +43,22 @@ func _initialize() -> void:
 class StubRig:
 	var sword_index := 0
 	var staff_active := false
+	var weapon := "sword"
+	var off_hand := ""
 	var weapon_item: Variant = null
 
 	func swings_two_handed() -> bool:
 		return sword_index in [2, 4]
+
+	## The rig's own answer for a hand, exactly as `Archer` gives it.
+	func swing_weapon_class(hand: String) -> String:
+		if weapon == "dagger":
+			return "dagger"
+		if hand == "left":
+			return off_hand
+		if weapon == "dual":
+			return "staff" if staff_active else "sword"
+		return "sword"
 
 
 class StubMob:
@@ -165,6 +177,14 @@ func _check_library() -> void:
 	# slicing tool writes and the only reason a swing does not read as a loop.
 	check(int(SfxLibraryScript.entry("swing_1h").get("count")) == 13, "whoosh takes changed")
 	check(int(SfxLibraryScript.entry("hit_blunt").get("count")) == 3, "blunt takes changed")
+	check(int(SfxLibraryScript.entry("swing_dagger").get("count")) == 6, "dagger takes changed")
+	# Smaller by construction: the flick is shorter and quieter than the sword.
+	var flick: Dictionary = SfxLibraryScript.entry("swing_dagger")
+	var sword: Dictionary = SfxLibraryScript.entry("swing_1h")
+	check(float(flick.get("db")) < float(sword.get("db")),
+		"the dagger flick must be quieter than the sword whoosh")
+	check(float(flick.get("pitch")[0]) > float(sword.get("pitch")[0]),
+		"the dagger flick must be brighter than the sword whoosh")
 
 
 func _check_weapon_reading() -> void:
@@ -178,16 +198,29 @@ func _check_weapon_reading() -> void:
 	var staff := StubRig.new()
 	staff.staff_active = true
 
-	check(SfxScript.kind_of(short) == {"two_handed": false, "blunt": false},
+	check(SfxScript.kind_of(short) == {"two_handed": false, "blunt": false, "dagger": false},
 		"a shortsword must read as a one-handed blade")
-	check(SfxScript.kind_of(great) == {"two_handed": true, "blunt": false},
+	check(SfxScript.kind_of(great) == {"two_handed": true, "blunt": false, "dagger": false},
 		"a greatsword must read as a two-handed blade")
-	check(SfxScript.kind_of(club) == {"two_handed": false, "blunt": true},
+	check(SfxScript.kind_of(club) == {"two_handed": false, "blunt": true, "dagger": false},
 		"a club must read as a one-handed blunt")
-	check(SfxScript.kind_of(branch) == {"two_handed": true, "blunt": true},
+	check(SfxScript.kind_of(branch) == {"two_handed": true, "blunt": true, "dagger": false},
 		"a tree branch must read as a two-handed blunt")
-	check(SfxScript.kind_of(staff) == {"two_handed": true, "blunt": true},
+	check(SfxScript.kind_of(staff) == {"two_handed": true, "blunt": true, "dagger": false},
 		"a staff must read as a two-handed blunt")
+
+	# The dagger is its own reading, in the main hand and behind a sword.
+	var dagger := StubRig.new()
+	dagger.weapon = "dagger"
+	check(SfxScript.kind_of(dagger) == {"two_handed": false, "blunt": false, "dagger": true},
+		"a dagger must read as a dagger")
+	var dual := StubRig.new()
+	dual.weapon = "dual"
+	dual.off_hand = "dagger"
+	check(bool(SfxScript.kind_of(dual, "left").get("dagger")),
+		"an off-hand dagger must read as a dagger")
+	check(not bool(SfxScript.kind_of(dual, "right").get("dagger")),
+		"the main-hand sword of a dual pair must not read as a dagger")
 
 	var club_mob := StubMob.new()
 	club_mob.weapon_item = "club_makeshift"
@@ -195,6 +228,9 @@ func _check_weapon_reading() -> void:
 	var sword_mob := StubMob.new()
 	sword_mob.weapon_item = "sword_makeshift"
 	check(not bool(SfxScript.kind_of(sword_mob).get("blunt")), "a mob blade must not read as blunt")
+	var shiv_mob := StubMob.new()
+	shiv_mob.weapon_item = "dagger_ironwood"
+	check(bool(SfxScript.kind_of(shiv_mob).get("dagger")), "a mob shiv must read as a dagger")
 
 	# The funnel itself: what the combat code calls, and what the manager hears.
 	audio.last_event = ""
@@ -206,6 +242,18 @@ func _check_weapon_reading() -> void:
 	check(audio.last_event == "hit_blunt", "a landed branch did not ask for the blunt hit")
 	SfxScript.landed(short, Vector3(1, 0, 2))
 	check(audio.last_event == "hit_blade", "a landed blade did not ask for the slit")
+	# A dagger is not a sword swung by a smaller man: it asks for its own takes,
+	# and its landed cut is the same recording held small.
+	SfxScript.swing(dagger, Vector3(1, 0, 2))
+	check(audio.last_event == "swing_dagger", "a dagger swing did not ask for the dagger flick")
+	SfxScript.swing(dual, Vector3(1, 0, 2), "left")
+	check(audio.last_event == "swing_dagger", "an off-hand dagger swing did not ask for the flick")
+	SfxScript.swing(dual, Vector3(1, 0, 2), "right")
+	check(audio.last_event == "swing_1h", "the main-hand sword of a dual pair lost its whoosh")
+	SfxScript.landed(dagger, Vector3(1, 0, 2))
+	check(audio.last_event == "hit_dagger", "a landed dagger did not ask for the small cut")
+	SfxScript.swing(shiv_mob, Vector3(1, 0, 2))
+	check(audio.last_event == "swing_dagger", "a mob shiv swing did not ask for the flick")
 	SfxScript.defense(Vector3(1, 0, 2), true)
 	check(audio.last_event == "parry", "a parry did not ask for the parry take")
 	SfxScript.defense(Vector3(1, 0, 2), false)

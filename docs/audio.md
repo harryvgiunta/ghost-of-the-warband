@@ -53,19 +53,30 @@ inside 20 ms are one contact reported twice and play once.
 | Event | Takes | Fires when |
 | --- | --- | --- |
 | `swing_1h` | 13 | any one-handed weapon commits a swing (`Combat.begin_melee`, `DevilMob`/`Enemy` on the frame they enter `STRIKE`) |
+| `swing_dagger` | 6 | the same, with a dagger in the swinging hand (main hand, or the off hand of a dual pair) |
 | `swing_2h` | 1 | the same, for a greatsword, the heavy branch or a staff |
 | `hit_blade` | 8 | a melee blow that was not blocked or parried landed (`Combat._resolve_melee_contact`, and each scene's mob-to-ranger handler) |
 | `hit_blunt` | 3 | the same, with a club, a branch or a staff in the swinging hand |
+| `hit_dagger` | 8 | the same, cut by a dagger: the slit takes held small |
 | `block` | 4 | a blow landed on a held guard (`Combat._block_feedback`, the arena's replicated `_defense_event`) |
 | `parry` | 4 | a blow was parried, and on a blade-vs-blade clash (`Combat._resolve_clash`) |
 | `arrow` | 1 | an arrow launches (`Arrow.launch`, on every peer that owns one) |
 | `throw` | 3 | a blade is let go of (`ThrownWeapon.launch`) |
 
-The blunt/two-handed reading is `Sfx.kind_of`: the ranger rig's own catalog
-index (`sword_index` 3 is the club, 4 the branch, plus `staff_active`), or a
-mob's carried piece (`weapon_item`, `held_weapon_id()`). It is an id/kind test,
-never a damage or reach guess: the catalog files both clubs and swords under
-`kind: "sword"`.
+The weapon reading is `Sfx.kind_of(source, hand)`: the ranger rig's own
+`swing_weapon_class(hand)` (so the off hand of a dual pair is read as what it
+actually holds), its catalog index (`sword_index` 3 is the club, 4 the branch,
+plus `staff_active`), or a mob's carried piece (`weapon_item`,
+`held_weapon_id()`). It is an id/kind test, never a damage or reach guess: the
+catalog files both clubs and swords under `kind: "sword"`.
+
+**A dagger is not a small sword.** It is the fastest weapon in the game - a
+0.5 s swing, and the shank passive takes it to 0.167 s - so a sword's 0.33 s
+whoosh under every stab reads as a greatsword swung by a man with a knife.
+`swing_dagger` is the same thirteen takes cut to their leading third (0.14 s),
+5 dB quieter and pitched up; `hit_dagger` is the slit recording 5 dB under the
+blade's cut and pitched up. The dagger keeps the same source recordings; only
+the window and the mix change.
 
 ## Slicing
 
@@ -73,11 +84,14 @@ never a damage or reach guess: the catalog files both clubs and swords under
 (`~/Downloads` plus `~/game-audio-lab/outputs`; `--sources` for another root).
 Every window is a fixed `(start, end)` in the source, every slice is mono 48 kHz
 peak-normalised to -1 dBFS with a 4 ms fade, and the output names are the ones
-`SfxLibrary` expects - so `--check` is the whole verification.
+`SfxLibrary` expects - so `--check` is the whole verification. The encode is
+`-bitexact` (no random Ogg stream serial, no encoder tag), so the same window
+always writes the same bytes and a re-run is a no-op in git.
 
 | Source | Becomes |
 | --- | --- |
 | `427979__kinoton__short-whoosh-13x.wav` (13 takes) | `swing/short_whoosh_01..13` |
+| the same recording, six takes cut to their attack | `swing/dagger_whoosh_01..06` |
 | `855844__sadiquecat__whoosh-long-bamboo-stick-os-st-13.wav` | `swing/long_whoosh_01` |
 | `460509__florianreichelt__hitting-in-a-face.mp3` (3 hits) | `impact/blunt_01..03` |
 | `873151__artninja__sword_throat_slitting_sound_10032026.wav` (16 takes, 8 kept) | `impact/slit_01..08` |
