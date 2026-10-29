@@ -114,6 +114,7 @@ WARBAND_TESTS = [
     "quartermaster_regression",
     "warband_art_regression",
     "run_persistence_regression",
+    "checkpoint_regression",
     "warband_swing_clock_regression",
     "warband_ranged_regression",
     "audio_regression",

@@ -29,7 +29,13 @@ controller. The cages stand in a clearing inside the dark wood; the wood runs 28
 to a town cut into the same trees. Nothing between them is a door: walking is the
 only way from one to the next, and no key loads a scene. The title's **GHOST OF THE
 WARBAND** door is a *new campaign* — it resets the warband and the shared journey
-(purse included) and opens at the cages, however the last run ended.
+(purse included) and opens at the cages, however the last run ended. **RESUME
+WARBAND** is the checkpoint door: it opens the world where the last autosave stands
+(disabled until a warband save exists). Autosave writes a **checkpoint** at the two
+moments that begin a stretch — the camp's six watchers dead with the squad on the
+road (`trail_start`, 60 m past the mouth), and the town square entered (`town`).
+A wipe reloads it; the opening itself has no checkpoint, so a tutorial wipe is still
+the tutorial's to take.
 
 1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
    (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
@@ -230,6 +236,19 @@ Integration seams deliberately placed in the base game:
     (7.5 energy, 26 m, warm): a carried torch has to be brighter than the trail's
     fixed 3.4/16 m pools. It polls the roster, so every gear path — paperdoll, stash,
     loot — lights or douses it without being told.
+23. **A checkpoint is the warband's save, not a second file.** `Warband.save_checkpoint()`
+    writes the roster, stash, essence and the `{id, area, position, label, at}`
+    bookmark to `user://warband_state.json` in one call (save version 4). It is
+    written at exactly two moments — the camp's six watchers down (`trail_start`)
+    and the town square entered (`town`) — once per id, so walking back and forth
+    cannot hammer the disk; `sanitise_checkpoint()` is the only reader, and a v3
+    file (no bookmark) still opens at the town. A wipe reloads it (downed bodies
+    wake at half health; dead bodies stay dead) and the **purse is never rolled
+    back**, because `PlayerState` owns it and a reload must not replay a payment.
+    A checkpoint start never re-runs the lesson: `CageEscape.prepare_resume()` is
+    called before the camp enters the tree, `place_resumed()` opens the four
+    cages, and no watcher is fielded. `GameFlow.active` still gates the scene
+    change, so a regression harness never gets teleported by a wipe.
 
 ### Tuning knobs (one place each)
 
@@ -253,8 +272,9 @@ Integration seams deliberately placed in the base game:
 | The world: budget | `warband_world_regression.gd` caps | nodes ≤ 26000 (now 6151), draws ≤ 800 (604), shapes ≤ 1400 (586), lights ≤ 210 (190: 152 of them the trail's torches) |
 | The world: walk | `warband_world_regression.gd` | 44 m opening + 1,117 m through the wood = cage line → town square over the heightfield's slopes, 156 s of game time, 0 scene changes |
 | Town lanterns | `town_dressing.gd` | 4 posts, 3.2 energy / 15 m, attenuation 1.1 |
-| Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the town end of the world; nobody revived, nothing gathered |
+| Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the last checkpoint; with no bookmark the wood simply takes what is left |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
+| Checkpoint moments | `world_scene.gd::_check_checkpoints` | `trail_start` when the camp's six are down and the squad is leaving (60 m past the mouth), `town` on entering the square; one write per id |
 | Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
 
 ### Godot gotchas found the hard way
@@ -298,6 +318,7 @@ Integration seams deliberately placed in the base game:
 | `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
 | `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
+| `checkpoint_regression` | 72 | the v4 bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |
 | `game_flow_regression` | 22 | world → arena → world on one save |
 | `admin_arena_regression` | 98 | bubble, downed, revive, loot, altar, screen, two peers |
 | `quartermaster_regression` | 20 | keeper price, purse, refusal |

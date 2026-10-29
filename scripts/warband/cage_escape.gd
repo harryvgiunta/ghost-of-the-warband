@@ -326,6 +326,11 @@ var _steel_taken := 0
 var _prompt_text := ""
 var _hint_text := ""
 var _lesson := false
+## True when the world opens on a checkpoint past this camp: the cages stand
+## empty and open, the pair never wake, and no lesson runs. Set before the camp
+## enters the tree, because `_ready` and `embed` are where the watchers and the
+## choice of lesson would otherwise happen.
+var _resume := false
 
 
 func _ready() -> void:
@@ -337,7 +342,7 @@ func _ready() -> void:
 		_build_night()
 		_build_floor()
 	_build_clearing()
-	if host == null:
+	if host == null and not _resume:
 		_install_watchers()
 
 
@@ -354,7 +359,8 @@ func embed(world: Node3D) -> void:
 	card = world.card
 	squad = world.squad
 	_pickups = world.pickups
-	_install_watchers()
+	if not _resume:
+		_install_watchers()
 
 
 # --- the world's side of the camp ------------------------------------------
@@ -485,6 +491,47 @@ func begin_lesson() -> void:
 ## True while the lesson is running, i.e. while the four cages hold their souls.
 func lesson_running() -> bool:
 	return _lesson and sequencer != null
+
+
+## The world is opening on a checkpoint past this camp. Called before the camp is
+## added to the tree: the wood still builds - it is the same place - but the pair
+## are never fielded and no lesson starts.
+func prepare_resume() -> void:
+	_resume = true
+
+
+## Stand the warband in a camp it has already left: the four cages hang open and
+## empty, nobody is clamped, and the squad is free to follow. There are no
+## watchers because the checkpoint was only written after they fell.
+func place_resumed(bodies_in: Array) -> void:
+	bodies = bodies_in
+	for actor in bodies:
+		if not is_instance_valid(actor):
+			continue
+		var merc_id: int = controller.merc_of(actor)
+		actor.combat.target_mask = WATCHER_LAYER
+		controller.set_bot(merc_id, false)
+	caged_ids.clear()
+	_cage_anchors.clear()
+	_cage_open.clear()
+	for index in CAGE_POSTS.size():
+		_cage_open.append(true)
+	for entry in _cage_doors:
+		entry["lift"] = CAGE_BAR_LIFT
+		var node: Node3D = entry["node"]
+		if is_instance_valid(node):
+			node.position.y = CAGE_BAR_LIFT
+
+
+## The opening is behind the warband: the leaving happened and the six watchers
+## it called out of the wood are dead. That - not a timer - is the moment the
+## trail begins and the first checkpoint is worth writing. A world that opened on
+## a bookmark past the cages never ran the lesson, so it has nothing to clear.
+func tutorial_cleared() -> bool:
+	if sequencer == null:
+		return false
+	return sequencer.state() == SequencerScript.State.ESCAPING \
+		and sequencer.guards_down() >= SequencerScript.GUARD_COUNT
 
 
 ## Whether this mercenary is free to act as a squadmate: a prisoner whose latch

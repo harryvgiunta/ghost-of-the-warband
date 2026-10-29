@@ -299,6 +299,29 @@ worktree briefs live in **`docs/warband-handoff.md`**. Start a session there: it
 names the commit, the engine/test commands, the eighteen rules that must not be
 regressed, the Godot traps already paid for, and the phase plan.
 
+### Checkpoints (autosave)
+
+The campaign autosaves at the two moments that begin a stretch, and the same file
+carries the bookmark (`Warband.checkpoint`, save version 4):
+
+| Id | Written when | Resume puts the squad |
+| --- | --- | --- |
+| `trail_start` | the camp's six watchers are dead and the leaving has happened (the tutorial is over, the run starts) | 60 m past the camp mouth, on the road, cages already open |
+| `town` | the soul's body first enters Hearthstead's square | the town's own spawn posts, square services live |
+
+`Warband.save_checkpoint(id, area, position, label)` writes the roster, the shared
+stash, the Cruor ledger and the bookmark in one `user://warband_state.json` write,
+so a load can never point at a state the file has not held. `sanitise_checkpoint()`
+is the only reader (hand-edited or older files drop the bookmark, never half-read
+it), and a v3 file simply resumes at the town as before. A wipe calls
+`GameFlow.retry_checkpoint()` after `WIPE_BEAT`: the warband reloads, bodies that
+were down wake at half health, bodies that were dead stay dead, and the **purse is
+not rolled back** (it belongs to `PlayerState`, and a reload must not replay a
+payment). With no bookmark - the opening - the wipe still has no way back. The
+title's **RESUME WARBAND** door opens the world on the bookmark; **GHOST OF THE
+WARBAND** is still always a new campaign. `tests/checkpoint_regression.gd` owns
+the whole contract, including the two real world resumes.
+
 Short version of the latest tuning (all in the code, all covered by
 `tests/cage_escape_regression.gd`):
 

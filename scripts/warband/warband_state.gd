@@ -28,12 +28,18 @@ const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "
 
 ## Additive save format. v2 added the run history (`runs`) and the lifetime
 ## totals (`run_totals`); v3 added each mercenary's two weapon sets (`weapon_sets`
-## plus `active_set` per record), the pair `TAB` brings up. Older files still load:
-## a record with no sets puts the pair already in its hands in Set 1 and starts Set
-## 2 empty, and a v1 file has no reports and zeroed totals, because every reader
-## of those fields defaults.
-const SAVE_VERSION := 3
+## plus `active_set` per record), the pair `TAB` brings up; v4 added the
+## checkpoint bookmark (`checkpoint`), the autosave that remembers which stretch
+## of the world the warband has already played. Older files still load: a record
+## with no sets puts the pair already in its hands in Set 1 and starts Set 2
+## empty, a v1 file has no reports and zeroed totals, and a file without a
+## checkpoint resumes at the town as it always did.
+const SAVE_VERSION := 4
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
+## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
+## not a save slot: the camp is the only place a run starts, so it is never a
+## checkpoint (the opening is already restartable from the title).
+const CHECKPOINT_AREAS := ["trail", "town"]
 
 var roster: WarbandRoster = RosterScript.new()
 var souls: SoulRouter = SoulScript.new()
@@ -49,6 +55,13 @@ var seeded := false
 var possession: Dictionary = {}   # peer_id -> merc_id
 ## Seconds into the current 5 s revive channel, keyed by peer id.
 var revive_channels: Dictionary = {}  # peer_id -> {merc_id, seconds}
+## The last autosave bookmark: `{id, area, position, label, at}` or `{}`. It is
+## written by the world at the moments the campaign becomes a new stretch - the
+## camp's six watchers down and the squad on the road, the town square entered -
+## and it is what a wipe and the title's resume door read. The roster, stash and
+## essence beside it are the warband as it stood then; the purse is not rolled
+## back, because `PlayerState` owns it and a reload must never repay a run.
+var checkpoint: Dictionary = {}
 
 func _ready() -> void:
 	set_process(false)
@@ -310,6 +323,7 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	seeded = false
 	possession.clear()
 	revive_channels.clear()
+	checkpoint.clear()
 	# A new campaign has no history to show (the persistence section owns it).
 	_reset_run_records()
 	_notify()
@@ -326,6 +340,7 @@ func to_dict() -> Dictionary:
 		"roster": roster.to_dict(),
 		"stash": stash.to_dict(),
 		"cruor": cruor.to_dict(),
+		"checkpoint": checkpoint.duplicate(true),
 		"runs": _run_history.duplicate(true),
 		"run_totals": RunReportScript.sanitize_totals(run_totals),
 	}
@@ -336,6 +351,9 @@ func from_dict(data: Dictionary) -> void:
 	cruor.from_dict(data.get("cruor", {}))
 	deployment_cap = clampi(int(data.get("deployment_cap", Contracts.MAX_DEPLOYMENT_CAP)),
 		1, Contracts.MAX_DEPLOYMENT_CAP)
+	# A v3 file has no checkpoint: it resumes at the town, which is what every
+	# save written before autosave existed meant.
+	checkpoint = sanitise_checkpoint(data.get("checkpoint", {}))
 	# A v1 save has neither field; both readers answer "nothing fought yet".
 	_load_run_history(data.get("runs", []))
 	run_totals = RunReportScript.sanitize_totals(data.get("run_totals", {}))
@@ -375,11 +393,121 @@ func load_state() -> bool:
 	from_dict(parsed)
 	return true
 
+# --- checkpoints (the autosave bookmark) ------------------------------------
+#
+# A checkpoint is the campaign's own memory of "how far we got", written at the
+# moments that begin a new stretch: the camp's six watchers down with the squad
+# on the road (`trail_start`), and the town square entered (`town`). It rides in
+# the same `warband_state.json` as everything else, so one file is one truthful
+# picture - a wiped run loads the roster, stash and essence as they stood there
+# and puts the warband back on that ground. A v3 file has no checkpoint and
+# resumes at the town, exactly as it did before.
+
+func has_checkpoint() -> bool:
+	return not checkpoint.is_empty()
+
+func checkpoint_id() -> String:
+	return str(checkpoint.get("id", ""))
+
+## `"trail"` or `"town"`, or `""` when there is no bookmark.
+func checkpoint_area() -> String:
+	return str(checkpoint.get("area", ""))
+
+func checkpoint_label() -> String:
+	return str(checkpoint.get("label", ""))
+
+## The ground the bookmark was taken on. Zero when there is none; callers that
+## need a standable point snap it to the terrain.
+func checkpoint_position() -> Vector3:
+	return checkpoint_vector(checkpoint)
+
+## The moment the bookmark was taken, as a unix stamp.
+func checkpoint_at() -> int:
+	return int(checkpoint.get("at", 0))
+
+## Write a checkpoint and the whole warband with it. The warband is saved at the
+## same time on purpose: a bookmark that points at a state the file has never
+## held is a lie the reload cannot honour. Returns the stored record.
+func save_checkpoint(id: String, area: String, position: Vector3, label: String = "") -> Dictionary:
+	var wanted_id := id.strip_edges()
+	var wanted_area := area if CHECKPOINT_AREAS.has(area) else "town"
+	if wanted_id.is_empty():
+		wanted_id = wanted_area
+	checkpoint = {
+		"id": wanted_id,
+		"area": wanted_area,
+		"position": [position.x, position.y, position.z],
+		"label": label,
+		"at": int(Time.get_unix_time_from_system()),
+	}
+	save_state()
+	_notify()
+	return checkpoint.duplicate(true)
+
+func clear_checkpoint() -> void:
+	if checkpoint.is_empty():
+		return
+	checkpoint.clear()
+	_notify()
+
+## How many bodies the bookmark can put on the field. A checkpoint whose whole
+## squad is dead is not a checkpoint: the wipe path must not loop on it.
+func checkpoint_standing() -> int:
+	var count := 0
+	for merc_id in roster.ids():
+		if roster.state_of(merc_id) != Contracts.HealthState.DEAD:
+			count += 1
+	return count
+
+## The same check a reader gets out of the file: malformed data is dropped, never
+## half-read. Static because a save's checkpoint is untrusted input.
+static func sanitise_checkpoint(data: Variant) -> Dictionary:
+	if not (data is Dictionary):
+		return {}
+	var record: Dictionary = data
+	var id := str(record.get("id", "")).strip_edges()
+	var area := str(record.get("area", ""))
+	if id.is_empty() or not CHECKPOINT_AREAS.has(area):
+		return {}
+	if not is_standable(record.get("position", null)):
+		return {}
+	var point := checkpoint_vector(record)
+	return {
+		"id": id,
+		"area": area,
+		"position": [point.x, point.y, point.z],
+		"label": str(record.get("label", "")),
+		"at": int(record.get("at", 0)),
+	}
+
+## A checkpoint's position, read from a record or from the live field.
+static func checkpoint_vector(record: Dictionary) -> Vector3:
+	var value: Variant = record.get("position", [])
+	if not (value is Array) or (value as Array).size() != 3:
+		return Vector3.ZERO
+	var values: Array = value
+	for index in 3:
+		if typeof(values[index]) not in [TYPE_INT, TYPE_FLOAT]:
+			return Vector3.ZERO
+	var point := Vector3(float(values[0]), float(values[1]), float(values[2]))
+	return point if point.is_finite() else Vector3.ZERO
+
+static func is_standable(value: Variant) -> bool:
+	if not (value is Array) or (value as Array).size() != 3:
+		return false
+	for entry in value as Array:
+		if typeof(entry) not in [TYPE_INT, TYPE_FLOAT]:
+			return false
+		if not is_finite(float(entry)):
+			return false
+	return true
+
 ## One line for the log card and for tests.
 func describe() -> String:
-	return "mercs=%d alive=%d deployed=%d cap=%d gold=%d cruor=%d brands=%d stash=%d" % [
+	return "mercs=%d alive=%d deployed=%d cap=%d gold=%d cruor=%d brands=%d stash=%d checkpoint=%s" % [
 		roster.count(), roster.alive_count(), roster.deployed_count(), deployment_cap,
-		gold(), cruor.total(), cruor.brands.size(), stash.pooled_total()]
+		gold(), cruor.total(), cruor.brands.size(), stash.pooled_total(),
+		checkpoint_id() if has_checkpoint() else "-"]
 
 # --- run reports (persistence) ---------------------------------------------
 #

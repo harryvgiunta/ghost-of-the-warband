@@ -213,6 +213,7 @@ func _physics_process(delta: float) -> void:
 	_sync_roster(delta)
 	_update_prompt()
 	_update_hint()
+	_check_checkpoints()
 	_check_wipe(delta)
 
 
@@ -422,6 +423,10 @@ func _build_areas() -> void:
 	camp = CampScript.new()
 	camp.name = "Camp"
 	camp.host = self
+	# A checkpoint past the cages opens the world with the lesson already behind
+	# it: the cages hang open and empty and the pair are never fielded.
+	if _resuming_trail():
+		camp.prepare_resume()
 	add_child(camp)
 	camp.embed(self)
 
@@ -467,9 +472,13 @@ func lane_end() -> Vector3:
 # --- the warband -----------------------------------------------------------
 
 ## Seed the warband the way the area it starts in expects, spawn one body per
-## mercenary at that area's posts, and seat the soul.
+## mercenary at that area's posts, and seat the soul. A resumed campaign opens on
+## its checkpoint instead: the same roster and gear the save holds, standing on
+## the ground the bookmark names.
 func _seat_warband() -> void:
-	if start_area == "town":
+	if start_area == "checkpoint" and warband.has_checkpoint():
+		_seat_checkpoint()
+	elif start_area == "town":
 		town.seed_warband()
 		warband.roster.clear_deployment()
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
@@ -478,6 +487,58 @@ func _seat_warband() -> void:
 		camp.seed_warband()
 		bodies = controller.spawn_mercenaries(camp.spawn_posts(), true)
 		camp.place_warband(bodies)
+	_adopt_bodies()
+	if start_area == "camp":
+		camp.begin_lesson()
+	_on_possession_changed(1, controller.merc_for_peer(1))
+
+
+## The bookmark is a place the warband already stood: the town's own fire ring,
+## or a ring of posts a few metres around the trail point it holds. Nothing is
+## seeded, dressed or re-taught - the roster is what the save says it is.
+func _seat_checkpoint() -> void:
+	if warband.checkpoint_area() == "town":
+		town.seed_warband()
+		warband.roster.clear_deployment()
+		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
+		town.place_warband(bodies)
+		return
+	var ground := _checkpoint_ground()
+	var posts := _spawn_ring(ground, maxi(1, warband.alive_merc_ids().size()))
+	bodies = controller.spawn_mercenaries(posts, true)
+	camp.place_resumed(bodies)
+	# The squad is out of the camp on a resumed trail: it walks with the soul.
+	if squad != null:
+		squad.following = true
+		squad.engage_radius = 34.0
+
+
+## Where a trail bookmark stands on the ground. Zero is a marker from a file that
+## named no position: the lane's first stretch past the camp is the safe answer.
+func _checkpoint_ground() -> Vector3:
+	var point: Vector3 = warband.checkpoint_position()
+	if point.is_zero_approx():
+		point = Vector3(CampScript.GATE_POINT.x, 0.0, CampScript.GATE_POINT.z - 55.0)
+	return TerrainScript.grounded(point)
+
+
+## A ring of standable posts around a point, so a resumed squad does not spawn
+## inside one body's capsule.
+func _spawn_ring(at: Vector3, count: int) -> Array[Vector3]:
+	var posts: Array[Vector3] = []
+	for index in count:
+		var angle := TAU * float(index) / float(maxi(1, count))
+		posts.append(TerrainScript.grounded(
+			at + Vector3(cos(angle) * 1.8, 0.0, sin(angle) * 1.8)))
+	if posts.is_empty():
+		posts.append(at)
+	return posts
+
+
+## Wire the bodies this scene just spawned: the squad list, the mob layer, the
+## crawl, the projectiles, the downed/killed drops and the torch. Shared by every
+## way the world can be seated, so a resume cannot forget one of them.
+func _adopt_bodies() -> void:
 	squad_ids.clear()
 	for actor in bodies:
 		var merc_id: int = controller.merc_of(actor)
@@ -511,9 +572,6 @@ func _seat_warband() -> void:
 	if first <= 0 and not squad_ids.is_empty():
 		first = int(squad_ids[0])
 		controller.direct(1, first)
-	if start_area == "camp":
-		camp.begin_lesson()
-	_on_possession_changed(1, controller.merc_for_peer(1))
 
 
 ## Every body's bowstring and throwing hand. A body that is not authoritative is
@@ -853,6 +911,9 @@ func _check_wipe(delta: float) -> void:
 	_sync_roster(1.0)
 	if revive != null:
 		revive.set_bodies([])
+	# A checkpoint is the way back from a wipe; with none (the opening, a fresh
+	# campaign) the wood still takes what is left.
+	_reload_checkpoint()
 
 
 func _all_bodies_out() -> bool:
@@ -864,6 +925,51 @@ func _all_bodies_out() -> bool:
 		if bool(actor.get("alive")) and not bool(actor.get("downed")):
 			return false
 	return true
+
+
+# --- checkpoints (autosave) ------------------------------------------------
+#
+# Two moments in the campaign begin a new stretch, and each one writes the
+# warband's own save with a bookmark: the camp's six watchers down and the squad
+# on the road (the tutorial is over, the run starts), and the town square first
+# entered. A checkpoint is written once per id, so walking back and forth does
+# not hammer the disk; a wipe loads it, and the title's resume door opens on it.
+
+func _check_checkpoints() -> void:
+	if warband == null or controller == null or _wiped:
+		return
+	var actor = controller.active_body(1)
+	if actor == null or not is_instance_valid(actor) or not bool(actor.get("alive")):
+		return
+	# The opening is behind us: the six watchers are dead and the leaving has
+	# happened. The bookmark sits a little down the road, past the ambush's own
+	# posts, so a reload never drops the squad inside a fight it has just lost.
+	if camp != null and camp.tutorial_cleared() and warband.checkpoint_id() != "trail_start":
+		var at := Vector3(CampScript.GATE_POINT.x, 0.0, CampScript.GATE_POINT.z - 60.0)
+		_save_checkpoint("trail_start", "trail", TerrainScript.grounded(at),
+			"THE CAMP IS BEHIND YOU")
+		return
+	if town != null and town.in_square(actor) and warband.checkpoint_id() != "town":
+		_save_checkpoint("town", "town", actor.global_position, "HEARTHSTEAD")
+
+
+func _save_checkpoint(id: String, area: String, position: Vector3, label: String) -> void:
+	warband.save_checkpoint(id, area, position, label)
+	if hud != null:
+		hud.set_status("CHECKPOINT  /  %s" % label, 4.0)
+
+
+## The wipe's way back. Only a live campaign may change scene (the regression
+## harnesses keep `GameFlow.active` false), and a checkpoint whose whole squad is
+## dead is not one: the wood keeps what is left, exactly as it always did.
+func _reload_checkpoint() -> bool:
+	if flow == null or not flow.active or warband == null or not warband.has_checkpoint():
+		return false
+	if hud != null:
+		hud.set_status("The warband falls. It rises again at the last checkpoint.", WIPE_BEAT)
+	if squad != null:
+		squad.following = false
+	return bool(flow.retry_checkpoint())
 
 
 # --- interaction -----------------------------------------------------------
@@ -1255,13 +1361,21 @@ func _on_scene_requested(path: String) -> void:
 
 # --- startup ---------------------------------------------------------------
 
-## Where the campaign puts this body down: the camp for a fresh run, the town for
-## a resumed save or for the arena's return.
+## Where the campaign puts this body down: the camp for a fresh run, a saved
+## checkpoint for a resumed one, or the town end for the arena's return.
 func _wanted_start() -> String:
 	if flow == null:
 		return "camp"
 	var wanted := str(flow.world_start)
+	if wanted == "checkpoint":
+		return "checkpoint" if warband != null and warband.has_checkpoint() else "town"
 	return "town" if wanted == "town" else "camp"
+
+
+## True when the world is opening on a bookmark past the cages.
+func _resuming_trail() -> bool:
+	return start_area == "checkpoint" and warband != null \
+		and warband.has_checkpoint() and warband.checkpoint_area() != "town"
 
 
 func _announce() -> void:

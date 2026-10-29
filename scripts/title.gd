@@ -28,6 +28,9 @@ var host_world_button: Button
 var join_button: Button
 ## The possession campaign's door: a fresh warband, not a resume.
 var warband_button: Button
+## The checkpoint door: opens the world where the last autosave stands. Disabled
+## until a warband save exists, because there is nothing to resume before one.
+var warband_resume_button: Button
 var _join_layer: Control
 var _lobby_layer: Control
 var _lobby_button: Button
@@ -66,6 +69,7 @@ func _ready() -> void:
 	_build_crash_notice()
 	_build_settings()
 	_refresh_load_button()
+	_refresh_warband_resume()
 	print("IRONWOOD_MENU_READY")
 
 func _build() -> void:
@@ -128,6 +132,7 @@ func _build() -> void:
 	host_world_button = _plate(column, "HOST OPEN WORLD", "", _host_open_world)
 	join_button = _plate(column, "JOIN GAME", "", _open_join)
 	warband_button = _plate(column, "GHOST OF THE WARBAND", "", _enter_warband)
+	warband_resume_button = _plate(column, "RESUME WARBAND", "", _resume_warband)
 	_lobby_button = _plate(column, "WARBAND LOBBY", "", _toggle_lobby)
 
 	_status = _center_label(column, "", 12, LedgerThemeScript.TEAL)
@@ -199,6 +204,27 @@ func _enter_warband() -> void:
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow != null:
 		flow.start_campaign()
+
+
+## The checkpoint door. `GameFlow.enter_warband()` is the resume path: it loads
+## the save and opens the world on the bookmark the autosave left (the town for a
+## file written before checkpoints existed).
+func _resume_warband() -> void:
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow == null:
+		return
+	flow.enter_warband()
+
+
+## Gate the checkpoint door on a real save. A warband may pin its own path (the
+## regressions do), so the check reads the node, not the default constant.
+func _refresh_warband_resume() -> void:
+	if warband_resume_button == null:
+		return
+	var warband := get_node_or_null("/root/Warband")
+	var has_save := warband != null and FileAccess.file_exists(str(warband.save_path))
+	warband_resume_button.disabled = not has_save
+	warband_resume_button.tooltip_text = "" if has_save else "No warband checkpoint yet."
 
 func _build_join_layer() -> void:
 	_join_layer = Control.new()

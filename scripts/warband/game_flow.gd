@@ -23,6 +23,7 @@ const ARENA_RETURN := "res://scenes/town_hub.tscn"
 
 const WarbandSessionScript := preload("res://scripts/warband/warband_session.gd")
 const WarbandLobbyScript := preload("res://scripts/warband/warband_lobby.gd")
+const WarbandContracts := preload("res://scripts/warband/warband_contracts.gd")
 ## Where the warband's socket lives. The flow is the one node that survives a
 ## hand-off, so it owns the session: a session created by the title screen would
 ## be freed with the title screen, and every peer would drop at the exact moment
@@ -57,14 +58,15 @@ var _refused_bodies: Dictionary = {}
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
-## The title menu's one door: resume a saved warband in town, or start the cages.
+## The title menu's one door: resume a saved warband where its last checkpoint
+## stands, or start the cages.
 func enter_warband() -> void:
 	var warband := get_node_or_null("/root/Warband")
 	if warband == null:
 		return
 	active = true
 	if warband.load_state() and warband.roster.count() > 0:
-		world_start = "town"
+		world_start = "checkpoint" if warband.has_checkpoint() else "town"
 		goto(WORLD_SCENE)
 		return
 	warband.reset_state()
@@ -93,6 +95,45 @@ func enter_town() -> void:
 	active = true
 	world_start = "town"
 	goto(WORLD_SCENE)
+
+## Put the warband back on the ground its last checkpoint remembers, without
+## changing scene. The save is the snapshot: reloading it restores the roster,
+## gear and essence as they stood at the bookmark, then any body that was down
+## is woken (a checkpoint is where a squad gets its feet back - a body that had
+## already bled out stays dead, and is the only loss a reload does not undo).
+## The purse is deliberately untouched: `PlayerState` owns it and a reload must
+## never replay a payment.
+func restore_checkpoint() -> bool:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null or not warband.has_checkpoint():
+		return false
+	if not warband.load_state():
+		return false
+	if not warband.has_checkpoint():
+		# The file on disk was older than the marker this process held.
+		return false
+	if warband.checkpoint_standing() <= 0:
+		return false
+	_wake_the_warband(warband)
+	world_start = "checkpoint"
+	return true
+
+## The wipe's door: restore the bookmark and open the world on it.
+func retry_checkpoint() -> bool:
+	if not restore_checkpoint():
+		return false
+	goto(WORLD_SCENE)
+	return true
+
+## Every body the bookmark held that was merely down gets up at half health; the
+## dead stay in the dirt. Whatever a body was wearing is already on the record.
+func _wake_the_warband(warband) -> void:
+	for merc_id in warband.roster.ids():
+		if warband.roster.state_of(int(merc_id)) != WarbandContracts.HealthState.DOWNED:
+			continue
+		var pool: float = warband.roster.max_health_of(int(merc_id))
+		warband.roster.set_health(int(merc_id), maxf(warband.roster.health_of(int(merc_id)), pool * 0.5))
+		warband.roster.set_state(int(merc_id), WarbandContracts.HealthState.ALIVE)
 
 func launch_expedition() -> void:
 	active = true
