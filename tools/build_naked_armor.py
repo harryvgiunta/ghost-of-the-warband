@@ -3,12 +3,19 @@
 Usage:
     python tools/build_naked_armor.py
 
+The set's body is the CC0 Quaternius ``Superhero_Male_FullBody`` sculpt, so the
+Universal Base Characters archive must be unpacked into
+``.runtime/character-source`` first (assets/characters/LICENSE.txt records the
+URL and licence). The Blender stage imports the shipped Ranger GLB for the rig
+and the head, splits the source body into the four slot pieces, fits and
+authors the shirt and shorts, bakes their cloth maps and exports the GLB.
+
 Override the Blender executable with IRONWOOD_BLENDER when the installed path
 differs.  The Blender stage fails the process (``--python-exit-code 1``) when a
 piece is unweighted, claims a bone the ranger skeleton does not have, leaves an
-empty vertex group, breaks the triangle budget, crosses the face, or lets the
-skin surface through the cloth over it; this wrapper then re-raises with the
-same non-zero exit.
+empty vertex group, breaks the triangle budget, or crosses the face above the
+jaw (the neck passes through the head's opening by design); this wrapper then
+re-raises with the same non-zero exit.
 
 After a rebuild, reimport in Godot and check the kit on the rig:
 

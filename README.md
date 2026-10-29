@@ -841,8 +841,15 @@ To re-author the assets, install Blender 5.1+, download and unpack the listed fr
 ```powershell
 $Blender = 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe'
 & $Blender --background --python tools/prepare_character.py -- .runtime/character-source assets/characters/ironwood_ranger.glb
+python tools/build_naked_armor.py
 & $Godot --headless --editor --path . --import
 ```
+
+The naked set (the old shirt and shorts the warband starts in) is rebuilt by
+`tools/build_naked_armor.py` from the same CC0 Quaternius Universal Base
+Characters pack: its body is that pack's `Superhero_Male_FullBody` sculpt on the
+Ranger's own 65-bone skeleton, with a measured neck fit into the Ranger head, a
+slimmed ribcage, and shirt and shorts cut from the body's own surface.
 
 Keep the GLB, adjacent JSON/provenance, and `.glb.import` settings together. Import settings preserve authored clip names, use 60 Hz animation sampling, and keep textures embedded rather than duplicating extracted PNGs. The preparation workflow preserves the authored striking arm and body motion, corrects support-hand proportions and clothing clearance, and smooths the one-handed cut's timing. `tools/character_clearance.py` validates interpolated support-arm motion against the deformed outfit before export is accepted.
 

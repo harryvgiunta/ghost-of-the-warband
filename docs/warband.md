@@ -406,7 +406,17 @@ Short version of the latest tuning (all in the code, all covered by
   pieces, one per body region (`Armor_Naked_Chest`, `_Hands`, `_Legs`, `_Feet`),
   and the arms and feet bridge two slots each, so they stay on screen while
   *either* neighbour is bare: a hauberk with bare hands keeps its hands and mail
-  legs with bare feet keep their feet. `tools/prepare_naked_armor.py` builds it;
+  legs with bare feet keep their feet. `tools/prepare_naked_armor.py` builds it
+  from the CC0 Quaternius `Superhero_Male_FullBody` body on the Ranger's own
+  65-bone skeleton: the sculpt is split by dominant bone, its head is removed at
+  the neck (the Ranger head stays on screen outside every slot), the neck is
+  tapered into the head's measured opening and the ribcage is slimmed out of the
+  source's superhero barrel. The shirt and shorts are cut from the body's own
+  surface, relaxed and pushed outside it, so they are fitted by construction;
+  the skin keeps the source's painted 2048 maps and the cloth gets its own baked
+  linen (shirt) and charcoal twill (shorts) maps. The measured neck taper, torso
+  slim, garment extents and cloth-to-skin gaps are recorded in
+  `ironwood_naked.json`;
 - **the watcher swings the thing it is holding**: the warden's authored attack
   clips raise the arm and then *hold* it, so played straight the club sat over the
   head and the blow landed with no motion. `devil_mob_visual.gd` now lays its own

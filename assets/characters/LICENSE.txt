@@ -165,6 +165,60 @@ ground contact within 25 mm of the lowest ankle, multiplied by cycle duration.
 The in-place source has no root-distance track; this is an explicitly measured
 contact-velocity estimate, not a claimed source root-motion distance.
 
+IRONWOOD NAKED BODY — SOURCE AND PROVENANCE
+
+The body the warband wears when it wears nothing is a real anatomical sculpt,
+not a modelled tube. It is the male base body from the same CC0 pack that
+supplies the Ranger's head:
+
+  Quaternius — Universal Base Characters [Standard]
+  https://quaternius.com/packs/universalbasecharacters.html
+  https://quaternius.itch.io/universal-base-characters
+  Original archive: Universal Base Characters[Standard].zip
+  Original selected model:
+    Base Characters/Godot - UE/Superhero_Male_FullBody.gltf
+    Superhero_Male_FullBody.bin and the T_Superhero_Male_* base-colour,
+    normal and roughness maps
+  Licence: License_Standard.txt, CC0 1.0 Universal
+
+The source mesh carries the same 65-bone rest skeleton as the Ranger, with bone
+names, rest transforms, skin weights and UVs. It is used as the naked set's
+skin: split by dominant bone into the four slot pieces
+(Armor_Naked_Chest/_Hands/_Legs/_Feet), bound to the Ranger armature, and
+exported with the source's own 2048 base-colour, normal and roughness maps
+through its own UV layout. The ring, wrist and ankle seams of the four pieces
+share the body's own smoothed normals, so they read as one continuous body.
+The source's head, eyes and brows are not used here: the Ranger head stays on
+screen outside every armour slot, so the naked body ends in a neck.
+
+Original modifications, all authored reproducibly in Blender:
+  - the source head is removed at z = 1.565 m and the neck is tapered to 0.87
+    of its radius so it enters the Ranger head's opening (measured against the
+    head's own lower shell; the cut ring clears it by ~9-18 mm);
+  - the ribcage is slimmed by up to 12% in depth and 3.5% in width with a
+    smooth height-weighted falloff centred at z = 1.30 m, which removes the
+    superhero barrel chest and restores human chest/waist proportion without
+    touching the arms, neck or waist;
+  - the shirt and shorts are cut from the body's own surface (the same faces),
+    relaxed, pushed outside the skin by 10-24 mm, given outward-only drape
+    folds, finished with extruded hem/cuff/waist bands and solidified to 3.5 mm
+    (shirt) and 4.0 mm (shorts);
+  - the cloth maps are rasterised per texel at bind-space positions: a linen
+    plain weave for the shirt (4.2 mm pitch) with a hem stitch, button placket
+    and ribbed crew collar, and a charcoal twill for the shorts (5.4 mm pitch)
+    with waistband, leg hems, side seam and fly, plus slubs, dye drift and
+    grime that collects at the hems;
+  - the skin keeps the source's painted pores, knuckle creases and nails; no
+    colour was invented for it.
+
+The set is 17,082 triangles, four pieces, three materials (Naked_Skin,
+Naked_Shirt, Naked_Shorts), nine embedded maps and the Ranger's 65 bones. The
+JSON records the measured neck taper, torso slim, garment extents and gaps.
+
+Reproduce with (after unpacking the pack into .runtime/character-source):
+  python tools/build_naked_armor.py
+  Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
+
 IRONWOOD ARMOR — ASSET LICENSE AND PROVENANCE
 
 The swappable armor pieces are original procedural work authored for this

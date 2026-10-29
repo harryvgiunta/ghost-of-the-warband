@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bbow6i8k0syq0"
-path="res://.godot/imported/ironwood_naked_Naked_Cloth_roughness.png-f852a198561a68f501b97043e5b52aa5.ctex"
+uid="uid://dwjiodcsylv8h"
+path="res://.godot/imported/ironwood_naked_Naked_Shirt_albedo.png-0c655f3942bd4345bee5b8e4532c3f7d.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "d3297fff62eac475bde9db32e0246ba7"
+"md5": "9bb62537cfa440d79105b0655a4753cf"
 }
 
 [deps]
 
-source_file="res://assets/characters/armor/ironwood_naked_Naked_Cloth_roughness.png"
-dest_files=["res://.godot/imported/ironwood_naked_Naked_Cloth_roughness.png-f852a198561a68f501b97043e5b52aa5.ctex"]
+source_file="res://assets/characters/armor/ironwood_naked_Naked_Shirt_albedo.png"
+dest_files=["res://.godot/imported/ironwood_naked_Naked_Shirt_albedo.png-0c655f3942bd4345bee5b8e4532c3f7d.ctex"]
 
 [params]
 

@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bhshoepixckdc"
-path="res://.godot/imported/ironwood_naked_Naked_Cloth_albedo.png-142be09e3a30693a4444a6b09393da40.ctex"
+uid="uid://d1qres4yxdu36"
+path="res://.godot/imported/ironwood_naked_T_Superhero_Male_Dark.png-a442b6d046e52e98cb4ae28e84c4c157.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "a1673799122cd2f6bded22580d68c781"
+"md5": "a510817b2732d2de6bacce0e9096e4ce"
 }
 
 [deps]
 
-source_file="res://assets/characters/armor/ironwood_naked_Naked_Cloth_albedo.png"
-dest_files=["res://.godot/imported/ironwood_naked_Naked_Cloth_albedo.png-142be09e3a30693a4444a6b09393da40.ctex"]
+source_file="res://assets/characters/armor/ironwood_naked_T_Superhero_Male_Dark.png"
+dest_files=["res://.godot/imported/ironwood_naked_T_Superhero_Male_Dark.png-a442b6d046e52e98cb4ae28e84c4c157.ctex"]
 
 [params]
 
