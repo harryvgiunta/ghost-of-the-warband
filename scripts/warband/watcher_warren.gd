@@ -6,9 +6,11 @@ extends Node3D
 ## The road's cult holds the lane, the camp's watchers hold the opening, and
 ## neither is a place the warband goes to on purpose. The warren is: three camps
 ## of wardens standing off the way, each a fireless patch of totems and skull
-## stakes with seven antlered bodies in it, 18-40 m out from the lane and clear of
-## the square's wall by a wall and a half. A squad that leaves the road finds them,
-## and a squad that does not is never pulled into them.
+## stakes with seven antlered bodies in it, 78-96 m out from the lane - past
+## twice a warden's 60 m sight, so a body walking the road is never pulled into a
+## fight it did not go looking for - and clear of the square's wall by a wall and
+## a half. What makes them findable is the map's markers and the dressing itself:
+## a place a body can see from the lane and walk to.
 ##
 ## A camp is a real camp because the dressing is real: `VillageKit` totems and
 ## skull stakes on their own collision, so the place reads as somewhere people
@@ -29,13 +31,16 @@ const MobWander = preload("res://scripts/mob_wander.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 ## Three camps, each a lane fraction and a side. The fractions are the last third
-## of the walk: a warband on its way to town meets the first camp through the
-## trees before the gate, and the last stands in the shadow of the wall without
-## ever being inside it.
+## of the walk, so a warband on its way to town passes all three before the gate;
+## the offsets are deep wood, 78-96 m out. They used to stand 18-40 m off the
+## lane, which is inside a warden's sight: seven bodies a camp came off their
+## marks the moment the squad walked past and met it in the middle of the road.
+## A hunting ground the road cannot see is the only hunting ground a warband can
+## choose to walk into.
 const CAMPS := [
-	{"fraction": 0.72, "side": 1.0, "offset": 24.0, "yaw": 0.4, "seed": 611},
-	{"fraction": 0.80, "side": -1.0, "offset": 31.0, "yaw": 2.1, "seed": 617},
-	{"fraction": 0.90, "side": 1.0, "offset": 26.0, "yaw": 4.6, "seed": 619},
+	{"fraction": 0.72, "side": 1.0, "offset": 78.0, "yaw": 0.4, "seed": 611},
+	{"fraction": 0.80, "side": -1.0, "offset": 96.0, "yaw": 2.1, "seed": 617},
+	{"fraction": 0.90, "side": 1.0, "offset": 86.0, "yaw": 4.6, "seed": 619},
 ]
 ## Seven watchers a camp. Three camps of seven is one order's worth of bodies and
 ## then some: twenty is the quartermaster's count, and a hunting ground that
