@@ -188,6 +188,34 @@ func brand_of(item_id: String) -> Dictionary:
 	var payload: Variant = brands.get(item_id, {})
 	return payload if payload is Dictionary else {}
 
+## Bind a piece with a reagent instead of with essence.
+##
+## The ichor bench pays for a sigil with a warden's vial, not with the wallet, so
+## this is `brand()` with the essence step removed and nothing else changed: the
+## same ability table picks the sigil, the same `brands` ledger stores it, and
+## the same `BrandedRunner`/`branded_hud` read it back. An already-branded piece
+## is refused rather than rerolled - rerolling is the altar's business, and it
+## costs essence.
+func bind(item_id: String, tier: int) -> Dictionary:
+	if not brandable_item(item_id):
+		return {"ok": false, "message": "Only steel, bows, staves, skulls and tomes take a sigil.",
+			"ability": "", "tier": tier, "reroll": false}
+	if not Catalog.is_tier(tier):
+		return {"ok": false, "message": "Choose an essence tier.", "ability": "", "tier": tier,
+			"reroll": false}
+	if is_branded(item_id):
+		return {"ok": false, "message": "That piece already carries a sigil. The altar rerolls it.",
+			"ability": "", "tier": tier, "reroll": false}
+	var ability := Branded.for_subtype(Contracts.weapon_subtype(State.ITEMS[item_id]))
+	if ability.is_empty():
+		return {"ok": false, "message": "That piece cannot hold a sigil.", "ability": "", "tier": tier,
+			"reroll": false}
+	brands[item_id] = {"tier": tier, "ability": ability, "rerolls": 0}
+	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
+	return {"ok": true, "ability": ability, "tier": tier, "reroll": false,
+		"message": "%s takes %s (%s)." % [item_name, Branded.ability_name(ability),
+			Catalog.tier_name(tier)]}
+
 func is_branded(item_id: String) -> bool:
 	return brands.has(item_id)
 
