@@ -1,14 +1,14 @@
 extends RefCounted
 ## The town square's dressing: the market that was built around the services.
 ##
-## `town_hub.gd` builds the square's bones - the ground and its flagstones, four
-## walls, the fire, the stash chest, the recruiter's and the keeper's desks, the
-## altar, the signpost and the gate - and every one of them stands in the open.
-## This module is the settlement around them: a booth over each counter with the
-## goods hanging off its front bar, a hide awning over the collective stash, a
-## fingerpost that actually names where each road goes, the ring of stones and
-## benches around the fire, and the four lanterns that pool light at the square's
-## corners.
+## `town_hub.gd` builds the settlement's bones - the ground and its flagstones, the
+## stake ring and its gate, the halls and dwellings, the fire, the stash chest, the
+## recruiter's and the keeper's desks, the altar, the signpost and the expedition
+## gate - and every one of them stands in the open. This module is the market
+## around them: a booth over each keeper's counter with the goods hanging off its
+## front bar, a hide awning over the collective stash, a fingerpost that actually
+## names where each road goes, the ring of stones and benches around the fire, and
+## the four lanterns that pool light in the alleys between the halls.
 ##
 ## Same three rules as the camp (`camp_dressing.gd`):
 ##
@@ -16,24 +16,25 @@ extends RefCounted
 ##    stands on a spawn ring, a service point or the gate. The root carries
 ##    `props` (name, position, radius, `blocks`, zone); `blocks` is true only for
 ##    something a body would stand in, so the regression can hold every spawn and
-##    every `G` point clear.
+##    every `G` point clear. Anything that needs to stop a body - a hall, a stake,
+##    a totem - is built by the scene on the town's one solid body instead.
 ## 2. **The village's palette.** Merged `MeshInstance3D`s, one surface per
 ##    material, materials from `VillageKit.materials()` - plus `Geo.material()`
 ##    for the iron, rope and lit-glass the kits do not carry.
 ## 3. **The scene owns the layout.** Counter and stash positions are read off the
 ##    nodes `town_hub.gd` already placed, so a service that moves takes its
-##    dressing with it. Only the fingerpost and the lantern corners are declared
-##    here, and `WALL_RADIUS` mirrors the scene's own constant.
+##    dressing with it. Only the fingerpost and the lanterns are declared here,
+##    and `WALL_RADIUS` mirrors the scene's own constant.
 
 const Geo = preload("res://scripts/geo.gd")
 
-## Mirrors `town_hub.gd::WALL_RADIUS`: the walkable square is this half-side, and
-## the regression compares the two so a wall move fails loudly.
-const WALL_RADIUS := 18.0
+## Mirrors `town_hub.gd::WALL_RADIUS`: the walkable settlement is inside this
+## radius, and the regression compares the two so a wall move fails loudly.
+const WALL_RADIUS := 22.0
 
-## Where the fingerpost stands: the plaza's north-west edge, clear of the stash
-## ring, the altar ring and the muster ring.
-const SIGN_POST := Vector3(-12.5, 0.0, 8.0)
+## Where the fingerpost stands: the east side of the road mouth, where a body
+## coming in through the gate reads it, clear of the lane and of every hall.
+const SIGN_POST := Vector3(7.5, 0.0, 10.5)
 
 ## The three boards, each pointing at the thing it names: a destination and the
 ## point in this square that it really is. `SIGN_TARGETS` is what the yaw is
@@ -44,11 +45,12 @@ const SIGN_BOARDS := [
 	{"text": "DEAD FIELD", "target": Vector3(8.0, 0.0, -6.0)},
 ]
 
-## Lantern corners: the four diagonals of the square, each arm reaching in
-## toward the fire.
+## The lanterns: one at the mouth of each alley the halls leave, each arm
+## reaching in toward the fire. A round settlement has no corners to light, so
+## these are the passages a body actually walks at dusk.
 const LANTERN_POSTS := [
-	Vector3(11.5, 0.0, 11.5), Vector3(-11.5, 0.0, 11.5),
-	Vector3(-11.5, 0.0, -11.5), Vector3(11.5, 0.0, -11.5),
+	Vector3(-10.25, 0.0, 8.0), Vector3(11.5, 0.0, 13.0),
+	Vector3(-12.5, 0.0, -11.25), Vector3(12.75, 0.0, -16.0),
 ]
 
 ## Bench angles around the fire, in degrees. They sit in the one free arc of the
@@ -379,7 +381,7 @@ static func _bench(m, mats: Dictionary, centre: Vector3, angle: float, index: in
 
 # --- the lanterns ----------------------------------------------------------
 
-## Four lanterns on the square's diagonals: a post, an arm reaching in over the
+## Four lanterns at the mouths of the alleys: a post, an arm reaching in over the
 ## square, an iron lantern with four lit panes, and the light pool it casts.
 static func _build_lanterns(root: Root, mats: Dictionary, own: Dictionary) -> void:
 	var holder := _group(root, "LanternPools")
