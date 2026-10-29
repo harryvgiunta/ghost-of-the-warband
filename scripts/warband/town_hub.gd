@@ -1,26 +1,37 @@
 extends Node3D
-## The persistent town hub: a dusk square where the warband musters between
-## expeditions.
+## The campaign's first town: a stockade settlement on the north road.
 ##
-## It is the loop's home end. The five sworn mercenaries stand around the fire as
-## real `ArenaActor` bodies under the real `PossessionController`, the local soul
-## starts inside the first of them, and every service the loop needs is a node
-## you can walk up to: the shared stash chest (the paperdoll over the collective
-## pool), the `SacrificialAltar`, the Gold recruiter's desk (the warband screen's
-## recruiter board) and the `ExpeditionGate` that marks a battle line and asks
-## the flow owner for the arena. The market ring around them carries the three
-## keeper stalls (Orla, Brann, Vey), each a counter `G` opens as a ledger board
-## of that keeper's stock and the shared stash. The same objects are used by the
-## admin arena, so nothing here re-implements a service; this scene only places
-## them and resolves which one a standing body is next to (`interact_at`).
+## It is the loop's home end. A leaning stake ring stands on the field with one
+## gap cut for the road, an antler gate in the gap, and the settlement behind it:
+## stick longhouses with their backs to the stakes, round wattle dwellings, an
+## open stall, the wardens' offering ground, and a fire in the middle of it all.
+## The five sworn mercenaries stand around that fire as real `ArenaActor` bodies
+## under the real `PossessionController`, the local soul starts inside the first
+## of them, and every service the loop needs is a node you can walk up to: the
+## shared stash chest, the `SacrificialAltar`, the Gold recruiter's booth, the
+## quartermaster's shop, the ichor bench at his side, the three keepers' counters
+## (Orla, Brann, Vey) and the `ExpeditionGate` that marks a battle line and asks
+## the flow owner for the arena.
 ##
-## There is no combat and no second damage multiplier: unpossessed bodies are
-## fixtures (`set_bot(false)`), so the square never brawls on its own.
+## Behind every counter stands a keeper - an armoured humanoid, one of the five
+## who run this place - and over the head of whichever of them has something to
+## say hangs a gold "TALK TO HIM" arrow (`QuestGiver.marker_service()` decides,
+## this scene only moves the arrow). Three archers of the watch hold the gate and
+## shoot what comes up the road at it.
+##
+## There is no combat in the square itself: unpossessed bodies are fixtures
+## (`set_bot(false)`), so it never brawls on its own. The watch is the one armed
+## thing here, and it only ever aims outward, at the world's own hostiles.
+##
+## The same objects are used by the admin arena, so nothing here re-implements a
+## service; this scene only places them and resolves which one a standing body is
+## next to (`interact_at`).
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
 const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
@@ -34,18 +45,42 @@ const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
+const QuestGiverScript = preload("res://scripts/warband/quest_giver.gd")
+const MarkerScript = preload("res://scripts/warband/quest_marker.gd")
+const BenchScript = preload("res://scripts/warband/ichor_bench.gd")
+const FolkScript = preload("res://scripts/warband/town_folk.gd")
+const GuardScript = preload("res://scripts/warband/town_guard.gd")
+const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 
-## How close a body must stand to the chest, the desk and the altar. The gate
+## How close a body must stand to the chest, the desk and the bench. The gate
 ## keeps its own (larger) `open_radius`.
 const SERVICE_REACH := 3.0
-const WALL_RADIUS := 18.0
+## The town is a ring now, not a room: this is the stake wall a body stands
+## inside, and the dressing mirrors it so the two can never drift apart.
+const WALL_RADIUS := 22.0
 ## The gap in the north wall the trail comes in through.
 const NORTH_GATE_HALF := 5.0
+## The stakes' lean, the gate's height and the seed the ring is rebuilt from.
+const GATE_HEIGHT := 4.6
+const GATE_SEED := 19
+const WALL_SEED := 7719
+## The angles the stake ring is cut at: the road in on the +Z axis, and two
+## shoulders either side of it so the whole gate frame stands in the clear rather
+## than among the last stakes.
+const GATE_GAPS := [-0.05, 0.0, 0.05]
 ## How far a body may stray from the fire in the standalone square.
-const BODY_BOUNDS := 16.0
+const BODY_BOUNDS := 20.0
 ## How deep the wood the settlement is cut into runs outside its walls.
 const WOOD_DEPTH := 20.0
 const TOWN_WOOD_SEED := 7717
+## How often the gold arrow re-reads who has business. The ledger moves without a
+## signal when the world counts a kill, so a slow clock is the only honest way to
+## ask again.
+const MARKER_POLL := 0.35
+## Where the arrow hangs: over the name, high enough to clear the tallest rig.
+const TALK_ARROW_HEIGHT := 2.42
+## The campaign's ichor order, by the id the ledger knows it by.
+const ICHOR_ORDER := "bind_the_ichor"
 
 ## The square's standing services, arranged so no two 3 m rings overlap: walking
 ## the square always names exactly one thing.
@@ -58,8 +93,8 @@ const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 
 ## The three keepers' counters, out on the market ring. Each keeps its own 3 m
 ## ring clear of every other service (the closest pair is Orla and the stash at
-## 6.3 m), and all three stand inside the square's 16 m walkable bound so a body
-## can always reach the stall it wants: Orla's bow rack west, Brann's anvil east,
+## 6.3 m), and all three stand inside the square's walkable bound so a body can
+## always reach the stall it wants: Orla's bow rack west, Brann's anvil east,
 ## Vey's armour table on the gate's side.
 const VENDOR_ORLA_POINT := Vector3(-14.0, 0.0, 2.0)
 const VENDOR_BRANN_POINT := Vector3(14.0, 0.0, 0.0)
@@ -76,6 +111,60 @@ const KEEPER_VOICES := {
 	"vendor_vey": "vey",
 	"quartermaster": "quartermaster",
 }
+
+## The settlement inside the stakes: five timber halls, two round dwellings and
+## an open stall, every one of them with its doorway to the fire and its back to
+## the wall. The positions are solved against the service rings, the muster posts
+## and the gate lane - the regression holds them to it - and the seeds pick a
+## side-clutter variant that stays inside each hall's own plot.
+const BUILDINGS := [
+	{"name": "OrlaStore", "kind": "keeper", "at": Vector3(-13.60, 0.0, 11.01),
+		"seed": 1301},
+	{"name": "BrannSmithy", "kind": "keeper", "at": Vector3(14.66, 0.0, 8.81),
+		"seed": 1307},
+	{"name": "VeyArmoury", "kind": "keeper", "at": Vector3(13.67, 0.0, -9.93),
+		"seed": 1313},
+	{"name": "RecruiterHall", "kind": "keeper", "at": Vector3(-15.37, 0.0, -6.53),
+		"seed": 1319},
+	{"name": "QuartermasterHall", "kind": "keeper", "at": Vector3(-8.65, 0.0, -14.98),
+		"seed": 1331},
+	{"name": "NorthDwelling", "kind": "wattle", "at": Vector3(-8.60, 0.0, 16.20),
+		"seed": 1901},
+	{"name": "SouthDwelling", "kind": "wattle", "at": Vector3(0.64, 0.0, -18.29),
+		"seed": 1907},
+	{"name": "MarketStall", "kind": "frame", "at": Vector3(8.10, 0.0, 15.20),
+		"seed": 1913},
+]
+
+## The wardens' own furniture, in the plots the halls left free: two totems
+## framing the road in, the town's woodpile and drying rack behind the halls, a
+## bound effigy on the wall's far side, and the offering ground in the north-west
+## pocket between the stash and the gate lane.
+const VILLAGE_PROPS := [
+	{"name": "GateTotemWest", "kind": "totem", "at": Vector3(-5.0, 0.0, 18.75),
+		"seed": 4301, "height": 4.4},
+	{"name": "GateTotemEast", "kind": "totem", "at": Vector3(5.25, 0.0, 18.5),
+		"seed": 4303, "height": 4.0},
+	{"name": "Woodpile", "kind": "woodpile", "at": Vector3(-14.75, 0.0, -13.0),
+		"seed": 4307},
+	{"name": "DryingRack", "kind": "rack", "at": Vector3(-17.0, 0.0, 6.0),
+		"seed": 4311},
+	{"name": "BoundEffigy", "kind": "effigy", "at": Vector3(11.0, 0.0, -14.75),
+		"seed": 4313},
+	{"name": "OfferingGround", "kind": "offering", "at": Vector3(-5.5, 0.0, 9.75),
+		"seed": 4317, "yaw": 30.0},
+]
+
+## The watch's posts: two archers at the shoulders of the gate - clear of the
+## lane a body walks - and a third standing back inside the west post. All three
+## have the gap in the stakes in front of them, because that is what a post at
+## the gate is for. The gate is the only place a hostile can reach the wall, so
+## it is the only post.
+const GUARD_POSTS := [
+	{"at": Vector3(-4.6, 0.0, 20.6), "yaw": PI},
+	{"at": Vector3(4.6, 0.0, 20.6), "yaw": PI},
+	{"at": Vector3(-4.2, 0.0, 16.2), "yaw": PI},
+]
 
 ## Muster ring around the fire: one post per body the round can field.
 const SPAWN_POSTS := [
@@ -111,10 +200,10 @@ signal scene_requested(path: String)
 ## Set before the node enters the tree.
 ##
 ## Embedded, the town is the far end of one continuous world: the world owns the
-## bodies, the camera, the HUD and the night, the town's north wall is the gate
-## the trail comes in through, and the square is cut into the same wood the
-## clearing stands in. Alone, this is the square as its own scene - the preview
-## the art and quartermaster regressions load.
+## bodies, the camera, the HUD, the night and the hostiles, the town's north wall
+## is the gate the trail comes in through, and the square is cut into the same
+## wood the clearing stands in. Alone, this is the square as its own scene - the
+## preview the art and quartermaster regressions load.
 var host: Node3D = null
 
 var warband: WarbandState
@@ -134,6 +223,21 @@ var vendor_brann: Node3D
 var vendor_vey: Node3D
 var vendor_menu
 var signpost: Node3D
+## The ichor bench's furniture. The slab is the service point a body stands at;
+## the panel it opens is `bench_panel`.
+var ichor_bench: Node3D
+var bench_panel
+## The keeper `interact_at` resolves by service id (`town_folk.gd`).
+var keepers: Dictionary = {}
+## The keepers' mouths: the hire lesson, the campaign's orders and the choice of
+## which keeper wears the gold arrow.
+var quest_giver
+## The one gold arrow in the town, riding whichever keeper has business.
+var quest_marker
+## The watch at the gate (`town_guard.gd`).
+var guards: Array = []
+## The stake count the ring came out at, for the settlement's own readout.
+var palisade_stakes := 0
 ## The treeline around the square: `{trees, bushes, wall}` from the wood planner.
 var wood: Dictionary = {}
 var fire_light: OmniLight3D
@@ -145,6 +249,12 @@ var _wood: StandardMaterial3D
 var _earth: StandardMaterial3D
 var _ash: StandardMaterial3D
 var _ember: StandardMaterial3D
+var _iron: StandardMaterial3D
+## Every wall, floor and hall collider in the town, on one body: the village kit
+## registers each shape against the caller's own solid, so collision keeps one
+## owner per scene.
+var _solids: StaticBody3D
+var _marker_clock := 0.0
 
 func _ready() -> void:
 	warband = get_node_or_null("/root/Warband") as WarbandState
@@ -162,6 +272,7 @@ func _ready() -> void:
 	_build_wood()
 	if host == null:
 		_build_ui()
+		_build_quest_layer(null)
 		controller.possession_changed.connect(_on_possession_changed)
 		controller.transfer_refused.connect(_on_transfer_refused)
 		controller.possession_released.connect(_on_possession_released)
@@ -170,7 +281,9 @@ func _ready() -> void:
 		var flow := get_node_or_null("/root/GameFlow")
 		if flow != null:
 			flow.bind(self)
-		print("TOWN_HUB_READY bodies=%d gold=%d" % [bodies.size(), warband.gold()])
+		print("TOWN_HUB_READY bodies=%d gold=%d stakes=%d buildings=%d keepers=%d guards=%d"
+			% [bodies.size(), warband.gold(), palisade_stakes, BUILDINGS.size(),
+				keepers.size(), guards.size()])
 
 
 ## Adopt the pieces the world owns. The world calls this once, after the town is
@@ -182,6 +295,11 @@ func embed(world: Node3D) -> void:
 	hud = world.hud
 	screen = world.screen
 	paperdoll = world.paperdoll
+	# The panels were built before the world handed its HUD over, so the bench
+	# takes the world's HUD now: a bind has to write the one status line.
+	if bench_panel != null:
+		bench_panel.configure(warband, hud)
+	_build_quest_layer(world.get("card"))
 	if gate != null:
 		gate.setup(warband, controller)
 
@@ -219,12 +337,17 @@ func _physics_process(delta: float) -> void:
 	_update_prompt()
 	_update_hint()
 
-func _process(_delta: float) -> void:
-	if host != null:
-		return
-	var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
-	if Input.mouse_mode != wanted:
-		Input.mouse_mode = wanted
+func _process(delta: float) -> void:
+	if host == null:
+		var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
+		if Input.mouse_mode != wanted:
+			Input.mouse_mode = wanted
+	# The arrow is asked again on a slow clock as well as on every talk and every
+	# ledger change: the world counts its kills without telling anyone.
+	_marker_clock += delta
+	if _marker_clock >= MARKER_POLL:
+		_marker_clock = 0.0
+		_refresh_marker()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if host != null:
@@ -264,6 +387,7 @@ func _build_materials() -> void:
 	_wood = Geo.material(Color(0.20, 0.14, 0.09), 0.0, 0.85)
 	_earth = Geo.material(Color(0.12, 0.105, 0.09), 0.0, 0.97)
 	_ash = Geo.material(Color(0.09, 0.08, 0.075), 0.0, 1.0)
+	_iron = Geo.material(Color(0.28, 0.27, 0.26), 0.62, 0.5)
 	_ember = StandardMaterial3D.new()
 	_ember.albedo_color = Color(0.98, 0.62, 0.22)
 	_ember.emission_enabled = true
@@ -297,8 +421,12 @@ func _build_environment() -> void:
 
 func _build_square() -> void:
 	_build_ground()
-	_build_walls()
+	_build_solids()
+	_build_wall()
+	_build_buildings()
+	_build_village_props()
 	_build_campfire()
+	_build_guards()
 
 func _build_ground() -> void:
 	# The world scene owns one ground for the whole map - a heightfield with this
@@ -308,77 +436,148 @@ func _build_ground() -> void:
 		var ground := StaticBody3D.new()
 		ground.name = "Ground"
 		add_child(ground)
+		# A town standing alone also owns the road outside its own gate: the
+		# watch needs ground to shoot at, and the wood is planted out to the same
+		# depth the world's treeline runs.
+		var span := (WALL_RADIUS + WOOD_DEPTH) * 2.0
 		var slab := BoxShape3D.new()
-		slab.size = Vector3(WALL_RADIUS * 2.4, 0.6, WALL_RADIUS * 2.4)
+		slab.size = Vector3(span, 0.6, span)
 		var shape := CollisionShape3D.new()
 		shape.shape = slab
 		shape.position = Vector3(0.0, -0.3, 0.0)
 		ground.add_child(shape)
 		Geo.box(ground, slab.size, Vector3(0.0, -0.3, 0.0), _earth)
 	# Worn flagstones: the middle of the square is paved, the ring stays dirt.
-	Geo.box(self, Vector3(23.0, 0.08, 19.0), Vector3(0.0, 0.02, 0.0), _stone)
+	Geo.box(self, Vector3(30.0, 0.08, 26.0), Vector3(0.0, 0.02, 0.0), _stone)
 
-## The square's edge. Three sides are the settlement's wall; the fourth - the
-## north side, the one the trail comes in through - is two stubs and the gate
-## frame a body walks between. That is the whole difference between the town as a
-## room and the town as the far end of the wood.
-func _build_walls() -> void:
-	var span := WALL_RADIUS * 2.0 + 1.4
-	_wall(Vector3(0.0, 0.0, -WALL_RADIUS), span, 0.0)
-	_wall(Vector3(-WALL_RADIUS, 0.0, 0.0), span, PI * 0.5)
-	_wall(Vector3(WALL_RADIUS, 0.0, 0.0), span, PI * 0.5)
-	var stub := (WALL_RADIUS + 0.7 - NORTH_GATE_HALF)
-	_wall(Vector3(-(NORTH_GATE_HALF + stub * 0.5), 0.0, WALL_RADIUS), stub, 0.0)
-	_wall(Vector3(NORTH_GATE_HALF + stub * 0.5, 0.0, WALL_RADIUS), stub, 0.0)
+## The one solid body every wall, hall and prop in the town registers its shapes
+## against. Built before anything that stands on it.
+func _build_solids() -> void:
+	_solids = StaticBody3D.new()
+	_solids.name = "TownSolids"
+	_solids.collision_layer = 1
+	_solids.collision_mask = 0
+	add_child(_solids)
+
+## The town is a stockade: a full ring of leaning stakes with one gap cut where
+## the road comes in, and the gate hung in it. It is the whole difference between
+## a square and a settlement, and it keeps the world's own field under it rather
+## than a second flat floor.
+func _build_wall() -> void:
+	var ring := Node3D.new()
+	ring.name = "Palisade"
+	add_child(ring)
+	palisade_stakes = VillageKit.palisade(ring, VillageKit.materials(), _solids, Vector2.ZERO,
+		WALL_RADIUS, GATE_GAPS, _ground_at, WALL_SEED)
 	_build_north_gate()
 
-func _wall(at: Vector3, span: float, yaw: float) -> void:
-	var side := Node3D.new()
-	side.name = "Wall%d" % get_child_count()
-	side.position = at
-	side.rotation.y = yaw
-	add_child(side)
-	var z := 0.0
-	Geo.box(side, Vector3(span, 1.8, 0.7), Vector3(0.0, 0.9, z), _stone)
-	Geo.box(side, Vector3(span, 0.22, 1.0), Vector3(0.0, 1.9, z), _wood)
-	for step in int(span / 6.0) + 1:
-		var x := -span * 0.5 + 6.0 * float(step)
-		if absf(x) > span * 0.5:
-			continue
-		Geo.cylinder(side, 0.22, 0.18, 3.4, Vector3(x, 1.7, z), _wood, 8)
-	var body := StaticBody3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(span, 3.4, 0.7)
-	var shape := CollisionShape3D.new()
-	shape.shape = box
-	shape.position = Vector3(0.0, 1.7, z)
-	body.add_child(shape)
-	side.add_child(body)
+
+## The field under a town-local point. The world pads this square flat, but the
+## wall stands on its own ground, so the ring follows a slope instead of floating
+## over one; a town standing alone has nothing but y = 0.
+func _ground_at(x: float, z: float) -> Vector3:
+	if host == null:
+		return Vector3(x, 0.0, z)
+	return TerrainScript.grounded(global_position + Vector3(x, 0.0, z)) - global_position
+
 
 ## The gate the trail comes in through: the village kit's own frame, so the town
-## reads as a settlement cut into the same world as the clearing it began in.
+## reads as a settlement cut into the same world as the clearing it began in. Two
+## braziers hang on its posts - the one warm light in a gate that has to be found
+## from the road.
 func _build_north_gate() -> void:
 	var gate := Node3D.new()
 	gate.name = "NorthGate"
 	gate.position = Vector3(0.0, 0.0, WALL_RADIUS)
 	add_child(gate)
-	var body := StaticBody3D.new()
-	body.name = "GateCollision"
-	body.collision_layer = 1
-	body.collision_mask = 0
-	gate.add_child(body)
-	VillageKit.gate(gate, VillageKit.materials(), body, NORTH_GATE_HALF, 4.6, 19)
+	VillageKit.gate(gate, VillageKit.materials(), _solids, NORTH_GATE_HALF, GATE_HEIGHT, GATE_SEED)
 	var label := Label3D.new()
 	label.name = "GateSign"
 	label.text = "THE WOOD ROAD"
 	label.font_size = 56
 	label.pixel_size = 0.006
 	label.modulate = Color(0.96, 0.82, 0.56)
-	label.position = Vector3(0.0, 4.9, 0.2)
+	label.position = Vector3(0.0, GATE_HEIGHT + 0.3, 0.2)
 	gate.add_child(label)
+	for side in [-1.0, 1.0]:
+		# An iron bowl lashed to the post, with the fire of the gate in it.
+		Geo.cylinder(gate, 0.24, 0.15, 0.20,
+			Vector3(side * (NORTH_GATE_HALF + 0.02), 3.42, 0.0), _iron, 10)
+		Geo.cylinder(gate, 0.17, 0.17, 0.05,
+			Vector3(side * (NORTH_GATE_HALF + 0.02), 3.53, 0.0), _ember, 10)
+		var light := _lamp(gate, Vector3(side * (NORTH_GATE_HALF + 0.02), 3.86, 0.0),
+			Color(1.0, 0.66, 0.32), 2.4, 10.0)
+		light.name = "GateBrazier%d" % (1 if side < 0.0 else 2)
+
+
+## The settlement behind the stakes: the halls, the round dwellings and the one
+## open stall, each with its doorway to the fire.
+func _build_buildings() -> void:
+	var mats: Dictionary = VillageKit.materials()
+	for row in BUILDINGS:
+		var at: Vector3 = row["at"]
+		var node := Node3D.new()
+		node.name = str(row["name"])
+		node.position = at
+		# A longhouse's door is on its local -Z and a round hut's on its local
+		# +Z, so each one is turned to put that face on the fire and its back on
+		# the stakes.
+		node.rotation.y = atan2(-at.x, -at.z) if str(row["kind"]) == "wattle" \
+			else atan2(at.x, at.z)
+		add_child(node)
+		match str(row["kind"]):
+			"keeper":
+				VillageKit.keeper_hut(node, mats, _solids, {
+					"seed": int(row["seed"]),
+					"name": "%sShell" % str(row["name"]),
+					"pitch": 0.52,
+				})
+			"wattle":
+				VillageKit.wattle_hut(node, mats, _solids, 2.2, 2.35, int(row["seed"]))
+			"frame":
+				VillageKit.trader_frame(node, mats, _solids, int(row["seed"]))
+
+
+## The wardens' own furniture, and the small litter of a place people live in.
+## The litter is presentation only - one merged mesh, no collider - so it may lie
+## under a counter's ring without standing in it.
+func _build_village_props() -> void:
+	var mats: Dictionary = VillageKit.materials()
+	for row in VILLAGE_PROPS:
+		var at: Vector3 = row["at"]
+		var node := Node3D.new()
+		node.name = str(row["name"])
+		node.position = at
+		# Every prop faces the fire unless its row names an angle of its own.
+		node.rotation.y = deg_to_rad(float(row["yaw"])) if row.has("yaw") \
+			else atan2(at.x, at.z)
+		add_child(node)
+		match str(row["kind"]):
+			"totem":
+				VillageKit.totem(node, mats, _solids, float(row.get("height", 4.4)),
+					int(row["seed"]))
+			"woodpile":
+				VillageKit.woodpile(node, mats, _solids, int(row["seed"]))
+			"rack":
+				VillageKit.drying_rack(node, mats, _solids, int(row["seed"]))
+			"effigy":
+				VillageKit.effigy(node, mats, _solids, int(row["seed"]))
+			"offering":
+				VillageKit.sacrifice_ground(node, mats, _solids, int(row["seed"]))
+	_build_litter()
+
+func _build_litter() -> void:
+	var mats: Dictionary = VillageKit.materials()
+	var m := VillageKit.Merged.new()
+	VillageKit.chopping_block(m, mats, Vector3(-13.15, 0.0, -12.2), 0.6)
+	VillageKit.pot_stack(m, mats, Vector3(-11.4, 0.0, 8.2), 1.2, 4409)
+	VillageKit.pot_stack(m, mats, Vector3(12.4, 0.0, 6.4), 2.6, 4421)
+	VillageKit.bone_heap(m, mats, Vector3(-3.3, 0.0, 8.5), 0.9, 4423)
+	m.commit(self, "TownLitter")
 
 ## The wood the settlement is cut into: the same treeline the clearing has, with
-## one gap where the road comes in.
+## one gap where the road comes in. The ring is a circle inscribed in the plot,
+## so the planner can never plant a trunk inside the stakes.
 func _build_wood() -> void:
 	var solids := StaticBody3D.new()
 	solids.name = "TownWoodCollision"
@@ -419,6 +618,33 @@ func _build_campfire() -> void:
 	fire_light.omni_attenuation = 1.4
 	fire_light.position = Vector3(0.0, 1.1, 0.0)
 	add_child(fire_light)
+
+
+## A lamp the square adds: never a shadow caster, never over the town's budget.
+## The night is the world's to light; these only mark the doors.
+func _lamp(parent: Node3D, at: Vector3, colour: Color, energy: float, reach: float) -> OmniLight3D:
+	var light := OmniLight3D.new()
+	light.light_color = colour
+	light.light_energy = minf(energy, 3.2)
+	light.omni_range = reach
+	light.omni_attenuation = 1.3
+	light.shadow_enabled = false
+	light.position = at
+	parent.add_child(light)
+	return light
+
+
+## The watch. Three static archers at the gate, all of them on the ground where a
+## post can see down the road. Everything they are lives in `town_guard.gd`.
+func _build_guards() -> void:
+	guards.clear()
+	for index in GUARD_POSTS.size():
+		var row: Dictionary = GUARD_POSTS[index]
+		var guard := GuardScript.new()
+		guard.name = "Watch%d" % (index + 1)
+		add_child(guard)
+		guard.setup(host, row["at"], float(row["yaw"]))
+		guards.append(guard)
 
 # --- bodies ----------------------------------------------------------------
 
@@ -496,12 +722,27 @@ func _build_services() -> void:
 	recruiter_desk = _build_recruiter_desk()
 	quartermaster_desk = _build_quartermaster_desk()
 	vendor_orla = _build_vendor_counter("VendorOrla", VENDOR_ORLA_POINT,
-		"STOREKEEPER ORLA", Color(0.94, 0.80, 0.52), 0)
+		Color(0.94, 0.80, 0.52), 0)
 	vendor_brann = _build_vendor_counter("VendorBrann", VENDOR_BRANN_POINT,
-		"SMITH BRANN", Color(0.86, 0.62, 0.42), 1)
+		Color(0.86, 0.62, 0.42), 1)
 	vendor_vey = _build_vendor_counter("VendorVey", VENDOR_VEY_POINT,
-		"QUARTERMASTER VEY", Color(0.72, 0.82, 0.96), 2)
+		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
+
+	# The ichor bench: the vial's one use, at the quartermaster's side. The slab
+	# is the service point, so the ring a body stands in is the bench's own.
+	ichor_bench = BenchScript.build_prop(self, BenchScript.PROP_POINT)
+	bench_panel = BenchScript.new()
+	bench_panel.name = "IchorBenchPanel"
+	add_child(bench_panel)
+	bench_panel.configure(warband, hud)
+
+	# Behind every counter, a keeper: a face and a kit, not a service.
+	keepers = FolkScript.build(self, {
+		"vendor_orla": vendor_orla, "vendor_brann": vendor_brann,
+		"vendor_vey": vendor_vey, "recruiter": recruiter_desk,
+		"quartermaster": quartermaster_desk,
+	})
 
 	gate = GateScript.new()
 	gate.name = "ExpeditionGate"
@@ -531,19 +772,26 @@ func _build_services() -> void:
 	# the moment the coin lands rather than bound when the board was built.
 	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
 	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
-	preload("res://scripts/warband/town_dressing.gd").build(self)
+	# The one gold arrow over the town. It rides its own keeper and this scene
+	# only decides when it is shown (`_refresh_marker`).
+	quest_marker = MarkerScript.new()
+	quest_marker.name = "TalkArrow"
+	add_child(quest_marker)
+	quest_marker.set_label("TALK TO HIM")
+	quest_marker.visible = false
+	DressingScript.build(self)
+
 
 func _build_stash_chest() -> Node3D:
 	var chest := Node3D.new()
 	chest.name = "StashChest"
 	chest.position = STASH_POINT
 	add_child(chest)
-	var iron := Geo.material(Color(0.30, 0.29, 0.28), 0.6, 0.55)
 	Geo.box(chest, Vector3(1.5, 0.8, 0.95), Vector3(0.0, 0.4, 0.0), _wood)
 	Geo.box(chest, Vector3(1.62, 0.24, 1.02), Vector3(0.0, 0.9, 0.0), _wood)
 	for x in [-0.6, 0.6]:
-		Geo.box(chest, Vector3(0.12, 0.86, 1.04), Vector3(x, 0.45, 0.0), iron)
-	Geo.box(chest, Vector3(0.22, 0.24, 0.1), Vector3(0.0, 0.62, 0.52), iron)
+		Geo.box(chest, Vector3(0.12, 0.86, 1.04), Vector3(x, 0.45, 0.0), _iron)
+	Geo.box(chest, Vector3(0.22, 0.24, 0.1), Vector3(0.0, 0.62, 0.52), _iron)
 	chest.add_child(_label("STASH", Vector3(0.0, 1.45, 0.0), Color(0.95, 0.78, 0.48)))
 	return chest
 
@@ -552,22 +800,15 @@ func _build_recruiter_desk() -> Node3D:
 	desk.name = "RecruiterDesk"
 	desk.position = RECRUITER_POINT
 	add_child(desk)
-	var iron := Geo.material(Color(0.28, 0.27, 0.26), 0.55, 0.6)
 	Geo.box(desk, Vector3(2.0, 0.12, 0.9), Vector3(0.0, 0.92, 0.0), _wood)
 	for x in [-0.82, 0.82]:
 		Geo.box(desk, Vector3(0.14, 0.86, 0.8), Vector3(x, 0.43, 0.0), _wood)
 	# The ledger and the purse: this is a place where names and gold are traded.
 	Geo.box(desk, Vector3(0.46, 0.06, 0.34), Vector3(-0.45, 1.01, 0.0),
 		Geo.material(Color(0.55, 0.52, 0.44), 0.0, 0.95))
-	Geo.box(desk, Vector3(0.2, 0.1, 0.2), Vector3(0.55, 1.03, 0.0), iron)
-	var lamp := OmniLight3D.new()
+	Geo.box(desk, Vector3(0.2, 0.1, 0.2), Vector3(0.55, 1.03, 0.0), _iron)
+	var lamp := _lamp(desk, Vector3(0.0, 1.5, 0.0), Color(1.0, 0.72, 0.42), 1.1, 5.0)
 	lamp.name = "DeskLamp"
-	lamp.light_color = Color(1.0, 0.72, 0.42)
-	lamp.light_energy = 1.1
-	lamp.omni_range = 5.0
-	lamp.position = Vector3(0.0, 1.5, 0.0)
-	desk.add_child(lamp)
-	desk.add_child(_label("RECRUITER", Vector3(0.0, 1.7, 0.0), Color(0.96, 0.74, 0.42)))
 	return desk
 
 ## The keeper's counter: plain steel into the collective stash for gold. The
@@ -584,22 +825,18 @@ func _build_quartermaster_desk() -> Node3D:
 		Geo.material(Color(0.42, 0.44, 0.46), 0.7, 0.35))
 	Geo.box(desk, Vector3(0.24, 0.24, 0.3), Vector3(0.5, 1.06, 0.0),
 		Geo.material(Color(0.55, 0.44, 0.28), 0.3, 0.7))
-	var lamp := OmniLight3D.new()
+	var lamp := _lamp(desk, Vector3(0.0, 1.5, 0.0), Color(0.78, 0.84, 1.0), 0.95, 5.0)
 	lamp.name = "DeskLamp"
-	lamp.light_color = Color(0.78, 0.84, 1.0)
-	lamp.light_energy = 0.95
-	lamp.omni_range = 5.0
-	lamp.position = Vector3(0.0, 1.5, 0.0)
-	desk.add_child(lamp)
-	desk.add_child(_label("QUARTERMASTER", Vector3(0.0, 1.7, 0.0), Color(0.78, 0.86, 0.96)))
 	return desk
 
 ## One of the three market stalls: the same trestle as the recruiter's and the
 ## keeper's, dressed with the goods that stall actually trades in - Orla's rack
 ## of bows and staves, Brann's anvil and laid-out blades, Vey's folded plates.
-## `seat` is the `PlayerState.VENDORS` index the counter opens.
-func _build_vendor_counter(node_name: String, at: Vector3, sign_text: String,
-		accent: Color, seat: int) -> Node3D:
+## The keeper's name is over the *keeper* (`town_folk.gd`), not over the boards:
+## a market is people, not labels. `seat` is the `PlayerState.VENDORS` index the
+## counter opens.
+func _build_vendor_counter(node_name: String, at: Vector3, accent: Color,
+		seat: int) -> Node3D:
 	var counter := Node3D.new()
 	counter.name = node_name
 	counter.position = at
@@ -633,14 +870,8 @@ func _build_vendor_counter(node_name: String, at: Vector3, sign_text: String,
 					Vector3(-0.3, 0.99 + float(index) * 0.055, 0.0), iron)
 			Geo.sphere(counter, 0.16, Vector3(0.52, 1.06, 0.0), steel,
 				Vector3(1.0, 0.9, 1.1))
-	var lamp := OmniLight3D.new()
+	var lamp := _lamp(counter, Vector3(0.0, 1.5, 0.0), accent, 0.85, 4.5)
 	lamp.name = "StallLamp"
-	lamp.light_color = accent
-	lamp.light_energy = 0.85
-	lamp.omni_range = 4.5
-	lamp.position = Vector3(0.0, 1.5, 0.0)
-	counter.add_child(lamp)
-	counter.add_child(_label(sign_text, Vector3(0.0, 1.72, 0.0), accent))
 	return counter
 
 func _build_signpost() -> Node3D:
@@ -688,6 +919,45 @@ func _build_ui() -> void:
 	paperdoll.configure(warband)
 	paperdoll.changed.connect(_on_paperdoll_changed)
 
+# --- the keepers' business -------------------------------------------------
+
+## The one mouth of the town. Built after the UI, because it writes the HUD and
+## reads the tutorial card; re-configured from `embed()` with the world's own
+## card, so the hire lesson and the campaign's orders are the same cards the rest
+## of the world uses.
+func _build_quest_layer(card) -> void:
+	if quest_giver == null:
+		quest_giver = QuestGiverScript.new()
+		quest_giver.name = "QuestGiver"
+		add_child(quest_giver)
+	quest_giver.configure(warband, hud, card)
+	if not warband.changed.is_connected(_refresh_marker):
+		warband.changed.connect(_refresh_marker)
+	_refresh_marker()
+
+
+## Hang the gold arrow over whichever keeper has business, or put it away. Asked
+## on every ledger change, after every `G`, and on a slow clock - the three ways
+## "who has something to say" can change without a panel closing.
+func _refresh_marker() -> void:
+	if quest_marker == null:
+		return
+	var service: String = quest_giver.marker_service() if quest_giver != null else ""
+	var keeper: Node3D = keepers.get(service, null) as Node3D
+	if keeper == null or not is_instance_valid(keeper):
+		quest_marker.visible = false
+		quest_marker.detach()
+		return
+	quest_marker.visible = true
+	if quest_marker.target() != keeper:
+		quest_marker.attach_to(keeper, TALK_ARROW_HEIGHT)
+
+## Whether the ledger is carrying the ichor order, which is the one thing the
+## square has to point its hint at: a reagent in the stash is useless until a
+## player knows the bench exists.
+func _bench_wanted() -> bool:
+	return warband != null and warband.quests.is_active(ICHOR_ORDER)
+
 # --- interaction -----------------------------------------------------------
 
 ## `TAB` quick-swaps the standing body's weapon set, exactly as the frontier does.
@@ -716,7 +986,7 @@ func _try_interact() -> void:
 		hud.set_status("Nothing to use here.", 1.5)
 
 ## Resolve and use whichever service `point` is next to. Returns `"stash"`,
-## `"altar"`, `"recruiter"`, `"quartermaster"`, `"vendor_orla"`,
+## `"altar"`, `"recruiter"`, `"quartermaster"`, `"ichor"`, `"vendor_orla"`,
 ## `"vendor_brann"`, `"vendor_vey"`, `"gate"` or `""`, which is what a single `G`
 ## handler and the regression both drive instead of guessing at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
@@ -736,14 +1006,29 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			hud.set_status("The altar drinks.", 2.5)
 		"recruiter":
 			_hide_panels()
+			# The lesson explains the board and the board is the counter, so both
+			# go up: the card over the hire rows it is describing. A player who
+			# reads it and puts it down is already standing at the oath they were
+			# told to swear. Once the lesson is read - and always at the cap,
+			# when talk has nothing to say - `G` is the board and nothing else.
 			screen.open()
-			var hint := "Hire from the recruiter board: HIRE swears a new body for gold."
-			screen.set_status(hint)
-			hud.set_status(hint, 5.0)
+			var hiring := "Hire from the recruiter board: HIRE swears a new body for gold."
+			screen.set_status(hiring)
+			if quest_giver == null or not quest_giver.talk("recruiter", peer_id):
+				hud.set_status(hiring, 5.0)
+			else:
+				hud.set_status("The recruiter has something to say about the eight.", 4.0)
 		"quartermaster":
 			_hide_panels()
-			quartermaster.open()
-			hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
+			if quest_giver != null and quest_giver.talk("quartermaster", peer_id):
+				hud.set_status("The quartermaster has an order.", 4.0)
+			else:
+				quartermaster.open()
+				hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
+		"ichor":
+			_hide_panels()
+			bench_panel.open()
+			hud.set_status("The ichor bench: one vial binds one blade out of the stash.", 4.0)
 		"vendor_orla":
 			_open_vendor(0)
 		"vendor_brann":
@@ -753,6 +1038,8 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 		"gate":
 			var gate_state: Dictionary = gate.prompt(peer_id)
 			hud.set_status(str(gate_state.get("message", "")), 5.0)
+	# The arrow is a question about the ledger, and a press can answer it.
+	_refresh_marker()
 	return service
 
 ## One keeper line, at the counter they are standing behind. Two cues exist
@@ -779,17 +1066,17 @@ func _open_vendor(index: int) -> void:
 	vendor_menu.open()
 	hud.set_status("%s  ·  %s" % [vendor_menu.keeper_name(), vendor_menu.keeper_line()], 5.0)
 
-## Whether a body is standing on the square's ground at all (the walls plus a
+## Whether a body is standing on the settlement's ground at all (the ring plus a
 ## stride): what decides whether the town's key line or the trail's is the one
-## worth showing. `margin` widens the box, which is what a rule that needs two
+## worth showing. `margin` widens the ring, which is what a rule that needs two
 ## answers - "is it a town body" now, and "has it left for good" - asks with, so a
 ## body on the line cannot flicker between them.
 func in_square(actor, margin: float = 0.0) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var local: Vector3 = actor.global_position - global_position
-	var half: float = WALL_RADIUS + 2.0 + maxf(margin, 0.0)
-	return absf(local.x) <= half and absf(local.z) <= half
+	var reach: float = WALL_RADIUS + 2.0 + maxf(margin, 0.0)
+	return Vector2(local.x, local.z).length() <= reach
 
 
 ## Whether one of the square's panels is open (the world owns the input, the
@@ -815,6 +1102,9 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
 		{"id": "gate", "point": gate.global_position, "reach": gate.open_radius},
 	]
+	if ichor_bench != null:
+		entries.append({"id": "ichor", "point": ichor_bench.global_position,
+			"reach": SERVICE_REACH})
 	var best := ""
 	var best_distance := INF
 	for entry in entries:
@@ -836,6 +1126,8 @@ func service_point(service: String) -> Vector3:
 			return recruiter_desk.global_position
 		"quartermaster":
 			return quartermaster_desk.global_position
+		"ichor":
+			return ichor_bench.global_position if ichor_bench != null else Vector3.ZERO
 		"vendor_orla":
 			return vendor_orla.global_position
 		"vendor_brann":
@@ -873,6 +1165,8 @@ func hint_line(actor) -> String:
 			text = "G - hire a new body for gold (up to the cap)"
 		"quartermaster":
 			text = "G - buy plain steel into the shared stash"
+		"ichor":
+			text = "G - the ichor bench"
 		"vendor_orla":
 			text = "G - buy bows and staves, or sell spare gear"
 		"vendor_brann":
@@ -881,6 +1175,10 @@ func hint_line(actor) -> String:
 			text = "G - buy armour, or sell spare gear"
 		"gate":
 			text = "G - launch an expedition with the line you deployed"
+	# A reagent in the stash is worthless until a player knows where it is worked,
+	# so while the ichor order is on the ledger the bench is named everywhere.
+	if service != "ichor" and _bench_wanted():
+		text += "   ·   G - the ichor bench"
 	return text
 
 
@@ -897,6 +1195,8 @@ func prompt_line(actor) -> String:
 			return "G - Gold recruiter"
 		"quartermaster":
 			return "G - quartermaster"
+		"ichor":
+			return "G - the ichor bench"
 		"vendor_orla":
 			return "G - Storekeeper Orla"
 		"vendor_brann":
@@ -935,13 +1235,16 @@ func _hide_panels() -> void:
 		quartermaster.close()
 	if vendor_menu != null and vendor_menu.is_open():
 		vendor_menu.close()
+	if bench_panel != null and bench_panel.is_open():
+		bench_panel.close()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (altar != null and altar.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
-		or (vendor_menu != null and vendor_menu.is_open())
+		or (vendor_menu != null and vendor_menu.is_open()) \
+		or (bench_panel != null and bench_panel.is_open())
 
 # --- seeding ---------------------------------------------------------------
 
