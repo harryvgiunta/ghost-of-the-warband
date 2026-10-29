@@ -153,6 +153,11 @@ const RETREAT_SECONDS := 0.9
 ## before it will stand over a downed body for five seconds. One rule for both:
 ## a body on the floor is only worth walking to when nothing can cut you for it.
 const LOOT_CLEAR_METRES := 22.0
+## How far from the soul an ally will wander to strip the field. A squad that
+## leaves the escort to fetch a cultist's bow forty metres back up the road is a
+## squad the player has to wait for; a squad that picks up what it walks past is
+## not. Past this the loot stays on the ground and the body stays with the soul.
+const LOOT_SEEK_METRES := 30.0
 
 ## A walk to a drop is a walk, not an order. A body that has not earned
 ## `FETCH_PROGRESS` metres of headway in `FETCH_GIVE_UP` seconds stops walking at
@@ -338,8 +343,9 @@ func drive(delta: float) -> void:
 			continue
 		track["engaged"] = false
 		# 3. Nothing hostile close: check the bodies. A squad strips the field when
-		#    the fighting has stopped, never mid-swing.
-		if _clear_of_hostiles(actor.global_position):
+		#    the fighting has stopped, never mid-swing - and never further from the
+		#    soul than an escort may stray to do it.
+		if _clear_of_hostiles(actor.global_position) and _near_soul(actor):
 			var spoil = _nearest_pickup(actor)
 			if spoil != null:
 				if _in_loot_reach(actor, spoil.global_position):
@@ -1173,6 +1179,17 @@ func other_id_hint(body) -> int:
 	if merc > 0:
 		return merc
 	return absi(str(body.name).hash()) % 12
+
+
+## Whether the soul is close enough for an ally to spend a moment on the ground it
+## is walking over. Without an escort (`following` false) the squad owns the field
+## and there is nothing to keep up with.
+func _near_soul(actor) -> bool:
+	if not following or player_body == null or not is_instance_valid(player_body):
+		return true
+	var gap: Vector3 = (player_body as Node3D).global_position - (actor as Node3D).global_position
+	gap.y = 0.0
+	return gap.length() <= LOOT_SEEK_METRES
 
 
 ## Record the soul's road one footprint at a time. Cheap on purpose: one distance
