@@ -16,6 +16,11 @@ extends "res://scripts/warband/lesson_arrow.gd"
 ## Where the arrow hangs over a standing body: the rig is 1.8-2.0 m to the crown
 ## and the arrow's own `HOVER` sits it another 1.7 m up.
 const HEAD_HEIGHT := 2.05
+## The word over a keeper's head is read from three or four metres, not from the
+## cage line, so it is scaled for that: the shared constant is sized for a marker
+## twenty metres away and at a conversation distance it fills half the screen.
+const NPC_LABEL_PIXEL := 0.0042
+const NPC_LABEL_FONT := 40
 
 var _target: Node3D = null
 var _height := HEAD_HEIGHT
@@ -38,6 +43,16 @@ func attached() -> bool:
 ## The body the arrow points at (or null).
 func target() -> Node3D:
 	return _target if attached() else null
+
+## The word over the arrow, at a keeper's scale. The parent builds the label with
+## the lesson's own measurements; this re-sizes it at the size a body standing at
+## the counter reads it.
+func set_label(text: String) -> void:
+	super.set_label(text)
+	if _label != null:
+		_label.pixel_size = NPC_LABEL_PIXEL
+		_label.font_size = NPC_LABEL_FONT
+
 
 func _process(delta: float) -> void:
 	_tick()

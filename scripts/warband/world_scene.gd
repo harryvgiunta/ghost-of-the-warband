@@ -97,9 +97,11 @@ const WorldMapScript = preload("res://scripts/warband/world_map.gd")
 ## town's north gate; the square's centre is this far beyond it.
 const TOWN_BEHIND := 30.0
 ## Half-size of the flat pad cut into the field for the town. It has to be wider
-## than the stockade ring (`town_hub.WALL_RADIUS`) plus the blend, or the wall
-## stakes would be planted on the field's own rolling ground.
-const TOWN_PAD := 30.0
+## than the stockade ring (`town_hub.WALL_RADIUS` 22) or the wall stakes would be
+## planted on the field's own rolling ground - and not much wider, because every
+## metre past the wall is a flat apron of pale pad outside a dark stockade, which
+## reads as concrete rather than as a clearing.
+const TOWN_PAD := 26.0
 ## How close a body has to stand to something to loot it by hand.
 const LOOT_REACH := 2.6
 ## `ArenaActor` clamps a body to a square around the world origin, and the town

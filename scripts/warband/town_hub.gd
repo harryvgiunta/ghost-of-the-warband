@@ -45,6 +45,7 @@ const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
+const FireFx = preload("res://scripts/world/fire_fx.gd")
 const QuestGiverScript = preload("res://scripts/warband/quest_giver.gd")
 const MarkerScript = preload("res://scripts/warband/quest_marker.gd")
 const BenchScript = preload("res://scripts/warband/ichor_bench.gd")
@@ -603,18 +604,23 @@ func _build_campfire() -> void:
 		var angle := TAU * float(index) / 3.0
 		Geo.beam(fire, Vector3(cos(angle) * 0.5, 0.22, sin(angle) * 0.5),
 			Vector3(0.0, 0.35, 0.0), 0.07, _wood, 6)
-	flame = Geo.cylinder(fire, 0.34, 0.0, 1.05, Vector3(0.0, 0.62, 0.0), _ember, 10)
-	var core := StandardMaterial3D.new()
-	core.albedo_color = Color(1.0, 0.86, 0.55)
-	core.emission_enabled = true
-	core.emission = Color(1.0, 0.82, 0.5)
-	core.emission_energy_multiplier = 3.4
-	Geo.cylinder(fire, 0.16, 0.0, 0.62, Vector3(0.0, 0.5, 0.0), core, 8)
+	# The flames are the world's own: `FireFx.flame_cards` on the shared flame
+	# shader, the same cards the wood burns and the camp's fires use. A cone with an
+	# emissive material reads as a plastic party hat at the middle of a town square.
+	var mats: Dictionary = VillageKit.materials()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1217
+	var merged := VillageKit.Merged.new()
+	FireFx.flame_cards(merged, mats["flame"], rng, 1.30, 0.16)
+	flame = merged.commit(fire, "FireTongues")
+	FireFx.embers(fire, 0.22, 0.55, 26)
 	fire_light = OmniLight3D.new()
 	fire_light.name = "FireLight"
 	fire_light.light_color = Color(1.0, 0.62, 0.28)
-	fire_light.light_energy = 2.4
-	fire_light.omni_range = 12.0
+	# A town square's fire carries further than a camp's: the halls around it are
+	# thirty metres apart and the light is the only thing between them and the dark.
+	fire_light.light_energy = 3.2
+	fire_light.omni_range = 16.0
 	fire_light.omni_attenuation = 1.4
 	fire_light.position = Vector3(0.0, 1.1, 0.0)
 	add_child(fire_light)
