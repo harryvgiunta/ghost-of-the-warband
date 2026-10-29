@@ -146,6 +146,10 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	# the rig bakes the height in before it measures its own legs, so a 2.1 m
 	# mercenary's feet still plant on the ground and a 1.6 m one's do too.
 	actor.appearance = WarbandLooks.profile_for(merc_id)
+	# And who he sounds like. A profile is a pure function of the id, like the
+	# look: every peer and every reload gives the same man the same mouth, and
+	# nothing about it travels the wire or needs a save field.
+	actor.voice_id = VoiceLibrary.profile_for(merc_id)
 	_bodies_root.add_child(actor)
 	var label: String = _warband.roster.name_of(merc_id)
 	actor.authoritative = authoritative

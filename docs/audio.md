@@ -197,14 +197,41 @@ the audit of what a delivery still owes.
 | `player` | `big_hit` | the same, at >= 35%: the line a player remembers | 0.70 / 8 s |
 | `player` | `kill` | a hostile died with this body named as `last_hitter` (`Voice.kill_quip` from the mob's own death) | 0.35 / 7 s |
 | `player` | `downed` | the body goes down, then again on the bleed clock every 2.6-5.4 s | 0.90 / - |
+| `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `aggro` | a party body picks its first hostile since it was last out of the fight (`SquadDrive.drive`, the `engaged` latch) | 0.01 / 6 s |
+| `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `hurt` | a blow took >= 18% of the pool and the body is still standing (`ArenaActor.take_damage`) | 0.01 / 8 s |
 | `orla`, `brann`, `vey`, `quartermaster` | `greet` | the counter is used (`TownHub.interact_at`) | 1.0 / 6 s |
 | `orla`, `brann`, `vey`, `quartermaster` | `done` | a purchase went through (`VendorMenu.purchased`, `QuartermasterMenu.purchased`) | 0.8 / 2 s |
+
+**The party speaks with five profiles, one per mercenary.** A profile is not extra
+content: it is the same two beats - finding something to hit, being hit - recorded
+five ways, so a squad of five reads as five men instead of one. The assignment is
+a pure function of the mercenary id (`VoiceLibrary.profile_for`: round robin over
+`PROFILES`, so the first five bodies field all five voices before any of them
+repeats), made in `PossessionController._spawn_body` beside
+`WarbandLooks.profile_for(merc_id)` and *before* the body enters the tree, because
+`ArenaActor._ready` builds the emitter from `voice_id`. Nothing else about the
+body changes, every peer and every reload agrees, and no save field or wire field
+carries it.
+
+One in a hundred is deliberate on both cues: a roll per body per engagement and
+per blow that took a real bite, so a fight is usually silent and a line lands as
+a line. The number lives in `VoiceLibrary.SQUAD`, which is the one place to turn
+it up.
 
 Which body hears what: a line is made by the machine that runs the body. The
 authority makes every mob's and every squadmate's; a replica makes the two cues
 it can read off a snapshot (a bite being committed, a death); the peer's own body
 makes its lines flat, in the player's ear, even when the host applied the blow.
 Every peer renders its own copy - audio is never sent over the wire.
+
+A party line is also **near-field by construction**: `SQUAD` asks for
+`unit_size` 5 m and `max_distance` 26 m, where a wolf's growl asks for 9 m and 48
+m and its death 56 m, because a growl has to carry across a clearing and a shout
+does not. So an ally engaging 40 m up the lane is silence, not a voice in your
+ear - the row's shape, not a distance test at the call site. The line itself is
+placed at the body (`VoiceEmitter.say` hands `Audio` the body's chest position), and
+the local body is the one exception: it plays flat, because it is the ear the line
+comes from.
 
 Two cues take the floor regardless of the gap between lines (`URGENT` in
 `VoiceEmitter`): the death cry and the moan of a body going down. A wolf that
@@ -235,6 +262,15 @@ reads it) turns green as they arrive:
 | `voice/player/downed_01..03.ogg` | 3 | the first gasp and the ragged moans of a body bleeding on the ground |
 | `voice/orla/greet_01..03.ogg`, `voice/brann/...`, `voice/vey/...`, `voice/quartermaster/...` | 3 | the keeper as their counter is used |
 | `voice/orla/done_01..02.ogg`, same four folders | 2 | the keeper after a trade |
+
+**The party's five profiles shipped**, so they are not on that list any more:
+`voice/{sergeant,veteran,bruiser,scout,hothead}/aggro_01..03.ogg` (the three
+sightings - "oh shit here they come", "who... oh", "get ready") and
+`hurt_01..02.ogg` (the scream, the curse), 25 takes. They are one performance
+converted once per profile with `tools/vc.py` (f0-conditioned, the profile's
+`vc_shift` applied before conversion: sergeant 0, veteran -2, bruiser -4, hothead
++5, scout +8), normalised to -16 LUFS - the source batch and its cue sheet live in
+`voice_batch/` outside the tree.
 
 Same rules as every other take: mono 48 kHz, peak -1 dBFS, a few ms of fade at
 each end, one file per take. `--fetch` does not know about these (they are

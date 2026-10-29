@@ -519,6 +519,18 @@ func voice_kill_quip() -> void:
 	_voice.killed()
 
 
+## Something hostile has just come into this body's reach and it has picked it:
+## the party's one aggrieved line. Whether it is said at all is the row's
+## business (`VoiceLibrary.SQUAD.aggro`: one roll in a hundred), so the caller
+## asks on every engagement and a fight is usually silent. The line is placed at
+## the body, so a squadmate shouting across the field is heard from where it
+## stands - and not heard at all past the row's `max_distance`.
+func voice_aggro() -> bool:
+	if _voice == null or not (is_local or authoritative):
+		return false
+	return _voice.say("aggro")
+
+
 ## Where the blow that put this body down came from. `receive_melee` is the one
 ## funnel that knows the attacker's body, so the crawl's bearing comes from it.
 func note_threat(point: Vector3) -> void:

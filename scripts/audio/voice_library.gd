@@ -31,6 +31,28 @@ const DIR := "res://assets/audio/voice/"
 ## sounds never steal a combat voice, and a blow never cuts a line.
 const POOL := "voice"
 
+## The warband's party speaks with five profiles. A profile is not a cue: it is
+## the same two beats recorded five ways, so the band sounds like five men
+## instead of one man five times. `profile_for()` hands one to each mercenary.
+const PROFILES := ["sergeant", "veteran", "bruiser", "scout", "hothead"]
+
+## What the party has to say, and how rarely. One line per engagement at most,
+## and a one-in-a-hundred roll at that: the shots are the point, so a squad that
+## talked every fight would be a squad nobody listens to. `hurt` reads the same
+## - a real bite of the pool, then the roll - and its takes are the scream and
+## the curse, so the heavier blow of the two sounds like the heavier blow.
+const SQUAD := {
+	# Something hostile has come into `engage_radius` and this body has just
+	# picked it: "oh shit, here they come", "who... oh", "get ready".
+	"aggro": {"stem": "aggro", "count": 3, "db": -9.0, "pitch": [0.96, 1.04],
+		"chance": 0.01, "cooldown": 6.0,
+		"unit_size": 5.0, "max_distance": 26.0, "cutoff": 9000.0},
+	# A blow that took a real bite of the body's pool: "arrghhhh", "fuck".
+	"hurt": {"stem": "hurt", "count": 2, "db": -9.0, "pitch": [0.96, 1.04],
+		"chance": 0.01, "cooldown": 8.0, "share": 0.18,
+		"unit_size": 5.0, "max_distance": 26.0, "cutoff": 9000.0},
+}
+
 ## The keepers share one line set: the same beats - a greeting when the counter
 ## is approached, a word after a trade - differ only in whose takes answer them.
 const KEEPER := {
@@ -85,6 +107,14 @@ const VOICES := {
 		"downed": {"stem": "downed", "count": 3, "db": -12.0, "pitch": [0.90, 0.98],
 			"chance": 0.90, "cooldown": 0.0},
 	},
+	## The party's five profiles. `ArenaActor.voice_id` is set from
+	## `profile_for(merc_id)` when a warband body is spawned, and nothing else
+	## about the body changes: same stats, same look, one man's mouth.
+	"sergeant": SQUAD,
+	"veteran": SQUAD,
+	"bruiser": SQUAD,
+	"scout": SQUAD,
+	"hothead": SQUAD,
 	## The town's keepers. They answer the one interaction the square has: a
 	## counter being used. `greet` is what they say when you walk up, `done` is
 	## the short answer after they have taken your coin - dialogue, not a quest
@@ -131,6 +161,16 @@ static func ensure() -> void:
 			if not _events.has(voice):
 				_events[voice] = {}
 			_events[voice][cue] = event
+
+
+## The voice one mercenary speaks with, derived from their id and nothing else -
+## the same rule `WarbandLooks.profile_for` uses for a body's look. Every peer and
+## every reload agrees on it, so a voice is not a save field and does not travel
+## the wire. Round-robin rather than a hash: five profiles over up to eight
+## bodies, so the band gets all five voices before any of them repeats.
+static func profile_for(merc_id: int) -> String:
+	var id := maxi(merc_id, 1)
+	return PROFILES[(id - 1) % PROFILES.size()]
 
 
 ## The mixer's name for one cue: `voice_wolf_death`.

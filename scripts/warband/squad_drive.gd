@@ -275,8 +275,17 @@ func drive(delta: float) -> void:
 		# 2. Armed, or nothing left to grab: go at the nearest watcher.
 		var watcher = _nearest_watcher(actor)
 		if watcher != null:
+			# Finding one is when the party talks. The latch makes it the moment
+			# this body goes from out of the fight to in it - the first hostile to
+			# come inside `engage_radius` since it was last clear - not every
+			# frame of the fight and not the third target in a scrum. How rare
+			# the line is belongs to the row (`VoiceLibrary.SQUAD.aggro`).
+			if not bool(track.get("engaged", false)):
+				actor.voice_aggro()
+			track["engaged"] = true
 			_fight(actor, watcher, track)
 			continue
+		track["engaged"] = false
 		# 3. Nothing hostile close: check the bodies. A squad strips the field when
 		#    the fighting has stopped, never mid-swing.
 		if _clear_of_hostiles(actor.global_position):

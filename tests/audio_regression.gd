@@ -553,6 +553,52 @@ func _check_voices() -> void:
 	check(float(downed.get("chance")) > 0.5 and float(downed.get("cooldown")) == 0.0,
 		"a body on the ground must actually moan")
 
+	# The party: five recorded profiles, one assigned per mercenary by id, and the
+	# two beats a fight gets - finding something to hit and being hit.
+	var absent: Array[String] = VoiceLibraryScript.missing()
+	for profile in VoiceLibraryScript.PROFILES:
+		check(voices.has(profile), "the party profile %s has no voice" % profile)
+		check(VoiceLibraryScript.takes(profile, "aggro") == 3,
+			"%s lost an aggro take" % profile)
+		check(VoiceLibraryScript.takes(profile, "hurt") == 2,
+			"%s lost a hurt take" % profile)
+		for cue in ["aggro", "hurt"]:
+			var path := SfxLibraryScript.path(
+				VoiceLibraryScript.event_name(profile, cue), 0)
+			check(ResourceLoader.exists(path), "missing take %s" % path)
+		check(not absent.has("%s/aggro" % profile),
+			"the audit named %s's aggro, which ships" % profile)
+		check(not absent.has("%s/hurt" % profile),
+			"the audit named %s's hurt, which ships" % profile)
+	# One voice per body and the same voice on every reload: the assignment is a
+	# pure function of the id, so nothing about it travels the wire.
+	var distinct := {}
+	for merc_id in range(1, VoiceLibraryScript.PROFILES.size() + 1):
+		distinct[VoiceLibraryScript.profile_for(merc_id)] = true
+	check(distinct.size() == VoiceLibraryScript.PROFILES.size(),
+		"the first five mercenaries must field all five voices")
+	check(VoiceLibraryScript.profile_for(7) == VoiceLibraryScript.profile_for(7),
+		"a mercenary's voice must not change between reads")
+	check(VoiceLibraryScript.profile_for(0) == VoiceLibraryScript.PROFILES[0],
+		"an unassigned id must still resolve to a profile")
+
+	# One in a hundred, and a fight is silent otherwise: the numbers are the
+	# design, so they are checked rather than trusted.
+	var aggro: Dictionary = VoiceLibraryScript.row("sergeant", "aggro")
+	var shout: Dictionary = VoiceLibraryScript.row("sergeant", "hurt")
+	check(is_equal_approx(float(aggro.get("chance")), 0.01),
+		"an aggro line must be a one-in-a-hundred roll")
+	check(float(aggro.get("cooldown")) >= 4.0, "aggro lines must not repeat per fight")
+	check(is_equal_approx(float(shout.get("chance")), 0.01),
+		"a hurt line must be a one-in-a-hundred roll")
+	check(float(shout.get("share")) > 0.0, "a hurt line must need a real blow")
+	# Spatial: the party's lines are placed at the body and die off in the near
+	# field, unlike a wolf's growl that has to carry across a clearing.
+	for kind in [aggro, shout]:
+		check(float(kind.get("max_distance")) <= 30.0,
+			"a party line must not be heard across the field")
+		check(float(kind.get("unit_size")) <= 6.0, "a party line must be a near voice")
+
 	# Delivered takes play; a voice nobody has recorded yet is silence, not a
 	# warning per call. These are the lines the delivery still owes.
 	audio.last_event = ""
@@ -563,12 +609,17 @@ func _check_voices() -> void:
 	check(VoiceScript.say("wolf", "death"), "a flat wolf death did not play")
 	check(audio.last_event == "voice_wolf_death", "the death asked for the wrong event")
 	audio.last_event = ""
+	check(VoiceScript.say("sergeant", "aggro", Vector3(2, 0, 3)),
+		"a party aggro line did not play")
+	check(audio.last_event == "voice_sergeant_aggro",
+		"the aggro line asked for the wrong event")
+	check(audio.last_event_position != null, "a party line must be placed at the body")
+	audio.last_event = ""
 	check(not VoiceScript.say("orla", "greet", Vector3(1, 0, 1)),
 		"a keeper with no takes must not play anything")
 	check(not VoiceScript.say("player", "hurt", Vector3(1, 0, 1)),
 		"a body with no takes must not play anything")
 	check(audio.last_event == "", "a voice with no takes still reached the mixer")
-	var absent: Array[String] = VoiceLibraryScript.missing()
 	check(absent.has("orla/greet"), "the audit must name the missing keeper lines")
 	check(absent.has("player/hurt"), "the audit must name the missing body lines")
 	check(not absent.has("wolf/growl"), "the audit named the wolf growl, which ships")
@@ -596,6 +647,32 @@ func _check_voices() -> void:
 		if emitter.say("attack"):
 			played += 1
 	check(played == 1, "the growl's cooldown did not open after its window")
+
+	# The party's roll, measured on an emitter's own clock: four hundred
+	# engagements with the cooldown spent between them is a handful of lines, not
+	# a fight that talks. The seed is fixed, so the count is the same twice.
+	var squad := VoiceEmitterScript.create("scout", null, true, 5)
+	var shouts := 0
+	for _attempt in 400:
+		squad.tick(8.0)
+		if squad.say("aggro"):
+			shouts += 1
+	check(shouts > 0, "the party never spoke in four hundred fights")
+	check(shouts <= 15, "the party shouted %d times in four hundred fights" % shouts)
+	# A blow has to be a real bite of the pool before a profile may answer it, and
+	# then it takes the same roll: a graze is silence, not a swear word.
+	var bloodied := VoiceEmitterScript.create("veteran", null, true, 9)
+	var answered := 0
+	var cursed := 0
+	for _attempt in 400:
+		bloodied.tick(9.0)
+		if bloodied.damage(0.05):
+			answered += 1
+		if bloodied.damage(0.30):
+			cursed += 1
+	check(answered == 0, "a graze made the party swear")
+	check(cursed > 0, "a heavy blow never made the party swear")
+	check(cursed <= 15, "every heavy blow made the party swear")
 
 	# A body with no voice, an unknown cue and a silenced emitter are all no-ops.
 	var mute := VoiceEmitterScript.create("", null, false, 3)
