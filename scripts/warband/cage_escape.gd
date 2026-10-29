@@ -493,6 +493,41 @@ func lesson_running() -> bool:
 	return _lesson and sequencer != null
 
 
+## Throw the opening away. A guest in a co-op campaign walks into this camp, but
+## the cages are the host's and the lesson is a solo beat: replaying it would hold
+## the guest's tree still behind a card about somebody else's opening, and a
+## clamped body would refuse the host's snapshots. The camp is left exactly as it
+## looks after the squad has left it - every cage open, nobody held - and with no
+## sequencer `is_free()` answers true for everybody.
+func dismiss_lesson() -> void:
+	_lesson = false
+	if sequencer != null:
+		sequencer.queue_free()
+		sequencer = null
+	if duel != null:
+		duel.queue_free()
+		duel = null
+	_jogging = false
+	_duel_card = -1
+	_card_state = -1
+	# The opening card holds the tree still; a guest that never finishes the
+	# lesson must not inherit its pause.
+	if card != null and card.is_open():
+		card.close()
+	if _shiv_marker != null and is_instance_valid(_shiv_marker):
+		_shiv_marker.visible = false
+	caged_ids.clear()
+	_cage_anchors.clear()
+	_cage_open.clear()
+	for index in CAGE_POSTS.size():
+		_cage_open.append(true)
+	for entry in _cage_doors:
+		entry["lift"] = CAGE_BAR_LIFT
+		var node: Node3D = entry["node"]
+		if is_instance_valid(node):
+			node.position.y = CAGE_BAR_LIFT
+
+
 ## The world is opening on a checkpoint past this camp. Called before the camp is
 ## added to the tree: the wood still builds - it is the same place - but the pair
 ## are never fielded and no lesson starts.

@@ -10,9 +10,15 @@ extends CanvasLayer
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
 
 const LAYER := 6
 const BAR_SIZE := Vector2(260, 10)
+## The skill row under the crosshair: three 96 px tiles, so the HUD shows what
+## the number row will do before the player presses it.
+const TILE_SIZE := Vector2(96, 96)
+const TILE_GAP := 6
 ## Nothing in the warband is clicked while the pointer is captured, so the
 ## reticle is the only thing that says where the soul is aiming. It is drawn by
 ## `Reticle` below, which carries its own measurements.
@@ -26,6 +32,9 @@ var _name_label: Label
 var _state_label: Label
 var _health_label: Label
 var _health_bar: ProgressBar
+var _stamina_label: Label
+var _stamina_bar: ProgressBar
+var _ability_tiles: Array = []
 var _squad_box: VBoxContainer
 var _squad_sig := ""
 var _purse_label: Label
@@ -137,6 +146,18 @@ func _build() -> void:
 	_health_label = Label.new()
 	_health_label.add_theme_font_size_override("font_size", 11)
 	column.add_child(_health_label)
+	# Stamina sits under health in the same panel: every skill and every sprint
+	# is paid from it, so it belongs next to the number it is spent beside.
+	_stamina_bar = ProgressBar.new()
+	_stamina_bar.name = "Stamina"
+	_stamina_bar.custom_minimum_size = BAR_SIZE
+	_stamina_bar.show_percentage = false
+	_stamina_bar.max_value = 100.0
+	_stamina_bar.value = 100.0
+	column.add_child(_stamina_bar)
+	_stamina_label = Label.new()
+	_stamina_label.add_theme_font_size_override("font_size", 11)
+	column.add_child(_stamina_label)
 
 	var squad_panel := PanelContainer.new()
 	squad_panel.name = "SquadPanel"
@@ -198,6 +219,33 @@ func _build() -> void:
 	_status_label.visible = false
 	root_control.add_child(_status_label)
 
+	# The skill row. Bottom left keeps the crosshair, the centred prompt and the
+	# branded sigil's bottom-right tile clear, and each tile reads its grant,
+	# cost and cooldown from the possessed body's runner every frame - a looted
+	# weapon changes it without a reload.
+	var ability_row := HBoxContainer.new()
+	ability_row.name = "Abilities"
+	ability_row.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	ability_row.position = Vector2(24, -TILE_SIZE.y - 20)
+	ability_row.add_theme_constant_override("separation", TILE_GAP)
+	ability_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_control.add_child(ability_row)
+	_ability_tiles.clear()
+	for index in AbilityRules.SLOT_COUNT:
+		var tile = AbilitySlotScript.new()
+		tile.name = "Ability%d" % (index + 1)
+		tile.configure(index)
+		ability_row.add_child(tile)
+		_ability_tiles.append(tile)
+
+## The stamina bar, for tests and for any scene that wants to highlight it.
+func stamina_bar() -> ProgressBar:
+	return _stamina_bar
+
+## One tile per `AbilityRules.SLOT_COUNT`, in key order (1, 2, 3).
+func ability_tiles() -> Array:
+	return _ability_tiles.duplicate()
+
 func _refresh_body() -> void:
 	if _name_label == null:
 		return
@@ -210,6 +258,12 @@ func _refresh_body() -> void:
 			_state_label.text = "The warband is down"
 		_health_bar.value = 0.0
 		_health_label.text = ""
+		_stamina_bar.value = 0.0
+		_stamina_label.text = ""
+		# No body, no skills: hide every tile rather than leave the pool's last
+		# grants up over a spectator.
+		for tile in _ability_tiles:
+			tile.update_state({})
 		return
 	var health: float = float(_body.get("health"))
 	var max_health: float = maxf(1.0, float(_body.get("max_health")))
@@ -221,6 +275,32 @@ func _refresh_body() -> void:
 	_health_bar.max_value = max_health
 	_health_bar.value = health
 	_health_label.text = "%d / %d" % [int(round(health)), int(round(max_health))]
+	var stamina: float = float(_body.get("stamina"))
+	var max_stamina: float = maxf(1.0, float(_body.get("max_stamina")))
+	_stamina_bar.max_value = max_stamina
+	_stamina_bar.value = stamina
+	_stamina_label.text = "%d / %d stamina" % [int(round(stamina)), int(round(max_stamina))]
+	_refresh_skills()
+
+## The three skill tiles, read from the body's own runner every frame. A body
+## with no grant in a slot hides that tile instead of advertising a key that
+## would do nothing.
+func _refresh_skills() -> void:
+	if _ability_tiles.is_empty():
+		return
+	var runner = _body.get("ability") if _body != null and is_instance_valid(_body) else null
+	for index in _ability_tiles.size():
+		var state := {}
+		if runner != null and is_instance_valid(runner) and runner.has_method("hud_state"):
+			state = runner.hud_state(index)
+		var tile = _ability_tiles[index]
+		tile.update_state(state)
+		# The tile is the shared arena widget, which advertises the arena's
+		# `SHIFT + n`. The warband fires the same slots from the number row, so
+		# only the key line is rewritten here - one tile design, two bindings.
+		var key_label = tile.get("_key")
+		if key_label != null:
+			key_label.text = str(index + 1)
 
 func _refresh_squad() -> void:
 	if _squad_box == null or _warband == null:

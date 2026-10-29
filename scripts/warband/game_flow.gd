@@ -209,6 +209,37 @@ func join_warband(address: String, port: int, guest_name: String) -> void:
 	_request_warband({"mode": "join", "address": address, "port": port,
 		"name": guest_name, "scene": ARENA_SCENE})
 
+## Open the campaign world as its host. The world is one continuous place, so
+## the seat says where the warband's feet land: a saved warband resumes at its
+## bookmark (or the town end when it has none), and a machine with no warband
+## starts a fresh run in the cages.
+func host_campaign(port: int, player_name: String) -> void:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null:
+		return
+	if warband.load_state() and warband.roster.count() > 0:
+		world_start = "checkpoint" if warband.has_checkpoint() else "town"
+	else:
+		warband.reset_state()
+		warband.save_state()
+		world_start = "camp"
+	_request_warband({"mode": "host", "address": "127.0.0.1", "port": port,
+		"name": player_name, "scene": WORLD_SCENE})
+
+## Join a campaign already running on another machine. The guest fields the
+## bodies from its own save - the warband is the same ledger on both machines -
+## and the host's snapshots then place them.
+func join_campaign(address: String, port: int, player_name: String) -> void:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null:
+		return
+	if not warband.load_state():
+		print("WARBAND_FLOW failed: joining the campaign needs a local warband save.")
+		return
+	world_start = "checkpoint" if warband.has_checkpoint() else "town"
+	_request_warband({"mode": "join", "address": address, "port": port,
+		"name": player_name, "scene": WORLD_SCENE})
+
 ## Leave the battle from this peer. A guest's departure hands its body back to
 ## the scene; a host's closes the socket and every guest hears `The host left.`
 func leave_warband() -> void:
@@ -301,6 +332,12 @@ func _seat_warband_link(scene: Node) -> void:
 		return
 	_warband_scene = wanted
 	session.setup(controller, warband)
+	# The world is more than its bodies: the same session carries its mobs, the
+	# loot on its ground and its missiles. Attached before any replica decision,
+	# because a guest's mobs must be replicas before their first brain ticks. The
+	# arena keeps its own field and is deliberately not attached.
+	if str(scene.scene_file_path) == WORLD_SCENE:
+		session.attach_world(scene as Node3D)
 	var mode := str(warband_intent.get("mode", "host"))
 	# A guest is a replica *before* the first body is dressed: `_dress` reads the
 	# body's own authority to decide whether it predicts or waits, and the arena

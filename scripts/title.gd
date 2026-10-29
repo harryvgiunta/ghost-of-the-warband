@@ -134,6 +134,9 @@ func _build() -> void:
 	warband_button = _plate(column, "GHOST OF THE WARBAND", "", _enter_warband)
 	warband_resume_button = _plate(column, "RESUME WARBAND", "", _resume_warband)
 	_lobby_button = _plate(column, "WARBAND LOBBY", "", _toggle_lobby)
+	# The lobby is the only door with two destinations, so the door says so
+	# before it opens: an arena bout, or campaign co-op entered with a friend.
+	_lobby_button.tooltip_text = "Arena battle or campaign co-op: host the warband, or join a friend."
 
 	_status = _center_label(column, "", 12, LedgerThemeScript.TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -196,6 +199,10 @@ func _toggle_lobby() -> void:
 	if _lobby_layer == null:
 		return
 	_lobby_layer.visible = not _lobby_layer.visible
+	if _lobby_layer.visible:
+		# The panel's mode row is the point of this door, so opening it says
+		# what the row chooses rather than leaving two silent options.
+		_set_status("Warband lobby: arena battle or campaign co-op - host or join.")
 
 
 func _enter_warband() -> void:

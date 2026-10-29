@@ -144,7 +144,10 @@ func run() -> void:
 		await _host_run()
 
 ## The title screen, filled in the way a player fills it: after the panel is up,
-## so the values typed survive the cache read that `_ready` performs.
+## so the values typed survive the cache read that `_ready` performs. The panel
+## now defaults to campaign co-op, but this two-process run proves the arena
+## session, so both legs choose the bout explicitly before pressing a button:
+## HOST and JOIN then still have to land on `admin_arena.tscn`.
 func _open_title(player_name: String, address: String, port: int) -> Node:
 	var title = load(TITLE).instantiate()
 	root.add_child(title)
@@ -154,6 +157,14 @@ func _open_title(player_name: String, address: String, port: int) -> Node:
 	title.lobby.name_input.text = player_name
 	title.lobby.address_input.text = address
 	title.lobby.port_input.value = port
+	check(title.lobby.mode_select != null, "The lobby carries the mode row")
+	if title.lobby.mode_select == null:
+		return title
+	title.lobby.mode_select.select(0)
+	title.lobby.mode_select.item_selected.emit(0)
+	check(title.lobby.selected_mode() == "arena",
+		"The arena bout is selected before the buttons are pressed (%s)"
+			% title.lobby.selected_mode())
 	return title
 
 # --- host ------------------------------------------------------------------

@@ -129,6 +129,35 @@ func buy_gear(item_id: String) -> Dictionary:
 		"message": "Bought %s for %d gold into the shared stash." % [
 			str(item.get("name", item_id)), cost]}
 
+## Sell one pooled copy back to a keeper. The piece must be in the shared pool:
+## a blade somebody is wearing is not the warband's to sell behind their back,
+## and the pool is the only place a copy can leave without stripping a body.
+##
+## The keeper pays `share` of the catalogue price (60% by default), floored to a
+## whole coin, so a sale always returns less than the purchase. `price` in the
+## reply is what the purse was actually paid, not the catalogue figure.
+func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
+	var id := State.migrate_item_id(item_id)
+	var item: Dictionary = State.ITEMS.get(id, {})
+	if item.is_empty():
+		return {"ok": false, "message": "No keeper buys that.", "price": 0, "item_id": item_id}
+	var list_price := int(item.get("price", 0))
+	if list_price <= 0:
+		return {"ok": false, "message": "That piece has no price.", "price": 0, "item_id": id}
+	var display := str(item.get("name", id))
+	# The pool is the authority on whether there is a copy to sell: a worn piece
+	# is on a body, not on the keeper's shelf, and a failed removal must never pay.
+	if not stash.remove(id, 1):
+		return {"ok": false, "price": 0, "item_id": id,
+			"message": "You have no spare %s in the stash." % display}
+	var payout := int(floor(float(list_price) * clampf(share, 0.0, 1.0)))
+	var state := get_node_or_null("/root/PlayerState")
+	if state != null:
+		state.add_credits(payout)
+	_notify()
+	return {"ok": true, "item_id": id, "price": payout,
+		"message": "Sold %s for %d gold." % [display, payout]}
+
 func hire(merc_name: String = "") -> Dictionary:
 	var state := get_node_or_null("/root/PlayerState")
 	var result := WarbandVendor.hire(roster, state, merc_name, deployment_cap) if state != null \

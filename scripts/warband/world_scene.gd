@@ -12,9 +12,10 @@ extends Node3D
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
-## warband screen, the paperdoll, the tutorial card, the loot vacuum, the revive
-## channel, the downed-crawl and the branded runner - and it builds three areas
-## that bring only their own geometry and their own business:
+## warband screen, the paperdoll, the tutorial card, the ability scene, the
+## campaign menu, the loot vacuum, the revive channel, the downed-crawl, the
+## branded runner, and the wilderness band on the way out - and it builds three
+## areas that bring only their own geometry and their own business:
 ##
 ##   * `Camp` - `cage_escape.gd`: the ragged pocket in the wood, the cages, the
 ##     lesson. No fence and no road: a camp with trees standing in it, and a gap
@@ -31,8 +32,9 @@ extends Node3D
 ## `admin_arena.tscn`, and the arena's return lands back here at the town end (see
 ## `GameFlow`). Nothing else changes scene, and nothing about travel does.
 ##
-## Keys: O warband, TAB quick weapon swap, P paperdoll, G interact and the revive
-## hold, K manual loot (never advertised), R the branded sigil, X shoulder swap.
+## Keys: O warband, ESC the campaign menu (resume, save, load, settings, leave,
+## quit), TAB quick weapon swap, P paperdoll, G interact and the revive hold,
+## K manual loot (never advertised), R the branded sigil, X shoulder swap.
 ## Q and E are held to strafe, WASD to walk, so neither is a press key. The camp's
 ## lesson adds F1-F5 and `[` `]`.
 
@@ -47,12 +49,23 @@ const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
 const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
 const CardScript = preload("res://scripts/warband/tutorial_card.gd")
-const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
+## The scene half of the item skills: one node for the whole campaign, exactly
+## as `main.gd` keeps one for the frontier. Without it a warband body could start
+## a skill's clock and never fire the arrow or the spell the clock was counting.
+const AbilitiesScript = preload("res://scripts/warband/warband_abilities.gd")
+## The campaign's Escape window. The frontier's quick menu belongs to a level of
+## that game; the world opens this one, which writes the same warband save and
+## leaves for the same title.
+const MenuScript = preload("res://scripts/warband/warband_menu.gd")
+## The band on the way out: seven briar wolves between the camp's mouth and the
+## first stretch of lane. They spawn after the warband is seated, so a wolf's
+## first target is a real body.
+const WildernessScript = preload("res://scripts/warband/wilderness.gd")
 const TorchScript = preload("res://scripts/warband/torch_light.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
@@ -86,6 +99,11 @@ const BODY_BOUNDS := 1400.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0
+## The source a wilderness blow is booked under, beside the camp's watchers (90)
+## and the trail's cultists (91): damage scaling, the threat a body remembers and
+## the death record all name an attacker family by number, and the band on the way
+## out is its own family.
+const WILDERNESS_SOURCE := 92
 ## What a warband missile may strike: the world (1) and the wood's own bodies (2).
 ## A squadmate is deliberately not in the set - the warband's swords do not cut
 ## its own, and neither do its arrows.
@@ -104,6 +122,12 @@ const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to w
 ## body to fall at their feet.
 const REVIVE_LESSON_RADIUS := 12.0
 const REVIVE_LESSON_STEP := "lesson_revive"
+## How often the world asks what part it plays in a co-op campaign. The flow is
+## still offline when `_ready` runs - the session is seated at the end of it - so
+## a client only learns its role from a poll, never from a read at startup.
+const ROLE_POLL_SECONDS := 1.0
+## The door the menu's "exit to title" row opens.
+const TITLE_SCENE := "res://title.tscn"
 ## The one card that is not a beat of a chapter: a squadmate going down can
 ## happen anywhere, in the camp or a mile down the trail, so it carries no numeral.
 const REVIVE_LESSON := {
@@ -119,17 +143,21 @@ var flow
 var controller
 var camera: Camera3D
 var hud
+## The one ability scene for the campaign: bodies are bound as they are adopted.
+var abilities
+## Escape's window: the warband's own quick menu, on a layer above the HUD.
+var menu
 var screen
 var paperdoll
 var card
-## Escape's own window. The campaign is not a level of the frontier's quick
-## menu, so it carries the settings page directly.
-var settings
 var loot
 var revive
 var branded
 var brand_hud
 var squad
+## The band between the camp's mouth and the lane. Built after the warband is
+## seated, because a wolf's first target is a real body.
+var wilderness
 ## The three areas. Each is the same script its standalone preview uses.
 var camp
 var trail
@@ -155,6 +183,13 @@ var _hint_text := ""
 var _roster_elapsed := 0.0
 var _wipe_beat := -1.0
 var _wiped := false
+## True once the flow says this machine is a guest. A client fields the same
+## bodies but does not own the world: it writes no checkpoint, runs no squad AI
+## and never swings a mob the session has marked as a replica.
+var _client := false
+## Seconds since the last role poll; `flow.warband_role()` costs a string compare
+## and a socket read, so it is asked once a second rather than every physics tick.
+var _role_elapsed := 0.0
 ## What the heightfield was baked to: `{triangles, cell, min, max}`.
 var _terrain: Dictionary = {}
 ## Where the town square stands, worked out before the ground so its pad can be
@@ -172,7 +207,11 @@ func _ready() -> void:
 	_build_ground()
 	_build_camera()
 	_build_soul()
+	# The ability scene exists before the bodies do: `_adopt_bodies()` binds each
+	# one as it is seated, and a body bound after its first cue would swallow it.
+	_build_abilities()
 	_build_ui()
+	_build_menu()
 	_build_loot()
 	_build_revive()
 	_build_squad()
@@ -181,6 +220,8 @@ func _ready() -> void:
 	# camp's first seen body, and a signal connected afterwards would miss it.
 	_wire_possession()
 	_seat_warband()
+	# The band comes after the seating: a wolf's first target is a real body.
+	_build_wilderness()
 	_attach_trail()
 	_build_brand()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -188,6 +229,12 @@ func _ready() -> void:
 	_announce()
 	if flow != null:
 		flow.bind(self)
+		# `bind()` is where the flow seats the session, so the role is knowable
+		# here - and it is the last moment a guest can act before the poll: a
+		# camp opening raises its pause card inside `_seat_warband`, and a paused
+		# tree runs no physics tick to poll from.
+		if str(flow.warband_role()) == "client":
+			_become_client()
 
 
 func _process(delta: float) -> void:
@@ -203,13 +250,21 @@ func _process(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if controller == null:
 		return
+	# The role is polled, never read once: the flow seats the session at the end
+	# of `_ready`, so at startup the answer is honestly "offline" and a guest only
+	# discovers itself a moment later.
+	_poll_role(delta)
 	# The squad's brains write a body's intent for this frame, so they run before
-	# the controller integrates it; the watchers tick themselves.
+	# the controller integrates it; the watchers tick themselves. A guest does not
+	# run them: its bodies are the host's to drive, and a second brain on the same
+	# body is a fight with itself.
 	_sync_crawl_control()
-	if squad != null:
+	if squad != null and not _client:
 		squad.drive(delta)
 	controller.physics_step(delta)
-	SquadDriveScript.retarget(guards, bodies, AGGRO_RADIUS)
+	# A replica is a mob the session is showing, not one this machine owns: it is
+	# handed no target, so no local sense ever wakes it behind the host's back.
+	SquadDriveScript.retarget(_local_guards(), bodies, AGGRO_RADIUS)
 	_sync_roster(delta)
 	_update_prompt()
 	_update_hint()
@@ -239,14 +294,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.open(controller.merc_for_peer(1))
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
-			if settings != null and settings.is_open():
-				settings.close()
+			# The warband's window is the menu: close it, close whatever panel is
+			# under it, or open it. The menu is the settings page's door now, so
+			# Escape no longer opens a second, narrower settings window.
+			if menu != null and menu.is_open():
+				menu.close()
 				get_viewport().set_input_as_handled()
 			elif _panel_open():
 				_hide_panels()
 				get_viewport().set_input_as_handled()
 			else:
-				_open_settings()
+				_open_menu()
 				get_viewport().set_input_as_handled()
 		KEY_K:
 			_try_loot()
@@ -383,10 +441,36 @@ func _build_ui() -> void:
 	card = CardScript.new()
 	card.name = "TutorialCard"
 	add_child(card)
-	settings = SettingsScript.new()
-	settings.name = "Settings"
-	add_child(settings)
-	settings.closed.connect(_on_settings_closed)
+
+
+## The scene half of the skills, built once under the world. `setup()` keeps the
+## world it spawns into and the controller it reads the soul from; `bind_body()`
+## is called by `_adopt_bodies()` for every body the world seats.
+func _build_abilities() -> void:
+	abilities = AbilitiesScript.new()
+	abilities.name = "Abilities"
+	add_child(abilities)
+	abilities.setup(self, controller)
+
+
+## Escape's window, on a layer above the HUD so the dim and the ledger cover the
+## bars. It pauses nothing: the world is one continuous place and the menu only
+## owns the pointer while it is up.
+func _build_menu() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "MenuLayer"
+	# Above the HUD's own `LAYER` (6): the menu's dim must sit over the bars, and
+	# below the tutorial card's 8, because the card is the topmost read in the game.
+	layer.layer = 7
+	add_child(layer)
+	menu = MenuScript.new()
+	menu.name = "WarbandMenu"
+	layer.add_child(menu)
+	menu.configure("EXIT TO TITLE")
+	menu.resumed.connect(_on_menu_resumed)
+	menu.load_requested.connect(_on_menu_load_requested)
+	menu.exit_requested.connect(_on_menu_exit_requested)
+	menu.quit_requested.connect(_on_menu_quit_requested)
 
 
 func _build_loot() -> void:
@@ -451,6 +535,19 @@ func _attach_trail() -> void:
 		"ground": false,
 		"arch": false,
 	})
+
+
+## The band between the camp's mouth and the lane, and the culler that keeps a
+## wolf the squad walked past from costing a tick behind the fog. It positions
+## itself off the camp's own mouth and the lane's own points, so a moved gap in
+## the trees moves the band with it.
+func _build_wilderness() -> void:
+	wilderness = WildernessScript.new()
+	wilderness.name = "Wilderness"
+	add_child(wilderness)
+	# `setup()` appends every wolf to `guards`, the world's one hostile list, so
+	# `retarget` and the squad find them without a second registry.
+	wilderness.setup(self)
 
 
 ## Where the lane's first waypoint lands: not the camp's mouth, but
@@ -549,6 +646,10 @@ func _adopt_bodies() -> void:
 		# world with nowhere to duel would swing through every watcher for nothing.
 		actor.combat.target_mask = 2
 		actor.bounds = BODY_BOUNDS
+		# The body's skill clock needs a scene listener before its first cue, or
+		# the beat fires into nothing: one scene node, bound once per body.
+		if abilities != null:
+			abilities.bind_body(actor)
 		_wire_crawl(actor)
 		_wire_projectiles(actor)
 		# A body that goes down lets go of its steel. Both the knock-down and the
@@ -708,11 +809,67 @@ func _build_squad() -> void:
 
 ## Who may act as a squadmate this frame: the camp answers with its latches (a
 ## prisoner still in a cage is not free, and the rescuer is the player's beat
-## until the squad is out).
+## until the squad is out). A body a human soul is inside is never a squadmate,
+## local or remote: the AI would be writing a second intent into a body somebody
+## is already walking.
 func _is_free_ally(merc_id: int) -> bool:
+	if merc_id <= 0:
+		return false
+	if warband != null and warband.souls != null and warband.souls.occupied_by(merc_id) > 0:
+		return false
 	if camp == null:
-		return merc_id > 0
+		return true
 	return camp.is_free(merc_id)
+
+
+# --- the co-op role --------------------------------------------------------
+#
+# The world is the same place on every machine, but only the host owns it: a
+# guest fields the bodies its save describes and follows the host's word on
+# everything else. The flow is still "offline" when `_ready` runs (the session is
+# seated at the end of it), so the role can only be discovered by asking later.
+
+## Ask the flow what part this machine plays, once a second. The first "client"
+## answer switches the world into its guest mode exactly once.
+func _poll_role(delta: float) -> void:
+	if _client or flow == null:
+		return
+	_role_elapsed += delta
+	if _role_elapsed < ROLE_POLL_SECONDS:
+		return
+	_role_elapsed = 0.0
+	if str(flow.warband_role()) == "client":
+		_become_client()
+
+
+## A guest does not replay the cages and does not write the campaign. The camp
+## throws its lesson away (the host's cage state is the truth, and the opening is
+## a solo beat), and from here on this machine runs no squad AI and no local mob
+## brains - the session has already marked the host's mobs as replicas.
+func _become_client() -> void:
+	if _client:
+		return
+	_client = true
+	if camp != null:
+		camp.dismiss_lesson()
+	if squad != null:
+		squad.following = false
+
+
+## The guards this machine may point at a body. A replica is the host's mob shown
+## here: giving it a target would arm a brain that never runs, and a stale target
+## is exactly what a late snapshot then drags a wolf towards.
+func _local_guards() -> Array:
+	if not _client:
+		return guards
+	var local: Array = []
+	for guard in guards:
+		if not is_instance_valid(guard):
+			continue
+		if bool(guard.get("replica")):
+			continue
+		local.append(guard)
+	return local
 
 
 func _wire_possession() -> void:
@@ -794,6 +951,71 @@ func drop_held_weapon(enemy) -> bool:
 	var at: Vector3 = (enemy as Node3D).global_position
 	spawn_pickup(item_id, GearDropScript.drop_point(at, GearDropScript.forward_of(enemy)))
 	return true
+
+
+## One hostile dies, and the world pays for it once. The wilderness band reports
+## here and nowhere else - the camp's watchers and the trail's cultists have their
+## own areas' handlers for the lesson's bookkeeping, but the purse belongs to the
+## world, so the reward cannot be booked twice.
+func _on_enemy_defeated(enemy, reward: int) -> void:
+	if not is_instance_valid(enemy):
+		return
+	# A replica is another machine's mob shown here: the host resolves its death
+	# and streams the amount through `WarbandSession.receive_reward`, so this
+	# purse adds nothing of its own.
+	if not _client and not bool(enemy.get("replica")):
+		_pay_kill(reward)
+	# The steel comes out of its hand and lands in the dirt; what it still wears is
+	# the corpse screen's, so nothing is on offer twice. The body stays on the one
+	# hostile list, exactly as the camp's and the trail's fallen do.
+	drop_held_weapon(enemy)
+	if loot != null and loot.has_method("register_corpse"):
+		loot.register_corpse(enemy)
+	if screen != null:
+		screen.refresh()
+
+
+## Book a reward into the shared purse and let the strip above it hear about it.
+## `Warband` is the one funnel - it writes the same `PlayerState` credits every
+## mode spends - but it announces nothing itself, so the purse is repainted here.
+func _pay_kill(reward: int) -> void:
+	if reward <= 0 or warband == null:
+		return
+	warband.award_gold(reward)
+	# The strip reads `warband.gold()` and only repaints when it is told to; the
+	# purse lives in `PlayerState`, so `award_gold` announces nothing by itself.
+	if hud != null and hud.has_method("_refresh_purse"):
+		hud.call("_refresh_purse")
+
+
+## A hostile's blow lands on a warband body. The mob emits the swing; the body's
+## own guard answers it, exactly as it does in the camp and on the trail - a blade
+## raised into the attacker's face turns the hit, and a parry staggers the animal
+## instead of cutting the body. Nothing here weighs the blow a second time: the
+## mob already carries its own scale.
+func _on_enemy_attack(attacker, amount: float, victim) -> void:
+	if not is_instance_valid(attacker) or not is_instance_valid(victim):
+		return
+	# Only a body this mode drives has a guard to answer with: anything else the
+	# signal names is not a fighter here and is left alone.
+	if not victim.has_method("receive_melee") and not victim.has_method("take_damage"):
+		return
+	# A body on the floor is out of the fight and a dead one cannot be put down
+	# twice: both are the roster's business now, not the mob's.
+	var alive = victim.get("alive")
+	if alive != null and not bool(alive):
+		return
+	if bool(victim.get("downed")):
+		return
+	var outcome := -1
+	if victim.has_method("receive_melee"):
+		outcome = int(victim.receive_melee(amount, WILDERNESS_SOURCE,
+			attacker.global_position))
+	elif victim.has_method("take_damage"):
+		victim.take_damage(amount, WILDERNESS_SOURCE)
+		outcome = CombatScript.DEFENSE_NONE
+	if outcome == CombatScript.DEFENSE_PARRY and attacker.has_method("stagger"):
+		attacker.stagger(CombatScript.PARRY_STAGGER)
 
 
 ## A warband body on the floor drops what it was holding. The roster is what
@@ -937,6 +1159,10 @@ func _all_bodies_out() -> bool:
 
 func _check_checkpoints() -> void:
 	if warband == null or controller == null or _wiped:
+		return
+	# A guest does not own the campaign: writing its own bookmark would move the
+	# line every machine reloads from to wherever one guest happened to stand.
+	if _client:
 		return
 	var actor = controller.active_body(1)
 	if actor == null or not is_instance_valid(actor) or not bool(actor.get("alive")):
@@ -1213,8 +1439,6 @@ func prompt_text() -> String:
 
 
 func _hide_panels() -> void:
-	if settings != null and settings.is_open():
-		settings.close()
 	if screen != null and screen.is_open():
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
@@ -1224,27 +1448,75 @@ func _hide_panels() -> void:
 
 
 func _panel_open() -> bool:
-	if settings != null and settings.is_open():
+	# The menu is a panel for the pointer's purposes - it takes the cursor - but
+	# Escape closes it through its own branch rather than through `_hide_panels`.
+	if menu != null and menu.is_open():
 		return true
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
 		return true
 	return town != null and town.panels_open()
 
 
-## Escape opens the settings page. The body keeps standing where it stood, but
-## it stops taking commands while the page is up: a click on the page must never
-## swing a weapon.
-func _open_settings() -> void:
-	if settings == null or (card != null and card.is_open()):
+## Escape opens the warband menu. The body keeps standing where it stood, but it
+## stops taking commands while the ledger is up: a click on the ledger must never
+## swing a weapon. `resumed` restores the body on every way the menu closes.
+func _open_menu() -> void:
+	if menu == null or (card != null and card.is_open()):
 		return
-	settings.open()
+	menu.open()
 	if controller != null:
 		controller.input_enabled = false
 
 
-func _on_settings_closed() -> void:
+func _on_menu_resumed() -> void:
 	if controller != null:
 		controller.input_enabled = true
+
+
+## The menu's LOAD row. The file is read first and the flow is told where to put
+## the warband second: `GameFlow.goto()` writes the warband on its way out, so a
+## load that ran after it would save the world's live roster over the file it was
+## about to read.
+func _on_menu_load_requested() -> void:
+	if menu != null:
+		menu.close()
+	if warband == null or flow == null:
+		return
+	if not warband.load_state():
+		if hud != null:
+			hud.set_status("No written warband to load.", 2.5)
+		return
+	flow.world_start = "checkpoint" if warband.has_checkpoint() else "town"
+	# The flow's own constant, read off the instance: the world never spells its
+	# own path a second time.
+	flow.goto(flow.WORLD_SCENE)
+
+
+## The menu's EXIT row: write the campaign, drop any socket this machine holds,
+## and go back to the title. A guest's bodies die with the scene, so the session
+## is abandoned before the hand-off rather than left pointing at them.
+func _on_menu_exit_requested() -> void:
+	if menu != null:
+		menu.close()
+	if warband != null:
+		warband.save_state()
+	if flow != null and flow.warband_role() != "offline":
+		flow.leave_warband()
+	var tree := get_tree()
+	if tree == null:
+		return
+	# A tutorial card may be holding the tree still; the title must not open
+	# behind it.
+	tree.paused = false
+	tree.change_scene_to_file(TITLE_SCENE)
+
+
+## The menu's QUIT row. The file is written before the process leaves, so the
+## last thing a campaign did is the one thing a reload needs.
+func _on_menu_quit_requested() -> void:
+	if warband != null:
+		warband.save_state()
+	get_tree().quit()
 
 
 # --- the town's readout ----------------------------------------------------

@@ -8,9 +8,11 @@ extends Node3D
 ## you can walk up to: the shared stash chest (the paperdoll over the collective
 ## pool), the `SacrificialAltar`, the Gold recruiter's desk (the warband screen's
 ## recruiter board) and the `ExpeditionGate` that marks a battle line and asks
-## the flow owner for the arena. The same objects are used by the admin arena, so
-## nothing here re-implements a service; this scene only places them and resolves
-## which one a standing body is next to (`interact_at`).
+## the flow owner for the arena. The market ring around them carries the three
+## keeper stalls (Orla, Brann, Vey), each a counter `G` opens as a ledger board
+## of that keeper's stock and the shared stash. The same objects are used by the
+## admin arena, so nothing here re-implements a service; this scene only places
+## them and resolves which one a standing body is next to (`interact_at`).
 ##
 ## There is no combat and no second damage multiplier: unpossessed bodies are
 ## fixtures (`set_bot(false)`), so the square never brawls on its own.
@@ -21,6 +23,7 @@ const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
+const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
@@ -43,14 +46,23 @@ const BODY_BOUNDS := 16.0
 const WOOD_DEPTH := 20.0
 const TOWN_WOOD_SEED := 7717
 
-## The four services, arranged so no two rings overlap: walking the square always
-## names exactly one thing.
+## The square's standing services, arranged so no two 3 m rings overlap: walking
+## the square always names exactly one thing.
 const STASH_POINT := Vector3(-8.0, 0.0, 4.0)
 const ALTAR_POINT := Vector3(8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
 const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const GATE_POINT := Vector3(8.0, 0.0, -6.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
+
+## The three keepers' counters, out on the market ring. Each keeps its own 3 m
+## ring clear of every other service (the closest pair is Orla and the stash at
+## 6.3 m), and all three stand inside the square's 16 m walkable bound so a body
+## can always reach the stall it wants: Orla's bow rack west, Brann's anvil east,
+## Vey's armour table on the gate's side.
+const VENDOR_ORLA_POINT := Vector3(-14.0, 0.0, 2.0)
+const VENDOR_BRANN_POINT := Vector3(14.0, 0.0, 0.0)
+const VENDOR_VEY_POINT := Vector3(7.0, 0.0, -14.0)
 
 ## Muster ring around the fire: one post per body the round can field.
 const SPAWN_POSTS := [
@@ -104,6 +116,10 @@ var stash_chest: Node3D
 var recruiter_desk: Node3D
 var quartermaster_desk: Node3D
 var quartermaster
+var vendor_orla: Node3D
+var vendor_brann: Node3D
+var vendor_vey: Node3D
+var vendor_menu
 var signpost: Node3D
 ## The treeline around the square: `{trees, bushes, wall}` from the wood planner.
 var wood: Dictionary = {}
@@ -466,6 +482,12 @@ func _build_services() -> void:
 	stash_chest = _build_stash_chest()
 	recruiter_desk = _build_recruiter_desk()
 	quartermaster_desk = _build_quartermaster_desk()
+	vendor_orla = _build_vendor_counter("VendorOrla", VENDOR_ORLA_POINT,
+		"STOREKEEPER ORLA", Color(0.94, 0.80, 0.52), 0)
+	vendor_brann = _build_vendor_counter("VendorBrann", VENDOR_BRANN_POINT,
+		"SMITH BRANN", Color(0.86, 0.62, 0.42), 1)
+	vendor_vey = _build_vendor_counter("VendorVey", VENDOR_VEY_POINT,
+		"QUARTERMASTER VEY", Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
 
 	gate = GateScript.new()
@@ -481,6 +503,16 @@ func _build_services() -> void:
 	quartermaster.name = "Quartermaster"
 	add_child(quartermaster)
 	quartermaster.configure(warband)
+	# One panel walks from keeper to keeper; the town owns the layer above the HUD
+	# so a stall opened by a standing body draws over both the square and the keys.
+	var vendor_layer := CanvasLayer.new()
+	vendor_layer.name = "VendorLayer"
+	vendor_layer.layer = 9
+	add_child(vendor_layer)
+	vendor_menu = VendorMenuScript.new()
+	vendor_menu.name = "VendorMenu"
+	vendor_layer.add_child(vendor_menu)
+	vendor_menu.configure(warband, 0)
 	preload("res://scripts/warband/town_dressing.gd").build(self)
 
 func _build_stash_chest() -> Node3D:
@@ -543,6 +575,55 @@ func _build_quartermaster_desk() -> Node3D:
 	desk.add_child(lamp)
 	desk.add_child(_label("QUARTERMASTER", Vector3(0.0, 1.7, 0.0), Color(0.78, 0.86, 0.96)))
 	return desk
+
+## One of the three market stalls: the same trestle as the recruiter's and the
+## keeper's, dressed with the goods that stall actually trades in - Orla's rack
+## of bows and staves, Brann's anvil and laid-out blades, Vey's folded plates.
+## `seat` is the `PlayerState.VENDORS` index the counter opens.
+func _build_vendor_counter(node_name: String, at: Vector3, sign_text: String,
+		accent: Color, seat: int) -> Node3D:
+	var counter := Node3D.new()
+	counter.name = node_name
+	counter.position = at
+	add_child(counter)
+	var iron := Geo.material(Color(0.30, 0.29, 0.28), 0.6, 0.55)
+	var steel := Geo.material(Color(0.46, 0.47, 0.49), 0.75, 0.35)
+	Geo.box(counter, Vector3(2.0, 0.12, 0.9), Vector3(0.0, 0.92, 0.0), _wood)
+	for x in [-0.82, 0.82]:
+		Geo.box(counter, Vector3(0.14, 0.86, 0.8), Vector3(x, 0.43, 0.0), _wood)
+	match seat:
+		0:
+			# Orla: bows and staves leaning on the back bar, a tally board in front.
+			for index in 4:
+				var slot_x := -0.76 + float(index) * 0.5
+				Geo.beam(counter, Vector3(slot_x, 1.0, -0.24),
+					Vector3(slot_x + 0.08, 2.05, -0.34), 0.028, _wood, 6)
+			Geo.box(counter, Vector3(0.5, 0.05, 0.26), Vector3(-0.4, 0.99, 0.22),
+				Geo.material(Color(0.55, 0.52, 0.44), 0.0, 0.95))
+		1:
+			# Brann: the anvil, three blades laid out, and the hammer beside them.
+			Geo.box(counter, Vector3(0.44, 0.2, 0.24), Vector3(0.5, 1.08, 0.0), iron)
+			for index in 3:
+				Geo.box(counter, Vector3(0.68, 0.03, 0.055),
+					Vector3(-0.38, 0.995, -0.2 + float(index) * 0.2), steel)
+			Geo.beam(counter, Vector3(-0.86, 0.98, 0.14),
+				Vector3(-0.6, 1.3, 0.14), 0.022, _wood, 6)
+		2:
+			# Vey: folded armour plates and a helm waiting to be fitted.
+			for index in 4:
+				Geo.box(counter, Vector3(0.62, 0.05, 0.5),
+					Vector3(-0.3, 0.99 + float(index) * 0.055, 0.0), iron)
+			Geo.sphere(counter, 0.16, Vector3(0.52, 1.06, 0.0), steel,
+				Vector3(1.0, 0.9, 1.1))
+	var lamp := OmniLight3D.new()
+	lamp.name = "StallLamp"
+	lamp.light_color = accent
+	lamp.light_energy = 0.85
+	lamp.omni_range = 4.5
+	lamp.position = Vector3(0.0, 1.5, 0.0)
+	counter.add_child(lamp)
+	counter.add_child(_label(sign_text, Vector3(0.0, 1.72, 0.0), accent))
+	return counter
 
 func _build_signpost() -> Node3D:
 	var post := Node3D.new()
@@ -617,8 +698,9 @@ func _try_interact() -> void:
 		hud.set_status("Nothing to use here.", 1.5)
 
 ## Resolve and use whichever service `point` is next to. Returns `"stash"`,
-## `"altar"`, `"recruiter"`, `"gate"` or `""`, which is what a single `G` handler
-## and the regression both drive instead of guessing at positions.
+## `"altar"`, `"recruiter"`, `"quartermaster"`, `"vendor_orla"`,
+## `"vendor_brann"`, `"vendor_vey"`, `"gate"` or `""`, which is what a single `G`
+## handler and the regression both drive instead of guessing at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
 	var service := service_at(point)
 	match service:
@@ -640,10 +722,24 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			_hide_panels()
 			quartermaster.open()
 			hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
+		"vendor_orla":
+			_open_vendor(0)
+		"vendor_brann":
+			_open_vendor(1)
+		"vendor_vey":
+			_open_vendor(2)
 		"gate":
 			var gate_state: Dictionary = gate.prompt(peer_id)
 			hud.set_status(str(gate_state.get("message", "")), 5.0)
 	return service
+
+## Open one keeper's stall. One panel serves all three, so opening a stall closes
+## whatever was up and re-points the same board at that keeper's stock.
+func _open_vendor(index: int) -> void:
+	_hide_panels()
+	vendor_menu.configure(warband, index)
+	vendor_menu.open()
+	hud.set_status("%s  ·  %s" % [vendor_menu.keeper_name(), vendor_menu.keeper_line()], 5.0)
 
 ## Whether a body is standing on the square's ground at all (the walls plus a
 ## stride): what decides whether the town's key line or the trail's is the one
@@ -673,6 +769,9 @@ func service_at(point: Vector3) -> String:
 		{"id": "altar", "point": altar.global_position, "reach": altar.interact_range},
 		{"id": "recruiter", "point": recruiter_desk.global_position, "reach": SERVICE_REACH},
 		{"id": "quartermaster", "point": quartermaster_desk.global_position, "reach": SERVICE_REACH},
+		{"id": "vendor_orla", "point": vendor_orla.global_position, "reach": SERVICE_REACH},
+		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
+		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
 		{"id": "gate", "point": gate.global_position, "reach": gate.open_radius},
 	]
 	var best := ""
@@ -696,6 +795,12 @@ func service_point(service: String) -> Vector3:
 			return recruiter_desk.global_position
 		"quartermaster":
 			return quartermaster_desk.global_position
+		"vendor_orla":
+			return vendor_orla.global_position
+		"vendor_brann":
+			return vendor_brann.global_position
+		"vendor_vey":
+			return vendor_vey.global_position
 		"gate":
 			return gate.global_position
 	return Vector3.ZERO
@@ -727,6 +832,12 @@ func hint_line(actor) -> String:
 			text = "G - hire a new body for gold (up to the cap)"
 		"quartermaster":
 			text = "G - buy plain steel into the shared stash"
+		"vendor_orla":
+			text = "G - buy bows and staves, or sell spare gear"
+		"vendor_brann":
+			text = "G - buy blades and shields, or sell spare gear"
+		"vendor_vey":
+			text = "G - buy armour, or sell spare gear"
 		"gate":
 			text = "G - launch an expedition with the line you deployed"
 	return text
@@ -745,6 +856,12 @@ func prompt_line(actor) -> String:
 			return "G - Gold recruiter"
 		"quartermaster":
 			return "G - quartermaster"
+		"vendor_orla":
+			return "G - Storekeeper Orla"
+		"vendor_brann":
+			return "G - Smith Brann"
+		"vendor_vey":
+			return "G - Quartermaster Vey"
 		"gate":
 			return "G - expedition gate"
 	return ""
@@ -775,12 +892,15 @@ func _hide_panels() -> void:
 		altar.close()
 	if quartermaster != null and quartermaster.is_open():
 		quartermaster.close()
+	if vendor_menu != null and vendor_menu.is_open():
+		vendor_menu.close()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (altar != null and altar.is_open()) \
-		or (quartermaster != null and quartermaster.is_open())
+		or (quartermaster != null and quartermaster.is_open()) \
+		or (vendor_menu != null and vendor_menu.is_open())
 
 # --- seeding ---------------------------------------------------------------
 

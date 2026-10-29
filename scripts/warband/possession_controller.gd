@@ -29,6 +29,7 @@ const Actor = preload("res://scripts/arena_actor.gd")
 const CameraRig = preload("res://scripts/warband/possession_camera.gd")
 const SyncScript = preload("res://scripts/warband/possession_sync.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
@@ -507,6 +508,11 @@ func _drive(actor: Actor) -> void:
 	var right := Vector2(cos(yaw), -sin(yaw))
 	var back := Vector2(sin(yaw), cos(yaw))
 	var direction := right * motion.x + back * motion.y
+	# A peek leans out of the shoulder the eye is on, so the side is read from
+	# the same camera that draws the crosshair. `cover.normal` only exists in
+	# cover; the actor's own step already tolerates the call outside it.
+	actor.peek_view_right = Vector3(right.x, 0.0, right.y)
+	actor.update_combat_cover_side()
 	var running := Input.is_physical_key_pressed(KEY_SHIFT)
 	var sample := aim_sample()
 	if actor.authoritative:
@@ -681,6 +687,17 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 			if typeof(value) != TYPE_STRING or value not in ["bandage", "potion"]:
 				return false
 			return actor.try_consume(str(value))
+		"ability":
+			# The warband binds plain 1/2/3 to the actor's three skill slots. The
+			# runner owns eligibility, stamina and cooldown; the controller only
+			# keeps the wire honest about which slot was asked for.
+			if typeof(value) != TYPE_INT:
+				return false
+			var index := int(value)
+			if index < 0 or index >= AbilityRules.SLOT_COUNT:
+				return false
+			var outcome: Variant = actor.try_ability(index)
+			return typeof(outcome) == TYPE_DICTIONARY and bool(outcome.get("ok", false))
 		"stop":
 			combat.stop()
 			return true
@@ -746,6 +763,14 @@ func _command(event: InputEventKey) -> bool:
 	var right := Vector3(cos(yaw), 0, -sin(yaw))
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
 	match event.keycode:
+		# The three item skills sit on the number row, plain: a warband player
+		# never needs Shift to reach a skill, and Shift+1 is the same press.
+		KEY_1:
+			_act("ability", 0)
+		KEY_2:
+			_act("ability", 1)
+		KEY_3:
+			_act("ability", 2)
 		KEY_6:
 			_act("consume", "bandage")
 		KEY_7:
@@ -756,6 +781,10 @@ func _command(event: InputEventKey) -> bool:
 			_act("crouch", not actor.cover.crouch_requested)
 		KEY_F:
 			_act("cover", forward)
+			# Peeking is a cover-only intent: standing up drops any lean the
+			# mouse still holds, so the next cover press starts flat against it.
+			if not actor.cover.active:
+				actor.peek_requested = false
 		KEY_X:
 			# Shoulder swap, as the frontier binds it: the eye crosses to the other
 			# side of the body and the crosshair keeps pointing where it pointed.
@@ -796,6 +825,10 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 			else:
 				_throw_held = false
 				_act("block", {"pressed": true, "forward": forward})
+				# Holding the guard against cover also leans out of it: the body
+				# stays behind the wall, the eye and the weapon come round it.
+				# Outside cover the same press is only a guard.
+				actor.peek_requested = bool(actor.cover.active)
 		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
 			if weapon in ["sword", "dagger", "dual"]:
 				var variant := "stab" if event.button_index == MOUSE_BUTTON_WHEEL_UP else "overhead"
@@ -803,6 +836,10 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 
 func _mouse_release(event: InputEventMouseButton) -> void:
 	var actor := active_actor
+	if event.button_index == MOUSE_BUTTON_RIGHT:
+		# Releasing the button ends the lean whatever the hands hold: the body
+		# settles back behind the wall instead of hanging out in the open.
+		actor.peek_requested = false
 	if event.button_index == MOUSE_BUTTON_LEFT and _drawing:
 		_drawing = false
 		var sample := aim_sample()

@@ -490,10 +490,12 @@ func check_live_input(warband, controller, merc_ids: Array[int]) -> void:
 	check(controller.refresh_gear(bow_id), "the roster kit re-dresses the body on demand")
 	check(controller.active_actor.rig.weapon == "bow",
 		"the shortbow is in its hands because its gear put it there")
-	for keycode in [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5]:
+	# 1/2/3 are the warband's ability slots now (deliberately not weapon keys);
+	# 4 and 5 remain the admin leftovers this check exists to keep inert.
+	for keycode in [KEY_4, KEY_5]:
 		controller._unhandled_input(key_event(keycode))
 	check(controller.active_actor.rig.weapon == "bow",
-		"1-5 put no weapon on the possessed body")
+		"4-5 put no weapon on the possessed body")
 	check(not controller.active_actor.rig.shield_equipped,
 		"and no shield either")
 	controller._unhandled_input(mouse_event(MOUSE_BUTTON_LEFT, true))

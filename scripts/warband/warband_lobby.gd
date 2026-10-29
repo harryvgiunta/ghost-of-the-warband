@@ -17,11 +17,21 @@ extends Control
 ## refused by the host over the wire, so without this strip the second player
 ## would be pressing a key that silently does nothing.
 
-## The panel the title places beside its four doors.
-const PANEL_SIZE := Vector2(744, 316)
+## The panel the title places beside its four doors. Tall enough for the mode
+## row, which is the lobby's only new question: the battle or the campaign.
+const PANEL_SIZE := Vector2(744, 340)
 ## The warband's own port. The arena's `--warband-join` fallback has always been
 ## 7779, so the lobby offers the same one instead of the open world's 7777.
 const DEFAULT_PORT := 7779
+## The two things this door can open. Campaign is the default: the warband is
+## the game now, so a player who presses HOST WARBAND without touching the mode
+## row must get the co-op run through the world the four cages, the trail and
+## the town share. The arena bout is still the first option and stays fully
+## selectable; it is the stand-alone bout that leaves the campaign save alone.
+const MODE_ARENA := "arena"
+const MODE_CAMPAIGN := "campaign"
+const ARENA_SCENE := "res://admin_arena.tscn"
+const CAMPAIGN_SCENE := "res://scenes/warband_world.tscn"
 
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 
@@ -34,6 +44,12 @@ const WARN := Color("e2a06a")
 var name_input: LineEdit
 var address_input: LineEdit
 var port_input: SpinBox
+## The choice between the stand-alone bout and the co-op campaign. Index 0 is
+## the arena and index 1 the campaign; the row is built with the campaign
+## selected, so the order of the options and the default are separate things.
+var mode_select: OptionButton
+## One line per mode, under the selector, saying what each one opens.
+var mode_description: Label
 var host_button: Button
 var join_button: Button
 var status_label: Label
@@ -78,49 +94,101 @@ func address() -> String:
 func port() -> int:
 	return int(port_input.value) if port_input != null else DEFAULT_PORT
 
+## `"arena"` or `"campaign"`. The selector's metadata is the source of truth, so
+## the payload cannot disagree with the option the player is looking at. A
+## selector that was never built - or one whose current row carries no mode -
+## falls back to the campaign, which is the panel's default.
+func selected_mode() -> String:
+	if mode_select == null:
+		return MODE_CAMPAIGN
+	var index := mode_select.selected
+	if index < 0 or index >= mode_select.item_count:
+		return MODE_CAMPAIGN
+	var kind := str(mode_select.get_item_metadata(index))
+	return kind if kind == MODE_CAMPAIGN or kind == MODE_ARENA else MODE_CAMPAIGN
+
+## The intent this lobby would hand `GameFlow` right now, built without sending
+## it. `action` is `"host"` or `"join"`; the scene follows the mode, not the
+## action, because both peers must field the same world. The title regression
+## presses HOST/JOIN for real; this accessor exists so a headless test can read
+## the request without opening a socket or moving the tree.
+func request_payload(action: String = "host") -> Dictionary:
+	var kind := selected_mode()
+	var hosting := action != "join"
+	return {
+		"mode": "host" if hosting else "join",
+		"mode_kind": kind,
+		"scene": CAMPAIGN_SCENE if kind == MODE_CAMPAIGN else ARENA_SCENE,
+		"address": "127.0.0.1" if hosting else address(),
+		"port": port(),
+		"name": player_name(),
+	}
+
 # --- the two doors ---------------------------------------------------------
 
 ## Open a battle on this machine. The socket is created by `GameFlow` once the
 ## arena has fielded the bodies, so the first snapshot never describes a body the
 ## wire has not seen.
 func host() -> void:
+	var campaign := selected_mode() == MODE_CAMPAIGN
+	var method := "host_campaign" if campaign else "host_warband"
 	var flow := get_node_or_null("/root/GameFlow")
-	if flow == null or not flow.has_method("host_warband"):
+	if flow == null or not flow.has_method(method):
 		set_status("The warband flow is unavailable.", WARN)
 		return
-	var chosen_port := port()
+	var payload := request_payload("host")
+	var chosen_port := int(payload.get("port", DEFAULT_PORT))
 	if chosen_port < 1024 or chosen_port > 65535:
 		set_status("Choose a UDP port between 1024 and 65535.", WARN)
 		return
-	var chosen_name := player_name()
+	var chosen_name := str(payload.get("name", player_name()))
+	# The remembered address is the field, not the payload: the intent binds
+	# 127.0.0.1, but the form has always remembered what the player typed.
 	_remember(chosen_name, address(), chosen_port)
-	set_status("Opening a warband battle on UDP %d. Friends join this port." % chosen_port)
-	_note("warband_host", {"port": chosen_port, "name": chosen_name})
+	if campaign:
+		set_status("Opening the campaign on UDP %d. Friends join this port." % chosen_port)
+	else:
+		set_status("Opening a warband battle on UDP %d. Friends join this port." % chosen_port)
+	_note("warband_host", {"port": chosen_port, "name": chosen_name,
+		"mode_kind": str(payload.get("mode_kind", MODE_ARENA))})
 	print("WARBAND_LOBBY_HOST port=%d name=%s" % [chosen_port, chosen_name])
-	flow.host_warband(chosen_port, chosen_name)
+	if campaign:
+		flow.host_campaign(chosen_port, chosen_name)
+	else:
+		flow.host_warband(chosen_port, chosen_name)
 
 ## Join a friend's battle. The flow enters the same scene and the first body no
 ## soul is inside; the host is the one that decides which body that turns out to
 ## be, so a body taken in the meantime comes back as a refusal, not a crash.
 func join() -> void:
+	var campaign := selected_mode() == MODE_CAMPAIGN
+	var method := "join_campaign" if campaign else "join_warband"
 	var flow := get_node_or_null("/root/GameFlow")
-	if flow == null or not flow.has_method("join_warband"):
+	if flow == null or not flow.has_method(method):
 		set_status("The warband flow is unavailable.", WARN)
 		return
-	var chosen_address := address()
+	var payload := request_payload("join")
+	var chosen_address := str(payload.get("address", address()))
 	if chosen_address.is_empty():
 		set_status("Enter the host's address.", WARN)
 		return
-	var chosen_port := port()
+	var chosen_port := int(payload.get("port", DEFAULT_PORT))
 	if chosen_port < 1024 or chosen_port > 65535:
 		set_status("Choose a UDP port between 1024 and 65535.", WARN)
 		return
-	var chosen_name := player_name()
+	var chosen_name := str(payload.get("name", player_name()))
 	_remember(chosen_name, chosen_address, chosen_port)
-	set_status("Joining %s:%d..." % [chosen_address, chosen_port])
-	_note("warband_join", {"address": chosen_address, "port": chosen_port, "name": chosen_name})
+	if campaign:
+		set_status("Joining the campaign at %s:%d..." % [chosen_address, chosen_port])
+	else:
+		set_status("Joining %s:%d..." % [chosen_address, chosen_port])
+	_note("warband_join", {"address": chosen_address, "port": chosen_port,
+		"name": chosen_name, "mode_kind": str(payload.get("mode_kind", MODE_ARENA))})
 	print("WARBAND_LOBBY_JOIN address=%s port=%d name=%s" % [chosen_address, chosen_port, chosen_name])
-	flow.join_warband(chosen_address, chosen_port, chosen_name)
+	if campaign:
+		flow.join_campaign(chosen_address, chosen_port, chosen_name)
+	else:
+		flow.join_warband(chosen_address, chosen_port, chosen_name)
 
 func set_status(message: String, color: Color = TEAL) -> void:
 	if status_label == null:
@@ -154,51 +222,73 @@ func _build() -> void:
 	var heading := _label(panel, "WARBAND LOBBY", Vector2(26, 20), 28, CREAM)
 	heading.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	heading.size = Vector2(690, 38)
-	var subtitle := _label(panel, "Host the warband, or join a friend's field.", Vector2(28, 58), 12, MUTED)
+	var subtitle := _label(panel, "Choose a field: an arena bout or campaign co-op.", Vector2(28, 58), 12, MUTED)
 	subtitle.size = Vector2(690, 18)
-	var rule := ColorRect.new()
-	rule.position = Vector2(28, 80)
-	rule.size = Vector2(84, 3)
-	rule.color = GOLD
-	panel.add_child(rule)
 
-	_label(panel, "YOUR NAME", Vector2(28, 96), 10, GOLD)
+	# The mode is the lobby's one question. Campaign co-op is the default, so the
+	# row is built with index 1 selected: HOST WARBAND with the dropdown never
+	# touched opens the warband world. The arena stays first in the list because
+	# it is the stand-alone bout and the older destination of the two, and it
+	# remains one click away.
+	mode_select = OptionButton.new()
+	mode_select.position = Vector2(28, 82)
+	mode_select.size = Vector2(300, 36)
+	mode_select.add_theme_font_size_override("font_size", 14)
+	mode_select.add_item("ARENA BATTLE", 0)
+	mode_select.set_item_metadata(0, MODE_ARENA)
+	mode_select.add_item("CAMPAIGN (CO-OP)", 1)
+	mode_select.set_item_metadata(1, MODE_CAMPAIGN)
+	mode_select.selected = 1
+	panel.add_child(mode_select)
+	# One line per mode, both readable without opening the dropdown: the choice
+	# is what the bout costs the campaign save, so leaving one unexplained is how
+	# a player hosts the wrong thing.
+	mode_description = _label(panel,
+		"ARENA BATTLE: a stand-alone bout; the campaign save is untouched.\n"
+		+ "CAMPAIGN (CO-OP): co-op through the warband world and its checkpoints.",
+		Vector2(340, 78), 9, MUTED)
+	mode_description.size = Vector2(380, 44)
+	mode_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	_label(panel, "YOUR NAME", Vector2(28, 134), 10, GOLD)
 	name_input = LineEdit.new()
-	name_input.position = Vector2(28, 116)
+	name_input.position = Vector2(28, 152)
 	name_input.size = Vector2(220, 38)
 	name_input.max_length = 16
 	panel.add_child(name_input)
 
-	_label(panel, "UDP PORT", Vector2(272, 96), 10, GOLD)
+	_label(panel, "UDP PORT", Vector2(272, 134), 10, GOLD)
 	port_input = SpinBox.new()
-	port_input.position = Vector2(272, 116)
+	port_input.position = Vector2(272, 152)
 	port_input.size = Vector2(120, 38)
 	port_input.min_value = 1024
 	port_input.max_value = 65535
 	port_input.value = DEFAULT_PORT
 	panel.add_child(port_input)
 
-	_label(panel, "HOST ADDRESS", Vector2(416, 96), 10, GOLD)
+	_label(panel, "HOST ADDRESS", Vector2(416, 134), 10, GOLD)
 	address_input = LineEdit.new()
-	address_input.position = Vector2(416, 116)
+	address_input.position = Vector2(416, 152)
 	address_input.size = Vector2(300, 38)
 	panel.add_child(address_input)
 
-	host_button = _button(panel, "HOST WARBAND", Vector2(28, 172), Vector2(340, 46))
+	host_button = _button(panel, "HOST WARBAND", Vector2(28, 200), Vector2(340, 46))
 	host_button.theme_type_variation = "PrimaryButton"
 	host_button.add_theme_font_size_override("font_size", 17)
 	host_button.pressed.connect(host)
-	join_button = _button(panel, "JOIN WARBAND", Vector2(384, 172), Vector2(332, 46))
+	join_button = _button(panel, "JOIN WARBAND", Vector2(384, 200), Vector2(332, 46))
 	join_button.add_theme_font_size_override("font_size", 17)
 	join_button.pressed.connect(join)
 
-	status_label = _label(panel, "", Vector2(28, 232), 12, TEAL)
-	status_label.size = Vector2(688, 36)
+	status_label = _label(panel, "", Vector2(28, 254), 12, TEAL)
+	# The title's CLOSE button sits over this panel's lower right, so both lines
+	# stay left of it instead of running underneath the button.
+	status_label.size = Vector2(500, 36)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var footnote := _label(panel,
-		"Friends need the same warband save, and join on the host's UDP port.",
-		Vector2(28, 274), 10, MUTED)
-	footnote.size = Vector2(688, 26)
+		"Arena bout or campaign co-op; friends need the same warband save and the host's UDP port.",
+		Vector2(28, 294), 10, MUTED)
+	footnote.size = Vector2(500, 30)
 	footnote.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 func _style(color: Color, border: Color, radius: int) -> StyleBoxFlat:

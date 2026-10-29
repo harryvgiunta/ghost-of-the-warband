@@ -216,6 +216,21 @@ func _build_devil_visual() -> void:
 func get_aim_position() -> Vector3:
 	return global_position + Vector3(0, 0.68 if kind == 0 else 1.25, 0)
 
+## Squad-drive hooks. A squadmate naming a wolf as its quarry is the same
+## enraged pursuit a landed blow starts, so `squad_drive.retarget` can point a
+## wolf at the body that came for it without knowing which mob family it is.
+func hunt(target: Node3D) -> void:
+	if not is_instance_valid(target):
+		return
+	_senses.notice(target, target.global_position)
+	if target is CharacterBody3D:
+		player = target
+
+## True while the wolf already wants somebody: a fresh sighting, a blow or a
+## squadmate's challenge.
+func hunting() -> bool:
+	return _senses.aggressive()
+
 func blood_rig() -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):
 		var anchor := _devil.blood_anchor()

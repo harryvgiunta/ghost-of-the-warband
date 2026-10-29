@@ -83,7 +83,7 @@ because bodies do not. Every scene that contains bodies:
 | `F1`..`F8` | Enter the n-th living body directly |
 | `O` | The warband screen (roster, state chips, click to control, hiring). `TAB` is the quick swap below, exactly as in the open frontier |
 | `Tab` | Quick weapon swap: the standing body puts away the set in its hands and takes up the other one. Both pairs live on the mercenary's roster record |
-| `1`..`7`, mouse, `Space`, `C`, `F`, `G`, `E` | unchanged from the arena/frontier bindings |
+| `1`..`3`, `6`/`7`, mouse, `Space`, `C`, `F`, `G`, `E` | warband controller: plain 1/2/3 fire the three item-skill slots (Shift+1..3 is the same press), 6/7 bandage/potion; mouse, `Space`, `C`, `F` and `E` keep the frontier meanings, `T` throws the held blade, and `G` stays the world's interact key |
 | `G` held | Revive the downed body under the crosshair (5 s channel, humans and the squad's own hands) |
 | `K` | Quick-loot the drop under the crosshair (battlefield looting) |
 
@@ -321,6 +321,37 @@ payment). With no bookmark - the opening - the wipe still has no way back. The
 title's **RESUME WARBAND** door opens the world on the bookmark; **GHOST OF THE
 WARBAND** is still always a new campaign. `tests/checkpoint_regression.gd` owns
 the whole contract, including the two real world resumes.
+
+### The newer surface (skills, menu, keepers, wolves, co-op)
+
+These landed on the same world without a second rulebook. Each has one owner:
+
+- **Item skills are still data.** `AbilityRules` is the only definition table;
+  the warband's scene half is one `WarbandAbilities` node in `world_scene.gd`
+  (`setup(world, controller)`, `bind_body(actor)`), which turns the possessed
+  body's own `AbilityRunner` cues into arrows, spells, the backstab blink/stab and
+  blade presentation, on the authority only. The keys are **plain 1/2/3** (Shift+1..3
+  is the same press — the tiles' shared `SHIFT + n` caption is rewritten), and the
+  HUD shows stamina plus the three slots from that body's runner every frame.
+- **The cover peek is RMB, in cover only.** Outside cover the same press is the
+  guard; the lean ends on release, and leaving cover with `F` drops it.
+- **Escape is `WarbandMenu`** — six rows (resume, save, load, settings, exit,
+  quit), one ledger frame, the shared sound page. It never pauses the tree, and
+  `world_scene` closes it, then an open panel, then opens it.
+- **The three keepers are one board.** `VendorMenu` is re-pointed per seat
+  (`vendor_orla`/`vendor_brann`/`vendor_vey`); `Warband.buy_gear` buys into the
+  shared stash and `Warband.sell_gear` sells one pooled spare out of it for 60%.
+- **The wolves are the base mob.** `WarbandWilderness` places seven `enemy.gd`
+  **kind 0** briars 122-252 m past the camp mouth — no new class, no stat table —
+  gives them pack patches through `MobWander`, and parks walked-past ones with its
+  own `MobCuller`.
+- **Co-op is one `attach_world` on the existing session.**
+  `GameFlow.host_campaign`/`join_campaign` reuse `WarbandSession`; the host owns
+  the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
+  replica that runs no AI), the loot, the missiles and the kill reward, while a
+  guest writes no checkpoint or save of its own, dismisses the camp lesson and
+  runs no squad AI. The lobby's mode row defaults to campaign co-op; the arena
+  bout remains selectable.
 
 Short version of the latest tuning (all in the code, all covered by
 `tests/cage_escape_regression.gd`):

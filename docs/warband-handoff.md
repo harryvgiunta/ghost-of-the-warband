@@ -106,8 +106,40 @@ the tutorial's to take.
    the Bilewarden at the end, with survivors physically looting the field.
    `Enter` comes back to the world at the town end.
 
+**Since the loop above was written**, four surfaces were added on the same world:
+
+- **The way out has teeth.** Seven base briar wolves (`enemy.gd` **kind 0**, no new
+  mob class and no stat table) stand on derived posts 122–252 m past the camp
+  mouth, 25 m clear of it and outside the pocket, aim at the nearest standing body
+  (refreshed every 0.5 s), wander as packs through `MobWander` at a 14 m radius,
+  and are parked by the band's own `MobCuller` once no body is within 150 m
+  (waking again inside 128 m). The opening fight stays the camp watchers'
+  business.
+- **The square has three keepers.** Storekeeper Orla (bows and staves), Smith
+  Brann (blades, dagger, shields) and Quartermaster Vey (armor, foci, jewelry)
+  stand at real counters, each a `G` service (`vendor_orla`/`vendor_brann`/
+  `vendor_vey`). One `VendorMenu` board walks keeper to keeper: buying spends gold
+  into the shared stash (`Warband.buy_gear`), selling takes a spare copy out of
+  the pool for 60% of catalogue (`Warband.sell_gear`), and a piece somebody is
+  wearing is not the warband's to sell.
+- **Escape is the warband's own window.** `WarbandMenu` has six rows — resume,
+  save, load, settings, exit to title, quit — and pauses nothing. SAVE writes
+  `Warband.save_state()`; LOAD re-reads that file and re-enters the world;
+  SETTINGS swaps in the shared sound page plus the windowed/fullscreen row. Escape
+  closes the menu first, then an open panel, then opens the menu; an open tutorial
+  card keeps it shut.
+- **The campaign is co-op.** The title lobby's HOST/JOIN WARBAND defaults to
+  **CAMPAIGN (CO-OP)** (the arena bout is still the first, selectable row) and
+  routes to `GameFlow.host_campaign`/`join_campaign`; both machines need the same
+  warband save. The host owns the world — its mobs, the loot that hits the ground,
+  the missiles in flight and every kill reward — and the guest sees it all through
+  the one `WarbandSession`. A guest fields its own save's bodies, has the camp
+  lesson dismissed, runs no squad AI and never writes a checkpoint.
+
 HUD keys: `[`/`]` cycle body, F1–F8 named body, O warband screen, TAB quick
-weapon swap (the frontier's two sets), P paperdoll, G interact and the five
+weapon swap (the frontier's two sets), P paperdoll, plain 1/2/3 item skills
+(Shift+1..3 is the same press), RMB guard — and a cover lean while attached,
+released with the button — Escape the campaign menu, G interact and the five
 second revive hold, K manual loot (unadvertised; the squad loots itself),
 R branded skill, X shoulder swap (the camera is 0.70 m off the spine, as the
 frontier's is - the reticle is not your own head).
@@ -249,6 +281,23 @@ Integration seams deliberately placed in the base game:
     called before the camp enters the tree, `place_resumed()` opens the four
     cages, and no watcher is fielded. `GameFlow.active` still gates the scene
     change, so a regression harness never gets teleported by a wipe.
+24. **Co-op is the host's world seen through one window.** The campaign opens as
+    host or guest through `GameFlow.host_campaign`/`join_campaign` over the one
+    existing `WarbandSession` (never a second socket); `attach_world(world)` is
+    called once, by `_seat_warband_link`, for the world scene only, and that one
+    call is the whole world half. The host is authoritative for mobs, loot,
+    missiles and rewards: snapshots are **keyed by the guard's node name** (never
+    an index) and sent at 15 Hz within 70 m of any body through `NetLimits`, so
+    the wire can never invent a mob and a repeated batch is a no-op. Every guard a
+    guest holds is a `replica`: it runs no AI and `apply_snapshot` is its only
+    writer. Loot is announced once, reliably, and re-spawned as the same
+    `WarbandPickup`; a replicated missile is a visual with an empty hit mask; and
+    **only the host's `defeated` signal pays**, through `receive_reward` into
+    `PlayerState`. A guest also writes **no checkpoint and no save of its own**
+    (`_check_checkpoints` returns on a client), dismisses the camp's lesson
+    (`camp.dismiss_lesson()`) and disables its squad AI. The lobby's mode row
+    makes **campaign co-op the default** and keeps the stand-alone arena bout as
+    the first, selectable row; the arena field is deliberately not attached.
 
 ### Tuning knobs (one place each)
 
@@ -275,6 +324,9 @@ Integration seams deliberately placed in the base game:
 | Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the last checkpoint; with no bookmark the wood simply takes what is left |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
 | Checkpoint moments | `world_scene.gd::_check_checkpoints` | `trail_start` when the camp's six are down and the squad is leaving (60 m past the mouth), `town` on entering the square; one write per id |
+| Wolves on the way out | `wilderness.gd::STATIONS` | seven **kind 0** briars at 122/140/158/178/200/224/252 m, 1.4-2.8 m off the line, `MOUTH_CLEARANCE` 25 m, 0.5 s target refresh, `PACK_RADIUS` 14 m |
+| Warband ability keys | `possession_controller.gd::_command` | plain 1/2/3 → slots 0/1/2 (Shift+1..3 is the same press); the HUD tiles read the possessed body's runner every frame and hide an ungranted slot |
+| Campaign menu | `warband_menu.gd` | six rows; SAVE `Warband.save_state()`, LOAD re-reads then re-enters the world, SETTINGS the shared sound page + display row, exit label scene-owned (`EXIT TO TITLE`), exit/quit save first, never pauses the tree |
 | Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
 
 ### Godot gotchas found the hard way
@@ -308,10 +360,18 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
-| `cage_escape_regression` | 327 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
+| `cage_escape_regression` | 344 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
 | `escape_run_regression` | 170 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
 | `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 220 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
+| `warband_world_regression` | 240 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
+| `warband_abilities_regression` | 42 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
+| `warband_menu_regression` | 41 | the six rows, SAVE/LOAD over `Warband.save_state`, LOAD gated on a real file, the sound page and back, `resumed` on every close, and the tree never paused |
+| `warband_vendors_regression` | 151 | three counters as `G` services in the market ring, each opening its own seat and stock; buy into the shared stash, sell one pooled copy at 60%, a short purse spends nothing, a worn copy is not on the board, closing leaves no panel |
+| `warband_wilderness_regression` | 66 | seven kind-0 wolves in `guards`/`wild_mobs`, clear of the mouth and pocket, aimed at the standing body, pack wander, and one `MobCuller` sweep parks a wolf left 300 m behind |
+| `warband_session_world_unit_regression` | 38 | no socket: one name-keyed mob entry, a batch fits one datagram, replica write + tick, an unknown name invents nothing, loot and missile announcements book once, a reward books once, and both campaign doors against a temp save |
+| `warband_lobby_campaign_regression` | 48 | the lobby defaults to CAMPAIGN (CO-OP), the arena stays the first selectable row, both payloads name the right scene, and switching back and forth (or a cache read) keeps the mode |
+| `warband_integration_regression` | 20 | the real world binds every seated body to `WarbandAbilities`, fields the wolves and their culler, paints the stamina bar and three tiles, opens/closes the menu from a real Escape without pausing, and never hands a human body to squad AI |
+| `warband_coop_campaign_regression` | 63 | two real processes: the host opens the campaign on its save, a guest joins and is given a body, its walk reaches the host, the host kills a replicated guard, loot crosses, the reward is paid once, and a leaving guest's body falls back |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
@@ -366,14 +426,12 @@ that is the pre-merge full suite, once, at the end.
 - **Both machines must load the same warband save.** The session replicates the
   bodies, not the roster or stash, so a peer with a different save renders the
   same seats but its own gear and health.
-- **A guest cannot hurt anything yet.** `WarbandSession` replicates the warband's
-  bodies (20 Hz snapshots) and nothing else: a guest's swings are refused locally
-  (`damage_enabled` is false for a replica, by the base game's own rule) and there
-  is no melee-intent channel to the host, while the cultists a guest sees are its
-  own local `EnemyWaves` — the host's cultists never reach it. The lobby makes
-  this reachable by a normal player, so say it plainly: hosting works, being the
-  guest is a spectator with a body until the intent channel and a mob snapshot
-  channel land. This is the same missing ack channel listed under prediction.
+- **Only the campaign world is replicated, not the arena.** `attach_world` is
+  wired for `scenes/warband_world.tscn` only, so in the campaign the host owns the
+  mobs (15 Hz, name-keyed snapshots), the loot, the missiles and the kill reward,
+  and a guest is a participant — its intents ride `PossessionSync` and the host
+  resolves them. The arena's own field is deliberately not attached: an arena
+  guest still sees its own local `EnemyWaves`.
 - **Cultists carry a brand but cannot cast it.** The Bilewarden's sigil is
   identity, kit provenance and a field label (`CultistGuard.brand`) — a
   `BrandedRunner` on a cultist is Phase 4.
@@ -443,9 +501,9 @@ the next session.
 
 ### Phase 4 (later)
 
-- **Make a guest a participant**: a mob snapshot channel (cultists and watchers
-  are the guest's own local spawn today) and a melee/ability intent channel, so
-  the second peer fights instead of watching. Same work as the prediction ack.
+- **Give the arena the world channel**: the campaign's mob/loot/missile/reward
+  replication lives behind `WarbandSession.attach_world`, wired only for the
+  campaign world; the arena's field is still each peer's own.
 - Cult brands that cast: give `CultistGuard` a `BrandedRunner` so the
   Bilewarden's `shockwave_cleave` is a mechanic, not a label.
 - Campaign levels reusing the warband loop (the base game's `docs/storyline.md`
