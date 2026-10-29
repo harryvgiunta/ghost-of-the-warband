@@ -144,9 +144,18 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	# The warband has no rounds: a mercenary that bleeds out stays dead, and the
 	# roster is the only thing that can bring one back.
 	actor.persistent_death = true
+	# And no single blow takes a body off the field: a lethal hit puts it on its
+	# chest for the whole bleed clock, a blow that lands on it there ends it, and
+	# a body that does die keeps its corpse where it fell.
+	actor.warband_death = true
 	actor.configure(0, true, label, spawn)
 	_apply_gear(actor, merc_id)
 	actor.killed.connect(_on_actor_killed.bind(actor))
+	# The router is what decides who may be entered, so it has to hear about the
+	# lie as well as the death: a body on its chest is still the soul's (it crawls
+	# and is picked up) but is nobody else's to step into.
+	actor.downed_started.connect(_on_body_downed_state.bind(actor))
+	actor.downed_ended.connect(_on_body_revived_state.bind(actor))
 	actor.tree_exiting.connect(_on_body_exiting.bind(actor))
 	_merc_bodies[merc_id] = actor
 	_body_mercs[actor] = merc_id
@@ -396,6 +405,24 @@ func _on_body_state_changed(body_id: int, state: int) -> void:
 	if peer_id == 0:
 		return
 	_eject(peer_id, Contracts.state_name(state))
+
+## A body knocked onto its chest. The router records DOWNED, which keeps the soul
+## where it is and refuses everybody else: `[`/`]`, F1..F8 and a click on the
+## warband screen cannot put a second soul into a body that is already on the floor.
+func _on_body_downed_state(_slot: int, actor: Actor) -> void:
+	var merc_id := merc_of(actor)
+	if merc_id <= 0 or _warband == null:
+		return
+	_warband.souls.set_body_state(merc_id, Contracts.HealthState.DOWNED)
+
+## A downed body standing back up: the router may offer it again.
+func _on_body_revived_state(_slot: int, actor: Actor) -> void:
+	var merc_id := merc_of(actor)
+	if merc_id <= 0 or _warband == null:
+		return
+	if not bool(actor.get("alive")):
+		return
+	_warband.souls.set_body_state(merc_id, Contracts.HealthState.ALIVE)
 
 ## The body itself died (a real `take_damage` reaching zero health). The router
 ## owns entry rules, so record the death there and let the state handler eject.

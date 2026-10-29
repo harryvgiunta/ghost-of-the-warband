@@ -112,7 +112,7 @@ func objective() -> String:
 func hint() -> String:
 	match _state:
 		State.CAGED:
-			return "[ ] or F1..F4 - enter another prisoner   ·   TAB - warband   ·   P - gear"
+			return "[ ] or F1..F4 - enter another prisoner   ·   O - warband   ·   P - gear"
 		State.ALL_SEEN:
 			return "Stay in a body - Corvin is walking in with empty hands."
 		State.RESCUER_ARRIVED:

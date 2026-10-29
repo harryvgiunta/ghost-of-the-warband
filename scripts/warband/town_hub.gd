@@ -203,12 +203,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:
-		KEY_TAB:
+		KEY_O:
 			if screen.is_open():
 				screen.close()
 			else:
 				_hide_panels()
 				screen.open()
+			get_viewport().set_input_as_handled()
+		KEY_TAB:
+			_swap_weapon_set()
 			get_viewport().set_input_as_handled()
 		KEY_P:
 			if paperdoll.is_open():
@@ -588,6 +591,22 @@ func _build_ui() -> void:
 
 # --- interaction -----------------------------------------------------------
 
+## `TAB` quick-swaps the standing body's weapon set, exactly as the frontier does.
+## A town standing alone (its own preview scene) gets the same key the campaign
+## world binds, so the swap is never a world-only feature.
+func _swap_weapon_set() -> void:
+	if warband == null or controller == null:
+		return
+	var merc_id: int = controller.merc_for_peer(1)
+	if merc_id <= 0:
+		hud.set_status("No body to swap for.", 2.0)
+		return
+	var result: Dictionary = warband.swap_weapon_set(merc_id)
+	if bool(result.get("ok", false)):
+		controller.refresh_gear(merc_id)
+	hud.set_status(str(result.get("message", "")), 2.0)
+
+
 ## The one `G` handler: which service the standing body is next to.
 func _try_interact() -> void:
 	var actor = controller.active_body(1)
@@ -642,7 +661,7 @@ func panels_open() -> bool:
 	return _panel_open()
 
 
-## Close whatever the square opened, for the world's one `ESC` and `TAB`.
+## Close whatever the square opened, for the world's one `ESC` and `O`.
 func close_panels() -> void:
 	_hide_panels()
 
@@ -698,10 +717,10 @@ func hint_line(actor) -> String:
 	var service := ""
 	if actor != null and is_instance_valid(actor):
 		service = service_at(actor.global_position)
-	var text := "TAB - warband   ·   P - stash and gear   ·   G - use what you stand at"
+	var text := "O - warband   ·   TAB - weapon set   ·   P - stash and gear   ·   G - use what you stand at"
 	match service:
 		"stash":
-			text = "G - shared stash and paperdoll   ·   TAB - warband"
+			text = "G - shared stash and paperdoll   ·   O - warband"
 		"altar":
 			text = "G - the Sacrificial Altar (unbind / distil / brand)"
 		"recruiter":

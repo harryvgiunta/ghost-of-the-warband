@@ -191,6 +191,9 @@ var shield_equipped := false
 var shield_variant := 1
 var consumable_kind := ""
 var downed_pose := false
+## A body that died on the ground is not still dragging itself: the lie is held
+## where it fell, with the pull cycle parked and the arm planted.
+var corpse_still := false
 var _downed_clock := 0.0
 var _downed_blend := 0.0
 var _bandage_prop: Node3D
@@ -459,8 +462,22 @@ func set_downed(value: bool) -> void:
 		_crouch_amount = 0.0
 	else:
 		_downed_blend = 0.0
+		corpse_still = false
 	_update_pose(0.0)
 	downed_pose_changed.emit(value)
+
+
+## A body that is not coming back: it keeps the lie it fell in, and the drag cycle
+## that kept it moving stops where it is. Cleared by `set_downed(false)` on every
+## revive, respawn and scene reset.
+func set_corpse(value: bool) -> void:
+	corpse_still = value
+	if not value:
+		return
+	set_downed(true)
+	# The pull is a cycle: parked at its start, the arm is planted and the body
+	# lies still instead of breathing its way through the dirt.
+	_downed_clock = 0.0
 
 
 ## True when the body is down or still falling to the floor.
@@ -469,7 +486,8 @@ func is_downed_pose() -> bool:
 
 
 func _advance_downed(delta: float) -> void:
-	_downed_clock += maxf(delta, 0.0)
+	if not corpse_still:
+		_downed_clock += maxf(delta, 0.0)
 	var target := 1.0 if downed_pose else 0.0
 	_downed_blend = move_toward(_downed_blend, target,
 		maxf(delta, 0.0) / DOWNED_FALL_SECONDS)

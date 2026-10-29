@@ -13,7 +13,7 @@ every parallel worktree builds against.
 | Deployment cap $X$ | `MAX_DEPLOYMENT_CAP` | 8 bodies | `scripts/warband/warband_contracts.gd` |
 | Downed instead of dead | `OVERKILL_THRESHOLD` | 10% of max health | same |
 | Finishing a downed body | `finishes_downed()` | blow > 10% of max health | same |
-| Revive channel | `REVIVE_CHANNEL_SECONDS` | 5.0 s, human only | same |
+| Revive channel | `REVIVE_CHANNEL_SECONDS` | 5.0 s: a soul holding `G`, or a squadmate's own hands once the field is clear | same |
 | Revive health | `REVIVE_HEALTH_FRACTION` | 50% of max | same |
 | Bleed-out while downed | `DOWNED_BLEED_SECONDS` | 30 s | same |
 | Crawl pace | `DOWNED_CRAWL_SPEED` | 0.9 m/s backwards | same |
@@ -81,8 +81,10 @@ because bodies do not. Every scene that contains bodies:
 | --- | --- |
 | `[` / `]` | Previous / next living, unoccupied body |
 | `F1`..`F8` | Enter the n-th living body directly |
-| `Tab`, `1`..`7`, mouse, `Space`, `C`, `F`, `G`, `E` | unchanged from the arena/frontier bindings |
-| `E` held | Revive the downed body under the crosshair (5 s channel, humans only) |
+| `O` | The warband screen (roster, state chips, click to control, hiring). `TAB` is the quick swap below, exactly as in the open frontier |
+| `Tab` | Quick weapon swap: the standing body puts away the set in its hands and takes up the other one. Both pairs live on the mercenary's roster record |
+| `1`..`7`, mouse, `Space`, `C`, `F`, `G`, `E` | unchanged from the arena/frontier bindings |
+| `G` held | Revive the downed body under the crosshair (5 s channel, humans and the squad's own hands) |
 | `K` | Quick-loot the drop under the crosshair (battlefield looting) |
 
 ## 4. Phase 1 worktree ownership
@@ -125,8 +127,11 @@ Gate checks:
    bodies cleanly, and a second peer cannot enter the occupied body.
 2. The far pair takes 10% damage and keeps a convincing block/circle pattern;
    walking a human body to them flips them to full damage.
-3. A hit that overkills by <= 10% downs and crawls; a heavier hit kills; holding
-   `H` for 5 s revives; AI never revives.
+3. In the campaign every lethal hit downs and crawls - a mercenary is never
+   killed by the blow - and the body bleeds for 30 s; holding `G` for 5 s revives
+   it, a squadmate does the same once the field is quiet, and any blow that lands
+   on the downed body finishes it and leaves a corpse. (The arena's own seats keep
+   the 10% overkill contract; only the warband's bodies hold that line.)
 4. End-of-battle sweep lands loot in the stash sorted by value; unbind, distil
    5:1 and brand all work from the same wallet the HUD shows.
 
@@ -159,7 +164,7 @@ failure pass; fix the contract instead.
 | `scripts/warband/possession_sync.gd` (`PossessionSync`) | host-authoritative transfer RPCs plus `server_apply(peer, merc_id)` |
 | `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`) | `setup(radius, exit_radius)`, `set_humans`, `track/untrack`, `sim_state_of`, `clear`, `sim_changed` |
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
-| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive, respawn and `_die` clear all of it, and `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
+| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive and respawn clear all of it, `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire, and `_die` either clears it (arena seats) or holds the corpse - rig visible, lie kept, drip off - for the warband bodies flagged `warband_death`. Those bodies also never die from the blow itself and are finished by any blow that lands while they are down. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
 | `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` / `corpse_loot_panel.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups` plus the corpse registry: `register_corpse(enemy) -> int` (one read of `gear_items()`, stable ids, the record dies with the body), `has_corpse/corpse_ids/corpse_items/corpse_value/corpse_at/corpse_position/corpse_label`, `take_from_corpse`, `take_all_from_corpse`, `claim_corpse(id, peer = 0)` (silent, the AI's entry point). Every one of them books through the same `_book_piece()`, so a piece cannot be duplicated and peer 0 never dresses a body. `CorpseLootPanel extends WarbandPaperdoll` adds `open_corpse(loot, id) -> bool`, `showing_corpse()`, `take_piece`, `take_all` and `set_title`; `G` at a corpse opens it and `P` still opens the mercenary paperdoll. `SoldierLootRun.run(pickups)` now also jogs survivors to corpses and claims each once. |
 | `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu`, `AltarMenu.configure/unbind_rows/distill_rows/brand_rows` |
 | `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash |

@@ -285,12 +285,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:
-		KEY_TAB:
+		KEY_O:
 			if screen.is_open():
 				screen.close()
 			else:
 				_hide_panels()
 				screen.open()
+			get_viewport().set_input_as_handled()
+		KEY_TAB:
+			_swap_weapon_set()
 			get_viewport().set_input_as_handled()
 		KEY_P:
 			if paperdoll.is_open():
@@ -754,6 +757,20 @@ func _try_quick_loot() -> void:
 		_note_loot(1)
 	hud.set_status(str(result.get("message", "")), 2.0)
 
+## `TAB` quick-swaps the standing body's weapon set, as the frontier does.
+func _swap_weapon_set() -> void:
+	if warband == null or controller == null:
+		return
+	var merc_id: int = controller.merc_for_peer(1)
+	if merc_id <= 0:
+		hud.set_status("No body to swap for.", 2.0)
+		return
+	var result: Dictionary = warband.swap_weapon_set(merc_id)
+	if bool(result.get("ok", false)):
+		_refresh_rig(merc_id)
+	hud.set_status(str(result.get("message", "")), 2.0)
+
+
 func _try_interact() -> void:
 	var actor = controller.active_body(1)
 	if actor == null:
@@ -773,7 +790,7 @@ func _update_prompt() -> void:
 		return
 	var target = _revive_target()
 	if target != null:
-		hud.set_prompt("Hold E - revive %s" % warband.roster.name_of(int(controller.merc_of(target))))
+		hud.set_prompt("Hold G - revive %s" % warband.roster.name_of(int(controller.merc_of(target))))
 		return
 	var actor = controller.active_body(1)
 	if actor != null:
@@ -822,11 +839,11 @@ var _hint_text := ""
 func _update_hint() -> void:
 	if hud == null:
 		return
-	var text := "TAB - warband   ·   P - gear   ·   [ ] / F1..F8 - take another body"
+	var text := "O - warband   ·   TAB - weapon set   ·   P - gear   ·   [ ] / F1..F8 - take another body"
 	if expedition:
 		text = "LMB / RMB - fight   ·   R - branded sigil   ·   K - loot   ·   B - end the field"
 	if _revive_target() != null:
-		text = "Hold E - revive the downed body beside you   ·   B - end the field"
+		text = "Hold G - revive the downed body beside you   ·   B - end the field"
 	elif _battle_over:
 		text = "Enter - back to town"
 	elif branded != null and bool(branded.can_activate().get("ok", false)):

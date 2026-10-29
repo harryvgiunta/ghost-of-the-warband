@@ -132,8 +132,8 @@ func _check_catalog() -> void:
 		check((smith.stock as Array).has(item_id), "The smith sells " + item_id)
 	check(is_equal_approx(float(StateScript.ITEM_STATS["dagger_ironwood"]["damage"]), 10.0),
 		"The Ironwood Shiv deals 10")
-	check(is_equal_approx(float(StateScript.ITEM_STATS["bow_twig"]["damage"]), 5.0),
-		"The Twig Bow deals 5")
+	check(is_equal_approx(float(StateScript.ITEM_STATS["bow_twig"]["damage"]), 10.0),
+		"The Twig Bow deals 10")
 	check(is_equal_approx(float(StateScript.ITEM_STATS["club_makeshift"]["damage"]), 6.0),
 		"The Club deals 6")
 	check(is_equal_approx(float(StateScript.ITEM_STATS["branch_heavy"]["damage"]), 15.0),
@@ -348,7 +348,7 @@ func _check_blades() -> void:
 	await process_frame
 	check(rig.weapon == "bow" and rig.bow_index == 3, "The twig bow selects the fourth bow profile")
 	check(rig._bows[3].get_child_count() > 0, "The twig bow builds its own geometry")
-	check(is_equal_approx(Combat.damage_for(3, 1.0), 5.0), "A full twig draw deals five")
+	check(is_equal_approx(Combat.damage_for(3, 1.0), 10.0), "A full twig draw deals ten")
 	var shiv := StateScript.build_loadout("dagger_ironwood", "shield_wood", salvage)
 	rig.apply_loadout(shiv)
 	await process_frame

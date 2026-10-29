@@ -41,12 +41,14 @@ difference - and the warband is the thing that survives a battle.
   human-possessed body is real (100% damage); every fight more than ~30 m from
   any human runs as a convincing background brawl at **10% damage**, so distant
   squads do not wipe each other off-screen. Walk over and it goes live.
-- **Downed, not dead:** a hit that overkills by **10% of max health or less**
-  leaves a mercenary Downed at 0 health - crawling backwards to cover, bleeding
-  out in 30 s. Only a human holds the **5 s revive** (E); AI never revives. A
-  heavier hit kills outright.
+- **Downed, not dead:** no blow takes a mercenary off the field. Any hit that
+  empties a pool leaves the body **Downed** at 0 health - crawling backwards to
+  cover, bleeding out in **30 s**. A soul can pick that body up with **G held for
+  five seconds**, and a squadmate walks over and does the same once the field is
+  quiet. A body that is struck again while it lies there dies, and a body that
+  dies **keeps its corpse on the ground** instead of vanishing.
 - **The makeshift tier:** the wood hands out nothing better than an **Ironwood
-  Shiv** (10), a **Twig Bow** (5), a **Club** (6), a **Heavy Tree Branch** (15,
+  Shiv** (10), a **Twig Bow** (10), a **Club** (6), a **Heavy Tree Branch** (15,
   two-handed) and a **Wooden Shield**. Forged steel is bought later, from the
   quartermaster, with a stash to pay for it.
 - **Bodies are lootable:** every fallen cultist and watcher is a corpse you can
@@ -62,11 +64,12 @@ difference - and the warband is the thing that survives a battle.
 | --- | --- |
 | `[` / `]` | previous / next living, unoccupied body |
 | `F1`..`F8` | enter a named body directly |
-| `TAB` | warband screen (health, downed state, gear, click to control, hiring) |
-| `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off; click a piece another mercenary wears to hand it over) |
+| `O` | warband screen (health, downed state, gear, click to control, hiring) |
+| `TAB` | quick weapon swap: the body puts away the set in its hands and takes up the other one (exactly as the open frontier does) |
+| `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off; click a piece another mercenary wears to hand it over; **SWAP SET** or `TAB` changes the weapon set) |
 | `G` | cut a cage latch, use the altar / stash / quartermaster / recruiter / expedition gate you stand at, or leave through the gate |
 | `K` | quick-loot the drop at your feet |
-| `E` (hold) | revive the downed body beside you |
+| `G` (hold) | revive the downed body beside you: five seconds, and a blow breaks the channel |
 | `R` | fire the branded ability on your weapon |
 | `B` | end the battle (sweep the field) |
 | `Enter` | return to town once the field is quiet |

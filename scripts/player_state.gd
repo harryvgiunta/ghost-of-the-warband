@@ -351,7 +351,7 @@ const ITEM_STATS := {
 	"dagger_iron": {"damage":14.0, "attack":0.5, "reach":1.2},
 	"sword_makeshift": {"damage":30.0, "attack":1.0, "reach":1.8},
 	"dagger_ironwood": {"damage":10.0, "attack":0.55, "reach":1.15},
-	"bow_twig": {"damage":5.0, "attack":0.7},
+	"bow_twig": {"damage":10.0, "attack":0.7},
 	"club_makeshift": {"damage":6.0, "attack":0.9, "reach":1.7},
 	"branch_heavy": {"damage":15.0, "attack":1.6, "reach":2.0},
 	"shield_wood": {"block":18},

@@ -85,21 +85,23 @@ func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
 	for item_id in _pooled:
 		by_item[str(item_id)] = {"pooled": int(_pooled[item_id]), "worn": []}
 	if roster != null:
+		# Both weapon sets count as worn: a piece waiting in the set the hands are
+		# not carrying is still on that mercenary, and a stash row that forgot it
+		# would offer the warband a copy it does not own.
 		for merc in roster.records():
-			var gear: Variant = merc.get("equipped", {})
-			if not gear is Dictionary:
-				continue
-			for slot in gear:
-				var worn_id := str(gear[slot])
+			var merc_id := int(merc.get("id", 0))
+			for wear in roster.worn_entries(merc_id):
+				var worn_id := str(wear.get("item", ""))
 				if worn_id.is_empty():
 					continue
 				var entry: Variant = by_item.get(worn_id)
 				if not entry is Dictionary:
 					entry = {"pooled": 0, "worn": []}
 					by_item[worn_id] = entry
-				(entry["worn"] as Array).append({"merc_id": int(merc.get("id", 0)),
+				(entry["worn"] as Array).append({"merc_id": merc_id,
 					"merc_name": str(merc.get("name", "Mercenary")),
-					"slot": str(slot)})
+					"slot": str(wear.get("slot", "")),
+					"set": int(wear.get("set", -1))})
 	var rows: Array[Dictionary] = []
 	for item_id in by_item:
 		var entry: Dictionary = by_item[item_id]
@@ -143,11 +145,10 @@ func available_ids(roster) -> Array[String]:
 		seen[str(item_id)] = true
 	if roster != null:
 		for merc in roster.records():
-			var gear: Variant = merc.get("equipped", {})
-			if gear is Dictionary:
-				for slot in gear:
-					if not str(gear[slot]).is_empty():
-						seen[str(gear[slot])] = true
+			for wear in roster.worn_entries(int(merc.get("id", 0))):
+				var worn_id := str(wear.get("item", ""))
+				if not worn_id.is_empty():
+					seen[worn_id] = true
 	var out: Array[String] = []
 	for item_id in seen:
 		out.append(str(item_id))

@@ -110,7 +110,7 @@ numerals preferred: `I`, `III`). Body copy never sits in Pirata One.
 | Screen | Uses |
 | --- | --- |
 | Tutorial card | clamp 880 × 580, chapter name, drop-cap body, keycaps, chapter stamps, brass CONTINUE, step seal |
-| Warband (TAB) | ledger header (purse/worth), mercenary rows, state chips, brass CONTROL, recruiter rows |
+| Warband (O) | ledger header (purse/worth), mercenary rows, state chips, brass CONTROL, recruiter rows |
 | Gear (P) | the frontier equipment page in the new skin: warband tabs on top, ten worn slots left, live ranger stage centre, trinket rail + KIT column right, collective stash as the grid underneath |
 | Quick menu (ESC) | rubricated sections, resume primary, save/display secondary, two lacquer exits, last-writing block |
 | Title | wordmark, skull seal, plate stack, no clamp |
@@ -126,7 +126,7 @@ Wired and verified in the running game:
 | --- | --- |
 | Tutorial card | `LedgerFrame` + plate rack + bone keycaps + chapter stamps + step seal |
 | Quick menu (Esc) | `LedgerFrame`, rubricated sections, brass resume, lacquer exits |
-| Warband (TAB) | `LedgerFrame`, Pirata names, chip textures, brass CONTROL, recruiter |
+| Warband (O) | `LedgerFrame`, Pirata names, chip textures, brass CONTROL, recruiter |
 | Gear (P) | frontier layout in the new skin: tabs on top, worn slots with marks, live ranger preview stage, stash rows |
 | Quartermaster | `LedgerFrame`, purse in Pirata, stock rows with BUY plates |
 | Sacrificial altar | `LedgerFrame`, tier rail, three ritual columns, brass BURN THE SIGIL |

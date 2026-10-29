@@ -250,10 +250,20 @@ func check_downed() -> void:
 	check(target.global_position.distance_to(start) > 0.05,
 		"a downed body crawls (%.2f m)" % target.global_position.distance_to(start))
 
+	# The campaign's own death rule: no blow ends a mercenary outright, so even a
+	# blow three times the whole pool only puts the body on its chest. The follow-up
+	# - a strike that lands on a downed body - is what finishes it, and the body
+	# then keeps its corpse on the ground.
 	victim.take_damage(raw_for(victim, float(victim.max_health)) * 3.0 + 50.0, 99)
+	check(bool(victim.get("alive")) and bool(victim.get("downed")),
+		"a heavy overkill downs instead of killing")
+	check(int(victim.health_state) == Contracts.HealthState.DOWNED,
+		"state is DOWNED after a blow that would have been lethal")
+	victim.take_damage(1.0, 99)
 	check(not bool(victim.get("alive")) and not bool(victim.get("downed")),
-		"a heavy overkill kills outright")
+		"a blow on the downed body finishes it")
 	check(int(victim.health_state) == Contracts.HealthState.DEAD, "state is DEAD")
+	check(bool(victim.rig.visible), "the corpse stays on the ground")
 
 # --- revive -----------------------------------------------------------------
 
@@ -328,8 +338,10 @@ func check_altar() -> void:
 # --- screens ----------------------------------------------------------------
 
 func check_screen() -> void:
+	# `O` is the screen key in every warband scene; `TAB` is the quick weapon swap.
+	# The press path itself is driven in `warband_world_regression.check_keys`.
 	game.screen.open()
-	check(game.screen.is_open(), "TAB opens the warband screen")
+	check(game.screen.is_open(), "the warband screen opens")
 	var target_merc := -1
 	for merc_id in warband.roster.alive_ids():
 		if warband.souls.occupied_by(merc_id) == 0:

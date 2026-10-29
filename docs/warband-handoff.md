@@ -64,9 +64,11 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
 4. **The fallen.** The first squadmate to go down within 12 m of the player's body
    raises the one unnumbered card (`lesson_revive`): **HOLD G** - not a tap - for
    five seconds brings a body back from DOWNED, and a blow that lands on the
-   reviver breaks the channel. The bleed clock is 30 s and any blow at or above
-   10% of the pool ends the body outright. The card is pushed from
-   `world_scene._on_body_downed`, so the camp and the trail share it.
+   reviver breaks the channel. The bleed clock is 30 s; in the campaign no blow
+   ends a mercenary outright - a lethal hit only puts the body down - while any
+   blow that lands on a downed body finishes it and leaves the corpse where it
+   fell. The card is pushed from `world_scene._on_body_downed`, so the camp and
+   the trail share it.
 5. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
    and **four armed watchers come out of the trees** (each drops its weapon) as the
    state turns to `ESCAPING`. There is no kill quota to open the way; there is no
@@ -98,8 +100,9 @@ WARBAND** door is a *new campaign* — it resets the warband and the shared jour
    the Bilewarden at the end, with survivors physically looting the field.
    `Enter` comes back to the world at the town end.
 
-HUD keys: `[`/`]` cycle body, F1–F8 named body, TAB warband screen, P paperdoll,
-G interact, K manual loot (unadvertised; the squad loots itself), E revive,
+HUD keys: `[`/`]` cycle body, F1–F8 named body, O warband screen, TAB quick
+weapon swap (the frontier's two sets), P paperdoll, G interact and the five
+second revive hold, K manual loot (unadvertised; the squad loots itself),
 R branded skill, X shoulder swap (the camera is 0.70 m off the spine, as the
 frontier's is - the reticle is not your own head).
 
@@ -236,7 +239,7 @@ Integration seams deliberately placed in the base game:
 | Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
 | Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 (Corvin's pair + the six at the leaving); a tally, no longer a gate |
-| Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% / 30-34 m / 8 |
+| Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% (arena seats; warband bodies always down, and any blow on a downed one finishes it) / 30-34 m / 8 |
 | Clearing size | `camp_dressing.gd` (`YARD_*`), `camp_clearing.gd` | 40 × 52 m pocket padded flat into the heightfield, wood immediately outside: 402 trees and 828 bushes in the band (24 trunks inside the pocket), 97 ragged stakes |
 | Camp torches | `cage_escape.gd::CAMP_TORCHES` | 11 (cages, mouth, both flanks, the rim), each on the ground's own height |
 | The way through the wood: length, clear line, torches | `run_forest.gd` | **914.6 m** (21 waypoints), **152 torches** (a pair every 12 m at 4.4 m, the only thing that marks the route), **no lane and no walls** — 942 trees stand in the walked band, and a 3.1 m clear line (`CLEAR_HALF` 1.55 m) runs down its middle |

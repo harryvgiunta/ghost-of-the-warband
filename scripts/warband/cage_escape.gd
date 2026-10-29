@@ -195,7 +195,7 @@ const STEP_CARDS := {
 		"title": "You are a soul, not a body",
 		"body": "Four prisoners hang in this camp, and your soul can enter any living body. Shift between them: that is the whole game.",
 		"keys": "F1  F2  F3  F4        or        [  ]        enter another prisoner",
-		"footnote": "Enter or click CONTINUE to play. TAB opens the warband, P your gear.",
+		"footnote": "Enter or click CONTINUE to play. O opens the warband, P your gear.",
 	},
 	1: {  # ALL_SEEN
 		"kicker": "STEP 2  /  THE SHIV",

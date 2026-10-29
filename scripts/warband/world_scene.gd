@@ -31,9 +31,10 @@ extends Node3D
 ## `admin_arena.tscn`, and the arena's return lands back here at the town end (see
 ## `GameFlow`). Nothing else changes scene, and nothing about travel does.
 ##
-## Keys: TAB warband, P paperdoll, G interact, E revive, K manual loot (never
-## advertised), R the branded sigil, X shoulder swap. Q and E are held to strafe, WASD to walk, so
-## neither is a press key. The camp's lesson adds F1-F5 and `[` `]`.
+## Keys: O warband, TAB quick weapon swap, P paperdoll, G interact and the revive
+## hold, K manual loot (never advertised), R the branded sigil, X shoulder swap.
+## Q and E are held to strafe, WASD to walk, so neither is a press key. The camp's
+## lesson adds F1-F5 and `[` `]`.
 
 signal scene_requested(path: String)
 
@@ -94,7 +95,7 @@ const PROJECTILE_CAP := 64
 ## How long the warband lies in the mud before the world stops pretending.
 const WIPE_BEAT := 2.5
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
-const TRAIL_HINT := "The squad follows you   ·   TAB - warband   ·   P - gear"
+const TRAIL_HINT := "The squad follows you   ·   O - warband   ·   P - gear"
 ## The key line under a prompt that names the revive hold.
 const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
 ## The band a fallen squadmate is taught in: close enough that the player is in
@@ -215,12 +216,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:
-		KEY_TAB:
+		KEY_O:
 			if screen.is_open():
 				screen.close()
 			else:
 				_hide_panels()
 				screen.open()
+			get_viewport().set_input_as_handled()
+		KEY_TAB:
+			_swap_weapon_set()
 			get_viewport().set_input_as_handled()
 		KEY_P:
 			if paperdoll.is_open():
@@ -905,6 +909,27 @@ func _nearest_pickup():
 			best_distance = distance
 			best = pickup
 	return best
+
+
+## `TAB` is the frontier's quick swap: the body the soul is inside puts away the
+## weapon set in its hands and takes up the other one. Both sets live on that
+## mercenary's roster record, so which pair the hands carry is warband state and
+## survives a body swap, a reload or a scene hand-off - and what the swap moved
+## onto the rig is the roster's own kit through `refresh_gear()`, never a weapon
+## conjured onto a body that was not carrying it.
+func _swap_weapon_set() -> void:
+	if warband == null or controller == null:
+		return
+	var merc_id: int = controller.merc_for_peer(1)
+	if merc_id <= 0:
+		if hud != null:
+			hud.set_status("The soul is loose. There is nobody to swap for.", 2.5)
+		return
+	var result: Dictionary = warband.swap_weapon_set(merc_id)
+	if bool(result.get("ok", false)):
+		controller.refresh_gear(merc_id)
+	if hud != null:
+		hud.set_status(str(result.get("message", "")), 2.0)
 
 
 ## `K` still works for a human; the squad loots itself and nothing announces it.

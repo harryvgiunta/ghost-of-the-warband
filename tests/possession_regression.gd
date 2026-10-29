@@ -369,12 +369,26 @@ func check_health_eject(warband, controller, merc_ids: Array[int]) -> void:
 	check(bool(entry.get("ok", false)), "peer 1 is back inside body A")
 	var victim = controller.body_of(merc_ids[0])
 	var before: int = warband.souls.body_of(1)
+	# A campaign body is never killed by the blow itself: 300 damage on a 100
+	# pool puts it on its chest for the whole bleed clock, whatever the hit was.
 	victim.take_damage(300.0, 99)
-	check(not victim.alive, "a real hit kills the possessed body")
+	check(victim.alive and bool(victim.downed),
+		"a blow that would be lethal drops a warband body instead of killing it")
+	check(victim.rig.visible, "a downed body is still on screen")
+	check(warband.souls.body_of(1) == before, "the downed body keeps its soul")
+	check(warband.souls.body_state(before) == Contracts.HealthState.DOWNED,
+		"the router records the body as downed, not dead")
+	# A blow that lands on it while it is down is a finisher, and that is the only
+	# thing here that ends a campaign body short of the bleed clock.
+	victim.take_damage(1.0, 99)
+	check(not victim.alive, "any blow that lands on a downed body finishes it")
+	check(victim.rig.visible, "the corpse stays where it fell instead of vanishing")
+	check(victim.rig.is_downed_pose(), "the corpse keeps the lie it fell in")
+	check(victim.rig.corpse_still, "and it lies still instead of dragging itself along")
 	var landed: int = warband.souls.body_of(1)
-	check(landed != before and landed > 0, "the soul left the body the hit killed")
+	check(landed != before and landed > 0, "the soul left the body the hit finished")
 	check(warband.souls.body_state(before) == Contracts.HealthState.DEAD,
-		"the killed body is dead in the router")
+		"the finished body is dead in the router")
 	check(warband.souls.occupied_by(before) == 0, "the dead body is unoccupied")
 	check(controller.active_actor != victim, "the controller stopped riding the corpse")
 	check(controller.active_actor != null and controller.active_actor.alive,

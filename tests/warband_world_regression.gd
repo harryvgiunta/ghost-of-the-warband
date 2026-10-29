@@ -127,6 +127,7 @@ func run() -> void:
 	await check_walk()
 	await check_town_end()
 	check_down_drops_steel()
+	check_keys()
 	check_budget()
 	check_doors()
 
@@ -184,6 +185,55 @@ func check_down_drops_steel() -> void:
 	var floor_mid: int = game.pickups.size()
 	victim._die(0)
 	check(game.pickups.size() == floor_mid, "the death of an already-dropped body adds no second blade")
+
+
+## One key press, as the window would send it: pressed, no echo, no modifiers.
+func _key(keycode: int) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = true
+	return event
+
+
+## The campaign's own key map, driven through the live scene's `_unhandled_input`:
+## `O` is the warband screen (TAB is not), and `TAB` is the frontier's quick weapon
+## swap - the body puts away the set in its hands and takes up the other one, with
+## the rig re-dressed from the roster.
+func check_keys() -> void:
+	var merc_id: int = game.controller.merc_for_peer(1)
+	check(merc_id > 0, "the soul is in a body to swap for")
+	if merc_id <= 0:
+		return
+	warband.stash.add("bow_twig", 1)
+	warband.stash.add("club_makeshift", 1)
+	check(bool(warband.equip_merc(merc_id, "main", "bow_twig").get("ok", false)),
+		"the soul's body takes the twig bow")
+	game.controller.refresh_gear(merc_id)
+	check(str(game.controller.body_of(merc_id).rig.weapon) == "bow",
+		"the bow is in its hands")
+	check(not game.screen.is_open(), "the warband screen starts closed")
+	game._unhandled_input(_key(KEY_O))
+	check(game.screen.is_open(), "O opens the warband screen")
+	game._unhandled_input(_key(KEY_O))
+	check(not game.screen.is_open(), "O closes it again")
+	game._unhandled_input(_key(KEY_TAB))
+	check(not game.screen.is_open(), "TAB does not open the warband screen")
+	var hands: Dictionary = warband.roster.equipped_of(merc_id)
+	check(str(hands.get("main", "")).is_empty() and str(hands.get("off", "")).is_empty(),
+		"TAB puts the bow away and the empty Set 2 is in its hands")
+	check(str(game.controller.body_of(merc_id).rig.weapon) != "bow",
+		"and the rig let go of it (%s)" % str(game.controller.body_of(merc_id).rig.weapon))
+	check(bool(warband.equip_merc(merc_id, "main", "club_makeshift").get("ok", false)),
+		"a club goes into the empty Set 2")
+	game.controller.refresh_gear(merc_id)
+	game._unhandled_input(_key(KEY_TAB))
+	hands = warband.roster.equipped_of(merc_id)
+	check(str(hands.get("main", "")) == "bow_twig", "the next TAB brings Set 1's bow back")
+	check(str(game.controller.body_of(merc_id).rig.weapon) == "bow",
+		"and the rig is holding it again")
+	check(warband.roster.weapon_set_pair(merc_id, 1).get("main", "") == "club_makeshift",
+		"Set 2 kept the club the swap put away")
 
 
 func _on_watchdog() -> void:

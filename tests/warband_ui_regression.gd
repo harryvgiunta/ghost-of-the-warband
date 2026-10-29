@@ -282,6 +282,24 @@ func _check_paperdoll() -> void:
 	doll.picker_buttons[first].pressed.emit()
 	check(doll.slot_rows["main"]["button"].text.contains(brand_line),
 		"the worn slot prints the brand line, got %s" % doll.slot_rows["main"]["button"].text)
+	# The panel's SWAP SET runs the same two-set swap `TAB` does: the line under the
+	# ranger names the set in the hands, and a press puts the other pair on the body.
+	check(doll._set_label.text.contains("SET 1 OF 2"),
+		"the stage names the set the hands carry, got %s" % doll._set_label.text)
+	check(doll._set_button.text.contains("SET 2"), "the button offers the other set")
+	doll._set_button.pressed.emit()
+	check(warband.roster.active_weapon_set(first) == 1,
+		"the panel's swap takes the body to Set 2")
+	check(str(warband.roster.equipped_of(first)["main"]).is_empty(),
+		"Set 2 was empty, so the hands are")
+	check(doll._set_label.text.contains("SET 2 OF 2"),
+		"and the stage says so, got %s" % doll._set_label.text)
+	check(doll.slot_rows["main"]["button"].text.contains("empty"),
+		"the worn main slot reads empty in Set 2")
+	doll._set_button.pressed.emit()
+	check(warband.roster.active_weapon_set(first) == 0, "a second press comes back to Set 1")
+	check(str(warband.roster.equipped_of(first)["main"]) == "sword_short",
+		"and Set 1's shortsword is in the hands again")
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
 

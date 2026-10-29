@@ -24,6 +24,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const State = preload("res://scripts/player_state.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
+const RosterScript = preload("res://scripts/warband/warband_roster.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const CharacterPreview = preload("res://scripts/character_preview.gd")
@@ -88,6 +89,7 @@ var _stash_controls: Dictionary = {}   # item_id -> {root, button, tag}
 var preview = null
 var _stage: NinePatchRect
 var _set_label: Label
+var _set_button: Button
 var _corpse_active := false
 ## The pieces the body carries, re-read from the vacuum on every repaint.
 var _corpse_ids: Array[String] = []
@@ -216,7 +218,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it (another body's piece is a hand-off)."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it (another body's piece is a hand-off). TAB swaps the weapon set."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _warband != null and _warband.roster.has(merc_id) else -1
@@ -355,6 +357,12 @@ func _ensure_built() -> void:
 	preview.built.connect(_refresh_preview)
 	_stage.add_child(preview)
 	_set_label = _label(centre, "", 10, MUTED)
+	_set_button = Button.new()
+	_set_button.text = "SWAP SET  \u00b7  TAB"
+	_set_button.focus_mode = Control.FOCUS_NONE
+	_set_button.custom_minimum_size = Vector2(0, 30)
+	_set_button.pressed.connect(_swap_set)
+	centre.add_child(_set_button)
 
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 3)
@@ -475,6 +483,16 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 	if row.get("text_color", Color.TRANSPARENT) != color:
 		row["text_color"] = color
 		button.add_theme_color_override("font_color", color)
+
+## The panel's own QR: the same swap the world's `TAB` runs, on the body this
+## screen is showing. The roster owns both pairs, so a piece put in a slot after
+## swapping belongs to the set that is now up.
+func _swap_set() -> void:
+	if _corpse_active or _warband == null or selected_merc <= 0:
+		return
+	var result: Dictionary = _warband.swap_weapon_set(selected_merc)
+	set_status(str(result.get("message", "")))
+	refresh()
 
 func _on_slot_pressed(slot: int) -> void:
 	# On a corpse the worn rows are the body's kit, so a press is a take rather
@@ -629,6 +647,7 @@ func _paint_mode() -> void:
 	_picker_box.visible = not _corpse_active
 	_stage.visible = not _corpse_active
 	_set_label.visible = not _corpse_active
+	_set_button.visible = not _corpse_active
 	_stash_hint.visible = not _corpse_active
 	_stash_box.visible = not _corpse_active
 	_corpse_box.visible = _corpse_active
@@ -736,9 +755,16 @@ func _refresh_preview() -> void:
 		armor, worn)
 	preview.apply_state(PreviewState.new(loadout, worn))
 	preview.set_active(true)
-	_set_label.text = "MAIN: %s   \u00b7   OFF: %s" % [
+	# The line under the ranger names the set TAB brings up, exactly as the
+	# frontier's own paperdoll does: which pair is in the hands is the one fact
+	# that decides what the next swap will take up.
+	var active_set: int = _warband.roster.active_weapon_set(selected_merc)
+	_set_label.text = "SET %d OF %d  \u00b7  MAIN: %s   \u00b7   OFF: %s" % [
+		active_set + 1, RosterScript.WEAPON_SET_COUNT,
 		_item_name(str(gear.get("main", ""))).to_upper(),
 		_item_name(str(gear.get("off", ""))).to_upper()]
+	_set_button.text = "SWAP TO SET %d  \u00b7  TAB" % (
+		RosterScript.WEAPON_SET_COUNT - active_set)
 
 
 class PreviewState:

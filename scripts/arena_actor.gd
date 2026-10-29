@@ -62,6 +62,13 @@ var respawn := 0.0
 ## three seconds; a warband mercenary that bled out is gone, and its roster record
 ## already says DEAD. Scenes that field bodies for good set this on creation.
 var persistent_death := false
+## Ghost of the Warband: a campaign body dies by the ground, never by the blow.
+## A lethal hit always leaves it DOWNED, so every body gets the full bleed clock;
+## once it is on the floor any blow that lands ends it; and a body that does die
+## keeps its model where it fell instead of vanishing. The possession controller
+## sets this on every roster body it spawns; the arena's own seats leave it off,
+## where a round can still be lost to one heavy strike.
+var warband_death := false
 # Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
 # true while DOWNED - the body keeps its collision, its model and its claim on
 # the slot, and only a finisher or the bleed clock kills it - so every existing
@@ -389,6 +396,19 @@ func _clear_downed_state() -> void:
 	if _bleed_drip != null:
 		_bleed_drip.detach()
 
+## The corpse: the rig stays where it fell, prone and spent, with the drip off.
+## Shared by the death and by a replica reading a death off the wire, so a body
+## that died on the host lies in the same pose on every screen watching it.
+func _hold_corpse() -> void:
+	if is_instance_valid(rig):
+		rig.visible = true
+		# The lie, held still: a corpse that kept the downed body's arm-over-arm
+		# pull would read as a body still trying to crawl.
+		rig.set_corpse(true)
+		rig.blood_loss = 1.0
+	if _bleed_drip != null:
+		_bleed_drip.detach()
+
 ## How long this body has lain on the ground, as a 0..1 share of the bleed clock.
 ## The rig carries it so the drip (and anything later) reads the same number the
 ## clock that kills the body runs on.
@@ -529,10 +549,14 @@ func _die(source_id: int) -> void:
 	roll.reset()
 	_store_body_collision()
 	_reset_rig_glide()
-	# The corpse's own pool rule takes the ground from here: the drag pose comes
-	# off and the drip stops on the frame the body dies.
-	_clear_downed_state()
-	rig.visible = false
+	# The drip stops on the frame the body dies. A campaign body then keeps the
+	# ground: its model stays in the lie it fell in, so a corpse is a thing you
+	# walk past rather than a body that winked out of the world.
+	if warband_death:
+		_hold_corpse()
+	else:
+		_clear_downed_state()
+		rig.visible = false
 	killed.emit(slot, source_id)
 
 func try_ability(slot: int = 0) -> Dictionary:
@@ -786,9 +810,11 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	amount = WarbandDamage.scale(amount, self)
 	if downed:
 		# Ghost of the Warband: a blow on a downed body is a finisher, not damage.
-		# The contract's own threshold ends it; chip damage (including the 10% a
+		# A campaign body is finished by any blow that lands on it - that is the
+		# price of lying in the dirt - while a body outside the campaign keeps the
+		# contract's own threshold, where chip damage (including the 10% a
 		# passive-simulated fight lands) is shrugged off.
-		if DownedRules.finishes(max_health, amount):
+		if warband_death or DownedRules.finishes(max_health, amount):
 			_die(source_id)
 		return
 	_cancel_consumable()
@@ -807,7 +833,12 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		rig.set_hit_react(seconds)
 		dodge.reset()
 	if bool(outcome.died):
-		_die(source_id)
+		# Nothing in the campaign is killed outright: the wood puts a body on its
+		# chest and the bleed clock is the only thing here that carries a body off.
+		if warband_death:
+			enter_downed(source_id)
+		else:
+			_die(source_id)
 	elif bool(outcome.downed):
 		enter_downed(source_id)
 
@@ -1549,10 +1580,15 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 		else:
 			_clear_downed_state()
 			downed_ended.emit(slot)
+	# A campaign death leaves a corpse on every screen, not a body that disappears
+	# the instant the authority says it is over - and a body that joined the scene
+	# already dead is lying on the ground like every other one. Idempotent.
+	if not alive and warband_death:
+		_hold_corpse()
 	kills = state.kills
 	deaths = state.deaths
 	respawn = state.respawn
-	rig.visible = alive
+	rig.visible = alive or warband_death
 	collision_layer = 4 if alive else 0
 	collision_mask = 1 if alive else 0
 	if rig.bow_index != int(state.bow):

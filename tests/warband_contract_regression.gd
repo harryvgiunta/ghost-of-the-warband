@@ -48,6 +48,7 @@ func run() -> void:
 	check_scaler()
 	check_roster()
 	check_gear_transfer(state, warband)
+	check_weapon_sets(warband)
 	check_souls()
 	check_stash(state, warband)
 	check_cruor(state, warband)
@@ -207,6 +208,94 @@ func check_gear_transfer(_state, warband) -> void:
 	check(str(roster.equipped_of(bram).get("main", "")) == "bow_short", "the bow is in hand")
 
 # --- souls -----------------------------------------------------------------
+
+## `TAB`'s two weapon sets: a body carries two complete pairs and exactly one is
+## in its hands. The swap alternates, the set being left remembers what it held,
+## both sets count as worn, and both survive a save.
+func check_weapon_sets(warband) -> void:
+	warband.reset_state()
+	var roster = warband.roster
+	var stash = warband.stash
+	var merc: int = warband.add_mercenary("Tabbard")
+	stash.add("bow_twig", 1)
+	stash.add("dagger_ironwood", 1)
+	stash.add("shield_wood", 1)
+
+	check(roster.active_weapon_set(merc) == 0, "a fresh body carries Set 1")
+	check(RosterScript.WEAPON_SET_COUNT == 2, "there are two weapon sets")
+	var refusal: Dictionary = warband.swap_weapon_set(merc)
+	check(not bool(refusal.get("ok", false)), "both sets empty: the swap is refused")
+	check(String(refusal.get("message", "")).begins_with("Both weapon sets are empty"),
+		"and it says why")
+
+	check(bool(warband.equip_merc(merc, "main", "bow_twig").get("ok", false)),
+		"the twig bow goes into the active set")
+	check(str(roster.equipped_of(merc).get("main", "")) == "bow_twig",
+		"Set 1 is what the hands carry")
+	var swap: Dictionary = warband.swap_weapon_set(merc)
+	check(bool(swap.get("ok", false)), "one press takes the body to Set 2")
+	check(roster.active_weapon_set(merc) == 1, "Set 2 is the active set")
+	check(str(roster.equipped_of(merc).get("main", "")) == "",
+		"Set 2 starts empty, so the hands are empty")
+	check(roster.weapon_set_pair(merc, 0).get("main", "") == "bow_twig",
+		"Set 1 kept the bow the swap put away")
+
+	check(bool(warband.equip_merc(merc, "main", "dagger_ironwood").get("ok", false)),
+		"a blade equipped now lands in Set 2")
+	check(bool(warband.equip_merc(merc, "off", "shield_wood").get("ok", false)),
+		"and the off hand of Set 2 takes the shield")
+	var back: Dictionary = warband.swap_weapon_set(merc)
+	check(bool(back.get("ok", false)) and roster.active_weapon_set(merc) == 0,
+		"the next press comes back to Set 1")
+	check(str(roster.equipped_of(merc).get("main", "")) == "bow_twig"
+			and str(roster.equipped_of(merc).get("off", "")) == "",
+		"Set 1's pair is in the hands again")
+	check(roster.weapon_set_label(merc, 1) == "Ironwood Shiv + Wooden Shield",
+		"Set 2 is named by what it holds")
+
+	# Both pairs are the body's gear: the stash sees them, the value counts them,
+	# and a hand-off can take a piece out of the set the hands are not carrying.
+	var worn_ids: Array[String] = []
+	for entry in roster.worn_entries(merc):
+		worn_ids.append(str(entry.get("item", "")))
+	check(worn_ids.has("bow_twig") and worn_ids.has("dagger_ironwood")
+			and worn_ids.has("shield_wood"),
+		"worn entries list both weapon sets")
+	check(warband.gear_value(merc) > 0, "the value of a body counts both sets")
+	var rows: Array[Dictionary] = stash.rows(roster, {})
+	var dagger_row := {}
+	for row in rows:
+		if str(row.get("item_id", "")) == "dagger_ironwood":
+			dagger_row = row
+	check(int(dagger_row.get("worn", []).size()) == 1,
+		"the stash row knows a piece waits in the inactive set")
+	var other: int = warband.add_mercenary("Borrower")
+	var hand_off: Dictionary = warband.equip_merc(other, "main", "dagger_ironwood")
+	check(bool(hand_off.get("ok", false)),
+		"a piece in the inactive set can still be handed over")
+	check(roster.weapon_set_pair(merc, 1).get("main", "") == "",
+		"and it leaves the set it was waiting in")
+
+	# A save carries both pairs and the set that is up.
+	var saved: Dictionary = warband.to_dict()
+	var fresh = RosterScript.new()
+	fresh.from_dict(saved.get("roster", {}))
+	check(fresh.active_weapon_set(merc) == 0, "the active set survives a save")
+	check(fresh.weapon_set_pair(merc, 0).get("main", "") == "bow_twig",
+		"Set 1 survives a save")
+	check(fresh.weapon_set_pair(merc, 1).get("off", "") == "shield_wood",
+		"Set 2 survives a save")
+	# A record written before the sets existed loads with its pair in Set 1.
+	var legacy = RosterScript.new()
+	var old_id: int = legacy.add_record({"id": 41, "name": "Old", "health": 100.0,
+		"max_health": 100.0, "state": 0, "deployed": false, "downed_seconds": 0.0,
+		"equipped": {"main": "sword_short", "off": "shield_buckler"}})
+	check(legacy.weapon_set_pair(old_id, 0).get("main", "") == "sword_short",
+		"a pre-set record puts the pair in its hands into Set 1")
+	check(legacy.weapon_set_pair(old_id, 1).get("main", "") == "",
+		"and Set 2 starts empty")
+	check(str(legacy.equipped_of(old_id).get("off", "")) == "shield_buckler",
+		"the legacy pair is what the body holds")
 
 func check_souls() -> void:
 	var RouterScript = preload("res://scripts/warband/soul_router.gd")

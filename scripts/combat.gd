@@ -13,7 +13,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
 ## Bow damage at full draw, in catalog `index` order: the three forged bows
 ## and the twig bow a warband starts with.
-const BASE_DAMAGE := [30.0, 38.0, 50.0, 5.0]
+const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0]
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8

@@ -27,9 +27,12 @@ const RunReportScript = preload("res://scripts/warband/run_report.gd")
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
 
 ## Additive save format. v2 added the run history (`runs`) and the lifetime
-## totals (`run_totals`); a v1 file still loads, with no reports and zeroed
-## totals, because every reader of those fields defaults.
-const SAVE_VERSION := 2
+## totals (`run_totals`); v3 added each mercenary's two weapon sets (`weapon_sets`
+## plus `active_set` per record), the pair `TAB` brings up. Older files still load:
+## a record with no sets puts the pair already in its hands in Set 1 and starts Set
+## 2 empty, and a v1 file has no reports and zeroed totals, because every reader
+## of those fields defaults.
+const SAVE_VERSION := 3
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 
 var roster: WarbandRoster = RosterScript.new()
@@ -165,21 +168,33 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
 
 ## Take one worn copy of `item_id` off whichever mercenary holds it and drop it
 ## into the pool. Returns `{ok, from}` where `from` names the mercenary.
+##
+## Both weapon sets are searched, not just the hands: a piece waiting in the set
+## the body is not carrying is still the warband's to hand over.
 func _strip_worn(item_id: String) -> Dictionary:
-	for merc in roster.records():
-		var gear: Variant = merc.get("equipped", {})
-		if not gear is Dictionary:
+	for entry in _worn_entries_all():
+		if str(entry.get("item", "")) != item_id:
 			continue
-		for slot in gear:
-			if str(gear[slot]) != item_id:
-				continue
-			var merc_id := int(merc.get("id", 0))
-			var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(str(slot))]
-			if roster.unequip(merc_id, str(slot)) != item_id:
-				continue
-			stash.add(item_id, 1)
-			return {"ok": true, "from": label}
+		var merc_id := int(entry.get("merc", 0))
+		var slot_id := str(entry.get("slot", ""))
+		var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(slot_id)]
+		if roster.take_worn(merc_id, slot_id, int(entry.get("set", -1))) != item_id:
+			continue
+		stash.add(item_id, 1)
+		return {"ok": true, "from": label}
 	return {"ok": false, "from": ""}
+
+## Every worn piece in the warband, both weapon sets included, as `{merc, slot,
+## item, set}` records.
+func _worn_entries_all() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for merc in roster.records():
+		var merc_id := int(merc.get("id", 0))
+		for entry in roster.worn_entries(merc_id):
+			var row := entry.duplicate()
+			row["merc"] = merc_id
+			out.append(row)
+	return out
 
 ## The piece a loot pickup should snap into the soul's hands if it can. It only
 ## takes a slot that is empty or holds something clearly cheaper, so a player
@@ -218,6 +233,16 @@ func unequip_merc(merc_id: int, slot_id: String) -> String:
 	_notify()
 	return item_id
 
+## `TAB` in the world: the standing body puts away the weapon set in its hands
+## and takes up the other one, exactly as the frontier's own swap does. The two
+## pairs live on the roster record, so the swap is warband state - it survives a
+## body hop, a reload and a scene hand-off - and the scene re-dresses the rig from
+## it with `refresh_gear()`.
+func swap_weapon_set(merc_id: int) -> Dictionary:
+	var result := roster.swap_weapon_set(merc_id)
+	_notify()
+	return result
+
 func set_deployed(merc_id: int, on: bool) -> Dictionary:
 	var result := roster.set_deployed(merc_id, on, deployment_cap)
 	_notify()
@@ -228,11 +253,12 @@ func deploy_battle(merc_ids: Array) -> Array[int]:
 	_notify()
 	return fielded
 
+## What one mercenary's kit is worth. Both weapon sets count: stowing a sword in
+## the set the hands are not carrying does not make it leave the warband.
 func gear_value(merc_id: int) -> int:
-	var gear := roster.equipped_of(merc_id)
 	var total := 0
-	for slot in gear:
-		var item_id := str(gear[slot])
+	for entry in roster.worn_entries(merc_id):
+		var item_id := str(entry.get("item", ""))
 		if not item_id.is_empty():
 			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
 	return total
@@ -240,13 +266,10 @@ func gear_value(merc_id: int) -> int:
 ## The warband's combined worth, gear and essence, for the HUD and tests.
 func total_value() -> int:
 	var total := 0
-	for merc in roster.records():
-		var gear: Variant = merc.get("equipped", {})
-		if gear is Dictionary:
-			for slot in gear:
-				var item_id := str(gear[slot])
-				if not item_id.is_empty():
-					total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+	for entry in _worn_entries_all():
+		var item_id := str(entry.get("item", ""))
+		if not item_id.is_empty():
+			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
 	var pooled := stash.pooled_map()
 	for item_id in pooled:
 		total += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * int(pooled[item_id])
@@ -549,12 +572,7 @@ func run_record() -> Dictionary:
 func _item_count() -> int:
 	var total := stash.pooled_total()
 	for merc in roster.records():
-		var gear: Variant = merc.get("equipped", {})
-		if not gear is Dictionary:
-			continue
-		for slot in gear:
-			if not str(gear[slot]).is_empty():
-				total += 1
+		total += roster.worn_entries(int(merc.get("id", 0))).size()
 	return total
 
 ## The bodies that took the field, as the roster holds them right now: the arena

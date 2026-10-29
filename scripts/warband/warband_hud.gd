@@ -5,7 +5,7 @@ extends CanvasLayer
 ##
 ## It owns no gameplay state: `set_body()` is called by the scene whenever the
 ## soul moves and every value is re-read each frame, so a revive, a loot or a
-## downed body is never a stale label. The tactical screen (TAB) is
+## downed body is never a stale label. The tactical screen (O) is
 ## `WarbandScreen`; this is the thin layer you read while fighting.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -263,7 +263,7 @@ func _refresh_squad() -> void:
 	var hint := Label.new()
 	hint.add_theme_font_size_override("font_size", 10)
 	hint.modulate = Color(0.72, 0.72, 0.72)
-	hint.text = "[ / ] swap body   TAB warband   G altar/stash"
+	hint.text = "[ / ] swap body   O warband   TAB weapon set   G altar/stash"
 	_squad_box.add_child(hint)
 
 func _refresh_purse() -> void:
