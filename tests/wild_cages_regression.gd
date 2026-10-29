@@ -44,9 +44,21 @@ const FREE_TIMEOUT := 12.0
 ## Nothing solid within 6 m of the lane's centre line. The walked band's own rule
 ## is `RunForestScript.CLEAR_HALF`; the cage line keeps a wider one.
 const CAGE_CLEARANCE := 6.0
-## A body's own footprints off the lane, as the camps are laid.
-const LATERAL_MIN := 18.0
-const LATERAL_MAX := 40.0
+## A camp body's own distance from the lane, as the camps are laid. The band's
+## floor is the rule that matters: a warden's sight is 60 m, so nothing may stand
+## inside 70 and the road must never be able to pull a camp.
+const LATERAL_MIN := 70.0
+const LATERAL_MAX := 120.0
+## How far a body may end up from where it was put while it stands on the road:
+## a warden that converged on it would shove it twice that in a breath.
+const STAND_DRIFT := 2.0
+## How far a calm warden may stand from its own camp's dressing: the spawn ring
+## plus the patch it roams, with room to spare. A camp that had converged on the
+## road would be tens of metres out.
+const RING_REACH := 14.0
+## Half a second of simulation at each of the three camps: enough for the far
+## band's own tick to take a sighting, if a sighting were possible.
+const ROAD_FRAMES := 30
 ## The same clearance the watchers must keep off the town's wall.
 const WALL_CLEARANCE := 14.0
 ## A settled mob stands this close to the analytic ground.
@@ -123,7 +135,7 @@ func run() -> void:
 	var roster_before: int = warband.roster.count()
 
 	await _check_cages()
-	await _check_warren(quests)
+	await _check_warren(body, quests)
 	_check_latches(body)
 	await _check_rescue(body, quests, roster_before)
 	_finish()
@@ -211,7 +223,7 @@ func _check_cages() -> void:
 
 # --- 2. the warren ---------------------------------------------------------
 
-func _check_warren(quests) -> void:
+func _check_warren(body, quests) -> void:
 	warren = WarrenScript.new()
 	warren.name = "WatcherWarren"
 	game.add_child(warren)
@@ -231,7 +243,7 @@ func _check_warren(quests) -> void:
 	var outside := 0
 	var listed := 0
 	var named := 0
-	var banded := 0
+	var closest := INF
 	var path = game.trail.forest.get("path")
 	for mob in warren.mobs():
 		var at: Vector3 = mob.global_position
@@ -243,15 +255,20 @@ func _check_warren(quests) -> void:
 			listed += 1
 		if str(mob.mob_id) == "hollow_warden":
 			named += 1
-		var lateral: float = path.distance_to(Vector2(at.x, at.z))
-		if lateral >= LATERAL_MIN and lateral <= LATERAL_MAX:
-			banded += 1
+		closest = minf(closest, path.distance_to(Vector2(at.x, at.z)))
 	check(on_ground == 21, "every warden stands on the ground (%d of 21)" % on_ground)
 	check(outside == 21, "every warden keeps %.0f m off the town's wall (%d of 21)"
 		% [wall + WALL_CLEARANCE, outside])
 	check(listed == 21, "every warden is on the world's one hostile list (%d of 21)" % listed)
 	check(named == 21, "every warden is a hollow warden (%d of 21)" % named)
-	check(banded == 21, "every warden stands 18-40 m off the lane (%d of 21)" % banded)
+	check(closest >= LATERAL_MIN,
+		"no warden stands inside %.0f m of the lane (nearest is %.1f m)"
+		% [LATERAL_MIN, closest])
+	check(closest <= LATERAL_MAX,
+		"and the nearest camp is still inside %.0f m of it (%.1f m)"
+		% [LATERAL_MAX, closest])
+
+	await _check_road_is_calm(body)
 
 	# A kill through the mob's own signal path reaches the world's handler and the
 	# ledger: this is the bounty's whole chain.
@@ -265,7 +282,55 @@ func _check_warren(quests) -> void:
 	check(warren.living() == 20, "and one body fewer stands (%d)" % warren.living())
 	print("WILD_CAGES_WARREN camps=%s mobs=%d" % [
 		str(warren.camp_points().map(func(p: Vector3) -> String:
-			return "(%.1f,%.1f)" % [p.x, p.z])), warren.mobs().size()])
+			return "(%.1f,%.2f,%.1f)" % [p.x, p.y, p.z])), warren.mobs().size()])
+
+
+## A body standing on the lane at each camp's own fraction must leave the camps
+## where they are. This is the road's rule and the reason the band starts at 70 m:
+## a warden's sight is 60 m, and a camp that came off its patch every time the
+## squad walked past would be a fight the warband never chose - and, at the old
+## 18-40 m, seven bodies a camp standing in the lane the campaign has to walk.
+func _check_road_is_calm(body) -> void:
+	var path = game.trail.forest.get("path")
+	# A warband body clamps itself to a square around the world origin
+	# (`arena_actor.gd::bounds`), so a lane point outside it is not somewhere a
+	# body can stand: the nearest the road lets it get is the bound. The stand is
+	# clamped here for exactly the reason the body clamps itself.
+	var reach := float(body.get("bounds"))
+	var nearest := INF
+	var drifted := 0.0
+	for spec in WarrenScript.CAMPS:
+		var frame: Dictionary = path.sample(path.total * float(spec["fraction"]))
+		var lane: Vector3 = frame["position"]
+		var land := Vector3(clampf(lane.x, -reach, reach), 0.0,
+			clampf(lane.z, -reach, reach))
+		var stood := Vector3(land.x, TerrainScript.height_at(land.x, land.z) + 0.25, land.z)
+		body.global_position = stood
+		body.velocity = Vector3.ZERO
+		for tick in ROAD_FRAMES:
+			await physics_frame
+		drifted = maxf(drifted, _flat(body.global_position, stood))
+		for mob in warren.mobs():
+			if not is_instance_valid(mob) or not bool(mob.get("alive")):
+				continue
+			nearest = minf(nearest, _flat(mob.global_position, body.global_position))
+	check(nearest >= 60.0,
+		"a body on the lane is outside a warden's sight of every camp (%.1f m)" % nearest)
+	check(drifted <= STAND_DRIFT,
+		"and nothing shoves it while it stands there (%.2f m off the mark)" % drifted)
+
+	# Every warden is still standing its own patch: a camp that had converged on
+	# the road would be tens of metres from its own dressing.
+	var walked_off := 0
+	for camp in warren.camps():
+		var centre: Vector3 = camp["centre"]
+		for mob in camp["mobs"]:
+			if not is_instance_valid(mob) or not bool(mob.get("alive")):
+				continue
+			if _flat(mob.global_position, centre) > RING_REACH:
+				walked_off += 1
+	check(walked_off == 0,
+		"the road does not pull a camp off its patch (%d walked off)" % walked_off)
 
 
 # --- 3. the latch ----------------------------------------------------------
