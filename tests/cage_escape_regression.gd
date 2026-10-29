@@ -640,6 +640,7 @@ func check_latches() -> void:
 	check(game.controller.merc_for_peer(1) == camp.rescuer_id,
 		"the soul is in Corvin's body for the latches")
 	var cutter = game.controller.active_body(1)
+	var audio = root.get_node_or_null("Audio")
 	check(camp.holds_blade(cutter), "and the shiv is in his hands")
 	check(camp.cages_open_count() == 0,
 		"the pair falling cut no latch by itself (%d)" % camp.cages_open_count())
@@ -667,6 +668,9 @@ func check_latches() -> void:
 			"cutting cage %d books %d latches (%d)" % [index + 1, index + 1, camp.cages_open_count()])
 		check(camp.sequencer.cages_opened() == index + 1,
 			"and the sequencer counts them one by one (%d)" % camp.sequencer.cages_opened())
+		check(audio == null or str(audio.last_event) == "cage_latch",
+			"cutting cage %d's latch plays the lock (%s)"
+			% [index + 1, "" if audio == null else str(audio.last_event)])
 		if index < camp.CAGE_POSTS.size() - 1:
 			check(camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
 				"%d of 4 latches does not loose the squad (%s)"

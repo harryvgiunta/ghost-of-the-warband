@@ -1199,7 +1199,13 @@ func interact(actor) -> bool:
 	if not holds_blade(actor):
 		_set_status("Nothing to cut the latch with.", 2.5)
 		return true
-	return open_latch(index)
+	var opened := open_latch(index)
+	if opened:
+		# The lock, the chain and the tick of the padlock. It is played here, on
+		# the player's press, and never inside `open_latch`: a resumed campaign
+		# opens all four cages in one call and must not sound like a locksmith.
+		SfxScript.play("cage_latch", CAGE_POSTS[index] + Vector3.UP * 1.1)
+	return opened
 
 
 ## The nearest still-closed cage the body can reach its latch of, or -1. Reach is

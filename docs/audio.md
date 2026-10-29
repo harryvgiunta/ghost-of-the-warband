@@ -88,6 +88,7 @@ inside 20 ms are one contact reported twice and play once.
 | `arrow` | 1 | an arrow launches (`Arrow.launch`, on every peer that owns one) |
 | `footstep` | 12 | the body this machine is inside puts its boot down (`Footsteps.update`, every fighter body and the frontier ranger) |
 | `footstep_far` | 12 | any *other* body's boot: the same takes, quiet and close-range |
+| `cage_latch` | 4 | the soul cuts a cage latch (`CageEscape.interact`; never inside `open_latch`, which a resumed campaign calls four times) |
 | `throw` | 3 | a blade is let go of (`ThrownWeapon.launch`) |
 
 The weapon reading is `Sfx.kind_of(source, hand)`: the ranger rig's own
@@ -126,6 +127,7 @@ always writes the same bytes and a re-run is a no-op in git.
 | `334167__loudernoises__flying-blade.wav` | `thrown/blade_01..03` |
 | `205563__everheat__arrow.wav` | `bow/arrow_01` |
 | `411206__straget__going-on-a-forest-road-gravel-and-grass.wav` (12 plants across 31 s) | `step/footstep_01..12` |
+| `330635__leonelmail__padlock-chain-lock-unlock.mp3` (the four events at 43-45 s) | `cage/cage_latch_01..04` |
 
 ## Verification
 

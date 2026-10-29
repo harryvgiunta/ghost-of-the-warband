@@ -35,6 +35,12 @@ const EVENTS := {
 		"db": -3.0, "pitch": [0.98, 1.06]},
 	"arrow": {"folder": "bow", "stem": "arrow", "count": 1,
 		"db": -4.0, "pitch": [0.97, 1.05]},
+	# A padlock and its chain being worked open: the camp's four latches. It is
+	# an interaction, so it sits forward of the combat bed and only a few metres
+	# of range - the sound of your own hand at the bars.
+	"cage_latch": {"folder": "cage", "stem": "cage_latch", "count": 4,
+		"db": -7.0, "pitch": [0.94, 1.04],
+		"unit_size": 4.0, "max_distance": 30.0, "cutoff": 9000.0},
 	"throw": {"folder": "thrown", "stem": "blade", "count": 3,
 		"db": -7.0, "pitch": [0.94, 1.06]},
 	# Boots, deliberately the quietest thing in the mix and on their own voice

@@ -110,6 +110,14 @@ SLICED = {
             (23.02, 23.27), (25.01, 25.26), (27.15, 27.40), (29.69, 29.94),
         ],
     },
+    # A padlock and its chain: the working part of the recording (43-45 s) is
+    # four events - the key and the barrel, a rattle, a tick, a second rattle.
+    "cage_latch": {
+        "source": "330635__leonelmail__padlock-chain-lock-unlock.mp3",
+        "windows": [
+            (43.26, 43.60), (43.95, 44.44), (44.62, 45.06), (45.08, 45.50),
+        ],
+    },
     # The bow releases: one arrow, whole.
     "arrow": {
         "source": "205563__everheat__arrow.wav",
@@ -129,6 +137,7 @@ GROUPS = {
     "blade": "thrown",
     "arrow": "bow",
     "footstep": "step",
+    "cage_latch": "cage",
 }
 
 
