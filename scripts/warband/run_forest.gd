@@ -32,7 +32,7 @@ extends RefCounted
 ##    same geometry instead of guessing at it.
 ##
 ## And two things that are not the road but the place it runs through. The wood is
-## **deep**: thirteen rows a side out to `WOOD_EDGE` (the near six walked past, the
+## **deep**: sixteen rows a side out to `WOOD_EDGE` (the near six walked past, the
 ## rest batched in fog-sized cells), with the mountain rim `terrain.gd` raises
 ## standing beyond them - the trail is a valley, not a strip of trees. One hollow
 ## in it is **wet**: `terrain.gd`'s swamp basin at `SWAMP_FRACTION` of the route
@@ -57,32 +57,52 @@ const HALF_WIDTH := WIDTH * 0.5
 const CLEAR_HALF := 1.55
 ## How far from the way dressing may stand outside it.
 const VERGE := 24.0
-const TREE_CHUNK := 96.0
+## The near wood's culling cells. The lane is a kilometre and a third long now, and
+## a cell edge is paid for on every row the wood plants, so the near rows share a
+## 128 m cell: still well inside the fog's own reach, and a fifth fewer multimeshes
+## than 96 m cells over the same wood.
+const TREE_CHUNK := 128.0
 ## The deep wood - every row past this offset - is batched in larger chunks: the
 ## outer rows are seen through fog at 60-plus metres, so a 512 m multimesh cell
-## culls nearly as well as a 96 m one for a fraction of the nodes and draws.
+## culls nearly as well as a 128 m one for a fraction of the nodes and draws.
 const DEEP_ROW_MIN := 26.0
 const DEEP_TREE_CHUNK := 512.0
-## The wood's own outer edge: no trunk is planted past this. The last three rows
+## The wood's own outer edge: no trunk is planted past this. It grew with the lane
+## (the wood is the trail's own depth, not a fixed skirt), so the last five rows
 ## are the mountain rim's forested skirt - sparse, large trees standing at the toe
 ## of the face, which read as a treeline climbing into the fog - and the rim
 ## (`terrain.gd`) closes the valley beyond them.
-const WOOD_EDGE := 156.0
+const WOOD_EDGE := 205.0
 ## Bushes cover the verge in one pass: fewer, larger batches than the trees.
-const BUSH_CHUNK := 120.0
+const BUSH_CHUNK := 160.0
 ## Torches: a pair either side every this many metres, on the verge - outside the
 ## walked line, because a staked post is solid and a body must never jam on one.
-const TORCH_SPACING := 12.0
+## Eighteen metres is still an unbroken chain of fire: each torch throws sixteen, so
+## the pair either side of a body standing between two posts both reach it, and the
+## whole 1,375 m route costs 154 lights against the old 152.
+const TORCH_SPACING := 18.0
 const TORCH_OFFSET := 4.4
 ## Where the cult stands in pairs. Fractions of the lane's arc length.
 const CLEARING_FRACTIONS := [0.22, 0.44, 0.66, 0.88]
 ## Grass and ferns are confined to the route's verge: the rest of the wood is
 ## trunks and brambles, and grass a body never sees is a draw call for nothing.
 const GRASS_BAND := 12.0
+## How often the floor's own litter falls: stone, trodden earth, leaf straw and the
+## odd drop of blood, as one of each per this many metres of lane. The counts are
+## read off the road's measured length, so a longer road gets more of the same
+## litter instead of the same litter spread thinner.
+const BOULDER_EVERY := 13.5
+const COBBLE_EVERY := 6.1
+const TRODDEN_EVERY := 11.0
+const STRAW_EVERY := 27.0
+const BLOOD_EVERY := 92.0
 const SEED := 82117
 
 ## The lane, its own first waypoint to the town gate. It winds, but every bend
 ## still closes on the arch, so a body walking it always has the town ahead of it.
+## Thirty straight z-steps of 45 m with the x drifting between -9 and 11: about
+## 1,375 m of measured road, and the wood, the torches, the clearings and the
+## ground are all derived from these points rather than from a second table.
 ## Where that first waypoint lands is the caller's `offset`: in the one world it
 ## is a long run of wood past the camp's mouth, not the camp's mouth itself.
 const LANE_POINTS := [
@@ -107,6 +127,16 @@ const LANE_POINTS := [
 	Vector3(5.0, 0.0, -804.0),
 	Vector3(-3.0, 0.0, -849.0),
 	Vector3(1.0, 0.0, -894.0),
+	Vector3(7.0, 0.0, -939.0),
+	Vector3(-2.0, 0.0, -984.0),
+	Vector3(-8.0, 0.0, -1029.0),
+	Vector3(3.0, 0.0, -1074.0),
+	Vector3(10.0, 0.0, -1119.0),
+	Vector3(-4.0, 0.0, -1164.0),
+	Vector3(1.0, 0.0, -1209.0),
+	Vector3(-6.0, 0.0, -1254.0),
+	Vector3(9.0, 0.0, -1299.0),
+	Vector3(-1.0, 0.0, -1344.0),
 ]
 
 
@@ -461,6 +491,13 @@ static func _count_type(node: Node, type_name: String) -> int:
 	return total
 
 
+## How many of something a road of `metres` carries at one per `every`: the lane's
+## own length is the only place a density is written down, so a longer road grows
+## its litter instead of thinning it.
+static func _per_metre(metres: float, every: float) -> int:
+	return maxi(1, int(round(metres / maxf(every, 0.001))))
+
+
 # --- layout ----------------------------------------------------------------
 
 ## Where the fielded warband stands: the mouth of the lane, inside the walkable
@@ -498,8 +535,8 @@ static func _clearing_points(path: Path) -> Array:
 static func _pursuer_posts(path: Path) -> Array:
 	# The first ambush stands well down the road, not on the camp's doorstep. The
 	# camp's own fight happens around the cages and a cultist's sight reaches 60 m,
-	# so anything closer joins the tutorial. On a nine-hundred-metre road this is
-	# ~90 m in; the rest of the ambushes follow every ~100 m after it.
+	# so anything closer joins the tutorial. On this road that is ~140 m in, past
+	# the corridor and out of sight of the mouth; the rest follow every ~280 m.
 	var at := path.total * 0.10
 	var head := path.sample(at)
 	var back: Vector3 = (head["position"] as Vector3) - (head["forward"] as Vector3) * 3.2
@@ -581,7 +618,7 @@ static func _build_catch_floor(root: Root, path: Path) -> void:
 ## how far they wander about that line, and whether a body can walk into them. The
 ## near two solid rows carry the trunks a body has to get round; the rest is
 ## batched forest, which closes the horizon through the fog for the price of a
-## multimesh. Thirteen rows a side, out to `WOOD_EDGE`: the trail is a wood now,
+## multimesh. Sixteen rows a side, out to `WOOD_EDGE`: the trail is a wood now,
 ## not a treeline, and the mountains stand beyond it.
 static func _wood_rows() -> Array:
 	return [
@@ -599,10 +636,13 @@ static func _wood_rows() -> Array:
 		{"offset": 73.0, "spacing": 36.0, "jitter": 7.4, "scale": Vector2(1.25, 2.3), "solid": false},
 		{"offset": 85.0, "spacing": 40.0, "jitter": 7.8, "scale": Vector2(1.3, 2.4), "solid": false},
 		# The rim's skirt: a sparse, oversized treeline at the toe of the mountain
-		# face, which is the last thing the fog lets through.
+		# face, which is the last thing the fog lets through. It reaches out to
+		# `WOOD_EDGE` now, so the wood's depth grows with the lane's length.
 		{"offset": 100.0, "spacing": 55.0, "jitter": 7.0, "scale": Vector2(1.25, 2.1), "solid": false},
 		{"offset": 125.0, "spacing": 62.0, "jitter": 7.0, "scale": Vector2(1.3, 2.2), "solid": false},
 		{"offset": 148.0, "spacing": 68.0, "jitter": 6.5, "scale": Vector2(1.25, 2.1), "solid": false},
+		{"offset": 172.0, "spacing": 76.0, "jitter": 6.5, "scale": Vector2(1.3, 2.2), "solid": false},
+		{"offset": 196.0, "spacing": 84.0, "jitter": 6.5, "scale": Vector2(1.25, 2.1), "solid": false},
 	]
 
 
@@ -821,7 +861,7 @@ static func _build_grass(root: Root, style: WorldStyle, path: Path) -> void:
 
 ## Stone: boulders bedded in the verge and loose cobbles trodden into the worn
 ## line. Both are merged into one mesh each, so the whole run's stone is two draw
-## calls.
+## calls however long the run is.
 static func _build_rocks(root: Root, path: Path) -> void:
 	var group := _group(root, "Rocks")
 	var rng := RandomNumberGenerator.new()
@@ -830,8 +870,10 @@ static func _build_rocks(root: Root, path: Path) -> void:
 	var meshes: Array[ArrayMesh] = [
 		RockKit.mesh("boulder", 2711), RockKit.mesh("slab", 2749), RockKit.mesh("boulder", 2787),
 	]
+	var boulder_count := _per_metre(path.total, BOULDER_EVERY)
+	var cobble_count := _per_metre(path.total, COBBLE_EVERY)
 	var boulders := CampKit.Merged.new()
-	for index in 68:
+	for index in boulder_count:
 		var at := rng.randf_range(0.0, path.total)
 		var side := -1.0 if index % 2 == 0 else 1.0
 		var point := path.verge(at, side * rng.randf_range(3.2, 13.0))
@@ -843,14 +885,14 @@ static func _build_rocks(root: Root, path: Path) -> void:
 	boulders.commit(group, "Boulders", false)
 	var cobbles := CampKit.Merged.new()
 	var cobble := RockKit.mesh("cobble", 6301)
-	for index in 150:
+	for index in cobble_count:
 		var at := rng.randf_range(0.0, path.total)
 		var point := path.verge(at, rng.randf_range(-4.0, 4.0))
 		RockKit.add_stone(cobbles, material, cobble,
 			TerrainScript.grounded(Vector3(point.x, -0.02, point.z)),
 			rng.randf_range(0.10, 0.3), rng.randf_range(0.0, TAU), 0.55, rng.randf_range(-0.25, 0.25))
 	cobbles.commit(group, "Cobbles", false)
-	root.stats["rocks"] = 68 + 150
+	root.stats["rocks"] = boulder_count + cobble_count
 
 
 # --- fire ------------------------------------------------------------------
@@ -1355,26 +1397,27 @@ static func _build_scatter(root: Root, path: Path) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = SEED + 53
 	var worn := CampKit.Merged.new()
-	for index in 84:
+	for index in _per_metre(path.total, TRODDEN_EVERY):
 		var at := rng.randf_range(0.0, path.total)
 		var point := path.verge(at, rng.randf_range(-4.2, 4.2))
 		_ground_patch(worn, iron["rut"], point, rng.randf_range(0.45, 1.8),
 			rng.randf_range(0.55, 1.15))
 	worn.commit(group, "Trodden", false)
 	var straw := CampKit.Merged.new()
-	for index in 34:
+	for index in _per_metre(path.total, STRAW_EVERY):
 		var at := rng.randf_range(0.0, path.total)
 		var point := path.verge(at, rng.randf_range(-4.6, 4.6))
 		_straw(straw, mats, TerrainScript.grounded(Vector3(point.x, 0.0, point.z)), rng, 0.6, 9)
 	straw.commit(group, "LeafLitter", false)
 	var blood := CampKit.Merged.new()
-	for index in 10:
+	for index in _per_metre(path.total, BLOOD_EVERY):
 		var at := rng.randf_range(0.0, path.total)
 		var point := path.verge(at, rng.randf_range(-3.6, 3.6))
 		_ground_patch(blood, iron["blood"], point, rng.randf_range(0.35, 0.7),
 			rng.randf_range(0.7, 1.0))
 	blood.commit(group, "Blood", false)
-	root.stats["scatter"] = 84 + 34 + 10
+	root.stats["scatter"] = _per_metre(path.total, TRODDEN_EVERY) \
+		+ _per_metre(path.total, STRAW_EVERY) + _per_metre(path.total, BLOOD_EVERY)
 
 
 ## A flat stain of worn earth, laid on the ground's own normal so it follows the
