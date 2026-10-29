@@ -12,6 +12,7 @@ const SfxLibraryScript = preload("res://scripts/audio/sfx_library.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
 const PauseMenuScript = preload("res://scripts/pause_menu.gd")
+const FootstepsScript = preload("res://scripts/audio/footsteps.gd")
 
 const TEST_SAVE := "user://audio_settings_test.json"
 
@@ -66,6 +67,31 @@ class StubMob:
 	var weapon := ""
 
 
+## A body that walks: the emitter only reads its velocity and its footing.
+class StubBody:
+	var velocity := Vector3(2.0, 0.0, 0.0)
+	var global_position := Vector3.ZERO
+	var on_floor := true
+
+	func is_on_floor() -> bool:
+		return on_floor
+
+	func is_inside_tree() -> bool:
+		return false
+
+
+## A rig's feet, at whatever height the test puts them.
+class StubFeet:
+	var left := 0.40
+	var right := 0.40
+
+	func get_joint_positions() -> Dictionary:
+		return {
+			"left_foot": Vector3(0.0, left, 0.0),
+			"right_foot": Vector3(2.0, right, 0.0),
+		}
+
+
 func run() -> void:
 	_remove_test_save()
 	audio = root.get_node_or_null("Audio")
@@ -79,6 +105,7 @@ func run() -> void:
 	_check_tracks()
 	_check_library()
 	_check_weapon_reading()
+	_check_footsteps()
 	_check_settings_menu()
 	_check_pause_menu()
 	audio.set_music_volume(0.8)
@@ -262,6 +289,62 @@ func _check_weapon_reading() -> void:
 	check(audio.last_event == "arrow", "an arrow did not ask for the bow take")
 	SfxScript.thrown(Vector3(1, 0, 2))
 	check(audio.last_event == "throw", "a thrown blade did not ask for the throw take")
+
+
+## The boots: a plant sounds, the same boot cannot machine-gun, and a body that
+## is airborne, standing or far away makes no sound at all.
+func _check_footsteps() -> void:
+	check(int(SfxLibraryScript.entry("footstep").get("count")) == 12, "footstep takes changed")
+	check(float(SfxLibraryScript.entry("footstep").get("db")) < float(SfxLibraryScript.entry("swing_1h").get("db")),
+		"a footfall must sit under the quietest swing")
+	check(str(SfxLibraryScript.entry("footstep").get("pool")) == "step",
+		"footfalls must use their own voice pool")
+	check(audio._voices_step.size() == 6, "the step voice pool is not built")
+
+	var body := StubBody.new()
+	var feet := StubFeet.new()
+	var steps = FootstepsScript.new()
+	body.velocity = Vector3(2.0, 0.0, 0.0)
+	audio.last_event = ""
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "", "a footfall fired before any boot came down")
+
+	audio.last_event = ""
+	feet.left = 0.30
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "footstep", "a planted boot made no sound")
+
+	audio.last_event = ""
+	feet.left = 0.40
+	steps.update(0.016, body, feet)
+	feet.left = 0.30
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "", "one boot sounded twice inside its own gap")
+
+	audio.last_event = ""
+	feet.left = 0.40
+	steps.update(0.20, body, feet)
+	feet.left = 0.30
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "footstep", "the boot went silent for good after its gap")
+
+	audio.last_event = ""
+	body.on_floor = false
+	feet.left = 0.45
+	steps.update(0.016, body, feet)
+	feet.left = 0.30
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "", "a body in the air made a footstep")
+
+	body.on_floor = true
+	body.velocity = Vector3.ZERO
+	audio.last_event = ""
+	feet.left = 0.45
+	steps.update(0.016, body, feet)
+	feet.left = 0.30
+	steps.update(0.016, body, feet)
+	check(audio.last_event == "", "a standing body made a footstep")
+
 
 
 func _check_settings_menu() -> void:

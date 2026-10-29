@@ -47,7 +47,16 @@ the world (a `AudioStreamPlayer3D` from a pool of twelve, `unit_size` 7 m,
 80 m cull) and omitted for anything on the player's own body (a flat
 `AudioStreamPlayer`). Takes are peak-normalised on disk and then levelled here;
 a take never repeats back to back, and each carries a small pitch spread so
-repeated blows do not read as a loop. Two identical events from the same place
+repeated blows do not read as a loop.
+
+Footsteps are the exception to the one-pool rule: `SfxLibrary` gives the
+`footstep` entry `"pool": "step"`, and the manager keeps six voices of its own
+for it (`unit_size` 4 m, 34 m cull, 6 kHz cutoff). A fight produces two steps a
+second per body, and a footfall must never be the sound that gets cut when a
+blow needs the next voice. `Footsteps` is a sibling of `bloody_feet.gd`: same
+`STEP_DROP` 0.05 m, so the print and the sound are one event seen and heard. It
+plays only for a body that is grounded, moving faster than 0.45 m/s and inside
+28 m of the camera, and the same boot cannot sound twice inside 180 ms. Two identical events from the same place
 inside 20 ms are one contact reported twice and play once.
 
 | Event | Takes | Fires when |
@@ -61,6 +70,7 @@ inside 20 ms are one contact reported twice and play once.
 | `block` | 4 | a blow landed on a held guard (`Combat._block_feedback`, the arena's replicated `_defense_event`) |
 | `parry` | 4 | a blow was parried, and on a blade-vs-blade clash (`Combat._resolve_clash`) |
 | `arrow` | 1 | an arrow launches (`Arrow.launch`, on every peer that owns one) |
+| `footstep` | 12 | a walking body's boot comes back down (`Footsteps.update`, every fighter body and the frontier ranger) |
 | `throw` | 3 | a blade is let go of (`ThrownWeapon.launch`) |
 
 The weapon reading is `Sfx.kind_of(source, hand)`: the ranger rig's own
@@ -98,6 +108,7 @@ always writes the same bytes and a re-run is a no-op in git.
 | `568790__fenodyrie__sword-against-sword.wav` (72 hits) | `defense/parry_01..04` (the short bright ones), `defense/clash_01..04` (the long ringing ones) |
 | `334167__loudernoises__flying-blade.wav` | `thrown/blade_01..03` |
 | `205563__everheat__arrow.wav` | `bow/arrow_01` |
+| `411206__straget__going-on-a-forest-road-gravel-and-grass.wav` (12 plants across 31 s) | `step/footstep_01..12` |
 
 ## Verification
 

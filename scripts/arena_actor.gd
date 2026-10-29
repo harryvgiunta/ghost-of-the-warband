@@ -13,6 +13,7 @@ const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
+const FootstepsScript = preload("res://scripts/audio/footsteps.gd")
 const BleedDrip = preload("res://scripts/warband/bleed_drip.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
@@ -197,6 +198,8 @@ var _floor_query := PhysicsRayQueryParameters3D.new()
 var _sight_query := PhysicsRayQueryParameters3D.new()
 ## Prints a bloody trail when this body walks out of a death pool.
 var _bloody_feet := BloodyFeet.new()
+## The boots: one emitter per body, driven by the same foot plant the trail reads.
+var _footsteps := FootstepsScript.new()
 ## The blood this body leaves on the ground while it is down. Built with the body
 ## and parked until it falls, so a fight never allocates one.
 var _bleed_drip: BleedDrip
@@ -970,6 +973,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	combat.set_motion(_last_motion,_last_running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
 	combat.advance(delta)
 	_bloody_feet.update(delta,self,rig)
+	_footsteps.update(delta,self,rig)
 
 ## One tick's movement intent: the walk target plus every velocity the state
 ## machines produced, in the single order the authority and a predicting peer

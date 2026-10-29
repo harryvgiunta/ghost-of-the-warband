@@ -24,6 +24,7 @@ const Stamina = preload("res://scripts/stamina.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
+const FootstepsScript = preload("res://scripts/audio/footsteps.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
 const RunningSlide = preload("res://scripts/running_slide.gd")
@@ -211,6 +212,7 @@ var _aim_query := PhysicsRayQueryParameters3D.new()
 var _aim_exclude: Array[RID] = []
 var _floor_query := PhysicsRayQueryParameters3D.new()
 var _bloody_feet := BloodyFeet.new()
+var _footsteps := FootstepsScript.new()
 ## The whole frontier — world, ranger, mobs, camera, effects — lives under this
 ## one node, so a run that opens inside this session can freeze it whole and
 ## hand it back exactly as it was left.
@@ -752,6 +754,7 @@ func _physics_process(delta: float) -> void:
 	slide.after_move(player,actual_velocity)
 	_collect_loot(delta)
 	_bloody_feet.update(delta,player,archer)
+	_footsteps.update(delta,player,archer)
 	archer.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
 	archer.set_slide(slide.progress if slide.active else -1.0,slide.direction)
 	archer.set_step(step.progress if step.active else -1.0,step.direction)
