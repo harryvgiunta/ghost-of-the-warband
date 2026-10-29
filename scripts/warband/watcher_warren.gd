@@ -43,14 +43,6 @@ const CAMPS := [
 const CAMP_SIZE := 7
 ## Every body the camps field: three camps of seven, by the table above.
 const TOTAL := 21
-## Off the lane a body's own footprint, as the posts are laid: 18-40 m. Inside
-## 18 a camp would pull the road, past 40 it is a place nobody finds.
-const LATERAL_MIN := 18.0
-const LATERAL_MAX := 40.0
-## How far from the town's centre the nearest body may stand: the wall, and a
-## wall and a half of wood beyond it. A camp against the palings would be a fight
-## inside a body's safe ground.
-const WALL_CLEARANCE := 14.0
 ## Members stand on this ring around the camp's dressing: inside the totem's
 ## reach and clear of its collider.
 const RING_INNER := 3.4

@@ -124,7 +124,7 @@ func run() -> void:
 
 	await _check_cages()
 	await _check_warren(quests)
-	_check_latches(body, quests, roster_before)
+	_check_latches(body)
 	await _check_rescue(body, quests, roster_before)
 	_finish()
 
@@ -270,7 +270,7 @@ func _check_warren(quests) -> void:
 
 # --- 3. the latch ----------------------------------------------------------
 
-func _check_latches(body, quests, roster_before: int) -> void:
+func _check_latches(body) -> void:
 	# Bare hands: the press is answered - the cage line owns the key it was meant
 	# for - and nothing opens.
 	body.rig.apply_loadout(State.build_loadout("", "", {}))
