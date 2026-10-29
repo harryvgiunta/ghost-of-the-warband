@@ -26,7 +26,6 @@ extends Node3D
 ## The cage owns no input. `interact()` is the world's `G`, exposed for whoever
 ## takes it (the camp's own latch rule is on the same key and the same press).
 
-const Geo = preload("res://scripts/geo.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const CampKit = preload("res://scripts/world/camp_kit.gd")
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
@@ -445,24 +444,34 @@ func _clear_of_wood(path, at: Vector3, trunks: Array) -> bool:
 ## door of bars on the lane side. The bars are collision - three walls and the
 ## door's own body, which rises with the door - because a cage a body can walk
 ## through is a picture of a cage.
+##
+## The iron is merged into two meshes rather than drawn bar by bar: four cages of
+## twenty-eight separate cylinders is a hundred draws for furniture standing in
+## the dark. One surface per material keeps the cage's look and the camp's rule
+## that a structure is a mesh, not a mesh per nail.
 func _build_cage(cage: Node3D) -> Node3D:
-	Geo.box(cage, Vector3(CAGE_SIZE, 0.1, CAGE_SIZE), Vector3(0, -0.03, 0), _wood)
+	var frame := CampKit.Merged.new()
+	CampKit.add_box(frame, Vector3(CAGE_SIZE, 0.1, CAGE_SIZE), Vector3(0, -0.03, 0), _wood)
 	for sx in [-1.0, 1.0]:
 		for sz in [-1.0, 1.0]:
-			Geo.box(cage, Vector3(0.17, 2.9, 0.17), Vector3(sx * 1.15, 1.45, sz * 1.15), _iron)
+			CampKit.add_box(frame, Vector3(0.17, 2.9, 0.17),
+				Vector3(sx * 1.15, 1.45, sz * 1.15), _iron)
 	for step in 5:
 		var offset := -0.8 + step * 0.4
-		Geo.cylinder(cage, 0.05, 0.05, 2.7, Vector3(offset, 1.4, 1.15), _iron, 6)
-		Geo.cylinder(cage, 0.05, 0.05, 2.7, Vector3(-1.15, 1.4, offset), _iron, 6)
-		Geo.cylinder(cage, 0.05, 0.05, 2.7, Vector3(1.15, 1.4, offset), _iron, 6)
-	Geo.box(cage, Vector3(CAGE_SIZE, 0.12, 0.12), Vector3(0, 2.78, -1.15), _iron)
+		CampKit.add_cyl_disc(frame, 0.05, 2.7, Vector3(offset, 1.4, 1.15), _iron, 6)
+		CampKit.add_cyl_disc(frame, 0.05, 2.7, Vector3(-1.15, 1.4, offset), _iron, 6)
+		CampKit.add_cyl_disc(frame, 0.05, 2.7, Vector3(1.15, 1.4, offset), _iron, 6)
+	CampKit.add_box(frame, Vector3(CAGE_SIZE, 0.12, 0.12), Vector3(0, 2.78, -1.15), _iron)
+	frame.commit(cage, "CageFrame")
 	var door := Node3D.new()
 	door.name = "Door"
 	door.position = Vector3(0, 0, -1.15)
 	cage.add_child(door)
+	var gate := CampKit.Merged.new()
 	for step in 6:
-		Geo.cylinder(door, 0.045, 0.045, 2.7, Vector3(-1.0 + step * 0.4, 1.4, 0), _iron, 6)
-	Geo.box(door, Vector3(2.4, 0.1, 0.1), Vector3(0, 1.1, 0), _iron)
+		CampKit.add_cyl_disc(gate, 0.045, 2.7, Vector3(-1.0 + step * 0.4, 1.4, 0), _iron, 6)
+	CampKit.add_box(gate, Vector3(2.4, 0.1, 0.1), Vector3(0, 1.1, 0), _iron)
+	gate.commit(door, "DoorFrame")
 	var bars := _collision_body(cage, "CageBars")
 	_collision_box(bars, Vector3(0.12, 2.7, CAGE_SIZE), Vector3(-1.15, 1.35, 0.0))
 	_collision_box(bars, Vector3(0.12, 2.7, CAGE_SIZE), Vector3(1.15, 1.35, 0.0))
