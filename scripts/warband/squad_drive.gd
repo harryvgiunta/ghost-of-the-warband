@@ -125,6 +125,20 @@ const SIDESTEP_SECONDS := 0.55
 ## before it will stand over a downed body for five seconds. One rule for both:
 ## a body on the floor is only worth walking to when nothing can cut you for it.
 const LOOT_CLEAR_METRES := 22.0
+
+## A walk to a drop is a walk, not an order. A body that has not earned
+## `FETCH_PROGRESS` metres of headway in `FETCH_GIVE_UP` seconds stops walking at
+## that piece and the squad never offers it again - it is the whole squad's five
+## seconds, not each body's, because one ally stuck on the same wall is every ally
+## stuck on the same wall. Loot is the only errand that can be given up: a fight,
+## a walk to the soul and the rescue are never abandoned.
+##
+## The camp showed what the missing rule cost: a freed squad that could not cross
+## a cage wall to the shiv on the altar's dirt stood shouldering that wall for the
+## rest of the session, and a run that never started had nothing to do with the
+## watchers it was meant to fight. The piece stays on the ground for the player.
+const FETCH_GIVE_UP := 5.0
+const FETCH_PROGRESS := 0.35
 ## How far an ally looks for steel on the ground or a body worth stripping. Wider
 ## than the walk-in reach: a squad crosses the clearing for a blade.
 const SEARCH_METRES := 40.0
@@ -209,6 +223,11 @@ var _rescuer_merc := 0
 ## The heading each body is turned to this frame, so the next one can be limited
 ## against it: merc_id -> flat unit vector.
 var _heading: Dictionary = {}
+## Drops and bodies the squad has given up on: target key -> true. Per scene, so a
+## reloaded world offers the same piece again; a key is `_pickup_key` or
+## `_corpse_key` and never a position, because a piece that moved is still the same
+## piece and a point is not an identity.
+var _abandoned: Dictionary = {}
 
 
 ## Point the module at a warband and the controller that owns its bodies.
@@ -252,26 +271,29 @@ func drive(delta: float) -> void:
 			continue
 		# 1. An unarmed ally looks for steel first: the steel is how a prisoner
 		#    becomes a fighter, not a buff the scene hands out. A weapon on the
-		#    ground is worth the walk; a rag or a ring is not.
+		#    ground is worth the walk; a rag or a ring is not. A walk that stops
+		#    getting anywhere is abandoned and the body is on to its next errand on
+		#    the same frame (`_walk_to_loot`), so a blade on the far side of a wall
+		#    costs the squad one wait, not its session.
 		if not _armed(actor, merc_id):
 			var steel = _nearest_weapon_pickup(actor)
 			if steel != null:
-				if actor.global_position.distance_to(steel.global_position) <= loot_reach:
+				if _in_loot_reach(actor, steel.global_position):
 					_hold(actor)
 					_take(actor, merc_id, steel)
-				else:
-					_advance(actor, steel.global_position, track, loot_reach)
-				continue
+					continue
+				if _walk_to_loot(actor, steel.global_position, _pickup_key(steel), track):
+					continue
 			var armed_body := _nearest_corpse_with_weapon(actor)
 			if armed_body != 0:
 				var held_at: Vector3 = loot.corpse_position(armed_body)
 				if _clear_of_hostiles(held_at):
-					if actor.global_position.distance_to(held_at) <= loot_reach:
+					if _in_loot_reach(actor, held_at):
 						_hold(actor)
 						_strip_weapon(actor, merc_id, armed_body)
-					else:
-						_advance(actor, held_at, track, loot_reach)
-					continue
+						continue
+					if _walk_to_loot(actor, held_at, _corpse_key(armed_body), track):
+						continue
 		# 2. Armed, or nothing left to grab: go at the nearest watcher.
 		var watcher = _nearest_watcher(actor)
 		if watcher != null:
@@ -291,24 +313,24 @@ func drive(delta: float) -> void:
 		if _clear_of_hostiles(actor.global_position):
 			var spoil = _nearest_pickup(actor)
 			if spoil != null:
-				if actor.global_position.distance_to(spoil.global_position) <= loot_reach:
+				if _in_loot_reach(actor, spoil.global_position):
 					_hold(actor)
 					_take(actor, merc_id, spoil)
-				else:
-					_advance(actor, spoil.global_position, track, loot_reach)
-				continue
+					continue
+				if _walk_to_loot(actor, spoil.global_position, _pickup_key(spoil), track):
+					continue
 			var fallen := _nearest_corpse(actor)
 			# The body has to be clear in its own right, not just the body
 			# walking to it: the rule is about the fight near the corpse.
 			if fallen != 0 and loot.has_corpse(fallen):
 				var at: Vector3 = loot.corpse_position(fallen)
 				if _clear_of_hostiles(at):
-					if actor.global_position.distance_to(at) <= loot_reach:
+					if _in_loot_reach(actor, at):
 						_hold(actor)
 						_claim(fallen)
-					else:
-						_advance(actor, at, track, loot_reach)
-					continue
+						continue
+					if _walk_to_loot(actor, at, _corpse_key(fallen), track):
+						continue
 		# 4. No fight: an escort stands on its own slot in the ring around the
 		#    soul, and a squad with nowhere to be roams its own post in small
 		#    steps. Nobody walks onto the soul, and nothing stands still.
@@ -439,6 +461,8 @@ func _nearest_pickup(actor):
 	for pickup in pickups:
 		if not is_instance_valid(pickup) or bool(pickup.collected):
 			continue
+		if _abandoned.has(_pickup_key(pickup)):
+			continue
 		var distance: float = actor.global_position.distance_to(pickup.global_position)
 		if distance < best_distance:
 			best_distance = distance
@@ -454,6 +478,8 @@ func _nearest_weapon_pickup(actor):
 	var best_distance := SEARCH_METRES
 	for pickup in pickups:
 		if not is_instance_valid(pickup) or bool(pickup.collected):
+			continue
+		if _abandoned.has(_pickup_key(pickup)):
 			continue
 		if not WarbandPickup.is_weapon(str(pickup.item_id)):
 			continue
@@ -474,6 +500,8 @@ func _nearest_corpse_with_weapon(actor) -> int:
 	var best_distance := SEARCH_METRES
 	for corpse_id in loot.corpse_ids():
 		var id := int(corpse_id)
+		if _abandoned.has(_corpse_key(id)):
+			continue
 		var has_weapon := false
 		for item_id in loot.corpse_items(id):
 			if WarbandPickup.is_weapon(str(item_id)):
@@ -684,10 +712,26 @@ func _finish_bandage(actor, merc_id: int) -> void:
 ## already been emptied, so the module asks it rather than keeping corpses of its
 ## own - and a scene whose vacuum predates `claim_corpse` simply has nothing to
 ## offer, which leaves the squad's fight and escort untouched.
+##
+## Walked by hand rather than through `corpse_at` so a body the squad has given up
+## on is not the answer: the next reachable one is, which a single nearest-body
+## query cannot express.
 func _nearest_corpse(actor) -> int:
 	if loot == null or not loot.has_method("claim_corpse"):
 		return 0
-	return int(loot.corpse_at(actor.global_position, SEARCH_METRES))
+	if not loot.has_method("corpse_ids"):
+		return 0
+	var best := 0
+	var best_distance := SEARCH_METRES
+	for corpse_id in loot.corpse_ids():
+		var id := int(corpse_id)
+		if _abandoned.has(_corpse_key(id)):
+			continue
+		var distance: float = actor.global_position.distance_to(loot.corpse_position(id))
+		if distance < best_distance:
+			best_distance = distance
+			best = id
+	return best
 
 
 ## True when no living cultist is close enough to interrupt a body bending over a
@@ -921,6 +965,60 @@ func _enter(track: Dictionary, state: int, seconds: float = 0.0) -> void:
 	track["state_left"] = seconds
 
 
+# --- fetching a drop -------------------------------------------------------
+
+## Whether a body is close enough to take what it walked to. One predicate for
+## both halves of the trip, so a walk that ends and a hand that reaches are the
+## same moment.
+func _in_loot_reach(actor, point: Vector3) -> bool:
+	return actor.global_position.distance_to(point) <= loot_reach
+
+
+## The key a drop is remembered by. Instance ids live as long as the node does,
+## which is as long as the piece is on the floor.
+func _pickup_key(pickup) -> String:
+	return "p%d" % pickup.get_instance_id()
+
+
+func _corpse_key(corpse_id: int) -> String:
+	return "c%d" % corpse_id
+
+
+## The squad has given up on a target: it leaves every selector at once, because
+## the wall that stopped one body stops the next.
+func _abandon(key: String) -> void:
+	_abandoned[key] = true
+
+
+## Walk to a drop or a body, and stop walking when it stops being reachable.
+## Answers true while the trip owns this frame; false the frame it is given up, so
+## the caller can fall through to its next errand without repeating the walk.
+##
+## `FETCH_PROGRESS` metres closer is what counts as getting somewhere - a body
+## shuffling along a wall at a crawl earns nothing and loses its trip - and the
+## clock is the body's own, so a fight that interrupts a walk does not spend it.
+func _walk_to_loot(actor, point: Vector3, key: String, track: Dictionary) -> bool:
+	if _abandoned.has(key):
+		return false
+	var distance: float = actor.global_position.distance_to(point)
+	if str(track.get("fetch_key", "")) != key:
+		track["fetch_key"] = key
+		track["fetch_best"] = distance
+		track["fetch_left"] = FETCH_GIVE_UP
+	elif distance <= float(track["fetch_best"]) - FETCH_PROGRESS:
+		track["fetch_best"] = distance
+		track["fetch_left"] = FETCH_GIVE_UP
+	else:
+		track["fetch_left"] = float(track.get("fetch_left", FETCH_GIVE_UP)) \
+			- float(track.get("delta", 0.0))
+		if float(track["fetch_left"]) <= 0.0:
+			track["fetch_key"] = ""
+			_abandon(key)
+			return false
+	_advance(actor, point, track, loot_reach)
+	return true
+
+
 ## Walk or jog to a point, stopping `stop_at` short of it. A drop, a corpse and
 ## the soul are places to stand next to; a watcher is a body to stand *away* from.
 func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) -> void:
@@ -1101,6 +1199,7 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 			"heal_left": 0.0, "bandaging": false, "merc_id": merc_id,
 			"roam_left": 0.0, "rest_left": 0.0, "to_post": false,
 			"roam_to": actor.global_position, "delta": delta,
+			"fetch_key": "", "fetch_best": 0.0, "fetch_left": 0.0,
 			"swings_left": 0, "swing_due": false,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]

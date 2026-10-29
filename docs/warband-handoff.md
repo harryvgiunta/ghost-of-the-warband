@@ -217,7 +217,13 @@ Integration seams deliberately placed in the base game:
 9. **The rescuer is the player's beat, not the AI's.** No auto-possession; he is
    excluded from the squad AI until the latches are cut.
 10. **Squad AI is silent about loot.** No pickup messages, no loot step in the
-    objective. `K` still works for a human but is not advertised.
+    objective. `K` still works for a human but is not advertised. A walk to a
+    piece is abandonable and every errand else is not: `_walk_to_loot` gives a
+    drop up when the body has not earned `FETCH_PROGRESS` 0.35 m of headway in
+    `FETCH_GIVE_UP` 5 s, and the key joins `_abandoned` for the rest of the scene,
+    so the whole squad is on to its next errand on that frame. Without it a freed
+    squad that could not cross a cage wall to the shiv stood shouldering the wall
+    for the session and the run never started. The piece stays for the player.
 11. **Kills landed before the squad is out do not count** (`note_guard_killed`
     refuses pre-FREED). `TutorialSequencer.note_battle_state()` reconciles the
     totals on entering FREED and is silent when nothing changed (recursion guard).

@@ -150,6 +150,15 @@ const WRONG_WAY_TEXT := "You're running the wrong way!"
 ## How high over the gap in the trees the roadside word stands. High enough to be
 ## read from the trail's first torch, low enough not to sit in the canopy.
 const WRONG_WAY_SIGN_HEIGHT := 4.2
+## The score is the wood's, and the town is where the run ends: the first frame
+## the soul stands in the square the soundtrack fades out, and it comes back only
+## if the squad walks back out through the gate. Long enough that arriving reads as
+## relief rather than a cut, because the last kilometre of trail is a chase.
+const TOWN_FADE_SECONDS := 2.5
+## How far past the square a body must walk before the score is back. The band
+## between the two answers is the hysteresis: a soul standing on the line keeps
+## the track it already has instead of stuttering the whole soundtrack.
+const TOWN_QUIET_MARGIN := 6.0
 
 ## The damage lesson: a bandage is three seconds of wrapping and 35 health, and it
 ## is taught the first time a body is badly hurt with nobody close enough to
@@ -179,6 +188,8 @@ const DOWNED_LESSON := {
 
 var warband
 var flow
+## The mixer, for the one thing a place changes about it: the town has no score.
+var audio
 var controller
 var camera: Camera3D
 var hud
@@ -251,6 +262,7 @@ func _ready() -> void:
 		push_error("WarbandWorld needs the Warband autoload")
 		return
 	flow = get_node_or_null("/root/GameFlow")
+	audio = get_node_or_null("/root/Audio")
 	start_area = _wanted_start()
 	_build_ground()
 	_build_camera()
@@ -320,6 +332,7 @@ func _physics_process(delta: float) -> void:
 	_push_downed_card()
 	_update_bandage_card()
 	_update_wrong_way()
+	_sync_town_music()
 	_check_checkpoints()
 	_check_wipe(delta)
 
@@ -1332,6 +1345,39 @@ func _all_bodies_out() -> bool:
 		if bool(actor.get("alive")) and not bool(actor.get("downed")):
 			return false
 	return true
+
+
+# --- the town's silence ----------------------------------------------------
+#
+# The soundtrack is the wood's: it starts on the first bar of the campaign and
+# rides the cages, the trail and every fight on it. The town is where a run ends,
+# so the score stops at the square and stays stopped - the keepers, the fire ring
+# and the warband talking are the town's own sound.
+
+## Hold the mix to what the place is. Idempotent and asked every frame rather than
+## driven from an edge: the manager answers a scene change with its own track, so
+## the only way this frame's answer cannot be undone by the next one is to ask
+## what the manager wants and correct it.
+func _sync_town_music() -> void:
+	if audio == null or town == null or controller == null:
+		return
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul):
+		return
+	var track := str(audio.music_track)
+	if town.in_square(soul):
+		if not track.is_empty():
+			audio.stop_music(TOWN_FADE_SECONDS)
+		return
+	# The band between the square and the wood belongs to neither answer: a body
+	# standing on the line keeps the score it already has rather than flickering
+	# the whole soundtrack on and off.
+	if town.in_square(soul, TOWN_QUIET_MARGIN):
+		return
+	# Back out of the gate: the trail is still the wood, and it still has a chase
+	# in it.
+	if track != "warband":
+		audio.play_music("warband")
 
 
 # --- checkpoints (autosave) ------------------------------------------------

@@ -41,7 +41,7 @@ Two tracks:
 | Track | File | Where |
 | --- | --- | --- |
 | `menu` | `assets/audio/music/menu_theme.ogg` (30 s) | `title.tscn` only |
-| `warband` | `assets/audio/music/warband_soundtrack.ogg` (49 min) | every other scene - the camp, the trail, the town, the arena, the delve, the sandbox |
+| `warband` | `assets/audio/music/warband_soundtrack.ogg` (49 min) | every other scene - the camp, the trail, the town, the arena, the delve, the sandbox. The campaign's town *area* is the exception: one scene holds the whole wood, and the square is silent (below) |
 
 `Audio._process` watches `SceneTree.current_scene` and asks
 `track_for_scene(path)`; a scene never starts a track itself, so a new scene
@@ -65,6 +65,26 @@ bed still holds is dropped - the soundtrack is not kept in memory while the menu
 is up. (A bed faded to silence is *still playing*, which is why `_retire` stops
 it explicitly: the old early-out on `bed.playing` meant every retired bed - and
 its stream - lived for the rest of the session.)
+
+### The town has no score
+
+`scenes/warband_world.tscn` is one scene holding the cages, the 915 m trail and
+the town, so a scene rule cannot separate them. `WorldScene._sync_town_music`
+holds the mix to what the *place* is: the first frame the soul stands in the
+square `Audio.stop_music(TOWN_FADE_SECONDS)` fades the soundtrack out over 2.5 s,
+and walking back out through the gate starts it again - the trail is still the
+wood and still has a chase in it.
+
+The poll is idempotent and runs every physics frame, because the manager answers
+a scene change with its own track: asking what the manager wants and correcting
+it is the only way this frame's answer cannot be undone by the next one. Between
+the two answers sits `TOWN_QUIET_MARGIN` 6 m of hysteresis (`TownHub.in_square`
+takes a widening `margin`), so a body standing on the square's line keeps the
+track it already has instead of stuttering the whole soundtrack.
+
+This is the campaign's town, not `town_hub.tscn` (a preview of the square on its
+own): the standalone scene keeps the scene rule and the soundtrack, because it
+has no wood to be chased through.
 
 ## One-shots
 

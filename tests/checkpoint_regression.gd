@@ -241,6 +241,7 @@ func check_world_resume() -> void:
 	check(warband.checkpoint_id() == "town", "the town square writes the town bookmark (%s)" % warband.checkpoint_id())
 	check(warband.checkpoint_area() == "town", "and says so")
 	check(FileAccess.file_exists(WARBAND_SAVE), "the town bookmark is on disk at once")
+	await check_town_silence(soul)
 	game.queue_free()
 	await process_frame
 	game = null
@@ -260,6 +261,50 @@ func check_world_resume() -> void:
 			"a resumed body stands in the square")
 	check(game.controller.active_body(1) != null, "the soul is seated in the square")
 	check(warband.checkpoint_id() == "town", "the town resume keeps its own bookmark")
+
+# --- the town is where the score stops -------------------------------------
+
+## The soundtrack is the wood's: it rides the cages and the whole kilometre of
+## trail. Reaching the town is the end of the run, so the square is silent - and
+## the wood takes its score back the moment the squad walks back out through the
+## gate, with a band between the two answers so a body on the line cannot flicker
+## it.
+func check_town_silence(soul) -> void:
+	var audio = root.get_node_or_null("Audio")
+	check(audio != null, "the mixer is up")
+	if audio == null or soul == null:
+		return
+	# The world scene's scene-change sync has no `current_scene` in this harness,
+	# so the track is set here: the rule under test is the town's own, not the
+	# manager's.
+	audio.play_music("warband")
+	await create_timer(0.2).timeout
+	check(str(audio.music_track).is_empty(),
+		"the square stops the soundtrack (%s)" % str(audio.music_track))
+	# Asked again with the score back up, because holding the rule has to be
+	# idempotent - the manager answers a scene change with its own track.
+	audio.play_music("warband")
+	await create_timer(0.2).timeout
+	check(str(audio.music_track).is_empty(),
+		"and goes on stopping it while the soul stands there (%s)" % str(audio.music_track))
+	# Just outside the square but inside the hysteresis band: hold, not restart.
+	var half: float = game.town.WALL_RADIUS + 2.0
+	soul.global_position = game.town.global_position + Vector3(0.0, 1.0, half + 2.0)
+	await create_timer(0.2).timeout
+	check(not game.town.in_square(soul), "the body is out of the square itself")
+	check(str(audio.music_track).is_empty(), "a body in the band keeps the silence (%s)"
+		% str(audio.music_track))
+	# Well clear of the square: back to the wood, and the chase with it.
+	soul.global_position = game.town.global_position + Vector3(0.0, 1.0, half + 30.0)
+	await create_timer(0.2).timeout
+	check(str(audio.music_track) == "warband",
+		"the wood takes its score back (%s)" % str(audio.music_track))
+	# And walking in again silences it again.
+	soul.global_position = game.town.global_position + Vector3(0.0, 1.0, 0.0)
+	await create_timer(0.2).timeout
+	check(str(audio.music_track).is_empty(),
+		"and the square stops it a second time (%s)" % str(audio.music_track))
+
 
 # --- the wipe door ---------------------------------------------------------
 

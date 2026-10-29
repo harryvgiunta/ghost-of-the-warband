@@ -781,12 +781,15 @@ func _open_vendor(index: int) -> void:
 
 ## Whether a body is standing on the square's ground at all (the walls plus a
 ## stride): what decides whether the town's key line or the trail's is the one
-## worth showing.
-func in_square(actor) -> bool:
+## worth showing. `margin` widens the box, which is what a rule that needs two
+## answers - "is it a town body" now, and "has it left for good" - asks with, so a
+## body on the line cannot flicker between them.
+func in_square(actor, margin: float = 0.0) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var local: Vector3 = actor.global_position - global_position
-	return absf(local.x) <= WALL_RADIUS + 2.0 and absf(local.z) <= WALL_RADIUS + 2.0
+	var half: float = WALL_RADIUS + 2.0 + maxf(margin, 0.0)
+	return absf(local.x) <= half and absf(local.z) <= half
 
 
 ## Whether one of the square's panels is open (the world owns the input, the
