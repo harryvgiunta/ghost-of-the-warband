@@ -45,9 +45,10 @@ const JOG_TIMEOUT := 16.0
 const PAIR_TIMEOUT := 40.0
 ## How long the driven walk may take before the test calls it a hang.
 const WALK_LIMIT := 200.0
-## The walk is played at three times the simulation per second so a quarter of a
-## kilometre fits in a regression; the recorded time is game time at 1x.
-const WALK_SCALE := 3.0
+## The walk is played at four and a fifth times the simulation per second so a
+## kilometre and a third of trail fits in a regression; the recorded time is game
+## time at 1x, so the distance and the pace asserted below are the campaign's own.
+const WALK_SCALE := 4.2
 ## Where the campaign's walk begins: the cage line the soul wakes on.
 const CAGE_LINE := Vector3(-2.6, 0.2, 6.0)
 
@@ -832,9 +833,16 @@ func check_walk() -> void:
 	game.controller.input_enabled = false
 	await physics_frame
 
+	# Follow the road itself instead of the polyline's own corners: a body steered
+	# at a 45 m waypoint cuts the inside of every bend, and on a lane this long the
+	# cut reaches the tree row. Sampling the path every few metres keeps the body on the
+	# line the torches mark, which is the line the lateral assertion is about.
 	var waypoints: Array[Vector3] = []
-	for index in range(1, lane.size()):
-		waypoints.append(lane[index])
+	var along := 6.0
+	while along < float(path.total):
+		var sample: Dictionary = path.sample(along)
+		waypoints.append((sample["position"] as Vector3) + Vector3(0.0, 0.2, 0.0))
+		along += 6.0
 	waypoints.append(town_gate + Vector3(0.0, 0.2, 0.0))
 	waypoints.append(Vector3(town_at.x, 0.2, town_at.z))
 
@@ -961,17 +969,18 @@ func check_town_end() -> void:
 			"the %s counter resolves from where the body stands" % service)
 		var answered: String = game.interact_at(1, body.global_position)
 		check(answered == service, "G at the %s opens it (got '%s')" % [service, answered])
-		if game.card != null and game.card.is_open():
-			# A keeper with something to say speaks before his counter opens: the
-			# recruiter explains the free eight, and the quartermaster hands over an
-			# order - or explains the vial the squad stripped off a warden. The next
-			# press is the counter.
-			check(service == "quartermaster" or service == "recruiter",
-				"only a keeper with business speaks first (%s)" % service)
+		# A keeper with something to say speaks before his counter opens, and the
+		# quartermaster can have two things to say in a row - an order on the table,
+		# then the vial the order is about. Each press is one card; the counter
+		# opens once he has said them all, and he must not talk forever.
+		var cards := 0
+		while game.card != null and game.card.is_open() and cards < 3:
+			cards += 1
 			game.card.close()
 			await create_timer(0.1).timeout
 			check(game.interact_at(1, body.global_position) == service,
-				"the %s counter opens once he has said his piece" % service)
+				"the %s counter still answers after card %d" % [service, cards])
+		check(cards < 3, "the %s keeper does not talk forever (%d cards)" % [service, cards])
 		check(game._panel_open(), "the %s panel is open" % service)
 		game._hide_panels()
 		await create_timer(0.1).timeout

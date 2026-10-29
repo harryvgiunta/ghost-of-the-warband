@@ -1185,7 +1185,11 @@ static func _build_arch(root: Root, path: Path) -> void:
 	var group := _group(root, "Arch")
 	var frame := path.sample(path.total)
 	var tail: Vector3 = TerrainScript.grounded(frame["position"])
-	var yaw := _yaw_spanning(frame["forward"])
+	# A gate frames the road: its span runs ACROSS the lane, so the body that walks
+	# through it walks between the posts. Facing the frame down the lane instead
+	# stands both posts on the centre line, fourteen metres apart and right in the
+	# walk - which is what the arch did until the walk drove through it.
+	var yaw := _yaw_facing(frame["forward"])
 	var host := _host(group, tail, yaw)
 	host.name = "Gate"
 	var mats: Dictionary = VillageKit.materials()
@@ -1262,7 +1266,7 @@ static func _build_hanging(root: Root, path: Path) -> void:
 		var at := path.total * (0.42 + 0.3 * float(index))
 		var frame := path.sample(at)
 		var host := _host(group, TerrainScript.grounded(frame["position"]),
-			_yaw_spanning(frame["forward"]))
+			_yaw_facing(frame["forward"]))
 		host.name = "BoneArch%d" % (index + 1)
 		CampKit.bone_arch(host, mats, root.solids, HALF_WIDTH + 1.6, 3.2, SEED + 61 + index * 3)
 	root.stats["hanging"] = 7 + 3 + 4 + 2 + 2
