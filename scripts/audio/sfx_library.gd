@@ -33,6 +33,10 @@ const EVENTS := {
 		"db": -4.0, "pitch": [0.97, 1.05]},
 	"throw": {"folder": "thrown", "stem": "blade", "count": 3,
 		"db": -7.0, "pitch": [0.94, 1.06]},
+	# Boots, deliberately the quietest thing in the mix and on their own voice
+	# pool: a footfall is texture, and it must never steal a voice from a blow.
+	"footstep": {"folder": "step", "stem": "footstep", "count": 12,
+		"db": -18.0, "pitch": [0.9, 1.08], "pool": "step"},
 }
 
 static var _cache: Dictionary = {}

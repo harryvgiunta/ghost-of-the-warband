@@ -100,6 +100,16 @@ SLICED = {
         "source": "334167__loudernoises__flying-blade.wav",
         "windows": [(0.00, 0.52), (0.45, 1.10), (2.15, 2.65)],
     },
+    # Boots on a forest road: ground that is half gravel, half grass. Twelve
+    # footfalls spread across the whole 31 s take, each cut from the plant.
+    "footstep": {
+        "source": "411206__straget__going-on-a-forest-road-gravel-and-grass.wav",
+        "windows": [
+            (0.01, 0.26), (2.09, 2.34), (4.56, 4.81), (6.83, 7.08),
+            (8.53, 8.78), (10.92, 11.17), (12.69, 12.94), (14.91, 15.16),
+            (23.02, 23.27), (25.01, 25.26), (27.15, 27.40), (29.69, 29.94),
+        ],
+    },
     # The bow releases: one arrow, whole.
     "arrow": {
         "source": "205563__everheat__arrow.wav",
@@ -118,6 +128,7 @@ GROUPS = {
     "clash": "defense",
     "blade": "thrown",
     "arrow": "bow",
+    "footstep": "step",
 }
 
 

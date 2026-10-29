@@ -30,6 +30,10 @@ const FADE_SECONDS := 1.2
 const BED_SILENCE_DB := -60.0
 const VOICES_3D := 12
 const VOICES_2D := 6
+## Footfalls have their own pool. A walk in a fight produces two steps a second
+## per body, and a footfall must never be the sound that gets cut when a blow
+## needs the next voice.
+const VOICES_STEP := 6
 ## Two identical one-shots from the same place inside this window are one
 ## contact reported twice (an attacker and a defender both noticing the blow),
 ## not two blows.
@@ -55,8 +59,10 @@ var _beds: Array[AudioStreamPlayer] = []
 var _bed_index := 0
 var _streams: Dictionary = {}
 var _voices_3d: Array[AudioStreamPlayer3D] = []
+var _voices_step: Array[AudioStreamPlayer3D] = []
 var _voices_2d: Array[AudioStreamPlayer] = []
 var _voice_3d := 0
+var _voice_step := 0
 var _voice_2d := 0
 var _last_variant: Dictionary = {}
 var _recent: Dictionary = {}
@@ -227,8 +233,13 @@ func play_event(event: String, at: Variant = null) -> void:
 	var pitch := _rng.randf_range(float(spread[0]), float(spread[1]))
 	var level := float(row.get("db", 0.0))
 	if at is Vector3:
-		var voice := _voices_3d[_voice_3d]
-		_voice_3d = (_voice_3d + 1) % _voices_3d.size()
+		var voice: AudioStreamPlayer3D
+		if str(row.get("pool", "world")) == "step":
+			voice = _voices_step[_voice_step]
+			_voice_step = (_voice_step + 1) % _voices_step.size()
+		else:
+			voice = _voices_3d[_voice_3d]
+			_voice_3d = (_voice_3d + 1) % _voices_3d.size()
 		voice.global_position = at
 		voice.volume_db = level
 		voice.pitch_scale = pitch
@@ -279,6 +290,18 @@ func _build_voices() -> void:
 		voice.panning_strength = 1.0
 		add_child(voice)
 		_voices_3d.append(voice)
+	for index in VOICES_STEP:
+		var step := AudioStreamPlayer3D.new()
+		step.name = "VoiceStep%d" % index
+		step.bus = BUS_SFX
+		# Feet are close-range: a smaller unit size and no far field at all.
+		step.unit_size = 4.0
+		step.max_db = 0.0
+		step.max_distance = 34.0
+		step.attenuation_filter_cutoff_hz = 6000.0
+		step.panning_strength = 1.0
+		add_child(step)
+		_voices_step.append(step)
 	for index in VOICES_2D:
 		var flat := AudioStreamPlayer.new()
 		flat.name = "Voice2D%d" % index
