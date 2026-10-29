@@ -24,6 +24,11 @@ extends Node3D
 signal taken(pickup: WarbandPickup)
 
 const State = preload("res://scripts/player_state.gd")
+const CampKit = preload("res://scripts/world/camp_kit.gd")
+const FireFx = preload("res://scripts/world/fire_fx.gd")
+## The worn torch's own constants, so a brand on the dirt burns exactly like the
+## one that was carried: one colour, one energy, one reach, no second tuning.
+const TorchScript = preload("res://scripts/warband/torch_light.gd")
 
 ## Seconds a disarmed drop stays locked to the mercenary that dropped it.
 const ARM_DELAY := 0.75
@@ -161,7 +166,10 @@ func _build() -> void:
 		"shield":
 			_build_shield()
 		"focus":
-			_build_bundle(0.20, 0.06, 0.26)
+			if item_id == TorchScript.ITEM_ID:
+				_build_torch()
+			else:
+				_build_bundle(0.20, 0.06, 0.26)
 		"jewelry":
 			_build_ring()
 		"armor", "armor_bundle":
@@ -237,6 +245,34 @@ func _build_bundle(w: float, h: float, d: float) -> void:
 	_box(Vector3(w, h, d), Vector3(0.0, h * 0.5, 0.0), CLOTH_ALBEDO, 0.0)
 	_box(Vector3(w * 0.45, h * 0.45, d * 0.7),
 		Vector3(w * 0.16, h * 1.14, 0.02), LOOT_ALBEDO, 0.3, 0.22)
+
+## A lit hand torch on the dirt. The stick lies where it fell along the drop's
+## own +X, the world's flame cards stand on its head, and an omni light of the
+## worn torch's exact colour, energy and reach sits over the fire. A brand does
+## not go out because it left a hand: the drop is light for whoever walks past.
+func _build_torch() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 907 + absi(item_id.hash()) % 97
+	var mats: Dictionary = CampKit.materials()
+	var batch := CampKit.Merged.new()
+	# Just off the dirt at both ends, so the stick reads as lying on it.
+	CampKit.add_beam(batch, Vector3(-0.44, 0.045, 0.0), Vector3(0.02, 0.055, 0.0),
+		0.032, mats["drift_dark"], 5, 0.028)
+	# The flame rises from the head, along the world's own up, not along the
+	# stick: a fire is never laid on its side.
+	var previous := batch.push(Transform3D(Basis(), Vector3(0.02, 0.055, 0.0)))
+	FireFx.flame_cards(batch, mats["flame"], rng, 0.24, 0.0)
+	batch.group = previous
+	batch.commit(self, "TorchBrand", false)
+	var light := OmniLight3D.new()
+	light.name = "TorchLight"
+	light.position = Vector3(0.02, 0.20, 0.0)
+	light.light_color = TorchScript.LIGHT_COLOR
+	light.light_energy = TorchScript.LIGHT_ENERGY
+	light.omni_range = TorchScript.LIGHT_RANGE
+	light.omni_attenuation = 1.0
+	light.shadow_enabled = false
+	add_child(light)
 
 ## A ring or a bead: one small loop on the dirt.
 func _build_ring() -> void:

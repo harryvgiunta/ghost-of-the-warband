@@ -4,13 +4,14 @@ extends Node
 ## mouth and the first stretch of the trail.
 ##
 ## The camp road is the only place in the campaign where a body can learn to
-## fight without a tutorial card in the way, so the wood is not empty: seven
-## briar wolves stand along the corridor `cage_escape.gd` cuts through the trees
-## and on the lane's first stretch past it. Their posts are derived, never
+## fight without a tutorial card in the way, so the wood is not empty, but the
+## road itself is: eight briar wolves hunt the widened forest in two deep packs of
+## four - one beside the corridor `cage_escape.gd` cuts through the trees at 38-50
+## m, one off the lane far down at 688-712 m. Their posts are derived, never
 ## rolled - the corridor from `GATE_POINT` for `CAMP_TO_ROAD_METRES`, then the
-## lane the world places at `trail_offset()` - so two visits meet the same band
-## standing in the same places, and no wolf is ever inside the camp pocket or the
-## town square.
+## lane the world places at `trail_offset()` - so two visits meet the same packs
+## standing in the same places, and no wolf is ever inside the camp pocket, the
+## town square, or a body's sight of the route it is walking.
 ##
 ## "Level 1" is not a stat the mobs carry: `enemy.gd` has one authored wolf, kind
 ## 0 at 38 health, and that base body is what a first road should hold. The band
@@ -29,24 +30,35 @@ const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 
-## Metres up the way out from the camp's mouth, and the side of the line the
-## wolf stands to (the corridor is 2.6 m half-width, the lane a little wider).
-## The band starts past the camp's own pocket and the opening fight's ground:
-## the first post is 122 m out, so no wolf can see (or be pulled by) a body
-## standing at the cages, and the player meets the wood after the lesson.
-const STATIONS := [
-	[122.0, -2.6],
-	[140.0, 2.2],
-	[158.0, -1.4],
-	[178.0, 2.8],
-	[200.0, -2.2],
-	[224.0, 1.8],
-	[252.0, -2.6],
-]
-
 ## Cleared ground: a wolf closer than this to the camp's mouth would be standing
 ## on the pocket's own edge, and the opening fight belongs to the camp's watchers.
 const MOUTH_CLEARANCE := 25.0
+## The deep-wood packs, and the whole band. There is no wolf on the lane or the
+## corridor: the trail belongs to the cult and the archer ambushes, and a wolf
+## pack is a thing a body finds by leaving the road. Two packs of four live well
+## out in the widened wood, one either side of the route, their members 6-16 m
+## apart inside one `PACK_RADIUS` so `assign_all` hands each pack one territory.
+## `along` is metres from the camp's mouth measured on the lane itself, and
+## `side` is metres off the centre line. Every post is past `DEEP_WOOD_INNER` and
+## beyond the wolf's own 23 m sight of the lane (28-50 m out), so a body on the
+## trail is never pulled into a pack, and clear of the two solid tree rows (the
+## outermost solid trunk reaches ~10.5 m with its jitter), so no wolf spawns in a
+## trunk collider.
+const DEEP_WOOD_INNER := 15.0
+const PACKS := [
+	# The first pack is off the corridor beside the trail-start checkpoint, deep
+	# enough (38-50 m) that a body on the road never sees it, near enough that a
+	# squad that leaves the path finds it - and that a co-op guest at the
+	# checkpoint has one in its 70 m replication band.
+	{"name": "BriarPackA", "corridor": true, "stations": [
+		[62.0, -38.0], [68.0, -46.0], [74.0, -42.0], [80.0, -50.0],
+	]},
+	{"name": "BriarPackB", "stations": [
+		[688.0, 30.0], [696.0, 36.0], [704.0, 43.0], [712.0, 50.0],
+	]},
+]
+## Both deep packs, for the tests that count the whole band.
+const PACK_COUNT := 8
 ## The same 12 cm the frontier lifts every mob spawn by, so a body dropped on the
 ## analytic ground starts just clear of it instead of inside the collider.
 const SPAWN_LIFT := 0.12
@@ -54,13 +66,16 @@ const SPAWN_LIFT := 0.12
 ## fast enough that a wolf never hunts a body that has left, and cheap enough that
 ## the frontier's hosts do not notice it.
 const REFRESH_SECONDS := 0.5
-## `main.gd`'s pack radius for every wilderness band. The wolves on the first
-## stretch are 26-32 m apart, so they keep their own patches rather than merging
-## into one wide territory the squad can walk around.
+## `main.gd`'s pack radius for every wilderness band. The corridor posts are
+## eighteen to twenty-six metres apart, so they keep their own patches; each deep
+## pack's posts sit inside this radius of one another, so `assign_all` gives that
+## pack one shared territory to roam.
 const PACK_RADIUS := 14.0
 
 var _world: Node3D
 var _wolves: Array = []
+## The deep-wood packs, one array of wolves per entry in `PACKS`, in spawn order.
+var _packs: Array = []
 var _culler
 var _elapsed := 0.0
 
@@ -83,11 +98,23 @@ func setup(world: Node3D) -> Array:
 		world.add_child(self)
 	_ensure_culler()
 	_clear_wolves()
-	for station in STATIONS:
-		_spawn_wolf(_post(float(station[0]), float(station[1])))
-	# Every wilderness body owns a patch; a band that spawned close enough to
-	# share a frame of the road wanders that stretch as one, exactly as the
-	# frontier's own packs do.
+	# The deep wood has its own bands: each pack's posts are close enough to one
+	# another to merge under `PACK_RADIUS`, and far enough from the lane that a
+	# body has to leave the trail to meet one.
+	_packs.clear()
+	for pack in PACKS:
+		var members: Array = []
+		for station in pack["stations"] as Array:
+			# A corridor pack is measured from the camp's mouth like the old band;
+			# the lane packs follow the lane's own polyline.
+			var point := _post(float(station[0]), float(station[1])) \
+				if bool(pack.get("corridor", false)) \
+				else _lane_post(float(station[0]), float(station[1]))
+			members.append(_spawn_wolf(point))
+		_packs.append(members)
+	# Every wilderness body owns a patch; each pack's members spawned close
+	# enough to share one frame of the wood, exactly as the frontier's own packs
+	# do. One call, so the two packs stay two territories.
 	MobWander.assign_all(_wolves, PACK_RADIUS)
 	_refresh()
 	return _wolves.duplicate()
@@ -108,6 +135,12 @@ func wolves() -> Array:
 	return _wolves.duplicate()
 
 
+## The deep-wood packs, one array of wolves per `PACKS` entry. The corridor band
+## is not one of them: those posts are solo, exactly as they were.
+func packs() -> Array:
+	return _packs.duplicate()
+
+
 ## The one sweep that parks a wolf the squad has left far behind.
 func culler():
 	return _culler
@@ -115,7 +148,7 @@ func culler():
 
 # --- the band ---------------------------------------------------------------
 
-func _spawn_wolf(point: Vector3) -> void:
+func _spawn_wolf(point: Vector3) -> Node:
 	var wolf = EnemyScript.new()
 	# kind 0 is the authored briar wolf: level 1 in everything but name.
 	wolf.kind = 0
@@ -143,6 +176,7 @@ func _spawn_wolf(point: Vector3) -> void:
 	if guards is Array:
 		guards.append(wolf)
 	_wolves.append(wolf)
+	return wolf
 
 
 ## Put the band's aim back on the bodies that are standing right now. The free
@@ -229,6 +263,48 @@ func _trail_offset() -> Vector3:
 	return Vector3.ZERO
 
 
+## A post `along` metres from the camp's mouth, `side` metres left or right of the
+## **lane itself**. `_post()` extrapolates the lane's first tangent, which is fine
+## for the first 250 m and wrong by tens of metres at 500: the deep packs are laid
+## on the real polyline so "15-30 m off the lane" means off the lane a body walks.
+## The lateral offset is held at `DEEP_WOOD_INNER`'s edge of the solid tree rows,
+## so no member spawns inside a trunk collider.
+func _lane_post(along: float, side: float) -> Vector3:
+	var mouth: Vector3 = CampScript.GATE_POINT
+	if along <= CampScript.CAMP_TO_ROAD_METRES:
+		return _post(along, side)
+	var reach := along - CampScript.CAMP_TO_ROAD_METRES
+	var offset := _trail_offset()
+	var lane: Array = RunForestScript.LANE_POINTS
+	var travelled := 0.0
+	var point := Vector3.ZERO
+	var heading := Vector3(0.0, 0.0, -1.0)
+	for index in range(lane.size() - 1):
+		var from: Vector3 = lane[index] + offset
+		var to: Vector3 = lane[index + 1] + offset
+		var span := from.distance_to(to)
+		if travelled + span >= reach or index == lane.size() - 2:
+			var t := clampf((reach - travelled) / maxf(span, 0.0001), 0.0, 1.0)
+			point = from.lerp(to, t)
+			heading = to - from
+			heading.y = 0.0
+			if heading.length_squared() < 0.0001:
+				heading = Vector3(0.0, 0.0, -1.0)
+			heading = heading.normalized()
+			break
+		travelled += span
+	var across := Vector3(-heading.z, 0.0, heading.x)
+	var lateral := side
+	if absf(lateral) < DEEP_WOOD_INNER:
+		lateral = signf(lateral if absf(lateral) > 0.001 else 1.0) * DEEP_WOOD_INNER
+	var at := point + across * lateral
+	# A world whose lane doubles back over the camp is not one this band may stand
+	# in: fall back to the corridor's own line.
+	if not _clear_of_camp(at):
+		at = mouth + Vector3(lateral, 0.0, -along)
+	return _ground(at)
+
+
 ## Never on the mouth, never inside the pocket.
 static func _clear_of_camp(point: Vector3) -> bool:
 	var mouth: Vector3 = CampScript.GATE_POINT
@@ -278,3 +354,4 @@ func _clear_wolves() -> void:
 			guards.erase(wolf)
 		wolf.queue_free()
 	_wolves.clear()
+	_packs.clear()

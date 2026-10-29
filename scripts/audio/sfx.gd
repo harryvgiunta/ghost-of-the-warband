@@ -25,6 +25,9 @@ const DAGGER_ITEMS := ["dagger_iron", "dagger_ironwood"]
 ## Blade span index where `Archer.SWORD_DATA` turns makeshift: club at 3, branch
 ## at 4. Read as a floor rather than an equality so a new blunt piece is blunt.
 const CLUB_INDEX := 3
+## `Archer.shield_variant` of the wooden shield (`State.ITEMS["shield_wood"]`):
+## the one guard that answers a blow with wood instead of steel.
+const WOODEN_SHIELD := 3
 ## What a weapon reads as when nothing else can say: an empty answer, not a
 ## guess at a catalog index.
 const UNARMED := {"two_handed": false, "blunt": false, "dagger": false}
@@ -38,12 +41,33 @@ static func play(event: String, at: Variant = null) -> void:
 	audio.play_event(event, at)
 
 
+## A menu or panel tick: the player's own hand, so it is flat and quiet.
+static func ui_click(at: Variant = null) -> void:
+	play("ui_click", at)
+
+
+## The soul changing bodies. One per real change of mercenary, at the body the
+## soul just stepped into.
+static func body_swap(at: Variant = null) -> void:
+	play("body_swap", at)
+
+
+## A piece lifted off the ground, at the drop's position.
+static func pickup(at: Variant = null) -> void:
+	play("pickup", at)
+
+
 ## A weapon is on its way through the air. `hand` decides which blade of a dual
-## pair swung, because the off hand may be the dagger.
-static func swing(source: Variant, at: Variant = null, hand: String = "right") -> void:
+## pair swung, because the off hand may be the dagger; `variant` is the swing
+## the melee already committed to, because a stab and a diagonal cut are not the
+## same sound even with the same knife in hand.
+static func swing(source: Variant, at: Variant = null, hand: String = "right",
+		variant: String = "") -> void:
 	var kind := kind_of(source, hand)
 	if bool(kind.get("dagger")):
-		play("swing_dagger", at)
+		# A stab is a push, not an arc: it gets the quietest take there is, so
+		# the slit of the impact is what the blow is heard as.
+		play("stab_dagger" if variant == "stab" else "swing_dagger", at)
 		return
 	play("swing_2h" if bool(kind.get("two_handed")) else "swing_1h", at)
 
@@ -60,9 +84,38 @@ static func landed(source: Variant, at: Variant = null, hand: String = "right") 
 		play("hit_blade", at)
 
 
-## Steel met steel. A parry rings, a held block carries weight.
-static func defense(at: Variant = null, parried: bool = false) -> void:
-	play("parry" if parried else "block", at)
+## Steel met steel - or wood, or a knife. A parry rings; a held block answers
+## with whatever the defender is actually holding: a wooden shield or a club
+## thuds, a dagger whispers, and only an edged guard rings.
+static func defense(at: Variant = null, parried: bool = false,
+		defender: Variant = null) -> void:
+	var guard: Variant = _guard_of(defender)
+	if parried:
+		# A stick or a club can turn a blade too, and it knocks rather than rings;
+		# a dagger never parries, but if a weak guard is reported as one it must
+		# still be the knife's whisper and not steel.
+		var p_kind := kind_of(guard)
+		if bool(p_kind.get("dagger")):
+			play("block_dagger", at)
+		elif bool(p_kind.get("blunt")):
+			play("block_wood", at)
+		else:
+			play("parry", at)
+		return
+	if _property(guard, "shield_equipped") == true:
+		if int(_property(guard, "shield_variant")) == WOODEN_SHIELD:
+			play("block_wood", at)
+			return
+		play("block", at)
+		return
+	var kind := kind_of(guard)
+	if bool(kind.get("dagger")):
+		play("block_dagger", at)
+		return
+	if bool(kind.get("blunt")):
+		play("block_wood", at)
+		return
+	play("block", at)
 
 
 static func arrow(at: Variant = null) -> void:
@@ -118,6 +171,26 @@ static func kind_of(source: Variant, hand: String = "right") -> Dictionary:
 		"blunt": staff or index >= CLUB_INDEX,
 		"dagger": false,
 	}
+
+
+## A property read that answers for anything: a missing property, a freed node
+## and a plain number all answer null rather than taking the call down.
+static func _property(source: Variant, property: String) -> Variant:
+	if not is_instance_valid(source):
+		return null
+	return source.get(property)
+
+
+## The thing that is actually holding the guard. An `ArenaActor` wears a rig and
+## answers nothing about weapons itself, so the rig is what is read; a mob that
+## carries its own piece answers for itself, and a bare body answers nothing.
+static func _guard_of(defender: Variant) -> Variant:
+	if not is_instance_valid(defender):
+		return null
+	if _property(defender, "shield_equipped") != null:
+		return defender
+	var rig: Variant = _property(defender, "rig")
+	return rig if is_instance_valid(rig) else defender
 
 
 static func _audio() -> Node:

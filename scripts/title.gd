@@ -12,6 +12,7 @@ const SessionScript = preload("res://scripts/session.gd")
 const LobbyScript = preload("res://scripts/warband/warband_lobby.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -195,6 +196,18 @@ func _plate(parent: Node, text: String, variation: String, action: Callable) -> 
 	return button
 
 
+## The four campaign doors all hand the score over to the warband: the menu
+## theme stops outright, the soundtrack starts at its own beginning, and the
+## door answers with the weight of a door (a blunt take pitched into the floor
+## and sent through the reverb bus). A refused door - no save to continue - never
+## gets here, because a door that did not open must not restart the music.
+func _enter_campaign_score() -> void:
+	SfxScript.play("menu_thud")
+	var audio := get_node_or_null("/root/Audio")
+	if audio != null:
+		audio.start_campaign_music()
+
+
 func _toggle_lobby() -> void:
 	if _lobby_layer == null:
 		return
@@ -210,6 +223,7 @@ func _enter_warband() -> void:
 	# cages, however the last one ended. Resuming lives behind its own door.
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow != null:
+		_enter_campaign_score()
 		flow.start_campaign()
 
 
@@ -220,6 +234,7 @@ func _resume_warband() -> void:
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow == null:
 		return
+	_enter_campaign_score()
 	flow.enter_warband()
 
 
@@ -397,6 +412,7 @@ func _start_new_game() -> void:
 	if state == null:
 		_set_status("Player state is unavailable.",WARN)
 		return
+	_enter_campaign_score()
 	state.reset(true)
 	if session != null:
 		session.clear()
@@ -414,6 +430,7 @@ func _load_saved_game() -> void:
 		_set_status("No saved journey yet. Start a new game.",WARN)
 		_refresh_load_button()
 		return
+	_enter_campaign_score()
 	state.load_state()
 	if session != null:
 		session.clear()

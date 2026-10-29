@@ -13,6 +13,10 @@ var rig
 var viewport: SubViewport
 var camera: Camera3D
 var _built := false
+## The kit and the look the stage is showing, kept so a rig rebuilt for a new
+## body can be dressed with the same gear it was already wearing.
+var _state = null
+var _appearance: Dictionary = {}
 
 func _ready() -> void:
 	stretch = true
@@ -103,8 +107,27 @@ func _add_stage() -> void:
 func apply_state(state) -> void:
 	if state == null or not _built:
 		return
+	_state = state
 	rig.apply_loadout(state.loadout())
 	TrinketArt.apply(rig.skeleton,state.trinkets())
+
+
+## Put one mercenary's body on the stage. The height a look carries is baked into
+## the rig before the rig measures its own legs, so a different look means a
+## different rig; the kit it was wearing is dressed again on the new one.
+func set_appearance(profile: Dictionary) -> void:
+	if not _built or profile == _appearance:
+		return
+	_appearance = profile.duplicate()
+	if rig != null and is_instance_valid(rig):
+		rig.queue_free()
+	rig = Archer.new()
+	rig.name = "PreviewRanger"
+	rig.appearance = _appearance
+	viewport.add_child(rig)
+	rig.set_physics_process(false)
+	if _state != null:
+		apply_state(_state)
 
 
 func set_active(active: bool) -> void:

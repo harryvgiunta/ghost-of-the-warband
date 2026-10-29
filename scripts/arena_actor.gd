@@ -14,6 +14,7 @@ const Combat = preload("res://scripts/combat.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodyFeet = preload("res://scripts/bloody_feet.gd")
 const FootstepsScript = preload("res://scripts/audio/footsteps.gd")
+const VoiceEmitterScript = preload("res://scripts/audio/voice_emitter.gd")
 const BleedDrip = preload("res://scripts/warband/bleed_drip.gd")
 const Geo = preload("res://scripts/geo.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
@@ -38,6 +39,10 @@ var slot := 0
 var peer_id := 0
 var is_bot := true
 var display_name := "Bot"
+## The look this body wears (`WarbandLooks.profile_for`), set *before* the body
+## enters the tree so the rig can bake the height in before it measures itself.
+## Empty is the shipped ranger, which is what every arena fighter and bot is.
+var appearance: Dictionary = {}
 var rig
 var combat
 var ability
@@ -88,6 +93,11 @@ var safe_anchor := Vector3.ZERO
 var safe_anchor_known := false
 var authoritative := false
 var is_local := false
+## The voice this body speaks with (`VoiceLibrary.VOICES`), and the emitter that
+## decides whether it says anything: a grunt on a real blow, the line on a heavy
+## one, a word over a kill, and the moans of a body bleeding on the ground.
+var voice_id := "player"
+var _voice: VoiceEmitter
 ## True on the one peer that owns this body over the wire: it integrates its
 ## own movement immediately and reconciles against the host's acknowledgements.
 var predicting := false
@@ -229,6 +239,7 @@ func _ready() -> void:
 	add_child(cover)
 	cover.setup(self,collider)
 	rig = Archer.new()
+	rig.appearance = appearance
 	add_child(rig)
 	_floor_query.collision_mask = 1
 	_sight_query.collision_mask = 1
@@ -260,7 +271,7 @@ func _ready() -> void:
 	slide = RunningSlide.new()
 	add_child(slide)
 	_label = Label3D.new()
-	_label.position.y = 2.3
+	_label.position.y = 2.3 * body_scale()
 	_label.font_size = 36
 	_label.pixel_size = 0.006
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -279,6 +290,10 @@ func _ready() -> void:
 	_bleed_drip = BleedDrip.new()
 	_bleed_drip.name = "BleedDrip"
 	add_child(_bleed_drip)
+	# The voice is built here and pointed at `voice_id`, which a scene may change
+	# before the body makes its first noise. `is_local` is read every frame, not
+	# here: the scene seats the body's flags after it is in the tree.
+	_voice = VoiceEmitterScript.create(voice_id, self, false, 3907 + slot)
 
 func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) -> void:
 	peer_id = owner_id
@@ -459,6 +474,10 @@ func enter_downed(source_id: int = -1) -> void:
 	_reset_rig_glide()
 	rig.visible = true
 	_begin_downed_state()
+	# The blow that puts a body down is the body's own: the first moan, then the
+	# bleed clock's ragged ones (`VoiceEmitter.tick`).
+	if _voice != null:
+		_voice.downed()
 	downed_started.emit(slot)
 
 ## Ghost of the Warband: stand back up out of DOWNED with the contract's share of
@@ -486,7 +505,19 @@ func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTIO
 	_reset_rig_glide()
 	rig.visible = true
 	_clear_downed_state()
+	if _voice != null:
+		_voice.stood_up()
 	downed_ended.emit(slot)
+
+## A hostile this body put down: a line about it, if it feels like one. Called by
+## the mob's own death through `Voice.kill_quip`, which is the only record a kill
+## leaves behind - the mob names its killer by instance id. The roll, the cooldown
+## and the choice of take are the emitter's (`VoiceLibrary.VOICES.player.kill`).
+func voice_kill_quip() -> void:
+	if _voice == null or not (is_local or authoritative):
+		return
+	_voice.killed()
+
 
 ## Where the blow that put this body down came from. `receive_melee` is the one
 ## funnel that knows the attacker's body, so the crawl's bearing comes from it.
@@ -560,6 +591,8 @@ func _die(source_id: int) -> void:
 	else:
 		_clear_downed_state()
 		rig.visible = false
+	if _voice != null:
+		_voice.stood_up()
 	killed.emit(slot, source_id)
 
 func try_ability(slot: int = 0) -> Dictionary:
@@ -731,8 +764,17 @@ func reset_stance() -> void:
 	rig.set_cover(false,Vector3.ZERO,0.0,false,Vector3.ZERO)
 	rig.set_slide(-1.0,Vector3.FORWARD)
 
+## The point other bodies aim at, and the point this body's own wounds open. It
+## rides the body's own height, so a mob reaches for the chest that is actually
+## there instead of a height only the tallest man has.
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0,1.2,0)
+	return global_position + Vector3(0,1.2 * body_scale(),0)
+
+## This body's height as a fraction of the authored rig. Presentation only: the
+## capsule, the health pool, reach and speeds are the same for every mercenary,
+## which is the warband's whole contract.
+func body_scale() -> float:
+	return clampf(float(appearance.get("height", 1.0)), 0.80, 1.20)
 
 func head_hitbox_center() -> Vector3:
 	return rig.head_hitbox_center() if is_instance_valid(rig) else global_position
@@ -842,8 +884,16 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 			enter_downed(source_id)
 		else:
 			_die(source_id)
-	elif bool(outcome.downed):
+		return
+	if bool(outcome.downed):
 		enter_downed(source_id)
+		return
+	# Still standing, so the blow is heard: the share of the pool it took decides
+	# whether this is a grunt or the line a player remembers (`VoiceEmitter`).
+	# A blow that puts a body down never gets here - going down has its own voice,
+	# and two lines on one frame would be one cut off.
+	if _voice != null:
+		_voice.damage(applied / maxf(max_health, 1.0))
 
 func try_consume(kind: String) -> bool:
 	if not authoritative or not alive or downed or consume_kind != "":
@@ -1560,6 +1610,11 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 	if not authoritative and had_pose and not replaced and previous_health-health > 0.01:
 		DamageNumbers.spawn(get_parent(),global_position,previous_health-health,"self" if is_local else "hit",false,health <= 0.0)
 		BloodFx.wound(self,rig,get_aim_position(),previous_health-health,false,health <= 0.0,1.0)
+		# The peer that does not simulate this body still has to hear its own
+		# voice: the host applied the blow, the ears are here. A blow that leaves
+		# the body at zero is the downed branch below, not a grunt.
+		if is_local and _voice != null and health > 0.0:
+			_voice.damage((previous_health-health) / maxf(max_health, 1.0))
 	alive = state.alive
 	# Ghost of the Warband: the wire carries no separate downed flag. A body at
 	# zero health that is still alive is exactly what the host wrote when a blow
@@ -1580,9 +1635,14 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 		# wire - which carries no presentation flag - is enough to say so.
 		if downed:
 			_begin_downed_state()
+			# The guest's own body: it went down on the host, it moans here.
+			if is_local and _voice != null:
+				_voice.downed()
 			downed_started.emit(slot)
 		else:
 			_clear_downed_state()
+			if _voice != null:
+				_voice.stood_up()
 			downed_ended.emit(slot)
 	# A campaign death leaves a corpse on every screen, not a body that disappears
 	# the instant the authority says it is over - and a body that joined the scene
@@ -1689,6 +1749,13 @@ func _pose_tick(tick: int) -> int:
 	return tick if tick >= 0 else _timeline.newest_tick() + 1
 
 func _process(delta: float) -> void:
+	# The body's voice: the local body's own lines play flat - they are the ears
+	# they come from - and every other body's are placed where it stands. The flag
+	# is read here rather than at creation because the scene seats `is_local`
+	# after the body is in the tree.
+	if _voice != null:
+		_voice.flat = is_local
+		_voice.tick(delta)
 	if not authoritative and _received_pose and not prediction_active():
 		_timeline.advance(delta)
 		var sample: Dictionary = _timeline.sample()

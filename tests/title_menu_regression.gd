@@ -158,7 +158,17 @@ func run() -> void:
 		root.add_child(title)
 		await process_frame
 		check(title.warband_button != null, "the warband door is on the title")
+		# The door is heard and the score is handed over: the menu theme stops
+		# outright and the soundtrack starts at its own beginning.
+		var audio_node = root.get_node_or_null("Audio")
+		if audio_node != null:
+			audio_node.last_event = ""
 		title.warband_button.pressed.emit()
+		if audio_node != null:
+			check(audio_node.last_event == "menu_thud",
+				"the warband door must sound as a door (%s)" % audio_node.last_event)
+			check(audio_node.music_track == "warband",
+				"the warband door must hand the score to the campaign (%s)" % audio_node.music_track)
 		check(flow.world_start == "camp", "the warband door starts at the cages (%s)" % flow.world_start)
 		check(warband.roster.count() == 0, "the warband door begins a fresh warband (%d bodies)"
 			% warband.roster.count())

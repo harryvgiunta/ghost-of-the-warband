@@ -329,6 +329,10 @@ func _host_run() -> void:
 		if world.has_method("spawn_pickup"):
 			spawned = world.spawn_pickup("sword_makeshift", at)
 		check(spawned != null, "The host spawns a pickup the wire can carry")
+		# The reward RPC is reliable and immediate; the replica's health arrives
+		# on the 15 Hz mob snapshot. Let one snapshot land before asking the guest
+		# what it holds, or the probe reads the last living state.
+		await create_timer(0.2).timeout
 		report.probe.rpc_id(client_peer, "kill", guard_name)
 		var kill_seen := await _wait_until(func(): return reports.has("kill"), 12.0)
 		check(kill_seen, "The guest reports after the kill")

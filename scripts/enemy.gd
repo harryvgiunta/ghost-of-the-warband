@@ -16,6 +16,8 @@ const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const VoiceScript = preload("res://scripts/audio/voice.gd")
+const VoiceEmitterScript = preload("res://scripts/audio/voice_emitter.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
@@ -63,6 +65,8 @@ var _stagger_duration := 0.0
 var _body: Node3D
 var _wolf: WolfVisual
 var _devil: DevilVisual
+## The noise this body makes: a growl going into the bite, a cry going down.
+var _voice: VoiceEmitter
 var _dodge
 var _warning: MeshInstance3D
 var _query := PhysicsRayQueryParameters3D.new()
@@ -202,6 +206,16 @@ func _ready() -> void:
 	# A pack that meets the same barrier splits around both of its sides.
 	_steering.bias = _orbit_dir
 	_lod = MobLod.new(int(absf(global_position.x) * 11.0 + absf(global_position.z) * 5.0))
+	# The noise this body makes. The voice is named by the species, so a wolf and
+	# a cinder devil keep their own takes without this file knowing either one;
+	# `VoiceLibrary` decides whether that voice has been recorded at all.
+	_voice = VoiceEmitterScript.create(voice_id(), self, false, 1103 + maxi(pack_index, 0))
+
+
+## The voice this body speaks with. A species without recorded lines answers an
+## empty name, which `VoiceEmitter` treats as silence rather than as an error.
+func voice_id() -> String:
+	return "wolf" if kind == 0 else "cinder_devil"
 
 func _build_wolf_visual() -> void:
 	_wolf = WolfVisual.new()
@@ -349,6 +363,10 @@ func _physics_process(delta: float) -> void:
 				state = "WINDUP"
 				_state_time = 0.0
 				_warning.visible = true
+				# The growl is the telegraph heard: a player looking the wrong
+				# way still gets told the jaws are coming. Not every bite - the
+				# row's chance is what keeps a pack from sounding like one animal.
+				_voice.say("attack")
 				target_direction = Vector3.ZERO
 			elif warband_passive and distance < 2.6:
 				# Ghost of the Warband: a passive wolf holds its ring instead of
@@ -808,6 +826,10 @@ func _enter_devil_state(next: String) -> void:
 	_state_time = 0.0
 	_shot_fired = false
 	_warning.visible = next == "WINDUP"
+	if next == "WINDUP":
+		# Same reading as the wolf's: the noise goes with the telegraph, not with
+		# the swing, so the windup can be answered with the eyes shut.
+		_voice.say("attack")
 	if next == "STRIKE":
 		# The cinder devil's committed swing. `Sfx` reads what it carries, so a
 		# short blade draws the short arc and a two-handed piece the long one.
@@ -985,6 +1007,10 @@ func _ingest_pose(state: Dictionary, tick: int) -> void:
 
 
 func _process(delta: float) -> void:
+	# Every machine that draws this body runs its voice clock, because the cues a
+	# replica makes off a snapshot are as local as the ones the authority makes.
+	if _voice != null:
+		_voice.tick(delta)
 	if not replica or not alive or not _received_pose:
 		return
 	_timeline.advance(delta)
@@ -1010,8 +1036,16 @@ func _enter_dead(announce: bool) -> void:
 	if kind == 2 and is_instance_valid(_devil):
 		# The dropped pickup owns the weapon now; keep it out of the corpse.
 		_devil.set_weapon("claw")
+	# The death cry is presentation, so every machine that runs this body hears
+	# it: the authority because it killed it, a replica because the snapshot has
+	# just told it the body is gone. `alive` is already false, so it happens once.
+	_voice.say("death")
 	if announce:
 		defeated.emit(self, 8 if kind == 0 else 6)
+		# The body that landed the last blow says something about it, if it feels
+		# like it. Only the authority knows a killer's `last_hitter` id, so only
+		# it asks.
+		VoiceScript.kill_quip(last_hitter)
 	# Collapse first, then hold the corpse for the shared five minutes.
 	var death_tween := create_tween()
 	if kind == 0:
@@ -1055,6 +1089,7 @@ func _packed_pose() -> Vector4:
 func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	var previous_health := health
 	var was_alive := alive
+	var previous_state := self.state
 	_ingest_pose(state,tick)
 	self.state = state.s
 	_state_time = state.t
@@ -1064,6 +1099,11 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	var grounded: bool = state.g
 	var pose: Vector4 = state.x
 	_warning.visible = self.state == "WINDUP"
+	# A replica commits its bite on the host, so the growl is read off the state
+	# change the wire carries: the same rule as the authority's, one snapshot
+	# late. The death cry is the `_enter_dead` below.
+	if previous_state != "WINDUP" and self.state == "WINDUP":
+		_voice.say("attack")
 	if kind == 0:
 		_wolf.set_motion(Vector2(velocity.x,velocity.z).length())
 		_wolf.set_combat(self.state,_state_time)

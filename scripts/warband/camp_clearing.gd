@@ -814,7 +814,39 @@ static func _build_cage(parent: Node3D, index: int, at: Vector3, mats: Dictionar
 	for step in 6:
 		Geo.cylinder(door, 0.045, 0.045, 2.7, Vector3(-1.0 + step * 0.4, 1.4, 0), iron["iron"], 6)
 	Geo.box(door, Vector3(2.4, 0.1, 0.1), Vector3(0, 1.1, 0), iron["iron"])
+	# The bars are a wall, not a painting: two 2.5 m sides and the back of the
+	# cage stop a body walking in, and the floor stops nothing because it is the
+	# world's own heightfield. The inside stays hollow - a clamped prisoner lives
+	# there - and the front belongs to the door.
+	var bars := _collision_body(cage, "CageBars")
+	_collision_box(bars, Vector3(0.12, 2.7, 2.5), Vector3(-1.15, 1.35, 0.0))
+	_collision_box(bars, Vector3(0.12, 2.7, 2.5), Vector3(1.15, 1.35, 0.0))
+	_collision_box(bars, Vector3(2.5, 2.7, 0.12), Vector3(0.0, 1.35, 1.15))
+	# The door is its own body so the collider rises with the bars it is drawn on:
+	# a cut latch opens the front of the cage, not just its picture.
+	var door_bars := _collision_body(door, "DoorBars")
+	_collision_box(door_bars, Vector3(2.4, 2.7, 0.12), Vector3(0.0, 1.35, 0.0))
 	return {"node": cage, "door": door}
+
+
+## A static collider on the world's own layer, and blind to everything: nothing
+## in the camp is pushed by these walls, they are simply there.
+static func _collision_body(parent: Node3D, node_name: String) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.name = node_name
+	body.collision_layer = 1
+	body.collision_mask = 0
+	parent.add_child(body)
+	return body
+
+
+static func _collision_box(parent: Node3D, size: Vector3, at: Vector3) -> void:
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	shape.position = at
+	parent.add_child(shape)
 
 
 ## The camp's own furniture: crate stacks, barrels and the cold altar behind the

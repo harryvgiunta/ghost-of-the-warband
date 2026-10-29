@@ -33,6 +33,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
+const VoiceScript = preload("res://scripts/audio/voice.gd")
 
 ## How close a body must stand to the chest, the desk and the altar. The gate
 ## keeps its own (larger) `open_radius`.
@@ -63,6 +64,18 @@ const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 const VENDOR_ORLA_POINT := Vector3(-14.0, 0.0, 2.0)
 const VENDOR_BRANN_POINT := Vector3(14.0, 0.0, 0.0)
 const VENDOR_VEY_POINT := Vector3(7.0, 0.0, -14.0)
+## The three stalls in the order `State.VENDORS` and the counters below keep them.
+const VENDOR_SERVICES := ["vendor_orla", "vendor_brann", "vendor_vey"]
+## The keeper behind each counter, by the service `interact_at` resolves. This is
+## the town's side of the dialogue: `VoiceLibrary.VOICES` holds what they say and
+## `greet`/`done` are the two moments the square gives them - being walked up to,
+## and taking your coin. A keeper with no recordings says nothing.
+const KEEPER_VOICES := {
+	"vendor_orla": "orla",
+	"vendor_brann": "brann",
+	"vendor_vey": "vey",
+	"quartermaster": "quartermaster",
+}
 
 ## Muster ring around the fire: one post per body the round can field.
 const SPAWN_POSTS := [
@@ -513,6 +526,11 @@ func _build_services() -> void:
 	vendor_menu.name = "VendorMenu"
 	vendor_layer.add_child(vendor_menu)
 	vendor_menu.configure(warband, 0)
+	# A trade is the one thing the keeper answers besides being walked up to. The
+	# panel is the same node for all three stalls, so the keeper is read off it at
+	# the moment the coin lands rather than bound when the board was built.
+	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
+	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
 	preload("res://scripts/warband/town_dressing.gd").build(self)
 
 func _build_stash_chest() -> Node3D:
@@ -703,6 +721,10 @@ func _try_interact() -> void:
 ## handler and the regression both drive instead of guessing at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
 	var service := service_at(point)
+	# A counter being used is the one moment a keeper has a body's attention, so
+	# that is when they speak. It goes before the panel opens: the line is the
+	# greeting, the board is the service.
+	_speak_keeper(service, "greet")
 	match service:
 		"stash":
 			_hide_panels()
@@ -732,6 +754,22 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			var gate_state: Dictionary = gate.prompt(peer_id)
 			hud.set_status(str(gate_state.get("message", "")), 5.0)
 	return service
+
+## One keeper line, at the counter they are standing behind. Two cues exist
+## today - `greet` and `done` - and both are rows in `VoiceLibrary`, so a keeper
+## answering a question the player asked is a third row and one call here. The
+## panel's own text is unchanged: the voice is on top of it, not instead of it.
+func _speak_keeper(service: String, cue: String) -> void:
+	if not KEEPER_VOICES.has(service):
+		return
+	VoiceScript.say(str(KEEPER_VOICES[service]), cue, service_point(service))
+
+
+## A stall sale: whichever keeper the walking panel is pointed at answers it.
+func _on_stall_traded() -> void:
+	var index := clampi(vendor_menu.vendor_index(), 0, VENDOR_SERVICES.size() - 1)
+	_speak_keeper(str(VENDOR_SERVICES[index]), "done")
+
 
 ## Open one keeper's stall. One panel serves all three, so opening a stall closes
 ## whatever was up and re-points the same board at that keeper's stock.

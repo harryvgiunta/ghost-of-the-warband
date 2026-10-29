@@ -6,6 +6,8 @@ extends CanvasLayer
 ## warband's collective stash, where the paperdoll can put it on any mercenary.
 
 signal changed
+## A keeper actually took the coin (see `VendorMenu.purchased`).
+signal purchased(item_id: String)
 
 const State = preload("res://scripts/player_state.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -90,6 +92,8 @@ func buy(item_id: String) -> Dictionary:
 	if _status != null:
 		_status.text = str(result.get("message", ""))
 	refresh()
+	if bool(result.get("ok", false)):
+		purchased.emit(item_id)
 	return result
 
 func refresh() -> void:

@@ -233,11 +233,16 @@ func _back() -> Vector3:
 	return Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)).normalized()
 
 ## The point the eye should read: the body's head and shoulders, not its feet.
+## A warband body carries its own height, so a short mercenary does not get an eye
+## floating above his crown and a tall one does not look at his collarbone.
 func _focus_point() -> Vector3:
 	var body := active_body()
 	if body == null:
 		return global_position
-	return body.global_position + Vector3.UP * EYE_HEIGHT
+	var height := EYE_HEIGHT
+	if body.has_method("body_scale"):
+		height *= float(body.body_scale())
+	return body.global_position + Vector3.UP * height
 
 ## The eye's wanted position: the orbit distance back along `back`, then the
 ## shoulder offset across it, before occlusion.

@@ -133,8 +133,10 @@ func run() -> void:
 	var spawned: Array = wilderness.setup(world)
 
 	# --- the band -----------------------------------------------------------
-	check(spawned.size() >= 6 and spawned.size() <= 8,
-		"setup spawns 6-8 wolves (got %d)" % spawned.size())
+	var expected_wolves := WildernessScript.PACK_COUNT
+	check(spawned.size() == expected_wolves,
+		"setup spawns only the two deep packs (%d, got %d)"
+		% [expected_wolves, spawned.size()])
 	var mouth: Vector3 = CampScript.GATE_POINT
 	for wolf in spawned:
 		check(is_instance_valid(wolf), "every spawned wolf is a live node")
@@ -162,23 +164,23 @@ func run() -> void:
 	check(culler != null and culler.name == "MobCuller", "the culler is named MobCuller")
 
 	await _settle(spawned)
-	# The wolf furthest from the ranger is the one no sighting could have woken:
-	# a hunting body may not park, and the sweep test must not depend on one
-	# having kept its nose down.
-	var stray = null
-	var farthest := -1.0
-	for wolf in spawned:
-		var apart: float = (wolf as Node3D).global_position.distance_to(target.global_position)
-		if apart > farthest:
-			farthest = apart
-			stray = wolf
-	check(stray != null and farthest > 30.0, "the stranded wolf starts outside sight")
-	check(farthest < 150.0, "the stranded wolf starts inside the wake band")
-	if stray == null:
-		check(false, "no wolf was placed to strand")
-	else:
-		check(not bool(stray.dormant), "a wolf on the road is awake before the move")
-		stray.global_position = Vector3(stray.global_position.x, 0.12,
+	# Every wolf now starts deep in the wood, well beyond sight. Wake one, walk it
+	# 300 m behind the ranger and prove the culler parks it: a hunting body must
+	# not sleep, and the sweep must never depend on one having kept its nose down.
+	var stray = spawned[0] if not spawned.is_empty() else null
+	check(stray != null, "a wolf was placed to strand")
+	if stray != null:
+		check((stray as Node3D).global_position.distance_to(target.global_position) > 30.0,
+			"the pack starts off the trail, beyond sight")
+		stray.mob_wake()
+		check(not bool(stray.dormant), "the wolf is awake before the move")
+		# Land it first, inside the tick band, then slide it out to 300 m. A body
+		# teleported straight past `DORMANT_DISTANCE` while airborne gets no tick
+		# (the budget gives it zero) and could never report its feet down.
+		stray.global_position = Vector3(TARGET_POST.x, 0.12, TARGET_POST.z - 100.0)
+		await _settle([stray])
+		check(stray.is_on_floor(), "the wolf lands before it is stranded")
+		stray.global_position = Vector3(stray.global_position.x, stray.global_position.y,
 			TARGET_POST.z - FLEE_METRES)
 		check(stray.global_position.distance_to(target.global_position) >= FLEE_METRES,
 			"the stranded wolf really stands 300 m behind")

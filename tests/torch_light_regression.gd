@@ -121,6 +121,31 @@ func _check_world() -> void:
 	check(not torch.flame_visible(), "the flame is gone with the piece")
 	check(warband.stash.pooled_count("torch_hand") == 1, "the torch went back to the pool")
 
+	# A dropped torch is still a torch: put it back in the hand, then drop the
+	# hand's gear on the world path and find the burning brand on the dirt.
+	var again: Dictionary = warband.equip_merc(merc_id, "off", "torch_hand")
+	check(bool(again.get("ok", false)), "the torch can be taken up again (%s)"
+		% str(again.get("reason", "")))
+	await create_timer(0.3).timeout
+	game.drop_merc_gear(body, merc_id)
+	await create_timer(0.3).timeout
+	var dropped = null
+	for pickup in game.pickups:
+		if is_instance_valid(pickup) and str(pickup.item_id) == "torch_hand":
+			dropped = pickup
+			break
+	check(dropped != null, "a dropped torch lies on the ground")
+	if dropped != null:
+		var ground_light := dropped.get_node_or_null("TorchLight") as OmniLight3D
+		check(ground_light != null and ground_light.visible,
+			"a dropped torch keeps its light on")
+		if ground_light != null:
+			check(ground_light.light_energy >= MIN_ENERGY,
+				"the ground torch is as bright as the hand torch (%.1f)"
+				% ground_light.light_energy)
+			check(ground_light.omni_range >= MIN_RANGE,
+				"the ground torch reaches as far (%.1f m)" % ground_light.omni_range)
+
 
 func _finish() -> void:
 	if is_instance_valid(game):

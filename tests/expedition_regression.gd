@@ -93,7 +93,13 @@ func run() -> void:
 	if guard != null:
 		guard.global_position = body.global_position + Vector3(1.4, 0, 0)
 		var before: float = body.health
-		await create_timer(3.5).timeout
+		# Six seconds, not three and a half: which swing lands is a race between the
+		# guard's blade geometry and the body's own parry window, and a warband body
+		# carries its own height (`WarbandLooks`), so that race moves by a swing from
+		# one body to the next. The claim is that a cultist within reach threatens a
+		# body, not that it does so on a particular beat - and six seconds is still a
+		# fifth of the bleed clock.
+		await create_timer(6.0).timeout
 		check(body.health < before, "a cultist guard takes health off a warband body")
 
 	# The director's curve, walked in order. Every wave but the first arrives on

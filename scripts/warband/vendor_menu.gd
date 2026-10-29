@@ -13,6 +13,10 @@ extends Control
 ## the layer, and the same node walks from keeper to keeper with `configure()`.
 
 signal changed
+## A keeper actually took the coin: the stock left the board and the purse paid
+## for it. `changed` cannot carry this - it also fires when the panel opens or a
+## body sells something back - and what the town wants to answer is the trade.
+signal purchased(item_id: String)
 
 const State = preload("res://scripts/player_state.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
@@ -159,6 +163,8 @@ func buy(item_id: String) -> Dictionary:
 	var result: Dictionary = _warband.buy_gear(item_id)
 	_set_status(str(result.get("message", "")))
 	refresh()
+	if bool(result.get("ok", false)):
+		purchased.emit(item_id)
 	return result
 
 ## Sell one pooled copy at the keeper's rate (`SELL_SHARE` of the catalogue).

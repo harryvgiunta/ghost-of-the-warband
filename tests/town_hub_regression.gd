@@ -10,6 +10,7 @@ extends SceneTree
 ## a resumed save and the field's return do.
 
 const State = preload("res://scripts/player_state.gd")
+const VoiceLibrary = preload("res://scripts/audio/voice_library.gd")
 
 const TEST_SAVE := "user://town_hub_state.json"
 const WARBAND_SAVE := "user://town_hub_warband.json"
@@ -117,6 +118,17 @@ func check_square() -> void:
 		var named: String = game.service_at(point)
 		check(named == service, "the %s ring resolves to itself (got '%s')" % [service, named])
 	check(game.service_at(game.town.global_position) == "", "the fire is not a service")
+
+	# The counters that can speak: every stall keeper and the quartermaster has a
+	# voice the library knows, and each one stands inside its own ring - a counter
+	# whose point fell outside its reach would greet nobody and never be heard.
+	for service in game.town.KEEPER_VOICES.keys():
+		var voice := str(game.town.KEEPER_VOICES[service])
+		check(VoiceLibrary.VOICES.has(voice), "the %s counter speaks with an unknown voice" % service)
+		check(game.service_at(game.service_point(service)) == service,
+			"the %s counter is not reachable from its own point" % service)
+	for service in game.town.VENDOR_SERVICES:
+		check(game.town.KEEPER_VOICES.has(service), "the %s stall has no keeper voice" % service)
 
 # --- stash and paperdoll ---------------------------------------------------
 

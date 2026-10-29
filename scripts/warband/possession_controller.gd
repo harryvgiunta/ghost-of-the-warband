@@ -34,6 +34,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 ## The peer whose soul this process owns. 1 is the host, matching ENet.
 var local_peer_id := 1
@@ -60,6 +61,9 @@ var _merc_bodies: Dictionary = {}   # merc_id -> ArenaActor
 var _body_mercs: Dictionary = {}    # ArenaActor -> merc_id
 var _loadouts: Dictionary = {}      # merc_id -> the seat loadout applied
 var _peer_actors: Dictionary = {}   # peer_id -> ArenaActor
+## The mercenary each peer was last wired into, so the swap sound fires on a
+## real change of body and not on every re-wire `possession_changed` reports.
+var _last_merc: Dictionary = {}     # peer_id -> merc_id
 var _tick := 0
 var _query := PhysicsRayQueryParameters3D.new()
 var _last_step_frame := -1
@@ -138,6 +142,10 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	# refuse each other's damage.
 	actor.slot = _spawned.size()
 	actor.name = "Body%02d" % merc_id
+	# Who this mercenary is to look at, decided before the body is in the tree:
+	# the rig bakes the height in before it measures its own legs, so a 2.1 m
+	# mercenary's feet still plant on the ground and a 1.6 m one's do too.
+	actor.appearance = WarbandLooks.profile_for(merc_id)
 	_bodies_root.add_child(actor)
 	var label: String = _warband.roster.name_of(merc_id)
 	actor.authoritative = authoritative
@@ -334,7 +342,14 @@ func _wire(peer_id: int, merc_id: int) -> void:
 			# The first body of a session snaps; every later body is an arc.
 			camera_rig.follow(actor, previous == null)
 	_warband.note_possession(peer_id, merc_id)
+	var changed := int(_last_merc.get(peer_id, -1)) != merc_id
+	_last_merc[peer_id] = merc_id
 	possession_changed.emit(peer_id, merc_id)
+	# One sound per body actually entered. `possession_changed` is also emitted
+	# when the same body is re-wired (a re-dress, a spawn refresh), and a whoosh
+	# on every one of those would read as the soul flickering.
+	if changed:
+		SfxScript.body_swap(actor.global_position)
 
 ## Hand a body to a peer: it becomes the input target for that peer only.
 func _dress(actor: Actor, peer_id: int) -> void:
@@ -374,6 +389,7 @@ func _release_peer(peer_id: int, reason: String) -> void:
 	if previous != null:
 		_detach(previous)
 	_peer_actors.erase(peer_id)
+	_last_merc.erase(peer_id)
 	if peer_id == local_peer_id:
 		active_actor = null
 		_drawing = false
@@ -451,6 +467,7 @@ func _on_body_exiting(actor: Actor) -> void:
 	for peer_id in _peer_actors.keys():
 		if _peer_actors[peer_id] == actor:
 			_peer_actors.erase(peer_id)
+			_last_merc.erase(peer_id)
 	if camera_rig != null:
 		camera_rig.forget(actor)
 	if active_actor == actor:

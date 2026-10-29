@@ -4,6 +4,7 @@ const WOLF := preload("res://assets/characters/ironwood_wolf.glb")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const VoiceLibraryScript = preload("res://scripts/audio/voice_library.gd")
 
 var failures := 0
 var checks := 0
@@ -165,9 +166,40 @@ func run() -> void:
 	await physics_frame
 	check(wolf_enemy._wolf != null, "Wolf enemy attaches its imported visual")
 	check(wolf_enemy._body.get_child_count() == 1 and wolf_enemy._body.get_child(0) == wolf_enemy._wolf, "Wolf body contains only the imported visual")
+
+	# The wolf's voice: the attack growl and the death cry, cut from the two
+	# licensed recordings (`tools/slice_game_audio.py`) and played by the mixer
+	# through the body's own emitter.
+	var audio := root.get_node_or_null("Audio")
+	check(audio != null, "the Audio autoload is missing")
+	check(wolf_enemy.voice_id() == "wolf", "the wolf babbles in another species' voice")
+	check(wolf_enemy._voice != null and wolf_enemy._voice.has("attack"),
+		"the wolf's growl take does not resolve through its own emitter")
+	check(wolf_enemy._voice.has("death"), "the wolf's death takes do not resolve")
+	# A growl is a coin toss on the body's own seed, so the test reads the coin:
+	# the same seed replayed here is the roll the bite will make.
+	var echo := RandomNumberGenerator.new()
+	echo.seed = wolf_enemy._voice.rng.seed
+	var growl_chance := float(VoiceLibraryScript.row("wolf", "attack").get("chance", 1.0))
+	check(echo.randf() < growl_chance, "the wolf's planted seed no longer clears a growl")
+	# Let it close and commit. The growl belongs to the telegraph, so the body has
+	# spoken before the jaws arrive.
+	var bite_deadline := Time.get_ticks_msec() + 2500
+	while wolf_enemy.state != "WINDUP" and Time.get_ticks_msec() < bite_deadline:
+		await physics_frame
+	check(wolf_enemy.state == "WINDUP", "the wolf never committed a bite")
+	check(wolf_enemy._voice._last_cue == "attack", "the committed bite made no growl")
+	if audio != null:
+		check(audio.last_event == "voice_wolf_attack", "the bite did not ask for the growl take")
+		check(audio.last_event_position is Vector3, "a growl must be placed in the world")
+
+	if audio != null:
+		audio.last_event = ""
 	wolf_enemy.take_damage(999.0, 0)
 	await create_timer(0.55).timeout
 	check(wolf_enemy.state == "DEAD" and wolf_enemy._wolf.is_dead(), "Wolf enemy routes lethal damage through the authored death")
+	if audio != null:
+		check(audio.last_event == "voice_wolf_death", "the dying wolf did not ask for its death cry")
 	check(wolf_enemy.scale == Vector3.ONE and wolf_enemy._body.scale == Vector3.ONE, "Wounded wolf keeps root and visual container scale identity during the collapse")
 	wolf_enemy.queue_free()
 	await process_frame

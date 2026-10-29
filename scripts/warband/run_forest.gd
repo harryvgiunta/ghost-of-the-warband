@@ -30,6 +30,15 @@ extends RefCounted
 ##    length, its width, every torch, the squad's spawn posts, the arch and the
 ##    three clearings the cult waits in, so the scene and the regression read the
 ##    same geometry instead of guessing at it.
+##
+## And two things that are not the road but the place it runs through. The wood is
+## **deep**: thirteen rows a side out to `WOOD_EDGE` (the near six walked past, the
+## rest batched in fog-sized cells), with the mountain rim `terrain.gd` raises
+## standing beyond them - the trail is a valley, not a strip of trees. One hollow
+## in it is **wet**: `terrain.gd`'s swamp basin at `SWAMP_FRACTION` of the route
+## gets a flat water plane on the existing water shader, reeds, snags, roots, mud
+## and a low mist, all of it off the lane and past the torch line, so the route is
+## unchanged and a body that steps off it is wading in the dark.
 
 const Geo = preload("res://scripts/geo.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -49,6 +58,16 @@ const CLEAR_HALF := 1.55
 ## How far from the way dressing may stand outside it.
 const VERGE := 24.0
 const TREE_CHUNK := 96.0
+## The deep wood - every row past this offset - is batched in larger chunks: the
+## outer rows are seen through fog at 60-plus metres, so a 512 m multimesh cell
+## culls nearly as well as a 96 m one for a fraction of the nodes and draws.
+const DEEP_ROW_MIN := 26.0
+const DEEP_TREE_CHUNK := 512.0
+## The wood's own outer edge: no trunk is planted past this. The last three rows
+## are the mountain rim's forested skirt - sparse, large trees standing at the toe
+## of the face, which read as a treeline climbing into the fog - and the rim
+## (`terrain.gd`) closes the valley beyond them.
+const WOOD_EDGE := 156.0
 ## Bushes cover the verge in one pass: fewer, larger batches than the trees.
 const BUSH_CHUNK := 120.0
 ## Torches: a pair either side every this many metres, on the verge - outside the
@@ -103,6 +122,12 @@ class Root extends Node3D:
 	var clearings: Array = []
 	var pursuer_posts: Array = []
 	var clearing_posts: Array = []
+	## Every trunk a body can walk into, as `{"at": Vector2 (x/z), "radius": float}`:
+	## the scene's ambushers and the wood's own placements stand clear of them.
+	var trunks: Array = []
+	## `terrain.gd`'s one hollow, as `swamp_region()` published it, plus the water
+	## plane's own numbers. Empty in a preview with no baked ground.
+	var swamp: Dictionary = {}
 	var groups: Dictionary = {}
 	var stats: Dictionary = {}
 	## One static body for every prop that needs a footprint.
@@ -225,6 +250,7 @@ static func build(parent: Node3D, options: Dictionary = {}) -> Dictionary:
 	_build_grass(root, style, path)
 	_build_rocks(root, path)
 	_build_torches(root, path)
+	_build_swamp(root, path)
 	if with_arch:
 		_build_arch(root, path)
 	_build_hanging(root, path)
@@ -254,6 +280,8 @@ static func build(parent: Node3D, options: Dictionary = {}) -> Dictionary:
 		"clearing_posts": root.clearing_posts,
 		"start": root.start,
 		"path": path,
+		"swamp": root.swamp,
+		"trunks": root.trunks,
 		"groups": root.groups,
 		"stats": root.stats,
 	}
@@ -274,24 +302,31 @@ static func night_style() -> WorldStyle:
 	style.id = "escape_run"
 	style.sky = {
 		"texture": "sky_frontier",
-		"energy": 0.10,
+		# The panorama at 0.10 filled the frame with a near-black hemisphere the
+		# moment a body turned round; it is a night sky now, not a void, and the
+		# sky's own ambient is what keeps the wood behind the squad readable.
+		"energy": 0.55,
 		"sun_rotation": Vector3(-58.0, -34.0, 0.0),
 		"sun_color": Color(0.54, 0.62, 0.88),
-		"sun_energy": 0.92,
+		"sun_energy": 1.0,
 		"sun_shadow_distance": 70.0,
-		"ambient_color": Color(0.125, 0.15, 0.205),
+		"ambient_color": Color(0.17, 0.20, 0.26),
 		"sun_shadows": false,
-		"ambient_energy": 2.2,
-		"use_sky_ambient": false,
+		# Sky ambient at a modest fill: the panorama is brighter now, but this is
+		# still a night wood, not a lit stage.
+		"ambient_energy": 1.3,
+		"use_sky_ambient": true,
 		"fog_mode": "exponential",
-		"fog_color": Color(0.05, 0.065, 0.095),
+		# A lighter haze that also eats the sky: the horizon closes at its own
+		# distance instead of turning the background into a black wall.
+		"fog_color": Color(0.075, 0.094, 0.124),
 		"fog_density": 0.012,
-		"fog_sun_scatter": 0.0,
-		"fog_sky_affect": 0.0,
-		"fog_aerial_perspective": 0.0,
+		"fog_sun_scatter": 0.05,
+		"fog_sky_affect": 0.38,
+		"fog_aerial_perspective": 0.18,
 		"tonemap": Environment.TONE_MAPPER_FILMIC,
 		"exposure": 1.0,
-		"saturation": 0.80,
+		"saturation": 0.84,
 		"contrast": 1.06,
 	}
 	style.ground = {
@@ -544,9 +579,10 @@ static func _build_catch_floor(root: Root, path: Path) -> void:
 
 ## One row of the wood: how far off the way its trees stand, how often they come,
 ## how far they wander about that line, and whether a body can walk into them. The
-## near two rows carry the trunks a body has to get round; the rest is batched
-## forest, which closes the horizon through the fog for the price of a multimesh.
-## Six rows a side, twice the treeline this lane grew out of.
+## near two solid rows carry the trunks a body has to get round; the rest is
+## batched forest, which closes the horizon through the fog for the price of a
+## multimesh. Thirteen rows a side, out to `WOOD_EDGE`: the trail is a wood now,
+## not a treeline, and the mountains stand beyond it.
 static func _wood_rows() -> Array:
 	return [
 		{"offset": 3.2, "spacing": 8.0, "jitter": 0.8, "scale": Vector2(0.85, 1.25), "solid": true},
@@ -555,6 +591,18 @@ static func _wood_rows() -> Array:
 		{"offset": 11.5, "spacing": 10.5, "jitter": 3.4, "scale": Vector2(1.0, 1.5), "solid": false},
 		{"offset": 16.5, "spacing": 12.5, "jitter": 4.2, "scale": Vector2(1.05, 1.6), "solid": false},
 		{"offset": 22.0, "spacing": 14.5, "jitter": 5.0, "scale": Vector2(1.1, 1.75), "solid": false},
+		{"offset": 28.0, "spacing": 16.0, "jitter": 5.4, "scale": Vector2(1.1, 1.8), "solid": false},
+		{"offset": 35.0, "spacing": 18.0, "jitter": 6.0, "scale": Vector2(1.15, 1.9), "solid": false},
+		{"offset": 43.0, "spacing": 24.0, "jitter": 6.4, "scale": Vector2(1.15, 2.0), "solid": false},
+		{"offset": 52.0, "spacing": 28.0, "jitter": 6.8, "scale": Vector2(1.2, 2.1), "solid": false},
+		{"offset": 62.0, "spacing": 32.0, "jitter": 7.0, "scale": Vector2(1.2, 2.2), "solid": false},
+		{"offset": 73.0, "spacing": 36.0, "jitter": 7.4, "scale": Vector2(1.25, 2.3), "solid": false},
+		{"offset": 85.0, "spacing": 40.0, "jitter": 7.8, "scale": Vector2(1.3, 2.4), "solid": false},
+		# The rim's skirt: a sparse, oversized treeline at the toe of the mountain
+		# face, which is the last thing the fog lets through.
+		{"offset": 100.0, "spacing": 55.0, "jitter": 7.0, "scale": Vector2(1.25, 2.1), "solid": false},
+		{"offset": 125.0, "spacing": 62.0, "jitter": 7.0, "scale": Vector2(1.3, 2.2), "solid": false},
+		{"offset": 148.0, "spacing": 68.0, "jitter": 6.5, "scale": Vector2(1.25, 2.1), "solid": false},
 	]
 
 
@@ -562,6 +610,10 @@ static func _wood_rows() -> Array:
 ## Trees stand *in* the walked band - that is the point of it - and the only rule
 ## they obey is that no trunk a body can walk into reaches inside `CLEAR_HALF` of
 ## the centre line.
+##
+## The near rows and the deep rows are batched separately: everything past
+## `DEEP_ROW_MIN` is fogged out long before its cell edge, so it pays for a 192 m
+## multimesh instead of the near wood's 96 m one.
 static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 	var group := _group(root, "Trees")
 	var rng := RandomNumberGenerator.new()
@@ -576,15 +628,19 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 			records.append({
 				"variant": built[index], "species": species,
 				"trunks": [] as Array[Dictionary], "leaves": [] as Array[Dictionary],
+				"deep_trunks": [] as Array[Dictionary],
+				"deep_leaves": [] as Array[Dictionary],
 			})
 	if records.is_empty():
 		return
 	var planted := 0
 	var solid_trees := 0
+	var deep_trees := 0
 	for row in _wood_rows():
 		var offset := float(row["offset"])
 		var spacing := float(row["spacing"])
 		var jitter := float(row["jitter"])
+		var deep := offset >= DEEP_ROW_MIN
 		for side in [-1.0, 1.0]:
 			var at := rng.randf_range(0.0, spacing)
 			while at < path.total:
@@ -601,27 +657,33 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 				var trunk_height := maxf(1.4, tree_height * float(trunk_spec.y) * 0.95)
 				var trunk_radius := maxf(0.18, tree_height * float(trunk_spec.x) * 1.04)
 				at += spacing * rng.randf_range(0.82, 1.24)
-				# The way stays clear: a trunk whose bark would reach inside the
-				# walked line is not planted at all. That is the whole reason the
-				# route is passable with the walls gone.
-				if path.distance_to(Vector2(ground_point.x, ground_point.z)) - trunk_radius < CLEAR_HALF:
+				# The way stays clear, and the wood stops at its own edge: a trunk
+				# whose bark would reach inside the walked line is not planted at
+				# all, and nothing stands out in the rim's open ground.
+				var lateral := path.distance_to(Vector2(ground_point.x, ground_point.z))
+				if lateral > WOOD_EDGE or lateral - trunk_radius < CLEAR_HALF:
 					continue
 				var point := TerrainScript.grounded(Vector3(ground_point.x, 0.0, ground_point.z))
 				var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(Vector3.ONE * scale_at)
 				var xform := Transform3D(basis, point)
 				var tints: Array = species.get("tints", [])
-				(record["trunks"] as Array[Dictionary]).append({
+				var trunk_bucket: Array = record["deep_trunks"] if deep else record["trunks"]
+				var leaf_bucket: Array = record["deep_leaves"] if deep else record["leaves"]
+				(trunk_bucket as Array[Dictionary]).append({
 					"transform": xform,
 					"color": _pick(species.get("bark_tints", []), rng, Color.WHITE),
 				})
 				if variant.get("leaves") != null and not tints.is_empty():
-					(record["leaves"] as Array[Dictionary]).append({
+					(leaf_bucket as Array[Dictionary]).append({
 						"transform": xform,
 						"color": _pick(tints, rng, Color.WHITE),
 					})
 				if bool(row["solid"]):
 					_trunk_collider(root.solids, point, trunk_radius, trunk_height)
+					root.trunks.append({"at": Vector2(point.x, point.z), "radius": trunk_radius})
 					solid_trees += 1
+				if deep:
+					deep_trees += 1
 				planted += 1
 	var batch_index := 0
 	for record in records:
@@ -634,8 +696,17 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 				TextureLibrary.foliage_material_tuned(String(variant["leaves_texture"]),
 					variant.get("wind", Vector2(0.08, 1.0))),
 				record["leaves"], TREE_CHUNK, {"cast_shadow": true})
+		WorldScatter.batch(group, "DeepTrunk_%d" % batch_index, variant["trunk"],
+			TextureLibrary.bark_material(String(variant["bark"])), record["deep_trunks"],
+			DEEP_TREE_CHUNK, {"cast_shadow": true})
+		if variant.get("leaves") != null and not (record["deep_leaves"] as Array).is_empty():
+			WorldScatter.batch(group, "DeepLeaves_%d" % batch_index, variant["leaves"],
+				TextureLibrary.foliage_material_tuned(String(variant["leaves_texture"]),
+					variant.get("wind", Vector2(0.08, 1.0))),
+				record["deep_leaves"], DEEP_TREE_CHUNK, {"cast_shadow": true})
 		batch_index += 1
 	root.stats["trees"] = planted
+	root.stats["deep_trees"] = deep_trees
 	root.stats["solid_trees"] = solid_trees
 
 
@@ -660,7 +731,7 @@ static func _build_bushes(root: Root, style: WorldStyle, path: Path) -> void:
 		var at := 0.0
 		while at < path.total:
 			for side in [-1.0, 1.0]:
-				if rng.randf() > 0.68:
+				if rng.randf() > 0.88:
 					continue
 				# Brush stands in the walked band too, right up to the edge of the
 				# clear line: nothing here has a collider, so it can.
@@ -668,16 +739,34 @@ static func _build_bushes(root: Root, style: WorldStyle, path: Path) -> void:
 					side * rng.randf_range(CLEAR_HALF + 0.3, VERGE))
 				var scale_at := rng.randf_range(0.75, 1.55)
 				var slot := rng.randi_range(0, variants.size() - 1)
+				# The swamp's brush is thicker and near-black: standing water and
+				# silt, not the wood's dry verge.
+				var wet := TerrainScript.swamp_weight_at(point.x, point.z)
+				var shade := 1.0 - 0.45 * wet
 				(buckets[slot] as Array[Dictionary]).append({
 					"transform": Transform3D(
 						Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(
 							Vector3(scale_at, scale_at * rng.randf_range(0.8, 1.2), scale_at)),
 						TerrainScript.grounded(Vector3(point.x, 0.0, point.z))),
-					"color": Color(rng.randf_range(0.62, 0.86), rng.randf_range(0.66, 0.9),
-						rng.randf_range(0.58, 0.82), 1.0),
+					"color": Color(rng.randf_range(0.62, 0.86) * shade,
+						rng.randf_range(0.66, 0.9) * shade,
+						rng.randf_range(0.58, 0.82) * shade, 1.0),
 				})
 				placed += 1
-			at += rng.randf_range(2.8, 4.4)
+				if wet > 0.12 and rng.randf() < 0.8:
+					# A second clump in the same bucket: the hollow is choked with
+					# growth, for no extra batch.
+					var moss := rng.randf_range(0.42, 0.62) * shade
+					(buckets[slot] as Array[Dictionary]).append({
+						"transform": Transform3D(
+							Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled(
+								Vector3(scale_at * 0.8, scale_at * rng.randf_range(1.0, 1.5),
+									scale_at * 0.8)),
+							TerrainScript.grounded(Vector3(point.x, 0.0, point.z))),
+						"color": Color(moss, moss * 1.18, moss * 0.9, 1.0),
+					})
+					placed += 1
+			at += rng.randf_range(2.2, 3.6)
 		for slot in variants.size():
 			WorldScatter.batch(group, "Bush_%d_%d" % [atlas_index, slot], variants[slot]["mesh"],
 				TextureLibrary.foliage_material_tuned(String(atlas), wind), buckets[slot],
@@ -717,7 +806,11 @@ static func _build_grass(root: Root, style: WorldStyle, path: Path) -> void:
 		var ground := func(point: Vector2) -> Vector3:
 			return Vector3(point.x - centre.x, TerrainScript.height_at(point.x, point.y),
 				point.y - centre.z)
-		var reserved := func(point: Vector2) -> bool: return path.distance_to(point) > GRASS_BAND
+		# The verge has grass; the wet hollow does not - its own reeds are built
+		# with the swamp, and lawn clumps standing in water read wrong.
+		var reserved := func(point: Vector2) -> bool:
+			return path.distance_to(point) > GRASS_BAND or TerrainScript.swamp_weight_at(
+				point.x, point.y) > 0.30
 		var built: Dictionary = GrassField.build(host, style, ground, reserved, SEED + 401 + index * 17)
 		for key in counts.keys():
 			counts[key] = int(counts[key]) + int(built.get(key, 0))
@@ -817,6 +910,231 @@ static func _torch(group: Node3D, mats: Dictionary, iron: Dictionary, at: Vector
 	light.flicker = 0.26
 	light.shadow_enabled = false
 	host.add_child(light)
+
+
+# --- the swamp -------------------------------------------------------------
+
+## The one wet hollow in the wood, laid on `terrain.gd`'s basin: a flat water
+## plane on the muddy floor, reeds and dead snags at the waterline, roots running
+## out of the bank, and a low mist that drifts over it. The water starts past the
+## torch line (`SWAMP_INNER` > 5.4 m), so the route's fire is never standing in
+## it, and its shader copy is darker than the world's ponds - this is the one part
+## of the trail a body wants a hand torch for.
+static func _build_swamp(root: Root, path: Path) -> void:
+	var region := TerrainScript.swamp_region()
+	if region.is_empty():
+		return
+	var group := _group(root, "Swamp")
+	root.swamp = region.duplicate()
+	var centre: Vector3 = region["centre"]
+	var water_y := float(region["water_y"])
+	var inner := float(region["inner"])
+	var outer := float(region["outer"])
+	var half := float(region["half_length"])
+	var side := float(region.get("side", -1.0))
+	var arc := _nearest_arc(path, centre)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = SEED + 61
+	var mats: Dictionary = CampKit.materials()
+	# --- the water
+	var water := _swamp_water_mesh(path, arc, water_y, inner + 0.7, outer - 0.9, half, side)
+	var plane := MeshInstance3D.new()
+	plane.name = "Water"
+	plane.mesh = water
+	var material := TextureLibrary.water_material().duplicate() as ShaderMaterial
+	material.set_shader_parameter("shallow_color", Color(0.12, 0.17, 0.14))
+	material.set_shader_parameter("deep_color", Color(0.035, 0.065, 0.055))
+	material.set_shader_parameter("sky_tint", Color(0.26, 0.32, 0.34))
+	material.set_shader_parameter("ripple_strength", 0.20)
+	material.set_shader_parameter("base_alpha", 0.92)
+	plane.material_override = material
+	plane.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	group.add_child(plane)
+	# --- reeds and sedge at the waterline
+	var reeds := CampKit.Merged.new()
+	var sedge := CampKit.Merged.new()
+	var reed_count := 0
+	for index in 170:
+		var along := rng.randf_range(-half * 0.9, half * 0.9)
+		var lateral := inner + rng.randf_range(-0.4, 5.6)
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		var point := (frame["position"] as Vector3) \
+			+ (frame["right"] as Vector3) * side * lateral
+		var wet := TerrainScript.swamp_weight_at(point.x, point.z)
+		if wet < 0.05:
+			continue
+		var foot := TerrainScript.grounded(Vector3(point.x, -0.05, point.z))
+		var height := rng.randf_range(0.55, 1.55)
+		var lean := Vector3(rng.randf_range(-0.16, 0.16), height,
+			rng.randf_range(-0.16, 0.16))
+		CampKit.add_beam(reeds if index % 3 != 0 else sedge, foot, foot + lean,
+			rng.randf_range(0.010, 0.024), mats["moss"] if index % 4 != 0 else mats["thatch_dark"],
+			3, 0.004)
+		reed_count += 1
+	reeds.commit(group, "Reeds")
+	sedge.commit(group, "Sedge")
+	# --- dead snags standing in the water
+	var snags := CampKit.Merged.new()
+	for index in 5:
+		var along := rng.randf_range(-half * 0.7, half * 0.7)
+		var lateral := inner + rng.randf_range(2.4, 9.0)
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		var point := (frame["position"] as Vector3) \
+			+ (frame["right"] as Vector3) * side * lateral
+		var foot := TerrainScript.grounded(Vector3(point.x, -0.2, point.z))
+		var top := foot + Vector3(rng.randf_range(-0.8, 0.8), rng.randf_range(3.2, 6.4),
+			rng.randf_range(-0.8, 0.8))
+		CampKit.add_beam(snags, foot, top, rng.randf_range(0.16, 0.30), mats["bark"], 6, 0.05)
+		for stub in 2:
+			var at := foot.lerp(top, rng.randf_range(0.45, 0.85))
+			var out := Vector3(rng.randf_range(-1.3, 1.3), rng.randf_range(0.2, 1.1),
+				rng.randf_range(-1.3, 1.3))
+			CampKit.add_beam(snags, at, at + out, rng.randf_range(0.05, 0.12), mats["bark"], 4, 0.02)
+	snags.commit(group, "Snags")
+	# --- roots crawling out of the bank, and mud where the water has drawn back
+	var roots := CampKit.Merged.new()
+	for index in 22:
+		var along := rng.randf_range(-half * 0.95, half * 0.95)
+		var lateral := inner + rng.randf_range(-1.2, 2.8)
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		var point := (frame["position"] as Vector3) \
+			+ (frame["right"] as Vector3) * side * lateral
+		var foot := TerrainScript.grounded(Vector3(point.x, -0.12, point.z))
+		var bend := foot + Vector3(rng.randf_range(-0.7, 0.7), rng.randf_range(0.05, 0.4),
+			rng.randf_range(-0.7, 0.7))
+		CampKit.add_beam(roots, foot, bend, rng.randf_range(0.05, 0.10), mats["bark"], 4, 0.02)
+		var tip := bend + Vector3(rng.randf_range(-1.6, 1.6), rng.randf_range(-0.25, 0.05),
+			rng.randf_range(-1.6, 1.6))
+		CampKit.add_beam(roots, bend, tip, rng.randf_range(0.025, 0.05), mats["bark"], 3, 0.01)
+	roots.commit(group, "Roots")
+	var mud := CampKit.Merged.new()
+	var mud_material := Geo.material(Color(0.10, 0.095, 0.075), 0.0, 0.98)
+	for index in 40:
+		var along := rng.randf_range(-half * 0.95, half * 0.95)
+		var lateral := inner + rng.randf_range(-1.4, 4.4)
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		var point := (frame["position"] as Vector3) \
+			+ (frame["right"] as Vector3) * side * lateral
+		var at := TerrainScript.grounded(Vector3(point.x, 0.03, point.z))
+		var saved := mud.push(Transform3D(
+			TerrainScript.ground_basis(point.x, point.z, rng.randf_range(0.0, TAU)).scaled(
+				Vector3(rng.randf_range(0.6, 2.0), 1.0, rng.randf_range(0.9, 2.6))), at))
+		CampKit.add_ball(mud, 1.0, Vector3.ZERO, mud_material, Vector3(1.0, 0.02, 1.0), 9, 3)
+		mud.group = saved
+	mud.commit(group, "Mud", false)
+	# --- mist
+	_swamp_mist(group, path, arc, water_y, inner, outer, half, side)
+	root.stats["swamp"] = 1
+	root.stats["swamp_reeds"] = reed_count
+
+
+## The water's surface: a strip following the lane's own bend, from the torch
+## line out to the far bank, at one flat level. The shader is world-space, so no
+## UVs are needed; the mesh is two long ribbons rather than a box so it follows
+## the route instead of one tangent.
+static func _swamp_water_mesh(path: Path, arc: float, level: float, inner: float,
+		outer: float, half: float, side: float) -> ArrayMesh:
+	var rows := 16
+	var columns := [inner, (inner + outer) * 0.5, outer]
+	var vertices := PackedVector3Array()
+	var indices := PackedInt32Array()
+	for row in rows + 1:
+		var along := lerpf(-half * 0.94, half * 0.94, float(row) / float(rows))
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		for lateral in columns:
+			var point: Vector3 = (frame["position"] as Vector3) \
+				+ (frame["right"] as Vector3) * side * float(lateral)
+			vertices.append(Vector3(point.x, level, point.z))
+	var width := columns.size()
+	for row in rows:
+		for column in width - 1:
+			var a := row * width + column
+			var b := a + 1
+			var c := a + width
+			var d := c + 1
+			indices.append(a)
+			indices.append(b)
+			indices.append(c)
+			indices.append(b)
+			indices.append(d)
+			indices.append(c)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+## A handful of soft billboards over the water, drifting on their own clock. Low
+## and thin, so the far bank still closes and the body walking it keeps a horizon.
+static func _swamp_mist(group: Node3D, path: Path, arc: float, level: float, inner: float,
+		outer: float, half: float, side: float) -> void:
+	var mist := SwampMist.new()
+	mist.name = "Mist"
+	group.add_child(mist)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.52, 0.58, 0.60, 0.16)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.billboard_keep_scale = true
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var quad := QuadMesh.new()
+	quad.size = Vector2(11.0, 2.6)
+	for index in 7:
+		var along := lerpf(-half * 0.8, half * 0.8, float(index) / 6.0)
+		var lateral := inner + 3.0 + float(index % 3) * 4.2
+		var frame := path.sample(clampf(arc + along, 0.0, path.total))
+		var point: Vector3 = (frame["position"] as Vector3) \
+			+ (frame["right"] as Vector3) * side * lateral
+		var card := MeshInstance3D.new()
+		card.name = "Mist%d" % index
+		card.mesh = quad
+		card.material_override = material
+		card.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		card.position = Vector3(point.x, level + 0.85, point.z)
+		mist.add_child(card)
+		mist.bases.append(card.position)
+	mist.speed = 0.37
+
+
+## One low bank of mist: every card drifts a little about its own anchor and
+## breathes in height, which is enough for a hollow that never had wind in it.
+class SwampMist extends Node3D:
+	var bases: Array[Vector3] = []
+	var speed := 0.35
+	var _time := 0.0
+
+	func _process(delta: float) -> void:
+		_time += delta
+		var count := mini(bases.size(), get_child_count())
+		for index in count:
+			var card := get_child(index) as Node3D
+			if card == null:
+				continue
+			var base: Vector3 = bases[index]
+			card.position = base + Vector3(
+				sin(_time * speed * 0.6 + float(index) * 1.3) * 0.9,
+				sin(_time * speed + float(index) * 0.7) * 0.10,
+				cos(_time * speed * 0.45 + float(index) * 0.9) * 0.5)
+
+
+## The lane's arc distance closest to a world point, so the swamp's props follow
+## the route's own curve rather than the region's single tangent.
+static func _nearest_arc(path: Path, point: Vector3) -> float:
+	var best := 0.0
+	var best_distance := INF
+	for index in 120:
+		var mark := path.total * float(index) / 119.0
+		var at := path.sample(mark)
+		var position: Vector3 = at["position"]
+		var distance := Vector2(position.x - point.x, position.z - point.z).length()
+		if distance < best_distance:
+			best_distance = distance
+			best = mark
+	return best
 
 
 ## The town's gate at the end of the lane, wide enough to frame the whole

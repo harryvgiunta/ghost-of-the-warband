@@ -341,10 +341,12 @@ These landed on the same world without a second rulebook. Each has one owner:
 - **The three keepers are one board.** `VendorMenu` is re-pointed per seat
   (`vendor_orla`/`vendor_brann`/`vendor_vey`); `Warband.buy_gear` buys into the
   shared stash and `Warband.sell_gear` sells one pooled spare out of it for 60%.
-- **The wolves are the base mob.** `WarbandWilderness` places seven `enemy.gd`
-  **kind 0** briars 122-252 m past the camp mouth — no new class, no stat table —
-  gives them pack patches through `MobWander`, and parks walked-past ones with its
-  own `MobCuller`.
+- **The wolves are the base mob.** `WarbandWilderness` places eight `enemy.gd`
+  **kind 0** briars in exactly two deep-wood packs of four — no new class, no stat
+  table — gives each pack one `MobWander` territory, and parks walked-past ones
+  with its own `MobCuller`. There are no wolves on the lane or the camp corridor:
+  the packs live 30-50 m off the route, beyond the wolves' own sight of it and
+  hundreds of metres apart, so a body only meets one by leaving the trail.
 - **Co-op is one `attach_world` on the existing session.**
   `GameFlow.host_campaign`/`join_campaign` reuse `WarbandSession`; the host owns
   the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
@@ -352,6 +354,47 @@ These landed on the same world without a second rulebook. Each has one owner:
   guest writes no checkpoint or save of its own, dismisses the camp lesson and
   runs no squad AI. The lobby's mode row defaults to campaign co-op; the arena
   bout remains selectable.
+
+### The band looks like a band
+
+Eight mercenaries fielded on one skeleton used to be eight of the same man. A
+mercenary's **look** is now a pure function of their id - `WarbandLooks.profile_for`
+(`scripts/warband/warband_looks.gd`) - so every peer, every reload and every save
+dresses him identically without a byte on the wire and without a field in the
+save. The numbers and the labels live in
+`assets/characters/warband/ironwood_warband_looks.json`, written by
+`python tools/prepare_warband_looks.py` from geometry and textures the repository
+already ships (no download, no Blender):
+
+| Where the look comes from | What it changes |
+| --- | --- |
+| `ironwood_faces.glb` | one of eight faces: an analytic warp of the Ranger head (jaw, chin, cheekbones, nose, brow ridge, eye spacing, mouth, lips), windows confined to the *front* of the face so every helmet and hood still fits. Brows follow the same field; each eyeball is translated rigidly |
+| `ironwood_hair.glb` | one of eight cuts (bare, buzz, crop, fringe, widow, **afro**, mop, bob) plus one of five beards (none, moustache, stubble, chinstrap, full). A short cut is a **thin shell of the skull's own triangles** - a buzz cut has to be the man's head with colour on it, and a smooth proxy bulges where a forehead recedes - and the **afro** is the one lofted mass: rings from a crown disc down to its own measured hairline, swelling to a cloud and settling flush onto the skin, so the volume is sealed and there is no rim to gape. A beard is a sheet over the jaw cut by its **own alpha design** - a cheek line that leaves the cheek clear, an arched moustache, an open mouth and a jawline bottom edge - so the silhouette is a texel and not a triangle edge. Everything binds rigidly to `Head` |
+| `warband_skin_basecolor.png`, `warband_shirt_basecolor.png`, `warband_shorts_basecolor.png` | the *veiled* maps: authored detail divided by the colour that carried it, so one texture serves every tone and the tone is one `albedo_color` |
+| `warband_eye_<n>_basecolor.png` | one of five iris tones |
+| `WarbandLooks.HEIGHT_MIN..HEIGHT_MAX` | the rig's uniform scale, `0.86`..`1.14` of the authored 1.87 m |
+
+Palette entry 0 of skin, shirt and shorts is the *measured base* of the shipped
+texture, so a mercenary wearing it looks exactly as the warband shipped; the
+seven entries after it are the variation. Faces, haircuts and the three colour
+palettes **step** with the id at four different offsets, so a full deployment of
+eight fields eight different faces, cuts, skins, shirts and pairs of shorts; the
+heights, beards and irises are hashed so they do not track any of those columns.
+
+What a look is *not* allowed to change: health, stamina, the capsule, reach,
+speeds, or anything else the warband's contract fixes. A height is presentation -
+`Archer` bakes it into the model before the rig measures its own legs, so the
+authored foot contact survives at both ends of the band, and `ArenaActor`,
+`PossessionCamera`, the name plate, the chest aim point and the head hit zone all
+read the same scale. A helmet hides the hair rather than the hair poking through
+it, and a body with no look at all - the frontier ranger, an arena fighter, every
+mob rig - is untouched by any of this.
+
+`tests/warband_appearance_regression.gd` holds the contract (determinism,
+distinctness across the deployment cap, every named piece present in the assets,
+the rig applying them, hair under a helmet, head zones scaled);
+`playtest/warband_lookbook.gd` and `playtest/warband_band.gd` render the band for
+the eye.
 
 Short version of the latest tuning (all in the code, all covered by
 `tests/cage_escape_regression.gd`):
@@ -469,9 +512,12 @@ Short version of the latest tuning (all in the code, all covered by
 - **the weapon is carried low at a run**: `Archer.CARRY_DEGREES` (64) tips the
   held piece toward the floor as speed passes a jog (`_carry_blend`, eased at
   `CARRY_RATE`), and only then: a swing, a guard, a roll, a slide, a consumable or
-  cover all hold the authored grip. A two-hander shouldered into a sprint used to
-  reach through the head; `arm_clearance_regression.check_carry_clearance`
-  measures the shaft clearing the skull (0.10 m before, 0.35 m after);
+  cover all hold the authored grip. The pitch is applied about the **actor's own
+  right axis**, not the hand socket's local X: the hand rolls through a run, and a
+  local-X pitch turned a long piece out to the right as much as toward the dirt.
+  A two-hander shouldered into a sprint used to reach through the head;
+  `arm_clearance_regression.check_carry_clearance` measures the shaft clearing the
+  skull (0.10 m before, 0.35 m after);
 - **the squad stands off**: an ally closes to `STANDOFF` 1.45 m and no further,
   walks itself back out if the press carries it inside `MIN_GAP` 0.95 m, and jogs
   only past `RUN_GAP` 7 m. The old ladder walked to the mob's own origin on every
@@ -506,7 +552,15 @@ Short version of the latest tuning (all in the code, all covered by
   flat and blended into the slope; the walk between them is not. There is no lane:
   the way through the wood is a faint worn line marked by a **pair of torches every
   12 m** (152 lights), with trunks standing in the walked band and a 3.1 m clear
-  line down its middle, so a body always has 2.5 m to pass through.
+  line down its middle, so a body always has 2.5 m to pass through;
+- the valley is **closed and deep**: thirteen tree rows a side run out to
+  `WOOD_EDGE` 156 m, and after normalisation the heightfield raises a noise-varied
+  34-58 m mountain rim along all four edges. The face is steeper than the 46-degree
+  `floor_max_angle`, so the trimesh itself is the boundary - no invisible wall and
+  no extra collider. A shallow **swamp** is cut into the wood at `SWAMP_FRACTION`
+  0.515 of the lane, on one side, 6.4-26 m off the centre line: a sunken bowl with
+  a water plane on the existing water shader, reeds, snags and mist, clear of the
+  torches so the route itself is unchanged;
 
 ### Running the tests
 

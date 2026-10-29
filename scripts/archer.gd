@@ -23,6 +23,44 @@ const ItemPassives = preload("res://scripts/item_passives.gd")
 const EnergyShield = preload("res://scripts/energy_shield.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
+## The warband's authored looks (`WarbandLooks`): eight faces and the hair and
+## beards grown off the same head. They live here because the rig is what swaps
+## them, and a body that never asks for a look (the frontier ranger, an arena
+## fighter, a mob) never instantiates one.
+const LOOKS_FACES = preload("res://assets/characters/warband/ironwood_faces.glb")
+const LOOKS_HAIR = preload("res://assets/characters/warband/ironwood_hair.glb")
+const LOOKS_SKIN = preload("res://assets/characters/warband/warband_skin_basecolor.png")
+const LOOKS_SHIRT = preload("res://assets/characters/warband/warband_shirt_basecolor.png")
+const LOOKS_SHORTS = preload("res://assets/characters/warband/warband_shorts_basecolor.png")
+## The five authored iris tones, in the order `WarbandLooks` indexes them.
+const LOOKS_EYES = [
+	preload("res://assets/characters/warband/warband_eye_0_basecolor.png"),
+	preload("res://assets/characters/warband/warband_eye_1_basecolor.png"),
+	preload("res://assets/characters/warband/warband_eye_2_basecolor.png"),
+	preload("res://assets/characters/warband/warband_eye_3_basecolor.png"),
+	preload("res://assets/characters/warband/warband_eye_4_basecolor.png"),
+]
+## Which surface on the body answers to which tone of the look, and which veiled
+## map its tint multiplies. A surface left out of this table - forged plate, mail,
+## steel, an eye under a helmet - keeps the artist's own colour, because a
+## mercenary buys their armour, not their skin.
+const LOOKS_SURFACES := {
+	"Naked_Skin": {"tint": "skin", "texture": LOOKS_SKIN},
+	"Naked_Shirt": {"tint": "shirt", "texture": LOOKS_SHIRT},
+	"Naked_Shorts": {"tint": "shorts", "texture": LOOKS_SHORTS},
+	# The shipped atlases that a kit can still put on screen: the leather outfit's
+	# bare arms and the head's own skin. Tinted, never retextured, so their UVs
+	# stay the artist's.
+	"MI_Regular_Male": {"tint": "skin"},
+	"MI_Superhero_Male": {"tint": "skin"},
+	"MI_Hair_1": {"tint": "hair_tone"},
+	"Warband_Skin": {"tint": "skin"},
+	"Warband_Hair": {"tint": "hair_tone"},
+	"Warband_Hair_Mass": {"tint": "hair_tone"},
+	# A beard catches more light than a head of hair: the same tone at full weight
+	# reads as paint on the jaw.
+	"Warband_Beard": {"tint": "hair_tone", "lighten": 1.25},
+}
 const BOW_DATA = [
 	{"name":"Shortbow", "subtitle":"Quick ashwood scout bow", "draw_seconds":1.0, "speed":66.0, "length":1.0},
 	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":84.0, "length":1.4},
@@ -248,6 +286,17 @@ var _release_contact := Vector3.ZERO
 var _release_bow_rotation := Quaternion.IDENTITY
 var last_arrow_visual_origin := Vector3.ZERO
 var _model: Node3D
+## A per-body look, as `WarbandLooks.profile_for()` builds it. Empty is the
+## shipped ranger: every other rig in the game leaves it alone.
+##
+## A body sets this *before* the rig enters the tree, because the height it
+## carries is baked into the model before the rig measures its own legs and
+## soles - the same measurements that keep feet on the ground.
+var appearance: Dictionary = {}
+## The height that was baked in, so head hitboxes and reported heights agree.
+var _looks_height := 1.0
+var _looks_face: Node3D
+var _looks_hair: Node3D
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
 var _swords: Array[Node3D] = []
@@ -334,7 +383,13 @@ func _ready() -> void:
 	name = "Archer"
 	_model = CHARACTER.instantiate()
 	add_child(_model)
-	_model.basis = Basis(Vector3.UP,PI)
+	# Height is baked into the model, not the rig node: the rig's own transform is
+	# rewritten by turns and teleports, and everything the rig carries - weapons,
+	# the quiver, the shield - is placed from *bone* transforms, so a scale here
+	# takes the body and its kit together and leaves the capsule alone.
+	if not appearance.is_empty():
+		_looks_height = clampf(float(appearance.get("height", 1.0)), 0.80, 1.20)
+	_model.basis = _model_basis(PI)
 	skeleton = _find_node_of_type(_model, "Skeleton3D") as Skeleton3D
 	_player = _find_node_of_type(_model, "AnimationPlayer") as AnimationPlayer
 	assert(skeleton != null and _player != null, "The ranger asset must contain its rig and authored animation library")
@@ -433,6 +488,7 @@ func _ready() -> void:
 	_build_equipment()
 	_build_consumable_props()
 	_built = true
+	_attach_looks()
 	set_bow(bow_index)
 	set_sword(sword_index)
 	_apply_armor_visibility()
@@ -663,6 +719,137 @@ func _attach_armor_file(set_name: String, spec: Dictionary) -> void:
 		piece.visible = false
 		if _armor_meshes.has(slot):
 			_armor_meshes[slot][set_index].append(piece)
+
+
+## Swap the shipped head and surfaces for one mercenary's look.
+##
+## Presentation only: the ranger's head, brows and eyes are replaced by a warp of
+## themselves, hair and a beard are grafted on, and the handful of skin and cloth
+## surfaces a warband actually shows are re-tinted. A body that was never given a
+## look returns at once, which is why the frontier, the arena fighters and every
+## mob rig keep the body they shipped with.
+func _attach_looks() -> void:
+	if appearance.is_empty() or _model == null or skeleton == null:
+		return
+	# The shipped head is replaced, never drawn beside its variant: the two are the
+	# same surface at different proportions and would z-fight across the whole face.
+	for name in ["Ranger_Head_SuperHero_Male", "Ranger_Head_Eyebrows", "Ranger_Head_Eyes"]:
+		var shipped := _model.find_child(name, true, false)
+		if shipped is MeshInstance3D:
+			(shipped as MeshInstance3D).visible = false
+	var face_name := str(appearance.get("face_name", ""))
+	if not face_name.is_empty() and LOOKS_FACES != null:
+		_looks_face = _looks_instance(LOOKS_FACES)
+		for node in _looks_face.find_children("*", "MeshInstance3D", true, false):
+			(node as MeshInstance3D).visible = str(node.name).begins_with(face_name + "_")
+	var hair_name := str(appearance.get("hair_name", ""))
+	var beard_name := str(appearance.get("beard_name", ""))
+	if (not hair_name.is_empty() or not beard_name.is_empty()) and LOOKS_HAIR != null:
+		_looks_hair = _looks_instance(LOOKS_HAIR)
+		for node in _looks_hair.find_children("*", "MeshInstance3D", true, false):
+			var piece := str(node.name)
+			(node as MeshInstance3D).visible = (not hair_name.is_empty() and piece == hair_name) \
+				or (not beard_name.is_empty() and piece == beard_name)
+	_looks_tint()
+	_looks_pick_eyes()
+	if _looks_hair != null:
+		# Hair belongs under a helmet, not through it.
+		_looks_hair.visible = not _slot_covered("head")
+
+
+## One authored look file hung on the body, every skin repointed at the live
+## skeleton - the same hand-off the armour sets use - and every piece parked
+## hidden until the caller names the ones this body wears.
+func _looks_instance(scene: PackedScene) -> Node3D:
+	var instance := scene.instantiate() as Node3D
+	_model.add_child(instance)
+	for node in instance.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		mesh.skeleton = mesh.get_path_to(skeleton)
+		# Hair casts no shadow: a sealed hair mass shadowing the skull it sits on
+		# is shadow acne, and at this scale nobody misses the cast.
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mesh.visible = false
+	return instance
+
+
+## Re-tint the surfaces a look owns. Materials are duplicated per body so two
+## mercenaries never share a shirt, and one tone is one `albedo_color`: the veiled
+## map carries the weave, the pores and the grime, the colour carries the person.
+func _looks_tint() -> void:
+	var tinted_by := {}
+	for node in _model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if mesh.mesh == null:
+			continue
+		for surface in mesh.mesh.get_surface_count():
+			var material := mesh.get_active_material(surface)
+			if material == null:
+				continue
+			var key := str(material.resource_name)
+			if not LOOKS_SURFACES.has(key):
+				continue
+			var spec: Dictionary = LOOKS_SURFACES[key]
+			var tone := str(appearance.get(str(spec.get("tint", "")), ""))
+			if tone.is_empty():
+				continue
+			var cache_key := key + "|" + tone
+			if not tinted_by.has(cache_key):
+				tinted_by[cache_key] = _looks_tinted(material, spec, tone, key)
+			mesh.set_surface_override_material(surface, tinted_by[cache_key])
+
+
+## A tinted copy of one authored material. The veiled map replaces the authored
+## albedo where the look ships one; the tone is an sRGB palette entry converted
+## once, because `albedo_color` multiplies in linear space.
+func _looks_tinted(material: Material, spec: Dictionary, tone: String,
+		key: String = "") -> Material:
+	var copy := material.duplicate() as BaseMaterial3D
+	if copy == null:
+		return material
+	if spec.has("texture"):
+		copy.albedo_texture = spec["texture"]
+	if key.begins_with("Warband_Hair") or key.begins_with("Warband_Beard"):
+		# Hair sits a few millimetres off the skull it covers, so the skull's own
+		# shadow rakes across it as a black band along the hairline. Hair does not
+		# receive shadows in any engine where this crops up; neither does ours.
+		copy.disable_receive_shadows = true
+	var colour := Color.html(tone).srgb_to_linear()
+	colour = (colour * float(spec.get("lighten", 1.0))).clamp()
+	copy.albedo_color = colour
+	return copy
+
+
+## The eyes are one authored mesh with five authored iris tones on disk; a body
+## takes its own instead of tinting a brown iris blue.
+func _looks_pick_eyes() -> void:
+	var face_name := str(appearance.get("face_name", ""))
+	var eyes := _looks_face.find_child(face_name + "_Eyes", true, false) as MeshInstance3D
+	if eyes == null:
+		return
+	var base := eyes.get_active_material(0)
+	if base == null:
+		return
+	var index := clampi(int(appearance.get("eye", 0)), 0, LOOKS_EYES.size() - 1)
+	var material := base.duplicate() as BaseMaterial3D
+	if material == null:
+		return
+	material.albedo_texture = LOOKS_EYES[index]
+	eyes.set_surface_override_material(0, material)
+
+
+## Height relative to the authored rig; 1.0 for a body with no look of its own.
+func body_scale() -> float:
+	return _looks_height
+
+
+## The model's basis for a stance yaw. Every write to `_model.basis` has to go
+## through here: the stance re-writes that basis several times a frame, and a
+## bare `Basis(Vector3.UP, yaw)` would stand a 1.6 m mercenary back up at the
+## authored 1.87 m on his first archery frame.
+func _model_basis(yaw: float) -> Basis:
+	return Basis(Vector3.UP, yaw).scaled(Vector3.ONE * _looks_height)
+
 
 func _build_consumable_props() -> void:
 	var cloth := Geo.material(Color("ddd6c2"))
@@ -1205,6 +1392,9 @@ func _apply_armor_visibility() -> void:
 			for node: Node3D in _armor_meshes[slot][set_index]:
 				node.visible = set_index == worn \
 					or (set_index == bare and bool(skin_on[slot]))
+	# A cut grown off the skull belongs under a helmet, not through one.
+	if _looks_hair != null:
+		_looks_hair.visible = not _slot_covered("head")
 
 ## True when the slot wears a set that draws its own piece there - the piece that
 ## covers the skin the naked layer would otherwise leave bare.
@@ -1964,7 +2154,9 @@ func head_hitbox_center() -> Vector3:
 	return _bone_world(_bones.Head) * Vector3(0, Hitbox.HUMAN_HEAD_OFFSET, 0)
 
 func head_hit_profile() -> Vector2:
-	return Vector2(Hitbox.HUMAN_HEAD_RADIUS, Hitbox.HUMAN_HEAD_HALF_HEIGHT)
+	# A tall body's head is a tall body's head: the authored zone is scaled with
+	# the surface that draws it, so an arrow stops where the skull is.
+	return Vector2(Hitbox.HUMAN_HEAD_RADIUS, Hitbox.HUMAN_HEAD_HALF_HEIGHT) * _looks_height
 
 func get_joint_positions() -> Dictionary:
 	var result: Dictionary = {}
@@ -2264,7 +2456,7 @@ func _update_pose(delta: float) -> void:
 			global_basis = Basis(Vector3.UP,atan2(-aim_offset.x,-aim_offset.z))
 	# These nodes are rotation-only. Repeated Euler setters preserve extracted
 	# scale and accumulate float drift until weapon/foot slerps cease to be rotations.
-	_model.basis = Basis(Vector3.UP,PI+STANCE_YAW*archery+_ability_spin_yaw())
+	_model.basis = _model_basis(PI+STANCE_YAW*archery+_ability_spin_yaw())
 	_model.position = Vector3.ZERO
 	var clip := ("Sword_Idle_OneHand" if weapon in ["sword","dagger"] or weapon == "dual" else "Idle_Loop")
 	if weapon == "sword" and (sword_index == 2 or _staff_shown()):
@@ -3341,6 +3533,23 @@ func _staff_mesh_offset() -> float:
 	var restore := smoothstep(duration*0.78,duration,time)
 	return lerpf(middle,0.0,slide*(1.0-restore))
 
+## The world socket of the off hand, for a prop that is not a weapon - a burning
+## brand. The grip point is the authored, mirrored off-hand grip in the left-hand
+## bone, so the fist closes around the piece exactly where a dagger's hilt would
+## sit; only the orientation is the actor's own upright, because a brand's flame
+## has to stand above the hand, not roll over with the wrist.
+func offhand_anchor() -> Transform3D:
+	if not _built or skeleton == null:
+		return global_transform
+	var grip := _bone_world(_arms[0][2]) * _sword_grip_left
+	var up := global_basis.y.normalized()
+	var right := global_basis.x.normalized()
+	var basis := Basis(right, up, right.cross(up).normalized())
+	# Cant the head a hand's width away from the body so the stick clears the hip
+	# and the flame does not sit in the shoulder line.
+	basis = basis * Basis(Vector3.BACK, deg_to_rad(10.0))
+	return Transform3D(basis, grip.origin)
+
 ## How far the carried piece is tipped at the dirt, in degrees, and how quickly a
 ## body settles into and out of the carry.
 const CARRY_DEGREES := 64.0
@@ -3358,10 +3567,18 @@ var _carry_blend := 0.0
 func _carry_socket(grip: Transform3D) -> Transform3D:
 	if _carry_blend <= 0.0001:
 		return grip
-	# The haft runs down the socket's own -Z, so a rotation about its +X with a
-	# negative angle pitches the blade toward the floor in front of the body.
-	return grip * Transform3D(
-		Basis(Vector3.RIGHT, deg_to_rad(-CARRY_DEGREES * _carry_blend)), Vector3.ZERO)
+	# Pitch about the actor's own right axis, not the socket's local X. The hand
+	# bone rolls through a run, so its X is not the body's: a post-multiplied
+	# local-X pitch tipped a long piece out to the right as much as at the dirt.
+	# Turn the socket's basis in actor space - its origin is the fist and does
+	# not move - so the tip stays in the sagittal plane and leans forward and
+	# down with the body instead of swinging sideways.
+	var right := global_basis.x
+	if right.length_squared() < 0.0001:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	var turn := Basis(right, deg_to_rad(-CARRY_DEGREES * _carry_blend))
+	return Transform3D(turn * grip.basis, grip.origin)
 
 
 ## Where the carry should be this frame: running only. A swing, a guard, a roll,

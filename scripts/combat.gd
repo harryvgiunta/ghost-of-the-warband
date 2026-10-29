@@ -601,8 +601,9 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	# that swings - the soul, an ally, a cultist, a bot in the yard - comes
 	# through here, so this is the one place a whoosh belongs. The hand matters:
 	# the off hand of a dual pair may be the dagger, and a dagger must not sound
-	# like the sword beside it.
-	SfxScript.swing(rig, _sound_point(), key)
+	# like the sword beside it. The variant matters too: a stab is a push, not
+	# an arc.
+	SfxScript.swing(rig, _sound_point(), key, requested)
 	return true
 
 
@@ -1150,9 +1151,10 @@ func _block_feedback(unit: Node, at: Vector3, parried: bool,
 		hand: String, reset_attacker: bool = true) -> void:
 	var defender_slot := int(unit.get("slot")) if unit.get("slot") != null else -1
 	defense_resolved.emit(defender_slot,at,parried)
-	# Steel met steel: the snap of a parry and the ring of a held block are the
-	# two halves of the same recording, split by how much weight the guard took.
-	SfxScript.defense(at, parried)
+	# Steel met steel - or wood, or a knife: the guard that took the blow says
+	# what it was made of, so the impact is heard as the shield the defender is
+	# actually holding rather than as one generic clash.
+	SfxScript.defense(at, parried, unit)
 	if not parried and reset_attacker:
 		# A held block knocks aside the swing that contacted it. A dual wielder's
 		# other hand keeps its own clock and can continue into the opening.

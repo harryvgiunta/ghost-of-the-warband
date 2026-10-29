@@ -29,6 +29,7 @@ const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const CharacterPreview = preload("res://scripts/character_preview.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const Looks = preload("res://scripts/warband/warband_looks.gd")
 
 const CREAM := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -753,6 +754,9 @@ func _refresh_preview() -> void:
 	}
 	var loadout := State.build_loadout(str(gear.get("main", "")), str(gear.get("off", "")),
 		armor, worn)
+	# The stage shows the mercenary being dressed, not a generic ranger: his own
+	# height, face, hair and colours, then his kit on top of them.
+	preview.set_appearance(Looks.profile_for(selected_merc))
 	preview.apply_state(PreviewState.new(loadout, worn))
 	preview.set_active(true)
 	# The line under the ranger names the set TAB brings up, exactly as the

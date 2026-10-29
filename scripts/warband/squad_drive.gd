@@ -56,11 +56,12 @@ var engage_radius := 60.0
 ## How close an ally must stand to swing.
 var reach := 2.0
 ## How close an ally must be to take a drop off the ground, or to bend over a
-## fallen body. The human's own reach is 2.6 m; 2.0 m is the same arm plus the
-## step a body takes at a drop lying against a trunk or a stake, where the
-## collider stops it just outside an arm's length and an unarmed ally would
-## otherwise stand over its own weapon forever.
-var loot_reach := 2.0
+## fallen body. The player's own reach is 2.6 m, and the squad uses the same
+## number: four allies converging on one blade stand in a ring, each pushed out
+## by the others, and a 2.0 m reach left the whole ring just short of the piece
+## forever. It also covers a drop lying against a trunk that stops the capsule
+## just outside an arm's length.
+var loot_reach := 2.6
 ## Where a body stops walking into what it is fighting. Blades are 1.15-2.3 m
 ## long, so a fighter that keeps pressing forward is inside the mob's own capsule
 ## long before its swing lands - and a squad that leans on a body shoves it across

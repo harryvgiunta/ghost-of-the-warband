@@ -30,6 +30,7 @@ const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const WildernessScript = preload("res://scripts/warband/wilderness.gd")
+const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const ArenaScript = preload("res://scripts/admin_arena.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
@@ -65,7 +66,7 @@ var opening_metres := 0.0
 ## The band on the way out: the briar wolves `wilderness.gd` spawns into
 ## `world.guards` before anything here reads the count, so every hostile tally in
 ## this run is the camp's watchers plus the trail's cultists plus these.
-var wolves: int = WildernessScript.STATIONS.size()
+var wolves: int = WildernessScript.PACK_COUNT
 
 
 func check(condition: bool, message: String) -> void:
@@ -449,7 +450,7 @@ func check_camp_in_the_woods() -> void:
 	# briar wolves hold the way between them - one list for all three.
 	var camp_guards: int = game.camp.guards.size()
 	check(camp_guards == 2, "two watchers hold the camp (%d)" % camp_guards)
-	check(game.guards.size() == camp_guards + 20 + wolves,
+	check(game.guards.size() == camp_guards + 20 + TrailScript.ARCHER_COUNT + wolves,
 		"twenty cultists and %d wolves join them on the same hostile list (%d in all)"
 		% [wolves, game.guards.size()])
 	for watcher in game.camp.guards:
@@ -670,8 +671,23 @@ func check_lesson() -> void:
 ## ground from the cages to the mouth is walked here, timed, and the six come out
 ## of the trees on the frame the mouth is crossed.
 func check_leaving() -> void:
+	# The cage bars are solid now: give the cut latches their 1.2 s lift before
+	# driving a body through a door that is still coming up.
+	await create_timer(1.4).timeout
+	dismiss_card("the latches")
 	var local = game.controller.active_body(1)
 	check(local != null, "the soul still has a body for the walk out")
+	# The cage bars are solid, so the driven body has to walk round the cage line
+	# instead of straight through it. A player sees the bars and steps around; the
+	# test follows the clear spine through the gap beside the soul's cage.
+	var side_x := -5.1 if local.global_position.x < 0.0 else 5.1
+	var route: Array[Vector3] = [
+		Vector3(side_x, 0.0, 9.0),
+		Vector3(side_x, 0.0, 3.2),
+		Vector3(0.0, 0.0, 1.0),
+		game.camp.GATE_POINT,
+	]
+	var route_index := 0
 	# The campaign's walk starts at the cage line the soul woke on. The ground
 	# between there and the mouth is covered by the opening itself - Corvin's run
 	# at the pair, then the walk out - so it is banked here and the lane's metres
@@ -693,10 +709,14 @@ func check_leaving() -> void:
 	while ticks < 3000:
 		if game.camp.sequencer.state() == SequencerScript.State.ESCAPING:
 			break
-		var to: Vector3 = game.camp.GATE_POINT - local.global_position
+		var target: Vector3 = route[mini(route_index, route.size() - 1)]
+		var to: Vector3 = target - local.global_position
 		to.y = 0.0
-		if to.length() <= 0.8:
-			break
+		if to.length() <= 0.9:
+			if route_index >= route.size() - 1:
+				break
+			route_index += 1
+			continue
 		var direction := to.normalized()
 		local.accept_network_input(Vector2(direction.x, direction.z), true)
 		await physics_frame
@@ -755,7 +775,7 @@ func check_leaving() -> void:
 	# The camp's pair plus the ambush, plus the road's twenty and the wolves on the
 	# way out: one list for the whole wood, so a watcher in the camp, a wolf on the
 	# corridor and a cultist on the lane are the same system.
-	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + wolves
+	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves
 	check(game.guards.size() == expected_hostiles,
 		"the world's hostile list holds all %d (%d)" % [expected_hostiles, game.guards.size()])
 
@@ -792,6 +812,9 @@ func check_walk() -> void:
 			if is_instance_valid(wolf) and bool(wolf.get("alive")):
 				wolf.take_damage(4000.0, 0)
 	await create_timer(0.4).timeout
+	# A one-time lesson may have opened after the field went quiet (the bandage
+	# card is the usual one); a paused tree would read as a body that cannot walk.
+	dismiss_card("the wound card")
 	check(game.trail.cultists_alive() == 0, "the trail can be cleared (%d left)"
 		% game.trail.cultists_alive())
 	check(game.loot.corpse_ids().size() >= game.trail.guards.size(),
@@ -978,7 +1001,7 @@ func check_budget() -> void:
 	# The route is marked by fire now: a pair of torches every twelve metres is 152
 	# lights down nine hundred metres of wood, and that is the design, not creep.
 	check(lights <= 210, "the world stays inside its light budget (%d)" % lights)
-	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + wolves
+	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves
 	check(int(readout["guards"]) == hostiles,
 		"all %d hostiles are on the list (%d)" % [hostiles, int(readout["guards"])])
 	check(float(readout["lane_length"]) >= 860.0 and float(readout["lane_length"]) <= 980.0,

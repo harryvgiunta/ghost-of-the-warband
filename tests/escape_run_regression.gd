@@ -22,6 +22,7 @@ extends SceneTree
 ##      gathers nothing, and makes no transition.
 
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
+const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -191,8 +192,9 @@ func check_the_world() -> void:
 		"the camp reaches the escape (%s)" % game.camp.sequencer.state_name())
 	soul = game.controller.active_body(1)
 	check(soul != null, "the soul is seated in a body when the trail opens")
-	check(soul != null and game.trail.guards.size() == 20,
-		"twenty cultists hold the trail (%d)" % game.trail.guards.size())
+	check(soul != null and game.trail.guards.size() == 20 + TrailScript.ARCHER_COUNT,
+		"twenty cultists and two archer ambushes hold the trail (%d)"
+		% game.trail.guards.size())
 	# Where they stand is what matters (asserted with the lane, below): a mob's
 	# `player` field is its current quarry, not a spawn-time script.
 
@@ -463,6 +465,9 @@ func check_follow() -> void:
 	# comes up the rises behind the soul, so it is allowed a longer catch-up than the
 	# flat corridor it used to run down.
 	while near < needed and waited < FOLLOW_S:
+		# A one-time lesson (the bandage card is the likely one after a long
+		# walk) pauses the tree; read it so the escort can keep moving.
+		_dismiss_card()
 		await create_timer(0.1).timeout
 		waited += 0.1
 		near = 0
@@ -491,12 +496,28 @@ func check_follow() -> void:
 			if is_instance_valid(hostile) and bool(hostile.get("alive")):
 				nearest = minf(nearest, _flat((hostile as Node3D).global_position,
 					(ally as Node3D).global_position))
-		report.append("%d:%.0fm%s%s:hostile=%.0fm:move=%.1f,%.1f" % [int(merc_id),
+		var track: Dictionary = game.squad._track.get(int(merc_id), {})
+		var stuck = game.squad._nearest_pickup(ally)
+		var pick_info := "none"
+		if is_instance_valid(stuck):
+			pick_info = "%s d=%.2f armed=%s drop=%s col=%s block=%s" % [
+				str(stuck.item_id), (stuck as Node3D).global_position.distance_to((ally as Node3D).global_position),
+				str(stuck.armed), str(stuck.dropper_peer), str(stuck.collected),
+				str(stuck.blocked_for(0))]
+		report.append("%d:%.0fm%s%s:hostile=%.0fm:move=%.1f,%.1f:at=%.1f,%.1f:free=%s:pb=%s:state=%s:band=%s:nw=%s:np=%s:nc=%s:paused=%s:pick=%s" % [int(merc_id),
 			_flat(ally.global_position, soul.global_position),
 			"" if bool(ally.get("alive")) else ":dead",
 			":down" if bool(ally.get("downed")) else "",
 			-1.0 if nearest == INF else nearest,
-			float(ally.get("move_direction").x), float(ally.get("move_direction").y)])
+			float(ally.get("move_direction").x), float(ally.get("move_direction").y),
+			(ally as Node3D).global_position.x, (ally as Node3D).global_position.z,
+			str(game.camp.is_free(int(merc_id))),
+			str(game.squad.player_body == soul),
+			str(track.get("state", "?")), str(track.get("bandaging", "?")),
+			str(is_instance_valid(game.squad._nearest_watcher(ally))),
+			str(is_instance_valid(game.squad._nearest_pickup(ally))),
+			str(game.squad._nearest_corpse(ally)),
+			str(game.get_tree().paused), pick_info])
 	check(near >= needed,
 		"the squad follows the soul down the trail (%d of %d within 20 m after %.0f s; following=%s; %s)"
 		% [near, needed, waited * WALK_SCALE, str(game.squad.following), ", ".join(report)])
@@ -543,8 +564,12 @@ func check_wipe() -> void:
 	var transitions_before: int = root.get_node("GameFlow").transitions
 	for actor in game.bodies:
 		actor.enter_downed(99)
+	# The soul's own body raises the downed lesson (it pauses the tree); a wipe
+	# is not a moment to leave a card up, so read it and let the world run.
+	_dismiss_card()
 	var waited := 0.0
 	while not game._wiped and waited < 8.0:
+		_dismiss_card()
 		await create_timer(0.1).timeout
 		waited += 0.1
 	check(game._wiped, "the world notices the warband is down")

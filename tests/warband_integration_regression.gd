@@ -8,7 +8,7 @@ extends SceneTree
 ##
 ##   1. builds the one `WarbandAbilities` scene and binds every seated body to it,
 ##      so a looted weapon's cue can actually spawn its arrow;
-##   2. builds the band on the way out - seven briar wolves in `guards`, with the
+##   2. builds the deep-wood band - eight briar wolves in `guards`, with the
 ##      `MobCuller` that keeps a walked-past wolf cheap;
 ##   3. paints the HUD against a living body: a stamina bar with a real maximum
 ##      and three ability tiles;

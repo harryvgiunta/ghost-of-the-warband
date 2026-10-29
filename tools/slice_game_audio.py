@@ -8,6 +8,13 @@ re-running it reproduces the exact tree the game ships.
     python tools/slice_game_audio.py                 # write assets/audio
     python tools/slice_game_audio.py --check         # verify the built tree
     python tools/slice_game_audio.py --sources DIR   # other raw library root
+    python tools/slice_game_audio.py --fetch --only voices --sources DIR
+    # ^ download the licensed voice recordings, then cut only the spoken lines
+
+`--only sfx` / `--only voices` builds one half of the tree, which is what a
+machine without the whole raw music library needs: the spoken lines are cut from
+their own two recordings and nothing else is touched. `--fetch` downloads those
+recordings from their pinned URLs into the source root first.
 
 Every slice is trimmed to mono 48 kHz, peak-normalised to -1 dBFS with a short
 fade on both ends (a hard cut clicks), then encoded as Vorbis with `-bitexact`,
@@ -26,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -125,6 +133,43 @@ SLICED = {
     },
 }
 
+# Spoken lines. `VoiceLibrary` owns how often a body says one; this table is the
+# same contract as `SLICED` - a fixed window of a licensed recording - but the
+# output lands under `assets/audio/voice/<voice>/` because a voice is a folder of
+# takes, not a one-shot. Add a cue here and one row in `VoiceLibrary.VOICES`, and
+# the game speaks it.
+VOICE_SLICED = {
+    # The briar wolf's growl going into the bite. One sustained growl, cut into
+    # three windows that each start in a dip of the envelope so every take has an
+    # attack of its own; the runtime's pitch spread does the rest.
+    "wolf/growl": {
+        "source": "338674__newagesoup__wolf-growl.mp3",
+        "windows": [(0.12, 0.86), (0.52, 1.22), (1.22, 2.06)],
+    },
+    # The wolf's death: six separate vocalisations out of one take, from the
+    # short yelp that opens it to the long dying whine at 5.6 s. The runtime
+    # pitches them down (0.80-0.90), which is what turns a dog into a wolf.
+    "wolf/death": {
+        "source": "277195__coral-island-studios__dog-begging.mp3",
+        "windows": [
+            (0.66, 1.22), (1.92, 2.48), (3.18, 3.92),
+            (5.64, 6.58), (7.76, 8.52), (8.70, 9.48),
+        ],
+    },
+}
+
+# The recordings `VOICE_SLICED` cuts, by the name this script looks for. They are
+# the creators' own preview masters (CC BY 4.0 - see assets/audio/LICENSE.txt),
+# pinned by URL so `--fetch` reproduces them instead of depending on a browser
+# session. A download from the sound page itself needs an account; the preview is
+# the same recording at 48 kHz, which is what every slice below is cut from.
+VOICE_SOURCES = {
+    "338674__newagesoup__wolf-growl.mp3":
+        "https://cdn.freesound.org/previews/338/338674_4067257-hq.mp3",
+    "277195__coral-island-studios__dog-begging.mp3":
+        "https://cdn.freesound.org/previews/277/277195_5324256-hq.mp3",
+}
+
 # Output folder per group. The game loads `res://assets/audio/sfx/<group>/`.
 GROUPS = {
     "short_whoosh": "swing",
@@ -170,42 +215,95 @@ def encode(samples: np.ndarray, destination: Path) -> None:
         )
 
 
-def build(sources: Path, out: Path) -> list[tuple[str, float, float]]:
-    built: list[tuple[str, float, float]] = []
-    music_dir = out / "music"
-    music_dir.mkdir(parents=True, exist_ok=True)
-    for name, source in MUSIC.items():
-        if not source.exists():
-            raise SystemExit(f"missing music source: {source}")
-        shutil.copy2(source, music_dir / name)
-        with sf.SoundFile(source) as handle:
-            built.append((str(music_dir / name), len(handle) / handle.samplerate, 0.0))
+def slice_source(source: Path, folder: Path, stem: str, windows,
+                 label: str) -> list[tuple[str, float, float]]:
+    """Cut `windows` out of one recording into consecutive takes in `folder`.
 
-    for group, recipe in SLICED.items():
-        source = sources / recipe["source"]
-        if not source.exists():
-            raise SystemExit(f"missing source: {source}")
-        samples, rate = sf.read(source, always_2d=True, dtype="float32")
-        mono = samples.mean(axis=1)
-        for index, (start, end) in enumerate(recipe["windows"], start=1):
-            window = mono[int(start * rate):int(end * rate)]
-            if window.size == 0:
-                raise SystemExit(f"{group}: empty window {start}-{end}")
-            resampled = window if rate == RATE else np.interp(
-                np.linspace(0.0, 1.0, int(window.size * RATE / rate), endpoint=False),
-                np.linspace(0.0, 1.0, window.size, endpoint=False),
-                window).astype(np.float32)
-            destination = out / "sfx" / GROUPS[group] / f"{group}_{index:02d}.ogg"
-            encode(scaled(resampled.astype(np.float32)), destination)
-            built.append((str(destination), resampled.size / RATE, PEAK))
+    Each take is written as `<folder>/<stem>_NN.ogg`, numbered from one in window
+    order - the names `SfxLibrary` and `VoiceLibrary` expect.
+    """
+    if not source.exists():
+        raise SystemExit(f"missing source: {source}")
+    built: list[tuple[str, float, float]] = []
+    samples, rate = sf.read(source, always_2d=True, dtype="float32")
+    mono = samples.mean(axis=1)
+    for index, (start, end) in enumerate(windows, start=1):
+        window = mono[int(start * rate):int(end * rate)]
+        if window.size == 0:
+            raise SystemExit(f"{label}: empty window {start}-{end}")
+        resampled = window if rate == RATE else np.interp(
+            np.linspace(0.0, 1.0, int(window.size * RATE / rate), endpoint=False),
+            np.linspace(0.0, 1.0, window.size, endpoint=False),
+            window).astype(np.float32)
+        out = folder / f"{stem}_{index:02d}.ogg"
+        encode(scaled(resampled.astype(np.float32)), out)
+        built.append((str(out), resampled.size / RATE, PEAK))
     return built
 
 
-def check(out: Path) -> int:
-    expected = [out / "music" / name for name in MUSIC]
-    for group, recipe in SLICED.items():
-        expected += [out / "sfx" / GROUPS[group] / f"{group}_{index:02d}.ogg"
-                     for index in range(1, len(recipe["windows"]) + 1)]
+def build(sources: Path, out: Path, only: str = "") -> list[tuple[str, float, float]]:
+    built: list[tuple[str, float, float]] = []
+    do_music = only == ""
+    do_sfx = only in ("", "sfx")
+    do_voices = only in ("", "voices")
+    if do_music:
+        music_dir = out / "music"
+        music_dir.mkdir(parents=True, exist_ok=True)
+        for name, source in MUSIC.items():
+            if not source.exists():
+                raise SystemExit(f"missing music source: {source}")
+            shutil.copy2(source, music_dir / name)
+            with sf.SoundFile(source) as handle:
+                built.append((str(music_dir / name), len(handle) / handle.samplerate, 0.0))
+
+    if do_sfx:
+        for group, recipe in SLICED.items():
+            built += slice_source(sources / recipe["source"], out / "sfx" / GROUPS[group],
+                                  group, recipe["windows"], group)
+
+    if do_voices:
+        for key, recipe in VOICE_SLICED.items():
+            voice, stem = key.split("/")
+            source = sources / recipe["source"]
+            if not source.exists():
+                raise SystemExit(f"missing voice source: {source} (try --fetch)")
+            built += slice_source(source, out / "voice" / voice, stem,
+                                  recipe["windows"], key)
+    return built
+
+
+def fetch(sources: Path) -> int:
+    """Download the voice recordings this script cuts, where they are missing."""
+    failed = 0
+    sources.mkdir(parents=True, exist_ok=True)
+    for name, url in VOICE_SOURCES.items():
+        destination = sources / name
+        if destination.exists():
+            print(f"have    {destination.name}")
+            continue
+        print(f"fetch   {url}")
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                destination.write_bytes(response.read())
+        except OSError as error:
+            print(f"FAILED  {name}: {error}")
+            failed += 1
+    return 1 if failed else 0
+
+
+def check(out: Path, only: str = "") -> int:
+    expected: list[Path] = []
+    if only in ("", "music"):
+        expected += [out / "music" / name for name in MUSIC]
+    if only in ("", "sfx"):
+        for group, recipe in SLICED.items():
+            expected += [out / "sfx" / GROUPS[group] / f"{group}_{index:02d}.ogg"
+                         for index in range(1, len(recipe["windows"]) + 1)]
+    if only in ("", "voices"):
+        for key, recipe in VOICE_SLICED.items():
+            voice, stem = key.split("/")
+            expected += [out / "voice" / voice / f"{stem}_{index:02d}.ogg"
+                         for index in range(1, len(recipe["windows"]) + 1)]
     missing = [str(path) for path in expected if not path.exists()]
     for path in missing:
         print(f"MISSING {path}")
@@ -217,11 +315,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sources", type=Path, default=DEFAULT_SOURCES)
     parser.add_argument("--out", type=Path, default=ROOT / "assets" / "audio")
+    parser.add_argument("--only", choices=["music", "sfx", "voices"], default="",
+                        help="build and check one part of the tree")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--fetch", action="store_true",
+                        help="download the licensed voice recordings first")
     args = parser.parse_args()
+    if args.fetch and fetch(args.sources):
+        return 1
     if args.check:
-        return check(args.out)
-    for path, seconds, level in build(args.sources, args.out):
+        return check(args.out, args.only)
+    for path, seconds, level in build(args.sources, args.out, args.only):
         print(f"{path}  {seconds:6.2f}s  {level:.2f}")
     return 0
 

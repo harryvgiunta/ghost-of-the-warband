@@ -99,7 +99,9 @@ func objective() -> String:
 				return "Corvin is at the cage line with empty hands. Take his body - F5 or [ ] - and get his shiv back."
 			return "Cut a latch at each cage   %d/%d" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
-			return "Out and armed. Walk out through the mouth   ·   watchers down %d/%d" \
+			# The way on is the gold arrow's to say now: no card, no objective and
+			# no key line names the mouth, because the arrow is standing in it.
+			return "The squad is free - follow the gold arrow.   ·   watchers down %d/%d" \
 				% [_guards_down, GUARD_COUNT]
 		State.ESCAPING:
 			return "The trees answer. Run the trail - the town is at the far end."
@@ -120,7 +122,9 @@ func hint() -> String:
 				return "F5 or [ ] - take Corvin's body   ·   K  -  take a weapon off the ground"
 			return "G  -  cut a latch  ·  %d of %d cages" % [_opened.size(), PRISONER_COUNT]
 		State.FREED:
-			return "W A S D - walk out through the mouth   ·   the squad arms itself"
+			# Nothing left to press: the arrow marks the walk, and a hint here
+			# would only repeat the objective.
+			return ""
 		State.ESCAPING:
 			return "W A S D - run the trail through the wood   ·   the town is at the far end of it"
 	return ""

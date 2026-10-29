@@ -16,6 +16,9 @@ signal closed
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const LedgerKeycapScript = preload("res://scripts/ui/ledger_keycap.gd")
+## The card's own click: the button and the dismiss keys are the two ways a
+## player puts a card away, and both should sound like the press they are.
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 const PANEL_SIZE := Vector2(880, 580)
 const TITLE_SIZE := 44
@@ -39,7 +42,7 @@ const STAMP_COUNT := 9
 ## The tokens the card draws as a carved key tile. A token with an underscore is
 ## one key with a two-word name: `WHEEL_UP` prints WHEEL UP on a single tile.
 const KEYS := ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "G", "P", "K", "R",
-	"TAB", "ESC", "ENTER", "SPACE", "SHIFT", "CTRL", "LMB", "RMB", "MOUSE",
+	"6", "TAB", "ESC", "ENTER", "SPACE", "SHIFT", "CTRL", "LMB", "RMB", "MOUSE",
 	"WHEEL_UP", "WHEEL_DOWN", "W", "A", "S", "D", "[", "]"]
 
 var _built := false
@@ -133,8 +136,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not _open or not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	if event.keycode in [KEY_G, KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE, KEY_SPACE]:
+		SfxScript.ui_click()
 		close()
 		get_viewport().set_input_as_handled()
+
+## The CONTINUE plate. A programmatic `close()` (a scene handing over, a reset)
+## is not a press and stays silent; only the player's own click sounds.
+func _on_continue() -> void:
+	if not _open:
+		return
+	SfxScript.ui_click()
+	close()
 
 # --- construction ----------------------------------------------------------
 
@@ -213,7 +225,7 @@ func _ensure_built() -> void:
 	_button.theme_type_variation = "PrimaryButton"
 	_button.custom_minimum_size = Vector2(300, 56)
 	_button.add_theme_font_size_override("font_size", 19)
-	_button.pressed.connect(close)
+	_button.pressed.connect(_on_continue)
 	row.add_child(_button)
 
 func _fill_keys(text: String) -> void:

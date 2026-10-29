@@ -22,6 +22,7 @@ extends Node
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const State = preload("res://scripts/player_state.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 
 ## How far one survivor reaches on the battlefield. Generous on purpose: a drop
 ## is only left behind when it is nowhere near any living body.
@@ -94,8 +95,12 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1) -> Dictionary:
 	if stash == null:
 		return _refused("The shared stash is missing.", pickup.item_id)
 	var item_id := pickup.item_id
+	# Heard where the piece lay, before `collect()` takes the node out of the
+	# tree: one pickup is one sound, and the drop's position is about to go.
+	var at := pickup.global_position
 	_book_piece(stash, item_id)
 	pickup.collect()
+	SfxScript.pickup(at)
 	_notify_warband()
 	return {"ok": true, "item_id": item_id,
 		"message": _dress_message(item_id, collector_peer)}
@@ -136,9 +141,13 @@ func sweep(survivors: Array) -> Dictionary:
 		if not _within_reach(pickup.global_position, anchors):
 			skipped += 1
 			continue
+		# One chime per piece, at the drop itself. The node is about to leave the
+		# tree, so the position is read first.
+		var at: Vector3 = pickup.global_position
 		_book_piece(stash, pickup.item_id)
 		ids.append(pickup.item_id)
 		pickup.collect()
+		SfxScript.pickup(at)
 	ids.sort()
 	_notify_warband()
 	var message := "The warband sweeps %d piece(s) into the shared stash." % ids.size()

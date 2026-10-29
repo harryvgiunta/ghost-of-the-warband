@@ -106,6 +106,17 @@ the tutorial's to take.
    the Bilewarden at the end, with survivors physically looting the field.
    `Enter` comes back to the world at the town end.
 
+**The band is eight men, not one man eight times.** A mercenary's look is a pure
+function of their id (`WarbandLooks.profile_for`): one of eight faces, one of eight
+cuts, one of five beards, one of five irises, eight skins, eight shirts, eight
+pairs of shorts and a height between 0.86 and 1.14 of the authored rig. It is
+derived, not saved and not replicated, so two peers and every reload agree; the
+numbers live in `assets/characters/warband/ironwood_warband_looks.json`, which
+`python tools/prepare_warband_looks.py` writes from geometry and textures the
+repo already ships. Nothing gameplay-facing moved: stats, capsule, reach and
+speeds are still the warband's one contract. See `docs/warband.md`
+("The band looks like a band") and `tests/warband_appearance_regression.gd`.
+
 **Since the loop above was written**, four surfaces were added on the same world:
 
 - **The way out has teeth.** Seven base briar wolves (`enemy.gd` **kind 0**, no new
@@ -324,7 +335,7 @@ Integration seams deliberately placed in the base game:
 | Wipe | `world_scene.gd::WIPE_BEAT` | 2.5 s after the last body falls, then the last checkpoint; with no bookmark the wood simply takes what is left |
 | Loot auto-equip rule | `warband_state.gd::auto_equip` | empty slot or better than worn |
 | Checkpoint moments | `world_scene.gd::_check_checkpoints` | `trail_start` when the camp's six are down and the squad is leaving (60 m past the mouth), `town` on entering the square; one write per id |
-| Wolves on the way out | `wilderness.gd::STATIONS` | seven **kind 0** briars at 122/140/158/178/200/224/252 m, 1.4-2.8 m off the line, `MOUTH_CLEARANCE` 25 m, 0.5 s target refresh, `PACK_RADIUS` 14 m |
+| Deep-wood wolves | `wilderness.gd::PACKS` | eight **kind 0** briars in two packs of four at 62-80 m and 688-712 m, 30-50 m off the line (one beside the checkpoint corridor, one deep on the lane; both beyond the wolf's sight of the route), nothing on the lane or corridor, `MOUTH_CLEARANCE` 25 m, 0.5 s target refresh, `PACK_RADIUS` 14 m |
 | Warband ability keys | `possession_controller.gd::_command` | plain 1/2/3 → slots 0/1/2 (Shift+1..3 is the same press); the HUD tiles read the possessed body's runner every frame and hide an ungranted slot |
 | Campaign menu | `warband_menu.gd` | six rows; SAVE `Warband.save_state()`, LOAD re-reads then re-enters the world, SETTINGS the shared sound page + display row, exit label scene-owned (`EXIT TO TITLE`), exit/quit save first, never pauses the tree |
 | Expedition waves | `expedition_director.gd` | 5 waves 3/4/4/5/6, tiers makeshift→mail, 2 s gap, boss 2x health + 2 escorts, 175 gold + 6 essence on clear |
@@ -358,16 +369,16 @@ Integration seams deliberately placed in the base game:
 | `warband_ui_regression` | 99 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
-| `town_hub_regression` | 60 | services, hire, deploy, paperdoll (the square as an area) |
+| `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
 | `cage_escape_regression` | 344 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
-| `escape_run_regression` | 170 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
-| `torch_light_regression` | 19 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
+| `escape_run_regression` | 194 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
+| `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 240 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
 | `warband_abilities_regression` | 42 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
 | `warband_menu_regression` | 41 | the six rows, SAVE/LOAD over `Warband.save_state`, LOAD gated on a real file, the sound page and back, `resumed` on every close, and the tree never paused |
 | `warband_vendors_regression` | 151 | three counters as `G` services in the market ring, each opening its own seat and stock; buy into the shared stash, sell one pooled copy at 60%, a short purse spends nothing, a worn copy is not on the board, closing leaves no panel |
-| `warband_wilderness_regression` | 66 | seven kind-0 wolves in `guards`/`wild_mobs`, clear of the mouth and pocket, aimed at the standing body, pack wander, and one `MobCuller` sweep parks a wolf left 300 m behind |
+| `warband_wilderness_regression` | 75 | eight kind-0 wolves in two deep packs inside `guards`/`wild_mobs`, clear of the mouth, pocket and lane, aimed at the standing body, pack wander, and one `MobCuller` sweep parks a wolf left 300 m behind |
 | `warband_session_world_unit_regression` | 38 | no socket: one name-keyed mob entry, a batch fits one datagram, replica write + tick, an unknown name invents nothing, loot and missile announcements book once, a reward books once, and both campaign doors against a temp save |
 | `warband_lobby_campaign_regression` | 48 | the lobby defaults to CAMPAIGN (CO-OP), the arena stays the first selectable row, both payloads name the right scene, and switching back and forth (or a cache read) keeps the mode |
 | `warband_integration_regression` | 20 | the real world binds every seated body to `WarbandAbilities`, fields the wolves and their culler, paints the stamina bar and three tiles, opens/closes the menu from a real Escape without pausing, and never hands a human body to squad AI |
@@ -376,6 +387,7 @@ Integration seams deliberately placed in the base game:
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
 | `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
+| `warband_appearance_regression` | 206 | the look table loads and starts each palette at the measured base, a look is a pure function of the id (order- and cache-independent), eight deployed bodies differ in face, cut, skin, shirt and shorts, every named piece exists in the assets, and the rig, an actor and an undressed body all apply or ignore it correctly (hair under a helmet, head zones scaled) |
 | `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
 | `checkpoint_regression` | 72 | the v4 bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |

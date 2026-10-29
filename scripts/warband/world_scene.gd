@@ -62,9 +62,9 @@ const AbilitiesScript = preload("res://scripts/warband/warband_abilities.gd")
 ## that game; the world opens this one, which writes the same warband save and
 ## leaves for the same title.
 const MenuScript = preload("res://scripts/warband/warband_menu.gd")
-## The band on the way out: seven briar wolves between the camp's mouth and the
-## first stretch of lane. They spawn after the warband is seated, so a wolf's
-## first target is a real body.
+## The deep-wood band: two packs of four briar wolves, both hundreds of metres
+## off the route. They spawn after the warband is seated, so a wolf's first target
+## is a real body.
 const WildernessScript = preload("res://scripts/warband/wilderness.gd")
 const TorchScript = preload("res://scripts/warband/torch_light.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
@@ -138,6 +138,45 @@ const REVIVE_LESSON := {
 	"footnote": "Let go and the work is lost. A body that bleeds out keeps its date with the dirt: the roster will not stand it back up.",
 }
 
+## The wrong-way sign. The trail is about 1070 m long at the camp's mouth, so a
+## body is only taught the road once it has stood within 950 m of town - the
+## escape's first steps never raise it. Running back up the trail from there shows
+## the banner at 1000 m, and turning round drops it under 980: the gap between the
+## two is the sign's hysteresis, so a body on the line does not flicker.
+const WRONG_WAY_ARM_METRES := 950.0
+const WRONG_WAY_TRIGGER_METRES := 1000.0
+const WRONG_WAY_CLEAR_METRES := 980.0
+const WRONG_WAY_TEXT := "You're running the wrong way!"
+## How high over the gap in the trees the roadside word stands. High enough to be
+## read from the trail's first torch, low enough not to sit in the canopy.
+const WRONG_WAY_SIGN_HEIGHT := 4.2
+
+## The damage lesson: a bandage is three seconds of wrapping and 35 health, and it
+## is taught the first time a body is badly hurt with nobody close enough to
+## punish the channel. The radius is a fight's breath, not the whole wood.
+const BANDAGE_LESSON_STEP := "lesson_bandage"
+const BANDAGE_LESSON_HEALTH := 0.6
+const BANDAGE_LESSON_RADIUS := 22.0
+const BANDAGE_LESSON := {
+	"kicker": "THE WOUND  /  THE WARBAND",
+	"title": "You've been damaged",
+	"body": "A blade has opened you and nothing is close enough to finish it. Press 6 to bind a bandage: three seconds of wrapping and 35 health back - and any blow that lands breaks the channel, so bind in the quiet, not in the fight.",
+	"keys": "6  -  bandage        ·        three seconds, +35 health",
+	"footnote": "A bandage only works while you are left alone. Break the fight off, then dress the wound.",
+}
+
+## The soul's own body on the floor. It is the one card that is about the player
+## rather than the squad: nobody is coming for a body the player did not ask to
+## save, so both ways out - an ally's `G`, or jumping - are named.
+const DOWNED_LESSON_STEP := "lesson_downed"
+const DOWNED_LESSON := {
+	"kicker": "THE DOWNED  /  THE WARBAND",
+	"title": "You've been downed!",
+	"body": "Your body is on its chest and bleeding. An ally can bring it back: stand over it and HOLD G for five seconds. Or leave it - step into another body with [ ] or F1..F8, and come back for the one you left behind.",
+	"keys": "HOLD G  -  an ally revives you        ·        [  ]  or  F1 .. F8  -  take another body",
+	"footnote": "The body you step out of keeps bleeding. Do not forget it - it is still yours to save.",
+}
+
 var warband
 var flow
 var controller
@@ -180,6 +219,15 @@ var projectiles: Array = []
 var _reviving := false
 var _prompt_text := ""
 var _hint_text := ""
+## The wrong-way sign's own memory: whether the road has been learned yet (armed),
+## whether the banner is up, and the word standing at the gap in the trees. Both
+## the banner and the sign are driven from the one poll, so they cannot disagree.
+var _wrong_way_armed := false
+var _wrong_way := false
+var _wrong_way_sign: Label3D
+## The player's own body went down while a card was up: the card is raised on the
+## first frame the tree is free again rather than written over somebody's read.
+var _downed_card_pending := false
 var _roster_elapsed := 0.0
 var _wipe_beat := -1.0
 var _wiped := false
@@ -216,6 +264,7 @@ func _ready() -> void:
 	_build_revive()
 	_build_squad()
 	_build_areas()
+	_build_wrong_way_sign()
 	# The soul is wired before it is seated: the very first possession is the
 	# camp's first seen body, and a signal connected afterwards would miss it.
 	_wire_possession()
@@ -268,6 +317,9 @@ func _physics_process(delta: float) -> void:
 	_sync_roster(delta)
 	_update_prompt()
 	_update_hint()
+	_push_downed_card()
+	_update_bandage_card()
+	_update_wrong_way()
 	_check_checkpoints()
 	_check_wipe(delta)
 
@@ -522,6 +574,29 @@ func _build_areas() -> void:
 	town.embed(self)
 	# The expedition gate is the only door the campaign has left.
 	town.scene_requested.connect(_on_scene_requested)
+
+
+## The word that answers the banner in the world itself: a body walking back up
+## the trail sees it standing over the gap in the trees it just came through. It
+## billsboards towards the camera and reads through the wood, because a sign that
+## a body has to find with its nose is not a sign.
+func _build_wrong_way_sign() -> void:
+	var word := Label3D.new()
+	word.name = "WrongWaySign"
+	word.text = WRONG_WAY_TEXT
+	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	word.no_depth_test = true
+	# About a metre of letter height over a dozen metres of line: a hanging sign
+	# the size of a hut, because it stands in the trees rather than on a wall.
+	word.pixel_size = 0.0125
+	word.font_size = 72
+	word.outline_size = 16
+	word.modulate = Color(0.99, 0.78, 0.26)
+	word.outline_modulate = Color(0.42, 0.03, 0.02, 0.95)
+	word.position = CampScript.GATE_POINT + Vector3(0.0, WRONG_WAY_SIGN_HEIGHT, 0.0)
+	word.visible = false
+	add_child(word)
+	_wrong_way_sign = word
 
 
 ## The lane, and the cult standing on it. Built after the warband is seated: two
@@ -1037,6 +1112,12 @@ func drop_merc_gear(actor, merc_id: int) -> void:
 
 func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	drop_merc_gear(actor, merc_id)
+	# The player's own body is a different lesson from a squadmate's: the revive
+	# card is about somebody else, this one is about what the soul can still do.
+	if controller != null and actor != null and is_instance_valid(actor) \
+			and actor == controller.active_body(1):
+		_downed_card_pending = true
+		_push_downed_card()
 	_push_revive_card(actor)
 
 
@@ -1063,6 +1144,110 @@ func _push_revive_card(actor) -> void:
 	card.show_step(REVIVE_LESSON_STEP, str(REVIVE_LESSON["kicker"]),
 		str(REVIVE_LESSON["title"]), str(REVIVE_LESSON["body"]),
 		str(REVIVE_LESSON["keys"]), str(REVIVE_LESSON["footnote"]))
+
+
+## The soul's own body went down: that is the player's own lesson, not a
+## squadmate's. It is raised on the frame the tree is free (a card that was up is
+## never written over), and it names both ways out because a player who does not
+## know they can leave will lie there waiting for an ally they do not have.
+func _push_downed_card() -> void:
+	if card == null or not _downed_card_pending:
+		return
+	if card.has_shown(DOWNED_LESSON_STEP):
+		_downed_card_pending = false
+		return
+	if card.is_open() or _panel_open() or controller == null:
+		return
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul):
+		return
+	if not bool(soul.get("downed")) or not bool(soul.get("alive")):
+		# Somebody stood the body up before the card could be read: what it would
+		# teach is no longer true.
+		_downed_card_pending = false
+		return
+	_downed_card_pending = false
+	card.show_step(DOWNED_LESSON_STEP, str(DOWNED_LESSON["kicker"]),
+		str(DOWNED_LESSON["title"]), str(DOWNED_LESSON["body"]),
+		str(DOWNED_LESSON["keys"]), str(DOWNED_LESSON["footnote"]))
+
+
+## The bandage lesson: the first time the soul's body is at or below 60% of its
+## pool with no hostile close enough to punish the channel, the world says `6`
+## out loud. A body that learned it in a fight would learn it face down.
+func _update_bandage_card() -> void:
+	if card == null or controller == null:
+		return
+	if card.is_open() or _panel_open() or card.has_shown(BANDAGE_LESSON_STEP):
+		return
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul):
+		return
+	if not bool(soul.get("alive")) or bool(soul.get("downed")):
+		return
+	var pool := maxf(1.0, float(soul.get("max_health")))
+	if float(soul.get("health")) / pool > BANDAGE_LESSON_HEALTH:
+		return
+	if _hostile_near((soul as Node3D).global_position, BANDAGE_LESSON_RADIUS):
+		return
+	card.show_step(BANDAGE_LESSON_STEP, str(BANDAGE_LESSON["kicker"]),
+		str(BANDAGE_LESSON["title"]), str(BANDAGE_LESSON["body"]),
+		str(BANDAGE_LESSON["keys"]), str(BANDAGE_LESSON["footnote"]))
+
+
+## Whether a hostile this machine drives is standing within `radius` of a point.
+## A replica is the host's mob shown here and is not hunting anybody locally, so
+## it is not in the answer.
+func _hostile_near(at: Vector3, radius: float) -> bool:
+	for guard in _local_guards():
+		if not is_instance_valid(guard) or not bool(guard.get("alive")):
+			continue
+		if (guard as Node3D).global_position.distance_to(at) <= radius:
+			return true
+	return false
+
+
+## The wrong-way sign, read off the trail's own ruler. A body only learns the road
+## once it has stood within `WRONG_WAY_ARM_METRES` of town - the escape's first
+## steps are 1070 m out and never raise it. After that, climbing back up the trail
+## past a kilometre raises the banner; turning round drops it under 980, so a body
+## standing on the line does not flicker.
+func _update_wrong_way() -> void:
+	if trail == null or controller == null or camp == null or not camp.escaping():
+		_set_wrong_way(false)
+		return
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul):
+		_set_wrong_way(false)
+		return
+	var metres: float = trail.metres_to_town((soul as Node3D).global_position)
+	if metres <= WRONG_WAY_ARM_METRES:
+		_wrong_way_armed = true
+	if not _wrong_way_armed:
+		return
+	if _wrong_way:
+		if metres < WRONG_WAY_CLEAR_METRES:
+			_set_wrong_way(false)
+	elif metres >= WRONG_WAY_TRIGGER_METRES:
+		_set_wrong_way(true)
+
+
+## One answer for the banner and the roadside word: they are the same sentence,
+## and they go up and down together.
+func _set_wrong_way(on: bool) -> void:
+	if on == _wrong_way:
+		return
+	_wrong_way = on
+	if hud != null:
+		hud.set_warning(WRONG_WAY_TEXT if on else "")
+	if _wrong_way_sign != null and is_instance_valid(_wrong_way_sign):
+		_wrong_way_sign.visible = on
+
+
+## Whether the wrong-way warning is up, for a test that must not read a private
+## label.
+func wrong_way() -> bool:
+	return _wrong_way
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:

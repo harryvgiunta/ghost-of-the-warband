@@ -452,3 +452,68 @@ GLB SHA-256:
   ironwood_gallowsroot.json  71e13f050779c7d2fa853e686ddc15af7337a4f019e76b35be675be007837b6a
   ironwood_makeshift.glb   f1b798d4346833942958f84d62af8516d00006b5d3f407153c784a25e99ade6f
   ironwood_makeshift.json  1d6f810e1ab8f5a4c391a44c719ccaeef28d4d504dcff374a56a3141ad381062
+
+IRONWOOD WARBAND LOOKS — SOURCE AND PROVENANCE
+
+The warband's eight faces, nine haircuts, four beards and its tintable skin,
+shirt and shorts surfaces are derived, reproducibly, from assets this repository
+already ships. Nothing is downloaded for them and nothing is modelled by hand:
+
+    python tools/prepare_warband_looks.py
+
+Inputs
+  assets/characters/ironwood_ranger.glb
+    head (Sphere.005_Retopology.004), brows (Face) and eyes (Face.001) meshes,
+    their skin weights and joint indices, the T_Superhero_Male_Normal and
+    T_Eye_* maps, and the T_Eye_Brown iris. The Ranger's own provenance above
+    applies: Quaternius Universal Base Characters, CC0 1.0 Universal.
+  assets/characters/armor/ironwood_naked_T_Superhero_Male_Dark.png
+  assets/characters/armor/ironwood_naked_Naked_Shirt_albedo.png
+  assets/characters/armor/ironwood_naked_Naked_Shorts_albedo.png
+    the naked set's skin, linen and twill atlases, from the same CC0 pack and
+    the same procedurally-rasterised cloth as the naked set above.
+
+Outputs and what was done to the inputs
+  assets/characters/warband/ironwood_faces.glb
+    eight variants, each an analytic warp of the union of the three head
+    meshes: jaw width, chin length and width, cheekbone spread, nose projection
+    and width, brow ridge, eye spacing, mouth width and lip volume. The warp is
+    windowed to the front of the face so the braincase, and therefore every
+    helmet and hood in the armour sets, keeps its authored dimensions. UVs,
+    joint indices and skin weights are the source's; the meshes bind to the live
+    Ranger skeleton at runtime by repointing their skin. No other geometry,
+    material or clip of the Ranger asset is touched.
+  assets/characters/warband/ironwood_hair.glb
+    original geometry authored by the tool: a short cut is a thin shell of the skull's own triangles,
+    wrapped flush on the head; the afro is the one lofted hair mass, from a crown
+    disc down to its own measured hairline and settled flush onto the skin, and a beard is a sheet over the jaw cut out by its own alpha
+    design - cheek line, arched moustache, open mouth, jawline bottom edge. All
+    of it is bound rigidly to the Ranger's `Head` joint.
+  assets/characters/warband/warband_skin_basecolor.png (2048)
+  assets/characters/warband/warband_skin_head_basecolor.png (1024)
+  assets/characters/warband/warband_shirt_basecolor.png
+  assets/characters/warband/warband_shorts_basecolor.png
+    "veiled" derivatives of the atlases above: each was converted to linear
+    light, divided by the mean of its brightest fifth (the flat lit surface),
+    partly desaturated so a pale character's blush does not survive every skin
+    tone, and re-encoded as sRGB. The artist's pores, knit, twill, grime and
+    folds survive; the hue does not, which is what lets one map serve eight skin
+    tones and eight dyed shirts through a single `albedo_color`.
+  assets/characters/warband/warband_hair_basecolor.png
+  assets/characters/warband/warband_beard_<style>.png
+    original maps generated analytically by the tool: a soft, painterly hair
+    albedo (no baked strands - at gameplay distance fine strands read as
+    scratches over the skull), and one RGBA mask per beard carrying its own
+    silhouette and mouth cut.
+  assets/characters/warband/warband_eye_<n>_basecolor.png
+    five recolours of the Ranger's authored brown iris; sclera, pupil and the
+    eye's own normal map are the source's.
+  assets/characters/warband/ironwood_warband_looks.json
+    the variant tables, the tone palettes (entry 0 of each cloth/skin palette is
+    the measured base colour of the shipped texture), the measured head
+    landmarks and the file budgets. `WarbandLooks` reads it at runtime, so the
+    tool output is the single source of truth for what a mercenary can wear.
+
+All modifications above are derivative works of CC0 1.0 Universal material and
+are distributed under the same terms. Attribution is courtesy, not obligation;
+the pack's author is credited here anyway.

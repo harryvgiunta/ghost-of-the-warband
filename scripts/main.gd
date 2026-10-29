@@ -1983,7 +1983,7 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if outcome == Combat.DEFENSE_PARRY:
 		attacker.stagger(Combat.PARRY_STAGGER)
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"parry")
-		SfxScript.defense(player.global_position + Vector3(0,1.15,0), true)
+		SfxScript.defense(player.global_position + Vector3(0,1.15,0), true, archer)
 		hud.show_feedback("PARRY  /  counter now",1.2)
 		return
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
@@ -1996,7 +1996,7 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 			player.velocity.x = push.x
 			player.velocity.z = push.z
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"block")
-		SfxScript.defense(player.global_position + Vector3(0,1.15,0), false)
+		SfxScript.defense(player.global_position + Vector3(0,1.15,0), false, archer)
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,false)
 			if health > 0.0:
@@ -2019,11 +2019,11 @@ func _receive_seat_attack(attacker, amount: float, seat) -> void:
 	if outcome == Combat.DEFENSE_PARRY:
 		attacker.stagger(Combat.PARRY_STAGGER)
 		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"parry")
-		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), true)
+		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), true, seat)
 		return
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
 		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"block")
-		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), false)
+		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), false, seat)
 		return
 	BloodFx.impact(attacker,seat.global_position + Vector3(0,1.1,0),seat.global_position - attacker.global_position,amount,false)
 	BloodFx.stain_attacker(attacker,amount)

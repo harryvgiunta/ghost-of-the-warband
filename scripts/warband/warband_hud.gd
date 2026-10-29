@@ -43,6 +43,9 @@ var _prompt_label: Label
 var _hint_label: Label
 var _status_label: Label
 var _status_seconds := 0.0
+## The wrong-way banner: the one line in the warband that is a warning rather
+## than an objective. It stays up until the world says the body turned around.
+var _warning_label: Label
 ## The aim reticle, drawn at the screen centre while the mouse is captured.
 var _reticle: Control
 
@@ -86,6 +89,22 @@ func set_prompt(text: String) -> void:
 	if _prompt_label != null:
 		_prompt_label.text = text
 		_prompt_label.visible = not text.is_empty()
+
+## The wrong-way banner: one loud line across the top of the screen, or "" to put
+## it away. Unlike the status line it has no clock - the trail's own distance
+## decides how long it is up, so it cannot lie about a body that is still walking
+## the wrong way.
+func set_warning(text: String) -> void:
+	if _warning_label == null:
+		return
+	_warning_label.text = text
+	_warning_label.visible = not text.is_empty()
+
+## The banner itself, for the world and for a test that must not read a private
+## label.
+func warning_label() -> Label:
+	return _warning_label
+
 
 ## A temporary banner ("Reviving...", "Dorn is down").
 func set_status(text: String, seconds: float = 2.5) -> void:
@@ -218,6 +237,22 @@ func _build() -> void:
 	_status_label.add_theme_font_size_override("font_size", 20)
 	_status_label.visible = false
 	root_control.add_child(_status_label)
+
+	# The warning sits above the status line, in gold on a blood outline: it is
+	# the only banner that must be read from the corner of an eye while a squad
+	# is being walked the wrong way up a dark trail.
+	_warning_label = Label.new()
+	_warning_label.name = "Warning"
+	_warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_warning_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_warning_label.position = Vector2(-460, 22)
+	_warning_label.custom_minimum_size = Vector2(920, 0)
+	_warning_label.add_theme_font_size_override("font_size", 34)
+	_warning_label.add_theme_color_override("font_color", Color(1.0, 0.79, 0.26))
+	_warning_label.add_theme_color_override("font_outline_color", Color(0.52, 0.03, 0.02))
+	_warning_label.add_theme_constant_override("outline_size", 9)
+	_warning_label.visible = false
+	root_control.add_child(_warning_label)
 
 	# The skill row. Bottom left keeps the crosshair, the centred prompt and the
 	# branded sigil's bottom-right tile clear, and each tile reads its grant,

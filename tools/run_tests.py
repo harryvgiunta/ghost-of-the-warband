@@ -113,6 +113,7 @@ WARBAND_TESTS = [
     "admin_arena_regression",
     "quartermaster_regression",
     "warband_art_regression",
+    "warband_appearance_regression",
     "run_persistence_regression",
     "checkpoint_regression",
     "warband_abilities_regression",

@@ -18,8 +18,13 @@ const ITEM_ID := "torch_hand"
 const LIGHT_ENERGY := 7.5
 const LIGHT_RANGE := 26.0
 const LIGHT_COLOR := Color(1.0, 0.63, 0.32)
-## Where the brand rides: the off hand, just below the shoulder line.
+## Where the brand rides until a live rig can answer: the off hand, just below
+## the shoulder line. A body with an `offhand_anchor()` socket replaces it every
+## frame with the hand's own grip point.
 const HAND := Vector3(-0.36, 1.16, -0.14)
+## How far above the grip point the burning head sits: the fist closes around the
+## stick a hand's width below the flame, not around the fire itself.
+const FLAME_LIFT := 0.16
 const POLL_SECONDS := 0.2
 
 var actor
@@ -41,6 +46,10 @@ func setup(body, id: int, warband_node) -> void:
 
 
 func _process(delta: float) -> void:
+	# The hand moves every frame; the poll below is only about whether the piece
+	# is still in the slot, so the follow runs on its own, finer clock.
+	if _lit:
+		_follow()
 	_elapsed += delta
 	if _elapsed < POLL_SECONDS:
 		return
@@ -79,8 +88,32 @@ func _sync() -> void:
 	_lit = want
 	if want:
 		_build()
+		_follow()
 	else:
 		_teardown()
+
+
+## Sit on the off hand's own grip point. The light is a child of the body, so
+## this is a world socket rather than a body-local offset: the torch keeps its
+## place in the fist through a run, a swing or a fall.
+func _follow() -> void:
+	if actor == null or not is_instance_valid(actor) or not is_inside_tree():
+		return
+	global_transform = _anchor()
+
+
+## The rig's off-hand socket. A warband body carries an `Archer` as `rig`; a rig
+## handed straight in answers for itself, and a body with neither follows its own
+## transform rather than keeping a stale hand position.
+func _anchor() -> Transform3D:
+	if actor == null or not is_instance_valid(actor):
+		return global_transform
+	if actor.has_method("offhand_anchor"):
+		return actor.offhand_anchor()
+	var rig = actor.get("rig")
+	if rig != null and is_instance_valid(rig) and rig.has_method("offhand_anchor"):
+		return rig.offhand_anchor()
+	return actor.global_transform
 
 
 ## The brand itself - a pitch-soaked stick with the world's flame cards on it -
@@ -104,7 +137,7 @@ func _build() -> void:
 	if light == null:
 		light = OmniLight3D.new()
 		light.name = "TorchLight"
-		light.position = Vector3(0.0, 0.08, 0.0)
+		light.position = Vector3(0.0, FLAME_LIFT + 0.08, 0.0)
 		light.light_color = LIGHT_COLOR
 		light.light_energy = LIGHT_ENERGY
 		light.omni_range = LIGHT_RANGE
@@ -113,6 +146,7 @@ func _build() -> void:
 		add_child(light)
 	if flame == null:
 		flame = build_visual(907 + merc_id * 13)
+		flame.position = Vector3(0.0, FLAME_LIFT, 0.0)
 		add_child(flame)
 	light.visible = true
 	flame.visible = true

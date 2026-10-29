@@ -22,6 +22,8 @@ const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const VoiceScript = preload("res://scripts/audio/voice.gd")
+const VoiceEmitterScript = preload("res://scripts/audio/voice_emitter.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -115,6 +117,8 @@ var _move_speed := 0.0
 var _strafe_dir := 1.0
 var _visual
 var _body: Node3D
+## The noise this body makes: a cry going into the swing, one going down.
+var _voice: VoiceEmitter
 var _rng := RandomNumberGenerator.new()
 var _target: CharacterBody3D
 var _senses := MobSenses.new()
@@ -204,6 +208,16 @@ func _ready() -> void:
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
 	_state_time = 0.0
+	# The voice is named by the profile, so a hollow warden and a gallowsroot look
+	# their takes up in their own folders without this file knowing either one.
+	_voice = VoiceEmitterScript.create(voice_id(), self, false, 2711 + int(absf(global_position.x)))
+
+
+## The voice this body speaks with: the profile id, which is also the folder of
+## its takes. A mobset with no recordings answers an empty voice - silence, not
+## an error.
+func voice_id() -> String:
+	return mob_id
 
 
 ## The profile table and the identity hooks are virtual so a second mobset can
@@ -438,6 +452,10 @@ func _enter(next_state: String, reset_time := true) -> void:
 	state = next_state
 	if reset_time:
 		_state_time = 0.0
+	if next_state == "WINDUP":
+		# The windup is the only warning a body gives, so the noise belongs to it
+		# rather than to the blow: a player facing away is told anyway.
+		_voice.say("attack")
 	if next_state == "STRIKE":
 		# The committed swing, heard from the body's own hand. `Sfx` reads the
 		# piece the mob carries, so a watcher's club whooshes and a two-handed
@@ -816,8 +834,15 @@ func _enter_dead(announce: bool) -> void:
 	velocity = Vector3.ZERO
 	if is_instance_valid(_visual):
 		_visual.die(fall)
+	# Presentation, so every machine that runs this body hears it: the authority
+	# because it killed it, a replica because the snapshot just said so. `alive`
+	# is already false, so this cannot fire twice.
+	_voice.say("death")
 	if announce:
 		defeated.emit(self, int(profile.gold))
+		# Only the authority resolves a killer's `last_hitter` id, so only it
+		# asks the killer for a line.
+		VoiceScript.kill_quip(last_hitter)
 	# Hold the authored death pose for the shared five minutes, then dissolve.
 	CorpseHold.hold(self, _body)
 
@@ -855,6 +880,8 @@ func _ingest_pose(state: Dictionary, tick: int) -> void:
 
 
 func _process(delta: float) -> void:
+	if _voice != null:
+		_voice.tick(delta)
 	if not replica or not alive or not _received_pose:
 		return
 	_timeline.advance(delta)
@@ -868,6 +895,7 @@ func _process(delta: float) -> void:
 func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	var previous_health := health
 	var was_alive := alive
+	var previous_state := self.state
 	_ingest_pose(state,tick)
 	self.state = state.s
 	_state_time = state.t
@@ -878,6 +906,10 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 		_visual.set_motion(velocity, state.g)
 		_visual.set_combat(self.state, _state_time)
 		_visual.set_poise(_present_blocking(), _present_crouch())
+	# The host commits the swing; the guest hears the windup off the state change
+	# the snapshot carries, which is the authority's own rule one packet late.
+	if previous_state != "WINDUP" and self.state == "WINDUP":
+		_voice.say("attack")
 	if health < previous_health:
 		var applied: float = previous_health - health
 		DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", false, health <= 0.0)

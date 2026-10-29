@@ -1,0 +1,37 @@
+IRONWOOD AUDIO — LICENSE AND PROVENANCE
+
+The music and the combat one-shots under assets/audio/sfx were produced by the
+project from the recordings listed in docs/audio.md ("Slicing"). The spoken
+lines under assets/audio/voice are cut from the two Freesound recordings below.
+
+Both recordings are Creative Commons Attribution 4.0 International (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+CC BY 4.0 permits copying, modifying and redistributing the work, including
+commercially, provided the creator is credited and the changes are indicated.
+Credits and changes are recorded here and in docs/audio.md.
+
+WOLF GROWL
+  "wolf-growl.wav" by newagesoup
+  https://freesound.org/people/newagesoup/sounds/338674/
+  (c) newagesoup, licensed CC BY 4.0
+  Source file: 338674__newagesoup__wolf-growl.mp3 (the creator's 48 kHz preview
+  master, https://cdn.freesound.org/previews/338/338674_4067257-hq.mp3)
+  Changes: trimmed, mono-mixed and normalised; three windows of the sustained
+  growl were cut into assets/audio/voice/wolf/growl_01..03.ogg. The game
+  additionally pitches each take down or up by up to 6% and shifts it to the
+  body's position.
+
+WOLF DEATH
+  "Dog Begging.wav" by Coral_Island_Studios
+  https://freesound.org/people/Coral_Island_Studios/sounds/277195/
+  (c) Coral_Island_Studios, licensed CC BY 4.0
+  Source file: 277195__coral-island-studios__dog-begging.mp3 (the creator's
+  48 kHz preview master,
+  https://cdn.freesound.org/previews/277/277195_5324256-hq.mp3)
+  Changes: trimmed, mono-mixed and normalised; six separate vocalisations were
+  cut out of the take into assets/audio/voice/wolf/death_01..06.ogg and are
+  played pitched down 10-20% so they read as a dying wolf rather than a dog.
+
+Both windows tables live in tools/slice_game_audio.py (VOICE_SLICED), which is
+what turns the two masters into the shipped .ogg files; `--fetch` downloads the
+masters from the URLs above, so the tree is reproducible without an account.

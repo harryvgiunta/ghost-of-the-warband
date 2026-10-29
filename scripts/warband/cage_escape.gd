@@ -265,6 +265,27 @@ const DUEL_CARDS := [
 	},
 ]
 
+## The latch beat's own card, raised once the first fight's three lessons are
+## done. It is not a numbered step of the chapter - the duel's cards took IV-VII
+## and OUT is VIII - so it carries its own id and sits between them like the
+## revive card does. The one thing it has to teach is that the gold arrow over a
+## cage means `G` at the bars with a blade in hand, because "cut a latch" is not
+## a place a body has ever walked to.
+const LATCH_LESSON_STEP := "lesson_latches"
+const LATCH_LESSON := {
+	"kicker": "THE LATCHES  /  THE WARBAND",
+	"title": "The cages are shut - cut them open",
+	"body": "Run to the cage under the gold arrow, stand at the bars, and press G with a blade in your hand. One latch per cage: four cuts and the whole squad walks out of this wood with you.",
+	"keys": "W A S D  -  run        ·        G  -  cut a latch at the bars",
+	"footnote": "The arrow moves to the next cage that is still shut. A bare hand on a padlock cuts nothing - take the shiv.",
+}
+
+## The word over the latch arrow, and the one over the arrow at the gap in the
+## trees once the squad is out. A marker with a word is a place a body can walk
+## to; the camp has no signposts and no road in sight.
+const LATCH_MARKER_LABEL := "PRESS G"
+const RUN_MARKER_LABEL := "RUN HERE"
+
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CombatScript = preload("res://scripts/combat.gd")
@@ -313,6 +334,15 @@ var _shiv_pickup
 ## The bouncing arrow over that drop, shown only while the lesson wants it walked
 ## to (the movement card and the pickup card) and taken with it.
 var _shiv_marker
+## The arrow over the first cage that is still shut, labelled `PRESS G`: the latch
+## beat is four short walks, and a body that just finished a fight has no reason
+## to look at the bars. Shown from the moment the duel is done until the last
+## latch goes.
+var _latch_marker
+## The arrow over the gap in the trees once the squad is free, labelled `RUN HERE`.
+## It is hidden again the moment the mouth is crossed, where the trail (and the
+## world's own metres-to-town line) takes over.
+var _run_marker
 var _jogging := false
 var _cage_open: Array[bool] = []     # per cage, in CAGE_POSTS order
 var _watchers_awake := false
@@ -458,10 +488,23 @@ func place_warband(bodies_in: Array) -> void:
 	# hanging over it - a body at the cage line cannot see a dagger in the dirt, and
 	# "walk to your shiv" is a place, not a sentence.
 	_shiv_pickup = _spawn_pickup(LESSON_SHIV, SHIV_POST)
-	_shiv_marker = ArrowScript.new()
-	_shiv_marker.name = "ShivMarker"
-	add_child(_shiv_marker)
-	_shiv_marker.visible = false
+	_shiv_marker = _spawn_marker("ShivMarker", "")
+	# The latch arrow and the way out: both are parked until the beat that owns
+	# them, because a marker with nothing to say is noise over a dark camp.
+	_latch_marker = _spawn_marker("LatchMarker", LATCH_MARKER_LABEL)
+	_run_marker = _spawn_marker("RunMarker", RUN_MARKER_LABEL)
+
+
+## One gold arrow, hidden until its beat wants it. `word` is the label over the
+## arrow ("" for none: the shiv already floats its own name).
+func _spawn_marker(marker_name: String, word: String):
+	var marker = ArrowScript.new()
+	marker.name = marker_name
+	add_child(marker)
+	if not word.is_empty():
+		marker.set_label(word)
+	marker.visible = false
+	return marker
 
 
 ## Start the lesson: the sequencer, the first fight's own lesson, the cards and
@@ -493,6 +536,13 @@ func lesson_running() -> bool:
 	return _lesson and sequencer != null
 
 
+## True once the leaving has happened: the camp is behind the squad and the wood
+## is on its heels. A camp opened on a checkpoint has no sequencer and answers
+## false, because nothing about that save is escaping.
+func escaping() -> bool:
+	return sequencer != null and sequencer.state() == SequencerScript.State.ESCAPING
+
+
 ## Throw the opening away. A guest in a co-op campaign walks into this camp, but
 ## the cages are the host's and the lesson is a solo beat: replaying it would hold
 ## the guest's tree still behind a card about somebody else's opening, and a
@@ -514,8 +564,9 @@ func dismiss_lesson() -> void:
 	# lesson must not inherit its pause.
 	if card != null and card.is_open():
 		card.close()
-	if _shiv_marker != null and is_instance_valid(_shiv_marker):
-		_shiv_marker.visible = false
+	for marker in [_shiv_marker, _latch_marker, _run_marker]:
+		if marker != null and is_instance_valid(marker):
+			marker.visible = false
 	caged_ids.clear()
 	_cage_anchors.clear()
 	_cage_open.clear()
@@ -689,6 +740,9 @@ func note_pickup(pickup = null) -> void:
 func _process(delta: float) -> void:
 	_advance_cage_doors(delta)
 	_update_shiv_marker()
+	_update_latch_marker()
+	_update_run_marker()
+	_maybe_latches_card()
 
 
 func _physics_process(delta: float) -> void:
@@ -990,7 +1044,10 @@ func _on_watcher_attack(attacker, amount: float, victim) -> void:
 	if outcome == CombatScript.DEFENSE_NONE:
 		SfxScript.landed(attacker, victim.global_position + Vector3.UP)
 	elif outcome > CombatScript.DEFENSE_NONE:
-		SfxScript.defense(attacker.global_position, outcome == CombatScript.DEFENSE_PARRY)
+		# The defender is what decides the metal: a wooden shield is a thud, a
+		# shiv is a thin clang, a raised blade rings.
+		SfxScript.defense(attacker.global_position,
+			outcome == CombatScript.DEFENSE_PARRY, victim)
 	if outcome >= 0 and controller != null and victim == controller.active_body(1) \
 			and duel != null and duel.fighting():
 		if outcome == CombatScript.DEFENSE_BLOCK or outcome == CombatScript.DEFENSE_WEAK_BLOCK:
@@ -1038,6 +1095,11 @@ func _push_duel_card(slot: int) -> void:
 
 func _on_state_changed(state: int, objective: String) -> void:
 	_push_card(state)
+	# The way out is marked on the frame the squad is freed, not the frame after
+	# the card is closed: the card covers the screen anyway, and a marker that
+	# arrives late is a marker a body has already walked past.
+	_update_latch_marker()
+	_update_run_marker()
 	if hud != null:
 		hud.set_status(objective, 6.0)
 	_write_prompt(objective, objective)
@@ -1109,6 +1171,90 @@ func _update_shiv_marker() -> void:
 		_shiv_marker.visible = wanted
 	if wanted:
 		_shiv_marker.anchor_at((_shiv_pickup as Node3D).global_position)
+
+
+## The first cage whose latch is still on, or -1 when the squad is out (or the
+## camp has no cages to speak of).
+func _first_closed_cage() -> int:
+	for index in CAGE_POSTS.size():
+		if index >= _cage_open.size() or not bool(_cage_open[index]):
+			return index
+	return -1
+
+
+## The latch arrow: the first fight is done, the cages are the errand, and a body
+## that just put two wardens down is looking at the wood rather than at four
+## padlocks. Anchored at the shut cage's own bars, on the side the approach walks
+## from, so the arrow hangs over the latch the player is about to reach for.
+func _update_latch_marker() -> void:
+	if _latch_marker == null or not is_instance_valid(_latch_marker):
+		return
+	var index := _first_closed_cage()
+	var done: bool = duel != null and is_instance_valid(duel) \
+		and duel.step() == DuelScript.Step.DONE
+	var taken: bool = sequencer != null and sequencer.rescuer_taken()
+	var wanted := index >= 0 and done and taken
+	if wanted != _latch_marker.visible:
+		_latch_marker.visible = wanted
+	if wanted:
+		var post: Vector3 = CAGE_POSTS[index]
+		_latch_marker.anchor_at(post + Vector3(0.0, 0.0, CAGE_HALF))
+
+
+## The way out: the squad is free, the gold arrow stands in the gap in the trees
+## and comes down the moment the mouth is crossed (the trail's own line takes over
+## beyond it) or the wood answers the leaving.
+func _update_run_marker() -> void:
+	if _run_marker == null or not is_instance_valid(_run_marker):
+		return
+	var freed: bool = sequencer != null \
+		and sequencer.state() == SequencerScript.State.FREED
+	var wanted := freed and not _mouth_crossed()
+	if wanted != _run_marker.visible:
+		_run_marker.visible = wanted
+	if wanted:
+		_run_marker.anchor_at(GATE_POINT)
+
+
+## Whether any of the camp's own watchers is still standing: a body to fight, not
+## a corpse to walk past.
+func _camp_watchers_alive() -> bool:
+	for watcher in guards:
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			return true
+	return false
+
+
+## Whether the soul's body is at or past the gap in the trees. The arrow has done
+## its job the moment a body is standing on the mouth: the trail, its torches and
+## the HUD's metres take it from there.
+func _mouth_crossed() -> bool:
+	var actor = controller.active_body(1) if controller != null else null
+	if actor == null or not is_instance_valid(actor):
+		return false
+	return (actor as Node3D).global_position.z <= GATE_POINT.z + 1.0
+
+
+## The latch beat's card, raised once - and only once the tree is free to raise it.
+## A card that is still open is never written over: the player closes what they
+## are reading, and this reads the fact again on the next frame.
+func _maybe_latches_card() -> void:
+	if card == null or card.is_open():
+		return
+	if _first_closed_cage() < 0 or sequencer == null or duel == null:
+		return
+	if not sequencer.rescuer_taken() or duel.step() != DuelScript.Step.DONE:
+		return
+	# `DONE` is also where the guard beat ends, with both watchers still standing
+	# and swinging. A card about padlocks must not freeze that fight: the latch
+	# beat waits for the pair to actually be down.
+	if _camp_watchers_alive():
+		return
+	if card.has_shown(LATCH_LESSON_STEP):
+		return
+	card.show_step(LATCH_LESSON_STEP, str(LATCH_LESSON["kicker"]),
+		str(LATCH_LESSON["title"]), str(LATCH_LESSON["body"]),
+		str(LATCH_LESSON["keys"]), str(LATCH_LESSON["footnote"]))
 
 
 ## A soul stepped into the rescuer: the lesson starts here, on the frame the
@@ -1262,9 +1408,13 @@ func _on_duel_step(step: int) -> void:
 			_set_status("The pair are awake. Your cuts are on the card - read it, then swing.", 4.5)
 		DuelScript.Step.DONE:
 			_set_status("The pair are down. Cut a latch at each cage with G.", 5.0)
-	# The arrow is a frame behind the card otherwise: a paused tree never reaches
-	# `_process`, and the walk the card just asked for would be unmarked.
+	# The arrows are a frame behind the card otherwise: a paused tree never reaches
+	# `_process`, and the walk the card just asked for would be unmarked. The
+	# latch beat's card is raised here too, on the frame the fight ends.
 	_update_shiv_marker()
+	_update_latch_marker()
+	_update_run_marker()
+	_maybe_latches_card()
 
 
 # --- the latches -----------------------------------------------------------

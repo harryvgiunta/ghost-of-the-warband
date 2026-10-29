@@ -8,7 +8,7 @@ extends RefCounted
 ## seed, 30-70 m wavelengths and a couple of metres of relief, so walking the trail
 ## goes over rises and through hollows and the horizon is not a line.
 ##
-## Three rules hold it together.
+## Four rules hold it together.
 ##
 ## 1. **One surface.** The mesh, the collider and `height_at()` are the same
 ##    surface: `height_at` interpolates the exact triangle the collider carries, so
@@ -17,9 +17,21 @@ extends RefCounted
 ## 2. **Flat where flatness is the point.** The camp pocket and the town square are
 ##    padded to `PAD_Y` and blended into the slope over `blend` metres, so the cages
 ##    stand level, the square is level, and the walk between them is not.
-## 3. **No seam, no ledge, no hole.** The field is bounded like the floor it
+## 3. **The wood is closed.** After the rolling floor is normalised, a mountain rim
+##    is raised along the strip's four edges - a steep face inside the field's
+##    boundary, 34-58 m high and noise-varied along its length - so the trail is a
+##    valley with walls instead of a plank in space. The face is steeper than the
+##    46-degree `floor_max_angle` every body walks with, so the trimesh *is* the
+##    wall and no collision is added for it.
+## 4. **No seam, no ledge, no hole.** The field is bounded like the floor it
 ##    replaces, the mesh covers all of it, and the world keeps a catch floor under
 ##    the lowest point so nothing can fall out of the map.
+##
+## One hollow is cut into it: a shallow swamp basin `SWAMP_FRACTION` of the way
+## down the trail, on one side of the lane, with a flat water level `swamp_region()`
+## publishes for the water plane and its reeds. The lane itself is never dug - the
+## basin starts `SWAMP_INNER` metres off the centre line, clear of the torch posts
+## - so the route stays exactly the route while the ground beside it goes wet.
 ##
 ## It is static state, because a world has exactly one ground: `build()` bakes the
 ## grid and every area samples it afterwards. Unbuilt (a standalone preview scene),
@@ -41,6 +53,36 @@ const OCTAVES := [{"wavelength": 64.0, "weight": 1.0}, {"wavelength": 40.0, "wei
 const PEAK := 1.9
 ## Where a pad is flat, and how far it takes to stop being flat.
 const PAD_Y := 0.0
+## The mountain rim: the steep face's heights, the band it rises over at each
+## edge (from the toe inside the wood to the field's boundary), and the share of
+## that band the face takes. `_rim_curve()` reaches full height by this share, so
+## the face is steeper than the 46-degree floor every body walks on and the strip
+## is enclosed by ground rather than by an invisible wall.
+const RIM_MIN := 34.0
+const RIM_MAX := 58.0
+const RIM_FACE_SHARE := 0.72
+## West/east toes, and the north/south toes. The field is x -210..210, z -1242..242.
+const RIM_TOE_X := 160.0
+const RIM_TOE_Z_NORTH := 180.0
+const RIM_TOE_Z_SOUTH := -1180.0
+## The upper edge of the rim's forested skirt, as a share of the face height:
+## below it the slope is gentle and dark enough for the wood's own rows to stand.
+const RIM_SKIRT_SHARE := 0.24
+## The swamp: where along the trail it begins, which side of the lane it lies on,
+## how far off the line its banks run, how long it is, and how deep the bowl cuts.
+## The water level is the lane's own height minus `SWAMP_WATER_DROP`, and the
+## water plane's inner edge starts past the torch line (`SWAMP_INNER` > 5.4 m).
+const SWAMP_FRACTION := 0.515
+const SWAMP_SIDE := -1.0
+const SWAMP_INNER := 6.4
+const SWAMP_OUTER := 26.0
+const SWAMP_HALF_LENGTH := 46.0
+const SWAMP_BANK := 4.5
+const SWAMP_DEPTH := 1.45
+const SWAMP_WATER_DROP := 0.55
+## The trail line the swamp is measured against: the longest polyline the caller
+## passes as `worn` is the lane (the corridor to the camp is a fifth as long).
+const SWAMP_TRAIL_MIN_LENGTH := 400.0
 ## The worn path's footprint: how much dirt the walk loads into the terrain shader's
 ## vertex alpha, how wide it is at its widest, and how patchy it is along its length.
 const WEAR_ALPHA := 0.55
@@ -50,6 +92,10 @@ static var _heights := PackedFloat32Array()
 static var _built := false
 static var _pads: Array = []
 static var _worn: Array = []
+## The baked swamp, as `height_at()`'s owner publishes it to anything that wants
+## to lay water, reeds or mist: `{centre, forward, right, water_y, inner, outer,
+## half_length, side}`.
+static var _swamp: Dictionary = {}
 ## The baked field's extremes, so nothing has to fold 13,000 floats to read them.
 static var _low := 0.0
 static var _high := 0.0
@@ -94,6 +140,26 @@ static func build(parent: Node3D, style: WorldStyle, pads: Array = [],
 static func height_at(x: float, z: float) -> float:
 	if not _built:
 		return PAD_Y
+	return _sampled(x, z)
+
+
+## The same point lifted onto the ground: what every prop that stands on it uses.
+static func grounded(at: Vector3) -> Vector3:
+	return Vector3(at.x, height_at(at.x, at.z) + at.y, at.z)
+
+
+## The one swamp in the wood, for the trail's water plane, reeds and mist:
+## `{centre, forward, right, water_y, inner, outer, half_length, side}`, or an
+## empty dictionary in a preview whose ground was never baked. `centre` is on the
+## lane at `SWAMP_FRACTION`; `side` is the lane's own right-hand sign the basin
+## lies on.
+static func swamp_region() -> Dictionary:
+	return _swamp.duplicate() if not _swamp.is_empty() else {}
+
+
+## The interpolated field without the "was it baked" guard, so the bake itself
+## can sample its own progress.
+static func _sampled(x: float, z: float) -> float:
 	var u := clampf((x - ORIGIN.x) / CELL, 0.0, float(COLS) - 0.0001)
 	var v := clampf((z - ORIGIN.y) / CELL, 0.0, float(ROWS) - 0.0001)
 	var i := int(u)
@@ -109,11 +175,6 @@ static func height_at(x: float, z: float) -> float:
 	if fx + fz <= 1.0:
 		return h00 + (h10 - h00) * fx + (h01 - h00) * fz
 	return (h11 - h01) * fx + (h11 - h10) * fz + (h10 + h01 - h11)
-
-
-## The same point lifted onto the ground: what every prop that stands on it uses.
-static func grounded(at: Vector3) -> Vector3:
-	return Vector3(at.x, height_at(at.x, at.z) + at.y, at.z)
 
 
 ## The surface normal at a point, for anything laid flat on the ground.
@@ -169,16 +230,23 @@ static func _bake() -> void:
 	var width := COLS + 1
 	_heights = PackedFloat32Array()
 	_heights.resize(count)
-	_low = INF
-	_high = -INF
+	_swamp = {}
 	for j in ROWS + 1:
 		for i in width:
 			var index := j * width + i
-			var height := _padded(raw[index] * scale,
-				ORIGIN.x + float(i) * CELL, ORIGIN.y + float(j) * CELL)
-			_heights[index] = height
-			_low = minf(_low, height)
-			_high = maxf(_high, height)
+			var x := ORIGIN.x + float(i) * CELL
+			var z := ORIGIN.y + float(j) * CELL
+			# The rolling floor, then the pads, then the rim that closes the strip.
+			_heights[index] = _rimmed(_padded(raw[index] * scale, x, z), x, z)
+	# The swamp is cut after the rim and the pads: a hollow in the walking wood,
+	# never a second surface. It also publishes the water level the trail's water
+	# plane lies on, measured off the lane's own baked height.
+	_settle_swamp()
+	_low = INF
+	_high = -INF
+	for index in count:
+		_low = minf(_low, _heights[index])
+		_high = maxf(_high, _heights[index])
 	_built = true
 
 
@@ -244,6 +312,174 @@ static func _padded(height: float, x: float, z: float) -> float:
 	return out
 
 
+# --- the rim and the swamp -------------------------------------------------
+
+## The strip's edges, raised: the field boundary pulled in to the four toes, with
+## the whole face inside `RIM_FACE_SHARE` of that band. A body walks with a
+## 46-degree floor, and the face is steeper than that everywhere it is climbed, so
+## the trimesh closes the wood without a single extra collider. The height along
+## the ridge is noise-varied, so the rim is a range of peaks.
+static func _rimmed(height: float, x: float, z: float) -> float:
+	var rise := _rim_rise(x, z)
+	if rise <= 0.0:
+		return height
+	var noise := 0.5 + 0.5 * _value(x / 47.0 + 11.0, z / 47.0 - 5.0)
+	return height + rise * lerpf(RIM_MIN, RIM_MAX, noise)
+
+
+## 0 in the walking wood, 1 at the field's edge. The max of the four faces, so a
+## corner takes the taller of its two ridges instead of adding them.
+static func _rim_rise(x: float, z: float) -> float:
+	# West toe -160, east toe 160, north toe 180, south toe -1180; the field runs
+	# x -210..210 and z -1242..242 (ORIGIN + COLS/ROWS * CELL).
+	var west := (-RIM_TOE_X - x) / maxf(absf(ORIGIN.x) - RIM_TOE_X, 1.0)
+	var east := (x - RIM_TOE_X) / maxf(absf(ORIGIN.x) - RIM_TOE_X, 1.0)
+	var north := (z - RIM_TOE_Z_NORTH) \
+		/ maxf(ORIGIN.y + float(ROWS) * CELL - RIM_TOE_Z_NORTH, 1.0)
+	var south := (RIM_TOE_Z_SOUTH - z) \
+		/ maxf(RIM_TOE_Z_SOUTH - ORIGIN.y, 1.0)
+	return maxf(maxf(_rim_curve(west), _rim_curve(east)),
+		maxf(_rim_curve(north), _rim_curve(south)))
+
+
+## The face's own profile: zero at the toe, the full peak by `RIM_FACE_SHARE`,
+## and the plateau to the boundary. The mid-face gradient is `1.5 / 0.72` of the
+## average, which is what puts every climb over the 46-degree floor.
+static func _rim_curve(t: float) -> float:
+	var share := clampf(t / RIM_FACE_SHARE, 0.0, 1.0)
+	return share * share * (3.0 - 2.0 * share)
+
+
+## Cut the one swamp into the baked field. The bowl is measured off the lane's
+## own height at that fraction, its banks stay under 25 degrees, and the water
+## level is published for the trail to lay a plane on. Everything is derived from
+## the lane polyline the world hands in as `worn`, so the swamp follows the route
+## instead of a guessed coordinate.
+static func _settle_swamp() -> void:
+	_swamp = {}
+	var trail := _trail_line()
+	if trail.size() < 2:
+		return
+	var marks := PackedFloat32Array()
+	marks.resize(trail.size())
+	marks[0] = 0.0
+	for index in range(1, trail.size()):
+		marks[index] = marks[index - 1] + trail[index - 1].distance_to(trail[index])
+	var total: float = marks[marks.size() - 1]
+	if total < SWAMP_TRAIL_MIN_LENGTH:
+		return
+	var frame := _frame_on(trail, marks, total * SWAMP_FRACTION)
+	var centre: Vector3 = frame["position"]
+	var forward: Vector3 = frame["forward"]
+	var right: Vector3 = frame["right"]
+	var flat := Vector2(centre.x, centre.z)
+	var heading := Vector2(forward.x, forward.z)
+	var across := Vector2(right.x, right.z)
+	var base := 0.0
+	for along in [-SWAMP_HALF_LENGTH, -SWAMP_HALF_LENGTH * 0.5, 0.0,
+			SWAMP_HALF_LENGTH * 0.5, SWAMP_HALF_LENGTH]:
+		var sample := centre + forward * float(along)
+		base += _sampled(sample.x, sample.z)
+	base /= 5.0
+	for j in ROWS + 1:
+		for i in COLS + 1:
+			var x := ORIGIN.x + float(i) * CELL
+			var z := ORIGIN.y + float(j) * CELL
+			var weight := _swamp_weight(x, z, flat, across, heading)
+			if weight <= 0.0:
+				continue
+			var ripple := 0.30 * (0.5 + 0.5 * _value(x / 13.0 + 7.0, z / 13.0 - 3.0))
+			var floor_y := base - SWAMP_DEPTH - ripple
+			var slot := j * (COLS + 1) + i
+			_heights[slot] = lerpf(_heights[slot], floor_y, weight)
+	_swamp = {
+		"centre": centre,
+		"forward": forward,
+		"right": right,
+		"water_y": base - SWAMP_WATER_DROP,
+		"inner": SWAMP_INNER,
+		"outer": SWAMP_OUTER,
+		"half_length": SWAMP_HALF_LENGTH,
+		"side": SWAMP_SIDE,
+	}
+
+
+## How much of the swamp a point belongs to: 0 on dry ground and on the lane,
+## 1 in the middle of the bowl. Shared by the bake, the mesh's wet tint and the
+## trail's reeds.
+static func _swamp_weight(x: float, z: float, centre: Vector2, across: Vector2,
+		heading: Vector2) -> float:
+	var offset := Vector2(x, z) - centre
+	var along := offset.dot(heading)
+	var lateral := offset.dot(across) * SWAMP_SIDE
+	if lateral <= SWAMP_INNER - SWAMP_BANK or lateral >= SWAMP_OUTER + SWAMP_BANK:
+		return 0.0
+	if absf(along) >= SWAMP_HALF_LENGTH:
+		return 0.0
+	var along_window := 1.0 - smoothstep(SWAMP_HALF_LENGTH * 0.62, SWAMP_HALF_LENGTH,
+		absf(along))
+	var bank_in := smoothstep(SWAMP_INNER, SWAMP_INNER + SWAMP_BANK, lateral)
+	var bank_out := 1.0 - smoothstep(SWAMP_OUTER - SWAMP_BANK, SWAMP_OUTER, lateral)
+	return clampf(along_window * bank_in * bank_out, 0.0, 1.0)
+
+
+## The swamp's weight at a world point, for anything outside the bake that wants
+## to know whether it stands in the wet (the trail's darker brush, its reeds).
+static func swamp_weight_at(x: float, z: float) -> float:
+	if _swamp.is_empty():
+		return 0.0
+	var centre: Vector3 = _swamp["centre"]
+	var forward: Vector3 = _swamp["forward"]
+	var right: Vector3 = _swamp["right"]
+	return _swamp_weight(x, z, Vector2(centre.x, centre.z),
+		Vector2(right.x, right.z), Vector2(forward.x, forward.z))
+
+
+## The longest polyline among the worn ones: the world's lane. The corridor to
+## the camp is a hundred and seventy metres, so length is the one honest way to
+## tell the route from the approach.
+static func _trail_line() -> PackedVector3Array:
+	var best := PackedVector3Array()
+	var best_length := 0.0
+	for path in _worn:
+		var points: PackedVector3Array = path.get("points", PackedVector3Array())
+		if points.size() < 2:
+			continue
+		var length := 0.0
+		for index in range(points.size() - 1):
+			length += points[index].distance_to(points[index + 1])
+		if length > best_length:
+			best_length = length
+			best = points
+	if best_length < SWAMP_TRAIL_MIN_LENGTH:
+		return PackedVector3Array()
+	return best
+
+
+## The frame at an arc distance along a polyline: where it is, which way it runs
+## and which way its right hand points.
+static func _frame_on(trail: PackedVector3Array, marks: PackedFloat32Array,
+		distance: float) -> Dictionary:
+	var total: float = marks[marks.size() - 1]
+	var at := clampf(distance, 0.0, total)
+	var index := 0
+	for probe in range(trail.size() - 1):
+		if at <= marks[probe + 1]:
+			index = probe
+			break
+		index = trail.size() - 2
+	var from := trail[index]
+	var to := trail[index + 1]
+	var span := maxf(0.0001, marks[index + 1] - marks[index])
+	var t := clampf((at - marks[index]) / span, 0.0, 1.0)
+	var forward := (to - from) / (to - from).length()
+	return {
+		"position": from.lerp(to, t),
+		"forward": forward,
+		"right": Vector3(forward.z, 0.0, -forward.x),
+	}
+
+
 # --- the mesh --------------------------------------------------------------
 
 static func _mesh() -> ArrayMesh:
@@ -267,7 +503,25 @@ static func _mesh() -> ArrayMesh:
 			# alpha that is its dirt weight - a faint, patchy, foot-worn line
 			# through the wood, not a road.
 			var tint := 0.94 + 0.08 * (_value(x / 23.0, z / 23.0) * 0.5 + 0.5)
-			colors[index] = Color(tint, tint, tint * 0.97, _wear(x, z))
+			var color := Color(tint, tint, tint * 0.97, _wear(x, z))
+			# The wet hollow reads as silt and shade: darker than the wood around
+			# it, which is half of why a hand torch is worth carrying there.
+			var wet := swamp_weight_at(x, z)
+			if wet > 0.0:
+				var damp := 1.0 - 0.36 * wet
+				color = Color(color.r * damp, color.g * (damp * 1.02), color.b * damp,
+					color.a)
+			# The rim's skirt is forest-dark where the wood's last rows climb it;
+			# the face above turns to cold stone.
+			var rise := _rim_rise(x, z)
+			if rise > 0.0:
+				var rock := smoothstep(RIM_SKIRT_SHARE, 0.82, rise)
+				var skirt := Color(color.r * 0.66, color.g * 0.84, color.b * 0.62)
+				var stone := Color(color.r * 0.94, color.g * 0.98, color.b * 1.06)
+				color = Color(lerpf(skirt.r, stone.r, rock),
+					lerpf(skirt.g, stone.g, rock), lerpf(skirt.b, stone.b, rock),
+					color.a)
+			colors[index] = color
 	for j in ROWS:
 		for i in COLS:
 			var a := j * width + i

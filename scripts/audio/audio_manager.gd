@@ -1,14 +1,23 @@
 extends Node
-## One audio authority: two buses, two music beds and the one-shot pool.
+## One audio authority: three buses, two music beds and the one-shot pool.
 ##
 ## Music follows the scene. `title.tscn` is the menu theme and every other scene
 ## is the warband's soundtrack, so a scene that forgets to start a track is not
-## a silent scene - the manager already knows. A crossfade carries the switch.
+## a silent scene - the manager already knows. A crossfade carries the switch,
+## and a campaign start is allowed to cut the menu off outright and put the score
+## back at zero.
+##
+## The soundtrack is 49 minutes long and its Ogg loop point is a cut, not a
+## composition, so the seam is managed here: when the live bed comes inside
+## `LOOP_FADE_SECONDS` of the end the other bed starts the same stream from zero
+## and takes over, and the last seconds of the score dissolve into its first.
+## Only the menu theme is looped on the stream.
 ##
 ## Volume lives on the buses, never on the voices: one slider is one
 ## `AudioServer` call and every stream under it follows, including a take that
 ## starts a second later. The value is persisted, because a mix a player set is
-## a setting like any other.
+## a setting like any other. `Reverb` is a third bus that returns into `SFX`, so
+## an event that asks for its tail still answers to the effects slider.
 ##
 ## The two streams are big (the soundtrack is a 49 minute master), so a track is
 ## loaded when it is wanted and dropped when the other bed takes over. Nothing
@@ -19,6 +28,7 @@ const SfxLibraryScript = preload("res://scripts/audio/sfx_library.gd")
 
 const BUS_MUSIC := "Music"
 const BUS_SFX := "SFX"
+const BUS_REVERB := "Reverb"
 const DEFAULT_SAVE_PATH := "user://audio_settings.json"
 const SAVE_VERSION := 1
 const MENU_SCENE := "title.tscn"
@@ -27,6 +37,10 @@ const TRACKS := {
 	"warband": "res://assets/audio/music/warband_soundtrack.ogg",
 }
 const FADE_SECONDS := 1.2
+## How much of the soundtrack's tail the managed seam crossfades: the live bed
+## starts the head of the stream on the other bed inside this window, so the
+## loop point is never heard as a cut at full level.
+const LOOP_FADE_SECONDS := 3.0
 const BED_SILENCE_DB := -60.0
 const VOICES_3D := 12
 const VOICES_2D := 6
@@ -34,6 +48,17 @@ const VOICES_2D := 6
 ## per body, and a footfall must never be the sound that gets cut when a blow
 ## needs the next voice.
 const VOICES_STEP := 6
+## Spoken lines have their own pool for the same reason, the other way round: a
+## growl or a shout is over a second long, so one line would sit on a combat
+## voice for the whole fight and a blow landing under it would be cut instead.
+## Four places and four flat lines is a camp of fighters, not a crowd.
+const VOICES_VOICE := 4
+## The 3D shape a spoken line gets when its row does not ask for another: the
+## widest in the mix, because a growl has to carry from the far side of a
+## clearing and a shout does not need muffling.
+const LINE_UNIT_SIZE := 9.0
+const LINE_MAX_DISTANCE := 70.0
+const LINE_CUTOFF := 11000.0
 ## The 3D shape a voice gets when its event does not ask for another: a world
 ## one-shot heard across the field.
 const VOICE_UNIT_SIZE := 7.0
@@ -63,13 +88,23 @@ var last_event_position: Variant = null
 
 var _beds: Array[AudioStreamPlayer] = []
 var _bed_index := 0
+## Which track each bed holds. Parallel to `_beds`, and cleared when the bed is
+## retired: the seam has to know that the live bed is the non-looping score.
+var _bed_tracks: Array[String] = ["", ""]
+## The scene instance a menu restart started from, so the scene sync cannot ask
+## the title for the menu theme and drag the score back while it is still up.
+var _restart_scene_id := 0
 var _streams: Dictionary = {}
 var _voices_3d: Array[AudioStreamPlayer3D] = []
 var _voices_step: Array[AudioStreamPlayer3D] = []
+var _voices_line: Array[AudioStreamPlayer3D] = []
 var _voices_2d: Array[AudioStreamPlayer] = []
+var _voices_flat_line: Array[AudioStreamPlayer] = []
 var _voice_3d := 0
 var _voice_step := 0
+var _voice_line := 0
 var _voice_2d := 0
+var _voice_flat_line := 0
 var _last_variant: Dictionary = {}
 var _recent: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
@@ -78,6 +113,10 @@ var _scene_id := 0
 
 
 func _ready() -> void:
+	# A tutorial card pauses the tree. The beds already run through it, so the
+	# manager's own seam and scene watch have to as well - otherwise a card read
+	# over the last seconds of the score leaves a non-looping stream stopped.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_rng.seed = 20261028
 	# A headless run is not the player's session: it must never read or write the
 	# mix a person set on this machine.
@@ -97,6 +136,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_sync_scene_music()
+	_seam_if_due()
 
 
 ## Whether there is a device to play into. Everything else - buses, volumes,
@@ -175,6 +215,7 @@ func play_music(track: String, fade: float = FADE_SECONDS) -> void:
 	to.stream = _stream_for(track)
 	to.volume_db = BED_SILENCE_DB
 	to.play()
+	_bed_tracks[_bed_index] = track
 	var seconds := clampf(fade, 0.05, 8.0)
 	if _fade != null and _fade.is_valid():
 		_fade.kill()
@@ -184,6 +225,94 @@ func play_music(track: String, fade: float = FADE_SECONDS) -> void:
 	if from.playing:
 		_fade.tween_property(from, "volume_db", BED_SILENCE_DB, seconds)
 		_fade.chain().tween_callback(_retire.bind(from))
+
+
+## Start a track from the top, now. The menu uses this to hand the score over:
+## the menu theme is stopped outright - no crossfade carrying the title music
+## onto the first act - and the campaign track starts at zero, its own beginning
+## rather than wherever a bed happened to be.
+func start_campaign_music() -> void:
+	# The title is still the current scene for the rest of the frame (and until
+	# the next scene loads). Remember which scene asked, so `_sync_scene_music`
+	# cannot answer it with the menu theme and undo the restart.
+	_restart_scene_id = _scene_instance_id()
+	_restart_track("warband")
+
+
+func _restart_track(track: String) -> void:
+	if not TRACKS.has(track):
+		return
+	music_track = track
+	_note("music", {"track": track, "available": is_available(), "restart": true})
+	if not is_available():
+		return
+	if _fade != null and _fade.is_valid():
+		_fade.kill()
+	# Both beds stop on the spot: a restart is a cut, and a half-faded bed left
+	# playing would keep the menu's tail under the first bar.
+	for index in _beds.size():
+		var bed := _beds[index]
+		bed.stop()
+		bed.stream = null
+		bed.volume_db = BED_SILENCE_DB
+		_bed_tracks[index] = ""
+	var live := _beds[_bed_index]
+	live.stream = _stream_for(track)
+	live.volume_db = 0.0
+	_bed_tracks[_bed_index] = track
+	live.play(0.0)
+	_purge_streams()
+
+
+## Whether the soundtrack's managed seam is due for a bed at `position` on a
+## `length`-second stream. Pure, so the headless regression can prove the window
+## without a device.
+func seam_due(position: float, length: float) -> bool:
+	if length <= LOOP_FADE_SECONDS * 2.0:
+		return false
+	return position >= length - LOOP_FADE_SECONDS
+
+
+## The managed loop seam. The score does not loop on its stream, so when the
+## live bed comes inside the fade window the other bed starts the same stream at
+## zero and crossfades in over the window; the outgoing bed is retired when the
+## fade lands, by which time the head of the track is already at its level.
+func _seam_if_due() -> void:
+	if not is_available() or music_track != "warband":
+		return
+	var live := _beds[_bed_index]
+	if _bed_tracks[_bed_index] != "warband" or live.stream == null:
+		return
+	if not live.playing:
+		# The score ran out before the seam could fire - a stall longer than the
+		# fade window leaves a non-looping stream stopped - so start it again
+		# rather than leaving the campaign silent. A deliberate stop has cleared
+		# `music_track` and never gets here.
+		live.volume_db = 0.0
+		live.play(0.0)
+		return
+	if not seam_due(live.get_playback_position(), live.stream.get_length()):
+		return
+	_seam()
+
+
+func _seam() -> void:
+	var from := _beds[_bed_index]
+	var track := _bed_tracks[_bed_index]
+	_bed_index = 1 - _bed_index
+	var to := _beds[_bed_index]
+	to.stream = _stream_for(track)
+	to.volume_db = BED_SILENCE_DB
+	to.play(0.0)
+	_bed_tracks[_bed_index] = track
+	if _fade != null and _fade.is_valid():
+		_fade.kill()
+	_fade = create_tween()
+	_fade.set_parallel(true)
+	_fade.tween_property(to, "volume_db", 0.0, LOOP_FADE_SECONDS)
+	_fade.tween_property(from, "volume_db", BED_SILENCE_DB, LOOP_FADE_SECONDS)
+	_fade.chain().tween_callback(_retire.bind(from))
+	_note("music", {"track": track, "seam": true})
 
 
 func stop_music(fade: float = 0.4) -> void:
@@ -238,23 +367,36 @@ func play_event(event: String, at: Variant = null) -> void:
 	var spread: Array = row.get("pitch", [1.0, 1.0])
 	var pitch := _rng.randf_range(float(spread[0]), float(spread[1]))
 	var level := float(row.get("db", 0.0))
+	# A row may ask for another bus (`Reverb` for the menu thud and the soul
+	# changing bodies). Voices are pooled, so the bus is re-stated on every play:
+	# a voice that last carried a tail must not swallow the next blade.
+	var bus_name := str(row.get("bus", BUS_SFX))
+	var pool := str(row.get("pool", "world"))
 	if at is Vector3:
 		var voice: AudioStreamPlayer3D
-		if str(row.get("pool", "world")) == "step":
+		if pool == "step":
 			voice = _voices_step[_voice_step]
 			_voice_step = (_voice_step + 1) % _voices_step.size()
+		elif pool == "voice":
+			voice = _voices_line[_voice_line]
+			_voice_line = (_voice_line + 1) % _voices_line.size()
 		else:
 			voice = _voices_3d[_voice_3d]
 			_voice_3d = (_voice_3d + 1) % _voices_3d.size()
 		voice.global_position = at
+		voice.bus = bus_name
 		voice.volume_db = level
 		voice.pitch_scale = pitch
 		voice.stream = stream
 		_shape(voice, row)
 		voice.play()
 		return
-	var flat := _voices_2d[_voice_2d]
-	_voice_2d = (_voice_2d + 1) % _voices_2d.size()
+	var flat := _voices_2d[_voice_2d] if pool != "voice" else _voices_flat_line[_voice_flat_line]
+	if pool == "voice":
+		_voice_flat_line = (_voice_flat_line + 1) % _voices_flat_line.size()
+	else:
+		_voice_2d = (_voice_2d + 1) % _voices_2d.size()
+	flat.bus = bus_name
 	flat.volume_db = level
 	flat.pitch_scale = pitch
 	flat.stream = stream
@@ -264,13 +406,34 @@ func play_event(event: String, at: Variant = null) -> void:
 # --- internals -------------------------------------------------------------
 
 func _ensure_buses() -> void:
-	for bus_name in [BUS_MUSIC, BUS_SFX]:
+	for bus_name in [BUS_MUSIC, BUS_SFX, BUS_REVERB]:
 		if AudioServer.get_bus_index(bus_name) >= 0:
 			continue
 		var index := AudioServer.bus_count
 		AudioServer.add_bus(index)
 		AudioServer.set_bus_name(index, bus_name)
 		AudioServer.set_bus_send(index, "Master")
+	# The reverb bus returns *into* the effects bus rather than into Master: its
+	# tail then passes through the SFX slider like everything else, and muting
+	# the effects mutes the reverb with them.
+	var reverb_bus := AudioServer.get_bus_index(BUS_REVERB)
+	if reverb_bus >= 0:
+		AudioServer.set_bus_send(reverb_bus, BUS_SFX)
+		if AudioServer.get_bus_effect_count(reverb_bus) == 0:
+			AudioServer.add_bus_effect(reverb_bus, _make_reverb())
+
+
+## The one room the mix owns: a short, dark tail, mostly dry so a door thud is
+## still a door and a soul's passage still has a direction.
+func _make_reverb() -> AudioEffectReverb:
+	var reverb := AudioEffectReverb.new()
+	reverb.room_size = 0.58
+	reverb.damping = 0.62
+	reverb.spread = 0.7
+	reverb.dry = 0.92
+	reverb.wet = 0.34
+	reverb.predelay_msec = 18.0
+	return reverb
 
 
 func _build_beds() -> void:
@@ -309,6 +472,24 @@ func _build_voices() -> void:
 		step.panning_strength = 1.0
 		add_child(step)
 		_voices_step.append(step)
+	# Spoken lines: the widest shape in the mix, because a growl has to carry
+	# from the far side of a clearing and a shout does not need muffling.
+	for index in VOICES_VOICE:
+		var line := AudioStreamPlayer3D.new()
+		line.name = "VoiceLine%d" % index
+		line.bus = BUS_SFX
+		line.unit_size = LINE_UNIT_SIZE
+		line.max_db = 3.0
+		line.max_distance = LINE_MAX_DISTANCE
+		line.attenuation_filter_cutoff_hz = LINE_CUTOFF
+		line.panning_strength = 1.0
+		add_child(line)
+		_voices_line.append(line)
+		var flat_line := AudioStreamPlayer.new()
+		flat_line.name = "VoiceFlatLine%d" % index
+		flat_line.bus = BUS_SFX
+		add_child(flat_line)
+		_voices_flat_line.append(flat_line)
 	for index in VOICES_2D:
 		var flat := AudioStreamPlayer.new()
 		flat.name = "Voice2D%d" % index
@@ -331,7 +512,19 @@ func _sync_scene_music() -> void:
 	var path := scene.scene_file_path
 	if path.is_empty():
 		return
+	# The title that started a campaign is not a title that wants its theme any
+	# more: it stays current for a frame or two after the restart, and asking it
+	# for the menu track would fade the score back into the menu.
+	if id == _restart_scene_id and track_for_scene(path) == "menu":
+		return
 	play_music(track_for_scene(path))
+
+
+func _scene_instance_id() -> int:
+	var tree := get_tree()
+	if tree == null or tree.current_scene == null:
+		return 0
+	return tree.current_scene.get_instance_id()
 
 
 func _stream_for(track: String) -> AudioStream:
@@ -339,19 +532,26 @@ func _stream_for(track: String) -> AudioStream:
 		return _streams[track]
 	var loaded := load(str(TRACKS[track])) as AudioStream
 	if loaded is AudioStreamOggVorbis:
-		# Both beds are beds: the menu theme is a loop by design, the soundtrack
-		# is the game's whole 49 minutes and runs round when it ends.
-		(loaded as AudioStreamOggVorbis).loop = true
+		# The menu theme is a loop by design. The soundtrack is not: its 49
+		# minutes are stitched by `_seam_if_due`, so the stream is left to run
+		# out and the manager decides what the seam sounds like.
+		(loaded as AudioStreamOggVorbis).loop = track != "warband"
 	_streams[track] = loaded
 	return loaded
 
 
-## Park a finished bed and let go of the master it was holding.
+## Park a finished bed and let go of the master it was holding. A bed faded to
+## `BED_SILENCE_DB` is still playing, which is what used to keep every retired
+## bed (and its stream) alive for the rest of the session: silence is not a stop.
 func _retire(bed: AudioStreamPlayer) -> void:
-	if not is_instance_valid(bed) or bed.playing:
+	if not is_instance_valid(bed):
 		return
+	var index := _beds.find(bed)
+	bed.stop()
 	bed.stream = null
 	bed.volume_db = BED_SILENCE_DB
+	if index >= 0:
+		_bed_tracks[index] = ""
 	_purge_streams()
 
 
@@ -370,11 +570,13 @@ func _purge_streams() -> void:
 
 ## Per-event 3D shape. The same pool serves the soul's own boots (close, full
 ## range) and another body's (small, dull, gone by ten metres), so every entry
-## that overrides one of these must be able to override all four.
+## that overrides one of these must be able to override all four. A spoken line
+## defaults to the line shape rather than the world one.
 func _shape(voice: AudioStreamPlayer3D, row: Dictionary) -> void:
-	voice.unit_size = float(row.get("unit_size", VOICE_UNIT_SIZE))
-	voice.max_distance = float(row.get("max_distance", VOICE_MAX_DISTANCE))
-	voice.attenuation_filter_cutoff_hz = float(row.get("cutoff", VOICE_CUTOFF))
+	var line := str(row.get("pool", "world")) == "voice"
+	voice.unit_size = float(row.get("unit_size", LINE_UNIT_SIZE if line else VOICE_UNIT_SIZE))
+	voice.max_distance = float(row.get("max_distance", LINE_MAX_DISTANCE if line else VOICE_MAX_DISTANCE))
+	voice.attenuation_filter_cutoff_hz = float(row.get("cutoff", LINE_CUTOFF if line else VOICE_CUTOFF))
 	voice.attenuation_model = int(row.get("attenuation", VOICE_ATTENUATION))
 
 

@@ -1,0 +1,321 @@
+{
+  "asset": "warband looks",
+  "tool": "tools/prepare_warband_looks.py",
+  "command": "python tools/prepare_warband_looks.py",
+  "source": "assets/characters/ironwood_ranger.glb (head, brows, eyes) and the naked set's own atlases in assets/characters/armor/",
+  "licence": "Derived from the CC0 Quaternius Universal Base Characters pack; see assets/characters/LICENSE.txt",
+  "head": {
+    "chin_y": 1.58875,
+    "top_y": 1.78484,
+    "half_width": 0.10482,
+    "back_z": -0.11048,
+    "nose_tip": [
+      -0.0,
+      1.65007,
+      0.09926
+    ],
+    "eye_centre": [
+      0.0,
+      1.68672,
+      0.05594
+    ],
+    "mouth": [
+      0.0,
+      1.61814,
+      0.08726
+    ],
+    "head_joint": 6
+  },
+  "faces": [
+    {
+      "name": "Sharp",
+      "jaw": -0.055,
+      "chin": 0.011,
+      "chin_w": -0.03,
+      "cheek": 0.0035,
+      "nose_proj": 0.006,
+      "nose_w": -0.1,
+      "brow": 0.0015,
+      "eye_gap": 0.0,
+      "mouth": -0.05,
+      "lip": 0.0
+    },
+    {
+      "name": "Broad",
+      "jaw": 0.075,
+      "chin": 0.0,
+      "chin_w": 0.055,
+      "cheek": 0.0055,
+      "nose_proj": -0.002,
+      "nose_w": 0.16,
+      "brow": 0.0045,
+      "eye_gap": 0.001,
+      "mouth": 0.06,
+      "lip": 0.0012
+    },
+    {
+      "name": "Long",
+      "jaw": -0.02,
+      "chin": 0.016,
+      "chin_w": -0.01,
+      "cheek": -0.003,
+      "nose_proj": 0.003,
+      "nose_w": -0.02,
+      "brow": 0.0005,
+      "eye_gap": -0.0012,
+      "mouth": -0.02,
+      "lip": 0.0
+    },
+    {
+      "name": "Round",
+      "jaw": 0.04,
+      "chin": -0.008,
+      "chin_w": 0.06,
+      "cheek": 0.008,
+      "nose_proj": -0.004,
+      "nose_w": 0.08,
+      "brow": -0.002,
+      "eye_gap": 0.0008,
+      "mouth": 0.0,
+      "lip": 0.0018
+    },
+    {
+      "name": "Heavy",
+      "jaw": 0.025,
+      "chin": 0.004,
+      "chin_w": 0.015,
+      "cheek": 0.002,
+      "nose_proj": 0.008,
+      "nose_w": 0.02,
+      "brow": 0.007,
+      "eye_gap": 0.002,
+      "mouth": 0.02,
+      "lip": 0.002
+    },
+    {
+      "name": "Wide",
+      "jaw": 0.02,
+      "chin": -0.004,
+      "chin_w": 0.01,
+      "cheek": 0.011,
+      "nose_proj": -0.001,
+      "nose_w": 0.04,
+      "brow": 0.001,
+      "eye_gap": 0.0015,
+      "mouth": 0.03,
+      "lip": 0.0005
+    },
+    {
+      "name": "Fine",
+      "jaw": -0.03,
+      "chin": 0.006,
+      "chin_w": -0.02,
+      "cheek": 0.001,
+      "nose_proj": -0.006,
+      "nose_w": -0.12,
+      "brow": -0.003,
+      "eye_gap": -0.0018,
+      "mouth": -0.06,
+      "lip": -0.0015
+    },
+    {
+      "name": "Hooked",
+      "jaw": -0.035,
+      "chin": 0.008,
+      "chin_w": -0.01,
+      "cheek": 0.004,
+      "nose_proj": 0.011,
+      "nose_w": -0.06,
+      "brow": 0.003,
+      "eye_gap": 0.0005,
+      "mouth": -0.01,
+      "lip": 0.0025
+    }
+  ],
+  "hair": [
+    {
+      "name": "Bare",
+      "bare": true
+    },
+    {
+      "name": "Buzz",
+      "front": 0.048,
+      "side": -0.026,
+      "back": -0.078,
+      "base": 0.0034,
+      "crown": 0.0046,
+      "bump": 0.5
+    },
+    {
+      "name": "Crop",
+      "front": 0.058,
+      "side": -0.03,
+      "back": -0.086,
+      "base": 0.0064,
+      "crown": 0.009,
+      "bump": 0.7
+    },
+    {
+      "name": "Fringe",
+      "front": 0.028,
+      "side": -0.034,
+      "back": -0.088,
+      "base": 0.008,
+      "crown": 0.0108,
+      "bump": 0.8,
+      "seed": 23
+    },
+    {
+      "name": "Widow",
+      "front": 0.078,
+      "side": -0.02,
+      "back": -0.076,
+      "base": 0.0056,
+      "crown": 0.0078,
+      "bump": 0.6,
+      "seed": 31
+    },
+    {
+      "name": "Afro",
+      "front": 0.054,
+      "side": -0.03,
+      "back": -0.092,
+      "base": 0.026,
+      "crown": 0.04,
+      "bump": 2.4,
+      "mass": true,
+      "seed": 53
+    },
+    {
+      "name": "Mop",
+      "front": 0.034,
+      "side": -0.04,
+      "back": -0.1,
+      "base": 0.0125,
+      "crown": 0.0165,
+      "bump": 1.4,
+      "seed": 47
+    },
+    {
+      "name": "Bob",
+      "front": 0.05,
+      "side": -0.048,
+      "back": -0.14,
+      "base": 0.0135,
+      "crown": 0.0185,
+      "fall": 0.016,
+      "bump": 1.2,
+      "seed": 71
+    }
+  ],
+  "beards": [
+    {
+      "name": "None"
+    },
+    {
+      "name": "Moustache",
+      "shape": "moustache",
+      "thickness": 0.0045
+    },
+    {
+      "name": "Stubble",
+      "shape": "full",
+      "thickness": 0.0028,
+      "stubble": true
+    },
+    {
+      "name": "Chinstrap",
+      "shape": "chinstrap",
+      "thickness": 0.005
+    },
+    {
+      "name": "Full",
+      "shape": "full",
+      "thickness": 0.0065
+    }
+  ],
+  "tones": {
+    "skin": [
+      "#af845a",
+      "#f2d8c6",
+      "#e2bb9c",
+      "#d9ab84",
+      "#c6956c",
+      "#a97446",
+      "#8a5c38",
+      "#69452b"
+    ],
+    "shirt": [
+      "#bdb19c",
+      "#a4552f",
+      "#3f4e6b",
+      "#5c6440",
+      "#b98a3c",
+      "#4a4643",
+      "#8c3a34",
+      "#6d8494"
+    ],
+    "shorts": [
+      "#4f4d48",
+      "#6b543c",
+      "#4f5a3f",
+      "#33394b",
+      "#2c2a28",
+      "#6a3b30",
+      "#8a7350",
+      "#423d38"
+    ],
+    "hair": [
+      "#1b1715",
+      "#3a2617",
+      "#55402a",
+      "#6e3a22",
+      "#a98a58",
+      "#8c4423",
+      "#8f8b86",
+      "#cfc3ad"
+    ]
+  },
+  "eye_tones": [
+    "#6b4a2a",
+    "#7a6a33",
+    "#4d6b45",
+    "#557084",
+    "#2f2a26"
+  ],
+  "veil": {
+    "skin": [
+      0.4303,
+      0.2295,
+      0.1028
+    ],
+    "shirt": [
+      0.507,
+      0.4416,
+      0.3311
+    ],
+    "shorts": [
+      0.0784,
+      0.0742,
+      0.0645
+    ]
+  },
+  "files": {
+    "ironwood_faces.glb": {
+      "nodes": 91,
+      "meshes": 24,
+      "materials": 7,
+      "images": 9,
+      "bytes": 3903828,
+      "triangles": 36928
+    },
+    "ironwood_hair.glb": {
+      "nodes": 78,
+      "meshes": 11,
+      "materials": 5,
+      "images": 5,
+      "bytes": 1172728,
+      "triangles": 35466
+    }
+  }
+}
