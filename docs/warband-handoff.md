@@ -226,7 +226,7 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | World | `scenes/warband_world.tscn` + `world_scene.gd`: the one campaign scene. Owns the soul controller, camera, HUD, warband screen, paperdoll, tutorial card, loot vacuum, crawl, revive, brand runner and the single ground (`terrain.gd`); builds the three areas and hands each the same controller. `GameFlow.world_start` says where the warband is put down ("camp" on a new game, "town" for a resumed save or the arena's return) |
 | Areas | `cage_escape.gd` (the camp clearing: cages, latches, sequencer, watchers, the six that come out of the trees), `escape_run.gd` (the trail: pursuers and its two endings), `town_hub.gd` (the square: stalls, stash, altar, keeper, expedition gate). Each takes `host` — the world — and in `host != null` mode builds only its own content: no controller, no HUD, no environment, no door |
 | Camp clearing | `camp_clearing.gd`: the camp as a clearing in the woods — treeline, 196 trees and 155 bushes round the edge, a broken stake fence (10 runs, 357 stakes), 17 torches, the mouth onto the trail |
-| The trail | `run_forest.gd` (the 915 m way through the wood and its dressing — no lane, no walls, a worn line marked by paired torches; returns `{lane, length, width, torches, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared by both areas) |
+| The trail | `run_forest.gd` (the 1,374.6 m way through the wood and its dressing — no lane, no walls, a worn line marked by paired torches; returns `{lane, length, width, torches, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared by both areas) |
 | Scenes (previews) | `scenes/cage_escape.tscn` and `scenes/town_hub.tscn` stay as area previews for the art and quartermaster tests; the campaign does not load them. `admin_arena.tscn` is the one scene change left |
 | Netcode | `warband_session.gd` (+ `possession_sync.gd`) |
 | Flow | `game_flow.gd` (the only thing that changes scene) |
@@ -479,9 +479,9 @@ Integration seams deliberately placed in the base game:
 | `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
 | `cage_escape_regression` | 341 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
-| `escape_run_regression` | 195 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
+| `escape_run_regression` | 195 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 244 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |
+| `warband_world_regression` | 250 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |
 | `warband_abilities_regression` | 42 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
 | `warband_menu_regression` | 41 | the six rows, SAVE/LOAD over `Warband.save_state`, LOAD gated on a real file, the sound page and back, `resumed` on every close, and the tree never paused |
 | `warband_vendors_regression` | 151 | three counters as `G` services in the market ring, each opening its own seat and stock; buy into the shared stash, sell one pooled copy at 60%, a short purse spends nothing, a worn copy is not on the board, closing leaves no panel |
@@ -606,11 +606,23 @@ line, five salvage silhouettes) and the world (a kilometre-and-a-third lane, a
 grown heightfield, the map sheet). The ichor bench was built with the foundation
 because the town needed it to place.
 
-The integration pass found two things no unit test could: the lane's arches and
-the TOWN gate were rotated with their span down the road, so their posts stood on
-the centre line and the walk drove into a post; and the body's own `BODY_BOUNDS`
-stopped 180 m short of the new town. Both are fixed, and `warband_world_regression`
-now walks the whole 1,575 m and reaches the square in 72 s.
+The integration pass found things no unit test could, and all of them are fixed:
+
+* the lane's arches and the TOWN gate were rotated with their span **down** the
+  road, so their posts stood on the centre line and the walk drove into a post
+  (`run_forest._yaw_facing`);
+* the body's own `BODY_BOUNDS` stopped 180 m short of the new town;
+* the escort was found standing in the camp's tree band four minutes after the
+  soul reached the gate - two allies each moving a centimetre a frame and getting
+  nowhere. The squad now follows the **soul's own footprints** when it is more than
+  a few strides behind, a body that covers no ground across a two-second window
+  backs out of the pocket and tries again, and it does not stop an escort to fetch
+  loot it walks past;
+* twenty-one wardens patrolled the lane after a squad that never left it, and the
+  town's pad was a pale apron eight metres past the wall.
+
+`warband_world_regression` now walks the whole 1,575 m, asserts every ally walked
+out on his feet and none is stranded, and reaches the square in about 63-100 s.
 
 ## 6. Next phases — ready to parallelise
 

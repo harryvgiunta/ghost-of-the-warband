@@ -591,7 +591,7 @@ allowed to grow to ten minutes.
 | --- | --- |
 | `cage_escape_regression` 263 | the camp, the four latches, the pair, the doors, the corridor to the road |
 | `escape_run_regression` 248 | the way through the wood, its cult, and the ambush that follows the leaving |
-| `warband_world_regression` 198 | one world, one controller, the ground, the 1,117 m walk, the budget (~65 s: the only long test) |
+| `warband_world_regression` 250 | one world, one controller, the ground, the 1,575 m walk, the escort, the budget (~65-100 s: the only long test) |
 | `watcher_variants_regression` 587 | the variant table, makeshift-only kits, a landed blow through `attacked`, the guard/stagger/crouch rules, and the warden's three swings + block + stagger + crouch clips |
 | `corpse_loot_regression` 110 | the corpse registry, one booking path, the corpse screen |
 | `stash_autoloot_regression` 185 | real drops, quick-loot, the sweep, the stash, the gear-drop rule (both hands empty, nothing banked, a lying piece that never moves) |
