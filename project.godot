@@ -9,6 +9,7 @@ config/description="A seamless woodland town and frontier, a four-seat arena and
 
 [autoload]
 Log="*res://scripts/log.gd"
+Audio="*res://scripts/audio/audio_manager.gd"
 PlayerState="*res://scripts/player_state.gd"
 Session="*res://scripts/session.gd"
 NetCache="*res://scripts/net_cache.gd"

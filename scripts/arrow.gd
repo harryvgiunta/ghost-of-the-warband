@@ -6,6 +6,7 @@ const Bow = preload("res://scripts/bow.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const VISUAL_BLEND_SECONDS := 0.12
 var velocity := Vector3.ZERO
@@ -52,6 +53,9 @@ func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: floa
 	_has_visual_start = visual_start.is_finite()
 	_visual_elapsed = 0.0
 	_place_visual()
+	# The bow lets go here, on every machine that owns an arrow: the live one on
+	# the authority and the replica that draws the same shot on a guest.
+	SfxScript.arrow(origin)
 
 func _physics_process(delta: float) -> void:
 	age += delta

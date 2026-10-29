@@ -21,6 +21,7 @@ const BrainScript = preload("res://scripts/warband/passive_duel_brain.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
@@ -88,6 +89,8 @@ var hud
 var screen
 var paperdoll
 var altar
+## Escape opens the settings page here as it does in the campaign.
+var settings
 var loot
 var revive
 var branded
@@ -300,8 +303,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.open(controller.merc_for_peer(1))
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
-			if _panel_open():
+			if settings != null and settings.is_open():
+				settings.close()
+				get_viewport().set_input_as_handled()
+			elif _panel_open():
 				_hide_panels()
+				get_viewport().set_input_as_handled()
+			else:
+				_open_settings()
 				get_viewport().set_input_as_handled()
 		KEY_K:
 			_try_quick_loot()
@@ -618,6 +627,10 @@ func _build_ui() -> void:
 	paperdoll.changed.connect(func() -> void:
 		if paperdoll.selected_merc > 0:
 			_refresh_rig(paperdoll.selected_merc))
+	settings = SettingsScript.new()
+	settings.name = "Settings"
+	add_child(settings)
+	settings.closed.connect(_on_settings_closed)
 
 # --- possession ------------------------------------------------------------
 
@@ -672,6 +685,8 @@ func _on_possess_requested(merc_id: int) -> void:
 	_refresh_marker()
 
 func _hide_panels() -> void:
+	if settings != null and settings.is_open():
+		settings.close()
 	if screen != null and screen.is_open():
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
@@ -679,10 +694,28 @@ func _hide_panels() -> void:
 	if altar != null and altar.is_open():
 		altar.close()
 
+
 func _panel_open() -> bool:
+	if settings != null and settings.is_open():
+		return true
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (altar != null and altar.is_open())
+
+
+## The page owns the pointer while it is up, so the body stops taking commands:
+## a click on a slider is never a swing.
+func _open_settings() -> void:
+	if settings == null:
+		return
+	settings.open()
+	if controller != null:
+		controller.input_enabled = false
+
+
+func _on_settings_closed() -> void:
+	if controller != null:
+		controller.input_enabled = true
 
 # --- revive ----------------------------------------------------------------
 

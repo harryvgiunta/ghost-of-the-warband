@@ -22,6 +22,7 @@ const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
@@ -1706,7 +1707,7 @@ func _on_devil_struck(_target, _amount, position: Vector3, outcome) -> void:
 	elif typeof(outcome) == TYPE_BOOL and bool(outcome):
 		kind = "parry"
 	Combat.spawn_impact(self,position,kind)
-	audio.play_sound("clang" if kind == "parry" else "block" if kind == "block" else "hit")
+	_sound_for(kind, position)
 	_impact_event.rpc(position,kind)
 
 @rpc("authority","call_remote","unreliable")
@@ -1714,7 +1715,19 @@ func _impact_event(position: Vector3, kind: String) -> void:
 	if network_role != "client":
 		return
 	Combat.spawn_impact(self,position,kind)
-	audio.play_sound("clang" if kind == "parry" else "block" if kind == "block" else "hit")
+	_sound_for(kind, position)
+
+
+## One impact, one sound. A devil's blow that met a raised blade rings; one that
+## landed opens a body. The attacker here is a devil, and no devil carries a
+## blunt piece, so a landed blow is always the blade.
+func _sound_for(kind: String, position: Vector3) -> void:
+	if kind == "parry":
+		SfxScript.defense(position, true)
+	elif kind == "block":
+		SfxScript.defense(position, false)
+	else:
+		SfxScript.landed(null, position)
 
 func _process(delta: float) -> void:
 	_elapsed += delta
@@ -2084,7 +2097,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if _pause_open():
 			if event.keycode == KEY_ESCAPE:
-				_close_menu()
+				# Escape unwinds one page at a time: the sound page hands the frame
+				# back to the menu, and the menu is what closes.
+				if pause_menu.showing_sound():
+					pause_menu.back()
+				else:
+					_close_menu()
 			return
 		match event.keycode:
 			KEY_ENTER:

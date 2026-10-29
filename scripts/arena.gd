@@ -7,6 +7,7 @@ const Hud = preload("res://scripts/arena_hud.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Thrown = preload("res://scripts/thrown_weapon.gd")
 const Audio = preload("res://scripts/range_audio.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
@@ -1024,14 +1025,15 @@ func _on_clash(position: Vector3) -> void:
 	if network_role != "host":
 		return
 	Combat.spawn_impact(self,position,"clash")
-	audio.play_sound("clang")
+	# The ring itself is played where the clash is resolved (`Combat._resolve_clash`),
+	# so the host does not play it a second time here.
 	_clash_event.rpc(position)
 
 func _on_defense_resolved(defender_slot: int, position: Vector3, parried: bool) -> void:
 	if network_role != "host":
 		return
 	Combat.spawn_impact(self,position,"parry" if parried else "block")
-	audio.play_sound("parry" if parried else "block")
+	# `Combat._block_feedback` already played the steel on this machine.
 	_defense_event.rpc(defender_slot,position,parried)
 
 @rpc("authority","call_remote","reliable")
@@ -1039,14 +1041,14 @@ func _defense_event(_defender_slot: int, position: Vector3, parried: bool) -> vo
 	if network_role != "client":
 		return
 	Combat.spawn_impact(self,position,"parry" if parried else "block")
-	audio.play_sound("parry" if parried else "block")
+	SfxScript.defense(position, parried)
 
 @rpc("authority","call_remote","unreliable")
 func _clash_event(position: Vector3) -> void:
 	if network_role != "client":
 		return
 	Combat.spawn_impact(self,position,"clash")
-	audio.play_sound("clang")
+	SfxScript.defense(position, true)
 
 func _on_killed(slot: int, source: int) -> void:
 	if network_role == "host" and source >= 0 and source < 4 and source != slot:
@@ -1292,7 +1294,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if _pause_open():
 			if event.keycode == KEY_ESCAPE:
-				_close_menu()
+				# Escape unwinds one page at a time: the sound page hands the frame
+				# back to the menu, and the menu is what closes.
+				if pause_menu.showing_sound():
+					pause_menu.back()
+				else:
+					_close_menu()
 			return
 		match event.keycode:
 			KEY_1:

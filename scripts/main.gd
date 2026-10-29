@@ -13,6 +13,7 @@ const MobCuller = preload("res://scripts/mob_culler.gd")
 const LootRules = preload("res://scripts/loot_rules.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Audio = preload("res://scripts/range_audio.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Combat = preload("res://scripts/combat.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
@@ -1010,7 +1011,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		# behind it and Escape always closes the topmost surface.
 		if _pause_open():
 			if event.keycode == KEY_ESCAPE:
-				_close_menu()
+				# Escape unwinds one page at a time: the sound page hands the frame
+				# back to the menu, and the menu is what closes.
+				if pause_menu.showing_sound():
+					pause_menu.back()
+				else:
+					_close_menu()
 			return
 		# The in-world kit always answers I, P and Escape first so it can close
 		# without leaking keys into movement, attacks or the waystone prompts.
@@ -1974,7 +1980,7 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	if outcome == Combat.DEFENSE_PARRY:
 		attacker.stagger(Combat.PARRY_STAGGER)
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"parry")
-		audio.play_sound("parry")
+		SfxScript.defense(player.global_position + Vector3(0,1.15,0), true)
 		hud.show_feedback("PARRY  /  counter now",1.2)
 		return
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
@@ -1987,7 +1993,7 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 			player.velocity.x = push.x
 			player.velocity.z = push.z
 		Combat.spawn_impact(self,player.global_position + Vector3(0,1.15,0),"block")
-		audio.play_sound("block")
+		SfxScript.defense(player.global_position + Vector3(0,1.15,0), false)
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,false)
 			if health > 0.0:
@@ -1998,6 +2004,7 @@ func _on_enemy_attack(attacker, amount: float, victim = null) -> void:
 	take_damage(amount)
 	# The unmitigated contact is the only branch that spilled blood. The attacker
 	# may carry a blade or a bare claw; `stain_attacker` owns both cases.
+	SfxScript.landed(attacker, player.global_position + Vector3(0,1.1,0))
 	BloodFx.impact(attacker,player.global_position + Vector3(0,1.1,0),
 		player.global_position - attacker.global_position,amount,false)
 	BloodFx.stain_attacker(attacker,amount)
@@ -2009,14 +2016,15 @@ func _receive_seat_attack(attacker, amount: float, seat) -> void:
 	if outcome == Combat.DEFENSE_PARRY:
 		attacker.stagger(Combat.PARRY_STAGGER)
 		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"parry")
-		audio.play_sound("parry")
+		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), true)
 		return
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
 		Combat.spawn_impact(self,seat.global_position + Vector3(0,1.15,0),"block")
-		audio.play_sound("block")
+		SfxScript.defense(seat.global_position + Vector3(0,1.15,0), false)
 		return
 	BloodFx.impact(attacker,seat.global_position + Vector3(0,1.1,0),seat.global_position - attacker.global_position,amount,false)
 	BloodFx.stain_attacker(attacker,amount)
+	SfxScript.landed(attacker, seat.global_position + Vector3(0,1.1,0))
 
 func take_damage(amount: float, react: bool = true) -> void:
 	# Ghost of the Warband: a hit is scaled once, here, by the proximity bubble

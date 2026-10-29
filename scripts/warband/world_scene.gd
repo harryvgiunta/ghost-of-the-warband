@@ -46,6 +46,7 @@ const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
 const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
 const CardScript = preload("res://scripts/warband/tutorial_card.gd")
+const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
@@ -120,6 +121,9 @@ var hud
 var screen
 var paperdoll
 var card
+## Escape's own window. The campaign is not a level of the frontier's quick
+## menu, so it carries the settings page directly.
+var settings
 var loot
 var revive
 var branded
@@ -230,8 +234,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.open(controller.merc_for_peer(1))
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
-			if _panel_open():
+			if settings != null and settings.is_open():
+				settings.close()
+				get_viewport().set_input_as_handled()
+			elif _panel_open():
 				_hide_panels()
+				get_viewport().set_input_as_handled()
+			else:
+				_open_settings()
 				get_viewport().set_input_as_handled()
 		KEY_K:
 			_try_loot()
@@ -368,6 +378,10 @@ func _build_ui() -> void:
 	card = CardScript.new()
 	card.name = "TutorialCard"
 	add_child(card)
+	settings = SettingsScript.new()
+	settings.name = "Settings"
+	add_child(settings)
+	settings.closed.connect(_on_settings_closed)
 
 
 func _build_loot() -> void:
@@ -1068,6 +1082,8 @@ func prompt_text() -> String:
 
 
 func _hide_panels() -> void:
+	if settings != null and settings.is_open():
+		settings.close()
 	if screen != null and screen.is_open():
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
@@ -1077,9 +1093,27 @@ func _hide_panels() -> void:
 
 
 func _panel_open() -> bool:
+	if settings != null and settings.is_open():
+		return true
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
 		return true
 	return town != null and town.panels_open()
+
+
+## Escape opens the settings page. The body keeps standing where it stood, but
+## it stops taking commands while the page is up: a click on the page must never
+## swing a weapon.
+func _open_settings() -> void:
+	if settings == null or (card != null and card.is_open()):
+		return
+	settings.open()
+	if controller != null:
+		controller.input_enabled = false
+
+
+func _on_settings_closed() -> void:
+	if controller != null:
+		controller.input_enabled = true
 
 
 # --- the town's readout ----------------------------------------------------

@@ -11,6 +11,7 @@ const StateScript = preload("res://scripts/player_state.gd")
 const SessionScript = preload("res://scripts/session.gd")
 const LobbyScript = preload("res://scripts/warband/warband_lobby.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -43,6 +44,9 @@ var _default_name := "Ranger"
 var _default_address := "127.0.0.1"
 var _default_port := 7777
 var crash_notice: Panel
+## Escape's own window: the menu has no pause to offer, but the mix still needs
+## a door, and Escape is the one every screen in the game uses.
+var settings
 var _crash_report: Dictionary = {}
 
 func _ready() -> void:
@@ -60,6 +64,7 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_build()
 	_build_crash_notice()
+	_build_settings()
 	_refresh_load_button()
 	print("IRONWOOD_MENU_READY")
 
@@ -300,6 +305,24 @@ func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2)
 	parent.add_child(result)
 	return result
 
+## The settings window is built last so it sits over the join form and the lobby
+## panel; Escape is the only door to it, exactly as it is in the world.
+func _build_settings() -> void:
+	settings = SettingsScript.new()
+	settings.name = "Settings"
+	add_child(settings)
+
+
+func _open_settings() -> void:
+	if settings == null:
+		return
+	if _join_layer != null and _join_layer.visible:
+		_close_join()
+	if _lobby_layer != null and _lobby_layer.visible:
+		_lobby_layer.visible = false
+	settings.open()
+
+
 ## The logger writes a report for the last unclearly-ended session before the
 ## menu builds. Surface it here so a crashed player can find the file without
 ## knowing about user://logs; the report is local and never uploaded.
@@ -449,9 +472,15 @@ func _note(message: String, data: Dictionary = {}) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed("ui_cancel"):
 		return
-	if _lobby_layer != null and _lobby_layer.visible:
+	if settings != null and settings.is_open():
+		settings.close()
+		get_viewport().set_input_as_handled()
+	elif _lobby_layer != null and _lobby_layer.visible:
 		_lobby_layer.visible = false
 		get_viewport().set_input_as_handled()
 	elif _join_layer != null and _join_layer.visible:
 		_close_join()
+		get_viewport().set_input_as_handled()
+	else:
+		_open_settings()
 		get_viewport().set_input_as_handled()

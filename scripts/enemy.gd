@@ -15,6 +15,7 @@ const Hitbox = preload("res://scripts/hitbox.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const DamageNumbers = preload("res://scripts/damage_numbers.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
+const SfxScript = preload("res://scripts/audio/sfx.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
@@ -792,6 +793,10 @@ func _enter_devil_state(next: String) -> void:
 	_state_time = 0.0
 	_shot_fired = false
 	_warning.visible = next == "WINDUP"
+	if next == "STRIKE":
+		# The cinder devil's committed swing. `Sfx` reads what it carries, so a
+		# short blade draws the short arc and a two-handed piece the long one.
+		SfxScript.swing(self, global_position + Vector3.UP * 1.2)
 
 func _devil_strike(distance: float, to_player: Vector3) -> void:
 	if distance > _attack_reach or absf(_target.global_position.y-global_position.y) > 1.25:
