@@ -300,9 +300,19 @@ func _check_rescue(body, quests, roster_before: int) -> void:
 		check(cages.open_cages()[index], "cage %d stands open" % (index + 1))
 		check(not cages.interact(body), "a second press on an open cage does nothing")
 		check(not cages.open_latch(index), "and open_latch refuses the same cage twice")
+		# The door lifts, the soldier walks out, and only then does the roll hear
+		# about him: one press is one record and one mark, never four at once.
+		var out := await _await(func() -> bool: return cages.freed() == index + 1,
+			FREE_TIMEOUT)
+		check(out, "cage %d's soldier walked out (%d freed)" % [index + 1, cages.freed()])
+		check(warband.roster.count() == roster_before + index + 1,
+			"one press puts one body on the roll (%d -> %d)"
+			% [roster_before, warband.roster.count()])
+		check(quests.progress_of("free_the_soldiers") == index + 1,
+			"and one mark on the rescue order (%d of %d)"
+			% [quests.progress_of("free_the_soldiers"),
+				quests.goal_count("free_the_soldiers")])
 
-	var done := await _await(func() -> bool: return cages.freed() == 4, FREE_TIMEOUT)
-	check(done, "four doors lifted, four soldiers walked out (%d freed)" % cages.freed())
 	check(cages.remaining() == 0, "the line is open (%d shut)" % cages.remaining())
 	check(cages.marker_points().is_empty(), "an open line has nothing left to mark")
 	var lifted := 0
