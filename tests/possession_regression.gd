@@ -141,6 +141,7 @@ func run() -> void:
 	check_opposition(warband, controller, merc_ids, events)
 	check_cycle(warband, controller, merc_ids)
 	check_camera(warband, controller, merc_ids)
+	check_free_look(controller)
 	await check_router_eject(warband, controller, merc_ids)
 	await check_health_eject(warband, controller, merc_ids)
 	check_squad_release(warband, controller, merc_ids, events)
@@ -333,6 +334,56 @@ func check_camera(warband, controller, merc_ids: Array[int]) -> void:
 		"a second activate retargets the camera")
 	check(controller.camera_rig.camera.global_position.distance_to(
 		controller.camera_rig.follow_point()) > 0.05, "that retarget starts an arc, not a cut")
+
+# --- free look --------------------------------------------------------------
+
+## The eye may look anywhere. The old range was -0.12..+0.95 rad, which is seven
+## degrees of sky: a body walking under the canopy could not look at it, and could
+## not look at the ground under its own feet either. Both poles are reachable now,
+## the composed basis stays a rotation there, and the top of the arc is the sky
+## over the shoulder rather than the inside of the body it is standing in.
+func check_free_look(controller) -> void:
+	var rig = controller.camera_rig
+	var body = rig.active_body()
+	check(body != null, "there is a body to look from")
+	check(PossessionCamera.LOOK_UP <= -1.4 and PossessionCamera.LOOK_DOWN >= 1.4,
+		"the arc covers eighty degrees either side of the horizon")
+
+	# The sky.
+	rig.rotate_view(0.0, -99.0)
+	check(is_equal_approx(rig.pitch, PossessionCamera.LOOK_UP),
+		"the look stops at the pole, not at the old ceiling")
+	for frame in 20:
+		rig.update(0.033)
+	var eye: Vector3 = rig.camera.global_position
+	var forward: Vector3 = -rig.camera.global_basis.z
+	check(forward.y > 0.97, "looking up aims at the sky, forward.y %.3f" % forward.y)
+	check(not is_nan(eye.x) and not is_nan(eye.y) and not is_nan(eye.z),
+		"the eye at the pole is a real point")
+	check(absf(rig.camera.global_basis.determinant() - 1.0) < 0.001,
+		"the eye at the pole is still a rotation, not a degenerate basis")
+	var flat := Vector2(eye.x - body.global_position.x, eye.z - body.global_position.z).length()
+	check(flat >= PossessionCamera.BODY_STANDOFF - 0.02,
+		"the top of the arc looks past the body, not through it (%.2f m out)" % flat)
+
+	# The ground at the body's own feet.
+	rig.pitch = PossessionCamera.LOOK_DOWN
+	for frame in 20:
+		rig.update(0.033)
+	forward = -rig.camera.global_basis.z
+	check(forward.y < -0.97, "looking down aims at the ground, forward.y %.3f" % forward.y)
+	check(rig.camera.global_position.y > body.global_position.y,
+		"looking down is from above the body, never through the floor")
+
+	# The composed basis is the orbit at every angle: -Z is exactly -back, which is
+	# what makes the reticle and the aim ray agree from boots to canopy.
+	for angle in [PossessionCamera.LOOK_UP, -0.6, 0.0, 0.26, 1.2, PossessionCamera.LOOK_DOWN]:
+		rig.pitch = float(angle)
+		rig.update(0.033)
+		var want: Vector3 = -rig._back()
+		check(absf((-rig.camera.global_basis.z).dot(want) - 1.0) < 0.0005,
+			"the eye looks along its own orbit at %.2f rad" % angle)
+	rig.pitch = PossessionCamera.FOLLOW_PITCH
 
 # --- eject on a router state change ---------------------------------------
 

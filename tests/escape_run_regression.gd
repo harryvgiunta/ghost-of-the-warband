@@ -326,6 +326,16 @@ func check_pursuers() -> void:
 	check(armed == game.trail.guards.size(), "every cultist holds a weapon (%d/%d)"
 		% [armed, game.trail.guards.size()])
 	check(visible >= 6, "the blade is in its hand (%d visible)" % visible)
+	# The trail is the same first scenario as the camp and it pays the same way: a
+	# corpse carries the makeshift rag and nothing above it, on the blade cultists
+	# and the hidden archers alike.
+	var above_tier: Array[String] = []
+	for cultist in game.trail.guards:
+		for item_id in cultist.gear_items():
+			if str(item_id).begins_with("armor_") and not str(item_id).begins_with("armor_makeshift_"):
+				above_tier.append(str(item_id))
+	check(above_tier.is_empty(),
+		"no trail corpse drops armour above the salvage tier (%s)" % str(above_tier))
 	# The road answers the *leaving*: when the squad steps out of the clearing a
 	# third of every ring is handed the soul, and no more. A cultist with a quarry
 	# from spawn walks ninety metres into the camp's own fight.

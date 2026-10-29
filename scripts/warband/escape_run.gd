@@ -26,10 +26,11 @@ const ArcherScript = preload("res://scripts/warband/watcher_archer.gd")
 const CombatScript = preload("res://scripts/combat.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 
-## What each cultist carries, in spawn order. Every one of them drops it.
-## What a road cultist wears under its blade: cult rags the warband can take.
-const CULTIST_RAGS := ["armor_makeshift_chest", "armor_leather_chest",
-	"armor_mail_chest", "armor_cloth_chest"]
+## What a road cultist wears under its blade: a cult rag the warband can take. The
+## trail is the first scenario and it pays in salvage - a makeshift chest and
+## nothing above it - because a leather, cloth or mail rag off the first fanatic
+## in reach outfits the squad before it has walked the lane's second torch.
+const CULTIST_RAG := "armor_makeshift_chest"
 ## The road's cultists carry the salvage tier, not forged steel: a road that hands
 ## every fanatic a smithed arming sword makes a mob into a knight, and a knight's
 ## blade off a murdered cultist is worth more than the whole camp put together.
@@ -223,7 +224,7 @@ func _build_ambushes() -> void:
 			archer.defeated.connect(_on_cultist_defeated)
 			archer.attacked.connect(_on_cultist_attack)
 			# A rag and a quiver's worth of nothing: the corpse lists what it had.
-			archer.armor_items = [str(CULTIST_RAGS[guards.size() % CULTIST_RAGS.size()])]
+			archer.armor_items = [CULTIST_RAG]
 			guards.append(archer)
 			host.guards.append(archer)
 			members.append(archer)
@@ -287,7 +288,7 @@ func _spawn_cultist(at: Vector3) -> void:
 	watcher.attacked.connect(_on_cultist_attack)
 	watcher.arm(str(CULTIST_ARMS[guards.size() % CULTIST_ARMS.size()]))
 	# A rag on its back, so a corpse is worth crossing the road for.
-	watcher.armor_items = [str(CULTIST_RAGS[guards.size() % CULTIST_RAGS.size()])]
+	watcher.armor_items = [CULTIST_RAG]
 	guards.append(watcher)
 	cultists.append(watcher)
 	host.guards.append(watcher)

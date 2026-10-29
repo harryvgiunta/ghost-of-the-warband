@@ -375,6 +375,18 @@ func check_gear() -> void:
 	check(carried_bandages > 0 and carried_bandages < _samples.size(),
 		"the dressings are carried by some bodies and not others (%d of %d)"
 		% [carried_bandages, _samples.size()])
+	# The first scenario pays in salvage: whatever the table names, a corpse in the
+	# camp or on the road carries the makeshift set or nothing at all, never the
+	# leather, cloth or mail that would outfit a squad before the trail's first
+	# fight. Every sample body and both lesson bodies are here.
+	for raw in _samples + _pairs:
+		var dropped_set := str(raw.variant.get("armor", "naked"))
+		check(dropped_set in WatcherScript.WATCHER_ARMOUR,
+			"a scenario-1 corpse carries an allowed set (%s)" % dropped_set)
+		for item_id in raw.gear_items():
+			if str(item_id).begins_with("armor_"):
+				check(str(item_id).begins_with("armor_makeshift_"),
+					"scenario-1 armour is the salvage tier (%s)" % str(item_id))
 
 # --- the swing -------------------------------------------------------------
 

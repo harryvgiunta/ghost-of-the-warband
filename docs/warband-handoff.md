@@ -361,7 +361,7 @@ Integration seams deliberately placed in the base game:
 | Test | Checks | Covers |
 | --- | ---: | --- |
 | `warband_contract_regression` | 180 | enums/slots, overkill, soul locks, roster, stash, cruor, gear hand-offs, auto-equip, vendor |
-| `possession_regression` | 236 | bodies, cycling, camera, net transfer, auto-eject |
+| `possession_regression` | 262 | bodies, cycling, camera (including free look: the whole sphere, a composed basis at both poles, and the eye kept out of the body's own column), net transfer, auto-eject |
 | `downed_revive_regression` | 67 | 10% overkill, crawl, 5 s channel |
 | `combat_bubble_regression` | 73 | 30/34 m, 10%, guard choreography, hysteresis |
 | `altar_regression` | 112 | unbind/distil/brand UI over the wallet |
@@ -371,7 +371,7 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
-| `cage_escape_regression` | 344 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
+| `cage_escape_regression` | 341 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
 | `escape_run_regression` | 194 | the trail as an area: 915 m walkable lane, art budget, 40 hunters spaced and never handed a quarry at spawn, the leaving waking them, both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 240 | one scene and one controller, the camp in the trees, the new opening, 989 m camp → town with no scene change, the services at the far end, budget |

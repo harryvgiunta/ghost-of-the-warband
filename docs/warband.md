@@ -160,7 +160,7 @@ failure pass; fix the contract instead.
 | Module | Public surface |
 | --- | --- |
 | `scripts/warband/possession_controller.gd` (`PossessionController`) | `setup(warband, camera, bodies_root)`, `spawn_mercenaries(points, authoritative)`, `activate/cycle/direct(peer, merc_id)`, `active_body(peer := 0)`, `body_of/merc_of/merc_for_peer`, `set_bot`, `living_merc_ids()`, `physics_step(delta)` (with `auto_simulate = false`), `release_local()`, signals `possession_changed`, `possession_released`, `transfer_refused` |
-| `scripts/warband/possession_camera.gd` (`PossessionCamera`) | adopts the mode's `Camera3D`, `follow(body, snap)`, `swoop_to(body, seconds)`, `rotate_view`, `aim_ray()`, `follow_point()` |
+| `scripts/warband/possession_camera.gd` (`PossessionCamera`) | adopts the mode's `Camera3D`, `follow(body, snap)`, `swoop_to(body, seconds)`, `rotate_view(delta_yaw, delta_pitch)`, `aim_ray()`, `follow_point()`. **Free look**: yaw wraps and pitch runs `LOOK_UP` -1.4835 .. `LOOK_DOWN` +1.4835 rad (85 degrees either side; the old range was -0.12..+0.95, seven degrees of sky). The view is a basis composed from yaw and pitch (`Basis(UP, yaw) * Basis(RIGHT, -pitch)`), not `look_at` with a world-up hint, because that hint is parallel to the view at a pole. Where the arc resolves the eye inside the body's own column (past ~70 degrees up, where the ground clamp holds the eye at `MIN_HEIGHT`), it slides out to `BODY_STANDOFF` 0.62 m along its own azimuth, probed against the world at the eye's height, so looking up is "past your shoulder" and never "through your own legs" |
 | `scripts/warband/possession_sync.gd` (`PossessionSync`) | host-authoritative transfer RPCs plus `server_apply(peer, merc_id)` |
 | `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`) | `setup(radius, exit_radius)`, `set_humans`, `track/untrack`, `sim_state_of`, `clear`, `sim_changed` |
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
@@ -431,6 +431,15 @@ Short version of the latest tuning (all in the code, all covered by
   `bow_twig`, `shield_wood`) and the expedition's waves escalate by more bodies and
   better salvage, never by forged arming swords - a mob with a smithed blade was a
   knight in rags whose corpse out-valued the battle;
+- **the first scenario pays in salvage, on the back as well as in the hand**: a
+  corpse in the camp or on the road carries the **makeshift** set or nothing at
+  all. `CageWatcher._pick_variant` holds that rule (`WATCHER_ARMOUR` is
+  `["naked", "makeshift"]`, and a set outside it is pulled to salvage), the variant
+  table's own `armor`/`pieces` say the same thing, and `escape_run.CULTIST_RAG`
+  gives every blade cultist and hidden archer the same makeshift chest. The slots
+  still vary, so two corpses are not identical - the tier does not. A leather,
+  cloth or mail piece off the first six cultists used to put a forged kit in the
+  squad's pack before the trail's second torch;
 - **field medicine**: `bandage_linen` is a catalog piece (category `misc`, so no
   slot will ever wear it). Half the watcher variants carry one as `carried` gear,
   so it reaches the shared stash through the corpse registry like any other loot.

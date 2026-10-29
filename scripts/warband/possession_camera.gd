@@ -26,12 +26,25 @@ const FOLLOW_PITCH := 0.26
 ## The eye rides a shoulder, not the spine: the frontier's 0.70 m, so the reticle
 ## and the body's own head are never the same point on screen.
 const SHOULDER_OFFSET := 0.70
+## How far the arc may swing. The old limit was -0.12 .. +0.95 rad, which is
+## seven degrees of sky - a body could not see the canopy it was walking under,
+## let alone the ground at its own feet. A free look is the whole sphere bar the
+## last five degrees at each pole, where the arc has no side left to swing to.
+## The signs follow `pitch`: negative lifts the eye below the horizon (looking
+## up), positive puts it overhead (looking down).
+const LOOK_UP := -1.4835
+const LOOK_DOWN := 1.4835
 ## How fast the eye crosses from one shoulder to the other, per second.
 const SWAP_RATE := 10.0
 ## The closest the camera may be pulled before it refuses to move in further.
 const MIN_DISTANCE := 0.55
 ## Clearance kept off the geometry that pulled the camera in.
 const SURFACE_MARGIN := 0.28
+## The radius of the column the ridden body's own legs and chest occupy. Past
+## about seventy degrees of upward look the resolved eye is directly under the
+## body, which is the inside of a thigh; it slides out to this standoff instead,
+## because free look must never mean "look through the man you are".
+const BODY_STANDOFF := 0.62
 ## How fast the boom may pull in and how slowly it is allowed back out. A tree
 ## passing between the eye and the body makes the raw ray distance jump by metres
 ## from one frame to the next; snapping to it reads as the world shaking, which is
@@ -150,9 +163,11 @@ func swap() -> void:
 	side = -side
 
 ## Move the eye around the body. Called with the mouse delta by the controller.
+## Yaw wraps, so the horizontal is already free; pitch is the whole sky and the
+## whole ground, short of the pole.
 func rotate_view(delta_yaw: float, delta_pitch: float) -> void:
 	yaw = wrapf(yaw + delta_yaw, -PI, PI)
-	pitch = clampf(pitch + delta_pitch, -0.12, 0.95)
+	pitch = clampf(pitch + delta_pitch, LOOK_UP, LOOK_DOWN)
 
 ## The arc and the follow both run from here, once per controller frame.
 func update(delta: float) -> void:
@@ -221,11 +236,18 @@ func _place(point: Vector3) -> void:
 ## Look along the orbit, never at the body: an eye that re-centres on the head
 ## cannot be aimed (the reticle would sit on the character's own skull, and the
 ## pitch would fight itself). The frontier looks down `-back` for the same reason.
+##
+## The basis is composed from `yaw` and `pitch` rather than aimed with
+## `look_at(pos - back, Vector3.UP)`: `look_at` degenerates as the view nears a
+## pole, where its up hint is parallel to the direction it is given, and a free
+## look walks straight into those poles. Composed, the whole sphere is stable:
+## `-Z` lands on `-back` exactly (yaw about world up, then pitch about the local
+## right, tilting the view down as `pitch` lifts the eye), and the up vector
+## follows at any angle.
 func _look() -> void:
 	if camera == null:
 		return
-	var back := _back()
-	camera.look_at(camera.global_position - back, Vector3.UP)
+	camera.global_basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -pitch)
 
 
 ## The unit vector from the body's focus out to the eye's shoulder.
@@ -283,4 +305,40 @@ func _resolved(wanted: Vector3) -> Vector3:
 	var point: Vector3 = anchor + direction * _boom
 	# A boom pulled flat against the ground would look through the body's knees.
 	point.y = maxf(point.y, body.global_position.y + MIN_HEIGHT)
-	return point
+	return _off_body(body, point)
+
+
+## Keep the eye out of the column the ridden body's own legs and chest occupy.
+##
+## Looking up to the top of the arc resolves an eye directly beneath the body -
+## a metre of sky above, and the inside of a thigh in front of it. The eye slides
+## out to `BODY_STANDOFF` along its own azimuth instead, keeping the height the
+## boom already resolved, so the view is "up past your own shoulder" and not
+## "through your own legs". The slide is probed against the world at the eye's own
+## height: standing with a trunk at your back must not push the eye into it.
+func _off_body(body: Actor, point: Vector3) -> Vector3:
+	var feet := body.global_position
+	var height := EYE_HEIGHT
+	if body.has_method("body_scale"):
+		height *= float(body.body_scale())
+	# Above the body's own head the eye is looking at the man, not through him.
+	if point.y < feet.y or point.y > feet.y + height * 1.15:
+		return point
+	var flat := Vector2(point.x - feet.x, point.z - feet.z)
+	var reach := flat.length()
+	if reach >= BODY_STANDOFF:
+		return point
+	var away := flat / reach if reach > 0.0001 else Vector2(sin(yaw), cos(yaw))
+	if away.length() < 0.0001:
+		return point
+	away = away.normalized()
+	var base := Vector3(feet.x, point.y, feet.z)
+	var out := Vector3(away.x, 0.0, away.y)
+	_query.from = base + out * 0.10
+	_query.to = base + out * BODY_STANDOFF
+	_query.collision_mask = WORLD_MASK
+	_query.exclude = [body.get_rid()]
+	var space := get_world_3d().direct_space_state
+	if space == null or not space.intersect_ray(_query).is_empty():
+		return point
+	return _query.to

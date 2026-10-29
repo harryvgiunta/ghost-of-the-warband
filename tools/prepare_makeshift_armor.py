@@ -693,12 +693,20 @@ CHEEK_CENTRES = (math.radians(322.0), math.radians(218.0))
 def build_head(material_of) -> tuple:
     """Bone coif: plated cap, brow band, cheek plates, crown ridge, antlers."""
     measure = MEASURE
-    refs = ["Male_Ranger_Head_Hood", "Ranger_Head_SuperHero_Male"]
-    hood = measure.table(refs, 1.515, 1.872, 0.008, half=0.012, smooth=1)
-    apex = hood.entries[-1][0]
-    grow = 0.020
-    z_top = apex + 0.040
-    skull = Vector((0.0, 0.030, 1.715))
+    # The cap fits the **skull**, not the cowl. It used to be measured off
+    # `Male_Ranger_Head_Hood`, the leather set's own head piece - which is never
+    # drawn under this one, because a slot wears exactly the set it was given - and
+    # the cowl is 30 cm across where the head is 21. On top of that the brow band
+    # stood 28 mm proud of it and the studs 52 mm, so the helmet measured 0.32 m
+    # across a 0.21 m head and read as a boulder.
+    refs = ["Ranger_Head_SuperHero_Male"]
+    skull = measure.table(refs, 1.515, 1.782, 0.008, half=0.012, smooth=1)
+    apex = skull.entries[-1][0]
+    # 16 mm of air over the skin, and a 9 mm shell: the cap's inner face has to
+    # clear the skull in the *idle* pose too, where the skin is not the bind pose.
+    grow = 0.016
+    z_top = apex + 0.030
+    skull_centre = Vector((0.0, 0.030, 1.715))
     parts = []
 
     def cheek_dip(theta: float) -> float:
@@ -724,9 +732,9 @@ def build_head(material_of) -> tuple:
     def cap_uv(theta: float, v: float) -> Vector:
         zb = rim_z(theta)
         z = zb + (z_top - zb) * v
-        section = hood.at(min(z, apex))
-        # The cowl's face rim juts past the per-height bounds, so the cap
-        # stands proud of it instead of guillotining the hood.
+        section = skull.at(min(z, apex))
+        # The brow and the cheekbones jut past a per-height ring, so the cap
+        # stands proud of the skin instead of guillotining them.
         front = max(0.0, -math.sin(theta))
         extra = 0.014 * front ** 1.5 * (1.0 - mobs.smoothstep(0.30, 0.85, v))
         # The cheek guards stand a little further off than the crown, so they
@@ -735,7 +743,7 @@ def build_head(material_of) -> tuple:
         shrink = 1.0 - 0.72 * mobs.smoothstep(apex - 0.004, z_top, z)
         # Four crown plates lap over each other: a raised lip on each plate's
         # trailing side, so the cap reads as bone plates and not as a bowl.
-        lip = 0.007 * mobs.smoothstep(0.80, 1.0, (theta * 4.0 / TAU) % 1.0)
+        lip = 0.005 * mobs.smoothstep(0.80, 1.0, (theta * 4.0 / TAU) % 1.0)
         rx = (section["rx"] + grow) * shrink + lip
         ry = (section["ry"] + grow + extra) * shrink + lip
         wobble = 1.0 + (mobs.hash01(theta * 2.4 + v * 6.0) - 0.5) * 0.026
@@ -750,11 +758,11 @@ def build_head(material_of) -> tuple:
         return cap_uv(theta, v)
 
     def outward(point: Vector) -> Vector:
-        return (point - skull).normalized()
+        return (point - skull_centre).normalized()
 
     parts.append(surface_grid("MS_Skull_Cap", 44, 10,
                               lambda u, v: cap_uv(TAU * u, v), material_of("bone"),
-                              thickness=0.013, cap_end=True, axis=Vector((0.0, 0.05, 1.75))))
+                              thickness=0.009, cap_end=True, axis=Vector((0.0, 0.05, 1.75))))
 
     # Bone rim all the way round, thickest across the brow where it becomes the
     # band the studs are driven through.
@@ -763,19 +771,20 @@ def build_head(material_of) -> tuple:
         point = cap_uv(theta, 0.012 + 0.150 * v)
         front = max(0.0, -math.sin(theta))
         radial = Vector((point.x, point.y - 0.03, 0.0))
-        return point + radial.normalized() * (0.008 + 0.008 * front ** 1.5)
+        return point + radial.normalized() * (0.006 + 0.006 * front ** 1.5)
 
     parts.append(surface_grid("MS_Helm_Rim", 36, 2, rim_band, material_of("bone"),
                               thickness=0.008, closed_u=True, axis=Vector((0.0, 0.05, 1.75))))
 
-    # Brow band: a second bone bar standing proud across the whole face.
-    parts.append(arc_plate("MS_Helm_Brow", hood, 1.752, 1.812, math.radians(216.0),
-                           math.radians(324.0), grow + 0.028, 22, 3, material_of("bone"),
-                           0.011, salt=2.4, jitter=0.004))
+    # Brow band: a second bone bar across the whole face. It stood 28 mm proud of
+    # the cowl and was measured with it; across the brow it is a bar again.
+    parts.append(arc_plate("MS_Helm_Brow", skull, 1.734, 1.780, math.radians(216.0),
+                           math.radians(324.0), grow + 0.012, 22, 3, material_of("bone"),
+                           0.009, salt=2.4, jitter=0.003))
 
     # Leather lining: a band hanging under the bone rim. It is built off the
-    # cap's own edge rather than off the cowl, so it cannot sink into the hood
-    # where the cowl flares; it reads as the roll the bone plates are sewn to.
+    # cap's own edge rather than off the skull, so it cannot sink into the brow
+    # where the skin flares; it reads as the roll the bone plates are sewn to.
     def lining(u, v):
         theta = TAU * u
         rim = cap_uv(theta, 0.020)
@@ -789,40 +798,42 @@ def build_head(material_of) -> tuple:
     ridge = [cap_uv(math.radians(270.0), 0.03 + 0.19 * step) for step in range(5)]
     ridge += [cap_uv(math.radians(270.0), 0.97), cap_uv(math.radians(90.0), 0.97)]
     ridge += [cap_uv(math.radians(90.0), 0.79 - 0.19 * step) for step in range(5)]
-    ridge = [point + outward(point) * 0.014 for point in ridge]
-    parts.append(cord("MS_Helm_Ridge", ridge, 0.017, material_of("bone"), sides=5,
+    ridge = [point + outward(point) * 0.009 for point in ridge]
+    parts.append(cord("MS_Helm_Ridge", ridge, 0.013, material_of("bone"), sides=5,
                       salt=5.7, taper=0.22))
     for index, (theta_deg, v) in enumerate(((270.0, 0.26), (270.0, 0.56),
                                             (90.0, 0.30), (90.0, 0.64))):
         point = cap_uv(math.radians(theta_deg), v)
-        parts.append(blob(f"MS_Helm_Scute_{index}", point + outward(point) * 0.020,
-                          (0.026, 0.034, 0.018), material_of("bone"), sides=6, rings=4,
+        parts.append(blob(f"MS_Helm_Scute_{index}", point + outward(point) * 0.011,
+                          (0.018, 0.024, 0.013), material_of("bone"), sides=6, rings=4,
                           salt=9.1 + index, squash_z=0.85))
 
     # Antler crown: sockets sit on the measured cap, racks lean out and back.
     for side in (1.0, -1.0):
         theta = math.radians(58.0 if side > 0 else 122.0)
-        surface = cap_at(theta, 1.796)
+        surface = cap_at(theta, 1.772)
         away = Vector((math.cos(theta), math.sin(theta), 0.0)).normalized()
-        base = surface - away * 0.012
+        # On the cap, not sunk through it: pulled inward the sockets are inside
+        # the skull, which the clearance pass refuses.
+        base = surface + away * 0.012
         parts.append(blob(f"MS_Helm_Socket_{'L' if side > 0 else 'R'}", base,
-                          (0.024, 0.024, 0.020), material_of("bone"), sides=8, rings=6,
+                          (0.018, 0.018, 0.015), material_of("bone"), sides=8, rings=6,
                           salt=6.2, squash_z=1.0))
         heading = (away * 0.40 + Vector((0.0, 0.12, 1.0))).normalized()
         racks = mobs.antler_rack(
             "MS_Antler", base + away * 0.004,
-            heading, 0.265, 0.040, 2,
+            heading, 0.145, 0.026, 2,
             material_of("antler"), salt=7.3 + side * 1.7 + 3.0, curve=0.72, gravity=0.09)
         parts.append(mobs.merge_tubes(f"MS_Antler_{'L' if side > 0 else 'R'}", racks, 6,
                                       material_of("antler"), wobble=0.10, salt=8.1 + side))
 
     # Rivets through the brow band.
     for index, angle in enumerate((238.0, 270.0, 302.0)):
-        section = hood.at(1.782)
-        point = Vector((section["cx"] + math.cos(math.radians(angle)) * (section["rx"] + grow + 0.052),
-                        section["cy"] + math.sin(math.radians(angle)) * (section["ry"] + grow + 0.052),
-                        1.782))
-        parts.append(blob(f"MS_Helm_Stud_{index}", point, (0.012, 0.012, 0.010),
+        section = skull.at(1.770)
+        point = Vector((section["cx"] + math.cos(math.radians(angle)) * (section["rx"] + grow + 0.016),
+                        section["cy"] + math.sin(math.radians(angle)) * (section["ry"] + grow + 0.016),
+                        1.770))
+        parts.append(blob(f"MS_Helm_Stud_{index}", point, (0.010, 0.010, 0.008),
                           material_of("bone"), sides=6, rings=4, salt=10.0 + index))
 
     if os.environ.get("MS_DEBUG_HELM"):
@@ -2085,7 +2096,11 @@ def main() -> None:
     # the hidden volume beside the limb, and the arm's inner half is modelled
     # inside the torso, so "never cross" is not a physical target there.
     strict_refs = {
-        "head": ["Male_Ranger_Head_Hood", "Ranger_Head_SuperHero_Male"],
+        # The cap fits the skull. `Male_Ranger_Head_Hood` is the *leather* set's
+        # head piece and a slot draws exactly the set it wears, so the two are
+        # never on screen together - measuring the cap against the cowl is what
+        # made it 0.32 m across a 0.21 m head.
+        "head": ["Ranger_Head_SuperHero_Male"],
         "chest": [],
         # The arms and glove cuff are chest/hands slot geometry themselves, so
         # they are never drawn with this kit; crossings are measured, not gated.
@@ -2094,7 +2109,7 @@ def main() -> None:
         "feet": ["Male_Ranger_Feet_Boots", "Ranger_Base_Calf"],
     }
     clearance_refs = {
-        "head": ["Male_Ranger_Head_Hood", "Ranger_Head_SuperHero_Male", "Male_Ranger_Body"],
+        "head": ["Ranger_Head_SuperHero_Male", "Male_Ranger_Body"],
         "chest": ["Male_Ranger_Body", "Male_Ranger_Legs", "Male_Ranger_Arms",
                   "Male_Ranger_Arms_Bracer", "Male_Ranger_Body_Belt_1",
                   "Male_Ranger_Body_Belt_2", "Male_Ranger_Acc_Pauldron"],

@@ -86,16 +86,16 @@
       ],
       "triangles": 4656,
       "bounds_min": [
-        -0.16,
-        1.6261,
-        -0.33239
+        -0.10575,
+        1.62398,
+        -0.18098
       ],
       "bounds_max": [
-        0.16037,
-        2.17007,
-        0.23867
+        0.10662,
+        1.97805,
+        0.13289
       ],
-      "vertices": 4561
+      "vertices": 4409
     },
     "Armor_Makeshift_Chest": {
       "slot": "chest",
@@ -217,275 +217,195 @@
     "rest": {
       "Armor_Makeshift_Head": {
         "MS_Skull_Cap": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 8.22
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 48.04
+            "nearest_mm": 8.28
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 112.46
+            "nearest_mm": 78.1
           }
         },
         "MS_Helm_Rim": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 20.69
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 59.53
+            "nearest_mm": 17.42
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 125.58
+            "nearest_mm": 81.46
           }
         },
         "MS_Helm_Brow": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 33.18
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 86.3
+            "nearest_mm": 21.25
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 210.4
+            "nearest_mm": 172.24
           }
         },
         "MS_Helm_Lining": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 19.33
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 57.3
+            "nearest_mm": 17.18
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 100.72
+            "nearest_mm": 52.36
           }
         },
         "MS_Helm_Ridge": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 23.74
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 92.1
+            "nearest_mm": 13.82
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 145.88
+            "nearest_mm": 79.19
           }
         },
         "MS_Helm_Scute_0": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 36.14
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 115.81
+            "nearest_mm": 26.99
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 272.3
+            "nearest_mm": 207.38
           }
         },
         "MS_Helm_Scute_1": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 26.11
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 110.92
+            "nearest_mm": 18.73
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 297.39
+            "nearest_mm": 219.18
           }
         },
         "MS_Helm_Scute_2": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 47.29
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 132.98
+            "nearest_mm": 5.24
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 199.28
+            "nearest_mm": 109.63
           }
         },
         "MS_Helm_Scute_3": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 29.97
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 140.53
+            "nearest_mm": 18.0
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 253.04
+            "nearest_mm": 157.73
           }
         },
         "MS_Helm_Socket_L": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 11.04
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 97.06
+            "nearest_mm": 16.52
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 197.67
+            "nearest_mm": 158.4
           }
         },
         "MS_Antler_L": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 8.27
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 100.49
+            "nearest_mm": 26.45
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 220.18
+            "nearest_mm": 165.4
           }
         },
         "MS_Helm_Socket_R": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 13.71
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 95.59
+            "nearest_mm": 14.12
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 197.6
+            "nearest_mm": 158.4
           }
         },
         "MS_Antler_R": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 8.16
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 101.97
+            "nearest_mm": 26.44
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 220.1
+            "nearest_mm": 166.22
           }
         },
         "MS_Helm_Stud_0": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 66.45
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 124.03
+            "nearest_mm": 29.75
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 263.04
+            "nearest_mm": 205.83
           }
         },
         "MS_Helm_Stud_1": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 63.16
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 132.13
+            "nearest_mm": 28.44
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 274.07
+            "nearest_mm": 210.19
           }
         },
         "MS_Helm_Stud_2": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 67.85
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 125.3
+            "nearest_mm": 28.95
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 262.28
+            "nearest_mm": 205.69
           }
         }
       },
@@ -2440,20 +2360,15 @@
     "idle": {
       "Armor_Makeshift_Head": {
         "Armor_Makeshift_Head": {
-          "Male_Ranger_Head_Hood": {
-            "intersections": 0,
-            "max_depth_mm": 0.0,
-            "nearest_mm": 5.78
-          },
           "Ranger_Head_SuperHero_Male": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 48.17
+            "nearest_mm": 5.24
           },
           "Male_Ranger_Body": {
             "intersections": 0,
             "max_depth_mm": 0.0,
-            "nearest_mm": 89.89
+            "nearest_mm": 59.57
           }
         }
       },
@@ -2537,7 +2452,6 @@
     "reported_intersections": 8541,
     "gated_refs": {
       "head": [
-        "Male_Ranger_Head_Hood",
         "Ranger_Head_SuperHero_Male"
       ],
       "chest": [],

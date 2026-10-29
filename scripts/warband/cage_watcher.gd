@@ -46,9 +46,11 @@ const HARDENED_HEALTH := 101.0
 const MAKESHIFT_TIER := ["dagger_ironwood", "club_makeshift", "branch_heavy",
 	"bow_twig", "shield_wood"]
 
-## What a watcher may wear. The four salvage sets and the shirt on its back; the
-## creature wears no armour, this is what a corpse is carrying.
-const WATCHER_ARMOUR := ["naked", "makeshift", "cloth", "leather", "mail"]
+## What a watcher may wear. The camp is the first scenario and it pays in salvage,
+## so a corpse carries the makeshift set or nothing at all; the creature wears no
+## armour of its own, this is what a body is carrying. `_pick_variant` holds the
+## rule, so a future table row cannot reintroduce a forged kit.
+const WATCHER_ARMOUR := ["naked", "makeshift"]
 
 ## The swings the warden's body authors, by the name the sampler table uses.
 const SWING_OVERHEAD := "overhead"
@@ -86,15 +88,17 @@ const TRADE_REACH := 1.15
 ## `scale` is applied uniformly to the whole body, `main` is always from the
 ## makeshift tier, `swing` is the attack it favours - the pool repeats it, so it
 ## is a preference and not a rotation - and `guard` is the share of exchanges the
-## body braces through (never 1.0).
+## body braces through (never 1.0). `armor` and `pieces` are what the corpse
+## carries, and in the first scenario that is the makeshift set or nothing: the
+## slots vary so two wardens are not the same corpse, the tier does not.
 const VARIANTS := [
 	{"name": "Moss Warden", "scale": 1.02, "tint": Color(0.72, 0.86, 0.62),
 		"main": "club_makeshift", "swing": SWING_SLASH,
-		"armor": "leather", "pieces": ["chest", "legs"],
+		"armor": "makeshift", "pieces": ["chest", "legs"],
 		"guard": 0.52, "crouch": false},
 	{"name": "Ash Reaver", "scale": 0.90, "tint": Color(0.84, 0.86, 0.90),
 		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "cloth", "pieces": ["chest", "head"],
+		"armor": "makeshift", "pieces": ["chest", "head"],
 		"guard": 0.44, "crouch": true},
 	{"name": "Bone Picker", "scale": 1.16, "tint": Color(1.00, 0.96, 0.84),
 		"main": "club_makeshift", "swing": SWING_OVERHEAD,
@@ -102,19 +106,19 @@ const VARIANTS := [
 		"guard": 0.60, "crouch": false},
 	{"name": "Rustcoat", "scale": 1.24, "tint": Color(0.96, 0.74, 0.58),
 		"main": "branch_heavy", "swing": SWING_STAB,
-		"armor": "leather", "pieces": ["chest", "legs"],
+		"armor": "makeshift", "pieces": ["chest", "legs"],
 		"guard": 0.48, "crouch": false},
 	{"name": "Dull Violet", "scale": 0.94, "tint": Color(0.82, 0.74, 0.96),
 		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "cloth", "pieces": ["chest", "legs", "feet"],
+		"armor": "makeshift", "pieces": ["chest", "legs", "feet"],
 		"guard": 0.66, "crouch": true},
 	{"name": "Tallow Sentry", "scale": 1.30, "tint": Color(1.00, 0.92, 0.68),
 		"main": "club_makeshift", "swing": SWING_SLASH,
-		"armor": "mail", "pieces": ["chest", "head"],
+		"armor": "makeshift", "pieces": ["chest", "head"],
 		"guard": 0.56, "crouch": false},
 	{"name": "Moss Stalker", "scale": 0.88, "tint": Color(0.72, 0.86, 0.62),
 		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "naked", "pieces": ["chest"],
+		"armor": "naked", "pieces": [],
 		"guard": 0.40, "crouch": true},
 	{"name": "Ashen Warden", "scale": 1.10, "tint": Color(0.84, 0.86, 0.90),
 		"main": "branch_heavy", "swing": SWING_OVERHEAD,
@@ -126,15 +130,15 @@ const VARIANTS := [
 		"guard": 0.62, "crouch": false},
 	{"name": "Rust Widow", "scale": 1.06, "tint": Color(0.96, 0.74, 0.58),
 		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "cloth", "pieces": ["chest", "head", "legs"],
+		"armor": "makeshift", "pieces": ["chest", "head", "legs"],
 		"guard": 0.58, "crouch": true},
 	{"name": "Violet Bound", "scale": 1.20, "tint": Color(0.82, 0.74, 0.96),
 		"main": "branch_heavy", "swing": SWING_STAB,
-		"armor": "mail", "pieces": ["chest", "legs"],
+		"armor": "makeshift", "pieces": ["chest", "legs"],
 		"guard": 0.46, "crouch": false},
 	{"name": "Tallow Throat", "scale": 0.92, "tint": Color(1.00, 0.92, 0.68),
 		"main": "club_makeshift", "swing": SWING_OVERHEAD,
-		"armor": "leather", "pieces": ["chest"],
+		"armor": "makeshift", "pieces": ["chest"],
 		"guard": 0.68, "crouch": false},
 ]
 
@@ -326,18 +330,30 @@ func _pick_variant() -> Dictionary:
 	var out: Dictionary = (VARIANTS[_variant_slot] as Dictionary).duplicate(true)
 	if not MAKESHIFT_TIER.has(str(out.get("main", ""))):
 		out["main"] = "dagger_ironwood"
+	# The first scenario pays in salvage, in the hand and on the corpse alike. The
+	# variant table says what a body brought when the camp was written; this is the
+	# rule that holds it there - a leather, cloth or mail rag off the first six
+	# cultists put a forged kit in a squad's pack before the trail's second torch.
+	# Only the tier changes: the paint, the build, the hand and the way of fighting
+	# are still the variant's own, and a body that came in with nothing on its back
+	# still drops nothing.
+	var worn := str(out.get("armor", "naked"))
+	if not WATCHER_ARMOUR.has(worn):
+		worn = "makeshift"
+	out["armor"] = worn
+	if worn == "naked":
+		out["pieces"] = []
 	if health_pool >= HARDENED_HEALTH:
 		return out
 	# The pair Corvin fights are still their own bodies - their own paint, build
 	# and hand - and only thinner: a shiv or a club, never the limb it can barely
-	# lift, and only the shirt on its back or the salvage kit.
+	# lift, and one rag on the corpse instead of the whole salvage kit.
 	out["guard"] = minf(float(out.get("guard", 0.5)), 0.55)
 	if weapon_item.is_empty():
 		out["main"] = "club_makeshift" if _variant_slot % 2 == 1 else "dagger_ironwood"
 		out["swing"] = SWING_SLASH if _variant_slot % 2 == 1 else SWING_STAB
-	if str(out.get("armor", "")) not in ["naked", "makeshift"]:
-		out["armor"] = "makeshift" if _variant_slot % 2 == 1 else "naked"
-		out["pieces"] = ["chest", "legs"] if _variant_slot % 2 == 1 else ["chest"]
+	if str(out.get("armor", "")) == "makeshift":
+		out["pieces"] = ["chest"]
 	return out
 
 
