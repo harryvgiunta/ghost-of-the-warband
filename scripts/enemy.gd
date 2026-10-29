@@ -40,6 +40,16 @@ const DEVIL_MAX_ATTACKERS := 3
 ## never be narrower than the surface an arrow actually stops on.
 const WOLF_BODY_RADIUS := 0.40
 const DEVIL_BODY_RADIUS := 0.34
+## What a briar wolf is worth once it falls: a pelt every time, and one or two of
+## the other three parts off the body's own salvage - the whole of what a kill in
+## the wood pays now that the wolves carry no blade. The table is the frontier's,
+## not the loot vacuum's: the corpse record is filled from here, so a wolf answers
+## the same way whether it is the host's body or a replay of the same hunt.
+const WOLF_PELT := "wolf_pelt"
+const WOLF_PARTS := ["wolf_pelt", "wolf_bone", "wolf_tooth", "wolf_paw"]
+## The share of wolves that also give up a second spare part. A body that leaves
+## only a pelt is a thin kill, not a miss.
+const WOLF_SPARE_SHARE := 0.5
 var kind := 0
 var pack_index := -1
 var devil_weapon := "claw"
@@ -64,6 +74,9 @@ var _state_time := 0.0
 var _stagger_duration := 0.0
 var _body: Node3D
 var _wolf: WolfVisual
+## The salvage this body rolled when its corpse was first read, kept so a body
+## that slid a step in its ragdoll still answers the parts it was killed with.
+var _wolf_parts: Array[String] = []
 var _devil: DevilVisual
 ## The noise this body makes: a growl going into the bite, a cry going down.
 var _voice: VoiceEmitter
@@ -254,6 +267,41 @@ func blood_rig() -> Node3D:
 
 func blood_scale() -> float:
 	return 1.35 if kind == 0 else 1.20
+
+## What is on this body when it falls, for `WarbandLoot.register_corpse`. A wolf
+## has no blade to take and nothing to strip off its back, so this is the salvage
+## alone; every other kind answers empty, which is what leaves the cinder devils'
+## dropped steel to the scene that spawns it.
+func gear_items() -> Array[String]:
+	if kind != 0:
+		return []
+	if _wolf_parts.is_empty():
+		_wolf_parts = parts_for(name, global_position)
+	return _wolf_parts.duplicate()
+
+## The salvage one wolf leaves, off its identity: the number a scene gave it
+## (`BriarWolf3`) and the metre it fell on. Two bodies that answer both, on any
+## machine and in any replay, yield the same pieces.
+static func parts_for(wolf_name: String, at: Vector3) -> Array[String]:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = _salvage_seed(wolf_name, at)
+	var out: Array[String] = [WOLF_PELT]
+	var spare: Array = WOLF_PARTS.duplicate()
+	spare.erase(WOLF_PELT)
+	var wanted := 3 if rng.randf() < WOLF_SPARE_SHARE else 2
+	while out.size() < wanted and not spare.is_empty():
+		var index := rng.randi_range(0, spare.size() - 1)
+		out.append(str(spare[index]))
+		spare.remove_at(index)
+	return out
+
+## The seed, rounded to the metre: a corpse is registered on the frame it dies,
+## but a body that is nudged before anything reads it must not change what it
+## carried.
+static func _salvage_seed(wolf_name: String, at: Vector3) -> int:
+	var seed_value := absi(wolf_name.hash()) * 31
+	seed_value += int(round(at.x)) * 7 + int(round(at.z)) * 13
+	return seed_value
 
 func blood_weapon_anchor(_hand: String = "") -> Node3D:
 	if kind == 2 and is_instance_valid(_devil):

@@ -40,9 +40,15 @@ extends RefCounted
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 
 ## The strip the world occupies. `x` is the strip's west edge, `y` its near edge.
-const ORIGIN := Vector2(-210.0, -1242.0)
-const COLS := 60
-const ROWS := 212
+## It is sized off the trail the world builds: the lane runs 1,375 m south from the
+## camp's mouth, the town stands 30 m past its far end, and the wood that has
+## grown out to `run_forest.gd`'s `WOOD_EDGE` has to stand on ground that does not
+## climb. So x reaches 268 m either side of the lane - the wood's edge, the rim's
+## toe and the face climbing to the boundary - and z runs from the camp's own wood
+## in the north to a town pad 62 m short of the southern rim.
+const ORIGIN := Vector2(-268.0, -1695.0)
+const COLS := 77
+const ROWS := 277
 const CELL := 7.0
 ## Three octaves, 64/40/31 m. The sum is normalised to `peak` metres either side of
 ## the pads, so the relief is the ±2 m a forest floor rolls over, not a mountain and
@@ -61,10 +67,12 @@ const PAD_Y := 0.0
 const RIM_MIN := 34.0
 const RIM_MAX := 58.0
 const RIM_FACE_SHARE := 0.72
-## West/east toes, and the north/south toes. The field is x -210..210, z -1242..242.
-const RIM_TOE_X := 160.0
+## West/east toes, and the north/south toes. The field is x -268..271, z
+## -1695..244, and the wood's own outer row stands at 196 m off the lane, so the
+## toe is past it and the face has 50 m (or 62 m north and south) to climb in.
+const RIM_TOE_X := 218.0
 const RIM_TOE_Z_NORTH := 180.0
-const RIM_TOE_Z_SOUTH := -1180.0
+const RIM_TOE_Z_SOUTH := -1633.0
 ## The upper edge of the rim's forested skirt, as a share of the face height:
 ## below it the slope is gentle and dark enough for the wood's own rows to stand.
 const RIM_SKIRT_SHARE := 0.24
@@ -96,7 +104,7 @@ static var _worn: Array = []
 ## to lay water, reeds or mist: `{centre, forward, right, water_y, inner, outer,
 ## half_length, side}`.
 static var _swamp: Dictionary = {}
-## The baked field's extremes, so nothing has to fold 13,000 floats to read them.
+## The baked field's extremes, so nothing has to fold 21,000 floats to read them.
 static var _low := 0.0
 static var _high := 0.0
 
@@ -330,14 +338,15 @@ static func _rimmed(height: float, x: float, z: float) -> float:
 ## 0 in the walking wood, 1 at the field's edge. The max of the four faces, so a
 ## corner takes the taller of its two ridges instead of adding them.
 static func _rim_rise(x: float, z: float) -> float:
-	# West toe -160, east toe 160, north toe 180, south toe -1180; the field runs
-	# x -210..210 and z -1242..242 (ORIGIN + COLS/ROWS * CELL).
+	# The toes are symmetric in x and hand-set in z; every denominator is the real
+	# distance from its toe to the field's own boundary, so the face's gradient is
+	# the same on all four sides whatever the strip is sized to.
+	var east_edge := ORIGIN.x + float(COLS) * CELL
+	var north_edge := ORIGIN.y + float(ROWS) * CELL
 	var west := (-RIM_TOE_X - x) / maxf(absf(ORIGIN.x) - RIM_TOE_X, 1.0)
-	var east := (x - RIM_TOE_X) / maxf(absf(ORIGIN.x) - RIM_TOE_X, 1.0)
-	var north := (z - RIM_TOE_Z_NORTH) \
-		/ maxf(ORIGIN.y + float(ROWS) * CELL - RIM_TOE_Z_NORTH, 1.0)
-	var south := (RIM_TOE_Z_SOUTH - z) \
-		/ maxf(RIM_TOE_Z_SOUTH - ORIGIN.y, 1.0)
+	var east := (x - RIM_TOE_X) / maxf(east_edge - RIM_TOE_X, 1.0)
+	var north := (z - RIM_TOE_Z_NORTH) / maxf(north_edge - RIM_TOE_Z_NORTH, 1.0)
+	var south := (RIM_TOE_Z_SOUTH - z) / maxf(RIM_TOE_Z_SOUTH - ORIGIN.y, 1.0)
 	return maxf(maxf(_rim_curve(west), _rim_curve(east)),
 		maxf(_rim_curve(north), _rim_curve(south)))
 
