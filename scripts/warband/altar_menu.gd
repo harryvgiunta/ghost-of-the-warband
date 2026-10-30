@@ -1,14 +1,18 @@
 class_name AltarMenu
 extends CanvasLayer
-## The Sacrificial Altar's ritual panel: unbind spare steel, distil the five
-## tiers 5:1, and burn brands onto the vessels a mercenary can actually hold.
+## The Sacrificial Altar's ritual panel, two pages in one frame. The first is the
+## reagent rite: lay a reagent from the shared stash on a weapon or a shield and
+## the piece wakes into its own skill (stock steel carries none). Behind it are the
+## essence rites: unbind spare steel, distil the five tiers 5:1, and burn brands
+## onto the vessels a mercenary can actually hold.
 ##
-## The panel owns no arithmetic and no wallet. `Warband.cruor` is the ledger and
-## `CruorCatalog`/`BrandedSkills`/`WarbandStash` are the tables, so every number
-## the player reads here is the number the save file and combat use; the menu only
-## reads that state, calls one of three verbs and repaints. It is built entirely
-## from `Label`s and `Button`s with the fallback font because it has to construct,
-## open and be driven inside a headless regression.
+## The panel owns no arithmetic and no wallet. `Warband.cruor` is the ledger,
+## `Warband.anoint` the reagent verb and `CruorCatalog`/`BrandedSkills`/
+## `WarbandStash` are the tables, so every number the player reads here is the
+## number the save file and combat use; the menu only reads that state, calls one
+## of four verbs and repaints. It is built entirely from `Label`s, `Button`s and
+## icons with the fallback font because it has to construct, open and be driven
+## inside a headless regression.
 
 signal changed
 
@@ -16,6 +20,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const State = preload("res://scripts/player_state.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 
@@ -25,6 +30,10 @@ const GOLD := LedgerThemeScript.BLOOD
 const BLOOD := LedgerThemeScript.BLOOD
 const INK := Color(0.07, 0.05, 0.05, 1.0)
 const FRAME_TINT := Color(0.10, 0.07, 0.07, 0.97)
+## The frame's two pages: the reagent rite, which is what a player walks up to the
+## altar for, and the essence rites behind it.
+const PAGE_ANOINT := "anoint"
+const PAGE_ESSENCE := "essence"
 
 ## The warband this panel renders. Assigned by `configure()`; every read goes
 ## through `_cruor()`/`_stash()` so a half-initialised panel cannot crash.
@@ -44,6 +53,11 @@ var _brand_cost: Label
 var _brand_line: Label
 var _brand_note: Label
 var _brand_button: Button
+var _anoint_list: VBoxContainer
+var _reagent_label: Label
+var _page := PAGE_ANOINT
+var _pages: Dictionary = {}          # page -> Control
+var _page_buttons: Dictionary = {}   # page -> Button
 var _built := false
 var _opened := false
 
@@ -51,6 +65,7 @@ var _tier_rows: Array[Dictionary] = []
 var _unbind_rows: Array[Dictionary] = []
 var _distill_rows: Array[Dictionary] = []
 var _brand_rows: Array[Dictionary] = []
+var _anoint_rows: Array[Dictionary] = []
 var _brand_item := ""
 var _brand_tier: int = Contracts.CruorTier.T1_RITUAL_TALLOW
 
@@ -75,9 +90,12 @@ func configure(source: Node) -> void:
 func is_open() -> bool:
 	return _opened
 
+## The altar always opens on the reagent rite: it is the verb a player is sent to
+## the altar for.
 func open() -> void:
 	_build()
 	_opened = true
+	_page = PAGE_ANOINT
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
@@ -94,9 +112,11 @@ func close() -> void:
 func refresh() -> void:
 	_build()
 	_refresh_header()
+	_refresh_anoint()
 	_refresh_unbind()
 	_refresh_distill()
 	_refresh_brand()
+	_apply_page()
 	visible = _opened
 
 # --- public state (the regression and the town hub read these) -------------
@@ -112,6 +132,24 @@ func distill_rows() -> Array[Dictionary]:
 
 func brand_rows() -> Array[Dictionary]:
 	return _brand_rows
+
+## One row per weapon or shield the warband carries (pooled or worn):
+## `{item_id, name, value, ability, ability_name, key, anointed, recipe,
+## recipe_text, ok, message, button}`; `button` is null on an anointed row.
+func anoint_rows() -> Array[Dictionary]:
+	return _anoint_rows
+
+## `PAGE_ANOINT` or `PAGE_ESSENCE`.
+func page() -> String:
+	return _page
+
+## Turn the frame to one of its two pages. False for a page it does not have.
+func show_page(page_name: String) -> bool:
+	if not _pages.has(page_name):
+		return false
+	_page = page_name
+	_apply_page()
+	return true
 
 func brand_button() -> Button:
 	return _brand_button
@@ -170,7 +208,20 @@ func select_brand_tier(tier: int) -> bool:
 	_refresh_brand_preview()
 	return true
 
-# --- the three verbs -------------------------------------------------------
+# --- the four verbs --------------------------------------------------------
+
+## Lay the altar's reagents on a piece. The spend, the ledger and the orders are
+## the warband's (`Warband.anoint`); a refusal is printed, never swallowed.
+func press_anoint(item_id: String) -> void:
+	if warband == null or not warband.has_method("anoint"):
+		_set_status("No warband to anoint for.", false)
+		return
+	var result: Dictionary = warband.anoint(item_id)
+	var completed: Variant = result.get("completed", [])
+	if bool(result.get("ok", false)) and completed is Array and not (completed as Array).is_empty():
+		result["message"] = str(result.get("message", "")) \
+			+ "  ·  Tell the quartermaster what the steel can do now."
+	_report(result)
 
 ## Render one pooled copy down. The yield and the destruction are the manager's.
 func press_unbind(item_id: String) -> void:
@@ -258,6 +309,115 @@ func _refresh_header() -> void:
 		label.text = "%s\n%d" % [Catalog.tier_name(tier), count]
 		_tier_rows.append({"tier": tier, "name": Catalog.tier_name(tier), "count": count,
 			"color": Catalog.tier_color(tier), "label": label})
+
+## One row per weapon or shield the warband carries, pooled or worn: an
+## anointing lives on the piece, so a blade in a mercenary's hands is as eligible
+## as a spare. Pieces still waiting come first, dearest first; the anointed sink
+## to the bottom with the word in place of the button.
+func _refresh_anoint() -> void:
+	_clear(_anoint_list)
+	_anoint_rows.clear()
+	var cruor := _cruor()
+	var stash := _stash()
+	if _reagent_label != null:
+		_reagent_label.text = _reagent_text(stash)
+	if cruor == null or stash == null or _anoint_list == null:
+		return
+	var roster: Variant = _roster()
+	var rows: Array[Dictionary] = []
+	for item_id in stash.available_ids(roster):
+		var skill := WarbandCruor.anoint_skill(item_id)
+		if skill.is_empty():
+			continue
+		var ability := str(skill.get("id", ""))
+		var check: Dictionary = cruor.can_anoint(stash, roster, item_id)
+		var recipe := WarbandCruor.anoint_recipe(ability)
+		rows.append({
+			"item_id": item_id,
+			"name": _item_name(item_id),
+			"value": _item_price(item_id),
+			"ability": ability,
+			"ability_name": str(skill.get("name", ability)),
+			"key": WarbandCruor.anoint_key(item_id),
+			"anointed": cruor.is_anointed(item_id),
+			"recipe": recipe,
+			"recipe_text": WarbandCruor.recipe_text(recipe),
+			"ok": bool(check.get("ok", false)),
+			"message": str(check.get("message", "")),
+		})
+	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if bool(a["anointed"]) != bool(b["anointed"]):
+			return not bool(a["anointed"])
+		if int(a["value"]) != int(b["value"]):
+			return int(a["value"]) > int(b["value"])
+		return str(a["name"]) < str(b["name"]))
+	for row in rows:
+		_anoint_list.add_child(_anoint_line(row))
+		_anoint_rows.append(row)
+	if rows.is_empty():
+		_add_note(_anoint_list, "The warband carries no weapon or shield to anoint.")
+
+## One piece: the icon of the skill it wakes into, its name and that skill's key,
+## what the rite takes, and the button - or the word that it is done. The button
+## stays pressable when the stash is short, like the brand's, so the refusal is
+## read rather than guessed at.
+func _anoint_line(row: Dictionary) -> Control:
+	var anointed := bool(row["anointed"])
+	var line := HBoxContainer.new()
+	line.name = "Anoint_%s" % str(row["item_id"])
+	line.add_theme_constant_override("separation", 10)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(38, 38)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = AbilityRules.icon_texture(str(row["ability"]))
+	# A sleeping skill is drawn faint; the anointed one at full ink.
+	icon.modulate = Color.WHITE if anointed else Color(1.0, 1.0, 1.0, 0.4)
+	line.add_child(icon)
+	var words := VBoxContainer.new()
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.add_theme_constant_override("separation", 0)
+	line.add_child(words)
+	_make_label(words, str(row["name"]), 13, CREAM)
+	_make_label(words, "%s  ·  key %s" % [str(row["ability_name"]), str(row["key"])], 10,
+		GOLD if anointed else MUTED)
+	var cost := _make_label(line, "ANOINTED" if anointed else str(row["recipe_text"]), 11,
+		GOLD if anointed or bool(row["ok"]) else BLOOD)
+	cost.custom_minimum_size = Vector2(170, 0)
+	cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	cost.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row["button"] = null
+	if not anointed:
+		var button := Button.new()
+		button.name = "AnointButton"
+		button.text = "ANOINT"
+		button.custom_minimum_size = Vector2(120, 32)
+		button.add_theme_font_size_override("font_size", 12)
+		if not bool(row["ok"]):
+			button.tooltip_text = str(row["message"])
+		button.pressed.connect(press_anoint.bind(str(row["item_id"])))
+		line.add_child(button)
+		row["button"] = button
+	return line
+
+## Every reagent a rite asks for and what the shared stash holds of it.
+func _reagent_text(stash: WarbandStash) -> String:
+	var seen: Dictionary = {}
+	var parts: Array[String] = []
+	for ability in WarbandCruor.ANOINT_RECIPES:
+		for reagent in WarbandCruor.ANOINT_RECIPES[ability]:
+			if seen.has(reagent):
+				continue
+			seen[reagent] = true
+			var held := stash.pooled_count(str(reagent)) if stash != null else 0
+			parts.append("%s  %d" % [_item_name(str(reagent)).to_upper(), held])
+	return "   ·   ".join(PackedStringArray(parts))
+
+func _apply_page() -> void:
+	for page_name in _pages:
+		(_pages[page_name] as Control).visible = page_name == _page
+	for page_name in _page_buttons:
+		(_page_buttons[page_name] as Button).set_pressed_no_signal(page_name == _page)
 
 func _refresh_unbind() -> void:
 	_clear(_unbind_list)
@@ -476,6 +636,18 @@ func _build() -> void:
 	title_row.add_theme_constant_override("separation", 12)
 	column.add_child(title_row)
 	_make_label(title_row, "THE SACRIFICE", 11, BLOOD)
+	# The two rites the altar keeps: reagents on steel first, essence behind it.
+	var pages := ButtonGroup.new()
+	for entry in [[PAGE_ANOINT, "ANOINT"], [PAGE_ESSENCE, "ESSENCE"]]:
+		var tab := Button.new()
+		tab.name = "Page_%s" % str(entry[0])
+		tab.text = str(entry[1])
+		tab.toggle_mode = true
+		tab.button_group = pages
+		tab.add_theme_font_size_override("font_size", 11)
+		tab.pressed.connect(show_page.bind(str(entry[0])))
+		title_row.add_child(tab)
+		_page_buttons[str(entry[0])] = tab
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(spacer)
@@ -488,10 +660,41 @@ func _build() -> void:
 	close_button.pressed.connect(close)
 	title_row.add_child(close_button)
 
+	# The reagent rite: every weapon the warband carries and the skill it wakes into.
+	var anoint_page := VBoxContainer.new()
+	anoint_page.name = "AnointPage"
+	anoint_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	anoint_page.add_theme_constant_override("separation", 6)
+	column.add_child(anoint_page)
+	_pages[PAGE_ANOINT] = anoint_page
+	_make_label(anoint_page, "ANOINT A WEAPON", 12, GOLD)
+	_reagent_label = _make_label(anoint_page, "", 12, CREAM)
+	_reagent_label.name = "Reagents"
+	_add_note(anoint_page, "Lay a reagent on a weapon and it wakes into its own skill: stock steel"
+		+ " has none. Every copy the warband carries keeps it; 1 looses a weapon's, 2 a shield's.")
+	var anoint_scroll := ScrollContainer.new()
+	anoint_scroll.name = "AnointScroll"
+	anoint_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	anoint_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	anoint_page.add_child(anoint_scroll)
+	_anoint_list = VBoxContainer.new()
+	_anoint_list.name = "AnointList"
+	_anoint_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_anoint_list.add_theme_constant_override("separation", 6)
+	anoint_scroll.add_child(_anoint_list)
+
+	# The essence rites: the five-tier rail over unbind, distil and brand.
+	var essence_page := VBoxContainer.new()
+	essence_page.name = "EssencePage"
+	essence_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	essence_page.add_theme_constant_override("separation", 8)
+	column.add_child(essence_page)
+	_pages[PAGE_ESSENCE] = essence_page
+
 	var rail := HBoxContainer.new()
 	rail.name = "TierRail"
 	rail.add_theme_constant_override("separation", 6)
-	column.add_child(rail)
+	essence_page.add_child(rail)
 	_tier_chips.clear()
 	for tier in Catalog.TIER_ORDER:
 		var chip := PanelContainer.new()
@@ -508,7 +711,7 @@ func _build() -> void:
 	body.name = "Body"
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", 14)
-	column.add_child(body)
+	essence_page.add_child(body)
 
 	# Unbinding: one button per spare magic piece, the yield printed on it.
 	var unbind_column := VBoxContainer.new()
@@ -577,13 +780,11 @@ func _build() -> void:
 	_brand_button.pressed.connect(press_brand)
 	brand_column.add_child(_brand_button)
 
-	var tail := Control.new()
-	tail.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(tail)
 	_status = _make_label(column, "", 12, MUTED)
 	_status.name = "Status"
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(0, 22)
+	_apply_page()
 
 func _make_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
 	var label := Label.new()

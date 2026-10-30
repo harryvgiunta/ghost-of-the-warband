@@ -9,7 +9,7 @@ extends RefCounted
 ##   KILL    a mob id (`note_kill`)            - "kill 20 of the watchers"
 ##   RESCUE  a body brought out of a cage      - "free 4 soldiers"
 ##   COLLECT an item taken into the stash      - "bring me the ichor"
-##   APPLY   a reagent worked into a weapon    - "...and bind it to steel"
+##   APPLY   a reagent worked into a weapon    - "...and anoint steel with it"
 ##   REACH   a named place (`note_reached`)    - "find the Crypt" (a shell)
 ##
 ## Those five are the whole vocabulary on purpose: the two common shapes the
@@ -98,9 +98,9 @@ const DEFS := {
 		"kind": Goal.APPLY,
 		"target": ICHOR_ID,
 		"count": 1,
-		"line": "Bind the warden's ichor into a weapon",
-		"hint": "G - the ichor bench",
-		"keys": "G - the ichor bench   ·   R - loose the sigil",
+		"line": "Anoint a weapon with the warden's ichor",
+		"hint": "G - the altar",
+		"keys": "G - the altar   ·   1 / 2 - loose the skill it wakes",
 		"done": "The steel drinks.",
 		"next": "",
 	},
@@ -315,8 +315,8 @@ func note_collected(item_id: String) -> Array[String]:
 			moved.append(quest_id)
 	return moved
 
-## A reagent was worked into a weapon (the ichor bench). Counted once per item
-## id, so laying the same vial to ten blades is one fact.
+## A reagent was worked into a weapon (the altar's anointing). Counted once per
+## item id, so laying the same vial to ten blades is one fact.
 func note_applied(item_id: String, amount: int = 1) -> Array[String]:
 	var moved: Array[String] = []
 	for quest_id in _ids_in([State.ACTIVE], ""):

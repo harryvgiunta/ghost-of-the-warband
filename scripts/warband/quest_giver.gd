@@ -9,7 +9,7 @@ extends Node
 ##   that says where the hire rows are; after that the counter opens the hire
 ##   board as it always did.
 ## * **The quartermaster** owns the campaign. G at his counter hands an order
-##   over, takes a finished one back, names the bench for the ichor, and otherwise
+##   over, takes a finished one back, sends the ichor to the altar, and otherwise
 ##   gets out of the way so his shop can open.
 ##
 ## The gold arrow over a head is decided here too (`marker_service`), because it
@@ -34,7 +34,7 @@ const RECRUITER := "recruiter"
 ## Tip ids. A tip is offered once per id, which is what makes "has he taught me
 ## this yet" a question about the channel and not about a save field.
 const HIRE_LESSON := "recruiter_hire"
-const BENCH_LESSON := "ichor_bench"
+const ALTAR_LESSON := "ichor_altar"
 
 ## `talk()` cues for the voice library, so a keeper's line rides the same path as
 ## every other cue in the square.
@@ -117,7 +117,7 @@ func _quartermaster_business() -> bool:
 func _ichor_unexplained() -> bool:
 	if warband == null:
 		return false
-	if tips != null and tips.has_shown(BENCH_LESSON):
+	if tips != null and tips.has_shown(ALTAR_LESSON):
 		return false
 	return warband.stash.pooled_count(QuestsScript.ICHOR_ID) > 0
 
@@ -199,7 +199,7 @@ func _talk_quartermaster() -> bool:
 		_offer(str(offers[0]))
 		return false
 	if _ichor_unexplained():
-		_teach_bench()
+		_teach_altar()
 	return false
 
 
@@ -224,9 +224,9 @@ func _offer(quest_id: String) -> void:
 	tips.tip("offer_%s" % quest_id, "M", "ORDER: %s" % str(row.get("title", quest_id)))
 
 
-func _teach_bench() -> void:
+func _teach_altar() -> void:
 	spoke.emit(GIVER, "greet")
-	tips.tip(BENCH_LESSON, "G", "BIND THE ICHOR AT THE BENCH")
+	tips.tip(ALTAR_LESSON, "G", "ANOINT A WEAPON WITH THE ICHOR AT THE ALTAR")
 
 
 ## Whether the ledger has anything to put on the screen. The HUD is written by

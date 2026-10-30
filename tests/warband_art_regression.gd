@@ -9,7 +9,7 @@ extends SceneTree
 ## outside the floor the scene actually built.
 ##
 ## The spawns and interaction points come from the two scene scripts' own
-## constants - `CAGE_POSTS`, `CAGE_CLAMP_RADIUS`, `RESCUER_POST`, `GATE_POINT`,
+## constants - `CAGE_POSTS`, `CAGE_CLAMP_RADIUS`, `GATE_POINT`,
 ## `GATE_WATCHERS`, `REINFORCE_POSTS`, `WEAPON_DROPS`, `SPAWN_POSTS` and the four
 ## service points - and the dressing modules' declared bounds are compared with
 ## the scenes' so the two can never drift apart in silence. Every point a body
@@ -396,7 +396,6 @@ func check_camp() -> void:
 	var points: Array = []
 	for post in CageScript.CAGE_POSTS:
 		points.append({"what": "a cage", "point": post, "reach": float(CageScript.CAGE_CLAMP_RADIUS)})
-	points.append({"what": "the rescuer's post", "point": CageScript.RESCUER_POST, "reach": 0.0})
 	points.append({"what": "the gate", "point": CageScript.GATE_POINT, "reach": float(CageScript.GATE_RADIUS)})
 	for entry in CageScript.GATE_WATCHERS:
 		points.append({"what": "a gate watcher's post", "point": entry["post"], "reach": 0.5})

@@ -8,10 +8,10 @@ extends Node3D
 ## The five sworn mercenaries stand around that fire as real `ArenaActor` bodies
 ## under the real `PossessionController`, the local soul starts inside the first
 ## of them, and every service the loop needs is a node you can walk up to: the
-## shared stash chest, the `SacrificialAltar`, the Gold recruiter's booth, the
-## quartermaster's shop, the ichor bench at his side, the three keepers' counters
-## (Orla, Brann, Vey) and the `ExpeditionGate` that marks a battle line and asks
-## the flow owner for the arena.
+## shared stash chest, the `SacrificialAltar` (where a warden's ichor wakes a
+## weapon into its skill), the Gold recruiter's booth, the quartermaster's shop,
+## the three keepers' counters (Orla, Brann, Vey) and the `ExpeditionGate` that
+## marks a battle line and asks the flow owner for the arena.
 ##
 ## Behind every counter stands a keeper - an armoured humanoid, one of the five
 ## who run this place - and over the head of whichever of them has something to
@@ -48,13 +48,12 @@ const VoiceScript = preload("res://scripts/audio/voice.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
 const QuestGiverScript = preload("res://scripts/warband/quest_giver.gd")
 const MarkerScript = preload("res://scripts/warband/quest_marker.gd")
-const BenchScript = preload("res://scripts/warband/ichor_bench.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 
-## How close a body must stand to the chest, the desk and the bench. The gate
-## keeps its own (larger) `open_radius`.
+## How close a body must stand to the chest and the desks. The altar keeps its own
+## `interact_range` and the gate its own (larger) `open_radius`.
 const SERVICE_REACH := 3.0
 ## The town is a ring now, not a room: this is the stake wall a body stands
 ## inside, and the dressing mirrors it so the two can never drift apart.
@@ -224,10 +223,6 @@ var vendor_brann: Node3D
 var vendor_vey: Node3D
 var vendor_menu
 var signpost: Node3D
-## The ichor bench's furniture. The slab is the service point a body stands at;
-## the panel it opens is `bench_panel`.
-var ichor_bench: Node3D
-var bench_panel
 ## The keeper `interact_at` resolves by service id (`town_folk.gd`).
 var keepers: Dictionary = {}
 ## The keepers' mouths: the hire lesson, the campaign's orders and the choice of
@@ -296,10 +291,6 @@ func embed(world: Node3D) -> void:
 	hud = world.hud
 	screen = world.screen
 	paperdoll = world.paperdoll
-	# The panels were built before the world handed its HUD over, so the bench
-	# takes the world's HUD now: a bind has to write the one status line.
-	if bench_panel != null:
-		bench_panel.configure(warband, hud)
 	_build_quest_layer(world.get("tips"))
 	if gate != null:
 		gate.setup(warband, controller)
@@ -735,14 +726,6 @@ func _build_services() -> void:
 		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
 
-	# The ichor bench: the vial's one use, at the quartermaster's side. The slab
-	# is the service point, so the ring a body stands in is the bench's own.
-	ichor_bench = BenchScript.build_prop(self, BenchScript.PROP_POINT)
-	bench_panel = BenchScript.new()
-	bench_panel.name = "IchorBenchPanel"
-	add_child(bench_panel)
-	bench_panel.configure(warband, hud)
-
 	# Behind every counter, a keeper: a face and a kit, not a service.
 	keepers = FolkScript.build(self, {
 		"vendor_orla": vendor_orla, "vendor_brann": vendor_brann,
@@ -960,8 +943,8 @@ func _refresh_marker() -> void:
 
 ## Whether the ledger is carrying the ichor order, which is the one thing the
 ## square has to point its hint at: a reagent in the stash is useless until a
-## player knows the bench exists.
-func _bench_wanted() -> bool:
+## player knows the altar is where it is worked.
+func _altar_wanted() -> bool:
 	return warband != null and warband.quests.is_active(ICHOR_ORDER)
 
 # --- interaction -----------------------------------------------------------
@@ -992,9 +975,9 @@ func _try_interact() -> void:
 		hud.set_status("Nothing to use here.", 1.5)
 
 ## Resolve and use whichever service `point` is next to. Returns `"stash"`,
-## `"altar"`, `"recruiter"`, `"quartermaster"`, `"ichor"`, `"vendor_orla"`,
-## `"vendor_brann"`, `"vendor_vey"`, `"gate"` or `""`, which is what a single `G`
-## handler and the regression both drive instead of guessing at positions.
+## `"altar"`, `"recruiter"`, `"quartermaster"`, `"vendor_orla"`, `"vendor_brann"`,
+## `"vendor_vey"`, `"gate"` or `""`, which is what a single `G` handler and the
+## regression both drive instead of guessing at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
 	var service := service_at(point)
 	# A counter being used is the one moment a keeper has a body's attention, so
@@ -1009,7 +992,7 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 		"altar":
 			_hide_panels()
 			altar.interact(peer_id)
-			hud.set_status("The altar drinks.", 2.5)
+			hud.set_status("The altar: lay a warden's ichor on a weapon and it wakes into its skill.", 4.0)
 		"recruiter":
 			_hide_panels()
 			# The first G names the hire rows in one tip over the board it is
@@ -1030,10 +1013,6 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			else:
 				quartermaster.open()
 				hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
-		"ichor":
-			_hide_panels()
-			bench_panel.open()
-			hud.set_status("The ichor bench: one vial binds one blade out of the stash.", 4.0)
 		"vendor_orla":
 			_open_vendor(0)
 		"vendor_brann":
@@ -1107,9 +1086,6 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
 		{"id": "gate", "point": gate.global_position, "reach": gate.open_radius},
 	]
-	if ichor_bench != null:
-		entries.append({"id": "ichor", "point": ichor_bench.global_position,
-			"reach": SERVICE_REACH})
 	var best := ""
 	var best_distance := INF
 	for entry in entries:
@@ -1131,8 +1107,6 @@ func service_point(service: String) -> Vector3:
 			return recruiter_desk.global_position
 		"quartermaster":
 			return quartermaster_desk.global_position
-		"ichor":
-			return ichor_bench.global_position if ichor_bench != null else Vector3.ZERO
 		"vendor_orla":
 			return vendor_orla.global_position
 		"vendor_brann":
@@ -1165,13 +1139,11 @@ func hint_line(actor) -> String:
 		"stash":
 			text = "G - shared stash and paperdoll   ·   O - warband"
 		"altar":
-			text = "G - the Sacrificial Altar (unbind / distil / brand)"
+			text = "G - the Sacrificial Altar (anoint weapons / unbind / distil / brand)"
 		"recruiter":
 			text = "G - swear a new body (the first eight are free)"
 		"quartermaster":
 			text = "G - buy plain steel into the shared stash"
-		"ichor":
-			text = "G - the ichor bench"
 		"vendor_orla":
 			text = "G - buy bows and staves, or sell spare gear"
 		"vendor_brann":
@@ -1181,9 +1153,9 @@ func hint_line(actor) -> String:
 		"gate":
 			text = "G - launch an expedition with the line you deployed"
 	# A reagent in the stash is worthless until a player knows where it is worked,
-	# so while the ichor order is on the ledger the bench is named everywhere.
-	if service != "ichor" and _bench_wanted():
-		text += "   ·   G - the ichor bench"
+	# so while the ichor order is on the ledger the altar is named everywhere.
+	if service != "altar" and _altar_wanted():
+		text += "   ·   G - the altar anoints with ichor"
 	return text
 
 
@@ -1200,8 +1172,6 @@ func prompt_line(actor) -> String:
 			return "G - Gold recruiter"
 		"quartermaster":
 			return "G - quartermaster"
-		"ichor":
-			return "G - the ichor bench"
 		"vendor_orla":
 			return "G - Storekeeper Orla"
 		"vendor_brann":
@@ -1240,16 +1210,13 @@ func _hide_panels() -> void:
 		quartermaster.close()
 	if vendor_menu != null and vendor_menu.is_open():
 		vendor_menu.close()
-	if bench_panel != null and bench_panel.is_open():
-		bench_panel.close()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (altar != null and altar.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
-		or (vendor_menu != null and vendor_menu.is_open()) \
-		or (bench_panel != null and bench_panel.is_open())
+		or (vendor_menu != null and vendor_menu.is_open())
 
 # --- seeding ---------------------------------------------------------------
 

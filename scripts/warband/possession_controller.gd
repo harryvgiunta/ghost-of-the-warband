@@ -99,6 +99,8 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_state_changed.connect(_on_body_state_changed)
 		if not _warband.souls.body_unregistered.is_connected(_on_body_unregistered):
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
+		if not _warband.anointed.is_connected(_on_piece_anointed):
+			_warband.anointed.connect(_on_piece_anointed)
 	if sync == null:
 		sync = SyncScript.new()
 		sync.name = "PossessionSync"
@@ -185,7 +187,9 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 ## main/off ids, the bow and sword indexes, packed armour and the trinket ids -
 ## and rebuilds the session kit through `State.build_loadout`, which is the same
 ## hand-off the hub paperdoll uses. Building that shape here (instead of passing
-## `build_loadout`'s own output) is what makes the worn armour reach the rig.
+## `build_loadout`'s own output) is what makes the worn armour reach the rig. The
+## altar's ledger rides beside it, never inside it: a held piece carries its
+## skill only when the warband anointed it.
 func _apply_gear(actor: Actor, merc_id: int) -> void:
 	var gear: Dictionary = _warband.roster.equipped_of(merc_id)
 	var main_id := str(gear.get("main", ""))
@@ -218,7 +222,7 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 			"off": off_id,
 		},
 	}
-	SeatLoadout.apply(actor.rig, loadout)
+	SeatLoadout.apply(actor.rig, loadout, _warband.cruor.anointed_among([main_id, off_id]))
 	_loadouts[merc_id] = loadout
 
 # --- reading ---------------------------------------------------------------
@@ -283,6 +287,14 @@ func refresh_gear(merc_id: int) -> bool:
 		return false
 	_apply_gear(actor, merc_id)
 	return true
+
+## The altar woke a piece: every body holding a copy is dressed again, so the
+## skill is in its hands now rather than at the next spawn.
+func _on_piece_anointed(item_id: String, _ability: String) -> void:
+	for merc_id in _merc_bodies.keys():
+		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
+		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
+			refresh_gear(int(merc_id))
 
 ## Living bodies in roster order: what `F1`..`F8` count.
 func living_merc_ids() -> Array[int]:

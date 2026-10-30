@@ -475,10 +475,19 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 	if slot == selected_slot:
 		color = BRASS_INK
 	var text := "%s%s  /  %s" % [marker, Contracts.slot_label(slot), _item_name(worn)]
-	# A brand is a property of the piece, so the line under the item name is the
-	# only place the player learns what the sigil does before entering a body.
-	if not worn.is_empty() and _warband != null and not _warband.cruor.brand_of(worn).is_empty():
-		text += "\n" + _warband.cruor.brand_line(worn)
+	# Anointings and brands are properties of the piece, so the lines under the
+	# item name are the only place the player learns what it looses before
+	# entering a body - and a plain weapon says what the altar would wake in it.
+	if not worn.is_empty() and _warband != null:
+		var anointed: String = _warband.cruor.anoint_line(worn)
+		if not anointed.is_empty():
+			text += "\n" + anointed
+		else:
+			var sleeping: Dictionary = WarbandCruor.anoint_skill(worn)
+			if not sleeping.is_empty():
+				text += "\nPlain - the altar wakes %s" % str(sleeping.get("name", ""))
+		if not _warband.cruor.brand_of(worn).is_empty():
+			text += "\n" + _warband.cruor.brand_line(worn)
 	if button.text != text:
 		button.text = text
 	if row.get("text_color", Color.TRANSPARENT) != color:

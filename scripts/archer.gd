@@ -253,6 +253,12 @@ var focus_active := false
 ## Presentation never reads these; the damage/timing getters below do.
 var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
 var trinket_stats := {}
+## The skill each held hand was anointed with at the altar, by ability id
+## (`{main, off}`; "" for a plain piece). A stock weapon carries no skill:
+## `AbilityRules.granted` hands a held piece its skill only when this names it
+## for that hand, and `apply_loadout` rewrites it on every dressing, so a hand
+## that swaps pieces never keeps the last one's skill.
+var anointed := {"main":"", "off":""}
 var _ward: EnergyShield
 var skeleton: Skeleton3D
 var _phase_time := 0.0
@@ -1123,6 +1129,9 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
 	apply_trinkets(loadout.get("trinkets",{}))
+	var hands: Variant = loadout.get("anointed",{})
+	var anointed_hands: Dictionary = hands if hands is Dictionary else {}
+	anointed = {"main":str(anointed_hands.get("main","")), "off":str(anointed_hands.get("off",""))}
 	set_blade_skins("makeshift" if main_id == "sword_makeshift" or off_id == "sword_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))
