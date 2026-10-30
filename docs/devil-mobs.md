@@ -18,9 +18,11 @@ offline build and replaces the surfaces with the ranger's CC0 source maps.
 
 ## Sources and licensing
 
-Everything below is CC0 1.0 Universal; provenance is recorded in
+The upstream sources below are CC0 1.0 Universal; provenance is recorded in
 `assets/characters/LICENSE.txt` and the source archives stay in the ignored
-`.runtime/character-source/` workspace.
+`.runtime/character-source/` workspace. The GLBs built from them in this
+repository are **not** CC0: they are licensed under CC BY-NC-SA 4.0, section 3
+of [LICENSE.md](../LICENSE.md), like the rest of `assets/characters/`.
 
 | Source | Used for |
 | --- | --- |

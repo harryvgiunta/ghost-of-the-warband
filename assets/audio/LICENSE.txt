@@ -35,3 +35,50 @@ WOLF DEATH
 Both windows tables live in tools/slice_game_audio.py (VOICE_SLICED), which is
 what turns the two masters into the shipped .ogg files; `--fetch` downloads the
 masters from the URLs above, so the tree is reproducible without an account.
+
+THIRD-PARTY SOUND SOURCES — THE ONE-SHOTS
+
+The combat one-shots under assets/audio/sfx are slices of the nine Freesound
+recordings listed in docs/audio.md ("Slicing"), which records every window and
+every output file. Two of the nine are licensed CC BY, and the credits below are
+required wherever this game is distributed, a commercial build included:
+
+SWORD THROAT SLIT — "sword_throat_slitting_sound_10032026" by Artninja
+  https://freesound.org/people/Artninja/sounds/873151/
+  (c) Artninja, licensed Creative Commons Attribution 4.0 International
+  https://creativecommons.org/licenses/by/4.0/
+  Changes: sixteen takes cut to the eight kept, trimmed, mono-mixed, peak
+  normalised and pitched per take -> assets/audio/sfx/impact/slit_01..08.ogg
+
+ARROW — "Arrow.wav" by EverHeat
+  https://freesound.org/people/EverHeat/sounds/205563/
+  (c) EverHeat, licensed Creative Commons Attribution 3.0 Unported
+  https://creativecommons.org/licenses/by/3.0/
+  Changes: trimmed to the release, mono-mixed and peak normalised ->
+  assets/audio/sfx/bow/arrow_01.ogg
+
+The other seven are Creative Commons 0 (public domain); no attribution is
+required and each is credited anyway:
+
+  "Short Whoosh, 13x" — Kinoton, sounds/427979        -> sfx/swing/short_whoosh_01..13
+  "Whoosh - Long Bamboo stick - OS ST 13" — Sadiquecat, sounds/855844
+                                                     -> sfx/swing/long_whoosh_01
+  "Hitting in a Face" — florianreichelt, sounds/460509 -> sfx/impact/blunt_01..03
+  "sword against sword.wav" — Fenodyrie, sounds/568790 -> sfx/defense/parry_* and clash_*
+  "Flying Blade" — loudernoises, sounds/334167        -> sfx/thrown/blade_01..03
+  "Going on a forest road gravel and grass.wav" — straget, sounds/411206
+                                                     -> sfx/step/footstep_01..12
+  "Padlock Chain Lock Unlock" — leonelmail, sounds/330635 -> sfx/cage/cage_latch_01..04
+
+Kinoton's page additionally asks that the raw recording not be redistributed or
+resold; this repository ships only the cut windows above and never the source
+master, which is what that request allows.
+
+WHAT IS LICENSED HERE
+
+Every file under assets/audio that is not one of the nine Freesound-derived
+slices above — the music, the assembled one-shots and the voice takes — is
+licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International (CC BY-NC-SA 4.0), section 3 of the LICENSE.md at the repository
+root. The CC BY recordings above keep their own terms, and the credits and change
+notes in this file travel with them.

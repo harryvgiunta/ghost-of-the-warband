@@ -1861,12 +1861,17 @@ alpha atlases, terrain detail and macro variation, rock and water normals,
 building materials (planks, timber, plaster, shingles, stone) and the
 forest-camp surfaces (thatch, hide, bone) and the flame atlas.
 
-The textures are distributed under CC0 1.0 Universal (Public Domain
-Dedication), the same dedication used by the character assets in this
-repository:
-https://creativecommons.org/publicdomain/zero/1.0/
+The textures are distributed under Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),
+section 3 of the LICENSE.md at the repository root:
+https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-No attribution is required by CC0; this file records provenance.
+Credit the project and say what you changed; do not sell them; share
+modifications under the same terms. Copies of these files published up to commit
+dbdecf8 were dedicated to the public domain under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/) and remain so in those
+copies; that dedication cannot be revoked, and every later change is licensed
+under LICENSE.md. This file records provenance either way.
 """
 
 

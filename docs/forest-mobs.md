@@ -17,10 +17,11 @@ ranger begins in and the salvage blades the smith sells beside the forged kit.
 | Palettes, clip timings, budgets | `tools/forest_styles.py` |
 | Makeshift armour meshes | `tools/prepare_makeshift_armor.py` |
 
-All of it is authored in this repository and distributed under the same CC0 1.0
-dedication as the rest of `assets/characters/` (see `LICENSE.txt` there). No
-generated image, photogrammetry scan, paid pack or restricted file is used, and
-no download is required to rebuild any of it.
+All of it is authored in this repository. The shipped assets are licensed under
+CC BY-NC-SA 4.0, section 3 of [LICENSE.md](../LICENSE.md) — the same terms as
+the rest of `assets/characters/` (see `LICENSE.txt` there). No generated image,
+photogrammetry scan, paid pack or restricted file is used, and no download is
+required to rebuild any of it.
 
 ## The three mobs
 

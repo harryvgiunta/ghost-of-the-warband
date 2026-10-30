@@ -617,7 +617,7 @@ python tools/world_textures.py
 & $Godot --headless --editor --path . --import
 ```
 
-The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedication are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
+The manifest is `assets/world/world_textures.json`; provenance and the CC BY-NC-SA 4.0 terms are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
 
 ## Devil court
 
@@ -870,7 +870,7 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 
 ### Rebuilding character assets
 
-The bundled Ranger model and motions are **CC0**: Ranger/base characters and locomotion by [Quaternius](https://quaternius.com/), with the two-handed heavy attack by [Gres](https://opengameart.org/content/humanoid-soulslike-animations). The Briar wolf is original procedural work authored by `tools/prepare_wolf.py`; it is not derived from those sources. Exact source files, extraction ranges, wolf measurements and modifications are recorded in [the asset provenance](assets/characters/LICENSE.txt). No paid pack or game account is needed.
+The bundled Ranger model and motions are built from **CC0** sources — Ranger/base characters and locomotion by [Quaternius](https://quaternius.com/), with the two-handed heavy attack by [Gres](https://opengameart.org/content/humanoid-soulslike-animations) — and the shipped GLB is licensed under **CC BY-NC-SA 4.0** like the rest of `assets/` ([LICENSE.md](LICENSE.md)); the sources stay CC0. The Briar wolf is original procedural work authored by `tools/prepare_wolf.py`; it is not derived from those sources. Exact source files, extraction ranges, wolf measurements and modifications are recorded in [the asset provenance](assets/characters/LICENSE.txt). No paid sources were used.
 
 To re-author the assets, install Blender 5.1+, download and unpack the listed free sources into `.runtime/character-source`, then run:
 
@@ -896,3 +896,15 @@ The same rebuild imports `Crouch_Idle_Loop` and `Crouch_Fwd_Loop` from the exist
 Optional Godot MCP tooling is pinned under `tools/`; run `npm ci --ignore-scripts` there if needed. Local MCP configuration, engine binaries, imports, caches and logs are excluded from Git. They are not required from the original development machine.
 
 Godot is downloaded separately under its [MIT license](https://godotengine.org/license/). [Official engine release](https://github.com/godotengine/godot/releases/tag/4.7.2-stable). Archery stance reference: [World Archery recurve technique](https://extranet.worldarchery.sport/documents/index.php/Media/Information_Sheets/003_Guide_to_Recurve_Technique.pdf).
+
+## License
+
+**Non-Commercial Source-Available Dual License** — see [LICENSE.md](LICENSE.md) for the full terms.
+
+| Part | License | What it means |
+| --- | --- | --- |
+| Game code (`scripts/`, `tools/`, `tests/`, scenes, shaders) | PolyForm Noncommercial 1.0.0 | Read, run, study, modify and share for personal, hobby, research, educational or other noncommercial use, keeping the `Required Notice:` line. No commercial use. |
+| Game assets (models, textures, animation, audio, UI art, levels, docs) | CC BY-NC-SA 4.0 | Play, stream, remix and mod for free with credit. No selling, and modifications must be shared under the same terms. |
+| Names, logos, trailer, store page and the compiled Steam build | All rights reserved | Forks may not use the "Ironwood" / "Ghost of the Warband" names or imply endorsement, and only the copyright holder may sell the game. |
+
+Third-party material keeps its own license (Quaternius and Gres CC0 sources, CC BY Freesound takes, SIL OFL fonts, the MIT Godot engine) — the credits that must ship with a build are in `assets/audio/LICENSE.txt`, `assets/characters/LICENSE.txt` and `assets/ui/fonts/`. Contributions are accepted under the [contributor terms](LICENSE.md#6-contributions-contributor-license-agreement), which keep the commercial build possible.
