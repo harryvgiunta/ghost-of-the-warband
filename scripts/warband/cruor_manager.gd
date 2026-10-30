@@ -1,22 +1,49 @@
 class_name WarbandCruor
 extends RefCounted
-## Sacramental Cruor: the ritual essence wallet, the unbinding, the distilling and
-## the brands themselves.
+## Sacramental Cruor: the ritual essence wallet, the unbinding, the distilling,
+## the brands, and the anointings the altar works with reagents.
 ##
-## Three verbs, one ledger:
+## Four verbs, one ledger:
+##   * anoint  - lay a reagent from the shared stash on a weapon or a shield so
+##               it wakes into its own skill (the 1 / 2 keys); stock steel has none;
 ##   * unbind  - destroy a spare magic item on the altar -> Tier 1..3 essence;
 ##   * distil  - 5 of tier N -> 1 of tier N+1 (625 T1 renders one Tier 5);
 ##   * brand   - spend essence to burn a sigil onto a weapon, bow, skull or tome,
-##               granting its active ability or rerolling the one already there.
+##               granting its `R` ability or rerolling the one already there.
 ##
-## Brands are item properties keyed by catalog id, so they survive the piece
-## moving between mercenaries and the stash. The essence counts and the brand map
-## are the only saved state.
+## Brands and anointings are item properties keyed by catalog id, so they survive
+## the piece moving between mercenaries and the stash, and every copy the warband
+## owns carries them. The essence counts, the brand map and the anointed map are
+## the only saved state.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const State = preload("res://scripts/player_state.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+
+## The reagent every anointing takes for now: a warden's ichor out of the shared
+## stash.
+const BASIC_REAGENT := "ichor_vial"
+
+## What waking each skill costs at the altar, `{reagent catalog id: count}`.
+## Every skill takes the basic reagent for now - one warden's ichor - so this is
+## the one table to balance them apart later. A skill missing here cannot be
+## anointed.
+const ANOINT_RECIPES := {
+	"barrage": {BASIC_REAGENT: 1},
+	"triple_volley": {BASIC_REAGENT: 1},
+	"piercing_shot": {BASIC_REAGENT: 1},
+	"double_slash": {BASIC_REAGENT: 1},
+	"lunge_thrust": {BASIC_REAGENT: 1},
+	"spin_slash": {BASIC_REAGENT: 1},
+	"backstab": {BASIC_REAGENT: 1},
+	"fireball": {BASIC_REAGENT: 1},
+	"bone_spear": {BASIC_REAGENT: 1},
+	"shield_bash": {BASIC_REAGENT: 1},
+	"shield_charge": {BASIC_REAGENT: 1},
+	"shield_slam": {BASIC_REAGENT: 1},
+}
 
 ## Essence burned per brand by the tier used. The higher tiers buy the same
 ## sigil more cheaply, which is what makes distilling worth doing.
@@ -34,6 +61,7 @@ const MAGIC_PRICE := 40
 
 var counts: Dictionary = {}
 var brands: Dictionary = {}   # item_id -> {tier, ability, rerolls}
+var anointed: Dictionary = {}   # item_id -> ability id the piece wakes into
 
 func _init() -> void:
 	clear()
@@ -43,6 +71,7 @@ func clear() -> void:
 	for tier in Catalog.TIER_ORDER:
 		counts[tier] = 0
 	brands = {}
+	anointed = {}
 
 # --- wallet ----------------------------------------------------------------
 
@@ -139,6 +168,100 @@ func distill_all(tier: int) -> Dictionary:
 	add(int(result["output_tier"]), int(result["output_count"]))
 	return result
 
+# --- anointing -------------------------------------------------------------
+
+## The skill a catalog piece wakes into at the altar, or {} for one that has none.
+static func anoint_skill(item_id: String) -> Dictionary:
+	return AbilityRules.skill_for(State.ITEMS.get(item_id, {}))
+
+## The key that looses a piece's skill in the warband: 1 for the main hand, 2 for
+## a shield.
+static func anoint_key(item_id: String) -> String:
+	return str(AbilityRules.hand_slot(State.ITEMS.get(item_id, {})) + 1)
+
+## The reagents waking `ability_id` costs, `{catalog id: count}`; {} when the
+## altar has no rite for it.
+static func anoint_recipe(ability_id: String) -> Dictionary:
+	var recipe: Variant = ANOINT_RECIPES.get(ability_id, {})
+	return (recipe as Dictionary).duplicate() if recipe is Dictionary else {}
+
+## "1 Warden's Ichor" - the altar row's price and the refusal's.
+static func recipe_text(recipe: Dictionary) -> String:
+	var parts: Array[String] = []
+	for reagent in recipe:
+		parts.append("%d %s" % [int(recipe[reagent]),
+			str(State.ITEMS.get(str(reagent), {}).get("name", reagent))])
+	return ", ".join(PackedStringArray(parts)) if not parts.is_empty() else "nothing"
+
+func is_anointed(item_id: String) -> bool:
+	return anointed.has(item_id)
+
+## The ability id an anointed piece carries, or "" for a plain one.
+func anointed_skill(item_id: String) -> String:
+	return str(anointed.get(item_id, ""))
+
+## The ids in `item_ids` the altar has anointed: what a dressing hands
+## `SeatLoadout.apply` so the rig carries their skills.
+func anointed_among(item_ids: Array) -> Array[String]:
+	var out: Array[String] = []
+	for item_id in item_ids:
+		if anointed.has(str(item_id)):
+			out.append(str(item_id))
+	return out
+
+## The card line for an anointed piece ("Anointed - BARRAGE [1]"), or "".
+func anoint_line(item_id: String) -> String:
+	var ability := anointed_skill(item_id)
+	if ability.is_empty():
+		return ""
+	return "Anointed - %s [%s]" % [str(AbilityRules.by_id(ability).get("name", ability)),
+		anoint_key(item_id)]
+
+## `{ok, message, ability, recipe}`: whether the altar would wake this piece now.
+## The piece has to be the warband's (pooled or worn - an anointing lives on the
+## item, not on a body) and the shared stash has to hold the whole recipe.
+func can_anoint(stash: WarbandStash, roster, item_id: String) -> Dictionary:
+	var skill := anoint_skill(item_id)
+	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
+	if skill.is_empty():
+		return {"ok": false, "message": "Only a weapon or a shield wakes at the altar.",
+			"ability": "", "recipe": {}}
+	var ability := str(skill.get("id", ""))
+	if is_anointed(item_id):
+		return {"ok": false, "message": "%s already carries %s." % [item_name, str(skill.get("name", ""))],
+			"ability": ability, "recipe": {}}
+	if stash == null or not stash.available_ids(roster).has(item_id):
+		return {"ok": false, "message": "The warband does not carry a %s." % item_name,
+			"ability": ability, "recipe": {}}
+	var recipe := anoint_recipe(ability)
+	if recipe.is_empty():
+		return {"ok": false, "message": "The altar knows no rite for %s." % str(skill.get("name", "")),
+			"ability": ability, "recipe": {}}
+	for reagent in recipe:
+		if stash.pooled_count(str(reagent)) < int(recipe[reagent]):
+			return {"ok": false, "message": "%s needs %s." % [str(skill.get("name", "")), recipe_text(recipe)],
+				"ability": ability, "recipe": recipe}
+	return {"ok": true, "message": "%s wakes into %s for %s." % [item_name, str(skill.get("name", "")),
+		recipe_text(recipe)], "ability": ability, "recipe": recipe}
+
+## Lay the recipe's reagents on a piece: they leave the shared stash and every
+## copy of the piece the warband owns wakes into its skill. Returns `{ok, message,
+## item_id, ability, spent}`, `spent` being the `{reagent: count}` that left.
+func anoint(stash: WarbandStash, roster, item_id: String) -> Dictionary:
+	var check := can_anoint(stash, roster, item_id)
+	var ability := str(check.get("ability", ""))
+	if not bool(check.get("ok", false)):
+		return {"ok": false, "message": str(check.get("message", "")), "item_id": item_id,
+			"ability": ability, "spent": {}}
+	var recipe: Dictionary = check["recipe"]
+	for reagent in recipe:
+		stash.remove(str(reagent), int(recipe[reagent]))
+	anointed[item_id] = ability
+	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
+	return {"ok": true, "item_id": item_id, "ability": ability, "spent": recipe,
+		"message": "%s wakes into %s. Key %s looses it." % [item_name,
+			str(AbilityRules.by_id(ability).get("name", ability)), anoint_key(item_id)]}
+
 # --- branding --------------------------------------------------------------
 
 func brand_cost(tier: int) -> int:
@@ -188,34 +311,6 @@ func brand_of(item_id: String) -> Dictionary:
 	var payload: Variant = brands.get(item_id, {})
 	return payload if payload is Dictionary else {}
 
-## Bind a piece with a reagent instead of with essence.
-##
-## The ichor bench pays for a sigil with a warden's vial, not with the wallet, so
-## this is `brand()` with the essence step removed and nothing else changed: the
-## same ability table picks the sigil, the same `brands` ledger stores it, and
-## the same `BrandedRunner`/`branded_hud` read it back. An already-branded piece
-## is refused rather than rerolled - rerolling is the altar's business, and it
-## costs essence.
-func bind(item_id: String, tier: int) -> Dictionary:
-	if not brandable_item(item_id):
-		return {"ok": false, "message": "Only steel, bows, staves, skulls and tomes take a sigil.",
-			"ability": "", "tier": tier, "reroll": false}
-	if not Catalog.is_tier(tier):
-		return {"ok": false, "message": "Choose an essence tier.", "ability": "", "tier": tier,
-			"reroll": false}
-	if is_branded(item_id):
-		return {"ok": false, "message": "That piece already carries a sigil. The altar rerolls it.",
-			"ability": "", "tier": tier, "reroll": false}
-	var ability := Branded.for_subtype(Contracts.weapon_subtype(State.ITEMS[item_id]))
-	if ability.is_empty():
-		return {"ok": false, "message": "That piece cannot hold a sigil.", "ability": "", "tier": tier,
-			"reroll": false}
-	brands[item_id] = {"tier": tier, "ability": ability, "rerolls": 0}
-	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
-	return {"ok": true, "ability": ability, "tier": tier, "reroll": false,
-		"message": "%s takes %s (%s)." % [item_name, Branded.ability_name(ability),
-			Catalog.tier_name(tier)]}
-
 func is_branded(item_id: String) -> bool:
 	return brands.has(item_id)
 
@@ -249,7 +344,7 @@ func to_dict() -> Dictionary:
 	var saved_brands := {}
 	for item_id in brands:
 		saved_brands[str(item_id)] = brand_of(str(item_id)).duplicate(true)
-	return {"counts": saved_counts, "brands": saved_brands}
+	return {"counts": saved_counts, "brands": saved_brands, "anointed": anointed.duplicate()}
 
 func from_dict(data: Dictionary) -> void:
 	clear()
@@ -267,3 +362,13 @@ func from_dict(data: Dictionary) -> void:
 				brands[str(item_id)] = {"tier": int(payload.get("tier", 0)),
 					"ability": str(payload.get("ability", "")),
 					"rerolls": int(payload.get("rerolls", 0))}
+	# An anointing is re-derived from today's table rather than trusted: a piece
+	# that no longer wakes into anything drops out, and one whose skill was
+	# re-tabled carries the skill it has now.
+	var saved_anointed: Variant = data.get("anointed", {})
+	if saved_anointed is Dictionary:
+		for item_id in saved_anointed:
+			var restored := State.migrate_item_id(str(item_id))
+			var skill := anoint_skill(restored)
+			if not skill.is_empty():
+				anointed[restored] = str(skill.get("id", ""))

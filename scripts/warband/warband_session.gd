@@ -21,8 +21,17 @@ extends Node
 ##   * **the world** - when a `WarbandWorld` is attached, the host also owns its
 ##     mobs (15 Hz, 70 m around any body), the loot that hits its ground and the
 ##     missiles in flight. A guest's mobs are `replica`s and never run AI, its
-##     arrows are visuals with an empty hit mask, and only the host's `defeated`
-##     signal pays a reward. All of it rides this one peer.
+##     arrows are visuals with an empty hit mask, and only the host resolves a
+##     kill. All of it rides this one peer;
+##   * **the shared warband** - in campaign co-op (`shared_warband`) the host's
+##     warband is the one pool every soul plays from. A guest that announces
+##     itself is sent the whole campaign (`receive_campaign`), lends it
+##     (`WarbandState.lend`) and never writes it; every change on the host goes
+##     out again (`receive_warband`), so the roster, the stash and the purse a
+##     guest sees are the host's. A guest whose world is up says so
+##     (`field_ready`) and the host seats it in the first free body; a soul with
+##     no free body waits - the one already inside the last body keeps it - and
+##     takes the next body that comes free, in the order the souls lost theirs.
 ##
 ## The scene spawns the bodies before `setup`; the session replicates them and
 ## never ticks `physics_step`, never reads `Input`, and never decides who is
@@ -52,6 +61,12 @@ const WILD_MOB_GROUP := "wild_mobs"
 const DELIVERY_BOOK_CAP := 512
 ## ENet slots. The deployment cap is eight bodies, so eight souls is the field.
 const MAX_CLIENTS := 8
+## The longest the host lets warband changes pile up before the next copy goes
+## out. The first change after a quiet spell leaves on the same frame, so a TAB a
+## guest asked for is back on its screen within a round trip.
+const MIRROR_SECONDS := 0.25
+## How often the host looks for a free body for a soul that has none.
+const SEAT_POLL_SECONDS := 0.5
 
 signal role_changed(role: String)
 signal peer_joined(peer_id: int)
@@ -60,6 +75,13 @@ signal peer_left(peer_id: int)
 signal ownership_changed(assignments: Dictionary)
 ## A transfer this peer asked for was refused; `reason` is the router's words.
 signal transfer_refused(merc_id: int, reason: String)
+## The host's campaign reached this guest: `{warband, gold, bodies, focus,
+## layout}`. Sent once when the guest announces itself and again whenever the
+## host's world opens anew (a checkpoint reload, the host's LOAD row).
+signal campaign_received(payload: Dictionary)
+## The socket closed under this peer for a reason it did not choose: the words
+## are what a player is told ("The host left.", "Could not join.").
+signal session_ended(reason: String)
 
 var controller: PossessionController
 var warband: WarbandState
@@ -74,6 +96,19 @@ var _peer: ENetMultiplayerPeer
 var _signals_wired := false
 var _accumulator := 0.0
 var _tick := 0
+## Campaign co-op: one warband, the host's, for every soul on the field (see the
+## class notes). Off for the arena bout, where both machines carry one save.
+var shared_warband := false
+## Host only: guests whose world is up and who can be put into a body.
+var _fielded: Dictionary = {}
+## Host only: souls on the field with no body, in the order they lost one.
+var _waiting: Array[int] = []
+## Host only: the body each guest is driving, so the frame-driven flag follows
+## the soul whichever way it changed bodies.
+var _driven: Dictionary = {}
+var _mirror_dirty := false
+var _mirror_elapsed := MIRROR_SECONDS
+var _seat_elapsed := 0.0
 
 # --- the world beyond the bodies -------------------------------------------
 #
@@ -111,6 +146,31 @@ func setup(possession_controller: PossessionController, warband_node: WarbandSta
 		controller.sync.name = "PossessionSync"
 		controller.add_child(controller.sync)
 	controller.sync.setup(warband, controller)
+	# A guest's own keys ask the host; the host's own keys stay local moves.
+	controller.transfer_requester = Callable(self, "request_body")
+	if not controller.possession_changed.is_connected(_on_controller_possession_changed):
+		controller.possession_changed.connect(_on_controller_possession_changed)
+	if warband != null and not warband.changed.is_connected(_on_warband_changed):
+		warband.changed.connect(_on_warband_changed)
+	var purse := get_node_or_null("/root/PlayerState")
+	if purse != null and purse.has_signal("changed") \
+			and not purse.changed.is_connected(_on_warband_changed):
+		purse.changed.connect(_on_warband_changed)
+
+## The scene that fielded the bodies is going away while the socket stays open:
+## a checkpoint reload, the host's LOAD row, a guest following the host into its
+## new world. Nothing on the wire may touch a body that is about to be freed, and
+## every soul is seated again on the next field.
+func detach_scene() -> void:
+	if controller != null and is_instance_valid(controller):
+		if controller.possession_changed.is_connected(_on_controller_possession_changed):
+			controller.possession_changed.disconnect(_on_controller_possession_changed)
+		controller.transfer_requester = Callable()
+	controller = null
+	_detach_world()
+	_fielded.clear()
+	_waiting.clear()
+	_driven.clear()
 
 ## "offline", "host" or "client".
 func role() -> String:
@@ -178,9 +238,10 @@ func host(port: int, host_name: String) -> bool:
 	role_changed.emit(_role)
 	return true
 
+## Open the socket to a host. The scene is not needed for this: a campaign guest
+## connects from the title, is sent the host's warband, and only then opens the
+## world that fields it (`setup` binds the controller when it exists).
 func join(address: String, port: int, guest_name: String) -> bool:
-	if controller == null:
-		return false
 	if _role != "offline":
 		leave()
 	var peer := ENetMultiplayerPeer.new()
@@ -246,7 +307,7 @@ func request_transfer(merc_id: int) -> void:
 	_host_transfer(sender, merc_id)
 
 ## Guest -> host handshake, so a late joiner learns who is inside what and who
-## the other souls are.
+## the other souls are. A campaign guest is sent the campaign itself in answer.
 @rpc("any_peer", "call_remote", "reliable")
 func announce(guest_name: String) -> void:
 	if _role != "host":
@@ -255,6 +316,8 @@ func announce(guest_name: String) -> void:
 	if sender <= 0:
 		return
 	_names[sender] = guest_name.strip_edges()
+	if shared_warband and controller != null:
+		receive_campaign.rpc_id(sender, campaign_payload())
 	_broadcast_ownership()
 
 ## Host -> everyone: the occupancy map plus the names that go with it.
@@ -267,6 +330,89 @@ func receive_ownership(assignments: Dictionary, names: Dictionary) -> void:
 @rpc("authority", "call_remote", "reliable")
 func receive_refusal(merc_id: int, reason: String) -> void:
 	transfer_refused.emit(merc_id, reason)
+
+## Guest -> host: this soul's world is up and it can be put into a body. The
+## host seats it in the first free one, or keeps it watching when none is.
+@rpc("any_peer", "call_remote", "reliable")
+func field_ready() -> void:
+	if _role != "host" or controller == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender <= 0 or not multiplayer.get_peers().has(sender):
+		return
+	_fielded[sender] = true
+	if controller.merc_for_peer(sender) <= 0 and not _waiting.has(sender):
+		_waiting.append(sender)
+	# A seat is a move, and its own map leaves with it; with nothing free the
+	# guest is told the truth (no body) rather than left believing it has one.
+	_seat_waiting()
+	_broadcast_ownership()
+	# The lent copy was taken when the guest announced itself; the field may have
+	# moved while its world was building.
+	_mirror_dirty = true
+
+## The guest's half of `field_ready`.
+func report_fielded() -> void:
+	if _role == "client" and _has_peers():
+		field_ready.rpc_id(1)
+
+## Host -> one guest (or every guest): the campaign it is about to play.
+@rpc("authority", "call_remote", "reliable")
+func receive_campaign(payload: Dictionary) -> void:
+	if _role != "client":
+		return
+	campaign_received.emit(payload)
+
+## Host -> every guest: the warband as it stands now. A guest's lent copy is
+## replaced whole, and a body whose kit moved is re-dressed from it.
+@rpc("authority", "call_remote", "reliable")
+func receive_warband(text: String, gold_amount: int) -> void:
+	var target: WarbandState = warband if warband != null else get_node_or_null("/root/Warband")
+	if _role != "client" or target == null or not target.lent:
+		return
+	var parsed: Variant = JSON.parse_string(text)
+	if not parsed is Dictionary:
+		return
+	var worn := _worn_signatures(target)
+	target.lend(parsed, gold_amount)
+	_redress(target, worn)
+
+## The host's world opened anew under a session that stays up: every guest is
+## sent the campaign again and rebuilds its own world on it.
+func broadcast_campaign() -> void:
+	if _role != "host" or not shared_warband or controller == null or not _has_peers():
+		return
+	receive_campaign.rpc(campaign_payload())
+
+## What a guest needs to field the host's world: the warband (as its save would
+## be written), the purse, the merc ids standing on the field (a downed one
+## included), where the party is, and the world's own layout answer.
+func campaign_payload() -> Dictionary:
+	var fielded: Array = []
+	var focus := Vector3.ZERO
+	if controller != null:
+		for actor in controller.bodies():
+			if not is_instance_valid(actor):
+				continue
+			var merc_id := controller.merc_of(actor)
+			if merc_id > 0 and warband.roster.has(merc_id) \
+					and warband.roster.state_of(merc_id) != WarbandContracts.HealthState.DEAD:
+				fielded.append(merc_id)
+				if focus.is_zero_approx():
+					focus = actor.global_position
+		var anchor = controller.focus_body()
+		if anchor != null:
+			focus = (anchor as Node3D).global_position
+	var layout := {}
+	if world != null and world.has_method("guest_layout"):
+		layout = world.call("guest_layout")
+	return {
+		"warband": JSON.stringify(warband.to_dict()),
+		"gold": warband.gold(),
+		"bodies": fielded,
+		"focus": [focus.x, focus.y, focus.z],
+		"layout": layout,
+	}
 
 # --- snapshots -------------------------------------------------------------
 
@@ -431,7 +577,8 @@ func receive_loot(item_id: String, at: Vector3) -> void:
 		return
 	_remember(_delivered_loot, key)
 	if world.has_method("spawn_pickup"):
-		world.call("spawn_pickup", item_id, at)
+		# `announced`: the one drop a guest's ground takes is the host's.
+		world.call("spawn_pickup", item_id, at, true)
 
 ## Host -> everyone: a shot or a thrown blade. Visual only - a guest's copy can
 ## draw the flight but its mask is empty, so it can never resolve a hit.
@@ -453,27 +600,23 @@ func receive_arrow(origin: Vector3, direction: Vector3, speed: float) -> void:
 	world.add_child(arrow)
 	arrow.launch(origin, heading, speed, 0.0, [])
 
-## Host -> everyone: a mob died and paid out. Only the host resolves a kill, so
-## only the host decides the amount; the purse lives in `PlayerState`, which is
-## the one wallet every mode writes through.
+## Host -> everyone: a shaft left the party quiver. Mirrored for the same reason a
+## kill's gold is: the quiver is one ledger, and a guest whose copy never lost a
+## shaft would shoot free. Reliable, because an arrow is a real spend.
 @rpc("authority", "call_remote", "reliable")
-func receive_reward(amount: int) -> void:
-	if amount <= 0:
+func receive_ammo_spent(count: int) -> void:
+	if count <= 0:
 		return
-	var state := get_node_or_null("/root/PlayerState")
-	if state != null and state.has_method("add_credits"):
-		state.add_credits(amount)
-	if world == null:
+	var warband := get_node_or_null("/root/Warband")
+	if warband != null and warband.has_method("take_arrows"):
+		warband.call("take_arrows", count)
+
+## The host's own half of a spend it just booked locally: tell the peers. A guest
+## that called this has nobody to tell - the host already sent its copy.
+func report_ammo_spent(count: int) -> void:
+	if _role != "host" or count <= 0 or not _has_peers():
 		return
-	var hud: Variant = world.get("hud")
-	if hud == null or not is_instance_valid(hud):
-		return
-	# The strip reads `warband.gold()` and only repaints on the warband's signal;
-	# a purse paid through `PlayerState` has to refresh itself.
-	if hud.has_method("refresh_purse"):
-		hud.call("refresh_purse")
-	elif hud.has_method("_refresh_purse"):
-		hud.call("_refresh_purse")
+	receive_ammo_spent.rpc(count)
 
 # --- internals: the host ---------------------------------------------------
 
@@ -488,12 +631,8 @@ func _host_transfer(peer_id: int, merc_id: int) -> Dictionary:
 	var result: Dictionary = controller.activate(peer_id, merc_id)
 	if not bool(result.get("ok", false)):
 		return _refuse(peer_id, merc_id, str(result.get("reason", SoulRouter.REASON_UNKNOWN)))
-	var actor := controller.body_of(int(result.get("body_id", merc_id)))
-	if actor != null and peer_id != controller.local_peer_id:
-		# The authority may only step a peer's body on frames that peer actually
-		# sent; an invented frame is the one correction no one can reconcile.
-		actor.frame_driven = true
-	_broadcast_ownership()
+	# The map goes out on the controller's own `possession_changed`, which every
+	# move makes - this one, an eject, a hotkey - so no path can skip it.
 	return result
 
 ## The router's rules already refused; this only makes sure the one soul that
@@ -527,22 +666,32 @@ func _known_body(merc_id: int) -> bool:
 
 # --- internals: the guest --------------------------------------------------
 
+## Take the host's map as it stands. Every soul whose body changes lets go first
+## and only then are the new bodies taken, so two souls trading bodies never meet
+## a body that is still the other's. The router takes the host's word
+## (`PossessionController.adopt`): the host has already applied every rule.
 func _adopt_ownership(assignments: Dictionary) -> void:
-	if controller == null:
-		return
-	_sync_local_peer()
 	var next := {}
 	for key in assignments:
 		next[int(key)] = int(assignments[key])
-	for key in _adopted:
-		var peer_id := int(key)
-		if int(_adopted[key]) > 0 and int(next.get(peer_id, 0)) <= 0:
+	if controller == null:
+		# The world is still building: the map is kept for `ownership()`, and the
+		# host sends it again once this soul says its field is up.
+		_adopted = next
+		ownership_changed.emit(_adopted.duplicate())
+		return
+	_sync_local_peer()
+	for peer_id in controller.possessing_peers():
+		if int(next.get(peer_id, 0)) != controller.merc_for_peer(peer_id):
 			_release_body_of(peer_id, "That soul let the body go.")
 	for key in next:
+		var peer_id := int(key)
 		var merc_id := int(next[key])
 		if merc_id <= 0 or not _known_body(merc_id):
 			continue
-		controller.activate(int(key), merc_id)
+		if controller.merc_for_peer(peer_id) == merc_id:
+			continue
+		controller.adopt(peer_id, merc_id)
 	_adopted = next
 	ownership_changed.emit(_adopted.duplicate())
 
@@ -582,8 +731,17 @@ func _process(delta: float) -> void:
 	if _role == "client":
 		_sync_local_peer()
 		return
-	if _role != "host" or controller == null or warband == null or not _has_peers():
+	if _role != "host" or controller == null or warband == null:
 		return
+	if not _waiting.is_empty():
+		_seat_elapsed += delta
+		if _seat_elapsed >= SEAT_POLL_SECONDS:
+			_seat_elapsed = 0.0
+			_seat_waiting()
+	if not _has_peers():
+		return
+	if shared_warband:
+		_tick_mirror(delta)
 	var interval := 1.0 / SNAPSHOT_HZ
 	# A hitch must not turn into a burst of stale snapshots.
 	_accumulator = minf(_accumulator + delta, interval * 4.0)
@@ -591,6 +749,119 @@ func _process(delta: float) -> void:
 		_accumulator -= interval
 		_send_snapshots()
 	_tick_world(delta)
+
+# --- internals: the shared warband -------------------------------------------
+
+## Every move the controller makes is a map change: a guest's request, the
+## host's own hotkey, an eject on death, a release with nowhere left to go. The
+## map goes out inside the same call, never on a later frame: whatever a peer
+## sends after hearing of a move must reach the host after the map that move
+## produced, and a map deferred to the next frame arrives behind it. A guest's new
+## body is also the one the host steps only on frames that guest sent, and a soul
+## left without a body joins the queue for the next free one.
+func _on_controller_possession_changed(peer_id: int, merc_id: int) -> void:
+	if _role != "host" or controller == null:
+		return
+	_broadcast_ownership()
+	if peer_id != controller.local_peer_id:
+		var previous = _driven.get(peer_id)
+		var body := controller.body_of(merc_id) if merc_id > 0 else null
+		if previous != null and is_instance_valid(previous) and previous != body:
+			previous.frame_driven = false
+		if body != null:
+			# The authority may only step a peer's body on frames that peer
+			# actually sent; an invented frame is the one correction no one can
+			# reconcile.
+			body.frame_driven = true
+			_driven[peer_id] = body
+		else:
+			_driven.erase(peer_id)
+	if merc_id > 0:
+		_waiting.erase(peer_id)
+	elif _on_field(peer_id) and not _waiting.has(peer_id):
+		_waiting.append(peer_id)
+
+## A soul the host is responsible for seating: its own, or a guest whose world is up.
+func _on_field(peer_id: int) -> bool:
+	if controller != null and peer_id == controller.local_peer_id:
+		return true
+	return _fielded.has(peer_id) and multiplayer.get_peers().has(peer_id)
+
+## Put every waiting soul into the first free body, the soul that lost its body
+## first going first. With nothing free they keep watching: a body that already
+## has a soul inside is that soul's, and nobody is moved out of it.
+func _seat_waiting() -> void:
+	if _role != "host" or controller == null or warband == null:
+		return
+	for peer_id in _waiting.duplicate():
+		if not _on_field(peer_id) or controller.merc_for_peer(peer_id) > 0:
+			_waiting.erase(peer_id)
+			continue
+		var free := _free_body()
+		if free <= 0:
+			return
+		# The body's roster record is what the guest dresses it from: the copy goes
+		# out in the same call and before the map, so a mercenary that joined the
+		# warband since the last copy is already in it when the seat arrives.
+		if shared_warband:
+			_push_warband()
+		_host_transfer(peer_id, free)
+
+## The first living, unoccupied body on the field, in roster order - one the
+## world says can move first (a prisoner still caged in the opening comes last).
+func _free_body() -> int:
+	var fallback := -1
+	for merc_id in warband.souls.possessable_ids():
+		var actor := controller.body_of(merc_id)
+		if actor == null or not is_instance_valid(actor) or not actor.alive or actor.downed:
+			continue
+		if world == null or not world.has_method("is_free_body") \
+				or bool(world.call("is_free_body", merc_id)):
+			return merc_id
+		if fallback < 0:
+			fallback = merc_id
+	return fallback
+
+func _on_warband_changed() -> void:
+	if _role == "host" and shared_warband:
+		_mirror_dirty = true
+
+## Send the warband the moment it changes after a quiet spell, and at most every
+## `MIRROR_SECONDS` while it keeps changing.
+func _tick_mirror(delta: float) -> void:
+	_mirror_elapsed = minf(_mirror_elapsed + delta, MIRROR_SECONDS)
+	if not _mirror_dirty or _mirror_elapsed < MIRROR_SECONDS:
+		return
+	_push_warband()
+
+## The host's warband as its file would hold it, to every guest. Reliable and in
+## order, which is what lets a seat name a mercenary the guest has just been told
+## about.
+func _push_warband() -> void:
+	_mirror_dirty = false
+	_mirror_elapsed = 0.0
+	receive_warband.rpc(JSON.stringify(warband.to_dict()), warband.gold())
+
+## What each fielded body wears, so a copy that moved somebody's kit re-dresses
+## exactly those bodies.
+func _worn_signatures(target: WarbandState) -> Dictionary:
+	var out := {}
+	if controller == null:
+		return out
+	for actor in controller.bodies():
+		var merc_id := controller.merc_of(actor)
+		if merc_id > 0 and target.roster.has(merc_id):
+			out[merc_id] = str(target.roster.equipped_of(merc_id))
+	return out
+
+func _redress(target: WarbandState, before: Dictionary) -> void:
+	if controller == null:
+		return
+	for key in before:
+		var merc_id := int(key)
+		if target.roster.has(merc_id) \
+				and str(target.roster.equipped_of(merc_id)) != str(before[key]):
+			controller.refresh_gear(merc_id)
 
 func _send_snapshots() -> void:
 	_tick += 1
@@ -708,37 +979,19 @@ func _near_any_body(point: Vector3, bodies: Array, limit_metres: float) -> bool:
 			return true
 	return false
 
-## The host is the only peer that resolves a mob's death, so it is the only peer
-## that pays for it. A guest hears the amount and books it against its own purse.
-func _on_guard_defeated(_enemy: Node3D, reward: int) -> void:
-	if _role != "host" or reward <= 0 or not _has_peers():
-		return
-	receive_reward.rpc(reward)
-
-## Wire the guards that already exist. Both peers do this: the host needs the
-## `defeated` signal, and a client needs the same node switched to replica.
+## Mark the guards that already exist as replicas on a guest: the host owns
+## every mob's brain and every kill.
 func _wire_world_guards() -> void:
+	if _role != "client":
+		return
 	for guard in _world_guards():
-		_wire_guard_signal(guard)
-		if _role == "client":
-			_mark_replica(guard)
-
-func _wire_guard_signal(guard) -> void:
-	if guard == null or not is_instance_valid(guard) or not guard is Node:
-		return
-	if not (guard as Node).has_signal("defeated"):
-		return
-	var callable := Callable(self, "_on_guard_defeated")
-	if not (guard as Node).is_connected("defeated", callable):
-		(guard as Node).connect("defeated", callable)
+		_mark_replica(guard)
 
 ## A mob the world adds after the hand-off - a ring that wakes, a wave that
-## spawns - still has to be a replica on a guest and still has to pay on a host.
+## spawns - still has to be a replica on a guest.
 func _on_world_node_added(node: Node) -> void:
 	if node == null or not is_instance_valid(node):
 		return
-	if node.has_signal("defeated"):
-		_wire_guard_signal(node)
 	if _role != "client":
 		return
 	# `node_added` fires before `_ready`, so the group may not be joined yet; the
@@ -846,12 +1099,17 @@ func _on_peer_connected(peer_id: int) -> void:
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	var merc_id := controller.merc_for_peer(peer_id) if controller != null else -1
+	_fielded.erase(peer_id)
+	_waiting.erase(peer_id)
 	_release_body_of(peer_id, "That soul left the battle.")
+	_driven.erase(peer_id)
 	if merc_id > 0 and controller != null:
-		# The body stays on the field under its own AI rather than freezing.
+		# The body stays on the field under its own AI rather than freezing - and
+		# a soul that was waiting for a body takes it.
 		controller.set_bot(merc_id, true)
 	_names.erase(peer_id)
 	if _role == "host":
+		_seat_waiting()
 		_broadcast_ownership()
 	peer_left.emit(peer_id)
 
@@ -870,3 +1128,4 @@ func _end(reason: String) -> void:
 	_adopted = {}
 	if was != "offline":
 		role_changed.emit(_role)
+		session_ended.emit(reason)

@@ -137,12 +137,11 @@ const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to w
 ## to fall at their feet.
 const REVIVE_LESSON_RADIUS := 12.0
 const REVIVE_LESSON_STEP := "lesson_revive"
-## How often the world asks what part it plays in a co-op campaign. The flow is
-## still offline when `_ready` runs - the session is seated at the end of it - so
-## a client only learns its role from a poll, never from a read at startup.
-const ROLE_POLL_SECONDS := 1.0
 ## The door the menu's "exit to title" row opens.
 const TITLE_SCENE := "res://title.tscn"
+## What a co-op guest is told when it reaches for something that changes the
+## host's warband or ground: those are worked from the host's own hands.
+const GUEST_HANDS_TEXT := "Co-op: latches, counters, corpses and loot are the host's to work."
 ## The world's three one-line lessons. Each is a key and a command, offered once,
 ## the first time the fact it names is true: a squadmate down, the player's own
 ## body down, and a wound with nobody near enough to punish a bandage. They are
@@ -225,8 +224,9 @@ var guards: Array = []
 ## Every weapon on the ground, in one list, for the one loot vacuum.
 var pickups: Array = []
 var squad_ids: Array[int] = []
-## "camp" (the campaign's opening) or "town" (a resumed save, or the arena's
-## return). Read from `GameFlow.world_start`.
+## "camp" (the campaign's opening), "town" (a resumed save, or the arena's
+## return), "checkpoint" (the autosave's bookmark) or "guest" (a co-op guest
+## fielding the host's bodies). Read from `GameFlow.world_start`.
 var start_area := "camp"
 
 var _crawls: Array = []
@@ -247,13 +247,21 @@ var _downed_tip_pending := false
 var _roster_elapsed := 0.0
 var _wipe_beat := -1.0
 var _wiped := false
-## True once the flow says this machine is a guest. A client fields the same
-## bodies but does not own the world: it writes no checkpoint, runs no squad AI
-## and never swings a mob the session has marked as a replica.
+## True when this machine is a co-op guest. The flow connects before the world
+## opens, so the role is known from the first line of `_ready`: a client fields
+## the host's bodies but does not own the world - it writes no checkpoint, runs no
+## squad AI, drops and books nothing, and never swings a mob the session has
+## marked as a replica.
 var _client := false
-## Seconds since the last role poll; `flow.warband_role()` costs a string compare
-## and a socket read, so it is asked once a second rather than every physics tick.
-var _role_elapsed := 0.0
+## The body the soul was watching on the last frame, so the HUD line changes
+## exactly when the watch does.
+var _watched_body = null
+## A guest's revive is the host's channel; this is the guest's own count of it,
+## for the prompt.
+var _guest_revive := 0.0
+## Whether the camp was built past its opening (a trail bookmark). A guest builds
+## its camp the way the host built its own, so both fields hold the same mobs.
+var _camp_resumed := false
 ## What the heightfield was baked to: `{triangles, cell, min, max}`.
 var _terrain: Dictionary = {}
 ## Where the town square stands, worked out before the ground so its pad can be
@@ -268,6 +276,7 @@ func _ready() -> void:
 		return
 	flow = get_node_or_null("/root/GameFlow")
 	audio = get_node_or_null("/root/Audio")
+	_client = flow != null and str(flow.warband_role()) == "client"
 	start_area = _wanted_start()
 	_build_ground()
 	_build_camera()
@@ -281,6 +290,8 @@ func _ready() -> void:
 	_build_revive()
 	_build_squad()
 	_build_areas()
+	if _client:
+		_become_client()
 	_build_wrong_way_sign()
 	# The soul is wired before it is seated: the very first possession is the
 	# camp's first seen body, and a signal connected afterwards would miss it.
@@ -294,17 +305,12 @@ func _ready() -> void:
 	_write_prompt("", "")
 	_announce()
 	if flow != null:
+		# `bind()` is where the flow seats the session on these bodies: a host
+		# opens its socket, a guest tells the host it can be put into one.
 		flow.bind(self)
-		# `bind()` is where the flow seats the session, so the role is knowable
-		# here - and it is the last moment a guest can act before the poll: the
-		# camp seats its bodies inside `_seat_warband`, and a guest must be marked
-		# a replica before the first clamp runs.
-		if str(flow.warband_role()) == "client":
-			_become_client()
 	# The orders' ground and the map sheet come last. The cages need the lane the
 	# wood has grown and the town's wall to stand against; the warcamps need the
-	# hostile list the areas have filled; and a guest has to know it is a guest
-	# before either is fielded, because a guest fields neither.
+	# hostile list the areas have filled; and a guest fields neither.
 	_build_orders()
 	_build_map()
 
@@ -322,10 +328,8 @@ func _process(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if controller == null:
 		return
-	# The role is polled, never read once: the flow seats the session at the end
-	# of `_ready`, so at startup the answer is honestly "offline" and a guest only
-	# discovers itself a moment later.
-	_poll_role(delta)
+	# A soul with no body of its own says whose it is watching.
+	_sync_watch()
 	# The squad's brains write a body's intent for this frame, so they run before
 	# the controller integrates it; the watchers tick themselves. A guest does not
 	# run them: its bodies are the host's to drive, and a second brain on the same
@@ -333,6 +337,10 @@ func _physics_process(delta: float) -> void:
 	_sync_crawl_control()
 	if squad != null and not _client:
 		squad.drive(delta)
+		# The band's own fights, as the notifier reads them: a break-off is said
+		# once and then stands under the roster until the ally is back.
+		if hud != null:
+			hud.set_aggro(squad.engaged_allies())
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
@@ -375,7 +383,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.close()
 			else:
 				_hide_panels()
-				paperdoll.open(controller.merc_for_peer(1))
+				paperdoll.open(_soul_merc())
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
 			# The warband's window is the menu: close it, close whatever panel is
@@ -515,6 +523,13 @@ func _build_soul() -> void:
 	controller.auto_simulate = false
 	add_child(controller)
 	controller.setup(warband, camera, self)
+	# A guest is connected before this world opens, so its soul is its own ENet
+	# peer from the first frame; the host and a solo game are peer 1.
+	if _client:
+		controller.local_peer_id = multiplayer.get_unique_id()
+	# TAB and the revive hold are this scene's verbs, run on the authority for
+	# whichever soul pressed them.
+	controller.world_action = Callable(self, "_on_world_action")
 
 
 func _build_ui() -> void:
@@ -635,7 +650,8 @@ func _build_areas() -> void:
 	camp.host = self
 	# A checkpoint past the cages opens the world with the lesson already behind
 	# it: the cages hang open and empty and the pair are never fielded.
-	if _resuming_trail():
+	_camp_resumed = _resuming_trail()
+	if _camp_resumed:
 		camp.prepare_resume()
 	add_child(camp)
 	camp.embed(self)
@@ -722,7 +738,9 @@ func lane_end() -> Vector3:
 ## its checkpoint instead: the same roster and gear the save holds, standing on
 ## the ground the bookmark names.
 func _seat_warband() -> void:
-	if start_area == "checkpoint" and warband.has_checkpoint():
+	if start_area == "guest":
+		_seat_guest()
+	elif start_area == "checkpoint" and warband.has_checkpoint():
 		_seat_checkpoint()
 	elif start_area == "town":
 		town.seed_warband()
@@ -736,7 +754,7 @@ func _seat_warband() -> void:
 	_adopt_bodies()
 	if start_area == "camp":
 		camp.begin_lesson()
-	_on_possession_changed(1, controller.merc_for_peer(1))
+	_on_possession_changed(controller.local_peer_id, _soul_merc())
 
 
 ## The bookmark is a place the warband already stood: the town's own fire ring,
@@ -757,6 +775,26 @@ func _seat_checkpoint() -> void:
 	if squad != null:
 		squad.following = true
 		squad.engage_radius = 34.0
+
+
+## A co-op guest fields exactly the bodies the host has on the field - the host's
+## roster, lent - and nothing is seeded, dressed or taught: the warband is the
+## host's, and so is every decision about it. They stand in a ring where the party
+## is until the host's first snapshot puts each one where it really stands, as
+## replicas the host drives; the host seats this soul once the world is up.
+func _seat_guest() -> void:
+	var field := _guest_field()
+	var wanted: Array = field.get("bodies", []) if field.get("bodies", []) is Array else []
+	var focus := Vector3.ZERO
+	var raw: Variant = field.get("focus", [])
+	if raw is Array and (raw as Array).size() == 3:
+		focus = Vector3(float(raw[0]), float(raw[1]), float(raw[2]))
+	if focus.is_zero_approx() or not focus.is_finite():
+		focus = _checkpoint_ground() if warband.has_checkpoint() else CampScript.GATE_POINT
+	var posts := _spawn_ring(TerrainScript.grounded(focus), maxi(1, wanted.size()))
+	bodies = controller.spawn_mercenaries(posts, false, wanted)
+	for actor in bodies:
+		controller.set_bot(controller.merc_of(actor), false)
 
 
 ## Where a trail bookmark stands on the ground. Zero is a marker from a file that
@@ -817,16 +855,21 @@ func _adopt_bodies() -> void:
 	if revive != null:
 		revive.set_bodies(bodies)
 	# The soul goes into a body before anything hunts it: a spectator's camera
-	# while two cultists run at nothing is not a first fight.
-	var first: int = controller.merc_for_peer(1)
-	if first <= 0 and not squad_ids.is_empty():
+	# while two cultists run at nothing is not a first fight. A guest's soul is the
+	# host's to seat.
+	var first: int = _soul_merc()
+	if first <= 0 and not squad_ids.is_empty() and not _client:
 		first = int(squad_ids[0])
-		controller.direct(1, first)
+		controller.direct(controller.local_peer_id, first)
 
 
 ## Every body's bowstring and throwing hand. A body that is not authoritative is
 ## somebody's prediction: it draws and releases on screen, and only the simulation
 ## that owns it spawns the missile that can hurt anyone.
+##
+## The quiver gate is installed here too, so a body that changes its bow for a
+## blade needs no second thought: `Combat.can_draw()` asks the party's one quiver
+## every time the string comes up.
 func _wire_projectiles(actor) -> void:
 	if actor == null or not is_instance_valid(actor):
 		return
@@ -837,6 +880,28 @@ func _wire_projectiles(actor) -> void:
 		combat.shot.connect(_on_body_shot.bind(actor))
 	if not combat.thrown.is_connected(_on_body_thrown):
 		combat.thrown.connect(_on_body_thrown.bind(actor))
+	combat.ammo_gate = _quiver_has_arrow
+
+
+## The one rule behind every bow in the warband: a shaft in the quiver or nothing
+## on the string.
+func _quiver_has_arrow() -> bool:
+	return warband == null or warband.has_arrows()
+
+
+## Spend one shaft from the party quiver and mirror the spend to every peer, the
+## way a kill's gold is mirrored: the quiver is one ledger, and a guest that could
+## not see the spend would shoot free. Answers false when the quiver is empty, so
+## the caller can refuse the missile rather than fly an arrow nobody paid for.
+func spend_arrow() -> bool:
+	if warband == null:
+		return true
+	if warband.take_arrows(1) <= 0:
+		return false
+	var link := get_node_or_null("/root/GameFlow/WarbandLink")
+	if link != null and link.has_method("report_ammo_spent"):
+		link.report_ammo_spent(1)
+	return true
 
 
 ## A bow released. The shot leaves along the camera's crosshair ray - the same ray
@@ -844,6 +909,11 @@ func _wire_projectiles(actor) -> void:
 func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: float,
 		actor) -> void:
 	if not _projectile_authority(actor):
+		return
+	# The shaft leaves the quiver as it leaves the string. A draw let through
+	# before the count ran out - a stale prediction, a hand-fired signal - still
+	# gets no free arrow.
+	if not spend_arrow():
 		return
 	var rig = actor.rig
 	var damage := float(CombatScript.damage_for(int(rig.bow_index), charge,
@@ -927,16 +997,20 @@ func _wire_crawl(actor) -> void:
 	add_child(crawl)
 	crawl.attach(actor)
 	crawl.set_friends(bodies)
+	# Only the host drags a body: a guest's copy of a crawl is in the host's
+	# snapshots, and a second crawl here would fight them.
+	crawl.set_physics_process(not _client)
 	_crawls.append(crawl)
 
 
-## The body the soul is inside is the player's to crawl; every other downed body
-## is the scene's. Re-read every frame, because the soul moves between bodies.
+## A body a soul is inside is that soul's to crawl - the host's from its keys, a
+## guest's from the frames it sends - and every other downed body is the scene's.
+## Re-read every frame, because souls move between bodies.
 func _sync_crawl_control() -> void:
-	var soul = controller.active_body(1)
 	for crawl in _crawls:
 		if is_instance_valid(crawl):
-			crawl.manual = is_instance_valid(soul) and crawl.actor == soul
+			var body = crawl.actor
+			crawl.manual = is_instance_valid(body) and int(body.get("peer_id")) > 0
 
 
 ## The squad is `squad_drive.gd` - the same one module the cage and the trail always
@@ -971,39 +1045,109 @@ func _is_free_ally(merc_id: int) -> bool:
 	return camp.is_free(merc_id)
 
 
+## Whether a body can walk off on its own right now: a prisoner still held by
+## the opening's clamp cannot. The host's session seats a co-op guest in a body
+## that can move before it settles for one that is still caged.
+func is_free_body(merc_id: int) -> bool:
+	return merc_id > 0 and (camp == null or camp.is_free(merc_id))
+
+
 # --- the co-op role --------------------------------------------------------
 #
 # The world is the same place on every machine, but only the host owns it: a
-# guest fields the bodies its save describes and follows the host's word on
-# everything else. The flow is still "offline" when `_ready` runs (the session is
-# seated at the end of it), so the role can only be discovered by asking later.
-
-## Ask the flow what part this machine plays, once a second. The first "client"
-## answer switches the world into its guest mode exactly once.
-func _poll_role(delta: float) -> void:
-	if _client or flow == null:
-		return
-	_role_elapsed += delta
-	if _role_elapsed < ROLE_POLL_SECONDS:
-		return
-	_role_elapsed = 0.0
-	if str(flow.warband_role()) == "client":
-		_become_client()
-
+# guest fields the host's bodies from the host's lent warband and follows the
+# host's word on everything else.
 
 ## A guest does not replay the cages and does not write the campaign. The camp
 ## throws its lesson away (the host's cage state is the truth, and the opening is
-## a solo beat), and from here on this machine runs no squad AI and no local mob
-## brains - the session has already marked the host's mobs as replicas.
+## a solo beat), and this machine runs no squad AI and no local mob brains - the
+## session marks the host's mobs as replicas.
 func _become_client() -> void:
-	if _client:
-		return
 	_client = true
 	if camp != null:
 		camp.dismiss_lesson()
 	if squad != null:
 		squad.following = false
 
+## What a guest's world must copy from this one to field the same mobs: whether
+## the camp was built past its opening. Sent with the campaign.
+func guest_layout() -> Dictionary:
+	return {"camp_resumed": _camp_resumed, "start": start_area}
+
+## The host's answer this guest's world is built on (`GameFlow.guest_field`).
+func _guest_field() -> Dictionary:
+	if flow == null or not flow.get("guest_field") is Dictionary:
+		return {}
+	return flow.guest_field
+
+## The body this machine's own soul is inside, or null.
+func _soul():
+	return controller.active_body() if controller != null else null
+
+## The mercenary this machine's own soul is inside, or -1.
+func _soul_merc() -> int:
+	return controller.merc_for_peer(controller.local_peer_id) if controller != null else -1
+
+## A soul whose last body fell watches the one somebody else is still inside;
+## the body panel says whose. Changes are painted once, on the frame they happen.
+func _sync_watch() -> void:
+	var watched = controller.watching()
+	if watched == _watched_body:
+		return
+	_watched_body = watched
+	if hud == null:
+		return
+	if watched == null:
+		hud.set_watching("")
+		return
+	var merc_name: String = warband.roster.name_of(controller.merc_of(watched))
+	hud.set_watching(merc_name, _soul_name(controller.watched_peer()))
+	hud.set_status("No body is free. You watch %s until one is." % merc_name, 4.0)
+
+## The player name a peer joined with, or "".
+func _soul_name(peer_id: int) -> String:
+	if peer_id <= 0 or flow == null or flow.session == null:
+		return ""
+	return str(flow.session.name_of(peer_id))
+
+## The scene's half of the intent channel (`PossessionController.world_action`):
+## run on the authority for any soul's body, a guest's included, so TAB and the
+## revive hold work on the host's warband and field whoever pressed them.
+func _on_world_action(actor, action: String, value) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	match action:
+		"swap_set":
+			return _swap_set_on(actor)
+		"revive":
+			return _revive_from(actor, bool(value))
+	return false
+
+## TAB on one body: its mercenary's two weapon sets trade places on the roster
+## and the rig is dressed from the record.
+func _swap_set_on(actor) -> bool:
+	var merc_id: int = controller.merc_of(actor)
+	if merc_id <= 0:
+		return false
+	var result: Dictionary = warband.swap_weapon_set(merc_id)
+	var ok := bool(result.get("ok", false))
+	if ok:
+		controller.refresh_gear(merc_id)
+	if hud != null and actor == _soul():
+		hud.set_status(str(result.get("message", "")), 2.0)
+	return ok
+
+## The revive hold, from whichever soul's body pressed it: the channel is keyed to
+## that soul's peer, exactly as the host's own is.
+func _revive_from(actor, pressed: bool) -> bool:
+	var peer_id := int(actor.get("peer_id"))
+	if peer_id <= 0 or revive == null:
+		return false
+	if not pressed:
+		revive.cancel(peer_id)
+		return true
+	var target = _revive_target_for(actor)
+	return target != null and revive.begin(peer_id, target)
 
 ## The guards this machine may point at a body. A replica is the host's mob shown
 ## here: giving it a target would arm a brain that never runs, and a stale target
@@ -1025,11 +1169,21 @@ func _wire_possession() -> void:
 	controller.possession_changed.connect(_on_possession_changed)
 	controller.transfer_refused.connect(_on_transfer_refused)
 	controller.possession_released.connect(_on_possession_released)
+	controller.draw_refused.connect(_on_draw_refused)
+
+
+## The quiver is empty and the string stayed down. Said once per press, and the
+## line points at the two places a shaft comes from. The peer id is the presser's,
+## and only the local soul's presses reach here.
+func _on_draw_refused(_peer_id: int) -> void:
+	if hud == null:
+		return
+	hud.set_status("Out of arrows: buy a bunch from a keeper, or take them off an archer.", 2.5)
 
 
 func _on_possession_changed(peer_id: int, merc_id: int) -> void:
-	if peer_id == 1 and hud != null:
-		hud.set_body(controller.active_body(1), warband.roster.name_of(merc_id), merc_id)
+	if peer_id == controller.local_peer_id and hud != null:
+		hud.set_body(_soul(), warband.roster.name_of(merc_id), merc_id)
 	if camp != null:
 		camp.note_possession(merc_id)
 	_attach_brand()
@@ -1041,7 +1195,11 @@ func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
 		hud.set_status("%s: %s" % [warband.roster.name_of(merc_id), reason], 2.5)
 
 
-func _on_possession_released(_peer_id: int, reason: String) -> void:
+## Only this machine's own soul is news here: a guest's body changing hands on
+## the host is the guest's business, and must not blank the host's panel.
+func _on_possession_released(peer_id: int, reason: String) -> void:
+	if peer_id != controller.local_peer_id:
+		return
 	if hud != null:
 		hud.set_body(null, "", -1)
 		hud.set_status("The soul is loose (%s)." % reason, 4.0)
@@ -1050,7 +1208,7 @@ func _on_possession_released(_peer_id: int, reason: String) -> void:
 
 func _on_possess_requested(merc_id: int) -> void:
 	screen.close()
-	controller.direct(1, merc_id)
+	controller.direct(controller.local_peer_id, merc_id)
 
 
 func _on_paperdoll_changed() -> void:
@@ -1078,7 +1236,11 @@ func nearest_standing_body(point: Vector3):
 
 ## One weapon on the ground, in the one vacuum. The camp's watchers and the
 ## trail's cultists both drop through here.
-func spawn_pickup(item_id: String, at: Vector3):
+func spawn_pickup(item_id: String, at: Vector3, announced: bool = false):
+	# A guest's ground carries only what the host announced: its own areas' drops
+	# are the host's drops, and they arrive through the session.
+	if _client and not announced:
+		return null
 	if loot == null or item_id.is_empty():
 		return null
 	var pickup = loot.spawn(item_id, at)
@@ -1109,10 +1271,15 @@ func drop_held_weapon(enemy) -> bool:
 func _on_enemy_defeated(enemy, reward: int) -> void:
 	if not is_instance_valid(enemy):
 		return
-	# A replica is another machine's mob shown here: the host resolves its death
-	# and streams the amount through `WarbandSession.receive_reward`, so this
-	# purse adds nothing of its own.
-	if not _client and not bool(enemy.get("replica")):
+	# A guest is shown the host's kill: the host pays the shared purse, drops the
+	# steel, books the corpse and the orders, and every piece of that reaches this
+	# machine through the session. Here the dead hand only lets go of its blade.
+	if _client:
+		GearDropScript.strip_enemy(enemy)
+		if screen != null:
+			screen.refresh()
+		return
+	if not bool(enemy.get("replica")):
 		_pay_kill(reward)
 	# The steel comes out of its hand and lands in the dirt; what it still wears is
 	# the corpse screen's, so nothing is on offer twice. The body stays on the one
@@ -1280,7 +1447,9 @@ func _on_enemy_attack(attacker, amount: float, victim) -> void:
 ## not booked into the stash, it is lying beside the body, where a soul can take
 ## it back with `K` or an ally can pick it up - and where it stays if nobody does.
 func drop_merc_gear(actor, merc_id: int) -> void:
-	if warband == null or merc_id <= 0 or not is_instance_valid(actor):
+	# The host strips the hands and announces the drop; a guest's roster hears it
+	# in the host's next warband copy.
+	if _client or warband == null or merc_id <= 0 or not is_instance_valid(actor):
 		return
 	var ids: Array[String] = GearDropScript.strip_hands(warband, merc_id)
 	if ids.is_empty():
@@ -1297,7 +1466,7 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	# The player's own body is a different lesson from a squadmate's: the revive
 	# tip is about somebody else, this one is about what the soul can still do.
 	if controller != null and actor != null and is_instance_valid(actor) \
-			and actor == controller.active_body(1):
+			and actor == _soul():
 		_downed_tip_pending = true
 		_push_downed_tip()
 	_push_revive_tip(actor)
@@ -1313,7 +1482,7 @@ func _push_revive_tip(actor) -> void:
 		return
 	if not bool(actor.get("downed")) or not bool(actor.get("alive")):
 		return
-	var soul = controller.active_body(1)
+	var soul = _soul()
 	if soul == null or not is_instance_valid(soul) or soul == actor:
 		return
 	if not bool(soul.get("alive")) or bool(soul.get("downed")):
@@ -1331,7 +1500,7 @@ func _push_downed_tip() -> void:
 		return
 	if _panel_open() or controller == null:
 		return
-	var soul = controller.active_body(1)
+	var soul = _soul()
 	if soul == null or not is_instance_valid(soul):
 		return
 	if not bool(soul.get("downed")) or not bool(soul.get("alive")):
@@ -1351,7 +1520,7 @@ func _update_bandage_tip() -> void:
 		return
 	if _panel_open():
 		return
-	var soul = controller.active_body(1)
+	var soul = _soul()
 	if soul == null or not is_instance_valid(soul):
 		return
 	if not bool(soul.get("alive")) or bool(soul.get("downed")):
@@ -1385,7 +1554,7 @@ func _update_wrong_way() -> void:
 	if trail == null or controller == null or camp == null or not camp.escaping():
 		_set_wrong_way(false)
 		return
-	var soul = controller.active_body(1)
+	var soul = _soul()
 	if soul == null or not is_instance_valid(soul):
 		_set_wrong_way(false)
 		return
@@ -1443,6 +1612,10 @@ func _loot_owner(peer_id: int) -> int:
 ## The roster is the truth a reload loads: mirror health and downed state while
 ## the world lasts, so a body that fell on the trail is found exactly as it fell.
 func _sync_roster(delta: float) -> void:
+	# A guest's world outlives its loan by a frame or two; past it the roster is
+	# this machine's own again, and these bodies are not its mercenaries.
+	if _client and not warband.lent:
+		return
 	_roster_elapsed += delta
 	if _roster_elapsed < 0.4:
 		return
@@ -1466,7 +1639,9 @@ func _sync_roster(delta: float) -> void:
 ## the warband through any more and nowhere to be carried to: the wood simply
 ## takes what is left, the roster keeps exactly that, and the squad stops.
 func _check_wipe(delta: float) -> void:
-	if _wiped:
+	# The host decides a wipe and reloads its checkpoint; a guest's world follows
+	# it there when the host's campaign arrives again.
+	if _wiped or _client:
 		return
 	if not _all_bodies_out():
 		_wipe_beat = -1.0
@@ -1517,7 +1692,7 @@ func _all_bodies_out() -> bool:
 func _sync_town_music() -> void:
 	if audio == null or town == null or controller == null:
 		return
-	var soul = controller.active_body(1)
+	var soul = controller.focus_body()
 	if soul == null or not is_instance_valid(soul):
 		return
 	var track := str(audio.music_track)
@@ -1551,7 +1726,8 @@ func _check_checkpoints() -> void:
 	# line every machine reloads from to wherever one guest happened to stand.
 	if _client:
 		return
-	var actor = controller.active_body(1)
+	# The party's ground: a host watching the last body still checkpoints it.
+	var actor = controller.focus_body()
 	if actor == null or not is_instance_valid(actor) or not bool(actor.get("alive")):
 		return
 	# The opening is behind us: the six watchers are dead and the leaving has
@@ -1592,10 +1768,16 @@ func _reload_checkpoint() -> bool:
 ## latches stand in the ground a body walks on - and a camp that refused the press
 ## (nothing in reach) hands it on rather than eating it.
 func _try_interact() -> void:
-	var actor = controller.active_body(1)
+	var actor = _soul()
 	if actor == null or not is_instance_valid(actor):
 		if hud != null:
 			hud.set_status("The soul is loose. There is nobody to act with.", 2.5)
+		return
+	if _client:
+		# Latches, counters, corpses and loose steel all change the host's warband
+		# and the host's ground; in co-op they are worked from the host's hands.
+		if hud != null:
+			hud.set_status(GUEST_HANDS_TEXT, 3.0)
 		return
 	if camp != null and camp.interact(actor):
 		return
@@ -1604,7 +1786,7 @@ func _try_interact() -> void:
 	# whatever else is standing here.
 	if soldier_cages != null and soldier_cages.interact(actor):
 		return
-	if town != null and not town.interact_at(1, actor.global_position).is_empty():
+	if town != null and not town.interact_at(controller.local_peer_id, actor.global_position).is_empty():
 		return
 	# A fallen body at your feet is a container: `G` opens its character screen. A
 	# body that has already given everything answers false, and the press falls
@@ -1636,9 +1818,9 @@ func _loot_click(event: InputEvent) -> bool:
 	var mouse := event as InputEventMouseButton
 	if mouse.button_index != MOUSE_BUTTON_LEFT or not mouse.pressed:
 		return false
-	if _panel_open() or _reviving or _wiped:
+	if _panel_open() or _reviving or _wiped or _client:
 		return false
-	var actor = controller.active_body(1)
+	var actor = _soul()
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var sample: Dictionary = controller.aim_sample()
@@ -1667,7 +1849,7 @@ func _interaction_status(actor) -> void:
 
 
 func _nearest_pickup():
-	var actor = controller.active_body(1)
+	var actor = _soul()
 	if actor == null or not is_instance_valid(actor):
 		return null
 	var best = null
@@ -1676,7 +1858,7 @@ func _nearest_pickup():
 		if not is_instance_valid(pickup) or bool(pickup.collected):
 			continue
 		var distance: float = actor.global_position.distance_to(pickup.global_position)
-		if distance <= best_distance and not pickup.blocked_for(1):
+		if distance <= best_distance and not pickup.blocked_for(controller.local_peer_id):
 			best_distance = distance
 			best = pickup
 	return best
@@ -1691,28 +1873,29 @@ func _nearest_pickup():
 func _swap_weapon_set() -> void:
 	if warband == null or controller == null:
 		return
-	var merc_id: int = controller.merc_for_peer(1)
-	if merc_id <= 0:
+	if _soul_merc() <= 0:
 		if hud != null:
 			hud.set_status("The soul is loose. There is nobody to swap for.", 2.5)
 		return
-	var result: Dictionary = warband.swap_weapon_set(merc_id)
-	if bool(result.get("ok", false)):
-		controller.refresh_gear(merc_id)
-	if hud != null:
-		hud.set_status(str(result.get("message", "")), 2.0)
+	# The swap rides the same channel as a swing: done here on the host, sent to
+	# the host by a guest - whose new hands come back with the host's warband.
+	controller.act("swap_set")
 
 
 ## `K` still works for a human; the squad loots itself and nothing announces it.
 func _try_loot() -> void:
+	if _client:
+		if hud != null:
+			hud.set_status(GUEST_HANDS_TEXT, 3.0)
+		return
 	var pickup = _nearest_pickup()
 	if pickup == null:
 		if hud != null:
 			hud.set_status("Nothing within reach.", 1.5)
 		return
-	var result: Dictionary = loot.quick_loot(pickup, 1)
+	var result: Dictionary = loot.quick_loot(pickup, controller.local_peer_id)
 	if bool(result.get("ok", false)):
-		controller.refresh_gear(controller.merc_for_peer(1))
+		controller.refresh_gear(_soul_merc())
 	if hud != null:
 		hud.set_status(str(result.get("message", "")), 2.5)
 
@@ -1720,7 +1903,11 @@ func _try_loot() -> void:
 # --- revive ----------------------------------------------------------------
 
 func _revive_target():
-	var actor = controller.active_body(1)
+	return _revive_target_for(_soul())
+
+
+## The nearest downed squadmate within reach of one body, or null.
+func _revive_target_for(actor):
 	if actor == null or not is_instance_valid(actor):
 		return null
 	var best = null
@@ -1741,19 +1928,30 @@ func _begin_revive() -> void:
 	var target = _revive_target()
 	if target == null or revive == null:
 		return
-	if revive.begin(1, target):
+	var merc_name: String = warband.roster.name_of(int(controller.merc_of(target)))
+	if _client:
+		# The host opens the channel on this soul's body; the five seconds are
+		# counted here only for the prompt.
+		controller.act("revive", true)
+		_reviving = true
+		_guest_revive = 0.0
+		if hud != null:
+			hud.set_status("Reviving %s..." % merc_name, Contracts.REVIVE_CHANNEL_SECONDS)
+		return
+	if revive.begin(controller.local_peer_id, target):
 		_reviving = true
 		if hud != null:
-			hud.set_status("Reviving %s..." % warband.roster.name_of(int(controller.merc_of(target))),
-				Contracts.REVIVE_CHANNEL_SECONDS)
+			hud.set_status("Reviving %s..." % merc_name, Contracts.REVIVE_CHANNEL_SECONDS)
 	elif hud != null:
 		hud.set_status("That one cannot be brought back.", 2.0)
 
 
 func _cancel_revive() -> void:
 	_reviving = false
-	if revive != null:
-		revive.cancel(1)
+	if _client:
+		controller.act("revive", false)
+	elif revive != null:
+		revive.cancel(controller.local_peer_id)
 
 
 func _tick_revive(delta: float) -> void:
@@ -1762,10 +1960,18 @@ func _tick_revive(delta: float) -> void:
 	revive.tick(delta)
 	if not _reviving:
 		return
-	var progress: float = float(revive.progress(1))
+	if _client:
+		_guest_revive += delta
+		var share := clampf(_guest_revive / Contracts.REVIVE_CHANNEL_SECONDS, 0.0, 1.0)
+		if hud != null:
+			hud.set_prompt("REVIVING  %d%%" % int(round(share * 100.0)))
+		if share >= 1.0 or _revive_target() == null:
+			_reviving = false
+		return
+	var progress: float = float(revive.progress(controller.local_peer_id))
 	if hud != null and progress > 0.0:
 		hud.set_prompt("REVIVING  %d%%" % int(round(progress * 100.0)))
-	if not revive.channeling(1):
+	if not revive.channeling(controller.local_peer_id):
 		_reviving = false
 
 
@@ -1776,8 +1982,8 @@ func _tick_revive(delta: float) -> void:
 func _attach_brand() -> void:
 	if branded == null:
 		return
-	var actor = controller.active_body(1)
-	var merc_id: int = controller.merc_for_peer(1)
+	var actor = _soul()
+	var merc_id: int = _soul_merc()
 	if actor == null or merc_id <= 0:
 		branded.attach(null, {})
 	else:
@@ -1807,7 +2013,7 @@ func _update_prompt() -> void:
 		return
 	if _panel_open() or _reviving:
 		return
-	var actor = controller.active_body(1)
+	var actor = _soul()
 	var text := ""
 	# A body on the floor outranks everything else on screen: the one thing a
 	# soul can do for a squadmate is stand over it and hold the key.
@@ -1838,7 +2044,7 @@ func _update_prompt() -> void:
 func _update_hint() -> void:
 	if hud == null or controller == null:
 		return
-	var actor = controller.active_body(1)
+	var actor = _soul()
 	var text := ""
 	if town != null and town.in_square(actor):
 		text = town.hint_line(actor)
@@ -1916,6 +2122,10 @@ func _on_menu_load_requested() -> void:
 	if menu != null:
 		menu.close()
 	if warband == null or flow == null:
+		return
+	if _client:
+		if hud != null:
+			hud.set_status("Only the host can load this campaign.", 2.5)
 		return
 	if not warband.load_state():
 		if hud != null:
@@ -2078,13 +2288,19 @@ func _wanted_start() -> String:
 	if flow == null:
 		return "camp"
 	var wanted := str(flow.world_start)
+	if wanted == "guest" and _client:
+		return "guest"
 	if wanted == "checkpoint":
 		return "checkpoint" if warband != null and warband.has_checkpoint() else "town"
 	return "town" if wanted == "town" else "camp"
 
 
-## True when the world is opening on a bookmark past the cages.
+## True when the world is opening on a bookmark past the cages. A guest builds
+## the camp the way the host built it, which is what the host's layout says.
 func _resuming_trail() -> bool:
+	if start_area == "guest":
+		var layout: Variant = _guest_field().get("layout", {})
+		return layout is Dictionary and bool((layout as Dictionary).get("camp_resumed", false))
 	return start_area == "checkpoint" and warband != null \
 		and warband.has_checkpoint() and warband.checkpoint_area() != "town"
 

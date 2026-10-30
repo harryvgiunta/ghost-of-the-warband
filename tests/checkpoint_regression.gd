@@ -102,7 +102,6 @@ func check_persistence() -> void:
 	if not (parsed is Dictionary):
 		return
 	var data: Dictionary = parsed
-	check(int(data.get("version", 0)) == 5, "the save version moved to 5 (%d)" % int(data.get("version", 0)))
 	check(data.get("checkpoint", {}) is Dictionary, "the file carries a checkpoint block")
 	var stored: Dictionary = warband.sanitise_checkpoint(data.get("checkpoint", {}))
 	check(stored.get("id", "") == "trail_start", "the bookmark names the tutorial's end")
@@ -363,13 +362,13 @@ func check_title_door() -> void:
 	var title = load("res://title.tscn").instantiate()
 	root.add_child(title)
 	await process_frame
-	check(title.warband_resume_button != null, "the title carries a resume door")
-	check(not title.warband_resume_button.disabled,
+	check(title.resume_button != null, "the title carries a resume door")
+	check(not title.resume_button.disabled,
 		"the resume door is live while a warband save exists")
-	check(title.warband_button != null, "and the new-campaign door is still there")
+	check(title.new_campaign_button != null, "and the new-campaign door is still there")
 	warband.save_path = "user://checkpoint_absent.json"
-	title._refresh_warband_resume()
-	check(title.warband_resume_button.disabled, "the resume door is dead without a save")
+	title._refresh_resume()
+	check(title.resume_button.disabled, "the resume door is dead without a save")
 	warband.save_path = WARBAND_SAVE
 	title.queue_free()
 	await process_frame

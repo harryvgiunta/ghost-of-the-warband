@@ -1,13 +1,13 @@
 extends Node
-## Remembers the last host address, player name and UDP port for both the
-## Title join form and the standalone arena lobby. This is presentation data only;
-## Session remains the one-shot host/join hand-off.
+## Remembers the last host address, player name and UDP ports for the title's
+## JOIN GAME and HOST GAME forms and the standalone arena lobby. This is
+## presentation data only; the flow and the sessions own the actual hand-offs.
 ##
-## The port a peer *joins* on and the port this machine *hosts the open world* on
-## are separate fields. Sharing one made a stale join port silently move the host
-## socket: the host thought it was serving UDP 7777 while it was actually serving
-## whatever the last join wrote, so a friend on the documented port timed out
-## while a second instance on the same PC, reading the same cache file, joined fine.
+## The port a peer *joins* on and the port this machine *hosts* on are separate
+## fields. Sharing one made a stale join port silently move the host socket: the
+## host thought it was serving UDP 7777 while it was actually serving whatever
+## the last join wrote, so a friend on the documented port timed out while a
+## second instance on the same PC, reading the same cache file, joined fine.
 
 const SAVE_PATH := "user://net_cache.json"
 const TEST_SAVE_PATH := "user://net_cache_test.json"
@@ -15,9 +15,8 @@ const TEST_SAVE_PATH := "user://net_cache_test.json"
 var player_name := "Ranger"
 var address := "127.0.0.1"
 var port := 7777
-## The open-world port this machine last opened. Only a host action writes it.
+## The port this machine last hosted on. Only a host action writes it.
 var host_port := 7777
-var mode := "arena"
 var save_path := SAVE_PATH
 
 func _ready() -> void:
@@ -44,30 +43,24 @@ func load_cache() -> void:
 	var saved_host_port := int(data.get("host_port",host_port))
 	if saved_host_port >= 1024 and saved_host_port <= 65535:
 		host_port = saved_host_port
-	var saved_mode := str(data.get("mode","arena"))
-	if saved_mode in ["arena","delve","world"]:
-		mode = saved_mode
 
-## Join intent: the name, address, port and door a guest last used. A host never
+## Join intent: the name, address and port a guest last used. A host never
 ## reaches this path, so remembering a join cannot move the host socket.
-func remember(next_name: String, next_address: String, next_port: int, next_mode: String = "") -> void:
+func remember(next_name: String, next_address: String, next_port: int) -> void:
 	player_name = _clean_name(next_name)
 	var clean_address := next_address.strip_edges()
 	if not clean_address.is_empty():
 		address = clean_address
 	if next_port >= 1024 and next_port <= 65535:
 		port = next_port
-	if next_mode in ["arena","delve","world"]:
-		mode = next_mode
 	save_cache()
 
-## Host intent: the name to seat and the open-world port to open. The guest-side
-## fields stay untouched, so a friend's form keeps offering the last join values.
+## Host intent: the name to seat and the port to open. The guest-side fields stay
+## untouched, so a friend's form keeps offering the last join values.
 func remember_host(next_name: String, next_port: int) -> void:
 	player_name = _clean_name(next_name)
 	if next_port >= 1024 and next_port <= 65535:
 		host_port = next_port
-	mode = "world"
 	save_cache()
 
 func save_cache() -> void:
@@ -81,7 +74,6 @@ func save_cache() -> void:
 		"address":address,
 		"port":port,
 		"host_port":host_port,
-		"mode":mode,
 	}))
 	file.close()
 
@@ -90,7 +82,6 @@ func reset(persist: bool = true) -> void:
 	address = "127.0.0.1"
 	port = 7777
 	host_port = 7777
-	mode = "arena"
 	if persist:
 		save_cache()
 

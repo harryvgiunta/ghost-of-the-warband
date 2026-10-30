@@ -9,9 +9,10 @@ const SLOT_LABELS := {
 	"neck":"Neck", "ring1":"Ring 1", "ring2":"Ring 2", "main":"Main Hand", "off":"Off-Hand",
 }
 ## Every category the catalog uses. `armor_bundle` and `misc` are carried, never
-## worn: a bundle of mail is a purchase, and a bandage is a dressing.
+## worn: a bundle of mail is a purchase, and a bandage is a dressing. `ammo` is
+## the third carried kind - shafts the shared quiver counts and a bow spends.
 const CATEGORIES := ["1h","2h","bow","staff","shield","focus","armor","jewelry",
-	"armor_bundle","misc"]
+	"armor_bundle","misc","ammo"]
 const EQUIPPABLE := ["1h","2h","bow","staff","shield","focus","armor","jewelry"]
 const TWO_HANDED := ["2h","bow","staff"]
 

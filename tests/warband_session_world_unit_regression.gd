@@ -5,7 +5,8 @@ extends SceneTree
 ## `bodies`, `pickups`, `projectiles`), so the checks are about the wire contract
 ## alone: which mobs are encoded, that an encoded batch fits one datagram, that a
 ## state names a guard or is dropped, and that a repeated announcement is booked
-## once. `GameFlow`'s campaign doors are checked against a temp save.
+## once. The lent warband a co-op guest plays from is checked against two temp
+## saves, and `GameFlow`'s campaign doors against one.
 ##
 ## The acceptance line is the last one printed:
 ##   WARBAND_SESSION_WORLD_UNIT_REGRESSION checks=N failures=M
@@ -13,6 +14,7 @@ extends SceneTree
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
 const GameFlowScript = preload("res://scripts/warband/game_flow.gd")
+const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
 
 const WARBAND_SAVE := "user://warband_session_world_unit_warband.json"
 const PLAYER_SAVE := "user://warband_session_world_unit_player.json"
@@ -74,8 +76,8 @@ class FakeWorld:
 	## Every `spawn_pickup` this peer was asked for, so a repeat is countable.
 	var spawned: Array = []
 
-	func spawn_pickup(item_id: String, at: Vector3) -> void:
-		spawned.append([item_id, at])
+	func spawn_pickup(item_id: String, at: Vector3, announced: bool = false) -> void:
+		spawned.append([item_id, at, announced])
 
 
 # --- harness ---------------------------------------------------------------
@@ -188,6 +190,8 @@ func run() -> void:
 	# --- the guest's handlers ----------------------------------------------
 	session.receive_loot("sword_iron", Vector3(3.0, 0.0, -2.0))
 	check(world.spawned.size() == 1, "a loot announcement spawns one drop")
+	check(world.spawned.size() == 1 and bool(world.spawned[0][2]),
+		"the drop is spawned as the host's announcement, the one kind a guest's ground takes")
 	session.receive_loot("sword_iron", Vector3(3.0, 0.0, -2.0))
 	check(world.spawned.size() == 1, "a repeated loot announcement is ignored")
 
@@ -201,25 +205,63 @@ func run() -> void:
 	session.receive_arrow(Vector3(0.0, 1.2, -1.0), Vector3(0.0, 0.0, -1.0), 24.0)
 	check(world.get_child_count() == before + 1, "a repeated arrow announcement is ignored")
 
+	# --- the lent warband --------------------------------------------------
+	# A co-op guest plays the host's warband and must come out of the session with
+	# its own campaign exactly as it went in: the file is never written or read
+	# while the loan lasts, the purse shown is the host's, and every gear and purse
+	# verb is the host's to make.
 	var player: Variant = root.get_node("PlayerState")
 	player.save_path = PLAYER_SAVE
 	player.reset(false)
-	var credits_before: int = int(player.credits)
-	session.receive_reward(17)
-	check(int(player.credits) == credits_before + 17,
-		"a reward is paid exactly once (%d -> %d)" % [credits_before, int(player.credits)])
-	session.receive_reward(0)
-	check(int(player.credits) == credits_before + 17, "a zero reward books nothing")
-
-	# --- the campaign doors ------------------------------------------------
 	var flow: Variant = root.get_node("GameFlow")
 	var warband: Variant = root.get_node("Warband")
 	warband.save_path = WARBAND_SAVE
-
 	warband.reset_state()
+	warband.add_mercenary("Own Man")
+	warband.save_state()
+	var own_text := FileAccess.get_file_as_string(WARBAND_SAVE)
+	var own_credits := int(player.credits)
+
+	# The host's warband, as its session sends it: a warband's own `to_dict()`.
+	var lender: Variant = WarbandStateScript.new()
+	var host_id: int = lender.add_mercenary("Host Man")
+	lender.add_mercenary("Host Second")
+	lender.stash.add("sword_iron", 1)
+	var host_dict: Dictionary = lender.to_dict()
+	lender.free()
+	warband.lend(host_dict, 444)
+	check(warband.lent, "a guest's warband is lent for the session")
+	check(warband.roster.count() == 2 and warband.roster.name_of(host_id) == "Host Man",
+		"the lent roster is the host's (%d, %s)" % [warband.roster.count(), warband.roster.name_of(host_id)])
+	check(warband.gold() == 444, "the purse shown is the host's (%d)" % warband.gold())
+	check(not warband.spend_gold(10), "a lent purse is never spent on the guest")
+	var bought: Dictionary = warband.buy_gear("sword_iron")
+	check(not bool(bought.get("ok", true)) and str(bought.get("message", "")) == warband.LENT_MESSAGE,
+		"buying into the host's stash is the host's to do (%s)" % str(bought.get("message", "")))
+	var equipped: Dictionary = warband.equip_merc(host_id, "main", "sword_iron")
+	check(not bool(equipped.get("ok", true)), "a guest cannot dress the host's mercenary")
+	check(not bool(warband.swap_weapon_set(host_id).get("ok", true)),
+		"a guest's own TAB never swaps on its lent copy (the host's world does it)")
+	check(int(player.credits) == own_credits, "the guest's own purse is untouched")
+	warband.save_state()
+	check(FileAccess.get_file_as_string(WARBAND_SAVE) == own_text,
+		"a lent warband never writes over the guest's own save")
+	check(not warband.load_state(), "a lent warband never reads the guest's own save into the session")
+	warband.lend(host_dict, 500)
+	check(warband.gold() == 500 and warband.roster.count() == 2,
+		"the host's next copy replaces the lent one whole")
+	warband.end_loan()
+	check(not warband.lent, "the loan ends with the session")
+	check(warband.roster.count() == 1 and warband.roster.name_of(warband.roster.ids()[0]) == "Own Man",
+		"the guest's own campaign comes back from its own file")
+	check(warband.gold() == own_credits, "and so does its own purse (%d)" % warband.gold())
+
+	# --- the campaign doors ------------------------------------------------
+	warband.reset_state()
+	warband.save_state()
 	flow.active = true
 	flow.host_campaign(0, "Host")
-	check(flow.world_start == "camp", "a fresh campaign opens in the cages (%s)" % flow.world_start)
+	check(flow.world_start == "camp", "HOST GAME's new game opens in the cages (%s)" % flow.world_start)
 	check(str(flow.warband_intent.get("scene", "")) == GameFlowScript.WORLD_SCENE,
 		"the host door asks for the world scene")
 	check(str(flow.warband_intent.get("mode", "")) == "host", "the host door carries the host mode")
@@ -227,16 +269,28 @@ func run() -> void:
 	warband.add_mercenary("Test")
 	warband.save_state()
 	check(warband.roster.count() == 1, "the temp save holds a roster")
-	flow.host_campaign(0, "Host")
-	check(flow.world_start == "town", "a warband with no checkpoint opens at the town (%s)" % flow.world_start)
-	check(str(flow.warband_intent.get("scene", "")) == GameFlowScript.WORLD_SCENE,
-		"a resumed host still asks for the world scene")
+	flow.host_campaign(0, "Host", GameFlowScript.HOST_CHECKPOINT)
+	check(flow.world_start == "town",
+		"hosting from a save with no checkpoint opens at the town (%s)" % flow.world_start)
+	check(warband.roster.count() == 1, "hosting from the checkpoint keeps the saved roster")
+	flow.host_campaign(0, "Host", GameFlowScript.HOST_NEW)
+	check(flow.world_start == "camp" and warband.roster.count() == 0,
+		"hosting a new game throws the saved warband away for the cages (%d)" % warband.roster.count())
 
-	flow.join_campaign("127.0.0.1", 0, "Guest")
-	check(flow.world_start == "town", "a guest opens where the save points (%s)" % flow.world_start)
+	# JOIN connects from the title and opens nothing until the host answers.
+	var probe := PacketPeerUDP.new()
+	probe.bind(0)
+	var silent_port := probe.get_local_port()
+	probe.close()
+	var scene_changes: int = flow.transitions
+	flow.join_campaign("127.0.0.1", silent_port, "Guest")
 	check(str(flow.warband_intent.get("mode", "")) == "join", "the join door carries the join mode")
-	check(str(flow.warband_intent.get("scene", "")) == GameFlowScript.WORLD_SCENE,
-		"the join door asks for the world scene")
+	check(str(flow.warband_role()) == "client", "JOIN GAME opens its socket on the title")
+	check(flow.transitions == scene_changes, "no world opens before the host has answered")
+	check(not warband.lent, "nothing is lent before the host's warband arrives")
+	flow.leave_warband()
+	check(str(flow.warband_role()) == "offline" and flow.warband_intent.is_empty(),
+		"leaving a join that never landed drops the socket and the intent")
 
 	# --- cleanup -----------------------------------------------------------
 	flow.active = false

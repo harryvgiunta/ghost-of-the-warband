@@ -15,6 +15,11 @@ const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
 
 const LAYER := 6
 const BAR_SIZE := Vector2(260, 10)
+## How long a break-off (or an ally coming back) is said in the banner, and how
+## long that merc is kept quiet after it: the standing line carries the state, the
+## banner is only the moment.
+const AGGRO_BANNER_SECONDS := 3.5
+const AGGRO_REPEAT_SECONDS := 6.0
 ## The skill row under the crosshair: three 96 px tiles, so the HUD shows what
 ## the number row will do before the player presses it.
 const TILE_SIZE := Vector2(96, 96)
@@ -27,6 +32,9 @@ var _warband = null
 var _body = null
 var _merc_id := -1
 var _merc_name := ""
+## Who the soul is watching while it has no body of its own (see `set_watching`).
+var _watching_name := ""
+var _watching_holder := ""
 
 var _name_label: Label
 var _state_label: Label
@@ -37,6 +45,15 @@ var _stamina_bar: ProgressBar
 var _ability_tiles: Array = []
 var _squad_box: VBoxContainer
 var _squad_sig := ""
+## The band's own fights: a standing line under the roster while an AI ally is in
+## one (`set_aggro`), and the ids it named last frame so a break-off is announced
+## once. `_aggro_mute` holds a merc's cooldown after that line, because a body
+## pacing in and out of `engage_radius` is one break-off, not five.
+var _aggro_box: VBoxContainer
+var _aggro_label: Label
+var _aggro_ids: Array[int] = []
+var _aggro_names: Dictionary = {}   # merc_id -> the name last reported
+var _aggro_mute: Dictionary = {}    # merc_id -> seconds of quiet left
 var _purse_label: Label
 var _essence_label: Label
 ## The campaign ledger block (see `set_quests`) and the signature of what it
@@ -79,6 +96,24 @@ func set_body(body, merc_name: String = "", merc_id: int = -1) -> void:
 	_refresh_body()
 	_refresh_squad()
 
+## The body the soul watches while every living body is taken: `merc_name` is
+## the mercenary, `holder` the player inside him ("" for none). The body panel
+## says so instead of "No body", so a player whose last body fell knows they are
+## watching a friend, not looking at a frozen camera. `""` puts it away.
+func set_watching(merc_name: String, holder: String = "") -> void:
+	_watching_name = merc_name
+	_watching_holder = holder
+	_refresh_body()
+
+## The two body-panel lines, for tests that must not read a private label.
+func body_lines() -> Array[String]:
+	var out: Array[String] = []
+	if _name_label != null:
+		out.append(_name_label.text)
+	if _state_label != null:
+		out.append(_state_label.text)
+	return out
+
 ## The standing key line: what to press on this beat ("G - cut the latch",
 ## "R - Rending Strike"). Unlike the prompt it does not vanish on its own, so a
 ## player who looks away for a second can find the controls again.
@@ -108,6 +143,18 @@ func set_warning(text: String) -> void:
 ## label.
 func warning_label() -> Label:
 	return _warning_label
+
+
+## The purse strip's text: gold and the party's quiver on one line, because a bow
+## with no shafts is the one number a player has to be able to see at a glance.
+func purse_line() -> String:
+	return str(_purse_label.text) if _purse_label != null else ""
+
+
+## The temporary banner's current text, for the same reason as `warning_label()`:
+## a test reads the line instead of a private label.
+func status_line() -> String:
+	return str(_status_label.text) if _status_label != null else ""
 
 
 ## A temporary banner ("Reviving...", "Dorn is down").
@@ -189,6 +236,14 @@ func _process(delta: float) -> void:
 		_status_seconds -= delta
 		if _status_seconds <= 0.0:
 			_status_label.visible = false
+	# A merc's quiet window after its break-off line. Counted here rather than in
+	# `set_aggro` so it runs on the HUD's own clock whatever the world does.
+	for merc_id in _aggro_mute.keys():
+		var left := float(_aggro_mute[merc_id]) - delta
+		if left <= 0.0:
+			_aggro_mute.erase(merc_id)
+		else:
+			_aggro_mute[merc_id] = left
 	_refresh_body()
 	_refresh_squad()
 
@@ -254,6 +309,24 @@ func _build() -> void:
 	_squad_box.add_theme_constant_override("separation", 1)
 	_squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	squad_panel.add_child(_squad_box)
+
+	# The band's fights, under the roster and outside its repaint: `_refresh_squad`
+	# frees every row it owns, so this line lives in its own box and is written by
+	# `set_aggro` alone. Hidden while the band is whole.
+	_aggro_box = VBoxContainer.new()
+	_aggro_box.name = "Aggro"
+	_aggro_box.add_theme_constant_override("separation", 1)
+	_aggro_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	squad_panel.add_child(_aggro_box)
+	_aggro_label = Label.new()
+	_aggro_label.name = "AggroLine"
+	_aggro_label.add_theme_font_size_override("font_size", 11)
+	_aggro_label.add_theme_color_override("font_color", Color(0.96, 0.71, 0.34))
+	_aggro_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_aggro_label.custom_minimum_size = Vector2(282, 0)
+	_aggro_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_aggro_label.visible = false
+	_aggro_box.add_child(_aggro_label)
 
 	_purse_label = Label.new()
 	_purse_label.name = "Purse"
@@ -369,12 +442,17 @@ func _refresh_body() -> void:
 	if _name_label == null:
 		return
 	if _body == null or not is_instance_valid(_body):
-		_name_label.text = _merc_name if not _merc_name.is_empty() else "No body"
-		if _warband != null and _merc_id >= 0:
-			_state_label.text = "%s  (F1..F8 to take another)" % Contracts.state_name(
-				_warband.roster.state_of(_merc_id))
+		if not _watching_name.is_empty():
+			_name_label.text = "WATCHING  %s" % _watching_name
+			_state_label.text = ("%s is inside  ·  no body is free" % _watching_holder) \
+				if not _watching_holder.is_empty() else "No body is free"
 		else:
-			_state_label.text = "The warband is down"
+			_name_label.text = _merc_name if not _merc_name.is_empty() else "No body"
+			if _warband != null and _merc_id >= 0:
+				_state_label.text = "%s  (F1..F8 to take another)" % Contracts.state_name(
+					_warband.roster.state_of(_merc_id))
+			else:
+				_state_label.text = "The warband is down"
 		_health_bar.value = 0.0
 		_health_label.text = ""
 		_stamina_bar.value = 0.0
@@ -465,6 +543,135 @@ func _refresh_squad() -> void:
 	hint.text = "[ / ] swap body   O warband   TAB weapon set   G altar/stash"
 	_squad_box.add_child(hint)
 
+
+# --- the band's fights ------------------------------------------------------
+
+## The band's own fights, as `SquadDrive.engaged_allies()` reports them.
+##
+## An AI ally that broke off used to be something the player found out by turning
+## round: the squad's only cue was `voice_aggro()`, and that row rolls its line at
+## one engagement in a hundred, so most break-offs were silent and the rest were a
+## voice heard once at the body. Now the break-off is said in the banner once, and
+## the state of it stands under the roster while the fight lasts -
+## `IN THE FIGHT  ·  Sorn, Dorn  ·  34 m back-left` - so a squad left behind is a
+## fact on the screen, not a thing to walk into.
+##
+## Called every frame by the world. Only the *set* of engaged allies is compared,
+## so the standing line follows a walking distance without re-announcing it, and a
+## merc's own quiet window keeps a body pacing in and out of `engage_radius` from
+## spamming the banner.
+func set_aggro(entries: Array) -> void:
+	if _aggro_label == null:
+		return
+	# The common case, every frame of a walk with nothing fighting: nothing to
+	# paint and nothing was painted. Skipped before any string is built.
+	if entries.is_empty() and _aggro_ids.is_empty() and _aggro_label.text.is_empty():
+		return
+	var engaged: Array[int] = []
+	var named: Dictionary = {}
+	for entry in entries:
+		if not (entry is Dictionary):
+			continue
+		var merc_id := int((entry as Dictionary).get("merc_id", 0))
+		if merc_id <= 0 or engaged.has(merc_id):
+			continue
+		engaged.append(merc_id)
+		named[merc_id] = str((entry as Dictionary).get("name", "a body"))
+	var entered: Array[int] = []
+	for merc_id in engaged:
+		if _aggro_ids.has(merc_id):
+			continue
+		# Still inside its quiet window: this body was just announced, and a
+		# fight that flickers at the edge of reach is one break-off, not five.
+		if float(_aggro_mute.get(merc_id, 0.0)) > 0.0:
+			continue
+		entered.append(merc_id)
+	var left: Array[int] = []
+	for merc_id in _aggro_ids:
+		if not engaged.has(merc_id):
+			left.append(merc_id)
+	var was_named := _aggro_names.duplicate()
+	_aggro_ids = engaged
+	_aggro_names = named
+	_aggro_label.text = _aggro_text(entries, engaged, named)
+	_aggro_label.visible = not _aggro_label.text.is_empty()
+	if not entered.is_empty():
+		for merc_id in entered:
+			_aggro_mute[merc_id] = AGGRO_REPEAT_SECONDS
+		var nearest := _nearest_engaged(entries, entered)
+		var back := _bearing_suffix(nearest)
+		if entered.size() == 1:
+			var who := str(named.get(entered[0], "A squadmate"))
+			var what := str(nearest.get("threat", ""))
+			set_status("%s breaks off%s." % [who, back] if what.is_empty() else
+				"%s breaks off: %s%s." % [who, what, back], AGGRO_BANNER_SECONDS)
+		else:
+			var what := str(nearest.get("threat", ""))
+			var line := "%d of the warband break off" % entered.size()
+			if not what.is_empty():
+				line += ": " + what
+			set_status(line + back + ".", AGGRO_BANNER_SECONDS)
+		return
+	if not left.is_empty():
+		# The other half of the notifier: a fight that ended has to end on the
+		# screen too, or the last thing the player read is a band under attack.
+		if left.size() == 1:
+			set_status("%s is back with the band." % str(was_named.get(left[0], "A squadmate")),
+				AGGRO_BANNER_SECONDS)
+		else:
+			set_status("%d are back with the band." % left.size(), AGGRO_BANNER_SECONDS)
+
+
+## The standing line, for the world and for a test that must not read a private
+## label.
+func aggro_line() -> String:
+	return str(_aggro_label.text) if _aggro_label != null else ""
+
+
+## `IN THE FIGHT  ·  who  ·  what  ·  how far and which way`. The threat is named
+## only when one ally is in it: a scrum of three is three fights, and the line is
+## about where the band is, not what it found.
+func _aggro_text(entries: Array, engaged: Array[int], named: Dictionary) -> String:
+	if engaged.is_empty():
+		return ""
+	var nearest := _nearest_engaged(entries, engaged)
+	var back := _bearing_suffix(nearest)
+	if engaged.size() == 1:
+		var what := str(nearest.get("threat", ""))
+		if what.is_empty():
+			return "IN THE FIGHT  ·  %s%s" % [str(named.get(engaged[0], "a body")), back]
+		return "IN THE FIGHT  ·  %s  ·  %s%s" % [str(named.get(engaged[0], "a body")), what, back]
+	var shown: Array[String] = []
+	for index in mini(engaged.size(), 2):
+		shown.append(str(named.get(engaged[index], "a body")))
+	var more := "" if engaged.size() <= 2 else " +%d" % (engaged.size() - 2)
+	return "IN THE FIGHT  ·  %s%s%s" % [", ".join(shown), more, back]
+
+
+## `  ·  34 m back-left`, or nothing when the report carried no distance. The
+## separator is the HUD's own, so the line reads as one strip.
+func _bearing_suffix(entry: Dictionary) -> String:
+	if entry.is_empty():
+		return ""
+	return "  ·  %d m %s" % [int(entry.get("distance", 0)),
+		str(entry.get("bearing", "away"))]
+
+
+## The closest of `ids` in a report: the banner quotes the nearest fight, because
+## that is the one a body would turn round for.
+func _nearest_engaged(entries: Array, ids: Array) -> Dictionary:
+	var best := {}
+	for entry in entries:
+		if not (entry is Dictionary):
+			continue
+		if not ids.has(int((entry as Dictionary).get("merc_id", 0))):
+			continue
+		if best.is_empty() \
+				or int((entry as Dictionary).get("distance", 0)) < int(best.get("distance", 0)):
+			best = entry
+	return best
+
+
 func _refresh_purse() -> void:
 	if _purse_label == null:
 		return
@@ -472,7 +679,7 @@ func _refresh_purse() -> void:
 		_purse_label.text = ""
 		_essence_label.text = ""
 		return
-	_purse_label.text = "%d gold" % _warband.gold()
+	_purse_label.text = "%d gold  ·  %d arrows" % [_warband.gold(), _warband.arrows()]
 	var total: int = _warband.cruor.total()
 	var parts: PackedStringArray = []
 	for tier in Catalog.TIER_ORDER:

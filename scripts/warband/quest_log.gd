@@ -9,7 +9,7 @@ extends RefCounted
 ##   KILL    a mob id (`note_kill`)            - "kill 20 of the watchers"
 ##   RESCUE  a body brought out of a cage      - "free 4 soldiers"
 ##   COLLECT an item taken into the stash      - "bring me the ichor"
-##   APPLY   a reagent worked into a weapon    - "...and bind it to steel"
+##   APPLY   a reagent worked into a weapon    - "...and anoint steel with it"
 ##   REACH   a named place (`note_reached`)    - "find the Crypt" (a shell)
 ##
 ## Those five are the whole vocabulary on purpose: the two common shapes the
@@ -44,7 +44,11 @@ const IDS := [
 ## what the quartermaster asks for, and four bodies is a cage line.
 const WATCHER_KILLS := 20
 const SOLDIER_RESCUES := 4
+## The wood's watchers are three creatures - the hollow warden, the ossuary
+## stalker and the gallowsroot - and the bounty counts all of them: a cull that
+## answered to one species would leave two-thirds of the camp standing.
 const WATCHER_ID := "hollow_warden"
+const WATCHER_IDS := ["hollow_warden", "ossuary_stalker", "gallowsroot"]
 const ICHOR_ID := "ichor_vial"
 
 ## One row per order, and every row is the whole of what an order says: a
@@ -66,13 +70,14 @@ const DEFS := {
 		"next": "cull_the_watchers",
 	},
 	"cull_the_watchers": {
-		"title": "CULL THE HOLLOW WATCHERS",
+		"title": "CULL THE WATCHERS",
 		"kicker": "THE QUARTERMASTER",
 		"giver": "quartermaster",
 		"kind": Goal.KILL,
 		"target": WATCHER_ID,
+		"targets": WATCHER_IDS,
 		"count": WATCHER_KILLS,
-		"line": "Kill the hollow watchers",
+		"line": "Kill the wood's watchers",
 		"hint": "RMB - guard   ·   LMB - swing",
 		"keys": "LMB - swing   ·   RMB - guard   ·   WHEEL - stab / overhead",
 		"done": "Twenty down.",
@@ -98,9 +103,9 @@ const DEFS := {
 		"kind": Goal.APPLY,
 		"target": ICHOR_ID,
 		"count": 1,
-		"line": "Bind the warden's ichor into a weapon",
-		"hint": "G - the ichor bench",
-		"keys": "G - the ichor bench   ·   R - loose the sigil",
+		"line": "Anoint a weapon with the warden's ichor",
+		"hint": "G - the altar",
+		"keys": "G - the altar   ·   1 / 2 - loose the skill it wakes",
 		"done": "The steel drinks.",
 		"next": "",
 	},
@@ -287,7 +292,8 @@ func note_rescue(count: int = 1) -> Array[String]:
 
 ## A kill landed on `mob_id` ("hollow_warden", "briar_wolf", ...). Bodies that
 ## do not name a mob id are not counted: a tally that answers to every death is
-## not a bounty.
+## not a bounty. A row with a `targets` list accepts any of them - the wood's
+## watchers are three creatures and one order.
 func note_kill(mob_id: String) -> Array[String]:
 	var moved: Array[String] = []
 	var wanted := mob_id.strip_edges()
@@ -296,11 +302,20 @@ func note_kill(mob_id: String) -> Array[String]:
 	for quest_id in _ids_in([State.ACTIVE], ""):
 		if goal_kind(quest_id) != Goal.KILL:
 			continue
-		if goal_target(quest_id) != wanted:
+		if not _kill_matches(quest_id, wanted):
 			continue
 		if advance(quest_id, 1):
 			moved.append(quest_id)
 	return moved
+
+
+## Whether a death on `wanted` counts toward one order: the row's whole list when
+## it names one, its single target otherwise.
+func _kill_matches(quest_id: String, wanted: String) -> bool:
+	var accepted: Array = def_of(quest_id).get("targets", [])
+	if not accepted.is_empty():
+		return accepted.has(wanted)
+	return goal_target(quest_id) == wanted
 
 ## An item reached the stash. Credited once per take: the log cannot be farmed
 ## by opening the stash twice.
@@ -315,8 +330,8 @@ func note_collected(item_id: String) -> Array[String]:
 			moved.append(quest_id)
 	return moved
 
-## A reagent was worked into a weapon (the ichor bench). Counted once per item
-## id, so laying the same vial to ten blades is one fact.
+## A reagent was worked into a weapon (the altar's anointing). Counted once per
+## item id, so laying the same vial to ten blades is one fact.
 func note_applied(item_id: String, amount: int = 1) -> Array[String]:
 	var moved: Array[String] = []
 	for quest_id in _ids_in([State.ACTIVE], ""):

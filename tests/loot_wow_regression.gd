@@ -512,11 +512,11 @@ func check_watchers() -> void:
 		field.add_child(watcher)
 		var items: Array[String] = watcher.gear_items()
 		var carries := items.has(ICHOR)
-		var slot := WatcherScript.variant_index_for(WatcherScript.WARDEN_ID, watcher.name)
-		check(slot == WatcherScript.variant_index_for(WatcherScript.WARDEN_ID, watcher.name),
+		var slot := WatcherScript.ichor_slot(WatcherScript.WARDEN_ID, watcher.name)
+		check(slot == WatcherScript.ichor_slot(WatcherScript.WARDEN_ID, watcher.name),
 			"%s's slot is the same every time it is asked" % watcher.name)
 		check(carries == (slot % WatcherScript.ICHOR_EVERY == WatcherScript.ICHOR_EVERY - 1),
-			"%s carries ichor off its variant, got %s" % [watcher.name, str(items)])
+			"%s carries ichor off its own ordinal, got %s" % [watcher.name, str(items)])
 		if carries:
 			carriers += 1
 		else:

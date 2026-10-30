@@ -1751,7 +1751,7 @@ func _enter_arena() -> void:
 		session.arm_arena("skirmish","127.0.0.1",7777,player_name)
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
-		cache.remember(player_name,"",7777,"arena")
+		cache.remember(player_name,"",7777)
 	_note("enter_arena", {"role": network_role, "name": player_name})
 	get_tree().change_scene_to_file("res://arena.tscn")
 

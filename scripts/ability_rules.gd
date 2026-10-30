@@ -1,9 +1,9 @@
 extends RefCounted
 ## Ability definitions shared by every mode.
 ##
-## An ability is data: the item that grants it, hand slot, cost, cooldown,
-## duration, travel, animation, sound, icon and the effect the owning scene
-## applies. `AbilityRunner` owns the lifecycle; controllers only supply
+## An ability is data: the stock item whose skill it is, hand slot, cost,
+## cooldown, duration, travel, animation, sound, icon and the effect the owning
+## scene applies. `AbilityRunner` owns the lifecycle; controllers only supply
 ## authority and the current base movement speed. Add a new entry here, an icon
 ## beside it, and the same HUD/input/network path works for the next ability.
 ##
@@ -11,6 +11,13 @@ extends RefCounted
 ## (necklace first, then ring 1, then ring 2). The granted ability follows the
 ## weapon the rig is actually holding, so a session weapon key changes it.
 ## A trinket grant is worn rather than held, so it survives every weapon swap.
+##
+## A weapon is plain until it is anointed. A hand definition's `item` names the
+## stock row whose skill a piece wakes into (`skill_for`), not a grant: `granted`
+## hands a held weapon its skill only when the rig's `anointed` names that skill
+## for that hand, and the one source of that is the warband altar's ledger,
+## carried onto the rig by `PlayerState.build_loadout`. An empty main hand keeps
+## the unarmed Charge and a worn trinket keeps its own grant.
 ##
 ## `move` decides what the feet do for the duration. A planted skill (ranged
 ## casts, the unarmed charge, the backstab blink) stops the walk dead; a melee
@@ -503,16 +510,68 @@ static func off_item(rig) -> String:
 
 ## Both hands' current grants plus the worn trinket's grant. A slot with no
 ## grant resolves to an empty dict. An empty main hand keeps the legacy unarmed
-## charge. The trinket slot prefers the necklace, then ring 1, then ring 2.
+## charge; a held weapon grants its skill only once it is anointed. The trinket
+## slot prefers the necklace, then ring 1, then ring 2.
 static func granted(rig) -> Array:
 	if not is_instance_valid(rig):
 		return [{}, {}, {}]
 	var main := main_item(rig)
 	var off := off_item(rig)
 	var trinket := trinket_item(rig)
-	var main_definition := by_item(main, 0) if not main.is_empty() else by_id("charge")
-	return [main_definition, by_item(off, 1) if not off.is_empty() else {},
+	var main_definition := by_id("charge") if main.is_empty() \
+		else _anointed(rig, "main", by_item(main, 0))
+	var off_definition := {} if off.is_empty() else _anointed(rig, "off", by_item(off, 1))
+	return [main_definition, off_definition,
 		by_item(trinket, 2) if not trinket.is_empty() else {}]
+
+
+## A held weapon's skill is the altar's to give: the definition comes back only
+## when the rig's `anointed` names it for that hand, so a stock piece - or a
+## piece the hands changed to without being dressed again - grants nothing.
+static func _anointed(rig, hand: String, definition: Dictionary) -> Dictionary:
+	if definition.is_empty():
+		return {}
+	var hands: Variant = rig.get("anointed")
+	if hands is Dictionary and str((hands as Dictionary).get(hand, "")) == str(definition.get("id", "")):
+		return definition
+	return {}
+
+
+## The stock row a catalog piece shares: the class-and-index clamp `main_item`
+## and `off_item` read off a dressed rig, applied to the catalog entry instead,
+## so the salvage tier wakes into the skill its hands resolve to. "" for a piece
+## that is not a bow, sword, dagger, staff or shield.
+static func stock_item(entry: Dictionary) -> String:
+	var index := int(entry.get("index", 0))
+	match str(entry.get("category", "")):
+		"bow":
+			return BOW_ITEMS[clampi(index, 0, BOW_ITEMS.size() - 1)]
+		"staff":
+			return STAFF_ITEMS[clampi(index, 0, STAFF_ITEMS.size() - 1)]
+		"shield":
+			return SHIELD_ITEMS[clampi(index, 0, SHIELD_ITEMS.size() - 1)]
+		"1h", "2h":
+			match str(entry.get("kind", "")):
+				"dagger":
+					return "dagger_iron"
+				"sword":
+					return SWORD_ITEMS[clampi(index, 0, SWORD_ITEMS.size() - 1)]
+	return ""
+
+
+## The hand a catalog piece looses its skill from: a shield's is the off hand's,
+## every other weapon's the main hand's.
+static func hand_slot(entry: Dictionary) -> int:
+	return 1 if str(entry.get("category", "")) == "shield" else 0
+
+
+## The skill a catalog piece wakes into once it is anointed, or {} for a piece
+## that has none (a focus, a trinket, salvage).
+static func skill_for(entry: Dictionary) -> Dictionary:
+	var stock := stock_item(entry)
+	if stock.is_empty():
+		return {}
+	return by_item(stock, hand_slot(entry))
 
 
 static func trinket_item(rig) -> String:

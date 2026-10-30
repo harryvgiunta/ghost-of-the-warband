@@ -218,10 +218,12 @@ func run() -> void:
 		walk_low = minf(walk_low, height)
 		walk_high = maxf(walk_high, height)
 	check(grounded_ok, "the ground answers all the way down the lane")
-	check(walk_high < 5.0 and walk_low > -5.0,
-		"the road stays on the valley floor (%.2f .. %.2f m)" % [walk_low, walk_high])
-	check(walk_high - walk_low >= 1.0,
-		"the walk goes over real ground (%.2f m of relief)" % (walk_high - walk_low))
+	# The lane is on the wood's floor, not up on the rim: the rim's own foot is 34 m
+	# up, and the swells the floor rolls between reach `RELIEF` either side of level.
+	check(walk_high < 26.0 and walk_low > -26.0,
+		"the road stays on the wood's floor (%.2f .. %.2f m)" % [walk_low, walk_high])
+	check(walk_high - walk_low >= 12.0,
+		"the walk goes over real hills (%.2f m of relief)" % (walk_high - walk_low))
 
 	# The mountain rim closes the strip on all four edges.
 	var mid_x := (west + east) * 0.5
@@ -286,12 +288,38 @@ func run() -> void:
 	check(worst_edge >= RunForest.CLEAR_HALF,
 		"nothing solid stands inside the clear line (%.2f m, at %s)"
 		% [worst_edge, str(worst_at)])
-	# ... and no lane point is off the walkable floor the field bakes under it.
-	var on_ground := true
-	for point in lane:
-		if absf(TerrainScript.height_at(point.x, point.z)) > 2.2:
-			on_ground = false
-	check(on_ground, "every lane point stands on the walkable floor")
+	# ... and the lane walks the hill country the field bakes under it. It used to
+	# be held to within two metres of level, because the old floor only rolled a
+	# couple of metres; the ground is rolling hills now, so the contract is the
+	# *walk*: the lane crosses real relief and no metre of it climbs faster than a
+	# body's own walkable floor (46 degrees, `floor_max_angle` on every mob).
+	var lane_low := INF
+	var lane_high := -INF
+	var worst_grade := 0.0
+	for index in range(lane.size() - 1):
+		var a: Vector3 = lane[index]
+		var b: Vector3 = lane[index + 1]
+		var span := Vector2(b.x - a.x, b.z - a.z).length()
+		var samples := maxi(int(ceil(span / 2.0)), 1)
+		var previous := TerrainScript.height_at(a.x, a.z)
+		lane_low = minf(lane_low, previous)
+		lane_high = maxf(lane_high, previous)
+		for step in range(1, samples + 1):
+			var t := float(step) / float(samples)
+			var x := lerpf(a.x, b.x, t)
+			var z := lerpf(a.z, b.z, t)
+			var height := TerrainScript.height_at(x, z)
+			lane_low = minf(lane_low, height)
+			lane_high = maxf(lane_high, height)
+			var run := span / float(samples)
+			if run > 0.01:
+				worst_grade = maxf(worst_grade, absf(height - previous) / run)
+			previous = height
+	check(worst_grade <= tan(deg_to_rad(40.0)),
+		"no metre of the lane climbs past a walkable floor (%.1f deg)"
+		% rad_to_deg(atan(worst_grade)))
+	check(lane_high - lane_low >= 12.0,
+		"the lane crosses real hill country (%.1f m over %.0f m)" % [lane_high - lane_low, path.total])
 
 	# --- 3. the map -------------------------------------------------------
 	var host := StubWorld.new()

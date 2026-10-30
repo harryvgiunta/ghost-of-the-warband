@@ -1,18 +1,19 @@
 extends Control
-## The main menu. Four doors only: begin a new journey, continue the saved one,
-## host your own open world, or join one. Everything else happens inside the world.
+## The main menu. Four doors and nothing else: NEW CAMPAIGN (Ghost of the
+## Warband from the cages), RESUME CAMPAIGN (the last autosave), JOIN GAME (play
+## inside a friend's campaign) and HOST GAME (open yours to friends, fresh or from
+## the checkpoint). Hosting shares one warband: every soul that joins plays from
+## the host's roster, stash and purse.
+##
+## The menu never changes scene itself. Every door hands what was chosen to
+## `GameFlow`, the one node that outlives the title, and the flow opens the world.
 
-signal start_requested
-signal load_requested
-signal host_requested
-signal join_requested
-
-const StateScript = preload("res://scripts/player_state.gd")
-const SessionScript = preload("res://scripts/session.gd")
-const LobbyScript = preload("res://scripts/warband/warband_lobby.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
+## Only for HOST GAME's two door names; the live flow is always the autoload.
+const GameFlowScript = preload("res://scripts/warband/game_flow.gd")
 
 const CREAM := Color("eee9db")
 const MUTED := Color("a5b6b7")
@@ -20,39 +21,37 @@ const GOLD := Color("e9bf76")
 const TEAL := Color("72cbb6")
 const WARN := Color("e2a06a")
 
-var state
-var session
+const DEFAULT_NAME := "Ranger"
+const DEFAULT_ADDRESS := "127.0.0.1"
+const DEFAULT_PORT := 7777
+const MIN_PORT := 1024
+const MAX_PORT := 65535
+const NAME_LENGTH := 16
+
 var _status: Label
-var start_button: Button
-var _load_button: Button
-var host_world_button: Button
+## Ghost of the Warband from the beginning: a fresh warband in the cages.
+var new_campaign_button: Button
+## The last autosave. Disabled until a warband save exists, because there is
+## nothing to resume before one.
+var resume_button: Button
 var join_button: Button
-## The possession campaign's door: a fresh warband, not a resume.
-var warband_button: Button
-## The "I have played this" door: it warns first, then opens the campaign in
-## Hearthstead with the cages behind it.
-var warband_skip_button: Button
-var skip_confirm_button: Button
-var skip_tutorial_button: Button
-var _skip_layer: Control
-## The checkpoint door: opens the world where the last autosave stands. Disabled
-## until a warband save exists, because there is nothing to resume before one.
-var warband_resume_button: Button
+var host_button: Button
+
 var _join_layer: Control
-var _lobby_layer: Control
-var _lobby_button: Button
-## The warband's host/join panel, beside the four doors. It talks to `GameFlow`
-## directly: the socket belongs to the flow (the one node that survives the
-## hand-off), so the menu only has to remember what was typed.
-var lobby
 var _name_input: LineEdit
-var _join_mode: OptionButton
 var _address_input: LineEdit
 var _port_input: SpinBox
 var _form_error: Label
-var _default_name := "Ranger"
-var _default_address := "127.0.0.1"
-var _default_port := 7777
+
+var _host_layer: Control
+var _host_name_input: LineEdit
+var _host_port_input: SpinBox
+var host_new_button: Button
+var host_checkpoint_button: Button
+## Says what FROM CHECKPOINT would open before the player commits to it.
+var _host_checkpoint_label: Label
+var _host_error: Label
+
 var crash_notice: Panel
 ## Escape's own window: the menu has no pause to offer, but the mix still needs
 ## a door, and Escape is the one every screen in the game uses.
@@ -60,23 +59,20 @@ var settings
 var _crash_report: Dictionary = {}
 
 func _ready() -> void:
-	state = get_node_or_null("/root/PlayerState")
-	if state == null:
-		state = StateScript.new()
-		state.name = "PlayerStateFallback"
-		add_child(state)
-	session = get_node_or_null("/root/Session")
-	if session == null:
-		session = SessionScript.new()
-		session.name = "SessionFallback"
-		add_child(session)
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_build()
 	_build_crash_notice()
 	_build_settings()
-	_refresh_load_button()
-	_refresh_warband_resume()
+	_refresh_resume()
+	# A session that ended under the player (the host left, a join never got an
+	# answer) comes back to this screen; the reason is the first thing it says.
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		var notice := str(flow.take_notice())
+		if not notice.is_empty():
+			_set_status(notice, WARN)
+		flow.notice_posted.connect(_on_notice_posted)
 	print("IRONWOOD_MENU_READY")
 
 func _build() -> void:
@@ -102,8 +98,8 @@ func _build() -> void:
 	column.set_anchors_preset(Control.PRESET_CENTER)
 	column.offset_left = -260
 	column.offset_right = 260
-	column.offset_top = -382
-	column.offset_bottom = 382
+	column.offset_top = -280
+	column.offset_bottom = 280
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_theme_constant_override("separation", 6)
 	add_child(column)
@@ -131,55 +127,22 @@ func _build() -> void:
 	rule.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(rule)
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 8)
+	gap.custom_minimum_size = Vector2(0, 26)
 	column.add_child(gap)
 
-	start_button = _plate(column, "NEW CAMPAIGN", "PrimaryButton", _start_new_game)
-	_load_button = _plate(column, "CONTINUE", "", _load_saved_game)
-	host_world_button = _plate(column, "HOST OPEN WORLD", "", _host_open_world)
+	new_campaign_button = _plate(column, "NEW CAMPAIGN", "PrimaryButton", _start_new_campaign)
+	new_campaign_button.tooltip_text = "Ghost of the Warband from the beginning: a fresh warband in the cages."
+	resume_button = _plate(column, "RESUME CAMPAIGN", "", _resume_campaign)
 	join_button = _plate(column, "JOIN GAME", "", _open_join)
-	warband_button = _plate(column, "GHOST OF THE WARBAND", "", _enter_warband)
-	warband_skip_button = _plate(column, "SKIP TUTORIAL  ·  START IN TOWN", "", _ask_skip_tutorial)
-	warband_skip_button.add_theme_font_size_override("font_size", 14)
-	warband_skip_button.tooltip_text = "Leaves the cages behind and opens the campaign in Hearthstead."
-	warband_resume_button = _plate(column, "RESUME WARBAND", "", _resume_warband)
-	_lobby_button = _plate(column, "WARBAND LOBBY", "", _toggle_lobby)
-	# The lobby is the only door with two destinations, so the door says so
-	# before it opens: an arena bout, or campaign co-op entered with a friend.
-	_lobby_button.tooltip_text = "Arena battle or campaign co-op: host the warband, or join a friend."
+	join_button.tooltip_text = "Join a friend's campaign and play from their warband."
+	host_button = _plate(column, "HOST GAME", "", _open_host)
+	host_button.tooltip_text = "Open a new game or your checkpoint to friends; everyone shares your warband."
 
 	_status = _center_label(column, "", 12, LedgerThemeScript.TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var hint := _center_label(column,
-		"WASD Move   ·   LMB Attack / Draw   ·   I Inventory   ·   P Equipment   ·   Esc Menu",
-		10, Color(0.66, 0.60, 0.50))
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
-	# The warband's host/join panel is a door of its own: hidden until asked for,
-	# then it sits over the world like every other ledger window.
-	lobby = LobbyScript.new()
-	lobby.name = "WarbandLobby"
-	_lobby_layer = Control.new()
-	_lobby_layer.name = "LobbyLayer"
-	_lobby_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_lobby_layer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_lobby_layer.visible = false
-	add_child(_lobby_layer)
-	var lobby_dim := ColorRect.new()
-	lobby_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	lobby_dim.color = Color(0.015, 0.012, 0.010, 0.88)
-	lobby_dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	_lobby_layer.add_child(lobby_dim)
-	lobby.position = Vector2(348, 258)
-	_lobby_layer.add_child(lobby)
-	var close := Button.new()
-	close.text = "CLOSE"
-	close.position = Vector2(870, 514)
-	close.size = Vector2(194, 44)
-	close.pressed.connect(_toggle_lobby)
-	_lobby_layer.add_child(close)
 	_build_join_layer()
-	_build_skip_layer()
+	_build_host_layer()
 
 
 func _center_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
@@ -206,11 +169,12 @@ func _plate(parent: Node, text: String, variation: String, action: Callable) -> 
 	return button
 
 
-## The four campaign doors all hand the score over to the warband: the menu
-## theme stops outright, the soundtrack starts at its own beginning, and the
-## door answers with the weight of a door (a blunt take pitched into the floor
-## and sent through the reverb bus). A refused door - no save to continue - never
-## gets here, because a door that did not open must not restart the music.
+## Every door that opens a campaign on this machine hands the score over to the
+## warband: the menu theme stops outright, the soundtrack starts at its own
+## beginning, and the door answers with the weight of a door (a blunt take
+## pitched into the floor and sent through the reverb bus). A refused door - no
+## save to resume - never gets here, because a door that did not open must not
+## restart the music.
 func _enter_campaign_score() -> void:
 	SfxScript.play("menu_thud")
 	var audio := get_node_or_null("/root/Audio")
@@ -218,141 +182,308 @@ func _enter_campaign_score() -> void:
 		audio.start_campaign_music()
 
 
-func _toggle_lobby() -> void:
-	if _lobby_layer == null:
-		return
-	_lobby_layer.visible = not _lobby_layer.visible
-	if _lobby_layer.visible:
-		# The panel's mode row is the point of this door, so opening it says
-		# what the row chooses rather than leaving two silent options.
-		_set_status("Warband lobby: arena battle or campaign co-op - host or join.")
+# --- NEW CAMPAIGN / RESUME CAMPAIGN ---------------------------------------------
 
-
-func _enter_warband() -> void:
-	# The warband door is a new campaign, not a resume: a fresh warband, the four
-	# cages, however the last one ended. Resuming lives behind its own door.
-	var flow := get_node_or_null("/root/GameFlow")
-	if flow != null:
-		_enter_campaign_score()
-		flow.start_campaign()
-
-
-## The checkpoint door. `GameFlow.enter_warband()` is the resume path: it loads
-## the save and opens the world on the bookmark the autosave left (the town for a
-## file written before checkpoints existed).
-func _resume_warband() -> void:
+## NEW CAMPAIGN is always the cages with a fresh warband and a fresh purse,
+## however the last campaign ended; resuming lives behind its own door.
+func _start_new_campaign() -> void:
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow == null:
+		_set_status("The campaign is unavailable.", WARN)
 		return
 	_enter_campaign_score()
+	_note("menu_new_campaign")
+	print("IRONWOOD_MENU_NEW_CAMPAIGN")
+	flow.start_campaign()
+
+
+## RESUME CAMPAIGN opens the save on the bookmark its last autosave left (the
+## town when the save predates checkpoints). The file is checked again on the
+## press: it may have gone since the screen was built.
+func _resume_campaign() -> void:
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow == null:
+		_set_status("The campaign is unavailable.", WARN)
+		return
+	if not _has_warband_save():
+		_refresh_resume()
+		_set_status("No campaign saved yet. Start a new one.", WARN)
+		return
+	_enter_campaign_score()
+	_note("menu_resume", {"save": _warband_save_path()})
+	print("IRONWOOD_MENU_RESUME")
 	flow.enter_warband()
 
 
-## Gate the checkpoint door on a real save. A warband may pin its own path (the
-## regressions do), so the check reads the node, not the default constant.
-func _refresh_warband_resume() -> void:
-	if warband_resume_button == null:
-		return
+## The warband save the resume and checkpoint doors read. A warband may pin its
+## own path (the regressions do), so this reads the node, not the default.
+func _warband_save_path() -> String:
 	var warband := get_node_or_null("/root/Warband")
-	var has_save := warband != null and FileAccess.file_exists(str(warband.save_path))
-	warband_resume_button.disabled = not has_save
-	warband_resume_button.tooltip_text = "" if has_save else "No warband checkpoint yet."
+	return "" if warband == null else str(warband.save_path)
+
+
+func _has_warband_save() -> bool:
+	var path := _warband_save_path()
+	return not path.is_empty() and FileAccess.file_exists(path)
+
+
+## Re-reads the save gate for the resume door and the host panel's checkpoint
+## door. Called when the screen opens and whenever a panel opens, so a save
+## written or deleted while the title stood is never stale.
+func _refresh_resume() -> void:
+	if resume_button != null:
+		var has_save := _has_warband_save()
+		resume_button.disabled = not has_save
+		if not has_save:
+			resume_button.tooltip_text = "No campaign saved yet."
+		else:
+			var peek := WarbandStateScript.peek_save(_warband_save_path())
+			var checkpoint: Dictionary = peek.get("checkpoint", {})
+			if not checkpoint.is_empty():
+				resume_button.tooltip_text = "Opens on your last checkpoint: %s." % _checkpoint_name(checkpoint)
+			else:
+				resume_button.tooltip_text = "Opens your last autosave."
+	_refresh_host_checkpoint()
+
+
+## A checkpoint's own label, or its ground when an older save wrote none.
+func _checkpoint_name(checkpoint: Dictionary) -> String:
+	var label := str(checkpoint.get("label", "")).strip_edges()
+	if not label.is_empty():
+		return label
+	return "HEARTHSTEAD" if str(checkpoint.get("area", "")) == "town" else "THE TRAIL"
+
+
+# --- JOIN GAME -----------------------------------------------------------------
 
 func _build_join_layer() -> void:
 	_join_layer = Control.new()
+	_join_layer.name = "JoinLayer"
 	_join_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_join_layer.mouse_filter = Control.MOUSE_FILTER_STOP
 	_join_layer.visible = false
 	add_child(_join_layer)
-	var dim := ColorRect.new()
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.012,0.03,0.038,0.8)
-	_join_layer.add_child(dim)
-	var panel := Panel.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER,true)
-	panel.position = Vector2(-240,-215)
-	panel.size = Vector2(480,430)
-	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
-	_join_layer.add_child(panel)
-	_label(panel,"JOIN GAME",Vector2(24,18),26,GOLD)
-	var hint := _label(panel,"Choose an arena match, a delve party or the open world. All values are remembered.",Vector2(24,54),11,MUTED)
-	hint.size = Vector2(432,32)
+	var panel := _form_panel(_join_layer, Vector2(480, 384))
+	_label(panel, "JOIN GAME", Vector2(24, 18), 26, GOLD)
+	var hint := _label(panel,
+		"You play from the host's warband, so you need no save of your own.",
+		Vector2(24, 54), 11, MUTED)
+	hint.size = Vector2(432, 32)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_label(panel,"MODE",Vector2(24,96),10,GOLD)
-	_join_mode = OptionButton.new()
-	_join_mode.position = Vector2(24,116)
-	_join_mode.size = Vector2(200,40)
-	_join_mode.add_item("Arena match",0)
-	_join_mode.add_item("Delve party",1)
-	_join_mode.add_item("Open world",2)
-	panel.add_child(_join_mode)
-	_label(panel,"YOUR NAME",Vector2(250,96),10,GOLD)
+	_label(panel, "YOUR NAME", Vector2(24, 96), 10, GOLD)
 	_name_input = LineEdit.new()
-	_name_input.position = Vector2(250,116)
-	_name_input.size = Vector2(206,40)
-	_name_input.max_length = 16
+	_name_input.position = Vector2(24, 116)
+	_name_input.size = Vector2(432, 40)
+	_name_input.max_length = NAME_LENGTH
 	panel.add_child(_name_input)
-	_label(panel,"HOST ADDRESS",Vector2(24,168),10,GOLD)
+	_label(panel, "HOST ADDRESS", Vector2(24, 168), 10, GOLD)
 	_address_input = LineEdit.new()
-	_address_input.position = Vector2(24,188)
-	_address_input.size = Vector2(300,40)
+	_address_input.position = Vector2(24, 188)
+	_address_input.size = Vector2(300, 40)
 	panel.add_child(_address_input)
-	_label(panel,"UDP PORT",Vector2(340,168),10,GOLD)
-	_port_input = SpinBox.new()
-	_port_input.position = Vector2(340,188)
-	_port_input.size = Vector2(116,40)
-	_port_input.min_value = 1024
-	_port_input.max_value = 65535
-	panel.add_child(_port_input)
-	var confirm := _button(panel,"JOIN",Vector2(24,258),Vector2(214,44))
+	_label(panel, "UDP PORT", Vector2(340, 168), 10, GOLD)
+	_port_input = _port_box(panel, Vector2(340, 188))
+	var confirm := _button(panel, "JOIN", Vector2(24, 254), Vector2(214, 44))
+	confirm.theme_type_variation = "PrimaryButton"
 	confirm.pressed.connect(_confirm_join)
-	var cancel := _button(panel,"CANCEL",Vector2(250,258),Vector2(206,44))
+	var cancel := _button(panel, "CANCEL", Vector2(250, 254), Vector2(206, 44))
 	cancel.pressed.connect(_close_join)
-	_form_error = _label(panel,"",Vector2(24,318),11,WARN)
-	_form_error.size = Vector2(432,54)
+	_form_error = _label(panel, "", Vector2(24, 312), 11, WARN)
+	_form_error.size = Vector2(432, 54)
 	_form_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_sync_join_form()
 
 
-## Fills the form from the cache *now*. Reading it once in `_ready` froze the
-## name, address, port and door at whatever the app started with, so a session
-## that hosted or joined something else kept offering dead values.
-func _sync_join_form() -> void:
-	var cached_name := _default_name
-	var cached_address := _default_address
-	var cached_port := _default_port
-	var cached_mode := "arena"
+## Fills the form from the cache *now*, every time it opens. Reading it once in
+## `_ready` froze the name, address and port at whatever the app started with,
+## so a session that joined somewhere else kept offering dead values.
+func _open_join() -> void:
+	if _host_layer != null and _host_layer.visible:
+		_close_host()
+	var cache := get_node_or_null("/root/NetCache")
+	_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
+	_address_input.text = DEFAULT_ADDRESS if cache == null else str(cache.address)
+	_port_input.value = clampi(DEFAULT_PORT if cache == null else int(cache.port), MIN_PORT, MAX_PORT)
+	_form_error.text = ""
+	_join_layer.visible = true
+	_name_input.grab_focus()
+	_name_input.select_all()
+
+
+func _close_join() -> void:
+	_join_layer.visible = false
+	_form_error.text = ""
+
+
+## Connects and waits on this screen: the world opens only once the host answers
+## with its warband, and a refusal comes back through `notice_posted`. The music
+## is left alone for the same reason - the door has not opened yet.
+func _confirm_join() -> void:
+	var address := _address_input.text.strip_edges()
+	if address.is_empty():
+		_form_error.text = "Enter the host's address."
+		return
+	var port := int(_port_input.value)
+	if port < MIN_PORT or port > MAX_PORT:
+		_form_error.text = "Choose a UDP port between %d and %d." % [MIN_PORT, MAX_PORT]
+		return
+	var player_name := _clean_name(_name_input.text)
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
-		cached_name = str(cache.player_name)
-		cached_address = str(cache.address)
-		cached_port = int(cache.port)
-		cached_mode = str(cache.mode)
-	if _name_input != null:
-		_name_input.text = cached_name
-	if _address_input != null:
-		_address_input.text = cached_address
-	if _port_input != null:
-		_port_input.value = clampi(cached_port,1024,65535)
-	if _join_mode != null:
-		_join_mode.selected = 2 if cached_mode == "world" else 1 if cached_mode == "delve" else 0
+		cache.remember(player_name, address, port)
+	_set_status("Joining %s:%d..." % [address, port])
+	print("IRONWOOD_MENU_JOIN address=%s port=%d name=%s" % [address, port, player_name])
+	_note("menu_join", {"address": address, "port": port, "name": player_name})
+	SfxScript.play("menu_thud")
+	_close_join()
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow == null:
+		_set_status("The campaign is unavailable.", WARN)
+		return
+	flow.join_campaign(address, port, player_name)
 
-func _style(color: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var result := StyleBoxFlat.new()
-	result.bg_color = color
-	result.border_color = border
-	result.set_border_width_all(1)
-	result.set_corner_radius_all(radius)
-	return result
+
+# --- HOST GAME -----------------------------------------------------------------
+
+func _build_host_layer() -> void:
+	_host_layer = Control.new()
+	_host_layer.name = "HostLayer"
+	_host_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_host_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_host_layer.visible = false
+	add_child(_host_layer)
+	var panel := _form_panel(_host_layer, Vector2(480, 430))
+	_label(panel, "HOST GAME", Vector2(24, 18), 26, GOLD)
+	var hint := _label(panel,
+		"Friends join on this UDP port and play from your warband: one roster, one stash, one purse.",
+		Vector2(24, 54), 11, MUTED)
+	hint.size = Vector2(432, 32)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_label(panel, "YOUR NAME", Vector2(24, 96), 10, GOLD)
+	_host_name_input = LineEdit.new()
+	_host_name_input.position = Vector2(24, 116)
+	_host_name_input.size = Vector2(300, 40)
+	_host_name_input.max_length = NAME_LENGTH
+	panel.add_child(_host_name_input)
+	_label(panel, "UDP PORT", Vector2(340, 96), 10, GOLD)
+	_host_port_input = _port_box(panel, Vector2(340, 116))
+	host_new_button = _button(panel, "NEW GAME", Vector2(24, 180), Vector2(214, 44))
+	host_new_button.theme_type_variation = "PrimaryButton"
+	host_new_button.tooltip_text = "A fresh campaign in the cages."
+	host_new_button.pressed.connect(_confirm_host.bind(GameFlowScript.HOST_NEW))
+	host_checkpoint_button = _button(panel, "FROM CHECKPOINT", Vector2(250, 180), Vector2(206, 44))
+	host_checkpoint_button.pressed.connect(_confirm_host.bind(GameFlowScript.HOST_CHECKPOINT))
+	_host_checkpoint_label = _label(panel, "", Vector2(24, 236), 11, TEAL)
+	_host_checkpoint_label.size = Vector2(432, 32)
+	_host_checkpoint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var cancel := _button(panel, "CANCEL", Vector2(24, 282), Vector2(432, 44))
+	cancel.pressed.connect(_close_host)
+	_host_error = _label(panel, "", Vector2(24, 342), 11, WARN)
+	_host_error.size = Vector2(432, 54)
+	_host_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+## Reads the cache and the save each time it opens. The host side has its own
+## port: the guest-side `port` is what a friend typed last, and letting it open
+## the socket is how a host ended up serving a port nobody else knew about.
+func _open_host() -> void:
+	if _join_layer != null and _join_layer.visible:
+		_close_join()
+	var cache := get_node_or_null("/root/NetCache")
+	_host_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
+	_host_port_input.value = clampi(DEFAULT_PORT if cache == null else int(cache.host_port), MIN_PORT, MAX_PORT)
+	_host_error.text = ""
+	_refresh_resume()
+	_host_layer.visible = true
+	_host_name_input.grab_focus()
+	_host_name_input.select_all()
+
+
+func _close_host() -> void:
+	_host_layer.visible = false
+	_host_error.text = ""
+
+
+## FROM CHECKPOINT is only offered when there is a warband save, and the line
+## under it says where that save would put the warband down.
+func _refresh_host_checkpoint() -> void:
+	if host_checkpoint_button == null:
+		return
+	var peek := WarbandStateScript.peek_save(_warband_save_path())
+	var checkpoint: Dictionary = peek.get("checkpoint", {})
+	host_checkpoint_button.disabled = not bool(peek.get("exists", false))
+	if not bool(peek.get("exists", false)):
+		_host_checkpoint_label.text = "No campaign saved yet."
+	elif not checkpoint.is_empty():
+		_host_checkpoint_label.text = "From checkpoint: %s" % _checkpoint_name(checkpoint)
+	elif int(peek.get("roster", 0)) > 0:
+		_host_checkpoint_label.text = "From checkpoint: saved warband - opens in Hearthstead"
+	else:
+		_host_checkpoint_label.text = "The save holds no warband yet - opens a fresh run in the cages."
+	host_checkpoint_button.tooltip_text = _host_checkpoint_label.text
+
+
+func _confirm_host(start: String) -> void:
+	var port := int(_host_port_input.value)
+	if port < MIN_PORT or port > MAX_PORT:
+		_host_error.text = "Choose a UDP port between %d and %d." % [MIN_PORT, MAX_PORT]
+		return
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow == null:
+		_host_error.text = "The campaign is unavailable."
+		return
+	var player_name := _clean_name(_host_name_input.text)
+	var cache := get_node_or_null("/root/NetCache")
+	if cache != null:
+		cache.remember_host(player_name, port)
+	_close_host()
+	_enter_campaign_score()
+	_set_status("Hosting on UDP %d. Friends join on this port." % port)
+	print("IRONWOOD_MENU_HOST port=%d start=%s name=%s" % [port, start, player_name])
+	_note("menu_host", {"port": port, "start": start, "name": player_name})
+	flow.host_campaign(port, player_name, start)
+
+
+# --- shared form pieces ----------------------------------------------------------
+
+## A name as the session will seat it: one line, sixteen characters, never blank.
+func _clean_name(text: String) -> String:
+	var clean := text.strip_edges().replace("\n", " ").replace("\r", " ").replace("\t", " ").left(NAME_LENGTH)
+	return DEFAULT_NAME if clean.is_empty() else clean
+
+
+func _form_panel(layer: Control, panel_size: Vector2) -> Panel:
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.012, 0.03, 0.038, 0.8)
+	layer.add_child(dim)
+	var panel := Panel.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER, true)
+	panel.position = -panel_size * 0.5
+	panel.size = panel_size
+	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
+	layer.add_child(panel)
+	return panel
+
+
+func _port_box(parent: Node, position_at: Vector2) -> SpinBox:
+	var box := SpinBox.new()
+	box.position = position_at
+	box.size = Vector2(116, 40)
+	box.min_value = MIN_PORT
+	box.max_value = MAX_PORT
+	parent.add_child(box)
+	return box
+
 
 func _label(parent: Node, text: String, position_at: Vector2, font_size: int, color: Color) -> Label:
 	var result := Label.new()
 	result.text = text
 	result.position = position_at
-	result.add_theme_font_size_override("font_size",font_size)
-	result.add_theme_color_override("font_color",color)
+	result.add_theme_font_size_override("font_size", font_size)
+	result.add_theme_color_override("font_color", color)
 	parent.add_child(result)
 	return result
+
 
 func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2) -> Button:
 	var result := Button.new()
@@ -363,83 +494,11 @@ func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2)
 	parent.add_child(result)
 	return result
 
-## The skip door's warning. Skipping the tutorial is the one decision on this
-## screen that throws away content, so the door asks first and says what is at
-## stake in the plainest words the game has. It sits over the join form and under
-## the settings window.
-func _build_skip_layer() -> void:
-	_skip_layer = Control.new()
-	_skip_layer.name = "SkipTutorialLayer"
-	_skip_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_skip_layer.mouse_filter = Control.MOUSE_FILTER_STOP
-	_skip_layer.visible = false
-	add_child(_skip_layer)
-	var dim := ColorRect.new()
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.015, 0.012, 0.010, 0.86)
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	_skip_layer.add_child(dim)
-	var panel := Panel.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER, true)
-	panel.size = Vector2(780, 380)
-	panel.position = Vector2(-390, -190)
-	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
-	_skip_layer.add_child(panel)
-	var title := _label(panel, "SKIP THE TUTORIAL?", Vector2(30, 24), 27, GOLD)
-	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
-	var warning := _label(panel,
-		"ARE YOU SURE?  WE REALLY RECOMMEND YOU DO THE TUTORIAL IF YOU HAVEN'T PLAYED.",
-		Vector2(30, 68), 17, WARN)
-	warning.size = Vector2(720, 64)
-	warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var body := _label(panel,
-		"Skipping leaves the cages, the ironwood shiv and the first walk behind "
-			+ "and opens the campaign already standing in Hearthstead with a sworn, "
-			+ "armed band. Every quest, the recruiter, the quartermaster, the shared "
-			+ "stash, the altar and the expedition gate still work - only the lessons "
-			+ "are gone.",
-		Vector2(30, 138), 13, MUTED)
-	body.size = Vector2(720, 96)
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	skip_tutorial_button = _button(panel, "PLAY THE TUTORIAL  (RECOMMENDED)",
-		Vector2(30, 286), Vector2(360, 54))
-	skip_tutorial_button.pressed.connect(_start_tutorial)
-	skip_confirm_button = _button(panel, "YES, SKIP  -  START IN TOWN",
-		Vector2(402, 286), Vector2(348, 54))
-	skip_confirm_button.theme_type_variation = "PrimaryButton"
-	skip_confirm_button.pressed.connect(_confirm_skip_tutorial)
 
+# --- settings, crash notice, status ------------------------------------------------
 
-## The skip door: always the warning first, never a silent throwaway.
-func _ask_skip_tutorial() -> void:
-	if _skip_layer == null:
-		return
-	_skip_layer.visible = true
-
-
-## "No, I have not played": the recommended path, the cages and the lesson.
-func _start_tutorial() -> void:
-	if _skip_layer != null:
-		_skip_layer.visible = false
-	var flow := get_node_or_null("/root/GameFlow")
-	if flow != null:
-		_enter_campaign_score()
-		flow.start_campaign(false)
-
-
-## "Yes, I know": a fresh warband that opens in the town square, with the
-## opening left behind and every quest still on the ledger.
-func _confirm_skip_tutorial() -> void:
-	if _skip_layer != null:
-		_skip_layer.visible = false
-	var flow := get_node_or_null("/root/GameFlow")
-	if flow != null:
-		_enter_campaign_score()
-		flow.start_campaign(true)
-
-
-## The settings window is built last so it sits over the join form and the lobby
-## panel; Escape is the only door to it, exactly as it is in the world.
+## The settings window is built last so it sits over both forms; Escape is the
+## only door to it, exactly as it is in the world.
 func _build_settings() -> void:
 	settings = SettingsScript.new()
 	settings.name = "Settings"
@@ -451,8 +510,8 @@ func _open_settings() -> void:
 		return
 	if _join_layer != null and _join_layer.visible:
 		_close_join()
-	if _lobby_layer != null and _lobby_layer.visible:
-		_lobby_layer.visible = false
+	if _host_layer != null and _host_layer.visible:
+		_close_host()
 	settings.open()
 
 
@@ -472,131 +531,35 @@ func _build_crash_notice() -> void:
 	crash_notice.size = Vector2(496, 190)
 	crash_notice.add_theme_stylebox_override("panel", LedgerThemeScript.lacquer_panel())
 	add_child(crash_notice)
-	_label(crash_notice,"PREVIOUS SESSION ENDED UNEXPECTEDLY",Vector2(20,16),14,WARN)
-	var detail := _label(crash_notice,"Crash report and session log saved.\nAttach both when reporting the problem.",Vector2(20,44),12,MUTED)
-	detail.size = Vector2(456,40)
+	_label(crash_notice, "PREVIOUS SESSION ENDED UNEXPECTEDLY", Vector2(20, 16), 14, WARN)
+	var detail := _label(crash_notice, "Crash report and session log saved.\nAttach both when reporting the problem.", Vector2(20, 44), 12, MUTED)
+	detail.size = Vector2(456, 40)
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var file_label := _label(crash_notice,str(_crash_report.get("text_path","")).get_file(),Vector2(20,94),11,TEAL)
-	file_label.size = Vector2(456,18)
+	var file_label := _label(crash_notice, str(_crash_report.get("text_path", "")).get_file(), Vector2(20, 94), 11, TEAL)
+	file_label.size = Vector2(456, 18)
 	file_label.clip_text = true
-	var open_folder := _button(crash_notice,"OPEN CRASH REPORTS",Vector2(20,124),Vector2(218,44))
+	var open_folder := _button(crash_notice, "OPEN CRASH REPORTS", Vector2(20, 124), Vector2(218, 44))
 	open_folder.pressed.connect(log.open_crash_folder)
-	var open_latest := _button(crash_notice,"OPEN LATEST REPORT",Vector2(250,124),Vector2(226,44))
+	var open_latest := _button(crash_notice, "OPEN LATEST REPORT", Vector2(250, 124), Vector2(226, 44))
 	open_latest.pressed.connect(func(): log.open_report(0))
-	_note("menu_crash_notice", {"session_id": str(_crash_report.get("session_id","")), "reports": reports.size()})
+	_note("menu_crash_notice", {"session_id": str(_crash_report.get("session_id", "")), "reports": reports.size()})
 
 
-func _refresh_load_button() -> void:
-	if _load_button == null or state == null:
-		return
-	var has_save := FileAccess.file_exists(str(state.save_path))
-	_load_button.disabled = not has_save
-	_load_button.tooltip_text = "" if has_save else "No saved journey yet."
+## A join that came to nothing while the title stood. The line is shown here and
+## taken from the flow at once, so the next title does not repeat a stale reason.
+func _on_notice_posted(text: String) -> void:
+	_set_status(text, WARN)
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		flow.take_notice()
 
-func _start_new_game() -> void:
-	if state == null:
-		_set_status("Player state is unavailable.",WARN)
-		return
-	_enter_campaign_score()
-	state.reset(true)
-	if session != null:
-		session.clear()
-	_note("menu_start", {"credits": int(state.credits)})
-	_set_status("A new journey begins at the town gate.")
-	print("IRONWOOD_NEW_GAME credits=%d" % int(state.credits))
-	start_requested.emit()
-	get_tree().change_scene_to_file("res://main.tscn")
-
-func _load_saved_game() -> void:
-	if state == null:
-		_set_status("Player state is unavailable.",WARN)
-		return
-	if not FileAccess.file_exists(str(state.save_path)):
-		_set_status("No saved journey yet. Start a new game.",WARN)
-		_refresh_load_button()
-		return
-	_enter_campaign_score()
-	state.load_state()
-	if session != null:
-		session.clear()
-	_note("menu_load", {"credits": int(state.credits), "inventory": state.inventory.size()})
-	_set_status("Journey restored.")
-	print("IRONWOOD_LOAD_GAME credits=%d inventory=%d" % [int(state.credits),state.inventory.size()])
-	load_requested.emit()
-	get_tree().change_scene_to_file("res://main.tscn")
-
-func _host_open_world() -> void:
-	var cache := get_node_or_null("/root/NetCache")
-	var port := _default_port
-	var player_name := _default_name
-	if cache != null:
-		# The host socket uses its own port. The guest-side `port` is what a
-		# friend typed last, and letting it open the world is how a host ended up
-		# serving a port nobody else knew about.
-		port = int(cache.host_port)
-		player_name = str(cache.player_name)
-	if session != null:
-		session.arm_world("world-host","127.0.0.1",port,player_name)
-	if cache != null:
-		cache.remember_host(player_name,port)
-	_note("menu_host", {"port": port, "name": player_name})
-	_set_status("Opening your world on UDP %d. Friends use this port." % port)
-	print("IRONWOOD_HOST_WORLD port=%d" % port)
-	host_requested.emit()
-	get_tree().change_scene_to_file("res://main.tscn")
-
-func _open_join() -> void:
-	_sync_join_form()
-	_join_layer.visible = true
-	_form_error.text = ""
-	_name_input.grab_focus()
-	_name_input.select_all()
-
-func _close_join() -> void:
-	_join_layer.visible = false
-	_form_error.text = ""
-
-func _confirm_join() -> void:
-	var address := _address_input.text.strip_edges()
-	if address.is_empty():
-		_form_error.text = "Enter the host's address."
-		return
-	var port := int(_port_input.value)
-	if port < 1024 or port > 65535:
-		_form_error.text = "Choose a UDP port between 1024 and 65535."
-		return
-	var player_name := _name_input.text.strip_edges().replace("\n"," ").replace("\r"," ").replace("\t"," ").left(16)
-	if player_name.is_empty():
-		player_name = "Ranger"
-	var cache := get_node_or_null("/root/NetCache")
-	var join_mode := "arena"
-	if _join_mode.selected == 1:
-		join_mode = "delve"
-	elif _join_mode.selected == 2:
-		join_mode = "world"
-	if cache != null:
-		cache.remember(player_name,address,port,join_mode)
-	if state != null:
-		state.save_state()
-	if session != null:
-		if join_mode == "world":
-			session.arm_world("world-join",address,port,player_name)
-		elif join_mode == "delve":
-			session.arm_delve("delve-join",address,port,player_name)
-		else:
-			session.arm_arena("client",address,port,player_name)
-	_note("menu_join", {"mode": join_mode, "address": address, "port": port, "name": player_name})
-	_set_status("Joining %s:%d..." % [address,port])
-	print("IRONWOOD_JOIN mode=%s address=%s port=%d name=%s" % [join_mode,address,port,player_name])
-	join_requested.emit()
-	var scene_path := "res://main.tscn" if join_mode == "world" else "res://delve.tscn" if join_mode == "delve" else "res://arena.tscn"
-	get_tree().change_scene_to_file(scene_path)
 
 func _set_status(message: String, color: Color = TEAL) -> void:
 	if _status == null:
 		return
 	_status.text = message
-	_status.add_theme_color_override("font_color",color)
+	_status.add_theme_color_override("font_color", color)
+
 
 func _note(message: String, data: Dictionary = {}) -> void:
 	var log := get_node_or_null("/root/Log")
@@ -609,16 +572,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if settings != null and settings.is_open():
 		settings.close()
-		get_viewport().set_input_as_handled()
-	elif _lobby_layer != null and _lobby_layer.visible:
-		_lobby_layer.visible = false
-		get_viewport().set_input_as_handled()
+	elif _host_layer != null and _host_layer.visible:
+		_close_host()
 	elif _join_layer != null and _join_layer.visible:
 		_close_join()
-		get_viewport().set_input_as_handled()
-	elif _skip_layer != null and _skip_layer.visible:
-		_skip_layer.visible = false
-		get_viewport().set_input_as_handled()
 	else:
 		_open_settings()
-		get_viewport().set_input_as_handled()
+	get_viewport().set_input_as_handled()

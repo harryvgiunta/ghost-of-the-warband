@@ -9,6 +9,7 @@ extends SceneTree
 ## which used to reverse every step now never reverses at all.
 
 const SquadScript = preload("res://scripts/warband/squad_drive.gd")
+const NavScript = preload("res://scripts/warband/squad_nav.gd")
 
 var checks := 0
 var failures := 0
@@ -75,9 +76,200 @@ func run() -> void:
 		% [SquadScript.CIRCLE_MIN, SquadScript.STEP_MIN])
 
 	check_fetch_give_up(step)
+	check_bearing()
+	check_escort_posts()
+	check_doubled_line(step)
+	check_cage_walk_out(step)
 
 	print("SQUAD_STEERING_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
+
+
+## The notifier says where the fight is, and a word the player can turn to is the
+## whole of it: the band used to fork in silence and the player found it behind
+## them by accident. Eight sectors around the view, plus the degenerate cases a
+## body standing on the soul would hand it.
+func check_bearing() -> void:
+	var forward := Vector3(0.0, 0.0, -1.0)
+	check(SquadScript.bearing_word(forward, Vector3(0.0, 0.0, -10.0)) == "ahead",
+		"a fight in front of the eye is ahead")
+	check(SquadScript.bearing_word(forward, Vector3(0.0, 0.0, 10.0)) == "behind",
+		"a fight behind the eye is behind")
+	check(SquadScript.bearing_word(forward, Vector3(-10.0, 0.0, 0.0)) == "left",
+		"a fight to the player's left says left")
+	check(SquadScript.bearing_word(forward, Vector3(10.0, 0.0, 0.0)) == "right",
+		"a fight to the player's right says right")
+	check(SquadScript.bearing_word(forward, Vector3(-8.0, 0.0, -8.0)) == "ahead-left",
+		"the front-left sector is a corner, not a side")
+	check(SquadScript.bearing_word(forward, Vector3(-8.0, 0.0, 8.0)) == "back-left",
+		"and the road behind the left shoulder says so")
+	check(SquadScript.bearing_word(forward, Vector3(0.0, 9.0, 0.0)) == "here",
+		"a body standing on the soul has no bearing to give")
+	# A view with no flat heading (a harness with no camera looking at its own
+	# feet) falls back to the world's forward instead of dividing by nothing.
+	check(SquadScript.bearing_word(Vector3(0.0, -1.0, 0.0), Vector3(0.0, 0.0, -5.0)) == "ahead",
+		"a vertical view still answers with the forward sector")
+
+
+## The ring the escort stands on. The layout used to spend one of its places on
+## the body the player is inside, so the ring wrapped and two allies were handed
+## the same post: they shoved each other off it and walked back in, which is the
+## band circling itself. Every ally gets its own place whatever its order in the
+## squad and however big the band is - the deployment cap is eight.
+func check_escort_posts() -> void:
+	for band in [5, 6, 7, 8]:
+		for soul_at in band:
+			var controller = FakeController.new()
+			var ids: Array[int] = []
+			var bodies: Array = []
+			for index in band:
+				var body = FakeBody.new()
+				root.add_child(body)
+				body.global_position = Vector3(float(index) * 1.2, 0.0, 0.0)
+				controller.bodies[index + 1] = body
+				ids.append(index + 1)
+				bodies.append(body)
+			var soul = bodies[soul_at]
+			var squad = SquadScript.new()
+			squad.setup(null, controller, null)
+			squad.squad_ids = ids
+			squad.player_body = soul
+			var posts: Array[Vector3] = []
+			for index in band:
+				if index == soul_at:
+					continue
+				posts.append(squad._escort_post(bodies[index], {"merc_id": index + 1}))
+			check(posts.size() == band - 1,
+				"band %d: the soul holds no post (%d for %d allies)"
+				% [band, posts.size(), band - 1])
+			var closest := INF
+			for a in posts.size():
+				for b in range(a + 1, posts.size()):
+					closest = minf(closest, posts[a].distance_to(posts[b]))
+			check(closest > SquadScript.PERSONAL_SPACE,
+				"band %d, soul at %d: every ally has its own post (closest %.2f m)"
+				% [band, soul_at, closest])
+			for body in bodies:
+				body.queue_free()
+
+
+## The soul's line walked forwards. The camp's own walk to a cage and back lays the
+## line out and back over itself, and the escort used to pick the nearest footprint
+## afresh every frame: at the turn the nearest was on the way out, so the body
+## walked to the turn, found the outbound footprint nearest again and paced the
+## same 2.5 m until the run ended - two allies were found there, 290 m behind the
+## soul. A body joined at the turn has to walk the line to its newest footprint,
+## and the footprint it is walking to may never be an older one.
+func check_doubled_line(step: float) -> void:
+	var squad = SquadScript.new()
+	squad.setup(null, null, null)
+	var soul := FakeBody.new()
+	root.add_child(soul)
+	squad.player_body = soul
+	# Out to the cage's front at x = -10 and back the same way to x = +10.
+	var x := 0.0
+	while x > -10.0:
+		soul.global_position = Vector3(x, 0.0, 0.0)
+		squad._drop_crumb()
+		x -= 0.1
+	while x < 10.0:
+		soul.global_position = Vector3(x, 0.0, 0.0)
+		squad._drop_crumb()
+		x += 0.1
+	var newest: Vector3 = squad._trail[squad._trail.size() - 1]
+	var ally := FakeBody.new()
+	root.add_child(ally)
+	ally.global_position = Vector3(-7.4, 0.0, 0.3)
+	var track := {"merc_id": 2, "crumb": -1}
+	var highest := -1
+	var backwards := 0
+	var frames := 0
+	while frames < 900:
+		var crumb: Variant = squad._crumb_for(ally, track)
+		if crumb == null:
+			break
+		var number := int(track["crumb"])
+		if number < highest:
+			backwards += 1
+		highest = maxi(highest, number)
+		var to: Vector3 = (crumb as Vector3) - ally.global_position
+		if ally.global_position.distance_to(newest) <= 1.0:
+			break
+		ally.global_position += to.normalized() * minf(to.length(), 5.5 * step)
+		frames += 1
+	check(ally.global_position.distance_to(newest) <= 1.0,
+		"a body joined where the line doubles back walks it to the soul (%.1f m short after %d frames)"
+		% [ally.global_position.distance_to(newest), frames])
+	check(backwards == 0, "and is never sent back to an older footprint (%d times)" % backwards)
+	check(frames < 300, "inside the line's own length (%d frames for ~17 m)" % frames)
+	soul.queue_free()
+	ally.queue_free()
+
+
+## A penned body walks out of the door. A cage is bars on three sides and a door
+## that rises: a prisoner whose latch is cut from behind the bars has its post
+## behind them, and a body steering straight at it shoulders the back bars, backs
+## out, turns round and walks back in until the soul walks away. On mapped ground
+## the same walk leaves through the door and goes round; the door itself is off
+## the map because it rises.
+func check_cage_walk_out(step: float) -> void:
+	var cage := Node3D.new()
+	root.add_child(cage)
+	var bars := StaticBody3D.new()
+	cage.add_child(bars)
+	for wall in [[Vector3(0.12, 2.7, 2.5), Vector3(-1.15, 1.35, 0.0)],
+			[Vector3(0.12, 2.7, 2.5), Vector3(1.15, 1.35, 0.0)],
+			[Vector3(2.5, 2.7, 0.12), Vector3(0.0, 1.35, 1.15)]]:
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = wall[0]
+		shape.shape = box
+		shape.position = wall[1]
+		bars.add_child(shape)
+	var door := StaticBody3D.new()
+	cage.add_child(door)
+	var door_shape := CollisionShape3D.new()
+	var door_box := BoxShape3D.new()
+	door_box.size = Vector3(2.4, 2.7, 0.12)
+	door_shape.shape = door_box
+	door_shape.position = Vector3(0.0, 1.35, -1.15)
+	door.add_child(door_shape)
+	var nav = NavScript.new()
+	nav.build(cage, Rect2(-10.0, -10.0, 20.0, 20.0), [door])
+	var inside := Vector3(0.0, 0.0, 0.3)
+	var behind := Vector3(0.0, 0.0, 3.6)
+	check(not nav.clear_line(inside, behind), "the back bars are on the map")
+	check(nav.clear_line(inside, Vector3(0.0, 0.0, -3.0)), "and the rising door is not")
+
+	var squad = SquadScript.new()
+	squad.setup(null, null, null)
+	squad.nav = nav
+	var body := FakeBody.new()
+	root.add_child(body)
+	body.global_position = inside
+	var track := {"merc_id": 3, "delta": step, "side": 0.0, "sign": 1.0, "retreat": 0.0}
+	var left_by_door := false
+	var through_bars := 0
+	var frames := 0
+	while frames < 600 and body.global_position.distance_to(behind) > 1.0:
+		var before: Vector3 = body.global_position
+		squad._advance(body, behind, track, 0.85)
+		body.global_position += Vector3(body.last_intent.x, 0.0, body.last_intent.y) * 5.5 * step
+		var after: Vector3 = body.global_position
+		if after.z < -1.45:
+			left_by_door = true
+		# Crossing the back bars' plane anywhere along the cage's width is walking
+		# through the iron.
+		if (before.z < 1.15) != (after.z < 1.15) and absf(after.x) < 1.25 + 0.3:
+			through_bars += 1
+		frames += 1
+	check(body.global_position.distance_to(behind) <= 1.0,
+		"a body penned in a cage reaches a post behind the bars (%.1f m short after %d frames)"
+		% [body.global_position.distance_to(behind), frames])
+	check(left_by_door, "by walking out of the door")
+	check(through_bars == 0, "and never through the bars (%d crossings)" % through_bars)
+	body.queue_free()
+	cage.queue_free()
 
 
 ## A walk to a piece of loot is a walk, not an order. The camp showed what the
@@ -229,7 +421,7 @@ class FakeController extends RefCounted:
 	func body_of(merc_id: int):
 		return bodies.get(merc_id, null)
 
-	func active_body(_peer_id: int):
+	func focus_body():
 		return null
 
 	func merc_of(_body) -> int:

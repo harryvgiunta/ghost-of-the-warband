@@ -109,27 +109,6 @@ func run() -> void:
 	reloaded.from_dict(warband.to_dict().get("roster", {}))
 	check(reloaded.count() == 6, "the saved roster matches the live one")
 
-	# The title's skip door: a new campaign that opens in Hearthstead instead of
-	# the cages, with the town's own armed lineup and no lesson.
-	var before_scene = current_scene
-	flow.start_campaign(true)
-	var skipped_scene = null
-	for index in 60:
-		await create_timer(0.1).timeout
-		var scene := current_scene
-		if scene != null and scene != before_scene and scene.scene_file_path == TOWN:
-			await create_timer(0.3).timeout
-			skipped_scene = current_scene
-			break
-	check(skipped_scene != null, "the skip door opens the world again")
-	if skipped_scene != null:
-		check(str(skipped_scene.start_area) == "town",
-			"the skipped campaign starts in Hearthstead (%s)" % str(skipped_scene.start_area))
-		check(warband.roster.count() == 5, "the town's own lineup swears a band (%d)"
-			% warband.roster.count())
-		check(skipped_scene.bodies.size() >= 1, "with bodies standing on the square")
-		check(skipped_scene.camp.sequencer == null, "and the cages' lesson never starts")
-
 	_finish()
 
 func _finish() -> void:

@@ -1,8 +1,9 @@
 extends SceneTree
-## Item skills: every catalog weapon grants exactly one ability, the two hand
-## slots resolve from the held kit, effects carry the requested damage/spread,
-## radial strikes and blasts damage the right bodies, and the planted effect
-## cues, projectile and HUD work.
+## Item skills: every catalog weapon wakes into exactly one ability once it is
+## anointed and grants nothing while plain, the two hand slots resolve from the
+## held kit, effects carry the requested damage/spread, radial strikes and
+## blasts damage the right bodies, and the planted effect cues, projectile and
+## HUD work.
 
 const Actor = preload("res://scripts/arena_actor.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
@@ -45,8 +46,10 @@ func check(condition: bool, message: String) -> void:
 		print("WEAPON_ABILITY_FAIL  ", message)
 
 
-func equip(rig, main_id: String, off_id: String = "") -> void:
-	rig.apply_loadout(State.build_loadout(main_id,off_id,ARMOR))
+## Dresses the rig. Both held pieces are anointed unless `anoint` is false: a
+## stock weapon carries no skill, and this harness exercises the skills.
+func equip(rig, main_id: String, off_id: String = "", anoint: bool = true) -> void:
+	rig.apply_loadout(State.build_loadout(main_id,off_id,ARMOR,{},[main_id,off_id] if anoint else []))
 
 
 func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
@@ -137,15 +140,44 @@ func run() -> void:
 		seen[expected] = true
 		var icon: Texture2D = AbilityRules.icon_texture(expected)
 		check(icon != null and icon.get_width() == 128, "%s icon loads at 128 px" % item_id)
-		# Rig resolution: a legal hand pair must expose the same grant.
-		if slot == 0:
-			equip(rig,item_id,"")
-		else:
-			equip(rig,"sword_arming",item_id)
+		# Rig resolution: a legal hand pair must expose the same grant once the
+		# piece is anointed, and nothing in that slot while it is plain.
+		var main_id := item_id if slot == 0 else "sword_arming"
+		var off_id := "" if slot == 0 else item_id
+		equip(rig,main_id,off_id,false)
+		check(AbilityRules.granted(rig)[slot].is_empty(), "The plain %s grants nothing from the rig" % item_id)
+		if slot == 1:
+			check(AbilityRules.granted(rig)[0].is_empty(), "A plain arming sword beside the shield grants nothing")
+		equip(rig,main_id,off_id)
 		var grants: Array = AbilityRules.granted(rig)
-		check(str(grants[slot].get("id","")) == expected, "The held %s resolves its grant from the rig" % item_id)
+		check(str(grants[slot].get("id","")) == expected, "The anointed %s resolves its grant from the rig" % item_id)
 		if slot == 1:
 			check(str(grants[0].get("id","")) == "lunge_thrust", "A shield leaves the main-hand skill intact")
+	# Every catalog weapon and shield, makeshift tier included: the skill the
+	# catalog says a piece wakes into is the one its dressed rig grants from the
+	# piece's hand, and the other hand stays empty. Shields are held beside a
+	# plain arming sword; every other piece is held alone.
+	var catalog_pieces := 0
+	for catalog_id: String in State.ITEMS:
+		var entry: Dictionary = State.ITEMS[catalog_id]
+		if not ["1h","2h","bow","staff","shield"].has(str(entry.get("category",""))) \
+				or not ["sword","dagger","bow","staff","shield"].has(str(entry.get("kind",""))):
+			continue
+		catalog_pieces += 1
+		var hand := AbilityRules.hand_slot(entry)
+		var skill: Dictionary = AbilityRules.skill_for(entry)
+		check(not skill.is_empty(), "%s wakes into a skill" % catalog_id)
+		check(hand == (1 if str(entry.category) == "shield" else 0), "%s looses its skill from its own hand" % catalog_id)
+		var loadout: Dictionary = State.build_loadout(catalog_id if hand == 0 else "sword_arming",
+			catalog_id if hand == 1 else "",ARMOR,{},[catalog_id])
+		check(str(loadout.anointed["main" if hand == 0 else "off"]) == str(skill.get("id","")),
+			"%s carries its skill onto the loadout" % catalog_id)
+		rig.apply_loadout(loadout)
+		var catalog_grants: Array = AbilityRules.granted(rig)
+		check(str(catalog_grants[hand].get("id","")) == str(skill.get("id","")),
+			"The anointed %s grants %s from the rig, got %s" % [catalog_id,skill.get("id",""),catalog_grants[hand].get("id","")])
+		check(catalog_grants[1-hand].is_empty(), "The anointed %s leaves the other hand without a skill" % catalog_id)
+	check(catalog_pieces >= WEAPONS.size(), "The catalog sweep covers every weapon and shield")
 	# Duplicate shortbow: the starter spare is the same grant.
 	equip(rig,"bow_short")
 	check(str(AbilityRules.granted(rig)[0].get("id","")) == "barrage", "Both shortbows grant Barrage")

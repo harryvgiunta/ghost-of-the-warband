@@ -9,7 +9,8 @@ a floating soul that enters any living mercenary of your warband. Every mercenar
 has identical base stats - **100 health, 1000 stamina**, gear is the only
 difference - and the warband is the thing that survives a battle.
 
-- **Saving:** the mode has its own save (`user://warband_state.json`);
+- **Saving:** the mode has its own save (`user://warband_state.json`, version 6,
+  which also remembers every piece the altar has anointed);
   **RESUME WARBAND** opens it where the last checkpoint stands (the town square,
   or 60 m past the camp's mouth once the watchers there are down). The ranger's
   kit is untouched.
@@ -25,8 +26,9 @@ difference - and the warband is the thing that survives a battle.
     (**W A S D** / mouse), take the ironwood shiv (**K**), the three cuts
     (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) the moment the
     shiv is in your hand, and the guard (**hold RMB**) on the second watcher's
-    raised club. The pair sleep until you are armed and are the softest bodies in
-    the game: a 1.3 s telegraph, half their blow, no guard.
+    raised club. The pair are two of the wood's creatures - a **hollow warden**
+    and an **ossuary stalker** - and they sleep until you are armed and are the
+    softest bodies in the game: a 1.3 s telegraph, half their blow, no guard.
   * Then **one latch per press** at each of the four remaining cages (a blade in
     hand and `G` at the bars; bare hands are refused on every cage but your own).
     The last latch puts five bodies on their feet, turns them into squad AI that
@@ -53,11 +55,21 @@ difference - and the warband is the thing that survives a battle.
   so every peer and every reload dresses him the same. A bare body carries
   nothing.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
-  pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
-  (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons
-  with active sigils), the **Gold recruiter** (bodies up to the deployment cap of
-  8), the **quartermaster** (plain steel bought into the shared stash) and the
+  pieces tagged with the mercenary wearing them), the **Sacrificial Altar** — a
+  blood-stained stone stele under candles and skull sticks, named **THE ALTAR** —
+  whose ANOINT page lays a warden's ichor on a weapon or shield the warband
+  carries so every copy wakes into its skill, and whose ESSENCE page unbinds spare
+  magic items into Cruor, distils 5:1 up five tiers and brands weapons with active
+  sigils; the **Gold recruiter** (bodies up to the deployment cap of 8), the
+  **quartermaster** (plain steel bought into the shared stash) and the
   **expedition gate** (pick up to 8 bodies, then launch).
+- **Steel is plain until anointed:** no stock weapon carries a skill. Four of the
+  twelve hollow-warden variants carry a vial of ichor; with one in the stash the
+  quartermaster hands over **ICHOR IN THE STEEL**, and one vial at the altar wakes
+  a piece into its skill (a twig bow into Long Piercing Shot, a club or heavy
+  branch into Spinning AOE Spin, the ironwood shiv into Backstab, the wooden shield
+  into Ground Shield Slam). The paperdoll names it: "Anointed - <SKILL> [key]", or
+  "Plain - the altar wakes <SKILL>".
 - **The field:** cultist waves in three escalating size/kit tiers. Combat near a
   human-possessed body is real (100% damage); every fight more than ~30 m from
   any human runs as a convincing background brawl at **10% damage**, so distant
@@ -76,6 +88,16 @@ difference - and the warband is the thing that survives a battle.
   open with **G** - their character screen, their slots, and each piece moved into
   the infinite stash (or **TAKE ALL**). The squad strips bodies on its own once
   the field is quiet, silently, into the same stash.
+- **The band's fights are not silent:** when an AI squadmate breaks off after
+  something, the HUD says it once - **Sorn breaks off: Briar wolf, 34 m
+  back-left** - and keeps **IN THE FIGHT · Sorn, Dorn · 34 m back-left** under
+  the roster until that ally is out of it, then **Sorn is back with the band.**
+  The bearing is measured from where you are looking, so the line is a place to
+  turn round for, and a body pacing in and out of reach is announced once.
+- **Arrows are a resource:** one shared quiver for the whole band, one shaft per
+  loosed arrow (skills included), and a dead trail archer's corpse is the only
+  resupply out on the road - four shafts and the twig bow it fired. Keepers sell
+  them by the bunch of ten. With the quiver empty the string stays down.
 - **Loot:** quick-loot during the fight (K). A picked-up piece goes straight into
   the soul's hands when it fills an empty slot or beats what is worn there, and
   otherwise into the shared stash. When the field goes quiet the surviving
@@ -89,6 +111,7 @@ difference - and the warband is the thing that survives a battle.
 | `TAB` | quick weapon swap: the body puts away the set in its hands and takes up the other one (exactly as the open frontier does) |
 | `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off; click a piece another mercenary wears to hand it over; **SWAP SET** or `TAB` changes the weapon set) |
 | `G` | cut a cage latch, use the altar / stash / quartermaster / recruiter / expedition gate you stand at, or leave through the gate |
+| `1` / `2` / `3` | loose the skill of an anointed main hand / an anointed shield / the worn trinket (Shift+1..3 is the same press) |
 | `K` | quick-loot the drop at your feet |
 | `G` (hold) | revive the downed body beside you: five seconds, and a blow breaks the channel |
 | `R` | fire the branded ability on your weapon |
@@ -118,23 +141,27 @@ cd ironwood-arena
 
 The launchers import the bundled character assets before starting the game, so a fresh checkout does not need an existing `.godot` cache. Subsequent launches reuse imported assets. Blender is not required to play.
 
-- **Play.cmd:** opens the main menu (**Start New Game**, **Load Saved Game**, **Host Open World**, **Join Game**).
+- **Play.cmd:** opens the main menu (**New Campaign**, **Resume Campaign**, **Join Game**, **Host Game**).
 - **Arena.cmd:** opens the standalone multiplayer lobby directly, or solo practice against bots. Its **Return to Town** button loads the PvE town.
-- **Host World.cmd:** starts the town/frontier as an open world on UDP 7777 with your Windows user name, so friends can join without a delve or arena. **Host Open World** in the main menu does the same on the open-world port (7777 unless a previous host opened another one).
-- **Host Tailscale.cmd:** starts the town/frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** and jump into the Sunken Delve hatch to host on that port. Friends join with the main menu's **Join Game** form, choosing **Delve party**.
+- **Host World.cmd:** starts the town/frontier as an open world on UDP 7777 with your Windows user name, so friends can join without a delve or arena.
+- **Host Tailscale.cmd:** starts the town/frontier in delve-host mode on UDP 7777 with your Windows user name. Walk into the **Wayfarer Inn** and jump into the Sunken Delve hatch to host on that port.
 
 Set `GODOT_PATH` to use another existing Godot executable. Linux/macOS users can install Godot 4.7.2, import `project.godot`, and run `title.tscn`, `main.tscn`, `arena.tscn` or `delve.tscn`; the Windows setup script does not install engines for those platforms.
 
 ## Main menu and the town
 
-Every launch opens the **main menu** with four doors:
+Every launch opens the **main menu**: Ghost of the Warband, four doors.
 
 | Menu action | Result |
 | --- | --- |
-| **Start New Game** | Resets the ranger to the starter kit, purse and empty stash, then starts at the south gate of Hearthstead. |
-| **Load Saved Game** | Restores `user://player_state.json` and starts at the town gate. Disabled when no save exists. |
-| **Host Open World** | Opens the current town and frontier as a four-ranger host on the **open-world UDP port** (7777 by default). A port remembered from an earlier join never moves it; the host's line names the port and every address a friend can type. Friends join it with **Join Game**. |
-| **Join Game** | Opens the name/address/port/mode form, reread from the cache each time it opens, and joins an **arena match**, **delve party** or **open world**. |
+| **New Campaign** | A fresh warband and a fresh purse, starting in the five cages of the camp with the shiv in the dirt. |
+| **Resume Campaign** | Opens your save where its last autosave stands: the trail checkpoint or Hearthstead. Disabled until a warband save exists. |
+| **Join Game** | Name, host address and UDP port, reread from the cache every time the form opens. You connect first and play **from the host's warband** - you need no save of your own. |
+| **Host Game** | Name and the port you open. **New Game** starts a fresh campaign; **From Checkpoint** opens the save on its bookmark (or in Hearthstead when it has none). The line under the buttons says what that checkpoint would open. |
+
+**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Only the host changes gear, buys, hires, loots a corpse or works a keeper; a guest's own TAB, revive and combat verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband.
+
+Bodies are the shared pool, and every soul hops freely between the free ones (`[` and `]`, or `F1..F8`). The only way a soul loses a body is dying in it. With one body left standing the soul already inside keeps it, and everyone else watches that body in free look - the body panel names who is inside - and takes the next body that comes free, in the order the souls lost theirs.
 
 There is no out-of-game depot. **Hearthstead** is the staging town inside the open PvE world, and every service is a real object you walk up to and press **G** on:
 
@@ -160,7 +187,7 @@ Dropping a piece in town, the frontier or the delve spawns a physical world pick
 
 Loot is tuned to **a tenth of its old rate**: a weapon-carrying devil leaves the piece it held 10% of the time, the frontier gear rotation drops on 5% of eligible kills, and a delve cache has a 10% chance of an item. Cache gold, kill gold and waystone rewards are unchanged.
 
-**New-game vs. load:** Start New Game overwrites the save with the starter kit; Load Saved Game re-reads the saved kit, stash, ground items and purse. The delve is an in-session endless run, so it has no resume checkpoint: it is a disposable instance you finish or leave, never a save.
+**New Campaign vs. Resume Campaign:** a new campaign resets the warband *and* the shared purse and opens in the cages; Resume Campaign re-reads `user://warband_state.json` and puts the warband on its last autosave bookmark. The campaign autosaves at two moments - the trail once the camp's watchers are down, and the first entry into Hearthstead - and a wipe reloads the bookmark (bodies that were merely down get up at half health; the dead stay dead; the purse is never rolled back). A co-op guest writes no checkpoint and no save of its own while it plays the host's warband.
 
 ### Item taxonomy and hand rules
 
@@ -174,6 +201,7 @@ Loot is tuned to **a tenth of its old rate**: a weapon-carrying devil leaves the
 | Focus | Off-hand only | Ash Tome, Bone Skull, Skull of Life, Skull of Death |
 | Armor | Its own head / chest / hands / legs / feet slot | Leather, mail, plate and Emberweave pieces |
 | Jewelry | Neck, or either ring slot | Ember Charm, Amulet of Energy Shield, seventeen rings |
+| Ammunition (`ammo`) | Carried, never worn | Arrow (sold by the bunch of ten) |
 
 - Right-click routing sends one-handers to the **main hand**, shields and foci to the **off-hand**, armor to its own slot, a necklace to the neck and a ring to the first empty ring slot (then ring 1). Alt+right-click and drags onto a slot choose the hand explicitly.
 - Equipping a two-handed weapon, bow or staff **overrides both hands**: an existing main-hand and off-hand item are both returned to the backpack. If the backpack has room for only one, the second displaced item lands on the floor.
@@ -241,7 +269,7 @@ All players should use the same current checkout and be connected to a tailnet t
 
 ### Open world (shared town and frontier)
 
-Press **Host Open World** in the main menu, or run `Host World.cmd`, to open the PvE town and frontier on UDP 7777. The opening message and the HUD's top-left line report the session and the port (`OPEN WORLD / UDP 7777 / 2 RANGERS`), and the message also lists every address a friend can type (the tailnet `100.x`, the LAN address, and `127.0.0.1` for a second instance on the host). Friends pick **Join Game → Open world**, enter the host's Tailscale IP and the port from that message, and arrive at the Hearthstead gate as their own saved ranger. Up to four rangers share the world. If the host's session disappears — the game closed or the connection dropped — the guest keeps playing alone: its own ranger is handed back standing where the seat was, the frontier resumes with no authority, and the quick menu opens with the reason at its top so **SAVE GAME** or **EXIT GAME** is one click away. A guest that was following the host below in the delve keeps its collision and comes back up on the inn landing.
+Run `Host World.cmd` to open the PvE town and frontier on UDP 7777. The opening message and the HUD's top-left line report the session and the port (`OPEN WORLD / UDP 7777 / 2 RANGERS`), and the message also lists every address a friend can type (the tailnet `100.x`, the LAN address, and `127.0.0.1` for a second instance on the host). Friends start the same launcher with `--world-join <address> <port>` (or the standalone arena lobby), enter the host's Tailscale IP and the port from that message, and arrive at the Hearthstead gate as their own saved ranger. Up to four rangers share the world. If the host's session disappears — the game closed or the connection dropped — the guest keeps playing alone: its own ranger is handed back standing where the seat was, the frontier resumes with no authority, and the quick menu opens with the reason at its top so **SAVE GAME** or **EXIT GAME** is one click away. A guest that was following the host below in the delve keeps its collision and comes back up on the inn landing.
 
 The host is authoritative for every ranger and mob. Clients send movement, aim and action intents, never damage, charge or positions. Mobs chase and strike the nearest ranger they can see (sight cone, range, line of sight and a 15 s pursuit memory; see `scripts/mob_senses.gd`); kills, arrows, thrown weapons, loot drops, waystone restorations and gold are replicated to every peer. Keepers, the stash and the backpack stay **per player**: each peer trades against its own `user://player_state.json`, and a world drop is granted to whichever ranger picks it up on their own machine. Only the host can restore a waystone or step into the arena portal. The hatch is host-led but never drags anyone: when the host drops through the inn hatch, the delve opens **inside the same session**, the frontier freezes in place behind it, and the host waits on a **waiting screen** that counts the rangers still upstairs. Riders stay in Hearthstead with the town fully rendered, walk to the Wayfarer Inn themselves and drop into the hatch to be led down on the connection they already have; the altar (or the ossuary pit) only wakes once nobody is left outside. Taking the rope (or ending the run from the game-over screen) drops the instance and resumes the frontier exactly as it was frozen — same mobs, same loot, same waystones, same peer, same party. **Enter** lets a host begin without a rider who never arrives. A rider who drops in while the host is still holding the town is asked to jump in together and is set back on the inn floor. If the host closes the game, clients see the connection message and continue alone with live mobs. There is no host migration.
 
@@ -277,7 +305,7 @@ The delve uses the same ENet transport. A delve host needs no lobby: the party f
 
 - Confirm the host is actually hosting: an open-world session shows `OPEN WORLD / UDP <port> / N RANGERS` at the top left; for an arena it must be in a match rather than merely the lobby, and for a delve after the hatch/descend press rather than still standing in the frontier or on the landing.
 - Compare the **UDP port** in that line with the port in the joining form. They must match; a timeout names the address and port it tried in brackets (`Connection timed out… [100.64.0.9:7777]`).
-- Pick the door the host is actually running: **Open world** for **Host Open World**, **Delve party** for a delve host, **Arena match** for `Arena.cmd`. A client on the wrong door connects to the port and then sits in an empty scene of its own.
+- Match the scene to the host: an open-world host for `Host World.cmd`, a delve host for `Host Tailscale.cmd`, an arena match for `Arena.cmd`. A client launched for the wrong one connects to the port and then sits in an empty scene of its own.
 - Run `tailscale ping HOST_TAILSCALE_IP` from the joining PC. This checks tailnet connectivity, not the game's UDP port.
 - Permit UDP **7777** in any custom tailnet access policy and allow the host executable through its local firewall.
 - If necessary, run `Allow Tailscale Host.ps1` in an elevated PowerShell on the **host only**. It creates a narrowly scoped rule for this engine, UDP 7777, the Tailscale adapter, and Tailscale IPv4 addresses. It is optional and never runs automatically.
@@ -344,7 +372,7 @@ Strikes are judged against the world the client saw. The host records one second
 | Click left mouse while dual wielding | Left-hand diagonal cut from the left |
 | Click right mouse while dual wielding | Right-hand diagonal cut from the right; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill granted by the equipped main hand / off-hand shield / worn trinket; each costs 1 stamina for testing |
+| Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill of an anointed main hand / anointed off-hand shield, or the worn trinket's grant; stock steel carries no skill, so on the frontier, which has no altar, the hand slots grant nothing; each costs 1 stamina for testing |
 | G | Interact with a keeper, the stash, the campfire or a waystone; open a wave cache, descend, or ascend |
 | I | Open or close the combined equipment screen (ten equipped slots, live ranger, 60-cell backpack and ground strip); while open it owns the cursor and blocks movement, attacks and interactions |
 | P | Open the same combined equipment screen; while open it owns the cursor and blocks movement, attacks and interactions |
@@ -357,7 +385,7 @@ Strikes are judged against the world the client saw. The host records one second
 
 The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and three ability slots: **SHIFT + 1** for the main hand, **SHIFT + 2** for the off-hand shield and **SHIFT + 3** for the worn trinket, each with its icon, stamina cost and cooldown.
 
-Abilities are data-driven and item-granted by `scripts/ability_rules.gd`: equipping a weapon grants its skill to the main hand, equipping a shield grants its skill to the off hand, and wearing the amulet or the dash ring grants its skill to the trinket slot. A definition carries the granting item, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
+Abilities are data-driven by `scripts/ability_rules.gd`. Stock weapons carry no skill in any mode: `AbilityRules.granted(rig)` wakes a weapon's skill in the main hand, or a shield's in the off hand, only once the warband's altar has anointed that piece (`rig.anointed`), so the frontier, arena and delve, which have no altar, field plain steel. Wearing the amulet or the dash ring grants its skill to the trinket slot. The table below is the skill each piece wakes into; the makeshift tier resolves through the same class/index (twig bow → Long Piercing Shot, club and heavy branch → Spinning AOE Spin, ironwood shiv → Backstab, wooden shield → Ground Shield Slam, makeshift cleaver → Double Slash). A definition carries the stock item it belongs to, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
 
 `move` decides what the feet do. **Double Slash, Lunging Thrust, Spinning AOE Spin, Headbutt, Shield Charge and Ground Shield Slam** keep normal walking input; **Barrage, Triple Fan Volley, Long Piercing Shot, Fireball, Bone Spear**, the unarmed **Charge** and **Backstab** stay planted. Committed travel still wins during its window (**0.24 s** lunge, **0.16 s** headbutt, **0.48 s** shield charge), and the walk resumes once it ends; no ability allows sprinting or jumping. A definition's `aim` flag makes that committed step travel down the live crosshair instead of the heading the key was pressed from, so the lunge, the headbutt and the shield charge all turn the body onto the crosshair and dash along it. Skills that cannot be performed from a crouch — every blade, shield and dagger skill plus the unarmed Charge — are performed standing: activating one cancels a manual crouch, snaps the capsule upright and only spends the skill once the body has headroom to stand, so the authored clip always owns the whole pose. The planted bow and staff casts still layer over a crouch.
 
@@ -425,6 +453,8 @@ arrow damage = bow base damage × clamp(draw amount, 0, 1)
 ```
 
 Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. The hit's own armor channel applies afterward: the helmet on a head hit, the body kit on the rest. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
+
+**Every loosed arrow costs one shaft.** In the warband campaign the party carries one shared quiver (`Warband.arrows()`, the `arrow` item in the shared stash), and each release - a plain bow shot or a shaft from **Barrage**, **Triple Volley** or **Piercing Shot** - takes one out of it. At zero the string will not come up at all: the HUD strip shows `gold · arrows`, a refused press prints **Out of arrows**, and the two ways to fill the quiver are a keeper's bunch (ten shafts for 20 gold at **Storekeeper Orla** or **Smith Brann**) or a dead trail archer, whose corpse carries the twig bow it fired and four of its own shafts. The frontier, arena and delve rangers have no quiver and are unaffected.
 
 Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus every ranger clone, the wolf and cinder devil, the five imported devils, the three forest mobs and the delve wave (imported species included). The zone is a **band across the body and never narrower than the capsule an arrow stops on**: an authored radius wins when it reaches past the capsule (a wolf skull, a beast muzzle), otherwise the zone is widened to the body radius plus 5 cm, so a shaft that lands on the head height of the visible body is always a headshot. A head hit then resolves the helmet's **head guard** instead of the body kit, so plate's 50% sallet brings a headshot back down to a normal hit. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
 
@@ -519,7 +549,7 @@ Taking damage rolls an **attack interruption** against the share of max health t
 
 Fighters no longer hard-collide with each other. Their capsules have a **soft separation** that only pushes when centres are inside **0.46 m**, which lets two players close to stabbing distance without being shoved off their aim. World geometry, cover, blades and projectiles still collide normally.
 
-The title menu and arena lobby remember the **last player name, host address, UDP port and join mode** in `user://net_cache.json`. Joining a game updates the cache after validation, and the next form opens with those values. **Join Game** rereads that file every time the form opens, so a session that hosted or joined something else never leaves stale values on screen. **Host Open World** writes its own `host_port` instead, which is why a remembered join port cannot move the host socket onto a port nobody else knows.
+The title's **Join Game** and **Host Game** forms and the arena lobby remember the **last player name, the join address and UDP port, and the port this machine hosts on** in `user://net_cache.json`. Joining a game updates the join side after validation, and **Join Game** rereads that file every time its form opens, so a session that joined somewhere else never leaves stale values on screen. **Host Game** writes its own `host_port` instead, which is why a remembered join port cannot move the host socket onto a port nobody else knows.
 
 ## Blood and wounds
 
@@ -568,6 +598,7 @@ A mob that wants to move and cannot is stuck, so `scripts/mob_steering.gd` owns 
 The frontier and arena are dressed by a small, data-driven world-art kit rather than per-scene primitives:
 
 - **Textured sky.** A photoreal 4096 × 2048 equirectangular panorama (`assets/world/textures/sky_frontier.png`) supplies the sky background: a Rayleigh-like blue gradient, a real-sized sun disc and aureole at the key light's exact direction, a perspective cumulus deck with self-shadowing, thin cirrus and aerial haze. Fog, ambient light, filmic grade and saturation are tuned to it.
+- **Hill country.** The wood has real elevation: three octaves of value noise at **190/100/58 m**, normalised to **±22 m** either side of level, so the walk to town crosses a crest every eighty metres or so and never climbs harder than about **15 degrees**. The camp pocket and the town square are held flat - `RELIEF_HOLD_INNER` 40 m of level ground around each pad, the swells reaching full height by `RELIEF_HOLD_OUTER` 260 m - and the mountain rim and the one swamp are unchanged, so the trail is a road between hills rather than a plank 1,375 m long.
 - **Textured terrain.** The continuous heightfield keeps its authored routes and clearings, but now renders through a world-space splat shader: grass, trail dirt and rock/scree textures blended by vertex dirt weights and slope, with low-frequency macro variation. Grass clumps, wildflowers and ferns are chunked alpha-cut cards that sway in the wind and fade out at their visibility range.
 - **Textured trees.** A species library builds deterministic mesh variants: oaken trunks with real branches and leaf-card crowns, layered briar pines, slim silver birches, amber rowans and bare snags. Bark and leaf textures are separate authored PNGs with normal maps and per-instance tint, so one mesh family yields many colours and silhouettes. Sizes, species weights and shape parameters live in code, not in the mesh files.
 - **Natural stone.** Scattered rock is authored, not repeated: `scripts/world/rock_kit.gd` deforms a faceted ellipsoid with a seeded noise field, narrows the crown and cuts a flat fracture face near the base, then smooth-shades it so the silhouette is broken but the surface reads as weathered granite. Five archetypes (rounded boulder, bedding slab, ledged outcrop, standing spire, cobble) are produced in variants, scattered in loose clusters, sized independently, bedded at their own angle and set into the terrain below the lowest ground under their real footprint, so a boulder breaks out of a slope instead of resting on it. Each variant's convex hull is its collision. Boulders and heaped fire stones use the natural `granite.png` surface (quartz and feldspar speckle, weathered veins, moss in the cracks); the coursed `rock.png` stays on carved stonework and dungeon walls. Village timber, plaster, roof shingles, bridge timbers and woven wattle panels share the other triplanar materials, and the pond uses a ripple normal map and a cheap sky-tinted fresnel shader.
@@ -604,7 +635,7 @@ python tools/world_textures.py
 & $Godot --headless --editor --path . --import
 ```
 
-The manifest is `assets/world/world_textures.json`; provenance and the CC0 dedication are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
+The manifest is `assets/world/world_textures.json`; provenance and the CC BY-NC-SA 4.0 terms are in `assets/world/LICENSE.txt`. World textures import lossless with mipmaps (they are alpha-scissored cards and tiled ground/bark surfaces, so mipmaps are required and block compression is intentionally disabled).
 
 ## Devil court
 
@@ -707,6 +738,36 @@ cleaver and a ground-rib shiv). Makeshift is set index 4 in
 `scripts/armor_data.gd`; five sets need three bits per slot, so
 `ArmorData.PIECE_MASK` and `ArmorData.SHIELD_BIT` are one shared contract across
 the HUD, the arena, the delve and host-authoritative snapshots.
+
+### Watcher skins (the wood on a human's rig)
+
+The campaign's watchers are these same three creatures, and they fight on the
+warband's own skeleton: `tools/prepare_watcher_skins.py` turns each shipped
+creature mesh into a whole-body skin for `ironwood_ranger.glb`'s 65 bones —
+`assets/characters/watchers/ironwood_watcher_<species>.glb` plus its measured
+JSON. Nothing is remodelled: the creature's vertices, UVs and material slots are
+carried across, the ranger's arms are posed onto the creature's hanging arms to
+become the bind, every creature bone is fitted onto its ranger counterpart, and
+the skin is weighted with the creature's own weights renamed onto ranger bones.
+The runtime scales the rig by the skin's measured fit scale, so a watcher stands
+exactly as tall as the creature it was; the skin ships no images and borrows the
+creature GLB's PBR atlases, tinted per body.
+
+```powershell
+python tools/build_watcher_skins.py all
+```
+
+`scripts/warband/watcher_visual.gd` is the presentation: it holds the rig, opens
+the authored cut a windup commits to and retimes it onto the mob's telegraph so
+the blade crosses the target on the damage frame, plays the guard loop and the
+crouch as stances, and hands the skeleton to the shared ragdoll on death.
+`scripts/warband/cage_watcher.gd` fields the three species (the intro pair and
+the leaving's ambush mix them), while `RangeWorld.forest_spawns` keeps the
+frontier's own creature versions untouched.
+
+Ignored intermediates and the review captures land in
+`.runtime/watcher-skins/<species>/`; keep the shipped GLB, its JSON and its
+`.glb.import` together.
 
 The workflow, budgets and gates are documented in
 [docs/forest-mobs.md](docs/forest-mobs.md). Rebuild with:
@@ -849,15 +910,15 @@ $Godot = '.\.runtime\godot\Godot_v4.7.2-stable_win64_console.exe'
 
 `python tools/run_tests.py` runs the full suite in parallel with isolated `APPDATA` per test, unique fixed UDP ports and a fixed simulated clock for the two long deterministic tests; it retries a timing failure once.
 
-`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the cinder devil, the five imported devils and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, stop blocking collision while still catching the world, and dissolve through the shared five-minute hold. It also checks the death physics: a rigged wolf, imported devil and delve species build a Godot physical-bone ragdoll under `scripts/corpse_physics.gd`, get an attack-style force from `scripts/impact_rules.gd`, fall onto the floor without folding their torso into a pile or spinning the head, settle and bake their limp pose, while a procedural delve devil killed in the air still obeys gravity through the dead CharacterBody root. `ability_regression.gd` checks the item-granted definitions, the shortbow Barrage grant, both hand slots, trivial stamina spend, cooldown swap reset, cue timing, the 1000-stamina pool, rejection cases, the packed ability index across animation/snapshot replication, the snapshot budget, the Shift + 1 / Shift + 2 frontier bindings, both HUD slots, the backstab sound and the hosted arena cue landing real damage. `weapon_abilities_regression.gd` covers all twelve catalog weapon/shield skills, their effect data and icons/sounds, the `move` feet rule (a held walk continues through a move-enabled melee skill and stops dead for a bow cast, on both a host arena fighter and the frontier ranger), the long lunge's 5.34 m lane that cuts a near and a far body once each without the closing thrust landing again, the 0.3166667 s spin and its crowded 0.06/0.16 cues, radial/arc/block/blast damage, the fireball and bone-spear projectiles, Barrage and piercing end-to-end damage, the off-axis bow that turns the body onto the live crosshair, the backstab blink behind the aimed body with its 28 damage, the spin dust ring and the MTU budget. `backstab_regression.gd` checks the crosshair target preflight, the behind-the-back landing spot, the blink and the guard-bypassing strike on a frozen arena rig. `ability_regression.gd` checks the item-granted definitions, the shortbow Barrage grant, both hand slots, trivial stamina spend, cooldown swap reset, cue timing, the 1000-stamina pool, rejection cases, the packed ability index across animation/snapshot replication, the snapshot budget, the Shift + 1 / Shift + 2 frontier bindings, both HUD slots, the backstab sound and the hosted arena cue landing real damage. `weapon_abilities_regression.gd` covers all twelve catalog weapon/shield skills, their effect data and icons/sounds, the `move` feet rule (a held walk continues through a move-enabled melee skill and stops dead for a bow cast, on both a host arena fighter and the frontier ranger), the long lunge's 5.34 m lane that cuts a near and a far body once each without the closing thrust landing again, the 0.3166667 s spin and its crowded 0.06/0.16 cues, radial/arc/block/blast damage, the fireball and bone-spear projectiles, Barrage and piercing end-to-end damage, the off-axis bow that turns the body onto the live crosshair, the backstab blink behind the aimed body with its 28 damage, the spin dust ring and the MTU budget. `backstab_regression.gd` checks the crosshair target preflight, the behind-the-back landing spot, the blink and the guard-bypassing strike on a frozen arena rig.
+`blood_regression.gd` checks the 60-second stain lifetime and fade, surface/body/weapon coverage, projectile and melee hooks, the per-rig and per-scene budgets, and the bleed path for the cinder devil, the five imported devils and the claw-armed attackers. `corpse_regression.gd` checks that a wolf, a cinder devil, an imported devil and a delve devil all outlive the old four-second free, stop blocking collision while still catching the world, and dissolve through the shared five-minute hold. It also checks the death physics: a rigged wolf, imported devil and delve species build a Godot physical-bone ragdoll under `scripts/corpse_physics.gd`, get an attack-style force from `scripts/impact_rules.gd`, fall onto the floor without folding their torso into a pile or spinning the head, settle and bake their limp pose, while a procedural delve devil killed in the air still obeys gravity through the dead CharacterBody root. `ability_regression.gd` checks the definitions, the anointed shortbow's Barrage grant, both hand slots, trivial stamina spend, cooldown swap reset, cue timing, the 1000-stamina pool, rejection cases, the packed ability index across animation/snapshot replication, the snapshot budget, the Shift + 1 / Shift + 2 frontier bindings, both HUD slots, the backstab sound and the hosted arena cue landing real damage. `weapon_abilities_regression.gd` covers all twelve catalog weapon/shield skills, a plain piece granting nothing, every catalog weapon/shield's anointed skill agreeing with the rig's class/index resolution, their effect data and icons/sounds, the `move` feet rule (a held walk continues through a move-enabled melee skill and stops dead for a bow cast, on both a host arena fighter and the frontier ranger), the long lunge's 5.34 m lane that cuts a near and a far body once each without the closing thrust landing again, the 0.3166667 s spin and its crowded 0.06/0.16 cues, radial/arc/block/blast damage, the fireball and bone-spear projectiles, Barrage and piercing end-to-end damage, the off-axis bow that turns the body onto the live crosshair, the backstab blink behind the aimed body with its 28 damage, the spin dust ring and the MTU budget. Both anoint their rigs by hand (`build_loadout(..., [ids])`, or `rig.anointed` on the frontier controller), since the sandbox has no altar. `backstab_regression.gd` checks the crosshair target preflight, the behind-the-back landing spot, the blink and the guard-bypassing strike on a frozen arena rig.
 
 `delve_regression.gd` checks the endless loop: the fall-in start, the sanctuary altar phase, the pentagram ritual, the cycle-one **10-enemy** wave (three imps, two devils, all five court devils and no clones) from random spawn points, its lightest-to-heaviest schedule, the delve's bandage/potion keys and heal, the wave ramp to the cycle-two twenty with the first crimson clone joining last (imported rig, court-scaled health, complete head and strike anchors), the clear delay, cache spawn, rope and floor-hole beacons, chest rewards, the Ossuary Pit's 15 enemies, depth-three sanctuary recycling with a new palette, and the rope return to town. `ranger_clone_regression.gd` covers the frontier's four clones: red-black tint, random main hands and armor, the close-in engagement (a real bow release from range, the walk down to blade reach, a swing at reach), the guard reaction, a blow from beyond the aggro range pulled into a full pursuit, a clone arrow stopping on a raised shield and damaging a bare body on the same lane, the one-time reward and corpse, and both snapshot shapes. `delve_entry_regression.gd` drives the town gate, the physical inn hatch fall, the arena portal host, and the rope return to `main.tscn`. `delve_network_regression.gd` runs two real ENet processes: a client joins the altar, both see the ritual, room, wave and cache, the client builds the species and clone replicas, and both observe the descent into the ossuary. `world_network_regression.gd` runs two real ENet processes for the open world: the host opens the town/frontier, the client joins seat one, both mobs and rangers replicate, the client's weapon/jump/melee intents drive its host-authoritative ranger, damage and health reach both peers, the host's mob arrow and loot drop appear on the client, every client mob is a host-driven replica, and the seat is freed when the client leaves. `open_world_delve_regression.gd` runs two real ENet processes through the hatch hand-off: the host lifts a rider who drops into the hatch alone back onto the inn floor, then the host's fall keeps the same ENet peer and port, the connected client follows into the delve without reconnecting, both delvers are seated, and the client keeps its role and name. `mob_budget_regression.gd` owns the tick budget: the documented grant rate in every band (60/30 near, 20, 5, 2.5 Hz), a full second of granted time at every distance, the presentation bands at 30 m and 62 m, and the one rule that makes the whole thing safe — a body on a twenty-four-frame budget covers exactly the same ground as one ticking every frame, on flat ground and on a slope. It also owns the end of the budget: the 150 m/128 m dormancy hysteresis, a parked body granted nothing and banking nothing across a minute of sleep, a wake that integrates one frame, and a real frontier body carried past the park radius that stops its physics process, its draw and its tick count and comes back when the ranger walks inside. The same run asserts the frontier's depth fog is fully opaque before that radius and that the camera stops with it. `mob_aggro_regression.gd` owns sight, the 12 m cry and the enraged pursuit; `mob_wander_regression.gd` owns the idle life: a lone sentinel settles and then wanders inside its own disc without ever leaving it, a three-body pack shares one territory and crosses it as a band, a sentinel spawning beside that band never merges with it, a blow pulls a packmate stranded 40 m away into the hunt while an unrelated mob stays calm, a body shoved out of its patch walks back inside, and the frontier hands every wilderness body a patch, with the court's five species each on its own post and the eastern nest of three spawns sharing one.
 
-`world_ui_regression.gd` drives the in-world **I/P kit** in the real delve and arena scenes. It checks that **I** opens the combined equipment screen and frees the cursor, that **P** opens the same stage and pack, that an equip updates `PlayerState` and the live rig (`Archer.apply_loadout`), that `Escape` closes the kit and recaptures the mouse, and that arena drops fall back to the persistent ground list. `menu_regression.gd` covers `scripts/pause_menu.gd` in all three scenes: `Escape` opens it with the pointer free while the tree stays unpaused and held movement is inert, gameplay keys do nothing behind it, **SAVE GAME** writes the journey and reports it, the display row keeps the mode the window really has, **RESUME** recaptures mouse-look, and each exit row performs its own hand-off (the title menu from the world, the lobby from the arena, the town from the delve). `host_leave_regression.gd` uses two real ENet processes: a guest follows a host's fall into the delve, the host's socket disappears, and the guest must come back with its own body on layer 4 colliding with the world and the mobs, standing at a steady height in the resumed frontier, with the quick menu already open. `town_services_regression.gd` walks the PvE town: the three keeper counters, the stash chest, the arena portal, the open hatch cell, the town-gate spawn, I/P panel switching, vendor buying, stash transfers and unarmed world drops. `title_menu_regression.gd` covers Start New Game, Load Saved Game, the disabled-load state and the cached Join form.
+`world_ui_regression.gd` drives the in-world **I/P kit** in the real delve and arena scenes. It checks that **I** opens the combined equipment screen and frees the cursor, that **P** opens the same stage and pack, that an equip updates `PlayerState` and the live rig (`Archer.apply_loadout`), that `Escape` closes the kit and recaptures the mouse, and that arena drops fall back to the persistent ground list. `menu_regression.gd` covers `scripts/pause_menu.gd` in all three scenes: `Escape` opens it with the pointer free while the tree stays unpaused and held movement is inert, gameplay keys do nothing behind it, **SAVE GAME** writes the journey and reports it, the display row keeps the mode the window really has, **RESUME** recaptures mouse-look, and each exit row performs its own hand-off (the title menu from the world, the lobby from the arena, the town from the delve). `host_leave_regression.gd` uses two real ENet processes: a guest follows a host's fall into the delve, the host's socket disappears, and the guest must come back with its own body on layer 4 colliding with the world and the mobs, standing at a steady height in the resumed frontier, with the quick menu already open. `town_services_regression.gd` walks the PvE town: the three keeper counters, the stash chest, the arena portal, the open hatch cell, the town-gate spawn, I/P panel switching, vendor buying, stash transfers and unarmed world drops. `title_menu_regression.gd` covers the four doors and nothing else: New Campaign starts a fresh warband and purse, Resume Campaign is gated on a real save and opens its checkpoint, Join Game rereads the cached name/address/port every time its form opens, Host Game opens on the remembered host port with New Game and From Checkpoint asking for the right world start, and From Checkpoint says what the save would open.
 
 ### Rebuilding character assets
 
-The bundled Ranger model and motions are **CC0**: Ranger/base characters and locomotion by [Quaternius](https://quaternius.com/), with the two-handed heavy attack by [Gres](https://opengameart.org/content/humanoid-soulslike-animations). The Briar wolf is original procedural work authored by `tools/prepare_wolf.py`; it is not derived from those sources. Exact source files, extraction ranges, wolf measurements and modifications are recorded in [the asset provenance](assets/characters/LICENSE.txt). No paid pack or game account is needed.
+The bundled Ranger model and motions are built from **CC0** sources — Ranger/base characters and locomotion by [Quaternius](https://quaternius.com/), with the two-handed heavy attack by [Gres](https://opengameart.org/content/humanoid-soulslike-animations) — and the shipped GLB is licensed under **CC BY-NC-SA 4.0** like the rest of `assets/` ([LICENSE.md](LICENSE.md)); the sources stay CC0. The Briar wolf is original procedural work authored by `tools/prepare_wolf.py`; it is not derived from those sources. Exact source files, extraction ranges, wolf measurements and modifications are recorded in [the asset provenance](assets/characters/LICENSE.txt). No paid sources were used.
 
 To re-author the assets, install Blender 5.1+, download and unpack the listed free sources into `.runtime/character-source`, then run:
 
@@ -883,3 +944,15 @@ The same rebuild imports `Crouch_Idle_Loop` and `Crouch_Fwd_Loop` from the exist
 Optional Godot MCP tooling is pinned under `tools/`; run `npm ci --ignore-scripts` there if needed. Local MCP configuration, engine binaries, imports, caches and logs are excluded from Git. They are not required from the original development machine.
 
 Godot is downloaded separately under its [MIT license](https://godotengine.org/license/). [Official engine release](https://github.com/godotengine/godot/releases/tag/4.7.2-stable). Archery stance reference: [World Archery recurve technique](https://extranet.worldarchery.sport/documents/index.php/Media/Information_Sheets/003_Guide_to_Recurve_Technique.pdf).
+
+## License
+
+**Non-Commercial Source-Available Dual License** — see [LICENSE.md](LICENSE.md) for the full terms.
+
+| Part | License | What it means |
+| --- | --- | --- |
+| Game code (`scripts/`, `tools/`, `tests/`, scenes, shaders) | PolyForm Noncommercial 1.0.0 | Read, run, study, modify and share for personal, hobby, research, educational or other noncommercial use, keeping the `Required Notice:` line. No commercial use. |
+| Game assets (models, textures, animation, audio, UI art, levels, docs) | CC BY-NC-SA 4.0 | Play, stream, remix and mod for free with credit. No selling, and modifications must be shared under the same terms. |
+| Names, logos, trailer, store page and the compiled Steam build | All rights reserved | Forks may not use the "Ironwood" / "Ghost of the Warband" names or imply endorsement, and only the copyright holder may sell the game. |
+
+Third-party material keeps its own license (Quaternius and Gres CC0 sources, CC BY Freesound takes, SIL OFL fonts, the MIT Godot engine) — the credits that must ship with a build are in `assets/audio/LICENSE.txt`, `assets/characters/LICENSE.txt` and `assets/ui/fonts/`. Contributions are accepted under the [contributor terms](LICENSE.md#6-contributions-contributor-license-agreement), which keep the commercial build possible.
