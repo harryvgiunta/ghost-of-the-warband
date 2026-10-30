@@ -44,6 +44,9 @@ required to rebuild any of it.
 | `assets/characters/forest/ironwood_<mob>.glb.import` | Godot import settings (embedded images, 60 Hz sampling) |
 | `scripts/forest_mob.gd` | Gameplay profiles; reuses the devil state machine via its virtual hooks |
 | `scripts/forest_mob_visual.gd` | Presentation table for the imported GLBs |
+| `tools/prepare_watcher_skins.py` + `tools/build_watcher_skins.py` | The three creatures refitted onto the warband's 65-bone rig as whole-body skins (`--no-captures` skips the review renders) |
+| `assets/characters/watchers/ironwood_watcher_<species>.glb` + `.json` + `.glb.import` | Runtime skin per species: one joined skinned mesh, the ranger's bones, no embedded images |
+| `scripts/warband/watcher_visual.gd` | The campaign's humanoid presentation for those skins (`scripts/warband/cage_watcher.gd` fields them) |
 | `scripts/range_world.gd` | 19 `forest_spawns`, separate from the 36 legacy and 16 devil tables |
 | `tests/forest_mobs_regression.gd` | Asset, presentation, gameplay, head-zone and frontier coverage |
 
@@ -99,8 +102,9 @@ strips a trailing `_Loop` from animation names, so the clips are named
 | Ossuary stalker | 2.400 | 1.100 | 0.700 | 1.25 (0.55) | 0.40 | 1.10 |
 | Gallowsroot | 3.200 | 1.800 | 1.000 | 2.10 (1.05) | 0.60 | 1.80 |
 
-The **hollow warden** carries five more, because it is the one the warband fights
-with weapons in hand (`scripts/warband/cage_watcher.gd`):
+The **hollow warden** carries five more, because it is the one creature with a
+weapon vocabulary: a body that has something in its hand can sweep, lunge, brace
+and stalk instead of only clawing.
 
 | Clip | Duration | Loop | Impact |
 | --- | ---: | --- | ---: |
@@ -115,6 +119,11 @@ controller can hold for any window and cut into an attack; the stagger is
 authored as a delta over the idle stance so its last frame *is* the idle and it
 can be cut short anywhere; the crouch is a loopable low stalk. The other two mobs
 keep the six-clip set and the shared sampler plays them exactly as before.
+
+The frontier's wardens (`RangeWorld.forest_spawns`) play all eleven through
+`scripts/forest_mob_visual.gd`. The campaign's watchers do **not** any more: they
+wear these creatures as skins on the warband's rig and fight on the ranger's own
+clips - see *Watcher skins* below.
 
 Attack timings are authored to the gameplay clock so
 `DevilMobVisual._seek_attack()` places the strike pose on the damage frame:
@@ -287,3 +296,68 @@ forged kit. It is the forest's own material language applied to worn gear.
   (15 bits) and `ArmorData.SHIELD_BIT` (bit 15) are one contract shared by the
   HUD, the arena, the delve and the host-authoritative snapshots; never
   hardcode either mask.
+
+## Watcher skins
+
+The campaign's watchers are these creatures and a human's fight at the same time.
+`tools/prepare_watcher_skins.py` turns each shipped creature mesh into a
+**whole-body skin for `ironwood_ranger.glb`'s 65-bone skeleton**, so
+`scripts/warband/watcher_visual.gd` can drive it with the warband's authored
+walk, run, swing, guard, flinch and fall instead of the six creature clips.
+
+What the tool does, in order:
+
+1. Both GLBs are imported and the creature is turned to the ranger's facing and
+   scaled by `1 / fit_scale`, where `fit_scale` is the creature's `neck_01`
+   height over the ranger's (warden 1.1312, stalker 1.0260, gallowsroot 1.1444).
+   The runtime scales the rig back up by the same number, so a watcher stands
+   exactly as tall as the creature it was.
+2. The ranger's arms are posed onto the creature's hanging arms (clavicle, upper
+   arm, forearm, hand). That pose is the **bind**: the skin is weighted in it and
+   exported on a skeleton whose rest *is* it, so the ranger's clips swing the
+   creature from the stance it was authored in - no T-pose round trip through the
+   sleeves and the hood.
+3. Every creature bone gets one affine fit onto its ranger counterpart: the
+   segment to the next joint is translated, turned and stretched onto the ranger
+   segment. The neck, head, jaw and crown are carried rigidly on the neck's
+   anchor (the hood keeps its height and the antlers their size), the claws ride
+   the hand, and the robe/shroud fans follow the thighs (a side fan 62% its own
+   leg, the front and back panels 50/50 across both) so a hem stays a hem. A
+   vertex moves by the blend of its own bones' fits; normals by the inverse
+   transpose of the same blend.
+4. Weights are the creature's own, renamed onto ranger bones (fans onto the
+   thighs, claws onto the proximal finger bones, crown onto the head), limited to
+   four influences and renormalised.
+
+Each skin is one joined skinned mesh with the creature's material slots and **no
+embedded images** - `scripts/warband/watcher_visual.gd` copies the creature
+GLB's own PBR materials per body and multiplies the variant's tint into them, so
+the atlases exist once on disk and two wardens are still two colours.
+
+```powershell
+python tools/build_watcher_skins.py all
+# or one species
+python tools/build_watcher_skins.py hollow_warden
+```
+
+The wrapper runs Blender 5.1 in background mode (`IRONWOOD_BLENDER` overrides the
+executable). Intermediates and the review captures land in
+`.runtime/watcher-skins/<species>/captures/`: the bind pose beside the source
+creature, then the ranger's own idle, walk, run, overhead, guard, stab and
+crouch, textured and in clay. Reimport in Godot and run
+`tests/watcher_variants_regression.gd` after a rebuild; it compares each skin
+against its adjacent JSON (fit scale, 65 bones, no images, node name) and the
+live bodies against the rig.
+
+| Skin | Triangles | Bones | Deforming bones | Bind height | Vertices |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Hollow warden | 30,234 | 65 | 22 | 3.76 m | 23,279 |
+| Ossuary stalker | 49,214 | 65 | 22 | 2.48 m | 33,835 |
+| Gallowsroot | 46,538 | 65 | 22 | 2.90 m | 33,591 |
+
+Measured from the exported GLBs. The height is the creature's own (the antler
+crown included, not in the collision capsule) and the runtime reproduces it
+exactly: `Archer.body_scale()` is `fit_scale x variant silhouette`, and
+`tests/watcher_variants_regression` asserts that a body earns the material it
+dresses with, that the ranger's own meshes are hidden under the skin, and that
+the head zone rides the rig's head.

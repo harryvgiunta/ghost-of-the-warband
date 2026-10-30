@@ -1,17 +1,24 @@
 extends "res://scripts/forest_mob.gd"
-## The camp's watchers: the wood's antlered wardens, armed and varied.
+## The camp's watchers: the wood's own creatures, armed and varied, fighting on
+## the warband's rig.
 ##
-## A watcher is the hollow warden of the Unholy Forest - the same imported body,
-## the same baked clips, the same authoritative mob state machine - with three
-## things of its own:
+## A watcher is one of the three Unholy Forest mobs - the Hollow warden, the
+## Ossuary stalker or the Gallowsroot - and it is the wood's creature to look at
+## and a human to fight. `scripts/warband/watcher_visual.gd` dresses the shared
+## `Archer` rig with a body skin made from the creature's own mesh
+## (`tools/prepare_watcher_skins.py`), so the body walks, runs, cuts, guards,
+## flinches and falls on the ranger's authored clips while every surface on it is
+## still the creature's. The state machine is the forest's: same sight, same
+## pursuit memory, same swept move, same damage funnel, same ragdoll.
 ##
-##   * the variant: a deterministic table entry (paint, silhouette size, weapon,
-##     favourite swing, guard share, crouch) picked from the body's id and the
-##     ordinal in its node name, so a clearing of watchers reads as a pack of
-##     creatures instead of one creature copied;
-##   * the arm: a catalog piece built into its right hand as the real model the
-##     warband holds (`sword.gd` / `dagger.gd` / `bow.gd` off the hand bone), and
-##     only ever the makeshift tier - the camp is a knife fight in the mud;
+## Three things belong to the watcher itself:
+##
+##   * the variant: a deterministic table entry (species, paint, silhouette size,
+##     weapon, favourite swing, guard share, crouch) picked from the body's id and
+##     the ordinal in its node name, so a squad reads as a pack of creatures
+##     instead of one creature copied;
+##   * the arm: a catalog piece held by the rig's own weapon slots, and only ever
+##     the makeshift tier - the camp is a knife fight in the mud;
 ##   * the fight: three swings to choose between (a sweep, a lunge and the plain
 ##     overhead), a rolled guard window it holds instead of trading, a stagger
 ##     when a real blow lands, and a stalking crouch it rests in.
@@ -21,19 +28,57 @@ extends "res://scripts/forest_mob.gd"
 ## `health_pool`, `alive`, `player`, the `defeated`/`attacked` signals, and the
 ## three dials a wave sets on its own bodies (`blow_scale`, `guard_scale`,
 ## `swing_gap_scale`).
-##
-## Everything else is inherited and untouched: sight and the pursuit memory, the
-## swept move, the damage funnel, the ragdoll corpse, the tick budget. Which clip
-## plays is the sampler's business (`forest_mob_visual.gd` -> `devil_mob_visual.gd`);
-## this script only decides what the body is doing.
 
 const ArmorData = preload("res://scripts/armor_data.gd")
 ## The item catalog: a variant names catalog pieces and the corpse lists them.
 const Catalog = preload("res://scripts/player_state.gd")
 
-## The species the camp keeps on its gate. A watcher is a warden whatever a
-## scene forgets to set.
+## The three species the wood fields. `mob_id` is the species, and it is what
+## the scene sets before the body enters the tree; a scene that forgets gets the
+## warden, because that is the camp's gate.
 const WARDEN_ID := "hollow_warden"
+const STALKER_ID := "ossuary_stalker"
+const GALLOWSROOT_ID := "gallowsroot"
+const SPECIES_IDS := [WARDEN_ID, STALKER_ID, GALLOWSROOT_ID]
+
+## The species' gameplay, inherited from the forest's own numbers so a watcher
+## moves, reaches and swings like the creature it is. `roam` is zeroed at spawn -
+## a watcher holds its post - and the scene owns the health pool.
+const WATCHER_PROFILES := {
+	WARDEN_ID: {
+		"display": "Hollow warden", "kind": 9,
+		"health": 96.0, "damage": 16.0, "reach": 2.35,
+		"walk_speed": 1.35, "run_speed": 3.60, "orbit": 5.0,
+		"sight": 30.0, "gold": 13,
+		"radius": 0.50, "height": 2.20, "aim": 1.72,
+		"windup": 0.55, "strike": 0.20, "recover": 0.65,
+		"cooldown": 1.50, "lunge": 5.6, "turn": 8.0,
+		"behaviour": "charger", "strafe": 0.85, "blood": 1.00,
+		"packed": true, "roam": 6.0,
+	},
+	STALKER_ID: {
+		"display": "Ossuary stalker", "kind": 10,
+		"health": 54.0, "damage": 10.0, "reach": 1.95,
+		"walk_speed": 1.50, "run_speed": 4.90, "orbit": 6.0,
+		"sight": 32.0, "gold": 10,
+		"radius": 0.34, "height": 2.05, "aim": 1.50,
+		"windup": 0.30, "strike": 0.13, "recover": 0.42,
+		"cooldown": 1.00, "lunge": 7.6, "turn": 11.0,
+		"behaviour": "crawler", "strafe": 1.30, "blood": 0.80,
+		"packed": true, "roam": 7.0,
+	},
+	GALLOWSROOT_ID: {
+		"display": "Gallowsroot", "kind": 11,
+		"health": 168.0, "damage": 24.0, "reach": 2.55,
+		"walk_speed": 1.00, "run_speed": 2.60, "orbit": 4.4,
+		"sight": 22.0, "gold": 20,
+		"radius": 0.46, "height": 2.10, "aim": 1.85,
+		"windup": 0.85, "strike": 0.26, "recover": 0.95,
+		"cooldown": 2.40, "lunge": 3.4, "turn": 5.0,
+		"behaviour": "brute", "strafe": 0.0, "blood": 1.50,
+		"packed": true, "roam": 3.0,
+	},
+}
 
 ## The pair the lesson fields are thinned bodies; everything else that holds the
 ## road is a hard body. Both are 30% under their old pools (31/101).
@@ -82,64 +127,81 @@ const STAGGER_SECONDS := 0.60
 ## swing would have.
 const TRADE_REACH := 1.15
 
-## The deterministic variant table. Every entry is a creature: a paint, a build, a
-## piece in its hand and a way of fighting. `tint` multiplies the authored
-## surfaces (so a warden keeps its PBR maps and its antlers are its own colour),
-## `scale` is applied uniformly to the whole body, `main` is always from the
-## makeshift tier, `swing` is the attack it favours - the pool repeats it, so it
-## is a preference and not a rotation - and `guard` is the share of exchanges the
-## body braces through (never 1.0). `armor` and `pieces` are what the corpse
-## carries, and in the first scenario that is the makeshift set or nothing: the
-## slots vary so two wardens are not the same corpse, the tier does not.
+## The deterministic variant table. Every entry is a creature: a species, a
+## paint, a build, a piece in its hand and a way of fighting. `tint` multiplies
+## the creature's authored surfaces (so a warden keeps its PBR maps and its
+## antlers are its own colour), `scale` is applied uniformly to the whole body,
+## `main` is always from the makeshift tier, `swing` is the attack it favours -
+## the pool repeats it, so it is a preference and not a rotation - and `guard` is
+## the share of exchanges the body braces through (never 1.0). `armor` and
+## `pieces` are what the corpse carries, and in the first scenario that is the
+## makeshift set or nothing: the slots vary so two watchers are not the same
+## corpse, the tier does not.
+##
+## The species are interleaved on purpose: `variant_index_for` walks the table
+## with a step coprime to its size, so the ordinals a scene hands out in order
+## come back as a mixed squad rather than a run of one creature.
 const VARIANTS := [
-	{"name": "Moss Warden", "scale": 1.02, "tint": Color(0.72, 0.86, 0.62),
+	{"name": "Moss Warden", "species": WARDEN_ID, "scale": 1.02,
+		"tint": Color(0.72, 0.86, 0.62),
 		"main": "club_makeshift", "swing": SWING_SLASH,
 		"armor": "makeshift", "pieces": ["chest", "legs"],
 		"guard": 0.52, "crouch": false},
-	{"name": "Ash Reaver", "scale": 0.90, "tint": Color(0.84, 0.86, 0.90),
-		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "makeshift", "pieces": ["chest", "head"],
-		"guard": 0.44, "crouch": true},
-	{"name": "Bone Picker", "scale": 1.16, "tint": Color(1.00, 0.96, 0.84),
-		"main": "club_makeshift", "swing": SWING_OVERHEAD,
-		"armor": "makeshift", "pieces": ["chest", "hands"],
-		"guard": 0.60, "crouch": false},
-	{"name": "Rustcoat", "scale": 1.24, "tint": Color(0.96, 0.74, 0.58),
-		"main": "branch_heavy", "swing": SWING_STAB,
-		"armor": "makeshift", "pieces": ["chest", "legs"],
-		"guard": 0.48, "crouch": false},
-	{"name": "Dull Violet", "scale": 0.94, "tint": Color(0.82, 0.74, 0.96),
-		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "makeshift", "pieces": ["chest", "legs", "feet"],
-		"guard": 0.66, "crouch": true},
-	{"name": "Tallow Sentry", "scale": 1.30, "tint": Color(1.00, 0.92, 0.68),
-		"main": "club_makeshift", "swing": SWING_SLASH,
-		"armor": "makeshift", "pieces": ["chest", "head"],
-		"guard": 0.56, "crouch": false},
-	{"name": "Moss Stalker", "scale": 0.88, "tint": Color(0.72, 0.86, 0.62),
+	{"name": "Moss Stalker", "species": STALKER_ID, "scale": 0.88,
+		"tint": Color(0.72, 0.86, 0.62),
 		"main": "dagger_ironwood", "swing": SWING_STAB,
 		"armor": "naked", "pieces": [],
 		"guard": 0.40, "crouch": true},
-	{"name": "Ashen Warden", "scale": 1.10, "tint": Color(0.84, 0.86, 0.90),
-		"main": "branch_heavy", "swing": SWING_OVERHEAD,
+	{"name": "Ash Reaver", "species": WARDEN_ID, "scale": 0.90,
+		"tint": Color(0.84, 0.86, 0.90),
+		"main": "dagger_ironwood", "swing": SWING_STAB,
+		"armor": "makeshift", "pieces": ["chest", "head"],
+		"guard": 0.44, "crouch": true},
+	{"name": "Rustcoat", "species": GALLOWSROOT_ID, "scale": 1.24,
+		"tint": Color(0.96, 0.74, 0.58),
+		"main": "branch_heavy", "swing": SWING_STAB,
 		"armor": "makeshift", "pieces": ["chest", "legs"],
-		"guard": 0.50, "crouch": false},
-	{"name": "Bone Herald", "scale": 0.98, "tint": Color(1.00, 0.96, 0.84),
+		"guard": 0.48, "crouch": false},
+	{"name": "Dull Violet", "species": STALKER_ID, "scale": 0.94,
+		"tint": Color(0.82, 0.74, 0.96),
+		"main": "dagger_ironwood", "swing": SWING_STAB,
+		"armor": "makeshift", "pieces": ["chest", "legs", "feet"],
+		"guard": 0.66, "crouch": true},
+	{"name": "Bone Picker", "species": WARDEN_ID, "scale": 1.16,
+		"tint": Color(1.00, 0.96, 0.84),
+		"main": "club_makeshift", "swing": SWING_OVERHEAD,
+		"armor": "makeshift", "pieces": ["chest", "hands"],
+		"guard": 0.60, "crouch": false},
+	{"name": "Bone Herald", "species": STALKER_ID, "scale": 0.98,
+		"tint": Color(1.00, 0.96, 0.84),
 		"main": "club_makeshift", "swing": SWING_SLASH,
 		"armor": "makeshift", "pieces": ["chest", "head"],
 		"guard": 0.62, "crouch": false},
-	{"name": "Rust Widow", "scale": 1.06, "tint": Color(0.96, 0.74, 0.58),
-		"main": "dagger_ironwood", "swing": SWING_STAB,
-		"armor": "makeshift", "pieces": ["chest", "head", "legs"],
-		"guard": 0.58, "crouch": true},
-	{"name": "Violet Bound", "scale": 1.20, "tint": Color(0.82, 0.74, 0.96),
+	{"name": "Violet Bound", "species": GALLOWSROOT_ID, "scale": 1.20,
+		"tint": Color(0.82, 0.74, 0.96),
 		"main": "branch_heavy", "swing": SWING_STAB,
 		"armor": "makeshift", "pieces": ["chest", "legs"],
 		"guard": 0.46, "crouch": false},
-	{"name": "Tallow Throat", "scale": 0.92, "tint": Color(1.00, 0.92, 0.68),
+	{"name": "Tallow Sentry", "species": WARDEN_ID, "scale": 1.30,
+		"tint": Color(1.00, 0.92, 0.68),
+		"main": "club_makeshift", "swing": SWING_SLASH,
+		"armor": "makeshift", "pieces": ["chest", "head"],
+		"guard": 0.56, "crouch": false},
+	{"name": "Ashen Warden", "species": WARDEN_ID, "scale": 1.10,
+		"tint": Color(0.84, 0.86, 0.90),
+		"main": "branch_heavy", "swing": SWING_OVERHEAD,
+		"armor": "makeshift", "pieces": ["chest", "legs"],
+		"guard": 0.50, "crouch": false},
+	{"name": "Tallow Throat", "species": GALLOWSROOT_ID, "scale": 0.92,
+		"tint": Color(1.00, 0.92, 0.68),
 		"main": "club_makeshift", "swing": SWING_OVERHEAD,
 		"armor": "makeshift", "pieces": ["chest"],
 		"guard": 0.68, "crouch": false},
+	{"name": "Rust Widow", "species": STALKER_ID, "scale": 1.06,
+		"tint": Color(0.96, 0.74, 0.58),
+		"main": "dagger_ironwood", "swing": SWING_STAB,
+		"armor": "makeshift", "pieces": ["chest", "head", "legs"],
+		"guard": 0.58, "crouch": true},
 ]
 
 ## Set before the body enters the tree: the pair Corvin fights are the thinned
@@ -183,11 +245,22 @@ var _enraged := false
 var _awake := false
 
 
-## The camp sets `mob_id` (`hollow_warden`) before the body enters the tree; a
-## scene that forgets still gets a warden rather than the devil the mob class
+## The camp sets `mob_id` (one of `SPECIES_IDS`) before the body enters the tree;
+## a scene that forgets still gets a warden rather than the devil the mob class
 ## defaults to. `mob_id` itself is the mob's own member.
 func _init() -> void:
 	mob_id = WARDEN_ID
+
+
+## The species' own gameplay: the forest's numbers, with the camp's own post
+## (`roam` zeroed here) and the scene owning the pool.
+func _profiles() -> Dictionary:
+	return WATCHER_PROFILES
+
+
+## The presentation: the warband's rig wearing the creature's skin.
+func _visual_script():
+	return preload("res://scripts/warband/watcher_visual.gd")
 
 
 func _ready() -> void:
@@ -214,10 +287,20 @@ func _ready() -> void:
 
 # --- the mob surface the scenes call ---------------------------------------
 
+## Parked by the culler: the body is hidden and stops ticking, so the rig - the
+## heaviest presentation in the world - stops posing with it.
+func mob_sleep() -> void:
+	super()
+	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
+		_visual.set_parked(true)
+
+
 ## Start hunting: the senses are on from now on. The camp calls this when Corvin
 ## reaches the cages; a road cultist gets it when the leaving wakes the road.
 func mob_wake() -> void:
 	super()
+	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
+		_visual.set_parked(false)
 	if not alive:
 		return
 	if not _awake:
@@ -309,14 +392,33 @@ func gear_items() -> Array[String]:
 	return out
 
 
-## The chest, scaled with the body so a small warden is aimed at where it
-## actually stands.
+## The chest of the body that is actually drawn. Every watcher skin is fitted
+## onto the one rig, so the aim point is a fraction of the rendered height and
+## not the creature's authored aim height.
 func get_aim_position() -> Vector3:
-	return global_position + Vector3(0.0, float(profile.get("aim", 1.0)) * _body_scale, 0.0)
+	return global_position + Vector3(0.0, 1.50 * body_scale(), 0.0)
 
 
 func get_display_name() -> String:
 	return str(variant.get("name", profile.get("display", "Hollow warden")))
+
+
+## The species this watcher is, as the mob id it was spawned with.
+func species_id() -> String:
+	return mob_id
+
+
+## The species' readable name ("Hollow warden", "Ossuary stalker", ...).
+func species_display() -> String:
+	return str(profile.get("display", mob_id))
+
+
+## The height the body is drawn at, relative to the authored 1.87 m rig: the
+## species' fit scale times the variant's silhouette.
+func body_scale() -> float:
+	if is_instance_valid(_visual) and _visual.has_method("body_scale"):
+		return float(_visual.body_scale())
+	return _body_scale
 
 
 # --- the variant -----------------------------------------------------------
@@ -324,10 +426,11 @@ func get_display_name() -> String:
 ## The table entry for this body, seeded by its id and its ordinal. The camp
 ## names its watchers `CampWatcher1..N` and the road names its own, so the digits
 ## in the node name walk the table; a body with no ordinal falls back to the id's
-## hash.
+## hash. The walk is inside the body's own species: a stalker is a stalker.
 func _pick_variant() -> Dictionary:
+	var table := table_for(mob_id)
 	_variant_slot = variant_index_for(mob_id, name)
-	var out: Dictionary = (VARIANTS[_variant_slot] as Dictionary).duplicate(true)
+	var out: Dictionary = (table[_variant_slot % table.size()] as Dictionary).duplicate(true)
 	if not MAKESHIFT_TIER.has(str(out.get("main", ""))):
 		out["main"] = "dagger_ironwood"
 	# The first scenario pays in salvage, in the hand and on the corpse alike. The
@@ -357,27 +460,42 @@ func _pick_variant() -> Dictionary:
 	return out
 
 
-## The deterministic table index for a watcher id. `7` is coprime with the table
-## size, so consecutive ordinals walk every entry instead of repeating.
+## The variant rows a species fields. A watcher's own walk of the table is over
+## these, so one squad can stand three creatures and each still varies.
+static func table_for(species: String) -> Array:
+	var out: Array = []
+	for entry in VARIANTS:
+		if str(entry.get("species", WARDEN_ID)) == species:
+			out.append(entry)
+	if out.is_empty():
+		for entry in VARIANTS:
+			out.append(entry)
+	return out
+
+
+## The deterministic table index for a watcher of one species. `7` is coprime
+## with the table size, so consecutive ordinals walk every entry of that species
+## instead of repeating.
 static func variant_index_for(watcher_id: String, node_name: String) -> int:
 	var digits := ""
 	for index in node_name.length():
 		var code := node_name.unicode_at(index)
 		if code >= 48 and code <= 57:
 			digits += node_name[index]
+	var size := table_for(watcher_id).size()
 	var base := absi(watcher_id.hash())
 	if digits.is_empty():
-		return base % VARIANTS.size()
-	return (base + int(digits) * 7) % VARIANTS.size()
+		return base % size
+	return (base + int(digits) * 7) % size
 
 
 ## One variant's identity, as the regression compares it. Two bodies with the
 ## same id and ordinal sign the same string on every run.
 static func signature_of(entry: Dictionary) -> String:
 	var tint: Color = entry.get("tint", Color.WHITE)
-	return "%0.2f|%s|%s|%s|%s|%s" % [float(entry.get("scale", 1.0)),
-		tint.to_html(false), str(entry.get("main", "")), str(entry.get("swing", "")),
-		str(entry.get("armor", "")),
+	return "%s|%0.2f|%s|%s|%s|%s|%s" % [str(entry.get("species", WARDEN_ID)),
+		float(entry.get("scale", 1.0)), tint.to_html(false), str(entry.get("main", "")),
+		str(entry.get("swing", "")), str(entry.get("armor", "")),
 		"|".join(PackedStringArray(entry.get("pieces", [])))]
 
 
@@ -399,10 +517,6 @@ func crouch_armed() -> bool:
 
 func swing_pool() -> Array:
 	return swing_pool_for(weapon_item, str(variant.get("swing", SWING_OVERHEAD)))
-
-
-func body_scale() -> float:
-	return _body_scale
 
 
 func paint_tint() -> Color:
@@ -560,11 +674,13 @@ func _enter_dead(announce: bool) -> void:
 ## The build. The silhouette is scaled uniformly - a stretched body would distort
 ## the mesh - and the physics capsule stays the profile's, so the reach, the aim
 ## height and the hit volume the fight is tuned on do not drift with a variant.
+## The scale goes to the rig (the species' fit scale times this), never to the
+## body container: the rig's own height drives its head zone and its aim.
 func _shape_body() -> void:
 	_body_scale = clampf(float(variant.get("scale", 1.0)), 0.88, 1.30)
-	if is_instance_valid(_body):
-		_body.scale = Vector3.ONE * _body_scale
 	if is_instance_valid(_visual):
+		if _visual.has_method("set_silhouette"):
+			_visual.set_silhouette(_body_scale)
 		_visual.set_tint(variant.get("tint", Color.WHITE))
 
 
@@ -575,23 +691,35 @@ func _apply_weapon() -> void:
 
 ## Every body in the wood walks the table with a field dressing tied at its belt:
 ## the squad's medicine is looted off the mobs it kills, never handed out and never
-## out of the shared stash. The variant's own ordinal still decides the ichor, so
-## the same warden always carries the same kit.
+## out of the shared stash. The ordinals of a clearing still decide the ichor, so
+## the same body always carries the same vial.
 const CARRIED_BANDAGE := "bandage_linen"
-## One warden in three also carries a vial of its own ichor - the reagent the
-## campaign's fourth order asks for, and the only reagent the altar anoints with in
-## the first scenario. It is the variant's property again, not a roll at the kill,
-## so a corpse that was killed twice on two machines carried the same vial.
+## One body in three also carries a vial of its own ichor - the reagent the
+## campaign's fourth order asks for, and the only way the bench ever gets it in
+## the first scenario. It is the body's property again, not a roll at the kill,
+## so a corpse that was killed twice on two machines carried the same vial - and
+## it is off the body's own identity rather than its table index, because the
+## table is per species and its size is not the wood's one-in-three.
 const CARRIED_ICHOR := "ichor_vial"
 const ICHOR_EVERY := 3
 
 func _stamp_carried() -> void:
 	carried.clear()
 	carried.append(CARRIED_BANDAGE)
-	# Slots 2, 5, 8 and 11 of the twelve: four wardens in a full table, and the
-	# clearings that field six get one or two of them.
-	if _variant_slot % ICHOR_EVERY == ICHOR_EVERY - 1:
+	if ichor_slot(mob_id, name) % ICHOR_EVERY == ICHOR_EVERY - 1:
 		carried.append(CARRIED_ICHOR)
+
+
+## The one-in-three that decides a vial: a pure function of the body's id and the
+## ordinal in its node name, so a clearing sees both kinds and the same warden
+## always carries the same kit.
+static func ichor_slot(watcher_id: String, node_name: String) -> int:
+	var digits := 0
+	for index in node_name.length():
+		var code := node_name.unicode_at(index)
+		if code >= 48 and code <= 57:
+			digits = digits * 10 + (code - 48)
+	return absi(watcher_id.hash()) + digits * 7
 
 
 func _stamp_armor_items() -> void:

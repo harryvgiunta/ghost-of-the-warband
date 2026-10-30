@@ -126,7 +126,7 @@ the tutorial's to take.
      nothing.
    * **The quartermaster** takes the arrow once the band is at the cap and hands
      over the cage line — four soldiers, `G` at each latch. Turn it in and he hands
-     over the watcher bounty: twenty hollow wardens. Turn that in and he opens the
+     over the watcher bounty: twenty of the wood's watchers (all three species count). Turn that in and he opens the
      campaign's over-arching order, **FIND THE CRYPT**, which is a shell: there is
      no Crypt in the world yet, and the order stays open until there is.
    * **The vial.** A warden's ichor drops off the wardens themselves (four variants
@@ -225,7 +225,7 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | Town folk | `town_folk.gd` (five armoured keepers), `town_guard.gd` (three static watch archers) |
 | UI | `warband_hud.gd`, `warband_screen.gd`, `warband_paperdoll.gd`, `tutorial_card.gd` |
 | World | `scenes/warband_world.tscn` + `world_scene.gd`: the one campaign scene. Owns the soul controller, camera, HUD, warband screen, paperdoll, tip channel, loot vacuum, crawl, revive, brand runner and the single ground (`terrain.gd`); builds the three areas and hands each the same controller. `GameFlow.world_start` says where the warband is put down ("camp" on a new game, "town" for a resumed save or the arena's return) |
-| Areas | `cage_escape.gd` (the camp clearing: cages, latches, sequencer, watchers, the six that come out of the trees), `escape_run.gd` (the trail: pursuers and its two endings), `town_hub.gd` (the square: stalls, stash, altar, keeper, expedition gate). Each takes `host` — the world — and in `host != null` mode builds only its own content: no controller, no HUD, no environment, no door |
+| Areas | `cage_escape.gd` (the camp clearing: cages, latches, sequencer, watchers, the four that come out of the trees), `escape_run.gd` (the trail: pursuers and its two endings), `town_hub.gd` (the square: stalls, stash, altar, keeper, expedition gate). Each takes `host` — the world — and in `host != null` mode builds only its own content: no controller, no HUD, no environment, no door |
 | Camp clearing | `camp_clearing.gd`: the camp as a clearing in the woods — treeline, 196 trees and 155 bushes round the edge, a broken stake fence (10 runs, 357 stakes), 17 torches, the mouth onto the trail |
 | The trail | `run_forest.gd` (the 1,374.6 m way through the wood and its dressing — no lane, no walls, a worn line marked by paired torches; returns `{lane, length, width, torches, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared by both areas) |
 | Scenes (previews) | `scenes/cage_escape.tscn` and `scenes/town_hub.tscn` stay as area previews for the art and quartermaster tests; the campaign does not load them. `admin_arena.tscn` is the one scene change left |
@@ -286,10 +286,14 @@ Integration seams deliberately placed in the base game:
     a floor.
 13. **Scene doors are one signal per scene** (`scene_requested(path)`), bound to
     `GameFlow`; scenes never load other scenes.
-14. **The camp's fight tuning is deliberate:** watchers have 72 health / 5 damage
-    / run 5.6 / sight 60 / orbit 1.9 and must be pointed at the squad on spawn
-    (`CageWatcher.hunt`); the second wave is **six** armed watchers, 2.5 s after
-    the first pair, each dropping its weapon; the escape needs eight kills.
+14. **The camp's fight tuning is deliberate:** a watcher's health is the scene's
+    pool (pair 21, ambush 42, the rest `HARDENED_HEALTH` 101), its damage, reach,
+    speeds, orbit and cadence are its **species'** own (`WATCHER_PROFILES`), and
+    it must be pointed at the squad on spawn (`CageWatcher.hunt`); the second wave
+    is **four** armed watchers (one of each creature plus a second warden), 2.5 s
+    after the first pair, each dropping its weapon; the escape needs six kills.
+    Every watcher is the creature's skin on the warband's rig - do not take the
+    camp back to `devil_mob_visual`'s creature clips.
 15. **The opening never moves the player** (no auto-possession, no auto-walk) and **loot is not announced** —
     both were explicit player requests. Do not reintroduce auto-possession or
     pickup feeds.
@@ -411,8 +415,9 @@ Integration seams deliberately placed in the base game:
     contract is measured off *every* collider the lane carries, not just the tree
     rows: nothing may sit within `CLEAR_HALF` 1.55 m of the centre line.
 31. **Ichor is item-shaped; essence is a wallet; steel is plain until anointed.**
-    A warden's ichor is a carried catalog piece (`ichor_vial`), dropped
-    deterministically by four of the twelve watcher variants. Stock weapons carry
+    A watcher's ichor is a carried catalog piece (`ichor_vial`), dropped
+    deterministically by one body in three (`ichor_slot` is a pure function of the
+    watcher's id and ordinal). Stock weapons carry
     no skill in any mode: `AbilityRules.granted(rig)` grants a hand's skill only
     when `rig.anointed[hand]` names it, and the warband fills that from the altar's
     `cruor.anointed` ledger (catalog id → ability id, so every copy carries it).
@@ -455,8 +460,8 @@ Integration seams deliberately placed in the base game:
 
 | Knob | Where | Now |
 | --- | --- | --- |
-| Watcher pools | `cage_watcher.gd` | pair 21 with `blow_scale` 0.5 and `windup_scale` 2.4 (`PAIR_LESSON_HEALTH` / `PAIR_*` in `cage_escape.gd`), the ambush 42, everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
-| Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
+| Watcher pools | `cage_watcher.gd` | pair 21 with `blow_scale` 0.5 and `windup_scale` 2.4 (`PAIR_LESSON_HEALTH` / `PAIR_*` in `cage_escape.gd`), the ambush 42, everyone else `HARDENED_HEALTH` 101; damage, reach, speeds and cadence are the species' own (`WATCHER_PROFILES`: warden 16 / 2.35 / run 3.60, stalker 10 / 1.95 / 4.90, gallowsroot 24 / 2.55 / 2.60), sight 60 |
+| Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 4 bodies - two wardens, a stalker and a gallowsroot, each with its makeshift piece - outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
 | Total watchers in the opening | `tutorial_sequencer.gd::GUARD_COUNT` | 6 (the pair + the four at the leaving); a tally for the checkpoint, never a gate |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% (arena seats; warband bodies always down, and any blow on a downed one finishes it) / 30-34 m / 8 |
@@ -480,8 +485,8 @@ Integration seams deliberately placed in the base game:
 | The cage line | `soldier_cages.gd` | four cages at lane fractions 0.34 / 0.52 / 0.68 / 0.86, 7.6-8.6 m off the line (alternating sides), `LATCH_REACH` 2.2 m from a footprint edge, `CAGE_BAR_LIFT` 2.6 m, soldiers `Bren / Hask / Ilse / Torvin` |
 | The warcamps | `watcher_warren.gd` | three camps of seven hollow wardens at fractions 0.72 / 0.80 / 0.90, **78 / 96 / 86 m** off the lane (past twice a warden's 60 m sight), one shared `MobWander` territory each, dressing from the village kit |
 | Free oaths and the dressing | `mercenary_vendor.gd::FREE_HIRES`, `warband_state.gd::dress_recruit` | the first 8 cost nothing (and 8 is the cap); a hire or a rescue takes the dearest spare in the shared stash for `main, off, head, chest, hands, legs, feet, neck, ring1, ring2` |
-| The ledger | `quest_log.gd::DEFS` | four rows: `free_the_soldiers` (rescue 4), `cull_the_watchers` (kill 20 `hollow_warden`), `find_the_crypt` (reach `crypt`, a shell with no place), `bind_the_ichor` (apply one `ichor_vial`: "Anoint a weapon with the warden's ichor") |
-| The ichor and the rite | `cage_watcher.gd::_stamp_carried`, `cruor_manager.gd::ANOINT_RECIPES` | four of twelve variants carry a vial; `ANOINT_RECIPES` is the one table that prices each of the twelve weapon/shield skills (all `{ichor_vial: 1}` today) — balance them apart there |
+| The ledger | `quest_log.gd::DEFS` | four rows: `free_the_soldiers` (rescue 4), `cull_the_watchers` (kill 20 of `WATCHER_IDS`: warden, stalker or gallowsroot), `find_the_crypt` (reach `crypt`, a shell with no place), `bind_the_ichor` (apply one `ichor_vial`: "Anoint a weapon with the warden's ichor") |
+| The ichor and the rite | `cage_watcher.gd::_stamp_carried`, `cruor_manager.gd::ANOINT_RECIPES` | one watcher in three carries a vial (`ichor_slot`); `ANOINT_RECIPES` is the one table that prices each of the twelve weapon/shield skills (all `{ichor_vial: 1}` today) — balance them apart there |
 | The loot click | `loot_hand.gd` | 0.9 s channel, 0.25 s cooldown, 2.0 m pile radius, 1.5 m walk-off, `LOOT_REACH` 2.6 m |
 | The map | `world_map.gd` | one page, `M`, never pauses, `REPAINT_SECONDS` 0.1, marks from `host.map_markers()` |
 | Town | `town_hub.gd` | `WALL_RADIUS` 22, 286 palisade stakes with one gap, 8 roofs (5 halls / 2 round huts / 1 stall), 5 armoured keepers, 3 watch archers at 26 m sight, 16 lights inside `town_stockade_regression.LIGHT_BUDGET` 17; the altar at `ALTAR_POINT` (8, 0, 4) owns exactly one (`RitualLight`) |
@@ -521,7 +526,7 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
-| `cage_escape_regression` | 341 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the six at the mouth, drops |
+| `cage_escape_regression` | 290 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the four at the mouth (one of each creature), drops |
 | `escape_run_regression` | 195 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 250 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |

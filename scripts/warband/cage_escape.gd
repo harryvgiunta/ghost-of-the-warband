@@ -178,9 +178,12 @@ const PAIR_BLOW_SCALE := 0.5
 const PAIR_WINDUP_SCALE := 2.4
 const PAIR_SWING_GAP_SCALE := 2.2
 const PAIR_GUARD_SCALE := 0.0
+## The pair that holds the camp's gate: two of the wood's creatures, and not the
+## same one twice - the opening squad is where the player meets what the wood
+## holds, so a warden and a stalker stand the lesson's first fight.
 const GATE_WATCHERS := [
-	{"post": Vector3(-4.2, 0.1, -20.5)},
-	{"post": Vector3(4.2, 0.1, -20.5)},
+	{"post": Vector3(-4.2, 0.1, -20.5), "species": "hollow_warden"},
+	{"post": Vector3(4.2, 0.1, -20.5), "species": "ossuary_stalker"},
 ]
 ## The second wave: the ambush the whole opening walks towards, and the first time
 ## the player faces a *group*. They come when the squad steps out of the camp - the
@@ -203,9 +206,15 @@ const AMBUSH_HEALTH := 42.0
 const AMBUSH_BLOW_SCALE := 0.5
 const AMBUSH_GUARD_SCALE := 0.45
 const AMBUSH_SWING_GAP_SCALE := 1.9
+## The ambush is the wood's whole host, so it is the first place all three
+## creatures are in one fight: two wardens, a stalker and a gallowsroot walking
+## out of the trees together. The weapons are the makeshift tier, the same as
+## every body in the camp.
 const REINFORCEMENTS := [
-	"club_makeshift", "dagger_ironwood", "club_makeshift", "bow_twig",
-	"club_makeshift", "dagger_ironwood",
+	{"item": "club_makeshift", "species": "hollow_warden"},
+	{"item": "dagger_ironwood", "species": "ossuary_stalker"},
+	{"item": "club_makeshift", "species": "gallowsroot"},
+	{"item": "branch_heavy", "species": "hollow_warden"},
 ]
 ## How close the soul's body has to be to the mouth for the wood to answer it.
 const ESCAPE_RADIUS := 6.0
@@ -859,7 +868,8 @@ func _install_watchers() -> void:
 		# The pair are the lesson's mooks: three shiv stabs each, half blows, a
 		# long telegraph before each swing, and no guard to break through.
 		var watcher := _add_watcher(spec["post"],
-			"CampWatcher%d" % (guards.size() + 1), "", PAIR_LESSON_HEALTH)
+			"CampWatcher%d" % (guards.size() + 1), "", PAIR_LESSON_HEALTH,
+			str(spec.get("species", WatcherScript.WARDEN_ID)))
 		watcher.blow_scale = PAIR_BLOW_SCALE
 		watcher.windup_scale = PAIR_WINDUP_SCALE
 		watcher.swing_gap_scale = PAIR_SWING_GAP_SCALE
@@ -867,10 +877,14 @@ func _install_watchers() -> void:
 
 
 func _add_watcher(at: Vector3, label: String, weapon: String = "",
-		health: float = WatcherScript.HARDENED_HEALTH) -> Node3D:
+		health: float = WatcherScript.HARDENED_HEALTH,
+		species: String = WatcherScript.WARDEN_ID) -> Node3D:
 	var watcher := WatcherScript.new()
 	watcher.name = label
-	watcher.mob_id = "hollow_warden"
+	# Named before the tree sees it: the species is the profile the body reads in
+	# `_ready`, so it has to be on the mob before `add_child`.
+	watcher.mob_id = species if WatcherScript.SPECIES_IDS.has(species) \
+		else WatcherScript.WARDEN_ID
 	watcher.health_pool = health
 	watcher.position = at
 	add_child(watcher)
@@ -934,16 +948,18 @@ func _drop_held_weapon(enemy) -> bool:
 
 
 
-## The ambush: six watchers out of the wood past the mouth, each carrying the
-## makeshift weapon it will drop when it falls. They are pointed at the nearest
-## body on the frame they exist, so they charge in instead of waiting to be
-## noticed.
+## The ambush: four watchers out of the wood past the mouth, each carrying the
+## makeshift weapon it will drop when it falls, and each one of the three
+## creatures the wood holds. They are pointed at the nearest body on the frame
+## they exist, so they charge in instead of waiting to be noticed.
 func _spawn_reinforcements() -> void:
 	var prey = nearest_standing_body(REINFORCE_POSTS[2])
 	for index in AMBUSH_COUNT:
 		var post: Vector3 = REINFORCE_POSTS[index % REINFORCE_POSTS.size()]
+		var spec: Dictionary = REINFORCEMENTS[index % REINFORCEMENTS.size()]
 		var watcher := _add_watcher(post, "CampWatcher%d" % (guards.size() + 1),
-			str(REINFORCEMENTS[index % REINFORCEMENTS.size()]), AMBUSH_HEALTH)
+			str(spec.get("item", "")), AMBUSH_HEALTH,
+			str(spec.get("species", WatcherScript.WARDEN_ID)))
 		watcher.blow_scale = AMBUSH_BLOW_SCALE
 		watcher.guard_scale = AMBUSH_GUARD_SCALE
 		watcher.swing_gap_scale = AMBUSH_SWING_GAP_SCALE

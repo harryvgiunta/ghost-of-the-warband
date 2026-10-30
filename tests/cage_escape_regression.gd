@@ -257,6 +257,7 @@ func check_spawn() -> void:
 	check(camp.cages_open_count() == 0,
 		"no latch is open at the start (%d)" % camp.cages_open_count())
 	check(camp.guards.size() == 2, "two watchers hold the clearing (%d)" % camp.guards.size())
+	var pair_species := {}
 	for watcher in camp.guards:
 		check(bool(watcher.get("alive")), "a watcher stands on its feet")
 		check(is_equal_approx(float(watcher.max_health), float(camp.PAIR_LESSON_HEALTH)),
@@ -265,9 +266,13 @@ func check_spawn() -> void:
 			"and never thicker than the camp's own thinned pool")
 		check(str(watcher.name).begins_with("CampWatcher"),
 			"the watcher is a camp body (%s)" % watcher.name)
-		check(str(watcher.get("mob_id")) == "hollow_warden",
-			"the watcher is the antlered warden body, not a ranger clone")
+		check(WatcherScript.SPECIES_IDS.has(str(watcher.get("mob_id"))),
+			"the watcher is one of the wood's creatures, not a ranger clone (%s)"
+			% str(watcher.get("mob_id")))
+		pair_species[str(watcher.get("mob_id"))] = true
 		check(not bool(watcher.hunting()), "and sleeps while the soul is still caged")
+	check(pair_species.size() == 2,
+		"the pair is two different creatures (%s)" % str(pair_species.keys()))
 	check(camp.pickups().size() == 3 + 1 + camp.STARTING_BANDAGES,
 		"three makeshift pieces, the shiv and five dressings lie on the walk (%d)"
 			% camp.pickups().size())

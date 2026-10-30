@@ -26,8 +26,9 @@ difference - and the warband is the thing that survives a battle.
     (**W A S D** / mouse), take the ironwood shiv (**K**), the three cuts
     (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) the moment the
     shiv is in your hand, and the guard (**hold RMB**) on the second watcher's
-    raised club. The pair sleep until you are armed and are the softest bodies in
-    the game: a 1.3 s telegraph, half their blow, no guard.
+    raised club. The pair are two of the wood's creatures - a **hollow warden**
+    and an **ossuary stalker** - and they sleep until you are armed and are the
+    softest bodies in the game: a 1.3 s telegraph, half their blow, no guard.
   * Then **one latch per press** at each of the four remaining cages (a blade in
     hand and `G` at the bars; bare hands are refused on every cage but your own).
     The last latch puts five bodies on their feet, turns them into squad AI that
@@ -720,6 +721,36 @@ cleaver and a ground-rib shiv). Makeshift is set index 4 in
 `scripts/armor_data.gd`; five sets need three bits per slot, so
 `ArmorData.PIECE_MASK` and `ArmorData.SHIELD_BIT` are one shared contract across
 the HUD, the arena, the delve and host-authoritative snapshots.
+
+### Watcher skins (the wood on a human's rig)
+
+The campaign's watchers are these same three creatures, and they fight on the
+warband's own skeleton: `tools/prepare_watcher_skins.py` turns each shipped
+creature mesh into a whole-body skin for `ironwood_ranger.glb`'s 65 bones —
+`assets/characters/watchers/ironwood_watcher_<species>.glb` plus its measured
+JSON. Nothing is remodelled: the creature's vertices, UVs and material slots are
+carried across, the ranger's arms are posed onto the creature's hanging arms to
+become the bind, every creature bone is fitted onto its ranger counterpart, and
+the skin is weighted with the creature's own weights renamed onto ranger bones.
+The runtime scales the rig by the skin's measured fit scale, so a watcher stands
+exactly as tall as the creature it was; the skin ships no images and borrows the
+creature GLB's PBR atlases, tinted per body.
+
+```powershell
+python tools/build_watcher_skins.py all
+```
+
+`scripts/warband/watcher_visual.gd` is the presentation: it holds the rig, opens
+the authored cut a windup commits to and retimes it onto the mob's telegraph so
+the blade crosses the target on the damage frame, plays the guard loop and the
+crouch as stances, and hands the skeleton to the shared ragdoll on death.
+`scripts/warband/cage_watcher.gd` fields the three species (the intro pair and
+the leaving's ambush mix them), while `RangeWorld.forest_spawns` keeps the
+frontier's own creature versions untouched.
+
+Ignored intermediates and the review captures land in
+`.runtime/watcher-skins/<species>/`; keep the shipped GLB, its JSON and its
+`.glb.import` together.
 
 The workflow, budgets and gates are documented in
 [docs/forest-mobs.md](docs/forest-mobs.md). Rebuild with:
