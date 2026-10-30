@@ -7,7 +7,7 @@ extends RefCounted
 ## slack chain on the cage doors, the cult's standards staked round the line, two
 ## gibbets out on the way in, the dressing around the cold altar, ember braziers
 ## that burn on the existing flame shader, and the litter of a camp people were
-## dragged through - straw, blood, cart ruts.
+## dragged through - straw and blood on the dirt, cart ruts worn into it.
 ##
 ## Three rules hold this together.
 ##
@@ -21,7 +21,7 @@ extends RefCounted
 ##    it - one `MeshInstance3D` per prop group, one surface per material - and
 ##    every material comes from `CampKit.materials()` (textured timber, hide,
 ##    bone, ochre), `TextureLibrary`'s flame shader, or `Geo.material()` for the
-##    things the kits do not carry (iron, blood, rutted earth).
+##    things the kits do not carry (iron, steel, blood).
 ## 3. **The scene owns the layout.** Cage centres and the altar are read off the
 ##    nodes `cage_escape.gd` already placed, so a moved cage moves its hardware.
 ##    Only the pocket's own bounds and the free-standing posts are declared here,
@@ -30,6 +30,7 @@ extends RefCounted
 
 const Geo = preload("res://scripts/geo.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
+const BloodFx = preload("res://scripts/blood_fx.gd")
 
 ## The pocket this dressing is laid out inside. Mirrors `cage_escape.gd`'s
 ## `YARD_HALF_WIDTH` / `YARD_FRONT` / `YARD_BACK`; the regression compares them.
@@ -85,12 +86,17 @@ const BLOOD_POSTS := [
 
 ## Cart ruts: the two tracks that were cut across the camp, stopping short of the
 ## cage line. The carts came a long way through the wood; the ruts are the camp's
-## own ground and go no further than its edge.
+## own ground and go no further than its edge. They are painted into the terrain's
+## ground map (`rut_lines()`), each a wet, muddy track `RUT_HALF_WIDTH` either side
+## of its wheel line - wide enough for the map's half-metre texels to carry it.
 const RUT_FROM := 4.0
 const RUT_TO := -26.0
 const RUT_HALF_TRACK := 1.15
+const RUT_HALF_WIDTH := 0.55
 
 static var _fittings: Dictionary = {}
+static var _stains: Array[StandardMaterial3D] = []
+static var _stain_card: PlaneMesh = null
 
 
 ## The dressing root. A plain `Node3D` that carries the prop records the
@@ -114,7 +120,7 @@ static func build(scene: Node3D) -> Node3D:
 	_build_gibbets(root, mats, iron)
 	_build_altar(root, scene, mats, iron)
 	_build_braziers(root, mats, iron)
-	_build_scatter(root, mats, iron)
+	_build_scatter(root, mats)
 	print("CAMP_DRESSING_READY props=%d" % root.props.size())
 	return root
 
@@ -131,9 +137,44 @@ static func metal() -> Dictionary:
 	m["iron"] = Geo.material(Color(0.17, 0.17, 0.18), 0.62, 0.52)
 	m["steel"] = Geo.material(Color(0.34, 0.35, 0.37), 0.72, 0.40)
 	m["blood"] = Geo.material(Color(0.125, 0.022, 0.022), 0.0, 0.90)
-	m["rut"] = Geo.material(Color(0.070, 0.060, 0.052), 0.0, 0.99)
 	_fittings = m
 	return m
+
+
+## Blood lying on the ground: soft-edged splat cards on `BloodFx`'s own splat
+## shapes, one material per shape. They are lit, so a torch finds them, and
+## glossy because blood is wet. A flattened ball read as a hard dark polygon laid
+## on the dirt, which is exactly what the ground must never carry.
+static func stain_materials() -> Array[StandardMaterial3D]:
+	if not _stains.is_empty():
+		return _stains
+	for variant in BloodFx.SPLAT_VARIANTS:
+		var material := StandardMaterial3D.new()
+		material.albedo_texture = BloodFx.splat_texture(variant)
+		# The splat carries its own dark red; the tint keeps it blood, not paint.
+		material.albedo_color = Color(1.0, 0.4, 0.38)
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.roughness = 0.3
+		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		_stains.append(material)
+	return _stains
+
+
+## One blood stain at `xform`'s origin on its +Y plane: a card whose splat core
+## is about `radius` metres across, `stretch` times longer along its local Z.
+## The caller lays the transform on the ground (`TerrainScript.ground_basis`) and
+## lifts it a couple of centimetres so it never fights the floor.
+static func add_stain(m: CampKit.Merged, xform: Transform3D, radius: float, stretch: float,
+		variant: int) -> void:
+	if _stain_card == null:
+		_stain_card = PlaneMesh.new()
+		_stain_card.size = Vector2(2.0, 2.0)
+	# The splat's core fills about 0.62 of the card's half-width; its droplets
+	# fly out past it.
+	var half := radius / 0.62
+	var materials := stain_materials()
+	m.add(_stain_card, Transform3D(xform.basis.scaled_local(Vector3(half, 1.0, half * stretch)),
+		xform.origin), materials[posmod(variant, materials.size())])
 
 
 ## The flame shader asking in a cold blue instead of firelight: the altar burns
@@ -379,11 +420,11 @@ static func _build_altar(root: Root, scene: Node3D, mats: Dictionary,
 		CampKit.add_beam(m, Vector3(1.02, 1.10, 0.0),
 			Vector3(1.02 + cos(angle) * 0.30, 1.12, sin(angle) * 0.30), 0.024,
 			mats["twig"], 3, 0.012)
-	# The blood this slab was used for.
-	CampKit.add_ball(m, 0.86, Vector3(0.10, 0.02, -1.95), iron["blood"],
-		Vector3(1.35, 0.05, 1.0), 10, 3)
-	CampKit.add_ball(m, 0.48, Vector3(-1.42, 0.02, -0.72), iron["blood"],
-		Vector3(1.0, 0.05, 1.5), 10, 3)
+	# The blood this slab was used for, soaked into the dirt in front of it.
+	add_stain(m, Transform3D(Basis(Vector3.UP, 0.3), Vector3(0.10, 0.025, -1.95)),
+		0.95, 0.75, 0)
+	add_stain(m, Transform3D(Basis(Vector3.UP, -0.5), Vector3(-1.42, 0.025, -0.72)),
+		0.5, 1.4, 1)
 	# Four cold candles, each on its own iron spike.
 	for index in 4:
 		var angle := TAU * float(index) / 4.0 + 0.4
@@ -463,9 +504,10 @@ static func _build_braziers(root: Root, mats: Dictionary, iron: Dictionary) -> v
 
 # --- the ground ------------------------------------------------------------
 
-## Litter: straw, blood and the cart ruts from the gate. All of it is flat, so
-## none of it has a footprint and none of it may ever be a collider.
-static func _build_scatter(root: Root, mats: Dictionary, iron: Dictionary) -> void:
+## Litter: straw and blood. All of it is flat, so none of it has a footprint and
+## none of it may ever be a collider. The cart ruts are not litter: they are worn
+## into the ground itself (`rut_lines()`).
+static func _build_scatter(root: Root, mats: Dictionary) -> void:
 	var holder := _group(root, "GroundScatter")
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1471
@@ -474,21 +516,32 @@ static func _build_scatter(root: Root, mats: Dictionary, iron: Dictionary) -> vo
 		_straw(straw, mats, TerrainScript.grounded(post), rng, 0.55, 9)
 	straw.commit(holder, "StrawScatter", false)
 	var blood := CampKit.Merged.new()
-	for post in BLOOD_POSTS:
-		CampKit.add_ball(blood, rng.randf_range(0.52, 0.95),
-			TerrainScript.grounded(post) + Vector3(0.0, 0.02, 0.0),
-			iron["blood"], Vector3(1.0, 0.03, rng.randf_range(0.70, 1.0)), 10, 3)
+	for index in BLOOD_POSTS.size():
+		var post: Vector3 = BLOOD_POSTS[index]
+		add_stain(blood, Transform3D(TerrainScript.ground_basis(post.x, post.z,
+			rng.randf_range(0.0, TAU)), TerrainScript.grounded(post + Vector3(0.0, 0.025, 0.0))),
+			rng.randf_range(0.52, 0.95), rng.randf_range(0.70, 1.0), index)
 	blood.commit(holder, "BloodStains", false)
-	var ruts := CampKit.Merged.new()
-	var length := RUT_FROM - RUT_TO
-	var centre := (RUT_FROM + RUT_TO) * 0.5
-	var rut_y := TerrainScript.height_at(0.0, centre)
-	for side in [-1.0, 1.0]:
-		CampKit.add_box(ruts, Vector3(0.30, 0.030, length),
-			Vector3(side * RUT_HALF_TRACK, rut_y + 0.012, centre), iron["rut"])
-	ruts.commit(holder, "CartRuts", false)
 	for post in STRAW_POSTS:
 		_record(root, "Straw", TerrainScript.grounded(post), 0.42, false)
 	for post in BLOOD_POSTS:
 		_record(root, "Blood", TerrainScript.grounded(post), 0.75, false)
-	_record(root, "CartRuts", Vector3(0.0, rut_y, centre), 0.50, false)
+
+
+## The two cart ruts from the gate, as worn marks for `terrain.gd`'s ground map:
+## wet, dark, muddy tracks that wander a hand's width as a wheel does, painted
+## into the yard's own dirt instead of two boards laid on top of it.
+static func rut_lines() -> Array:
+	var lines: Array = []
+	var steps := 7
+	for side in [-1.0, 1.0]:
+		var points := PackedVector3Array()
+		for step in steps:
+			var t := float(step) / float(steps - 1)
+			var z := lerpf(RUT_FROM, RUT_TO, t)
+			# One wander for both wheels: the cart's axle keeps the pair parallel.
+			var wander := 0.12 * sin(t * 7.3 + 0.6) + 0.05 * sin(t * 17.0)
+			points.append(Vector3(side * RUT_HALF_TRACK + wander, 0.0, z))
+		lines.append({"points": points, "half_width": RUT_HALF_WIDTH, "strength": 1.0,
+			"wet": 0.75})
+	return lines

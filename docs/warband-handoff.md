@@ -37,24 +37,30 @@ road (`trail_start`, 60 m past the mouth), and the town square entered (`town`).
 A wipe reloads it; the opening itself has no checkpoint, so a tutorial wipe is still
 the tutorial's to take.
 
-1. **You wake in the cage.** The player is inside the first of the five
-   prisoners (`CAGE_POSTS[OWN_CAGE]`, `OWN_CAGE` 0) and the clamp holds it there
-   (`CAGE_CLAMP_RADIUS` 0.95 m). Objective: **Cut your latch**; the tip channel
-   (`camp.TIP_CAGE`) names `G`. The player's own padlock is the one that gives up
-   to bare hands - a wretch with a nail - and every other cage needs a blade.
-2. **The camp, and the objective.** Cutting it is the `LOOSE` beat: out of the
-   bars, a tip names `W A S D`, and the gold arrow stands over the camp's only
-   blade (the ironwood shiv at `SHIV_POST`). Stepping `BEARINGS_RADIUS` 4.2 m from
-   the player's own cage is the whole of "getting your bearings": the sequencer
-   turns to `FREEING`, the objective becomes **Free your warband n/5**, and the
-   first fight's lesson (`duel_lesson.gd`) starts at its `MOVE` beat. The four
-   other cages are scattered through the pocket, so the quest is a walk around it.
+1. **You wake in the cage, with the blade in reach.** The player is inside the
+   first of the five prisoners (`CAGE_POSTS[OWN_CAGE]`, `OWN_CAGE` 0) and the
+   clamp holds it there (`CAGE_CLAMP_RADIUS` 0.95 m). The ironwood shiv lies on
+   the dirt right outside the cell door (`SHIV_POST` 0, 4.35: within the world's
+   2.6 m `LOOT_REACH` of the clamped body), with two lit hand torches beside it,
+   and the gold arrow hangs over it. Objective: **Take the shiv through the
+   bars**; the tip channel (`camp.TIP_BLADE`) names `K`, and a bare-handed `G`
+   opens nothing - `camp.interact` says what is missing. The pickup is booked
+   while the cage still holds the body, the blade snaps into the main hand, the
+   sequencer books `note_armed()`, and the line turns to **Cut your latch**.
+2. **The latch, and the camp.** Cutting the own latch with the blade is the
+   `LOOSE` beat: out of the bars, a tip names `W A S D`. Stepping
+   `BEARINGS_RADIUS` 4.2 m from the player's own cage is the whole of "getting
+   your bearings": the sequencer turns to `FREEING`, the objective becomes
+   **Free your warband n/5**, and the first fight's lesson (`duel_lesson.gd`)
+   starts on the armed body - straight into `FIGHT`, the cuts named - because the
+   blade was taken before the door. The four other cages are scattered through
+   the pocket, so the quest is a walk around it.
 3. **The first fight, one line at a time.** There is no card and nothing pauses:
    every beat offers one tip (`scripts/warband/warband_tips.gd`, key tiles plus a
    command, six seconds, gone) and the HUD prompt names the job.
-   Walking onto the shiv offers `K`; taking it puts the blade in the hand, raises
-   the cuts (LMB diagonal, `WHEEL_UP` stab - the dagger's Prison shank, +200%,
-   0.167 s - and `WHEEL_DOWN` overhead) and wakes the pair. The second watcher's
+   The shiv is already in hand, so the lesson enters at `FIGHT` and stepping out
+   raises the cuts (LMB diagonal, `WHEEL_UP` stab - the dagger's Prison shank,
+   +200%, 0.167 s - and `WHEEL_DOWN` overhead) and wakes the pair. The second watcher's
    first windup raises **hold RMB**; a dagger only softens a blow
    (`DEFENSE_WEAK_BLOCK`), so the tip says a guard is a moment, not a wall.
    The pair are the softest bodies in the game: 21 health (two stabs),
@@ -292,12 +298,13 @@ Integration seams deliberately placed in the base game:
    command under the crosshair) and `warband_tips.gd` never pauses, never takes
    the pointer and never opens twice. A beat that offers a hint must leave the
    game running - `warband_world_regression` asserts `not paused` on every one.
-9. **The player's own latch is the only bare-handed one.** `camp.interact`
-   refuses every other cage without a blade ("Nothing to cut the latch with.");
-   the own cage (`OWN_CAGE` 0) opens to a fist, because getting out of it is the
-   first step of the game. Nothing about the squad AI is gated on a possession any
-   more - a body is free the moment its own cage is open (`is_free`), and the
-   clamp, not a script, is what holds the rest.
+9. **Every latch needs steel, the player's own included.** `camp.interact`
+   refuses a shutter without a blade ("Nothing to cut the latch with."); the shiv
+   lies on the dirt outside the own cage's door, so the opening's first two beats
+   are the pickup through the bars (`K`, booked while the clamp still holds the
+   body) and the latch that blade cuts (`G`). Nothing about the squad AI is gated
+   on a possession any more - a body is free the moment its own cage is open
+   (`is_free`), and the clamp, not a script, is what holds the rest.
 10. **Squad AI is silent about loot.** No pickup messages, no loot step in the
     objective. `K` still works for a human but is not advertised. A walk to a
     piece is abandonable and every errand else is not: `_walk_to_loot` gives a
@@ -558,8 +565,8 @@ Integration seams deliberately placed in the base game:
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
 | `duel_lesson_regression` | 54 | the first fight's machine alone: nothing advances before the body is taken, one card per fact in order, the target watcher's windup does not teach the guard while its partner stands, a block before the card is not booked, the pair falling ends it, `reset()` starts over |
-| `cage_escape_regression` | 290 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the four at the mouth (one of each creature), drops |
-| `escape_run_regression` | 195 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
+| `cage_escape_regression` | 305 | the two ground torches at the starting cage, the shiv taken through the bars while clamped, a bare-handed G opening nothing, the own latch cut with the blade, the pair waking on the armed body, a raised guard on the second watcher, the revive lesson on a fallen ally, the four latches cut one G at a time, the squad arming, the four at the mouth (one of each creature), drops |
+| `escape_run_regression` | 201 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 305 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |
 | `warband_abilities_regression` | 46 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), a stock kit shows no hand tiles and the anointed kit grants all three, the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
@@ -745,7 +752,8 @@ glowing spheres. Both are fixed (`a8ee1f2`, `9b1b66a`); the road now reads as a
 chain of fire and the camp as a lit holding pen.
 
 **Still not exercised on a display:** driving the opening with real input (the
-own latch, the bearings step, the blade and the pair, the four cuts, the leaving)
+shiv through the bars, the own latch, the bearings step, the pair, the four cuts,
+the leaving)
 and a second peer through HOST GAME. Every check for those is headless. Do that
 first in the next session.
 

@@ -344,7 +344,7 @@ func _physics_process(delta: float) -> void:
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
-	SquadDriveScript.retarget(_local_guards(), bodies, AGGRO_RADIUS)
+	SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
 	_sync_roster(delta)
 	_sync_quests()
 	# The loot channel runs on the world's clock and breaks the moment a panel is
@@ -459,12 +459,14 @@ func _build_ground() -> void:
 		{"rect": Rect2(_town_at.x - TOWN_PAD, _town_at.z - TOWN_PAD,
 			TOWN_PAD * 2.0, TOWN_PAD * 2.0), "y": TerrainScript.PAD_Y, "blend": 16.0},
 	]
-	# What feet have worn: the gap in the camp's wood and the line of torches. The
-	# far side of the town's square is paved, so nothing there needs a path.
+	# What feet have worn, painted into the ground's own map: the line of torches,
+	# the camp's yard, its corridor out through the wood and its cart ruts, and the
+	# ring of the town's square with the road in through its gate.
 	var worn := [
-		{"points": _corridor_line(), "half_width": 2.6},
-		{"points": _lane_line(), "half_width": 3.2},
+		{"points": _lane_line(), "half_width": 3.2, "strength": 0.95},
 	]
+	worn.append_array(CampScript.trodden_ground())
+	worn.append_array(TownScript.trodden_ground(_town_at))
 	_terrain = TerrainScript.build(self, style, pads, worn)
 	# The net: a slab under the strip's lowest point, as wide and as long as the
 	# field it protects. Nothing that slips through the mesh is ever lost.
@@ -483,16 +485,6 @@ func _build_ground() -> void:
 		float(TerrainScript.ROWS) * TerrainScript.CELL + 120.0)
 	net_shape.shape = net_box
 	net.add_child(net_shape)
-
-
-## The worn line between the camp's mouth and the lane's first waypoint, in world
-## space: the ground's only idea of where the way out is.
-func _corridor_line() -> PackedVector3Array:
-	var line := PackedVector3Array()
-	line.append(CampScript.GATE_POINT)
-	line.append(Vector3(CampScript.GATE_POINT.x, 0.0,
-		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES))
-	return line
 
 
 ## The lane, in world space, so the trodden ground follows the same line the
@@ -1163,6 +1155,24 @@ func _local_guards() -> Array:
 			continue
 		local.append(guard)
 	return local
+
+
+## The warband bodies a hostile may take as a quarry: every standing body the
+## camp's cages do not hold. A clamped prisoner behind bars is not a sighting, and
+## the pair that wake in the camp would otherwise be pointed at the nearest caged
+## squadmate - and swing at bars - while the player walked around them.
+func _targetable_bodies() -> Array:
+	if camp == null:
+		return bodies
+	var out: Array = []
+	for body in bodies:
+		if not is_instance_valid(body):
+			continue
+		var merc_id: int = controller.merc_of(body)
+		if merc_id > 0 and camp.is_cage_clamped(merc_id):
+			continue
+		out.append(body)
+	return out
 
 
 func _wire_possession() -> void:

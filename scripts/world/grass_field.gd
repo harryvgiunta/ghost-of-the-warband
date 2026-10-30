@@ -14,9 +14,20 @@ extends RefCounted
 
 const MAX_ATTEMPTS_PER_INSTANCE := 8
 const SLOPE_SAMPLE := 0.65
+## A grass clump is four bent cards: a wider, softer tuft than three flat boards,
+## and lit by the shader as a mound rather than as planes.
+const GRASS_CARDS := 4
+const GRASS_BEND := 0.42
 
 
-static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved: Callable, seed: int) -> Dictionary:
+## Scatters the style's grass, flowers and ferns round `parent` and batches them.
+## By default candidates are drawn from a disc of each config's `radius` with its
+## radial `density_falloff`; a scene whose cover follows a shape instead (a lane's
+## verges, a camp's rim) passes `sampler`, called with the field's RNG, which
+## proposes world x/z points - the configs' `count` is then the target for that
+## shape, and `reserved`, height and slope still reject.
+static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved: Callable, seed: int,
+		sampler: Callable = Callable()) -> Dictionary:
 	var counts := {"grass": 0, "flowers": 0, "ferns": 0, "chunks": 0}
 	if parent == null or style == null or not ground.is_valid():
 		return counts
@@ -27,7 +38,7 @@ static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved:
 	var center := Vector2(origin.x, origin.z)
 
 	var grass_cfg: Dictionary = style.grass
-	var grass_instances := _collect(rng, grass_cfg, center, ground, reserved)
+	var grass_instances := _collect(rng, grass_cfg, center, ground, reserved, sampler)
 	if not grass_instances.is_empty():
 		var variant_count := maxi(1, int(grass_cfg.get("clump_variants", 3)))
 		var variant_instances: Array = []
@@ -42,13 +53,14 @@ static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved:
 			var instances: Array[Dictionary] = variant_instances[variant]
 			if instances.is_empty():
 				continue
-			var mesh := _clump_mesh(String(grass_cfg.get("texture", "grass_meadow")), variant, 3, 0.55, 0.52, 0.16)
+			var mesh := _clump_mesh(String(grass_cfg.get("texture", "grass_meadow")), variant,
+				GRASS_CARDS, 0.55, 0.52, 0.12, GRASS_BEND)
 			counts["chunks"] += WorldScatter.batch(parent, "Grass_%d" % variant, mesh, material,
 				instances, chunk_size, {"visible_end": range_end, "cast_shadow": false})
 		counts["grass"] = grass_instances.size()
 
 	var flowers_cfg: Dictionary = style.ground_cover.get("flowers", {})
-	var flower_instances := _collect(rng, flowers_cfg, center, ground, reserved)
+	var flower_instances := _collect(rng, flowers_cfg, center, ground, reserved, sampler)
 	if not flower_instances.is_empty():
 		var range_end := float(flowers_cfg.get("range", 60.0))
 		var material := _fading_material(TextureLibrary.flower_material(), String(flowers_cfg.get("texture", "flowers")), range_end)
@@ -59,7 +71,7 @@ static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved:
 		counts["flowers"] = flower_instances.size()
 
 	var fern_cfg: Dictionary = style.ground_cover.get("ferns", {})
-	var fern_instances := _collect(rng, fern_cfg, center, ground, reserved)
+	var fern_instances := _collect(rng, fern_cfg, center, ground, reserved, sampler)
 	if not fern_instances.is_empty():
 		var range_end := float(fern_cfg.get("range", 54.0))
 		var material := _fading_material(TextureLibrary.fern_material(), String(fern_cfg.get("texture", "fern")), range_end)
@@ -72,10 +84,27 @@ static func build(parent: Node3D, style: WorldStyle, ground: Callable, reserved:
 	return counts
 
 
+## The style's cover asked for a shaped field of `area` square metres: a copy whose
+## grass, flower and fern `count` is that area times the config's `density`
+## (clumps per square metre). For `build()` with a `sampler`, so a lane's verge or
+## a camp's rim is as thick per metre whatever its length.
+static func for_area(style: WorldStyle, area: float) -> WorldStyle:
+	var out := WorldStyle.new()
+	out.id = style.id
+	out.grass = style.grass.duplicate()
+	out.grass["count"] = roundi(area * float(style.grass.get("density", 0.0)))
+	for key in style.ground_cover:
+		var cfg: Dictionary = (style.ground_cover[key] as Dictionary).duplicate()
+		cfg["count"] = roundi(area * float(cfg.get("density", 0.0)))
+		out.ground_cover[key] = cfg
+	return out
+
+
 ## Samples up to `count` accepted positions. Rejection: reserved areas, invalid
-## ground, height range, slope above `max_slope`, and the near/far density curve.
+## ground, height range, slope above `max_slope`, and the near/far density curve
+## (disc sampling only - a `sampler` already proposes the shape it wants).
 static func _collect(rng: RandomNumberGenerator, cfg: Dictionary, center: Vector2,
-		ground: Callable, reserved: Callable) -> Array[Dictionary]:
+		ground: Callable, reserved: Callable, sampler: Callable) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var target := int(cfg.get("count", 0))
 	if target <= 0:
@@ -90,9 +119,17 @@ static func _collect(rng: RandomNumberGenerator, cfg: Dictionary, center: Vector
 	var attempts := target * MAX_ATTEMPTS_PER_INSTANCE
 	while result.size() < target and attempts > 0:
 		attempts -= 1
-		var angle := rng.randf_range(0.0, TAU)
-		var distance := sqrt(rng.randf()) * radius
-		var point := center + Vector2(cos(angle), sin(angle)) * distance
+		var point: Vector2
+		# Normalised radial distance: denser near the build centre, thinner out
+		# at world edge. Scenes tune this with `density_falloff`.
+		var radial := 0.0
+		if sampler.is_valid():
+			point = sampler.call(rng)
+		else:
+			var angle := rng.randf_range(0.0, TAU)
+			var distance := sqrt(rng.randf()) * radius
+			point = center + Vector2(cos(angle), sin(angle)) * distance
+			radial = clampf(distance / radius, 0.0, 1.0)
 		var position: Vector3 = ground.call(point)
 		if not position.is_finite():
 			continue
@@ -100,9 +137,6 @@ static func _collect(rng: RandomNumberGenerator, cfg: Dictionary, center: Vector
 			continue
 		if reserved.is_valid() and bool(reserved.call(point)):
 			continue
-		# Normalised radial distance: denser near the build centre, thinner out
-		# at world edge. Scenes tune this with `density_falloff`.
-		var radial := clampf(distance / radius, 0.0, 1.0)
 		var density := lerpf(falloff.x, falloff.y, smoothstep(0.35, 1.0, radial))
 		if rng.randf() > density:
 			continue
@@ -137,56 +171,78 @@ static func _slope_degrees(ground: Callable, point: Vector2) -> float:
 	return rad_to_deg(atan(sqrt(gradient_x * gradient_x + gradient_z * gradient_z)))
 
 
-## Three alpha cards fanned around Y. `tilt` leans the cards outward from the
-## base; ferns use a large tilt to arch like a frond rosette.
+## Alpha cards fanned around Y. `tilt` leans the cards outward from the base;
+## ferns use a large tilt to arch like a frond rosette. `bend` (radians) leans the
+## upper half of each card further out than the lower, so a grass card curves
+## like the blades drawn on it instead of standing as a flat board; the fan is
+## turned a little off-even per card so no two clumps show the same star.
 static func _clump_mesh(texture_id: String, variant: int, card_count: int,
-		width: float, height: float, tilt: float) -> ArrayMesh:
+		width: float, height: float, tilt: float, bend: float = 0.0) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var cells := TextureLibrary.cell_count(texture_id)
 	for card_index in range(card_count):
-		var angle := TAU * float(card_index) / float(card_count) + float(variant) * 0.35
+		var jitter := (rng_phase(card_index + 3, variant) - 0.5) * (TAU / float(card_count)) * 0.35
+		var angle := TAU * float(card_index) / float(card_count) + float(variant) * 0.35 + jitter
 		var outward := Vector3(cos(angle), 0.0, sin(angle))
 		var right := Vector3(-outward.z, 0.0, outward.x)
-		var up := (Vector3.UP * cos(tilt) + outward * sin(tilt)).normalized()
-		var normal := right.cross(up).normalized()
 		var cell := TextureLibrary.atlas_cell(texture_id, variant * card_count + card_index)
-		_add_blade(st, right, up, normal, width, height, cell, rng_phase(card_index, variant))
+		_add_blade(st, right, outward, width, height, tilt, bend, cell,
+			rng_phase(card_index, variant))
 	# SurfaceTool returns an ArrayMesh; no material is attached so callers can
 	# share one override material across every variant and chunk.
 	return st.commit()
 
 
 ## Adds one card with its base at the local origin and wind weight rising toward
-## the tip (UV2.y), which keeps the base planted while the tip sways.
-static func _add_blade(st: SurfaceTool, right: Vector3, up: Vector3, normal: Vector3,
-		width: float, height: float, cell: Rect2, phase: float) -> void:
+## the tip (UV2.y), which keeps the base planted while the tip sways. A bent card
+## is two quads: the lower half at `tilt`, the upper at `tilt + bend`.
+static func _add_blade(st: SurfaceTool, right: Vector3, outward: Vector3, width: float,
+		height: float, tilt: float, bend: float, cell: Rect2, phase: float) -> void:
 	var half := width * 0.5
-	var p0 := -right * half
-	var p1 := right * half
-	var p2 := p1 + up * height
-	var p3 := p0 + up * height
 	var u0 := cell.position.x
 	var u1 := cell.end.x
 	var v0 := cell.position.y
 	var v1 := cell.end.y
-	var base_colour := Color(0.78, 0.78, 0.78, 1.0)
-	var tip_colour := Color.WHITE
-	# Two triangles, non-indexed. Culling is disabled by the grass shader.
-	_blade_vertex(st, p0, normal, Vector2(u0, v1), Vector2(phase, 0.05), base_colour)
-	_blade_vertex(st, p1, normal, Vector2(u1, v1), Vector2(phase, 0.05), base_colour)
-	_blade_vertex(st, p2, normal, Vector2(u1, v0), Vector2(phase, 1.0), tip_colour)
-	_blade_vertex(st, p0, normal, Vector2(u0, v1), Vector2(phase, 0.05), base_colour)
-	_blade_vertex(st, p2, normal, Vector2(u1, v0), Vector2(phase, 1.0), tip_colour)
-	_blade_vertex(st, p3, normal, Vector2(u0, v0), Vector2(phase, 1.0), tip_colour)
+	var low_up := (Vector3.UP * cos(tilt) + outward * sin(tilt)).normalized()
+	var rows: Array[Dictionary] = [{"at": Vector3.ZERO, "v": v1, "weight": 0.05, "up": low_up}]
+	if bend > 0.0:
+		var top_up := (Vector3.UP * cos(tilt + bend) + outward * sin(tilt + bend)).normalized()
+		var middle: Vector3 = low_up * height * 0.5
+		rows.append({"at": middle, "v": lerpf(v1, v0, 0.5), "weight": 0.4,
+			"up": (low_up + top_up).normalized()})
+		rows.append({"at": middle + top_up * height * 0.5, "v": v0, "weight": 1.0, "up": top_up})
+	else:
+		rows.append({"at": low_up * height, "v": v0, "weight": 1.0, "up": low_up})
+	for index in rows.size() - 1:
+		var low: Dictionary = rows[index]
+		var high: Dictionary = rows[index + 1]
+		var low_normal := right.cross(low["up"] as Vector3).normalized()
+		var high_normal := right.cross(high["up"] as Vector3).normalized()
+		var p0: Vector3 = (low["at"] as Vector3) - right * half
+		var p1: Vector3 = (low["at"] as Vector3) + right * half
+		var p2: Vector3 = (high["at"] as Vector3) + right * half
+		var p3: Vector3 = (high["at"] as Vector3) - right * half
+		var lv := float(low["v"])
+		var hv := float(high["v"])
+		var lw := float(low["weight"])
+		var hw := float(high["weight"])
+		# Two triangles, non-indexed. Culling is disabled by the grass shader.
+		_blade_vertex(st, p0, low_normal, Vector2(u0, lv), Vector2(phase, lw))
+		_blade_vertex(st, p1, low_normal, Vector2(u1, lv), Vector2(phase, lw))
+		_blade_vertex(st, p2, high_normal, Vector2(u1, hv), Vector2(phase, hw))
+		_blade_vertex(st, p0, low_normal, Vector2(u0, lv), Vector2(phase, lw))
+		_blade_vertex(st, p2, high_normal, Vector2(u1, hv), Vector2(phase, hw))
+		_blade_vertex(st, p3, high_normal, Vector2(u0, hv), Vector2(phase, hw))
 
 
+## One card vertex. The shader darkens toward the base by `UV2.y` (the wind
+## weight), so a clump reads as grass growing out of shade.
 static func _blade_vertex(st: SurfaceTool, point: Vector3, normal: Vector3, uv: Vector2,
-		wind_uv: Vector2, colour: Color) -> void:
+		wind_uv: Vector2) -> void:
 	st.set_normal(normal)
 	st.set_uv(uv)
 	st.set_uv2(wind_uv)
-	st.set_color(colour)
+	st.set_color(Color.WHITE)
 	st.add_vertex(point)
 
 

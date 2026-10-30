@@ -923,35 +923,131 @@ def make_needles_pine(size=232):
     return [_pine_cell(size, SEED + 231 + k) for k in range(4)]
 
 
-def _grass_cell(size, seed):
+def _tuft_blade(bx, by, ang, length, width, droop, steps=14):
+    """Curved, tapering blade outline rooted at (bx, by), plus its spine.
+
+    ``ang`` is the root direction (radians from vertical, + = right) and
+    ``droop`` bends it further outward along the length (quadratic onset,
+    cubic tail), so long blades arch over and their tips hang.
+    """
+    spine = []
+    x, y = bx, by
+    seg = length / steps
+    for k in range(steps + 1):
+        t = k / steps
+        spine.append((x, y, t))
+        a = ang + droop * (t * t * 0.8 + 0.6 * t * t * t)
+        x += math.sin(a) * seg
+        y -= math.cos(a) * seg
+    left, right = [], []
+    for k, (x, y, t) in enumerate(spine):
+        if k < len(spine) - 1:
+            nx, ny = spine[k + 1][0] - x, spine[k + 1][1] - y
+        else:
+            nx, ny = x - spine[k - 1][0], y - spine[k - 1][1]
+        n = math.hypot(nx, ny) or 1.0
+        px, py = -ny / n, nx / n
+        half = width * 0.5 * (1.0 - t) ** 0.75 if t < 1.0 else 0.0
+        left.append((x + px * half, y + py * half))
+        right.append((x - px * half, y - py * half))
+    return left, right, spine
+
+
+def _grass_cell(size, seed, seed_heads=0):
+    """One soft natural grass tuft on a card (ground line = cell bottom).
+
+    70-130 thin blades rooted in a cluster across the middle of the bottom
+    edge, fanning outward with gentle droop; most blades are 35-75 % of the
+    cell tall. Each blade is shaded base-dark to tip-light in pale,
+    desaturated tones so per-instance tints read well; ~13 % are dry straw
+    and some cells carry slender seed-head stems.
+    """
     ss = 4
     img = _new_cell(size, ss)
     d = ImageDraw.Draw(img)
     rng = np.random.default_rng(seed)
     S = size * ss
-    palette = [(150, 178, 98), (168, 194, 114), (132, 162, 86), (183, 204, 132)]
-    for i in range(40):
-        bx = S * rng.uniform(0.22, 0.78)
-        by = S * 0.97
-        hgt = S * rng.uniform(0.42, 0.82)
-        lean = rng.uniform(-0.22, 0.22)
-        col = _vary(palette[rng.integers(0, len(palette))], rng, 8)
-        pts = []
-        w = S * rng.uniform(0.010, 0.018)
-        steps = 7
-        for k in range(steps):
-            t = k / (steps - 1)
-            x = bx + lean * hgt * (t ** 1.6)
-            y = by - hgt * t
-            pts.append((x, y, w * (1.0 - 0.92 * t)))
-        left = [(x - wd, y) for x, y, wd in pts]
-        right = [(x + wd, y) for x, y, wd in reversed(pts)]
-        d.polygon([(x, y) for x, y in left + right], fill=(*col, 255))
+    margin = 0.035 * S
+    ground = S * 0.975
+    root_w = S * rng.uniform(0.40, 0.66)
+    root_c = S * 0.5 + rng.uniform(-0.04, 0.04) * S
+    greens = [(172, 196, 128), (184, 204, 140), (160, 186, 118), (194, 210, 152)]
+    straw = [(214, 204, 152), (204, 190, 136), (222, 214, 170)]
+
+    blades = []
+    for _ in range(int(rng.integers(70, 131))):
+        u = rng.uniform(-1.0, 1.0)
+        u = math.copysign(abs(u) ** 0.85, u)
+        bx = root_c + u * root_w * 0.5
+        # fan: outer roots lean out more; a little scatter either way
+        ang = u * 0.62 + rng.normal(0.0, 0.16)
+        r = rng.random()
+        if r < 0.10:
+            frac = rng.uniform(0.25, 0.35)
+        elif r < 0.85:
+            frac = rng.uniform(0.35, 0.75)
+        else:
+            frac = rng.uniform(0.75, 0.96)
+        length = S * frac
+        width = S * rng.uniform(0.0105, 0.017)
+        droop = math.copysign(rng.uniform(0.15, 0.9), ang + rng.normal(0, 0.05))
+        droop *= 0.5 + frac
+        # keep the whole blade inside the cell (transparent border pad)
+        for _try in range(12):
+            left, right, _spine = _tuft_blade(bx, ground, ang, length, width, droop)
+            xs = [p[0] for p in left + right]
+            ys = [p[1] for p in left + right]
+            if min(xs) > margin and max(xs) < S - margin and min(ys) > margin:
+                break
+            length *= 0.9
+            droop *= 0.85
+            ang *= 0.9
+        dry = rng.random() < 0.13
+        col = _vary((straw if dry else greens)[rng.integers(0, 3 if dry else 4)], rng, 7)
+        blades.append((abs(ang) + 0.3 * rng.random(), left, right, col, dry))
+
+    # outer, leaning blades first so upright centre blades overlap them
+    blades.sort(key=lambda b: -b[0])
+    for _key, left, right, col, dry in blades:
+        n = len(left) - 1
+        lo = 0.50 if not dry else 0.62
+        for k in range(n):
+            v = lo + (1.0 - lo) * min(1.0, (k + 0.5) / n * 1.25)
+            c = tuple(int(min(255, ch * v)) for ch in col)
+            d.polygon([left[k], left[k + 1], right[k + 1], right[k]], fill=(*c, 255))
+
+    for _ in range(seed_heads):
+        bx = root_c + rng.uniform(-0.18, 0.18) * root_w
+        ang = rng.normal(0.0, 0.12)
+        length = S * rng.uniform(0.78, 0.9)
+        droop = rng.uniform(-0.25, 0.25)
+        for _try in range(12):
+            _l, _r, spine = _tuft_blade(bx, ground, ang, length, S * 0.009, droop)
+            if min(p[1] for p in spine) > margin + S * 0.03 and \
+                    margin + S * 0.04 < min(p[0] for p in spine) and \
+                    max(p[0] for p in spine) < S - margin - S * 0.04:
+                break
+            length *= 0.94
+        d.line([(x, y) for x, y, _t in spine], fill=(198, 196, 146, 255),
+               width=max(3, int(S * 0.0085)), joint="curve")
+        # slender spike over the top sixth: a bumpy, tapered seed head
+        sl, sr = [], []
+        for x, y, t in spine:
+            if t < 0.83:
+                continue
+            u = (t - 0.83) / 0.17
+            half = S * 0.0105 * math.sin(math.pi * min(1.0, 0.12 + u * 0.88)) ** 0.6
+            half *= rng.uniform(0.8, 1.15)
+            sl.append((x - half, y))
+            sr.append((x + half, y))
+        sc = _vary((206, 198, 150), rng, 6)
+        d.polygon(sl + sr[::-1], fill=(*sc, 255))
     return _finish_cell(img, size)
 
 
 def make_grass_meadow(size=232):
-    return [_grass_cell(size, SEED + 241 + k) for k in range(4)]
+    seed_heads = (2, 0, 3, 0)
+    return [_grass_cell(size, SEED + 241 + k, seed_heads[k]) for k in range(4)]
 
 
 FLOWERS = [
@@ -1147,46 +1243,280 @@ def _overlay(rgb_arr, shapes, ss=2):
     return Image.alpha_composite(base, _draw_shapes(size, ss, shapes)).convert("RGB")
 
 
+def wrap_blur(arr, sigma):
+    """Periodic Gaussian blur (FFT), so blurred height fields keep tiling."""
+    if sigma <= 0:
+        return arr.astype(np.float32)
+    h, w = arr.shape[:2]
+    fy = np.fft.fftfreq(h)[:, None]
+    fx = np.fft.fftfreq(w)[None, :]
+    kern = np.exp(-2.0 * (math.pi * sigma) ** 2 * (fx * fx + fy * fy))
+    if arr.ndim == 3:
+        kern = kern[..., None]
+    out = np.fft.ifft2(np.fft.fft2(arr, axes=(0, 1)) * kern, axes=(0, 1)).real
+    return out.astype(np.float32)
+
+
+def _render_pair(size, ss, items):
+    """Draw wrapped (bbox, fn) items into a colour and a height canvas.
+
+    ``fn(dc, dh, ox, oy)`` paints its colour into ``dc`` and its grey height
+    into ``dh``; each item is drawn only at the wrap offsets its bounding box
+    reaches, so thousands of strokes stay cheap and the tile stays seamless.
+    Returns two float RGBA arrays (colour, grey height) with straight alpha.
+    """
+    S = size * ss
+    col = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    hgt = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    dc = _ScaledDraw(ImageDraw.Draw(col), ss)
+    dh = _ScaledDraw(ImageDraw.Draw(hgt), ss)
+    for (x0, y0, x1, y1), fn in items:
+        for ox in (-size, 0, size):
+            if x1 + ox < -1 or x0 + ox > size + 1:
+                continue
+            for oy in (-size, 0, size):
+                if y1 + oy < -1 or y0 + oy > size + 1:
+                    continue
+                fn(dc, dh, ox, oy)
+    return [np.asarray(im.resize((size, size), Image.LANCZOS), np.float32) / 255.0
+            for im in (col, hgt)]
+
+
+def _composite_pair(rgb_base, h_base, layers):
+    """Over-composite the (colour, height) canvases from ``_render_pair``."""
+    col, hgt = layers
+    ca = col[..., 3:4]
+    rgb_out = rgb_base * (1.0 - ca) + col[..., :3] * ca
+    ha = hgt[..., 3]
+    h_out = h_base * (1.0 - ha) + hgt[..., 0] * ha
+    return rgb_out.astype(np.float32), h_out.astype(np.float32)
+
+
+def _pack_height(albedo, height):
+    """RGBA image: sRGB albedo + linear height alpha clamped to >= 10/255
+    (Godot's importer may rewrite the colour under fully transparent texels)."""
+    a = np.empty(albedo.shape[:2] + (4,), np.float32)
+    a[..., :3] = np.clip(albedo, 0.0, 1.0)
+    a[..., 3] = np.clip(height, 10.0 / 255.0, 1.0)
+    return to_image(a, "RGBA")
+
+
+def _normal_half(height, strength):
+    """Normal map at full resolution, 2x2-averaged and renormalised to half size."""
+    n = normal_from_height(height, strength) * 2.0 - 1.0
+    h, w = height.shape
+    n = n.reshape(h // 2, 2, w // 2, 2, 3).mean(axis=(1, 3))
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    return n * 0.5 + 0.5
+
+
+def _bbox(pts, pad=2.0):
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
+
+
+def _hgrey(v, a=255):
+    g = int(np.clip(v, 0.0, 1.0) * 255.0 + 0.5)
+    return (g, g, g, a)
+
+
+def _wrap_dist(x0, y0, x1, y1, size):
+    dx = abs(x0 - x1) % size
+    dy = abs(y0 - y1) % size
+    return math.hypot(min(dx, size - dx), min(dy, size - dy))
+
+
+def _blade_polys(x0, y0, ang, length, width, bend, segs=3):
+    """Top-down blade: tapered quads from root to tip, slightly curved."""
+    out = []
+    x, y = x0, y0
+    path = [(x, y)]
+    step = length / segs
+    for k in range(segs):
+        a = ang + bend * (k + 0.5) / segs
+        x += math.cos(a) * step
+        y += math.sin(a) * step
+        path.append((x, y))
+    for k in range(segs):
+        (ax, ay), (bx, by) = path[k], path[k + 1]
+        dx, dy = bx - ax, by - ay
+        n = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / n, dx / n
+        wa = width * 0.5 * (1.0 - k / segs) ** 0.9
+        wb = width * 0.5 * (1.0 - (k + 1) / segs) ** 0.9
+        out.append([(ax + nx * wa, ay + ny * wa), (bx + nx * wb, by + ny * wb),
+                    (bx - nx * wb, by - ny * wb), (ax - nx * wa, ay - ny * wa)])
+    return out, path
+
+
+TERRAIN_GRASS_STRENGTH = 3.0
+TERRAIN_LITTER_STRENGTH = 3.0
+TERRAIN_DIRT_STRENGTH = 6.0
+TERRAIN_ROCK_STRENGTH = 4.0
+
+
 def make_terrain_grass(w=512, h=512):
-    yy = (np.arange(h) + 0.5)[:, None] / h
-    xx = (np.arange(w) + 0.5)[None, :] / w
-    m1 = fbm(w, h, 7, 7, SEED + 301, octaves=5)
-    m2 = fbm(w, h, 26, 26, SEED + 302, octaves=4)
-    fine = fbm(w, h, 110, 110, SEED + 303, octaves=3)
-    dry = smoothstep(0.58, 0.78, fbm(w, h, 4, 4, SEED + 304, octaves=3))
+    """Dense lawn seen from above, 4 m tile: albedo + blade-height field.
 
-    base = mix(rgb(84, 118, 58), rgb(112, 148, 72), stretch(m1, 3, 97))
-    base = mix(base, rgb(126, 158, 82), m2 * 0.35)
-    base = mix(base, rgb(146, 152, 88), dry * 0.30)
-    base *= (0.90 + 0.20 * fine)[..., None]
-
-    # clover + tiny broad leaves for close-up interest
+    Thousands of short tapered blade strokes in four depth layers - a dark
+    shadowed underlayer, two mid layers and sparse light tips - rooted in
+    tussock clumps that radiate in every direction (no lean, no baked light).
+    Paint order is depth order, so the height alpha rises with each layer:
+    the shader's height blend lets blade tips poke through gaps in the
+    neighbouring layer. Dry straw blades gather in patches; clover leaflets
+    sit between the mid and top layers.
+    """
     rng = np.random.default_rng(SEED + 305)
-    shapes = []
-    for i in range(160):
-        bx, by = rng.uniform(0, w), rng.uniform(0, h)
-        hgt = rng.uniform(5, 18)
-        lean = rng.uniform(-4, 4)
-        col = _vary((70, 110, 48) if i % 3 else (126, 158, 86), rng, 12)
-        wid = rng.uniform(0.7, 1.4)
-        def blade(d, ox, oy, bx=bx, by=by, hgt=hgt, lean=lean, col=col, wid=wid):
-            pts = [(bx + ox + lean * (t ** 1.5), by + oy - hgt * t)
-                   for t in np.linspace(0, 1, 5)]
-            d.line(pts, fill=(*col, 210), width=max(1, int(wid * 2)))
-        shapes.append(blade)
-    for i in range(45):
-        bx, by = rng.uniform(0, w), rng.uniform(0, h)
-        r = rng.uniform(1.6, 3.4)
-        col = _vary((104, 142, 66), rng, 10)
-        def clover(d, ox, oy, bx=bx, by=by, r=r, col=col):
-            for k in range(3):
-                a = k * 2.094
-                d.ellipse([bx + ox + math.cos(a) * r - r * 0.7,
-                           by + oy + math.sin(a) * r - r * 0.7,
-                           bx + ox + math.cos(a) * r + r * 0.7,
-                           by + oy + math.sin(a) * r + r * 0.7], fill=(*col, 190))
-        shapes.append(clover)
-    return _overlay(base, shapes)
+    broad = fbm(w, h, 5, 5, SEED + 301, octaves=4)
+    lush = stretch(fbm(w, h, 9, 9, SEED + 302, octaves=4), 2, 98)
+    dry = smoothstep(0.55, 0.72, fbm(w, h, 10, 10, SEED + 304, octaves=3))
+    soil_n = fbm(w, h, 64, 64, SEED + 303, octaves=3)
+
+    base = mix(rgb(36, 40, 22), rgb(58, 58, 34), soil_n)
+    height = 0.04 + 0.10 * soil_n
+
+    # (count, length px, width px, base colour, tip colour, h root, h tip)
+    layers = [
+        (16000, (5.0, 11.0), (1.5, 2.5), (56, 78, 38), (88, 120, 58), 0.12, 0.34),
+        (14000, (6.0, 13.0), (1.4, 2.4), (86, 118, 58), (124, 160, 78), 0.30, 0.56),
+        (10000, (6.0, 13.0), (1.3, 2.2), (106, 140, 68), (148, 180, 96), 0.48, 0.78),
+        (3500, (5.0, 11.0), (1.1, 2.0), (126, 156, 80), (176, 198, 122), 0.68, 0.98),
+    ]
+    straw = [((128, 116, 72), (184, 168, 116)), ((116, 110, 66), (168, 158, 106)),
+             ((134, 118, 80), (194, 178, 130))]
+    clumps = rng.uniform(0, w, (1400, 2)).astype(np.float32)
+
+    def field_at(f, x, y):
+        return float(f[int(y) % h, int(x) % w])
+
+    def blade_item(x0, y0, ang, ln, wd, bend, c0, c1, h0, h1):
+        polys, path = _blade_polys(x0, y0, ang, ln, wd, bend)
+        n = len(polys)
+        cols = [tuple(int(c0[i] + (c1[i] - c0[i]) * (k + 0.5) / n) for i in range(3))
+                for k in range(n)]
+        hs = [h0 + (h1 - h0) * (k + 0.5) / n for k in range(n)]
+
+        def fn(dc, dh, ox, oy, polys=polys, cols=cols, hs=hs):
+            for poly, c, hv in zip(polys, cols, hs):
+                p = [(x + ox, y + oy) for x, y in poly]
+                dc.polygon(p, fill=(*c, 255))
+                dh.polygon(p, fill=_hgrey(hv))
+        return _bbox(path, wd + 1.0), fn
+
+    def clover_item(lx, ly, r, rot, col, hv):
+        mid = tuple(min(255, int(c * 1.22 + 8)) for c in col)
+        leaflets = []
+        for k in range(3):
+            a = rot + k * math.tau / 3.0
+            leaflets.append(_ellipse_pts(lx + math.cos(a) * r * 0.95,
+                                         ly + math.sin(a) * r * 0.95, r, r * 0.78, a, 12))
+
+        def fn(dc, dh, ox, oy):
+            for pts in leaflets:
+                p = [(x + ox, y + oy) for x, y in pts]
+                dc.polygon(p, fill=(*col, 255))
+                dh.polygon(p, fill=_hgrey(hv))
+            dc.ellipse([lx + ox - r * 0.45, ly + oy - r * 0.45,
+                        lx + ox + r * 0.45, ly + oy + r * 0.45], fill=(*mid, 150))
+        return (lx - 3 * r, ly - 3 * r, lx + 3 * r, ly + 3 * r), fn
+
+    items = []
+    for li, (count, lr, wr, cb, ct, h0, h1) in enumerate(layers):
+        if li == 3:
+            # clover rosettes between the mid layers and the light tips
+            for _ in range(55):
+                cx, cy = rng.uniform(0, w), rng.uniform(0, h)
+                for _leaf in range(rng.integers(3, 9)):
+                    lx = cx + rng.normal(0, 4.0)
+                    ly = cy + rng.normal(0, 4.0)
+                    r = rng.uniform(1.6, 2.6)
+                    rot = rng.uniform(0, math.tau)
+                    col = _vary((96, 136, 78), rng, 8)
+                    items.append(clover_item(lx, ly, r, rot, col, rng.uniform(0.62, 0.76)))
+        for _ in range(count):
+            if rng.random() < 0.7:
+                cx, cy = clumps[rng.integers(0, len(clumps))]
+                rad = rng.uniform(0.0, 3.0)
+                ang = rng.uniform(0, math.tau)
+                x0 = cx + math.cos(ang) * rad
+                y0 = cy + math.sin(ang) * rad
+                ang += rng.normal(0.0, 0.5)
+            else:
+                x0, y0 = rng.uniform(0, w), rng.uniform(0, h)
+                ang = rng.uniform(0, math.tau)
+            ln = rng.uniform(*lr) * (0.8 + 0.4 * field_at(lush, x0, y0))
+            wd = rng.uniform(*wr)
+            bend = rng.normal(0.0, 0.5)
+            tone = rng.uniform(0.86, 1.12) * (0.92 + 0.16 * field_at(broad, x0, y0))
+            if li > 0 and rng.random() < 0.05 + 0.62 * field_at(dry, x0, y0):
+                sb, st = straw[rng.integers(0, len(straw))]
+                c0 = tuple(int(c * tone * (0.75 + 0.1 * li)) for c in sb)
+                c1 = tuple(min(255, int(c * tone)) for c in st)
+            else:
+                c0 = tuple(int(c * tone) for c in cb)
+                c1 = tuple(min(255, int(c * tone)) for c in ct)
+            jit = rng.uniform(-0.04, 0.04)
+            items.append(blade_item(x0, y0, ang, ln, wd, bend, c0, c1,
+                                    h0 + jit, h1 + jit))
+
+    alb, height = _composite_pair(base, height, _render_pair(w, 3, items))
+    height = wrap_blur(height, 0.45)
+    # Non-directional micro-occlusion: deep gaps between blades go darker.
+    alb *= (0.82 + 0.18 * smoothstep(0.05, 0.55, height))[..., None]
+    height = stretch(height, 0.5, 99.8)
+    return _pack_height(alb, height), to_image(
+        normal_from_height(height, TERRAIN_GRASS_STRENGTH), "RGB")
+
+
+def _dirt_relief(size, soil_height, cracks, stones, grains, twigs, ss=2):
+    """Height alpha for the trail dirt from the geometry its albedo drew.
+
+    Soil micro-relief low, cracks cut into it, stones domed well above it
+    (concentric rings rising to a crown that scales with the stone, softened
+    by a wrapped blur), grit grains and twigs just proud of whatever they lie on.
+    """
+    def layer(fns, sigma=0.0):
+        a = np.asarray(_draw_shapes(size, ss, fns), np.float32) / 255.0
+        val, cov = a[..., 0] * a[..., 3], a[..., 3]
+        if sigma:
+            val, cov = wrap_blur(val, sigma), wrap_blur(cov, sigma)
+        return np.clip(val, 0.0, 1.0), np.clip(cov, 0.0, 1.0)
+
+    h = 0.10 + 0.40 * soil_height
+
+    def crack(d, ox, oy, pts, width):
+        d.line([(x + ox, y + oy) for x, y in pts], fill=(255, 255, 255, 255),
+               width=width + 1)
+    _v, cut = layer([lambda d, ox, oy, p=p, wd=wd: crack(d, ox, oy, p, wd)
+                     for p, wd in cracks], 0.7)
+    h -= 0.22 * cut
+
+    def stone(d, ox, oy, pts, bx, by, crown):
+        for k, s in enumerate((1.0, 0.82, 0.64, 0.46, 0.28)):
+            v = 0.42 + (crown - 0.42) * math.sin(0.5 * math.pi * (k + 1) / 5.0)
+            d.polygon([(bx + ox + (x - bx) * s, by + oy + (y - by) * s) for x, y in pts],
+                      fill=_hgrey(v))
+    fns = []
+    for pts, bx, by, r in stones:
+        crown = float(np.clip(0.58 + 0.03 * r, 0.62, 1.0))
+        fns.append(lambda d, ox, oy, p=pts, bx=bx, by=by, c=crown:
+                   stone(d, ox, oy, p, bx, by, c))
+    val, cov = layer(fns, 0.8)
+    h = h * (1.0 - cov) + val
+
+    # grit and twigs lie on whatever is under them (soil or stone): relative bumps
+    def grain(d, ox, oy, bx, by, r):
+        d.ellipse([bx + ox - r, by + oy - r, bx + ox + r, by + oy + r], fill=_hgrey(1.0))
+    _v, cov = layer([lambda d, ox, oy, g=g: grain(d, ox, oy, *g) for g in grains], 0.6)
+    h += 0.08 * cov
+
+    def twig(d, ox, oy, pts, width):
+        d.line([(x + ox, y + oy) for x, y in pts], fill=_hgrey(1.0), width=width + 1)
+    _v, cov = layer([lambda d, ox, oy, p=p, wd=wd: twig(d, ox, oy, p, wd)
+                     for p, wd in twigs], 0.6)
+    h += 0.16 * cov
+    return stretch(h, 0.2, 99.9)
 
 
 def make_terrain_dirt(w=1024, h=1024):
@@ -1200,6 +1530,9 @@ def make_terrain_dirt(w=1024, h=1024):
     over the 5 m trail tile, so a pebble is legible underfoot instead of a
     smudge. All fields wrap and every stone is drawn through the same wrapped
     overlay, so the tile seam stays structural.
+
+    Returns RGBA 1024 (A = linear height: soil micro-relief, sunken cracks,
+    domed stones and grit, raised twigs) and a 512 normal map of it.
     """
     # structure at three scales: broad ground tone, 40 cm and 5 cm patches,
     # 1.7 cm grain and sub-centimetre dust. A continuous Voronoi joint net at
@@ -1244,6 +1577,9 @@ def make_terrain_dirt(w=1024, h=1024):
 
     rng = np.random.default_rng(SEED + 318)
     shapes: list = []
+    # Geometry recorded alongside the albedo shapes (no extra rng draws, so the
+    # colour stays exactly as authored) and replayed into the height alpha.
+    cracks, stones, grains, twigs = [], [], [], []
 
     # Hairline cracks first: stones sit over them, never the other way round.
     for _ in range(30):
@@ -1262,6 +1598,7 @@ def make_terrain_dirt(w=1024, h=1024):
                    fill=(38, 29, 21, 190), width=width)
 
         shapes.append(crack)
+        cracks.append((pts, width))
 
     # Stones: occasional cobbles, a scatter of trail gravel, then the fines.
     # Most of them cluster the way real trail gravel does, instead of an even
@@ -1335,6 +1672,7 @@ def make_terrain_dirt(w=1024, h=1024):
                        fill=(*dark, 180), width=2)
 
         shapes.append(stone)
+        stones.append((pts, bx, by, max(rx, ry)))
 
     for _ in range(2000):
         bx, by = scatter()
@@ -1349,6 +1687,7 @@ def make_terrain_dirt(w=1024, h=1024):
                        bx + ox + radius, by + oy + radius], fill=(*col, 215))
 
         shapes.append(speck)
+        grains.append((bx, by, radius))
 
     # Thin worn roots and twig litter, the one thing a path through this wood
     # keeps on top of the dirt.
@@ -1370,25 +1709,254 @@ def make_terrain_dirt(w=1024, h=1024):
                    width=width)
 
         shapes.append(twig)
+        twigs.append((pts, width))
 
-    return _overlay(soil, shapes, ss=2)
+    albedo = np.asarray(_overlay(soil, shapes, ss=2), np.float32) / 255.0
+    relief = _dirt_relief(w, height, cracks, stones, grains, twigs)
+    return _pack_height(albedo, relief), to_image(
+        _normal_half(relief, TERRAIN_DIRT_STRENGTH), "RGB")
+
+
+def make_terrain_litter(w=512, h=512):
+    """Forest-floor litter, 3.2 m tile (6 mm a texel): albedo + height.
+
+    Dark crumbly humus, a few moss cushions, a mat of shed pine needles, then
+    fallen broadleaf leaves (brown, ochre, rust, grey-brown and dark decayed
+    ones, each with a midrib) and small twigs on top. Paint order is depth
+    order, so the height alpha climbs with every layer: humus lowest, leaf
+    crowns and twigs highest, which is what the shader's height blend needs
+    for leaves to lie over grass and dirt instead of under them.
+    """
+    rng = np.random.default_rng(SEED + 351)
+    broad = fbm(w, h, 4, 4, SEED + 352, octaves=4)
+    crumb = fbm(w, h, 90, 90, SEED + 353, octaves=3)
+    fine = fbm(w, h, 220, 220, SEED + 354, octaves=2)
+    leafy = stretch(fbm(w, h, 6, 6, SEED + 355, octaves=3), 2, 98)
+
+    hum = mix(rgb(54, 45, 32), rgb(88, 73, 52), crumb)
+    hum = mix(hum, rgb(40, 31, 24), smoothstep(0.55, 0.75, broad) * 0.5)
+    hum *= (0.88 + 0.24 * fine)[..., None]
+    height = 0.04 + 0.12 * crumb + 0.04 * fine
+
+    items = []
+
+    def poly_item(pts, col, hv, extra=None):
+        def fn(dc, dh, ox, oy):
+            p = [(x + ox, y + oy) for x, y in pts]
+            dc.polygon(p, fill=col)
+            dh.polygon(p, fill=_hgrey(hv))
+            if extra:
+                extra(dc, dh, ox, oy)
+        return _bbox(pts), fn
+
+    def line_item(pts, col, hv, width):
+        def fn(dc, dh, ox, oy):
+            p = [(x + ox, y + oy) for x, y in pts]
+            dc.line(p, fill=col, width=width, joint="curve")
+            dh.line(p, fill=_hgrey(hv), width=width, joint="curve")
+        return _bbox(pts, width + 1.0), fn
+
+    # humus crumbs: tiny dark/pale fragments
+    for _ in range(1800):
+        cx, cy = rng.uniform(0, w), rng.uniform(0, h)
+        r = rng.uniform(0.6, 1.6)
+        col = _vary((84, 64, 46) if rng.random() < 0.5 else (28, 22, 17), rng, 8)
+        items.append(poly_item(_ellipse_pts(cx, cy, r, r * rng.uniform(0.5, 1.0),
+                                            rng.uniform(0, math.pi), 8),
+                               (*col, 230), rng.uniform(0.14, 0.24)))
+
+    # moss cushions: domed, stippled
+    mosses = []
+    for _ in range(9):
+        cx, cy = rng.uniform(0, w), rng.uniform(0, h)
+        r = rng.uniform(9.0, 18.0)
+        mosses.append((cx, cy, r))
+        ang = rng.uniform(0, math.pi)
+        base_col = _vary((70, 86, 40), rng, 6)
+        for k, s in enumerate((1.0, 0.8, 0.6, 0.4)):
+            col = tuple(int(c * (0.82 + 0.12 * k)) for c in base_col)
+            pts = [(cx + math.cos(a + ang) * r * s * rng.uniform(0.85, 1.12),
+                    cy + math.sin(a + ang) * r * s * 0.8 * rng.uniform(0.85, 1.12))
+                   for a in np.linspace(0, math.tau, 16, endpoint=False)]
+            items.append(poly_item(pts, (*col, 255), 0.26 + 0.09 * k))
+        for _dot in range(int(r * r * 0.9)):
+            a = rng.uniform(0, math.tau)
+            d = r * 0.9 * math.sqrt(rng.random())
+            px, py = cx + math.cos(a) * d, cy + math.sin(a) * d * 0.8
+            col = _vary((104, 120, 56) if rng.random() < 0.5 else (46, 58, 28), rng, 8)
+            items.append(poly_item(_ellipse_pts(px, py, 0.7, 0.7, 0.0, 6), (*col, 200),
+                                   0.40 + 0.18 * (1.0 - d / r)))
+
+    needle_cols = [(128, 92, 60), (110, 80, 54), (104, 90, 74), (140, 110, 78)]
+
+    def needle(hv_range):
+        x0, y0 = rng.uniform(0, w), rng.uniform(0, h)
+        ang = rng.uniform(0, math.tau)
+        ln = rng.uniform(6.0, 12.0)
+        bend = rng.normal(0, 0.12)
+        pts = [(x0 + math.cos(ang + bend * t) * ln * t, y0 + math.sin(ang + bend * t) * ln * t)
+               for t in (0.0, 0.5, 1.0)]
+        col = _vary(needle_cols[rng.integers(0, 4)], rng, 10)
+        items.append(line_item(pts, (*col, 235), rng.uniform(*hv_range), 1))
+
+    for _ in range(1500):
+        needle((0.24, 0.36))
+
+    # brown, ochre, rust, grey-brown, dark decayed, pale tan, umber, fawn
+    leaf_cols = [(126, 97, 64), (154, 124, 72), (140, 90, 54), (120, 110, 90),
+                 (80, 67, 50), (168, 142, 92), (106, 86, 60), (134, 106, 76)]
+    leaf_cdf = np.cumsum([0.17, 0.13, 0.12, 0.13, 0.14, 0.08, 0.13, 0.10])
+    n_leaves = 3100
+    for k in range(n_leaves):
+        x0, y0 = rng.uniform(0, w), rng.uniform(0, h)
+        if rng.random() > 0.55 + 0.45 * float(leafy[int(y0) % h, int(x0) % w]):
+            continue
+        if any(_wrap_dist(x0, y0, mx, my, w) < mr * 0.75 for mx, my, mr in mosses) \
+                and rng.random() < 0.85:
+            continue
+        ln = rng.uniform(11.0, 22.0) * (1.3 if rng.random() < 0.12 else 1.0)
+        kind = rng.random()
+        if kind < 0.30:      # oak-like lobed
+            outline = _leaf_outline(ln, ln * 0.30, lobes=rng.integers(3, 5),
+                                    lobe_amp=0.30, n=24)
+        elif kind < 0.75:    # beech / birch ovate
+            outline = _leaf_outline(ln, ln * rng.uniform(0.26, 0.36), n=18)
+        else:                # narrow willow / chestnut
+            outline = _leaf_outline(ln, ln * rng.uniform(0.16, 0.22), n=16)
+        ang = rng.uniform(0, math.tau)
+        pts = _rot([(x, y + ln * 0.5) for x, y in outline], ang, x0, y0)
+        ci = int(np.searchsorted(leaf_cdf, rng.random() * leaf_cdf[-1]))
+        col = np.array(leaf_cols[min(ci, len(leaf_cols) - 1)], np.float32)
+        col = col * rng.uniform(0.86, 1.14) + rng.uniform(-6, 6, 3)
+        col = tuple(int(c) for c in np.clip(col, 0, 255))
+        rib = tuple(int(np.clip(c * (1.22 if sum(col) < 300 else 0.78), 0, 255)) for c in col)
+        edge = tuple(int(c * 0.8) for c in col)
+        # later leaves lie on earlier ones, so height follows paint order;
+        # the blade centre is curled up a little above its rim
+        hv = 0.42 + 0.50 * k / n_leaves
+        inner = _rot([(x * 0.55, (y + ln * 0.5) * 0.78) for x, y in outline], ang, x0, y0)
+        rib_pts = _rot([(0.0, -ln * 0.5), (0.0, ln * 0.62)], ang, x0, y0)
+        mid_col = tuple(min(255, int(c * 1.05)) for c in col)
+
+        def leaf_detail(dc, dh, ox, oy, inner=inner, rib_pts=rib_pts, rib=rib, hv=hv,
+                        mid_col=mid_col):
+            p = [(x + ox, y + oy) for x, y in inner]
+            dc.polygon(p, fill=(*mid_col, 255))
+            dh.polygon(p, fill=_hgrey(hv + 0.03))
+            q = [(x + ox, y + oy) for x, y in rib_pts]
+            dc.line(q, fill=(*rib, 210), width=1)
+            dh.line(q, fill=_hgrey(hv + 0.05), width=1)
+        items.append(poly_item(pts, (*edge, 255), hv - 0.03, leaf_detail))
+
+    for _ in range(260):
+        needle((0.90, 0.96))
+
+    for _ in range(26):
+        x0, y0 = rng.uniform(0, w), rng.uniform(0, h)
+        ang = rng.uniform(0, math.tau)
+        ln = rng.uniform(14.0, 48.0)
+        wd = 2 if rng.random() < 0.6 else 3
+        pts = [(x0, y0)]
+        for _s in range(4):
+            ang += rng.uniform(-0.3, 0.3)
+            x0 += math.cos(ang) * ln / 4.0
+            y0 += math.sin(ang) * ln / 4.0
+            pts.append((x0, y0))
+        col = _vary((92, 76, 60), rng, 10)
+        items.append(line_item(pts, (*col, 255), rng.uniform(0.94, 1.0), wd))
+        if rng.random() < 0.6:
+            bx, by = pts[rng.integers(1, 4)]
+            ba = ang + rng.choice((-1, 1)) * rng.uniform(0.5, 1.0)
+            bl = rng.uniform(4.0, 10.0)
+            items.append(line_item([(bx, by), (bx + math.cos(ba) * bl, by + math.sin(ba) * bl)],
+                                   (*col, 255), 0.95, 1))
+
+    alb, height = _composite_pair(hum, height, _render_pair(w, 4, items))
+    height = wrap_blur(height, 0.45)
+    alb *= (0.84 + 0.16 * smoothstep(0.05, 0.50, height))[..., None]
+    height = stretch(height, 0.5, 99.8)
+    return _pack_height(alb, height), to_image(
+        normal_from_height(height, TERRAIN_LITTER_STRENGTH), "RGB")
+
+
+def _warp_lookup(fields, w, h, amount, seed, freq=12):
+    """Resample same-size fields through a wrapped fBm domain warp (nearest)."""
+    X = np.arange(w, dtype=np.float32)[None, :]
+    Y = np.arange(h, dtype=np.float32)[:, None]
+    wx = (fbm(w, h, freq, freq, seed, octaves=3) - 0.5) * amount
+    wy = (fbm(w, h, freq, freq, seed + 1, octaves=3) - 0.5) * amount
+    xi = np.floor(X + wx).astype(np.int32) % w
+    yi = np.floor(Y + wy).astype(np.int32) % h
+    return [f[yi, xi] for f in fields]
 
 
 def make_terrain_rock(w=512, h=512):
-    f1, f2, ids = cellular(w, h, 16, 16, SEED + 321)
-    cellv = value_hash(ids, SEED + 322)
-    crack = smoothstep(0.0, 3.0, f2 - f1)
-    fine = fbm(w, h, 80, 80, SEED + 323, octaves=4)
-    moss = smoothstep(0.60, 0.80, fbm(w, h, 5, 5, SEED + 324, octaves=3)
-                      + 0.35 * (1.0 - crack))
+    """Scree and fractured rock, 4 m tile: albedo + plate height.
 
-    base = mix(rgb(104, 106, 100), rgb(140, 140, 130), cellv)
-    base = mix(base, rgb(78, 80, 76), (1.0 - crack) * 0.55)
-    base *= (0.88 + 0.24 * fine)[..., None]
-    base = mix(base, rgb(88, 112, 68), moss * 0.55)
-    base = mix(base, rgb(150, 150, 132),
+    Angular stones from a domain-warped Voronoi (ragged joints), about a third
+    of them broken into smaller chips, each a faceted plate with its own tilt,
+    crown and tone, sunk into dark grit-filled joints of varying width where
+    moss settles. Height alpha: plates high, joints low; the facet tilts are
+    what the normal map reads.
+    """
+    f1, f2, ids = cellular(w, h, 13, 13, SEED + 321)
+    g1, g2, gids = cellular(w, h, 29, 29, SEED + 332)
+    # Break about a third of the big plates into smaller chips so stone size
+    # varies; chip fractures are tighter than the joints between whole stones.
+    broken = value_hash(ids, SEED + 333) < 0.35
+    seam = np.where(broken, np.minimum(f2 - f1, (g2 - g1) * 1.8 + 0.6), f2 - f1)
+    ids = np.where(broken & (g2 - g1 < f2 - f1), ids * 4096 + gids, ids * 4096 + 4095)
+    ids = np.unique(ids, return_inverse=True)[1].reshape(h, w).astype(np.int32)
+    seam, ids = _warp_lookup([seam, ids], w, h, 7.0, SEED + 329, freq=20)
+    seam, ids = _warp_lookup([seam, ids], w, h, 2.5, SEED + 334, freq=56)
+    cellv = value_hash(ids, SEED + 322)
+    fine = fbm(w, h, 80, 80, SEED + 323, octaves=4)
+    grit = fbm(w, h, 160, 160, SEED + 330, octaves=2)
+    moss = smoothstep(0.62, 0.82, fbm(w, h, 5, 5, SEED + 324, octaves=3)
+                      + 0.30 * (1.0 - smoothstep(0.0, 4.0, seam)))
+
+    # per-stone facet: a plane through the stone's (wrapped) centroid
+    X = np.broadcast_to((np.arange(w, dtype=np.float32) + 0.5)[None, :], (h, w))
+    Y = np.broadcast_to((np.arange(h, dtype=np.float32) + 0.5)[:, None], (h, w))
+    n = int(ids.max()) + 1
+    flat = ids.ravel()
+
+    def circ_mean(coord, size):
+        a = coord.ravel() * (math.tau / size)
+        s = np.bincount(flat, np.sin(a), n)
+        c = np.bincount(flat, np.cos(a), n)
+        return (np.arctan2(s, c) % math.tau) * (size / math.tau)
+
+    dx = X - circ_mean(X, w)[ids]
+    dx -= w * np.round(dx / w)
+    dy = Y - circ_mean(Y, h)[ids]
+    dy -= h * np.round(dy / h)
+    tx = (value_hash(ids, SEED + 326) - 0.5) * 2.0
+    ty = (value_hash(ids, SEED + 327) - 0.5) * 2.0
+    cw = w / 20.0
+    facet = (tx * dx + ty * dy) / cw
+
+    gap_w = 1.4 + 3.2 * smoothstep(0.45, 0.75, fbm(w, h, 9, 9, SEED + 335, octaves=3))
+    joint = smoothstep(0.2 * gap_w, gap_w, seam)
+    shoulder = smoothstep(0.0, 0.40 * cw, seam)
+
+    stone = mix(rgb(116, 116, 110), rgb(158, 156, 146), cellv)
+    stone = mix(stone, rgb(126, 120, 108), value_hash(ids, SEED + 331) * 0.45)
+    stone *= (0.86 + 0.26 * fine)[..., None]
+    gap = mix(rgb(66, 63, 56), rgb(104, 98, 86), grit)
+    base = mix(gap, stone, joint)
+    base *= (0.84 + 0.16 * shoulder)[..., None]
+    base = mix(base, rgb(88, 104, 66), moss * 0.42)
+    base = mix(base, rgb(158, 158, 140),
                smoothstep(0.72, 0.85, fbm(w, h, 40, 40, SEED + 325, octaves=2)) * 0.25)
-    return base
+
+    height = (0.08 + 0.46 * shoulder ** 0.7 + 0.16 * cellv + 0.12 * facet * shoulder
+              + 0.12 * fine + 0.05 * fbm(w, h, 24, 24, SEED + 328, octaves=3))
+    height = height * joint + (0.04 + 0.06 * grit) * (1.0 - joint)
+    height -= 0.06 * moss
+    height = stretch(wrap_blur(height, 0.6), 0.5, 99.8)
+    return _pack_height(base, height), to_image(
+        normal_from_height(height, TERRAIN_ROCK_STRENGTH), "RGB")
 
 
 def make_terrain_macro(w=256, h=256):
@@ -1399,6 +1967,56 @@ def make_terrain_macro(w=256, h=256):
     tint = mix(np.array((1.0, 1.0, 0.99), np.float32),
                np.array((0.98, 1.0, 0.96), np.float32), a)
     return np.clip(v[..., None] * tint, 0, 1)
+
+
+def _unit_mean(a):
+    """Stretch to 0..1 and bend with a power curve so the mean is ~0.5."""
+    v = stretch(a, 0.3, 99.7)
+    lo, hi = 0.25, 4.0
+    for _ in range(40):
+        g = math.sqrt(lo * hi)
+        if float((v ** g).mean()) > 0.5:
+            lo = g
+        else:
+            hi = g
+    return (v ** math.sqrt(lo * hi)).astype(np.float32)
+
+
+def _fbm_rolled(w, h, cells, seed, octaves=4, ridge=False):
+    """Tileable fBm whose octaves are each rolled by a random whole-pixel
+    offset: plain ``fbm`` puts every octave's lattice (where smoothstep value
+    noise has zero slope) on the same tile edges, which shows as axis-aligned
+    creases when a data map drives blend thresholds."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros((h, w), np.float32)
+    amp, norm = 1.0, 0.0
+    for o in range(octaves):
+        n = value_noise(w, h, cells << o, cells << o, seed + 7919 * o)
+        if ridge:
+            n = 1.0 - np.abs(n * 2.0 - 1.0)
+        out += amp * np.roll(n, (int(rng.integers(0, h)), int(rng.integers(0, w))), (0, 1))
+        norm += amp
+        amp *= 0.5
+    return out / norm
+
+
+def make_terrain_noise(w=256, h=256):
+    """Linear data map for the terrain shader (not colour; import as linear).
+
+    Four independent tileable fBm channels, each stretched to fill 0..1 with
+    mean 0.5: R broad patches (3 lattice cells per tile), G medium (6),
+    B finer, clumped by a Voronoi term and a ridged octave so blend edges
+    come out ragged (17), A medium-broad (4).
+    """
+    r = _fbm_rolled(w, h, 3, SEED + 361)
+    g = _fbm_rolled(w, h, 6, SEED + 362)
+    f1, _f2, _ids = cellular(w, h, 17, 17, SEED + 364)
+    clump = 1.0 - np.clip(f1 / (w / 17.0), 0.0, 1.0)
+    b = (0.50 * _fbm_rolled(w, h, 17, SEED + 363, octaves=3)
+         + 0.30 * clump ** 1.5
+         + 0.20 * _fbm_rolled(w, h, 34, SEED + 366, octaves=2, ridge=True))
+    a = _fbm_rolled(w, h, 4, SEED + 365)
+    return to_image(np.stack([_unit_mean(c) for c in (r, g, b, a)], axis=-1), "RGBA")
 
 
 def make_rock(w=512, h=512):
@@ -1914,6 +2532,11 @@ ATLAS_LAYOUT = {
     "grass_meadow": (2, 2), "fern": (2, 2), "flowers": (4, 2),
     "flame": (2, 2),
 }
+TERRAIN_LAYER_IDS = ("terrain_grass", "terrain_litter", "terrain_dirt", "terrain_rock")
+TERRAIN_LAYERS = {
+    "terrain_grass": make_terrain_grass, "terrain_litter": make_terrain_litter,
+    "terrain_dirt": make_terrain_dirt, "terrain_rock": make_terrain_rock,
+}
 
 ASSETS = [
     dict(id="sky_frontier", file="sky_frontier.png", size=(4096, 2048),
@@ -1948,7 +2571,9 @@ ASSETS = [
          description="2x2 pine needle fan sprigs on short branches."),
     dict(id="grass_meadow", file="grass_meadow.png", size=(512, 512), channels=4,
          tiling="atlas", n_version=None, kind="groundcover",
-         description="2x2 pale-green upright grass tufts (tint friendly)."),
+         description="2x2 soft grass tufts: 70-130 curved, tapering blades fanned from "
+                     "a rooted cluster, base-dark to tip-light, some straw blades and "
+                     "seed heads; pale and desaturated (tint friendly)."),
     dict(id="flowers", file="flowers.png", size=(512, 512), channels=4,
          tiling="atlas", n_version=None, kind="groundcover",
          description="4x2 wildflower cards: daisy, buttercup, poppy, cornflower, "
@@ -1957,15 +2582,31 @@ ASSETS = [
          tiling="atlas", n_version=None, kind="groundcover",
          description="2x2 fern fronds with serrated pinnae."),
     dict(id="terrain_grass", file="terrain_grass.png", size=(512, 512),
-         channels=3, tiling="both", n_version=None, kind="terrain",
-         description="Fine meadow grass and clover detail for the terrain shader."),
-    dict(id="terrain_dirt", file="terrain_dirt.png", size=(1024, 1024), channels=3,
-         tiling="both", n_version=None, kind="terrain",
-         description="Packed trail dirt: embedded gravel, hairline cracks, twigs "
-                     "and dry/damp patches."),
-    dict(id="terrain_rock", file="terrain_rock.png", size=(512, 512), channels=3,
-         tiling="both", n_version=None, kind="terrain",
-         description="Scree and fractured rock face with moss patches."),
+         channels=4, tiling="both", n_version="terrain_grass_n.png", kind="terrain",
+         description="Dense lawn/forest grass seen from above (4 m tile): layered "
+                     "blades over dark gaps, light tips, dry straw patches, clover. "
+                     "RGB albedo, A = linear height (blade tips high)."),
+    dict(id="terrain_litter", file="terrain_litter.png", size=(512, 512),
+         channels=4, tiling="both", n_version="terrain_litter_n.png", kind="terrain",
+         description="Forest-floor litter (3.2 m tile): dark humus, fallen broadleaf "
+                     "leaves with midribs, pine needles, twigs, moss cushions. "
+                     "RGB albedo, A = linear height (leaves/twigs high, humus low)."),
+    dict(id="terrain_dirt", file="terrain_dirt.png", size=(1024, 1024), channels=4,
+         tiling="both", n_version="terrain_dirt_n.png", n_size=(512, 512),
+         kind="terrain",
+         description="Packed trail dirt (5 m tile): embedded gravel, hairline cracks, "
+                     "twigs and dry/damp patches. RGB albedo, A = linear height "
+                     "(domed stones high, cracks sunken); 512 normal map."),
+    dict(id="terrain_rock", file="terrain_rock.png", size=(512, 512), channels=4,
+         tiling="both", n_version="terrain_rock_n.png", kind="terrain",
+         description="Scree and fractured rock (4 m tile): angular plates and chips in "
+                     "grit-filled joints, moss. RGB albedo, A = linear height "
+                     "(plates high, joints low)."),
+    dict(id="terrain_noise", file="terrain_noise.png", size=(256, 256),
+         channels=4, tiling="both", n_version=None, kind="terrain",
+         description="LINEAR DATA, not colour: four independent tileable fBm channels "
+                     "stretched to 0..1, mean 0.5. R broad (3 cells), G medium (6), "
+                     "B fine ridged/clumpy (17), A medium-broad (4)."),
     dict(id="terrain_macro", file="terrain_macro.png", size=(256, 256),
          channels=3, tiling="both", n_version=None, kind="terrain",
          description="Low-frequency grey-green mottling for macro terrain variation."),
@@ -2019,6 +2660,10 @@ NORMALS = {
     "rock_n.png": ("rock", 5.0),
     "thatch_n.png": ("thatch", 6.0), "hide_n.png": ("hide", 3.0),
     "bone_n.png": ("bone", 3.0), "wattle_n.png": ("wattle", 2.5),
+    "terrain_grass_n.png": ("terrain_grass", TERRAIN_GRASS_STRENGTH),
+    "terrain_litter_n.png": ("terrain_litter", TERRAIN_LITTER_STRENGTH),
+    "terrain_dirt_n.png": ("terrain_dirt", TERRAIN_DIRT_STRENGTH),
+    "terrain_rock_n.png": ("terrain_rock", TERRAIN_ROCK_STRENGTH),
 }
 
 LICENSE_TEXT = """IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
@@ -2034,9 +2679,12 @@ maps are derived from authored height fields in the OpenGL convention
 (+Y up, green = up) and carry no baked directional light.
 
 Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
-alpha atlases, terrain detail and macro variation, rock and water normals,
-building materials (planks, timber, plaster, shingles, stone) and the
-forest-camp surfaces (thatch, hide, bone) and the flame atlas.
+alpha atlases (incl. the grass-tuft cards), the height-blended terrain ground
+layers (grass, forest-floor litter, trail dirt, rock/scree: albedo + height
+alpha + normals), the linear terrain noise data map and macro variation,
+rock and water normals, building materials (planks, timber, plaster,
+shingles, stone) and the forest-camp surfaces (thatch, hide, bone) and the
+flame atlas.
 
 The textures are distributed under Creative Commons
 Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),
@@ -2243,6 +2891,56 @@ def sheet_foliage(tex_dir, ids, path):
     sheet.save(path)
 
 
+def sheet_terrain_review(tex_dir, path):
+    """Ground layers (2x2 tiled albedo, height, normal, 1:1 crop), the noise
+    channels and the grass-tuft cards on mid grey."""
+    from PIL import ImageFont
+    font = ImageFont.load_default(size=15)
+    t = 256
+    pad = 10
+    label = 22
+    rows = len(TERRAIN_LAYER_IDS) + 2
+    width = 4 * t + 5 * pad
+    sheet = Image.new("RGB", (width, rows * (t + label + pad) + pad), (128, 128, 128))
+    d = ImageDraw.Draw(sheet)
+    y = pad
+    for tid in TERRAIN_LAYER_IDS:
+        im = Image.open(tex_dir / f"{tid}.png")
+        alb = im.convert("RGB")
+        small = alb.resize((t // 2, t // 2), Image.LANCZOS)
+        tiled = Image.new("RGB", (t, t))
+        for ox in range(2):
+            for oy in range(2):
+                tiled.paste(small, (ox * t // 2, oy * t // 2))
+        height = im.getchannel("A").resize((t, t), Image.LANCZOS).convert("RGB")
+        normal = Image.open(tex_dir / f"{tid}_n.png").convert("RGB").resize((t, t), Image.LANCZOS)
+        crop = alb.crop((0, 0, t, t))
+        for i, (img, cap) in enumerate(((tiled, "%s 2x2" % tid), (height, "height (A)"),
+                                        (normal, "normal"), (crop, "1:1 crop"))):
+            x = pad + i * (t + pad)
+            sheet.paste(img, (x, y))
+            d.text((x, y + t + 3), cap, fill=(16, 16, 16), font=font)
+        y += t + label + pad
+    noise = Image.open(tex_dir / "terrain_noise.png")
+    for i, band in enumerate("RGBA"):
+        x = pad + i * (t + pad)
+        sheet.paste(noise.getchannel(band).resize((t, t), Image.LANCZOS).convert("RGB"), (x, y))
+        d.text((x, y + t + 3), "terrain_noise %s" % band, fill=(16, 16, 16), font=font)
+    y += t + label + pad
+    atlas = Image.open(tex_dir / "grass_meadow.png").convert("RGBA")
+    cols, rows_ = ATLAS_LAYOUT["grass_meadow"]
+    cw = (atlas.width - GUTTER * (cols + 1)) // cols
+    ch = (atlas.height - GUTTER * (rows_ + 1)) // rows_
+    for i in range(cols * rows_):
+        cx = GUTTER + (i % cols) * (cw + GUTTER)
+        cy = GUTTER + (i // cols) * (ch + GUTTER)
+        cell = atlas.crop((cx, cy, cx + cw, cy + ch))
+        x = pad + i * (t + pad)
+        sheet.paste(cell, (x, y), cell)
+        d.text((x, y + t + 3), "grass_meadow cell %d" % i, fill=(16, 16, 16), font=font)
+    sheet.save(path)
+
+
 def sheet_sky_seam(sky, path):
     w, h = sky.size
     strip = Image.new("RGB", (512, 512))
@@ -2303,12 +3001,13 @@ def build_all(only=None):
     if _want(only, "flame"):
         out["flame.png"] = make_flame()
 
-    if _want(only, "terrain_grass"):
-        out["terrain_grass.png"] = make_terrain_grass()
-    if _want(only, "terrain_dirt"):
-        out["terrain_dirt.png"] = make_terrain_dirt()
-    if _want(only, "terrain_rock"):
-        out["terrain_rock.png"] = to_image(make_terrain_rock(), "RGB")
+    for tid in TERRAIN_LAYER_IDS:
+        if _want(only, tid):
+            albedo, normal = TERRAIN_LAYERS[tid]()
+            out[f"{tid}.png"] = albedo
+            out[f"{tid}_n.png"] = normal
+    if _want(only, "terrain_noise"):
+        out["terrain_noise.png"] = make_terrain_noise()
     if _want(only, "terrain_macro"):
         out["terrain_macro.png"] = to_image(make_terrain_macro(), "RGB")
     if _want(only, "rock"):
@@ -2352,11 +3051,14 @@ def write_manifest():
         path = TEX_DIR / spec["file"]
         if not path.exists():
             continue
-        entries.append(dict(
+        entry = dict(
             id=spec["id"], file=spec["file"], size=list(spec["size"]),
             channels=spec["channels"], tiling=spec["tiling"],
             n_version=spec["n_version"], kind=spec["kind"],
-            description=spec["description"]))
+            description=spec["description"])
+        if "n_size" in spec:
+            entry["n_size"] = list(spec["n_size"])
+        entries.append(entry)
     manifest = dict(
         generator="tools/world_textures.py", seed=SEED,
         color_space="sRGB albedo; normal maps OpenGL +Y (green up)",
@@ -2390,9 +3092,10 @@ def validate_and_report(t_start):
             img = Image.open(path)
             img.load()
             loaded[fn] = img
-            exp = spec["size"]
+            normal = fn != spec["file"]
+            exp = spec.get("n_size", spec["size"]) if normal else spec["size"]
             ok = img.size == tuple(exp) and img.mode == (
-                "RGBA" if spec["channels"] == 4 else "RGB")
+                "RGBA" if spec["channels"] == 4 and not normal else "RGB")
             checks.append(ok)
             sz = path.stat().st_size
             if fn == spec["file"]:
@@ -2476,6 +3179,21 @@ def validate_and_report(t_start):
             st["mean_r"], st["mean_g"], st["mean_b"], "PASS" if ok else "FAIL"))
 
     add("")
+    add("TERRAIN HEIGHT ALPHA (linear height; min >= 10/255, real contrast)")
+    add("%-18s %-6s %-6s %-6s %-6s %s" % ("id", "min", "p1", "p99", "mean", "verdict"))
+    for tid in TERRAIN_LAYER_IDS:
+        fn = tid + ".png"
+        if fn not in loaded or loaded[fn].mode != "RGBA":
+            continue
+        alpha = np.asarray(loaded[fn])[..., 3]
+        p1, p99 = np.percentile(alpha, [1, 99])
+        ok = int(alpha.min()) >= 10 and p99 - p1 >= 128
+        checks.append(ok)
+        add("%-18s %-6d %-6d %-6d %-6.1f %s" % (
+            tid, int(alpha.min()), int(p1), int(p99), float(alpha.mean()),
+            "PASS" if ok else "FAIL"))
+
+    add("")
     if "sky_frontier.png" in loaded:
         sm = sky_metrics(loaded["sky_frontier.png"])
         add("SKY (4096x2048 equirectangular)")
@@ -2496,10 +3214,9 @@ def validate_and_report(t_start):
         add("  sky structure check: %s" % ("PASS" if ok else "REVIEW"))
 
     add("")
-    add("NOTE: textures were inspected with numeric/ASCII diagnostics only in this")
-    add("session (raster images could not be displayed to the authoring agent).")
+    add("NOTE: the numbers above are gates, not a look; review the contact sheets.")
     add("Contact sheets for human review: .runtime/world-art/texture_sheet.png,")
-    add("foliage_sheet.png, sky_seam.png, sky_thumb.png")
+    add("foliage_sheet.png, terrain_review.png, sky_seam.png, sky_thumb.png")
     add("")
     result = "PASS" if all(checks) else "FAIL"
     add("RESULT: %s  (%d checks, %d failed)" % (result, len(checks), checks.count(False)))
@@ -2539,6 +3256,7 @@ def main(argv=None):
             ids = [s["id"] for s in ASSETS if s["tiling"] == "both"]
             sheet_tiling(TEX_DIR, ids, SCRATCH / "texture_sheet.png")
             sheet_foliage(TEX_DIR, list(ATLAS_LAYOUT), SCRATCH / "foliage_sheet.png")
+            sheet_terrain_review(TEX_DIR, SCRATCH / "terrain_review.png")
             sky = Image.open(TEX_DIR / "sky_frontier.png")
             sheet_sky_seam(sky, SCRATCH / "sky_seam.png")
             sky.resize((1024, 512), Image.LANCZOS).save(SCRATCH / "sky_thumb.png")

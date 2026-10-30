@@ -2,6 +2,13 @@ shader_type spatial;
 // Grass/flower/fern clumps. UV2 = (wind phase, wind weight). UV2.y rises toward
 // the blade tip so the base stays planted. Camera-distance fade starts just
 // before the MultiMesh visibility range ends, hiding the chunk cut.
+//
+// A clump is lit as a soft mound, not as boards: the card normal is bent toward
+// the sky (`normal_up`), so every card of a tuft - front face or back - takes
+// the same light the ground under it does. The base sits in its own shade
+// (`base_shade`, by the wind weight) and light passes through a blade from behind
+// (`translucency`), so a torch beyond the verge rims the grass instead of
+// blacking it out.
 render_mode cull_disabled, depth_prepass_alpha;
 
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap, repeat_disable;
@@ -12,6 +19,9 @@ uniform float wind_speed = 1.2;
 uniform float wind_scale = 0.45;
 uniform float fade_start = 58.0;
 uniform float fade_end = 72.0;
+uniform float base_shade : hint_range(0.0, 1.0) = 0.78;
+uniform float normal_up : hint_range(0.0, 1.0) = 0.6;
+uniform float translucency : hint_range(0.0, 1.0) = 0.3;
 
 void vertex() {
 	float phase = UV2.x;
@@ -30,12 +40,16 @@ void fragment() {
 	// Fragment VERTEX is view-space, so its length is camera distance.
 	float distance_to_camera = length(VERTEX);
 	float fade = 1.0 - smoothstep(fade_start, fade_end, distance_to_camera);
-	ALBEDO = colour.rgb;
+	float rise = smoothstep(0.0, 1.0, UV2.y);
+	vec3 albedo = colour.rgb * mix(base_shade, 1.0, rise);
+	ALBEDO = albedo;
 	ALPHA = colour.a * fade;
 	ALPHA_SCISSOR_THRESHOLD = alpha_scissor;
-	ROUGHNESS = 0.95;
-	SPECULAR = 0.04;
-	if (!FRONT_FACING) {
-		NORMAL = -NORMAL;
-	}
+	ROUGHNESS = 0.9;
+	SPECULAR = 0.08;
+	AO = mix(0.45, 1.0, rise);
+	BACKLIGHT = albedo * translucency;
+	vec3 facing = FRONT_FACING ? NORMAL : -NORMAL;
+	vec3 sky = (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz;
+	NORMAL = normalize(mix(facing, sky, normal_up));
 }

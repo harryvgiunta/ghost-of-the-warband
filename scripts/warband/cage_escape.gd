@@ -28,13 +28,14 @@ extends Node3D
 ##
 ## The opening is played, not read. The player wakes inside the first of the five:
 ##
-##   1. cut the latch on its own cage with `G` - bare hands, a nail, a padlock;
-##   2. step out and get its bearings: the camp, the fire, the cages in the trees;
-##   3. the objective arrives - free the rest of the warband - over a gold arrow
-##      on the camp's only blade and a pair of watchers to use it on, each key
-##      named at the moment it is needed;
-##   4. five bodies on their feet, and the objective turns over: run to the town;
-##   5. the gap in the trees is the leaving, and the wood answers it.
+##   1. take the ironwood shiv off the dirt in front of its cage with `K`, through
+##      the bars - the first thing the camp asks of a body;
+##   2. cut the latch on its own cage with `G`: a blade does what a nail cannot;
+##   3. step out and get its bearings: the camp, the fire, the cages in the trees;
+##   4. the objective arrives - free the rest of the warband - over the blade in
+##      hand and a pair of watchers to use it on, each key named as it is needed;
+##   5. five bodies on their feet, and the objective turns over: run to the town;
+##   6. the gap in the trees is the leaving, and the wood answers it.
 ##
 ## Nothing opens on its own, and nothing is explained in a paragraph. Past the
 ## mouth is trees for `CAMP_TO_ROAD_METRES` before the trail's first torch.
@@ -65,17 +66,16 @@ const CAGE_POSTS := [
 	Vector3(-17.0, 0.2, -18.5),    # deep left, down by the collapsed den
 	Vector3(12.0, 0.2, -9.5),      # right, between the cages and the watchers
 ]
-## The dressings a campaign starts with, lying on the altar's dirt where a player
-## walking to the shiv will see them: five, so the first fight can be answered with
-## `6` five times. They are the player's - picked up with `K` into the shared stash
-## - and the squad's own medicine never draws on that stash.
+## The dressings a campaign starts with, lying on the cold altar's dirt: five, so
+## the first fight can be answered with `6` five times. They are the player's -
+## picked up with `K` into the shared stash - and the squad's own medicine never
+## draws on that stash.
 const STARTING_BANDAGES := 5
 const BANDAGE_ITEM := "bandage_linen"
 ## Five spots at the cold altar (`ColdAltar` stands at (0, 0, 12.5)), all of them on
-## its *far* side: three along the slab's back edge and two on the dirt behind it.
-## That is deliberate - the shiv lies at the altar's near foot (`SHIV_POST`, z 11.0)
-## and `K` takes the nearest piece, so the dressings must never be the nearest thing
-## to a body walking up to the blade it was shown.
+## its *far* side: three along the slab's back edge and two on the dirt behind it, so
+## a body walking up to the stone from the cages reads the medicine before the slab
+## and `K` never has to choose between the two.
 const START_BANDAGE_POSTS := [
 	Vector3(-1.2, 1.14, 13.1), Vector3(0.0, 1.14, 13.1), Vector3(1.2, 1.14, 13.1),
 	Vector3(-0.7, 0.15, 14.1), Vector3(0.7, 0.15, 14.1),
@@ -92,22 +92,31 @@ const WALK_ROUTE := [
 	Vector3(-17.0, 0.0, -18.5), Vector3(12.0, 0.0, -9.5), Vector3(0.0, 0.0, -12.0),
 	Vector3(0.0, 0.0, -22.0), Vector3(0.0, 0.0, -29.0),
 ]
-## Corvin's shiv, on the dirt at the foot of the cold altar - the stone he jogs
-## past on his way to the cages, and the one lit place at the back of the camp. The
-## pair threw it there, so the first weapon the player ever holds is a thing on the
-## ground a few paces behind where his body lands, picked up with `K`, and marked
-## by `lesson_arrow.gd` until it is taken.
+## Corvin's shiv, on the dirt right in front of the player's own cage - thrown
+## there when the pair shut the door, a hand's reach outside the bars. The first
+## weapon the player ever holds is taken with `K` *through the cage*, and the same
+## blade is what cuts the latch that holds them: the opening's first two beats are
+## the weapon and the door it opens.
 ##
-## It sits inside the altar's ring of skull-topped sticks (radius 3.05 m) and clear
-## of the four cold candles (1.9 m) and the bone heap beside the steps, so the
-## gold arrow has dark dirt under it rather than stone.
+## It lies half a metre outside the door and between its posts, so a body at the
+## bars can reach it, the gold arrow over it is read through the bars, and a body
+## stepping out of the door does not trip over it.
 const LESSON_SHIV := "dagger_ironwood"
-const SHIV_POST := Vector3(-2.15, 0.15, 11.0)
+const SHIV_POST := Vector3(0.0, 0.15, 4.35)
 ## How close the body has to come to the shiv before the tip that asks for `K` is
 ## offered. It matches the world's own loot reach (`world_scene.LOOT_REACH`), so
 ## the tip arrives on exactly the frames `K` works: a new player presses it and
 ## never meets a "too far away" line in between.
 const SHIV_CARD_RADIUS := 2.6
+## Two worn hand torches on the dirt at the starting cage: the off-hand light the
+## player takes into the wood. They lie either side of the cell's door, a pace
+## beyond the shiv, so the first thing a caged body sees at its feet is its blade
+## with two brands burning beside it - and `K` still takes the shiv first, because
+## every one of these posts is further from the bars than the blade in the door's
+## line.
+const START_TORCH_POSTS := [
+	Vector3(-2.4, 0.15, 3.6), Vector3(2.4, 0.15, 3.6),
+]
 ## The way out: not a gate and not a road - the gap the wood leaves between its
 ## trees at the camp's front line. Past it is nothing but wood for
 ## `CAMP_TO_ROAD_METRES`.
@@ -269,6 +278,7 @@ const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CombatScript = preload("res://scripts/combat.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const ArrowScript = preload("res://scripts/warband/lesson_arrow.gd")
+const TorchScript = preload("res://scripts/warband/torch_light.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const DressingScript = preload("res://scripts/warband/camp_dressing.gd")
@@ -333,6 +343,19 @@ var _lesson := false
 ## enters the tree, because `_ready` and `embed` are where the watchers and the
 ## choice of opening would otherwise happen.
 var _resume := false
+
+
+## The camp's worn ground, for the world's terrain - which is baked before the
+## camp is built, so it is read off the constants: the yard, the walk, the cages,
+## the fire, the shelters and the altar (`camp_clearing.gd`), the worn line down
+## the corridor's gap in the wood to the road, and the two cart ruts
+## (`camp_dressing.gd`). The terrain paints them into its ground map.
+static func trodden_ground() -> Array:
+	var marks: Array = ClearingScript.trodden_ground(CAGE_POSTS, WALK_ROUTE)
+	marks.append({"points": ClearingScript.corridor_line(GATE_POINT, CAMP_TO_ROAD_METRES),
+		"half_width": 2.6, "strength": 0.9})
+	marks.append_array(DressingScript.rut_lines())
+	return marks
 
 
 func _ready() -> void:
@@ -478,10 +501,19 @@ func place_warband(bodies_in: Array) -> void:
 	# it and can answer the first fight with `6`.
 	for post in START_BANDAGE_POSTS:
 		_spawn_pickup(BANDAGE_ITEM, post)
-	# And the shiv itself, lying where the pair threw it: the first weapon in the
-	# game and the beat the opening is built around. It gets a big gold arrow
-	# hanging over it - a body in a cage cannot see a dagger in the dirt, and "walk
-	# to your shiv" is a place, not a sentence.
+	# Two worn hand torches on the dirt either side of the starting cage's door:
+	# the off-hand light the player carries into the wood, already burning because
+	# a ground torch is a ground torch. Both are the same catalog piece the
+	# quartermaster sells, so the first `K` on one arms the off hand and the
+	# second goes to the stash for a squadmate.
+	for post in START_TORCH_POSTS:
+		_spawn_pickup(TorchScript.ITEM_ID, post)
+	# And the shiv itself, lying where the pair threw it - right in the dirt
+	# outside the cell door, a reach through the bars. It is the first weapon in
+	# the game and the beat the opening is built around, and the blade is what
+	# opens the cage: `K` takes it, `G` cuts the latch with it. It gets a big gold
+	# arrow hanging over it - a body in a cage cannot see a dagger in the dirt,
+	# and "take your shiv" is a place, not a sentence.
 	_shiv_pickup = _spawn_pickup(LESSON_SHIV, SHIV_POST)
 	_shiv_marker = _spawn_marker("ShivMarker", "")
 	# The latch arrow and the way out: both are parked until the beat that owns
@@ -522,7 +554,10 @@ func begin_lesson() -> void:
 	# has to find: the game opens inside a prisoner.
 	controller.direct(1, caged_ids[OWN_CAGE])
 	sequencer.begin()
-	_play_tip(TIP_CAGE)
+	# The first thing the camp asks for is the blade on the dirt: a body in a cage
+	# cannot walk to its weapon, and the shiv outside the door is the one thing it
+	# can reach. The latch tip follows the frame the pickup lands.
+	_play_tip(TIP_BLADE)
 
 
 ## True while the opening is running, i.e. while the cages hold the squad.
@@ -711,10 +746,15 @@ func note_pickup(pickup = null) -> void:
 	_steel_taken += 1
 	if sequencer != null:
 		sequencer.note_weapon_looted()
-	if duel != null and pickup != null and is_instance_valid(pickup) \
-			and pickup == _shiv_pickup:
-		if duel.note_shiv_taken():
-			_set_status("The ironwood shiv is in your hand. The pair are awake.", 4.0)
+	if pickup != null and is_instance_valid(pickup) and pickup == _shiv_pickup:
+		# The blade came through the bars: the cage has a latch it can cut now, so
+		# the tip that names `G` follows the one that named `K`, and the opening's
+		# first errand is done.
+		if sequencer != null and sequencer.note_armed():
+			_play_tip(TIP_CAGE)
+			_set_status("The ironwood shiv is in your hand. Cut the latch.", 4.0)
+		if duel != null and duel.note_shiv_taken():
+			_set_status("A blade is in your hands. The pair are awake.", 4.0)
 	if screen != null:
 		screen.refresh()
 
@@ -758,11 +798,15 @@ func _build_clearing() -> void:
 		keep_clear.append({"point": post, "radius": 2.0})
 	for entry in CAMP_TORCHES:
 		keep_clear.append({"point": entry[0], "radius": 1.6})
+	# The two brands lying at the starting cage: no trunk or bush stands on the
+	# dirt a new soul has to reach through the bars.
+	for post in START_TORCH_POSTS:
+		keep_clear.append({"point": post, "radius": 1.2})
 	for watcher in GATE_WATCHERS:
 		keep_clear.append({"point": watcher["post"], "radius": 2.0})
-	# The walk the opening is played on: the player's own cage, the altar the blade
-	# lies at, each scattered cage in turn, then down the pocket to the gap in the
-	# trees. The wood closes in around it but never on it.
+	# The walk the opening is played on: the player's own cage, the cold altar and
+	# its dressings, each scattered cage in turn, then down the pocket to the gap
+	# in the trees. The wood closes in around it but never on it.
 	for point in WALK_ROUTE:
 		keep_clear.append({"point": point, "radius": 4.2})
 	clearing = ClearingScript.build(self, {
@@ -1102,8 +1146,8 @@ func note_possession(merc_id: int) -> void:
 
 # --- the first fight's lesson ----------------------------------------------
 
-## The shiv's arrow lives exactly as long as the errand does: from the moment the
-## lesson starts asking for a walk to the moment the drop leaves the dirt. It is
+## The shiv's arrow lives exactly as long as the errand does: from the frame the
+## opening starts to the frame the drop leaves the dirt through the bars. It is
 ## polled rather than pushed, so a pickup taken by anybody - the player, a
 ## squadmate, a sweep - takes the arrow with it.
 func _update_shiv_marker() -> void:
@@ -1111,8 +1155,8 @@ func _update_shiv_marker() -> void:
 		return
 	var live: bool = _shiv_pickup != null and is_instance_valid(_shiv_pickup) \
 		and not bool(_shiv_pickup.get("collected"))
-	var wanted: bool = live and duel != null \
-		and (duel.step() == DuelScript.Step.MOVE or duel.step() == DuelScript.Step.FETCH)
+	var wanted: bool = live and sequencer != null \
+		and sequencer.state() == SequencerScript.State.CAGED
 	if wanted != _shiv_marker.visible:
 		_shiv_marker.visible = wanted
 	if wanted:
@@ -1198,9 +1242,10 @@ func _maybe_bearings() -> void:
 
 
 ## The freed body gets its bearings: the opening moves on to the objective, and the
-## first fight's lesson starts on the frame the walk does. A body that already
-## holds a blade (a campaign that came back to the camp armed) skips the fetch -
-## there is nothing on the dirt to teach it.
+## first fight's lesson starts on the frame the walk does. The shiv was taken
+## through the bars before the latch, so the ordinary case is an armed body: the
+## lesson names the cuts and turns the pair loose at once. A body that somehow
+## walks out empty-handed still gets the walk-and-fetch beats.
 func _begin_duel() -> void:
 	if duel == null:
 		return
@@ -1327,17 +1372,16 @@ func _on_duel_step(_step: int) -> void:
 ## was cut, or the body is standing at a shut cage with nothing to cut it with and
 ## has been told so. False hands the press on to the town counters and the floor.
 ##
-## The player's own cage is the exception to the blade: it is worked from inside,
-## with whatever a prisoner has - a nail, a rib, the hasp bent against the post -
-## and getting out of it is the first step of the game. Every other cage is a cut
-## and needs steel.
+## Every latch is a cut and needs steel, the player's own included: the shiv lies
+## on the dirt outside its door for exactly that, and a caged body that presses `G`
+## with empty hands is told what is missing instead of being let out.
 func interact(actor) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var index := latch_target(actor)
 	if index < 0:
 		return false
-	if not holds_blade(actor) and index != OWN_CAGE:
+	if not holds_blade(actor):
 		_set_status("Nothing to cut the latch with.", 2.5)
 		return true
 	var opened := open_latch(index)

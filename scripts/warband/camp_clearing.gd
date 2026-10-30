@@ -83,6 +83,12 @@ const WALL_HEIGHT := 3.0
 ## centre. A gap between trees a body can walk abreast in - not a road, and not a
 ## fifteen-metre avenue.
 const CORRIDOR_HALF := 4.5
+## The corridor's wandering run, in gaps.
+const CORRIDOR_SEGMENTS := 9
+## How far past the pocket's edge the camp's grass runs, and how wide it grows
+## either side of the corridor's worn line on the way out.
+const GRASS_RIM := 14.0
+const GRASS_VERGE := 7.0
 ## The walk the lesson is played on, handed to the planting as keep-out circles by
 ## the camp: cage to cage, then down the pocket to the mouth.
 const WALK_SPINE := [
@@ -101,6 +107,8 @@ const HUTS := [
 		"height": 1.75, "style": "collapsed", "seed": 3329},
 ]
 const FIRE_POST := Vector3(-6.4, 0.0, -4.0)
+## The cold altar the cult works on the yard from: the dressing finds its node.
+const ALTAR_POST := Vector3(0.0, 0.0, 12.5)
 ## The cult's own junk, stacked where it was dropped. All of it merged, none of it
 ## a collider.
 const PROP_POSTS := [
@@ -111,16 +119,25 @@ const BARREL_POSTS := [
 	Vector3(-13.6, 0.0, 3.0), Vector3(14.2, 0.0, 2.0), Vector3(-8.0, 0.0, -19.0),
 ]
 
+## The yard's broad wear, `[centre, radius, strength]`: the ground between the
+## cages, the middle of the pocket, and the run down to the mouth.
+const YARD_WEAR := [
+	[Vector3(0.0, 0.0, 6.0), 10.0, 0.85],
+	[Vector3(0.5, 0.0, -8.0), 9.5, 0.8],
+	[Vector3(-0.5, 0.0, -21.0), 7.5, 0.75],
+]
+
 
 ## Builds the camp under `parent` and returns what the camp needs:
 ## `{root, cages, doors, solids, clear, mouth, band, corridor, trees, bushes,
-## stakes, wall, huts}`.
+## grass, stakes, wall, huts}`.
 ## `layout` is the camp's own: `{half_width, front, back, cage_posts, mouth,
 ## mouth_half_width, to_road, torches, keep_clear}`.
 static func build(parent: Node3D, layout: Dictionary, style: WorldStyle) -> Dictionary:
 	var empty := {"root": null, "cages": [], "doors": [], "solids": null,
 		"clear": Vector2.ZERO, "mouth": Vector3.ZERO, "band": Rect2(),
-		"corridor": [], "trees": 0, "bushes": 0, "stakes": 0, "wall": 0, "huts": 0}
+		"corridor": [], "trees": 0, "bushes": 0, "grass": 0, "stakes": 0, "wall": 0,
+		"huts": 0}
 	if parent == null or style == null:
 		return empty
 	var half := float(layout.get("half_width", 20.0))
@@ -173,12 +190,16 @@ static func build(parent: Node3D, layout: Dictionary, style: WorldStyle) -> Dict
 	_build_shelters(root, solids, mats)
 	_build_fire(root, mats)
 	_build_junk(root, mats)
-	_build_ground(root, style, pocket, rng)
+	# The pocket's trodden dirt is the ground's own surface: `trodden_ground()`
+	# hands it to the world's terrain before anything here is built.
 	var stakes := _build_ragged_boundary(root, mats, pocket, mouth, mouth_half, corridor)
 	var band := pocket.grow(WOOD_DEPTH)
 	var wood := plant_wood(root, style, pocket, WOOD_DEPTH, corridor, planted_clear, SEED,
 		solids, "Wood", true)
 	_build_wood_litter(root, band, pocket, corridor, planted_clear, rng)
+	var grass := 0
+	if TerrainScript.is_built():
+		grass = _build_grass(root, style, pocket, planted_clear, mouth, to_road)
 	_build_torches(root, layout.get("torches", []), mats)
 
 	return {
@@ -193,10 +214,42 @@ static func build(parent: Node3D, layout: Dictionary, style: WorldStyle) -> Dict
 		"trees": int(wood.get("trees", 0)),
 		"inside_trees": int(wood.get("inside", 0)),
 		"bushes": int(wood.get("bushes", 0)),
+		"grass": grass,
 		"stakes": stakes,
 		"wall": int(wood.get("wall", 0)),
 		"huts": HUTS.size(),
 	}
+
+
+# --- the grass -------------------------------------------------------------
+
+## Grass, ferns and the odd flower round the camp: through the pocket and the
+## near wood (`GRASS_RIM` past its edge) and along the corridor out (`GRASS_VERGE`
+## either side of its worn line), trodden out wherever the ground map says the
+## yard is worn and never on a spot the camp keeps clear. Only on the world's baked
+## ground: a standalone preview's flat floor has no worn yard to keep bare.
+## Returns the grass clumps placed.
+static func _build_grass(root: Node3D, style: WorldStyle, pocket: Rect2, keep_clear: Array,
+		mouth: Vector3, to_road: float) -> int:
+	var rim := pocket.grow(GRASS_RIM)
+	var corridor_area := to_road * GRASS_VERGE * 2.0
+	var share := rim.get_area() / (rim.get_area() + corridor_area)
+	var host := Node3D.new()
+	host.name = "Grass"
+	root.add_child(host)
+	var ground := func(point: Vector2) -> Vector3:
+		return Vector3(point.x, TerrainScript.height_at(point.x, point.y), point.y)
+	var sampler := func(rng: RandomNumberGenerator) -> Vector2:
+		if rng.randf() < share:
+			return _sample(rng, rim)
+		var t := rng.randf()
+		return Vector2(mouth.x + _corridor_wobble(t) + rng.randf_range(-GRASS_VERGE, GRASS_VERGE),
+			mouth.z - to_road * t)
+	var reserved := func(point: Vector2) -> bool:
+		return _blocked(point, [], keep_clear) or TerrainScript.is_trodden(point.x, point.y)
+	var cover := GrassField.for_area(style, rim.get_area() + corridor_area)
+	var built: Dictionary = GrassField.build(host, cover, ground, reserved, SEED + 611, sampler)
+	return int(built.get("grass", 0))
 
 
 # --- the wood --------------------------------------------------------------
@@ -532,17 +585,37 @@ static func _corridor(mouth: Vector3, mouth_half: float, to_road: float) -> Arra
 	var throat := Rect2(mouth.x - mouth_half - 2.5, mouth.z - 34.0,
 		(mouth_half + 2.5) * 2.0, 38.0)
 	gaps.append(throat)
-	var segments := 9
-	var step := to_road / float(segments)
+	var step := to_road / float(CORRIDOR_SEGMENTS)
 	var width := CORRIDOR_HALF * 2.0
-	for index in segments:
-		var t := (float(index) + 0.5) / float(segments)
+	for index in CORRIDOR_SEGMENTS:
+		var t := (float(index) + 0.5) / float(CORRIDOR_SEGMENTS)
 		var z := mouth.z - step * (float(index) + 0.5)
-		var wobble := sin(t * TAU * 1.5) * 3.5
-		gaps.append(Rect2(mouth.x + wobble - width * 0.5, z - step * 0.62, width, step * 1.24))
+		gaps.append(Rect2(mouth.x + _corridor_wobble(t) - width * 0.5, z - step * 0.62,
+			width, step * 1.24))
 	gaps.append(Rect2(mouth.x - CORRIDOR_HALF - 1.0, mouth.z - to_road - 2.0,
 		width + 2.0, 5.0))
 	return gaps
+
+
+## The worn line down the middle of the corridor, mouth to road, in world space:
+## the line `terrain.gd` wears into the ground through the gaps `_corridor()` cuts,
+## so the trodden earth follows the gap in the trees instead of running into them.
+static func corridor_line(mouth: Vector3, to_road: float) -> PackedVector3Array:
+	var line := PackedVector3Array()
+	line.append(Vector3(mouth.x, 0.0, mouth.z))
+	var step := to_road / float(CORRIDOR_SEGMENTS)
+	for index in CORRIDOR_SEGMENTS:
+		var t := (float(index) + 0.5) / float(CORRIDOR_SEGMENTS)
+		line.append(Vector3(mouth.x + _corridor_wobble(t), 0.0,
+			mouth.z - step * (float(index) + 0.5)))
+	line.append(Vector3(mouth.x, 0.0, mouth.z - to_road))
+	return line
+
+
+## How far the corridor's centre wanders off the mouth's line at `t` (0 at the
+## mouth, 1 at the road). The gaps and the worn line share it.
+static func _corridor_wobble(t: float) -> float:
+	return sin(t * TAU * 1.5) * 3.5
 
 
 # --- the ragged boundary ---------------------------------------------------
@@ -670,43 +743,28 @@ static func _build_junk(root: Node3D, mats: Dictionary) -> void:
 	m.commit(group, "Junk")
 
 
-## Dirt: the pocket's own ground, worn bare around the cages, the fire and the
-## shelters. Flat discs of the terrain shader's dirt, laid over the world's floor
-## at a few centimetres, so the camp reads as trampled earth and not as one
-## pristine slab of turf.
-static func _build_ground(root: Node3D, style: WorldStyle, pocket: Rect2,
-		rng: RandomNumberGenerator) -> void:
-	var group := Node3D.new()
-	group.name = "Dirt"
-	root.add_child(group)
-	var dirt := TextureLibrary.terrain_material(style)
-	var disc := CylinderMesh.new()
-	disc.top_radius = 1.0
-	disc.bottom_radius = 1.0
-	disc.height = 1.0
-	disc.radial_segments = 10
-	disc.rings = 1
-	var m := CampKit.Merged.new()
-	var worn: Array[Vector3] = [Vector3(0.0, 0.0, 4.0), Vector3(0.0, 0.0, -6.0),
-		Vector3(0.0, 0.0, -18.0), FIRE_POST]
+## The pocket's trodden ground, as worn marks for `terrain.gd`'s ground map: the
+## walk the opening is played on, the cages, the fire, the shelters, the altar
+## and the heart of the yard. The terrain paints and height-blends them into the
+## floor, so the camp's dirt has a soft, ragged edge and no disc sits on the
+## grass. `cage_posts` and `walk` are the camp's own (`cage_escape.gd`).
+static func trodden_ground(cage_posts: Array, walk: Array) -> Array:
+	var marks: Array = []
+	# The yard, where the cult stood about and dragged its prisoners: worn down the
+	# middle of the pocket from the cage line to the mouth, ragged at its edge.
+	for spot in YARD_WEAR:
+		marks.append({"point": spot[0], "radius": spot[1], "strength": spot[2]})
+	var route := PackedVector3Array()
+	for point in walk:
+		route.append(point)
+	marks.append({"points": route, "half_width": 2.6, "strength": 0.95})
+	for post in cage_posts:
+		marks.append({"point": post, "radius": 3.4, "strength": 1.0})
+	marks.append({"point": FIRE_POST, "radius": 3.8, "strength": 1.0})
+	marks.append({"point": ALTAR_POST, "radius": 3.6, "strength": 0.95})
 	for hut in HUTS:
-		var post: Vector3 = hut["post"]
-		worn.append(post)
-	for index in 26:
-		var base: Vector3 = worn[index % worn.size()]
-		var angle := rng.randf_range(0.0, TAU)
-		var spread := rng.randf_range(0.0, 5.5)
-		var at := Vector3(base.x + cos(angle) * spread, 0.0, base.z + sin(angle) * spread)
-		if absf(at.x) > pocket.size.x * 0.5 - 0.6:
-			continue
-		if at.z > pocket.end.y - 0.6 or at.z < pocket.position.y + 0.6:
-			continue
-		var radius := rng.randf_range(1.6, 4.2)
-		var top := rng.randf_range(0.02, 0.05)
-		m.add(disc, Transform3D(Basis.IDENTITY.scaled(
-			Vector3(radius, top, radius * rng.randf_range(0.75, 1.15))),
-			TerrainScript.grounded(Vector3(at.x, top * 0.5, at.z))), dirt)
-	m.commit(group, "CampDirt", false)
+		marks.append({"point": hut["post"], "radius": 3.0, "strength": 0.85})
+	return marks
 
 
 # --- the wood's own floor --------------------------------------------------
@@ -869,7 +927,7 @@ static func _build_props(parent: Node3D, mats: Dictionary) -> void:
 			TerrainScript.grounded(barrel) + Vector3(0, 0.48, 0), wood, 12)
 	var altar := Node3D.new()
 	altar.name = "ColdAltar"
-	altar.position = TerrainScript.grounded(Vector3(0, 0, 12.5))
+	altar.position = TerrainScript.grounded(ALTAR_POST)
 	parent.add_child(altar)
 	Geo.box(altar, Vector3(2.6, 0.9, 1.3), Vector3(0, 0.45, 0), stone)
 	Geo.box(altar, Vector3(3.0, 0.18, 1.6), Vector3(0, 0.99, 0), stone)

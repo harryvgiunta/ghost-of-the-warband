@@ -17,20 +17,21 @@ difference - and the warband is the thing that survives a battle.
 - **Start here, and play it:** the title's **GHOST OF THE WARBAND** puts you
   inside the **first of five** prisoners, shut in a cage. The opening teaches by
   being played, not by being read:
-  * **cut your own latch** (**G**) - the wretch's own padlock is the one that
-    gives up to bare hands - and step out into the camp;
-  * **get your bearings**: the fire, the shelters, the four other cages scattered
-    through the wood, and the gold arrow over the camp's only blade;
+  * **take the ironwood shiv through the bars** (**K**) - it lies on the dirt
+    right outside your cell door, with two lit hand torches on the ground beside
+    it - and **cut your own latch** with it (**G**); bare hands open nothing;
+  * **get your bearings**: the fire, the shelters, and the four other cages
+    scattered through the wood;
   * the objective arrives - **free your warband** - and the first fight teaches
-    itself in one-line tips under the crosshair, never a paused page: walk
-    (**W A S D** / mouse), take the ironwood shiv (**K**), the three cuts
-    (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) the moment the
-    shiv is in your hand, and the guard (**hold RMB**) on the second watcher's
-    raised club. The pair are two of the wood's creatures - a **hollow warden**
-    and an **ossuary stalker** - and they sleep until you are armed and are the
-    softest bodies in the game: a 1.3 s telegraph, half their blow, no guard.
+    itself in one-line tips under the crosshair, never a paused page: the three
+    cuts (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) are named
+    as the armed body steps out and wake the pair, and the guard (**hold RMB**)
+    comes on the second watcher's raised club. The pair are two of the wood's
+    creatures - a **hollow warden** and an **ossuary stalker** - and they sleep
+    until you are armed and out of the cage, and are the softest bodies in the
+    game: a 1.3 s telegraph, half their blow, no guard.
   * Then **one latch per press** at each of the four remaining cages (a blade in
-    hand and `G` at the bars; bare hands are refused on every cage but your own).
+    hand and `G` at the bars; bare hands are refused, your own cage included).
     The last latch puts five bodies on their feet, turns them into squad AI that
     arms itself off the ground, and the objective turns over: **run to the town**.
 - **Controls:** **Esc → KEYS** (in the quick menu, the warband menu and the
@@ -599,7 +600,7 @@ The frontier and arena are dressed by a small, data-driven world-art kit rather 
 
 - **Textured sky.** A photoreal 4096 × 2048 equirectangular panorama (`assets/world/textures/sky_frontier.png`) supplies the sky background: a Rayleigh-like blue gradient, a real-sized sun disc and aureole at the key light's exact direction, a perspective cumulus deck with self-shadowing, thin cirrus and aerial haze. Fog, ambient light, filmic grade and saturation are tuned to it.
 - **Hill country.** The wood has real elevation: three octaves of value noise at **190/100/58 m**, normalised to **±22 m** either side of level, so the walk to town crosses a crest every eighty metres or so and never climbs harder than about **15 degrees**. The camp pocket and the town square are held flat - `RELIEF_HOLD_INNER` 40 m of level ground around each pad, the swells reaching full height by `RELIEF_HOLD_OUTER` 260 m - and the mountain rim and the one swamp are unchanged, so the trail is a road between hills rather than a plank 1,375 m long.
-- **Textured terrain.** The continuous heightfield keeps its authored routes and clearings, but now renders through a world-space splat shader: grass, trail dirt and rock/scree textures blended by vertex dirt weights and slope, with low-frequency macro variation. Grass clumps, wildflowers and ferns are chunked alpha-cut cards that sway in the wind and fade out at their visibility range.
+- **Textured terrain.** The continuous heightfield keeps its authored routes and clearings and renders through one world-space shader (`scripts/world/shaders/terrain.gdshader`) over four tiled layers - grass, forest-floor leaf litter, trodden dirt and rock/scree - each an albedo with its height in alpha plus a normal map. Where two layers meet, the taller texel wins (grass blades stand in the soil, stones break through it), so a worn edge is ragged and soft instead of a cross-fade; every layer is read twice, the second read turned and scaled, so a tile never prints the same patch in a row. Rock follows slope, litter lies in broad noise patches and dirt is the worn ground. In the warband world that is a half-metre **ground map** baked by `scripts/warband/terrain.gd` from the lane, the camp's corridor, its yard, cages, fire, shelters and cart ruts, and the town's ring (wear in red, wet in green - the swamp's mud and the ruts), and `Terrain.wear_at()` lets the grass be trodden out of it; the frontier keeps its per-vertex path weights. Nothing is laid on top of the ground any more: the camp's dirt discs and the lane's trodden patches are gone, and ground blood is a soft-edged splat card. Grass is four bent alpha cards per clump lit as a mound (bases in shade, light through the blades), wildflowers and ferns are chunked alpha-cut cards, and all of it sways in the wind and fades out at its visibility range; along the trail the cover runs the whole verge instead of two meadows.
 - **Textured trees.** A species library builds deterministic mesh variants: oaken trunks with real branches and leaf-card crowns, layered briar pines, slim silver birches, amber rowans and bare snags. Bark and leaf textures are separate authored PNGs with normal maps and per-instance tint, so one mesh family yields many colours and silhouettes. Sizes, species weights and shape parameters live in code, not in the mesh files.
 - **Natural stone.** Scattered rock is authored, not repeated: `scripts/world/rock_kit.gd` deforms a faceted ellipsoid with a seeded noise field, narrows the crown and cuts a flat fracture face near the base, then smooth-shades it so the silhouette is broken but the surface reads as weathered granite. Five archetypes (rounded boulder, bedding slab, ledged outcrop, standing spire, cobble) are produced in variants, scattered in loose clusters, sized independently, bedded at their own angle and set into the terrain below the lowest ground under their real footprint, so a boulder breaks out of a slope instead of resting on it. Each variant's convex hull is its collision. Boulders and heaped fire stones use the natural `granite.png` surface (quartz and feldspar speckle, weathered veins, moss in the cracks); the coursed `rock.png` stays on carved stonework and dungeon walls. Village timber, plaster, roof shingles, bridge timbers and woven wattle panels share the other triplanar materials, and the pond uses a ripple normal map and a cheap sky-tinted fresnel shader.
 - **The forest camp.** A narrow footpath leaves the west cross road and runs ~110 m into the deep western stand, where a fifth of the world's trees are packed into one belt so the walk in is through real woods. `scripts/world/camp_kit.gd` builds what waits at the end, out of cached primitives merged into one multi-surface mesh per shelter and one batch for all its clutter: six shelters of saplings bent at a kink, cross-hatched with twigs and heaped with twig piles and straw (1.9-2.9 m wide, 1.2-1.6 m tall - child-sized, never a building), split into clusters: three dens west, two south and a hunter's den out in the trees; clootie trees, a bone arch, painted mask stakes, skull rings, a bound straw figure, a wicker effigy, a strung web of cords, driftwood, drying racks, an offering stone, brush windbreaks, a bound-stick idol, pots, cauldrons, bone heaps, and eleven shapes of hanging charm (bone chime, skull string, pot string, antler, wicker cage, rag fetish, rib bundle, rune board, cloth bundle, bone mobile, mask chime) - over 400 of them, two to four per tree on the 130-odd trees around the camp and down the path, plus two per shelter eave. Every prop is deterministic from its seed.

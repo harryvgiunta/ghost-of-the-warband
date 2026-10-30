@@ -130,6 +130,10 @@ static func grass_material() -> ShaderMaterial:
 	if _materials.has(key):
 		return _materials[key]
 	var material := _clump_material("grass_meadow", 0.16, 1.25, 0.14)
+	# A tuft grows out of its own shade and is lit as a mound.
+	material.set_shader_parameter("base_shade", 0.5)
+	material.set_shader_parameter("normal_up", 0.65)
+	material.set_shader_parameter("translucency", 0.35)
 	_materials[key] = material
 	return material
 
@@ -152,34 +156,33 @@ static func fern_material() -> ShaderMaterial:
 	return material
 
 
-## Frontier terrain shader wired to the style's textures, tints and scales.
+## The terrain shader wired to the style's layers, tints and scales. Each layer is
+## an albedo with its height in alpha plus a `<id>_n` normal map; `terrain_noise`
+## is the shader's linear noise. A scene with its own ground map (the warband's
+## terrain) duplicates this and sets `ground_map`/`ground_map_origin`/
+## `ground_map_size`; without one the dirt comes from the mesh's vertex alpha.
 static func terrain_material(style: WorldStyle) -> ShaderMaterial:
 	var style_id := "default" if style == null else style.id
 	var key := "terrain:" + style_id
 	if _materials.has(key):
 		return _materials[key]
+	var ground: Dictionary = {} if style == null else style.ground
 	var material := ShaderMaterial.new()
 	material.shader = TERRAIN_SHADER
-	if style != null:
-		var ground: Dictionary = style.ground
-		material.set_shader_parameter("grass_texture", texture(String(ground.get("grass_texture", "terrain_grass"))))
-		material.set_shader_parameter("dirt_texture", texture(String(ground.get("dirt_texture", "terrain_dirt"))))
-		material.set_shader_parameter("rock_texture", texture(String(ground.get("rock_texture", "terrain_rock"))))
-		material.set_shader_parameter("macro_texture", texture(String(ground.get("macro_texture", "terrain_macro"))))
-		material.set_shader_parameter("grass_tint", ground.get("grass_tint", Color.WHITE))
-		material.set_shader_parameter("dirt_tint", ground.get("dirt_tint", Color.WHITE))
-		material.set_shader_parameter("rock_tint", ground.get("rock_tint", Color.WHITE))
-		material.set_shader_parameter("tile", float(ground.get("tile", 7.0)))
-		material.set_shader_parameter("dirt_tile", float(ground.get("dirt_tile", 6.0)))
-		material.set_shader_parameter("rock_tile", float(ground.get("rock_tile", 5.0)))
-		material.set_shader_parameter("macro_tile", float(ground.get("macro_tile", 27.0)))
-		material.set_shader_parameter("detail_strength", float(ground.get("detail_strength", 1.0)))
-		material.set_shader_parameter("detail_fade", ground.get("detail_fade", Vector2(95.0, 150.0)))
-	else:
-		material.set_shader_parameter("grass_texture", texture("terrain_grass"))
-		material.set_shader_parameter("dirt_texture", texture("terrain_dirt"))
-		material.set_shader_parameter("rock_texture", texture("terrain_rock"))
-		material.set_shader_parameter("macro_texture", texture("terrain_macro"))
+	for entry in [["grass", "terrain_grass"], ["litter", "terrain_litter"],
+			["dirt", "terrain_dirt"], ["rock", "terrain_rock"]]:
+		var id := String(ground.get("%s_texture" % entry[0], entry[1]))
+		material.set_shader_parameter("%s_texture" % entry[0], texture(id))
+		material.set_shader_parameter("%s_normal" % entry[0], _normal_texture(id))
+	material.set_shader_parameter("noise_texture",
+		texture(String(ground.get("noise_texture", "terrain_noise"))))
+	for tint in ["grass_tint", "grass_dry_tint", "litter_tint", "dirt_tint", "rock_tint"]:
+		material.set_shader_parameter(tint, ground.get(tint, Color.WHITE))
+	for entry in [["tile", 4.0], ["litter_tile", 3.2], ["dirt_tile", 5.0], ["rock_tile", 4.0],
+			["litter_cover", 0.3], ["dry_cover", 0.3], ["blend_contrast", 0.55],
+			["blend_softness", 0.1], ["normal_strength", 1.0], ["detail_strength", 1.0]]:
+		material.set_shader_parameter(entry[0], float(ground.get(entry[0], entry[1])))
+	material.set_shader_parameter("detail_fade", ground.get("detail_fade", Vector2(70.0, 140.0)))
 	_materials[key] = material
 	return material
 
@@ -246,6 +249,29 @@ static func granite_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
 	material.normal_scale = 1.0
 	material.roughness = 0.92
 	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
+## Laid flagstones for a paved floor: the coursed `rock` surface at a flagstone's
+## scale (a stone about 0.6 m across), world-planar so a slab of any size lays
+## its stones continuously, with the joints in the normal map.
+static func paving_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
+	var key := "paving:%s" % tint.to_html(false)
+	if _materials.has(key):
+		return _materials[key]
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture("rock")
+	material.albedo_color = tint
+	material.uv1_triplanar = true
+	material.uv1_world_triplanar = true
+	material.uv1_triplanar_sharpness = 1.0
+	material.uv1_scale = Vector3(0.15, 0.15, 0.15)
+	material.normal_enabled = true
+	material.normal_texture = _normal_texture("rock")
+	material.normal_scale = 1.2
+	material.roughness = 0.88
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_materials[key] = material
 	return material

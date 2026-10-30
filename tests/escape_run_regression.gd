@@ -149,9 +149,10 @@ func _dismiss_card() -> void:
 ## The world, opened at the camp, with the opening driven through its own public
 ## beats to the escape: what this test wants is the trail, not the cages.
 ##
-## The opening is five latches and a pair of watchers: the player's own cage is
-## worked bare-handed, the other four are cut with the blade lying on the dirt, and
-## the walk out through the mouth is what turns the wood loose.
+## The opening is five latches and a pair of watchers: the shiv lies on the dirt
+## outside the player's own cage, so it is taken through the bars first and every
+## latch - the own cage included - is cut with it, and the walk out through the
+## mouth is what turns the wood loose.
 func check_the_world() -> void:
 	game = load(WORLD).instantiate()
 	root.add_child(game)
@@ -163,9 +164,22 @@ func check_the_world() -> void:
 	var soul = game.controller.active_body(1)
 	check(soul != null and game.camp.is_cage_clamped(game.controller.merc_for_peer(1)),
 		"the campaign opens with the soul clamped in its own cage")
-	# Out of the cage: a wretch with a nail and a padlock, and `G` is the whole
-	# lesson. Nothing else opens on its own.
-	check(game.camp.interact(soul), "the player's own latch answers G")
+	# A bare-handed `G` opens nothing: the latch is a cut, and the blade is on the
+	# dirt outside the door.
+	check(not game.camp.holds_blade(soul), "the player's hands are empty at the wake")
+	check(game.camp.interact(soul), "the camp consumes the press at its own cage")
+	check(game.camp.cages_open_count() == 0,
+		"and a bare-handed G opens nothing (%d)" % game.camp.cages_open_count())
+	check(game.camp.is_cage_clamped(game.controller.merc_for_peer(1)),
+		"the soul is still clamped in its cage")
+	# `K` reaches the shiv through the bars: the pickup lands without the body
+	# ever leaving the cage, and only then is there steel to cut a latch with.
+	_dismiss_card()
+	game._try_loot()
+	check(game.camp.holds_blade(soul), "K puts the ironwood shiv in the soul's hands")
+	check(game.camp.is_cage_clamped(game.controller.merc_for_peer(1)),
+		"and the pickup happened from inside the cage")
+	check(game.camp.interact(soul), "the player's own latch answers G with the shiv")
 	check(game.camp.cages_open_count() == 1, "and the cage opens on that press")
 	check(game.camp.sequencer.state() == SequencerScript.State.LOOSE,
 		"the opening moves on to the camp (%s)" % game.camp.sequencer.state_name())
@@ -176,15 +190,6 @@ func check_the_world() -> void:
 	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
 		"stepping out of the cage carries the opening to the objective (%s)"
 			% game.camp.sequencer.state_name())
-	# The camp's only blade is on the dirt: the body walks onto it and takes it
-	# with `K`, and only then is there steel to cut a latch with.
-	check(not game.camp.holds_blade(soul), "the player's hands are empty at the wake")
-	soul.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, -2.0)
-	await physics_frame
-	await physics_frame
-	_dismiss_card()
-	game._try_loot()
-	check(game.camp.holds_blade(soul), "K puts the ironwood shiv in the soul's hands")
 	# The pair are awake now; this regression wants the trail, so they fall.
 	for watcher in game.camp.guards.duplicate():
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):

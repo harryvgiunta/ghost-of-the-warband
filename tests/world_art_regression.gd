@@ -101,10 +101,11 @@ func _check_tree_variants() -> void:
 			"same seed must reproduce identical vertex data")
 
 func _check_texture_library() -> void:
-	for id in ["terrain_grass", "terrain_dirt", "terrain_rock", "terrain_macro", "rock", "bark_oak",
-			"bark_pine", "bark_birch", "bark_dead", "leaves_broadleaf", "leaves_amber", "leaves_birch",
-			"needles_pine", "grass_meadow", "flowers", "fern", "wood_planks", "timber", "plaster",
-			"roof_shingles", "stone_blocks", "sky_frontier"]:
+	for id in ["terrain_grass", "terrain_litter", "terrain_dirt", "terrain_rock", "terrain_noise",
+			"terrain_macro", "rock", "bark_oak", "bark_pine", "bark_birch", "bark_dead",
+			"leaves_broadleaf", "leaves_amber", "leaves_birch", "needles_pine", "grass_meadow",
+			"flowers", "fern", "wood_planks", "timber", "plaster", "roof_shingles", "stone_blocks",
+			"sky_frontier"]:
 		var texture := TextureLibrary.texture(id)
 		check(texture != null and texture.get_width() > 0, "texture '%s' must load" % id)
 	check(TextureLibrary.texture_count() >= 20, "the world must load the full authored texture set")

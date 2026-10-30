@@ -2,8 +2,8 @@
  "generator": "tools/world_textures.py",
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
- "file_count": 39,
- "total_bytes": 12376242,
+ "file_count": 45,
+ "total_bytes": 17289063,
  "textures": [
   {
    "id": "sky_frontier",
@@ -133,7 +133,7 @@
    "tiling": "atlas",
    "n_version": null,
    "kind": "groundcover",
-   "description": "2x2 pale-green upright grass tufts (tint friendly)."
+   "description": "2x2 soft grass tufts: 70-130 curved, tapering blades fanned from a rooted cluster, base-dark to tip-light, some straw blades and seed heads; pale and desaturated (tint friendly)."
   },
   {
    "id": "flowers",
@@ -168,11 +168,24 @@
     512,
     512
    ],
-   "channels": 3,
+   "channels": 4,
    "tiling": "both",
-   "n_version": null,
+   "n_version": "terrain_grass_n.png",
    "kind": "terrain",
-   "description": "Fine meadow grass and clover detail for the terrain shader."
+   "description": "Dense lawn/forest grass seen from above (4 m tile): layered blades over dark gaps, light tips, dry straw patches, clover. RGB albedo, A = linear height (blade tips high)."
+  },
+  {
+   "id": "terrain_litter",
+   "file": "terrain_litter.png",
+   "size": [
+    512,
+    512
+   ],
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_litter_n.png",
+   "kind": "terrain",
+   "description": "Forest-floor litter (3.2 m tile): dark humus, fallen broadleaf leaves with midribs, pine needles, twigs, moss cushions. RGB albedo, A = linear height (leaves/twigs high, humus low)."
   },
   {
    "id": "terrain_dirt",
@@ -181,11 +194,15 @@
     1024,
     1024
    ],
-   "channels": 3,
+   "channels": 4,
    "tiling": "both",
-   "n_version": null,
+   "n_version": "terrain_dirt_n.png",
    "kind": "terrain",
-   "description": "Packed trail dirt: embedded gravel, hairline cracks, twigs and dry/damp patches."
+   "description": "Packed trail dirt (5 m tile): embedded gravel, hairline cracks, twigs and dry/damp patches. RGB albedo, A = linear height (domed stones high, cracks sunken); 512 normal map.",
+   "n_size": [
+    512,
+    512
+   ]
   },
   {
    "id": "terrain_rock",
@@ -194,11 +211,24 @@
     512,
     512
    ],
-   "channels": 3,
+   "channels": 4,
+   "tiling": "both",
+   "n_version": "terrain_rock_n.png",
+   "kind": "terrain",
+   "description": "Scree and fractured rock (4 m tile): angular plates and chips in grit-filled joints, moss. RGB albedo, A = linear height (plates high, joints low)."
+  },
+  {
+   "id": "terrain_noise",
+   "file": "terrain_noise.png",
+   "size": [
+    256,
+    256
+   ],
+   "channels": 4,
    "tiling": "both",
    "n_version": null,
    "kind": "terrain",
-   "description": "Scree and fractured rock face with moss patches."
+   "description": "LINEAR DATA, not colour: four independent tileable fBm channels stretched to 0..1, mean 0.5. R broad (3 cells), G medium (6), B fine ridged/clumpy (17), A medium-broad (4)."
   },
   {
    "id": "terrain_macro",

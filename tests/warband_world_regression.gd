@@ -12,10 +12,11 @@ extends SceneTree
 ##      the cult's fence used to be, shelters and a fire round the cages, the four
 ##      cages on their own anchors - and a long run of ordinary trees between the
 ##      gap in the wood and the road's first torch.
-##   3. **The lesson still works.** CAGED -> ALL_SEEN -> Corvin kills the pair ->
-##      F5 -> one latch per cage cut with G -> the squad out and armed -> walking
-##      out through the gap is ESCAPING and the six come out of the wood, with
-##      every out-of-order beat refused and nothing opening on its own.
+##   3. **The lesson still works.** CAGED -> the shiv taken through the bars and
+##      the own latch cut with it -> the pair on the freed armed body -> one latch
+##      per cage cut with G -> the squad out and armed -> walking out through the
+##      gap is ESCAPING and the six come out of the wood, with every out-of-order
+##      beat refused and nothing opening on its own.
 ##   4. **Walking is the only travel.** A real body is driven out of the camp,
 ##      down the 915 m trail and into the town square: no scene is requested, no
 ##      transition is made, the scene object never changes, the body never leaves
@@ -420,8 +421,9 @@ func check_camp_in_the_woods() -> void:
 	check(inside >= 6, "trees stand inside the camp itself (%d trunks)" % inside)
 	check(game.camp.get_node_or_null("Clearing/Wood") != null,
 		"the camp's wood is one batched group")
-	# The campsite: shelters, a fire and the junk, all close in around the cages.
-	for label in ["Huts", "CampFire", "CampJunk", "Dirt", "StakeRing", "WoodLitter"]:
+	# The campsite: shelters, a fire and the junk, all close in around the cages,
+	# and grass round the trodden yard.
+	for label in ["Huts", "CampFire", "CampJunk", "Grass", "StakeRing", "WoodLitter"]:
 		check(game.camp.get_node_or_null("Clearing/%s" % label) != null,
 			"the camp builds its %s" % label)
 	print("WORLD_CLEARING size=%.0fx%.0f band=%.0fx%.0f inside=%d trees=%d bushes=%d stakes=%d wall=%d"
@@ -524,6 +526,57 @@ func check_ground() -> void:
 		"the walk between them goes over real hills (%.1f m of relief)" % (high_walk - low_walk))
 	print("WORLD_GROUND relief=%.1f..%.1f walk=%.1f..%.1f tris=%d"
 		% [low, high, low_walk, high_walk, int(readout["terrain_tris"])])
+	check_worn_ground()
+
+
+## The worn ground is the ground's own map, never geometry laid on it: trodden
+## earth where feet go, untouched wood off the route, and an edge softer than one of
+## the heightfield's 7 m cells. The old dirt rode the mesh's vertex alpha, which
+## cannot draw anything narrower than a cell - every trodden patch came out as a
+## polygon of triangles - and the camp's own dirt was a set of hard discs on the
+## grass. (Where the grass stands is not read here: a headless run keeps no
+## MultiMesh instance data.)
+func check_worn_ground() -> void:
+	for index in game.camp.CAGE_POSTS.size():
+		var post: Vector3 = game.camp.CAGE_POSTS[index]
+		var worn := TerrainScript.wear_at(post.x, post.z)
+		check(worn >= 0.6, "the ground at cage %d is trodden earth (%.2f)" % [index + 1, worn])
+	var path = game.trail.forest["path"]
+	var thinnest := 1.0
+	var widest := 0.0
+	var wild := 0.0
+	# Off the swamp (0.42-0.62 of the way, where the bowl is mud beside the lane)
+	# and off the camp's corridor, which meets the lane at its start.
+	for fraction in [0.12, 0.2, 0.28, 0.36, 0.7, 0.78, 0.86, 0.94]:
+		var frame: Dictionary = path.sample(path.total * float(fraction))
+		var at: Vector3 = frame["position"]
+		var right: Vector3 = frame["right"]
+		thinnest = minf(thinnest, TerrainScript.wear_at(at.x, at.z))
+		for side: float in [-1.0, 1.0]:
+			# Out across the line: where the bare core gives way, and where the
+			# ground is untouched again.
+			var core := -1.0
+			var edge := -1.0
+			for step in 64:
+				var reach := 0.25 * float(step)
+				var probe := at + right * side * reach
+				var worn := TerrainScript.wear_at(probe.x, probe.z)
+				if core < 0.0 and worn < 0.6:
+					core = reach
+				if worn <= 0.05:
+					edge = reach
+					break
+			check(core >= 0.0 and edge >= 0.0,
+				"the lane's worn line ends inside 16 m at %.0f%% (%.1f .. %.1f m)"
+				% [float(fraction) * 100.0, core, edge])
+			widest = maxf(widest, edge - core)
+			var off := at + right * side * 40.0
+			wild = maxf(wild, TerrainScript.wear_at(off.x, off.z))
+	check(thinnest >= 0.6, "the lane's middle is trodden earth all the way (%.2f)" % thinnest)
+	check(widest < TerrainScript.CELL * 0.5,
+		"a worn edge is softer than a terrain cell, not a polygon of them (%.1f m)" % widest)
+	check(wild <= 0.01, "the wood off the route is untouched (%.2f)" % wild)
+	print("WORLD_WORN lane_core=%.2f edge=%.1fm wild=%.2f" % [thinnest, widest, wild])
 
 
 # --- 3. the lesson ---------------------------------------------------------
@@ -532,15 +585,16 @@ func check_lesson() -> void:
 	dismiss_card("the opening")
 	check(game.camp.sequencer.state() == SequencerScript.State.CAGED,
 		"the opening wakes the player in a cage")
-	check(game.camp.sequencer.objective() == "Cut your latch",
+	check(game.camp.sequencer.objective() == "Take the shiv through the bars",
 		"with one thing to do (%s)" % game.camp.sequencer.objective())
-	check(game.camp.sequencer.hint().contains("G"), "and the key that does it")
+	check(game.camp.sequencer.hint().contains("K"), "and the key that does it")
 	check(game.camp.cages_open_count() == 0, "the cages are all shut")
 	check(game.camp.caged_ids.size() == 5, "five bodies are held (%d)" % game.camp.caged_ids.size())
-	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES,
-		"three cultist weapons, the camp's shiv and five dressings lie on the dirt (%d)"
+	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES
+			+ game.camp.START_TORCH_POSTS.size(),
+		"three cultist weapons, the camp's shiv, five dressings and two torches lie on the dirt (%d)"
 		% game.camp.pickups().size())
-	check(game.tips != null and game.tips.has_shown(game.camp.TIP_CAGE),
+	check(game.tips != null and game.tips.has_shown(game.camp.TIP_BLADE),
 		"and the first key was named as a tip over the crosshair")
 
 	# A caged body cannot leave its cage: the clamp is what holds it, not a script.
@@ -564,16 +618,25 @@ func check_lesson() -> void:
 	check(not game.camp.sequencer.note_escaped(), "and the escape cannot happen from a cage")
 	check(game.camp.sequencer.cages_opened() == 0, "nothing was booked on the live opening")
 
-	# Out of the cage: the player's own latch, bare-handed, on one press.
+	# The cage is worked with the blade on the dirt outside its door: a bare-handed
+	# press opens nothing, `K` takes the shiv through the bars, and the same blade
+	# cuts the latch.
 	check(not game.camp.holds_blade(actor), "the player wakes with empty hands")
 	check(game.camp.latch_target(actor) == game.camp.OWN_CAGE,
 		"and its own latch is the one in reach (%d)" % game.camp.latch_target(actor))
 	game._try_interact()
-	check(game.camp.cages_open_count() == 1, "G opens the player's own cage (%d)"
+	check(game.camp.cages_open_count() == 0, "a bare-handed G opens nothing (%d)"
+		% game.camp.cages_open_count())
+	game._try_loot()
+	check(game.camp.holds_blade(actor), "K takes the shiv through the bars")
+	check(game.camp.is_cage_clamped(merc_id), "and the body never left its cage for it")
+	game._try_interact()
+	check(game.camp.cages_open_count() == 1, "and the shiv opens the player's own cage (%d)"
 		% game.camp.cages_open_count())
 	check(game.camp.sequencer.state() == SequencerScript.State.LOOSE,
-		"and the opening moves out into the camp (%s)" % game.camp.sequencer.state_name())
+		"the opening moves out into the camp (%s)" % game.camp.sequencer.state_name())
 	check(not game.camp.is_cage_clamped(merc_id), "the clamp is gone from the player's body")
+	check(game.tips.has_shown(game.camp.TIP_CAGE), "the latch was named")
 	check(game.tips.has_shown(game.camp.TIP_WALK), "the walk was named")
 
 	# Bearings: the beat ends on the freed body stepping away from its own cage.
@@ -582,39 +645,15 @@ func check_lesson() -> void:
 	await physics_frame
 	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
 		"stepping out carries it to the objective (%s)" % game.camp.sequencer.state_name())
-	check(game.camp.duel.step() == DuelScript.Step.MOVE,
-		"and the first fight's lesson is at the feet (%s)" % game.camp.duel.step_name())
+	check(game.camp.duel.step() == DuelScript.Step.FIGHT,
+		"and the first fight's lesson starts on the armed body (%s)" % game.camp.duel.step_name())
 	var opening_prompt: String = game.camp.prompt_line(actor)
 	check(opening_prompt.contains("warband 1/5"),
 		"the prompt carries the objective's count (%s)" % opening_prompt)
 
-	# A body at another cage with bare hands is told what is missing, and opens
-	# nothing: only the wretch's own cell gives up to a nail.
-	var other_cage: Vector3 = game.camp.CAGE_POSTS[game.camp.OWN_CAGE + 1]
-	actor.global_position = other_cage + Vector3(0.0, 0.2, 2.6)
-	await physics_frame
-	game._try_interact()
-	check(game.camp.cages_open_count() == 1, "G with bare hands opens no other cage")
-	var bare_status = game.hud.get("_status_label")
-	check(bare_status != null
-			and str(bare_status.text).contains("Nothing to cut the latch with"),
-		"the HUD says what is missing")
-	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
-		"and the objective stays where it was")
-
-	# The camp's only blade is on the dirt: walk onto it, take it, and the pair wake.
-	# The player walks up to the blade from the cages, so the approach is the front
-	# of the altar - the dressings lie behind it and are never the nearest piece.
-	actor.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, -2.0)
-	await physics_frame
-	await physics_frame
-	check(game.camp.duel.step() == DuelScript.Step.FETCH,
-		"standing over the blade asks for the pickup (%s)" % game.camp.duel.step_name())
-	check(game.tips.has_shown(game.camp.TIP_BLADE), "the pickup was named")
-	game._try_loot()
-	check(game.camp.holds_blade(actor), "and the ironwood shiv is in the player's hands")
-	check(game.camp.duel.step() == DuelScript.Step.FIGHT,
-		"the fight starts on the frame the blade is taken (%s)" % game.camp.duel.step_name())
+	# The shiv was taken through the bars, so the fight is already on: the cuts
+	# were named when the armed body stepped out, and the pair wake on it.
+	check(game.camp.holds_blade(actor), "the ironwood shiv is in the player's hands")
 	check(game.tips.has_shown(game.camp.TIP_SWING), "the cuts were named")
 	check(not paused, "none of it held the game still")
 	var pair_woke := await await_condition(
@@ -677,8 +716,9 @@ func check_lesson() -> void:
 	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
 			fallen_pair += 1
-	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES + fallen_pair,
-		"three drops, the shiv, the altar's five dressings and one blade per fallen watcher lie where they were (%d for %d fallen)"
+	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES
+			+ game.camp.START_TORCH_POSTS.size() + fallen_pair,
+		"three drops, the shiv, the altar's five dressings, two torches and one blade per fallen watcher lie where they were (%d for %d fallen)"
 		% [game.camp.pickups().size(), fallen_pair])
 
 

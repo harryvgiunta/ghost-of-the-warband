@@ -11,9 +11,12 @@ maps are derived from authored height fields in the OpenGL convention
 (+Y up, green = up) and carry no baked directional light.
 
 Generated content: sky panorama, bark albedo + normals, foliage/ground-cover
-alpha atlases, terrain detail and macro variation, rock and water normals,
-building materials (planks, timber, plaster, shingles, stone) and the
-forest-camp surfaces (thatch, hide, bone) and the flame atlas.
+alpha atlases (incl. the grass-tuft cards), the height-blended terrain ground
+layers (grass, forest-floor litter, trail dirt, rock/scree: albedo + height
+alpha + normals), the linear terrain noise data map and macro variation,
+rock and water normals, building materials (planks, timber, plaster,
+shingles, stone) and the forest-camp surfaces (thatch, hide, bone) and the
+flame atlas.
 
 The textures are distributed under Creative Commons
 Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),

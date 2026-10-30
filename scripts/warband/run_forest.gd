@@ -43,7 +43,7 @@ extends RefCounted
 const Geo = preload("res://scripts/geo.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 ## The camp's dressing module owns the handful of materials the world kits do not
-## carry (iron, steel, blood, rutted earth); it is the shared source, not copied.
+## carry (iron, steel, blood); it is the shared source, not copied.
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 
 ## The route's walkable band: what the scene reports as its width, and what the
@@ -87,13 +87,13 @@ const CLEARING_FRACTIONS := [0.22, 0.44, 0.66, 0.88]
 ## Grass and ferns are confined to the route's verge: the rest of the wood is
 ## trunks and brambles, and grass a body never sees is a draw call for nothing.
 const GRASS_BAND := 12.0
-## How often the floor's own litter falls: stone, trodden earth, leaf straw and the
-## odd drop of blood, as one of each per this many metres of lane. The counts are
-## read off the road's measured length, so a longer road gets more of the same
-## litter instead of the same litter spread thinner.
+## How often the floor's own litter falls: stone, leaf straw and the odd drop of
+## blood, as one of each per this many metres of lane. The counts are read off the
+## road's measured length, so a longer road gets more of the same litter instead
+## of the same litter spread thinner. The trodden earth itself is not litter: it is
+## worn into the terrain's ground map along the lane.
 const BOULDER_EVERY := 13.5
 const COBBLE_EVERY := 6.1
-const TRODDEN_EVERY := 11.0
 const STRAW_EVERY := 27.0
 const BLOOD_EVERY := 92.0
 const SEED := 82117
@@ -359,48 +359,59 @@ static func night_style() -> WorldStyle:
 		"saturation": 0.84,
 		"contrast": 1.06,
 	}
+	# The wood's floor: grass where the canopy opens, fallen leaves in broad
+	# patches between (`litter_cover`), trodden dirt wherever the ground map says
+	# feet have been, rock on the rim. The tints are the night's grade on textures
+	# authored at daylight value, so a torch finds real colour in the ground.
 	style.ground = {
 		"grass_texture": "terrain_grass",
+		"litter_texture": "terrain_litter",
 		"dirt_texture": "terrain_dirt",
 		"rock_texture": "terrain_rock",
+		"noise_texture": "terrain_noise",
 		"macro_texture": "terrain_macro",
-		"tile": 6.0,
+		"tile": 4.0,
+		"litter_tile": 3.2,
 		"dirt_tile": 5.0,
 		"rock_tile": 4.0,
 		"macro_tile": 24.0,
-		"grass_tint": Color("333d29"),
-		"dirt_tint": Color("4a3f30"),
-		"rock_tint": Color("33312b"),
-		"detail_strength": 0.55,
+		"grass_tint": Color("5b6a4a"),
+		"grass_dry_tint": Color("6e6a4a"),
+		"litter_tint": Color("857560"),
+		"dirt_tint": Color("8a7a64"),
+		"rock_tint": Color("54534c"),
+		"litter_cover": 0.32,
+		"dry_cover": 0.3,
+		"blend_contrast": 0.55,
+		"blend_softness": 0.1,
+		"normal_strength": 1.0,
+		"detail_strength": 0.6,
 		"detail_fade": Vector2(70.0, 120.0),
 	}
+	# The cover is placed by shape, not by disc (`GrassField.for_area` with a
+	# sampler): the lane's verges and the camp's rim ask for these densities per
+	# square metre, and the worn ground thins them (`terrain.gd`'s `is_trodden`).
+	# A chunk is drawn while its centre is inside `range`, so chunks stay small
+	# enough (48 m) that the next one appears inside the shader's own fade; one
+	# clump mesh and no flowers keep the whole verge to two draws a chunk.
 	style.grass = {
 		"texture": "grass_meadow",
-		"count": 2600,
+		"density": 0.42,
 		"range": 76.0,
-		"chunk_size": 96.0,
-		"radius": 150.0,
-		"tints": [Color("54613c"), Color("44523a"), Color("6b7350"), Color("38452f")],
+		"chunk_size": 48.0,
+		"tints": [Color("4c5c3a"), Color("3e4e34"), Color("5a6648"), Color("34442c")],
 		"shade_tint": Color("20281c"),
 		"wind": Vector2(0.10, 1.2),
-		"density_falloff": Vector2(1.0, 0.62),
 		"max_slope": 30.0,
-		"height_range": Vector2(-2.0, 40.0),
+		"height_range": Vector2(-40.0, 90.0),
 		"scale": Vector2(0.80, 1.5),
-		"clump_variants": 2,
+		"clump_variants": 1,
 	}
 	style.ground_cover = {
-		"flowers": {
-			"texture": "flowers", "count": 340, "range": 58.0, "chunk_size": 96.0,
-			"radius": 150.0, "scale": Vector2(0.6, 1.1), "wind": Vector2(0.07, 1.1),
-			"max_slope": 26.0, "height_range": Vector2(-2.0, 40.0),
-			"tints": [Color("8c8a6a"), Color("7a6a78"), Color("6c7a8c"), Color("8a7a5e")],
-			"shade_tint": Color("30361f"),
-		},
 		"ferns": {
-			"texture": "fern", "count": 620, "range": 64.0, "chunk_size": 96.0,
-			"radius": 150.0, "scale": Vector2(0.75, 1.45), "wind": Vector2(0.06, 1.0),
-			"max_slope": 34.0, "height_range": Vector2(-2.0, 40.0),
+			"texture": "fern", "density": 0.05, "range": 76.0, "chunk_size": 48.0,
+			"scale": Vector2(0.75, 1.45), "wind": Vector2(0.06, 1.0),
+			"max_slope": 34.0, "height_range": Vector2(-40.0, 90.0),
 			"tints": [Color("41552f"), Color("35472a"), Color("56683c")],
 			"shade_tint": Color("1e2718"),
 		},
@@ -839,35 +850,45 @@ static func _pick(pool: Array, rng: RandomNumberGenerator, fallback: Color) -> C
 	return pool[rng.randi_range(0, pool.size() - 1)]
 
 
-## The lawn and the ferns, both confined to the route's verge: two meadows, one at
-## each end of the run, so the whole way has grass under it. The field is centred on
-## its host and places its clumps in *local* space, so the ground callable answers
-## relative to the host and at the heightfield's own height.
+## The lawn, the ferns and the odd flower, the whole length of the route's verge:
+## one field whose candidates are drawn straight from the band `GRASS_BAND` either
+## side of the lane (`GrassField` batches it into its own chunks), at the night
+## style's densities. The worn line thins it - the more trodden the ground, the
+## more of its clumps are gone (`terrain.gd`'s `is_trodden`) - so the walked
+## middle is bare earth between grassy verges. The field's host is placed so the
+## whole band - the lane's own sideways drift plus `GRASS_BAND` either side - sits
+## inside one column of the cover's chunks: the verge is then cut into chunks
+## along its length only, not split down its middle as well. The ground callable
+## answers in the host's local space.
 static func _build_grass(root: Root, style: WorldStyle, path: Path) -> void:
-	var counts := {"grass": 0, "flowers": 0, "ferns": 0, "chunks": 0}
 	var group := _group(root, "Grass")
-	for index in 2:
-		var at := path.total * (0.25 + 0.5 * float(index))
-		var frame := path.sample(at)
-		var centre := Vector3((frame["position"] as Vector3).x, 0.0, (frame["position"] as Vector3).z)
-		var host := Node3D.new()
-		host.name = "Grass%d" % (index + 1)
-		host.position = centre
-		group.add_child(host)
-		var ground := func(point: Vector2) -> Vector3:
-			return Vector3(point.x - centre.x, TerrainScript.height_at(point.x, point.y),
-				point.y - centre.z)
-		# The verge has grass; the wet hollow does not - its own reeds are built
-		# with the swamp, and lawn clumps standing in water read wrong.
-		var reserved := func(point: Vector2) -> bool:
-			return path.distance_to(point) > GRASS_BAND or TerrainScript.swamp_weight_at(
-				point.x, point.y) > 0.30
-		var built: Dictionary = GrassField.build(host, style, ground, reserved, SEED + 401 + index * 17)
-		for key in counts.keys():
-			counts[key] = int(counts[key]) + int(built.get(key, 0))
-	root.stats["grass"] = int(counts["grass"])
-	root.stats["ferns"] = int(counts["ferns"])
-	root.stats["flowers"] = int(counts["flowers"])
+	var low := INF
+	var high := -INF
+	for point in path.points:
+		low = minf(low, point.x)
+		high = maxf(high, point.x)
+	var chunk := float(style.grass.get("chunk_size", 48.0))
+	var anchor := Vector3((low + high) * 0.5 - chunk * 0.5, 0.0, path.points[0].z)
+	var host := Node3D.new()
+	host.name = "Verge"
+	host.position = anchor
+	group.add_child(host)
+	var ground := func(point: Vector2) -> Vector3:
+		return Vector3(point.x - anchor.x, TerrainScript.height_at(point.x, point.y),
+			point.y - anchor.z)
+	var sampler := func(rng: RandomNumberGenerator) -> Vector2:
+		var at := path.verge(rng.randf() * path.total, rng.randf_range(-GRASS_BAND, GRASS_BAND))
+		return Vector2(at.x, at.z)
+	# The wet hollow has no lawn - its own reeds are built with the swamp, and
+	# clumps standing in water read wrong - and the trodden line has little.
+	var reserved := func(point: Vector2) -> bool:
+		return TerrainScript.swamp_weight_at(point.x, point.y) > 0.30 \
+			or TerrainScript.is_trodden(point.x, point.y)
+	var verge := GrassField.for_area(style, path.total * GRASS_BAND * 2.0)
+	var built: Dictionary = GrassField.build(host, verge, ground, reserved, SEED + 401, sampler)
+	root.stats["grass"] = int(built.get("grass", 0))
+	root.stats["ferns"] = int(built.get("ferns", 0))
+	root.stats["flowers"] = int(built.get("flowers", 0))
 
 
 ## Stone: boulders bedded in the verge and loose cobbles trodden into the worn
@@ -969,10 +990,12 @@ static func _torch(group: Node3D, mats: Dictionary, iron: Dictionary, at: Vector
 
 ## The one wet hollow in the wood, laid on `terrain.gd`'s basin: a flat water
 ## plane on the muddy floor, reeds and dead snags at the waterline, roots running
-## out of the bank, and a low mist that drifts over it. The water starts past the
-## torch line (`SWAMP_INNER` > 5.4 m), so the route's fire is never standing in
-## it, and its shader copy is darker than the world's ponds - this is the one part
-## of the trail a body wants a hand torch for.
+## out of the bank, and a low mist that drifts over it. The mud itself is the
+## terrain's own (the ground map's wet channel), so the bank darkens into the bowl
+## instead of carrying slabs of mud. The water starts past the torch line
+## (`SWAMP_INNER` > 5.4 m), so the route's fire is never standing in it, and its
+## shader copy is darker than the world's ponds - this is the one part of the
+## trail a body wants a hand torch for.
 static func _build_swamp(root: Root, path: Path) -> void:
 	var region := TerrainScript.swamp_region()
 	if region.is_empty():
@@ -1044,7 +1067,7 @@ static func _build_swamp(root: Root, path: Path) -> void:
 				rng.randf_range(-1.3, 1.3))
 			CampKit.add_beam(snags, at, at + out, rng.randf_range(0.05, 0.12), mats["bark"], 4, 0.02)
 	snags.commit(group, "Snags")
-	# --- roots crawling out of the bank, and mud where the water has drawn back
+	# --- roots crawling out of the bank
 	var roots := CampKit.Merged.new()
 	for index in 22:
 		var along := rng.randf_range(-half * 0.95, half * 0.95)
@@ -1060,21 +1083,6 @@ static func _build_swamp(root: Root, path: Path) -> void:
 			rng.randf_range(-1.6, 1.6))
 		CampKit.add_beam(roots, bend, tip, rng.randf_range(0.025, 0.05), mats["bark"], 3, 0.01)
 	roots.commit(group, "Roots")
-	var mud := CampKit.Merged.new()
-	var mud_material := Geo.material(Color(0.10, 0.095, 0.075), 0.0, 0.98)
-	for index in 40:
-		var along := rng.randf_range(-half * 0.95, half * 0.95)
-		var lateral := inner + rng.randf_range(-1.4, 4.4)
-		var frame := path.sample(clampf(arc + along, 0.0, path.total))
-		var point := (frame["position"] as Vector3) \
-			+ (frame["right"] as Vector3) * side * lateral
-		var at := TerrainScript.grounded(Vector3(point.x, 0.03, point.z))
-		var saved := mud.push(Transform3D(
-			TerrainScript.ground_basis(point.x, point.z, rng.randf_range(0.0, TAU)).scaled(
-				Vector3(rng.randf_range(0.6, 2.0), 1.0, rng.randf_range(0.9, 2.6))), at))
-		CampKit.add_ball(mud, 1.0, Vector3.ZERO, mud_material, Vector3(1.0, 0.02, 1.0), 9, 3)
-		mud.group = saved
-	mud.commit(group, "Mud", false)
 	# --- mist
 	_swamp_mist(group, path, arc, water_y, inner, outer, half, side)
 	root.stats["swamp"] = 1
@@ -1400,24 +1408,18 @@ static func _brazier(group: Node3D, mats: Dictionary, iron: Dictionary, at: Vect
 
 # --- the ground's own litter -----------------------------------------------
 
-## What the wood's floor carries where feet and hooves have passed: patchy trodden
-## earth, leaf litter and a few drops of blood, none of it on a line and none of it
-## on the centre of the way. There are no cart ruts here any more - this was never
-## a road. All of it is flat and lies on the slope it is laid on, so none of it is a
-## collider.
+## What the wood's floor carries where feet and hooves have passed: leaf litter
+## and a few drops of blood, none of it on a line and none of it on the centre of
+## the way. The trodden earth under them is the ground's own surface (the
+## terrain's ground map), never a patch laid on it, and there are no cart ruts here
+## - this was never a road. All of it is flat and lies on the slope it is laid on,
+## so none of it is a collider; the blood is the camp's own soft-edged stain card
+## (`CampDressing.add_stain`), never a disc.
 static func _build_scatter(root: Root, path: Path) -> void:
 	var group := _group(root, "Scatter")
 	var mats: Dictionary = CampKit.materials()
-	var iron: Dictionary = CampDressing.metal()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = SEED + 53
-	var worn := CampKit.Merged.new()
-	for index in _per_metre(path.total, TRODDEN_EVERY):
-		var at := rng.randf_range(0.0, path.total)
-		var point := path.verge(at, rng.randf_range(-4.2, 4.2))
-		_ground_patch(worn, iron["rut"], point, rng.randf_range(0.45, 1.8),
-			rng.randf_range(0.55, 1.15))
-	worn.commit(group, "Trodden", false)
 	var straw := CampKit.Merged.new()
 	for index in _per_metre(path.total, STRAW_EVERY):
 		var at := rng.randf_range(0.0, path.total)
@@ -1428,23 +1430,13 @@ static func _build_scatter(root: Root, path: Path) -> void:
 	for index in _per_metre(path.total, BLOOD_EVERY):
 		var at := rng.randf_range(0.0, path.total)
 		var point := path.verge(at, rng.randf_range(-3.6, 3.6))
-		_ground_patch(blood, iron["blood"], point, rng.randf_range(0.35, 0.7),
-			rng.randf_range(0.7, 1.0))
+		var basis := TerrainScript.ground_basis(point.x, point.z, rng.randf_range(0.0, TAU))
+		CampDressing.add_stain(blood, Transform3D(basis,
+			TerrainScript.grounded(Vector3(point.x, 0.025, point.z))),
+			rng.randf_range(0.35, 0.7), rng.randf_range(0.7, 1.0), index)
 	blood.commit(group, "Blood", false)
-	root.stats["scatter"] = _per_metre(path.total, TRODDEN_EVERY) \
-		+ _per_metre(path.total, STRAW_EVERY) + _per_metre(path.total, BLOOD_EVERY)
-
-
-## A flat stain of worn earth, laid on the ground's own normal so it follows the
-## slope instead of cutting into it or floating over it.
-static func _ground_patch(m, material: Material, point: Vector3, radius: float,
-		stretch: float) -> void:
-	var basis := TerrainScript.ground_basis(point.x, point.z, 0.0)
-	basis = basis.scaled(Vector3(radius, 1.0, radius * stretch))
-	var saved: Transform3D = m.push(Transform3D(basis,
-		TerrainScript.grounded(Vector3(point.x, 0.03, point.z))))
-	CampKit.add_ball(m, 1.0, Vector3.ZERO, material, Vector3(1.0, 0.03, 1.0), 10, 3)
-	m.group = saved
+	root.stats["scatter"] = _per_metre(path.total, STRAW_EVERY) \
+		+ _per_metre(path.total, BLOOD_EVERY)
 
 
 ## A handful of broken straw: thin tapered straws leaning out of a heap.

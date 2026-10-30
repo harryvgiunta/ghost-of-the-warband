@@ -4,18 +4,17 @@ extends SceneTree
 ## The camp is the first quarter of one continuous world and this regression owns
 ## the lesson inside it. The player wakes inside the first of five prisoners, shut
 ## in its own cage: five bodies, five latches and no blade in anybody's hands. The
-## first latch is cut bare-handed (`G`) - a nail and a padlock - which opens that
-## cage and turns the sequencer to LOOSE. Stepping out past `BEARINGS_RADIUS` is
-## getting your bearings, and that is where the first fight's lesson
-## (`duel_lesson.gd`) starts at MOVE: walk to the ironwood shiv on the dirt at the
-## altar, take it with `K` (the frame the blade enters the hand is the frame the
-## cuts are named and the pair wake), and hold `RMB` on the second watcher's
-## windup. The pair then fall to the player's own steel, and the four remaining
-## cages are cut with `G` one at a time - each needs a blade, and bare hands are
-## told so. The fifth latch puts five bodies on their feet: WARBAND, run to the
-## town, over the gold arrow at the gap in the trees. Walking into that gap is the
-## leaving, and the wood answers it with four armed watchers. Only the pair and
-## the ambush down is the opening cleared.
+## ironwood shiv lies on the dirt right outside that cage's door, so the first beat
+## is a `K` through the bars - the pickup lands while the body is still clamped -
+## and the own latch is cut with it (`G`): bare hands are refused, the player's own
+## cage included. Stepping out past `BEARINGS_RADIUS` is getting your bearings, and
+## that is where the first fight's lesson (`duel_lesson.gd`) starts on an armed
+## body - the cuts named and the pair woken - with `RMB` taught on the second
+## watcher's windup. The pair then fall to the player's own steel, and the four
+## remaining cages are cut with `G` one at a time. The fifth latch puts five bodies
+## on their feet: WARBAND, run to the town, over the gold arrow at the gap in the
+## trees. Walking into that gap is the leaving, and the wood answers it with four
+## armed watchers. Only the pair and the ambush down is the opening cleared.
 ##
 ## Nothing here is written in a paragraph any more. The whole opening is eight
 ## one-line tips, each one a key and a command, and every beat below asserts the
@@ -115,7 +114,7 @@ func run() -> void:
 	print("CAGE_PHASE caged %d ms" % (Time.get_ticks_msec() - _phase_start))
 
 	_phase_start = Time.get_ticks_msec()
-	await check_blade()
+	await check_pair_wakes()
 	await check_guard()
 	print("CAGE_PHASE first fight %d ms" % (Time.get_ticks_msec() - _phase_start))
 
@@ -244,16 +243,47 @@ func check_spawn() -> void:
 	check(shiv != null and str(shiv.item_id) == camp.LESSON_SHIV,
 		"and it is the shiv, not a stray club (%s)"
 		% ("" if shiv == null else str(shiv.item_id)))
+	var own_cage: Vector3 = camp.CAGE_POSTS[camp.OWN_CAGE]
 	if shiv != null and is_instance_valid(shiv):
-		check(flat_range((shiv as Node3D).global_position, camp.SHIV_POST) <= 0.5,
-			"at the foot of the cold altar (%.2f m off)"
-			% flat_range((shiv as Node3D).global_position, camp.SHIV_POST))
+		var shiv_at: Vector3 = (shiv as Node3D).global_position
+		check(flat_range(shiv_at, camp.SHIV_POST) <= 0.5,
+			"in front of the player's own cage (%.2f m off)"
+			% flat_range(shiv_at, camp.SHIV_POST))
+		check(shiv_at.z < own_cage.z - float(camp.CAGE_HALF)
+				and absf(shiv_at.x - own_cage.x) < float(camp.CAGE_HALF),
+			"outside the door and between its posts (%.2f m in front of the bars)"
+			% (own_cage.z - float(camp.CAGE_HALF) - shiv_at.z))
+		var caged_body = game.controller.active_body(1)
+		check(caged_body != null and (caged_body as Node3D).global_position \
+				.distance_to(shiv_at) <= 2.6,
+			"and close enough to take through the bars (%.2f m)"
+			% (0.0 if caged_body == null else
+				(caged_body as Node3D).global_position.distance_to(shiv_at)))
+	# Two off-hand torches on the dirt either side of the starting cage's door:
+	# the same catalog piece the quartermaster sells, burning where they lie.
+	var torches: Array = []
+	for pickup in camp.pickups():
+		if is_instance_valid(pickup) and str(pickup.item_id) == "torch_hand":
+			torches.append(pickup)
+	check(torches.size() == camp.START_TORCH_POSTS.size(),
+		"two hand torches lie at the starting cage (%d)" % torches.size())
+	for pickup in torches:
+		var at: Vector3 = (pickup as Node3D).global_position
+		var on_post := false
+		for post in camp.START_TORCH_POSTS:
+			if flat_range(at, post) <= 0.5:
+				on_post = true
+		check(on_post, "a torch lies where the camp posted it (%.1f, %.1f)" % [at.x, at.z])
+		var light := pickup.get_node_or_null("TorchLight") as OmniLight3D
+		check(light != null and light.visible and light.light_energy >= 7.0,
+			"and the brand on the dirt is lit (%.1f energy)"
+			% (0.0 if light == null else light.light_energy))
 	check(camp.sequencer.state() == SequencerScript.State.CAGED,
 		"the opening starts caged (%s)" % camp.sequencer.state_name())
-	check(camp.sequencer.objective() == "Cut your latch",
-		"the objective is the latch and nothing else (%s)" % camp.sequencer.objective())
-	check(camp.sequencer.hint().contains("G"),
-		"the key line names G (%s)" % camp.sequencer.hint())
+	check(camp.sequencer.objective() == "Take the shiv through the bars",
+		"the first errand is the blade through the bars (%s)" % camp.sequencer.objective())
+	check(camp.sequencer.hint().contains("K"),
+		"and the key line names K (%s)" % camp.sequencer.hint())
 	check(camp.cages_open_count() == 0,
 		"no latch is open at the start (%d)" % camp.cages_open_count())
 	check(camp.guards.size() == 2, "two watchers hold the clearing (%d)" % camp.guards.size())
@@ -273,13 +303,16 @@ func check_spawn() -> void:
 		check(not bool(watcher.hunting()), "and sleeps while the soul is still caged")
 	check(pair_species.size() == 2,
 		"the pair is two different creatures (%s)" % str(pair_species.keys()))
-	check(camp.pickups().size() == 3 + 1 + camp.STARTING_BANDAGES,
-		"three makeshift pieces, the shiv and five dressings lie on the walk (%d)"
+	check(camp.pickups().size() == 3 + 1 + camp.STARTING_BANDAGES
+			+ camp.START_TORCH_POSTS.size(),
+		"three makeshift pieces, the shiv, five dressings and two torches lie in the camp (%d)"
 			% camp.pickups().size())
 	check(camp.START_BANDAGE_POSTS.size() == camp.STARTING_BANDAGES,
 		"and the altar carries exactly five of them (%d)" % camp.START_BANDAGE_POSTS.size())
-	check(camp.tips != null and camp.tips.has_shown(camp.TIP_CAGE),
-		"the first beat's tip is the latch, offered once")
+	check(camp.tips != null and camp.tips.has_shown(camp.TIP_BLADE),
+		"the first beat's tip names the pickup, offered once")
+	check(not camp.tips.has_shown(camp.TIP_CAGE),
+		"and the latch tip waits for the blade (%s)" % str(camp.tips.current_tip()))
 	check(not _has_node_named(game, "TutorialCard"),
 		"the opening has no tutorial card node anywhere in the scene")
 	for body in game.bodies:
@@ -337,8 +370,13 @@ func check_clamp() -> void:
 		"a caged body is snapped back inside its cage (%.2f m)" % strayed)
 	check(game.controller.active_body(1) == actor, "the clamped body is still the soul's body")
 
-# --- the player's own latch, cut bare-handed -------------------------------
+# --- the shiv through the bars, and the own latch cut with it ---------------
 
+## The first two beats are one sequence: a bare-handed `G` opens nothing, the
+## shiv on the dirt outside the door is taken through the bars with `K` without
+## the body ever leaving the cage, and the same blade cuts the latch. The pair
+## stay asleep through all of it - two watchers coming at a clamped prisoner are
+## the opposite of a lesson.
 func check_own_latch() -> void:
 	var soul_id: int = int(game.controller.merc_for_peer(1))
 	var soul = game.controller.active_body(1)
@@ -347,8 +385,39 @@ func check_own_latch() -> void:
 		"its own latch is in reach through the bars (%d)" % camp.latch_target(soul))
 	check(not camp.holds_blade(soul), "and the body has nothing to cut it with")
 	check(camp.interact(soul), "the camp consumes the press at its own cage")
+	check(camp.cages_open_count() == 0,
+		"a bare-handed G opens nothing, its own cage included (%d)"
+			% camp.cages_open_count())
+	check(camp.is_cage_clamped(soul_id), "and the clamp still holds the soul")
+	var status = game.hud.get("_status_label")
+	check(status != null and str(status.text).contains("Nothing to cut the latch with"),
+		"the HUD says what is missing (%s)" % ("" if status == null else str(status.text)))
+	# `K` on the blade outside the door: the reach is the world's own, and the
+	# pickup is booked while the cage still holds the body.
+	check(str(camp.sequencer.objective()) == "Take the shiv through the bars",
+		"the objective is still the blade (%s)" % camp.sequencer.objective())
+	game._try_loot()
+	check(str(warband.roster.equipped_of(soul_id).get("main", "")) == camp.LESSON_SHIV,
+		"K puts the ironwood shiv in the main hand through the bars (%s)"
+			% str(warband.roster.equipped_of(soul_id).get("main", "")))
+	check(camp.holds_blade(soul), "and the body is holding a blade")
+	check(camp.is_cage_clamped(soul_id),
+		"the pickup happened from inside the cage, which is still clamped")
+	check(not bool(camp.get("_watchers_awake")),
+		"and taking the shiv does not turn the pair loose")
+	check(_watchers_at_posts(), "both are still standing on their posts")
+	check(camp.sequencer.state() == SequencerScript.State.CAGED,
+		"the opening is still caged until the latch is cut (%s)"
+			% camp.sequencer.state_name())
+	check(camp.sequencer.armed(), "but the machine knows the blade is in hand")
+	check(camp.sequencer.objective() == "Cut your latch",
+		"so the objective turns to the latch (%s)" % camp.sequencer.objective())
+	check(camp.sequencer.hint().contains("G"),
+		"and the key line names G (%s)" % camp.sequencer.hint())
+	check(camp.tips.has_shown(camp.TIP_CAGE), "the latch tip follows the pickup")
+	check(camp.interact(soul), "the camp consumes the press at its own cage")
 	check(camp.cages_open_count() == 1,
-		"the own latch is cut bare-handed (%d)" % camp.cages_open_count())
+		"and the shiv cuts the own latch (%d)" % camp.cages_open_count())
 	check(camp.sequencer.is_cage_opened(camp.OWN_CAGE), "and the machine booked cage 0")
 	check(not camp.is_cage_clamped(soul_id), "the own cage stops holding the soul")
 	check(camp.sequencer.state() == SequencerScript.State.LOOSE,
@@ -362,9 +431,9 @@ func check_own_latch() -> void:
 
 # --- order guards, and a cage that needs steel -----------------------------
 
-## The latches that are not the player's own are cuts, and a cut needs a knife.
-## The machine is asked first, while the soul is still standing in its own cage:
-## a latch out of range, a negative latch, and the own cage a second time.
+## The latches are cuts, and the machine is asked first, while the soul is still
+## standing in its own cage: a latch out of range, a negative latch, and the own
+## cage a second time. Then the walk that ends the caged beat.
 func check_refusals() -> void:
 	var before: int = camp.sequencer.state()
 	check(not camp.sequencer.note_cage_opened(9), "a cage that does not exist is never booked")
@@ -376,8 +445,8 @@ func check_refusals() -> void:
 	check(camp.sequencer.cages_opened() == 1, "and book nothing")
 	check(camp.sequencer.state() == before, "refusals leave the state where it was")
 
-	# A different cage, with bare hands. The nearest other cage stands 11.7 m off,
-	# so this walk is also the bearings beat: one step, one press, two facts.
+	# A cage across the camp, with the shiv in hand. The nearest other cage stands
+	# 11.7 m off, so this walk is also the bearings beat: one step, one fact.
 	var soul = game.controller.active_body(1)
 	var other: int = camp.OWN_CAGE + 1
 	var post: Vector3 = camp.CAGE_POSTS[other]
@@ -391,12 +460,7 @@ func check_refusals() -> void:
 	check(frames <= 3, "and it does so on the frame the radius is crossed (%d)" % frames)
 	check(camp.latch_target(soul) == other,
 		"cage %d's latch is the one in reach (%d)" % [other + 1, camp.latch_target(soul)])
-	check(not camp.holds_blade(soul), "the body still has nothing to cut with")
-	check(camp.interact(soul), "the camp consumes the press at a cage it cannot cut")
-	check(camp.cages_open_count() == 1, "G with bare hands opens no cage")
-	var status = game.hud.get("_status_label")
-	check(status != null and str(status.text).contains("Nothing to cut the latch with"),
-		"and the HUD says what is missing (%s)" % ("" if status == null else str(status.text)))
+	check(camp.holds_blade(soul), "and the shiv is in the hand that will cut it")
 
 ## The bearings beat ends on a fact and not a timer, and the objective that
 ## arrives with it is the warband's - carried on the same HUD line as the first
@@ -415,50 +479,40 @@ func check_bearings() -> void:
 		"the objective counts the warband (%s)" % camp.sequencer.objective())
 	check(not camp.sequencer.note_looked_around(), "and it only ever fires once")
 	check(camp.duel != null, "the first fight's lesson is built with the camp")
-	check(camp.duel.step() == DuelScript.Step.MOVE,
-		"and starts at the feet (%s)" % camp.duel.step_name())
+	check(camp.duel.step() == DuelScript.Step.FIGHT,
+		"and starts on the armed body the bars handed it (%s)" % camp.duel.step_name())
+	check(bool(camp.duel.cuts_tip()), "with the cuts named on that frame")
+	check(camp.tips.has_shown(camp.TIP_SWING), "and the swing tip raised")
 	var prompt := str(camp.prompt_line(soul))
 	check(prompt.contains("warband 1/5"),
 		"the prompt carries the warband count under the fight's command (%s)" % prompt)
-	check(prompt.contains("shiv"),
-		"and the command sends the player to the blade (%s)" % prompt)
-	check(str(camp.hint_line(soul)).contains("W A S D"),
-		"the key line teaches walking (%s)" % str(camp.hint_line(soul)))
+	check(prompt.contains("Put the pair down"),
+		"and the command is the fight (%s)" % prompt)
+	check(str(camp.hint_line(soul)).contains("LMB"),
+		"the key line names the cut (%s)" % str(camp.hint_line(soul)))
 	clear_tips()
 	check_no_prose("the bearings beat")
 
-# --- the blade, and the pair waking ----------------------------------------
+# --- the pair waking -------------------------------------------------------
 
-## Walk onto the shiv, take it with `K`, and watch the pair wake on the blade.
-## Every tip here is raised by the fight itself - a step onto the shiv, the frame
-## the blade enters the hand - and none of them holds the game still.
-func check_blade() -> void:
+## The pair wake on the armed body leaving the cage, not on the pickup: the shiv
+## was taken through the bars while the door was shut, and two watchers coming at
+## a clamped prisoner would be the opposite of a lesson. Every tip here is raised
+## by the fight itself and none of them holds the game still.
+func check_pair_wakes() -> void:
 	var soul_id: int = int(game.controller.merc_for_peer(1))
 	var cutter = game.controller.active_body(1)
 	check(cutter != null, "the soul still has its body for the walk")
-	cutter.global_position = camp.SHIV_POST + Vector3(0.0, 0.35, -1.8)
-	var near := await _wait_until(
-		func() -> bool: return camp.duel.step() == DuelScript.Step.FETCH, 2.0)
-	check(near, "standing over the shiv asks for the pickup (%s)" % camp.duel.step_name())
-	check(camp.tips.has_shown(camp.TIP_BLADE), "and names K on that beat")
-	check(str(camp.duel.hint()).contains("K"),
-		"the lesson's key line is the pickup (%s)" % camp.duel.hint())
-	check(not bool(camp.get("_watchers_awake")),
-		"the camp has not turned the pair loose on an empty-handed body")
-	check(_watchers_at_posts(), "and both are still standing on their posts")
-	check(not paused, "the pickup beat never pauses the tree")
-	game._try_loot()
 	check(str(warband.roster.equipped_of(soul_id).get("main", "")) == camp.LESSON_SHIV,
-		"K puts the ironwood shiv in the main hand (%s)"
+		"the shiv is still in the main hand (%s)"
 		% str(warband.roster.equipped_of(soul_id).get("main", "")))
 	check(camp.holds_blade(cutter), "and the body is holding a blade")
 	check(camp.duel.step() == DuelScript.Step.FIGHT,
-		"taking the shiv starts the fight (%s)" % camp.duel.step_name())
-	check(camp.tips.has_shown(camp.TIP_SWING), "the cuts are named on the frame of the pickup")
-	check(bool(camp.duel.cuts_tip()), "and the lesson has raised them")
+		"the first fight is on (%s)" % camp.duel.step_name())
+	check(not paused, "the wake never pauses the tree")
 	var woke := await _wait_until(
 		func() -> bool: return _pursuing_watchers() == camp.guards.size(), 4.0)
-	check(woke, "the pair wake on the blade (%d of %d pursuing)"
+	check(woke, "the pair wake as the armed body leaves the cage (%d of %d pursuing)"
 		% [_pursuing_watchers(), camp.guards.size()])
 	for watcher in camp.guards:
 		check(watcher.get("player") == cutter,

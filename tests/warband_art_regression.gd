@@ -311,12 +311,13 @@ func check_camp() -> void:
 			check(brazier_lights.size() == 1 and brazier_lights[0] is FireFlicker,
 				"brazier %d breathes instead of glowing flat" % (index + 1))
 
-	# The litter.
+	# The litter. The cart ruts are not litter any more: they are worn into the
+	# world's ground map, which `warband_world_regression` reads.
 	var scatter = dressing.get_node_or_null("GroundScatter")
-	check(scatter != null and scatter.get_child_count() == 3,
-		"the ground carries straw, blood and cart ruts (%d)" % (0 if scatter == null else scatter.get_child_count()))
+	check(scatter != null and scatter.get_child_count() == 2,
+		"the ground carries straw and blood (%d)" % (0 if scatter == null else scatter.get_child_count()))
 	if scatter != null:
-		for label in ["StrawScatter", "BloodStains", "CartRuts"]:
+		for label in ["StrawScatter", "BloodStains"]:
 			var flat := scatter.get_node_or_null(label) as MeshInstance3D
 			check(flat != null and surfaces_of(flat) >= 1, "%s is merged into one mesh" % label)
 			if flat == null:
@@ -326,12 +327,16 @@ func check_camp() -> void:
 			check(world_aabb(flat).size.y < 0.6, "%s lies flat on the yard (%.2f m)" % [label, world_aabb(flat).size.y])
 		var stains := scatter.get_node_or_null("BloodStains") as MeshInstance3D
 		if stains != null and stains.mesh != null:
-			var blood := stains.mesh.surface_get_material(0)
-			check(blood is StandardMaterial3D, "the stains are a plain surface material")
-			if blood is StandardMaterial3D:
-				var colour: Color = (blood as StandardMaterial3D).albedo_color
-				check(colour.r > colour.g * 2.0 and colour.r > colour.b * 2.0,
-					"the stains are blood and not paint (%s)" % colour.to_html(false))
+			# A stain is a soft splat, never a hard-edged disc of flat colour.
+			for surface in stains.mesh.get_surface_count():
+				var blood := stains.mesh.surface_get_material(surface) as StandardMaterial3D
+				check(blood != null and blood.albedo_texture != null
+					and blood.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED,
+					"stain surface %d is a soft-edged splat, not a disc" % surface)
+				if blood != null:
+					var colour: Color = blood.albedo_color
+					check(colour.r > colour.g * 2.0 and colour.r > colour.b * 2.0,
+						"the stains are blood and not paint (%s)" % colour.to_html(false))
 
 	# Materials: every surface has one, the kits' textures are in use, and the
 	# flame shader appears exactly where something burns.

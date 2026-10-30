@@ -91,6 +91,12 @@ const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const GATE_POINT := Vector3(8.0, 0.0, -6.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 
+## The paved middle of the square: its size, the size of one laid stone, and how
+## far the outer stones wander in and out of the course.
+const PAVING_SIZE := Vector2(30.0, 26.0)
+const PAVING_CELL := 0.92
+const PAVING_RAGGED := 0.09
+const PAVING_SEED := 4217
 ## The three keepers' counters, out on the market ring. Each keeps its own 3 m
 ## ring clear of every other service (the closest pair is Orla and the stash at
 ## 6.3 m), and all three stand inside the square's walkable bound so a body can
@@ -420,6 +426,18 @@ func _build_square() -> void:
 	_build_campfire()
 	_build_guards()
 
+## The square's worn ground, for the world's terrain (baked before the town is
+## built), with the square's centre at `at`: the ring inside the stockade is
+## trodden dirt round the paved middle, and the road comes in through the north
+## gate on a worn line of its own.
+static func trodden_ground(at: Vector3) -> Array:
+	var road := PackedVector3Array([at + Vector3(0.0, 0.0, WALL_RADIUS + 9.0),
+		at + Vector3(0.0, 0.0, WALL_RADIUS), at + Vector3(0.0, 0.0, 6.0)])
+	return [
+		{"point": at, "radius": WALL_RADIUS - 2.0, "strength": 0.8},
+		{"points": road, "half_width": NORTH_GATE_HALF * 0.6, "strength": 0.9},
+	]
+
 func _build_ground() -> void:
 	# The world scene owns one ground for the whole map - a heightfield with this
 	# square padded flat into it - so the square's own props keep standing at y = 0
@@ -439,8 +457,39 @@ func _build_ground() -> void:
 		shape.position = Vector3(0.0, -0.3, 0.0)
 		ground.add_child(shape)
 		Geo.box(ground, slab.size, Vector3(0.0, -0.3, 0.0), _earth)
-	# Worn flagstones: the middle of the square is paved, the ring stays dirt.
-	Geo.box(self, Vector3(30.0, 0.08, 26.0), Vector3(0.0, 0.02, 0.0), _stone)
+	_build_paving()
+
+
+## Worn flagstones: the middle of the square is paved, the ring stays dirt. Laid
+## as a seeded grid of single stones whose outer courses are dropped and jittered,
+## so the paving ends the way a laid square ends - in a ragged line of half-sunk
+## stones the trodden ring swallows - instead of as a pale rectangular slab.
+func _build_paving() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = PAVING_SEED
+	var library = preload("res://scripts/world/texture_library.gd")
+	var material: Material = library.paving_material(Color(0.52, 0.50, 0.47))
+	var merged := preload("res://scripts/world/camp_kit.gd").Merged.new()
+	var half := PAVING_SIZE * 0.5
+	var columns := ceili(PAVING_SIZE.x / PAVING_CELL)
+	var rows := ceili(PAVING_SIZE.y / PAVING_CELL)
+	for row in rows:
+		for column in columns:
+			var at := Vector2(-half.x + (float(column) + 0.5) * PAVING_CELL,
+				-half.y + (float(row) + 0.5) * PAVING_CELL)
+			# The square is an ellipse of laid stones: how far into it a cell sits
+			# decides the odds one was laid there, so the edge comes out ragged.
+			var reach := Vector2(at.x / half.x, at.y / half.y).length()
+			if reach + rng.randf_range(-PAVING_RAGGED, PAVING_RAGGED) > 1.0:
+				continue
+			var span := PAVING_CELL - 0.06
+			var stone := BoxMesh.new()
+			stone.size = Vector3(span * rng.randf_range(0.86, 1.06), 0.08,
+				span * rng.randf_range(0.86, 1.06))
+			merged.add(stone, Transform3D(Basis(Vector3.UP, rng.randf_range(-0.06, 0.06)),
+				Vector3(at.x, 0.01, at.y)), material)
+	merged.commit(self, "Paving", false)
+
 
 ## The one solid body every wall, hall and prop in the town registers its shapes
 ## against. Built before anything that stands on it.

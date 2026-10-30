@@ -6,8 +6,9 @@ extends Node
 ## Five prisoners are held in one camp. The player wakes in the first of them,
 ## shut in a cage, and the five beats are the five things a new player has to do:
 ##
-##   1. **CAGED** - cut your own latch. No blade, no tool, no help: a wretch with
-##      a nail and a padlock, and `G` is the whole lesson.
+##   1. **CAGED** - take the blade through the bars, then cut your own latch. The
+##      shiv lies on the dirt outside the cell door; `K` reaches it through the
+##      bars, and `G` is what the new steel opens. Nothing else opens the cage.
 ##   2. **LOOSE** - out of the cage and into the camp. The first step away from
 ##      the bars is what "getting your bearings" means here, and the beat ends on
 ##      it: no timer, no line to read.
@@ -42,6 +43,10 @@ var _started := false
 var _opened: Array[int] = []
 var _guards_down := 0
 var _weapons := 0
+## The caged body has the blade in hand (taken through the bars). It is the one
+## fact the CAGED line needs: the shiv is the errand until it is taken, and the
+## latch it can cut is the errand after.
+var _armed := false
 
 
 ## Announce the opening state. Idempotent: re-entering the camp (or a scene that
@@ -91,7 +96,9 @@ static func state_name_of(value: int) -> String:
 func objective() -> String:
 	match _state:
 		State.CAGED:
-			return "Cut your latch"
+			# The blade is the first errand: it lies on the dirt outside the door
+			# and is the only thing a caged body can reach. The latch follows.
+			return "Cut your latch" if _armed else "Take the shiv through the bars"
 		State.LOOSE:
 			return "Get your bearings"
 		State.FREEING:
@@ -109,7 +116,7 @@ func objective() -> String:
 func hint() -> String:
 	match _state:
 		State.CAGED:
-			return "G  -  pick the latch"
+			return "G  -  pick the latch" if _armed else "K  -  take the ironwood shiv"
 		State.LOOSE:
 			return "W A S D  -  walk   ·   MOUSE  -  look"
 		State.FREEING:
@@ -191,6 +198,22 @@ func note_weapon_looted() -> bool:
 		return false
 	_weapons += 1
 	return true
+
+
+## The caged body reached the shiv through the bars. Booked as a fact like a latch:
+## the CAGED line turns from the blade to the latch the blade opens, and no state
+## changes - the cage is still shut until `note_cage_opened` says otherwise.
+func note_armed() -> bool:
+	if _armed:
+		return false
+	_armed = true
+	announce()
+	return true
+
+
+## Whether the caged body holds the blade (read by the camp's own prompt).
+func armed() -> bool:
+	return _armed
 
 
 ## The squad walked out of the clearing's mouth. This - not a body count - is the
