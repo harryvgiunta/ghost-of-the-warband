@@ -10,6 +10,18 @@ without permission. Attribution is not required by CC0; provenance is retained
 here for traceability. No paid packs, paid export services or restricted files
 were used. Downloads used the creators' ordinary free Standard download flow.
 
+WHAT THE CC0 TERMS ABOVE COVER
+
+They are the licences of the upstream *sources*, and they keep applying to those
+sources. The assets built from them in this repository — the Ranger GLB and its
+armour, the Briar wolf, the five devils, the Cinder devil, the Unholy Forest
+mobs, the Makeshift and naked sets and the warband looks — are distributed under
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+(CC BY-NC-SA 4.0), section 3 of the LICENSE.md at the repository root. Copies of
+these files published up to commit a6a4d55 were distributed under CC0 1.0 and
+remain so in those copies; that dedication cannot be revoked. Every later change
+is licensed under LICENSE.md.
+
 CREATORS AND PRIMARY SOURCES
 
 Quaternius — Modular Character Outfits - Fantasy [Standard]
@@ -145,7 +157,8 @@ Smooth weight transfer keys pelvis counterbalance, three articulated spine
 joints and modest neck/head counterbalance; arm-local transforms remain neutral
 so attack/aim overlays retain their grip. Fixed-length two-bone leg solves keep
 the original ankles and foot orientations planted. These local additions are
-distributed under the same CC0 1.0 dedication linked above.
+part of the shipped asset and are licensed with it under CC BY-NC-SA 4.0
+(LICENSE.md, section 3).
 
 Exported asset axes are +Y up and +Z forward. Anatomical left leans toward +X
 and right toward -X, each reaching 18 degrees chest tilt; top leans toward +Z
@@ -248,8 +261,9 @@ Reproduce with:
       .runtime/character-source assets/characters/ironwood_ranger.glb
   Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
 
-The armor is distributed under CC0 1.0 Universal, the same dedication linked at
-the top of this file, to match the project's existing character assets.
+The armor is distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3): the
+Quaternius leather underneath stays CC0, the generated mail, plate, cloth and
+hose do not.
 
 IRONWOOD BRIAR WOLF — ASSET LICENSE AND PROVENANCE
 
@@ -283,8 +297,7 @@ The runtime presentation is scripts/wolf_visual.gd; the wolf branch of
 scripts/enemy.gd owns only AI/collision/damage and samples the attack from its
 existing 0.65 s windup and 0.85 s recovery timers. No clip event deals damage.
 
-The wolf is distributed under CC0 1.0 Universal, the same dedication linked at
-the top of this file, to match the project's existing character assets.
+The wolf is distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3).
 
 Reproduce with:
   blender --background --python-exit-code 1 --python tools/prepare_wolf.py -- \
@@ -357,9 +370,9 @@ records the measured skeleton, bounds, clips, impact times, materials and head
 zone. Runtime presentation, AI and spawns live in scripts/devil_mob_visual.gd,
 scripts/devil_mob.gd and RangeWorld.devil_spawns.
 
-The assets are dedicated to the public domain under CC0 1.0 Universal, the
-same dedication linked at the top of this file, to match the source packs and
-the project's existing character assets.
+The assets are distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3). The
+CC0 source packs they rebuild from keep their own CC0 terms; these derived GLBs
+are not CC0 and may not be used commercially.
 
 Reproduce with:
   python tools/build_devils.py all
@@ -427,18 +440,34 @@ The Makeshift set is bone over cured hide (17,732 tris, 65 bones, 3 materials,
 9 embedded images) and guards nothing by design: it changes what the ranger
 looks like, not what a blow costs.
 
+The three **watcher skins** are the same original creatures refitted onto the
+ranger's 65-bone skeleton by `tools/prepare_watcher_skins.py` (build:
+`tools/build_watcher_skins.py`), so the campaign's watchers can fight on the
+warband's authored clips. They add no third-party content: the vertices, UVs and
+material slots are the shipped forest meshes', they carry no images of their own
+(they borrow the creature GLBs' PBR atlases at runtime), and every weight,
+segment fit and clip is this repository's own. Runtime outputs:
+
+  assets/characters/watchers/ironwood_watcher_hollow_warden.glb   + .json + .glb.import
+  assets/characters/watchers/ironwood_watcher_ossuary_stalker.glb + .json + .glb.import
+  assets/characters/watchers/ironwood_watcher_gallowsroot.glb     + .json + .glb.import
+
+  Hollow warden skin    30,234 tris  65 bones  0 images  fit 1.1312  height 3.76 m
+  Ossuary stalker skin  49,214 tris  65 bones  0 images  fit 1.0260  height 2.48 m
+  Gallowsroot skin      46,538 tris  65 bones  0 images  fit 1.1444  height 2.90 m
+
 Authored clips (60 Hz baked, in-place, stationary root):
   <Mob>_Idle / Walk / Run   loop; loop modes are applied by the runtime
   <Mob>_Attack              one-shot, authored impact at the gameplay damage frame
   <Mob>_Hit                 one-shot stagger pose
   <Mob>_Death               one-shot collapse, held by the corpse controller
 
-These assets are distributed under CC0 1.0 Universal, the same dedication linked
-at the top of this file, to match the project's existing character assets.
+These assets are distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3).
 
 Reproduce with:
   python tools/build_forest.py all
   python tools/build_makeshift_armor.py
+  python tools/build_watcher_skins.py all
   Godot_v4.7.2-stable_win64_console.exe --headless --editor --path . --import
   Godot_v4.7.2-stable_win64_console.exe --headless --path . \
       --script res://tests/forest_mobs_regression.gd
@@ -514,6 +543,10 @@ Outputs and what was done to the inputs
     landmarks and the file budgets. `WarbandLooks` reads it at runtime, so the
     tool output is the single source of truth for what a mercenary can wear.
 
-All modifications above are derivative works of CC0 1.0 Universal material and
-are distributed under the same terms. Attribution is courtesy, not obligation;
-the pack's author is credited here anyway.
+The inputs above are CC0 1.0 Universal material; these outputs — the faces, the
+hair and beard geometry, the veiled atlases and the eye recolours — are
+derivative works distributed under CC BY-NC-SA 4.0 (LICENSE.md, section 3). The
+CC0 inputs stay CC0, so the same derivatives can be rebuilt from them by anyone
+who obtains the packs; what this license governs is the files shipped here.
+Attribution to Quaternius remains courtesy, not obligation, and the pack's
+author is credited here anyway.

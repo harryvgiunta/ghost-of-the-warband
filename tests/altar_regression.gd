@@ -1,6 +1,8 @@
 extends SceneTree
-## Sacrificial Altar regression: the panel renders exactly the spare magic gear,
-## spends what it says it spends, and refuses out loud when the wallet is empty.
+## Sacrificial Altar regression: the reagent rite wakes a weapon into its skill
+## and the body holding it carries that skill at once; the essence rites render
+## exactly the spare magic gear, spend what they say they spend, and refuse out
+## loud when the wallet is empty.
 ##
 ## Everything is driven through the real `AltarMenu` nodes - the row buttons emit
 ## their own `pressed` - against the real `Warband` autoload, so the numbers the
@@ -9,8 +11,11 @@ extends SceneTree
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
+const State = preload("res://scripts/player_state.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
 const SacrificialAltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
+const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 
 const TEST_SAVE := "user://altar_regression_state.json"
 const T1: int = Contracts.CruorTier.T1_RITUAL_TALLOW
@@ -56,6 +61,8 @@ func run() -> void:
 	menu.configure(warband)
 	menu.changed.connect(_on_menu_changed)
 
+	check_recipes()
+	await check_anoint()
 	check_unbind_list()
 	check_unbind_press()
 	check_distill()
@@ -98,6 +105,12 @@ func _header_row(tier: int) -> Dictionary:
 			return row
 	return {}
 
+func _anoint_row(item_id: String) -> Dictionary:
+	for row in menu.anoint_rows():
+		if str(row["item_id"]) == item_id:
+			return row
+	return {}
+
 func _menu_count(scan: Node) -> int:
 	var total := 0
 	for child in scan.get_children():
@@ -111,6 +124,119 @@ func _on_altar_opened(peer_id: int) -> void:
 
 func _on_menu_changed() -> void:
 	changed_hits += 1
+
+# --- the reagent rite ------------------------------------------------------
+
+## Every weapon and shield in the catalog, forged or salvage, wakes into a skill,
+## and every such skill has a rite made of catalog reagents. A skill with no rite
+## would leave its weapon plain for good.
+func check_recipes() -> void:
+	for item_id in State.ITEMS:
+		var item: Dictionary = State.ITEMS[item_id]
+		var wielded := str(item.get("category", "")) in ["1h", "2h", "bow", "staff", "shield"] \
+			and str(item.get("kind", "")) in ["sword", "dagger", "bow", "staff", "shield"]
+		var skill: Dictionary = WarbandCruor.anoint_skill(str(item_id))
+		check(wielded == not skill.is_empty(),
+			"%s wakes at the altar exactly when it is held steel (%s)" % [item_id, str(skill.get("id", ""))])
+		if skill.is_empty():
+			continue
+		var recipe: Dictionary = WarbandCruor.anoint_recipe(str(skill.get("id", "")))
+		check(not recipe.is_empty(), "%s's skill %s has a rite" % [item_id, str(skill.get("id", ""))])
+		for reagent in recipe:
+			check(bool(State.ITEMS.get(str(reagent), {}).get("reagent", false)) and int(recipe[reagent]) >= 1,
+				"%s's rite asks for a catalog reagent, got %s x%s" % [item_id, str(reagent), str(recipe[reagent])])
+
+## The rite on the real panel and the real roster: a worn bow and a pooled sword
+## are both offered, one press spends exactly the recipe and wakes the bow, the
+## body the controller dressed carries the skill without being dressed by hand, a
+## short stash refuses out loud, a woken piece is never woken twice, and the
+## ledger rides the save.
+func check_anoint() -> void:
+	warband.reset_state()
+	var stash = warband.stash
+	var reagent := WarbandCruor.BASIC_REAGENT
+	var merc: int = warband.add_mercenary("Wick", {"main": "bow_short"})
+	stash.add("sword_short", 1)
+	stash.add("ring_silver", 1)
+	stash.add(reagent, 1)
+	check(warband.quests.offer("bind_the_ichor") and bool(warband.quests.accept("bind_the_ichor").get("ok", false)),
+		"the ichor order is on the ledger")
+
+	# A body dressed off the roster, the way every scene fields one.
+	var field := Node3D.new()
+	field.name = "AnointField"
+	root.add_child(field)
+	var bodies_root := Node3D.new()
+	bodies_root.name = "Bodies"
+	field.add_child(bodies_root)
+	var camera := Camera3D.new()
+	field.add_child(camera)
+	var controller = ControllerScript.new()
+	controller.name = "Soul"
+	controller.auto_simulate = false
+	field.add_child(controller)
+	controller.setup(warband, camera, bodies_root)
+	var posts: Array[Vector3] = [Vector3.ZERO]
+	controller.spawn_mercenaries(posts, true)
+	await physics_frame
+	var body = controller.body_of(merc)
+	check(body != null, "the archer is fielded")
+	if body == null:
+		field.queue_free()
+		return
+	check(str(body.rig.weapon) == "bow", "the body holds the stock bow")
+	check(body.ability.definition(0).is_empty(), "a stock bow carries no skill")
+
+	menu.open()
+	check(menu.page() == AltarMenuScript.PAGE_ANOINT, "the altar opens on the reagent rite")
+	var bow := _anoint_row("bow_short")
+	var sword := _anoint_row("sword_short")
+	check(not bow.is_empty(), "a worn bow is offered: an anointing lives on the piece")
+	check(not sword.is_empty(), "a pooled sword is offered")
+	check(_anoint_row("ring_silver").is_empty(), "a ring wakes into nothing and is not offered")
+	var bow_skill := str(AbilityRules.skill_for(State.ITEMS["bow_short"]).get("id", ""))
+	check(str(bow.get("ability", "")) == bow_skill and not bow_skill.is_empty(),
+		"the row names the skill the bow wakes into (%s)" % str(bow.get("ability", "")))
+	check(str(bow.get("key", "")) == "1", "a bow's skill is the main hand's key")
+	check(not bool(bow.get("anointed", true)) and bow.get("button") != null, "a plain piece carries a button")
+
+	var before := changed_hits
+	(bow["button"] as Button).pressed.emit()
+	check(warband.cruor.is_anointed("bow_short"), "the press wakes the bow")
+	check(stash.pooled_count(reagent) == 0, "exactly the recipe left the shared stash")
+	check(changed_hits == before + 1, "the panel announces the rite once")
+	check(str(body.ability.definition(0).get("id", "")) == bow_skill,
+		"the fielded body carries the skill at once, got %s" % str(body.ability.definition(0).get("id", "")))
+	check(warband.quests.is_complete("bind_the_ichor"), "the ichor order hears about the rite")
+	var woken := _anoint_row("bow_short")
+	check(bool(woken.get("anointed", false)) and woken.get("button") == null,
+		"the woken bow reads as done and offers no button")
+
+	# The sword with the stash empty: refused out loud, nothing moves.
+	before = changed_hits
+	(_anoint_row("sword_short")["button"] as Button).pressed.emit()
+	check(not warband.cruor.is_anointed("sword_short"), "an empty stash wakes nothing")
+	check(changed_hits == before, "a refused rite announces nothing")
+	check(menu.status_text().contains(str(State.ITEMS[reagent]["name"])),
+		"the refusal names the reagent it wants: %s" % menu.status_text())
+
+	# A woken piece is not woken twice, and a piece the band does not carry is refused.
+	stash.add(reagent, 1)
+	check(not bool(warband.anoint("bow_short").get("ok", true)), "a woken piece refuses a second rite")
+	check(not bool(warband.anoint("bow_long").get("ok", true)), "a piece the warband does not carry is refused")
+	check(stash.pooled_count(reagent) == 1, "neither refusal spends the reagent")
+
+	# The ledger rides the save.
+	var saved: Dictionary = warband.to_dict()
+	warband.reset_state()
+	check(not warband.cruor.is_anointed("bow_short"), "a reset forgets the rite")
+	warband.from_dict(saved)
+	check(warband.cruor.anointed_skill("bow_short") == bow_skill, "the anointing survives the save")
+	check(not warband.cruor.is_anointed("sword_short"), "and the refused sword is still plain")
+
+	menu.close()
+	field.queue_free()
+	await process_frame
 
 # --- the unbind list -------------------------------------------------------
 
@@ -314,14 +440,14 @@ func check_altar() -> void:
 	root.add_child(altar)
 	check(is_equal_approx(altar.interact_range, 3.0), "the kneel radius is 3 m")
 
-	var boxes := 0
+	var meshes := 0
 	var lights := 0
-	for child in altar.get_children():
-		if child is MeshInstance3D and child.mesh is BoxMesh:
-			boxes += 1
-		if child is OmniLight3D:
+	for child in altar.find_children("*", "", true, false):
+		if child is MeshInstance3D and (child as MeshInstance3D).mesh != null:
+			meshes += 1
+		if child is Light3D:
 			lights += 1
-	check(boxes >= 1, "the altar is carved from box meshes")
+	check(meshes >= 1, "the altar is drawn")
 	check(lights == 1, "one ritual light hangs over it")
 	check(altar.in_reach(altar.global_position + Vector3(2.0, 0.0, 0.0)), "2 m is inside reach")
 	check(not altar.in_reach(altar.global_position + Vector3(4.0, 0.0, 0.0)), "4 m is outside reach")

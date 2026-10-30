@@ -121,6 +121,7 @@ func run() -> void:
 
 	_phase_start = Time.get_ticks_msec()
 	await check_latches()
+	await check_walk_out()
 	print("CAGE_PHASE latches %d ms" % (Time.get_ticks_msec() - _phase_start))
 
 	_phase_start = Time.get_ticks_msec()
@@ -256,6 +257,7 @@ func check_spawn() -> void:
 	check(camp.cages_open_count() == 0,
 		"no latch is open at the start (%d)" % camp.cages_open_count())
 	check(camp.guards.size() == 2, "two watchers hold the clearing (%d)" % camp.guards.size())
+	var pair_species := {}
 	for watcher in camp.guards:
 		check(bool(watcher.get("alive")), "a watcher stands on its feet")
 		check(is_equal_approx(float(watcher.max_health), float(camp.PAIR_LESSON_HEALTH)),
@@ -264,9 +266,13 @@ func check_spawn() -> void:
 			"and never thicker than the camp's own thinned pool")
 		check(str(watcher.name).begins_with("CampWatcher"),
 			"the watcher is a camp body (%s)" % watcher.name)
-		check(str(watcher.get("mob_id")) == "hollow_warden",
-			"the watcher is the antlered warden body, not a ranger clone")
+		check(WatcherScript.SPECIES_IDS.has(str(watcher.get("mob_id"))),
+			"the watcher is one of the wood's creatures, not a ranger clone (%s)"
+			% str(watcher.get("mob_id")))
+		pair_species[str(watcher.get("mob_id"))] = true
 		check(not bool(watcher.hunting()), "and sleeps while the soul is still caged")
+	check(pair_species.size() == 2,
+		"the pair is two different creatures (%s)" % str(pair_species.keys()))
 	check(camp.pickups().size() == 3 + 1 + camp.STARTING_BANDAGES,
 		"three makeshift pieces, the shiv and five dressings lie on the walk (%d)"
 			% camp.pickups().size())
@@ -726,6 +732,54 @@ func check_latches() -> void:
 	check(camp.tips.has_shown(camp.TIP_RUN), "and the run's tip is offered on that beat")
 	check(SequencerScript.GUARD_COUNT == 2 + CampScript.AMBUSH_COUNT,
 		"the camp's tally counts the pair and the ambush (%d)" % SequencerScript.GUARD_COUNT)
+
+# --- the walk out ----------------------------------------------------------
+
+## Every latch above was cut from the +z side, behind the bars, where the latch
+## arrow hangs - and a cage's only way out is its door on the -z side. A prisoner
+## let out from behind its bars has its post behind them too: steering straight at
+## it, it shouldered the back bars, backed out of the door, turned round and walked
+## back in for as long as the soul stood there. With the soul holding still where it
+## cut the last latch, every freed body has to leave through its own door and come
+## to it.
+func check_walk_out() -> void:
+	var soul = game.controller.active_body(1)
+	var last: int = camp.CAGE_POSTS.size() - 1
+	var post: Vector3 = camp.CAGE_POSTS[last]
+	check(soul != null and soul.global_position.z > post.z + camp.CAGE_HALF,
+		"the soul stands behind the last cage it opened (%.1f m past its bars)"
+		% (0.0 if soul == null else soul.global_position.z - post.z - camp.CAGE_HALF))
+	var penned = game.controller.body_of(int(camp.caged_ids[last]))
+	Engine.time_scale = 3.0
+	var gathered := await _wait_until(func() -> bool: return _farthest_ally(soul) <= 7.0, 30.0)
+	Engine.time_scale = 1.0
+	check(penned != null and flat_range(penned.global_position, post) > camp.CAGE_HALF + 0.3,
+		"the prisoner let out from behind its bars has left its cage (%.1f m from the centre)"
+		% (0.0 if penned == null else flat_range(penned.global_position, post)))
+	check(gathered, "every freed prisoner walks out of its cage to the soul (farthest %.1f m: %s)"
+		% [_farthest_ally(soul), _ally_spots(soul)])
+
+
+## The flat distance from the soul to the free squadmate standing farthest from it.
+func _farthest_ally(soul) -> float:
+	var farthest := 0.0
+	for merc_id in game.squad_ids:
+		var ally = game.controller.body_of(int(merc_id))
+		if ally == null or ally == soul or not camp.is_free(int(merc_id)):
+			continue
+		farthest = maxf(farthest, flat_range(ally.global_position, soul.global_position))
+	return farthest
+
+
+func _ally_spots(soul) -> String:
+	var spots: Array[String] = []
+	for merc_id in game.squad_ids:
+		var ally = game.controller.body_of(int(merc_id))
+		if ally == null or ally == soul:
+			continue
+		spots.append("%s (%.1f, %.1f)" % [warband.roster.name_of(int(merc_id)),
+			ally.global_position.x, ally.global_position.z])
+	return ", ".join(spots)
 
 # --- the fallen ------------------------------------------------------------
 

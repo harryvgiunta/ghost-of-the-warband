@@ -22,6 +22,12 @@ const ArrowScript = preload("res://scripts/arrow.gd")
 ## authors for a bow on the warden's hand bone.
 const BOW_ITEM := "bow_twig"
 
+## The catalog ammunition the corpse gives back: the shafts a hidden archer was
+## drawing from. The wood is where a band that ran its quiver dry re-supplies, and
+## the body that was shooting at you is the one worth bending over.
+const ARROW_ITEM := "arrow"
+const CARRIED_ARROWS := 4
+
 ## The ring it holds: never inside this, never past that - and it retreats when a
 ## blade gets closer than the inner edge. The two numbers are what make fighting
 ## one a march up the trail instead of a scrum.
@@ -239,7 +245,9 @@ func _strike_damage() -> float:
 
 
 ## The release. No `attacked` signal: an arrow owns its own hit, so emitting the
-## melee blow as well would book the damage twice.
+## melee blow as well would book the damage twice. The rig plays the loose - it
+## has been on the string since the windup opened - and the shaft leaves from the
+## bow the body is actually holding.
 func _resolve_strike() -> void:
 	if not is_instance_valid(_target) or not alive:
 		return
@@ -255,6 +263,8 @@ func _resolve_strike() -> void:
 	var parent := get_parent()
 	if parent == null:
 		return
+	if is_instance_valid(_visual) and _visual.has_method("release_bow"):
+		_visual.release_bow()
 	var arrow := ArrowScript.new()
 	arrow.source_id = DAMAGE_SOURCE
 	arrow.shooter = self
@@ -269,11 +279,13 @@ func _resolve_strike() -> void:
 	shots_fired += 1
 
 
-## Where the shaft leaves: chest height, a hand's width ahead of the body, on the
-## line the bow hand actually holds.
+## Where the shaft leaves: the bow the body is holding - its own arrow rest, at
+## the end of a real draw - or, on a body with no rig answer, chest height a
+## hand's width ahead of the body on the line the bow would be held.
 func _bow_origin() -> Vector3:
-	var aim_height := float(profile.get("aim", 1.72)) * body_scale()
-	return global_position + Vector3(0.0, aim_height * 0.86, 0.0) \
+	if is_instance_valid(_visual) and _visual.has_method("bow_origin"):
+		return _visual.bow_origin()
+	return global_position + Vector3(0.0, 1.50 * 0.86 * body_scale(), 0.0) \
 		- global_basis.z * 0.45
 
 
@@ -302,6 +314,16 @@ func _hunt(delta: float) -> void:
 			_face_intent = _move_intent
 			return
 	super(delta)
+
+
+## The archer carries what it fires. The base body stamps the field dressing every
+## warden wears (and its vial of ichor where the variant says so); an archer adds
+## the quiver it was drawing from, so its corpse is ammunition as well as kit - the
+## only resupply out on the road.
+func _stamp_carried() -> void:
+	super()
+	for index in CARRIED_ARROWS:
+		carried.append(ARROW_ITEM)
 
 
 ## The hidden stance: crouched until the ambush is sprung, and crouched again

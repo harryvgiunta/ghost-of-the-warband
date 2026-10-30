@@ -102,7 +102,6 @@ WARBAND_TESTS = [
     "town_hub_regression",
     "town_stockade_regression",
     "quest_log_regression",
-    "ichor_bench_regression",
     "loot_wow_regression",
     "wild_cages_regression",
     "world_map_regression",

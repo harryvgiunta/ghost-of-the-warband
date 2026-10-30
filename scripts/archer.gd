@@ -253,6 +253,12 @@ var focus_active := false
 ## Presentation never reads these; the damage/timing getters below do.
 var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
 var trinket_stats := {}
+## The skill each held hand was anointed with at the altar, by ability id
+## (`{main, off}`; "" for a plain piece). A stock weapon carries no skill:
+## `AbilityRules.granted` hands a held piece its skill only when this names it
+## for that hand, and `apply_loadout` rewrites it on every dressing, so a hand
+## that swaps pieces never keeps the last one's skill.
+var anointed := {"main":"", "off":""}
 var _ward: EnergyShield
 var skeleton: Skeleton3D
 var _phase_time := 0.0
@@ -293,10 +299,33 @@ var _model: Node3D
 ## carries is baked into the model before the rig measures its own legs and
 ## soles - the same measurements that keep feet on the ground.
 var appearance: Dictionary = {}
+## A whole-body skin worn instead of the ranger's own body - a GLB skinned to
+## this rig's own skeleton, carrying its own cloth and its own silhouette. The
+## warband's watchers are the wood's creatures standing on a human's rig: the
+## creature's mesh, this rig's 65 bones and its authored clips. A body with a
+## skin draws no armour, no naked layer and no shipped head, because the skin
+## *is* the body. Set it before the node enters the tree. Keys: `path` (the
+## skin scene), `node` (its root name) and `height` (its size relative to the
+## authored 1.87 m rig - the creature's own fit scale, not a mercenary's).
+var body_skin: Dictionary = {}
+## The owner turns this rig itself (a mob has one facing and a quarry, not a
+## walk direction): the locomotion cycle may then pose the legs but must not
+## snap the whole body onto its velocity.
+var heading_locked := false
+## A rig that carries one piece and nothing else. The hero rig builds its whole
+## arsenal in `_ready` - three bows, five swords, two off-hand swords, two
+## staves, four focuses, a dagger, a shield and two consumables, three hundred
+## and fifty nodes - because a player may reach for any of them. A mob never
+## does: it is handed one catalog piece and keeps it. Built on demand, the same
+## body costs fifteen nodes instead of three hundred and fifty.
+var sparse_props := false
 ## The height that was baked in, so head hitboxes and reported heights agree.
 var _looks_height := 1.0
 var _looks_face: Node3D
 var _looks_hair: Node3D
+## The worn body skin's root and its skinned meshes, in draw order.
+var _skin_root: Node3D
+var _skin_meshes: Array[MeshInstance3D] = []
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
 var _swords: Array[Node3D] = []
@@ -389,6 +418,11 @@ func _ready() -> void:
 	# takes the body and its kit together and leaves the capsule alone.
 	if not appearance.is_empty():
 		_looks_height = clampf(float(appearance.get("height", 1.0)), 0.80, 1.20)
+	elif not body_skin.is_empty():
+		# A skin states its own size. The creature's fit scale is not a
+		# mercenary's 0.86..1.14 - an antlered warden stands head and shoulders
+		# over a ranger - so the band is the rig's own, not a look's.
+		_looks_height = clampf(float(body_skin.get("height", 1.0)), 0.40, 3.00)
 	_model.basis = _model_basis(PI)
 	skeleton = _find_node_of_type(_model, "Skeleton3D") as Skeleton3D
 	_player = _find_node_of_type(_model, "AnimationPlayer") as AnimationPlayer
@@ -452,6 +486,18 @@ func _ready() -> void:
 	string_hand = Node3D.new()
 	string_hand.name = "StringGrip"
 	add_child(string_hand)
+	if sparse_props:
+		# One piece, built when it is handed over: see `sparse_props`.
+		weapon = "none"
+		main_hand_kind = "none"
+		_build_equipment()
+		_built = true
+		_attach_looks()
+		_apply_armor_visibility()
+		if not body_skin.is_empty():
+			_attach_body_skin()
+		_update_pose(0.0)
+		return
 	for index in BOW_DATA.size():
 		var bow := Bow.new()
 		bow.bow_kind = index
@@ -492,6 +538,8 @@ func _ready() -> void:
 	set_bow(bow_index)
 	set_sword(sword_index)
 	_apply_armor_visibility()
+	if not body_skin.is_empty():
+		_attach_body_skin()
 	_update_pose(0.0)
 
 ## The body is on the ground. Called by whichever layer owns the health - the
@@ -652,7 +700,11 @@ func _build_equipment() -> void:
 		Geo.beam(_quiver,Vector3(x,0.18,z),Vector3(x,0.47,z),0.004,trim,6)
 		Geo.box(_quiver,Vector3(0.035,0.07,0.004),Vector3(x,0.43,z),trim)
 	_build_armor_meshes()
-	_attach_external_armor()
+	# A body skin draws no armour at all: the creature's own cloth is the body,
+	# and a set of forged pieces under it would be hidden work on eleven bodies
+	# a clearing.
+	if body_skin.is_empty():
+		_attach_external_armor()
 
 
 ## Every set that ships as its own skinned GLB is bound to a copy of this rig's
@@ -682,6 +734,64 @@ const EXTERNAL_ARMOR := {
 func _attach_external_armor() -> void:
 	for set_name: String in EXTERNAL_ARMOR:
 		_attach_armor_file(set_name, EXTERNAL_ARMOR[set_name] as Dictionary)
+
+
+## Every mesh the ranger's own body is made of, outfit and face included: a
+## body that wears a skin must take the whole man off the screen, or a human
+## face looks out of a creature's hood.
+const RANGER_BODY_MESHES := ["Male_Ranger_Head_Hood", "Male_Ranger_Body",
+	"Male_Ranger_Body_Belt_1", "Male_Ranger_Body_Belt_2", "Male_Ranger_Acc_Pauldron",
+	"Male_Ranger_Arms", "Male_Ranger_Arms_Bracer", "Male_Ranger_Legs",
+	"Ranger_Base_Calf", "Male_Ranger_Feet_Boots", "Ranger_Head_SuperHero_Male",
+	"Ranger_Head_Eyebrows", "Ranger_Head_Eyes"]
+
+
+func _hide_ranger_body() -> void:
+	if _model == null:
+		return
+	for mesh_name in RANGER_BODY_MESHES:
+		var shipped := _model.find_child(mesh_name, true, false)
+		if shipped is MeshInstance3D:
+			(shipped as MeshInstance3D).visible = false
+
+
+## Wear the body skin: one GLB hung on the model, every skinned mesh repointed at
+## the live skeleton - the same hand-off the armour sets use - and the ranger's
+## own body taken off the screen.
+func _attach_body_skin() -> void:
+	var path := str(body_skin.get("path", ""))
+	if path.is_empty() or not ResourceLoader.exists(path):
+		push_error("Missing body skin: " + path)
+		return
+	var packed := load(path) as PackedScene
+	if packed == null:
+		push_error("Body skin is not a scene: " + path)
+		return
+	if is_instance_valid(_skin_root):
+		_skin_root.queue_free()
+	_skin_root = packed.instantiate() as Node3D
+	_skin_root.name = str(body_skin.get("node", "BodySkin"))
+	_model.add_child(_skin_root)
+	_skin_meshes.clear()
+	for node in _skin_root.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if mesh.mesh == null:
+			continue
+		mesh.skeleton = mesh.get_path_to(skeleton)
+		_skin_meshes.append(mesh)
+	_hide_ranger_body()
+	_apply_armor_visibility()
+
+
+## The skinned meshes the body skin draws, for whoever dresses them with the
+## creature's own materials and paint. Empty for a body with no skin.
+func skin_meshes() -> Array[MeshInstance3D]:
+	return _skin_meshes
+
+
+## The root of the worn skin, or null.
+func skin_root() -> Node3D:
+	return _skin_root if is_instance_valid(_skin_root) else null
 
 
 ## Sets whose asset could not be found, reported once per session: every body in
@@ -841,6 +951,15 @@ func _looks_pick_eyes() -> void:
 ## Height relative to the authored rig; 1.0 for a body with no look of its own.
 func body_scale() -> float:
 	return _looks_height
+
+
+## Resize a body-skin rig: the skin's own fit scale times the silhouette its
+## variant carries. The model basis is rewritten on every pose solve, so the
+## body, its kit and its head zone all follow in one call.
+func set_body_height(value: float) -> void:
+	_looks_height = clampf(value, 0.40, 3.00)
+	if _built:
+		_update_pose(0.0)
 
 
 ## The model's basis for a stance yaw. Every write to `_model.basis` has to go
@@ -1025,6 +1144,7 @@ func set_bow(index: int) -> void:
 	bow_index = clampi(index,0,BOW_DATA.size()-1)
 	if not _built:
 		return
+	_ensure_bow(bow_index)
 	active_bow = _bows[bow_index]
 	_sync_weapon_visibility()
 	_update_pose(0.0)
@@ -1048,6 +1168,7 @@ func set_sword(index: int) -> void:
 		_blocking = false
 	if not _built:
 		return
+	_ensure_sword(sword_index)
 	active_sword = _swords[sword_index]
 	_set_blade_skin(active_sword, sword_skin if sword_index == 0 else "")
 	_sync_weapon_visibility()
@@ -1058,10 +1179,65 @@ func set_sword(index: int) -> void:
 ## The two are separate objects, so the mesh is rebuilt rather than retinted.
 func set_dagger_index(index: int) -> void:
 	dagger_index = clampi(index, 0, DAGGER_DATA.size() - 1)
-	if not _built or not is_instance_valid(active_dagger):
+	if not _built:
 		return
+	if not is_instance_valid(active_dagger):
+		if not sparse_props:
+			return
+		active_dagger = _make_dagger(dagger_index)
+		_sync_weapon_visibility()
 	active_dagger.blade_length = float(dagger_profile(dagger_index).length)
 	active_dagger.set_dagger_kind(dagger_index)
+
+
+## The piece builders the sparse rig uses on demand: the same construction
+## `_ready` uses for the hero rig's whole arsenal.
+func _make_bow(index: int) -> Bow:
+	var bow := Bow.new()
+	bow.name = "Bow%d" % index
+	bow.bow_kind = index
+	bow.bow_length = float(BOW_DATA[index].length)
+	add_child(bow)
+	return bow
+
+
+func _make_sword(index: int) -> Node3D:
+	var sword := Sword.new()
+	sword.name = "Sword%d" % index
+	sword.sword_kind = index
+	sword.blade_length = float(SWORD_DATA[index].length)
+	add_child(sword)
+	return sword
+
+
+func _make_dagger(index: int) -> Dagger:
+	var dagger := Dagger.new()
+	dagger.name = "Dagger"
+	dagger.dagger_kind = index
+	dagger.blade_length = float(dagger_profile(index).length)
+	add_child(dagger)
+	return dagger
+
+
+## Reserve a slot per catalog index and build only the one asked for, so
+## `_bows[i]` still means "the catalog's i-th bow" and every loop over the
+## arrays skips the empty slots.
+func _ensure_bow(index: int) -> void:
+	if not sparse_props:
+		return
+	while _bows.size() < BOW_DATA.size():
+		_bows.append(null)
+	if _bows[index] == null:
+		_bows[index] = _make_bow(index)
+
+
+func _ensure_sword(index: int) -> void:
+	if not sparse_props:
+		return
+	while _swords.size() < SWORD_DATA.size():
+		_swords.append(null)
+	if _swords[index] == null:
+		_swords[index] = _make_sword(index)
 
 ## Swap the held blade's model family without changing its combat profile: the
 ## salvage cleaver is class-equivalent to the iron piece it replaces.
@@ -1110,8 +1286,12 @@ func set_weapon(value: String) -> bool:
 	weapon = value
 	if shield_equipped and not can_equip_shield():
 		shield_equipped = false
-	set_bow(bow_index)
-	set_sword(sword_index)
+	# A sparse rig builds only the family the mode actually carries: a watcher
+	# handed a club never pays for a bow, and one being disarmed builds nothing.
+	if value == "bow":
+		set_bow(bow_index)
+	elif not sparse_props or value in ["sword", "dual"]:
+		set_sword(sword_index)
 	_sync_weapon_visibility()
 	return true
 
@@ -1123,6 +1303,9 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
 	apply_trinkets(loadout.get("trinkets",{}))
+	var hands: Variant = loadout.get("anointed",{})
+	var anointed_hands: Dictionary = hands if hands is Dictionary else {}
+	anointed = {"main":str(anointed_hands.get("main","")), "off":str(anointed_hands.get("off",""))}
 	set_blade_skins("makeshift" if main_id == "sword_makeshift" or off_id == "sword_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))
@@ -1284,19 +1467,29 @@ func _sync_weapon_visibility() -> void:
 	var staff_shown := _staff_shown()
 	var left_shown := weapon == "dual" and off_weapon_active and off_weapon_kind in ["dagger","sword"]
 	for i in _swords.size():
+		if _swords[i] == null:
+			continue
 		_swords[i].visible = weapon in ["sword","dual"] and i == sword_index and not hidden and not staff_shown and not consuming
 	for i in _bows.size():
+		if _bows[i] == null:
+			continue
 		_bows[i].visible = weapon == "bow" and i == bow_index and not consuming
 	for i in _staffs.size():
+		if _staffs[i] == null:
+			continue
 		_staffs[i].visible = staff_shown and i == staff_index and not hidden and not consuming
 	if active_dagger != null:
 		active_dagger.visible = ((weapon == "dagger" and not hidden) \
 			or (left_shown and off_weapon_kind == "dagger")) and not consuming
 	for i in _off_swords.size():
+		if _off_swords[i] == null:
+			continue
 		_off_swords[i].visible = left_shown and off_weapon_kind == "sword" and i == off_weapon_index and not consuming
 	var focus_shown := focus_active and _focus_supported() and not consuming
 	for key: String in _focus_items:
-		_focus_items[key].visible = focus_shown and key == focus_kind
+		var item: Node3D = _focus_items[key]
+		if item != null:
+			item.visible = focus_shown and key == focus_kind
 	# The quiver is a piece of kit, not a body part: a prisoner with a club on its
 	# shoulder is not carrying arrows. It appears with the bow and leaves with it.
 	if _quiver != null:
@@ -1381,6 +1574,20 @@ func _apply_armor_visibility() -> void:
 	# bare, so a hauberk with bare hands keeps its hands, mail legs with bare feet
 	# keep their feet, and no kit can leave a body without a limb.
 	var bare := ArmorData.SET_IDS.find("naked")
+	if not body_skin.is_empty():
+		# The skin is the body: every slot the ranger could draw goes dark, and
+		# the naked layer with them, or a human face and bare forearms would
+		# stand inside a creature's robe.
+		for slot in ArmorData.SLOTS:
+			for set_index: int in _armor_meshes.get(slot, {}):
+				for node: Node3D in _armor_meshes[slot][set_index]:
+					node.visible = false
+		_hide_ranger_body()
+		if _looks_hair != null:
+			_looks_hair.visible = false
+		if _looks_face != null:
+			_looks_face.visible = false
+		return
 	var skin_on := {}
 	for slot in ArmorData.SLOTS:
 		skin_on[slot] = not _slot_covered(slot)
@@ -1608,6 +1815,26 @@ func abort_melee(hand: String) -> void:
 	else:
 		_right_melee_time = -1.0
 	_sync_primary_hand()
+	_update_pose(0.0)
+
+
+## Stretch the swing a hand is already in onto a clock the caller owns. A
+## creature's telegraph is not a weapon's speed: a mob commits to a windup, a
+## strike and a recovery that are its own profile's numbers, and the blade has
+## to be at full extension on the frame its damage resolves. The elapsed share
+## is preserved, so the retime itself never moves the blade.
+func retime_melee(hand: String, seconds: float) -> void:
+	var duration := maxf(0.08, seconds)
+	if hand == "left":
+		if _left_melee_time < 0.0:
+			return
+		_left_melee_time = clampf(_left_melee_time / maxf(_left_melee_duration, 0.0001), 0.0, 1.0) * duration
+		_left_melee_duration = duration
+	else:
+		if _right_melee_time < 0.0:
+			return
+		_right_melee_time = clampf(_right_melee_time / maxf(_right_melee_duration, 0.0001), 0.0, 1.0) * duration
+		_right_melee_duration = duration
 	_update_pose(0.0)
 
 func _clear_melee() -> void:
@@ -1929,7 +2156,7 @@ func set_locomotion(world_velocity: Vector3, grounded: bool) -> void:
 		_air_time = 0.0
 	_velocity = world_velocity
 	_grounded = grounded
-	if not _cover_active and not _blocking and not is_consuming() and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
+	if not heading_locked and not _cover_active and not _blocking and not is_consuming() and phase == "READY" and _roll_progress < 0.0 and slide_progress < 0.0 and _step_progress < 0.0 and _step_facing_hold <= 0.0 and Vector2(world_velocity.x,world_velocity.z).length_squared() > 0.01:
 		# A quick step keeps the original facing; its travel is applied by the
 		# hips and shoulders below instead of snapping the whole body sideways.
 		global_basis = Basis(Vector3.UP,atan2(-world_velocity.x,-world_velocity.z))
@@ -2158,6 +2385,18 @@ func head_hit_profile() -> Vector2:
 	# the surface that draws it, so an arrow stops where the skull is.
 	return Vector2(Hitbox.HUMAN_HEAD_RADIUS, Hitbox.HUMAN_HEAD_HALF_HEIGHT) * _looks_height
 
+## Whether the rig's authored library carries `clip`. A presenter that promises
+## its scene a clip (- a body skin driving the rig from a mob's state machine)
+## is answered by the asset, not by a table.
+func has_clip(clip: String) -> bool:
+	return _player != null and not clip.is_empty() and _player.has_animation(clip)
+
+
+## The authored clip the rig is playing now, for whoever reads the presentation.
+func current_clip() -> String:
+	return _player.current_animation if _player != null else ""
+
+
 func get_joint_positions() -> Dictionary:
 	var result: Dictionary = {}
 	for side in 2:
@@ -2177,20 +2416,24 @@ func get_blade_base(hand: String = "") -> Vector3:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	if key == "left":
 		return _left_blade_node().to_global(Vector3(0,0,-0.09))
-	if weapon == "dagger":
+	if weapon == "dagger" and is_instance_valid(active_dagger):
 		return active_dagger.to_global(Vector3(0,0,-0.09))
-	if _staff_shown():
+	if _staff_shown() and is_instance_valid(active_staff):
 		return active_staff.to_global(Vector3(0,0,-0.09))
+	if not is_instance_valid(active_sword):
+		return get_joint_positions()["right_wrist"]
 	return active_sword.to_global(Vector3(0,0,-0.09))
 
 func get_blade_tip(hand: String = "") -> Vector3:
 	var key := hand if hand in ["left","right"] else _melee_hand
 	if key == "left":
 		return _left_blade_node().to_global(Vector3(0,0,-float(_off_profile().length)-0.09))
-	if weapon == "dagger":
+	if weapon == "dagger" and is_instance_valid(active_dagger):
 		return active_dagger.to_global(Vector3(0,0,-float(dagger_profile(dagger_index).length)-0.09))
-	if _staff_shown():
+	if _staff_shown() and is_instance_valid(active_staff):
 		return active_staff.to_global(Vector3(0,0,-float(STAFF_DATA[staff_index].length)-0.09))
+	if not is_instance_valid(active_sword):
+		return get_joint_positions()["right_wrist"]
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
 
 func _physics_process(delta: float) -> void:

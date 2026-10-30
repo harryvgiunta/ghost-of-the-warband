@@ -344,7 +344,14 @@ func check_pursuers() -> void:
 		check(is_equal_approx(float(watcher.max_health), float(WatcherScript.HARDENED_HEALTH)),
 			"a road cultist carries the hardened pool (%s of %s)"
 			% [str(watcher.max_health), str(WatcherScript.HARDENED_HEALTH)])
-		check(watcher.global_position.y > -1.0, "a cultist stands on the lane")
+		# On the ground it was posted on, wherever that is: the trail is hill
+		# country, so "y above zero" was a claim about the old flat floor, and a
+		# cultist standing in a hollow at -15 m is a cultist on its feet.
+		var ground := TerrainScript.height_at(watcher.global_position.x,
+			watcher.global_position.z)
+		check(absf(watcher.global_position.y - ground) < 1.5,
+			"a cultist stands on the ground it was posted on (%.1f vs %.1f)"
+			% [watcher.global_position.y, ground])
 		check(watcher.safe_center.is_equal_approx(game.trail.town_gate()),
 			"the town's gate is the safe ring, so nobody is hunted inside it")
 	check(armed == game.trail.guards.size(), "every cultist holds a weapon (%d/%d)"

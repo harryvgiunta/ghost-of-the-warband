@@ -2,8 +2,8 @@ extends SceneTree
 ## The campaign's first town is a stockade settlement, not a room: a stake ring
 ## with one open gate on the north road, roofed halls with their backs to the
 ## stakes, a keeper standing behind every counter, a gold arrow over the one who
-## has something to say, an ichor bench, and three archers of the watch who shoot
-## what comes up the road past the gate.
+## has something to say, an altar that anoints weapons with the wardens' ichor,
+## and three archers of the watch who shoot what comes up the road past the gate.
 ##
 ## Every claim here is a number the scene can be asked for without a rendered
 ## window: the stakes the ring came out at, the roof over each hall's eave, the
@@ -33,10 +33,9 @@ const WOLF_OUTSIDE := 8.0
 const WATCH_SECONDS := 3.0
 ## The town may own this many lamps and no more: the fire, the three stall lamps,
 ## the two desk lamps, the altar's, the dressing's four lanterns, the expedition
-## gate's two, the two gate braziers, the bench's green one and the offering
-## ground's. The town added four of them (the braziers, the bench and the
-## offering); the rest were already here.
-const LIGHT_BUDGET := 18
+## gate's two, the two gate braziers and the offering ground's. The town added
+## three of them (the braziers and the offering); the rest were already here.
+const LIGHT_BUDGET := 17
 
 var town
 var warband
@@ -270,7 +269,7 @@ func check_buildings() -> void:
 
 	# None of it may stand on the square's own ground: the fire, the counters, the
 	# three 3 m service rings, the muster posts or the gate lane.
-	for service in ["stash", "altar", "recruiter", "quartermaster", "ichor",
+	for service in ["stash", "altar", "recruiter", "quartermaster",
 			"vendor_orla", "vendor_brann", "vendor_vey", "gate"]:
 		check(standing_clear(town.service_point(service)),
 			"a body can stand at the %s" % service)
@@ -440,9 +439,8 @@ func check_talk() -> void:
 
 
 func check_services() -> void:
-	# Every service the loop owns still resolves from its own point, the bench
-	# included.
-	for service in ["stash", "altar", "recruiter", "quartermaster", "ichor",
+	# Every service the loop owns still resolves from its own point.
+	for service in ["stash", "altar", "recruiter", "quartermaster",
 			"vendor_orla", "vendor_brann", "vendor_vey", "gate"]:
 		var point: Vector3 = town.service_point(service)
 		check(point != Vector3.ZERO, "%s has a point in the settlement" % service)
@@ -450,21 +448,18 @@ func check_services() -> void:
 			"the %s ring resolves to itself (got '%s')" % [service, town.service_at(point)])
 	check(town.service_at(town.global_position) == "", "the fire is still not a service")
 
-	# The ichor bench: a service, a panel, and a word in the key line.
-	var bench: Vector3 = town.service_point("ichor")
-	check(town.ichor_bench != null and town.ichor_bench.name == "IchorBench",
-		"the ichor bench stands at the quartermaster's side")
-	check(town.interact_at(1, bench) == "ichor", "G at the bench names it")
-	check(town.bench_panel.is_open(), "the bench panel opens")
-	check(town.panels_open(), "an open bench counts as an open panel")
-	check(town.hint_line(_at(bench)).contains("ichor bench"),
-		"the key line names the bench: %s" % town.hint_line(_at(bench)))
-	check(town.prompt_line(_at(bench)).contains("ichor"),
-		"the crosshair prompt names the bench")
+	# The altar is where the ichor is worked: G opens its rite, an open altar is
+	# an open panel, and the key line names what it does.
+	var altar: Vector3 = town.service_point("altar")
+	check(town.interact_at(1, altar) == "altar", "G at the altar names it")
+	check(town.altar.is_open(), "the altar's panel opens")
+	check(town.panels_open(), "an open altar counts as an open panel")
+	check(town.hint_line(_at(altar)).contains("anoint"),
+		"the key line names the rite: %s" % town.hint_line(_at(altar)))
 	town.close_panels()
-	check(not town.bench_panel.is_open(), "the bench closes with the rest")
+	check(not town.altar.is_open(), "the altar closes with the rest")
 
-	# While the ichor order is on the ledger the bench is named wherever a body
+	# While the ichor order is on the ledger the altar is named wherever a body
 	# stands, because a reagent in the stash is useless until a player finds it.
 	check(warband.quests.offer("bind_the_ichor") or warband.quests.is_active("bind_the_ichor"),
 		"the ichor order can be offered")
@@ -472,8 +467,8 @@ func check_services() -> void:
 		warband.quests.accept("bind_the_ichor")
 	check(warband.quests.is_active("bind_the_ichor"), "the ichor order is on the ledger")
 	var away := _at(Vector3(-2.0, 0.0, 2.0))
-	check(town.hint_line(away).contains("ichor bench"),
-		"the hint names the bench while the order runs: %s" % town.hint_line(away))
+	check(town.hint_line(away).contains("altar"),
+		"the hint names the altar while the order runs: %s" % town.hint_line(away))
 
 	# The vendors are still three stalls with a keeper each.
 	for index in TownScript.VENDOR_SERVICES.size():

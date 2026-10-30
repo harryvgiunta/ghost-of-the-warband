@@ -10,6 +10,7 @@ const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
 const INVENTORY_CAPACITY := 60
 const STASH_CAPACITY := 20
@@ -63,6 +64,14 @@ const ITEMS := {
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"A green sapling and a length of cord",
 		"detail":"5 damage at full draw / 0.7 s draw / it will put an arrow in the wood"},
+	# Ammunition. A shaft is a carried piece, never a worn one: the shared stash
+	# counts them, one leaves the quiver for every arrow a bow looses, a trail
+	# archer's corpse is worth bending over for, and a keeper sells them by the
+	# bunch (`bundle` at the generic price, so a sale still pays per shaft).
+	"arrow": {"name":"Arrow", "short":"Arrow", "kind":"arrow", "index":0, "price":2,
+		"category":"ammo", "slot":"", "bundle":10, "material":"Shaft",
+		"summary":"An ash shaft, an iron head and goose fletching",
+		"detail":"One shaft per loosed arrow / sold by the bunch of ten"},
 	"club_makeshift": {"name":"Club", "short":"Club", "kind":"sword", "index":3, "price":4,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A knotted length of heartwood with the root still on it",
@@ -98,13 +107,13 @@ const ITEMS := {
 		"category":"misc", "slot":"", "material":"Trophy",
 		"summary":"Four claws on a severed paw, corded to a leather loop",
 		"detail":"Carried in the shared stash / proof of the hunt"},
-	# The watchers' own blood, drawn off a warden's body: the reagent the ichor
-	# bench works into steel. It is a carried item, not a wallet - the wallet is
-	# the altar's Cruor, and the two are deliberately different things.
+	# The watchers' own blood, drawn off a warden's body: the reagent the altar
+	# works into steel. It is a carried item, not a wallet - the wallet is the
+	# altar's Cruor, and the two are deliberately different things.
 	"ichor_vial": {"name":"Warden's Ichor", "short":"Ichor", "kind":"material", "index":4, "price":60,
 		"category":"misc", "slot":"", "material":"Reagent", "reagent":true,
 		"summary":"Black ichor in a stoppered vial. It is still moving",
-		"detail":"Carried in the shared stash / bound into a weapon at the ichor bench"},
+		"detail":"Carried in the shared stash / anoints a weapon with its skill at the altar"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -400,6 +409,7 @@ const ITEM_QUOTES := {
 	"sword_makeshift": "Tree branch, flint, sinew; it will do until it does not.",
 	"dagger_ironwood": "Somebody's rib. It still points where you aim it.",
 	"bow_twig": "A sapling that has not yet learned to be a bow.",
+	"arrow": "Cheap, single-use, and the only thing standing between you and the wood.",
 	"club_makeshift": "The root was doing fine until it met you.",
 	"branch_heavy": "Two hands, one tree, no plan.",
 	"shield_wood": "A hut wall with opinions.",
@@ -483,12 +493,12 @@ static func migrate_item_id(item_id: String) -> String:
 
 const VENDORS := [
 	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
-		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
+		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone","arrow",
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
 		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
 		"sword_short","sword_arming","sword_great","dagger_iron",
-		"shield_buckler","shield_kite","shield_tower","shield_wood",
+		"shield_buckler","shield_kite","shield_tower","shield_wood","arrow",
 	]},
 	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
 		"armor_naked_head","armor_naked_chest","armor_naked_hands","armor_naked_legs","armor_naked_feet",
@@ -567,6 +577,12 @@ func item_summary(id: String) -> String:
 func item_price(id: String) -> int:
 	return int(_item(id).get("price", 0))
 
+## How many copies one visit to a keeper's shelf hands over. Ammunition is the
+## only piece sold in a bunch; every other row is one piece at a time. Static
+## because the warband and the keeper board both ask it without an instance.
+static func item_bundle(id: String) -> int:
+	return maxi(int((ITEMS.get(id, {}) as Dictionary).get("bundle", 1)), 1)
+
 func item_category(id: String) -> String:
 	return str(_item(id).get("category", ""))
 
@@ -624,6 +640,8 @@ func item_type_line(id: String) -> String:
 		return "JEWELRY  /  " + ("RING" if str(item.get("slot", "")) == "ring" else "NECK")
 	if category == "armor_bundle":
 		return "LEGACY ARMOR SET"
+	if category == "ammo":
+		return "AMMO  /  THE SHARED QUIVER"
 	return kind
 
 ## Rows for the hover card and the inspector: label/value pairs.
@@ -669,6 +687,12 @@ func item_stat_rows(id: String) -> Array:
 		else:
 			rows.append({"label":"MATERIAL", "value":str(item.get("material", "Salvage"))})
 			rows.append({"label":"USE", "value":"Carried in the shared stash"})
+	elif category == "ammo":
+		# A shaft is spent, not worn: the card says what one shot costs and how
+		# many a keeper hands over at the list price.
+		rows.append({"label":"SPENT", "value":"1 per arrow loosed"})
+		rows.append({"label":"BUNCH", "value":"%d per purchase" % item_bundle(id)})
+		rows.append({"label":"USE", "value":"The shared quiver, drawn by any bow"})
 	elif category == "jewelry":
 		var jewelry_rows := TrinketStats.effect_rows(id)
 		if jewelry_rows.is_empty():
@@ -704,6 +728,8 @@ func item_compact_stats(id: String) -> String:
 			parts.append("HEAL %d%%" % int(round(float(item.get("heal", 0.0)) * 100.0)))
 		else:
 			parts.append("MATERIAL  " + str(item.get("material", "SALVAGE")).to_upper())
+	elif category == "ammo":
+		parts.append("AMMO  1 PER LOOSED ARROW")
 	elif category == "focus":
 		var focus_text := TrinketStats.effect_summary(id)
 		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")
@@ -887,8 +913,11 @@ func owned_in_stash(id: String) -> int:
 
 ## Build the exact loadout shape consumed by Archer.apply_loadout(), arena and
 ## delve. Pure: derives everything from the ids and the armor index map.
+## `anointed_ids` are the catalog ids the altar has anointed: a held piece in
+## that list carries its skill onto the rig (`anointed`); every other piece,
+## stock steel included, is plain.
 static func build_loadout(main_id: String, off_id: String, armor_pieces: Dictionary,
-		trinket_ids: Dictionary = {}) -> Dictionary:
+		trinket_ids: Dictionary = {}, anointed_ids: Array = []) -> Dictionary:
 	var armor := {}
 	for slot in ArmorData.SLOTS:
 		armor[slot] = int(armor_pieces.get(slot, ArmorData.NONE))
@@ -932,7 +961,20 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
 			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
+		"anointed":{"main":_anointed_skill(main_id, 0, anointed_ids),
+			"off":_anointed_skill(off_id, 1, anointed_ids)},
 	}
+
+## The skill a held piece carries onto the rig: its own, fired from the hand it
+## is held in, and only while the altar's ledger lists it. An off-hand blade
+## carries nothing, because its skill is a main-hand one.
+static func _anointed_skill(item_id: String, slot: int, anointed_ids: Array) -> String:
+	if item_id.is_empty() or not anointed_ids.has(item_id):
+		return ""
+	var entry: Dictionary = ITEMS.get(item_id, {})
+	if AbilityRules.hand_slot(entry) != slot:
+		return ""
+	return str(AbilityRules.skill_for(entry).get("id", ""))
 
 func loadout() -> Dictionary:
 	return build_loadout(main_item(), off_item(), equipped_pieces(), equipped)

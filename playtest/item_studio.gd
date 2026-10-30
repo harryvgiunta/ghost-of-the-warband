@@ -12,6 +12,7 @@ extends Node3D
 
 const Archer = preload("res://scripts/archer.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const Bow = preload("res://scripts/bow.gd")
 const TrinketArt = preload("res://scripts/trinket_art.gd")
 const ShieldScript = preload("res://scripts/shield.gd")
 const StateScript = preload("res://scripts/player_state.gd")
@@ -139,6 +140,11 @@ func _render_item(item_id: String, output: String) -> void:
 			# world's drop shows.
 			_apply_carried(item_id)
 			await _capture_alpha(Vector3.ZERO, 0.17, Vector3(0.42, 0.34, -1.0), output)
+		"ammo":
+			# A shaft is carried, not held: the icon is the flight model the bow
+			# looses and the world plants in a shield.
+			_apply_arrow(item_id)
+			await _capture_alpha(Vector3.ZERO, 0.30, Vector3(0.42, 0.34, -1.0), output)
 		"armor":
 			_apply_armor(item)
 			var frame := _armor_frame(slot)
@@ -244,6 +250,24 @@ func _apply_torch(_item_id: String) -> void:
 	var art: Node3D = preload("res://scripts/warband/torch_light.gd").build_visual(907)
 	art.name = "ItemIconArt"
 	_rig.add_child(art)
+
+
+## A shaft: the same model the bow looses and the corpse keeps, laid across the
+## frame head-down so the silhouette reads at slot size.
+func _apply_arrow(_item_id: String) -> void:
+	TrinketArt.clear(_rig.skeleton)
+	_clear_display_art()
+	_rig.apply_loadout(StateScript.build_loadout("", "", _bare_armor()))
+	_hide_character()
+	var art := Node3D.new()
+	art.name = "ItemIconArt"
+	_rig.add_child(art)
+	var shaft := Bow.create_arrow_visual()
+	# The flight model runs nose-first down its own -Z, so turning it about Z lays
+	# it diagonally in frame with the head at the lower left.
+	shaft.rotation_degrees = Vector3(0.0, 0.0, 54.0)
+	shaft.position = Vector3(0.0, 0.0, Bow.ARROW_LENGTH * 0.5)
+	art.add_child(shaft)
 
 
 ## A carried piece: a roll of boiled linen, banded and folded, in the hand's

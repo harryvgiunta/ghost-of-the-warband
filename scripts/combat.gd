@@ -75,6 +75,11 @@ var lag_ticks := 0
 var lag_tick := 0
 ## Incoming stagger multiplier from worn trinkets (1.0 is unmodified).
 var stagger_scale := 1.0
+## Who answers "may this body loose a shaft?" An invalid gate means the body never
+## counts ammunition - the arena's bots and the frontier's ranger have no quiver
+## of their own. The warband installs one gate on every body it adopts, and it
+## reads the party's shared quiver, so a spent quiver keeps the string down.
+var ammo_gate: Callable = Callable()
 # The last validated camera-ray muzzle. Arrows leave along this line instead of
 # converging from the animated bow tip to the crosshair point.
 var launch_origin := Vector3.INF
@@ -291,7 +296,12 @@ func _launch_line_clear(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vec
 
 func can_draw() -> bool:
 	return rig.weapon == "bow" and grounded and rig.phase == "READY" \
-		and rig._roll_progress < 0.0 and stagger_time <= 0.0
+		and rig._roll_progress < 0.0 and stagger_time <= 0.0 and not quiver_empty()
+
+## True when the gate itself is the reason the string will not come up, so a
+## caller can say "out of arrows" instead of "the bow would not draw".
+func quiver_empty() -> bool:
+	return ammo_gate.is_valid() and not bool(ammo_gate.call())
 
 func begin_draw() -> bool:
 	if not can_draw() or not _accept_cover_draw():

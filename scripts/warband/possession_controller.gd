@@ -24,6 +24,9 @@ extends Node
 signal possession_changed(peer_id: int, merc_id: int)
 signal possession_released(peer_id: int, reason: String)
 signal transfer_refused(peer_id: int, merc_id: int, reason: String)
+## A bow press that the quiver refused: the scene says so on the HUD. Emitted only
+## when the ammunition gate is the reason the string would not come up.
+signal draw_refused(peer_id: int)
 
 const Actor = preload("res://scripts/arena_actor.gd")
 const CameraRig = preload("res://scripts/warband/possession_camera.gd")
@@ -113,6 +116,8 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_state_changed.connect(_on_body_state_changed)
 		if not _warband.souls.body_unregistered.is_connected(_on_body_unregistered):
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
+		if not _warband.anointed.is_connected(_on_piece_anointed):
+			_warband.anointed.connect(_on_piece_anointed)
 	if sync == null:
 		sync = SyncScript.new()
 		sync.name = "PossessionSync"
@@ -210,7 +215,9 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 ## main/off ids, the bow and sword indexes, packed armour and the trinket ids -
 ## and rebuilds the session kit through `State.build_loadout`, which is the same
 ## hand-off the hub paperdoll uses. Building that shape here (instead of passing
-## `build_loadout`'s own output) is what makes the worn armour reach the rig.
+## `build_loadout`'s own output) is what makes the worn armour reach the rig. The
+## altar's ledger rides beside it, never inside it: a held piece carries its
+## skill only when the warband anointed it.
 func _apply_gear(actor: Actor, merc_id: int) -> void:
 	var gear: Dictionary = _warband.roster.equipped_of(merc_id)
 	var main_id := str(gear.get("main", ""))
@@ -243,7 +250,7 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 			"off": off_id,
 		},
 	}
-	SeatLoadout.apply(actor.rig, loadout)
+	SeatLoadout.apply(actor.rig, loadout, _warband.cruor.anointed_among([main_id, off_id]))
 	_loadouts[merc_id] = loadout
 
 # --- reading ---------------------------------------------------------------
@@ -342,6 +349,14 @@ func refresh_gear(merc_id: int) -> bool:
 		return false
 	_apply_gear(actor, merc_id)
 	return true
+
+## The altar woke a piece: every body holding a copy is dressed again, so the
+## skill is in its hands now rather than at the next spawn.
+func _on_piece_anointed(item_id: String, _ability: String) -> void:
+	for merc_id in _merc_bodies.keys():
+		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
+		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
+			refresh_gear(int(merc_id))
 
 ## Living bodies in roster order: what `F1`..`F8` count.
 func living_merc_ids() -> Array[int]:
@@ -961,6 +976,10 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 		MOUSE_BUTTON_LEFT:
 			if weapon == "bow":
 				_drawing = _act("draw", sample["point"], sample["origin"])
+				# A press that silently does nothing reads as a broken button, so a
+				# draw refused by an empty quiver is said out loud once per press.
+				if not _drawing and actor.combat.quiver_empty():
+					draw_refused.emit(local_peer_id)
 			elif weapon == "dual":
 				_melee("left", "diagonal_left", sample)
 			else:
@@ -1005,6 +1024,14 @@ func _melee(hand: String, variant: String, sample: Dictionary) -> bool:
 ## own keys (TAB, the revive hold) come through this.
 func act(action: String, value: Variant = null) -> bool:
 	return _act(action, value)
+
+## The way the player's eye is pointing, flat. The camera owns the aim ray; the
+## body's own facing follows its feet, so a HUD line that says "behind you" has to
+## read the view and not the rig.
+func view_forward() -> Vector3:
+	var yaw := camera_rig.yaw if camera_rig != null else 0.0
+	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
 
 ## Run one verb on the possessed body with the camera ray that produced it.
 ## A guest owns no combat: it predicts the locomotion intents the actor layer

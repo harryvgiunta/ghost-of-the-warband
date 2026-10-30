@@ -17,6 +17,11 @@ extends SceneTree
 ##      frontier's 0.70 m, eased), and the reticle ray still resolves its own aim
 ##      point afterwards.
 ##   5. **Thrown steel.** T held and released spawns a real thrown blade.
+##   6. **A quiver, not a decoration.** Every loosed arrow takes a shaft out of
+##      the party's shared quiver, an empty quiver keeps the string down (and says
+##      so on the HUD), and a bought bunch puts the bow back in the body's hands.
+##   7. **Archers carry arrows.** A trail archer's corpse is a resupply: the bow
+##      it fired and the shafts it was drawing from are on the body.
 ##
 ## The pair stand on a plate hung in empty air above the camp, so no tree, prop or
 ## cage bar can be the thing that stopped an arrow.
@@ -83,7 +88,10 @@ func run() -> void:
 	await settle(SETTLE_FRAMES)
 	await check_bow()
 	await check_shoulder()
+	await check_quiver()
 	await check_throw()
+	await check_archer_drop()
+	await check_band_breaks_off()
 
 	print("WARBAND_RANGED_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
@@ -180,6 +188,11 @@ func check_bow() -> void:
 		"the crosshair is on the dummy (%.2f m from its feet)"
 		% (point - (target as Node3D).global_position).length())
 
+	var quiver_before: int = warband.arrows()
+	check(quiver_before > 0,
+		"the band opens with shafts in the shared quiver (%d)" % quiver_before)
+	check(game.hud.purse_line().contains("%d arrows" % quiver_before),
+		"the strip counts the quiver beside the purse (%s)" % game.hud.purse_line())
 
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
@@ -201,6 +214,9 @@ func check_bow() -> void:
 	check(game.projectiles.size() == before + 1,
 		"a released string puts an arrow in the world (%d -> %d)"
 		% [before, game.projectiles.size()])
+	check(warband.arrows() == quiver_before - 1,
+		"and one shaft leaves the quiver for it (%d -> %d)"
+		% [quiver_before, warband.arrows()])
 	var arrow = null
 	if game.projectiles.size() > before:
 		arrow = game.projectiles[game.projectiles.size() - 1]
@@ -285,3 +301,172 @@ func check_throw() -> void:
 		var thrown = game.projectiles[game.projectiles.size() - 1]
 		check(str(thrown.get("weapon")) == "dagger",
 			"and it is the dagger that left the hand (%s)" % str(thrown.get("weapon")))
+
+
+# --- 6. the empty quiver ---------------------------------------------------
+
+## A bow with nothing behind it is a stick. The quiver is spent down to nothing,
+## a press is refused out loud instead of silently, and a keeper's bunch - the
+## same write the vendor board makes - puts the string back up.
+func check_quiver() -> void:
+	await settle(SETTLE_FRAMES)
+	check(str(body.rig.weapon) == "bow",
+		"the body still holds the bow for the quiver run (%s)" % str(body.rig.weapon))
+
+	var spent: int = warband.take_arrows(warband.arrows())
+	check(spent > 0 and not warband.has_arrows(),
+		"the quiver can be emptied (%d shafts spent, %d left)" % [spent, warband.arrows()])
+
+	var refusals := [0]
+	controller.draw_refused.connect(func(_peer: int) -> void: refusals[0] += 1)
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	await settle(4)
+	var dry_before: int = game.projectiles.size()
+	controller._mouse_press(press)
+	await physics_frame
+	check(bool(body.combat.quiver_empty()), "an empty quiver is the body's own state")
+	check(str(body.rig.phase) not in ["DRAWING", "HOLDING"],
+		"a dry bow does not draw (%s)" % str(body.rig.phase))
+	check(game.projectiles.size() == dry_before, "and no arrow leaves the world")
+	check(refusals[0] == 1, "the press says why (%d line(s))" % int(refusals[0]))
+	check(game.hud.status_line().contains("Out of arrows"),
+		"and the HUD says where to get more (%s)" % game.hud.status_line())
+	controller._mouse_release(release)
+	await physics_frame
+	check(game.projectiles.size() == dry_before, "releasing a string that never drew looses nothing")
+
+	# A bunch off a keeper's shelf: the same `add_arrows` the vendor board calls.
+	warband.add_arrows(10)
+	await settle(SETTLE_FRAMES)
+	check(not bool(body.combat.quiver_empty()), "a bought bunch fills the quiver (%d)" % warband.arrows())
+	var loaded_before: int = warband.arrows()
+	controller._mouse_press(press)
+	await settle(4)
+	check(str(body.rig.phase) in ["DRAWING", "HOLDING"],
+		"and the string comes up again (%s)" % str(body.rig.phase))
+	controller._mouse_release(release)
+	await settle(4)
+	check(warband.arrows() == loaded_before - 1,
+		"the second shot spends its own shaft (%d -> %d)" % [loaded_before, warband.arrows()])
+	# The nock-and-recover clock (0.95 s) has to run out before the next section
+	# asks the hands for anything else: this test's neighbour throws a blade, and
+	# a bow still recovering refuses the throw.
+	await create_timer(1.2).timeout
+	print("RANGED_QUIVER spent=%d loaded=%d" % [spent, warband.arrows()])
+
+
+# --- 7. what an archer leaves behind ---------------------------------------
+
+## The trail's archers are the wood's only resupply. A dead one carries the bow it
+## was firing and a bunch of its own shafts, and the world registers the body's
+## kit so the corpse screen can hand them over.
+func check_archer_drop() -> void:
+	var archer = load("res://scripts/warband/watcher_archer.gd").new()
+	archer.name = "RangedArcherProbe"
+	archer.mob_id = "hollow_warden"
+	game.add_child(archer)
+	await settle(2)
+	check(is_instance_valid(archer), "an archer body stands up")
+	var kit: Array = []
+	if is_instance_valid(archer) and archer.has_method("gear_items"):
+		kit = archer.gear_items()
+	var shafts := 0
+	for entry in kit:
+		if str(entry) == "arrow":
+			shafts += 1
+	check(shafts == 4, "the archer's corpse carries its own quiver (%d shafts)" % shafts)
+	check(kit.has("bow_twig"), "and the bow it was firing (%s)" % str(kit))
+	check(kit.has("bandage_linen"), "beside the dressing every warden wears")
+	var corpse := int(game.loot.register_corpse(archer))
+	check(corpse != 0, "the world registers the body as a container")
+	var on_body: Array = game.loot.corpse_items(corpse)
+	check(on_body.count("arrow") == 4, "and books every shaft on it (%d)" % on_body.count("arrow"))
+	archer.queue_free()
+	print("RANGED_ARCHER_DROP kit=%s" % str(kit))
+
+
+# --- 8. the band breaks off ------------------------------------------------
+
+## The AI squad forks after its own fight, and the player hears about it.
+##
+## The notifier is proved here because this test owns the one harness in the suite
+## that runs the real world scene with a real squad, the real guard list and the
+## real HUD: the dummy is stood next to an *ally* (not next to the soul, who is up
+## on the plate), the squad's own `_nearest_watcher` picks it up, and everything
+## after that is what a player reads.
+const BEARINGS := ["ahead", "ahead-left", "ahead-right", "left", "right",
+	"back-left", "back-right", "behind"]
+
+func check_band_breaks_off() -> void:
+	var ally = null
+	var ally_id := 0
+	for raw_id in game.squad.squad_ids:
+		var merc_id := int(raw_id)
+		var candidate = game.controller.body_of(merc_id)
+		if candidate == null or not is_instance_valid(candidate) or candidate == body:
+			continue
+		if not bool(candidate.get("alive")) or bool(candidate.get("downed")):
+			continue
+		ally = candidate
+		ally_id = merc_id
+		break
+	check(ally != null and ally_id > 0, "the warband has a body the AI drives")
+	if ally == null:
+		return
+	var hunter = WatcherScript.new()
+	hunter.name = "AggroDummy"
+	hunter.mob_id = "hollow_warden"
+	hunter.health_pool = 400.0
+	game.add_child(hunter)
+	hunter.global_position = (ally as Node3D).global_position + Vector3(6.0, 0.0, 0.0)
+	game.guards.append(hunter)
+	var engaged: Array = []
+	for index in 300:
+		await physics_frame
+		if index < 10:
+			continue
+		engaged = game.squad.engaged_allies()
+		if not engaged.is_empty():
+			break
+	check(not engaged.is_empty(), "an ally that goes in on something is reported")
+	if engaged.is_empty():
+		return
+	var report: Dictionary = engaged[0]
+	check(str(report["name"]) == warband.roster.name_of(int(report["merc_id"])),
+		"the report names the ally (%s)" % str(report["name"]))
+	check(str(report["threat"]) == str(hunter.get_display_name()),
+		"and what it went in on (%s)" % str(report["threat"]))
+	check(int(report["distance"]) > 0,
+		"with how far it is from the soul (%d m)" % int(report["distance"]))
+	check(str(report["bearing"]) in BEARINGS,
+		"and which way the player would turn (%s)" % str(report["bearing"]))
+	check(game.hud.aggro_line().contains("IN THE FIGHT"),
+		"the HUD keeps the fight on the screen (%s)" % game.hud.aggro_line())
+	check(game.hud.aggro_line().contains(str(report["name"])),
+		"and names the ally in it")
+	var said: String = game.hud.status_line()
+	check(said.contains("break off") or said.contains("breaks off"),
+		"the break-off was said once in the banner (%s)" % said)
+	print("RANGED_AGGRO name=%s threat=%s m=%d bearing=%s"
+		% [str(report["name"]), str(report["threat"]), int(report["distance"]),
+			str(report["bearing"])])
+
+	# Out of reach is out of the fight: the line clears and the band is told the
+	# ally is back. The dummy is walked off the field rather than killed, so no
+	# kill payout can be the thing the banner was about.
+	hunter.global_position = (ally as Node3D).global_position + Vector3(220.0, 0.0, 0.0)
+	for index in 40:
+		await physics_frame
+		if game.squad.engaged_allies().is_empty():
+			break
+	check(game.squad.engaged_allies().is_empty(), "an ally out of the fight is no longer reported")
+	check(game.hud.aggro_line().is_empty(),
+		"and the standing line is put away (%s)" % game.hud.aggro_line())
+	check(game.hud.status_line().contains("back with the band"),
+		"the HUD says the ally came back (%s)" % game.hud.status_line())
+	hunter.queue_free()

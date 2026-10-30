@@ -337,6 +337,10 @@ func _physics_process(delta: float) -> void:
 	_sync_crawl_control()
 	if squad != null and not _client:
 		squad.drive(delta)
+		# The band's own fights, as the notifier reads them: a break-off is said
+		# once and then stands under the roster until the ally is back.
+		if hud != null:
+			hud.set_aggro(squad.engaged_allies())
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
@@ -862,6 +866,10 @@ func _adopt_bodies() -> void:
 ## Every body's bowstring and throwing hand. A body that is not authoritative is
 ## somebody's prediction: it draws and releases on screen, and only the simulation
 ## that owns it spawns the missile that can hurt anyone.
+##
+## The quiver gate is installed here too, so a body that changes its bow for a
+## blade needs no second thought: `Combat.can_draw()` asks the party's one quiver
+## every time the string comes up.
 func _wire_projectiles(actor) -> void:
 	if actor == null or not is_instance_valid(actor):
 		return
@@ -872,6 +880,28 @@ func _wire_projectiles(actor) -> void:
 		combat.shot.connect(_on_body_shot.bind(actor))
 	if not combat.thrown.is_connected(_on_body_thrown):
 		combat.thrown.connect(_on_body_thrown.bind(actor))
+	combat.ammo_gate = _quiver_has_arrow
+
+
+## The one rule behind every bow in the warband: a shaft in the quiver or nothing
+## on the string.
+func _quiver_has_arrow() -> bool:
+	return warband == null or warband.has_arrows()
+
+
+## Spend one shaft from the party quiver and mirror the spend to every peer, the
+## way a kill's gold is mirrored: the quiver is one ledger, and a guest that could
+## not see the spend would shoot free. Answers false when the quiver is empty, so
+## the caller can refuse the missile rather than fly an arrow nobody paid for.
+func spend_arrow() -> bool:
+	if warband == null:
+		return true
+	if warband.take_arrows(1) <= 0:
+		return false
+	var link := get_node_or_null("/root/GameFlow/WarbandLink")
+	if link != null and link.has_method("report_ammo_spent"):
+		link.report_ammo_spent(1)
+	return true
 
 
 ## A bow released. The shot leaves along the camera's crosshair ray - the same ray
@@ -879,6 +909,11 @@ func _wire_projectiles(actor) -> void:
 func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: float,
 		actor) -> void:
 	if not _projectile_authority(actor):
+		return
+	# The shaft leaves the quiver as it leaves the string. A draw let through
+	# before the count ran out - a stale prediction, a hand-fired signal - still
+	# gets no free arrow.
+	if not spend_arrow():
 		return
 	var rig = actor.rig
 	var damage := float(CombatScript.damage_for(int(rig.bow_index), charge,
@@ -1134,6 +1169,16 @@ func _wire_possession() -> void:
 	controller.possession_changed.connect(_on_possession_changed)
 	controller.transfer_refused.connect(_on_transfer_refused)
 	controller.possession_released.connect(_on_possession_released)
+	controller.draw_refused.connect(_on_draw_refused)
+
+
+## The quiver is empty and the string stayed down. Said once per press, and the
+## line points at the two places a shaft comes from. The peer id is the presser's,
+## and only the local soul's presses reach here.
+func _on_draw_refused(_peer_id: int) -> void:
+	if hud == null:
+		return
+	hud.set_status("Out of arrows: buy a bunch from a keeper, or take them off an archer.", 2.5)
 
 
 func _on_possession_changed(peer_id: int, merc_id: int) -> void:

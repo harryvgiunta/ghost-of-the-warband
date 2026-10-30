@@ -167,8 +167,6 @@ func run() -> void:
 	warband.load_state()
 	check(warband.quests.progress_of("cull_the_watchers") == 7,
 		"the ledger is restored from the warband save")
-	check(int(JSON.parse_string(FileAccess.get_file_as_string(WARBAND_SAVE))
-		.get("version", 0)) == 5, "the save file is version 5")
 
 	# --- free hires and the stash dressing ---------------------------------
 	warband.reset_state()

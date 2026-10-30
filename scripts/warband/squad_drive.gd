@@ -53,8 +53,16 @@ var follow_slack := 3.2
 var _rng := RandomNumberGenerator.new()
 var _rng_seeded := false
 ## The soul's footprints down the road, oldest first: the line the escort walks when
-## it has been left behind.
+## it has been left behind. `_trail_base` counts the footprints that have fallen off
+## the back, so a footprint's number - its index plus the base - is still the same
+## footprint after the line is trimmed, and an ally's place on it survives.
 var _trail: Array[Vector3] = []
+var _trail_base := 0
+## The ground an area has mapped for the squad (`squad_nav.gd`), or null. Where it
+## covers a body and the place it is walking to, the walk goes round what the map
+## knows is solid instead of pushing at it in a straight line; everywhere else the
+## squad steers as it always has. The camp owns the one map today.
+var nav = null
 var engage_radius := 60.0
 ## How close an ally must stand to swing.
 var reach := 2.0
@@ -87,7 +95,14 @@ const PUSH_SHARE := 0.75
 const PUSH_CAP := 0.55
 ## An escort stands on its own slot around the soul rather than on the soul: the
 ## ring is what spreads the squad out on the walk instead of stacking it.
-const ESCORT_RINGS := 2
+##
+## Four posts to a ring, and the next ring turned half a slot: the eight allies a
+## full warband can field are eight distinct places, each a stride from its
+## neighbours. The layout used to key off the body's index in `squad_ids`, which
+## spends one of those places on the soul the player is inside - so the ring
+## wrapped and two allies were handed the same point, shoved each other off it and
+## walked back in. Two bodies orbiting one post is the band circling itself.
+const ESCORT_SLOT_ANGLES := 4
 const ESCORT_SLOT_GAP := 1.35
 ## The escort's arrival band. An ally walks to its post only when it is further
 ## than `ESCORT_ENGAGE` from it and stops `ESCORT_STANDOFF` short, so it arrives
@@ -110,6 +125,22 @@ const ESCORT_RALLY := 9.0
 ## How far off the line a crumb may be before an ally stops trusting it: past this
 ## the body is standing somewhere the soul never walked and goes its own way.
 const CRUMB_GRIP := 14.0
+## The line is walked forwards only. A body within `CRUMB_ARRIVE` of the footprint
+## it is walking to has reached it and heads for the next; it never turns back for
+## an older one. Picking the nearest footprint afresh every frame is what pinned two
+## allies in the camp for the rest of the run: the soul walked to a cage and back
+## the same way, so the line ran out and back over itself, and at the turn the
+## nearest footprint was on the way out - the body walked to the turn, found the
+## outbound footprint nearest again, and paced the same 2.5 m forever. Half a step,
+## so a body on the line is always on one footprint or the next.
+const CRUMB_ARRIVE := CRUMB_STEP * 0.5
+## A walk the map routes round something solid. The route is planned again when the
+## place it leads to has moved `ROUTE_SLACK` metres, and every `ROUTE_SECONDS`
+## while the body is still on it; the body aims at the furthest of the next
+## `ROUTE_LOOKAHEAD` cells it can see, so it cuts each corner the map allows.
+const ROUTE_SECONDS := 0.75
+const ROUTE_SLACK := 1.0
+const ROUTE_LOOKAHEAD := 12
 ## Idle bodies take one short step and then stand: a waiting squad drifts instead of
 ## freezing in a heap, and stands still in between instead of pacing. Measured from
 ## the other direction - a squad that stepped whenever its clock ran out never
@@ -240,7 +271,7 @@ const TURN_RATE := 320.0
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
 ## that keeps running behind a fight.
 const TRACK_CLOCKS := ["state_left", "step_left", "side", "retreat", "heal_left", "roam_left",
-	"rest_left"]
+	"rest_left", "route_left"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
 ## hand can hold at all is the union plus a bow, which the squad's `_armed` test
@@ -346,9 +377,13 @@ func drive(delta: float) -> void:
 			if not bool(track.get("engaged", false)):
 				actor.voice_aggro()
 			track["engaged"] = true
+			# Held for the notifier: `engaged_allies()` reads it back so the band
+			# can say what an ally went in on, not just that it left.
+			track["threat"] = watcher
 			_fight(actor, watcher, track)
 			continue
 		track["engaged"] = false
+		track["threat"] = null
 		# 3. Nothing hostile close: check the bodies. A squad strips the field when
 		#    the fighting has stopped, never mid-swing - and never further from the
 		#    soul than an escort may stray to do it.
@@ -378,15 +413,21 @@ func drive(delta: float) -> void:
 		#    steps. Nobody walks onto the soul, and nothing stands still.
 		if following and is_instance_valid(player_body):
 			# Far behind, the soul's line outranks the ring slot: walking the way the
-			# player walked is what keeps a squad together in a wood this size.
-			var to_soul: Vector3 = (player_body as Node3D).global_position - actor.global_position
+			# player walked is what keeps a squad together in a wood this size. On
+			# mapped ground the map already knows the way round, so the body goes
+			# straight for its slot instead of retracing every turn the soul took.
+			var soul_at: Vector3 = (player_body as Node3D).global_position
+			var to_soul: Vector3 = soul_at - actor.global_position
 			to_soul.y = 0.0
-			if to_soul.length() > ESCORT_RALLY:
-				var crumb: Variant = _crumb_for(actor)
+			if to_soul.length() > ESCORT_RALLY and not _mapped(actor.global_position, soul_at):
+				var crumb: Variant = _crumb_for(actor, track)
 				if crumb != null:
 					track["to_post"] = true
 					_advance(actor, crumb, track, 0.9)
 					continue
+			# Off the line: the next time this body falls behind it rejoins from
+			# where it stands, not from a footprint it left a fight ago.
+			track["crumb"] = -1
 			var post := _escort_post(actor, track)
 			var gap: Vector3 = post - actor.global_position
 			gap.y = 0.0
@@ -422,6 +463,107 @@ func armed_count() -> int:
 		if in_roster and _holds_weapon(actor):
 			count += 1
 	return count
+
+
+# --- the notifier's facts ---------------------------------------------------
+
+## Every ally that is in a fight right now, as the HUD reads it: who broke off,
+## what it went in on, how far it is from the soul and which way the player would
+## have to turn.
+##
+## The squad forked in silence before this. `voice_aggro()` is the only cue a
+## break-off had, and the row rolls that line at one in a hundred, so the player
+## learned the band was gone by turning round and finding it a hundred metres
+## back. This is the fact the notifier paints - nothing here is announced from the
+## AI, and a body that stops swinging leaves the list on the same frame.
+##
+## Rows: `{merc_id, name, threat, distance, bearing}`. Empty while the band is
+## whole, and empty while the soul is between bodies: a split needs somebody to be
+## split from.
+func engaged_allies() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if controller == null or warband == null:
+		return out
+	var soul = controller.active_body(1)
+	if soul == null or not is_instance_valid(soul):
+		return out
+	var forward := _view_forward(soul)
+	var soul_at: Vector3 = (soul as Node3D).global_position
+	for raw_id in squad_ids:
+		var merc_id := int(raw_id)
+		if not _is_free(merc_id):
+			continue
+		var actor = controller.body_of(merc_id)
+		if actor == null or not is_instance_valid(actor) or actor == soul:
+			continue
+		# Only a standing body is in a fight; a downed ally is the wipe's problem,
+		# and the banner that names a downed body is the scene's own.
+		if not bool(actor.get("alive")) or bool(actor.get("downed")):
+			continue
+		var track: Variant = _track.get(merc_id, null)
+		if not (track is Dictionary) or not bool((track as Dictionary).get("engaged", false)):
+			continue
+		var offset: Vector3 = (actor as Node3D).global_position - soul_at
+		out.append({
+			"merc_id": merc_id,
+			"name": warband.roster.name_of(merc_id),
+			"threat": _threat_name((track as Dictionary).get("threat")),
+			"distance": int(round(Vector3(offset.x, 0.0, offset.z).length())),
+			"bearing": bearing_word(forward, offset),
+		})
+	return out
+
+
+## What a squadmate is fighting, in the words the game already uses for it. A
+## threat that died or left the tree during the frame is still named: the body did
+## go in on something, and "something in the wood" beats an empty word.
+static func _threat_name(threat) -> String:
+	if not is_instance_valid(threat):
+		return "something in the wood"
+	if threat.has_method("get_display_name"):
+		var named := str(threat.call("get_display_name"))
+		if not named.is_empty():
+			return named
+	return str((threat as Node).name)
+
+
+## The way the player's eye is pointing, flat. The camera owns the aim ray, so
+## "behind you" means behind the view and not behind the feet of a body that is
+## walking sideways; a harness with no camera falls back to the soul's facing.
+func _view_forward(soul) -> Vector3:
+	if controller != null and controller.has_method("view_forward"):
+		var aimed: Variant = controller.call("view_forward")
+		if typeof(aimed) == TYPE_VECTOR3 and (aimed as Vector3).length_squared() > 0.01:
+			return (aimed as Vector3).normalized()
+	if soul is Node3D:
+		return -(soul as Node3D).global_basis.z
+	return Vector3.FORWARD
+
+
+## The word for where a point lies relative to the way the player is looking:
+## eight sectors, so the notifier can say "34 m back-left" and mean a place to turn
+## to. A positive angle is to the player's left (Godot's `signed_angle_to` measures
+## against `UP`, so a target on the right answers negative).
+static func bearing_word(forward: Vector3, offset: Vector3) -> String:
+	var flat := Vector3(offset.x, 0.0, offset.z)
+	if flat.length_squared() < 0.0001:
+		return "here"
+	var heading := Vector3(forward.x, 0.0, forward.z)
+	if heading.length_squared() < 0.0001:
+		heading = Vector3.FORWARD
+	var angle := rad_to_deg(heading.normalized().signed_angle_to(flat.normalized(),
+		Vector3.UP))
+	var side := "left" if angle > 0.0 else "right"
+	var magnitude := absf(angle)
+	if magnitude <= 22.5:
+		return "ahead"
+	if magnitude <= 67.5:
+		return "ahead-" + side
+	if magnitude <= 112.5:
+		return side
+	if magnitude <= 157.5:
+		return "back-" + side
+	return "behind"
 
 
 ## Point every living watcher at the nearest standing squad body and put it on
@@ -1069,6 +1211,8 @@ func _walk_to_loot(actor, point: Vector3, key: String, track: Dictionary) -> boo
 
 ## Walk or jog to a point, stopping `stop_at` short of it. A drop, a corpse and
 ## the soul are places to stand next to; a watcher is a body to stand *away* from.
+## On mapped ground the walk goes round what stands in the way (`_route_aim`); the
+## stop is still measured to the point itself.
 func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) -> void:
 	var to: Vector3 = point - actor.global_position
 	to.y = 0.0
@@ -1079,10 +1223,54 @@ func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) ->
 	# Walking is not fighting: a guard left up while crossing the yard to a drop
 	# would be a pose nobody set.
 	actor.combat.stop_block()
+	var heading: Vector3 = _route_aim(actor, point, track) - actor.global_position
+	heading.y = 0.0
+	if heading.length_squared() <= 0.0001:
+		heading = to
 	# Far out is a jog; the last few metres into contact are a walk, so a squad
 	# arrives beside a body instead of running it over.
-	_steer(actor, to.normalized(), track, gap > RUN_GAP)
+	_steer(actor, heading.normalized(), track, gap > RUN_GAP)
 
+
+## Whether the map covers both ends of a walk.
+func _mapped(from: Vector3, to: Vector3) -> bool:
+	return nav != null and nav.covers(from) and nav.covers(to)
+
+
+## Where a walk to `point` aims this frame: straight at it off the map, or when
+## nothing the map knows of stands in the line; otherwise at the furthest of the
+## next `ROUTE_LOOKAHEAD` cells of a route round it that the body can see from
+## where it stands. The route is kept on the track and planned again when the
+## point moves or the route grows old, so a chase round a cage follows the body
+## it is chasing.
+func _route_aim(actor, point: Vector3, track: Dictionary) -> Vector3:
+	var here: Vector3 = (actor as Node3D).global_position
+	if not _mapped(here, point) or nav.clear_line(here, point):
+		# Clear ground: the next blocked line plans on its first frame.
+		track["route"] = PackedVector3Array()
+		track["route_left"] = 0.0
+		return point
+	var route: PackedVector3Array = track.get("route", PackedVector3Array())
+	var planned: Vector3 = track.get("route_goal", point)
+	var moved := Vector2(planned.x - point.x, planned.z - point.z).length()
+	# The clock, not an empty answer, decides when to ask again: a goal the map
+	# cannot reach answers empty, and asking every frame searches the whole map
+	# every frame.
+	if float(track.get("route_left", 0.0)) <= 0.0 or moved > ROUTE_SLACK:
+		route = nav.route(here, point)
+		track["route"] = route
+		track["route_goal"] = point
+		track["route_left"] = ROUTE_SECONDS
+		track["route_at"] = 0
+	if route.is_empty():
+		return point
+	var at := clampi(int(track.get("route_at", 0)), 0, route.size() - 1)
+	for index in range(at + 1, mini(route.size(), at + 1 + ROUTE_LOOKAHEAD)):
+		if not nav.clear_line(here, route[index]):
+			break
+		at = index
+	track["route_at"] = at
+	return route[at]
 
 
 ## One intent write for every kind of movement the squad makes. A body whose push
@@ -1207,50 +1395,89 @@ func _drop_crumb() -> void:
 	_trail.append(at)
 	while _trail.size() > CRUMB_KEEP:
 		_trail.remove_at(0)
+		_trail_base += 1
 
 
-## The footprint an ally should walk to: the one ahead of the nearest crumb it is
-## standing on, so a body that has fallen behind rejoins the line and then follows
-## it. Null when the body is nowhere near the line the soul walked.
-func _crumb_for(actor) -> Variant:
+## The footprint an ally should walk to. A body joins the line at the footprint
+## nearest it - the newest of two on the same spot, so a line that doubled back is
+## joined on its way out - and from then on only ever walks it forwards: reaching a
+## footprint hands it the next, and nothing older is offered again while it holds
+## its place (`track["crumb"]`, a footprint number that survives the line being
+## trimmed). Null when the body is nowhere near the line the soul walked.
+##
+## A footprint already in hand is *kept* however far away it is: the grip is a rule
+## about where to start walking the line, not a leash that snaps back to the nearest
+## footprint, and a body dropped from its footprint mid-stride just paces between
+## the two it keeps swapping. "Reached" is arrival or progress - the next footprint
+## closer to the body than the one it is walking to - because the line is laid where
+## the soul stood, and two of those can be a stride or a hundred metres apart.
+func _crumb_for(actor, track: Dictionary) -> Variant:
 	if _trail.size() < 2:
 		return null
 	var here: Vector3 = (actor as Node3D).global_position
-	var best := -1
-	var best_distance := INF
-	for index in _trail.size():
-		var distance: float = _trail[index].distance_to(here)
-		if distance < best_distance:
-			best_distance = distance
-			best = index
-	if best < 0 or best_distance > CRUMB_GRIP:
-		return null
-	# One footprint ahead, never the last one underfoot: a body that aims at the
-	# crumb it is already standing on stands there.
-	var next := mini(best + 1, _trail.size() - 1)
-	return _trail[next]
+	var index := int(track.get("crumb", -1)) - _trail_base
+	if index < 0 or index >= _trail.size():
+		index = -1
+		var best_distance := CRUMB_GRIP
+		for probe in _trail.size():
+			var distance: float = _trail[probe].distance_to(here)
+			if distance <= best_distance:
+				best_distance = distance
+				index = probe
+		if index < 0:
+			track["crumb"] = -1
+			return null
+	while index < _trail.size() - 1:
+		var to_this: Vector3 = _trail[index] - here
+		to_this.y = 0.0
+		var ahead: Vector3 = _trail[index + 1] - _trail[index]
+		ahead.y = 0.0
+		var next_is_nearer := _trail[index + 1].distance_to(here) < to_this.length()
+		var walked_past := ahead.length_squared() > 0.01 and to_this.dot(ahead) < 0.0
+		var reached := to_this.length() <= CRUMB_ARRIVE or next_is_nearer or walked_past
+		if not reached:
+			break
+		index += 1
+	track["crumb"] = _trail_base + index
+	return _trail[index]
 
 
-## Where an escort stands: its own slot on a ring around the soul. The slot comes
-## from the body's place in the squad order, so two allies never claim the same
-## spot and the ring itself is what spreads the squad on the walk.
+## Where an escort stands: its own slot on a ring around the soul.
+##
+## The slot is the body's place among the *allies* on the ring, not its place in
+## `squad_ids`: the soul's own record holds no post, and counting it left a hole
+## that wrapped the last body onto the first body's point - two allies shoving each
+## other round one spot forever, which is the squad circling itself. The slot comes
+## from the squad order, so two allies never claim the same place and the ring is
+## what spreads them on the walk. On mapped ground a slot that falls inside a trunk
+## or a cage wall moves to the nearest ground a body can stand on, so the arrival
+## band is measured to somewhere reachable.
 func _escort_post(actor, track: Dictionary) -> Vector3:
 	var soul: Vector3 = (player_body as Node3D).global_position
 	var merc_id := int(track.get("merc_id", 0))
 	var slot := 0
-	var count := maxi(squad_ids.size(), 1)
+	var seen := 0
 	for index in squad_ids.size():
-		if int(squad_ids[index]) == merc_id:
-			slot = index
-			break
-	var ring := 1 + int(slot / ESCORT_RINGS) % 2
-	var angle := TAU * float(slot % maxi(ESCORT_RINGS * 2, 1)) / float(maxi(ESCORT_RINGS * 2, 1))
-	var radius := follow_slack + ESCORT_SLOT_GAP * float(ring) * 0.5
+		var other_id := int(squad_ids[index])
+		if not _is_free(other_id):
+			continue
+		var other = controller.body_of(other_id) if controller != null else null
+		if other != null and is_instance_valid(other) and other == player_body:
+			continue
+		if other_id == merc_id:
+			slot = seen
+		seen += 1
+	var ring := slot / ESCORT_SLOT_ANGLES
+	# Ring 0 sits on the four cardinals; ring 1 is turned half a slot, so a full
+	# band is a staggered double ring instead of an outer one in the inner one's
+	# shadow.
+	var half_slot := PI / float(ESCORT_SLOT_ANGLES)
+	var angle := TAU * float(slot % ESCORT_SLOT_ANGLES) / float(ESCORT_SLOT_ANGLES) \
+		+ half_slot * float(ring % 2)
+	var radius := follow_slack + ESCORT_SLOT_GAP * 0.5 * float(ring + 1)
 	var post := soul + Vector3(cos(angle), 0.0, sin(angle)) * radius
-	# The soul moves; the slot follows it, not the other way round, and an ally
-	# with the same slot keeps `count` bodies apart from its neighbour by the ring.
-	if count > 4:
-		post += Vector3(cos(angle + 0.7), 0.0, sin(angle + 0.7)) * ESCORT_SLOT_GAP * 0.35
+	if _mapped(soul, post):
+		post = nav.free_point(post)
 	return post
 
 
@@ -1301,6 +1528,8 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 			"fetch_key": "", "fetch_best": 0.0, "fetch_left": 0.0,
 			"swings_left": 0, "swing_due": false, "retreat": 0.0,
 			"anchor": actor.global_position, "anchor_left": POCKET_SECONDS,
+			"crumb": -1, "route": PackedVector3Array(), "route_goal": actor.global_position,
+			"route_left": 0.0, "route_at": 0,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]
 	track["delta"] = delta
