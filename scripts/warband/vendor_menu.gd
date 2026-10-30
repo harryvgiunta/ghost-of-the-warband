@@ -96,7 +96,9 @@ func status_text() -> String:
 	return str(_status.text) if _status != null else ""
 
 ## The keeper's stock, filtered to ids this build actually carries at a price.
-## Rows: `{item_id, name, category, price, affordable}`.
+## Rows: `{item_id, name, category, price, affordable, bundle}`. `price` is what
+## the BUY button costs for one visit to the shelf: a piece sold by the bunch
+## (ammunition) lists the bunch, because that is what the coin buys.
 func stock_rows() -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
 	if _warband == null or State.VENDORS.is_empty():
@@ -111,12 +113,15 @@ func stock_rows() -> Array[Dictionary]:
 		var price := int(item.get("price", 0))
 		if price <= 0:
 			continue
+		var bundle := State.item_bundle(item_id)
+		var cost := price * bundle
 		rows.append({
 			"item_id": item_id,
 			"name": str(item.get("name", item_id)),
 			"category": str(item.get("category", "")),
-			"price": price,
-			"affordable": gold >= price,
+			"price": cost,
+			"affordable": gold >= cost,
+			"bundle": bundle,
 		})
 	return rows
 
@@ -307,7 +312,12 @@ func _stock_row(row: Dictionary) -> void:
 	var item_id := str(row["item_id"])
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override("separation", 8)
-	var name_label := _label(line, str(row["name"]), 16, INK)
+	# A bunch row says how many shafts the coin buys: the price beside it is the
+	# whole bunch, so "Arrow  ×10   20 G" is one purchase, not ten.
+	var label := str(row["name"])
+	if int(row.get("bundle", 1)) > 1:
+		label = "%s  ×%d" % [label, int(row["bundle"])]
+	var name_label := _label(line, label, 16, INK)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var price_label := _label(line, "%d G" % int(row["price"]), 14, MUTED)
 	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT

@@ -570,6 +570,17 @@ Short version of the latest tuning (all in the code, all covered by
   ten seconds and ended 12-20 m from where they started. After the band and the
   rest, the same measurement is 0.9-1.8 m in ten seconds. A squad with nothing to
   do used to stand as one knot - and then, for a while, to walk in circles;
+- **the camp is mapped for the squad**: `scripts/warband/squad_nav.gd` draws the
+  camp's own colliders - cage bars, huts, trunks, with every cage door left off
+  because it rises - into half-metre cells, and a walk whose two ends are on that
+  map goes round anything solid on an `AStarGrid2D` route instead of pushing at it
+  in a straight line. A cage is bars on three sides and a door, and the latch arrow
+  hangs on the back bars: a prisoner let out from behind its cage used to shoulder
+  the back bars, back out of the door and walk straight back in for as long as the
+  soul stood there. Off the map the escort walks the soul's footprints **forwards
+  only**; choosing the nearest footprint afresh every frame paced two allies on
+  2.5 m of cage 1's approach for a whole run, because the walk to a cage and back
+  lays the line out and back over itself;
 - an unarmed ally looks for **steel** first - a weapon on the ground inside
   `SEARCH_METRES`, or a blade still on a corpse (`WarbandGearDrop`/`take_from_corpse`)
   - and does not cross the clearing for a rag, a ring or a bundle;

@@ -518,8 +518,10 @@ func check_ground() -> void:
 		var height := TerrainScript.height_at(point.x, point.z)
 		low_walk = minf(low_walk, height)
 		high_walk = maxf(high_walk, height)
-	check(high_walk - low_walk >= 1.0,
-		"the walk between them goes over real slopes (%.1f m of relief)" % (high_walk - low_walk))
+	# The walk between them is not: the trail is hill country, and the floor it
+	# used to be - two metres of roll - is what made the wood read as a lawn.
+	check(high_walk - low_walk >= 12.0,
+		"the walk between them goes over real hills (%.1f m of relief)" % (high_walk - low_walk))
 	print("WORLD_GROUND relief=%.1f..%.1f walk=%.1f..%.1f tris=%d"
 		% [low, high, low_walk, high_walk, int(readout["terrain_tris"])])
 

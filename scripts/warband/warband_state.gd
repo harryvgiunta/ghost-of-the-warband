@@ -111,6 +111,51 @@ func award_gold(amount: int) -> void:
 	if state != null:
 		state.add_credits(amount)
 
+# --- the quiver ------------------------------------------------------------
+
+## Ammunition is one pool for the whole band, exactly like the shared stash it
+## lives in: every shaft a bow looses comes out of it, every bunch a keeper sells
+## goes into it, and every archer's corpse gives a few back. A bow with nothing
+## in the quiver cannot be drawn, which is the whole of the rule.
+const ARROW_ITEM := "arrow"
+## What a fresh campaign opens with. A body that has to buy its first shaft
+## before it may use a bow it just looted would read the bow as broken.
+const STARTING_ARROWS := 24
+
+func arrows() -> int:
+	return stash.pooled_count(ARROW_ITEM)
+
+## False when the quiver is empty. A caller drawing a bow asks this first.
+func has_arrows() -> bool:
+	return arrows() > 0
+
+## Take up to `count` shafts out of the pool and answer how many actually left
+## it: a loosed arrow asks for one and gets 0 or 1, so the count can never go
+## negative however many shots a frame resolves.
+func take_arrows(count: int = 1) -> int:
+	var taken := 0
+	while taken < maxi(count, 0) and stash.remove(ARROW_ITEM, 1):
+		taken += 1
+	if taken > 0:
+		_notify()
+	return taken
+
+## Put shafts back in the pool: a keeper's bunch, an archer's corpse, a test.
+func add_arrows(count: int = 1) -> int:
+	var added := maxi(count, 0)
+	if added <= 0:
+		return 0
+	stash.add(ARROW_ITEM, added)
+	_notify()
+	return added
+
+## A campaign's opening bunch. Seeding never mints: a warband that already counts
+## shafts - a resumed save, a keeper's purchase - keeps exactly what it had.
+func seed_quiver(count: int = STARTING_ARROWS) -> int:
+	if arrows() > 0:
+		return 0
+	return add_arrows(count)
+
 # --- roster ----------------------------------------------------------------
 
 func merc_ids() -> Array[int]:
@@ -216,22 +261,27 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 
 ## Buy one catalog item into the shared stash with gold. The price is the same
 ## keeper price the paperdoll and the stash sort use, so nothing can disagree
-## about what a piece is worth.
+## about what a piece is worth. A catalog row that carries a `bundle` (ammunition)
+## hands over that many copies for the list price per copy, so one visit to the
+## shelf is a quiver's worth of shafts and a sale still pays per shaft.
 func buy_gear(item_id: String) -> Dictionary:
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	if item.is_empty():
-		return {"ok": false, "message": "The quartermaster does not stock that.", "item_id": item_id, "cost": 0}
-	var cost := int(item.get("price", 0))
-	if cost <= 0:
-		return {"ok": false, "message": "That piece has no price.", "item_id": item_id, "cost": 0}
+		return {"ok": false, "message": "The quartermaster does not stock that.", "item_id": item_id, "cost": 0, "count": 0}
+	var count := State.item_bundle(item_id)
+	var cost := int(item.get("price", 0)) * count
+	if int(item.get("price", 0)) <= 0:
+		return {"ok": false, "message": "That piece has no price.", "item_id": item_id, "cost": 0, "count": 0}
 	if not spend_gold(cost):
-		return {"ok": false, "item_id": item_id, "cost": cost,
+		return {"ok": false, "item_id": item_id, "cost": cost, "count": count,
 			"message": "You need %d gold; you have %d." % [cost, gold()]}
-	stash.add(item_id, 1)
+	stash.add(item_id, count)
 	_notify()
-	return {"ok": true, "item_id": item_id, "cost": cost,
-		"message": "Bought %s for %d gold into the shared stash." % [
-			str(item.get("name", item_id)), cost]}
+	var display := str(item.get("name", item_id))
+	if count > 1:
+		display = "%d × %s" % [count, display]
+	return {"ok": true, "item_id": item_id, "cost": cost, "count": count,
+		"message": "Bought %s for %d gold into the shared stash." % [display, cost]}
 
 ## Sell one pooled copy back to a keeper. The piece must be in the shared pool:
 ## a blade somebody is wearing is not the warband's to sell behind their back,

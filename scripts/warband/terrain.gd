@@ -4,9 +4,12 @@ extends RefCounted
 ## placed on it.
 ##
 ## The campaign used to lie on a single flat box: 420 x 1480 m of y = 0. It is a
-## drowned wood on a rolling floor now - three octaves of value noise on a fixed
-## seed, 30-70 m wavelengths and a couple of metres of relief, so walking the trail
-## goes over rises and through hollows and the horizon is not a line.
+## drowned wood in hill country now - three octaves of value noise on a fixed seed,
+## 190/100/58 m wavelengths and `RELIEF` metres either side of level, so the walk
+## to town crosses crests and drops into hollows and the horizon is a range of
+## swells rather than a line. The waves are long against their own amplitude on
+## purpose: a hill here is a minute's walk up and a minute's walk down, at ten
+## degrees, never a face to climb.
 ##
 ## Four rules hold it together.
 ##
@@ -50,13 +53,25 @@ const ORIGIN := Vector2(-268.0, -1695.0)
 const COLS := 77
 const ROWS := 277
 const CELL := 7.0
-## Three octaves, 64/40/31 m. The sum is normalised to `peak` metres either side of
-## the pads, so the relief is the ±2 m a forest floor rolls over, not a mountain and
-## not corrugation.
+## Three octaves, 190/100/58 m. The sum is normalised to `RELIEF` metres either
+## side of level, so the wood rises and falls by about a house and a half over a
+## couple of hundred metres - hill country, walked at ten degrees, not a mountain
+## and not corrugation. The old floor was ±2 m of the same noise at a quarter the
+## wavelength: relief you could see in the triangle count and never on the skyline.
+## `_relief_hold()` keeps the swells off the pads, so the camp and the square stayed
+## level while the ground between them became a walk over real ground.
 const SEED := 51117
-const OCTAVES := [{"wavelength": 64.0, "weight": 1.0}, {"wavelength": 40.0, "weight": 0.55},
-	{"wavelength": 31.0, "weight": 0.28}]
-const PEAK := 1.9
+const OCTAVES := [{"wavelength": 190.0, "weight": 1.0}, {"wavelength": 100.0, "weight": 0.55},
+	{"wavelength": 58.0, "weight": 0.3}]
+const RELIEF := 22.0
+## Where the swells are held down to nothing and how far they take to come back.
+## Measured from the pad's own rectangle: inside `RELIEF_HOLD_INNER` of its edge the
+## ground is the pad's smooth base, and a hill reaches full height by
+## `RELIEF_HOLD_OUTER`. Without the hold the camp sat in a pit walled by its own 14 m
+## blend - a flat pad against ground that had climbed 16 m under it - and the walk
+## out of it was a scramble.
+const RELIEF_HOLD_INNER := 40.0
+const RELIEF_HOLD_OUTER := 260.0
 ## Where a pad is flat, and how far it takes to stop being flat.
 const PAD_Y := 0.0
 ## The mountain rim: the steep face's heights, the band it rises over at each
@@ -231,10 +246,10 @@ static func _bake() -> void:
 			raw[j * (COLS + 1) + i] = value
 			lowest = minf(lowest, value)
 			highest = maxf(highest, value)
-	# Normalised to `PEAK`: a fixed seed gives a fixed field, and its extremes are
+	# Normalised to `RELIEF`: a fixed seed gives a fixed field, and its extremes are
 	# the relief the world was designed around rather than whatever the octaves
 	# happened to add up to.
-	var scale := PEAK / maxf(maxf(absf(lowest), absf(highest)), 0.0001)
+	var scale := RELIEF / maxf(maxf(absf(lowest), absf(highest)), 0.0001)
 	var width := COLS + 1
 	_heights = PackedFloat32Array()
 	_heights.resize(count)
@@ -244,8 +259,10 @@ static func _bake() -> void:
 			var index := j * width + i
 			var x := ORIGIN.x + float(i) * CELL
 			var z := ORIGIN.y + float(j) * CELL
-			# The rolling floor, then the pads, then the rim that closes the strip.
-			_heights[index] = _rimmed(_padded(raw[index] * scale, x, z), x, z)
+			# The rolling floor - held down around the pads - then the pads, then
+			# the rim that closes the strip.
+			_heights[index] = _rimmed(_padded(raw[index] * scale * _relief_hold(x, z),
+				x, z), x, z)
 	# The swamp is cut after the rim and the pads: a hollow in the walking wood,
 	# never a second surface. It also publishes the water level the trail's water
 	# plane lies on, measured off the lane's own baked height.
@@ -298,6 +315,25 @@ static func _lattice(ix: int, iz: int) -> float:
 	h = (h * 1274126177) & 0x7fffffff
 	h = (h ^ (h >> 16)) & 0x7fffffff
 	return float(h % 2000001) / 1000000.0 - 1.0
+
+
+## How much of the rolling floor a point keeps: 0 within `RELIEF_HOLD_INNER` of a
+## pad's edge, 1 from `RELIEF_HOLD_OUTER`, smoothstepped between. One rule for every
+## pad handed in, so the camp pocket and the town square are held the same way and a
+## world with no pads at all (a bare field, a preview) keeps all of its relief.
+static func _relief_hold(x: float, z: float) -> float:
+	if _pads.is_empty():
+		return 1.0
+	var hold := 1.0
+	for pad in _pads:
+		var rect: Rect2 = pad["rect"]
+		var dx := maxf(rect.position.x - x, x - rect.end.x)
+		var dz := maxf(rect.position.y - z, z - rect.end.y)
+		var outside := sqrt(maxf(dx, 0.0) * maxf(dx, 0.0) + maxf(dz, 0.0) * maxf(dz, 0.0))
+		var t := clampf((outside - RELIEF_HOLD_INNER)
+			/ maxf(RELIEF_HOLD_OUTER - RELIEF_HOLD_INNER, 0.0001), 0.0, 1.0)
+		hold = minf(hold, t * t * (3.0 - 2.0 * t))
+	return hold
 
 
 ## A baked height, pressed flat inside a pad and taken back to the slope over the

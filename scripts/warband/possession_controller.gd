@@ -24,6 +24,9 @@ extends Node
 signal possession_changed(peer_id: int, merc_id: int)
 signal possession_released(peer_id: int, reason: String)
 signal transfer_refused(peer_id: int, merc_id: int, reason: String)
+## A bow press that the quiver refused: the scene says so on the HUD. Emitted only
+## when the ammunition gate is the reason the string would not come up.
+signal draw_refused(peer_id: int)
 
 const Actor = preload("res://scripts/arena_actor.gd")
 const CameraRig = preload("res://scripts/warband/possession_camera.gd")
@@ -845,6 +848,10 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 		MOUSE_BUTTON_LEFT:
 			if weapon == "bow":
 				_drawing = _act("draw", sample["point"], sample["origin"])
+				# A press that silently does nothing reads as a broken button, so a
+				# draw refused by an empty quiver is said out loud once per press.
+				if not _drawing and actor.combat.quiver_empty():
+					draw_refused.emit(local_peer_id)
 			elif weapon == "dual":
 				_melee("left", "diagonal_left", sample)
 			else:
@@ -883,6 +890,14 @@ func _mouse_release(event: InputEventMouseButton) -> void:
 func _melee(hand: String, variant: String, sample: Dictionary) -> bool:
 	return _act("melee", {"aim": sample["point"], "hand": hand, "variant": variant},
 		sample["origin"])
+
+## The way the player's eye is pointing, flat. The camera owns the aim ray; the
+## body's own facing follows its feet, so a HUD line that says "behind you" has to
+## read the view and not the rig.
+func view_forward() -> Vector3:
+	var yaw := camera_rig.yaw if camera_rig != null else 0.0
+	return Vector3(-sin(yaw), 0.0, -cos(yaw))
+
 
 ## Run one verb on the possessed body with the camera ray that produced it.
 ## A guest owns no combat: it predicts the locomotion intents the actor layer

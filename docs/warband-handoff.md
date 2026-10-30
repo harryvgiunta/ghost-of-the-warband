@@ -424,6 +424,27 @@ Integration seams deliberately placed in the base game:
     anointed)` takes the anointed ids as a trusted local argument, never from the
     (possibly remote) loadout dict. Essence still pays the `R` brands on the
     altar's ESSENCE page; the two ledgers never touch.
+32. **The camp is mapped; the footprints are walked forwards.** A squad that steers
+    in straight lines cannot get out of a pocket: a cage is bars on three sides and
+    a door that rises, and a prisoner whose latch was cut from behind the bars (the
+    `PRESS G` arrow hangs on the +z side, the door is -z) shouldered the back bars,
+    backed out of the door and walked straight back in for as long as the soul
+    stood there. `squad_nav.gd` is the squad's map of the camp: the camp's own
+    static colliders (bars, huts, trunks; every cage door left off, because it
+    rises) rasterised into 0.5 m cells with 0.5 m of clearance, over the pocket,
+    `NAV_MARGIN` 10 m of near wood and `NAV_THROAT` 36 m of the way out
+    (`cage_escape._build_nav()`, handed to `squad.nav` in `embed()`). Every
+    `SquadDrive._advance` whose two ends are on the map aims at the furthest
+    visible cell of an `AStarGrid2D` route whenever the straight line is blocked,
+    and on the map the escort walks to its ring post (snapped to open ground)
+    instead of the footprints. Off the map the **footprint line is walked
+    forwards only**: `_crumb_for` joins at the nearest footprint (the newest of two
+    on one spot), `CRUMB_ARRIVE` 1.25 m hands the next, and nothing older is offered
+    while the body holds its place. Picking the nearest footprint afresh every frame
+    paced two allies on 2.5 m of cage 1's approach for a whole run, because the
+    soul's walk to a cage and back lays the line out and back over itself.
+    `squad_steering_regression` (`check_doubled_line`, `check_cage_walk_out`) and
+    `cage_escape_regression.check_walk_out` own the rule.
 
 ### Tuning knobs (one place each)
 
@@ -486,9 +507,9 @@ Integration seams deliberately placed in the base game:
 | --- | ---: | --- |
 | `warband_contract_regression` | 180 | enums/slots, overkill, soul locks, roster, stash, cruor, gear hand-offs, auto-equip, vendor |
 | `possession_regression` | 262 | bodies, cycling, camera (including free look: the whole sphere, a composed basis at both poles, and the eye kept out of the body's own column), net transfer, auto-eject |
-| `downed_revive_regression` | 67 | 10% overkill, crawl, 5 s channel |
+| `downed_revive_regression` | 75 | 10% overkill, crawl, 5 s channel |
 | `combat_bubble_regression` | 73 | 30/34 m, 10%, guard choreography, hysteresis |
-| `altar_regression` | 256 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill without a manual refresh, the ichor order completes, and the ledger survives the save |
+| `altar_regression` | 257 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill without a manual refresh, the ichor order completes, and the ledger survives the save |
 | `stash_autoloot_regression` | 170 | pickups, sweep, infinite value sort |
 | `warband_ui_regression` | 99 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |

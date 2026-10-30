@@ -1242,6 +1242,9 @@ func seed_warband() -> void:
 	for item_id in TOWN_SPARES:
 		if State.ITEMS.has(str(item_id)):
 			warband.stash.add(str(item_id), 1)
+	# A bow with nothing to shoot is a stick: the band opens with one bunch of
+	# shafts in the shared quiver, and every keeper sells more.
+	warband.seed_quiver()
 	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 25)
 	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 10)
 	warband.cruor.add(Contracts.CruorTier.T3_COAGULATED_CRUOR, 5)

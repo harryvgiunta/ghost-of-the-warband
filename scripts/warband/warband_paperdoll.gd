@@ -180,6 +180,10 @@ func set_title(text: String) -> void:
 ## Take one carried piece off the body. This is the corpse screen's only action,
 ## and the list row and the worn slot both land here; the vacuum refuses a piece
 ## that is already gone, so a stale row can never pay twice.
+##
+## One row is one take. When the body carries several copies of the same piece -
+## the shafts off a trail archer - the row names the bunch and the click books all
+## of them, so the count on the button is what actually moves.
 func take_piece(item_id: String) -> Dictionary:
 	if not _corpse_active:
 		return {"ok": false, "item_id": item_id, "message": ""}
@@ -188,14 +192,30 @@ func take_piece(item_id: String) -> Dictionary:
 		set_status("There is no way to take that piece.")
 		return {"ok": false, "item_id": item_id, "message": ""}
 	var result: Dictionary = corpse_loot.take_from_corpse(corpse_id, item_id)
-	set_status(str(result.get("message", "")))
+	var taken := 1 if bool(result.get("ok", false)) else 0
+	var last: Dictionary = result
+	while bool(result.get("ok", false)) and _corpse_holds(item_id):
+		result = corpse_loot.take_from_corpse(corpse_id, item_id)
+		if bool(result.get("ok", false)):
+			taken += 1
+			last = result
+	set_status(str(last.get("message", "")))
 	refresh_corpse()
 	# Gear moved, exactly as it does when the stash halves of this screen equip a
 	# piece: whoever is watching the panel (a scene refreshing the body it drives)
 	# hears the same signal for a corpse take.
-	if bool(result.get("ok", false)):
+	if taken > 0:
 		changed.emit()
 	return result
+
+
+## Whether the body still carries this piece, for a caller that is emptying a row.
+func _corpse_holds(item_id: String) -> bool:
+	if corpse_loot == null or not is_instance_valid(corpse_loot) \
+			or not corpse_loot.has_method("corpse_items"):
+		return false
+	var ids: Array = corpse_loot.corpse_items(corpse_id)
+	return ids.has(item_id)
 
 ## Strip the body in one go - the TAKE ALL row.
 func take_all() -> Dictionary:
@@ -708,10 +728,19 @@ func _sync_corpse_rows() -> void:
 		_corpse_rows_box.remove_child(child)
 		child.queue_free()
 	corpse_rows.clear()
+	# One row per piece, not one per copy: a bunch of the same shaft is a single
+	# line with its count, in the order the body was carrying them.
+	var counts: Dictionary = {}
+	var order: Array[String] = []
 	var value := 0
 	for item_id in _corpse_ids:
+		if not counts.has(item_id):
+			order.append(item_id)
+			counts[item_id] = 0
+		counts[item_id] = int(counts[item_id]) + 1
 		value += StashScript.value_of(item_id)
-		corpse_rows.append(_make_corpse_row(item_id))
+	for item_id in order:
+		corpse_rows.append(_make_corpse_row(item_id, int(counts[item_id])))
 	_corpse_empty.visible = _corpse_ids.is_empty()
 	_take_all_button.visible = not _corpse_ids.is_empty()
 	_take_all_button.text = "TAKE ALL  /  %d gold" % value
@@ -720,18 +749,23 @@ func _sync_corpse_rows() -> void:
 	else:
 		_merc_label.text = "%d piece(s)  /  %d gold on the body" % [_corpse_ids.size(), value]
 
-func _make_corpse_row(item_id: String) -> Dictionary:
+func _make_corpse_row(item_id: String, count: int = 1) -> Dictionary:
 	var button := Button.new()
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(0, 30)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.text = "%s  /  %d gold" % [_item_name(item_id), StashScript.value_of(item_id)]
+	var display := _item_name(item_id)
+	# A row that stands for several copies says so, and its price is the bunch: one
+	# click books exactly what the row says.
+	var label := display if count <= 1 else "%s  ×%d" % [display, count]
+	var worth := StashScript.value_of(item_id) * maxi(count, 1)
+	button.text = "%s  /  %d gold" % [label, worth]
 	button.tooltip_text = "Click to take it into the shared stash."
 	button.pressed.connect(take_piece.bind(item_id))
 	_corpse_rows_box.add_child(button)
-	return {"item_id": item_id, "name": _item_name(item_id),
-		"value": StashScript.value_of(item_id), "button": button}
+	return {"item_id": item_id, "name": display, "count": maxi(count, 1),
+		"value": worth, "button": button}
 
 # --- presentation helpers --------------------------------------------------
 

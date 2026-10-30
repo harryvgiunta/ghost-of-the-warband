@@ -165,6 +165,11 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 	if actor is CollisionObject3D:
 		excluded.append(actor.get_rid())
 	for shot in shots:
+		# A skill looses arrows like a bow does: one shaft out of the party quiver
+		# each. A volley that outruns the quiver fires only what is left in it, so
+		# no skill can spend the count past zero.
+		if not _take_arrow():
+			break
 		# A barrage spreads by beat, a volley by arrow in the same beat.
 		var pattern_index := index if kind == "barrage" else shot
 		var offsets: Vector2 = AbilityFx.shot_offsets(definition, pattern_index)
@@ -177,6 +182,16 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 		add_child(arrow)
 		arrow.launch(origin, direction, speed, damage, excluded, origin, pierce)
 		_track(arrow)
+
+
+## One shaft out of the party quiver, through the world's own spend funnel so the
+## co-op peers are told about it too. A node with no world behind it - a harness
+## that stands this one up on its own - looses free rather than guessing at a
+## quiver it was never handed.
+func _take_arrow() -> bool:
+	if _world == null or not _world.has_method("spend_arrow"):
+		return true
+	return bool(_world.call("spend_arrow"))
 
 
 ## Fireball / bone spear: the projectile owns its flight and presentation, and

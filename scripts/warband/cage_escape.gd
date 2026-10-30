@@ -124,6 +124,12 @@ const CAMP_TO_ROAD_METRES := 170.0
 const YARD_HALF_WIDTH := 20.0
 const YARD_FRONT := -30.0
 const YARD_BACK := 22.0
+## The ground the squad has a map of (`squad_nav.gd`): the pocket, `NAV_MARGIN` of
+## the near wood on every side - the trunks a fight spills into - and `NAV_THROAT`
+## metres of the way out past the front line, where the ambush comes down the
+## corridor. Past it the squad walks the soul's footprints as it does on the trail.
+const NAV_MARGIN := 10.0
+const NAV_THROAT := 36.0
 ## How far a caged body may stray from its own cage centre. The clamp, not the
 ## bars alone, is what holds a body in: legs that walk against the metal are
 ## snapped back on the frame they leave it.
@@ -260,6 +266,7 @@ const DressingScript = preload("res://scripts/warband/camp_dressing.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const NavScript = preload("res://scripts/warband/squad_nav.gd")
 
 ## The world scene that embeds this camp, or null when the camp stands alone.
 ## Set before the node enters the tree.
@@ -345,8 +352,27 @@ func embed(world: Node3D) -> void:
 	tips = world.tips
 	squad = world.squad
 	_pickups = world.pickups
+	if squad != null:
+		squad.nav = _build_nav()
 	if not _resume:
 		_install_watchers()
+
+
+## The squad's map of the camp, drawn from the camp's own colliders - bars, huts,
+## trunks - with every cage door left off: a door rises when its latch goes, and a
+## body still behind one is held by the clamp, not by the map. The cages are
+## pockets with one way out, which is exactly what a body steering in a straight
+## line cannot get out of: a prisoner whose latch is cut from behind its bars has
+## to walk out of the door and round to the soul, and only a map knows that.
+func _build_nav():
+	var doors: Array = []
+	for entry in _cage_doors:
+		doors.append(entry["node"])
+	var nav = NavScript.new()
+	nav.build(self, Rect2(-YARD_HALF_WIDTH - NAV_MARGIN, YARD_FRONT - NAV_THROAT,
+		(YARD_HALF_WIDTH + NAV_MARGIN) * 2.0,
+		YARD_BACK + NAV_MARGIN - (YARD_FRONT - NAV_THROAT)), doors)
+	return nav
 
 
 # --- the world's side of the camp ------------------------------------------
@@ -396,6 +422,10 @@ func seed_warband() -> void:
 	for index in CAGE_COUNT:
 		caged_ids.append(squad_ids[index])
 	warband.deploy_battle(squad_ids)
+	# The camp's own quiver: the opening is blades and bare hands, but the first
+	# bow a prisoner loots - off a trail archer, or bought in town - has shafts
+	# behind it. An existing warband keeps whatever it was already carrying.
+	warband.seed_quiver()
 	_cage_open.clear()
 	for index in caged_ids.size():
 		_cage_open.append(false)

@@ -64,6 +64,14 @@ const ITEMS := {
 		"category":"bow", "grip":"bow", "slot":"main",
 		"summary":"A green sapling and a length of cord",
 		"detail":"5 damage at full draw / 0.7 s draw / it will put an arrow in the wood"},
+	# Ammunition. A shaft is a carried piece, never a worn one: the shared stash
+	# counts them, one leaves the quiver for every arrow a bow looses, a trail
+	# archer's corpse is worth bending over for, and a keeper sells them by the
+	# bunch (`bundle` at the generic price, so a sale still pays per shaft).
+	"arrow": {"name":"Arrow", "short":"Arrow", "kind":"arrow", "index":0, "price":2,
+		"category":"ammo", "slot":"", "bundle":10, "material":"Shaft",
+		"summary":"An ash shaft, an iron head and goose fletching",
+		"detail":"One shaft per loosed arrow / sold by the bunch of ten"},
 	"club_makeshift": {"name":"Club", "short":"Club", "kind":"sword", "index":3, "price":4,
 		"category":"1h", "grip":"1h", "slot":"main",
 		"summary":"A knotted length of heartwood with the root still on it",
@@ -401,6 +409,7 @@ const ITEM_QUOTES := {
 	"sword_makeshift": "Tree branch, flint, sinew; it will do until it does not.",
 	"dagger_ironwood": "Somebody's rib. It still points where you aim it.",
 	"bow_twig": "A sapling that has not yet learned to be a bow.",
+	"arrow": "Cheap, single-use, and the only thing standing between you and the wood.",
 	"club_makeshift": "The root was doing fine until it met you.",
 	"branch_heavy": "Two hands, one tree, no plan.",
 	"shield_wood": "A hut wall with opinions.",
@@ -484,12 +493,12 @@ static func migrate_item_id(item_id: String) -> String:
 
 const VENDORS := [
 	{"name":"Storekeeper Orla", "tag":"STORE", "line":"Bows, staves and trail goods.", "stock":[
-		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone",
+		"bow_short","bow_recurve","bow_long","staff_fire","staff_bone","arrow",
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
 		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
 		"sword_short","sword_arming","sword_great","dagger_iron",
-		"shield_buckler","shield_kite","shield_tower","shield_wood",
+		"shield_buckler","shield_kite","shield_tower","shield_wood","arrow",
 	]},
 	{"name":"Quartermaster Vey", "tag":"QUARTERMASTER", "line":"Armor for the long patrol. Buy the pieces you need.", "stock":[
 		"armor_naked_head","armor_naked_chest","armor_naked_hands","armor_naked_legs","armor_naked_feet",
@@ -568,6 +577,12 @@ func item_summary(id: String) -> String:
 func item_price(id: String) -> int:
 	return int(_item(id).get("price", 0))
 
+## How many copies one visit to a keeper's shelf hands over. Ammunition is the
+## only piece sold in a bunch; every other row is one piece at a time. Static
+## because the warband and the keeper board both ask it without an instance.
+static func item_bundle(id: String) -> int:
+	return maxi(int((ITEMS.get(id, {}) as Dictionary).get("bundle", 1)), 1)
+
 func item_category(id: String) -> String:
 	return str(_item(id).get("category", ""))
 
@@ -625,6 +640,8 @@ func item_type_line(id: String) -> String:
 		return "JEWELRY  /  " + ("RING" if str(item.get("slot", "")) == "ring" else "NECK")
 	if category == "armor_bundle":
 		return "LEGACY ARMOR SET"
+	if category == "ammo":
+		return "AMMO  /  THE SHARED QUIVER"
 	return kind
 
 ## Rows for the hover card and the inspector: label/value pairs.
@@ -670,6 +687,12 @@ func item_stat_rows(id: String) -> Array:
 		else:
 			rows.append({"label":"MATERIAL", "value":str(item.get("material", "Salvage"))})
 			rows.append({"label":"USE", "value":"Carried in the shared stash"})
+	elif category == "ammo":
+		# A shaft is spent, not worn: the card says what one shot costs and how
+		# many a keeper hands over at the list price.
+		rows.append({"label":"SPENT", "value":"1 per arrow loosed"})
+		rows.append({"label":"BUNCH", "value":"%d per purchase" % item_bundle(id)})
+		rows.append({"label":"USE", "value":"The shared quiver, drawn by any bow"})
 	elif category == "jewelry":
 		var jewelry_rows := TrinketStats.effect_rows(id)
 		if jewelry_rows.is_empty():
@@ -705,6 +728,8 @@ func item_compact_stats(id: String) -> String:
 			parts.append("HEAL %d%%" % int(round(float(item.get("heal", 0.0)) * 100.0)))
 		else:
 			parts.append("MATERIAL  " + str(item.get("material", "SALVAGE")).to_upper())
+	elif category == "ammo":
+		parts.append("AMMO  1 PER LOOSED ARROW")
 	elif category == "focus":
 		var focus_text := TrinketStats.effect_summary(id)
 		parts.append(focus_text if not focus_text.is_empty() else "COSMETIC")

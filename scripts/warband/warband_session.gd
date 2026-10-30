@@ -453,6 +453,24 @@ func receive_arrow(origin: Vector3, direction: Vector3, speed: float) -> void:
 	world.add_child(arrow)
 	arrow.launch(origin, heading, speed, 0.0, [])
 
+## Host -> everyone: a shaft left the party quiver. Mirrored for the same reason a
+## kill's gold is: the quiver is one ledger, and a guest whose copy never lost a
+## shaft would shoot free. Reliable, because an arrow is a real spend.
+@rpc("authority", "call_remote", "reliable")
+func receive_ammo_spent(count: int) -> void:
+	if count <= 0:
+		return
+	var warband := get_node_or_null("/root/Warband")
+	if warband != null and warband.has_method("take_arrows"):
+		warband.call("take_arrows", count)
+
+## The host's own half of a spend it just booked locally: tell the peers. A guest
+## that called this has nobody to tell - the host already sent its copy.
+func report_ammo_spent(count: int) -> void:
+	if _role != "host" or count <= 0 or not _has_peers():
+		return
+	receive_ammo_spent.rpc(count)
+
 ## Host -> everyone: a mob died and paid out. Only the host resolves a kill, so
 ## only the host decides the amount; the purse lives in `PlayerState`, which is
 ## the one wallet every mode writes through.

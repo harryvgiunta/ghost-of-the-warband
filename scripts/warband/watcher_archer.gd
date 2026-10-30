@@ -22,6 +22,12 @@ const ArrowScript = preload("res://scripts/arrow.gd")
 ## authors for a bow on the warden's hand bone.
 const BOW_ITEM := "bow_twig"
 
+## The catalog ammunition the corpse gives back: the shafts a hidden archer was
+## drawing from. The wood is where a band that ran its quiver dry re-supplies, and
+## the body that was shooting at you is the one worth bending over.
+const ARROW_ITEM := "arrow"
+const CARRIED_ARROWS := 4
+
 ## The ring it holds: never inside this, never past that - and it retreats when a
 ## blade gets closer than the inner edge. The two numbers are what make fighting
 ## one a march up the trail instead of a scrum.
@@ -302,6 +308,16 @@ func _hunt(delta: float) -> void:
 			_face_intent = _move_intent
 			return
 	super(delta)
+
+
+## The archer carries what it fires. The base body stamps the field dressing every
+## warden wears (and its vial of ichor where the variant says so); an archer adds
+## the quiver it was drawing from, so its corpse is ammunition as well as kit - the
+## only resupply out on the road.
+func _stamp_carried() -> void:
+	super()
+	for index in CARRIED_ARROWS:
+		carried.append(ARROW_ITEM)
 
 
 ## The hidden stance: crouched until the ambush is sprung, and crouched again

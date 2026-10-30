@@ -74,6 +74,16 @@ difference - and the warband is the thing that survives a battle.
   open with **G** - their character screen, their slots, and each piece moved into
   the infinite stash (or **TAKE ALL**). The squad strips bodies on its own once
   the field is quiet, silently, into the same stash.
+- **The band's fights are not silent:** when an AI squadmate breaks off after
+  something, the HUD says it once - **Sorn breaks off: Briar wolf, 34 m
+  back-left** - and keeps **IN THE FIGHT · Sorn, Dorn · 34 m back-left** under
+  the roster until that ally is out of it, then **Sorn is back with the band.**
+  The bearing is measured from where you are looking, so the line is a place to
+  turn round for, and a body pacing in and out of reach is announced once.
+- **Arrows are a resource:** one shared quiver for the whole band, one shaft per
+  loosed arrow (skills included), and a dead trail archer's corpse is the only
+  resupply out on the road - four shafts and the twig bow it fired. Keepers sell
+  them by the bunch of ten. With the quiver empty the string stays down.
 - **Loot:** quick-loot during the fight (K). A picked-up piece goes straight into
   the soul's hands when it fills an empty slot or beats what is worn there, and
   otherwise into the shared stash. When the field goes quiet the surviving
@@ -173,6 +183,7 @@ Loot is tuned to **a tenth of its old rate**: a weapon-carrying devil leaves the
 | Focus | Off-hand only | Ash Tome, Bone Skull, Skull of Life, Skull of Death |
 | Armor | Its own head / chest / hands / legs / feet slot | Leather, mail, plate and Emberweave pieces |
 | Jewelry | Neck, or either ring slot | Ember Charm, Amulet of Energy Shield, seventeen rings |
+| Ammunition (`ammo`) | Carried, never worn | Arrow (sold by the bunch of ten) |
 
 - Right-click routing sends one-handers to the **main hand**, shields and foci to the **off-hand**, armor to its own slot, a necklace to the neck and a ring to the first empty ring slot (then ring 1). Alt+right-click and drags onto a slot choose the hand explicitly.
 - Equipping a two-handed weapon, bow or staff **overrides both hands**: an existing main-hand and off-hand item are both returned to the backpack. If the backpack has room for only one, the second displaced item lands on the floor.
@@ -425,6 +436,8 @@ arrow damage = bow base damage × clamp(draw amount, 0, 1)
 
 Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. The hit's own armor channel applies afterward: the helmet on a head hit, the body kit on the rest. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
 
+**Every loosed arrow costs one shaft.** In the warband campaign the party carries one shared quiver (`Warband.arrows()`, the `arrow` item in the shared stash), and each release - a plain bow shot or a shaft from **Barrage**, **Triple Volley** or **Piercing Shot** - takes one out of it. At zero the string will not come up at all: the HUD strip shows `gold · arrows`, a refused press prints **Out of arrows**, and the two ways to fill the quiver are a keeper's bunch (ten shafts for 20 gold at **Storekeeper Orla** or **Smith Brann**) or a dead trail archer, whose corpse carries the twig bow it fired and four of its own shafts. The frontier, arena and delve rangers have no quiver and are unaffected.
+
 Hits in the animated **head zone** deal **double damage**; body hits keep the base value. The zone follows the head joint through crouch, cover lean and rolls. It applies to arena players and bots plus every ranger clone, the wolf and cinder devil, the five imported devils, the three forest mobs and the delve wave (imported species included). The zone is a **band across the body and never narrower than the capsule an arrow stops on**: an authored radius wins when it reaches past the capsule (a wolf skull, a beast muzzle), otherwise the zone is widened to the body radius plus 5 cm, so a shaft that lands on the head height of the visible body is always a headshot. A head hit then resolves the helmet's **head guard** instead of the body kit, so plate's 50% sallet brings a headshot back down to a normal hit. A blade that sweeps through the head zone also doubles, even when the shape query reports the contact elsewhere; the zone is a damage volume on the normal body capsule, not a second collider.
 
 The charge bar and bowstring animation fill together over the bow's full draw duration, including raising the bow. Release whenever you want: a large bow held for **1.5 seconds deals 50% damage**; holding it for 3 seconds gives full damage.
@@ -567,6 +580,7 @@ A mob that wants to move and cannot is stuck, so `scripts/mob_steering.gd` owns 
 The frontier and arena are dressed by a small, data-driven world-art kit rather than per-scene primitives:
 
 - **Textured sky.** A photoreal 4096 × 2048 equirectangular panorama (`assets/world/textures/sky_frontier.png`) supplies the sky background: a Rayleigh-like blue gradient, a real-sized sun disc and aureole at the key light's exact direction, a perspective cumulus deck with self-shadowing, thin cirrus and aerial haze. Fog, ambient light, filmic grade and saturation are tuned to it.
+- **Hill country.** The wood has real elevation: three octaves of value noise at **190/100/58 m**, normalised to **±22 m** either side of level, so the walk to town crosses a crest every eighty metres or so and never climbs harder than about **15 degrees**. The camp pocket and the town square are held flat - `RELIEF_HOLD_INNER` 40 m of level ground around each pad, the swells reaching full height by `RELIEF_HOLD_OUTER` 260 m - and the mountain rim and the one swamp are unchanged, so the trail is a road between hills rather than a plank 1,375 m long.
 - **Textured terrain.** The continuous heightfield keeps its authored routes and clearings, but now renders through a world-space splat shader: grass, trail dirt and rock/scree textures blended by vertex dirt weights and slope, with low-frequency macro variation. Grass clumps, wildflowers and ferns are chunked alpha-cut cards that sway in the wind and fade out at their visibility range.
 - **Textured trees.** A species library builds deterministic mesh variants: oaken trunks with real branches and leaf-card crowns, layered briar pines, slim silver birches, amber rowans and bare snags. Bark and leaf textures are separate authored PNGs with normal maps and per-instance tint, so one mesh family yields many colours and silhouettes. Sizes, species weights and shape parameters live in code, not in the mesh files.
 - **Natural stone.** Scattered rock is authored, not repeated: `scripts/world/rock_kit.gd` deforms a faceted ellipsoid with a seeded noise field, narrows the crown and cuts a flat fracture face near the base, then smooth-shades it so the silhouette is broken but the surface reads as weathered granite. Five archetypes (rounded boulder, bedding slab, ledged outcrop, standing spire, cobble) are produced in variants, scattered in loose clusters, sized independently, bedded at their own angle and set into the terrain below the lowest ground under their real footprint, so a boulder breaks out of a slope instead of resting on it. Each variant's convex hull is its collision. Boulders and heaped fire stones use the natural `granite.png` surface (quartz and feldspar speckle, weathered veins, moss in the cracks); the coursed `rock.png` stays on carved stonework and dungeon walls. Village timber, plaster, roof shingles, bridge timbers and woven wattle panels share the other triplanar materials, and the pond uses a ripple normal map and a cheap sky-tinted fresnel shader.

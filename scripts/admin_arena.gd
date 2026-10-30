@@ -986,6 +986,9 @@ func _seed_warband() -> void:
 				warband.roster.equip(merc_id, slot, armor_id)
 	for item_id in SPARES:
 		warband.stash.add(str(item_id), 1)
+	# The harness fights like the campaign does: one bunch of shafts in the
+	# shared quiver, so a bow in a test body's hands can actually loose.
+	warband.seed_quiver()
 	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 25)
 	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 10)
 	warband.cruor.add(Contracts.CruorTier.T3_COAGULATED_CRUOR, 5)
