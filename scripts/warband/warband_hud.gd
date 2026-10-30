@@ -32,6 +32,9 @@ var _warband = null
 var _body = null
 var _merc_id := -1
 var _merc_name := ""
+## Who the soul is watching while it has no body of its own (see `set_watching`).
+var _watching_name := ""
+var _watching_holder := ""
 
 var _name_label: Label
 var _state_label: Label
@@ -92,6 +95,24 @@ func set_body(body, merc_name: String = "", merc_id: int = -1) -> void:
 	# a body panel that reads "No body" behind it is a lie.
 	_refresh_body()
 	_refresh_squad()
+
+## The body the soul watches while every living body is taken: `merc_name` is
+## the mercenary, `holder` the player inside him ("" for none). The body panel
+## says so instead of "No body", so a player whose last body fell knows they are
+## watching a friend, not looking at a frozen camera. `""` puts it away.
+func set_watching(merc_name: String, holder: String = "") -> void:
+	_watching_name = merc_name
+	_watching_holder = holder
+	_refresh_body()
+
+## The two body-panel lines, for tests that must not read a private label.
+func body_lines() -> Array[String]:
+	var out: Array[String] = []
+	if _name_label != null:
+		out.append(_name_label.text)
+	if _state_label != null:
+		out.append(_state_label.text)
+	return out
 
 ## The standing key line: what to press on this beat ("G - cut the latch",
 ## "R - Rending Strike"). Unlike the prompt it does not vanish on its own, so a
@@ -421,12 +442,17 @@ func _refresh_body() -> void:
 	if _name_label == null:
 		return
 	if _body == null or not is_instance_valid(_body):
-		_name_label.text = _merc_name if not _merc_name.is_empty() else "No body"
-		if _warband != null and _merc_id >= 0:
-			_state_label.text = "%s  (F1..F8 to take another)" % Contracts.state_name(
-				_warband.roster.state_of(_merc_id))
+		if not _watching_name.is_empty():
+			_name_label.text = "WATCHING  %s" % _watching_name
+			_state_label.text = ("%s is inside  ·  no body is free" % _watching_holder) \
+				if not _watching_holder.is_empty() else "No body is free"
 		else:
-			_state_label.text = "The warband is down"
+			_name_label.text = _merc_name if not _merc_name.is_empty() else "No body"
+			if _warband != null and _merc_id >= 0:
+				_state_label.text = "%s  (F1..F8 to take another)" % Contracts.state_name(
+					_warband.roster.state_of(_merc_id))
+			else:
+				_state_label.text = "The warband is down"
 		_health_bar.value = 0.0
 		_health_label.text = ""
 		_stamina_bar.value = 0.0

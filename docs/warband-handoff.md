@@ -178,13 +178,20 @@ speeds are still the warband's one contract. See `docs/warband.md`
   SETTINGS swaps in the shared sound page plus the windowed/fullscreen row. Escape
   closes the menu first, then an open panel, then opens the menu; an open tutorial
   card keeps it shut.
-- **The campaign is co-op.** The title lobby's HOST/JOIN WARBAND defaults to
-  **CAMPAIGN (CO-OP)** (the arena bout is still the first, selectable row) and
-  routes to `GameFlow.host_campaign`/`join_campaign`; both machines need the same
-  warband save. The host owns the world — its mobs, the loot that hits the ground,
-  the missiles in flight and every kill reward — and the guest sees it all through
-  the one `WarbandSession`. A guest fields its own save's bodies, has the camp
-  lesson dismissed, runs no squad AI and never writes a checkpoint.
+- **The campaign is co-op, and it is one warband.** The title's **HOST GAME**
+  opens the world with `GameFlow.host_campaign(port, name, start)` where `start`
+  is `HOST_NEW` (a fresh run in the cages) or `HOST_CHECKPOINT` (the save on its
+  bookmark, or the town end when it has none); **JOIN GAME** connects first and
+  opens the world only when the host sends its campaign back. Both machines then
+  play **the host's** roster, stash, purse and orders: the guest lends it
+  (`WarbandState.lend`), refuses every gear and purse verb of its own, writes no
+  checkpoint and no save, and has its copy refreshed by `receive_warband` whenever
+  the host's changes. The host owns the world — its mobs, the loot that hits the
+  ground, the missiles in flight and every kill — and the guest sees it all
+  through the one `WarbandSession`. A body only ever comes free through a death,
+  and **with one body left the soul inside keeps it**: everyone else watches that
+  body (`watching()`, a free-look eye plus a HUD line naming the holder) and takes
+  the next free body, oldest loss first.
 
 HUD keys: `[`/`]` cycle body, F1–F8 named body, O warband screen, **M the map**,
 TAB quick
@@ -367,12 +374,16 @@ Integration seams deliberately placed in the base game:
     guest holds is a `replica`: it runs no AI and `apply_snapshot` is its only
     writer. Loot is announced once, reliably, and re-spawned as the same
     `WarbandPickup`; a replicated missile is a visual with an empty hit mask; and
-    **only the host's `defeated` signal pays**, through `receive_reward` into
-    `PlayerState`. A guest also writes **no checkpoint and no save of its own**
-    (`_check_checkpoints` returns on a client), dismisses the camp's lesson
-    (`camp.dismiss_lesson()`) and disables its squad AI. The lobby's mode row
-    makes **campaign co-op the default** and keeps the stand-alone arena bout as
-    the first, selectable row; the arena field is deliberately not attached.
+    only the host books a kill's gold, corpse, drop and order, because the purse
+    and the warband are the host's. A guest also writes **no checkpoint and no
+    save of its own** (`_check_checkpoints` returns on a client), dismisses the
+    camp's lesson (`camp.dismiss_lesson()`) and disables its squad AI. Ownership
+    goes out **inside the call that moves a soul** (`_on_controller_possession_changed`
+    → `_broadcast_ownership`), never on a later frame: whatever a peer sends after
+    hearing of a move must reach the host after the map that move produced. A seat
+    pushed to a waiting soul sends the host's warband copy first, so the guest
+    already knows the mercenary the map names. The title no longer carries a mode
+    row or an arena door; the arena field is not attached to this session at all.
 
 25. **The first eight oaths are free.** `WarbandVendor.FREE_HIRES` is 8 and
     `hire_cost()` answers 0 under it, because eight bodies *is* the deployment
@@ -521,7 +532,7 @@ Integration seams deliberately placed in the base game:
 | `combat_bubble_regression` | 73 | 30/34 m, 10%, guard choreography, hysteresis |
 | `altar_regression` | 257 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill without a manual refresh, the ichor order completes, and the ledger survives the save |
 | `stash_autoloot_regression` | 170 | pickups, sweep, infinite value sort |
-| `warband_ui_regression` | 99 | roster screen, paperdoll hand-off, recruiter |
+| `warband_ui_regression` | 116 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
 | `enemy_waves_regression` | 108 | cultists, waves, soldier loot run |
 | `town_hub_regression` | 71 | services, hire, deploy, paperdoll (the square as an area) |
@@ -529,21 +540,19 @@ Integration seams deliberately placed in the base game:
 | `cage_escape_regression` | 290 | cards/pause, the four duel cards and their triggers, the shiv pickup, the player's own swing biting a watcher, a raised guard on the second watcher, the revive card on a fallen ally, the four latches cut one G at a time, the squad arming, the four at the mouth (one of each creature), drops |
 | `escape_run_regression` | 195 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
-| `warband_world_regression` | 250 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |
+| `warband_world_regression` | 305 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |
 | `warband_abilities_regression` | 46 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), a stock kit shows no hand tiles and the anointed kit grants all three, the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
 | `warband_menu_regression` | 41 | the six rows, SAVE/LOAD over `Warband.save_state`, LOAD gated on a real file, the sound page and back, `resumed` on every close, and the tree never paused |
 | `warband_vendors_regression` | 151 | three counters as `G` services in the market ring, each opening its own seat and stock; buy into the shared stash, sell one pooled copy at 60%, a short purse spends nothing, a worn copy is not on the board, closing leaves no panel |
 | `warband_wilderness_regression` | 75 | eight kind-0 wolves in two deep packs inside `guards`/`wild_mobs`, clear of the mouth, pocket and lane, aimed at the standing body, pack wander, and one `MobCuller` sweep parks a wolf left 300 m behind |
-| `warband_session_world_unit_regression` | 38 | no socket: one name-keyed mob entry, a batch fits one datagram, replica write + tick, an unknown name invents nothing, loot and missile announcements book once, a reward books once, and both campaign doors against a temp save |
-| `warband_lobby_campaign_regression` | 48 | the lobby defaults to CAMPAIGN (CO-OP), the arena stays the first selectable row, both payloads name the right scene, and switching back and forth (or a cache read) keeps the mode |
+| `warband_session_world_unit_regression` | 54 | no socket: one name-keyed mob entry, a batch fits one datagram, replica write + tick, an unknown name invents nothing, loot and missile announcements book once, the lent warband (host's roster and purse, gear and purse verb refusals, no write and no read of the guest's own file, the loan's return), and the campaign doors (new, checkpoint, a join that opens nothing until the host answers) |
 | `warband_integration_regression` | 38 | the real world binds every seated body to `WarbandAbilities`, fields the wolves and their culler, paints the stamina bar and three tiles, opens/closes the menu from a real Escape without pausing, and never hands a human body to squad AI |
-| `warband_coop_campaign_regression` | 63 | two real processes: the host opens the campaign on its save, a guest joins and is given a body, its walk reaches the host, the host kills a replicated guard, loot crosses, the reward is paid once, and a leaving guest's body falls back |
+| `warband_coop_campaign_regression` | 43 | two real processes on one warband: the host opens its save on HOST GAME, the guest joins from the title, is lent the host's campaign and fields the host's bodies as replicas, is seated in a free body, keeps its own save byte-identical, and is given a third body when one comes free; with the last body standing the soul inside keeps it and the other soul watches it (eye + HUD line naming the holder) |
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
 | `warband_art_regression` | 196 | camp/town dressing counts, materials, nothing solid inside the play space |
 | `warband_appearance_regression` | 206 | the look table loads and starts each palette at the measured base, a look is a pure function of the id (order- and cache-independent), eight deployed bodies differ in face, cut, skin, shirt and shorts, every named piece exists in the assets, and the rig, an actor and an undressed body all apply or ignore it correctly (hair under a helmet, head zones scaled) |
-| `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
 | `checkpoint_regression` | 78 | the bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |
 | `game_flow_regression` | 22 | world → arena → world on one save |
@@ -579,7 +588,7 @@ for t in $LIST; do
 done; wait
 grep -l "failures=[1-9]" "$OUT"/*.txt || echo "gate green"
 # then the socket tests, one at a time (they bind ports):
-for t in warband_session warband_lobby; do
+for t in warband_session warband_coop_campaign; do
   $GODOT --headless --path . --script "res://tests/${t}_regression.gd" | tail -1
 done
 ```
@@ -695,7 +704,7 @@ a bounded history and lifetime totals shown on the roster screen.
 | --- | --- | --- |
 | `wt-12-expedition-director` | `scripts/warband/expedition_director.gd`, `tests/expedition_director_regression.gd`, and `admin_arena.gd` (single owner this phase) | Waves come from `EnemyWaves` but are paced and scaled by a director: 3 → 5 waves, kit tiers by wave, a boss wave (one `CultistGuard` at 2× health with a branded weapon), gold + Cruor rewards on clear, and a mission summary (items looted, kills, gold). A test drives wave 1 → boss and asserts the rewards and the summary counts. |
 | `wt-13-branded-in-world` | `scripts/warband/branded_hud.gd`, `tests/branded_world_regression.gd`, small hooks in `admin_arena.gd` **only via a signal it exposes** | A brand HUD tile (icon, cooldown ring, tier) on the arena/town HUD, the sigil line in the paperdoll already exists; `R` works in the expedition; an unbranded item shows nothing. Test builds an actor with a brand, asserts the tile text/cooldown and a real hit. |
-| `wt-14-warband-lobby` | `scripts/warband/warband_lobby.gd`, `title.tscn`/`title.gd` (single owner this phase), `tests/warband_lobby_regression.gd` | Host/join UI on the title: name, port, HOST WARBAND / JOIN WARBAND; it starts `WarbandSession` and passes the intent through `GameFlow`; a guest's possession works in the arena. Test: two processes, guest asks for a body, host refuses a taken one. |
+| `wt-14-warband-lobby` | `scripts/warband/game_flow.gd`, `title.tscn`/`title.gd`, `tests/warband_coop_campaign_regression.gd` | **Superseded by wt-26**: the lobby panel is gone and the title's HOST GAME / JOIN GAME carry the same intent into `GameFlow`, with one warband shared by every soul. The two-process test is the campaign one. |
 | `wt-15-camp-and-town-art` | `scripts/warband/camp_dressing.gd`, `scripts/warband/town_dressing.gd`, `tests/warband_art_regression.gd` | Authored-looking camp (cage bars, gibbets, cult banners, ember lights) and town (awning, signpost text, fire), using `Geo`/`TextureLibrary` and the existing world kits; the cage/town tests keep passing and `world_art_regression` stays green. No new collisions inside the play space. |
 | `wt-16-run-persistence` | `scripts/warband/run_report.gd`, `tests/run_persistence_regression.gd`, `warband_state.gd` §persistence only | Battle results written to the warband save: roster health/downed at the moment of leaving, gold earned, Cruor earned, a per-run record (wins, wipes, best wave) shown on the roster screen; loading restores it. Test saves mid-run state, reloads, and compares. |
 
@@ -715,7 +724,7 @@ chain of fire and the camp as a lit holding pen.
 
 **Still not exercised on a display:** driving the opening with real input (the
 own latch, the bearings step, the blade and the pair, the four cuts, the leaving)
-and a second peer through the lobby. Every check for those is headless. Do that
+and a second peer through HOST GAME. Every check for those is headless. Do that
 first in the next session.
 
 ### Phase 4 (later)

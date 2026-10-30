@@ -699,7 +699,7 @@ func _remember_network(player_name: String, address: String, port: int) -> void:
 		return
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
-		cache.remember(player_name,address,port,"delve")
+		cache.remember(player_name,address,port)
 
 func _local_loadout() -> Dictionary:
 	var node: Variant = get_node_or_null("/root/PlayerState")

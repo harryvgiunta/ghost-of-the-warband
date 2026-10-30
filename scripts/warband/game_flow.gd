@@ -10,6 +10,10 @@ extends Node
 ## `active` stays false until the flow is entered from the title menu or the
 ## campaign button, which is what keeps every scene regression able to emit its
 ## door signal without the tree moving underneath it.
+##
+## The title's four doors land here: NEW CAMPAIGN (`start_campaign`), RESUME
+## CAMPAIGN (`enter_warband`), HOST GAME (`host_campaign`, a new game or the saved
+## checkpoint) and JOIN GAME (`join_campaign`).
 
 ## The campaign is one world: the camp, the trail through the wood and the town
 ## all stand in this one scene, and walking is the only way between them.
@@ -20,50 +24,82 @@ const ARENA_SCENE := "res://admin_arena.tscn"
 ## "the world, at the town end" - the arena hands the survivors back into the
 ## square they marched out of.
 const ARENA_RETURN := "res://scenes/town_hub.tscn"
+## Where a guest goes when its session ends under it: the host left, or never
+## answered.
+const TITLE_SCENE := "res://title.tscn"
+
+## HOST GAME's two doors: a fresh campaign in the cages, or the saved warband on
+## its last checkpoint.
+const HOST_NEW := "new"
+const HOST_CHECKPOINT := "checkpoint"
+## How long JOIN GAME waits on the title for the host's campaign. ENet gives up on
+## an unreachable address by itself; this catches a host that is there but never
+## sends a warband.
+const JOIN_TIMEOUT_SECONDS := 20.0
 
 const WarbandSessionScript := preload("res://scripts/warband/warband_session.gd")
-const WarbandLobbyScript := preload("res://scripts/warband/warband_lobby.gd")
+const WarbandBannerScript := preload("res://scripts/warband/warband_banner.gd")
 const WarbandContracts := preload("res://scripts/warband/warband_contracts.gd")
 ## Where the warband's socket lives. The flow is the one node that survives a
 ## hand-off, so it owns the session: a session created by the title screen would
 ## be freed with the title screen, and every peer would drop at the exact moment
-## the arena loaded. The node path is the RPC address, which is why it sits under
+## the world loaded. The node path is the RPC address, which is why it sits under
 ## an autoload - `/root/GameFlow/WarbandLink` is the same on every peer whatever
 ## scene each of them happens to be in.
 const WARBAND_LINK := "WarbandLink"
 const WARBAND_BANNER := "WarbandBanner"
 
-signal warband_intent_changed(intent: Dictionary)
+## A line for the title: why a join came to nothing, why a session ended.
+signal notice_posted(text: String)
 
 var active := false
 var last_scene := ""
 ## Where the world puts the warband down when it opens: `"camp"` for a fresh run
-## (the cages), `"town"` for a resumed save or the field's return. The world reads
-## it once, in its own `_ready`.
+## (the cages), `"town"` for a resumed save or the field's return, `"checkpoint"`
+## for the autosave's bookmark, and `"guest"` for a co-op guest fielding the
+## host's bodies. The world reads it once, in its own `_ready`.
 var world_start := "camp"
 var transitions := 0
-## The lobby's last request: `{mode, address, port, name, scene}`. It stays here
+## The co-op request in force: `{mode, address, port, name, scene}`. It stays here
 ## (not in the menu) so the flow - the only thing that outlives the menu - can
 ## honour it once the scene that fields the bodies exists.
 var warband_intent: Dictionary = {}
-## The live `WarbandSession`, or null between battles.
+## The live `WarbandSession`, or null outside co-op.
 var session = null
 ## The persistent strip that names the role and repeats a refusal verbatim.
 var banner = null
+## What a guest's world needs from the host's campaign to stand the same bodies
+## in the same wood: `{bodies, focus, layout}` from `WarbandSession.campaign_payload`.
+## Empty until the host has answered.
+var guest_field: Dictionary = {}
 var _warband_scene := ""
-var _seat_tries := 0
-## Bodies a refusal already took off the table, so a retry cannot ask twice.
-var _refused_bodies: Dictionary = {}
+var _notice := ""
+var _join_clock := 0.0
+## True while this node is closing its own session, so the session's goodbye is
+## not mistaken for the host leaving.
+var _closing := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process(false)
 
-## The title menu's one door: resume a saved warband where its last checkpoint
-## stands, or start the cages.
+## JOIN GAME waits on the title until the host's campaign arrives.
+func _process(delta: float) -> void:
+	if str(warband_intent.get("mode", "")) != "join" or not guest_field.is_empty():
+		set_process(false)
+		return
+	_join_clock += delta
+	if _join_clock >= JOIN_TIMEOUT_SECONDS:
+		_guest_over("The host at %s:%d never sent its warband." % [
+			str(warband_intent.get("address", "")), int(warband_intent.get("port", 0))])
+
+## RESUME CAMPAIGN: the saved warband where its last checkpoint stands, or the
+## cages when there is nothing saved to resume.
 func enter_warband() -> void:
 	var warband := get_node_or_null("/root/Warband")
 	if warband == null:
 		return
+	_end_warband_link("a campaign of this machine's own")
 	active = true
 	if warband.load_state() and warband.roster.count() > 0:
 		world_start = "checkpoint" if warband.has_checkpoint() else "town"
@@ -74,24 +110,25 @@ func enter_warband() -> void:
 	world_start = "camp"
 	goto(WORLD_SCENE)
 
-## A brand-new campaign: the four cages, whatever the save says. `skip_tutorial`
-## is the title's own door for a player who has done the opening before: the
-## cages, the shiv and the walk are left behind and the warband opens already
-## standing in Hearthstead, sworn and armed by the town's own lineup. Every quest
-## is still there - only the lesson is not.
-func start_campaign(skip_tutorial: bool = false) -> void:
+## NEW CAMPAIGN: the five cages, whatever the save says.
+func start_campaign() -> void:
+	var warband := get_node_or_null("/root/Warband")
+	_end_warband_link("a new campaign")
 	active = true
-	# The purse is the shared wallet, so a fresh campaign has to reset the journey
-	# too: otherwise the last run's gold and pack walk into the cages with the soul.
+	_fresh_campaign(warband)
+	goto(WORLD_SCENE)
+
+## A fresh warband and a fresh purse, written at once. The purse is the shared
+## wallet, so a fresh campaign has to reset the journey too: otherwise the last
+## run's gold and pack walk into the cages with the soul.
+func _fresh_campaign(warband) -> void:
 	var state := get_node_or_null("/root/PlayerState")
 	if state != null:
 		state.reset(true)
-	var warband := get_node_or_null("/root/Warband")
 	if warband != null:
 		warband.reset_state()
 		warband.save_state()
-	world_start = "town" if skip_tutorial else "camp"
-	goto(WORLD_SCENE)
+	world_start = "camp"
 
 ## Go straight to the town end of the world (debug door, and where a resumed
 ## campaign lands).
@@ -179,11 +216,16 @@ func goto(path: String) -> void:
 		# either: every next scene re-enters the body its peer already had.
 		warband.save_state()
 		warband.clear_possession()
-	# A battle lives and dies with the scene that fields its bodies: leaving that
-	# scene ends the session (a host's departure closes the socket, and every
-	# guest hears it), so nobody keeps a controller that no longer exists.
-	if session != null and not _warband_scene.is_empty() and path != _warband_scene:
-		_end_warband_link("left the field")
+	# A session lives and dies with the scene that fields its bodies: leaving that
+	# scene ends it (a host's departure closes the socket, and every guest hears
+	# it), so nobody keeps a controller that no longer exists. Opening the same
+	# world again - a checkpoint reload, the menu's LOAD, a guest following its
+	# host - keeps the socket and lets go of the bodies that are about to go.
+	if session != null and not _warband_scene.is_empty():
+		if path != _warband_scene:
+			_end_warband_link("left the field")
+		else:
+			session.detach_scene()
 	last_scene = path
 	transitions += 1
 	var tree := get_tree()
@@ -194,223 +236,150 @@ func goto(path: String) -> void:
 	tree.paused = false
 	tree.call_deferred("change_scene_to_file", path)
 
-# --- the warband battle ----------------------------------------------------
+## The last line `notice_posted` carried, handed over once: the title shows it
+## when it opens after a session ended under the player.
+func take_notice() -> String:
+	var text := _notice
+	_notice = ""
+	return text
+
+func _post_notice(text: String) -> void:
+	_notice = text
+	notice_posted.emit(text)
+
+# --- campaign co-op -----------------------------------------------------------
 #
-# The title screen's lobby is only a form. It stores an intent here and the flow
-# seats a `WarbandSession` on the scene that next fields the warband's bodies, so
-# the ENet peer outlives the menu. Everything below is additive: no existing
-# door changed shape, and `goto` still clears `paused` for the hand-off.
+# One host, one warband. HOST GAME opens the world on this machine and the socket
+# with it; JOIN GAME connects first, is sent the host's whole warband, and only
+# then opens the world on it - the guest plays from the host's roster, stash and
+# purse, and its own save is never read or written while the session lasts.
 
-## Open a battle on this machine and carry the intent into the scene that fields
-## the warband's bodies.
-func host_warband(port: int, host_name: String) -> void:
-	_request_warband({"mode": "host", "address": "127.0.0.1", "port": port,
-		"name": host_name, "scene": ARENA_SCENE})
-
-## Join a friend's battle: the same scene, the same mode, and the first body no
-## soul is already inside.
-func join_warband(address: String, port: int, guest_name: String) -> void:
-	_request_warband({"mode": "join", "address": address, "port": port,
-		"name": guest_name, "scene": ARENA_SCENE})
-
-## Open the campaign world as its host. The world is one continuous place, so
-## the seat says where the warband's feet land: a saved warband resumes at its
-## bookmark (or the town end when it has none), and a machine with no warband
-## starts a fresh run in the cages.
-func host_campaign(port: int, player_name: String) -> void:
+## HOST GAME. `start` is `HOST_NEW` (a fresh campaign in the cages) or
+## `HOST_CHECKPOINT` (the saved warband on its bookmark, or the town end when it
+## has none). A checkpoint door with nothing saved behind it opens a fresh run.
+func host_campaign(port: int, player_name: String, start: String = HOST_NEW) -> void:
 	var warband := get_node_or_null("/root/Warband")
 	if warband == null:
 		return
-	if warband.load_state() and warband.roster.count() > 0:
+	_end_warband_link("another campaign was hosted")
+	if start == HOST_CHECKPOINT and warband.load_state() and warband.roster.count() > 0:
 		world_start = "checkpoint" if warband.has_checkpoint() else "town"
 	else:
-		warband.reset_state()
-		warband.save_state()
-		world_start = "camp"
+		_fresh_campaign(warband)
 	_request_warband({"mode": "host", "address": "127.0.0.1", "port": port,
 		"name": player_name, "scene": WORLD_SCENE})
+	goto(WORLD_SCENE)
 
-## Join a campaign already running on another machine. The guest fields the
-## bodies from its own save - the warband is the same ledger on both machines -
-## and the host's snapshots then place them.
+## JOIN GAME. The socket opens here, on the title; the host answers with its
+## campaign (`_on_campaign_received`), and only then does the world open.
 func join_campaign(address: String, port: int, player_name: String) -> void:
-	var warband := get_node_or_null("/root/Warband")
-	if warband == null:
-		return
-	if not warband.load_state():
-		print("WARBAND_FLOW failed: joining the campaign needs a local warband save.")
-		return
-	world_start = "checkpoint" if warband.has_checkpoint() else "town"
+	_end_warband_link("another campaign was joined")
 	_request_warband({"mode": "join", "address": address, "port": port,
 		"name": player_name, "scene": WORLD_SCENE})
+	if not session.join(address, port, player_name):
+		_guest_over("Could not reach %s:%d." % [address, port])
+		return
+	_join_clock = 0.0
+	set_process(true)
+	print("WARBAND_FLOW join address=%s port=%d name=%s" % [address, port, player_name])
+	_paint_warband_banner()
 
-## Leave the battle from this peer. A guest's departure hands its body back to
-## the scene; a host's closes the socket and every guest hears `The host left.`
+## Leave the session from this peer. A guest's departure hands its body back to
+## the host's field; a host's closes the socket and every guest hears `The host
+## left.`
 func leave_warband() -> void:
 	_end_warband_link("left the battle")
-
-## Ask to enter one body through the same channel the lobby strip watches. The
-## host decides at once; a guest asks and the refusal - naming the router's own
-## reason - comes back to its banner.
-func warband_enter_body(merc_id: int) -> Dictionary:
-	if session == null:
-		return {"ok": false, "message": "No warband battle is open.", "body_id": merc_id,
-			"previous_body_id": -1, "reason": SoulRouter.REASON_UNKNOWN, "pending": false}
-	return session.request_body(merc_id)
 
 ## "offline", "host" or "client".
 func warband_role() -> String:
 	return str(session.role()) if session != null else "offline"
 
-## The first body no soul is inside, in roster order. On a guest this is a guess
-## the host confirms - the map it has is the host's last word, and a body taken
-## in between comes back as a refusal instead of a second soul.
-func first_free_body() -> int:
-	var warband := get_node_or_null("/root/Warband")
-	if warband == null:
-		return -1
-	var taken := {}
-	if session != null:
-		var map: Dictionary = session.ownership()
-		for key in map:
-			var owned := int(map[key])
-			if owned > 0:
-				taken[owned] = true
-	for merc_id in warband.roster.ids():
-		if taken.has(merc_id) or _refused_bodies.has(merc_id):
-			continue
-		if not warband.roster.is_alive(merc_id):
-			continue
-		if not warband.souls.has_body(merc_id):
-			continue
-		if warband.souls.occupied_by(merc_id) != 0:
-			continue
-		return merc_id
-	return -1
-
 func _request_warband(intent: Dictionary) -> void:
-	_end_warband_link("another battle was asked for")
 	warband_intent = intent.duplicate()
-	_seat_tries = 0
-	_refused_bodies = {}
+	guest_field = {}
 	active = true
-	warband_intent_changed.emit(warband_intent.duplicate())
-	# The hand-off first (it ends any older session but this fresh one does not
-	# exist yet), then the socket: `bind` runs after the scene's `_ready`, by
-	# which time the link is there waiting for it.
-	goto(str(intent.get("scene", ARENA_SCENE)))
 	_attach_warband_link()
 
-## Create the session and its strip if this is the first battle. Both hang under
-## the flow, so both outlive every scene.
+## Create the session and its strip. Both hang under the flow, so both outlive
+## every scene.
 func _attach_warband_link() -> void:
 	if session == null:
 		session = WarbandSessionScript.new()
 		session.name = WARBAND_LINK
+		session.shared_warband = true
 		add_child(session)
 		session.role_changed.connect(_on_warband_role_changed)
 		session.peer_joined.connect(_on_warband_peer_changed)
 		session.peer_left.connect(_on_warband_peer_changed)
 		session.ownership_changed.connect(_on_warband_ownership_changed)
 		session.transfer_refused.connect(_on_warband_refusal)
+		session.campaign_received.connect(_on_campaign_received)
+		session.session_ended.connect(_on_session_ended)
 	if banner == null:
-		banner = WarbandLobbyScript.Banner.new()
+		banner = WarbandBannerScript.new()
 		banner.name = WARBAND_BANNER
 		add_child(banner)
-	_paint_warband_banner("Warband battle: waiting for the field.")
+	_paint_warband_banner()
 
-## The scene that fields the bodies has arrived. Attach the session to its
+## The host's campaign reached this guest: lend its warband and open the world
+## on it. It arrives again when the host's world opens anew, and the guest's
+## world follows it there.
+func _on_campaign_received(payload: Dictionary) -> void:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null or str(warband_intent.get("mode", "")) != "join":
+		return
+	var parsed: Variant = JSON.parse_string(str(payload.get("warband", "")))
+	if not parsed is Dictionary:
+		_guest_over("The host's warband could not be read.")
+		return
+	set_process(false)
+	warband.lend(parsed, int(payload.get("gold", 0)))
+	guest_field = {
+		"bodies": payload.get("bodies", []),
+		"focus": payload.get("focus", []),
+		"layout": payload.get("layout", {}),
+	}
+	world_start = "guest"
+	print("WARBAND_FLOW campaign roster=%d bodies=%d" % [warband.roster.count(),
+		(guest_field["bodies"] as Array).size() if guest_field["bodies"] is Array else 0])
+	goto(WORLD_SCENE)
+
+## The world that fields the bodies has arrived. Attach the session to its
 ## controller - the bodies are already on the field, so this is the first moment
-## a snapshot could be honest - and then open the socket or re-enter a body.
+## a snapshot could be honest - and then open the socket, or tell the host this
+## guest is ready to be put into a body.
 func _seat_warband_link(scene: Node) -> void:
 	if session == null or warband_intent.is_empty():
 		return
-	var wanted := str(warband_intent.get("scene", ""))
-	if wanted.is_empty() or str(scene.scene_file_path) != wanted:
+	if str(scene.scene_file_path) != str(warband_intent.get("scene", "")):
 		return
 	var warband := get_node_or_null("/root/Warband")
-	if warband == null:
-		return
 	var controller = scene.get("controller")
-	if controller == null:
+	if warband == null or controller == null:
 		return
-	_warband_scene = wanted
+	_warband_scene = str(warband_intent.get("scene", ""))
 	session.setup(controller, warband)
 	# The world is more than its bodies: the same session carries its mobs, the
-	# loot on its ground and its missiles. Attached before any replica decision,
-	# because a guest's mobs must be replicas before their first brain ticks. The
-	# arena keeps its own field and is deliberately not attached.
-	if str(scene.scene_file_path) == WORLD_SCENE:
-		session.attach_world(scene as Node3D)
-	var mode := str(warband_intent.get("mode", "host"))
-	# A guest is a replica *before* the first body is dressed: `_dress` reads the
-	# body's own authority to decide whether it predicts or waits, and the arena
-	# spawned every body as the simulated side.
-	if session.role() == "client" or (session.role() == "offline" and mode == "join"):
-		_configure_replica(controller)
-	if session.role() == "offline":
-		_open_warband_session()
-	else:
-		_seat_warband_body()
-
-## The scene spawns its bodies authoritative: the arena was written before the
-## session existed and always asks for the simulated side. A guest must not be.
-## Its own body has to integrate from its own keys and send intents to the host,
-## while every other body follows the host's snapshots - the exact declaration
-## `spawn_mercenaries(points, false)` makes, applied to bodies that are already
-## on the field. `_authoritative` is private by convention, the same way
-## `WarbandSession` already reaches into `PossessionController._release_peer`.
-func _configure_replica(controller) -> void:
-	controller._authoritative = false
-	for body in controller.bodies():
-		if not is_instance_valid(body):
-			continue
-		body.authoritative = false
-		body.combat.damage_enabled = false
-
-func _open_warband_session() -> void:
-	if session == null:
+	# loot on its ground and its missiles.
+	session.attach_world(scene as Node3D)
+	if str(warband_intent.get("mode", "")) == "join":
+		if session.role() != "client":
+			_guest_over("The host left.")
+			return
+		session.report_fielded()
+		_paint_warband_banner()
 		return
-	var mode := str(warband_intent.get("mode", "host"))
-	var port := int(warband_intent.get("port", 0))
-	var player_name := str(warband_intent.get("name", "Soul"))
-	if mode == "host":
+	if session.role() == "offline":
+		var port := int(warband_intent.get("port", 0))
+		var player_name := str(warband_intent.get("name", "Soul"))
 		if not session.host(port, player_name):
 			_fail_warband("Could not open UDP %d on this machine." % port)
 			return
 		print("WARBAND_FLOW host port=%d name=%s" % [port, player_name])
 	else:
-		var address := str(warband_intent.get("address", "127.0.0.1"))
-		if not session.join(address, port, player_name):
-			_fail_warband("Could not reach %s:%d." % [address, port])
-			return
-		print("WARBAND_FLOW join address=%s port=%d name=%s" % [address, port, player_name])
-	_seat_warband_body()
-
-## Put this peer's soul into a body. The host is normally seated by the scene
-## itself (it is ENet peer 1); a guest waits for the host's map, which says who
-## is already inside what, and then asks for the first free body.
-func _seat_warband_body() -> void:
-	if session == null or session.controller == null:
-		return
-	var warband := get_node_or_null("/root/Warband")
-	if warband == null:
-		return
-	var me := int(session.controller.local_peer_id)
-	if warband.souls.body_of(me) > 0 or int(session.ownership().get(me, 0)) > 0:
-		_paint_warband_banner()
-		return
-	if session.role() == "client" and session.peer_count() < 2:
-		# Not connected yet: the map has not arrived and the host cannot be asked.
-		_paint_warband_banner()
-		return
-	var free_body := first_free_body()
-	if free_body <= 0:
-		_paint_warband_banner("The field has no free body left.")
-		return
-	_seat_tries += 1
-	var result: Dictionary = session.request_body(free_body)
-	print("WARBAND_FLOW seat merc=%d pending=%s" % [free_body, result.get("pending", false)])
+		# The host's world opened again under the same socket (a checkpoint
+		# reload, the menu's LOAD): every guest rebuilds its own on it.
+		session.broadcast_campaign()
 	_paint_warband_banner()
 
 func _paint_warband_banner(note: String = "") -> void:
@@ -425,14 +394,17 @@ func _paint_warband_banner(note: String = "") -> void:
 	var text := ""
 	if role == "host":
 		text = "WARBAND  ·  HOSTING UDP %d  ·  %d soul%s" % [port, souls, "" if souls == 1 else "s"]
-	elif role == "client":
+	elif role == "client" and souls >= 2:
 		var address := str(warband_intent.get("address", ""))
 		text = "WARBAND  ·  %s:%d  ·  %d soul%s" % [address, port, souls,
 			"" if souls == 1 else "s"]
+	elif str(warband_intent.get("mode", "")) == "join":
+		text = "WARBAND  ·  joining %s:%d..." % [str(warband_intent.get("address", "")), port]
 	elif not warband_intent.is_empty():
 		text = "WARBAND  ·  opening the %s door..." % str(warband_intent.get("mode", ""))
 	banner.show_state(text)
 
+## The host could not open its socket: it plays on alone, and the strip says why.
 func _fail_warband(message: String) -> void:
 	print("WARBAND_FLOW failed: %s" % message)
 	warband_intent.clear()
@@ -448,35 +420,49 @@ func _on_warband_peer_changed(_peer_id: int) -> void:
 
 func _on_warband_ownership_changed(_assignments: Dictionary) -> void:
 	_paint_warband_banner()
-	_seat_warband_body()
 
-## A refusal in the router's words. It is always shown; a body taken between the
-## guess and the ask is not an error, so a guest tries the next one (three times,
-## never the same body twice) and the reason stays on the strip meanwhile.
-func _on_warband_refusal(merc_id: int, reason: String) -> void:
+## A refusal in the router's words, always shown on the strip.
+func _on_warband_refusal(_merc_id: int, reason: String) -> void:
 	if banner != null and not reason.is_empty():
 		banner.note_refusal(reason)
-	if reason != SoulRouter.REASON_OCCUPIED:
-		return
-	_refused_bodies[merc_id] = true
-	if warband_role() != "client" or _seat_tries >= 3:
-		return
-	_seat_warband_body()
 
-## Drop the socket and the strip. The controller reference goes first: the scene
-## that owns those bodies is on its way out, and a session left holding it would
-## step a corpse between the free and the next scene's ready.
+## The socket closed under this peer (the host left, the address never answered).
+func _on_session_ended(reason: String) -> void:
+	if _closing:
+		return
+	if str(warband_intent.get("mode", "")) == "join":
+		_guest_over(reason)
+
+## A guest's session is over: its own campaign comes back and, when the host's
+## world was already up around it, the title opens with the reason on it.
+func _guest_over(reason: String) -> void:
+	var in_world := not _warband_scene.is_empty()
+	print("WARBAND_FLOW guest over (%s)" % reason)
+	_post_notice(reason)
+	_end_warband_link(reason)
+	if in_world:
+		goto(TITLE_SCENE)
+
+## Drop the socket and the strip, and give a guest its own warband back. The
+## controller reference goes first: the scene that owns those bodies is on its
+## way out, and a session left holding it would step a corpse between the free
+## and the next scene's ready.
 func _end_warband_link(reason: String) -> void:
+	_closing = true
 	if session != null:
 		print("WARBAND_FLOW closed (%s)" % reason)
 		session.controller = null
 		session.leave()
 		session.queue_free()
 		session = null
+	_closing = false
 	if banner != null:
 		banner.queue_free()
 		banner = null
 	_warband_scene = ""
 	warband_intent.clear()
-	_seat_tries = 0
-	_refused_bodies = {}
+	guest_field = {}
+	set_process(false)
+	var warband := get_node_or_null("/root/Warband")
+	if warband != null and bool(warband.get("lent")):
+		warband.end_loan()

@@ -218,6 +218,12 @@ func save_game() -> bool:
 		set_status("No warband to write in this scene.")
 		_note("save_skipped")
 		return false
+	# A co-op guest is playing the host's warband: there is no file of its own to
+	# write, and the host's ledger is the host's to keep.
+	if bool(warband.get("lent")):
+		set_status("This is the host's campaign: the host keeps its ledger.")
+		_note("save_skipped", {"lent": true})
+		return false
 	var path := _save_path()
 	if path.is_empty():
 		set_status("No warband file is configured.")
@@ -377,9 +383,14 @@ func _refresh_load() -> void:
 	if load_button == null:
 		return
 	var path := _save_path()
+	var warband := _warband()
+	var lent := warband != null and bool(warband.get("lent"))
 	var has_save := not path.is_empty() and FileAccess.file_exists(path)
-	load_button.disabled = not has_save
-	load_button.tooltip_text = "" if has_save else "No written warband to load."
+	load_button.disabled = lent or not has_save
+	if lent:
+		load_button.tooltip_text = "Only the host can load this campaign."
+	else:
+		load_button.tooltip_text = "" if has_save else "No written warband to load."
 
 
 func _refresh_display() -> void:
