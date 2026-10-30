@@ -36,9 +36,10 @@ extends RefCounted
 ## rest batched in fog-sized cells), with the mountain rim `terrain.gd` raises
 ## standing beyond them - the trail is a valley, not a strip of trees. One hollow
 ## in it is **wet**: `terrain.gd`'s swamp basin at `SWAMP_FRACTION` of the route
-## gets a flat water plane on the existing water shader, reeds, snags, roots, mud
-## and a low mist, all of it off the lane and past the torch line, so the route is
-## unchanged and a body that steps off it is wading in the dark.
+## gets a flat water plane on the existing water shader, reeds, snags and roots,
+## all of it off the lane and past the torch line, so the route is unchanged and a
+## body that steps off it is wading in the dark. The mud bank under it is the
+## terrain's own wet ground, not a mesh.
 
 const Geo = preload("res://scripts/geo.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -989,13 +990,14 @@ static func _torch(group: Node3D, mats: Dictionary, iron: Dictionary, at: Vector
 # --- the swamp -------------------------------------------------------------
 
 ## The one wet hollow in the wood, laid on `terrain.gd`'s basin: a flat water
-## plane on the muddy floor, reeds and dead snags at the waterline, roots running
-## out of the bank, and a low mist that drifts over it. The mud itself is the
-## terrain's own (the ground map's wet channel), so the bank darkens into the bowl
-## instead of carrying slabs of mud. The water starts past the torch line
-## (`SWAMP_INNER` > 5.4 m), so the route's fire is never standing in it, and its
-## shader copy is darker than the world's ponds - this is the one part of the
-## trail a body wants a hand torch for.
+## plane on the muddy floor, reeds and dead snags at the waterline, and roots
+## running out of the bank. The mud itself is the terrain's own (the ground map's
+## wet channel), so the bank darkens into the bowl instead of carrying slabs of
+## mud. The water starts past the torch line (`SWAMP_INNER` > 5.4 m), so the
+## route's fire is never standing in it, and its shader copy is darker than the
+## world's ponds - this is the one part of the trail a body wants a hand torch
+## for. No mist: untextured billboard cards over the water read as flat grey
+## squares, which is worse than a clear hollow.
 static func _build_swamp(root: Root, path: Path) -> void:
 	var region := TerrainScript.swamp_region()
 	if region.is_empty():
@@ -1083,8 +1085,6 @@ static func _build_swamp(root: Root, path: Path) -> void:
 			rng.randf_range(-1.6, 1.6))
 		CampKit.add_beam(roots, bend, tip, rng.randf_range(0.025, 0.05), mats["bark"], 3, 0.01)
 	roots.commit(group, "Roots")
-	# --- mist
-	_swamp_mist(group, path, arc, water_y, inner, outer, half, side)
 	root.stats["swamp"] = 1
 	root.stats["swamp_reeds"] = reed_count
 
@@ -1126,60 +1126,6 @@ static func _swamp_water_mesh(path: Path, arc: float, level: float, inner: float
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return mesh
-
-
-## A handful of soft billboards over the water, drifting on their own clock. Low
-## and thin, so the far bank still closes and the body walking it keeps a horizon.
-static func _swamp_mist(group: Node3D, path: Path, arc: float, level: float, inner: float,
-		outer: float, half: float, side: float) -> void:
-	var mist := SwampMist.new()
-	mist.name = "Mist"
-	group.add_child(mist)
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.52, 0.58, 0.60, 0.16)
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	material.billboard_keep_scale = true
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var quad := QuadMesh.new()
-	quad.size = Vector2(11.0, 2.6)
-	for index in 7:
-		var along := lerpf(-half * 0.8, half * 0.8, float(index) / 6.0)
-		var lateral := inner + 3.0 + float(index % 3) * 4.2
-		var frame := path.sample(clampf(arc + along, 0.0, path.total))
-		var point: Vector3 = (frame["position"] as Vector3) \
-			+ (frame["right"] as Vector3) * side * lateral
-		var card := MeshInstance3D.new()
-		card.name = "Mist%d" % index
-		card.mesh = quad
-		card.material_override = material
-		card.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		card.position = Vector3(point.x, level + 0.85, point.z)
-		mist.add_child(card)
-		mist.bases.append(card.position)
-	mist.speed = 0.37
-
-
-## One low bank of mist: every card drifts a little about its own anchor and
-## breathes in height, which is enough for a hollow that never had wind in it.
-class SwampMist extends Node3D:
-	var bases: Array[Vector3] = []
-	var speed := 0.35
-	var _time := 0.0
-
-	func _process(delta: float) -> void:
-		_time += delta
-		var count := mini(bases.size(), get_child_count())
-		for index in count:
-			var card := get_child(index) as Node3D
-			if card == null:
-				continue
-			var base: Vector3 = bases[index]
-			card.position = base + Vector3(
-				sin(_time * speed * 0.6 + float(index) * 1.3) * 0.9,
-				sin(_time * speed + float(index) * 0.7) * 0.10,
-				cos(_time * speed * 0.45 + float(index) * 0.9) * 0.5)
 
 
 ## The lane's arc distance closest to a world point, so the swamp's props follow

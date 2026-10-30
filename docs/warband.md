@@ -711,8 +711,8 @@ Short version of the latest tuning (all in the code, all covered by
   `floor_max_angle`, so the trimesh itself is the boundary - no invisible wall and
   no extra collider. A shallow **swamp** is cut into the wood at `SWAMP_FRACTION`
   0.515 of the lane, on one side, 6.4-26 m off the centre line: a sunken bowl with
-  a water plane on the existing water shader, reeds, snags and mist, clear of the
-  torches so the route itself is unchanged;
+  a water plane on the existing water shader, reeds and snags over the terrain's
+  own wet mud, clear of the torches so the route itself is unchanged;
 
 ### Running the tests
 

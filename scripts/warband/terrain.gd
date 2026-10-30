@@ -139,8 +139,8 @@ static var _built := false
 static var _pads: Array = []
 static var _worn: Array = []
 ## The baked swamp, as `height_at()`'s owner publishes it to anything that wants
-## to lay water, reeds or mist: `{centre, forward, right, water_y, inner, outer,
-## half_length, side}`.
+## to lay water, reeds or its own wet ground: `{centre, forward, right, water_y,
+## inner, outer, half_length, side}`.
 static var _swamp: Dictionary = {}
 ## The baked field's extremes, so nothing has to fold 21,000 floats to read them.
 static var _low := 0.0
@@ -211,7 +211,7 @@ static func grounded(at: Vector3) -> Vector3:
 	return Vector3(at.x, height_at(at.x, at.z) + at.y, at.z)
 
 
-## The one swamp in the wood, for the trail's water plane, reeds and mist:
+## The one swamp in the wood, for the trail's water plane and reeds:
 ## `{centre, forward, right, water_y, inner, outer, half_length, side}`, or an
 ## empty dictionary in a preview whose ground was never baked. `centre` is on the
 ## lane at `SWAMP_FRACTION`; `side` is the lane's own right-hand sign the basin
