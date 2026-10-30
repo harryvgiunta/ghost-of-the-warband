@@ -231,14 +231,17 @@ Every hand-off goes through one `scene_requested(path)` signal per scene, bound 
 the campaign door is used, which is why every scene regression can emit its door
 without being teleported out of the test.
 
-The title's **SKIP TUTORIAL · START IN TOWN** door is the second way into a new
-campaign. It always asks first - *"ARE YOU SURE? WE REALLY RECOMMEND YOU DO THE
-TUTORIAL IF YOU HAVEN'T PLAYED."* - and only then calls
-`GameFlow.start_campaign(true)`, which opens the world with `world_start = "town"`:
-the cages, the shiv and the walk are behind you, the town's own lineup swears and
-arms the band, and every quest, counter, the stash, the altar and the expedition
-gate still work. `start_campaign(false)` (the plain door) still starts in the camp.
-Tutorial card popups are skipped in every campaign (`TutorialCard.SKIP_ALL`).
+The title is **four doors and nothing else**: **NEW CAMPAIGN**
+(`GameFlow.start_campaign()` - a fresh warband, a fresh purse, the cages),
+**RESUME CAMPAIGN** (`enter_warband()` - the save on its autosave bookmark, the
+town for a save that predates checkpoints; disabled until a save exists),
+**JOIN GAME** and **HOST GAME**. Host Game asks one more question, on two buttons:
+**NEW GAME** (`host_campaign(port, name, HOST_NEW)`, a fresh warband in the cages)
+and **FROM CHECKPOINT** (`HOST_CHECKPOINT`, the save on its bookmark, or the town
+end when it has none), with a line under them saying what the checkpoint would
+open. There is no skip-tutorial door, no frontier door and no arena lobby on the
+title any more: those scenes are reachable through their own launchers
+(`Arena.cmd`, `Host World.cmd`) and the title is the campaign.
 
 ### Multiplayer
 
@@ -360,13 +363,28 @@ These landed on the same world without a second rulebook. Each has one owner:
   with its own `MobCuller`. There are no wolves on the lane or the camp corridor:
   the packs live 30-50 m off the route, beyond the wolves' own sight of it and
   hundreds of metres apart, so a body only meets one by leaving the trail.
-- **Co-op is one `attach_world` on the existing session.**
-  `GameFlow.host_campaign`/`join_campaign` reuse `WarbandSession`; the host owns
-  the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
-  replica that runs no AI), the loot, the missiles and the kill reward, while a
-  guest writes no checkpoint or save of its own, dismisses the camp lesson and
-  runs no squad AI. The lobby's mode row defaults to campaign co-op; the arena
-  bout remains selectable.
+- **Co-op plays one warband, the host's.**
+  `GameFlow.host_campaign`/`join_campaign` reuse `WarbandSession`, and the title's
+  JOIN GAME connects **before** the world opens: the host answers with its whole
+  campaign (`receive_campaign`), the guest lends it (`WarbandState.lend`) and
+  fields exactly the host's bodies as replicas, then says `field_ready` and is
+  seated in the first free body. The lent copy is read-only on the guest - every
+  gear and purse verb answers `LENT_MESSAGE`, `save_state`/`load_state` refuse -
+  and the host mirrors every change back (`receive_warband`, 0.25 s at most), so
+  the roster, stash, purse and orders on both screens are the host's. The host
+  owns the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
+  replica that runs no AI), the loot, the missiles and the kill. A guest writes no
+  checkpoint, works no keeper, latch, corpse or pickup, and runs no squad AI; its
+  TAB and revive travel as intents (`swap_set`, `revive`) and are resolved on the
+  host's field. The arena bout still exists in `admin_arena.tscn` for its own
+  launcher, but the title no longer offers it.
+- **With one body left, the soul inside keeps it.**
+  `SoulRouter` stays one peer per body; a death ejects the soul, and
+  `WarbandSession` seats it only into a **free** body. Nobody is moved out of the
+  last body: the waiting soul watches it (`PossessionController.watching()`, a
+  free-look eye on the other player's body, `WarbandHud.set_watching` naming the
+  holder) and takes the next body that comes free, in the order the souls lost
+  theirs.
 
 ### The band looks like a band
 

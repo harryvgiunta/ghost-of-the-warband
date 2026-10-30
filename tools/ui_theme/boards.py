@@ -574,9 +574,8 @@ def title() -> Image.Image:
     draw.line((W * 0.5 + 40, 380, W * 0.5 + 300, 380), fill=(150, 118, 66, 150), width=1)
     kit.thorn(canvas, W * 0.5, 380, 10, 0, (170, 48, 32, 230))
 
-    labels = [("NEW CAMPAIGN", "brass", "N"), ("CONTINUE", "iron", ""),
-              ("HOST OPEN WORLD", "iron", ""), ("JOIN GAME", "iron", ""),
-              ("WARBAND LOBBY", "iron", ""), ("QUIT", "lacquer", "")]
+    labels = [("NEW CAMPAIGN", "brass", "N"), ("RESUME CAMPAIGN", "iron", ""),
+              ("JOIN GAME", "iron", ""), ("HOST GAME", "iron", "")]
     y = 442
     for label, variant, cap in labels:
         button(canvas, (W * 0.5 - 250, y, W * 0.5 + 250, y + 54), label, variant,

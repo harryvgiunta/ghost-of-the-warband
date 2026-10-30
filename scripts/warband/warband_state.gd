@@ -48,6 +48,8 @@ const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## not a save slot: the camp is the only place a run starts, so it is never a
 ## checkpoint (the opening is already restartable from the title).
 const CHECKPOINT_AREAS := ["trail", "town"]
+## What every gear and purse verb answers while the warband is lent (see `lent`).
+const LENT_MESSAGE := "This is the host's warband: only the host changes its gear and purse."
 
 var roster: WarbandRoster = RosterScript.new()
 var souls: SoulRouter = SoulScript.new()
@@ -74,6 +76,17 @@ var revive_channels: Dictionary = {}  # peer_id -> {merc_id, seconds}
 ## essence beside it are the warband as it stood then; the purse is not rolled
 ## back, because `PlayerState` owns it and a reload must never repay a run.
 var checkpoint: Dictionary = {}
+## True while this warband is a co-op host's, lent to this machine for the length
+## of a session (`GameFlow.join_campaign`). A lent warband is shown and played and
+## never touches this machine's files: `save_state` and `load_state` refuse, so the
+## guest's own campaign is exactly as it was when the session ends. The host is
+## the only place the shared warband changes - its gear, its purse, its roll - so
+## every gear and purse verb below answers `LENT_MESSAGE` instead, and the host's
+## own updates arrive through `lend()`. `end_loan()` gives this machine its own
+## warband back.
+var lent := false
+## The host's purse while lent: shown, never spent on this machine.
+var _lent_gold := 0
 
 func _ready() -> void:
 	set_process(false)
@@ -86,6 +99,8 @@ func _ready() -> void:
 # --- purse -----------------------------------------------------------------
 
 func gold() -> int:
+	if lent:
+		return _lent_gold
 	var state := get_node_or_null("/root/PlayerState")
 	return int(state.credits) if state != null else 0
 
@@ -93,6 +108,8 @@ func gold() -> int:
 func spend_gold(amount: int) -> bool:
 	if amount <= 0:
 		return true
+	if lent:
+		return false
 	var state := get_node_or_null("/root/PlayerState")
 	if state == null or int(state.credits) < amount:
 		return false
@@ -100,11 +117,41 @@ func spend_gold(amount: int) -> bool:
 	return true
 
 func award_gold(amount: int) -> void:
-	if amount == 0:
+	if amount == 0 or lent:
 		return
 	var state := get_node_or_null("/root/PlayerState")
 	if state != null:
 		state.add_credits(amount)
+
+# --- the co-op loan ----------------------------------------------------------
+
+## Take a co-op host's warband for the session: the roster, stash, essence,
+## orders and bookmark exactly as the host holds them (its `to_dict()`), and the
+## host's purse. The host sends it again whenever its warband changes, so this is
+## also how the lent copy keeps up.
+func lend(data: Dictionary, gold_amount: int) -> void:
+	lent = true
+	_lent_gold = maxi(0, gold_amount)
+	from_dict(data)
+
+## Hand the lent warband back: this machine's own save is read again, or a fresh
+## warband stands in when there is none, so the title opens exactly the campaign
+## it opened before the session.
+func end_loan() -> void:
+	if not lent:
+		return
+	lent = false
+	_lent_gold = 0
+	clear_possession()
+	if not load_state():
+		reset_state()
+
+## The refusal every gear and purse verb gives while lent, in the shape that verb
+## always answers with.
+func _lent_refusal(fields: Dictionary = {}) -> Dictionary:
+	var out := {"ok": false, "message": LENT_MESSAGE}
+	out.merge(fields)
+	return out
 
 # --- roster ----------------------------------------------------------------
 
@@ -174,6 +221,8 @@ func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
 ## Returns `{ok, merc_id, fitted, message}` with the ids that walked across.
 func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 	var fitted: Array[String] = []
+	if lent:
+		return _lent_refusal({"merc_id": merc_id, "fitted": fitted})
 	if merc_id <= 0 or not roster.is_alive(merc_id):
 		return {"ok": false, "merc_id": merc_id, "fitted": fitted, "message": ""}
 	for slot_id in slots:
@@ -213,6 +262,8 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 ## keeper price the paperdoll and the stash sort use, so nothing can disagree
 ## about what a piece is worth.
 func buy_gear(item_id: String) -> Dictionary:
+	if lent:
+		return _lent_refusal({"item_id": item_id, "cost": 0})
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	if item.is_empty():
 		return {"ok": false, "message": "The quartermaster does not stock that.", "item_id": item_id, "cost": 0}
@@ -236,6 +287,8 @@ func buy_gear(item_id: String) -> Dictionary:
 ## whole coin, so a sale always returns less than the purchase. `price` in the
 ## reply is what the purse was actually paid, not the catalogue figure.
 func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
+	if lent:
+		return _lent_refusal({"price": 0, "item_id": item_id})
 	var id := State.migrate_item_id(item_id)
 	var item: Dictionary = State.ITEMS.get(id, {})
 	if item.is_empty():
@@ -258,6 +311,8 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 		"message": "Sold %s for %d gold." % [display, payout]}
 
 func hire(merc_name: String = "") -> Dictionary:
+	if lent:
+		return _lent_refusal({"merc_id": -1, "cost": 0})
 	var state := get_node_or_null("/root/PlayerState")
 	var result := WarbandVendor.hire(roster, state, merc_name, deployment_cap) if state != null \
 		else {"ok": false, "message": "The purse is missing.", "merc_id": -1, "cost": 0}
@@ -286,6 +341,8 @@ func hire_cost() -> int:
 ## dagger in a fresh warband could never be handed from the rescuer to a
 ## prisoner, which is exactly what the first scene asks the player to do.
 func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
+	if lent:
+		return _lent_refusal({"displaced": {}})
 	if item_id.is_empty():
 		return {"ok": false, "message": "Choose a piece of gear.", "displaced": {}}
 	var gear := roster.equipped_of(merc_id)
@@ -351,6 +408,8 @@ func _worn_entries_all() -> Array[Dictionary]:
 ## never loses a good blade to a lucky drop; anything else stays in the stash.
 ## Returns `{ok, slot, displaced, message}`.
 func auto_equip(merc_id: int, item_id: String) -> Dictionary:
+	if lent:
+		return _lent_refusal({"slot": ""})
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	if item.is_empty() or merc_id <= 0:
 		return {"ok": false, "message": "", "slot": ""}
@@ -376,6 +435,8 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 
 ## Strip a worn piece back into the pool.
 func unequip_merc(merc_id: int, slot_id: String) -> String:
+	if lent:
+		return ""
 	var item_id := roster.unequip(merc_id, slot_id)
 	if item_id.is_empty():
 		return ""
@@ -389,16 +450,23 @@ func unequip_merc(merc_id: int, slot_id: String) -> String:
 ## body hop, a reload and a scene hand-off - and the scene re-dresses the rig from
 ## it with `refresh_gear()`.
 func swap_weapon_set(merc_id: int) -> Dictionary:
+	if lent:
+		return _lent_refusal({"set": 0})
 	var result := roster.swap_weapon_set(merc_id)
 	_notify()
 	return result
 
 func set_deployed(merc_id: int, on: bool) -> Dictionary:
+	if lent:
+		return _lent_refusal()
 	var result := roster.set_deployed(merc_id, on, deployment_cap)
 	_notify()
 	return result
 
 func deploy_battle(merc_ids: Array) -> Array[int]:
+	if lent:
+		var none: Array[int] = []
+		return none
 	var fielded := roster.deploy(merc_ids, deployment_cap)
 	_notify()
 	return fielded
@@ -452,6 +520,9 @@ func clear_possession() -> void:
 # --- reset -----------------------------------------------------------------
 
 func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
+	# A reset is a fresh warband of this machine's own, never a host's.
+	lent = false
+	_lent_gold = 0
 	roster.clear()
 	stash.clear()
 	cruor.clear()
@@ -514,6 +585,10 @@ func from_dict(data: Dictionary) -> void:
 ## and every scene's `_exit_tree()` call this, so the report is written with the
 ## roster the arena mirrored at 0.4 s intervals still in place.
 func save_state() -> void:
+	# A lent warband is the host's: writing it here would put somebody else's
+	# campaign over this machine's own save.
+	if lent:
+		return
 	_close_open_run()
 	var file := FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
@@ -523,6 +598,10 @@ func save_state() -> void:
 	file.close()
 
 func load_state() -> bool:
+	# Reading this machine's file into a lent warband would swap the host's
+	# campaign for the guest's in the middle of a session.
+	if lent:
+		return false
 	if not FileAccess.file_exists(save_path):
 		return false
 	var file := FileAccess.open(save_path, FileAccess.READ)
@@ -539,6 +618,23 @@ func load_state() -> bool:
 		return false
 	from_dict(parsed)
 	return true
+
+## What a warband file holds, read without adopting it: `{exists, roster,
+## checkpoint}`. The title says what HOST GAME's checkpoint door would open with
+## this, and must not load a save into the live warband just to describe one.
+static func peek_save(path: String) -> Dictionary:
+	var out := {"exists": false, "roster": 0, "checkpoint": {}}
+	if path.is_empty() or not FileAccess.file_exists(path):
+		return out
+	out["exists"] = true
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not parsed is Dictionary:
+		return out
+	var roster_data: Variant = (parsed as Dictionary).get("roster", {})
+	if roster_data is Dictionary and (roster_data as Dictionary).get("mercenaries", []) is Array:
+		out["roster"] = ((roster_data as Dictionary)["mercenaries"] as Array).size()
+	out["checkpoint"] = sanitise_checkpoint((parsed as Dictionary).get("checkpoint", {}))
+	return out
 
 # --- checkpoints (the autosave bookmark) ------------------------------------
 #

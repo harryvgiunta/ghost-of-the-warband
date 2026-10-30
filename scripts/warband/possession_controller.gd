@@ -53,6 +53,20 @@ var auto_simulate := true
 ## possessed body stops walking. Pointer capture stays the scene's business too,
 ## which is why the controller itself never touches `Input.mouse_mode` policy.
 var input_enabled := true
+## How the local soul asks for a body while this process is not the authority.
+## The session sets it: a guest's `[`/`]`, F1..F8 and warband-screen click become a
+## request the host answers with its ownership map, never a move made here - two
+## guests deciding for themselves is how two souls ended up in one body.
+var transfer_requester: Callable = Callable()
+## The scene's half of the verbs the controller does not own (`swap_set`,
+## `revive`): called as `world_action.call(actor, action, value)` on the
+## authority, so a guest's TAB or revive reaches the host's warband through the
+## same intent channel as its swing.
+var world_action: Callable = Callable()
+## The body the local soul's eye rides while it has none of its own: another
+## soul's body. When every living body is taken, the soul that was inside the
+## last one first keeps it, and everybody else watches it through this.
+var watched: Actor = null
 
 var _warband: WarbandState
 var _bodies_root: Node3D
@@ -110,12 +124,13 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 ## One real body per living mercenary, wearing that mercenary's gear. Deployed
 ## ids win when the warband has marked a battle line; otherwise the whole living
 ## roster fields, which is what the cage and the arena both want.
-func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true) -> Array[Actor]:
+func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true,
+		merc_ids: Array = []) -> Array[Actor]:
 	var out: Array[Actor] = []
 	if _warband == null:
 		return out
 	_authoritative = authoritative
-	for merc_id in _spawn_ids():
+	for merc_id in _spawn_ids(merc_ids):
 		var spawn := Vector3.ZERO
 		if not spawn_points.is_empty():
 			spawn = spawn_points[out.size() % spawn_points.size()]
@@ -124,8 +139,18 @@ func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true)
 			out.append(actor)
 	return out
 
-func _spawn_ids() -> Array[int]:
+## The mercenaries to field. `wanted` is a list the authority already fielded (a
+## co-op guest fields exactly the host's bodies, a downed one included); without
+## it, deployed ids win and otherwise the living roster takes the field.
+func _spawn_ids(wanted: Array = []) -> Array[int]:
 	var out: Array[int] = []
+	if not wanted.is_empty():
+		for raw_id in wanted:
+			var merc_id := int(raw_id)
+			if _warband.roster.has(merc_id) and not _merc_bodies.has(merc_id) \
+					and _warband.roster.state_of(merc_id) != Contracts.HealthState.DEAD:
+				out.append(merc_id)
+		return out
 	var deployed := _warband.deployed_merc_ids()
 	var source: Array[int] = deployed if not deployed.is_empty() else _warband.alive_merc_ids()
 	for merc_id in source:
@@ -241,6 +266,40 @@ func active_body(peer_id: int = 0) -> Actor:
 		return active_actor
 	return body_for_peer(peer_id)
 
+## The body the local soul is looking at: its own, or - while it has none - the
+## one it is watching. The scene follows this for everything that should go on
+## with the party rather than stop with one soul (the squad's escort, the music,
+## the checkpoints).
+func focus_body() -> Actor:
+	if active_actor != null and is_instance_valid(active_actor):
+		return active_actor
+	return watching()
+
+## The other soul's body this one is watching, or null.
+func watching() -> Actor:
+	if active_actor != null and is_instance_valid(active_actor):
+		return null
+	return watched if watched != null and is_instance_valid(watched) else null
+
+## The peer inside the body being watched, or 0.
+func watched_peer() -> int:
+	var body := watching()
+	if body == null:
+		return 0
+	for peer_id in _peer_actors:
+		if _peer_actors[peer_id] == body:
+			return int(peer_id)
+	return 0
+
+## Every peer this process has wired into a body, in id order.
+func possessing_peers() -> Array[int]:
+	var out: Array[int] = []
+	for peer_id in _peer_actors:
+		if body_for_peer(int(peer_id)) != null:
+			out.append(int(peer_id))
+	out.sort()
+	return out
+
 ## Tell the controller whether an unpossessed body should fight on its own. The
 ## arena marks its two squads this way; a body with a soul inside ignores it
 ## until the soul leaves.
@@ -314,6 +373,15 @@ func cycle(peer_id: int, direction: int = 1) -> Dictionary:
 	if _warband == null:
 		return {"ok": false, "message": "No warband.", "body_id": -1, "previous_body_id": -1,
 			"reason": SoulRouter.REASON_UNKNOWN}
+	if _routes(peer_id):
+		var target := _warband.souls.cycle_target(peer_id, direction)
+		var body_id := int(target.get("body_id", -1))
+		if not bool(target.get("ok", false)):
+			transfer_refused.emit(peer_id, body_id, str(target.get("reason", "")))
+			return target
+		if body_id == _warband.souls.body_of(peer_id):
+			return target
+		return transfer_requester.call(body_id)
 	var result := _warband.souls.cycle(peer_id, direction)
 	if bool(result.get("ok", false)):
 		_wire(peer_id, int(result.get("body_id", -1)))
@@ -323,7 +391,24 @@ func cycle(peer_id: int, direction: int = 1) -> Dictionary:
 
 ## Enter a named body. The warband screen's click and `F1`..`F8` both land here.
 func direct(peer_id: int, merc_id: int) -> Dictionary:
+	if _routes(peer_id):
+		return transfer_requester.call(merc_id)
 	return activate(peer_id, merc_id)
+
+## Adopt the authority's decision as it stands: the router takes the host's word
+## (`SoulRouter.assign`) and the scene is wired to it. Only a guest's session
+## calls this, with the host's ownership map.
+func adopt(peer_id: int, merc_id: int) -> void:
+	if _warband == null or body_of(merc_id) == null:
+		return
+	if not _warband.souls.assign(peer_id, merc_id):
+		return
+	_wire(peer_id, merc_id)
+
+## True when the local soul's move has to be asked for rather than made: this
+## process is not the authority and a session is listening.
+func _routes(peer_id: int) -> bool:
+	return not _authoritative and peer_id == local_peer_id and transfer_requester.is_valid()
 
 ## Wire the scene to a router decision. Never validates: the router has already
 ## moved the soul by the time this runs, so a second check would only hide bugs.
@@ -339,12 +424,15 @@ func _wire(peer_id: int, merc_id: int) -> void:
 	_dress(actor, peer_id)
 	_peer_actors[peer_id] = actor
 	if peer_id == local_peer_id:
+		var was_watching := watching() != null
 		active_actor = actor
+		watched = null
 		_drawing = false
 		_throw_held = false
 		if camera_rig != null:
-			# The first body of a session snaps; every later body is an arc.
-			camera_rig.follow(actor, previous == null)
+			# The first body of a session snaps; every later body is an arc, and
+			# so is the way back from a body this soul was only watching.
+			camera_rig.follow(actor, previous == null and not was_watching)
 	_warband.note_possession(peer_id, merc_id)
 	var changed := int(_last_merc.get(peer_id, -1)) != merc_id
 	_last_merc[peer_id] = merc_id
@@ -454,6 +542,10 @@ func _on_actor_killed(_slot: int, _source: int, actor: Actor) -> void:
 	_warband.souls.set_body_state(merc_id, Contracts.HealthState.DEAD)
 
 func _eject(peer_id: int, reason: String) -> void:
+	# A guest does not move souls: the host ejects every one of them and its
+	# ownership map says where each landed - or that one is watching now.
+	if not _authoritative:
+		return
 	var moved := cycle(peer_id, 1)
 	var body := body_for_peer(peer_id)
 	if bool(moved.get("ok", false)) and body != null and body.alive:
@@ -499,6 +591,7 @@ func physics_step(delta: float) -> void:
 		return
 	_last_step_frame = frame
 	if camera_rig != null:
+		_update_watch()
 		camera_rig.update(delta)
 	if _spawned.is_empty():
 		return
@@ -514,6 +607,30 @@ func physics_step(delta: float) -> void:
 			body.step(delta, _spawned, _tick)
 	elif actor != null and is_instance_valid(actor) and actor.predicting:
 		actor.predicted_step(delta, _spawned)
+
+## A soul with no body watches one that has a soul in it: the lowest peer id
+## other than this one with a living body. That is the other player's body when
+## the last free one went to them, and nothing at all when every body is down -
+## the eye then holds its last frame, as it always did.
+func _update_watch() -> void:
+	if active_actor != null and is_instance_valid(active_actor):
+		watched = null
+		return
+	var target: Actor = null
+	for peer_id in possessing_peers():
+		if peer_id == local_peer_id:
+			continue
+		var body := body_for_peer(peer_id)
+		if body != null and body.alive:
+			target = body
+			break
+	if target == watched and (target == null or camera_rig.active_body() == target):
+		return
+	watched = target
+	if target == null:
+		camera_rig.clear()
+	else:
+		camera_rig.follow(target, false)
 
 ## The possessed body's intent for this frame, read from the same bindings the
 ## arena uses: WASD relative to the camera, Shift to sprint, the centre ray as
@@ -722,6 +839,11 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 		"stop":
 			combat.stop()
 			return true
+		"swap_set", "revive":
+			# The scene's verbs: the authority's world answers them for this body,
+			# so a guest's TAB and revive land on the host's warband and field.
+			if world_action.is_valid():
+				return bool(world_action.call(actor, action, value))
 	return false
 
 # --- input -----------------------------------------------------------------
@@ -745,7 +867,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		_mouse_press(event)
 
 func _input(event: InputEvent) -> void:
-	if active_actor == null or not input_enabled:
+	if not input_enabled:
+		return
+	if active_actor == null:
+		# A watching soul still owns its eye: it looks around the body it rides.
+		if watching() != null and event is InputEventMouseMotion \
+				and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and camera_rig != null:
+			camera_rig.rotate_view(-event.relative.x * 0.004, event.relative.y * 0.004)
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if camera_rig != null:
@@ -871,6 +999,12 @@ func _mouse_release(event: InputEventMouseButton) -> void:
 func _melee(hand: String, variant: String, sample: Dictionary) -> bool:
 	return _act("melee", {"aim": sample["point"], "hand": hand, "variant": variant},
 		sample["origin"])
+
+## One verb on the local soul's body, the way its key would send it: performed
+## here on the authority, predicted and sent to the host on a guest. The scene's
+## own keys (TAB, the revive hold) come through this.
+func act(action: String, value: Variant = null) -> bool:
+	return _act(action, value)
 
 ## Run one verb on the possessed body with the camera ray that produced it.
 ## A guest owns no combat: it predicts the locomotion intents the actor layer

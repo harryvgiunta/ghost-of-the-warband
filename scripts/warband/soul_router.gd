@@ -171,6 +171,29 @@ func request_transfer(peer_id: int, target_body_id: int) -> Dictionary:
 func can_transfer(peer_id: int, target_body_id: int) -> Dictionary:
 	return _refuse(peer_id, target_body_id, "")
 
+## The authority's word, taken as it is. A guest never decides who is inside
+## what - the host's ownership map does, and the host has already applied every
+## rule above - so a body this peer still believes is downed (a snapshot behind
+## the host) must still take the soul the host put in it. Whatever the peer held
+## and whoever held the body are released first, so the lock stays one-to-one.
+func assign(peer_id: int, body_id: int) -> bool:
+	if peer_id == 0 or not _bodies.has(body_id):
+		return false
+	var current := body_of(peer_id)
+	if current == body_id:
+		return true
+	if current != -1:
+		release_peer(peer_id, "moved")
+	var record: Dictionary = _bodies[body_id]
+	var holder := int(record.get("occupied_by_peer_id", 0))
+	if holder != 0 and holder != peer_id:
+		release_peer(holder, "moved")
+	record["occupied_by_peer_id"] = peer_id
+	record["last_owner_peer_id"] = peer_id
+	_peer_body[peer_id] = body_id
+	body_possessed.emit(peer_id, body_id)
+	return true
+
 func _refuse(peer_id: int, target_body_id: int, reason: String) -> Dictionary:
 	if not _bodies.has(target_body_id):
 		return _refused(peer_id, target_body_id, REASON_UNKNOWN)
@@ -222,6 +245,16 @@ func possessable_ids() -> Array[int]:
 ## instead of failing. Returns the same `request_transfer` payload; a refusal
 ## leaves the soul where it is.
 func cycle(peer_id: int, direction: int = 1) -> Dictionary:
+	var target := cycle_target(peer_id, direction)
+	var body_id := int(target.get("body_id", -1))
+	if not bool(target.get("ok", false)) or body_id == body_of(peer_id):
+		return target
+	return request_transfer(peer_id, body_id)
+
+## Where `cycle` would put the soul, without moving it: a guest asks the host
+## for exactly this body. The payload is `request_transfer`'s; a `body_id` equal
+## to the soul's own body means it stays (it holds the only one standing).
+func cycle_target(peer_id: int, direction: int = 1) -> Dictionary:
 	var current := body_of(peer_id)
 	var candidates := possessable_ids()
 	if candidates.is_empty():
@@ -246,7 +279,8 @@ func cycle(peer_id: int, direction: int = 1) -> Dictionary:
 	if target == current:
 		return {"ok": true, "message": "You are the only body standing.",
 			"body_id": current, "previous_body_id": current, "reason": REASON_NONE}
-	return request_transfer(peer_id, target)
+	return {"ok": true, "message": "", "body_id": target, "previous_body_id": current,
+		"reason": REASON_NONE}
 
 func clear() -> void:
 	_bodies.clear()

@@ -280,7 +280,9 @@ func setup(warband_state, soul_controller, loot_vacuum) -> void:
 func drive(delta: float) -> void:
 	if controller == null or warband == null:
 		return
-	player_body = controller.active_body(1)
+	# The body the squad walks with: the soul's own, or - while the soul watches
+	# a co-op friend in the last body standing - that one.
+	player_body = controller.focus_body()
 	_drop_crumb()
 	if _rescue_step(delta):
 		# The rescue has already written its rescuer's intent for this frame; the
@@ -404,7 +406,7 @@ func armed_count() -> int:
 	if controller == null or warband == null:
 		return 0
 	var count := 0
-	var soul_body = controller.active_body(1)
+	var soul_body = controller.focus_body()
 	for raw_id in squad_ids:
 		var merc_id := int(raw_id)
 		if not _is_free(merc_id):

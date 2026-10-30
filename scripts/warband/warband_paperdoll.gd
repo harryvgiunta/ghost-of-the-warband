@@ -519,6 +519,8 @@ func _on_slot_pressed(slot: int) -> void:
 		var returned := str(_warband.unequip_merc(selected_merc, slot_id))
 		if not returned.is_empty():
 			set_status("%s returns to the collective stash." % _item_name(returned))
+		elif bool(_warband.get("lent")):
+			set_status(str(_warband.LENT_MESSAGE))
 	refresh()
 	changed.emit()
 

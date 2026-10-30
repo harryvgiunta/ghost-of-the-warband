@@ -128,15 +128,13 @@ WARBAND_TESTS = [
     "warband_vendors_regression",
     "warband_wilderness_regression",
     "warband_session_world_unit_regression",
-    "warband_lobby_campaign_regression",
     "warband_integration_regression",
     "warband_swing_clock_regression",
     "warband_ranged_regression",
     "audio_regression",
 ]
 ## ENet tests: two real processes on one machine, so they never share the pool.
-SERIAL = ["warband_lobby_regression", "warband_session_regression",
-          "warband_coop_campaign_regression"]
+SERIAL = ["warband_session_regression", "warband_coop_campaign_regression"]
 ## Tests that walk real game time. A fixed clock lets them run as fast as the CPU
 ## can instead of at the wall clock, which is the difference between 90 s and 40 s;
 ## their assertions are distances and states, not frame counts.

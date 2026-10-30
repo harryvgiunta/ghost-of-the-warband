@@ -229,7 +229,7 @@ class FakeController extends RefCounted:
 	func body_of(merc_id: int):
 		return bodies.get(merc_id, null)
 
-	func active_body(_peer_id: int):
+	func focus_body():
 		return null
 
 	func merc_of(_body) -> int:
