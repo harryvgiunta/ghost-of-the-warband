@@ -179,7 +179,7 @@ func check_the_world() -> void:
 	# The camp's only blade is on the dirt: the body walks onto it and takes it
 	# with `K`, and only then is there steel to cut a latch with.
 	check(not game.camp.holds_blade(soul), "the player's hands are empty at the wake")
-	soul.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	soul.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, -2.0)
 	await physics_frame
 	await physics_frame
 	_dismiss_card()

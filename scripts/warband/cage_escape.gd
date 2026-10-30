@@ -71,12 +71,14 @@ const CAGE_POSTS := [
 ## - and the squad's own medicine never draws on that stash.
 const STARTING_BANDAGES := 5
 const BANDAGE_ITEM := "bandage_linen"
-## Five spots at the cold altar (`ColdAltar` stands at (0, 0, 12.5)): three along
-## the slab's lip and two on the dirt in front, spread far enough apart that five
-## separate pieces read as five.
+## Five spots at the cold altar (`ColdAltar` stands at (0, 0, 12.5)), all of them on
+## its *far* side: three along the slab's back edge and two on the dirt behind it.
+## That is deliberate - the shiv lies at the altar's near foot (`SHIV_POST`, z 11.0)
+## and `K` takes the nearest piece, so the dressings must never be the nearest thing
+## to a body walking up to the blade it was shown.
 const START_BANDAGE_POSTS := [
-	Vector3(-1.1, 1.14, 12.5), Vector3(0.0, 1.14, 12.5), Vector3(1.1, 1.14, 12.5),
-	Vector3(-0.6, 0.15, 11.2), Vector3(0.6, 0.15, 11.2),
+	Vector3(-1.2, 1.14, 13.1), Vector3(0.0, 1.14, 13.1), Vector3(1.2, 1.14, 13.1),
+	Vector3(-0.7, 0.15, 14.1), Vector3(0.7, 0.15, 14.1),
 ]
 ## How far the freed body has to step from its own cage to have got its bearings:
 ## out of the bars and a pace further, so the beat is a step and not a timer.

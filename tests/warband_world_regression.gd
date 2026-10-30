@@ -601,7 +601,9 @@ func check_lesson() -> void:
 		"and the objective stays where it was")
 
 	# The camp's only blade is on the dirt: walk onto it, take it, and the pair wake.
-	actor.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	# The player walks up to the blade from the cages, so the approach is the front
+	# of the altar - the dressings lie behind it and are never the nearest piece.
+	actor.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, -2.0)
 	await physics_frame
 	await physics_frame
 	check(game.camp.duel.step() == DuelScript.Step.FETCH,
