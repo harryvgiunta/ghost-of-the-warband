@@ -1399,15 +1399,22 @@ func _drop_crumb() -> void:
 ## The footprint an ally should walk to. A body joins the line at the footprint
 ## nearest it - the newest of two on the same spot, so a line that doubled back is
 ## joined on its way out - and from then on only ever walks it forwards: reaching a
-## footprint (`CRUMB_ARRIVE`) hands it the next, and nothing older is offered again
-## while it holds its place (`track["crumb"]`, a footprint number that survives the
-## line being trimmed). Null when the body is nowhere near the line the soul walked.
+## footprint hands it the next, and nothing older is offered again while it holds
+## its place (`track["crumb"]`, a footprint number that survives the line being
+## trimmed). Null when the body is nowhere near the line the soul walked.
+##
+## A footprint already in hand is *kept* however far away it is: the grip is a rule
+## about where to start walking the line, not a leash that snaps back to the nearest
+## footprint, and a body dropped from its footprint mid-stride just paces between
+## the two it keeps swapping. "Reached" is arrival or progress - the next footprint
+## closer to the body than the one it is walking to - because the line is laid where
+## the soul stood, and two of those can be a stride or a hundred metres apart.
 func _crumb_for(actor, track: Dictionary) -> Variant:
 	if _trail.size() < 2:
 		return null
 	var here: Vector3 = (actor as Node3D).global_position
 	var index := int(track.get("crumb", -1)) - _trail_base
-	if index < 0 or index >= _trail.size() or _trail[index].distance_to(here) > CRUMB_GRIP:
+	if index < 0 or index >= _trail.size():
 		index = -1
 		var best_distance := CRUMB_GRIP
 		for probe in _trail.size():
@@ -1418,7 +1425,16 @@ func _crumb_for(actor, track: Dictionary) -> Variant:
 		if index < 0:
 			track["crumb"] = -1
 			return null
-	while index < _trail.size() - 1 and _trail[index].distance_to(here) <= CRUMB_ARRIVE:
+	while index < _trail.size() - 1:
+		var to_this: Vector3 = _trail[index] - here
+		to_this.y = 0.0
+		var ahead: Vector3 = _trail[index + 1] - _trail[index]
+		ahead.y = 0.0
+		var next_is_nearer := _trail[index + 1].distance_to(here) < to_this.length()
+		var walked_past := ahead.length_squared() > 0.01 and to_this.dot(ahead) < 0.0
+		var reached := to_this.length() <= CRUMB_ARRIVE or next_is_nearer or walked_past
+		if not reached:
+			break
 		index += 1
 	track["crumb"] = _trail_base + index
 	return _trail[index]

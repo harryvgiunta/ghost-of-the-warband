@@ -439,10 +439,15 @@ Integration seams deliberately placed in the base game:
     and on the map the escort walks to its ring post (snapped to open ground)
     instead of the footprints. Off the map the **footprint line is walked
     forwards only**: `_crumb_for` joins at the nearest footprint (the newest of two
-    on one spot), `CRUMB_ARRIVE` 1.25 m hands the next, and nothing older is offered
-    while the body holds its place. Picking the nearest footprint afresh every frame
-    paced two allies on 2.5 m of cage 1's approach for a whole run, because the
-    soul's walk to a cage and back lays the line out and back over itself.
+    on one spot) and then hands the next one on three facts - arrival inside
+    `CRUMB_ARRIVE` 1.25 m, the next footprint being nearer than this one, or having
+    walked past it along the line - and nothing older is ever offered while the body
+    holds its place. A footprint in hand is kept however far off it is: the grip is
+    a rule about where to start walking, not a leash, and dropping a body back to
+    the nearest footprint mid-stride paced it between the two it swapped. Picking
+    the nearest footprint afresh every frame paced two allies on 2.5 m of cage 1's
+    approach for a whole run, because the soul's walk to a cage and back lays the
+    line out and back over itself.
     `squad_steering_regression` (`check_doubled_line`, `check_cage_walk_out`) and
     `cage_escape_regression.check_walk_out` own the rule.
 

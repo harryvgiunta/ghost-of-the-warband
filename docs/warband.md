@@ -578,9 +578,11 @@ Short version of the latest tuning (all in the code, all covered by
   hangs on the back bars: a prisoner let out from behind its cage used to shoulder
   the back bars, back out of the door and walk straight back in for as long as the
   soul stood there. Off the map the escort walks the soul's footprints **forwards
-  only**; choosing the nearest footprint afresh every frame paced two allies on
-  2.5 m of cage 1's approach for a whole run, because the walk to a cage and back
-  lays the line out and back over itself;
+  only** - it joins at the nearest one and never drops back to a nearer one, so a
+  line that doubles back is walked to its newest footprint instead of being paced;
+  choosing the nearest footprint afresh every frame paced two allies on 2.5 m of
+  cage 1's approach for a whole run, because the walk to a cage and back lays the
+  line out and back over itself;
 - an unarmed ally looks for **steel** first - a weapon on the ground inside
   `SEARCH_METRES`, or a blade still on a corpse (`WarbandGearDrop`/`take_from_corpse`)
   - and does not cross the clearing for a rag, a ring or a bundle;
