@@ -128,9 +128,11 @@ var engaged := false
 ## piece in the shared stash, taken by the squad like any other loot.
 const BANDAGE_ITEM := "bandage_linen"
 const BANDAGE_SECONDS := 1.8
-## Health below this share is worth a bandage; above it the squad keeps its
-## dressings for after the fight.
-const BANDAGE_HEALTH_SHARE := 0.7
+## Health at or below this share is worth a bandage; above it the squad keeps its
+## dressings. Half the pool is deliberately the same number the revive channel
+## hands back (`REVIVE_HEALTH_FRACTION`), so a squadmate that has just been stood
+## up - the one that needs a dressing most - is exactly on the trigger.
+const BANDAGE_HEALTH_SHARE := 0.5
 ## What one bandage closes, as a share of the body's own pool.
 const BANDAGE_HEAL_SHARE := 0.3
 ## How long an ally may push without moving before it sidesteps, and for how long
@@ -722,8 +724,9 @@ func _bandage_step(actor, merc_id: int, track: Dictionary, _delta: float) -> boo
 	return true
 
 
-## Hurt enough to spend a dressing, holding a body that can still be saved, with
-## one in the shared stash to spend.
+## Hurt enough to spend a dressing - half the pool or less, which is where a body
+## comes back from the floor - holding a body that can still be saved, with one in
+## the shared stash to spend.
 func _wants_bandage(actor, merc_id: int) -> bool:
 	if warband == null or warband.stash == null:
 		return false
@@ -734,7 +737,7 @@ func _wants_bandage(actor, merc_id: int) -> bool:
 	var pool := float(actor.get("max_health"))
 	if pool <= 0.0:
 		return false
-	return float(actor.get("health")) < pool * BANDAGE_HEALTH_SHARE
+	return float(actor.get("health")) <= pool * BANDAGE_HEALTH_SHARE
 
 
 ## Close the wound: the dressing leaves the stash, the body gets its share of its

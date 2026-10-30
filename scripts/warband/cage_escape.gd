@@ -65,6 +65,9 @@ const CAGE_POSTS := [
 	Vector3(-17.0, 0.2, -18.5),    # deep left, down by the collapsed den
 	Vector3(12.0, 0.2, -9.5),      # right, between the cages and the watchers
 ]
+## The dressings a fresh warband starts with, in the shared stash. A squad binds
+## its own wounds at half a pool; the first fight is what it is meant to survive.
+const STARTING_BANDAGES := 4
 ## How far the freed body has to step from its own cage to have got its bearings:
 ## out of the bars and a pace further, so the beat is a step and not a timer.
 const BEARINGS_RADIUS := 4.2
@@ -377,6 +380,12 @@ func seed_warband() -> void:
 		for merc_id in squad_ids:
 			warband.roster.unequip(merc_id, "main")
 			warband.roster.unequip(merc_id, "off")
+	# A fresh warband is handed its field dressings: the squad binds its own wounds
+	# at half a pool (and every body a revive stands up lands exactly there), and a
+	# rule with no bandage in the stash is a rule that never fires. Four is a first
+	# fight's worth, not a supply: the rest is taken off the wardens' bodies.
+	if fresh:
+		warband.stash.add("bandage_linen", STARTING_BANDAGES)
 	caged_ids.clear()
 	for index in CAGE_COUNT:
 		caged_ids.append(squad_ids[index])

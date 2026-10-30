@@ -63,6 +63,15 @@ func run() -> void:
 	check(not _squad._wants_bandage(body, _merc_id),
 		"a body at full health does not spend a bandage")
 
+	# A body stood back up by a revive lands on exactly half its pool, and that is
+	# the trigger: the one that has just been down is the one that binds first.
+	body.health = body.max_health * 0.5
+	check(_squad._wants_bandage(body, _merc_id),
+		"a body standing on half a pool - where a revive leaves it - wants a dressing")
+	body.health = body.max_health * 0.51
+	check(not _squad._wants_bandage(body, _merc_id),
+		"and one just above half keeps its dressings")
+
 	# Hurt, quiet, and holding a dressing: the channel opens and takes its seconds.
 	body.health = body.max_health * 0.4
 	check(_squad._wants_bandage(body, _merc_id), "a badly hurt body wants a dressing")
