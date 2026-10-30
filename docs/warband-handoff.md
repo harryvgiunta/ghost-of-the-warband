@@ -111,10 +111,10 @@ the tutorial's to take.
 8. **Town.** The trail ends at a **stockade**: 286 planted stakes with one gap and
    a bone-lintel gate over the road, eight roofs inside it (five stick-walled
    halls, two round dwellings, one open stall), a totem pair, the fire ring, and
-   the services — shared infinite stash, Sacrificial Altar (unbind / distil 5:1 /
-   brand), the **recruiter** (the first eight oaths are free; a hire dresses itself
-   from the shared stash), the **quartermaster** (plain steel into the stash, and
-   the campaign's orders), the **ichor bench**, three market keepers and the
+   the services — shared infinite stash, Sacrificial Altar (anoint weapons / unbind
+   / distil 5:1 / brand), the **recruiter** (the first eight oaths are free; a hire
+   dresses itself from the shared stash), the **quartermaster** (plain steel into
+   the stash, and the campaign's orders), three market keepers and the
    expedition gate (deploy up to 8 → arena). Every keeper is an armoured body
    standing behind his own counter, and a gold **TALK TO HIM** arrow rides
    whichever one has something to say. Three watch archers stand on the wall and
@@ -130,10 +130,11 @@ the tutorial's to take.
      campaign's over-arching order, **FIND THE CRYPT**, which is a shell: there is
      no Crypt in the world yet, and the order stays open until there is.
    * **The vial.** A warden's ichor drops off the wardens themselves (four variants
-     in twelve carry it). Walking up to the quartermaster with one in the stash
-     raises the card that explains it and then the bench: press `G` at the bench,
-     take a spare weapon out of the stash, and it comes back with a sigil bound
-     into it — `R` looses it. One vial, one blade, no essence spent.
+     in twelve carry it). Steel carries no skill until the altar wakes it: walking
+     up to the quartermaster with a vial in the stash raises **ICHOR IN THE STEEL**
+     and his lesson, then `G` at the altar opens on its ANOINT page — one vial on a
+     weapon or shield the warband carries and every copy wakes into its skill, loosed
+     with `1` (weapon) or `2` (shield). No essence spent.
 8. **The map.** `M` opens the wood on one page: the road sampled from the trail's
    own path, the camp's ring, the town's walled square, the order markers (cages,
    warcamps), every hostile within the wood and the souls' own bodies with the one
@@ -187,9 +188,10 @@ speeds are still the warband's one contract. See `docs/warband.md`
 
 HUD keys: `[`/`]` cycle body, F1–F8 named body, O warband screen, **M the map**,
 TAB quick
-weapon swap (the frontier's two sets), P paperdoll, plain 1/2/3 item skills
-(Shift+1..3 is the same press), RMB guard — and a cover lean while attached,
-released with the button — Escape the campaign menu, G interact and the five
+weapon swap (the frontier's two sets), P paperdoll, plain 1/2/3 the skills of
+anointed hands and the worn trinket (Shift+1..3 is the same press), RMB guard —
+and a cover lean while attached, released with the button — Escape the campaign
+menu, G interact and the five
 second revive hold, **LMB on a corpse or a drop is the loot** (the body ducks and
 takes everything; K still quick-loots one piece),
 R branded skill, X shoulder swap (the camera is 0.70 m off the spine, as the
@@ -210,12 +212,12 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | Area | Files |
 | --- | --- |
 | Contract/vocabulary | `scripts/warband/warband_contracts.gd`, `cruor_catalog.gd`, `branded_skills.gd` |
-| Persistence | `warband_state.gd` (autoload, `user://warband_state.json`), `warband_roster.gd`, `town_stash_model.gd`, `cruor_manager.gd`, `mercenary_vendor.gd` |
+| Persistence | `warband_state.gd` (autoload, `user://warband_state.json` at `SAVE_VERSION` 6: v5 added `quests`, v6 the altar's `cruor.anointed`, so a v5 file loads with plain steel), `warband_roster.gd`, `town_stash_model.gd`, `cruor_manager.gd`, `mercenary_vendor.gd` |
 | Possession | `soul_router.gd`, `possession_controller.gd`, `possession_camera.gd`, `possession_sync.gd` |
 | Combat bubble | `combat_bubble.gd`, `passive_duel_brain.gd`, `damage_scaler.gd` |
 | Downed/revive | `downed_state.gd`, `crawl_to_safety.gd`, `revive_channel.gd` |
 | Loot | `loot_vacuum.gd`, `warband_pickup.gd`, `soldier_loot_run.gd` |
-| Crafting | `sacrificial_altar.gd`, `altar_menu.gd`, `quartermaster_menu.gd`, `ichor_bench.gd` (the reagent bench: one vial, one sigil, no essence) |
+| Crafting | `sacrificial_altar.gd` (the altar's body), `altar_menu.gd` (ANOINT and ESSENCE pages), `cruor_manager.gd` (`ANOINT_RECIPES` and the `anointed` ledger beside the brands), `quartermaster_menu.gd` |
 | Campaign ledger | `quest_log.gd` (`WarbandQuests`, `Warband.quests`), `quest_giver.gd` (the keeper's cards and the gold arrow's owner), `quest_marker.gd` (the arrow over a head) |
 | The orders' ground | `soldier_cages.gd` (four caged soldiers and the latch), `watcher_warren.gd` (three warcamps of 21 wardens) |
 | Loot | `loot_vacuum.gd`, `warband_pickup.gd`, `loot_hand.gd` (the click and the crouch), `loot_summary.gd` (the one line) |
@@ -339,7 +341,7 @@ Integration seams deliberately placed in the base game:
     loot — lights or douses it without being told.
 23. **A checkpoint is the warband's save, not a second file.** `Warband.save_checkpoint()`
     writes the roster, stash, essence and the `{id, area, position, label, at}`
-    bookmark to `user://warband_state.json` in one call (save version 4). It is
+    bookmark to `user://warband_state.json` in one call (the bookmark since save version 4). It is
     written at exactly two moments — the camp's six watchers down (`trail_start`)
     and the town square entered (`town`) — once per id, so walking back and forth
     cannot hammer the disk; `sanitise_checkpoint()` is the only reader, and a v3
@@ -378,7 +380,7 @@ Integration seams deliberately placed in the base game:
 26. **One ledger, five goal shapes.** `scripts/warband/quest_log.gd`
     (`class_name WarbandQuests`, `Warband.quests`) is the only place an objective
     lives: `KILL` / `RESCUE` / `COLLECT` / `APPLY` / `REACH`, one row each in
-    `DEFS`, progress and state keyed by id and saved as v5 (`quests`). The two
+    `DEFS`, progress and state keyed by id and saved as `quests`. The two
     shapes the campaign leans on — *kill X of a mob*, *rescue X bodies* — are
     table rows, not code paths, so a new bounty is a definition plus one
     `note_*` call. The world counts deaths (`WorldScene.note_kill`, from both the
@@ -387,8 +389,9 @@ Integration seams deliberately placed in the base game:
 27. **The keeper who speaks speaks first.** `QuestGiver.talk(service, peer)` runs
     before the counter opens: a card for an order, a turn-in, or the vial; the
     counter is the next press. It can be two cards in a row (the ichor order, then
-    the bench lesson) and that is correct — a test that presses a counter once
-    must close cards until the panel opens rather than assume one press.
+    the altar lesson, tip `ichor_altar`) and that is correct — a test that presses
+    a counter once must close cards until the panel opens rather than assume one
+    press.
 28. **A click on lootable ground is the loot, not a swing.** `WorldScene._input`
     reads the press before the soul controller's `_unhandled_input`, so
     `WarbandLootHand.try_click` can consume it; nothing lootable under the
@@ -407,13 +410,20 @@ Integration seams deliberately placed in the base game:
     post and stopped). `_yaw_facing(forward)` puts the span across the road. The
     contract is measured off *every* collider the lane carries, not just the tree
     rows: nothing may sit within `CLEAR_HALF` 1.55 m of the centre line.
-31. **Ichor is item-shaped; essence is a wallet.** A warden's ichor is a carried
-    catalog piece (`ichor_vial`), dropped deterministically by four of the twelve
-    watcher variants. `IchorBench.apply()` spends one vial and calls
-    `WarbandCruor.bind()` — the same brand ledger the altar writes, with the
-    essence step removed — so the sigil tile, `R` and the tooltip all work with no
-    idea that a reagent paid for them. An already-branded piece is refused there;
-    rerolling stays the altar's job.
+31. **Ichor is item-shaped; essence is a wallet; steel is plain until anointed.**
+    A warden's ichor is a carried catalog piece (`ichor_vial`), dropped
+    deterministically by four of the twelve watcher variants. Stock weapons carry
+    no skill in any mode: `AbilityRules.granted(rig)` grants a hand's skill only
+    when `rig.anointed[hand]` names it, and the warband fills that from the altar's
+    `cruor.anointed` ledger (catalog id → ability id, so every copy carries it).
+    `Warband.anoint(item_id)` spends the recipe from the shared stash
+    (`WarbandCruor.ANOINT_RECIPES`, `{ichor_vial: 1}` for every skill today),
+    writes the ledger, credits APPLY orders through `quests.note_applied` per
+    reagent and emits `Warband.anointed`, which the controller answers by
+    re-dressing every body holding that piece. `SeatLoadout.apply(rig, loadout,
+    anointed)` takes the anointed ids as a trusted local argument, never from the
+    (possibly remote) loadout dict. Essence still pays the `R` brands on the
+    altar's ESSENCE page; the two ledgers never touch.
 
 ### Tuning knobs (one place each)
 
@@ -444,11 +454,11 @@ Integration seams deliberately placed in the base game:
 | The cage line | `soldier_cages.gd` | four cages at lane fractions 0.34 / 0.52 / 0.68 / 0.86, 7.6-8.6 m off the line (alternating sides), `LATCH_REACH` 2.2 m from a footprint edge, `CAGE_BAR_LIFT` 2.6 m, soldiers `Bren / Hask / Ilse / Torvin` |
 | The warcamps | `watcher_warren.gd` | three camps of seven hollow wardens at fractions 0.72 / 0.80 / 0.90, **78 / 96 / 86 m** off the lane (past twice a warden's 60 m sight), one shared `MobWander` territory each, dressing from the village kit |
 | Free oaths and the dressing | `mercenary_vendor.gd::FREE_HIRES`, `warband_state.gd::dress_recruit` | the first 8 cost nothing (and 8 is the cap); a hire or a rescue takes the dearest spare in the shared stash for `main, off, head, chest, hands, legs, feet, neck, ring1, ring2` |
-| The ledger | `quest_log.gd::DEFS` | four rows: `free_the_soldiers` (rescue 4), `cull_the_watchers` (kill 20 `hollow_warden`), `find_the_crypt` (reach `crypt`, a shell with no place), `bind_the_ichor` (apply one `ichor_vial`) |
-| The ichor | `cage_watcher.gd::_stamp_carried`, `ichor_bench.gd` | four of twelve variants carry a vial; one vial binds one pooled weapon at `T1_RITUAL_TALLOW` with no essence spent |
+| The ledger | `quest_log.gd::DEFS` | four rows: `free_the_soldiers` (rescue 4), `cull_the_watchers` (kill 20 `hollow_warden`), `find_the_crypt` (reach `crypt`, a shell with no place), `bind_the_ichor` (apply one `ichor_vial`: "Anoint a weapon with the warden's ichor") |
+| The ichor and the rite | `cage_watcher.gd::_stamp_carried`, `cruor_manager.gd::ANOINT_RECIPES` | four of twelve variants carry a vial; `ANOINT_RECIPES` is the one table that prices each of the twelve weapon/shield skills (all `{ichor_vial: 1}` today) — balance them apart there |
 | The loot click | `loot_hand.gd` | 0.9 s channel, 0.25 s cooldown, 2.0 m pile radius, 1.5 m walk-off, `LOOT_REACH` 2.6 m |
 | The map | `world_map.gd` | one page, `M`, never pauses, `REPAINT_SECONDS` 0.1, marks from `host.map_markers()` |
-| Town | `town_hub.gd` | `WALL_RADIUS` 22, 286 palisade stakes with one gap, 8 roofs (5 halls / 2 round huts / 1 stall), 5 armoured keepers, 3 watch archers at 26 m sight, 16 lights |
+| Town | `town_hub.gd` | `WALL_RADIUS` 22, 286 palisade stakes with one gap, 8 roofs (5 halls / 2 round huts / 1 stall), 5 armoured keepers, 3 watch archers at 26 m sight, 16 lights inside `town_stockade_regression.LIGHT_BUDGET` 17; the altar at `ALTAR_POINT` (8, 0, 4) owns exactly one (`RitualLight`) |
 | Deep-wood wolves | `wilderness.gd::PACKS` | eight **kind 0** briars in two packs of four at 62-80 m and 688-712 m, 30-50 m off the line (one beside the checkpoint corridor, one deep on the lane; both beyond the wolf's sight of the route), nothing on the lane or corridor, `MOUTH_CLEARANCE` 25 m, 0.5 s target refresh, `PACK_RADIUS` 14 m |
 | Warband ability keys | `possession_controller.gd::_command` | plain 1/2/3 → slots 0/1/2 (Shift+1..3 is the same press); the HUD tiles read the possessed body's runner every frame and hide an ungranted slot |
 | Campaign menu | `warband_menu.gd` | six rows; SAVE `Warband.save_state()`, LOAD re-reads then re-enters the world, SETTINGS the shared sound page + display row, exit label scene-owned (`EXIT TO TITLE`), exit/quit save first, never pauses the tree |
@@ -478,7 +488,7 @@ Integration seams deliberately placed in the base game:
 | `possession_regression` | 262 | bodies, cycling, camera (including free look: the whole sphere, a composed basis at both poles, and the eye kept out of the body's own column), net transfer, auto-eject |
 | `downed_revive_regression` | 67 | 10% overkill, crawl, 5 s channel |
 | `combat_bubble_regression` | 73 | 30/34 m, 10%, guard choreography, hysteresis |
-| `altar_regression` | 112 | unbind/distil/brand UI over the wallet |
+| `altar_regression` | 256 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill without a manual refresh, the ichor order completes, and the ledger survives the save |
 | `stash_autoloot_regression` | 170 | pickups, sweep, infinite value sort |
 | `warband_ui_regression` | 99 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |
@@ -489,7 +499,7 @@ Integration seams deliberately placed in the base game:
 | `escape_run_regression` | 195 | the trail as an area: a 1,374.6 m lane walked over a 420 m stretch, art budget, the hunters spaced and never handed a quarry at spawn, the leaving waking them, the escort arriving (three within 20 m), both endings |
 | `torch_light_regression` | 24 | the torch is a legal off-hand piece, lit on the body that wears it, 7.5 energy / 26 m, and dark again when it comes off |
 | `warband_world_regression` | 250 | one scene and one controller, the camp in the trees, the new opening, 1,575 m camp → town with no scene change, the services and the keepers' cards at the far end, no ally abandoned, budget |
-| `warband_abilities_regression` | 42 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
+| `warband_abilities_regression` | 46 | plain 1/2/3 starts the body's three slots (Shift+1 is the same press, not a requirement), a stock kit shows no hand tiles and the anointed kit grants all three, the stamina bar and three tiles read that body, an ungranted slot hides, RMB peeks only in cover and guards everywhere, one authoritative cue spawns exactly one arrow/spell |
 | `warband_menu_regression` | 41 | the six rows, SAVE/LOAD over `Warband.save_state`, LOAD gated on a real file, the sound page and back, `resumed` on every close, and the tree never paused |
 | `warband_vendors_regression` | 151 | three counters as `G` services in the market ring, each opening its own seat and stock; buy into the shared stash, sell one pooled copy at 60%, a short purse spends nothing, a worn copy is not on the board, closing leaves no panel |
 | `warband_wilderness_regression` | 75 | eight kind-0 wolves in two deep packs inside `guards`/`wild_mobs`, clear of the mouth, pocket and lane, aimed at the standing body, pack wander, and one `MobCuller` sweep parks a wolf left 300 m behind |
@@ -500,21 +510,20 @@ Integration seams deliberately placed in the base game:
 | `expedition_regression` | 42 | deployed line, five waves, loot run, return |
 | `expedition_director_regression` | 154 | five-wave curve 3/4/4/5/6, boss at 2x with a run-scoped brand, rewards once, wipe pays nothing |
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
-| `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
+| `warband_art_regression` | 196 | camp/town dressing counts, materials, nothing solid inside the play space |
 | `warband_appearance_regression` | 206 | the look table loads and starts each palette at the measured base, a look is a pure function of the id (order- and cache-independent), eight deployed bodies differ in face, cut, skin, shirt and shorts, every named piece exists in the assets, and the rig, an actor and an undressed body all apply or ignore it correctly (hair under a helmet, head zones scaled) |
 | `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
-| `checkpoint_regression` | 72 | the v4 bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |
+| `checkpoint_regression` | 78 | the bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |
 | `game_flow_regression` | 22 | world → arena → world on one save |
 | `admin_arena_regression` | 98 | bubble, downed, revive, loot, altar, screen, two peers |
 | `quartermaster_regression` | 20 | keeper price, purse, refusal |
 | `warband_session_regression` | 49 | two real ENet processes |
-| `quest_log_regression` | 96 | the ledger alone: the five goal shapes, offer/accept/turn-in guards, kill counting by mob id, the chain to the Crypt shell, the ichor's APPLY order, save v5 round trip, free hires and the stash dressing, and the keeper's tips and arrow |
-| `town_stockade_regression` | 239 | the town as a place: the stake ring and its one gap, 8 roofs standing clear of every service ring and the gate lane, 5 armoured keepers that cannot be possessed or hit, the gold arrow moving recruiter → quartermaster, the recruiter's tip then board, the quartermaster's order on the same press, the ichor service, and a watch archer putting a real arrow into a wolf |
+| `quest_log_regression` | 95 | the ledger alone: the five goal shapes, offer/accept/turn-in guards, kill counting by mob id, the chain to the Crypt shell, the ichor's APPLY order, the ledger's save round trip, free hires and the stash dressing, and the keeper's tips and arrow |
+| `town_stockade_regression` | 234 | the town as a place: the stake ring and its one gap, 8 roofs standing clear of every service ring and the gate lane, 5 armoured keepers that cannot be possessed or hit, the gold arrow moving recruiter → quartermaster, the recruiter's tip then board, the quartermaster's order on the same press, the altar service where the ichor is laid, the light budget of 17, and a watch archer putting a real arrow into a wolf |
 | `wild_cages_regression` | 102 | the orders' ground on the real world: four cages on the ground and clear of the lane, the latch refusing bare hands, four names on the roll and four marks on the rescue order, 21 wardens in `guards` (nearest camp 72 m off the lane), a body standing on the lane never waking a camp, and one death counting toward the bounty |
 | `loot_wow_regression` | 213 | the wolf's salvage table (deterministic per body), the booking path, `LootSummary` wording, five salvage silhouettes, the click/crouch/cancel gesture on stub bodies, and the wardens' 4-of-12 ichor split |
 | `world_map_regression` | 64 | the grown lane and field, and the page: bounds, projection monotonicity, every mark inside the panel, the legend, open/close, metres-per-pixel |
-| `ichor_bench_regression` | 28 | one vial, one sigil: the vial leaving the stash, the brand landing in the altar's own ledger at T1, no essence spent, an already-branded piece refused, and the order accounting for the bind |
 
 Relevant legacy tests that must stay green when touching shared files:
 `gameplay`, `combat_expansion`, `net_limits`, `world_art`, `mob_aggro`,
@@ -586,8 +595,10 @@ that is the pre-merge full suite, once, at the end.
   is deliberately empty.
 - **The map has no fog and no zoom.** It draws the whole wood on one sheet; a
   survey it has not seen (the Crypt) is simply absent.
-- **Ichor binds at one tier.** The bench always writes `T1_RITUAL_TALLOW`; deepening
-  a sigil is still the altar's job, paid in essence.
+- **Every rite costs the same vial.** `WarbandCruor.ANOINT_RECIPES` prices all
+  twelve weapon/shield skills at `{ichor_vial: 1}` for now; balancing them apart
+  is that one table. The frontier/arena/delve sandbox has no altar, so its
+  weapons carry no skill.
 - **A rescued soldier joins the roster, not the field.** The body that walks out of
   the cage is a figure that fades; the record appears at the next town or battle,
   because bodies are spawned per scene by the controller.
@@ -603,15 +614,14 @@ that is the pre-merge full suite, once, at the end.
 ### Phase 4 (landed): the first town and the orders
 
 Four branches and one foundation on one integration tree. The foundation is the
-campaign ledger (`quest_log.gd` + `Warband.quests`, save v5), the keeper who talks
+campaign ledger (`quest_log.gd` + `Warband.quests`, saved as `quests`), the keeper who talks
 (`quest_giver.gd`), the arrow (`quest_marker.gd`), the free first eight oaths and
 the stash dressing, and the two material families (wolf salvage, warden ichor).
 The branches own the town (palisade, gate, eight roofs, five armoured keepers,
 three watch archers), the orders' ground (four caged soldiers, three warcamps of
 21 wardens), the loot (wolf drop table, the click-and-crouch hand, one summary
 line, five salvage silhouettes) and the world (a kilometre-and-a-third lane, a
-grown heightfield, the map sheet). The ichor bench was built with the foundation
-because the town needed it to place.
+grown heightfield, the map sheet).
 
 The integration pass found things no unit test could, and all of them are fixed:
 

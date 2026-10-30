@@ -10,6 +10,7 @@ const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
 const INVENTORY_CAPACITY := 60
 const STASH_CAPACITY := 20
@@ -98,13 +99,13 @@ const ITEMS := {
 		"category":"misc", "slot":"", "material":"Trophy",
 		"summary":"Four claws on a severed paw, corded to a leather loop",
 		"detail":"Carried in the shared stash / proof of the hunt"},
-	# The watchers' own blood, drawn off a warden's body: the reagent the ichor
-	# bench works into steel. It is a carried item, not a wallet - the wallet is
-	# the altar's Cruor, and the two are deliberately different things.
+	# The watchers' own blood, drawn off a warden's body: the reagent the altar
+	# works into steel. It is a carried item, not a wallet - the wallet is the
+	# altar's Cruor, and the two are deliberately different things.
 	"ichor_vial": {"name":"Warden's Ichor", "short":"Ichor", "kind":"material", "index":4, "price":60,
 		"category":"misc", "slot":"", "material":"Reagent", "reagent":true,
 		"summary":"Black ichor in a stoppered vial. It is still moving",
-		"detail":"Carried in the shared stash / bound into a weapon at the ichor bench"},
+		"detail":"Carried in the shared stash / anoints a weapon with its skill at the altar"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",
@@ -887,8 +888,11 @@ func owned_in_stash(id: String) -> int:
 
 ## Build the exact loadout shape consumed by Archer.apply_loadout(), arena and
 ## delve. Pure: derives everything from the ids and the armor index map.
+## `anointed_ids` are the catalog ids the altar has anointed: a held piece in
+## that list carries its skill onto the rig (`anointed`); every other piece,
+## stock steel included, is plain.
 static func build_loadout(main_id: String, off_id: String, armor_pieces: Dictionary,
-		trinket_ids: Dictionary = {}) -> Dictionary:
+		trinket_ids: Dictionary = {}, anointed_ids: Array = []) -> Dictionary:
 	var armor := {}
 	for slot in ArmorData.SLOTS:
 		armor[slot] = int(armor_pieces.get(slot, ArmorData.NONE))
@@ -932,7 +936,20 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
 			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
+		"anointed":{"main":_anointed_skill(main_id, 0, anointed_ids),
+			"off":_anointed_skill(off_id, 1, anointed_ids)},
 	}
+
+## The skill a held piece carries onto the rig: its own, fired from the hand it
+## is held in, and only while the altar's ledger lists it. An off-hand blade
+## carries nothing, because its skill is a main-hand one.
+static func _anointed_skill(item_id: String, slot: int, anointed_ids: Array) -> String:
+	if item_id.is_empty() or not anointed_ids.has(item_id):
+		return ""
+	var entry: Dictionary = ITEMS.get(item_id, {})
+	if AbilityRules.hand_slot(entry) != slot:
+		return ""
+	return str(AbilityRules.skill_for(entry).get("id", ""))
 
 func loadout() -> Dictionary:
 	return build_loadout(main_item(), off_item(), equipped_pieces(), equipped)

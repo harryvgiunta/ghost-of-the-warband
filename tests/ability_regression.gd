@@ -31,8 +31,10 @@ func pause(seconds: float) -> void:
 	await create_timer(seconds).timeout
 
 
+## Dresses the rig with both held pieces anointed: a stock weapon carries no
+## skill, and this harness exercises the skills themselves.
 func equip(rig, main_id: String, off_id: String = "") -> void:
-	rig.apply_loadout(State.build_loadout(main_id,off_id,{"head":0,"chest":0,"hands":0,"legs":0,"feet":0}))
+	rig.apply_loadout(State.build_loadout(main_id,off_id,{"head":0,"chest":0,"hands":0,"legs":0,"feet":0},{},[main_id,off_id]))
 
 
 func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
@@ -53,13 +55,13 @@ func run() -> void:
 	watchdog.timeout.connect(_on_watchdog)
 	check(is_equal_approx(Stamina.MAX,1000.0), "The base stamina pool is ten times the old hundred")
 
-	# Data: the starter shortbow grants Barrage; an empty hand keeps Charge.
+	# Data: the anointed starter shortbow grants Barrage; an empty hand keeps Charge.
 	var world := Node3D.new()
 	root.add_child(world)
 	var host := fighter(world,0,Vector3.ZERO)
 	equip(host.rig,"bow_short")
 	var definition: Dictionary = host.ability.definition(0)
-	check(str(definition.get("id","")) == "barrage", "The shortbow grants Barrage in the main hand")
+	check(str(definition.get("id","")) == "barrage", "The anointed shortbow grants Barrage in the main hand")
 	check(str(definition.get("key","")) == "SHIFT + 1", "Barrage binds to Shift + 1")
 	check(is_equal_approx(float(definition.get("stamina_cost",0.0)),AbilityRules.TEST_STAMINA_COST), "Barrage costs a trivial stamina sliver")
 	check(float(definition.get("cooldown",0.0)) > 0.0, "Barrage has a cooldown")
@@ -114,11 +116,11 @@ func run() -> void:
 	host.ability.advance(1.0)
 	check(float(host.ability.hud_state(0).cooldown) > 0.0, "Barrage is cooling before the swap")
 	host.ability.cancel()
-	host.rig.set_bow(1)
+	equip(host.rig,"bow_recurve")
 	host.ability.advance(0.01)
 	check(host.ability.hud_state(0).cooldown == 0.0, "Switching weapons clears the slot's testing cooldown")
-	check(str(host.ability.hud_state(0).get("id","")) == "triple_volley", "The new bow grants its own skill")
-	host.rig.set_bow(0)
+	check(str(host.ability.hud_state(0).get("id","")) == "triple_volley", "The new anointed bow grants its own skill")
+	equip(host.rig,"bow_short")
 	host.ability.advance(0.01)
 
 	# Eligibility boundaries.
@@ -182,8 +184,8 @@ func run() -> void:
 
 	# Off-hand shield skills occupy slot 1 beside the main-hand skill.
 	equip(host.rig,"sword_arming","shield_tower")
-	check(str(host.ability.definition(0).get("id","")) == "lunge_thrust", "The arming sword grants Lunge Thrust")
-	check(str(host.ability.definition(1).get("id","")) == "shield_slam", "The tower shield grants Ground Shield Slam")
+	check(str(host.ability.definition(0).get("id","")) == "lunge_thrust", "The anointed arming sword grants Lunge Thrust")
+	check(str(host.ability.definition(1).get("id","")) == "shield_slam", "The anointed tower shield grants Ground Shield Slam")
 	check(str(host.ability.definition(1).get("key","")) == "SHIFT + 2", "The shield skill binds to Shift + 2")
 	host.stamina = Stamina.MAX
 	check(bool(host.try_ability(1).get("ok",false)), "The second hand slot activates independently")
@@ -197,6 +199,8 @@ func run() -> void:
 	var game = load("res://main.tscn").instantiate()
 	root.add_child(game)
 	await pause(0.8)
+	# The frontier has no altar, so the harness anoints the starter shortbow by hand.
+	game.archer.anointed = {"main":"barrage", "off":""}
 	check(game.ability != null and game.hud._ability_slot != null, "The frontier builds the ability runner and HUD slot")
 	check(game.hud._off_ability_slot != null, "The frontier builds the off-hand ability slot")
 	check(is_equal_approx(game.hud._stamina_bar.max_value,Stamina.MAX), "The frontier stamina bar uses the new pool")

@@ -10,6 +10,9 @@ extends Node
 ## Gold is the existing `PlayerState` purse; this node never keeps a second one.
 
 signal changed
+## A piece just woke into its skill at the altar. Whatever dresses bodies off the
+## roster listens, so every body already holding a copy carries the skill at once.
+signal anointed(item_id: String, ability: String)
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
@@ -38,11 +41,13 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## checkpoint bookmark (`checkpoint`), the autosave that remembers which stretch
 ## of the world the warband has already played; v5 added the campaign ledger
 ## (`quests`), the objectives the quartermaster has handed over and how far each
-## one got. Older files still load: a record with no sets puts the pair already
-## in its hands in Set 1 and starts Set 2 empty, a v1 file has no reports and
-## zeroed totals, a file without a checkpoint resumes at the town as it always
-## did, and a file without quests opens with an empty ledger.
-const SAVE_VERSION := 5
+## one got; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
+## steel that has been given its skill. Older files still load: a record with no
+## sets puts the pair already in its hands in Set 1 and starts Set 2 empty, a v1
+## file has no reports and zeroed totals, a file without a checkpoint resumes at
+## the town as it always did, a file without quests opens with an empty ledger,
+## and a file without anointings carries plain steel.
+const SAVE_VERSION := 6
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -256,6 +261,25 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 	_notify()
 	return {"ok": true, "item_id": id, "price": payout,
 		"message": "Sold %s for %d gold." % [display, payout]}
+
+## Lay the altar's reagents on a piece the warband carries. The recipe leaves the
+## shared stash, every copy of the piece wakes into its own skill, the ledger's
+## APPLY orders hear about each reagent, and `anointed` tells the scene to dress
+## the bodies already holding one. Returns the ledger's reply plus `completed`,
+## the orders this anointing finished.
+func anoint(item_id: String) -> Dictionary:
+	var result := cruor.anoint(stash, roster, item_id)
+	var completed: Array[String] = []
+	if bool(result.get("ok", false)):
+		var spent: Dictionary = result.get("spent", {})
+		for reagent in spent:
+			for quest_id in quests.note_applied(str(reagent), int(spent[reagent])):
+				if quests.is_complete(quest_id):
+					completed.append(quest_id)
+		anointed.emit(item_id, str(result.get("ability", "")))
+		_notify()
+	result["completed"] = completed
+	return result
 
 func hire(merc_name: String = "") -> Dictionary:
 	var state := get_node_or_null("/root/PlayerState")

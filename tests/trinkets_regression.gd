@@ -62,9 +62,9 @@ func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
 	return actor
 
 
-func rig_for(main_id: String, off_id: String, trinkets: Dictionary) -> Node3D:
+func rig_for(main_id: String, off_id: String, trinkets: Dictionary, anointed: Array = []) -> Node3D:
 	var host := fighter(scene, 0, Vector3.ZERO)
-	host.rig.apply_loadout(State.build_loadout(main_id, off_id, ZERO_ARMOR, trinkets))
+	host.rig.apply_loadout(State.build_loadout(main_id, off_id, ZERO_ARMOR, trinkets, anointed))
 	return host
 
 
@@ -309,7 +309,9 @@ func _test_grants() -> void:
 		"The necklace wins the trinket slot over a ring")
 	both_host.queue_free()
 
-	var echo_host := rig_for("bow_short", "", {"neck":"", "ring1":"ring_echo", "ring2":"", "off":""})
+	# A stock bow carries no skill, so the echo host's shortbow is anointed.
+	var echo_host := rig_for("bow_short", "", {"neck":"", "ring1":"ring_echo", "ring2":"", "off":""},
+		["bow_short"])
 	echo_host.stamina = Stamina.MAX
 	var echoed: Dictionary = echo_host.ability.activate(0)
 	check(bool(echoed.get("ok", false)), "The bow skill activates")

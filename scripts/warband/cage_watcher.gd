@@ -579,7 +579,7 @@ func _apply_weapon() -> void:
 ## the same warden always carries the same kit.
 const CARRIED_BANDAGE := "bandage_linen"
 ## One warden in three also carries a vial of its own ichor - the reagent the
-## campaign's fourth order asks for, and the only way the bench ever gets it in
+## campaign's fourth order asks for, and the only reagent the altar anoints with in
 ## the first scenario. It is the variant's property again, not a roll at the kill,
 ## so a corpse that was killed twice on two machines carried the same vial.
 const CARRIED_ICHOR := "ichor_vial"

@@ -29,7 +29,10 @@ static func trinkets(value: Variant) -> Dictionary:
 		kit[slot] = hand(source.get(slot,""),slot)
 	return kit
 
-static func apply(rig, loadout: Dictionary) -> void:
+## `anointed` is the altar ledger's list of anointed catalog ids. It is a local,
+## trusted argument and never read from `loadout`: a seat loadout can arrive over
+## the wire, and a peer must not be able to claim a skill its steel was never given.
+static func apply(rig, loadout: Dictionary, anointed: Array = []) -> void:
 	if rig == null or loadout.is_empty():
 		return
 	var bow: Variant = loadout.get("bow")
@@ -53,7 +56,7 @@ static func apply(rig, loadout: Dictionary) -> void:
 		# Explicitly empty hands are deliberate (unarmed); a malformed non-empty
 		# hand falls through instead of wiping a valid seat.
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else rig.armor_pieces.duplicate()
-		rig.apply_loadout(State.build_loadout(main,off,pieces,worn))
+		rig.apply_loadout(State.build_loadout(main,off,pieces,worn,anointed))
 		return
 	# A kit that omits the hands still carries its worn trinkets.
 	rig.apply_trinkets(worn)

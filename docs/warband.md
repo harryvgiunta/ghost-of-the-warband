@@ -37,11 +37,11 @@ not re-implement it and do not redefine an enum, a slot id or a tier name.
 | `scripts/warband/soul_router.gd` | `SoulRouter` | Body registry, one peer per body, `request_transfer`, `cycle`, refusal reasons, alive-only entry |
 | `scripts/warband/town_stash_model.gd` | `WarbandStash` | Infinite pooled stash, collective `rows()` sorted by value with `Equipped` tags |
 | `scripts/warband/cruor_catalog.gd` | `CruorCatalog` | The five tiers, names/colours/values, `distill`, `unbind_yield` |
-| `scripts/warband/cruor_manager.gd` | `WarbandCruor` | Essence wallet, `unbind`, `distill`, `distill_all`, `brand`, brand map, persistence |
+| `scripts/warband/cruor_manager.gd` | `WarbandCruor` | Essence wallet, `unbind`, `distill`, `distill_all`, `brand`, brand map; the altar's reagent rite: `BASIC_REAGENT` (`ichor_vial`), `ANOINT_RECIPES` (ability id → `{reagent catalog id: count}`, every weapon/shield skill `{ichor_vial: 1}` for now), the `anointed` ledger (catalog id → ability id), `anoint_skill`/`anoint_key`/`anoint_recipe`/`recipe_text`/`is_anointed`/`anointed_skill`/`anointed_among`/`anoint_line`/`can_anoint`/`anoint`; persistence (`cruor.anointed` re-derived from today's table on load) |
 | `scripts/warband/branded_skills.gd` | `BrandedSkills` | The six branded abilities, which item class carries each, tier power curve |
 | `scripts/warband/mercenary_vendor.gd` | `WarbandVendor` | Hire price (120 + 35/body), `hire()`, recruiter board |
 | `scripts/warband/damage_scaler.gd` | `WarbandDamage` | The single bubble multiplier, keyed by instance id |
-| `scripts/warband/warband_state.gd` | autoload `Warband` | Owns roster + souls + stash + cruor, gold bridge to `PlayerState.credits`, save/load, possession mirror |
+| `scripts/warband/warband_state.gd` | autoload `Warband` | Owns roster + souls + stash + cruor, gold bridge to `PlayerState.credits`, save/load (`SAVE_VERSION` 6; v6 adds `cruor.anointed`, so a v5 file loads with plain steel), possession mirror, and `anoint(item_id)`: spends the recipe from the shared stash, writes the ledger, credits APPLY orders through `quests.note_applied` per reagent, emits `anointed(item_id, ability)` and `changed`, and returns `completed` (the orders it finished); a piece that is not the warband's, already anointed, or short of its recipe is refused and nothing is spent |
 | `tests/warband_contract_regression.gd` | - | 140 checks over all of the above |
 
 Damage funnels already call `WarbandDamage.scale(amount, self)` as their first
@@ -85,7 +85,7 @@ because bodies do not. Every scene that contains bodies:
 | `F1`..`F8` | Enter the n-th living body directly |
 | `O` | The warband screen (roster, state chips, click to control, hiring). `TAB` is the quick swap below, exactly as in the open frontier |
 | `Tab` | Quick weapon swap: the standing body puts away the set in its hands and takes up the other one. Both pairs live on the mercenary's roster record |
-| `1`..`3`, `6`/`7`, mouse, `Space`, `C`, `F`, `G`, `E` | warband controller: plain 1/2/3 fire the three item-skill slots (Shift+1..3 is the same press), 6/7 bandage/potion; mouse, `Space`, `C`, `F` and `E` keep the frontier meanings, `T` throws the held blade, and `G` stays the world's interact key |
+| `1`..`3`, `6`/`7`, mouse, `Space`, `C`, `F`, `G`, `E` | warband controller: plain 1/2/3 fire the three skill slots — an anointed main hand, an anointed shield, the worn trinket (Shift+1..3 is the same press) — 6/7 bandage/potion; mouse, `Space`, `C`, `F` and `E` keep the frontier meanings, `T` throws the held blade, and `G` stays the world's interact key |
 | `G` held | Revive the downed body under the crosshair (5 s channel, humans and the squad's own hands) |
 | `K` | Quick-loot the drop under the crosshair (battlefield looting) |
 
@@ -168,8 +168,8 @@ failure pass; fix the contract instead.
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
 | `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive and respawn clear all of it, `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire, and `_die` either clears it (arena seats) or holds the corpse - rig visible, lie kept, drip off - for the warband bodies flagged `warband_death`. Those bodies also never die from the blow itself and are finished by any blow that lands while they are down. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
 | `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` / `corpse_loot_panel.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups` plus the corpse registry: `register_corpse(enemy) -> int` (one read of `gear_items()`, stable ids, the record dies with the body), `has_corpse/corpse_ids/corpse_items/corpse_value/corpse_at/corpse_position/corpse_label`, `take_from_corpse`, `take_all_from_corpse`, `claim_corpse(id, peer = 0)` (silent, the AI's entry point). Every one of them books through the same `_book_piece()`, so a piece cannot be duplicated and peer 0 never dresses a body. `CorpseLootPanel extends WarbandPaperdoll` adds `open_corpse(loot, id) -> bool`, `showing_corpse()`, `take_piece`, `take_all` and `set_title`; `G` at a corpse opens it and `P` still opens the mercenary paperdoll. `SoldierLootRun.run(pickups)` now also jogs survivors to corpses and claims each once. |
-| `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu`, `AltarMenu.configure/unbind_rows/distill_rows/brand_rows` |
-| `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash |
+| `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu` (the body: `_build_body()`); `AltarMenu.configure/page/show_page/anoint_rows/press_anoint/unbind_rows/distill_rows/brand_rows`, two pages `PAGE_ANOINT` (every open lands here) and `PAGE_ESSENCE` |
+| `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash, whose worn slot line adds "Anointed - <SKILL> [key]" or, for a plain weapon, "Plain - the altar wakes <SKILL>", plus the brand line when branded |
 | `scripts/warband/warband_hud.gd` (`WarbandHud`) | body panel, squad rows, prompts, status banners |
 | `scripts/admin_arena.gd` + `admin_arena.tscn` | the gate scene: two three-body brawls 42 m apart, eight roster bodies, two souls, the altar, the stash chest, battlefield loot |
 
@@ -314,7 +314,7 @@ regressed, the Godot traps already paid for, and the phase plan.
 ### Checkpoints (autosave)
 
 The campaign autosaves at the two moments that begin a stretch, and the same file
-carries the bookmark (`Warband.checkpoint`, save version 4):
+carries the bookmark (`Warband.checkpoint`, in the save since version 4):
 
 | Id | Written when | Resume puts the squad |
 | --- | --- | --- |
@@ -339,13 +339,25 @@ the whole contract, including the two real world resumes.
 
 These landed on the same world without a second rulebook. Each has one owner:
 
-- **Item skills are still data.** `AbilityRules` is the only definition table;
-  the warband's scene half is one `WarbandAbilities` node in `world_scene.gd`
-  (`setup(world, controller)`, `bind_body(actor)`), which turns the possessed
-  body's own `AbilityRunner` cues into arrows, spells, the backstab blink/stab and
-  blade presentation, on the authority only. The keys are **plain 1/2/3** (Shift+1..3
-  is the same press — the tiles' shared `SHIFT + n` caption is rewritten), and the
-  HUD shows stamina plus the three slots from that body's runner every frame.
+- **Item skills are still data, and stock steel is plain.** `AbilityRules` is the
+  only definition table, and `AbilityRules.granted(rig)` grants a hand's skill
+  (slot 0 the main hand, slot 1 a shield in the off hand) only when
+  `rig.anointed[hand]` names it — in every mode. A body's hands are anointed by
+  the altar: `PossessionController._apply_gear` passes
+  `cruor.anointed_among([main, off])` to `SeatLoadout.apply(rig, loadout,
+  anointed)` (a trusted local argument, never read from the possibly-remote
+  loadout dict), `PlayerState.build_loadout(..., anointed_ids)` resolves each
+  listed piece through `AbilityRules.skill_for`/`hand_slot`/`stock_item`, and
+  `Archer.apply_loadout` rewrites `Archer.anointed` from `loadout.anointed`.
+  `Warband.anointed` makes the controller `refresh_gear` every body holding the
+  piece. An empty main hand still grants the unarmed Charge, and the trinkets'
+  grants are worn, not anointed. The warband's scene half is one
+  `WarbandAbilities` node in `world_scene.gd` (`setup(world, controller)`,
+  `bind_body(actor)`), which turns the possessed body's own `AbilityRunner` cues
+  into arrows, spells, the backstab blink/stab and blade presentation, on the
+  authority only. The keys are **plain 1/2/3** (Shift+1..3 is the same press —
+  the tiles' shared `SHIFT + n` caption is rewritten), and the HUD shows stamina
+  plus the three slots from that body's runner every frame.
 - **The cover peek is RMB, in cover only.** Outside cover the same press is the
   guard; the lean ends on release, and leaving cover with `F` drops it.
 - **Escape is `WarbandMenu`** — six rows (resume, save, load, settings, exit,
@@ -625,20 +637,28 @@ and the rules they cannot break live in `docs/warband-handoff.md` §§1-4.
 
 | Surface | Module | Contract |
 | --- | --- | --- |
-| The stockade | `scripts/warband/town_hub.gd`, `town_dressing.gd`, `town_folk.gd` | `WALL_RADIUS` 22, a `VillageKit.palisade` ring cut for one north gap and a `VillageKit.gate` in it, eight roofs (`keeper_hut` x5, `wattle_hut` x2, `trader_frame` x1) and village dressing with no colliders of its own. The same service ids, points and `G` semantics as before, plus `ichor`. Five armoured keeper bodies (`Archer` rigs, `WarbandLooks` profiles, real armor sets) stand behind their counters, unpossessable and unhittable |
+| The stockade | `scripts/warband/town_hub.gd`, `town_dressing.gd`, `town_folk.gd` | `WALL_RADIUS` 22, a `VillageKit.palisade` ring cut for one north gap and a `VillageKit.gate` in it, eight roofs (`keeper_hut` x5, `wattle_hut` x2, `trader_frame` x1) and village dressing with no colliders of its own. The same service ids, points and `G` semantics as before; the town stays inside `town_stockade_regression.LIGHT_BUDGET` 17. Five armoured keeper bodies (`Archer` rigs, `WarbandLooks` profiles, real armor sets) stand behind their counters, unpossessable and unhittable |
 | The watch | `scripts/warband/town_guard.gd` | three static archers on the gate: nearest hostile within 26 m from the world's `guards` (or `wild_mobs`), line of sight on layer 1, 0.9 s draw, a real `arrow.gd` on the mob layer, 1.6 s cooldown. They never move or speak |
-| The ledger | `scripts/warband/quest_log.gd` | `WarbandQuests` on `Warband.quests`: `KILL` / `RESCUE` / `COLLECT` / `APPLY` / `REACH`, four rows in `DEFS`, one state and one count each, saved as `quests` in save v5. `note_kill` / `note_rescue` / `note_collected` / `note_applied` / `note_reached`; `offer` → `accept` → `turn_in` with the chain in each row's `next` |
+| The ledger | `scripts/warband/quest_log.gd` | `WarbandQuests` on `Warband.quests`: `KILL` / `RESCUE` / `COLLECT` / `APPLY` / `REACH`, four rows in `DEFS`, one state and one count each, saved as `quests`. `note_kill` / `note_rescue` / `note_collected` / `note_applied` / `note_reached`; `offer` → `accept` → `turn_in` with the chain in each row's `next` |
 | The keeper who talks | `scripts/warband/quest_giver.gd`, `quest_marker.gd` | `talk(service, peer)` raises the card that teaches or hands over an order and answers false when the counter should open instead; `marker_service()` decides who wears the gold `TALK TO HIM` arrow (the recruiter while the band is short of the cap, the quartermaster when he has an order, a turn-in or a vial to explain) |
 | The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed` per cage (roster + stash dressing + ledger + HUD). A `FREE HIM` arrow rides the nearest shut cage while the order is live |
 | The warcamps | `scripts/warband/watcher_warren.gd` | 21 hollow wardens in three camps 78 / 96 / 86 m off the lane, dressed from the village kit, one `MobWander` territory each, wired to the world's kill handler so they count toward the bounty |
 | The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground **in the body's own reach** ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. The reach is measured from the body, not only from the crosshair: a click on a corpse across the field falls through to the swing instead of stealing it |
 | The map | `scripts/warband/world_map.gd` | one page, `M`, no pause: the lane sampled from the trail's path, the camp ring, the walled square, hostiles, the warband and the soul's own facing, plus `host.map_markers()` (shut cages, warcamps) |
-| The bench | `scripts/warband/ichor_bench.gd` | `IchorBench.build_prop()` (furniture with the town's one cold-green light) and the panel: pooled unbranded weapons, one vial per blade, `WarbandCruor.bind()` writing the altar's own brand ledger without touching the essence wallet |
+| The altar | `scripts/warband/sacrificial_altar.gd`, `altar_menu.gd`, `cruor_manager.gd` | `SacrificialAltar` at `ALTAR_POINT` (8, 0, 4): a stepped stone pedestal and stele (`AltarStone`), a `Slab`, one merged `AltarDressing` (reagent bowl of glowing ichor, horned skull with ochre marks, blood, eight tallow candles, two iron stands, eight skull sticks, a bone heap), blood-red `AltarFlames` cards, exactly one light `RitualLight` (warm red, energy 2.6, range 9, no shadows) and an `AltarNameplate` "THE ALTAR" at 2.2 m; no colliders, all within 2.5 m. `AltarMenu` opens on ANOINT: every weapon or shield the warband carries (pooled or worn), waiting-first then dearest, with the skill's icon (dim until anointed), piece, skill and key, recipe and an ANOINT button that stays pressable on a short stash so the refusal is printed — or ANOINTED. ESSENCE is unbind / distil 5:1 / brand. `G` there sets "The altar: lay a warden's ichor on a weapon and it wakes into its skill." |
 
 The **orders** the quartermaster hands out, in chain order:
 
 1. `free_the_soldiers` — rescue four caged soldiers.
 2. `cull_the_watchers` — kill twenty hollow wardens.
 3. `find_the_crypt` — a shell: the order exists, the place does not.
-4. `bind_the_ichor` — off the chain: appears the moment a warden's vial is in the
-   shared stash, and teaches the bench that turns it into a weapon's sigil.
+4. `bind_the_ichor` (ICHOR IN THE STEEL) — off the chain: appears the moment a
+   warden's vial (four of the twelve warden variants carry one; catalog detail
+   "Carried in the shared stash / anoints a weapon with its skill at the altar")
+   is in the shared stash. Line "Anoint a weapon with the warden's
+   ichor", hint "G - the altar", keys "G - the altar · 1 / 2 - loose the skill it
+   wakes"; the quartermaster's lesson is tip `ichor_altar` ("ANOINT A WEAPON WITH
+   THE ICHOR AT THE ALTAR"). While it is active the town key line appends "G - the
+   altar anoints with ichor"; at the altar it reads "G - the Sacrificial Altar
+   (anoint weapons / unbind / distil / brand)". Finishing it appends "Tell the
+   quartermaster what the steel can do now." to the altar's status.

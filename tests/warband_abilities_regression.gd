@@ -1,8 +1,9 @@
 extends SceneTree
 ## Warband abilities and HUD: a possessed body's three skills are reachable from
-## the number row, the HUD reads stamina and the grants from that same body, the
-## right mouse button guards and peeks out of cover, and the scene-level ability
-## node resolves a cue into exactly one projectile on the authority only.
+## the number row, the HUD reads stamina and the grants from that same body, stock
+## steel carries no skill until the altar anoints it, the right mouse button
+## guards and peeks out of cover, and the scene-level ability node resolves a cue
+## into exactly one projectile on the authority only.
 
 const Actor = preload("res://scripts/arena_actor.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -174,13 +175,22 @@ func _check_hud(world: Node3D, actor) -> void:
 		% tile_key(tiles[0]))
 	check(not tiles[1].visible, "a hand with no grant hides its tile")
 
-	# A full kit grants all three slots: main hand, shield and amulet.
+	# Stock steel carries no skill: a dagger and a buckler off the shelf leave both
+	# hand tiles dark, while the amulet's grant is worn, not anointed, and shows.
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
 		{"neck": "neck_shield"}))
 	actor.stamina = actor.max_stamina
 	hud.set_body(actor, "Probe", 1)
+	check(not tiles[0].visible and not tiles[1].visible,
+		"stock steel in both hands shows no hand tile")
+	check(tiles[2].visible, "the worn amulet still shows its grant")
+
+	# The same kit anointed grants all three slots: main hand, shield and amulet.
+	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
+		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
+	hud.set_body(actor, "Probe", 1)
 	for index in tiles.size():
-		check(tiles[index].visible, "slot %d is shown for a full kit" % index)
+		check(tiles[index].visible, "slot %d is shown for an anointed kit" % index)
 		check(tile_key(tiles[index]) == str(index + 1),
 			"tile %d is labelled %d, got %s" % [index, index + 1,
 			tile_key(tiles[index])])
@@ -248,12 +258,17 @@ func _check_ability_node(world: Node3D, actor, controller) -> void:
 		"binding one body twice leaves one connection, got %d"
 		% abilities.bound_bodies().size())
 
-	# A bow on the main hand makes slot 0 the Barrage, whose cue spawns arrows.
+	# A stock bow carries nothing: slot 0 is empty and its key starts nothing.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
-	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "barrage",
-		"the shortbow grants the Barrage")
+	check(AbilityRules.definition_for(actor.rig, 0).is_empty(), "a stock shortbow grants no skill")
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
+	check(not bool(actor.try_ability(0).get("ok", true)), "the stock bow's key starts nothing")
+
+	# Anointed, the same bow wakes into the Barrage, whose cue spawns arrows.
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR, {}, ["bow_short"]))
+	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "barrage",
+		"the anointed shortbow grants the Barrage")
 	var outcome: Dictionary = actor.try_ability(0)
 	check(bool(outcome.get("ok", false)), "the Barrage starts")
 	actor.ability.cue.emit("barrage", "shot", 0)
@@ -271,9 +286,9 @@ func _check_ability_node(world: Node3D, actor, controller) -> void:
 
 	# A staff cast resolves through the same node: the spell projectile is the
 	# second missile, and its blast is wired to the body's own combat.
-	actor.rig.apply_loadout(State.build_loadout("staff_fire", "", ARMOR))
+	actor.rig.apply_loadout(State.build_loadout("staff_fire", "", ARMOR, {}, ["staff_fire"]))
 	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "fireball",
-		"the ember staff grants the Fireball")
+		"the anointed ember staff grants the Fireball")
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
 	check(bool(actor.try_ability(0).get("ok", false)), "the Fireball starts")
