@@ -124,8 +124,11 @@ const ROAM_INTENT := 0.30
 const ROAM_STOP := 0.12
 ## True for the rest of the scene once an ally has swung at a watcher.
 var engaged := false
-## A hurt ally binds its wounds once the field is quiet: the bandage is a catalog
-## piece in the shared stash, taken by the squad like any other loot.
+## A hurt ally binds its wounds once the field is quiet. The dressing is the body's
+## own: a squad's medicine never comes out of the player's shared stash, which is
+## the player's to spend with `6`. What the squad needs beyond that is what it takes
+## off the bodies it kills, and the camp's altar starts every campaign with a
+## handful on the dirt.
 const BANDAGE_ITEM := "bandage_linen"
 const BANDAGE_SECONDS := 1.8
 ## Health at or below this share is worth a bandage; above it the squad keeps its
@@ -699,7 +702,7 @@ func _rescue_ally(patient):
 ## One frame of a hurt ally's own dressing. Answers true when the bandage owns
 ## this frame's intent: the channel has just started, is still running, or has
 ## just closed a wound. A hostile inside `LOOT_CLEAR_METRES` drops the work
-## unfinished, and the dressing stays in the stash because it was never used.
+## unfinished.
 func _bandage_step(actor, merc_id: int, track: Dictionary, _delta: float) -> bool:
 	if bool(track.get("bandaging", false)):
 		if not _clear_of_hostiles(actor.global_position):
@@ -725,12 +728,9 @@ func _bandage_step(actor, merc_id: int, track: Dictionary, _delta: float) -> boo
 
 
 ## Hurt enough to spend a dressing - half the pool or less, which is where a body
-## comes back from the floor - holding a body that can still be saved, with one in
-## the shared stash to spend.
+## comes back from the floor - on a body that can still be saved.
 func _wants_bandage(actor, merc_id: int) -> bool:
-	if warband == null or warband.stash == null:
-		return false
-	if int(warband.stash.pooled_count(BANDAGE_ITEM)) <= 0:
+	if warband == null:
 		return false
 	if not warband.roster.is_alive(merc_id):
 		return false
@@ -740,13 +740,11 @@ func _wants_bandage(actor, merc_id: int) -> bool:
 	return float(actor.get("health")) <= pool * BANDAGE_HEALTH_SHARE
 
 
-## Close the wound: the dressing leaves the stash, the body gets its share of its
-## own pool back, and the roster is written on the same frame so a save taken
-## mid-battle records the patched body, not the wound.
+## Close the wound: the body gets its share of its own pool back, and the roster is
+## written on the same frame so a save taken mid-battle records the patched body,
+## not the wound. Nothing leaves the shared stash - that is the player's.
 func _finish_bandage(actor, merc_id: int) -> void:
-	if warband == null or warband.stash == null:
-		return
-	if not warband.stash.remove(BANDAGE_ITEM, 1):
+	if warband == null:
 		return
 	var pool := float(actor.get("max_health"))
 	var healed := minf(pool, float(actor.get("health")) + pool * BANDAGE_HEAL_SHARE)

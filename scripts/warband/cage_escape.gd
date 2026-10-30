@@ -65,9 +65,19 @@ const CAGE_POSTS := [
 	Vector3(-17.0, 0.2, -18.5),    # deep left, down by the collapsed den
 	Vector3(12.0, 0.2, -9.5),      # right, between the cages and the watchers
 ]
-## The dressings a fresh warband starts with, in the shared stash. A squad binds
-## its own wounds at half a pool; the first fight is what it is meant to survive.
-const STARTING_BANDAGES := 4
+## The dressings a campaign starts with, lying on the altar's dirt where a player
+## walking to the shiv will see them: five, so the first fight can be answered with
+## `6` five times. They are the player's - picked up with `K` into the shared stash
+## - and the squad's own medicine never draws on that stash.
+const STARTING_BANDAGES := 5
+const BANDAGE_ITEM := "bandage_linen"
+## Five spots at the cold altar (`ColdAltar` stands at (0, 0, 12.5)): three along
+## the slab's lip and two on the dirt in front, spread far enough apart that five
+## separate pieces read as five.
+const START_BANDAGE_POSTS := [
+	Vector3(-1.1, 1.14, 12.5), Vector3(0.0, 1.14, 12.5), Vector3(1.1, 1.14, 12.5),
+	Vector3(-0.6, 0.15, 11.2), Vector3(0.6, 0.15, 11.2),
+]
 ## How far the freed body has to step from its own cage to have got its bearings:
 ## out of the bars and a pace further, so the beat is a step and not a timer.
 const BEARINGS_RADIUS := 4.2
@@ -380,12 +390,6 @@ func seed_warband() -> void:
 		for merc_id in squad_ids:
 			warband.roster.unequip(merc_id, "main")
 			warband.roster.unequip(merc_id, "off")
-	# A fresh warband is handed its field dressings: the squad binds its own wounds
-	# at half a pool (and every body a revive stands up lands exactly there), and a
-	# rule with no bandage in the stash is a rule that never fires. Four is a first
-	# fight's worth, not a supply: the rest is taken off the wardens' bodies.
-	if fresh:
-		warband.stash.add("bandage_linen", STARTING_BANDAGES)
 	caged_ids.clear()
 	for index in CAGE_COUNT:
 		caged_ids.append(squad_ids[index])
@@ -428,6 +432,11 @@ func place_warband(bodies_in: Array) -> void:
 	# other prisoners give themselves a blade the moment their latch is cut.
 	for drop in WEAPON_DROPS:
 		_spawn_pickup(str(drop[0]), drop[1])
+	# And the dressings a campaign opens with, at the altar: exactly `STARTING_BANDAGES`
+	# pieces, so a player who walks straight to the blade finds five bandages under
+	# it and can answer the first fight with `6`.
+	for post in START_BANDAGE_POSTS:
+		_spawn_pickup(BANDAGE_ITEM, post)
 	# And the shiv itself, lying where the pair threw it: the first weapon in the
 	# game and the beat the opening is built around. It gets a big gold arrow
 	# hanging over it - a body in a cage cannot see a dagger in the dirt, and "walk

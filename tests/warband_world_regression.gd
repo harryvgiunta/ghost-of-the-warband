@@ -535,8 +535,8 @@ func check_lesson() -> void:
 	check(game.camp.sequencer.hint().contains("G"), "and the key that does it")
 	check(game.camp.cages_open_count() == 0, "the cages are all shut")
 	check(game.camp.caged_ids.size() == 5, "five bodies are held (%d)" % game.camp.caged_ids.size())
-	check(game.camp.pickups().size() == 4,
-		"three cultist weapons and the camp's shiv lie on the dirt (%d)"
+	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES,
+		"three cultist weapons, the camp's shiv and five dressings lie on the dirt (%d)"
 		% game.camp.pickups().size())
 	check(game.tips != null and game.tips.has_shown(game.camp.TIP_CAGE),
 		"and the first key was named as a tip over the crosshair")
@@ -673,8 +673,8 @@ func check_lesson() -> void:
 	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
 			fallen_pair += 1
-	check(game.camp.pickups().size() == 4 + fallen_pair,
-		"three drops and one blade per fallen watcher lie where they were (%d for %d fallen)"
+	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES + fallen_pair,
+		"three drops, the shiv, the altar's five dressings and one blade per fallen watcher lie where they were (%d for %d fallen)"
 		% [game.camp.pickups().size(), fallen_pair])
 
 

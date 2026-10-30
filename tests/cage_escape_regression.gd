@@ -267,8 +267,11 @@ func check_spawn() -> void:
 		check(str(watcher.get("mob_id")) == "hollow_warden",
 			"the watcher is the antlered warden body, not a ranger clone")
 		check(not bool(watcher.hunting()), "and sleeps while the soul is still caged")
-	check(camp.pickups().size() == 4,
-		"three makeshift pieces and the shiv lie on the walk (%d)" % camp.pickups().size())
+	check(camp.pickups().size() == 3 + 1 + camp.STARTING_BANDAGES,
+		"three makeshift pieces, the shiv and five dressings lie on the walk (%d)"
+			% camp.pickups().size())
+	check(camp.START_BANDAGE_POSTS.size() == camp.STARTING_BANDAGES,
+		"and the altar carries exactly five of them (%d)" % camp.START_BANDAGE_POSTS.size())
 	check(camp.tips != null and camp.tips.has_shown(camp.TIP_CAGE),
 		"the first beat's tip is the latch, offered once")
 	check(not _has_node_named(game, "TutorialCard"),

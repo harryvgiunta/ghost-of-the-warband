@@ -51,14 +51,16 @@ func run() -> void:
 	body.name = "FakeMerc"
 	root.add_child(body)
 
-	# A whole body with nothing to dress it with: no bandage, no work.
-	check(not _squad._wants_bandage(body, _merc_id),
-		"a warband with no bandage in the stash has nothing to bind a wound with")
-	check(not _squad._bandage_step(body, _merc_id, _track(), 0.016),
-		"and the ally keeps doing what it was doing")
+	# The dressing is the body's own: an empty shared stash is not a reason to
+	# bleed. That stash is the player's, spent with `6`.
+	body.health = body.max_health * 0.4
+	check(_squad._wants_bandage(body, _merc_id),
+		"an ally binds its own wound with an empty shared stash")
+	check(warband.stash.pooled_count(BANDAGE) == 0, "and nothing is in the stash to take")
+	check(_squad._bandage_step(body, _merc_id, _track(), 0.016),
+		"so the channel opens anyway")
 
 	# A healthy body keeps its dressings for after the fight.
-	warband.stash.add(BANDAGE, 2)
 	body.health = body.max_health
 	check(not _squad._wants_bandage(body, _merc_id),
 		"a body at full health does not spend a bandage")
@@ -81,14 +83,15 @@ func run() -> void:
 	check(bool(track.get("bandaging", false)), "the channel is open")
 	check(is_equal_approx(float(track.get("heal_left", 0.0)), SquadScript.BANDAGE_SECONDS),
 		"and it is the bandage's own length, got %s" % str(track.get("heal_left", 0.0)))
-	check(warband.stash.pooled_count(BANDAGE) == 2,
+	check(warband.stash.pooled_count(BANDAGE) == 0,
 		"nothing is spent while the dressing is still being tied")
 
 	# Half the channel later the dressing is still in the stash, and the wound is
 	# still open.
 	track["heal_left"] = SquadScript.BANDAGE_SECONDS * 0.5
 	check(_squad._bandage_step(body, _merc_id, track, 0.016), "the channel holds the body")
-	check(warband.stash.pooled_count(BANDAGE) == 2, "a half tied bandage is not spent")
+	check(warband.stash.pooled_count(BANDAGE) == 0,
+		"a half tied bandage touches nothing in the player's stash")
 
 	# A hostile inside the clear range interrupts it, and the dressing survives.
 	var watcher := FakeWatcher.new()
@@ -98,8 +101,8 @@ func run() -> void:
 	check(not _squad._bandage_step(body, _merc_id, track, 0.016),
 		"a hostile in reach drops the work unfinished")
 	check(not bool(track.get("bandaging", false)), "the channel is abandoned")
-	check(warband.stash.pooled_count(BANDAGE) == 2,
-		"and an interrupted dressing is not spent")
+	check(warband.stash.pooled_count(BANDAGE) == 0,
+		"and an interrupted dressing spends nothing anywhere")
 	check(is_equal_approx(body.health, body.max_health * 0.4),
 		"the wound is exactly as it was")
 
@@ -110,7 +113,8 @@ func run() -> void:
 	track["heal_left"] = 0.0
 	check(not _squad._bandage_step(body, _merc_id, track, 0.016),
 		"the last tick of the channel is the one that closes the wound")
-	check(warband.stash.pooled_count(BANDAGE) == 1, "the dressing is spent")
+	check(warband.stash.pooled_count(BANDAGE) == 0,
+		"closing the wound never reaches into the player's stash")
 	check(is_equal_approx(body.health, body.max_health * (0.4 + SquadScript.BANDAGE_HEAL_SHARE)),
 		"the wound closes by the bandage's share, got %s" % str(body.health))
 	check(is_equal_approx(float(warband.roster.health_of(_merc_id)), body.health),

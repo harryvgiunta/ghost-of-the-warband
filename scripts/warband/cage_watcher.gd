@@ -573,9 +573,10 @@ func _apply_weapon() -> void:
 		_visual.set_held_weapon(weapon_item)
 
 
-## Every other body walked the table with a field dressing tied at its belt: the
-## squad's medicine is looted off the mobs it kills, never handed out. The split is
-## the variant's own ordinal, so the same watcher always carries the same kit.
+## Every body in the wood walks the table with a field dressing tied at its belt:
+## the squad's medicine is looted off the mobs it kills, never handed out and never
+## out of the shared stash. The variant's own ordinal still decides the ichor, so
+## the same warden always carries the same kit.
 const CARRIED_BANDAGE := "bandage_linen"
 ## One warden in three also carries a vial of its own ichor - the reagent the
 ## campaign's fourth order asks for, and the only way the bench ever gets it in
@@ -586,8 +587,7 @@ const ICHOR_EVERY := 3
 
 func _stamp_carried() -> void:
 	carried.clear()
-	if _variant_slot % 2 == 0:
-		carried.append(CARRIED_BANDAGE)
+	carried.append(CARRIED_BANDAGE)
 	# Slots 2, 5, 8 and 11 of the twelve: four wardens in a full table, and the
 	# clearings that field six get one or two of them.
 	if _variant_slot % ICHOR_EVERY == ICHOR_EVERY - 1:
