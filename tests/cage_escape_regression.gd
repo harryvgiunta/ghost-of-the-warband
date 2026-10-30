@@ -718,8 +718,8 @@ func check_latches() -> void:
 			% flat_range((marker as Node3D).global_position, camp.GATE_POINT))
 		check(str(marker.get_script().resource_path).ends_with("lesson_arrow.gd"),
 			"and it is the lesson's arrow (%s)" % str(marker.get_script().resource_path))
-	check(game.squad != null and not bool(game.squad.following),
-		"the squad holds the camp while the objective is the walk out")
+	check(game.squad != null and bool(game.squad.following),
+		"the freed squad escorts the soul from the first open cage, not from the leaving")
 	check(camp.tips.has_shown(camp.TIP_RUN), "and the run's tip is offered on that beat")
 	check(SequencerScript.GUARD_COUNT == 2 + CampScript.AMBUSH_COUNT,
 		"the camp's tally counts the pair and the ambush (%d)" % SequencerScript.GUARD_COUNT)

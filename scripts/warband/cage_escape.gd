@@ -997,12 +997,21 @@ func _on_state_changed(state: int, _objective: String) -> void:
 			# lesson: walk to the blade under the gold arrow. The tip names the
 			# key, the prompt names the job, and the pair stay asleep until the
 			# blade is in hand.
+			#
+			# From this frame on every cage the player opens is an escort: an ally
+			# that followed only after the leaving used to stand in the camp and
+			# wander its own post while the soul walked off, which is the report
+			# "the band splits up". `is_free` still holds the cages shut, so the
+			# four still caged do nothing until their own latch goes.
+			if squad != null:
+				squad.following = true
+				squad.engage_radius = 34.0
 			_begin_duel()
 		SequencerScript.State.WARBAND:
 			# Five bodies on their feet and the objective turns over: the way on
-			# is the town, down the trail, on foot.
-			if squad != null:
-				squad.following = false
+			# is the town, down the trail, on foot. The squad keeps following -
+			# the last latch is not a reason to leave anybody standing in the
+			# wood.
 			_play_tip(TIP_RUN)
 			_update_run_marker()
 		SequencerScript.State.ESCAPING:

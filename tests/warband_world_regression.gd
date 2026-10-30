@@ -663,7 +663,7 @@ func check_lesson() -> void:
 	check(game.tips.has_shown(game.camp.TIP_RUN), "and the run was named")
 	check(game.camp._run_marker != null and game.camp._run_marker.visible,
 		"the gold arrow stands over the gap in the trees")
-	check(not game.squad.following, "the warband holds the camp until the leaving")
+	check(game.squad.following, "the freed warband follows the soul round the camp")
 
 	# The freed squad arms itself off the ground - silently, with no loot step.
 	var armed := await await_condition(
