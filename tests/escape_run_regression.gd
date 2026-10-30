@@ -140,12 +140,18 @@ func _flat(from: Vector3, to: Vector3) -> float:
 
 
 func _dismiss_card() -> void:
-	if game != null and game.card != null and game.card.is_open():
-		game.card.close()
+	# There is no card any more: the opening offers tips, and none of them pauses
+	# the tree. The name stays because every beat of this test calls it.
+	if game != null and game.tips != null and is_instance_valid(game.tips):
+		game.tips.hide()
 
 
-## The world, opened at the camp, with the lesson driven through its own public
+## The world, opened at the camp, with the opening driven through its own public
 ## beats to the escape: what this test wants is the trail, not the cages.
+##
+## The opening is five latches and a pair of watchers: the player's own cage is
+## worked bare-handed, the other four are cut with the blade lying on the dirt, and
+## the walk out through the mouth is what turns the wood loose.
 func check_the_world() -> void:
 	game = load(WORLD).instantiate()
 	root.add_child(game)
@@ -154,44 +160,54 @@ func check_the_world() -> void:
 	_dismiss_card()
 	check(game.camp != null and game.trail != null and game.town != null,
 		"the world built all three of its areas")
-	for merc_id in game.camp.caged_ids:
-		game.camp.sequencer.note_body_entered(int(merc_id))
-	_dismiss_card()
-	game.camp.sequencer.note_rescuer_arrived()
-	_dismiss_card()
-	# The pair standing over the cages fall, then the soul itself steps into Corvin
-	# for the shiv and walks the cage line cutting one latch per cage - the only
-	# way a cage opens now.
-	for watcher in game.camp.guards.duplicate():
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(4000.0, 0)
-	game.controller.direct(1, game.camp.rescuer_id)
-	_dismiss_card()
-	check(not game.camp.cages_open(), "taking Corvin cuts nothing by itself")
-	var cutter = game.controller.active_body(1)
-	check(not game.camp.holds_blade(cutter), "his hands are empty until the shiv is taken")
-	# The first weapon in the game is on the dirt: the body walks onto it and takes
-	# it with `K`, and only then is there a blade to cut a latch with.
-	cutter.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	var soul = game.controller.active_body(1)
+	check(soul != null and game.camp.is_cage_clamped(game.controller.merc_for_peer(1)),
+		"the campaign opens with the soul clamped in its own cage")
+	# Out of the cage: a wretch with a nail and a padlock, and `G` is the whole
+	# lesson. Nothing else opens on its own.
+	check(game.camp.interact(soul), "the player's own latch answers G")
+	check(game.camp.cages_open_count() == 1, "and the cage opens on that press")
+	check(game.camp.sequencer.state() == SequencerScript.State.LOOSE,
+		"the opening moves on to the camp (%s)" % game.camp.sequencer.state_name())
+	# Out of the bars is not out of the first beat: a step away from the cage is.
+	soul.global_position = game.camp.CAGE_POSTS[game.camp.OWN_CAGE] + Vector3(0.0, 0.2, -7.0)
+	await physics_frame
+	await physics_frame
+	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
+		"stepping out of the cage carries the opening to the objective (%s)"
+			% game.camp.sequencer.state_name())
+	# The camp's only blade is on the dirt: the body walks onto it and takes it
+	# with `K`, and only then is there steel to cut a latch with.
+	check(not game.camp.holds_blade(soul), "the player's hands are empty at the wake")
+	soul.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
 	await physics_frame
 	await physics_frame
 	_dismiss_card()
 	game._try_loot()
-	check(game.camp.holds_blade(cutter), "K puts the ironwood shiv in his hands")
-	# Taking it freezes the game for the cuts card; this regression wants the trail.
-	_dismiss_card()
+	check(game.camp.holds_blade(soul), "K puts the ironwood shiv in the soul's hands")
+	# The pair are awake now; this regression wants the trail, so they fall.
+	for watcher in game.camp.guards.duplicate():
+		if is_instance_valid(watcher) and bool(watcher.get("alive")):
+			watcher.take_damage(4000.0, 0)
+	await physics_frame
+	# One latch per cage, in any order: the player's own is already cut, so four
+	# walks remain.
 	for index in game.camp.CAGE_POSTS.size():
+		if index == game.camp.OWN_CAGE:
+			continue
 		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
+		soul.global_position = Vector3(post.x, 0.2, post.z + 2.6)
 		await physics_frame
 		game._try_interact()
 		_dismiss_card()
-		check(game.camp.cages_open_count() == index + 1,
-			"latch %d was cut one cage at a time (%d)" % [index + 1, game.camp.cages_open_count()])
-	check(game.camp.cages_open(), "all four latches are cut (%d of %d)"
+	check(game.camp.cages_open(), "every latch is cut (%d of %d)"
 		% [game.camp.cages_open_count(), game.camp.caged_ids.size()])
+	check(game.camp.sequencer.state() == SequencerScript.State.WARBAND,
+		"five bodies on their feet is the end of the objective (%s)"
+			% game.camp.sequencer.state_name())
+	check(game.camp.sequencer.objective() == "Run to the town",
+		"and the objective turns over to the road (%s)" % game.camp.sequencer.objective())
 	# The escape is the walk out: the soul crosses the mouth and the wood answers.
-	var soul = game.controller.active_body(1)
 	soul.global_position = game.camp.GATE_POINT + Vector3(0.0, 0.2, 0.0)
 	await physics_frame
 	await physics_frame

@@ -9,28 +9,36 @@ a floating soul that enters any living mercenary of your warband. Every mercenar
 has identical base stats - **100 health, 1000 stamina**, gear is the only
 difference - and the warband is the thing that survives a battle.
 
-- **Start here:** the title menu's **GHOST OF THE WARBAND** opens the cages (a
-  fresh warband) or resumes a saved one in the town. The mode has its own save
-  (`user://warband_state.json`); the ranger's kit is untouched.
-- **The four cages:** every beat opens a full-size tutorial card that **pauses
-  the game** and names the keys as carved key tiles; it closes on its **CONTINUE**
-  button (or G / Enter / Escape). Shift between all four prisoners, then a fifth
-  prisoner in sacrificial rags runs in **empty-handed** - the pair took his shiv
-  off him and threw it down at the camp's cold altar - and **you take his body
-  yourself** (F5 or `[ ]`). Nothing fights for you: the first fight is taught while it happens, one
-  card per thing you need - the walk (`W A S D`, `SHIFT`, `SPACE`, mouse), the
-  ironwood shiv on the ground (**K**), the three cuts (**LMB** diagonal,
-  **WHEEL UP** stab, **WHEEL DOWN** overhead) the instant the shiv is in your
-  hand, and the guard (**hold RMB**) on the second watcher's raised club. Every
-  one of them freezes the game while you read it. The pair sleep until you are
-  armed and they are the softest bodies in the game: a long telegraph, half their
-  blow, no guard. Then walk to each cage and press **G** to cut its own latch:
-  four latches, four presses, and bare hands are refused. A squadmate who goes
-  down raises one more card, wherever it happens - **hold G** for five seconds and
-  they stand back up. The moment a cage opens, that prisoner is **taken over by
-  squad AI** and picks the makeshift steel off the ground itself. There is no
-  gate: the camp is a ragged pocket **deep in the wood**, and the way out is a
-  long walk through the trees before the trail's first torch.
+- **Saving:** the mode has its own save (`user://warband_state.json`);
+  **RESUME WARBAND** opens it where the last checkpoint stands (the town square,
+  or 60 m past the camp's mouth once the watchers there are down). The ranger's
+  kit is untouched.
+- **Start here, and play it:** the title's **GHOST OF THE WARBAND** puts you
+  inside the **first of five** prisoners, shut in a cage. The opening teaches by
+  being played, not by being read:
+  * **cut your own latch** (**G**) - the wretch's own padlock is the one that
+    gives up to bare hands - and step out into the camp;
+  * **get your bearings**: the fire, the shelters, the four other cages scattered
+    through the wood, and the gold arrow over the camp's only blade;
+  * the objective arrives - **free your warband** - and the first fight teaches
+    itself in one-line tips under the crosshair, never a paused page: walk
+    (**W A S D** / mouse), take the ironwood shiv (**K**), the three cuts
+    (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) the moment the
+    shiv is in your hand, and the guard (**hold RMB**) on the second watcher's
+    raised club. The pair sleep until you are armed and are the softest bodies in
+    the game: a 1.3 s telegraph, half their blow, no guard.
+  * Then **one latch per press** at each of the four remaining cages (a blade in
+    hand and `G` at the bars; bare hands are refused on every cage but your own).
+    The last latch puts five bodies on their feet, turns them into squad AI that
+    arms itself off the ground, and the objective turns over: **run to the town**.
+- **Controls:** **Esc → KEYS** (in the quick menu, the warband menu and the
+  title's settings) opens the CONTROLS sheet: the keyboard itself, drawn in the
+  ledger's carved bone keycaps, every bound key washed in blood, and an arrow from
+  each key to the action it serves.
+- **The fallen:** a squadmate who goes down near you is brought back by **holding
+  G** for five seconds (30 s bleed clock; a blow on the reviver breaks the
+  channel). No blow ends a mercenary outright in the campaign - a lethal hit puts
+  the body down, and any blow on a downed body finishes it.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons

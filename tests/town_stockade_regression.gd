@@ -411,21 +411,19 @@ func check_talk() -> void:
 	var giver = town.quest_giver
 	if giver == null:
 		return
-	var card = giver.card
-	check(card != null, "the town has a card to read the lessons on")
-	if card == null:
+	var tips = giver.tips
+	check(tips != null, "the town has a tip channel to name its lessons on")
+	if tips == null:
 		return
 
-	# The recruiter: the lesson once, then the board it teaches.
+	# The recruiter: the line once, then the board it teaches.
 	var desk: Vector3 = town.service_point("recruiter")
 	check(town.interact_at(1, desk) == "recruiter", "G at the desk names the recruiter")
-	check(card.has_shown(GiverScript.HIRE_LESSON), "the first G offers the hire lesson")
-	check(not card.is_open(), "and the skipped card never opens")
+	check(tips.has_shown(GiverScript.HIRE_LESSON), "the first G offers the hire tip")
 	check(town.screen.is_open(), "the hire board opens straight away")
-	card.close()
+	tips.hide()
 	await create_timer(0.15).timeout
 	check(town.interact_at(1, desk) == "recruiter", "G at the desk names it again")
-	check(not card.is_open(), "the lesson is read once and never again")
 	check(town.screen.is_open(), "from then on G is the recruiter board itself")
 	town.screen.close()
 
@@ -435,9 +433,9 @@ func check_talk() -> void:
 		"G at the desk names the quartermaster")
 	check(warband.quests.is_active("free_the_soldiers"),
 		"the quartermaster's talk accepts the rescue order")
-	check(not card.is_open(), "and the skipped order opens no card")
-	check(town.quartermaster.is_open(), "his counter opens instead of the skipped card")
-	card.close()
+	check(tips.has_shown("offer_free_the_soldiers"), "the order is one tip")
+	check(town.quartermaster.is_open(), "his counter opens instead of a page")
+	tips.hide()
 	await create_timer(0.15).timeout
 
 

@@ -16,7 +16,7 @@ Every window in the game is the same object at a different size:
 > a forged iron clamp gripping a torn vellum page, titled on the clamp,
 > sealed in wax, with its action plates on the page.
 
-Screens do not invent furniture. The tutorial card, the warband ledger, the
+Screens do not invent furniture. The tip plaque, the controls sheet, the warband ledger, the
 gear page, the quick menu and the title all use the same clamp, the same
 header, the same plate rack, the same seal and the same keycaps. Content is
 what changes.
@@ -148,7 +148,7 @@ stretch), focus state = hover plate, keycaps wrapped by an `HFlowContainer`.
 ### Pointer
 
 A visible window owns the pointer. `LedgerFrame` keeps `Input.mouse_mode`
-`VISIBLE` for as long as it is visible (including the paused tutorial card, whose
+`VISIBLE` for as long as it is visible (including a sub-page, whose
 open runs before `world_scene` captures the mouse in `_ready`), and every menu's
 `open()` sets it on the same frame as the press. Closing does not capture: the
 scene's own policy takes the pointer back once no panel is open.

@@ -39,9 +39,7 @@ const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const TEST_SAVE := "user://warband_world_state.json"
 const WARBAND_SAVE := "user://warband_world_warband.json"
 const WORLD := "res://scenes/warband_world.tscn"
-## The rescuer's walk and his fight have to happen inside this.
-const JOG_TIMEOUT := 16.0
-## How long the shiv may take to put the pair down before the test calls it a hang.
+## How long the first fight has to start before the test calls it a hang.
 const PAIR_TIMEOUT := 40.0
 ## How long the driven walk may take before the test calls it a hang.
 const WALK_LIMIT := 200.0
@@ -50,8 +48,8 @@ const WALK_LIMIT := 200.0
 ## running seven other Godots; the recorded time is game time at 1x, so the distance
 ## and the pace asserted below are the campaign's own.
 const WALK_SCALE := 5.0
-## Where the campaign's walk begins: the cage line the soul wakes on.
-const CAGE_LINE := Vector3(-2.6, 0.2, 6.0)
+## Where the campaign's walk begins: the cage the soul wakes in (`CAGE_POSTS[0]`).
+const CAGE_LINE := Vector3(0.0, 0.2, 6.0)
 
 var game
 var flow
@@ -289,13 +287,14 @@ func flat_range(from: Vector3, to: Vector3) -> float:
 	return Vector2(from.x - to.x, from.z - to.z).length()
 
 
-## Every tutorial popup is skipped in this build: a beat that would have raised a
-## card must leave the game running and the card hidden.
+## The warband teaches with tips, never with pages: a beat that offers a hint must
+## leave the game running, and nothing may pause the tree over a read.
 func dismiss_card(label: String) -> void:
-	if game == null or game.card == null:
+	if game == null:
 		return
-	check(not game.card.is_open(), "no tutorial card opens (%s)" % label)
-	check(not paused, "and the game is never held still by one (%s)" % label)
+	check(not paused, "the game is never held still by a read (%s)" % label)
+	if game.tips != null and is_instance_valid(game.tips):
+		game.tips.hide()
 
 
 ## Poll a condition while playing the player: any card that opens during the wait
@@ -325,8 +324,10 @@ func check_one_of_each() -> void:
 	check(game.controller != null, "the world owns a possession controller")
 	check(nodes_named("Soul") == 1, "exactly one controller exists (%d)" % nodes_named("Soul"))
 	check(nodes_named("WarbandHud") == 1, "exactly one warband HUD exists (%d)" % nodes_named("WarbandHud"))
-	check(nodes_named("TutorialCard") == 1,
-		"exactly one tutorial card exists (%d)" % nodes_named("TutorialCard"))
+	check(nodes_named("TutorialCard") == 0,
+		"the world carries no tutorial card any more (%d)" % nodes_named("TutorialCard"))
+	check(nodes_named("Tips") == 1,
+		"exactly one tip channel exists (%d)" % nodes_named("Tips"))
 	# Only the world's own view counts: the paperdoll renders its character into
 	# a SubViewport, and a camera that is current inside a SubViewport is current
 	# for that viewport alone.
@@ -352,7 +353,7 @@ func check_one_of_each() -> void:
 		"the areas adopt the world's controller instead of building one")
 	check(game.camp.hud == game.hud and game.town.hud == game.hud,
 		"the areas write to the world's one HUD")
-	check(game.camp.card == game.card, "the areas share the world's one tutorial card")
+	check(game.camp.tips == game.tips, "the areas share the world's one tip channel")
 	check(game.camp.squad == game.squad,
 		"the camp drives the world's one squad module, not a copy")
 	check(game.bodies.size() == 5, "five bodies stand in the camp (%d)" % game.bodies.size())
@@ -360,18 +361,32 @@ func check_one_of_each() -> void:
 	var local = game.controller.active_body(1)
 	check(local != null, "the local soul starts inside a body")
 	check(game.camp.caged_ids.has(game.controller.merc_for_peer(1)),
-		"the soul starts in one of the four prisoners")
+		"the soul starts inside one of the five prisoners")
+	check(game.camp.caged_ids.size() == 5, "all five of the warband are in cages (%d)"
+		% game.camp.caged_ids.size())
 	# The tutorial machine ends in the escape: there is no TOWN beat.
 	check(SequencerScript.state_name_of(SequencerScript.State.ESCAPING) == "escaping",
 		"the escape is the tutorial's last state")
 	check(SequencerScript.state_name_of(SequencerScript.State.ESCAPING + 1) == "unknown",
 		"the state machine stops at the escape - there is no town state")
-	var final_card: String = str(game.camp.STEP_CARDS[4]["body"]).to_lower()
-	check(final_card.contains("trail"), "the last card says the trail through the wood is the way out")
-	check(not final_card.contains("arch"), "the last card promises no arch")
-	var final_keys: String = str(game.camp.STEP_CARDS[4]["keys"]).to_lower()
-	check(final_keys.contains("run") or final_keys.contains("walk"),
-		"the last card tells the player to move through the wood")
+	# The opening's whole script is a table of one-line tips: no paragraph, no
+	# page, and every one of them a command.
+	var tips_table: Dictionary = game.camp.OPENING_TIPS
+	check(tips_table.size() == 8, "the opening has eight tips (%d)" % tips_table.size())
+	for id in tips_table.keys():
+		var row: Dictionary = tips_table[id]
+		var text := str(row.get("text", ""))
+		var keys := str(row.get("keys", ""))
+		check(not text.contains("\n") and not keys.contains("\n"),
+			"%s is one line" % id)
+		check(text.length() <= 48, "%s is short enough to read over a fight (%d)"
+			% [id, text.length()])
+		check(not text.ends_with("."), "%s is a command, not a sentence" % id)
+	var run_row: Dictionary = tips_table[game.camp.TIP_RUN]
+	check(str(run_row["text"]).to_lower().contains("town"),
+		"the last tip names the town (%s)" % str(run_row["text"]))
+	check(game.camp.RUN_MARKER_LABEL == "RUN TO TOWN",
+		"and the arrow over the way out says the same (%s)" % game.camp.RUN_MARKER_LABEL)
 
 
 # --- 2. the camp is in a wood ----------------------------------------------
@@ -473,12 +488,19 @@ func check_ground() -> void:
 	check(int(readout["terrain_tris"]) >= 20000,
 		"the ground is one heightfield (%d triangles)" % int(readout["terrain_tris"]))
 	check(high - low >= 2.0, "the wood rises and falls (%.1f .. %.1f m)" % [low, high])
-	# The cage line stands level: four cages on one pad, no step between them.
-	var first := TerrainScript.height_at(game.camp.CAGE_POSTS[0].x, game.camp.CAGE_POSTS[0].z)
-	for post in game.camp.CAGE_POSTS:
-		var height := TerrainScript.height_at(post.x, post.z)
-		check(absf(height - first) < 0.01,
-			"the cages stand level with each other (%.3f m vs %.3f)" % [height, first])
+	# The cages are scattered through the pocket, so each one stands on the ground
+	# at its own anchor: a cage that floats or sinks is a body in the wood, not a
+	# prisoner in a cage.
+	for index in game.camp.CAGE_POSTS.size():
+		var post: Vector3 = game.camp.CAGE_POSTS[index]
+		var cage := game.camp.get_node_or_null("Cage%d" % (index + 1)) as Node3D
+		check(cage != null, "cage %d stands in the camp" % (index + 1))
+		if cage == null:
+			continue
+		var ground := TerrainScript.height_at(post.x, post.z)
+		check(absf(cage.global_position.y - ground) < 0.05,
+			"cage %d sits on the ground it was planted on (%.3f vs %.3f)"
+				% [index + 1, cage.global_position.y, ground])
 	# ... and so does the square.
 	var centre: Vector3 = game.town.global_position
 	var corner: Variant = null
@@ -505,16 +527,21 @@ func check_ground() -> void:
 # --- 3. the lesson ---------------------------------------------------------
 
 func check_lesson() -> void:
-	dismiss_card("the opening card")
-	check(game.camp.sequencer.state() == SequencerScript.State.CAGED, "the lesson opens caged")
-	check(game.camp.sequencer.seen_count() == 1, "the starting body counts as seen")
-	check(game.camp.sequencer.objective().contains("1/4"), "the objective counts the seen bodies")
-	check(not game.camp.cages_open(), "the cages are still shut")
+	dismiss_card("the opening")
+	check(game.camp.sequencer.state() == SequencerScript.State.CAGED,
+		"the opening wakes the player in a cage")
+	check(game.camp.sequencer.objective() == "Cut your latch",
+		"with one thing to do (%s)" % game.camp.sequencer.objective())
+	check(game.camp.sequencer.hint().contains("G"), "and the key that does it")
+	check(game.camp.cages_open_count() == 0, "the cages are all shut")
+	check(game.camp.caged_ids.size() == 5, "five bodies are held (%d)" % game.camp.caged_ids.size())
 	check(game.camp.pickups().size() == 4,
-		"three cultist weapons and the rescuer's shiv lie on the walk (%d)"
+		"three cultist weapons and the camp's shiv lie on the dirt (%d)"
 		% game.camp.pickups().size())
+	check(game.tips != null and game.tips.has_shown(game.camp.TIP_CAGE),
+		"and the first key was named as a tip over the crosshair")
 
-	# A caged soul cannot leave its cage: possession moves the soul, not the bars.
+	# A caged body cannot leave its cage: the clamp is what holds it, not a script.
 	var merc_id: int = game.controller.merc_for_peer(1)
 	var actor = game.controller.body_of(merc_id)
 	var anchor: Vector3 = game.camp.cage_anchor_for(merc_id)
@@ -525,100 +552,78 @@ func check_lesson() -> void:
 		"a caged body is snapped back inside its cage (%.2f m)"
 		% flat_range(actor.global_position, anchor))
 
-	# Every out-of-order beat is refused. A cage that does not exist is never booked,
-	# and the live lesson starts with no latch on it at all - the early-latch guard
-	# itself is measured on a scratch machine in the cage regression.
+	# Every out-of-order beat is refused on the live opening.
 	check(not game.camp.sequencer.note_cage_opened(9), "a cage that does not exist is never booked")
-	check(not game.camp.sequencer.note_rescuer_arrived(), "the rescuer cannot arrive before all four seen")
+	check(not game.camp.sequencer.note_cage_opened(-1), "nor a negative one")
+	check(not game.camp.sequencer.note_looked_around(),
+		"the bearings beat cannot start before the cage is open")
 	check(not game.camp.sequencer.note_guard_killed(), "a guard death before the fight is not progress")
-	check(not game.camp.sequencer.note_weapon_looted(), "loot before the cages open is not progress")
-	check(not game.camp.sequencer.note_body_entered(0), "a non-body never counts as a prisoner")
-	check(game.camp.sequencer.cages_opened() == 0, "and no latch was booked on the live lesson")
+	check(not game.camp.sequencer.note_weapon_looted(), "loot before the cage is open is not progress")
+	check(not game.camp.sequencer.note_escaped(), "and the escape cannot happen from a cage")
+	check(game.camp.sequencer.cages_opened() == 0, "nothing was booked on the live opening")
 
-	# All four seen, in a scrambled order: the lesson must not depend on F1..F4.
-	var ids: Array = game.camp.caged_ids
-	for index in ids.size():
-		game.controller.direct(1, int(ids[(index + 2) % ids.size()]))
-	check(game.camp.sequencer.seen_count() == 4, "all four prisoners were seen")
-	check(game.camp.sequencer.state() == SequencerScript.State.ALL_SEEN,
-		"the fourth possession advances to ALL_SEEN (%s)" % game.camp.sequencer.state_name())
-	check(state_count(SequencerScript.State.ALL_SEEN) == 1, "ALL_SEEN is entered exactly once")
-	dismiss_card("all four seen")
-
-	# Corvin jogs in with empty hands and stops at the cage line: the pair are the
-	# player's fight now, not his. The soul is NOT moved for the player - taking his
-	# body is the beat.
-	var arrived := await await_condition(
-		func() -> bool: return game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		JOG_TIMEOUT, "the rescuer's walk")
-	check(arrived, "the rescuer walked to the cages (%s)" % game.camp.sequencer.state_name())
-	check(state_count(SequencerScript.State.RESCUER_ARRIVED) == 1,
-		"RESCUER_ARRIVED is entered exactly once")
-	check(game.controller.merc_for_peer(1) != game.camp.rescuer_id,
-		"the soul is NOT moved into the rescuer for the player")
-	check(not game.camp.sequencer.rescuer_taken(), "the rescuer has not been taken yet")
-	check(game.camp.cages_open_count() == 0, "no latch is cut for free")
-	check(game.camp.sequencer.objective().contains("F5"), "the objective names the key")
-	var walked_in = game.controller.body_of(game.camp.rescuer_id)
-	check(not game.camp.holds_blade(walked_in),
-		"the rescuer walked in with nothing in his hands")
-	var sleeping := 0
-	for watcher in game.camp.guards:
-		if is_instance_valid(watcher) and bool(watcher.hunting()):
-			sleeping += 1
-	check(sleeping == 0, "nothing hunts before the player is armed (%d hunting)" % sleeping)
-	dismiss_card("the rescuer's card")
-
-	# A body at the bars with bare hands is told what is missing, and opens nothing.
-	var first_cage: Vector3 = game.camp.CAGE_POSTS[0]
-	var prisoner = game.controller.body_of(int(ids[2]))
-	prisoner.global_position = first_cage + Vector3(0.0, 0.1, 2.4)
-	await physics_frame
-	check(not game.camp.holds_blade(prisoner), "the prisoner has nothing in its hands")
+	# Out of the cage: the player's own latch, bare-handed, on one press.
+	check(not game.camp.holds_blade(actor), "the player wakes with empty hands")
+	check(game.camp.latch_target(actor) == game.camp.OWN_CAGE,
+		"and its own latch is the one in reach (%d)" % game.camp.latch_target(actor))
 	game._try_interact()
-	check(game.camp.cages_open_count() == 0, "G with bare hands opens no cage")
+	check(game.camp.cages_open_count() == 1, "G opens the player's own cage (%d)"
+		% game.camp.cages_open_count())
+	check(game.camp.sequencer.state() == SequencerScript.State.LOOSE,
+		"and the opening moves out into the camp (%s)" % game.camp.sequencer.state_name())
+	check(not game.camp.is_cage_clamped(merc_id), "the clamp is gone from the player's body")
+	check(game.tips.has_shown(game.camp.TIP_WALK), "the walk was named")
+
+	# Bearings: the beat ends on the freed body stepping away from its own cage.
+	actor.global_position = game.camp.CAGE_POSTS[game.camp.OWN_CAGE] + Vector3(0.0, 0.2, -7.0)
+	await physics_frame
+	await physics_frame
+	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
+		"stepping out carries it to the objective (%s)" % game.camp.sequencer.state_name())
+	check(game.camp.duel.step() == DuelScript.Step.MOVE,
+		"and the first fight's lesson is at the feet (%s)" % game.camp.duel.step_name())
+	var opening_prompt: String = game.camp.prompt_line(actor)
+	check(opening_prompt.contains("warband 1/5"),
+		"the prompt carries the objective's count (%s)" % opening_prompt)
+
+	# A body at another cage with bare hands is told what is missing, and opens
+	# nothing: only the wretch's own cell gives up to a nail.
+	var other_cage: Vector3 = game.camp.CAGE_POSTS[game.camp.OWN_CAGE + 1]
+	actor.global_position = other_cage + Vector3(0.0, 0.2, 2.6)
+	await physics_frame
+	game._try_interact()
+	check(game.camp.cages_open_count() == 1, "G with bare hands opens no other cage")
 	var bare_status = game.hud.get("_status_label")
 	check(bare_status != null
 			and str(bare_status.text).contains("Nothing to cut the latch with"),
 		"the HUD says what is missing")
-	check(game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-		"and the lesson stays where it was")
+	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
+		"and the objective stays where it was")
 
-	# The first fight is the player's: take the body, walk to the shiv, take it, and
-	# put the pair down. This regression is about the world around that fight, so
-	# the melee itself is left to `cage_escape_regression` and the pair fall through
-	# the same damage path a landed swing ends in.
-	var take: Dictionary = game.controller.direct(1, game.camp.rescuer_id)
-	check(bool(take.get("ok", false)), "the rescuer's body can be entered")
-	check(game.camp.sequencer.rescuer_taken(), "the sequencer saw the player take the body")
-	check(game.camp.cages_open_count() == 0, "taking him cuts no latch by itself")
-	check(game.camp.duel.step() == DuelScript.Step.MOVE,
-		"taking him starts the first fight's lesson at the feet (%s)"
-		% game.camp.duel.step_name())
-	dismiss_card("the walking card")
-	var cutter = game.controller.active_body(1)
-	check(not game.camp.holds_blade(cutter), "his hands are empty until the shiv is taken")
-	cutter.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
+	# The camp's only blade is on the dirt: walk onto it, take it, and the pair wake.
+	actor.global_position = game.camp.SHIV_POST + Vector3(0.0, 0.35, 2.0)
 	await physics_frame
 	await physics_frame
 	check(game.camp.duel.step() == DuelScript.Step.FETCH,
-		"standing over the shiv asks for the pickup (%s)" % game.camp.duel.step_name())
-	dismiss_card("the pickup card")
+		"standing over the blade asks for the pickup (%s)" % game.camp.duel.step_name())
+	check(game.tips.has_shown(game.camp.TIP_BLADE), "the pickup was named")
 	game._try_loot()
-	check(game.camp.holds_blade(cutter), "and the shiv is in the player's hands")
-	check(game.card != null and game.card.has_shown("step_5"),
-		"the cuts lesson is offered and recorded")
-	check(not game.card.is_open() and not paused,
-		"but taking it opens no card and keeps the game in the player's hands")
-	dismiss_card("the cuts card")
+	check(game.camp.holds_blade(actor), "and the ironwood shiv is in the player's hands")
+	check(game.camp.duel.step() == DuelScript.Step.FIGHT,
+		"the fight starts on the frame the blade is taken (%s)" % game.camp.duel.step_name())
+	check(game.tips.has_shown(game.camp.TIP_SWING), "the cuts were named")
+	check(not paused, "none of it held the game still")
 	var pair_woke := await await_condition(
 		func() -> bool:
 			for watcher in game.camp.guards:
 				if is_instance_valid(watcher) and bool(watcher.hunting()):
 					return true
 			return false, 8.0, "the pair waking")
-	check(pair_woke, "the pair wake on the body that took the shiv")
+	check(pair_woke, "the pair wake on the body that took the blade")
 	dismiss_card("the pair waking")
+	# This regression is about the world around the fight: the melee itself is
+	# `cage_escape_regression`'s, and the pair fall through the same damage path a
+	# landed swing ends in.
 	for watcher in game.camp.guards.duplicate():
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			watcher.take_damage(1000.0, 0)
@@ -626,45 +631,50 @@ func check_lesson() -> void:
 	check(game.camp.watchers_down() == 2, "the pair are down (%d)" % game.camp.watchers_down())
 	check(game.camp.sequencer.guards_down() == 2,
 		"both kills count on the tally (%d)" % game.camp.sequencer.guards_down())
-	check(game.camp.cages_open_count() == 0, "the pair falling cuts nothing by itself")
+	check(game.camp.cages_open_count() == 1, "the pair falling cuts nothing by itself")
 
-	# The player walks the cage line cutting one latch per press. Only the fourth
-	# frees the squad.
+	# The player walks to each shut cage and cuts one latch per press. Only the
+	# last one puts the warband on its feet.
+	var shut: Array[int] = []
 	for index in game.camp.CAGE_POSTS.size():
+		if index != game.camp.OWN_CAGE:
+			shut.append(index)
+	for step in shut.size():
+		var index: int = shut[step]
 		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		cutter.global_position = Vector3(post.x, 0.2, post.z + 2.6)
+		actor.global_position = Vector3(post.x, 0.2, post.z + 2.6)
 		await physics_frame
 		game._try_interact()
-		check(game.camp.cages_open_count() == index + 1,
+		check(game.camp.cages_open_count() == step + 2,
 			"latch %d is cut one cage at a time (%d)" % [index + 1, game.camp.cages_open_count()])
-		if index < game.camp.CAGE_POSTS.size() - 1:
-			check(game.camp.sequencer.state() == SequencerScript.State.RESCUER_ARRIVED,
-				"and the squad is not loose at %d of 4 (%s)"
-				% [index + 1, game.camp.sequencer.state_name()])
-	check(game.camp.cages_open(), "all four latches are cut")
-	check(state_count(SequencerScript.State.FREED) == 1, "FREED is entered exactly once")
-	check(game.camp.sequencer.state() == SequencerScript.State.FREED,
-		"the fourth latch frees the squad (%s)" % game.camp.sequencer.state_name())
-	for index in ids.size():
-		check(not game.camp.is_cage_clamped(int(ids[index])),
+		if step < shut.size() - 1:
+			check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
+				"and the warband is not loose at %d of 5 (%s)"
+				% [step + 2, game.camp.sequencer.state_name()])
+	check(game.camp.cages_open(), "every latch is cut")
+	check(state_count(SequencerScript.State.WARBAND) == 1, "WARBAND is entered exactly once")
+	check(game.camp.sequencer.state() == SequencerScript.State.WARBAND,
+		"the last latch puts five bodies on their feet (%s)" % game.camp.sequencer.state_name())
+	for index in game.camp.caged_ids.size():
+		check(not game.camp.is_cage_clamped(int(game.camp.caged_ids[index])),
 			"cage %d stopped clamping its prisoner" % (index + 1))
-	check(game.camp.sequencer.objective().contains("2/%d" % SequencerScript.GUARD_COUNT),
-		"the tally reads true against the camp (%s)" % game.camp.sequencer.objective())
-	dismiss_card("the freed card")
+	check(game.camp.sequencer.objective() == "Run to the town",
+		"the objective turns over to the road (%s)" % game.camp.sequencer.objective())
+	check(game.tips.has_shown(game.camp.TIP_RUN), "and the run was named")
+	check(game.camp._run_marker != null and game.camp._run_marker.visible,
+		"the gold arrow stands over the gap in the trees")
+	check(not game.squad.following, "the warband holds the camp until the leaving")
 
 	# The freed squad arms itself off the ground - silently, with no loot step.
 	var armed := await await_condition(
 		func() -> bool: return game.camp.allies_armed() >= 1, 16.0, "the squad arming")
 	check(armed, "a freed ally picks a weapon off the ground and holds it")
-	# The three cultist drops are still there, plus a blade for each of the pair
-	# Corvin put down: a fallen watcher's steel leaves its hand and lands on the
-	# dirt beside it.
 	var fallen_pair := 0
 	for watcher in game.camp.guards:
 		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
 			fallen_pair += 1
 	check(game.camp.pickups().size() == 4 + fallen_pair,
-		"three drops, the shiv and one blade per fallen watcher lie where they were (%d for %d fallen)"
+		"three drops and one blade per fallen watcher lie where they were (%d for %d fallen)"
 		% [game.camp.pickups().size(), fallen_pair])
 
 
@@ -695,10 +705,11 @@ func check_leaving() -> void:
 	# between there and the mouth is covered by the opening itself - Corvin's run
 	# at the pair, then the walk out - so it is banked here and the lane's metres
 	# are added on top: one walk from the cages to the square, not two halves.
-	opening_metres = flat_range(local.global_position, CAGE_LINE)
+	opening_metres = flat_range(local.global_position,
+		game.camp.CAGE_POSTS[game.camp.OWN_CAGE])
 	check(game.camp.guards.size() == 2,
 		"the camp holds no more watchers than the pair (%d)" % game.camp.guards.size())
-	check(game.camp.sequencer.state() == SequencerScript.State.FREED,
+	check(game.camp.sequencer.state() == SequencerScript.State.WARBAND,
 		"the camp is held, not escaped (%s)" % game.camp.sequencer.state_name())
 	game.controller.input_enabled = false
 	await physics_frame
@@ -1001,19 +1012,11 @@ func check_town_end() -> void:
 			"the %s counter resolves from where the body stands" % service)
 		var answered: String = game.interact_at(1, body.global_position)
 		check(answered == service, "G at the %s opens it (got '%s')" % [service, answered])
-		# A keeper with something to say speaks before his counter opens, and the
-		# quartermaster can have two things to say in a row - an order on the table,
-		# then the vial the order is about. Each press is one card; the counter
-		# opens once he has said them all, and he must not talk forever.
-		var cards := 0
-		while game.card != null and game.card.is_open() and cards < 3:
-			cards += 1
-			game.card.close()
-			await create_timer(0.1).timeout
-			check(game.interact_at(1, body.global_position) == service,
-				"the %s counter still answers after card %d" % [service, cards])
-		check(cards < 3, "the %s keeper does not talk forever (%d cards)" % [service, cards])
-		check(game._panel_open(), "the %s panel is open" % service)
+		# A keeper with something to say says it as one line and gets out of the
+		# way: the counter opens on the same press, and nothing is read on top of
+		# it. There is no modal to dismiss and nothing to spam-skip.
+		check(game._panel_open(), "the %s counter opens on the same press" % service)
+		check(not paused, "and the game keeps running behind it (%s)" % service)
 		game._hide_panels()
 		await create_timer(0.1).timeout
 	check(not game._panel_open(), "the panels close again")

@@ -47,6 +47,10 @@ const SOLDIER_RESCUES := 4
 const WATCHER_ID := "hollow_warden"
 const ICHOR_ID := "ichor_vial"
 
+## One row per order, and every row is the whole of what an order says: a
+## title, one line of what is wanted, one key line, and the next link. There is
+## no prose here any more - the ledger row on the HUD is what a player reads, and
+## a keeper hands an order over with a single tip.
 const DEFS := {
 	"free_the_soldiers": {
 		"title": "THE CAGES IN THE WOOD",
@@ -57,14 +61,8 @@ const DEFS := {
 		"count": SOLDIER_RESCUES,
 		"line": "Free the soldiers caged in the wood",
 		"hint": "G at a cage with a blade in your hand",
-		"body": "The wardens drive our stragglers into stake cages and leave them"
-			+ " there to rot. Four of the warband are still shut in them.\n\n"
-			+ "Walk the wood and look for the iron. Stand at a cage with a blade in"
-			+ " your hand and press G: the latch is a cut, not a key. Every soldier"
-			+ " you bring out swears to the band and takes a place on the roster.",
 		"keys": "G - cut a cage latch",
-		"done": "Four cages open and four names on the roll. The wood has fewer"
-			+ " prisoners and the warband has four more blades.",
+		"done": "Four cages open.",
 		"next": "cull_the_watchers",
 	},
 	"cull_the_watchers": {
@@ -76,14 +74,8 @@ const DEFS := {
 		"count": WATCHER_KILLS,
 		"line": "Kill the hollow watchers",
 		"hint": "RMB - guard   ·   LMB - swing",
-		"body": "The antlered ones are the wood's teeth: they hold the road, they"
-			+ " hold the cages, and they answer every horn in the valley.\n\n"
-			+ "Put twenty of them down. Kill them wherever they stand - the camps"
-			+ " past the town wall are thick with them - and come back when the"
-			+ " count is done.",
 		"keys": "LMB - swing   ·   RMB - guard   ·   WHEEL - stab / overhead",
-		"done": "Twenty bodies in the leaves. The watchers will not hold this wood"
-			+ " again this season.",
+		"done": "Twenty down.",
 		"next": "find_the_crypt",
 	},
 	"find_the_crypt": {
@@ -95,11 +87,6 @@ const DEFS := {
 		"count": 1,
 		"line": "Find the Crypt",
 		"hint": "M - the map",
-		"body": "Before the wardens there was a road, and below the road there was"
-			+ " a crypt where the first warband laid its dead. The quartermaster"
-			+ " has the name of the place and nothing else - no door, no depth,"
-			+ " no ground.\n\n"
-			+ "Find it. He cannot draw the way until somebody has stood in it.",
 		"keys": "M - the map",
 		"done": "You found it.",
 		"next": "",
@@ -113,15 +100,8 @@ const DEFS := {
 		"count": 1,
 		"line": "Bind the warden's ichor into a weapon",
 		"hint": "G - the ichor bench",
-		"body": "That vial is what the watchers bleed when they die: black, thick,"
-			+ " and still moving. The old smiths cut it into steel and the blade"
-			+ " took a will of its own.\n\n"
-			+ "The bench at the quartermaster's side is where it is done. Take a"
-			+ " spare weapon out of the shared stash, lay the vial to it, and the"
-			+ " piece comes back with a sigil you can loose with R.",
 		"keys": "G - the ichor bench   ·   R - loose the sigil",
-		"done": "The steel drinks. Whatever the watchers are, some of it is in the"
-			+ " band's hands now.",
+		"done": "The steel drinks.",
 		"next": "",
 	},
 }

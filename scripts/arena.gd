@@ -1294,11 +1294,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if _pause_open():
 			if event.keycode == KEY_ESCAPE:
-				# Escape unwinds one page at a time: the sound page hands the frame
-				# back to the menu, and the menu is what closes.
-				if pause_menu.showing_sound():
-					pause_menu.back()
-				else:
+				# Escape unwinds one page at a time: the sound page and the controls
+				# page hand the frame back to the menu, and the menu is what closes.
+				if not pause_menu.back():
 					_close_menu()
 			return
 		match event.keycode:

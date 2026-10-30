@@ -37,49 +37,48 @@ road (`trail_start`, 60 m past the mouth), and the town square entered (`town`).
 A wipe reloads it; the opening itself has no checkpoint, so a tutorial wipe is still
 the tutorial's to take.
 
-1. **Cages.** The soul is in one of four caged prisoners. Shift between all four
-   (`[` `]` or F1–F4). A big **card pauses the game** on every beat and names the
-   keys; it closes on CONTINUE / G / Enter / Escape.
-2. **Corvin arrives with empty hands.** After the fourth sighting he jogs in
-   (~3.6 s) and stops in front of the cold altar: the pair took his shiv off him
-   at the mouth and threw it down at the altar's left foot (`SHIV_POST`
-   (-2.15, 0.15, 11.0), inside its ring of skull sticks and clear of the candles). He fights nothing and nothing fights him - the
-   first fight is the player's, and it is taught while it happens
-   (`scripts/warband/duel_lesson.gd`, four cards):
-   * **the feet** — the moment the soul enters him: W A S D / SHIFT / SPACE /
-     mouse, and where the shiv lies;
-   * **the steel** — walking onto the shiv opens the card that names `K`; taking
-     it is what arms the body and what wakes the pair. The shiv carries a
-     `LessonArrow` (`lesson_arrow.gd`, unshaded gold, `SIZE` 1.35, bobbing and
-     rolling) from the first frame of the walk until the drop leaves the dirt, and
-     the camp's loose dagger was moved off the same walk so no decoy sits closer;
-   * **the cuts** — raised on the same frame the shiv enters the hand, before the
-     pair get one frame to close in: LMB diagonal, `WHEEL UP` stab (Prison shank:
-     +200%, 0.167 s), `WHEEL DOWN` overhead;
-   * **the guard** — the second watcher's first windup, held still mid-swing:
-     hold RMB. A dagger only softens a blow (`DEFENSE_WEAK_BLOCK`), so the card
-     says a guard is a moment, not a wall.
-   The cards pause the tree, so a new player reads each one with the club frozen
-   in the air. The pair are the softest bodies in the game: 21 health (two
-   shiv stabs), `blow_scale` 0.5, `windup_scale` 2.4 (a 1.3 s telegraph),
-   `swing_gap_scale` 2.2 and `guard_scale` 0.
-3. **The latches, cut by hand.** One latch per cage with `G` in a body holding a
-   blade (`LATCH_REACH` 2.2 m) — nothing opens on a possession, a kill or a body
-   count. The fourth latch lifts the doors, turns the freed prisoners into squad
-   AI and they arm themselves from the steel on the ground.
-4. **The fallen.** The first squadmate to go down within 12 m of the player's body
-   raises the one unnumbered card (`lesson_revive`): **HOLD G** - not a tap - for
+1. **You wake in the cage.** The player is inside the first of the five
+   prisoners (`CAGE_POSTS[OWN_CAGE]`, `OWN_CAGE` 0) and the clamp holds it there
+   (`CAGE_CLAMP_RADIUS` 0.95 m). Objective: **Cut your latch**; the tip channel
+   (`camp.TIP_CAGE`) names `G`. The player's own padlock is the one that gives up
+   to bare hands - a wretch with a nail - and every other cage needs a blade.
+2. **The camp, and the objective.** Cutting it is the `LOOSE` beat: out of the
+   bars, a tip names `W A S D`, and the gold arrow stands over the camp's only
+   blade (the ironwood shiv at `SHIV_POST`). Stepping `BEARINGS_RADIUS` 4.2 m from
+   the player's own cage is the whole of "getting your bearings": the sequencer
+   turns to `FREEING`, the objective becomes **Free your warband n/5**, and the
+   first fight's lesson (`duel_lesson.gd`) starts at its `MOVE` beat. The four
+   other cages are scattered through the pocket, so the quest is a walk around it.
+3. **The first fight, one line at a time.** There is no card and nothing pauses:
+   every beat offers one tip (`scripts/warband/warband_tips.gd`, key tiles plus a
+   command, six seconds, gone) and the HUD prompt names the job.
+   Walking onto the shiv offers `K`; taking it puts the blade in the hand, raises
+   the cuts (LMB diagonal, `WHEEL_UP` stab - the dagger's Prison shank, +200%,
+   0.167 s - and `WHEEL_DOWN` overhead) and wakes the pair. The second watcher's
+   first windup raises **hold RMB**; a dagger only softens a blow
+   (`DEFENSE_WEAK_BLOCK`), so the tip says a guard is a moment, not a wall.
+   The pair are the softest bodies in the game: 21 health (two stabs),
+   `blow_scale` 0.5, `windup_scale` 2.4 (a 1.3 s telegraph), `swing_gap_scale` 2.2
+   and `guard_scale` 0.
+4. **The latches, cut by hand.** One latch per cage with `G` in a body holding a
+   blade (`LATCH_REACH` 2.2 m) - nothing opens on a possession or a kill. The
+   latch arrow rides the *nearest* shut cage, so five scattered cages are five
+   walks and not a line. The second cut offers the bodies tip (`F1`..`F5`, `[` `]`).
+   The fifth lifts every door, turns the freed prisoners into squad AI that arms
+   itself off the ground, and turns the objective over: **Run to the town**.
+5. **The fallen.** The first squadmate to go down within 12 m of the player's body
+   offers the one unnumbered tip (`lesson_revive`): **HOLD G** - not a tap - for
    five seconds brings a body back from DOWNED, and a blow that lands on the
    reviver breaks the channel. The bleed clock is 30 s; in the campaign no blow
    ends a mercenary outright - a lethal hit only puts the body down - while any
    blow that lands on a downed body finishes it and leaves the corpse where it
-   fell. The card is pushed from `world_scene._on_body_downed`, so the camp and
-   the trail share it.
-5. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
+   fell. It is offered from `world_scene._on_body_downed`, so the camp and the
+   trail share it.
+6. **The leaving is the ambush.** Walk the soul's body out of the clearing's mouth
    and **four armed watchers come out of the trees** (each drops its weapon) as the
    state turns to `ESCAPING`. There is no kill quota to open the way; there is no
    gate.
-5. **The wood.** The mouth leads onto a **1,374.6 m** road through the same wood —
+7. **The wood.** The mouth leads onto a **1,374.6 m** road through the same wood —
    torches down both verges every 18 m, ironoak and hollow snags, rag trees and
    gallows trees with charms strung across the track, two bone arches that frame
    the road, wicker effigies, skull stakes, cauldrons, braziers, straw, blood and
@@ -109,7 +108,7 @@ the tutorial's to take.
    78–96 m off the road (fractions 0.72 / 0.80 / 0.90), past twice a warden's own
    sight of the lane, so the road never drags them into a fight the band did not
    walk into — the map and the camp dressings are what make them findable.
-6. **Town.** The trail ends at a **stockade**: 286 planted stakes with one gap and
+8. **Town.** The trail ends at a **stockade**: 286 planted stakes with one gap and
    a bone-lintel gate over the road, eight roofs inside it (five stick-walled
    halls, two round dwellings, one open stall), a totem pair, the fire ring, and
    the services — shared infinite stash, Sacrificial Altar (unbind / distil 5:1 /
@@ -223,7 +222,7 @@ Autoloads (`project.godot`): `Log`, `PlayerState`, `Session`, `NetCache`,
 | The map | `world_map.gd` (one page, `M`, fed by `WorldScene.map_markers()`) |
 | Town folk | `town_folk.gd` (five armoured keepers), `town_guard.gd` (three static watch archers) |
 | UI | `warband_hud.gd`, `warband_screen.gd`, `warband_paperdoll.gd`, `tutorial_card.gd` |
-| World | `scenes/warband_world.tscn` + `world_scene.gd`: the one campaign scene. Owns the soul controller, camera, HUD, warband screen, paperdoll, tutorial card, loot vacuum, crawl, revive, brand runner and the single ground (`terrain.gd`); builds the three areas and hands each the same controller. `GameFlow.world_start` says where the warband is put down ("camp" on a new game, "town" for a resumed save or the arena's return) |
+| World | `scenes/warband_world.tscn` + `world_scene.gd`: the one campaign scene. Owns the soul controller, camera, HUD, warband screen, paperdoll, tip channel, loot vacuum, crawl, revive, brand runner and the single ground (`terrain.gd`); builds the three areas and hands each the same controller. `GameFlow.world_start` says where the warband is put down ("camp" on a new game, "town" for a resumed save or the arena's return) |
 | Areas | `cage_escape.gd` (the camp clearing: cages, latches, sequencer, watchers, the six that come out of the trees), `escape_run.gd` (the trail: pursuers and its two endings), `town_hub.gd` (the square: stalls, stash, altar, keeper, expedition gate). Each takes `host` — the world — and in `host != null` mode builds only its own content: no controller, no HUD, no environment, no door |
 | Camp clearing | `camp_clearing.gd`: the camp as a clearing in the woods — treeline, 196 trees and 155 bushes round the edge, a broken stake fence (10 runs, 357 stakes), 17 torches, the mouth onto the trail |
 | The trail | `run_forest.gd` (the 1,374.6 m way through the wood and its dressing — no lane, no walls, a worn line marked by paired torches; returns `{lane, length, width, torches, ...}`) + `squad_drive.gd` (the one follow/fight/retarget behaviour, shared by both areas) |
@@ -258,10 +257,17 @@ Integration seams deliberately placed in the base game:
 7. **Arena bodies target layer 4 by default.** Scenes that fight wilderness mobs
    (layer 2) must set `combat.target_mask` themselves; the cage uses 2 only, so
    the squad cannot cut itself.
-8. **Tutorial cards pause the tree** (`TutorialCard` runs `PROCESS_MODE_ALWAYS`).
-   A scene hand-off must clear `paused` (`GameFlow.goto` does).
-9. **The rescuer is the player's beat, not the AI's.** No auto-possession; he is
-   excluded from the squad AI until the latches are cut.
+8. **Nothing in the warband pauses the tree.** The tutorial card and its
+   paragraphs are gone (the file is deleted): the opening teaches with `WarbandTips` (a key line and a
+   command under the crosshair) and `warband_tips.gd` never pauses, never takes
+   the pointer and never opens twice. A beat that offers a hint must leave the
+   game running - `warband_world_regression` asserts `not paused` on every one.
+9. **The player's own latch is the only bare-handed one.** `camp.interact`
+   refuses every other cage without a blade ("Nothing to cut the latch with.");
+   the own cage (`OWN_CAGE` 0) opens to a fist, because getting out of it is the
+   first step of the game. Nothing about the squad AI is gated on a possession any
+   more - a body is free the moment its own cage is open (`is_free`), and the
+   clamp, not a script, is what holds the rest.
 10. **Squad AI is silent about loot.** No pickup messages, no loot step in the
     objective. `K` still works for a human but is not advertised. A walk to a
     piece is abandonable and every errand else is not: `_walk_to_loot` gives a
@@ -282,7 +288,7 @@ Integration seams deliberately placed in the base game:
     / run 5.6 / sight 60 / orbit 1.9 and must be pointed at the squad on spawn
     (`CageWatcher.hunt`); the second wave is **six** armed watchers, 2.5 s after
     the first pair, each dropping its weapon; the escape needs eight kills.
-15. **The rescuer is not moved for the player** and **loot is not announced** —
+15. **The opening never moves the player** (no auto-possession, no auto-walk) and **loot is not announced** —
     both were explicit player requests. Do not reintroduce auto-possession or
     pickup feeds.
 16. **One world, and the only travel is a walk.** `scenes/warband_world.tscn` is
@@ -303,13 +309,13 @@ Integration seams deliberately placed in the base game:
     cages; `enter_warband()` is the resume path and is not what the title calls.
     `title_menu_regression` pins it with a saved warband that must not survive the
     click.
-19. **The cages fall to taking Corvin, and the ambush is the leaving.** There is
-    no latch key: `G` does nothing to a cage, and the four latches are cut in the
-    same call that puts the soul in his body (`_maybe_cut_latches` needs the soul
-    *in him* and no watcher standing). `ESCAPING` is the body crossing the mouth,
-    and that frame spawns the six armed watchers; `GUARD_COUNT` is a tally, not a
-    gate. The road never spawns a cultist with a quarry: `wake_road` hands a third
-    of each ring the soul at the leaving, and the rest notice by sight.
+19. **The latches are the objective, and the leaving is the ambush.** There is no
+    auto-opening and no possession gate: every cage but the player's own takes a
+    `G` with a blade in hand, one press each, and the fifth puts the warband on its
+    feet (`WARBAND`). `ESCAPING` is the body crossing the mouth, and that frame
+    spawns the four armed watchers; `GUARD_COUNT` is a tally, not a gate. The road
+    never spawns a cultist with a quarry: `wake_road` hands a third of each ring
+    the soul at the leaving, and the rest notice by sight.
 21. **Nothing solid stands on the way's centre line.** There is no lane: the route
     is a worn line through standing wood, and `CLEAR_HALF` (1.55 m) either side of
     it holds nothing a body can walk into, so the narrowest gap on the centre line
@@ -321,11 +327,11 @@ Integration seams deliberately placed in the base game:
     its blade is free and holds a guard between swings. It breaks off to circle
     only after a few swings and only sometimes, and it blocks while it circles -
     a squad that orbits while being hit is the failure this rule exists to stop.
-20. **No body gets a private health pool.** Every mercenary is 100 health, the NPC
-    rescuer included — a `RESCUER_HEALTH` bump was tried and removed: it breaks
-    the equal-stats contract and carries into the roster. If a scripted fight is
-    too costly, fix the fight (the shiv's stab passive is what makes a shiv work),
-    not the pool.
+20. **No body gets a private health pool.** Every mercenary is 100 health - all
+    five prisoners and every soul a cage frees included. A private pool breaks the
+    equal-stats contract and carries into the roster. If a scripted fight is too
+    costly, fix the fight (the shiv's stab passive is what makes a shiv work), not
+    the pool.
 18. **The hand torch is one module and one brightness.** `torch_light.gd` owns the
     item's visual (shared with the icon studio through `build_visual`) and its light
     (7.5 energy, 26 m, warm): a carried torch has to be brighter than the trail's
@@ -413,13 +419,14 @@ Integration seams deliberately placed in the base game:
 
 | Knob | Where | Now |
 | --- | --- | --- |
-| Watcher pools | `cage_watcher.gd` | pair 30 with `blow_scale` 0.5 and `windup_scale` 2.4 (`PAIR_*` in `cage_escape.gd`), everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
+| Watcher pools | `cage_watcher.gd` | pair 21 with `blow_scale` 0.5 and `windup_scale` 2.4 (`PAIR_LESSON_HEALTH` / `PAIR_*` in `cage_escape.gd`), the ambush 42, everyone else 144 (braced); damage 5, run 5.6, sight 60, orbit 1.9 |
 | Second wave contents and post positions | `cage_escape.gd::REINFORCEMENTS`, `REINFORCE_POSTS` | 6 arms, outside the gate |
 | Delay before the second wave | `cage_escape.gd::REINFORCE_DELAY` | 2.5 s |
-| Total watchers for the escape | `tutorial_sequencer.gd::GUARD_COUNT` | 8 (Corvin's pair + the six at the leaving); a tally, no longer a gate |
+| Total watchers in the opening | `tutorial_sequencer.gd::GUARD_COUNT` | 6 (the pair + the four at the leaving); a tally for the checkpoint, never a gate |
 | Revive / overkill / bubble / cap | `warband_contracts.gd` | 5 s / 10% (arena seats; warband bodies always down, and any blow on a downed one finishes it) / 30-34 m / 8 |
 | Clearing size | `camp_dressing.gd` (`YARD_*`), `camp_clearing.gd` | 40 × 52 m pocket padded flat into the heightfield, wood immediately outside: 402 trees and 828 bushes in the band (24 trunks inside the pocket), 97 ragged stakes |
-| Camp torches | `cage_escape.gd::CAMP_TORCHES` | 11 (cages, mouth, both flanks, the rim), each on the ground's own height |
+| Camp torches | `cage_escape.gd::CAMP_TORCHES` | 11 (the cage ground, mouth, both flanks, the rim), each on the ground's own height |
+| Cages | `cage_escape.gd::CAGE_POSTS` | 5, scattered: own cage at the pocket's centre, four others behind the lean-to, on the far right, deep left by the den and right by the watchers |
 | The way through the wood: length, clear line, torches | `run_forest.gd` | **1,374.6 m** (31 waypoints, 45 m z-steps), **154 torches** (a pair every 18 m at 4.4 m, the only thing that marks the route), **no lane and no walls** — 2,467 trees and 3,421 bushes in the band, 581 solid trunks and 327 rocks, and a 3.1 m clear line (`CLEAR_HALF` 1.55 m) down its middle. Two bone arches and the TOWN gate span the road (`_yaw_facing`), never down it |
 | Mob guard | `devil_mob.gd::GUARD_REDUCTION`, `cage_watcher.gd` | braced most of its cycle, 65% of a blow turned; warband cultists only (`guard_between_swings`) |
 | Squad rhythm | `squad_drive.gd` | one per-ally ladder (close / swing / guard / circle / reset) on every frame; the exchange rolls once when the blade frees: 55-70% guard for 0.35-0.80 s, 1-3 swings then a 0.25-0.55 s short rugged circle re-rolled every 0.12-0.20 s |
@@ -502,8 +509,8 @@ Integration seams deliberately placed in the base game:
 | `admin_arena_regression` | 98 | bubble, downed, revive, loot, altar, screen, two peers |
 | `quartermaster_regression` | 20 | keeper price, purse, refusal |
 | `warband_session_regression` | 49 | two real ENet processes |
-| `quest_log_regression` | 97 | the ledger alone: the five goal shapes, offer/accept/turn-in guards, kill counting by mob id, the chain to the Crypt shell, the ichor's APPLY order, save v5 round trip, free hires and the stash dressing, and the keeper's cards and arrow |
-| `town_stockade_regression` | 241 | the town as a place: the stake ring and its one gap, 8 roofs standing clear of every service ring and the gate lane, 5 armoured keepers that cannot be possessed or hit, the gold arrow moving recruiter → quartermaster, the recruiter's card then board, the quartermaster's order, the ichor service, and a watch archer putting a real arrow into a wolf |
+| `quest_log_regression` | 96 | the ledger alone: the five goal shapes, offer/accept/turn-in guards, kill counting by mob id, the chain to the Crypt shell, the ichor's APPLY order, save v5 round trip, free hires and the stash dressing, and the keeper's tips and arrow |
+| `town_stockade_regression` | 239 | the town as a place: the stake ring and its one gap, 8 roofs standing clear of every service ring and the gate lane, 5 armoured keepers that cannot be possessed or hit, the gold arrow moving recruiter → quartermaster, the recruiter's tip then board, the quartermaster's order on the same press, the ichor service, and a watch archer putting a real arrow into a wolf |
 | `wild_cages_regression` | 102 | the orders' ground on the real world: four cages on the ground and clear of the lane, the latch refusing bare hands, four names on the roll and four marks on the rescue order, 21 wardens in `guards` (nearest camp 72 m off the lane), a body standing on the lane never waking a camp, and one death counting toward the bounty |
 | `loot_wow_regression` | 213 | the wolf's salvage table (deterministic per body), the booking path, `LootSummary` wording, five salvage silhouettes, the click/crouch/cancel gesture on stub bodies, and the wardens' 4-of-12 ichor split |
 | `world_map_regression` | 64 | the grown lane and field, and the page: bounds, projection monotonicity, every mark inside the panel, the legend, open/close, metres-per-pixel |
@@ -665,10 +672,10 @@ and 1.15 ambient) and the camp as a night with no vision at all, its torches bar
 glowing spheres. Both are fixed (`a8ee1f2`, `9b1b66a`); the road now reads as a
 chain of fire and the camp as a lit holding pen.
 
-**Still not exercised on a display:** driving the tutorial with real input (cards,
-F5 taking Corvin, the four G latches, the squad fight, the six runners) and a
-second peer through the lobby. Every check for those is headless. Do that first in
-the next session.
+**Still not exercised on a display:** driving the opening with real input (the
+own latch, the bearings step, the blade and the pair, the four cuts, the leaving)
+and a second peer through the lobby. Every check for those is headless. Do that
+first in the next session.
 
 ### Phase 4 (later)
 

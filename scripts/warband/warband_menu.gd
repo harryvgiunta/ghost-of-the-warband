@@ -23,18 +23,24 @@ signal saved(path: String)
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
+const KeybindPageScript = preload("res://scripts/ui/keybind_page.gd")
 
-## The index page and the one sub-page it opens.
+## The index page and the two sub-pages it opens: the mix, and the controls sheet.
 const PAGE_MENU := "menu"
 const PAGE_SOUND := "sound"
+const PAGE_KEYS := "keys"
 
-const PANEL_SIZE := Vector2(460, 700)
+const PANEL_SIZE := Vector2(460, 760)
+## The controls sheet is a whole keyboard wide: the frame itself grows for it.
+const KEYS_PANEL_SIZE := Vector2(1140, 760)
 const DIM := Color(0.02, 0.015, 0.01, 0.82)
 
 var resume_button: Button
 var save_button: Button
 var load_button: Button
 var settings_button: Button
+## The controls sheet's row, on the settings page beside the mix.
+var keys_button: Button
 var exit_button: Button
 var quit_button: Button
 ## The windowed/fullscreen row on the settings page.
@@ -42,10 +48,13 @@ var display_button: Button
 var back_button: Button
 ## The shared mixer page; it owns every level and mute, this menu owns none.
 var sound_page
+## The controls sheet, the same board the frontier's quick menu shows.
+var keys_page
 
 var _frame
 var _menu_layer: VBoxContainer
 var _sound_layer: VBoxContainer
+var _keys_layer: VBoxContainer
 var _notice: Label
 var _status: Label
 var _page := PAGE_MENU
@@ -82,7 +91,7 @@ func is_open() -> bool:
 	return _open
 
 
-## Which page is showing: `"menu"` or `"sound"`.
+## Which page is showing: `"menu"`, `"sound"` or `"keys"`.
 func page() -> String:
 	return _page
 
@@ -151,15 +160,32 @@ func back() -> bool:
 ## Unknown pages fall back to the index, so a typo can never hide the menu.
 func show_page(name: String) -> void:
 	_build()
-	if name != PAGE_SOUND:
+	if name != PAGE_SOUND and name != PAGE_KEYS:
 		name = PAGE_MENU
 	_page = name
 	_menu_layer.visible = name == PAGE_MENU
 	_sound_layer.visible = name == PAGE_SOUND
-	_frame.configure("Sound" if name == PAGE_SOUND else "Warband",
-		"gear" if name == PAGE_SOUND else "banner")
+	_keys_layer.visible = name == PAGE_KEYS
+	match name:
+		PAGE_SOUND:
+			_frame.configure("Sound", "gear")
+			_set_panel_size(PANEL_SIZE)
+		PAGE_KEYS:
+			_frame.configure("Keys", "cage")
+			_set_panel_size(KEYS_PANEL_SIZE)
+		_:
+			_frame.configure("Warband", "banner")
+			_set_panel_size(PANEL_SIZE)
 	if name == PAGE_SOUND and sound_page != null and is_inside_tree():
 		sound_page.refresh()
+
+
+## The frame is centred, so its four offsets are all a page size needs.
+func _set_panel_size(panel: Vector2) -> void:
+	_frame.offset_left = -panel.x * 0.5
+	_frame.offset_right = panel.x * 0.5
+	_frame.offset_top = -panel.y * 0.5
+	_frame.offset_bottom = panel.y * 0.5
 
 
 ## Repaint the rows that mirror real state: whether a save exists, and the mode
@@ -279,6 +305,9 @@ func _build() -> void:
 	settings_button = _button("SETTINGS", "", 46)
 	settings_button.pressed.connect(show_page.bind(PAGE_SOUND))
 	column.add_child(settings_button)
+	keys_button = _button("KEYS", "", 46)
+	keys_button.pressed.connect(show_page.bind(PAGE_KEYS))
+	column.add_child(keys_button)
 	_section(column, "LEAVE")
 
 	exit_button = _button(_exit_label, "DangerButton", 46)
@@ -319,6 +348,18 @@ func _build() -> void:
 	back_button = _button("BACK", "", 46)
 	back_button.pressed.connect(show_page.bind(PAGE_MENU))
 	_sound_layer.add_child(back_button)
+
+	_keys_layer = _column(_frame.body, "Keys")
+	_keys_layer.visible = false
+	_section(_keys_layer, "CONTROLS")
+	keys_page = KeybindPageScript.new()
+	keys_page.name = "KeybindPage"
+	keys_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_keys_layer.add_child(keys_page)
+	var keys_back := _button("BACK", "", 46)
+	keys_back.name = "KeysBack"
+	keys_back.pressed.connect(show_page.bind(PAGE_MENU))
+	_keys_layer.add_child(keys_back)
 
 	_refresh_display()
 	_refresh_load()

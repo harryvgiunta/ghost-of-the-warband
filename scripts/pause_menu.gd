@@ -7,6 +7,9 @@ extends CanvasLayer
 ## The menu is one LedgerFrame like every other screen: the plates are the shared
 ## rack, the sections are rubricated in blood ink, and the last written save is
 ## set at the foot of the page.
+##
+## Two sub pages hang off the rows, the mix and the controls sheet, each one deep:
+## the frame grows for the sheet and comes back for the rows.
 
 signal resumed
 signal exit_requested
@@ -15,8 +18,14 @@ signal quit_requested
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
+const KeybindPageScript = preload("res://scripts/ui/keybind_page.gd")
 
 const PANEL_SIZE := Vector2(460, 600)
+## The controls sheet is a whole keyboard wide: the frame itself grows for it.
+const KEYS_PANEL_SIZE := Vector2(1140, 760)
+const PAGE_MENU := "menu"
+const PAGE_SOUND := "sound"
+const PAGE_KEYS := "keys"
 const INK := LedgerThemeScript.INK
 const INK_MUTED := LedgerThemeScript.INK_MUTED
 const BLOOD := LedgerThemeScript.BLOOD
@@ -30,10 +39,15 @@ var sound_button: Button
 ## The sound page, one page in from the menu: the same page the campaign's
 ## Escape window shows, so both ESC surfaces mix identically.
 var sound_page
+## The controls sheet, one page in from the menu: the same board the campaign's
+## Escape window shows, so both ESC surfaces name the keys identically.
+var keys_page
+var keys_button: Button
 var _column: VBoxContainer
 var _sound_layer: VBoxContainer
+var _keys_layer: VBoxContainer
 var _frame
-var _showing_sound := false
+var _page := PAGE_MENU
 var exit_button: Button
 var quit_button: Button
 var _notice: Label
@@ -59,7 +73,7 @@ func is_open() -> bool:
 
 func open(message: String = "") -> void:
 	_build()
-	_show_sound_page(false)
+	_set_page(PAGE_MENU)
 	_open = true
 	visible = true
 	_notice.text = message
@@ -159,6 +173,9 @@ func _build() -> void:
 	sound_button = _button("SOUND", "", 48)
 	sound_button.pressed.connect(_show_sound_page.bind(true))
 	column.add_child(sound_button)
+	keys_button = _button("KEYS", "", 48)
+	keys_button.pressed.connect(show_keys.bind(true))
+	column.add_child(keys_button)
 	_section(column, "LEAVE")
 
 	exit_button = _button(_exit_label, "DangerButton", 48)
@@ -199,30 +216,83 @@ func _build() -> void:
 	var sound_back := _button("BACK", "", 48)
 	sound_back.pressed.connect(_show_sound_page.bind(false))
 	_sound_layer.add_child(sound_back)
+
+	_keys_layer = VBoxContainer.new()
+	_keys_layer.name = "Keys"
+	_keys_layer.add_theme_constant_override("separation", 10)
+	_keys_layer.visible = false
+	frame.body.add_child(_keys_layer)
+	_section(_keys_layer, "CONTROLS")
+	keys_page = KeybindPageScript.new()
+	keys_page.name = "KeybindPage"
+	keys_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_keys_layer.add_child(keys_page)
+	var keys_back := _button("BACK", "", 48)
+	keys_back.name = "KeysBack"
+	keys_back.pressed.connect(show_keys.bind(false))
+	_keys_layer.add_child(keys_back)
 	_refresh_display()
 
 
-## Sound is one page in: the menu keeps its rows, the page takes the frame so the
-## window is never two menus deep.
-func _show_sound_page(on: bool) -> void:
-	if _column == null or _sound_layer == null:
+## One page at a time: the menu keeps its rows, a sub page takes the frame so the
+## window is never two menus deep. The controls sheet needs a wider page than the
+## rows do, so the frame itself is resized instead of only its body.
+func _set_page(name: String) -> void:
+	if _column == null:
 		return
-	_showing_sound = on
-	_column.visible = not on
-	_sound_layer.visible = on
+	if name != PAGE_SOUND and name != PAGE_KEYS:
+		name = PAGE_MENU
+	_page = name
+	_column.visible = name == PAGE_MENU
+	if _sound_layer != null:
+		_sound_layer.visible = name == PAGE_SOUND
+	if _keys_layer != null:
+		_keys_layer.visible = name == PAGE_KEYS
 	if _frame != null:
-		_frame.configure("Sound" if on else "Menu", "gear")
-	if on and sound_page != null:
+		match name:
+			PAGE_KEYS:
+				_frame.configure("Keys", "cage")
+				_set_panel_size(KEYS_PANEL_SIZE)
+			_:
+				_frame.configure("Sound" if name == PAGE_SOUND else "Menu", "gear")
+				_set_panel_size(PANEL_SIZE)
+	if name == PAGE_SOUND and sound_page != null:
 		sound_page.refresh()
 
 
+## The frame is centred, so its four offsets are all a page size needs.
+func _set_panel_size(panel: Vector2) -> void:
+	_frame.offset_left = -panel.x * 0.5
+	_frame.offset_right = panel.x * 0.5
+	_frame.offset_top = -panel.y * 0.5
+	_frame.offset_bottom = panel.y * 0.5
+
+
+## Sound is one page in: the menu keeps its rows, the page takes the frame.
+func _show_sound_page(on: bool) -> void:
+	_set_page(PAGE_SOUND if on else PAGE_MENU)
+
+
 func showing_sound() -> bool:
-	return _showing_sound
+	return _page == PAGE_SOUND
 
 
-## Escape while the sound page is up answers here instead of closing the menu.
-func back() -> void:
-	_show_sound_page(false)
+## The controls sheet, on the same footing as the sound page.
+func show_keys(on: bool) -> void:
+	_set_page(PAGE_KEYS if on else PAGE_MENU)
+
+
+func showing_keys() -> bool:
+	return _page == PAGE_KEYS
+
+
+## Escape answers here first: a sub page returns to the menu and consumes the
+## press, the menu itself lets the scene close it.
+func back() -> bool:
+	if _page == PAGE_MENU:
+		return false
+	_set_page(PAGE_MENU)
+	return true
 
 func _refresh_display() -> void:
 	if display_button == null:

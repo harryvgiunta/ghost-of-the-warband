@@ -300,7 +300,7 @@ func embed(world: Node3D) -> void:
 	# takes the world's HUD now: a bind has to write the one status line.
 	if bench_panel != null:
 		bench_panel.configure(warband, hud)
-	_build_quest_layer(world.get("card"))
+	_build_quest_layer(world.get("tips"))
 	if gate != null:
 		gate.setup(warband, controller)
 
@@ -928,15 +928,15 @@ func _build_ui() -> void:
 # --- the keepers' business -------------------------------------------------
 
 ## The one mouth of the town. Built after the UI, because it writes the HUD and
-## reads the tutorial card; re-configured from `embed()` with the world's own
-## card, so the hire lesson and the campaign's orders are the same cards the rest
+## reads the tip channel; re-configured from `embed()` with the world's own tips,
+## so the hire line and the campaign's orders come from the same channel the rest
 ## of the world uses.
-func _build_quest_layer(card) -> void:
+func _build_quest_layer(tips) -> void:
 	if quest_giver == null:
 		quest_giver = QuestGiverScript.new()
 		quest_giver.name = "QuestGiver"
 		add_child(quest_giver)
-	quest_giver.configure(warband, hud, card)
+	quest_giver.configure(warband, hud, tips)
 	if not warband.changed.is_connected(_refresh_marker):
 		warband.changed.connect(_refresh_marker)
 	_refresh_marker()
@@ -1012,11 +1012,9 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			hud.set_status("The altar drinks.", 2.5)
 		"recruiter":
 			_hide_panels()
-			# The lesson explains the board and the board is the counter, so both
-			# go up: the card over the hire rows it is describing. A player who
-			# reads it and puts it down is already standing at the oath they were
-			# told to swear. Once the lesson is read - and always at the cap,
-			# when talk has nothing to say - `G` is the board and nothing else.
+			# The first G names the hire rows in one tip over the board it is
+			# describing. Once that line is offered - and always at the cap, when
+			# talk has nothing to say - `G` is the board and nothing else.
 			screen.open()
 			var hiring := "Hire from the recruiter board: the first eight oaths cost nothing," \
 				+ " and every body arms itself out of the shared stash."

@@ -85,8 +85,6 @@ func _check_world() -> void:
 	game = load(WORLD).instantiate()
 	root.add_child(game)
 	await create_timer(1.6).timeout
-	if game.card != null and game.card.is_open():
-		game.card.close()
 	await create_timer(0.4).timeout
 
 	var merc_id: int = game.controller.merc_for_peer(1)

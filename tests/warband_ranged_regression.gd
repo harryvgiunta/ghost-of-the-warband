@@ -97,8 +97,9 @@ func _finish() -> void:
 
 
 func close_cards() -> void:
-	if game != null and game.card != null and game.card.is_open():
-		game.card.close()
+	# Nothing in the warband pauses the tree any more, so there is no card to
+	# close before the fight: the opening teaches with tips.
+	pass
 
 
 func settle(frames: int) -> void:

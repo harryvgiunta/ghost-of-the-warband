@@ -90,10 +90,10 @@ func run() -> void:
 		_finish()
 		return
 	current_scene = game
-	# A start that ever raises the opening card must not leave the tree paused
-	# behind it: this run reads the world, not the lesson.
-	if is_instance_valid(game.card) and game.card.is_open():
-		game.card.close()
+	# A start that ever raises the opening's tips must not leave a panel over the
+	# world: this run reads the world, not the lesson.
+	if game.tips != null and is_instance_valid(game.tips):
+		game.tips.hide()
 
 	await create_timer(SETTLE_SECONDS).timeout
 	check_world_pieces()

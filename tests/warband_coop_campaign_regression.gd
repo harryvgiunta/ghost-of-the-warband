@@ -98,14 +98,14 @@ func _world_is_ready() -> bool:
 	return scene != null and str(scene.scene_file_path) == WORLD_SCENE \
 		and scene.has_method("stats")
 
-## A card pauses the tree, and a paused tree runs no physics - a test that waits
-## through one would measure nothing. Play the reader: close whatever is up.
+## Nothing in the warband pauses the tree any more, but a tip left on the screen
+## from the opening would follow the guest into its first fight: put it away.
 func _close_any_card() -> void:
 	if world == null or not is_instance_valid(world):
 		return
-	var card = world.get("card")
-	if card != null and is_instance_valid(card) and card.is_open():
-		card.close()
+	var tips = world.get("tips")
+	if tips != null and is_instance_valid(tips):
+		tips.hide()
 
 func _wait_until(predicate: Callable, timeout: float) -> bool:
 	var limit := int(timeout * 1000.0)
@@ -442,8 +442,8 @@ func _check_join_report(data: Dictionary) -> void:
 	check(int(data.get("ability_tiles", -1)) == 3,
 		"The guest's HUD shows three ability tiles (%d)"
 			% int(data.get("ability_tiles", -1)))
-	check(not bool(data.get("card_open", true)),
-		"The guest's opening tutorial card is not holding the tree")
+	check(not bool(data.get("tips_showing", true)),
+		"The guest's opening tips are not left on the screen")
 	check(bool(data.get("sequencer_null", false)),
 		"The guest has no opening tutorial sequencer")
 	check(int(data.get("failures", 1)) == 0,
@@ -624,10 +624,10 @@ func _probe_payload(tag: String) -> Dictionary:
 	var wild = world.get("wilderness")
 	if wild != null and is_instance_valid(wild) and wild.has_method("wolves"):
 		wolves = wild.wolves().size()
-	var card_open := false
-	if world.get("card") != null and is_instance_valid(world.get("card")):
-		var card = world.get("card")
-		card_open = bool(card.is_open())
+	var tips_showing := false
+	if world.get("tips") != null and is_instance_valid(world.get("tips")):
+		var tips = world.get("tips")
+		tips_showing = bool(tips.showing())
 	var sequencer_null := true
 	var sequencer_state := ""
 	var camp = world.get("camp")
@@ -652,7 +652,7 @@ func _probe_payload(tag: String) -> Dictionary:
 		"replica_count": replicas,
 		"stamina_max": stamina_max,
 		"ability_tiles": tiles,
-		"card_open": card_open,
+		"tips_showing": tips_showing,
 		"sequencer_null": sequencer_null,
 		"sequencer_state": sequencer_state,
 		"credits": int(state.credits) if state != null else -1,

@@ -5,33 +5,34 @@ extends Node
 ## The town has two of them and both are the same object here, because the
 ## difference between them is a table row, not a class:
 ##
-## * **The recruiter** owns the hire lesson. G at his counter raises the card
-##   that explains the oath, the warband screen and the free first eight; after
-##   that the counter opens the hire board as it always did.
+## * **The recruiter** owns the hire lesson. G at his counter tips the one line
+##   that says where the hire rows are; after that the counter opens the hire
+##   board as it always did.
 ## * **The quartermaster** owns the campaign. G at his counter hands an order
-##   over, takes a finished one back, explains the ichor, and otherwise gets out
-##   of the way so his shop can open.
+##   over, takes a finished one back, names the bench for the ichor, and otherwise
+##   gets out of the way so his shop can open.
 ##
 ## The gold arrow over a head is decided here too (`marker_service`), because it
-## is the same question the cards answer: who has something to say right now. The
+## is the same question the tips answer: who has something to say right now. The
 ## rule is one line of the campaign's shape - the recruiter has business while
 ## the band is short of the cap, the quartermaster has business whenever an order
 ## is waiting, and whichever is true first wears the arrow.
 ##
-## Nothing here reads a scene: the owner hands in the warband, the HUD and the
-## tutorial card, and calls `talk()` from its one `G` handler. A standalone town
-## preview passes no card and this node builds its own, so the square is playable
-## in its own scene exactly as it is inside the world.
+## Nothing here reads a scene: the owner hands in the warband, the HUD and the tip
+## channel, and calls `talk()` from its one `G` handler. A standalone town preview
+## passes no tips and this node builds its own, so the square is playable in its
+## own scene exactly as it is inside the world. Nothing here writes a paragraph:
+## an order's title, its key line and its ledger row are the whole of it.
 
-const CardScript = preload("res://scripts/warband/tutorial_card.gd")
+const TipsScript = preload("res://scripts/warband/warband_tips.gd")
 const QuestsScript = preload("res://scripts/warband/quest_log.gd")
 
 ## The two keepers this node speaks for, by the service ids the town resolves.
 const GIVER := "quartermaster"
 const RECRUITER := "recruiter"
 
-## Card ids. A card is shown once per step id, which is what makes "has he
-## taught me this yet" a question about the card and not about a save field.
+## Tip ids. A tip is offered once per id, which is what makes "has he taught me
+## this yet" a question about the channel and not about a save field.
 const HIRE_LESSON := "recruiter_hire"
 const BENCH_LESSON := "ichor_bench"
 
@@ -44,22 +45,22 @@ signal quest_finished(quest_id: String)
 var warband = null
 var quests: WarbandQuests = null
 var hud = null
-var card = null
-## True when this node made the card itself and must free it with itself.
-var _own_card := false
+var tips = null
+## True when this node made the tip channel itself and must free it with itself.
+var _own_tips := false
 
 
-func configure(warband_in, hud_in = null, card_in = null) -> void:
+func configure(warband_in, hud_in = null, tips_in = null) -> void:
 	warband = warband_in
 	quests = warband.quests if warband != null else null
 	hud = hud_in
-	if card_in != null:
-		card = card_in
-	elif card == null:
-		card = CardScript.new()
-		card.name = "QuestCard"
-		add_child(card)
-		_own_card = true
+	if tips_in != null:
+		tips = tips_in
+	elif tips == null:
+		tips = TipsScript.new()
+		tips.name = "QuestTips"
+		add_child(tips)
+		_own_tips = true
 
 
 # --- who has business ------------------------------------------------------
@@ -91,7 +92,7 @@ func business(service: String) -> bool:
 
 
 func _recruiter_business() -> bool:
-	if card != null and not card.has_shown(HIRE_LESSON):
+	if tips != null and not tips.has_shown(HIRE_LESSON):
 		return true
 	return _can_hire()
 
@@ -111,12 +112,12 @@ func _quartermaster_business() -> bool:
 		return true
 	return false
 
-## The vial is in the stash and the lesson that says what to do with it has not
-## been read.
+## The vial is in the stash and the line that says what to do with it has not
+## been offered.
 func _ichor_unexplained() -> bool:
 	if warband == null:
 		return false
-	if card != null and card.has_shown(BENCH_LESSON):
+	if tips != null and tips.has_shown(BENCH_LESSON):
 		return false
 	return warband.stash.pooled_count(QuestsScript.ICHOR_ID) > 0
 
@@ -163,9 +164,10 @@ func _can_hire_full() -> bool:
 
 # --- talking ---------------------------------------------------------------
 
-## The one talk handler. Returns true when this node answered the press (a card
-## went up); false means "not mine", and the caller opens the keeper's own board
-## (`warband_screen` for the recruiter's hire rows, `quartermaster` for the shop).
+## The one talk handler. The keeper says his line as a tip on the way in and hands
+## the press on, so the counter always opens on the same G: a player is never made
+## to press twice to get at the board the line is about. Returns true only when a
+## keeper keeps the press for himself, which none of them does today.
 func talk(service: String, _peer_id: int = 1) -> bool:
 	if warband == null or quests == null:
 		return false
@@ -179,73 +181,52 @@ func talk(service: String, _peer_id: int = 1) -> bool:
 
 
 func _talk_recruiter() -> bool:
-	if card == null or card.has_shown(HIRE_LESSON):
-		return false
-	var shown: bool = card.show_step(HIRE_LESSON, "THE RECRUITER", "EIGHT OATHS, NO GOLD",
-		"Every mercenary in the band is the same body: a hundred health, a thousand"
-			+ " stamina, and whatever steel it can hold. Stats never change - the kit"
-			+ " does.\n\nOpen the warband screen. The recruiter board has a HIRE row"
-			+ " for each open place. The first eight oaths cost nothing, and every"
-			+ " fresh body arms itself out of the shared stash before it takes the"
-			+ " field.",
-		"O  -  THE WARBAND SCREEN   ·   HIRE  -  THE RECRUITER BOARD   ·   G  -  TALK",
-		"Eight bodies is the whole deployment cap. Pick who marches at the expedition gate.")
+	if tips != null and not tips.has_shown(HIRE_LESSON):
+		tips.tip(HIRE_LESSON, "O", "THE WARBAND SCREEN HIRES")
 	spoke.emit(RECRUITER, "greet")
-	return shown
-
-
-func _talk_quartermaster() -> bool:
-	if card == null:
-		return false
-	var done := quests.completed_ids(GIVER)
-	if not done.is_empty():
-		return _turn_in(str(done[0]))
-	var offers := quests.offerable(GIVER)
-	if not offers.is_empty():
-		return _offer(str(offers[0]))
-	if _ichor_unexplained():
-		return _teach_bench()
 	return false
 
 
-func _turn_in(quest_id: String) -> bool:
+func _talk_quartermaster() -> bool:
+	if tips == null:
+		return false
+	var done := quests.completed_ids(GIVER)
+	if not done.is_empty():
+		_turn_in(str(done[0]))
+		return false
+	var offers := quests.offerable(GIVER)
+	if not offers.is_empty():
+		_offer(str(offers[0]))
+		return false
+	if _ichor_unexplained():
+		_teach_bench()
+	return false
+
+
+func _turn_in(quest_id: String) -> void:
 	var result := quests.turn_in(quest_id)
 	var row := QuestsScript.def_of(quest_id)
 	var next_id := str(result.get("next", ""))
-	var footnote := ""
 	if not next_id.is_empty():
 		quests.accept(next_id)
-		footnote = "NEXT: %s" % str(QuestsScript.def_of(next_id).get("title", next_id))
-		quest_accepted.emit(next_id)
 	spoke.emit(GIVER, "done")
 	quest_finished.emit(quest_id)
-	return card.show_step("done_%s" % quest_id, str(row.get("kicker", "THE QUARTERMASTER")),
-		str(row.get("title", quest_id)), str(row.get("done", "")),
-		"G  -  TALK   ·   M  -  THE MAP", footnote)
+	tips.tip("done_%s" % quest_id, "G", "ORDER DONE: %s" % str(row.get("title", quest_id)))
 
 
-func _offer(quest_id: String) -> bool:
+func _offer(quest_id: String) -> void:
 	var result := quests.accept(quest_id)
 	if not bool(result.get("ok", false)):
-		return false
+		return
 	var row := QuestsScript.def_of(quest_id)
 	quest_accepted.emit(quest_id)
 	spoke.emit(GIVER, "greet")
-	return card.show_step("offer_%s" % quest_id, str(row.get("kicker", "THE QUARTERMASTER")),
-		str(row.get("title", quest_id)), str(row.get("body", "")),
-		str(row.get("keys", "G  -  TALK")), "ACCEPTED  -  the objective is on the ledger.")
+	tips.tip("offer_%s" % quest_id, "M", "ORDER: %s" % str(row.get("title", quest_id)))
 
 
-func _teach_bench() -> bool:
+func _teach_bench() -> void:
 	spoke.emit(GIVER, "greet")
-	return card.show_step(BENCH_LESSON, "THE QUARTERMASTER", "ICHOR TAKES TO STEEL",
-		"You are carrying a watcher's ichor. It is not a relic and it is not worth"
-			+ " gold to a keeper - it is a reagent, and the bench at my side is where"
-			+ " it is worked.\n\nStand at the bench and press G. Take a spare weapon"
-			+ " out of the shared stash, lay the vial to it, and the piece comes back"
-			+ " with a sigil bound into it. Press R to loose it. One vial, one blade.",
-		"G  -  THE ICHOR BENCH   ·   R  -  LOOSE THE SIGIL",
-		"The weapon keeps its sigil for good. It rides the piece, not the body.")
+	tips.tip(BENCH_LESSON, "G", "BIND THE ICHOR AT THE BENCH")
 
 
 ## Whether the ledger has anything to put on the screen. The HUD is written by

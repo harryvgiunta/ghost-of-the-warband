@@ -42,8 +42,8 @@ const FLOOR_HALF_WIDTH := 34.0
 const FLOOR_FRONT := -70.0
 const FLOOR_BACK := 40.0
 
-## Four cages, in `CAGE_POSTS` order: `Cage1`..`Cage4`.
-const CAGE_COUNT := 4
+## Five cages, in `CAGE_POSTS` order: `Cage1`..`Cage5`.
+const CAGE_COUNT := 5
 
 ## The cult's standards, staked in the dirt round the cage line - there is no
 ## palisade left to lash them to, so each one is its own mast with guy-lines.

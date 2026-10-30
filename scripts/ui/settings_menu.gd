@@ -1,6 +1,7 @@
 class_name SettingsMenu
 extends CanvasLayer
-## The settings window Escape brings up: a short index and a SOUND page.
+## The settings window Escape brings up: a short index, a SOUND page and the
+## controls sheet.
 ##
 ## It owns no audio state of its own - the sound page talks to the `Audio`
 ## autoload and every value it paints is read back from there - so a slider
@@ -15,17 +16,24 @@ signal closed
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
+const KeybindPageScript = preload("res://scripts/ui/keybind_page.gd")
 
 const PANEL_SIZE := Vector2(620, 520)
+## The controls sheet is a whole keyboard wide: the frame itself grows for it.
+const KEYS_PANEL_SIZE := Vector2(1140, 760)
 const PAGE_ROOT := "root"
 const PAGE_SOUND := "sound"
+const PAGE_KEYS := "keys"
 const DIM := Color(0.02, 0.015, 0.01, 0.82)
 
 var sound_button: Button
+var keys_button: Button
 var close_button: Button
 var back_button: Button
 ## The one sound page, shared with the quick menu's copy of the same idea.
 var sound_page
+## The one controls sheet, on the same footing.
+var keys_page
 
 var _root: Control
 var _frame
@@ -93,6 +101,28 @@ func show_page(name: String) -> void:
 	_page = name
 	for key in _pages.keys():
 		(_pages[key] as Control).visible = key == name
+	_apply_chrome()
+
+
+## The controls sheet is wider than the index, so the window itself changes size
+## and title with the page; every other page puts the settings window back.
+func _apply_chrome() -> void:
+	if _frame == null:
+		return
+	if _page == PAGE_KEYS:
+		_frame.configure("Keys", "cage")
+		_set_panel_size(KEYS_PANEL_SIZE)
+	else:
+		_frame.configure("Settings", "gear")
+		_set_panel_size(PANEL_SIZE)
+
+
+## The frame is centred, so its four offsets are all a page size needs.
+func _set_panel_size(panel: Vector2) -> void:
+	_frame.offset_left = -panel.x * 0.5
+	_frame.offset_right = panel.x * 0.5
+	_frame.offset_top = -panel.y * 0.5
+	_frame.offset_bottom = panel.y * 0.5
 
 
 ## Repaint from the mixer. Called on open, and after every move.
@@ -140,6 +170,7 @@ func _build() -> void:
 
 	_pages[PAGE_ROOT] = _build_root(_frame.body)
 	_pages[PAGE_SOUND] = _build_sound(_frame.body)
+	_pages[PAGE_KEYS] = _build_keys(_frame.body)
 	show_page(PAGE_ROOT)
 	refresh()
 
@@ -158,6 +189,10 @@ func _build_root(parent: Node) -> VBoxContainer:
 	sound_button = _button(column, "SOUND", "PrimaryButton", 56)
 	sound_button.pressed.connect(func(): show_page(PAGE_SOUND))
 	column.add_child(sound_button)
+
+	keys_button = _button(column, "KEYS", "", 48)
+	keys_button.pressed.connect(func(): show_page(PAGE_KEYS))
+	column.add_child(keys_button)
 
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -188,6 +223,26 @@ func _build_sound(parent: Node) -> VBoxContainer:
 	back_button = _button(column, "BACK", "", 48)
 	back_button.pressed.connect(func(): show_page(PAGE_ROOT))
 	column.add_child(back_button)
+	return column
+
+
+func _build_keys(parent: Node) -> VBoxContainer:
+	var column := VBoxContainer.new()
+	column.name = "Keys"
+	column.add_theme_constant_override("separation", 10)
+	parent.add_child(column)
+	column.visible = false
+	_section(column, "CONTROLS")
+
+	keys_page = KeybindPageScript.new()
+	keys_page.name = "KeybindPage"
+	keys_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(keys_page)
+
+	var back := _button(column, "BACK", "", 48)
+	back.name = "KeysBack"
+	back.pressed.connect(func(): show_page(PAGE_ROOT))
+	column.add_child(back)
 	return column
 
 

@@ -12,7 +12,7 @@ extends Node3D
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
-## warband screen, the paperdoll, the tutorial card, the ability scene, the
+## warband screen, the paperdoll, the tips, the ability scene, the
 ## campaign menu, the loot vacuum, the revive channel, the downed-crawl, the
 ## branded runner, and the wilderness band on the way out - and it builds three
 ## areas that bring only their own geometry and their own business:
@@ -48,7 +48,7 @@ const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 ## change signal and `is_open()` are unchanged.
 const PaperdollScript = preload("res://scripts/warband/corpse_loot_panel.gd")
 const GearDropScript = preload("res://scripts/warband/gear_drop.gd")
-const CardScript = preload("res://scripts/warband/tutorial_card.gd")
+const TipsScript = preload("res://scripts/warband/warband_tips.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
@@ -133,8 +133,8 @@ const TRAIL_HINT := "The squad follows you   ·   M - map   ·   O - warband   �
 ## The key line under a prompt that names the revive hold.
 const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
 ## The band a fallen squadmate is taught in: close enough that the player is in
-## the fight that put them down, wide enough that the card does not wait for a
-## body to fall at their feet.
+## the fight that put them down, wide enough that the tip does not wait for a body
+## to fall at their feet.
 const REVIVE_LESSON_RADIUS := 12.0
 const REVIVE_LESSON_STEP := "lesson_revive"
 ## How often the world asks what part it plays in a co-op campaign. The flow is
@@ -143,15 +143,14 @@ const REVIVE_LESSON_STEP := "lesson_revive"
 const ROLE_POLL_SECONDS := 1.0
 ## The door the menu's "exit to title" row opens.
 const TITLE_SCENE := "res://title.tscn"
-## The one card that is not a beat of a chapter: a squadmate going down can
-## happen anywhere, in the camp or a mile down the trail, so it carries no numeral.
-const REVIVE_LESSON := {
-	"kicker": "THE FALLEN  /  THE WARBAND",
-	"title": "A squadmate is down - bring them back",
-	"body": "A body on its chest is not dead yet. It bleeds for thirty seconds, and for every one of them it can be brought back: stand over your squadmate and HOLD G - not a tap. Five full seconds, and a blow that lands on you breaks the channel.",
-	"keys": "HOLD G  -  five seconds on a fallen body",
-	"footnote": "Let go and the work is lost. A body that bleeds out keeps its date with the dirt: the roster will not stand it back up.",
-}
+## The world's three one-line lessons. Each is a key and a command, offered once,
+## the first time the fact it names is true: a squadmate down, the player's own
+## body down, and a wound with nobody near enough to punish a bandage. They are
+## the same channel the opening teaches with - nothing pauses, nothing is read.
+const REVIVE_LESSON := {"keys": "HOLD G", "text": "PICK UP A FALLEN SQUADMATE"}
+const BANDAGE_LESSON := {"keys": "6", "text": "BANDAGE · +35 · HOLD STILL"}
+const DOWNED_LESSON := {"keys": "HOLD G   F1", "text": "YOU ARE DOWN · AN ALLY LIFTS YOU"}
+
 
 ## The wrong-way sign. It measures the distance still to run, so the three numbers
 ## are read off the trail's own length: the banner arms once the body has come
@@ -176,31 +175,13 @@ const TOWN_FADE_SECONDS := 2.5
 ## the track it already has instead of stuttering the whole soundtrack.
 const TOWN_QUIET_MARGIN := 6.0
 
-## The damage lesson: a bandage is three seconds of wrapping and 35 health, and it
-## is taught the first time a body is badly hurt with nobody close enough to
-## punish the channel. The radius is a fight's breath, not the whole wood.
+## The damage lesson's two numbers: a bandage is three seconds of wrapping and 35
+## health, and it is taught the first time a body is badly hurt with nobody close
+## enough to punish the channel. The radius is a fight's breath, not the whole wood.
 const BANDAGE_LESSON_STEP := "lesson_bandage"
 const BANDAGE_LESSON_HEALTH := 0.6
 const BANDAGE_LESSON_RADIUS := 22.0
-const BANDAGE_LESSON := {
-	"kicker": "THE WOUND  /  THE WARBAND",
-	"title": "You've been damaged",
-	"body": "A blade has opened you and nothing is close enough to finish it. Press 6 to bind a bandage: three seconds of wrapping and 35 health back - and any blow that lands breaks the channel, so bind in the quiet, not in the fight.",
-	"keys": "6  -  bandage        ·        three seconds, +35 health",
-	"footnote": "A bandage only works while you are left alone. Break the fight off, then dress the wound.",
-}
-
-## The soul's own body on the floor. It is the one card that is about the player
-## rather than the squad: nobody is coming for a body the player did not ask to
-## save, so both ways out - an ally's `G`, or jumping - are named.
 const DOWNED_LESSON_STEP := "lesson_downed"
-const DOWNED_LESSON := {
-	"kicker": "THE DOWNED  /  THE WARBAND",
-	"title": "You've been downed!",
-	"body": "Your body is on its chest and bleeding. An ally can bring it back: stand over it and HOLD G for five seconds. Or leave it - step into another body with [ ] or F1..F8, and come back for the one you left behind.",
-	"keys": "HOLD G  -  an ally revives you        ·        [  ]  or  F1 .. F8  -  take another body",
-	"footnote": "The body you step out of keeps bleeding. Do not forget it - it is still yours to save.",
-}
 
 var warband
 var flow
@@ -215,7 +196,8 @@ var abilities
 var menu
 var screen
 var paperdoll
-var card
+## The one hint channel: a key and a command under the crosshair.
+var tips
 var loot
 var revive
 var branded
@@ -259,9 +241,9 @@ var _hint_text := ""
 var _wrong_way_armed := false
 var _wrong_way := false
 var _wrong_way_sign: Label3D
-## The player's own body went down while a card was up: the card is raised on the
-## first frame the tree is free again rather than written over somebody's read.
-var _downed_card_pending := false
+## The player's own body went down while a panel was up: the tip is offered on
+## the first frame the screen is clear again rather than written over a read.
+var _downed_tip_pending := false
 var _roster_elapsed := 0.0
 var _wipe_beat := -1.0
 var _wiped := false
@@ -314,9 +296,9 @@ func _ready() -> void:
 	if flow != null:
 		flow.bind(self)
 		# `bind()` is where the flow seats the session, so the role is knowable
-		# here - and it is the last moment a guest can act before the poll: a
-		# camp opening raises its pause card inside `_seat_warband`, and a paused
-		# tree runs no physics tick to poll from.
+		# here - and it is the last moment a guest can act before the poll: the
+		# camp seats its bodies inside `_seat_warband`, and a guest must be marked
+		# a replica before the first clamp runs.
 		if str(flow.warband_role()) == "client":
 			_become_client()
 	# The orders' ground and the map sheet come last. The cages need the lane the
@@ -366,8 +348,8 @@ func _physics_process(delta: float) -> void:
 		loot_hand.tick(delta)
 	_update_prompt()
 	_update_hint()
-	_push_downed_card()
-	_update_bandage_card()
+	_push_downed_tip()
+	_update_bandage_tip()
 	_update_wrong_way()
 	_sync_town_music()
 	_check_checkpoints()
@@ -400,7 +382,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			# under it, or open it. The menu is the settings page's door now, so
 			# Escape no longer opens a second, narrower settings window.
 			if menu != null and menu.is_open():
-				menu.close()
+				# One page at a time: the controls and sound pages hand the frame
+				# back, and only the menu itself closes on the next press.
+				if not menu.back():
+					menu.close()
 				get_viewport().set_input_as_handled()
 			elif _panel_open():
 				_hide_panels()
@@ -550,9 +535,9 @@ func _build_ui() -> void:
 	add_child(paperdoll)
 	paperdoll.configure(warband)
 	paperdoll.changed.connect(_on_paperdoll_changed)
-	card = CardScript.new()
-	card.name = "TutorialCard"
-	add_child(card)
+	tips = TipsScript.new()
+	tips.name = "Tips"
+	add_child(tips)
 
 
 ## The scene half of the skills, built once under the world. `setup()` keeps the
@@ -572,7 +557,7 @@ func _build_menu() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "MenuLayer"
 	# Above the HUD's own `LAYER` (6): the menu's dim must sit over the bars, and
-	# below the tutorial card's 8, because the card is the topmost read in the game.
+	# below the tips' 7, because a key line under the crosshair is read over it.
 	layer.layer = 7
 	add_child(layer)
 	menu = MenuScript.new()
@@ -1310,22 +1295,19 @@ func drop_merc_gear(actor, merc_id: int) -> void:
 func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	drop_merc_gear(actor, merc_id)
 	# The player's own body is a different lesson from a squadmate's: the revive
-	# card is about somebody else, this one is about what the soul can still do.
+	# tip is about somebody else, this one is about what the soul can still do.
 	if controller != null and actor != null and is_instance_valid(actor) \
 			and actor == controller.active_body(1):
-		_downed_card_pending = true
-		_push_downed_card()
-	_push_revive_card(actor)
+		_downed_tip_pending = true
+		_push_downed_tip()
+	_push_revive_tip(actor)
 
 
-## The first squadmate to go down near the player teaches the channel. A body on
-## its chest is not dead: it bleeds for thirty seconds, and `G` held for five
-## brings it back. The card holds the game still - the bleed clock with it - so
-## the whole rule can be read while the body is still worth standing over.
-func _push_revive_card(actor) -> void:
-	if card == null or card.has_shown(REVIVE_LESSON_STEP):
-		return
-	if controller == null or revive == null:
+## The first squadmate to go down near the player teaches the channel: a body on
+## its chest is not dead, and `G` held for five seconds brings it back. One tip,
+## offered once, on the frame the fact is first true.
+func _push_revive_tip(actor) -> void:
+	if tips == null or controller == null or revive == null:
 		return
 	if actor == null or not is_instance_valid(actor):
 		return
@@ -1338,44 +1320,36 @@ func _push_revive_card(actor) -> void:
 		return
 	if soul.global_position.distance_to(actor.global_position) > REVIVE_LESSON_RADIUS:
 		return
-	card.show_step(REVIVE_LESSON_STEP, str(REVIVE_LESSON["kicker"]),
-		str(REVIVE_LESSON["title"]), str(REVIVE_LESSON["body"]),
-		str(REVIVE_LESSON["keys"]), str(REVIVE_LESSON["footnote"]))
+	tips.tip(REVIVE_LESSON_STEP, str(REVIVE_LESSON["keys"]), str(REVIVE_LESSON["text"]))
 
 
 ## The soul's own body went down: that is the player's own lesson, not a
-## squadmate's. It is raised on the frame the tree is free (a card that was up is
-## never written over), and it names both ways out because a player who does not
-## know they can leave will lie there waiting for an ally they do not have.
-func _push_downed_card() -> void:
-	if card == null or not _downed_card_pending:
+## squadmate's, and it names both ways out - a hand, or another body - because a
+## player who does not know they can leave will lie there waiting.
+func _push_downed_tip() -> void:
+	if tips == null or not _downed_tip_pending:
 		return
-	if card.has_shown(DOWNED_LESSON_STEP):
-		_downed_card_pending = false
-		return
-	if card.is_open() or _panel_open() or controller == null:
+	if _panel_open() or controller == null:
 		return
 	var soul = controller.active_body(1)
 	if soul == null or not is_instance_valid(soul):
 		return
 	if not bool(soul.get("downed")) or not bool(soul.get("alive")):
-		# Somebody stood the body up before the card could be read: what it would
-		# teach is no longer true.
-		_downed_card_pending = false
+		# Somebody stood the body up before the tip could be offered: what it would
+		# say is no longer true.
+		_downed_tip_pending = false
 		return
-	_downed_card_pending = false
-	card.show_step(DOWNED_LESSON_STEP, str(DOWNED_LESSON["kicker"]),
-		str(DOWNED_LESSON["title"]), str(DOWNED_LESSON["body"]),
-		str(DOWNED_LESSON["keys"]), str(DOWNED_LESSON["footnote"]))
+	_downed_tip_pending = false
+	tips.tip(DOWNED_LESSON_STEP, str(DOWNED_LESSON["keys"]), str(DOWNED_LESSON["text"]))
 
 
 ## The bandage lesson: the first time the soul's body is at or below 60% of its
-## pool with no hostile close enough to punish the channel, the world says `6`
-## out loud. A body that learned it in a fight would learn it face down.
-func _update_bandage_card() -> void:
-	if card == null or controller == null:
+## pool with no hostile close enough to punish the channel, the world says `6` out
+## loud. A body that learned it in a fight would learn it face down.
+func _update_bandage_tip() -> void:
+	if tips == null or controller == null:
 		return
-	if card.is_open() or _panel_open() or card.has_shown(BANDAGE_LESSON_STEP):
+	if _panel_open():
 		return
 	var soul = controller.active_body(1)
 	if soul == null or not is_instance_valid(soul):
@@ -1387,9 +1361,7 @@ func _update_bandage_card() -> void:
 		return
 	if _hostile_near((soul as Node3D).global_position, BANDAGE_LESSON_RADIUS):
 		return
-	card.show_step(BANDAGE_LESSON_STEP, str(BANDAGE_LESSON["kicker"]),
-		str(BANDAGE_LESSON["title"]), str(BANDAGE_LESSON["body"]),
-		str(BANDAGE_LESSON["keys"]), str(BANDAGE_LESSON["footnote"]))
+	tips.tip(BANDAGE_LESSON_STEP, str(BANDAGE_LESSON["keys"]), str(BANDAGE_LESSON["text"]))
 
 
 ## Whether a hostile this machine drives is standing within `radius` of a point.
@@ -1874,6 +1846,10 @@ func _update_hint() -> void:
 		text = camp.hint_line(actor)
 	if text.is_empty():
 		text = TRAIL_HINT
+	# A tip is the same information, larger, and it is already up: showing the key
+	# line underneath it is the same sentence twice on one screen.
+	if tips != null and tips.showing():
+		text = ""
 	_write_prompt(_prompt_text, text)
 
 
@@ -1920,7 +1896,7 @@ func _panel_open() -> bool:
 ## stops taking commands while the ledger is up: a click on the ledger must never
 ## swing a weapon. `resumed` restores the body on every way the menu closes.
 func _open_menu() -> void:
-	if menu == null or (card != null and card.is_open()):
+	if menu == null:
 		return
 	menu.open()
 	if controller != null:
@@ -1964,8 +1940,8 @@ func _on_menu_exit_requested() -> void:
 	var tree := get_tree()
 	if tree == null:
 		return
-	# A tutorial card may be holding the tree still; the title must not open
-	# behind it.
+	# Nothing in this scene pauses the tree, but a title must never open behind a
+	# paused one either way.
 	tree.paused = false
 	tree.change_scene_to_file(TITLE_SCENE)
 

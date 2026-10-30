@@ -229,9 +229,8 @@ func run() -> void:
 		"the arrow starts on the recruiter while the band is short")
 	check(not giver.talk("recruiter"),
 		"the skipped hire lesson hands the recruiter's talk to his board")
-	check(not giver.card.is_open(), "no card is up")
-	check(giver.card.has_shown(GiverScript.HIRE_LESSON),
-		"but the lesson is recorded as offered")
+	check(giver.tips.has_shown(GiverScript.HIRE_LESSON),
+		"but the hire tip is recorded as offered")
 	check(not giver.talk("recruiter"), "and every later talk opens the board the same way")
 
 	# The band fills to the cap: the quartermaster takes the arrow and offers the
@@ -242,7 +241,8 @@ func run() -> void:
 	check(not giver.talk("quartermaster"),
 		"with the lesson skipped, his counter is the answer")
 	check(warband.quests.is_active("free_the_soldiers"), "the cage order is accepted in his hand")
-	check(not giver.card.is_open(), "and no offer card opens")
+	check(giver.tips.has_shown("offer_free_the_soldiers"),
+		"and the offer is one tip, not a page")
 
 	# Four cages, then the turn-in card names the next order and hands it over.
 	for index in QuestsScript.SOLDIER_RESCUES:
@@ -251,7 +251,8 @@ func run() -> void:
 	giver.talk("quartermaster")
 	check(warband.quests.is_closed("free_the_soldiers"), "the order is turned in")
 	check(warband.quests.is_active("cull_the_watchers"), "and the watcher bounty is taken over")
-	check(not giver.card.is_open(), "the skipped turn-in card never opens")
+	check(giver.tips.has_shown("done_free_the_soldiers"),
+		"the turn-in is one tip, not a page")
 
 	# The ichor order appears off the chain, the moment the band holds a vial.
 	warband.stash.add(QuestsScript.ICHOR_ID, 1)

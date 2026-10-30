@@ -124,6 +124,7 @@ WARBAND_TESTS = [
     "checkpoint_regression",
     "warband_abilities_regression",
     "warband_menu_regression",
+    "keybind_screen_regression",
     "warband_vendors_regression",
     "warband_wilderness_regression",
     "warband_session_world_unit_regression",

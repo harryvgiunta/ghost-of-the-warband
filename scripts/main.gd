@@ -1014,11 +1014,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		# behind it and Escape always closes the topmost surface.
 		if _pause_open():
 			if event.keycode == KEY_ESCAPE:
-				# Escape unwinds one page at a time: the sound page hands the frame
-				# back to the menu, and the menu is what closes.
-				if pause_menu.showing_sound():
-					pause_menu.back()
-				else:
+				# Escape unwinds one page at a time: the sound page and the controls
+				# page hand the frame back to the menu, and the menu is what closes.
+				if not pause_menu.back():
 					_close_menu()
 			return
 		# The in-world kit always answers I, P and Escape first so it can close

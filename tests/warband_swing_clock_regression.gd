@@ -63,11 +63,10 @@ func seconds(frames: int) -> float:
 
 # --- setup ----------------------------------------------------------------
 
-## The tutorial card pauses the tree, and a paused tree neither steps the bodies
-## nor animates the rig: this test is about the frames after it.
+## The opening teaches with tips rather than a paused page, so there is nothing
+## to close before this test reads the swing clock.
 func close_card() -> void:
-	if game.card != null and game.card.is_open():
-		game.card.close()
+	pass
 
 ## A floor of our own under the squad. The world's ground is a terrain field
 ## rebuilt by another regression's subject; the swing clock must not depend on
