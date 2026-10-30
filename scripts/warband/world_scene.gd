@@ -1671,6 +1671,11 @@ func _loot_click(event: InputEvent) -> bool:
 		return false
 	var sample: Dictionary = controller.aim_sample()
 	if not loot_hand.try_click(actor, sample.get("point", Vector3.ZERO)):
+		# Nothing to loot: the press belongs to the blade. Empty hands cannot
+		# swing, and a click that does nothing at all is the one report this game
+		# keeps getting, so name the missing piece.
+		if str(actor.rig.weapon) in ["", "none"] and hud != null:
+			hud.set_status("Your hands are empty. Take a weapon with K, or equip one on O.", 2.5)
 		return false
 	get_viewport().set_input_as_handled()
 	return true

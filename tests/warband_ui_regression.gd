@@ -47,6 +47,7 @@ func run() -> void:
 	_check_refresh()
 	_check_paperdoll()
 	_check_recruiter()
+	_check_old_save_purge()
 	warband.reset_state()
 	state.reset(false)
 	_remove_test_save()
@@ -60,12 +61,20 @@ func _check_rows_and_control() -> void:
 	_set_gold(1000)
 	var alive: int = warband.add_mercenary("Aldous")
 	var downed: int = warband.add_mercenary("Brine")
-	var dead: int = warband.add_mercenary("Cael")
+	var fallen: int = warband.add_mercenary("Cael")
+	warband.stash.add("dagger_iron", 1)
+	check(bool(warband.equip_merc(fallen, "main", "dagger_iron").get("ok", false)),
+		"the doomed body wears a dagger")
+	var pieces_before: int = warband.stash.pooled_count("dagger_iron")
 	warband.roster.apply_damage(downed, 100.0)
-	warband.roster.apply_damage(dead, 120.0)
+	warband.roster.apply_damage(fallen, 120.0)
 	check(warband.roster.state_of(alive) == Contracts.HealthState.ALIVE, "the first mercenary stands")
 	check(warband.roster.state_of(downed) == Contracts.HealthState.DOWNED, "100 damage only downs")
-	check(warband.roster.state_of(dead) == Contracts.HealthState.DEAD, "120 damage kills")
+	check(not warband.roster.has(fallen), "120 damage kills and takes the record with it")
+	check(warband.roster.count() == 2, "the dead leave the roster at once (%d left)"
+		% warband.roster.count())
+	check(warband.stash.pooled_count("dagger_iron") == pieces_before + 1,
+		"what the dead were wearing goes back into the shared stash")
 
 	var souls = warband.souls
 	var screen = ScreenScript.new()
@@ -73,16 +82,17 @@ func _check_rows_and_control() -> void:
 	root.add_child(screen)
 	screen.open()
 	check(screen.is_open(), "open() opens the screen")
-	check(screen.rows.size() == 3, "one row per mercenary, got %d" % screen.rows.size())
+	check(screen.rows.size() == 2, "one row per mercenary still on the books, got %d"
+		% screen.rows.size())
+	check(not screen.rows.has(fallen), "the fallen have no row")
 	check(screen.rows[alive]["name"].text == "Aldous", "the row names the mercenary")
 	check(screen.rows[downed]["name"].text == "Brine", "rows stay in roster order")
 
 	check(screen.rows[alive]["state"].text == "ALIVE", "the living row reads ALIVE")
 	check(screen.rows[downed]["state"].text == "DOWNED", "the downed row reads DOWNED")
-	check(screen.rows[dead]["state"].text == "DEAD", "the dead row reads DEAD")
 	check(screen.rows[downed]["state"].get_theme_color("font_color")
-		!= screen.rows[dead]["state"].get_theme_color("font_color"),
-		"a downed row is coloured apart from a dead one")
+		!= screen.rows[alive]["state"].get_theme_color("font_color"),
+		"a downed row is coloured apart from a living one")
 	check(screen.rows[alive]["bar"].value == 100.0, "the live health bar reads the roster")
 	check(screen.rows[alive]["health"].text == "100 / 100", "the health line reads the roster")
 	check(screen.rows[downed]["bar"].value == 0.0, "a downed body reads zero health")
@@ -91,8 +101,6 @@ func _check_rows_and_control() -> void:
 
 	check(not screen.rows[alive]["control"].disabled, "a living body can be controlled")
 	check(screen.rows[downed]["control"].disabled, "a downed body cannot be jumped into")
-	check(screen.rows[dead]["control"].disabled, "a dead body cannot be controlled")
-	check(screen.rows[dead]["deploy"].disabled, "the dead cannot be deployed")
 	check(not screen.rows[downed]["deploy"].disabled, "a downed body can still be fielded")
 
 	check(screen.gold_label.text == "1000 G", "the header shows the purse, got %s" % screen.gold_label.text)
@@ -107,7 +115,6 @@ func _check_rows_and_control() -> void:
 	check(seen.size() == 1 and seen[0] == alive,
 		"clicking the living row emits exactly one possess_requested, got %s" % str(seen))
 	screen.rows[downed]["control"].pressed.emit()
-	screen.rows[dead]["control"].pressed.emit()
 	check(seen.size() == 1, "disabled rows never emit, got %s" % str(seen))
 
 	# Another peer inside the living body: the button advertises the lock.
@@ -116,7 +123,7 @@ func _check_rows_and_control() -> void:
 	# Re-binding the same warband and router must not duplicate rows or wires:
 	# the possession checks below run on the freshly attached listener.
 	screen.configure(warband, souls)
-	check(screen.rows.size() == 3, "re-configuring keeps one row per mercenary")
+	check(screen.rows.size() == 2, "re-configuring keeps one row per mercenary")
 	check(bool(souls.request_transfer(7, alive).get("ok", false)), "peer 7 takes the living body")
 	check(screen.rows[alive]["control"].disabled, "a body held by another peer is disabled")
 	check(screen.rows[alive]["control"].text == "IN USE", "the held body says so")
@@ -152,6 +159,35 @@ func _check_refresh() -> void:
 		"an equip made elsewhere shows in the gear summary, got %s"
 		% screen.rows[alive]["gear"].text)
 	screen.close()
+
+# --- an old file's dead ----------------------------------------------------
+
+## A save written before the dead left the books still carries their records.
+## Opening it must free the hire cap on the spot and hand the stash back what
+## the corpse was wearing - not inherit a graveyard and its kit.
+func _check_old_save_purge() -> void:
+	warband.reset_state()
+	_set_gold(0)
+	var survivor: int = warband.add_mercenary("Ash")
+	var fallen: int = warband.add_mercenary("Bram")
+	warband.roster.equip(fallen, "main", "sword_short")
+	var data: Dictionary = warband.to_dict()
+	var records: Array = data["roster"]["mercenaries"]
+	for record in records:
+		if int((record as Dictionary)["id"]) == fallen:
+			record["state"] = Contracts.HealthState.DEAD
+			record["health"] = 0.0
+			record["deployed"] = false
+	var file := FileAccess.open(TEST_SAVE, FileAccess.WRITE)
+	file.store_string(JSON.stringify(data))
+	file.close()
+	check(warband.load_state(), "an old save with a dead record still loads")
+	check(not warband.roster.has(fallen), "the dead record is gone from the roster")
+	check(warband.roster.has(survivor), "the living record stays")
+	check(warband.roster.count() == 1, "the party is the living alone (%d)"
+		% warband.roster.count())
+	check(warband.stash.pooled_count("sword_short") == 1,
+		"and what the dead body wore is back in the shared stash")
 
 # --- the paperdoll ---------------------------------------------------------
 
@@ -344,4 +380,16 @@ func _check_recruiter() -> void:
 	check(screen.status_text().contains("No more can be sworn"),
 		"the refusal is reported, got %s" % screen.status_text())
 	check(screen.rows.size() == sworn, "the roster is unchanged at the cap")
+
+	# A dead mercenary no longer holds a place: the same cap can be filled again.
+	var fallen: int = warband.roster.ids()[0]
+	warband.roster.apply_damage(fallen, 1000.0)
+	check(not warband.roster.has(fallen), "the fallen leave the books at the cap")
+	check(warband.roster.count() == sworn - 1, "and free a place in the warband")
+	_set_gold(10000)
+	var freed: int = warband.roster.count()
+	screen.hire_buttons[0].pressed.emit()
+	check(warband.roster.count() == freed + 1, "the freed place can be sworn again")
+	check(not screen.status_text().contains("No more can be sworn"),
+		"the recruiter no longer refuses, got %s" % screen.status_text())
 	screen.close()

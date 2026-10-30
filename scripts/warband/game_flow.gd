@@ -74,8 +74,12 @@ func enter_warband() -> void:
 	world_start = "camp"
 	goto(WORLD_SCENE)
 
-## A brand-new campaign: the four cages, whatever the save says.
-func start_campaign() -> void:
+## A brand-new campaign: the four cages, whatever the save says. `skip_tutorial`
+## is the title's own door for a player who has done the opening before: the
+## cages, the shiv and the walk are left behind and the warband opens already
+## standing in Hearthstead, sworn and armed by the town's own lineup. Every quest
+## is still there - only the lesson is not.
+func start_campaign(skip_tutorial: bool = false) -> void:
 	active = true
 	# The purse is the shared wallet, so a fresh campaign has to reset the journey
 	# too: otherwise the last run's gold and pack walk into the cages with the soul.
@@ -86,7 +90,7 @@ func start_campaign() -> void:
 	if warband != null:
 		warband.reset_state()
 		warband.save_state()
-	world_start = "camp"
+	world_start = "town" if skip_tutorial else "camp"
 	goto(WORLD_SCENE)
 
 ## Go straight to the town end of the world (debug door, and where a resumed

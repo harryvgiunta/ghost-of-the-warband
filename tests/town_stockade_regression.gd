@@ -419,9 +419,9 @@ func check_talk() -> void:
 	# The recruiter: the lesson once, then the board it teaches.
 	var desk: Vector3 = town.service_point("recruiter")
 	check(town.interact_at(1, desk) == "recruiter", "G at the desk names the recruiter")
-	check(card.has_shown(GiverScript.HIRE_LESSON), "the first G raises the hire lesson")
-	check(card.is_open(), "and the card is up")
-	check(town.screen.is_open(), "the hire board waits underneath the card")
+	check(card.has_shown(GiverScript.HIRE_LESSON), "the first G offers the hire lesson")
+	check(not card.is_open(), "and the skipped card never opens")
+	check(town.screen.is_open(), "the hire board opens straight away")
 	card.close()
 	await create_timer(0.15).timeout
 	check(town.interact_at(1, desk) == "recruiter", "G at the desk names it again")
@@ -435,8 +435,8 @@ func check_talk() -> void:
 		"G at the desk names the quartermaster")
 	check(warband.quests.is_active("free_the_soldiers"),
 		"the quartermaster's talk accepts the rescue order")
-	check(card.is_open(), "and the order opens as a card")
-	check(not town.quartermaster.is_open(), "his shop stays shut while he is talking")
+	check(not card.is_open(), "and the skipped order opens no card")
+	check(town.quartermaster.is_open(), "his counter opens instead of the skipped card")
 	card.close()
 	await create_timer(0.15).timeout
 

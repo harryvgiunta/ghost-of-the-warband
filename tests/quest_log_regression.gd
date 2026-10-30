@@ -227,21 +227,22 @@ func run() -> void:
 	giver.configure(warband, null)
 	check(giver.marker_service() == "recruiter",
 		"the arrow starts on the recruiter while the band is short")
-	check(giver.talk("recruiter"), "talking to the recruiter raises the hire lesson")
-	check(giver.card.is_open(), "the card is up")
-	check(str(giver.card.step()) == GiverScript.HIRE_LESSON, "and it is the hire lesson")
-	giver.card.close()
-	check(not giver.talk("recruiter"), "the lesson is taught once; the next talk opens the board")
+	check(not giver.talk("recruiter"),
+		"the skipped hire lesson hands the recruiter's talk to his board")
+	check(not giver.card.is_open(), "no card is up")
+	check(giver.card.has_shown(GiverScript.HIRE_LESSON),
+		"but the lesson is recorded as offered")
+	check(not giver.talk("recruiter"), "and every later talk opens the board the same way")
 
 	# The band fills to the cap: the quartermaster takes the arrow and offers the
 	# cages.
 	while warband.roster.count() < warband.deployment_cap:
 		warband.hire()
 	check(giver.marker_service() == "quartermaster", "the arrow moves to the quartermaster")
-	check(giver.talk("quartermaster"), "and he has something to say")
+	check(not giver.talk("quartermaster"),
+		"with the lesson skipped, his counter is the answer")
 	check(warband.quests.is_active("free_the_soldiers"), "the cage order is accepted in his hand")
-	check(str(giver.card.step()) == "offer_free_the_soldiers", "the offer card went up")
-	giver.card.close()
+	check(not giver.card.is_open(), "and no offer card opens")
 
 	# Four cages, then the turn-in card names the next order and hands it over.
 	for index in QuestsScript.SOLDIER_RESCUES:
@@ -250,16 +251,15 @@ func run() -> void:
 	giver.talk("quartermaster")
 	check(warband.quests.is_closed("free_the_soldiers"), "the order is turned in")
 	check(warband.quests.is_active("cull_the_watchers"), "and the watcher bounty is taken over")
-	check(str(giver.card.step()) == "done_free_the_soldiers", "the turn-in card went up")
-	giver.card.close()
+	check(not giver.card.is_open(), "the skipped turn-in card never opens")
 
 	# The ichor order appears off the chain, the moment the band holds a vial.
 	warband.stash.add(QuestsScript.ICHOR_ID, 1)
 	giver.refresh_offers()
 	check(warband.quests.is_offered("bind_the_ichor"), "a vial in the stash offers its order")
-	check(giver.talk("quartermaster"), "the quartermaster answers")
+	check(not giver.talk("quartermaster"),
+		"the skipped ichor lesson hands the press to his counter")
 	check(warband.quests.is_active("bind_the_ichor"), "and the ichor order is taken")
-	giver.card.close()
 	check(giver.marker_service() == "quartermaster", "the arrow stays on the keeper with work")
 
 	# --- the HUD block ------------------------------------------------------

@@ -161,15 +161,14 @@ func state_count(value: int) -> int:
 		previous = current
 	return total
 
-## The tutorial card is modal and pauses the tree. A test plays the player: if a
-## card is up, it must be pausing, and closing it must resume.
+## Every tutorial popup is skipped in this build. A beat that would have raised
+## one must leave the game running and the card hidden - no modal, no pause - and
+## the beat itself still has to happen (the sequencer and the lesson advance).
 func dismiss_card(label: String) -> void:
-	if game == null or game.card == null or not game.card.is_open():
+	if game == null or game.card == null:
 		return
-	check(paused, "the card holds the game still (%s)" % label)
-	check(not game.card.step().is_empty(), "the card names its step (%s)" % label)
-	game.card.close()
-	check(not paused, "closing the card resumes the game (%s)" % label)
+	check(not game.card.is_open(), "no tutorial card opens (%s)" % label)
+	check(not paused, "and the game is never held still by one (%s)" % label)
 
 func flat_range(from: Vector3, to: Vector3) -> float:
 	return Vector2(from.x - to.x, from.z - to.z).length()
@@ -444,9 +443,8 @@ func check_rescuer() -> void:
 		"the pickup card opens no farther off than the key that takes it reaches")
 	check(camp.duel.step() == DuelScript.Step.MOVE,
 		"taking him starts the lesson at the feet (%s)" % camp.duel.step_name())
-	check(game.card != null and game.card.is_open() and game.card.step() == "step_3",
-		"the walking card is the chapter's fourth (%s)"
-		% ("" if game.card == null else game.card.step()))
+	check(game.card != null and not game.card.is_open(),
+		"the walking beat opens no card and gives no directions")
 	check(str(camp.hint_line(cutter)).contains("W A S D"),
 		"and its key line teaches walking (%s)" % str(camp.hint_line(cutter)))
 	# The walk is marked: a big gold arrow bobbing over the shiv, up while the card
@@ -501,9 +499,8 @@ func check_duel() -> void:
 	await physics_frame
 	check(camp.duel.step() == DuelScript.Step.FETCH,
 		"standing over the shiv asks for the pickup (%s)" % camp.duel.step_name())
-	check(game.card != null and game.card.is_open() and game.card.step() == "step_4",
-		"the pickup card is the chapter's fifth (%s)"
-		% ("" if game.card == null else game.card.step()))
+	check(game.card != null and not game.card.is_open(),
+		"the pickup beat opens no card")
 	check(str(camp.hint_line(cutter)).contains("K"),
 		"and its key line names K (%s)" % str(camp.hint_line(cutter)))
 	for watcher in camp.guards:
@@ -521,15 +518,10 @@ func check_duel() -> void:
 		"taking the shiv starts the fight (%s)" % camp.duel.step_name())
 	# 3. The pickup itself is the freeze: the three cuts are named on the frame the
 	#    shiv enters the hand, before the pair are given one frame to close in.
-	check(camp.duel.cuts_card(), "the pickup raises the cuts card")
-	check(game.card != null and game.card.is_open(),
-		"and the game is held still on that frame")
-	check(paused, "the tree is paused, not just the card")
-	if game.card != null and game.card.is_open():
-		check(game.card.step() == "step_5", "the cuts card is the chapter's sixth (%s)"
-			% game.card.step())
-		check(int(game.card.get("_keys_row").get_child_count()) >= 3,
-			"and it draws the three cut keys as tiles")
+	check(camp.duel.cuts_card(), "the pickup raises the cuts lesson")
+	check(game.card != null and not game.card.is_open(),
+		"but the skipped card leaves the game in the player's hands")
+	check(not paused, "and the tree keeps running")
 	check(str(camp.hint_line(cutter)).contains("LMB"),
 		"while the key line teaches the cut (%s)" % str(camp.hint_line(cutter)))
 	check(_hunting_watchers() == 0, "and nothing has moved on the body still reading (%d hunting)"
@@ -548,10 +540,9 @@ func check_duel() -> void:
 		func() -> bool: return bool(camp.duel.guard_card()), 16.0, "the guard card")
 	check(wind, "a watcher's windup teaches the guard (%d hunting, %s)"
 		% [_hunting_watchers(), camp.duel.step_name()])
-	if game.card != null and game.card.is_open():
-		check(game.card.step() == "step_6", "the guard card is the chapter's seventh (%s)"
-			% game.card.step())
-		dismiss_card("the guard card")
+	check(game.card != null and not game.card.is_open(),
+		"the guard beat opens no card either")
+	dismiss_card("the guard card")
 	# 6. Hold the guard and let the club come down on it. The press is repeated
 	#    because a body still landing cannot raise its blade.
 	var guarded := false
@@ -718,11 +709,10 @@ func check_revive_lesson() -> void:
 	var floor_before: int = camp.pickups().size()
 	ally.enter_downed(0)
 	await physics_frame
-	check(game.card != null and game.card.is_open(),
-		"a squadmate falling at the player's feet opens the revive lesson")
-	check(game.card.step() == "lesson_revive",
-		"it is the one unnumbered card (%s)" % ("" if game.card == null else game.card.step()))
-	check(paused, "and it holds the game still, bleed clock included")
+	check(game.card != null and game.card.has_shown("lesson_revive"),
+		"a squadmate falling at the player's feet offers the revive lesson")
+	check(not game.card.is_open(), "and the skipped card never opens")
+	check(not paused, "the game keeps running, bleed clock included")
 	check(camp.pickups().size() == floor_before,
 		"an empty-handed body leaves nothing on the dirt (%d for %d)"
 		% [camp.pickups().size(), floor_before])

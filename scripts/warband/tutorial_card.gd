@@ -45,6 +45,14 @@ const KEYS := ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "G", "P", "K", "R
 	"6", "TAB", "ESC", "ENTER", "SPACE", "SHIFT", "CTRL", "LMB", "RMB", "MOUSE",
 	"WHEEL_UP", "WHEEL_DOWN", "W", "A", "S", "D", "[", "]"]
 
+## This build ships with every tutorial popup skipped: the lesson cards are
+## how-to copy, and the owner does not want the game to stop and explain. The
+## step is still recorded (`has_shown()` keeps meaning "this lesson has been
+## offered", which the quest givers read), nothing opens, and nothing pauses.
+## Quests, objectives, the ledger and the HUD are untouched - only the modal
+## card and its directions are gone.
+const SKIP_ALL := true
+
 var _built := false
 var _open := false
 var _step := ""
@@ -72,6 +80,8 @@ func show_step(step: String, kicker: String, title: String, body: String,
 	if _shown.has(step):
 		return false
 	_shown[step] = true
+	if SKIP_ALL:
+		return false
 	_ensure_built()
 	_step = step
 	_kicker.text = _kicker_text(kicker)
@@ -88,6 +98,8 @@ func show_step(step: String, kicker: String, title: String, body: String,
 	return true
 
 func open() -> void:
+	if SKIP_ALL:
+		return
 	if not _built:
 		_ensure_built()
 	if _open:

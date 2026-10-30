@@ -18,6 +18,11 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const State = preload("res://scripts/player_state.gd")
 
+## A record that has just become DEAD, whoever put it down: a lethal blow, a
+## finisher on a downed body, the bleed clock, or a scene mirroring a corpse.
+## `Warband` listens so the dead leave the books on the same frame they die.
+signal died(merc_id: int)
+
 ## Record keys.
 const KEY_ID := "id"
 const KEY_NAME := "name"
@@ -250,12 +255,16 @@ func set_state(merc_id: int, state: int) -> void:
 	var record := find(merc_id)
 	if record.is_empty():
 		return
+	var was_dead := int(record.get(KEY_STATE, Contracts.HealthState.ALIVE)) \
+		== Contracts.HealthState.DEAD
 	record[KEY_STATE] = state
 	if state != Contracts.HealthState.DOWNED:
 		record[KEY_DOWNED_SECONDS] = 0.0
 	if state == Contracts.HealthState.DEAD:
 		record[KEY_HEALTH] = 0.0
 		record[KEY_DEPLOYED] = false
+	if state == Contracts.HealthState.DEAD and not was_dead:
+		died.emit(merc_id)
 
 ## Apply a hit through the shared overkill contract. Returns the resolver's
 ## dictionary plus `{"merc_id": id, "state_from": previous_state}`; a body that
@@ -278,9 +287,13 @@ func apply_damage(merc_id: int, amount: float) -> Dictionary:
 			record[KEY_STATE] = Contracts.HealthState.DEAD
 			record[KEY_HEALTH] = 0.0
 			record[KEY_DEPLOYED] = false
-		return {"ok": true, "state": int(record[KEY_STATE]), "health": float(record[KEY_HEALTH]),
+		var answer := {"ok": true, "state": int(record[KEY_STATE]),
+			"health": float(record[KEY_HEALTH]),
 			"damage": maxf(0.0, amount), "overkill": maxf(0.0, amount), "downed": not finished,
 			"died": finished, "merc_id": merc_id, "state_from": state_from}
+		if finished:
+			died.emit(merc_id)
+		return answer
 	var result := Contracts.resolve_damage(float(record[KEY_HEALTH]), max_hp, amount)
 	if not bool(result["ok"]):
 		result["merc_id"] = merc_id
@@ -292,6 +305,8 @@ func apply_damage(merc_id: int, amount: float) -> Dictionary:
 		record[KEY_DEPLOYED] = false
 	result["merc_id"] = merc_id
 	result["state_from"] = state_from
+	if bool(result["died"]):
+		died.emit(merc_id)
 	return result
 
 func heal(merc_id: int, amount: float) -> float:
@@ -331,7 +346,29 @@ func tick_downed(merc_id: int, delta: float) -> bool:
 	record[KEY_STATE] = Contracts.HealthState.DEAD
 	record[KEY_HEALTH] = 0.0
 	record[KEY_DEPLOYED] = false
+	died.emit(merc_id)
 	return true
+
+## Every dead record leaves the books, and the caller is told what each one was
+## still wearing so the gear can go back to the shared stash instead of dying
+## with the body. Returns `[{id, name, health, max_health, items}]`; empty when
+## nobody had died. The roster stays pure data - it removes, it does not book.
+func take_dead() -> Array[Dictionary]:
+	var fallen: Array[Dictionary] = []
+	for merc_id in dead_ids():
+		var record := find(merc_id)
+		var items: Array[String] = []
+		for entry in worn_entries(merc_id):
+			items.append(str(entry.get("item", "")))
+		fallen.append({
+			"id": merc_id,
+			"name": str(record.get(KEY_NAME, "Mercenary")),
+			"health": float(record.get(KEY_HEALTH, 0.0)),
+			"max_health": float(record.get(KEY_MAX_HEALTH, Contracts.BASE_MAX_HEALTH)),
+			"items": items,
+		})
+		remove(merc_id)
+	return fallen
 
 ## Bring every mercenary back at full health for the next battle.
 func restore_all() -> void:

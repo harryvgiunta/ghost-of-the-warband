@@ -410,6 +410,27 @@ func check_hand() -> void:
 	hand.tick(1.0)
 	check(drop.collected and pile.collected, "the pile around the clicked drop was taken")
 	check(not far.collected, "a drop across the clearing was not")
+	# The body's reach is what opens a channel, not the crosshair alone: a click
+	# on a drop across the clearing is a swing, never a loot from ten paces off.
+	hand.tick(0.3)
+	check(not hand.try_click(body, far.global_position),
+		"a drop out of the body's reach is an attack")
+	check(not hand.active(), "and no channel opened")
+
+	# The same rule for a corpse. This is the click that used to steal a swing
+	# aimed at a fighter standing over the dead: the channel is the body's work,
+	# so a corpse across the field cannot be worked from here.
+	var distant := StubCorpse.new()
+	distant.carried = ["wolf_paw"]
+	_field.add_child(distant)
+	distant.global_position = body.global_position + Vector3(25.0, 0.0, 0.0)
+	var distant_id := loot.register_corpse(distant)
+	hand.tick(0.3)
+	check(not hand.try_click(body, distant.global_position),
+		"a corpse out of the body's reach is an attack")
+	check(not hand.active(), "and no channel opened")
+	check(loot.corpse_items(distant_id) == ["wolf_paw"], "the distant corpse is untouched")
+	distant.queue_free()
 	check(stash.pooled_count(ICHOR) >= 1, "the ichor is in the shared stash")
 	check(hand.last_summary().contains("Warden's Ichor"),
 		"the line names the reagent, got %s" % hand.last_summary())

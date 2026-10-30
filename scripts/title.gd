@@ -29,6 +29,12 @@ var host_world_button: Button
 var join_button: Button
 ## The possession campaign's door: a fresh warband, not a resume.
 var warband_button: Button
+## The "I have played this" door: it warns first, then opens the campaign in
+## Hearthstead with the cages behind it.
+var warband_skip_button: Button
+var skip_confirm_button: Button
+var skip_tutorial_button: Button
+var _skip_layer: Control
 ## The checkpoint door: opens the world where the last autosave stands. Disabled
 ## until a warband save exists, because there is nothing to resume before one.
 var warband_resume_button: Button
@@ -96,8 +102,8 @@ func _build() -> void:
 	column.set_anchors_preset(Control.PRESET_CENTER)
 	column.offset_left = -260
 	column.offset_right = 260
-	column.offset_top = -340
-	column.offset_bottom = 340
+	column.offset_top = -382
+	column.offset_bottom = 382
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_theme_constant_override("separation", 6)
 	add_child(column)
@@ -133,6 +139,9 @@ func _build() -> void:
 	host_world_button = _plate(column, "HOST OPEN WORLD", "", _host_open_world)
 	join_button = _plate(column, "JOIN GAME", "", _open_join)
 	warband_button = _plate(column, "GHOST OF THE WARBAND", "", _enter_warband)
+	warband_skip_button = _plate(column, "SKIP TUTORIAL  ·  START IN TOWN", "", _ask_skip_tutorial)
+	warband_skip_button.add_theme_font_size_override("font_size", 14)
+	warband_skip_button.tooltip_text = "Leaves the cages behind and opens the campaign in Hearthstead."
 	warband_resume_button = _plate(column, "RESUME WARBAND", "", _resume_warband)
 	_lobby_button = _plate(column, "WARBAND LOBBY", "", _toggle_lobby)
 	# The lobby is the only door with two destinations, so the door says so
@@ -170,6 +179,7 @@ func _build() -> void:
 	close.pressed.connect(_toggle_lobby)
 	_lobby_layer.add_child(close)
 	_build_join_layer()
+	_build_skip_layer()
 
 
 func _center_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
@@ -353,6 +363,81 @@ func _button(parent: Node, text: String, position_at: Vector2, size_at: Vector2)
 	parent.add_child(result)
 	return result
 
+## The skip door's warning. Skipping the tutorial is the one decision on this
+## screen that throws away content, so the door asks first and says what is at
+## stake in the plainest words the game has. It sits over the join form and under
+## the settings window.
+func _build_skip_layer() -> void:
+	_skip_layer = Control.new()
+	_skip_layer.name = "SkipTutorialLayer"
+	_skip_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_skip_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_skip_layer.visible = false
+	add_child(_skip_layer)
+	var dim := ColorRect.new()
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0.015, 0.012, 0.010, 0.86)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_skip_layer.add_child(dim)
+	var panel := Panel.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER, true)
+	panel.size = Vector2(780, 380)
+	panel.position = Vector2(-390, -190)
+	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
+	_skip_layer.add_child(panel)
+	var title := _label(panel, "SKIP THE TUTORIAL?", Vector2(30, 24), 27, GOLD)
+	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
+	var warning := _label(panel,
+		"ARE YOU SURE?  WE REALLY RECOMMEND YOU DO THE TUTORIAL IF YOU HAVEN'T PLAYED.",
+		Vector2(30, 68), 17, WARN)
+	warning.size = Vector2(720, 64)
+	warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var body := _label(panel,
+		"Skipping leaves the cages, the ironwood shiv and the first walk behind "
+			+ "and opens the campaign already standing in Hearthstead with a sworn, "
+			+ "armed band. Every quest, the recruiter, the quartermaster, the shared "
+			+ "stash, the altar and the expedition gate still work - only the lessons "
+			+ "are gone.",
+		Vector2(30, 138), 13, MUTED)
+	body.size = Vector2(720, 96)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	skip_tutorial_button = _button(panel, "PLAY THE TUTORIAL  (RECOMMENDED)",
+		Vector2(30, 286), Vector2(360, 54))
+	skip_tutorial_button.pressed.connect(_start_tutorial)
+	skip_confirm_button = _button(panel, "YES, SKIP  -  START IN TOWN",
+		Vector2(402, 286), Vector2(348, 54))
+	skip_confirm_button.theme_type_variation = "PrimaryButton"
+	skip_confirm_button.pressed.connect(_confirm_skip_tutorial)
+
+
+## The skip door: always the warning first, never a silent throwaway.
+func _ask_skip_tutorial() -> void:
+	if _skip_layer == null:
+		return
+	_skip_layer.visible = true
+
+
+## "No, I have not played": the recommended path, the cages and the lesson.
+func _start_tutorial() -> void:
+	if _skip_layer != null:
+		_skip_layer.visible = false
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		_enter_campaign_score()
+		flow.start_campaign(false)
+
+
+## "Yes, I know": a fresh warband that opens in the town square, with the
+## opening left behind and every quest still on the ledger.
+func _confirm_skip_tutorial() -> void:
+	if _skip_layer != null:
+		_skip_layer.visible = false
+	var flow := get_node_or_null("/root/GameFlow")
+	if flow != null:
+		_enter_campaign_score()
+		flow.start_campaign(true)
+
+
 ## The settings window is built last so it sits over the join form and the lobby
 ## panel; Escape is the only door to it, exactly as it is in the world.
 func _build_settings() -> void:
@@ -530,6 +615,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif _join_layer != null and _join_layer.visible:
 		_close_join()
+		get_viewport().set_input_as_handled()
+	elif _skip_layer != null and _skip_layer.visible:
+		_skip_layer.visible = false
 		get_viewport().set_input_as_handled()
 	else:
 		_open_settings()

@@ -213,24 +213,55 @@ func check_orders() -> void:
 	check(actor != null, "a body stands for the click")
 	if actor == null or game.loot_hand == null:
 		return
-	var sample: Dictionary = game.controller.aim_sample()
-	var point: Vector3 = sample.get("point", Vector3.ZERO)
-	var drop = game.spawn_pickup("wolf_pelt", point)
-	check(drop != null, "a pelt lies at the crosshair")
-	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
-	press.pressed = true
-	check(game._loot_click(press), "the left button begins the loot")
+	# A piece under the crosshair but out of the body's reach is a swing. The
+	# channel is the body's own work: a click on a drop across the clearing used
+	# to loot it and steal the attack aimed at a fighter standing over it.
+	var far_drop = game.spawn_pickup("wolf_pelt",
+		actor.global_position + actor.global_basis.x * 30.0)
+	check(far_drop != null, "a pelt lies thirty metres off")
+	check(not game.loot_hand.try_click(actor, far_drop.global_position),
+		"a drop out of the body's reach is left to the sword")
+	check(not game.loot_hand.active(), "and no channel opened")
+	far_drop.queue_free()
+	# The same gesture on a piece at the body's feet is the loot.
+	var drop = game.spawn_pickup("wolf_pelt",
+		actor.global_position - actor.global_basis.z * 1.0)
+	check(drop != null, "a pelt lies at the body's feet")
+	check(game.loot_hand.try_click(actor, drop.global_position),
+		"the left button begins the loot")
 	check(game.loot_hand.active(), "the body is working the ground")
 	check(game.loot_hand.target_kind() == "drop", "and it is the drop it found")
-	var waited := 0.0
-	while game.loot_hand.active() and waited < 3.0:
-		await create_timer(0.1).timeout
-		waited += 0.1
-	check(not game.loot_hand.active(), "the channel closes on its own (%.1f s)" % waited)
+	# The world owns the channel's clock, so the test drives one full beat instead
+	# of racing a squadmate to the piece the body is already working.
+	game.loot_hand.tick(1.0)
+	check(not game.loot_hand.active(), "the channel closes on its own")
 	check(warband.stash.pooled_count("wolf_pelt") >= 1, "the pelt is in the shared stash")
 	check(game.loot_hand.last_summary().contains("Wolf Pelt"),
 		"and one line says what came back (%s)" % game.loot_hand.last_summary())
+
+	# Empty hands are the one click that used to do nothing at all. It is not a
+	# loot and it cannot swing, so the HUD has to name the missing piece.
+	var merc: int = game.controller.merc_for_peer(1)
+	var hands: Dictionary = warband.roster.equipped_of(merc)
+	warband.roster.unequip(merc, "main")
+	warband.roster.unequip(merc, "off")
+	game.controller.refresh_gear(merc)
+	await physics_frame
+	check(str(actor.rig.weapon) in ["", "none"], "the body is bare-handed (%s)"
+		% str(actor.rig.weapon))
+	var bare := InputEventMouseButton.new()
+	bare.button_index = MOUSE_BUTTON_LEFT
+	bare.pressed = true
+	check(not game._loot_click(bare), "a bare-handed press is not a loot")
+	var status: Label = game.hud.get("_status_label")
+	check(status != null and status.text.contains("hands are empty"),
+		"and the HUD says why nothing swings (%s)"
+			% ("" if status == null else status.text))
+	for slot in ["main", "off"]:
+		var item_id := str(hands.get(slot, ""))
+		if not item_id.is_empty():
+			warband.roster.equip(merc, slot, item_id)
+	game.controller.refresh_gear(merc)
 
 	# Nothing under the crosshair: the world must not eat the press, or the sword
 	# could never be raised over open ground.

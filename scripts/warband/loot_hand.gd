@@ -88,12 +88,18 @@ func try_click(actor, point: Vector3) -> bool:
 		return false
 	if not _can_work(actor):
 		return false
+	# The channel is the body's own work, so the piece has to be in the body's
+	# reach as well as under the crosshair. Measuring only from `point` let a
+	# click aimed at a fighter standing over a corpse loot that corpse from
+	# across the field - the click crouched and worked the ground instead of
+	# swinging, which is the report "I cannot attack any more".
+	var body_at: Vector3 = (actor as Node3D).global_position
 	var corpse_id: int = _loot.corpse_at(point, _reach)
-	if corpse_id != 0:
+	if corpse_id != 0 and body_at.distance_to(_loot.corpse_position(corpse_id)) <= _reach:
 		_begin(actor, KIND_CORPSE, corpse_id, null)
 		return true
 	var pickup: WarbandPickup = _drop_at(point)
-	if pickup != null:
+	if pickup != null and body_at.distance_to(pickup.global_position) <= _reach:
 		_begin(actor, KIND_DROP, 0, pickup)
 		return true
 	return false

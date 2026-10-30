@@ -77,6 +77,8 @@ var checkpoint: Dictionary = {}
 
 func _ready() -> void:
 	set_process(false)
+	if not roster.died.is_connected(_on_merc_died):
+		roster.died.connect(_on_merc_died)
 	# The battle ledger is fed by watching the field, so it needs `node_added`
 	# from the first frame; see "run reports" in the persistence section.
 	_ensure_run_watch()
@@ -114,6 +116,45 @@ func alive_merc_ids() -> Array[int]:
 
 func deployed_merc_ids() -> Array[int]:
 	return roster.deployed_ids()
+
+## The dead leave the warband the moment they die: a corpse is not a party member,
+## it cannot be deployed or entered, and its record used to sit on the hire cap
+## forever - a band that had filled its eight places could never swear another
+## body because the fallen still counted. The name leaves the roster, the body
+## leaves the soul router, and everything it was still wearing goes back into the
+## shared stash, so dying costs the man, never the gear. Returns the fallen
+## records (`[{id, name, health, max_health, items}]`); empty when nobody died.
+func reap_dead() -> Array[Dictionary]:
+	var fallen := roster.take_dead()
+	if fallen.is_empty():
+		return fallen
+	for entry in fallen:
+		var merc_id := int(entry.get("id", 0))
+		for item_id in entry.get("items", []):
+			stash.add(str(item_id), 1)
+		# A battle's ledger still remembers the body that took the field, even
+		# though the roster no longer holds it.
+		if run != null and _run_body_ids.has(merc_id):
+			_run_fallen[merc_id] = {
+				"name": str(entry.get("name", "")),
+				"health": 0.0,
+				"max_health": float(entry.get("max_health", 1.0)),
+				"state": RunReportScript.state_key(Contracts.HealthState.DEAD),
+			}
+		if souls.has_body(merc_id):
+			souls.unregister_body(merc_id)
+		for peer_id in possession.keys():
+			if int(possession[peer_id]) == merc_id:
+				possession.erase(peer_id)
+		for peer_id in revive_channels.keys():
+			var channel: Variant = revive_channels[peer_id]
+			if channel is Dictionary and int((channel as Dictionary).get("merc_id", 0)) == merc_id:
+				revive_channels.erase(peer_id)
+	_notify()
+	return fallen
+
+func _on_merc_died(_merc_id: int) -> void:
+	reap_dead()
 
 ## Hack a body into the warband (the cage tutorial's four prisoners, the admin
 ## arena's eight test bodies, a soldier cut out of a cage). No gold changes hands.
@@ -458,6 +499,11 @@ func from_dict(data: Dictionary) -> void:
 	# A v1 save has neither field; both readers answer "nothing fought yet".
 	_load_run_history(data.get("runs", []))
 	run_totals = RunReportScript.sanitize_totals(data.get("run_totals", {}))
+	# A file written before the dead left the books still carries their records.
+	# They leave now, and whatever they wore joins the stash that was just read:
+	# opening an old warband must free the hire cap, not inherit a graveyard.
+	_run_fallen.clear()
+	reap_dead()
 	# No reward is ever re-applied here. The purse and the essence wallet already
 	# hold what a battle paid; the history is a ledger of that, never a second
 	# payment, so a save/load cycle cannot pay a run twice.
@@ -640,6 +686,9 @@ var _run_cleared_waves := 0
 var _run_kills := 0
 var _run_notes: Dictionary = {}
 var _run_body_ids: Array[int] = []
+## Bodies that died on this field and have already left the roster, keyed by
+## mercenary id: the report still lists them as the dead they are.
+var _run_fallen: Dictionary = {}
 var _run_gold_start := 0
 var _run_cruor_start := 0
 var _run_items_start := 0
@@ -812,6 +861,9 @@ func _snapshot_bodies() -> Array[Dictionary]:
 	for entry in _run_body_ids:
 		var merc_id := int(entry)
 		if not roster.has(merc_id):
+			# Left the roster on this field: the report keeps the corpse.
+			if _run_fallen.has(merc_id):
+				out.append((_run_fallen[merc_id] as Dictionary).duplicate())
 			continue
 		out.append({
 			"name": roster.name_of(merc_id),
@@ -847,6 +899,7 @@ func _clear_run_state() -> void:
 	_run_kills = 0
 	_run_notes.clear()
 	_run_body_ids.clear()
+	_run_fallen.clear()
 	_run_gold_start = 0
 	_run_cruor_start = 0
 	_run_items_start = 0

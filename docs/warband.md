@@ -16,6 +16,8 @@ every parallel worktree builds against.
 | Revive channel | `REVIVE_CHANNEL_SECONDS` | 5.0 s: a soul holding `G`, or a squadmate's own hands once the field is clear | same |
 | Revive health | `REVIVE_HEALTH_FRACTION` | 50% of max | same |
 | Bleed-out while downed | `DOWNED_BLEED_SECONDS` | 30 s | same |
+| A death leaves the party | `Warband.reap_dead()` | the dead record is removed at once, its worn gear returns to the shared stash, and the hire cap it held is freed | `scripts/warband/warband_state.gd` |
+| Tutorial popups | `TutorialCard.SKIP_ALL` | every lesson card is skipped: no modal, no pause and no directions. The step is still recorded, so `has_shown()` and the quest givers keep their state; quests, objectives and the ledger are untouched | `scripts/warband/tutorial_card.gd` |
 | Crawl pace | `DOWNED_CRAWL_SPEED` | 0.9 m/s backwards | same |
 | Active damage | `ACTIVE_DAMAGE_MULTIPLIER` | 1.0 | same |
 | Passive damage | `PASSIVE_DAMAGE_MULTIPLIER` | 0.10 | same |
@@ -228,6 +230,15 @@ Every hand-off goes through one `scene_requested(path)` signal per scene, bound 
 the campaign door is used, which is why every scene regression can emit its door
 without being teleported out of the test.
 
+The title's **SKIP TUTORIAL · START IN TOWN** door is the second way into a new
+campaign. It always asks first - *"ARE YOU SURE? WE REALLY RECOMMEND YOU DO THE
+TUTORIAL IF YOU HAVEN'T PLAYED."* - and only then calls
+`GameFlow.start_campaign(true)`, which opens the world with `world_start = "town"`:
+the cages, the shiv and the walk are behind you, the town's own lineup swears and
+arms the band, and every quest, counter, the stash, the altar and the expedition
+gate still work. `start_campaign(false)` (the plain door) still starts in the camp.
+Tutorial card popups are skipped in every campaign (`TutorialCard.SKIP_ALL`).
+
 ### Multiplayer
 
 `admin_arena.tscn` with `--warband-host <port>` hosts; `--warband-join <address>
@@ -315,8 +326,9 @@ so a load can never point at a state the file has not held. `sanitise_checkpoint
 is the only reader (hand-edited or older files drop the bookmark, never half-read
 it), and a v3 file simply resumes at the town as before. A wipe calls
 `GameFlow.retry_checkpoint()` after `WIPE_BEAT`: the warband reloads, bodies that
-were down wake at half health, bodies that were dead stay dead, and the **purse is
-not rolled back** (it belongs to `PlayerState`, and a reload must not replay a
+were down wake at half health, the dead are not in the file at all (a death takes
+its record out of the roster on the frame it happens), and the **purse is not
+rolled back** (it belongs to `PlayerState`, and a reload must not replay a
 payment). With no bookmark - the opening - the wipe still has no way back. The
 title's **RESUME WARBAND** door opens the world on the bookmark; **GHOST OF THE
 WARBAND** is still always a new campaign. `tests/checkpoint_regression.gd` owns
@@ -618,7 +630,7 @@ and the rules they cannot break live in `docs/warband-handoff.md` §§1-4.
 | The keeper who talks | `scripts/warband/quest_giver.gd`, `quest_marker.gd` | `talk(service, peer)` raises the card that teaches or hands over an order and answers false when the counter should open instead; `marker_service()` decides who wears the gold `TALK TO HIM` arrow (the recruiter while the band is short of the cap, the quartermaster when he has an order, a turn-in or a vial to explain) |
 | The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed` per cage (roster + stash dressing + ledger + HUD). A `FREE HIM` arrow rides the nearest shut cage while the order is live |
 | The warcamps | `scripts/warband/watcher_warren.gd` | 21 hollow wardens in three camps 78 / 96 / 86 m off the lane, dressed from the village kit, one `MobWander` territory each, wired to the world's kill handler so they count toward the bounty |
-| The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. `_input` reads it before the soul controller, so a click on loot is never also a swing |
+| The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground **in the body's own reach** ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. The reach is measured from the body, not only from the crosshair: a click on a corpse across the field falls through to the swing instead of stealing it |
 | The map | `scripts/warband/world_map.gd` | one page, `M`, no pause: the lane sampled from the trail's path, the camp ring, the walled square, hostiles, the warband and the soul's own facing, plus `host.map_markers()` (shut cages, warcamps) |
 | The bench | `scripts/warband/ichor_bench.gd` | `IchorBench.build_prop()` (furniture with the town's one cold-green light) and the panel: pooled unbranded weapons, one vial per blade, `WarbandCruor.bind()` writing the altar's own brand ledger without touching the essence wallet |
 

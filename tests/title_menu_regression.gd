@@ -174,6 +174,20 @@ func run() -> void:
 			% warband.roster.count())
 		check(warband.gold() == int(state.STARTING_CREDITS),
 			"a fresh warband starts on the starting purse, not the saved one (%d)" % warband.gold())
+
+		# The skip door warns first, and only then opens the campaign in town.
+		check(title.warband_skip_button != null, "the skip tutorial door is on the title")
+		title.warband_skip_button.pressed.emit()
+		check(title._skip_layer != null and title._skip_layer.visible,
+			"the skip door asks before it throws the tutorial away")
+		if audio_node != null:
+			audio_node.last_event = ""
+		title.skip_confirm_button.pressed.emit()
+		check(not title._skip_layer.visible, "confirming closes the warning")
+		check(flow.world_start == "town",
+			"a skipped tutorial starts in Hearthstead (%s)" % flow.world_start)
+		if audio_node != null:
+			check(audio_node.last_event == "menu_thud", "the skip door sounds as a door")
 		flow.active = false
 		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://title_warband.json"))
 

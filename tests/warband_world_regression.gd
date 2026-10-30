@@ -289,15 +289,13 @@ func flat_range(from: Vector3, to: Vector3) -> float:
 	return Vector2(from.x - to.x, from.z - to.z).length()
 
 
-## The tutorial card is modal and pauses the tree. A test plays the player: if a
-## card is up, it must be pausing, and closing it must resume.
+## Every tutorial popup is skipped in this build: a beat that would have raised a
+## card must leave the game running and the card hidden.
 func dismiss_card(label: String) -> void:
-	if game == null or game.card == null or not game.card.is_open():
+	if game == null or game.card == null:
 		return
-	check(paused, "the card holds the game still (%s)" % label)
-	check(not game.card.step().is_empty(), "the card names its step (%s)" % label)
-	game.card.close()
-	check(not paused, "closing the card resumes the game (%s)" % label)
+	check(not game.card.is_open(), "no tutorial card opens (%s)" % label)
+	check(not paused, "and the game is never held still by one (%s)" % label)
 
 
 ## Poll a condition while playing the player: any card that opens during the wait
@@ -608,9 +606,10 @@ func check_lesson() -> void:
 	dismiss_card("the pickup card")
 	game._try_loot()
 	check(game.camp.holds_blade(cutter), "and the shiv is in the player's hands")
-	check(game.card != null and game.card.is_open() and game.card.step() == "step_5",
-		"and taking it holds the game still for the cuts card (%s)"
-		% ("" if game.card == null else game.card.step()))
+	check(game.card != null and game.card.has_shown("step_5"),
+		"the cuts lesson is offered and recorded")
+	check(not game.card.is_open() and not paused,
+		"but taking it opens no card and keeps the game in the player's hands")
 	dismiss_card("the cuts card")
 	var pair_woke := await await_condition(
 		func() -> bool:
