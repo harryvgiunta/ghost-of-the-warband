@@ -696,6 +696,17 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 				var trunk_spec: Vector2 = species.get("trunk", Vector2(0.04, 0.62))
 				var trunk_height := maxf(1.4, tree_height * float(trunk_spec.y) * 0.95)
 				var trunk_radius := maxf(0.18, tree_height * float(trunk_spec.x) * 1.04)
+				# The bark is what a body meets. The species table names the trunk's
+				# taper, but an ironoak's base flares well past it - and a collider
+				# narrower than the drawn bark is an invisible wall with a tree painted
+				# a metre behind it, which is exactly what "I stop two metres short and
+				# the camera goes inside the wood" was. The mesh's own footprint is the
+				# floor of the number, for the planting rule and the collider alike.
+				var trunk_mesh: Mesh = variant.get("trunk")
+				if trunk_mesh != null:
+					var box := trunk_mesh.get_aabb()
+					var bark := maxf(absf(box.position.x), absf(box.end.x)) * scale_at
+					trunk_radius = maxf(trunk_radius, bark)
 				at += spacing * rng.randf_range(0.82, 1.24)
 				# The way stays clear, and the wood stops at its own edge: a trunk
 				# whose bark would reach inside the walked line is not planted at
