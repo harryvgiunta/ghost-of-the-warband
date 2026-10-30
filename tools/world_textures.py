@@ -1097,11 +1097,42 @@ def make_fern(size=232):
 # ---------------------------------------------------------------------------
 
 
+class _ScaledDraw:
+    """ImageDraw proxy mapping base-pixel coordinates onto a supersampled canvas.
+
+    `_draw_shapes` renders at `size * ss`; shapes are authored in the final
+    texture's pixels, so every coordinate and stroke width has to be scaled by
+    the same factor. Without this the whole overlay landed in the top-left
+    quarter at half size (the terrain textures' ornaments never covered the
+    tile), which is exactly the flat, bald ground the dirt was failing at.
+    """
+
+    def __init__(self, draw, scale):
+        self._draw = draw
+        self._scale = scale
+
+    def _points(self, xy):
+        return [(x * self._scale, y * self._scale) for x, y in xy]
+
+    def line(self, xy, fill=None, width=1, joint=None):
+        self._draw.line(self._points(xy), fill=fill,
+                        width=max(1, int(round(width * self._scale))),
+                        joint=joint)
+
+    def polygon(self, xy, fill=None, outline=None):
+        self._draw.polygon(self._points(xy), fill=fill, outline=outline)
+
+    def ellipse(self, xy, fill=None, outline=None, width=1):
+        self._draw.ellipse([value * self._scale for value in xy], fill=fill,
+                           outline=outline,
+                           width=max(1, int(round(width * self._scale))))
+
+
 def _draw_shapes(size, ss, shape_fns):
     """Draw wrapped shapes on a transparent supersampled canvas."""
     canvas = Image.new("RGBA", (size * ss, size * ss), (0, 0, 0, 0))
-    d = ImageDraw.Draw(canvas)
-    step = size * ss
+    d = _ScaledDraw(ImageDraw.Draw(canvas), ss)
+    step = size
     for fn in shape_fns:
         for ox in (-step, 0, step):
             for oy in (-step, 0, step):
@@ -1158,44 +1189,189 @@ def make_terrain_grass(w=512, h=512):
     return _overlay(base, shapes)
 
 
-def make_terrain_dirt(w=512, h=512):
-    m1 = fbm(w, h, 6, 6, SEED + 311, octaves=5)
-    m2 = fbm(w, h, 24, 24, SEED + 312, octaves=4)
-    fine = fbm(w, h, 120, 120, SEED + 313, octaves=3)
-    packed = smoothstep(0.55, 0.8, fbm(w, h, 3, 3, SEED + 314, octaves=3))
+def make_terrain_dirt(w=1024, h=1024):
+    """Packed trail dirt: embedded gravel, hairline cracks, twigs and weather.
 
-    base = mix(rgb(128, 103, 76), rgb(154, 128, 96), stretch(m1, 3, 97))
-    base = mix(base, rgb(104, 84, 62), packed * 0.45)
-    base = mix(base, rgb(160, 140, 108), m2 * 0.22)
-    base *= (0.90 + 0.18 * fine)[..., None]
+    The old surface was one stretched fBm mottle with a sprinkle of pale
+    pixels, so at the 5-6 m tile the ground read as flat paint. This authors a
+    real soil instead: two cellular networks cut the ground into clods and
+    peds, an fBm micro-relief is embossed into the albedo, and seeded stones
+    carry their own contact shadow and top light. At 1024 px a texel is 5 mm
+    over the 5 m trail tile, so a pebble is legible underfoot instead of a
+    smudge. All fields wrap and every stone is drawn through the same wrapped
+    overlay, so the tile seam stays structural.
+    """
+    # structure at three scales: broad ground tone, 40 cm and 5 cm patches,
+    # 1.7 cm grain and sub-centimetre dust. A continuous Voronoi joint net at
+    # two scales read as cracked mud; the trail keeps only its organic cracks
+    # (drawn below), so the surface stays trodden soil rather than a mud flat.
+    broad = fbm(w, h, 4, 4, SEED + 311, octaves=5)
+    mid = fbm(w, h, 13, 13, SEED + 312, octaves=4)
+    grit = fbm(w, h, 96, 96, SEED + 313, octaves=4)
+    fine = fbm(w, h, 300, 300, SEED + 314, octaves=3)
+    micro = fbm(w, h, 700, 700, SEED + 315, octaves=2)
+    damp = smoothstep(0.54, 0.82, fbm(w, h, 3, 3, SEED + 316, octaves=4))
+    dry = smoothstep(0.56, 0.84, fbm(w, h, 7, 7, SEED + 317, octaves=3))
+    packed = smoothstep(0.50, 0.74, fbm(w, h, 5, 5, SEED + 318, octaves=3))
 
-    rng = np.random.default_rng(SEED + 315)
-    shapes = []
-    for i in range(190):
+    _ped1, ped2, _ped_ids = cellular(w, h, 72, 72, SEED + 321)
+    peds = (1.0 - smoothstep(0.4, 1.9, ped2 - _ped1)) * 0.18
+
+    height = (0.34 * broad + 0.20 * mid + 0.18 * grit
+              + 0.13 * fine + 0.06 * micro + 0.05 * (1.0 - peds))
+    height = stretch(height, 1, 99)
+
+    soil = mix(rgb(54, 46, 37), rgb(98, 82, 63),
+               smoothstep(0.14, 0.55, height))
+    soil = mix(soil, rgb(140, 119, 93), smoothstep(0.55, 0.86, height) * 0.85)
+    soil = mix(soil, rgb(164, 143, 115), packed * 0.30)
+    # Moisture pulls the tone grey and dark; old dry ground goes ochre, never
+    # the other way round, so the patches read as weather rather than noise.
+    soil = mix(soil, rgb(78, 70, 60), damp * 0.26)
+    soil = mix(soil, rgb(150, 126, 92), dry * 0.20)
+    soil *= (1.0 - 0.03 * peds)[..., None]
+    soil *= (0.90 + 0.20 * grit)[..., None]
+    soil *= (0.94 + 0.12 * micro)[..., None]
+
+    # Emboss the authored height into the albedo: lit crowns, dark pits. This
+    # is what makes 5 mm grain survive the 8-bit quantisation and the mip
+    # chain instead of averaging back into a flat tan.
+    blurred = np.asarray(
+        to_image(np.clip(height, 0.0, 1.0), "L").filter(ImageFilter.GaussianBlur(1.2)),
+        np.float32) / 255.0
+    shade = np.clip(1.0 + (height - blurred) * 3.0, 0.72, 1.22)
+    soil *= shade[..., None]
+
+    rng = np.random.default_rng(SEED + 318)
+    shapes: list = []
+
+    # Hairline cracks first: stones sit over them, never the other way round.
+    for _ in range(30):
         bx, by = rng.uniform(0, w), rng.uniform(0, h)
-        rx, ry = rng.uniform(1.2, 6.0), rng.uniform(1.0, 4.5)
-        ang = rng.uniform(0, math.pi)
-        g = int(rng.uniform(120, 172))
-        col = _vary((g, g - int(rng.uniform(2, 12)), g - int(rng.uniform(8, 22))), rng, 8)
-        pts = _ellipse_pts(bx, by, rx, ry, ang, 9)
-        def stone(d, ox, oy, pts=pts, col=col):
-            d.polygon([(x + ox, y + oy) for x, y in pts], fill=(*col, 235))
-            d.line([(x + ox, y + oy) for x, y in pts] + [(pts[0][0] + ox, pts[0][1] + oy)],
-                   fill=(*[int(c * 0.55) for c in col], 200), width=1)
-        shapes.append(stone)
-    for i in range(26):
-        bx, by = rng.uniform(0, w), rng.uniform(0, h)
+        angle = rng.uniform(0, math.tau)
         pts = [(bx, by)]
-        a = rng.uniform(0, 6.28)
-        for k in range(rng.integers(3, 7)):
-            a += rng.uniform(-0.6, 0.6)
-            bx += math.cos(a) * rng.uniform(4, 13)
-            by += math.sin(a) * rng.uniform(4, 13)
+        for _step in range(rng.integers(3, 8)):
+            angle += rng.uniform(-0.55, 0.55)
+            bx += math.cos(angle) * rng.uniform(6, 20)
+            by += math.sin(angle) * rng.uniform(6, 20)
             pts.append((bx, by))
-        def crack(d, ox, oy, pts=pts):
-            d.line([(x + ox, y + oy) for x, y in pts], fill=(84, 68, 50, 150), width=1)
+        width = 2 if rng.random() < 0.65 else 3
+
+        def crack(d, ox, oy, pts=pts, width=width):
+            d.line([(x + ox, y + oy) for x, y in pts],
+                   fill=(38, 29, 21, 190), width=width)
+
         shapes.append(crack)
-    return _overlay(base, shapes)
+
+    # Stones: occasional cobbles, a scatter of trail gravel, then the fines.
+    # Most of them cluster the way real trail gravel does, instead of an even
+    # confetti sprinkle; the wrapped overlay lets a cluster cross the seam.
+    clusters = [(rng.uniform(0, w), rng.uniform(0, h), rng.uniform(34.0, 105.0))
+                for _ in range(16)]
+
+    def scatter():
+        if rng.random() < 0.62:
+            cx, cy, reach = clusters[rng.integers(0, len(clusters))]
+            angle = rng.uniform(0.0, math.tau)
+            distance = reach * math.sqrt(rng.random())
+            return cx + math.cos(angle) * distance, cy + math.sin(angle) * distance
+        return rng.uniform(0, w), rng.uniform(0, h)
+
+    specs = []
+    for _ in range(42):
+        bx, by = scatter()
+        specs.append((bx, by, rng.uniform(8.0, 16.0), rng.uniform(6.0, 12.0)))
+    for _ in range(520):
+        bx, by = scatter()
+        specs.append((bx, by, rng.uniform(2.4, 7.5), rng.uniform(2.0, 6.0)))
+    palette = [(134, 128, 116), (108, 103, 94), (92, 88, 82),
+               (148, 132, 108), (118, 106, 90), (84, 82, 78)]
+    for bx, by, rx, ry in specs:
+        ang = rng.uniform(0, math.pi)
+        sides = rng.integers(7, 12)
+        pts = []
+        for k in range(sides):
+            a = math.tau * k / sides
+            wobble = rng.uniform(0.80, 1.18)
+            pts.append((bx + math.cos(a + ang) * rx * wobble,
+                        by + math.sin(a + ang) * ry * wobble))
+        # Stone tone varies in luminance, not per-channel hue: independent
+        # channel noise made neutral gravel read lavender and green.
+        base_col = palette[rng.integers(0, len(palette))]
+        tone = rng.uniform(-16.0, 16.0)
+        warm = rng.uniform(-5.0, 5.0)
+        base_col = tuple(int(np.clip(c + tone + (warm if channel == 0 else -warm * 0.5),
+                                     0, 255)) for channel, c in enumerate(base_col))
+        if rng.random() < 0.045:
+            quartz = rng.uniform(-10.0, 10.0)
+            base_col = (int(168 + quartz), int(160 + quartz), int(144 + quartz))
+        lift = rng.uniform(1.2, 2.8)
+        shadow = (26, 20, 15, 130)
+        dark = tuple(int(c * 0.42) for c in base_col)
+        pale = tuple(min(255, int(c * 1.35 + 16)) for c in base_col)
+        top_pts = [p for p in pts if p[1] < by]
+        low_pts = [p for p in pts if p[1] >= by]
+        flecks = []
+        for _ in range(2):
+            fa = rng.uniform(0.0, math.tau)
+            fr = rng.uniform(0.0, 0.5)
+            flecks.append((bx + math.cos(fa) * rx * fr,
+                           by + math.sin(fa) * ry * fr,
+                           rng.uniform(0.8, 1.8)))
+
+        def stone(d, ox, oy, pts=pts, top_pts=top_pts, low_pts=low_pts,
+                  base_col=base_col, dark=dark, pale=pale, shadow=shadow,
+                  lift=lift, flecks=flecks):
+            d.polygon([(x + ox, y + oy + lift) for x, y in pts], fill=shadow)
+            d.polygon([(x + ox, y + oy) for x, y in pts], fill=(*base_col, 250))
+            for fx, fy, fr in flecks:
+                d.ellipse([fx + ox - fr, fy + oy - fr,
+                           fx + ox + fr, fy + oy + fr], fill=(*dark, 70))
+            if len(top_pts) >= 2:
+                d.line([(x + ox, y + oy) for x, y in top_pts],
+                       fill=(*pale, 110), width=2)
+            if len(low_pts) >= 2:
+                d.line([(x + ox, y + oy) for x, y in low_pts],
+                       fill=(*dark, 180), width=2)
+
+        shapes.append(stone)
+
+    for _ in range(2000):
+        bx, by = scatter()
+        radius = rng.uniform(0.5, 1.7)
+        if rng.random() < 0.10:
+            col = _vary((162, 154, 138), rng, 10)
+        else:
+            col = _vary(palette[rng.integers(0, len(palette))], rng, 10)
+
+        def speck(d, ox, oy, bx=bx, by=by, radius=radius, col=col):
+            d.ellipse([bx + ox - radius, by + oy - radius,
+                       bx + ox + radius, by + oy + radius], fill=(*col, 215))
+
+        shapes.append(speck)
+
+    # Thin worn roots and twig litter, the one thing a path through this wood
+    # keeps on top of the dirt.
+    for _ in range(16):
+        bx, by = rng.uniform(0, w), rng.uniform(0, h)
+        angle = rng.uniform(0, math.tau)
+        length = rng.uniform(14, 38)
+        pts = [(bx, by)]
+        for _step in range(3):
+            angle += rng.uniform(-0.4, 0.4)
+            bx += math.cos(angle) * length / 3.0
+            by += math.sin(angle) * length / 3.0
+            pts.append((bx, by))
+        col = _vary((74, 58, 41), rng, 8)
+        width = 1 if rng.random() < 0.6 else 2
+
+        def twig(d, ox, oy, pts=pts, col=col, width=width):
+            d.line([(x + ox, y + oy) for x, y in pts], fill=(*col, 185),
+                   width=width)
+
+        shapes.append(twig)
+
+    return _overlay(soil, shapes, ss=2)
 
 
 def make_terrain_rock(w=512, h=512):
@@ -1783,9 +1959,10 @@ ASSETS = [
     dict(id="terrain_grass", file="terrain_grass.png", size=(512, 512),
          channels=3, tiling="both", n_version=None, kind="terrain",
          description="Fine meadow grass and clover detail for the terrain shader."),
-    dict(id="terrain_dirt", file="terrain_dirt.png", size=(512, 512), channels=3,
+    dict(id="terrain_dirt", file="terrain_dirt.png", size=(1024, 1024), channels=3,
          tiling="both", n_version=None, kind="terrain",
-         description="Packed trail dirt with small stones and cracks."),
+         description="Packed trail dirt: embedded gravel, hairline cracks, twigs "
+                     "and dry/damp patches."),
     dict(id="terrain_rock", file="terrain_rock.png", size=(512, 512), channels=3,
          tiling="both", n_version=None, kind="terrain",
          description="Scree and fractured rock face with moss patches."),

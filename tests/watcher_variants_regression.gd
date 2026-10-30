@@ -29,6 +29,8 @@ const Catalog = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const Scaler = preload("res://scripts/warband/damage_scaler.gd")
+const BloodSurface = preload("res://scripts/blood_surface.gd")
+const BloodField = preload("res://scripts/blood_field.gd")
 
 const SPECIES := ["hollow_warden", "ossuary_stalker", "gallowsroot"]
 const PER_SPECIES := 4
@@ -101,6 +103,7 @@ func run() -> void:
 	check_assets()
 	check_table()
 	check_bodies()
+	await check_blood()
 	check_pairs()
 	await check_weapon()
 	check_arm_round_trip()
@@ -336,6 +339,44 @@ func check_bodies() -> void:
 			"%s's index is inside its own table (%d)" % [species, slot])
 		check(str((rows[slot] as Dictionary).get("species", "")) == species,
 			"and lands on a %s" % species)
+
+
+## Body blood must ride the skeleton the skin is actually rendered on. The
+## fitted watcher skins keep their source armature in the scene, and the blood
+## field used to measure that dead rest pose: the stains stayed behind in the
+## air while the body walked and swung. One body per species is measured, and
+## the stain's parent chain is the check, because that is what makes it move.
+func check_blood() -> void:
+	var seen := {}
+	for raw in _samples:
+		var watcher = raw
+		var species := str(watcher.species_id())
+		if seen.has(species):
+			continue
+		seen[species] = true
+		var vis = watcher._visual
+		var rig = vis.rig
+		var skin_root: Node3D = vis.blood_anchor()
+		var body: Dictionary = BloodSurface.body_for(skin_root)
+		check(body.get("skeleton") == rig.skeleton,
+			"%s's blood measures the live skeleton, not the skin's rest armature" % species)
+		var field = BloodField.new()
+		field.set_process(false)
+		root.add_child(field)
+		field.wound(skin_root, watcher.get_aim_position(), 20.0, false, false, 1.0)
+		await process_frame
+		var soak: MeshInstance3D = null
+		for child in watcher.find_children("*", "MeshInstance3D", true, false):
+			if child.has_meta("blood_stain"):
+				soak = child as MeshInstance3D
+				break
+		check(soak != null, "%s's wound leaves body blood" % species)
+		if soak != null:
+			check(rig.skeleton.is_ancestor_of(soak),
+				"%s's wound rides the animated skeleton" % species)
+		field.clear_all()
+		field.queue_free()
+		await process_frame
 
 
 func check_pairs() -> void:

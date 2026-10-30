@@ -3,7 +3,7 @@
  "seed": 20261023,
  "color_space": "sRGB albedo; normal maps OpenGL +Y (green up)",
  "file_count": 39,
- "total_bytes": 10449352,
+ "total_bytes": 12376242,
  "textures": [
   {
    "id": "sky_frontier",
@@ -178,14 +178,14 @@
    "id": "terrain_dirt",
    "file": "terrain_dirt.png",
    "size": [
-    512,
-    512
+    1024,
+    1024
    ],
    "channels": 3,
    "tiling": "both",
    "n_version": null,
    "kind": "terrain",
-   "description": "Packed trail dirt with small stones and cracks."
+   "description": "Packed trail dirt: embedded gravel, hairline cracks, twigs and dry/damp patches."
   },
   {
    "id": "terrain_rock",

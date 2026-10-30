@@ -696,6 +696,20 @@ static func _bind_map(skin: Skin, skeleton: Skeleton3D) -> PackedInt32Array:
 static func _find_skeleton(rig: Node3D) -> Skeleton3D:
 	if rig is Skeleton3D:
 		return rig as Skeleton3D
+	# The visible skin is the authority. A mounted skin can carry its own
+	# imported armature that no longer animates anything: the watchers' fitted
+	# skins keep their source Skeleton3D in the scene and repoint the mesh at
+	# the ranger's live skeleton. Measuring the first armature found put body
+	# blood in that dead rest pose, so the stains hung beside the moving body.
+	for node in _mesh_instances(rig):
+		var mesh_node := node as MeshInstance3D
+		if mesh_node == null or mesh_node.skin == null:
+			continue
+		if not mesh_node.is_visible_in_tree() or mesh_node.skeleton.is_empty():
+			continue
+		var bound := mesh_node.get_node_or_null(mesh_node.skeleton) as Skeleton3D
+		if bound != null:
+			return bound
 	var found := rig.find_children("*", "Skeleton3D", true, false)
 	return found[0] as Skeleton3D if not found.is_empty() else null
 
