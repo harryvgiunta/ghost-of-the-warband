@@ -18,7 +18,7 @@ armour, the Briar wolf, the five devils, the Cinder devil, the Unholy Forest
 mobs, the Makeshift and naked sets and the warband looks — are distributed under
 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
 (CC BY-NC-SA 4.0), section 3 of the LICENSE.md at the repository root. Copies of
-these files published up to commit dbdecf8 were distributed under CC0 1.0 and
+these files published up to commit a6a4d55 were distributed under CC0 1.0 and
 remain so in those copies; that dedication cannot be revoked. Every later change
 is licensed under LICENSE.md.
 

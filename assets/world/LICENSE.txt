@@ -22,7 +22,7 @@ https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 Credit the project and say what you changed; do not sell them; share
 modifications under the same terms. Copies of these files published up to commit
-dbdecf8 were dedicated to the public domain under CC0 1.0
+a6a4d55 were dedicated to the public domain under CC0 1.0
 (https://creativecommons.org/publicdomain/zero/1.0/) and remain so in those
 copies; that dedication cannot be revoked, and every later change is licensed
 under LICENSE.md. This file records provenance either way.

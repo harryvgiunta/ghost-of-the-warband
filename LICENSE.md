@@ -266,7 +266,7 @@ dedication cannot be revoked for copies already published.**
 So, precisely:
 
 - Every copy of this repository published **up to and including commit
-  `dbdecf8`** stays public domain for the files as they existed in that copy.
+  `a6a4d55`** stays public domain for the files as they existed in that copy.
   Anyone holding such a copy may still use those exact files commercially.
 - From this commit forward, §2 and §3 govern: every change to those files, and
   every file added after them, is code or asset under this file. The CC0

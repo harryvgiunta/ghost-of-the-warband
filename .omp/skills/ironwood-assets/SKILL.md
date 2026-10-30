@@ -40,7 +40,7 @@ Read [the project skill](../ironwood-archer/SKILL.md) for gameplay and toolchain
 
 Re-read affected code before acting: these facts can change. Search unknown behavior with `find`; locate known names with `grep`/`glob`, then read bounded sections. Inventory existing scenes, materials, textures, source metadata, and actual callers before downloading or building anything.
 
-**Outbound license (do not re-dedicate).** The upstream sources recorded here — Quaternius, Gres, and the CC0 Freesound takes — stay CC0. Everything built from them in `assets/` is **CC BY-NC-SA 4.0**, section 3 of `LICENSE.md`: never write a new CC0 dedication for a shipped asset, never assume a free download may be relicensed permissively, and keep the required CC BY credits in `assets/audio/LICENSE.txt` intact. Copies published up to commit `dbdecf8` were CC0 and stay CC0 in those copies; that does not license the current files.
+**Outbound license (do not re-dedicate).** The upstream sources recorded here — Quaternius, Gres, and the CC0 Freesound takes — stay CC0. Everything built from them in `assets/` is **CC BY-NC-SA 4.0**, section 3 of `LICENSE.md`: never write a new CC0 dedication for a shipped asset, never assume a free download may be relicensed permissively, and keep the required CC BY credits in `assets/audio/LICENSE.txt` intact. Copies published up to commit `a6a4d55` were CC0 and stay CC0 in those copies; that does not license the current files.
 
 ## Bounded task procedure
 
