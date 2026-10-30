@@ -409,6 +409,79 @@ the rig applying them, hair under a helmet, head zones scaled);
 `playtest/warband_lookbook.gd` and `playtest/warband_band.gd` render the band for
 the eye.
 
+### Every drop is his own
+
+Drops are paced, the stash is shared and eight men wear the same five pieces, so
+a look that stops at the face leaves a band in uniform. The armour is the man's
+too: `WarbandFlair.profile_for(id)` (`scripts/warband/warband_flair.gd`, the same
+pure function of the id, memoised like the look) decides what he does to whatever
+he is wearing.
+
+| Where it comes from | What it changes |
+| --- | --- |
+| `FIELDS` (nine medieval dyes, each with its own charges) | the **field** his cloth is dyed and the **charge** the design is drawn in. A charge is always a tincture that reads on that field, so a design is never invisible |
+| `DESIGNS`, `MOTIFS`, `HEMS` | fifteen heraldic designs (partitions and ordinaries: per pale, quarterly, chevron, saltire, chequy, barry, lozengy...), eight devices (skull, crossbones, sun, crescent, star, eye, antlers, rune) and six borders (band, double, zigzag, beads, stitch, crenel) |
+| `THREADS`, `FITTINGS`, `LEATHERS`, `BONES`, `FEATHERS`, `FINISHES` | the embroidery thread (and whether it is gilt), the metal of every buckle and rivet, the stain of every strap and boot, how his bone is treated, the feathers he hangs, and what he has done to his steel: bright, blackened, russet or blued |
+| `trophies` | `[{anchor, kind}]`: skulls, beast skulls, bird skulls, jaws, finger bones, vertebrae, teeth, claws, feathers, rags in his livery, shoulder spikes, ribs, a long bone, bone beads, ankle rattles, a horsehair plume and a pair of horns, hung at the belt, the hips, a temple, the crown, a shoulder, the neck, the wrists, a thigh and the ankles |
+
+The livery **steps** with the id and the rest is hashed, so a deployment of eight
+wears eight fields, eight designs and eight devices, and a tenth man wraps the
+palette rather than running out.
+
+`ArmorFlair` (`scripts/armor_flair.gd`) puts it on the body. One body's kit, one
+pass of `dress()` whenever the kit changes:
+
+- **Rest space on the vertices.** Each worn armour mesh is swapped, once per
+  session and shared by every body, for a copy that carries each vertex's
+  skeleton rest-space position in `CUSTOM0`. The Compatibility renderer skips the
+  shader stage for unskinned meshes, and a skinned material would otherwise see
+  *posed* positions, so a stripe drawn in view space would slide across the
+  chest through a swing, a roll and a ragdoll. Rest space does not move; the
+  design stays where it was sewn.
+- **One material per worn surface**, a `ShaderMaterial` of
+  `scripts/world/shaders/armor_flair.gdshader` numbered by what the surface *is*
+  (`ArmorFlair.ROLES`): cloth, lining, the ranger outfit's atlas, leather, hide,
+  plate, mail, steel edge, fittings and bone. The authored `StandardMaterial3D`
+  is mirrored exactly (albedo map and colour, roughness and metallic maps on
+  their own channels, the normal map and its depth) and the flair is laid over
+  it, so nothing the artist authored is lost. Surfaces outside `ROLES` - skin,
+  the naked shirt and shorts - are left to the look.
+- **The weave without the colour.** Every role divides the authored map by the
+  mean luminance of the texels it re-colours (`material_stats`, cached per
+  material), so a dyed coat keeps its weave, its grain and its grime. The ranger
+  outfit is one atlas split by hue: its green cloth takes the livery, its brown
+  takes the stain, its bare metal keeps its finish, and its skin patch stays
+  skin.
+- **The borders ride measurements, not guesses.** `piece_edges` measures each
+  set's piece once (the hem of a coat, the end of a sleeve, the cuff of a glove,
+  the top of a boot) and the shader sews the border that far in from the edge -
+  so a plate tasset gets one too, and a piece with no edge of a kind gets none.
+- **Steel and hide get the treatment their material allows**: gilt or latten
+  trim along the open edges of plate and mail, a livery **surcoat** drawn over
+  mail or plate plate on the trunk (with its own thread border) for the men who
+  chose one, the device **painted** on bright plate and **daubed** on the salvage
+  set's hide, worn through where it was rubbed.
+- **Trophies** hang from a `BoneAttachment3D` per anchor, placed on the measured
+  outer surface of whatever is drawn there (never at the anchor) and shown only
+  while that slot wears a real piece: a bare body carries nothing. A ring trophy
+  (necklace, bracelet, rattles) ties round the **measured cross-section** of the
+  neck, wrist or ankle - an oval, because a neck is wider across than deep - and
+  the geometry is one merged mesh per trophy, no shadow, no collider.
+
+Cost: the first body pays ~35 ms (mesh copies and the veil measurements are then
+shared), later bodies ~12 ms, a full five-piece dress of a set ~1-6 ms and a
+single piece swap ~0.1 ms. Everything is presentation - nothing about a flair
+reaches the save, the wire or any stat.
+
+`tests/armor_flair_regression.gd` holds it (475 checks: determinism and
+distinctness, every authored armour material given a role, the rest space equal
+to the mesh's own vertices and shared between bodies, per-body materials, the
+measured edges, the trophies shown only with a piece and measured onto the
+surface, the oval necklace, and a body with no look left untouched);
+`playtest/armor_flair_lookbook.gd` renders the band in one kit per set, and
+`--plain` renders the same men as the warband dressed them before.
+
+
 Short version of the latest tuning (all in the code, all covered by
 `tests/cage_escape_regression.gd`):
 

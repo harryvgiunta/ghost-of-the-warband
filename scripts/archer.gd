@@ -22,6 +22,7 @@ const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 const EnergyShield = preload("res://scripts/energy_shield.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
+const ArmorFlair = preload("res://scripts/armor_flair.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 ## The warband's authored looks (`WarbandLooks`): eight faces and the hair and
 ## beards grown off the same head. They live here because the rig is what swaps
@@ -297,6 +298,9 @@ var appearance: Dictionary = {}
 var _looks_height := 1.0
 var _looks_face: Node3D
 var _looks_hair: Node3D
+## What this body does to the armour it wears (`ArmorFlair`), when its look
+## carries a flair. Null for every body without one.
+var _flair: ArmorFlair
 var _player: AnimationPlayer
 var _bows: Array[Bow] = []
 var _swords: Array[Node3D] = []
@@ -755,6 +759,9 @@ func _attach_looks() -> void:
 	if _looks_hair != null:
 		# Hair belongs under a helmet, not through it.
 		_looks_hair.visible = not _slot_covered("head")
+	var flair: Dictionary = appearance.get("flair", {})
+	if not flair.is_empty():
+		_flair = ArmorFlair.new(skeleton, _armor_meshes, flair)
 
 
 ## One authored look file hung on the body, every skin repointed at the live
@@ -1395,6 +1402,9 @@ func _apply_armor_visibility() -> void:
 	# A cut grown off the skull belongs under a helmet, not through one.
 	if _looks_hair != null:
 		_looks_hair.visible = not _slot_covered("head")
+	# The body's livery and trophies follow the kit it now wears.
+	if _flair != null:
+		_flair.dress(armor_pieces)
 
 ## True when the slot wears a set that draws its own piece there - the piece that
 ## covers the skin the naked layer would otherwise leave bare.

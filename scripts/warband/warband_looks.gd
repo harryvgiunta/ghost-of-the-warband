@@ -16,9 +16,13 @@ extends RefCounted
 ##                  (the shaved head) resolves to a name the rig simply won't find
 ##   `skin`, `shirt`, `shorts`, `hair_tone`  albedo tints as `#rrggbb` strings
 ##   `eye`          index into the authored iris tones
+##   `flair`        what he does to the armour he wears (`WarbandFlair.profile_for`)
 ##
 ## The tints are sRGB hex; the rig converts them to linear once, because
 ## `albedo_color` multiplies in linear space.
+
+const LookHash = preload("res://scripts/warband/look_hash.gd")
+const WarbandFlair = preload("res://scripts/warband/warband_flair.gd")
 
 const LOOKS_PATH := "res://assets/characters/warband/ironwood_warband_looks.json"
 ## Height as a fraction of the authored 1.87 m rig: 1.61 m to 2.13 m of man. That
@@ -64,7 +68,7 @@ static func profile_for(merc_id: int) -> Dictionary:
 	var beards: Array = table.get("beards", [])
 	var eye_tones: Array = table.get("eye_tones", [])
 	var tones: Dictionary = table.get("tones", {})
-	var height := lerpf(HEIGHT_MIN, HEIGHT_MAX, fraction(id, STREAM_HEIGHT))
+	var height := lerpf(HEIGHT_MIN, HEIGHT_MAX, LookHash.fraction(id, STREAM_HEIGHT))
 	var profile := {
 		"merc_id": id,
 		"height": snappedf(height, HEIGHT_STEP),
@@ -73,8 +77,8 @@ static func profile_for(merc_id: int) -> Dictionary:
 		# is free to collide (two men may wear the same colour).
 		"face": (id - 1) % maxi(faces.size(), 1),
 		"hair": (id - 1 + 2) % maxi(hairs.size(), 1),
-		"beard": pick(id, STREAM_BEARD, beards.size()),
-		"eye": pick(id, STREAM_EYE, eye_tones.size()),
+		"beard": LookHash.pick(id, STREAM_BEARD, beards.size()),
+		"eye": LookHash.pick(id, STREAM_EYE, eye_tones.size()),
 		# The colours step too, at four different offsets: a full deployment is
 		# therefore eight different skins in eight different shirts over eight
 		# different pairs of shorts, which is the picture the band is for. Past
@@ -83,6 +87,7 @@ static func profile_for(merc_id: int) -> Dictionary:
 		"shirt": cycled(tones.get("shirt", []), id, 3),
 		"shorts": cycled(tones.get("shorts", []), id, 5),
 		"hair_tone": cycled(tones.get("hair", []), id, 2),
+		"flair": WarbandFlair.profile_for(id),
 	}
 	profile["face_name"] = "Face%d" % (int(profile["face"]) + 1)
 	profile["hair_name"] = _name_of(hairs, int(profile["hair"]), "Hair_")
@@ -109,31 +114,3 @@ static func cycled(palette: Array, merc_id: int, offset: int) -> String:
 	if palette.is_empty():
 		return "#ffffff"
 	return str(palette[(merc_id - 1 + offset) % palette.size()])
-
-
-static func pick(merc_id: int, stream: int, count: int) -> int:
-	if count <= 0:
-		return 0
-	return _stream(merc_id, stream) % count
-
-
-## A deterministic fraction in `0..1` for one (id, stream) pair.
-static func fraction(merc_id: int, stream: int) -> float:
-	return float(_stream(merc_id, stream) & 0xFFFFFF) / float(0x1000000)
-
-
-## A 32-bit integer hash. Written out instead of using `hash()` because this
-## number decides what a body wears on every peer and in every save: it has to
-## come out the same on both machines, forever, and `hash()` is free to change.
-static func _stream(merc_id: int, stream: int) -> int:
-	var value: int = merc_id * 2246822519 + stream * 3266489917 + 0x9E3779B1
-	value = _scramble(value)
-	return value & 0xFFFFFFFF
-
-
-static func _scramble(seed: int) -> int:
-	var x: int = seed & 0xFFFFFFFF
-	x = ((x ^ (x >> 16)) * 0x7FEB352D) & 0xFFFFFFFF
-	x = ((x ^ (x >> 15)) * 0x846CA68B) & 0xFFFFFFFF
-	x = (x ^ (x >> 16)) & 0xFFFFFFFF
-	return x

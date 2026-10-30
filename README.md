@@ -39,6 +39,19 @@ difference - and the warband is the thing that survives a battle.
   G** for five seconds (30 s bleed clock; a blow on the reviver breaks the
   channel). No blow ends a mercenary outright in the campaign - a lethal hit puts
   the body down, and any blow on a downed body finishes it.
+- **Every drop is his own:** the band dresses out of one stash, so two men often
+  wear the same five pieces - and still do not dress alike. Each mercenary dyes
+  his cloth in his own livery (one of nine medieval dyes with a design in a
+  charge that reads on it: per pale, quarterly, chevron, saltire, chequy, barry,
+  lozengy...), wears his own device on the breast and the back (skull,
+  crossbones, sun, crescent, star, eye, antlers, rune), sews his own border
+  along every hem and cuff, stains his leather, blackens, blues or polishes his
+  steel, re-casts his buckles - and hangs his own trophies on himself (a skull or
+  a jaw at the belt, teeth at the neck, a plume or a pair of horns on the helm,
+  feathers at a temple, beads at a wrist, rattles at an ankle). Nothing about it
+  is saved, replicated or rolled at spawn: it is a pure function of the man's id,
+  so every peer and every reload dresses him the same. A bare body carries
+  nothing.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, equipped
   pieces tagged with the mercenary wearing them), the **Sacrificial Altar**
   (unbind spare magic items into Cruor, distil 5:1 up five tiers, brand weapons

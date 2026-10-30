@@ -155,6 +155,27 @@ repo already ships. Nothing gameplay-facing moved: stats, capsule, reach and
 speeds are still the warband's one contract. See `docs/warband.md`
 ("The band looks like a band") and `tests/warband_appearance_regression.gd`.
 
+**The armour is his too.** The same look carries a `flair`
+(`WarbandFlair.profile_for`, `scripts/warband/warband_flair.gd`): the dye and the
+design his cloth is cut in, the device sewn or painted on his breast and back, the
+border on every open edge, the stain of his leather, what he has done to his steel
+and the trophies he hangs on himself. `ArmorFlair` (`scripts/armor_flair.gd`)
+dresses each worn piece with `scripts/world/shaders/armor_flair.gdshader`, reading
+the vertex's **skeleton rest position** out of `CUSTOM0` - a stripe in view space
+slides off the chest through a swing. The rules that will bite again: the
+Compatibility renderer skips the shader stage for unskinned meshes, so the armour
+meshes keep their skins; every authored `StandardMaterial3D` is mirrored field by
+field (its maps and their channels, its normal depth) because the shader draws the
+map itself; the veil (the mean luminance each role divides its map by) is measured
+in the stored texel values, because a uniform, a material colour and a texture
+arrive in the shader in the same space (a 0.5 grey comes out 0.5 through all
+three); the naked set and the outfit's skin patch are the *look's* surfaces, not
+the armour's, and stay out of `ArmorFlair.ROLES`; and a trophy is placed on the
+**measured** outer surface of what is drawn at its anchor (a ring on the measured
+cross-section, which is an oval), shown only while its slot wears a real piece.
+`tests/armor_flair_regression.gd` holds it; `playtest/armor_flair_lookbook.gd`
+renders one kit per set, `--plain` for the comparison.
+
 **Since the loop above was written**, four surfaces were added on the same world:
 
 - **The way out has teeth.** Seven base briar wolves (`enemy.gd` **kind 0**, no new
@@ -502,6 +523,7 @@ Integration seams deliberately placed in the base game:
 | `branded_world_regression` | 48 | the sigil tile: tier line, cost, cooldown vs READY, rebind, a real `R` hit |
 | `warband_art_regression` | 192 | camp/town dressing counts, materials, nothing solid inside the play space |
 | `warband_appearance_regression` | 206 | the look table loads and starts each palette at the measured base, a look is a pure function of the id (order- and cache-independent), eight deployed bodies differ in face, cut, skin, shirt and shorts, every named piece exists in the assets, and the rig, an actor and an undressed body all apply or ignore it correctly (hair under a helmet, head zones scaled) |
+| `armor_flair_regression` | 475 | the armour flair: the tables and the thread that reads on them, a flair that is a pure function of the id, eight bodies with eight fields and eight devices, every authored armour material given a role, the rest space on the vertices equal to the mesh's own and shared by every body while the materials are each body's own, the measured piece edges, the surcoat following the flair, the veils measured, every trophy shown only with a real piece and placed on the measured surface (an oval necklace, a hip outside the waist), every trophy kind building, and a body with no look left untouched |
 | `warband_lobby_regression` | 56 | two peers through the title lobby, socket survives the hand-off, refusal verbatim |
 | `run_persistence_regression` | 196 | battle ledger, history + lifetime totals, reload pays nothing twice, a v1 save still loads |
 | `checkpoint_regression` | 72 | the v4 bookmark round trip, garbage refused, v3 saves still load, a wipe's restore (downed wake, dead stay dead, purse untouched), trail and town resumes in the real world, the retry door, the title's resume door |
