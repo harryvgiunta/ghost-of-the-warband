@@ -1,15 +1,14 @@
 extends Node
 ## Autoload `GameFlow`: the door between the warband's scenes.
 ##
-## The campaign is a chain of scenes that each know one next place: the cages
-## hand the squad to the town, the town's gate launches an expedition, the arena
-## hands the survivors back. No scene loads another directly - each emits
-## `scene_requested(path)` and this node is the only thing that changes scene, so
-## a test can drive a whole scene without being teleported out of it.
+## The campaign is one world: the camp, the trail and the town all stand in one
+## scene, and walking is the only way between them. This node is the only thing
+## that changes scene - the title's doors open the world, a checkpoint reload
+## reopens it, and a guest whose session ended goes back to the title - so a test
+## can drive a whole scene without being teleported out of it.
 ##
-## `active` stays false until the flow is entered from the title menu or the
-## campaign button, which is what keeps every scene regression able to emit its
-## door signal without the tree moving underneath it.
+## `active` stays false until the flow is entered from the title menu, which is
+## what keeps a regression harness's world from reloading a checkpoint under it.
 ##
 ## The title's four doors land here: NEW CAMPAIGN (`start_campaign`), RESUME
 ## CAMPAIGN (`enter_warband`), HOST GAME (`host_campaign`, a new game or the saved
@@ -18,12 +17,6 @@ extends Node
 ## The campaign is one world: the camp, the trail through the wood and the town
 ## all stand in this one scene, and walking is the only way between them.
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
-const ARENA_SCENE := "res://admin_arena.tscn"
-## The arena was written against the old town scene's path and still asks for it.
-## There is no separate town scene in the campaign any more, so that path means
-## "the world, at the town end" - the arena hands the survivors back into the
-## square they marched out of.
-const ARENA_RETURN := "res://scenes/town_hub.tscn"
 ## Where a guest goes when its session ends under it: the host left, or never
 ## answered.
 const TITLE_SCENE := "res://title.tscn"
@@ -55,7 +48,7 @@ signal notice_posted(text: String)
 var active := false
 var last_scene := ""
 ## Where the world puts the warband down when it opens: `"camp"` for a fresh run
-## (the cages), `"town"` for a resumed save or the field's return, `"checkpoint"`
+## (the cages), `"town"` for a resumed save without a bookmark, `"checkpoint"`
 ## for the autosave's bookmark, and `"guest"` for a co-op guest fielding the
 ## host's bodies. The world reads it once, in its own `_ready`.
 var world_start := "camp"
@@ -130,13 +123,6 @@ func _fresh_campaign(warband) -> void:
 		warband.save_state()
 	world_start = "camp"
 
-## Go straight to the town end of the world (debug door, and where a resumed
-## campaign lands).
-func enter_town() -> void:
-	active = true
-	world_start = "town"
-	goto(WORLD_SCENE)
-
 ## Put the warband back on the ground its last checkpoint remembers, without
 ## changing scene. The save is the snapshot: reloading it restores the roster,
 ## gear and essence as they stood at the bookmark, then any body that was down
@@ -176,35 +162,14 @@ func _wake_the_warband(warband) -> void:
 		warband.roster.set_health(int(merc_id), maxf(warband.roster.health_of(int(merc_id)), pool * 0.5))
 		warband.roster.set_state(int(merc_id), WarbandContracts.HealthState.ALIVE)
 
-func launch_expedition() -> void:
-	active = true
-	goto(ARENA_SCENE)
-
-## Connect a scene's door to this node. Scenes call this from their own `_ready`;
-## connecting is harmless while `active` is false.
+## Seat the co-op session on a scene's bodies. Scenes call this from their own
+## `_ready`: a scene binding is the moment its bodies exist, which is the earliest
+## a session may be attached to them - and the latest, because the first snapshot
+## must describe bodies the wire has seen.
 func bind(scene: Node) -> void:
-	if scene == null or not scene.has_signal("scene_requested"):
+	if scene == null:
 		return
-	var callable := Callable(self, "_on_scene_requested")
-	if not scene.is_connected("scene_requested", callable):
-		scene.scene_requested.connect(callable)
-	# A scene binding is the moment its bodies exist, which is the earliest a
-	# session may be attached to them - and the latest, because the first
-	# snapshot must describe bodies the wire has seen.
 	_seat_warband_link(scene)
-
-func _on_scene_requested(path: String) -> void:
-	if not active:
-		return
-	# A door that asks for the world is not the campaign's opening: the opening is
-	# the title's own call, which says where to put the warband down. Everything
-	# that arrives through a scene door - the field's return above all - comes back
-	# into the world at the town end, where the square and the gate are.
-	if path == ARENA_RETURN or path == WORLD_SCENE:
-		world_start = "town"
-		goto(WORLD_SCENE)
-		return
-	goto(path)
 
 func goto(path: String) -> void:
 	if path.is_empty() or not ResourceLoader.exists(path):

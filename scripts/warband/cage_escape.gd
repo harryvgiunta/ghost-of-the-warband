@@ -453,7 +453,6 @@ func seed_warband() -> void:
 	caged_ids.clear()
 	for index in CAGE_COUNT:
 		caged_ids.append(squad_ids[index])
-	warband.deploy_battle(squad_ids)
 	# The camp's own quiver: the opening is blades and bare hands, but the first
 	# bow a prisoner loots - off a trail archer, or bought in town - has shafts
 	# behind it. An existing warband keeps whatever it was already carrying.
@@ -485,11 +484,10 @@ func place_warband(bodies_in: Array) -> void:
 		var post := _post_for(merc_id)
 		actor.global_position = post
 		actor.spawn_point = post
-		# `ArenaActor` is born hostile only to other arena bodies (layer 4). This
-		# camp's enemies are the wilderness watchers (layer 2), and the squad must
-		# never cut its own fighters, so the swords look at the mob layer only.
+		# A body is born hostile only to other bodies (layer 4). This camp's
+		# enemies are the wilderness watchers (layer 2), and the squad must never
+		# cut its own fighters, so the swords look at the mob layer only.
 		actor.combat.target_mask = WATCHER_LAYER
-		controller.set_bot(merc_id, false)
 	for merc_id in caged_ids:
 		_cage_anchors[merc_id] = _post_for(merc_id)
 	# The camp arms its own squad: three makeshift pieces on the dirt, so the four
@@ -616,9 +614,7 @@ func place_resumed(bodies_in: Array) -> void:
 	for actor in bodies:
 		if not is_instance_valid(actor):
 			continue
-		var merc_id: int = controller.merc_of(actor)
 		actor.combat.target_mask = WATCHER_LAYER
-		controller.set_bot(merc_id, false)
 	caged_ids.clear()
 	_cage_anchors.clear()
 	_cage_open.clear()

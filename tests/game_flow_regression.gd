@@ -1,22 +1,21 @@
 extends SceneTree
-## Phase Gate 2, the chain: the cages hand the squad to the town, the town's gate
-## launches an expedition, and the field hands the survivors back to town - all
-## through the real scene doors and the real `GameFlow` owner, on real saves.
+## GHOST OF THE WARBAND: the four doors on the title, through the real `GameFlow`
+## and the real world scene.
 ##
-## The content of each scene is proven by its own regression; this one proves the
-## loop is actually wired and that the warband survives every hand-off.
+## New Campaign opens the world at the cages with a fresh warband and a fresh
+## purse; Resume Campaign opens it where the save's bookmark stands; a campaign
+## that was left through the menu is on disk and resumes; and leaving the world
+## never strands the flow. The world's own content is proven by its own
+## regression - this one proves the loop is wired and that the warband, the
+## roster and the purse survive every hand-off.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
 const TEST_SAVE := "user://game_flow_state.json"
 const WARBAND_SAVE := "user://game_flow_warband.json"
-## The campaign is one world now: the cages, the trail and the town are the same
-## scene, entered at the camp for a fresh run and at the town for a return.
-const CAGE := "res://scenes/warband_world.tscn"
-const TOWN := "res://scenes/warband_world.tscn"
-const ARENA := "res://admin_arena.tscn"
+## The campaign is one world: the cages, the trail and the town are the same scene.
+const WORLD := "res://scenes/warband_world.tscn"
 
 var flow
 var warband
@@ -49,71 +48,62 @@ func run() -> void:
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
 
+	# --- NEW CAMPAIGN: the cages, a fresh warband and a fresh purse -----------
+	check(int(state.credits) > 0, "the purse starts with the new-game credits")
+	warband.hire("Old Hand")
+	warband.add_mercenary("Survivor")
+	var stale: int = warband.roster.count()
+	check(stale == 2, "a warband stands before the new campaign starts (%d)" % stale)
+
 	flow.active = true
 	flow.start_campaign()
-	var cage = await _wait_scene(CAGE, 8.0)
-	check(cage != null, "the campaign opens in the cages")
-	if cage == null:
+	var world = await _wait_scene(WORLD, 12.0)
+	check(world != null, "NEW CAMPAIGN opens the world")
+	if world == null:
 		_finish()
 		return
-	check(cage.bodies.size() == 5, "the tutorial fields the four prisoners and the rescuer")
-	check(warband.roster.count() == 5, "and the warband owns five bodies")
+	check(flow.world_start == "camp", "at the cages, which is where a run starts")
+	check(world.bodies.size() >= 5, "the cages field the squad (%d bodies)" % world.bodies.size())
+	check(warband.roster.count() >= 5, "and the warband owns them (%d)" % warband.roster.count())
 	check(flow.transitions == 1, "one transition so far")
+	check(int(state.credits) > 0, "the purse is the new-game purse, not a previous run's")
 
-	# The cage's own door, exactly as the escape emits it.
-	cage.scene_requested.emit(TOWN)
-	var town = await _wait_scene(TOWN, 8.0)
-	check(town != null, "the escape hands the squad to the town")
-	if town == null:
-		_finish()
-		return
-	check(town.bodies.size() == 5, "the whole warband walks into the square")
-	check(warband.roster.count() == 5, "the warband survives the hand-off")
-	check(warband.souls.body_ids().size() == 5, "the town registered every body in the soul router")
-
-	# Hire one more, then deploy three of them through the gate.
-	var gold_before: int = warband.gold()
-	var hired: Dictionary = warband.hire("Ilsa")
-	check(bool(hired.get("ok", false)), "the town can still hire")
-	check(int(hired.get("cost", -1)) == 0 and warband.gold() == gold_before,
-		"a sixth oath costs nothing: the first eight are free")
-	check(warband.roster.count() == 6, "the warband is six")
-
-	var deployed_ids: Array = warband.roster.alive_ids().slice(0, 3)
-	var launch: Dictionary = town.gate.deploy_and_launch(deployed_ids)
-	check(bool(launch.get("ok", false)), "the gate launches")
-	check(town.is_connected("scene_requested", Callable(flow, "_on_scene_requested")),
-		"the square's door is bound to the flow")
-	var arena = await _wait_scene(ARENA, 10.0)
-	check(arena != null, "the expedition reaches the arena")
-	if arena == null:
-		_finish()
-		return
-	check(arena.expedition, "a deployment line makes it a real battle")
-	check(arena.bodies.size() == 3, "exactly the deployed line takes the field (%d)" % arena.bodies.size())
-	check(arena.waves != null and arena.waves.living() == 3, "and the cult is waiting")
-
-	# The field's door, exactly as Enter emits it after a cleared battle.
-	arena.scene_requested.emit(TOWN)
-	var back = await _wait_scene(TOWN, 8.0)
-	check(back != null, "the field hands the survivors back to town")
-	if back == null:
-		_finish()
-		return
-	check(warband.roster.count() == 6, "the warband keeps every body through the battle")
-	check(warband.souls.body_ids().size() == 6, "and the town re-registers them all")
-	check(flow.transitions >= 4, "the loop made at least four transitions (%d)" % flow.transitions)
-
-	# A fresh save on disk proves the loop is persistent, not just in memory.
-	var reloaded = RosterScript.new()
+	# --- the warband survives the hand-off ----------------------------------
+	var live: int = warband.roster.count()
+	var reloaded := RosterScript.new()
 	reloaded.from_dict(warband.to_dict().get("roster", {}))
-	check(reloaded.count() == 6, "the saved roster matches the live one")
+	check(reloaded.count() == live, "the saved roster matches the live one")
+
+	# --- a checkpoint is what RESUME reads ----------------------------------
+	var body = world.bodies[0]
+	warband.save_checkpoint("trail", "trail", body.global_position, "TRAIL")
+	check(warband.has_checkpoint(), "the world writes a bookmark")
+	warband.save_state()
+	check(FileAccess.file_exists(WARBAND_SAVE), "the campaign is on disk")
+
+	# --- RESUME CAMPAIGN: back to the bookmark ------------------------------
+	# The warband on disk is what a relaunch reads: reset, load, then resume.
+	warband.reset_state()
+	check(not warband.has_checkpoint(), "a reset forgets the bookmark")
+	warband.load_state()
+	flow.enter_warband()
+	var resumed = await _wait_scene(WORLD, 12.0)
+	check(resumed != null, "RESUME CAMPAIGN opens the world")
+	if resumed == null:
+		_finish()
+		return
+	check(flow.world_start == "checkpoint", "at the bookmark, not the cages (%s)" % flow.world_start)
+	check(warband.has_checkpoint(), "and the bookmark is still the one the save holds")
+	check(flow.transitions == 2, "each door is one transition (%d)" % flow.transitions)
+
+	# --- EXIT TO TITLE leaves the flow usable -------------------------------
+	flow.active = false
+	check(flow.last_scene == WORLD, "the flow remembers the scene it opened (%s)" % flow.last_scene)
 
 	_finish()
 
 func _finish() -> void:
 	flow.active = false
-	Damage.reset()
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
 	if current_scene != null:
@@ -128,7 +118,7 @@ func _wait_scene(path: String, timeout: float) -> Node:
 		await create_timer(0.1).timeout
 		var scene := current_scene
 		if scene != null and scene.scene_file_path == path:
-			# One more beat so the scene's `_ready` (bodies, HUD, gate) has run.
+			# One more beat so the scene's `_ready` (bodies, HUD) has run.
 			await create_timer(0.4).timeout
 			scene = current_scene
 			if scene != null and scene.scene_file_path == path:

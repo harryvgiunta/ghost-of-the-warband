@@ -11,7 +11,7 @@ const SfxScript = preload("res://scripts/audio/sfx.gd")
 const SfxLibraryScript = preload("res://scripts/audio/sfx_library.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
-const PauseMenuScript = preload("res://scripts/pause_menu.gd")
+const WarbandMenuScript = preload("res://scripts/warband/warband_menu.gd")
 const FootstepsScript = preload("res://scripts/audio/footsteps.gd")
 const VoiceLibraryScript = preload("res://scripts/audio/voice_library.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
@@ -19,10 +19,9 @@ const VoiceEmitterScript = preload("res://scripts/audio/voice_emitter.gd")
 
 const TEST_SAVE := "user://audio_settings_test.json"
 
-## Every scene the campaign or the sandbox can be in. All of them are the game,
-## so all of them carry the soundtrack; only the title is the menu theme.
+## Every scene the campaign can be in. All of them are the game, so all of them
+## carry the soundtrack; only the title is the menu theme.
 const GAME_SCENES := [
-	"res://main.tscn", "res://arena.tscn", "res://delve.tscn", "res://admin_arena.tscn",
 	"res://scenes/warband_world.tscn", "res://scenes/cage_escape.tscn",
 	"res://scenes/town_hub.tscn",
 ]
@@ -131,7 +130,7 @@ func run() -> void:
 	_check_weapon_reading()
 	_check_footsteps()
 	_check_settings_menu()
-	_check_pause_menu()
+	_check_quick_menu()
 	audio.set_music_volume(0.8)
 	audio.set_sfx_volume(0.8)
 	audio.set_music_muted(false)
@@ -570,6 +569,25 @@ func _check_voices() -> void:
 			"the audit named %s's aggro, which ships" % profile)
 		check(not absent.has("%s/hurt" % profile),
 			"the audit named %s's hurt, which ships" % profile)
+	# The rest of a fight, and the rows the recording script fills: the heavy
+	# blow, the kill quip and the body on the ground. No takes are delivered
+	# yet - the audit names them - but the thresholds are the contract: a heavy
+	# blow needs more of the pool than a grunt, a quip answers fewer kills than
+	# close calls answer blows, and a downed body spends no cooldown on the only
+	# thing it has left to say.
+	for profile in VoiceLibraryScript.PROFILES:
+		var heavy: Dictionary = VoiceLibraryScript.row(profile, "big_hit")
+		var quip: Dictionary = VoiceLibraryScript.row(profile, "kill")
+		var ground: Dictionary = VoiceLibraryScript.row(profile, "downed")
+		check(not heavy.is_empty(), "%s has no heavy-blow line" % profile)
+		check(not quip.is_empty(), "%s has no kill line" % profile)
+		check(not ground.is_empty(), "%s has no downed line" % profile)
+		check(float(heavy.get("share")) > float(VoiceLibraryScript.row(profile, "hurt").get("share")),
+			"%s's heavy blow must need a heavier hit than its grunt" % profile)
+		check(float(quip.get("chance")) < float(heavy.get("chance")),
+			"%s must quip on fewer kills than it curses near-death" % profile)
+		check(float(ground.get("cooldown")) == 0.0,
+			"%s's downed line must not answer to a cooldown" % profile)
 	# One voice per body and the same voice on every reload: the assignment is a
 	# pure function of the id, so nothing about it travels the wire.
 	var distinct := {}
@@ -754,23 +772,21 @@ func _check_settings_menu() -> void:
 	menu.queue_free()
 
 
-func _check_pause_menu() -> void:
-	var menu = PauseMenuScript.new()
-	menu.name = "TestPauseMenu"
+func _check_quick_menu() -> void:
+	var menu = WarbandMenuScript.new()
+	menu.name = "TestWarbandMenu"
 	root.add_child(menu)
-	menu.configure("LEAVE MATCH")
-	menu.open("")
+	menu.open()
 	check(menu.is_open(), "the quick menu did not open")
-	check(not menu.showing_sound(), "the quick menu opened on a sub page")
-	check(menu.sound_button != null, "the quick menu has no SOUND row")
-	menu.sound_button.pressed.emit()
-	check(menu.showing_sound(), "the SOUND row did not open the sound page")
+	check(menu.page() == "menu", "the quick menu opened on a sub page")
+	check(menu.keys_button != null, "the quick menu has no KEYS row")
+	menu.show_page("sound")
+	check(menu.page() == "sound", "the SOUND row did not open the sound page")
 	check(menu.sound_page != null and menu.sound_page.is_visible_in_tree(),
 		"the quick menu's sound page was not shown")
 	menu.sound_page.sfx_slider.value = 25.0
 	check(absf(audio.sfx_volume - 0.25) < 0.001, "the quick menu's slider did not move the mix")
-	menu.back()
-	check(not menu.showing_sound(), "BACK did not return to the menu")
+	check(menu.back() and menu.page() == "menu", "BACK did not return to the menu")
 	menu.close()
 	check(not menu.is_open(), "the quick menu did not close")
 	menu.queue_free()

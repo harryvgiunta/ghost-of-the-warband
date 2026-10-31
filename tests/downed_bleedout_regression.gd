@@ -9,7 +9,7 @@ extends SceneTree
 ## `possession_controller` hands a warband body, and the drip runs on real physics
 ## frames so a pulse that never fires fails here instead of passing quietly.
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 
@@ -57,7 +57,7 @@ func make_actor(slot: int, peer: int, bot: bool, point: Vector3):
 	body.slot = slot
 	body.authoritative = true
 	scene.add_child(body)
-	body.configure(peer,bot,"Bleeding %d" % slot,point)
+	body.configure(peer,"Bleeding %d" % slot,point)
 	return body
 
 ## A melee blow from five metres along +x, the same funnel the fight uses.
@@ -139,10 +139,12 @@ func run() -> void:
 	check(not fallen.downed,"A bled out body is no longer downed")
 	check(is_zero_approx(fallen.health),"A bled out body sits at zero health")
 	check(fallen.health_state == Contracts.HealthState.DEAD,"A bled out body is DEAD")
-	check(not fallen.rig.is_downed_pose(),"The death clears the prone pose")
-	check(is_zero_approx(fallen.rig.blood_loss),"The death clears the blood loss")
+	check(fallen.rig.is_downed_pose(),"a bled-out campaign body keeps the lie it fell in")
+	check(is_equal_approx(fallen.rig.blood_loss,1.0),
+		"and the pool is the corpse's: the rig reads full blood loss")
 	check(drip != null and not drip.attached(),"The death stops the drip")
-	check(is_equal_approx(fallen.respawn,3.0),"The death still arms the arena's respawn")
+	check(not fallen.alive and fallen.health_state == Contracts.HealthState.DEAD,
+		"A campaign death stays on the ground: there is no respawn clock")
 	for tick in 10:
 		fallen.step(0.1,[fallen])
 	check(not fallen.alive and fallen.health_state == Contracts.HealthState.DEAD,

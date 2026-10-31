@@ -79,7 +79,15 @@ func setup(world_ref) -> void:
 ## The click. True when a channel began - the caller must let the click be a loot,
 ## not an attack. False means there is nothing lootable at `point` (or this
 ## machine does not own the loot), and the caller is free to swing.
-func try_click(actor, point: Vector3) -> bool:
+##
+## `aim_target` is the collider the crosshair ray met, when the caller has one. A
+## fighter under the reticle is the thing the player aimed at, so a press on it is
+## a cut and never a loot - even when the corpse it stands over, or the blade that
+## fell beside it, is inside the same arm's reach. Measuring only the distance from
+## the aim point let a drop lying within a step of a mob steal every click aimed at
+## that mob: the body ducked, the fight went on, and the report was "I cannot
+## attack any more".
+func try_click(actor, point: Vector3, aim_target: Variant = null) -> bool:
 	if _loot == null or not is_instance_valid(_loot):
 		return false
 	if _is_client():
@@ -87,6 +95,8 @@ func try_click(actor, point: Vector3) -> bool:
 	if _cool > 0.0 or active():
 		return false
 	if not _can_work(actor):
+		return false
+	if _aims_at_a_living_body(aim_target):
 		return false
 	# The channel is the body's own work, so the piece has to be in the body's
 	# reach as well as under the crosshair. Measuring only from `point` let a
@@ -103,6 +113,18 @@ func try_click(actor, point: Vector3) -> bool:
 		_begin(actor, KIND_DROP, 0, pickup)
 		return true
 	return false
+
+
+## Whether the press was aimed at a body that can still fight. A corpse in the
+## same ray - `alive` false - is ground to work, which is what makes looting the
+## body you just put down a click and not a swing.
+func _aims_at_a_living_body(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target) or not (target is Node):
+		return false
+	var node := target as Node
+	if not node.has_method("take_damage"):
+		return false
+	return node.get("alive") == true
 
 
 ## Break the channel without taking anything. The world calls this for what only it

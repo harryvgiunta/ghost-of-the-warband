@@ -252,8 +252,8 @@ func event(category: String, message: String, data: Dictionary = {}, severity: i
 	}, text)
 
 
-## Sticky session context: scene, network role, run depth, party size, anything
-## the next crash report should know without a gameplay log line.
+## Sticky session context: scene, network role, anything the next crash
+## report should know without a gameplay log line.
 func context(key: String, value: Variant) -> void:
 	_state_mutex.lock()
 	_context[key] = _clean_variant(value)
@@ -866,7 +866,6 @@ func _collect_sample() -> Dictionary:
 		"window": [DisplayServer.window_get_size().x, DisplayServer.window_get_size().y],
 		"memory": _memory_summary(),
 		"multiplayer": _multiplayer_summary(),
-		"game": _game_sample(scene),
 		"player_state": _player_state_sample(),
 	}
 	return sample
@@ -895,103 +894,11 @@ func _multiplayer_summary() -> Dictionary:
 	}
 
 
-func _game_sample(scene: Node) -> Dictionary:
-	if scene == null:
-		return {}
-	var game := {
-		"role": _scene_value(scene, "network_role"),
-		"phase": _scene_value(scene, "phase"),
-		"depth": _scene_value(scene, "depth"),
-		"local_slot": _scene_value(scene, "local_slot"),
-		"health": _scene_value(scene, "health"),
-		"max_health": _scene_value(scene, "max_health"),
-		"stamina": _scene_value(scene, "stamina"),
-		"max_stamina": _scene_value(scene, "max_stamina"),
-		"gold": _scene_value(scene, "gold"),
-		"kills": _scene_value(scene, "kills"),
-		"respawns": _scene_value(scene, "respawns"),
-		"endpoint": _scene_value(scene, "_endpoint"),
-		"world_port": _scene_value(scene, "_world_port"),
-	}
-	var player = scene.get("player")
-	if player != null and is_instance_valid(player) and player is Node3D:
-		game["player"] = {
-			"position": [snappedf(player.global_position.x, 0.001), snappedf(player.global_position.y, 0.001), snappedf(player.global_position.z, 0.001)],
-			"velocity": [snappedf(player.velocity.x, 0.001), snappedf(player.velocity.y, 0.001), snappedf(player.velocity.z, 0.001)],
-			"on_floor": bool(player.is_on_floor()),
-		}
-	var actors = scene.get("actors")
-	var local_slot := int(scene.get("local_slot")) if scene.get("local_slot") != null else -1
-	if actors is Array and local_slot >= 0 and local_slot < actors.size():
-		var actor = actors[local_slot]
-		if actor != null and is_instance_valid(actor):
-			game["local_actor"] = {
-				"health": _scene_value(actor, "health"),
-				"alive": _scene_value(actor, "alive"),
-				"max_health": _scene_value(actor, "max_health"),
-				"display_name": _scene_value(actor, "display_name"),
-			}
-	if actors is Array:
-		var roster: Array = []
-		for actor in actors:
-			if actor == null or not is_instance_valid(actor):
-				continue
-			roster.append({
-				"slot": _scene_value(actor, "slot"),
-				"peer": _scene_value(actor, "peer_id"),
-				"name": _scene_value(actor, "display_name"),
-				"health": _scene_value(actor, "health"),
-				"max_health": _scene_value(actor, "max_health"),
-				"alive": _scene_value(actor, "alive"),
-				"bot": _scene_value(actor, "is_bot"),
-				"authoritative": _scene_value(actor, "authoritative"),
-			})
-		if not roster.is_empty():
-			game["actors"] = roster
-	if scene.has_method("_run_state_dict"):
-		var run = scene.call("_run_state_dict")
-		if typeof(run) == TYPE_DICTIONARY:
-			game["run"] = _clean_variant(run)
-	for key in game.keys():
-		if game[key] == null:
-			game.erase(key)
-	return game
-
-
-func _scene_value(object: Object, property: String) -> Variant:
-	if object == null:
-		return null
-	var value = object.get(property)
-	if value == null:
-		return null
-	return _clean_variant(value)
-
-
 func _player_state_sample() -> Dictionary:
 	var state := get_node_or_null("/root/PlayerState")
 	if state == null:
 		return {}
-	var inventory_source = state.get("inventory")
-	var stash_source = state.get("stash")
-	var floor_source = state.get("floor_items")
-	var quick = state.get("quick")
-	var quick_back = state.get("quick_back")
-	var equipped = state.get("equipped")
-	var inventory: Array = _clean_variant(inventory_source) if inventory_source is Array else []
-	var stash: Array = _clean_variant(stash_source) if stash_source is Array else []
-	var floor_items: Array = _clean_variant(floor_source) if floor_source is Array else []
-	return {
-		"credits": int(state.get("credits")),
-		"inventory": inventory,
-		"inventory_count": inventory.size(),
-		"stash": stash,
-		"stash_count": stash.size(),
-		"floor": floor_items,
-		"floor_count": floor_items.size(),
-		"quick": _clean_variant(quick) if typeof(quick) == TYPE_DICTIONARY else {},
-		"quick_back": _clean_variant(quick_back) if typeof(quick_back) == TYPE_DICTIONARY else {},
-		"equipped": _clean_variant(equipped) if typeof(equipped) == TYPE_DICTIONARY else {},
-	}
+	return {"credits": int(state.get("credits"))}
 
 
 # ---------------------------------------------------------------------------

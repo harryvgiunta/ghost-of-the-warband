@@ -2,12 +2,11 @@ extends SceneTree
 ## The town end of the one world, on real bodies: the square builds at the far end
 ## of the trail, the five services resolve from a point, the recruiter hires and
 ## refuses at the cap, the paperdoll moves gear between one mercenary and the
-## collective pool, and the expedition gate writes the battle line and asks for
-## the arena.
+## collective pool, and the square is the campaign's one settlement.
 ##
-## The town is no longer a scene of its own in the campaign; it is loaded here by
-## asking the world to put the warband down at its town end, which is exactly what
-## a resumed save and the field's return do.
+## The town is not a scene of its own in the campaign; it is loaded here by asking
+## the world to put the warband down at its town end, which is exactly what a
+## resumed save does.
 
 const State = preload("res://scripts/player_state.gd")
 const VoiceLibrary = preload("res://scripts/audio/voice_library.gd")
@@ -62,7 +61,6 @@ func run() -> void:
 	await check_stash()
 	await check_altar()
 	await check_recruiter()
-	await check_gate()
 
 	if game != null and is_instance_valid(game):
 		game.queue_free()
@@ -94,8 +92,6 @@ func check_square() -> void:
 	var merc_id: int = game.controller.merc_for_peer(1)
 	check(merc_id > 0 and warband.souls.occupied_by(merc_id) == 1,
 		"the router says peer one holds that body")
-	for body in game.bodies:
-		check(not bool(body.get("is_bot")), "a town body is a fixture, not a bot")
 	check(game.hud != null and game.screen != null and game.paperdoll != null,
 		"the HUD and both panels exist")
 
@@ -105,15 +101,13 @@ func check_square() -> void:
 	check(is_instance_valid(game.signpost), "the signpost stands in the square")
 	check(game.altar != null and game.altar.has_method("in_reach") and game.altar.has_method("interact"),
 		"the sacrificial altar is the shared object")
-	check(game.gate != null and game.gate.has_signal("scene_requested"),
-		"the expedition gate is wired for a scene request")
 	check(game.fire_light is OmniLight3D and game.fire_light.light_energy > 0.0,
 		"the campfire casts light")
 	check(game.flame is MeshInstance3D and game.flame.mesh != null, "the campfire has a flame mesh")
 
 	# Point resolution: the four rings name one service each, and the fire names
 	# none of them.
-	for service in ["stash", "altar", "recruiter", "gate"]:
+	for service in ["stash", "altar", "recruiter", "quartermaster"]:
 		var point: Vector3 = game.service_point(service)
 		var named: String = game.service_at(point)
 		check(named == service, "the %s ring resolves to itself (got '%s')" % [service, named])
@@ -238,50 +232,3 @@ func check_recruiter() -> void:
 	check(warband.roster.count() == cap_count, "the recruiter refuses at the cap")
 	check(warband.gold() == cap_gold, "a refused hire costs nothing")
 	game.screen.close()
-
-# --- expedition gate -------------------------------------------------------
-
-func check_gate() -> void:
-	var paths: Array[String] = []
-	game.gate.scene_requested.connect(func(path: String) -> void: paths.append(path))
-
-	var point: Vector3 = game.service_point("gate")
-	game.controller.active_body(1).global_position = point + Vector3(0.0, 0.1, 0.0)
-	await create_timer(0.3).timeout
-	var standing: Dictionary = game.gate.prompt(1)
-	check(bool(standing.get("ok", false)), "a body inside the arch opens the gate")
-	check(int(standing.get("cap", 0)) == warband.deployment_cap, "the prompt reports the cap")
-	check(game.interact_at(1, point) == "gate", "G under the arch names the gate")
-
-	# Step out of the ring: the gate closes again.
-	game.controller.active_body(1).global_position = Vector3(0.0, 0.1, 4.0)
-	await create_timer(0.2).timeout
-	var away: Dictionary = game.gate.prompt(1)
-	check(not bool(away.get("ok", false)), "a body away from the arch cannot pass")
-	game.controller.active_body(1).global_position = point + Vector3(0.0, 0.1, 0.0)
-	await create_timer(0.2).timeout
-
-	var ids: Array[int] = warband.merc_ids()
-	var three: Array[int] = [ids[0], ids[2], ids[4]]
-	var launch: Dictionary = game.gate.deploy_and_launch(three)
-	check(bool(launch.get("ok", false)), "the gate launches the marked line")
-	check((launch["deployed_ids"] as Array) == three, "the gate keeps the order it was given")
-	check(warband.deployed_merc_ids() == three,
-		"the roster fields exactly those three (%s)" % str(warband.deployed_merc_ids()))
-	check(paths.size() == 1 and paths[0] == "res://admin_arena.tscn",
-		"the gate asks the flow owner for the arena (%s)" % str(paths))
-
-	# A warband inflated past the cap still fields at most the cap, in order.
-	while warband.roster.count() < warband.deployment_cap + 2:
-		warband.add_mercenary("Extra %d" % warband.roster.count())
-	var all_ids: Array[int] = warband.merc_ids()
-	var capped: Dictionary = game.gate.deploy_and_launch(all_ids)
-	var capped_ids: Array = capped["deployed_ids"]
-	check(capped_ids.size() == warband.deployment_cap,
-		"the gate enforces the cap (%d of %d)" % [capped_ids.size(), all_ids.size()])
-	check(warband.deployed_merc_ids() == capped_ids, "the roster fields the capped line")
-
-	var back: Dictionary = game.gate.return_to_town()
-	check(bool(back.get("ok", false)), "the gate can send the warband home")
-	check(paths.size() == 3 and paths[2] == "res://scenes/town_hub.tscn",
-		"returning asks for the town hub (%s)" % str(paths))

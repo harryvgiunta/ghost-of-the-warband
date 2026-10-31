@@ -13,17 +13,17 @@ The base suite and the warband suite run in one pool; the socket tests run after
 it, serially, because parallel ENet processes on one machine produce flakes that
 are not the code's fault. One retry, sequentially, absorbs a timing flake.
 
-The **warband** suite is the game and runs by default: it covers the campaign,
-the roster, the stash, the camp, the trail, the cult and the possession layer.
-The base suite is the old frontier/arena/delve sandbox - a harness for the shared
-rig and combat code, not a shipping mode - so it only runs when asked with
+The **warband** suite is the game and runs by default: it covers the title, the
+campaign, the roster, the stash, the camp, the trail, the town and the
+possession layer. The base suite drives the shared rig, combat, body and netcode
+primitives on their own (no game scene), so it only runs when asked with
 `--base`, and then only for a change that actually touches that shared layer.
 
 Usage:
     python tools/run_tests.py                          # the game (warband)
     python tools/run_tests.py --base                   # the shared-layer harness
     python tools/run_tests.py --all                    # both
-    python tools/run_tests.py --only dagger_regression,paperdoll_regression
+    python tools/run_tests.py --only hitbox_regression,possession_regression
     GODOT_PATH=/path/to/godot python tools/run_tests.py
 """
 import concurrent.futures
@@ -39,65 +39,33 @@ TESTS = [
     "rig_regression",
     "draw_combat_regression",
     "projectile_regression",
-    "gameplay_regression",
     "melee_roll_regression",
     "action_pose_regression",
-    "weapon_input_regression",
     "arm_clearance_regression",
-    "network_input_regression",
     "cover_movement_regression",
     "running_slide_regression",
     "wolf_regression",
     "devil_regression",
-    "devil_mobs_regression",
-    "forest_mobs_regression",
-    "makeshift_gear_regression",
     "swing_reach_regression",
-    "block_clash_regression",
     "hitbox_regression",
-    "dagger_regression",
-    "item_passives_regression",
-    "throw_regression",
-    "shield_regression",
-    "title_menu_regression",
     "logging_regression",
-    "town_services_regression",
-    "paperdoll_regression",
-    "world_ui_regression",
-    "dual_wield_regression",
-    "combat_expansion_regression",
-    "world_art_regression",
-    "delve_regression",
-    "delve_entry_regression",
-    "delve_network_regression",
-    "world_network_regression",
-    "open_world_combat_regression",
-    "net_prediction_regression",
-    "net_limits_regression",
-    "open_world_delve_regression",
-    "ranger_clone_regression",
-    "consumable_regression",
-    "blood_regression",
     "corpse_regression",
-    "ability_regression",
-    "weapon_abilities_regression",
     "backstab_regression",
-    "trinkets_regression"
+    "mob_aggro_regression",
+    "replica_animation_regression",
 ]
 ## The warband possession campaign: one world, one roster, one stash.
 WARBAND_TESTS = [
+    "title_menu_regression",
     "warband_contract_regression",
     "possession_regression",
     "downed_revive_regression",
     "downed_bleedout_regression",
-    "combat_bubble_regression",
     "altar_regression",
     "stash_autoloot_regression",
     "corpse_loot_regression",
     "warband_ui_regression",
     "branded_abilities_regression",
-    "branded_world_regression",
-    "enemy_waves_regression",
     "watcher_variants_regression",
     "town_hub_regression",
     "town_stockade_regression",
@@ -112,15 +80,11 @@ WARBAND_TESTS = [
     "squad_medicine_regression",
     "squad_steering_regression",
     "torch_light_regression",
-    "expedition_regression",
-    "expedition_director_regression",
     "game_flow_regression",
-    "admin_arena_regression",
     "quartermaster_regression",
     "warband_art_regression",
     "warband_appearance_regression",
     "armor_flair_regression",
-    "run_persistence_regression",
     "checkpoint_regression",
     "warband_abilities_regression",
     "warband_menu_regression",
@@ -130,6 +94,7 @@ WARBAND_TESTS = [
     "warband_session_world_unit_regression",
     "warband_integration_regression",
     "warband_swing_clock_regression",
+    "warband_netcode_regression",
     "warband_ranged_regression",
     "audio_regression",
 ]
@@ -138,9 +103,8 @@ SERIAL = ["warband_session_regression", "warband_coop_campaign_regression"]
 ## Tests that walk real game time. A fixed clock lets them run as fast as the CPU
 ## can instead of at the wall clock, which is the difference between 90 s and 40 s;
 ## their assertions are distances and states, not frame counts.
-FIXED_FPS = {"cover_movement_regression", "weapon_input_regression",
-             "warband_world_regression", "escape_run_regression",
-             "warband_swing_clock_regression"}
+FIXED_FPS = {"cover_movement_regression", "warband_world_regression",
+             "escape_run_regression", "warband_swing_clock_regression"}
 ## How many Godot processes run at once. One process per test sounds fastest and
 ## is not: on a real desktop the pool thrashes and the borderline tests - the ones
 ## that walk a thousand metres of world in real time - start missing their own
@@ -156,11 +120,10 @@ TIMEOUT = 90.0
 ## game time - and they run in the same pool, so the wall is one of them plus the
 ## tail, not the sum.
 TOTAL_BUDGET = 240.0
-## The top of the allowed band, for the two tests whose point is a fixed 240 Hz
-## clock walked end to end through the frontier. They are the only exceptions and
-## they must still fit inside two minutes.
-TIMEOUTS = {"weapon_input_regression": 120.0, "cover_movement_regression": 120.0,
-            "warband_world_regression": 120.0, "escape_run_regression": 120.0}
+## The top of the allowed band, for the tests that walk a fixed clock or a
+## kilometre of world. They must still fit inside two minutes.
+TIMEOUTS = {"cover_movement_regression": 120.0, "warband_world_regression": 120.0,
+            "escape_run_regression": 120.0, "cage_escape_regression": 120.0}
 
 
 def engine_path() -> str:

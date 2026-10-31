@@ -14,7 +14,7 @@ extends Node3D
 ## Camera aim is the single source of truth for the possessed body: the
 ## controller asks `aim_ray()` and hands the centre ray to `Combat`.
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 
 ## The world layer `ArenaActor` bodies collide with; camera probes only this.
 const WORLD_MASK := 1

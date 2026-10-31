@@ -28,7 +28,6 @@ const Mob = preload("res://scripts/forest_mob.gd")
 const Catalog = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
-const Scaler = preload("res://scripts/warband/damage_scaler.gd")
 const BloodSurface = preload("res://scripts/blood_surface.gd")
 const BloodField = preload("res://scripts/blood_field.gd")
 
@@ -74,7 +73,6 @@ func _on_defeated(_enemy, _reward) -> void:
 
 
 func run() -> void:
-	Scaler.reset()
 	var floor_body := StaticBody3D.new()
 	var floor_shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -117,7 +115,6 @@ func run() -> void:
 	_field.queue_free()
 	floor_body.queue_free()
 	await process_frame
-	Scaler.reset()
 	print("WATCHER_VARIANTS_REGRESSION checks=", checks, " failures=", failures)
 	if failures == 0:
 		print("WATCHER_VARIANTS_OK ", checks)

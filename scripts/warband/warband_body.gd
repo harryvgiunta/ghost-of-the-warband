@@ -1,3 +1,4 @@
+class_name WarbandBody
 extends CharacterBody3D
 
 signal fired(slot: int, origin: Vector3, direction: Vector3, speed: float, charge: float)
@@ -37,11 +38,10 @@ const FOCUS_CODES := {"tome":1, "skull":2, "skull_life":3, "skull_death":4}
 const FOCUS_KINDS := {1:"tome", 2:"skull", 3:"skull_life", 4:"skull_death"}
 var slot := 0
 var peer_id := 0
-var is_bot := true
-var display_name := "Bot"
+var display_name := ""
 ## The look this body wears (`WarbandLooks.profile_for`), set *before* the body
 ## enters the tree so the rig can bake the height in before it measures itself.
-## Empty is the shipped ranger, which is what every arena fighter and bot is.
+## Empty is the shipped ranger.
 var appearance: Dictionary = {}
 var rig
 var combat
@@ -61,20 +61,6 @@ var health := MAX_HEALTH
 var max_health := MAX_HEALTH
 var weapon_blood := 0.0
 var alive := true
-var kills := 0
-var deaths := 0
-var respawn := 0.0
-## A body that stays down. The arena's round clock revives a dead fighter after
-## three seconds; a warband mercenary that bled out is gone, and its roster record
-## already says DEAD. Scenes that field bodies for good set this on creation.
-var persistent_death := false
-## Ghost of the Warband: a campaign body dies by the ground, never by the blow.
-## A lethal hit always leaves it DOWNED, so every body gets the full bleed clock;
-## once it is on the floor any blow that lands ends it; and a body that does die
-## keeps its model where it fell instead of vanishing. The possession controller
-## sets this on every roster body it spawns; the arena's own seats leave it off,
-## where a round can still be lost to one heavy strike.
-var warband_death := false
 # Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
 # true while DOWNED - the body keeps its collision, its model and its claim on
 # the slot, and only a finisher or the bleed clock kills it - so every existing
@@ -150,7 +136,7 @@ var _input_queue: Array = []
 var _frame_consumed := false
 ## True once a peer's numbered frames drive this body. Only then does a tick
 ## with no frame hold the pose: a body this scene drives itself (the host's own
-## fighter, a bot, a fixture) has no frame stream and simulates every tick.
+## body, a squad body, a fixture) has no frame stream and simulates every tick.
 var frame_driven := false
 var ack_seq := -1
 var ack_position := Vector3.ZERO
@@ -212,7 +198,6 @@ const INPUT_REDUNDANCY := 3
 ## here loses its travel for good and shows up later as a correction.
 const INPUT_QUEUE_LIMIT := 12
 var _floor_query := PhysicsRayQueryParameters3D.new()
-var _sight_query := PhysicsRayQueryParameters3D.new()
 ## Prints a bloody trail when this body walks out of a death pool.
 var _bloody_feet := BloodyFeet.new()
 ## The boots: one emitter per body, driven by the same foot plant the trail reads.
@@ -242,7 +227,6 @@ func _ready() -> void:
 	rig.appearance = appearance
 	add_child(rig)
 	_floor_query.collision_mask = 1
-	_sight_query.collision_mask = 1
 	rig.set_ground_sampler(_floor_height)
 	combat = Combat.new()
 	add_child(combat)
@@ -295,16 +279,16 @@ func _ready() -> void:
 	# here: the scene seats the body's flags after it is in the tree.
 	_voice = VoiceEmitterScript.create(voice_id, self, false, 3907 + slot)
 
-func configure(owner_id: int, bot: bool, player_name: String, spawn: Vector3) -> void:
+func configure(owner_id: int, player_name: String, spawn: Vector3) -> void:
 	peer_id = owner_id
-	is_bot = bot
 	display_name = player_name
 	spawn_point = spawn
 	combat.damage_enabled = authoritative
-	kills = 0
-	deaths = 0
 	revive()
 
+## Stand the body up fresh at its spawn point: full pools, no stance and no
+## prediction history. `configure()` calls it, and so does a fixture that reuses
+## a body.
 func revive() -> void:
 	position = spawn_point + Vector3(0,0.08,0)
 	_timeline.reset_to(position)
@@ -339,18 +323,14 @@ func revive() -> void:
 	_heal_remaining = 0.0
 	_heal_rate = 0.0
 	alive = true
-	# Ghost of the Warband: a respawn also clears the downed state - a body that
-	# really died takes the arena's three-second path, never both.
 	health_state = WarbandContracts.HealthState.ALIVE
 	downed = false
 	downed_seconds = 0.0
 	downed_by = -1
 	downed_threat_known = false
 	safe_anchor_known = false
-	# A respawn is the arena's way out of DEAD and out of DOWNED alike: the rig
-	# stands up and stops bleeding here exactly as it does on a revive.
+	# The rig stands up and stops bleeding here exactly as it does on a revive.
 	_clear_downed_state()
-	respawn = 0.0
 	combat.stop()
 	combat.clear_camera_ray()
 	# The blow that killed this body also staggered it, and a dead body never
@@ -373,9 +353,8 @@ func revive() -> void:
 	_restore_body_collision()
 	rig.visible = true
 
-## A dying body keeps the collision its scene configured, because the revive
-## has to put it back: the frontier ranger collides with mob layer 2 and the
-## arena/delve fighters with the world only.
+## A dying body keeps the collision its scene configured, because a revive has
+## to put it back.
 func _store_body_collision() -> void:
 	_body_layer = collision_layer
 	_body_mask = collision_mask
@@ -383,8 +362,8 @@ func _store_body_collision() -> void:
 	collision_mask = 0
 
 func _restore_body_collision() -> void:
-	# A body downed by a blow keeps the collision its scene configured; one that
-	# a lobby or round reset parked keeps the arena's fighter kit.
+	# The collision the scene configured, or the body's own kit (layer 4, world
+	# mask) when nothing was stored.
 	collision_layer = _body_layer if _body_layer >= 0 else 4
 	collision_mask = _body_mask if _body_mask >= 0 else 1
 
@@ -404,8 +383,8 @@ func _begin_downed_state() -> void:
 	if _bleed_drip != null:
 		_bleed_drip.attach(self)
 
-## Puts the rig back on its feet and stops the drip. Shared by the revive, the
-## arena respawn and the death, so no path can clear `downed` while leaving the
+## Puts the rig back on its feet and stops the drip. Shared by the spawn reset,
+## the revive and the death, so no path can clear `downed` while leaving the
 ## prone pose - or a bleeding body - behind.
 func _clear_downed_state() -> void:
 	if is_instance_valid(rig):
@@ -448,8 +427,8 @@ func _tick_downed_presentation(delta: float) -> void:
 ## The body keeps its collision and its model on purpose: it is still an
 ## obstacle, still finishable and still the thing a human walks over to pick up.
 ## What stops is intent - no swing in flight, no ability, no guard, no walk - and
-## the bleed clock starts. Nothing here touches `alive`, so the respawn timer,
-## the snapshot and every existing "is this body there" check are unchanged.
+## the bleed clock starts. Nothing here touches `alive`, so the snapshot and every
+## existing "is this body there" check are unchanged.
 func enter_downed(source_id: int = -1) -> void:
 	if downed or not alive:
 		return
@@ -481,8 +460,8 @@ func enter_downed(source_id: int = -1) -> void:
 	downed_started.emit(slot)
 
 ## Ghost of the Warband: stand back up out of DOWNED with the contract's share of
-## max health. The arena's `revive()` stays the respawn path for a body that
-## actually died; these two never run for the same body at once.
+## max health. A body that died stays dead; only the roster brings a mercenary
+## back.
 func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTION) -> void:
 	if not downed or not alive:
 		return
@@ -578,8 +557,9 @@ func crawl_step(point: Vector3, speed: float, delta: float) -> void:
 	position.x = clampf(position.x, -bounds, bounds)
 	position.z = clampf(position.z, -bounds, bounds)
 
-## The one death path: the respawn clock, the death stat, the hidden corpse and
-## the kill credit. A finisher, the bleed clock and a lethal blow all land here,
+## The one death path: the corpse and the kill credit. A finisher, the bleed
+## clock and a lethal blow all land here, so a body that dies is a body that died
+## the same way whatever put it down.
 ## so a body that dies is a body that died the same way whatever put it down.
 func _die(source_id: int) -> void:
 	health = 0.0
@@ -588,21 +568,15 @@ func _die(source_id: int) -> void:
 	downed_seconds = 0.0
 	downed_threat_known = false
 	health_state = WarbandContracts.HealthState.DEAD
-	respawn = 3.0
-	deaths += 1
 	combat.stop()
 	reset_stance()
 	roll.reset()
 	_store_body_collision()
 	_reset_rig_glide()
-	# The drip stops on the frame the body dies. A campaign body then keeps the
-	# ground: its model stays in the lie it fell in, so a corpse is a thing you
-	# walk past rather than a body that winked out of the world.
-	if warband_death:
-		_hold_corpse()
-	else:
-		_clear_downed_state()
-		rig.visible = false
+	# The drip stops on the frame the body dies, and the body keeps the ground:
+	# its model stays in the lie it fell in, so a corpse is a thing you walk past
+	# rather than a body that winked out of the world.
+	_hold_corpse()
 	if _voice != null:
 		_voice.stood_up()
 	killed.emit(slot, source_id)
@@ -820,18 +794,6 @@ func _sync_trinket_limits() -> void:
 	stamina = minf(stamina, max_stamina)
 	combat.stagger_scale = TrinketStats.stagger_scale(trinket_stats)
 
-func get_trinket_stats() -> Dictionary:
-	return trinket_stats
-
-## Off-hand skulls: the wearer refills on every kill this body makes.
-func apply_kill_refill() -> void:
-	var heal := float(trinket_stats.get("heal_on_kill", 0.0))
-	var gain := float(trinket_stats.get("stamina_on_kill", 0.0))
-	if heal > 0.0:
-		health = minf(max_health, health + heal)
-	if gain > 0.0:
-		stamina = minf(max_stamina, stamina + gain)
-
 ## Start the Energy Shield ward from a successful activation.
 func start_ward(definition: Dictionary) -> void:
 	var effect := AbilityRules.ward(definition)
@@ -860,19 +822,16 @@ func _tick_ward(delta: float) -> void:
 	if ward_seconds <= 0.0:
 		rig.set_ward(false)
 
+## A campaign body dies by the ground, never by the blow: a lethal hit leaves it
+## DOWNED for the whole bleed clock, any blow that lands on it there ends it, and
+## a body that does die keeps its corpse where it fell.
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
-	# Ghost of the Warband: one scale, at the funnel, from the victim's bubble.
-	amount = WarbandDamage.scale(amount, self)
 	if downed:
-		# Ghost of the Warband: a blow on a downed body is a finisher, not damage.
-		# A campaign body is finished by any blow that lands on it - that is the
-		# price of lying in the dirt - while a body outside the campaign keeps the
-		# contract's own threshold, where chip damage (including the 10% a
-		# passive-simulated fight lands) is shrugged off.
-		if warband_death or DownedRules.finishes(max_health, amount):
-			_die(source_id)
+		# A blow on a downed body is a finisher, not damage: lying in the dirt,
+		# any blow that lands ends it.
+		_die(source_id)
 		return
 	_cancel_consumable()
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
@@ -889,15 +848,9 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		var seconds: float = combat.stagger_from_damage(applied,max_health)
 		rig.set_hit_react(seconds)
 		dodge.reset()
-	if bool(outcome.died):
-		# Nothing in the campaign is killed outright: the wood puts a body on its
-		# chest and the bleed clock is the only thing here that carries a body off.
-		if warband_death:
-			enter_downed(source_id)
-		else:
-			_die(source_id)
-		return
-	if bool(outcome.downed):
+	if bool(outcome.died) or bool(outcome.downed):
+		# Nothing is killed outright: the wood puts a body on its chest and the
+		# bleed clock is the only thing here that carries a body off.
 		enter_downed(source_id)
 		return
 	# Still standing, so the blow is heard: the share of the pool it took decides
@@ -962,19 +915,13 @@ func update_combat_cover_side() -> void:
 func update_cover_aim_readiness() -> void:
 	if not cover.active:
 		_exposure_tick = -1
-	combat.cover_aim_ready = is_bot or peer_id <= 1 or not cover.active \
+	combat.cover_aim_ready = peer_id <= 1 or not cover.active \
 		or (_exposure_tick >= 0 and aim_snapshot_tick >= _exposure_tick)
 
 func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	if not authoritative and not predicting:
 		return
 	if not alive:
-		# Only the authority owns the respawn clock; a replica learns its state
-		# from the snapshots it is handed.
-		if authoritative and not persistent_death:
-			respawn = maxf(0,respawn-delta)
-			if respawn <= 0:
-				revive()
 		return
 	if downed:
 		# Ghost of the Warband: a downed body keeps its ground and its collision
@@ -1014,9 +961,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		slide.reset()
 		if not ability.allows_movement():
 			move_direction = Vector2.ZERO
-	if is_bot:
-		_bot_step(delta,actors)
-	elif input_age > 0.65:
+	if input_age > 0.65:
 		move_direction = Vector2.ZERO
 		run_requested = false
 		peek_requested = false
@@ -1035,8 +980,8 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		# A tick the peer that owns this body sent no frame for. Repeating the
 		# last intent would walk the body ahead of the frames that own it, and
 		# every invented frame comes back as a correction that yanks its owner
-		# forward. A body this scene drives itself (the host's own fighter, a
-		# bot, a fixture) has no frame stream and simulates every tick.
+		# forward. A body this scene drives itself (the host's own body, a
+		# squad body, a fixture) has no frame stream and simulates every tick.
 		_hold_position(delta)
 	else:
 		motion = _resolve_motion(delta,actors,simulation_tick)
@@ -1494,62 +1439,6 @@ func _separation_velocity(actors: Array) -> Vector3:
 		push += offset*(0.46-distance)/0.46
 	return push.limit_length(1.0)*3.2
 
-func _bot_step(_delta: float, actors: Array) -> void:
-	if combat.stagger_time > 0.0:
-		move_direction = Vector2.ZERO
-		run_requested = false
-		jump_requested = false
-		combat.stop_block()
-		return
-	var nearest = null
-	var distance := INF
-	for other in actors:
-		# Ghost of the Warband: a Downed body is not a threat and not a target.
-		# Without this an AI squad executes its own crawling allies with the next
-		# swing, which makes the whole Downed state meaningless.
-		if other == self or not other.alive or other.get("downed") == true:
-			continue
-		var candidate: float = position.distance_squared_to(other.position)
-		if candidate < distance:
-			distance = candidate
-			nearest = other
-	if nearest == null:
-		move_direction = Vector2.ZERO
-		combat.stop()
-		return
-	var to_enemy: Vector3 = nearest.position-position
-	to_enemy.y = 0
-	var direction := to_enemy.normalized()
-	_sight_query.from = get_aim_position()
-	_sight_query.to = nearest.get_aim_position()
-	var obstructed := not get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty()
-	if distance > 100 or obstructed:
-		_sight_query.to = _sight_query.from + direction * 2.0
-		if not get_world_3d().direct_space_state.intersect_ray(_sight_query).is_empty():
-			direction = direction.rotated(Vector3.UP,1.1 if slot % 2 == 0 else -1.1)
-		move_direction = Vector2(direction.x,direction.z)
-	elif distance < 16:
-		move_direction = Vector2(-direction.x,-direction.z)
-	else:
-		move_direction = Vector2.ZERO
-	run_requested = false
-	combat.set_aim(nearest.get_aim_position())
-	if distance < 9.0:
-		rig.set_weapon("sword")
-	elif distance > 20.25:
-		rig.set_weapon("bow")
-	if rig.weapon == "sword":
-		move_direction = Vector2(direction.x,direction.z) if distance > 2.25 else Vector2.ZERO
-		if combat.clash_cooldown <= 0.0 and not obstructed \
-				and distance <= pow(float(Archer.SWORD_DATA[rig.sword_index].reach),2):
-			combat.begin_melee()
-		return
-	if not obstructed and distance < 625.0:
-		if combat.can_draw():
-			combat.begin_draw()
-		elif rig.draw_amount >= 0.85 and rig.phase in ["DRAWING", "HOLDING"]:
-			combat.release_draw()
-
 func _floor_height(point: Vector3) -> float:
 	_floor_query.from = point + Vector3(0,1,0)
 	_floor_query.to = point - Vector3(0,2,0)
@@ -1581,7 +1470,7 @@ static func gear_bits_for(rig) -> int:
 
 func snapshot() -> Dictionary:
 	var state := {"slot":slot,"peer":peer_id,"position":position,"velocity":velocity,
-		"health":health,"maxh":max_health,"ward":ward_seconds,"alive":alive,"kills":kills,"deaths":deaths,"respawn":respawn,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
+		"health":health,"maxh":max_health,"ward":ward_seconds,"alive":alive,"bow":rig.bow_index,"armor":rig.armor_bits() | (ArmorData.SHIELD_BIT if rig.shield_equipped else 0),"sword":rig.sword_index,"weapon":rig.weapon,"gear":gear_bits(),
 		"weapon_blood":weapon_blood,
 		"stamina":stamina,"ability":ability.pack_snapshot(),
 		"animation":rig.pack_animation_state(rig.get_animation_state()),"progress":combat.attack_progress,"movement":combat.movement_mode,
@@ -1595,11 +1484,8 @@ func snapshot() -> Dictionary:
 	return state
 
 func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> void:
-	# A bot seat has no peer: peer 0 is the wire form of `is_bot`.
-	var incoming_bot := int(state.peer) == 0
-	var replaced := peer_id != int(state.peer) or is_bot != incoming_bot
+	var replaced := peer_id != int(state.peer)
 	peer_id = int(state.peer)
-	is_bot = incoming_bot
 	# The name is static for the match and arrives with the roster, not the tick.
 	if state.has("name"):
 		display_name = str(state.name)
@@ -1659,12 +1545,9 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 	# A campaign death leaves a corpse on every screen, not a body that disappears
 	# the instant the authority says it is over - and a body that joined the scene
 	# already dead is lying on the ground like every other one. Idempotent.
-	if not alive and warband_death:
+	if not alive:
 		_hold_corpse()
-	kills = state.kills
-	deaths = state.deaths
-	respawn = state.respawn
-	rig.visible = alive or warband_death
+	rig.visible = true
 	collision_layer = 4 if alive else 0
 	collision_mask = 1 if alive else 0
 	if rig.bow_index != int(state.bow):
@@ -1774,6 +1657,6 @@ func _process(delta: float) -> void:
 		position = sample.pos
 		velocity = sample.vel
 	_tick_downed_presentation(delta)
-	_label.text = "%s%s  %d" % [display_name," [BOT]" if is_bot else "",int(health)]
+	_label.text = "%s  %d" % [display_name,int(health)]
 	_ground_ring.visible = alive
 	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)

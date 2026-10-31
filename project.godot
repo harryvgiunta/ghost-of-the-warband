@@ -5,13 +5,12 @@ config/name="IRONWOOD | The Frontier"
 config/version="0.4.0"
 run/main_scene="res://title.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-config/description="A seamless woodland town and frontier, a four-seat arena and an endless survival delve beneath Hearthstead."
+config/description="Ghost of the Warband: a possession campaign for one soul and its mercenaries, solo or hosted for friends."
 
 [autoload]
 Log="*res://scripts/log.gd"
 Audio="*res://scripts/audio/audio_manager.gd"
 PlayerState="*res://scripts/player_state.gd"
-Session="*res://scripts/session.gd"
 NetCache="*res://scripts/net_cache.gd"
 Warband="*res://scripts/warband/warband_state.gd"
 GameFlow="*res://scripts/warband/game_flow.gd"

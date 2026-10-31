@@ -24,7 +24,6 @@ extends SceneTree
 const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 const TEST_SAVE := "user://escape_run_state.json"
@@ -54,7 +53,6 @@ var warband
 var game
 var checks := 0
 var failures := 0
-var requested: Array = []
 
 
 func check(condition: bool, message: String) -> void:
@@ -84,7 +82,6 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
-	Damage.reset()
 	flow.active = false
 	flow.world_start = "camp"
 
@@ -124,15 +121,10 @@ func _finish() -> void:
 	if is_instance_valid(game):
 		game.queue_free()
 	await process_frame
-	Damage.reset()
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
 	print("ESCAPE_RUN_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
-
-
-func _on_scene_requested(path: String) -> void:
-	requested.append(path)
 
 
 func _flat(from: Vector3, to: Vector3) -> float:
@@ -157,7 +149,6 @@ func check_the_world() -> void:
 	game = load(WORLD).instantiate()
 	root.add_child(game)
 	await create_timer(0.8).timeout
-	game.scene_requested.connect(_on_scene_requested)
 	_dismiss_card()
 	check(game.camp != null and game.trail != null and game.town != null,
 		"the world built all three of its areas")
@@ -500,7 +491,7 @@ func check_walk() -> void:
 		"the body walked its stretch of the lane (%.0f m of %.0f m)" % [covered, WALK_METRES])
 	check(ticks < 20000 and real_seconds < WALK_LIMIT,
 		"the run finished inside the watchdog (%.1f s real)" % real_seconds)
-	check(requested.is_empty(), "walking the trail requests no scene (%s)" % str(requested))
+	check(root.get_node("GameFlow").transitions == 0, "walking the trail requests no scene")
 	print("ESCAPE_RUN_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f lateral=%.2f"
 		% [game_seconds, real_seconds, ticks, covered, worst])
 
@@ -586,7 +577,6 @@ func check_no_door() -> void:
 	await physics_frame
 	game._try_interact()
 	await create_timer(0.3).timeout
-	check(requested.is_empty(), "the end of the trail asks for no scene (%s)" % str(requested))
 	check(root.get_node("GameFlow").transitions == transitions_before,
 		"and makes no transition (%d)" % root.get_node("GameFlow").transitions)
 	check(game.town.in_square(body) or _flat(body.global_position, game.town.global_position) < 40.0,
@@ -604,12 +594,10 @@ func check_wipe() -> void:
 	await process_frame
 	await create_timer(0.2).timeout
 	warband.clear_possession()
-	requested.clear()
 	root.get_node("GameFlow").world_start = "camp"
 	game = load(WORLD).instantiate()
 	root.add_child(game)
 	await create_timer(0.6).timeout
-	game.scene_requested.connect(_on_scene_requested)
 	# The opening card pauses the tree; a paused world cannot notice a wipe.
 	_dismiss_card()
 	check(game.bodies.size() >= 4, "the wiped world still fields the warband (%d)" % game.bodies.size())
@@ -625,7 +613,7 @@ func check_wipe() -> void:
 		await create_timer(0.1).timeout
 		waited += 0.1
 	check(game._wiped, "the world notices the warband is down")
-	check(requested.is_empty(), "a wipe hands the warband through no door (%s)" % str(requested))
+	check(root.get_node("GameFlow").transitions == transitions_before, "a wipe hands the warband through no door")
 	check(root.get_node("GameFlow").transitions == transitions_before,
 		"and makes no transition (%d)" % root.get_node("GameFlow").transitions)
 	for merc_id in game.squad_ids:

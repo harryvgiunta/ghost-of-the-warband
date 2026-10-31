@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Roll = preload("res://scripts/dodge_roll.gd")
 const STEP := 1.0 / 240.0
 var checks := 0
@@ -46,7 +46,7 @@ func fighter(parent: Node3D, index: int, position_at: Vector3):
 	actor.slot = index
 	actor.authoritative = true
 	parent.add_child(actor)
-	actor.configure(index + 1, false, "Regression", position_at)
+	actor.configure(index + 1, "Regression", position_at)
 	actor.set_process(false)
 	actor.rig.set_process(false)
 	actor.rig.set_physics_process(false)

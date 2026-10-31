@@ -183,7 +183,7 @@ func _write_probe_session(sid: String, pid: int, clean: bool) -> void:
 		"beat_unix": beat,
 		"scene": "res://probe.tscn",
 		"context": {"probe": "yes"},
-		"sample": {"scene": "res://probe.tscn", "static_mem": 12345, "game": {"role": "offline"}},
+		"sample": {"scene": "res://probe.tscn", "static_mem": 12345},
 		"breadcrumbs": [{"ts": Store.utc_iso(beat), "cat": "test", "msg": "synthetic crumb", "data": {}}],
 		"errors": [{"ts": Store.utc_iso(beat), "sev": "error", "code": "SYNTHETIC_ERROR",
 			"function": "probe", "file": "probe.gd", "line": 7, "error_type": 0, "frames": []}],
@@ -325,14 +325,9 @@ func run() -> void:
 		check(not sample.is_empty(), "force_sample updates the marker immediately")
 		check(int(sample.get("static_mem", 0)) > 0, "The sample carries static memory")
 		check(int(sample.get("nodes", 0)) > 0, "The sample carries the tree node count")
-		check(sample.has("game") and sample.has("player_state"), "The sample carries game and player state")
+		check(sample.has("player_state"), "The sample carries player state")
 		var player_sample: Dictionary = sample.get("player_state", {})
 		check(player_sample.has("credits"), "The sample reads PlayerState")
-		check(player_sample.get("inventory") is Array, "The sample carries the backpack item list")
-		check(player_sample.get("equipped") is Dictionary, "The sample carries the equipped slots")
-		var inventory_items: Array = player_sample.get("inventory", [])
-		check(int(player_sample.get("inventory_count", -1)) == inventory_items.size(),
-			"The backpack item count matches its list")
 		check(marker.get("context", {}).get("test_phase") == "logging_regression", "The marker carries sticky context")
 		var crumb_count := 0
 		for crumb in marker.get("breadcrumbs", []):

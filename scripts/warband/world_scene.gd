@@ -28,9 +28,8 @@ extends Node3D
 ##   * `Town` - `town_hub.gd`: the square at the far end, walled on three sides,
 ##     open where the trail comes in.
 ##
-## The one door left in the campaign is the expedition gate: it asks for
-## `admin_arena.tscn`, and the arena's return lands back here at the town end (see
-## `GameFlow`). Nothing else changes scene, and nothing about travel does.
+## Nothing in this scene changes scene: walking is the only way between the three
+## places, and the campaign menu's own doors go through `GameFlow`.
 ##
 ## Keys: O warband, ESC the campaign menu (resume, save, load, settings, leave,
 ## quit), TAB quick weapon swap, P paperdoll, G interact and the revive hold,
@@ -38,7 +37,6 @@ extends Node3D
 ## Q and E are held to strafe, WASD to walk, so neither is a press key. The camp's
 ## lesson adds F1-F5 and `[` `]`.
 
-signal scene_requested(path: String)
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
@@ -522,6 +520,9 @@ func _build_soul() -> void:
 	# TAB and the revive hold are this scene's verbs, run on the authority for
 	# whichever soul pressed them.
 	controller.world_action = Callable(self, "_on_world_action")
+	# The wood's own bodies join the host's rewind: a guest's blade has to find
+	# the watcher the guest's screen showed, not the one that has moved since.
+	controller.lag_extras = Callable(self, "_lag_bodies")
 
 
 func _build_ui() -> void:
@@ -654,8 +655,6 @@ func _build_areas() -> void:
 	town.position = _town_at
 	add_child(town)
 	town.embed(self)
-	# The expedition gate is the only door the campaign has left.
-	town.scene_requested.connect(_on_scene_requested)
 
 
 ## The word that answers the banner in the world itself: a body walking back up
@@ -736,7 +735,6 @@ func _seat_warband() -> void:
 		_seat_checkpoint()
 	elif start_area == "town":
 		town.seed_warband()
-		warband.roster.clear_deployment()
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
 		town.place_warband(bodies)
 	else:
@@ -755,7 +753,6 @@ func _seat_warband() -> void:
 func _seat_checkpoint() -> void:
 	if warband.checkpoint_area() == "town":
 		town.seed_warband()
-		warband.roster.clear_deployment()
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
 		town.place_warband(bodies)
 		return
@@ -785,8 +782,6 @@ func _seat_guest() -> void:
 		focus = _checkpoint_ground() if warband.has_checkpoint() else CampScript.GATE_POINT
 	var posts := _spawn_ring(TerrainScript.grounded(focus), maxi(1, wanted.size()))
 	bodies = controller.spawn_mercenaries(posts, false, wanted)
-	for actor in bodies:
-		controller.set_bot(controller.merc_of(actor), false)
 
 
 ## Where a trail bookmark stands on the ground. Zero is a marker from a file that
@@ -915,6 +910,7 @@ func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: fl
 	arrow.shooter = actor
 	arrow.hit_mask = PROJECTILE_HIT_MASK
 	arrow.authoritative_damage = true
+	_arm_projectile(arrow, actor)
 	add_child(arrow)
 	arrow.launch(origin, direction, speed, damage, _projectile_exclude(actor),
 		rig.last_arrow_visual_origin, 0)
@@ -936,6 +932,7 @@ func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: 
 	thrown.shooter = actor
 	thrown.hit_mask = PROJECTILE_HIT_MASK
 	thrown.authoritative_damage = true
+	_arm_projectile(thrown, actor)
 	if weapon == "dagger":
 		thrown.blade_length = float(ArcherScript.dagger_profile(weapon_index).length)
 	else:
@@ -944,6 +941,28 @@ func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: 
 	add_child(thrown)
 	thrown.launch(origin, direction, speed, damage, _projectile_exclude(actor))
 	_keep_projectile(thrown)
+
+
+## A missile the host spawns for a peer's body is resolved against the bodies that
+## peer saw: the shaft carries the same one-second window its owner's blade does.
+## The host's own shots carry a zero window and resolve against the present.
+## Guarded on the controller's callable: a scene with no `PossessionController`
+## (a test, a fixture) simply has no history to rewind.
+func _arm_projectile(missile, actor) -> void:
+	if controller == null or not is_instance_valid(actor):
+		return
+	missile.lag_comp = controller.lag_history
+	missile.lag_ticks = int(actor.combat.lag_ticks)
+
+
+## Every hostile this world keeps a hurtbox for, as one flat list: the watcher
+## camps, the wilderness wolves and the trail's own guard list.
+func _lag_bodies() -> Array:
+	var out: Array = []
+	for guard in guards:
+		if is_instance_valid(guard) and guard.get("alive") == true:
+			out.append(guard)
+	return out
 
 
 ## Who may spawn a live missile: only the body whose simulation is this machine's.
@@ -1820,6 +1839,12 @@ func _try_interact() -> void:
 ## nothing else; a click with nothing lootable there is left alone and lands as a
 ## cut exactly as before. That is the whole difference between a game that asks you
 ## to press a key per piece and one where the body works the corpse.
+##
+## "Under the crosshair" is the ray's own answer, not a radius around it: a fighter
+## the player is looking at is what the press was for, so the ray's living target
+## is handed to the hand and it refuses the loot. A corpse is the exception on
+## purpose - it answers `alive` false, so the body you just put down is still a
+## click away from being searched.
 func _loot_click(event: InputEvent) -> bool:
 	if loot_hand == null or controller == null:
 		return false
@@ -1834,7 +1859,8 @@ func _loot_click(event: InputEvent) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var sample: Dictionary = controller.aim_sample()
-	if not loot_hand.try_click(actor, sample.get("point", Vector3.ZERO)):
+	if not loot_hand.try_click(actor, sample.get("point", Vector3.ZERO),
+			sample.get("target", null)):
 		# Nothing to loot: the press belongs to the blade. Empty hands cannot
 		# swing, and a click that does nothing at all is the one report this game
 		# keeps getting, so name the missing piece.
@@ -2163,7 +2189,12 @@ func _on_menu_exit_requested() -> void:
 	# Nothing in this scene pauses the tree, but a title must never open behind a
 	# paused one either way.
 	tree.paused = false
-	tree.change_scene_to_file(TITLE_SCENE)
+	# The flow owns every scene change: this is the title door, and going round it
+	# would leave `active` set and a possession pointing at a dead body.
+	if flow != null:
+		flow.goto(flow.TITLE_SCENE)
+	else:
+		tree.change_scene_to_file(TITLE_SCENE)
 
 
 ## The menu's QUIT row. The file is written before the process leaves, so the
@@ -2177,15 +2208,12 @@ func _on_menu_quit_requested() -> void:
 # --- the town's readout ----------------------------------------------------
 #
 # The world *is* the scene the town's services stand in, so the services are
-# answered from here: the altar, the counters, the stash and the gate are the
-# town area's own objects, forwarded rather than duplicated.
+# answered from here: the altar, the counters and the stash are the town area's
+# own objects, forwarded rather than duplicated.
 
 var altar:
 	get:
 		return town.altar if town != null else null
-var gate:
-	get:
-		return town.gate if town != null else null
 var quartermaster:
 	get:
 		return town.quartermaster if town != null else null
@@ -2281,13 +2309,6 @@ func _count_type(node: Node, type_name: String) -> int:
 			total += 1
 		total += _count_type(child, type_name)
 	return total
-
-
-# --- doors -----------------------------------------------------------------
-
-## The expedition gate asked for the field; the world owns the only door.
-func _on_scene_requested(path: String) -> void:
-	scene_requested.emit(path)
 
 
 # --- startup ---------------------------------------------------------------

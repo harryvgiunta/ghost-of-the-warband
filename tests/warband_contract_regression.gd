@@ -11,7 +11,6 @@ const CruorScript = preload("res://scripts/warband/cruor_manager.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const StateScript = preload("res://scripts/player_state.gd")
 
@@ -45,7 +44,6 @@ func run() -> void:
 
 	check_slots()
 	check_overkill()
-	check_scaler()
 	check_roster()
 	check_gear_transfer(state, warband)
 	check_weapon_sets(warband)
@@ -119,28 +117,6 @@ func check_overkill() -> void:
 	check(Contracts.finishes_downed(100.0, 10.0) == false, "a light blow cannot finish a downed body")
 	check(Contracts.finishes_downed(100.0, 10.5) == true, "a heavy blow finishes a downed body")
 	check(Contracts.REVIVE_CHANNEL_SECONDS == 5.0, "the revive channel is five seconds")
-	check(is_equal_approx(Contracts.PASSIVE_DAMAGE_MULTIPLIER, 0.1), "the far fight runs at 10%")
-	check(is_equal_approx(Contracts.damage_multiplier(Contracts.CombatSimState.ACTIVE), 1.0), "active is 100%")
-	check(is_equal_approx(Contracts.damage_multiplier(Contracts.CombatSimState.PASSIVE_SIM), 0.1), "passive is 10%")
-
-# --- bubble scaler ---------------------------------------------------------
-
-func check_scaler() -> void:
-	Damage.reset()
-	var body := Node3D.new()
-	root.add_child(body)
-	check(is_equal_approx(Damage.scale(100.0, body), 100.0), "an untracked body is not nerfed")
-	Damage.set_sim_state(body, Contracts.CombatSimState.PASSIVE_SIM)
-	check(is_equal_approx(Damage.scale(100.0, body), 10.0), "a passive body takes 10%")
-	check(Damage.is_passive(body), "passive reads back")
-	Damage.set_sim_state(body, Contracts.CombatSimState.ACTIVE)
-	check(is_equal_approx(Damage.scale(100.0, body), 100.0), "re-entering the bubble restores 100%")
-	check(Damage.registered_count() == 0, "ACTIVE bodies leave no registry entry")
-	Damage.set_sim_state(body, Contracts.CombatSimState.PASSIVE_SIM)
-	body.free()
-	Damage.prune()
-	check(Damage.registered_count() == 0, "prune drops a freed body")
-	Damage.reset()
 
 # --- gear hand-offs --------------------------------------------------------
 
@@ -288,7 +264,7 @@ func check_weapon_sets(warband) -> void:
 	# A record written before the sets existed loads with its pair in Set 1.
 	var legacy = RosterScript.new()
 	var old_id: int = legacy.add_record({"id": 41, "name": "Old", "health": 100.0,
-		"max_health": 100.0, "state": 0, "deployed": false, "downed_seconds": 0.0,
+		"max_health": 100.0, "state": 0, "downed_seconds": 0.0,
 		"equipped": {"main": "sword_short", "off": "shield_buckler"}})
 	check(legacy.weapon_set_pair(old_id, 0).get("main", "") == "sword_short",
 		"a pre-set record puts the pair in its hands into Set 1")
@@ -381,20 +357,6 @@ func check_roster() -> void:
 		"revive restores a twentieth of the pool")
 	check(roster.apply_damage(c, 200.0)["died"], "a body at half health can be overkilled")
 
-	# Deployment cap X.
-	var cap_roster = RosterScript.new()
-	var ids: Array[int] = []
-	for index in 10:
-		ids.append(cap_roster.create("M%d" % index))
-	var fielded := cap_roster.deploy(ids, Contracts.MAX_DEPLOYMENT_CAP)
-	check(fielded.size() == Contracts.MAX_DEPLOYMENT_CAP, "deployment is capped at X")
-	check(cap_roster.deployed_count() == Contracts.MAX_DEPLOYMENT_CAP, "deployed count agrees")
-	var ninth := cap_roster.create("Ninth")
-	var refusal := cap_roster.set_deployed(ninth, true, Contracts.MAX_DEPLOYMENT_CAP)
-	check(refusal["ok"] == false, "a ninth body is refused at the cap")
-	var stand_down := cap_roster.set_deployed(ninth, false, Contracts.MAX_DEPLOYMENT_CAP)
-	check(stand_down["ok"] == true, "standing down always works")
-
 	# Gear is the only differentiator, and hand rules hold.
 	var gear_roster = RosterScript.new()
 	var d := gear_roster.create("Dorn")
@@ -418,13 +380,12 @@ func check_roster() -> void:
 	check(gear_roster.equip(d, "head", "bow_short")["ok"] == false, "a bow cannot be worn on the head")
 
 	# Persistence round-trip keeps ids, gear and states.
-	gear_roster.set_deployed(d, true, 8)
 	var saved := gear_roster.to_dict()
 	var loaded = RosterScript.new()
 	loaded.from_dict(saved)
 	check(loaded.count() == gear_roster.count(), "records survive a round-trip")
 	check(loaded.equipped_of(d)["main"] == "sword_great", "gear survives a round-trip")
-	check(loaded.deployed_ids().has(d), "deployment survives a round-trip")
+	check(loaded.state_of(d) == gear_roster.state_of(d), "the body's state survives a round-trip")
 	check(loaded.create("Next") > d, "the id counter advances past saved ids")
 
 # --- stash -----------------------------------------------------------------

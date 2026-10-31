@@ -83,29 +83,16 @@ enum CruorTier {
 
 enum HealthState { ALIVE, DOWNED, DEAD }
 
-## `ACTIVE` = inside a human presence bubble, full speed and damage.
-## `PASSIVE_SIM` = away from every human, convincing choreography at 10% damage.
-enum CombatSimState { ACTIVE, PASSIVE_SIM }
-
 # --- tuning ----------------------------------------------------------------
 
 ## A lethal hit whose overkill is <= 10% of max health downs instead of kills.
 const OVERKILL_THRESHOLD := 0.10
-## A human holds the revive channel for five seconds; AI never revives.
+## A human holds the revive channel for five seconds.
 const REVIVE_CHANNEL_SECONDS := 5.0
-## Damage multiplier inside a bubble and far away from every bubble.
-const ACTIVE_DAMAGE_MULTIPLIER := 1.0
-const PASSIVE_DAMAGE_MULTIPLIER := 0.10
-## The bubble is measured from every human-possessed body, so it scales with
-## the number of players rather than needing a separate node per group.
-const DEFAULT_BUBBLE_RADIUS := 30.0
-## A bubble shrinks/grows with hysteresis so a body pacing the edge cannot
-## chatter between real combat and simulation every frame.
-const BUBBLE_EXIT_RADIUS := 34.0
 ## Mercenaries in a warband have identical base stats: gear is the only lever.
 const BASE_MAX_HEALTH := 100.0
 const BASE_MAX_STAMINA := 1000.0
-## The warband deployable into one battle (the plan's cap X).
+## How many mercenaries a warband may swear in.
 const MAX_DEPLOYMENT_CAP := 8
 ## How close a human must stand to hold a revive channel.
 const REVIVE_REACH := 2.5
@@ -161,9 +148,6 @@ static func off_hand_only(item: Dictionary) -> bool:
 	return weapon_subtype(item) in [WeaponSubType.SHIELD, WeaponSubType.SKULL, WeaponSubType.TOME]
 
 # --- combat helpers --------------------------------------------------------
-
-static func damage_multiplier(sim_state: int) -> float:
-	return PASSIVE_DAMAGE_MULTIPLIER if sim_state == CombatSimState.PASSIVE_SIM else ACTIVE_DAMAGE_MULTIPLIER
 
 static func state_name(state: int) -> String:
 	match state:

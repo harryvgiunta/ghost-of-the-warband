@@ -142,7 +142,6 @@ func check_rescue() -> void:
 	root.add_child(soul)
 	var ally := FakeBody.new()
 	ally.name = "Ally"
-	ally.is_bot = true
 	root.add_child(ally)
 	ally.global_position = soul.global_position + Vector3(1.0, 0.0, 0.0)
 	channel.set_bodies([ally, soul])
@@ -276,7 +275,6 @@ class FakeBody extends Node3D:
 	var run_requested := false
 	var alive := true
 	var downed := false
-	var is_bot := false
 	var rig = null
 	var crawl_calls := 0
 	var last_crawl_target := Vector3.ZERO

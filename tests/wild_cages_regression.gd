@@ -34,7 +34,6 @@ const TownScript = preload("res://scripts/warband/town_hub.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const State = preload("res://scripts/player_state.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
 ## The world's own build is a heightfield and a wood; this is the ceiling for it.
 const WORLD_TIMEOUT := 45.0
@@ -103,7 +102,6 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
-	Damage.reset()
 	flow.active = false
 	# A campaign that is already in the world: the square is the seat, so no
 	# opening card is raised over a test that never plays the lesson.

@@ -22,8 +22,8 @@ extends SceneTree
 ##      transition is made, the scene object never changes, the body never leaves
 ##      the walkable ground, and the walk is timed.
 ##   5. **The town end is the town.** The stash, the altar, the recruiter and the
-##      quartermaster answer `G` from where the body stands, and the expedition
-##      gate is the campaign's one remaining door.
+##      quartermaster answer `G` from where the body stands, and nothing in the
+##      square changes scene.
 ##   6. **The budget.** One world is one scene: nodes, multimesh draws, lights and
 ##      collision shapes are counted and bounded.
 
@@ -33,8 +33,6 @@ const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const WildernessScript = preload("res://scripts/warband/wilderness.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
-const ArenaScript = preload("res://scripts/admin_arena.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 const TEST_SAVE := "user://warband_world_state.json"
@@ -59,7 +57,6 @@ var state
 var checks := 0
 var failures := 0
 var state_log: Array = []
-var requested: Array = []
 ## Ground the opening itself walks: the cages to the mouth, which the ambush
 ## interrupts. Counted into the campaign's 359 m below so the number the docs
 ## quote is the whole walk, not the half of it the walk test times.
@@ -97,7 +94,6 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
-	Damage.reset()
 	flow.active = false
 	flow.world_start = "camp"
 
@@ -121,7 +117,6 @@ func run() -> void:
 	current_scene = game
 	await create_timer(1.0).timeout
 	game.camp.sequencer.state_changed.connect(_on_state_changed)
-	game.scene_requested.connect(_on_scene_requested)
 	# From here on the flow is live: if anything in the world opened a door, the
 	# transition counter would move and the walk checks would catch it.
 	flow.active = true
@@ -256,7 +251,6 @@ func _finish() -> void:
 	if is_instance_valid(game):
 		game.queue_free()
 	await process_frame
-	Damage.reset()
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
 	print("WARBAND_WORLD_REGRESSION checks=", checks, " failures=", failures)
@@ -265,10 +259,6 @@ func _finish() -> void:
 
 func _on_state_changed(new_state: int, objective: String) -> void:
 	state_log.append([new_state, objective])
-
-
-func _on_scene_requested(path: String) -> void:
-	requested.append(path)
 
 
 ## How many times the machine *entered* `value`: a state is announced again on
@@ -956,7 +946,6 @@ func check_walk() -> void:
 		% [transitions_before, flow.transitions])
 	check(current_scene == scene_before, "the scene object never changed during the walk")
 	check(game.is_inside_tree(), "the world is still the scene the body walked in")
-	check(requested.is_empty(), "no scene was requested by walking (%s)" % str(requested))
 	check(off_ground == 0, "the body never left the walkable ground (%d ticks off)" % off_ground)
 	check(worst_lateral <= half + 0.6,
 		"the body never left the %.1f m trail (%.2f m off centre)" % [half * 2.0, worst_lateral])
@@ -1043,7 +1032,6 @@ func check_town_end() -> void:
 	check(is_instance_valid(game.stash_chest), "the stash chest stands in the square")
 	check(is_instance_valid(game.recruiter_desk), "the recruiter desk stands in the square")
 	check(game.altar != null and game.altar.has_method("interact"), "the altar is the shared object")
-	check(game.gate != null, "the expedition gate stands in the square")
 	check(is_instance_valid(game.quartermaster), "the quartermaster's counter is real")
 
 	# Each counter answers G from where the body stands - and the answer is the
@@ -1064,26 +1052,6 @@ func check_town_end() -> void:
 		game._hide_panels()
 		await create_timer(0.1).timeout
 	check(not game._panel_open(), "the panels close again")
-
-	# The one door left: the expedition gate asks for the arena, exactly once.
-	var paths: Array[String] = []
-	game.gate.scene_requested.connect(func(path: String) -> void: paths.append(path))
-	var gate_at: Vector3 = game.service_point("gate")
-	body.global_position = gate_at + Vector3(0.0, 0.1, 0.0)
-	await create_timer(0.2).timeout
-	var standing: Dictionary = game.gate.prompt(1)
-	check(bool(standing.get("ok", false)), "a body under the arch opens the gate")
-	var ids: Array[int] = warband.merc_ids()
-	var line: Array[int] = []
-	for index in mini(3, ids.size()):
-		line.append(int(ids[index]))
-	flow.active = false
-	var launch: Dictionary = game.gate.deploy_and_launch(line)
-	check(bool(launch.get("ok", false)), "the gate launches the marked line")
-	check(paths.size() == 1 and paths[0] == "res://admin_arena.tscn",
-		"the gate asks for the arena and nothing else (%s)" % str(paths))
-	flow.active = true
-
 
 # --- 6. the budget ---------------------------------------------------------
 
@@ -1122,13 +1090,6 @@ func check_budget() -> void:
 
 func check_doors() -> void:
 	check(flow.WORLD_SCENE == WORLD, "the flow's campaign scene is the world (%s)" % flow.WORLD_SCENE)
-	# The arena was written against the old town scene and is not ours to change:
-	# the flow has to map that path to the world's town end.
-	check(ArenaScript.TOWN_SCENE == flow.ARENA_RETURN,
-		"the field's return path is the one the flow maps (%s)" % ArenaScript.TOWN_SCENE)
-	flow.active = true
-	flow.world_start = "camp"
-	flow._on_scene_requested(ArenaScript.TOWN_SCENE)
-	check(flow.world_start == "town", "the field's return lands at the world's town end (%s)" % flow.world_start)
+	check(flow.TITLE_SCENE == "res://title.tscn", "and its way out is the title")
 	flow.active = false
 	flow.world_start = "camp"

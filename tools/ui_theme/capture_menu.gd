@@ -4,7 +4,7 @@ extends SceneTree
 ##       --script res://tools/ui_theme/capture_menu.gd --resolution 1440x900
 
 const OUT := "res://media/concept/game_menu.png"
-const PauseMenu = preload("res://scripts/pause_menu.gd")
+const WarbandMenuScript = preload("res://scripts/warband/warband_menu.gd")
 
 func _initialize() -> void:
 	var flow = root.get_node_or_null("/root/GameFlow")
@@ -21,7 +21,7 @@ func _run() -> void:
 	var card = root.find_child("TutorialCard", true, false)
 	if card != null and card.has_method("close"):
 		card.close()
-	var menu := PauseMenu.new()
+	var menu := WarbandMenuScript.new()
 	menu.name = "CaptureMenu"
 	root.add_child(menu)
 	menu.configure("EXIT TO TOWN")

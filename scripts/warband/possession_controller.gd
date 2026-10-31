@@ -1,25 +1,28 @@
 class_name PossessionController
 extends Node
-## The local player's soul, spread over a squad of real `ArenaActor` bodies.
+## The local player's soul, spread over a squad of real `WarbandBody` bodies.
 ##
 ## Ghost of the Warband has no main character: the player is a floating
 ## consciousness and every mercenary in the warband is a possible body. This node
-## is the bridge between that idea and the existing arena actor layer:
+## is the bridge between that idea and the body layer:
 ##
-##   * one `ArenaActor` per living roster mercenary, wearing that mercenary's
+##   * one `WarbandBody` per living roster mercenary, wearing that mercenary's
 ##     gear through the same `State.build_loadout` + `SeatLoadout.apply` path the
 ##     hub paperdoll uses, so a body looks exactly like the roster record;
 ##   * `Warband.souls` (the router) stays the authority for who is inside what -
 ##     this controller never moves a soul itself, it asks the router and then
 ##     wires the scene to the answer;
 ##   * exactly the body this peer is inside gets player input; every other body
-##     keeps its AI/remote flags, so a soul change is a control change, not a
+##     keeps its remote flags, so a soul change is a control change, not a
 ##     teleport of the camera or of the squad;
 ##   * a body that stops being alive ejects its soul immediately, because a
 ##     player watching a corpse take input is the one bug this game cannot have.
 ##
-## The camera (`possession_camera.gd`) owns the aim ray; the sim loop mirrors
-## `arena.gd` (host steps every body, guest predicts its own).
+## The camera (`possession_camera.gd`) owns the aim ray. The sim loop is the
+## co-op one: the host steps every body from the numbered frames its peers send
+## and keeps one second of their capsules (`lag_history`) so a guest's swing is
+## judged against the bodies that guest saw; a guest integrates its own body on
+## the key and reconciles against the host's acknowledgement.
 
 signal possession_changed(peer_id: int, merc_id: int)
 signal possession_released(peer_id: int, reason: String)
@@ -28,7 +31,8 @@ signal transfer_refused(peer_id: int, merc_id: int, reason: String)
 ## when the ammunition gate is the reason the string would not come up.
 signal draw_refused(peer_id: int)
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
+const CombatScript = preload("res://scripts/combat.gd")
 const CameraRig = preload("res://scripts/warband/possession_camera.gd")
 const SyncScript = preload("res://scripts/warband/possession_sync.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -38,6 +42,8 @@ const State = preload("res://scripts/player_state.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
+const LagCompensation = preload("res://scripts/lag_compensation.gd")
 
 ## The peer whose soul this process owns. 1 is the host, matching ENet.
 var local_peer_id := 1
@@ -49,6 +55,17 @@ var sync
 var active_actor: Actor
 ## True when this process runs the authoritative simulation of the bodies.
 var _authoritative := false
+## The host's one-second history of every damageable capsule, and the tick the
+## simulation is on. A guest's action names the tick it was drawing; the host
+## resolves the blow against that frame instead of the present one.
+var lag_history = LagCompensation.new()
+## Extra bodies a scene wants in the history (the world's own mobs). They are
+## recorded beside the warband's bodies, so a guest can hit what a guest saw.
+var lag_extras := Callable()
+## The guest's playout clock: the newest snapshot it has been handed and the
+## tick it is currently drawing. Its actions carry that tick, which is the whole
+## input to the host's rewind.
+var _clock = NetReplication.NetClock.new()
 ## A mode that calls `physics_step` itself (the admin arena does) sets this
 ## false so the bodies are never integrated twice per tick.
 var auto_simulate := true
@@ -84,9 +101,6 @@ var _last_merc: Dictionary = {}     # peer_id -> merc_id
 var _tick := 0
 var _query := PhysicsRayQueryParameters3D.new()
 var _last_step_frame := -1
-## Per-mercenary AI flag the scene asked for; a body with no soul falls back to
-## this, so leaving a body hands it to the AI the mode configured.
-var _bot_flags: Dictionary = {}
 var _drawing := false
 var _throw_held := false
 ## Which side the next one-handed cut starts from; the locals alternate.
@@ -126,9 +140,8 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 
 # --- spawning --------------------------------------------------------------
 
-## One real body per living mercenary, wearing that mercenary's gear. Deployed
-## ids win when the warband has marked a battle line; otherwise the whole living
-## roster fields, which is what the cage and the arena both want.
+## One real body per living mercenary, wearing that mercenary's gear: the ids a
+## caller names, or the whole living roster.
 func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true,
 		merc_ids: Array = []) -> Array[Actor]:
 	var out: Array[Actor] = []
@@ -144,9 +157,9 @@ func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true,
 			out.append(actor)
 	return out
 
-## The mercenaries to field. `wanted` is a list the authority already fielded (a
-## co-op guest fields exactly the host's bodies, a downed one included); without
-## it, deployed ids win and otherwise the living roster takes the field.
+## The mercenaries to field. `wanted` is a list the caller already chose (the
+## camp's squad, or a co-op guest fielding exactly the host's bodies, a downed
+## one included); without it the living roster takes the field.
 func _spawn_ids(wanted: Array = []) -> Array[int]:
 	var out: Array[int] = []
 	if not wanted.is_empty():
@@ -156,9 +169,7 @@ func _spawn_ids(wanted: Array = []) -> Array[int]:
 					and _warband.roster.state_of(merc_id) != Contracts.HealthState.DEAD:
 				out.append(merc_id)
 		return out
-	var deployed := _warband.deployed_merc_ids()
-	var source: Array[int] = deployed if not deployed.is_empty() else _warband.alive_merc_ids()
-	for merc_id in source:
+	for merc_id in _warband.alive_merc_ids():
 		if _warband.roster.is_alive(merc_id) and not _merc_bodies.has(merc_id):
 			out.append(merc_id)
 	return out
@@ -184,14 +195,7 @@ func _spawn_body(merc_id: int, spawn: Vector3, authoritative: bool) -> Actor:
 	var label: String = _warband.roster.name_of(merc_id)
 	actor.authoritative = authoritative
 	actor.combat.damage_enabled = authoritative
-	# The warband has no rounds: a mercenary that bleeds out stays dead, and the
-	# roster is the only thing that can bring one back.
-	actor.persistent_death = true
-	# And no single blow takes a body off the field: a lethal hit puts it on its
-	# chest for the whole bleed clock, a blow that lands on it there ends it, and
-	# a body that does die keeps its corpse where it fell.
-	actor.warband_death = true
-	actor.configure(0, true, label, spawn)
+	actor.configure(0, label, spawn)
 	_apply_gear(actor, merc_id)
 	actor.killed.connect(_on_actor_killed.bind(actor))
 	# The router is what decides who may be entered, so it has to hear about the
@@ -306,23 +310,6 @@ func possessing_peers() -> Array[int]:
 			out.append(int(peer_id))
 	out.sort()
 	return out
-
-## Tell the controller whether an unpossessed body should fight on its own. The
-## arena marks its two squads this way; a body with a soul inside ignores it
-## until the soul leaves.
-func set_bot(merc_id: int, bot: bool) -> void:
-	var actor := body_of(merc_id)
-	if actor == null:
-		return
-	_bot_flags[merc_id] = bot
-	for peer_id in _peer_actors:
-		if _peer_actors[peer_id] == actor:
-			return
-	actor.is_bot = bot
-	actor.is_local = false
-	actor.predicting = false
-	if bot:
-		actor.peer_id = 0
 
 func body_for_peer(peer_id: int) -> Actor:
 	var actor: Variant = _peer_actors.get(peer_id)
@@ -462,7 +449,6 @@ func _wire(peer_id: int, merc_id: int) -> void:
 func _dress(actor: Actor, peer_id: int) -> void:
 	var mine := peer_id == local_peer_id
 	actor.peer_id = peer_id
-	actor.is_bot = false
 	actor.is_local = mine
 	# A guest integrates its own body between snapshots; the host never does.
 	actor.predicting = mine and not actor.authoritative
@@ -471,15 +457,14 @@ func _dress(actor: Actor, peer_id: int) -> void:
 	if actor.predicting:
 		actor.interp_delay = 0.05
 
-## Give a body back to the scene. Its intent latches are cleared so the AI does
-## not inherit a held draw, a held guard or a half-finished swing from a soul
-## that has already left.
+## Give a body back to the scene. Its intent latches are cleared so the squad's
+## own behaviour does not inherit a held draw, a held guard or a half-finished
+## swing from a soul that has already left.
 func _detach(actor: Actor) -> void:
 	if not is_instance_valid(actor):
 		return
 	actor.is_local = false
 	actor.predicting = false
-	actor.is_bot = bool(_bot_flags.get(merc_of(actor), true))
 	actor.peer_id = 0
 	actor.move_direction = Vector2.ZERO
 	actor.run_requested = false
@@ -605,6 +590,8 @@ func physics_step(delta: float) -> void:
 	if frame == _last_step_frame:
 		return
 	_last_step_frame = frame
+	if not _authoritative:
+		_clock.advance(delta)
 	if camera_rig != null:
 		_update_watch()
 		camera_rig.update(delta)
@@ -619,9 +606,38 @@ func physics_step(delta: float) -> void:
 			if not is_instance_valid(body):
 				continue
 			body.combat.lag_tick = _tick
+			body.combat.lag_rewind = lag_history
 			body.step(delta, _spawned, _tick)
+		# Recorded after the bodies moved, so frame `_tick` is what a peer that
+		# acts on `_tick` was looking at.
+		lag_history.record(_tick, _lag_subjects())
 	elif actor != null and is_instance_valid(actor) and actor.predicting:
 		actor.predicted_step(delta, _spawned)
+
+## The simulation tick the authority is on. It is the number a snapshot is named
+## by and the number a peer's action is rewound to, so both sides count the same
+## clock: one tick is one physics frame at 60 Hz.
+func sim_tick() -> int:
+	return _tick
+
+
+## The guest's side of the playout clock: one snapshot arrival is one tick of the
+## host's simulation, and the render tick it settles on is what its own swings
+## are judged against.
+func ingest_snapshot(tick: int) -> void:
+	if tick > 0:
+		_clock.ingest(tick, Time.get_ticks_msec() / 1000.0)
+
+## The server tick this peer is drawing right now. Before the first remote
+## snapshot arrives there is nothing to name, so the newest local acknowledgement
+## stands in.
+func view_tick() -> int:
+	if _clock.newest_tick() >= 0:
+		return _clock.render_tick()
+	var actor := active_actor
+	if actor != null and is_instance_valid(actor):
+		return maxi(0, actor.view_tick)
+	return 0
 
 ## A soul with no body watches one that has a soul in it: the lowest peer id
 ## other than this one with a living body. That is the other player's body when
@@ -674,22 +690,27 @@ func _drive(actor: Actor) -> void:
 		_aim(actor, point, origin)
 		actor.accept_network_input(direction, running)
 	else:
-		actor.update_input(direction, running)
+		var view := view_tick()
+		actor.update_input(direction, running, view)
 		if sync != null:
-			sync.send_move(direction, running, sample["point"], sample["origin"])
+			sync.send_move(direction, running, sample["point"], sample["origin"],
+				actor.latest_prediction_seq(), view, actor.input_history())
 
 ## The centre ray of the view plus the first thing it hits, which is what the
 ## possessed body aims at. The possessed body itself and nothing else is
-## excluded, matching the arena's crosshair query.
+## excluded, matching the arena's crosshair query. `target` is that thing - the
+## collider under the reticle, or null when the ray met nothing inside its reach -
+## so a caller can ask what the player is looking at and not only where.
 func aim_sample() -> Dictionary:
 	var actor := active_actor
 	if actor == null or not is_instance_valid(actor):
-		return {"point": Vector3.ZERO, "origin": Vector3.ZERO}
+		return {"point": Vector3.ZERO, "origin": Vector3.ZERO, "target": null}
 	var ray := camera_rig.aim_ray() if camera_rig != null \
 		else {"origin": actor.global_position, "direction": -actor.global_basis.z}
 	var origin: Vector3 = ray["origin"]
 	var direction: Vector3 = ray["direction"]
 	var point := origin + direction * 120.0
+	var target: Variant = null
 	if _bodies_root != null and _bodies_root.is_inside_tree():
 		var anchor: Vector3 = actor.global_position + Vector3.UP * CameraRig.EYE_HEIGHT
 		var depth := maxf(0.0, (anchor - origin).dot(direction))
@@ -706,12 +727,13 @@ func aim_sample() -> Dictionary:
 		var hit: Dictionary = space.intersect_ray(_query) if space != null else {}
 		if not hit.is_empty():
 			point = hit.position
-	return {"point": point, "origin": origin}
+			target = hit.get("collider")
+	return {"point": point, "origin": origin, "target": target}
 
 ## Aim the body at a world point, optionally with the camera ray that produced
 ## it (the same pair the arena's `_set_aim` validates).
 func _aim(actor: Actor, point: Vector3, origin: Variant = null) -> bool:
-	if not point.is_finite() or point.length_squared() > 1000000.0:
+	if not CombatScript.aim_point_valid(actor.global_position, point):
 		return false
 	actor.update_cover_aim_readiness()
 	actor.combat.set_aim(point)
@@ -732,22 +754,33 @@ func _aim(actor: Actor, point: Vector3, origin: Variant = null) -> bool:
 			actor.combat.face_block(facing)
 	return true
 
-## A movement frame for a peer's body, arriving from the wire.
+## A movement frame for a peer's body, arriving from the wire. The frame's own
+## number, the tick its owner was drawing and the frames behind it all travel
+## with it: the authority simulates each numbered frame exactly once and can
+## answer for the pose it produced.
 func apply_move(merc_id: int, direction: Vector2, running: bool, point: Variant = null,
-		origin: Variant = null) -> bool:
+		origin: Variant = null, seq: int = -1, view: int = -1,
+		history: Array = []) -> bool:
 	var actor := body_of(merc_id)
 	if actor == null or not actor.authoritative:
 		return false
 	if typeof(point) == TYPE_VECTOR3:
 		_aim(actor, point, origin)
-	actor.accept_network_input(direction, running)
+	actor.accept_network_input(direction, running, seq, view, history)
 	return true
 
 ## One validated combat verb on one body. Shared by the local driver and by the
 ## sync's remote intents, so a guest can only do what the host could do.
 func apply_action(merc_id: int, action: String, value: Variant = null,
-		origin: Variant = null) -> bool:
-	return _perform(body_of(merc_id), action, value, origin)
+		origin: Variant = null, view: int = -1) -> bool:
+	var actor := body_of(merc_id)
+	if actor == null:
+		return false
+	# Every damage-capable verb the host resolves for a peer is judged against
+	# the bodies that peer was looking at, not against the ones that have moved
+	# since. The window is cleared for the host's own body by `lag_ticks = 0`.
+	arm_lag(actor, view)
+	return _perform(actor, action, value, origin)
 
 func _perform(actor: Actor, action: String, value: Variant, origin: Variant = null) -> bool:
 	if actor == null or not is_instance_valid(actor) or not actor.alive:
@@ -860,6 +893,43 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 			if world_action.is_valid():
 				return bool(world_action.call(actor, action, value))
 	return false
+
+# --- backward reconciliation ------------------------------------------------
+
+## The longest rewind the host performs for one client action: half a second.
+const MAX_LAG_TICKS := 30
+
+## Arms one body's damage window with the rewind its owner needs. `view` is the
+## server tick that peer was drawing when it acted; a host-driven body carries
+## none, so it resolves against the present.
+func arm_lag(actor: Actor, view: int) -> void:
+	if actor == null or not is_instance_valid(actor):
+		return
+	actor.combat.lag_rewind = lag_history
+	actor.combat.lag_tick = _tick
+	actor.combat.lag_ticks = 0
+	# Only an action that arrived with a view tick came from a peer: the host's
+	# own verbs pass -1 and resolve against the present.
+	if view >= 0:
+		actor.combat.lag_ticks = clampi(_tick - view, 0, MAX_LAG_TICKS)
+
+## Every body the history keeps: the squad, then whatever the scene adds (the
+## world's own mobs), so a guest's blade finds the watcher it saw.
+func _lag_subjects() -> Array:
+	var out: Array = []
+	for body in _spawned:
+		if is_instance_valid(body):
+			out.append(body)
+	if lag_extras.is_valid():
+		var extra: Variant = lag_extras.call()
+		if extra is Array:
+			out.append_array(extra)
+	return out
+
+## Drop the history at a scene hand-off: no frame from the last place is a pose
+## a peer can act on in this one.
+func clear_lag_history() -> void:
+	lag_history.clear()
 
 # --- input -----------------------------------------------------------------
 
@@ -1041,8 +1111,10 @@ func _act(action: String, value: Variant, origin: Variant = null) -> bool:
 	if actor == null or not is_instance_valid(actor) or not actor.alive:
 		return false
 	if actor.authoritative:
+		# The host's own body is the present: there is nothing to rewind.
+		arm_lag(actor, -1)
 		return _perform(actor, action, value, origin)
 	actor.predict_action(action, value)
 	if sync != null:
-		sync.send_action(action, value, origin)
+		sync.send_action(action, value, origin, view_tick())
 	return true

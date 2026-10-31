@@ -41,6 +41,12 @@ const PROFILES := ["sergeant", "veteran", "bruiser", "scout", "hothead"]
 ## talked every fight would be a squad nobody listens to. `hurt` reads the same
 ## - a real bite of the pool, then the roll - and its takes are the scream and
 ## the curse, so the heavier blow of the two sounds like the heavier blow.
+##
+## The five beats are the whole arc of a body in a fight: it finds something to
+## hit (`aggro`), it is hit (`hurt`), it nearly stops being hit ever again
+## (`big_hit`), it puts something down (`kill`), and it goes down itself
+## (`downed`). A possessed body speaks with its mercenary's profile, so without
+## the last four here the player's own voice only ever grunted.
 const SQUAD := {
 	# Something hostile has come into `engage_radius` and this body has just
 	# picked it: "oh shit, here they come", "who... oh", "get ready".
@@ -51,6 +57,25 @@ const SQUAD := {
 	"hurt": {"stem": "hurt", "count": 2, "db": -9.0, "pitch": [0.96, 1.04],
 		"chance": 0.01, "cooldown": 8.0, "share": 0.18,
 		"unit_size": 5.0, "max_distance": 26.0, "cutoff": 9000.0},
+	# A blow that could have ended it: the line the player remembers, so it
+	# needs a third of the pool and then its own roll - and it is rarer than
+	# `hurt` even when it fires, because a body that says it every fight is
+	# reading its own health bar out loud.
+	"big_hit": {"stem": "big_hit", "count": 2, "db": -7.0, "pitch": [0.94, 1.02],
+		"chance": 0.55, "cooldown": 9.0, "share": 0.35,
+		"unit_size": 5.0, "max_distance": 26.0, "cutoff": 9000.0},
+	# The body just put something down. Not every kill, and never twice in a
+	# breath: a squad that narrates every swing is noise, and these takes are
+	# the one place a profile's own character is allowed to show.
+	"kill": {"stem": "kill", "count": 3, "db": -10.0, "pitch": [0.94, 1.06],
+		"chance": 0.3, "cooldown": 9.0,
+		"unit_size": 5.0, "max_distance": 24.0, "cutoff": 9000.0},
+	# Downed: the first gasp as the blow lands, then the bleed clock's ragged
+	# moans (`VoiceEmitter.DOWNED_AFTER`), and no cooldown at all - it is the
+	# only thing that body has left to say.
+	"downed": {"stem": "downed", "count": 3, "db": -11.0, "pitch": [0.92, 1.0],
+		"chance": 0.9, "cooldown": 0.0,
+		"unit_size": 5.0, "max_distance": 22.0, "cutoff": 9000.0},
 }
 
 ## The keepers share one line set: the same beats - a greeting when the counter

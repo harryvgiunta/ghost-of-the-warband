@@ -19,6 +19,19 @@ const BARK_UV_METRES := 2.0
 const TRUNK_SIDES := 8
 const BRANCH_SIDES := 5
 
+## The trunk's own profile, as a fraction of the species' base radius at a given
+## height. Every trunk is the same six-ring tube: a flare that dies out inside the
+## first metre, a nearly straight lower run, then the taper to the tip. The mesh
+## and the collision are both cut from these numbers, so the bark a body meets is
+## the bark that is drawn - a collider built from a species table can be neither.
+const TRUNK_RINGS := 6
+const TRUNK_RING_CURVE := 0.94
+const TRUNK_TAPER_CURVE := 0.9
+const TRUNK_TIP_TAPER := 0.22
+const SNAG_TIP_TAPER := 0.34
+const TRUNK_FLARE := 0.24
+const TRUNK_FLARE_FALLOFF := 2.4
+
 const BUDGETS := {
 	"broadleaf": 1400,
 	"conifer": 900,
@@ -68,10 +81,96 @@ static func _build_one(species: Dictionary, rng: RandomNumberGenerator) -> Dicti
 		"leaves": leaves_mesh,
 		"height": height,
 		"radius": maxf(radius, 0.1),
+		# The tube's own numbers, kept beside the mesh: `radius` above is the whole
+		# trunk mesh's box, which carries the branch tips out to the crown and says
+		# nothing about where the bark is. Trunk collision and its planting rule
+		# read these instead.
+		"base_radius": float(dims["base_radius"]),
+		"trunk_height": float(dims["trunk_height"]),
+		"form": form,
 		"bark": String(species.get("bark", "bark_oak")),
 		"leaves_texture": String(species.get("leaves", "")),
 		"wind": species.get("wind", Vector2(0.15, 1.0)),
 	}
+
+
+## The flare the trunk's first rings are built with: widest at the ground, gone
+## inside the first metre.
+static func _ring_flare(y: float) -> float:
+	return 1.0 + TRUNK_FLARE * exp(-y * TRUNK_FLARE_FALLOFF)
+
+
+## How far the trunk has closed in at ring `t` (0 at the ground, 1 at the tip).
+static func _ring_taper(t: float, form: String) -> float:
+	return lerpf(1.0, SNAG_TIP_TAPER if form == "snag" else TRUNK_TIP_TAPER,
+		pow(t, TRUNK_TAPER_CURVE))
+
+
+## Where ring `index`'s vertices sit above the tree's own origin.
+static func _ring_height(index: int, trunk_height: float) -> float:
+	if index <= 0:
+		return 0.0
+	return trunk_height * pow(float(index) / float(TRUNK_RINGS - 1), TRUNK_RING_CURVE)
+
+
+## The radius of the drawn trunk at local height `y`, in the mesh's own units.
+##
+## The tube is a straight run between its ring vertices, so this is the surface the
+## bark shows. It is what a collider and a planting rule have to ask, because the
+## species table's `trunk` is the taper before the flare, and a trunk mesh's own
+## box is the branch tips.
+static func trunk_radius_at(variant: Dictionary, y: float) -> float:
+	var trunk_height := float(variant.get("trunk_height", 0.0))
+	var base_radius := float(variant.get("base_radius", 0.0))
+	if trunk_height <= 0.0 or base_radius <= 0.0:
+		return 0.0
+	var form := String(variant.get("form", "broadleaf"))
+	y = clampf(y, 0.0, trunk_height)
+	var low_y := 0.0
+	var low_radius := base_radius * _ring_taper(0.0, form) * _ring_flare(0.0)
+	for index in range(1, TRUNK_RINGS):
+		var high_y := _ring_height(index, trunk_height)
+		var high_radius := base_radius * _ring_taper(float(index) / float(TRUNK_RINGS - 1), form) \
+			* _ring_flare(high_y)
+		if y <= high_y:
+			return lerpf(low_radius, high_radius, (y - low_y) / maxf(high_y - low_y, 0.000001))
+		low_y = high_y
+		low_radius = high_radius
+	return low_radius
+
+
+## The bark's footprint on the ground, scaled: the number a planting rule keeps off
+## the walked line and a path steers around.
+static func trunk_footprint(variant: Dictionary, scale: float) -> float:
+	return trunk_radius_at(variant, 0.0) * scale
+
+
+## The bark a body meets, as collision: one cylinder on the trunk's own footprint.
+##
+## The species table's taper is the tube *before* its flare, and a trunk mesh's own
+## box is the branch tips out at the crown - a collider cut from either is not the
+## tree. The nominal radius let a body's boots stand inside the flare (an ironoak's
+## bark is a fifth wider at the ground than its taper says) and on the lane the box
+## made every ironoak a two-metre invisible pillar with a tree painted in the middle
+## of it. The cover anchor is measured off this surface at knee height, which is why
+## the report was that the sticky points were out of proportion to the trees that
+## were rendered: the cover anchor now stands on the bark's widest drawn ring, out
+## at the one radius a standing capsule can lean on.
+static func add_trunk_solids(parent: Node3D, at: Vector3, variant: Dictionary, scale: float) -> void:
+	var top := float(variant.get("trunk_height", 0.0)) * scale
+	if parent == null or top <= 0.0:
+		return
+	_trunk_solid(parent, at + Vector3(0.0, top * 0.5, 0.0), trunk_footprint(variant, scale), top)
+
+
+static func _trunk_solid(parent: Node3D, centre: Vector3, radius: float, height: float) -> void:
+	var shape := CylinderShape3D.new()
+	shape.radius = maxf(radius, 0.02)
+	shape.height = maxf(height, 0.05)
+	var collision := CollisionShape3D.new()
+	collision.shape = shape
+	collision.position = centre
+	parent.add_child(collision)
 
 
 static func _dimensions(species: Dictionary, rng: RandomNumberGenerator, form: String) -> Dictionary:
@@ -109,20 +208,13 @@ static func _build_trunk(species: Dictionary, rng: RandomNumberGenerator, dims: 
 	var crown_base: float = dims["crown_base"]
 
 	# Six rings: a flared root ring, a nearly straight lower trunk, then a taper.
-	var ring_count := 6
 	var path := PackedVector3Array()
 	var radii := PackedFloat32Array()
-	for ring_index in range(ring_count):
-		var t := float(ring_index) / float(ring_count - 1)
-		var y: float
-		if ring_index == 0:
-			y = 0.0
-		else:
-			y = trunk_height * pow(t, 0.94)
-		var taper := lerpf(1.0, 0.22 if form != "snag" else 0.34, pow(t, 0.9))
-		var flare := 1.0 + 0.24 * exp(-y * 2.4)
+	for ring_index in range(TRUNK_RINGS):
+		var t := float(ring_index) / float(TRUNK_RINGS - 1)
+		var y := _ring_height(ring_index, trunk_height)
 		path.append(_spine_at(y, dims))
-		radii.append(base_radius * taper * flare)
+		radii.append(base_radius * _ring_taper(t, form) * _ring_flare(y))
 	_add_tube(st, path, radii, TRUNK_SIDES, true, BARK_UV_METRES, Color.WHITE)
 
 	var branch_count := 3

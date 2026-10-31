@@ -14,7 +14,7 @@ extends SceneTree
 
 const Looks = preload("res://scripts/warband/warband_looks.gd")
 const Archer = preload("res://scripts/archer.gd")
-const ActorScript = preload("res://scripts/arena_actor.gd")
+const ActorScript = preload("res://scripts/warband/warband_body.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 
 const FACES_PATH := "res://assets/characters/warband/ironwood_faces.glb"

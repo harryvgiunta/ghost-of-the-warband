@@ -9,7 +9,6 @@ const StateScript = preload("res://scripts/player_state.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const LootScript = preload("res://scripts/warband/loot_vacuum.gd")
 const PanelScript = preload("res://scripts/warband/corpse_loot_panel.gd")
-const SoldierRunScript = preload("res://scripts/warband/soldier_loot_run.gd")
 
 const TEST_SAVE := "user://corpse_loot_state.json"
 
@@ -22,8 +21,6 @@ const HOOD := "armor_leather_head"
 const CLUB := "club_makeshift"
 const SHIELD := "shield_wood"
 const BRANCH := "branch_heavy"
-const SQUAD_BLADE := "focus_skull_death"
-const SQUAD_RAG := "neck_ember"
 const PANEL_BOW := "bow_twig"
 const PANEL_HELM := "armor_cloth_head"
 const PANEL_SHIRT := "armor_naked_chest"
@@ -40,19 +37,6 @@ class DummyCorpse extends Node3D:
 
 	func get_display_name() -> String:
 		return "Camp Watcher"
-
-class DummyRig extends Node:
-	var steps := 0
-
-	func set_locomotion(_velocity: Vector3, _grounded: bool) -> void:
-		steps += 1
-
-class DummySoldier extends Node3D:
-	var alive := true
-	var downed := false
-	var move_direction := Vector2.ZERO
-	var run_requested := false
-	var rig: DummyRig = null
 
 var checks := 0
 var failures := 0
@@ -100,7 +84,6 @@ func run() -> void:
 	check_single_take()
 	check_claim()
 	await check_freed_body()
-	await check_squad_claim()
 	check_panel()
 
 	_remove_test_save()
@@ -252,50 +235,6 @@ func check_freed_body() -> void:
 	check(_pooled(BRANCH) == 0, "a freed body's piece never reaches the stash")
 	check(int(_loot.claim_corpse(corpse, 0).get("count", -1)) == 0,
 		"claiming a freed body reports empty instead of crashing")
-
-# --- the squad strips bodies on its own ------------------------------------
-
-func check_squad_claim() -> void:
-	var kit: Array[String] = [SQUAD_BLADE, SQUAD_RAG]
-	var body := _body(kit, Vector3(4.0, 0.0, 0.0), "WatcherSquad")
-	var corpse := _loot.register_corpse(body)
-	check(corpse > 0, "the squad's body registers")
-
-	var first := DummySoldier.new()
-	first.name = "SoldierA"
-	first.rig = DummyRig.new()
-	root.add_child(first)
-	first.global_position = Vector3.ZERO
-	var second := DummySoldier.new()
-	second.name = "SoldierB"
-	second.rig = DummyRig.new()
-	root.add_child(second)
-	second.global_position = Vector3(0.6, 0.0, 0.0)
-
-	var runner = SoldierRunScript.new()
-	runner.name = "CorpseRun"
-	root.add_child(runner)
-	runner.setup(_warband, _loot, [first, second])
-	var collected := [0]
-	runner.finished.connect(func(count: int) -> void: collected[0] = count)
-
-	runner.run([])
-	check(runner.running(), "the squad sets off for the body")
-	await create_timer(1.3).timeout
-	check(runner.done(), "the squad's run finishes")
-	check(int(collected[0]) == 2, "the run reports both pieces, got %d" % int(collected[0]))
-	check(_pooled(SQUAD_BLADE) == 1, "the squad books the blade into the stash")
-	check(_pooled(SQUAD_RAG) == 1, "the squad books the rag into the stash")
-	check(_loot.corpse_items(corpse).is_empty(), "the squad leaves an empty body")
-	check(not _loot.corpse_ids().has(corpse), "the stripped body is not re-offered")
-	check(first.rig.steps > 0 or second.rig.steps > 0,
-		"the jog drives the rig's step cycle")
-
-	runner.run([])
-	check(int(collected[0]) == 0, "a second run finds nothing left")
-	check(runner.done(), "a run with no targets finishes at once")
-	check(_pooled(SQUAD_BLADE) == 1 and _pooled(SQUAD_RAG) == 1,
-		"no soldier can book the same corpse piece twice")
 
 # --- the corpse screen -----------------------------------------------------
 

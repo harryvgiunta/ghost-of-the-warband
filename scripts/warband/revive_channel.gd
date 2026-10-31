@@ -54,14 +54,14 @@ func set_bodies(list: Array) -> void:
 	bodies = list
 
 ## Open a channel from `reviver_peer` onto `target_actor`. Refused - with no
-## channel left behind - when the target is not a downed body, is out of reach,
-## is already dead, or when the reviver is AI.
+## channel left behind - when the target is not a downed body, is out of reach or
+## is already dead.
 func begin(reviver_peer: int, target_actor) -> bool:
 	if reviver_peer <= 0:
-		# Peer 0 is the router's "nobody": only a bot body answers to it.
+		# Peer 0 is the router's "nobody": no body answers to it.
 		return false
 	var reviver = body_of(reviver_peer)
-	if not is_instance_valid(reviver) or bool(reviver.get("is_bot")):
+	if not is_instance_valid(reviver):
 		return false
 	if not can_revive(reviver, target_actor):
 		return false
@@ -166,7 +166,7 @@ func body_of(peer: int) -> Object:
 func can_revive(reviver, target) -> bool:
 	if not is_instance_valid(reviver) or not is_instance_valid(target):
 		return false
-	if bool(reviver.get("is_bot")) or not _standing(reviver):
+	if not _standing(reviver):
 		return false
 	if not _revivable(target):
 		return false

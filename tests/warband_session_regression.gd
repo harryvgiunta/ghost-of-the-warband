@@ -126,10 +126,6 @@ func _build_field(authoritative: bool) -> bool:
 	battlefield.add_child(controller)
 	controller.setup(warband, camera, battlefield)
 	bodies = controller.spawn_mercenaries(_posts(), authoritative)
-	for body in bodies:
-		# Every body the scene did not hand to a soul holds its ground, so the
-		# field cannot turn into a brawl under the measurements.
-		controller.set_bot(controller.merc_of(body), false)
 	session = SessionScript.new()
 	session.name = "WarbandSession"
 	battlefield.add_child(session)
@@ -288,7 +284,6 @@ func _host_run() -> void:
 	check(warband.souls.occupied_by(client_merc) == 0, "The router frees the departed body")
 	var freed = controller.body_of(client_merc)
 	check(freed != null, "The departed body stays on the field")
-	check(freed != null and bool(freed.is_bot), "The departed body falls back to its own AI")
 	check(session.role() == "host", "The host keeps hosting after the client leaves")
 	check(controller.merc_for_peer(1) == host_merc, "The host keeps its own body")
 	check(controller.body_of(host_merc) != null and controller.body_of(host_merc).alive,

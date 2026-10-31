@@ -129,7 +129,7 @@ if log != null:
 `event()` sanitizes dictionaries, arrays, vectors, colors and objects into
 JSON-safe values; payloads are capped. `context()` is included in the marker and
 therefore in the next crash report. The existing helpers in `main.gd`,
-`arena.gd`, `delve.gd`, `session.gd`, `title.gd`, `pause_menu.gd` and
+`title.gd`, `world_scene.gd` and
 `player_state.gd` show the intended granularity.
 
 ## Verifying

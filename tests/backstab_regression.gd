@@ -6,7 +6,7 @@ extends SceneTree
 ## Run manually:
 ##   godot --headless --path . --script tests/backstab_regression.gd
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Archer = preload("res://scripts/archer.gd")
 const Backstab = preload("res://scripts/backstab_ability.gd")
 
@@ -64,7 +64,7 @@ func fighter(parent: Node3D, index: int, spawn: Vector3, authority: bool = true)
 	actor.slot = index
 	actor.authoritative = authority
 	parent.add_child(actor)
-	actor.configure(index + 1, false, "Regression", spawn)
+	actor.configure(index + 1, "Regression", spawn)
 	actor.set_process(false)
 	actor.rig.set_process(false)
 	actor.rig.set_physics_process(false)

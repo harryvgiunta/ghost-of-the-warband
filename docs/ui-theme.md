@@ -7,7 +7,7 @@ built against.
 Boards: `media/concept/00_contact_sheet.png` (all nine on one page),
 `01_theme_sheet.png` … `08_altar.png`. The gear board composites
 `media/concept/preview_ranger.png`, captured from the game's own character
-preview viewport (`tools/ui_theme/capture_preview.gd`).
+preview viewport (now built by `WarbandPaperdoll`).
 
 ## The one object
 
@@ -139,8 +139,7 @@ keycap `scripts/ui/ledger_keycap.gd`. Captures: `media/concept/game_capture.png`
 `game_menu.png`, `game_warband.png`, `game_gear.png`, `game_quartermaster.png`,
 `game_altar.png`, `game_title.png`.
 
-The frontier's own inventory (`world_ui.gd`, Ironwood mode) keeps its old chrome:
-it is the menu the gear page was merged *from*, not a warband surface.
+The campaign's own screens are all ledger windows: `warband_menu.gd`, `warband_screen.gd`, `warband_paperdoll.gd`, `altar_menu.gd`, `vendor_menu.gd`, `quartermaster_menu.gd`, `corpse_loot_panel.gd`, `world_map.gd`, plus `settings_menu.gd` on the title.
 
 Polish landed: 256 px page texture with softened fibres (no banding under the
 stretch), focus state = hover plate, keycaps wrapped by an `HFlowContainer`.
@@ -162,7 +161,7 @@ scene's own policy takes the pointer back once no panel is open.
 2. One `Theme` resource plus `scripts/ui/ledger.gd` helpers; the screens keep
    their current signals and public fields — only construction changes:
    `tutorial_card.gd`, `warband_screen.gd`, `warband_paperdoll.gd`,
-   `pause_menu.gd`, `quartermaster_menu.gd`, `altar_menu.gd`, `title.gd`.
+   `warband_menu.gd`, `quartermaster_menu.gd`, `altar_menu.gd`, `title.gd`.
 3. Import the two OFL fonts as Godot font resources with size overrides.
 4. Verification: launch the warband world, open every screen, capture at
    1440 × 900 and 1920 × 1080; the existing `warband_ui`, tutorial and layout regressions must still pass; no `StyleBoxFlat` chrome left on

@@ -1,5 +1,13 @@
 # Ghost of the Warband
 
+> **The sandbox modes and the expedition are gone.** Ghost of the Warband is the
+> only game: `title.tscn` → `GameFlow` → `scenes/warband_world.tscn`. The frontier
+> (`main.tscn`), arena (`arena.tscn`), delve (`delve.tscn`) and the expedition
+> field (`admin_arena.tscn`) plus their scripts were deleted; `arena_actor.gd` is
+> now `scripts/warband/warband_body.gd` (`WarbandBody`) and nothing carries a bot
+> AI or a round respawn. This document records the design that was built; where a
+> section names one of those deleted files it is **history**, not a live contract.
+
 A possession-based warband overhaul of Ironwood. There is no main character: the
 player is a floating consciousness that enters any living mercenary in their
 warband. Every mercenary has identical base stats (`100` health, `1000` stamina);
@@ -40,14 +48,12 @@ not re-implement it and do not redefine an enum, a slot id or a tier name.
 | `scripts/warband/cruor_manager.gd` | `WarbandCruor` | Essence wallet, `unbind`, `distill`, `distill_all`, `brand`, brand map; the altar's reagent rite: `BASIC_REAGENT` (`ichor_vial`), `ANOINT_RECIPES` (ability id → `{reagent catalog id: count}`, every weapon/shield skill `{ichor_vial: 1}` for now), the `anointed` ledger (catalog id → ability id), `anoint_skill`/`anoint_key`/`anoint_recipe`/`recipe_text`/`is_anointed`/`anointed_skill`/`anointed_among`/`anoint_line`/`can_anoint`/`anoint`; persistence (`cruor.anointed` re-derived from today's table on load) |
 | `scripts/warband/branded_skills.gd` | `BrandedSkills` | The six branded abilities, which item class carries each, tier power curve |
 | `scripts/warband/mercenary_vendor.gd` | `WarbandVendor` | Hire price (120 + 35/body), `hire()`, recruiter board |
-| `scripts/warband/damage_scaler.gd` | `WarbandDamage` | The single bubble multiplier, keyed by instance id |
 | `scripts/warband/warband_state.gd` | autoload `Warband` | Owns roster + souls + stash + cruor, gold bridge to `PlayerState.credits`, save/load (`SAVE_VERSION` 6; v6 adds `cruor.anointed`, so a v5 file loads with plain steel), possession mirror, and `anoint(item_id)`: spends the recipe from the shared stash, writes the ledger, credits APPLY orders through `quests.note_applied` per reagent, emits `anointed(item_id, ability)` and `changed`, and returns `completed` (the orders it finished); a piece that is not the warband's, already anointed, or short of its recipe is refused and nothing is spent |
 | `tests/warband_contract_regression.gd` | - | 140 checks over all of the above |
 
-Damage funnels already call `WarbandDamage.scale(amount, self)` as their first
-statement: `main.gd::take_damage`, `arena_actor.gd::take_damage`,
-`devil_mob.gd::take_damage` (also covers `forest_mob.gd`), `enemy.gd::take_damage`
-and `ranger_clone.gd::take_damage`. **Never add a second multiplier.**
+There is no proximity-bubble damage scaler any more (`WarbandDamage` and
+`combat_bubble.gd` went with the expedition that needed them): every damage funnel
+takes the damage it is given. **Never add a second multiplier.**
 
 ## 3. How the modes are built
 
@@ -365,6 +371,11 @@ These landed on the same world without a second rulebook. Each has one owner:
   plus the three slots from that body's runner every frame.
 - **The cover peek is RMB, in cover only.** Outside cover the same press is the
   guard; the lean ends on release, and leaving cover with `F` drops it.
+- **Sticky movement is a press, never a contact.** `F` sticks only to a surface
+  inside the frontal cone (`CoverMovement.STICK_ARC`), so a tree behind the player
+  is not cover; nothing attaches while walking, and the body comes off when the
+  input points to the far side of the surface the press took (`stick_normal`), on
+  jump, roll, step, blade, death or lost support. Only a fresh `F` puts it back.
 - **Escape is `WarbandMenu`** — six rows (resume, save, load, settings, exit,
   quit), one ledger frame, the shared sound page. It never pauses the tree, and
   `world_scene` closes it, then an open panel, then opens it.
@@ -757,7 +768,7 @@ and the rules they cannot break live in `docs/warband-handoff.md` §§1-4.
 | The keeper who talks | `scripts/warband/quest_giver.gd`, `quest_marker.gd` | `talk(service, peer)` raises the card that teaches or hands over an order and answers false when the counter should open instead; `marker_service()` decides who wears the gold `TALK TO HIM` arrow (the recruiter while the band is short of the cap, the quartermaster when he has an order, a turn-in or a vial to explain) |
 | The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed` per cage (roster + stash dressing + ledger + HUD). A `FREE HIM` arrow rides the nearest shut cage while the order is live |
 | The warcamps | `scripts/warband/watcher_warren.gd` | 21 hollow wardens in three camps 78 / 96 / 86 m off the lane, dressed from the village kit, one `MobWander` territory each, wired to the world's kill handler so they count toward the bounty |
-| The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground **in the body's own reach** ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. The reach is measured from the body, not only from the crosshair: a click on a corpse across the field falls through to the swing instead of stealing it |
+| The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground **in the body's own reach** ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. The reach is measured from the body, not only from the crosshair: a click on a corpse across the field falls through to the swing instead of stealing it. **A living body on the reticle is never a loot** - `aim_sample()` hands the ray's target to `try_click`, which refuses a body that answers `alive` true, because a mob's aim point is its own chest and a blade at its feet is inside the same arm's reach; a corpse answers `alive` false and stays lootable |
 | The map | `scripts/warband/world_map.gd` | one page, `M`, no pause: the lane sampled from the trail's path, the camp ring, the walled square, hostiles, the warband and the soul's own facing, plus `host.map_markers()` (shut cages, warcamps) |
 | The altar | `scripts/warband/sacrificial_altar.gd`, `altar_menu.gd`, `cruor_manager.gd` | `SacrificialAltar` at `ALTAR_POINT` (8, 0, 4): a stepped stone pedestal and stele (`AltarStone`), a `Slab`, one merged `AltarDressing` (reagent bowl of glowing ichor, horned skull with ochre marks, blood, eight tallow candles, two iron stands, eight skull sticks, a bone heap), blood-red `AltarFlames` cards, exactly one light `RitualLight` (warm red, energy 2.6, range 9, no shadows) and an `AltarNameplate` "THE ALTAR" at 2.2 m; no colliders, all within 2.5 m. `AltarMenu` opens on ANOINT: every weapon or shield the warband carries (pooled or worn), waiting-first then dearest, with the skill's icon (dim until anointed), piece, skill and key, recipe and an ANOINT button that stays pressable on a short stash so the refusal is printed — or ANOINTED. ESSENCE is unbind / distil 5:1 / brand. `G` there sets "The altar: lay a warden's ichor on a weapon and it wakes into its skill." |
 

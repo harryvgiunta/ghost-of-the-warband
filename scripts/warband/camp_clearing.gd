@@ -318,10 +318,7 @@ static func plant_wood(parent: Node3D, style: WorldStyle, clearing: Rect2, depth
 		if clearing.has_point(point):
 			inside += 1
 		if solid:
-			var tree_height := float(variant.get("height", 8.0)) * scale_at
-			var trunk_spec: Vector2 = species.get("trunk", Vector2(0.04, 0.62))
-			_trunk_collider(solids, at, maxf(0.18, tree_height * float(trunk_spec.x) * 1.04),
-				maxf(1.4, tree_height * float(trunk_spec.y) * 0.95))
+			TreeKit.add_trunk_solids(solids, at, variant, scale_at)
 	out["trees"] = points.size()
 	out["inside"] = inside
 
@@ -498,16 +495,6 @@ static func _pick(pool: Array, rng: RandomNumberGenerator, fallback: Color) -> C
 	if pool.is_empty():
 		return fallback
 	return pool[rng.randi_range(0, pool.size() - 1)]
-
-
-static func _trunk_collider(solids: Node3D, at: Vector3, radius: float, height: float) -> void:
-	var shape := CylinderShape3D.new()
-	shape.radius = radius
-	shape.height = height
-	var collision := CollisionShape3D.new()
-	collision.shape = shape
-	collision.position = at + Vector3(0.0, height * 0.5, 0.0)
-	solids.add_child(collision)
 
 
 ## A rectangle of walls around `rect`, split where a gap rect crosses the line.

@@ -414,6 +414,12 @@ class FakeRoster extends RefCounted:
 	func equipped_of(_merc_id: int) -> Dictionary:
 		return {}
 
+	func is_alive(_merc_id: int) -> bool:
+		return true
+
+	func health_of(_merc_id: int) -> float:
+		return 100.0
+
 
 class FakeController extends RefCounted:
 	var bodies: Dictionary = {}

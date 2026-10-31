@@ -802,11 +802,10 @@ func _refresh_preview() -> void:
 	# The stage shows the mercenary being dressed, not a generic ranger: his own
 	# height, face, hair and colours, then his kit on top of them.
 	preview.set_appearance(Looks.profile_for(selected_merc))
-	preview.apply_state(PreviewState.new(loadout, worn))
+	preview.apply_kit(loadout, worn)
 	preview.set_active(true)
-	# The line under the ranger names the set TAB brings up, exactly as the
-	# frontier's own paperdoll does: which pair is in the hands is the one fact
-	# that decides what the next swap will take up.
+	# The line under the ranger names the set TAB brings up: which pair is in
+	# the hands is the one fact that decides what the next swap will take up.
 	var active_set: int = _warband.roster.active_weapon_set(selected_merc)
 	_set_label.text = "SET %d OF %d  \u00b7  MAIN: %s   \u00b7   OFF: %s" % [
 		active_set + 1, RosterScript.WEAPON_SET_COUNT,
@@ -814,21 +813,6 @@ func _refresh_preview() -> void:
 		_item_name(str(gear.get("off", ""))).to_upper()]
 	_set_button.text = "SWAP TO SET %d  \u00b7  TAB" % (
 		RosterScript.WEAPON_SET_COUNT - active_set)
-
-
-class PreviewState:
-	var _loadout: Dictionary
-	var _trinkets: Dictionary
-
-	func _init(loadout: Dictionary, trinkets: Dictionary) -> void:
-		_loadout = loadout
-		_trinkets = trinkets
-
-	func loadout() -> Dictionary:
-		return _loadout
-
-	func trinkets() -> Dictionary:
-		return _trinkets
 
 
 func _label(parent: Node, text: String, font_size: int, color: Color) -> Label:

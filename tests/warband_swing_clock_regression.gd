@@ -36,6 +36,7 @@ extends SceneTree
 ##      release returns the rig to READY.
 
 const WORLD := "res://scenes/warband_world.tscn"
+const CombatScript = preload("res://scripts/combat.gd")
 
 var checks := 0
 var failures := 0
@@ -336,8 +337,62 @@ func wedge_probe(wedged: int) -> void:
 			float(rig.melee_progress_for("right")) if bool(rig.is_melee()) else 1.0,
 			str(rig.phase), str(rig.weapon), str(combat.grounded)])
 
-# --- 6. the bow -----------------------------------------------------------
+# --- 7. the road out of the origin ----------------------------------------
 
+## The campaign is 1,374 m of lane with the town past its end. Every mode's aim
+## gate refused a point more than 1 km from (0,0,0) - `length_squared() >
+## 1000000.0`, a bound for a small arena applied to a kilometre and a third of
+## road. Past that mark a body could not swing, draw, throw or guard, from any
+## distance, on any body the soul entered, while every bot beside it swung
+## freely: "no matter how far away I was, I couldn't swing anything, even when
+## switching characters". The bound is the body's own now.
+func check_far_from_origin() -> void:
+	var dressed: bool = await arm("dagger_ironwood")
+	check(dressed, "the shiv is in the hand before the far cut")
+	# The camp's leash holds a body inside its own cage until the latch is cut, and
+	# a clamped body is snapped home every frame. Tell the camp the warband has
+	# already left it, exactly as the world does for a checkpoint past the cages,
+	# so the walk out of the origin is a place a body can stand.
+	game.camp.place_resumed(game.bodies)
+	var far := Vector3(0.0, 0.0, -1150.0)
+	plate(far)
+	body.position = far + Vector3(0.0, 0.6, 0.0)
+	body.velocity = Vector3.ZERO
+	await settle_grounded()
+	# The eye eases after the body; a walk to the far end of the road keeps them
+	# together, so this check waits for the camera instead of reading a ray that
+	# still starts a kilometre behind.
+	var caught := 0
+	while caught < 300:
+		var eye: Vector3 = controller.camera_rig.aim_ray().get("origin", far)
+		if eye.distance_to(body.global_position) <= 8.0:
+			break
+		await physics_frame
+		caught += 1
+	check(caught < 300, "the eye catches the body down the road (%d frames)" % caught)
+	check(body.global_position.length() > 1000.0,
+		"the body stands past the old origin bound (%.0f m out)" % body.global_position.length())
+	check(bool(combat.grounded), "on the campaign's own road")
+	var sample: Dictionary = controller.aim_sample()
+	var point: Vector3 = sample.get("point", Vector3.ZERO)
+	check(point.length() > 1000.0,
+		"and the aim point it resolves is out there too (%s, %.0f m from origin)"
+			% [str(point.round()), point.length()])
+	check(bool(CombatScript.aim_point_valid(body.global_position, point)),
+		"a point the body can see is a valid aim point wherever it stands")
+	check(not bool(CombatScript.aim_point_valid(body.global_position,
+		Vector3(1e12, 1e12, 1e12))), "a coordinate off the world is still refused")
+	check(bool(CombatScript.aim_point_valid(body.global_position,
+		body.global_position + Vector3(0.0, 1.5, -40.0))), "a real aim 40 m out is fine")
+	check(click(), "a click out here still starts a cut")
+	check(bool(rig.is_melee()), "and the rig is swinging")
+	await wait_hand_idle()
+	check(bool(rig.can_begin_melee("right")), "the hand recovers out here too")
+	print("SWING_CLOCK far from_origin=%.0f point=%.0f" % [
+		body.global_position.length(), point.length()])
+
+
+# --- 6. the bow -----------------------------------------------------------
 func check_bow() -> void:
 	var dressed: bool = await arm("bow_twig")
 	check(dressed, "the twig bow is worn")
@@ -432,6 +487,7 @@ func run() -> void:
 	await check_click_rate()
 	await check_long_session()
 	await check_bow()
+	await check_far_from_origin()
 	_finish()
 
 func _on_watchdog() -> void:

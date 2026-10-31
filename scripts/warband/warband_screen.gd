@@ -1,12 +1,12 @@
 class_name WarbandScreen
 extends CanvasLayer
 ## The tactical warband screen: the purse and worth in the header, one line per
-## mercenary (live health, ALIVE/DOWNED/DEAD chip, gear, deployment switch and a
-## click-to-control button) and the Gold recruiter's board underneath.
+## mercenary (live health, ALIVE/DOWNED/DEAD chip, gear and a click-to-control
+## button) and the Gold recruiter's board underneath.
 ##
 ## It owns no state and no input. Every number is read out of `Warband` at paint
 ## time and every action goes back through it, so a heal on the battlefield, a
-## hire or a deployment toggle repaints the panel without a scene reload.
+## hire repaints the panel without a scene reload.
 ## Entering a body is deliberately NOT done here: `possess_requested` is the seam
 ## the possession controller listens on, which keeps the router the one authority
 ## over who is inside what.
@@ -19,7 +19,6 @@ signal possess_requested(merc_id: int)
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Vendor = preload("res://scripts/warband/mercenary_vendor.gd")
 const State = preload("res://scripts/player_state.gd")
-const RunReportScript = preload("res://scripts/warband/run_report.gd")
 
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
@@ -36,19 +35,13 @@ const SIZE := Vector2(1090, 660)
 const ARMOR_SLOTS := ["head", "chest", "hands", "legs", "feet"]
 
 ## Row controls keyed by mercenary id, so a scene (or a test) reads one line
-## without walking the tree: `{root, name, bar, health, state, gear, deploy,
-## control}`. Rebuilt only when the roster's shape changes; `_apply_row` keeps
-## the existing buttons alive so hover/focus survive a refresh.
+## without walking the tree: `{root, name, bar, health, state, gear, control}`.
+## Rebuilt only when the roster's shape changes; `_apply_row` keeps the existing
+## buttons alive so hover/focus survive a refresh.
 var rows: Dictionary = {}
 ## Header fields, in the order the screen reads them.
 var gold_label: Label
-var deployed_label: Label
 var value_label: Label
-## The LAST RUN block: the filed battle's counts, the bodies' outcomes and the
-## lifetime record. Empty until the warband has fought something.
-var last_run_label: Label
-var run_bodies_label: Label
-var record_label: Label
 ## Recruiter board: the three fresh names currently offered, and the button that
 ## swears each one in.
 var hire_names: Array[String] = []
@@ -114,7 +107,6 @@ func refresh() -> void:
 		return
 	_sync_rows()
 	_refresh_header()
-	_refresh_runs()
 	_refresh_recruiter()
 
 func set_status(message: String) -> void:
@@ -201,11 +193,7 @@ func _ensure_built() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(spacer)
-	deployed_label = _label(head, "", 12, TEAL)
 	value_label = _label(head, "", 12, MUTED)
-	_section(column, "")
-
-	_build_run_block(column)
 	_section(column, "MERCENARY")
 	_rows_box = VBoxContainer.new()
 	_rows_box.add_theme_constant_override("separation", 6)
@@ -276,14 +264,6 @@ func _make_row(merc_id: int) -> Dictionary:
 	var gear_label := _label(root, "", 12, MUTED)
 	gear_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gear_label.clip_text = true
-	var deploy := Button.new()
-	deploy.toggle_mode = true
-	deploy.focus_mode = Control.FOCUS_NONE
-	deploy.custom_minimum_size = Vector2(104, 30)
-	deploy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	deploy.add_theme_font_size_override("font_size", 10)
-	deploy.pressed.connect(func() -> void: _on_deploy(merc_id, deploy.button_pressed))
-	root.add_child(deploy)
 	var control := Button.new()
 	control.text = "CONTROL"
 	control.theme_type_variation = "PrimaryButton"
@@ -294,7 +274,7 @@ func _make_row(merc_id: int) -> Dictionary:
 	control.pressed.connect(func() -> void: _on_control(merc_id))
 	root.add_child(control)
 	return {"root": root, "name": name_label, "bar": bar, "health": health_label,
-		"state": chip, "gear": gear_label, "deploy": deploy, "control": control}
+		"state": chip, "gear": gear_label, "control": control}
 
 func _apply_row(merc_id: int) -> void:
 	var row: Dictionary = rows[merc_id]
@@ -320,12 +300,6 @@ func _apply_row(merc_id: int) -> void:
 	bar.value = health
 	(row["health"] as Label).text = "%d / %d" % [roundi(health), roundi(max_health)]
 	(row["gear"] as Label).text = _gear_summary(merc_id)
-	var deploy: Button = row["deploy"]
-	deploy.set_pressed_no_signal(bool(roster.find(merc_id).get("deployed", false)))
-	deploy.text = "DEPLOYED" if deploy.button_pressed else "DEPLOY"
-	deploy.disabled = state == Contracts.HealthState.DEAD
-	deploy.tooltip_text = "%s fielded of %d." % [
-		str(roster.deployed_count()), int(_warband.deployment_cap)]
 	var control: Button = row["control"]
 	var holder := 0
 	if _souls != null and _souls.has_body(merc_id):
@@ -408,78 +382,7 @@ func _refresh_header() -> void:
 	if _warband == null:
 		return
 	gold_label.text = "%d G" % int(_warband.gold())
-	deployed_label.text = "%d / %d FIELDED" % [
-		int(_warband.roster.deployed_count()), int(_warband.deployment_cap)]
 	value_label.text = "WORTH %d G" % int(_warband.total_value())
-
-# --- last run --------------------------------------------------------------
-
-## The smallest honest record of the last battle: one row of counts, the bodies
-## that fought, and the warband's lifetime tally. Every number comes out of the
-## filed report (`Warband.last_run()`) or the lifetime counters; the panel never
-## keeps a copy of its own.
-func _build_run_block(parent: Node) -> void:
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 14)
-	parent.add_child(head)
-	var title := _label(head, "LAST RUN", 14, AMBER)
-	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
-	title.custom_minimum_size = Vector2(96, 0)
-	last_run_label = _label(head, "", 13, CREAM)
-	last_run_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	last_run_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	run_bodies_label = _label(parent, "", 12, MUTED)
-	run_bodies_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	record_label = _label(parent, "", 12, TEAL)
-
-func _refresh_runs() -> void:
-	if last_run_label == null:
-		return
-	if _warband == null or not _warband.has_method("last_run"):
-		last_run_label.text = "No battle recorded yet."
-		run_bodies_label.text = ""
-		record_label.text = ""
-		return
-	var report: Dictionary = _warband.last_run()
-	if report.is_empty():
-		last_run_label.text = "No battle recorded yet."
-		run_bodies_label.text = ""
-	else:
-		last_run_label.text = "%s  ·  %d of %d waves cleared  ·  %d kills  ·  %d items  ·  %d gold  ·  %d cruor  ·  %s" % [
-			RunReportScript.outcome_label(str(report.get("outcome", ""))),
-			int(report.get("waves_cleared", 0)), int(report.get("waves", 0)),
-			int(report.get("kills", 0)), int(report.get("items", 0)),
-			int(report.get("gold", 0)), int(report.get("cruor", 0)),
-			RunReportScript.stamp_text(int(report.get("ended_at", 0)))]
-		run_bodies_label.text = _body_line(report.get("bodies", []))
-	record_label.text = _record_line(_warband.run_record())
-
-func _record_line(totals: Dictionary) -> String:
-	var runs := int(totals.get("runs", 0))
-	if runs <= 0:
-		return "WARBAND RECORD  no battles fought yet"
-	return "WARBAND RECORD  %d run(s)  ·  %d clear(s)  ·  %d wipe(s)  ·  best wave %d" % [
-		runs, int(totals.get("wins", 0)), int(totals.get("wipes", 0)),
-		int(totals.get("best_wave", 0))]
-
-## `Aldous 62/100 · Brine downed · Cael dead` - the survivors' real health and
-## the state each body left the field in.
-func _body_line(bodies: Variant) -> String:
-	if not bodies is Array:
-		return ""
-	var line := ""
-	for entry in bodies as Array:
-		if not entry is Dictionary:
-			continue
-		var body: Dictionary = entry
-		var part := str(body.get("name", "Unknown"))
-		if str(body.get("state", "")) == RunReportScript.STATE_ALIVE:
-			part += " %d/%d" % [roundi(float(body.get("health", 0.0))),
-				roundi(float(body.get("max_health", 0.0)))]
-		else:
-			part += " " + str(body.get("state", ""))
-		line += ("  ·  " if not line.is_empty() else "") + part
-	return line
 
 # --- recruiter -------------------------------------------------------------
 
@@ -550,17 +453,6 @@ func _on_hire(index: int) -> void:
 	var candidate := hire_names[index] if index < hire_names.size() else ""
 	var result: Dictionary = _warband.hire(candidate)
 	set_status(str(result.get("message", "")))
-	refresh()
-
-func _on_deploy(merc_id: int, on: bool) -> void:
-	if _warband == null:
-		return
-	var result: Dictionary = _warband.set_deployed(merc_id, on)
-	set_status(str(result.get("message", "")))
-	if not bool(result.get("ok", false)) and rows.has(merc_id):
-		# The toggle must not keep a mark the roster refused.
-		var deploy: Button = rows[merc_id]["deploy"]
-		deploy.set_pressed_no_signal(not on)
 	refresh()
 
 func _on_control(merc_id: int) -> void:

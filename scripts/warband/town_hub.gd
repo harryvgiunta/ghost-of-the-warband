@@ -5,13 +5,12 @@ extends Node3D
 ## gap cut for the road, an antler gate in the gap, and the settlement behind it:
 ## stick longhouses with their backs to the stakes, round wattle dwellings, an
 ## open stall, the wardens' offering ground, and a fire in the middle of it all.
-## The five sworn mercenaries stand around that fire as real `ArenaActor` bodies
+## The five sworn mercenaries stand around that fire as real `WarbandBody` bodies
 ## under the real `PossessionController`, the local soul starts inside the first
 ## of them, and every service the loop needs is a node you can walk up to: the
 ## shared stash chest, the `SacrificialAltar` (where a warden's ichor wakes a
 ## weapon into its skill), the Gold recruiter's booth, the quartermaster's shop,
-## the three keepers' counters (Orla, Brann, Vey) and the `ExpeditionGate` that
-## marks a battle line and asks the flow owner for the arena.
+## and the three keepers' counters (Orla, Brann, Vey).
 ##
 ## Behind every counter stands a keeper - an armoured humanoid, one of the five
 ## who run this place - and over the head of whichever of them has something to
@@ -19,20 +18,18 @@ extends Node3D
 ## this scene only moves the arrow). Three archers of the watch hold the gate and
 ## shoot what comes up the road at it.
 ##
-## There is no combat in the square itself: unpossessed bodies are fixtures
-## (`set_bot(false)`), so it never brawls on its own. The watch is the one armed
-## thing here, and it only ever aims outward, at the world's own hostiles.
+## There is no combat in the square itself: nothing hostile is fielded inside the
+## stakes. The watch is the one armed thing here, and it only ever aims outward,
+## at the world's own hostiles.
 ##
-## The same objects are used by the admin arena, so nothing here re-implements a
-## service; this scene only places them and resolves which one a standing body is
-## next to (`interact_at`).
+## Nothing here re-implements a service; this scene only places them and resolves
+## which one a standing body is next to (`interact_at`).
 
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
-const GateScript = preload("res://scripts/warband/expedition_gate.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
 const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
@@ -53,7 +50,7 @@ const GuardScript = preload("res://scripts/warband/town_guard.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 
 ## How close a body must stand to the chest and the desks. The altar keeps its own
-## `interact_range` and the gate its own (larger) `open_radius`.
+## `interact_range`.
 const SERVICE_REACH := 3.0
 ## The town is a ring now, not a room: this is the stake wall a body stands
 ## inside, and the dressing mirrors it so the two can never drift apart.
@@ -88,7 +85,6 @@ const STASH_POINT := Vector3(-8.0, 0.0, 4.0)
 const ALTAR_POINT := Vector3(8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
 const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
-const GATE_POINT := Vector3(8.0, 0.0, -6.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 
 ## The paved middle of the square: its size, the size of one laid stone, and how
@@ -101,7 +97,7 @@ const PAVING_SEED := 4217
 ## ring clear of every other service (the closest pair is Orla and the stash at
 ## 6.3 m), and all three stand inside the square's walkable bound so a body can
 ## always reach the stall it wants: Orla's bow rack west, Brann's anvil east,
-## Vey's armour table on the gate's side.
+## Vey's armour table at the back of the square.
 const VENDOR_ORLA_POINT := Vector3(-14.0, 0.0, 2.0)
 const VENDOR_BRANN_POINT := Vector3(14.0, 0.0, 0.0)
 const VENDOR_VEY_POINT := Vector3(7.0, 0.0, -14.0)
@@ -179,9 +175,8 @@ const SPAWN_POSTS := [
 	Vector3(4.2, 0.0, -1.2), Vector3(-3.6, 0.0, -1.6),
 ]
 
-## The first-run warband: the same identical bodies the arena fields, in plain
-## dusk gear, so the town is playable before a single battle. An existing
-## warband is left exactly as it is.
+## The first-run warband: identical bodies in plain dusk gear, so the town is
+## playable from its first minute. An existing warband is left exactly as it is.
 const TOWN_LINEUP := [
 	{"name": "Aldous", "main": "sword_short", "off": "shield_buckler", "armor": "leather"},
 	{"name": "Brine", "main": "dagger_iron", "off": "shield_kite", "armor": "mail"},
@@ -191,16 +186,12 @@ const TOWN_LINEUP := [
 ]
 
 ## Spares the collective stash starts with, so the paperdoll and the altar have
-## something to move before the first battle is fought.
+## something to move from the first minute.
 const TOWN_SPARES := [
 	"sword_arming", "shield_buckler", "bow_short", "focus_skull", "focus_tome",
 	"armor_leather_head", "armor_leather_chest", "ring_copper", "ring_health",
 	"dagger_ironwood", "club_makeshift", "branch_heavy", "shield_wood",
 ]
-
-## The town's one door: the expedition gate asks to be replaced and the scene
-## forwards it, so the game-flow owner binds a single signal per scene.
-signal scene_requested(path: String)
 
 ## The world scene that embeds this town, or null when the town stands alone.
 ## Set before the node enters the tree.
@@ -219,7 +210,6 @@ var hud: WarbandHud
 var screen: WarbandScreen
 var paperdoll: WarbandPaperdoll
 var altar: SacrificialAltar
-var gate: GateScript
 var stash_chest: Node3D
 var recruiter_desk: Node3D
 var quartermaster_desk: Node3D
@@ -280,9 +270,6 @@ func _ready() -> void:
 		controller.possession_released.connect(_on_possession_released)
 		_enter_first_body()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-		var flow := get_node_or_null("/root/GameFlow")
-		if flow != null:
-			flow.bind(self)
 		print("TOWN_HUB_READY bodies=%d gold=%d stakes=%d buildings=%d keepers=%d guards=%d"
 			% [bodies.size(), warband.gold(), palisade_stakes, BUILDINGS.size(),
 				keepers.size(), guards.size()])
@@ -298,8 +285,6 @@ func embed(world: Node3D) -> void:
 	screen = world.screen
 	paperdoll = world.paperdoll
 	_build_quest_layer(world.get("tips"))
-	if gate != null:
-		gate.setup(warband, controller)
 
 
 ## Where the warband stands when the campaign starts in the town.
@@ -307,23 +292,17 @@ func spawn_posts() -> Array[Vector3]:
 	return _spawn_points()
 
 
-## Seat the bodies the world spawned around the fire. The square shows the whole
-## living warband, so a battle line left behind by a previous expedition is
-## cleared here and written again at the gate.
+## Seat the bodies the world spawned around the fire: the square shows the whole
+## living warband.
 func place_warband(bodies_in: Array) -> void:
-	warband.roster.clear_deployment()
 	bodies = bodies_in
 	for actor in bodies:
 		if not is_instance_valid(actor):
 			continue
-		var merc_id := int(controller.merc_of(actor))
 		var index := bodies.find(actor)
 		var post: Vector3 = SPAWN_POSTS[index % SPAWN_POSTS.size()]
 		actor.global_position = global_position + post
 		actor.spawn_point = global_position + post
-		# The square is not a battle: an unpossessed bot would pick the nearest
-		# mercenary as a target and brawl around the fire.
-		controller.set_bot(merc_id, false)
 
 
 ## Embedded, the world steps the bodies and writes the one HUD: the square only
@@ -708,19 +687,12 @@ func _build_body_layer() -> void:
 	controller.auto_simulate = false
 	add_child(controller)
 	controller.setup(warband, camera, self)
-	# The square is the muster ground: it shows the whole living warband, so a
-	# battle line a previous expedition left behind is cleared here and written
-	# again at the gate.
-	warband.roster.clear_deployment()
 	bodies = controller.spawn_mercenaries(_spawn_points(), true)
 	for actor in bodies:
 		if not is_instance_valid(actor):
 			continue
 		actor.global_position = actor.spawn_point + Vector3(0.0, 0.1, 0.0)
 		actor.bounds = BODY_BOUNDS
-		# Town bodies are fixtures, not bots: an unpossessed bot would pick the
-		# nearest mercenary as a target and brawl around the fire.
-		controller.set_bot(int(controller.merc_of(actor)), false)
 
 func _spawn_points() -> Array[Vector3]:
 	var points: Array[Vector3] = []
@@ -782,13 +754,6 @@ func _build_services() -> void:
 		"quartermaster": quartermaster_desk,
 	})
 
-	gate = GateScript.new()
-	gate.name = "ExpeditionGate"
-	gate.position = GATE_POINT
-	add_child(gate)
-	gate.setup(warband, controller)
-	# The square has exactly one door, whatever asks to leave by it.
-	gate.scene_requested.connect(func(path: String): scene_requested.emit(path))
 	# The keeper's counter is a service, not scenery of the HUD: the world embeds
 	# the square without building the town's own panels.
 	quartermaster = QuartermasterScript.new()
@@ -920,7 +885,7 @@ func _build_signpost() -> Node3D:
 	Geo.cylinder(post, 0.13, 0.11, 3.0, Vector3(0.0, 1.5, 0.0), _wood, 8)
 	var board := Geo.material(Color(0.24, 0.17, 0.11), 0.0, 0.9)
 	Geo.box(post, Vector3(2.4, 1.1, 0.1), Vector3(0.0, 2.35, 0.0), board)
-	var text := _label("THE SQUARE\nSTASH   ALTAR\nRECRUITER   GATE",
+	var text := _label("THE SQUARE\nSTASH   ALTAR\nRECRUITER",
 		Vector3(0.0, 2.35, 0.08), Color(0.94, 0.88, 0.76))
 	text.font_size = 48
 	text.pixel_size = 0.0045
@@ -1025,7 +990,7 @@ func _try_interact() -> void:
 
 ## Resolve and use whichever service `point` is next to. Returns `"stash"`,
 ## `"altar"`, `"recruiter"`, `"quartermaster"`, `"vendor_orla"`, `"vendor_brann"`,
-## `"vendor_vey"`, `"gate"` or `""`, which is what a single `G` handler and the
+## `"vendor_vey"` or `""`, which is what a single `G` handler and the
 ## regression both drive instead of guessing at positions.
 func interact_at(peer_id: int, point: Vector3) -> String:
 	var service := service_at(point)
@@ -1068,9 +1033,6 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			_open_vendor(1)
 		"vendor_vey":
 			_open_vendor(2)
-		"gate":
-			var gate_state: Dictionary = gate.prompt(peer_id)
-			hud.set_status(str(gate_state.get("message", "")), 5.0)
 	# The arrow is a question about the ledger, and a press can answer it.
 	_refresh_marker()
 	return service
@@ -1133,7 +1095,6 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_orla", "point": vendor_orla.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
-		{"id": "gate", "point": gate.global_position, "reach": gate.open_radius},
 	]
 	var best := ""
 	var best_distance := INF
@@ -1162,8 +1123,6 @@ func service_point(service: String) -> Vector3:
 			return vendor_brann.global_position
 		"vendor_vey":
 			return vendor_vey.global_position
-		"gate":
-			return gate.global_position
 	return Vector3.ZERO
 
 ## A paperdoll change has to reach the body standing in the square, or the
@@ -1199,8 +1158,6 @@ func hint_line(actor) -> String:
 			text = "G - buy blades and shields, or sell spare gear"
 		"vendor_vey":
 			text = "G - buy armour, or sell spare gear"
-		"gate":
-			text = "G - launch an expedition with the line you deployed"
 	# A reagent in the stash is worthless until a player knows where it is worked,
 	# so while the ichor order is on the ledger the altar is named everywhere.
 	if service != "altar" and _altar_wanted():
@@ -1227,8 +1184,6 @@ func prompt_line(actor) -> String:
 			return "G - Smith Brann"
 		"vendor_vey":
 			return "G - Quartermaster Vey"
-		"gate":
-			return "G - expedition gate"
 	return ""
 
 
@@ -1269,7 +1224,7 @@ func _panel_open() -> bool:
 
 # --- seeding ---------------------------------------------------------------
 
-## A first-run warband, so the square is playable before an expedition. An
+## A first-run warband, so the square is playable from its first minute. An
 ## existing warband (from a save or the camp) is never touched. The world calls
 ## this only when the campaign starts in the town; a camp start has already
 ## dressed its prisoners.

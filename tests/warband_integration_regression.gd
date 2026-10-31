@@ -18,6 +18,7 @@ extends SceneTree
 ##      co-op from driving a body a player is walking.
 
 const WorldScene := "res://scenes/warband_world.tscn"
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const TEST_SAVE := "user://warband_integration_player.json"
 const WARBAND_SAVE := "user://warband_integration_warband.json"
 ## The bookmark the world opens on: on the trail, past the cages, so the opening
@@ -238,6 +239,84 @@ func check_orders() -> void:
 	check(warband.stash.pooled_count("wolf_pelt") >= 1, "the pelt is in the shared stash")
 	check(game.loot_hand.last_summary().contains("Wolf Pelt"),
 		"and one line says what came back (%s)" % game.loot_hand.last_summary())
+
+	# A fighter under the reticle is what the press was for, whatever lies at its
+	# feet. The aim point of a mob across the fight sits on its own chest, so a drop
+	# inside the same arm's reach is "under the crosshair" by distance alone: the
+	# body ducked to work the ground in the middle of the fight and the click never
+	# swung. That is the report "clicking to attack is unresponsive", and it starts
+	# once the ground has steel on it.
+	game.loot_hand.tick(0.3)
+	var stand: Vector3 = actor.global_position
+	var ray: Dictionary = game.controller.camera_rig.aim_ray()
+	var ray_origin: Vector3 = ray.get("origin", stand)
+	var ray_dir: Vector3 = ray.get("direction", -actor.global_basis.z)
+	# The scenery the reticle lands on now is the wall the fighter must stand in
+	# front of, or the ray would stop short and never meet him.
+	var obstacle: Vector3 = game.controller.aim_sample().get("point", stand)
+	var clear_from := ray_origin.distance_to(obstacle) if obstacle != Vector3.ZERO else 0.0
+	var spot := Vector3.ZERO
+	var reachable := false
+	var along := 0.6
+	while along < 14.0:
+		var probe: Vector3 = ray_origin + ray_dir * along
+		var flat := Vector2(probe.x - stand.x, probe.z - stand.z).length()
+		var near_ground := absf((probe.y - 1.0) - stand.y) <= 0.8
+		var clear := clear_from < 0.1 or along < clear_from - 0.4
+		if flat >= 1.7 and flat <= 2.1 and near_ground and clear:
+			spot = probe
+			reachable = true
+			break
+		along += 0.05
+	check(reachable, "the crosshair ray has a point inside a mob's arm's reach")
+	if reachable:
+		var fighter = WatcherScript.new()
+		fighter.name = "LootFighter"
+		fighter.mob_id = "hollow_warden"
+		fighter.health_pool = 8.0
+		game.add_child(fighter)
+		# Feet under the ray point, so the capsule a ~2 m tall body carries has the
+		# reticle on its chest rather than over its head.
+		fighter.global_position = Vector3(spot.x, spot.y - 1.0, spot.z)
+		# Held still so the ray keeps meeting the same capsule for the whole check.
+		fighter.set_physics_process(false)
+		var toward := Vector3(spot.x - stand.x, 0.0, spot.z - stand.z)
+		if toward.length_squared() < 0.0001:
+			toward = -actor.global_basis.z
+		await physics_frame
+		await physics_frame
+		var aimed: Dictionary = game.controller.aim_sample()
+		check(aimed.get("target") == fighter, "the reticle is on the living watcher")
+		# The piece that steals the press: inside the body's reach and inside the
+		# aim point's, so distance alone calls it "under the crosshair".
+		game.loot_hand.tick(0.3)
+		var under = game.spawn_pickup("wolf_pelt",
+			stand + toward.normalized() * 0.9 + Vector3.UP * 0.2)
+		check(under != null, "a pelt lies between the two bodies")
+		# Read once: the squad's own hands take loose steel between frames, and the
+		# piece has to be the same one for every press below.
+		var under_at: Vector3 = under.global_position
+		var strike := InputEventMouseButton.new()
+		strike.button_index = MOUSE_BUTTON_LEFT
+		strike.pressed = true
+		check(not game._loot_click(strike),
+			"a press aimed at a living fighter is a cut, not a loot")
+		check(not game.loot_hand.active(), "and the body does not duck to work the ground")
+		check(not game.loot_hand.try_click(actor, under_at, fighter),
+			"a living fighter under the reticle is never a loot")
+		check(not game.loot_hand.active(), "and no channel opened")
+		# The same piece, the same arm: only the body on the reticle changes, and a
+		# body that has stopped fighting is ground to work.
+		fighter.take_damage(1000.0, 0)
+		check(not bool(fighter.get("alive")), "the watcher is down")
+		check(game.loot_hand.try_click(actor, under_at, fighter),
+			"a press on that body once it is down is the loot")
+		check(game.loot_hand.active(), "and the body works the ground")
+		game.loot_hand.cancel()
+		if is_instance_valid(under):
+			under.queue_free()
+		fighter.queue_free()
+		await physics_frame
 
 	# Empty hands are the one click that used to do nothing at all. It is not a
 	# loot and it cannot swing, so the HUD has to name the missing piece.

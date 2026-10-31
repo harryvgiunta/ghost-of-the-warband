@@ -102,39 +102,49 @@ func _broadcast(peer_id: int, merc_id: int) -> void:
 
 # --- intents ---------------------------------------------------------------
 
-## Client -> host movement frame for the body that peer is inside.
+## Client -> host movement frame for the body that peer is inside. The frame's
+## number, the tick its owner was drawing and the three frames behind it ride
+## along, so the host simulates exactly the intents that peer recorded.
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func move_input(direction: Vector2, running: bool, point: Variant = null,
-		origin: Variant = null) -> void:
+		origin: Variant = null, seq: Variant = -1, view: Variant = -1,
+		history: Array = []) -> void:
 	if not is_host():
 		return
 	var merc_id := _sender_body()
 	if merc_id <= 0 or controller == null:
 		return
-	controller.apply_move(merc_id, direction, running, point, origin)
+	controller.apply_move(merc_id, direction, running, point, origin,
+		int(seq) if typeof(seq) == TYPE_INT else -1,
+		int(view) if typeof(view) == TYPE_INT else -1,
+		history if typeof(history) == TYPE_ARRAY else [])
 
 ## Client -> host combat verb. Only the host resolves damage, parry or stamina,
-## so a guest can never invent its own hit.
+## so a guest can never invent its own hit - and `view` is the tick that guest
+## was drawing, which is the frame the host resolves the blow against.
 @rpc("any_peer", "call_remote", "reliable")
-func action_input(action: String, value: Variant = null, origin: Variant = null) -> void:
+func action_input(action: String, value: Variant = null, origin: Variant = null,
+		view: Variant = -1) -> void:
 	if not is_host():
 		return
 	var merc_id := _sender_body()
 	if merc_id <= 0 or controller == null:
 		return
-	controller.apply_action(merc_id, action, value, origin)
+	controller.apply_action(merc_id, action, value, origin,
+		int(view) if typeof(view) == TYPE_INT else -1)
 
 ## This peer's own frame, on its way to the host.
 func send_move(direction: Vector2, running: bool, point: Variant = null,
-		origin: Variant = null) -> void:
+		origin: Variant = null, seq: int = -1, view: int = -1, history: Array = []) -> void:
 	if is_host() or multiplayer == null or not multiplayer.has_multiplayer_peer():
 		return
-	move_input.rpc_id(1, direction, running, point, origin)
+	move_input.rpc_id(1, direction, running, point, origin, seq, view, history)
 
-func send_action(action: String, value: Variant = null, origin: Variant = null) -> void:
+func send_action(action: String, value: Variant = null, origin: Variant = null,
+		view: int = -1) -> void:
 	if is_host() or multiplayer == null or not multiplayer.has_multiplayer_peer():
 		return
-	action_input.rpc_id(1, action, value, origin)
+	action_input.rpc_id(1, action, value, origin, view)
 
 func _sender_body() -> int:
 	if _router == null or multiplayer == null:

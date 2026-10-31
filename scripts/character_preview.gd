@@ -1,8 +1,8 @@
 extends SubViewportContainer
-## The equipment menu's live ranger: a second Archer rendered into its own
-## SubViewport and driven by the same `PlayerState.loadout()` the world rig
-## uses. It never takes input and never joins the gameplay tree's collision or
-## network state.
+## The paperdoll's live mercenary: a second Archer rendered into its own
+## SubViewport and dressed from the same `PlayerState.build_loadout()` shape the
+## world rig uses. It never takes input and never joins the gameplay tree's
+## collision or network state.
 
 const Archer = preload("res://scripts/archer.gd")
 const TrinketArt = preload("res://scripts/trinket_art.gd")
@@ -15,7 +15,8 @@ var camera: Camera3D
 var _built := false
 ## The kit and the look the stage is showing, kept so a rig rebuilt for a new
 ## body can be dressed with the same gear it was already wearing.
-var _state = null
+var _loadout: Dictionary = {}
+var _trinkets: Dictionary = {}
 var _appearance: Dictionary = {}
 
 func _ready() -> void:
@@ -104,12 +105,13 @@ func _add_stage() -> void:
 	viewport.add_child(platform)
 
 
-func apply_state(state) -> void:
-	if state == null or not _built:
+func apply_kit(loadout: Dictionary, trinkets: Dictionary) -> void:
+	if not _built:
 		return
-	_state = state
-	rig.apply_loadout(state.loadout())
-	TrinketArt.apply(rig.skeleton,state.trinkets())
+	_loadout = loadout
+	_trinkets = trinkets
+	rig.apply_loadout(loadout)
+	TrinketArt.apply(rig.skeleton,trinkets)
 
 
 ## Put one mercenary's body on the stage. The height a look carries is baked into
@@ -126,8 +128,8 @@ func set_appearance(profile: Dictionary) -> void:
 	rig.appearance = _appearance
 	viewport.add_child(rig)
 	rig.set_physics_process(false)
-	if _state != null:
-		apply_state(_state)
+	if not _loadout.is_empty():
+		apply_kit(_loadout, _trinkets)
 
 
 func set_active(active: bool) -> void:

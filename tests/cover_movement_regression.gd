@@ -1,7 +1,6 @@
 extends SceneTree
 
-const Actor = preload("res://scripts/arena_actor.gd")
-const ShoulderCamera = preload("res://scripts/shoulder_camera.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 var failures := 0
 var checks := 0
 var scene: Node3D
@@ -136,6 +135,72 @@ func relocate(point: Vector3) -> void:
 	actor.spawn_point = point
 	actor.revive()
 	await drive(30)
+
+## Sticky movement is opt-in: a press on a surface that stands in front of the
+## body, and only that. This is the report - "players automatically sticky wall" -
+## checked from both ends: nothing near cover holds a body that never pressed F,
+## and a body that leaves cover stays out until it presses F again.
+func sticky_toggle_scenarios() -> void:
+	await relocate(Vector3(0,0,1.1))
+	check(not actor.cover.try_enter(Vector3.BACK),"A wall behind the player is not a surface F sticks to")
+	check(not actor.cover.active,"and a refused press leaves sticky movement off")
+	await drive(20,Vector2(0,-1))
+	check(not actor.cover.active,"Walking into cover without a press never sticks to it")
+	check(actor.cover.try_enter(Vector3.FORWARD),"The same wall in front of the player is cover")
+	await drive(20)
+	check(actor.cover.active,"and the press holds the body on it")
+	# Off the surface is off the surface: input that points away peels the body
+	# free, and walking back in does not re-arm it.
+	await drive(20,Vector2(0,1))
+	check(not actor.cover.active,"Walking off the surface releases sticky movement")
+	await drive(45,Vector2(0,-1))
+	check(not actor.cover.active and actor.position.z<0.8,"Walking back to the surface does not reattach the body")
+	check(actor.cover.try_enter(Vector3.FORWARD),"A fresh press sticks it again")
+	await drive(20)
+	check(actor.cover.active,"and the body holds the wall again")
+	actor.press_jump(false)
+	await drive(2)
+	check(not actor.cover.active,"A jump leaves sticky movement off")
+	await drive(45)
+	check(actor.is_on_floor() and not actor.cover.active,"Landing on the same ground does not put it back")
+
+## A real generated trunk, not a stand-in cylinder: the mesh and the collision it
+## plants are one profile, so the sticky point is the bark the player can see. This
+## is the report - "some trees have sticky points out of proportion to the graphics"
+## - measured end to end: the anchor stands on the trunk's own drawn footprint and
+## the standing capsule is outside it.
+func tree_trunk_scenarios() -> void:
+	var species: Dictionary = WorldStyle.frontier().species_by_id("ironoak")
+	var variants: Array = TreeKit.build_variants(species, 4242)
+	check(not variants.is_empty() and float(variants[0].get("trunk_height", 0.0)) > 0.0,
+		"the ironoak ships a trunk the collision can be cut from")
+	if variants.is_empty():
+		return
+	var variant: Dictionary = variants[0]
+	var scale := 1.2
+	var footprint: float = TreeKit.trunk_footprint(variant, scale)
+	var body := StaticBody3D.new()
+	body.position = Vector3(0, 0, 20)
+	body.collision_layer = 1
+	body.collision_mask = 0
+	scene.add_child(body)
+	TreeKit.add_trunk_solids(body, Vector3.ZERO, variant, scale)
+	await relocate(Vector3(0,0,20.0+footprint+1.0))
+	check(actor.cover.try_enter(Vector3.FORWARD),"A generated tree trunk is cover")
+	await drive(25)
+	var stand: float = Vector2(actor.position.x,actor.position.z-20.0).length()
+	check(actor.cover.active and absf(stand-(footprint+0.42))<0.04,
+		"the anchor stands on the trunk's drawn footprint (%.2f m, footprint %.2f + 0.42)"
+		% [stand, footprint])
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = actor.cover._capsule
+	query.collision_mask = 1
+	query.exclude = [actor.get_rid(),floor_body.get_rid()]
+	query.transform = actor.cover._collider.global_transform
+	check(scene.get_world_3d().direct_space_state.intersect_shape(query,1).is_empty(),
+		"and the standing capsule is outside the bark, not buried in the flare")
+	body.queue_free()
+	await drive(3)
 
 func crouched_capsule_clear() -> bool:
 	var collider: CollisionShape3D = actor.cover._collider
@@ -364,7 +429,7 @@ func lookout_geometry_scenarios() -> void:
 	var rotated_right := Vector3.RIGHT.rotated(Vector3.UP,PI/4.0)
 	var fixtures := [
 		{"name":"narrow trunk","center":Vector3(6,0,10),"right":Vector3.RIGHT,"depth":0.32,"edge":0.0,"extent":0.45},
-		{"name":"arena trunk","center":Vector3(0,0,10),"right":Vector3.RIGHT,"depth":0.55,"edge":0.0,"extent":0.65},
+		{"name":"wide trunk","center":Vector3(0,0,10),"right":Vector3.RIGHT,"depth":0.55,"edge":0.0,"extent":0.65},
 		{"name":"rotated box","center":Vector3(-10,0,0),"right":rotated_right,"depth":0.3,"edge":1.82,"extent":0.45},
 		{"name":"convex rock","center":Vector3(12,0,10),"right":Vector3.RIGHT,"depth":0.4,"edge":0.0,"extent":0.65},
 		{"name":"inward-rising rock","center":Vector3(6,0,-6),"right":Vector3.RIGHT,"depth":0.3,"edge":0.0,"extent":0.45},
@@ -581,13 +646,16 @@ func run() -> void:
 	scene.add_child(tree)
 	actor = Actor.new()
 	actor.authoritative = true
-	actor.is_bot = false
 	scene.add_child(actor)
-	actor.configure(1,false,"Cover regression",Vector3(0,0,1.1))
+	actor.configure(1,"Cover regression",Vector3(0,0,1.1))
 	await drive(30)
 	check(actor.cover.try_enter(Vector3.FORWARD),"A grounded character attaches to a nearby wall")
 	await drive(30)
 	check(actor.cover.active and not actor.cover.low and absf(actor.position.z-0.72)<0.02,"Cover settles at capsule-safe wall clearance")
+	await sticky_toggle_scenarios()
+	check(actor.cover.try_enter(Vector3.FORWARD),"A fresh press takes the wall again after the toggle checks")
+	await drive(30)
+	check(actor.cover.active and absf(actor.position.z-0.72)<0.02,"Re-entry settles back on the protected anchor")
 	check(not actor.combat.begin_draw(),"A direct draw at the solid middle of tall cover cannot expose or shoot through the wall")
 	await drive(20)
 	check(actor.cover.active and actor.rig.phase=="READY","Blocked direct attacks leave the actor safely tucked")
@@ -644,7 +712,10 @@ func run() -> void:
 	await drive(5)
 	check(not actor.cover.active and not actor.roll.active and actor.velocity.y>0 and not actor.is_on_floor(),"Unmodified Space launches out of low cover instead of reattaching")
 	actor.take_damage(1000,1)
-	check(not actor.cover.active and not actor.alive,"Death clears cover and its reduced collider")
+	check(actor.downed and not actor.cover.active,
+		"Going down clears cover and restores the standing collider")
+	actor.take_damage(1.0,1)
+	check(not actor.alive,"and the finisher takes the body")
 	actor.revive()
 	check(not actor.cover.active and is_equal_approx(actor.cover._capsule.height,1.8),"Respawn restores ordinary standing movement")
 	await relocate(Vector3(0,0,11.25))
@@ -699,34 +770,34 @@ func run() -> void:
 	await crouched_cover_scenarios()
 	await automatic_attack_scenarios()
 	await lookout_geometry_scenarios()
+	await tree_trunk_scenarios()
 	await relocate(Vector3(0,0,1.1))
 	actor.cover.try_enter(Vector3.FORWARD)
 	wall.queue_free()
 	await drive(3)
 	check(not actor.cover.active,"Removing the supporting obstacle releases cover")
-	var camera := ShoulderCamera.new()
-	var space := scene.get_world_3d().direct_space_state
-	var focus := Vector3(0,1.5,-8)
-	var right_position := camera.resolve(space,focus,Vector3.BACK,4.5)
+	# The eye a possessed body is seen through rides its shoulder; read the eye
+	# itself, relative to the point it frames.
+	await relocate(Vector3(0,0,-8))
+	var camera := PossessionCamera.new()
+	scene.add_child(camera)
+	camera.follow(actor,true)
+	var focus: Vector3 = camera._focus_point()
+	var right_position: Vector3 = camera.camera.global_position-focus
 	camera.swap()
 	camera.update(0.05)
-	var transition := camera.resolve(space,focus,Vector3.BACK,4.5)
+	var transition: Vector3 = camera.camera.global_position-focus
 	check(transition.x<right_position.x and transition.x>-0.70,"Shoulder switching traverses smoothly rather than teleporting")
-	camera.update(1.0)
-	var left_position := camera.resolve(space,focus,Vector3.BACK,4.5)
+	for frame in 60:
+		camera.update(1.0/30.0)
+	var left_position: Vector3 = camera.camera.global_position-focus
 	check(left_position.x< -0.69 and right_position.x>0.69,"Both shoulder views frame opposite sides of the character")
 	box(Vector3(4,4,0.2),focus+Vector3(0,0,2))
 	await physics_frame
-	var blocked := camera.resolve(space,focus,Vector3.BACK,4.5)
-	check(blocked.z<focus.z+1.7,"Camera volume stops before a thin wall instead of clipping its near plane")
-	var sphere := SphereShape3D.new()
-	sphere.radius = ShoulderCamera.CAMERA_RADIUS
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = sphere
-	query.collision_mask = 1
-	var recovered := camera.resolve(space,focus+Vector3(0,0,1.95),Vector3.FORWARD,3.0)
-	query.transform.origin = recovered
-	check(space.intersect_shape(query,1).is_empty(),"Camera recovers when its starting sphere overlaps world geometry")
+	for frame in 30:
+		camera.update(1.0/60.0)
+	var blocked: Vector3 = camera.camera.global_position
+	check(blocked.z<focus.z+1.7,"Camera boom stops before a thin wall instead of clipping its near plane")
 	var rig = load("res://scripts/archer.gd").new()
 	scene.add_child(rig)
 	rig.set_physics_process(false)

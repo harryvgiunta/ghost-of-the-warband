@@ -32,8 +32,9 @@ static func utc_stamp(unix_time: float = -1.0) -> String:
 		int(date.hour), int(date.minute), int(date.second)]
 
 
-## A filename-safe fragment used in session ids: `res://main.tscn` becomes
-## `main`, `res://tests/logging_regression.gd` becomes `logging_regression`.
+## A filename-safe fragment used in session ids: `res://scenes/warband_world.tscn`
+## becomes `warband_world`, `res://tests/logging_regression.gd` becomes
+## `logging_regression`.
 static func slug(text: String, max_length: int = 32) -> String:
 	var source := text.get_file().get_basename().to_lower()
 	var result := ""

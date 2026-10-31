@@ -592,8 +592,6 @@ func check_town() -> void:
 	points.append({"what": "the recruiter", "point": TownScript.RECRUITER_POINT, "reach": 0.0})
 	points.append({"what": "the quartermaster", "point": TownScript.QUARTERMASTER_POINT, "reach": 0.0})
 	points.append({"what": "the signpost", "point": TownScript.SIGN_POINT, "reach": 0.0})
-	points.append({"what": "the expedition gate", "point": TownScript.GATE_POINT,
-		"reach": float(town.gate.open_radius)})
 	assert_clear(props, points, "town")
 
 	print("WARBAND_ART_TOWN groups=%d meshes=%d props=%d materials=%d" % [

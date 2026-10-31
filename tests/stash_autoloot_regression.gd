@@ -390,8 +390,6 @@ func check_infinite_stash() -> void:
 		added += 1
 	check(stash.pooled_total() == 1500,
 		"1000 + 500 pieces are stored together, got %d" % stash.pooled_total())
-	check(stash.pooled_total() > int(StateScript.STASH_CAPACITY),
-		"the shared stash has no capacity wall, only the legacy %d slot array had" % int(StateScript.STASH_CAPACITY))
 	check(stash.pooled_ids().size() == ids.size(), "every catalog id is pooled")
 
 	rows = stash.rows(_warband.roster, _warband.cruor.brands)

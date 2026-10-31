@@ -5,15 +5,14 @@ extends SceneTree
 ## live in the scenes - so what can regress is the drawing: a key that does
 ## something must be lit, two tiles must never sit on one another, every action
 ## must be reached by an arrowhead that ends on its own label, and the board must
-## fit the page it is given. The second half is the wiring: the frontier's quick
-## menu, the warband's own menu and the settings window each open the sheet one
-## page deep and hand Escape back the same way they always have.
+## fit the page it is given. The second half is the wiring: the campaign's own
+## menu and the settings window each open the sheet one page deep and hand Escape
+## back the same way they always have.
 ##
 ## Built headless: layout is pure arithmetic on the page's own size, so none of
 ## this needs a renderer.
 
 const PageScript = preload("res://scripts/ui/keybind_page.gd")
-const PauseScript = preload("res://scripts/pause_menu.gd")
 const WarbandMenuScript = preload("res://scripts/warband/warband_menu.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 
@@ -131,34 +130,9 @@ func _check_board() -> void:
 	await process_frame
 
 
-# --- the three windows -----------------------------------------------------
+# --- the two windows -------------------------------------------------------
 
 func _check_menus() -> void:
-	# The frontier's quick menu: the sheet is one page in, and Escape walks back.
-	var pause = PauseScript.new()
-	pause.name = "PauseMenu"
-	root.add_child(pause)
-	await process_frame
-	pause.open()
-	check(pause.keys_button != null, "the quick menu has a KEYS row")
-	check(pause.is_open() and not pause.showing_keys(), "it opens on its rows")
-	pause.show_keys(true)
-	check(pause.showing_keys(), "KEYS takes the frame")
-	check(pause.keys_page != null and pause.keys_page.is_inside_tree(),
-		"and the sheet is in the tree")
-	var grown: float = pause.get_node("Menu/Frame").size.x if pause.has_node("Menu/Frame") else 0.0
-	check(grown > PauseScript.PANEL_SIZE.x + 1.0,
-		"the window grows for a keyboard (%d)" % int(grown))
-	check(pause.back(), "Escape on the sheet hands the frame back")
-	check(not pause.showing_keys() and pause.is_open(), "and the menu is still open")
-	check(not pause.back(), "Escape on the rows asks the scene to close it")
-	pause._show_sound_page(true)
-	check(pause.showing_sound() and pause.back() and not pause.showing_sound(),
-		"the sound page still unwinds the same way")
-	pause.close()
-	pause.queue_free()
-	await process_frame
-
 	# The campaign's own menu: the same sheet, the same one-page rule.
 	var band = WarbandMenuScript.new()
 	band.name = "WarbandMenu"

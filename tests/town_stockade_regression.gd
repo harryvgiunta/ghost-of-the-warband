@@ -270,7 +270,7 @@ func check_buildings() -> void:
 	# None of it may stand on the square's own ground: the fire, the counters, the
 	# three 3 m service rings, the muster posts or the gate lane.
 	for service in ["stash", "altar", "recruiter", "quartermaster",
-			"vendor_orla", "vendor_brann", "vendor_vey", "gate"]:
+			"vendor_orla", "vendor_brann", "vendor_vey"]:
 		check(standing_clear(town.service_point(service)),
 			"a body can stand at the %s" % service)
 	for post in TownScript.SPAWN_POSTS:
@@ -441,7 +441,7 @@ func check_talk() -> void:
 func check_services() -> void:
 	# Every service the loop owns still resolves from its own point.
 	for service in ["stash", "altar", "recruiter", "quartermaster",
-			"vendor_orla", "vendor_brann", "vendor_vey", "gate"]:
+			"vendor_orla", "vendor_brann", "vendor_vey"]:
 		var point: Vector3 = town.service_point(service)
 		check(point != Vector3.ZERO, "%s has a point in the settlement" % service)
 		check(town.service_at(point) == service,

@@ -8,7 +8,7 @@ extends SceneTree
 ## crawl is driven by real physics frames, so a body that is not moved through its
 ## own collision cannot pass.
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Crawl = preload("res://scripts/warband/crawl_to_safety.gd")
 const Revive = preload("res://scripts/warband/revive_channel.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -59,7 +59,7 @@ func make_actor(slot: int, peer: int, bot: bool, point: Vector3):
 	body.slot = slot
 	body.authoritative = true
 	scene.add_child(body)
-	body.configure(peer,bot,"Downed %d" % slot,point)
+	body.configure(peer,"Downed %d" % slot,point)
 	body.downed_started.connect(func(_slot: int): _downed_starts += 1)
 	body.downed_ended.connect(func(_slot: int): _downed_ends += 1)
 	body.killed.connect(func(killed_slot: int, source: int):
@@ -98,12 +98,17 @@ func run() -> void:
 	hit_from_plus_x(ten,110.0)
 	check(ten.downed and ten.alive,"A hit that overkills by exactly 10% still downs")
 
+	# A campaign body is never killed by the blow itself: a lethal hit of any size
+	# puts it on its chest, and the next blow - or the bleed clock - is what ends it.
 	var heavy = make_actor(3,3,false,Vector3(0,0,8))
 	var kills_before := _kill_slots.size()
 	hit_from_plus_x(heavy,110.1)
-	check(not heavy.alive and not heavy.downed,"A hit that overkills by 10.1% kills")
+	check(heavy.alive and heavy.downed,"A hit that overkills by 10.1% still only downs the body")
+	check(heavy.health_state == Contracts.HealthState.DOWNED,"The downed body is DOWNED")
+	check(_kill_slots.size() == kills_before,"no death is filed for a blow on its feet")
+	hit_from_plus_x(heavy,1.0)
+	check(not heavy.alive and not heavy.downed,"the next blow that lands ends it")
 	check(heavy.health_state == Contracts.HealthState.DEAD,"A killed body is DEAD")
-	check(is_equal_approx(heavy.respawn,3.0),"A real death still arms the arena's three second respawn")
 	check(_kill_slots.size() == kills_before + 1 and heavy.slot in _kill_slots,"killed fires for a real death")
 
 	var soft = make_actor(4,4,false,Vector3(0,0,12))
@@ -133,10 +138,8 @@ func run() -> void:
 	hit_from_plus_x(chip,100.0)
 	check(chip.downed,"The chip fixture is downed before the follow-up")
 	hit_from_plus_x(chip,5.0)
-	check(chip.downed and chip.alive and is_zero_approx(chip.health),
-		"5 damage on a 100 health body is chip: it stays downed at zero health")
-	hit_from_plus_x(chip,15.0)
-	check(not chip.alive and not chip.downed,"15 damage is a finisher: the downed body dies")
+	check(not chip.alive and not chip.downed,
+		"any blow on a downed body is a finisher: there is no chip damage on the floor")
 	check(chip.health_state == Contracts.HealthState.DEAD,"The finished body is DEAD")
 
 	# --- the backwards crawl ------------------------------------------------
@@ -219,10 +222,10 @@ func run() -> void:
 	hit_from_plus_x(ai_patient,100.0)
 	var ai_body = make_actor(14,0,true,ai_patient.global_position + Vector3(1.0,0,0))
 	channel.set_bodies([ai_body,ai_patient])
-	check(not channel.begin(0,ai_patient),"Peer 0 is an AI body and never opens a revive")
+	check(not channel.begin(0,ai_patient),"Peer 0 is nobody and never opens a revive")
 	var flagged = make_actor(15,4,true,ai_patient.global_position + Vector3(1.0,0,0))
 	channel.set_bodies([flagged,ai_patient])
-	check(not channel.begin(4,ai_patient),"A bot body never opens a revive even with a peer id")
+	check(channel.begin(4,ai_patient),"a peer's body opens the channel from reach")
 	channel.set_bodies([healer,ai_patient])
 	check(not channel.begin(1,ai_patient),"A human cannot revive a body from across the field")
 	check(not channel.channeling(1),"A refused channel leaves nothing open")

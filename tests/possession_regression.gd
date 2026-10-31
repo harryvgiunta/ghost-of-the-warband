@@ -88,10 +88,9 @@ func run() -> void:
 	var merc_ids: Array[int] = []
 	for index in KITS.size():
 		var merc_id: int = warband.add_mercenary("Soul %d" % (index + 1), KITS[index])
-		warband.set_deployed(merc_id, true)
 		merc_ids.append(merc_id)
 	check(merc_ids.size() == 8, "eight mercenaries join the warband")
-	check(warband.deployed_merc_ids().size() == 8, "all eight are marked for the battle line")
+	check(warband.alive_merc_ids().size() == 8, "and all eight are living bodies")
 
 	# --- the arena, built in the real tree --------------------------------
 	var arena := Node3D.new()
@@ -132,7 +131,7 @@ func run() -> void:
 	await physics_frame
 	check(controller.is_inside_tree() and bodies_root.is_inside_tree(),
 		"the controller and its bodies live in the real tree")
-	check(bodies.size() == 8, "eight real ArenaActors are fielded, got %d" % bodies.size())
+	check(bodies.size() == 8, "eight real WarbandBody bodies are fielded, got %d" % bodies.size())
 	check(controller.bodies().size() == 8, "the controller keeps all eight bodies")
 	check(camera.get_parent() == controller.camera_rig,
 		"the mode's camera is adopted by the possession rig, not duplicated")
@@ -211,12 +210,6 @@ func check_bodies(warband, controller, merc_ids: Array[int]) -> void:
 			"body %d wears its own neck piece" % merc_id)
 	check(mains.size() == 8, "all eight bodies carry a different main hand")
 
-	# The arena marks its two squads through this call; an empty body obeys it.
-	controller.set_bot(merc_ids[4], false)
-	check(not controller.body_of(merc_ids[4]).is_bot, "a body can be reserved for a human seat")
-	controller.set_bot(merc_ids[4], true)
-	check(controller.body_of(merc_ids[4]).is_bot, "and handed back to the AI")
-
 # --- peer 2 cannot take peer 1's body --------------------------------------
 
 func check_opposition(warband, controller, merc_ids: Array[int], events: Array) -> void:
@@ -225,7 +218,7 @@ func check_opposition(warband, controller, merc_ids: Array[int], events: Array) 
 	var body_a = controller.body_of(merc_ids[0])
 	check(warband.souls.body_of(1) == merc_ids[0], "the router records peer 1 inside A")
 	check(warband.possessed_by(1) == merc_ids[0], "the warband mirror records the possession")
-	check(body_a.is_local and not body_a.is_bot, "the possessed body takes player input")
+	check(body_a.is_local, "the possessed body takes player input")
 	check(not body_a.predicting, "the host body is simulated, never predicted")
 	check(controller.active_actor == body_a, "the controller's active body is A")
 
@@ -241,7 +234,7 @@ func check_opposition(warband, controller, merc_ids: Array[int], events: Array) 
 	var second: Dictionary = controller.activate(2, merc_ids[1])
 	check(bool(second.get("ok", false)), "peer 2 enters body B instead")
 	var body_b = controller.body_of(merc_ids[1])
-	check(not body_b.is_local and not body_b.is_bot, "a remote peer's body is neither local nor AI")
+	check(not body_b.is_local, "a remote peer's body is not local")
 	check(controller.active_actor == body_a, "peer 2's entry did not take local control")
 	check(warband.possessed_by(2) == merc_ids[1], "the mirror holds both peers")
 	check(events.size() == 2 and events[0] == [1, merc_ids[0]] and events[1] == [2, merc_ids[1]],
@@ -532,7 +525,6 @@ func check_live_input(warband, controller, merc_ids: Array[int]) -> void:
 	# and 1..5 - an admin leftover that spawned a bow, a sword, a shield and a
 	# second blade out of nothing - must not answer at all.
 	var bow_id := merc_ids[0]
-	controller.set_bot(bow_id, false)
 	controller.activate(1, bow_id)
 	for tick in 8:
 		await physics_frame

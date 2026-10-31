@@ -477,16 +477,6 @@ static func _solid_box(parent: Node3D, size: Vector3, at: Vector3, material: Mat
 	return body
 
 
-static func _trunk_collider(solids: StaticBody3D, at: Vector3, radius: float, height: float) -> void:
-	var shape := CylinderShape3D.new()
-	shape.radius = radius
-	shape.height = height
-	var collision := CollisionShape3D.new()
-	collision.shape = shape
-	collision.position = at + Vector3(0.0, height * 0.5, 0.0)
-	solids.add_child(collision)
-
-
 static func _count_nodes(node: Node) -> int:
 	var total := 0
 	for child in node.get_children():
@@ -705,20 +695,15 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 				var species: Dictionary = record["species"]
 				var scale_at := rng.randf_range(float(row["scale"].x), float(row["scale"].y))
 				var tree_height := float(variant.get("height", 8.0)) * scale_at
-				var trunk_spec: Vector2 = species.get("trunk", Vector2(0.04, 0.62))
-				var trunk_height := maxf(1.4, tree_height * float(trunk_spec.y) * 0.95)
-				var trunk_radius := maxf(0.18, tree_height * float(trunk_spec.x) * 1.04)
-				# The bark is what a body meets. The species table names the trunk's
-				# taper, but an ironoak's base flares well past it - and a collider
-				# narrower than the drawn bark is an invisible wall with a tree painted
-				# a metre behind it, which is exactly what "I stop two metres short and
-				# the camera goes inside the wood" was. The mesh's own footprint is the
-				# floor of the number, for the planting rule and the collider alike.
-				var trunk_mesh: Mesh = variant.get("trunk")
-				if trunk_mesh != null:
-					var box := trunk_mesh.get_aabb()
-					var bark := maxf(absf(box.position.x), absf(box.end.x)) * scale_at
-					trunk_radius = maxf(trunk_radius, bark)
+				# The bark is what a body meets, and the bark is the trunk tube: the
+				# flare its first rings are drawn with, at the tree's own scale. The
+				# species table's taper is that tube before the flare, and the trunk
+				# mesh's own box carries the branch tips out to the crown - either
+				# one planted a collider that was not the tree: a nominal radius let
+				# the feet stand inside the flare, and the box made every ironoak a
+				# two-metre invisible pillar with a tree painted in the middle of it,
+				# which is exactly where the cover anchor then stuck you.
+				var trunk_radius := TreeKit.trunk_footprint(variant, scale_at)
 				at += spacing * rng.randf_range(0.82, 1.24)
 				# The way stays clear, and the wood stops at its own edge: a trunk
 				# whose bark would reach inside the walked line is not planted at
@@ -742,7 +727,7 @@ static func _build_trees(root: Root, style: WorldStyle, path: Path) -> void:
 						"color": _pick(tints, rng, Color.WHITE),
 					})
 				if bool(row["solid"]):
-					_trunk_collider(root.solids, point, trunk_radius, trunk_height)
+					TreeKit.add_trunk_solids(root.solids, point, variant, scale_at)
 					root.trunks.append({"at": Vector2(point.x, point.z), "radius": trunk_radius})
 					solid_trees += 1
 				if deep:

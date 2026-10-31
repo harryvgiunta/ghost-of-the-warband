@@ -1,7 +1,7 @@
 extends SceneTree
 ## Standard cuts cover crowds in front without depending on target height or
 ## needle-thin blade contact. Precision attacks have separate blade regressions.
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Stamina = preload("res://scripts/stamina.gd")
@@ -27,7 +27,7 @@ func fighter(index: int, at: Vector3):
 	actor.slot = index
 	actor.authoritative = true
 	world.add_child(actor)
-	actor.configure(index+1,false,"Cleave",at)
+	actor.configure(index+1,"Cleave",at)
 	actor.rig.set_physics_process(false)
 	actor.combat.set_motion(Vector3.ZERO,false,true)
 	return actor

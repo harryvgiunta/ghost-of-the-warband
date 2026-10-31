@@ -133,7 +133,11 @@ func _nearest_hostile() -> Node3D:
 	var best: Node3D = null
 	var best_distance := REACH
 	for entry in _hostiles():
-		if not (entry is Node3D) or not is_instance_valid(entry):
+		# The validity check comes first: `is` on a freed node is an error, not a
+		# false, and a mob freed between two polls is exactly the case here.
+		if not is_instance_valid(entry):
+			continue
+		if not (entry is Node3D):
 			continue
 		var body := entry as Node3D
 		if not _alive(body):

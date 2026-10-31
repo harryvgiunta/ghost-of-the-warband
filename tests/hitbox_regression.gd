@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Enemy = preload("res://scripts/enemy.gd")
@@ -34,7 +34,7 @@ func fighter(parent: Node3D, slot: int, at: Vector3):
 	actor.slot = slot
 	actor.authoritative = true
 	parent.add_child(actor)
-	actor.configure(slot + 1, false, "Regression", at)
+	actor.configure(slot + 1, "Regression", at)
 	strip(actor)
 	actor.set_process(false)
 	actor.rig.set_process(false)

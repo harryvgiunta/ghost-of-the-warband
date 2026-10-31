@@ -4,7 +4,7 @@ extends SceneTree
 ## for a body the player may actually enter; `Warband.changed` repaints without a
 ## reopen; the paperdoll dresses and undresses a mercenary out of the collective
 ## stash without losing a single gold of value; and the recruiter charges the
-## vendor's price and refuses honestly at the deployment cap.
+## vendor's price and refuses honestly at the hire cap.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
@@ -101,11 +101,8 @@ func _check_rows_and_control() -> void:
 
 	check(not screen.rows[alive]["control"].disabled, "a living body can be controlled")
 	check(screen.rows[downed]["control"].disabled, "a downed body cannot be jumped into")
-	check(not screen.rows[downed]["deploy"].disabled, "a downed body can still be fielded")
 
 	check(screen.gold_label.text == "1000 G", "the header shows the purse, got %s" % screen.gold_label.text)
-	check(screen.deployed_label.text == "0 / 8 FIELDED",
-		"the header shows deployed over the cap, got %s" % screen.deployed_label.text)
 	check(screen.value_label.text.contains(str(warband.total_value())),
 		"the header shows the warband's worth, got %s" % screen.value_label.text)
 
@@ -148,10 +145,6 @@ func _check_refresh() -> void:
 	check(screen.rows[alive]["health"].text == "55 / 100",
 		"Warband.changed repaints the health line, got %s" % screen.rows[alive]["health"].text)
 	check(screen.rows[alive]["bar"].value == 55.0, "Warband.changed repaints the bar")
-	check(bool(warband.set_deployed(alive, true).get("ok", false)), "deploying the living body works")
-	check(screen.rows[alive]["deploy"].text == "DEPLOYED", "the deployment toggle repaints")
-	check(screen.deployed_label.text == "1 / 8 FIELDED",
-		"the header counts the deployment, got %s" % screen.deployed_label.text)
 	check(screen.rows[alive]["gear"].text.contains("empty"), "the row is still the same row")
 	warband.stash.add("sword_short", 1)
 	warband.equip_merc(alive, "main", "sword_short")
@@ -177,7 +170,6 @@ func _check_old_save_purge() -> void:
 		if int((record as Dictionary)["id"]) == fallen:
 			record["state"] = Contracts.HealthState.DEAD
 			record["health"] = 0.0
-			record["deployed"] = false
 	var file := FileAccess.open(TEST_SAVE, FileAccess.WRITE)
 	file.store_string(JSON.stringify(data))
 	file.close()

@@ -27,7 +27,6 @@ const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
-const Damage = preload("res://scripts/warband/damage_scaler.gd")
 
 const TEST_SAVE := "user://cage_escape_state.json"
 const WARBAND_SAVE := "user://cage_escape_warband.json"
@@ -38,6 +37,7 @@ const NAKED_SLOTS := ["head", "chest", "hands", "legs", "feet"]
 const MAKESHIFT := ["club_makeshift", "dagger_ironwood", "branch_heavy", "bow_twig"]
 
 var game
+var flow
 var camp
 var warband
 var state
@@ -45,7 +45,6 @@ var checks := 0
 var failures := 0
 var state_log: Array = []
 var _phase_start := 0
-var requested_paths: Array = []
 
 func check(condition: bool, message: String) -> void:
 	checks += 1
@@ -70,8 +69,7 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
-	Damage.reset()
-	var flow = root.get_node("GameFlow")
+	flow = root.get_node("GameFlow")
 	flow.active = false
 	flow.world_start = "camp"
 
@@ -101,7 +99,6 @@ func run() -> void:
 		_finish()
 		return
 	camp.sequencer.state_changed.connect(_on_state_changed)
-	game.scene_requested.connect(_on_scene_requested)
 	print("CAGE_PHASE built %d ms" % (Time.get_ticks_msec() - _phase_start))
 
 	_phase_start = Time.get_ticks_msec()
@@ -130,7 +127,7 @@ func run() -> void:
 
 	check(is_instance_valid(game) and game.is_inside_tree(),
 		"the player stays in the world when nothing was requested")
-	check(requested_paths.is_empty(), "the camp never asks for a scene (%s)" % str(requested_paths))
+	check(flow.transitions == 0, "the camp never asks for a scene (%d)" % flow.transitions)
 	_finish()
 
 func _on_watchdog() -> void:
@@ -143,7 +140,6 @@ func _finish() -> void:
 	if is_instance_valid(game):
 		game.queue_free()
 	await process_frame
-	Damage.reset()
 	var flow = root.get_node("GameFlow")
 	flow.world_start = "camp"
 	_remove(TEST_SAVE)
@@ -154,8 +150,6 @@ func _finish() -> void:
 func _on_state_changed(new_state: int, objective: String) -> void:
 	state_log.append([new_state, objective])
 
-func _on_scene_requested(path: String) -> void:
-	requested_paths.append(path)
 
 ## How many times the machine *entered* `value`. A state is announced again
 ## whenever a counter changes while it is held (a latch, a corpse, a pickup), so a
@@ -977,8 +971,8 @@ func check_escape() -> void:
 	check(camp.sequencer.guards_down() == int(SequencerScript.GUARD_COUNT),
 		"and the tally reached the whole camp (%d of %d)"
 		% [camp.sequencer.guards_down(), int(SequencerScript.GUARD_COUNT)])
-	check(requested_paths.is_empty(), "walking out of the camp requests no scene (%s)"
-		% str(requested_paths))
+	check(flow.transitions == 0, "walking out of the camp requests no scene (%d)"
+		% flow.transitions)
 	check(SequencerScript.state_name_of(SequencerScript.State.ESCAPING) == "escaping"
 			and SequencerScript.state_name_of(SequencerScript.State.ESCAPING + 1) == "unknown",
 		"the state machine has no town state after the escape")

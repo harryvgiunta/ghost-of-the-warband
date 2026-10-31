@@ -219,13 +219,17 @@ the audit of what a delivery still owes.
 | `player` | `downed` | the body goes down, then again on the bleed clock every 2.6-5.4 s | 0.90 / - |
 | `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `aggro` | a party body picks its first hostile since it was last out of the fight (`SquadDrive.drive`, the `engaged` latch) | 0.01 / 6 s |
 | `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `hurt` | a blow took >= 18% of the pool and the body is still standing (`ArenaActor.take_damage`) | 0.01 / 8 s |
+| `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `big_hit` | the same, at >= 35%: the close call, and the heavier of the two reads the heavier blow (`VoiceEmitter.damage` tries it first) | 0.55 / 9 s |
+| `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `kill` | that body is the `last_hitter` on a mob's death (`Voice.kill_quip`) | 0.30 / 9 s |
+| `sergeant`, `veteran`, `bruiser`, `scout`, `hothead` | `downed` | the body goes down, then again on the bleed clock every 2.6-5.4 s | 0.90 / - |
 | `orla`, `brann`, `vey`, `quartermaster` | `greet` | the counter is used (`TownHub.interact_at`) | 1.0 / 6 s |
 | `orla`, `brann`, `vey`, `quartermaster` | `done` | a purchase went through (`VendorMenu.purchased`, `QuartermasterMenu.purchased`) | 0.8 / 2 s |
 
 **The party speaks with five profiles, one per mercenary.** A profile is not extra
-content: it is the same two beats - finding something to hit, being hit - recorded
-five ways, so a squad of five reads as five men instead of one. The assignment is
-a pure function of the mercenary id (`VoiceLibrary.profile_for`: round robin over
+content: it is the same five beats - finding something to hit, being hit, the close
+call, the kill, going down - recorded five ways, so a squad of five reads as five
+men instead of one. The assignment is a pure function of the mercenary id
+(`VoiceLibrary.profile_for`: round robin over
 `PROFILES`, so the first five bodies field all five voices before any of them
 repeats), made in `PossessionController._spawn_body` beside
 `WarbandLooks.profile_for(merc_id)` and *before* the body enters the tree, because
@@ -282,6 +286,16 @@ reads it) turns green as they arrive:
 | `voice/player/downed_01..03.ogg` | 3 | the first gasp and the ragged moans of a body bleeding on the ground |
 | `voice/orla/greet_01..03.ogg`, `voice/brann/...`, `voice/vey/...`, `voice/quartermaster/...` | 3 | the keeper as their counter is used |
 | `voice/orla/done_01..02.ogg`, same four folders | 2 | the keeper after a trade |
+| `voice/{sergeant,veteran,bruiser,scout,hothead}/big_hit_01..02.ogg` | 2 each | the close call, one per profile |
+| `voice/{sergeant,veteran,bruiser,scout,hothead}/kill_01..03.ogg` | 3 each | the kill quip, one per profile |
+| `voice/{sergeant,veteran,bruiser,scout,hothead}/downed_01..03.ogg` | 3 each | the body on the ground, one per profile |
+
+**The recording script is the delivery plan.** `loops/voice_script.json` in
+`game-audio-lab` is one entry per take (85 across the nine voices), the take id
+is the filename above, and `python tools/cast_takes.py check|convert|install`
+walks it: your performance in, Seed-VC into that voice's cast reference, that
+character's DSP chain, and the oggs land in the folders this table names.
+`docs/voice-script.md` there is the same sheet rendered to read aloud.
 
 **The party's five profiles shipped**, so they are not on that list any more:
 `voice/{sergeant,veteran,bruiser,scout,hothead}/aggro_01..03.ogg` (the three

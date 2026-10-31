@@ -5,7 +5,7 @@ extends SceneTree
 ## guards and peeks out of cover, and the scene-level ability node resolves a cue
 ## into exactly one projectile on the authority only.
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
@@ -75,7 +75,7 @@ func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
 	actor.slot = index
 	actor.authoritative = true
 	parent.add_child(actor)
-	actor.configure(index + 1, false, "Probe", at)
+	actor.configure(index + 1, "Probe", at)
 	actor.set_process(false)
 	actor.rig.set_physics_process(false)
 	actor.set_physics_process(false)

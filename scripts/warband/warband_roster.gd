@@ -5,7 +5,7 @@ extends RefCounted
 ##
 ## A mercenary is a plain dictionary so it survives save/load and the wire
 ## without a serializer: `id`, `name`, `health`, `max_health`, `state`,
-## `equipped`, `deployed`, `downed_seconds`. Every record is created
+## `equipped`, `downed_seconds`. Every record is created
 ## at `WarbandContracts.BASE_MAX_HEALTH` with empty hands: the ONLY thing that
 ## differentiates two mercenaries is the gear in `equipped`.
 ##
@@ -30,7 +30,6 @@ const KEY_HEALTH := "health"
 const KEY_MAX_HEALTH := "max_health"
 const KEY_STATE := "state"
 const KEY_EQUIPPED := "equipped"
-const KEY_DEPLOYED := "deployed"
 const KEY_DOWNED_SECONDS := "downed_seconds"
 ## The two weapon sets, and which one the hands carry. A mercenary's armour and
 ## trinkets live on `equipped`; only the two hand slots travel through these.
@@ -64,7 +63,6 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_EQUIPPED: empty_equipment(),
 		KEY_WEAPON_SETS: [empty_pair(), empty_pair()],
 		KEY_ACTIVE_SET: 0,
-		KEY_DEPLOYED: false,
 		KEY_DOWNED_SECONDS: 0.0,
 	}
 
@@ -151,16 +149,6 @@ func dead_ids() -> Array[int]:
 func alive_count() -> int:
 	return alive_ids().size()
 
-func deployed_ids() -> Array[int]:
-	var out: Array[int] = []
-	for merc in _mercs:
-		if bool(merc.get(KEY_DEPLOYED, false)):
-			out.append(int(merc[KEY_ID]))
-	return out
-
-func deployed_count() -> int:
-	return deployed_ids().size()
-
 # --- mutation --------------------------------------------------------------
 
 func clear() -> void:
@@ -196,7 +184,6 @@ func add_record(record: Dictionary) -> int:
 	copy[KEY_MAX_HEALTH] = float(copy.get(KEY_MAX_HEALTH, Contracts.BASE_MAX_HEALTH))
 	copy[KEY_HEALTH] = clampf(float(copy.get(KEY_HEALTH, copy[KEY_MAX_HEALTH])), 0.0, copy[KEY_MAX_HEALTH])
 	copy[KEY_STATE] = int(copy.get(KEY_STATE, Contracts.HealthState.ALIVE))
-	copy[KEY_DEPLOYED] = bool(copy.get(KEY_DEPLOYED, false))
 	copy[KEY_DOWNED_SECONDS] = float(copy.get(KEY_DOWNED_SECONDS, 0.0))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
@@ -262,7 +249,6 @@ func set_state(merc_id: int, state: int) -> void:
 		record[KEY_DOWNED_SECONDS] = 0.0
 	if state == Contracts.HealthState.DEAD:
 		record[KEY_HEALTH] = 0.0
-		record[KEY_DEPLOYED] = false
 	if state == Contracts.HealthState.DEAD and not was_dead:
 		died.emit(merc_id)
 
@@ -286,7 +272,6 @@ func apply_damage(merc_id: int, amount: float) -> Dictionary:
 		if finished:
 			record[KEY_STATE] = Contracts.HealthState.DEAD
 			record[KEY_HEALTH] = 0.0
-			record[KEY_DEPLOYED] = false
 		var answer := {"ok": true, "state": int(record[KEY_STATE]),
 			"health": float(record[KEY_HEALTH]),
 			"damage": maxf(0.0, amount), "overkill": maxf(0.0, amount), "downed": not finished,
@@ -301,8 +286,6 @@ func apply_damage(merc_id: int, amount: float) -> Dictionary:
 		return result
 	record[KEY_HEALTH] = float(result["health"])
 	record[KEY_STATE] = int(result["state"])
-	if bool(result["died"]):
-		record[KEY_DEPLOYED] = false
 	result["merc_id"] = merc_id
 	result["state_from"] = state_from
 	if bool(result["died"]):
@@ -345,7 +328,6 @@ func tick_downed(merc_id: int, delta: float) -> bool:
 		return false
 	record[KEY_STATE] = Contracts.HealthState.DEAD
 	record[KEY_HEALTH] = 0.0
-	record[KEY_DEPLOYED] = false
 	died.emit(merc_id)
 	return true
 
@@ -620,48 +602,6 @@ func unequip(merc_id: int, slot_id: String) -> String:
 	if str(slot_id) in HAND_SLOTS:
 		_store_hands(record)
 	return item_id
-
-# --- deployment ------------------------------------------------------------
-
-## Mark a body for the next battle. Refuses when the deployment cap is reached
-## and the body is not already deployed. Returns `{ok, message}`.
-func set_deployed(merc_id: int, on: bool, cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> Dictionary:
-	var record := find(merc_id)
-	if record.is_empty():
-		return {"ok": false, "message": "No such mercenary."}
-	if not on:
-		record[KEY_DEPLOYED] = false
-		return {"ok": true, "message": "%s stands down." % name_of(merc_id)}
-	if int(record.get(KEY_STATE, Contracts.HealthState.DEAD)) == Contracts.HealthState.DEAD:
-		return {"ok": false, "message": "%s is dead." % name_of(merc_id)}
-	if bool(record.get(KEY_DEPLOYED, false)):
-		return {"ok": true, "message": "%s is already deployed." % name_of(merc_id)}
-	if deployed_count() >= maxi(0, cap):
-		return {"ok": false, "message": "The warband can field at most %d." % cap}
-	record[KEY_DEPLOYED] = true
-	return {"ok": true, "message": "%s joins the battle." % name_of(merc_id)}
-
-## Deploy exactly these ids, in order, up to the cap. Returns the ids fielded.
-func deploy(merc_ids: Array, cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> Array[int]:
-	for merc in _mercs:
-		merc[KEY_DEPLOYED] = false
-	var out: Array[int] = []
-	for id in merc_ids:
-		var merc_id := int(id)
-		if out.size() >= maxi(0, cap):
-			break
-		if is_dead(merc_id):
-			continue
-		var record := find(merc_id)
-		if record.is_empty():
-			continue
-		record[KEY_DEPLOYED] = true
-		out.append(merc_id)
-	return out
-
-func clear_deployment() -> void:
-	for merc in _mercs:
-		merc[KEY_DEPLOYED] = false
 
 # --- persistence -----------------------------------------------------------
 

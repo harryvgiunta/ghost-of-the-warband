@@ -423,6 +423,10 @@ func receive_snapshot(tick: int, entries: Array) -> void:
 	if controller == null:
 		return
 	_sync_local_peer()
+	# The guest's playout clock: every arrival names a tick of the host's
+	# simulation, and the render tick it settles on is what its own actions are
+	# judged against.
+	controller.ingest_snapshot(tick)
 	var actors: Array = controller.bodies()
 	for entry in entries:
 		if typeof(entry) != TYPE_ARRAY:
@@ -864,7 +868,10 @@ func _redress(target: WarbandState, before: Dictionary) -> void:
 			controller.refresh_gear(merc_id)
 
 func _send_snapshots() -> void:
-	_tick += 1
+	# The tick on the wire is the simulation tick the bodies were stepped on, not
+	# this sender's own packet counter: a guest's actions name it back, and the
+	# host rewinds to it.
+	_tick = int(controller.sim_tick())
 	var entries: Array = []
 	for merc_id in warband.roster.ids():
 		var actor := controller.body_of(merc_id)
@@ -1098,15 +1105,10 @@ func _on_peer_connected(peer_id: int) -> void:
 	peer_joined.emit(peer_id)
 
 func _on_peer_disconnected(peer_id: int) -> void:
-	var merc_id := controller.merc_for_peer(peer_id) if controller != null else -1
 	_fielded.erase(peer_id)
 	_waiting.erase(peer_id)
 	_release_body_of(peer_id, "That soul left the battle.")
 	_driven.erase(peer_id)
-	if merc_id > 0 and controller != null:
-		# The body stays on the field under its own AI rather than freezing - and
-		# a soul that was waiting for a body takes it.
-		controller.set_bot(merc_id, true)
 	_names.erase(peer_id)
 	if _role == "host":
 		_seat_waiting()

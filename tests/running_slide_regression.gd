@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const DT := 1.0/60.0
 const FORWARD := Vector2(0,-1)
 var failures := 0
@@ -277,7 +277,13 @@ func combat_and_lifecycle() -> void:
 	await drive(2)
 	check(actor.slide.active and actor.rig.phase=="MELEE","Starting a grounded sword swing does not silently cancel the slide")
 	actor.take_damage(1000.0,actor.slot+1)
-	check(not actor.alive and not actor.slide.active and actor.rig.slide_progress<0.0,"Death immediately clears physical and visible sliding")
+	# A campaign body goes DOWN on a lethal blow, and going down is what clears
+	# the slide; the finisher is the next blow that lands.
+	check(actor.downed and actor.alive and not actor.slide.active and actor.rig.slide_progress<0.0,
+		"Going down immediately clears physical and visible sliding")
+	actor.take_damage(1.0,actor.slot+1)
+	check(not actor.alive and not actor.slide.active and actor.rig.slide_progress<0.0,
+		"A finisher leaves no slide behind either")
 	actor.set_crouch(true)
 	check(not actor.slide.active,"Dead crouch intent cannot restart sliding")
 	actor.revive()
@@ -299,7 +305,7 @@ func run() -> void:
 	actor = Actor.new()
 	actor.authoritative = true
 	scene.add_child(actor)
-	actor.configure(1,false,"Slide regression",Vector3(0,0,6))
+	actor.configure(1,"Slide regression",Vector3(0,0,6))
 	actor.set_process(false)
 	actor.rig.set_physics_process(false)
 	await deceleration_and_pose()

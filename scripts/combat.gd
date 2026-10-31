@@ -15,6 +15,10 @@ const ImpactRules = preload("res://scripts/impact_rules.gd")
 ## Bow damage at full draw, in catalog `index` order: the three forged bows
 ## and the twig bow a warband starts with.
 const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0]
+## How far from a body an aim point may lie and still be a place that body could
+## be shooting at. The longest ray either mode casts is 120 m, so this is the
+## sanity bound with room to spare, not a reach.
+const AIM_REACH := 400.0
 const PARRY_WINDOW := 0.25
 const SHAFT_SETTLE_GRACE := 0.15
 const PARRY_STAGGER := 0.8
@@ -1274,6 +1278,21 @@ func update_aim() -> void:
 	# Aim is a world-space point from the camera ray, never a tracked unit or
 	# a compensated ballistic solution. Gravity acts after the arrow is released.
 	rig.aim_at(aim_point)
+
+## Whether `point` is a place the body standing at `at` could be aiming at.
+##
+## The bound is measured **from the body**, never from the world origin. An
+## absolute one (`point.length_squared() > 1000000.0`, i.e. more than 1 km from
+## (0,0,0)) was shared by every mode's aim gate, and the campaign is 1,374 m of
+## lane with the town past its end: past that mark every swing, draw, throw and
+## guard was refused before it started - from any distance, on every body the
+## soul entered, while the bots beside it swung freely. A frame that is not a
+## place at all (a NaN, or a coordinate off the edge of the world) is still
+## refused, which is the only thing this check was ever for.
+static func aim_point_valid(at: Vector3, point: Vector3) -> bool:
+	if not point.is_finite():
+		return false
+	return point.distance_squared_to(at) <= AIM_REACH * AIM_REACH
 
 ## `scale` is the shooter's trinket multiplier; enemies pass nothing.
 static func damage_for(bow_index: int, charge: float, scale: float = 1.0) -> float:

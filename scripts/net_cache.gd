@@ -1,7 +1,7 @@
 extends Node
 ## Remembers the last host address, player name and UDP ports for the title's
-## JOIN GAME and HOST GAME forms and the standalone arena lobby. This is
-## presentation data only; the flow and the sessions own the actual hand-offs.
+## JOIN GAME and HOST GAME forms. This is presentation data only; the flow and
+## the sessions own the actual hand-offs.
 ##
 ## The port a peer *joins* on and the port this machine *hosts* on are separate
 ## fields. Sharing one made a stale join port silently move the host socket: the

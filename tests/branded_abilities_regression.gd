@@ -8,7 +8,7 @@ extends SceneTree
 ## real `Arrow` nodes, so a shaft that would not hit a body in the game cannot
 ## pass here either.
 
-const Actor = preload("res://scripts/arena_actor.gd")
+const Actor = preload("res://scripts/warband/warband_body.gd")
 const Arrow = preload("res://scripts/arrow.gd")
 const Combat = preload("res://scripts/combat.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
@@ -75,7 +75,7 @@ func make_body(slot: int, point: Vector3):
 	body.authoritative = true
 	body.max_health = POOL_HEALTH
 	scene.add_child(body)
-	body.configure(slot, true, "Branded %d" % slot, point)
+	body.configure(slot, "Branded %d" % slot, point)
 	return body
 
 ## Puts a body back on its feet at `point` with a full pool, a full stamina bar

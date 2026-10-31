@@ -3,6 +3,17 @@ extends Node
 
 const REACH := 1.35
 const GAP := 0.42
+## Sticky movement is a press on the thing in front of the player, never on a
+## wall the search fan happened to find behind them: F only considers surfaces
+## inside this cone around the view (0.5 is sixty degrees either side).
+const STICK_ARC := 0.5
+## How far the held input has to point off the surface before the body lets go.
+## A body leans on cover; it does not wear it.
+const RELEASE_PUSH := 0.6
+## How far past the ray's hit the anchor may be pushed to fit the whole capsule,
+## and the step it walks out in.
+const SETTLE_REACH := 0.5
+const SETTLE_STEP := 0.03
 const SPEED := 2.2
 const FAST_SPEED := 4.2
 const STANCE_SPEED := 6.0
@@ -15,6 +26,11 @@ const FIRING_RADIUS := 0.05
 var view_right := Vector3.RIGHT
 var active := false
 var normal := Vector3.ZERO
+## The normal of the surface the press took. The away test is measured against
+## this, not against the live normal: sliding round a curved trunk turns the live
+## normal but the player's input is still the same lateral push, and judging that
+## against the rotating normal stopped the slide dead halfway round every tree.
+var stick_normal := Vector3.ZERO
 var low := false
 var peeking := false
 var lean := Vector3.ZERO
@@ -72,9 +88,12 @@ func try_enter(preferred_direction: Vector3) -> bool:
 	var best: Dictionary = {}
 	var best_score := INF
 	var space := _body.get_world_3d().direct_space_state
-	# Nearby sides remain usable when looking away; the view breaks distance ties.
-	for index in 16:
-		var direction := forward.rotated(Vector3.UP,float(index)*TAU/16.0)
+	# Only what stands in front of the player is a candidate; the view still breaks
+	# distance ties between two things that are both in it.
+	for index in 24:
+		var direction := forward.rotated(Vector3.UP,float(index)*TAU/24.0)
+		if direction.dot(forward) < STICK_ARC:
+			continue
 		_ray.from = _body.global_position+Vector3.UP*PROBE_HEIGHT
 		_ray.to = _ray.from+direction*REACH
 		var hit := space.intersect_ray(_ray)
@@ -87,15 +106,25 @@ func try_enter(preferred_direction: Vector3) -> bool:
 	if best.is_empty():
 		return false
 	normal = _flat_normal(best.normal)
+	stick_normal = normal
 	attached_rid = best.rid
 	_anchor = best.position+normal*GAP-Vector3.UP*PROBE_HEIGHT
 	var support := _support(_anchor)
 	if support.is_empty():
 		return false
 	_anchor = _grounded_position(_anchor,support)
+	_anchor = _settle_anchor(_anchor,normal)
 	# Entering cover follows the supported capsule path, including terrain rise.
 	if not _walk_clear(_body.global_position,_anchor):
-		return false
+		# A body already resting against the very surface it presses F on cannot take
+		# that path: the capsule query calls the contact a collision and the sweep
+		# reports an immediate wall, so F would do nothing exactly when the player
+		# stands at the tree. That body only ever steps outward, and its destination
+		# capsule still has to be clear - never through the surface it leans on.
+		var stood := _body.global_transform
+		stood.origin = _anchor
+		if not _capsule_clear_at(stood) or (_anchor-_body.global_position).dot(normal) < 0.0:
+			return false
 	active = true
 	peeking = false
 	low = _is_low_cover()
@@ -111,9 +140,34 @@ func exit() -> void:
 	_top_lean = false
 	low = false
 	normal = Vector3.ZERO
+	stick_normal = Vector3.ZERO
 	_peek_offset = Vector3.ZERO
 	_peek_side = 0
 	_side_extents = Vector2(PEEK_DISTANCE,PEEK_DISTANCE)
+
+## The nearest spot along `outward` from a probed surface where the whole capsule
+## fits.
+##
+## The ray finds the surface at one height; the body is a standing capsule. A face
+## that swells below the ray's own height - the flare of a trunk under the collider's
+## footprint, a rock's bulge at the ankle, a wall's plinth - leaves the hit point a
+## place the boots cannot stand, which is what made a sticky point read as off the
+## tree. Walking the anchor out in small steps until the capsule clears the geometry
+## is the whole difference between leaning on a wall and hanging inside it, and every
+## slide step derives its anchor the same way, so sliding cannot cut back into it.
+func _settle_anchor(point: Vector3, outward: Vector3) -> Vector3:
+	var settled := point
+	for index in int(SETTLE_REACH/SETTLE_STEP):
+		var support := _support(settled)
+		if support.is_empty():
+			return point
+		settled = _grounded_position(settled,support)
+		var pose := _body.global_transform
+		pose.origin = settled
+		if _capsule_clear_at(pose):
+			return settled
+		settled += outward*SETTLE_STEP
+	return point
 
 func prepare_jump() -> bool:
 	if not _can_stand():
@@ -163,6 +217,20 @@ func step(delta: float, desired_direction: Vector3, wants_peek: bool, shoulder: 
 		_update_stance(delta,crouch_requested)
 		return Vector3.ZERO
 	attached_rid = contact.rid
+	# The press sticks the body to this surface; it does not hold it there. Input
+	# that points to the far side of the surface the press took peels the body away
+	# and leaves it free - jumping, the roll, the side step and a blade already end
+	# it the same way - and nothing reattaches on its own, so a body only ever sticks
+	# again by a fresh press on whatever is in front of it then. Measured against
+	# `stick_normal` rather than the live normal: a torso sliding round a trunk keeps
+	# pushing the same lateral way while the normal turns under it, and that must not
+	# read as walking off the tree.
+	var planar := Vector3(desired_direction.x,0.0,desired_direction.z)
+	var face := stick_normal if not stick_normal.is_zero_approx() else normal
+	if planar.length_squared() > 0.0001 and planar.normalized().dot(face) > RELEASE_PUSH:
+		exit()
+		_update_stance(delta,crouch_requested)
+		return Vector3.ZERO
 	var tangent := normal.cross(Vector3.UP)
 	var travel := clampf(desired_direction.dot(tangent),-1.0,1.0)
 	var speed := FAST_SPEED if fast else SPEED
@@ -184,6 +252,7 @@ func step(delta: float, desired_direction: Vector3, wants_peek: bool, shoulder: 
 			next_normal = normal.lerp(next_normal,blend).normalized()
 			next_anchor = (_anchor-normal*GAP).lerp(contact_point,blend)+next_normal*GAP
 			next_anchor = _anchor+(next_anchor-_anchor).limit_length(stride.length())
+			next_anchor = _settle_anchor(next_anchor,next_normal)
 			if _walk_clear(_anchor,next_anchor):
 				_anchor = next_anchor
 				_peek_offset = Vector3.ZERO
