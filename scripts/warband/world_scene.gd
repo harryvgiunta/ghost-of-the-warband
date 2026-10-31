@@ -85,11 +85,18 @@ const TerrainScript = preload("res://scripts/warband/terrain.gd")
 ## world the way an area does and build only their own content.
 const SoldierCagesScript = preload("res://scripts/warband/soldier_cages.gd")
 const WatcherWarrenScript = preload("res://scripts/warband/watcher_warren.gd")
-## The click that loots: the body ducks over a body or a drop and the warband
-## takes everything on it in one go.
+## The take-it-all: shift and a right click on a body or a drop, the body ducks
+## and the warband takes everything on it in one go.
 const LootHandScript = preload("res://scripts/warband/loot_hand.gd")
+## The tiny loot window a plain right click on a body opens, and the looted list
+## every booked piece is written to.
+const LootWindowScript = preload("res://scripts/warband/loot_window.gd")
+const LootFeedScript = preload("res://scripts/warband/loot_feed.gd")
 ## The campaign's map sheet. One page, drawn by one `_draw()`, opened with `M`.
 const WorldMapScript = preload("res://scripts/warband/world_map.gd")
+## The delve: the Weeping Hollow's mouth in the square, the counter a party and its
+## delve inventory are made up at, and the cave instance it goes down into.
+const DelveAreaScript = preload("res://scripts/warband/delve_area.gd")
 
 ## How far past the lane's far end the town square stands. The lane ends at the
 ## town's north gate; the square's centre is this far beyond it.
@@ -209,9 +216,13 @@ var wilderness
 ## wood, and the warcamps of watchers near the town.
 var soldier_cages
 var watcher_warren
-## The click that loots, and the campaign's map sheet.
+## The take-it-all, the loot window, the looted list, and the campaign's map sheet.
 var loot_hand
+var loot_window
+var loot_feed
 var world_map
+## The delve (`delve_area.gd`): the mouth in the square and the instance below.
+var delve_area
 ## The three areas. Each is the same script its standalone preview uses.
 var camp
 var trail
@@ -290,6 +301,7 @@ func _ready() -> void:
 	_build_revive()
 	_build_squad()
 	_build_areas()
+	_build_delve()
 	if _client:
 		_become_client()
 	_build_wrong_way_sign()
@@ -345,6 +357,11 @@ func _physics_process(delta: float) -> void:
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
 	SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
+	# The delve's own clock: dens that wake, a party that falls, the eye's sky.
+	if delve_area != null:
+		delve_area.tick(delta)
+	if loot_window != null:
+		loot_window.tick()
 	_sync_roster(delta)
 	_sync_field()
 	_sync_quests()
@@ -407,8 +424,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		KEY_M:
 			# One page, and it never pauses: the map is something a body reads
-			# while it keeps walking.
-			if world_map != null:
+			# while it keeps walking. It is a map of the wood, and the Hollow is
+			# not on it.
+			if delve_area != null and delve_area.in_cave(_soul()):
+				if hud != null:
+					hud.set_status("No map reaches this far underground.", 2.5)
+				get_viewport().set_input_as_handled()
+			elif world_map != null:
 				if _panel_open():
 					_hide_panels()
 				world_map.toggle()
@@ -587,12 +609,27 @@ func _build_loot() -> void:
 	add_child(loot)
 	loot.setup(warband, self)
 	loot.equip_target = Callable(self, "_loot_owner")
-	# The click. It lives beside the vacuum because it is the vacuum's other
+	# The take-it-all. It lives beside the vacuum because it is the vacuum's other
 	# hand: the same booking path, started by a gesture instead of a key.
 	loot_hand = LootHandScript.new()
 	loot_hand.name = "LootHand"
 	add_child(loot_hand)
 	loot_hand.setup(self)
+	loot_window = LootWindowScript.new()
+	loot_window.name = "LootWindow"
+	add_child(loot_window)
+	loot_window.setup(self)
+	# Every piece the warband books - the soul's hands, a squadmate's, a sweep's -
+	# is one line on the looted list.
+	loot_feed = LootFeedScript.new()
+	loot_feed.name = "LootFeed"
+	add_child(loot_feed)
+	loot.booked.connect(_on_loot_booked)
+
+
+func _on_loot_booked(item_id: String, collector_peer: int) -> void:
+	if loot_feed != null:
+		loot_feed.note(item_id, "" if collector_peer > 0 else "squad")
 
 
 ## The orders' ground: four caged soldiers down the wood and three warcamps of
@@ -658,6 +695,15 @@ func _build_areas() -> void:
 	town.position = _town_at
 	add_child(town)
 	town.embed(self)
+
+
+## The delve stands in the square the town just built, and hands the squad its
+## cave map and the soul its party when a party goes down.
+func _build_delve() -> void:
+	delve_area = DelveAreaScript.new()
+	delve_area.name = "Delve"
+	add_child(delve_area)
+	delve_area.setup(self)
 
 
 ## The word that answers the banner in the world itself: a body walking back up
@@ -1150,6 +1196,10 @@ func _is_free_ally(merc_id: int) -> bool:
 	if merc_id <= 0:
 		return false
 	if warband != null and warband.souls != null and warband.souls.occupied_by(merc_id) > 0:
+		return false
+	# While a party is below, a body left in the town is nobody's to drive: it
+	# stands where it was left until the party comes back up.
+	if warband != null and warband.delve.active and not warband.delve.is_member(merc_id):
 		return false
 	if camp == null:
 		return true
@@ -1783,6 +1833,12 @@ func _check_wipe(delta: float) -> void:
 	# it there when the host's campaign arrives again.
 	if _wiped or _client:
 		return
+	# A party below falls by its own rule (`delve_area.gd`): the bodies left in the
+	# town are still standing, and the Hollow - not the checkpoint - decides what a
+	# fall costs.
+	if warband != null and warband.delve.active:
+		_wipe_beat = -1.0
+		return
 	if not _all_bodies_out():
 		_wipe_beat = -1.0
 		return
@@ -1938,6 +1994,9 @@ func _try_interact() -> void:
 	# whatever else is standing here.
 	if soldier_cages != null and soldier_cages.interact(actor):
 		return
+	# The Hollow's mouth in the square, and the rope out of it below.
+	if delve_area != null and delve_area.interact(actor):
+		return
 	if town != null and not town.interact_at(controller.local_peer_id, actor.global_position).is_empty():
 		return
 	# A fallen body at your feet is a container: `G` opens its character screen. A
@@ -1954,14 +2013,15 @@ func _try_interact() -> void:
 	_interaction_status(actor)
 
 
-## A left click on lootable ground is the loot, not a swing.
+## A right click on lootable ground is the loot, not the guard.
 ##
 ## The world sees the press before the soul controller does (`_input` runs ahead of
-## `_unhandled_input`, and consuming the event stops it reaching the swing), so a
-## click with a body or a drop under the crosshair starts the duck-and-take and
-## nothing else; a click with nothing lootable there is left alone and lands as a
-## cut exactly as before. That is the whole difference between a game that asks you
-## to press a key per piece and one where the body works the corpse.
+## `_unhandled_input`, and consuming the event stops it reaching the guard), so a
+## right click with a body or a drop under the crosshair and in the body's reach
+## opens the loot window on it - a click on a row takes it, a shift-click takes the
+## lot - and with shift held the body ducks and takes everything at once. A right
+## click with nothing lootable there is left alone and raises the guard exactly as
+## before.
 ##
 ## "Under the crosshair" is the ray's own answer, not a radius around it: a fighter
 ## the player is looking at is what the press was for, so the ray's living target
@@ -1974,21 +2034,31 @@ func _loot_click(event: InputEvent) -> bool:
 	if not (event is InputEventMouseButton):
 		return false
 	var mouse := event as InputEventMouseButton
-	if mouse.button_index != MOUSE_BUTTON_LEFT or not mouse.pressed:
+	if not mouse.pressed:
 		return false
 	if _panel_open() or _reviving or _wiped or _client:
 		return false
 	var actor = _soul()
 	if actor == null or not is_instance_valid(actor):
 		return false
-	var sample: Dictionary = controller.aim_sample()
-	if not loot_hand.try_click(actor, sample.get("point", Vector3.ZERO),
-			sample.get("target", null)):
-		# Nothing to loot: the press belongs to the blade. Empty hands cannot
-		# swing, and a click that does nothing at all is the one report this game
-		# keeps getting, so name the missing piece.
+	if mouse.button_index == MOUSE_BUTTON_LEFT:
+		# The left button is the blade's. Empty hands cannot swing, and a click
+		# that does nothing at all is the one report this game keeps getting, so
+		# name the missing piece.
 		if str(actor.rig.weapon) in ["", "none"] and hud != null:
-			hud.set_status("Your hands are empty. Take a weapon with K, or equip one on O.", 2.5)
+			hud.set_status("Your hands are empty. Right-click a body to loot one, or equip one on P.", 2.5)
+		return false
+	if mouse.button_index != MOUSE_BUTTON_RIGHT:
+		return false
+	var sample: Dictionary = controller.aim_sample()
+	var target: Dictionary = loot_hand.target_at(actor, sample.get("point", Vector3.ZERO),
+		sample.get("target", null))
+	if target.is_empty():
+		return false
+	if mouse.shift_pressed:
+		if not loot_hand.begin_on(actor, target):
+			return false
+	elif loot_window == null or not loot_window.open_on(actor, target):
 		return false
 	get_viewport().set_input_as_handled()
 	return true
@@ -2188,7 +2258,11 @@ func _update_prompt() -> void:
 			"" if soldier_cages.remaining() == 1 else "S"], "G  -  cut a cage latch")
 	# The counter under the body's nose wins over the camp's lesson, and the
 	# lesson wins over the trail: a body can only be standing in one of them.
-	if town != null and town.in_square(actor):
+	# The Hollow first: below, its objective is the only line that means anything,
+	# and at the mouth it names the way down.
+	if delve_area != null:
+		text = delve_area.prompt_line(actor)
+	if text.is_empty() and town != null and town.in_square(actor):
 		text = town.prompt_line(actor)
 	if text.is_empty() and camp != null:
 		text = camp.prompt_line(actor)
@@ -2219,7 +2293,9 @@ func _update_hint() -> void:
 		return
 	var actor = _soul()
 	var text := ""
-	if town != null and town.in_square(actor):
+	if delve_area != null:
+		text = delve_area.hint_line(actor)
+	if text.is_empty() and town != null and town.in_square(actor):
 		text = town.hint_line(actor)
 	if text.is_empty() and camp != null:
 		text = camp.hint_line(actor)
@@ -2257,6 +2333,10 @@ func _hide_panels() -> void:
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
 		paperdoll.close()
+	if loot_window != null and loot_window.is_open():
+		loot_window.close()
+	if delve_area != null:
+		delve_area.close_panels()
 	if town != null:
 		town.close_panels()
 
@@ -2267,6 +2347,10 @@ func _panel_open() -> bool:
 	if menu != null and menu.is_open():
 		return true
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
+		return true
+	if loot_window != null and loot_window.is_open():
+		return true
+	if delve_area != null and delve_area.panels_open():
 		return true
 	return town != null and town.panels_open()
 

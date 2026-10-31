@@ -1,15 +1,16 @@
 class_name WarbandLootHand
 extends Node
-## The click that loots: aim at a body or a drop, work it, and the warband takes
-## everything on it in one go.
+## The take-it-all: shift and a right click on a body or a drop, and the warband
+## takes everything on it in one go.
 ##
-## This is the one gesture - click the corpse, the body ducks, the stash fills -
-## instead of a feed of pieces. A click on lootable ground starts a short channel
-## on the body (it crouches, the HUD says so); when the channel ends the whole
-## container is emptied through the loot vacuum's one booking path, the body
-## straightens, and a single line says what came back. Nothing here books a piece
-## itself, so a click cannot pay twice: the corpse record empties and the drop
-## node leaves the tree.
+## A plain right click opens the loot window on the same target
+## (`loot_window.gd`); with shift held the body works the ground instead - it
+## crouches, the HUD says so, and when the channel ends the whole container is
+## emptied through the loot vacuum's one booking path, the body straightens, and a
+## single line says what came back. Both gestures resolve what is under the press
+## through `target_at`, so they never disagree about what is there. Nothing here
+## books a piece itself, so a press cannot pay twice: the corpse record empties
+## and the drop node leaves the tree.
 ##
 ## The channel is a body's work, so it breaks the moment the work stops being
 ## possible: a blow that puts the body down, a walk off the spot it started from,
@@ -76,9 +77,10 @@ func setup(world_ref) -> void:
 		_reach = float(published)
 
 
-## The click. True when a channel began - the caller must let the click be a loot,
-## not an attack. False means there is nothing lootable at `point` (or this
-## machine does not own the loot), and the caller is free to swing.
+## The shift-click that loots everything. True when a channel began - the caller
+## must let the press be a loot, not a guard or a swing. False means there is
+## nothing lootable at `point` (or this machine does not own the loot), and the
+## press is the caller's.
 ##
 ## `aim_target` is the collider the crosshair ray met, when the caller has one. A
 ## fighter under the reticle is the thing the player aimed at, so a press on it is
@@ -88,17 +90,23 @@ func setup(world_ref) -> void:
 ## that mob: the body ducked, the fight went on, and the report was "I cannot
 ## attack any more".
 func try_click(actor, point: Vector3, aim_target: Variant = null) -> bool:
+	return begin_on(actor, target_at(actor, point, aim_target))
+
+
+## What a press at `point` would loot, without starting anything: `{kind,
+## corpse_id, pickup}` for the nearest body with something left on it, else the
+## nearest open drop, or `{}`. Both the channel and the loot window resolve the
+## press through this, so the two gestures always agree about what is there.
+func target_at(actor, point: Vector3, aim_target: Variant = null) -> Dictionary:
 	if _loot == null or not is_instance_valid(_loot):
-		return false
+		return {}
 	if _is_client():
-		return false
-	if _cool > 0.0 or active():
-		return false
+		return {}
 	if not _can_work(actor):
-		return false
+		return {}
 	if _aims_at_a_living_body(aim_target):
-		return false
-	# The channel is the body's own work, so the piece has to be in the body's
+		return {}
+	# The take is the body's own work, so the piece has to be in the body's
 	# reach as well as under the crosshair. Measuring only from `point` let a
 	# click aimed at a fighter standing over a corpse loot that corpse from
 	# across the field - the click crouched and worked the ground instead of
@@ -106,11 +114,24 @@ func try_click(actor, point: Vector3, aim_target: Variant = null) -> bool:
 	var body_at: Vector3 = (actor as Node3D).global_position
 	var corpse_id: int = _loot.corpse_at(point, _reach)
 	if corpse_id != 0 and body_at.distance_to(_loot.corpse_position(corpse_id)) <= _reach:
-		_begin(actor, KIND_CORPSE, corpse_id, null)
-		return true
+		return {"kind": KIND_CORPSE, "corpse_id": corpse_id, "pickup": null}
 	var pickup: WarbandPickup = _drop_at(point)
 	if pickup != null and body_at.distance_to(pickup.global_position) <= _reach:
-		_begin(actor, KIND_DROP, 0, pickup)
+		return {"kind": KIND_DROP, "corpse_id": 0, "pickup": pickup}
+	return {}
+
+
+## Start the duck-and-take on a target `target_at` resolved. False when there is
+## nothing to work, the hands are already busy, or the cooldown is still running.
+func begin_on(actor, target: Dictionary) -> bool:
+	if target.is_empty() or _cool > 0.0 or active() or not _can_work(actor):
+		return false
+	var kind := str(target.get("kind", ""))
+	if kind == KIND_CORPSE:
+		_begin(actor, KIND_CORPSE, int(target.get("corpse_id", 0)), null)
+		return true
+	if kind == KIND_DROP and target.get("pickup") != null and is_instance_valid(target.get("pickup")):
+		_begin(actor, KIND_DROP, 0, target.get("pickup"))
 		return true
 	return false
 

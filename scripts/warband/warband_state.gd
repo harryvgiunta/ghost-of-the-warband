@@ -24,6 +24,7 @@ const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const QuestScript = preload("res://scripts/warband/quest_log.gd")
+const DelveScript = preload("res://scripts/warband/delve_state.gd")
 
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
@@ -40,11 +41,14 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## (`quests`), the objectives the quartermaster has handed over and how far each
 ## one got; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
 ## steel that has been given its skill; v7 dropped the expedition's battle ledger
-## (`runs`, `run_totals`). Older files still load: a record with no sets puts the
+## (`runs`, `run_totals`); v8 added the delve (`delve`): the inventory packed at
+## the Hollow's mouth and, while a party is below, who went down. Older files
+## still load: a record with no sets puts the
 ## pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
-## with an empty ledger, and a file without anointings carries plain steel.
-const SAVE_VERSION := 7
+## with an empty ledger, a file without anointings carries plain steel, and a file
+## without a delve has an empty pack and nobody below.
+const SAVE_VERSION := 8
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -61,6 +65,11 @@ var cruor: WarbandCruor = CruorScript.new()
 ## how far each has got. Pure state (no scene, no node), saved with everything
 ## else, so a checkpoint restores the orders as they stood.
 var quests: WarbandQuests = QuestScript.new()
+## The delve: the inventory a party carries below and who went down with it
+## (`delve_state.gd`). While a party is below, every verb that moves gear between
+## a body and the pool works that inventory instead of the town stash
+## (`field_stash`).
+var delve = DelveScript.new()
 var deployment_cap: int = Contracts.MAX_DEPLOYMENT_CAP
 var save_path := DEFAULT_SAVE_PATH
 ## True when a mode has already handed this warband its starting bodies, so a
@@ -157,14 +166,15 @@ func _lent_refusal(fields: Dictionary = {}) -> Dictionary:
 ## Ammunition is one pool for the whole band, exactly like the shared stash it
 ## lives in: every shaft a bow looses comes out of it, every bunch a keeper sells
 ## goes into it, and every archer's corpse gives a few back. A bow with nothing
-## in the quiver cannot be drawn, which is the whole of the rule.
+## in the quiver cannot be drawn, which is the whole of the rule. Below, the
+## quiver is the delve inventory: a party shoots what it packed and what it takes.
 const ARROW_ITEM := "arrow"
 ## What a fresh campaign opens with. A body that has to buy its first shaft
 ## before it may use a bow it just looted would read the bow as broken.
 const STARTING_ARROWS := 24
 
 func arrows() -> int:
-	return stash.pooled_count(ARROW_ITEM)
+	return field_stash().pooled_count(ARROW_ITEM)
 
 ## False when the quiver is empty. A caller drawing a bow asks this first.
 func has_arrows() -> bool:
@@ -175,7 +185,7 @@ func has_arrows() -> bool:
 ## negative however many shots a frame resolves.
 func take_arrows(count: int = 1) -> int:
 	var taken := 0
-	while taken < maxi(count, 0) and stash.remove(ARROW_ITEM, 1):
+	while taken < maxi(count, 0) and field_stash().remove(ARROW_ITEM, 1):
 		taken += 1
 	if taken > 0:
 		_notify()
@@ -186,7 +196,7 @@ func add_arrows(count: int = 1) -> int:
 	var added := maxi(count, 0)
 	if added <= 0:
 		return 0
-	stash.add(ARROW_ITEM, added)
+	field_stash().add(ARROW_ITEM, added)
 	_notify()
 	return added
 
@@ -196,6 +206,31 @@ func seed_quiver(count: int = STARTING_ARROWS) -> int:
 	if arrows() > 0:
 		return 0
 	return add_arrows(count)
+
+# --- the field's pool ---------------------------------------------------------
+
+## The pool the field's hands work right now: the town stash, or the delve
+## inventory while a party is below. Equipping, unequipping, a loot take, a dead
+## squadmate's kit and the quiver all go through this, so nothing taken in the
+## cave reaches the stash before the party climbs out with it.
+func field_stash() -> WarbandStash:
+	return delve.inventory if delve.active else stash
+
+## How a message names that pool.
+func field_label() -> String:
+	return "the delve inventory" if delve.active else "the shared stash"
+
+## The mercenaries whose gear may be moved right now: the whole roster, or only
+## the party while it is below - a body left in the town cannot hand a piece into
+## the cave, and nobody in the cave can reach a body in the town.
+func dressable_ids() -> Array[int]:
+	if not delve.active:
+		return roster.ids()
+	var out: Array[int] = []
+	for merc_id in roster.ids():
+		if delve.party.has(merc_id):
+			out.append(merc_id)
+	return out
 
 # --- roster ----------------------------------------------------------------
 
@@ -249,16 +284,20 @@ func _balance_field() -> void:
 ## forever - a band that had filled its eight places could never swear another
 ## body because the fallen still counted. The name leaves the roster, the body
 ## leaves the soul router, and everything it was still wearing goes back into the
-## shared stash, so dying costs the man, never the gear. Returns the fallen
-## records (`[{id, name, health, max_health, items}]`); empty when nobody died.
+## shared stash, so dying costs the man, never the gear - unless he died below:
+## a member of the party below leaves his kit in the delve inventory, which the
+## survivors carry out or lose with their own. Returns the fallen records
+## (`[{id, name, health, max_health, items}]`); empty when nobody died.
 func reap_dead() -> Array[Dictionary]:
 	var fallen := roster.take_dead()
 	if fallen.is_empty():
 		return fallen
 	for entry in fallen:
 		var merc_id := int(entry.get("id", 0))
+		var into: WarbandStash = delve.inventory if delve.is_member(merc_id) else stash
 		for item_id in entry.get("items", []):
-			stash.add(str(item_id), 1)
+			into.add(str(item_id), 1)
+		delve.party.erase(merc_id)
 		if souls.has_body(merc_id):
 			souls.unregister_body(merc_id)
 		for peer_id in possession.keys():
@@ -310,7 +349,7 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 				continue
 		var best := ""
 		var best_value := -1
-		for item_id in stash.pooled_ids():
+		for item_id in field_stash().pooled_ids():
 			var item: Dictionary = State.ITEMS.get(str(item_id), {})
 			if not EquipmentRules.allowed(item, wanted_slot):
 				continue
@@ -328,7 +367,7 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 			"message": "%s takes the field with what the band had spare." % roster.name_of(merc_id)}
 	_notify()
 	return {"ok": true, "merc_id": merc_id, "fitted": fitted,
-		"message": "%s arms from the shared stash: %s." % [roster.name_of(merc_id),
+		"message": "%s arms from %s: %s." % [roster.name_of(merc_id), field_label(),
 			", ".join(fitted.map(func(item_id: String): return str(
 				State.ITEMS.get(item_id, {}).get("name", item_id))))]}
 
@@ -446,13 +485,17 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
 		return _lent_refusal({"displaced": {}})
 	if item_id.is_empty():
 		return {"ok": false, "message": "Choose a piece of gear.", "displaced": {}}
+	if delve.active and not delve.party.has(merc_id):
+		return {"ok": false, "message": "%s is not with the party." % roster.name_of(merc_id),
+			"displaced": {}}
+	var pool := field_stash()
 	var gear := roster.equipped_of(merc_id)
 	if str(gear.get(slot_id, "")) == item_id:
 		return {"ok": true, "message": "%s is already worn there." % roster.name_of(merc_id),
 			"displaced": {}}
 	var moved_from := ""
-	if stash.pooled_count(item_id) <= 0:
-		var taken := _strip_worn(item_id)
+	if pool.pooled_count(item_id) <= 0:
+		var taken := _strip_worn(item_id, pool)
 		if not bool(taken.get("ok", false)):
 			return {"ok": false, "message": "You do not own that piece yet.", "displaced": {}}
 		moved_from = str(taken.get("from", ""))
@@ -461,34 +504,39 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
 		# Put the stripped piece back where it came from: a refused equip must
 		# not quietly pocket somebody else's gear.
 		if not moved_from.is_empty():
-			stash.remove(item_id, 1)
+			pool.remove(item_id, 1)
 		return result
-	stash.remove(item_id, 1)
+	pool.remove(item_id, 1)
 	var displaced: Dictionary = result.get("displaced", {})
 	for slot in displaced:
 		var old_id := str(displaced[slot])
 		if not old_id.is_empty():
-			stash.add(old_id, 1)
+			pool.add(old_id, 1)
 	if not moved_from.is_empty():
 		result["message"] = "%s taken from %s." % [str(result.get("message", "")), moved_from]
 	_notify()
 	return result
 
 ## Take one worn copy of `item_id` off whichever mercenary holds it and drop it
-## into the pool. Returns `{ok, from}` where `from` names the mercenary.
+## into `pool`. Returns `{ok, from}` where `from` names the mercenary. Only a
+## body whose gear may move right now is searched (`dressable_ids`): below, a
+## piece is handed between the party's own and never fetched out of the town.
 ##
 ## Both weapon sets are searched, not just the hands: a piece waiting in the set
 ## the body is not carrying is still the warband's to hand over.
-func _strip_worn(item_id: String) -> Dictionary:
+func _strip_worn(item_id: String, pool: WarbandStash) -> Dictionary:
+	var reachable := dressable_ids()
 	for entry in _worn_entries_all():
 		if str(entry.get("item", "")) != item_id:
 			continue
 		var merc_id := int(entry.get("merc", 0))
+		if not reachable.has(merc_id):
+			continue
 		var slot_id := str(entry.get("slot", ""))
 		var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(slot_id)]
 		if roster.take_worn(merc_id, slot_id, int(entry.get("set", -1))) != item_id:
 			continue
-		stash.add(item_id, 1)
+		pool.add(item_id, 1)
 		return {"ok": true, "from": label}
 	return {"ok": false, "from": ""}
 
@@ -534,14 +582,16 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 	return {"ok": true, "slot": slot_id, "message": str(result.get("message", "")),
 		"displaced": result.get("displaced", {})}
 
-## Strip a worn piece back into the pool.
+## Strip a worn piece back into the pool the field works.
 func unequip_merc(merc_id: int, slot_id: String) -> String:
 	if lent:
+		return ""
+	if delve.active and not delve.party.has(merc_id):
 		return ""
 	var item_id := roster.unequip(merc_id, slot_id)
 	if item_id.is_empty():
 		return ""
-	stash.add(item_id, 1)
+	field_stash().add(item_id, 1)
 	_notify()
 	return item_id
 
@@ -567,19 +617,140 @@ func gear_value(merc_id: int) -> int:
 			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
 	return total
 
-## The warband's combined worth, gear and essence, for the HUD and tests.
+## The warband's combined worth - gear, the town stash, the delve inventory and
+## essence - for the HUD and tests.
 func total_value() -> int:
 	var total := 0
 	for entry in _worn_entries_all():
 		var item_id := str(entry.get("item", ""))
 		if not item_id.is_empty():
 			total += WarbandStash.value_of(item_id, cruor.brand_of(item_id))
-	var pooled := stash.pooled_map()
-	for item_id in pooled:
-		total += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * int(pooled[item_id])
+	total += _pool_value(stash)
+	total += _pool_value(delve.inventory)
 	for tier in CruorCatalog.TIER_ORDER:
 		total += cruor.tier_count(tier) * CruorCatalog.tier_value(tier)
 	return total
+
+func _pool_value(pool: WarbandStash) -> int:
+	var total := 0
+	var pooled := pool.pooled_map()
+	for item_id in pooled:
+		total += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * int(pooled[item_id])
+	return total
+
+# --- the delve -------------------------------------------------------------
+#
+# The loop the town exists for: pack supplies out of the stash into the delve
+# inventory, send a party down, and either climb out with everything the party
+# took (it all goes into the stash) or fall below and lose it - the inventory and
+# every piece the party's members still wear. The scene owns the cave and the
+# bodies; these verbs own the books, and each of the three moments that changes
+# them (going down, climbing out, falling) is written to the save at once.
+
+## Pack copies of a free piece from the town stash into the delve inventory.
+## `count` -1 packs every free copy. Refused while a party is below - the pack
+## went down with it. Returns `{ok, item_id, count, message}`.
+func pack_for_delve(item_id: String, count: int = 1) -> Dictionary:
+	return _move_pooled(stash, delve.inventory, item_id, count, "packed for the delve")
+
+## Put packed copies back into the town stash. `count` -1 unpacks every copy.
+func unpack_from_delve(item_id: String, count: int = 1) -> Dictionary:
+	return _move_pooled(delve.inventory, stash, item_id, count, "back in the town stash")
+
+func _move_pooled(from: WarbandStash, to: WarbandStash, item_id: String, count: int,
+		where: String) -> Dictionary:
+	if lent:
+		return _lent_refusal({"item_id": item_id, "count": 0})
+	var display := str(State.ITEMS.get(item_id, {}).get("name", item_id))
+	if delve.active:
+		return {"ok": false, "item_id": item_id, "count": 0,
+			"message": "The party is below: the pack went down with it."}
+	var have := from.pooled_count(item_id)
+	var moved := have if count < 0 else mini(count, have)
+	if moved <= 0:
+		return {"ok": false, "item_id": item_id, "count": 0,
+			"message": "There is no spare %s to move." % display}
+	from.remove(item_id, moved)
+	to.add(item_id, moved)
+	_notify()
+	return {"ok": true, "item_id": item_id, "count": moved,
+		"message": "%s%s %s." % [display, " x%d" % moved if moved > 1 else "", where]}
+
+## Send a party down. Every name must be on the field and standing - the scene
+## checks the bodies, this checks the books. Going down is the commitment, so it
+## is written at once: a load that still finds the party below counts the
+## descent as lost (`load_state`), which is what makes a fall cost what it costs.
+## Returns `{ok, party, message}`.
+func begin_delve(party_ids: Array) -> Dictionary:
+	if lent:
+		return _lent_refusal({"party": []})
+	if delve.active:
+		return {"ok": false, "party": delve.party.duplicate(), "message": "A party is already below."}
+	var party: Array[int] = []
+	for raw_id in party_ids:
+		var merc_id := int(raw_id)
+		if merc_id <= 0 or party.has(merc_id):
+			continue
+		if not roster.is_alive(merc_id) or roster.is_reserve(merc_id):
+			return {"ok": false, "party": [],
+				"message": "%s cannot go down like that." % roster.name_of(merc_id)}
+		party.append(merc_id)
+	if party.is_empty():
+		return {"ok": false, "party": [], "message": "Choose who goes down."}
+	delve.begin(party)
+	_notify()
+	save_state()
+	return {"ok": true, "party": party,
+		"message": "%d go down with %d piece(s) in the delve inventory." % [party.size(),
+			delve.inventory.pooled_total()]}
+
+## The party climbed out alive: every piece in the delve inventory goes into the
+## town stash and the descent is over. Returns `{ok, items: {id: count}, count,
+## value}` - what was brought home.
+func extract_delve() -> Dictionary:
+	if not delve.active:
+		return {"ok": false, "items": {}, "count": 0, "value": 0}
+	var items: Dictionary = delve.inventory.pooled_map()
+	var count := 0
+	var value := 0
+	for item_id in items:
+		var copies := int(items[item_id])
+		stash.add(str(item_id), copies)
+		count += copies
+		value += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * copies
+	delve.inventory.clear()
+	delve.finish()
+	_notify()
+	save_state()
+	return {"ok": true, "items": items, "count": count, "value": value}
+
+## The party fell below: everything it carried is the Hollow's. Every member still
+## on the books is stripped - both weapon sets, armour, trinkets - and the delve
+## inventory, which already holds whatever the dead were wearing, is emptied.
+## Returns `{ok, items: {id: count}, count, value}` - what was lost.
+func forfeit_delve() -> Dictionary:
+	if not delve.active:
+		return {"ok": false, "items": {}, "count": 0, "value": 0}
+	var lost: Dictionary = {}
+	for merc_id in delve.party:
+		for entry in roster.worn_entries(merc_id):
+			var item_id := roster.take_worn(merc_id, str(entry.get("slot", "")),
+				int(entry.get("set", -1)))
+			if not item_id.is_empty():
+				lost[item_id] = int(lost.get(item_id, 0)) + 1
+	var packed: Dictionary = delve.inventory.pooled_map()
+	for item_id in packed:
+		lost[item_id] = int(lost.get(item_id, 0)) + int(packed[item_id])
+	var count := 0
+	var value := 0
+	for item_id in lost:
+		count += int(lost[item_id])
+		value += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * int(lost[item_id])
+	delve.inventory.clear()
+	delve.finish()
+	_notify()
+	save_state()
+	return {"ok": true, "items": lost, "count": count, "value": value}
 
 # --- possession bookkeeping ------------------------------------------------
 
@@ -619,6 +790,7 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	possession.clear()
 	revive_channels.clear()
 	checkpoint.clear()
+	delve.clear()
 	_notify()
 
 func _notify() -> void:
@@ -635,12 +807,16 @@ func to_dict() -> Dictionary:
 		"cruor": cruor.to_dict(),
 		"checkpoint": checkpoint.duplicate(true),
 		"quests": quests.to_dict(),
+		"delve": delve.to_dict(),
 	}
 
 func from_dict(data: Dictionary) -> void:
 	roster.from_dict(data.get("roster", {}))
 	stash.from_dict(data.get("stash", {}))
 	cruor.from_dict(data.get("cruor", {}))
+	# Read before the dead are reaped below: a member who died below left his kit
+	# in the delve inventory, not the stash. A v7 file has no delve at all.
+	delve.from_dict(data.get("delve", {}))
 	deployment_cap = clampi(int(data.get("deployment_cap", Contracts.MAX_DEPLOYMENT_CAP)),
 		1, Contracts.MAX_DEPLOYMENT_CAP)
 	# A v3 file has no checkpoint: it resumes at the town, which is what every
@@ -696,6 +872,11 @@ func load_state() -> bool:
 		push_warning("Warband: %s is from a newer build" % save_path)
 		return false
 	from_dict(parsed)
+	# A party still below in the file never climbed out: the game was left while
+	# it was down there (a quit, an exit, a crash). That is a fall, not a pause -
+	# otherwise leaving the game would be the way to keep what a fall costs.
+	if delve.active:
+		forfeit_delve()
 	return true
 
 ## What a warband file holds, read without adopting it: `{exists, roster,

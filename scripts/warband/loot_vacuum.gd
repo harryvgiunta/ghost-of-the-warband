@@ -6,18 +6,25 @@ extends Node
 ##
 ## There is no mode-local pile of loot here. A collected piece is a
 ## `WarbandStash` row the instant it is taken, so the stash stays the single
-## container and the warband's worth is always the stash's worth.
+## container and the warband's worth is always the stash's worth. Below, in the
+## delve, that row is in the delve inventory instead (`Warband.field_stash`): what
+## the party takes in the cave is the party's until it climbs out.
 ##
 ## A fallen enemy is a container too, not a heap on the floor: `register_corpse()`
 ## reads the kit once and holds it on a record keyed by corpse id, so the corpse
 ## screen and the squad's own sweep search the body rather than a scattering of
 ## world drops. Every take - a pickup under the crosshair, a piece clicked off a
 ## body, an AI claim - walks `_book_piece()`, so there is exactly one way into
-## the stash and a corpse can yield each piece once.
+## the stash and a corpse can yield each piece once. That one path also says so
+## (`booked`), which is what the looted list on the HUD is drawn from.
 ##
 ## `sweep()` only moves what a living body could walk over: reach is measured from
 ## the survivors, and a battle that leaves nobody standing gathers nothing - the
 ## dead do not loot themselves.
+
+## One piece just entered the warband's pool. `collector_peer` is the soul whose
+## hands took it, or 0 for the warband itself (a squadmate, a sweep).
+signal booked(item_id: String, collector_peer: int)
 
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -98,7 +105,7 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1) -> Dictionary:
 	# Heard where the piece lay, before `collect()` takes the node out of the
 	# tree: one pickup is one sound, and the drop's position is about to go.
 	var at := pickup.global_position
-	_book_piece(stash, item_id)
+	_book_piece(stash, item_id, collector_peer)
 	pickup.collect()
 	SfxScript.pickup(at)
 	_notify_warband()
@@ -144,13 +151,13 @@ func sweep(survivors: Array) -> Dictionary:
 		# One chime per piece, at the drop itself. The node is about to leave the
 		# tree, so the position is read first.
 		var at: Vector3 = pickup.global_position
-		_book_piece(stash, pickup.item_id)
+		_book_piece(stash, pickup.item_id, 0)
 		ids.append(pickup.item_id)
 		pickup.collect()
 		SfxScript.pickup(at)
 	ids.sort()
 	_notify_warband()
-	var message := "The warband sweeps %d piece(s) into the shared stash." % ids.size()
+	var message := "The warband sweeps %d piece(s) into %s." % [ids.size(), _pool_name()]
 	if skipped > 0:
 		message += " %d drop(s) lay beyond the battlefield." % skipped
 	return _sweep_result(true, ids, skipped, message)
@@ -281,7 +288,7 @@ func take_from_corpse(corpse_id: int, item_id: String, collector_peer: int = 1) 
 	var stash := _stash()
 	if stash == null:
 		return _refused("The shared stash is missing.", item_id)
-	_book_piece(stash, item_id)
+	_book_piece(stash, item_id, collector_peer)
 	items.remove_at(index)
 	record["items"] = items
 	_notify_warband()
@@ -301,7 +308,7 @@ func take_all_from_corpse(corpse_id: int, collector_peer: int = 1) -> Dictionary
 	if not record.is_empty():
 		var items: Array[String] = record["items"]
 		for item_id in items.duplicate():
-			_book_piece(stash, item_id)
+			_book_piece(stash, item_id, collector_peer)
 			# The dressing still happens for a peer standing in a body, but a bulk
 			# take reports counts rather than one line per piece.
 			_dress_message(item_id, collector_peer)
@@ -338,16 +345,17 @@ func describe() -> String:
 ## The one way a piece enters the warband: a real stash row plus a line in the
 ## ledger the battle report reads. Every caller resolves the stash first, because
 ## refusing before anything is booked is the only honest answer to a missing one.
-func _book_piece(stash: WarbandStash, item_id: String) -> void:
+func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int) -> void:
 	stash.add(item_id, 1)
 	_gathered.append(item_id)
+	booked.emit(item_id, collector_peer)
 
 ## The line a taker reads, and the one hand-off the warband allows: a piece taken
 ## by a soul standing in a living body snaps into that body's hands instead of only
 ## landing in the stash. The piece is a stash row either way, so what the warband
 ## is worth never disagrees with what it wears.
 func _dress_message(item_id: String, collector_peer: int) -> String:
-	var message := "%s goes into the shared stash." % WarbandPickup.item_name(item_id)
+	var message := "%s goes into %s." % [WarbandPickup.item_name(item_id), _pool_name()]
 	# Peer 0 is the warband itself - a squad soldier or a sweep - and has no body
 	# a piece could be worn by, so the booking stays a plain stash row.
 	if collector_peer <= 0:
@@ -465,15 +473,23 @@ func _pickup_host() -> Node:
 			return scene
 	return null
 
-## The infinite shared stash, resolved through the warband (or the autoload when
-## this node was never handed one).
+## The pool a take lands in: the warband's field stash - the town stash, or the
+## delve inventory while a party is below - resolved through the warband (or the
+## autoload when this node was never handed one).
 func _stash() -> WarbandStash:
 	if _warband == null or not is_instance_valid(_warband):
 		_warband = get_node_or_null("/root/Warband") if is_inside_tree() else null
 	if _warband == null:
 		return null
-	var stash: Variant = _warband.get("stash")
+	var stash: Variant = _warband.call("field_stash") if _warband.has_method("field_stash") \
+		else _warband.get("stash")
 	return stash if stash is WarbandStash else null
+
+## How a message names that pool.
+func _pool_name() -> String:
+	if _warband != null and is_instance_valid(_warband) and _warband.has_method("field_label"):
+		return str(_warband.call("field_label"))
+	return "the shared stash"
 
 ## The stash is the warband's, so its change signal is the one the HUD listens to.
 func _notify_warband() -> void:

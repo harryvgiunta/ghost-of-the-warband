@@ -37,12 +37,18 @@ var rect := Rect2()
 var _size := Vector2i.ZERO
 var _solid := PackedByteArray()
 var _grid := AStarGrid2D.new()
+## The floor a collider is measured against: NAN reads the wood's heightfield
+## under it; a mapped area with its own flat floor (the delve's cave, far off the
+## field) names that height instead.
+var _floor_y := NAN
 
 
 ## Map `area` (flat, x/z) from the colliders under `root`. `skip` holds nodes whose
-## whole subtree stays off the map.
-func build(root: Node, area: Rect2, skip: Array = []) -> void:
+## whole subtree stays off the map. `floor_y` is the area's own floor height, for
+## ground that is not the wood's heightfield.
+func build(root: Node, area: Rect2, skip: Array = [], floor_y: float = NAN) -> void:
 	rect = area
+	_floor_y = floor_y
 	_size = Vector2i(ceili(area.size.x / CELL), ceili(area.size.y / CELL))
 	_solid = PackedByteArray()
 	_solid.resize(_size.x * _size.y)
@@ -228,7 +234,8 @@ func _stamp(holder: CollisionShape3D) -> void:
 		.grow(CLEARANCE)
 	if not flat.intersects(rect):
 		return
-	var ground := TerrainScript.height_at(xform.origin.x, xform.origin.z)
+	var ground := _floor_y if not is_nan(_floor_y) \
+		else TerrainScript.height_at(xform.origin.x, xform.origin.z)
 	if bounds.position.y > ground + BAND_HIGH or bounds.end.y < ground + BAND_LOW:
 		return
 	var inverse := xform.affine_inverse()

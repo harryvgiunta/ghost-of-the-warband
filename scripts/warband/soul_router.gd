@@ -29,10 +29,32 @@ const REASON_UNKNOWN := "That body is not in the warband."
 const REASON_DEAD := "The dead do not answer."
 const REASON_DOWNED := "That one is down. Revive them first."
 const REASON_OCCUPIED := "Another soul is already inside that body."
+const REASON_AWAY := "That body is not with the party."
 const REASON_NONE := ""
 
 var _bodies: Dictionary = {}   # body_id -> {node, name, state, occupied_by_peer_id, last_owner_peer_id}
 var _peer_body: Dictionary = {}  # peer_id -> body_id
+## The bodies a soul may enter while the warband is split - a party below in the
+## delve and the rest in the town. Empty means every registered body.
+var _reach: Dictionary = {}   # body_id -> true
+
+# --- reach ------------------------------------------------------------------
+
+## Only these bodies may be entered until `clear_reach`: a soul that went down
+## with the party cannot hop into a body standing in the town, and no soul in the
+## town can hop into the cave. A body already worn keeps its soul either way.
+func set_reach(body_ids: Array) -> void:
+	_reach.clear()
+	for raw_id in body_ids:
+		if int(raw_id) > 0:
+			_reach[int(raw_id)] = true
+
+func clear_reach() -> void:
+	_reach.clear()
+
+## Whether a soul may be put into this body by the reach rule alone.
+func reachable(body_id: int) -> bool:
+	return _reach.is_empty() or _reach.has(body_id)
 
 # --- registration ----------------------------------------------------------
 
@@ -206,6 +228,8 @@ func _refuse(peer_id: int, target_body_id: int, reason: String) -> Dictionary:
 	var holder := int(record.get("occupied_by_peer_id", 0))
 	if holder != 0 and holder != peer_id:
 		return _refused(peer_id, target_body_id, REASON_OCCUPIED)
+	if not reachable(target_body_id):
+		return _refused(peer_id, target_body_id, REASON_AWAY)
 	return {"ok": true, "message": "", "body_id": target_body_id,
 		"previous_body_id": body_of(peer_id), "reason": REASON_NONE}
 
@@ -232,6 +256,8 @@ func possessable_ids() -> Array[int]:
 	var out: Array[int] = []
 	for body_id in body_ids():
 		if body_state(body_id) != Contracts.HealthState.ALIVE:
+			continue
+		if not reachable(body_id):
 			continue
 		var holder := occupied_by(body_id)
 		if holder != 0:
@@ -285,6 +311,7 @@ func cycle_target(peer_id: int, direction: int = 1) -> Dictionary:
 func clear() -> void:
 	_bodies.clear()
 	_peer_body.clear()
+	_reach.clear()
 
 func description() -> String:
 	var parts: PackedStringArray = []

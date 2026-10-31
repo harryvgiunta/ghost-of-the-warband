@@ -306,6 +306,19 @@ func setup(warband_state, soul_controller, loot_vacuum) -> void:
 	loot = loot_vacuum
 
 
+## The whole band was moved at once - down into the delve, or back up out of it.
+## The soul's footprints, every body's route and fight clocks, and the pieces the
+## squad gave up on all describe ground the band no longer stands on, so they are
+## dropped and every body starts fresh where it now stands.
+func relocate() -> void:
+	_trail.clear()
+	_trail_base = 0
+	_track.clear()
+	_heading.clear()
+	_abandoned.clear()
+	_rescuer_merc = 0
+
+
 ## One frame of squad intent. Called before `controller.physics_step` so the
 ## brains have written a body's intent for the tick that integrates it.
 func drive(delta: float) -> void:

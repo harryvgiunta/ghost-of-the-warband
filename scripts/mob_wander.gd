@@ -40,6 +40,11 @@ const LANE_PROBE := 2.6
 ## Height above the body's feet at which the lane is sampled.
 const LANE_LIFT := 0.7
 
+## Every pack ever handed out gets its own scene group. `assign_all` is called
+## once per habitat (a warcamp, a delve den), and numbering each call's packs from
+## zero again put packs that never met in one group - the first sighting in one
+## den alerted every "first pack" in the world.
+static var _packs_handed := 0
 
 ## One shared patch: its centre, how far it reaches, and the goal its owners
 ## are currently walking toward.
@@ -253,7 +258,10 @@ static func _hand_out(members: Array, index: int) -> void:
 		if inside < MobSenses.SAFE_RING:
 			reach = minf(reach, maxf(1.5, MobSenses.SAFE_RING - inside - 1.0))
 	territory.radius = reach
-	var group := "" if count < 2 else "mob_pack_%d" % index
+	var group := ""
+	if count >= 2:
+		group = "mob_pack_%d" % _packs_handed
+		_packs_handed += 1
 	for mob in members:
 		mob.assign_territory(territory, members.find(mob), group)
 		if not group.is_empty():

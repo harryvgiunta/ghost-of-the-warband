@@ -17,8 +17,9 @@ a floating soul that enters any living mercenary of your warband. Every mercenar
 has identical base stats - **100 health, 1000 stamina**, gear is the only
 difference - and the warband is the thing that survives a battle.
 
-- **Saving:** the mode has its own save (`user://warband_state.json`, version 6,
-  which also remembers every piece the altar has anointed);
+- **Saving:** the mode has its own save (`user://warband_state.json`, version 8,
+  which also remembers every piece the altar has anointed and the packed delve
+  inventory - and, while a party is below, that it is below);
   **RESUME WARBAND** opens it where the last checkpoint stands (the town square,
   or 60 m past the camp's mouth once the watchers there are down). The ranger's
   kit is untouched.
@@ -71,7 +72,9 @@ difference - and the warband is the thing that survives a battle.
   magic items into Cruor, distils 5:1 up five tiers and brands weapons with active
   sigils; the **Gold recruiter** (bodies up to the deployment cap of 8), the
   **quartermaster** (plain steel and arrows bought into the shared stash) and the
-  **expedition gate** (pick up to 8 bodies, then launch).
+  **Weeping Hollow's mouth** - a rope pit by the square's east lanes where a party
+  is chosen, a **delve inventory** is packed and the party goes down (see
+  *The delve* below).
 - **A sworn body takes the field:** a hire stands up in the square beside the
   band, and a soldier cut out of a cage stands up where he walked out, while the
   field is under its cap of 8. Past a full field a new name waits in the
@@ -101,8 +104,12 @@ difference - and the warband is the thing that survives a battle.
   quartermaster, with a stash to pay for it.
 - **Bodies are lootable:** every fallen cultist and watcher is a corpse you can
   open with **G** - their character screen, their slots, and each piece moved into
-  the infinite stash (or **TAKE ALL**). The squad strips bodies on its own once
-  the field is quiet, silently, into the same stash.
+  the infinite stash (or **TAKE ALL**). A **right click** on a body in reach opens a
+  small loot window beside the crosshair: a click takes a row, a **shift-click**
+  takes everything, and **Shift + right click** on the body ducks and takes the
+  lot without a window. The squad strips bodies on its own once the field is
+  quiet, into the same pool, and every piece anyone takes is written on the
+  **looted list** at the right of the screen.
 - **The band's fights are not silent:** when an AI squadmate breaks off after
   something, the HUD says it once - **Sorn breaks off: Briar wolf, 34 m
   back-left** - and keeps **IN THE FIGHT · Sorn, Dorn · 34 m back-left** under
@@ -115,8 +122,9 @@ difference - and the warband is the thing that survives a battle.
   them by the bunch of ten. With the quiver empty the string stays down.
 - **Loot:** quick-loot during the fight (K). A picked-up piece goes straight into
   the soul's hands when it fills an empty slot or beats what is worn there, and
-  otherwise into the shared stash. When the field goes quiet the surviving
-  soldiers physically jog to the drops before everything lands in the stash.
+  otherwise into the shared stash - or, below in the delve, the delve inventory.
+  When the field goes quiet the surviving soldiers physically jog to the drops
+  before everything lands in the pool.
 
 | Key | Warband mode |
 | --- | --- |
@@ -125,7 +133,9 @@ difference - and the warband is the thing that survives a battle.
 | `O` | warband screen (health, downed state, gear, click to control, hiring) |
 | `TAB` | quick weapon swap: the body puts away the set in its hands and takes up the other one |
 | `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off into the stash; click a stash piece to wear it; **SWAP SET** or `TAB` changes the weapon set) |
-| `G` | cut a cage latch, or use the altar / stash / quartermaster / recruiter you stand at |
+| `G` | cut a cage latch, use the altar / stash / quartermaster / recruiter you stand at, open the Hollow's mouth, or climb the rope out of it |
+| `RMB` on a body | the loot window: click a row to take it, shift-click to take everything |
+| `Shift` + `RMB` on a body | duck and take everything on it |
 | `1` / `2` / `3` | loose the skill of an anointed main hand / an anointed shield / the worn trinket (Shift+1..3 is the same press) |
 | `K` | quick-loot the drop at your feet |
 | `G` (hold) | revive the downed body beside you: five seconds, and a blow breaks the channel |
@@ -250,7 +260,7 @@ A **neck** piece, either **ring** and the **off hand** can change the ranger's n
 
 ### Looting the dead
 
-A hostile leaves a **corpse you can work**: walk up to it, press **P**, and take what it carried into the shared stash. The corpse screen lists every carried piece - and a trail archer leaves the twig bow it fired plus four of its own shafts - and a stripped body is never offered twice. **K** quick-loots the drop at your feet. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings; the stash is shared, so any body in the warband can then be dressed from it at the paperdoll.
+A hostile leaves a **corpse you can work**: walk up to it and press **G** for its character screen, or **right-click** it for the small loot window beside the crosshair (click a row to take it, shift-click to take everything; **Shift + right click** on the body takes the lot at once). The corpse screen lists every carried piece - and a trail archer leaves the twig bow it fired plus four of its own shafts - and a stripped body is never offered twice. **K** quick-loots the drop at your feet. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings; the stash is shared, so any body in the warband can then be dressed from it at the paperdoll. Every piece the warband takes - by your hands or a squadmate's - is written on the **looted list** at the right of the screen.
 
 Dropping gear from the paperdoll in town or on the trail spawns a pickup at the body's feet. That drop starts **unarmed**: it arms only after the dropper steps out of the pickup radius, so walking back over it later banks it into the stash normally.
 
@@ -635,6 +645,44 @@ wolves in two deep-wood packs. They share the engine's one rule set:
 - `scripts/mob_lod.gd` + `mob_culler.gd` - 1/3/12/24-frame tick bands by distance
   and a body parked past 150 m.
 
+## The delve: the Weeping Hollow
+
+The loop the town exists for. Make up a party, pack what it carries, go down,
+take what the cave holds, and climb out alive with it.
+
+1. **At the mouth** - the rope pit with the A-frame by the square's east lanes
+   (the fingerpost's **THE DELVE** board points at it) - **G** opens the panel.
+   **THE PARTY** lists every body standing on the field, each a toggle (all go
+   by default). **THE TOWN STASH** is the warband's free pieces: a click packs one
+   copy into **THE DELVE INVENTORY**, a shift-click packs every copy, and the
+   inventory's rows go back the same way. A pack left at the mouth stays packed.
+2. **GO DOWN** puts the party on the landing of a **fresh instance** of floor I:
+   a chain of torchlit halls joined by bending tunnels, built when the party goes
+   down and freed when it comes back up. Two dens of watchers (three, then four)
+   sleep at their posts until one of them sees you, hears a fight or takes a
+   blow, or a body walks into the room - then the whole den wakes. **Gorehorn**,
+   the Hollow's demon, waits at the bottom in a ring of old blood.
+3. **Below, the party carries one inventory.** Everything taken - by your hands
+   through the loot window or **Shift + right click**, by a squadmate stripping
+   the dead, a fallen squadmate's own kit - lands in the **delve inventory**, never
+   the town stash. It is also the quiver: archers shoot what was packed. **P**
+   dresses the party from it, and only the party: the bodies left in the town
+   cannot be entered, dressed or driven until the party is back.
+4. **Climb out** with **G** at the rope under the hole in the mouth's roof: every
+   body still alive - standing or carried - comes up beside the pit, and every
+   piece in the delve inventory goes into the town stash.
+5. **Fall** - nobody below left standing - and the Hollow keeps everything: the
+   delve inventory and every piece the party's members still wear. Whoever was
+   only down stands up at the mouth with nothing on and a twentieth of a pool,
+   like any revive; the dead stay dead. **Leaving the game while a party is
+   below counts as a fall**: going down is written to the save at once, and a
+   save that still holds a party below loads with that party's gear and pack
+   gone.
+
+The HUD carries the floor's line over the looted list (the floor, what the
+inventory holds, Gorehorn's blood once he is up), the crosshair line names the
+objective, and **M** has no map down there.
+
 ## World art
 
 The frontier and arena are dressed by a small, data-driven world-art kit rather than per-scene primitives:
@@ -681,7 +729,7 @@ The manifest is `assets/world/world_textures.json`; provenance and the CC BY-NC-
 
 ## Devil court
 
-Five imported devil-themed mobs are kept in the tree as art and mob code, and **none of them is spawned by any scene** now that the campaign is the only game: the **Hellish goat man** (jet-black armorless goat demon with empty skull sockets and black horns/hooves), **Succubus** (half-open-wing, black-horned raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (carved stone brute with ember-slit sockets, a fanged muzzle, crown horns, half-raised bat wings and a spiked spine). The placements they were fielded on went with the sandbox world; `devil_mob.gd`, `devil_mob_visual.gd` and the profiles are kept for when the campaign wants them, and `devil_mobs_regression` still validates the assets. The old court was inspectable immediately without aggro.
+Five imported devil-themed mobs are kept in the tree as art and mob code: the **Hellish goat man** (jet-black armorless goat demon with empty skull sockets and black horns/hooves), **Succubus** (half-open-wing, black-horned raider), **Devil spawn** (low skittering nest-hunter), **Hell beast** (heavy quadruped brute) and **Gargoyle** (carved stone brute with ember-slit sockets, a fanged muzzle, crown horns, half-raised bat wings and a spiked spine). One of them is fielded: the Hellish goat man is **Gorehorn**, the master at the bottom of the Weeping Hollow's first floor (`scripts/warband/delve_demon.gd` lays boss numbers and the floor's prize over the goat's own profile, body and clips). The other four's placements went with the sandbox world; `devil_mob.gd`, `devil_mob_visual.gd` and the profiles are kept for when the campaign wants them. The old court was inspectable immediately without aggro.
 
 **Crimson ranger clones:** four patrols hold the outer frontier trails, and from **cycle two** three to four join every delve wave. Each clone wears the player Ranger rig **heavily tinted crimson-black** with its own random paperdoll — a rolled main hand (any bow, sword, dagger or staff), an optional shield or focus, and a mixed armor set per slot — so no two read alike. They fight like the arena bots rather than the mobs, but they **close**: outside 11 m the bow is the weapon and the clone keeps walking the gap down between shots (it only plants its feet while the string is drawn), inside 11 m it puts the blade away and charges to reach, then cuts, guards and side-steps like a duelist. They lead their arrows, switch targets, react to an incoming swing with a raised guard or a quick side step, and answer a **12 m pack alarm** like any wilderness mob — a clone woken by a sighting or a cry joins the hunt, and a landed blow on a clone makes it chase the ranger that hit it for the full 90 s pursuit, past its own aggro range and leash. Their armor reduces damage like a player's, they can be parried, and they drop the main-hand weapon they rolled when they fall.
 

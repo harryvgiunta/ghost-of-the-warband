@@ -42,7 +42,7 @@ const SIGN_POST := Vector3(7.5, 0.0, 10.5)
 const SIGN_BOARDS := [
 	{"text": "THE ALTAR", "target": Vector3(8.0, 0.0, 4.0)},
 	{"text": "THE KEEPERS", "target": Vector3(-4.0, 0.0, -9.0)},
-	{"text": "DEAD FIELD", "target": Vector3(8.0, 0.0, -6.0)},
+	{"text": "THE DELVE", "target": Vector3(8.0, 0.0, -6.0)},
 ]
 
 ## The lanterns: one at the mouth of each alley the halls leave, each arm

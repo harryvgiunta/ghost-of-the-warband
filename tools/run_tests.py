@@ -71,6 +71,7 @@ WARBAND_TESTS = [
     "town_stockade_regression",
     "quest_log_regression",
     "loot_wow_regression",
+    "delve_regression",
     "wild_cages_regression",
     "world_map_regression",
     "duel_lesson_regression",

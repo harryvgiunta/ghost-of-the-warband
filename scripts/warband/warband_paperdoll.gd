@@ -127,9 +127,8 @@ func open(merc_id: int = -1) -> void:
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var target := merc_id
-	if target <= 0 or _warband == null or not _warband.roster.has(target):
-		target = selected_merc if _warband != null and _warband.roster.has(selected_merc) \
-			else _first_merc_id()
+	if target <= 0 or not _can_dress(target):
+		target = selected_merc if _can_dress(selected_merc) else _first_merc_id()
 	select_merc(target, false)
 	set_status(USAGE_HINT)
 
@@ -230,7 +229,7 @@ func take_all() -> Dictionary:
 	if count <= 0:
 		set_status("There is nothing left on that body.")
 	else:
-		set_status("%d piece(s) go into the shared stash." % count)
+		set_status("%d piece(s) go into %s." % [count, _pool_label()])
 	refresh_corpse()
 	if count > 0:
 		changed.emit()
@@ -242,7 +241,7 @@ func take_all() -> Dictionary:
 const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it. TAB swaps the weapon set."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
-	selected_merc = merc_id if _warband != null and _warband.roster.has(merc_id) else -1
+	selected_merc = merc_id if _can_dress(merc_id) else -1
 	_slot_chosen = false
 	selected_slot = Contracts.SlotType.MAIN_HAND
 	refresh()
@@ -259,12 +258,35 @@ func refresh() -> void:
 		return
 	if _warband == null:
 		return
-	if selected_merc <= 0 or not _warband.roster.has(selected_merc):
+	if selected_merc <= 0 or not _can_dress(selected_merc):
 		selected_merc = _first_merc_id()
+	_paint_mode()
 	_sync_picker()
 	_refresh_slots()
 	_refresh_preview()
-	_sync_stash(_warband.stash.rows(_warband.roster, _warband.cruor.brands))
+	_sync_stash(_pool().rows(_warband.roster, _warband.cruor.brands))
+
+## The pool the stash half shows and dresses from: the town stash, or the delve
+## inventory while a party is below (`Warband.field_stash`).
+func _pool() -> WarbandStash:
+	return _warband.field_stash()
+
+func _pool_label() -> String:
+	return str(_warband.field_label()) if _warband != null else "the shared stash"
+
+func _below() -> bool:
+	return _warband != null and bool(_warband.delve.active)
+
+## The mercenaries this panel may dress: the whole roster, or only the party
+## while it is below - a body in the town is out of the cave's reach.
+func _dressable_ids() -> Array[int]:
+	var none: Array[int] = []
+	if _warband == null:
+		return none
+	return _warband.dressable_ids()
+
+func _can_dress(merc_id: int) -> bool:
+	return merc_id > 0 and _dressable_ids().has(merc_id)
 
 ## Repaint the corpse half: the carried slots, the takeable list and the two lines
 ## that say what the body is still worth.
@@ -436,7 +458,7 @@ func _make_slot_row(parent: Node, slot: int) -> Dictionary:
 # --- picker ----------------------------------------------------------------
 
 func _sync_picker() -> void:
-	var ids: Array[int] = _warband.roster.ids()
+	var ids: Array[int] = _dressable_ids()
 	for merc_id in picker_buttons.keys():
 		if ids.has(int(merc_id)):
 			continue
@@ -462,10 +484,8 @@ func _sync_picker() -> void:
 		button.theme_type_variation = "PrimaryButton" if merc_id == selected_merc else ""
 
 func _first_merc_id() -> int:
-	if _warband == null or _warband.roster.count() == 0:
-		return -1
-	var ids: Array[int] = _warband.roster.ids()
-	return ids[0]
+	var ids: Array[int] = _dressable_ids()
+	return ids[0] if not ids.is_empty() else -1
 
 # --- worn slots ------------------------------------------------------------
 
@@ -547,7 +567,7 @@ func _on_slot_pressed(slot: int) -> void:
 	else:
 		var returned := str(_warband.unequip_merc(selected_merc, slot_id))
 		if not returned.is_empty():
-			set_status("%s returns to the collective stash." % _item_name(returned))
+			set_status("%s returns to %s." % [_item_name(returned), _pool_label()])
 		elif bool(_warband.get("lent")):
 			set_status(str(_warband.LENT_MESSAGE))
 	refresh()
@@ -563,7 +583,7 @@ func _sync_stash(rows: Array[Dictionary]) -> void:
 		# The list is the unequipped pool only: a piece with no free copy is on a
 		# body, and that body's worn slot is where it shows and comes off. The
 		# free count is read from the pool itself, never from a worn tally.
-		var free_count := int(_warband.stash.pooled_count(item_id))
+		var free_count := int(_pool().pooled_count(item_id))
 		if free_count <= 0:
 			continue
 		seen[item_id] = true
@@ -649,9 +669,9 @@ func _paint_mode() -> void:
 	_corpse_box.visible = _corpse_active
 	_worn_title.text = "WHAT THE BODY CARRIES" if _corpse_active else "WORN GEAR"
 	_stash_title.text = "THE BODY'S GEAR / TAKE IT" if _corpse_active \
-		else "COLLECTIVE STASH / VALUE ORDER"
+		else ("DELVE INVENTORY / VALUE ORDER" if _below() else "COLLECTIVE STASH / VALUE ORDER")
 	_head_hint.text = "their kit is the warband's" if _corpse_active \
-		else "the collective stash is shared"
+		else ("the party carries one inventory below" if _below() else "the collective stash is shared")
 
 ## The header line in corpse mode: who fell.
 func _corpse_title() -> String:
@@ -727,7 +747,7 @@ func _make_corpse_row(item_id: String, count: int = 1) -> Dictionary:
 	var label := display if count <= 1 else "%s  ×%d" % [display, count]
 	var worth := StashScript.value_of(item_id) * maxi(count, 1)
 	button.text = "%s  /  %d gold" % [label, worth]
-	button.tooltip_text = "Click to take it into the shared stash."
+	button.tooltip_text = "Click to take it."
 	button.pressed.connect(take_piece.bind(item_id))
 	_corpse_rows_box.add_child(button)
 	return {"item_id": item_id, "name": display, "count": maxi(count, 1),

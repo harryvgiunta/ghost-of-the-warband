@@ -968,3 +968,10 @@ func head_hit_profile() -> Vector2:
 
 func is_dead() -> bool:
 	return not alive
+
+
+## Whether this body is in a pursuit right now: it saw, heard or was struck by
+## something it hunts and the memory has not run out. A scene that keeps bodies
+## asleep until they notice somebody (the delve's dens) asks this.
+func alerted() -> bool:
+	return alive and _senses.aggressive()

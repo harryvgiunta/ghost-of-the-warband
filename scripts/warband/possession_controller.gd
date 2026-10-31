@@ -347,13 +347,16 @@ func _on_piece_anointed(item_id: String, _ability: String) -> void:
 		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
 			refresh_gear(int(merc_id))
 
-## Living bodies in roster order: what `F1`..`F8` count.
+## Living bodies in roster order: what `F1`..`F8` count. While the warband is
+## split (a party below in the delve) only the bodies a soul may reach count, so
+## F1 is the first body of the party and never a body left in the town.
 func living_merc_ids() -> Array[int]:
 	var out: Array[int] = []
 	if _warband == null:
 		return out
 	for merc_id in _warband.roster.ids():
-		if _warband.roster.is_alive(merc_id) and _merc_bodies.has(merc_id):
+		if _warband.roster.is_alive(merc_id) and _merc_bodies.has(merc_id) \
+				and _warband.souls.reachable(merc_id):
 			out.append(merc_id)
 	return out
 
