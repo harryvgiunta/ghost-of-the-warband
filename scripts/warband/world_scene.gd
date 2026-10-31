@@ -1007,7 +1007,6 @@ func _wire_crawl(actor) -> void:
 	crawl.name = "Crawl"
 	add_child(crawl)
 	crawl.attach(actor)
-	crawl.set_friends(bodies)
 	# Only the host drags a body: a guest's copy of a crawl is in the host's
 	# snapshots, and a second crawl here would fight them.
 	crawl.set_physics_process(not _client)

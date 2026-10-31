@@ -1,6 +1,6 @@
 class_name DownedRules
 extends RefCounted
-## GHOST OF THE WARBAND: the 10% overkill rule and the crawl geometry, as pure
+## GHOST OF THE WARBAND: the 10% overkill rule and the downed clocks, as pure
 ## helpers shared by both bodies that can be knocked down.
 ##
 ## Two different things fight in this game: the arena layer's `ArenaActor`
@@ -15,17 +15,6 @@ extends RefCounted
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
-## How far ahead of itself a downed body aims, and how close counts as arrived.
-## The arrival margin keeps a blocked crawl from jittering against the wall it
-## cannot pass.
-const CRAWL_DISTANCE := 3.0
-const CRAWL_ARRIVAL := 0.08
-## Below this the blend of "away from the blow" and "toward safety" has
-## collapsed (a friend standing exactly behind the killer) and the blow's own
-## bearing is used instead.
-const BLEND_FLOOR := 0.05
-## A bearing shorter than this is not a bearing: the body is already there.
-const MIN_BEARING := 0.0001
 ## A clock assembled out of frame deltas lands a hair either side of the whole
 ## second it was meant to measure (fifty 0.1 s ticks sum to 4.999999999999998),
 ## so the downed clocks finish inside a millisecond of their target. That is far
@@ -77,30 +66,3 @@ static func drip_interval(fraction: float) -> float:
 ## down more than the first. A presentation weight, not damage.
 static func drip_volume(fraction: float) -> float:
 	return lerpf(DRIP_VOLUME_MIN, DRIP_VOLUME_MAX, clampf(fraction, 0.0, 1.0))
-
-## Where a downed body drags itself: away from the blow that put it down, biased
-## toward the nearest standing friend or a supplied safe anchor.
-##
-## Both bearings are horizontal, so a body never aims itself into the floor; a
-## body with neither bearing (no attacker known, nowhere safe) returns its own
-## position, which the crawl reads as "stay put".
-static func crawl_target(origin: Vector3, threat: Vector3, has_threat: bool,
-		safe: Vector3, has_safe: bool) -> Vector3:
-	var away := _bearing(threat, origin) if has_threat else Vector3.ZERO
-	var toward_safe := _bearing(origin, safe) if has_safe else Vector3.ZERO
-	var direction := away + toward_safe
-	# Two safe bearings that cancel out point at nothing; the blow's direction is
-	# the one bearing a downed body is sure of.
-	if direction.length() < BLEND_FLOOR:
-		direction = away
-	if direction.length() < MIN_BEARING:
-		return origin
-	return origin + direction.normalized() * CRAWL_DISTANCE
-
-## The horizontal unit vector from `from` toward `to`, or zero when the two are
-## on top of each other.
-static func _bearing(from: Vector3, to: Vector3) -> Vector3:
-	var planar := Vector3(to.x - from.x, 0.0, to.z - from.z)
-	if planar.length() < MIN_BEARING:
-		return Vector3.ZERO
-	return planar.normalized()

@@ -99,6 +99,11 @@ const REVIVE_REACH := 2.5
 ## Seconds a downed body survives before bleeding out, and its crawl pace.
 const DOWNED_BLEED_SECONDS := 30.0
 const DOWNED_CRAWL_SPEED := 0.9
+## Every warband body knits its wounds on its own while it stands: one point of
+## health every five seconds, whatever it is doing. Slow on purpose - a full pool
+## is eight minutes of walking - so it buys a long retreat, never a fight.
+const HEALTH_REGEN_AMOUNT := 1.0
+const HEALTH_REGEN_SECONDS := 5.0
 ## 5 lower-tier units fuse into 1 of the next tier (5^4 = 625 Tier 1 -> 1 Tier 5).
 const CRUOR_DISTILL_RATIO := 5
 

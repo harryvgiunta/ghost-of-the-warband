@@ -104,7 +104,7 @@ the files listed under its name. Anything else is a merge conflict waiting.
 | --- | --- | --- | --- |
 | `wt-1-soul-consciousness` | `scripts/warband/possession_controller.gd`, `scripts/warband/possession_camera.gd`, `scripts/warband/possession_sync.gd`, `scripts/warband/warband_body.gd`, `scenes/warband/*.tscn` it needs | `scripts/warband/soul_router.gd` (only if the contract truly needs a field) | Soul controller around `ArenaActor`, camera swoop, hotkey cycling, host/guest transfer lock over ENet, 2-peer test |
 | `wt-2-bubble-combat-ai` | `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`), `scripts/warband/passive_duel_brain.gd` | none | Distance tracker from every human body, ACTIVE/PASSIVE toggling through `WarbandDamage`, 80% guard / circling / occasional-swing choreography |
-| `wt-3-downed-revive` | `scripts/warband/downed_state.gd`, `scripts/warband/crawl_to_safety.gd`, `scripts/warband/revive_channel.gd` | `scripts/arena_actor.gd` (health → DOWNED, revive path), `scripts/main.gd` (same for the frontier body) | 10% overkill routing, AI crawl to safe anchors, human-only 5 s channel |
+| `wt-3-downed-revive` | `scripts/warband/downed_state.gd`, `scripts/warband/crawl_to_safety.gd`, `scripts/warband/revive_channel.gd` | `scripts/arena_actor.gd` (health → DOWNED, revive path), `scripts/main.gd` (same for the frontier body) | 10% overkill routing, soul-keyed crawl, human-only 5 s channel |
 | `wt-4-stash-autoloot` | `scripts/warband/loot_vacuum.gd`, `scripts/warband/loot_pickup_warband.gd` if needed | `scripts/player_state.gd` (catalog additions only) | Manual quick-loot, end-of-battle sweep to the infinite stash, every gear type covered |
 | `wt-5-cruor-altar` | `scripts/warband/sacrificial_altar.gd`, `scripts/warband/altar_menu.gd` (`AltarMenu`) | none | Altar scene/overlay: unbind, distil, brand/reroll with the real wallet |
 | `wt-6-warband-ui` | `scripts/warband/warband_screen.gd` (`WarbandScreen`), `scripts/warband/warband_paperdoll.gd` (`WarbandPaperdoll`) | none | Tactical warband screen (HP/downed/gear, click-to-control) and the mercenary paperdoll over the value-sorted stash |
@@ -135,10 +135,12 @@ Gate checks:
    bodies cleanly, and a second peer cannot enter the occupied body.
 2. The far pair takes 10% damage and keeps a convincing block/circle pattern;
    walking a human body to them flips them to full damage.
-3. In the campaign every lethal hit downs and crawls - a mercenary is never
-   killed by the blow - and the body bleeds for 30 s; holding `G` for 5 s revives
-   it, a squadmate does the same once the field is quiet, and any blow that lands
-   on the downed body finishes it and leaves a corpse. (The arena's own seats keep
+3. In the campaign every lethal hit downs - a mercenary is never killed by the
+   blow - and the body bleeds for 30 s. Only a body a soul is inside crawls on
+   its keys; an AI-driven body holds the ground it fell on, which is what lets a
+   squadmate stand over it for the channel. Holding `G` for 5 s revives it, a
+   squadmate does the same once the field is quiet, and any blow that lands on
+   the downed body finishes it and leaves a corpse. (The arena's own seats keep
    the 10% overkill contract; only the warband's bodies hold that line.)
 4. End-of-battle sweep lands loot in the stash sorted by value; unbind, distil
    5:1 and brand all work from the same wallet the HUD shows.
@@ -172,7 +174,7 @@ failure pass; fix the contract instead.
 | `scripts/warband/possession_sync.gd` (`PossessionSync`) | host-authoritative transfer RPCs plus `server_apply(peer, merc_id)` |
 | `scripts/warband/combat_bubble.gd` (`WarbandBubbleManager`) | `setup(radius, exit_radius)`, `set_humans`, `track/untrack`, `sim_state_of`, `clear`, `sim_changed` |
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
-| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/set_anchor/set_friends`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive and respawn clear all of it, `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire, and `_die` either clears it (arena seats) or holds the corpse - rig visible, lie kept, drip off - for the warband bodies flagged `warband_death`. Those bodies also never die from the blow itself and are finished by any blow that lands while they are down. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
+| `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/manual`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive and respawn clear all of it, `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire, and `_die` either clears it (arena seats) or holds the corpse - rig visible, lie kept, drip off - for the warband bodies flagged `warband_death`. Those bodies also never die from the blow itself and are finished by any blow that lands while they are down. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
 | `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` / `corpse_loot_panel.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups` plus the corpse registry: `register_corpse(enemy) -> int` (one read of `gear_items()`, stable ids, the record dies with the body), `has_corpse/corpse_ids/corpse_items/corpse_value/corpse_at/corpse_position/corpse_label`, `take_from_corpse`, `take_all_from_corpse`, `claim_corpse(id, peer = 0)` (silent, the AI's entry point). Every one of them books through the same `_book_piece()`, so a piece cannot be duplicated and peer 0 never dresses a body. `CorpseLootPanel extends WarbandPaperdoll` adds `open_corpse(loot, id) -> bool`, `showing_corpse()`, `take_piece`, `take_all` and `set_title`; `G` at a corpse opens it and `P` still opens the mercenary paperdoll. `SoldierLootRun.run(pickups)` now also jogs survivors to corpses and claims each once. |
 | `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu` (the body: `_build_body()`); `AltarMenu.configure/page/show_page/anoint_rows/press_anoint/unbind_rows/distill_rows/brand_rows`, two pages `PAGE_ANOINT` (every open lands here) and `PAGE_ESSENCE` |
 | `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with `possess_requested(merc_id)`; mercenary paperdoll over the collective stash, whose worn slot line adds "Anointed - <SKILL> [key]" or, for a plain weapon, "Plain - the altar wakes <SKILL>", plus the brand line when branded |
@@ -182,10 +184,10 @@ failure pass; fix the contract instead.
 ### Gate 1 result
 
 `tests/admin_arena_regression.gd` - 90 checks, 0 failures: 10% far / 100% near,
-real guards and swings in the passive brawl, a just-lethal hit Downing and
-crawling, a heavy hit killing, a five-second human revive at half health with AI
-refused, the value-sorted sweep, the altar wallet, the warband-screen click and
-the two-peer body lock. `tests/warband_session_regression.gd` covers the real
+real guards and swings in the passive brawl, a just-lethal hit Downing, a heavy
+hit killing, a five-second human revive at half health with AI refused, the
+value-sorted sweep, the altar wallet, the warband-screen click and the two-peer
+body lock. `tests/warband_session_regression.gd` covers the real
 ENet session (Phase 2).
 
 The full Phase 1 library suite (`warband_contract`, `possession`, `downed_revive`,
@@ -634,7 +636,12 @@ Short version of the latest tuning (all in the code, all covered by
   `DOWNED_CRAWL_SPEED` and through the same capsule, so a wall still stops it.
   Measured in the world: 0.00 m of drift in two idle seconds (the old auto-crawl
   slid the body away under the player), 0.67 m while a key is held, 0.00 m after
-  release. Entering a downed body is still refused (`REASON_DOWNED`);
+  release. **A body with no soul in it does not crawl at all**: `manual` false
+  returns from `CrawlToSafety._physics_process` before the step, so an AI-driven
+  squadmate holds the ground it fell on. The autonomous crawl that dragged it
+  toward safety is deleted; it walked the patient out of the rescuers' reach on
+  the first frame the channel opened. Entering a downed body is still refused
+  (`REASON_DOWNED`);
 - **the revive key is a hold**: `G` held for `REVIVE_CHANNEL_SECONDS` (5 s) picks a
   downed squadmate up, and the body stands on `REVIVE_HEALTH_FRACTION` - **5%** of
   its own pool, enough to walk out and not enough to trade. `G` is only consumed
@@ -648,10 +655,19 @@ Short version of the latest tuning (all in the code, all covered by
   `ALLY_PEER` - the bot refusal is for *peer* channels only). `_rescue_patient`
   reads *any* downed squadmate, preferring the body the soul is inside: the soul
   hops bodies and a downed mercenary whose soul has moved on is still the
-  warband's to pick up. Measured in the world with the field cleared: the soul was
-  up in 5.4 s on 5% health. A hostile arriving,
+  warband's to pick up. The patient holds its ground (no soul, no crawl), so a
+  cleared field is enough for the channel to run its whole five seconds: measured
+  in the world the soul was up in 5.4 s on 5% health, and a downed AI body is now
+  still for the rescuer's hands. A hostile arriving,
   the rescuer going down or walking off breaks it exactly like a human key. An
   AI channel is never opened while a fight is on;
+- **wounds knit slowly**: every standing `WarbandBody` recovers
+  `HEALTH_REGEN_AMOUNT` **1** health per `HEALTH_REGEN_SECONDS` **5 s** on the
+  authority's tick, whether a soul is inside it or not. A full pool takes eight
+  minutes, so it buys a long retreat and never a fight; the clock resets at full
+  health and when the body falls, and a downed body on the bleed clock heals
+  nothing. Replicas read the rise off their snapshots like any other health
+  delta;
 - **the crosshair is back**: `WarbandHud` draws its own `Reticle` (four arms and a
   dot) at the screen centre, visible only while the pointer is captured and the
   soul is in a body - nothing else in the warband says where the soul is aiming;

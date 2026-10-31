@@ -224,8 +224,10 @@ func check_rescue_manual_crawl() -> void:
 	check(body.last_crawl_target.x > body.global_position.x,
 		"in the direction the player held")
 	crawl.manual = false
-	body.move_direction = Vector2.ZERO
-	check(not body.crawl_calls == 3, "the scene's own crawl is not driven by keys")
+	body.move_direction = Vector2(1.0, 0.0)
+	crawl._physics_process(1.0 / 60.0)
+	check(body.crawl_calls == 2,
+		"a downed body with no soul inside holds its ground, key or no key")
 
 
 func alley_position(body) -> Vector3:

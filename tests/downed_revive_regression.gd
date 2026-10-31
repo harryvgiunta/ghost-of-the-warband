@@ -11,6 +11,7 @@ extends SceneTree
 const Actor = preload("res://scripts/warband/warband_body.gd")
 const Crawl = preload("res://scripts/warband/crawl_to_safety.gd")
 const Revive = preload("res://scripts/warband/revive_channel.gd")
+const Squad = preload("res://scripts/warband/squad_drive.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
 ## A blow the victim did not land itself: `receive_melee` refuses `source == slot`.
@@ -116,6 +117,19 @@ func run() -> void:
 	check(is_equal_approx(soft.health,60.0) and soft.alive and not soft.downed,
 		"A 40 damage hit on 100 health leaves the body standing at 60")
 
+	# --- slow regeneration --------------------------------------------------
+	# Every standing warband body knits one point of health every five seconds,
+	# and nothing at all while it is on the ground.
+	for tick in 49:
+		soft.step(0.1,[soft])
+	check(is_equal_approx(soft.health,60.0),"4.9 s on its feet heals nothing")
+	soft.step(0.1,[soft])
+	check(is_equal_approx(soft.health,61.0),
+		"five seconds on its feet heals the contract's single point")
+	for tick in 50:
+		soft.step(0.1,[soft])
+	check(is_equal_approx(soft.health,62.0),"the next point takes another five seconds")
+
 	# --- a downed body cannot act ------------------------------------------
 	check(exact.combat.attack_progress >= 1.0 - 0.001,"A downed body has no swing in flight")
 	check(not exact.rig.is_melee(),"The rig holds no melee pose while downed")
@@ -132,6 +146,10 @@ func run() -> void:
 	exact.step(1.0/60.0,[exact])
 	check(exact.downed and exact.combat.attack_progress >= 1.0 - 0.001 and exact.jump_requested == false,
 		"A downed tick advances nothing a body could act with")
+	for tick in 100:
+		exact.step(0.1,[exact])
+	check(exact.downed and is_zero_approx(exact.health),
+		"A downed body regenerates nothing: the bleed clock is its only clock")
 
 	# --- the finisher rule --------------------------------------------------
 	var chip = make_actor(5,5,false,Vector3(0,0,16))
@@ -142,19 +160,37 @@ func run() -> void:
 		"any blow on a downed body is a finisher: there is no chip damage on the floor")
 	check(chip.health_state == Contracts.HealthState.DEAD,"The finished body is DEAD")
 
-	# --- the backwards crawl ------------------------------------------------
+	# --- the downed crawl belongs to a soul ---------------------------------
+	# A body the AI drives holds the ground it fell on. That is what lets the
+	# squad walk up to it, stand still and hold the five second channel: a body
+	# that kept dragging itself across the field left that reach every frame.
 	var crawler = make_actor(6,6,false,Vector3(0,0,20))
 	hit_from_plus_x(crawler,100.0)
-	var aim: Vector3 = crawler.downed_crawl_target()
-	check(aim.x < crawler.global_position.x - 2.0 and absf(aim.z - crawler.global_position.z) < 0.01,
-		"The crawl aims along the killer's bearing, away from it")
 	var crawl = Crawl.new()
 	scene.add_child(crawl)
 	check(crawl.attach(crawler),"A downed body accepts a crawl")
 	var crawl_start: Vector3 = crawler.global_position
+	crawler.move_direction = Vector2(-1.0,0.0)
 	await _frames(60)
-	check(crawler.global_position.x < crawl_start.x - 0.5,"One second of physics drags the body away from the killer")
-	check(absf(crawler.global_position.z - crawl_start.z) < 0.2,"The crawl stays on its bearing instead of wandering")
+	check(crawler.global_position.distance_to(crawl_start) < 0.001,
+		"A downed body with nobody inside it stays exactly where it fell")
+	check(crawl.manual == false,"and its crawl is not the soul's")
+	crawler.move_direction = Vector2.ZERO
+
+	# The soul's own body crawls on its keys, and only then: no key is no motion.
+	crawl.manual = true
+	var manual_start: Vector3 = crawler.global_position
+	await _frames(30)
+	check(crawler.global_position.distance_to(manual_start) < 0.001,
+		"A soul's downed body does not slide with no key held")
+	crawler.move_direction = Vector2(-1.0,0.0)
+	await _frames(60)
+	check(crawler.global_position.x < manual_start.x - 0.5,
+		"and one second of held keys drags it along the key's bearing")
+	check(absf(crawler.global_position.z - manual_start.z) < 0.2,
+		"The crawl stays on its bearing instead of wandering")
+	crawler.move_direction = Vector2.ZERO
+
 	crawler.revive_from_downed()
 	check(not crawler.downed
 		and is_equal_approx(crawler.health, 100.0 * Contracts.REVIVE_HEALTH_FRACTION),
@@ -170,21 +206,59 @@ func run() -> void:
 	var stand_crawl = Crawl.new()
 	scene.add_child(stand_crawl)
 	check(stand_crawl.attach(standing),"A standing body can be given a crawl")
-	stand_crawl.set_anchor(Vector3(0,0,24))
 	var stand_at: Vector3 = standing.global_position
 	await _frames(30)
 	check(standing.global_position.distance_to(stand_at) < 0.001,"A standing body is never moved by the crawl")
 
-	# A wall on the crawl's line stops it: the drag uses the body's own capsule.
-	var walled = make_actor(10,10,false,Vector3(0,0,40))
-	box(Vector3(0.6,3,6),Vector3(-1.2,1.5,40))
+	# A wall on the soul's crawl line stops it: the drag uses the body's capsule.
+	var walled = make_actor(10,10,false,Vector3(0,0,-20))
+	box(Vector3(0.6,3,6),Vector3(-1.2,1.5,-20))
 	hit_from_plus_x(walled,100.0)
 	var wall_crawl = Crawl.new()
 	scene.add_child(wall_crawl)
 	wall_crawl.attach(walled)
+	wall_crawl.manual = true
+	walled.move_direction = Vector2(-1.0,0.0)
 	await _frames(120)
 	check(walled.global_position.x < -0.25 and walled.global_position.x > -0.95,
 		"The crawl slides up to the wall and stops instead of passing through it")
+	walled.move_direction = Vector2.ZERO
+
+	# --- the squad picks a still body up ------------------------------------
+	# The end-to-end version of the rule: a real rescuer walks to a downed body
+	# that has nobody inside it, opens the real channel while that body's own
+	# crawl node runs, and the channel survives the five seconds. With the old
+	# autonomous crawl the patient slid out of reach on the first frame the
+	# channel opened, and this rescue could never finish.
+	var patient_ai = make_actor(20,0,true,Vector3(0,0,-30))
+	hit_from_plus_x(patient_ai,100.0)
+	var patient_crawl = Crawl.new()
+	scene.add_child(patient_crawl)
+	patient_crawl.attach(patient_ai)
+	var rescuer = make_actor(21,0,true,patient_ai.global_position + Vector3(0,0,9.0))
+	var rescue_channel = Revive.new()
+	scene.add_child(rescue_channel)
+	rescue_channel.set_bodies([rescuer,patient_ai])
+	var squad = Squad.new()
+	var rescue_controller := RescueController.new()
+	rescue_controller.bodies = {20: patient_ai, 21: rescuer}
+	squad.controller = rescue_controller
+	squad.revive = rescue_channel
+	var rescue_ids: Array[int] = [20,21]
+	squad.squad_ids = rescue_ids
+	squad.watchers = []
+	squad.player_body = null
+	var patient_at: Vector3 = patient_ai.global_position
+	for tick in 480:
+		squad._rescue_step(1.0/60.0)
+		rescuer.step(1.0/60.0,[rescuer,patient_ai])
+		patient_crawl._physics_process(1.0/60.0)
+		rescue_channel.tick(1.0/60.0)
+		if not patient_ai.downed:
+			break
+	check(not patient_ai.downed,"the squad's own hands stand the still body up")
+	check(patient_ai.global_position.distance_to(patient_at) < 0.001,
+		"and the patient held its ground through the whole rescue")
 
 	# --- the human-only five second revive ---------------------------------
 	var patient = make_actor(11,11,false,Vector3(0,0,52))
@@ -198,11 +272,12 @@ func run() -> void:
 	channel.cancelled.connect(func(peer: int, _target, reason: String): _cancels.append({"peer": peer, "reason": reason}))
 	check(channel.begin(1,patient),"A human peer opens a revive from two metres")
 	check(is_zero_approx(channel.progress(1)),"A fresh channel reads zero")
+	var ends_before_channel := _downed_ends
 	for tick in 49:
 		channel.tick(0.1)
 	check(patient.downed,"4.9 s of channel is not enough")
 	check(absf(channel.progress(1) - 0.98) < 0.001,"Progress reads back the channel's share of five seconds")
-	check(_downed_ends == 1,"A half held channel stands nobody up")
+	check(_downed_ends == ends_before_channel,"A half held channel stands nobody up")
 	var ends_before := _downed_ends
 	var finished: Dictionary = channel.tick(0.1)
 	check(not patient.downed,"One more tenth of a second revives the body")
@@ -309,3 +384,18 @@ func run() -> void:
 
 	print("DOWNED_REVIVE_REGRESSION checks=%d failures=%d" % [checks,failures])
 	quit(0 if failures == 0 else 1)
+
+
+## The two calls `SquadDrive` makes on a soul's controller: a mercenary id for a
+## real body, and that body back again. The rescue reads nothing else.
+class RescueController:
+	var bodies: Dictionary = {}
+
+	func body_of(merc_id: int):
+		return bodies.get(merc_id, null)
+
+	func merc_of(body) -> int:
+		for merc_id in bodies:
+			if bodies[merc_id] == body:
+				return int(merc_id)
+		return -1

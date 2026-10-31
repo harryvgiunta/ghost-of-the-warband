@@ -71,12 +71,9 @@ var downed := false
 var downed_seconds := 0.0
 ## The slot that put this body down, credited if it bleeds out.
 var downed_by := -1
-## Where that blow came from: the crawl aims the opposite way.
-var downed_threat := Vector3.ZERO
-var downed_threat_known := false
-## A safe anchor the crawl biases toward (a friendly body, a patch of cover).
-var safe_anchor := Vector3.ZERO
-var safe_anchor_known := false
+## Seconds of standing, unhealed time banked toward the next point of the
+## contract's slow regeneration (`HEALTH_REGEN_SECONDS` per point).
+var _regen_elapsed := 0.0
 var authoritative := false
 var is_local := false
 ## The voice this body speaks with (`VoiceLibrary.VOICES`), and the emitter that
@@ -312,6 +309,7 @@ func revive() -> void:
 	input_age = 0.0
 	reset_stance()
 	health = max_health
+	_regen_elapsed = 0.0
 	weapon_blood = 0.0
 	stamina = max_stamina
 	ward_seconds = 0.0
@@ -327,8 +325,6 @@ func revive() -> void:
 	downed = false
 	downed_seconds = 0.0
 	downed_by = -1
-	downed_threat_known = false
-	safe_anchor_known = false
 	# The rig stands up and stops bleeding here exactly as it does on a revive.
 	_clear_downed_state()
 	combat.stop()
@@ -437,6 +433,9 @@ func enter_downed(source_id: int = -1) -> void:
 	health_state = WarbandContracts.HealthState.DOWNED
 	downed_seconds = 0.0
 	downed_by = source_id
+	# A body on the ground is on the bleed clock, not the regen clock: the time
+	# it spent standing before the blow buys nothing toward standing back up.
+	_regen_elapsed = 0.0
 	velocity = Vector3.ZERO
 	move_direction = Vector2.ZERO
 	run_requested = false
@@ -468,10 +467,9 @@ func revive_from_downed(fraction: float = WarbandContracts.REVIVE_HEALTH_FRACTIO
 	downed = false
 	downed_seconds = 0.0
 	downed_by = -1
-	downed_threat_known = false
-	safe_anchor_known = false
 	health_state = WarbandContracts.HealthState.ALIVE
 	health = DownedRules.revive_health(max_health, fraction)
+	_regen_elapsed = 0.0
 	velocity = Vector3.ZERO
 	combat.stagger_time = 0.0
 	reset_stance()
@@ -510,30 +508,6 @@ func voice_aggro() -> bool:
 	return _voice.say("aggro")
 
 
-## Where the blow that put this body down came from. `receive_melee` is the one
-## funnel that knows the attacker's body, so the crawl's bearing comes from it.
-func note_threat(point: Vector3) -> void:
-	if point.is_finite():
-		downed_threat = point
-		downed_threat_known = true
-
-## The safe anchor the crawl biases toward. A non-finite point clears it.
-func set_safe_anchor(point: Vector3) -> void:
-	safe_anchor = point
-	safe_anchor_known = point.is_finite()
-
-func clear_safe_anchor() -> void:
-	safe_anchor_known = false
-
-## The point this body drags itself toward while downed: away from the blow,
-## biased toward the safe anchor. Its own position when it has nothing to crawl
-## away from, or when it is not downed at all.
-func downed_crawl_target() -> Vector3:
-	if not downed:
-		return global_position
-	return DownedRules.crawl_target(global_position, downed_threat, downed_threat_known,
-		safe_anchor, safe_anchor_known)
-
 ## Ghost of the Warband: one frame of the downed crawl, moved through the body's
 ## own capsule so a wall, tree or crate stops it instead of being ghosted
 ## through. Never moves a body that is not downed.
@@ -566,7 +540,7 @@ func _die(source_id: int) -> void:
 	alive = false
 	downed = false
 	downed_seconds = 0.0
-	downed_threat_known = false
+	_regen_elapsed = 0.0
 	health_state = WarbandContracts.HealthState.DEAD
 	combat.stop()
 	reset_stance()
@@ -620,8 +594,6 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 		# light one is shrugged off.
 		take_damage(amount,source_id,headshot,false)
 		return Combat.DEFENSE_NONE
-	# The blow's own bearing, kept for the crawl if it puts this body down.
-	note_threat(attacker_position)
 	var outcome: int = combat.resolve_melee_defense(attacker_position)
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
@@ -897,6 +869,22 @@ func _advance_consumable(delta: float) -> void:
 		health = minf(max_health,health+amount)
 		_heal_remaining = maxf(0.0,_heal_remaining-amount)
 
+## Every standing warband body knits its wounds on its own: one point of health
+## every `WarbandContracts.HEALTH_REGEN_SECONDS`. Slow on purpose - a mercenary
+## out of a fight recovers over minutes, not seconds - and it runs on the one
+## peer that owns the health, so a replica sees the rise in its snapshots.
+func _advance_health_regen(delta: float) -> void:
+	if health >= max_health:
+		# A whole body banks nothing: the first wound starts a fresh clock.
+		_regen_elapsed = 0.0
+		return
+	_regen_elapsed += maxf(delta, 0.0)
+	# Frame deltas never sum to a whole five seconds (fifty 0.1 s ticks come to
+	# 4.999999999999998), the same slack every other downed clock uses.
+	while _regen_elapsed >= WarbandContracts.HEALTH_REGEN_SECONDS - DownedRules.CLOCK_SLACK:
+		_regen_elapsed -= WarbandContracts.HEALTH_REGEN_SECONDS
+		health = minf(max_health, health + WarbandContracts.HEALTH_REGEN_AMOUNT)
+
 func _cancel_consumable() -> void:
 	if consume_kind != "":
 		consume_kind = ""
@@ -926,8 +914,10 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	if downed:
 		# Ghost of the Warband: a downed body keeps its ground and its collision
 		# but has no intent - nothing here advances a swing, an ability or a
-		# step. The bleed clock is the only thing that ticks, and the crawl node
-		# (if the scene gave this body one) owns whatever motion it makes.
+		# step. The bleed clock is the only thing that ticks. A soul's own body
+		# can still drag itself with `CrawlToSafety`; a body with nobody inside
+		# it stays exactly where it fell, so the squad can stand over it and
+		# hold the revive channel.
 		if authoritative:
 			downed_seconds += delta
 			if DownedRules.bled_out(downed_seconds):
@@ -941,6 +931,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		# empty queue may hold the pose.
 		_frame_consumed = _consume_input_frame()
 		_advance_consumable(delta)
+		_advance_health_regen(delta)
 		if consume_kind != "":
 			move_direction = Vector2.ZERO
 			run_requested = false
