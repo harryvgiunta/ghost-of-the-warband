@@ -214,6 +214,19 @@ func check_recruiter() -> void:
 		"hiring spends exactly the hire cost (%d -> %d, cost %d)"
 			% [gold_before, warband.gold(), cost])
 	check(warband.hire_cost() == 0, "the next oath is still free under the eight")
+	# An oath is a body in the square, not a name on a list: under the cap the
+	# hire takes a place on the field and stands up beside the band.
+	var hired_ids: Array[int] = warband.roster.ids()
+	var hired_id: int = hired_ids[hired_ids.size() - 1]
+	check(not warband.roster.is_reserve(hired_id), "a hire under the cap takes a place on the field")
+	await physics_frame
+	await physics_frame
+	var hired_body = game.controller.body_of(hired_id)
+	check(hired_body != null and is_instance_valid(hired_body),
+		"the hire stands up as a body in the world")
+	if hired_body != null and is_instance_valid(hired_body):
+		check(game.town.in_square(hired_body), "in the square (%s)" % str(hired_body.global_position))
+		check(game.bodies.has(hired_body), "and the world fields him with the rest of the band")
 
 	# At the cap the board must refuse and leave the purse and roster alone.
 	while warband.roster.count() < warband.deployment_cap:
@@ -232,3 +245,39 @@ func check_recruiter() -> void:
 	check(warband.roster.count() == cap_count, "the recruiter refuses at the cap")
 	check(warband.gold() == cap_gold, "a refused hire costs nothing")
 	game.screen.close()
+
+	# The cap is the field. Every sworn name now stands in the square; one more,
+	# sworn past it (a soldier cut out of a cage), waits in the reserve with no
+	# body - until a place opens while the band is in the town.
+	await physics_frame
+	await physics_frame
+	var standing := 0
+	for merc_id in warband.roster.ids():
+		if game.controller.body_of(merc_id) != null:
+			standing += 1
+	check(standing == warband.deployment_cap,
+		"a full field is a body for every place (%d of %d)" % [standing, warband.deployment_cap])
+	var waiting_id: int = warband.add_mercenary("Reserve")
+	check(warband.roster.is_reserve(waiting_id), "a name sworn past a full field waits in the reserve")
+	await physics_frame
+	await physics_frame
+	check(game.controller.body_of(waiting_id) == null, "and has no body on the field")
+	var soul_merc: int = game.controller.merc_for_peer(1)
+	var fallen := -1
+	for merc_id in warband.roster.ids():
+		if merc_id != soul_merc and merc_id != waiting_id:
+			fallen = merc_id
+			break
+	var fallen_body = game.controller.body_of(fallen)
+	check(fallen_body != null, "a squadmate stands to fall")
+	if fallen_body == null:
+		return
+	fallen_body._die(0)
+	# The world mirrors a body's death into the books on its own roster clock.
+	await create_timer(0.8).timeout
+	check(not warband.roster.has(fallen), "the fallen leave the books and free a place")
+	check(not warband.roster.is_reserve(waiting_id), "in the square, the reserve takes the place")
+	var called_up = game.controller.body_of(waiting_id)
+	check(called_up != null and is_instance_valid(called_up), "and stands up as a body")
+	if called_up != null and is_instance_valid(called_up):
+		check(game.town.in_square(called_up), "by the town's fire (%s)" % str(called_up.global_position))

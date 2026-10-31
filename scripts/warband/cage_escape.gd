@@ -427,7 +427,9 @@ func spawn_posts() -> Array[Vector3]:
 ## `LESSON_SHIV` on the dirt, and taking it with `K` is the beat that arms the
 ## player and wakes the pair.
 func seed_warband() -> void:
-	var living: Array = warband.alive_merc_ids()
+	# The squad is the field: a name waiting in the reserve has no body to cage.
+	var living: Array = warband.alive_merc_ids().filter(
+		func(merc_id: int) -> bool: return not warband.roster.is_reserve(merc_id))
 	var fresh := living.is_empty()
 	if fresh:
 		for prisoner in PRISONER_NAMES:

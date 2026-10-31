@@ -24,9 +24,12 @@ const BOW_ITEM := "bow_twig"
 
 ## The catalog ammunition the corpse gives back: the shafts a hidden archer was
 ## drawing from. The wood is where a band that ran its quiver dry re-supplies, and
-## the body that was shooting at you is the one worth bending over.
+## the body that was shooting at you is the one worth bending over. The bunch is
+## 10-20 shafts, off the body's own identity (`carried_arrows()`), so a corpse
+## killed on two machines still carries the same count.
 const ARROW_ITEM := "arrow"
-const CARRIED_ARROWS := 4
+const CARRIED_ARROWS_MIN := 10
+const CARRIED_ARROWS_MAX := 20
 
 ## The ring it holds: never inside this, never past that - and it retreats when a
 ## blade gets closer than the inner edge. The two numbers are what make fighting
@@ -322,8 +325,15 @@ func _hunt(delta: float) -> void:
 ## only resupply out on the road.
 func _stamp_carried() -> void:
 	super()
-	for index in CARRIED_ARROWS:
+	for index in carried_arrows(mob_id, name):
 		carried.append(ARROW_ITEM)
+
+
+## How many shafts a body's quiver holds: a pure function of its id and node name
+## (the same identity `ichor_slot()` reads), between the two bounds inclusive.
+static func carried_arrows(watcher_id: String, node_name: String) -> int:
+	var spread := CARRIED_ARROWS_MAX - CARRIED_ARROWS_MIN + 1
+	return CARRIED_ARROWS_MIN + ichor_slot(watcher_id, node_name) % spread
 
 
 ## The hidden stance: crouched until the ambush is sprung, and crouched again

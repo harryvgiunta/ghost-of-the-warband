@@ -205,6 +205,45 @@ func merc_ids() -> Array[int]:
 func alive_merc_ids() -> Array[int]:
 	return roster.alive_ids()
 
+# --- the field and the reserve ---------------------------------------------
+#
+# The field is the bodies the warband has standing: at most `deployment_cap` of
+# them. A name sworn while the field is full - a soldier cut out of a cage past
+# the eighth body - waits in the reserve (`WarbandRoster.is_reserve`) with no body
+# at all, and takes a place again only in the town (the world decides where; this
+# only keeps the books).
+
+## Places left on the field: the cap less every body already on it.
+func field_room() -> int:
+	return maxi(0, deployment_cap - roster.field_count())
+
+## The oldest name in the reserve takes a place on the field. Returns its id, or
+## -1 when the field is full or nobody waits.
+func deploy_reserve() -> int:
+	if field_room() <= 0:
+		return -1
+	var waiting := roster.reserve_ids()
+	if waiting.is_empty():
+		return -1
+	roster.set_reserve(waiting[0], false)
+	_notify()
+	return waiting[0]
+
+## A file can name more bodies on the field than the cap allows (one written
+## before the reserve existed, when every rescue took the field), or none at all
+## while names wait in the reserve. The newest fielded names step back into the
+## reserve until the field fits, and an empty field takes the reserve's oldest,
+## so a load always stands the warband up inside the cap.
+func _balance_field() -> void:
+	var field := roster.field_ids()
+	for index in range(field.size() - 1, deployment_cap - 1, -1):
+		roster.set_reserve(field[index], true)
+	if roster.field_count() > 0:
+		return
+	var waiting := roster.reserve_ids()
+	for index in mini(waiting.size(), deployment_cap):
+		roster.set_reserve(waiting[index], false)
+
 ## The dead leave the warband the moment they die: a corpse is not a party member,
 ## it cannot be deployed or entered, and its record used to sit on the hire cap
 ## forever - a band that had filled its eight places could never swear another
@@ -237,8 +276,11 @@ func _on_merc_died(_merc_id: int) -> void:
 
 ## Hack a body into the warband (the cage tutorial's four prisoners, the admin
 ## arena's eight test bodies, a soldier cut out of a cage). No gold changes hands.
+## The body takes the field when there is room for it, and the reserve when not.
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
+	var room := field_room() > 0
 	var merc_id := roster.create(merc_name, equipped)
+	roster.set_reserve(merc_id, not room)
 	_notify()
 	return merc_id
 
@@ -370,12 +412,15 @@ func hire(merc_name: String = "") -> Dictionary:
 	if lent:
 		return _lent_refusal({"merc_id": -1, "cost": 0})
 	var state := get_node_or_null("/root/PlayerState")
+	var room := field_room() > 0
 	var result := WarbandVendor.hire(roster, state, merc_name, deployment_cap) if state != null \
 		else {"ok": false, "message": "The purse is missing.", "merc_id": -1, "cost": 0}
 	if bool(result.get("ok", false)):
 		# A body that swears with empty hands is dead weight: the recruiter's
 		# oath includes whatever the shared stash can spare.
 		var merc_id := int(result.get("merc_id", -1))
+		# A hire takes the field at the desk when there is a place for him.
+		roster.set_reserve(merc_id, not room)
 		var dressed := dress_recruit(merc_id)
 		var fitted: Array = dressed.get("fitted", [])
 		if not fitted.is_empty():
@@ -608,6 +653,10 @@ func from_dict(data: Dictionary) -> void:
 	# They leave now, and whatever they wore joins the stash that was just read:
 	# opening an old warband must free the hire cap, not inherit a graveyard.
 	reap_dead()
+	# The field fits the cap on every load. A lent copy is the host's books as the
+	# host keeps them, never rebalanced here, so both machines field one squad.
+	if not lent:
+		_balance_field()
 	# Nothing is ever paid here: the purse and the essence wallet already hold
 	# what a run earned, so a save/load cycle cannot pay one twice.
 	seeded = roster.count() > 0

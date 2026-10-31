@@ -209,7 +209,7 @@ func _check_paperdoll() -> void:
 	check(doll.selected_merc == first, "the paperdoll opens on the asked-for mercenary")
 	check(doll.slot_rows.size() == Contracts.SLOT_ORDER.size(), "all ten worn slots are drawn")
 	check(doll.picker_buttons.size() == 2, "the picker strip has one button per mercenary")
-	check(doll.stash_rows.size() == 3, "the stash lists every owned piece, got %d"
+	check(doll.stash_rows.size() == 3, "the stash lists every unequipped piece, got %d"
 		% doll.stash_rows.size())
 	check(str(warband.roster.equipped_of(first)["main"]).is_empty(), "the mercenary starts bare")
 	check(doll.slot_rows["main"]["button"].text.contains("empty"), "an empty slot says empty")
@@ -252,7 +252,8 @@ func _check_paperdoll() -> void:
 	check(warband.total_value() == baseline, "no gold is lost moving gear, %d vs %d"
 		% [warband.total_value(), baseline])
 
-	# The list is value-ordered and tags a piece another mercenary is wearing.
+	# The list is value-ordered and holds unequipped pieces only: the shield the
+	# first mercenary wears is on his off-hand slot, not in the stash.
 	var values: Array[int] = []
 	for shown in doll.stash_rows:
 		values.append(int(shown["value"]))
@@ -261,39 +262,36 @@ func _check_paperdoll() -> void:
 		if values[index] > values[index - 1]:
 			ordered = false
 	check(ordered, "the stash list is value-ordered, got %s" % str(values))
-	var reference: Array[Dictionary] = warband.stash.rows(warband.roster, warband.cruor.brands)
-	check(doll.stash_rows.size() == reference.size(), "the panel shows every stash row")
+	var reference: Array[Dictionary] = []
+	for owned in warband.stash.rows(warband.roster, warband.cruor.brands):
+		if int(owned["pooled"]) > 0:
+			reference.append(owned)
+	check(doll.stash_rows.size() == reference.size(),
+		"the panel shows every stash row with a free copy, got %d of %d"
+		% [doll.stash_rows.size(), reference.size()])
 	for index in reference.size():
 		check(str(doll.stash_rows[index]["item_id"]) == str(reference[index]["item_id"]),
 			"row %d matches the stash's own order" % index)
+	check(_stash_row(doll, "shield_buckler").is_empty(), "the worn shield is not on the list")
 
 	doll.picker_buttons[other].pressed.emit()
 	check(doll.selected_merc == other, "the picker strip switches mercenary")
-	var tagged := _stash_row(doll, "shield_buckler")
-	check(not tagged.is_empty(), "the worn shield is still on the list")
-	check(int(tagged["pooled"]) == 0, "a worn piece has no free copy")
-	# The stash is one pool, so a piece another body wears is a hand-off, not a
-	# locked row: clicking it takes it off that body and puts it on this one.
-	check(not tagged["button"].disabled, "a worn piece can be handed over from the list")
-	tagged["button"].pressed.emit()
-	check(str(warband.roster.equipped_of(other).get("off", "")) == "shield_buckler",
-		"clicking the worn row dresses the selected mercenary")
-	check(str(warband.roster.equipped_of(first).get("off", "")) == "",
-		"and takes it off the mercenary who wore it")
-	check(warband.stash.pooled_count("shield_buckler") == 0,
-		"a hand-off leaves no copy in the pool")
-	# Hand it straight back so the rest of the checks start where they expected.
-	doll.picker_buttons[first].pressed.emit()
-	doll._on_stash_pressed("shield_buckler")
-	check(str(warband.roster.equipped_of(first).get("off", "")) == "shield_buckler",
-		"and the piece can be handed straight back")
-	doll.picker_buttons[other].pressed.emit()
-	var tag_lines: Array = tagged["tags"]
-	check(tag_lines.size() == 1, "the worn piece carries one tag, got %s" % str(tag_lines))
-	check(str(tag_lines[0]).contains("Equipped") and str(tag_lines[0]).contains("Aldous"),
-		"the tag names the Equipped wearer, got %s" % str(tag_lines))
+	check(_stash_row(doll, "shield_buckler").is_empty(),
+		"another body's worn piece is not offered either")
 	check(doll.slot_rows["off"]["button"].text.contains("empty"),
 		"the newly picked mercenary shows their own bare slots")
+	# Handing a piece over is two clicks through the pool: off the wearer's slot,
+	# then from the stash onto the new body.
+	doll.picker_buttons[first].pressed.emit()
+	doll.slot_rows["off"]["button"].pressed.emit()
+	check(not _stash_row(doll, "shield_buckler").is_empty(),
+		"a piece taken off comes back onto the list")
+	doll.picker_buttons[other].pressed.emit()
+	_stash_row(doll, "shield_buckler")["button"].pressed.emit()
+	check(str(warband.roster.equipped_of(other).get("off", "")) == "shield_buckler",
+		"the freed shield dresses the other mercenary")
+	check(_stash_row(doll, "shield_buckler").is_empty(),
+		"and its last free copy leaves the list")
 
 	# A brand on a worn piece is printed under its slot.
 	doll.picker_buttons[first].pressed.emit()

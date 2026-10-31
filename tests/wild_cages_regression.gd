@@ -368,10 +368,12 @@ func _check_latches(body) -> void:
 
 
 func _check_rescue(body, quests, roster_before: int) -> void:
+	var room_at_start: int = warband.field_room()
 	for index in 4:
 		var node: Node3D = cages.cages()[index]
 		_stand_at(body, node)
 		var shut_before: int = cages.remaining()
+		var room_before: int = warband.field_room()
 		check(cages.latch_target(body) == index,
 			"cage %d's latch is in reach from where the body stands" % (index + 1))
 		check(cages.interact(body), "cage %d's press is consumed" % (index + 1))
@@ -392,6 +394,27 @@ func _check_rescue(body, quests, roster_before: int) -> void:
 			"and one mark on the rescue order (%d of %d)"
 			% [quests.progress_of("free_the_soldiers"),
 				quests.goal_count("free_the_soldiers")])
+		# With a place on the field he takes it where he stands, out at the cage;
+		# past a full field he waits in the town's reserve and nothing stands up.
+		var rescued_ids: Array[int] = warband.roster.ids()
+		var rescued: int = rescued_ids[rescued_ids.size() - 1]
+		await physics_frame
+		await physics_frame
+		var rescued_body = game.controller.body_of(rescued)
+		if room_before > 0:
+			check(not warband.roster.is_reserve(rescued), "cage %d's soldier takes a place on the field"
+				% (index + 1))
+			check(rescued_body != null and is_instance_valid(rescued_body)
+				and _flat(rescued_body.global_position, node.global_position) < 4.0,
+				"and stands up as a body at his cage (%s)" % (
+					str(rescued_body.global_position) if rescued_body != null else "no body"))
+		else:
+			check(warband.roster.is_reserve(rescued),
+				"cage %d's soldier, past a full field, waits in the reserve" % (index + 1))
+			check(rescued_body == null, "and no body stands up for him out in the wood")
+	check(warband.roster.reserve_ids().size() == maxi(0, 4 - room_at_start),
+		"the field took %d of the four and the rest wait in the reserve (%d waiting)"
+		% [mini(4, room_at_start), warband.roster.reserve_ids().size()])
 
 	check(cages.remaining() == 0, "the line is open (%d shut)" % cages.remaining())
 	check(cages.marker_points().is_empty(), "an open line has nothing left to mark")

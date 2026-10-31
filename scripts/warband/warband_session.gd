@@ -699,6 +699,14 @@ func _adopt_ownership(assignments: Dictionary) -> void:
 	_adopted = next
 	ownership_changed.emit(_adopted.duplicate())
 
+## A guest's world has stood up a body the host fielded after this map arrived -
+## a hire, a rescue, the reserve called up - and the map already names a soul in
+## it: take the host's map again, so that soul is seated here as it is there.
+func readopt_ownership() -> void:
+	if _role != "client" or controller == null:
+		return
+	_adopt_ownership(_adopted)
+
 ## Give a body back on this process. The router is told first because it is the
 ## rule book; the controller then hands the body to the scene, where it keeps
 ## whatever AI flag the scene gave it.

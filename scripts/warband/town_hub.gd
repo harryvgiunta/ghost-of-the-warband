@@ -1026,7 +1026,7 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 				hud.set_status("The quartermaster has an order.", 4.0)
 			else:
 				quartermaster.open()
-				hud.set_status("The quartermaster sells plain steel into the shared stash.", 4.0)
+				hud.set_status("The quartermaster sells plain steel and arrows into the shared stash.", 4.0)
 		"vendor_orla":
 			_open_vendor(0)
 		"vendor_brann":
@@ -1070,8 +1070,17 @@ func in_square(actor, margin: float = 0.0) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var local: Vector3 = actor.global_position - global_position
-	var reach: float = WALL_RADIUS + 2.0 + maxf(margin, 0.0)
-	return Vector2(local.x, local.z).length() <= reach
+	return Vector2(local.x, local.z).length() <= _square_reach(margin)
+
+## Flat metres from a point to the edge of `in_square`'s ring: what the trail's
+## objective counts down, so it reaches zero where the town's own lines begin.
+func metres_to_square(point: Vector3) -> float:
+	var local: Vector3 = point - global_position
+	return maxf(Vector2(local.x, local.z).length() - _square_reach(), 0.0)
+
+## The square's ring: the wall plus a stride, widened by `margin`.
+func _square_reach(margin: float = 0.0) -> float:
+	return WALL_RADIUS + 2.0 + maxf(margin, 0.0)
 
 
 ## Whether one of the square's panels is open (the world owns the input, the
@@ -1151,11 +1160,11 @@ func hint_line(actor) -> String:
 		"recruiter":
 			text = "G - swear a new body (the first eight are free)"
 		"quartermaster":
-			text = "G - buy plain steel into the shared stash"
+			text = "G - buy plain steel and arrows into the shared stash"
 		"vendor_orla":
-			text = "G - buy bows and staves, or sell spare gear"
+			text = "G - buy bows, staves and arrows, or sell spare gear"
 		"vendor_brann":
-			text = "G - buy blades and shields, or sell spare gear"
+			text = "G - buy blades, shields and arrows, or sell spare gear"
 		"vendor_vey":
 			text = "G - buy armour, or sell spare gear"
 	# A reagent in the stash is worthless until a player knows where it is worked,

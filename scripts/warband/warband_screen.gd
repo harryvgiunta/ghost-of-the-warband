@@ -1,8 +1,9 @@
 class_name WarbandScreen
 extends CanvasLayer
 ## The tactical warband screen: the purse and worth in the header, one line per
-## mercenary (live health, ALIVE/DOWNED/DEAD chip, gear and a click-to-control
-## button) and the Gold recruiter's board underneath.
+## mercenary (live health, ALIVE/DOWNED/DEAD chip - RESERVE for a name waiting in
+## the town with no body - gear and a click-to-control button) and the Gold
+## recruiter's board underneath.
 ##
 ## It owns no state and no input. Every number is read out of `Warband` at paint
 ## time and every action goes back through it, so a heal on the battlefield, a
@@ -284,7 +285,9 @@ func _apply_row(merc_id: int) -> void:
 	var state := int(roster.state_of(merc_id))
 	(row["name"] as Label).text = str(roster.name_of(merc_id))
 	var chip: Label = row["state"]
-	chip.text = Contracts.state_name(state).to_upper()
+	# A name in the reserve is sworn but has no body: the chip says where he is.
+	var waiting: bool = roster.is_reserve(merc_id)
+	chip.text = "RESERVE" if waiting else Contracts.state_name(state).to_upper()
 	var bar: ProgressBar = row["bar"]
 	# The chip colour and the bar fill only change when the health state does;
 	# repainting every row on every warband event must not allocate styles.
@@ -306,8 +309,12 @@ func _apply_row(merc_id: int) -> void:
 		holder = int(_souls.occupied_by(merc_id))
 	var taken := holder != 0 and holder != local_peer
 	control.text = "IN USE" if taken else "CONTROL"
-	control.disabled = state != Contracts.HealthState.ALIVE or taken
-	control.tooltip_text = _control_hint(state, taken)
+	control.disabled = waiting or state != Contracts.HealthState.ALIVE or taken
+	control.tooltip_text = RESERVE_HINT if waiting else _control_hint(state, taken)
+
+## Why a reserve row cannot be taken: the field is full, and only the town gives
+## a waiting name a place on it.
+const RESERVE_HINT := "Waiting in the town's reserve: he takes the field when the band is back in the square with a place free."
 
 func _control_hint(state: int, taken: bool) -> String:
 	if taken:

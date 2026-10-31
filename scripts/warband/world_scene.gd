@@ -126,6 +126,8 @@ const PROJECTILE_HIT_MASK := 1 | 2
 const PROJECTILE_CAP := 64
 ## How long the warband lies in the mud before the world stops pretending.
 const WIPE_BEAT := 2.5
+## The trail's objective. It counts down to the square's own ring and is gone
+## inside it: the town is where it is reached, so a body there never reads it.
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
 const TRAIL_HINT := "The squad follows you   ·   M - map   ·   O - warband   ·   P - gear"
 ## The key line under a prompt that names the revive hold.
@@ -344,6 +346,7 @@ func _physics_process(delta: float) -> void:
 	# handed no target, so no local sense ever wakes it behind the host's back.
 	SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
 	_sync_roster(delta)
+	_sync_field()
 	_sync_quests()
 	# The loot channel runs on the world's clock and breaks the moment a panel is
 	# over the body doing the work: a screen does not pause the tree, so nothing
@@ -757,7 +760,7 @@ func _seat_checkpoint() -> void:
 		town.place_warband(bodies)
 		return
 	var ground := _checkpoint_ground()
-	var posts := _spawn_ring(ground, maxi(1, warband.alive_merc_ids().size()))
+	var posts := _spawn_ring(ground, maxi(1, warband.roster.field_count()))
 	bodies = controller.spawn_mercenaries(posts, true)
 	camp.place_resumed(bodies)
 	# The squad is out of the camp on a resumed trail: it walks with the soul.
@@ -812,42 +815,140 @@ func _spawn_ring(at: Vector3, count: int) -> Array[Vector3]:
 func _adopt_bodies() -> void:
 	squad_ids.clear()
 	for actor in bodies:
-		var merc_id: int = controller.merc_of(actor)
-		if merc_id > 0 and not squad_ids.has(merc_id):
-			squad_ids.append(merc_id)
-		# The warband's enemies in this world are the wood's own mobs (layer 2).
-		# `ArenaActor` is born hostile to other arena bodies (layer 4), which in a
-		# world with nowhere to duel would swing through every watcher for nothing.
-		actor.combat.target_mask = 2
-		actor.bounds = BODY_BOUNDS
-		# The body's skill clock needs a scene listener before its first cue, or
-		# the beat fires into nothing: one scene node, bound once per body.
-		if abilities != null:
-			abilities.bind_body(actor)
-		_wire_crawl(actor)
-		_wire_projectiles(actor)
-		# A body that goes down lets go of its steel. Both the knock-down and the
-		# bleed-out walk the same hook, so a body that dies without ever being
-		# downed (a finisher, a lethal blow) drops exactly as one that fell does.
-		if merc_id > 0:
-			actor.downed_started.connect(_on_body_downed.bind(actor, merc_id))
-			actor.killed.connect(_on_body_killed.bind(actor, merc_id))
-		# A worn hand torch is light, and light belongs to the body carrying it.
-		if merc_id > 0:
-			var torch := TorchScript.new()
-			actor.add_child(torch)
-			torch.setup(actor, merc_id, warband)
+		_adopt_body(actor)
+	_squad_moved()
+	_seat_loose_soul()
+
+
+## One body's wiring, for the seating above and for a body that takes the field
+## after it (`_sync_field`).
+func _adopt_body(actor) -> void:
+	var merc_id: int = controller.merc_of(actor)
+	if merc_id > 0 and not squad_ids.has(merc_id):
+		squad_ids.append(merc_id)
+	# The warband's enemies in this world are the wood's own mobs (layer 2).
+	# `ArenaActor` is born hostile to other arena bodies (layer 4), which in a
+	# world with nowhere to duel would swing through every watcher for nothing.
+	actor.combat.target_mask = 2
+	actor.bounds = BODY_BOUNDS
+	# The body's skill clock needs a scene listener before its first cue, or
+	# the beat fires into nothing: one scene node, bound once per body.
+	if abilities != null:
+		abilities.bind_body(actor)
+	_wire_crawl(actor)
+	_wire_projectiles(actor)
+	# A body that goes down lets go of its steel. Both the knock-down and the
+	# bleed-out walk the same hook, so a body that dies without ever being
+	# downed (a finisher, a lethal blow) drops exactly as one that fell does.
+	if merc_id > 0:
+		actor.downed_started.connect(_on_body_downed.bind(actor, merc_id))
+		actor.killed.connect(_on_body_killed.bind(actor, merc_id))
+	# A worn hand torch is light, and light belongs to the body carrying it.
+	if merc_id > 0:
+		var torch := TorchScript.new()
+		actor.add_child(torch)
+		torch.setup(actor, merc_id, warband)
+
+
+## The squad's brain and the revive channel read the body list, so a body that
+## joins has to reach both.
+func _squad_moved() -> void:
 	if squad != null:
 		squad.squad_ids = squad_ids
 	if revive != null:
 		revive.set_bodies(bodies)
-	# The soul goes into a body before anything hunts it: a spectator's camera
-	# while two cultists run at nothing is not a first fight. A guest's soul is the
-	# host's to seat.
-	var first: int = _soul_merc()
-	if first <= 0 and not squad_ids.is_empty() and not _client:
-		first = int(squad_ids[0])
-		controller.direct(controller.local_peer_id, first)
+
+
+## The soul goes into a body before anything hunts it: a spectator's camera
+## while two cultists run at nothing is not a first fight. A guest's soul is the
+## host's to seat.
+func _seat_loose_soul() -> void:
+	if _soul_merc() <= 0 and not squad_ids.is_empty() and not _client:
+		controller.direct(controller.local_peer_id, int(squad_ids[0]))
+
+
+# --- the field ---------------------------------------------------------------
+#
+# Every name with a place on the field (`WarbandRoster.field_ids`) has a body in
+# the world. A place taken after the world was seated - a hire at the recruiter,
+# a soldier cut out of a cage, the reserve called up in the square - is a body
+# spawned here on the next frame, wired like the rest and in the squad at once.
+# A name sworn past a full field waits in the reserve with no body, and the
+# reserve is only ever called up in the town. A guest spawns nothing on its own
+# account: the host's books say who is on the field, and its copy follows them.
+
+## Where a body that has just been sworn stands up, by merc id: the spot a soldier
+## walked out of his cage to. A name with no entry musters at the town's fire
+## while the party is in the square, and beside the party anywhere else.
+var _muster_at: Dictionary = {}
+
+func _sync_field() -> void:
+	if warband == null or controller == null:
+		return
+	# A guest's world outlives its loan by a frame or two, and the roster under it
+	# is then this machine's own: none of those names has a place on this field.
+	if _client and not warband.lent:
+		return
+	if not _client:
+		_call_up_reserve()
+	var joined: Array = []
+	for merc_id in warband.roster.field_ids():
+		if controller.body_of(merc_id) != null:
+			continue
+		var posts: Array[Vector3] = [_muster_point(merc_id, joined.size())]
+		var wanted: Array[int] = [merc_id]
+		joined.append_array(controller.spawn_mercenaries(posts, not _client, wanted))
+		_muster_at.erase(merc_id)
+	if joined.is_empty():
+		return
+	for actor in joined:
+		bodies.append(actor)
+		_adopt_body(actor)
+	_squad_moved()
+	_seat_loose_soul()
+	# A guest's map may already seat a soul in the body that just stood up here.
+	if _client:
+		var link := get_node_or_null("/root/GameFlow/WarbandLink")
+		if link != null and link.has_method("readopt_ownership"):
+			link.readopt_ownership()
+
+
+## The reserve takes the field only in the town: while the party stands in the
+## square and the field has a place, the name that has waited longest takes it.
+func _call_up_reserve() -> void:
+	if town == null or warband.field_room() <= 0:
+		return
+	var focus = controller.focus_body()
+	if focus == null or not is_instance_valid(focus) or not town.in_square(focus):
+		return
+	var names: Array[String] = []
+	var merc_id: int = warband.deploy_reserve()
+	while merc_id > 0:
+		names.append(warband.roster.name_of(merc_id))
+		merc_id = warband.deploy_reserve()
+	if not names.is_empty() and hud != null:
+		hud.set_status("%s %s the reserve and %s the band." % [", ".join(names),
+			"leaves" if names.size() == 1 else "leave",
+			"joins" if names.size() == 1 else "join"], 4.0)
+
+
+## A new body's ground: its own muster spot, the town's fire ring while the party
+## is in the square, or a ring beside the party's body. `index` spreads the bodies
+## that join on one frame.
+func _muster_point(merc_id: int, index: int) -> Vector3:
+	var own: Variant = _muster_at.get(merc_id)
+	if own is Vector3:
+		return TerrainScript.grounded(own)
+	var focus = controller.focus_body()
+	var party: bool = focus != null and is_instance_valid(focus)
+	if town != null and (not party or town.in_square(focus)):
+		var posts: Array[Vector3] = town.spawn_posts()
+		var post: Vector3 = posts[(bodies.size() + index) % posts.size()]
+		return TerrainScript.grounded(town.global_position + post)
+	if party:
+		var ring := _spawn_ring((focus as Node3D).global_position, 6)
+		return ring[(bodies.size() + index) % ring.size()]
+	return TerrainScript.grounded(Vector3.ZERO)
 
 
 ## Every body's bowstring and throwing hand. A body that is not authoritative is
@@ -1381,27 +1482,38 @@ func map_markers() -> Array[Dictionary]:
 
 ## A soldier comes out of a cage and swears to the band: one roster record, the
 ## best spare kit the shared stash holds, one mark on the ledger, one line on the
-## HUD. The area that cut the latch calls this and nothing else.
-func note_soldier_freed(merc_name: String) -> int:
+## HUD. The area that cut the latch calls this and nothing else. `at` is where he
+## stands: with a place on the field he takes it there, and past a full field he
+## waits in the reserve and his figure fades with nobody in its place.
+func note_soldier_freed(merc_name: String, at: Vector3 = Vector3.INF) -> int:
 	if warband == null:
 		return -1
 	var merc_id: int = warband.add_mercenary(merc_name)
 	if merc_id <= 0:
 		return -1
 	warband.dress_recruit(merc_id)
+	var waiting: bool = warband.roster.is_reserve(merc_id)
+	if not waiting and at.is_finite():
+		_muster_at[merc_id] = at
 	var moved: Array = warband.quests.note_rescue()
 	_announce_quests(moved)
 	if hud != null:
 		var quests: WarbandQuests = warband.quests
+		var line := "%s joins the warband." % merc_name
+		var seconds := 3.5
 		if quests.is_complete("free_the_soldiers"):
-			hud.set_status("%s is out of the cage. Every name is off the roll - back to"
-				% merc_name + " the quartermaster.", 4.5)
+			line = "%s is out of the cage. Every name is off the roll - back to" % merc_name \
+				+ " the quartermaster."
+			seconds = 4.5
 		elif quests.is_active("free_the_soldiers"):
-			hud.set_status("%s is out of the cage. Freed %d of %d." % [merc_name,
+			line = "%s is out of the cage. Freed %d of %d." % [merc_name,
 				quests.progress_of("free_the_soldiers"),
-				quests.goal_count("free_the_soldiers")], 4.0)
-		else:
-			hud.set_status("%s joins the warband." % merc_name, 3.5)
+				quests.goal_count("free_the_soldiers")]
+			seconds = 4.0
+		if waiting:
+			line += " The field is full: he waits in the town's reserve."
+			seconds += 1.0
+		hud.set_status(line, seconds)
 	return merc_id
 
 ## Paint the ledger block. Cheap by construction: the HUD repaints only when the
@@ -1744,8 +1856,14 @@ func _sync_town_music() -> void:
 # Two moments in the campaign begin a new stretch, and each one writes the
 # warband's own save with a bookmark: the camp's six watchers down and the squad
 # on the road (the tutorial is over, the run starts), and the town square first
-# entered. A checkpoint is written once per id, so walking back and forth does
-# not hammer the disk; a wipe loads it, and the title's resume door opens on it.
+# entered. The bookmark only ever moves forward through `CHECKPOINT_ORDER`, so
+# walking back and forth does not hammer the disk - and a session that played
+# the opening, whose camp still reads as cleared, cannot pull the town bookmark
+# back to the trail on the next frame and then forward again on the one after.
+# A wipe loads it, and the title's resume door opens on it.
+
+## The bookmarks in the order the campaign reaches them.
+const CHECKPOINT_ORDER := ["trail_start", "town"]
 
 func _check_checkpoints() -> void:
 	if warband == null or controller == null or _wiped:
@@ -1761,13 +1879,19 @@ func _check_checkpoints() -> void:
 	# The opening is behind us: the six watchers are dead and the leaving has
 	# happened. The bookmark sits a little down the road, past the ambush's own
 	# posts, so a reload never drops the squad inside a fight it has just lost.
-	if camp != null and camp.tutorial_cleared() and warband.checkpoint_id() != "trail_start":
+	if camp != null and camp.tutorial_cleared() and _checkpoint_ahead("trail_start"):
 		var at := Vector3(CampScript.GATE_POINT.x, 0.0, CampScript.GATE_POINT.z - 60.0)
 		_save_checkpoint("trail_start", "trail", TerrainScript.grounded(at),
 			"THE CAMP IS BEHIND YOU")
 		return
-	if town != null and town.in_square(actor) and warband.checkpoint_id() != "town":
+	if town != null and town.in_square(actor) and _checkpoint_ahead("town"):
 		_save_checkpoint("town", "town", actor.global_position, "HEARTHSTEAD")
+
+
+## Whether writing `id` moves the bookmark forward. An id the order does not
+## know (a hand-edited or older file) is behind every stretch.
+func _checkpoint_ahead(id: String) -> bool:
+	return CHECKPOINT_ORDER.find(id) > CHECKPOINT_ORDER.find(warband.checkpoint_id())
 
 
 func _save_checkpoint(id: String, area: String, position: Vector3, label: String) -> void:
@@ -1877,9 +2001,8 @@ func _interaction_status(actor) -> void:
 	var line := ""
 	if camp != null:
 		line = camp.prompt_line(actor)
-	if line.is_empty() and trail != null:
-		line = "%s   ·   %d m" % [TRAIL_OBJECTIVE,
-			int(round(trail.metres_to_town(actor.global_position)))]
+	if line.is_empty():
+		line = _trail_objective_line(actor)
 	hud.set_status(line if not line.is_empty() else "Nothing within reach.", 3.0)
 
 
@@ -2069,10 +2192,25 @@ func _update_prompt() -> void:
 		text = town.prompt_line(actor)
 	if text.is_empty() and camp != null:
 		text = camp.prompt_line(actor)
-	if text.is_empty() and trail != null and actor != null and is_instance_valid(actor):
-		text = "%s   ·   %d m" % [TRAIL_OBJECTIVE,
-			int(round(trail.metres_to_town(actor.global_position)))]
+	if text.is_empty():
+		text = _trail_objective_line(actor)
 	_write_prompt(text, _hint_text)
+
+
+## "REACH THE TOWN · 214 m", or "" for a body already standing in the square. The
+## figure is the distance to the square's ring - where the town's own lines take
+## over - not to the gate arch outside it: counted to the arch it fell to zero at
+## the gate, then climbed again all the way across the square.
+func _trail_objective_line(actor) -> String:
+	if trail == null or actor == null or not is_instance_valid(actor):
+		return ""
+	var at: Vector3 = (actor as Node3D).global_position
+	var metres: float = trail.metres_to_town(at)
+	if town != null:
+		if town.in_square(actor):
+			return ""
+		metres = town.metres_to_square(at)
+	return "%s   ·   %d m" % [TRAIL_OBJECTIVE, int(round(metres))]
 
 
 ## The key line: the lesson's, or the counter's, or the trail's.

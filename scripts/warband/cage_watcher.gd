@@ -81,9 +81,10 @@ const WATCHER_PROFILES := {
 }
 
 ## The pair the lesson fields are thinned bodies; everything else that holds the
-## road is a hard body. Both are 30% under their old pools (31/101).
+## road is a hard body. The pair is 30% under its old pool (31); the hard pool is
+## 71 - 30 points off the 101 it had, which made a road watcher a slog to cut down.
 const PAIR_HEALTH := 31.0
-const HARDENED_HEALTH := 101.0
+const HARDENED_HEALTH := 71.0
 
 ## The makeshift tier, in catalog order. No forged steel is allowed in the camp,
 ## so this is the whole pool a variant may name - and the twig bow is in it

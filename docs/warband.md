@@ -41,7 +41,7 @@ not re-implement it and do not redefine an enum, a slot id or a tier name.
 | File | Class | Responsibility |
 | --- | --- | --- |
 | `scripts/warband/warband_contracts.gd` | `WarbandContracts` | Slot/weapon/health/sim enums, slot ids (`feet`, `main`, `off`), `resolve_damage`, `finishes_downed`, `damage_multiplier`, all tuning constants |
-| `scripts/warband/warband_roster.gd` | `WarbandRoster` | Mercenary records (identical base stats), health/downed/dead, `apply_damage`, `revive`, `tick_downed`, `equip`/`unequip`, deployment cap, save round-trip |
+| `scripts/warband/warband_roster.gd` | `WarbandRoster` | Mercenary records (identical base stats), health/downed/dead, `apply_damage`, `revive`, `tick_downed`, `equip`/`unequip`, the `reserve` flag (`field_ids`/`field_count`/`reserve_ids`), deployment cap, save round-trip |
 | `scripts/warband/soul_router.gd` | `SoulRouter` | Body registry, one peer per body, `request_transfer`, `cycle`, refusal reasons, alive-only entry |
 | `scripts/warband/town_stash_model.gd` | `WarbandStash` | Infinite pooled stash, collective `rows()` sorted by value with `Equipped` tags |
 | `scripts/warband/cruor_catalog.gd` | `CruorCatalog` | The five tiers, names/colours/values, `distill`, `unbind_yield` |
@@ -208,7 +208,7 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | --- | --- |
 | `scenes/cage_escape.tscn` + `scripts/warband/cage_escape.gd` | the **cold open**, deep in the wood: a ragged 40 x 52 m pocket (`YARD_HALF_WIDTH` 20, front -30, back 22) with no wall and no gate - a broken stake ring, three twig shelters, a fire ring, junk and trees standing inside it, and 170 m of ordinary forest (`CAMP_TO_ROAD_METRES`) before the trail's first torch. **Five cages scattered through the pocket** (`CAGE_POSTS`; the player wakes in `OWN_CAGE` 0) hold the warband; **every latch takes `G` with a blade inside `LATCH_REACH` 2.2 m, the player's own included**, and nothing opens on a possession or a kill. The ironwood shiv lies on the dirt right outside the own cage's door (`SHIV_POST`), taken through the bars with `K` while the clamp still holds the body, with two lit hand torches on the ground beside it; the gold shiv arrow rides that blade; the latch arrow rides the *nearest* shut cage; the run arrow rides the gap in the trees once the fifth latch goes. Two camp watchers sleep until the player is armed (`PAIR_LESSON_HEALTH` 21, `blow_scale` 0.5, `windup_scale` 2.4, no guard) and four more come out of the trees at the leaving. Cards and paragraphs are gone: `TIP_*` + `OPENING_TIPS` are one-line hints through `warband_tips.gd` |
 | squad AI (`scripts/warband/squad_drive.gd`) | the one module both areas share: a freed prisoner arms itself from the nearest drop (booked by `WarbandLoot`, worn via `auto_equip`, re-dressed with `refresh_gear`), then runs at the nearest watcher and fights on layer 2 through one explicit ladder - close / swing / guard / circle / reset - resolved on every frame, with the exchange rolled once when the blade frees (55-70% guard for 0.35-0.80 s, guard dropping into the blow), 1-3 swings then a 0.25-0.55 s short rugged circle re-rolled per step, and only `sword`/`dagger` allowed to guard. Escort clause when nothing is hostile; the field is stripped once `_clear_of_hostiles` at the drop or corpse (22 m), drops through `quick_loot` and bodies through `register_corpse`/`corpse_at`/`claim_corpse`. The player's own body is never driven. |
-| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the wood's **three creatures** (`extends ForestMob` → `DevilMob`), one species per body: the Hollow warden, the Ossuary stalker and the Gallowsroot. Each is the wood's silhouette to look at and a **human to fight** - `scripts/warband/watcher_visual.gd` puts the creature's own skin on the warband's `Archer` rig, so the body walks, runs, cuts, guards, flinches and falls on the ranger's authored clips. `WATCHER_PROFILES` is the three species' gameplay (the forest's own health, damage, reach, speeds and cadence), `PAIR_HEALTH` 31 / `HARDENED_HEALTH` 101 (the scene owns the pool), `WATCHER_LAYER` 2, pack `camp_watchers`, sight 60. A deterministic 12-entry `VARIANTS` table (seeded by `mob_id` + the node's ordinal, and walked **inside the species**) varies a paint multiplied into the creature's own PBR surfaces, a uniform silhouette scale 0.88-1.30, a main hand from `MAKESHIFT_TIER`, a favourite swing, a guard share and a crouch; its rows are interleaved so consecutive ordinals come back as a mixed squad. `arm(item_id)` arms the rig's own weapon slot, so the piece in the hand is the catalog model the warband holds (`sword.gd`'s club and branch, `dagger.gd`'s shiv, `bow.gd`'s twig bow) gripped by the hand bones and carried by every clip; `take_weapon_item()` strips it and `gear_items()` lists the blade plus the worn salvage. Per windup it picks one of the three authored cuts (overhead / diagonal slash / dagger lunge); one guard roll per exchange (`guard_chance()` = variant share × `guard_scale`, capped 0.9) holds the authored block loop instead of trading, then drops into the swing; any blow at or above `max(STAGGER_FLOOR 6, STAGGER_SHARE 10 % of health)` plays the rig's recoil and cancels swing and guard; a crouch-armed body rests in the rig's crouch, folded `CROUCH_AMOUNT` 0.62 deep. The three scene dials (`blow_scale`, `guard_scale`, `swing_gap_scale`) weight the blow, the guard share and the cooldown; the strike emits `attacked(self, profile damage × blow_scale, victim)` and a death emits `defeated` exactly once |
+| `scripts/warband/cage_watcher.gd` (`CageWatcher`) | the wood's **three creatures** (`extends ForestMob` → `DevilMob`), one species per body: the Hollow warden, the Ossuary stalker and the Gallowsroot. Each is the wood's silhouette to look at and a **human to fight** - `scripts/warband/watcher_visual.gd` puts the creature's own skin on the warband's `Archer` rig, so the body walks, runs, cuts, guards, flinches and falls on the ranger's authored clips. `WATCHER_PROFILES` is the three species' gameplay (the forest's own health, damage, reach, speeds and cadence), `PAIR_HEALTH` 31 / `HARDENED_HEALTH` 71 (the scene owns the pool), `WATCHER_LAYER` 2, pack `camp_watchers`, sight 60. A deterministic 12-entry `VARIANTS` table (seeded by `mob_id` + the node's ordinal, and walked **inside the species**) varies a paint multiplied into the creature's own PBR surfaces, a uniform silhouette scale 0.88-1.30, a main hand from `MAKESHIFT_TIER`, a favourite swing, a guard share and a crouch; its rows are interleaved so consecutive ordinals come back as a mixed squad. `arm(item_id)` arms the rig's own weapon slot, so the piece in the hand is the catalog model the warband holds (`sword.gd`'s club and branch, `dagger.gd`'s shiv, `bow.gd`'s twig bow) gripped by the hand bones and carried by every clip; `take_weapon_item()` strips it and `gear_items()` lists the blade plus the worn salvage. Per windup it picks one of the three authored cuts (overhead / diagonal slash / dagger lunge); one guard roll per exchange (`guard_chance()` = variant share × `guard_scale`, capped 0.9) holds the authored block loop instead of trading, then drops into the swing; any blow at or above `max(STAGGER_FLOOR 6, STAGGER_SHARE 10 % of health)` plays the rig's recoil and cancels swing and guard; a crouch-armed body rests in the rig's crouch, folded `CROUCH_AMOUNT` 0.62 deep. The three scene dials (`blow_scale`, `guard_scale`, `swing_gap_scale`) weight the blow, the guard share and the cooldown; the strike emits `attacked(self, profile damage × blow_scale, victim)` and a death emits `defeated` exactly once |
 | `scripts/warband/watcher_visual.gd` (`WatcherVisual`) | one `Node3D` per watcher between the mob and its body, answering the creature sampler's whole API so no scene changed with the cutover (`set_motion`, `set_combat`, `set_poise`, `die`, `held_item`/`set_held_weapon`, `attack_names`/`attack_clip`/`block_clip`/`stagger_clip`/`crouch_clip`, `has_clip`, `set_tint`/`tint`, `head_hitbox_center`/`head_hit_profile`, `blood_anchor`, `strike_hand_position`, `set_distance`, `set_parked`). It builds the `Archer` rig with `body_skin` = the species' skin and `heading_locked` (a watcher holds its quarry, not its walk direction), dresses every skin surface with a per-body copy of the creature's material and the variant's tint, and drives the fight: a windup calls `begin_melee` with the variant's cut then `retime_melee` to `(windup + strike × 0.34) / BLADE_IMPACT_SHARE` so the strike window opens on the frame `DevilMob` resolves damage; a stagger cuts the swing with the rig's flinch; a bow windup draws and `release_bow()` looses the visual string; death hands the skeleton to `CorpsePhysics.start_limp`. `set_distance` stops the rig past `MobLod.ANIMATE_DISTANCE` (shadows past `SHADOW_DISTANCE`) and `set_parked` stops it entirely while `MobCuller` has the body asleep |
 | `scripts/warband/warband_tips.gd` (`WarbandTips`) | the one hint channel: `tip(id, keys, text, seconds)` paints `LedgerKeycap` tiles beside one command, fades on its own clock, and never opens twice. `current_keys()`/`current_text()`/`has_shown()` are what the regressions read. The modal `TutorialCard` and every paragraph it carried are **deleted** |
 | `scripts/ui/keybind_page.gd` (`KeybindPage`) | the CONTROLS sheet: the whole keyboard drawn from `LedgerKeycap` tiles (ESC + F1-F12, digits, QWERTY, the bottom row) plus the mouse cluster, every bound key washed blood and every dead one left as bone, and one blood arrowhead per action ending on the action's label (`leaders()`/`action_rect()`). Board units are scaled to the page, so a narrow window shrinks the board instead of stacking labels on keys. Hosted one page deep by `pause_menu.gd`, `warband_menu.gd` and `ui/settings_menu.gd`; `keybind_screen_regression` owns it |
@@ -221,7 +221,7 @@ that fix every exponential-fog style (the arena) rendered as a white-out.
 | `scripts/warband/enemy_waves.gd` (`EnemyWaves`) | deterministic waves (3, +1 per wave, capped at 6) with escalating kits, `wave_started/wave_cleared`, `guards()`, `field()`, `living()` |
 | `scripts/warband/soldier_loot_run.gd` (`SoldierLootRun`) | survivors physically jog to the drops **and to the bodies**, then the vacuum books each piece into the shared stash exactly once |
 | `scripts/warband/warband_session.gd` (`WarbandSession`) | real ENet host/join, body ownership broadcast, 20 Hz body snapshots, guest prediction, AI fallback on leave |
-| `scripts/warband/quartermaster_menu.gd` (`QuartermasterMenu`) + `Warband.buy_gear` | ten base pieces bought with gold into the collective stash; the same keeper price the stash sort uses |
+| `scripts/warband/quartermaster_menu.gd` (`QuartermasterMenu`) + `Warband.buy_gear` | base pieces and arrows (priced and sold by the bunch) bought with gold into the collective stash; the same keeper price the stash sort uses |
 | `scripts/warband/game_flow.gd` (autoload `GameFlow`) | the only thing that changes scene; `enter_warband()`, `start_campaign()`, `enter_town()`, `launch_expedition()`, `bind(scene)` |
 | `admin_arena.tscn` | doubles as the Play Arena: an empty deployment line builds the two sandbox brawls, a deployed line builds a real expedition against the cult (three waves, guard loot, soldier loot run, `Enter` back to town) |
 
@@ -286,8 +286,9 @@ what exposed the engine fog trap above.
   copy off whoever holds it**: handing the rescuer's only shiv to a prisoner is a
   transfer, and a piece can also move between slots on the same body. A refused
   equip never pockets somebody else's gear.
-- The paperdoll therefore never disables a worn row: clicking it hands the piece
-  over. Clicking a worn slot takes it off.
+- The paperdoll's stash list shows unequipped copies only: a worn piece is on its
+  wearer's slots. Handing one over is two clicks - its worn slot puts it back in
+  the pool, then its stash row dresses the selected body.
 - `Warband.auto_equip(id, item_id)` (used by `WarbandLoot` on a hand pickup) puts
   a looted piece straight into the soul's hands when that slot is empty or the
   new piece is worth more than what is worn there; anything else stays in the
@@ -334,6 +335,15 @@ carries the bookmark (`Warband.checkpoint`, in the save since version 4):
 | `trail_start` | the camp's six watchers are dead and the leaving has happened (the tutorial is over, the run starts) | 60 m past the camp mouth, on the road, cages already open |
 | `town` | the soul's body first enters Hearthstead's square | the town's own spawn posts, square services live |
 
+The bookmark only ever moves forward through `WorldScene.CHECKPOINT_ORDER`
+(`trail_start`, then `town`): a session that played the opening still reads its
+camp as cleared, and comparing against the current id alone rewrote `trail_start`
+the frame after the square wrote `town` - the status line flipped between the two
+labels and the save hit the disk every frame. The trail's `REACH THE TOWN · n m`
+prompt counts down to the square's ring (`TownHub.metres_to_square`) and is gone
+inside it; counted to the gate arch it reached zero outside the wall and climbed
+again across the square.
+
 `Warband.save_checkpoint(id, area, position, label)` writes the roster, the shared
 stash, the Cruor ledger and the bookmark in one `user://warband_state.json` write,
 so a load can never point at a state the file has not held. `sanitise_checkpoint()`
@@ -347,6 +357,31 @@ payment). With no bookmark - the opening - the wipe still has no way back. The
 title's **RESUME WARBAND** door opens the world on the bookmark; **GHOST OF THE
 WARBAND** is still always a new campaign. `tests/checkpoint_regression.gd` owns
 the whole contract, including the two real world resumes.
+
+### The field and the reserve
+
+The roster can hold more names than the field: `deployment_cap` (8) is the most
+bodies standing at once, and a record whose `reserve` flag is set is sworn,
+dressed and saved but has **no body**. The rules:
+
+- A name sworn while the field has a place takes it. `Warband.add_mercenary` and
+  `Warband.hire` set the flag from `field_room()` at the moment of the oath, and
+  `WorldScene._sync_field()` spawns a body for every fielded name that has none on
+  the next physics frame: a hire musters at the town's fire ring, a soldier cut
+  out of a cage stands up where he walked out (`note_soldier_freed(name, at)`),
+  and the body is wired and in the squad at once (`_adopt_body`).
+- Past a full field a new name waits in the reserve; his cage figure fades with
+  nobody in its place, the HUD says he waits in the town, the squad rows leave him
+  out and the roster screen shows **RESERVE** with CONTROL disabled.
+- The reserve is only called up in the town: while the party's focus body stands
+  in the square and the field has room, `Warband.deploy_reserve()` gives the
+  longest-waiting name the place (`_call_up_reserve`).
+- A load balances the books (`Warband._balance_field`): a file fielding more
+  names than the cap steps the newest back into the reserve, and an empty field
+  takes the reserve's oldest, so every load stands the warband up inside the cap.
+  A lent co-op copy is never rebalanced - it is the host's books - and a guest
+  spawns a replica for every fielded name it has no body for, which the host's
+  snapshots then place.
 
 ### The newer surface (skills, menu, keepers, wolves, co-op)
 
@@ -782,7 +817,7 @@ and the rules they cannot break live in `docs/warband-handoff.md` §§1-4.
 | The watch | `scripts/warband/town_guard.gd` | three static archers on the gate: nearest hostile within 26 m from the world's `guards` (or `wild_mobs`), line of sight on layer 1, 0.9 s draw, a real `arrow.gd` on the mob layer, 1.6 s cooldown. They never move or speak |
 | The ledger | `scripts/warband/quest_log.gd` | `WarbandQuests` on `Warband.quests`: `KILL` / `RESCUE` / `COLLECT` / `APPLY` / `REACH`, four rows in `DEFS`, one state and one count each, saved as `quests`. `note_kill` / `note_rescue` / `note_collected` / `note_applied` / `note_reached`; `offer` → `accept` → `turn_in` with the chain in each row's `next` |
 | The keeper who talks | `scripts/warband/quest_giver.gd`, `quest_marker.gd` | `talk(service, peer)` raises the card that teaches or hands over an order and answers false when the counter should open instead; `marker_service()` decides who wears the gold `TALK TO HIM` arrow (the recruiter while the band is short of the cap, the quartermaster when he has an order, a turn-in or a vial to explain) |
-| The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed` per cage (roster + stash dressing + ledger + HUD). A `FREE HIM` arrow rides the nearest shut cage while the order is live |
+| The cage line | `scripts/warband/soldier_cages.gd` | four caged soldiers off the road, latches cut by hand with a blade (`G`, 2.2 m from the footprint), a door that lifts, a soldier who walks out and one `note_soldier_freed(name, at)` per cage (roster + stash dressing + ledger + HUD); with a place on the field his body stands up at the cage as the figure fades, past a full field he waits in the reserve. A `FREE HIM` arrow rides the nearest shut cage while the order is live |
 | The warcamps | `scripts/warband/watcher_warren.gd` | 21 hollow wardens in three camps 78 / 96 / 86 m off the lane, dressed from the village kit, one `MobWander` territory each, wired to the world's kill handler so they count toward the bounty |
 | The click | `scripts/warband/loot_hand.gd`, `loot_summary.gd` | a left click on lootable ground **in the body's own reach** ducks the body for 0.9 s and empties a corpse record or a drop pile through the vacuum's one booking path, then says one line. The reach is measured from the body, not only from the crosshair: a click on a corpse across the field falls through to the swing instead of stealing it. **A living body on the reticle is never a loot** - `aim_sample()` hands the ray's target to `try_click`, which refuses a body that answers `alive` true, because a mob's aim point is its own chest and a blade at its feet is inside the same arm's reach; a corpse answers `alive` false and stays lootable |
 | The map | `scripts/warband/world_map.gd` | one page, `M`, no pause: the lane sampled from the trail's path, the camp ring, the walled square, hostiles, the warband and the soul's own facing, plus `host.map_markers()` (shut cages, warcamps) |

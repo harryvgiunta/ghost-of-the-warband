@@ -502,7 +502,11 @@ func _refresh_skills() -> void:
 func _refresh_squad() -> void:
 	if _squad_box == null or _warband == null:
 		return
-	var ids: Array[int] = _warband.roster.ids()
+	# The squad is the field: a name waiting in the reserve has no body to show.
+	var ids: Array[int] = []
+	for merc_id in _warband.roster.ids():
+		if not _warband.roster.is_reserve(merc_id):
+			ids.append(merc_id)
 	var signature := "%d|%d" % [ids.size(), _merc_id]
 	for merc_id in ids:
 		var record: Dictionary = _warband.roster.find(merc_id)

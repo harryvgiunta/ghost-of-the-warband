@@ -5,7 +5,7 @@ extends RefCounted
 ##
 ## A mercenary is a plain dictionary so it survives save/load and the wire
 ## without a serializer: `id`, `name`, `health`, `max_health`, `state`,
-## `equipped`, `downed_seconds`. Every record is created
+## `equipped`, `downed_seconds`, `reserve`. Every record is created
 ## at `WarbandContracts.BASE_MAX_HEALTH` with empty hands: the ONLY thing that
 ## differentiates two mercenaries is the gear in `equipped`.
 ##
@@ -39,6 +39,11 @@ const KEY_ACTIVE_SET := "active_set"
 ## `{main, off}` pair, one of them in the hands.
 const WEAPON_SET_COUNT := 2
 const HAND_SLOTS := ["main", "off"]
+## True while a mercenary waits in the reserve: sworn, dressed and on the books,
+## but with no body on the field. The field holds at most `Warband.deployment_cap`
+## bodies; a name sworn past a full field waits here until the band is back in
+## the town with a place to give.
+const KEY_RESERVE := "reserve"
 
 var _mercs: Array[Dictionary] = []
 var _next_id := 1
@@ -64,6 +69,7 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_WEAPON_SETS: [empty_pair(), empty_pair()],
 		KEY_ACTIVE_SET: 0,
 		KEY_DOWNED_SECONDS: 0.0,
+		KEY_RESERVE: false,
 	}
 
 # --- reading ---------------------------------------------------------------
@@ -149,6 +155,37 @@ func dead_ids() -> Array[int]:
 func alive_count() -> int:
 	return alive_ids().size()
 
+func is_reserve(merc_id: int) -> bool:
+	return bool(find(merc_id).get(KEY_RESERVE, false))
+
+## Every living or downed mercenary with a place on the field, in roster order.
+func field_ids() -> Array[int]:
+	var out: Array[int] = []
+	for merc in _mercs:
+		if _on_field(merc):
+			out.append(int(merc[KEY_ID]))
+	return out
+
+func field_count() -> int:
+	var count := 0
+	for merc in _mercs:
+		if _on_field(merc):
+			count += 1
+	return count
+
+## The names waiting in the reserve, oldest first.
+func reserve_ids() -> Array[int]:
+	var out: Array[int] = []
+	for merc in _mercs:
+		if bool(merc.get(KEY_RESERVE, false)) \
+				and int(merc.get(KEY_STATE, Contracts.HealthState.DEAD)) != Contracts.HealthState.DEAD:
+			out.append(int(merc[KEY_ID]))
+	return out
+
+static func _on_field(merc: Dictionary) -> bool:
+	return not bool(merc.get(KEY_RESERVE, false)) \
+		and int(merc.get(KEY_STATE, Contracts.HealthState.DEAD)) != Contracts.HealthState.DEAD
+
 # --- mutation --------------------------------------------------------------
 
 func clear() -> void:
@@ -185,6 +222,7 @@ func add_record(record: Dictionary) -> int:
 	copy[KEY_HEALTH] = clampf(float(copy.get(KEY_HEALTH, copy[KEY_MAX_HEALTH])), 0.0, copy[KEY_MAX_HEALTH])
 	copy[KEY_STATE] = int(copy.get(KEY_STATE, Contracts.HealthState.ALIVE))
 	copy[KEY_DOWNED_SECONDS] = float(copy.get(KEY_DOWNED_SECONDS, 0.0))
+	copy[KEY_RESERVE] = bool(copy.get(KEY_RESERVE, false))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
 	if saved_gear is Dictionary:
@@ -230,6 +268,12 @@ func rename(merc_id: int, merc_name: String) -> bool:
 		return false
 	record[KEY_NAME] = merc_name.strip_edges()
 	return true
+
+## Send a mercenary to the reserve (`true`) or give it a place on the field.
+func set_reserve(merc_id: int, waiting: bool) -> void:
+	var record := find(merc_id)
+	if not record.is_empty():
+		record[KEY_RESERVE] = waiting
 
 func set_health(merc_id: int, hp: float) -> void:
 	var record := find(merc_id)

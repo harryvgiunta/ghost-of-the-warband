@@ -159,7 +159,8 @@ func spawn_mercenaries(spawn_points: Array[Vector3], authoritative: bool = true,
 
 ## The mercenaries to field. `wanted` is a list the caller already chose (the
 ## camp's squad, or a co-op guest fielding exactly the host's bodies, a downed
-## one included); without it the living roster takes the field.
+## one included); without it the living field takes it - every living name not
+## waiting in the reserve, which has no body until the town gives it a place.
 func _spawn_ids(wanted: Array = []) -> Array[int]:
 	var out: Array[int] = []
 	if not wanted.is_empty():
@@ -170,7 +171,8 @@ func _spawn_ids(wanted: Array = []) -> Array[int]:
 				out.append(merc_id)
 		return out
 	for merc_id in _warband.alive_merc_ids():
-		if _warband.roster.is_alive(merc_id) and not _merc_bodies.has(merc_id):
+		if _warband.roster.is_alive(merc_id) and not _warband.roster.is_reserve(merc_id) \
+				and not _merc_bodies.has(merc_id):
 			out.append(merc_id)
 	return out
 

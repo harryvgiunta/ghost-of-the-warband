@@ -285,12 +285,17 @@ func _host_run() -> void:
 				% [int(data.get("failures", 1)), str(data.get("failed", []))])
 
 	# --- a body that comes free goes to the soul that waited ---------------
+	# A name sworn with a place on the field stands up on its own: a body in the
+	# host's world, a replica of it in the guest's.
 	var late_id: int = warband.add_mercenary(LATE_NAME)
 	warband.roster.equip(late_id, "main", "sword_short")
-	var late_posts: Array[Vector3] = [TRAIL_POINT + Vector3(2.0, 0.0, 0.0)]
-	var late_wanted: Array[int] = [late_id]
-	var late_bodies: Array = flow.session.controller.spawn_mercenaries(late_posts, true, late_wanted)
-	check(late_bodies.size() == 1, "The host fields the third body (%d)" % late_bodies.size())
+	check(not warband.roster.is_reserve(late_id), "The third name has a place on the field")
+	var fielded := await _wait_until(
+		func(): return flow.session.controller.body_of(late_id) != null, 5.0)
+	check(fielded, "The host's world fields the third body")
+	var host_field: Array = world.get("bodies") if world.get("bodies") is Array else []
+	check(fielded and host_field.has(flow.session.controller.body_of(late_id)),
+		"and wires it with the rest of the band")
 	check(warband.roster.has(late_id), "The warband takes a third body (%d)" % late_id)
 	var reseated := await _wait_until(
 		func(): return int(flow.session.ownership().get(guest_peer, 0)) == late_id, 20.0)
@@ -298,6 +303,15 @@ func _host_run() -> void:
 		% str(flow.session.ownership().get(guest_peer, 0)))
 	check(int(flow.session.ownership().get(1, 0)) == host_merc,
 		"The host was never moved out of its body")
+	report.probe.rpc_id(guest_peer, "late")
+	var late_seen := await _wait_until(func(): return reports.has("late"), 15.0)
+	check(late_seen, "The guest reports the body it was given")
+	if late_seen:
+		var late: Dictionary = reports["late"]
+		check(int(late.get("own_merc", -1)) == late_id,
+			"The guest's soul sits in the third body (%s)" % str(late.get("own_merc")))
+		check(bool(late.get("own_body", false)),
+			"and the guest's world stands that body up to drive")
 
 	# --- the guest leaves, its own campaign comes back ---------------------
 	report.finish.rpc_id(guest_peer)
@@ -462,6 +476,11 @@ func _on_probe(tag: String) -> void:
 		for _beat in 4:
 			await physics_frame
 		await process_frame
+	elif tag == "late":
+		# The host's map, its warband copy and the body it asks this world for land
+		# on their own clocks: the report waits for the soul to settle in it.
+		await _wait_until(func(): return _own_merc() > 0 and flow.session != null \
+			and flow.session.controller.body_of(_own_merc()) != null, 5.0)
 	_submit(_probe_payload(tag))
 
 func _probe_payload(tag: String) -> Dictionary:
@@ -483,6 +502,7 @@ func _probe_payload(tag: String) -> Dictionary:
 		"lent": bool(warband.lent) if warband != null else false,
 		"roster": warband.roster.count() if warband != null else -1,
 		"own_merc": _own_merc(),
+		"own_body": _own_merc() > 0 and controller != null and controller.body_of(_own_merc()) != null,
 		"watching": watching,
 		"watching_holder": holder,
 		"mission_watch": lines.size() >= 2 and String(lines[1]).contains("no body is free"),

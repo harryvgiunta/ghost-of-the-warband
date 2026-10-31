@@ -1,8 +1,8 @@
 class_name WarbandPaperdoll
 extends CanvasLayer
 ## The mercenary paperdoll over the collective stash: the ten worn slots on the
-## left, every owned piece on the right in the stash's own value order (pooled
-## copies AND pieces someone is already wearing, tagged with their wearer), and a
+## left, the stash's unequipped pieces on the right in its own value order (a
+## piece somebody wears is shown on that body's slots, never in the list), and a
 ## picker strip along the top so one panel dresses the whole warband.
 ##
 ## Both halves are views of `Warband`: clicking a free copy goes through
@@ -62,8 +62,8 @@ var selected_merc := -1
 var selected_slot := Contracts.SlotType.MAIN_HAND
 ## Slot rows keyed by slot id (`head`..`off`): `{slot, id, button, item_id}`.
 var slot_rows: Dictionary = {}
-## The stash exactly as rendered, in value order: the stash row dictionaries plus
-## `button`, and `tags` rewritten as the "Equipped: <merc> <slot>" display lines.
+## The stash exactly as rendered, in value order: the stash rows that still have
+## a free copy, with `pooled` as that free count, plus `button`.
 var stash_rows: Array[Dictionary] = []
 ## Picker strip buttons keyed by mercenary id.
 var picker_buttons: Dictionary = {}
@@ -86,7 +86,7 @@ var _corpse_rows_box: VBoxContainer
 var _corpse_empty: Label
 var _take_all_button: Button
 var _status: Label
-var _stash_controls: Dictionary = {}   # item_id -> {root, button, tag}
+var _stash_controls: Dictionary = {}   # item_id -> row Button
 var preview = null
 var _stage: NinePatchRect
 var _set_label: Label
@@ -239,7 +239,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it (another body's piece is a hand-off). TAB swaps the weapon set."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it. TAB swaps the weapon set."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _warband != null and _warband.roster.has(merc_id) else -1
@@ -558,37 +558,34 @@ func _on_slot_pressed(slot: int) -> void:
 func _sync_stash(rows: Array[Dictionary]) -> void:
 	var seen: Dictionary = {}
 	stash_rows.clear()
-	for index in rows.size():
-		var data: Dictionary = rows[index]
+	for data in rows:
 		var item_id := str(data["item_id"])
-		seen[item_id] = true
-		# `WarbandStash.rows()` folds a partly-worn item's pooled count into its
-		# worn array, so the free count shown and clicked has to come from the
-		# pool itself - otherwise a piece one mercenary wears could never be
-		# handed to a second one.
+		# The list is the unequipped pool only: a piece with no free copy is on a
+		# body, and that body's worn slot is where it shows and comes off. The
+		# free count is read from the pool itself, never from a worn tally.
 		var free_count := int(_warband.stash.pooled_count(item_id))
-		var control: Dictionary = _stash_controls.get(item_id, {})
-		if control.is_empty():
-			control = _make_stash_row(item_id)
-			_stash_controls[item_id] = control
-		_stash_box.move_child(control["root"], index)
-		_apply_stash_row(control, data, free_count)
+		if free_count <= 0:
+			continue
+		seen[item_id] = true
+		var button: Button = _stash_controls.get(item_id)
+		if button == null:
+			button = _make_stash_row(item_id)
+			_stash_controls[item_id] = button
+		_stash_box.move_child(button, stash_rows.size())
+		_apply_stash_row(button, data, free_count)
 		var view: Dictionary = data.duplicate()
 		view["pooled"] = free_count
-		view["tags"] = _tag_lines(data.get("tags", []))
-		view["button"] = control["button"]
+		view["button"] = button
 		stash_rows.append(view)
 	for item_id in _stash_controls.keys():
 		if seen.has(str(item_id)):
 			continue
-		var stale: Dictionary = _stash_controls[item_id]
-		_stash_box.remove_child(stale["root"])
-		(stale["root"] as Node).queue_free()
+		var stale: Button = _stash_controls[item_id]
+		_stash_box.remove_child(stale)
+		stale.queue_free()
 		_stash_controls.erase(item_id)
 
-func _make_stash_row(item_id: String) -> Dictionary:
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 1)
+func _make_stash_row(item_id: String) -> Button:
 	var button := Button.new()
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.focus_mode = Control.FOCUS_NONE
@@ -596,47 +593,14 @@ func _make_stash_row(item_id: String) -> Dictionary:
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.clip_text = true
 	button.add_theme_font_size_override("font_size", 12)
+	button.tooltip_text = "Click to wear it here."
 	button.pressed.connect(func() -> void: _on_stash_pressed(item_id))
-	root.add_child(button)
-	var tag := _label(root, "", 10, MUTED)
-	tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tag.custom_minimum_size = Vector2(0, 14)
-	_stash_box.add_child(root)
-	return {"root": root, "button": button, "tag": tag}
+	_stash_box.add_child(button)
+	return button
 
-func _apply_stash_row(control: Dictionary, data: Dictionary, free_count: int) -> void:
-	var button: Button = control["button"]
-	var worn_text := "free x%d" % free_count if free_count > 0 else "worn"
-	button.text = "%s  /  %d gold  /  %s" % [
-		str(data.get("name", data.get("item_id", ""))), int(data.get("value", 0)), worn_text]
-	# The stash is one pool: a piece another mercenary is wearing can be taken
-	# and handed over, so the row stays clickable and says where it is.
-	button.disabled = false
-	button.tooltip_text = "Click to wear it here." if free_count > 0 \
-		else "Worn by someone else: click to take it and wear it here."
-	(control["tag"] as Label).text = _tag_summary(data.get("tags", []))
-
-## `WarbandStash.rows()` tags read "<merc> <slot>"; the panel prefixes them so a
-## glance at the right-hand column says why a row cannot be equipped.
-func _tag_summary(tags: Array) -> String:
-	var names: Array[String] = []
-	for tag in tags:
-		var name := str(tag).split(" ")[0]
-		if not name.is_empty() and not names.has(name):
-			names.append(name)
-	if names.is_empty():
-		return ""
-	var shown := ", ".join(PackedStringArray(names.slice(0, 2)))
-	if names.size() > 2:
-		shown += " +%d" % (names.size() - 2)
-	return "WORN BY " + shown.to_upper()
-
-
-func _tag_lines(tags: Array) -> Array[String]:
-	var out: Array[String] = []
-	for tag in tags:
-		out.append("Equipped: %s" % str(tag))
-	return out
+func _apply_stash_row(button: Button, data: Dictionary, free_count: int) -> void:
+	button.text = "%s  /  %d gold  /  x%d" % [
+		str(data.get("name", data.get("item_id", ""))), int(data.get("value", 0)), free_count]
 
 func _on_stash_pressed(item_id: String) -> void:
 	# The stash rows are hidden on the corpse screen; a press can only be a

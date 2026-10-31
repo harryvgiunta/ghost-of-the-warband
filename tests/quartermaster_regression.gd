@@ -79,6 +79,25 @@ func run() -> void:
 	check(game.quartermaster.status_text().contains("Shortsword"),
 		"the keeper says what was bought")
 
+	# The desk sells the shafts its bows spend, by the bunch: the row prices the
+	# whole bunch and one purchase lands that many in the shared quiver.
+	var bundle: int = State.item_bundle("arrow")
+	var arrow_row: Dictionary = {}
+	for row in game.quartermaster.stock_rows():
+		if str(row["item_id"]) == "arrow":
+			arrow_row = row
+	check(not arrow_row.is_empty(), "the quartermaster stocks arrows")
+	check(int(arrow_row.get("price", 0)) == int(State.ITEMS["arrow"]["price"]) * bundle,
+		"the arrow row prices the whole bunch (%d)" % int(arrow_row.get("price", 0)))
+	var quiver_before: int = warband.arrows()
+	var purse_before := int(state.credits)
+	var shafts: Dictionary = game.quartermaster.buy("arrow")
+	check(bool(shafts.get("ok", false)), "a bunch of arrows is bought at the desk")
+	check(warband.arrows() == quiver_before + bundle,
+		"the bunch lands in the shared quiver (%d -> %d)" % [quiver_before, warband.arrows()])
+	check(int(state.credits) == purse_before - int(arrow_row.get("price", 0)),
+		"and costs exactly the row's price (%d)" % state.credits)
+
 	# The whole warband can be armed from the shop, not only the ranger.
 	var merc_ids: Array[int] = warband.roster.alive_ids()
 	var arm: Dictionary = warband.equip_merc(int(merc_ids[0]), "main", "sword_short")

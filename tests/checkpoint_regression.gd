@@ -16,6 +16,7 @@ extends SceneTree
 ## dead, and a checkpoint with no living body refuses to be loaded at all.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const WorldScene := "res://scenes/warband_world.tscn"
 const TEST_SAVE := "user://checkpoint_player.json"
 const WARBAND_SAVE := "user://checkpoint_warband.json"
@@ -63,6 +64,7 @@ func run() -> void:
 	check_wipe_door()
 	await check_retry_reload()
 	await check_title_door()
+	await check_opening_into_town()
 	_finish()
 
 func _finish() -> void:
@@ -372,3 +374,68 @@ func check_title_door() -> void:
 	warband.save_path = WARBAND_SAVE
 	title.queue_free()
 	await process_frame
+
+
+# --- the opening walked into the town --------------------------------------
+
+## A session that played the opening keeps its camp cleared for good. That used to
+## be enough to write `trail_start` again on the frame after the square wrote
+## `town`, and `town` again on the frame after that: the status line flipped between
+## the two bookmarks and the save hit the disk every frame. The bookmark only moves
+## forward - and the trail's objective is a countdown to the square, gone inside it.
+func check_opening_into_town() -> void:
+	warband.reset_state()
+	warband.clear_checkpoint()
+	flow.world_start = "camp"
+	await _build_world()
+	if game == null or not game.has_method("stats") or game.camp.sequencer == null:
+		check(false, "the world opened on the cages with the lesson running")
+		return
+	# The opening's end, as the sequencer books it: the leaving happened and the
+	# six watchers it called out are down.
+	var sequencer = game.camp.sequencer
+	sequencer._state = SequencerScript.State.ESCAPING
+	sequencer._guards_down = SequencerScript.GUARD_COUNT
+	check(game.camp.tutorial_cleared(), "the opening reads as cleared")
+	game._check_checkpoints()
+	check(warband.checkpoint_id() == "trail_start",
+		"the cleared opening writes the trail bookmark (%s)" % warband.checkpoint_id())
+	var soul = game.controller.focus_body()
+	check(soul != null, "the party has a body to walk")
+	if soul == null:
+		return
+	# Several frames standing in the square, the camp still cleared behind it.
+	for frame in 4:
+		soul.global_position = game.town.global_position + Vector3(0.0, 1.0, 0.0)
+		game._check_checkpoints()
+		check(warband.checkpoint_id() == "town",
+			"frame %d in the square keeps the town bookmark (%s)" % [frame, warband.checkpoint_id()])
+	check(game.hud.status_line().contains("HEARTHSTEAD"),
+		"the status line stays on the town (%s)" % game.hud.status_line())
+	check(game._trail_objective_line(soul).is_empty(),
+		"a body in the square is never told to reach the town (%s)" % game._trail_objective_line(soul))
+	# Walking back out does not pull the bookmark back to the trail either.
+	soul.global_position = game.trail.town_gate() + Vector3(0.0, 1.0, 0.0)
+	game._check_checkpoints()
+	check(warband.checkpoint_id() == "town",
+		"walking back out keeps the town bookmark (%s)" % warband.checkpoint_id())
+	# The walk in, from outside the gate to the fire: the objective's figure only
+	# ever falls, and the line is gone once the square is reached.
+	var centre: Vector3 = game.town.global_position
+	var gate: Vector3 = game.trail.town_gate()
+	var outside: Vector3 = gate + (gate - centre).normalized() * 24.0
+	var previous := INF
+	var falling := true
+	var gone := false
+	for step in 13:
+		var at: Vector3 = outside.lerp(centre, float(step) / 12.0)
+		soul.global_position = Vector3(at.x, soul.global_position.y, at.z)
+		var line: String = game._trail_objective_line(soul)
+		if line.is_empty():
+			gone = game.town.in_square(soul)
+			continue
+		var metres := float(line.get_slice("\u00b7", 1).to_int())
+		falling = falling and metres <= previous and not gone
+		previous = metres
+	check(falling, "the walk to the town counts its metres down, never back up")
+	check(gone, "and the line is gone in the square")

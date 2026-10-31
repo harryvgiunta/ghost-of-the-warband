@@ -15,7 +15,9 @@ extends Node3D
 ## it is drawn on. What is new is what is inside it and what happens when the
 ## latch goes: the soldier walks out through the lifted door, the warband takes
 ## his name (`host.note_soldier_freed`, the one call that adds a roster record),
-## and the figure fades because the roll now owns a body of its own.
+## and the figure fades - over his own warband body standing up in the same spot
+## while the field has a place, or over nothing when it is full and he waits in
+## the town's reserve.
 ##
 ## The two rules the world measures this against are the lane's clearance - the
 ## wood is walked on a 1.55 m half-band and a post on the centre line stops a body
@@ -280,7 +282,10 @@ func _walk_out(index: int) -> void:
 	tween.tween_callback(_finish.bind(index))
 
 
-## He is out: the one call that puts him on the roll, then the figure goes.
+## He is out: the one call that puts him on the roll, then the figure goes. With
+## a place on the field his warband body stands up where the figure stood - the
+## figure fades over it - and past a full field he waits in the reserve and the
+## figure fades with nobody in its place.
 ## A guest calls nothing - the host owns the roster and the ledger, and a guest
 ## writing a rescue of its own would count the same soldier twice.
 func _finish(index: int) -> void:
@@ -289,7 +294,11 @@ func _finish(index: int) -> void:
 		return
 	cage["freed"] = true
 	if not _is_guest() and host != null and host.has_method("note_soldier_freed"):
-		host.note_soldier_freed(str(cage["name"]))
+		var soldier = cage["soldier"]
+		var node: Node3D = cage["node"]
+		var at: Vector3 = (soldier as Node3D).global_position \
+			if soldier != null and is_instance_valid(soldier) else node.global_position
+		host.note_soldier_freed(str(cage["name"]), at)
 	_fade(index)
 
 

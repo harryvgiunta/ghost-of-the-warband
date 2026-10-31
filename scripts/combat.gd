@@ -99,6 +99,17 @@ const CLEAVE_ANGLE_PADDING := deg_to_rad(12.0)
 const CLEAVE_BOTTOM := -0.25
 const CLEAVE_TOP := 1.85
 const MAX_CLEAVE_CONTACTS := 128
+## The most bodies one attack may strike. A weapon swing stops dealing damage at
+## its cap - one body for every one-handed piece (blades, clubs, daggers, either
+## hand of a dual pair), two for a two-hander (the greatsword, the heavy branch, a
+## staff) - and one item-skill activation (every beat of a whirlwind, one blast)
+## stops at `ABILITY_MAX_VICTIMS`.
+const ONE_HAND_MAX_VICTIMS := 1
+const TWO_HAND_MAX_VICTIMS := 2
+const ABILITY_MAX_VICTIMS := 10
+## A capped cut strikes bodies in the order it crosses them; bodies inside one
+## degree of the sweep are crossed together, and the nearest of them goes first.
+const CLEAVE_ORDER_STEP := deg_to_rad(1.0)
 var _cleave_query := PhysicsShapeQueryParameters3D.new()
 var _cleave_shape := CylinderShape3D.new()
 var _melee_query := PhysicsShapeQueryParameters3D.new()
@@ -125,7 +136,8 @@ func _swing_state(hand: String) -> Dictionary:
 		var excluded: Array[RID] = []
 		_swings[hand] = {"active":false, "weapon":"", "damage":0.0,
 			"victims":{}, "exclude":excluded, "blocked":false,
-			"diagonal":false, "reach":0.0, "half_angle":0.0, "side":1.0, "cut":0.0}
+			"diagonal":false, "reach":0.0, "half_angle":0.0, "side":1.0, "cut":0.0,
+			"max_victims":ONE_HAND_MAX_VICTIMS}
 	return _swings[hand]
 
 ## One swing clock: the rig's. `Combat` keeps a copy of each hand's recovery -
@@ -642,6 +654,7 @@ func _on_melee_started(hand: String) -> void:
 	state.variant = rig.melee_variant(hand)
 	state.side = 1.0 if rig.melee_variant(hand) == "diagonal_right" else -1.0
 	state.cut = 0.0
+	state.max_victims = _swing_victim_cap(hand)
 	state.victims.clear()
 	state.exclude.clear()
 	if is_instance_valid(actor):
@@ -652,11 +665,23 @@ func _on_melee_started(hand: String) -> void:
 	else:
 		_right_swing_seconds = seconds
 
+## How many bodies one swing of `hand` may strike: two for a two-handed piece in
+## the main hand, one for everything else - the off hand of a dual pair is always
+## a one-hander.
+func _swing_victim_cap(hand: String) -> int:
+	if hand == "right" and (rig.swings_two_handed() or rig.swing_weapon_class(hand) == "staff"):
+		return TWO_HAND_MAX_VICTIMS
+	return ONE_HAND_MAX_VICTIMS
+
+## True once a swing has struck as many bodies as its weapon allows.
+func _swing_spent(state: Dictionary) -> bool:
+	return state.victims.size() >= int(state.get("max_victims", ONE_HAND_MAX_VICTIMS))
+
 func _can_damage_melee(hand: String, state: Dictionary) -> bool:
 	return damage_enabled and state.active and not state.blocked \
 		and is_instance_valid(actor) and actor.get("alive") != false \
 		and rig.weapon == state.weapon and rig.has_melee(hand) \
-		and rig._roll_progress < 0.0
+		and rig._roll_progress < 0.0 and not _swing_spent(state)
 
 ## Resolves one blade sample against the present world, then against the world
 ## the client's owner was drawing: a body that stepped out of the cut since the
@@ -732,6 +757,7 @@ func _sweep_cleave(hand: String, state: Dictionary) -> void:
 	_cleave_query.exclude = state.exclude
 	var space := actor.get_world_3d().direct_space_state
 	var hits := space.intersect_shape(_cleave_query,MAX_CLEAVE_CONTACTS)
+	_sort_cleave_hits(hits,forward,right,float(state.side))
 	for hit in hits:
 		if not _can_damage_melee(hand,state):
 			return
@@ -756,6 +782,28 @@ func _sweep_cleave(hand: String, state: Dictionary) -> void:
 			continue
 		state.exclude.append(hit.rid)
 		_resolve_melee_contact(hand,state,unit,contact,false)
+
+## Put a cleave's sector contacts in the order the cut crosses them: from the
+## loaded side along the sweep, a `CLEAVE_ORDER_STEP` at a time, nearest first
+## inside one step. A capped swing is spent on the first bodies of this order,
+## so which bodies a crowd loses depends neither on the frame rate nor on the
+## physics server's own hit order.
+func _sort_cleave_hits(hits: Array[Dictionary], forward: Vector3, right: Vector3,
+		side: float) -> void:
+	if hits.size() < 2:
+		return
+	var origin := actor.global_position
+	var order := func(hit: Dictionary) -> Vector2:
+		var unit = hit.get("collider")
+		if not is_instance_valid(unit) or not unit is Node3D:
+			return Vector2(INF,INF)
+		var offset: Vector3 = (unit as Node3D).global_position-origin
+		offset.y = 0.0
+		# The diagonal travels from `side * half_angle` towards the other flank.
+		var along := -side*atan2(offset.dot(right),offset.dot(forward))
+		return Vector2(snappedf(along,CLEAVE_ORDER_STEP),offset.length())
+	hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return order.call(a) < order.call(b))
 
 func _sweep_capsule(space: PhysicsDirectSpaceState3D, hand: String, state: Dictionary,
 		base_from: Vector3, tip_from: Vector3, base_to: Vector3, tip_to: Vector3,
@@ -857,6 +905,8 @@ func _lag_melee_strike(hand: String, state: Dictionary, base: Vector3, tip: Vect
 		low = maxf(-PI*0.5,minf(angle_from,angle_to)-CLEAVE_ANGLE_PADDING)
 		high = minf(PI*0.5,maxf(angle_from,angle_to)+CLEAVE_ANGLE_PADDING)
 	for candidate in lag_rewind.candidates(tick):
+		if _swing_spent(state):
+			return
 		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
 			continue
 		if candidate.get("alive") != true:
@@ -947,7 +997,8 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 ## ring around it. Reuses the melee contact path so blocks, armor, blood and
 ## damage numbers behave exactly like an authored swing. Returns victims hit.
 ## `victims` is shared across every beat of one activation (a travelling lunge
-## sweeps the same dictionary each tick), so no body is ever struck twice.
+## sweeps the same dictionary each tick), so no body is ever struck twice and the
+## whole activation strikes at most `ABILITY_MAX_VICTIMS` bodies.
 func ability_strike(radius: float, arc_degrees: float, damage: float,
 		stagger_seconds: float = 0.0, ring: bool = false,
 		require_sight: bool = true, victims: Dictionary = {}) -> int:
@@ -960,11 +1011,13 @@ func ability_strike(radius: float, arc_degrees: float, damage: float,
 	return struck
 
 ## A blast centred away from the caster (a fireball burst). Sight is ignored:
-## the explosion owns the space it fills.
+## the explosion owns the space it fills. One blast is one attack: the present
+## and the rewound world share its victims, and its cap.
 func ability_blast(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float = 0.0) -> int:
-	var struck := _ability_area(centre,radius,damage,stagger_seconds,360.0,true,false)
-	struck += _lag_area_strike(centre,radius,damage,stagger_seconds,360.0,true,false)
+	var victims: Dictionary = {}
+	var struck := _ability_area(centre,radius,damage,stagger_seconds,360.0,true,false,victims)
+	struck += _lag_area_strike(centre,radius,damage,stagger_seconds,360.0,true,false,victims)
 	return struck
 
 
@@ -988,6 +1041,8 @@ func _lag_area_strike(centre: Vector3, radius: float, damage: float,
 	var half := deg_to_rad(clampf(arc_degrees,0.0,360.0))*0.5
 	var struck := 0
 	for candidate in lag_rewind.candidates(tick):
+		if victims.size() >= ABILITY_MAX_VICTIMS:
+			break
 		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
 			continue
 		if candidate == actor or candidate.get("alive") != true:
@@ -1056,8 +1111,14 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 	_blast_query.exclude = state.exclude
 	var space := actor.get_world_3d().direct_space_state
 	var hits := space.intersect_shape(_blast_query,MAX_CLEAVE_CONTACTS)
+	# More bodies than the activation may still strike: the nearest go first.
+	if hits.size() > ABILITY_MAX_VICTIMS - victims.size():
+		hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return _distance_from(a, centre) < _distance_from(b, centre))
 	var hit_count := 0
 	for hit in hits:
+		if victims.size() >= ABILITY_MAX_VICTIMS:
+			break
 		var unit = hit.collider
 		if not is_instance_valid(unit) or not unit.has_method("take_damage") \
 				or unit.get("alive") != true or state.victims.has(unit.get_instance_id()):
@@ -1086,6 +1147,14 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 			elif unit.has_method("stagger"):
 				unit.stagger(stagger_seconds)
 	return hit_count
+
+## How far a shape-query contact's body stands from `point`; INF for a contact
+## whose body is gone.
+func _distance_from(hit: Dictionary, point: Vector3) -> float:
+	var unit = hit.get("collider")
+	if not is_instance_valid(unit) or not unit is Node3D:
+		return INF
+	return (unit as Node3D).global_position.distance_to(point)
 
 func _unit_is_dead(unit: Node) -> bool:
 	var flag = unit.get("alive")

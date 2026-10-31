@@ -379,13 +379,22 @@ func check_archer_drop() -> void:
 	for entry in kit:
 		if str(entry) == "arrow":
 			shafts += 1
-	check(shafts == 4, "the archer's corpse carries its own quiver (%d shafts)" % shafts)
+	check(shafts >= 10 and shafts <= 20,
+		"the archer's corpse carries its own quiver of 10-20 shafts (%d)" % shafts)
 	check(kit.has("bow_twig"), "and the bow it was firing (%s)" % str(kit))
 	check(kit.has("bandage_linen"), "beside the dressing every warden wears")
 	var corpse := int(game.loot.register_corpse(archer))
 	check(corpse != 0, "the world registers the body as a container")
 	var on_body: Array = game.loot.corpse_items(corpse)
-	check(on_body.count("arrow") == 4, "and books every shaft on it (%d)" % on_body.count("arrow"))
+	check(on_body.count("arrow") == shafts,
+		"and books every shaft on it (%d)" % on_body.count("arrow"))
+	# The bunch is the body's own, never a roll at the kill: across a trail's worth
+	# of archer names every quiver lands inside 10-20, and both bounds occur.
+	var counts: Array[int] = []
+	for index in 60:
+		counts.append(int(archer.carried_arrows(archer.mob_id, "WardenArcher%d" % index)))
+	check(counts.min() == 10 and counts.max() == 20,
+		"archer quivers span 10-20 shafts, got %d-%d" % [counts.min(), counts.max()])
 	archer.queue_free()
 	print("RANGED_ARCHER_DROP kit=%s" % str(kit))
 

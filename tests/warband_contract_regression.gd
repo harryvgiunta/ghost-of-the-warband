@@ -51,6 +51,7 @@ func run() -> void:
 	check_stash(state, warband)
 	check_cruor(state, warband)
 	check_vendor(state, warband)
+	check_reserve(warband)
 	check_persistence(warband)
 
 	_remove_test_save()
@@ -556,6 +557,47 @@ func check_vendor(state, warband) -> void:
 	check(warband.roster.count() == sworn, "the roster is unchanged")
 	state.credits = 99999
 	warband.deployment_cap = Contracts.MAX_DEPLOYMENT_CAP
+
+# --- the field and the reserve ---------------------------------------------
+
+## The field holds at most the deployment cap; a name sworn past it waits in the
+## reserve, the name that waited longest is the first to take a freed place, and
+## a load always stands the warband up inside the cap.
+func check_reserve(warband) -> void:
+	warband.reset_state()
+	var cap: int = warband.deployment_cap
+	var ids: Array[int] = []
+	for index in cap + 2:
+		ids.append(warband.add_mercenary("Oath %d" % index))
+	check(warband.roster.field_count() == cap,
+		"the field fills to the cap (%d)" % warband.roster.field_count())
+	check(warband.roster.is_reserve(ids[cap]) and warband.roster.is_reserve(ids[cap + 1]),
+		"the two sworn past it wait in the reserve")
+	check(warband.field_room() == 0 and warband.deploy_reserve() == -1,
+		"a full field calls nobody up")
+	warband.roster.apply_damage(ids[0], 10000.0)
+	check(not warband.roster.has(ids[0]), "a fallen body leaves the books")
+	check(warband.field_room() == 1, "and frees one place (%d)" % warband.field_room())
+	check(warband.deploy_reserve() == ids[cap], "the name that waited longest takes it")
+	check(not warband.roster.is_reserve(ids[cap]) and warband.roster.is_reserve(ids[cap + 1]),
+		"and only him")
+	# A file written before the reserve fielded every name: a load steps the
+	# newest back until the field fits.
+	var data: Dictionary = warband.to_dict()
+	for record in data["roster"]["mercenaries"]:
+		record["reserve"] = false
+	warband.from_dict(data)
+	check(warband.roster.field_count() == cap,
+		"a load fields no more than the cap (%d)" % warband.roster.field_count())
+	check(warband.roster.is_reserve(ids[cap + 1]) and not warband.roster.is_reserve(ids[cap]),
+		"and the newest name goes back to wait")
+	# An empty field takes its reserve, so a load always has bodies to stand up.
+	for record in data["roster"]["mercenaries"]:
+		record["reserve"] = true
+	warband.from_dict(data)
+	check(warband.roster.field_count() == cap,
+		"an empty field takes the reserve up to the cap (%d)" % warband.roster.field_count())
+	warband.reset_state()
 
 # --- persistence -----------------------------------------------------------
 
