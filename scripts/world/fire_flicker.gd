@@ -8,6 +8,8 @@ class_name FireFlicker
 ## sines around it, so the fire never settles into a visible cycle. Two fires are
 ## offset from each other by their own position.
 
+const Perf = preload("res://scripts/perf_probe.gd")
+
 ## Fraction of the base energy the lamp wanders by.
 @export var flicker: float = 0.18
 
@@ -22,8 +24,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("fx.fire")
 	_clock += delta
 	var wobble := sin(_clock * 7.3 + _phase) * 0.55 \
 		+ sin(_clock * 11.9 + _phase * 1.7) * 0.28 \
 		+ sin(_clock * 19.7 + _phase * 2.3) * 0.17
 	light_energy = base_energy * (1.0 + flicker * wobble)
+	Perf.end()

@@ -24,6 +24,7 @@ const MobLod = preload("res://scripts/mob_lod.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
 const VoiceEmitterScript = preload("res://scripts/audio/voice_emitter.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Per-mob gameplay profiles. Health, damage, reach, speed and cadence are
 ## deliberately close to the existing Cinder devil pack so the new mobs remain
@@ -244,6 +245,12 @@ func _visual_script():
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("mob.ai")
+	_think(delta)
+	Perf.end()
+
+
+func _think(delta: float) -> void:
 	if dormant or replica:
 		return
 	if not alive:
@@ -260,8 +267,10 @@ func _physics_process(delta: float) -> void:
 	# than its sight range can be seen, so that tick skips the sight rays.
 	var pursuit := false
 	if nearest <= _sight_range():
+		Perf.begin("mob.senses")
 		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
 			_eye_height(), Callable(self, "_is_hostile"))
+		Perf.end()
 	else:
 		_senses.age(delta)
 		pursuit = _senses.aggressive()
@@ -340,8 +349,10 @@ func _physics_process(delta: float) -> void:
 				_enter("CIRCLE")
 		"DEAD":
 			return
+	Perf.begin("mob.move")
 	_separate()
 	_drive(delta)
+	Perf.end()
 	_visual.set_motion(get_real_velocity(), is_on_floor())
 	_visual.set_combat(state, _state_time)
 	_visual.set_poise(_present_blocking(), _present_crouch())
@@ -882,6 +893,12 @@ func _ingest_pose(state: Dictionary, tick: int) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("mob.process")
+	_replay_tick(delta)
+	Perf.end()
+
+
+func _replay_tick(delta: float) -> void:
 	if _voice != null:
 		_voice.tick(delta)
 	if not replica or not alive or not _received_pose:

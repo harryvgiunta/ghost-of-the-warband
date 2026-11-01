@@ -26,6 +26,7 @@ extends CanvasLayer
 ## not have.
 
 const Branded = preload("res://scripts/warband/branded_skills.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## One above `WarbandHud` (6): the sigil tile is a corner widget, never something
 ## the body panel or the squad rows have to fight for space with.
@@ -114,7 +115,9 @@ func cooldown_progress() -> float:
 	return _bar.value / _bar.max_value
 
 func _process(_delta: float) -> void:
+	Perf.begin("hud.brand")
 	refresh()
+	Perf.end()
 
 ## Repaint from the runner. Safe to call before the scene has a runner.
 func refresh() -> void:

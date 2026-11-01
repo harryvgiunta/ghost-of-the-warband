@@ -11,6 +11,7 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const SPIN_SPEED := 11.0
 var weapon := "sword"
@@ -54,6 +55,11 @@ func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: floa
 	SfxScript.thrown(origin)
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("missile")
+	_fly(delta)
+	Perf.end()
+
+func _fly(delta: float) -> void:
 	age += delta
 	if not flying:
 		if age > 10.0:

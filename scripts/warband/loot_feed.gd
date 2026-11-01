@@ -11,6 +11,7 @@ extends CanvasLayer
 
 const State = preload("res://scripts/player_state.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const MAX_LINES := 8
 const LINE_SECONDS := 8.0
@@ -79,6 +80,12 @@ func lines() -> Array[String]:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("hud.feed")
+	_age_lines(delta)
+	Perf.end()
+
+
+func _age_lines(delta: float) -> void:
 	for index in range(_lines.size() - 1, -1, -1):
 		var line: Dictionary = _lines[index]
 		line["age"] = float(line["age"]) + delta

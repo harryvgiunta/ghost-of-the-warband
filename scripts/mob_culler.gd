@@ -15,6 +15,7 @@ extends Node
 ## to answer that one call.
 
 const MobSenses = preload("res://scripts/mob_senses.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Seconds between sweeps. A sprinting ranger covers 2.5 m in this time and the
 ## hysteresis band is 20 m wide, so nothing can pass through the band unseen.
@@ -29,6 +30,12 @@ var _elapsed := 0.0
 
 
 func _process(delta: float) -> void:
+	Perf.begin("mob.cull")
+	_tick_sweep(delta)
+	Perf.end()
+
+
+func _tick_sweep(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed < INTERVAL:
 		return

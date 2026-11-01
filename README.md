@@ -156,6 +156,7 @@ difference - and the warband is the thing that survives a battle.
 | `K` | quick-loot the drop at your feet |
 | `G` (hold) | revive the downed body beside you: five seconds, and a blow breaks the channel |
 | `R` | fire the branded ability on your weapon |
+| `F12` | performance overlay: fps, frame times and the timings of the game's major functions, in any scene (see [Performance overlay](#performance-overlay-f12)) |
 
 **Multiplayer:** host and join from the title screen. Read from the host's gate
 line. The host is authoritative for every body; ownership transfers are
@@ -957,6 +958,54 @@ the exact path is printed at boot. Logs are local and never uploaded. Use
 variables. Multi-instance runs are safe: a live host or client is never reported
 as crashed. Full file and report anatomy, retention and the `Log.event`
 integration API: [docs/logging.md](docs/logging.md).
+
+## Performance overlay (F12)
+
+Press **F12** anywhere - the title, the campaign, over a menu - and the frame is
+drawn over the game in the top-right corner; press it again to close it. It is
+answered before any menu or key the scenes own and never takes the pointer.
+
+- **Headline:** fps and the average frame time over the last 240 frames, red
+  below 57 fps. Under it, the worst frame, the 1% low and whether vsync or an fps
+  cap is pacing the frame.
+- **Engine:** the renderer's CPU and GPU milliseconds with draw calls,
+  primitives and objects; the physics step and how many ran per drawn frame, with
+  active bodies, pairs and islands; nodes, orphans, resources, static and video
+  memory.
+- **World:** in the campaign, the living bodies, the hostiles (and how many the
+  culler has parked), missiles in flight and drops on the ground.
+- **Major functions:** a call tree of the game's frame entry points, heaviest
+  first: milliseconds per drawn frame with and without the child scopes (`self`),
+  calls per frame and share of the frame. It lists as many rows as the window
+  holds and totals the top-level time of the rest.
+
+| Scope | What it times |
+| --- | --- |
+| `world.physics` | the campaign's physics tick: `squad.drive` (`squad.route`, `squad.fight`), `soul.step` (`camera`, `soul.drive`, every `body.step` with its `body.move` / `body.combat` / `body.feet`, `lag.record`), `squad.retarget`, `delve.tick`, `world.books`, `world.prompts`, `world.flow` |
+| `world.process`, `body.process`, `body.predict` | the world's idle frame, every body's voice and presentation, a guest's predicted step |
+| `rig.anim` → `rig.pose` | every humanoid rig's animation step and pose solve: the warband, the watchers, the keepers, the gate's watch |
+| `mob.ai` (`mob.senses`, `mob.move`), `mob.process`, `mob.anim` | the watchers', forest mobs' and Gorehorn's brain, sight, steering, voice and clips |
+| `wolf.ai` (`wolf.senses`), `wolf.process`, `wolf.anim` | the wilderness wolves |
+| `mob.cull`, `wild.tick`, `warren.tick` | the culler's sleep/wake sweep and the band's and warcamps' retargeting |
+| `net.session` (`net.mirror`, `net.snapshot`, `net.world`) | the host's half of a co-op session |
+| `hud`, `hud.brand`, `hud.tips`, `hud.feed`, `hud.marker`, `hud.map` | the HUD and its pieces |
+| `missile`, `blood`, `brand.fx`, `fx.trail`, `fx.fire`, `fx.torch` | everything in flight, blood, sigils, blade trails, fire lights and hand torches |
+| `camp.*`, `trail`, `town.*`, `town.guard`, `cages`, `delve.cave`, `delve.fauna` | the areas' own clocks |
+| `audio`, `log` (`log.sample`, `log.scan`) | the mixer and the session log's two-second sampler |
+
+The last line totals the scoped time against the frame and counts the
+begin/end pairs, which are what the profiler itself costs: about half a
+microsecond a pair while the overlay is open. Closed, a pair is two calls that
+return on their first line, about a sixth of a microsecond - some 0.07 ms of a
+campaign frame's ~420 pairs. A **WARNING** line means a scope lost its `end` that
+window, and the tree under it is not to be trusted.
+
+To time something new, `const Perf = preload("res://scripts/perf_probe.gd")` and
+put `Perf.begin("name")` / `Perf.end()` around it; a function with early returns
+keeps its name and moves its body into a helper, so the pair cannot be skipped.
+A scene adds its own line by joining `PerfOverlay.CONTEXT_GROUP` and answering
+`perf_context()`. `tests/perf_overlay_regression.gd` presses F12 in the real
+world, reads the readout and fails on any lost `end`.
 
 ## Update
 

@@ -37,6 +37,7 @@ const WarbandLooks = preload("res://scripts/warband/warband_looks.gd")
 const Archer = preload("res://scripts/archer.gd")
 const QuestMarker = preload("res://scripts/warband/quest_marker.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Where on the way each cage stands, as a fraction of the lane's own length.
 ## Four stretches, spread far enough apart that a body meets the first one before
@@ -127,6 +128,12 @@ func setup(world: Node3D) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("cages")
+	_poll_marker(delta)
+	Perf.end()
+
+
+func _poll_marker(delta: float) -> void:
 	if _marker == null:
 		return
 	_poll += delta

@@ -25,6 +25,7 @@ const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ArcherScript = preload("res://scripts/warband/watcher_archer.gd")
 const CombatScript = preload("res://scripts/combat.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## What a road cultist wears under its blade: a cult rag the warband can take. The
 ## trail is the first scenario and it pays in salvage - a makeshift chest and
@@ -129,6 +130,12 @@ func cultist_kills() -> int:
 ## its trees - and then all three take that body at once. Two groups, polled five
 ## times a second, cost nothing at all.
 func _process(delta: float) -> void:
+	Perf.begin("trail")
+	_poll_ambush(delta)
+	Perf.end()
+
+
+func _poll_ambush(delta: float) -> void:
 	if not _ambush_hidden or host == null or ambushes.is_empty():
 		return
 	if bool(host.get("_client")):

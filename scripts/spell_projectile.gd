@@ -10,6 +10,7 @@ const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const GRAVITY := Vector3(0.0, -1.6, 0.0)
 
@@ -67,6 +68,12 @@ func launch(origin: Vector3, direction: Vector3, launch_speed: float,
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("missile")
+	_fly(delta)
+	Perf.end()
+
+
+func _fly(delta: float) -> void:
 	age += delta
 	if is_instance_valid(_sparkle):
 		_sparkle.rotate_y(delta * 7.0)

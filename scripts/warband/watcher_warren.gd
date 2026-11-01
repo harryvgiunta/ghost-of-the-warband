@@ -29,6 +29,7 @@ const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Three camps, each a lane fraction and a side. The fractions are the last third
 ## of the walk, so a warband on its way to town passes all three before the gate;
@@ -101,6 +102,12 @@ func setup(world: Node3D) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("warren.tick")
+	_tick_refresh(delta)
+	Perf.end()
+
+
+func _tick_refresh(delta: float) -> void:
 	if _mobs.is_empty():
 		return
 	_elapsed += delta

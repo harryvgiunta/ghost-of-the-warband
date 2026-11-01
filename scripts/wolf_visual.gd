@@ -7,6 +7,7 @@ extends Node3D
 const MobLod = preload("res://scripts/mob_lod.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const WOLF_SCENE := preload("res://assets/characters/ironwood_wolf.glb")
 const IDLE_CLIP := "Wolf_Idle_Loop"
 const TROT_CLIP := "Wolf_Trot_Loop"
@@ -111,6 +112,12 @@ func is_dead() -> bool:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("wolf.anim")
+	_animate(delta)
+	Perf.end()
+
+
+func _animate(delta: float) -> void:
 	if _player == null:
 		return
 	if _dead:

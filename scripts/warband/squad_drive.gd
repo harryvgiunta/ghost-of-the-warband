@@ -36,6 +36,7 @@ extends RefCounted
 ## still.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Read-only sources the scene owns.
 var controller
@@ -1036,6 +1037,12 @@ func _note_wounds() -> void:
 # --- intent ----------------------------------------------------------------
 
 func _fight(actor, watcher, track: Dictionary) -> void:
+	Perf.begin("squad.fight")
+	_fight_watcher(actor, watcher, track)
+	Perf.end()
+
+
+func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	var to: Vector3 = watcher.global_position - actor.global_position
 	to.y = 0.0
 	var distance := to.length()
@@ -1327,6 +1334,13 @@ func _mapped(from: Vector3, to: Vector3) -> bool:
 ## point moves or the route grows old, so a chase round a cage follows the body
 ## it is chasing.
 func _route_aim(actor, point: Vector3, track: Dictionary) -> Vector3:
+	Perf.begin("squad.route")
+	var aim := _steer_route(actor, point, track)
+	Perf.end()
+	return aim
+
+
+func _steer_route(actor, point: Vector3, track: Dictionary) -> Vector3:
 	var here: Vector3 = (actor as Node3D).global_position
 	if not _mapped(here, point) or nav.clear_line(here, point):
 		# Clear ground: the next blocked line plans on its first frame.

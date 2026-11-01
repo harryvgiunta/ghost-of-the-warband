@@ -8,6 +8,7 @@ extends Node3D
 
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const BloodSurface = preload("res://scripts/blood_surface.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const PATCH_SEGMENTS := 12
 const PATCH_RINGS := 2
@@ -55,7 +56,9 @@ func _ready() -> void:
 	set_process(true)
 
 func _process(delta: float) -> void:
+	Perf.begin("blood")
 	advance(delta)
+	Perf.end()
 
 # --- public field API ------------------------------------------------------
 

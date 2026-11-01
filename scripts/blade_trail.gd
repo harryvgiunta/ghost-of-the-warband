@@ -10,6 +10,8 @@ extends Node3D
 ## quick steel swish instead of a sail. It reads the rig and never damages,
 ## edits or reparents anything on it.
 
+const Perf = preload("res://scripts/perf_probe.gd")
+
 const SAMPLE_WINDOW := 0.11
 const MAX_SAMPLES := 24
 const LINGER := 0.18
@@ -51,6 +53,12 @@ func start(rig, seconds: float, color: Color) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("fx.trail")
+	_follow_blade(delta)
+	Perf.end()
+
+
+func _follow_blade(delta: float) -> void:
 	if not is_instance_valid(_rig) or not _rig.has_method("get_blade_base") \
 			or not _rig.has_method("get_blade_tip"):
 		queue_free()

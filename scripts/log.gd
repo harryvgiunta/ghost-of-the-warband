@@ -27,6 +27,7 @@ extends Node
 const Store = preload("res://scripts/log_store.gd")
 const Capture = preload("res://scripts/log_capture.gd")
 const Watchdog = preload("res://scripts/log_watchdog.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const LEVEL_TRACE := 0
 const LEVEL_DEBUG := 1
@@ -147,15 +148,25 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	Perf.begin("log")
+	_heartbeat(_delta)
+	Perf.end()
+
+
+func _heartbeat(_delta: float) -> void:
 	if not enabled or not _started:
 		return
 	_beat_msec = Time.get_ticks_msec()
 	if _beat_msec - _last_sample_msec >= SAMPLE_MS:
 		_last_sample_msec = _beat_msec
+		Perf.begin("log.sample")
 		force_sample()
+		Perf.end()
 	if _beat_msec - _last_scan_msec >= SCAN_MS:
 		_last_scan_msec = _beat_msec
+		Perf.begin("log.scan")
 		scan_for_crashes()
+		Perf.end()
 
 
 func _exit_tree() -> void:

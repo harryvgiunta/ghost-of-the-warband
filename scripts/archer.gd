@@ -23,6 +23,7 @@ const ItemPassives = preload("res://scripts/item_passives.gd")
 const EnergyShield = preload("res://scripts/energy_shield.gd")
 const DodgeRoll = preload("res://scripts/dodge_roll.gd")
 const ArmorFlair = preload("res://scripts/armor_flair.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const CHARACTER = preload("res://assets/characters/ironwood_ranger.glb")
 ## The warband's authored looks (`WarbandLooks`): eight faces and the hair and
 ## beards grown off the same head. They live here because the rig is what swaps
@@ -2447,7 +2448,9 @@ func get_blade_tip(hand: String = "") -> Vector3:
 	return active_sword.to_global(Vector3(0,0,-float(SWORD_DATA[sword_index].length)-0.09))
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("rig.anim")
 	advance_animation(delta)
+	Perf.end()
 
 func advance_animation(delta: float) -> void:
 	if not _built:
@@ -2654,6 +2657,11 @@ func _locomotion_clip_time(clip: String) -> float:
 	return _locomotion_phase*_player.get_animation(clip).length
 
 func _update_pose(delta: float) -> void:
+	Perf.begin("rig.pose")
+	_solve_pose(delta)
+	Perf.end()
+
+func _solve_pose(delta: float) -> void:
 	if not _built:
 		return
 	_step_facing_hold = maxf(0.0,_step_facing_hold-delta)

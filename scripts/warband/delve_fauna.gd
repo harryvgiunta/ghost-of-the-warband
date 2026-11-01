@@ -15,6 +15,7 @@ extends Node3D
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Rock = preload("res://scripts/warband/delve_rock.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## What lives in each area, spread over its rooms: rats and webs by wall length,
 ## bats, roosts and glowworms over its halls by floor.
@@ -515,6 +516,12 @@ static func _thread() -> ArrayMesh:
 # --- the clock ---------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	Perf.begin("delve.fauna")
+	_step_life(delta)
+	Perf.end()
+
+
+func _step_life(delta: float) -> void:
 	if cave == null or not is_instance_valid(cave):
 		return
 	_clock += delta

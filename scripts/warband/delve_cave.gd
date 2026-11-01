@@ -45,6 +45,7 @@ const MobWander = preload("res://scripts/mob_wander.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const FaunaScript = preload("res://scripts/warband/delve_fauna.gd")
 const Loot = preload("res://scripts/warband/delve_loot.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const TITLE := "THE WEEPING HOLLOW"
 const FLOOR_LABEL := "FLOOR I"
@@ -388,6 +389,12 @@ func _own(index: int, lights: Array) -> void:
 # --- the lights --------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	Perf.begin("delve.cave")
+	_tick_air(delta)
+	Perf.end()
+
+
+func _tick_air(delta: float) -> void:
 	_light_clock += delta
 	var jumped := false
 	if _light_clock < LIGHT_POLL:

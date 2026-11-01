@@ -52,6 +52,9 @@ const CrawlScript = preload("res://scripts/warband/crawl_to_safety.gd")
 const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
+## The F12 overlay asks this world for its own line through the overlay's group.
+const PerfOverlayScript = preload("res://scripts/perf_overlay.gd")
 ## The scene half of the item skills: one node for the whole campaign, exactly
 ## as `main.gd` keeps one for the frontier. Without it a warband body could start
 ## a skill's clock and never fire the arrow or the spell the clock was counting.
@@ -281,6 +284,8 @@ var _town_at := Vector3.ZERO
 
 
 func _ready() -> void:
+	# The F12 overlay (`perf_overlay.gd`) reads its world line from this group.
+	add_to_group(PerfOverlayScript.CONTEXT_GROUP)
 	warband = get_node_or_null("/root/Warband")
 	if warband == null:
 		push_error("WarbandWorld needs the Warband autoload")
@@ -328,6 +333,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("world.process")
+	_tick_frame(delta)
+	Perf.end()
+
+
+func _tick_frame(delta: float) -> void:
 	if controller == null:
 		return
 	var panel_open := _panel_open()
@@ -337,7 +348,46 @@ func _process(delta: float) -> void:
 	_tick_revive(delta)
 
 
+## The F12 overlay's line about this world (`perf_overlay.gd`): what the frame
+## is running, which is what its timings are read against.
+func perf_context() -> PackedStringArray:
+	var living := 0
+	var total := 0
+	for body in bodies:
+		if is_instance_valid(body):
+			total += 1
+			if body.get("alive") == true:
+				living += 1
+	# The wilderness wolves and the warren's wardens append themselves to
+	# `guards`, so the one list is every hostile the world runs. A parked body
+	# (`dormant`, the culler's sleep) has no physics tick and no draw call.
+	var hostiles := 0
+	var parked := 0
+	for guard in guards:
+		if is_instance_valid(guard) and guard.get("alive") == true:
+			hostiles += 1
+			if guard.get("dormant") == true:
+				parked += 1
+	var missiles := 0
+	for missile in projectiles:
+		if is_instance_valid(missile):
+			missiles += 1
+	var drops := 0
+	for drop in pickups:
+		if is_instance_valid(drop):
+			drops += 1
+	return PackedStringArray([
+		"world    %d/%d bodies   %d hostiles (%d parked)   %d missiles   %d drops"
+		% [living, total, hostiles, parked, missiles, drops]])
+
+
 func _physics_process(delta: float) -> void:
+	Perf.begin("world.physics")
+	_step_world(delta)
+	Perf.end()
+
+
+func _step_world(delta: float) -> void:
 	if controller == null:
 		return
 	# A soul with no body of its own says whose it is watching.
@@ -348,6 +398,7 @@ func _physics_process(delta: float) -> void:
 	# body is a fight with itself.
 	_sync_crawl_control()
 	if squad != null and not _client:
+		Perf.begin("squad.drive")
 		# How the party picks its fights is the warband's, set from the menu.
 		squad.party_mode = warband.party_mode
 		squad.drive(delta)
@@ -355,13 +406,19 @@ func _physics_process(delta: float) -> void:
 		# once and then stands under the roster until the ally is back.
 		if hud != null:
 			hud.set_aggro(squad.engaged_allies())
+		Perf.end()
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
+	Perf.begin("squad.retarget")
 	SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
+	Perf.end()
 	# The delve's own clock: dens that wake, a party that falls, the eye's sky.
 	if delve_area != null:
+		Perf.begin("delve.tick")
 		delve_area.tick(delta)
+		Perf.end()
+	Perf.begin("world.books")
 	if loot_window != null:
 		loot_window.tick()
 	_sync_roster(delta)
@@ -374,14 +431,19 @@ func _physics_process(delta: float) -> void:
 		if _panel_open():
 			loot_hand.cancel()
 		loot_hand.tick(delta)
+	Perf.end()
+	Perf.begin("world.prompts")
 	_update_prompt()
 	_update_hint()
 	_push_downed_tip()
 	_update_bandage_tip()
 	_update_wrong_way()
+	Perf.end()
+	Perf.begin("world.flow")
 	_sync_town_music()
 	_check_checkpoints()
 	_check_wipe(delta)
+	Perf.end()
 
 
 func _unhandled_input(event: InputEvent) -> void:

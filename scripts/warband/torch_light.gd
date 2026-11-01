@@ -13,6 +13,7 @@ extends Node3D
 
 const CampKit = preload("res://scripts/world/camp_kit.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const ITEM_ID := "torch_hand"
 const LIGHT_ENERGY := 7.5
@@ -46,6 +47,12 @@ func setup(body, id: int, warband_node) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("fx.torch")
+	_follow_and_poll(delta)
+	Perf.end()
+
+
+func _follow_and_poll(delta: float) -> void:
 	# The hand moves every frame; the poll below is only about whether the piece
 	# is still in the slot, so the follow runs on its own, finer clock.
 	if _lit:

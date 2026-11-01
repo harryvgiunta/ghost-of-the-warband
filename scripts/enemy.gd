@@ -23,6 +23,7 @@ const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
 const Arrow = preload("res://scripts/arrow.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const DEVIL_HEALTH := 24.0
 ## How far each kind can see. Distance alone never starts a fight: the mob has
 ## to have the ranger in its forward cone with a clear line of sight, and it
@@ -340,6 +341,12 @@ func head_hit_profile() -> Vector2:
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("wolf.ai")
+	_think(delta)
+	Perf.end()
+
+
+func _think(delta: float) -> void:
 	if dormant or replica:
 		return
 	if not alive:
@@ -356,8 +363,10 @@ func _physics_process(delta: float) -> void:
 	# sight range there is nobody to look for, so that tick skips its rays.
 	var pursuit := false
 	if nearest <= _sight_range():
+		Perf.begin("wolf.senses")
 		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
 			_eye_height(), Callable(self, "_is_hostile"))
+		Perf.end()
 	else:
 		_senses.age(delta)
 		pursuit = _senses.aggressive()
@@ -1053,6 +1062,12 @@ func _ingest_pose(state: Dictionary, tick: int) -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("wolf.process")
+	_replay_tick(delta)
+	Perf.end()
+
+
+func _replay_tick(delta: float) -> void:
 	# Every machine that draws this body runs its voice clock, because the cues a
 	# replica makes off a snapshot are as local as the ones the authority makes.
 	if _voice != null:

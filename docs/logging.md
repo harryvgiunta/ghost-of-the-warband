@@ -16,7 +16,11 @@ messages share one stream, and a crash is reconstructed on the next launch.
 | Stalls | A watchdog thread reports a main-loop gap over 6 s as `hang`, with the last sample, breadcrumbs and memory, and a `hang_resume` when frames move again |
 
 No frame-by-frame trace is written. The sampler is the periodic cost; everything
-else is event-driven.
+else is event-driven. The live, per-frame view is the F12 performance overlay
+(`scripts/perf_overlay.gd`, see the README's "Performance overlay (F12)"): the
+same engine counters plus the timings of the game's major functions, measured
+only while it is open and never written to the log. The sampler itself shows
+there as `log.sample`.
 
 ## Where it lives
 

@@ -31,6 +31,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilityRunner = preload("res://scripts/ability_runner.gd")
 const Stamina = preload("res://scripts/stamina.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const MAX_HEALTH := 100.0
@@ -918,6 +919,11 @@ func update_cover_aim_readiness() -> void:
 		or (_exposure_tick >= 0 and aim_snapshot_tick >= _exposure_tick)
 
 func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
+	Perf.begin("body.step")
+	_step_body(delta, actors, simulation_tick)
+	Perf.end()
+
+func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 	if not authoritative and not predicting:
 		return
 	if not alive:
@@ -986,6 +992,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		# squad body, a fixture) has no frame stream and simulates every tick.
 		_hold_position(delta)
 	else:
+		Perf.begin("body.move")
 		motion = _resolve_motion(delta,actors,simulation_tick)
 		_integrate(delta,motion,actors,true)
 		# The model trails a correction by a few frames while the body is exact.
@@ -1000,6 +1007,7 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 		# The acknowledgement names the state the frame that consumed this
 		# client frame produced, so its owner replays from exactly here.
 		_commit_acknowledgement()
+		Perf.end()
 	if not authoritative:
 		# The owning peer integrates its own translation; its rig stays on the
 		# authoritative animation state so prediction never invents a pose.
@@ -1011,9 +1019,13 @@ func step(delta: float, actors: Array, simulation_tick: int = 0) -> void:
 	rig.set_locomotion(_last_motion,is_on_floor() and not roll.active)
 	rig.set_roll(roll.progress if roll.active else -1.0,roll.direction)
 	combat.set_motion(_last_motion,_last_running or slide.active or roll.active or dodge.active,is_on_floor() and not roll.active)
+	Perf.begin("body.combat")
 	combat.advance(delta)
+	Perf.end()
+	Perf.begin("body.feet")
 	_bloody_feet.update(delta,self,rig)
 	_footsteps.update(delta,self,rig,is_local)
+	Perf.end()
 
 ## One tick's movement intent: the walk target plus every velocity the state
 ## machines produced, in the single order the authority and a predicting peer
@@ -1316,6 +1328,12 @@ func predict_action(action: String, value: Variant) -> void:
 ## runs for this body, minus damage, combat clocks, consumables and kits. The
 ## resolved motion frame is recorded for replay.
 func predicted_step(delta: float, actors: Array) -> void:
+	Perf.begin("body.predict")
+	_predict_body(delta, actors)
+	Perf.end()
+
+
+func _predict_body(delta: float, actors: Array) -> void:
 	if not prediction_active():
 		return
 	input_age = 0.0
@@ -1646,6 +1664,7 @@ func _pose_tick(tick: int) -> int:
 	return tick if tick >= 0 else _timeline.newest_tick() + 1
 
 func _process(delta: float) -> void:
+	Perf.begin("body.process")
 	# The body's voice: the local body's own lines play flat - they are the ears
 	# they come from - and every other body's are placed where it stands. The flag
 	# is read here rather than at creation because the scene seats `is_local`
@@ -1662,3 +1681,4 @@ func _process(delta: float) -> void:
 	_label.text = "%s  %d" % [display_name,int(health)]
 	_ground_ring.visible = alive
 	_ground_ring.global_position = Vector3(global_position.x,_floor_height(global_position)+0.025,global_position.z)
+	Perf.end()

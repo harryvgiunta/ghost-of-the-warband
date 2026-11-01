@@ -12,6 +12,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const LAYER := 6
 const BAR_SIZE := Vector2(260, 10)
@@ -227,6 +228,7 @@ func quest_lines() -> Array[String]:
 	return out
 
 func _process(delta: float) -> void:
+	Perf.begin("hud")
 	# The reticle belongs to the aiming body, so it is up exactly while the pointer
 	# is captured: a panel opens, the cursor comes back, the crosshair goes away.
 	if _reticle != null:
@@ -246,6 +248,7 @@ func _process(delta: float) -> void:
 			_aggro_mute[merc_id] = left
 	_refresh_body()
 	_refresh_squad()
+	Perf.end()
 
 func _build() -> void:
 	var root_control := Control.new()

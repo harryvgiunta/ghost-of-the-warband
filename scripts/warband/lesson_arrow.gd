@@ -14,6 +14,8 @@ extends Node3D
 ## The scene owns where it points (`anchor_at`) and when it is shown; the bob and
 ## the roll are this node's own clock, so a marker never fights a physics step.
 
+const Perf = preload("res://scripts/perf_probe.gd")
+
 const GOLD := Color(1.0, 0.76, 0.24)
 ## The label is the same gold, with a burnt outline so it reads over a torch, a
 ## cage and the wood's black night alike.
@@ -87,8 +89,10 @@ func label_text() -> String:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("hud.marker")
 	_clock += delta
 	_place()
+	Perf.end()
 
 
 func _place() -> void:

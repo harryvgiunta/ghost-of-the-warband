@@ -13,6 +13,7 @@ extends CanvasLayer
 
 const LedgerKeycapScript = preload("res://scripts/ui/ledger_keycap.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const LAYER := 7
 ## How long a tip stays up before it starts to fade, and how long the fade takes.
@@ -115,6 +116,12 @@ func reset() -> void:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("hud.tips")
+	_tick_fade(delta)
+	Perf.end()
+
+
+func _tick_fade(delta: float) -> void:
 	if not visible:
 		return
 	_clock += delta

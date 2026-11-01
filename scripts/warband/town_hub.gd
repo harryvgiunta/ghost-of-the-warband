@@ -48,6 +48,7 @@ const MarkerScript = preload("res://scripts/warband/quest_marker.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## How close a body must stand to the chest and the desks. The altar keeps its own
 ## `interact_range`.
@@ -308,6 +309,12 @@ func place_warband(bodies_in: Array) -> void:
 ## Embedded, the world steps the bodies and writes the one HUD: the square only
 ## answers questions about what stands where.
 func _physics_process(delta: float) -> void:
+	Perf.begin("town.physics")
+	_step_world(delta)
+	Perf.end()
+
+
+func _step_world(delta: float) -> void:
 	if controller == null or host != null:
 		return
 	controller.physics_step(delta)
@@ -315,6 +322,7 @@ func _physics_process(delta: float) -> void:
 	_update_hint()
 
 func _process(delta: float) -> void:
+	Perf.begin("town.process")
 	if host == null:
 		var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
 		if Input.mouse_mode != wanted:
@@ -325,6 +333,7 @@ func _process(delta: float) -> void:
 	if _marker_clock >= MARKER_POLL:
 		_marker_clock = 0.0
 		_refresh_marker()
+	Perf.end()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if host != null:

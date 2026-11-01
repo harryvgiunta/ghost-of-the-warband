@@ -29,6 +29,7 @@ const MobWander = preload("res://scripts/mob_wander.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Cleared ground: a wolf closer than this to the camp's mouth would be standing
 ## on the pocket's own edge, and the opening fight belongs to the camp's watchers.
@@ -121,6 +122,12 @@ func setup(world: Node3D) -> Array:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("wild.tick")
+	_tick_refresh(delta)
+	Perf.end()
+
+
+func _tick_refresh(delta: float) -> void:
 	if _wolves.is_empty():
 		return
 	_elapsed += delta

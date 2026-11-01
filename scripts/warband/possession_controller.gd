@@ -44,6 +44,7 @@ const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const LagCompensation = preload("res://scripts/lag_compensation.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## The peer whose soul this process owns. 1 is the host, matching ENet.
 var local_peer_id := 1
@@ -591,6 +592,11 @@ func _physics_process(delta: float) -> void:
 ## with its own simulation clock calls this and turns `auto_simulate` off; the
 ## physics-frame guard below keeps a double call from integrating twice.
 func physics_step(delta: float) -> void:
+	Perf.begin("soul.step")
+	_step_squad(delta)
+	Perf.end()
+
+func _step_squad(delta: float) -> void:
 	var frame := Engine.get_physics_frames()
 	if frame == _last_step_frame:
 		return
@@ -598,14 +604,18 @@ func physics_step(delta: float) -> void:
 	if not _authoritative:
 		_clock.advance(delta)
 	if camera_rig != null:
+		Perf.begin("camera")
 		_update_watch()
 		camera_rig.update(delta)
+		Perf.end()
 	if _spawned.is_empty():
 		return
 	_tick += 1
 	var actor := active_actor
 	if actor != null and is_instance_valid(actor):
+		Perf.begin("soul.drive")
 		_drive(actor)
+		Perf.end()
 	if _authoritative:
 		for body in _spawned:
 			if not is_instance_valid(body):
@@ -615,7 +625,9 @@ func physics_step(delta: float) -> void:
 			body.step(delta, _spawned, _tick)
 		# Recorded after the bodies moved, so frame `_tick` is what a peer that
 		# acts on `_tick` was looking at.
+		Perf.begin("lag.record")
 		lag_history.record(_tick, _lag_subjects())
+		Perf.end()
 	elif actor != null and is_instance_valid(actor) and actor.predicting:
 		actor.predicted_step(delta, _spawned)
 

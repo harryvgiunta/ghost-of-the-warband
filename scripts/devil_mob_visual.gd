@@ -32,6 +32,7 @@ const Bow = preload("res://scripts/bow.gd")
 ## warden's hand is the club the warband swings.
 const Catalog = preload("res://scripts/player_state.gd")
 const Archer = preload("res://scripts/archer.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const SCENES := {
 	"hell_goat": "res://assets/characters/devils/ironwood_hell_goat.glb",
@@ -577,6 +578,12 @@ func is_dead() -> bool:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("mob.anim")
+	_animate(delta)
+	Perf.end()
+
+
+func _animate(delta: float) -> void:
 	if _player == null:
 		return
 	_hover_time += delta

@@ -7,6 +7,7 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 const GRAVITY := Vector3(0.0, -4.0, 0.0)
 const VISUAL_BLEND_SECONDS := 0.12
 var velocity := Vector3.ZERO
@@ -58,6 +59,11 @@ func launch(origin: Vector3, direction: Vector3, speed: float, shot_damage: floa
 	SfxScript.arrow(origin)
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("missile")
+	_fly(delta)
+	Perf.end()
+
+func _fly(delta: float) -> void:
 	age += delta
 	_visual_elapsed = minf(_visual_elapsed + delta,VISUAL_BLEND_SECONDS)
 	if not flying:

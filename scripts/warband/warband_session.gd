@@ -41,6 +41,7 @@ extends Node
 const NetLimits = preload("res://scripts/net_limits.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const ArrowScript = preload("res://scripts/arrow.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## How often the host writes every body to the wire.
 const SNAPSHOT_HZ := 20.0
@@ -740,6 +741,11 @@ func _sync_local_peer() -> void:
 # --- internals: the wire ---------------------------------------------------
 
 func _process(delta: float) -> void:
+	Perf.begin("net.session")
+	_tick_session(delta)
+	Perf.end()
+
+func _tick_session(delta: float) -> void:
 	if _role == "client":
 		_sync_local_peer()
 		return
@@ -753,14 +759,20 @@ func _process(delta: float) -> void:
 	if not _has_peers():
 		return
 	if shared_warband:
+		Perf.begin("net.mirror")
 		_tick_mirror(delta)
+		Perf.end()
 	var interval := 1.0 / SNAPSHOT_HZ
 	# A hitch must not turn into a burst of stale snapshots.
 	_accumulator = minf(_accumulator + delta, interval * 4.0)
+	Perf.begin("net.snapshot")
 	while _accumulator >= interval:
 		_accumulator -= interval
 		_send_snapshots()
+	Perf.end()
+	Perf.begin("net.world")
 	_tick_world(delta)
+	Perf.end()
 
 # --- internals: the shared warband -------------------------------------------
 

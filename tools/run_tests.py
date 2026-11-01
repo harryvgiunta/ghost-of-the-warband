@@ -99,6 +99,7 @@ WARBAND_TESTS = [
     "warband_netcode_regression",
     "warband_ranged_regression",
     "audio_regression",
+    "perf_overlay_regression",
 ]
 ## ENet tests: two real processes on one machine, so they never share the pool.
 SERIAL = ["warband_session_regression", "warband_coop_campaign_regression"]

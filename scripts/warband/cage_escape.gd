@@ -286,6 +286,7 @@ const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const NavScript = preload("res://scripts/warband/squad_nav.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## The world scene that embeds this camp, or null when the camp stands alone.
 ## Set before the node enters the tree.
@@ -760,14 +761,22 @@ func note_pickup(pickup = null) -> void:
 # --- running ---------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	Perf.begin("camp.process")
 	_advance_cage_doors(delta)
 	_update_shiv_marker()
 	_update_latch_marker()
 	_update_run_marker()
 	_maybe_bearings()
+	Perf.end()
 
 
 func _physics_process(_delta: float) -> void:
+	Perf.begin("camp.physics")
+	_step_lesson(_delta)
+	Perf.end()
+
+
+func _step_lesson(_delta: float) -> void:
 	if not lesson_running() or controller == null:
 		return
 	_maintain_watchers()

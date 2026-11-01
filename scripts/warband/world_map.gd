@@ -27,6 +27,7 @@ extends CanvasLayer
 ##    underneath. Reading the map is a risk, not a pause.
 
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const TITLE := "THE WOOD"
 const SUBTITLE := "THE CAMP'S RING TO THE TOWN'S WALL  \u00b7  NORTH IS UP"
@@ -141,6 +142,12 @@ func title() -> String:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("hud.map")
+	_tick_repaint(delta)
+	Perf.end()
+
+
+func _tick_repaint(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed < REPAINT_SECONDS:
 		return

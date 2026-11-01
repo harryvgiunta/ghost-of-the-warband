@@ -21,6 +21,7 @@ extends CanvasLayer
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Rock = preload("res://scripts/warband/delve_rock.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const TITLE := "THE WEEPING HOLLOW  \u00b7  FLOOR I"
 const SUBTITLE := "SIX ROPES ROUND GOREHORN'S LAIR  \u00b7  THE DEEP SIDE IS UP"
@@ -117,6 +118,12 @@ func title() -> String:
 
 
 func _process(delta: float) -> void:
+	Perf.begin("hud.map")
+	_tick_repaint(delta)
+	Perf.end()
+
+
+func _tick_repaint(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed < REPAINT_SECONDS:
 		return

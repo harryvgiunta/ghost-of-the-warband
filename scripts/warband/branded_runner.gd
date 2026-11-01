@@ -18,6 +18,7 @@ extends Node
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const Fx = preload("res://scripts/warband/branded_fx.gd")
 const Archer = preload("res://scripts/archer.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Six shafts inside the space of one draw, each carrying half a full draw. The
 ## charge is scaled by the tier, so T1 is a 50% draw and T5 is a real full one;
@@ -274,6 +275,11 @@ func _play_ward() -> void:
 # --- the tick ---------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	Perf.begin("brand.fx")
+	_advance_brand(delta)
+	Perf.end()
+
+func _advance_brand(delta: float) -> void:
 	_cooldown = maxf(0.0, _cooldown - delta)
 	if _shots.is_empty() and _bleeds.is_empty():
 		return

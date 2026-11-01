@@ -25,6 +25,7 @@ extends Node
 ## every event testable with no device to play into.
 
 const SfxLibraryScript = preload("res://scripts/audio/sfx_library.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 const BUS_MUSIC := "Music"
 const BUS_SFX := "SFX"
@@ -135,8 +136,10 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	Perf.begin("audio")
 	_sync_scene_music()
 	_seam_if_due()
+	Perf.end()
 
 
 ## Whether there is a device to play into. Everything else - buses, volumes,

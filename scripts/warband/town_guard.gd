@@ -23,6 +23,7 @@ const ArrowScript = preload("res://scripts/arrow.gd")
 const CombatScript = preload("res://scripts/combat.gd")
 const Senses = preload("res://scripts/mob_senses.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## How often the post is asked whether anything is worth shooting. The same clock
 ## the town uses for the gold arrow: a mob's death is not a signal either.
@@ -94,6 +95,12 @@ func setup(host_or_null, at: Vector3, yaw: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	Perf.begin("town.guard")
+	_watch_post(delta)
+	Perf.end()
+
+
+func _watch_post(delta: float) -> void:
 	if rig == null:
 		return
 	if _cooldown > 0.0:
