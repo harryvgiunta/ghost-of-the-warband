@@ -18,6 +18,7 @@ extends RefCounted
 ## fold is written out instead of calling `hash()`).
 
 const Archer = preload("res://scripts/archer.gd")
+const RigPresence = preload("res://scripts/rig_presence.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
@@ -110,6 +111,7 @@ static func _dress(keeper: Keeper, profile: Dictionary, row: Dictionary) -> Node
 	# carries is baked in when the skeleton is measured.
 	rig.appearance = profile
 	keeper.add_child(rig)
+	keeper.add_child(RigPresence.new(rig))
 	var set_index := ArmorData.SET_IDS.find(str(row["armor"]))
 	var pieces := {}
 	for slot in ArmorData.SLOTS:

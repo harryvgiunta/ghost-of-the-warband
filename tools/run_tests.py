@@ -53,6 +53,7 @@ TESTS = [
     "backstab_regression",
     "mob_aggro_regression",
     "replica_animation_regression",
+    "frame_budget_regression",
 ]
 ## The warband possession campaign: one world, one roster, one stash.
 WARBAND_TESTS = [

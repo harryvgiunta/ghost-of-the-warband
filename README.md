@@ -1007,6 +1007,34 @@ A scene adds its own line by joining `PerfOverlay.CONTEXT_GROUP` and answering
 `perf_context()`. `tests/perf_overlay_regression.gd` presses F12 in the real
 world, reads the readout and fails on any lost `end`.
 
+## Frame budget
+
+A drawn frame is the only unit the eye sees, so it is the unit the heavy work is
+budgeted in. `MobLod` (`scripts/mob_lod.gd`) is the one table of distances: a
+mob's brain ticks every frame near a ranger, every `MID_FRAMES` at the middle
+band, twelve or twenty-four frames out, and past `DORMANT_DISTANCE` the culler
+parks it - no tick, no draw, no state change. On top of it, three rules keep a
+crowded room affordable:
+
+- **One brain tick a frame.** A frame that runs several physics ticks hands each
+  mob the whole elapsed time in one step (`devil_mob._physics_process`): the
+  simulated time is identical, `_lod.slice` and `MobLod.move` both work in
+  seconds, and the work is paid once.
+- **A rest for the sleeping.** A delve den asleep with the whole party outside
+  its sight is rested (`devil_mob.rest`, set by `delve_cave`'s poll): no brain at
+  all, nothing hidden. A blow or a cry lifts it on the frame it lands.
+- **Poses the eye asks for.** A watcher's rig is posed from the drawn frame, not
+  the physics tick (`Archer.view_paced`), and by the camera: every frame in front
+  of the eye inside `VIEW_NEAR`, every second past it, twenty frames for a body
+  off the screen that casts no shadow, six while it does. The authored cycle is a
+  clock, so a coarser solve samples the phase the body would have been at anyway.
+  Keepers, gate watch and caged soldiers, which have no brain to budget, are
+  rested by `scripts/rig_presence.gd` past `MobLod.ANIMATE_DISTANCE` from the
+  camera.
+
+What these rules never touch: damage, sight, the state machine's windows, a
+blow's timing, or the pose of anything the player or the squad is fighting.
+
 ## Update
 
 **Close every running game instance, including the host, before updating.** Godot keeps loaded scripts in memory; pulling changes does not update an already-running match. `Play.cmd` opens the main menu, which is the whole game.

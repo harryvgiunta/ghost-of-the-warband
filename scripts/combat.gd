@@ -1346,7 +1346,10 @@ func update_aim() -> void:
 		return
 	# Aim is a world-space point from the camera ray, never a tracked unit or
 	# a compensated ballistic solution. Gravity acts after the arrow is released.
-	rig.aim_at(aim_point)
+	# A draw or a throw is read off the hand right after this, so it turns now;
+	# a swing is re-solved by the rig's own clock later this same frame (with its
+	# sweeps), so solving its turn here would be thrown away.
+	rig.aim_at(aim_point, not rig.is_melee() or not rig.is_physics_processing())
 
 ## Whether `point` is a place the body standing at `at` could be aiming at.
 ##

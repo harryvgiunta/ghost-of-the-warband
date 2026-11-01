@@ -137,6 +137,9 @@ func close() -> void:
 		return
 	_open = false
 	visible = false
+	# A shut screen draws nothing: its stage stops rendering and posing.
+	if preview != null:
+		preview.set_active(false)
 
 ## Put the screen on the body `new_corpse_id` names. `ids` is what the body still
 ## carries; every repaint re-reads the same list from the vacuum, so a piece the
@@ -787,7 +790,9 @@ func _refresh_preview() -> void:
 	# height, face, hair and colours, then his kit on top of them.
 	preview.set_appearance(Looks.profile_for(selected_merc))
 	preview.apply_kit(loadout, worn)
-	preview.set_active(true)
+	# Dressed on every repaint, open or shut (`Warband.changed` repaints a shut
+	# screen too), but only an open screen renders and poses its stage.
+	preview.set_active(_open)
 	# The line under the ranger names the set TAB brings up: which pair is in
 	# the hands is the one fact that decides what the next swap will take up.
 	var active_set: int = _warband.roster.active_weapon_set(selected_merc)

@@ -135,6 +135,9 @@ func _ready() -> void:
 	# given and nothing else, and thirteen weapons per body is ten thousand nodes
 	# in a wood that already holds sixty of them.
 	rig.sparse_props = true
+	# Its pose is only ever looked at: the brain lands the blows, so the rig may
+	# pose more coarsely where the camera cannot see it well.
+	rig.view_paced = true
 	rig.body_skin = {"path": str(spec["skin"]), "node": str(spec["node"]),
 		"height": _fit() * silhouette}
 	add_child(rig)
@@ -164,7 +167,9 @@ func set_motion(velocity: Vector3, grounded: bool) -> void:
 	_grounded = grounded
 	if not is_instance_valid(rig):
 		return
-	rig.aim_at(_forward_point())
+	# A view-paced rig poses from the drawn frame, after this tick, so its turn is
+	# taken there (`Archer._process`); solving it here would be thrown away.
+	rig.aim_at(_forward_point(), not rig.view_paced)
 	rig.set_locomotion(velocity, grounded)
 
 
@@ -252,6 +257,10 @@ func _apply_clock() -> void:
 	if not is_instance_valid(rig) or _dead:
 		return
 	rig.set_physics_process(not _parked and _band < 2)
+	# Past the shadow band the body is a figure across a room - a den asleep
+	# next door, a hunter still closing - and keeps its authored cycle on the mid
+	# tick budget's clock. Every blow and shot lands inside 30 m, on the full one.
+	rig.set_pose_stride(1 if _band <= 0 else MobLod.MID_FRAMES)
 	rig.set_shadow_casting(not _parked and _band <= 0)
 
 
@@ -294,9 +303,13 @@ func release_bow() -> void:
 
 
 ## Where a shaft leaves the body: the real bow when one is in hand, else chest
-## height a hand's width ahead of the body.
+## height a hand's width ahead of the body. The bow is only trusted when the
+## skeleton was solved this frame - a view-paced rig poses when the camera asks,
+## and a shaft that left from a pose three frames old would leave from the wrong
+## place.
 func bow_origin() -> Vector3:
-	if is_instance_valid(rig) and rig.weapon == "bow" and is_instance_valid(rig.active_bow):
+	if is_instance_valid(rig) and rig.weapon == "bow" and is_instance_valid(rig.active_bow) \
+			and rig.pose_is_current():
 		return rig.get_arrow_origin()
 	return global_position + Vector3.UP * (CHEST_HEIGHT * 0.86 * _height()) - global_basis.z * 0.45
 

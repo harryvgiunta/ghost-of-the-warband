@@ -59,6 +59,12 @@ const SPAWN_LIFT := 0.12
 const MASTER_NAME := "HollowMaster"
 ## How often the sleepers are asked whether they have noticed anything.
 const WAKE_POLL := 0.25
+## A sleeper further than this from every standing body of the party is rested
+## (`rest`): no brain at all until the party comes back inside. It is past every
+## sleeper's sight (the watchers' 22-32 m, the master's 34 m) by more than a
+## sprinting body covers between two polls, so nothing a sleeper could have
+## seen is missed - and the den still wakes on a blow or a cry, from the poll.
+const REST_DISTANCE := 40.0
 ## A body this far inside a den's room wakes it whatever the den has seen.
 const WAKE_INSET := 1.5
 const PACK_RADIUS := 14.0
@@ -557,10 +563,14 @@ func tick(delta: float, party: Array) -> void:
 			continue
 		# Asleep, but with its eyes open: every sleeper watches the nearest body,
 		# so what wakes it is its own sight cone and the rock between - never
-		# distance through a wall.
+		# distance through a wall. A sleeper too far to see anybody rests.
 		for mob in den["mobs"]:
 			if is_instance_valid(mob) and bool(mob.get("alive")):
-				mob.player = _nearest(mob.global_position, standing)
+				var prey = _nearest(mob.global_position, standing)
+				mob.player = prey
+				var gap: float = mob.global_position.distance_to(prey.global_position) \
+					if prey != null else INF
+				mob.rest(gap > REST_DISTANCE, gap)
 
 
 func _den_noticed(den: Dictionary, standing: Array[CharacterBody3D]) -> bool:
@@ -586,6 +596,7 @@ func _wake(den: Dictionary, standing: Array[CharacterBody3D]) -> void:
 	for mob in den["mobs"]:
 		if not is_instance_valid(mob) or not bool(mob.get("alive")):
 			continue
+		mob.rest(false)
 		_enlist(mob)
 		var prey = _nearest(mob.global_position, standing)
 		if prey != null:

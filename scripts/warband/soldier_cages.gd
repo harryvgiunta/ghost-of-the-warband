@@ -35,6 +35,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const WarbandLooks = preload("res://scripts/warband/warband_looks.gd")
 const Archer = preload("res://scripts/archer.gd")
+const RigPresence = preload("res://scripts/rig_presence.gd")
 const QuestMarker = preload("res://scripts/warband/quest_marker.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
@@ -506,6 +507,7 @@ func _build_soldier(cage: Node3D, index: int) -> Node3D:
 	rig.appearance = WarbandLooks.profile_for(int(SOLDIER_LOOKS[index]))
 	rig.position = Vector3(0.0, SPAWN_LIFT, 0.10)
 	cage.add_child(rig)
+	cage.add_child(RigPresence.new(rig))
 	# `_ready` names the rig "Archer"; the cage's own name is what the world and
 	# the tests look the prisoner up by.
 	rig.name = "CagedSoldier"

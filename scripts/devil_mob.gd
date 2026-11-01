@@ -136,6 +136,12 @@ var _lod := MobLod.new()
 var _present_band := -1
 ## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
 var dormant := false
+## Rested by its owner (`rest`): no brain at all, nothing hidden.
+var resting := false
+## The drawn frame this body's brain last ran in, and the tick time it has banked
+## from further ticks inside the same frame (`_physics_process`).
+var _brain_frame := -1
+var _brain_bank := 0.0
 var _attacker: Node3D
 ## Ghost of the Warband: the far-fight stance - `PassiveDuelBrain` widens the
 ## ring and shuts the attack gate between the few blows a far body is allowed.
@@ -155,6 +161,14 @@ var guard_between_swings := false
 ## swing when the window closes. The cultists brace on their own clock; the
 ## camp's watchers roll for it once an exchange.
 var _braced := 0.0
+## Two bodies of one family closer than this push apart (`_separate`).
+const SEPARATION_RADIUS := 1.35
+## The family's bodies by `SEPARATION_RADIUS` cell, gathered once per physics
+## frame (`_crowd`): group name -> {cell: [body]}, and the frame it was taken.
+## A delve fields 210 watchers in one family, so walking the whole group for
+## every body that moved was 210 lookups per mover per tick.
+static var _crowd_cells := {}
+static var _crowd_frames := {}
 
 
 func _ready() -> void:
@@ -245,8 +259,21 @@ func _visual_script():
 
 
 func _physics_process(delta: float) -> void:
+	if resting:
+		return
+	# One brain tick per drawn frame at most: a frame that runs several physics
+	# ticks hands this body the whole elapsed time in one step instead. The
+	# simulated time is the same - `_lod.slice` and `MobLod.move` both work in
+	# seconds - so nothing the eye can see changes; the work is paid once.
+	var frame := Engine.get_process_frames()
+	if frame == _brain_frame:
+		_brain_bank += delta
+		return
+	_brain_frame = frame
+	var step := delta + _brain_bank
+	_brain_bank = 0.0
 	Perf.begin("mob.ai")
-	_think(delta)
+	_think(step)
 	Perf.end()
 
 
@@ -422,7 +449,23 @@ func mob_sleep() -> void:
 	visible = false
 
 
+## The owner's word that nothing can reach this body: a delve den asleep with the
+## whole party out of its sight. While it holds the brain is skipped outright -
+## unlike `mob_sleep` nothing is hidden, and the rig keeps its own clock on the
+## band `nearest` puts it in. Lifting it hands the next tick back to the budget
+## with nothing banked from the rest.
+func rest(value: bool, nearest: float = INF) -> void:
+	if value:
+		_cull_presentation(nearest)
+	elif resting:
+		_lod.resume()
+	resting = value
+
+
 func mob_wake() -> void:
+	# A blow reaches a rested body as surely as a parked one (`take_damage`,
+	# `stagger`): it thinks again this tick instead of at its owner's next look.
+	rest(false)
 	if not dormant:
 		return
 	dormant = false
@@ -651,20 +694,50 @@ func _is_hostile(candidate: Node3D) -> bool:
 
 func _separate() -> void:
 	var push := Vector3.ZERO
-	for other in get_tree().get_nodes_in_group(_group_name()):
-		if other == self or not is_instance_valid(other) or not bool(other.get("alive")):
-			continue
-		var offset: Vector3 = global_position - other.global_position
-		offset.y = 0.0
-		var gap := offset.length()
-		if gap > 0.001 and gap < 1.35:
-			push += offset / gap * (1.35 - gap)
+	var cells := _crowd()
+	var cell := _crowd_cell(global_position)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			var near: Array = cells.get(Vector2i(cell.x + dx, cell.y + dz), [])
+			for other in near:
+				if other == self or not is_instance_valid(other) or not bool(other.get("alive")):
+					continue
+				var offset: Vector3 = global_position - other.global_position
+				offset.y = 0.0
+				var gap := offset.length()
+				if gap > 0.001 and gap < SEPARATION_RADIUS:
+					push += offset / gap * (SEPARATION_RADIUS - gap)
 	if push.length_squared() > 0.0001:
 		if _move_intent.length_squared() > 0.0001:
 			_move_intent = (_move_intent + push * 0.85).normalized()
 		else:
 			_move_intent = push.normalized()
 			_move_speed = maxf(_move_speed, float(profile.walk_speed) * 0.35)
+
+
+## This family's bodies by cell, taken on the first separation of the physics
+## frame. A body can only push off the nine cells round its own, because a cell
+## is as wide as the push. Within a frame the cells are where the bodies stood
+## when it began; the push itself reads where each neighbour is now.
+func _crowd() -> Dictionary:
+	var group := _group_name()
+	var frame := Engine.get_physics_frames()
+	if int(_crowd_frames.get(group, -1)) == frame:
+		return _crowd_cells[group]
+	var cells := {}
+	for other in get_tree().get_nodes_in_group(group):
+		var key := _crowd_cell((other as Node3D).global_position)
+		if cells.has(key):
+			(cells[key] as Array).append(other)
+		else:
+			cells[key] = [other]
+	_crowd_cells[group] = cells
+	_crowd_frames[group] = frame
+	return cells
+
+
+static func _crowd_cell(point: Vector3) -> Vector2i:
+	return Vector2i(floori(point.x / SEPARATION_RADIUS), floori(point.z / SEPARATION_RADIUS))
 
 
 func _drive(delta: float) -> void:

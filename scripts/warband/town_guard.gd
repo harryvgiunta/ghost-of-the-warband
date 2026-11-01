@@ -16,6 +16,7 @@ extends Node3D
 ## guard only ever reads it - the mobs belong to the world's own simulation.
 
 const Archer = preload("res://scripts/archer.gd")
+const RigPresence = preload("res://scripts/rig_presence.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandLooks = preload("res://scripts/warband/warband_looks.gd")
@@ -81,6 +82,7 @@ func setup(host_or_null, at: Vector3, yaw: float) -> void:
 	rig.name = "WatchBody"
 	rig.appearance = WarbandLooks.profile_for(LOOK_SEED)
 	add_child(rig)
+	add_child(RigPresence.new(rig))
 	var set_index := ArmorData.SET_IDS.find("leather")
 	var pieces := {}
 	for slot in ArmorData.SLOTS:

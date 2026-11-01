@@ -321,6 +321,34 @@ var heading_locked := false
 ## does: it is handed one catalog piece and keeps it. Built on demand, the same
 ## body costs fifteen nodes instead of three hundred and fifty.
 var sparse_props := false
+## Physics ticks per pose solve (`set_pose_stride`). A body the eye only sees
+## across a room keeps its authored cycle on a coarser clock: the tracks still
+## advance by the whole elapsed time, sampled every `_pose_stride` ticks.
+var _pose_stride := 1
+var _stride_ticks := 0
+var _stride_delta := 0.0
+## A rig only the eye reads - a watcher's, whose brain lands its blows - also
+## follows the camera (`_eye_stride`) and poses from the drawn frame instead of
+## the physics tick, set by its owner. The clocks are never short: a coarser
+## solve advances them by the whole elapsed time.
+var view_paced := false:
+	set(value):
+		view_paced = value
+		if is_inside_tree():
+			set_process(value)
+const VIEW_NEAR := 20.0
+## Frames per solve for a body off the screen (`_eye_stride`).
+const VIEW_OFF := 20
+const VIEW_OFF_SHADOW := 6
+## Drawn frames between two looks at the camera. Every frame, because the frame a
+## body comes back into view is the frame it has to be posed in.
+const VIEW_LOOK_FRAMES := 1
+var _view_stride := 1
+var _view_look := 0
+## The drawn frame this rig's skeleton was last solved in (`pose_is_current`).
+var _posed_frame := -1
+## Whether this rig's meshes still cast, so a pose off the screen still shows.
+var _casts_shadow := true
 ## The height that was baked in, so head hitboxes and reported heights agree.
 var _looks_height := 1.0
 var _looks_face: Node3D
@@ -546,6 +574,9 @@ func _ready() -> void:
 	if not body_skin.is_empty():
 		_attach_body_skin()
 	_update_pose(0.0)
+	# The drawn-frame clock is this rig's only pose clock where its owner asked
+	# for one; a rig posed by the physics tick never pays for it.
+	set_process(view_paced)
 
 ## The body is on the ground. Called by whichever layer owns the health - the
 ## arena actor, the frontier body, a warband replica - and idempotent, so a
@@ -659,6 +690,8 @@ func _apply_downed_pose() -> void:
 ## Hide them and stop the physics-clock animation before the skin is simulated.
 func enter_corpse_pose() -> void:
 	set_physics_process(false)
+	# The drawn-frame clock is a pose clock too: a corpse poses from neither.
+	set_process(false)
 	for child in get_children():
 		if child == _model:
 			continue
@@ -2076,19 +2109,27 @@ func reset_attack_state() -> void:
 	phase = "READY"
 	_update_pose(0.0)
 
-func aim_at(world_point: Vector3) -> void:
+## Face the pose at `world_point`. A drawing or swinging rig re-solves at once,
+## so an owner reading the hand this tick reads it on the new line. `solve`
+## false leaves the turn to the rig's own clock: for a presenter whose rig ticks
+## after it in the same frame, the solve here would be thrown away.
+func aim_at(world_point: Vector3, solve: bool = true) -> void:
 	_aim_point = world_point
-	if _built and phase != "READY":
+	if solve and _built and phase != "READY":
 		_update_pose(0.0)
 
 func set_roll(progress: float, direction: Vector3) -> void:
 	# An authoritative roll clock: this body is posed locally, so a snapshot may
 	# not advance it a second time.
 	_pose_from_snapshots = false
+	# Owners hand the clock over every tick. With no roll before or after there
+	# is nothing new to pose, and the rig's own step solves this tick anyway.
+	var idle := progress < 0.0 and _roll_progress < 0.0
 	_roll_progress = progress
 	if progress >= 0.0:
 		global_basis = Basis(Vector3.UP,atan2(-direction.x,-direction.z))
-	_update_pose(0.0)
+	if not idle:
+		_update_pose(0.0)
 
 func set_hit_react(seconds: float) -> void:
 	if seconds <= 0.0:
@@ -2099,6 +2140,7 @@ func set_hit_react(seconds: float) -> void:
 	_update_pose(0.0)
 
 func set_step(progress: float, direction: Vector3) -> void:
+	var idle := progress < 0.0 and _step_progress < 0.0
 	_step_progress = clampf(progress,0.0,1.0) if progress >= 0.0 else -1.0
 	if _step_progress >= 0.0:
 		var planar := Vector3(direction.x,0.0,direction.z)
@@ -2108,7 +2150,9 @@ func set_step(progress: float, direction: Vector3) -> void:
 		# Keep the facing latched so the exit does not snap the root into the
 		# step direction and undo the whole side-step silhouette.
 		_step_facing_hold = 0.20
-	_update_pose(0.0)
+	# Like the roll: no step before or after is nothing new to pose.
+	if not idle:
+		_update_pose(0.0)
 
 func set_slide(progress: float, direction: Vector3) -> void:
 	slide_progress = clampf(progress,0.0,1.0) if progress >= 0.0 else -1.0
@@ -2379,6 +2423,7 @@ func get_stance_forward() -> Vector3:
 ## casting into the four directional splits. Only the clone's own rig is
 ## affected; the player's rig never receives this call.
 func set_shadow_casting(casting: bool) -> void:
+	_casts_shadow = casting
 	var setting := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casting \
 		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for node in find_children("*", "MeshInstance3D", true, false):
@@ -2449,8 +2494,73 @@ func get_blade_tip(hand: String = "") -> Vector3:
 
 func _physics_process(delta: float) -> void:
 	Perf.begin("rig.anim")
-	advance_animation(delta)
+	_stride_delta += delta
+	_stride_ticks += 1
+	# A rig only the eye reads poses once per drawn frame instead (`_process`):
+	# a slow frame that runs several physics ticks pays one solve for all of them.
+	if not view_paced:
+		_solve_due()
 	Perf.end()
+
+func _process(_delta: float) -> void:
+	# Only a view-paced rig runs this clock, and only while its physics clock is
+	# on: past the animate band, parked or a corpse, both are stopped.
+	if not view_paced or not is_physics_processing():
+		return
+	Perf.begin("rig.anim")
+	_view_look -= 1
+	if _view_look <= 0:
+		_view_look = VIEW_LOOK_FRAMES
+		_view_stride = _eye_stride()
+	_solve_due()
+	Perf.end()
+
+## The pose, once the ticks since the last solve reach the stride: the clocks
+## advance by all of their time in one step.
+func _solve_due() -> void:
+	if _stride_ticks >= maxi(_pose_stride,_view_stride):
+		advance_animation(_stride_delta)
+		_posed_frame = Engine.get_process_frames()
+		_stride_ticks = 0
+		_stride_delta = 0.0
+
+
+## Whether the skeleton was solved in this drawn frame: what a cue that reads a
+## hand, an arrow rest or a blade tip asks before it trusts the answer. A strike
+## resolves on the physics tick of a frame, whose solves ran in the frame before
+## it, so one frame back is current.
+func pose_is_current() -> bool:
+	return Engine.get_process_frames() - _posed_frame <= 1
+
+## Frames per solve the camera asks of a `view_paced` rig. What is off the screen
+## is not posed every frame - but a body still casting a shadow is, because its
+## shadow is on the screen even when it is behind the eye. Nothing goes stale for
+## long: the authored cycle is a clock, so a solve that comes back samples the
+## phase the body would have been at anyway.
+func _eye_stride() -> int:
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return 1
+	var chest := global_position+Vector3.UP*(1.2*_looks_height)
+	if not camera.is_position_in_frustum(chest):
+		# Off the screen: the shadow is the only thing of it that can still show,
+		# so it keeps a near clock while it casts and rests when it does not. The
+		# look is taken every drawn frame, so the frame it comes back into view it
+		# is solved from the clocks at the phase it would have been at.
+		return VIEW_OFF_SHADOW if _casts_shadow else VIEW_OFF
+	if camera.global_position.distance_squared_to(chest) > VIEW_NEAR*VIEW_NEAR:
+		return 2
+	return 1
+
+## Solve the pose every `ticks` physics ticks instead of every one. A change
+## spreads the rigs that share a stride over its ticks, so a room of them never
+## solves on the same one.
+func set_pose_stride(ticks: int) -> void:
+	ticks = maxi(ticks,1)
+	if ticks == _pose_stride:
+		return
+	_pose_stride = ticks
+	_stride_ticks = get_instance_id()%ticks
 
 func advance_animation(delta: float) -> void:
 	if not _built:
@@ -2462,9 +2572,13 @@ func advance_animation(delta: float) -> void:
 	# Each hand owns its elapsed time. Both weapons can damage in the same
 	# frame; the right sword animation is the body clip whenever it is active.
 	# Chronological substeps prevent a long frame from skipping either downswing.
+	# They exist for whoever reads the sweeps (a body's `Combat`): a rig nobody
+	# listens to - a watcher, whose brain lands its own blows - draws the same
+	# swing from one solve a tick instead of two.
+	var sample := MELEE_SAMPLE_SECONDS if melee_sweep.has_connections() else INF
 	var remaining := maxf(delta,0.0)
 	while remaining > 0.000001 and is_melee():
-		var step := minf(remaining,MELEE_SAMPLE_SECONDS)
+		var step := minf(remaining,sample)
 		var previous_left := _left_melee_time
 		var previous_right := _right_melee_time
 		var previous_left_base := Vector3.ZERO
@@ -3008,7 +3122,7 @@ func _apply_slide_pose(lower_only: bool) -> void:
 		if side == 0:
 			rest_basis = Basis(stance.x,0.14)*rest_basis
 		var pole := stance*Vector3(sign_x*0.18,0.25,-1.0)
-		_solve_limb(_legs[side],foot.origin.lerp(target,weight),foot.basis.slerp(rest_basis,weight),pole)
+		_solve_limb(_legs[side],foot.origin.lerp(target,weight),_turn_toward(foot.basis,rest_basis,weight),pole)
 
 func _diagonal_swing_timeline(hand: String) -> Dictionary:
 	var duration := melee_seconds(hand)
@@ -3115,7 +3229,7 @@ func _apply_melee_swing_path() -> void:
 		for side in 2:
 			var clip_foot := _bone_world(_legs[side][2])
 			var ankle := _swing_stance[side].origin.lerp(clip_foot.origin,handoff)
-			var ankle_basis := _swing_stance[side].basis.slerp(clip_foot.basis,handoff)
+			var ankle_basis := _turn_toward(_swing_stance[side].basis,clip_foot.basis,handoff)
 			_solve_limb(_legs[side],ankle,ankle_basis,stance_pole)
 	else:
 		spine_yaw += pelvis_yaw
@@ -3863,6 +3977,13 @@ func _weapon_socket(hand_xf: Transform3D) -> Transform3D:
 func _bone_world(index: int) -> Transform3D:
 	return skeleton.global_transform*skeleton.get_bone_global_pose(index)
 
+## Turn a world frame toward another by `weight`. A world frame carries the
+## rig's uniform scale (a look's height, a watcher's fit), which `Basis.slerp`
+## refuses: it reports an error and blends from the identity instead. So the
+## rotations are blended alone and the first frame keeps its own scale.
+func _turn_toward(from: Basis, to: Basis, weight: float) -> Basis:
+	return Basis(from.get_rotation_quaternion().slerp(to.get_rotation_quaternion(),weight)).scaled(from.get_scale())
+
 func _set_bone_world(index: int, pose: Transform3D) -> void:
 	skeleton.set_bone_global_pose(index,skeleton.global_transform.affine_inverse()*pose)
 
@@ -3924,7 +4045,7 @@ func _plant_archery_feet(weight: float) -> void:
 		var foot := _bone_world(_legs[side][2])
 		var planted := global_position+stance*Vector3(sign_x*0.18,_foot_height[side],0.0)
 		var basis := skeleton.global_basis*skeleton.get_bone_global_rest(_legs[side][2]).basis
-		_solve_limb(_legs[side],foot.origin.lerp(planted,weight),foot.basis.slerp(basis,weight),stance*Vector3(sign_x*0.08,0,-1))
+		_solve_limb(_legs[side],foot.origin.lerp(planted,weight),_turn_toward(foot.basis,basis,weight),stance*Vector3(sign_x*0.08,0,-1))
 
 func _step_foot_offset(side: int) -> Vector3:
 	# Widen the stance toward the step: the leading foot reaches out and lifts,
