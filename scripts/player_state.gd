@@ -106,6 +106,15 @@ const ITEMS := {
 		"category":"misc", "slot":"", "material":"Reagent", "reagent":true,
 		"summary":"Black ichor in a stoppered vial. It is still moving",
 		"detail":"Carried in the shared stash / anoints a weapon with its skill at the altar"},
+	# The altar's first essence as a thing in a hand: what the Hollow's demons bleed
+	# when they die, and what the watchers now gate demons through to harvest for
+	# themselves. Below it is a carried piece in the delve inventory like any other;
+	# the climb out renders it into the wallet's Ritual Tallow (`Warband.extract_delve`),
+	# and a fall loses it with the rest. Its id is the wallet tier's own.
+	"cruor_t1": {"name":"Ritual Tallow", "short":"Tallow", "kind":"material", "index":5, "price":10,
+		"category":"misc", "slot":"", "material":"Essence",
+		"summary":"Demon fat rendered down to a grey wax. It is warm",
+		"detail":"Carried in the delve inventory / climbing out renders it into the altar's Ritual Tallow"},
 	"staff_fire": {"name":"Ember Staff", "short":"Ember Stf", "kind":"staff", "index":0, "price":240,
 		"category":"staff", "grip":"staff", "slot":"main",
 		"summary":"A charred staff crowned with a live ember",

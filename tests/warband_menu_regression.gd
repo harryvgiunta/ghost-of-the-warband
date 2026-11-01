@@ -2,9 +2,12 @@ extends SceneTree
 ## Warband menu regression: the quick menu has all six rows, writes and reads
 ## the warband through `Warband.save_state()` at whatever path the autoload
 ## carries, gates LOAD on a real file, opens the shared sound page and comes
-## back, emits `resumed` on close, and never pauses the tree.
+## back, emits `resumed` on close, and never pauses the tree. Its party row puts
+## the warband in a mode, lights that mode alone, follows the books when the mode
+## moves elsewhere, and leaves a lent warband's mode the host's.
 
 const MenuScript = preload("res://scripts/warband/warband_menu.gd")
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
 const TEST_SAVE := "user://warband_menu_state.json"
 const ROW_KEYS := ["resume", "save", "load", "settings", "exit", "quit"]
@@ -50,6 +53,21 @@ func _on_exit_requested() -> void:
 	_exits += 1
 
 
+## The modes whose toggle is down, in the row's order.
+func _lit(modes: Dictionary) -> Array:
+	var out: Array = []
+	for mode in Contracts.PARTY_MODES:
+		if (modes[mode] as Button).button_pressed:
+			out.append(mode)
+	return out
+
+
+## A real click on a toggle: the press flips it, then reports itself.
+func _click(button: Button) -> void:
+	button.button_pressed = not button.button_pressed
+	button.pressed.emit()
+
+
 func run() -> void:
 	_remove_save()
 	var warband := root.get_node_or_null("Warband")
@@ -87,6 +105,32 @@ func run() -> void:
 	check(menu.is_open(), "open() reports the menu is up")
 	check(menu.visible, "open() shows the menu")
 	check(not paused, "opening the menu never pauses the tree")
+
+	# --- the party's mode --------------------------------------------------
+	var modes: Dictionary = menu.party_buttons()
+	check(modes.size() == Contracts.PARTY_MODES.size(),
+		"the party row carries one toggle per mode (%d)" % modes.size())
+	check(_lit(modes) == [Contracts.PARTY_OFFENSIVE],
+		"a fresh band's mode is the one lit (%s)" % str(_lit(modes)))
+	_click(modes[Contracts.PARTY_DEFENSIVE])
+	check(warband.party_mode == Contracts.PARTY_DEFENSIVE, "a press puts the party in that mode")
+	check(_lit(modes) == [Contracts.PARTY_DEFENSIVE],
+		"and that mode alone is lit (%s)" % str(_lit(modes)))
+	_click(modes[Contracts.PARTY_DEFENSIVE])
+	check(warband.party_mode == Contracts.PARTY_DEFENSIVE
+			and _lit(modes) == [Contracts.PARTY_DEFENSIVE],
+		"pressing the lit mode again keeps it lit (%s)" % str(_lit(modes)))
+	warband.set_party_mode(Contracts.PARTY_PASSIVE)
+	check(_lit(modes) == [Contracts.PARTY_PASSIVE],
+		"the row follows the books when the mode moves elsewhere (%s)" % str(_lit(modes)))
+	warband.lent = true
+	_click(modes[Contracts.PARTY_OFFENSIVE])
+	check(warband.party_mode == Contracts.PARTY_PASSIVE
+			and _lit(modes) == [Contracts.PARTY_PASSIVE],
+		"a guest's press leaves the host's mode lit (%s)" % str(_lit(modes)))
+	check(not menu.status_text().is_empty(), "and the refusal is said")
+	warband.lent = false
+	warband.set_party_mode(Contracts.PARTY_OFFENSIVE)
 
 	# --- save --------------------------------------------------------------
 	buttons["save"].pressed.emit()

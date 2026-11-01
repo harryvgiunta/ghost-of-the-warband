@@ -3,97 +3,58 @@ extends Node3D
 ## freed when it comes back up.
 ##
 ## The cave is an instance. Every descent builds a fresh copy of the same authored
-## floor - the rock, the light, the watchers in their dens and the demon at the
-## bottom - at `DelveArea.ORIGIN`, far outside the wood's map, and the climb out
+## floor - the rock, the light, the watchers in their dens and the demon in the
+## lair - at `DelveArea.ORIGIN`, far outside the wood's map, and the climb out
 ## frees all of it: nothing below outlives the party that went down. The floor is
 ## deterministic (fixed layout, fixed seeds, fixed names), so a co-op guest builds
 ## the same cave its host built and the host's mob snapshots land on bodies of the
 ## same name.
 ##
-## The layout is a chain of rooms joined by tunnels, each an axis-aligned
-## rectangle of floor in the cave's own frame (+Z back toward the mouth, -Z deeper).
-## The rock is derived, not authored: the rooms are rasterised onto a half-metre
-## grid and every cell that is not floor is rock, merged into as few boxes as the
-## grid allows. A tunnel's mouth is an opening because the floor runs through it,
-## and the squad's map (`squad_nav.gd`) sees the same boxes the bodies collide
-## with. Each room owns its own shell mesh, which keeps the renderer's per-object
-## light limit local: a room is lit by its own torches.
+## The plan is `delve_layout.gd`: ten areas round Gorehorn's lair, built for more
+## than one party - six shafts on the rim, each in its own area, each a landing and
+## a rope up. This node turns the plan into a place. The rooms are rasterised onto
+## a half-metre grid and every cell that is not floor is rock, merged into as few
+## collider boxes as the grid allows, so the squad's map (`squad_nav.gd`) sees the
+## same boxes the bodies collide with. What is drawn is more than the boxes: each
+## room's own shell carries only the rock nearest it (`Layout.wall_rects`), and
+## over it a rock skin, the dripstone and breakdown grown along it and the life
+## that moves in it (`delve_rock.gd`, `delve_dressing.gd`, `delve_fauna.gd`), so a
+## room - and every light the renderer counts against it - stays local, and a
+## room's lights and its life go quiet while the eye is far from it (`LIGHT_NEAR` /
+## `LIGHT_FAR`). The air follows the eye from area to area (`_settle_air`).
 ##
-## Watchers wait in two dens and the demon in the last room. A den sleeps - its
-## bodies stand their posts outside the world's hostile list, so nothing in the
-## next room picks a fight through rock - until one of its own sees a body, hears
-## a fight or takes a blow, or a body walks into the room. Then the whole den wakes
-## at once and joins `host.guards`, where the squad, the retarget and the session
-## find it like any other hostile.
+## Watchers wait in eight dens - ten bodies for every post a den was written with
+## (`Layout.den_members`) - and the demon in the lair. A den sleeps - its bodies
+## stand their posts outside the world's hostile list, so nothing in the next room
+## picks a fight through rock - until one of its own sees a body, hears a fight or
+## takes a blow, or a body walks into the room. Then the whole den wakes at once
+## and joins `host.guards`, where the squad, the retarget and the session find it
+## like any other hostile.
 
 ## A den just woke: `label` is how the HUD names it.
 signal den_woke(den_id: String, label: String)
 ## The floor's master died.
 signal master_slain(master_name: String)
 
+const Layout = preload("res://scripts/warband/delve_layout.gd")
+const Dressing = preload("res://scripts/warband/delve_dressing.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const DemonScript = preload("res://scripts/warband/delve_demon.gd")
 const NavScript = preload("res://scripts/warband/squad_nav.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
-const TextureLibrary = preload("res://scripts/world/texture_library.gd")
-const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
+const FaunaScript = preload("res://scripts/warband/delve_fauna.gd")
+const Loot = preload("res://scripts/warband/delve_loot.gd")
 
 const TITLE := "THE WEEPING HOLLOW"
 const FLOOR_LABEL := "FLOOR I"
-## The raster the rock is derived from, and the rock's height: every wall rises
-## to `TOP`, and each room's ceiling fills down from it to the room's own height.
-const CELL := 0.5
-const TOP := 11.0
-## The rock box the rooms are cut out of, in the cave's frame (x/z): every room
-## plus two metres of rock on every side.
-const BOUNDS := Rect2(-50.0, -96.0, 62.0, 104.0)
-## The rooms, mouth first. Edges sit on the half-metre grid, and every room shares
-## an edge with the next, which is the whole of how they connect. The ways between
-## the halls bend on purpose: a den's sight runs down a straight tunnel, and a den
-## that could see the landing - or the next den's fight - woke the moment a party
-## set foot below.
-const ROOMS := [
-	{"id": "mouth", "rect": Rect2(-7.0, -8.0, 14.0, 14.0), "height": 7.0},
-	{"id": "first_way", "rect": Rect2(-2.5, -15.0, 5.0, 7.0), "height": 4.6, "tunnel": true},
-	{"id": "first_bend", "rect": Rect2(-2.5, -20.0, 12.0, 5.0), "height": 4.6, "tunnel": true},
-	{"id": "first_drop", "rect": Rect2(4.5, -24.0, 5.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "den", "rect": Rect2(-10.0, -42.0, 20.0, 18.0), "height": 8.0},
-	{"id": "crawl", "rect": Rect2(-17.0, -40.0, 7.0, 4.0), "height": 4.2, "tunnel": true},
-	{"id": "crawl_turn", "rect": Rect2(-21.0, -40.0, 4.0, 14.0), "height": 4.6, "tunnel": true},
-	{"id": "crawl_out", "rect": Rect2(-24.0, -30.0, 3.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "ossuary", "rect": Rect2(-42.0, -48.0, 18.0, 26.0), "height": 8.5},
-	{"id": "descent", "rect": Rect2(-36.0, -66.0, 6.0, 18.0), "height": 5.0, "tunnel": true},
-	{"id": "lair", "rect": Rect2(-48.0, -94.0, 30.0, 28.0), "height": 10.0},
-]
-## The way up: a rope out of a hole in the mouth's roof.
-const EXIT_POINT := Vector3(0.0, 0.0, 3.6)
+## How close to a rope a body must stand to climb it.
 const EXIT_REACH := 2.6
-## Where the party lands: a ring in the mouth, facing down the first way.
-const ENTRY_CENTRE := Vector3(0.0, 0.0, -1.0)
+## The landing: a ring in front of the shaft's rope, one post per body.
 const ENTRY_RADIUS := 2.3
 const ENTRY_POSTS := 8
 ## The same lift every body in the world is spawned clear of its ground by.
 const SPAWN_LIFT := 0.12
-## The two dens. Every body faces its den's own entrance (`door`), so its sight
-## cone is what notices a party coming in.
-const DENS := [
-	{"id": "den", "label": "The watchers' den wakes.", "room": "den", "door": Vector3(7.0, 0.0, -24.0),
-		"members": [
-		{"species": "hollow_warden", "at": Vector3(-4.5, 0.0, -35.0)},
-		{"species": "ossuary_stalker", "at": Vector3(4.0, 0.0, -37.5)},
-		{"species": "hollow_warden", "at": Vector3(0.5, 0.0, -31.0)},
-	]},
-	{"id": "ossuary", "label": "The ossuary stirs.", "room": "ossuary", "door": Vector3(-24.0, 0.0, -28.0),
-		"members": [
-		{"species": "ossuary_stalker", "at": Vector3(-29.0, 0.0, -33.0)},
-		{"species": "gallowsroot", "at": Vector3(-35.0, 0.0, -40.0)},
-		{"species": "hollow_warden", "at": Vector3(-38.0, 0.0, -30.0)},
-		{"species": "ossuary_stalker", "at": Vector3(-30.5, 0.0, -44.0)},
-	]},
-]
-## The floor's master, at the far end of the lair, facing the way down.
-const MASTER_POINT := Vector3(-33.0, 0.0, -84.0)
 const MASTER_NAME := "HollowMaster"
 ## How often the sleepers are asked whether they have noticed anything.
 const WAKE_POLL := 0.25
@@ -101,6 +62,16 @@ const WAKE_POLL := 0.25
 const WAKE_INSET := 1.5
 const PACK_RADIUS := 14.0
 const SEED := 4409
+## The renderer draws only so many lights a frame: a room's lights burn while the
+## eye is within `LIGHT_NEAR` of the room and go out past `LIGHT_FAR` (between the
+## two they keep what they had), asked every `LIGHT_POLL` - and at once when the
+## eye jumps further than `EYE_JUMP`, as it does on a landing.
+const LIGHT_NEAR := 40.0
+const LIGHT_FAR := 48.0
+const LIGHT_POLL := 0.3
+const EYE_JUMP := 8.0
+## How fast the air eases to the next area's, per second.
+const AIR_EASE := 1.2
 
 ## The world this instance is built into.
 var host: Node3D = null
@@ -113,57 +84,84 @@ var nav = null
 var environment: Environment = null
 ## The floor's master (`delve_demon.gd`), or null once freed.
 var master = null
+## The floor's small life (`delve_fauna.gd`).
+var fauna = null
+## The host's dice for the floor's loot table (`delve_loot.gd`): drawn afresh every
+## descent, so a rare prize is not always on the same post.
+var loot_rng := RandomNumberGenerator.new()
 
-## `{id, label, rect, mobs, awake}` per den, in `DENS` order.
+## `{id, label, rect, mobs, awake}` per den, in `Layout.DENS` order, the lair last.
 var _dens: Array[Dictionary] = []
 var _poll := 0.0
-var _rock_material: Material
-var _floor_material: Material
-var _ceiling_material: Material
-var _boulder_material: Material
-var _glow_material: StandardMaterial3D
-var _stones: Array[ArrayMesh] = []
-var _spires: Array[ArrayMesh] = []
-var _lights := 0
+## One node per `Layout.ROOMS` entry, and the lights each room owns.
+var _rooms: Array[Node3D] = []
+var _room_lights: Array = []
+var _room_lit := PackedByteArray()
+var _light_clock := 0.0
+var _last_eye := Vector3(INF, INF, INF)
+## The area whose air the eye is in (`CaveKit.AREAS` key).
+var _air_area := "mouth"
 
 
 # --- reading ---------------------------------------------------------------
 
-## Where the rope hangs, in the world.
-func exit_point() -> Vector3:
-	return to_global(EXIT_POINT)
+## Where a shaft's rope hangs, in the world.
+func rope_point(landing_id: String) -> Vector3:
+	return to_global(_landing(landing_id)["rope"])
 
 
-## Whether a body stands close enough to the rope to climb it.
-func at_exit(actor) -> bool:
+## The shaft whose rope a body stands close enough to climb, or "".
+func exit_at(actor) -> String:
 	if actor == null or not is_instance_valid(actor):
-		return false
-	return (actor as Node3D).global_position.distance_to(exit_point()) <= EXIT_REACH
+		return ""
+	var at: Vector3 = (actor as Node3D).global_position
+	for landing in Layout.LANDINGS:
+		if at.distance_to(to_global(landing["rope"])) <= EXIT_REACH:
+			return str(landing["id"])
+	return ""
+
+
+## Whether a body stands close enough to any rope to climb it.
+func at_exit(actor) -> bool:
+	return not exit_at(actor).is_empty()
 
 
 ## Whether a world point is inside this instance: under its roof and over its
 ## floor. The eye is asked this every frame, so it is a box test.
 func contains(point: Vector3) -> bool:
 	var local := point - global_position
-	if local.y < -6.0 or local.y > TOP + 6.0:
+	if local.y < -6.0 or local.y > Layout.TOP + 6.0:
 		return false
-	return BOUNDS.has_point(Vector2(local.x, local.z))
+	return Layout.BOUNDS.has_point(Vector2(local.x, local.z))
 
 
-## The ground the party lands on, in the world, one post per body.
-func entry_posts(count: int) -> Array[Vector3]:
+## The ground a party lands on at one shaft, in the world, one post per body.
+func entry_posts(landing_id: String, count: int) -> Array[Vector3]:
+	var centre: Vector3 = _landing(landing_id)["centre"]
 	var out: Array[Vector3] = []
 	for index in maxi(1, count):
 		var angle := TAU * float(index % ENTRY_POSTS) / float(ENTRY_POSTS)
 		var radius := ENTRY_RADIUS + 1.2 * float(index / ENTRY_POSTS)
-		out.append(to_global(ENTRY_CENTRE + Vector3(cos(angle) * radius, SPAWN_LIFT,
-			sin(angle) * radius)))
+		out.append(to_global(centre + Vector3(cos(angle) * radius, SPAWN_LIFT, sin(angle) * radius)))
 	return out
 
 
-## The way a landed body faces: down the first way.
-func entry_yaw() -> float:
-	return 0.0
+## The way a body landed at a shaft faces: out of its chamber.
+func entry_yaw(landing_id: String) -> float:
+	return float(_landing(landing_id)["yaw"])
+
+
+## The area (`Layout.AREAS` key) a world point stands in, or "" in the rock.
+func area_at(point: Vector3) -> String:
+	var local := to_local(point)
+	return Layout.area_at(Vector2(local.x, local.z))
+
+
+## The rope a body at a world point reaches by the shortest walk: `{id, area,
+## metres}`, or {} from inside the rock.
+func nearest_rope(point: Vector3) -> Dictionary:
+	var local := to_local(point)
+	return Layout.nearest_landing(Vector2(local.x, local.z))
 
 
 ## Every hostile this floor fielded, the master included.
@@ -171,9 +169,15 @@ func mobs() -> Array:
 	var out: Array = []
 	for den in _dens:
 		out.append_array(den["mobs"])
-	if master != null:
-		out.append(master)
 	return out
+
+
+## One den's bodies (`Layout.DENS` id, or "lair" for the master).
+func den_mobs(den_id: String) -> Array:
+	for den in _dens:
+		if str(den["id"]) == den_id:
+			return den["mobs"]
+	return []
 
 
 ## Hostiles still standing.
@@ -189,7 +193,7 @@ func master_alive() -> bool:
 	return master != null and is_instance_valid(master) and bool(master.get("alive"))
 
 
-## Whether a den has woken (`id` from `DENS`, or "lair" for the master).
+## Whether a den has woken (`id` from `Layout.DENS`, or "lair" for the master).
 func is_awake(den_id: String) -> bool:
 	for den in _dens:
 		if str(den["id"]) == den_id:
@@ -197,8 +201,32 @@ func is_awake(den_id: String) -> bool:
 	return false
 
 
+## Every light the floor owns.
 func light_count() -> int:
-	return _lights
+	var count := 0
+	for lights in _room_lights:
+		count += (lights as Array).size()
+	return count
+
+
+## The floor's lights burning now: the ones in rooms near the eye.
+func lit_count() -> int:
+	var count := 0
+	for lights in _room_lights:
+		for lamp in lights:
+			if is_instance_valid(lamp) and (lamp as Light3D).visible:
+				count += 1
+	return count
+
+
+## Whether a room's lights are burning: the eye is near it, so its life moves.
+func room_lit(index: int) -> bool:
+	return index >= 0 and index < _room_lit.size() and _room_lit[index] != 0
+
+
+func _landing(landing_id: String) -> Dictionary:
+	var found := Layout.landing(landing_id)
+	return found if not found.is_empty() else Layout.LANDINGS[0]
 
 
 # --- the build ---------------------------------------------------------------
@@ -209,42 +237,31 @@ func light_count() -> int:
 func build(world: Node3D, as_replica: bool = false) -> void:
 	host = world
 	replica = as_replica
-	_materials()
+	loot_rng.randomize()
 	_build_environment()
 	_build_rock()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = SEED
-	for room in ROOMS:
-		_dress_room(room, rng)
-	_build_exit()
+	for index in Layout.ROOMS.size():
+		Dressing.dress_room(_rooms[index], index)
+	_build_ropes()
 	_build_lights()
 	_build_props()
 	_build_mobs()
+	fauna = FaunaScript.new()
+	fauna.name = "Fauna"
+	add_child(fauna)
+	fauna.build(self, _room_lights)
 	nav = NavScript.new()
-	nav.build(self, Rect2(global_position.x + BOUNDS.position.x,
-		global_position.z + BOUNDS.position.y, BOUNDS.size.x, BOUNDS.size.y), [],
-		global_position.y)
+	var bounds := Layout.BOUNDS
+	nav.build(self, Rect2(global_position.x + bounds.position.x, global_position.z + bounds.position.y,
+		bounds.size.x, bounds.size.y), [], global_position.y)
+	_sync_lights(true)
+	_settle_air(1.0)
 
 
-func _materials() -> void:
-	_rock_material = TextureLibrary.granite_material(Color(0.47, 0.44, 0.41))
-	_floor_material = TextureLibrary.granite_material(Color(0.34, 0.30, 0.27))
-	_ceiling_material = TextureLibrary.granite_material(Color(0.30, 0.28, 0.27))
-	_boulder_material = TextureLibrary.boulder_material(Color(0.62, 0.58, 0.54))
-	_glow_material = StandardMaterial3D.new()
-	_glow_material.albedo_color = Color(0.55, 0.95, 0.80)
-	_glow_material.emission_enabled = true
-	_glow_material.emission = Color(0.30, 0.95, 0.72)
-	_glow_material.emission_energy_multiplier = 1.6
-	_glow_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for variant in 4:
-		_stones.append(RockKit.mesh("outcrop" if variant % 2 == 0 else "boulder", 9100 + variant * 37))
-	for variant in 3:
-		_spires.append(RockKit.mesh("spire", 9300 + variant * 41))
-
-
-## Underground: no sky, a dim warm ambient that keeps rock readable between the
-## torches, and a close brown haze so the far end of a hall is a guess.
+## Underground: no sky, a dim ambient that keeps rock readable between the torches,
+## and a close haze so the far end of a hall is a guess. Both take the colour of the
+## area the eye is in (`CaveKit.AREAS` fog/ambient), easing over as it walks
+## through.
 func _build_environment() -> void:
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_COLOR
@@ -272,112 +289,46 @@ func _build_environment() -> void:
 	environment.glow_hdr_threshold = 1.1
 
 
-## The rock: one floor slab under everything, a box for every run of grid that is
-## not floor, and a ceiling over every room. Each room's share of the rock is drawn
-## by that room's own mesh.
+## The rock: one floor slab under everything, a collider box for every run of grid
+## that is not floor, and a ceiling over every room. Each room's node draws its
+## own floor, roof and the rock nearest it in its area's stone.
 func _build_rock() -> void:
 	var solids := StaticBody3D.new()
 	solids.name = "Rock"
 	solids.collision_layer = 1
 	solids.collision_mask = 0
 	add_child(solids)
-	_box_collider(solids, Vector3(BOUNDS.size.x, 1.0, BOUNDS.size.y),
-		Vector3(BOUNDS.get_center().x, -0.5, BOUNDS.get_center().y))
-	var shells: Dictionary = {}
-	for room in ROOMS:
+	var bounds := Layout.BOUNDS
+	_box_collider(solids, Vector3(bounds.size.x, 1.0, bounds.size.y),
+		Vector3(bounds.get_center().x, -0.5, bounds.get_center().y))
+	var walls: Array = Layout.wall_rects()
+	for index in Layout.ROOMS.size():
+		var room: Dictionary = Layout.ROOMS[index]
 		var node := Node3D.new()
 		node.name = "Room_%s" % str(room["id"])
 		add_child(node)
+		_rooms.append(node)
+		_room_lights.append([])
+		var stone: Dictionary = Dressing.stone(str(room["area"]))
 		var shell := VillageKit.Merged.new()
 		var rect: Rect2 = room["rect"]
 		var height := float(room["height"])
 		VillageKit.add_box(shell, Vector3(rect.size.x, 0.2, rect.size.y),
-			Vector3(rect.get_center().x, -0.1, rect.get_center().y), _floor_material)
-		var ceiling := Vector3(rect.size.x, TOP - height, rect.size.y)
-		var ceiling_at := Vector3(rect.get_center().x, (height + TOP) * 0.5, rect.get_center().y)
-		VillageKit.add_box(shell, ceiling, ceiling_at, _ceiling_material)
+			Vector3(rect.get_center().x, -0.1, rect.get_center().y), stone["floor"])
+		var ceiling := Vector3(rect.size.x, Layout.TOP - height, rect.size.y)
+		var ceiling_at := Vector3(rect.get_center().x, (height + Layout.TOP) * 0.5, rect.get_center().y)
+		VillageKit.add_box(shell, ceiling, ceiling_at, stone["roof"])
 		_box_collider(solids, ceiling, ceiling_at)
-		shells[str(room["id"])] = {"node": node, "shell": shell}
-	for block in rock_rects():
-		var size := Vector3(block.size.x, TOP, block.size.y)
-		var at := Vector3(block.get_center().x, TOP * 0.5, block.get_center().y)
-		_box_collider(solids, size, at)
-		var beside := _room_touching(block)
-		if beside.is_empty():
-			continue
-		VillageKit.add_box(shells[beside]["shell"], size, at, _rock_material)
-	for room_id in shells:
-		shells[room_id]["shell"].commit(shells[room_id]["node"], "Shell", false)
-
-
-## The rock as rectangles: every half-metre cell of `BOUNDS` whose centre is not
-## on a room's floor, merged greedily into the widest, then tallest, run.
-static func rock_rects() -> Array[Rect2]:
-	var cols := int(ceil(BOUNDS.size.x / CELL))
-	var rows := int(ceil(BOUNDS.size.y / CELL))
-	var open := PackedByteArray()
-	open.resize(cols * rows)
-	open.fill(0)
-	# Each room fills the cells it covers; its edges sit on the grid, so a cell is
-	# wholly floor or wholly rock.
-	for room in ROOMS:
-		var rect: Rect2 = room["rect"]
-		var x0 := int(round((rect.position.x - BOUNDS.position.x) / CELL))
-		var z0 := int(round((rect.position.y - BOUNDS.position.y) / CELL))
-		var x1 := int(round((rect.end.x - BOUNDS.position.x) / CELL))
-		var z1 := int(round((rect.end.y - BOUNDS.position.y) / CELL))
-		for z in range(maxi(z0, 0), mini(z1, rows)):
-			for x in range(maxi(x0, 0), mini(x1, cols)):
-				open[z * cols + x] = 1
-	var used := PackedByteArray()
-	used.resize(cols * rows)
-	used.fill(0)
-	var out: Array[Rect2] = []
-	for z in rows:
-		var x := 0
-		while x < cols:
-			var index := z * cols + x
-			if open[index] != 0 or used[index] != 0:
-				x += 1
-				continue
-			var width := 1
-			while x + width < cols and open[index + width] == 0 and used[index + width] == 0:
-				width += 1
-			var depth := 1
-			while z + depth < rows:
-				var whole := true
-				for step in width:
-					var probe := (z + depth) * cols + x + step
-					if open[probe] != 0 or used[probe] != 0:
-						whole = false
-						break
-				if not whole:
-					break
-				depth += 1
-			for dz in depth:
-				for dx in width:
-					used[(z + dz) * cols + x + dx] = 1
-			out.append(Rect2(BOUNDS.position.x + float(x) * CELL, BOUNDS.position.y + float(z) * CELL,
-				float(width) * CELL, float(depth) * CELL))
-			x += width
-	return out
-
-
-## Whether a cave-local x/z point is on some room's floor.
-static func is_floor(point: Vector2) -> bool:
-	for room in ROOMS:
-		if (room["rect"] as Rect2).has_point(point):
-			return true
-	return false
-
-
-## The room a rock block borders, or "" for rock no room can see.
-func _room_touching(block: Rect2) -> String:
-	var grown := block.grow(0.25)
-	for room in ROOMS:
-		if grown.intersects(room["rect"] as Rect2):
-			return str(room["id"])
-	return ""
+		for block in walls[index]:
+			var wall: Rect2 = block
+			VillageKit.add_box(shell, Vector3(wall.size.x, Layout.TOP, wall.size.y),
+				Vector3(wall.get_center().x, Layout.TOP * 0.5, wall.get_center().y), stone["wall"])
+		shell.commit(node, "Shell", false)
+	_room_lit.resize(Layout.ROOMS.size())
+	_room_lit.fill(1)
+	for block in Layout.rock_rects():
+		_box_collider(solids, Vector3(block.size.x, Layout.TOP, block.size.y),
+			Vector3(block.get_center().x, Layout.TOP * 0.5, block.get_center().y))
 
 
 func _box_collider(solids: StaticBody3D, size: Vector3, at: Vector3) -> void:
@@ -389,296 +340,34 @@ func _box_collider(solids: StaticBody3D, size: Vector3, at: Vector3) -> void:
 	solids.add_child(holder)
 
 
-## Broken stone along every wall foot, stalactites in every roof, a few
-## stalagmites at the walls: what turns boxes of rock into a cave. All of it is
-## presentation, batched per room, and none of it stands where a body walks.
-func _dress_room(room: Dictionary, rng: RandomNumberGenerator) -> void:
-	var node := get_node("Room_%s" % str(room["id"])) as Node3D
-	var rect: Rect2 = room["rect"]
-	var tunnel := bool(room.get("tunnel", false))
-	var height := float(room["height"])
-	var rocks := VillageKit.Merged.new()
-	var step := 1.8 if tunnel else 2.3
-	var edges := [
-		[Vector2(rect.position.x, rect.position.y), Vector2(rect.end.x, rect.position.y), Vector2(0.0, 1.0)],
-		[Vector2(rect.position.x, rect.end.y), Vector2(rect.end.x, rect.end.y), Vector2(0.0, -1.0)],
-		[Vector2(rect.position.x, rect.position.y), Vector2(rect.position.x, rect.end.y), Vector2(1.0, 0.0)],
-		[Vector2(rect.end.x, rect.position.y), Vector2(rect.end.x, rect.end.y), Vector2(-1.0, 0.0)],
-	]
-	for edge in edges:
-		var a: Vector2 = edge[0]
-		var b: Vector2 = edge[1]
-		var inward: Vector2 = edge[2]
-		var along := (b - a).normalized()
-		var length := a.distance_to(b)
-		var t := rng.randf_range(0.2, 1.0)
-		while t < length - 0.2:
-			var point := a + along * t
-			# A mouth into the next room is floor on the far side: no stone there.
-			if not is_floor(point - inward * 0.75):
-				var size := rng.randf_range(0.35, 0.6) if tunnel else rng.randf_range(0.5, 1.0)
-				var at := Vector3(point.x - inward.x * size * 0.2, 0.0, point.y - inward.y * size * 0.2)
-				RockKit.add_stone(rocks, _boulder_material, _stones[rng.randi() % _stones.size()],
-					at, size, rng.randf_range(0.0, TAU), 0.42, rng.randf_range(-0.25, 0.25))
-				if not tunnel and rng.randf() < 0.22:
-					_stalagmite(rocks, at - Vector3(inward.x, 0.0, inward.y) * 0.1, rng)
-			t += step * rng.randf_range(0.7, 1.3)
-	var hanging := int(rect.get_area() / (26.0 if tunnel else 16.0))
-	for index in hanging:
-		var at := Vector2(rng.randf_range(rect.position.x + 1.0, rect.end.x - 1.0),
-			rng.randf_range(rect.position.y + 1.0, rect.end.y - 1.0))
-		_stalactite(rocks, Vector3(at.x, 0.0, at.y), height, rng, tunnel)
-	rocks.commit(node, "Stone", false)
+## Every shaft's rope and the night that falls down it.
+func _build_ropes() -> void:
+	for landing in Layout.LANDINGS:
+		var index := Layout.room_index(str(landing["room"]))
+		_own(index, Dressing.rope(_rooms[index], landing, float(Layout.ROOMS[index]["height"])))
 
 
-func _stalactite(m, at: Vector3, ceiling: float, rng: RandomNumberGenerator, short: bool) -> void:
-	var mesh: ArrayMesh = _spires[rng.randi() % _spires.size()]
-	var bounds := mesh.get_aabb()
-	var width := rng.randf_range(0.18, 0.34) if short else rng.randf_range(0.22, 0.5)
-	var stretch := rng.randf_range(0.7, 1.4)
-	var basis := (Basis(Vector3.UP, rng.randf_range(0.0, TAU)) * Basis(Vector3.RIGHT, PI)) \
-		.scaled_local(Vector3(width, width * stretch, width))
-	# Upside down, the mesh's lowest point is its root: sink it into the roof.
-	var root := -bounds.position.y * width * stretch
-	m.add(mesh, Transform3D(basis, Vector3(at.x, ceiling + 0.15 - root, at.z)), _boulder_material)
-
-
-func _stalagmite(m, at: Vector3, rng: RandomNumberGenerator) -> void:
-	var mesh: ArrayMesh = _spires[rng.randi() % _spires.size()]
-	var bounds := mesh.get_aabb()
-	var width := rng.randf_range(0.2, 0.38)
-	var stretch := rng.randf_range(0.8, 1.5)
-	var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled_local(
-		Vector3(width, width * stretch, width))
-	m.add(mesh, Transform3D(basis, Vector3(at.x, -0.12 - bounds.position.y * width * stretch, at.z)),
-		_boulder_material)
-
-
-## The way up: a knotted rope out of a hole of night in the mouth's roof, the cold
-## light that falls through it, and a word on the stone so it is found.
-func _build_exit() -> void:
-	var node := get_node("Room_mouth") as Node3D
-	var mats: Dictionary = CampKit.materials()
-	var m := VillageKit.Merged.new()
-	var roof := float(ROOMS[0]["height"])
-	var hang := EXIT_POINT + Vector3(0.0, roof, 0.0)
-	VillageKit.add_beam(m, hang, EXIT_POINT + Vector3(0.0, 0.25, 0.0), 0.045, mats["drift"], 6)
-	var knots := int((roof - 0.6) / 0.9)
-	for index in knots:
-		VillageKit.add_ball(m, 0.075, EXIT_POINT + Vector3(0.0, 0.7 + float(index) * 0.9, 0.0),
-			mats["drift"], Vector3(1.0, 0.8, 1.0), 6, 4)
-	m.commit(node, "Rope", false)
-	var sky := StandardMaterial3D.new()
-	sky.albedo_color = Color(0.55, 0.66, 0.85)
-	sky.emission_enabled = true
-	sky.emission = Color(0.42, 0.52, 0.78)
-	sky.emission_energy_multiplier = 1.3
-	sky.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var hole := MeshInstance3D.new()
-	hole.name = "SkyHole"
-	var disc := CylinderMesh.new()
-	disc.top_radius = 0.9
-	disc.bottom_radius = 0.9
-	disc.height = 0.04
-	disc.radial_segments = 18
-	hole.mesh = disc
-	hole.material_override = sky
-	hole.position = hang - Vector3(0.0, 0.03, 0.0)
-	hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.add_child(hole)
-	var shaft := SpotLight3D.new()
-	shaft.name = "NightShaft"
-	shaft.position = hang - Vector3(0.0, 0.2, 0.0)
-	shaft.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
-	shaft.light_color = Color(0.62, 0.72, 0.95)
-	shaft.light_energy = 3.0
-	shaft.spot_range = roof + 2.0
-	shaft.spot_angle = 32.0
-	shaft.shadow_enabled = false
-	node.add_child(shaft)
-	_lights += 1
-	var word := Label3D.new()
-	word.name = "WayUp"
-	word.text = "THE WAY UP"
-	word.font_size = 56
-	word.pixel_size = 0.006
-	word.outline_size = 10
-	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	word.modulate = Color(0.86, 0.90, 1.0)
-	word.outline_modulate = Color(0.02, 0.03, 0.06, 0.9)
-	word.position = EXIT_POINT + Vector3(0.0, 2.7, 0.0)
-	node.add_child(word)
-
-
-## Torches in the walls, a fire in the den, cold fungus in the ossuary, braziers
-## round the lair. Every light belongs to the room it lights.
 func _build_lights() -> void:
-	_sconce("mouth", Vector3(-6.95, 0.0, -2.0), Vector3(1.0, 0.0, 0.0), 11)
-	_sconce("mouth", Vector3(6.95, 0.0, -4.0), Vector3(-1.0, 0.0, 0.0), 12)
-	_fire("mouth", Vector3(-3.6, 0.0, 3.0), 9)
-	_sconce("first_bend", Vector3(3.0, 0.0, -19.95), Vector3(0.0, 0.0, 1.0), 13)
-	_sconce("den", Vector3(-9.95, 0.0, -30.0), Vector3(1.0, 0.0, 0.0), 17)
-	_sconce("den", Vector3(9.95, 0.0, -39.0), Vector3(-1.0, 0.0, 0.0), 19)
-	_fire("den", Vector3(1.5, 0.0, -36.0), 23)
-	_sconce("crawl_turn", Vector3(-20.95, 0.0, -34.0), Vector3(1.0, 0.0, 0.0), 29)
-	_sconce("ossuary", Vector3(-41.95, 0.0, -26.0), Vector3(1.0, 0.0, 0.0), 31)
-	_sconce("ossuary", Vector3(-24.05, 0.0, -44.0), Vector3(-1.0, 0.0, 0.0), 37)
-	_fungus("ossuary", Vector3(-40.6, 0.0, -45.8), 41)
-	_fungus("ossuary", Vector3(-26.0, 0.0, -23.4), 43)
-	_sconce("descent", Vector3(-35.95, 0.0, -57.0), Vector3(1.0, 0.0, 0.0), 47)
-	for spot in [Vector3(-44.0, 0.0, -70.5), Vector3(-22.0, 0.0, -70.5),
-			Vector3(-44.0, 0.0, -89.5), Vector3(-22.0, 0.0, -89.5)]:
-		_brazier("lair", spot, 53 + int(absf(spot.x + spot.z)))
+	for order in Layout.LIGHTS.size():
+		var spec: Dictionary = Layout.LIGHTS[order]
+		var index := Layout.room_index(str(spec["room"]))
+		_own(index, Dressing.light(_rooms[index], spec, SEED + 11 + order * 13))
 
 
-func _sconce(room_id: String, at: Vector3, inward: Vector3, seed_value: int) -> void:
-	var node := get_node("Room_%s" % room_id) as Node3D
-	var host_node := Node3D.new()
-	host_node.name = "Sconce%d" % seed_value
-	host_node.position = at
-	host_node.rotation.y = atan2(inward.x, inward.z)
-	node.add_child(host_node)
-	var mats: Dictionary = CampKit.materials()
-	var iron: Dictionary = CampDressing.metal()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value
-	var m := CampKit.Merged.new()
-	CampKit.add_beam(m, Vector3(0.0, 2.05, -0.1), Vector3(0.0, 2.05, 0.30), 0.03, iron["iron"], 5)
-	CampKit.add_ring(m, Vector3(0.0, 2.05, 0.34), 0.0, 0.05, 0.08, iron["iron"], 0.0, 8, 3)
-	CampKit.add_beam(m, Vector3(0.0, 1.75, 0.30), Vector3(0.0, 2.36, 0.40), 0.045, mats["drift_dark"], 6, 0.035)
-	CampKit.add_ball(m, 0.07, Vector3(0.0, 2.38, 0.40), mats["fire_core"], Vector3(1.0, 0.6, 1.0), 7, 4)
-	var saved: Transform3D = m.push(Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 0.40)))
-	FireFx.flame_cards(m, mats["flame"], rng, 0.42, 2.36)
-	m.group = saved
-	m.commit(host_node, "Torch")
-	var light := FireFlicker.new()
-	light.name = "TorchLight"
-	light.position = Vector3(0.0, 2.6, 0.62)
-	light.light_color = Color(1.0, 0.58, 0.26)
-	light.light_energy = 3.0
-	light.omni_range = 13.0
-	light.omni_attenuation = 1.0
-	light.flicker = 0.24
-	light.shadow_enabled = false
-	host_node.add_child(light)
-	_lights += 1
-
-
-func _fire(room_id: String, at: Vector3, seed_value: int) -> void:
-	var node := get_node("Room_%s" % room_id) as Node3D
-	var host_node := Node3D.new()
-	host_node.name = "Fire%d" % seed_value
-	host_node.position = at
-	node.add_child(host_node)
-	CampKit.fire_ring(host_node, CampKit.materials(), seed_value)
-	var light := host_node.get_node_or_null("CampFireLight") as OmniLight3D
-	if light != null:
-		light.light_energy = 2.0
-		light.omni_range = 10.0
-	_lights += 1
-
-
-## Pale growth on the wet stone at a wall's foot, and the cold light it gives.
-func _fungus(room_id: String, at: Vector3, seed_value: int) -> void:
-	var node := get_node("Room_%s" % room_id) as Node3D
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value
-	var m := VillageKit.Merged.new()
-	for index in 14:
-		var spot := at + Vector3(rng.randf_range(-1.1, 1.1), rng.randf_range(0.02, 0.9),
-			rng.randf_range(-1.1, 1.1))
-		VillageKit.add_ball(m, rng.randf_range(0.04, 0.11), spot, _glow_material,
-			Vector3(1.0, 0.55, 1.0), 6, 4)
-	m.commit(node, "Fungus%d" % seed_value, false)
-	var light := OmniLight3D.new()
-	light.name = "FungusLight%d" % seed_value
-	light.position = at + Vector3(0.0, 0.8, 0.0)
-	light.light_color = Color(0.40, 0.95, 0.78)
-	light.light_energy = 1.1
-	light.omni_range = 7.5
-	light.omni_attenuation = 1.3
-	light.shadow_enabled = false
-	node.add_child(light)
-	_lights += 1
-
-
-func _brazier(room_id: String, at: Vector3, seed_value: int) -> void:
-	var node := get_node("Room_%s" % room_id) as Node3D
-	var host_node := Node3D.new()
-	host_node.name = "Brazier%d" % seed_value
-	host_node.position = at
-	node.add_child(host_node)
-	var mats: Dictionary = CampKit.materials()
-	var iron: Dictionary = CampDressing.metal()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value
-	var m := CampKit.Merged.new()
-	for index in 3:
-		var angle := TAU * float(index) / 3.0
-		CampKit.add_beam(m, Vector3(cos(angle) * 0.34, 0.0, sin(angle) * 0.34),
-			Vector3(cos(angle) * 0.18, 0.95, sin(angle) * 0.18), 0.035, iron["iron"], 5)
-	CampKit.add_ring(m, Vector3(0.0, 1.0, 0.0), 0.0, 0.28, 0.36, iron["iron"], 0.0, 12, 4)
-	CampKit.add_ball(m, 0.26, Vector3(0.0, 1.04, 0.0), mats["ember"], Vector3(1.1, 0.35, 1.1), 8, 4)
-	CampKit.add_ball(m, 0.12, Vector3(0.0, 1.12, 0.0), mats["fire_core"], Vector3(1.0, 0.5, 1.0), 7, 4)
-	FireFx.flame_cards(m, mats["flame"], rng, 0.85, 1.1)
-	m.commit(host_node, "Brazier")
-	FireFx.embers(host_node, 1.14, 0.22, 14)
-	var light := FireFlicker.new()
-	light.name = "BrazierLight"
-	light.position = Vector3(0.0, 1.9, 0.0)
-	light.light_color = Color(1.0, 0.42, 0.18)
-	light.light_energy = 2.6
-	light.omni_range = 13.0
-	light.omni_attenuation = 1.0
-	light.flicker = 0.28
-	light.shadow_enabled = false
-	host_node.add_child(light)
-	_lights += 1
-
-
-## What the watchers live among, and the lair's altar of the dead.
+## What each area is read from: one merged prop mesh per room, the kit pieces that
+## stand on their own, and a `Solids` body per room for whatever stops a body.
 func _build_props() -> void:
-	var mats: Dictionary = VillageKit.materials()
-	var den := get_node("Room_den") as Node3D
-	var den_solids := _solids(den, "DenSolids")
-	var pole := Node3D.new()
-	pole.name = "DenTotem"
-	pole.position = Vector3(-6.5, 0.0, -40.0)
-	den.add_child(pole)
-	VillageKit.totem(pole, mats, den_solids, 3.8, 6611)
-	var clutter := VillageKit.Merged.new()
-	VillageKit.skull_stakes(clutter, mats, Vector3(-6.5, 0.0, -26.5), 0.4, 4, 0.85, 6613)
-	VillageKit.bone_heap(clutter, mats, Vector3(-8.0, 0.0, -33.0), 0.8, 6617)
-	VillageKit.bone_heap(clutter, mats, Vector3(7.0, 0.0, -40.5), 2.1, 6619)
-	clutter.commit(den, "DenClutter")
-	var ossuary := get_node("Room_ossuary") as Node3D
-	var bones := VillageKit.Merged.new()
-	for spot in [Vector3(-40.0, 0.0, -24.5), Vector3(-26.5, 0.0, -36.0), Vector3(-40.5, 0.0, -38.0),
-			Vector3(-33.0, 0.0, -46.5), Vector3(-27.0, 0.0, -24.0)]:
-		VillageKit.bone_heap(bones, mats, spot, spot.x * 0.3, 6700 + int(absf(spot.z)))
-	VillageKit.skull_stakes(bones, mats, Vector3(-36.0, 0.0, -23.0), 0.0, 5, 0.9, 6721)
-	bones.commit(ossuary, "OssuaryBones")
-	var lair := get_node("Room_lair") as Node3D
-	var lair_solids := _solids(lair, "LairSolids")
-	var altar := Node3D.new()
-	altar.name = "LairAltar"
-	altar.position = MASTER_POINT + Vector3(0.0, 0.0, -6.0)
-	lair.add_child(altar)
-	VillageKit.sacrifice_ground(altar, mats, lair_solids, 6801)
-	var lair_clutter := VillageKit.Merged.new()
-	VillageKit.skull_stakes(lair_clutter, mats, Vector3(-40.0, 0.0, -78.0), 1.1, 5, 0.95, 6811)
-	VillageKit.skull_stakes(lair_clutter, mats, Vector3(-26.0, 0.0, -78.0), -1.1, 5, 0.95, 6813)
-	for spot in [Vector3(-45.5, 0.0, -80.0), Vector3(-20.5, 0.0, -84.0), Vector3(-41.0, 0.0, -92.0),
-			Vector3(-24.0, 0.0, -68.5)]:
-		VillageKit.bone_heap(lair_clutter, mats, spot, spot.z * 0.2, 6820 + int(absf(spot.x)))
-	# A ring of old blood the master stands in.
-	var stain := StandardMaterial3D.new()
-	stain.albedo_color = Color(0.20, 0.03, 0.03)
-	stain.roughness = 0.35
-	VillageKit.add_cyl_disc(lair_clutter, 3.2, 0.02, MASTER_POINT + Vector3(0.0, 0.01, 0.0), stain, 28)
-	VillageKit.add_ring(lair_clutter, MASTER_POINT + Vector3(0.0, 0.03, 0.0), 0.0, 3.3, 3.45,
-		mats["bone"], 0.0, 28, 4)
-	lair_clutter.commit(lair, "LairClutter")
+	var clutter := {}
+	var solids := {}
+	for order in Layout.PROPS.size():
+		var spec: Dictionary = Layout.PROPS[order]
+		var index := Layout.room_index(str(spec["room"]))
+		if not clutter.has(index):
+			clutter[index] = VillageKit.Merged.new()
+			solids[index] = _solids(_rooms[index], "Solids")
+		_own(index, Dressing.prop(_rooms[index], clutter[index], solids[index], spec, SEED + 501 + order * 17))
+	for index in clutter:
+		clutter[index].commit(_rooms[index], "Props", false)
 
 
 func _solids(parent: Node3D, label: String) -> StaticBody3D:
@@ -690,36 +379,102 @@ func _solids(parent: Node3D, label: String) -> StaticBody3D:
 	return solids
 
 
+func _own(index: int, lights: Array) -> void:
+	if index < 0:
+		return
+	(_room_lights[index] as Array).append_array(lights)
+
+
+# --- the lights --------------------------------------------------------------
+
+func _process(delta: float) -> void:
+	_light_clock += delta
+	var jumped := false
+	if _light_clock < LIGHT_POLL:
+		var camera := get_viewport().get_camera_3d()
+		jumped = camera != null and camera.global_position.distance_to(_last_eye) >= EYE_JUMP
+		if not jumped:
+			_settle_air(delta)
+			return
+	_light_clock = 0.0
+	_sync_lights(false)
+	# A landing puts the eye in new air at once; a walk eases into it.
+	_settle_air(1.0 / AIR_EASE if jumped else delta)
+
+
+## Light the rooms near the eye and put out the rest, and note the area the eye is
+## in. A room without lights is still marked near or far: its life moves only near.
+## With no camera there is nothing to save, and every light keeps burning.
+func _sync_lights(force: bool) -> void:
+	if not is_inside_tree():
+		return
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	_last_eye = camera.global_position
+	var eye := to_local(_last_eye)
+	var flat := Vector2(eye.x, eye.z)
+	var area := Layout.area_at(flat)
+	if not area.is_empty():
+		_air_area = area
+	for index in _room_lights.size():
+		var rect: Rect2 = Layout.ROOMS[index]["rect"]
+		var gap := Vector2(maxf(maxf(rect.position.x - flat.x, flat.x - rect.end.x), 0.0),
+			maxf(maxf(rect.position.y - flat.y, flat.y - rect.end.y), 0.0)).length()
+		var lit := _room_lit[index] != 0
+		var want := lit
+		if gap <= LIGHT_NEAR:
+			want = true
+		elif gap > LIGHT_FAR:
+			want = false
+		if want == lit and not force:
+			continue
+		_room_lit[index] = 1 if want else 0
+		for lamp in _room_lights[index]:
+			if is_instance_valid(lamp):
+				(lamp as Light3D).visible = want
+
+
+## Ease the haze and the ambient toward the air of the area the eye is in.
+func _settle_air(delta: float) -> void:
+	if environment == null:
+		return
+	var spec: Dictionary = CaveKit.AREAS.get(_air_area, CaveKit.AREAS["mouth"])
+	var k := clampf(delta * AIR_EASE, 0.0, 1.0)
+	environment.fog_light_color = environment.fog_light_color.lerp(spec["fog"], k)
+	environment.ambient_light_color = environment.ambient_light_color.lerp(spec["ambient"], k)
+	environment.fog_density = lerpf(environment.fog_density, float(spec["haze"]), k)
+
+
 # --- the hostiles ------------------------------------------------------------
 
 func _build_mobs() -> void:
 	var mobs_root := Node3D.new()
 	mobs_root.name = "Mobs"
 	add_child(mobs_root)
-	for spec in DENS:
-		var room: Dictionary = _room(str(spec["room"]))
+	for spec in Layout.DENS:
 		var members: Array = []
 		var index := 0
-		for row in spec["members"]:
+		for row in Layout.den_members(spec):
 			index += 1
 			var at: Vector3 = row["at"]
-			var door: Vector3 = spec["door"]
+			var face: Vector3 = row["face"]
 			members.append(_spawn_watcher(mobs_root, "Hollow%s%d" % [str(spec["id"]).capitalize(), index],
-				str(row["species"]), at, atan2(-(door.x - at.x), -(door.z - at.z))))
+				str(row["species"]), at, atan2(-(face.x - at.x), -(face.z - at.z))))
 		MobWander.assign_all(members, PACK_RADIUS)
 		_dens.append({"id": str(spec["id"]), "label": str(spec["label"]),
-			"rect": room["rect"], "mobs": members, "awake": false})
+			"rect": Layout.room(str(spec["room"]))["rect"], "mobs": members, "awake": false})
 	master = DemonScript.new()
 	master.name = MASTER_NAME
-	master.position = MASTER_POINT + Vector3(0.0, SPAWN_LIFT, 0.0)
-	master.rotation.y = PI
+	master.position = Layout.MASTER_POINT + Vector3(0.0, SPAWN_LIFT, 0.0)
+	master.rotation.y = Layout.MASTER_YAW
 	mobs_root.add_child(master)
 	master.home = master.global_position
 	master.safe_center = _safe_center()
 	_wire(master)
 	master.defeated.connect(_on_master_defeated)
 	_dens.append({"id": "lair", "label": "Gorehorn rises from the blood.",
-		"rect": _room("lair")["rect"], "mobs": [master], "awake": false})
+		"rect": Layout.room(Layout.MASTER_ROOM)["rect"], "mobs": [master], "awake": false})
 	if replica:
 		# The host drives every body: a guest's copies are replicas from their
 		# first frame and are on the hostile list so the snapshots find them.
@@ -744,9 +499,17 @@ func _wire(mob) -> void:
 	if replica or host == null:
 		return
 	if host.has_method("_on_enemy_defeated"):
-		mob.defeated.connect(Callable(host, "_on_enemy_defeated"))
+		mob.defeated.connect(_on_mob_defeated)
 	if host.has_method("_on_enemy_attack"):
 		mob.attacked.connect(Callable(host, "_on_enemy_attack"))
+
+
+## A body below falls: the floor's loot table settles what it leaves, then the
+## world pays and books the kill exactly as it does above.
+func _on_mob_defeated(enemy, reward: int) -> void:
+	if is_instance_valid(enemy):
+		Loot.settle(enemy, enemy == master, loot_rng)
+	host._on_enemy_defeated(enemy, reward)
 
 
 ## The town's ring is the one ground nobody hunts on; the cave is nowhere near it.
@@ -755,13 +518,6 @@ func _safe_center() -> Vector3:
 	if town != null and is_instance_valid(town):
 		return (town as Node3D).global_position
 	return Vector3(0.0, 0.0, 1.0e6)
-
-
-func _room(room_id: String) -> Dictionary:
-	for room in ROOMS:
-		if str(room["id"]) == room_id:
-			return room
-	return {}
 
 
 func _enlist(mob) -> void:
@@ -848,8 +604,9 @@ func _on_master_defeated(_enemy, _reward: int) -> void:
 
 # --- leaving ---------------------------------------------------------------
 
-## Take this floor out of the world: its bodies off the hostile list, and every
-## drop and missile still lying inside it freed with it. The cave's own nodes -
+## Take this floor out of the world: its bodies off the hostile list, every drop
+## and missile still lying inside it freed with it, and every body left in it -
+## the party's own dead included - no longer a container. The cave's own nodes -
 ## rock, light, corpses, ragdolls - go with the node.
 func teardown() -> void:
 	if host != null and is_instance_valid(host):
@@ -874,6 +631,11 @@ func teardown() -> void:
 			for pickup in loot.pickups():
 				if is_instance_valid(pickup) and contains(pickup.global_position):
 					pickup.queue_free()
+			# The party's dead stay below, and so does whatever nobody took back
+			# off them: no body down here is a container once the floor is gone.
+			for corpse_id in loot.corpse_ids():
+				if contains(loot.corpse_position(corpse_id)):
+					loot.forget_corpse(corpse_id)
 	_dens.clear()
 	master = null
 	queue_free()

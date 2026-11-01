@@ -507,7 +507,8 @@ func _refresh_squad() -> void:
 	for merc_id in _warband.roster.ids():
 		if not _warband.roster.is_reserve(merc_id):
 			ids.append(merc_id)
-	var signature := "%d|%d" % [ids.size(), _merc_id]
+	var mode := str(_warband.get("party_mode")) if _warband.get("party_mode") != null else ""
+	var signature := "%d|%d|%s" % [ids.size(), _merc_id, mode]
 	for merc_id in ids:
 		var record: Dictionary = _warband.roster.find(merc_id)
 		signature += "|%d:%d:%d" % [merc_id,
@@ -515,7 +516,10 @@ func _refresh_squad() -> void:
 	if signature == _squad_sig:
 		return
 	_squad_sig = signature
+	# Out of the box at once, not at the end of the frame: the party line keeps its
+	# own name across a repaint.
 	for child in _squad_box.get_children():
+		_squad_box.remove_child(child)
 		child.queue_free()
 	for index in ids.size():
 		var merc_id := ids[index]
@@ -541,6 +545,14 @@ func _refresh_squad() -> void:
 				row.modulate = Color(0.95, 0.95, 0.95)
 		row.text = "%s %s  %-10s %3d%%%s" % [marker, key, str(record.get("name", "?")), percent, suffix]
 		_squad_box.add_child(row)
+	# How the band picks its fights, and the key that changes it.
+	if not mode.is_empty():
+		var party := Label.new()
+		party.name = "PartyMode"
+		party.add_theme_font_size_override("font_size", 11)
+		party.modulate = Color(0.86, 0.80, 0.62)
+		party.text = "PARTY  %s   ·   B changes it" % mode.to_upper()
+		_squad_box.add_child(party)
 	var hint := Label.new()
 	hint.add_theme_font_size_override("font_size", 10)
 	hint.modulate = Color(0.72, 0.72, 0.72)

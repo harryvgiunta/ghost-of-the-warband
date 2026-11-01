@@ -102,6 +102,7 @@ const BOTTOM_ACTIONS := [
 	["GEAR", "P"],
 	["WARBAND", "O"],
 	["MAP", "M"],
+	["PARTY MODE", "B"],
 	["MENU", "ESC"],
 ]
 

@@ -17,16 +17,25 @@ extends RefCounted
 ##   * `following` - whether an ally escorts the soul or holds its ground.
 ##   * `engage_radius` - how far an ally will pick a fight on its own. The cage
 ##     lets the squad cross the yard; the run keeps them near the soul.
+##   * `party_mode` - which fights are the squad's to take at all: the warband's
+##     own mode (`WarbandContracts.PARTY_MODES`), set from the warband menu.
+##     OFFENSIVE goes at any hostile in `engage_radius`; DEFENSIVE only at one the
+##     band is already at war with - one that struck a band body (`note_struck`)
+##     or that a band body wounded first (`_note_wounds`, the soul's own blade
+##     included); PASSIVE fights nothing, fetches nothing and keeps to the soul.
 ##
 ## Everything the squad does is silent. Arming itself, taking a drop and swinging
 ## are the squad's business, not a feed to read; the warband contract forbids a
 ## loot step in the objective and forbids announcing pickups.
 ##
 ## The fight itself is the ranger clones' rhythm with the guard made honest, and
-## with every frame accounted for: an ally inside `engage_radius` is closing,
-## swinging, holding a short guard window, taking a few steps off the line, or
-## re-forming for the next blow. There is no fifth answer, so a body with a
-## hostile in reach can never fall back to standing still.
+## with every frame accounted for: an ally inside `engage_radius` of a hostile its
+## mode lets it fight is closing, swinging, holding a short guard window, taking a
+## few steps off the line, or re-forming for the next blow. There is no fifth
+## answer, so a body with such a hostile in reach can never fall back to standing
+## still.
+
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
 ## Read-only sources the scene owns.
 var controller
@@ -64,6 +73,9 @@ var _trail_base := 0
 ## squad steers as it always has. The camp owns the one map today.
 var nav = null
 var engage_radius := 60.0
+## The party's mode (`Contracts.PARTY_MODES`). The scene hands in the warband's own
+## every frame; the default is what the squad was before there was a choice.
+var party_mode: String = Contracts.DEFAULT_PARTY_MODE
 ## How close an ally must stand to swing.
 var reach := 2.0
 ## How close an ally must be to take a drop off the ground, or to bend over a
@@ -297,6 +309,14 @@ var _heading: Dictionary = {}
 ## `_corpse_key` and never a position, because a piece that moved is still the same
 ## piece and a point is not an identity.
 var _abandoned: Dictionary = {}
+## The hostiles the band is already at war with, by instance id: each struck a band
+## body (`note_struck`) or took its last wound from one (`_note_wounds`). Kept in
+## every mode, so a squad told to stand its ground mid-fight goes on with the fight
+## it is in. A hostile leaves when it dies, and the whole book with `relocate()`.
+var _provoked: Dictionary = {}
+## The slots of the band's bodies on this frame (slot -> true): what a mob's
+## `last_hitter` is read against. Cleared and refilled, never reallocated.
+var _band_slots: Dictionary = {}
 
 
 ## Point the module at a warband and the controller that owns its bodies.
@@ -316,7 +336,16 @@ func relocate() -> void:
 	_track.clear()
 	_heading.clear()
 	_abandoned.clear()
+	_provoked.clear()
 	_rescuer_merc = 0
+
+
+## A hostile is about to land a blow or a shaft on one of the band's bodies - the
+## soul's own as much as a squadmate's (`WarbandBody.struck_by`). The band did not
+## start that fight, and under DEFENSIVE it is one the band now answers.
+func note_struck(attacker) -> void:
+	if is_instance_valid(attacker):
+		_provoked[attacker.get_instance_id()] = true
 
 
 ## One frame of squad intent. Called before `controller.physics_step` so the
@@ -328,6 +357,8 @@ func drive(delta: float) -> void:
 	# a co-op friend in the last body standing - that one.
 	player_body = controller.focus_body()
 	_drop_crumb()
+	_note_wounds()
+	var passive := party_mode == Contracts.PARTY_PASSIVE
 	if _rescue_step(delta):
 		# The rescue has already written its rescuer's intent for this frame; the
 		# rest of the squad still gets its turn below.
@@ -359,8 +390,9 @@ func drive(delta: float) -> void:
 		#    ground is worth the walk; a rag or a ring is not. A walk that stops
 		#    getting anywhere is abandoned and the body is on to its next errand on
 		#    the same frame (`_walk_to_loot`), so a blade on the far side of a wall
-		#    costs the squad one wait, not its session.
-		if not _armed(actor, merc_id):
+		#    costs the squad one wait, not its session. A passive squad fetches
+		#    nothing: it is keeping to the soul, and a walk to a blade is not that.
+		if not _armed(actor, merc_id) and not passive:
 			var steel = _nearest_weapon_pickup(actor)
 			if steel != null:
 				if _in_loot_reach(actor, steel.global_position):
@@ -379,7 +411,8 @@ func drive(delta: float) -> void:
 						continue
 					if _walk_to_loot(actor, held_at, _corpse_key(armed_body), track):
 						continue
-		# 2. Armed, or nothing left to grab: go at the nearest watcher.
+		# 2. Armed, or nothing left to grab: go at the nearest watcher the party's
+		#    mode lets this body fight (`_nearest_watcher`; none, under PASSIVE).
 		var watcher = _nearest_watcher(actor)
 		if watcher != null:
 			# Finding one is when the party talks. The latch makes it the moment
@@ -397,10 +430,11 @@ func drive(delta: float) -> void:
 			continue
 		track["engaged"] = false
 		track["threat"] = null
-		# 3. Nothing hostile close: check the bodies. A squad strips the field when
+		# 3. Nothing to fight: check the bodies. A squad strips the field when
 		#    the fighting has stopped, never mid-swing - and never further from the
-		#    soul than an escort may stray to do it.
-		if _clear_of_hostiles(actor.global_position) and _near_soul(actor):
+		#    soul than an escort may stray to do it. A passive squad leaves the
+		#    field where it lies.
+		if not passive and _clear_of_hostiles(actor.global_position) and _near_soul(actor):
 			var spoil = _nearest_pickup(actor)
 			if spoil != null:
 				if _in_loot_reach(actor, spoil.global_position):
@@ -705,7 +739,7 @@ func _nearest_corpse_with_weapon(actor) -> int:
 		return 0
 	var best := 0
 	var best_distance := SEARCH_METRES
-	for corpse_id in loot.corpse_ids():
+	for corpse_id in loot.corpse_ids(false):
 		var id := int(corpse_id)
 		if _abandoned.has(_corpse_key(id)):
 			continue
@@ -914,7 +948,9 @@ func _finish_bandage(actor, merc_id: int) -> void:
 ## the bodies a scene registered (`register_corpse`) and stops offering one it has
 ## already been emptied, so the module asks it rather than keeping corpses of its
 ## own - and a scene whose vacuum predates `claim_corpse` simply has nothing to
-## offer, which leaves the squad's fight and escort untouched.
+## offer, which leaves the squad's fight and escort untouched. A fallen comrade's
+## body below (`register_remains`) is never on its list: his kit is a soul's to
+## take back.
 ##
 ## Walked by hand rather than through `corpse_at` so a body the squad has given up
 ## on is not the answer: the next reachable one is, which a single nearest-body
@@ -926,7 +962,7 @@ func _nearest_corpse(actor) -> int:
 		return 0
 	var best := 0
 	var best_distance := SEARCH_METRES
-	for corpse_id in loot.corpse_ids():
+	for corpse_id in loot.corpse_ids(false):
 		var id := int(corpse_id)
 		if _abandoned.has(_corpse_key(id)):
 			continue
@@ -950,17 +986,51 @@ func _clear_of_hostiles(point: Vector3) -> bool:
 	return true
 
 
+## The nearest hostile inside `engage_radius` this body may go at under the party's
+## mode: any under OFFENSIVE, only one the band is already at war with under
+## DEFENSIVE (`_provoked`), and none at all under PASSIVE.
 func _nearest_watcher(actor):
+	if party_mode == Contracts.PARTY_PASSIVE:
+		return null
+	var answering := party_mode == Contracts.PARTY_DEFENSIVE
 	var best = null
 	var best_distance := engage_radius
 	for watcher in watchers:
 		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		if answering and not _provoked.has(watcher.get_instance_id()):
 			continue
 		var distance: float = actor.global_position.distance_to(watcher.global_position)
 		if distance < best_distance:
 			best_distance = distance
 			best = watcher
 	return best
+
+
+## The other half of the band's book, read before anybody picks a fight: every
+## hostile whose last wound came off one of the band's own bodies - the soul's blade
+## or shaft as much as a squadmate's. `last_hitter` is the slot each mob's damage
+## path writes for every blow that lands (`take_damage`; a band body's `slot` is its
+## combat source), so the soul's first cut is on the book the next frame. A dead
+## hostile leaves it.
+func _note_wounds() -> void:
+	_band_slots.clear()
+	for raw_id in squad_ids:
+		var body = controller.body_of(int(raw_id))
+		if body == null or not is_instance_valid(body):
+			continue
+		var slot: Variant = body.get("slot")
+		if slot != null:
+			_band_slots[int(slot)] = true
+	for watcher in watchers:
+		if not is_instance_valid(watcher):
+			continue
+		if not bool(watcher.get("alive")):
+			_provoked.erase(watcher.get_instance_id())
+			continue
+		var hitter: Variant = watcher.get("last_hitter")
+		if hitter != null and _band_slots.has(int(hitter)):
+			_provoked[watcher.get_instance_id()] = true
 
 
 # --- intent ----------------------------------------------------------------

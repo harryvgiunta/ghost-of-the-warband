@@ -80,6 +80,7 @@ WARBAND_TESTS = [
     "warband_world_regression",
     "squad_medicine_regression",
     "squad_steering_regression",
+    "squad_party_mode_regression",
     "torch_light_regression",
     "game_flow_regression",
     "quartermaster_regression",

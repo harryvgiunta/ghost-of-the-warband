@@ -9,13 +9,15 @@ extends Node3D
 ##     panel opens: which standing bodies go down, and which spare pieces leave the
 ##     town stash for the delve inventory (`delve_prep_menu.gd`).
 ##   * **Going down** writes the descent into the warband (`Warband.begin_delve`),
-##     builds a fresh cave (`delve_cave.gd`) at `ORIGIN`, puts the party on its
-##     landing ring and shuts the rest of the warband out of reach: the soul and the
-##     squad only ever work the bodies below. Everything taken below lands in the
-##     delve inventory, never the stash.
-##   * **Climbing out** (`G` at the rope below) brings every body still alive -
-##     standing or carried - back to the mouth and empties the inventory into the
-##     town stash (`Warband.extract_delve`).
+##     builds a fresh cave (`delve_cave.gd`) at `ORIGIN` and lowers the party down
+##     one of its six shafts - drawn afresh every descent, the way an extraction
+##     floor hands each party its own corner (`delve_layout.landings_for`) - then
+##     shuts the rest of the warband out of reach: the soul and the squad only ever
+##     work the bodies below. Everything taken below lands in the delve inventory,
+##     never the stash.
+##   * **Climbing out** (`G` at any shaft's rope below) brings every body still
+##     alive - standing or carried - back to the mouth and empties the inventory
+##     into the town stash (`Warband.extract_delve`).
 ##   * **Falling** - nobody below left standing - costs the inventory and every
 ##     piece the party still wears (`Warband.forfeit_delve`). Whoever was only down
 ##     stands up at the mouth with nothing on and a revive's twentieth of a pool
@@ -31,7 +33,9 @@ signal climbed_out(result: Dictionary)
 signal fell(result: Dictionary)
 
 const CaveScript = preload("res://scripts/warband/delve_cave.gd")
+const Layout = preload("res://scripts/warband/delve_layout.gd")
 const PrepScript = preload("res://scripts/warband/delve_prep_menu.gd")
+const MapScript = preload("res://scripts/warband/delve_map.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
@@ -54,14 +58,18 @@ const HEADER_POLL := 0.25
 const GUEST_TEXT := "Co-op: the host takes the party down and brings it up."
 const MOUTH_PROMPT := "G  -  THE WEEPING HOLLOW"
 const MOUTH_HINT := "G - choose the party and pack the delve inventory, then go down"
-const BELOW_HINT := "RMB - loot a body   ·   SHIFT + RMB - take it all   ·   P - gear and the delve inventory   ·   G at the rope - climb out"
+const BELOW_HINT := "RMB - loot a body into the delve inventory   ·   P - gear and the delve inventory   ·   M - the floor's plan   ·   G at a rope - climb out"
 
 ## The world this area stands in.
 var host: Node3D = null
 ## The instance below while a party is down there, else null.
 var cave = null
+## The shaft (`delve_layout.LANDINGS` id) the party below came down, else "".
+var landing := ""
 ## The panel the mouth opens.
 var prep = null
+## The floor's plan (`delve_map.gd`), opened with `M` below.
+var map = null
 ## The rope pit in the square.
 var mouth: Node3D = null
 
@@ -70,16 +78,22 @@ var _eye_below := false
 var _sun: Node3D = null
 var _nav_before = null
 var _header_clock := 0.0
+var _draw := RandomNumberGenerator.new()
 
 
 func setup(world: Node3D) -> void:
 	host = world
+	_draw.randomize()
 	_build_mouth()
 	prep = PrepScript.new()
 	prep.name = "DelvePrep"
 	add_child(prep)
 	prep.configure(host.warband)
 	prep.descend_requested.connect(_on_descend_requested)
+	map = MapScript.new()
+	map.name = "DelveMap"
+	add_child(map)
+	map.configure(self)
 
 
 # --- reading -----------------------------------------------------------------
@@ -148,8 +162,9 @@ func close_panels() -> void:
 
 # --- the HUD lines -----------------------------------------------------------
 
-## The crosshair line: the rope below, the floor's objective anywhere else below,
-## or the mouth in the square. Empty everywhere else.
+## The crosshair line: a rope below, the floor's objective anywhere else below
+## (and, once Gorehorn is dead, the rope the shortest walk reaches), or the mouth
+## in the square. Empty everywhere else.
 func prompt_line(actor) -> String:
 	if actor == null or not is_instance_valid(actor):
 		return ""
@@ -159,7 +174,11 @@ func prompt_line(actor) -> String:
 			return "G  -  CLIMB OUT  ·  %d PIECE%s TO THE TOWN STASH" % [pieces, "" if pieces == 1 else "S"]
 		if cave.master_alive():
 			return "SLAY GOREHORN  ·  %d BELOW" % cave.living()
-		return "CLIMB OUT  ·  THE ROPE IS AT THE MOUTH"
+		var rope: Dictionary = cave.nearest_rope((actor as Node3D).global_position)
+		if rope.is_empty():
+			return "CLIMB OUT  ·  A ROPE HANGS IN EVERY SHAFT"
+		return "CLIMB OUT  ·  NEAREST ROPE  ·  %s  ·  %d M" % [Layout.area_name(str(rope["area"])),
+			roundi(float(rope["metres"]))]
 	if not host.warband.delve.active and at_mouth(actor):
 		return MOUTH_PROMPT
 	return ""
@@ -209,7 +228,7 @@ func interact(actor) -> bool:
 	if bool(host.get("_client")):
 		hud.set_status(GUEST_TEXT, 3.0)
 	elif host.warband.delve.active:
-		hud.set_status("The party is below. It comes up by the rope, or not at all.", 3.0)
+		hud.set_status("The party is below. It comes up by a rope, or not at all.", 3.0)
 	else:
 		open_prep()
 	return true
@@ -234,8 +253,9 @@ func _on_descend_requested(party: Array) -> void:
 
 ## Send these bodies below. Every one must be standing; the books are written
 ## first (`Warband.begin_delve`), then the instance is built and the party put on
-## its landing ring. Returns `{ok, party, message}`.
-func descend(party_ids: Array) -> Dictionary:
+## the landing ring of one shaft - `landing_id` when it names one, else a shaft
+## drawn for this descent. Returns `{ok, party, landing, message}`.
+func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 	if host == null or bool(host.get("_client")):
 		return {"ok": false, "party": [], "message": GUEST_TEXT}
 	if cave != null or host.warband.delve.active:
@@ -263,20 +283,23 @@ func descend(party_ids: Array) -> Dictionary:
 	if host.has_method("_hide_panels"):
 		host._hide_panels()
 	_open_instance(false)
-	var posts: Array[Vector3] = cave.entry_posts(bodies.size())
+	landing = landing_id if not Layout.landing(landing_id).is_empty() \
+		else Layout.landings_for(1, _draw.randi())[0]
+	var posts: Array[Vector3] = cave.entry_posts(landing, bodies.size())
 	for index in bodies.size():
-		_move_body(bodies[index], posts[index], cave.entry_yaw())
+		_move_body(bodies[index], posts[index], cave.entry_yaw(landing))
 	host.warband.souls.set_reach(ids)
 	var controller = host.controller
 	if not ids.has(int(controller.merc_for_peer(controller.local_peer_id))):
 		controller.direct(controller.local_peer_id, ids[0])
-	host.hud.set_status("The party goes down into the Weeping Hollow.", 4.0)
+	host.hud.set_status("The party goes down into the Weeping Hollow: %s." % Layout.area_name(
+		str(Layout.landing(landing)["area"])), 4.0)
 	descended.emit(ids.duplicate())
-	return {"ok": true, "party": ids, "message": str(booked.get("message", ""))}
+	return {"ok": true, "party": ids, "landing": landing, "message": str(booked.get("message", ""))}
 
 
-## The party climbs the rope: every body still alive comes up to the mouth, and
-## the delve inventory goes into the town stash. Returns `Warband.extract_delve`'s
+## The party climbs a rope: every body still alive comes up to the mouth, and the
+## delve inventory goes into the town stash. Returns `Warband.extract_delve`'s
 ## answer.
 func climb_out() -> Dictionary:
 	if host == null or bool(host.get("_client")) or cave == null:
@@ -389,6 +412,9 @@ func _open_instance(as_replica: bool) -> void:
 func _close_instance() -> void:
 	if cave == null:
 		return
+	# The plan is of a floor nobody is on any more.
+	if map != null:
+		map.close()
 	var squad = host.get("squad")
 	if squad != null:
 		squad.nav = _nav_before
@@ -397,6 +423,7 @@ func _close_instance() -> void:
 	host.warband.souls.clear_reach()
 	cave.teardown()
 	cave = null
+	landing = ""
 	_wipe_beat = -1.0
 	_sync_eye(true)
 	_paint_header()
@@ -441,6 +468,9 @@ func _world_sun() -> Node3D:
 	return _sun
 
 
+## The floor's lines over the looted list: the floor and the area the eye's body
+## stands in, what the inventory holds, the rope the shortest walk reaches, and
+## Gorehorn's blood. Every line stays inside the feed's column.
 func _paint_header() -> void:
 	var feed = host.get("loot_feed")
 	if feed == null:
@@ -454,15 +484,23 @@ func _paint_header() -> void:
 	for item_id in pooled:
 		value += StashScript.value_of(str(item_id)) * int(pooled[item_id])
 	var pieces: int = pool.pooled_total()
-	var lines := PackedStringArray([
-		"%s  ·  %s" % [CaveScript.TITLE, CaveScript.FLOOR_LABEL],
-		"DELVE INVENTORY  ·  %d PIECE%s  ·  %d G" % [pieces, "" if pieces == 1 else "S", value],
-	])
+	var lines := PackedStringArray(["%s  ·  %s" % [CaveScript.TITLE, CaveScript.FLOOR_LABEL]])
+	var body = host.controller.active_body() if host.controller != null else null
+	var rope := {}
+	if body != null and is_instance_valid(body) and cave.contains(body.global_position):
+		var area: String = cave.area_at(body.global_position)
+		if not area.is_empty():
+			lines.append(Layout.area_name(area))
+		rope = cave.nearest_rope(body.global_position)
+	lines.append("DELVE INVENTORY  ·  %d PIECE%s  ·  %d G" % [pieces, "" if pieces == 1 else "S", value])
+	if not rope.is_empty():
+		lines.append("WAY UP  ·  %s  ·  %d M" % [Layout.area_name(str(rope["area"])),
+			roundi(float(rope["metres"]))])
 	if cave.master_alive():
 		if cave.is_awake("lair"):
 			lines.append("GOREHORN  %d / %d" % [int(cave.master.health), int(cave.master.max_health)])
 	else:
-		lines.append("GOREHORN IS DEAD  ·  CLIMB OUT BY THE ROPE")
+		lines.append("GOREHORN IS DEAD  ·  CLIMB OUT BY A ROPE")
 	feed.set_header("\n".join(lines))
 
 

@@ -83,6 +83,24 @@ enum CruorTier {
 
 enum HealthState { ALIVE, DOWNED, DEAD }
 
+# --- the party's mode ------------------------------------------------------
+
+## How the squad's AI picks its fights, set from the warband menu and saved with
+## the warband. The id is the save and wire vocabulary; the menu prints it in caps.
+##   * `offensive` - the squad goes looking: anything hostile inside its engage
+##     radius is a fight (the only behaviour there was before the choice);
+##   * `defensive` - the squad answers: it fights only what has struck one of the
+##     band, and what the band has already wounded - the soul's own blade first;
+##   * `passive` - the squad fights nothing and fetches nothing: it keeps to the
+##     soul, for running away.
+const PARTY_OFFENSIVE := "offensive"
+const PARTY_DEFENSIVE := "defensive"
+const PARTY_PASSIVE := "passive"
+## Most willing first: the order the menu lays them out in.
+const PARTY_MODES: Array[String] = [PARTY_OFFENSIVE, PARTY_DEFENSIVE, PARTY_PASSIVE]
+## What a warband that was never told otherwise fights as - a fresh one, a v8 file.
+const DEFAULT_PARTY_MODE := PARTY_OFFENSIVE
+
 # --- tuning ----------------------------------------------------------------
 
 ## A lethal hit whose overkill is <= 10% of max health downs instead of kills.

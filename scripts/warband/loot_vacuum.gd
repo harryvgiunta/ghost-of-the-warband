@@ -88,8 +88,9 @@ func spawn(item_id: String, at: Vector3, armed: bool = true, dropper_peer: int =
 	return pickup
 
 ## A human takes one drop instantly. There is no distance check here: the caller
-## already decided the body under the crosshair reaches it.
-func quick_loot(pickup: WarbandPickup, collector_peer: int = 1) -> Dictionary:
+## already decided the body under the crosshair reaches it. `dress` false books
+## the piece into the pool without putting it on the taker's body.
+func quick_loot(pickup: WarbandPickup, collector_peer: int = 1, dress: bool = true) -> Dictionary:
 	if not is_instance_valid(pickup):
 		return _refused("There is no drop to take.", "")
 	if pickup.collected:
@@ -105,12 +106,14 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1) -> Dictionary:
 	# Heard where the piece lay, before `collect()` takes the node out of the
 	# tree: one pickup is one sound, and the drop's position is about to go.
 	var at := pickup.global_position
-	_book_piece(stash, item_id, collector_peer)
+	var awoke := _book_piece(stash, item_id, collector_peer, pickup.anointed)
 	pickup.collect()
 	SfxScript.pickup(at)
 	_notify_warband()
-	return {"ok": true, "item_id": item_id,
-		"message": _dress_message(item_id, collector_peer)}
+	var message := _dress_message(item_id, collector_peer if dress else 0)
+	if awoke:
+		message += " %s." % str(_warband.cruor.anoint_line(item_id))
+	return {"ok": true, "item_id": item_id, "message": message}
 
 ## The mercenary the pickup should be worn by, or -1. A callable that throws or
 ## answers nonsense simply means "keep it in the stash".
@@ -151,7 +154,7 @@ func sweep(survivors: Array) -> Dictionary:
 		# One chime per piece, at the drop itself. The node is about to leave the
 		# tree, so the position is read first.
 		var at: Vector3 = pickup.global_position
-		_book_piece(stash, pickup.item_id, 0)
+		_book_piece(stash, pickup.item_id, 0, pickup.anointed)
 		ids.append(pickup.item_id)
 		pickup.collect()
 		SfxScript.pickup(at)
@@ -191,6 +194,29 @@ func register_corpse(enemy) -> int:
 	_corpses[corpse_id] = {"id": corpse_id, "enemy": enemy, "items": ids}
 	return corpse_id
 
+## A member of the party below who dies keeps what he still wore on his own body:
+## a container like an enemy's, labelled with his name, and marked as the party's
+## remains so the squad's sweep (`corpse_ids(false)`) never strips a fallen
+## comrade - a soul has to take it back. Answers 0 for an empty kit, and the same
+## id when the same body is registered twice.
+func register_remains(body: Node3D, items: Array[String], label: String) -> int:
+	if body == null or not is_instance_valid(body) or items.is_empty():
+		return 0
+	_prune_corpses()
+	var known := _corpse_id_of_enemy(body)
+	if known != 0:
+		return known
+	var corpse_id := _next_corpse_id
+	_next_corpse_id += 1
+	_corpses[corpse_id] = {"id": corpse_id, "enemy": body, "items": items.duplicate(),
+		"label": label, "remains": true}
+	return corpse_id
+
+## Forget a body: what is still on it is nobody's now. The Hollow calls this for
+## the dead the party leaves below when its instance closes.
+func forget_corpse(corpse_id: int) -> void:
+	_corpses.erase(corpse_id)
+
 ## Whether the body a corpse id names is registered and still holds something.
 ## False for a stripped body and for one whose enemy has been freed, so a caller
 ## that offers loot never offers a finished corpse.
@@ -200,8 +226,6 @@ func has_corpse(corpse_id: int) -> bool:
 		return false
 	return not (record["items"] as Array).is_empty()
 
-## Every body still worth searching, oldest first. A stripped body stays out of
-## this list, so a caller that walks it never re-offers a finished corpse.
 ## How many fallen bodies the registry has taken in this battle, whether or not
 ## somebody has already emptied them. `corpse_ids()` only names the ones still
 ## holding something, which is what a searcher wants; this is what a test or a
@@ -212,12 +236,18 @@ func registered_corpses() -> int:
 	return _corpses.size()
 
 
-func corpse_ids() -> Array[int]:
+## Every body still worth searching, oldest first. A stripped body stays out of
+## this list, so a caller that walks it never re-offers a finished corpse; with
+## `include_remains` false so do the party's own dead (`register_remains`), which
+## is the list the squad's sweep walks.
+func corpse_ids(include_remains: bool = true) -> Array[int]:
 	_prune_corpses()
 	var out: Array[int] = []
 	for corpse_id in _corpses.keys():
 		var record: Dictionary = _corpses[corpse_id]
 		if (record["items"] as Array).is_empty():
+			continue
+		if not include_remains and bool(record.get("remains", false)):
 			continue
 		out.append(int(corpse_id))
 	out.sort()
@@ -263,6 +293,9 @@ func corpse_label(corpse_id: int) -> String:
 	var record := _corpse_record(corpse_id)
 	if record.is_empty():
 		return ""
+	var label := str(record.get("label", ""))
+	if not label.is_empty():
+		return label
 	var enemy = record["enemy"]
 	if enemy.has_method("get_display_name"):
 		var named := str(enemy.get_display_name())
@@ -297,8 +330,9 @@ func take_from_corpse(corpse_id: int, item_id: String, collector_peer: int = 1) 
 
 ## Strip a body in one go. Returns what was taken and what it was worth, so a
 ## panel and a battle report can both use the same answer. Each piece is booked
-## before it leaves the body, so a failure part-way cannot lose one.
-func take_all_from_corpse(corpse_id: int, collector_peer: int = 1) -> Dictionary:
+## before it leaves the body, so a failure part-way cannot lose one. `dress` false
+## books every piece into the pool and puts none of them on the taker's body.
+func take_all_from_corpse(corpse_id: int, collector_peer: int = 1, dress: bool = true) -> Dictionary:
 	var ids: Array[String] = []
 	var value := 0
 	var stash := _stash()
@@ -311,7 +345,7 @@ func take_all_from_corpse(corpse_id: int, collector_peer: int = 1) -> Dictionary
 			_book_piece(stash, item_id, collector_peer)
 			# The dressing still happens for a peer standing in a body, but a bulk
 			# take reports counts rather than one line per piece.
-			_dress_message(item_id, collector_peer)
+			_dress_message(item_id, collector_peer if dress else 0)
 			ids.append(item_id)
 			value += StashScript.value_of(item_id)
 			items.remove_at(items.find(item_id))
@@ -345,10 +379,15 @@ func describe() -> String:
 ## The one way a piece enters the warband: a real stash row plus a line in the
 ## ledger the battle report reads. Every caller resolves the stash first, because
 ## refusing before anything is booked is the only honest answer to a missing one.
-func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int) -> void:
+## A piece that came out of the Hollow already anointed wakes into its skill as it
+## is booked (`Warband.grant_anointing`); answers true when it did.
+func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int, anointed: bool = false) -> bool:
 	stash.add(item_id, 1)
+	var awoke: bool = anointed and _warband != null and is_instance_valid(_warband) \
+		and _warband.has_method("grant_anointing") and bool(_warband.grant_anointing(item_id))
 	_gathered.append(item_id)
 	booked.emit(item_id, collector_peer)
+	return awoke
 
 ## The line a taker reads, and the one hand-off the warband allows: a piece taken
 ## by a soul standing in a living body snaps into that body's hands instead of only

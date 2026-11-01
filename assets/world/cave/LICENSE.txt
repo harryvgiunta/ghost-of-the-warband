@@ -1,0 +1,52 @@
+IRONWOOD CAVE KIT (THE WEEPING HOLLOW) - LICENSE AND PROVENANCE
+
+Everything under this directory (assets/world/cave/) is built by one command:
+
+    python tools/build_cave_kit.py
+
+which downloads the pinned sources below into the ignored .runtime/cave-source/,
+checks each against its SHA-256 (tools/cave_kit_sources.py), and runs Blender 5.1
+in background mode on tools/prepare_cave_kit.py. cave_kit.json records every
+source URL, digest and author, the Blender version, and the digest of every
+output.
+
+UPSTREAM SOURCES - CC0 1.0 (public domain)
+
+Five photoscanned texture sets from Poly Haven (https://polyhaven.com), all
+dedicated to the public domain under CC0 1.0
+(https://creativecommons.org/publicdomain/zero/1.0/; https://polyhaven.com/license),
+retrieved 2026-11-01 at 2k (diffuse, OpenGL normal, roughness, AO, displacement):
+
+  Rock Face 03      https://polyhaven.com/a/rock_face_03
+                    Dario Barresi (photography), Rico Cilliers (processing)
+  Cliff Side        https://polyhaven.com/a/cliff_side
+                    James Ray Cock, Dario Barresi (photography),
+                    Jenelle van Heerden (processing)
+  Dark Rock 02      https://polyhaven.com/a/dark_rock_02     Amal Kumar
+  Rocks Ground 08   https://polyhaven.com/a/rocks_ground_08  Rob Tuytel
+  Rock 08           https://polyhaven.com/a/rock_08          Rob Tuytel
+
+The upstream files stay CC0; they are not redistributed here. Credit to the
+authors above is given with thanks though CC0 does not require it.
+
+WHAT WAS MADE FROM THEM
+
+  textures/cave_<set>_{albedo,normal,orh}.png  (limestone = Rock Face 03,
+      strata = Cliff Side, basalt = Dark Rock 02, silt = Rocks Ground 08):
+      averaged to 1024, broad blotching flattened, desaturated and normalised to
+      one mean albedo; normals renormalised and rescaled; ORH packs ambient
+      occlusion, roughness and percentile-normalised height.
+  cave_formations.glb: thirteen original dripstone and breakdown pieces sculpted
+      from analytic fields in Blender; base colour, normals, roughness and
+      occlusion baked in Cycles from the high-detail sculpt, with Rock 08
+      box-projected into the source surface.
+  cave_flora.glb: three original fungus pieces (a giant cap, a cap cluster, a
+      bracket shelf), baked the same way from procedural Blender surfaces only.
+  cave_fauna.glb: original bat, rat, cave spider and moth meshes, vertex
+      coloured; no third-party source.
+  textures/cave_web.png: an original web built as curves and rendered in Cycles.
+
+The files in this directory are licensed under Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),
+section 3 of the LICENSE.md at the repository root:
+https://creativecommons.org/licenses/by-nc-sa/4.0/

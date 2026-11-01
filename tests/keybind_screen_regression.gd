@@ -19,7 +19,7 @@ const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
 ## The keys the campaign actually reads. Every one of them must be washed blood:
 ## a controls sheet that leaves a live key as dead bone is the one lie it can tell.
 const BOUND := ["W", "A", "S", "D", "SHIFT", "SPACE", "C", "TAB", "F1", "F5",
-	"LMB", "RMB", "WHEEL", "T", "Q", "E", "R", "G", "K", "P", "O", "M", "ESC"]
+	"LMB", "RMB", "WHEEL", "T", "Q", "E", "R", "G", "K", "P", "O", "M", "B", "ESC"]
 
 var checks := 0
 var failures := 0
@@ -54,10 +54,10 @@ func _check_board() -> void:
 	await process_frame
 
 	var labels: Array[String] = page.action_labels()
-	check(labels.size() == 19, "the sheet names 19 actions (%d)" % labels.size())
+	check(labels.size() == 20, "the sheet names 20 actions (%d)" % labels.size())
 	for wanted in ["MOVE", "SPRINT", "JUMP", "CROUCH", "WEAPON SET", "SWING",
 			"GUARD", "STAB", "OVERHEAD", "THROW", "SIDESTEP", "SIGIL",
-			"USE · LATCH", "TAKE", "GEAR", "WARBAND", "MAP", "MENU"]:
+			"USE · LATCH", "TAKE", "GEAR", "WARBAND", "MAP", "PARTY MODE", "MENU"]:
 		check(labels.has(wanted), "the sheet names %s (%s)" % [wanted, str(labels)])
 	check(labels.has("BODIES · F1-F5 · [ ]"),
 		"and names the bodies: %s" % str(labels))
@@ -73,7 +73,7 @@ func _check_board() -> void:
 	var leaders: Array[Dictionary] = page.leaders()
 	check(leaders.size() == page.arrow_count(),
 		"every thread is carried in the sheet's own list")
-	check(leaders.size() == 20, "twenty arrowheads serve nineteen actions (%d)" % leaders.size())
+	check(leaders.size() == 21, "twenty-one arrowheads serve twenty actions (%d)" % leaders.size())
 	for run in leaders:
 		var label := String(run["label"])
 		var rect: Rect2 = page.action_rect(label)

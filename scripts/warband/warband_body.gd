@@ -9,6 +9,9 @@ signal killed(slot: int, source: int)
 # the HUD, the crawl and the revive channel never have to poll for it.
 signal downed_started(slot: int)
 signal downed_ended(slot: int)
+## A hostile is about to land a blow or a shaft on this body (`note_attacker`). The
+## squad listens: its party mode decides whether that is a fight the band answers.
+signal struck_by(attacker: Node3D)
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -583,6 +586,14 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 		combat.start_block(forward)
 	else:
 		combat.stop_block()
+
+## The striker behind the blow or the shaft about to land, named first - the same
+## call a mob gets from every blade and missile (`arrow.gd`, `combat.gd`), and the
+## one the scenes' blow handlers make before `receive_melee`. The body keeps
+## nothing; `struck_by` hands the striker on.
+func note_attacker(attacker: Node3D) -> void:
+	if is_instance_valid(attacker) and attacker != self:
+		struck_by.emit(attacker)
 
 func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
 	if not authoritative or not alive or source_id == slot:

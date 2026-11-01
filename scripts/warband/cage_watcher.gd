@@ -211,6 +211,9 @@ var health_pool := HARDENED_HEALTH
 ## The catalog piece in the right hand, or "" for an empty hand. `arm` writes it,
 ## `take_weapon_item` hands it back so the scene can drop it.
 var weapon_item := ""
+## True while the piece in the hand is already anointed: a rare body below
+## (`delve_loot.gd`). The drop it leaves carries that; an empty hand carries nothing.
+var weapon_anointed := false
 ## Armour a corpse is carrying. A scene may overwrite it (the road does).
 var armor_items: Array[String] = []
 ## What else is on the body when it falls: a dressing, a bundle, whatever the
@@ -358,6 +361,7 @@ func note_attacker(attacker: Node3D) -> void:
 ## would hold, hung off the hand bone, so the rig and the corpse agree.
 func arm(item_id: String) -> void:
 	weapon_item = item_id
+	weapon_anointed = false
 	if not is_node_ready():
 		return
 	_apply_weapon()
@@ -367,6 +371,7 @@ func arm(item_id: String) -> void:
 func take_weapon_item() -> String:
 	var item := weapon_item
 	weapon_item = ""
+	weapon_anointed = false
 	if is_node_ready():
 		_apply_weapon()
 	return item
@@ -673,12 +678,23 @@ func _enter_dead(announce: bool) -> void:
 # --- the body and the kit --------------------------------------------------
 
 ## The build. The silhouette is scaled uniformly - a stretched body would distort
-## the mesh - and the physics capsule stays the profile's, so the reach, the aim
-## height and the hit volume the fight is tuned on do not drift with a variant.
+## the mesh - and the hit capsule stands as tall as the body it is scaled to. The
+## capsule is what every arrow, thrown blade and swing stops on: held at the
+## species' own height, a 1.30 sentry drew its head half a metre above the top of
+## it, and a shaft through the skull on screen flew on through air. Only the
+## height follows the build; the girth stays the profile's, so the spacing, the
+## reach and the trade the fight is tuned on do not drift with a variant, and the
+## antler crown stays outside the capsule exactly as the profile's height has it.
 ## The scale goes to the rig (the species' fit scale times this), never to the
 ## body container: the rig's own height drives its head zone and its aim.
 func _shape_body() -> void:
 	_body_scale = clampf(float(variant.get("scale", 1.0)), 0.88, 1.30)
+	var capsule: CapsuleShape3D = null
+	if is_instance_valid(_collision):
+		capsule = _collision.shape as CapsuleShape3D
+	if capsule != null:
+		capsule.height = maxf(float(profile.height) * _body_scale, capsule.radius * 2.0 + 0.02)
+		_collision.position.y = capsule.height * 0.5
 	if is_instance_valid(_visual):
 		if _visual.has_method("set_silhouette"):
 			_visual.set_silhouette(_body_scale)

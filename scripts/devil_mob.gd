@@ -117,6 +117,10 @@ var _move_speed := 0.0
 var _strafe_dir := 1.0
 var _visual
 var _body: Node3D
+## The body's one physics capsule: what every arrow, thrown blade and swing stops
+## on. Built from the profile in `_ready`; the shape is this body's own resource,
+## so a subclass that draws its body at another size resizes it here.
+var _collision: CollisionShape3D
 ## The noise this body makes: a cry going into the swing, one going down.
 var _voice: VoiceEmitter
 var _rng := RandomNumberGenerator.new()
@@ -186,10 +190,10 @@ func _ready() -> void:
 	var shape := CapsuleShape3D.new()
 	shape.radius = float(profile.radius)
 	shape.height = maxf(float(profile.height), shape.radius * 2.0 + 0.02)
-	var collision := CollisionShape3D.new()
-	collision.shape = shape
-	collision.position.y = shape.height * 0.5
-	add_child(collision)
+	_collision = CollisionShape3D.new()
+	_collision.shape = shape
+	_collision.position.y = shape.height * 0.5
+	add_child(_collision)
 	_body = Node3D.new()
 	add_child(_body)
 	_visual = _visual_script().new()

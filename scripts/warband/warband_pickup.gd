@@ -56,6 +56,10 @@ var armed := true
 var dropper_peer := 0
 ## True once the piece has left the world, so a second collect cannot pay twice.
 var collected := false
+## True for a piece that came out of the Hollow already anointed
+## (`delve_loot.gd`): the warband that takes it has its skill awake
+## (`Warband.grant_anointing`), and its plate says so.
+var anointed := false
 
 var _label: Label3D = null
 var _arm_timer: Timer = null
@@ -68,6 +72,11 @@ func setup(id: String, label: String = "") -> void:
 	if _label == null:
 		_build()
 	_set_label(label if not label.is_empty() else item_name(id))
+
+## Mark the drop as a piece already anointed, on its plate as on its books.
+func anoint() -> void:
+	anointed = true
+	_set_label("Anointed %s" % item_name(item_id))
 
 ## The catalog name, falling back to the raw id for a drop whose id is unknown.
 static func item_name(id: String) -> String:

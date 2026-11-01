@@ -24,7 +24,7 @@ licenses themselves and talk to a lawyer.
 | `assets/characters/`, `assets/world/`, `assets/audio/`, `assets/ui/`, `media/`, `docs/`, `README.md`, `.omp/skills/` | **CC BY-NC-SA 4.0** | §3 below |
 | `assets/ui/fonts/` | **SIL Open Font License 1.1** — their own, not mine | §4 below |
 | The names "IRONWOOD", "Ghost of the Warband", the logos, the store page and the compiled Steam build | **All rights reserved** | §5 below |
-| Quaternius, Gres and Freesound source material | **Their own licenses** — I can only pass on what I was given | §4 below |
+| Quaternius, Gres, Poly Haven and Freesound source material | **Their own licenses** — I can only pass on what I was given | §4 below |
 
 A single file that is both code and data (a `.tscn` that points at a model, a
 `.glb` that carries both a mesh and an animation) is covered by the license of
@@ -198,6 +198,7 @@ the files.
 | --- | --- | --- | --- |
 | Quaternius — Universal Base Characters, Modular Character Outfits Fantasy, Universal Animation Library 1 & 2 | character bodies, outfits, hair, skeletons; `assets/characters/LICENSE.txt` | CC0 1.0 Universal | none; credited as courtesy |
 | Gres — Humanoid SoulsLike Animations (OpenGameArt) | two-handed sword clips | CC0 1.0 Universal | none; credited as courtesy |
+| Poly Haven — Rock Face 03, Cliff Side, Dark Rock 02, Rocks Ground 08, Rock 08 (Dario Barresi, Rico Cilliers, James Ray Cock, Jenelle van Heerden, Amal Kumar, Rob Tuytel) | scans processed into `assets/world/cave/` | CC0 1.0 Universal | none; credited as courtesy |
 | Freesound — Kinoton, Sadiquecat, florianreichelt, Fenodyrie, loudernoises, straget, leonelmail | sound effects in `assets/audio/sfx/` | CC0 1.0 Universal | none |
 | Freesound — **Artninja** | `sfx/impact/slit_*.ogg` | **CC BY 4.0** | **credit required, changes indicated** |
 | Freesound — **EverHeat** | `sfx/bow/arrow_01.ogg` | **CC BY 3.0** | **credit required, changes indicated** |
@@ -208,8 +209,8 @@ the files.
 
 Exact creators, source URLs, slicing windows and the changes made to each
 recording are recorded in `assets/audio/LICENSE.txt` and `docs/audio.md`; model
-and texture provenance is in `assets/characters/LICENSE.txt` and
-`assets/world/LICENSE.txt`.
+and texture provenance is in `assets/characters/LICENSE.txt`,
+`assets/world/LICENSE.txt` and `assets/world/cave/LICENSE.txt`.
 
 Where a third-party license conflicts with this file, the third-party license
 wins for that material, and you also keep every right that third-party license

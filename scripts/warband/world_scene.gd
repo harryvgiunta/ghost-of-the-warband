@@ -348,6 +348,8 @@ func _physics_process(delta: float) -> void:
 	# body is a fight with itself.
 	_sync_crawl_control()
 	if squad != null and not _client:
+		# How the party picks its fights is the warband's, set from the menu.
+		squad.party_mode = warband.party_mode
 		squad.drive(delta)
 		# The band's own fights, as the notifier reads them: a break-off is said
 		# once and then stands under the roster until the ally is back.
@@ -424,13 +426,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		KEY_M:
 			# One page, and it never pauses: the map is something a body reads
-			# while it keeps walking. It is a map of the wood, and the Hollow is
-			# not on it.
-			if delve_area != null and delve_area.in_cave(_soul()):
-				if hud != null:
-					hud.set_status("No map reaches this far underground.", 2.5)
+			# while it keeps walking. Above it is the wood's sheet; below, the
+			# Hollow's own plan of the floor.
+			if delve_area != null and delve_area.in_cave(_soul()) and delve_area.map != null:
+				if world_map != null and world_map.is_open():
+					world_map.close()
+				if _panel_open():
+					_hide_panels()
+				delve_area.map.toggle()
 				get_viewport().set_input_as_handled()
 			elif world_map != null:
+				if delve_area != null and delve_area.map != null and delve_area.map.is_open():
+					delve_area.map.close()
 				if _panel_open():
 					_hide_panels()
 				world_map.toggle()
@@ -441,6 +448,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_G:
 			_try_interact()
 			get_viewport().set_input_as_handled()
+		KEY_B:
+			_cycle_party_mode()
+			get_viewport().set_input_as_handled()
+
+
+## `B` steps the party to its next mode (`Warband.cycle_party_mode`: OFFENSIVE,
+## DEFENSIVE, PASSIVE) and says the answer - a lent warband's refusal included - on
+## the status line. The squad list's party line and the menu's row follow the books.
+func _cycle_party_mode() -> void:
+	if warband == null:
+		return
+	var result: Dictionary = warband.cycle_party_mode()
+	if hud != null:
+		hud.set_status(str(result.get("message", "")), 2.5)
 
 
 ## `G` held is the revive channel: hold it for `REVIVE_CHANNEL_SECONDS` (five) on a
@@ -889,6 +910,10 @@ func _adopt_body(actor) -> void:
 	if merc_id > 0:
 		actor.downed_started.connect(_on_body_downed.bind(actor, merc_id))
 		actor.killed.connect(_on_body_killed.bind(actor, merc_id))
+	# A body that is struck names its striker, and the squad's party mode decides
+	# whether the band answers it.
+	if squad != null:
+		actor.struck_by.connect(squad.note_struck)
 	# A worn hand torch is light, and light belongs to the body carrying it.
 	if merc_id > 0:
 		var torch := TorchScript.new()
@@ -1433,13 +1458,18 @@ func spawn_pickup(item_id: String, at: Vector3, announced: bool = false):
 ## A fallen enemy lets go of what it was holding. The piece comes out of its
 ## hand, lands on the dirt in front of the body, and joins the one loot list a
 ## soul reaches with `K` and a squadmate walks to. What the body still wears is
-## the corpse screen's, so nothing is on offer twice.
+## the corpse screen's, so nothing is on offer twice. A rare watcher below holds
+## its steel already anointed (`delve_loot.gd`), and the drop carries that - read
+## before the hand is emptied.
 func drop_held_weapon(enemy) -> bool:
+	var anointed: bool = is_instance_valid(enemy) and enemy.get("weapon_anointed") == true
 	var item_id: String = GearDropScript.strip_enemy(enemy)
 	if item_id.is_empty():
 		return false
 	var at: Vector3 = (enemy as Node3D).global_position
-	spawn_pickup(item_id, GearDropScript.drop_point(at, GearDropScript.forward_of(enemy)))
+	var pickup = spawn_pickup(item_id, GearDropScript.drop_point(at, GearDropScript.forward_of(enemy)))
+	if pickup != null and anointed:
+		pickup.anoint()
 	return true
 
 
@@ -1622,6 +1652,10 @@ func _on_enemy_attack(attacker, amount: float, victim) -> void:
 	if bool(victim.get("downed")):
 		return
 	var outcome := -1
+	# Name the striker before the blow lands, as every blade and shaft does: the
+	# squad's party mode reads it (`WarbandBody.struck_by`).
+	if victim.has_method("note_attacker"):
+		victim.note_attacker(attacker)
 	if victim.has_method("receive_melee"):
 		outcome = int(victim.receive_melee(amount, WILDERNESS_SOURCE,
 			attacker.global_position))
@@ -1779,7 +1813,31 @@ func wrong_way() -> bool:
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
-	drop_merc_gear(actor, merc_id)
+	if not _leave_remains(actor, merc_id):
+		drop_merc_gear(actor, merc_id)
+
+
+## A member of the party below who dies keeps what he still wore - both weapon
+## sets, armour, trinkets - on his own body (`WarbandLoot.register_remains`): it is
+## never booked for him, the squad leaves it alone, and the party only gets it back
+## by looting the corpse. What nobody takes back stays below with him. False for
+## any other death, which lets go of its hands as ever.
+func _leave_remains(actor, merc_id: int) -> bool:
+	if _client or warband == null or merc_id <= 0 or not warband.delve.is_member(merc_id):
+		return false
+	var kit: Array[String] = []
+	for entry in warband.roster.worn_entries(merc_id):
+		var item_id: String = warband.roster.take_worn(merc_id, str(entry.get("slot", "")),
+			int(entry.get("set", -1)))
+		if not item_id.is_empty():
+			kit.append(item_id)
+	if loot == null or not is_instance_valid(actor) or kit.is_empty():
+		return true
+	loot.register_remains(actor, kit, warband.roster.name_of(merc_id))
+	if hud != null:
+		hud.set_status("%s is dead. What he wore is on his body: loot it to take it back." %
+			warband.roster.name_of(merc_id), 4.0)
+	return true
 
 
 func _on_pickup_taken(pickup) -> void:
@@ -2019,7 +2077,9 @@ func _try_interact() -> void:
 ## `_unhandled_input`, and consuming the event stops it reaching the guard), so a
 ## right click with a body or a drop under the crosshair and in the body's reach
 ## opens the loot window on it - a click on a row takes it, a shift-click takes the
-## lot - and with shift held the body ducks and takes everything at once. A right
+## lot - and with shift held the body ducks and takes everything at once. Below, in
+## the delve, the click is the take itself: the body and everything piled beside it
+## go straight into the delve inventory (`WarbandLootHand.take_now`). A right
 ## click with nothing lootable there is left alone and raises the guard exactly as
 ## before.
 ##
@@ -2055,7 +2115,10 @@ func _loot_click(event: InputEvent) -> bool:
 		sample.get("target", null))
 	if target.is_empty():
 		return false
-	if mouse.shift_pressed:
+	if delve_area != null and delve_area.in_cave(actor):
+		if loot_hand.take_now(actor, target).is_empty():
+			return false
+	elif mouse.shift_pressed:
 		if not loot_hand.begin_on(actor, target):
 			return false
 	elif loot_window == null or not loot_window.open_on(actor, target):

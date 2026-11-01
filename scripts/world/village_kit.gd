@@ -166,18 +166,23 @@ class Merged:
 	func is_empty() -> bool:
 		return surfaces.is_empty()
 
-	func commit(host: Node3D, label: String, cast_shadow: bool = true) -> MeshInstance3D:
-		if surfaces.is_empty():
-			return null
+	## The merged mesh itself, one surface per material, for a caller that keeps
+	## it (and may place it more than once).
+	func build_mesh() -> ArrayMesh:
 		var mesh := ArrayMesh.new()
 		var index := 0
 		for material in surfaces.keys():
 			(surfaces[material] as SurfaceTool).commit(mesh)
 			mesh.surface_set_material(index, material)
 			index += 1
+		return mesh
+
+	func commit(host: Node3D, label: String, cast_shadow: bool = true) -> MeshInstance3D:
+		if surfaces.is_empty():
+			return null
 		var node := MeshInstance3D.new()
 		node.name = label
-		node.mesh = mesh
+		node.mesh = build_mesh()
 		node.cast_shadow = (GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadow
 			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 		host.add_child(node)

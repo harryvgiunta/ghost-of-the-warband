@@ -1,8 +1,10 @@
 IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
 
-Every texture under this directory (assets/world/textures/) is original,
-procedurally generated work authored for this repository. No third-party
-source imagery, scans, photo textures or paid packs were used or downloaded.
+Every texture under assets/world/textures/ is original, procedurally generated
+work authored for this repository. No third-party source imagery, scans, photo
+textures or paid packs were used or downloaded for them. (The Weeping Hollow's
+cave kit in assets/world/cave/ is built from CC0 Poly Haven scans and has its own
+provenance in assets/world/cave/LICENSE.txt.)
 
 Authoring source: tools/world_textures.py (deterministic Python, numpy and
 Pillow only). Running the tool regenerates every PNG in this directory

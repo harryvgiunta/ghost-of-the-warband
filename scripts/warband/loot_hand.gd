@@ -12,6 +12,10 @@ extends Node
 ## books a piece itself, so a press cannot pay twice: the corpse record empties
 ## and the drop node leaves the tree.
 ##
+## Below, in the delve, a right click is neither: `take_now` empties the container
+## at once - the body and every drop piled beside it - straight into the delve
+## inventory, with no window, no channel and nothing put on the taker's body.
+##
 ## The channel is a body's work, so it breaks the moment the work stops being
 ## possible: a blow that puts the body down, a walk off the spot it started from,
 ## or `cancel()` from the world for the cases only it can see (a panel opening, a
@@ -134,6 +138,44 @@ func begin_on(actor, target: Dictionary) -> bool:
 		_begin(actor, KIND_DROP, 0, target.get("pickup"))
 		return true
 	return false
+
+
+## The delve's right click: everything in the container `target` names - the body
+## and every open drop within `PILE_RADIUS` of it, or the drop and its pile - goes
+## into the field pool at once (the delve inventory, below). Every piece is booked
+## by the vacuum's one path and none is dressed onto the body that took it, so the
+## whole container lands in the inventory. Answers what was taken, in booking
+## order; empty when there was nothing to take or the hands are busy.
+func take_now(actor, target: Dictionary) -> Array[String]:
+	var ids: Array[String] = []
+	if target.is_empty() or active() or not _can_work(actor) or _loot == null:
+		return ids
+	var anchor := Vector3.ZERO
+	var kind := str(target.get("kind", ""))
+	if kind == KIND_CORPSE:
+		var corpse_id := int(target.get("corpse_id", 0))
+		anchor = _loot.corpse_position(corpse_id)
+		var taken: Dictionary = _loot.take_all_from_corpse(corpse_id, LOCAL_PEER, false)
+		for entry in taken.get("ids", []):
+			ids.append(str(entry))
+	elif kind == KIND_DROP and target.get("pickup") != null and is_instance_valid(target.get("pickup")):
+		anchor = (target.get("pickup") as Node3D).global_position
+	else:
+		return ids
+	for pickup in _loot.pickups():
+		if not is_instance_valid(pickup) or pickup.collected or pickup.blocked_for(LOCAL_PEER):
+			continue
+		if pickup.global_position.distance_to(anchor) > PILE_RADIUS:
+			continue
+		var result: Dictionary = _loot.quick_loot(pickup, LOCAL_PEER, false)
+		if bool(result.get("ok", false)):
+			ids.append(str(result.get("item_id", "")))
+	if ids.is_empty():
+		return ids
+	_summary = SummaryScript.describe(ids)
+	if _hud != null and is_instance_valid(_hud) and _hud.has_method("set_status"):
+		_hud.set_status(_summary, SUMMARY_SECONDS)
+	return ids
 
 
 ## Whether the press was aimed at a body that can still fight. A corpse in the

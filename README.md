@@ -17,9 +17,9 @@ a floating soul that enters any living mercenary of your warband. Every mercenar
 has identical base stats - **100 health, 1000 stamina**, gear is the only
 difference - and the warband is the thing that survives a battle.
 
-- **Saving:** the mode has its own save (`user://warband_state.json`, version 8,
-  which also remembers every piece the altar has anointed and the packed delve
-  inventory - and, while a party is below, that it is below);
+- **Saving:** the mode has its own save (`user://warband_state.json`, version 9,
+  which also remembers every piece the altar has anointed, the party's mode and
+  the packed delve inventory - and, while a party is below, that it is below);
   **RESUME WARBAND** opens it where the last checkpoint stands (the town square,
   or 60 m past the camp's mouth once the watchers there are down). The ranger's
   kit is untouched.
@@ -107,15 +107,31 @@ difference - and the warband is the thing that survives a battle.
   the infinite stash (or **TAKE ALL**). A **right click** on a body in reach opens a
   small loot window beside the crosshair: a click takes a row, a **shift-click**
   takes everything, and **Shift + right click** on the body ducks and takes the
-  lot without a window. The squad strips bodies on its own once the field is
-  quiet, into the same pool, and every piece anyone takes is written on the
-  **looted list** at the right of the screen.
+  lot without a window. Below, in the delve, the right click itself takes the
+  whole body - and the steel lying beside it - straight into the delve inventory.
+  The squad strips bodies on its own once the field is quiet, into the same pool,
+  and every piece anyone takes is written on the **looted list** at the right of
+  the screen.
 - **The band's fights are not silent:** when an AI squadmate breaks off after
   something, the HUD says it once - **Sorn breaks off: Briar wolf, 34 m
   back-left** - and keeps **IN THE FIGHT · Sorn, Dorn · 34 m back-left** under
   the roster until that ally is out of it, then **Sorn is back with the band.**
   The bearing is measured from where you are looking, so the line is a place to
   turn round for, and a body pacing in and out of reach is announced once.
+- **The party's mode:** **B** steps it - **OFFENSIVE**, **DEFENSIVE**, **PASSIVE**
+  and round again - and the squad list under your body panel shows the one the
+  band is in (**PARTY  DEFENSIVE · B changes it**). **Esc** opens the warband menu,
+  where **THE PARTY** under RESUME sets it too. It decides how the AI squad picks
+  its fights. **OFFENSIVE** (a fresh band's,
+  and all the squad ever did before) goes looking: anything hostile within 34 m
+  is a fight. **DEFENSIVE** answers: the squad fights only what has struck one of
+  the band - your own body included - and what you (or it) wounded first, so your
+  first cut starts its fight; a wound from outside the band, like the town
+  watch's arrow, does not. **PASSIVE** fights nothing and fetches nothing: the
+  squad keeps to your heels, for running away - it still picks up a fallen friend
+  and ties a bandage once nothing hostile is within 22 m. A hostile that struck
+  the band while it was passive is still answered the moment it is told to defend.
+  The mode is saved with the warband; a co-op guest's menu shows the host's.
 - **Arrows are a resource:** one shared quiver for the whole band, one shaft per
   loosed arrow (skills included), and a dead trail archer's corpse is the only
   resupply out on the road - 10-20 shafts and the twig bow it fired. Keepers sell
@@ -411,7 +427,7 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 | G | Interact with a keeper, the stash, the campfire, a cage latch or a corpse the squad may revive |
 | P | Open or close the equipment screen (ten worn slots, a live ranger, the shared stash and the kit summary); while open it owns the cursor and blocks movement, attacks and interactions |
 | I | Open the same screen |
-| Escape | Close the paperdoll, keeper or stash panel first; otherwise open the **quick menu** with the pointer free. It never pauses the world, so a hosted session stays connected while it is up: **RESUME**, **SAVE GAME**, the window mode switch, **KEYS**, the SOUND page, **EXIT TO TITLE** and **EXIT GAME**. It opens by itself when a host disappears |
+| Escape | Close the paperdoll, keeper or stash panel first; otherwise open the **quick menu** with the pointer free. It never pauses the world, so a hosted session stays connected while it is up: **RESUME**, the party's mode (**OFFENSIVE** / **DEFENSIVE** / **PASSIVE**), **SAVE GAME**, the window mode switch, **KEYS**, the SOUND page, **EXIT TO TITLE** and **EXIT GAME**. It opens by itself when a host disappears |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
 | Mouse wheel | Select the melee variant when armed; hold Ctrl to zoom |
 | C | Toggle crouch while grounded; slide when pressed during a sprint |
@@ -656,21 +672,51 @@ take what the cave holds, and climb out alive with it.
    by default). **THE TOWN STASH** is the warband's free pieces: a click packs one
    copy into **THE DELVE INVENTORY**, a shift-click packs every copy, and the
    inventory's rows go back the same way. A pack left at the mouth stays packed.
-2. **GO DOWN** puts the party on the landing of a **fresh instance** of floor I:
-   a chain of torchlit halls joined by bending tunnels, built when the party goes
-   down and freed when it comes back up. Two dens of watchers (three, then four)
-   sleep at their posts until one of them sees you, hears a fight or takes a
-   blow, or a body walks into the room - then the whole den wakes. **Gorehorn**,
-   the Hollow's demon, waits at the bottom in a ring of old blood.
+2. **GO DOWN** lowers the party down one of six shafts into a **fresh instance**
+   of floor I, built when the party goes down and freed when it comes back up.
+   The shaft is drawn every descent, so you never know which corner of the
+   Hollow you will start in. The floor is built for an extraction crowd: ten
+   areas, 160 by 190 metres, round a hub -
+
+   | Area | What it is |
+   | --- | --- |
+   | The Mouth | the old landing under the town's rope (shaft) |
+   | The Drowned Gallery | black pools under cold witch-light, a cistern (shaft) |
+   | The Old Workings | timbered galleries, lanterns, broken carts (shaft) |
+   | The Pale Garden | a grove of giant glowing fungus (shaft) |
+   | The Black Mere | a lake cavern with a drowned shrine (shaft) |
+   | The Bone Chapel | skull-lined nave, apse and crypt (shaft) |
+   | The Watchers' Den, The Ossuary, The Rooted Hall | the dens between the shafts |
+   | Gorehorn's Lair | the hub, with a way in from every side |
+
+   Eight dens of watchers sleep at their posts - ten bodies for every post a den
+   was laid out with, **210** in all - until one of them sees you, hears a fight
+   or takes a blow, or a body walks into the room - then the whole den wakes. No
+   den can see a landing. **Gorehorn**, the Hollow's demon, waits in the middle of
+   the lair in a ring of old blood.
+
+   The Hollow pays thin: a watcher below leaves about **30%** of what the same body
+   leaves in the wood - each piece of its kit survives the fall on its own roll -
+   while Gorehorn keeps his prize whole. Two rare finds ride on top. Demons bleed
+   the altar's first essence, **Ritual Tallow**, and the watchers have caught on:
+   they gate demons through to harvest it, so about one watcher in twenty-five
+   carries a piece (one demon in ten). About one watcher in fifty holds steel that
+   is **already anointed** - its drop is labelled, and taking it wakes that piece's
+   skill for every copy the warband owns, no ichor spent.
 3. **Below, the party carries one inventory.** Everything taken - by your hands
-   through the loot window or **Shift + right click**, by a squadmate stripping
-   the dead, a fallen squadmate's own kit - lands in the **delve inventory**, never
-   the town stash. It is also the quiver: archers shoot what was packed. **P**
+   with a **right click** (the whole body and what lies beside it, no window), by
+   a squadmate stripping the dead - lands in the **delve inventory**, never the
+   town stash. It is also the quiver: archers shoot what was packed. **P**
    dresses the party from it, and only the party: the bodies left in the town
-   cannot be entered, dressed or driven until the party is back.
-4. **Climb out** with **G** at the rope under the hole in the mouth's roof: every
-   body still alive - standing or carried - comes up beside the pit, and every
-   piece in the delve inventory goes into the town stash.
+   cannot be entered, dressed or driven until the party is back. **A squadmate
+   who dies below keeps his kit on his body**: nothing comes back on its own and
+   the squad will not strip him - right-click his corpse to take it all back into
+   the inventory, or leave it to the Hollow.
+4. **Climb out** with **G** at **any** shaft's rope - the one you came down or
+   any other you reach: every body still alive - standing or carried - comes up
+   beside the pit in the square, every piece in the delve inventory goes into
+   the town stash, and the Ritual Tallow you carried up goes into the altar's
+   essence.
 5. **Fall** - nobody below left standing - and the Hollow keeps everything: the
    delve inventory and every piece the party's members still wear. Whoever was
    only down stands up at the mouth with nothing on and a twentieth of a pool,
@@ -679,9 +725,32 @@ take what the cave holds, and climb out alive with it.
    save that still holds a party below loads with that party's gear and pack
    gone.
 
-The HUD carries the floor's line over the looted list (the floor, what the
-inventory holds, Gorehorn's blood once he is up), the crosshair line names the
-objective, and **M** has no map down there.
+The HUD carries the floor's line over the looted list (the floor, the area you
+are in, what the inventory holds, **WAY UP** - the nearest rope by walking
+distance - and Gorehorn's blood once he is up), and the crosshair line names the
+objective and, once Gorehorn is dead, the nearest rope. **M** below opens the
+**floor's plan**: every hall and way of floor I on one surveyor's sheet, the six
+ropes (the one the shortest walk reaches ringed, the one you came down marked),
+Gorehorn, whatever has woken and hunts you, the party, and you with the way you
+face. Like the wood's map it never pauses the cave.
+
+**The Hollow's look.** The rock is not the collider boxes it stands on: every wall
+carries a skin of broken strata, a talus foot, overhangs and a cove into a vaulted
+roof, worn into an arch at every way through, in the area's own stone - pale
+limestone at the mouth, the dens and the ossuary, wet black basalt in the gallery
+and the mere, banded strata in the rooted hall, the workings and the red lair -
+from CC0 photoscans processed in Blender. Dripstone grows on it: stalactite
+clusters and curtains, spires and flowstone, columns, fallen breakdown and talus,
+all sculpted and baked in Blender (`python tools/build_cave_kit.py`). The garden's
+fungus is the kit's, its gills alight. Water streaks the walls and pools on wet
+floors, drips from the gallery's and the mere's stalactites, and the night falls
+down each shaft as a pale cone with dust turning in it. The Hollow is alive: bats
+roost in the high roofs and burst into flight when you walk under them, others
+loop under the halls, rats run the wall feet and bolt from you, spiders sit in old
+webs in the corners, moths circle every flame, and glowworms hang their cold
+lights from the damp roofs of the gallery, the garden and the mere. Each area
+breathes its own air - warm haze at the mouth, cold blue over the water, green in
+the garden, red in the lair - and the eye eases from one into the next.
 
 ## World art
 

@@ -262,6 +262,17 @@ func anoint(stash: WarbandStash, roster, item_id: String) -> Dictionary:
 		"message": "%s wakes into %s. Key %s looses it." % [item_name,
 			str(AbilityRules.by_id(ability).get("name", ability)), anoint_key(item_id)]}
 
+## Wake a piece into its skill with no reagent: the altar's rite is `anoint`, this
+## is a piece that came out of the Hollow already anointed (`delve_loot.gd`). Every
+## copy the warband owns carries it, as an altar anointing would. False for a piece
+## with no skill and for one that is already awake.
+func grant_anointing(item_id: String) -> bool:
+	var skill := anoint_skill(item_id)
+	if skill.is_empty() or is_anointed(item_id):
+		return false
+	anointed[item_id] = str(skill.get("id", ""))
+	return true
+
 # --- branding --------------------------------------------------------------
 
 func brand_cost(tier: int) -> int:

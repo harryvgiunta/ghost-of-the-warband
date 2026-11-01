@@ -6,9 +6,10 @@ extends RefCounted
 ## The town stash is the warband's safe pool. A descent takes a party and its
 ## delve inventory - the supplies packed at the Hollow's mouth - into the cave,
 ## and everything the party takes down there (a corpse's kit, a drop, a fallen
-## squadmate's gear) lands in that inventory, never in the stash. Climbing out
-## alive empties the inventory into the stash; a party that falls loses the
-## inventory and everything its members still wear.
+## squadmate's gear taken back off his body) lands in that inventory, never in the
+## stash. Climbing out alive empties the inventory into the stash (the essence it
+## carried into the altar's wallet); a party that falls loses the inventory and
+## everything its members still wear.
 ##
 ## While no descent runs the inventory is simply the pack being made up in town:
 ## packed pieces are out of the stash and wait at the mouth for the next party.

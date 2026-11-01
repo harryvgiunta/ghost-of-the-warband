@@ -16,7 +16,9 @@ extends SceneTree
 ##     target on the frame the mob's damage resolves;
 ##   * `arm`/`take_weapon_item` round-trip, the guard and the crouch are the rig's
 ##     authored stances, a real blow breaks a swing, and a corpse is the shared
-##     ragdoll.
+##     ragdoll;
+##   * the hit capsule stands as tall as the body that is drawn: an arrow loosed
+##     at the drawn head or chest of every table row lands on that body.
 ##
 ## The three skins are also compared against their exported metadata, so a
 ## sampler that promises a height or a fit scale the asset does not carry fails
@@ -30,6 +32,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const BloodSurface = preload("res://scripts/blood_surface.gd")
 const BloodField = preload("res://scripts/blood_field.gd")
+const ArrowScript = preload("res://scripts/arrow.gd")
 
 const SPECIES := ["hollow_warden", "ossuary_stalker", "gallowsroot"]
 const PER_SPECIES := 4
@@ -37,6 +40,13 @@ const SPAWN_STEP := 4.5
 ## Off the ring, for the hunting checks: these bodies must not be measured
 ## against the camp's yard.
 const FAR_SAFE := Vector3(-900.0, 0.0, -900.0)
+## The hit-volume row: one body per table row, clear of the samples and the
+## striker, each shot from `SHOT_RANGE` with the twig bow's full-draw speed. Close
+## enough that the drop cannot carry a high shaft down into the chest, far enough
+## to be a shot rather than a body pressed against the string.
+const HIT_ROW_Z := -40.0
+const SHOT_RANGE := 3.0
+const SHOT_SPEED := 48.0
 ## The three swings' rig clips, pinned: the presenter promises these names and the
 ## ranger's own AnimationPlayer has to carry them.
 const SWING_CLIPS := {
@@ -111,6 +121,7 @@ func run() -> void:
 	await check_attack()
 	await check_sampler()
 	check_death()
+	await check_hit_volume()
 
 	_field.queue_free()
 	floor_body.queue_free()
@@ -827,3 +838,60 @@ func check_death() -> void:
 	watcher.take_damage(4000.0, 90)
 	check(_defeats == 1, "a blow on the corpse is not a second kill (%d)" % _defeats)
 	check(watcher.gear_items().size() >= 1, "the corpse still lists its kit")
+
+
+# --- the hit volume --------------------------------------------------------
+
+## Every arrow, thrown blade and swing stops on the mob's one capsule, and a
+## variant's build scales the body that is drawn by up to 1.30. A capsule held at
+## the species' own height ended under a big body's collarbones, so a shaft
+## through the head on screen flew on through air: the hit volume has to grow
+## with the build. Every row of every species is fielded, because the rows are
+## where the builds live, and each is shot at its drawn head and then at its
+## drawn chest - the two places a player puts the reticle.
+func check_hit_volume() -> void:
+	var bodies: Array = []
+	var x := -0.5 * SPAWN_STEP * float(WatcherScript.VARIANTS.size())
+	for species in SPECIES:
+		var rows := WatcherScript.table_for(species)
+		var fielded := {}
+		for ordinal in range(1, 200):
+			var label := "Mark%s%d" % [str(species).to_pascal_case(), ordinal]
+			var slot := WatcherScript.variant_index_for(species, label)
+			if fielded.has(slot):
+				continue
+			fielded[slot] = true
+			bodies.append(_spawn(_field, label, species, Vector3(x, 0.1, HIT_ROW_Z),
+				WatcherScript.HARDENED_HEALTH))
+			x += SPAWN_STEP
+			if fielded.size() == rows.size():
+				break
+		check(fielded.size() == rows.size(),
+			"every %s row stands for the shot (%d / %d)" % [species, fielded.size(), rows.size()])
+	for frame in 4:
+		await physics_frame
+	for lane in ["head", "chest"]:
+		var volley: Array = []
+		for raw in bodies:
+			var watcher = raw
+			var aim: Vector3 = watcher.head_hitbox_center() if lane == "head" \
+				else watcher.get_aim_position()
+			var arrow = ArrowScript.new()
+			root.add_child(arrow)
+			var excluded: Array[RID] = []
+			arrow.launch(aim + Vector3(0.0, 0.0, SHOT_RANGE), Vector3.FORWARD, SHOT_SPEED,
+				5.0, excluded)
+			volley.append([watcher, float(watcher.health), arrow, aim.y - watcher.global_position.y])
+		for frame in 12:
+			await physics_frame
+		for entry in volley:
+			var watcher = entry[0]
+			check(float(watcher.health) < float(entry[1]),
+				"an arrow at the drawn %s of %s (build %.2f, %.2f m up a %.2f m body) lands on it"
+				% [lane, str(watcher.get_display_name()), float(watcher.variant.get("scale", 1.0)),
+					float(entry[3]), 1.869 * float(watcher.body_scale())])
+			if is_instance_valid(entry[2]):
+				entry[2].queue_free()
+	for raw in bodies:
+		raw.queue_free()
+	await process_frame

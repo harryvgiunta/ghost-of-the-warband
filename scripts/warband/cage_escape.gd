@@ -1038,6 +1038,10 @@ func _on_watcher_attack(attacker, amount: float, victim) -> void:
 	# swing, the ambush lands half a swing, a hardened body lands all of it - so
 	# the scene weighs nobody a second time here.
 	var outcome := -1
+	# Name the striker before the blow lands, as every blade and shaft does: the
+	# squad's party mode reads it (`WarbandBody.struck_by`).
+	if victim.has_method("note_attacker"):
+		victim.note_attacker(attacker)
 	if victim.has_method("receive_melee"):
 		outcome = int(victim.receive_melee(amount, WATCHER_SOURCE,
 			attacker.global_position))

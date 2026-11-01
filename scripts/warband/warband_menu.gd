@@ -1,7 +1,7 @@
 class_name WarbandMenu
 extends Control
-## The warband's own quick menu: resume, write the campaign to disk, resume a
-## written one, settings and the two ways out.
+## The warband's own quick menu: resume, the party's mode, write the campaign to
+## disk, resume a written one, settings and the two ways out.
 ##
 ## It is a plain Control, not a CanvasLayer, because the campaign world hangs it
 ## under its own overlay and the tests build it without a scene. Like every
@@ -20,6 +20,7 @@ signal exit_requested
 signal quit_requested
 signal saved(path: String)
 
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SoundPageScript = preload("res://scripts/ui/sound_settings_page.gd")
@@ -30,10 +31,19 @@ const PAGE_MENU := "menu"
 const PAGE_SOUND := "sound"
 const PAGE_KEYS := "keys"
 
-const PANEL_SIZE := Vector2(460, 760)
+## Tall enough for the party's row over the campaign's: every row stands with the
+## notice line up, and the three modes sit side by side with room to spare.
+const PANEL_SIZE := Vector2(500, 840)
 ## The controls sheet is a whole keyboard wide: the frame itself grows for it.
 const KEYS_PANEL_SIZE := Vector2(1140, 760)
 const DIM := Color(0.02, 0.015, 0.01, 0.82)
+## The line under the party's three modes, for the one that is lit. One line each
+## at the panel's width, so switching modes never moves the rows below.
+const PARTY_LINES := {
+	Contracts.PARTY_OFFENSIVE: "The squad goes looking: anything hostile in sight is a fight.",
+	Contracts.PARTY_DEFENSIVE: "The squad answers: what strikes the band, or what you strike.",
+	Contracts.PARTY_PASSIVE: "The squad keeps to you and fights nothing. For running.",
+}
 
 var resume_button: Button
 var save_button: Button
@@ -50,6 +60,10 @@ var back_button: Button
 var sound_page
 ## The controls sheet, the same board the frontier's quick menu shows.
 var keys_page
+## The party's three modes, by mode id: one toggle each, the lit one the mode the
+## warband is in, and the line under them saying what that one does.
+var _party_buttons: Dictionary = {}
+var _party_line: Label
 
 var _frame
 var _menu_layer: VBoxContainer
@@ -77,6 +91,12 @@ func _ready() -> void:
 	# first); repaint the mode row now that there is one to ask.
 	refresh()
 	visible = _open
+	# A guest's copy of the books changes under an open menu when the host puts
+	# the party in another mode; the lit row follows it.
+	var warband = _warband()
+	if warband != null and warband.has_signal("changed") \
+			and not warband.changed.is_connected(_refresh_party):
+		warband.changed.connect(_refresh_party)
 
 
 ## The world names what leaving this campaign means: the trail, the town, the
@@ -108,6 +128,12 @@ func action_buttons() -> Dictionary:
 		"exit": exit_button,
 		"quit": quit_button,
 	}
+
+
+## The party's mode row, by mode id (`Contracts.PARTY_MODES`).
+func party_buttons() -> Dictionary:
+	_build()
+	return _party_buttons.duplicate()
 
 
 ## `context` may carry `page` (start on a page), `notice` (a line at the head,
@@ -188,11 +214,12 @@ func _set_panel_size(panel: Vector2) -> void:
 	_frame.offset_bottom = panel.y * 0.5
 
 
-## Repaint the rows that mirror real state: whether a save exists, and the mode
-## the window is actually in.
+## Repaint the rows that mirror real state: the party's mode, whether a save
+## exists, and the mode the window is actually in.
 func refresh() -> void:
 	if not _built:
 		return
+	_refresh_party()
 	_refresh_load()
 	_refresh_display()
 	if _page == PAGE_SOUND and sound_page != null and is_inside_tree():
@@ -240,6 +267,24 @@ func save_game() -> bool:
 	saved.emit(path)
 	_refresh_load()
 	return true
+
+
+## Put the party in `mode` (`Contracts.PARTY_MODES`). The mode is the warband's
+## (`Warband.set_party_mode`): saved with it, lent with it, and handed to the squad
+## every frame. The menu adds nothing - it asks, says the answer and repaints, so
+## a guest's press is the host's refusal on the status line.
+func set_party_mode(mode: String) -> bool:
+	var warband = _warband()
+	if warband == null or not warband.has_method("set_party_mode"):
+		set_status("No warband to command in this scene.")
+		_refresh_party()
+		return false
+	var result: Dictionary = warband.set_party_mode(mode)
+	var ok := bool(result.get("ok", false))
+	set_status(str(result.get("message", "")))
+	_refresh_party()
+	_note("party_mode", {"asked": mode, "mode": str(result.get("mode", "")), "ok": ok})
+	return ok
 
 
 func is_fullscreen() -> bool:
@@ -300,6 +345,24 @@ func _build() -> void:
 	resume_button = _button("RESUME", "PrimaryButton", 52)
 	resume_button.pressed.connect(close)
 	column.add_child(resume_button)
+	_section(column, "THE PARTY")
+	var modes := HBoxContainer.new()
+	modes.name = "PartyModes"
+	modes.add_theme_constant_override("separation", 6)
+	column.add_child(modes)
+	for mode in Contracts.PARTY_MODES:
+		var button := _button(str(mode).to_upper(), "", 40)
+		button.name = "Party" + str(mode).capitalize()
+		button.toggle_mode = true
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.add_theme_font_size_override("font_size", 13)
+		button.pressed.connect(set_party_mode.bind(str(mode)))
+		modes.add_child(button)
+		_party_buttons[str(mode)] = button
+	_party_line = _label("", 12, LedgerThemeScript.INK_MUTED)
+	_party_line.name = "PartyLine"
+	_party_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(_party_line)
 	_section(column, "THE CAMPAIGN")
 
 	save_button = _button("SAVE GAME", "", 46)
@@ -367,6 +430,7 @@ func _build() -> void:
 	keys_back.pressed.connect(show_page.bind(PAGE_MENU))
 	_keys_layer.add_child(keys_back)
 
+	_refresh_party()
 	_refresh_display()
 	_refresh_load()
 
@@ -377,6 +441,21 @@ func _column(parent: Control, node_name: String) -> VBoxContainer:
 	result.add_theme_constant_override("separation", 6)
 	parent.add_child(result)
 	return result
+
+
+## Light the party's mode as the warband holds it - the host's, on a guest - and
+## say what it does.
+func _refresh_party() -> void:
+	if _party_line == null:
+		return
+	var warband = _warband()
+	var mode := str(warband.get("party_mode")) if warband != null else ""
+	for key in _party_buttons:
+		var button: Button = _party_buttons[key]
+		var lit: bool = key == mode
+		button.set_pressed_no_signal(lit)
+		button.theme_type_variation = "PrimaryButton" if lit else ""
+	_party_line.text = str(PARTY_LINES.get(mode, ""))
 
 
 func _refresh_load() -> void:

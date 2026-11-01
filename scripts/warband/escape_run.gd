@@ -340,6 +340,10 @@ func _on_cultist_attack(attacker, amount: float, victim) -> void:
 	if not is_instance_valid(attacker) or not is_instance_valid(victim):
 		return
 	var outcome := -1
+	# Name the striker before the blow lands, as every blade and shaft does: the
+	# squad's party mode reads it (`WarbandBody.struck_by`).
+	if victim.has_method("note_attacker"):
+		victim.note_attacker(attacker)
 	if victim.has_method("receive_melee"):
 		outcome = int(victim.receive_melee(amount, WATCHER_SOURCE, attacker.global_position))
 	elif victim.has_method("take_damage"):

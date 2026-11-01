@@ -42,13 +42,15 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## one got; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
 ## steel that has been given its skill; v7 dropped the expedition's battle ledger
 ## (`runs`, `run_totals`); v8 added the delve (`delve`): the inventory packed at
-## the Hollow's mouth and, while a party is below, who went down. Older files
+## the Hollow's mouth and, while a party is below, who went down; v9 added the
+## party's mode (`party_mode`), how the squad picks its fights. Older files
 ## still load: a record with no sets puts the
 ## pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
-## with an empty ledger, a file without anointings carries plain steel, and a file
-## without a delve has an empty pack and nobody below.
-const SAVE_VERSION := 8
+## with an empty ledger, a file without anointings carries plain steel, a file
+## without a delve has an empty pack and nobody below, and a file without a party
+## mode fights offensive, which is all the squad ever did before it had one.
+const SAVE_VERSION := 9
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -87,6 +89,10 @@ var revive_channels: Dictionary = {}  # peer_id -> {merc_id, seconds}
 ## essence beside it are the warband as it stood then; the purse is not rolled
 ## back, because `PlayerState` owns it and a reload must never repay a run.
 var checkpoint: Dictionary = {}
+## How the squad picks its fights (`Contracts.PARTY_MODES`): set from the warband
+## menu with `set_party_mode`, saved with the books and lent with them, so a co-op
+## guest's menu shows the host's mode. Only the host's squad acts on it.
+var party_mode: String = Contracts.DEFAULT_PARTY_MODE
 ## True while this warband is a co-op host's, lent to this machine for the length
 ## of a session (`GameFlow.join_campaign`). A lent warband is shown and played and
 ## never touches this machine's files: `save_state` and `load_state` refuse, so the
@@ -285,9 +291,12 @@ func _balance_field() -> void:
 ## body because the fallen still counted. The name leaves the roster, the body
 ## leaves the soul router, and everything it was still wearing goes back into the
 ## shared stash, so dying costs the man, never the gear - unless he died below:
-## a member of the party below leaves his kit in the delve inventory, which the
-## survivors carry out or lose with their own. Returns the fallen records
-## (`[{id, name, health, max_health, items}]`); empty when nobody died.
+## a member of the party below leaves his kit on his corpse (the world takes it
+## off his books as he dies, `world_scene._leave_remains`), and the party gets it
+## back only by looting the body. Anything still on his books when he is reaped
+## below - a save loaded with the party down - joins the delve inventory the fall
+## then loses. Returns the fallen records (`[{id, name, health, max_health,
+## items}]`); empty when nobody died.
 func reap_dead() -> Array[Dictionary]:
 	var fallen := roster.take_dead()
 	if fallen.is_empty():
@@ -446,6 +455,17 @@ func anoint(item_id: String) -> Dictionary:
 		_notify()
 	result["completed"] = completed
 	return result
+
+## A piece found already anointed - a rare watcher's steel below (`delve_loot.gd`)
+## - wakes into its skill the moment the warband takes it, and `anointed` dresses
+## the bodies already holding a copy, exactly as the altar's rite does. Nothing is
+## spent. False for a lent warband, a piece with no skill, and one already awake.
+func grant_anointing(item_id: String) -> bool:
+	if lent or not cruor.grant_anointing(item_id):
+		return false
+	anointed.emit(item_id, cruor.anointed_skill(item_id))
+	_notify()
+	return true
 
 func hire(merc_name: String = "") -> Dictionary:
 	if lent:
@@ -705,8 +725,9 @@ func begin_delve(party_ids: Array) -> Dictionary:
 			delve.inventory.pooled_total()]}
 
 ## The party climbed out alive: every piece in the delve inventory goes into the
-## town stash and the descent is over. Returns `{ok, items: {id: count}, count,
-## value}` - what was brought home.
+## town stash - except the essence it carried up (`cruor_t1`, Ritual Tallow off the
+## Hollow's corpses), which renders into the altar's wallet - and the descent is
+## over. Returns `{ok, items: {id: count}, count, value}` - what was brought home.
 func extract_delve() -> Dictionary:
 	if not delve.active:
 		return {"ok": false, "items": {}, "count": 0, "value": 0}
@@ -715,7 +736,11 @@ func extract_delve() -> Dictionary:
 	var value := 0
 	for item_id in items:
 		var copies := int(items[item_id])
-		stash.add(str(item_id), copies)
+		var tier := CruorCatalog.tier_from_id(str(item_id))
+		if tier >= 0:
+			cruor.add(tier, copies)
+		else:
+			stash.add(str(item_id), copies)
 		count += copies
 		value += WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id))) * copies
 	delve.inventory.clear()
@@ -726,7 +751,7 @@ func extract_delve() -> Dictionary:
 
 ## The party fell below: everything it carried is the Hollow's. Every member still
 ## on the books is stripped - both weapon sets, armour, trinkets - and the delve
-## inventory, which already holds whatever the dead were wearing, is emptied.
+## inventory, with whatever was taken back off the dead, is emptied.
 ## Returns `{ok, items: {id: count}, count, value}` - what was lost.
 func forfeit_delve() -> Dictionary:
 	if not delve.active:
@@ -751,6 +776,33 @@ func forfeit_delve() -> Dictionary:
 	_notify()
 	save_state()
 	return {"ok": true, "items": lost, "count": count, "value": value}
+
+# --- the party's mode ------------------------------------------------------
+
+## What a guest is told when it reaches for the party's mode: the squad it would
+## command runs on the host.
+const LENT_PARTY_MESSAGE := "This is the host's warband: only the host sets how the party fights."
+
+## Put the party in `mode`. Returns `{ok, mode, message}`, `mode` being the one the
+## party is in afterwards. An unknown mode is refused, and so is a lent warband's:
+## the squad that would obey it is the host's. Only a real change is announced.
+func set_party_mode(mode: String) -> Dictionary:
+	if lent:
+		return {"ok": false, "mode": party_mode, "message": LENT_PARTY_MESSAGE}
+	if not Contracts.PARTY_MODES.has(mode):
+		return {"ok": false, "mode": party_mode,
+			"message": "The party has no %s mode." % mode.to_upper()}
+	if mode != party_mode:
+		party_mode = mode
+		_notify()
+	return {"ok": true, "mode": party_mode, "message": "The party is %s." % mode.to_upper()}
+
+## Step the party to the next mode in `Contracts.PARTY_MODES` order - OFFENSIVE,
+## DEFENSIVE, PASSIVE, and round again - which is what the world's `B` key does.
+## The same answer and the same refusals as `set_party_mode`.
+func cycle_party_mode() -> Dictionary:
+	var index := Contracts.PARTY_MODES.find(party_mode)
+	return set_party_mode(Contracts.PARTY_MODES[(index + 1) % Contracts.PARTY_MODES.size()])
 
 # --- possession bookkeeping ------------------------------------------------
 
@@ -791,6 +843,7 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	revive_channels.clear()
 	checkpoint.clear()
 	delve.clear()
+	party_mode = Contracts.DEFAULT_PARTY_MODE
 	_notify()
 
 func _notify() -> void:
@@ -808,14 +861,16 @@ func to_dict() -> Dictionary:
 		"checkpoint": checkpoint.duplicate(true),
 		"quests": quests.to_dict(),
 		"delve": delve.to_dict(),
+		"party_mode": party_mode,
 	}
 
 func from_dict(data: Dictionary) -> void:
 	roster.from_dict(data.get("roster", {}))
 	stash.from_dict(data.get("stash", {}))
 	cruor.from_dict(data.get("cruor", {}))
-	# Read before the dead are reaped below: a member who died below left his kit
-	# in the delve inventory, not the stash. A v7 file has no delve at all.
+	# Read before the dead are reaped below: a member still on the books of a party
+	# below is reaped into the delve inventory, which the load's fall then loses,
+	# never into the stash. A v7 file has no delve at all.
 	delve.from_dict(data.get("delve", {}))
 	deployment_cap = clampi(int(data.get("deployment_cap", Contracts.MAX_DEPLOYMENT_CAP)),
 		1, Contracts.MAX_DEPLOYMENT_CAP)
@@ -825,6 +880,10 @@ func from_dict(data: Dictionary) -> void:
 	# A v4 file has no ledger: it opens with no orders, which is exactly the
 	# quartermaster's slate before he speaks.
 	quests.from_dict(QuestScript.sanitise(data.get("quests", {})))
+	# A v8 file has no party mode: the squad fights offensive, as it always did,
+	# and so does a mode this build has never heard of.
+	var mode := str(data.get("party_mode", Contracts.DEFAULT_PARTY_MODE))
+	party_mode = mode if Contracts.PARTY_MODES.has(mode) else Contracts.DEFAULT_PARTY_MODE
 	# A file written before the dead left the books still carries their records.
 	# They leave now, and whatever they wore joins the stash that was just read:
 	# opening an old warband must free the hire cap, not inherit a graveyard.

@@ -53,6 +53,7 @@ func run() -> void:
 	check_vendor(state, warband)
 	check_reserve(warband)
 	check_persistence(warband)
+	check_party_mode(warband)
 
 	_remove_test_save()
 	print("WARBAND_CONTRACT_REGRESSION checks=", checks, " failures=", failures)
@@ -623,3 +624,58 @@ func check_persistence(warband) -> void:
 	check(warband.cruor.brand_of("sword_arming")["ability"] == "rending_strike", "the brand survives")
 	check(warband.describe() == before, "the saved card round-trips exactly")
 	check(warband.total_value() > 0, "the warband has a worth")
+
+# --- the party's mode ------------------------------------------------------
+
+## How the squad picks its fights is the warband's: a fresh band is offensive, a
+## named mode takes and is announced once (the co-op mirror sends on `changed`),
+## an unknown mode and a guest's press change nothing, and the mode rides the save -
+## a file from before it existed fights offensive.
+func check_party_mode(warband) -> void:
+	warband.reset_state()
+	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a fresh warband fights offensive")
+	var told := [0]
+	var count := func() -> void: told[0] += 1
+	warband.changed.connect(count)
+	var result: Dictionary = warband.set_party_mode(Contracts.PARTY_DEFENSIVE)
+	check(bool(result.get("ok", false)) and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+		"the party takes a named mode (%s)" % str(result.get("message", "")))
+	check(told[0] == 1, "and says so once (%d)" % told[0])
+	warband.set_party_mode(Contracts.PARTY_DEFENSIVE)
+	check(told[0] == 1, "the mode it is already in is no change (%d)" % told[0])
+	result = warband.set_party_mode("berserk")
+	check(not bool(result.get("ok", true)) and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+		"an unknown mode is refused and the party keeps its own")
+	warband.changed.disconnect(count)
+
+	warband.set_party_mode(Contracts.PARTY_PASSIVE)
+	warband.save_state()
+	warband.reset_state()
+	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a reset is a fresh band on offensive")
+	check(warband.load_state() and warband.party_mode == Contracts.PARTY_PASSIVE,
+		"the party's mode survives a save")
+	var old: Dictionary = warband.to_dict()
+	old.erase("party_mode")
+	warband.from_dict(old)
+	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a v8 file, with no mode, fights offensive")
+	old["party_mode"] = "berserk"
+	warband.from_dict(old)
+	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "and so does a mode this build never heard of")
+
+	# The world's `B` steps through the modes in the menu's order and round again.
+	var stepped: Array[String] = []
+	for _press in Contracts.PARTY_MODES.size():
+		stepped.append(str(warband.cycle_party_mode().get("mode", "")))
+	check(stepped == [Contracts.PARTY_DEFENSIVE, Contracts.PARTY_PASSIVE, Contracts.PARTY_OFFENSIVE],
+		"a step walks OFFENSIVE, DEFENSIVE, PASSIVE and back round (%s)" % str(stepped))
+
+	# A guest's copy is the host's books: the press is refused and nothing moves.
+	warband.lent = true
+	result = warband.set_party_mode(Contracts.PARTY_DEFENSIVE)
+	check(not bool(result.get("ok", true)) and warband.party_mode == Contracts.PARTY_OFFENSIVE,
+		"a lent warband's mode is the host's to set (%s)" % str(result.get("message", "")))
+	result = warband.cycle_party_mode()
+	check(not bool(result.get("ok", true)) and warband.party_mode == Contracts.PARTY_OFFENSIVE,
+		"and so is a step")
+	warband.lent = false
+	warband.reset_state()
