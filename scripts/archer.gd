@@ -376,7 +376,12 @@ var _leg_lengths := Vector2.ZERO
 var _leg_bones := PackedInt32Array()
 var _lower_pose: Array[Transform3D] = []
 var _blend_pose: Array[Transform3D] = []
-var _authored_pose: Array[Transform3D] = []
+## How many bones the skeleton has, read once. `get_bone_count()` is a native call
+## and the solve walked four loops of sixty-five asking for it every time.
+var _bone_count := 0
+## Clip lengths by name: `_clip_length(clip)` unwraps a resource
+## per call and the solve asked for it two or three times a frame.
+var _clip_seconds := {}
 var _crouch_pose: Array[Transform3D] = []
 var _slide_crouch_pose: Array[Transform3D] = []
 var _crouch_lowering := 0.0
@@ -461,10 +466,10 @@ func _ready() -> void:
 	_player = _find_node_of_type(_model, "AnimationPlayer") as AnimationPlayer
 	assert(skeleton != null and _player != null, "The ranger asset must contain its rig and authored animation library")
 	_player.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
-	for index in skeleton.get_bone_count():
+	_bone_count = skeleton.get_bone_count()
+	for index in _bone_count:
 		_bones[skeleton.get_bone_name(index)] = index
 		_blend_pose.append(Transform3D.IDENTITY)
-		_authored_pose.append(skeleton.get_bone_pose(index))
 		_crouch_pose.append(Transform3D.IDENTITY)
 	for side in ["l", "r"]:
 		_arms.append(PackedInt32Array([_bones["upperarm_"+side],_bones["lowerarm_"+side],_bones["hand_"+side]]))
@@ -482,7 +487,7 @@ func _ready() -> void:
 	var standing_pelvis := skeleton.get_bone_global_pose(_bones.pelvis).origin.y
 	_sample_clip(str(_profile.clips.crouch_idle.name),0.0)
 	_crouch_lowering = 0.58-(standing_pelvis-skeleton.get_bone_global_pose(_bones.pelvis).origin.y)
-	for bone in skeleton.get_bone_count():
+	for bone in _bone_count:
 		_slide_crouch_pose.append(skeleton.get_bone_pose(bone))
 	_palm_left = _vector(_profile.palms.left)
 	_palm_right = _vector(_profile.palms.right)
@@ -499,7 +504,7 @@ func _ready() -> void:
 		var calf := skeleton.get_bone_global_rest(_legs[side][1]).origin
 		_leg_lengths[side] = thigh.distance_to(calf)+calf.distance_to(skeleton.get_bone_global_rest(_legs[side][2]).origin)
 		_foot_up.append(rest.basis.inverse() * Vector3.UP)
-	for bone in skeleton.get_bone_count():
+	for bone in _bone_count:
 		var ancestor := bone
 		while ancestor >= 0:
 			if ancestor == int(_bones.clavicle_l) or ancestor == int(_bones.clavicle_r):
@@ -2562,6 +2567,19 @@ func set_pose_stride(ticks: int) -> void:
 	_pose_stride = ticks
 	_stride_ticks = get_instance_id()%ticks
 
+## Seconds in a clip, cached. A clip the library does not carry answers 0, which
+## the callers already treat as "no time base" by falling back to 0.
+func _clip_length(clip: String) -> float:
+	var cached: Variant = _clip_seconds.get(clip)
+	if cached != null:
+		return float(cached)
+	var length := 0.0
+	if _player != null and _player.has_animation(clip):
+		length = _player.get_animation(clip).length
+	_clip_seconds[clip] = length
+	return length
+
+
 func advance_animation(delta: float) -> void:
 	if not _built:
 		return
@@ -2758,7 +2776,7 @@ func _sample_clip(clip: String, time: float) -> void:
 	skeleton.reset_bone_poses()
 	if _player.current_animation != clip:
 		_player.play(clip,0.0)
-	_player.seek(clampf(time,0.0,_player.get_animation(clip).length),true)
+	_player.seek(clampf(time,0.0,_clip_length(clip)),true)
 
 func _locomotion_clip(speed: float) -> String:
 	if speed > 7.0:
@@ -2768,7 +2786,7 @@ func _locomotion_clip(speed: float) -> String:
 	return "Walk_Loop"
 
 func _locomotion_clip_time(clip: String) -> float:
-	return _locomotion_phase*_player.get_animation(clip).length
+	return _locomotion_phase*_clip_length(clip)
 
 func _update_pose(delta: float) -> void:
 	Perf.begin("rig.pose")
@@ -2836,10 +2854,10 @@ func _solve_pose(delta: float) -> void:
 	var clip := ("Sword_Idle_OneHand" if weapon in ["sword","dagger"] or weapon == "dual" else "Idle_Loop")
 	if weapon == "sword" and (sword_index == 2 or _staff_shown()):
 		clip = "Sword_Idle"
-	var time := fposmod(_motion_time,_player.get_animation(clip).length)
+	var time := fposmod(_motion_time,_clip_length(clip))
 	if _roll_progress >= 0.0:
 		clip = "Roll"
-		time = clampf(_roll_progress,0,1)*_player.get_animation(clip).length
+		time = clampf(_roll_progress,0,1)*_clip_length(clip)
 	elif is_melee():
 		clip = str(_melee_clip().name)
 		time = _melee_clip_time()
@@ -2848,27 +2866,29 @@ func _solve_pose(delta: float) -> void:
 		time = _throw_clip_time()
 	elif consuming:
 		clip = str(CONSUMABLE_DATA.get(consumable_kind, {}).get("clip","Idle_Loop"))
-		time = clampf(_phase_time,0.0,_player.get_animation(clip).length)
+		time = clampf(_phase_time,0.0,_clip_length(clip))
 	elif ability:
-		clip = ability_clip if _player.has_animation(ability_clip) else "Sprint_Loop"
-		time = ability_progress()*_player.get_animation(clip).length
+		clip = ability_clip if _clip_length(ability_clip) > 0.0 else "Sprint_Loop"
+		time = ability_progress()*_clip_length(clip)
 	elif drawing:
 		time = 0.0
 	elif guarding:
 		clip = "Sword_Block_Loop" if weapon == "sword" and (sword_index == 2 or _staff_shown()) else "Sword_Block_Loop_OneHand"
-		time = fposmod(_motion_time,_player.get_animation(clip).length)
+		time = fposmod(_motion_time,_clip_length(clip))
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
-		time = _air_time/0.15*_player.get_animation(clip).length if _air_time < 0.15 else fposmod(_air_time,_player.get_animation(clip).length)
+		time = _air_time/0.15*_clip_length(clip) if _air_time < 0.15 else fposmod(_air_time,_clip_length(clip))
 	elif _landing_weight > 0.0 and not moving and not sliding:
 		clip = "Jump_Land"
-		time = (1.0-_landing_weight)*_player.get_animation(clip).length
+		time = (1.0-_landing_weight)*_clip_length(clip)
 	elif moving:
 		clip = _locomotion_clip(speed)
 		time = _locomotion_clip_time(clip)
 	if clip != _display_clip or lower_clip != _display_lower_clip or weapon != _display_weapon or drawing != _display_drawing or diagonal_id != _display_diagonal:
-		for bone in skeleton.get_bone_count():
-			_blend_pose[bone] = _authored_pose[bone]
+		# The skeleton still holds the pose the last solve left, so the transition
+		# reads it directly instead of keeping a 65-bone copy of it every frame.
+		for bone in _bone_count:
+			_blend_pose[bone] = skeleton.get_bone_pose(bone)
 		_blend_time = 0.0
 		_display_clip = clip
 		_display_lower_clip = lower_clip
@@ -2886,21 +2906,21 @@ func _solve_pose(delta: float) -> void:
 	if crouching:
 		var crouch_moving := moving or (sliding and slide_progress < 0.0 and speed > 0.1)
 		var crouch_clip := str(_profile.clips.crouch_forward.name if crouch_moving else _profile.clips.crouch_idle.name)
-		var crouch_time := _locomotion_clip_time(crouch_clip) if crouch_moving else fposmod(_motion_time,_player.get_animation(crouch_clip).length)
+		var crouch_time := _locomotion_clip_time(crouch_clip) if crouch_moving else fposmod(_motion_time,_clip_length(crouch_clip))
 		_sample_clip(crouch_clip,crouch_time)
 		var slide_blend := smoothstep(0.0,1.0,_slide_weight)
-		for bone in skeleton.get_bone_count():
+		for bone in _bone_count:
 			var pose := skeleton.get_bone_pose(bone)
 			_crouch_pose[bone] = pose.interpolate_with(_slide_crouch_pose[bone],slide_blend) if sliding else pose
 	if arm_overlay or diagonal_body:
 		var carry_clip := "Sword_Idle"
 		if diagonal_body:
 			carry_clip = "Sword_Block_Loop" if weapon == "sword" and (sword_index == 2 or _staff_shown()) else "Sword_Idle_OneHand"
-		_sample_clip(carry_clip,fposmod(_motion_time,_player.get_animation(carry_clip).length))
+		_sample_clip(carry_clip,fposmod(_motion_time,_clip_length(carry_clip)))
 		for index in _guard_bones.size():
 			_guard_pose[index] = skeleton.get_bone_pose(_guard_bones[index])
 	if layer_lower_body:
-		var lower_time := _locomotion_clip_time(lower_clip) if moving else (1.0-_landing_weight)*_player.get_animation(lower_clip).length
+		var lower_time := _locomotion_clip_time(lower_clip) if moving else (1.0-_landing_weight)*_clip_length(lower_clip)
 		_sample_clip(lower_clip,lower_time)
 		for index in _leg_bones.size():
 			_lower_pose[index] = skeleton.get_bone_pose(_leg_bones[index])
@@ -2924,12 +2944,13 @@ func _solve_pose(delta: float) -> void:
 	_blend_time = minf(BLEND_SECONDS,_blend_time+delta)
 	if _blend_time < BLEND_SECONDS and _roll_progress < 0.0:
 		var weight := smoothstep(0.0,BLEND_SECONDS,_blend_time)
-		for bone in skeleton.get_bone_count():
+		for bone in _bone_count:
 			skeleton.set_bone_pose(bone,_blend_pose[bone].interpolate_with(skeleton.get_bone_pose(bone),weight))
 	# Blend authored motion only. Feeding already crouched/IK-corrected bones
 	# back into the next transition applies their offsets again on every switch.
-	for bone in skeleton.get_bone_count():
-		_authored_pose[bone] = skeleton.get_bone_pose(bone)
+	# `_authored_pose` is only ever a transition's starting point, and the blend
+	# above reads the skeleton itself; keeping a copy of all sixty-five bones here
+	# every solve was a frame's worth of boxing for a value nobody read.
 	if arm_overlay:
 		for index in _guard_bones.size():
 			skeleton.set_bone_pose(_guard_bones[index],_guard_pose[index])
@@ -3070,13 +3091,6 @@ func _pose_dual_arms() -> void:
 			for index in right_bones.size():
 				var bone := right_bones[index]
 				skeleton.set_bone_pose(bone,right_before[index].interpolate_with(skeleton.get_bone_pose(bone),weight))
-	# Feed the visible arm pose into the next clip transition instead of the
-	# unsolved authored arm, which would pop when the strike ends.
-	for bone in _arms[0]:
-		_authored_pose[bone] = skeleton.get_bone_pose(bone)
-	if restore_right:
-		for bone in right_bones:
-			_authored_pose[bone] = skeleton.get_bone_pose(bone)
 
 func _apply_cover_crouch(lower_only: bool) -> void:
 	# Authored crouch steps replace standing strides; aim and sword grips keep their upper-body pose.
@@ -3084,7 +3098,7 @@ func _apply_cover_crouch(lower_only: bool) -> void:
 		for bone in _leg_bones:
 			skeleton.set_bone_pose(bone,skeleton.get_bone_pose(bone).interpolate_with(_crouch_pose[bone],_crouch_amount))
 	else:
-		for bone in skeleton.get_bone_count():
+		for bone in _bone_count:
 			skeleton.set_bone_pose(bone,skeleton.get_bone_pose(bone).interpolate_with(_crouch_pose[bone],_crouch_amount))
 	var left := _bone_world(_legs[0][2])
 	var right := _bone_world(_legs[1][2])
