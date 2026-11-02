@@ -74,10 +74,17 @@ func run() -> void:
 	check(bool(bought.get("ok", false)), "the purchase succeeds")
 	check(int(state.credits) == 1000 - int(State.ITEMS["sword_short"]["price"]),
 		"exactly the price is spent (%d)" % state.credits)
-	check(warband.stash.pooled_count("sword_short") == 1, "the piece lands in the shared stash")
+	var merc_ids: Array[int] = warband.roster.alive_ids()
+	check(str(warband.roster.equipped_of(merc_ids[0]).get("main", "")) == "sword_short",
+		"the first bare body takes the blade as it is bought")
+	check(warband.stash.pooled_count("sword_short") == 0, "and the worn copy leaves the pool")
+	check(str(game.controller.seat_loadout(merc_ids[0]).get("main", "")) == "sword_short",
+		"the live body is re-dressed with the blade the band armed itself with")
 	check(game.quartermaster.is_open(), "buying keeps the shop open")
 	check(game.quartermaster.status_text().contains("Shortsword"),
 		"the keeper says what was bought")
+	check(game.quartermaster.status_text().contains("takes it"),
+		"and who the band armed with it")
 
 	# The desk sells the shafts its bows spend, by the bunch: the row prices the
 	# whole bunch and one purchase lands that many in the shared quiver.
@@ -98,11 +105,22 @@ func run() -> void:
 	check(int(state.credits) == purse_before - int(arrow_row.get("price", 0)),
 		"and costs exactly the row's price (%d)" % state.credits)
 
-	# The whole warband can be armed from the shop, not only the ranger.
-	var merc_ids: Array[int] = warband.roster.alive_ids()
-	var arm: Dictionary = warband.equip_merc(int(merc_ids[0]), "main", "sword_short")
-	check(bool(arm.get("ok", false)), "a mercenary wears what was bought")
-	check(warband.stash.pooled_count("sword_short") == 0, "wearing it takes it out of the pool")
+	# The whole warband can be armed from the shop, not only the ranger: each
+	# purchase fills the next open slot across the band.
+	var shield_bought: Dictionary = game.quartermaster.buy("shield_buckler")
+	check(bool(shield_bought.get("ok", false))
+		and str(warband.roster.equipped_of(merc_ids[0]).get("off", "")) == "shield_buckler",
+		"a bought shield fills the next open slot")
+	var bow_bought: Dictionary = game.quartermaster.buy("bow_short")
+	check(bool(bow_bought.get("ok", false))
+		and str(warband.roster.equipped_of(merc_ids[1]).get("main", "")) == "bow_short",
+		"a bought bow arms the next body")
+	var helm_bought: Dictionary = game.quartermaster.buy("armor_leather_head")
+	check(bool(helm_bought.get("ok", false))
+		and str(warband.roster.equipped_of(merc_ids[0]).get("head", "")) == "armor_leather_head",
+		"a bought helm goes on a head")
+	check(warband.stash.pooled_count("sword_short") == 0,
+		"nothing the band wears is left doubled in the pool")
 
 	# An empty purse buys nothing, and nothing is lost.
 	state.credits = 5

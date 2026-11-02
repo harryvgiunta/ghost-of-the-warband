@@ -48,8 +48,8 @@ not re-implement it and do not redefine an enum, a slot id or a tier name.
 | `scripts/warband/cruor_manager.gd` | `WarbandCruor` | Essence wallet, `unbind`, `distill`, `distill_all`, `brand`, brand map; the altar's reagent rite: `BASIC_REAGENT` (`ichor_vial`), `ANOINT_RECIPES` (ability id → `{reagent catalog id: count}`, every weapon/shield skill `{ichor_vial: 1}` for now), the `anointed` ledger (catalog id → ability id), `anoint_skill`/`anoint_key`/`anoint_recipe`/`recipe_text`/`is_anointed`/`anointed_skill`/`anointed_among`/`anoint_line`/`can_anoint`/`anoint`; persistence (`cruor.anointed` re-derived from today's table on load) |
 | `scripts/warband/branded_skills.gd` | `BrandedSkills` | The six branded abilities, which item class carries each, tier power curve |
 | `scripts/warband/mercenary_vendor.gd` | `WarbandVendor` | Hire price (120 + 35/body), `hire()`, recruiter board |
-| `scripts/warband/warband_state.gd` | autoload `Warband` | Owns roster + souls + stash + cruor + delve + the party's mode, gold bridge to `PlayerState.credits`, save/load (`SAVE_VERSION` 9; v6 adds `cruor.anointed`, so a v5 file loads with plain steel; v8 adds `delve`, the packed delve inventory and who is below, so a v7 file loads with an empty pack and nobody below; v9 adds `party_mode`, so a v8 file - or a mode this build does not know - fights offensive), possession mirror, the delve verbs (§12), `set_party_mode(mode)` (`{ok, mode, message}`; an unknown mode and a lent warband are refused, and only a real change emits `changed`, which is what mirrors it to a co-op guest), and `anoint(item_id)`: spends the recipe from the shared stash, writes the ledger, credits APPLY orders through `quests.note_applied` per reagent, emits `anointed(item_id, ability)` and `changed`, and returns `completed` (the orders it finished); a piece that is not the warband's, already anointed, or short of its recipe is refused and nothing is spent |
-| `tests/warband_contract_regression.gd` | - | 222 checks over all of the above |
+| `scripts/warband/warband_state.gd` | autoload `Warband` | Owns roster + souls + stash + cruor + delve + the party's mode, gold bridge to `PlayerState.credits`, save/load (`SAVE_VERSION` 10; v6 adds `cruor.anointed`, so a v5 file loads with plain steel; v8 adds `delve`, the packed delve inventory and who is below, so a v7 file loads with an empty pack and nobody below; v9 adds `party_mode`, so a v8 file - or a mode this build does not know - fights offensive; v10 adds `auto_equip_restricted`, the item ids held back from the band's automatic arming, so a v9 file arms from every piece), possession mirror, the delve verbs (§12), `set_party_mode(mode)` (`{ok, mode, message}`; an unknown mode and a lent warband are refused, and only a real change emits `changed`, which is what mirrors it to a co-op guest), and `anoint(item_id)`: spends the recipe from the shared stash, writes the ledger, credits APPLY orders through `quests.note_applied` per reagent, emits `anointed(item_id, ability)` and `changed`, and returns `completed` (the orders it finished); a piece that is not the warband's, already anointed, or short of its recipe is refused and nothing is spent |
+| `tests/warband_contract_regression.gd` | - | 245 checks over all of the above |
 
 There is no proximity-bubble damage scaler any more (`WarbandDamage` and
 `combat_bubble.gd` went with the expedition that needed them): every damage funnel
@@ -288,7 +288,21 @@ what exposed the engine fog trap above.
   equip never pockets somebody else's gear.
 - The paperdoll's stash list shows unequipped copies only: a worn piece is on its
   wearer's slots. Handing one over is two clicks - its worn slot puts it back in
-  the pool, then its stash row dresses the selected body.
+  the pool, then its stash row dresses the selected body. A right-click on a free
+  row holds that item id back from every automatic equip (the row says `HELD`);
+  a left click still wears it by hand.
+- `Warband.arm_warband()` is the band's own dressing. It walks every body the
+  field can reach and fills each slot that is empty or still wearing the naked
+  set with the dearest legal, unheld spare in `field_stash()`. It runs as a
+  purchase lands (`buy_gear`), so a shopping spree is felt on the bodies; a real
+  worn piece is never upgraded, a two-hander never costs an occupied off hand, and
+  one `changed` plus one `armed(merc_ids)` covers the whole pass (`armed`
+  re-dresses exactly those live rigs through `PossessionController`).
+- `Warband.restrict_auto_equip(item_id, true)` is the player's override: the id
+  is held back from `arm_warband`, `dress_recruit` and the loot pickup
+  `auto_equip`, for every copy at once, while a manual `equip_merc` is untouched.
+  The holds ride the save under `auto_equip_restricted` and are released with
+  `restrict_auto_equip(item_id, false)`.
 - `Warband.auto_equip(id, item_id)` (used by `WarbandLoot` on a hand pickup) puts
   a looted piece straight into the soul's hands when that slot is empty or the
   new piece is worth more than what is worn there; anything else stays in the

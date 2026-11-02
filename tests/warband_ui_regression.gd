@@ -326,6 +326,25 @@ func _check_paperdoll() -> void:
 	check(warband.roster.active_weapon_set(first) == 0, "a second press comes back to Set 1")
 	check(str(warband.roster.equipped_of(first)["main"]) == "sword_short",
 		"and Set 1's shortsword is in the hands again")
+
+	# The player's override: a right-click holds a piece back from the band's
+	# automatic arming, and a left click still wears it by hand. A held row says
+	# so, and the same right-click releases it again.
+	doll.picker_buttons[other].pressed.emit()
+	var free_sword := _stash_row(doll, "sword_short")
+	check(not free_sword.is_empty(), "the free shortsword is on the stash list")
+	var right_click := InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	free_sword["button"].gui_input.emit(right_click)
+	check(warband.is_auto_equip_restricted("sword_short"),
+		"a right-click holds the piece back from auto-equip")
+	check(_stash_row(doll, "sword_short")["button"].text.contains("HELD"),
+		"the held row says HELD")
+	check(doll.status_text().contains("restricted"), "and the screen says what happened")
+	_stash_row(doll, "sword_short")["button"].pressed.emit()
+	check(str(warband.roster.equipped_of(other).get("main", "")) == "sword_short",
+		"a held piece can still be worn by the player's hand")
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
 

@@ -57,6 +57,22 @@ func _row_for(rows: Array, item_id: String) -> Dictionary:
 			return row
 	return {}
 
+## The four bodies at the counters are already fully dressed: this test is about
+## the pool moving between a keeper and the stash, and an open slot would let the
+## warband's arming pass take a bought piece out of the pool before the board can
+## show it. The arming pass has its own checks in the contract regression.
+func _dress_for_market() -> void:
+	var kit := {
+		"main": "sword_short", "off": "shield_tower",
+		"head": "armor_plate_head", "chest": "armor_plate_chest",
+		"hands": "armor_plate_hands", "legs": "armor_plate_legs",
+		"feet": "armor_plate_feet", "neck": "neck_ember",
+		"ring1": "ring_blood", "ring2": "ring_dash",
+	}
+	for merc_id in warband.roster.ids():
+		for slot in kit:
+			warband.roster.equip(int(merc_id), str(slot), str(kit[slot]))
+
 func run() -> void:
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
@@ -71,6 +87,7 @@ func run() -> void:
 	# every count below is this test's own purchase and sale.
 	for index in 4:
 		warband.add_mercenary("Merc %d" % index)
+	_dress_for_market()
 	check(warband.stash.pooled_total() == 0, "the test starts with an empty shared stash")
 
 	game = load("res://scenes/town_hub.tscn").instantiate()

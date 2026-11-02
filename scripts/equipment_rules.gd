@@ -26,6 +26,15 @@ static func item_name(item: Dictionary) -> String:
 static func two_handed(item: Dictionary) -> bool:
 	return str(item.get("category", "")) in TWO_HANDED
 
+## The "naked" set is the covering a body is born in, not armour: bare head, an
+## old shirt, bare hands, tight shorts and bare feet exist so the rig has a mesh
+## in every slot. The arming pass may replace one of these exactly as if the slot
+## were empty, which is what lets a band that starts in rags put on real gear.
+const BARE_GARMENT_PREFIX := "armor_naked_"
+
+static func bare_garment(item_id: String) -> bool:
+	return item_id.begins_with(BARE_GARMENT_PREFIX)
+
 ## Whether the item's category may occupy the slot at all.
 static func allowed(item: Dictionary, slot: String) -> bool:
 	if item.is_empty() or not slot in SLOTS:

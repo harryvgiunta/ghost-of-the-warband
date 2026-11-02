@@ -241,7 +241,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it. TAB swaps the weapon set."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. TAB swaps the weapon set."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _can_dress(merc_id) else -1
@@ -416,7 +416,8 @@ func _ensure_built() -> void:
 	body.add_child(right)
 	_stash_title = _label(right, "COLLECTIVE STASH  \u00b7  VALUE ORDER", 10, MUTED)
 	_stash_hint = _label(right,
-		"A worn slot takes the piece back; a free copy goes into the chosen slot.",
+		"A worn slot takes the piece back; a free copy goes into the chosen slot.\n"
+		+ "Right-click a free copy to hold it back from the band's auto-equip.",
 		11, MUTED)
 	_stash_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var scroll := ScrollContainer.new()
@@ -616,14 +617,23 @@ func _make_stash_row(item_id: String) -> Button:
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.clip_text = true
 	button.add_theme_font_size_override("font_size", 12)
-	button.tooltip_text = "Click to wear it here."
+	button.tooltip_text = "Click to wear it here. Right-click to hold it back from auto-equip."
 	button.pressed.connect(func() -> void: _on_stash_pressed(item_id))
+	button.gui_input.connect(func(event: InputEvent) -> void:
+		_on_stash_row_input(event, item_id))
 	_stash_box.add_child(button)
 	return button
 
 func _apply_stash_row(button: Button, data: Dictionary, free_count: int) -> void:
-	button.text = "%s  /  %d gold  /  x%d" % [
-		str(data.get("name", data.get("item_id", ""))), int(data.get("value", 0)), free_count]
+	var item_id := str(data.get("item_id", ""))
+	var held := _warband != null and bool(_warband.is_auto_equip_restricted(item_id))
+	button.text = "%s  /  %d gold  /  x%d%s" % [
+		str(data.get("name", item_id)), int(data.get("value", 0)), free_count,
+		"  ·  HELD" if held else ""]
+	var tooltip := "Click to wear it here. Right-click to restrict this item from auto-equip."
+	if held:
+		tooltip = "Restricted from auto-equip. Right-click to allow auto-equip again."
+	button.tooltip_text = tooltip
 
 func _on_stash_pressed(item_id: String) -> void:
 	# The stash rows are hidden on the corpse screen; a press can only be a
@@ -656,6 +666,26 @@ func _on_stash_pressed(item_id: String) -> void:
 	_slot_chosen = false
 	refresh()
 	changed.emit()
+
+## A right-click on a stash row is the player's override: hold that item id back
+## from every automatic equip (band arming, recruit dressing, a loot pickup) or
+## let it be equipped again. Left-click still wears it by hand, because the hold
+## steers the AI and never takes the piece out of the player's hands.
+func _on_stash_row_input(event: InputEvent, item_id: String) -> void:
+	if _corpse_active or _warband == null:
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mouse := event as InputEventMouseButton
+	if not mouse.pressed or mouse.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	var button: Variant = _stash_controls.get(item_id)
+	if button is Button:
+		(button as Button).accept_event()
+	var hold := not bool(_warband.is_auto_equip_restricted(item_id))
+	var result: Dictionary = _warband.restrict_auto_equip(item_id, hold)
+	set_status(str(result.get("message", "")))
+	refresh()
 
 # --- the corpse screen -----------------------------------------------------
 

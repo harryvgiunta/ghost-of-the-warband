@@ -13,6 +13,9 @@ signal changed
 ## A piece just woke into its skill at the altar. Whatever dresses bodies off the
 ## roster listens, so every body already holding a copy carries the skill at once.
 signal anointed(item_id: String, ability: String)
+## The warband armed itself out of the pool: these mercenaries' kits changed, so
+## whatever keeps a live rig re-dresses them (`PossessionController`).
+signal armed(merc_ids: Array)
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const RosterScript = preload("res://scripts/warband/warband_roster.gd")
@@ -43,14 +46,15 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## steel that has been given its skill; v7 dropped the expedition's battle ledger
 ## (`runs`, `run_totals`); v8 added the delve (`delve`): the inventory packed at
 ## the Hollow's mouth and, while a party is below, who went down; v9 added the
-## party's mode (`party_mode`), how the squad picks its fights. Older files
-## still load: a record with no sets puts the
-## pair already in its hands in Set 1 and starts Set 2 empty, a file without a
+## party's mode (`party_mode`), how the squad picks its fights; v10 added the
+## auto-equip holds (`auto_equip_restricted`), the pieces the player keeps out of
+## the band's automatic arming. Older files still load: a record with no sets puts
+## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
 ## with an empty ledger, a file without anointings carries plain steel, a file
-## without a delve has an empty pack and nobody below, and a file without a party
-## mode fights offensive, which is all the squad ever did before it had one.
-const SAVE_VERSION := 9
+## without a delve has an empty pack and nobody below, a file without a party mode
+## fights offensive, and a file without holds arms from every piece, as it always did.
+const SAVE_VERSION := 10
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -102,6 +106,14 @@ var party_mode: String = Contracts.DEFAULT_PARTY_MODE
 ## own updates arrive through `lend()`. `end_loan()` gives this machine its own
 ## warband back.
 var lent := false
+## Item ids the player has held back from automatic equipping: `arm_warband`,
+## `dress_recruit` and a loot pickup leave them in the pool, while a hand on the
+## paperdoll may still wear one. Item ids, not copies, so every spare and every
+## body's copy obeys the same hold; saved with the warband and lent with it.
+var auto_equip_restricted: Dictionary = {}
+## True while `arm_warband` is walking the roster, so an equip that emits
+## `changed` (or anything listening to it) cannot start a second pass.
+var _arming := false
 ## The host's purse while lent: shown, never spent on this machine.
 var _lent_gold := 0
 
@@ -337,9 +349,10 @@ func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
 ## A body that swears with empty hands is dead weight, so a hire and a rescue
 ## both walk the equipment slots in the order a fighter would fill them and take
 ## the dearest spare out of the shared stash for each one. The pool is the only
-## source: nothing is minted, and anything the body was already wearing (the
-## cage's rags, a looted blade) is left alone. A two-hander locks the off hand,
-## exactly as `EquipmentRules` says it does.
+## source: nothing is minted, a real worn piece is left alone, and the naked set
+## a prisoner is born in counts as bare, so a recruit in rags still takes gear.
+## A two-hander locks the off hand, exactly as `EquipmentRules` says it does, and
+## a piece the player held back from auto-equip stays in the pool.
 ## Returns `{ok, merc_id, fitted, message}` with the ids that walked across.
 func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 	var fitted: Array[String] = []
@@ -347,30 +360,8 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 		return _lent_refusal({"merc_id": merc_id, "fitted": fitted})
 	if merc_id <= 0 or not roster.is_alive(merc_id):
 		return {"ok": false, "merc_id": merc_id, "fitted": fitted, "message": ""}
-	for slot_id in slots:
-		var wanted_slot := str(slot_id)
-		var gear := roster.equipped_of(merc_id)
-		if not str(gear.get(wanted_slot, "")).is_empty():
-			continue
-		if wanted_slot == "off":
-			var main_id := str(gear.get("main", ""))
-			if Contracts.two_handed_item(State.ITEMS.get(main_id, {})):
-				continue
-		var best := ""
-		var best_value := -1
-		for item_id in field_stash().pooled_ids():
-			var item: Dictionary = State.ITEMS.get(str(item_id), {})
-			if not EquipmentRules.allowed(item, wanted_slot):
-				continue
-			var value := WarbandStash.value_of(str(item_id), cruor.brand_of(str(item_id)))
-			if value > best_value:
-				best_value = value
-				best = str(item_id)
-		if best.is_empty():
-			continue
-		var result := equip_merc(merc_id, wanted_slot, best)
-		if bool(result.get("ok", false)):
-			fitted.append(best)
+	for entry in _fill_slots(merc_id, slots):
+		fitted.append(str(entry.get("item_id", "")))
 	if fitted.is_empty():
 		return {"ok": true, "merc_id": merc_id, "fitted": fitted,
 			"message": "%s takes the field with what the band had spare." % roster.name_of(merc_id)}
@@ -380,11 +371,145 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 			", ".join(fitted.map(func(item_id: String): return str(
 				State.ITEMS.get(item_id, {}).get("name", item_id))))]}
 
+## Arm the whole band out of the pool it can reach. The automatic answer to a
+## shopping spree: every body the field can dress fills each slot that is empty
+## or still wearing the naked set, taking the dearest legal, unheld spare the
+## pool holds. A real worn piece is never upgraded, so a kit the player chose by
+## hand is not overruled by a lucky purchase. One notify and one `armed` signal
+## are emitted for the pass, never one per piece.
+## Returns `{ok, fitted, mercs, message}`; `fitted` is `[{merc_id, slot, item_id}]`.
+func arm_warband() -> Dictionary:
+	var fitted: Array[Dictionary] = []
+	var mercs: Array[int] = []
+	if lent or _arming:
+		return {"ok": false, "fitted": fitted, "mercs": mercs, "message": ""}
+	_arming = true
+	for merc_id in dressable_ids():
+		if not roster.is_alive(merc_id):
+			continue
+		var filled := _fill_slots(merc_id, DRESS_SLOTS)
+		if filled.is_empty():
+			continue
+		mercs.append(merc_id)
+		fitted.append_array(filled)
+	_arming = false
+	if fitted.is_empty():
+		return {"ok": true, "fitted": fitted, "mercs": mercs, "message": ""}
+	_notify()
+	armed.emit(mercs)
+	return {"ok": true, "fitted": fitted, "mercs": mercs, "message": _arm_message(fitted)}
+
+## Fill every named slot on one body from the field's pool. A slot is open when
+## it is empty or still wears the naked set; a real worn piece is left alone. The
+## dearest legal, unheld copy wins, and a two-handed main never costs an off-hand
+## already in use. Returns `[{merc_id, slot, item_id}]`; the caller owns the one
+## notify, which is what keeps a band-wide pass from repainting eight times.
+func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
+	var fitted: Array[Dictionary] = []
+	for raw_slot in slots:
+		var slot_id := str(raw_slot)
+		var gear := roster.equipped_of(merc_id)
+		var current := str(gear.get(slot_id, ""))
+		if not current.is_empty() and not EquipmentRules.bare_garment(current):
+			continue
+		if slot_id == "off":
+			var main_item: Dictionary = State.ITEMS.get(str(gear.get("main", "")), {})
+			if Contracts.two_handed_item(main_item):
+				continue
+		var best := _best_spare(slot_id, gear)
+		if best.is_empty():
+			continue
+		var result := equip_merc(merc_id, slot_id, best, false)
+		if not bool(result.get("ok", false)):
+			continue
+		fitted.append({"merc_id": merc_id, "slot": slot_id, "item_id": best})
+	return fitted
+
+## The dearest legal spare for one slot: the one choice a recruit dressing and a
+## band-wide arming pass both make. Held pieces and naked coverings never compete.
+func _best_spare(slot_id: String, gear: Dictionary) -> String:
+	var pool := field_stash()
+	var off_worn := not str(gear.get("off", "")).is_empty() \
+		and not EquipmentRules.bare_garment(str(gear.get("off", "")))
+	var best := ""
+	var best_value := -1
+	for item_id in pool.pooled_ids():
+		if is_auto_equip_restricted(item_id):
+			continue
+		var item: Dictionary = State.ITEMS.get(item_id, {})
+		if item.is_empty() or not EquipmentRules.allowed(item, slot_id):
+			continue
+		if EquipmentRules.bare_garment(item_id):
+			continue
+		if slot_id == "main" and off_worn and EquipmentRules.two_handed(item):
+			continue
+		var value := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+		if value > best_value:
+			best_value = value
+			best = item_id
+	return best
+
+## One line naming the bodies an arming pass fitted, and what each took.
+func _arm_message(fitted: Array) -> String:
+	var parts: Array[String] = []
+	for entry in fitted:
+		var row: Dictionary = entry
+		var merc_id := int(row.get("merc_id", 0))
+		var item_id := str(row.get("item_id", ""))
+		parts.append("%s %s" % [roster.name_of(merc_id),
+			str(State.ITEMS.get(item_id, {}).get("name", item_id))])
+	if parts.size() == 1:
+		var only: Dictionary = fitted[0]
+		return "%s takes it (%s)." % [roster.name_of(int(only.get("merc_id", 0))),
+			EquipmentRules.slot_label(str(only.get("slot", "")))]
+	return "The band arms itself: %s." % ", ".join(parts)
+
+## Hold an item id back from every automatic equip - a band-wide arming pass, a
+## recruit's dressing or a loot pickup. Manual equipping is untouched: a hand on
+## the paperdoll may still wear one, so the override steers the AI, not the
+## player. Item ids, not copies, so every spare and every worn copy obey it.
+## Returns `{ok, item_id, restricted, message}`; a lent warband is refused.
+func restrict_auto_equip(item_id: String, restricted: bool = true) -> Dictionary:
+	if lent:
+		return _lent_refusal({"item_id": item_id, "restricted": false})
+	var id := State.migrate_item_id(item_id)
+	var item: Dictionary = State.ITEMS.get(id, {})
+	if item.is_empty():
+		return {"ok": false, "item_id": item_id, "restricted": false,
+			"message": "No such piece to hold back."}
+	var was := is_auto_equip_restricted(id)
+	if restricted:
+		auto_equip_restricted[id] = true
+	else:
+		auto_equip_restricted.erase(id)
+	if was != restricted:
+		_notify()
+	var display := str(item.get("name", id))
+	var message := "%s may be auto-equipped again." % display
+	if restricted:
+		message = "%s is restricted from auto-equip." % display
+	return {"ok": true, "item_id": id, "restricted": restricted,
+		"message": message}
+
+## Whether the player has held this piece back from automatic equipping.
+func is_auto_equip_restricted(item_id: String) -> bool:
+	return auto_equip_restricted.has(State.migrate_item_id(item_id))
+
+## Every held item id, sorted - what the save writes and a panel can list.
+func restricted_ids() -> Array[String]:
+	var out: Array[String] = []
+	for item_id in auto_equip_restricted:
+		out.append(str(item_id))
+	out.sort()
+	return out
+
 ## Buy one catalog item into the shared stash with gold. The price is the same
 ## keeper price the paperdoll and the stash sort use, so nothing can disagree
 ## about what a piece is worth. A catalog row that carries a `bundle` (ammunition)
 ## hands over that many copies for the list price per copy, so one visit to the
-## shelf is a quiver's worth of shafts and a sale still pays per shaft.
+## shelf is a quiver's worth of shafts and a sale still pays per shaft. The band
+## arms itself from the pool as the purchase lands, so a shopping spree is felt
+## on the bodies rather than left sitting in a row.
 func buy_gear(item_id: String) -> Dictionary:
 	if lent:
 		return _lent_refusal({"item_id": item_id, "cost": 0})
@@ -399,12 +524,17 @@ func buy_gear(item_id: String) -> Dictionary:
 		return {"ok": false, "item_id": item_id, "cost": cost, "count": count,
 			"message": "You need %d gold; you have %d." % [cost, gold()]}
 	stash.add(item_id, count)
+	var armed: Dictionary = arm_warband()
 	_notify()
 	var display := str(item.get("name", item_id))
 	if count > 1:
 		display = "%d × %s" % [count, display]
+	var message := "Bought %s for %d gold into the shared stash." % [display, cost]
+	var fitted: Array = armed.get("fitted", [])
+	if not fitted.is_empty():
+		message += " " + str(armed.get("message", ""))
 	return {"ok": true, "item_id": item_id, "cost": cost, "count": count,
-		"message": "Bought %s for %d gold into the shared stash." % [display, cost]}
+		"message": message, "armed": fitted}
 
 ## Sell one pooled copy back to a keeper. The piece must be in the shared pool:
 ## a blade somebody is wearing is not the warband's to sell behind their back,
@@ -492,15 +622,16 @@ func hire(merc_name: String = "") -> Dictionary:
 func hire_cost() -> int:
 	return WarbandVendor.hire_cost(roster)
 
-## Equip a mercenary straight from the collective stash. The piece is looked up
-## by catalog id; anything displaced returns to the pool, so no item is ever
-## lost by equipping.
 ## Equip a mercenary from the collective stash. The stash is one pool, so a
 ## piece another mercenary is already wearing is a *transfer*, not a refusal:
 ## the wearer is stripped and the piece walks across. Without that rule the only
 ## dagger in a fresh warband could never be handed from the rescuer to a
 ## prisoner, which is exactly what the first scene asks the player to do.
-func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
+## `announce` false lets a caller that is fitting several pieces in one pass
+## (`arm_warband`, `dress_recruit`) emit a single `changed` instead of one per
+## slot; the caller then owns the notify.
+func equip_merc(merc_id: int, slot_id: String, item_id: String,
+		announce: bool = true) -> Dictionary:
 	if lent:
 		return _lent_refusal({"displaced": {}})
 	if item_id.is_empty():
@@ -534,7 +665,8 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String) -> Dictionary:
 			pool.add(old_id, 1)
 	if not moved_from.is_empty():
 		result["message"] = "%s taken from %s." % [str(result.get("message", "")), moved_from]
-	_notify()
+	if announce:
+		_notify()
 	return result
 
 ## Take one worn copy of `item_id` off whichever mercenary holds it and drop it
@@ -584,6 +716,9 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "message": "", "slot": ""}
 	if not str(item.get("category", "")) in EQUIPPABLE_CATEGORIES:
 		return {"ok": false, "message": "", "slot": ""}
+	if is_auto_equip_restricted(item_id):
+		return {"ok": false, "message": "%s is restricted from auto-equip." % EquipmentRules.item_name(item),
+			"slot": ""}
 	if not roster.is_alive(merc_id):
 		return {"ok": false, "message": "", "slot": ""}
 	var gear := roster.equipped_of(merc_id)
@@ -832,8 +967,10 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	# A reset is a fresh warband of this machine's own, never a host's.
 	lent = false
 	_lent_gold = 0
+	_arming = false
 	roster.clear()
 	stash.clear()
+	auto_equip_restricted.clear()
 	cruor.clear()
 	souls.clear()
 	quests.reset()
@@ -862,11 +999,21 @@ func to_dict() -> Dictionary:
 		"quests": quests.to_dict(),
 		"delve": delve.to_dict(),
 		"party_mode": party_mode,
+		"auto_equip_restricted": restricted_ids(),
 	}
 
 func from_dict(data: Dictionary) -> void:
 	roster.from_dict(data.get("roster", {}))
 	stash.from_dict(data.get("stash", {}))
+	# The holds are item ids, not rows in a pool, so they outlive a copy moving
+	# between the stash, a body and the delve inventory. A v9 file has none.
+	auto_equip_restricted.clear()
+	var holds: Variant = data.get("auto_equip_restricted", [])
+	if holds is Array:
+		for raw_id in holds:
+			var held_id := State.migrate_item_id(str(raw_id))
+			if not held_id.is_empty() and State.ITEMS.has(held_id):
+				auto_equip_restricted[held_id] = true
 	cruor.from_dict(data.get("cruor", {}))
 	# Read before the dead are reaped below: a member still on the books of a party
 	# below is reaped into the delve inventory, which the load's fall then loses,

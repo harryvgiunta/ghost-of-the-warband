@@ -54,6 +54,7 @@ func run() -> void:
 	check_reserve(warband)
 	check_persistence(warband)
 	check_party_mode(warband)
+	check_auto_arm(warband)
 
 	_remove_test_save()
 	print("WARBAND_CONTRACT_REGRESSION checks=", checks, " failures=", failures)
@@ -679,3 +680,95 @@ func check_party_mode(warband) -> void:
 		"and so is a step")
 	warband.lent = false
 	warband.reset_state()
+
+# --- the band arms itself --------------------------------------------------
+
+## The warband dresses itself out of the global pool: a purchase fills every slot
+## that is empty or still wearing the naked set, the bare body's rags are
+## replaced, a real worn piece is never upgraded, and a held item id stays pooled
+## until the player lifts the hold - while a manual equip is always allowed.
+func check_auto_arm(warband) -> void:
+	warband.reset_state()
+	var state = root.get_node("PlayerState")
+	state.credits = 10000
+	var roster = warband.roster
+	var stash = warband.stash
+	var ash: int = warband.add_mercenary("Ash")
+	var bram: int = warband.add_mercenary("Bram")
+	# The camp's rags, the state every prisoner starts in.
+	roster.equip(ash, "chest", "armor_naked_chest")
+
+	var bought: Dictionary = warband.buy_gear("sword_short")
+	check(bool(bought.get("ok", false)), "the keeper sells a blade")
+	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
+		"the first bare body takes the blade as it is bought")
+	check(stash.pooled_count("sword_short") == 0, "and its copy leaves the pool")
+	check((bought.get("armed", []) as Array).size() == 1,
+		"the purchase names the body it armed")
+	check(str(roster.equipped_of(bram).get("main", "")).is_empty(),
+		"the next body is still waiting for a weapon")
+
+	warband.buy_gear("bow_short")
+	check(str(roster.equipped_of(bram).get("main", "")) == "bow_short",
+		"a second weapon arms the second bare body")
+	warband.buy_gear("shield_wood")
+	warband.buy_gear("shield_wood")
+	check(str(roster.equipped_of(ash).get("off", "")) == "shield_wood",
+		"a shield fills a free off hand")
+	check(str(roster.equipped_of(bram).get("off", "")).is_empty(),
+		"a bow's two-handed grip keeps that off hand empty")
+	warband.buy_gear("armor_makeshift_chest")
+	check(str(roster.equipped_of(ash).get("chest", "")) == "armor_makeshift_chest",
+		"a real cuirass replaces the naked shirt")
+	check(stash.pooled_count("armor_naked_chest") == 1, "the rags go back to the pool")
+
+	# A real worn piece is not upgraded by a later purchase: arming fills, it
+	# does not re-kit a body the player already dressed. Every slot that could take
+	# a spare one-hander is full, so the better blade stays in the pool.
+	stash.add("sword_arming", 1)
+	warband.arm_warband()
+	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
+		"the arming pass leaves a real worn blade alone")
+	check(stash.pooled_count("sword_arming") == 1, "and the better spare waits in the pool")
+
+	# The override: a held item id never arms itself, while the player's hand can
+	# still wear it.
+	var hold: Dictionary = warband.restrict_auto_equip("sword_arming")
+	check(bool(hold.get("ok", false)) and warband.is_auto_equip_restricted("sword_arming"),
+		"the player holds a powerful piece back from auto-equip")
+	var cade: int = warband.add_mercenary("Cade")
+	var refused: Dictionary = warband.auto_equip(cade, "sword_arming")
+	check(not bool(refused.get("ok", true)), "a held piece is never snapped into a hand")
+	check(str(roster.equipped_of(cade).get("main", "")).is_empty(),
+		"the body stays bare and the piece stays pooled")
+	var held_pass: Dictionary = warband.arm_warband()
+	var sword_stayed := true
+	for entry in held_pass.get("fitted", []):
+		if str((entry as Dictionary).get("item_id", "")) == "sword_arming":
+			sword_stayed = false
+	check(sword_stayed and stash.pooled_count("sword_arming") == 1,
+		"a band-wide pass respects the hold")
+	var manual: Dictionary = warband.equip_merc(cade, "main", "sword_arming")
+	check(bool(manual.get("ok", false))
+		and str(roster.equipped_of(cade).get("main", "")) == "sword_arming",
+		"the player's own hand may still wear a held piece")
+	warband.unequip_merc(cade, "main")
+	check(stash.pooled_count("sword_arming") == 1, "and taking it off returns it to the pool")
+
+	# Lifting the hold lets the arming pass use it.
+	warband.restrict_auto_equip("sword_arming", false)
+	var again: Dictionary = warband.arm_warband()
+	check(str(roster.equipped_of(cade).get("main", "")) == "sword_arming",
+		"the same copy arms a body once the hold is lifted")
+	check(not (again.get("fitted", []) as Array).is_empty(),
+		"and the pass reports the fitting")
+
+	# The holds are warband state: a reset forgets them and a save carries them.
+	warband.restrict_auto_equip("armor_makeshift_legs")
+	warband.save_state()
+	warband.reset_state()
+	check(not warband.is_auto_equip_restricted("armor_makeshift_legs"),
+		"a fresh warband starts with no holds")
+	check(warband.load_state(), "the saved warband loads")
+	check(warband.is_auto_equip_restricted("armor_makeshift_legs"),
+		"the holds ride in the warband save")

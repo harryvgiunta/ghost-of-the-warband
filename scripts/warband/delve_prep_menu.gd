@@ -200,6 +200,7 @@ func _fill_pool(box: VBoxContainer, rows: Array[Dictionary], packing: bool) -> v
 		return
 	for row in rows:
 		var item_id := str(row["item_id"])
+		var held: bool = _warband != null and bool(_warband.is_auto_equip_restricted(item_id))
 		var button := Button.new()
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_NONE
@@ -207,14 +208,35 @@ func _fill_pool(box: VBoxContainer, rows: Array[Dictionary], packing: bool) -> v
 		button.custom_minimum_size = Vector2(0, 28)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.add_theme_font_size_override("font_size", 12)
-		button.text = "%s  %s  ×%d  ·  %d G" % ["+" if packing else "-", str(row["name"]),
-			int(row["count"]), int(row["value"])]
-		button.tooltip_text = "Click: one copy. Shift-click: every copy."
+		button.text = "%s  %s  ×%d  ·  %d G%s" % ["+" if packing else "-", str(row["name"]),
+			int(row["count"]), int(row["value"]), "  ·  HELD" if held else ""]
+		button.tooltip_text = "Click: one copy. Shift-click: every copy. Right-click: restrict this item from auto-equip."
+		if held:
+			button.tooltip_text = "Restricted from auto-equip. Click: one copy. Shift-click: every copy. Right-click: allow auto-equip again."
+		button.gui_input.connect(func(event: InputEvent) -> void:
+			_on_pool_input(event, item_id))
 		if packing:
 			button.pressed.connect(func() -> void: pack(item_id, Input.is_key_pressed(KEY_SHIFT)))
 		else:
 			button.pressed.connect(func() -> void: unpack(item_id, Input.is_key_pressed(KEY_SHIFT)))
 		box.add_child(button)
+
+
+## A right-click on a stash row is the same override the paperdoll offers: hold
+## the item id back from every automatic equip, or allow it again. Packing with
+## the left button is untouched, so a held piece can still go down with the party.
+func _on_pool_input(event: InputEvent, item_id: String) -> void:
+	if _warband == null:
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mouse := event as InputEventMouseButton
+	if not mouse.pressed or mouse.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	var hold := not bool(_warband.is_auto_equip_restricted(item_id))
+	var result: Dictionary = _warband.restrict_auto_equip(item_id, hold)
+	set_status(str(result.get("message", "")))
+	refresh()
 
 
 func _clear(box: Node) -> void:

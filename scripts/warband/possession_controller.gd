@@ -133,6 +133,8 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
 		if not _warband.anointed.is_connected(_on_piece_anointed):
 			_warband.anointed.connect(_on_piece_anointed)
+		if _warband.has_signal("armed") and not _warband.armed.is_connected(_on_warband_armed):
+			_warband.armed.connect(_on_warband_armed)
 	if sync == null:
 		sync = SyncScript.new()
 		sync.name = "PossessionSync"
@@ -347,6 +349,13 @@ func _on_piece_anointed(item_id: String, _ability: String) -> void:
 		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
 		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
 			refresh_gear(int(merc_id))
+
+## The warband armed itself from a purchase or a recruit's dressing: re-dress
+## exactly the bodies whose roster kit changed, so the blade is in their hands
+## before the next frame rather than at the next spawn.
+func _on_warband_armed(merc_ids: Array) -> void:
+	for raw_id in merc_ids:
+		refresh_gear(int(raw_id))
 
 ## Living bodies in roster order: what `F1`..`F8` count. While the warband is
 ## split (a party below in the delve) only the bodies a soul may reach count, so
