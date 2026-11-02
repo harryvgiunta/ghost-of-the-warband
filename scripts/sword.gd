@@ -46,6 +46,10 @@ func _build() -> void:
 			_build_branch()
 		_:
 			_build_steel()
+	# Thirteen primitives are thirteen draw calls: baked into one instance with a
+	# surface per material, the whole blade is four or five. Nothing on a held
+	# blade moves on its own, so nothing is lost but the draws.
+	Geo.bake_parts(self)
 
 
 func _build_steel() -> void:

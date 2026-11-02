@@ -31,6 +31,9 @@ func _build() -> void:
 		_build_ironwood()
 	else:
 		_build_iron()
+	# A dagger is a handful of primitives like any other blade; baked, it is one
+	# draw per material instead of one per part.
+	Geo.bake_parts(self)
 
 
 func _build_iron() -> void:

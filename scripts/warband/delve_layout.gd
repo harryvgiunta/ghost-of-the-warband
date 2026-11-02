@@ -212,13 +212,7 @@ const DENS := [
 ## authored with. The authored posts stand first, exactly as written; the crowd is
 ## laid across the den's own room, each body on the free spot furthest from every
 ## body already placed, with the species and the door of the post it repeats.
-##
-## Ten was a hall of thirty bodies, and thirty bodies in one room is the frame:
-## every one of them is a rig, a capsule and a brain inside the 48 m the cave
-## draws. Four is a den a party fights through - the authored posts plus enough
-## company that a room never reads as a diorama - and it keeps the whole floor at
-## a fifth of the bodies it used to field.
-const DEN_CROWD := 4
+const DEN_CROWD := 10
 ## Where a crowd body may stand: `CROWD_WALL` in from the room's rock,
 ## `CROWD_DOOR` from the middle of any way out (a body in a doorway blocks it, and
 ## a door is where a sleeper's sight runs furthest), `CROWD_CLEAR` past the

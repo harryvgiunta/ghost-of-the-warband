@@ -122,6 +122,12 @@ const BODY_BOUNDS := 1900.0
 ## A watcher only takes an interest in a body it can plausibly reach: without
 ## this the camp's guards would run the whole trail after a squad that left.
 const AGGRO_RADIUS := 55.0
+## Physics ticks between two party brain ticks. The squad's brains are decisions,
+## not physics: a body whose intent is rewritten every 50 ms walks the same
+## ground as one rewritten every 16, and the tick it is granted carries the whole
+## elapsed time - the same rule `MobLod` gives a mob its skipped frames. The
+## soul's own body never waits for it: the controller integrates every tick.
+const SQUAD_TICKS := 3
 ## The source a wilderness blow is booked under, beside the camp's watchers (90)
 ## and the trail's cultists (91): damage scaling, the threat a body remembers and
 ## the death record all name an attacker family by number, and the band on the way
@@ -212,6 +218,10 @@ var revive
 var branded
 var brand_hud
 var squad
+## Ticks banked toward the party's next brain tick, and the time they added up to
+## (`SQUAD_TICKS`). Seeded full, so the first tick of the world drives the band.
+var _squad_ticks := SQUAD_TICKS
+var _squad_delta := 0.0
 ## The band between the camp's mouth and the lane. Built after the warband is
 ## seated, because a wolf's first target is a real body.
 var wilderness
@@ -398,15 +408,21 @@ func _step_world(delta: float) -> void:
 	# body is a fight with itself.
 	_sync_crawl_control()
 	if squad != null and not _client:
-		Perf.begin("squad.drive")
-		# How the party picks its fights is the warband's, set from the menu.
-		squad.party_mode = warband.party_mode
-		squad.drive(delta)
-		# The band's own fights, as the notifier reads them: a break-off is said
-		# once and then stands under the roster until the ally is back.
-		if hud != null:
-			hud.set_aggro(squad.engaged_allies())
-		Perf.end()
+		# The band's brains run every `SQUAD_TICKS`, on the time they skipped.
+		_squad_ticks += 1
+		_squad_delta += delta
+		if _squad_ticks >= SQUAD_TICKS:
+			Perf.begin("squad.drive")
+			# How the party picks its fights is the warband's, set from the menu.
+			squad.party_mode = warband.party_mode
+			squad.drive(_squad_delta)
+			# The band's own fights, as the notifier reads them: a break-off is said
+			# once and then stands under the roster until the ally is back.
+			if hud != null:
+				hud.set_aggro(squad.engaged_allies())
+			Perf.end()
+			_squad_ticks = 0
+			_squad_delta = 0.0
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.

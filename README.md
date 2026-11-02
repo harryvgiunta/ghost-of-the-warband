@@ -690,8 +690,8 @@ take what the cave holds, and climb out alive with it.
    | The Watchers' Den, The Ossuary, The Rooted Hall | the dens between the shafts |
    | Gorehorn's Lair | the hub, with a way in from every side |
 
-   Eight dens of watchers sleep at their posts - four bodies for every post a den
-   was laid out with, **85** in all - until one of them sees you, hears a fight
+   Eight dens of watchers sleep at their posts - ten bodies for every post a den
+   was laid out with, **210** in all - until one of them sees you, hears a fight
    or takes a blow, or a body walks into the room - then the whole den wakes. Only
    the bodies inside **48 m** of the eye are drawn: the rest are three rooms of
    bent tunnel away with their lights already out. No
@@ -1025,6 +1025,16 @@ crowded room affordable:
 - **A rest for the sleeping.** A delve den asleep with the whole party outside
   its sight is rested (`devil_mob.rest`, set by `delve_cave`'s poll): no brain at
   all, nothing hidden. A blow or a cry lifts it on the frame it lands.
+- **A blade is one draw per material.** A held sword is a dozen primitives and a
+  held branch is eighteen; each `MeshInstance3D` used to be its own draw call, so
+  a crowd of armed bodies paid thirteen draws for one length of wood.
+  `Geo.bake_parts` bakes the parts into one instance with a surface per material
+  (13 -> 4 or 5 for a steel blade, 18 -> 5 for a branch), transforms baked, so
+  what is drawn is exactly what stood there. The bow and the shield are not baked:
+  they move their own parts.
+- **The band's brains are decisions.** `SQUAD_TICKS` 3: `squad.drive` runs every
+  third physics tick on the time it skipped, the way `MobLod` grants a mob its
+  frames. The soul's own body still integrates every tick.
 - **The eye's own reach.** The cave's lights go out past `LIGHT_FAR` 48 m, and a
   body past `BODY_HIDE_DISTANCE` (the same 48 m, the same poll) is hidden and its
   rig parked - the floor's eighty-five bodies used to keep a draw list alive in
