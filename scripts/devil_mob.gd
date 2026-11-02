@@ -298,6 +298,7 @@ func _physics_process(delta: float) -> void:
 		CorpsePhysics.settle_root(self, delta)
 		return
 	_advance_strike(delta)
+	_advance_motion(delta)
 	_advance_presentation()
 	var frame := Engine.get_process_frames()
 	# Sight once a drawn frame - the rate a brain used to keep, so nothing that
@@ -413,13 +414,8 @@ func _think(delta: float) -> void:
 				_enter("CIRCLE")
 		"DEAD":
 			return
-	Perf.begin("mob.move")
+	_turn(delta)
 	_separate()
-	_drive(delta)
-	Perf.end()
-	_visual.set_motion(get_real_velocity(), is_on_floor())
-	_visual.set_combat(state, _state_time)
-	_visual.set_poise(_present_blocking(), _present_crouch())
 
 
 ## Distance to the closest ranger, for the tick budget. Walks the two slots
@@ -549,14 +545,13 @@ func _calm_tick(delta: float) -> void:
 	_move_speed = 0.0
 	_face_intent = Vector3.ZERO
 	_return_home(delta)
+	_turn(delta)
 	if _present_band > 1:
 		# Nothing at this distance can see the pose: skip the cluster pass and
 		# the locomotion presentation entirely.
 		_move_intent = _move_intent.normalized() if _move_speed > 0.0 else Vector3.ZERO
-		_drive(delta)
 		return
 	_separate()
-	_drive(delta)
 
 
 func _enter(next_state: String, reset_time := true) -> void:
@@ -674,6 +669,16 @@ func _hunt(delta: float) -> void:
 	# Standing over the last sighting: scan the ground instead of freezing.
 	rotation.y += sin(_state_time * 1.5) * delta * 1.7
 	_face_intent = -global_basis.z
+
+
+## The body moves, every tick, along the intent the brain last set. Motion is not
+## a decision: handing `move_and_slide` the brain's five frames of delta swept a
+## charging body a body-length in one step, with no capsule and no pose in
+## between - which reads as teleporting, and puts every swing behind it.
+func _advance_motion(delta: float) -> void:
+	Perf.begin("mob.move")
+	_drive(delta)
+	Perf.end()
 
 
 ## What the eye reads, on every physics tick. The state it shows is the brain's,
@@ -851,10 +856,17 @@ func _drive(delta: float) -> void:
 		velocity.y = 0.0
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
+	MobLod.move(self, delta)
+
+
+## Which way the body looks, on the clock it decides on. Facing is a decision like
+## any other: turned from the motion tick instead, a body spends five frames
+## swinging round to a point it chose five frames ago, and its sight cone sweeps
+## the room on the way - a wanderer that turns would notice a ranger it never faced.
+func _turn(delta: float) -> void:
 	if _face_intent.length_squared() > 0.0001 and state != "STAGGER":
 		rotation.y = lerp_angle(rotation.y, atan2(-_face_intent.x, -_face_intent.z),
 			minf(delta * float(profile.turn), 1.0))
-	MobLod.move(self, delta)
 
 
 func _steer(direction: Vector3) -> Vector3:
