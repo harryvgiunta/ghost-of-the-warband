@@ -134,6 +134,20 @@ var _wander := MobWander.new()
 var _lod := MobLod.new()
 ## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
 var _present_band := -1
+## Drawn frames between two brain ticks, and the offset this body takes into them
+## so a den never lands its brains on the same frame. A brain is a decision rate:
+## where to stand, who to chase, whether to swing. None of that needs the drawn
+## frame's rate, and a hall of a hundred of them doing it was a fifth of the
+## cave's frame. The blow itself is not a decision and does not run on this clock
+## (`_advance_strike`).
+const THINK_FRAMES := 5
+var _phase := 0
+## The drawn frame perception last ran in, and the tick time banked for it.
+var _sense_frame := -1
+var _sense_bank := 0.0
+## Seconds left before a committed blow lands: armed by the brain, spent on the
+## physics tick. -1 is no blow in the air.
+var _strike_left := -1.0
 ## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
 var dormant := false
 ## Rested by its owner (`rest`): no brain at all, nothing hidden.
@@ -176,6 +190,9 @@ static var _crowd_frames := {}
 
 
 func _ready() -> void:
+	# With which of the `THINK_FRAMES` this body thinks, so a den of thirty never
+	# lands its brains on the same frame.
+	_phase = absi(get_instance_id()) % THINK_FRAMES
 	var table := _profiles()
 	if not table.has(mob_id):
 		push_error("Unknown mob id: " + mob_id)
@@ -265,12 +282,36 @@ func _visual_script():
 func _physics_process(delta: float) -> void:
 	if resting:
 		return
-	# One brain tick per drawn frame at most: a frame that runs several physics
-	# ticks hands this body the whole elapsed time in one step instead. The
-	# simulated time is the same - `_lod.slice` and `MobLod.move` both work in
-	# seconds - so nothing the eye can see changes; the work is paid once.
+	# Three clocks, and only the last one is a decision:
+	#   * every physics tick - a blow already in the air, a corpse settling and
+	#     what the eye reads (`_advance_presentation`);
+	#   * once a drawn frame - everything the body can see, which is the rate a
+	#     brain used to keep, so nothing that could be seen before is missed;
+	#   * every `THINK_FRAMES` frames - where it stands, who it hunts, whether it
+	#     swings. That is the quarter that cost a fifth of the cave's frame, and
+	#     none of it needs the drawn frame's rate.
+	# The clock that comes round is handed the whole elapsed time, so the
+	# simulated time is unchanged - only work no eye could see is skipped.
+	if not alive:
+		# A ragdoll that falls five frames at a time drops a body through the
+		# floor, so settling is not on the decision clock either.
+		CorpsePhysics.settle_root(self, delta)
+		return
+	_advance_strike(delta)
+	_advance_presentation()
 	var frame := Engine.get_process_frames()
+	# Sight once a drawn frame - the rate a brain used to keep, so nothing that
+	# could be seen before is missed now.
+	if frame == _sense_frame:
+		_sense_bank += delta
+	else:
+		_sense_frame = frame
+		_advance_senses(delta + _sense_bank)
+		_sense_bank = 0.0
 	if frame == _brain_frame:
+		_brain_bank += delta
+		return
+	if (frame + _phase) % THINK_FRAMES != 0:
 		_brain_bank += delta
 		return
 	_brain_frame = frame
@@ -293,18 +334,10 @@ func _think(delta: float) -> void:
 	if budget <= 0.0:
 		return
 	delta = budget
-	# Sight, not proximity, decides whether this mob is in a fight. Losing the
-	# view keeps the pursuit alive for `MEMORY_SECONDS`. Nothing further away
-	# than its sight range can be seen, so that tick skips the sight rays.
-	var pursuit := false
-	if nearest <= _sight_range():
-		Perf.begin("mob.senses")
-		pursuit = _senses.step(self, _candidates(), delta, _sight_range(),
-			_eye_height(), Callable(self, "_is_hostile"))
-		Perf.end()
-	else:
-		_senses.age(delta)
-		pursuit = _senses.aggressive()
+	# Sight, not proximity, decides whether this mob is in a fight - and sight is
+	# already spent every tick by `_advance_senses`, so a brain this coarsely
+	# budgeted never misses a sighting a per-frame brain would have made.
+	var pursuit := _senses.aggressive()
 	if _senses.woke:
 		# The first sighting of a pack's member is the pack's sighting.
 		MobSenses.alert_packmates(self, _senses.target, _senses.last_seen, _wander.group)
@@ -363,7 +396,7 @@ func _think(delta: float) -> void:
 			_face_intent = _strike_direction
 			if not _struck and _state_time >= float(profile.strike) * 0.34:
 				_struck = true
-				_resolve_strike()
+				_strike_left = 0.0
 			if _state_time >= float(profile.strike):
 				_enter("RECOVER")
 				_attack_cooldown = _cooldown_seconds()
@@ -524,10 +557,6 @@ func _calm_tick(delta: float) -> void:
 		return
 	_separate()
 	_drive(delta)
-	if is_instance_valid(_visual):
-		_visual.set_motion(get_real_velocity(), is_on_floor())
-		_visual.set_combat(state, _state_time)
-		_visual.set_poise(_present_blocking(), _present_crouch())
 
 
 func _enter(next_state: String, reset_time := true) -> void:
@@ -535,6 +564,7 @@ func _enter(next_state: String, reset_time := true) -> void:
 	if reset_time:
 		_state_time = 0.0
 	if next_state == "WINDUP":
+		_strike_left = -1.0
 		# The windup is the only warning a body gives, so the noise belongs to it
 		# rather than to the blow: a player facing away is told anyway.
 		_voice.say("attack")
@@ -644,6 +674,47 @@ func _hunt(delta: float) -> void:
 	# Standing over the last sighting: scan the ground instead of freezing.
 	rotation.y += sin(_state_time * 1.5) * delta * 1.7
 	_face_intent = -global_basis.z
+
+
+## What the eye reads, on every physics tick. The state it shows is the brain's,
+## but the clip advances when the body is drawn: a death held on the ground must
+## not step five frames at a time.
+func _advance_presentation() -> void:
+	if _present_band > 1 or not is_instance_valid(_visual):
+		return
+	_visual.set_motion(get_real_velocity(), is_on_floor())
+	_visual.set_combat(state, _state_time)
+	_visual.set_poise(_present_blocking(), _present_crouch())
+
+
+## Everything the body can see, on every physics tick. Perception is a raycast
+## and a memory clock, not a decision: a brain that thinks every fifth frame must
+## not also see every fifth frame, or a ranger crosses a doorway unseen.
+func _advance_senses(delta: float) -> void:
+	if dormant or replica:
+		return
+	var nearest := _nearest_ranger()
+	if nearest <= _sight_range():
+		Perf.begin("mob.senses")
+		_senses.step(self, _candidates(), delta, _sight_range(),
+			_eye_height(), Callable(self, "_is_hostile"))
+		Perf.end()
+	else:
+		_senses.age(delta)
+
+
+## Spends a committed blow's countdown. Called on the physics tick before the
+## brain's budget is consulted, so a blow armed by a coarse brain still lands on
+## the frame the swing's contact is authored for - within one tick, not within
+## one brain.
+func _advance_strike(delta: float) -> void:
+	if _strike_left < 0.0:
+		return
+	_strike_left -= delta
+	if _strike_left > 0.0:
+		return
+	_strike_left = -1.0
+	_resolve_strike()
 
 
 func _resolve_strike() -> void:
