@@ -35,7 +35,8 @@ const M_ORPHANS := 10
 const M_RESOURCES := 11
 const M_MEMORY := 12
 const M_VRAM := 13
-const MONITORS := 14
+const M_FRAME := 14
+const MONITORS := 15
 
 ## A scene that knows something the engine does not (bodies, mobs, missiles)
 ## joins this group and answers `perf_context() -> PackedStringArray`.
@@ -173,6 +174,12 @@ func _sample_monitors() -> void:
 	_samples += 1
 
 
+## Our own scopes, in milliseconds per drawn frame: the half of the frame the
+## game's own functions account for.
+func _scoped_per_frame() -> float:
+	return float(Perf.scoped_us()) / float(maxi(Perf.frames, 1)) / 1000.0
+
+
 func _mean(index: int) -> float:
 	return _sum[index] / float(maxi(_samples, 1))
 
@@ -189,6 +196,7 @@ func _process(_delta: float) -> void:
 	_frame_us[_next] = spent
 	_next = (_next + 1) % WINDOW
 	_filled = mini(_filled + 1, WINDOW)
+	_sum[M_FRAME] += float(spent) / 1000.0
 	_sample_monitors()
 	_since_refresh += spent
 	if _since_refresh < REFRESH_US:
@@ -218,11 +226,15 @@ func _compose() -> void:
 	lines.append("render   %5.2f cpu %5.2f gpu   %d draws   %.2f M prims   %d objects" % [
 		_mean(M_RENDER_CPU), _mean(M_RENDER_GPU), int(_mean(M_DRAWS)),
 		_mean(M_PRIMS) / 1000000.0, int(_mean(M_OBJECTS))])
-	# Physics is printed per step, not per frame: the frame only decides how many
-	# steps it has to pay for, and a step that is itself slow is a different bug.
-	var steps := maxi(_steps, 1)
-	lines.append("physics  %5.2f /step x%3.1f  %d active   %d pairs   %d islands" % [
-		_sum[M_PHYSICS] / float(steps), float(_steps) / float(maxi(_samples, 1)),
+	# The engine's physics monitor was printed here and could not be reconciled
+	# with the frame beside it: at a fixed 200 ms frame it read 1.27 ms at 120
+	# physics ticks and the same at 240, so it is neither a step nor a frame and
+	# dividing it is guesswork. What the frame says is what is left once our own
+	# scopes and the renderer are taken out - the physics server and the engine's
+	# traversal - beside the steps a drawn frame ran.
+	var other := _mean(M_FRAME) - _scoped_per_frame() - _mean(M_RENDER_CPU)
+	lines.append("physics  %5.2f other x%3.1f  %d active   %d pairs   %d islands" % [
+		other, float(_steps) / float(maxi(_samples, 1)),
 		int(_mean(M_ACTIVE)), int(_mean(M_PAIRS)), int(_mean(M_ISLANDS))])
 	lines.append("tree     %d nodes   %d orphans   %d resources   %d MB   vram %d MB" % [
 		int(_mean(M_NODES)), int(_mean(M_ORPHANS)), int(_mean(M_RESOURCES)),

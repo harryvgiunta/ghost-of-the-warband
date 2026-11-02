@@ -856,7 +856,14 @@ func _drive(delta: float) -> void:
 		velocity.y = 0.0
 	elif not is_on_floor():
 		velocity.y -= 18.0 * delta
-	MobLod.move(self, delta)
+	# A body with nothing to do does not ask the world where it can go: a sweep
+	# for a body with no horizontal motion resolves to standing still anyway, and
+	# it is the most expensive thing a mob does per tick - a capsule cast at the
+	# terrain. Half of a stand-off is spent standing or circling on the spot.
+	if not is_on_floor() \
+			or Vector2(velocity.x, velocity.z).length_squared() > 0.0004 \
+			or desired.length_squared() > 0.0004:
+		MobLod.move(self, delta)
 
 
 ## Which way the body looks, on the clock it decides on. Facing is a decision like

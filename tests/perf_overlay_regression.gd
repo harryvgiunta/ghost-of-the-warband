@@ -158,8 +158,8 @@ func _check_overlay() -> void:
 	# printed per step: one slow step must not pass itself off as every frame's
 	# cost, and the frame only decides how many steps it pays for.
 	var physics_line := _line_starting(text, "physics ")
-	check(physics_line.contains("/step") and physics_line.contains("x"),
-		"physics is printed per step beside the steps a frame ran (%s)" % physics_line)
+	check(physics_line.contains("other") and physics_line.contains("x"),
+		"the frame's unscripted share is printed beside the steps it ran (%s)" % physics_line)
 	# The frame that hurt, named: what an average cannot show, and the only
 	# reading that explains a 1%% low.
 	var slowest := _line_starting(text, "slowest ")
