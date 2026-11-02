@@ -48,6 +48,10 @@ static var worst_frames_ago := 0
 const WINDOW_FRAMES := 240
 static var _prev := PackedInt64Array()
 static var _worst := PackedInt64Array()
+## Calls inside that frame, so a stampede (one scope, hundreds of calls) reads
+## differently from one slow call.
+static var _prev_calls := PackedInt32Array()
+static var _worst_calls := PackedInt32Array()
 
 ## The open scopes, innermost last. Parallel packed arrays grown in steps of
 ## sixteen, so a begin/end pair never allocates.
@@ -122,12 +126,14 @@ static func tick() -> int:
 			worst_frames_ago = 0
 			for slot in _worst.size():
 				_worst[slot] = _total[slot] - _prev[slot]
+				_worst_calls[slot] = _calls[slot] - _prev_calls[slot]
 		elif worst_frame_us > 0 and worst_frames_ago > WINDOW_FRAMES:
 			# The frame that hurt has left the window the headline reads.
 			worst_frame_us = 0
 			worst_frames_ago = 0
 	for slot in _prev.size():
 		_prev[slot] = _total[slot]
+		_prev_calls[slot] = _calls[slot]
 	return spent
 
 
@@ -139,6 +145,7 @@ static func restart() -> void:
 	_calls.fill(0)
 	_peak.fill(0)
 	_prev.fill(0)
+	_prev_calls.fill(0)
 	# `_worst` and `worst_frame_us` deliberately survive a restart: they are the
 	# record of one frame, not a window total.
 	frames = 0
@@ -153,6 +160,7 @@ static func reset() -> void:
 	_depth = 0
 	_last_tick = 0
 	_worst.fill(0)
+	_worst_calls.fill(0)
 	worst_frame_us = 0
 	worst_frames_ago = 0
 	restart()
@@ -192,7 +200,7 @@ static func worst_rows(limit: int = 4) -> Array[Dictionary]:
 		if nested:
 			continue
 		out.append({"name": _names[slot], "depth": _depths[slot], "slot": slot,
-			"us": _worst[slot]})
+			"us": _worst[slot], "calls": _worst_calls[slot]})
 	return out
 
 
@@ -234,6 +242,8 @@ static func _add(name: String, parent: int) -> int:
 	_peak.append(0)
 	_prev.append(0)
 	_worst.append(0)
+	_prev_calls.append(0)
+	_worst_calls.append(0)
 	_children[parent + 1][name] = slot
 	_children.append({})
 	return slot

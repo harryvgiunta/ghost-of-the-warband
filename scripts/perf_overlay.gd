@@ -232,7 +232,10 @@ func _compose() -> void:
 	if Perf.worst_frame_us > 0:
 		var inside := PackedStringArray()
 		for row in Perf.worst_rows(4):
-			inside.append("%s %.2f" % [str(row["name"]), float(row["us"]) / 1000.0])
+			# The call count is what tells a stampede from one slow call: 78 ms
+			# of `rig.anim` is seven hundred solves, not one expensive one.
+			inside.append("%s %.2f x%d" % [str(row["name"]), float(row["us"]) / 1000.0,
+				int(row.get("calls", 0))])
 		lines.append("slowest  %6.2f ms  %d frames ago  %s" % [
 			float(Perf.worst_frame_us) / 1000.0, Perf.worst_frames_ago,
 			"  ·  ".join(inside)])
