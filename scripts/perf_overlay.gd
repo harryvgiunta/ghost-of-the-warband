@@ -57,6 +57,8 @@ const BODY_SIZE := 14
 ## The 60 Hz frame with room for vsync jitter (a vsynced 60 fps averages a hair
 ## over 16.67 ms): an average frame slower than 57 fps turns the headline red.
 const BUDGET_MS := 1000.0 / 57.0
+## A frame slower than this is counted as a hitch in the headline block.
+const SLOW_MS := 40.0
 const OVER_BUDGET := Color(0.95, 0.42, 0.34)
 ## The scope column is two spaces a level of nesting, then the name.
 const NAME_WIDTH := 28
@@ -71,13 +73,17 @@ var _frame_us := PackedInt64Array()
 var _next := 0
 var _filled := 0
 var _since_refresh := 0
-var _physics_mark := 0
 ## The engine's own monitors, summed over the window. They are read from
 ## `Performance` once a frame and printed as an average: a single frame's value
 ## is what the browser shows, and one slow step read as "physics 44 ms" says
 ## nothing about the frame the eye is complaining about.
 var _sum := PackedFloat64Array()
 var _samples := 0
+## Physics steps seen since the last rebuild, counted on the same frames the
+## milliseconds are summed on. Dividing one clock's sum by another clock's count
+## is what let "physics 43.94" sit beside a 28 ms frame.
+var _steps := 0
+var _last_physics_frame := 0
 
 
 func _init() -> void:
@@ -129,7 +135,8 @@ func set_open(value: bool) -> void:
 	_sum.resize(MONITORS)
 	_sum.fill(0.0)
 	_samples = 0
-	_physics_mark = Engine.get_physics_frames()
+	_steps = 0
+	_last_physics_frame = Engine.get_physics_frames()
 	_headline.add_theme_color_override("font_color", Ledger.BONE)
 	_headline.text = "measuring..."
 	_body.text = ""
@@ -146,7 +153,15 @@ func _sample_monitors() -> void:
 	_sum[M_DRAWS] += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
 	_sum[M_PRIMS] += Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
 	_sum[M_OBJECTS] += Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
-	_sum[M_PHYSICS] += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	# The monitor reports the frame's whole physics time, so a frame that ran
+	# three steps reports three steps' worth - and a frame that ran none repeats
+	# the last reading, which must not be summed again.
+	var physics_frame := Engine.get_physics_frames()
+	var ran := physics_frame - _last_physics_frame
+	_last_physics_frame = physics_frame
+	if ran > 0:
+		_steps += ran
+		_sum[M_PHYSICS] += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
 	_sum[M_PAIRS] += Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)
 	_sum[M_ACTIVE] += Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS)
 	_sum[M_ISLANDS] += Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT)
@@ -197,9 +212,6 @@ func _compose() -> void:
 		OVER_BUDGET if average > BUDGET_MS else Ledger.BONE)
 
 	var window_frames := maxi(Perf.frames, 1)
-	var physics_frames := Engine.get_physics_frames()
-	var ticks := float(physics_frames - _physics_mark) / float(window_frames)
-	_physics_mark = physics_frames
 	var lines := PackedStringArray()
 	lines.append("frame    %6.2f worst   %6.2f 1%% low (%5.1f fps)   %s" % [
 		worst, low, _fps(low), _pacing()])
@@ -208,9 +220,10 @@ func _compose() -> void:
 		_mean(M_PRIMS) / 1000000.0, int(_mean(M_OBJECTS))])
 	# Physics is printed per step, not per frame: the frame only decides how many
 	# steps it has to pay for, and a step that is itself slow is a different bug.
+	var steps := maxi(_steps, 1)
 	lines.append("physics  %5.2f /step x%3.1f  %d active   %d pairs   %d islands" % [
-		_mean(M_PHYSICS) / maxf(ticks, 0.001), ticks, int(_mean(M_ACTIVE)),
-		int(_mean(M_PAIRS)), int(_mean(M_ISLANDS))])
+		_sum[M_PHYSICS] / float(steps), float(_steps) / float(maxi(_samples, 1)),
+		int(_mean(M_ACTIVE)), int(_mean(M_PAIRS)), int(_mean(M_ISLANDS))])
 	lines.append("tree     %d nodes   %d orphans   %d resources   %d MB   vram %d MB" % [
 		int(_mean(M_NODES)), int(_mean(M_ORPHANS)), int(_mean(M_RESOURCES)),
 		int(_mean(M_MEMORY)), int(_mean(M_VRAM))])
@@ -220,8 +233,17 @@ func _compose() -> void:
 		var inside := PackedStringArray()
 		for row in Perf.worst_rows(4):
 			inside.append("%s %.2f" % [str(row["name"]), float(row["us"]) / 1000.0])
-		lines.append("slowest  %6.2f ms  %s" % [float(Perf.worst_frame_us) / 1000.0,
+		lines.append("slowest  %6.2f ms  %d frames ago  %s" % [
+			float(Perf.worst_frame_us) / 1000.0, Perf.worst_frames_ago,
 			"  ·  ".join(inside)])
+	# How often the frame is over twice the 60 Hz budget: the shape of the drop,
+	# which a mean and a 1% low between them cannot describe.
+	var slow := 0
+	for index in _filled:
+		if float(_frame_us[index]) / 1000.0 > SLOW_MS:
+			slow += 1
+	lines.append("hitches  %d of %d frames over %d ms" % [slow, maxi(_filled, 1),
+		int(SLOW_MS)])
 	for node in get_tree().get_nodes_in_group(CONTEXT_GROUP):
 		if node.has_method("perf_context"):
 			lines.append_array(node.call("perf_context"))

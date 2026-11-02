@@ -50,6 +50,12 @@ const DORMANT_DISTANCE := 150.0
 const WAKE_DISTANCE := 128.0
 ## Past this distance animation evaluation and locomotion presentation stop.
 const ANIMATE_DISTANCE := 62.0
+## Past this distance a rig poses every other frame instead of every frame. A
+## two-metre creature at ten metres is a couple of hundred pixels of silhouette
+## and the authored cycle is a clock - a coarser solve samples the phase the body
+## would have been at anyway. Inside it the body is close enough that a swing has
+## to read frame for frame.
+const POSE_NEAR := 10.0
 ## Past this distance a body stops casting into the four shadow splits. Every
 ## mob inside 110 m used to be skinned a second time for the shadow pass.
 const SHADOW_DISTANCE := 30.0

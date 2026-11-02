@@ -114,6 +114,9 @@ var _paint: Array[StandardMaterial3D] = []
 var _base: Array[Color] = []
 var _held_item := ""
 var _band := -1
+## Whether the last distance reading was inside `MobLod.POSE_NEAR`: a rig in a
+## hall poses every other frame, one at arm's length every frame.
+var _near := true
 var _parked := false
 
 ## One harvested set of creature materials per species, per process: the skin
@@ -237,9 +240,11 @@ func get_clip_name() -> String:
 ## evaluating tracks and past `SHADOW_DISTANCE` it stops casting.
 func set_distance(distance: float) -> void:
 	var band := MobLod.band(distance)
-	if band == _band:
+	var near := distance <= MobLod.POSE_NEAR
+	if band == _band and near == _near:
 		return
 	_band = band
+	_near = near
 	_apply_clock()
 
 
@@ -260,7 +265,7 @@ func _apply_clock() -> void:
 	# Past the shadow band the body is a figure across a room - a den asleep
 	# next door, a hunter still closing - and keeps its authored cycle on the mid
 	# tick budget's clock. Every blow and shot lands inside 30 m, on the full one.
-	rig.set_pose_stride(1 if _band <= 0 else MobLod.MID_FRAMES)
+	rig.set_pose_stride(1 if _near else 2 if _band <= 0 else MobLod.MID_FRAMES)
 	rig.set_shadow_casting(not _parked and _band <= 0)
 
 

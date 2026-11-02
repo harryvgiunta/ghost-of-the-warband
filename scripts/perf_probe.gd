@@ -42,6 +42,10 @@ static var _peak := PackedInt64Array()
 ## it. `_prev` is the window total as of the last `tick()`, so a frame's own
 ## cost is the difference.
 static var worst_frame_us := 0
+## Frames since the slowest one happened, so the overlay can say how old it is.
+static var worst_frames_ago := 0
+## How long a recorded worst frame is kept: the same window the fps figure uses.
+const WINDOW_FRAMES := 240
 static var _prev := PackedInt64Array()
 static var _worst := PackedInt64Array()
 
@@ -109,10 +113,19 @@ static func tick() -> int:
 	if spent > 0:
 		frames += 1
 		frame_us += spent
+		# Kept across `restart()`: the scope table is rebuilt every quarter
+		# second, and the frame that stutters lands once every few seconds - a
+		# record that dies with the table can never catch one.
+		worst_frames_ago += 1
 		if spent > worst_frame_us:
 			worst_frame_us = spent
+			worst_frames_ago = 0
 			for slot in _worst.size():
 				_worst[slot] = _total[slot] - _prev[slot]
+		elif worst_frame_us > 0 and worst_frames_ago > WINDOW_FRAMES:
+			# The frame that hurt has left the window the headline reads.
+			worst_frame_us = 0
+			worst_frames_ago = 0
 	for slot in _prev.size():
 		_prev[slot] = _total[slot]
 	return spent
@@ -126,8 +139,8 @@ static func restart() -> void:
 	_calls.fill(0)
 	_peak.fill(0)
 	_prev.fill(0)
-	_worst.fill(0)
-	worst_frame_us = 0
+	# `_worst` and `worst_frame_us` deliberately survive a restart: they are the
+	# record of one frame, not a window total.
 	frames = 0
 	frame_us = 0
 	imbalanced = 0
@@ -139,6 +152,9 @@ static func restart() -> void:
 static func reset() -> void:
 	_depth = 0
 	_last_tick = 0
+	_worst.fill(0)
+	worst_frame_us = 0
+	worst_frames_ago = 0
 	restart()
 
 
