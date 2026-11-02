@@ -23,6 +23,7 @@ const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const CREAM := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -378,7 +379,23 @@ func _anoint_line(row: Dictionary) -> Control:
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	words.add_theme_constant_override("separation", 0)
 	line.add_child(words)
-	_make_label(words, str(row["name"]), 13, CREAM)
+	var name_label := ItemHover.LabelRow.new()
+	name_label.text = str(row["name"])
+	name_label.add_theme_font_size_override("font_size", int(round(13 * 1.18)))
+	name_label.add_theme_color_override("font_color", CREAM)
+	# The item card is the only place the piece's own numbers and its brand show
+	# beside the skill this rite would wake; the option button's refusal tooltip
+	# stays on the button.
+	var item_id := str(row["item_id"])
+	if anointed:
+		name_label.show_item(item_id, warband,
+			"Already anointed with %s - key %s in the body." % [
+				str(row["ability_name"]), str(row["key"])])
+	else:
+		name_label.show_item(item_id, warband,
+			"ANOINT spends %s - key %s in the body." % [
+				str(row["recipe_text"]), str(row["key"])])
+	words.add_child(name_label)
 	_make_label(words, "%s  ·  key %s" % [str(row["ability_name"]), str(row["key"])], 10,
 		GOLD if anointed else MUTED)
 	var cost := _make_label(line, "ANOINTED" if anointed else str(row["recipe_text"]), 11,
@@ -445,13 +462,14 @@ func _refresh_unbind() -> void:
 			return int(a["value"]) > int(b["value"])
 		return str(a["name"]) < str(b["name"]))
 	for row in rows:
-		var button := Button.new()
+		var button := ItemHover.Row.new()
 		button.name = "Unbind_%s" % str(row["item_id"])
 		button.text = "%s  |  %d c  |  %s" % [str(row["name"]), int(row["value"]),
 			str(row["yield_text"])]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.add_theme_font_size_override("font_size", 11)
-		button.tooltip_text = "Unbind %s into %s" % [str(row["name"]), str(row["yield_text"])]
+		button.show_item(str(row["item_id"]), warband,
+			"Click to unbind it into %s." % str(row["yield_text"]))
 		button.pressed.connect(press_unbind.bind(str(row["item_id"])))
 		_unbind_list.add_child(button)
 		row["button"] = button

@@ -43,8 +43,7 @@ func run() -> void:
 	# --- dormant ------------------------------------------------------------
 	check(not lesson.active(), "the lesson is inert until the player is awake")
 	check(not lesson.fighting(), "and the pair may not wake for it")
-	check(lesson.objective().is_empty() and lesson.hint().is_empty(),
-		"with nothing to say on the HUD")
+	check(lesson.objective().is_empty(), "with nothing to say on the HUD")
 	check(not lesson.note_shiv_near(), "a step onto the blade before the wake is not progress")
 	check(not lesson.note_shiv_taken(), "and neither is a pickup")
 	check(not lesson.note_guarded(), "nor a guard")
@@ -56,8 +55,6 @@ func run() -> void:
 	check(lesson.active() and not lesson.fighting(),
 		"the keys are the lesson's and the pair are still asleep")
 	check(tips == [DuelScript.Tip.MOVE], "one walking tip was asked for (%s)" % str(tips))
-	check(lesson.hint().contains("W A S D"), "which names walking")
-	check(lesson.hint().contains("SHIFT"), "and running")
 	check(not lesson.wake(), "a second wake cannot restart it")
 
 	# --- the steel ----------------------------------------------------------
@@ -65,7 +62,6 @@ func run() -> void:
 	check(lesson.step() == DuelScript.Step.FETCH, "at the steel (%s)" % lesson.step_name())
 	check(tips == [DuelScript.Tip.MOVE, DuelScript.Tip.FETCH],
 		"the pickup tip follows the walking tip (%s)" % str(tips))
-	check(lesson.hint().contains("K"), "and names K")
 	check(not lesson.note_shiv_near(), "the pickup tip is asked for once")
 	check(not lesson.note_guarded(), "a block before anybody was told does not count")
 
@@ -77,9 +73,6 @@ func run() -> void:
 	check(lesson.cuts_tip(), "the pickup itself asks for the cuts tip")
 	check(tips.size() == 3 and tips[2] == DuelScript.Tip.SWING,
 		"the cuts tip is the third one asked for (%s)" % str(tips))
-	check(lesson.hint().contains("LMB"), "which names the cut")
-	check(lesson.hint().contains("WHEEL_UP") and lesson.hint().contains("WHEEL_DOWN"),
-		"and both wheel swings (%s)" % lesson.hint())
 	check(not lesson.note_shiv_taken(), "the cuts tip is asked for once")
 
 	# --- the guard ----------------------------------------------------------
@@ -90,17 +83,14 @@ func run() -> void:
 	check(lesson.guard_tip(), "and the guard tip is up")
 	check(tips.size() == 4 and tips[3] == DuelScript.Tip.GUARD,
 		"it is the fourth tip asked for (%s)" % str(tips))
-	check(lesson.hint().contains("RMB"), "which names the guard key")
-	check(lesson.hint().to_lower().contains("press again"),
-		"and says a block drops it, so it is pressed again (%s)" % lesson.hint())
 	check(not lesson.note_windup(88, 2), "the guard tip is asked for once")
 	check(lesson.note_guarded(), "a blow on the raised guard ends the lesson")
 	check(lesson.guarded() and lesson.step() == DuelScript.Step.DONE,
 		"the lesson is done (%s)" % lesson.step_name())
 	check(not lesson.active() and not lesson.fighting(),
 		"and it hands the keys back to the camp")
-	check(lesson.objective().is_empty() and lesson.hint().is_empty(),
-		"with nothing left to say (%s / %s)" % [lesson.objective(), lesson.hint()])
+	check(lesson.objective().is_empty(),
+		"with nothing left to say (%s)" % lesson.objective())
 	check(not lesson.note_guarded(), "a second block is not booked again")
 
 	# --- the last of the pair ----------------------------------------------
@@ -134,16 +124,12 @@ func run() -> void:
 	root.add_child(probe)
 	probe.wake()
 	lines.append(probe.objective())
-	lines.append(probe.hint())
 	probe.note_shiv_near()
 	lines.append(probe.objective())
-	lines.append(probe.hint())
 	probe.note_shiv_taken()
 	lines.append(probe.objective())
-	lines.append(probe.hint())
 	check(probe.note_windup(5, 1), "the guard beat can be probed on one watcher")
 	lines.append(probe.objective())
-	lines.append(probe.hint())
 	for line in lines:
 		check(not line.contains("\n"), "no lesson line is more than one line (%s)" % line)
 		check(line.length() <= 84, "every lesson line fits one read (%d: %s)" % [line.length(), line])

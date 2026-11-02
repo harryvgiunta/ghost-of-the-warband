@@ -13,8 +13,8 @@ extends Node
 ##      in hand is the moment the pair wake.
 ##   4. **GUARD** - the second watcher's windup is the moment to name `RMB`.
 ##
-## Every beat is one line and one key line; the scene shows each as a tip, never
-## as a page to read. The node owns no scene lookups: the camp feeds it facts and
+## Every beat is one line, and the scene shows it as a tip carrying that beat's
+## key - never a page to read. The node owns no scene lookups: the camp feeds it facts and
 ## shows the tips it asks for. Every transition is guarded, so a scene that fires
 ## an event early (a swing before the blade, a guard before the tip) is ignored
 ## rather than throwing the lesson out of sequence. Facts arrive at most once.
@@ -124,7 +124,7 @@ func step_name() -> String:
 	return "unknown"
 
 
-## Whether the lesson still owns the prompt and the key line.
+## Whether the lesson still owns the prompt.
 func active() -> bool:
 	return _step == Step.MOVE or _step == Step.FETCH or _step == Step.FIGHT
 
@@ -164,20 +164,6 @@ func objective() -> String:
 			if _guard_tip and not _guarded:
 				return "Guard the blow"
 			return "Put the pair down"
-	return ""
-
-
-## The key line under it: exactly what to press, this beat.
-func hint() -> String:
-	match _step:
-		Step.MOVE:
-			return "W A S D  -  walk   ·   SHIFT  -  run   ·   MOUSE  -  look"
-		Step.FETCH:
-			return "K  -  take the ironwood shiv"
-		Step.FIGHT:
-			if _guard_tip and not _guarded:
-				return "RMB  -  guard   ·   a block drops it, press again"
-			return "LMB  -  cut   ·   WHEEL_UP  -  stab   ·   WHEEL_DOWN  -  overhead"
 	return ""
 
 

@@ -58,6 +58,16 @@ const MIN_HEIGHT := 0.9
 const SWOOP_SECONDS := 0.35
 ## How fast the camera closes the last metres of ordinary follow.
 const FOLLOW_RATE := 16.0
+## Ctrl + the wheel: one notch shortens or lengthens the boom by this factor, so
+## five notches roughly halve or double the distance and a flick of the wheel is
+## a readable change rather than a crawl.
+const ZOOM_STEP := 0.86
+## The zoom is a multiplier on `FOLLOW_DISTANCE`, never a distance of its own, so
+## the default view stays the one the mode was framed around. 0.36 is 1.6 m over
+## the shoulder - closer than that the eye is inside the body's own column - and
+## 2.0 is 8.8 m, which reads the ground around the band without leaving it.
+const ZOOM_MIN := 0.36
+const ZOOM_MAX := 2.0
 
 var camera: Camera3D
 ## Orbit around the body, radians. Yaw 0 puts the camera behind (+Z), positive
@@ -67,6 +77,11 @@ var pitch := FOLLOW_PITCH
 ## Which shoulder the eye is over: 1 the body's right, -1 its left. `X` swaps it,
 ## exactly as the frontier's `shoulder_camera.swap()` does.
 var side := 1
+## How far the eye stands off the body, as a multiplier on `FOLLOW_DISTANCE`.
+## Ctrl + the wheel moves it; everything else (occlusion, the arc, the shoulder
+## slide) is measured off the same boom, so a zoomed-in eye is still pulled out of
+## a trunk and a zoomed-out one still ends on the ground rather than in it.
+var zoom := 1.0
 ## The eased lateral offset, so a swap crosses the body instead of cutting.
 var _offset := SHOULDER_OFFSET
 
@@ -161,6 +176,26 @@ func forget(body: Actor) -> void:
 ## slides over the body's shoulder instead of snapping to the far side of it.
 func swap() -> void:
 	side = -side
+
+## One wheel notch with Ctrl held: a positive `notches` pulls the eye in, a
+## negative one pushes it out, and the multiplier is clamped to
+## `ZOOM_MIN`..`ZOOM_MAX` so the boom can never reach the body or leave the field.
+##
+## The boom itself is snapped (`_boom = -1` is the resolve's own "take the wanted
+## length" case) rather than eased: `BOOM_OUT_RATE` is 3.5 m/s, tuned so a trunk
+## passing between the eye and the body does not shake the frame, and a wheel that
+## kept that rate would take two seconds to answer. Occlusion still resolves the
+## new length on the next frame, so the snap is never into geometry.
+func zoom_by(notches: int) -> void:
+	if notches == 0:
+		return
+	zoom = clampf(zoom * pow(ZOOM_STEP, float(notches)), ZOOM_MIN, ZOOM_MAX)
+	_boom = -1.0
+
+## The boom length the eye wants right now, in metres: the default distance at
+## `zoom` 1.0, which is what the mode's framing and every tuning number assume.
+func boom_length() -> float:
+	return FOLLOW_DISTANCE * zoom
 
 ## Move the eye around the body. Called with the mouse delta by the controller.
 ## Yaw wraps, so the horizontal is already free; pitch is the whole sky and the
@@ -267,11 +302,12 @@ func _focus_point() -> Vector3:
 	return body.global_position + Vector3.UP * height
 
 ## The eye's wanted position: the orbit distance back along `back`, then the
-## shoulder offset across it, before occlusion.
+## shoulder offset across it, before occlusion. The distance is the zoomed boom, so
+## one multiplier moves the eye and nothing else.
 func _shoulder() -> Vector3:
 	var back := _back()
 	var right := Vector3(back.z, 0.0, -back.x).normalized()
-	return _focus_point() + back * FOLLOW_DISTANCE + right * _offset
+	return _focus_point() + back * boom_length() + right * _offset
 
 ## Pull a wanted eye position out of geometry. The ray runs from the focus to
 ## the wanted point so a wall between the two shortens the boom instead of

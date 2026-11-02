@@ -12,9 +12,10 @@ signal downed_ended(slot: int)
 ## A hostile is about to land a blow or a shaft on this body (`note_attacker`). The
 ## squad listens: its party mode decides whether that is a fight the band answers.
 signal struck_by(attacker: Node3D)
-## A raised guard took a blow and came down: the fighter must raise it again. The
-## scene says so on the soul's own body, because a guard that dropped with the
-## button still held looks like a button that stopped working.
+## A raised bare guard took a blow and came down: the fighter must raise it again.
+## A shield is the exception (`receive_melee`) and never emits this. The scene says
+## so on the soul's own body, because a guard that dropped with the button still
+## held looks like a button that stopped working.
 signal guard_broken(slot: int)
 
 const Archer = preload("res://scripts/archer.gd")
@@ -625,14 +626,17 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 			velocity.x = push.x
 			velocity.z = push.z
-		# The blow was stopped, and it cost more than the pool's price: the guard
-		# is spent and comes down. One raised guard buys one block, so a crowd
-		# cannot be stood off by leaning on the button.
-		combat.break_guard()
-		guard_broken.emit(slot)
+		# The blow was stopped and the pool paid `block_stamina_cost` for it. What
+		# that does to the guard is what stopped it: a shield is a boss to be hit,
+		# so the arm stays up and only the stamina goes - the pool is the wall's
+		# whole price. A bare blade cannot hold its line, so one raised guard buys
+		# one block and the crowd cannot be stood off by leaning on the button.
+		if not rig.shield_equipped:
+			combat.break_guard()
+			guard_broken.emit(slot)
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
-			# The raised dagger absorbs the impact: half damage but the guard
-			# stays up and the attacker's swing continues.
+			# The raised dagger absorbs the impact: half damage, and the attacker's
+			# swing continues.
 			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false)
 		return outcome
 	take_damage(amount,source_id,headshot)

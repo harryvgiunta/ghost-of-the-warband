@@ -69,11 +69,12 @@ func key_event(code: Key, pressed: bool = true) -> InputEventKey:
 	event.pressed = pressed
 	return event
 
-func mouse_event(button: MouseButton, pressed: bool) -> InputEventMouseButton:
+func mouse_event(button: MouseButton, pressed: bool, ctrl: bool = false) -> InputEventMouseButton:
 	var event := InputEventMouseButton.new()
 	event.button_index = button
 	event.pressed = pressed
 	event.position = Vector2(720, 450)
+	event.ctrl_pressed = ctrl
 	return event
 
 func run() -> void:
@@ -141,6 +142,7 @@ func run() -> void:
 	check_cycle(warband, controller, merc_ids)
 	check_camera(warband, controller, merc_ids)
 	check_free_look(controller)
+	await check_zoom(controller, merc_ids)
 	await check_router_eject(warband, controller, merc_ids)
 	await check_health_eject(warband, controller, merc_ids)
 	check_squad_release(warband, controller, merc_ids, events)
@@ -377,6 +379,90 @@ func check_free_look(controller) -> void:
 		check(absf((-rig.camera.global_basis.z).dot(want) - 1.0) < 0.0005,
 			"the eye looks along its own orbit at %.2f rad" % angle)
 	rig.pitch = PossessionCamera.FOLLOW_PITCH
+
+# --- ctrl + wheel: the eye in and out ---------------------------------------
+
+## Ctrl + the wheel moves the eye along the boom the occlusion already resolves.
+## The bare wheel is still the stab and the overhead, so the modifier is the whole
+## difference between the two: a zoom that also swung would be a swing the player
+## never asked for, and a wheel that zoomed without Ctrl would delete two cuts.
+func check_zoom(controller, merc_ids: Array[int]) -> void:
+	var rig = controller.camera_rig
+	var entry: Dictionary = controller.activate(1, merc_ids[3])
+	check(bool(entry.get("ok", false)), "peer 1 enters the sword body for the zoom")
+	# A body swings off the floor, and a fresh seat is airborne until the first
+	# physics tick: the plain-wheel contrast below would read a refusal instead.
+	for tick in 8:
+		await physics_frame
+	var actor = controller.active_actor
+	if actor == null:
+		check(false, "the zoom needs a possessed body")
+		return
+	check(actor.rig.weapon in ["sword", "dagger", "dual"],
+		"the wheel's own weapon is in its hands (%s)" % actor.rig.weapon)
+	check(actor.is_on_floor(), "the sword body is standing")
+
+	rig.zoom = 1.0
+	rig.pitch = PossessionCamera.FOLLOW_PITCH
+	var side_before: int = controller._next_swing_side
+	var phase_before: String = actor.rig.phase
+	for notch in 3:
+		controller._unhandled_input(mouse_event(MOUSE_BUTTON_WHEEL_UP, true, true))
+	check(rig.zoom < 0.7, "ctrl + wheel up pulls the eye in (zoom %.3f)" % rig.zoom)
+	check(is_equal_approx(rig.boom_length(), PossessionCamera.FOLLOW_DISTANCE * rig.zoom),
+		"the boom is the default distance times the zoom")
+	check(controller._next_swing_side == side_before and actor.rig.phase == phase_before,
+		"the zoom is not also a stab (%s)" % actor.rig.phase)
+	controller._unhandled_input(mouse_event(MOUSE_BUTTON_WHEEL_DOWN, true, true))
+	check(rig.zoom > 0.6 and rig.zoom < 0.86, "wheel down backs the zoom off (%.3f)" % rig.zoom)
+
+	# The eye really is closer: the settled camera stands off the body's focus by
+	# the zoomed boom, not by the one the mode was framed around.
+	var focus: Vector3 = rig._focus_point()
+	var zoomed: float = rig.zoom
+	for frame in 30:
+		rig.update(0.033)
+	var near: float = rig.camera.global_position.distance_to(focus)
+	rig.zoom = 1.0
+	rig._boom = -1.0
+	for frame in 30:
+		rig.update(0.033)
+	var far: float = rig.camera.global_position.distance_to(focus)
+	check(near < far - 0.5,
+		"a zoomed-in eye stands closer (%.2f m at zoom %.2f against %.2f m)"
+			% [near, zoomed, far])
+
+	# Both stops hold: the eye never reaches the body and never leaves the field.
+	for notch in 40:
+		rig.zoom_by(1)
+	check(is_equal_approx(rig.zoom, PossessionCamera.ZOOM_MIN),
+		"the closest zoom stops at ZOOM_MIN (%.3f)" % rig.zoom)
+	for frame in 20:
+		rig.update(0.033)
+	var floor_distance: float = rig.camera.global_position.distance_to(rig._focus_point())
+	check(floor_distance > PossessionCamera.MIN_DISTANCE - 0.01,
+		"the closest eye is still off the body (%.2f m)" % floor_distance)
+	for notch in 80:
+		rig.zoom_by(-1)
+	check(is_equal_approx(rig.zoom, PossessionCamera.ZOOM_MAX),
+		"the furthest zoom stops at ZOOM_MAX (%.3f)" % rig.zoom)
+
+	# The same wheel with no modifier is the cut it always was. A wheel press never
+	# touches `_next_swing_side` (that is the left click's alternation), so the
+	# proof is the rig leaving READY on the same frame the button is pressed.
+	rig.zoom = 1.0
+	rig._boom = -1.0
+	phase_before = actor.rig.phase
+	controller._unhandled_input(mouse_event(MOUSE_BUTTON_WHEEL_UP, true))
+	check(actor.rig.phase != phase_before,
+		"a bare wheel is still a stab (%s -> %s)" % [phase_before, actor.rig.phase])
+	check(is_equal_approx(rig.zoom, 1.0), "and a bare wheel never moves the eye")
+
+	# A soul between bodies has no boom: the wheel is not a free-look camera.
+	rig.clear()
+	controller._unhandled_input(mouse_event(MOUSE_BUTTON_WHEEL_DOWN, true, true))
+	check(is_equal_approx(rig.zoom, 1.0), "a soul with no body has no zoom")
+	rig.follow(actor, true)
 
 # --- eject on a router state change ---------------------------------------
 

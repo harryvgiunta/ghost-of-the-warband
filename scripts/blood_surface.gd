@@ -3,11 +3,20 @@ extends RefCounted
 ##
 ## Blood has to lie on the clothes instead of floating beside them. The GL
 ## Compatibility renderer has no decal support and the collision body is only a
-## capsule, so this class measures the real garment once per rig: every visible
+## capsule, so this class measures the real garment once: every visible
 ## skinned-mesh vertex is binned into its dominant bone and stored as a radial
 ## profile around that bone's rest axis, while primitive-built rigs are measured
 ## as their own triangle soup. BloodField lays its stain patches out on those
 ## measurements, projecting every patch vertex onto the shell.
+##
+## The measurement is the expensive part of the first blow a body takes, so two
+## tables hold it. `_cache` is one entry per rig (a rig that swaps armor or
+## equipment is remeasured); `_shells` is one entry per *visible shell*, the
+## mesh names a rig wears. Bodies that wear the same skin - the seven watchers of
+## one camp, a squad in one kit - share a shell, so the group pays for one
+## measurement instead of one each. The profiles are stored in bone rest space,
+## which is what makes that share safe: a shell knows nothing about the rig it
+## was measured from and is bound to a live skeleton on the way out.
 ##
 ## Everything here is presentation. A failed measurement only means no body
 ## blood for that rig; it never gates damage.
@@ -15,12 +24,24 @@ extends RefCounted
 const ANGLE_BUCKETS := 24
 const AXIAL_BANDS := 12
 const CELLS := ANGLE_BUCKETS * AXIAL_BANDS
-const MAX_SAMPLED_VERTICES := 16000
+## How many garment vertices one measurement may look at, spread evenly over the
+## whole cloth. The profile it fills has `CELLS` cells per bone - a few thousand
+## at most for a whole body - so a few thousand samples already cover every cell
+## many times over; the surplus bought nothing and cost the frame it ran in.
+const MAX_SAMPLED_VERTICES := 6000
 const CACHE_LIMIT := 96
+const SHELL_LIMIT := 24
 ## The stain sits this far off the measured surface so it never z-fights cloth.
 const LIFT := 0.003
 
+## Per-rig measurements, keyed by `rig.get_instance_id()`.
 static var _cache: Dictionary = {}
+## Per-visible-shell bone profiles, keyed by the shell signature: the same
+## cloth on the same armature, without a rig attached.
+static var _shells: Dictionary = {}
+## How many garment measurements this process has run: one per visible shell,
+## however many bodies wear it. Read by `blood_cost_regression`.
+static var measurements := 0
 
 # --- measurement -----------------------------------------------------------
 
@@ -34,11 +55,53 @@ static func body_for(rig: Node3D) -> Dictionary:
 	var entry = _cache.get(key)
 	if entry != null and is_instance_valid(entry.rig) and int(entry.signature) == signature:
 		return entry.body
-	var body := _measure(rig)
+	var body := _measure_for(rig, signature)
 	body["signature"] = signature
 	_cache[key] = {"signature": signature, "rig": rig, "body": body}
 	_prune()
 	return body
+
+## One rig's surface, from the shared shell of the cloth it wears or from its own
+## boxes when it has no armature. Measures the garment at most once.
+static func _measure_for(rig: Node3D, signature: int) -> Dictionary:
+	var skeleton := _find_skeleton(rig) if signature != 0 else null
+	if skeleton == null or skeleton.get_bone_count() <= 0:
+		# No armature: a primitive rig is measured per body, because its boxes are
+		# this rig's own nodes and are never shared with another.
+		return _measure(rig)
+	var key := _shell_key(signature, skeleton)
+	var shell = _shells.get(key)
+	if shell == null:
+		var measured := _measure(rig)
+		if measured.bones.is_empty():
+			# A skeleton with no visible cloth under it: nothing worth sharing, and
+			# nothing to paint either.
+			return measured
+		var carriers := {}
+		for index in measured.bones:
+			var carrier: Dictionary = (measured.bones[index] as Dictionary).duplicate()
+			# Rest-space numbers only: the rig that measured it is not part of it.
+			carrier.erase("skeleton")
+			carriers[index] = carrier
+		shell = {"bones": carriers}
+		_shells[key] = shell
+		_prune_shells()
+	return _bind_shell(shell, rig, skeleton)
+
+## Two armatures can wear meshes with the same names, and a profile measured on
+## one skeleton must never be handed to a skeleton it does not describe: the key
+## names the bone count as well as the cloth.
+static func _shell_key(signature: int, skeleton: Skeleton3D) -> String:
+	return "%d:%d" % [signature, skeleton.get_bone_count()]
+
+## One rig's view of a shell: the same profiles bound to that rig's skeleton.
+static func _bind_shell(shell: Dictionary, rig: Node3D, skeleton: Skeleton3D) -> Dictionary:
+	var carriers := {}
+	for index in shell.bones:
+		var carrier: Dictionary = (shell.bones[index] as Dictionary).duplicate()
+		carrier.skeleton = skeleton
+		carriers[index] = carrier
+	return {"rig": rig, "skeleton": skeleton, "bones": carriers, "primitives": []}
 
 ## The bone or primitive the blow's cloth belongs to. Thick limbs win ties, but
 ## proximity decides: blood lands on the body part that was actually hit.
@@ -216,6 +279,7 @@ static func add_patch(tool: SurfaceTool, carrier: Dictionary, center_local: Vect
 # --- bone profiles ---------------------------------------------------------
 
 static func _measure(rig: Node3D) -> Dictionary:
+	measurements += 1
 	var body := {"rig": rig, "skeleton": null, "bones": {}, "primitives": []}
 	var meshes := _mesh_instances(rig)
 	var skeleton := _find_skeleton(rig)
@@ -241,13 +305,16 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 	var ups := PackedVector3Array()
 	var widths := PackedVector3Array()
 	var rests: Array[Transform3D] = []
+	var rests_inv: Array[Transform3D] = []
 	axes.resize(bone_count)
 	ups.resize(bone_count)
 	widths.resize(bone_count)
 	rests.resize(bone_count)
+	rests_inv.resize(bone_count)
 	for index in bone_count:
 		var rest := skeleton.get_bone_global_rest(index)
 		rests[index] = rest
+		rests_inv[index] = rest.affine_inverse()
 		var direction := Vector3.UP
 		var children := skeleton.get_bone_children(index)
 		if not children.is_empty():
@@ -274,10 +341,19 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 	var total := 0
 	for node in meshes:
 		var mesh_node := node as MeshInstance3D
-		if mesh_node.skin == null or mesh_node.mesh == null:
+		var mesh := mesh_node.mesh
+		if mesh_node.skin == null or mesh == null:
 			continue
-		for surface in mesh_node.mesh.get_surface_count():
-			var arrays := mesh_node.mesh.surface_get_arrays(surface)
+		var array_mesh := mesh as ArrayMesh
+		if array_mesh != null:
+			# `surface_get_array_len` is the vertex count and costs a call: the
+			# counting pass must not copy every surface's arrays just to size
+			# the sampling stride.
+			for surface in array_mesh.get_surface_count():
+				total += array_mesh.surface_get_array_len(surface)
+			continue
+		for surface in mesh.get_surface_count():
+			var arrays := mesh.surface_get_arrays(surface)
 			var vertices = arrays[Mesh.ARRAY_VERTEX]
 			if vertices != null:
 				total += (vertices as PackedVector3Array).size()
@@ -296,42 +372,41 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 			var skin_weights = arrays[Mesh.ARRAY_WEIGHTS]
 			if vertices == null or skin_bones == null or skin_weights == null:
 				continue
-			var vertex_count: int = (vertices as PackedVector3Array).size()
+			var points: PackedVector3Array = vertices
+			var indices: PackedInt32Array = skin_bones
+			var influence: PackedFloat32Array = skin_weights
+			var vertex_count := points.size()
 			if vertex_count == 0:
 				continue
-			var stride: int = maxi(1, int(skin_bones.size()) / vertex_count)
+			var stride: int = maxi(1, indices.size() / vertex_count)
 			for vertex in range(0, vertex_count, step):
-				var picked_bone := [-1, -1, -1, -1]
-				var picked_weight := [0.0, 0.0, 0.0, 0.0]
+				# The strongest influence and its bone, held in scalars: this loop
+				# runs over every sampled vertex of every visible garment, and an
+				# array per vertex was most of what a first hit cost.
+				var dominant := -1
+				var best := 0.0
 				var total_weight := 0.0
+				var base := vertex * stride
 				for slot in stride:
-					var weight: float = skin_weights[vertex * stride + slot]
+					var weight := influence[base + slot]
 					if weight <= 0.0:
 						continue
 					total_weight += weight
-					var skin_bone := int(skin_bones[vertex * stride + slot])
-					var resolved := -1
-					if skin_bone >= 0 and skin_bone < bind_map.size():
-						resolved = bind_map[skin_bone]
-					var target := -1
-					for candidate in 4:
-						if weight > float(picked_weight[candidate]):
-							target = candidate
-							break
-					if target < 0:
+					if weight <= best:
 						continue
-					for shift in range(3, target, -1):
-						picked_bone[shift] = picked_bone[shift - 1]
-						picked_weight[shift] = picked_weight[shift - 1]
-					picked_bone[target] = resolved
-					picked_weight[target] = weight
+					best = weight
+					# A weight whose skin bone resolves to nothing keeps the
+					# strongest slot but names no bone: the vertex is dropped
+					# rather than pinned to the next influence down.
+					var skin_bone := indices[base + slot]
+					dominant = -1
+					if skin_bone >= 0 and skin_bone < bind_map.size():
+						dominant = bind_map[skin_bone]
 				if total_weight <= 0.0:
 					continue
-				positions.append(mesh_transform \
-					* (vertices as PackedVector3Array)[vertex])
-				for slot in 4:
-					bones.append(int(picked_bone[slot]))
-					weights.append(float(picked_weight[slot]) / total_weight)
+				positions.append(mesh_transform * points[vertex])
+				bones.append(dominant)
+				weights.append(best / total_weight)
 	# Profiles are built from each vertex's dominant bone plus the garment layers
 	# that continue along the same chain, which is cheap; the whole-garment sample
 	# below is what corrects a splash onto the outermost layer in the current pose.
@@ -339,38 +414,43 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 	var record_h := PackedFloat32Array()
 	var record_angle := PackedFloat32Array()
 	var record_radius := PackedFloat32Array()
-	for index in range(0, positions.size(), maxi(1, int(ceil(float(positions.size()) \
-			/ float(MAX_SAMPLED_VERTICES))))):
-		var dominant := -1
-		var best := 0.0
-		for slot in 4:
-			var weight := weights[index * 4 + slot]
-			if weight > best:
-				best = weight
-				dominant = bones[index * 4 + slot]
-		if dominant < 0 or dominant >= bone_count or best <= 0.0:
-			continue
-		var targets := [dominant]
-		var parent := skeleton.get_bone_parent(dominant)
+	# Which bones a vertex's dominant bone also paints: itself, the parent it
+	# continues from, and the children it continues into. Fixed by the armature,
+	# so it is solved once per bone instead of once per vertex.
+	var chains: Array[PackedInt32Array] = []
+	chains.resize(bone_count)
+	for bone in bone_count:
+		var chain := PackedInt32Array()
+		chain.append(bone)
+		var parent := skeleton.get_bone_parent(bone)
 		if parent >= 0:
-			var back: Vector3 = rests[parent].origin - rests[dominant].origin
+			var back: Vector3 = rests[parent].origin - rests[bone].origin
 			if back.length_squared() > 0.000001:
-				var back_dir: Vector3 = (rests[dominant].basis.inverse() * back) \
+				var back_dir: Vector3 = (rests[bone].basis.inverse() * back) \
 					.normalized()
-				if back_dir.dot(axes[dominant]) < -0.6:
-					targets.append(parent)
-		for child in skeleton.get_bone_children(dominant):
-			if targets.size() >= 5:
-				break
-			var offset: Vector3 = rests[child].origin - rests[dominant].origin
-			if offset.length_squared() < 0.000001:
-				continue
-			var forward: Vector3 = (rests[dominant].basis.inverse() * offset) \
-				.normalized()
-			if forward.dot(axes[dominant]) > 0.6:
-				targets.append(child)
-		for target in targets:
-			var point: Vector3 = rests[target].affine_inverse() * positions[index]
+				if back_dir.dot(axes[bone]) < -0.6:
+					chain.append(parent)
+		if chain.size() < 5:
+			for child in skeleton.get_bone_children(bone):
+				if chain.size() >= 5:
+					break
+				var offset: Vector3 = rests[child].origin - rests[bone].origin
+				if offset.length_squared() < 0.000001:
+					continue
+				var forward: Vector3 = (rests[bone].basis.inverse() * offset) \
+					.normalized()
+				if forward.dot(axes[bone]) > 0.6:
+					chain.append(child)
+		chains[bone] = chain
+	var sample: int = maxi(1, int(ceil(float(positions.size()) \
+		/ float(MAX_SAMPLED_VERTICES))))
+	for index in range(0, positions.size(), sample):
+		var dominant := bones[index]
+		if dominant < 0 or dominant >= bone_count or weights[index] <= 0.0:
+			continue
+		var at := positions[index]
+		for target in chains[dominant]:
+			var point: Vector3 = rests_inv[target] * at
 			var h: float = point.dot(axes[target])
 			var planar: Vector3 = point - axes[target] * h
 			var radius := planar.length()
@@ -648,7 +728,12 @@ static func _signature(rig: Node3D) -> int:
 		var mesh_node := node as MeshInstance3D
 		if mesh_node.skin == null or not mesh_node.is_visible_in_tree():
 			continue
+		# The cloth is the mesh and the skin that binds it to the armature, not
+		# the node's name: two species can name their surface the same thing, and
+		# a shell measured on one of them must never be painted onto the other.
 		value = (value * 33 + str(mesh_node.name).hash()) % 2147483647
+		value = (value * 33 + int(mesh_node.mesh.get_instance_id())) % 2147483647
+		value = (value * 33 + int(mesh_node.skin.get_instance_id())) % 2147483647
 	return value
 
 static func _mesh_instances(rig: Node3D) -> Array:
@@ -720,3 +805,13 @@ static func _prune() -> void:
 		var entry: Dictionary = _cache[key]
 		if not is_instance_valid(entry.rig):
 			_cache.erase(key)
+
+## Shells are the cheap half of the table - a handful of kits per scene - so
+## they only ever need forgetting, never measuring again: a shell whose rig is
+## long dead still describes the cloth the next body of that kit will wear.
+static func _prune_shells() -> void:
+	if _shells.size() <= SHELL_LIMIT:
+		return
+	var keys := _shells.keys()
+	for index in range(0, keys.size() - SHELL_LIMIT):
+		_shells.erase(keys[index])

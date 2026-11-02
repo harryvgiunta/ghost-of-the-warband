@@ -21,6 +21,7 @@ const SummaryScript = preload("res://scripts/warband/loot_summary.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const State = preload("res://scripts/player_state.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const WIDTH := 320.0
 ## Where the window sits relative to the crosshair: beside it, not over it.
@@ -39,6 +40,9 @@ var world = null
 var _loot = null
 var _controller = null
 var _hud = null
+## The warband the world reads its stash and altar ledger from; the hover card
+## prints a piece's brand and anointing from it.
+var _warband = null
 var _reach := DEFAULT_REACH
 var _open := false
 var _actor = null
@@ -67,6 +71,7 @@ func setup(world_ref) -> void:
 	_loot = world.get("loot")
 	_hud = world.get("hud")
 	_controller = world.get("controller")
+	_warband = world.get("warband")
 	var script: Script = world.get_script()
 	if script != null:
 		var published: Variant = script.get_script_constant_map().get("LOOT_REACH")
@@ -260,15 +265,16 @@ func _repaint() -> void:
 		child.queue_free()
 	for row in _rows:
 		var item_id := str(row["item_id"])
-		var button := Button.new()
+		var count := int(row["count"])
+		var button := ItemHover.Row.new()
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_NONE
 		button.clip_text = true
 		button.custom_minimum_size = Vector2(0, 28)
 		button.add_theme_font_size_override("font_size", 13)
-		var count := int(row["count"])
 		button.text = "%s%s  ·  %d G" % [str(row["name"]), "  ×%d" % count if count > 1 else "",
 			int(row["value"]) * count]
+		button.show_item(item_id, _warband, "Click to take it. Shift-click takes the lot.", count)
 		button.pressed.connect(_on_row_pressed.bind(item_id))
 		_list.add_child(button)
 

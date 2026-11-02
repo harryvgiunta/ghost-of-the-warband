@@ -41,9 +41,15 @@ const WEAPON_SET_COUNT := 2
 const HAND_SLOTS := ["main", "off"]
 ## True while a mercenary waits in the reserve: sworn, dressed and on the books,
 ## but with no body on the field. The field holds at most `Warband.deployment_cap`
-## bodies; a name sworn past a full field waits here until the band is back in
-## the town with a place to give.
+## bodies; a name sworn past a full field waits here until the band is back in the
+## town with a place to give.
 const KEY_RESERVE := "reserve"
+## How this body fights on its own (`WarbandContracts.DISPOSITIONS`). Identical
+## stats are the campaign's rule, so a disposition is a *behaviour* the squad AI
+## reads, not a stat block: a tank blocks and holds, a melee body presses and
+## falls back to a bandage under 30%, a bow gives ground when crowded and looses
+## again. The automatic arming reads the same field when it picks a piece.
+const KEY_DISPOSITION := "disposition"
 
 var _mercs: Array[Dictionary] = []
 var _next_id := 1
@@ -70,6 +76,7 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_ACTIVE_SET: 0,
 		KEY_DOWNED_SECONDS: 0.0,
 		KEY_RESERVE: false,
+		KEY_DISPOSITION: Contracts.DEFAULT_DISPOSITION,
 	}
 
 # --- reading ---------------------------------------------------------------
@@ -158,6 +165,12 @@ func alive_count() -> int:
 func is_reserve(merc_id: int) -> bool:
 	return bool(find(merc_id).get(KEY_RESERVE, false))
 
+## How this body fights on its own. An unknown id (or a record raised before the
+## field existed) answers the default rather than an empty string, so no reader
+## has to invent one.
+func disposition_of(merc_id: int) -> String:
+	return Contracts.disposition_id(find(merc_id).get(KEY_DISPOSITION, ""))
+
 ## Every living or downed mercenary with a place on the field, in roster order.
 func field_ids() -> Array[int]:
 	var out: Array[int] = []
@@ -223,6 +236,9 @@ func add_record(record: Dictionary) -> int:
 	copy[KEY_STATE] = int(copy.get(KEY_STATE, Contracts.HealthState.ALIVE))
 	copy[KEY_DOWNED_SECONDS] = float(copy.get(KEY_DOWNED_SECONDS, 0.0))
 	copy[KEY_RESERVE] = bool(copy.get(KEY_RESERVE, false))
+	# A record written before the field existed comes up as the default, and so
+	# does one carrying a word this build has never heard of.
+	copy[KEY_DISPOSITION] = Contracts.disposition_id(copy.get(KEY_DISPOSITION, ""))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
 	if saved_gear is Dictionary:
@@ -274,6 +290,16 @@ func set_reserve(merc_id: int, waiting: bool) -> void:
 	var record := find(merc_id)
 	if not record.is_empty():
 		record[KEY_RESERVE] = waiting
+
+## Write this body's disposition. The id is sanitised through the contract, so a
+## stray spelling lands on the default rather than in the save. Answers whether a
+## live record took it.
+func set_disposition(merc_id: int, disposition: String) -> bool:
+	var record := find(merc_id)
+	if record.is_empty():
+		return false
+	record[KEY_DISPOSITION] = Contracts.disposition_id(disposition)
+	return true
 
 func set_health(merc_id: int, hp: float) -> void:
 	var record := find(merc_id)

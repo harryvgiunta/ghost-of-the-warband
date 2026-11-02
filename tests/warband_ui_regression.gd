@@ -9,6 +9,9 @@ extends SceneTree
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const State = preload("res://scripts/player_state.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 
 const TEST_SAVE := "user://warband_ui_state.json"
 
@@ -46,6 +49,8 @@ func run() -> void:
 	_check_rows_and_control()
 	_check_refresh()
 	_check_paperdoll()
+	_check_item_hover()
+	_check_reequip_buttons()
 	_check_recruiter()
 	_check_old_save_purge()
 	warband.reset_state()
@@ -347,6 +352,127 @@ func _check_paperdoll() -> void:
 		"a held piece can still be worn by the player's hand")
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
+
+# --- item hover details ----------------------------------------------------
+
+## The hover card is the only place a row says what a piece actually is: the
+## paperdoll's rows carry a click instruction, so a card that slipped back to a
+## sentence would leave the stash with no item details at all. Every check reads
+## its expectation from the catalogue or the table that owns the number.
+func _check_item_hover() -> void:
+	warband.reset_state()
+	_set_gold(1000)
+	var first: int = warband.add_mercenary("Aldous")
+	warband.stash.add("sword_short", 1)
+	warband.stash.add("armor_leather_chest", 1)
+	warband.stash.add("ring_melee", 1)
+	var doll = DollScript.new()
+	doll.configure(warband)
+	root.add_child(doll)
+	doll.open(first)
+
+	# A weapon: name, kind, the catalogue's damage/speed/reach line and its worth.
+	var sword_row := _stash_row(doll, "sword_short")
+	check(not sword_row.is_empty(), "the shortsword is on the stash list")
+	check(sword_row["button"].tooltip_text == "Shortsword",
+		"the row's tooltip is the piece the card describes")
+	check(sword_row["button"].call("_make_custom_tooltip",
+		sword_row["button"].tooltip_text) != null,
+		"the row answers Godot's tooltip callback with the card")
+	var sword_card = sword_row["button"].make_card()
+	check(sword_card != null, "hovering a stash row builds an item card")
+	var sword_text := _card_text(sword_card)
+	check(sword_text.contains("Shortsword"), "the card names the piece")
+	check(sword_text.contains("ONE-HAND"), "the card carries the type line, got %s" % sword_text)
+	check(sword_text.contains(str(State.ITEMS["sword_short"]["detail"])),
+		"the card carries the catalogue's detail text")
+	check(sword_text.contains("WORTH"), "the card prices the piece")
+
+	# Armor: the guard the set actually grants, not a word about clicking.
+	var armor_card = _stash_row(doll, "armor_leather_chest")["button"].make_card()
+	check(armor_card != null, "hovering armor builds a card")
+	var armor_text := _card_text(armor_card)
+	var guard := int(round(ArmorData.reduction_for(
+		ArmorData.set_of_item("armor_leather_chest"), "chest") * 100.0))
+	check(armor_text.contains("BODY GUARD"),
+		"the card names the guard channel, got %s" % armor_text)
+	check(armor_text.contains("+%d%%" % guard),
+		"the card prints the set's real guard (%d%%)" % guard)
+
+	# A ring: the modifier rows come from the table combat reads.
+	var ring_card = _stash_row(doll, "ring_melee")["button"].make_card()
+	check(ring_card != null, "hovering a ring builds a card")
+	var ring_text := _card_text(ring_card)
+	var ring_row: Dictionary = TrinketStats.effect_rows("ring_melee")[0]
+	check(ring_text.contains(str(ring_row["label"])),
+		"the card names the ring's modifier, got %s" % ring_text)
+	check(ring_text.contains(str(ring_row["value"])),
+		"the card prints the ring's real value, got %s" % ring_text)
+
+	# A worn slot describes what it holds; an empty one has nothing to describe.
+	warband.equip_merc(first, "main", "sword_short")
+	var worn_card = doll.slot_rows["main"]["button"].make_card()
+	check(worn_card != null, "hovering a worn slot builds a card")
+	check(_card_text(worn_card).contains(str(State.ITEMS["sword_short"]["detail"])),
+		"the worn slot's card carries the piece's details")
+	warband.unequip_merc(first, "main")
+	check(doll.slot_rows["main"]["button"].make_card() == null,
+		"an empty slot builds no card")
+	doll.close()
+
+## Every Label under the card, which is how a card says anything at all.
+func _card_text(node: Node) -> String:
+	var parts := PackedStringArray()
+	_collect_card_text(node, parts)
+	return "\n".join(parts)
+
+
+func _collect_card_text(node: Node, parts: PackedStringArray) -> void:
+	if node is Label:
+		parts.append((node as Label).text)
+	for child in node.get_children():
+		_collect_card_text(child, parts)
+
+# --- the two re-kits -------------------------------------------------------
+
+## The stage's two buttons: this body's kit goes back and comes out again by the
+## band's own priorities, and the band button rebuilds the whole roster out of
+## one pool, oldest name first. Both read their answer off `Warband`.
+func _check_reequip_buttons() -> void:
+	warband.reset_state()
+	_set_gold(1000)
+	var first: int = warband.add_mercenary("Aldous")
+	var second: int = warband.add_mercenary("Brine")
+	warband.roster.equip(first, "main", "sword_short")
+	warband.stash.add("sword_great", 1)
+	var doll = DollScript.new()
+	doll.configure(warband)
+	root.add_child(doll)
+	doll.open(first)
+	check(doll._reequip_button.text.contains("ALDOUS"),
+		"the re-kit button names the body on the stage, got %s" % doll._reequip_button.text)
+	check(not doll._reequip_button.disabled, "and it is live for a body the screen may dress")
+	doll._reequip_button.pressed.emit()
+	check(str(warband.roster.equipped_of(first).get("main", "")) == "sword_great",
+		"the button hands the shortsword back and takes the pool's better blade, got %s"
+		% str(warband.roster.equipped_of(first).get("main", "")))
+	check(doll.status_text().contains("re-equips"),
+		"and the screen reports the fitting, got %s" % doll.status_text())
+	check(doll.slot_rows["main"]["button"].text.contains("Greatsword"),
+		"the worn slot repaints, got %s" % doll.slot_rows["main"]["button"].text)
+	check(warband.stash.pooled_count("sword_short") == 1, "and the old blade is a stash row")
+
+	# The band button dresses the whole roster out of that one pool.
+	warband.stash.add("sword_short", 1)
+	doll._reequip_all_button.pressed.emit()
+	check(str(warband.roster.equipped_of(first).get("main", "")) == "sword_great",
+		"the band pass dresses the oldest name with the pick of the pool")
+	check(str(warband.roster.equipped_of(second).get("main", "")) == "sword_short",
+		"and the next body with what is left")
+	check(doll.status_text().contains("The band re-equips"),
+		"and the screen says what the pass did, got %s" % doll.status_text())
+	check(doll.picker_buttons.size() == 2, "the picker still has one button per body")
+	doll.close()
 
 # --- the recruiter ---------------------------------------------------------
 

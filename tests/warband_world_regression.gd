@@ -577,7 +577,6 @@ func check_lesson() -> void:
 		"the opening wakes the player in a cage")
 	check(game.camp.sequencer.objective() == "Take the shiv through the bars",
 		"with one thing to do (%s)" % game.camp.sequencer.objective())
-	check(game.camp.sequencer.hint().contains("K"), "and the key that does it")
 	check(game.camp.cages_open_count() == 0, "the cages are all shut")
 	check(game.camp.caged_ids.size() == 5, "five bodies are held (%d)" % game.camp.caged_ids.size())
 	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES
@@ -631,8 +630,13 @@ func check_lesson() -> void:
 
 	# Bearings: the beat ends on the freed body stepping away from its own cage.
 	actor.global_position = game.camp.CAGE_POSTS[game.camp.OWN_CAGE] + Vector3(0.0, 0.2, -7.0)
-	await physics_frame
-	await physics_frame
+	# The beat is polled in `_process`, and two `physics_frame` awaits can both
+	# resume inside one physics phase - so wait on the process frame the radius is
+	# crossed, the way the cage's own bearings check does.
+	var bearing_frames := 0
+	while game.camp.sequencer.state() == SequencerScript.State.LOOSE and bearing_frames < 60:
+		await process_frame
+		bearing_frames += 1
 	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
 		"stepping out carries it to the objective (%s)" % game.camp.sequencer.state_name())
 	check(game.camp.duel.step() == DuelScript.Step.FIGHT,
@@ -791,8 +795,6 @@ func check_leaving() -> void:
 	check(game.camp.sequencer.guards_down() == 2,
 		"the escape is not a kill quota: only Corvin's pair are down (%d)"
 		% game.camp.sequencer.guards_down())
-	check(game.camp.sequencer.hint().contains("trail"),
-		"the escape's key line names the trail (%s)" % game.camp.sequencer.hint())
 	check(game.squad.following, "the squad turns escort the moment the trees answer")
 	print("WORLD_OPENING metres=%.0f game_seconds=%.1f real_seconds=%.1f"
 		% [opening_metres, game_seconds, real_seconds])

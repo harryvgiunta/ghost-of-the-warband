@@ -81,8 +81,10 @@ const EYE_JUMP := 8.0
 ## lights are already out at `LIGHT_FAR`, the haze is half opaque and three rooms
 ## of bent tunnel stand between. Every body on the floor used to keep its draw
 ## list alive in every room of it; this is the one rule that keeps the frame's
-## cost tied to the room the eye is in.
-const BODY_HIDE_DISTANCE := 48.0
+## cost tied to the room the eye is in. It is the authored floor's 48 m at the
+## plan's own scale (`Layout.SCALE`), which stays past the farthest corner of any
+## room - a body in the room the eye stands in is always drawn.
+const BODY_HIDE_DISTANCE := 48.0 * Layout.SCALE
 ## How fast the air eases to the next area's, per second.
 const AIR_EASE := 1.2
 
@@ -289,7 +291,9 @@ func _build_environment() -> void:
 	environment.fog_sky_affect = 0.0
 	environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	# Godot 4.7 resets the density when the mode is written: the density goes last.
-	environment.fog_density = 0.016
+	# The haze is authored at the plan's drawn size. The floor is built `SCALE` times
+	# it, and a density `SCALE` times thinner fogs twice the distance exactly as far.
+	environment.fog_density = 0.016 / Layout.SCALE
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	environment.tonemap_exposure = 1.35
 	environment.adjustment_enabled = true
@@ -477,7 +481,7 @@ func _settle_air(delta: float) -> void:
 	var k := clampf(delta * AIR_EASE, 0.0, 1.0)
 	environment.fog_light_color = environment.fog_light_color.lerp(spec["fog"], k)
 	environment.ambient_light_color = environment.ambient_light_color.lerp(spec["ambient"], k)
-	environment.fog_density = lerpf(environment.fog_density, float(spec["haze"]), k)
+	environment.fog_density = lerpf(environment.fog_density, float(spec["haze"]) / Layout.SCALE, k)
 
 
 # --- the hostiles ------------------------------------------------------------

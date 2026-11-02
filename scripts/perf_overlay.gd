@@ -50,11 +50,18 @@ const WINDOW := 240
 const MIN_ROWS := 8
 ## Above every layer the game draws (the paperdoll's 25 is the highest).
 const LAYER := 100
-const MARGIN := 16.0
-const PADDING := 12.0
-const GAP := 6
-const HEADLINE_SIZE := 24
-const BODY_SIZE := 14
+## Every dimension below is the number the readout was authored at times this, so
+## one constant shrinks the whole window: text, margins, padding and gap together.
+## 0.52 linear is a little over a quarter of the panel's old footprint (0.52
+## squared is 0.27), which keeps it out of the way of the game it is measuring. It
+## is small on purpose - a much smaller factor puts the 14 px readout under 7 px
+## and nobody reads numbers that height.
+const SCALE := 0.52
+const MARGIN := 16.0 * SCALE
+const PADDING := 12.0 * SCALE
+const GAP := roundi(6.0 * SCALE)
+const HEADLINE_SIZE := roundi(24.0 * SCALE)
+const BODY_SIZE := roundi(14.0 * SCALE)
 ## The 60 Hz frame with room for vsync jitter (a vsynced 60 fps averages a hair
 ## over 16.67 ms): an average frame slower than 57 fps turns the headline red.
 const BUDGET_MS := 1000.0 / 57.0

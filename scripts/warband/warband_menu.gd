@@ -31,9 +31,10 @@ const PAGE_MENU := "menu"
 const PAGE_SOUND := "sound"
 const PAGE_KEYS := "keys"
 
-## Tall enough for the party's row over the campaign's: every row stands with the
-## notice line up, and the three modes sit side by side with room to spare.
-const PANEL_SIZE := Vector2(500, 840)
+## The eight rows over the party's: every row stands with the notice line up, and
+## the three modes sit side by side with room to spare. It was 500 x 840 for the
+## same rows stacked one per line on a screen with a fight standing behind it.
+const PANEL_SIZE := Vector2(460, 620)
 ## The controls sheet is a whole keyboard wide: the frame itself grows for it.
 const KEYS_PANEL_SIZE := Vector2(1140, 760)
 const DIM := Color(0.02, 0.015, 0.01, 0.82)
@@ -330,59 +331,75 @@ func _build() -> void:
 	_menu_layer = _column(_frame.body, "Menu")
 	var column := _menu_layer
 
-	var kicker := _label("GHOST OF THE WARBAND", 10, LedgerThemeScript.INK_MUTED)
+	var kicker := _label("GHOST OF THE WARBAND", 9, LedgerThemeScript.INK_MUTED)
 	column.add_child(kicker)
-	var title := _label("THE WARBAND", 30, LedgerThemeScript.INK)
+	var title := _label("THE WARBAND", 24, LedgerThemeScript.INK)
 	title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	column.add_child(title)
 
-	_notice = _label("", 12, LedgerThemeScript.BLOOD)
+	_notice = _label("", 11, LedgerThemeScript.BLOOD)
 	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_notice.custom_minimum_size = Vector2(0, 32)
+	_notice.custom_minimum_size = Vector2(0, 22)
 	_notice.visible = false
 	column.add_child(_notice)
 
-	resume_button = _button("RESUME", "PrimaryButton", 52)
+	resume_button = _button("RESUME", "PrimaryButton", 44)
 	resume_button.pressed.connect(close)
 	column.add_child(resume_button)
 	_section(column, "THE PARTY")
 	var modes := HBoxContainer.new()
 	modes.name = "PartyModes"
-	modes.add_theme_constant_override("separation", 6)
+	modes.add_theme_constant_override("separation", 5)
 	column.add_child(modes)
 	for mode in Contracts.PARTY_MODES:
-		var button := _button(str(mode).to_upper(), "", 40)
+		var button := _button(str(mode).to_upper(), "", 32)
 		button.name = "Party" + str(mode).capitalize()
 		button.toggle_mode = true
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.add_theme_font_size_override("font_size", 13)
+		button.add_theme_font_size_override("font_size", 11)
 		button.pressed.connect(set_party_mode.bind(str(mode)))
 		modes.add_child(button)
 		_party_buttons[str(mode)] = button
-	_party_line = _label("", 12, LedgerThemeScript.INK_MUTED)
+	_party_line = _label("", 11, LedgerThemeScript.INK_MUTED)
 	_party_line.name = "PartyLine"
 	_party_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(_party_line)
 	_section(column, "THE CAMPAIGN")
 
-	save_button = _button("SAVE GAME", "", 46)
+	# The four page rows stand two by two: they are all the same weight and none of
+	# them is a decision, so a column of four was 4 x 46 px of the window spent on
+	# nothing the player has to read in order.
+	var pages := HBoxContainer.new()
+	pages.name = "Pages"
+	pages.add_theme_constant_override("separation", 5)
+	column.add_child(pages)
+	var save_column := VBoxContainer.new()
+	save_column.add_theme_constant_override("separation", 5)
+	save_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pages.add_child(save_column)
+	var page_column := VBoxContainer.new()
+	page_column.add_theme_constant_override("separation", 5)
+	page_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pages.add_child(page_column)
+
+	save_button = _button("SAVE GAME", "", 36)
 	save_button.pressed.connect(save_game)
-	column.add_child(save_button)
-	load_button = _button("LOAD GAME", "", 46)
+	save_column.add_child(save_button)
+	load_button = _button("LOAD GAME", "", 36)
 	load_button.pressed.connect(_on_load_pressed)
-	column.add_child(load_button)
-	settings_button = _button("SETTINGS", "", 46)
+	save_column.add_child(load_button)
+	settings_button = _button("SETTINGS", "", 36)
 	settings_button.pressed.connect(show_page.bind(PAGE_SOUND))
-	column.add_child(settings_button)
-	keys_button = _button("KEYS", "", 46)
+	page_column.add_child(settings_button)
+	keys_button = _button("KEYS", "", 36)
 	keys_button.pressed.connect(show_page.bind(PAGE_KEYS))
-	column.add_child(keys_button)
+	page_column.add_child(keys_button)
 	_section(column, "LEAVE")
 
-	exit_button = _button(_exit_label, "DangerButton", 46)
+	exit_button = _button(_exit_label, "DangerButton", 36)
 	exit_button.pressed.connect(_on_exit_pressed)
 	column.add_child(exit_button)
-	quit_button = _button("QUIT GAME", "DangerButton", 46)
+	quit_button = _button("QUIT GAME", "DangerButton", 36)
 	quit_button.pressed.connect(_on_quit_pressed)
 	column.add_child(quit_button)
 
@@ -391,13 +408,13 @@ func _build() -> void:
 	column.add_child(spacer)
 
 	var hint := _label("The warband keeps standing while this page is open.",
-		12, LedgerThemeScript.INK_MUTED)
+		11, LedgerThemeScript.INK_MUTED)
 	hint.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(hint)
-	_status = _label("", 12, LedgerThemeScript.TEAL)
+	_status = _label("", 11, LedgerThemeScript.TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.custom_minimum_size = Vector2(0, 32)
+	_status.custom_minimum_size = Vector2(0, 22)
 	column.add_child(_status)
 
 	_sound_layer = _column(_frame.body, "Settings")
@@ -438,7 +455,7 @@ func _build() -> void:
 func _column(parent: Control, node_name: String) -> VBoxContainer:
 	var result := VBoxContainer.new()
 	result.name = node_name
-	result.add_theme_constant_override("separation", 6)
+	result.add_theme_constant_override("separation", 4)
 	parent.add_child(result)
 	return result
 
@@ -570,7 +587,7 @@ func _note(message: String, data: Dictionary = {}) -> void:
 
 
 func _section(parent: Control, text: String) -> void:
-	parent.add_child(_label(text, 10, LedgerThemeScript.BLOOD))
+	parent.add_child(_label(text, 9, LedgerThemeScript.BLOOD))
 
 
 func _label(text: String, font_size: int, color: Color) -> Label:
@@ -588,5 +605,5 @@ func _button(text: String, variation: String, height: int) -> Button:
 		result.theme_type_variation = variation
 	result.custom_minimum_size = Vector2(0, height)
 	result.focus_mode = Control.FOCUS_NONE
-	result.add_theme_font_size_override("font_size", 15)
+	result.add_theme_font_size_override("font_size", 13)
 	return result

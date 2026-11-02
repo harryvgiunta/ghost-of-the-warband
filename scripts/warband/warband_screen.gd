@@ -1,9 +1,11 @@
 class_name WarbandScreen
 extends CanvasLayer
-## The tactical warband screen: the purse and worth in the header, one line per
-## mercenary (live health, ALIVE/DOWNED/DEAD chip - RESERVE for a name waiting in
-## the town with no body - gear and a click-to-control button) and the Gold
-## recruiter's board underneath.
+## The tactical warband screen: a compact sidebar pinned to the window's right
+## edge, with the purse and worth in the header, one two-line row per mercenary
+## (live health, ALIVE/DOWNED/DEAD chip - RESERVE for a name waiting in the town
+## with no body - disposition, gear and a click-to-control button) and the Gold
+## recruiter's board underneath. The party list scrolls, so the panel stays small
+## however many names are sworn.
 ##
 ## It owns no state and no input. Every number is read out of `Warband` at paint
 ## time and every action goes back through it, so a heal on the battlefield, a
@@ -31,7 +33,23 @@ const TEAL := LedgerThemeScript.TEAL
 const AMBER := Color("7c3e12")
 const DANGER := LedgerThemeScript.BLOOD
 
-const SIZE := Vector2(1090, 660)
+const SIZE := Vector2(420, 540)
+## Gap between the panel and the window's right edge. The screen is a sidebar
+## over the world, not a sheet across it: it pins to the right and stays small.
+const MARGIN := 16.0
+## How much of the world the sheet's own gloom takes out from under it. The panel
+## is a sidebar, so this is a shade across the plate and not a blackout of the
+## fight behind it: the party list is read while the warband keeps standing.
+const DIM := Color(0.02, 0.015, 0.01, 0.52)
+
+## The compact type scale: a name big enough to scan, everything else small. The
+## roster is read at a glance while the world keeps running behind it.
+const NAME_SIZE := 13
+const CHIP_SIZE := 8
+const DISPOSITION_SIZE := 8
+const CONTROL_SIZE := 8
+const DETAIL_SIZE := 9
+const HIRE_SIZE := 10
 
 const ARMOR_SLOTS := ["head", "chest", "hands", "legs", "feet"]
 
@@ -166,57 +184,64 @@ func _ensure_built() -> void:
 	add_child(shell)
 	var dim := ColorRect.new()
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.02, 0.015, 0.01, 0.84)
+	dim.color = DIM
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	shell.add_child(dim)
 
 	var frame = LedgerFrameScript.new()
 	frame.name = "Frame"
 	frame.configure("Warband", "banner")
-	frame.set_anchors_preset(Control.PRESET_CENTER)
-	frame.offset_left = -SIZE.x * 0.5
-	frame.offset_right = SIZE.x * 0.5
+	# Pinned to the right edge and vertical middle: the party sits beside the
+	# world instead of over it.
+	frame.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	frame.offset_left = -SIZE.x - MARGIN
+	frame.offset_right = -MARGIN
 	frame.offset_top = -SIZE.y * 0.5
 	frame.offset_bottom = SIZE.y * 0.5
 	shell.add_child(frame)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
+	column.add_theme_constant_override("separation", 4)
 	frame.body.add_child(column)
 
 	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 14)
+	head.add_theme_constant_override("separation", 8)
 	column.add_child(head)
-	var purse := _label(head, "PURSE", 10, MUTED)
+	var purse := _label(head, "PURSE", 8, MUTED)
 	purse.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	gold_label = _label(head, "", 22, CREAM)
+	gold_label = _label(head, "", 15, CREAM)
 	gold_label.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(spacer)
-	value_label = _label(head, "", 12, MUTED)
-	_section(column, "MERCENARY")
+	value_label = _label(head, "", 9, MUTED)
+	_section(column, "PARTY")
+	# The list scrolls: the panel is small on purpose, so eight names and three
+	# oaths cannot be guaranteed to fit at once.
+	var scroll := ScrollContainer.new()
+	scroll.name = "PartyList"
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(scroll)
 	_rows_box = VBoxContainer.new()
-	_rows_box.add_theme_constant_override("separation", 6)
-	column.add_child(_rows_box)
-	_empty_label = _label(_rows_box, "The warband is empty. Swear a body in below.", 13, MUTED)
+	_rows_box.add_theme_constant_override("separation", 3)
+	_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_rows_box)
+	_empty_label = _label(_rows_box, "The warband is empty. Swear a body in below.", 10, MUTED)
 
 	var recruiter_head := HBoxContainer.new()
-	recruiter_head.add_theme_constant_override("separation", 14)
+	recruiter_head.add_theme_constant_override("separation", 8)
 	column.add_child(recruiter_head)
-	var recruiter_title := _label(recruiter_head, "GOLD RECRUITER", 17, GOLD)
+	var recruiter_title := _label(recruiter_head, "GOLD RECRUITER", 11, GOLD)
 	recruiter_title.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
 	recruiter_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_cost_label = _label(recruiter_head, "", 11, MUTED)
+	_cost_label = _label(recruiter_head, "", 8, MUTED)
 	_recruiter_box = VBoxContainer.new()
-	_recruiter_box.add_theme_constant_override("separation", 6)
+	_recruiter_box.add_theme_constant_override("separation", 2)
 	column.add_child(_recruiter_box)
 	for index in 3:
 		_hire_rows.append(_make_hire_row(index))
-	var tail := Control.new()
-	tail.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(tail)
-	_status = _label(column, "", 12, TEAL)
+	_status = _label(column, "", DETAIL_SIZE, TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
@@ -241,41 +266,64 @@ func _sync_rows() -> void:
 	_empty_label.visible = ids.is_empty()
 
 func _make_row(merc_id: int) -> Dictionary:
-	var root := HBoxContainer.new()
+	# Two lines in a narrow panel: who and what state, then the body's health and
+	# kit. One line was a sheet's width and the panel is a sidebar now.
+	var root := VBoxContainer.new()
 	root.name = "Mercenary%d" % merc_id
-	root.add_theme_constant_override("separation", 12)
-	root.custom_minimum_size = Vector2(0, 40)
+	root.add_theme_constant_override("separation", 1)
 	_rows_box.add_child(root)
-	var name_label := _label(root, "", 20, CREAM)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 4)
+	root.add_child(head)
+	var name_label := _label(head, "", NAME_SIZE, CREAM)
 	name_label.add_theme_font_override("font", LedgerThemeScript.FONT_DISPLAY)
-	name_label.custom_minimum_size = Vector2(148, 0)
-	var bar := ProgressBar.new()
-	bar.custom_minimum_size = Vector2(150, 14)
-	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	bar.show_percentage = false
-	bar.max_value = 1.0
-	bar.add_theme_stylebox_override("background", _bar_style(Color("3a2e21"), Color("221a12")))
-	root.add_child(bar)
-	var health_label := _label(root, "", 12, MUTED)
-	health_label.custom_minimum_size = Vector2(74, 0)
-	var chip := _label(root, "", 11, TEAL)
-	chip.custom_minimum_size = Vector2(86, 24)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
+	var chip := _label(head, "", CHIP_SIZE, TEAL)
+	chip.custom_minimum_size = Vector2(50, 19)
 	chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	chip.add_theme_stylebox_override("normal", _chip_style(0))
-	var gear_label := _label(root, "", 12, MUTED)
-	gear_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gear_label.clip_text = true
+	# How this body fights on its own: the disposition chip. A press steps it to
+	# the next of `Contracts.DISPOSITIONS`, so the roster is where the band's
+	# intentions are set - the party's mode says which fights are taken, this says
+	# how each body takes them.
+	var disposition := Button.new()
+	disposition.name = "Disposition"
+	disposition.text = Contracts.disposition_label(Contracts.DEFAULT_DISPOSITION)
+	disposition.focus_mode = Control.FOCUS_NONE
+	disposition.custom_minimum_size = Vector2(50, 20)
+	disposition.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	disposition.add_theme_font_size_override("font_size", DISPOSITION_SIZE)
+	disposition.pressed.connect(func() -> void: _on_disposition(merc_id))
+	head.add_child(disposition)
 	var control := Button.new()
 	control.text = "CONTROL"
 	control.theme_type_variation = "PrimaryButton"
 	control.focus_mode = Control.FOCUS_NONE
-	control.custom_minimum_size = Vector2(112, 30)
+	control.custom_minimum_size = Vector2(70, 20)
 	control.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	control.add_theme_font_size_override("font_size", 10)
+	control.add_theme_font_size_override("font_size", CONTROL_SIZE)
 	control.pressed.connect(func() -> void: _on_control(merc_id))
-	root.add_child(control)
+	head.add_child(control)
+
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 6)
+	root.add_child(line)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(86, 7)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.add_theme_stylebox_override("background", _bar_style(Color("3a2e21"), Color("221a12")))
+	line.add_child(bar)
+	var health_label := _label(line, "", DETAIL_SIZE, MUTED)
+	health_label.custom_minimum_size = Vector2(46, 0)
+	var gear_label := _label(line, "", DETAIL_SIZE, MUTED)
+	gear_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gear_label.clip_text = true
 	return {"root": root, "name": name_label, "bar": bar, "health": health_label,
-		"state": chip, "gear": gear_label, "control": control}
+		"state": chip, "gear": gear_label, "disposition": disposition, "control": control}
 
 func _apply_row(merc_id: int) -> void:
 	var row: Dictionary = rows[merc_id]
@@ -303,6 +351,15 @@ func _apply_row(merc_id: int) -> void:
 	bar.value = health
 	(row["health"] as Label).text = "%d / %d" % [roundi(health), roundi(max_health)]
 	(row["gear"] as Label).text = _gear_summary(merc_id)
+	# The disposition reads off the record, so a press here and the squad's own
+	# brain cannot disagree about how this body fights.
+	var disposition: Button = row["disposition"]
+	var style := str(roster.disposition_of(merc_id))
+	disposition.text = Contracts.disposition_label(style)
+	disposition.tooltip_text = "%s - press for the next." % Contracts.disposition_text(style)
+	# A lent warband's bodies are the host's to command; the button says so the
+	# same way the control button does, instead of taking a press that is refused.
+	disposition.disabled = _warband.lent
 	var control: Button = row["control"]
 	var holder := 0
 	if _souls != null and _souls.has_body(merc_id):
@@ -369,10 +426,10 @@ func _chip_style(state: int) -> StyleBoxTexture:
 	box.texture_margin_right = 12
 	box.texture_margin_top = 8
 	box.texture_margin_bottom = 8
-	box.content_margin_left = 10
-	box.content_margin_right = 10
-	box.content_margin_top = 4
-	box.content_margin_bottom = 4
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	box.content_margin_top = 2
+	box.content_margin_bottom = 2
 	return box
 
 func _bar_style(fill: Color, border: Color) -> StyleBoxFlat:
@@ -395,15 +452,16 @@ func _refresh_header() -> void:
 
 func _make_hire_row(index: int) -> Dictionary:
 	var root := HBoxContainer.new()
-	root.add_theme_constant_override("separation", 10)
-	var name_label := _label(root, "", 15, CREAM)
-	name_label.custom_minimum_size = Vector2(150, 0)
+	root.add_theme_constant_override("separation", 8)
+	var name_label := _label(root, "", HIRE_SIZE, CREAM)
+	name_label.custom_minimum_size = Vector2(78, 0)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
 	var button := Button.new()
 	button.text = "HIRE"
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(150, 30)
-	button.add_theme_font_size_override("font_size", 11)
+	button.custom_minimum_size = Vector2(74, 20)
+	button.add_theme_font_size_override("font_size", CONTROL_SIZE)
 	button.pressed.connect(func() -> void: _on_hire(index))
 	root.add_child(button)
 	hire_buttons.append(button)
@@ -462,6 +520,15 @@ func _on_hire(index: int) -> void:
 	set_status(str(result.get("message", "")))
 	refresh()
 
+## A press on the disposition chip: the warband steps the body to the next of
+## `Contracts.DISPOSITIONS` and answers, and the row repaints from the record.
+func _on_disposition(merc_id: int) -> void:
+	if _warband == null:
+		return
+	var result: Dictionary = _warband.cycle_disposition(merc_id)
+	set_status(str(result.get("message", "")))
+	refresh()
+
 func _on_control(merc_id: int) -> void:
 	# A disabled button still delivers this signal if something emits it
 	# directly, so the guard repeats the rule the disabled state advertises.
@@ -475,10 +542,10 @@ func _on_control(merc_id: int) -> void:
 func _section(parent: Node, text: String) -> void:
 	if text.is_empty():
 		var gap := Control.new()
-		gap.custom_minimum_size = Vector2(0, 6)
+		gap.custom_minimum_size = Vector2(0, 4)
 		parent.add_child(gap)
 		return
-	var label := _label(parent, text, 10, MUTED)
+	var label := _label(parent, text, 8, MUTED)
 	label.add_theme_constant_override("line_spacing", 0)
 
 func _label(parent: Node, text: String, font_size: int, color: Color) -> Label:

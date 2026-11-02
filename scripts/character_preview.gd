@@ -8,11 +8,32 @@ const Archer = preload("res://scripts/archer.gd")
 const TrinketArt = preload("res://scripts/trinket_art.gd")
 
 const RIM_COLOR := Color("e9bf76")
+## Where the portrait camera aims when the rig cannot answer: a standing ranger's
+## head is about this high.
+const HEAD_FALLBACK := Vector3(0.0, 1.62, 0.0)
+## How far off the head the bust camera stands, in head half-heights (the head is
+## two of those tall), and how far above its centre it sits: a portrait looks
+## slightly down on the face.
+const BUST_STANDOFF := 8.8
+const BUST_LIFT := 0.5
+## How far the look target sits below the skull's centre, in head half-heights:
+## the shoulders belong in the frame under it.
+const BUST_DROP := 0.55
+## How far round the head the camera stands, in degrees. The rig's own presentation
+## pose turns the face a little; the camera turns with it so the portrait is a
+## three-quarter view and not a profile.
+const BUST_YAW := 16.0
 
 var rig
 var viewport: SubViewport
 var camera: Camera3D
+var platform: MeshInstance3D
 var _built := false
+## Head-and-shoulders instead of the whole figure (the HUD's portrait), and the
+## frames a one-shot render still owes after `flash()`.
+var _bust := false
+var _flash := 0
+var _active := false
 ## The kit and the look the stage is showing, kept so a rig rebuilt for a new
 ## body can be dressed with the same gear it was already wearing.
 var _loadout: Dictionary = {}
@@ -23,6 +44,18 @@ func _ready() -> void:
 	stretch = true
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build()
+	set_process(true)
+
+
+## Render the frames a one-shot still owes and stop again. A portrait of a man who
+## is standing still only changes when he is re-dressed, so it must not keep a
+## whole 3D pass running: `flash()` draws it and the viewport goes back to sleep.
+func _process(_delta: float) -> void:
+	if _flash <= 0:
+		return
+	_flash -= 1
+	if _flash == 0 and not _active:
+		viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
 func _build() -> void:
@@ -50,6 +83,7 @@ func _build() -> void:
 	rig.name = "PreviewRanger"
 	viewport.add_child(rig)
 	rig.set_physics_process(false)
+	_frame_camera()
 	built.emit()
 
 
@@ -89,7 +123,7 @@ func _add_lights() -> void:
 
 
 func _add_stage() -> void:
-	var platform := MeshInstance3D.new()
+	platform = MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 0.62
 	disc.bottom_radius = 0.68
@@ -112,6 +146,7 @@ func apply_kit(loadout: Dictionary, trinkets: Dictionary) -> void:
 	_trinkets = trinkets
 	rig.apply_loadout(loadout)
 	TrinketArt.apply(rig.skeleton,trinkets)
+	_frame_camera()
 
 
 ## Put one mercenary's body on the stage. The height a look carries is baked into
@@ -130,11 +165,68 @@ func set_appearance(profile: Dictionary) -> void:
 	rig.set_physics_process(false)
 	if not _loadout.is_empty():
 		apply_kit(_loadout, _trinkets)
+	_frame_camera()
 
 
 func set_active(active: bool) -> void:
 	if not _built:
 		return
+	_active = active
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if active \
 		else SubViewport.UPDATE_DISABLED
 	rig.set_physics_process(active)
+
+
+## Head and shoulders instead of the whole figure: the HUD's portrait is a bust,
+## the gear page's stage is a man. The camera hangs off the head bone, so a taller
+## mercenary is framed by his own skull rather than by a constant.
+func set_bust(on: bool) -> void:
+	if _bust == on:
+		return
+	_bust = on
+	_frame_camera()
+
+
+func flash(frames: int = 3) -> void:
+	if not _built:
+		return
+	_flash = maxi(frames, 1)
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+
+
+func _frame_camera() -> void:
+	if not _built:
+		return
+	if platform != null:
+		# A bust hangs in the frame the HUD draws behind it; the stage disc
+		# belongs to the standing figure on the gear page.
+		platform.visible = not _bust
+	if not _bust:
+		camera.fov = 28.0
+		camera.look_at_from_position(Vector3(0.52,1.14,-4.02),Vector3(0.0,1.03,0.0),Vector3.UP)
+		return
+	var head := _head_centre()
+	var half_height: float = maxf(_head_half_height(), 0.08)
+	# The camera stands off the head by the head's own size and turns with the
+	# pose, so a taller or broader mercenary is framed by his own skull.
+	var distance: float = half_height * BUST_STANDOFF
+	var yaw := deg_to_rad(BUST_YAW)
+	var stand := Vector3(sin(yaw), 0.0, -cos(yaw)) * distance
+	camera.fov = 34.0
+	camera.look_at_from_position(head + Vector3(0.0, half_height * BUST_LIFT, 0.0) + stand,
+		head + Vector3(0.0, -half_height * BUST_DROP, 0.0), Vector3.UP)
+
+
+## Where the head is: the rig's own head point, the one an arrow is stopped by.
+## A bone's origin sits at the neck, so it is the rig that knows where the skull
+## ended up once its height and its pose are applied.
+func _head_centre() -> Vector3:
+	if rig != null and is_instance_valid(rig) and rig.has_method("head_hitbox_center"):
+		return rig.head_hitbox_center()
+	return HEAD_FALLBACK
+
+
+func _head_half_height() -> float:
+	if rig != null and is_instance_valid(rig) and rig.has_method("head_hit_profile"):
+		return float((rig.head_hit_profile() as Vector2).y)
+	return 0.14

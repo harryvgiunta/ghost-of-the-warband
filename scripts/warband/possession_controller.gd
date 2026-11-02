@@ -968,6 +968,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _hotkey(event.keycode):
 			get_viewport().set_input_as_handled()
 			return
+	# Ctrl + the wheel is the eye, and it is answered before the body is asked
+	# about anything: the same wheel with no modifier is a stab or an overhead, so
+	# the modifier is what lets one gesture be both. It is consumed here, which is
+	# what keeps a zoom from also swinging.
+	if event is InputEventMouseButton and event.pressed and _zoom_press(event):
+		get_viewport().set_input_as_handled()
+		return
 	if active_actor == null:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -1060,6 +1067,27 @@ func _command(event: InputEventKey) -> bool:
 			_act("step", right)
 		_:
 			return false
+	return true
+
+## Ctrl + the wheel: the eye in and out. Wheel up pulls the eye in, wheel down
+## pushes it out. It does not look at the pointer: a panel that owns it is a
+## full-rect `Control` that eats the event before any `_unhandled_input` sees it,
+## so a menu is already the wall the wheel cannot cross. What it does need is a
+## body on the boom - a soul between bodies has no distance to shorten.
+func _zoom_press(event: InputEventMouseButton) -> bool:
+	if not event.ctrl_pressed:
+		return false
+	var notches := 0
+	match event.button_index:
+		MOUSE_BUTTON_WHEEL_UP:
+			notches = 1
+		MOUSE_BUTTON_WHEEL_DOWN:
+			notches = -1
+		_:
+			return false
+	if camera_rig == null or camera_rig.active_body() == null:
+		return false
+	camera_rig.zoom_by(notches)
 	return true
 
 func _mouse_press(event: InputEventMouseButton) -> void:

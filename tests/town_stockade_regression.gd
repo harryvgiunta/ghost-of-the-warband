@@ -448,27 +448,22 @@ func check_services() -> void:
 			"the %s ring resolves to itself (got '%s')" % [service, town.service_at(point)])
 	check(town.service_at(town.global_position) == "", "the fire is still not a service")
 
-	# The altar is where the ichor is worked: G opens its rite, an open altar is
-	# an open panel, and the key line names what it does.
+	# The altar is where the ichor is worked: G opens its rite, and an open altar
+	# is an open panel.
 	var altar: Vector3 = town.service_point("altar")
 	check(town.interact_at(1, altar) == "altar", "G at the altar names it")
 	check(town.altar.is_open(), "the altar's panel opens")
 	check(town.panels_open(), "an open altar counts as an open panel")
-	check(town.hint_line(_at(altar)).contains("anoint"),
-		"the key line names the rite: %s" % town.hint_line(_at(altar)))
 	town.close_panels()
 	check(not town.altar.is_open(), "the altar closes with the rest")
 
-	# While the ichor order is on the ledger the altar is named wherever a body
-	# stands, because a reagent in the stash is useless until a player finds it.
+	# The ichor order lives on the ledger, which is where the altar is named now
+	# that the square has no standing key line.
 	check(warband.quests.offer("bind_the_ichor") or warband.quests.is_active("bind_the_ichor"),
 		"the ichor order can be offered")
 	if not warband.quests.is_active("bind_the_ichor"):
 		warband.quests.accept("bind_the_ichor")
 	check(warband.quests.is_active("bind_the_ichor"), "the ichor order is on the ledger")
-	var away := _at(Vector3(-2.0, 0.0, 2.0))
-	check(town.hint_line(away).contains("altar"),
-		"the hint names the altar while the order runs: %s" % town.hint_line(away))
 
 	# The vendors are still three stalls with a keeper each.
 	for index in TownScript.VENDOR_SERVICES.size():

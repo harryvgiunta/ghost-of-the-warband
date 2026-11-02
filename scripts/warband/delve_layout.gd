@@ -15,14 +15,25 @@ extends RefCounted
 ## deeper. Every room is an axis-aligned rectangle on the half-metre raster; two
 ## rooms connect only by sharing an edge (no two overlap - a lower ceiling would
 ## hang into the taller room), and everything that is not a room is rock.
+##
+## Everything below is authored at the floor's drawn size and the floor is built
+## `SCALE` times it, so the table reads as the cave looks and one number makes the
+## whole Hollow bigger: the rooms, the rock between them, the shafts and their
+## landings, every den post, the master's ring and the plan the map draws. Nothing
+## authored at the size of a body - the crowd's spacing, a light's reach, the
+## ropes' landing ring - scales with the floor.
+
+## How much bigger than the authored plan the floor is built. 2.0 is the shipped
+## floor; 1.0 is the plan as drawn.
+const SCALE := 2.0
 
 ## The raster the rock is derived from, and the rock's height: every wall rises to
 ## `TOP`, and each room's ceiling fills down from it to the room's own height.
 const CELL := 0.5
-const TOP := 11.0
+const AUTHORED_TOP := 11.0
 ## The rock box the rooms are cut out of, in the cave's frame (x/z): every room
 ## plus at least two metres of rock on every side.
-const BOUNDS := Rect2(-80.0, -180.0, 160.0, 190.0)
+const AUTHORED_BOUNDS := Rect2(-80.0, -180.0, 160.0, 190.0)
 ## How many cells of rock behind a room's face its own shell draws. Nothing inside
 ## a room ever sees further into the rock, and a shell that stops here stays local
 ## to its room, so the renderer's per-object light limit only ever counts the
@@ -47,7 +58,7 @@ const AREAS := {
 ## between halls (smaller stone, fewer spires). The ways between dens and shafts
 ## bend on purpose: a den's sight runs down a straight tunnel, and a den that could
 ## see a landing - or the next den's fight - would wake the moment a party landed.
-const ROOMS := [
+const AUTHORED_ROOMS := [
 	# THE MOUTH: the old landing under the town's own rope, and the ways west and
 	# east along the floor's southern rim.
 	{"id": "mouth", "area": "mouth", "rect": Rect2(-7.0, -8.0, 14.0, 14.0), "height": 7.0},
@@ -143,12 +154,16 @@ const ROOMS := [
 	{"id": "lair", "area": "lair", "rect": Rect2(-17.0, -104.0, 34.0, 30.0), "height": 10.0},
 ]
 
+## The rooms the floor is built from: `AUTHORED_ROOMS` at `SCALE`.
+static var ROOMS: Array = _scaled_rooms(AUTHORED_ROOMS)
+
 ## The six shafts. Each is a rope out of a hole in its chamber's roof - the way a
 ## party comes down and a way up for any party that reaches it - with the landing
 ## ring in front of it, facing out of the chamber. `centre` stands 5.4 m in front
-## of the rope, so even the ring's nearest post is out of the rope's reach: a body
-## that has just landed is never already climbing out.
-const LANDINGS := [
+## of the rope as drawn here (10.8 m at `SCALE` 2), so even the ring's nearest post
+## is out of the rope's reach: a body that has just landed is never already
+## climbing out.
+const AUTHORED_LANDINGS := [
 	{"id": "mouth", "area": "mouth", "room": "mouth",
 		"rope": Vector3(0.0, 0.0, 3.6), "centre": Vector3(0.0, 0.0, -1.8), "yaw": 0.0},
 	{"id": "gallery", "area": "gallery", "room": "gallery_shaft",
@@ -163,12 +178,15 @@ const LANDINGS := [
 		"rope": Vector3(54.0, 0.0, -174.4), "centre": Vector3(54.0, 0.0, -169.0), "yaw": PI},
 ]
 
+## The shafts the floor is built from: `AUTHORED_LANDINGS` at `SCALE`.
+static var LANDINGS: Array = _scaled_landings(AUTHORED_LANDINGS)
+
 ## The dens, as authored. Each body stands its post facing one of its den's doors
 ## (`face`), so its sight cone is what notices a party coming in; a den with two
 ## doors watches both. Every den's posts are more than a shout (12 m) from every
 ## other den's. These are the posts a den was written with; the den fields
 ## `DEN_CROWD` times as many (`den_members`).
-const DENS := [
+const AUTHORED_DENS := [
 	{"id": "den", "label": "The watchers' den wakes.", "room": "den", "members": [
 		{"species": "hollow_warden", "at": Vector3(-4.5, 0.0, -35.0), "face": Vector3(9.0, 0.0, -24.0)},
 		{"species": "ossuary_stalker", "at": Vector3(4.0, 0.0, -37.5), "face": Vector3(9.0, 0.0, -24.0)},
@@ -208,6 +226,10 @@ const DENS := [
 	]},
 ]
 
+## The dens the floor is built from: `AUTHORED_DENS` at `SCALE`, every post and
+## the door it faces moved out with its room.
+static var DENS: Array = _scaled_dens(AUTHORED_DENS)
+
 ## The floor is crowded: every den fields `DEN_CROWD` bodies for each post it was
 ## authored with. The authored posts stand first, exactly as written; the crowd is
 ## laid across the den's own room, each body on the free spot furthest from every
@@ -229,14 +251,17 @@ const OVERHEAD_PROPS := ["roots"]
 ## The floor's master, on the blood ring in the middle of the lair, facing the
 ## southern door.
 const MASTER_ROOM := "lair"
-const MASTER_POINT := Vector3(0.0, 0.0, -89.0)
+const AUTHORED_MASTER_POINT := Vector3(0.0, 0.0, -89.0)
 const MASTER_YAW := PI
+## The master's ring on the floor the plan is built at: `AUTHORED_MASTER_POINT` at
+## `SCALE`.
+static var MASTER_POINT: Vector3 = _flat(AUTHORED_MASTER_POINT)
 
 ## Every light, by the room it lights. Wall kinds (`sconce`, `witch`, `lantern`,
 ## `fungus`) name a wall (`n` the room's deep edge, `s` its near edge, `w`, `e`) and
 ## how far along it, from the edge's low corner, they hang; floor kinds (`fire`,
 ## `brazier`, `candles`) stand at `at`.
-const LIGHTS := [
+const AUTHORED_LIGHTS := [
 	{"kind": "sconce", "room": "mouth", "wall": "w", "along": 0.43},
 	{"kind": "sconce", "room": "mouth", "wall": "e", "along": 0.75},
 	{"kind": "fire", "room": "mouth", "at": Vector3(-3.6, 0.0, 3.0)},
@@ -296,9 +321,12 @@ const LIGHTS := [
 	{"kind": "brazier", "room": "lair", "at": Vector3(13.0, 0.0, -86.0)},
 ]
 
+## The lights the floor is built from: `AUTHORED_LIGHTS` at `SCALE`.
+static var LIGHTS: Array = _scaled_spots(AUTHORED_LIGHTS)
+
 ## What each area is read from. Kinds with a `collider` stop bodies and are on the
 ## squad's map; everything else is presentation that stands where nobody walks.
-const PROPS := [
+const AUTHORED_PROPS := [
 	# The watchers' den.
 	{"kind": "totem", "room": "den", "at": Vector3(-6.5, 0.0, -40.0), "height": 3.8},
 	{"kind": "stakes", "room": "den", "at": Vector3(-6.5, 0.0, -26.5), "yaw": 0.4, "count": 4},
@@ -384,6 +412,86 @@ const PROPS := [
 	{"kind": "column", "room": "lair", "at": Vector3(-10.0, 0.0, -86.0), "radius": 1.1},
 	{"kind": "column", "room": "lair", "at": Vector3(10.0, 0.0, -97.0), "radius": 1.1},
 ]
+
+## The props the floor is built from: `AUTHORED_PROPS` at `SCALE`.
+static var PROPS: Array = _scaled_spots(AUTHORED_PROPS)
+
+## The rock's height and the box it is cut out of, at `SCALE`.
+static var TOP: float = AUTHORED_TOP * SCALE
+static var BOUNDS: Rect2 = _flat_rect(AUTHORED_BOUNDS)
+
+
+# --- the scale ------------------------------------------------------------------
+
+## A plan point on the floor the plan is built at: `SCALE` times as far from the
+## origin. Its height is left alone - what a spot's height means is the plinth a
+## candle stands on or the footing of a prop, and that is authored at the size of a
+## body, not of the floor.
+static func _flat(at: Vector3) -> Vector3:
+	return Vector3(at.x * SCALE, at.y, at.z * SCALE)
+
+
+static func _flat_rect(rect: Rect2) -> Rect2:
+	return Rect2(rect.position * SCALE, rect.size * SCALE)
+
+
+## `AUTHORED_ROOMS` at `SCALE`: the footprint moved and grown, the ceiling with it,
+## so a room keeps its shape.
+static func _scaled_rooms(source: Array) -> Array:
+	var out: Array = []
+	for row in source:
+		var room: Dictionary = row.duplicate()
+		room["rect"] = _flat_rect(row["rect"])
+		room["height"] = float(row["height"]) * SCALE
+		out.append(room)
+	return out
+
+
+## `AUTHORED_LANDINGS` at `SCALE`: the rope and the ring in front of it.
+static func _scaled_landings(source: Array) -> Array:
+	var out: Array = []
+	for row in source:
+		var landing: Dictionary = row.duplicate()
+		landing["rope"] = _flat(row["rope"])
+		landing["centre"] = _flat(row["centre"])
+		out.append(landing)
+	return out
+
+
+## `AUTHORED_DENS` at `SCALE`: every post, and the door its body faces, moved out
+## with its room.
+static func _scaled_dens(source: Array) -> Array:
+	var out: Array = []
+	for row in source:
+		var den: Dictionary = row.duplicate()
+		var members: Array = []
+		for member in row["members"]:
+			members.append({"species": member["species"], "at": _flat(member["at"]),
+				"face": _flat(member["face"])})
+		den["members"] = members
+		out.append(den)
+	return out
+
+
+## `AUTHORED_LIGHTS` / `AUTHORED_PROPS` at `SCALE`: where a piece stands, the ground
+## it covers (`size`, `radius`) and the height the plan gives it (the den's totem).
+## A wall mount is a fraction of the way along its wall, and a count is a number of
+## pieces: neither moves with the floor.
+static func _scaled_spots(source: Array) -> Array:
+	var out: Array = []
+	for row in source:
+		var spot: Dictionary = row.duplicate()
+		if spot.has("at"):
+			spot["at"] = _flat(row["at"])
+		if spot.has("size"):
+			spot["size"] = (row["size"] as Vector2) * SCALE
+		if spot.has("radius"):
+			spot["radius"] = float(row["radius"]) * SCALE
+		if spot.has("height"):
+			spot["height"] = float(row["height"]) * SCALE
+		out.append(spot)
+	return out
+
 
 static var _raster := PackedInt32Array()
 static var _cols := 0

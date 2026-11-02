@@ -44,6 +44,18 @@ extends RefCounted
 ## flies - because an archer that closes before it shoots has given up the one
 ## thing a bow has, and one that aims at the chest across a bow's length puts the
 ## shaft in the dirt.
+##
+## On top of all of that, each body fights the way its own record says it does
+## (`WarbandContracts.DISPOSITIONS`, read by `_disposition` and resolved by
+## `profile_of`; `tests/squad_disposition_regression.gd` owns the contract): the
+## ladder above is the same for every body, and a disposition changes four things
+## inside it - the guard it rolls and whether it advances behind one, whether it
+## falls back out of a fight to bind a wound (`_withdraw_step`) or gives ground to
+## re-position a shot (`_kite_step`), which of the skills in its hands it reaches
+## for first (`_cast_step`), and which rank of the band's formation it walks in
+## (`_escort_post`: tanks in front, the melee wall behind them, the bows behind
+## that). A band of eight is eight intentions; nothing else about them differs,
+## because identical base stats are the campaign's rule.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
@@ -51,6 +63,11 @@ const Perf = preload("res://scripts/perf_probe.gd")
 ## the numbers the shot is flown with, never from numbers of its own.
 const Archer = preload("res://scripts/archer.gd")
 const Arrow = preload("res://scripts/arrow.gd")
+## The shared skill table: the slots a body can fire and the definitions the
+## disposition's casting priority is resolved against.
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+## The pool's own floor for a raised guard, shared with the soul's `set_block`.
+const Stamina = preload("res://scripts/stamina.gd")
 
 ## Read-only sources the scene owns.
 var controller
@@ -70,8 +87,6 @@ var player_body = null
 ## `merc_id -> bool`, defaulting to "every squad id is free".
 var eligible := Callable()
 var following := false
-## How far behind the soul an escorting ally may fall before it closes up.
-var follow_slack := 3.2
 ## Deterministic across runs: the rhythm looks unscripted without making a
 ## regression flaky.
 var _rng := RandomNumberGenerator.new()
@@ -120,17 +135,55 @@ const PERSONAL_WEIGHT := 0.9
 ## rides on, so a body always keeps most of the way it meant to go.
 const PUSH_SHARE := 0.75
 const PUSH_CAP := 0.55
-## An escort stands on its own slot around the soul rather than on the soul: the
-## ring is what spreads the squad out on the walk instead of stacking it.
+## An escort walks in a formation rather than around a ring: a row is a line of
+## bodies abreast across the soul's own heading, and the rows stack from the front
+## of the band to the back.
 ##
-## Four posts to a ring, and the next ring turned half a slot: the eight allies a
-## full warband can field are eight distinct places, each a stride from its
-## neighbours. The layout used to key off the body's index in `squad_ids`, which
-## spends one of those places on the soul the player is inside - so the ring
-## wrapped and two allies were handed the same point, shoved each other off it and
-## walked back in. Two bodies orbiting one post is the band circling itself.
-const ESCORT_SLOT_ANGLES := 4
-const ESCORT_SLOT_GAP := 1.35
+## The order of the ranks is `Contracts.DISPOSITIONS`, which is already written
+## front line first - tanks ahead where a watcher met on the road meets a shield,
+## the melee wall a stride behind them, the bows behind that with the field in
+## front of their shafts. The soul's own disposition never enters into it: the
+## ranks are measured from the soul's body, so a soul inside a bow still walks
+## behind its tanks and in front of its archers, and a soul inside a tank has its
+## archers behind it and nobody in front.
+##
+## The places are keyed off the *allies*. The layout used to spend one of a ring's
+## places on the soul the player is inside - the ring wrapped and two allies were
+## handed the same point, shoved each other off it and walked back in. Two bodies
+## in one place is the band circling itself, so the soul holds no place at all.
+
+## Where row 0 stands: ahead of the soul by enough that the body lands a stride
+## ahead of it. A walk to a place stops `ESCORT_STANDOFF` 0.85 m short of it (that
+## band is what keeps a body from pacing at its post), so the place has to be
+## `ESCORT_STANDOFF` plus `PERSONAL_SPACE` out for the body to end up with its own
+## air around it rather than inside the soul's.
+const FORMATION_FRONT := 2.4
+## How far apart the rows are, front to back, and how far apart the bodies abreast
+## in one row. Both are outside `PERSONAL_SPACE` 1.45 - a body stands on its own
+## ground and the separation push never has to move it - and the row gap is the
+## wider of the two so a body directly behind another still has room to breathe.
+## The gap is what puts the melee wall about the soul's own line and the bows a
+## stride behind it, rather than all three ranks standing at the front rank's feet.
+const FORMATION_ROW_GAP := 2.2
+const FORMATION_LANE := 1.7
+## Bodies to a row. Four abreast is a line an eight-body band reads as a rank
+## rather than a fence across the road; the fifth starts the rank's next row.
+const FORMATION_PER_ROW := 4
+## How fast the formation's heading comes round, in degrees a second. The heading
+## is the soul's own facing, eased: the ranks have to walk to their new ground
+## anyway, and a band that pivots on the spot every time the player comes about
+## reads as a carousel.
+const FORMATION_TURN_RATE := 90.0
+## The pace an escort matches. A player jogging (8.5 m/s in `WarbandBody`) against
+## a squad walking (5.5 m/s) loses three metres a second, and a formation that is
+## five metres behind the soul is not a formation - the tanks are no longer ahead
+## of anything. Above this the escort runs to its post; a soul walking or standing
+## still is matched by walking.
+const ESCORT_JOG_PACE := 6.2
+## How far from its post an escorting body may fall before it jogs, while the soul
+## is moving at a pace it has to be matched at. Tighter than `RUN_GAP` on purpose:
+## `RUN_GAP` is a blade closing on a mob, and this is a line holding its shape.
+const ESCORT_JOG_GAP := 3.0
 ## The escort's arrival band. An ally walks to its post only when it is further
 ## than `ESCORT_ENGAGE` from it and stops `ESCORT_STANDOFF` short, so it arrives
 ## and stays. Without the band a body walked to its post, overshot it by the
@@ -145,7 +198,7 @@ const ESCORT_STANDOFF := 0.85
 ## that beelines at a body two hundred metres away beelines through tree rows.
 ## `CRUMB_STEP` is how much ground one footprint is worth, `CRUMB_KEEP` how many
 ## are held (600 m of road), and `ESCORT_RALLY` the distance at which a body stops
-## trying to hold its ring slot and starts catching up along the line.
+## trying to hold its place in the formation and starts catching up along the line.
 const CRUMB_STEP := 2.5
 const CRUMB_KEEP := 240
 const ESCORT_RALLY := 9.0
@@ -298,7 +351,7 @@ const TURN_RATE := 320.0
 ## is, and the channel is abandoned by walking the enemy check, not by a timer
 ## that keeps running behind a fight.
 const TRACK_CLOCKS := ["state_left", "step_left", "side", "retreat", "heal_left", "roam_left",
-	"rest_left", "route_left"]
+	"rest_left", "route_left", "hurt_left", "withdraw_left", "cast_lock"]
 
 ## What a body can swing, and the narrower pair that can also set a guard. What a
 ## hand can hold at all is the union plus a bow, which the squad's `_armed` test
@@ -338,6 +391,98 @@ const SHOT_MASK := 1
 const BOW_FACE_COSINE := 0.94
 const BOW_TURN_STEP := 0.25
 
+# --- dispositions ----------------------------------------------------------
+#
+# One body's way of fighting (`Contracts.DISPOSITIONS`), read off the roster per
+# mercenary every frame the squad drives it. The party's mode says which fights
+# the band takes; this says how each body takes them, and the numbers below are
+# the whole of the difference - no stat block, no second brain. The campaign's
+# rule is that identical base stats are the only fair ground; a disposition is
+# behaviour on top of it, so the same eighty-health body is a wall, a press or a
+# pair of eyes on the far end of a bow.
+#
+#   guard_*      the rolled guard band: a tank is up nearly every exchange, a
+#                melee body attacks more than it guards, a bow cannot guard.
+#   shield       advance and hold behind the guard rather than at a closed blade.
+#   withdraw     health share under which the body leaves contact to bind a wound
+#                (0 = never; the tank's "never falls back").
+#   kites        give ground when crowded or struck, and loose again from range.
+#   cast_every   seconds between its skill casts, on top of the skill's own
+#                cooldown - the cadence that keeps a squad from reading as a
+#                magic show.
+#
+# Where a body stands in the band's formation is not here: the ranks run in
+# `Contracts.DISPOSITIONS` order, front line first, so one table owns the order a
+# squad walks in and the order the roster screen steps through.
+const TANK_PROFILE := {
+	"guard_chance_min": 0.92, "guard_chance_max": 1.0,
+	"guard_min": 0.45, "guard_max": 0.95,
+	"shield": true, "withdraw": 0.0, "kites": false, "cast_every": 3.0,
+}
+## The share of its own pool a body falls back below. A tank's is zero - it never
+## gives ground, so its dressing only ever happens on a field it already owns.
+const WITHDRAW_SHARE := 0.30
+const MELEE_PROFILE := {
+	"guard_chance_min": 0.40, "guard_chance_max": 0.55,
+	"guard_min": 0.30, "guard_max": 0.62,
+	"shield": false, "withdraw": WITHDRAW_SHARE, "kites": false,
+	"cast_every": 2.2,
+}
+const BOW_PROFILE := {
+	"guard_chance_min": 0.0, "guard_chance_max": 0.0,
+	"guard_min": GUARD_MIN, "guard_max": GUARD_MAX,
+	"shield": false, "withdraw": WITHDRAW_SHARE, "kites": true,
+	"cast_every": 1.6,
+}
+## The line a falling-back body has to get behind: below `withdraw` it walks away
+## from the nearest hostile, and the dressing opens on the first frame nothing
+## hostile is inside `LOOT_CLEAR_METRES` of it. The clock bounds the walk - a body
+## that could not break contact inside it goes back in rather than leading the
+## squad into the wood.
+const WITHDRAW_SECONDS := 8.0
+## How long one wound keeps an archer re-positioning. The hit itself is the
+## trigger ("falls back on hit to position for the bow strike again"): a body
+## whose health dropped inside this window gives ground before it draws.
+const KITE_HIT_MEMORY := 1.2
+## How far past `BOW_HOLD_MIN` a kiting archer is trying to get before it plants
+## and draws again.
+const BOW_KITE_MARGIN := 1.6
+## How long a kiting archer keeps backing without gaining ground before it gives
+## the retreat up and looses from where it stands. A wall at its back is not a
+## range, and a body that walks into one for the rest of the fight has stopped
+## being a bow.
+const KITE_STUCK_SECONDS := 0.6
+## How many hostiles make a ring skill worth casting, and the radius the count is
+## taken over.
+const CAST_TARGETS := 2
+const CAST_CLUSTER_RADIUS := 3.2
+## A planted cast (a spell, a fireball) is worth a body's turn inside this range,
+## with a clean line to what it is casting at.
+const CAST_RANGE := 14.0
+## A melee arc's reach when its row does not name one: a blade's measure, so a
+## skill with no radius is never cast at a body across the clearing.
+const CAST_ARC_REACH := 2.1
+## How many of the nearest hostiles a melee body compares before it picks the
+## densest knot: the AOE preference, bounded so a crowd costs a fixed few checks
+## instead of a square of the wood.
+const CLUSTER_CANDIDATES := 3
+## What one packmate is worth when an AOE body is choosing a target, in metres of
+## its own walk: two hostiles inside `MELEE_CLUSTER_RADIUS` of one another make
+## either a better target than a nearer one standing alone.
+const MELEE_CLUSTER_PULL := 2.4
+const MELEE_CLUSTER_RADIUS := 3.0
+
+## The profile for a disposition id, always a dictionary - a body whose roster
+## row this build cannot read fights as melee, like everything that predates the
+## field.
+static func profile_of(disposition: String) -> Dictionary:
+	match Contracts.disposition_id(disposition):
+		Contracts.DISPOSITION_TANK:
+			return TANK_PROFILE
+		Contracts.DISPOSITION_BOW:
+			return BOW_PROFILE
+	return MELEE_PROFILE
+
 ## per merc_id: the blocked push, the current fight state, and this body's own
 ## rolls. Nothing here is read off the instance id: two allies in the same gear
 ## circle on different beats because each rolled for itself.
@@ -348,6 +493,10 @@ var _rescuer_merc := 0
 ## The heading each body is turned to this frame, so the next one can be limited
 ## against it: merc_id -> flat unit vector.
 var _heading: Dictionary = {}
+## The heading the band's formation is drawn on this frame, eased after the soul's
+## own facing by `_update_formation_heading`. Zero until a drive has eased one,
+## which reads as "the soul's facing as it stands".
+var _formation_forward := Vector3.ZERO
 ## Drops and bodies the squad has given up on: target key -> true. Per scene, so a
 ## reloaded world offers the same piece again; a key is `_pickup_key` or
 ## `_corpse_key` and never a position, because a piece that moved is still the same
@@ -387,6 +536,7 @@ func relocate() -> void:
 	_trail_base = 0
 	_track.clear()
 	_heading.clear()
+	_formation_forward = Vector3.ZERO
 	_abandoned.clear()
 	_provoked.clear()
 	_rescuer_merc = 0
@@ -409,6 +559,7 @@ func drive(delta: float) -> void:
 	# a co-op friend in the last body standing - that one.
 	player_body = controller.focus_body()
 	_drop_crumb()
+	_update_formation_heading(delta)
 	_note_wounds()
 	var passive := party_mode == Contracts.PARTY_PASSIVE
 	if _rescue_step(delta):
@@ -465,7 +616,10 @@ func drive(delta: float) -> void:
 						continue
 		# 2. Armed, or nothing left to grab: go at the nearest watcher the party's
 		#    mode lets this body fight (`_nearest_watcher`; none, under PASSIVE).
-		var watcher = _nearest_watcher(actor)
+		#    A melee body goes at the knot instead of the nearest blade, because a
+		#    ring skill only pays for itself where two hostiles stand together.
+		var watcher = _nearest_watcher(actor,
+			_disposition(merc_id) == Contracts.DISPOSITION_MELEE)
 		if watcher != null:
 			# Finding one is when the party talks. The latch makes it the moment
 			# this body goes from out of the fight to in it - the first hostile to
@@ -507,14 +661,14 @@ func drive(delta: float) -> void:
 						continue
 					if _walk_to_loot(actor, at, _corpse_key(fallen), track):
 						continue
-		# 4. No fight: an escort stands on its own slot in the ring around the
-		#    soul, and a squad with nowhere to be roams its own post in small
-		#    steps. Nobody walks onto the soul, and nothing stands still.
+		# 4. No fight: an escort walks to its place in the band's formation, and a
+		#    squad with nowhere to be roams its own post in small steps. Nobody
+		#    walks onto the soul, and nothing stands still.
 		if following and is_instance_valid(player_body):
-			# Far behind, the soul's line outranks the ring slot: walking the way the
+			# Far behind, the soul's line outranks the formation: walking the way the
 			# player walked is what keeps a squad together in a wood this size. On
 			# mapped ground the map already knows the way round, so the body goes
-			# straight for its slot instead of retracing every turn the soul took.
+			# straight for its place instead of retracing every turn the soul took.
 			var soul_at: Vector3 = (player_body as Node3D).global_position
 			var to_soul: Vector3 = soul_at - actor.global_position
 			to_soul.y = 0.0
@@ -533,7 +687,13 @@ func drive(delta: float) -> void:
 			var walking := bool(track.get("to_post", false))
 			if gap.length() > (ESCORT_STANDOFF if walking else ESCORT_ENGAGE):
 				track["to_post"] = true
-				_advance(actor, post, track, ESCORT_STANDOFF)
+				# The place is measured from the soul, so it travels at the soul's
+				# pace: a body left walking behind a jogging player loses the
+				# formation one rank at a time, and a band five metres back has no
+				# front line at all. A soul standing still or walking is matched by
+				# walking - nobody jogs to take a step to its shoulder.
+				var jog_at := ESCORT_JOG_GAP if _soul_pace() > ESCORT_JOG_PACE else RUN_GAP
+				_advance(actor, post, track, ESCORT_STANDOFF, false, jog_at)
 				continue
 			track["to_post"] = false
 		_idle_roam(actor, track)
@@ -746,6 +906,53 @@ func _blade_free(actor) -> bool:
 ## dual pair, so a body that cannot guard never spends an exchange on one.
 func _can_guard(actor) -> bool:
 	return str(actor.rig.weapon) in GUARD_BLADES
+
+
+## How this body fights on its own. Read from the warband's roster every frame
+## rather than cached: a press on the roster's chip is felt on the next squad
+## tick, and a body that swaps bodies mid-fight carries no stale intention.
+func _disposition(merc_id: int) -> String:
+	if warband == null:
+		return Contracts.DEFAULT_DISPOSITION
+	var roster = warband.roster
+	if roster == null or not roster.has_method("disposition_of"):
+		return Contracts.DEFAULT_DISPOSITION
+	return str(roster.disposition_of(merc_id))
+
+
+## How many living hostiles stand inside `radius` of a point, flat. The count a
+## ring skill asks for and a melee body weighs its targets by - one pass, no
+## allocation.
+func _hostiles_within(point: Vector3, radius: float) -> int:
+	var count := 0
+	for watcher in watchers:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var offset: Vector3 = (watcher as Node3D).global_position - point
+		offset.y = 0.0
+		if offset.length() <= radius:
+			count += 1
+	return count
+
+
+## The unit direction that walks straight away from the nearest living hostile.
+## Zero when there is nothing to walk away from, which is the caller's cue that
+## nothing is chasing it.
+func _away_from_hostiles(point: Vector3) -> Vector3:
+	var nearest = null
+	var best := INF
+	for watcher in watchers:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var distance: float = point.distance_to((watcher as Node3D).global_position)
+		if distance < best:
+			best = distance
+			nearest = watcher
+	if nearest == null:
+		return Vector3.ZERO
+	var away: Vector3 = point - (nearest as Node3D).global_position
+	away.y = 0.0
+	return away.normalized() if away.length_squared() > 0.0001 else Vector3.FORWARD
 
 
 func _nearest_pickup(actor):
@@ -996,6 +1203,213 @@ func _finish_bandage(actor, merc_id: int) -> void:
 	warband.changed.emit()
 
 
+# --- falling back, holding the line, and the skill ladder ------------------
+#
+# The three things a disposition changes mid-fight, all of them intent written on
+# the frame they decide: whether a hurt body leaves the fight (withdraw), whether
+# a crowded or struck archer gives ground (kite), and which of the skills in its
+# hands it reaches for (cast). Each answers true when it owns the frame, so the
+# ladder below them never has to know they ran.
+
+## A hurt body that falls back does it here: below its disposition's share of its
+## own pool it stops trading and walks away from the nearest hostile until the
+## field is clear enough to bind the wound. The tank never takes this branch - its
+## share is zero - which is the whole of "never falls back": the same body at one
+## point of health stays in the line, and the dressing it eventually gets is the
+## quiet-field one every ally gets.
+##
+## The walk is bounded (`WITHDRAW_SECONDS`): a body that cannot break contact in
+## eight seconds stops giving ground and fights with what it has, rather than
+## leading the band across the wood with a blade at its back. That latch clears
+## when the wound is closed, so the next time it is hurt it tries again.
+func _withdraw_step(actor, track: Dictionary, profile: Dictionary) -> bool:
+	var share := float(profile.get("withdraw", 0.0))
+	if share <= 0.0:
+		# Reset the latches for the bodies that never fall back, so a disposition
+		# changed mid-fight cannot leave a withdrawal half done behind it.
+		track["withdrawing"] = false
+		track["withdraw_failed"] = false
+		track["withdraw_left"] = 0.0
+		return false
+	var pool := float(actor.get("max_health"))
+	if pool <= 0.0:
+		return false
+	var hurt := float(actor.get("health")) <= pool * share
+	if not hurt or _clear_of_hostiles(actor.global_position):
+		track["withdrawing"] = false
+		track["withdraw_left"] = 0.0
+		if not hurt:
+			track["withdraw_failed"] = false
+		return false
+	if float(track.get("withdraw_left", 0.0)) <= 0.0 and bool(track.get("withdrawing", false)):
+		# The clock ran out still in contact: this body has given all the ground it
+		# is going to give.
+		track["withdrawing"] = false
+		track["withdraw_failed"] = true
+	if bool(track.get("withdraw_failed", false)):
+		return false
+	if not bool(track.get("withdrawing", false)):
+		track["withdrawing"] = true
+		track["withdraw_left"] = WITHDRAW_SECONDS
+	var away := _away_from_hostiles(actor.global_position)
+	if away.is_zero_approx():
+		return false
+	_enter(track, FIGHT_CLOSE)
+	actor.combat.stop_block()
+	# A jog, and the body's back to what it is leaving: a walk away reads as a
+	# stumble, and a hurt body that turns on the spot to face its target has spent
+	# the ground it just bought.
+	_steer(actor, away, track, true)
+	return true
+
+
+## The back line's own rule. An archer that has been struck inside
+## `KITE_HIT_MEMORY`, or that has a hostile inside `BOW_HOLD_MIN`, gives ground
+## until it has `BOW_KITE_MARGIN` of room past the hold, then plants and looses
+## again - "falls back on hit to position for the bow strike again". A drawn
+## string is a commitment and is never abandoned for the feet: the arrow goes
+## first, and the reposition happens in the beat after it.
+func _kite_step(actor, track: Dictionary, profile: Dictionary, direction: Vector3,
+		distance: float) -> bool:
+	if not bool(profile.get("kites", false)):
+		return false
+	if str(actor.rig.phase) in DRAW_PHASES or float(actor.rig.draw_amount) > 0.0:
+		return false
+	# The ground an archer gives is the ground a blade would need to take: it backs
+	# off to a bow's hold, and a wound buys it a step further, never a walk out of
+	# the range it shoots from - at its own range it plants and looses.
+	var want := BOW_HOLD_MIN + BOW_KITE_MARGIN
+	var wounded := float(track.get("hurt_left", 0.0)) > 0.0
+	if distance >= want and not wounded:
+		track["kite_best"] = 0.0
+		track["kite_stuck"] = 0.0
+		return false
+	if distance >= want + BOW_KITE_MARGIN:
+		track["kite_best"] = 0.0
+		track["kite_stuck"] = 0.0
+		return false
+	# A corner is not a bow's range: an archer that has stopped gaining ground for
+	# `KITE_STUCK_SECONDS` - a wall at its back, a ring of bodies - stops giving it
+	# and shoots from where it stands. The latch stays until the body actually
+	# gains ground again, so it does not walk into the same wall every half second.
+	var best := float(track.get("kite_best", 0.0))
+	if distance > best + 0.05:
+		track["kite_best"] = distance
+		track["kite_stuck"] = 0.0
+	else:
+		track["kite_stuck"] = float(track.get("kite_stuck", 0.0)) \
+			+ float(track.get("delta", 0.0))
+		if float(track["kite_stuck"]) >= KITE_STUCK_SECONDS:
+			return false
+	_enter(track, FIGHT_RESET)
+	actor.combat.stop_block()
+	_steer(actor, -direction, track, true)
+	return true
+
+
+## The disposition's casting priority, resolved against what the body is actually
+## holding. Every slot the runner can fire is ranked by
+## `Contracts.disposition_ability_rank` - a tank's ward and shield first, a melee
+## body's ring, an archer's volley - and the best rank whose geometry fits this
+## moment is the one that fires. A rank of `ABILITY_NEVER` is a skill this body
+## does not call on at all, and no rank at all is `ABILITY_OTHER`: used when
+## nothing preferred fits, so an anointed piece is never dead weight.
+##
+## `cast_every` is the cadence on top of each skill's own cooldown. Without it the
+## squad would be a magic show: every weapon skill costs a sliver and re-arms in a
+## second, and eight bodies firing on every frame they were free would read as a
+## formation of casters rather than fighters.
+func _cast_step(actor, track: Dictionary, profile: Dictionary, watcher, direction: Vector3,
+		distance: float) -> bool:
+	if float(track.get("cast_lock", 0.0)) > 0.0:
+		return false
+	# A window that is still running is what the body is doing: a rolled guard, a
+	# circle, a swing's own beat. A skill changes the plan, and the plan is not
+	# changed mid-beat.
+	if float(track.get("state_left", 0.0)) > 0.0:
+		return false
+	var runner = actor.get("ability")
+	if runner == null or not is_instance_valid(runner):
+		return false
+	if bool(runner.active):
+		return false
+	# A skill is a fresh commitment: it starts from a body with nothing in flight
+	# and no string drawn, or it would cancel the beat it interrupts. A raised
+	# guard is the one thing the front line may spend on it - the shield skills are
+	# the tank's own, and its guard comes back the frame after the cast - while the
+	# other two dispositions keep their window.
+	if float(actor.combat.attack_progress) < 0.999:
+		return false
+	if bool(actor.combat.blocking) and not bool(profile.get("shield", false)):
+		return false
+	if str(actor.rig.phase) in DRAW_PHASES or float(actor.rig.draw_amount) > 0.0:
+		return false
+	var disposition := _disposition(int(track.get("merc_id", 0)))
+	var best_slot := -1
+	var best_rank := Contracts.ABILITY_NEVER
+	var best_definition: Dictionary = {}
+	for slot in AbilityRules.SLOT_COUNT:
+		var definition: Dictionary = runner.definition(slot)
+		if definition.is_empty():
+			continue
+		var rank := Contracts.disposition_ability_rank(disposition,
+			str(definition.get("id", "")))
+		if rank >= best_rank:
+			continue
+		# The runner's own eligibility - cooldown, stamina, the shape of the hands -
+		# is asked before the geometry, so a skill that cannot fire costs nothing.
+		if not str(runner.blocker(slot)).is_empty():
+			continue
+		if not _cast_fits(actor, definition, watcher, distance):
+			continue
+		best_rank = rank
+		best_slot = slot
+		best_definition = definition
+	if best_slot < 0:
+		return false
+	# The aim the ladder wrote at the top of this frame is already the one every
+	# skill in the table reads: the sighted shot point for a bow, the target's
+	# chest for a blade. A cast does not re-aim it.
+	actor.combat.stop_block()
+	var result: Dictionary
+	if actor.has_method("try_ability"):
+		result = actor.try_ability(best_slot)
+	else:
+		result = runner.activate(best_slot)
+	if not bool(result.get("ok", false)):
+		return false
+	engaged = true
+	track["swing_due"] = false
+	track["cast_lock"] = float(profile.get("cast_every", 2.0))
+	_enter(track, FIGHT_SWING)
+	_hold(actor)
+	return true
+
+
+## Whether the skill `definition` has anything to do from here: a ring needs a
+## knot, an arc needs its target inside its own reach, a volley needs the bow's
+## flight and a clean line, and a ward is worth casting the moment something
+## hostile is in front of the body and the ward is not already up. Anything else
+## (a blink, a committed dash) is not the squad's to pick.
+func _cast_fits(actor, definition: Dictionary, watcher, distance: float) -> bool:
+	var effect: Dictionary = definition.get("effect", {})
+	var reach := float(effect.get("radius", 0.0))
+	match str(effect.get("kind", "")):
+		"melee_ring":
+			return _hostiles_within(actor.global_position,
+				maxf(reach, CAST_CLUSTER_RADIUS)) >= CAST_TARGETS
+		"melee_arc":
+			return distance <= maxf(reach, CAST_ARC_REACH) + 0.4
+		"barrage", "volley", "piercing_shot":
+			return distance <= _bow_reach(actor) and not actor.combat.quiver_empty() \
+				and _clear_shot(actor, watcher)
+		"projectile":
+			return distance <= CAST_RANGE and _clear_shot(actor, watcher)
+		"ward":
+			return float(actor.get("ward_seconds")) <= 0.0
+	return false
+
+
 ## The nearest fallen body this ally may search, or 0 for none. The vacuum holds
 ## the bodies a scene registered (`register_corpse`) and stops offering one it has
 ## already been emptied, so the module asks it rather than keeping corpses of its
@@ -1048,7 +1462,13 @@ func _clear_of_hostiles(point: Vector3) -> bool:
 ## trunk forty metres off is a direction to walk, not a target, and the long shot
 ## is for a clean line or it is not taken at all. That is what lets an archer open
 ## on a pack the squad used to have to close with first.
-func _nearest_watcher(actor):
+##
+## A melee body weighs the nearest few by the company they keep: two hostiles
+## inside `MELEE_CLUSTER_RADIUS` make either of them a better target than a
+## nearer one standing alone, because that is where a ring lands twice. The
+## weighing is bounded to `CLUSTER_CANDIDATES` so a wood full of bodies costs a
+## fixed handful of checks rather than a square of the scene.
+func _nearest_watcher(actor, cluster := false):
 	if party_mode == Contracts.PARTY_PASSIVE:
 		return null
 	var answering := party_mode == Contracts.PARTY_DEFENSIVE
@@ -1069,6 +1489,47 @@ func _nearest_watcher(actor):
 			continue
 		best_distance = distance
 		best = watcher
+	if not cluster or best == null:
+		return best
+	return _densest_of(actor, best, best_distance)
+
+
+## The best target among the nearest `CLUSTER_CANDIDATES` legal hostiles, with the
+## company each keeps weighed in: `distance - neighbours * MELEE_CLUSTER_PULL`.
+## `nearest` is the plain nearest already found, and stays the answer whenever no
+## knot beats it.
+func _densest_of(actor, nearest, nearest_distance: float):
+	var candidates: Array = []
+	for watcher in watchers:
+		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
+			continue
+		var distance: float = actor.global_position.distance_to(watcher.global_position)
+		if distance > maxf(engage_radius, nearest_distance):
+			continue
+		if party_mode == Contracts.PARTY_DEFENSIVE \
+				and not _provoked.has(watcher.get_instance_id()):
+			continue
+		var entry := {"body": watcher, "distance": distance}
+		if candidates.size() < CLUSTER_CANDIDATES:
+			candidates.append(entry)
+			continue
+		# Keep the list to the nearest few: the furthest held candidate goes.
+		var worst := 0
+		for index in candidates.size():
+			if float(candidates[index]["distance"]) > float(candidates[worst]["distance"]):
+				worst = index
+		if distance < float(candidates[worst]["distance"]):
+			candidates[worst] = entry
+	var best = nearest
+	var best_score := nearest_distance
+	for entry in candidates:
+		var body = entry["body"]
+		var company := _hostiles_within((body as Node3D).global_position,
+			MELEE_CLUSTER_RADIUS) - 1
+		var score := float(entry["distance"]) - float(maxi(company, 0)) * MELEE_CLUSTER_PULL
+		if score < best_score:
+			best_score = score
+			best = body
 	return best
 
 
@@ -1111,6 +1572,9 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	to.y = 0.0
 	var distance := to.length()
 	var direction := to.normalized() if distance > 0.001 else Vector3.FORWARD
+	# How this body fights (`Contracts.DISPOSITIONS`), read off its own record.
+	var disposition := _disposition(int(track.get("merc_id", 0)))
+	var profile := profile_of(disposition)
 	# A bow is a long arm, and the first job with one is to use it. The shot is
 	# sighted from the bow's own speed and the missile's own fall, so an arrow
 	# loosed at forty metres is pointed where the shaft will be when it gets
@@ -1119,6 +1583,24 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	var in_reach := bow and distance <= _bow_reach(actor)
 	actor.combat.set_aim(_shot_point(actor, watcher) if in_reach \
 		else watcher.get_aim_position())
+	# 0. A body that has decided to fall back does it before anything else. Below
+	#    its disposition's share of the pool it breaks contact and walks out of
+	#    the fight; the dressing opens on the first frame the field is clear
+	#    (`_bandage_step`), which is the whole point of giving the ground.
+	if _withdraw_step(actor, track, profile):
+		return
+	# 1. The back line keeps its distance. An archer that has just been struck -
+	#    or that has a blade in its face - gives ground until the string can come
+	#    up again, then plants and looses; it never trades inside a blade's reach.
+	#    The feet come before the skill: a volley from inside a blade's measure is
+	#    a volley the archer did not need to spend its ground on.
+	if bow and _kite_step(actor, track, profile, direction, distance):
+		return
+	# 2. The skill this body reaches for first, when the moment fits: a tank's
+	#    shield and ward, a melee body's ring on a knot, an archer's volley down a
+	#    clean line. This is the disposition's casting priority in the field.
+	if _cast_step(actor, track, profile, watcher, direction, distance):
+		return
 	# With a bow and a clean line the ally shoots from where it stands, at any
 	# range inside its bow's reach. It does not walk in to a blade's standoff
 	# first: that is what kept every archer in the squad at arm's length, and an
@@ -1153,6 +1635,12 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	var standoff := _standoff_for(actor)
 	if distance > standoff:
 		_enter(track, FIGHT_CLOSE)
+		if bool(profile.get("shield", false)):
+			# The front line advances behind its guard: the blade comes up the
+			# moment a hostile is in sight of it and comes down only for the blow,
+			# which is the body that can be leaned on without being opened.
+			_advance(actor, watcher.global_position, track, standoff, true)
+			return
 		actor.combat.stop_block()
 		_advance(actor, watcher.global_position, track, standoff)
 		return
@@ -1176,6 +1664,13 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	if _swing(actor, track, direction):
 		return
 	_enter(track, FIGHT_CLOSE)
+	if bool(profile.get("shield", false)):
+		# The beat between exchanges is spent behind the guard, not with the arm
+		# hanging: the same shuffle off the line, and the blade already in the way
+		# of whatever comes at it next. This is the blocking difference - the other
+		# two dispositions roll for a window and stand open between them.
+		_guard_step(actor, direction, track, distance)
+		return
 	actor.combat.stop_block()
 	_close_step(actor, direction, track, distance)
 
@@ -1184,10 +1679,17 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 ## What this exchange is, rolled once at the moment the blade comes free, which is
 ## the only moment the choice costs anything. A guard is drawn with a fresh chance
 ## every exchange - never a cooldown-gated certainty - and the blow is never
-## withheld, only delayed by the short window it was rolled behind.
+## withheld, only delayed by the short window it was rolled behind. The chance and
+## the window are the body's disposition's: a tank is up nearly every exchange and
+## holds it longer, a melee body spends its turns attacking.
 func _roll_exchange(actor, track: Dictionary) -> void:
-	if _can_guard(actor) and _rng.randf() < _rng.randf_range(GUARD_CHANCE_MIN, GUARD_CHANCE_MAX):
-		_enter(track, FIGHT_GUARD, _rng.randf_range(GUARD_MIN, GUARD_MAX))
+	var profile := profile_of(_disposition(int(track.get("merc_id", 0))))
+	if _can_guard(actor) and _rng.randf() < _rng.randf_range(
+			float(profile.get("guard_chance_min", GUARD_CHANCE_MIN)),
+			float(profile.get("guard_chance_max", GUARD_CHANCE_MAX))):
+		_enter(track, FIGHT_GUARD, _rng.randf_range(
+			float(profile.get("guard_min", GUARD_MIN)),
+			float(profile.get("guard_max", GUARD_MAX))))
 		return
 	if int(track.get("swings_left", 0)) <= 0:
 		track["swings_left"] = _rng.randi_range(SWINGS_MIN, SWINGS_MAX)
@@ -1369,12 +1871,26 @@ func _circle_step(actor, direction: Vector3, track: Dictionary) -> void:
 ## walk in is the same standoff the closing step keeps: a guard is a blade in the
 ## way, not a body driving its shoulder into the target.
 func _guard_step(actor, direction: Vector3, track: Dictionary, distance: float = STANDOFF) -> void:
-	if not actor.combat.blocking:
-		actor.combat.start_block(direction)
+	_raise_guard(actor, direction)
 	actor.combat.face_block(direction)
 	var across := direction.cross(Vector3.UP) * float(track.get("orbit", 1.0))
 	_steer(actor, direction * GUARD_CLOSE * _press(distance) + across * GUARD_SHUFFLE,
 		track, false)
+
+
+## Put the arm up, if the body has the wind to hold it. `Combat.start_block` has
+## no pool rule of its own - a player's press is gated in `WarbandBody.set_block`
+## before it is handed over, and the squad writes the same call directly, so it
+## asks the same floor here. A spent body fights the exchange open-handed rather
+## than flapping a guard it cannot hold: at zero the body's own tick drops the
+## arm, and without this rule the squad would raise it again three frames later.
+func _raise_guard(actor, forward: Vector3) -> void:
+	if actor.combat.blocking:
+		return
+	var pool: Variant = actor.get("stamina")
+	if pool != null and float(pool) < Stamina.GUARD_MIN:
+		return
+	actor.combat.start_block(forward)
 
 
 ## The beat between exchanges with no guard up: work the angle from the standoff,
@@ -1474,23 +1990,39 @@ func _walk_to_loot(actor, point: Vector3, key: String, track: Dictionary) -> boo
 ## the soul are places to stand next to; a watcher is a body to stand *away* from.
 ## On mapped ground the walk goes round what stands in the way (`_route_aim`); the
 ## stop is still measured to the point itself.
-func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0) -> void:
+##
+## `keep_guard` is the front line's walk: crossing ground toward a hostile with the
+## blade already up, instead of the closed blade every other errand uses. It is a
+## parameter rather than a second copy because the route, the jog and the stop are
+## the same walk either way. `jog_at` is the gap the jog starts at - `RUN_GAP` for a
+## blade closing on a mob, `ESCORT_JOG_GAP` for a line keeping its shape.
+func _advance(actor, point: Vector3, track: Dictionary, stop_at: float = 0.0,
+		keep_guard: bool = false, jog_at: float = RUN_GAP) -> void:
 	var to: Vector3 = point - actor.global_position
 	to.y = 0.0
 	var gap := to.length() - maxf(stop_at, 0.0)
 	if gap <= 0.08 or to.length_squared() <= 0.0001:
-		_hold(actor)
+		if keep_guard:
+			_guard_step(actor, to.normalized(), track, to.length())
+		else:
+			_hold(actor)
 		return
 	# Walking is not fighting: a guard left up while crossing the yard to a drop
-	# would be a pose nobody set.
-	actor.combat.stop_block()
+	# would be a pose nobody set. The front line's advance is the exception, and it
+	# is asked for rather than assumed.
 	var heading: Vector3 = _route_aim(actor, point, track) - actor.global_position
 	heading.y = 0.0
 	if heading.length_squared() <= 0.0001:
 		heading = to
+	if keep_guard:
+		_raise_guard(actor, heading.normalized())
+		actor.combat.face_block(heading.normalized())
+	else:
+		actor.combat.stop_block()
 	# Far out is a jog; the last few metres into contact are a walk, so a squad
-	# arrives beside a body instead of running it over.
-	_steer(actor, heading.normalized(), track, gap > RUN_GAP)
+	# arrives beside a body instead of running it over. `jog_at` is where "far
+	# out" starts, and the formation holds its shape at a closer one.
+	_steer(actor, heading.normalized(), track, gap > jog_at)
 
 
 ## Whether the map covers both ends of a walk.
@@ -1578,9 +2110,11 @@ func _steer(actor, direction: Vector3, track: Dictionary, running: bool) -> void
 
 
 ## The heading after one frame of turning: `wanted` approached from `current` at no
-## more than `TURN_RATE` degrees a second. Pure and deterministic, so a regression
-## can hold the cap without a live fight.
-static func limited_heading(current: Vector3, wanted: Vector3, delta: float) -> Vector3:
+## more than `rate` degrees a second. Pure and deterministic, so a regression can
+## hold the cap without a live fight, and two callers with two different temperaments
+## - a body's feet and the band's formation - share one turn rule.
+static func limited_heading(current: Vector3, wanted: Vector3, delta: float,
+		rate: float = TURN_RATE) -> Vector3:
 	var flat_wanted := Vector3(wanted.x, 0.0, wanted.z)
 	if flat_wanted.length_squared() <= 0.000001:
 		return current
@@ -1589,7 +2123,7 @@ static func limited_heading(current: Vector3, wanted: Vector3, delta: float) -> 
 	if flat_current.length_squared() <= 0.000001:
 		return flat_wanted
 	flat_current = flat_current.normalized()
-	var max_step := deg_to_rad(TURN_RATE) * maxf(delta, 0.0)
+	var max_step := deg_to_rad(rate) * maxf(delta, 0.0)
 	var turn := flat_current.signed_angle_to(flat_wanted, Vector3.UP)
 	if absf(turn) <= max_step:
 		return flat_wanted
@@ -1710,40 +2244,118 @@ func _crumb_for(actor, track: Dictionary) -> Variant:
 	return _trail[index]
 
 
-## Where an escort stands: its own slot on a ring around the soul.
+## How many rows `bodies` bodies take, filling `FORMATION_PER_ROW` at a time.
+static func _row_of(bodies: int) -> int:
+	return (maxi(bodies, 0) + FORMATION_PER_ROW - 1) / FORMATION_PER_ROW
+
+
+## The heading the formation is drawn on: the eased one the drive keeps, or the
+## soul's own facing when nothing has eased one yet - a test's first call, or the
+## frame before the first drive. A zero vector here would collapse every row onto
+## the soul.
+func _formation_heading() -> Vector3:
+	if _formation_forward.length_squared() > 0.01:
+		return _formation_forward
+	return _soul_heading()
+
+
+## The soul's facing as a flat unit vector. It is the way the body last *walked* -
+## `Archer.set_locomotion` turns the whole rig onto its travel - and not the way
+## the camera looks: a formation re-drawn around the crosshair would swing the
+## whole band round every time the player glanced sideways at a sound.
+func _soul_heading() -> Vector3:
+	if player_body == null or not is_instance_valid(player_body):
+		return Vector3.FORWARD
+	var facing: Vector3 = -(player_body as Node3D).global_basis.z
+	facing.y = 0.0
+	if facing.length_squared() > 0.0001:
+		return facing.normalized()
+	return _view_forward(player_body)
+
+
+## How fast the soul's own body is travelling, flat, in metres a second - the pace
+## an escort has to match to stay in formation. Read off the body's velocity rather
+## than the key press: it is what the body is actually doing.
+func _soul_pace() -> float:
+	if player_body == null or not is_instance_valid(player_body):
+		return 0.0
+	var moving: Variant = player_body.get("velocity")
+	if typeof(moving) != TYPE_VECTOR3:
+		return 0.0
+	return Vector2((moving as Vector3).x, (moving as Vector3).z).length()
+
+
+## Ease the formation's heading after the soul's facing, once per drive pass:
+## every ally is drawn on the same heading, and the turn belongs to the band.
+func _update_formation_heading(delta: float) -> void:
+	if player_body == null or not is_instance_valid(player_body):
+		_formation_forward = Vector3.ZERO
+		return
+	_formation_forward = limited_heading(_formation_forward, _soul_heading(), delta,
+		FORMATION_TURN_RATE)
+
+
+## Where an escort stands: its own place in the band's formation.
 ##
-## The slot is the body's place among the *allies* on the ring, not its place in
-## `squad_ids`: the soul's own record holds no post, and counting it left a hole
-## that wrapped the last body onto the first body's point - two allies shoving each
-## other round one spot forever, which is the squad circling itself. The slot comes
-## from the squad order, so two allies never claim the same place and the ring is
-## what spreads them on the walk. On mapped ground a slot that falls inside a trunk
-## or a cage wall moves to the nearest ground a body can stand on, so the arrival
-## band is measured to somewhere reachable.
+## The place is a row and a lane. Rows stack from the front of the band to the
+## back - row 0 is `FORMATION_FRONT` metres ahead of the soul, and each row after
+## it is `FORMATION_ROW_GAP` further back - and the rows are handed out in
+## `Contracts.DISPOSITIONS` order, every rank taking the rows after the last row
+## its seniors filled. So no tank ever stands behind a melee body and no archer
+## stands in front of a blade, however many of each the band fields, and a full
+## band's places are two or three lines a few strides apart instead of one long
+## fence across the road.
+##
+## The lane is the body's place in its own row, centred on the row it is in. An
+## odd row is shifted half a lane, so a rank of one never stands on the soul's own
+## line and a rank of four stands abreast of it either side.
+##
+## On mapped ground a place that falls inside a trunk or a cage wall moves to the
+## nearest ground a body can stand on, so the arrival band is measured to
+## somewhere reachable.
 func _escort_post(actor, track: Dictionary) -> Vector3:
 	var soul: Vector3 = (player_body as Node3D).global_position
 	var merc_id := int(track.get("merc_id", 0))
-	var slot := 0
-	var seen := 0
-	for index in squad_ids.size():
-		var other_id := int(squad_ids[index])
+	var disposition := Contracts.disposition_id(_disposition(merc_id))
+	# This body's index among the free allies of its own disposition, and how many
+	# allies each disposition fields: the soul's own record holds no place, so
+	# counting it in would hand the last body the first body's lane.
+	var index := 0
+	var counts := {}
+	for rank_id in Contracts.DISPOSITIONS:
+		counts[rank_id] = 0
+	for raw_id in squad_ids:
+		var other_id := int(raw_id)
 		if not _is_free(other_id):
 			continue
 		var other = controller.body_of(other_id) if controller != null else null
 		if other != null and is_instance_valid(other) and other == player_body:
 			continue
+		var other_style := Contracts.disposition_id(_disposition(other_id))
 		if other_id == merc_id:
-			slot = seen
-		seen += 1
-	var ring := slot / ESCORT_SLOT_ANGLES
-	# Ring 0 sits on the four cardinals; ring 1 is turned half a slot, so a full
-	# band is a staggered double ring instead of an outer one in the inner one's
-	# shadow.
-	var half_slot := PI / float(ESCORT_SLOT_ANGLES)
-	var angle := TAU * float(slot % ESCORT_SLOT_ANGLES) / float(ESCORT_SLOT_ANGLES) \
-		+ half_slot * float(ring % 2)
-	var radius := follow_slack + ESCORT_SLOT_GAP * 0.5 * float(ring + 1)
-	var post := soul + Vector3(cos(angle), 0.0, sin(angle)) * radius
+			index = int(counts.get(other_style, 0))
+		counts[other_style] = int(counts.get(other_style, 0)) + 1
+	# The rows already spoken for are the ones the ranks in front of this one fill,
+	# and a rank never starts ahead of its own floor: the tanks' row is the front of
+	# the band whatever the band fields, the melee line is never in front of it, and
+	# the bows are never in front of the blades.
+	var floor_row := Contracts.DISPOSITIONS.find(disposition)
+	var ahead := 0
+	for step in floor_row:
+		ahead += int(counts.get(Contracts.DISPOSITIONS[step], 0))
+	var base_row := maxi(_row_of(ahead), floor_row)
+	var row := base_row + index / FORMATION_PER_ROW
+	var abreast := mini(FORMATION_PER_ROW,
+		maxi(int(counts.get(disposition, 0)) - (row - base_row) * FORMATION_PER_ROW, 1))
+	var lane := float(index % FORMATION_PER_ROW) - float(abreast - 1) * 0.5
+	# An odd row would put its middle body on the soul's own line - in the front
+	# rank that is a shield in the player's eyes - so it is shifted half a lane, and
+	# the side alternates with the row so the band is not biased to one shoulder.
+	if abreast % 2 == 1:
+		lane += 0.5 * (1.0 if row % 2 == 0 else -1.0)
+	var forward := _formation_heading()
+	var post := soul + forward * (FORMATION_FRONT - FORMATION_ROW_GAP * float(row)) \
+		+ forward.cross(Vector3.UP) * (lane * FORMATION_LANE)
 	if _mapped(soul, post):
 		post = nav.free_point(post)
 	return post
@@ -1798,11 +2410,23 @@ func _track_for(merc_id: int, actor, delta: float) -> Dictionary:
 			"anchor": actor.global_position, "anchor_left": POCKET_SECONDS,
 			"crumb": -1, "route": PackedVector3Array(), "route_goal": actor.global_position,
 			"route_left": 0.0, "route_at": 0,
+			"was_health": actor.get("health"), "hurt_left": 0.0,
+			"kite_best": 0.0, "kite_stuck": 0.0,
+			"withdraw_left": 0.0, "withdrawing": false, "withdraw_failed": false,
+			"cast_lock": 0.0,
 			"orbit": 1.0 if _rng.randf() < 0.5 else -1.0, "lateral": 0.7, "back": 0.35}
 	var track: Dictionary = _track[merc_id]
 	track["delta"] = delta
 	for key in TRACK_CLOCKS:
 		track[key] = maxf(0.0, float(track.get(key, 0.0)) - delta)
+	# A wound is what an archer re-positions for: health that fell since the last
+	# frame is the "on hit" the disposition's kite answers, whatever dealt it -
+	# a blade, a shaft, a bleed tick. Read off the body rather than off a signal,
+	# so a hit that lands between two squad ticks still counts.
+	var health := float(actor.get("health"))
+	if health < float(track.get("was_health", health)) - 0.01:
+		track["hurt_left"] = KITE_HIT_MEMORY
+	track["was_health"] = health
 	var moved: float = actor.global_position.distance_to(track["last"])
 	track["last"] = actor.global_position
 	var wanted: bool = Vector2(actor.move_direction).length_squared() > 0.01

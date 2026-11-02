@@ -77,8 +77,6 @@ const TOWN_WOOD_SEED := 7717
 const MARKER_POLL := 0.35
 ## Where the arrow hangs: over the name, high enough to clear the tallest rig.
 const TALK_ARROW_HEIGHT := 2.42
-## The campaign's ichor order, by the id the ledger knows it by.
-const ICHOR_ORDER := "bind_the_ichor"
 
 ## The square's standing services, arranged so no two 3 m rings overlap: walking
 ## the square always names exactly one thing.
@@ -319,7 +317,6 @@ func _step_world(delta: float) -> void:
 		return
 	controller.physics_step(delta)
 	_update_prompt()
-	_update_hint()
 
 func _process(delta: float) -> void:
 	Perf.begin("town.process")
@@ -964,12 +961,6 @@ func _refresh_marker() -> void:
 	if quest_marker.target() != keeper:
 		quest_marker.attach_to(keeper, TALK_ARROW_HEIGHT)
 
-## Whether the ledger is carrying the ichor order, which is the one thing the
-## square has to point its hint at: a reagent in the stash is useless until a
-## player knows the altar is where it is worked.
-func _altar_wanted() -> bool:
-	return warband != null and warband.quests.is_active(ICHOR_ORDER)
-
 # --- interaction -----------------------------------------------------------
 
 ## `TAB` quick-swaps the standing body's weapon set, exactly as the frontier does.
@@ -1071,7 +1062,7 @@ func _open_vendor(index: int) -> void:
 	hud.set_status("%s  ·  %s" % [vendor_menu.keeper_name(), vendor_menu.keeper_line()], 5.0)
 
 ## Whether a body is standing on the settlement's ground at all (the ring plus a
-## stride): what decides whether the town's key line or the trail's is the one
+## stride): what decides whether the town's own prompt or the trail's is the one
 ## worth showing. `margin` widens the ring, which is what a rule that needs two
 ## answers - "is it a town body" now, and "has it left for good" - asks with, so a
 ## body on the line cannot flicker between them.
@@ -1150,39 +1141,10 @@ func _on_paperdoll_changed() -> void:
 		return
 	controller.refresh_gear(paperdoll.selected_merc)
 
-## The key line for the square. The town is where a player learns the two screens,
-## so it always names them, plus whatever counter the body is standing at.
-var _hint_text := ""
-
-## The key line for the square, or "" when the body is nowhere near a counter.
-## The world writes it to the one HUD; a town standing alone writes it itself.
-func hint_line(actor) -> String:
-	var service := ""
-	if actor != null and is_instance_valid(actor):
-		service = service_at(actor.global_position)
-	var text := "O - warband   ·   TAB - weapon set   ·   P - stash and gear   ·   G - use what you stand at"
-	match service:
-		"stash":
-			text = "G - shared stash and paperdoll   ·   O - warband"
-		"altar":
-			text = "G - the Sacrificial Altar (anoint weapons / unbind / distil / brand)"
-		"recruiter":
-			text = "G - swear a new body (the first eight are free)"
-		"quartermaster":
-			text = "G - buy plain steel and arrows into the shared stash"
-		"vendor_orla":
-			text = "G - buy bows, staves and arrows, or sell spare gear"
-		"vendor_brann":
-			text = "G - buy blades, shields and arrows, or sell spare gear"
-		"vendor_vey":
-			text = "G - buy armour, or sell spare gear"
-	# A reagent in the stash is worthless until a player knows where it is worked,
-	# so while the ichor order is on the ledger the altar is named everywhere.
-	if service != "altar" and _altar_wanted():
-		text += "   ·   G - the altar anoints with ichor"
-	return text
-
-
+## The key line for the square: what the body is standing at, as the one prompt
+## under the crosshair. The town is where a player learns the two screens, so the
+## counter under his nose names the one he is at; the screens themselves are
+## taught by the keeper who tells him about them.
 ## The crosshair prompt for the counter the body stands at, or "".
 func prompt_line(actor) -> String:
 	if actor == null or not is_instance_valid(actor):
@@ -1204,14 +1166,6 @@ func prompt_line(actor) -> String:
 			return "G - Quartermaster Vey"
 	return ""
 
-
-func _update_hint() -> void:
-	if hud == null or controller == null:
-		return
-	var text := hint_line(controller.active_body(1))
-	if text != _hint_text:
-		_hint_text = text
-		hud.set_hint(text)
 
 func _update_prompt() -> void:
 	if hud == null:

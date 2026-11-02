@@ -19,6 +19,7 @@ const State = preload("res://scripts/player_state.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const INK := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -234,7 +235,7 @@ func _fill_pool(box: VBoxContainer, rows: Array[Dictionary], packing: bool) -> v
 	for row in rows:
 		var item_id := str(row["item_id"])
 		var held: bool = _warband != null and bool(_warband.is_auto_equip_restricted(item_id))
-		var button := Button.new()
+		var button := ItemHover.Row.new()
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_NONE
 		button.clip_text = true
@@ -243,9 +244,10 @@ func _fill_pool(box: VBoxContainer, rows: Array[Dictionary], packing: bool) -> v
 		button.add_theme_font_size_override("font_size", 12)
 		button.text = "%s  %s  ×%d  ·  %d G%s" % ["+" if packing else "-", str(row["name"]),
 			int(row["count"]), int(row["value"]), "  ·  HELD" if held else ""]
-		button.tooltip_text = "Click: moves %d. Shift-click: the whole stack. Right-click: restrict this item from auto-equip." % _amount
+		var hint := "Click: moves %d. Shift-click: the whole stack. Right-click: restrict this item from auto-equip." % _amount
 		if held:
-			button.tooltip_text = "Restricted from auto-equip. Click: moves %d. Shift-click: the whole stack. Right-click: allow auto-equip again." % _amount
+			hint = "Restricted from auto-equip. Click: moves %d. Shift-click: the whole stack. Right-click: allow auto-equip again." % _amount
+		button.show_item(item_id, _warband, hint, int(row["count"]))
 		button.gui_input.connect(func(event: InputEvent) -> void:
 			_on_pool_input(event, item_id))
 		if packing:

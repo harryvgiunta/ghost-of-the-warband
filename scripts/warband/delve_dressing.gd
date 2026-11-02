@@ -57,6 +57,11 @@ const JAMB_CLEAR := 1.8
 ## Every room grows from this and its own index, whatever order rooms are built in.
 const GROWTH_SEED := 9100
 
+## The floor is built `PLAN` times the size its lamps were authored at: a lamp
+## reaches `PLAN` times as far and burns `PLAN` squared as bright - the same light
+## at twice the distance - so a hall that doubled is lit exactly as it was.
+const PLAN := Layout.SCALE
+
 static var _stone_sets: Dictionary = {}
 static var _mats: Dictionary = {}
 static var _grown: Dictionary = {}
@@ -566,6 +571,16 @@ static func _motes(at: Vector3, tall: float) -> CPUParticles3D:
 
 # --- lights ------------------------------------------------------------------
 
+## A lamp at the plan's scale. A flickering lamp breathes around the energy it was
+## born with (`FireFlicker.base_energy`), so that moves with it: scaling only the
+## energy it holds would be undone on the lamp's first frame.
+static func _at_plan(lamp: OmniLight3D) -> void:
+	lamp.omni_range *= PLAN
+	lamp.light_energy *= PLAN * PLAN
+	if lamp.get("base_energy") != null:
+		lamp.set("base_energy", lamp.light_energy)
+
+
 ## One `Layout.LIGHTS` row, built into its room's node. Returns every light it made.
 static func light(node: Node3D, spec: Dictionary, seed_value: int) -> Array[Light3D]:
 	var kind := str(spec["kind"])
@@ -629,6 +644,7 @@ static func _sconce(node: Node3D, at: Vector3, inward: Vector3, seed_value: int,
 	lamp.omni_attenuation = 1.0
 	lamp.flicker = 0.16 if cold else 0.24
 	lamp.shadow_enabled = false
+	_at_plan(lamp)
 	host.add_child(lamp)
 	var out: Array[Light3D] = [lamp]
 	return out
@@ -665,6 +681,7 @@ static func _lantern(node: Node3D, at: Vector3, inward: Vector3, seed_value: int
 	lamp.omni_attenuation = 1.0
 	lamp.flicker = 0.12
 	lamp.shadow_enabled = false
+	_at_plan(lamp)
 	host.add_child(lamp)
 	var out: Array[Light3D] = [lamp]
 	return out
@@ -698,6 +715,7 @@ static func _fungus(node: Node3D, wall: Vector3, inward: Vector3, seed_value: in
 	lamp.omni_range = 7.5
 	lamp.omni_attenuation = 1.3
 	lamp.shadow_enabled = false
+	_at_plan(lamp)
 	node.add_child(lamp)
 	var out: Array[Light3D] = [lamp]
 	return out
@@ -714,6 +732,7 @@ static func _fire(node: Node3D, at: Vector3, seed_value: int) -> Array[Light3D]:
 	if lamp != null:
 		lamp.light_energy = 2.0
 		lamp.omni_range = 10.0
+		_at_plan(lamp)
 		out.append(lamp)
 	return out
 
@@ -747,6 +766,7 @@ static func _brazier(node: Node3D, at: Vector3, seed_value: int) -> Array[Light3
 	lamp.omni_attenuation = 1.0
 	lamp.flicker = 0.28
 	lamp.shadow_enabled = false
+	_at_plan(lamp)
 	host.add_child(lamp)
 	var out: Array[Light3D] = [lamp]
 	return out
@@ -784,6 +804,7 @@ static func _candles(node: Node3D, at: Vector3, seed_value: int) -> Array[Light3
 	lamp.omni_attenuation = 1.2
 	lamp.flicker = 0.2
 	lamp.shadow_enabled = false
+	_at_plan(lamp)
 	host.add_child(lamp)
 	var out: Array[Light3D] = [lamp]
 	return out
@@ -850,6 +871,8 @@ static func prop(node: Node3D, clutter, solids: StaticBody3D, spec: Dictionary,
 			_plinth(clutter, solids, at, yaw)
 		_:
 			push_error("delve dressing: unknown prop kind %s" % kind)
+	for lamp in out:
+		_at_plan(lamp)
 	return out
 
 

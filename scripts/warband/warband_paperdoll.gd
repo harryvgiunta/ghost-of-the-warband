@@ -30,6 +30,7 @@ const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const CharacterPreview = preload("res://scripts/character_preview.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Looks = preload("res://scripts/warband/warband_looks.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const CREAM := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -91,6 +92,9 @@ var preview = null
 var _stage: NinePatchRect
 var _set_label: Label
 var _set_button: Button
+## The two re-kits under the stage: this body's, and the whole band's.
+var _reequip_button: Button
+var _reequip_all_button: Button
 var _corpse_active := false
 ## The pieces the body carries, re-read from the vacuum on every repaint.
 var _corpse_ids: Array[String] = []
@@ -241,7 +245,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. TAB swaps the weapon set."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. RE-EQUIP hands a kit back and picks it again by priority. TAB swaps the weapon set."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _can_dress(merc_id) else -1
@@ -265,6 +269,7 @@ func refresh() -> void:
 		selected_merc = _first_merc_id()
 	_paint_mode()
 	_sync_picker()
+	_sync_reequip()
 	_refresh_slots()
 	_refresh_preview()
 	_sync_stash(_pool().rows(_warband.roster, _warband.cruor.brands))
@@ -359,6 +364,13 @@ func _ensure_built() -> void:
 	var spacer_head := Control.new()
 	spacer_head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(spacer_head)
+	_reequip_all_button = Button.new()
+	_reequip_all_button.text = "RE-EQUIP THE BAND"
+	_reequip_all_button.focus_mode = Control.FOCUS_NONE
+	_reequip_all_button.custom_minimum_size = Vector2(0, 28)
+	_reequip_all_button.tooltip_text = "Every body hands its kit back, then the roster is dressed one body at a time: the first names get the pick of the pool."
+	_reequip_all_button.pressed.connect(_reequip_band)
+	head.add_child(_reequip_all_button)
 	_merc_label = _label(head, "", 12, TEAL)
 
 	_picker_box = HBoxContainer.new()
@@ -409,6 +421,16 @@ func _ensure_built() -> void:
 	_set_button.custom_minimum_size = Vector2(0, 30)
 	_set_button.pressed.connect(_swap_set)
 	centre.add_child(_set_button)
+	# "This body" sits with the body's own controls; "the band" is a screen-level
+	# action and lives in the header with the title. Both hand the kit back to the
+	# pool first, so the band's own priorities are the only ones in play.
+	_reequip_button = Button.new()
+	_reequip_button.text = "RE-EQUIP"
+	_reequip_button.focus_mode = Control.FOCUS_NONE
+	_reequip_button.custom_minimum_size = Vector2(0, 30)
+	_reequip_button.tooltip_text = "Hand this body's kit back to the stash and dress it again: the dearest spare for every slot, a shield for a tank, a bow for an archer."
+	_reequip_button.pressed.connect(_reequip_selected)
+	centre.add_child(_reequip_button)
 
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 3)
@@ -448,7 +470,7 @@ func _ensure_built() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 func _make_slot_row(parent: Node, slot: int) -> Dictionary:
-	var button := Button.new()
+	var button := ItemHover.Row.new()
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(318, 32)
@@ -490,6 +512,19 @@ func _sync_picker() -> void:
 func _first_merc_id() -> int:
 	var ids: Array[int] = _dressable_ids()
 	return ids[0] if not ids.is_empty() else -1
+
+## The per-body re-kit names the body it would hand back, and is dead when the
+## screen has none to name: an empty warband, or a body the scene cannot dress.
+func _sync_reequip() -> void:
+	if _reequip_button == null or _warband == null:
+		return
+	var dressable := selected_merc > 0
+	_reequip_button.disabled = not dressable
+	if dressable:
+		_reequip_button.text = "RE-EQUIP  \u00b7  %s" % \
+			str(_warband.roster.name_of(selected_merc)).to_upper()
+	else:
+		_reequip_button.text = "RE-EQUIP"
 
 # --- worn slots ------------------------------------------------------------
 
@@ -537,6 +572,14 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 	if row.get("text_color", Color.TRANSPARENT) != color:
 		row["text_color"] = color
 		button.add_theme_color_override("font_color", color)
+	# Hovering the slot says what the piece is, not just what a click does; an
+	# empty slot has nothing to describe.
+	if worn.is_empty():
+		button.show_item("")
+	elif _corpse_active:
+		button.show_item(worn, _warband, "Click to take it from the body.")
+	else:
+		button.show_item(worn, _warband, "Click to take it off.")
 
 ## The panel's own QR: the same swap the world's `TAB` runs, on the body this
 ## screen is showing. The roster owns both pairs, so a piece put in a slot after
@@ -547,6 +590,30 @@ func _swap_set() -> void:
 	var result: Dictionary = _warband.swap_weapon_set(selected_merc)
 	set_status(str(result.get("message", "")))
 	refresh()
+
+## Re-kit the body on the stage: everything it wears goes back into the pool and
+## the band's own choice fills the slots again (`Warband.reequip_merc`), so a tank
+## comes back in a shield and a one-hander and an archer in a bow without the
+## player sorting through the stash by hand.
+func _reequip_selected() -> void:
+	if _corpse_active or _warband == null or selected_merc <= 0:
+		set_status("Choose a mercenary first.")
+		return
+	var result: Dictionary = _warband.reequip_merc(selected_merc)
+	set_status(str(result.get("message", "")))
+	refresh()
+	changed.emit()
+
+## Re-kit the whole band: every dressable body hands its kit back, then the roster
+## is dressed one body at a time out of that one pool. The first names in the
+## roster get the pick, which is what one shared stash costs.
+func _reequip_band() -> void:
+	if _corpse_active or _warband == null:
+		return
+	var result: Dictionary = _warband.reequip_warband()
+	set_status(str(result.get("message", "")))
+	refresh()
+	changed.emit()
 
 func _on_slot_pressed(slot: int) -> void:
 	# On a corpse the worn rows are the body's kit, so a press is a take rather
@@ -610,14 +677,13 @@ func _sync_stash(rows: Array[Dictionary]) -> void:
 		_stash_controls.erase(item_id)
 
 func _make_stash_row(item_id: String) -> Button:
-	var button := Button.new()
+	var button := ItemHover.Row.new()
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(0, 30)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.clip_text = true
 	button.add_theme_font_size_override("font_size", 12)
-	button.tooltip_text = "Click to wear it here. Right-click to hold it back from auto-equip."
 	button.pressed.connect(func() -> void: _on_stash_pressed(item_id))
 	button.gui_input.connect(func(event: InputEvent) -> void:
 		_on_stash_row_input(event, item_id))
@@ -633,7 +699,7 @@ func _apply_stash_row(button: Button, data: Dictionary, free_count: int) -> void
 	var tooltip := "Click to wear it here. Right-click to restrict this item from auto-equip."
 	if held:
 		tooltip = "Restricted from auto-equip. Right-click to allow auto-equip again."
-	button.tooltip_text = tooltip
+	button.show_item(item_id, _warband, tooltip, free_count)
 
 func _on_stash_pressed(item_id: String) -> void:
 	# The stash rows are hidden on the corpse screen; a press can only be a
@@ -697,6 +763,8 @@ func _paint_mode() -> void:
 	_stage.visible = not _corpse_active
 	_set_label.visible = not _corpse_active
 	_set_button.visible = not _corpse_active
+	_reequip_button.visible = not _corpse_active
+	_reequip_all_button.visible = not _corpse_active
 	_stash_hint.visible = not _corpse_active
 	_stash_box.visible = not _corpse_active
 	_corpse_box.visible = _corpse_active
@@ -769,7 +837,7 @@ func _sync_corpse_rows() -> void:
 		_merc_label.text = "%d piece(s)  /  %d gold on the body" % [_corpse_ids.size(), value]
 
 func _make_corpse_row(item_id: String, count: int = 1) -> Dictionary:
-	var button := Button.new()
+	var button := ItemHover.Row.new()
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(0, 30)
@@ -780,7 +848,7 @@ func _make_corpse_row(item_id: String, count: int = 1) -> Dictionary:
 	var label := display if count <= 1 else "%s  ×%d" % [display, count]
 	var worth := StashScript.value_of(item_id) * maxi(count, 1)
 	button.text = "%s  /  %d gold" % [label, worth]
-	button.tooltip_text = "Click to take it."
+	button.show_item(item_id, _warband, "Click to take it from the body.", count)
 	button.pressed.connect(take_piece.bind(item_id))
 	_corpse_rows_box.add_child(button)
 	return {"item_id": item_id, "name": display, "count": maxi(count, 1),

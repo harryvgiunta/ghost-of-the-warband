@@ -101,6 +101,189 @@ const PARTY_MODES: Array[String] = [PARTY_OFFENSIVE, PARTY_DEFENSIVE, PARTY_PASS
 ## What a warband that was never told otherwise fights as - a fresh one, a v8 file.
 const DEFAULT_PARTY_MODE := PARTY_OFFENSIVE
 
+# --- the party member's disposition ----------------------------------------
+
+## How one body fights on its own. The party's mode (`PARTY_MODES` above) says
+## which fights the squad takes; a disposition says how each mercenary takes
+## them. Every record carries one (`WarbandRoster.KEY_DISPOSITION`) and the squad
+## AI reads it per body, so a band of eight fights as eight intentions instead of
+## one - and the automatic arming reads it too, because a shield is a fighter's
+## choice as much as a shield hand is.
+##
+##   * `tank`  - the front line. Guards between blows instead of behind a rolled
+##     window, advances behind the guard, never gives ground to a blade and never
+##     breaks off a fight to bind a wound; a shield's skills and a ward first.
+##   * `melee` - the press. Attacks more than it guards, prefers the densest knot
+##     of hostiles and the wide arc and ring skills, and below
+##     `SquadDrive.WITHDRAW_SHARE` it falls back out of contact to bind a wound.
+##   * `bow`   - the back line. Holds the far end of its own bow's reach and, when
+##     struck or crowded, gives ground until the string can come up again (kites);
+##     prefers the volley skills; the arming hands it a bow.
+const DISPOSITION_TANK := "tank"
+const DISPOSITION_MELEE := "melee"
+const DISPOSITION_BOW := "bow"
+## Every disposition, front line first - the order the roster screen steps them.
+const DISPOSITIONS: Array[String] = [DISPOSITION_TANK, DISPOSITION_MELEE, DISPOSITION_BOW]
+## What a warband that was never told otherwise fights as. A v10 file, a fresh
+## warband and a rescued stranger all come up as this.
+const DEFAULT_DISPOSITION := DISPOSITION_MELEE
+const DISPOSITION_LABELS := {
+	DISPOSITION_TANK: "TANK",
+	DISPOSITION_MELEE: "MELEE",
+	DISPOSITION_BOW: "BOW",
+}
+## The one line the roster screen prints under the chip.
+const DISPOSITION_TEXT := {
+	DISPOSITION_TANK: "Holds the line: guards between blows, never falls back.",
+	DISPOSITION_MELEE: "Presses the densest knot and falls back under 30% to bind a wound.",
+	DISPOSITION_BOW: "Back line: kites when struck or crowded, then looses again.",
+}
+## How far down a disposition's skill list an ability may sit. `ABILITY_NEVER`
+## is a skill that disposition never reaches for, however idle it is.
+const ABILITY_NEVER := 99
+## Skill preferences, best first. A row names the skills its body reaches for
+## and spells out the ones it will not (`ABILITY_NEVER`); a skill no row has met
+## yet ranks `ABILITY_OTHER`, which loses to every named skill but is still used
+## when nothing better fits - a new anointed blade is not dead weight on a body
+## whose table has not caught up.
+const ABILITY_OTHER := 8
+const DISPOSITION_ABILITIES := {
+	DISPOSITION_TANK: {
+		"energy_shield": 0,
+		"shield_slam": 1,
+		"shield_bash": 2,
+		"shield_charge": 3,
+		"double_slash": 5,
+		"lunge_thrust": 6,
+		"spin_slash": 7,
+		"backstab": ABILITY_NEVER,
+		"dash": ABILITY_NEVER,
+		"charge": ABILITY_NEVER,
+	},
+	DISPOSITION_MELEE: {
+		"spin_slash": 0,
+		"shield_slam": 1,
+		"double_slash": 2,
+		"lunge_thrust": 3,
+		"shield_bash": 4,
+		"shield_charge": 5,
+		"fireball": 6,
+		"bone_spear": 6,
+		"energy_shield": 7,
+		"barrage": ABILITY_NEVER,
+		"triple_volley": ABILITY_NEVER,
+		"piercing_shot": ABILITY_NEVER,
+		"backstab": ABILITY_NEVER,
+		"dash": ABILITY_NEVER,
+		"charge": ABILITY_NEVER,
+	},
+	DISPOSITION_BOW: {
+		"barrage": 0,
+		"triple_volley": 1,
+		"piercing_shot": 2,
+		"energy_shield": 4,
+		"double_slash": 6,
+		"lunge_thrust": 7,
+		"spin_slash": ABILITY_NEVER,
+		"shield_bash": ABILITY_NEVER,
+		"shield_charge": ABILITY_NEVER,
+		"shield_slam": ABILITY_NEVER,
+		"backstab": ABILITY_NEVER,
+		"dash": ABILITY_NEVER,
+		"charge": ABILITY_NEVER,
+	},
+}
+## What the automatic arming adds to a piece's price when it is choosing for this
+## disposition: the number that makes a shield worth carrying, a greatsword worth
+## swinging and a bow worth drawing when the pool holds all three. A row may name
+## a piece's `kind` as well as its `category`, and the kind wins when it does -
+## `dagger` refines `1h`, so a body's opinion of a knife is not its opinion of a
+## sword - while a kind the row does not name falls through to the category, which
+## keeps `2h`, `bow`, `shield`, `focus` and plain armour on their single entry.
+const DISPOSITION_GEAR := {
+	DISPOSITION_TANK: {"shield": 170.0, "1h": 120.0, "focus": 40.0, "2h": -70.0,
+		"bow": -220.0, "staff": -120.0, "dagger": -20.0},
+	DISPOSITION_MELEE: {"2h": 150.0, "1h": 80.0, "dagger": 40.0, "focus": 20.0,
+		"shield": -60.0, "bow": -220.0, "staff": -100.0},
+	DISPOSITION_BOW: {"bow": 260.0, "1h": 30.0, "dagger": 20.0, "focus": 10.0,
+		"2h": -90.0, "staff": -60.0, "shield": -170.0},
+}
+## What a disposition wants in its **off hand**, best kind first. The off hand is a
+## stance of its own and not a second main hand: a tank's holds a shield (or a ward
+## behind it), a melee body pairs a second blade with a one-hander, and a bowman
+## keeps a ward there for when the string has to come up. The order outranks the
+## price on that one slot, which is the point of it - a cheap board still beats a
+## dear second dagger for the body that means to hold the line.
+const DISPOSITION_OFF_HAND := {
+	DISPOSITION_TANK: ["shield", "focus", "1h"],
+	DISPOSITION_MELEE: ["1h", "shield", "focus"],
+	DISPOSITION_BOW: ["focus", "1h", "shield"],
+}
+
+## The disposition id for `raw`: itself for a known id, the default for an empty
+## string or a word this build has never heard of - a save, a screen and the wire
+## all pass their own spelling through here.
+static func disposition_id(raw: Variant) -> String:
+	var wanted := str(raw).strip_edges().to_lower()
+	return wanted if DISPOSITIONS.has(wanted) else DEFAULT_DISPOSITION
+
+## The id for `raw` as written, or '' when it names no disposition this build
+## knows. `disposition_id` is the forgiving reader; this is the refusing one, for
+## a verb that must not silently accept a typo.
+static func disposition_exact(raw: Variant) -> String:
+	var wanted := str(raw).strip_edges().to_lower()
+	return wanted if DISPOSITIONS.has(wanted) else ""
+
+static func disposition_label(disposition: String) -> String:
+	return str(DISPOSITION_LABELS.get(disposition, DISPOSITION_LABELS[DEFAULT_DISPOSITION]))
+
+static func disposition_text(disposition: String) -> String:
+	return str(DISPOSITION_TEXT.get(disposition, DISPOSITION_TEXT[DEFAULT_DISPOSITION]))
+
+## The disposition one step on in `DISPOSITIONS` order, wrapping: what a press on
+## the roster's chip does.
+static func next_disposition(disposition: String) -> String:
+	var index := DISPOSITIONS.find(disposition_id(disposition))
+	return DISPOSITIONS[(index + 1) % DISPOSITIONS.size()]
+
+## How much this body wants to reach for `ability` right now: 0 is its first
+## choice, `ABILITY_NEVER` is a skill it never calls on. An unknown ability id is
+## `ABILITY_OTHER`, so a skill added later is used when nothing preferred fits.
+static func disposition_ability_rank(disposition: String, ability: String) -> int:
+	var row: Dictionary = DISPOSITION_ABILITIES.get(disposition_id(disposition), {})
+	return int(row.get(ability, ABILITY_OTHER))
+
+## The score the automatic arming gives a piece for this body: its price, plus
+## what its kind is worth to the disposition. One decision, used by a recruit's
+## dressing, the band-wide arming pass and a loot pickup's snap-in. A row names a
+## piece's `kind` where it has an opinion of its own (`dagger` over `1h`) and the
+## category otherwise, so a knife never scores as the sword it is not.
+static func disposition_gear_score(disposition: String, item: Dictionary,
+		value: int) -> float:
+	var row: Dictionary = DISPOSITION_GEAR.get(disposition_id(disposition), {})
+	var kind := str(item.get("kind", ""))
+	if row.has(kind):
+		return float(value) + float(row[kind])
+	return float(value) + float(row.get(str(item.get("category", "")), 0.0))
+
+## What this body wants in `slot_id`, higher being better and `-1` meaning the
+## slot is not decided this way - every slot but the off hand is scored by
+## `disposition_gear_score` alone, where price carries the choice. The off hand
+## reads its row's best kind first, so a tank's shield outranks any second blade
+## it could carry and a melee body's second blade outranks a board.
+static func disposition_off_hand_rank(disposition: String, item: Dictionary,
+		slot_id: String) -> int:
+	if slot_id != "off":
+		return -1
+	var row: Array = DISPOSITION_OFF_HAND.get(disposition_id(disposition), [])
+	var kind := str(item.get("kind", ""))
+	var index := row.find(kind)
+	if index < 0:
+		index = row.find(str(item.get("category", "")))
+	if index < 0:
+		return 0
+	return row.size() - index
+
 # --- tuning ----------------------------------------------------------------
 
 ## A lethal hit whose overkill is <= 10% of max health downs instead of kills.

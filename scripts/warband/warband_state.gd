@@ -48,13 +48,16 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## the Hollow's mouth and, while a party is below, who went down; v9 added the
 ## party's mode (`party_mode`), how the squad picks its fights; v10 added the
 ## auto-equip holds (`auto_equip_restricted`), the pieces the player keeps out of
-## the band's automatic arming. Older files still load: a record with no sets puts
+## the band's automatic arming; v11 added each record's disposition (the `tank` /
+## `melee` / `bow` behaviour the squad AI reads per body and the arming reads when
+## it picks a piece). Older files still load: a record with no sets puts
 ## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
 ## with an empty ledger, a file without anointings carries plain steel, a file
 ## without a delve has an empty pack and nobody below, a file without a party mode
-## fights offensive, and a file without holds arms from every piece, as it always did.
-const SAVE_VERSION := 10
+## fights offensive, a file without holds arms from every piece, as it always did,
+## and a file without a disposition fields every body as melee.
+const SAVE_VERSION := 11
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -406,6 +409,7 @@ func arm_warband() -> Dictionary:
 ## notify, which is what keeps a band-wide pass from repainting eight times.
 func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
 	var fitted: Array[Dictionary] = []
+	var disposition := roster.disposition_of(merc_id)
 	for raw_slot in slots:
 		var slot_id := str(raw_slot)
 		var gear := roster.equipped_of(merc_id)
@@ -416,7 +420,7 @@ func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
 			var main_item: Dictionary = State.ITEMS.get(str(gear.get("main", "")), {})
 			if Contracts.two_handed_item(main_item):
 				continue
-		var best := _best_spare(slot_id, gear)
+		var best := _best_spare(slot_id, gear, disposition)
 		if best.is_empty():
 			continue
 		var result := equip_merc(merc_id, slot_id, best, false)
@@ -425,14 +429,25 @@ func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
 		fitted.append({"merc_id": merc_id, "slot": slot_id, "item_id": best})
 	return fitted
 
-## The dearest legal spare for one slot: the one choice a recruit dressing and a
-## band-wide arming pass both make. Held pieces and naked coverings never compete.
-func _best_spare(slot_id: String, gear: Dictionary) -> String:
+## The best legal spare for one slot as this body would choose it: the one
+## decision a recruit dressing, a band-wide arming pass and a pickup's snap-in all
+## make. A disposition moves the score rather than the rule - a tank's shield and
+## one-hander beat a dearer greatsword, a bow beats everything in a bowman's main
+## hand - and the price still decides between two pieces of the same kind. Held
+## pieces and naked coverings never compete.
+##
+## The off hand is the one slot where the stance outranks the price
+## (`Contracts.disposition_off_hand_rank`): a tank takes the board over a second
+## blade however much the blade is worth, because holding the line is what the
+## hand is for. Inside one kind the dearest still wins, as everywhere else.
+func _best_spare(slot_id: String, gear: Dictionary, disposition: String = "") -> String:
 	var pool := field_stash()
+	var body := Contracts.disposition_id(disposition)
 	var off_worn := not str(gear.get("off", "")).is_empty() \
 		and not EquipmentRules.bare_garment(str(gear.get("off", "")))
 	var best := ""
-	var best_value := -1
+	var best_score := -INF
+	var best_rank := -1
 	for item_id in pool.pooled_ids():
 		if is_auto_equip_restricted(item_id):
 			continue
@@ -443,11 +458,198 @@ func _best_spare(slot_id: String, gear: Dictionary) -> String:
 			continue
 		if slot_id == "main" and off_worn and EquipmentRules.two_handed(item):
 			continue
-		var value := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
-		if value > best_value:
-			best_value = value
-			best = item_id
+		var rank := Contracts.disposition_off_hand_rank(body, item, slot_id)
+		var score := _gear_score(item_id, item, body)
+		if rank < best_rank or (rank == best_rank and score <= best_score):
+			continue
+		best_rank = rank
+		best_score = score
+		best = item_id
 	return best
+
+## What one piece is worth to one body: its price plus what its kind is worth to
+## the body's disposition (`Contracts.disposition_gear_score`). The one scoring
+## function the arming and a pickup both read, so a bowman's main hand and a
+## tank's shield hand cannot disagree about what they want.
+func _gear_score(item_id: String, item: Dictionary, disposition: String) -> float:
+	var value := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
+	return Contracts.disposition_gear_score(disposition, item, value)
+
+## Re-equip one body from the pool: everything it wears goes back first, then the
+## same choice an arming pass makes fills it again - the dearest legal spare for
+## each slot, scored by the body's disposition, so a tank comes back with a shield
+## and a one-hander, a bowman with a bow and a melee body with the greatsword.
+##
+## This is the re-kit `arm_warband` is not: the arming pass only fills what is
+## empty, while this hands a dressed body back and lets the band choose again.
+## Nothing is minted and nothing is lost - a released piece is a pool row before
+## the refill reads it, so the warband is worth the same number either side. The
+## rags a body is born in stay on (they are the mesh the rig draws, not gear) and
+## are traded for real armour as the fill finds it, and a body that carried an
+## alternate weapon set keeps one.
+##
+## Returns `{ok, merc_id, released, fitted, message}`: `released` the ids that
+## went back into the pool, `fitted` the `[{merc_id, slot, item_id}]` that walked
+## out of it. A lent warband, a body outside the party and a body that is down
+## are all refused with the kit untouched.
+func reequip_merc(merc_id: int) -> Dictionary:
+	var released: Array[String] = []
+	var fitted: Array[Dictionary] = []
+	if lent:
+		return _lent_refusal({"merc_id": merc_id, "released": released, "fitted": fitted})
+	if _arming:
+		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
+			"message": ""}
+	if merc_id <= 0 or not roster.has(merc_id):
+		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
+			"message": "No such mercenary."}
+	if not dressable_ids().has(merc_id):
+		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
+			"message": "%s is not with the party." % roster.name_of(merc_id)}
+	if not roster.is_alive(merc_id):
+		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
+			"message": "%s cannot be dressed right now." % roster.name_of(merc_id)}
+	var second_set := _second_set_bound(merc_id)
+	_arming = true
+	released = _release_worn(merc_id, field_stash())
+	fitted = _refill(merc_id, second_set)
+	_arming = false
+	var message := _reequip_message(merc_id, released, fitted)
+	if released.is_empty() and fitted.is_empty():
+		return {"ok": true, "merc_id": merc_id, "released": released, "fitted": fitted,
+			"message": message}
+	_notify()
+	armed.emit([merc_id])
+	return {"ok": true, "merc_id": merc_id, "released": released, "fitted": fitted,
+		"message": message}
+
+## Re-equip the whole band in one pass: every dressable body hands its kit back
+## into the pool first, then the roster is built one body at a time in recruitment
+## order, so the oldest name takes the pick of it. That is the point of the pass
+## rather than a flaw in it - the pool is one pile of gear, the first body to be
+## dressed gets the plate and the next one gets the mail.
+##
+## Both halves run in separate loops on purpose: releasing as each body is filled
+## would let a body keep a piece the later one is better suited to only because it
+## was already wearing it. Returns `{ok, mercs, released, fitted, message}`,
+## `mercs` being every body the refill fitted, front of the roster first.
+func reequip_warband() -> Dictionary:
+	var fitted: Array[Dictionary] = []
+	var mercs: Array[int] = []
+	var released: Array[String] = []
+	if lent:
+		return _lent_refusal({"mercs": mercs, "released": released, "fitted": fitted})
+	if _arming:
+		return {"ok": false, "mercs": mercs, "released": released, "fitted": fitted,
+			"message": ""}
+	var bodies: Array[int] = []
+	for merc_id in dressable_ids():
+		if roster.is_alive(merc_id):
+			bodies.append(merc_id)
+	# Which bodies carried a second weapon set, read before the release empties
+	# the one the refill would otherwise only put half a kit back into.
+	var seconds: Dictionary = {}
+	for merc_id in bodies:
+		seconds[merc_id] = _second_set_bound(merc_id)
+	var pool := field_stash()
+	_arming = true
+	for merc_id in bodies:
+		released.append_array(_release_worn(merc_id, pool))
+	for merc_id in bodies:
+		var got := _refill(merc_id, bool(seconds.get(merc_id, false)))
+		if got.is_empty():
+			continue
+		fitted.append_array(got)
+		if not mercs.has(merc_id):
+			mercs.append(merc_id)
+	_arming = false
+	var message := _band_reequip_message(mercs, fitted, released)
+	if released.is_empty() and fitted.is_empty():
+		return {"ok": true, "mercs": mercs, "released": released, "fitted": fitted,
+			"message": message}
+	_notify()
+	armed.emit(mercs)
+	return {"ok": true, "mercs": mercs, "released": released, "fitted": fitted,
+		"message": message}
+
+## Hand every real piece a body wears back into `pool`, both weapon sets included.
+## The rags it is born in stay on: `EquipmentRules.bare_garment` is the mesh the
+## rig draws rather than gear, and no arming pass would ever hand it out again.
+## Returns the ids released, in wear order. The caller owns the notify.
+func _release_worn(merc_id: int, pool: WarbandStash) -> Array[String]:
+	var out: Array[String] = []
+	if pool == null:
+		return out
+	for entry in roster.worn_entries(merc_id):
+		var item_id := str(entry.get("item", ""))
+		if item_id.is_empty() or EquipmentRules.bare_garment(item_id):
+			continue
+		if roster.take_worn(merc_id, str(entry.get("slot", "")),
+				int(entry.get("set", -1))) != item_id:
+			continue
+		pool.add(item_id, 1)
+		out.append(item_id)
+	return out
+
+## Fill a body that has just been stripped, from the pool the field works. The set
+## in the hands is filled first; a body that carried a second one has it filled
+## too, by putting that set in the hands for the length of the fill and swapping
+## back after - so what the player set up is re-armed instead of halved.
+## Returns `[{merc_id, slot, item_id}]`. The caller owns the notify.
+func _refill(merc_id: int, second_set: bool = false) -> Array[Dictionary]:
+	var fitted := _fill_slots(merc_id, DRESS_SLOTS)
+	if not second_set:
+		return fitted
+	var swap: Dictionary = roster.swap_weapon_set(merc_id)
+	if not bool(swap.get("ok", false)):
+		return fitted
+	fitted.append_array(_fill_slots(merc_id, RosterScript.HAND_SLOTS))
+	roster.swap_weapon_set(merc_id)
+	return fitted
+
+## Whether the body carries a pair in the weapon set the hands are not holding.
+## Both halves of the pair count: a stowed blade is re-armed like one in hand.
+func _second_set_bound(merc_id: int) -> bool:
+	var pair := roster.weapon_set_pair(merc_id, 1)
+	return not str(pair.get("main", "")).is_empty() \
+		or not str(pair.get("off", "")).is_empty()
+
+## One line naming what one body's re-equip took, or why it took nothing.
+func _reequip_message(merc_id: int, released: Array, fitted: Array) -> String:
+	var merc_name := roster.name_of(merc_id)
+	if not fitted.is_empty():
+		return "%s re-equips from %s: %s." % [merc_name, field_label(), _fitted_names(fitted)]
+	if not released.is_empty():
+		return "%s hands everything back; %s holds nothing spare." % [merc_name, field_label()]
+	return "%s is down to rags already, and %s holds nothing spare." % [merc_name, field_label()]
+
+## One line for a band-wide pass: how many pieces each body took, roster first. A
+## pass that only emptied the bodies says that instead of pretending to have fitted
+## something nobody had.
+func _band_reequip_message(mercs: Array, fitted: Array, released: Array) -> String:
+	if fitted.is_empty():
+		if released.is_empty():
+			return "There is nothing to re-equip: %s holds nothing spare." % field_label()
+		return "The band hands its kit back; %s holds nothing spare." % field_label()
+	var counts: Dictionary = {}
+	for entry in fitted:
+		var merc_id := int((entry as Dictionary).get("merc_id", 0))
+		counts[merc_id] = int(counts.get(merc_id, 0)) + 1
+	var parts: Array[String] = []
+	for merc_id in mercs:
+		var count := int(counts.get(int(merc_id), 0))
+		if count <= 0:
+			continue
+		parts.append("%s %d" % [roster.name_of(int(merc_id)), count])
+	return "The band re-equips from %s: %s." % [field_label(), ", ".join(parts)]
+
+## The names of the pieces a pass fitted, in fitting order.
+func _fitted_names(fitted: Array) -> String:
+	var names: Array[String] = []
+	for entry in fitted:
+		var item_id := str((entry as Dictionary).get("item_id", ""))
+		names.append(str(State.ITEMS.get(item_id, {}).get("name", item_id)))
+	return ", ".join(names)
 
 ## One line naming the bodies an arming pass fitted, and what each took.
 func _arm_message(fitted: Array) -> String:
@@ -705,8 +907,10 @@ func _worn_entries_all() -> Array[Dictionary]:
 	return out
 
 ## The piece a loot pickup should snap into the soul's hands if it can. It only
-## takes a slot that is empty or holds something clearly cheaper, so a player
-## never loses a good blade to a lucky drop; anything else stays in the stash.
+## takes a slot that is empty or holds something clearly worth less *to this body*,
+## so a player never loses a good blade to a lucky drop - and a bowman's bow beats
+## a dearer sword, a tank's shield beats a dearer second blade, and a melee
+## body's greatsword beats a cheaper one-hander. Anything else stays in the stash.
 ## Returns `{ok, slot, displaced, message}`.
 func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 	if lent:
@@ -721,15 +925,15 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 			"slot": ""}
 	if not roster.is_alive(merc_id):
 		return {"ok": false, "message": "", "slot": ""}
+	var disposition := roster.disposition_of(merc_id)
 	var gear := roster.equipped_of(merc_id)
 	var slot_id := EquipmentRules.auto_slot(item, gear)
 	if slot_id.is_empty():
 		return {"ok": false, "message": "", "slot": ""}
 	var worn := str(gear.get(slot_id, ""))
 	if not worn.is_empty():
-		var worn_price := WarbandStash.value_of(worn, cruor.brand_of(worn))
-		var new_price := WarbandStash.value_of(item_id, cruor.brand_of(item_id))
-		if new_price <= worn_price:
+		var worn_score := _gear_score(worn, State.ITEMS.get(worn, {}), disposition)
+		if _gear_score(item_id, item, disposition) <= worn_score:
 			return {"ok": false, "message": "", "slot": slot_id}
 	var result := equip_merc(merc_id, slot_id, item_id)
 	if not bool(result.get("ok", false)):
@@ -938,6 +1142,40 @@ func set_party_mode(mode: String) -> Dictionary:
 func cycle_party_mode() -> Dictionary:
 	var index := Contracts.PARTY_MODES.find(party_mode)
 	return set_party_mode(Contracts.PARTY_MODES[(index + 1) % Contracts.PARTY_MODES.size()])
+
+# --- a party member's disposition ------------------------------------------
+
+## What a guest is told when it reaches for a body's disposition: the squad it
+## would command runs on the host.
+const LENT_DISPOSITION_MESSAGE := "This is the host's warband: only the host says how its bodies fight."
+
+## Give one mercenary a disposition (`Contracts.DISPOSITIONS`). The party's mode
+## says which fights the squad takes; this says how this body takes them, and it
+## is per record - saved with the roster and lent with it, so a guest reads the
+## host's band. Returns `{ok, disposition, message}` with the body's disposition
+## afterwards: an unknown word is refused, and so is a lent warband's, because the
+## squad that would obey it is the host's. Only a real change is announced.
+func set_disposition(merc_id: int, disposition: String) -> Dictionary:
+	var now := roster.disposition_of(merc_id) if roster.has(merc_id) else Contracts.DEFAULT_DISPOSITION
+	if lent:
+		return _lent_refusal({"disposition": now, "message": LENT_DISPOSITION_MESSAGE})
+	if not roster.has(merc_id):
+		return {"ok": false, "disposition": now, "message": "No such mercenary."}
+	var wanted := Contracts.disposition_exact(disposition)
+	if wanted.is_empty():
+		return {"ok": false, "disposition": now,
+			"message": "%s is not a disposition." % str(disposition).to_upper()}
+	roster.set_disposition(merc_id, wanted)
+	if wanted != now:
+		_notify()
+	return {"ok": true, "disposition": wanted,
+		"message": "%s fights as %s." % [roster.name_of(merc_id),
+			Contracts.disposition_label(wanted)]}
+
+## Step one body to the next disposition in `Contracts.DISPOSITIONS` order -
+## what a press on the roster's chip does. TANK, MELEE, BOW and round again.
+func cycle_disposition(merc_id: int) -> Dictionary:
+	return set_disposition(merc_id, Contracts.next_disposition(roster.disposition_of(merc_id)))
 
 # --- possession bookkeeping ------------------------------------------------
 

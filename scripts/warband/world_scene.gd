@@ -145,9 +145,6 @@ const WIPE_BEAT := 2.5
 ## The trail's objective. It counts down to the square's own ring and is gone
 ## inside it: the town is where it is reached, so a body there never reads it.
 const TRAIL_OBJECTIVE := "REACH THE TOWN"
-const TRAIL_HINT := "The squad follows you   ·   M - map   ·   O - warband   ·   P - gear"
-## The key line under a prompt that names the revive hold.
-const G_REVIVE_HINT := "hold G   ·   five seconds, and a fifth of a breath to walk on"
 ## The band a fallen squadmate is taught in: close enough that the player is in
 ## the fight that put them down, wide enough that the tip does not wait for a body
 ## to fall at their feet.
@@ -260,7 +257,6 @@ var _crawls: Array = []
 var projectiles: Array = []
 var _reviving := false
 var _prompt_text := ""
-var _hint_text := ""
 ## The wrong-way sign's own memory: whether the road has been learned yet (armed),
 ## whether the banner is up, and the word standing at the gap in the trees. Both
 ## the banner and the sign are driven from the one poll, so they cannot disagree.
@@ -306,6 +302,10 @@ func _ready() -> void:
 	audio = get_node_or_null("/root/Audio")
 	_client = flow != null and str(flow.warband_role()) == "client"
 	start_area = _wanted_start()
+	# The shared blood art is generated once per process. Left to the first blow
+	# that needs it, the walk over its six images lands inside the damage frame
+	# of a session's first fight; here it lands inside the load.
+	BloodFx.prewarm()
 	_build_ground()
 	_build_camera()
 	_build_soul()
@@ -331,7 +331,7 @@ func _ready() -> void:
 	_attach_trail()
 	_build_brand()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	_write_prompt("", "")
+	_write_prompt("")
 	_announce()
 	if flow != null:
 		# `bind()` is where the flow seats the session on these bodies: a host
@@ -458,7 +458,6 @@ func _step_world(delta: float) -> void:
 	Perf.end()
 	Perf.begin("world.prompts")
 	_update_prompt()
-	_update_hint()
 	_push_downed_tip()
 	_update_bandage_tip()
 	_update_wrong_way()
@@ -697,7 +696,7 @@ func _build_menu() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "MenuLayer"
 	# Above the HUD's own `LAYER` (6): the menu's dim must sit over the bars, and
-	# below the tips' 7, because a key line under the crosshair is read over it.
+	# below the tips' 7, because the prompt under the crosshair is read over it.
 	layer.layer = 7
 	add_child(layer)
 	menu = MenuScript.new()
@@ -1482,7 +1481,7 @@ func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 	if camp != null:
 		camp.note_possession(merc_id)
 	_attach_brand()
-	_write_prompt("", "")
+	_write_prompt("")
 
 
 func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
@@ -1787,9 +1786,10 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 	_push_revive_tip(actor)
 
 
-## A guard that stopped a blow comes down and stays down until the button is
-## pressed again. Only the soul's own guard is called out: the band's bodies
-## break and re-raise theirs without an eye on them.
+## A bare guard that stopped a blow comes down and stays down until the button is
+## pressed again (a shield block never comes down, so it never lands here). Only
+## the soul's own guard is called out: the band's bodies break and re-raise theirs
+## without an eye on them.
 func _on_guard_broken(_slot: int, actor) -> void:
 	if hud == null or controller == null or actor == null or not is_instance_valid(actor):
 		return
@@ -2400,7 +2400,9 @@ func _activate_brand() -> void:
 # --- the one HUD line ------------------------------------------------------
 
 ## The prompt: the counter under the body's nose, then the camp's lesson, then the
-## metres left to the town.
+## metres left to the town. It is the only standing line the world writes; the key
+## legend that used to sit under it is gone - the lesson cards and the tips teach
+## the controls, and nothing on this HUD repeats them over a fight.
 func _update_prompt() -> void:
 	if hud == null or controller == null:
 		return
@@ -2413,14 +2415,14 @@ func _update_prompt() -> void:
 	var fallen = _revive_target()
 	if fallen != null:
 		_write_prompt("HOLD G  ·  PICK UP %s" % warband.roster.name_of(
-			int(controller.merc_of(fallen))).to_upper(), G_REVIVE_HINT)
+			int(controller.merc_of(fallen))).to_upper())
 		return
 	# A cage in reach outranks the trail's distance line and nothing else: it is
 	# the one thing standing at the body's feet wherever in the wood it is.
 	if soldier_cages != null and actor != null and is_instance_valid(actor) \
 			and soldier_cages.latch_target(actor) >= 0:
 		_write_prompt("G  -  CUT THE LATCH   ·   %d CAGE%s LEFT" % [soldier_cages.remaining(),
-			"" if soldier_cages.remaining() == 1 else "S"], "G  -  cut a cage latch")
+			"" if soldier_cages.remaining() == 1 else "S"])
 	# The counter under the body's nose wins over the camp's lesson, and the
 	# lesson wins over the trail: a body can only be standing in one of them.
 	# The Hollow first: below, its objective is the only line that means anything,
@@ -2433,7 +2435,7 @@ func _update_prompt() -> void:
 		text = camp.prompt_line(actor)
 	if text.is_empty():
 		text = _trail_objective_line(actor)
-	_write_prompt(text, _hint_text)
+	_write_prompt(text)
 
 
 ## "REACH THE TOWN · 214 m", or "" for a body already standing in the square. The
@@ -2452,36 +2454,14 @@ func _trail_objective_line(actor) -> String:
 	return "%s   ·   %d m" % [TRAIL_OBJECTIVE, int(round(metres))]
 
 
-## The key line: the lesson's, or the counter's, or the trail's.
-func _update_hint() -> void:
-	if hud == null or controller == null:
-		return
-	var actor = _soul()
-	var text := ""
-	if delve_area != null:
-		text = delve_area.hint_line(actor)
-	if text.is_empty() and town != null and town.in_square(actor):
-		text = town.hint_line(actor)
-	if text.is_empty() and camp != null:
-		text = camp.hint_line(actor)
-	if text.is_empty():
-		text = TRAIL_HINT
-	# A tip is the same information, larger, and it is already up: showing the key
-	# line underneath it is the same sentence twice on one screen.
-	if tips != null and tips.showing():
-		text = ""
-	_write_prompt(_prompt_text, text)
-
-
-func _write_prompt(prompt: String, hint: String) -> void:
+## The one line under the crosshair. Only the prompt is written: it is the world
+## saying an action is available, not a key legend.
+func _write_prompt(prompt: String) -> void:
 	if hud == null:
 		return
 	if prompt != _prompt_text:
 		_prompt_text = prompt
 		hud.set_prompt(prompt)
-	if hint != _hint_text:
-		_hint_text = hint
-		hud.set_hint(hint)
 
 
 ## What the HUD says the trail is, for a test that must not read a private label.

@@ -392,7 +392,10 @@ func stop_block() -> void:
 ## down and the fighter has to raise it again. A guard is a press, not a state,
 ## so a button held down holds nothing - the player clicks again for the next
 ## blow, and a body in a crowd cannot lean on one raised guard. A parry (the
-## timed deflection inside `PARRY_WINDOW`) is not a block and keeps its guard.
+## timed deflection inside `PARRY_WINDOW`) is not a block and keeps its guard,
+## and a shield is never spent at all: `WarbandBody.receive_melee` leaves it up
+## and charges the pool for the blow. This is the drop only - who it applies to
+## is the caller's rule.
 func break_guard() -> void:
 	stop_block()
 

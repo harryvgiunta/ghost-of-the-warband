@@ -12,6 +12,9 @@ extends SceneTree
 ##   * the squad's map walks every shaft to the lair and to every other shaft, no
 ##     sleeper can see a landing, every den's post is open ground, and every den is
 ##     crowded to `DEN_CROWD` bodies a post inside its own room;
+##   * the floor is built `SCALE` times the authored plan - every shaft, den post,
+##     light and prop still on its own room's floor, no room wider than the eye's
+##     reach;
 ##   * only the bodies inside `BODY_HIDE_DISTANCE` of the eye are drawn, and a
 ##     hidden body is still a body: it keeps its brain, its clock and its place;
 ##   * below, the party is the only thing a soul or a paperdoll can reach, the
@@ -83,6 +86,7 @@ func run() -> void:
 	await check_mouth_and_pack()
 	await check_descent()
 	check_floor_plan()
+	check_plan_geometry()
 	check_eye_culling()
 	await check_floor_map()
 	await _gather_at("mouth")
@@ -339,6 +343,58 @@ func check_floor_plan() -> void:
 	check(buried.is_empty(), "every den's post is open ground on the squad's map (%s)" % str(buried))
 
 
+## The floor's own geometry, at the size it is built: the plan is `SCALE` times the
+## authored one, every room is inside the rock box, and every piece the plan places
+## - a shaft's rope and the ring in front of it, a den's post, a light, a prop, the
+## master's ring - is on the floor of the room it names. A piece left behind by a
+## half-applied scale stands in the rock, so this is asked of the built floor.
+## And no room is wider corner to corner than the eye's reach: however big the
+## floor is built, a body in the room the eye stands in is drawn.
+func check_plan_geometry() -> void:
+	var cave = game.delve_area.cave
+	var box: Rect2 = Layout.BOUNDS
+	check(box.size.is_equal_approx(Layout.AUTHORED_BOUNDS.size * Layout.SCALE),
+		"the rock box is built at %s times the authored plan (%s)" % [Layout.SCALE, box.size])
+	var stray: Array[String] = []
+	var widest := 0.0
+	var widest_room := ""
+	for index in Layout.ROOMS.size():
+		var room: Dictionary = Layout.ROOMS[index]
+		var rect: Rect2 = room["rect"]
+		if not box.encloses(rect):
+			stray.append("%s in the rock" % str(room["id"]))
+		if rect.size.length() > widest:
+			widest = rect.size.length()
+			widest_room = str(room["id"])
+	check(widest <= cave.BODY_HIDE_DISTANCE,
+		"no room is wider than the eye's reach (%s %.1f m, reach %.1f m)"
+		% [widest_room, widest, cave.BODY_HIDE_DISTANCE])
+	for entry in Layout.LANDINGS:
+		for field in ["rope", "centre"]:
+			var at: Vector3 = entry[field]
+			if not _on_its_floor(str(entry["room"]), Vector2(at.x, at.z)):
+				stray.append("%s %s" % [str(entry["id"]), field])
+	for spec in Layout.DENS:
+		for member in Layout.den_members(spec):
+			var at: Vector3 = member["at"]
+			if not _on_its_floor(str(spec["room"]), Vector2(at.x, at.z)):
+				stray.append("%s post" % str(spec["id"]))
+	for spec in Layout.LIGHTS + Layout.PROPS:
+		var at: Vector3 = Layout.wall_point(str(spec["room"]), str(spec["wall"]), float(spec["along"]))["at"] \
+			if spec.has("wall") else spec["at"]
+		if not _on_its_floor(str(spec["room"]), Vector2(at.x, at.z)):
+			stray.append("%s %s" % [str(spec["room"]), str(spec["kind"])])
+	if not _on_its_floor(Layout.MASTER_ROOM, Vector2(Layout.MASTER_POINT.x, Layout.MASTER_POINT.z)):
+		stray.append("the master's ring")
+	check(stray.is_empty(), "every piece of the plan stands on its own room's floor (%s)" % str(stray))
+
+
+## Whether a cave-frame point is on the floor of the room it names.
+func _on_its_floor(room_id: String, at: Vector2) -> bool:
+	var index := Layout.room_index(room_id)
+	return index >= 0 and Layout.room_index_at(at) == index
+
+
 ## The eye's reach on the floor. The descent fields a den per room, and the frame
 ## pays for every one of them: a body past `BODY_HIDE_DISTANCE` is not a picture
 ## anyone can see (its room's lights are out and three rooms of bent tunnel stand
@@ -550,9 +606,14 @@ func check_den_and_loot() -> void:
 				others.append(other_id)
 	check(not others.is_empty(), "the squad has bodies left to strip")
 	var wanted := mini(others.size(), 3)
+	# The squad walks there from the shaft it came down, so the allowance is the
+	# authored 20 s at the plan's own scale: the floor is `SCALE` times as long and
+	# the squad covers the same ground at the same speed. The loop leaves as soon as
+	# the bodies are stripped, so the allowance costs nothing when the walk is quick.
+	var budget := 20.0 * Layout.SCALE
 	var waited := 0.0
 	var emptied := 0
-	while waited < 14.0 and emptied < wanted:
+	while waited < budget and emptied < wanted:
 		await create_timer(0.5).timeout
 		waited += 0.5
 		emptied = 0

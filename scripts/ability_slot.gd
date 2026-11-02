@@ -20,34 +20,45 @@ var _name: Label
 var _cost: Label
 var _slot := 0
 
+## The square the tile is built at when the caller asks for none: one arena tile.
+## The warband's HUD asks for 72, because three corners' worth of corner plate is
+## a lot of screen to spend on a skill row while a squad is being fought.
+const TILE := 96.0
 
-func configure(slot: int) -> void:
+
+## Lay the tile out at `extent` pixels square. Every child is placed and sized off
+## that one number, so a smaller tile is the same design at another measure rather
+## than a second layout: at 96 the icon is 52, the key 84 x 13 under it and the
+## name 88 x 14 beneath that; at 72 they are three quarters of that.
+func configure(slot: int, extent: float = TILE) -> void:
 	_slot = slot
-	custom_minimum_size = Vector2(96,96)
-	size = Vector2(96,96)
+	var box := maxf(24.0, extent)
+	var k := box / TILE
+	custom_minimum_size = Vector2(box, box)
+	size = Vector2(box, box)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_style = StyleBoxFlat.new()
 	_style.bg_color = Color(0.045,0.095,0.12,0.92)
 	_style.border_color = Color("58716b")
 	_style.set_border_width_all(1)
-	_style.set_corner_radius_all(8)
+	_style.set_corner_radius_all(roundi(8.0 * k))
 	add_theme_stylebox_override("panel",_style)
 	_icon = TextureRect.new()
-	_icon.position = Vector2(22,8)
-	_icon.size = Vector2(52,52)
+	_icon.position = Vector2(22,8) * k
+	_icon.size = Vector2(52,52) * k
 	_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_icon)
-	_cooldown = _label(Vector2(20,10),Vector2(56,48),20,CREAM)
+	_cooldown = _label(Vector2(20,10) * k,Vector2(56,48) * k,maxi(11,roundi(20.0 * k)),CREAM)
 	_cooldown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_cooldown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_cooldown.visible = false
-	_key = _label(Vector2(6,64),Vector2(84,13),10,MUTED)
+	_key = _label(Vector2(6,64) * k,Vector2(84,13) * k,maxi(8,roundi(10.0 * k)),MUTED)
 	# The name owns the bottom row so a long skill name is not clipped; the
 	# cost rides the icon's top-right corner instead.
-	_name = _label(Vector2(6,78),Vector2(88,14),10,GOLD)
-	_cost = _label(Vector2(66,8),Vector2(26,12),9,GOLD)
+	_name = _label(Vector2(6,78) * k,Vector2(88,14) * k,maxi(8,roundi(10.0 * k)),GOLD)
+	_cost = _label(Vector2(66,8) * k,Vector2(26,12) * k,maxi(8,roundi(9.0 * k)),GOLD)
 	_cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	visible = false
 

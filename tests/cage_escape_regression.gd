@@ -276,8 +276,6 @@ func check_spawn() -> void:
 		"the opening starts caged (%s)" % camp.sequencer.state_name())
 	check(camp.sequencer.objective() == "Take the shiv through the bars",
 		"the first errand is the blade through the bars (%s)" % camp.sequencer.objective())
-	check(camp.sequencer.hint().contains("K"),
-		"and the key line names K (%s)" % camp.sequencer.hint())
 	check(camp.cages_open_count() == 0,
 		"no latch is open at the start (%d)" % camp.cages_open_count())
 	check(camp.guards.size() == 2, "two watchers hold the clearing (%d)" % camp.guards.size())
@@ -406,8 +404,6 @@ func check_own_latch() -> void:
 	check(camp.sequencer.armed(), "but the machine knows the blade is in hand")
 	check(camp.sequencer.objective() == "Cut your latch",
 		"so the objective turns to the latch (%s)" % camp.sequencer.objective())
-	check(camp.sequencer.hint().contains("G"),
-		"and the key line names G (%s)" % camp.sequencer.hint())
 	check(camp.tips.has_shown(camp.TIP_CAGE), "the latch tip follows the pickup")
 	check(camp.interact(soul), "the camp consumes the press at its own cage")
 	check(camp.cages_open_count() == 1,
@@ -419,8 +415,6 @@ func check_own_latch() -> void:
 	check(state_count(SequencerScript.State.LOOSE) == 1, "LOOSE is entered exactly once")
 	check(camp.sequencer.objective() == "Get your bearings",
 		"the objective turns over (%s)" % camp.sequencer.objective())
-	check(camp.sequencer.hint().contains("W A S D"),
-		"and the key line teaches walking (%s)" % camp.sequencer.hint())
 	check(camp.tips.has_shown(camp.TIP_WALK), "the walk's tip is offered on that beat")
 
 # --- order guards, and a cage that needs steel -----------------------------
@@ -482,8 +476,6 @@ func check_bearings() -> void:
 		"the prompt carries the warband count under the fight's command (%s)" % prompt)
 	check(prompt.contains("Put the pair down"),
 		"and the command is the fight (%s)" % prompt)
-	check(str(camp.hint_line(soul)).contains("LMB"),
-		"the key line names the cut (%s)" % str(camp.hint_line(soul)))
 	clear_tips()
 	check_no_prose("the bearings beat")
 
@@ -763,9 +755,6 @@ func check_latches() -> void:
 	check(state_count(SequencerScript.State.WARBAND) == 1, "WARBAND is entered exactly once")
 	check(camp.sequencer.objective() == "Run to the town",
 		"and it says where to go (%s)" % camp.sequencer.objective())
-	var hint := str(camp.sequencer.hint())
-	check(hint.contains("run"), "the key line names the run (%s)" % hint)
-	check(hint.contains("arrow"), "and the gold arrow the player is to follow (%s)" % hint)
 	var marker = camp.get("_run_marker")
 	check(marker != null and is_instance_valid(marker) and bool(marker.get("visible")),
 		"the arrow stands over the gap in the trees")
@@ -901,9 +890,6 @@ func check_escape() -> void:
 	check(flat_range(soul.global_position, camp.GATE_POINT) <= float(camp.ESCAPE_RADIUS) + 0.5,
 		"the soul reached the mouth (%.1f m from it)"
 		% flat_range(soul.global_position, camp.GATE_POINT))
-	var hint := str(camp.sequencer.hint())
-	check(hint.contains("trail"), "the escape's key line names the trail (%s)" % hint)
-	check(hint.contains("town"), "and names the town at the far end (%s)" % hint)
 	check(camp.sequencer.objective().is_empty(),
 		"past the mouth the world's own line takes over (%s)" % camp.sequencer.objective())
 	check(not camp.tutorial_cleared(),

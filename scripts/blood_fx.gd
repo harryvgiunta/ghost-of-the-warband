@@ -15,6 +15,9 @@ const FADE_SECONDS := 3.0
 ## corpse lies there (`scripts/corpse_hold.gd` holds corpses for five minutes).
 const POOL_LIFETIME := 300.0
 const SPLAT_VARIANTS := 3
+## The per-scene owner of every stain, resolved on the first wound. Named here so
+## `prewarm()` can load it while the scene is still loading.
+const FIELD_PATH := "res://scripts/blood_field.gd"
 
 static var _splat_textures: Array[Texture2D] = []
 static var _pool_texture: Texture2D
@@ -152,7 +155,7 @@ static func field_for(parent: Node) -> Node:
 	var existing := root.get_node_or_null("BloodField")
 	if existing != null:
 		return existing
-	var script := load("res://scripts/blood_field.gd")
+	var script := load(FIELD_PATH)
 	if script == null:
 		return null
 	var field: Node = script.new()
@@ -213,6 +216,21 @@ static func drop_mesh() -> SphereMesh:
 static func drop_material() -> StandardMaterial3D:
 	_prepare()
 	return _drop_material
+
+# --- share art -------------------------------------------------------------
+
+## Builds the shared blood art now instead of inside the first blow that needs
+## it, and compiles the per-scene field script the same way. Rasterising the
+## splat, pool, footprint and soak textures is a forty-millisecond walk over six
+## images and compiling `blood_field.gd` is another twenty; lazily, a session's
+## first armed hit pays both inside a damage frame, and the frame a blow lands on
+## is the one frame that cannot afford it. A scene calls this once as it builds,
+## where the cost is part of the load. Idempotent.
+static func prewarm() -> void:
+	_prepare()
+	# `field_for` resolves this script on the first wound. The load is cached, so
+	# the blow that asks for it finds a compiled script instead of compiling one.
+	ResourceLoader.load(FIELD_PATH, "Script", ResourceLoader.CACHE_MODE_REUSE)
 
 static func _prepare() -> void:
 	if _prepared:

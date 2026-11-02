@@ -112,22 +112,6 @@ func objective() -> String:
 	return ""
 
 
-## The key line under the objective: exactly what to press, this beat.
-func hint() -> String:
-	match _state:
-		State.CAGED:
-			return "G  -  pick the latch" if _armed else "K  -  take the ironwood shiv"
-		State.LOOSE:
-			return "W A S D  -  walk   ·   MOUSE  -  look"
-		State.FREEING:
-			return "G  -  cut a latch   ·   K  -  take a weapon"
-		State.WARBAND:
-			return "W A S D  -  run   ·   follow the gold arrow"
-		State.ESCAPING:
-			return "W A S D  -  run the trail   ·   the town is at the far end"
-	return ""
-
-
 func cages_opened() -> int:
 	return _opened.size()
 

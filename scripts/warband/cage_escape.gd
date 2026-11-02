@@ -245,8 +245,8 @@ const WEAPON_DROPS := [
 	["dagger_ironwood", Vector3(1.4, 0.15, -27.0)],
 	["branch_heavy", Vector3(-4.6, 0.15, -16.5)],
 ]
-## The opening's whole script: one key line and one command, offered once, from
-## the beat that has the question. A tip never opens a page and never pauses the
+## The opening's whole script: one key and one command, offered once, from the
+## beat that has the question. A tip never opens a page and never pauses the
 ## game. These ids are what the world's `WarbandTips` dedupes on.
 const TIP_CAGE := "opening_cage"
 const TIP_WALK := "opening_walk"
@@ -675,17 +675,6 @@ func prompt_line(actor) -> String:
 	return sequencer.objective()
 
 
-## The opening's key line, or "" when the body is not the camp's business.
-func hint_line(actor) -> String:
-	if not lesson_running() or actor == null or not is_instance_valid(actor):
-		return ""
-	if duel != null and duel.active():
-		return duel.hint()
-	if not _in_camp(actor) and sequencer.state() != SequencerScript.State.ESCAPING:
-		return ""
-	return sequencer.hint()
-
-
 ## How many latches have been cut, 0..5, the player's own cage included. One per
 ## cage, in any order, and the fifth is what looses the squad: this is a progress
 ## count, not an all-or-nothing answer.
@@ -1081,7 +1070,7 @@ func _on_watcher_attack(attacker, amount: float, victim) -> void:
 
 # --- the tips --------------------------------------------------------------
 
-## One opening tip, once. `OPENING_TIPS` holds the copy: a key line and a command,
+## One opening tip, once. `OPENING_TIPS` holds the copy: a key and a command,
 ## never a page.
 func _play_tip(id: String) -> bool:
 	if tips == null or not OPENING_TIPS.has(id):
@@ -1368,9 +1357,8 @@ func _strike_would_land(watcher, body) -> bool:
 	return watcher.global_position.distance_to(body.global_position) <= reach
 
 
-## A duel beat changed. The HUD's prompt and key line are polled by the world
-## every frame; this only has to keep the two arrows honest on the frame the beat
-## turns over.
+## A duel beat changed. The HUD's prompt is polled by the world every frame; this
+## only has to keep the two arrows honest on the frame the beat turns over.
 func _on_duel_step(_step: int) -> void:
 	_update_shiv_marker()
 	_update_latch_marker()

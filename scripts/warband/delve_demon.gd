@@ -10,6 +10,8 @@ extends "res://scripts/devil_mob.gd"
 ## world's hunt surface (`hunt`, `hunting`) so the squad's retarget can point it
 ## at a body like any other hostile.
 
+const Layout = preload("res://scripts/warband/delve_layout.gd")
+
 const BOSS_ID := "hell_goat"
 ## The master's numbers, laid over the goat's own profile so the clip timing the
 ## sampler reads (windup, strike, recover) stays the goat's.
@@ -47,8 +49,10 @@ func _ready() -> void:
 	glow.name = "Hellfire"
 	glow.position = Vector3(0.0, 1.2, 0.0)
 	glow.light_color = Color(1.0, 0.28, 0.12)
-	glow.light_energy = 1.4
-	glow.omni_range = 6.5
+	# The floor is built `Layout.SCALE` times its drawn size, and the light under the
+	# master goes with it: the same glow at twice the distance.
+	glow.light_energy = 1.4 * Layout.SCALE * Layout.SCALE
+	glow.omni_range = 6.5 * Layout.SCALE
 	glow.omni_attenuation = 1.4
 	glow.shadow_enabled = false
 	add_child(glow)

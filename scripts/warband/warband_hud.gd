@@ -1,30 +1,88 @@
 class_name WarbandHud
 extends CanvasLayer
-## The in-battle readout for a possession game: the body you are inside, the
-## squad you can jump into, and the one prompt that matters right now.
+## The in-battle readout for a possession game: the soul you are inside, the band
+## you can jump into, the purse, and the one prompt that matters right now.
 ##
 ## It owns no gameplay state: `set_body()` is called by the scene whenever the
 ## soul moves and every value is re-read each frame, so a revive, a loot or a
 ## downed body is never a stale label. The tactical screen (O) is
 ## `WarbandScreen`; this is the thin layer you read while fighting.
+##
+## ## Where it sits
+##
+## The corners are the readout, and each one is one object:
+##
+##   * **Bottom left - the soul.** A bust of the body you are inside, framed by
+##     the ledger's own iron clamp, with his name and state, health over stamina
+##     and the skill row in the same plate. Every fact about the body you are
+##     driving is in that one plate and nowhere else.
+##   * **Top right - the band.** Headed by the purse (gold and the quiver, which
+##     is what a bow runs out of), then one row per mercenary in the field: the
+##     badge for how he fights, his name, his health and his state. The campaign
+##     ledger hangs under it.
+##   * **Centre.** The crosshair, the contextual prompt at the bottom and the two
+##     banners at the top. There is no standing key legend: the controls are
+##     taught by the lesson cards and the tips, not repeated over the fight.
+##
+## The top left and the bottom right belong to the world: `WarbandTips` and the
+## branded sigil tile.
 
+const Ledger = preload("res://scripts/ui/ledger_theme.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
-const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
+const CharacterPreview = preload("res://scripts/character_preview.gd")
+const Looks = preload("res://scripts/warband/warband_looks.gd")
+const State = preload("res://scripts/player_state.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
 const LAYER := 6
-const BAR_SIZE := Vector2(260, 10)
+## The two corner plates are the same width, and that width is the skill row:
+## three 72 px tiles, the two gaps between them and the plate's own padding. It
+## was 336 px around 96 px tiles - a quarter of a 1440 px screen for each corner,
+## over the fight it is meant to sit beside.
+const PANEL_WIDTH := 244.0
+const MARGIN := 14.0
+const PANEL_PAD := 10
+## The bust: portrait proportions, framed by `clamp.png` nine-sliced at 14 px. It
+## is a face for a corner, not a character sheet.
+const PORTRAIT_SIZE := Vector2(66, 82)
+const METER_HEIGHT := 7.0
+## The colours the Blood Ledger already uses, read from the one theme so the HUD
+## and the screens cannot drift apart.
+const BONE := Ledger.BONE
+const BONE_DIM := Ledger.BONE_DIM
+const BRASS := Color("d9b877")
+const MUTED := Color("9c8a6a")
+## The disposition word under a band row: brass, but quiet enough to sit under a
+## name it is not competing with.
+const DISPOSITION_INK := Color("b79a68")
+const ALIVE_INK := Color("7fd7c4")
+const DOWNED_INK := Color("e08a3c")
+const DEAD_INK := Color("8a827a")
+const HEALTH_FILL := Color("77241c")
+const STAMINA_FILL := Color("2f6f63")
+const METER_BACK := Color("14181a")
+const METER_EDGE := Color("46443f")
+## How a disposition reads on the band rows: the small medallion of the ledger's
+## icon set, and the word under the name.
+const DISPOSITION_BADGE := {
+	Contracts.DISPOSITION_TANK: "shield",
+	Contracts.DISPOSITION_MELEE: "blade",
+	Contracts.DISPOSITION_BOW: "bow",
+}
 ## How long a break-off (or an ally coming back) is said in the banner, and how
 ## long that merc is kept quiet after it: the standing line carries the state, the
 ## banner is only the moment.
 const AGGRO_BANNER_SECONDS := 3.5
 const AGGRO_REPEAT_SECONDS := 6.0
-## The skill row under the crosshair: three 96 px tiles, so the HUD shows what
-## the number row will do before the player presses it.
-const TILE_SIZE := Vector2(96, 96)
-const TILE_GAP := 6
+## The skill row: three tiles and the two gaps between them are what the plates
+## are wide, so the corners and the row share one measure. The tile is
+## `AbilitySlot.TILE`, which the warband asks for at 72 px instead of the arena's
+## 96: three of them plus these gaps and the plate padding is `PANEL_WIDTH`.
+const TILE_GAP := 4
+const TILE_SIZE := 72.0
 ## Nothing in the warband is clicked while the pointer is captured, so the
 ## reticle is the only thing that says where the soul is aiming. It is drawn by
 ## `Reticle` below, which carries its own measurements.
@@ -43,9 +101,20 @@ var _health_label: Label
 var _health_bar: ProgressBar
 var _stamina_label: Label
 var _stamina_bar: ProgressBar
+## The bust: a second rig on its own SubViewport, drawn only when the body or its
+## kit changes. `_portrait_sig` is what it is currently dressed in.
+var _portrait = null
+var _portrait_eye: TextureRect
+var _portrait_sig := ""
+## The health state the bust was last tinted for (`_tint_portrait`).
+var _portrait_state := -2
 var _ability_tiles: Array = []
 var _squad_box: VBoxContainer
-var _squad_sig := ""
+## One row per mercenary on the field, keyed by id and kept across frames: the
+## rows carry textures now, so a repaint updates them where they stand instead of
+## freeing and rebuilding the band every time somebody takes a hit.
+var _rows: Dictionary = {}
+var _party_label: Label
 ## The band's own fights: a standing line under the roster while an AI ally is in
 ## one (`set_aggro`), and the ids it named last frame so a break-off is announced
 ## once. `_aggro_mute` holds a merc's cooldown after that line, because a body
@@ -56,13 +125,11 @@ var _aggro_ids: Array[int] = []
 var _aggro_names: Dictionary = {}   # merc_id -> the name last reported
 var _aggro_mute: Dictionary = {}    # merc_id -> seconds of quiet left
 var _purse_label: Label
-var _essence_label: Label
 ## The campaign ledger block (see `set_quests`) and the signature of what it
 ## currently shows, so a repaint only happens when the objectives actually move.
 var _quest_box: VBoxContainer
 var _quest_sig := ""
 var _prompt_label: Label
-var _hint_label: Label
 var _status_label: Label
 var _status_seconds := 0.0
 ## The wrong-way banner: the one line in the warband that is a warning rather
@@ -78,9 +145,18 @@ func _ready() -> void:
 
 func configure(warband) -> void:
 	_warband = warband
-	if _warband != null and not _warband.changed.is_connected(_refresh_purse):
-		_warband.changed.connect(_refresh_purse)
+	if _warband != null and not _warband.changed.is_connected(_on_warband_changed):
+		_warband.changed.connect(_on_warband_changed)
 	_refresh_purse()
+	_refresh_squad()
+	_refresh_portrait()
+
+
+## The purse moved or a piece of kit did: the rail and the bust both read the
+## warband, and the bust re-dresses only if what it shows actually changed.
+func _on_warband_changed() -> void:
+	_refresh_purse()
+	_refresh_portrait()
 
 ## The body the local soul is inside. `merc_name` is the roster name; a null
 ## body means the soul is between bodies (spectating a wipe).
@@ -96,6 +172,7 @@ func set_body(body, merc_name: String = "", merc_id: int = -1) -> void:
 	# a body panel that reads "No body" behind it is a lie.
 	_refresh_body()
 	_refresh_squad()
+	_refresh_portrait()
 
 ## The body the soul watches while every living body is taken: `merc_name` is
 ## the mercenary, `holder` the player inside him ("" for none). The body panel
@@ -114,15 +191,6 @@ func body_lines() -> Array[String]:
 	if _state_label != null:
 		out.append(_state_label.text)
 	return out
-
-## The standing key line: what to press on this beat ("G - cut the latch",
-## "R - Rending Strike"). Unlike the prompt it does not vanish on its own, so a
-## player who looks away for a second can find the controls again.
-func set_hint(text: String) -> void:
-	if _hint_label == null:
-		return
-	_hint_label.text = text
-	_hint_label.visible = not text.is_empty()
 
 ## One line under the crosshair: "HOLD G - PICK UP DORN", "K - loot Shortsword".
 func set_prompt(text: String) -> void:
@@ -197,7 +265,7 @@ func set_quests(rows: Array) -> void:
 		var entry: Dictionary = row
 		var title := Label.new()
 		title.text = str(entry.get("title", ""))
-		title.add_theme_font_size_override("font_size", 13)
+		title.add_theme_font_size_override("font_size", 11)
 		title.add_theme_color_override("font_color",
 			Color(0.96, 0.83, 0.55) if not bool(entry.get("done", false)) else Color(0.62, 0.86, 0.60))
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -205,7 +273,7 @@ func set_quests(rows: Array) -> void:
 		_quest_box.add_child(title)
 		var detail := Label.new()
 		detail.text = "%s   ·   %s" % [str(entry.get("line", "")), str(entry.get("detail", ""))]
-		detail.add_theme_font_size_override("font_size", 12)
+		detail.add_theme_font_size_override("font_size", 10)
 		detail.add_theme_color_override("font_color", Color(0.82, 0.79, 0.68))
 		detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -263,128 +331,16 @@ func _build() -> void:
 	_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root_control.add_child(_reticle)
 
-	var frame := PanelContainer.new()
-	frame.name = "BodyPanel"
-	frame.position = Vector2(18, 16)
-	frame.custom_minimum_size = Vector2(BAR_SIZE.x + 28, 0)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root_control.add_child(frame)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 3)
-	frame.add_child(column)
-
-	_name_label = Label.new()
-	_name_label.text = "No body"
-	column.add_child(_name_label)
-	_state_label = Label.new()
-	_state_label.add_theme_font_size_override("font_size", 12)
-	column.add_child(_state_label)
-	_health_bar = ProgressBar.new()
-	_health_bar.custom_minimum_size = BAR_SIZE
-	_health_bar.show_percentage = false
-	_health_bar.max_value = 100.0
-	_health_bar.value = 100.0
-	column.add_child(_health_bar)
-	_health_label = Label.new()
-	_health_label.add_theme_font_size_override("font_size", 11)
-	column.add_child(_health_label)
-	# Stamina sits under health in the same panel: every skill and every sprint
-	# is paid from it, so it belongs next to the number it is spent beside.
-	_stamina_bar = ProgressBar.new()
-	_stamina_bar.name = "Stamina"
-	_stamina_bar.custom_minimum_size = BAR_SIZE
-	_stamina_bar.show_percentage = false
-	_stamina_bar.max_value = 100.0
-	_stamina_bar.value = 100.0
-	column.add_child(_stamina_bar)
-	_stamina_label = Label.new()
-	_stamina_label.add_theme_font_size_override("font_size", 11)
-	column.add_child(_stamina_label)
-
-	var squad_panel := PanelContainer.new()
-	squad_panel.name = "SquadPanel"
-	squad_panel.position = Vector2(18, 128)
-	squad_panel.custom_minimum_size = Vector2(300, 0)
-	squad_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root_control.add_child(squad_panel)
-	_squad_box = VBoxContainer.new()
-	_squad_box.name = "Squad"
-	_squad_box.add_theme_constant_override("separation", 1)
-	_squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	squad_panel.add_child(_squad_box)
-
-	# The band's fights, under the roster and outside its repaint: `_refresh_squad`
-	# frees every row it owns, so this line lives in its own box and is written by
-	# `set_aggro` alone. Hidden while the band is whole.
-	_aggro_box = VBoxContainer.new()
-	_aggro_box.name = "Aggro"
-	_aggro_box.add_theme_constant_override("separation", 1)
-	_aggro_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	squad_panel.add_child(_aggro_box)
-	_aggro_label = Label.new()
-	_aggro_label.name = "AggroLine"
-	_aggro_label.add_theme_font_size_override("font_size", 11)
-	_aggro_label.add_theme_color_override("font_color", Color(0.96, 0.71, 0.34))
-	_aggro_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_aggro_label.custom_minimum_size = Vector2(282, 0)
-	_aggro_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_aggro_label.visible = false
-	_aggro_box.add_child(_aggro_label)
-
-	_purse_label = Label.new()
-	_purse_label.name = "Purse"
-	_purse_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_purse_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_purse_label.position = Vector2(-20, 16)
-	_purse_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	root_control.add_child(_purse_label)
-
-	_essence_label = Label.new()
-	_essence_label.name = "Essence"
-	_essence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_essence_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_essence_label.position = Vector2(-20, 38)
-	_essence_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_essence_label.add_theme_font_size_override("font_size", 12)
-	root_control.add_child(_essence_label)
-
-	# The campaign ledger, under the purse: one block per objective the
-	# quartermaster has handed over, read from `WarbandQuests`. It is a tracker,
-	# not a menu - nothing here is clicked while the pointer is captured - and it
-	# stays hidden until there is an order to show.
-	var quest_panel := PanelContainer.new()
-	quest_panel.name = "QuestPanel"
-	quest_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	quest_panel.position = Vector2(-20, 62)
-	quest_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	quest_panel.custom_minimum_size = Vector2(300, 0)
-	quest_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	quest_panel.visible = false
-	root_control.add_child(quest_panel)
-	_quest_box = VBoxContainer.new()
-	_quest_box.name = "Quests"
-	_quest_box.add_theme_constant_override("separation", 2)
-	_quest_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	quest_panel.add_child(_quest_box)
-
-	_hint_label = Label.new()
-	_hint_label.name = "Hint"
-	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_hint_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_hint_label.position = Vector2(-310, -154)
-	_hint_label.custom_minimum_size = Vector2(620, 0)
-	_hint_label.add_theme_font_size_override("font_size", 16)
-	_hint_label.add_theme_color_override("font_color", Color(0.82, 0.78, 0.62))
-	_hint_label.visible = false
-	root_control.add_child(_hint_label)
+	_build_soul_plate(root_control)
+	_build_band_plate(root_control)
 
 	_prompt_label = Label.new()
 	_prompt_label.name = "Prompt"
 	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_prompt_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_prompt_label.position = Vector2(-180, -120)
-	_prompt_label.custom_minimum_size = Vector2(360, 0)
-	_prompt_label.add_theme_font_size_override("font_size", 20)
+	_prompt_label.position = Vector2(-160, -96)
+	_prompt_label.custom_minimum_size = Vector2(320, 0)
+	_prompt_label.add_theme_font_size_override("font_size", 17)
 	_prompt_label.visible = false
 	root_control.add_child(_prompt_label)
 
@@ -392,9 +348,9 @@ func _build() -> void:
 	_status_label.name = "Status"
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_status_label.position = Vector2(-200, 90)
-	_status_label.custom_minimum_size = Vector2(400, 0)
-	_status_label.add_theme_font_size_override("font_size", 20)
+	_status_label.position = Vector2(-180, 74)
+	_status_label.custom_minimum_size = Vector2(360, 0)
+	_status_label.add_theme_font_size_override("font_size", 17)
 	_status_label.visible = false
 	root_control.add_child(_status_label)
 
@@ -405,33 +361,345 @@ func _build() -> void:
 	_warning_label.name = "Warning"
 	_warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_warning_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_warning_label.position = Vector2(-460, 22)
-	_warning_label.custom_minimum_size = Vector2(920, 0)
-	_warning_label.add_theme_font_size_override("font_size", 34)
+	_warning_label.position = Vector2(-360, 16)
+	_warning_label.custom_minimum_size = Vector2(720, 0)
+	_warning_label.add_theme_font_size_override("font_size", 26)
 	_warning_label.add_theme_color_override("font_color", Color(1.0, 0.79, 0.26))
 	_warning_label.add_theme_color_override("font_outline_color", Color(0.52, 0.03, 0.02))
-	_warning_label.add_theme_constant_override("outline_size", 9)
+	_warning_label.add_theme_constant_override("outline_size", 7)
 	_warning_label.visible = false
 	root_control.add_child(_warning_label)
 
-	# The skill row. Bottom left keeps the crosshair, the centred prompt and the
-	# branded sigil's bottom-right tile clear, and each tile reads its grant,
-	# cost and cooldown from the possessed body's runner every frame - a looted
-	# weapon changes it without a reload.
+
+# --- the soul's plate ------------------------------------------------------
+
+## The bottom left: the body the soul is inside, as one plate. The bust in the
+## ledger's iron clamp, the name and its state, health over stamina and the skill
+## row those two pay for - all of it in the same object, so the eye never has to
+## cross the screen to read the body it is driving.
+func _build_soul_plate(parent: Control) -> void:
+	var column := VBoxContainer.new()
+	column.name = "SoulColumn"
+	column.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	column.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	column.offset_left = MARGIN
+	column.offset_right = MARGIN + PANEL_WIDTH
+	column.offset_top = -MARGIN
+	column.offset_bottom = -MARGIN
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(column)
+
+	var plate := PanelContainer.new()
+	plate.name = "SoulPanel"
+	plate.add_theme_stylebox_override("panel", _plate_style())
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(plate)
+	var body := VBoxContainer.new()
+	body.name = "Body"
+	body.add_theme_constant_override("separation", 6)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plate.add_child(body)
+
+	var head := HBoxContainer.new()
+	head.name = "Head"
+	head.add_theme_constant_override("separation", 8)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(head)
+	head.add_child(_build_portrait())
+
+	var vitals := VBoxContainer.new()
+	vitals.name = "Vitals"
+	vitals.add_theme_constant_override("separation", 2)
+	vitals.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vitals.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	vitals.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(vitals)
+
+	_name_label = Label.new()
+	_name_label.name = "Name"
+	_name_label.text = "No body"
+	_name_label.add_theme_font_override("font", Ledger.FONT_DISPLAY)
+	_name_label.add_theme_font_size_override("font_size", 17)
+	_name_label.add_theme_color_override("font_color", BONE)
+	_name_label.clip_text = true
+	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vitals.add_child(_name_label)
+
+	# The state line carries two different things: the one word a living, downed
+	# or dead body is (on the ledger's own chip), or the sentence a soul with no
+	# body has to say. Same label, no chip in the second case.
+	_state_label = Label.new()
+	_state_label.name = "State"
+	_state_label.add_theme_font_size_override("font_size", 9)
+	_state_label.add_theme_color_override("font_color", ALIVE_INK)
+	_state_label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vitals.add_child(_state_label)
+
+	# Health over stamina, both paid into the skill row underneath: the two bars
+	# are the same widget in two colours, each with the number it is spent down to.
+	var health := _meter_row(vitals, "HEALTH", HEALTH_FILL)
+	_health_bar = health[0]
+	_health_label = health[1]
+	_health_bar.name = "Health"
+	var stamina := _meter_row(vitals, "STAMINA", STAMINA_FILL)
+	_stamina_bar = stamina[0]
+	_stamina_label = stamina[1]
+	_stamina_bar.name = "Stamina"
+
+	# The hairline that ties the bars to the skill row: one rule, then the tiles.
+	var rule := ColorRect.new()
+	rule.name = "Rule"
+	rule.color = Color(0.86, 0.72, 0.42, 0.22)
+	rule.custom_minimum_size = Vector2(0, 1)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(rule)
+
 	var ability_row := HBoxContainer.new()
 	ability_row.name = "Abilities"
-	ability_row.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	ability_row.position = Vector2(24, -TILE_SIZE.y - 20)
 	ability_row.add_theme_constant_override("separation", TILE_GAP)
+	ability_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ability_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root_control.add_child(ability_row)
+	body.add_child(ability_row)
 	_ability_tiles.clear()
 	for index in AbilityRules.SLOT_COUNT:
 		var tile = AbilitySlotScript.new()
 		tile.name = "Ability%d" % (index + 1)
-		tile.configure(index)
+		tile.configure(index, TILE_SIZE)
 		ability_row.add_child(tile)
 		_ability_tiles.append(tile)
+
+
+## The bust: the body in the iron clamp the menus are built out of. It renders
+## only when the body or its kit changes (`_refresh_portrait`), so a static
+## portrait costs nothing a frame.
+func _build_portrait() -> Control:
+	var frame := Panel.new()
+	frame.name = "Portrait"
+	frame.custom_minimum_size = PORTRAIT_SIZE
+	frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0.052, 0.060, 0.062, 0.97)
+	back.set_corner_radius_all(3)
+	frame.add_theme_stylebox_override("panel", back)
+
+	_portrait = CharacterPreview.new()
+	_portrait.name = "Bust"
+	_portrait.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_portrait.offset_left = 4
+	_portrait.offset_top = 4
+	_portrait.offset_right = -4
+	_portrait.offset_bottom = -4
+	_portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_portrait.visible = false
+	_portrait.built.connect(_refresh_portrait)
+	frame.add_child(_portrait)
+
+	# No body to show: the theme's own eye, since a soul watching a friend is
+	# the one state that is not a portrait of anybody.
+	_portrait_eye = TextureRect.new()
+	_portrait_eye.name = "NoBody"
+	_portrait_eye.texture = Ledger.icon_large("eye")
+	_portrait_eye.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_portrait_eye.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_portrait_eye.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_portrait_eye.offset_left = 14
+	_portrait_eye.offset_top = 20
+	_portrait_eye.offset_right = -14
+	_portrait_eye.offset_bottom = -20
+	_portrait_eye.modulate = Color(1.0, 1.0, 1.0, 0.5)
+	_portrait_eye.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(_portrait_eye)
+
+	var clamp := NinePatchRect.new()
+	clamp.name = "Clamp"
+	clamp.texture = load(Ledger.DIR + "clamp.png")
+	clamp.patch_margin_left = 14
+	clamp.patch_margin_right = 14
+	clamp.patch_margin_top = 14
+	clamp.patch_margin_bottom = 14
+	clamp.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	clamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(clamp)
+	return frame
+
+
+## One labelled meter: a caps caption, the bar and the number, so health and
+## stamina read apart at a glance instead of by colour alone. The three columns
+## are as narrow as the widest string each carries ("STAMINA", "1000 / 1000").
+func _meter_row(parent: Node, caption: String, fill: Color) -> Array:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(row)
+	var cap := _text(row, caption, 8, MUTED)
+	cap.custom_minimum_size = Vector2(32, 0)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(36, METER_HEIGHT)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = 1.0
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_theme_stylebox_override("background", _meter_trough())
+	bar.add_theme_stylebox_override("fill", _meter_fill(fill))
+	row.add_child(bar)
+	var value := _text(row, "", 9, BONE_DIM)
+	value.custom_minimum_size = Vector2(48, 0)
+	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	return [bar, value]
+
+
+# --- the band's plate ------------------------------------------------------
+
+## The top right: the purse on a rail, then a row per mercenary on the field and
+## how he fights. The campaign ledger is its own smaller plate under it.
+func _build_band_plate(parent: Control) -> void:
+	var column := VBoxContainer.new()
+	column.name = "BandColumn"
+	column.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	column.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	column.offset_left = -MARGIN - PANEL_WIDTH
+	column.offset_right = -MARGIN
+	column.offset_top = MARGIN
+	column.offset_bottom = MARGIN
+	column.add_theme_constant_override("separation", 6)
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(column)
+
+	var plate := PanelContainer.new()
+	plate.name = "BandPanel"
+	plate.add_theme_stylebox_override("panel", _plate_style())
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(plate)
+	var body := VBoxContainer.new()
+	body.name = "Body"
+	body.add_theme_constant_override("separation", 4)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plate.add_child(body)
+
+	# The purse rides the header rail: a bow with no shafts is as raw a number as
+	# the gold, and both are the band's.
+	var rail := PanelContainer.new()
+	rail.name = "PurseRail"
+	rail.add_theme_stylebox_override("panel", _rail_style())
+	rail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(rail)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rail.add_child(head)
+	var title := _text(head, "THE BAND", 9, BRASS)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_purse_label = _text(head, "", 12, BONE)
+	_purse_label.name = "Purse"
+	_purse_label.add_theme_font_override("font", Ledger.FONT_DISPLAY)
+	_purse_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	# One row per mercenary on the field. `_refresh_squad` keeps these nodes and
+	# updates them in place: the rows carry textures, and a body taking a hit must
+	# not rebuild the band.
+	_squad_box = VBoxContainer.new()
+	_squad_box.name = "Squad"
+	_squad_box.add_theme_constant_override("separation", 3)
+	_squad_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(_squad_box)
+
+	# How the band picks its fights. It is a state, not a key line: the O screen
+	# is where it is changed.
+	_party_label = _text(body, "", 8, MUTED)
+	_party_label.name = "PartyMode"
+	_party_label.visible = false
+
+	# The band's fights, outside the roster's own repaint, written by `set_aggro`
+	# alone and hidden while the band is whole.
+	_aggro_box = VBoxContainer.new()
+	_aggro_box.name = "Aggro"
+	_aggro_box.add_theme_constant_override("separation", 1)
+	_aggro_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(_aggro_box)
+	_aggro_label = Label.new()
+	_aggro_label.name = "AggroLine"
+	_aggro_label.add_theme_font_size_override("font_size", 9)
+	_aggro_label.add_theme_color_override("font_color", Color(0.96, 0.71, 0.34))
+	_aggro_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_aggro_label.custom_minimum_size = Vector2(PANEL_WIDTH - 2 * PANEL_PAD, 0)
+	_aggro_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_aggro_label.visible = false
+	_aggro_box.add_child(_aggro_label)
+
+	# The campaign ledger: one block per objective the quartermaster has handed
+	# over, read from `WarbandQuests`. It is a tracker, not a menu - nothing here
+	# is clicked while the pointer is captured - and it stays hidden until there
+	# is an order to show.
+	var quest_panel := PanelContainer.new()
+	quest_panel.name = "QuestPanel"
+	quest_panel.add_theme_stylebox_override("panel", _plate_style())
+	quest_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	quest_panel.visible = false
+	column.add_child(quest_panel)
+	_quest_box = VBoxContainer.new()
+	_quest_box.name = "Quests"
+	_quest_box.add_theme_constant_override("separation", 2)
+	_quest_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	quest_panel.add_child(_quest_box)
+
+
+# --- the ledger's materials ------------------------------------------------
+
+## A plate: the menus' planished iron slab, with its nine-slice margins turned
+## into the padding the HUD's content sits inside.
+func _plate_style() -> StyleBoxTexture:
+	var box := Ledger.iron_panel()
+	box.content_margin_left = PANEL_PAD
+	box.content_margin_right = PANEL_PAD
+	box.content_margin_top = PANEL_PAD - 2
+	box.content_margin_bottom = PANEL_PAD - 2
+	return box
+
+
+## The header band: the same rail every window is titled on.
+func _rail_style() -> StyleBoxTexture:
+	var box := StyleBoxTexture.new()
+	box.texture = load(Ledger.DIR + "rail.png")
+	box.texture_margin_left = 12
+	box.texture_margin_right = 12
+	box.texture_margin_top = 0
+	box.texture_margin_bottom = 0
+	box.content_margin_left = 8
+	box.content_margin_right = 8
+	box.content_margin_top = 1
+	box.content_margin_bottom = 2
+	return box
+
+
+func _meter_trough() -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = METER_BACK
+	box.border_color = METER_EDGE
+	box.set_border_width_all(1)
+	box.set_corner_radius_all(2)
+	return box
+
+
+func _meter_fill(fill: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.set_corner_radius_all(2)
+	return box
+
+
+func _text(parent: Node, text: String, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(label)
+	return label
 
 ## The stamina bar, for tests and for any scene that wants to highlight it.
 func stamina_bar() -> ProgressBar:
@@ -449,13 +717,16 @@ func _refresh_body() -> void:
 			_name_label.text = "WATCHING  %s" % _watching_name
 			_state_label.text = ("%s is inside  ·  no body is free" % _watching_holder) \
 				if not _watching_holder.is_empty() else "No body is free"
+			_paint_state(-1)
 		else:
 			_name_label.text = _merc_name if not _merc_name.is_empty() else "No body"
 			if _warband != null and _merc_id >= 0:
-				_state_label.text = "%s  (F1..F8 to take another)" % Contracts.state_name(
-					_warband.roster.state_of(_merc_id))
+				var last := int(_warband.roster.state_of(_merc_id))
+				_state_label.text = Contracts.state_name(last).to_upper()
+				_paint_state(last)
 			else:
 				_state_label.text = "The warband is down"
+				_paint_state(-1)
 		_health_bar.value = 0.0
 		_health_label.text = ""
 		_stamina_bar.value = 0.0
@@ -464,6 +735,7 @@ func _refresh_body() -> void:
 		# grants up over a spectator.
 		for tile in _ability_tiles:
 			tile.update_state({})
+		_tint_portrait(-1)
 		return
 	var health: float = float(_body.get("health"))
 	var max_health: float = maxf(1.0, float(_body.get("max_health")))
@@ -471,7 +743,8 @@ func _refresh_body() -> void:
 	var state := Contracts.HealthState.DOWNED if downed else (
 		Contracts.HealthState.ALIVE if bool(_body.get("alive")) else Contracts.HealthState.DEAD)
 	_name_label.text = _merc_name if not _merc_name.is_empty() else str(_body.get("display_name"))
-	_state_label.text = Contracts.state_name(state)
+	_state_label.text = Contracts.state_name(state).to_upper()
+	_paint_state(state)
 	_health_bar.max_value = max_health
 	_health_bar.value = health
 	_health_label.text = "%d / %d" % [int(round(health)), int(round(max_health))]
@@ -479,8 +752,32 @@ func _refresh_body() -> void:
 	var max_stamina: float = maxf(1.0, float(_body.get("max_stamina")))
 	_stamina_bar.max_value = max_stamina
 	_stamina_bar.value = stamina
-	_stamina_label.text = "%d / %d stamina" % [int(round(stamina)), int(round(max_stamina))]
+	_stamina_label.text = "%d / %d" % [int(round(stamina)), int(round(max_stamina))]
 	_refresh_skills()
+	_tint_portrait(state)
+
+
+## The state line: the ledger's own chip for a body that is alive, downed or
+## dead, and plain type for the sentence a soul with no body has to read.
+## `-1` is neither: "no body" is not a health state.
+func _paint_state(state: int) -> void:
+	if _state_label == null:
+		return
+	if state < 0:
+		_state_label.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+		_state_label.add_theme_color_override("font_color", MUTED)
+		return
+	var ink := ALIVE_INK
+	var chip := "alive"
+	match state:
+		Contracts.HealthState.DOWNED:
+			ink = DOWNED_INK
+			chip = "downed"
+		Contracts.HealthState.DEAD:
+			ink = DEAD_INK
+			chip = "dead"
+	_state_label.add_theme_color_override("font_color", ink)
+	_state_label.add_theme_stylebox_override("normal", _chip_style(chip))
 
 ## The three skill tiles, read from the body's own runner every frame. A body
 ## with no grant in a slot hides that tile instead of advertising a key that
@@ -510,57 +807,198 @@ func _refresh_squad() -> void:
 	for merc_id in _warband.roster.ids():
 		if not _warband.roster.is_reserve(merc_id):
 			ids.append(merc_id)
-	var mode := str(_warband.get("party_mode")) if _warband.get("party_mode") != null else ""
-	var signature := "%d|%d|%s" % [ids.size(), _merc_id, mode]
-	for merc_id in ids:
-		var record: Dictionary = _warband.roster.find(merc_id)
-		signature += "|%d:%d:%d" % [merc_id,
-			int(round(float(record.get("health", 0.0)))), int(record.get("state", 0))]
-	if signature == _squad_sig:
-		return
-	_squad_sig = signature
-	# Out of the box at once, not at the end of the frame: the party line keeps its
-	# own name across a repaint.
-	for child in _squad_box.get_children():
-		_squad_box.remove_child(child)
-		child.queue_free()
+	# A body that left the field (or was finished) loses its row at once; the
+	# rest are kept and painted where they stand. The rows carry textures now, so
+	# a band taking hits must not rebuild them frame after frame.
+	for merc_id in _rows.keys():
+		if ids.has(int(merc_id)):
+			continue
+		var stale: Dictionary = _rows[merc_id]
+		_squad_box.remove_child(stale["root"])
+		(stale["root"] as Node).queue_free()
+		_rows.erase(merc_id)
 	for index in ids.size():
 		var merc_id := ids[index]
-		var record: Dictionary = _warband.roster.find(merc_id)
-		if record.is_empty():
-			continue
-		var state := int(record.get("state", Contracts.HealthState.DEAD))
-		var max_hp := maxf(1.0, float(record.get("max_health", 1.0)))
-		var percent := int(round(float(record.get("health", 0.0)) / max_hp * 100.0))
-		var key := "F%d" % (index + 1) if index < 8 else "--"
-		var marker := ">" if merc_id == _merc_id else " "
-		var row := Label.new()
-		row.add_theme_font_size_override("font_size", 12)
-		var suffix := ""
+		if not _rows.has(merc_id):
+			_rows[merc_id] = _make_row(merc_id)
+		_squad_box.move_child(_rows[merc_id]["root"], index)
+		_apply_row(merc_id)
+	# How the band picks its fights - the state, not the key: O is where it moves.
+	var mode := str(_warband.get("party_mode")) if _warband.get("party_mode") != null else ""
+	if _party_label != null:
+		_party_label.text = ("PARTY  %s" % mode.to_upper()) if not mode.is_empty() else ""
+		_party_label.visible = not mode.is_empty()
+
+
+## One mercenary's row: the badge for how he fights, his name over that word, his
+## health and his state. Built once per body, then updated in place.
+func _make_row(merc_id: int) -> Dictionary:
+	var root := HBoxContainer.new()
+	root.name = "Mercenary%d" % merc_id
+	root.add_theme_constant_override("separation", 5)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_squad_box.add_child(root)
+
+	var badge := TextureRect.new()
+	badge.name = "Badge"
+	badge.custom_minimum_size = Vector2(18, 18)
+	badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(badge)
+
+	var cell := VBoxContainer.new()
+	cell.name = "Identity"
+	cell.add_theme_constant_override("separation", 0)
+	cell.custom_minimum_size = Vector2(54, 0)
+	cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(cell)
+	var name_label := _text(cell, "", 12, BONE)
+	name_label.name = "Title"
+	name_label.add_theme_font_override("font", Ledger.FONT_DISPLAY)
+	var style_label := _text(cell, "", 8, DISPOSITION_INK)
+	style_label.name = "Disposition"
+
+	var bar := ProgressBar.new()
+	bar.name = "Health"
+	bar.custom_minimum_size = Vector2(28, 6)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = 1.0
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_theme_stylebox_override("background", _meter_trough())
+	bar.add_theme_stylebox_override("fill", _meter_fill(HEALTH_FILL))
+	root.add_child(bar)
+
+	var state := _text(root, "", 8, BONE_DIM)
+	state.name = "State"
+	state.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	state.custom_minimum_size = Vector2(38, 0)
+	return {"root": root, "badge": badge, "name": name_label, "style": style_label,
+		"bar": bar, "state": state, "signature": ""}
+
+
+## Paint one row from the record. Everything is read off the roster, so the row
+## and the squad's own brain cannot disagree about how a body fights or what it
+## has left; the strings are only rewritten when the fact behind them moves.
+func _apply_row(merc_id: int) -> void:
+	var row: Dictionary = _rows.get(merc_id, {})
+	if row.is_empty():
+		return
+	var record: Dictionary = _warband.roster.find(merc_id)
+	if record.is_empty():
+		return
+	var state := int(record.get("state", Contracts.HealthState.DEAD))
+	var max_hp := maxf(1.0, float(record.get("max_health", 1.0)))
+	var health := clampf(float(record.get("health", 0.0)), 0.0, max_hp)
+	var percent := int(round(health / max_hp * 100.0))
+	var style := str(_warband.roster.disposition_of(merc_id))
+	var active := merc_id == _merc_id
+	var signature := "%d|%d|%s|%s" % [state, percent, style, active]
+	if signature != str(row.get("signature", "")):
+		row["signature"] = signature
+		var name_label: Label = row["name"]
+		name_label.text = str(record.get("name", "?"))
+		name_label.add_theme_color_override("font_color", BRASS if active else BONE)
+		(row["style"] as Label).text = Contracts.disposition_label(style)
+		var badge: TextureRect = row["badge"]
+		badge.texture = Ledger.icon_small(str(DISPOSITION_BADGE.get(style, "blade")))
+		# The body the soul is inside is the one row that is lit.
+		badge.modulate = Color.WHITE if active else Color(0.86, 0.84, 0.80, 0.86)
+		var state_label: Label = row["state"]
 		match state:
 			Contracts.HealthState.DOWNED:
-				suffix = "  DOWNED"
-				row.modulate = Color(0.92, 0.62, 0.30)
+				state_label.text = "DOWNED"
+				state_label.add_theme_color_override("font_color", DOWNED_INK)
 			Contracts.HealthState.DEAD:
-				suffix = "  DEAD"
-				row.modulate = Color(0.55, 0.55, 0.55)
+				state_label.text = "DEAD"
+				state_label.add_theme_color_override("font_color", DEAD_INK)
 			_:
-				row.modulate = Color(0.95, 0.95, 0.95)
-		row.text = "%s %s  %-10s %3d%%%s" % [marker, key, str(record.get("name", "?")), percent, suffix]
-		_squad_box.add_child(row)
-	# How the band picks its fights, and the key that changes it.
-	if not mode.is_empty():
-		var party := Label.new()
-		party.name = "PartyMode"
-		party.add_theme_font_size_override("font_size", 11)
-		party.modulate = Color(0.86, 0.80, 0.62)
-		party.text = "PARTY  %s   ·   B changes it" % mode.to_upper()
-		_squad_box.add_child(party)
-	var hint := Label.new()
-	hint.add_theme_font_size_override("font_size", 10)
-	hint.modulate = Color(0.72, 0.72, 0.72)
-	hint.text = "[ / ] swap body   O warband   TAB weapon set   G altar/stash"
-	_squad_box.add_child(hint)
+				state_label.text = "%d%%" % percent
+				state_label.add_theme_color_override("font_color", BONE_DIM)
+	var bar: ProgressBar = row["bar"]
+	bar.max_value = max_hp
+	bar.value = health
+
+
+# --- the bust --------------------------------------------------------------
+
+## Dress the bust, or put it away when the soul has no body to show.
+##
+## The portrait is a second `Archer` in its own SubViewport, so it is built for
+## the body currently inside the soul and re-dressed only when that body or its
+## kit changes: `set_body` and `Warband.changed` are the only callers, and the
+## signature below makes the second of those free for a purse or an arrow.
+func _refresh_portrait() -> void:
+	if _portrait == null:
+		return
+	var dress: bool = _body != null and is_instance_valid(_body) and _merc_id > 0 \
+		and _warband != null and _warband.roster.has(_merc_id) \
+		and DisplayServer.get_name() != "headless"
+	if not dress:
+		_portrait.visible = false
+		_portrait_sig = ""
+		_portrait_state = -2
+		if _portrait_eye != null:
+			_portrait_eye.visible = true
+		return
+	_portrait.visible = true
+	if _portrait_eye != null:
+		_portrait_eye.visible = false
+	var gear: Dictionary = _warband.roster.equipped_of(_merc_id)
+	var signature := "%d|" % _merc_id
+	for slot in Contracts.SLOT_ORDER:
+		signature += "%s," % str(gear.get(slot, ""))
+	if signature == _portrait_sig:
+		return
+	_portrait_sig = signature
+	var armor := {}
+	for slot in ArmorData.SLOTS:
+		armor[slot] = ArmorData.set_of_item(str(gear.get(slot, "")))
+	# The trinkets ride the same three ids the gear page hands the live stage, so
+	# the man in the HUD wears what the man on the page wears.
+	var worn := {
+		"neck": str(gear.get("neck", "")),
+		"ring1": str(gear.get("ring1", "")),
+		"ring2": str(gear.get("ring2", "")),
+		"off": str(gear.get("off", "")),
+	}
+	var loadout := State.build_loadout(str(gear.get("main", "")), str(gear.get("off", "")),
+		armor, worn)
+	_portrait.set_appearance(Looks.profile_for(_merc_id))
+	_portrait.set_bust(true)
+	_portrait.apply_kit(loadout, worn)
+	_portrait.flash()
+
+
+## The bust goes grey with the body it shows: a downed man is not a portrait of
+## an able one. Cheap enough for the frame because it only writes on a change.
+##
+## The lit tint is over white: the preview's own lights are set for a stage, and a
+## face at 96 px on an iron plate needs a little more of it to read.
+func _tint_portrait(state: int) -> void:
+	if _portrait == null or state == _portrait_state:
+		return
+	_portrait_state = state
+	_portrait.modulate = Color(1.16, 1.13, 1.08) if state == Contracts.HealthState.ALIVE \
+		else Color(0.58, 0.56, 0.54)
+
+
+func _chip_style(key: String) -> StyleBoxTexture:
+	var box := StyleBoxTexture.new()
+	box.texture = load(Ledger.DIR + "chip_%s.png" % key)
+	box.texture_margin_left = 12
+	box.texture_margin_right = 12
+	box.texture_margin_top = 8
+	box.texture_margin_bottom = 8
+	box.content_margin_left = 10
+	box.content_margin_right = 10
+	box.content_margin_top = 3
+	box.content_margin_bottom = 3
+	return box
 
 
 # --- the band's fights ------------------------------------------------------
@@ -690,23 +1128,17 @@ func _nearest_engaged(entries: Array, ids: Array) -> Dictionary:
 			best = entry
 	return best
 
-
+## The purse on the band's header rail: gold and the party's quiver on one line,
+## because a bow with no shafts is the one number a player has to be able to see at
+## a glance. The ritual essence has its own ledger on the altar screen; it is not a
+## number a fight turns on.
 func _refresh_purse() -> void:
 	if _purse_label == null:
 		return
 	if _warband == null:
 		_purse_label.text = ""
-		_essence_label.text = ""
 		return
 	_purse_label.text = "%d gold  ·  %d arrows" % [_warband.gold(), _warband.arrows()]
-	var total: int = _warband.cruor.total()
-	var parts: PackedStringArray = []
-	for tier in Catalog.TIER_ORDER:
-		var count: int = _warband.cruor.tier_count(tier)
-		if count > 0:
-			parts.append("%d %s" % [count, Catalog.tier_short(tier)])
-	_essence_label.text = ("Cruor: " + ", ".join(parts)) if not parts.is_empty() else (
-		"Cruor: none" if total == 0 else "Cruor: %d" % total)
 
 func _roster_id_for(body) -> int:
 	if _warband == null or body == null:

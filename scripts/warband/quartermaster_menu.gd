@@ -13,6 +13,7 @@ const State = preload("res://scripts/player_state.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const INK := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -177,8 +178,15 @@ func _build() -> void:
 		var label := str(row["name"])
 		if int(row["bundle"]) > 1:
 			label = "%s  ×%d" % [label, int(row["bundle"])]
-		var name_label := _label(line, label, 17, INK)
+		var name_label := ItemHover.LabelRow.new()
+		name_label.text = label
+		name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		name_label.add_theme_font_size_override("font_size", 17)
+		name_label.add_theme_color_override("font_color", INK)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.show_item(item_id, _warband,
+			"Click BUY - the keeper asks %d G." % int(row["price"]), int(row["bundle"]))
+		line.add_child(name_label)
 		var buy_button := Button.new()
 		buy_button.custom_minimum_size = Vector2(120, 30)
 		buy_button.add_theme_font_size_override("font_size", 11)

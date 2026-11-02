@@ -21,6 +21,7 @@ signal purchased(item_id: String)
 const State = preload("res://scripts/player_state.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
+const ItemHover = preload("res://scripts/warband/item_hover.gd")
 
 const INK := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -317,8 +318,15 @@ func _stock_row(row: Dictionary) -> void:
 	var label := str(row["name"])
 	if int(row.get("bundle", 1)) > 1:
 		label = "%s  ×%d" % [label, int(row["bundle"])]
-	var name_label := _label(line, label, 16, INK)
+	var name_label := ItemHover.LabelRow.new()
+	name_label.text = label
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 16)
+	name_label.add_theme_color_override("font_color", INK)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.show_item(item_id, _warband,
+		"Click BUY - the keeper asks %d G." % int(row["price"]), int(row["bundle"]))
+	line.add_child(name_label)
 	var price_label := _label(line, "%d G" % int(row["price"]), 14, MUTED)
 	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	price_label.custom_minimum_size = Vector2(64, 0)
@@ -335,9 +343,15 @@ func _stash_row(row: Dictionary) -> void:
 	var item_id := str(row["item_id"])
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override("separation", 8)
-	var name_label := _label(line, "%s  ×%d" % [str(row["name"]), int(row["count"])],
-		16, INK)
+	var name_label := ItemHover.LabelRow.new()
+	name_label.text = "%s  ×%d" % [str(row["name"]), int(row["count"])]
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 16)
+	name_label.add_theme_color_override("font_color", INK)
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.show_item(item_id, _warband,
+		"Click SELL - the keeper pays %d G each." % int(row["price"]), int(row["count"]))
+	line.add_child(name_label)
 	var price_label := _label(line, "%d G" % int(row["price"]), 14, MUTED)
 	price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	price_label.custom_minimum_size = Vector2(64, 0)

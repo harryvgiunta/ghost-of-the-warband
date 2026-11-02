@@ -12,14 +12,15 @@ extends CanvasLayer
 ##
 ## ## Where it sits
 ##
-## `WarbandHud` owns the top left (body panel, squad list under it), the top
-## right (purse and essence) and the centre lines (`Status` at centre-top, the
-## hint and the prompt at centre-bottom, both ±310 px around the middle). This
-## layer is the bottom right corner: a fixed 330 x 132 tile 20 px in from the
-## screen edges, one `CanvasLayer` above the battle readout so the two can never
-## draw over one another at any of the sizes the game runs at (1440 x 900 design,
-## 1280 x 800 window). On the 1440 canvas the hint reaches x = 1030 and the tile
-## starts at x = 1090.
+## `WarbandHud` owns the bottom left (the soul's plate: bust, health over stamina,
+## the skill row), the top right (the band's plate: purse, one row per mercenary,
+## the campaign ledger under it) and the centre lines (`Status` at centre-top, the
+## prompt at centre-bottom, ±180 px around the middle). This layer is the bottom
+## right corner: a fixed 330 x 132 tile 20 px in from the screen edges, one
+## `CanvasLayer` above the battle readout so the two can never draw over one
+## another at any of the sizes the game runs at (1440 x 900 design, 1280 x 800
+## window). On the 1440 canvas the prompt reaches x = 900 and the tile starts at
+## x = 1090.
 ##
 ## It is hidden outright when the held piece carries no brand: plain steel has no
 ## sigil, and an empty frame in the corner would advertise a verb the body does
@@ -31,8 +32,14 @@ const Perf = preload("res://scripts/perf_probe.gd")
 ## One above `WarbandHud` (6): the sigil tile is a corner widget, never something
 ## the body panel or the squad rows have to fight for space with.
 const LAYER := 7
-const TILE_SIZE := Vector2(330.0, 132.0)
-const MARGIN := 20.0
+## The corner tile is the same measure as the HUD's own plates (`PANEL_WIDTH`
+## 244): one width across the whole readout, and a branded weapon's sigil no
+## longer claims a third of the bottom of the screen for four short lines.
+const TILE_SIZE := Vector2(244.0, 100.0)
+const MARGIN := 14.0
+## The backdrop's padding, used by the cooldown bar's own width as well so the
+## two cannot disagree about the inside of the tile.
+const TILE_PAD := 8.0
 ## The file's own path, so `attach()` can build one without the script naming
 ## its own `class_name` (a headless run against a stale global class cache would
 ## not resolve it).
@@ -216,32 +223,32 @@ func _build() -> void:
 	backdrop.border_color = Color(0.32, 0.24, 0.14)
 	backdrop.set_border_width_all(1)
 	backdrop.set_corner_radius_all(3)
-	backdrop.set_content_margin_all(10)
+	backdrop.set_content_margin_all(int(TILE_PAD))
 	_panel.add_theme_stylebox_override("panel", backdrop)
 	root_control.add_child(_panel)
 
 	var column := VBoxContainer.new()
 	column.name = "Column"
-	column.add_theme_constant_override("separation", 3)
+	column.add_theme_constant_override("separation", 2)
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_panel.add_child(column)
 
 	var heading := Label.new()
 	heading.name = "Heading"
 	heading.text = "BRANDED SIGIL"
-	heading.add_theme_font_size_override("font_size", 10)
+	heading.add_theme_font_size_override("font_size", 9)
 	heading.add_theme_color_override("font_color", GOLD)
 	column.add_child(heading)
 
 	_title = Label.new()
 	_title.name = "Ability"
-	_title.add_theme_font_size_override("font_size", 15)
+	_title.add_theme_font_size_override("font_size", 12)
 	_title.add_theme_color_override("font_color", Color(0.95, 0.92, 0.84))
 	column.add_child(_title)
 
 	_cost = Label.new()
 	_cost.name = "Cost"
-	_cost.add_theme_font_size_override("font_size", 11)
+	_cost.add_theme_font_size_override("font_size", 9)
 	_cost.add_theme_color_override("font_color", FAINT)
 	column.add_child(_cost)
 
@@ -252,19 +259,19 @@ func _build() -> void:
 	column.add_child(row)
 	_status = Label.new()
 	_status.name = "State"
-	_status.add_theme_font_size_override("font_size", 14)
+	_status.add_theme_font_size_override("font_size", 11)
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_status)
 	var key := Label.new()
 	key.name = "Key"
 	key.text = "R"
-	key.add_theme_font_size_override("font_size", 12)
+	key.add_theme_font_size_override("font_size", 10)
 	key.add_theme_color_override("font_color", GOLD)
 	row.add_child(key)
 
 	_bar = ProgressBar.new()
 	_bar.name = "Cooldown"
-	_bar.custom_minimum_size = Vector2(TILE_SIZE.x - 20.0, 8.0)
+	_bar.custom_minimum_size = Vector2(TILE_SIZE.x - 2.0 * TILE_PAD, 6.0)
 	_bar.show_percentage = false
 	_bar.max_value = 1.0
 	_bar.value = 0.0

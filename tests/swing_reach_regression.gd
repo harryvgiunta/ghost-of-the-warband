@@ -355,6 +355,33 @@ func run() -> void:
 	attacker.combat.begin_melee("right","diagonal_left")
 	advance(1.0)
 	check(defender.health < 100.0,"The next blow lands while the guard is still down")
+	# A shield is the exception. The boss takes the blow and the pool pays for it,
+	# but the arm never comes down: a shield is made to be blocked on, so the same
+	# raised guard stops the next blow too, for the same charge.
+	defender.health = 100.0
+	defender.combat.stagger_time = 0.0
+	defender.rig.set_hit_react(0.0)
+	defender.rig.set_shield(true)
+	check(defender.rig.shield_equipped,"The defender takes a shield for the block test")
+	defender.stamina = Stamina.MAX
+	defender.combat.stop_block()
+	defender.combat.start_block(Vector3.BACK)
+	reset_swing()
+	attacker.combat.begin_melee("right","diagonal_right")
+	advance(1.0)
+	check(defender.health == 100.0 and defender.combat.blocking
+			and is_equal_approx(defender.stamina,Stamina.MAX-Combat.SHIELD_BLOCK_STAMINA),
+		"A shield block spends its stamina and keeps the guard up (%.1f)"
+			% (Stamina.MAX-defender.stamina))
+	reset_swing()
+	attacker.combat.begin_melee("right","diagonal_left")
+	advance(1.0)
+	check(defender.health == 100.0 and defender.combat.blocking
+			and is_equal_approx(defender.stamina,
+				Stamina.MAX-Combat.SHIELD_BLOCK_STAMINA*2.0),
+		"and the same raised shield stops the next blow (%.1f)"
+			% (Stamina.MAX-defender.stamina))
+	defender.rig.set_shield(false)
 	var guarded_health: float = defender.health
 	# The landed blow staggered the defender and only the attacker's clock is
 	# advanced in this harness, so the reaction is cleared by hand.

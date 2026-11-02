@@ -57,8 +57,6 @@ const RETURN_STEP := 3.2
 const HEADER_POLL := 0.25
 const GUEST_TEXT := "Co-op: the host takes the party down and brings it up."
 const MOUTH_PROMPT := "G  -  THE WEEPING HOLLOW"
-const MOUTH_HINT := "G - choose the party and pack the delve inventory, then go down"
-const BELOW_HINT := "RMB - loot a body into the delve inventory   ·   P - gear and the delve inventory   ·   M - the floor's plan   ·   G at a rope - climb out"
 
 ## The world this area stands in.
 var host: Node3D = null
@@ -181,14 +179,6 @@ func prompt_line(actor) -> String:
 			roundi(float(rope["metres"]))]
 	if not host.warband.delve.active and at_mouth(actor):
 		return MOUTH_PROMPT
-	return ""
-
-
-func hint_line(actor) -> String:
-	if in_cave(actor):
-		return BELOW_HINT
-	if actor != null and not host.warband.delve.active and at_mouth(actor):
-		return MOUTH_HINT
 	return ""
 
 
