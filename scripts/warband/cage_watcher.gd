@@ -291,20 +291,10 @@ func _ready() -> void:
 
 # --- the mob surface the scenes call ---------------------------------------
 
-## Parked by the culler: the body is hidden and stops ticking, so the rig - the
-## heaviest presentation in the world - stops posing with it.
-func mob_sleep() -> void:
-	super()
-	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
-		_visual.set_parked(true)
-
-
 ## Start hunting: the senses are on from now on. The camp calls this when Corvin
 ## reaches the cages; a road cultist gets it when the leaving wakes the road.
 func mob_wake() -> void:
 	super()
-	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
-		_visual.set_parked(false)
 	if not alive:
 		return
 	if not _awake:

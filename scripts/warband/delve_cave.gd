@@ -77,6 +77,12 @@ const LIGHT_NEAR := 40.0
 const LIGHT_FAR := 48.0
 const LIGHT_POLL := 0.3
 const EYE_JUMP := 8.0
+## Past this from the eye a body is not a picture anyone can see: the room's
+## lights are already out at `LIGHT_FAR`, the haze is half opaque and three rooms
+## of bent tunnel stand between. Every body on the floor used to keep its draw
+## list alive in every room of it; this is the one rule that keeps the frame's
+## cost tied to the room the eye is in.
+const BODY_HIDE_DISTANCE := 48.0
 ## How fast the air eases to the next area's, per second.
 const AIR_EASE := 1.2
 
@@ -446,6 +452,21 @@ func _sync_lights(force: bool) -> void:
 		for lamp in _room_lights[index]:
 			if is_instance_valid(lamp):
 				(lamp as Light3D).visible = want
+	cull_bodies(_last_eye)
+
+
+## Hide the bodies the eye cannot reach, on the clock the lights already keep:
+## the same 48 m, the same poll, the same jump. A hidden body keeps its brain,
+## its collision and its clock - this only asks it to stop drawing and stop
+## posing, which is what the whole floor's rigs were doing in rooms nobody stood
+## in. `eye` is world space.
+func cull_bodies(eye: Vector3) -> void:
+	var reach := BODY_HIDE_DISTANCE * BODY_HIDE_DISTANCE
+	for den in _dens:
+		for mob in den["mobs"]:
+			if not is_instance_valid(mob) or not mob.has_method("set_culled"):
+				continue
+			mob.set_culled((mob as Node3D).global_position.distance_squared_to(eye) > reach)
 
 
 ## Ease the haze and the ambient toward the air of the area the eye is in.

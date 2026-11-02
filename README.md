@@ -690,9 +690,11 @@ take what the cave holds, and climb out alive with it.
    | The Watchers' Den, The Ossuary, The Rooted Hall | the dens between the shafts |
    | Gorehorn's Lair | the hub, with a way in from every side |
 
-   Eight dens of watchers sleep at their posts - ten bodies for every post a den
-   was laid out with, **210** in all - until one of them sees you, hears a fight
-   or takes a blow, or a body walks into the room - then the whole den wakes. No
+   Eight dens of watchers sleep at their posts - four bodies for every post a den
+   was laid out with, **85** in all - until one of them sees you, hears a fight
+   or takes a blow, or a body walks into the room - then the whole den wakes. Only
+   the bodies inside **48 m** of the eye are drawn: the rest are three rooms of
+   bent tunnel away with their lights already out. No
    den can see a landing. **Gorehorn**, the Hollow's demon, waits in the middle of
    the lair in a ring of old blood.
 
@@ -1023,6 +1025,11 @@ crowded room affordable:
 - **A rest for the sleeping.** A delve den asleep with the whole party outside
   its sight is rested (`devil_mob.rest`, set by `delve_cave`'s poll): no brain at
   all, nothing hidden. A blow or a cry lifts it on the frame it lands.
+- **The eye's own reach.** The cave's lights go out past `LIGHT_FAR` 48 m, and a
+  body past `BODY_HIDE_DISTANCE` (the same 48 m, the same poll) is hidden and its
+  rig parked - the floor's eighty-five bodies used to keep a draw list alive in
+  every room of it. Hidden is not dormant: the body keeps its brain, its
+  collision and its clock, so the party walks into it standing where it was.
 - **Poses the eye asks for.** A watcher's rig is posed from the drawn frame, not
   the physics tick (`Archer.view_paced`), and by the camera: every frame in front
   of the eye inside `VIEW_NEAR`, every second past it, twenty frames for a body

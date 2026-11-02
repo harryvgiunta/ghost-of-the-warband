@@ -138,6 +138,10 @@ var _present_band := -1
 var dormant := false
 ## Rested by its owner (`rest`): no brain at all, nothing hidden.
 var resting := false
+## Culled by its owner's eye: the body is past the fog wall and behind rock, so
+## it is hidden and its rig is parked - but it is not dormant, so an owner that
+## only asked for less drawing never silenced a fight.
+var culled := false
 ## The drawn frame this body's brain last ran in, and the tick time it has banked
 ## from further ticks inside the same frame (`_physics_process`).
 var _brain_frame := -1
@@ -446,7 +450,7 @@ func mob_sleep() -> void:
 		# Nothing banked from before the sleep; the first frame back is granted.
 		_lod.resume()
 		set_physics_process(false)
-	visible = false
+	_apply_shown()
 
 
 ## The owner's word that nothing can reach this body: a delve den asleep with the
@@ -471,9 +475,29 @@ func mob_wake() -> void:
 	dormant = false
 	_lod.resume()
 	set_physics_process(true)
-	visible = true
+	_apply_shown()
 	# Re-apply the presentation band for the distance it woke at.
 	_present_band = -1
+
+
+## The owner's eye cannot reach this body: hide it and park its rig. It keeps
+## its brain, its collision and its clock - a body behind the party is still a
+## fight, and the party rounds a corner into it at full speed.
+func set_culled(value: bool) -> void:
+	if value == culled:
+		return
+	culled = value
+	_apply_shown()
+
+
+## One place decides whether the body and its rig are drawn: parked by the
+## culler and culled by its owner are two reasons for the same treatment, and a
+## rig that keeps sampling tracks while hidden costs what a visible one does.
+func _apply_shown() -> void:
+	var hidden := dormant or culled
+	visible = not hidden
+	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
+		_visual.set_parked(hidden)
 
 
 ## Nothing in sight and nothing remembered: keep the patch alive. This is the

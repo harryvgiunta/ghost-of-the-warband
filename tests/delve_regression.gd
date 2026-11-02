@@ -11,7 +11,9 @@ extends SceneTree
 ##     area and far from the next, and the draw spreads parties over all six;
 ##   * the squad's map walks every shaft to the lair and to every other shaft, no
 ##     sleeper can see a landing, every den's post is open ground, and every den is
-##     crowded to ten bodies a post inside its own room;
+##     crowded to `DEN_CROWD` bodies a post inside its own room;
+##   * only the bodies inside `BODY_HIDE_DISTANCE` of the eye are drawn, and a
+##     hidden body is still a body: it keeps its brain, its clock and its place;
 ##   * below, the party is the only thing a soul or a paperdoll can reach, the
 ##     quiver is the inventory, and everything taken - by a right click, the window
 ##     or a squadmate - lands in the inventory and never in the stash; a right
@@ -81,6 +83,7 @@ func run() -> void:
 	await check_mouth_and_pack()
 	await check_descent()
 	check_floor_plan()
+	check_eye_culling()
 	await check_floor_map()
 	await _gather_at("mouth")
 	await check_den_and_loot()
@@ -334,6 +337,43 @@ func check_floor_plan() -> void:
 					seen.append("%s->%s" % [mob.name, entry["id"]])
 	check(seen.is_empty(), "no sleeper has a line of sight to a landing (%s)" % str(seen))
 	check(buried.is_empty(), "every den's post is open ground on the squad's map (%s)" % str(buried))
+
+
+## The eye's reach on the floor. The descent fields a den per room, and the frame
+## pays for every one of them: a body past `BODY_HIDE_DISTANCE` is not a picture
+## anyone can see (its room's lights are out and three rooms of bent tunnel stand
+## between), so it stops drawing and stops posing. Hiding is not silencing - the
+## body keeps its brain, its collision and its clock, and the party walks into it
+## standing where it was.
+func check_eye_culling() -> void:
+	var cave = game.delve_area.cave
+	var mobs: Array = cave.mobs()
+	check(mobs.size() > 20, "the floor fields bodies to cull (%d)" % mobs.size())
+	var target = mobs[0]
+	var at: Vector3 = target.global_position
+	var inside := 0
+	for mob in mobs:
+		if (mob as Node3D).global_position.distance_to(at) <= cave.BODY_HIDE_DISTANCE:
+			inside += 1
+	cave.cull_bodies(at)
+	var culled := 0
+	for mob in mobs:
+		if bool(mob.get("culled")):
+			culled += 1
+	check(culled == mobs.size() - inside,
+		"exactly the bodies outside the eye's reach are culled (%d of %d, %d inside)"
+		% [culled, mobs.size(), inside])
+	check(inside < mobs.size() / 2,
+		"the eye's reach is a fraction of the floor (%d of %d)" % [inside, mobs.size()])
+	target.mob_wake()
+	check(target.visible, "the body the eye stands on is drawn")
+	cave.cull_bodies(at + Vector3(0.0, 0.0, cave.BODY_HIDE_DISTANCE * 2.0))
+	check(not target.visible, "the body is hidden when the eye leaves it")
+	check(not target.dormant,
+		"hidden is not dormant: the body keeps its brain, its collision and its clock")
+	check(target.is_physics_processing(), "and it is still being simulated")
+	cave.cull_bodies(at)
+	check(target.visible, "and it comes back when the eye returns")
 
 
 ## `M` below opens the Hollow's own plan, not the wood's sheet, and the plan is the
