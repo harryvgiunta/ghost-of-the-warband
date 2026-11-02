@@ -388,6 +388,14 @@ func stop_block() -> void:
 	if is_instance_valid(rig):
 		rig.set_blocking(false)
 
+## A guard that actually took a blow is spent, not merely dented: the arm comes
+## down and the fighter has to raise it again. A guard is a press, not a state,
+## so a button held down holds nothing - the player clicks again for the next
+## blow, and a body in a crowd cannot lean on one raised guard. A parry (the
+## timed deflection inside `PARRY_WINDOW`) is not a block and keeps its guard.
+func break_guard() -> void:
+	stop_block()
+
 func face_block(forward: Vector3) -> void:
 	if blocking and is_instance_valid(rig):
 		rig.face_block(forward)

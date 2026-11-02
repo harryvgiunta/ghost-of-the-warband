@@ -91,7 +91,8 @@ func run() -> void:
 	check(tips.size() == 4 and tips[3] == DuelScript.Tip.GUARD,
 		"it is the fourth tip asked for (%s)" % str(tips))
 	check(lesson.hint().contains("RMB"), "which names the guard key")
-	check(lesson.hint().to_lower().contains("hold"), "and says it is held (%s)" % lesson.hint())
+	check(lesson.hint().to_lower().contains("press again"),
+		"and says a block drops it, so it is pressed again (%s)" % lesson.hint())
 	check(not lesson.note_windup(88, 2), "the guard tip is asked for once")
 	check(lesson.note_guarded(), "a blow on the raised guard ends the lesson")
 	check(lesson.guarded() and lesson.step() == DuelScript.Step.DONE,

@@ -16,7 +16,10 @@ extends RefCounted
 ##     roster.
 ##   * `following` - whether an ally escorts the soul or holds its ground.
 ##   * `engage_radius` - how far an ally will pick a fight on its own. The cage
-##     lets the squad cross the yard; the run keeps them near the soul.
+##     lets the squad cross the yard; the run keeps them near the soul. It is a
+##     blade's rule: a bow-armed ally searches as far as its own shaft flies
+##     (`_bow_reach`), and takes what it finds past that radius only down a clean
+##     line (`_clear_shot`).
 ##   * `party_mode` - which fights are the squad's to take at all: the warband's
 ##     own mode (`WarbandContracts.PARTY_MODES`), set from the warband menu.
 ##     OFFENSIVE goes at any hostile in `engage_radius`; DEFENSIVE only at one the
@@ -34,9 +37,20 @@ extends RefCounted
 ## few steps off the line, or re-forming for the next blow. There is no fifth
 ## answer, so a body with such a hostile in reach can never fall back to standing
 ## still.
+##
+## A bow gets one rule of its own. An ally holding one does not have to walk into
+## a blade's reach to fight: it looses from wherever it stands inside its own
+## bow's range, down a clean line, sighted for the flight the arrow actually
+## flies - because an archer that closes before it shoots has given up the one
+## thing a bow has, and one that aims at the chest across a bow's length puts the
+## shaft in the dirt.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+## The bows' own table and the missile's own fall: the squad sights a shot from
+## the numbers the shot is flown with, never from numbers of its own.
+const Archer = preload("res://scripts/archer.gd")
+const Arrow = preload("res://scripts/arrow.gd")
 
 ## Read-only sources the scene owns.
 var controller
@@ -295,6 +309,35 @@ const HELD_WEAPONS := ["sword", "dagger", "dual", "bow"]
 ## The two phases in which a bow's string is up.
 const DRAW_PHASES := ["DRAWING", "HOLDING"]
 
+## How far a bow reaches: the distance its own shaft covers in `BOW_FLIGHT_SECONDS`
+## of flight. A flight time and not a distance on purpose - the heavy war bow
+## outranges the twig bow through its speed alone (55 m to 26 m), and every bow's
+## drop at its own reach comes out the same (about 0.6 m), so the archer's lift is
+## one number for the whole rack. `engage_radius` is a blade's rule; this is the
+## one an ally with a bow in its hands is held to.
+const BOW_FLIGHT_SECONDS := 0.55
+## Inside this the bow is the wrong tool and the close fight is the right one: the
+## beat between shots is spent stepping rather than standing. Outside it the archer
+## plants its feet - a shuffle that carried it a hand's width back per shot would
+## walk it out of its own bow's reach and then back in again.
+const BOW_HOLD_MIN := 5.0
+## The share of the bow's own speed a loosed shaft actually leaves at.
+## `_fight_bow` lets the string go at 0.85 draw and the rig scales the speed by
+## `lerp(0.45, 1.0, charge)`, so the sight solve aims the arrow that will fly.
+const BOW_SHOT_CHARGE := 0.9
+## What a clean line of fire is cast through: the world - terrain, props, trunks,
+## cage bars. The band's own bodies are not in it, because a warband arrow does not
+## cut a squadmate (`PROJECTILE_HIT_MASK`'s rule), so an ally in the lane is not in
+## the way of the shaft.
+const SHOT_MASK := 1
+## How far off the target an archer may face and still loose at it: cosine of the
+## angle between the body's facing and the target, about 20 degrees. A body's
+## facing is its walk direction and the shot leaves along the aim, so a body that
+## never turned would fire out of the back of its own head at whatever came at it
+## from behind; the turn is a quarter stride taken between shots.
+const BOW_FACE_COSINE := 0.94
+const BOW_TURN_STEP := 0.25
+
 ## per merc_id: the blocked push, the current fight state, and this body's own
 ## rolls. Nothing here is read off the instance id: two allies in the same gear
 ## circle on different beats because each rolled for itself.
@@ -318,6 +361,14 @@ var _provoked: Dictionary = {}
 ## The slots of the band's bodies on this frame (slot -> true): what a mob's
 ## `last_hitter` is read against. Cleared and refilled, never reallocated.
 var _band_slots: Dictionary = {}
+## The line of fire an archer casts before it looses: world geometry only, from
+## its own chest to the target's, so a trunk or a cage wall is what a shot cannot
+## pass and a squadmate walking past is not.
+var _shot_query := PhysicsRayQueryParameters3D.new()
+
+
+func _init() -> void:
+	_shot_query.collision_mask = SHOT_MASK
 
 
 ## Point the module at a warband and the controller that owns its bodies.
@@ -987,24 +1038,37 @@ func _clear_of_hostiles(point: Vector3) -> bool:
 	return true
 
 
-## The nearest hostile inside `engage_radius` this body may go at under the party's
-## mode: any under OFFENSIVE, only one the band is already at war with under
-## DEFENSIVE (`_provoked`), and none at all under PASSIVE.
+## The nearest hostile this body may go at under the party's mode: any under
+## OFFENSIVE, only one the band is already at war with under DEFENSIVE
+## (`_provoked`), and none at all under PASSIVE.
+##
+## The search is as wide as the weapon in the body's hands. Inside
+## `engage_radius` a body takes what it could walk to, exactly as before. Past
+## that only a bow takes anything, and only what it can see: a watcher behind a
+## trunk forty metres off is a direction to walk, not a target, and the long shot
+## is for a clean line or it is not taken at all. That is what lets an archer open
+## on a pack the squad used to have to close with first.
 func _nearest_watcher(actor):
 	if party_mode == Contracts.PARTY_PASSIVE:
 		return null
 	var answering := party_mode == Contracts.PARTY_DEFENSIVE
 	var best = null
-	var best_distance := engage_radius
+	var best_distance := maxf(engage_radius, _bow_reach(actor))
 	for watcher in watchers:
 		if not is_instance_valid(watcher) or not bool(watcher.get("alive")):
 			continue
 		if answering and not _provoked.has(watcher.get_instance_id()):
 			continue
 		var distance: float = actor.global_position.distance_to(watcher.global_position)
-		if distance < best_distance:
-			best_distance = distance
-			best = watcher
+		# Only a nearer body can beat the one already offered, so the line cast
+		# below is spent on candidates that could still win.
+		if distance >= best_distance:
+			continue
+		# Beyond a blade's reach only a bow goes, and only down a clean line.
+		if distance > engage_radius and not _clear_shot(actor, watcher):
+			continue
+		best_distance = distance
+		best = watcher
 	return best
 
 
@@ -1047,7 +1111,23 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	to.y = 0.0
 	var distance := to.length()
 	var direction := to.normalized() if distance > 0.001 else Vector3.FORWARD
-	actor.combat.set_aim(watcher.get_aim_position())
+	# A bow is a long arm, and the first job with one is to use it. The shot is
+	# sighted from the bow's own speed and the missile's own fall, so an arrow
+	# loosed at forty metres is pointed where the shaft will be when it gets
+	# there - not at the chest it left from, which the drop puts in the dirt.
+	var bow := str(actor.rig.weapon) == "bow"
+	var in_reach := bow and distance <= _bow_reach(actor)
+	actor.combat.set_aim(_shot_point(actor, watcher) if in_reach \
+		else watcher.get_aim_position())
+	# With a bow and a clean line the ally shoots from where it stands, at any
+	# range inside its bow's reach. It does not walk in to a blade's standoff
+	# first: that is what kept every archer in the squad at arm's length, and an
+	# archer that closes before it shoots has given up the one thing a bow has.
+	# The close fight below is for a bow that has nothing to loose - a trunk
+	# across the line, a spent quiver, a target beyond its own shaft's flight.
+	if in_reach and not actor.combat.quiver_empty() and _clear_shot(actor, watcher):
+		_fight_bow(actor, track, direction, distance)
+		return
 	var state := int(track.get("state", FIGHT_CLOSE))
 	var left := float(track.get("state_left", 0.0))
 	# A window that is still running is what the body is doing this frame. A
@@ -1076,8 +1156,8 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 		actor.combat.stop_block()
 		_advance(actor, watcher.global_position, track, standoff)
 		return
-	if str(actor.rig.weapon) == "bow":
-		_fight_bow(actor, track, direction)
+	if bow:
+		_fight_bow(actor, track, direction, distance)
 		return
 	# An exchange this body has already rolled and not yet landed: swing the
 	# moment the blade is free. Re-rolling here is how a body that cannot swing
@@ -1142,7 +1222,13 @@ func _swing(actor, track: Dictionary, direction: Vector3) -> bool:
 ## A bow cannot guard and cannot swing, so it keeps the draw/hold/release path and
 ## spends the beat between shots on a step. Only a string that is up plants the
 ## feet: a draw cannot be rushed.
-func _fight_bow(actor, track: Dictionary, direction: Vector3) -> void:
+##
+## `distance` is how far the target stands this frame, and it decides the beat
+## between shots. At range the archer stands: it has the line it wants, and a
+## step that carried it a hand's width back per shot would walk it out of its own
+## bow's reach and then back in again. Inside `BOW_HOLD_MIN` the step is the close
+## fight's, where the bow is the wrong tool and moving is all it has.
+func _fight_bow(actor, track: Dictionary, direction: Vector3, distance: float) -> void:
 	if actor.combat.can_draw():
 		_enter(track, FIGHT_SWING)
 		_hold(actor)
@@ -1158,7 +1244,92 @@ func _fight_bow(actor, track: Dictionary, direction: Vector3) -> void:
 	# is not a circle: a bow is never breaking off, so it must not leave a window
 	# clock behind for the melee ladder to read.
 	_enter(track, FIGHT_RESET)
+	# A body's facing is its walk direction (`Archer.set_locomotion`), so a target
+	# that came round behind the archer would be shot past its own shoulder. The
+	# turn is taken here, between shots, and never across a drawn string.
+	if _off_the_target(actor, direction):
+		_steer(actor, direction * BOW_TURN_STEP, track, false)
+		return
+	if distance > BOW_HOLD_MIN:
+		_hold(actor)
+		return
 	_circle_step(actor, direction, track)
+
+
+## Whether the body is facing far enough away from `direction` to be worth turning
+## before the string comes up again.
+static func _off_the_target(actor, direction: Vector3) -> bool:
+	var facing: Vector3 = -(actor as Node3D).global_basis.z
+	facing.y = 0.0
+	var wanted := Vector3(direction.x, 0.0, direction.z)
+	if facing.length_squared() <= 0.0001 or wanted.length_squared() <= 0.0001:
+		return false
+	return facing.normalized().dot(wanted.normalized()) < BOW_FACE_COSINE
+
+
+## Where the shaft has to be pointed to land on the target: the target's own aim
+## point, carried by the walk it is doing, and lifted by what the flight costs in
+## drop. Over a bow's reach the fall is most of a metre, and a body under way is
+## another metre aside by the time the arrow arrives, so a shot aimed at the chest
+## both falls short and misses wide.
+##
+## The flight time is solved twice: the first pass ignores the lift the correction
+## adds to the line, the second flies the corrected line. `Arrow.GRAVITY` owns the
+## fall, so the missile's own physics re-sights every archer in the squad.
+func _shot_point(actor, watcher) -> Vector3:
+	var mark: Vector3 = watcher.get_aim_position()
+	var speed := _bow_speed(actor) * BOW_SHOT_CHARGE
+	if speed <= 0.0:
+		return mark
+	var drift := Vector3.ZERO
+	var walk: Variant = watcher.get("velocity")
+	if walk is Vector3:
+		drift = Vector3((walk as Vector3).x, 0.0, (walk as Vector3).z)
+	var from: Vector3 = actor.get_aim_position()
+	var aim := mark
+	for pass_index in 2:
+		var travel: float = from.distance_to(aim) / speed
+		aim = mark + drift * travel
+		aim.y = mark.y + 0.5 * absf(Arrow.GRAVITY.y) * travel * travel
+	return aim
+
+
+## Whether this body has a shaft's clean line to the target: its own chest to the
+## target's aim point, through the world and nothing else. A trunk, a cage wall or
+## a rock is what a shot cannot pass.
+func _clear_shot(actor, watcher) -> bool:
+	if not is_instance_valid(actor) or not is_instance_valid(watcher):
+		return false
+	_shot_query.from = actor.get_aim_position()
+	_shot_query.to = watcher.get_aim_position()
+	return actor.get_world_3d().direct_space_state.intersect_ray(_shot_query).is_empty()
+
+
+## The speed a shaft leaves this body's bow at, in metres a second: the bow's own
+## row in the rig's table, not a number the AI keeps.
+func _bow_speed(actor) -> float:
+	if actor == null or not is_instance_valid(actor):
+		return 0.0
+	var rig = actor.get("rig")
+	if rig == null or not is_instance_valid(rig):
+		return 0.0
+	var index := clampi(int(rig.get("bow_index")), 0, Archer.BOW_DATA.size() - 1)
+	return float(Archer.BOW_DATA[index]["speed"])
+
+
+## How far this body will shoot: its own bow's speed out to `BOW_FLIGHT_SECONDS`.
+## Zero for a body with no bow - and for a body with no rig at all, which is what
+## the squad's steering harness walks around - so a blade's engagement stays
+## `engage_radius`.
+func _bow_reach(actor) -> float:
+	if actor == null or not is_instance_valid(actor):
+		return 0.0
+	var rig = actor.get("rig")
+	if rig == null or not is_instance_valid(rig):
+		return 0.0
+	if str(rig.weapon) != "bow":
+		return 0.0
+	return _bow_speed(actor) * BOW_FLIGHT_SECONDS
 
 
 ## A break-off beat: a quarter to a half second of steps, each with its own

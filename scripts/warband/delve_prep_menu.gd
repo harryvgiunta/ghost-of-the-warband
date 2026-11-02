@@ -3,8 +3,9 @@ extends CanvasLayer
 ##
 ## Three columns on one ledger page. THE PARTY is every body standing on the
 ## field, each a toggle - lit goes down. THE TOWN STASH is the warband's free
-## pieces; a click packs one copy into THE DELVE INVENTORY beside it and a
-## shift-click packs every copy, and the inventory's rows go back the same way.
+## pieces: the amount dial above the page says how many copies a click moves
+## (one by default, or as many as a quiver needs), a shift-click moves a whole
+## stack whatever the dial says, and the inventory's rows go back the same way.
 ## The inventory is real warband state (`Warband.pack_for_delve`), so a pack made
 ## up and left at the mouth is still packed next time. GO DOWN asks the scene to
 ## take the chosen bodies below; the scene answers and the panel closes.
@@ -24,11 +25,18 @@ const MUTED := LedgerThemeScript.INK_MUTED
 const BLOOD := LedgerThemeScript.BLOOD
 const TEAL := LedgerThemeScript.TEAL
 const PANEL_SIZE := Vector2(1180, 700)
+## The most copies one click will move. Shafts are counted in the hundreds, so
+## this is the same order as a full quiver and not a limit a party can reach by
+## accident.
+const MAX_AMOUNT := 999
 const RULE := "Whatever the party wears and packs goes down with it. Climb out alive and every piece comes home into the town stash; fall below and the Hollow keeps all of it."
 
 var _warband = null
 var _open := false
 var _built := false
+## Copies one click moves. One by default, so a click is still "one copy" for
+## anything that never touches the dial.
+var _amount := 1
 ## Bodies that may go down, by merc id, in the order the scene offered them.
 var _candidates: Array[int] = []
 ## Bodies chosen to go.
@@ -37,8 +45,10 @@ var _party_box: VBoxContainer
 var _stash_box: VBoxContainer
 var _pack_box: VBoxContainer
 var _party_title: Label
+var _stash_title: Label
 var _pack_title: Label
 var _status: Label
+var _amount_box: SpinBox
 var _descend_button: Button
 
 
@@ -103,24 +113,46 @@ func set_member(merc_id: int, going: bool) -> void:
 	refresh()
 
 
-## Pack one copy (or every copy) of a free stash piece.
+## Pack one click's worth of a free stash piece. `every` is the shift-click and
+## wins over the dial: the whole stack goes.
 func pack(item_id: String, every: bool = false) -> Dictionary:
-	if _warband == null:
-		return {"ok": false, "message": ""}
-	var result: Dictionary = _warband.pack_for_delve(item_id, -1 if every else 1)
-	set_status(str(result.get("message", "")))
-	refresh()
-	return result
+	return _move(item_id, every, true)
 
 
-## Put one copy (or every copy) back in the stash.
+## Put one click's worth (or every copy) back in the stash.
 func unpack(item_id: String, every: bool = false) -> Dictionary:
+	return _move(item_id, every, false)
+
+
+## How many copies one click moves. The dial writes it; a test or a scene can say
+## so directly, and the panel repaints what the next click will do.
+func set_amount(count: int) -> void:
+	_amount = clampi(count, 1, MAX_AMOUNT)
+	if _amount_box != null:
+		_amount_box.set_value_no_signal(float(_amount))
+	refresh()
+
+
+func amount() -> int:
+	return _amount
+
+
+func _move(item_id: String, every: bool, packing: bool) -> Dictionary:
 	if _warband == null:
 		return {"ok": false, "message": ""}
-	var result: Dictionary = _warband.unpack_from_delve(item_id, -1 if every else 1)
+	var count: int = -1 if every else _amount
+	var result: Dictionary
+	if packing:
+		result = _warband.pack_for_delve(item_id, count)
+	else:
+		result = _warband.unpack_from_delve(item_id, count)
 	set_status(str(result.get("message", "")))
 	refresh()
 	return result
+
+
+func _on_amount_changed(value: float) -> void:
+	set_amount(int(value))
 
 
 func set_status(text: String) -> void:
@@ -162,6 +194,7 @@ func refresh() -> void:
 		button.toggled.connect(func(on: bool) -> void: set_member(merc_id, on))
 		_party_box.add_child(button)
 	_party_title.text = "THE PARTY  ·  %d GO DOWN" % _chosen.size()
+	_stash_title.text = "THE TOWN STASH  ·  CLICK MOVES %d" % _amount
 	_fill_pool(_stash_box, stash_rows(), true)
 	var packed := pack_rows()
 	_fill_pool(_pack_box, packed, false)
@@ -210,9 +243,9 @@ func _fill_pool(box: VBoxContainer, rows: Array[Dictionary], packing: bool) -> v
 		button.add_theme_font_size_override("font_size", 12)
 		button.text = "%s  %s  ×%d  ·  %d G%s" % ["+" if packing else "-", str(row["name"]),
 			int(row["count"]), int(row["value"]), "  ·  HELD" if held else ""]
-		button.tooltip_text = "Click: one copy. Shift-click: every copy. Right-click: restrict this item from auto-equip."
+		button.tooltip_text = "Click: moves %d. Shift-click: the whole stack. Right-click: restrict this item from auto-equip." % _amount
 		if held:
-			button.tooltip_text = "Restricted from auto-equip. Click: one copy. Shift-click: every copy. Right-click: allow auto-equip again."
+			button.tooltip_text = "Restricted from auto-equip. Click: moves %d. Shift-click: the whole stack. Right-click: allow auto-equip again." % _amount
 		button.gui_input.connect(func(event: InputEvent) -> void:
 			_on_pool_input(event, item_id))
 		if packing:
@@ -280,6 +313,27 @@ func _build() -> void:
 	rule.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
 	rule.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
+	# The dial that ends the click-per-arrow tax: a quiver goes down in one click
+	# at the number typed here, and a shift-click still takes the whole stack.
+	var move_row := HBoxContainer.new()
+	move_row.add_theme_constant_override("separation", 10)
+	column.add_child(move_row)
+	_label(move_row, "COPIES A CLICK MOVES", 11, MUTED)
+	_amount_box = SpinBox.new()
+	_amount_box.name = "Amount"
+	_amount_box.min_value = 1.0
+	_amount_box.max_value = float(MAX_AMOUNT)
+	_amount_box.step = 1.0
+	_amount_box.allow_greater = false
+	_amount_box.allow_lesser = false
+	_amount_box.value = float(_amount)
+	_amount_box.custom_minimum_size = Vector2(140, 30)
+	_amount_box.tooltip_text = "How many copies one click moves, both ways. SHIFT-click moves the whole stack."
+	_amount_box.value_changed.connect(_on_amount_changed)
+	move_row.add_child(_amount_box)
+	var stack_note := _label(move_row, "SHIFT-CLICK  -  THE WHOLE STACK", 11, MUTED)
+	stack_note.add_theme_font_override("font", LedgerThemeScript.FONT_ITALIC)
+
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 18)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -289,7 +343,7 @@ func _build() -> void:
 	_party_box = _scroll_list(party)
 	var stash := _column(body, 0)
 	stash.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_label(stash, "THE TOWN STASH  ·  CLICK PACKS ONE, SHIFT-CLICK PACKS ALL", 11, MUTED)
+	_stash_title = _label(stash, "THE TOWN STASH", 11, MUTED)
 	_stash_box = _scroll_list(stash)
 	var pack := _column(body, 0)
 	pack.size_flags_horizontal = Control.SIZE_EXPAND_FILL

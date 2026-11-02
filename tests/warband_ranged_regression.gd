@@ -29,12 +29,18 @@ extends SceneTree
 const WORLD := "res://scenes/warband_world.tscn"
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const CombatScript = preload("res://scripts/combat.gd")
+const SquadDrive = preload("res://scripts/warband/squad_drive.gd")
+const ArrowScript = preload("res://scripts/arrow.gd")
 
 const TEST_SAVE := "user://warband_ranged_state.json"
 const WARBAND_SAVE := "user://warband_ranged_warband.json"
 ## The plate the range stands on, and how far out the dummy is.
 const PLATE_Y := 40.0
 const RANGE := 12.0
+## How far the squad's own archer is asked to shoot: past the 34 m the squad
+## walks to a hostile, inside the 46 m a recurve's shaft covers (84 m/s over the
+## half-second flight the squad's reach is measured in).
+const SQUAD_RANGE := 42.0
 const SETTLE_FRAMES := 40
 
 var game
@@ -92,6 +98,9 @@ func run() -> void:
 	await check_throw()
 	await check_archer_drop()
 	await check_band_breaks_off()
+	# Last, so the break-off banner it burns belongs to nobody else's run: the
+	# HUD speaks once per ally per quiet window, and this check spends that line.
+	await check_squad_ranged()
 
 	print("WARBAND_RANGED_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
@@ -272,6 +281,124 @@ func check_shoulder() -> void:
 	controller.camera_rig.swap()
 	await settle(SETTLE_FRAMES)
 	print("RANGED_SHOULDER travel=%.2f" % travel)
+
+
+# --- 9. an ally with a bow -------------------------------------------------
+
+## The squad's own long arm. A bow used to mean an ally walked the whole way in
+## to a blade's standoff before the string came up - `_fight_watcher` advanced to
+## `_standoff_for` first and only asked about the bow once it was already inside
+## arm's length - so every archer the band fielded fought like a man with a stick,
+## and the squad's fights were all in the mob's own face.
+##
+## Here an ally is armed with a recurve (84 m/s, so 46 m of reach at the
+## half-second flight the squad measures a bow by) and a hostile is stood 42 m off
+## on the plate - past the 34 m `engage_radius` the squad walks to a hostile, so
+## the fight can only happen because the body has a bow. The ally takes it, looses,
+## and puts the shaft in the body without ever closing on it.
+func check_squad_ranged() -> void:
+	var ally = null
+	var ally_id := 0
+	for raw_id in game.squad.squad_ids:
+		var merc_id := int(raw_id)
+		var candidate = game.controller.body_of(merc_id)
+		if candidate == null or not is_instance_valid(candidate) or candidate == body:
+			continue
+		if not bool(candidate.get("alive")) or bool(candidate.get("downed")):
+			continue
+		ally = candidate
+		ally_id = merc_id
+		break
+	check(ally != null and ally_id > 0, "the warband has a body the AI drives")
+	if ally == null:
+		return
+
+	# The plate, alone with the dummy: the camp's own watchers are on the ground
+	# forty metres below and would be the nearest hostile to a body standing here.
+	var kept: Array = game.squad.watchers
+	var hunter = WatcherScript.new()
+	hunter.name = "RangedHunter"
+	hunter.mob_id = "hollow_warden"
+	hunter.health_pool = 400.0
+	# A dummy, not a dead body: `PROCESS_MODE_DISABLED` takes a CharacterBody3D out
+	# of the physics space in this engine, and an arrow then flies straight through
+	# it. Its own clocks are what stop it acting.
+	hunter.set_physics_process(false)
+	hunter.set_process(false)
+	game.add_child(hunter)
+	game.squad.watchers = [hunter]
+	var home: Vector3 = (ally as Node3D).global_position
+	var ground: Vector3 = Vector3(-20.0, PLATE_Y + 0.3, 0.0)
+	(ally as Node3D).global_position = ground
+	hunter.global_position = ground + Vector3(0.0, 0.0, -SQUAD_RANGE)
+
+	warband.stash.add("bow_recurve", 1)
+	var worn: Dictionary = warband.equip_merc(ally_id, "main", "bow_recurve")
+	check(bool(worn.get("ok", false)),
+		"an ally can be armed with a recurve (%s)" % str(worn.get("message", "")))
+	controller.refresh_gear(ally_id)
+	warband.add_arrows(40)
+	await settle(6)
+	check(str(ally.rig.weapon) == "bow",
+		"and the rig is holding it (%s)" % str(ally.rig.weapon))
+
+	var reach: float = 84.0 * float(SquadDrive.BOW_FLIGHT_SECONDS)
+	check(reach > SQUAD_RANGE and reach > float(game.squad.engage_radius),
+		"the recurve outranges both the shot and the squad's walk-in (%.1f m)" % reach)
+
+	# The sight itself, before the shot: a shaft is lifted by what it will drop
+	# over its flight, and a shot aimed at the chest across a bow's reach lands in
+	# the dirt short of it. A target standing still gets no lead.
+	var mark: Vector3 = hunter.get_aim_position()
+	var sighted: Vector3 = game.squad._shot_point(ally, hunter)
+	var flight: float = sighted.distance_to(ally.get_aim_position()) \
+		/ (84.0 * float(SquadDrive.BOW_SHOT_CHARGE))
+	var fall: float = 0.5 * absf(ArrowScript.GRAVITY.y) * flight * flight
+	check(sighted.y - mark.y > fall * 0.8,
+		"the shot is sighted above the body by what the flight drops (%.2f m for %.2f m of fall)"
+		% [sighted.y - mark.y, fall])
+	check(Vector2(sighted.x - mark.x, sighted.z - mark.z).length() < 0.05,
+		"and straight at a body that is standing still (%.3f m of lead)"
+		% Vector2(sighted.x - mark.x, sighted.z - mark.z).length())
+
+	var hp_before := float(hunter.health)
+	var arrows_before: int = warband.arrows()
+	var shots_before: int = game.projectiles.size()
+	var closest := INF
+	var hit_at := -1
+	for index in 420:
+		await physics_frame
+		closest = minf(closest, (ally as Node3D).global_position.distance_to(
+			(hunter as Node3D).global_position))
+		if float(hunter.health) < hp_before:
+			hit_at = index
+			break
+	check(hit_at >= 0,
+		"an ally with a bow shoots a body %.0f m off (health %.0f -> %.0f)"
+		% [SQUAD_RANGE, hp_before, float(hunter.health)])
+	check(game.projectiles.size() > shots_before,
+		"and it is a real arrow in the world (%d -> %d)"
+		% [shots_before, game.projectiles.size()])
+	check(warband.arrows() < arrows_before,
+		"a shaft left the shared quiver for it (%d -> %d)"
+		% [arrows_before, warband.arrows()])
+	check(closest > 20.0,
+		"without walking in to it (closest %.1f m of %.0f)" % [closest, SQUAD_RANGE])
+	var reported := false
+	for row in game.squad.engaged_allies():
+		if int(row["merc_id"]) == ally_id:
+			reported = true
+	check(reported, "and the fight is on the squad's own book")
+	print("RANGED_SQUAD hit_at=%d closest=%.1f hp=%.0f arrows=%d"
+		% [hit_at, closest, float(hunter.health), warband.arrows()])
+
+	# Give the body back: the plate is forty metres of air above the soul, and an
+	# escort left standing on it walks off the edge the moment the fight ends.
+	game.squad.watchers = kept
+	game.guards.erase(hunter)
+	hunter.queue_free()
+	(ally as Node3D).global_position = home
+	await settle(6)
 
 
 # --- 5. thrown steel -------------------------------------------------------

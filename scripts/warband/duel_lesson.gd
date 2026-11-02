@@ -176,7 +176,7 @@ func hint() -> String:
 			return "K  -  take the ironwood shiv"
 		Step.FIGHT:
 			if _guard_tip and not _guarded:
-				return "HOLD RMB  -  guard   ·   let go to swing"
+				return "RMB  -  guard   ·   a block drops it, press again"
 			return "LMB  -  cut   ·   WHEEL_UP  -  stab   ·   WHEEL_DOWN  -  overhead"
 	return ""
 

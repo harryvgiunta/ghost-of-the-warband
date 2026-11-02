@@ -261,7 +261,7 @@ const OPENING_TIPS := {
 	TIP_WALK: {"keys": "W A S D", "text": "WALK · THE MOUSE LOOKS"},
 	TIP_BLADE: {"keys": "K", "text": "TAKE THE IRONWOOD SHIV"},
 	TIP_SWING: {"keys": "LMB", "text": "CUT · THE WHEEL STABS AND CHOPS"},
-	TIP_GUARD: {"keys": "HOLD RMB", "text": "GUARD · LET GO TO SWING"},
+	TIP_GUARD: {"keys": "RMB", "text": "GUARD · ONE BLOW, THEN PRESS AGAIN"},
 	TIP_LATCH: {"keys": "G", "text": "CUT EVERY LATCH"},
 	TIP_BODIES: {"keys": "F1 [ ]", "text": "STEP INTO A SQUADMATE"},
 	TIP_RUN: {"keys": "W A S D", "text": "RUN TO THE TOWN"},

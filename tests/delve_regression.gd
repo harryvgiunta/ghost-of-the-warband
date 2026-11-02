@@ -31,6 +31,7 @@ const WorldScene := "res://scenes/warband_world.tscn"
 const TEST_SAVE := "user://delve_player.json"
 const WARBAND_SAVE := "user://delve_warband.json"
 const AreaScript = preload("res://scripts/warband/delve_area.gd")
+const PrepScript = preload("res://scripts/warband/delve_prep_menu.gd")
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 
 var state
@@ -143,10 +144,30 @@ func check_mouth_and_pack() -> void:
 	check(area.prep.selected().size() == offered.size(), "and every one starts chosen")
 	var arrows: int = warband.stash.pooled_count("arrow")
 	check(arrows > 0, "the town's quiver has shafts to pack (%d)" % arrows)
+	check(area.prep.amount() == 1, "a click moves one copy until the dial says otherwise")
 	area.prep.pack("arrow", true)
 	check(warband.delve.inventory.pooled_count("arrow") == arrows,
 		"a shift-click packs every shaft (%d)" % warband.delve.inventory.pooled_count("arrow"))
 	check(warband.stash.pooled_count("arrow") == 0, "and the stash has none left")
+	# The dial: one click moves as many copies as the party says, which is what a
+	# quiver needs and what "click once per arrow" was paying for.
+	area.prep.set_amount(6)
+	check(area.prep.amount() == 6, "the dial holds the copies a click moves")
+	area.prep.unpack("arrow")
+	check(warband.delve.inventory.pooled_count("arrow") == arrows - 6
+			and warband.stash.pooled_count("arrow") == 6,
+		"one click moves the dial's six shafts back to the stash (%d / %d)" % [
+			warband.delve.inventory.pooled_count("arrow"), warband.stash.pooled_count("arrow")])
+	area.prep.pack("arrow")
+	check(warband.delve.inventory.pooled_count("arrow") == arrows
+			and warband.stash.pooled_count("arrow") == 0,
+		"and one click packs them down again (%d)" % warband.delve.inventory.pooled_count("arrow"))
+	# Outside the dial's range, and back to a click of one for the blade below.
+	area.prep.set_amount(0)
+	check(area.prep.amount() == 1, "the dial cannot go below one copy")
+	area.prep.set_amount(9999)
+	check(area.prep.amount() == PrepScript.MAX_AMOUNT, "nor above the panel's ceiling")
+	area.prep.set_amount(1)
 	var spare_before: int = warband.stash.pooled_count("sword_arming")
 	area.prep.pack("sword_arming")
 	check(warband.delve.inventory.pooled_count("sword_arming") == 1, "a click packs one spare blade")

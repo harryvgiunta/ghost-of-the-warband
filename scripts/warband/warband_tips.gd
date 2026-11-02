@@ -2,7 +2,7 @@ class_name WarbandTips
 extends CanvasLayer
 ## GHOST OF THE WARBAND: the one hint channel, and the whole of the tutorial.
 ##
-## A tip is a key and a command - `G · CUT THE LATCH`, `HOLD RMB · GUARD` - under
+## A tip is a key and a command - `G · CUT THE LATCH`, `RMB · GUARD` - under
 ## the crosshair, up for a few seconds, then gone. It never pauses the tree, never
 ## takes the pointer and never opens twice: a beat that re-announces itself cannot
 ## nag. Nothing in the warband explains itself in a paragraph any more; the game

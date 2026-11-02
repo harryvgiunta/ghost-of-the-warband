@@ -684,6 +684,9 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 			velocity.x = push.x
 			velocity.z = push.z
+		# One raised guard buys one block for a clone too: it re-raises on its
+		# own cooldown, never by leaning on the guard it already had.
+		combat.break_guard()
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false)
 		return outcome

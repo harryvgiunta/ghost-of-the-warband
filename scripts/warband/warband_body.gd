@@ -12,6 +12,10 @@ signal downed_ended(slot: int)
 ## A hostile is about to land a blow or a shaft on this body (`note_attacker`). The
 ## squad listens: its party mode decides whether that is a fight the band answers.
 signal struck_by(attacker: Node3D)
+## A raised guard took a blow and came down: the fighter must raise it again. The
+## scene says so on the soul's own body, because a guard that dropped with the
+## button still held looks like a button that stopped working.
+signal guard_broken(slot: int)
 
 const Archer = preload("res://scripts/archer.gd")
 const Combat = preload("res://scripts/combat.gd")
@@ -584,6 +588,10 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 	if not authoritative or not alive or downed:
 		return
 	if pressed:
+		# No wind, no guard: an empty pool cannot hold a blade up, so the player
+		# waits for it to knit back instead of leaning on a free defence.
+		if stamina < Stamina.GUARD_MIN:
+			return
 		combat.start_block(forward)
 	else:
 		combat.stop_block()
@@ -617,6 +625,11 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
 			velocity.x = push.x
 			velocity.z = push.z
+		# The blow was stopped, and it cost more than the pool's price: the guard
+		# is spent and comes down. One raised guard buys one block, so a crowd
+		# cannot be stood off by leaning on the button.
+		combat.break_guard()
+		guard_broken.emit(slot)
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			# The raised dagger absorbs the impact: half damage but the guard
 			# stays up and the attacker's swing continues.
@@ -1035,8 +1048,24 @@ func _resolve_motion(delta: float, actors: Array, simulation_tick: int) -> Dicti
 	var direction := Vector3(move_direction.x,0,move_direction.y)
 	var slide_velocity: Vector3 = slide.step(delta,self,cover,direction,roll.active)
 	var running: bool = run_requested and (cover.active or not cover.crouched and not cover.crouch_requested) and not _exhausted and stamina > 1 and direction.length_squared() > 0.01 and not ability.active
-	var stamina_rate: float = 0.0 if combat.blocking or ability.active else (-Stamina.SPRINT_DRAIN_PER_SECOND if running or slide.active else Stamina.REGEN_PER_SECOND * TrinketStats.stamina_regen(trinket_stats))
+	# A raised guard is held with the whole body and drains faster than the pool
+	# knits back (13/s), so guarding is a timed trade, never a resting stance. The
+	# blow the guard actually stops is charged again in `receive_melee`.
+	var stamina_rate: float = 0.0
+	if ability.active:
+		stamina_rate = 0.0
+	elif combat.blocking:
+		stamina_rate = -Stamina.GUARD_DRAIN_PER_SECOND
+	elif running or slide.active:
+		stamina_rate = -Stamina.SPRINT_DRAIN_PER_SECOND
+	else:
+		stamina_rate = Stamina.REGEN_PER_SECOND * TrinketStats.stamina_regen(trinket_stats)
 	stamina = clampf(stamina + delta * stamina_rate,0,max_stamina)
+	if combat.blocking and stamina <= 0.0:
+		# Out of wind the arm comes down by itself. It stays down until the pool
+		# is back over `GUARD_MIN`, so the drop cannot be undone by a press on
+		# the same frame.
+		combat.break_guard()
 	if stamina <= Stamina.SPRINT_EXHAUSTED:
 		_exhausted = true
 	elif stamina >= Stamina.SPRINT_RESUME:

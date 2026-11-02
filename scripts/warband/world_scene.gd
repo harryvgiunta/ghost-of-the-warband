@@ -972,6 +972,11 @@ func _adopt_body(actor) -> void:
 	if merc_id > 0:
 		actor.downed_started.connect(_on_body_downed.bind(actor, merc_id))
 		actor.killed.connect(_on_body_killed.bind(actor, merc_id))
+		# A guard that took a blow comes down and stays down until the button is
+		# pressed again. On the soul's own body that is said out loud: a guard
+		# that dropped with the button still held is otherwise indistinguishable
+		# from a button that stopped working.
+		actor.guard_broken.connect(_on_guard_broken.bind(actor))
 	# A body that is struck names its striker, and the squad's party mode decides
 	# whether the band answers it.
 	if squad != null:
@@ -1756,6 +1761,17 @@ func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
 		_downed_tip_pending = true
 		_push_downed_tip()
 	_push_revive_tip(actor)
+
+
+## A guard that stopped a blow comes down and stays down until the button is
+## pressed again. Only the soul's own guard is called out: the band's bodies
+## break and re-raise theirs without an eye on them.
+func _on_guard_broken(_slot: int, actor) -> void:
+	if hud == null or controller == null or actor == null or not is_instance_valid(actor):
+		return
+	if actor != _soul():
+		return
+	hud.set_status("GUARD BROKEN  -  CLICK RMB AGAIN", 1.6)
 
 
 ## The first squadmate to go down near the player teaches the channel: a body on

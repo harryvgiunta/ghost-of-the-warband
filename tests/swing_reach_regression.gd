@@ -346,16 +346,45 @@ func run() -> void:
 	attacker.combat.begin_melee("right","diagonal_right")
 	advance(1.0)
 	check(defender.health == 100.0 and defender.stamina == Stamina.MAX-Combat.BLOCK_STAMINA,
-		"A diagonal cleave honors a held guard and spends stamina only once")
+		"A diagonal cleave honors a raised guard and spends stamina once")
+	# One raised guard buys one block. The blow is what spends it, so the arm
+	# comes down by itself and a crowd cannot be stood off by holding the button:
+	# the guard has to be pressed again for the next blow.
+	check(not defender.combat.blocking,"A landed block drops the guard")
 	reset_swing()
-	defender.combat.stop_block()
+	attacker.combat.begin_melee("right","diagonal_left")
+	advance(1.0)
+	check(defender.health < 100.0,"The next blow lands while the guard is still down")
+	var guarded_health: float = defender.health
+	# The landed blow staggered the defender and only the attacker's clock is
+	# advanced in this harness, so the reaction is cleared by hand.
+	defender.combat.stagger_time = 0.0
+	defender.rig.set_hit_react(0.0)
 	defender.stamina = 100.0
+	defender.combat.stop_block()
 	attacker.combat.begin_melee("right","diagonal_left")
 	advance(attacker.rig._melee_window("right").x)
 	defender.combat.start_block(Vector3.BACK)
 	advance(0.15)
-	check(defender.health == 100.0 and attacker.combat.stagger_time > 0.0,
+	check(defender.health == guarded_health and attacker.combat.stagger_time > 0.0,
 		"A timely guard parries and cancels an assisted diagonal hit")
+	# Holding a guard drains the pool: guarding is a timed trade, not a resting
+	# stance. Nothing else touches the body here, so the only movement in the bar
+	# is the guard's own drain.
+	defender.stamina = Stamina.MAX
+	defender.combat.start_block(Vector3.BACK)
+	for tick in 5:
+		defender.step(0.1,[defender])
+	check(defender.combat.blocking and is_equal_approx(defender.stamina,
+			Stamina.MAX - Stamina.GUARD_DRAIN_PER_SECOND * 0.5),
+		"Half a second of guard drains the pool at the guard's own rate (%.1f)"
+			% (Stamina.MAX - defender.stamina))
+	# A spent body cannot raise one at all, so a drop cannot be clicked away.
+	defender.combat.stop_block()
+	defender.stamina = Stamina.GUARD_MIN - 1.0
+	defender.set_block(true,Vector3.BACK)
+	check(not defender.combat.blocking,"A body under the guard floor cannot raise an arm")
+	defender.stamina = Stamina.MAX
 
 	world.queue_free()
 	await process_frame
