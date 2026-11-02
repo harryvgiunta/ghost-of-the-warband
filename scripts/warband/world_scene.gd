@@ -222,6 +222,8 @@ var squad
 ## (`SQUAD_TICKS`). Seeded full, so the first tick of the world drives the band.
 var _squad_ticks := SQUAD_TICKS
 var _squad_delta := 0.0
+## Ticks banked toward the next retarget sweep (the same `SQUAD_TICKS` budget).
+var _retarget_ticks := 0
 ## The band between the camp's mouth and the lane. Built after the warband is
 ## seated, because a wolf's first target is a real body.
 var wilderness
@@ -426,9 +428,15 @@ func _step_world(delta: float) -> void:
 	controller.physics_step(delta)
 	# A replica is a mob the session is showing, not one this machine owns: it is
 	# handed no target, so no local sense ever wakes it behind the host's back.
-	Perf.begin("squad.retarget")
-	SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
-	Perf.end()
+	# Every hostile against every body every tick was a hundred distance checks a
+	# tick for a decision nothing can notice being 50 ms old: the same budget the
+	# band's own brains run on.
+	_retarget_ticks += 1
+	if _retarget_ticks >= SQUAD_TICKS:
+		_retarget_ticks = 0
+		Perf.begin("squad.retarget")
+		SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
+		Perf.end()
 	# The delve's own clock: dens that wake, a party that falls, the eye's sky.
 	if delve_area != null:
 		Perf.begin("delve.tick")

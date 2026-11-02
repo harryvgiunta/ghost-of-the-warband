@@ -970,10 +970,14 @@ answered before any menu or key the scenes own and never takes the pointer.
 - **Headline:** fps and the average frame time over the last 240 frames, red
   below 57 fps. Under it, the worst frame, the 1% low and whether vsync or an fps
   cap is pacing the frame.
-- **Engine:** the renderer's CPU and GPU milliseconds with draw calls,
-  primitives and objects; the physics step and how many ran per drawn frame, with
-  active bodies, pairs and islands; nodes, orphans, resources, static and video
-  memory.
+- **Engine**, as a mean over the window rather than the last frame Godot happened
+  to hand over: the renderer's CPU and GPU milliseconds with draw calls,
+  primitives and objects; **physics milliseconds per step** beside how many steps
+  a drawn frame ran, with active bodies, pairs and islands; nodes, orphans,
+  resources, static and video memory.
+- **Slowest:** the frame of the window that hurt most, by name - `slowest 95.84 ms
+  world.physics 21.30 · mob.ai 3.10 · rig.anim 1.80`. Averages cannot show a
+  1% low; this is the line to read when the frame is dropping instead of steady.
 - **World:** in the campaign, the living bodies, the hostiles (and how many the
   culler has parked), missiles in flight and drops on the ground.
 - **Major functions:** a call tree of the game's frame entry points, heaviest

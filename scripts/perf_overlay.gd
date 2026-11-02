@@ -19,6 +19,24 @@ extends CanvasLayer
 const Perf = preload("res://scripts/perf_probe.gd")
 const Ledger = preload("res://scripts/ui/ledger_theme.gd")
 
+## The engine monitors the window averages, in the order `_sample_monitors`
+## reads them. One array of floats holds seconds and counts alike.
+const M_RENDER_CPU := 0
+const M_RENDER_GPU := 1
+const M_DRAWS := 2
+const M_PRIMS := 3
+const M_OBJECTS := 4
+const M_PHYSICS := 5
+const M_PAIRS := 6
+const M_ACTIVE := 7
+const M_ISLANDS := 8
+const M_NODES := 9
+const M_ORPHANS := 10
+const M_RESOURCES := 11
+const M_MEMORY := 12
+const M_VRAM := 13
+const MONITORS := 14
+
 ## A scene that knows something the engine does not (bodies, mobs, missiles)
 ## joins this group and answers `perf_context() -> PackedStringArray`.
 const CONTEXT_GROUP := &"perf_context"
@@ -54,6 +72,12 @@ var _next := 0
 var _filled := 0
 var _since_refresh := 0
 var _physics_mark := 0
+## The engine's own monitors, summed over the window. They are read from
+## `Performance` once a frame and printed as an average: a single frame's value
+## is what the browser shows, and one slow step read as "physics 44 ms" says
+## nothing about the frame the eye is complaining about.
+var _sum := PackedFloat64Array()
+var _samples := 0
 
 
 func _init() -> void:
@@ -102,10 +126,40 @@ func set_open(value: bool) -> void:
 	_next = 0
 	_filled = 0
 	_since_refresh = 0
+	_sum.resize(MONITORS)
+	_sum.fill(0.0)
+	_samples = 0
 	_physics_mark = Engine.get_physics_frames()
 	_headline.add_theme_color_override("font_color", Ledger.BONE)
 	_headline.text = "measuring..."
 	_body.text = ""
+
+
+## What each monitor cost or counted since the last rebuild, added up: the
+## column is printed as a mean over the frames of the window, so one slow step
+## cannot pass itself off as the cost of every frame.
+func _sample_monitors() -> void:
+	var rid := get_viewport().get_viewport_rid()
+	_sum[M_RENDER_CPU] += RenderingServer.get_frame_setup_time_cpu() \
+		+ RenderingServer.viewport_get_measured_render_time_cpu(rid)
+	_sum[M_RENDER_GPU] += RenderingServer.viewport_get_measured_render_time_gpu(rid)
+	_sum[M_DRAWS] += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	_sum[M_PRIMS] += Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
+	_sum[M_OBJECTS] += Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
+	_sum[M_PHYSICS] += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	_sum[M_PAIRS] += Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)
+	_sum[M_ACTIVE] += Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS)
+	_sum[M_ISLANDS] += Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT)
+	_sum[M_NODES] += Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+	_sum[M_ORPHANS] += Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)
+	_sum[M_RESOURCES] += Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	_sum[M_MEMORY] += Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	_sum[M_VRAM] += Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0
+	_samples += 1
+
+
+func _mean(index: int) -> float:
+	return _sum[index] / float(maxi(_samples, 1))
 
 
 ## The readout as drawn, headline first. What the regression reads.
@@ -120,6 +174,7 @@ func _process(_delta: float) -> void:
 	_frame_us[_next] = spent
 	_next = (_next + 1) % WINDOW
 	_filled = mini(_filled + 1, WINDOW)
+	_sample_monitors()
 	_since_refresh += spent
 	if _since_refresh < REFRESH_US:
 		return
@@ -145,28 +200,28 @@ func _compose() -> void:
 	var physics_frames := Engine.get_physics_frames()
 	var ticks := float(physics_frames - _physics_mark) / float(window_frames)
 	_physics_mark = physics_frames
-	var rid := get_viewport().get_viewport_rid()
 	var lines := PackedStringArray()
 	lines.append("frame    %6.2f worst   %6.2f 1%% low (%5.1f fps)   %s" % [
 		worst, low, _fps(low), _pacing()])
 	lines.append("render   %5.2f cpu %5.2f gpu   %d draws   %.2f M prims   %d objects" % [
-		RenderingServer.get_frame_setup_time_cpu()
-			+ RenderingServer.viewport_get_measured_render_time_cpu(rid),
-		RenderingServer.viewport_get_measured_render_time_gpu(rid),
-		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
-		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000000.0,
-		int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))])
-	lines.append("physics  %5.2f x%3.1f   %d active   %d pairs   %d islands" % [
-		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, ticks,
-		int(Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS)),
-		int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)),
-		int(Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT))])
+		_mean(M_RENDER_CPU), _mean(M_RENDER_GPU), int(_mean(M_DRAWS)),
+		_mean(M_PRIMS) / 1000000.0, int(_mean(M_OBJECTS))])
+	# Physics is printed per step, not per frame: the frame only decides how many
+	# steps it has to pay for, and a step that is itself slow is a different bug.
+	lines.append("physics  %5.2f /step x%3.1f  %d active   %d pairs   %d islands" % [
+		_mean(M_PHYSICS) / maxf(ticks, 0.001), ticks, int(_mean(M_ACTIVE)),
+		int(_mean(M_PAIRS)), int(_mean(M_ISLANDS))])
 	lines.append("tree     %d nodes   %d orphans   %d resources   %d MB   vram %d MB" % [
-		int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
-		int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)),
-		int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),
-		int(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0),
-		int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0)])
+		int(_mean(M_NODES)), int(_mean(M_ORPHANS)), int(_mean(M_RESOURCES)),
+		int(_mean(M_MEMORY)), int(_mean(M_VRAM))])
+	# The frame that hurt, and what was running inside it: the one reading an
+	# average cannot give, and the only one that explains a 1% low.
+	if Perf.worst_frame_us > 0:
+		var inside := PackedStringArray()
+		for row in Perf.worst_rows(4):
+			inside.append("%s %.2f" % [str(row["name"]), float(row["us"]) / 1000.0])
+		lines.append("slowest  %6.2f ms  %s" % [float(Perf.worst_frame_us) / 1000.0,
+			"  ·  ".join(inside)])
 	for node in get_tree().get_nodes_in_group(CONTEXT_GROUP):
 		if node.has_method("perf_context"):
 			lines.append_array(node.call("perf_context"))

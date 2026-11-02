@@ -154,6 +154,22 @@ func _check_overlay() -> void:
 	check(_line_starting(text, "physics ").contains("pairs"), "the physics step and its counters are listed")
 	check(_line_starting(text, "world ").contains("bodies"),
 		"the world contributes its own line (%s)" % _line_starting(text, "world "))
+	# The engine's own monitors are an average over the window, and physics is
+	# printed per step: one slow step must not pass itself off as every frame's
+	# cost, and the frame only decides how many steps it pays for.
+	var physics_line := _line_starting(text, "physics ")
+	check(physics_line.contains("/step") and physics_line.contains("x"),
+		"physics is printed per step beside the steps a frame ran (%s)" % physics_line)
+	# The frame that hurt, named: what an average cannot show, and the only
+	# reading that explains a 1%% low.
+	var slowest := _line_starting(text, "slowest ")
+	var slow_fields := slowest.strip_edges().split(" ", false)
+	var frame_fields := _line_starting(text, "frame ").strip_edges().split(" ", false)
+	check(slow_fields.size() > 2 and float(slow_fields[1]) > 0.0 and slowest.contains("·"),
+		"the readout names the scopes of the slowest frame (%s)" % slowest)
+	check(float(slow_fields[1]) <= float(frame_fields[1]) + 0.01,
+		"the slowest frame is the one the frame line calls worst (%s vs %s)"
+		% [slow_fields[1], frame_fields[1]])
 	for scope: String in WORLD_SCOPES:
 		var line := _scope_line(text, scope)
 		check(not line.is_empty(), "the readout times %s" % scope)

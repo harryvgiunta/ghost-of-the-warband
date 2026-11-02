@@ -36,6 +36,14 @@ static var _total := PackedInt64Array()
 static var _own := PackedInt64Array()
 static var _calls := PackedInt32Array()
 static var _peak := PackedInt64Array()
+## The frame that hurt: its wall time, and what each scope cost inside it. The
+## window's totals are an average, and a frame that runs three times the average
+## is what the eye reads as a stutter - the average never shows which scope did
+## it. `_prev` is the window total as of the last `tick()`, so a frame's own
+## cost is the difference.
+static var worst_frame_us := 0
+static var _prev := PackedInt64Array()
+static var _worst := PackedInt64Array()
 
 ## The open scopes, innermost last. Parallel packed arrays grown in steps of
 ## sixteen, so a begin/end pair never allocates.
@@ -101,6 +109,12 @@ static func tick() -> int:
 	if spent > 0:
 		frames += 1
 		frame_us += spent
+		if spent > worst_frame_us:
+			worst_frame_us = spent
+			for slot in _worst.size():
+				_worst[slot] = _total[slot] - _prev[slot]
+	for slot in _prev.size():
+		_prev[slot] = _total[slot]
 	return spent
 
 
@@ -111,6 +125,9 @@ static func restart() -> void:
 	_own.fill(0)
 	_calls.fill(0)
 	_peak.fill(0)
+	_prev.fill(0)
+	_worst.fill(0)
+	worst_frame_us = 0
 	frames = 0
 	frame_us = 0
 	imbalanced = 0
@@ -131,6 +148,45 @@ static func rows() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	_append_rows(-1, out)
 	return out
+
+
+## The scopes of the slowest frame of the window, heaviest first, as
+## `{name, depth, us}`. What the average cannot show: the one frame the eye read
+## as a stutter, and what was running inside it.
+static func worst_rows(limit: int = 4) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if worst_frame_us <= 0:
+		return out
+	var order: Array[int] = []
+	for slot in _worst.size():
+		if _worst[slot] > 0:
+			order.append(slot)
+	order.sort_custom(func(a: int, b: int) -> bool: return _worst[a] > _worst[b])
+	# Only roots and their heaviest children: a list of nested duplicates under
+	# a couple of parents says less than the parents themselves.
+	for slot in order:
+		if out.size() >= limit:
+			break
+		var nested := false
+		for row in out:
+			var parent: int = _parents[slot]
+			if parent >= 0 and (parent == int(row["slot"]) or _under(parent, int(row["slot"]))):
+				nested = true
+				break
+		if nested:
+			continue
+		out.append({"name": _names[slot], "depth": _depths[slot], "slot": slot,
+			"us": _worst[slot]})
+	return out
+
+
+static func _under(slot: int, ancestor: int) -> bool:
+	var walk := slot
+	while walk >= 0:
+		if walk == ancestor:
+			return true
+		walk = _parents[walk]
+	return false
 
 
 ## Time spent inside any scope this window: the sum of the roots, so nested
@@ -160,6 +216,8 @@ static func _add(name: String, parent: int) -> int:
 	_own.append(0)
 	_calls.append(0)
 	_peak.append(0)
+	_prev.append(0)
+	_worst.append(0)
 	_children[parent + 1][name] = slot
 	_children.append({})
 	return slot
