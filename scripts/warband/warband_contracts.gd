@@ -18,11 +18,16 @@ extends RefCounted
 ## The ten worn slots, in paperdoll order. `BOOTS` is the existing `feet` id and
 ## `MAIN_HAND`/`OFF_HAND` are the existing `main`/`off` ids: the enum names are
 ## the design vocabulary, `SLOT_IDS` is the wire and save vocabulary.
+##
+## Steel first, then the armour, then the trinkets - the order a body is armed in
+## (`Warband.DRESS_SLOTS`), so the rows of the page and the kit order the hotbar
+## keys are laid out in are the same order the body is first dressed.
 enum SlotType { HEAD, CHEST, HANDS, LEGS, BOOTS, NECK, RING1, RING2, MAIN_HAND, OFF_HAND }
 
 const SLOT_ORDER: Array[int] = [
+	SlotType.MAIN_HAND, SlotType.OFF_HAND,
 	SlotType.HEAD, SlotType.CHEST, SlotType.HANDS, SlotType.LEGS, SlotType.BOOTS,
-	SlotType.NECK, SlotType.RING1, SlotType.RING2, SlotType.MAIN_HAND, SlotType.OFF_HAND,
+	SlotType.NECK, SlotType.RING1, SlotType.RING2,
 ]
 
 const SLOT_IDS := {

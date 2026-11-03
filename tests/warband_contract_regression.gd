@@ -67,7 +67,16 @@ func check_slots() -> void:
 	var ids: Array[String] = []
 	for slot in Contracts.SLOT_ORDER:
 		ids.append(Contracts.slot_id(slot))
-	check(ids == Rules.SLOTS, "SlotType ids must be exactly EquipmentRules.SLOTS, got %s" % str(ids))
+	# The page lists the steel first, in the order a body is armed. The wire ids
+	# keep their own order, so the two only have to name the same ten slots.
+	var listed := ids.duplicate()
+	listed.sort()
+	var known: Array = Rules.SLOTS.duplicate()
+	known.sort()
+	check(listed == known,
+		"SlotType ids must be exactly EquipmentRules.SLOTS, got %s" % str(ids))
+	check(ids.slice(0, 2) == ["main", "off"],
+		"and the paperdoll order is steel first, got %s" % str(ids))
 	check(Contracts.slot_id(Contracts.SlotType.BOOTS) == "feet", "BOOTS is the existing feet id")
 	check(Contracts.slot_id(Contracts.SlotType.OFF_HAND) == "off", "OFF_HAND is the existing off id")
 	check(Contracts.slot_from_id("ring2") == Contracts.SlotType.RING2, "ring2 round-trips")

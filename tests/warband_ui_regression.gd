@@ -213,6 +213,13 @@ func _check_paperdoll() -> void:
 	check(doll.is_open(), "open() opens the paperdoll")
 	check(doll.selected_merc == first, "the paperdoll opens on the asked-for mercenary")
 	check(doll.slot_rows.size() == Contracts.SLOT_ORDER.size(), "all ten worn slots are drawn")
+	check(Contracts.slot_id(Contracts.SLOT_ORDER[0]) == "main"
+			and Contracts.slot_id(Contracts.SLOT_ORDER[1]) == "off",
+		"the rows put the steel first, in the order the body is armed")
+	check(doll.controlled_merc == first, "the page opens on the body the soul is in")
+	check(doll.picker_buttons[first].text.contains("YOU"),
+		"the body under the soul carries its own mark, got %s"
+		% doll.picker_buttons[first].text)
 	check(doll.picker_buttons.size() == 2, "the picker strip has one button per mercenary")
 	check(doll.stash_rows.size() == 3, "the stash lists every unequipped piece, got %d"
 		% doll.stash_rows.size())

@@ -716,6 +716,9 @@ func _enter_first_body() -> void:
 func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 	if peer_id == 1:
 		_refresh_hud()
+		# The gear page and its hotbar belong to the body the soul is in.
+		if paperdoll != null:
+			paperdoll.follow_controlled(merc_id)
 		hud.set_status("%s takes the soul." % warband.roster.name_of(merc_id), 2.0)
 
 func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
@@ -723,6 +726,8 @@ func _on_transfer_refused(_peer_id: int, merc_id: int, reason: String) -> void:
 
 func _on_possession_released(_peer_id: int, reason: String) -> void:
 	hud.set_body(null, "", -1)
+	if paperdoll != null:
+		paperdoll.follow_controlled(-1)
 	hud.set_status("The soul is loose (%s)." % reason, 4.0)
 
 func _on_possess_requested(merc_id: int) -> void:

@@ -8,6 +8,7 @@ extends SceneTree
 const Actor = preload("res://scripts/warband/warband_body.gd")
 const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const SeatLoadout = preload("res://scripts/seat_loadout.gd")
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const HudScript = preload("res://scripts/warband/warband_hud.gd")
@@ -95,6 +96,7 @@ func run() -> void:
 	_check_rules()
 	_check_rig(world)
 	_check_warband()
+	_check_wear_order()
 	_check_paperdoll()
 	world.queue_free()
 	warband.reset_state()
@@ -276,6 +278,31 @@ func _check_warband() -> void:
 	warband.lent = false
 
 
+## The keys follow the order the body is worn: the main hand, the off hand, then
+## the necklace, ring 1 and ring 2 - the same order the page lists the slots in
+## and the arming dresses them, so key 1 is the row at the top of the page.
+func _check_wear_order() -> void:
+	warband.reset_state()
+	var merc: int = warband.add_mercenary("Worn")
+	for item_id in ["sword_arming", "shield_kite", "neck_shield", "ring_dash", "ring_echo"]:
+		warband.stash.add(item_id, 1)
+	warband.equip_merc(merc, "main", "sword_arming")
+	warband.equip_merc(merc, "off", "shield_kite")
+	warband.equip_merc(merc, "neck", "neck_shield")
+	warband.equip_merc(merc, "ring1", "ring_dash")
+	warband.equip_merc(merc, "ring2", "ring_echo")
+	warband.grant_anointing("sword_arming")
+	warband.grant_anointing("shield_kite")
+	check(_same(warband.hotbar_layout(merc),
+		["lunge_thrust", "shield_charge", "energy_shield", "dash",
+			"", "", "", "", "", ""]),
+		"an unwritten layout is the wear order - main hand, off hand, then the trinkets, got %s"
+		% str(warband.hotbar_layout(merc)))
+	check(Contracts.slot_id(Contracts.SLOT_ORDER[0]) == "main"
+			and Contracts.slot_id(Contracts.SLOT_ORDER[1]) == "off",
+		"and the page lists the slots in that order, steel first")
+
+
 ## The paperdoll row: the same ten keys, click-to-swap, a reset that hands the
 ## order back to the kit, and no row on a corpse.
 func _check_paperdoll() -> void:
@@ -293,6 +320,15 @@ func _check_paperdoll() -> void:
 	doll.configure(warband)
 	root.add_child(doll)
 	doll.open(merc)
+	check(doll.controlled_merc == merc,
+		"opening the page on a body makes it the controlled body")
+	check(doll._hotbar_label.text.contains("THE BODY YOU CONTROL"),
+		"the hotbar row says whose row it is, got %s" % doll._hotbar_label.text)
+	check(doll._merc_label.text.contains("YOU"),
+		"and the page's identity says it is the player's body, got %s"
+		% doll._merc_label.text)
+	check(doll._worn_title.text.contains("KEYS"),
+		"the worn column names the body, got %s" % doll._worn_title.text)
 	check(doll.hotbar_tiles.size() == AbilityRules.SLOT_COUNT,
 		"the paperdoll draws one key per slot, got %d" % doll.hotbar_tiles.size())
 	check(doll.hotbar_buttons.size() == AbilityRules.SLOT_COUNT,
@@ -307,11 +343,15 @@ func _check_paperdoll() -> void:
 		"a granted key draws its skill's icon")
 	check(doll.hotbar_tiles[5].get("_icon").texture == null,
 		"an empty key draws no icon")
-	# The row is the HUD's own measure: ten compact keys with the same gap.
+	# The row is the HUD's own measure, and the block is cut to it: the header,
+	# the KIT ORDER press and the tenth key end on the same edge.
 	var row: HBoxContainer = doll._hotbar_box.get_node("Keys")
 	var measured := row.get_combined_minimum_size()
-	check(measured.x >= 10.0 * 40.0 + 9.0 * 4.0,
-		"ten 40 px keys fit the row, got %.1f px" % measured.x)
+	check(is_equal_approx(measured.x, DollScript.HOTBAR_WIDTH),
+		"the keys fill the hotbar block exactly, got %.1f of %.1f"
+		% [measured.x, DollScript.HOTBAR_WIDTH])
+	check(is_equal_approx(doll._hotbar_box.custom_minimum_size.x, DollScript.HOTBAR_WIDTH),
+		"and the block takes the keys' own width, not the column's")
 	check(doll.hotbar_buttons[0].tooltip_text.contains("Barrage"),
 		"hovering a key names the skill on it, got %s"
 		% doll.hotbar_buttons[0].tooltip_text)
@@ -355,6 +395,22 @@ func _check_paperdoll() -> void:
 		["barrage", "energy_shield", "dash", "", "", "", "", "", "", ""]),
 		"KIT ORDER hands the keys back to the kit, got %s"
 		% str(doll.hotbar_layout()))
+
+	# Another body's page says whose row it is, and a page on the body the soul is
+	# in follows the soul when it changes bodies.
+	var other: int = warband.add_mercenary("Other")
+	doll.select_merc(other)
+	check(doll._hotbar_label.text.contains("NOT YOUR BODY"),
+		"another body's row says it is not the player's, got %s" % doll._hotbar_label.text)
+	check(not doll._merc_label.text.contains("YOU"),
+		"and its identity carries no mark of the player's body, got %s"
+		% doll._merc_label.text)
+	doll.select_merc(merc)
+	doll.follow_controlled(other)
+	check(doll.selected_merc == other,
+		"a page on the body the soul leaves follows the soul")
+	doll.follow_controlled(merc)
+	check(doll.selected_merc == merc, "and follows it back")
 
 	# The dead body's screen is a looting screen: no hotbar row.
 	doll.show_corpse(99, ["dagger_iron"])

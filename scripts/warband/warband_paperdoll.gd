@@ -45,7 +45,15 @@ const SIZE := Vector2(1240, 780)
 ## The hotbar row under the stage: the same compact key the HUD draws, at the
 ## same measure, so the screen the player arranges is the row the fight shows.
 const HOTBAR_TILE := 40.0
-const HOTBAR_GAP := 4
+## The same 3 px the HUD's own row uses, and the reason the block fits the
+## centre column: ten 40 px keys and nine 3 px gaps are 427 px, inside the 432
+## the frame leaves once the worn and stash columns have their widths.
+const HOTBAR_GAP := 3
+## The hotbar block's own measure: ten keys and the gaps between them. The
+## header, the keys and the KIT ORDER press all take this width, so the block
+## has one left edge and one right edge instead of three.
+const HOTBAR_WIDTH := HOTBAR_TILE * AbilityRules.SLOT_COUNT \
+	+ HOTBAR_GAP * (AbilityRules.SLOT_COUNT - 1)
 const SLOT_ICON := {
 	"head": "helm", "chest": "cuirass", "hands": "gauntlet", "legs": "greaves",
 	"feet": "boot", "neck": "amulet", "ring1": "ring", "ring2": "ring",
@@ -65,6 +73,10 @@ var corpse_rows: Array[Dictionary] = []
 
 ## The mercenary being dressed; `-1` when the warband is empty.
 var selected_merc := -1
+## The body the soul is inside right now (`-1` when no soul holds one here). The
+## page opens on it, and the hotbar row names it: a row of keys the player did
+## not arrange for the body under their hands must never read as their own.
+var controlled_merc := -1
 ## The slot the next stash click lands in (`WarbandContracts.SlotType`).
 var selected_slot := Contracts.SlotType.MAIN_HAND
 ## Slot rows keyed by slot id (`head`..`off`): `{slot, id, button, item_id}`.
@@ -114,6 +126,7 @@ var hotbar_ids: Array[String] = []
 ## The key picked up by the last click, `-1` when nothing is picked up.
 var _hotbar_selected := -1
 var _hotbar_box: VBoxContainer
+var _hotbar_label: Label
 var _reset_hotbar_button: Button
 
 func _ready() -> void:
@@ -137,8 +150,10 @@ func configure(warband) -> void:
 func is_open() -> bool:
 	return _open
 
-## Open on `merc_id`, or keep the current selection. `-1` picks the first
-## mercenary when nothing valid is selected yet. Opening the warband's own gear
+## Open on `merc_id`, or keep the current selection. `-1` picks the body the soul
+## is inside when it is here, then the last name chosen, then the first
+## mercenary. A real id is taken as the controlled body: every caller that opens
+## this page is standing in the body it passes. Opening the warband's own gear
 ## leaves the corpse screen behind: one screen, one job at a time.
 func open(merc_id: int = -1) -> void:
 	_ensure_built()
@@ -147,11 +162,38 @@ func open(merc_id: int = -1) -> void:
 	_open = true
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if merc_id > 0:
+		controlled_merc = merc_id
 	var target := merc_id
 	if target <= 0 or not _can_dress(target):
-		target = selected_merc if _can_dress(selected_merc) else _first_merc_id()
+		if _can_dress(controlled_merc):
+			target = controlled_merc
+		elif _can_dress(selected_merc):
+			target = selected_merc
+		else:
+			target = _first_merc_id()
 	select_merc(target, false)
 	set_status(USAGE_HINT)
+
+## The body the soul is inside, so the page can open on it and the hotbar row can
+## name it. `-1` when the soul is watching from outside a body.
+func set_controlled(merc_id: int) -> void:
+	if merc_id == controlled_merc:
+		return
+	controlled_merc = merc_id
+	refresh()
+
+## A soul changed bodies while this page was up. A page that was showing the body
+## it just left follows the player, so the gear and the hotbar under the cursor
+## stay the body under their hands; a page the player pointed at another name
+## stays there, and the hotbar header says it is not their body.
+func follow_controlled(merc_id: int) -> void:
+	var followed := selected_merc == controlled_merc
+	controlled_merc = merc_id
+	if followed and _open and _can_dress(merc_id):
+		select_merc(merc_id, false)
+		return
+	refresh()
 
 func close() -> void:
 	if not _open:
@@ -285,7 +327,7 @@ func refresh() -> void:
 		_sync_hotbar()
 		return
 	if selected_merc <= 0 or not _can_dress(selected_merc):
-		selected_merc = _first_merc_id()
+		selected_merc = controlled_merc if _can_dress(controlled_merc) else _first_merc_id()
 	_paint_mode()
 	_sync_picker()
 	_sync_reequip()
@@ -376,26 +418,37 @@ func _ensure_built() -> void:
 	column.add_theme_constant_override("separation", 6)
 	frame.body.add_child(column)
 
+	# Two header lines, each on the frame's edges: the screen's name and the body
+	# it is showing at the top, the roster chips and the band-wide press under
+	# them. The body's name sits on the right, where it reads as the identity of
+	# the page rather than the title of the stash under it.
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)
 	column.add_child(head)
 	title_label = _label(head, "PAPERDOLL", 12, GOLD)
-	_head_hint = _label(head, "the collective stash is shared", 12, MUTED)
+	_head_hint = _label(head, "the collective stash is shared, the body is not", 12, MUTED)
 	var spacer_head := Control.new()
 	spacer_head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(spacer_head)
+	_merc_label = _label(head, "", 12, TEAL)
+	_merc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	var picker_line := HBoxContainer.new()
+	picker_line.add_theme_constant_override("separation", 12)
+	column.add_child(picker_line)
+	_picker_box = HBoxContainer.new()
+	_picker_box.add_theme_constant_override("separation", 6)
+	picker_line.add_child(_picker_box)
+	var spacer_pick := Control.new()
+	spacer_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker_line.add_child(spacer_pick)
 	_reequip_all_button = Button.new()
 	_reequip_all_button.text = "RE-EQUIP THE BAND"
 	_reequip_all_button.focus_mode = Control.FOCUS_NONE
 	_reequip_all_button.custom_minimum_size = Vector2(0, 28)
 	_reequip_all_button.tooltip_text = "Every body hands its kit back, then the roster is dressed one body at a time: the first names get the pick of the pool."
 	_reequip_all_button.pressed.connect(_reequip_band)
-	head.add_child(_reequip_all_button)
-	_merc_label = _label(head, "", 12, TEAL)
-
-	_picker_box = HBoxContainer.new()
-	_picker_box.add_theme_constant_override("separation", 6)
-	column.add_child(_picker_box)
+	picker_line.add_child(_reequip_all_button)
 
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 16)
@@ -460,11 +513,13 @@ func _ensure_built() -> void:
 	_hotbar_box = VBoxContainer.new()
 	_hotbar_box.name = "Hotbar"
 	_hotbar_box.add_theme_constant_override("separation", 6)
+	_hotbar_box.custom_minimum_size = Vector2(HOTBAR_WIDTH, 0)
+	_hotbar_box.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	centre.add_child(_hotbar_box)
 	var hotbar_head := HBoxContainer.new()
 	hotbar_head.add_theme_constant_override("separation", 8)
 	_hotbar_box.add_child(hotbar_head)
-	_label(hotbar_head, "HOTBAR  /  THE TEN KEYS", 10, MUTED)
+	_hotbar_label = _label(hotbar_head, "HOTBAR  /  THE TEN KEYS", 10, MUTED)
 	var hotbar_spacer := Control.new()
 	hotbar_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hotbar_head.add_child(hotbar_spacer)
@@ -569,13 +624,17 @@ func _sync_picker() -> void:
 			button = Button.new()
 			button.toggle_mode = true
 			button.focus_mode = Control.FOCUS_NONE
-			button.custom_minimum_size = Vector2(132, 30)
+			button.custom_minimum_size = Vector2(150, 30)
 			button.pressed.connect(func() -> void: select_merc(merc_id))
 			_picker_box.add_child(button)
 			picker_buttons[merc_id] = button
 		_picker_box.move_child(button, index)
-		button.text = "%s  %s" % [str(_warband.roster.name_of(merc_id)),
-			Contracts.state_name(int(_warband.roster.state_of(merc_id)))]
+		# The body under the player's hands carries its own mark: the chip is the
+		# first thing on the page and it must answer "whose kit am I looking at"
+		# before the gear and the hotbar are read.
+		button.text = "%s  %s%s" % [str(_warband.roster.name_of(merc_id)),
+			Contracts.state_name(int(_warband.roster.state_of(merc_id))),
+			"  \u00b7  YOU" if merc_id == controlled_merc else ""]
 		button.set_pressed_no_signal(merc_id == selected_merc)
 		button.theme_type_variation = "PrimaryButton" if merc_id == selected_merc else ""
 
@@ -600,16 +659,25 @@ func _sync_reequip() -> void:
 
 func _refresh_slots() -> void:
 	if selected_merc <= 0:
-		_merc_label.text = "No mercenary to dress."
+		_merc_label.text = "NO BODY TO DRESS"
+		_merc_label.add_theme_color_override("font_color", MUTED)
+		_worn_title.text = "WORN GEAR"
 		for slot in Contracts.SLOT_ORDER:
 			var bare: Dictionary = slot_rows[Contracts.slot_id(slot)]
 			bare["item_id"] = ""
 			_apply_slot_row(bare, slot, "")
 		return
-	_merc_label.text = "%s  /  %s  /  %d gold worn" % [
-		str(_warband.roster.name_of(selected_merc)),
-		Contracts.state_name(int(_warband.roster.state_of(selected_merc))),
-		int(_warband.gear_value(selected_merc))]
+	var body_name := str(_warband.roster.name_of(selected_merc))
+	var mine := selected_merc == controlled_merc
+	_merc_label.text = "%s  /  %s  /  %d G WORN%s" % [
+		body_name.to_upper(),
+		Contracts.state_name(int(_warband.roster.state_of(selected_merc))).to_upper(),
+		int(_warband.gear_value(selected_merc)),
+		"   \u00b7   YOU" if mine else ""]
+	_merc_label.add_theme_color_override("font_color", TEAL if mine else BONE)
+	# The column says whose rows these are, so the left half of the page can be
+	# read on its own - the body's name is not only in the header.
+	_worn_title.text = "WORN GEAR  \u00b7  %s" % body_name.to_upper()
 	var gear: Dictionary = _warband.roster.equipped_of(selected_merc)
 	for slot in Contracts.SLOT_ORDER:
 		var row: Dictionary = slot_rows[Contracts.slot_id(slot)]
@@ -731,6 +799,19 @@ func _sync_hotbar() -> void:
 	var layout: Array = []
 	if _warband != null and selected_merc > 0 and not _corpse_active:
 		layout = _warband.hotbar_layout(selected_merc)
+	# Whose row this is, in the row's own header: the body on the stage, and
+	# whether that body is the one under the player's hands.
+	var body_name := ""
+	if _warband != null and selected_merc > 0:
+		body_name = str(_warband.roster.name_of(selected_merc)).to_upper()
+	var mine := selected_merc > 0 and selected_merc == controlled_merc
+	if body_name.is_empty():
+		_hotbar_label.text = "HOTBAR  /  THE TEN KEYS"
+	else:
+		_hotbar_label.text = "HOTBAR  /  %s  /  %s" % [body_name,
+			"THE BODY YOU CONTROL" if mine else "NOT YOUR BODY"]
+	_hotbar_label.add_theme_color_override("font_color",
+		MUTED if mine or body_name.is_empty() else GOLD)
 	var any := false
 	for index in hotbar_tiles.size():
 		var id := str(layout[index]) if index < layout.size() else ""
@@ -920,7 +1001,8 @@ func _paint_mode() -> void:
 	_stash_title.text = "THE BODY'S GEAR / TAKE IT" if _corpse_active \
 		else ("DELVE INVENTORY / VALUE ORDER" if _below() else "COLLECTIVE STASH / VALUE ORDER")
 	_head_hint.text = "their kit is the warband's" if _corpse_active \
-		else ("the party carries one inventory below" if _below() else "the collective stash is shared")
+		else ("the party carries one inventory below, the body is not" if _below() \
+		else "the collective stash is shared, the body is not")
 
 ## The header line in corpse mode: who fell.
 func _corpse_title() -> String:

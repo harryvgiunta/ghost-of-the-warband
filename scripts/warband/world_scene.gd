@@ -1504,8 +1504,14 @@ func _on_draw_refused(_peer_id: int) -> void:
 
 
 func _on_possession_changed(peer_id: int, merc_id: int) -> void:
-	if peer_id == controller.local_peer_id and hud != null:
-		hud.set_body(_soul(), warband.roster.name_of(merc_id), merc_id)
+	if peer_id == controller.local_peer_id:
+		if hud != null:
+			hud.set_body(_soul(), warband.roster.name_of(merc_id), merc_id)
+		# The gear page is the body's own: a page showing the body the soul just
+		# left follows it, so the hotbar under the cursor is always the row the
+		# player's number keys fire.
+		if paperdoll != null:
+			paperdoll.follow_controlled(merc_id)
 	if camp != null:
 		camp.note_possession(merc_id)
 	_attach_brand()
@@ -1525,6 +1531,8 @@ func _on_possession_released(peer_id: int, reason: String) -> void:
 	if hud != null:
 		hud.set_body(null, "", -1)
 		hud.set_status("The soul is loose (%s)." % reason, 4.0)
+	if paperdoll != null:
+		paperdoll.follow_controlled(-1)
 	_attach_brand()
 
 
