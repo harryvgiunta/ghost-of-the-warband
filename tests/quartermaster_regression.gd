@@ -3,6 +3,7 @@ extends SceneTree
 ## the same refusal rules the rest of the town uses.
 
 const State = preload("res://scripts/player_state.gd")
+const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 
 const TEST_SAVE := "user://quartermaster_state.json"
 const WARBAND_SAVE := "user://quartermaster_warband.json"
@@ -38,7 +39,11 @@ func run() -> void:
 	warband.reset_state()
 	state.credits = 1000
 	for index in 4:
-		warband.add_mercenary("Merc %d" % index)
+		var merc_id: int = warband.add_mercenary("Merc %d" % index)
+		# The second body is the band's bowman, so a bow bought at the desk has an
+		# owner: a blade's body never takes one (`Contracts.disposition_refuses_gear`).
+		if index == 1:
+			warband.set_disposition(merc_id, Contracts.DISPOSITION_BOW)
 
 	game = load("res://scenes/town_hub.tscn").instantiate()
 	root.add_child(game)

@@ -1,12 +1,15 @@
 extends Control
-## The main menu. Four doors and nothing else: NEW CAMPAIGN (Ghost of the
-## Warband from the cages), RESUME CAMPAIGN (the last autosave), JOIN GAME (play
+## The main menu. The doors and nothing else: NEW CAMPAIGN (a named campaign from
+## the cages), CAMPAIGNS (every campaign this machine has saved), JOIN GAME (play
 ## inside a friend's campaign) and HOST GAME (open yours to friends, fresh or from
-## the checkpoint). Hosting shares one warband: every soul that joins plays from
-## the host's roster, stash and purse.
+## a campaign's checkpoint). Hosting shares one warband: every soul that joins
+## plays from the host's roster, stash and purse.
 ##
-## The menu never changes scene itself. Every door hands what was chosen to
-## `GameFlow`, the one node that outlives the title, and the flow opens the world.
+## A campaign is a folder of its own (`SaveSlots`): starting a new one is a new
+## folder and a new purse, so the campaigns already on this machine are left
+## exactly as they are. The menu never changes scene itself. Every door hands what
+## was chosen to `GameFlow`, the one node that outlives the title, and the flow
+## opens the world.
 
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const SettingsScript = preload("res://scripts/ui/settings_menu.gd")
@@ -27,15 +30,26 @@ const DEFAULT_PORT := 7777
 const MIN_PORT := 1024
 const MAX_PORT := 65535
 const NAME_LENGTH := 16
+## The campaign list's own months, so a saved row reads the same on every locale.
+const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 var _status: Label
-## Ghost of the Warband from the beginning: a fresh warband in the cages.
+## Ghost of the Warband from the beginning: a named campaign in the cages.
 var new_campaign_button: Button
-## The last autosave. Disabled until a warband save exists, because there is
-## nothing to resume before one.
-var resume_button: Button
+## Every campaign this machine has saved, and the door to start another one.
+var campaigns_button: Button
 var join_button: Button
 var host_button: Button
+
+## The new campaign's name, and why it could not be made if it could not.
+var _new_layer: Control
+var _new_name_input: LineEdit
+var _new_error: Label
+
+var _campaigns_layer: Control
+var _campaigns_list: VBoxContainer
+var _campaigns_empty: Label
 
 var _join_layer: Control
 var _name_input: LineEdit
@@ -46,6 +60,8 @@ var _form_error: Label
 var _host_layer: Control
 var _host_name_input: LineEdit
 var _host_port_input: SpinBox
+## Which saved campaign FROM CHECKPOINT would host, newest first.
+var _host_campaign_box: OptionButton
 var host_new_button: Button
 var host_checkpoint_button: Button
 ## Says what FROM CHECKPOINT would open before the player commits to it.
@@ -64,7 +80,7 @@ func _ready() -> void:
 	_build()
 	_build_crash_notice()
 	_build_settings()
-	_refresh_resume()
+	_refresh_campaigns()
 	# A session that ended under the player (the host left, a join never got an
 	# answer) comes back to this screen; the reason is the first thing it says.
 	var flow := get_node_or_null("/root/GameFlow")
@@ -130,19 +146,22 @@ func _build() -> void:
 	gap.custom_minimum_size = Vector2(0, 26)
 	column.add_child(gap)
 
-	new_campaign_button = _plate(column, "NEW CAMPAIGN", "PrimaryButton", _start_new_campaign)
-	new_campaign_button.tooltip_text = "Ghost of the Warband from the beginning: a fresh warband in the cages."
-	resume_button = _plate(column, "RESUME CAMPAIGN", "", _resume_campaign)
+	new_campaign_button = _plate(column, "NEW CAMPAIGN", "PrimaryButton", _open_new_campaign)
+	new_campaign_button.tooltip_text = "Ghost of the Warband from the beginning: a campaign of its own, in the cages."
+	campaigns_button = _plate(column, "CAMPAIGNS", "", _open_campaigns)
+	campaigns_button.tooltip_text = "Open a campaign this machine has saved. Each has its own warband, purse and stash."
 	join_button = _plate(column, "JOIN GAME", "", _open_join)
 	join_button.tooltip_text = "Join a friend's campaign and play from their warband."
 	host_button = _plate(column, "HOST GAME", "", _open_host)
-	host_button.tooltip_text = "Open a new game or your checkpoint to friends; everyone shares your warband."
+	host_button.tooltip_text = "Open a new game or a campaign's checkpoint to friends; everyone shares your warband."
 
 	_status = _center_label(column, "", 12, LedgerThemeScript.TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_build_join_layer()
 	_build_host_layer()
+	_build_new_layer()
+	_build_campaigns_layer()
 
 
 func _center_label(parent: Node, text: String, font_size: int, color: Color) -> Label:
@@ -182,67 +201,151 @@ func _enter_campaign_score() -> void:
 		audio.start_campaign_music()
 
 
-# --- NEW CAMPAIGN / RESUME CAMPAIGN ---------------------------------------------
+# --- NEW CAMPAIGN / CAMPAIGNS ---------------------------------------------------
 
-## NEW CAMPAIGN is always the cages with a fresh warband and a fresh purse,
-## however the last campaign ended; resuming lives behind its own door.
-func _start_new_campaign() -> void:
+## NEW CAMPAIGN asks for a name and then makes a campaign of its own. It writes
+## no line into a campaign already saved: the name is a new folder, and the folder
+## is what the warband and the purse are bound to when the world opens.
+func _open_new_campaign() -> void:
+	_close_join()
+	_close_host()
+	_close_campaigns()
+	var cache := get_node_or_null("/root/NetCache")
+	_new_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
+	_new_error.text = ""
+	_new_layer.visible = true
+	_new_name_input.grab_focus()
+	_new_name_input.select_all()
+
+
+func _close_new_campaign() -> void:
+	if _new_layer == null:
+		return
+	_new_layer.visible = false
+	_new_error.text = ""
+
+
+func _confirm_new_campaign() -> void:
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow == null:
-		_set_status("The campaign is unavailable.", WARN)
+		_new_error.text = "The campaign is unavailable."
 		return
+	var slots := get_node_or_null("/root/SaveSlots")
+	if slots == null:
+		_new_error.text = "The campaign ledger is unavailable."
+		return
+	var id := str(slots.new_slot(_clean_name(_new_name_input.text)))
+	if not bool(slots.bind(id)):
+		_new_error.text = "That campaign could not be opened."
+		return
+	_close_new_campaign()
 	_enter_campaign_score()
-	_note("menu_new_campaign")
-	print("IRONWOOD_MENU_NEW_CAMPAIGN")
+	print("IRONWOOD_MENU_NEW_CAMPAIGN slot=%s" % id)
+	_note("menu_new_campaign", {"slot": id, "name": str(slots.name_of(id))})
 	flow.start_campaign()
 
 
-## RESUME CAMPAIGN opens the save on the bookmark its last autosave left (the
-## town when the save predates checkpoints). The file is checked again on the
-## press: it may have gone since the screen was built.
-func _resume_campaign() -> void:
+## CAMPAIGNS lists every campaign this machine has saved, newest first. A row
+## opens that campaign where its last autosave left it; the list is rebuilt from
+## disk on every open, so a campaign written while the title stood is never stale.
+func _open_campaigns() -> void:
+	_close_join()
+	_close_host()
+	_close_new_campaign()
+	_build_campaign_rows()
+	_campaigns_layer.visible = true
+
+
+func _close_campaigns() -> void:
+	if _campaigns_layer == null:
+		return
+	_campaigns_layer.visible = false
+
+
+func _build_campaign_rows() -> void:
+	for child in _campaigns_list.get_children():
+		child.free()
+	var slots := get_node_or_null("/root/SaveSlots")
+	var summaries: Array = [] if slots == null else slots.summaries()
+	_campaigns_empty.visible = summaries.is_empty()
+	for summary in summaries:
+		var button := Button.new()
+		button.text = "%s\n%s" % [str(summary["name"]), _campaign_line(summary)]
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(496, 62)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.add_theme_font_size_override("font_size", 14)
+		button.set_meta("slot_id", str(summary["id"]))
+		button.pressed.connect(_open_campaign.bind(str(summary["id"])))
+		_campaigns_list.add_child(button)
+
+
+## The slots the list is showing, in order: a caller reads this instead of
+## walking the tree.
+func campaign_ids() -> Array[String]:
+	var out: Array[String] = []
+	if _campaigns_list == null:
+		return out
+	for child in _campaigns_list.get_children():
+		if child.has_meta("slot_id"):
+			out.append(str(child.get_meta("slot_id")))
+	return out
+
+
+## Open one saved campaign: bind it, then let the flow read it exactly as a resume
+## always has. An empty campaign opens in the cages, which is what a campaign
+## started and never written is.
+func _open_campaign(id: String) -> void:
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow == null:
 		_set_status("The campaign is unavailable.", WARN)
 		return
-	if not _has_warband_save():
-		_refresh_resume()
-		_set_status("No campaign saved yet. Start a new one.", WARN)
+	var slots := get_node_or_null("/root/SaveSlots")
+	if slots == null or not bool(slots.bind(id)):
+		_set_status("That campaign is no longer saved.", WARN)
+		_build_campaign_rows()
 		return
+	_close_campaigns()
 	_enter_campaign_score()
-	_note("menu_resume", {"save": _warband_save_path()})
-	print("IRONWOOD_MENU_RESUME")
+	print("IRONWOOD_MENU_CAMPAIGN slot=%s" % id)
+	_note("menu_campaign", {"slot": id, "name": str(slots.name_of(id))})
 	flow.enter_warband()
 
 
-## The warband save the resume and checkpoint doors read. A warband may pin its
-## own path (the regressions do), so this reads the node, not the default.
-func _warband_save_path() -> String:
-	var warband := get_node_or_null("/root/Warband")
-	return "" if warband == null else str(warband.save_path)
+## One campaign's second line: how much warband it holds, where it stands, and
+## when it was last played.
+func _campaign_line(summary: Dictionary) -> String:
+	var parts: Array[String] = []
+	if int(summary.get("roster", 0)) > 0:
+		parts.append("%d in the roster" % int(summary.get("roster", 0)))
+	else:
+		parts.append("no warband yet" if bool(summary.get("exists", false)) else "empty")
+	var checkpoint: Dictionary = summary.get("checkpoint", {})
+	if not checkpoint.is_empty():
+		parts.append(_checkpoint_name(checkpoint))
+	var when := _when(int(summary.get("played", 0)))
+	if not when.is_empty():
+		parts.append(when)
+	return "   ·   ".join(parts)
 
 
-func _has_warband_save() -> bool:
-	var path := _warband_save_path()
-	return not path.is_empty() and FileAccess.file_exists(path)
+## A moment as the list says it, on the player's own clock rather than UTC.
+func _when(unix: int) -> String:
+	if unix <= 0:
+		return ""
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var at := Time.get_datetime_dict_from_unix_time(unix + bias)
+	var month := clampi(int(at.get("month", 1)), 1, 12)
+	return "%d %s, %02d:%02d" % [int(at.get("day", 1)), MONTHS[month - 1],
+		int(at.get("hour", 0)), int(at.get("minute", 0))]
 
 
-## Re-reads the save gate for the resume door and the host panel's checkpoint
-## door. Called when the screen opens and whenever a panel opens, so a save
-## written or deleted while the title stood is never stale.
-func _refresh_resume() -> void:
-	if resume_button != null:
-		var has_save := _has_warband_save()
-		resume_button.disabled = not has_save
-		if not has_save:
-			resume_button.tooltip_text = "No campaign saved yet."
-		else:
-			var peek := WarbandStateScript.peek_save(_warband_save_path())
-			var checkpoint: Dictionary = peek.get("checkpoint", {})
-			if not checkpoint.is_empty():
-				resume_button.tooltip_text = "Opens on your last checkpoint: %s." % _checkpoint_name(checkpoint)
-			else:
-				resume_button.tooltip_text = "Opens your last autosave."
+## Re-reads the ledger behind the host panel - its campaign list and the
+## checkpoint line under FROM CHECKPOINT. Called when the panel opens, so a save
+## written or a campaign started while the title stood is never stale.
+func _refresh_campaigns() -> void:
+	_refresh_host_campaigns()
 	_refresh_host_checkpoint()
 
 
@@ -297,8 +400,9 @@ func _build_join_layer() -> void:
 ## `_ready` froze the name, address and port at whatever the app started with,
 ## so a session that joined somewhere else kept offering dead values.
 func _open_join() -> void:
-	if _host_layer != null and _host_layer.visible:
-		_close_host()
+	_close_host()
+	_close_new_campaign()
+	_close_campaigns()
 	var cache := get_node_or_null("/root/NetCache")
 	_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
 	_address_input.text = DEFAULT_ADDRESS if cache == null else str(cache.address)
@@ -351,7 +455,7 @@ func _build_host_layer() -> void:
 	_host_layer.mouse_filter = Control.MOUSE_FILTER_STOP
 	_host_layer.visible = false
 	add_child(_host_layer)
-	var panel := _form_panel(_host_layer, Vector2(480, 430))
+	var panel := _form_panel(_host_layer, Vector2(480, 480))
 	_label(panel, "HOST GAME", Vector2(24, 18), 26, GOLD)
 	var hint := _label(panel,
 		"Friends join on this UDP port and play from your warband: one roster, one stash, one purse.",
@@ -366,33 +470,42 @@ func _build_host_layer() -> void:
 	panel.add_child(_host_name_input)
 	_label(panel, "UDP PORT", Vector2(340, 96), 10, GOLD)
 	_host_port_input = _port_box(panel, Vector2(340, 116))
-	host_new_button = _button(panel, "NEW GAME", Vector2(24, 180), Vector2(214, 44))
+	_label(panel, "CHECKPOINT CAMPAIGN", Vector2(24, 166), 10, GOLD)
+	_host_campaign_box = OptionButton.new()
+	_host_campaign_box.position = Vector2(24, 186)
+	_host_campaign_box.size = Vector2(432, 40)
+	_host_campaign_box.add_theme_font_size_override("font_size", 13)
+	_host_campaign_box.item_selected.connect(func(_index: int): _refresh_host_checkpoint())
+	panel.add_child(_host_campaign_box)
+	host_new_button = _button(panel, "NEW GAME", Vector2(24, 240), Vector2(214, 44))
 	host_new_button.theme_type_variation = "PrimaryButton"
-	host_new_button.tooltip_text = "A fresh campaign in the cages."
+	host_new_button.tooltip_text = "A fresh campaign in the cages, in a campaign of its own."
 	host_new_button.pressed.connect(_confirm_host.bind(GameFlowScript.HOST_NEW))
-	host_checkpoint_button = _button(panel, "FROM CHECKPOINT", Vector2(250, 180), Vector2(206, 44))
+	host_checkpoint_button = _button(panel, "FROM CHECKPOINT", Vector2(250, 240), Vector2(206, 44))
 	host_checkpoint_button.pressed.connect(_confirm_host.bind(GameFlowScript.HOST_CHECKPOINT))
-	_host_checkpoint_label = _label(panel, "", Vector2(24, 236), 11, TEAL)
+	_host_checkpoint_label = _label(panel, "", Vector2(24, 292), 11, TEAL)
 	_host_checkpoint_label.size = Vector2(432, 32)
 	_host_checkpoint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var cancel := _button(panel, "CANCEL", Vector2(24, 282), Vector2(432, 44))
+	var cancel := _button(panel, "CANCEL", Vector2(24, 336), Vector2(432, 44))
 	cancel.pressed.connect(_close_host)
-	_host_error = _label(panel, "", Vector2(24, 342), 11, WARN)
+	_host_error = _label(panel, "", Vector2(24, 392), 11, WARN)
 	_host_error.size = Vector2(432, 54)
 	_host_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
-## Reads the cache and the save each time it opens. The host side has its own
-## port: the guest-side `port` is what a friend typed last, and letting it open
-## the socket is how a host ended up serving a port nobody else knew about.
+## Reads the cache, the ledger and the chosen campaign's save each time it opens.
+## The host side has its own port: the guest-side `port` is what a friend typed
+## last, and letting it open the socket is how a host ended up serving a port
+## nobody else knew about.
 func _open_host() -> void:
-	if _join_layer != null and _join_layer.visible:
-		_close_join()
+	_close_join()
+	_close_new_campaign()
+	_close_campaigns()
 	var cache := get_node_or_null("/root/NetCache")
 	_host_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
 	_host_port_input.value = clampi(DEFAULT_PORT if cache == null else int(cache.host_port), MIN_PORT, MAX_PORT)
 	_host_error.text = ""
-	_refresh_resume()
+	_refresh_campaigns()
 	_host_layer.visible = true
 	_host_name_input.grab_focus()
 	_host_name_input.select_all()
@@ -403,12 +516,46 @@ func _close_host() -> void:
 	_host_error.text = ""
 
 
-## FROM CHECKPOINT is only offered when there is a warband save, and the line
-## under it says where that save would put the warband down.
+## The campaigns FROM CHECKPOINT can open, newest first. Rebuilt every time the
+## panel opens, so a campaign saved or started while the title stood is in the
+## list without a restart.
+func _refresh_host_campaigns() -> void:
+	if _host_campaign_box == null:
+		return
+	var slots := get_node_or_null("/root/SaveSlots")
+	var summaries: Array = [] if slots == null else slots.summaries()
+	_host_campaign_box.clear()
+	for summary in summaries:
+		_host_campaign_box.add_item("%s  -  %s" % [str(summary["name"]), _campaign_line(summary)])
+		_host_campaign_box.set_item_metadata(_host_campaign_box.item_count - 1, str(summary["id"]))
+	_host_campaign_box.disabled = summaries.is_empty()
+	if summaries.is_empty():
+		_host_campaign_box.add_item("No campaign saved yet")
+	_host_campaign_box.selected = 0
+
+
+## The campaign the FROM CHECKPOINT door would open: whatever the selector shows,
+## "" when nothing is saved.
+func _host_campaign_id() -> String:
+	if _host_campaign_box == null or _host_campaign_box.disabled or _host_campaign_box.selected < 0:
+		return ""
+	var meta: Variant = _host_campaign_box.get_item_metadata(_host_campaign_box.selected)
+	return "" if meta == null else str(meta)
+
+
+## FROM CHECKPOINT is only offered when the chosen campaign has a warband save,
+## and the line under it says where that save would put the warband down.
 func _refresh_host_checkpoint() -> void:
 	if host_checkpoint_button == null:
 		return
-	var peek := WarbandStateScript.peek_save(_warband_save_path())
+	var slots := get_node_or_null("/root/SaveSlots")
+	var id := _host_campaign_id()
+	if slots == null or id.is_empty():
+		host_checkpoint_button.disabled = true
+		_host_checkpoint_label.text = "No campaign saved yet."
+		host_checkpoint_button.tooltip_text = _host_checkpoint_label.text
+		return
+	var peek := WarbandStateScript.peek_save(str(slots.warband_path(id)))
 	var checkpoint: Dictionary = peek.get("checkpoint", {})
 	host_checkpoint_button.disabled = not bool(peek.get("exists", false))
 	if not bool(peek.get("exists", false)):
@@ -422,6 +569,9 @@ func _refresh_host_checkpoint() -> void:
 	host_checkpoint_button.tooltip_text = _host_checkpoint_label.text
 
 
+## HOST GAME's two doors. NEW GAME makes a campaign of its own named after the
+## host, so hosting a session can never write over a campaign already saved; FROM
+## CHECKPOINT opens the campaign the selector names on its bookmark.
 func _confirm_host(start: String) -> void:
 	var port := int(_host_port_input.value)
 	if port < MIN_PORT or port > MAX_PORT:
@@ -432,6 +582,14 @@ func _confirm_host(start: String) -> void:
 		_host_error.text = "The campaign is unavailable."
 		return
 	var player_name := _clean_name(_host_name_input.text)
+	var slots := get_node_or_null("/root/SaveSlots")
+	if start == GameFlowScript.HOST_CHECKPOINT:
+		var id := _host_campaign_id()
+		if slots == null or id.is_empty() or not bool(slots.bind(id)):
+			_host_error.text = "No campaign to host from."
+			return
+	elif slots != null:
+		slots.bind(str(slots.new_slot(player_name)))
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
 		cache.remember_host(player_name, port)
@@ -441,6 +599,76 @@ func _confirm_host(start: String) -> void:
 	print("IRONWOOD_MENU_HOST port=%d start=%s name=%s" % [port, start, player_name])
 	_note("menu_host", {"port": port, "start": start, "name": player_name})
 	flow.host_campaign(port, player_name, start)
+
+
+# --- NEW CAMPAIGN'S FORM / THE CAMPAIGN LIST ------------------------------------
+
+## One name field: the campaign's folder is new whatever is typed, and the name is
+## how a player tells this campaign from the others on the machine.
+func _build_new_layer() -> void:
+	_new_layer = Control.new()
+	_new_layer.name = "NewCampaignLayer"
+	_new_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_new_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_new_layer.visible = false
+	add_child(_new_layer)
+	var panel := _form_panel(_new_layer, Vector2(480, 300))
+	_label(panel, "NEW CAMPAIGN", Vector2(24, 18), 26, GOLD)
+	var hint := _label(panel,
+		"A fresh warband, a fresh purse and its own files. The campaigns already saved are left as they are.",
+		Vector2(24, 54), 11, MUTED)
+	hint.size = Vector2(432, 34)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_label(panel, "CAMPAIGN NAME", Vector2(24, 104), 10, GOLD)
+	_new_name_input = LineEdit.new()
+	_new_name_input.position = Vector2(24, 124)
+	_new_name_input.size = Vector2(432, 40)
+	_new_name_input.max_length = NAME_LENGTH
+	panel.add_child(_new_name_input)
+	_new_error = _label(panel, "", Vector2(24, 172), 11, WARN)
+	_new_error.size = Vector2(432, 34)
+	_new_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var start := _button(panel, "BEGIN", Vector2(24, 216), Vector2(214, 44))
+	start.theme_type_variation = "PrimaryButton"
+	start.pressed.connect(_confirm_new_campaign)
+	var cancel := _button(panel, "CANCEL", Vector2(250, 216), Vector2(206, 44))
+	cancel.pressed.connect(_close_new_campaign)
+
+
+## The campaigns themselves: one row per saved campaign, newest first, with what
+## opening it would put the warband on.
+func _build_campaigns_layer() -> void:
+	_campaigns_layer = Control.new()
+	_campaigns_layer.name = "CampaignsLayer"
+	_campaigns_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_campaigns_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_campaigns_layer.visible = false
+	add_child(_campaigns_layer)
+	var panel := _form_panel(_campaigns_layer, Vector2(560, 520))
+	_label(panel, "CAMPAIGNS", Vector2(24, 18), 26, GOLD)
+	var hint := _label(panel,
+		"A campaign is its own warband, purse and stash. Open one where its last autosave left it.",
+		Vector2(24, 54), 11, MUTED)
+	hint.size = Vector2(512, 34)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var scroll := ScrollContainer.new()
+	scroll.name = "Scroll"
+	scroll.position = Vector2(24, 96)
+	scroll.size = Vector2(512, 330)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+	_campaigns_list = VBoxContainer.new()
+	_campaigns_list.name = "List"
+	_campaigns_list.add_theme_constant_override("separation", 4)
+	_campaigns_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_campaigns_list)
+	_campaigns_empty = _label(panel,
+		"No campaign saved yet. NEW CAMPAIGN starts the first one.",
+		Vector2(24, 104), 13, MUTED)
+	_campaigns_empty.size = Vector2(512, 60)
+	_campaigns_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var close := _button(panel, "CLOSE", Vector2(24, 444), Vector2(512, 44))
+	close.pressed.connect(_close_campaigns)
 
 
 # --- shared form pieces ----------------------------------------------------------
@@ -508,10 +736,10 @@ func _build_settings() -> void:
 func _open_settings() -> void:
 	if settings == null:
 		return
-	if _join_layer != null and _join_layer.visible:
-		_close_join()
-	if _host_layer != null and _host_layer.visible:
-		_close_host()
+	_close_join()
+	_close_host()
+	_close_new_campaign()
+	_close_campaigns()
 	settings.open()
 
 
@@ -576,6 +804,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_close_host()
 	elif _join_layer != null and _join_layer.visible:
 		_close_join()
+	elif _new_layer != null and _new_layer.visible:
+		_close_new_campaign()
+	elif _campaigns_layer != null and _campaigns_layer.visible:
+		_close_campaigns()
 	else:
 		_open_settings()
 	get_viewport().set_input_as_handled()

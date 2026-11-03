@@ -32,11 +32,32 @@ const BAND_HIGH := 1.85
 ## How far a goal that lands in a solid cell is moved to the nearest open one, in
 ## cells: a post drawn inside a trunk, a corpse against a cage.
 const SNAP_RINGS := 8
+## The search a way round is planned on. `_solid` is what a body may stand in and
+## what a line is tested against, but a search over it costs about a microsecond a
+## cell it opens - and the delve's floor is 640 x 760 of them, four to fourteen
+## milliseconds for one route. On a map this big the plan runs on every
+## `PLAN_LATTICE`-th cell instead: a fourth of the cells each way is a sixteenth of
+## the search, and the route's own `clear_line` smoothing off the fine raster turns
+## the coarse points back into a line a body walks. Smaller maps - the camp's yard,
+## a cage - are searched on the raster itself, so a doorway the fine map draws as
+## open is never closed by a coarser one, and nothing there changes.
+const PLAN_LATTICE := 4
+const PLAN_MIN_CELLS := 65536
+## How far a search's own goal may be moved off a solid planning cell, in
+## planning cells: the fine raster has already snapped the point, so this only
+## answers a body standing inside a wall's margin.
+const PLAN_SNAP_RINGS := 3
 
 var rect := Rect2()
 var _size := Vector2i.ZERO
 var _solid := PackedByteArray()
-var _grid := AStarGrid2D.new()
+## The lattice a way round is searched on: `_plan_px` metres a cell, `_plan_step`
+## fine cells to one. On a small map that is the raster itself.
+var _plan := AStarGrid2D.new()
+var _plan_size := Vector2i.ZERO
+var _plan_px := CELL
+var _plan_step := 1
+var _plan_solid := PackedByteArray()
 ## The floor a collider is measured against: NAN reads the wood's heightfield
 ## under it; a mapped area with its own flat floor (the delve's cave, far off the
 ## field) names that height instead.
@@ -64,17 +85,49 @@ func build(root: Node, area: Rect2, skip: Array = [], floor_y: float = NAN) -> v
 					_stamp(child)
 		for child in node.get_children():
 			pending.append(child)
-	_grid.region = Rect2i(Vector2i.ZERO, _size)
-	_grid.cell_size = Vector2(CELL, CELL)
-	_grid.offset = area.position + Vector2(CELL, CELL) * 0.5
-	_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
-	_grid.default_compute_heuristic = AStarGrid2D.HEURISTIC_OCTILE
-	_grid.default_estimate_heuristic = AStarGrid2D.HEURISTIC_OCTILE
-	_grid.update()
-	for z in _size.y:
-		for x in _size.x:
-			if _solid[z * _size.x + x] != 0:
-				_grid.set_point_solid(Vector2i(x, z))
+	_build_plan(area)
+
+
+## The search lattice: the fine raster when the map is small, every
+## `PLAN_LATTICE`-th cell when it is not. A planning cell is solid when any of the
+## fine cells it covers is - the search is never offered a gap the walk cannot
+## take - so a wall's clearance grows by at most one planning cell and a passage
+## narrower than that is planned round rather than through.
+func _build_plan(area: Rect2) -> void:
+	_plan_step = PLAN_LATTICE if _size.x * _size.y >= PLAN_MIN_CELLS else 1
+	_plan_px = CELL * float(_plan_step)
+	_plan_size = Vector2i(ceili(float(_size.x) / float(_plan_step)),
+		ceili(float(_size.y) / float(_plan_step)))
+	_plan_solid = PackedByteArray()
+	_plan_solid.resize(_plan_size.x * _plan_size.y)
+	_plan_solid.fill(0)
+	_plan.region = Rect2i(Vector2i.ZERO, _plan_size)
+	_plan.cell_size = Vector2(_plan_px, _plan_px)
+	_plan.offset = area.position + Vector2(_plan_px, _plan_px) * 0.5
+	_plan.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_plan.default_compute_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_plan.default_estimate_heuristic = AStarGrid2D.HEURISTIC_OCTILE
+	_plan.update()
+	for z in _plan_size.y:
+		for x in _plan_size.x:
+			if not _plan_block_open(x, z):
+				_plan_solid[z * _plan_size.x + x] = 1
+				_plan.set_point_solid(Vector2i(x, z))
+
+
+## Whether every fine cell one planning cell covers is open ground.
+func _plan_block_open(x: int, z: int) -> bool:
+	for dz in _plan_step:
+		var row := z * _plan_step + dz
+		for dx in _plan_step:
+			var column := x * _plan_step + dx
+			# Past the raster the map has nothing to say: it is not floor the walk
+			# was drawn on, so it is not offered to the search either.
+			if column >= _size.x or row >= _size.y:
+				return false
+			if _solid[row * _size.x + column] != 0:
+				return false
+	return true
 
 
 ## Whether a point lies on the mapped ground.
@@ -139,30 +192,83 @@ func free_point(point: Vector3) -> Vector3:
 
 
 ## The way from one point to another round everything solid: the centres of the
-## cells to walk through, the first step first and the goal's cell last (at the
-## goal's own height). Empty when either end is off the map or has nothing open in
-## reach. A goal sealed off from the start is walked as close as the ground allows.
+## cells to walk through, the first step first and the goal itself last (at the
+## goal's own height and its own x/z when the raster can stand a body there).
+## Empty when either end is off the map or has nothing open in reach. A goal
+## sealed off from the start is walked as close as the ground allows.
+##
+## The search is planned on `_plan`, which is the raster on a small map and a
+## coarser lattice on a big one (`PLAN_LATTICE`); the points it hands back are
+## smoothed against the fine raster by the caller (`SquadDrive._steer_route`), so
+## a coarse plan still walks a fine line.
 func route(from: Vector3, to: Vector3) -> PackedVector3Array:
 	var out := PackedVector3Array()
 	if not covers(from) or not covers(to):
 		return out
-	var start := _cell_of(from)
-	if _is_solid(start):
-		start = _nearest_open(start, Vector2(from.x, from.z))
-	var goal := _cell_of(to)
-	if _is_solid(goal):
-		goal = _nearest_open(goal, Vector2(to.x, to.z))
+	var target := free_point(to)
+	var start := _plan_cell(from)
+	if _plan_is_solid(start):
+		start = _plan_open_near(start, Vector2(from.x, from.z))
+	var goal := _plan_cell(target)
+	if _plan_is_solid(goal):
+		goal = _plan_open_near(goal, Vector2(target.x, target.z))
 	if start.x < 0 or goal.x < 0:
 		return out
 	if start == goal:
-		var at := _centre(goal)
-		out.append(Vector3(at.x, to.y, at.y))
+		out.append(target if target.distance_squared_to(to) <= 0.0001 else _plan_point(goal, to.y))
 		return out
-	var cells: Array[Vector2i] = _grid.get_id_path(start, goal, true)
+	var cells: Array[Vector2i] = _plan.get_id_path(start, goal, true)
 	for index in range(1, cells.size()):
-		var at := _centre(cells[index])
-		out.append(Vector3(at.x, to.y, at.y))
+		out.append(_plan_point(cells[index], to.y))
+	if out.size() > 0 and target.distance_squared_to(to) <= 0.0001:
+		# The raster can stand a body on the goal itself, so the last waypoint is
+		# that point rather than the middle of the cell around it: a body walking
+		# to a body stops where it was sent, not half a planning cell short.
+		out[out.size() - 1] = to
 	return out
+
+
+# --- the search lattice -----------------------------------------------------
+
+func _plan_cell(point: Vector3) -> Vector2i:
+	return Vector2i(floori((point.x - rect.position.x) / _plan_px),
+		floori((point.z - rect.position.y) / _plan_px))
+
+
+func _plan_point(cell: Vector2i, height: float) -> Vector3:
+	var at := rect.position + (Vector2(cell) + Vector2(0.5, 0.5)) * _plan_px
+	return Vector3(at.x, height, at.y)
+
+
+func _plan_is_solid(cell: Vector2i) -> bool:
+	if cell.x < 0 or cell.y < 0 or cell.x >= _plan_size.x or cell.y >= _plan_size.y:
+		return true
+	return _plan_solid[cell.y * _plan_size.x + cell.x] != 0
+
+
+## The open planning cell closest to `near`, ring by ring out to
+## `PLAN_SNAP_RINGS`, or (-1, -1). The raster has already moved a blocked goal to
+## the nearest ground a body can stand on; what is left is a cell the coarse
+## lattice closed but the walk can take.
+func _plan_open_near(cell: Vector2i, near: Vector2) -> Vector2i:
+	for ring in range(1, PLAN_SNAP_RINGS + 1):
+		var best := Vector2i(-1, -1)
+		var best_distance := INF
+		for dz in range(-ring, ring + 1):
+			for dx in range(-ring, ring + 1):
+				if absi(dx) != ring and absi(dz) != ring:
+					continue
+				var probe := cell + Vector2i(dx, dz)
+				if _plan_is_solid(probe):
+					continue
+				var distance := _plan_point(probe, 0.0).distance_squared_to(
+					Vector3(near.x, 0.0, near.y))
+				if distance < best_distance:
+					best_distance = distance
+					best = probe
+		if best.x >= 0:
+			return best
+	return Vector2i(-1, -1)
 
 
 # --- the raster ------------------------------------------------------------

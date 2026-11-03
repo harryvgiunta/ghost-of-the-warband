@@ -217,50 +217,11 @@ func anoint_line(item_id: String) -> String:
 	return "Anointed - %s [%s]" % [str(AbilityRules.by_id(ability).get("name", ability)),
 		anoint_key(item_id)]
 
-## `{ok, message, ability, recipe}`: whether the altar would wake this piece now.
-## The piece has to be the warband's (pooled or worn - an anointing lives on the
-## item, not on a body) and the shared stash has to hold the whole recipe.
-func can_anoint(stash: WarbandStash, roster, item_id: String) -> Dictionary:
-	var skill := anoint_skill(item_id)
-	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
-	if skill.is_empty():
-		return {"ok": false, "message": "Only a weapon or a shield wakes at the altar.",
-			"ability": "", "recipe": {}}
-	var ability := str(skill.get("id", ""))
-	if is_anointed(item_id):
-		return {"ok": false, "message": "%s already carries %s." % [item_name, str(skill.get("name", ""))],
-			"ability": ability, "recipe": {}}
-	if stash == null or not stash.available_ids(roster).has(item_id):
-		return {"ok": false, "message": "The warband does not carry a %s." % item_name,
-			"ability": ability, "recipe": {}}
-	var recipe := anoint_recipe(ability)
-	if recipe.is_empty():
-		return {"ok": false, "message": "The altar knows no rite for %s." % str(skill.get("name", "")),
-			"ability": ability, "recipe": {}}
-	for reagent in recipe:
-		if stash.pooled_count(str(reagent)) < int(recipe[reagent]):
-			return {"ok": false, "message": "%s needs %s." % [str(skill.get("name", "")), recipe_text(recipe)],
-				"ability": ability, "recipe": recipe}
-	return {"ok": true, "message": "%s wakes into %s for %s." % [item_name, str(skill.get("name", "")),
-		recipe_text(recipe)], "ability": ability, "recipe": recipe}
-
-## Lay the recipe's reagents on a piece: they leave the shared stash and every
-## copy of the piece the warband owns wakes into its skill. Returns `{ok, message,
-## item_id, ability, spent}`, `spent` being the `{reagent: count}` that left.
-func anoint(stash: WarbandStash, roster, item_id: String) -> Dictionary:
-	var check := can_anoint(stash, roster, item_id)
-	var ability := str(check.get("ability", ""))
-	if not bool(check.get("ok", false)):
-		return {"ok": false, "message": str(check.get("message", "")), "item_id": item_id,
-			"ability": ability, "spent": {}}
-	var recipe: Dictionary = check["recipe"]
-	for reagent in recipe:
-		stash.remove(str(reagent), int(recipe[reagent]))
-	anointed[item_id] = ability
-	var item_name := str(State.ITEMS.get(item_id, {}).get("name", item_id))
-	return {"ok": true, "item_id": item_id, "ability": ability, "spent": recipe,
-		"message": "%s wakes into %s. Key %s looses it." % [item_name,
-			str(AbilityRules.by_id(ability).get("name", ability)), anoint_key(item_id)]}
+## The catalog-id rite this file used to own is gone: the altar now rolls the
+## per-copy pool (`Warband.annoint` -> `AnnointRoll`/`AnnointLedger`), and a piece
+## is woken by a welded skill rather than by a fixed recipe. What remains here is
+## the wallet, the brands, the reagent table the altar's header still reads, and
+## `grant_anointing` for steel that came out of the Hollow already awake.
 
 ## Wake a piece into its skill with no reagent: the altar's rite is `anoint`, this
 ## is a piece that came out of the Hollow already anointed (`delve_loot.gd`). Every

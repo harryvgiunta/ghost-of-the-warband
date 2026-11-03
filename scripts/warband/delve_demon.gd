@@ -1,14 +1,24 @@
 extends "res://scripts/devil_mob.gd"
-## Gorehorn: the thing at the bottom of the Weeping Hollow's first floor.
+## The Hollow's demons: the imported bodies of `devil_mob.gd`, kept below.
 ##
-## It is the Hellish goat man - the same imported body, rig and clips as the
-## frontier devil (`devil_mob_visual.gd`, `mob_id` "hell_goat") and the same
-## authoritative AI - fought as the floor's master: five and a half times the
-## goat's pool, a heavier blow, a longer reach and a longer stare, and a body that
-## holds its post in the lair instead of roaming. It carries the floor's prize, so
-## its corpse is a container like a watcher's (`gear_items`), and it answers the
-## world's hunt surface (`hunt`, `hunting`) so the squad's retarget can point it
-## at a body like any other hostile.
+## Two things come out of this file, and `boss` says which one a body is.
+##
+## **The master.** Gorehorn is the Hellish goat man - the same imported body, rig
+## and clips as the frontier devil (`devil_mob_visual.gd`, `mob_id` "hell_goat") and
+## the same authoritative AI - fought as the floor's master: five and a half times
+## the goat's pool, a heavier blow, a longer reach and a longer stare (`OVERRIDES`),
+## and a body that holds its post in the lair instead of roaming. It carries the
+## floor's prize, so its corpse is a container like a watcher's (`gear_items`), and
+## it answers the world's hunt surface (`hunt`, `hunting`) so the squad's retarget
+## can point it at a body like any other hostile.
+##
+## **The floor's other demons.** The same body and the same AI, one per chamber of
+## the demons' ring and one of every species in the squad that keeps the lair, on
+## `KEEPER_OVERRIDES`. They are kept and fed by the watchers that gate them through
+## to harvest Ritual Tallow, which is what makes a keeper worth two and a half of
+## the wardens standing beside it and still a long way under the master. Every demon
+## bleeds the altar's first essence when it falls, so the loot table asks it
+## `demon()`.
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 
@@ -19,9 +29,20 @@ const OVERRIDES := {
 	"display": "Gorehorn", "health": 400.0, "damage": 21.0, "reach": 2.35,
 	"sight": 34.0, "gold": 60, "cooldown": 1.6, "roam": 0.0, "packed": false,
 }
-## What the body carries: the floor's prize.
+## What the master's body carries: the floor's prize.
 const SPOILS := ["sword_arming", "ring_blood", "focus_skull_death", "ichor_vial", "ichor_vial"]
 
+## Everything below the master: the keepers of the demons' ring (one a chamber) and
+## the squad that keeps the lair (one of every species). They are fed and kept by
+## the watchers that gate them through to harvest their essence, which is why one
+## keeper is worth two and a half of the wardens that share its floor; and its
+## sight is the floor's own 30 m, past nothing a sleeper in another room could see.
+const KEEPER_OVERRIDES := {"health": 240.0, "damage": 17.0, "sight": 30.0, "gold": 24,
+	"cooldown": 1.4, "roam": 0.0}
+
+## True for the floor's master (Gorehorn): its own numbers, its prize, and the
+## hellfire under it. Every other demon of the floor takes `KEEPER_OVERRIDES`.
+var boss := false
 ## The pieces still on the body, read once by the loot vacuum when it falls.
 var spoils: Array[String] = []
 
@@ -31,9 +52,9 @@ func _init() -> void:
 
 
 func _profiles() -> Dictionary:
-	var master: Dictionary = (PROFILES[BOSS_ID] as Dictionary).duplicate(true)
-	master.merge(OVERRIDES, true)
-	return {BOSS_ID: master}
+	var row: Dictionary = (PROFILES[mob_id] as Dictionary).duplicate(true)
+	row.merge(OVERRIDES if boss else KEEPER_OVERRIDES, true)
+	return {mob_id: row}
 
 
 func _ready() -> void:
@@ -42,6 +63,8 @@ func _ready() -> void:
 	var label := name
 	super()
 	name = label
+	if not boss:
+		return
 	spoils.assign(SPOILS)
 	# A dull hellfire under the body: the lair's master is the one thing in the
 	# dark that is lit from where it stands.
@@ -56,6 +79,12 @@ func _ready() -> void:
 	glow.omni_attenuation = 1.4
 	glow.shadow_enabled = false
 	add_child(glow)
+
+
+## What the loot table asks a falling body: a demon bleeds the altar's essence and
+## keeps no watcher's kit (see `delve_loot.settle`).
+func demon() -> bool:
+	return true
 
 
 ## Commit to a body: the world's retarget calls this for a hostile that is not

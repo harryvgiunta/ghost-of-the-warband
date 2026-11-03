@@ -11,7 +11,9 @@ extends SceneTree
 ##     area and far from the next, and the draw spreads parties over all six;
 ##   * the squad's map walks every shaft to the lair and to every other shaft, no
 ##     sleeper can see a landing, every den's post is open ground, and every den is
-##     crowded to `DEN_CROWD` bodies a post inside its own room;
+##     crowded to its own `crowd` a post inside its own room;
+##   * the floor is three rings - shafts, the demons' ring with one demon a chamber,
+##     and the centre's squad of several demon species - and most rooms keep a bow;
 ##   * the floor is built `SCALE` times the authored plan - every shaft, den post,
 ##     light and prop still on its own room's floor, no room wider than the eye's
 ##     reach;
@@ -86,6 +88,7 @@ func run() -> void:
 	await check_mouth_and_pack()
 	await check_descent()
 	check_floor_plan()
+	check_demon_ring()
 	check_plan_geometry()
 	check_eye_culling()
 	await check_floor_map()
@@ -110,6 +113,21 @@ func _finish() -> void:
 
 func _soul():
 	return game.controller.active_body(1)
+
+
+## A staged descent: wait until the floor is whole (and the panel that asked for
+## it has closed). A ceiling in frames, so a stuck build fails the run in ~15 s
+## rather than hanging it.
+func _await_floor(limit: int = 900) -> void:
+	var waited := 0
+	while waited < limit:
+		var area = game.delve_area
+		var soul = game.controller.active_body(1)
+		if area != null and area.below() and not area.building() and not area.prep.is_open() \
+				and soul != null and is_instance_valid(soul) and area.in_cave(soul):
+			return
+		await process_frame
+		waited += 1
 
 
 func _frames(count: int) -> void:
@@ -195,7 +213,9 @@ func check_descent() -> void:
 	# GO DOWN draws the shaft; a fixed draw keeps the run repeatable.
 	area._draw.seed = 20261031
 	area.prep.descend_requested.emit(area.prep.selected())
-	await _frames(3)
+	# A descent builds the floor across frames now (the window keeps painting
+	# under GOING DOWN), so the test waits for the floor, not three frames.
+	await _await_floor()
 	check(not area.prep.is_open(), "GO DOWN closes the panel")
 	check(area.below() and warband.delve.active, "the party is below")
 	check(warband.delve.party == _party, "the books hold the chosen party (%s)" % str(warband.delve.party))
@@ -250,7 +270,7 @@ func check_descent() -> void:
 ## area and far from the next, a draw that hands parties different shafts as far
 ## apart as it can, ways that join every shaft to the lair and to each other on
 ## the squad's own map, no den that can see anybody land, and every den crowded to
-## `DEN_CROWD` bodies for each post it was written with, each inside its own room.
+## `den_crowd` bodies for each post it was written with, each inside its own room.
 func check_floor_plan() -> void:
 	var cave = game.delve_area.cave
 	var areas := {}
@@ -272,9 +292,9 @@ func check_floor_plan() -> void:
 			var at: Vector3 = cave.to_local(mob.global_position)
 			if room.has_point(Vector2(at.x, at.z)):
 				inside += 1
-		if fielded.size() != (spec["members"] as Array).size() * Layout.DEN_CROWD or inside != fielded.size():
+		if fielded.size() != Layout.den_bodies(spec) or inside != fielded.size():
 			thin.append("%s %d/%d" % [spec["id"], inside, fielded.size()])
-	check(thin.is_empty(), "every den fields %d bodies a post, all in its room (%s)" % [Layout.DEN_CROWD, str(thin)])
+	check(thin.is_empty(), "every den fields its crowd a post, all in its own room (%s)" % str(thin))
 	var misplaced: Array[String] = []
 	for entry in Layout.LANDINGS:
 		var shaft := Layout.room_index(str(entry["room"]))
@@ -341,6 +361,82 @@ func check_floor_plan() -> void:
 					seen.append("%s->%s" % [mob.name, entry["id"]])
 	check(seen.is_empty(), "no sleeper has a line of sight to a landing (%s)" % str(seen))
 	check(buried.is_empty(), "every den's post is open ground on the squad's map (%s)" % str(buried))
+
+
+## The floor's three rings: the six shafts on the outer rim, the demons' ring of
+## four chambers round the lair - one demon and its archers a chamber - and the
+## centre, which keeps a squad of several demon species and Gorehorn himself. Most
+## of the floor's rooms keep a bow of their own: a watcher with a bow is not a
+## curiosity below, it is what holds the far side of a room while the rest close.
+func check_demon_ring() -> void:
+	var cave = game.delve_area.cave
+	var chambers: Array[String] = []
+	for spec in Layout.DENS:
+		if str(Layout.room(str(spec["room"])).get("area", "")) == "ring":
+			chambers.append(str(spec["id"]))
+	check(chambers.size() == 4, "four chambers ring the lair (%d)" % chambers.size())
+	var wrong: Array[String] = []
+	for den_id in chambers:
+		var demons := 0
+		var bows := 0
+		for mob in cave.den_mobs(den_id):
+			if mob.has_method("demon"):
+				demons += 1
+			elif mob.has_method("begin_ambush"):
+				bows += 1
+		if demons != 1 or bows < 1:
+			wrong.append("%s %d demon(s) %d bow(s)" % [den_id, demons, bows])
+	check(wrong.is_empty(),
+		"every chamber of the ring keeps one demon, and archers with it (%s)" % str(wrong))
+	var squad := {}
+	var guard_bows := 0
+	for mob in cave.den_mobs("lair_guard"):
+		if mob.has_method("demon"):
+			squad[str(mob.get("mob_id"))] = true
+		elif mob.has_method("begin_ambush"):
+			guard_bows += 1
+	check(squad.size() >= 3,
+		"the centre keeps a squad of several demon species (%s)" % str(squad.keys()))
+	check(guard_bows >= 1, "and its own archers hold the sides (%d)" % guard_bows)
+	check(cave.master != null and bool(cave.master.get("boss")) and bool(cave.master.get("alive")),
+		"Gorehorn holds the centre himself")
+	var armed := 0
+	for spec in Layout.DENS:
+		var bows := 0
+		for mob in cave.den_mobs(str(spec["id"])):
+			if mob.has_method("begin_ambush"):
+				bows += 1
+		if bows > 0:
+			armed += 1
+	check(armed * 2 > Layout.DENS.size(),
+		"most of the floor's rooms keep a bow (%d of %d dens)" % [armed, Layout.DENS.size()])
+	# The ring is a loop and not four spokes: each corner's arc walks to both of the
+	# chambers it joins, so a party can go round the ring without crossing the lair.
+	var corners := {"ring_sw_jog": ["ring_s", "ring_w"], "ring_se_jog": ["ring_s", "ring_e"],
+		"ring_ne_jog": ["ring_n", "ring_e"], "ring_nw_run": ["ring_w", "ring_n"]}
+	var broken: Array[String] = []
+	for arc_id in corners:
+		var from_point: Vector3 = cave.to_global(_room_centre(arc_id))
+		for room_id in corners[arc_id]:
+			var goal: Vector3 = cave.to_global(_room_centre(room_id))
+			var path: PackedVector3Array = cave.nav.route(from_point, goal)
+			if path.is_empty() or Vector2(path[path.size() - 1].x, path[path.size() - 1].z).distance_to(
+					Vector2(goal.x, goal.z)) > 1.0:
+				broken.append("%s->%s" % [arc_id, room_id])
+	check(broken.is_empty(),
+		"the ring's corners walk to both chambers they join (%s)" % str(broken))
+	var keeper = null
+	for mob in cave.den_mobs("ring_s"):
+		if mob.has_method("demon"):
+			keeper = mob
+	check(keeper != null and float(keeper.get("max_health")) > 200.0,
+		"a chamber's keeper is a demon of the floor's own weight (%s)" % str(keeper.get("max_health") if keeper != null else 0))
+
+
+## The middle of a room's floor, in the cave's frame (y is a metre up).
+func _room_centre(room_id: String) -> Vector3:
+	var rect: Rect2 = Layout.room(room_id)["rect"]
+	return Vector3(rect.get_center().x, 0.5, rect.get_center().y)
 
 
 ## The floor's own geometry, at the size it is built: the plan is `SCALE` times the
@@ -411,13 +507,25 @@ func check_eye_culling() -> void:
 	for mob in mobs:
 		if (mob as Node3D).global_position.distance_to(at) <= cave.BODY_HIDE_DISTANCE:
 			inside += 1
+	# Reveals are staged (a body is drawn for the first time on the frame it is
+	# shown, and a room shown at once is a stall), so one poll hides everything
+	# out of reach and puts back only its share; a few polls put the rest back.
 	cave.cull_bodies(at)
 	var culled := 0
 	for mob in mobs:
 		if bool(mob.get("culled")):
 			culled += 1
+	check(culled <= mobs.size() - inside + cave.REVEAL_CHUNK,
+		"no more than one chunk of the eye's bodies is still hidden (%d of %d, %d inside)"
+		% [culled, mobs.size(), inside])
+	for _poll in 8:
+		cave.cull_bodies(at)
+	culled = 0
+	for mob in mobs:
+		if bool(mob.get("culled")):
+			culled += 1
 	check(culled == mobs.size() - inside,
-		"exactly the bodies outside the eye's reach are culled (%d of %d, %d inside)"
+		"every body outside the eye's reach is culled once the reveals are done (%d of %d, %d inside)"
 		% [culled, mobs.size(), inside])
 	check(inside < mobs.size() / 2,
 		"the eye's reach is a fraction of the floor (%d of %d)" % [inside, mobs.size()])
@@ -778,7 +886,7 @@ func check_fall() -> void:
 	for merc_id in party:
 		worn += warband.roster.worn_entries(merc_id).size()
 	check(worn > 0, "the second party wears something to lose (%d)" % worn)
-	var result: Dictionary = area.descend(party)
+	var result: Dictionary = await area.descend(party)
 	check(bool(result.get("ok", false)), "a second party goes down (%s)" % str(result.get("message", "")))
 	check(not area.cave.is_awake("den"), "into a fresh instance: the den sleeps again")
 	for merc_id in party:

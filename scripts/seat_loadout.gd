@@ -18,6 +18,25 @@ static func hand(value: Variant, slot: String) -> String:
 		return ""
 	return id
 
+## Stats ride the rig's own trinket dictionary; skills replace the hand gates,
+## so a welded skill fires from the hand that holds the piece.
+static func _apply_annoints(rig, annoints: Dictionary) -> void:
+	if rig == null or annoints.is_empty():
+		return
+	var stats: Variant = annoints.get("stats", {})
+	var procs: Variant = annoints.get("procs", [])
+	if rig.has_method("apply_annointments"):
+		rig.apply_annointments(stats if stats is Dictionary else {},
+			procs if procs is Array else [])
+	var skills: Variant = annoints.get("skills", {})
+	if not skills is Dictionary:
+		return
+	var hands := {"main": str((skills as Dictionary).get("main", "")),
+		"off": str((skills as Dictionary).get("off", ""))}
+	if hands["main"].is_empty() and hands["off"].is_empty():
+		return
+	rig.anointed = hands
+
 ## The worn kit travels beside the hands. Each id must be a real catalog item
 ## legal in its slot; anything else becomes an empty slot.
 static func trinkets(value: Variant) -> Dictionary:
@@ -32,7 +51,11 @@ static func trinkets(value: Variant) -> Dictionary:
 ## `anointed` is the altar ledger's list of anointed catalog ids. It is a local,
 ## trusted argument and never read from `loadout`: a seat loadout can arrive over
 ## the wire, and a peer must not be able to claim a skill its steel was never given.
-static func apply(rig, loadout: Dictionary, anointed: Array = []) -> void:
+## `annoints` is the same kind of trusted-local argument as `anointed`: the
+## warband's own ledger, never a loadout field. `{stats: Dictionary,
+## skills: {main, off}}`; a bare dictionary leaves the rig alone.
+static func apply(rig, loadout: Dictionary, anointed: Array = [],
+		annoints: Dictionary = {}) -> void:
 	if rig == null or loadout.is_empty():
 		return
 	var bow: Variant = loadout.get("bow")
@@ -57,6 +80,7 @@ static func apply(rig, loadout: Dictionary, anointed: Array = []) -> void:
 		# hand falls through instead of wiping a valid seat.
 		var pieces: Dictionary = ArmorData.unpack(int(armor) & ArmorData.PIECE_MASK) if armor_ok else rig.armor_pieces.duplicate()
 		rig.apply_loadout(State.build_loadout(main,off,pieces,worn,anointed))
+		_apply_annoints(rig, annoints)
 		return
 	# A kit that omits the hands still carries its worn trinkets.
 	rig.apply_trinkets(worn)
@@ -66,3 +90,4 @@ static func apply(rig, loadout: Dictionary, anointed: Array = []) -> void:
 		rig.set_sword(int(sword))
 	if armor_ok:
 		rig.set_armor_bits(int(armor))
+	_apply_annoints(rig, annoints)

@@ -425,6 +425,158 @@ const ABILITIES := [
 			"seconds": 60.0},
 		"cues": [{"at": 0.42, "cue": "ward"}],
 	},
+	# --- annoint-only skills -------------------------------------------------
+	# Welded by the altar from the pool, never granted by a stock catalog row.
+	# Icons fall back to nothing and the animation falls back to the rig's
+	# placeholder, so a skill is playable before its art exists.
+	{
+		"id": "butchers_cut", "name": "BUTCHER'S CUT", "item": "sword_short",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 25.0,
+		"cooldown": 6.0, "duration": 0.6, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slash", "move": true, "animation": "Sword_Double_Slash",
+		"lean": 0.04, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/butchers_cut.png",
+		"description": "A hooked cut that opens the body up.",
+		"effect": {"kind": "melee_arc", "damage_scale": 0.9, "arc_degrees": 100.0,
+			"radius": 2.2, "stagger": 0.15},
+		"cues": [{"at": 0.30, "cue": "arc"}],
+	},
+	{
+		"id": "gut_hook", "name": "GUT HOOK", "item": "sword_short",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 30.0,
+		"cooldown": 10.0, "duration": 0.7, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slash", "move": true, "animation": "Sword_Overhead",
+		"lean": 0.02, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/gut_hook.png",
+		"description": "One narrow cut straight up under the ribs.",
+		"effect": {"kind": "melee_arc", "damage_scale": 1.4, "arc_degrees": 45.0,
+			"radius": 2.3, "stagger": 0.2},
+		"cues": [{"at": 0.34, "cue": "arc"}],
+	},
+	{
+		"id": "knife_work", "name": "KNIFE WORK", "item": "dagger_iron",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 20.0,
+		"cooldown": 6.0, "duration": 0.36, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "stab", "move": true, "animation": "Sword_Double_Slash",
+		"lean": 0.03, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/knife_work.png",
+		"description": "Three fast stabs thrown from the hip.",
+		"effect": {"kind": "melee_arc", "damage_scale": 1.1, "arc_degrees": 70.0,
+			"radius": 1.35, "stagger": 0.1},
+		"cues": [{"at": 0.15, "cue": "arc"}],
+	},
+	{
+		"id": "ground_breaker", "name": "GROUND BREAKER", "item": "sword_great",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 80.0,
+		"cooldown": 12.0, "duration": 0.85, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slam", "move": false, "animation": "Sword_Overhead",
+		"lean": -0.08, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/ground_breaker.png",
+		"description": "The haft comes down on the ground and the ring goes out.",
+		"effect": {"kind": "melee_ring", "damage_scale": 1.2, "arc_degrees": 360.0,
+			"radius": 3.0, "stagger": 1.5},
+		"cues": [{"at": 0.42, "cue": "ring"}],
+	},
+	{
+		"id": "wide_sweep", "name": "WIDE SWEEP", "item": "sword_great",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 40.0,
+		"cooldown": 8.0, "duration": 0.75, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slash", "move": true, "animation": "Sword_Double_Slash",
+		"lean": 0.10, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/wide_sweep.png",
+		"description": "Everything in front of you, all at once.",
+		"effect": {"kind": "melee_arc", "damage_scale": 0.8, "arc_degrees": 220.0,
+			"radius": 2.7, "stagger": 0.3},
+		"cues": [{"at": 0.38, "cue": "arc"}],
+	},
+	{
+		"id": "executioner", "name": "EXECUTIONER", "item": "sword_great",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 60.0,
+		"cooldown": 15.0, "duration": 0.9, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slash", "move": true, "animation": "Sword_Overhead",
+		"lean": 0.0, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/executioner.png",
+		"description": "A deliberate overhead that ends a wounded body.",
+		"effect": {"kind": "melee_arc", "damage_scale": 2.2, "arc_degrees": 60.0,
+			"radius": 2.2, "stagger": 0.4},
+		"cues": [{"at": 0.46, "cue": "arc"}],
+	},
+	{
+		"id": "rain_of_ash", "name": "RAIN OF ASH", "item": "bow_short",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 40.0,
+		"cooldown": 18.0, "duration": 1.35, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "barrage", "move": false, "animation": "Bow_Barrage",
+		"lean": 0.0, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/rain_of_ash.png",
+		"description": "Eight arrows arced high and dropped into a patch of ground.",
+		"effect": {"kind": "barrage", "damage_scale": 0.4, "shots": 8,
+			"spread_degrees": 6.0, "vertical_spread_degrees": 2.0,
+			"arrow_speed_scale": 1.1},
+		"cues": [
+			{"at": 0.22, "cue": "shot"}, {"at": 0.34, "cue": "shot"},
+			{"at": 0.46, "cue": "shot"}, {"at": 0.58, "cue": "shot"},
+			{"at": 0.70, "cue": "shot"}, {"at": 0.82, "cue": "shot"},
+			{"at": 0.94, "cue": "shot"}, {"at": 1.06, "cue": "shot"},
+		],
+	},
+	{
+		"id": "skewer", "name": "SKEWER", "item": "bow_long",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 50.0,
+		"cooldown": 14.0, "duration": 1.2, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "pierce", "move": false, "animation": "Bow_Barrage",
+		"lean": 0.0, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/skewer.png",
+		"description": "One shaft down the line, through whoever is standing in it.",
+		"effect": {"kind": "piercing_shot", "damage_scale": 0.8, "pierce": 3},
+		"cues": [{"at": 0.55, "cue": "shot"}],
+	},
+	{
+		"id": "cinder_lance", "name": "CINDER LANCE", "item": "staff_fire",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 45.0,
+		"cooldown": 10.0, "duration": 0.55, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "fire", "move": true, "animation": "Staff_Fireball_Cast",
+		"lean": 0.02, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/cinder_lance.png",
+		"description": "A lance of fire down the crosshair, straight through a rank.",
+		"effect": {"kind": "projectile", "damage_scale": 1.4, "radius": 0.0,
+			"speed": 26.0, "pierce": 4, "projectile": "fireball"},
+		"cues": [{"at": 0.26, "cue": "cast"}],
+	},
+	{
+		"id": "grave_bloom", "name": "GRAVE BLOOM", "item": "staff_bone",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 55.0,
+		"cooldown": 14.0, "duration": 0.7, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "bone", "move": true, "animation": "Staff_Fireball_Cast",
+		"lean": 0.0, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/grave_bloom.png",
+		"description": "A bloom of bone that opens where the aim point lands.",
+		"effect": {"kind": "projectile", "damage_scale": 1.0, "radius": 4.0,
+			"speed": 14.0, "pierce": 0, "projectile": "bone"},
+		"cues": [{"at": 0.34, "cue": "cast"}],
+	},
+	{
+		"id": "ember_ward", "name": "EMBER WARD", "item": "staff_fire",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 40.0,
+		"cooldown": 20.0, "duration": 0.6, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "ward", "move": true, "animation": "Staff_Fireball_Cast",
+		"lean": -0.03, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/ember_ward.png",
+		"description": "A short ward: four tenths of every blow paid in stamina.",
+		"effect": {"kind": "ward", "absorb": 0.4, "stamina_scale": 2.0, "seconds": 6.0},
+		"cues": [{"at": 0.30, "cue": "ward"}],
+	},
+	{
+		"id": "rebuke", "name": "REBUKE", "item": "shield_buckler",
+		"hitem": "", "slot": 1, "key": "SHIFT + 2", "stamina_cost": 25.0,
+		"cooldown": 10.0, "duration": 0.65, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "bash", "move": true, "animation": "Shield_Bash",
+		"lean": 0.0, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/rebuke.png",
+		"description": "The board's rim comes round, and the last blow goes back.",
+		"effect": {"kind": "melee_arc", "damage_scale": 0.7, "arc_degrees": 90.0,
+			"radius": 2.0, "stagger": 0.3},
+		"cues": [{"at": 0.32, "cue": "arc"}],
+	},
 ]
 
 static var _icon_cache: Dictionary = {}
@@ -435,6 +587,10 @@ static var _by_item: Dictionary = {}
 static func _static_init() -> void:
 	for ability: Dictionary in ABILITIES:
 		_by_id[str(ability.id)] = ability
+		# An annoint-only skill is welded by the altar, not by the catalog row:
+		# it must never shadow the row's own stock skill in `_by_item`.
+		if bool(ability.get("annoint_only", false)):
+			continue
 		var item := str(ability.get("item", ""))
 		var slot := int(ability.get("slot", 0))
 		if not item.is_empty():
@@ -532,9 +688,23 @@ static func _anointed(rig, hand: String, definition: Dictionary) -> Dictionary:
 	if definition.is_empty():
 		return {}
 	var hands: Variant = rig.get("anointed")
-	if hands is Dictionary and str((hands as Dictionary).get(hand, "")) == str(definition.get("id", "")):
+	if not hands is Dictionary:
+		return {}
+	var wanted := str((hands as Dictionary).get(hand, ""))
+	if wanted.is_empty():
+		return {}
+	if not definition.is_empty() and str(definition.get("id", "")) == wanted:
 		return definition
-	return {}
+	# The altar welds any wired skill from the pool onto any piece, so the hand
+	# follows the annointment's id rather than the catalog row's own skill. The
+	# slot and key are rewritten for the hand that actually holds it.
+	var welded := by_id(wanted)
+	if welded.is_empty():
+		return {}
+	var out := welded.duplicate(true)
+	out["slot"] = 1 if hand == "off" else 0
+	out["key"] = "SHIFT + 2" if hand == "off" else "SHIFT + 1"
+	return out
 
 
 ## The stock row a catalog piece shares: the class-and-index clamp `main_item`

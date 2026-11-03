@@ -81,14 +81,14 @@ func run() -> void:
 	warband.save_state()
 	check(FileAccess.file_exists(WARBAND_SAVE), "the campaign is on disk")
 
-	# --- RESUME CAMPAIGN: back to the bookmark ------------------------------
+	# --- a campaign from the list: back to the bookmark ----------------------
 	# The warband on disk is what a relaunch reads: reset, load, then resume.
 	warband.reset_state()
 	check(not warband.has_checkpoint(), "a reset forgets the bookmark")
 	warband.load_state()
 	flow.enter_warband()
 	var resumed = await _wait_scene(WORLD, 12.0)
-	check(resumed != null, "RESUME CAMPAIGN opens the world")
+	check(resumed != null, "enter_warband opens the world")
 	if resumed == null:
 		_finish()
 		return

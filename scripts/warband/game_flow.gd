@@ -10,9 +10,9 @@ extends Node
 ## `active` stays false until the flow is entered from the title menu, which is
 ## what keeps a regression harness's world from reloading a checkpoint under it.
 ##
-## The title's four doors land here: NEW CAMPAIGN (`start_campaign`), RESUME
-## CAMPAIGN (`enter_warband`), HOST GAME (`host_campaign`, a new game or the saved
-## checkpoint) and JOIN GAME (`join_campaign`).
+## The title's four doors land here: NEW CAMPAIGN (`start_campaign`), CAMPAIGNS
+## (`enter_warband`, the campaign a row opens), HOST GAME (`host_campaign`, a new
+## game or a campaign's checkpoint) and JOIN GAME (`join_campaign`).
 
 ## The campaign is one world: the camp, the trail through the wood and the town
 ## all stand in this one scene, and walking is the only way between them.
@@ -86,8 +86,9 @@ func _process(delta: float) -> void:
 		_guest_over("The host at %s:%d never sent its warband." % [
 			str(warband_intent.get("address", "")), int(warband_intent.get("port", 0))])
 
-## RESUME CAMPAIGN: the saved warband where its last checkpoint stands, or the
-## cages when there is nothing saved to resume.
+## A campaign from the title's list: the warband where its last checkpoint
+## stands, or the cages when that campaign has nothing saved in it yet. The
+## folder is the title's to bind (`SaveSlots`); this only reads what it bound.
 func enter_warband() -> void:
 	var warband := get_node_or_null("/root/Warband")
 	if warband == null:
@@ -103,7 +104,9 @@ func enter_warband() -> void:
 	world_start = "camp"
 	goto(WORLD_SCENE)
 
-## NEW CAMPAIGN: the five cages, whatever the save says.
+## NEW CAMPAIGN: the five cages, whatever the save says. The campaign folder is
+## the title's to make (`SaveSlots.new_slot` + `bind`), so this writes a new
+## campaign and never an old one.
 func start_campaign() -> void:
 	var warband := get_node_or_null("/root/Warband")
 	_end_warband_link("a new campaign")

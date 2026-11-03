@@ -38,6 +38,7 @@ const AbilityRunner = preload("res://scripts/ability_runner.gd")
 const Stamina = preload("res://scripts/stamina.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const AnnointRuntime = preload("res://scripts/warband/annoint_runtime.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const MAX_HEALTH := 100.0
 const WALK_SPEED := 5.5
@@ -102,6 +103,8 @@ var max_stamina := Stamina.MAX
 ## Worn trinket kit and its summed modifiers (see `TrinketStats`).
 var trinkets: Dictionary = {"neck":"", "ring1":"", "ring2":"", "off":""}
 var trinket_stats: Dictionary = {}
+## The procs this body's kit arms, armed at dress time.
+var annoint_playback := AnnointRuntime.new()
 ## Energy Shield ward: while it runs, `absorb` of every hit is paid from
 ## stamina at `stamina_scale` times that share instead of from health.
 var ward_seconds := 0.0
@@ -603,6 +606,7 @@ func set_block(pressed: bool, forward: Vector3) -> void:
 ## nothing; `struck_by` hands the striker on.
 func note_attacker(attacker: Node3D) -> void:
 	if is_instance_valid(attacker) and attacker != self:
+		annoint_playback.note_attacker(attacker)
 		struck_by.emit(attacker)
 
 func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
@@ -634,6 +638,7 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 		if not rig.shield_equipped:
 			combat.break_guard()
 			guard_broken.emit(slot)
+		annoint_playback.on_block()
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			# The raised dagger absorbs the impact: half damage, and the attacker's
 			# swing continues.
@@ -784,6 +789,15 @@ func apply_trinkets(kit: Dictionary) -> void:
 		rig.apply_trinkets(kit)
 	_sync_trinket_limits()
 
+## The annointments welded to the body's kit, merged onto the rig's stats and
+## pushed through the same limit sync a ring change uses.
+func apply_annointments(stats: Dictionary, procs: Array = []) -> void:
+	if is_instance_valid(rig):
+		rig.apply_annointments(stats)
+	_sync_trinket_limits()
+	annoint_playback.bind(self)
+	annoint_playback.arm(procs)
+
 func _sync_trinket_limits() -> void:
 	if not is_instance_valid(rig):
 		return
@@ -835,9 +849,13 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 		_die(source_id)
 		return
 	_cancel_consumable()
+	# A lethal save and an absorb move the *incoming* figure before the armour
+	# channel sees it, which is the only place a modifier can stop a blow.
+	amount = annoint_playback.on_incoming(amount, source_id)
 	var applied: float = amount * Hitbox.damage_multiplier(headshot) \
 		* (1.0 - rig.damage_reduction(headshot))
 	applied = _absorb_with_ward(applied)
+	annoint_playback.after_damage(applied, source_id)
 	# Ghost of the Warband: the contract's single 10% overkill authority decides
 	# whether this hit leaves the body standing, drops it DOWNED or kills it.
 	# Nothing here re-derives the threshold.
@@ -977,6 +995,7 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 	if authoritative:
 		ability.advance(delta)
 		_tick_ward(delta)
+		annoint_playback.tick(delta)
 	if ability.active:
 		# A melee skill keeps the walking intent, but sprint, jump, peek and
 		# slide stay off for the duration. Any other skill plants the fighter.

@@ -22,6 +22,7 @@ const TEST_SAVE := "user://checkpoint_player.json"
 const WARBAND_SAVE := "user://checkpoint_warband.json"
 const OLD_SAVE := "user://checkpoint_v3.json"
 const BAD_SAVE := "user://checkpoint_bad.json"
+const SLOT_ROOT := "user://checkpoint_saves"
 
 var state
 var warband
@@ -43,6 +44,26 @@ func _initialize() -> void:
 func _remove(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## A campaign folder holds two files, so removing one means walking it.
+func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	var names: Array[String] = []
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while not entry.is_empty():
+		names.append(entry)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	for name in names:
+		var child := path.path_join(name)
+		if DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(child)):
+			_remove_tree(child)
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(child))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 func run() -> void:
 	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE]:
@@ -76,6 +97,7 @@ func _finish() -> void:
 	flow.world_start = "camp"
 	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE]:
 		_remove(path)
+	_remove_tree(SLOT_ROOT)
 	print("CHECKPOINT_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -358,21 +380,41 @@ func _wait_world(timeout: float) -> Node:
 	return null
 
 
-## The title's resume door: present, and only live when there is a warband save
-## for it to open.
+## The title's campaign doors: the ledger lists what is saved, and FROM CHECKPOINT
+## offers the campaign whose warband file is there. A campaign is a folder now, so
+## nothing else gates them - there is no single shared file to check.
 func check_title_door() -> void:
+	var slots = root.get_node_or_null("SaveSlots")
+	check(slots != null, "the title's campaign ledger is an autoload")
+	if slots == null:
+		return
+	slots.root_path = SLOT_ROOT
+	_remove_tree(SLOT_ROOT)
+	slots.load_index()
 	var title = load("res://title.tscn").instantiate()
 	root.add_child(title)
 	await process_frame
-	check(title.resume_button != null, "the title carries a resume door")
-	check(not title.resume_button.disabled,
-		"the resume door is live while a warband save exists")
+	check(title.campaigns_button != null, "the title carries a campaigns door")
 	check(title.new_campaign_button != null, "and the new-campaign door is still there")
-	warband.save_path = "user://checkpoint_absent.json"
-	title._refresh_resume()
-	check(title.resume_button.disabled, "the resume door is dead without a save")
-	warband.save_path = WARBAND_SAVE
+	title._open_campaigns()
+	check(title.campaign_ids().is_empty(), "an empty ledger lists no campaign")
+	title._close_campaigns()
+	# A campaign with this warband in it: written where binding writes it, without
+	# binding, because the rest of this test keeps its own pinned save paths.
+	var id := str(slots.new_slot("Checkpoint campaign"))
+	var pinned := str(warband.save_path)
+	warband.save_path = str(slots.warband_path(id))
+	warband.save_state()
+	warband.save_path = pinned
+	title._refresh_campaigns()
+	check(not title.host_checkpoint_button.disabled,
+		"FROM CHECKPOINT is live on the campaign's warband save")
+	title._open_campaigns()
+	check(title.campaign_ids().size() == 1 and title.campaign_ids()[0] == id,
+		"the list names the saved campaign (%s)" % str(title.campaign_ids()))
 	title.queue_free()
+	warband.save_path = WARBAND_SAVE
+	_remove_tree(SLOT_ROOT)
 	await process_frame
 
 

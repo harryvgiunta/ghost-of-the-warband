@@ -346,8 +346,36 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	Perf.begin("world.process")
+	_note_hitch()
 	_tick_frame(delta)
 	Perf.end()
+
+
+## A frame long enough to be felt is written to the log, once a second at most,
+## with what the world can see of it: the frame's own time, the physics steps it
+## ran, the draw calls and the count of bodies below. A session that stuttered can
+## then be read back from its log instead of described from memory - the report
+## "it freezes when a room comes into range" is what this line was added for.
+const HITCH_USEC := 45000
+var _last_frame_us := 0
+var _hitch_clock := 0.0
+
+func _note_hitch() -> void:
+	var now := Time.get_ticks_usec()
+	var spent := now - _last_frame_us if _last_frame_us > 0 else 0
+	_last_frame_us = now
+	_hitch_clock += float(spent) / 1000000.0
+	if spent < HITCH_USEC or _hitch_clock < 1.0:
+		return
+	_hitch_clock = 0.0
+	Log.event("hitch", "a frame the player would feel", {
+		"ms": roundi(float(spent) / 1000.0),
+		"tick": Engine.get_physics_frames(),
+		"draws": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+		"objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
+		"guards": guards.size() if guards != null else 0,
+		"below": delve_area != null and delve_area.cave != null,
+	}, Log.LEVEL_WARN)
 
 
 func _tick_frame(delta: float) -> void:
@@ -2076,7 +2104,7 @@ func _sync_town_music() -> void:
 # walking back and forth does not hammer the disk - and a session that played
 # the opening, whose camp still reads as cleared, cannot pull the town bookmark
 # back to the trail on the next frame and then forward again on the one after.
-# A wipe loads it, and the title's resume door opens on it.
+# A wipe loads it, and the title's campaign list opens on it.
 
 ## The bookmarks in the order the campaign reaches them.
 const CHECKPOINT_ORDER := ["trail_start", "town"]

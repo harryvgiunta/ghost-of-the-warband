@@ -13,7 +13,9 @@ const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
+const ItemCard = preload("res://scripts/warband/item_card.gd")
 const SacrificialAltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
 
@@ -63,6 +65,8 @@ func run() -> void:
 
 	check_recipes()
 	await check_anoint()
+	check_bench()
+	check_rack()
 	check_unbind_list()
 	check_unbind_press()
 	check_distill()
@@ -108,6 +112,12 @@ func _header_row(tier: int) -> Dictionary:
 func _anoint_row(item_id: String) -> Dictionary:
 	for row in menu.anoint_rows():
 		if str(row["item_id"]) == item_id:
+			return row
+	return {}
+
+func _rack_row(item_id: String, ordinal: int) -> Dictionary:
+	for row in menu.anoint_rows():
+		if str(row["item_id"]) == item_id and int(row["ordinal"]) == ordinal:
 			return row
 	return {}
 
@@ -191,52 +201,199 @@ func check_anoint() -> void:
 	check(menu.page() == AltarMenuScript.PAGE_ANOINT, "the altar opens on the reagent rite")
 	var bow := _anoint_row("bow_short")
 	var sword := _anoint_row("sword_short")
-	check(not bow.is_empty(), "a worn bow is offered: an anointing lives on the piece")
+	check(not bow.is_empty(), "a worn bow is offered")
 	check(not sword.is_empty(), "a pooled sword is offered")
-	check(_anoint_row("ring_silver").is_empty(), "a ring wakes into nothing and is not offered")
-	var bow_skill := str(AbilityRules.skill_for(State.ITEMS["bow_short"]).get("id", ""))
-	check(str(bow.get("ability", "")) == bow_skill and not bow_skill.is_empty(),
-		"the row names the skill the bow wakes into (%s)" % str(bow.get("ability", "")))
-	check(str(bow.get("key", "")) == "1", "a bow's skill is the main hand's key")
-	check(not bool(bow.get("anointed", true)) and bow.get("button") != null, "a plain piece carries a button")
+	check(_anoint_row("ring_silver").is_empty(), "a ring has no pool and is not offered")
+	check(int(bow.get("count", -1)) == warband.annoints.count("bow_short", 0),
+		"the card counts the welds on its own copy")
+	check(bow.get("button") != null, "a plain piece carries a button")
 
-	var before := changed_hits
-	(bow["button"] as Button).pressed.emit()
-	check(warband.cruor.is_anointed("bow_short"), "the press wakes the bow")
-	check(stash.pooled_count(reagent) == 0, "exactly the recipe left the shared stash")
-	check(changed_hits == before + 1, "the panel announces the rite once")
-	check(str(body.ability.definition(0).get("id", "")) == bow_skill,
-		"the fielded body carries the skill at once, got %s" % str(body.ability.definition(0).get("id", "")))
-	check(warband.quests.is_complete("bind_the_ichor"), "the ichor order hears about the rite")
-	var woken := _anoint_row("bow_short")
-	check(bool(woken.get("anointed", false)) and woken.get("button") == null,
-		"the woken bow reads as done and offers no button")
+	# The die is forced for the test: same ritual, same code, a known band.
+	var result: Dictionary = warband.anoint("bow_short", -1, _seed_in_band(0, 24))
+	check(bool(result.get("ok", false)), "the rite commits: %s" % str(result.get("message", "")))
+	check(int(result.get("outcome", -1)) == 0, "the forced band added an ability")
+	var entry = AnnointCatalog.by_id(str(result.get("entry_id", "")))
+	check(entry != null and int(entry.kind) == AnnointCatalog.Kind.ABILITY,
+		"the piece took an ability")
+	check(warband.annoints.has("bow_short", 0, str(entry.id)), "the copy carries it")
+	check(stash.pooled_count(reagent) == 0, "exactly one ichor left the shared stash")
+	check(warband.quests.is_complete("bind_the_ichor"), "the ichor order heard about it")
+	var skill_id := str(entry.ability)
+	check(str(warband.annointment_skills(merc).get("main", "")) == skill_id,
+		"the body's main hand wakes the skill")
+	check(str(body.ability.definition(0).get("id", "")) == skill_id,
+		"the fielded body carries the skill at once, got %s" \
+			% str(body.ability.definition(0).get("id", "")))
 
-	# The sword with the stash empty: refused out loud, nothing moves.
-	before = changed_hits
-	(_anoint_row("sword_short")["button"] as Button).pressed.emit()
-	check(not warband.cruor.is_anointed("sword_short"), "an empty stash wakes nothing")
-	check(changed_hits == before, "a refused rite announces nothing")
-	check(menu.status_text().contains(str(State.ITEMS[reagent]["name"])),
-		"the refusal names the reagent it wants: %s" % menu.status_text())
-
-	# A woken piece is not woken twice, and a piece the band does not carry is refused.
+	# Six annointments fit, so a marked piece is not "done": the second rite is
+	# spent, and it can only ever add, strip or swap - never destroy.
 	stash.add(reagent, 1)
-	check(not bool(warband.anoint("bow_short").get("ok", true)), "a woken piece refuses a second rite")
-	check(not bool(warband.anoint("bow_long").get("ok", true)), "a piece the warband does not carry is refused")
-	check(stash.pooled_count(reagent) == 1, "neither refusal spends the reagent")
+	var second: Dictionary = warband.anoint("bow_short", -1, _seed_in_band(25, 49))
+	check(bool(second.get("ok", false)) or int(second.get("outcome", -1)) == 2,
+		"a second rite is allowed")
+	check(stash.pooled_count(reagent) == 0, "the second rite spent its ichor")
+	var after := _anoint_row("bow_short")
+	check(after.get("button") != null, "a piece with room still offers the button")
+	check(State.ITEMS.has("bow_short"), "the piece still exists - nothing is destroyed")
 
-	# The ledger rides the save.
+	# A piece the warband does not carry is refused, and refuses for free.
+	stash.add(reagent, 1)
+	var foreign: Dictionary = warband.anoint("bow_long", -1, _seed_in_band(75, 99))
+	check(not bool(foreign.get("ok", true)), "a piece the warband does not carry is refused")
+	check(stash.pooled_count(reagent) == 1, "that refusal spent nothing")
+
+	# The copy rides the save.
 	var saved: Dictionary = warband.to_dict()
+	var held: Array = warband.annoints.ids("bow_short", 0)
 	warband.reset_state()
-	check(not warband.cruor.is_anointed("bow_short"), "a reset forgets the rite")
+	check(warband.annoints.count("bow_short", 0) == 0, "a reset forgets the steel")
 	warband.from_dict(saved)
-	check(warband.cruor.anointed_skill("bow_short") == bow_skill, "the anointing survives the save")
-	check(not warband.cruor.is_anointed("sword_short"), "and the refused sword is still plain")
+	check(warband.annoints.ids("bow_short", 0) == held, "the annointments survive the save")
+	check(not warband.annoints.has("sword_short", 0, str(entry.id)),
+		"an untouched piece stays plain")
+
+	# With the stash dry the panel refuses out loud and nothing moves.
+	stash.remove(reagent, stash.pooled_count(reagent))
+	var before_hits := changed_hits
+	(_anoint_row("sword_short")["button"] as Button).pressed.emit()
+	check(warband.annoints.count("sword_short", 0) == 0, "an empty stash welds nothing")
+	check(changed_hits == before_hits, "a refused rite announces nothing")
+	check(menu.doctrine_text().contains(str(State.ITEMS[reagent]["name"])),
+		"the bench names the reagent it wants: %s" % menu.doctrine_text())
 
 	menu.close()
 	field.queue_free()
 	await process_frame
+
+## The bench: the square holds exactly one piece, the chips only lay it there,
+## and the one ANOINT button works whatever is laid - it is never a row's verb.
+func check_bench() -> void:
+	_fresh()
+	var stash = warband.stash
+	stash.add("sword_arming", 1)
+	stash.add("bow_short", 1)
+	stash.add("dagger_ironwood", 1)
+	stash.add("ichor_vial", 2)
+	warband.add_mercenary("Fen")
+	menu.refresh()
+	check(not menu.selected_anoint_item().is_empty(),
+		"the bench lays a piece by itself so it is never empty for nothing")
+	check(menu.select_anoint_item("sword_arming"), "a carried sword can be laid")
+	check(menu.selected_anoint_item() == "sword_arming", "the square keeps what was laid in it")
+	check(not menu.select_anoint_item("bow_long"),
+		"a piece the warband does not carry cannot be laid")
+	check(menu.selected_anoint_item() == "sword_arming",
+		"a refused piece leaves the square alone")
+
+	# The one button works the piece in the square, and the square keeps it. The
+	# roll may come back with nothing to take (a vial can be spent for nothing),
+	# so the bench must announce the rite exactly when the copy really changed.
+	var before: int = stash.pooled_count("ichor_vial")
+	var before_ids: Array = warband.annoints.ids("sword_arming", 0)
+	var hits := changed_hits
+	menu.anoint_button().pressed.emit()
+	check(stash.pooled_count("ichor_vial") == before - 1, "the one button spends one vial")
+	var after_ids: Array = warband.annoints.ids("sword_arming", 0)
+	check((changed_hits == hits + 1) == (after_ids != before_ids),
+		"the bench announces the rite exactly when the copy changed")
+	check(menu.selected_anoint_item() == "sword_arming", "the worked piece stays in the square")
+	check(stash.pooled_count("dagger_ironwood") == 1, "the chips spend nothing by being pressed")
+
+	# Taking the piece off leaves nothing to work, and the button says so by
+	# being dead - there is no row left to press by mistake.
+	var socket: Button = menu.find_child("AnointSocket", true, false)
+	check(socket != null, "the bench has its square")
+	socket.pressed.emit()
+	check(menu.selected_anoint_item().is_empty(), "pressing the square takes the piece off")
+	check(menu.anoint_button().disabled, "with nothing laid the one button is dead")
+
+## The rack: one card per **copy**, not one per catalogue id. Four swords are four
+## cards, each printing the annointments welded to that copy; laying a card works
+## that copy and leaves its neighbours untouched.
+func check_rack() -> void:
+	_fresh()
+	var stash = warband.stash
+	stash.add("sword_arming", 4)
+	stash.add("ichor_vial", 12)
+	warband.add_mercenary("Ledge")
+	warband.anoint("sword_arming", 1, _seed_in_band(0, 24))
+	warband.anoint("sword_arming", 3, _seed_in_band(0, 24))
+	menu.refresh()
+
+	var rows: Array = menu.anoint_rows()
+	check(rows.size() == 4, "four copies are four cards, got %d" % rows.size())
+	var ordinals: Array[int] = []
+	for row in rows:
+		ordinals.append(int(row["ordinal"]))
+		check(row.get("button") != null, "every copy is a card of its own")
+	ordinals.sort()
+	check(ordinals == [0, 1, 2, 3], "the rack addresses every copy: %s" % str(ordinals))
+	check(int(_rack_row("sword_arming", 1)["count"]) == 1, "a card counts its own welds")
+	check(int(_rack_row("sword_arming", 0)["count"]) == 0, "a bare copy stays bare")
+	var welded := str(_rack_row("sword_arming", 1)["welded"])
+	var entry = warband.annoints.entries_of("sword_arming", 1)[0]
+	check(welded.contains(str(entry.name)),
+		"the card names what is welded to it: %s" % welded)
+	check(str(_rack_row("sword_arming", 0)["welded"]).is_empty(),
+		"a bare copy's card names nothing")
+	check(ItemCard.annoint_entries("sword_arming", warband, 1).size()
+		== warband.annoints.count("sword_arming", 1),
+		"the hover card asks for the copy the row stands for")
+	check(ItemCard.annoint_entries("sword_arming", warband, 0).is_empty(),
+		"and a bare copy's hover card is bare")
+
+	# Laying a card addresses that copy, and the one ANOINT works only it.
+	check(menu.select_anoint_item("sword_arming", 1), "a card is laid by its copy")
+	check(menu.selected_anoint_ordinal() == 1, "the square holds the copy, not just the piece")
+	var neighbours: Array = [warband.annoints.ids("sword_arming", 0),
+		warband.annoints.ids("sword_arming", 2), warband.annoints.ids("sword_arming", 3)]
+	menu.anoint_button().pressed.emit()
+	check(warband.annoints.ids("sword_arming", 0) == neighbours[0]
+		and warband.annoints.ids("sword_arming", 2) == neighbours[1]
+		and warband.annoints.ids("sword_arming", 3) == neighbours[2],
+		"the rite moved only the copy in the square")
+	check(menu.selected_anoint_ordinal() == 1, "the square keeps the copy it worked")
+	check(menu.selected_anoint_item() == "sword_arming", "and the piece it belongs to")
+
+	# The rack is the warband's own count: a fifth sword is a fifth card.
+	stash.add("sword_great", 1)
+	menu.refresh()
+	check(menu.anoint_rows().size() == 5, "a copy added behind the panel is a card")
+
+	# The filter: only the copies a body is wearing right now.
+	var wielder: int = warband.add_mercenary("Brann")
+	check(bool(warband.equip_merc(wielder, "main", "sword_great").get("ok", false)),
+		"a body takes a greatsword")
+	menu.refresh()
+	check(menu.rack_filter() == AltarMenuScript.RACK_ALL, "the rack starts listing every copy")
+	var every: int = menu.anoint_rows().size()
+	check(menu.set_rack_filter(AltarMenuScript.RACK_WORN), "the rack filters to worn copies")
+	var worn_rows: Array = menu.anoint_rows()
+	check(worn_rows.size() == 1, "exactly the worn sword is listed, got %d" % worn_rows.size())
+	check(not str(worn_rows[0]["worn"]).is_empty(),
+		"the listed copy says who wears it: %s" % str(worn_rows[0]["worn"]))
+	check(worn_rows.size() < every, "the filter drops the copies nobody wears")
+	check(menu.selected_anoint_item() == "sword_great",
+		"the square holds a copy the filtered rack shows")
+	check(not menu.set_rack_filter("nonsense"), "an unknown filter is refused")
+	check(menu.rack_filter() == AltarMenuScript.RACK_WORN, "a refused filter changes nothing")
+	check(menu.set_rack_filter(AltarMenuScript.RACK_ALL), "the rack can list everything again")
+	check(menu.anoint_rows().size() == every, "and every copy comes back")
+
+## An RNG whose first draw lands in `[lo, hi]`, so a band can be forced without
+## reaching into the roll's guts.
+func _seed_in_band(lo: int, hi: int) -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	var seed := 1
+	while seed < 300000:
+		rng.seed = seed
+		var drawn := rng.randi_range(0, 99)
+		if drawn >= lo and drawn <= hi:
+			rng.seed = seed
+			return rng
+		seed += 1
+	rng.seed = 1
+	return rng
 
 # --- the unbind list -------------------------------------------------------
 

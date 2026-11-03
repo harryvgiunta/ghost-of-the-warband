@@ -26,16 +26,19 @@ class Row extends Button:
 	var hint := ""
 	var note := ""
 	var count := 1
+	var ordinal := -1
 
 	## Point this row at `item_id`. `owner` is the warband whose brand/anointing
-	## ledger the card prints (optional); `text` is the row's own instruction.
+	## ledger the card prints (optional); `text` is the row's own instruction;
+	## `copy` which copy of the piece it stands for (-1: the warband resolves it).
 	func show_item(id: String, owner = null, text: String = "", copies: int = 1,
-			board_note: String = "") -> void:
+			board_note: String = "", copy: int = -1) -> void:
 		item_id = id
 		warband = owner
 		hint = text
 		count = maxi(copies, 1)
 		note = board_note
+		ordinal = copy
 		tooltip_text = str(State.ITEMS.get(id, {}).get("name", id)) if not id.is_empty() else ""
 
 	## The card for the row's current piece, or null when it holds none.
@@ -43,7 +46,7 @@ class Row extends Button:
 		if item_id.is_empty() or not Card.has(item_id):
 			return null
 		var card = Card.new()
-		card.compose(item_id, warband, hint, count, note)
+		card.compose(item_id, warband, hint, count, note, ordinal)
 		return card
 
 	func _make_custom_tooltip(_for_text: String) -> Object:
@@ -59,14 +62,16 @@ class LabelRow extends Label:
 	var hint := ""
 	var note := ""
 	var count := 1
+	var ordinal := -1
 
 	func show_item(id: String, owner = null, text: String = "", copies: int = 1,
-			board_note: String = "") -> void:
+			board_note: String = "", copy: int = -1) -> void:
 		item_id = id
 		warband = owner
 		hint = text
 		count = maxi(copies, 1)
 		note = board_note
+		ordinal = copy
 		tooltip_text = str(State.ITEMS.get(id, {}).get("name", id)) if not id.is_empty() else ""
 		# A Label is not hoverable by default; the row's name is the thing the
 		# player points at, so it answers the mouse itself.
@@ -76,7 +81,7 @@ class LabelRow extends Label:
 		if item_id.is_empty() or not Card.has(item_id):
 			return null
 		var card = Card.new()
-		card.compose(item_id, warband, hint, count, note)
+		card.compose(item_id, warband, hint, count, note, ordinal)
 		return card
 
 	func _make_custom_tooltip(_for_text: String) -> Object:

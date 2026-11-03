@@ -58,11 +58,13 @@ TESTS = [
 ## The warband possession campaign: one world, one roster, one stash.
 WARBAND_TESTS = [
     "title_menu_regression",
+    "save_slots_regression",
     "warband_contract_regression",
     "possession_regression",
     "downed_revive_regression",
     "downed_bleedout_regression",
     "altar_regression",
+    "annoint_regression",
     "stash_autoloot_regression",
     "corpse_loot_regression",
     "warband_ui_regression",

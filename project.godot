@@ -9,6 +9,7 @@ config/description="Ghost of the Warband: a possession campaign for one soul and
 
 [autoload]
 Log="*res://scripts/log.gd"
+SaveSlots="*res://scripts/warband/save_slots.gd"
 Audio="*res://scripts/audio/audio_manager.gd"
 PlayerState="*res://scripts/player_state.gd"
 NetCache="*res://scripts/net_cache.gd"

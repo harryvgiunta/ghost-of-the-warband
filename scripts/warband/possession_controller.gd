@@ -63,6 +63,11 @@ var lag_history = LagCompensation.new()
 ## Extra bodies a scene wants in the history (the world's own mobs). They are
 ## recorded beside the warband's bodies, so a guest can hit what a guest saw.
 var lag_extras := Callable()
+## Whether the host keeps that history at all: true only while another peer is
+## connected, because a rewind exists for a remote action and a solo party has
+## none. One capsule sheet a tick for every body in the world is a millisecond in
+## the delve's three hundred, spent on a frame nobody is asking.
+var lag_tracking := false
 ## The guest's playout clock: the newest snapshot it has been handed and the
 ## tick it is currently drawing. Its actions carry that tick, which is the whole
 ## input to the host's rewind.
@@ -259,8 +264,24 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 			"off": off_id,
 		},
 	}
-	SeatLoadout.apply(actor.rig, loadout, _warband.cruor.anointed_among([main_id, off_id]))
+	var annoints := _warband_annoints(merc_id)
+	SeatLoadout.apply(actor.rig, loadout,
+		_warband.cruor.anointed_among([main_id, off_id]), annoints)
+	# The rig holds the stats; the body owns the maxima and the runtime, so it is
+	# told with an empty stat payload (the rig already has them) and the procs.
+	if actor.has_method("apply_annointments"):
+		actor.apply_annointments({}, annoints.get("procs", []))
 	_loadouts[merc_id] = loadout
+
+## The warband's annointments as the rig consumes them: stats in `TrinketStats`
+## shape, and the skill each hand's copy wakes. Both are local ledger reads, so a
+## replica cannot claim a modifier its steel was never given.
+func _warband_annoints(merc_id: int) -> Dictionary:
+	if _warband == null or not _warband.has_method("annointment_stats"):
+		return {}
+	return {"stats": _warband.annointment_stats(merc_id),
+		"skills": _warband.annointment_skills(merc_id),
+		"procs": _warband.annointment_procs(merc_id)}
 
 # --- reading ---------------------------------------------------------------
 
@@ -634,9 +655,10 @@ func _step_squad(delta: float) -> void:
 			body.step(delta, _spawned, _tick)
 		# Recorded after the bodies moved, so frame `_tick` is what a peer that
 		# acts on `_tick` was looking at.
-		Perf.begin("lag.record")
-		lag_history.record(_tick, _lag_subjects())
-		Perf.end()
+		if lag_tracking:
+			Perf.begin("lag.record")
+			lag_history.record(_tick, _lag_subjects())
+			Perf.end()
 	elif actor != null and is_instance_valid(actor) and actor.predicting:
 		actor.predicted_step(delta, _spawned)
 

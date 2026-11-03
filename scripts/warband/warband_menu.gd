@@ -263,8 +263,16 @@ func save_game() -> bool:
 		_note("save_failed", {"path": path})
 		return false
 	var roster := _roster_count(warband)
-	set_status("Warband written  /  %s  /  %d in the roster" % [path.get_file(), roster])
-	_note("save", {"path": path, "roster": roster})
+	# Every campaign's warband file is called `warband_state.json`, so the line
+	# says which campaign was written, not which file.
+	var where := path.get_file()
+	var slots := get_node_or_null("/root/SaveSlots")
+	if slots != null:
+		var campaign := str(slots.campaign_of(path))
+		if not campaign.is_empty():
+			where = campaign
+	set_status("Warband written  /  %s  /  %d in the roster" % [where, roster])
+	_note("save", {"path": path, "campaign": where, "roster": roster})
 	saved.emit(path)
 	_refresh_load()
 	return true

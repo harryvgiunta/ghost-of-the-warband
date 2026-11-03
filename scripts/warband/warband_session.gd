@@ -147,6 +147,9 @@ func setup(possession_controller: PossessionController, warband_node: WarbandSta
 		controller.sync.name = "PossessionSync"
 		controller.add_child(controller.sync)
 	controller.sync.setup(warband, controller)
+	# A world opened under a socket that already has a guest on it keeps the
+	# rewind history from its first frame, not from the next connection.
+	controller.lag_tracking = _role == "host" and peer_count() > 1
 	# A guest's own keys ask the host; the host's own keys stay local moves.
 	controller.transfer_requester = Callable(self, "request_body")
 	if not controller.possession_changed.is_connected(_on_controller_possession_changed):
@@ -1108,6 +1111,9 @@ func _unwire_signals() -> void:
 func _teardown() -> void:
 	_unwire_signals()
 	_detach_world()
+	if controller != null and is_instance_valid(controller):
+		controller.lag_tracking = false
+		controller.clear_lag_history()
 	if _peer != null:
 		_peer.close()
 		_peer = null
@@ -1122,12 +1128,19 @@ func _on_connected() -> void:
 	announce.rpc_id(1, _player_name)
 
 func _on_peer_connected(peer_id: int) -> void:
+	# Somebody can now send us an action, so the host starts keeping the frames it
+	# would be rewound into. A solo party keeps none.
+	if _role == "host" and controller != null:
+		controller.clear_lag_history()
+		controller.lag_tracking = true
 	peer_joined.emit(peer_id)
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	_fielded.erase(peer_id)
 	_waiting.erase(peer_id)
 	_release_body_of(peer_id, "That soul left the battle.")
+	if _role == "host" and controller != null and connected_peers().size() <= 1:
+		controller.lag_tracking = false
 	_driven.erase(peer_id)
 	_names.erase(peer_id)
 	if _role == "host":

@@ -42,7 +42,7 @@ const REPAINT_SECONDS := 0.1
 const DIM := Color(0.02, 0.015, 0.01, 0.62)
 const PAGE_FILL := LedgerThemeScript.BONE
 ## The rock is the page's darker field; a room is the cut, washed in its area's
-## colour so the ten areas read apart.
+## colour so the eleven areas read apart.
 const ROCK_FILL := Color(0.66, 0.6, 0.5)
 const CUT_FILL := Color(0.9, 0.86, 0.76)
 const WASH := {

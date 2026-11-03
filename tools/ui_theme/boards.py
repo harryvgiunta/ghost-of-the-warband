@@ -574,7 +574,7 @@ def title() -> Image.Image:
     draw.line((W * 0.5 + 40, 380, W * 0.5 + 300, 380), fill=(150, 118, 66, 150), width=1)
     kit.thorn(canvas, W * 0.5, 380, 10, 0, (170, 48, 32, 230))
 
-    labels = [("NEW CAMPAIGN", "brass", "N"), ("RESUME CAMPAIGN", "iron", ""),
+    labels = [("NEW CAMPAIGN", "brass", "N"), ("CAMPAIGNS", "iron", ""),
               ("JOIN GAME", "iron", ""), ("HOST GAME", "iron", "")]
     y = 442
     for label, variant, cap in labels:

@@ -153,12 +153,18 @@ const DISPOSITION_ABILITIES := {
 		"shield_slam": 1,
 		"shield_bash": 2,
 		"shield_charge": 3,
+		"rebuke": 4,
 		"double_slash": 5,
 		"lunge_thrust": 6,
 		"spin_slash": 7,
+		"butchers_cut": 7,
+		"ground_breaker": 7,
 		"backstab": ABILITY_NEVER,
+		"knife_work": ABILITY_NEVER,
 		"dash": ABILITY_NEVER,
 		"charge": ABILITY_NEVER,
+		"rain_of_ash": ABILITY_NEVER,
+		"skewer": ABILITY_NEVER,
 	},
 	DISPOSITION_MELEE: {
 		"spin_slash": 0,
@@ -170,6 +176,13 @@ const DISPOSITION_ABILITIES := {
 		"fireball": 6,
 		"bone_spear": 6,
 		"energy_shield": 7,
+		"ground_breaker": 4,
+		"wide_sweep": 4,
+		"executioner": 4,
+		"butchers_cut": 5,
+		"gut_hook": 5,
+		"knife_work": 6,
+		"rebuke": 7,
 		"barrage": ABILITY_NEVER,
 		"triple_volley": ABILITY_NEVER,
 		"piercing_shot": ABILITY_NEVER,
@@ -182,8 +195,20 @@ const DISPOSITION_ABILITIES := {
 		"triple_volley": 1,
 		"piercing_shot": 2,
 		"energy_shield": 4,
+		"rain_of_ash": 1,
+		"skewer": 3,
 		"double_slash": 6,
 		"lunge_thrust": 7,
+		"knife_work": 7,
+		"cinder_lance": ABILITY_NEVER,
+		"grave_bloom": ABILITY_NEVER,
+		"ember_ward": ABILITY_NEVER,
+		"ground_breaker": ABILITY_NEVER,
+		"wide_sweep": ABILITY_NEVER,
+		"executioner": ABILITY_NEVER,
+		"gut_hook": ABILITY_NEVER,
+		"butchers_cut": ABILITY_NEVER,
+		"rebuke": ABILITY_NEVER,
 		"spin_slash": ABILITY_NEVER,
 		"shield_bash": ABILITY_NEVER,
 		"shield_charge": ABILITY_NEVER,
@@ -207,6 +232,19 @@ const DISPOSITION_GEAR := {
 		"shield": -60.0, "bow": -220.0, "staff": -100.0},
 	DISPOSITION_BOW: {"bow": 260.0, "1h": 30.0, "dagger": 20.0, "focus": 10.0,
 		"2h": -90.0, "staff": -60.0, "shield": -170.0},
+}
+## The kinds a disposition's automatic arming **never reaches for**, however
+## empty the hand and however dear the piece. `DISPOSITION_GEAR` can only make a
+## piece expensive, so a pool with no blade in it still handed a melee body the
+## band's one spare bow - and a body that fights with a blade cannot swing a bow,
+## so it circled the field with a stick it never drew. A refusal is the arming's
+## answer to that: a blade's trade keeps its hands empty for the blade the field
+## will offer (or for the player's own hand on the paperdoll, which is not bound
+## by this table), and the bow stays in the pool for a body that draws it.
+const DISPOSITION_GEAR_REFUSED := {
+	DISPOSITION_TANK: ["bow", "staff"],
+	DISPOSITION_MELEE: ["bow", "staff"],
+	DISPOSITION_BOW: [],
 }
 ## What a disposition wants in its **off hand**, best kind first. The off hand is a
 ## stance of its own and not a second main hand: a tank's holds a shield (or a ward
@@ -253,15 +291,32 @@ static func disposition_ability_rank(disposition: String, ability: String) -> in
 	var row: Dictionary = DISPOSITION_ABILITIES.get(disposition_id(disposition), {})
 	return int(row.get(ability, ABILITY_OTHER))
 
+## The word a disposition table knows a piece by: its `kind` when the catalogue
+## names one (`dagger`, `bow`), its `category` when it does not (a plain `2h`).
+## Both tables below read this one answer, so a knife can never be scored as the
+## sword it is not and a refusal can never disagree with a weight.
+static func gear_kind(item: Dictionary) -> String:
+	var kind := str(item.get("kind", ""))
+	return kind if not kind.is_empty() else str(item.get("category", ""))
+
+## Whether this body's automatic arming must leave the piece in the pool. A
+## refusal outranks both the price and the pool's emptiness: the hands stay empty
+## for what the trade uses rather than closing on what it cannot swing. A body
+## the player dresses by hand is not asked (`WarbandState.equip_merc`).
+static func disposition_refuses_gear(disposition: String, item: Dictionary) -> bool:
+	var row: Array = DISPOSITION_GEAR_REFUSED.get(disposition_id(disposition), [])
+	var kind := gear_kind(item)
+	return row.has(kind) or row.has(str(item.get("category", "")))
+
 ## The score the automatic arming gives a piece for this body: its price, plus
 ## what its kind is worth to the disposition. One decision, used by a recruit's
-## dressing, the band-wide arming pass and a loot pickup's snap-in. A row names a
-## piece's `kind` where it has an opinion of its own (`dagger` over `1h`) and the
-## category otherwise, so a knife never scores as the sword it is not.
+## dressing, the band-wide arming pass and a loot pickup's snap-in. Only pieces
+## `disposition_refuses_gear` lets through are scored - a bow is not a cheap blade
+## to a melee body, it is not a blade at all.
 static func disposition_gear_score(disposition: String, item: Dictionary,
 		value: int) -> float:
 	var row: Dictionary = DISPOSITION_GEAR.get(disposition_id(disposition), {})
-	var kind := str(item.get("kind", ""))
+	var kind := gear_kind(item)
 	if row.has(kind):
 		return float(value) + float(row[kind])
 	return float(value) + float(row.get(str(item.get("category", "")), 0.0))

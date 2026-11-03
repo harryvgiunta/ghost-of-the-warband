@@ -45,6 +45,7 @@ const FORMATIONS := {
 	"chapel": {"roof": 0.5, "wall": 0.35, "spires": 3, "flowstone": 2, "breakdown": 1, "talus": 1, "curtains": 2},
 	"rooted": {"roof": 0.25, "wall": 0.4, "spires": 1, "flowstone": 1, "breakdown": 3, "talus": 3, "curtains": 0},
 	"workings": {"roof": 0.2, "wall": 0.5, "spires": 1, "flowstone": 0, "breakdown": 5, "talus": 4, "curtains": 0},
+	"ring": {"roof": 0.6, "wall": 0.45, "spires": 3, "flowstone": 1, "breakdown": 2, "talus": 2, "curtains": 1},
 	"lair": {"roof": 0.7, "wall": 0.5, "spires": 4, "flowstone": 1, "breakdown": 3, "talus": 2, "curtains": 1},
 }
 ## Hanging length below the root of each stalactite piece, at scale 1.

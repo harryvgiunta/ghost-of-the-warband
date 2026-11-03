@@ -58,6 +58,7 @@ func run() -> void:
 	check_arming()
 	check_withdraw()
 	check_kite()
+	check_dry_bow()
 	check_blocking()
 	check_cluster()
 	check_casting()
@@ -136,6 +137,29 @@ func check_contract() -> void:
 	check(Contracts.disposition_gear_score("melee", bow, 120)
 			< Contracts.disposition_gear_score("melee", greatsword, 340) - 300.0,
 		"and a melee body never trades its blade for one")
+
+	# A weight only makes a piece expensive; a refusal makes it never picked. A
+	# melee body and a tank do not reach for a bow or a staff, however empty the
+	# hand - the arming waits for the blade instead (a body the player dresses by
+	# hand is not asked).
+	var staff := {"kind": "staff", "category": "staff"}
+	var bow_item := {"kind": "bow", "category": "bow"}
+	check(Contracts.disposition_refuses_gear("melee", bow_item),
+		"a melee body's arming never reaches for a bow")
+	check(Contracts.disposition_refuses_gear("tank", bow_item),
+		"nor a tank's")
+	check(Contracts.disposition_refuses_gear("melee", staff),
+		"and a staff is no more a blade's business")
+	check(not Contracts.disposition_refuses_gear("bow", bow_item),
+		"a bow body's arming reaches for its own bow")
+	check(not Contracts.disposition_refuses_gear("bow", {"kind": "sword", "category": "1h"}),
+		"and for a blade when the pool holds no bow")
+	check(not Contracts.disposition_refuses_gear("melee", greatsword),
+		"a melee body's greatsword is never refused")
+	check(Contracts.gear_kind({"kind": "dagger", "category": "1h"}) == "dagger",
+		"a piece is read by its kind first, so a knife is never a sword")
+	check(Contracts.gear_kind({"category": "2h"}) == "2h",
+		"and by its category when the catalogue names no kind")
 
 
 # --- 2. the record and the verb --------------------------------------------
@@ -263,6 +287,46 @@ func check_arming() -> void:
 	check(bool(snap.get("ok", false)) and str(snap.get("slot", "")) == "off",
 		"a tank takes a shield into an empty off hand (%s)" % str(snap.get("message", "")))
 
+	# A bow is not a blade's spare. The band's pool can run out of blades while a
+	# bow is still lying in it, and the arming used to close the empty hand on the
+	# bow: a melee body then walked the field with a weapon its trade never draws.
+	# Two melee bodies, one blade and one bow between them.
+	warband.reset_state()
+	var point: int = warband.add_mercenary("Point")
+	var rear: int = warband.add_mercenary("Rear")
+	warband.stash.add("sword_short", 1)
+	warband.stash.add("bow_short", 1)
+	warband.dress_recruit(point)
+	warband.dress_recruit(rear)
+	check(str(warband.roster.equipped_of(point).get("main", "")) == "sword_short",
+		"the blade in the pool goes to a melee body (%s)"
+			% str(warband.roster.equipped_of(point).get("main", "")))
+	check(str(warband.roster.equipped_of(rear).get("main", "")).is_empty(),
+		"and a melee body left without one keeps its hands empty for the next blade, got %s"
+			% str(warband.roster.equipped_of(rear).get("main", "")))
+	check(warband.stash.pooled_count("bow_short") == 1,
+		"the bow waits in the pool for a body that draws it")
+	snap = warband.auto_equip(rear, "bow_short")
+	check(not bool(snap.get("ok", true)),
+		"a bow does not snap into an empty-handed melee body's main hand")
+	check(str(warband.roster.equipped_of(rear).get("main", "")).is_empty(),
+		"and the hand stays empty")
+	var tank_refusal: Dictionary = warband.auto_equip(rear, "staff_fire")
+	check(not bool(tank_refusal.get("ok", true)),
+		"nor a staff, which a blade cannot swing either")
+	# The same bow is the bow body's own: the refusal is the trade's, not the pool's.
+	warband.set_disposition(rear, Contracts.DISPOSITION_BOW)
+	warband.dress_recruit(rear)
+	check(str(warband.roster.equipped_of(rear).get("main", "")) == "bow_short",
+		"and a bow body takes the bow the melee body refused (%s)"
+			% str(warband.roster.equipped_of(rear).get("main", "")))
+	# The player's own hand is not the arming's: the paperdoll may still dress a
+	# melee body with a bow, and `auto_equip`'s refusal is what the band's side of
+	# the choice obeys.
+	check(not Contracts.disposition_refuses_gear(Contracts.DISPOSITION_BOW,
+		PlayerState.ITEMS["sword_short"]),
+		"a bow body still reaches for a blade when the pool has no bow")
+
 
 # --- 4. the behaviour ------------------------------------------------------
 
@@ -311,6 +375,8 @@ class FakeCombat extends RefCounted:
 	var attack_progress := 1.0
 	var clash_cooldown := 0.0
 	var aim_point := Vector3.ZERO
+	var dry := false
+	var draws := 0
 
 	func stop_block() -> void:
 		blocking = false
@@ -329,7 +395,17 @@ class FakeCombat extends RefCounted:
 		aim_point = point
 
 	func quiver_empty() -> bool:
-		return false
+		return dry
+
+	func can_draw() -> bool:
+		return not dry
+
+	func begin_draw() -> bool:
+		draws += 1
+		return true
+
+	func release_draw() -> void:
+		pass
 
 
 ## A hostile: a position, the flag the target search reads and an aim point.
@@ -363,9 +439,13 @@ class FakeWarband extends RefCounted:
 ## The one field the squad reads off the books: how each body fights.
 class FakeRoster extends RefCounted:
 	var styles: Dictionary = {}
+	var gear: Dictionary = {}
 
 	func disposition_of(merc_id: int) -> String:
 		return Contracts.disposition_id(styles.get(merc_id, ""))
+
+	func equipped_of(_merc_id: int) -> Dictionary:
+		return gear
 
 
 class FakeController extends RefCounted:
@@ -532,6 +612,54 @@ func check_kite() -> void:
 		"a melee body never kites")
 
 
+## A bow with an empty quiver is not a weapon. It cannot be drawn and it cannot be
+## swung, so the body counts itself unarmed (the intent ladder's errand is steel),
+## gives ground out of a blade's measure and plants at its own - and never circles
+## a hostile it can never hurt, which is what a bow body with a spent quiver used
+## to do at contact.
+func check_dry_bow() -> void:
+	var host = _watcher_at(Vector3(2.0, 0.0, 0.0))
+	var body := _body_at(Vector3.ZERO)
+	body.rig.weapon = "bow"
+	body.combat.dry = true
+	var drive = _squad_for(8, Contracts.DISPOSITION_MELEE)
+	drive.watchers = [host]
+	drive.warband.roster.gear = {"main": "bow_short", "off": ""}
+	check(not drive._armed(body, 8),
+		"a bow with an empty quiver does not count as armed")
+	check(drive._dry_bow(body), "and the ladder knows why")
+
+	var track := _track(8)
+	drive._fight_watcher(body, host, track)
+	check(int(track.get("state", -1)) != SquadScript.FIGHT_CIRCLE,
+		"a dry bow never circles a hostile it cannot hurt")
+	check(Vector2(body.last_intent).normalized().dot(Vector2(-1.0, 0.0)) > 0.9,
+		"it gives ground out of a blade's measure (%s)" % str(body.last_intent))
+	check(body.running, "at a jog")
+
+	# At its own range the feet stop: the ground it wanted is behind it now.
+	host.global_position = Vector3(12.0, 0.0, 0.0)
+	drive._fight_watcher(body, host, _track(8))
+	check(Vector2(body.last_intent).length() < 0.01,
+		"and plants once it has the bow's range (%s)" % str(body.last_intent))
+
+	# The same frame taken through the close-fight path: no call circles on a dry
+	# string, whichever door the ladder came through.
+	var close := _track(8)
+	drive._fight_bow(body, close, Vector3.RIGHT, 2.0)
+	check(int(close.get("state", -1)) != SquadScript.FIGHT_CIRCLE,
+		"and the close-fight path never circles it either")
+	check(body.combat.draws == 0, "while a dry string is never drawn")
+
+	# A shaft in the quiver puts the bow back to work: the same body counts as
+	# armed and the close fight draws instead of backing off.
+	body.combat.dry = false
+	check(drive._armed(body, 8), "a loaded bow counts as armed again")
+	var shoot := _track(8)
+	drive._fight_bow(body, shoot, Vector3.RIGHT, 2.0)
+	check(body.combat.draws == 1, "and the bow draws again")
+
+
 ## A tank advances behind its guard and waits behind it between exchanges; a
 ## melee body walks with the blade down and stands open.
 func check_blocking() -> void:
@@ -590,7 +718,7 @@ func check_blocking() -> void:
 		"a tank's falling-back share is zero: it never gives ground")
 	check(is_equal_approx(float(melee_profile["withdraw"]), SquadScript.WITHDRAW_SHARE)
 			and is_equal_approx(SquadScript.WITHDRAW_SHARE, 0.30),
-		"a melee body falls back below 30% of its pool (%s)"
+		"a melee body falls back below 30%% of its pool (%s)"
 		% str(SquadScript.WITHDRAW_SHARE))
 	check(is_equal_approx(float(SquadScript.profile_of(Contracts.DISPOSITION_BOW)["withdraw"]),
 			SquadScript.WITHDRAW_SHARE),

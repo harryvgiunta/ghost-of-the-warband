@@ -137,9 +137,10 @@ static func wear_lines(item_id: String, cruor: Variant) -> Array:
 ## Dress this panel as the card for `item_id`. `warband` (optional) supplies the
 ## brand/anointing ledger; `hint` is the row's own instruction, `count` how many
 ## copies the row stands for, `note` anything the caller's board adds (a keeper's
-## price). No-op for an id the catalogue does not know.
+## price), `copy_ordinal` which copy the row shows (-1 resolves it). No-op for an
+## id the catalogue does not know.
 func compose(item_id: String, warband = null, hint: String = "",
-		count: int = 1, note: String = "") -> void:
+		count: int = 1, note: String = "", copy_ordinal: int = -1) -> void:
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	if item.is_empty():
 		return
@@ -176,6 +177,11 @@ func compose(item_id: String, warband = null, hint: String = "",
 	var detail := str(item.get("detail", ""))
 	var rows := detail_rows(item_id, item)
 	var wears := wear_lines(item_id, cruor)
+	# The welded annointments sit under the ledger lines: one row per modifier,
+	# read straight off the pool so a new entry needs no card change.
+	for entry in annoint_entries(item_id, warband, copy_ordinal):
+		rows.append({"label": "ANNOINT", "value": "%s - %s" % [
+			str(entry.name), str(entry.line)]})
 	if not detail.is_empty() or not rows.is_empty() or not wears.is_empty():
 		_rule(column)
 	if not detail.is_empty():
@@ -201,6 +207,24 @@ func compose(item_id: String, warband = null, hint: String = "",
 	if not hint.is_empty():
 		var line := _text(column, hint, 10, TEAL)
 		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+## The annointments on the copy this card is showing. `ordinal` -1 is resolved by
+## the warband (a worn piece answers its own copy); a pooled one answers the
+## first copy, which is what a board without its own addresses presses. A row
+## that stands for one copy of many passes its own.
+static func annoint_entries(item_id: String, warband, ordinal: int = -1) -> Array:
+	if warband == null or not is_instance_valid(warband):
+		return []
+	var ledger: Variant = (warband as Object).get("annoints")
+	if ledger == null:
+		return []
+	var copy := ordinal
+	if copy < 0:
+		copy = 0
+		if (warband as Object).has_method("annoint_copy_for_item"):
+			copy = int((warband as Object).annoint_copy_for_item(item_id))
+	return ledger.entries_of(item_id, copy)
 
 
 static func _cruor_of(warband) -> Variant:

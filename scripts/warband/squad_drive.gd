@@ -43,7 +43,10 @@ extends RefCounted
 ## bow's range, down a clean line, sighted for the flight the arrow actually
 ## flies - because an archer that closes before it shoots has given up the one
 ## thing a bow has, and one that aims at the chest across a bow's length puts the
-## shaft in the dirt.
+## shaft in the dirt. A quiver with nothing in it is the exception that proves it:
+## a bow that cannot be drawn is no weapon at all (`_dry_bow`), so the body counts
+## itself unarmed for the arming errand and keeps the bow's range (`_keep_bow_range`)
+## rather than circling a hostile it can never hurt.
 ##
 ## On top of all of that, each body fights the way its own record says it does
 ## (`WarbandContracts.DISPOSITIONS`, read by `_disposition` and resolved by
@@ -880,7 +883,20 @@ func _armed(actor, merc_id: int) -> bool:
 		or not str(gear.get("off", "")).is_empty()
 	if roster_armed and not _holds_weapon(actor):
 		controller.refresh_gear(merc_id)
-	return roster_armed and _holds_weapon(actor)
+	if not (roster_armed and _holds_weapon(actor)):
+		return false
+	# A bow with an empty quiver is not a weapon: nothing can be loosed from it and
+	# nothing can be swung with it, so the body is on the band's unarmed errand -
+	# find steel - exactly as if it carried nothing at all.
+	return not _dry_bow(actor)
+
+
+## Whether the body's weapon is a bow the quiver cannot feed. The squad reads this
+## instead of `rig.weapon == "bow"` wherever it means "can this body hurt anyone".
+func _dry_bow(actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	return str(actor.rig.weapon) == "bow" and bool(actor.combat.quiver_empty())
 
 
 func _holds_weapon(actor) -> bool:
@@ -1029,7 +1045,12 @@ func _strip_weapon(actor, merc_id: int, corpse_id: int) -> void:
 		var result: Dictionary = loot.take_from_corpse(corpse_id, id, 0)
 		if not bool(result.get("ok", false)):
 			continue
-		warband.auto_equip(merc_id, id)
+		# The piece is booked with every other take; whether the body can carry it
+		# is the arming's decision. A watcher's bow is not a melee body's weapon,
+		# so the corpse's next piece is the one it reaches for.
+		var worn: Dictionary = warband.auto_equip(merc_id, id)
+		if not bool(worn.get("ok", false)):
+			continue
 		controller.refresh_gear(merc_id)
 		actor.combat.stop()
 		return
@@ -1601,12 +1622,21 @@ func _fight_watcher(actor, watcher, track: Dictionary) -> void:
 	#    clean line. This is the disposition's casting priority in the field.
 	if _cast_step(actor, track, profile, watcher, direction, distance):
 		return
+	# A bow the quiver cannot feed is a stick: nothing to loose, nothing to swing.
+	# It keeps the bow's own range - out of a blade's measure, then planted -
+	# instead of circling a hostile it can never hurt. The close fight below is for
+	# a bow with a line problem, not a spent quiver, and the intent ladder has
+	# already sent this body after steel if the field holds any (`_armed`).
+	if _dry_bow(actor):
+		_keep_bow_range(actor, track, direction, distance)
+		return
 	# With a bow and a clean line the ally shoots from where it stands, at any
 	# range inside its bow's reach. It does not walk in to a blade's standoff
 	# first: that is what kept every archer in the squad at arm's length, and an
 	# archer that closes before it shoots has given up the one thing a bow has.
-	# The close fight below is for a bow that has nothing to loose - a trunk
-	# across the line, a spent quiver, a target beyond its own shaft's flight.
+	# The close fight below is for a bow with no shot on this target - a trunk
+	# across the line, a body beyond its own shaft's flight - not for one the
+	# quiver has nothing for, which the branch above sends to its own range.
 	if in_reach and not actor.combat.quiver_empty() and _clear_shot(actor, watcher):
 		_fight_bow(actor, track, direction, distance)
 		return
@@ -1721,6 +1751,20 @@ func _swing(actor, track: Dictionary, direction: Vector3) -> bool:
 	return true
 
 
+## The feet of a bow that cannot loose: out of a blade's measure, then planted at
+## its own. No window clock is left behind, so the melee ladder never reads this
+## beat as a circle to finish, and the body never walks into the hostile it cannot
+## hurt. A body backed against a wall simply stands there - the ground it gave was
+## the only ground it had.
+func _keep_bow_range(actor, track: Dictionary, direction: Vector3, distance: float) -> void:
+	_enter(track, FIGHT_RESET)
+	actor.combat.stop_block()
+	if distance < BOW_HOLD_MIN:
+		_steer(actor, -direction, track, true)
+		return
+	_hold(actor)
+
+
 ## A bow cannot guard and cannot swing, so it keeps the draw/hold/release path and
 ## spends the beat between shots on a step. Only a string that is up plants the
 ## feet: a draw cannot be rushed.
@@ -1731,6 +1775,12 @@ func _swing(actor, track: Dictionary, direction: Vector3) -> bool:
 ## bow's reach and then back in again. Inside `BOW_HOLD_MIN` the step is the close
 ## fight's, where the bow is the wrong tool and moving is all it has.
 func _fight_bow(actor, track: Dictionary, direction: Vector3, distance: float) -> void:
+	# A quiver with nothing in it is not a close fight: the bow cannot be swung and
+	# the body cannot hurt what it is circling, so the dry string takes the range
+	# beat instead (the ladder's own branch is the walk-in, this is the frame).
+	if _dry_bow(actor):
+		_keep_bow_range(actor, track, direction, distance)
+		return
 	if actor.combat.can_draw():
 		_enter(track, FIGHT_SWING)
 		_hold(actor)

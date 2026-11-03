@@ -1024,6 +1024,7 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 ## and the shared hold. Replicas call it with `announce = false` so gold and the
 ## kill stay on the host.
 func _enter_dead(announce: bool) -> void:
+	Perf.begin("mob.dead")
 	alive = false
 	state = "DEAD"
 	_struck = true
@@ -1039,12 +1040,17 @@ func _enter_dead(announce: bool) -> void:
 	# is already false, so this cannot fire twice.
 	_voice.say("death")
 	if announce:
+		Perf.begin("mob.defeated")
 		defeated.emit(self, int(profile.gold))
 		# Only the authority resolves a killer's `last_hitter` id, so only it
 		# asks the killer for a line.
 		VoiceScript.kill_quip(last_hitter)
+		Perf.end()
 	# Hold the authored death pose for the shared five minutes, then dissolve.
+	Perf.begin("corpse.hold")
 	CorpseHold.hold(self, _body)
+	Perf.end()
+	Perf.end()
 
 
 func snapshot() -> Dictionary:

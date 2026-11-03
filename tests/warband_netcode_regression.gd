@@ -93,7 +93,7 @@ func run() -> void:
 	await frame_tick_checks()
 	await prediction_checks()
 	await lag_history_checks()
-	lag_window_checks()
+	await lag_window_checks()
 	datagram_checks()
 
 	_remove(TEST_SAVE)
@@ -172,6 +172,11 @@ func _build_field(warband) -> void:
 	var camera := Camera3D.new()
 	scene.add_child(camera)
 	controller.setup(warband, camera, scene)
+	# This harness is the host of a two-soul match: the rewind history exists for
+	# a peer's action, so a host with one connected is the state it models (a solo
+	# party's controller keeps none - `WarbandSession` sets the flag on the first
+	# guest and clears it on the last).
+	controller.lag_tracking = true
 	var posts: Array[Vector3] = [
 		Vector3(0.0, 0.1, 0.0), Vector3(3.0, 0.1, 0.0), Vector3(-3.0, 0.1, 0.0)]
 	bodies = controller.spawn_mercenaries(posts, true)
@@ -365,6 +370,14 @@ func lag_window_checks() -> void:
 	# The history keeps the squad, and whatever the scene adds to it.
 	var recorded: int = controller.lag_history.frames.size()
 	check(recorded > 0, "the host records a frame per simulation tick (%d)" % recorded)
+	# A solo party has nobody to rewind for: no guest, no sheet of capsules.
+	controller.lag_tracking = false
+	var settled: int = controller.lag_history.frames.size()
+	await run_ticks(4)
+	check(controller.lag_history.frames.size() == settled,
+		"a host with no guest on it records nothing (%d -> %d)"
+		% [settled, controller.lag_history.frames.size()])
+	controller.lag_tracking = true
 
 
 # --- 5. the datagram -------------------------------------------------------

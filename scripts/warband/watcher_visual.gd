@@ -30,6 +30,7 @@ const Archer = preload("res://scripts/archer.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const Catalog = preload("res://scripts/player_state.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
+const Perf = preload("res://scripts/perf_probe.gd")
 
 ## The three watcher species, by the mob id a scene sets: the skin the fit tool
 ## exported, the creature GLB whose PBR atlases it borrows (the skin ships no
@@ -224,7 +225,9 @@ func die(direction: Vector3 = Vector3.ZERO) -> void:
 	rig.abort_melee("right")
 	rig.set_hit_react(0.0)
 	rig.enter_corpse_pose()
+	Perf.begin("corpse.limp")
 	CorpsePhysics.start_limp(rig, direction)
+	Perf.end()
 
 
 func is_dead() -> bool:

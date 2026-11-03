@@ -17,11 +17,12 @@ a floating soul that enters any living mercenary of your warband. Every mercenar
 has identical base stats - **100 health, 1000 stamina**, gear is the only
 difference - and the warband is the thing that survives a battle.
 
-- **Saving:** the mode has its own save (`user://warband_state.json`, version 9,
-  which also remembers every piece the altar has anointed, the party's mode and
-  the packed delve inventory - and, while a party is below, that it is below);
-  **RESUME WARBAND** opens it where the last checkpoint stands (the town square,
-  or 60 m past the camp's mouth once the watchers there are down). The ranger's
+- **Saving:** every campaign is a folder of its own - `user://saves/<id>/warband_state.json`
+  (roster, stash, essence, bookmark, version 12) beside that campaign's own purse
+  in the same folder - so the campaigns on a machine never share a file.
+  **CAMPAIGNS** lists them (name, roster, bookmark, last played) and opens one
+  where its last autosave left it; **NEW CAMPAIGN** asks for a name and makes a
+  new folder, so starting a game can never write over a saved one. The ranger's
   kit is untouched.
 - **Start here, and play it:** the title's **GHOST OF THE WARBAND** puts you
   inside the **first of five** prisoners, shut in a cage. The opening teaches by
@@ -67,14 +68,16 @@ difference - and the warband is the thing that survives a battle.
 - **Hearthstead hub:** the shared **infinite stash** (value-sorted, unequipped
   pieces only - a worn piece is on its wearer's slots), the **Sacrificial Altar** — a
   blood-stained stone stele under candles and skull sticks, named **THE ALTAR** —
-  whose ANOINT page lays a warden's ichor on a weapon or shield the warband
-  carries so every copy wakes into its skill, and whose ESSENCE page unbinds spare
-  magic items into Cruor, distils 5:1 up five tiers and brands weapons with active
-  sigils; the **Gold recruiter** (bodies up to the deployment cap of 8), the
-  **quartermaster** (plain steel and arrows bought into the shared stash) and the
-  **Weeping Hollow's mouth** - a rope pit by the square's east lanes where a party
-  is chosen, a **delve inventory** is packed and the party goes down (see
-  *The delve* below).
+  whose ANOINT page is a rack of individual copies (ten greatswords are ten
+  cards, each with its own welded annointments and its own count, with a WORN
+  ONLY toggle for the copies a body has on) over a bench
+  that spends a warden's ichor on the picked copy alone, and whose ESSENCE page
+  unbinds spare magic items into Cruor, distils 5:1 up five tiers and brands
+  weapons with active sigils; the **Gold recruiter** (bodies up to the deployment
+  cap of 8), the **quartermaster** (plain steel and arrows bought into the shared
+  stash) and the **Weeping Hollow's mouth** - a rope pit by the square's east
+  lanes where a party is chosen, a **delve inventory** is packed and the party
+  goes down (see *The delve* below).
 - **A sworn body takes the field:** a hire stands up in the square beside the
   band, and a soldier cut out of a cage stands up where he walked out, while the
   field is under its cap of 8. Past a full field a new name waits in the
@@ -221,11 +224,11 @@ Every catalog item keeps its data row in `scripts/player_state.gd` (`ITEMS`), an
 
 **TAB swaps between two weapon sets.** Every mercenary carries two complete weapon sets — a main hand and an off hand each — and exactly one is active: the hands hold its pair, and the pair lives on the roster record so a swap survives a body hop and a reload. Pressing TAB while Set 1 is active brings up Set 2; the next press brings Set 1 back, and the paperdoll always says which set is active. Equipping, unequipping or dropping a weapon rewrites **the active set only**: the other set keeps the weapon waiting in it, and a weapon you equip by hand comes back when you TAB back to that set. Any legal main/off combination works: bow, one- or two-handed sword, dagger, staff, shield, focus or a dual-wield pair. Both sets are written to the save, and both pairs must be carried in the backpack or hands; a stashed piece blocks the swap with a message.
 
-Dropping a piece in the camp, on the trail or in town spawns a physical world pickup at the body's feet. It arms only after you step clear, so the dropper cannot scoop it straight back up. Every successful gear change is written to `user://warband_state.json` with the rest of the warband.
+Dropping a piece in the camp, on the trail or in town spawns a physical world pickup at the body's feet. It arms only after you step clear, so the dropper cannot scoop it straight back up. Every successful gear change is written to the campaign's `warband_state.json` with the rest of the warband.
 
 Loot is tuned to **a tenth of the engine's old rate**: a weapon-carrying hostile leaves the piece it held 10% of the time, and a corpse can be worked for everything it carried.
 
-**New Campaign vs. Resume Campaign:** a new campaign resets the warband *and* the shared purse and opens in the cages; Resume Campaign re-reads `user://warband_state.json` and puts the warband on its last autosave bookmark. The campaign autosaves at two moments - the trail once the camp's watchers are down, and the first entry into Hearthstead - and a wipe reloads the bookmark (bodies that were merely down get up at half health; the dead stay dead; the purse is never rolled back). A co-op guest writes no checkpoint and no save of its own while it plays the host's warband.
+**Campaigns, not one shared save:** every campaign is a folder of its own under `user://saves` (`<id>/warband_state.json` with its roster, stash, essence and bookmark, and `<id>/player_state.json` with its purse), and the title's **CAMPAIGNS** door lists them with the roster each holds, the bookmark it would open and when it was last played. Starting a campaign - **NEW CAMPAIGN**, or a hosted **NEW GAME** - makes a new folder and a new purse and writes nothing into the campaigns already there; opening one binds the warband and the purse to it, and every autosave, bookmark, purchase, gear change and SAVE GAME after that goes to that folder and no other. A campaign autosaves at two moments - the trail once the camp's watchers are down, and the first entry into Hearthstead - and a wipe reloads the bookmark (bodies that were merely down get up at half health; the dead stay dead; the purse is never rolled back). A build before the ledger kept one campaign in `user://warband_state.json`; the next launch adopts it as the first campaign rather than leaving it behind. A co-op guest writes no checkpoint and no save of its own while it plays the host's warband.
 
 ### Item taxonomy and hand rules
 
@@ -301,7 +304,7 @@ Reduction runs on **two channels**. The helmet alone answers a **head** hit, whi
 
 Armor is equipped per slot at the paperdoll, one catalog piece at a time; what a body wears is the roster record the save holds. The band also dresses itself: a purchase fills empty slots and the naked starting set with the dearest spare in the shared stash, and right-clicking a stash row holds that item id back from every automatic equip (for example, to keep a rare blade for a chosen mercenary) while leaving it wearable by hand.
 
-**RE-EQUIP** is the deliberate re-kit the arming pass is not. The arming pass only fills what is empty, so a body wearing the salvage tier keeps it however much better kit the stash has collected; the paperdoll's **RE-EQUIP** button hands everything that body wears back into the pool first and then lets the band choose again — the dearest spare for every slot, scored by the body's own disposition, so a tank comes back in a shield and a one-hander, a bowman in a bow and a melee body in the greatsword. The off hand is the one slot where the stance beats the price: a tank's wooden board outranks a dearer second blade, because holding the line is what that hand is for, while a melee body pairs a second blade there and a bowman keeps a ward in it. Nothing is minted and nothing is lost: a released piece is a stash row before the refill reads it, so the warband's worth is the same number either side of the press. The rags a body is born in stay on — they are the mesh the rig draws, not gear — and a body carrying a second weapon set comes back with one. **RE-EQUIP THE BAND** runs the same thing for the whole roster: every dressable body hands its kit back, then the roster is dressed **one body at a time in recruitment order**, so the oldest name takes the pick of the one shared pool and the next one takes what is left. Held pieces stay pooled through either pass, and a body that is down is refused rather than stripped.
+**RE-EQUIP** is the deliberate re-kit the arming pass is not. The arming pass only fills what is empty, so a body wearing the salvage tier keeps it however much better kit the stash has collected; the paperdoll's **RE-EQUIP** button hands everything that body wears back into the pool first and then lets the band choose again — the dearest spare for every slot, scored by the body's own disposition, so a tank comes back in a shield and a one-hander, a bowman in a bow and a melee body in the greatsword (a bow or a staff is no blade's spare, so it stays in the pool for the body that draws it). The off hand is the one slot where the stance beats the price: a tank's wooden board outranks a dearer second blade, because holding the line is what that hand is for, while a melee body pairs a second blade there and a bowman keeps a ward in it. Nothing is minted and nothing is lost: a released piece is a stash row before the refill reads it, so the warband's worth is the same number either side of the press. The rags a body is born in stay on — they are the mesh the rig draws, not gear — and a body carrying a second weapon set comes back with one. **RE-EQUIP THE BAND** runs the same thing for the whole roster: every dressable body hands its kit back, then the roster is dressed **one body at a time in recruitment order**, so the oldest name takes the pick of the one shared pool and the next one takes what is left. Held pieces stay pooled through either pass, and a body that is down is refused rather than stripped.
 
 ## Play with friends over Tailscale
 
@@ -680,9 +683,13 @@ take what the cave holds, and climb out alive with it.
    inventory's rows go back the same way. A pack left at the mouth stays packed.
 2. **GO DOWN** lowers the party down one of six shafts into a **fresh instance**
    of floor I, built when the party goes down and freed when it comes back up.
+   The build is a load, not a freeze: the floor comes up a frame's worth at a
+   time under **THE WEEPING HOLLOW · GOING DOWN** with a percentage, the window
+   keeps painting, and the party is put down the frame it is whole.
    The shaft is drawn every descent, so you never know which corner of the
-   Hollow you will start in. The floor is built for an extraction crowd: ten
-   areas, 320 by 380 metres, round a hub -
+   Hollow you will start in. The floor is built for an extraction crowd: eleven
+   areas, 320 by 380 metres, in three rings - the shafts and their dens on the
+   outer rim, the demons' ring inside them, the lair at the centre -
 
    | Area | What it is |
    | --- | --- |
@@ -693,13 +700,22 @@ take what the cave holds, and climb out alive with it.
    | The Black Mere | a lake cavern with a drowned shrine (shaft) |
    | The Bone Chapel | skull-lined nave, apse and crypt (shaft) |
    | The Watchers' Den, The Ossuary, The Rooted Hall | the dens between the shafts |
-   | Gorehorn's Lair | the hub, with a way in from every side |
+   | The Demons' Ring | four chambers round the lair, **a demon in each**, joined to each other round the outside of the lair so the ring is a loop you can walk |
+   | Gorehorn's Lair | the centre, with a way in from every side and a **squad of demons** on its floor |
 
    Eight dens of watchers sleep at their posts - ten bodies for every post a den
-   was laid out with, **210** in all - until one of them sees you, hears a fight
-   or takes a blow, or a body walks into the room - then the whole den wakes. Only
-   the bodies inside **96 m** of the eye are drawn: the rest are three rooms of
-   bent tunnel away with their lights already out. No
+   was laid out with, **210** in all, plus **one archer a den** - and every hall,
+   the way on to the ring, the ring's chambers and the lair keep their own on top
+   of them: a hall is held by a scattered few and one archer, a tunnel by a pair, each
+   chamber of the ring by **a demon and two archers**, the lair by **five demons -
+   one of every species the floor fields - and two archers** - **298 bodies
+   below**, 299 with Gorehorn - until one of them sees you, hears a fight or takes
+   a blow, or a body walks into the room - then the whole den wakes, the archers
+   with it. A den that has
+   woken lets go again once the eye has lost it and no body of the party is
+   within a shout, so the floor pays for the fight you are in, not for every
+   fight you have had. Only the bodies inside **96 m** of the eye are drawn: the
+   rest are three rooms of bent tunnel away with their lights already out. No
    den can see a landing. **Gorehorn**, the Hollow's demon, waits in the middle of
    the lair in a ring of old blood.
 

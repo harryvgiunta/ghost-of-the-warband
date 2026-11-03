@@ -405,6 +405,12 @@ func _ready() -> void:
 		save_path = "user://player_state_test.json"
 		reset(false)
 		return
+	# Each campaign has its own purse (`SaveSlots`): the bound one is the file
+	# this node reads and writes. A machine with no campaign keeps the single
+	# pre-slot path, which is what the ledger adopts on first launch.
+	var slots := get_node_or_null("/root/SaveSlots")
+	if slots != null and not str(slots.active).is_empty():
+		save_path = str(slots.purse_path(str(slots.active)))
 	load_state()
 
 ## How many copies one visit to a keeper's shelf hands over. Ammunition is the

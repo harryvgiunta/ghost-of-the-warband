@@ -180,11 +180,17 @@ func check_gear_transfer(_state, warband) -> void:
 	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
 		"the off hand is untouched by a main-hand upgrade")
 
-	# Unarmed bodies get the first thing they pick up.
+	# Unarmed bodies get the first thing they pick up - but only what their trade
+	# fights with. A blade's body leaves the band's spare bow in the pool
+	# (`Contracts.DISPOSITION_GEAR_REFUSED`), and the bow body takes it.
 	var bram: int = warband.add_mercenary("Bram")
 	stash.add("bow_short", 1)
 	var first: Dictionary = warband.auto_equip(bram, "bow_short")
-	check(bool(first.get("ok", false)), "an unarmed body takes the first weapon it loots")
+	check(not bool(first.get("ok", true)) and warband.stash.pooled_count("bow_short") == 1,
+		"an unarmed melee body does not loot a bow")
+	warband.set_disposition(bram, Contracts.DISPOSITION_BOW)
+	var first_bow: Dictionary = warband.auto_equip(bram, "bow_short")
+	check(bool(first_bow.get("ok", false)), "an unarmed bow body takes the bow it loots")
 	check(str(roster.equipped_of(bram).get("main", "")) == "bow_short", "the bow is in hand")
 
 # --- souls -----------------------------------------------------------------
@@ -696,6 +702,9 @@ func check_auto_arm(warband) -> void:
 	var stash = warband.stash
 	var ash: int = warband.add_mercenary("Ash")
 	var bram: int = warband.add_mercenary("Bram")
+	# Bram is the band's bowman: a free bow has an owner to go to, and a blade's
+	# body never takes one (`Contracts.DISPOSITION_GEAR_REFUSED`).
+	warband.set_disposition(bram, Contracts.DISPOSITION_BOW)
 	# The camp's rags, the state every prisoner starts in.
 	roster.equip(ash, "chest", "armor_naked_chest")
 
@@ -890,22 +899,26 @@ func check_reequip(warband) -> void:
 
 	# A body with a second weapon set comes back with one: the pass fills the set
 	# in its hands first, then puts that set down and fills the other, then swaps
-	# back, so what the player set up is re-armed instead of halved.
+	# back, so what the player set up is re-armed instead of halved. Both sets are
+	# its trade's, though: the pooled bow is no second-set weapon for a blade's body.
 	warband.reset_state()
 	var twin: int = warband.add_mercenary("Otto")
 	roster.equip(twin, "main", "sword_short")
 	roster.swap_weapon_set(twin)
-	roster.equip(twin, "main", "bow_short")
+	roster.equip(twin, "main", "sword_makeshift")
 	roster.swap_weapon_set(twin)
+	stash.add("sword_great", 1)
 	stash.add("sword_arming", 1)
 	stash.add("bow_recurve", 1)
 	warband.reequip_merc(twin)
-	check(str(roster.weapon_set_pair(twin, 0).get("main", "")) == "sword_arming",
+	check(str(roster.weapon_set_pair(twin, 0).get("main", "")) == "sword_great",
 		"Set 1 is re-armed with the better blade, got %s"
 		% str(roster.weapon_set_pair(twin, 0).get("main", "")))
-	check(str(roster.weapon_set_pair(twin, 1).get("main", "")) == "bow_recurve",
+	check(str(roster.weapon_set_pair(twin, 1).get("main", "")) == "sword_arming",
 		"and Set 2 keeps a set of its own, got %s"
 		% str(roster.weapon_set_pair(twin, 1).get("main", "")))
+	check(stash.pooled_count("bow_recurve") == 1,
+		"a melee body's second set is no place for the pooled bow")
 
 	# The band pass empties every body before it dresses any of them, so a piece
 	# one body was wearing is available to the body ahead of it in the roster.

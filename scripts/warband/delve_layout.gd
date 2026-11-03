@@ -1,15 +1,20 @@
 extends RefCounted
-## The Weeping Hollow's first floor, as authored: its ten areas, the rooms each is
-## cut from, the six shafts a party comes down (and climbs out of), the dens, the
-## master, and every light and prop. Pure data and the geometry asked of it -
+## The Weeping Hollow's first floor, as authored: its eleven areas, the rooms each
+## is cut from, the six shafts a party comes down (and climbs out of), the dens,
+## the master, and every light and prop. Pure data and the geometry asked of it -
 ## nothing here touches the scene tree, so the regression reads the plan without
 ## building a cave and a co-op guest's copy is the host's by construction.
 ##
-## The floor is laid out for more than one party. The six shafts stand on the
-## floor's rim, two rows of three, each in its own area and each at least fifty
-## metres of rock from the next; the areas between them are dens, and Gorehorn's
-## lair is the hub in the middle with a way in from every side. Every shaft is
-## also a way up, so a party can climb out of whichever rope it reaches first.
+## The floor is laid out for more than one party, in three rings. The six shafts
+## stand on the floor's rim, two rows of three, each in its own area and each at
+## least fifty metres of rock from the next; the areas between them are the outer
+## ring, and every one of them is a den. Inside them, the demons' ring: four
+## chambers round the lair, one on each of its ways in, joined to each other round
+## the outside of the lair by a bent arc at every corner, so the inner ring is a
+## loop and not four spokes - and each chamber keeps one demon. At the centre,
+## Gorehorn's lair, with a way in from every side and a squad of demons on its
+## floor. Every shaft is also a way up, so a party can climb out of whichever rope
+## it reaches first.
 ##
 ## The frame is the cave's own: x across, +Z back toward the town's side, -Z
 ## deeper. Every room is an axis-aligned rectangle on the half-metre raster; two
@@ -51,6 +56,7 @@ const AREAS := {
 	"chapel": "THE BONE CHAPEL",
 	"rooted": "THE ROOTED HALL",
 	"workings": "THE OLD WORKINGS",
+	"ring": "THE DEMONS' RING",
 	"lair": "GOREHORN'S LAIR",
 }
 
@@ -90,8 +96,6 @@ const AUTHORED_ROOMS := [
 	{"id": "niche_c", "area": "ossuary", "rect": Rect2(-65.0, -82.0, 3.0, 4.0), "height": 3.4, "tunnel": true},
 	{"id": "oss_south", "area": "ossuary", "rect": Rect2(-60.0, -74.0, 4.0, 10.0), "height": 4.6, "tunnel": true},
 	{"id": "oss_south_jog", "area": "ossuary", "rect": Rect2(-66.0, -64.0, 10.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "lair_west_jog", "area": "ossuary", "rect": Rect2(-32.0, -92.0, 4.0, 12.0), "height": 4.6, "tunnel": true},
-	{"id": "oss_east", "area": "ossuary", "rect": Rect2(-44.0, -84.0, 12.0, 4.0), "height": 4.6, "tunnel": true},
 	{"id": "oss_north", "area": "ossuary", "rect": Rect2(-54.0, -104.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
 	# THE PALE GARDEN: a fungus grove on the way up from the ossuary, the garden
 	# itself and its glade, and the shaft in its northern rock.
@@ -129,8 +133,6 @@ const AUTHORED_ROOMS := [
 	{"id": "crypt_south_jog", "area": "rooted", "rect": Rect2(54.0, -108.0, 12.0, 4.0), "height": 4.6, "tunnel": true},
 	{"id": "rooted_north", "area": "rooted", "rect": Rect2(54.0, -104.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
 	{"id": "rooted", "area": "rooted", "rect": Rect2(44.0, -100.0, 20.0, 24.0), "height": 8.0},
-	{"id": "lair_east_jog", "area": "rooted", "rect": Rect2(28.0, -94.0, 4.0, 16.0), "height": 4.6, "tunnel": true},
-	{"id": "rooted_west", "area": "rooted", "rect": Rect2(32.0, -94.0, 12.0, 4.0), "height": 4.6, "tunnel": true},
 	{"id": "rooted_south", "area": "rooted", "rect": Rect2(54.0, -76.0, 4.0, 12.0), "height": 4.6, "tunnel": true},
 	# THE OLD WORKINGS: a timbered gallery south of the rooted hall, the old
 	# workings themselves and the shaft beside them.
@@ -144,13 +146,35 @@ const AUTHORED_ROOMS := [
 	{"id": "workings", "area": "workings", "rect": Rect2(40.0, -16.0, 22.0, 24.0), "height": 6.5},
 	{"id": "workings_neck", "area": "workings", "rect": Rect2(62.0, -8.0, 4.0, 4.0), "height": 4.4, "tunnel": true},
 	{"id": "workings_shaft", "area": "workings", "rect": Rect2(66.0, -12.0, 12.0, 14.0), "height": 6.5},
-	# GOREHORN'S LAIR, the hub, and its four ways in.
+	# THE DEMONS' RING: the floor's inner ring. Four chambers round the lair, one
+	# on each of its ways in, each keeping one demon - and each joined to the lair
+	# by a doorway of its own rather than by its whole flank, so the ring is four
+	# rooms round a room and not one cavern with curtains through it. At every
+	# corner a bent arc of two tunnels walks round the *outside* of the lair to the
+	# next chamber, so the ring is a loop a party can walk and not four spokes; and
+	# a short way out of each of the south, east and west chambers is the outer
+	# area that side, with the ring's north chamber opening on the drowned shrine.
+	{"id": "ring_s", "area": "ring", "rect": Rect2(-8.0, -70.0, 14.0, 12.0), "height": 8.0},
+	{"id": "ring_e", "area": "ring", "rect": Rect2(21.0, -96.0, 19.0, 20.0), "height": 8.0},
+	{"id": "ring_n", "area": "ring", "rect": Rect2(-6.0, -114.0, 16.0, 6.0), "height": 8.0},
+	{"id": "ring_w", "area": "ring", "rect": Rect2(-40.0, -96.0, 19.0, 16.0), "height": 8.0},
+	{"id": "ring_s_neck", "area": "ring", "rect": Rect2(-2.0, -74.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_e_neck", "area": "ring", "rect": Rect2(17.0, -88.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_n_neck", "area": "ring", "rect": Rect2(-4.0, -108.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_w_neck", "area": "ring", "rect": Rect2(-21.0, -92.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_s_out", "area": "ring", "rect": Rect2(-2.0, -58.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_e_out", "area": "ring", "rect": Rect2(40.0, -86.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_w_out", "area": "ring", "rect": Rect2(-44.0, -90.0, 4.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_sw_drop", "area": "ring", "rect": Rect2(-26.0, -80.0, 4.0, 10.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_sw_jog", "area": "ring", "rect": Rect2(-26.0, -70.0, 18.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_se_drop", "area": "ring", "rect": Rect2(22.0, -76.0, 4.0, 10.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_se_jog", "area": "ring", "rect": Rect2(6.0, -66.0, 20.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_ne_jog", "area": "ring", "rect": Rect2(10.0, -114.0, 16.0, 4.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_ne_drop", "area": "ring", "rect": Rect2(22.0, -110.0, 4.0, 14.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_nw_rise", "area": "ring", "rect": Rect2(-30.0, -114.0, 4.0, 18.0), "height": 4.6, "tunnel": true},
+	{"id": "ring_nw_run", "area": "ring", "rect": Rect2(-26.0, -113.0, 20.0, 4.0), "height": 4.6, "tunnel": true},
+	# GOREHORN'S LAIR, the centre room, and the way in from the den.
 	{"id": "den_jog", "area": "lair", "rect": Rect2(-8.0, -54.0, 14.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "lair_south", "area": "lair", "rect": Rect2(2.0, -74.0, 4.0, 20.0), "height": 5.0, "tunnel": true},
-	{"id": "lair_west", "area": "lair", "rect": Rect2(-28.0, -92.0, 11.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "lair_east", "area": "lair", "rect": Rect2(17.0, -82.0, 11.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "lair_north_jog", "area": "lair", "rect": Rect2(-6.0, -114.0, 16.0, 4.0), "height": 4.6, "tunnel": true},
-	{"id": "lair_north", "area": "lair", "rect": Rect2(6.0, -110.0, 4.0, 6.0), "height": 4.6, "tunnel": true},
 	{"id": "lair", "area": "lair", "rect": Rect2(-17.0, -104.0, 34.0, 30.0), "height": 10.0},
 ]
 
@@ -186,43 +210,155 @@ static var LANDINGS: Array = _scaled_landings(AUTHORED_LANDINGS)
 ## doors watches both. Every den's posts are more than a shout (12 m) from every
 ## other den's. These are the posts a den was written with; the den fields
 ## `DEN_CROWD` times as many (`den_members`).
+##
+## Two kinds of post are placed once and never crowded, because a crowd of them
+## is a different room: `"bow": true` is one of the hollow wardens with a bow
+## (`watcher_archer.gd`) - a den keeps one or two archers to hold the far side of
+## its room while the rest close - and `"demon": true` is one of the floor's own
+## demons (`delve_demon.gd`), which is what the demons' ring and the lair keep.
 const AUTHORED_DENS := [
 	{"id": "den", "label": "The watchers' den wakes.", "room": "den", "members": [
 		{"species": "hollow_warden", "at": Vector3(-4.5, 0.0, -35.0), "face": Vector3(9.0, 0.0, -24.0)},
 		{"species": "ossuary_stalker", "at": Vector3(4.0, 0.0, -37.5), "face": Vector3(9.0, 0.0, -24.0)},
 		{"species": "hollow_warden", "at": Vector3(0.5, 0.0, -31.0), "face": Vector3(-6.0, 0.0, -42.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(9.0, 0.0, -26.0), "face": Vector3(1.0, 0.0, -33.0)},
 	]},
 	{"id": "cistern", "label": "Something moves in the cistern.", "room": "cistern", "members": [
 		{"species": "hollow_warden", "at": Vector3(-64.0, 0.0, -40.0), "face": Vector3(-72.0, 0.0, -38.0)},
 		{"species": "ossuary_stalker", "at": Vector3(-60.0, 0.0, -46.5), "face": Vector3(-64.0, 0.0, -50.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-70.0, 0.0, -37.5), "face": Vector3(-64.0, 0.0, -44.0)},
 	]},
 	{"id": "ossuary", "label": "The ossuary stirs.", "room": "ossuary", "members": [
 		{"species": "ossuary_stalker", "at": Vector3(-49.0, 0.0, -80.0), "face": Vector3(-44.0, 0.0, -82.0)},
 		{"species": "gallowsroot", "at": Vector3(-53.0, 0.0, -88.0), "face": Vector3(-44.0, 0.0, -82.0)},
 		{"species": "hollow_warden", "at": Vector3(-56.0, 0.0, -79.0), "face": Vector3(-58.0, 0.0, -74.0)},
 		{"species": "ossuary_stalker", "at": Vector3(-50.0, 0.0, -95.0), "face": Vector3(-52.0, 0.0, -100.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-45.5, 0.0, -96.0), "face": Vector3(-52.0, 0.0, -88.0)},
 	]},
 	{"id": "grove", "label": "The grove's sleepers wake.", "room": "grove", "members": [
 		{"species": "ossuary_stalker", "at": Vector3(-68.0, 0.0, -121.0), "face": Vector3(-72.0, 0.0, -128.0)},
 		{"species": "hollow_warden", "at": Vector3(-63.0, 0.0, -118.0), "face": Vector3(-60.0, 0.0, -114.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-72.0, 0.0, -116.0), "face": Vector3(-66.0, 0.0, -122.0)},
 	]},
 	{"id": "shrine", "label": "The drowned shrine has keepers.", "room": "shrine", "members": [
 		{"species": "hollow_warden", "at": Vector3(-10.0, 0.0, -121.0), "face": Vector3(-12.0, 0.0, -128.0)},
 		{"species": "gallowsroot", "at": Vector3(-6.0, 0.0, -118.0), "face": Vector3(-4.0, 0.0, -114.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-16.5, 0.0, -117.0), "face": Vector3(-10.0, 0.0, -121.0)},
 	]},
 	{"id": "crypt", "label": "The crypt's dead get up.", "room": "crypt", "members": [
 		{"species": "ossuary_stalker", "at": Vector3(65.0, 0.0, -122.0), "face": Vector3(60.0, 0.0, -128.0)},
 		{"species": "hollow_warden", "at": Vector3(67.0, 0.0, -118.0), "face": Vector3(64.0, 0.0, -114.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(59.0, 0.0, -119.0), "face": Vector3(65.0, 0.0, -124.0)},
 	]},
 	{"id": "rooted", "label": "The rooted hall wakes.", "room": "rooted", "members": [
 		{"species": "gallowsroot", "at": Vector3(52.0, 0.0, -88.0), "face": Vector3(44.0, 0.0, -92.0)},
 		{"species": "hollow_warden", "at": Vector3(49.0, 0.0, -93.0), "face": Vector3(44.0, 0.0, -92.0)},
 		{"species": "ossuary_stalker", "at": Vector3(57.0, 0.0, -95.0), "face": Vector3(56.0, 0.0, -100.0)},
 		{"species": "hollow_warden", "at": Vector3(57.0, 0.0, -81.0), "face": Vector3(56.0, 0.0, -76.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(47.0, 0.0, -97.0), "face": Vector3(54.0, 0.0, -88.0)},
 	]},
 	{"id": "upper", "label": "The old workings are not empty.", "room": "upper", "members": [
 		{"species": "hollow_warden", "at": Vector3(55.0, 0.0, -42.0), "face": Vector3(52.0, 0.0, -36.0)},
 		{"species": "ossuary_stalker", "at": Vector3(61.0, 0.0, -46.0), "face": Vector3(64.0, 0.0, -50.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(64.0, 0.0, -37.5), "face": Vector3(55.0, 0.0, -42.0)},
+	]},
+	# The floor's own ground: the halls a party walks through between the dens, and
+	# the way on to the ring. They were forty metres of nothing between one den and
+	# the next - the Walk to the lair met eight crowds and no bodies anywhere else
+	# - so every hall keeps a scattered few and every approach holds the door.
+	# `crowd` is this den's own number (a hall is not a den's barracks), and the
+	# crowd's maximin placement spreads those bodies across the whole room rather
+	# than ringing the post that spawned them. A hall is also long enough for a bow
+	# to work, so most of them keep one archer of their own.
+	{"id": "gallery", "label": "The gallery's dead look up from the water.", "room": "gallery",
+		"crowd": 4, "members": [
+		{"species": "ossuary_stalker", "at": Vector3(-58.0, 0.0, -19.0), "face": Vector3(-64.0, 0.0, -8.0)},
+		{"species": "hollow_warden", "at": Vector3(-48.0, 0.0, -13.0), "face": Vector3(-42.0, 0.0, -12.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-48.0, 0.0, -22.5), "face": Vector3(-56.0, 0.0, -16.0)},
+	]},
+	{"id": "gallery_deep", "label": "Something shifts in the flooded dark.", "room": "gallery_deep",
+		"crowd": 2, "members": [
+		{"species": "ossuary_stalker", "at": Vector3(-53.0, 0.0, -27.0), "face": Vector3(-56.0, 0.0, -24.0)},
+		{"species": "ossuary_stalker", "at": Vector3(-61.0, 0.0, -30.0), "face": Vector3(-66.0, 0.0, -28.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-52.0, 0.0, -31.0), "face": Vector3(-58.0, 0.0, -28.0)},
+	]},
+	{"id": "garden", "label": "The garden's growth walks.", "room": "garden",
+		"crowd": 5, "members": [
+		{"species": "hollow_warden", "at": Vector3(-68.0, 0.0, -148.0), "face": Vector3(-72.0, 0.0, -138.0)},
+		{"species": "gallowsroot", "at": Vector3(-66.0, 0.0, -155.0), "face": Vector3(-62.0, 0.0, -160.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-52.0, 0.0, -157.0), "face": Vector3(-60.0, 0.0, -150.0)},
+	]},
+	{"id": "garden_glade", "label": "The glade's keepers turn.", "room": "garden_glade",
+		"crowd": 3, "members": [
+		{"species": "hollow_warden", "at": Vector3(-44.0, 0.0, -144.0), "face": Vector3(-42.0, 0.0, -148.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-48.0, 0.0, -152.0), "face": Vector3(-46.0, 0.0, -148.0)},
+	]},
+	{"id": "mere", "label": "The mere's shore is held.", "room": "mere",
+		"crowd": 6, "members": [
+		{"species": "ossuary_stalker", "at": Vector3(-12.0, 0.0, -142.0), "face": Vector3(-20.0, 0.0, -140.0)},
+		{"species": "hollow_warden", "at": Vector3(6.0, 0.0, -152.0), "face": Vector3(18.0, 0.0, -156.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-18.0, 0.0, -155.0), "face": Vector3(-8.0, 0.0, -150.0)},
+	]},
+	{"id": "chapel", "label": "The nave's congregation rises.", "room": "chapel",
+		"crowd": 4, "members": [
+		{"species": "hollow_warden", "at": Vector3(48.0, 0.0, -144.0), "face": Vector3(44.0, 0.0, -146.0)},
+		{"species": "gallowsroot", "at": Vector3(52.0, 0.0, -156.0), "face": Vector3(54.0, 0.0, -160.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(59.5, 0.0, -156.0), "face": Vector3(52.0, 0.0, -148.0)},
+	]},
+	{"id": "apse", "label": "Something kneels in the apse.", "room": "apse",
+		"crowd": 2, "members": [
+		{"species": "ossuary_stalker", "at": Vector3(65.5, 0.0, -146.0), "face": Vector3(63.0, 0.0, -148.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(63.0, 0.0, -152.0), "face": Vector3(66.0, 0.0, -148.0)},
+	]},
+	{"id": "workings", "label": "The timbered gallery is worked still.", "room": "workings",
+		"crowd": 2, "members": [
+		{"species": "hollow_warden", "at": Vector3(46.0, 0.0, -6.0), "face": Vector3(50.0, 0.0, -14.0)},
+		{"species": "ossuary_stalker", "at": Vector3(58.0, 0.0, 2.0), "face": Vector3(62.0, 0.0, -6.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(52.0, 0.0, 5.5), "face": Vector3(52.0, 0.0, -6.0)},
+	]},
+	# THE DEMONS' RING: one chamber on each way into the lair, one demon each, and
+	# two archers apiece to hold the far side of the room while it closes. `crowd`
+	# is 1: a chamber this size is a fight of three, not a barracks.
+	{"id": "ring_s", "label": "The south chamber's demon wakes.", "room": "ring_s",
+		"crowd": 1, "members": [
+		{"species": "hell_goat", "demon": true, "at": Vector3(-1.0, 0.0, -64.0), "face": Vector3(-1.0, 0.0, -74.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-6.0, 0.0, -68.0), "face": Vector3(-1.0, 0.0, -64.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(4.0, 0.0, -60.0), "face": Vector3(-1.0, 0.0, -64.0)},
+	]},
+	{"id": "ring_e", "label": "The east chamber's demon wakes.", "room": "ring_e",
+		"crowd": 1, "members": [
+		{"species": "hell_goat", "demon": true, "at": Vector3(30.0, 0.0, -86.0), "face": Vector3(21.0, 0.0, -86.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(37.0, 0.0, -79.0), "face": Vector3(30.0, 0.0, -86.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(36.0, 0.0, -93.0), "face": Vector3(30.0, 0.0, -86.0)},
+	]},
+	{"id": "ring_n", "label": "The north chamber's demon wakes.", "room": "ring_n",
+		"crowd": 1, "members": [
+		{"species": "hell_goat", "demon": true, "at": Vector3(-2.0, 0.0, -111.0), "face": Vector3(-2.0, 0.0, -108.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(6.0, 0.0, -112.0), "face": Vector3(-2.0, 0.0, -111.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(8.0, 0.0, -110.0), "face": Vector3(-2.0, 0.0, -111.0)},
+	]},
+	{"id": "ring_w", "label": "The west chamber's demon wakes.", "room": "ring_w",
+		"crowd": 1, "members": [
+		{"species": "hell_goat", "demon": true, "at": Vector3(-30.0, 0.0, -88.0), "face": Vector3(-21.0, 0.0, -88.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-37.0, 0.0, -83.0), "face": Vector3(-30.0, 0.0, -88.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-36.0, 0.0, -93.0), "face": Vector3(-30.0, 0.0, -88.0)},
+	]},
+	# THE CENTRE: Gorehorn's own floor, and the squad that keeps it - one of every
+	# demon the floor fields, from the devil spawn to the gargoyle, on top of the
+	# master himself and a pair of archers.
+	{"id": "lair_guard", "label": "Gorehorn's own stand up.", "room": "lair",
+		"crowd": 1, "members": [
+		{"species": "hell_goat", "demon": true, "at": Vector3(5.0, 0.0, -95.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "succubus", "demon": true, "at": Vector3(-6.0, 0.0, -93.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "spawn", "demon": true, "at": Vector3(0.0, 0.0, -82.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "beast", "demon": true, "at": Vector3(-11.0, 0.0, -95.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "gargoyle", "demon": true, "at": Vector3(8.0, 0.0, -101.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(-15.0, 0.0, -77.0), "face": Vector3(0.0, 0.0, -89.0)},
+		{"species": "hollow_warden", "bow": true, "at": Vector3(13.0, 0.0, -80.0), "face": Vector3(0.0, 0.0, -89.0)},
+	]},
+	{"id": "den_jog", "label": "The way on to the lair is watched.", "room": "den_jog",
+		"crowd": 2, "members": [
+		{"species": "hollow_warden", "at": Vector3(0.0, 0.0, -52.0), "face": Vector3(0.0, 0.0, -54.0)},
 	]},
 ]
 
@@ -230,10 +366,14 @@ const AUTHORED_DENS := [
 ## the door it faces moved out with its room.
 static var DENS: Array = _scaled_dens(AUTHORED_DENS)
 
-## The floor is crowded: every den fields `DEN_CROWD` bodies for each post it was
-## authored with. The authored posts stand first, exactly as written; the crowd is
-## laid across the den's own room, each body on the free spot furthest from every
-## body already placed, with the species and the door of the post it repeats.
+## The floor is crowded: every den fields `DEN_CROWD` bodies for each melee post it
+## was authored with, unless it names its own `crowd` (`den_crowd`); an archer or a
+## demon post is one body, never a crowd. The authored posts stand first, exactly as
+## written; the crowd is laid across the den's own room, each body on the free spot
+## furthest from every body already placed, with the species and the door of the
+## post it repeats. That furthest-spot rule is what
+## scatters a hall's few bodies across the whole hall instead of piling them round
+## the post that spawned them.
 const DEN_CROWD := 10
 ## Where a crowd body may stand: `CROWD_WALL` in from the room's rock,
 ## `CROWD_DOOR` from the middle of any way out (a body in a doorway blocks it, and
@@ -271,7 +411,6 @@ const AUTHORED_LIGHTS := [
 	{"kind": "sconce", "room": "den", "wall": "w", "along": 0.67},
 	{"kind": "sconce", "room": "den", "wall": "e", "along": 0.17},
 	{"kind": "fire", "room": "den", "at": Vector3(1.5, 0.0, -36.0)},
-	{"kind": "sconce", "room": "lair_south", "wall": "w", "along": 0.7},
 	{"kind": "witch", "room": "gallery", "wall": "s", "along": 0.6},
 	{"kind": "witch", "room": "gallery", "wall": "e", "along": 0.3},
 	{"kind": "fungus", "room": "gallery_deep", "wall": "n", "along": 0.3},
@@ -283,7 +422,6 @@ const AUTHORED_LIGHTS := [
 	{"kind": "sconce", "room": "ossuary", "wall": "e", "along": 0.3},
 	{"kind": "fungus", "room": "ossuary", "wall": "n", "along": 0.2},
 	{"kind": "fungus", "room": "ossuary", "wall": "s", "along": 0.85},
-	{"kind": "sconce", "room": "oss_east", "wall": "n", "along": 0.4},
 	{"kind": "fungus", "room": "grove", "wall": "w", "along": 0.6},
 	{"kind": "fungus", "room": "grove", "wall": "e", "along": 0.3},
 	{"kind": "fungus", "room": "garden", "wall": "w", "along": 0.4},
@@ -319,6 +457,16 @@ const AUTHORED_LIGHTS := [
 	{"kind": "brazier", "room": "lair", "at": Vector3(13.0, 0.0, -99.0)},
 	{"kind": "brazier", "room": "lair", "at": Vector3(-13.0, 0.0, -99.0)},
 	{"kind": "brazier", "room": "lair", "at": Vector3(13.0, 0.0, -86.0)},
+	# The demons' ring, one fire and one wall light a chamber: a keeper walks in
+	# its own light, and the arcs between the chambers are dark on purpose.
+	{"kind": "brazier", "room": "ring_s", "at": Vector3(-5.0, 0.0, -62.0)},
+	{"kind": "sconce", "room": "ring_s", "wall": "e", "along": 0.5},
+	{"kind": "brazier", "room": "ring_e", "at": Vector3(33.0, 0.0, -90.0)},
+	{"kind": "sconce", "room": "ring_e", "wall": "n", "along": 0.55},
+	{"kind": "brazier", "room": "ring_n", "at": Vector3(2.0, 0.0, -113.0)},
+	{"kind": "sconce", "room": "ring_n", "wall": "e", "along": 0.5},
+	{"kind": "brazier", "room": "ring_w", "at": Vector3(-27.0, 0.0, -92.0)},
+	{"kind": "sconce", "room": "ring_w", "wall": "n", "along": 0.4},
 ]
 
 ## The lights the floor is built from: `AUTHORED_LIGHTS` at `SCALE`.
@@ -411,6 +559,19 @@ const AUTHORED_PROPS := [
 	{"kind": "bones", "room": "lair", "at": Vector3(9.0, 0.0, -76.5), "yaw": -15.0},
 	{"kind": "column", "room": "lair", "at": Vector3(-10.0, 0.0, -86.0), "radius": 1.1},
 	{"kind": "column", "room": "lair", "at": Vector3(10.0, 0.0, -97.0), "radius": 1.1},
+	# The demons' ring: each chamber keeps its own keeper's blood ring, a heap of
+	# the ones it has already eaten and its trophy stakes.
+	{"kind": "blood", "room": "ring_s", "at": Vector3(-1.0, 0.0, -64.0), "radius": 3.0},
+	{"kind": "bones", "room": "ring_s", "at": Vector3(4.0, 0.0, -69.0), "yaw": -17.0},
+	{"kind": "stakes", "room": "ring_s", "at": Vector3(-6.0, 0.0, -60.0), "yaw": 1.2, "count": 5},
+	{"kind": "blood", "room": "ring_e", "at": Vector3(30.0, 0.0, -86.0), "radius": 3.0},
+	{"kind": "bones", "room": "ring_e", "at": Vector3(24.0, 0.0, -92.0), "yaw": -15.0},
+	{"kind": "column", "room": "ring_e", "at": Vector3(24.0, 0.0, -79.0), "radius": 1.0},
+	{"kind": "blood", "room": "ring_n", "at": Vector3(-2.0, 0.0, -111.0), "radius": 3.0},
+	{"kind": "stakes", "room": "ring_n", "at": Vector3(-5.0, 0.0, -113.0), "yaw": 0.4, "count": 4},
+	{"kind": "blood", "room": "ring_w", "at": Vector3(-30.0, 0.0, -88.0), "radius": 3.0},
+	{"kind": "bones", "room": "ring_w", "at": Vector3(-25.0, 0.0, -94.0), "yaw": -16.0},
+	{"kind": "rubble", "room": "ring_w", "at": Vector3(-24.0, 0.0, -82.0), "radius": 1.4},
 ]
 
 ## The props the floor is built from: `AUTHORED_PROPS` at `SCALE`.
@@ -459,15 +620,18 @@ static func _scaled_landings(source: Array) -> Array:
 
 
 ## `AUTHORED_DENS` at `SCALE`: every post, and the door its body faces, moved out
-## with its room.
+## with its room. A post's other facts (`bow`, `demon`) ride along unchanged -
+## they are what a body is, not how far it stands from the floor's origin.
 static func _scaled_dens(source: Array) -> Array:
 	var out: Array = []
 	for row in source:
 		var den: Dictionary = row.duplicate()
 		var members: Array = []
 		for member in row["members"]:
-			members.append({"species": member["species"], "at": _flat(member["at"]),
-				"face": _flat(member["face"])})
+			var post: Dictionary = member.duplicate()
+			post["at"] = _flat(member["at"])
+			post["face"] = _flat(member["face"])
+			members.append(post)
 		den["members"] = members
 		out.append(den)
 	return out
@@ -535,10 +699,21 @@ static func area_name(area_id: String) -> String:
 	return str(AREAS.get(area_id, ""))
 
 
+## How many bodies a den fields for each post it was written with: `DEN_CROWD`
+## unless the den names its own `crowd`. A den's barracks is ten a post; a hall a
+## party walks through keeps its own number, so the floor can be populated where
+## the walking happens without a hall turning into a second barracks.
+static func den_crowd(den: Dictionary) -> int:
+	return maxi(1, int(den.get("crowd", DEN_CROWD)))
+
+
 ## Every post a den fields, `{species, at, face}`: its authored `members` first,
-## then the crowd (`DEN_CROWD`). Pure and cached, so the cave, the dressing that
-## keeps the posts clear and a co-op guest's copy all stand the same bodies on the
-## same spots.
+## then the crowd (`den_crowd`). A post written `bow` or `demon` is one body and
+## is never crowded (`_crowdable`); the crowd repeats the den's melee posts up to
+## `den_crowd` bodies for each, so ten a post stays ten a post and an archer or a
+## demon stays the one it was written as. Pure and cached, so the cave, the
+## dressing that keeps the posts clear and a co-op guest's copy all stand the same
+## bodies on the same spots.
 static func den_members(den: Dictionary) -> Array:
 	var den_id := str(den["id"])
 	if _crowds.has(den_id):
@@ -548,6 +723,9 @@ static func den_members(den: Dictionary) -> Array:
 	var index := room_index(str(den["room"]))
 	_crowds[den_id] = out
 	if index < 0 or authored.is_empty():
+		return out
+	var melee := _crowdable(authored)
+	if melee.is_empty():
 		return out
 	var inner := (ROOMS[index]["rect"] as Rect2).grow(-CROWD_WALL)
 	var keep_out := _crowd_keep_out(index)
@@ -573,7 +751,7 @@ static func den_members(den: Dictionary) -> Array:
 	gaps.fill(INF)
 	for row in authored:
 		_narrow(gaps, spots, row["at"])
-	var want := authored.size() * DEN_CROWD
+	var want := melee.size() * den_crowd(den) + (authored.size() - melee.size())
 	while out.size() < want:
 		var best := -1
 		for spot_index in spots.size():
@@ -581,11 +759,30 @@ static func den_members(den: Dictionary) -> Array:
 				best = spot_index
 		if best < 0 or gaps[best] < CROWD_SPACING:
 			break
-		var source: Dictionary = authored[(out.size() - authored.size()) % authored.size()]
+		var source: Dictionary = melee[(out.size() - authored.size()) % melee.size()]
 		var at := Vector3(spots[best].x, 0.0, spots[best].y)
 		out.append({"species": source["species"], "at": at, "face": source["face"]})
 		_narrow(gaps, spots, at)
 	return out
+
+
+## The posts the crowd repeats: everything but the archers (`bow`) and the demons
+## (`demon`), which are placed where they were written and once.
+static func _crowdable(authored: Array) -> Array:
+	var out: Array = []
+	for row in authored:
+		if bool(row.get("bow", false)) or bool(row.get("demon", false)):
+			continue
+		out.append(row)
+	return out
+
+
+## How many bodies a den fields: `den_crowd` for each melee post it was written
+## with, and one for each archer or demon it names. The regression asks this of
+## the plan and counts the bodies the built floor stands on its floor.
+static func den_bodies(den: Dictionary) -> int:
+	var authored: Array = den["members"]
+	return _crowdable(authored).size() * den_crowd(den) + authored.size() - _crowdable(authored).size()
 
 
 static func _narrow(gaps: PackedFloat32Array, spots: Array[Vector2], at: Vector3) -> void:

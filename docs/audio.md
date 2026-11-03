@@ -148,7 +148,7 @@ inside 20 ms are one contact reported twice and play once.
 | `cage_latch` | 4 | the soul cuts a cage latch (`CageEscape.interact`; never inside `open_latch`, which a resumed campaign calls four times) |
 | `throw` | 3 | a blade is let go of (`ThrownWeapon.launch`) |
 | `ui_click` | 4 | a menu or card plate is pressed (`Sfx.ui_click`): the latch transient, pitched bright and quiet |
-| `menu_thud` | 3 | a campaign door opens - NEW CAMPAIGN, CONTINUE, GHOST OF THE WARBAND, RESUME WARBAND (`title._enter_campaign_score`): a blunt take pitched into the floor, on the `Reverb` bus |
+| `menu_thud` | 3 | a campaign door opens - NEW CAMPAIGN, a CAMPAIGNS row, HOST GAME's two doors (`title._enter_campaign_score`): a blunt take pitched into the floor, on the `Reverb` bus |
 | `body_swap` | 6 | the soul actually enters a different mercenary (`PossessionController._wire`, once per real change; a re-wire of the same body is silent), on the `Reverb` bus |
 | `pickup` | 4 | a drop is taken (`WarbandLoot.quick_loot`, `WarbandLoot.sweep`), at the drop's position, once per piece |
 

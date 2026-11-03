@@ -29,6 +29,7 @@ const LIFE := {
 	"chapel": {"rats": 4, "webs": 9, "bats": 6, "roosts": 2, "glowworms": 0},
 	"rooted": {"rats": 4, "webs": 4, "bats": 0, "roosts": 0, "glowworms": 0},
 	"workings": {"rats": 6, "webs": 6, "bats": 0, "roosts": 0, "glowworms": 0},
+	"ring": {"rats": 4, "webs": 6, "bats": 8, "roosts": 2, "glowworms": 0},
 	"lair": {"rats": 3, "webs": 2, "bats": 10, "roosts": 2, "glowworms": 0},
 }
 ## The cold light of each area's glowworms.

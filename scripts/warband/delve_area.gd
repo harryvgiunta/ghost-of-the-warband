@@ -110,8 +110,18 @@ func at_mouth(actor) -> bool:
 	return Vector2(offset.x, offset.z).length() <= MOUTH_REACH
 
 
+## The floor's own clock and the eye's sky below are only the floor's once it is
+## whole; `_building` is the window between the instance being created and its
+## last build step.
+var _building := false
+
 func below() -> bool:
-	return cave != null
+	return cave != null and cave.built
+
+
+## Whether a floor is coming up right now (the party is still in the square).
+func building() -> bool:
+	return _building
 
 
 ## Whether a body stands inside the instance.
@@ -166,7 +176,7 @@ func close_panels() -> void:
 func prompt_line(actor) -> String:
 	if actor == null or not is_instance_valid(actor):
 		return ""
-	if in_cave(actor):
+	if below() and in_cave(actor):
 		if cave.at_exit(actor):
 			var pieces: int = host.warband.delve.inventory.pooled_total()
 			return "G  -  CLIMB OUT  ·  %d PIECE%s TO THE TOWN STASH" % [pieces, "" if pieces == 1 else "S"]
@@ -189,6 +199,10 @@ func prompt_line(actor) -> String:
 func tick(delta: float) -> void:
 	if host == null:
 		return
+	if _building:
+		_paint_loading(delta)
+		_sync_eye()
+		return
 	if bool(host.get("_client")):
 		_mirror()
 	elif cave != null:
@@ -201,13 +215,26 @@ func tick(delta: float) -> void:
 		_paint_header()
 
 
+## The line the player reads while the floor comes up: the window keeps painting,
+## so this is a load, not a freeze.
+func _paint_loading(delta: float) -> void:
+	_header_clock += delta
+	if _header_clock < HEADER_POLL:
+		return
+	_header_clock = 0.0
+	if cave == null:
+		return
+	host.hud.set_status("%s  ·  GOING DOWN  ·  %d%%" % [CaveScript.TITLE,
+		roundi(cave.built_share * 100.0)], 1.0)
+
+
 ## `G`: the rope below, or the mouth in the square. True when the press was the
 ## delve's.
 func interact(actor) -> bool:
 	if actor == null or not is_instance_valid(actor):
 		return false
 	var hud = host.get("hud")
-	if cave != null and cave.at_exit(actor):
+	if below() and cave.at_exit(actor):
 		if bool(host.get("_client")):
 			hud.set_status(GUEST_TEXT, 3.0)
 		else:
@@ -232,7 +259,7 @@ func open_prep() -> void:
 
 
 func _on_descend_requested(party: Array) -> void:
-	var result := descend(party)
+	var result: Dictionary = await descend(party)
 	if bool(result.get("ok", false)):
 		prep.close()
 	else:
@@ -245,6 +272,12 @@ func _on_descend_requested(party: Array) -> void:
 ## first (`Warband.begin_delve`), then the instance is built and the party put on
 ## the landing ring of one shaft - `landing_id` when it names one, else a shaft
 ## drawn for this descent. Returns `{ok, party, landing, message}`.
+##
+## The floor is built across frames (`delve_cave.build_staged`) and the party is
+## placed when it is whole: two to four seconds of rigs and rock, and the window
+## keeps painting under `GOING DOWN` while it happens instead of freezing. This
+## function is therefore a coroutine - a caller that wants the bodies placed must
+## `await` it.
 func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 	if host == null or bool(host.get("_client")):
 		return {"ok": false, "party": [], "message": GUEST_TEXT}
@@ -272,9 +305,12 @@ func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 		host.loot_hand.cancel()
 	if host.has_method("_hide_panels"):
 		host._hide_panels()
-	_open_instance(false)
+	# The shaft is drawn before the floor is built: the build warms the room the
+	# party lands in, so the eye's first frame below is a frame that has been
+	# drawn before.
 	landing = landing_id if not Layout.landing(landing_id).is_empty() \
 		else Layout.landings_for(1, _draw.randi())[0]
+	await _open_instance(false, str(Layout.landing(landing)["room"]))
 	var posts: Array[Vector3] = cave.entry_posts(landing, bodies.size())
 	for index in bodies.size():
 		_move_body(bodies[index], posts[index], cave.entry_yaw(landing))
@@ -292,7 +328,7 @@ func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 ## delve inventory goes into the town stash. Returns `Warband.extract_delve`'s
 ## answer.
 func climb_out() -> Dictionary:
-	if host == null or bool(host.get("_client")) or cave == null:
+	if host == null or bool(host.get("_client")) or not below():
 		return {"ok": false, "items": {}, "count": 0, "value": 0}
 	var bodies := party_bodies(true)
 	var result: Dictionary = host.warband.extract_delve()
@@ -327,7 +363,7 @@ func _check_wipe(delta: float) -> void:
 ## party still wears, and whoever was only down wakes in the square with nothing.
 ## Returns `Warband.forfeit_delve`'s answer: what was lost.
 func fall() -> Dictionary:
-	if host == null or cave == null:
+	if host == null or not below():
 		return {"ok": false, "items": {}, "count": 0, "value": 0}
 	var survivors := party_bodies(true)
 	var result: Dictionary = host.warband.forfeit_delve()
@@ -382,12 +418,16 @@ func _move_body(body, at: Vector3, yaw: float) -> void:
 
 # --- the instance ------------------------------------------------------------
 
-func _open_instance(as_replica: bool) -> void:
+func _open_instance(as_replica: bool, warm_room: String = "") -> void:
 	cave = CaveScript.new()
 	cave.name = "WeepingHollow"
 	cave.position = ORIGIN
 	add_child(cave)
-	cave.build(host, as_replica)
+	# The floor comes up a frame's worth at a time: the loading line counts while
+	# the window keeps painting. Nothing below is trusted until `cave.built`.
+	_building = true
+	await cave.build_staged(host, as_replica, warm_room)
+	_building = false
 	cave.den_woke.connect(_on_den_woke)
 	cave.master_slain.connect(_on_master_slain)
 	var squad = host.get("squad")
@@ -430,7 +470,7 @@ func _close_instance() -> void:
 ## below and frees it when they say it is not.
 func _mirror() -> void:
 	var wanted := bool(host.warband.delve.active)
-	if wanted and cave == null:
+	if wanted and cave == null and not _building:
 		_open_instance(true)
 	elif not wanted and cave != null:
 		_close_instance()
@@ -442,7 +482,7 @@ func _sync_eye(force: bool = false) -> void:
 	var camera: Camera3D = host.get("camera")
 	if camera == null:
 		return
-	var eye_below: bool = cave != null and cave.contains(camera.global_position)
+	var eye_below: bool = below() and cave.contains(camera.global_position)
 	if eye_below == _eye_below and not force:
 		return
 	_eye_below = eye_below
@@ -465,7 +505,7 @@ func _paint_header() -> void:
 	var feed = host.get("loot_feed")
 	if feed == null:
 		return
-	if cave == null or not host.warband.delve.active:
+	if not below() or not host.warband.delve.active:
 		feed.set_header("")
 		return
 	var pool = host.warband.delve.inventory
@@ -477,7 +517,7 @@ func _paint_header() -> void:
 	var lines := PackedStringArray(["%s  ·  %s" % [CaveScript.TITLE, CaveScript.FLOOR_LABEL]])
 	var body = host.controller.active_body() if host.controller != null else null
 	var rope := {}
-	if body != null and is_instance_valid(body) and cave.contains(body.global_position):
+	if body != null and is_instance_valid(body) and cave != null and cave.contains(body.global_position):
 		var area: String = cave.area_at(body.global_position)
 		if not area.is_empty():
 			lines.append(Layout.area_name(area))

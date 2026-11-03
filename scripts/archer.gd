@@ -1912,6 +1912,20 @@ func melee_damage(hand: String = "") -> float:
 	return base*melee_scale()
 
 ## Trinket modifiers read by the controllers, `Combat` and the ability cues.
+## Fold a body's annointment stats into the same dictionary every accessor
+## already reads (`melee_scale`, `attack_rate`, `move_scale`,
+## `damage_reduction`, ...), so a welded modifier needs no second pipeline.
+## Additive with the trinkets, then the shared clamps decide the ceiling.
+func apply_annointments(stats: Dictionary, procs: Array = []) -> void:
+	# `procs` is the body's business: the rig holds stats, `WarbandBody` holds the
+	# runtime that plays them, so a plain Archer simply ignores the list.
+	if stats.is_empty():
+		return
+	if trinket_stats.is_empty():
+		trinket_stats = TrinketStats.sum({})
+	for key in stats:
+		trinket_stats[str(key)] = float(trinket_stats.get(str(key), 0.0)) + float(stats[key])
+
 func apply_trinkets(kit: Dictionary) -> void:
 	trinkets = TrinketStats.kit(kit)
 	trinket_stats = TrinketStats.sum(trinkets)
@@ -2428,12 +2442,19 @@ func get_stance_forward() -> Vector3:
 ## casting into the four directional splits. Only the clone's own rig is
 ## affected; the player's rig never receives this call.
 func set_shadow_casting(casting: bool) -> void:
+	# Same setting, nothing to write: a band that flickers at its boundary (a
+	# fight at thirty metres) otherwise walks the whole rig and flips every mesh's
+	# shadow variant on every frame either side of it.
+	if casting == _casts_shadow:
+		return
+	Perf.begin("rig.shadow")
 	_casts_shadow = casting
 	var setting := GeometryInstance3D.SHADOW_CASTING_SETTING_ON if casting \
 		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for node in find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
 		mesh.cast_shadow = setting
+	Perf.end()
 
 
 func head_hitbox_center() -> Vector3:
@@ -3820,9 +3841,20 @@ func _update_bow_pose(drawing: bool) -> void:
 	var carry_grip: Vector3 = left*_palm_left
 	var carry_contact: Vector3 = right*_palm_right
 	var bow_basis := left.basis*_bow_grip_basis
+	# `Basis.slerp` interpolates a rotation and refuses a scaled basis, and the
+	# watcher rigs wear their variant's scale - the cave's archers are the same
+	# hollow warden bodies drawn at 1.0-1.3 (the wood's trail archers walk the same
+	# path). The girth is held aside so the draw is solved on rotations, and put
+	# back on the bow the hand actually holds.
+	var girth := bow_basis.get_scale()
+	bow_basis = bow_basis.orthonormalized()
 	var grip := carry_grip
 	var contact := carry_contact
-	var right_basis := right.basis
+	# The drawing hand's basis carries the rig's scale for the same reason, and it
+	# is interpolated by the same `slerp`s: the rotations are solved unit and the
+	# girth goes back on the hand's own offsets at the end.
+	var right_girth := right.basis.get_scale()
+	var right_basis := right.basis.orthonormalized()
 	if drawing:
 		var shoulder := _bone_world(_arms[1][0]).origin
 		var body_right := shoulder-_bone_world(_arms[0][0]).origin
@@ -3860,16 +3892,16 @@ func _update_bow_pose(drawing: bool) -> void:
 		var left_basis := bow_basis*_bow_grip_basis.inverse()
 		_solve_limb(_arms[0],grip-left_basis*_palm_left,left_basis,-body_right*0.60+body_forward*0.40-Vector3.UP*0.20)
 		left = _bone_world(_arms[0][2])
-		active_bow.global_transform = Transform3D(bow_basis,left*_palm_left)
+		active_bow.global_transform = Transform3D(bow_basis.scaled_local(girth),left*_palm_left)
 		active_bow.set_draw(draw_amount)
-		right_basis = bow_basis*_string_grip_basis.inverse()
+		right_basis = (bow_basis*_string_grip_basis.inverse()).orthonormalized()
 		contact = active_bow.get_nock_position()
 		var draw_reach := 1.0
 		if phase == "DRAWING":
 			draw_reach = smoothstep(0.03,RAISE_SECONDS,_phase_time)
 			var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
 			contact = _hand_arc(carry_contact,hip_gate,front_gate,contact,draw_reach)
-			right_basis = right.basis.slerp(right_basis,draw_reach)
+			right_basis = right.basis.orthonormalized().slerp(right_basis,draw_reach)
 		elif phase in ["RELEASE","RECOVER"]:
 			var follow := smoothstep(0.0,RELEASE_SECONDS,_phase_time) if phase == "RELEASE" else 1.0
 			contact = to_global(_release_contact)+global_basis*Basis(_release_bow_rotation).z*(0.12*follow*_release_raise*_release_charge)
@@ -3883,13 +3915,14 @@ func _update_bow_pose(drawing: bool) -> void:
 					var relax := smoothstep(0.72,RECOVER_SECONDS,_phase_time)
 					var hip_gate := chest+body_forward*0.35+body_right*0.28-Vector3.UP*0.20
 					contact = _hand_arc(active_bow.get_nock_position(),hip_gate,hip_gate,carry_contact,relax)
-					right_basis = right_basis.slerp(right.basis,relax)
+					right_basis = right_basis.slerp(right.basis.orthonormalized(),relax)
 		var elbow_pole := body_right*0.65+body_forward*0.40+Vector3.UP*0.12
 		if phase == "DRAWING":
 			elbow_pole = (_bone_world(_arms[1][1]).origin-shoulder).lerp(elbow_pole,draw_reach)
-		_solve_limb(_arms[1],contact-right_basis*_palm_right,right_basis,elbow_pole)
+		var worn := right_basis.scaled_local(right_girth)
+		_solve_limb(_arms[1],contact-worn*_palm_right,worn,elbow_pole)
 	else:
-		active_bow.global_transform = Transform3D(bow_basis,grip)
+		active_bow.global_transform = Transform3D(bow_basis.scaled_local(girth),grip)
 		active_bow.set_draw(0.0)
 	active_bow.set_arrow_visible(_roll_progress < 0.0 and (phase in ["READY","DRAWING","HOLDING"] \
 		or (phase == "RECOVER" and _phase_time >= 0.68) \

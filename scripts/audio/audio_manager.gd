@@ -96,6 +96,16 @@ var _bed_tracks: Array[String] = ["", ""]
 ## the title for the menu theme and drag the score back while it is still up.
 var _restart_scene_id := 0
 var _streams: Dictionary = {}
+## Tracks whose stream is in memory for the session. The score is a 49 minute
+## master - 61 MB in one file - and `load()` on it is a synchronous read that
+## froze the frame it happened on (a second or two on a slow disk). It was paid
+## every time the party stepped out of the square, because `stop_music` purged the
+## stream the bed had let go of and the next `play_music` loaded it again.
+## So: asked for once, in the background, the moment the manager is up; kept for
+## the session; and a track that is not in yet starts on the frame it lands.
+var _resident: Dictionary = {}
+## Tracks with a threaded load in flight.
+var _loading: Dictionary = {}
 var _voices_3d: Array[AudioStreamPlayer3D] = []
 var _voices_step: Array[AudioStreamPlayer3D] = []
 var _voices_line: Array[AudioStreamPlayer3D] = []
@@ -133,13 +143,54 @@ func _ready() -> void:
 	# track, without waiting for the next scene change.
 	_scene_id = 0
 	_sync_scene_music()
+	_warm_tracks()
 
 
 func _process(_delta: float) -> void:
 	Perf.begin("audio")
 	_sync_scene_music()
 	_seam_if_due()
+	_deliver_tracks()
 	Perf.end()
+
+
+## Ask for every track now, in the background, so no frame ever pays for a
+## sixty-one megabyte read. A headless run has no device: it never asks.
+func _warm_tracks() -> void:
+	if not is_available():
+		return
+	for track in TRACKS:
+		_request_track(str(track))
+
+
+## Start a threaded load for one track (once).
+func _request_track(track: String) -> void:
+	if _resident.has(track) or _loading.has(track) or not TRACKS.has(track):
+		return
+	if ResourceLoader.load_threaded_request(str(TRACKS[track])) == OK:
+		_loading[track] = true
+
+
+## The frame a track arrives: keep it for the session and, if it is the one the
+## manager wants, put it on a bed now - the score simply starts a moment later
+## instead of the game stopping while it reads.
+func _deliver_tracks() -> void:
+	if _loading.is_empty():
+		return
+	for track in _loading.keys():
+		var path := str(TRACKS[track])
+		if ResourceLoader.load_threaded_get_status(path) != ResourceLoader.THREAD_LOAD_LOADED:
+			continue
+		_loading.erase(track)
+		var loaded := ResourceLoader.load_threaded_get(path) as AudioStream
+		if loaded == null:
+			continue
+		if loaded is AudioStreamOggVorbis:
+			(loaded as AudioStreamOggVorbis).loop = track != "warband"
+		_streams[track] = loaded
+		_resident[track] = true
+		if music_track == track and _beds[_bed_index].stream != loaded:
+			_arm_track(track, FADE_SECONDS)
 
 
 ## Whether there is a device to play into. Everything else - buses, volumes,
@@ -203,6 +254,8 @@ func track_for_scene(path: String) -> String:
 
 ## Start a track, crossfading from whatever bed is up. Idempotent: asking for
 ## the track that is already playing is a no-op, so a scene can call it freely.
+## A track whose sixty-one megabytes are still being read says so at once and
+## arms itself the frame they land (`_deliver_tracks`).
 func play_music(track: String, fade: float = FADE_SECONDS) -> void:
 	if not TRACKS.has(track):
 		return
@@ -211,6 +264,17 @@ func play_music(track: String, fade: float = FADE_SECONDS) -> void:
 	music_track = track
 	_note("music", {"track": track, "available": is_available()})
 	if not is_available():
+		return
+	if not _resident.has(track) and not _streams.has(track):
+		_request_track(track)
+		return
+	_arm_track(track, fade)
+
+
+## The crossfade itself: `track`'s stream on the other bed, fading in over
+## `fade`, the old bed fading out and then retired.
+func _arm_track(track: String, fade: float) -> void:
+	if not is_available() or not TRACKS.has(track):
 		return
 	var from := _beds[_bed_index]
 	_bed_index = 1 - _bed_index
@@ -260,6 +324,11 @@ func _restart_track(track: String) -> void:
 		bed.volume_db = BED_SILENCE_DB
 		_bed_tracks[index] = ""
 	var live := _beds[_bed_index]
+	if not _resident.has(track) and not _streams.has(track):
+		# Not read yet: the score starts the frame it lands (`_deliver_tracks`)
+		# rather than stopping the game while sixty-one megabytes come off disk.
+		_request_track(track)
+		return
 	live.stream = _stream_for(track)
 	live.volume_db = 0.0
 	_bed_tracks[_bed_index] = track
@@ -562,6 +631,10 @@ func _retire(bed: AudioStreamPlayer) -> void:
 ## does not need until the next track.
 func _purge_streams() -> void:
 	for track in _streams.keys():
+		# A warmed track is kept for the session: dropping it would put the
+		# sixty-one megabyte read back on the frame the party leaves the square.
+		if _resident.has(track):
+			continue
 		var held := false
 		for bed in _beds:
 			if bed.playing and bed.stream == _streams[track]:
