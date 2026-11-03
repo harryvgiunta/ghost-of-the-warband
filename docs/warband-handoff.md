@@ -1,4 +1,4 @@
-| `altar_regression` | 257 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill without a manual refresh, the ichor order completes, and the ledger survives the save |
+| `altar_regression` | 308 | unbind/distil/brand UI over the wallet; every catalog weapon/shield has a rite of catalog reagents, the real panel anoints a worn bow and refuses a short stash out loud, a controller-dressed body carries the skill and the copy's visible marks without a manual refresh, the ichor order completes, and the ledger survives the save |
 | `stash_autoloot_regression` | 170 | pickups, sweep, infinite value sort |
 | `warband_ui_regression` | 116 | roster screen, paperdoll hand-off, recruiter |
 | `branded_abilities_regression` | 114 | six sigils, tiers, refusals |

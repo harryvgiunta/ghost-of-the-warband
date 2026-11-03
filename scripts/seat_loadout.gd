@@ -29,6 +29,9 @@ static func _apply_annoints(rig, annoints: Dictionary) -> void:
 		rig.apply_annointments(stats if stats is Dictionary else {},
 			procs if procs is Array else [])
 	var skills: Variant = annoints.get("skills", {})
+	var marks: Variant = annoints.get("marks", {})
+	if marks is Dictionary and rig.has_method("set_annoint_marks"):
+		rig.set_annoint_marks(marks)
 	if not skills is Dictionary:
 		return
 	var hands := {"main": str((skills as Dictionary).get("main", "")),
@@ -53,7 +56,9 @@ static func trinkets(value: Variant) -> Dictionary:
 ## the wire, and a peer must not be able to claim a skill its steel was never given.
 ## `annoints` is the same kind of trusted-local argument as `anointed`: the
 ## warband's own ledger, never a loadout field. `{stats: Dictionary,
-## skills: {main, off}}`; a bare dictionary leaves the rig alone.
+## skills: {main, off}, marks: {main, off}}`; a bare dictionary leaves the rig
+## alone. `marks` is how many annointments each held copy carries, which the rig
+## draws on the piece.
 static func apply(rig, loadout: Dictionary, anointed: Array = [],
 		annoints: Dictionary = {}) -> void:
 	if rig == null or loadout.is_empty():

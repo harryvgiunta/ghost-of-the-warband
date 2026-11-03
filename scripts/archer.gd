@@ -15,6 +15,7 @@ const Dagger = preload("res://scripts/dagger.gd")
 const Shield = preload("res://scripts/shield.gd")
 const Staff = preload("res://scripts/staff.gd")
 const FocusItem = preload("res://scripts/focus_item.gd")
+const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
@@ -261,6 +262,10 @@ var trinket_stats := {}
 ## for that hand, and `apply_loadout` rewrites it on every dressing, so a hand
 ## that swaps pieces never keeps the last one's skill.
 var anointed := {"main":"", "off":""}
+## How many annointments the altar welded to the copy in each hand, 0..6. The rig
+## hands these to the piece it is drawing, so a worked blade carries its marks in
+## the hand, on the floor and in the paperdoll's mirror - never in a menu alone.
+var annoint_marks := {"main":0, "off":0}
 var _ward: EnergyShield
 var skeleton: Skeleton3D
 var _phase_time := 0.0
@@ -440,6 +445,10 @@ var ability_move := false
 var ability_travel := 0.0
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
+## Where the off hand rides once the body is running: down beside the hip, level
+## with the sword hand, so the pair read as two blades carried by one runner
+## instead of one hand at the hip and one folded up at the chest.
+const OFFHAND_RUN_OFFSET := Vector3(0.10,-0.40,0.08)
 var _offhand_weapon_basis := Basis.IDENTITY
 var _offhand_pole := Vector3(0.40,-0.20,0.50)
 var _foot_height := Vector2.ZERO
@@ -1542,6 +1551,51 @@ func _sync_weapon_visibility() -> void:
 		_quiver.visible = weapon == "bow" and not consuming
 	if active_shield != null:
 		active_shield.set_active(shield_equipped and not consuming and is_visible_in_tree())
+	_apply_annoint_marks()
+
+
+## The altar's count belongs to a copy, and a rig draws exactly one copy per hand:
+## so every dress and every weapon change hands the number to the piece that is
+## actually in the hand. A stowed blade stays plain until it is drawn.
+func _apply_annoint_marks() -> void:
+	var main_tier := int(annoint_marks.get("main",0))
+	var off_tier := int(annoint_marks.get("off",0))
+	if weapon == "bow":
+		_annoint_piece(active_bow,main_tier)
+	elif weapon == "dagger":
+		_annoint_piece(active_dagger,main_tier)
+	elif _staff_shown():
+		_annoint_piece(active_staff,main_tier)
+	elif weapon in ["sword","dual"]:
+		_annoint_piece(active_sword,main_tier)
+	if weapon == "dual":
+		_annoint_piece(active_off_weapon,off_tier)
+	if focus_active:
+		_annoint_piece(active_focus,off_tier)
+	if shield_equipped:
+		_annoint_piece(active_shield,off_tier)
+
+
+func _annoint_piece(node: Node3D, tier: int) -> void:
+	if node == null or not is_instance_valid(node) or not node.has_method("set_annoint_marks"):
+		return
+	node.set_annoint_marks(tier)
+
+
+## The warband's ledger reading for the two hands, pushed by whoever dressed the
+## rig (`SeatLoadout`). Accepted before the rig is built, so a body can be told its
+## kit before it owns a skeleton.
+func set_annoint_marks(marks: Dictionary) -> void:
+	var main_count := AnnointMarks.tier_of(int(marks.get("main",0)))
+	var off_count := AnnointMarks.tier_of(int(marks.get("off",0)))
+	if main_count == int(annoint_marks.get("main",0)) \
+			and off_count == int(annoint_marks.get("off",0)):
+		return
+	annoint_marks = {"main":main_count, "off":off_count}
+	if not _built:
+		return
+	_sync_weapon_visibility()
+	_update_pose(0.0)
 
 ## Hand-above weapon node used for blood coating. Only the weapon actually
 ## drawn in that hand is stained, so a stowed sword keeps its clean steel.
@@ -2842,7 +2896,7 @@ func _solve_pose(delta: float) -> void:
 	var drawing := weapon == "bow" and phase in ["DRAWING","HOLDING","RELEASE","RECOVER"]
 	var aim_bow := drawing or bow_ability
 	var throwing := phase in ["T_DRAW","T_HOLD","T_RELEASE","T_RECOVER"]
-	var coupled_carry := weapon == "sword" and (sword_index == 2 or _staff_shown()) and not is_melee() and not throwing and not consuming
+	var coupled_carry := weapon == "sword" and (swings_two_handed() or _staff_shown()) and not is_melee() and not throwing and not consuming
 	var guarding := (coupled_carry or _blocking) and _grounded and _roll_progress < 0.0
 	var arm_overlay := coupled_carry and not guarding
 	var action := is_melee() or drawing or throwing or guarding or _cover_active or consuming or moving_ability
@@ -2873,7 +2927,7 @@ func _solve_pose(delta: float) -> void:
 	_model.basis = _model_basis(PI+STANCE_YAW*archery+_ability_spin_yaw())
 	_model.position = Vector3.ZERO
 	var clip := ("Sword_Idle_OneHand" if weapon in ["sword","dagger"] or weapon == "dual" else "Idle_Loop")
-	if weapon == "sword" and (sword_index == 2 or _staff_shown()):
+	if weapon == "sword" and (swings_two_handed() or _staff_shown()):
 		clip = "Sword_Idle"
 	var time := fposmod(_motion_time,_clip_length(clip))
 	if _roll_progress >= 0.0:
@@ -2894,7 +2948,7 @@ func _solve_pose(delta: float) -> void:
 	elif drawing:
 		time = 0.0
 	elif guarding:
-		clip = "Sword_Block_Loop" if weapon == "sword" and (sword_index == 2 or _staff_shown()) else "Sword_Block_Loop_OneHand"
+		clip = "Sword_Block_Loop" if weapon == "sword" and (swings_two_handed() or _staff_shown()) else "Sword_Block_Loop_OneHand"
 		time = fposmod(_motion_time,_clip_length(clip))
 	elif not _grounded:
 		clip = "Jump_Start" if _air_time < 0.15 else "Jump_Loop"
@@ -2936,7 +2990,7 @@ func _solve_pose(delta: float) -> void:
 	if arm_overlay or diagonal_body:
 		var carry_clip := "Sword_Idle"
 		if diagonal_body:
-			carry_clip = "Sword_Block_Loop" if weapon == "sword" and (sword_index == 2 or _staff_shown()) else "Sword_Idle_OneHand"
+			carry_clip = "Sword_Block_Loop" if weapon == "sword" and (swings_two_handed() or _staff_shown()) else "Sword_Idle_OneHand"
 		_sample_clip(carry_clip,fposmod(_motion_time,_clip_length(carry_clip)))
 		for index in _guard_bones.size():
 			_guard_pose[index] = skeleton.get_bone_pose(_guard_bones[index])
@@ -2989,6 +3043,11 @@ func _solve_pose(delta: float) -> void:
 	if leaning:
 		_apply_cover_lean()
 	_apply_melee_swing_path()
+	# A two-hander's raised block is solved, not authored: the socket puts the
+	# blade wherever the main hand is, and an authored wrist can hold a metre and
+	# a half of steel across its owner's own chest.
+	if _blocking and swings_two_handed() and not _staff_shown():
+		_pose_two_hand_guard()
 	_apply_hit_react_pose()
 	if ability:
 		_apply_ability_pose()
@@ -3005,7 +3064,7 @@ func _solve_pose(delta: float) -> void:
 		head.basis = Basis(Vector3.UP,-STANCE_YAW*archery)*head.basis
 		_set_bone_world(_bones.Head,head)
 	if weapon == "dual" and not consuming:
-		_pose_dual_arms()
+		_pose_dual_arms(moving)
 		if _right_melee_time >= 0.0 and _right_variant == "stab":
 			_aim_sword_thrust()
 	elif weapon == "dagger" and _right_melee_time >= 0.0 and not is_diagonal_swing("right"):
@@ -3027,12 +3086,12 @@ func _solve_pose(delta: float) -> void:
 		_update_hand_contacts()
 		var right_hand := _bone_world(_arms[1][2])
 		if weapon == "dagger":
-			active_dagger.global_transform = _carry_socket(right_hand * _sword_grip)
+			active_dagger.global_transform = _carry_socket(right_hand * _sword_grip,1.0)
 		elif weapon == "dual":
-			active_sword.global_transform = _carry_socket(right_hand * _sword_grip)
+			active_sword.global_transform = _carry_socket(right_hand * _sword_grip,1.0)
 			if active_off_weapon != null:
 				active_off_weapon.global_transform = _carry_socket(
-					_bone_world(_arms[0][2]) * _sword_grip_left)
+					_bone_world(_arms[0][2]) * _sword_grip_left,-1.0)
 		elif _staff_shown():
 			# A staff is gripped around its middle: the right hand sits just
 			# below the shaft centre and the support hand above it.
@@ -3046,7 +3105,58 @@ func _solve_pose(delta: float) -> void:
 	_update_consumable_props()
 	_sync_weapon_visibility()
 
-func _pose_dual_arms() -> void:
+## The two-hander's held guard. The authored clip carries the stance, the plant
+## and the breathing; the arms are solved here, because the socket hangs the
+## sword off the main hand and a metre of blade across the chest is a metre of
+## blade through the ribs. Both hands ride one hilt in front of the sternum, the
+## blade stands up over the face and the flat is turned to the blow.
+func _pose_two_hand_guard() -> void:
+	var grip := _sword_grip
+	var forward := _block_forward
+	forward.y = 0.0
+	if forward.length_squared() < 0.000001:
+		forward = -global_basis.z
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	# A guard breathes: the hilt rises and drifts a centimetre over the loop and
+	# the blade leans with it, so a held guard reads as weight held up rather
+	# than a statue with a sword welded to its fist.
+	var breath := sin(_motion_time*TAU/maxf(_clip_length("Sword_Block_Loop"),0.001))
+	var pivot := (_bone_world(_arms[0][0]).origin+_bone_world(_arms[1][0]).origin)*0.5
+	var blade := (Vector3.UP+forward*(GUARD_LEAN+GUARD_BREATH_LEAN*breath) \
+		+right*GUARD_CANT).normalized()
+	# `looking_at` puts the weapon's -Z on the blade and its +Y on the flat, and
+	# the flat faces the same way the body is blocking.
+	var blade_basis := Basis.looking_at(blade,forward)
+	var support_basis := blade_basis*_sword_grip_left.basis.inverse()
+	# Where the support wrist sits once the main hand holds the hilt: fixed by the
+	# blade frame, which lets the hilt be drawn into both arms' reach before
+	# either arm is solved instead of after.
+	var support_shift := blade_basis.z*GUARD_SUPPORT_DEPTH-support_basis*_palm_left
+	var right_shoulder := _bone_world(_arms[1][0]).origin
+	var right_elbow := _bone_world(_arms[1][1]).origin
+	var right_reach := right_shoulder.distance_to(right_elbow) \
+		+right_elbow.distance_to(_bone_world(_arms[1][2]).origin)
+	var left_shoulder := _bone_world(_arms[0][0]).origin
+	var left_elbow := _bone_world(_arms[0][1]).origin
+	var left_reach := left_shoulder.distance_to(left_elbow) \
+		+left_elbow.distance_to(_bone_world(_arms[0][2]).origin)
+	var wanted := pivot+forward*GUARD_HILT_FORWARD \
+		+Vector3.UP*(GUARD_HILT_LIFT+GUARD_BREATH*breath) \
+		+right*(GUARD_BREATH*0.6*breath)
+	var hilt := _two_hand_wrist_target(wanted,right_shoulder,right_reach*0.94,
+		left_shoulder-support_shift,left_reach*0.94,forward)
+	# Both elbows hang under the hilt and outside the ribs.
+	_solve_limb(_arms[1],hilt,blade_basis*grip.basis.inverse(),
+		(right*0.9+forward*0.25-Vector3.UP*0.75).normalized())
+	var sword_hand := _bone_world(_arms[1][2])
+	var handle := sword_hand*grip
+	var support_target := handle*Vector3(0,0,GUARD_SUPPORT_DEPTH) \
+		- support_basis*_palm_left
+	_solve_limb(_arms[0],support_target,support_basis,
+		(-right*0.9+forward*0.25-Vector3.UP*0.75).normalized())
+
+func _pose_dual_arms(moving: bool) -> void:
 	# Precision strikes extend the left hand along the crosshair. Diagonal
 	# paths take over that arm after this neutral offhand solve. An inactive
 	# right hand keeps its neutral local pose instead of copying a left stab.
@@ -3096,7 +3206,14 @@ func _pose_dual_arms() -> void:
 				skeleton.set_bone_pose(bone,_neutral_right_arm[bone])
 	else:
 		var shoulder := skeleton.get_bone_global_pose(_arms[0][0])
-		var target_skel := shoulder.origin+_offhand_offset
+		var target_skel := shoulder.origin+_offhand_offset.lerp(OFFHAND_RUN_OFFSET,_carry_blend)
+		# The off arm runs too: it counter-swings against the sword hand's own
+		# authored swing, so a jog reads as a body working and not as one arm
+		# carrying a weight beside a body that is moving on its own.
+		if moving:
+			var drive := skeleton.get_bone_global_pose(_arms[1][2]).origin \
+				-skeleton.get_bone_global_pose(_arms[1][0]).origin
+			target_skel += Vector3(0.0,0.0,clampf(-drive.z*0.9,-0.14,0.14))
 		_solve_limb(_arms[0],skeleton.global_transform*target_skel,
 			skeleton.global_basis*_offhand_weapon_basis*_sword_grip_left.basis.inverse(),
 			skeleton.global_basis*_offhand_pole)
@@ -3972,35 +4089,68 @@ func offhand_anchor() -> Transform3D:
 	basis = basis * Basis(Vector3.BACK, deg_to_rad(10.0))
 	return Transform3D(basis, grip.origin)
 
-## How far the carried piece is tipped at the dirt, in degrees, and how quickly a
-## body settles into and out of the carry.
-const CARRY_DEGREES := 64.0
+## How far in front of the sternum a two-handed guard holds its hilt, how far
+## above the shoulder line (negative is below it, which is where both hands drive
+## from), how far the blade leans off vertical, which way it cants, and how much
+## of the breath reaches the steel.
+const GUARD_HILT_FORWARD := 0.34
+const GUARD_HILT_LIFT := -0.18
+const GUARD_LEAN := 0.24
+const GUARD_CANT := -0.14
+const GUARD_BREATH := 0.010
+const GUARD_BREATH_LEAN := 0.030
+## How far down the handle the support hand sits, in metres along the weapon's
+## own +Z (toward the pommel). The greatsword's grip is 0.31 m long and the
+## branch's is gripped 0.20 m up, so this lands on both.
+const GUARD_SUPPORT_DEPTH := 0.12
+
+## A carried piece trails behind the fist: below the horizontal by `CARRY_TILT`,
+## out from the body by `CARRY_CANT`, with its flat rolled `CARRY_ROLL` off the
+## outward axis so a blade is not a paddle seen edge-on. Pointing a one-metre
+## arming sword at the ground would bury it — a hand rides a hip at about 0.9 m —
+## so the tip goes back and down past the calf instead, clear of the legs and of
+## the dirt, and the two hands mirror each other.
+const CARRY_TILT := -22.0
+const CARRY_CANT := 34.0
+const CARRY_ROLL := 14.0
 const CARRY_RATE := 5.0
 
-## The piece dropped toward the ground while the body is running. `_carry_blend`
+## The piece dropped into the run carry while the body is moving. `_carry_blend`
 ## rides the speed: standing or fighting it is 0 and the piece is held ready, at a
-## jog and a sprint it climbs to 1 and the whole weapon swings down out of the way.
-## A two-hander shouldered through a sprint reaches over the head and through it,
-## and the branch is long enough to find the face on the way down.
+## jog and a sprint it climbs to 1 and the whole weapon settles out of the way.
+## A two-hander shouldered through a sprint reaches over the head and through it.
 var _carry_blend := 0.0
 
+## Where the blade points in the run carry, in the actor's own frame.
+func _carry_basis(side: float) -> Basis:
+	var forward := -global_basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.000001:
+		forward = Vector3.FORWARD
+	forward = forward.normalized()
+	var back := -forward
+	var out := global_basis.x
+	out.y = 0.0
+	out = (out if out.length_squared() > 0.000001 else Vector3.RIGHT).normalized()*side
+	var cant := deg_to_rad(CARRY_CANT)
+	var tilt := deg_to_rad(CARRY_TILT)
+	var roll := deg_to_rad(CARRY_ROLL)
+	var level := back*cos(cant)+out*sin(cant)
+	var blade := level*cos(tilt)+Vector3.UP*sin(tilt)
+	var flat := (out*cos(cant)-back*sin(cant))*cos(roll)+Vector3.UP*sin(roll)
+	return Basis.looking_at(blade.normalized(),flat.normalized())
+
+
 ## The socket with the run carry folded in. Nothing is turned when the blend is
-## zero, so every fighting pose keeps the authored grip exactly.
-func _carry_socket(grip: Transform3D) -> Transform3D:
+## zero, so every fighting pose keeps the authored grip exactly. The blend is a
+## frame in the actor's own space rather than a pitch about one axis: the hand bone
+## rolls and pumps through a run, and a piece that inherits that roll swings its
+## tip through the chest and the dirt instead of trailing the body.
+func _carry_socket(grip: Transform3D, side: float = 1.0) -> Transform3D:
 	if _carry_blend <= 0.0001:
 		return grip
-	# Pitch about the actor's own right axis, not the socket's local X. The hand
-	# bone rolls through a run, so its X is not the body's: a post-multiplied
-	# local-X pitch tipped a long piece out to the right as much as at the dirt.
-	# Turn the socket's basis in actor space - its origin is the fist and does
-	# not move - so the tip stays in the sagittal plane and leans forward and
-	# down with the body instead of swinging sideways.
-	var right := global_basis.x
-	if right.length_squared() < 0.0001:
-		right = Vector3.RIGHT
-	right = right.normalized()
-	var turn := Basis(right, deg_to_rad(-CARRY_DEGREES * _carry_blend))
-	return Transform3D(turn * grip.basis, grip.origin)
+	var carried := _blend_basis(grip.basis,_carry_basis(side),_carry_blend)
+	return Transform3D(carried.scaled(grip.basis.get_scale()),grip.origin)
 
 
 ## Where the carry should be this frame: running only. A swing, a guard, a roll,
@@ -4010,6 +4160,11 @@ func _carry_target(speed: float) -> float:
 	if not _grounded or phase != "READY" or weapon == "none":
 		return 0.0
 	if _blocking or _cover_active or _roll_progress >= 0.0 or slide_progress >= 0.0:
+		return 0.0
+	# A piece held by two hands, or a shaft wedged under one arm, is owned by the
+	# hands: turning it in the actor's frame would pull it out of its own grip.
+	# The carry is the single-hand carry.
+	if swings_two_handed() or _staff_shown():
 		return 0.0
 	if is_melee() or is_consuming() or _step_progress >= 0.0:
 		return 0.0

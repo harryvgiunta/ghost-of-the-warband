@@ -97,6 +97,38 @@ the card's copy can never disagree.
     is a passive for the purposes of the roll: it takes no slot and is always on.
 - An annointment and a **brand** are independent. A piece may carry both.
 
+### 1.1 The mark the altar leaves
+
+An annointment is not a number in a menu. Every worked piece carries its count on
+its own steel: one inlaid mark per annointment, glowing a step hotter with each,
+and a full six-annointment piece rings its face and lights its edges. A plain
+piece draws nothing at all — the mark *is* the difference, in the hand, on the
+floor and on the paperdoll's own ranger.
+
+| Piece | Where the marks go |
+| --- | --- |
+| Forged sword, dagger | a lit channel down the fuller, one chevron per annointment marching down it; from four, both edges are lit too |
+| Makeshift sword, club, branch, staff | one glowing band per annointment up the haft or shaft, standing `14%` proud of the wood |
+| Shield | one lit stud per annointment round the face, and a warden's hoop round the rim from four |
+| Bow | one band per annointment round the grip, above the hand |
+| Tome, skull | runes across the cover; warding marks walked over the front of the cranium |
+
+The colour walks from the altar's own ember (`#ff8a2a` at one) to hot bone
+(`#ffd9a8` at six) and the emission climbs with it, stopping short of white-out
+so the top rung still reads as worked metal rather than bare steel. Everything
+is drawn by `scripts/annoint_marks.gd`, so one call site per weapon family and
+one shared emissive material per piece.
+
+**How the count reaches the steel.** The count belongs to a *copy*, so it rides
+the dress and not the loadout: `Warband.annointment_marks(merc_id)` answers
+`{main, off}`, `PossessionController` adds it to the `annoints` payload
+`SeatLoadout` hands the rig, and `Archer.set_annoint_marks` pushes each hand's
+count onto the piece that hand is actually drawing. The altar's rite therefore
+marks the sword in the body's hand the same frame it is welded: the controller
+re-dresses bodies holding the copy on `annointed_state`. The paperdoll and the
+HUD bust are dressed from the same call, so the copy never shows two faces.
+
+
 ## 2. The roll
 
 One annointing = one `ichor_vial`. Four outcomes, equal weight, `d100`:

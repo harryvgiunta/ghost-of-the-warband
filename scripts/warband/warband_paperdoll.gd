@@ -861,6 +861,14 @@ func _item_name(item_id: String) -> String:
 		return "empty"
 	return str(State.ITEMS.get(item_id, {}).get("name", item_id))
 
+
+## The altar's count on the two pieces this body is holding, for the stage ranger:
+## a worked blade wears its marks on the paperdoll too, not only in the hand.
+func _worn_annoint_marks() -> Dictionary:
+	if _warband == null or not _warband.has_method("annointment_marks"):
+		return {}
+	return _warband.annointment_marks(selected_merc)
+
 func _refresh_preview() -> void:
 	if preview == null:
 		return
@@ -887,7 +895,7 @@ func _refresh_preview() -> void:
 	# The stage shows the mercenary being dressed, not a generic ranger: his own
 	# height, face, hair and colours, then his kit on top of them.
 	preview.set_appearance(Looks.profile_for(selected_merc))
-	preview.apply_kit(loadout, worn)
+	preview.apply_kit(loadout, worn, _worn_annoint_marks())
 	# Dressed on every repaint, open or shut (`Warband.changed` repaints a shut
 	# screen too), but only an open screen renders and poses its stage.
 	preview.set_active(_open)

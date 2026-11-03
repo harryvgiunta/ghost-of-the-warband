@@ -949,9 +949,14 @@ func _refresh_portrait() -> void:
 	if _portrait_eye != null:
 		_portrait_eye.visible = false
 	var gear: Dictionary = _warband.roster.equipped_of(_merc_id)
+	var marks: Dictionary = _warband.annointment_marks(_merc_id) \
+		if _warband.has_method("annointment_marks") else {}
 	var signature := "%d|" % _merc_id
 	for slot in Contracts.SLOT_ORDER:
 		signature += "%s," % str(gear.get(slot, ""))
+	# An annointment changes no id: it changes the copy's steel. So the count rides
+	# the signature, or a piece worked at the altar would keep its old face.
+	signature += "|%d,%d" % [int(marks.get("main", 0)), int(marks.get("off", 0))]
 	if signature == _portrait_sig:
 		return
 	_portrait_sig = signature
@@ -970,7 +975,7 @@ func _refresh_portrait() -> void:
 		armor, worn)
 	_portrait.set_appearance(Looks.profile_for(_merc_id))
 	_portrait.set_bust(true)
-	_portrait.apply_kit(loadout, worn)
+	_portrait.apply_kit(loadout, worn, marks)
 	_portrait.flash()
 
 

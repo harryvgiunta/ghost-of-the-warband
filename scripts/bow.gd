@@ -1,6 +1,7 @@
 extends Node3D
 
 const Geo = preload("res://scripts/geo.gd")
+const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 # Human-scale draw fitted to the imported ranger's arm span, shared by all bow shapes.
 const BRACE_DISTANCE: float = 0.18
 const DRAW_DISTANCE: float = 0.62
@@ -23,11 +24,43 @@ var _has_pose := false
 var _rest_lengths := PackedFloat32Array()
 var _rest_angles := PackedFloat32Array()
 var _string_half_length := 0.0
+## The altar's bands on this copy: one per annointment, wrapped around the grip
+## where the hand leaves them visible, and glowing harder with each.
+var annoint_tier := 0
+var _annoint_glyphs := 0
+var _annoint_marks: Node3D
 const SEGMENTS: int = 9
 
 func _ready() -> void:
 	_build()
 	set_draw(normalized_draw)
+	_etch_annoints()
+
+
+## The altar's record of this copy. The limbs are rebuilt for the draw solve, so
+## the marks live in their own node and are refilled without touching them.
+func set_annoint_marks(value: int) -> void:
+	var wanted := AnnointMarks.tier_of(value)
+	if wanted == annoint_tier and _annoint_marks != null:
+		return
+	annoint_tier = wanted
+	_etch_annoints()
+
+
+func annoint_glyphs() -> int:
+	return _annoint_glyphs
+
+
+func _etch_annoints() -> void:
+	if _annoint_marks == null:
+		_annoint_marks = Node3D.new()
+		_annoint_marks.name = "AnnointMarks"
+		add_child(_annoint_marks)
+	for child in _annoint_marks.get_children():
+		_annoint_marks.remove_child(child)
+		child.queue_free()
+	_annoint_glyphs = AnnointMarks.rings(_annoint_marks,Vector3(0.0,-0.12,0.0),
+		Vector3(0,1,0),0.34,0.036,annoint_tier)
 
 func _build() -> void:
 	var wood: StandardMaterial3D

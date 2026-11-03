@@ -4,8 +4,13 @@ extends Node3D
 ## ironwood shiv of the makeshift tier at index 1.
 
 const Geo = preload("res://scripts/geo.gd")
+const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 var blade_length := 0.34
 var dagger_kind := 0
+## How many annointments the altar welded to this copy, 0..6: one inlaid mark per
+## annointment, glowing harder with each.
+var annoint_tier := 0
+var _annoint_glyphs := 0
 
 
 func _ready() -> void:
@@ -17,6 +22,19 @@ func set_dagger_kind(kind: int) -> void:
 		return
 	dagger_kind = kind
 	_build()
+
+
+## The altar's record of this copy. Only a change of rung rebuilds the blade.
+func set_annoint_marks(value: int) -> void:
+	var wanted := AnnointMarks.tier_of(value)
+	if wanted == annoint_tier and get_child_count() > 0:
+		return
+	annoint_tier = wanted
+	_build()
+
+
+func annoint_glyphs() -> int:
+	return _annoint_glyphs
 
 
 func _clear() -> void:
@@ -59,6 +77,8 @@ func _build_iron() -> void:
 		var binding := Geo.cylinder(self,0.019,0.019,0.006,Vector3(0,0,-0.026+index*0.026),brass,10)
 		binding.rotation.x = PI/2.0
 	Geo.sphere(self,0.027,Vector3(0,0,0.086),brass)
+	_annoint_glyphs = AnnointMarks.blade(self,Vector3(0,0,-0.10),
+		maxf(span*0.86,0.06),0.040,0.0055,annoint_tier)
 
 ## A split ironwood stave whittled to a point: the makeshift tier's shank. Dark,
 ## dense, fire-hardened at the tip, bound in gut over a rag grip, and crooked
@@ -101,3 +121,6 @@ func _build_ironwood() -> void:
 		Vector3(1.0, 0.85, 1.0))
 	var toggle := Geo.cylinder(self, 0.006, 0.004, 0.052, Vector3(0.016, 0.004, 0.050), gut, 5)
 	toggle.rotation.z = 1.35
+	# A branded shiv: the altar's bands sit on the stave above the gut wraps.
+	_annoint_glyphs = AnnointMarks.rings(self,Vector3(0.003,0.002,-0.08),
+		Vector3(0.0,0.0,-1),absf(tip)*0.52,0.019,annoint_tier)

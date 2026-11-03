@@ -39,6 +39,9 @@ var _active := false
 var _loadout: Dictionary = {}
 var _trinkets: Dictionary = {}
 var _appearance: Dictionary = {}
+## How many annointments each held copy carries, so the ranger on the stage wears
+## the same worked steel the body in the world does.
+var _marks: Dictionary = {}
 
 func _ready() -> void:
 	stretch = true
@@ -139,12 +142,14 @@ func _add_stage() -> void:
 	viewport.add_child(platform)
 
 
-func apply_kit(loadout: Dictionary, trinkets: Dictionary) -> void:
+func apply_kit(loadout: Dictionary, trinkets: Dictionary, marks: Dictionary = {}) -> void:
 	if not _built:
 		return
 	_loadout = loadout
 	_trinkets = trinkets
+	_marks = marks
 	rig.apply_loadout(loadout)
+	rig.set_annoint_marks(_marks) if rig.has_method("set_annoint_marks") else null
 	TrinketArt.apply(rig.skeleton,trinkets)
 	_frame_camera()
 
@@ -164,7 +169,7 @@ func set_appearance(profile: Dictionary) -> void:
 	viewport.add_child(rig)
 	rig.set_physics_process(false)
 	if not _loadout.is_empty():
-		apply_kit(_loadout, _trinkets)
+		apply_kit(_loadout, _trinkets, _marks)
 	_frame_camera()
 
 

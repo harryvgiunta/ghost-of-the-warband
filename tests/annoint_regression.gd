@@ -18,6 +18,13 @@ const Stats = preload("res://scripts/trinket_stats.gd")
 const Rules = preload("res://scripts/ability_rules.gd")
 const State = preload("res://scripts/player_state.gd")
 const Runtime = preload("res://scripts/warband/annoint_runtime.gd")
+const Marks = preload("res://scripts/annoint_marks.gd")
+const SwordScript = preload("res://scripts/sword.gd")
+const DaggerScript = preload("res://scripts/dagger.gd")
+const StaffScript = preload("res://scripts/staff.gd")
+const ShieldScript = preload("res://scripts/shield.gd")
+const BowScript = preload("res://scripts/bow.gd")
+const FocusScript = preload("res://scripts/focus_item.gd")
 
 const RITUALS := 99999
 
@@ -59,6 +66,7 @@ func run() -> void:
 	_check_applicability()
 	_check_die()
 	_check_ledger()
+	_check_marks()
 	_check_runtime()
 	_check_stress()
 
@@ -292,6 +300,95 @@ func _check_ledger() -> void:
 	check(not ledger.rows_for("head_mail", 0).is_empty(), "card rows empty")
 	check(not ledger.summary_for("head_mail", 0).is_empty(), "summary empty")
 	check(ledger.want_for(refs, "tank") <= 1.0, "want_for out of range")
+
+
+# --- the visible mark ------------------------------------------------------
+
+## What a player actually sees: every weapon family draws one inlaid mark per
+## annointment and glows a step brighter with each, a plain piece draws nothing
+## at all, and re-stating the same count is free.
+func _check_marks() -> void:
+	check(Marks.tier_of(-3) == 0 and Marks.tier_of(99) == Marks.TIERS,
+		"the altar's count is clamped to the six a piece can carry")
+	check(Marks.material_for(0) == null,"a plain piece draws no inlaid material")
+	var previous_energy := -1.0
+	var previous_glyphs := -1
+	for tier in range(0,Marks.TIERS + 1):
+		check(Marks.energy_for(tier) > previous_energy,"the glow climbs with every rung (%d)" % tier)
+		check(Marks.glyph_count(tier) > previous_glyphs,"every rung adds a mark (%d)" % tier)
+		previous_energy = Marks.energy_for(tier)
+		previous_glyphs = Marks.glyph_count(tier)
+	check(Marks.color_for(1) != Marks.color_for(Marks.TIERS),
+		"a full piece burns a different colour to a single annointment")
+
+	var holder := Node3D.new()
+	root.add_child(holder)
+	var pieces: Array = []
+	for index in 5:
+		var sword := SwordScript.new()
+		sword.sword_kind = index
+		sword.blade_length = float([0.50,0.80,1.40,0.68,1.16][index])
+		pieces.append(["sword_%d" % index,sword])
+	for index in 2:
+		var dagger := DaggerScript.new()
+		dagger.dagger_kind = index
+		dagger.blade_length = float([0.34,0.30][index])
+		pieces.append(["dagger_%d" % index,dagger])
+	for index in 2:
+		var staff := StaffScript.new()
+		staff.staff_kind = index
+		staff.blade_length = float([1.60,1.50][index])
+		pieces.append(["staff_%d" % index,staff])
+	pieces.append(["shield",ShieldScript.new()])
+	for index in 3:
+		var bow := BowScript.new()
+		bow.bow_kind = index
+		bow.bow_length = float([1.30,1.40,1.55][index])
+		pieces.append(["bow_%d" % index,bow])
+	for kind in ["tome","skull","skull_life"]:
+		var focus := FocusScript.new()
+		focus.focus_kind = kind
+		pieces.append(["focus_%s" % kind,focus])
+	for entry in pieces:
+		var label := str(entry[0])
+		var piece: Node3D = entry[1]
+		piece.set_annoint_marks(0)
+		holder.add_child(piece)
+		check(int(piece.annoint_glyphs()) == 0,"%s is plain" % label)
+		var plain_surfaces := _emissive_surfaces(piece)
+		piece.set_annoint_marks(1)
+		var single := int(piece.annoint_glyphs())
+		check(single > 0,"%s draws its mark for one annointment, got %d" % [label,single])
+		piece.set_annoint_marks(Marks.TIERS)
+		var full := int(piece.annoint_glyphs())
+		check(full > single,"%s draws more marks at six than at one (%d > %d)" % [label,full,single])
+		check(_emissive_surfaces(piece) > plain_surfaces,
+			"%s adds a glowing surface once it is worked" % label)
+		# Re-stating the same rung on every dress must not rebuild the piece.
+		var first_child: Node = piece.get_child(0)
+		piece.set_annoint_marks(Marks.TIERS)
+		check(piece.get_child_count() > 0 and piece.get_child(0) == first_child,
+			"%s is not rebuilt when the count has not moved" % label)
+		piece.queue_free()
+	holder.queue_free()
+
+
+## How many surfaces of a piece carry an emission: the inlaid marks, once worked.
+func _emissive_surfaces(piece: Node3D) -> int:
+	var total := 0
+	for node in piece.find_children("*","MeshInstance3D",true,false):
+		var mesh_instance := node as MeshInstance3D
+		if mesh_instance == null:
+			continue
+		var override := mesh_instance.material_override
+		if override is StandardMaterial3D and (override as StandardMaterial3D).emission_enabled:
+			total += 1
+		if mesh_instance.mesh != null:
+			for surface in mesh_instance.mesh.get_surface_count():
+				var material: Material = mesh_instance.mesh.surface_get_material(surface)
+				if material is StandardMaterial3D and (material as StandardMaterial3D).emission_enabled:
+					total += 1
+	return total
 
 
 # --- the procs -------------------------------------------------------------

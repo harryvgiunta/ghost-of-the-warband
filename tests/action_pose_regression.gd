@@ -410,6 +410,106 @@ func check_cover_poses(holder: Node3D) -> void:
 			check((-rig.global_basis.z).dot(Vector3.BACK)>0.99,"Retucking restores the protected outward facing")
 		rig.queue_free()
 
+## The greatsword's raised block: both hands on one hilt in front of the chest,
+## the blade standing up over the face with its flat turned to the blow, and no
+## steel inside its owner. This is the pose the authored wrist could not give:
+## the socket hangs the sword off the main hand, so a chest-height hilt across
+## the body is a metre and a half of steel through the ribs.
+func check_guard(rig: Node3D, size: int) -> void:
+	rig.set_weapon("sword")
+	rig.set_sword(size)
+	rig.set_locomotion(Vector3.ZERO,true)
+	rig.advance_animation(0.3)
+	rig.set_blocking(true,Vector3.FORWARD)
+	var forward: Vector3 = -rig.global_basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
+	var closest_torso := INF
+	var flat_forward := INF
+	var palms_ahead := INF
+	for frame in 90:
+		rig.advance_animation(1.0/60.0)
+		check(rig.is_blocking(),"The guard stays raised for the whole loop")
+		check_two_hand_grip(rig)
+		var joints: Dictionary = rig.get_joint_positions()
+		var base: Vector3 = rig.get_blade_base("right")
+		var tip: Vector3 = rig.get_blade_tip("right")
+		var blade: Vector3 = (tip-base).normalized()
+		check(blade.y > 0.85,
+			"The guard stands the blade up rather than laying it across the chest (%.2f)" % blade.y)
+		check((base-rig.global_position).dot(forward) > 0.22,
+			"The hilt is held out in front of the chest, not inside it (%.3f)" % (base-rig.global_position).dot(forward))
+		check(tip.y-rig.global_position.y > 1.9,"The held blade covers the head (tip %.2f)" % (tip.y-rig.global_position.y))
+		var chest_a: Vector3 = (joints.left_hip+joints.right_hip)*0.5
+		var chest_b: Vector3 = (joints.left_shoulder+joints.right_shoulder)*0.5
+		for step in 9:
+			var point: Vector3 = base.lerp(tip,float(step)/8.0)
+			closest_torso = minf(closest_torso,
+				point.distance_to(Geometry3D.get_closest_point_to_segment(point,chest_a,chest_b)))
+		flat_forward = minf(flat_forward,rig.active_sword.global_basis.y.dot(forward))
+		palms_ahead = minf(palms_ahead,minf(
+			(joints.right_wrist-rig.global_position).dot(forward),
+			(joints.left_wrist-rig.global_position).dot(forward)))
+	check(closest_torso > 0.16,"No part of the held blade passes through the torso (%.3f)" % closest_torso)
+	check(flat_forward > 0.55,"The flat of the blade faces the blow it is raised against (%.2f)" % flat_forward)
+	check(palms_ahead > 0.14,"Both hands work in front of the body (%.3f)" % palms_ahead)
+	rig.set_blocking(false)
+	rig.advance_animation(0.2)
+
+
+## The run carry: a blade held in one hand trails behind the fist, out past the
+## leg and clear of the dirt, on both sides at once. The old carry pitched every
+## socket at the ground, which on a dual pair pointed both blades down the legs
+## and drove the off hand's tip through the floor.
+func check_run_carry(rig: Node3D) -> void:
+	rig.set_weapon("sword")
+	rig.set_sword(1)
+	rig.set_off_weapon("sword",1,true)
+	rig.set_weapon("dual")
+	var speed := Vector3(0,0,-6.4)
+	rig.set_locomotion(speed,true)
+	rig.advance_animation(0.4)
+	var lowest_steel := INF
+	var closest_leg := INF
+	var trailing := INF
+	var canting := INF
+	var sampled := 0
+	for frame in 120:
+		rig.set_locomotion(speed,true)
+		rig.advance_animation(1.0/90.0)
+		if rig._carry_blend < 0.999:
+			continue
+		sampled += 1
+		var joints: Dictionary = rig.get_joint_positions()
+		var forward: Vector3 = -rig.global_basis.z
+		forward.y = 0.0
+		forward = forward.normalized()
+		var side_axis: Vector3 = rig.global_basis.x.normalized()
+		var legs := [["left_hip","left_knee"],["left_knee","left_ankle"],
+			["right_hip","right_knee"],["right_knee","right_ankle"]]
+		for hand in ["left","right"]:
+			var base: Vector3 = rig.get_blade_base(hand)
+			var tip: Vector3 = rig.get_blade_tip(hand)
+			var blade: Vector3 = (tip-base).normalized()
+			lowest_steel = minf(lowest_steel,minf(base.y,tip.y))
+			trailing = minf(trailing,-blade.dot(forward))
+			canting = minf(canting,absf(blade.dot(side_axis)))
+			for leg in legs:
+				for step in 9:
+					var point: Vector3 = base.lerp(tip,float(step)/8.0)
+					closest_leg = minf(closest_leg,point.distance_to(
+						Geometry3D.get_closest_point_to_segment(point,joints[leg[0]],joints[leg[1]])))
+	check(sampled > 60,"The sprint reaches its carry on both hands")
+	check(lowest_steel > 0.22,"Neither carried blade reaches the dirt at a sprint (%.3f)" % lowest_steel)
+	check(closest_leg > 0.08,"Neither carried blade passes through a leg (%.3f)" % closest_leg)
+	check(trailing > 0.45,"Both carried blades trail behind the runner (%.2f)" % trailing)
+	check(canting > 0.22,"Both carried blades cant out away from the body (%.2f)" % canting)
+	rig.set_off_weapon("",0,false)
+	rig.set_weapon("sword")
+	rig.set_locomotion(Vector3.ZERO,true)
+	rig.advance_animation(0.2)
+
+
 func run() -> void:
 	var holder := Node3D.new()
 	root.add_child(holder)
@@ -451,6 +551,9 @@ func run() -> void:
 	check_running(rig,"bow",1)
 	check_running(rig,"sword",1)
 	check_running(rig,"sword",2)
+	check_guard(rig,2)
+	check_guard(rig,4)
+	check_run_carry(rig)
 	check_cover_poses(holder)
 	holder.queue_free()
 	await process_frame

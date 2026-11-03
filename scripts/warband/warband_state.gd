@@ -983,6 +983,18 @@ func annointment_skills(merc_id: int) -> Dictionary:
 func annointment_procs(merc_id: int) -> Array:
 	return annoints.procs_for(annoint_refs(merc_id))
 
+## How many annointments each held copy carries, per hand. The rig draws them as
+## inlaid marks on the piece itself, one per annointment.
+func annointment_marks(merc_id: int) -> Dictionary:
+	var kit := roster.equipped_of(merc_id)
+	var out := {"main": 0, "off": 0}
+	for slot in ["main", "off"]:
+		var item_id := str(kit.get(slot, ""))
+		if item_id.is_empty():
+			continue
+		out[slot] = annoints.count(item_id, annoint_copy(merc_id, slot))
+	return out
+
 ## How much this body wants its own annointed kit, 0..1, for the arming pass.
 func annointment_want(merc_id: int, disposition: String) -> float:
 	return annoints.want_for(annoint_refs(merc_id), disposition)

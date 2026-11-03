@@ -7,12 +7,18 @@ extends Node3D
 ## -Z, grip at the origin.
 
 const Geo = preload("res://scripts/geo.gd")
+const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 ## Which kinds are not steel by default. The catalog's `index` is the key, so a
 ## club is a club because it is item index 3, not because a caller said so.
 const NATURAL_FAMILY := {3: "club", 4: "branch"}
 var blade_length := 0.8
 var sword_kind := 0
 var skin := ""
+## How many annointments the altar welded to this copy, 0..6. The blade draws one
+## inlaid mark per annointment and glows harder with each, so a worked piece is
+## recognisable in the hand and on the floor.
+var annoint_tier := 0
+var _annoint_glyphs := 0
 
 
 func _ready() -> void:
@@ -24,6 +30,22 @@ func set_skin(value: String) -> void:
 		return
 	skin = value
 	_build()
+
+
+## The altar's record of this copy, pushed by the rig that draws it. Only a change
+## of rung rebuilds the blade.
+func set_annoint_marks(value: int) -> void:
+	var wanted := AnnointMarks.tier_of(value)
+	if wanted == annoint_tier and get_child_count() > 0:
+		return
+	annoint_tier = wanted
+	_build()
+
+
+## The separate marks the blade is carrying right now: one per annointment, plus
+## the fuller and the rune pairs that come with them.
+func annoint_glyphs() -> int:
+	return _annoint_glyphs
 
 
 func _clear() -> void:
@@ -72,6 +94,9 @@ func _build_steel() -> void:
 		var binding := Geo.cylinder(self,0.030,0.030,0.008,Vector3(0,0,-0.025+index*(grip_length-0.03)/5.0),gold,10)
 		binding.rotation.x=PI/2
 	Geo.sphere(self,0.043,Vector3(0,0,grip_length-0.02),gold)
+	# The altar's work: inlaid runes down the fuller of the forged blade.
+	_annoint_glyphs = AnnointMarks.blade(self,Vector3(0,0,-0.10),
+		maxf(blade_length-0.24,0.10),width,0.0175,annoint_tier)
 
 
 ## How far up the limb a two-handed grip sits. The hand is the node's origin, so
@@ -127,6 +152,10 @@ func _build_makeshift() -> void:
 			Vector3(-0.030 + index * 0.055,0.014,-0.055),bark_light)
 		splinter.rotation.x = 0.5 - index * 0.9
 		splinter.rotation.y = 0.4 + index * 0.5
+	# A worked stave is branded, not decorated: the altar's marks are burnt bands
+	# around the haft where a hand holds it.
+	_annoint_glyphs = AnnointMarks.rings(self,Vector3(0.006,0.003,-0.12),
+		Vector3(0,0,-1),span*0.46,0.033,annoint_tier)
 
 ## A knotted length of heartwood with the root still on it: one club, two hands
 ## of a prisoner's strength, a head that is heavier than the haft so the swing
@@ -173,6 +202,9 @@ func _build_club() -> void:
 			Vector3(0.0, 0.0, -0.03 + index * 0.038), cord, 9)
 		wrap.rotation.x = PI / 2.0
 	Geo.sphere(self, 0.030, Vector3(0.0, 0.0, 0.112), heart, Vector3(1.0, 0.8, 1.0))
+	# A worked club carries the altar's bands up its haft.
+	_annoint_glyphs = AnnointMarks.rings(self,Vector3(0.0,0.0,-0.12),
+		Vector3(0,0,-1),span*0.62,0.036,annoint_tier)
 
 
 ## A whole limb swung with both hands: long, bent, and heavy enough that a body
@@ -233,3 +265,6 @@ func _build_branch() -> void:
 		Vector3(-0.040, -0.030, -0.44 - span * 0.10), leaf)
 	rag.rotation.z = 0.5
 	rag.rotation.y = 0.3
+	# The altar's bands run up the limb itself, past the second hand.
+	_annoint_glyphs = AnnointMarks.rings(holder,Vector3(0.006,0.004,-0.14),
+		Vector3(0.0,0.02,-1),span*0.70,0.050,annoint_tier)

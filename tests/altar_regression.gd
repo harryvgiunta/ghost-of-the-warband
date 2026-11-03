@@ -195,6 +195,8 @@ func check_anoint() -> void:
 		field.queue_free()
 		return
 	check(str(body.rig.weapon) == "bow", "the body holds the stock bow")
+	check(int(body.rig.annoint_marks.get("main", -1)) == 0, "a plain bow is drawn plain")
+	check(int(body.rig.active_bow.annoint_glyphs()) == 0, "a plain bow carries no marks")
 	check(body.ability.definition(0).is_empty(), "a stock bow carries no skill")
 
 	menu.open()
@@ -224,6 +226,22 @@ func check_anoint() -> void:
 	check(str(body.ability.definition(0).get("id", "")) == skill_id,
 		"the fielded body carries the skill at once, got %s" \
 			% str(body.ability.definition(0).get("id", "")))
+	# The weld is visible on the steel: the ledger's count reaches the rig that is
+	# drawing the copy, and the piece in the hand marks itself once per
+	# annointment. This is the whole reason the count travels with the dress.
+	var welded: int = warband.annoints.count("bow_short", 0)
+	var marks: Dictionary = warband.annointment_marks(merc)
+	check(int(marks.get("main", -1)) == welded,
+		"the warband counts the worn copy's annointments (%d)" % welded)
+	check(int(body.rig.annoint_marks.get("main", -1)) == welded,
+		"the re-dressed body carries the count")
+	check(int(body.rig.annoint_marks.get("off", -1)) == 0,
+		"the empty off hand marks nothing")
+	check(int(body.rig.active_bow.annoint_glyphs()) == welded,
+		"the bow in the hand draws one mark per annointment, got %d of %d" \
+			% [int(body.rig.active_bow.annoint_glyphs()), welded])
+	check(body.rig.active_bow.get_node_or_null("AnnointMarks") != null,
+		"the marks are drawn on the held piece, not only counted")
 
 	# Six annointments fit, so a marked piece is not "done": the second rite is
 	# spent, and it can only ever add, strip or swap - never destroy.
@@ -235,6 +253,9 @@ func check_anoint() -> void:
 	var after := _anoint_row("bow_short")
 	check(after.get("button") != null, "a piece with room still offers the button")
 	check(State.ITEMS.has("bow_short"), "the piece still exists - nothing is destroyed")
+	var grown: int = warband.annoints.count("bow_short", 0)
+	check(int(body.rig.active_bow.annoint_glyphs()) == grown,
+		"the marks follow the copy's count after the second rite (%d)" % grown)
 
 	# A piece the warband does not carry is refused, and refuses for free.
 	stash.add(reagent, 1)

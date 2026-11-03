@@ -138,6 +138,12 @@ func setup(warband: WarbandState, camera_node: Camera3D, bodies_root: Node3D) ->
 			_warband.souls.body_unregistered.connect(_on_body_unregistered)
 		if not _warband.anointed.is_connected(_on_piece_anointed):
 			_warband.anointed.connect(_on_piece_anointed)
+		# Welding an annointment changes the copy's steel: the body holding it is
+		# dressed again, so the marks and the modifiers both land now and not at
+		# the next spawn.
+		if _warband.has_signal("annointed_state") \
+				and not _warband.annointed_state.is_connected(_on_piece_annointed):
+			_warband.annointed_state.connect(_on_piece_annointed)
 		if _warband.has_signal("armed") and not _warband.armed.is_connected(_on_warband_armed):
 			_warband.armed.connect(_on_warband_armed)
 	if sync == null:
@@ -281,7 +287,8 @@ func _warband_annoints(merc_id: int) -> Dictionary:
 		return {}
 	return {"stats": _warband.annointment_stats(merc_id),
 		"skills": _warband.annointment_skills(merc_id),
-		"procs": _warband.annointment_procs(merc_id)}
+		"procs": _warband.annointment_procs(merc_id),
+		"marks": _warband.annointment_marks(merc_id)}
 
 # --- reading ---------------------------------------------------------------
 
@@ -366,6 +373,16 @@ func refresh_gear(merc_id: int) -> bool:
 ## The altar woke a piece: every body holding a copy is dressed again, so the
 ## skill is in its hands now rather than at the next spawn.
 func _on_piece_anointed(item_id: String, _ability: String) -> void:
+	for merc_id in _merc_bodies.keys():
+		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
+		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
+			refresh_gear(int(merc_id))
+
+
+## The altar welded an annointment to a copy: the piece draws a new mark and its
+## storage is bigger, so every body holding that copy is dressed again. The signal
+## carries the ledger's id list; only the copy's owner cares which entries they are.
+func _on_piece_annointed(item_id: String, _entries: Array) -> void:
 	for merc_id in _merc_bodies.keys():
 		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
 		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
