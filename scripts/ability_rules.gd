@@ -588,6 +588,36 @@ const ABILITIES := [
 			"radius": 2.0, "stagger": 0.3},
 		"cues": [{"at": 0.32, "cue": "arc"}],
 	},
+	# The two consumables. They are not the kit's: nothing is worn to grant them
+	# and nothing is anointed, so `granted` appends them after the kit's skills -
+	# the bandage on key 9 and the potion on key 0 until the player moves them.
+	# The body owns the channel; the runner owns the key and the cooldown.
+	{
+		"id": "bandage",
+		"name": "BANDAGE",
+		"item": "",
+		"slot": 0,
+		"key": "9",
+		"stamina_cost": 0.0,
+		"cooldown": 9.0,
+		"duration": 0.0,
+		"move": false,
+		"consume": "bandage",
+		"description": "Bind a wound: 35 health over three seconds, standing still.",
+	},
+	{
+		"id": "healing_potion",
+		"name": "HEALING POTION",
+		"item": "",
+		"slot": 0,
+		"key": "0",
+		"stamina_cost": 0.0,
+		"cooldown": 12.0,
+		"duration": 0.0,
+		"move": false,
+		"consume": "potion",
+		"description": "Drink a healing potion: 50 health at once.",
+	},
 ]
 
 static var _icon_cache: Dictionary = {}
@@ -675,18 +705,40 @@ static func off_item(rig) -> String:
 	return SHIELD_ITEMS[clampi(int(rig.shield_variant), 0, SHIELD_ITEMS.size() - 1)]
 
 
+## The two consumables every body carries on the bar, after the kit's own skills:
+## a bandage and a healing potion are worn by nobody and anointed by nothing, so
+## they cannot come from a piece. The kit keeps the slots before them, which is
+## what leaves the default bandage on key 9 and the potion on key 0.
+const CONSUMABLE_IDS := ["bandage", "healing_potion"]
+
+static var _consumables: Array = []
+
+static func consumable_definitions() -> Array:
+	# Built once: `granted` runs on every HUD frame and on every dressing, and the
+	# two definitions never change.
+	if _consumables.is_empty():
+		for id in CONSUMABLE_IDS:
+			var definition := by_id(id)
+			if not definition.is_empty():
+				_consumables.append(definition)
+	return _consumables
+
+
 ## Every skill the worn kit grants, laid into the hotbar. `rig.hotbar_order` is
 ## the player's own sequence (see `ordered_ids`): the skills it names take the
 ## slots it names, and every skill it does not name follows in kit order - the
-## main hand's, then the off hand's, then the necklace, ring 1 and ring 2. A
-## slot with no grant resolves to an empty dict. An empty main hand keeps the
-## legacy unarmed charge; a held weapon grants skills only once it is anointed,
-## and a piece carrying several welded abilities grants all of them.
+## main hand's, then the off hand's, then the necklace, ring 1 and ring 2, and
+## the two consumables last. A slot with no grant resolves to an empty dict. An
+## empty main hand keeps the legacy unarmed charge; a held weapon grants skills
+## only once it is anointed, and a piece carrying several welded abilities grants
+## all of them.
 static func granted(rig) -> Array:
 	if not is_instance_valid(rig):
 		return _empty_slots()
-	return _layout(grants_for(main_item(rig), off_item(rig),
-		rig.get("anointed"), rig.get("trinkets")), rig.get("hotbar_order"))
+	var grants := grants_for(main_item(rig), off_item(rig),
+		rig.get("anointed"), rig.get("trinkets"))
+	grants.append_array(consumable_definitions())
+	return _layout(grants, rig.get("hotbar_order"))
 
 
 ## The grants a kit wakes, before any slot layout: the stock ids the hands
@@ -712,6 +764,11 @@ static func grants_for(main: String, off: String, anointed: Variant,
 ## everything the list does not name follows in kit order. An id in the layout
 ## that grants nothing this frame is skipped, not erased - the layout is the
 ## player's and a stowed piece must not silently rewrite it.
+##
+## The two consumables are the one fixed pair on the row: the bandage keeps the
+## ninth key and the potion the tenth, so the body can always bind a wound and
+## always has a draught, and the kit's own skills keep the eight keys before
+## them. The sequence arranges those eight; the last two are nobody's to move.
 static func _layout(grants: Array, order: Variant) -> Array:
 	var definitions := {}
 	var ids: Array = []
@@ -724,9 +781,18 @@ static func _layout(grants: Array, order: Variant) -> Array:
 		definitions[id] = definition
 		ids.append(id)
 	var out: Array = _empty_slots()
-	var ordered := ordered_ids(ids, order)
-	for index in mini(ordered.size(), SLOT_COUNT):
+	var kit_ids: Array = []
+	for id in ids:
+		if not CONSUMABLE_IDS.has(id):
+			kit_ids.append(id)
+	var ordered := ordered_ids(kit_ids, order)
+	var kit_slots := SLOT_COUNT - CONSUMABLE_IDS.size()
+	for index in mini(ordered.size(), kit_slots):
 		out[index] = definitions[ordered[index]]
+	for offset in CONSUMABLE_IDS.size():
+		var id := str(CONSUMABLE_IDS[offset])
+		if definitions.has(id):
+			out[kit_slots + offset] = definitions[id]
 	return out
 
 

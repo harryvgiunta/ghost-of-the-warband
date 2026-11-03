@@ -153,29 +153,37 @@ func _check_number_row(actor) -> void:
 	actor.ability.cooldowns[0] = 0.0
 	actor.stamina = actor.max_stamina
 
-	# Ten skills fill ten slots, and the tenth is fired by KEY_0. A bow with every
-	# bow weld plus the shield pool and the amulet's ward is ten grants exactly.
+	# The kit's skills take the first eight keys; the bandage and the potion keep
+	# the last two. A bow with every bow weld plus the shield pool and the amulet's
+	# ward is more grants than the eight keys before the consumables, so the
+	# surplus waits and the two consumables are always on the bar.
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
 	actor.rig.anointed = {"main": AbilityRules.skill_ids([
 		"barrage", "triple_volley", "piercing_shot", "rain_of_ash", "skewer",
 		"shield_bash", "shield_charge", "shield_slam", "rebuke", "energy_shield",
 	]), "off": []}
 	var grants: Array = AbilityRules.granted(actor.rig)
-	check(grants.size() == AbilityRules.SLOT_COUNT and not grants[9].is_empty(),
+	check(grants.size() == AbilityRules.SLOT_COUNT,
 		"ten grants fill ten slots")
-	check(str(grants[9].get("id", "")) == "energy_shield",
-		"the tenth slot is the tenth grant, got %s" % str(grants[9].get("id", "")))
-	actor.combat.grounded = true
-	Input.parse_input_event(key_event(KEY_0, true))
-	Input.flush_buffered_events()
-	var tenth := await _wait_until(func(): return bool(actor.ability.active), 1.5)
-	Input.parse_input_event(key_event(KEY_0, false))
-	Input.flush_buffered_events()
-	check(tenth, "KEY_0 starts slot 10")
-	check(int(actor.ability.active_slot) == 9,
-		"KEY_0 fires the tenth slot, got %d" % int(actor.ability.active_slot))
-	check(str(actor.ability.active_id) == "energy_shield",
-		"KEY_0 starts the tenth grant, got %s" % str(actor.ability.active_id))
+	check(not grants[7].is_empty(),
+		"the eighth key is the kit's last skill, got %s" % str(grants[7].get("id", "")))
+	check(str(grants[8].get("id", "")) == "bandage"
+			and str(grants[9].get("id", "")) == "healing_potion",
+		"the last two keys are the bandage and the potion, got %s / %s"
+		% [str(grants[8].get("id", "")), str(grants[9].get("id", ""))])
+
+	# A whole body is refused its dressing and its draught with the line the
+	# player can act on. The channel itself belongs to the body (`try_consume`);
+	# this harness has no floor to stand on, so only the refusal is exercised.
+	actor.health = actor.max_health
+	var dressing: Dictionary = actor.ability.activate(8)
+	check(not bool(dressing.get("ok", true))
+			and str(dressing.get("message", "")).contains("not wounded"),
+		"key 9 answers a whole body, got %s" % str(dressing.get("message", "")))
+	var draught: Dictionary = actor.ability.activate(9)
+	check(not bool(draught.get("ok", true))
+			and str(draught.get("message", "")).contains("not wounded"),
+		"key 0 answers a whole body, got %s" % str(draught.get("message", "")))
 	actor.ability.cancel()
 	actor.ability.reset()
 	actor.rig.apply_loadout(State.build_loadout("", "", ARMOR))
@@ -228,8 +236,10 @@ func _check_hud(world: Node3D, actor) -> void:
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
 		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
 	hud.set_body(actor, "Probe", 1)
-	check(_granted(tiles) == 3, "an anointed kit fills three slots, got %d" % _granted(tiles))
 	var anointed_ids := ["backstab", "shield_bash", "energy_shield"]
+	check(_granted(tiles) == anointed_ids.size() + 2,
+		"an anointed kit fills three slots and the two consumables fill the last two, got %d"
+		% _granted(tiles))
 	for index in anointed_ids.size():
 		check(tile_id(tiles[index]) == anointed_ids[index],
 			"slot %d draws %s, got %s" % [index, anointed_ids[index],
@@ -247,8 +257,9 @@ func _check_hud(world: Node3D, actor) -> void:
 		"off": []}
 	hud.set_body(actor, "Probe", 1)
 	var welded_ids := ["barrage", "triple_volley", "energy_shield", "dash"]
-	check(_granted(tiles) == welded_ids.size(),
-		"two welded skills and two trinkets fill four slots, got %d" % _granted(tiles))
+	check(_granted(tiles) == welded_ids.size() + 2,
+		"two welded skills, two trinkets and the two consumables fill six slots, got %d"
+		% _granted(tiles))
 	for index in welded_ids.size():
 		check(tile_id(tiles[index]) == welded_ids[index],
 			"slot %d draws %s, got %s" % [index, welded_ids[index],
@@ -257,7 +268,10 @@ func _check_hud(world: Node3D, actor) -> void:
 			"hotbar slot %d keeps its number, got %s" % [index + 1,
 			tile_key(tiles[index])])
 	check(tile_id(tiles[welded_ids.size()]).is_empty(),
-		"the rest of the hotbar stays empty")
+		"the rest of the kit's keys stay empty")
+	check(tile_id(tiles[AbilityRules.SLOT_COUNT - 2]) == "bandage"
+			and tile_id(tiles[AbilityRules.SLOT_COUNT - 1]) == "healing_potion",
+		"the bandage and the potion keep the last two keys")
 	check(tile_key(tiles[AbilityRules.SLOT_COUNT - 1]) == "10",
 		"the tenth slot is labelled 10, got %s"
 		% tile_key(tiles[AbilityRules.SLOT_COUNT - 1]))

@@ -1040,6 +1040,12 @@ func hotbar_kit(merc_id: int) -> Array[String]:
 		if id.is_empty() or out.has(id):
 			continue
 		out.append(id)
+	# The two consumables every body carries, after the kit's own skills - the
+	# same order `AbilityRules.granted` lays on the rig, so the page's row and
+	# the keys a fight fires cannot disagree about where the bandage sits.
+	for id in AbilityRules.CONSUMABLE_IDS:
+		if not out.has(id):
+			out.append(id)
 	return out
 
 
@@ -1058,26 +1064,42 @@ func _hotbar_hand(item_id: String, hand: String, merc_id: int) -> Array[String]:
 	return out
 
 
-## The body's skills in the player's own sequence, one per hotbar slot. The
-## layout ranks the whole kit and the ten keys take the first ten, which is the
-## same cap `AbilityRules.granted` applies - so a kit with more welds than keys
-## draws the same ten on the HUD and in the paperdoll.
+## The body's kit skills in the player's own sequence, one per hotbar slot. The
+## layout ranks the kit and the eight keys before the consumables take the first
+## eight, the same cap `AbilityRules.granted` applies - so a kit with more welds
+## than keys draws the same row on the HUD and in the paperdoll. The bandage and
+## the potion are not the kit's and are laid by `hotbar_layout`.
 func hotbar_skills(merc_id: int) -> Array[String]:
-	var ordered := AbilityRules.ordered_ids(hotbar_kit(merc_id),
-		roster.hotbar_order_of(merc_id))
+	var kit: Array[String] = []
+	for id in hotbar_kit(merc_id):
+		if not AbilityRules.CONSUMABLE_IDS.has(id):
+			kit.append(id)
+	var ordered := AbilityRules.ordered_ids(kit, roster.hotbar_order_of(merc_id))
+	var slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
 	var out: Array[String] = []
-	for index in mini(ordered.size(), AbilityRules.SLOT_COUNT):
+	for index in mini(ordered.size(), slots):
 		out.append(ordered[index])
 	return out
 
 
-## The ten keys exactly as the HUD draws them: one ability id per slot, "" for a
-## key that fires nothing.
+## The ten keys exactly as the HUD draws them: the kit's sequence on the first
+## eight, the bandage on key 9 and the potion on key 0, "" for a key that fires
+## nothing. The two consumables keep their keys whatever the kit or the saved
+## sequence says, which is the same rule `AbilityRules._layout` applies to the
+## rig - the page and the fight cannot disagree about where the bandage sits.
 func hotbar_layout(merc_id: int) -> Array[String]:
-	var skills := hotbar_skills(merc_id)
+	var kit := hotbar_skills(merc_id)
+	var kit_slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
 	var out: Array[String] = []
 	for index in AbilityRules.SLOT_COUNT:
-		out.append(skills[index] if index < skills.size() else "")
+		out.append("")
+	for index in mini(kit.size(), kit_slots):
+		out[index] = kit[index]
+	var granted := hotbar_kit(merc_id)
+	for offset in AbilityRules.CONSUMABLE_IDS.size():
+		var id := str(AbilityRules.CONSUMABLE_IDS[offset])
+		if granted.has(id):
+			out[kit_slots + offset] = id
 	return out
 
 
@@ -1096,9 +1118,17 @@ func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 		var id := str(item)
 		if id.is_empty() or not kit.has(id) or laid.has(id):
 			continue
+		if AbilityRules.CONSUMABLE_IDS.has(id):
+			continue
 		laid.append(id)
 	for id in kit:
-		if not laid.has(id):
+		if laid.has(id) or AbilityRules.CONSUMABLE_IDS.has(id):
+			continue
+		laid.append(id)
+	# The last two keys are the consumables' own: the sequence arranges the kit,
+	# and the bandage and the potion ride after it wherever the caller named them.
+	for id in AbilityRules.CONSUMABLE_IDS:
+		if kit.has(id) and not laid.has(id):
 			laid.append(id)
 	roster.set_hotbar_order(merc_id, laid)
 	# The body in the world is dressed from the record, so its own key order
@@ -1111,7 +1141,8 @@ func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 ## Move the skill on key `from_slot` to key `to_slot`, swapping whatever was
 ## there. Slots are the ten keys the number row fires, not indices into the
 ## stored sequence, so moving a skill into an empty key closes the row up
-## behind it. Answers `{ok, message, order}`.
+## behind it. The bandage and the potion keep the last two keys and are not
+## movable: a body always has them. Answers `{ok, message, order}`.
 func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary:
 	if lent:
 		return _lent_refusal({"order": []})
@@ -1123,6 +1154,10 @@ func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary
 	if from_slot == to_slot:
 		return {"ok": false, "message": "That skill is already on key %d."
 			% (from_slot + 1), "order": []}
+	var kit_slots := AbilityRules.SLOT_COUNT - AbilityRules.CONSUMABLE_IDS.size()
+	if from_slot >= kit_slots or to_slot >= kit_slots:
+		return {"ok": false, "message": "The bandage keeps key 9 and the potion key 0.",
+			"order": []}
 	var layout := hotbar_layout(merc_id)
 	if layout[from_slot].is_empty() and layout[to_slot].is_empty():
 		return {"ok": false, "message": "Both keys are empty.", "order": []}

@@ -131,19 +131,24 @@ func _check_rules() -> void:
 ## key, the HUD draws that key, and a skill that moves carries its cooldown.
 func _check_rig(world: Node3D) -> void:
 	var kit := ["barrage", "triple_volley", "energy_shield"]
+	var consumables := ["bandage", "healing_potion"]
 	var actor := fighter(world, 0, Vector3.ZERO)
 	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR,
 		{"neck": "neck_shield"}))
 	actor.rig.anointed = {"main": AbilityRules.skill_ids(["barrage", "triple_volley"]),
 		"off": []}
-	check(_same(_ids(AbilityRules.granted(actor.rig)), kit),
-		"with no layout the keys follow kit order")
+	check(_same(_ids(AbilityRules.granted(actor.rig)), kit + consumables),
+		"with no layout the keys follow kit order and the two consumables end it")
+	check(str(AbilityRules.definition_for(actor.rig, 8).get("id", "")) == "bandage",
+		"the bandage keeps key 9")
+	check(str(AbilityRules.definition_for(actor.rig, 9).get("id", "")) == "healing_potion",
+		"and the potion keeps key 0")
 	check(AbilityRules.granted(actor.rig).size() == AbilityRules.SLOT_COUNT,
 		"the hotbar is always ten slots wide")
 
 	actor.rig.hotbar_order = AbilityRules.skill_ids(["energy_shield", "barrage"])
 	check(_same(_ids(AbilityRules.granted(actor.rig)),
-		["energy_shield", "barrage", "triple_volley"]),
+		["energy_shield", "barrage", "triple_volley", "bandage", "healing_potion"]),
 		"the layout decides which key fires which skill")
 	check(str(AbilityRules.definition_for(actor.rig, 0).get("id", "")) == "energy_shield",
 		"key 1 is the first skill the layout names")
@@ -151,6 +156,8 @@ func _check_rig(world: Node3D) -> void:
 		"a skill the layout does not name keeps its place after the named ones")
 	check(AbilityRules.definition_for(actor.rig, 5).is_empty(),
 		"a key with no grant is empty")
+	check(str(AbilityRules.definition_for(actor.rig, 9).get("id", "")) == "healing_potion",
+		"and the consumables stay on the last two keys however the kit is arranged")
 
 	# The dressing hand-off: a seat loadout carries the layout beside the kit and
 	# turns it into the rig's own key order.
@@ -168,7 +175,7 @@ func _check_rig(world: Node3D) -> void:
 		"off": []}
 	actor.rig.hotbar_order.clear()
 	actor.ability.setup(actor, actor.rig, actor.combat, 5.5)
-	check(_same(_ids(AbilityRules.granted(actor.rig)), kit),
+	check(_same(_ids(AbilityRules.granted(actor.rig)), kit + consumables),
 		"the runner starts on kit order")
 	actor.ability.cooldowns[0] = 3.0
 	actor.rig.hotbar_order = AbilityRules.skill_ids(["triple_volley"])
@@ -216,35 +223,46 @@ func _check_warband() -> void:
 	check(warband.grant_anointing("bow_short"), "the altar wakes the bow's skill")
 
 	var kit := ["barrage", "energy_shield", "dash"]
-	check(_same(warband.hotbar_kit(merc), kit),
-		"the kit lists the main hand's skill then each worn granting trinket")
-	check(_same(warband.hotbar_layout(merc), kit + ["", "", "", "", "", "", ""]),
-		"the layout pads the kit to ten keys")
+	var all := kit + ["bandage", "healing_potion"]
+	check(_same(warband.hotbar_kit(merc), all),
+		"the kit lists the main hand's skill, each worn granting trinket, and the two consumables")
+	check(_same(warband.hotbar_layout(merc),
+		kit + ["", "", "", "", ""] + ["bandage", "healing_potion"]),
+		"the layout keeps the kit on the first keys and the bandage and potion on the last two")
+	check(str(AbilityRules.by_id("bandage").get("consume", "")) == "bandage",
+		"the bandage is an ability the body performs")
+	check(str(AbilityRules.by_id("healing_potion").get("consume", "")) == "potion",
+		"and the potion is one too")
 
 	var moved: Dictionary = warband.move_hotbar_skill(merc, 0, 2)
 	check(bool(moved.get("ok", false)), "moving a skill answers ok: %s"
 		% str(moved.get("message", "")))
 	check(_same(warband.hotbar_layout(merc),
-		["dash", "energy_shield", "barrage", "", "", "", "", "", "", ""]),
+		["dash", "energy_shield", "barrage", "", "", "", "", "", "bandage", "healing_potion"]),
 		"moving a skill onto another key swaps them, got %s"
 		% str(warband.hotbar_layout(merc)))
 	check(_same(Array(warband.roster.hotbar_order_of(merc)),
-		["dash", "energy_shield", "barrage"]),
-		"the row is saved as the body's sequence")
+		["dash", "energy_shield", "barrage", "bandage", "healing_potion"]),
+		"the row is saved as the body's sequence with the consumables last")
 
 	var swapped: Dictionary = warband.move_hotbar_skill(merc, 0, 1)
 	check(bool(swapped.get("ok", false)) and str(swapped.get("message", "")) == "Skills swapped.",
 		"moving onto a full key swaps the two, got %s" % str(swapped.get("message", "")))
 	check(_same(warband.hotbar_layout(merc),
-		["energy_shield", "dash", "barrage", "", "", "", "", "", "", ""]),
+		["energy_shield", "dash", "barrage", "", "", "", "", "", "bandage", "healing_potion"]),
 		"the two skills trade keys")
 
 	var refused: Dictionary = warband.move_hotbar_skill(merc, 3, 4)
 	check(not bool(refused.get("ok", true)), "moving two empty keys refuses")
+	var held_key: Dictionary = warband.move_hotbar_skill(merc, 8, 0)
+	check(not bool(held_key.get("ok", true))
+			and str(held_key.get("message", "")).contains("bandage"),
+		"the bandage's key is not movable, got %s" % str(held_key.get("message", "")))
 	var written: Dictionary = warband.set_hotbar_order(merc, ["dash", "bogus", "dash"])
 	check(bool(written.get("ok", false)), "a hand-written layout is accepted")
-	check(_same(Array(written.get("order", [])), ["dash", "barrage", "energy_shield"]),
-		"unknown and duplicate ids are dropped and the rest follow in kit order, got %s"
+	check(_same(Array(written.get("order", [])),
+		["dash", "barrage", "energy_shield", "bandage", "healing_potion"]),
+		"unknown and duplicate ids are dropped, the rest follow in kit order, and the consumables end it, got %s"
 		% str(written.get("order", [])))
 
 	# The layout is part of the saved warband, not a session preference.
@@ -253,17 +271,18 @@ func _check_warband() -> void:
 	warband.from_dict(saved)
 	check(warband.roster.count() == 1, "the body is back after the round-trip")
 	check(_same(Array(warband.roster.hotbar_order_of(merc)),
-		["dash", "barrage", "energy_shield"]),
+		["dash", "barrage", "energy_shield", "bandage", "healing_potion"]),
 		"the hotbar layout survives a save round-trip")
 	check(_same(warband.hotbar_layout(merc),
-		["dash", "barrage", "energy_shield", "", "", "", "", "", "", ""]),
+		["dash", "barrage", "energy_shield", "", "", "", "", "", "bandage", "healing_potion"]),
 		"and still fires from the saved keys")
 
 	var reset: Dictionary = warband.reset_hotbar(merc)
 	check(bool(reset.get("ok", false)), "KIT ORDER answers ok")
 	check(warband.roster.hotbar_order_of(merc).is_empty(),
 		"KIT ORDER stores no layout")
-	check(_same(warband.hotbar_layout(merc), kit + ["", "", "", "", "", "", ""]),
+	check(_same(warband.hotbar_layout(merc),
+		kit + ["", "", "", "", ""] + ["bandage", "healing_potion"]),
 		"KIT ORDER hands the keys back to the kit")
 
 	warband.set_hotbar_order(merc, ["energy_shield", "dash", "barrage"])
@@ -273,7 +292,7 @@ func _check_warband() -> void:
 		and str(lent_refusal.get("message", "")) == warband.LENT_MESSAGE,
 		"a lent warband refuses the layout, got %s" % str(lent_refusal.get("message", "")))
 	check(_same(Array(warband.roster.hotbar_order_of(merc)),
-		["energy_shield", "dash", "barrage"]),
+		["energy_shield", "dash", "barrage", "bandage", "healing_potion"]),
 		"and the host's order is untouched")
 	warband.lent = false
 
@@ -295,8 +314,8 @@ func _check_wear_order() -> void:
 	warband.grant_anointing("shield_kite")
 	check(_same(warband.hotbar_layout(merc),
 		["lunge_thrust", "shield_charge", "energy_shield", "dash",
-			"", "", "", "", "", ""]),
-		"an unwritten layout is the wear order - main hand, off hand, then the trinkets, got %s"
+			"", "", "", "", "bandage", "healing_potion"]),
+		"an unwritten layout is the wear order - main hand, off hand, then the trinkets - with the two consumables on the last keys, got %s"
 		% str(warband.hotbar_layout(merc)))
 	check(Contracts.slot_id(Contracts.SLOT_ORDER[0]) == "main"
 			and Contracts.slot_id(Contracts.SLOT_ORDER[1]) == "off",
@@ -343,6 +362,12 @@ func _check_paperdoll() -> void:
 		"a granted key draws its skill's icon")
 	check(doll.hotbar_tiles[5].get("_icon").texture == null,
 		"an empty key draws no icon")
+	check(tile_id(doll.hotbar_tiles[8]) == "bandage"
+			and tile_id(doll.hotbar_tiles[9]) == "healing_potion",
+		"the row carries the bandage on key 9 and the potion on the tenth key")
+	check(tile_key(doll.hotbar_tiles[8]) == "9"
+			and tile_key(doll.hotbar_tiles[9]) == "10",
+		"and their tiles are numbered 9 and 10")
 	# The row is the HUD's own measure, and the block is cut to it: the header,
 	# the KIT ORDER press and the tenth key end on the same edge.
 	var row: HBoxContainer = doll._hotbar_box.get_node("Keys")
@@ -366,7 +391,7 @@ func _check_paperdoll() -> void:
 	doll.hotbar_buttons[2].pressed.emit()
 	check(doll._hotbar_selected == -1, "the second click puts it down")
 	check(_same(doll.hotbar_layout(),
-		["dash", "energy_shield", "barrage", "", "", "", "", "", "", ""]),
+		["dash", "energy_shield", "barrage", "", "", "", "", "", "bandage", "healing_potion"]),
 		"the row redraws in the new order, got %s" % str(doll.hotbar_layout()))
 	check(doll.status_text().contains("swapped"), "the swap is reported, got %s"
 		% doll.status_text())
@@ -379,10 +404,20 @@ func _check_paperdoll() -> void:
 	check(_same(doll.hotbar_layout(), before), "and the row is unchanged")
 
 	# An empty key cannot start a move.
-	doll.hotbar_buttons[8].pressed.emit()
+	doll.hotbar_buttons[5].pressed.emit()
 	check(doll._hotbar_selected == -1, "an empty key cannot be picked up")
 	check(doll.status_text().contains("fires nothing"),
 		"the empty key says why, got %s" % doll.status_text())
+
+	# The bandage is picked up like any key and the move is refused, because the
+	# last two keys are the consumables' own.
+	doll.hotbar_buttons[8].pressed.emit()
+	check(doll._hotbar_selected == 8, "the bandage key picks up")
+	doll.hotbar_buttons[0].pressed.emit()
+	check(doll._hotbar_selected == -1, "and the press that would move it drops the pick")
+	check(doll.status_text().contains("bandage"),
+		"the screen says the bandage keeps its key, got %s" % doll.status_text())
+	check(_same(doll.hotbar_layout(), before), "and the row is unchanged")
 
 	# Picking a mercenary resets the pending pick.
 	doll.hotbar_buttons[0].pressed.emit()
@@ -392,7 +427,7 @@ func _check_paperdoll() -> void:
 
 	doll._reset_hotbar_button.pressed.emit()
 	check(_same(doll.hotbar_layout(),
-		["barrage", "energy_shield", "dash", "", "", "", "", "", "", ""]),
+		["barrage", "energy_shield", "dash", "", "", "", "", "", "bandage", "healing_potion"]),
 		"KIT ORDER hands the keys back to the kit, got %s"
 		% str(doll.hotbar_layout()))
 

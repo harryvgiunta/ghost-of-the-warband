@@ -64,6 +64,10 @@ func activate(slot: int = 0) -> Dictionary:
 	var reason := blocker(slot)
 	if not reason.is_empty():
 		return {"ok": false, "message": reason}
+	# A consumable is a key, not a skill: the body owns the channel (the clip,
+	# the wound, the heal) and the runner owns the key and its cooldown.
+	if definition.has("consume"):
+		return _activate_consumable(definition, slot)
 	# A blade skill or a committed dash needs an upright stance: cancel the
 	# crouch first and only spend the cost once the body can actually stand.
 	if AbilityRules.needs_standing(definition) and not _stand_before_melee():
@@ -93,6 +97,30 @@ func activate(slot: int = 0) -> Dictionary:
 	activated.emit(active_id, definition)
 	_emit_due_cues()
 	return {"ok": true, "definition": definition}
+
+
+## The bandage and the potion: the body starts its own channel and the key takes
+## the definition's cooldown. A refusal is the body's - a whole body, a stagger,
+## a body already binding a wound - and it costs neither stamina nor the key.
+func _activate_consumable(definition: Dictionary, slot: int) -> Dictionary:
+	var kind := str(definition.get("consume", ""))
+	if actor == null or not is_instance_valid(actor) or not actor.has_method("try_consume"):
+		return {"ok": false,
+			"message": "%s cannot be used here." % str(definition.name).capitalize()}
+	if not bool(actor.try_consume(kind)):
+		return {"ok": false, "message": _consume_refusal(definition)}
+	if slot >= 0 and slot < cooldowns.size():
+		cooldowns[slot] = float(definition.get("cooldown", 0.0))
+	return {"ok": true, "definition": definition}
+
+
+## Why the body would not take the piece: the one line the player can act on.
+func _consume_refusal(definition: Dictionary) -> String:
+	if float(actor.get("health")) >= float(actor.get("max_health")) - 0.001:
+		return "You are not wounded."
+	if str(actor.get("consume_kind")) != "":
+		return "Finish the %s first." % str(actor.get("consume_kind")).capitalize()
+	return "%s cannot be used right now." % str(definition.name).capitalize()
 
 
 ## The line the skill is performed down. A travelling skill follows the live
@@ -252,9 +280,15 @@ func hud_states() -> Array:
 
 func _hud_state(definition: Dictionary, slot: int) -> Dictionary:
 	var cost := float(definition.stamina_cost)
+	# A consumable has no runner activation of its own: the channel lives on the
+	# body, so the key reads active while that body is binding the same wound.
+	var running := active and active_slot == slot
+	if not running and definition.has("consume") and is_instance_valid(actor) \
+			and str(actor.get("consume_kind")) == str(definition.get("consume")):
+		running = true
 	return {
 		"id": str(definition.id),
-		"active": active and active_slot == slot,
+		"active": running,
 		"cooldown": cooldowns[slot] if slot < cooldowns.size() else 0.0,
 		"stamina_cost": cost,
 		"affordable": float(actor.stamina) >= cost if is_instance_valid(actor) else true,
