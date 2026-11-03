@@ -17,6 +17,7 @@ extends RefCounted
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const State = preload("res://scripts/player_state.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
 ## A record that has just become DEAD, whoever put it down: a lethal blow, a
 ## finisher on a downed body, the bleed clock, or a scene mirroring a corpse.
@@ -50,6 +51,11 @@ const KEY_RESERVE := "reserve"
 ## falls back to a bandage under 30%, a bow gives ground when crowded and looses
 ## again. The automatic arming reads the same field when it picks a piece.
 const KEY_DISPOSITION := "disposition"
+## The player's own hotbar sequence for this body: ability ids in the order they
+## laid the ten keys out (`Warband.hotbar_layout`). `[]` means the kit's own
+## order. An id whose piece is stowed is kept here and skipped by
+## `AbilityRules.granted`, so a swap does not erase the place the player gave it.
+const KEY_HOTBAR := "hotbar_order"
 
 var _mercs: Array[Dictionary] = []
 var _next_id := 1
@@ -77,7 +83,25 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_DOWNED_SECONDS: 0.0,
 		KEY_RESERVE: false,
 		KEY_DISPOSITION: Contracts.DEFAULT_DISPOSITION,
+		KEY_HOTBAR: [],
 	}
+
+
+## A saved hotbar layout in the shape the game writes: ability ids, each once,
+## at most one per key. A record written before the player could reorder the
+## keys has none, and plays in kit order, which is what `[]` means.
+static func sanitise_hotbar(value: Variant) -> Array[String]:
+	var out: Array[String] = []
+	if not value is Array:
+		return out
+	for item in value:
+		var id := str(item) if typeof(item) == TYPE_STRING else ""
+		if id.is_empty() or out.has(id):
+			continue
+		out.append(id)
+		if out.size() >= AbilityRules.SLOT_COUNT:
+			break
+	return out
 
 # --- reading ---------------------------------------------------------------
 
@@ -239,6 +263,9 @@ func add_record(record: Dictionary) -> int:
 	# A record written before the field existed comes up as the default, and so
 	# does one carrying a word this build has never heard of.
 	copy[KEY_DISPOSITION] = Contracts.disposition_id(copy.get(KEY_DISPOSITION, ""))
+	# A record written before the keys could be rearranged carries no layout:
+	# the kit's own order, which is exactly what an empty list means.
+	copy[KEY_HOTBAR] = sanitise_hotbar(copy.get(KEY_HOTBAR, []))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
 	if saved_gear is Dictionary:
@@ -299,6 +326,21 @@ func set_disposition(merc_id: int, disposition: String) -> bool:
 	if record.is_empty():
 		return false
 	record[KEY_DISPOSITION] = Contracts.disposition_id(disposition)
+	return true
+
+## The player's own hotbar sequence for this body, in the order they laid the
+## keys out. `[]` means the kit's own order; a record that predates the layout
+## reads as `[]` through `sanitise_hotbar`.
+func hotbar_order_of(merc_id: int) -> Array[String]:
+	return sanitise_hotbar(find(merc_id).get(KEY_HOTBAR, []))
+
+## Write the sequence. Answers false for an unknown body. The caller owns what
+## a sequence may name: the roster stores the player's layout, not a skill table.
+func set_hotbar_order(merc_id: int, order: Array) -> bool:
+	var record := find(merc_id)
+	if record.is_empty():
+		return false
+	record[KEY_HOTBAR] = sanitise_hotbar(order)
 	return true
 
 func set_health(merc_id: int, hp: float) -> void:

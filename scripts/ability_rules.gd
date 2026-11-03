@@ -7,10 +7,19 @@ extends RefCounted
 ## authority and the current base movement speed. Add a new entry here, an icon
 ## beside it, and the same HUD/input/network path works for the next ability.
 ##
-## Slot 0 is the main hand, slot 1 the off hand, slot 2 the trinket slot
-## (necklace first, then ring 1, then ring 2). The granted ability follows the
-## weapon the rig is actually holding, so a session weapon key changes it.
-## A trinket grant is worn rather than held, so it survives every weapon swap.
+## The hotbar is derived from the kit, ordered by the player. `granted` walks
+## the worn kit and lays every skill it finds into slots 1..`SLOT_COUNT`: the
+## skills named by `rig.hotbar_order` take the slots that order names, and the
+## rest follow in kit order - the main hand's skills first, then the off hand's,
+## then the necklace, ring 1 and ring 2 - so a piece carrying several welded
+## skills shows every one of them. The order is authored in the paperdoll and
+## saved per mercenary; `granted` never lets it invent a skill the kit does not
+## grant. A definition's own `slot` still names the hand or trinket that
+## performs it; only the hotbar key is rewritten per grant.
+##
+## The granted ability follows the weapon the rig is actually holding, so a
+## session weapon key changes it. A trinket grant is worn rather than held, so it
+## survives every weapon swap.
 ##
 ## A weapon is plain until it is anointed. A hand definition's `item` names the
 ## stock row whose skill a piece wakes into (`skill_for`), not a grant: `granted`
@@ -29,7 +38,9 @@ extends RefCounted
 ## pressed from. Every skill that travels (the lunge, the boss shove, the shield
 ## charge) declares it; a planted skill needs no direction.
 
-const SLOT_COUNT := 3
+## The hotbar: ten slots, fired from the number row (1..9 and 0 for the tenth).
+## Every wired skill a worn piece carries is laid into one of these.
+const SLOT_COUNT := 10
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 ## Temporary testing cost: every weapon skill spends a trivial stamina sliver
 ## so the effect can be exercised back to back. The legacy unarmed charge keeps
@@ -382,8 +393,8 @@ const ABILITIES := [
 		"cues": [{"at": 0.50, "cue": "ring"}],
 	},
 	{
-		# Worn trinkets own the third slot. The ring is not held, so this skill
-		# is available with any weapon loadout.
+		# Worn trinkets own their own hotbar slots. The ring is not held, so this
+		# skill is available with any weapon loadout.
 		"id": "dash",
 		"name": "DASH",
 		"item": "ring_dash",
@@ -664,46 +675,153 @@ static func off_item(rig) -> String:
 	return SHIELD_ITEMS[clampi(int(rig.shield_variant), 0, SHIELD_ITEMS.size() - 1)]
 
 
-## Both hands' current grants plus the worn trinket's grant. A slot with no
-## grant resolves to an empty dict. An empty main hand keeps the legacy unarmed
-## charge; a held weapon grants its skill only once it is anointed. The trinket
-## slot prefers the necklace, then ring 1, then ring 2.
+## Every skill the worn kit grants, laid into the hotbar. `rig.hotbar_order` is
+## the player's own sequence (see `ordered_ids`): the skills it names take the
+## slots it names, and every skill it does not name follows in kit order - the
+## main hand's, then the off hand's, then the necklace, ring 1 and ring 2. A
+## slot with no grant resolves to an empty dict. An empty main hand keeps the
+## legacy unarmed charge; a held weapon grants skills only once it is anointed,
+## and a piece carrying several welded abilities grants all of them.
 static func granted(rig) -> Array:
 	if not is_instance_valid(rig):
-		return [{}, {}, {}]
-	var main := main_item(rig)
-	var off := off_item(rig)
-	var trinket := trinket_item(rig)
-	var main_definition := by_id("charge") if main.is_empty() \
-		else _anointed(rig, "main", by_item(main, 0))
-	var off_definition := {} if off.is_empty() else _anointed(rig, "off", by_item(off, 1))
-	return [main_definition, off_definition,
-		by_item(trinket, 2) if not trinket.is_empty() else {}]
+		return _empty_slots()
+	return _layout(grants_for(main_item(rig), off_item(rig),
+		rig.get("anointed"), rig.get("trinkets")), rig.get("hotbar_order"))
 
 
-## A held weapon's skill is the altar's to give: the definition comes back only
-## when the rig's `anointed` names it for that hand, so a stock piece - or a
-## piece the hands changed to without being dressed again - grants nothing.
-static func _anointed(rig, hand: String, definition: Dictionary) -> Dictionary:
-	if definition.is_empty():
-		return {}
-	var hands: Variant = rig.get("anointed")
-	if not hands is Dictionary:
-		return {}
-	var wanted := str((hands as Dictionary).get(hand, ""))
-	if wanted.is_empty():
-		return {}
-	if not definition.is_empty() and str(definition.get("id", "")) == wanted:
-		return definition
-	# The altar welds any wired skill from the pool onto any piece, so the hand
-	# follows the annointment's id rather than the catalog row's own skill. The
-	# slot and key are rewritten for the hand that actually holds it.
-	var welded := by_id(wanted)
-	if welded.is_empty():
-		return {}
-	var out := welded.duplicate(true)
-	out["slot"] = 1 if hand == "off" else 0
-	out["key"] = "SHIFT + 2" if hand == "off" else "SHIFT + 1"
+## The grants a kit wakes, before any slot layout: the stock ids the hands
+## resolve to (`main_item`/`off_item` on a rig, or `stock_item` off a catalog
+## row), the anointed id list per hand and the worn trinket kit. One table for
+## the rig in the world and for a roster record nobody is inside, so a menu can
+## never promise a key the HUD would not draw.
+static func grants_for(main: String, off: String, anointed: Variant,
+		trinkets: Variant) -> Array:
+	var grants: Array = []
+	if main.is_empty():
+		grants.append(by_id("charge"))
+	else:
+		grants.append_array(_hand_skills("main", by_item(main, 0), anointed))
+	if not off.is_empty():
+		grants.append_array(_hand_skills("off", by_item(off, 1), anointed))
+	grants.append_array(_trinket_skills(trinkets))
+	return grants
+
+
+## The ten-slot hotbar the grants fill. `order` is a list of skill ids in the
+## player's own sequence: a named skill takes the slot its position names, and
+## everything the list does not name follows in kit order. An id in the layout
+## that grants nothing this frame is skipped, not erased - the layout is the
+## player's and a stowed piece must not silently rewrite it.
+static func _layout(grants: Array, order: Variant) -> Array:
+	var definitions := {}
+	var ids: Array = []
+	for definition in grants:
+		var id := str(definition.get("id", ""))
+		# One hotbar slot per skill id: the same welded skill on two pieces is one
+		# press, not two copies the cooldown would have to disagree about.
+		if id.is_empty() or definitions.has(id):
+			continue
+		definitions[id] = definition
+		ids.append(id)
+	var out: Array = _empty_slots()
+	var ordered := ordered_ids(ids, order)
+	for index in mini(ordered.size(), SLOT_COUNT):
+		out[index] = definitions[ordered[index]]
+	return out
+
+
+## Skill ids in the player's own order: the ids `order` names come first, in
+## the sequence it names them, and every other id keeps its place after them.
+## Unknown and duplicate entries are ignored, so a stale save or a hand-edited
+## file cannot invent a slot. Shared by the HUD's `granted` and the paperdoll's
+## row, so the two can never disagree about which key fires what.
+static func ordered_ids(ids: Array, order: Variant) -> Array[String]:
+	var rank := {}
+	var raw: Array = order if order is Array else []
+	for item in raw:
+		var id := str(item)
+		if id.is_empty() or rank.has(id):
+			continue
+		rank[id] = rank.size()
+	var listed: Array[String] = []
+	var rest: Array[String] = []
+	var seen := {}
+	for item in ids:
+		var id := str(item)
+		if id.is_empty() or seen.has(id):
+			continue
+		seen[id] = true
+		if rank.has(id):
+			listed.append(id)
+		else:
+			rest.append(id)
+	listed.sort_custom(func(a: String, b: String) -> bool:
+		return int(rank[a]) < int(rank[b]))
+	listed.append_array(rest)
+	return listed
+
+
+static func _empty_slots() -> Array:
+	var out: Array = []
+	for _slot in SLOT_COUNT:
+		out.append({})
+	return out
+
+
+## The skills one hand was anointed with, in weld order. The rig's `anointed`
+## is a list per hand because the altar can weld several skills to one copy; a
+## plain piece - and a hand changed without being dressed again - grants nothing.
+## A grant equal to the piece's own stock skill reuses that definition, so its
+## authored item (and the damage read off it) stays right.
+static func _hand_skills(hand: String, stock: Dictionary, anointed: Variant) -> Array:
+	var out: Array = []
+	if not anointed is Dictionary:
+		return out
+	for id in skill_ids((anointed as Dictionary).get(hand, "")):
+		var definition: Dictionary = by_id(id)
+		if definition.is_empty():
+			continue
+		var grant: Dictionary = stock.duplicate(true) \
+			if not stock.is_empty() and str(stock.get("id", "")) == id \
+			else definition.duplicate(true)
+		# The altar welds any wired skill from the pool onto any piece, so the
+		# hand that performs it is the one holding the piece.
+		grant["slot"] = 1 if hand == "off" else 0
+		out.append(grant)
+	return out
+
+
+## The worn trinket grants, one per slot that carries a granting piece: the
+## necklace, ring 1 and ring 2 may each wake a skill of their own.
+static func _trinket_skills(trinkets: Variant) -> Array:
+	var out: Array = []
+	if not trinkets is Dictionary:
+		return out
+	for slot in TrinketStats.ABILITY_ORDER:
+		var item_id := str((trinkets as Dictionary).get(slot, ""))
+		if item_id.is_empty():
+			continue
+		var definition: Dictionary = by_id(TrinketStats.grant_for(item_id))
+		if not definition.is_empty():
+			out.append(definition)
+	return out
+
+
+## A rig carries its anointed ids as a list per hand. Older dressings (and the
+## arena's loadout shape) carry a bare id string, so both are accepted and
+## deduped; unknown ids are dropped rather than becoming dead hotbar slots.
+static func skill_ids(value: Variant) -> Array[String]:
+	var out: Array[String] = []
+	var raw: Array = []
+	if value is String:
+		raw = [value]
+	elif value is Array:
+		raw = value
+	for item in raw:
+		var id := str(item)
+		if id.is_empty() or out.has(id) or by_id(id).is_empty():
+			continue
+		out.append(id)
 	return out
 
 
@@ -742,15 +860,6 @@ static func skill_for(entry: Dictionary) -> Dictionary:
 	if stock.is_empty():
 		return {}
 	return by_item(stock, hand_slot(entry))
-
-
-static func trinket_item(rig) -> String:
-	if not is_instance_valid(rig):
-		return ""
-	var kit: Variant = rig.get("trinkets")
-	if kit is Dictionary:
-		return TrinketStats.ability_item(kit)
-	return ""
 
 
 static func definition_for(rig, slot: int) -> Dictionary:

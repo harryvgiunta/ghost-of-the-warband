@@ -31,6 +31,8 @@ const CharacterPreview = preload("res://scripts/character_preview.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const Looks = preload("res://scripts/warband/warband_looks.gd")
 const ItemHover = preload("res://scripts/warband/item_hover.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
+const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
 
 const CREAM := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -40,6 +42,10 @@ const BONE := Color("e9e0c9")
 const BONE_DIM := Color("b7ab93")
 const BRASS_INK := Color("f2d6a2")
 const SIZE := Vector2(1240, 780)
+## The hotbar row under the stage: the same compact key the HUD draws, at the
+## same measure, so the screen the player arranges is the row the fight shows.
+const HOTBAR_TILE := 40.0
+const HOTBAR_GAP := 4
 const SLOT_ICON := {
 	"head": "helm", "chest": "cuirass", "hands": "gauntlet", "legs": "greaves",
 	"feet": "boot", "neck": "amulet", "ring1": "ring", "ring2": "ring",
@@ -98,6 +104,17 @@ var _reequip_all_button: Button
 var _corpse_active := false
 ## The pieces the body carries, re-read from the vacuum on every repaint.
 var _corpse_ids: Array[String] = []
+
+## The hotbar row: one compact key per `AbilityRules.SLOT_COUNT`, in the order
+## the body's key layout fires them. `hotbar_ids` is what that row is drawing
+## (`""` for an empty key), kept for callers and tests.
+var hotbar_tiles: Array = []
+var hotbar_buttons: Array = []
+var hotbar_ids: Array[String] = []
+## The key picked up by the last click, `-1` when nothing is picked up.
+var _hotbar_selected := -1
+var _hotbar_box: VBoxContainer
+var _reset_hotbar_button: Button
 
 func _ready() -> void:
 	layer = 25
@@ -245,12 +262,13 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. RE-EQUIP hands a kit back and picks it again by priority. TAB swaps the weapon set."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. RE-EQUIP hands a kit back and picks it again by priority. TAB swaps the weapon set. On the hotbar, click a skill then the key it should fire from."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _can_dress(merc_id) else -1
 	_slot_chosen = false
 	selected_slot = Contracts.SlotType.MAIN_HAND
+	_hotbar_selected = -1
 	refresh()
 	if announce:
 		changed.emit()
@@ -264,6 +282,7 @@ func refresh() -> void:
 		refresh_corpse()
 		return
 	if _warband == null:
+		_sync_hotbar()
 		return
 	if selected_merc <= 0 or not _can_dress(selected_merc):
 		selected_merc = _first_merc_id()
@@ -272,6 +291,7 @@ func refresh() -> void:
 	_sync_reequip()
 	_refresh_slots()
 	_refresh_preview()
+	_sync_hotbar()
 	_sync_stash(_pool().rows(_warband.roster, _warband.cruor.brands))
 
 ## The pool the stash half shows and dresses from: the town stash, or the delve
@@ -431,6 +451,56 @@ func _ensure_built() -> void:
 	_reequip_button.tooltip_text = "Hand this body's kit back to the stash and dress it again: the dearest spare for every slot, a shield for a tank, a bow for an archer."
 	_reequip_button.pressed.connect(_reequip_selected)
 	centre.add_child(_reequip_button)
+
+	# The ten keys, in the order this body fires them. The HUD draws the same
+	# row during a fight; this is the only place the order can be changed, and
+	# the change is saved with the body and carried onto its rig at the next
+	# dressing. Empty keys keep their frames and numbers, exactly as they do in
+	# the fight, so the screen never promises a skill the kit cannot grant.
+	_hotbar_box = VBoxContainer.new()
+	_hotbar_box.name = "Hotbar"
+	_hotbar_box.add_theme_constant_override("separation", 6)
+	centre.add_child(_hotbar_box)
+	var hotbar_head := HBoxContainer.new()
+	hotbar_head.add_theme_constant_override("separation", 8)
+	_hotbar_box.add_child(hotbar_head)
+	_label(hotbar_head, "HOTBAR  /  THE TEN KEYS", 10, MUTED)
+	var hotbar_spacer := Control.new()
+	hotbar_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hotbar_head.add_child(hotbar_spacer)
+	_reset_hotbar_button = Button.new()
+	_reset_hotbar_button.text = "KIT ORDER"
+	_reset_hotbar_button.focus_mode = Control.FOCUS_NONE
+	_reset_hotbar_button.custom_minimum_size = Vector2(0, 26)
+	_reset_hotbar_button.tooltip_text = "Drop the arrangement and let the kit order the keys again: main hand, off hand, then the worn trinkets."
+	_reset_hotbar_button.pressed.connect(_reset_hotbar)
+	hotbar_head.add_child(_reset_hotbar_button)
+	var hotbar_row := HBoxContainer.new()
+	hotbar_row.name = "Keys"
+	hotbar_row.add_theme_constant_override("separation", HOTBAR_GAP)
+	_hotbar_box.add_child(hotbar_row)
+	hotbar_tiles.clear()
+	hotbar_buttons.clear()
+	for index in AbilityRules.SLOT_COUNT:
+		# A Button carries the click and the tooltip; the tile inside draws the
+		# same key the HUD does at the same measure. An empty key is still a
+		# drop target, so the frame is never hidden.
+		var button := Button.new()
+		button.name = "Key%d" % (index + 1)
+		button.focus_mode = Control.FOCUS_NONE
+		# The tile draws the frame; the button is only the click and the hover.
+		button.flat = true
+		button.custom_minimum_size = Vector2(HOTBAR_TILE, HOTBAR_TILE)
+		button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		button.pressed.connect(_on_hotbar_pressed.bind(index))
+		hotbar_row.add_child(button)
+		var tile = AbilitySlotScript.new()
+		tile.name = "Skill"
+		tile.configure(index, HOTBAR_TILE)
+		button.add_child(tile)
+		hotbar_buttons.append(button)
+		hotbar_tiles.append(tile)
 
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 3)
@@ -644,6 +714,83 @@ func _on_slot_pressed(slot: int) -> void:
 	refresh()
 	changed.emit()
 
+# --- the hotbar -------------------------------------------------------------
+
+## The ten keys this screen is drawing, one id per slot with "" for an empty
+## key. The same row the HUD reads during a fight.
+func hotbar_layout() -> Array[String]:
+	return hotbar_ids.duplicate()
+
+## Repaint the keys from the body's own layout. The HUD and this row read the
+## same `Warband.hotbar_layout`, so what the player arranges here is exactly
+## what the number row fires.
+func _sync_hotbar() -> void:
+	if hotbar_tiles.is_empty():
+		return
+	hotbar_ids.clear()
+	var layout: Array = []
+	if _warband != null and selected_merc > 0 and not _corpse_active:
+		layout = _warband.hotbar_layout(selected_merc)
+	var any := false
+	for index in hotbar_tiles.size():
+		var id := str(layout[index]) if index < layout.size() else ""
+		hotbar_ids.append(id)
+		if not id.is_empty():
+			any = true
+		hotbar_tiles[index].update_state({} if id.is_empty() else {"id": id})
+		var button: Button = hotbar_buttons[index]
+		var definition := AbilityRules.by_id(id)
+		button.tooltip_text = "Key %d - no skill" % (index + 1) if definition.is_empty() \
+			else "Key %d - %s\nClick a skill, then the key it should fire from." % [
+				index + 1, str(definition.get("name", "")).capitalize()]
+		button.modulate = Color(1.6, 1.4, 1.0) if index == _hotbar_selected \
+			else Color.WHITE
+	_reset_hotbar_button.disabled = _warband == null or selected_merc <= 0 \
+		or _corpse_active or not any
+
+## One click picks a key up; the next puts it where it belongs. A second click
+## on the same key drops the pick, and an empty first key says so instead of
+## leaving the player waiting for the second press.
+func _on_hotbar_pressed(slot: int) -> void:
+	if _corpse_active or hotbar_tiles.is_empty():
+		return
+	if _warband == null or selected_merc <= 0:
+		set_status("Choose a mercenary first.")
+		return
+	if slot < 0 or slot >= hotbar_ids.size():
+		return
+	if _hotbar_selected < 0:
+		if hotbar_ids[slot].is_empty():
+			set_status("Key %d fires nothing. Pick a skill first." % (slot + 1))
+			return
+		_hotbar_selected = slot
+		var definition := AbilityRules.by_id(hotbar_ids[slot])
+		set_status("%s on key %d. Now click the key it should fire from." % [
+			str(definition.get("name", "That skill")).capitalize(), slot + 1])
+		_sync_hotbar()
+		return
+	if _hotbar_selected == slot:
+		_hotbar_selected = -1
+		set_status("")
+		_sync_hotbar()
+		return
+	var from := _hotbar_selected
+	_hotbar_selected = -1
+	var result: Dictionary = _warband.move_hotbar_skill(selected_merc, from, slot)
+	set_status(str(result.get("message", "")))
+	refresh()
+
+## Hand the keys back to the kit: main hand, off hand, necklace, ring 1, ring 2.
+## The numbers stay where they are; only the skills move.
+func _reset_hotbar() -> void:
+	if _corpse_active or _warband == null or selected_merc <= 0:
+		set_status("Choose a mercenary first.")
+		return
+	_hotbar_selected = -1
+	var result: Dictionary = _warband.reset_hotbar(selected_merc)
+	set_status(str(result.get("message", "")))
+	refresh()
+
 # --- stash -----------------------------------------------------------------
 
 func _sync_stash(rows: Array[Dictionary]) -> void:
@@ -765,6 +912,7 @@ func _paint_mode() -> void:
 	_set_button.visible = not _corpse_active
 	_reequip_button.visible = not _corpse_active
 	_reequip_all_button.visible = not _corpse_active
+	_hotbar_box.visible = not _corpse_active
 	_stash_hint.visible = not _corpse_active
 	_stash_box.visible = not _corpse_active
 	_corpse_box.visible = _corpse_active

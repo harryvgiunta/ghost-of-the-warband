@@ -27,6 +27,7 @@ const VendorScript = preload("res://scripts/warband/mercenary_vendor.gd")
 const SoulScript = preload("res://scripts/warband/soul_router.gd")
 const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
 const QuestScript = preload("res://scripts/warband/quest_log.gd")
 const AnnointScript = preload("res://scripts/warband/annoint_ledger.gd")
@@ -56,14 +57,17 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## auto-equip holds (`auto_equip_restricted`), the pieces the player keeps out of
 ## the band's automatic arming; v11 added each record's disposition (the `tank` /
 ## `melee` / `bow` behaviour the squad AI reads per body and the arming reads when
-## it picks a piece). Older files still load: a record with no sets puts
+## it picks a piece); v13 added each record's hotbar layout (`hotbar_order`), the
+## sequence of ability ids the player has laid on the ten keys. Older files still
+## load: a record with no sets puts
 ## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
 ## with an empty ledger, a file without anointings carries plain steel, a file
 ## without a delve has an empty pack and nobody below, a file without a party mode
 ## fights offensive, a file without holds arms from every piece, as it always did,
-## and a file without a disposition fields every body as melee.
-const SAVE_VERSION := 12
+## a file without a disposition fields every body as melee, and a file without a
+## hotbar layout fires every skill from the key the kit's own order gives it.
+const SAVE_VERSION := 13
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -967,15 +971,16 @@ func annoint_refs(merc_id: int) -> Array:
 func annointment_stats(merc_id: int) -> Dictionary:
 	return annoints.stats_for(annoint_refs(merc_id))
 
-## The skills this body's annointments wake, one per hand.
+## The skills this body's annointments wake, one list per hand: a copy may carry
+## several ability welds and every one of them reaches the hotbar.
 func annointment_skills(merc_id: int) -> Dictionary:
 	var kit := roster.equipped_of(merc_id)
-	var out := {"main": "", "off": ""}
+	var out := {"main": [], "off": []}
 	for slot in ["main", "off"]:
 		var item_id := str(kit.get(slot, ""))
 		if item_id.is_empty():
 			continue
-		out[slot] = annoints.ability_of(item_id, annoint_copy(merc_id, slot))
+		out[slot] = annoints.skills_of(item_id, annoint_copy(merc_id, slot))
 	return out
 
 ## The procs this body's annointments arm: `AnnointRuntime` reads this once per
@@ -998,6 +1003,154 @@ func annointment_marks(merc_id: int) -> Dictionary:
 ## How much this body wants its own annointed kit, 0..1, for the arming pass.
 func annointment_want(merc_id: int, disposition: String) -> float:
 	return annoints.want_for(annoint_refs(merc_id), disposition)
+
+# --- the hotbar -------------------------------------------------------------
+#
+# The altar decides which skills a kit grants; the player decides which of the
+# ten keys each one sits on. The layout is a sequence of ability ids stored per
+# mercenary (`WarbandRoster.KEY_HOTBAR`), and `AbilityRules.granted` lays the kit
+# out through it, so the HUD, the runner and the paperdoll all read one order.
+# The layout never grants a skill: an id the kit does not wake is skipped.
+
+## The skill ids this body's kit grants right now, in kit order. Mirrors the
+## dressing `SeatLoadout` runs, without a rig: a roster record may have no body
+## at all (a reserve, a name the scene never spawned) and the paperdoll still
+## has to draw the keys that body would fire.
+func hotbar_kit(merc_id: int) -> Array[String]:
+	var out: Array[String] = []
+	var gear := roster.equipped_of(merc_id)
+	var main_id := str(gear.get("main", ""))
+	var off_id := str(gear.get("off", ""))
+	var main := ""
+	var off := ""
+	var hands := {"main": [], "off": []}
+	if not main_id.is_empty():
+		main = AbilityRules.stock_item(State.ITEMS.get(main_id, {}))
+		hands["main"] = _hotbar_hand(main_id, "main", merc_id)
+	# The off hand only performs a skill while it holds a shield: an off-hand
+	# blade is a dual-wield partner, and `AbilityRules.off_item` grants nothing
+	# for it either.
+	if str(State.ITEMS.get(off_id, {}).get("category", "")) == "shield":
+		off = AbilityRules.stock_item(State.ITEMS.get(off_id, {}))
+		hands["off"] = _hotbar_hand(off_id, "off", merc_id)
+	var trinkets := {"neck": str(gear.get("neck", "")),
+		"ring1": str(gear.get("ring1", "")), "ring2": str(gear.get("ring2", ""))}
+	for definition in AbilityRules.grants_for(main, off, hands, trinkets):
+		var id := str(definition.get("id", ""))
+		if id.is_empty() or out.has(id):
+			continue
+		out.append(id)
+	return out
+
+
+## The skills one hand of this body's kit wakes: the copy's own welds when the
+## altar welded any, otherwise the piece's catalog anointing - the same two
+## sources `SeatLoadout.apply` reads for the live rig.
+func _hotbar_hand(item_id: String, hand: String, merc_id: int) -> Array[String]:
+	var welded := annoints.skills_of(item_id, annoint_copy(merc_id, hand))
+	if not welded.is_empty():
+		return welded
+	var skill := State.anointed_skill(item_id, 1 if hand == "off" else 0,
+		cruor.anointed_among([item_id]))
+	var out: Array[String] = []
+	if not skill.is_empty():
+		out.append(skill)
+	return out
+
+
+## The body's skills in the player's own sequence, one per hotbar slot. The
+## layout ranks the whole kit and the ten keys take the first ten, which is the
+## same cap `AbilityRules.granted` applies - so a kit with more welds than keys
+## draws the same ten on the HUD and in the paperdoll.
+func hotbar_skills(merc_id: int) -> Array[String]:
+	var ordered := AbilityRules.ordered_ids(hotbar_kit(merc_id),
+		roster.hotbar_order_of(merc_id))
+	var out: Array[String] = []
+	for index in mini(ordered.size(), AbilityRules.SLOT_COUNT):
+		out.append(ordered[index])
+	return out
+
+
+## The ten keys exactly as the HUD draws them: one ability id per slot, "" for a
+## key that fires nothing.
+func hotbar_layout(merc_id: int) -> Array[String]:
+	var skills := hotbar_skills(merc_id)
+	var out: Array[String] = []
+	for index in AbilityRules.SLOT_COUNT:
+		out.append(skills[index] if index < skills.size() else "")
+	return out
+
+
+## Lay the body's skills out on the ten keys. `order` is a sequence of ability
+## ids; ids this body's kit does not grant are dropped, and every grant the
+## sequence leaves out is appended in kit order, so what is stored is always a
+## permutation of what the body can actually fire. Answers `{ok, message, order}`.
+func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
+	if lent:
+		return _lent_refusal({"order": []})
+	if not roster.has(merc_id):
+		return {"ok": false, "message": "No such mercenary.", "order": []}
+	var kit := hotbar_kit(merc_id)
+	var laid: Array[String] = []
+	for item in order:
+		var id := str(item)
+		if id.is_empty() or not kit.has(id) or laid.has(id):
+			continue
+		laid.append(id)
+	for id in kit:
+		if not laid.has(id):
+			laid.append(id)
+	roster.set_hotbar_order(merc_id, laid)
+	# The body in the world is dressed from the record, so its own key order
+	# follows the write; a body nobody is inside picks it up at its next spawn.
+	armed.emit([merc_id])
+	_notify()
+	return {"ok": true, "message": "The keys are laid out.", "order": laid}
+
+
+## Move the skill on key `from_slot` to key `to_slot`, swapping whatever was
+## there. Slots are the ten keys the number row fires, not indices into the
+## stored sequence, so moving a skill into an empty key closes the row up
+## behind it. Answers `{ok, message, order}`.
+func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary:
+	if lent:
+		return _lent_refusal({"order": []})
+	if not roster.has(merc_id):
+		return {"ok": false, "message": "No such mercenary.", "order": []}
+	if from_slot < 0 or from_slot >= AbilityRules.SLOT_COUNT \
+			or to_slot < 0 or to_slot >= AbilityRules.SLOT_COUNT:
+		return {"ok": false, "message": "That is not a hotbar key.", "order": []}
+	if from_slot == to_slot:
+		return {"ok": false, "message": "That skill is already on key %d."
+			% (from_slot + 1), "order": []}
+	var layout := hotbar_layout(merc_id)
+	if layout[from_slot].is_empty() and layout[to_slot].is_empty():
+		return {"ok": false, "message": "Both keys are empty.", "order": []}
+	var held := layout[from_slot]
+	layout[from_slot] = layout[to_slot]
+	layout[to_slot] = held
+	var order: Array[String] = []
+	for id in layout:
+		if not id.is_empty():
+			order.append(id)
+	var result := set_hotbar_order(merc_id, order)
+	if bool(result.get("ok", false)):
+		result["message"] = "Skills swapped." if not layout[from_slot].is_empty() \
+			and not layout[to_slot].is_empty() else "Skill moved."
+	return result
+
+
+## Drop the player's layout: the keys follow the kit again - the main hand, the
+## off hand, then the necklace, ring 1 and ring 2.
+func reset_hotbar(merc_id: int) -> Dictionary:
+	if lent:
+		return _lent_refusal({"order": []})
+	if not roster.has(merc_id):
+		return {"ok": false, "message": "No such mercenary.", "order": []}
+	roster.set_hotbar_order(merc_id, [])
+	armed.emit([merc_id])
+	_notify()
+	return {"ok": true, "message": "The keys follow the kit again.", "order": []}
 
 ## A piece found already anointed - a rare watcher's steel below (`delve_loot.gd`)
 ## - wakes into its skill the moment the warband takes it, and `anointed` dresses
@@ -1372,6 +1525,15 @@ const LENT_DISPOSITION_MESSAGE := "This is the host's warband: only the host say
 ## host's band. Returns `{ok, disposition, message}` with the body's disposition
 ## afterwards: an unknown word is refused, and so is a lent warband's, because the
 ## squad that would obey it is the host's. Only a real change is announced.
+##
+## A real change can leave a piece in a hand the new stance never carries - the
+## band dressed a body as a melee body with the greatsword, and the player has
+## just made it the front line. Those pieces go back into the pool and the hands
+## are filled again by the same choice an arming pass makes
+## (`_release_refused_hands`), so a TANK reads as a shield and a one-hander the
+## moment the chip is pressed. A blade a bowman carries is not refused (the bow's
+## trade falls back on it), and a piece the player lays in by hand after the
+## change is theirs - this runs on the change itself.
 func set_disposition(merc_id: int, disposition: String) -> Dictionary:
 	var now := roster.disposition_of(merc_id) if roster.has(merc_id) else Contracts.DEFAULT_DISPOSITION
 	if lent:
@@ -1384,10 +1546,41 @@ func set_disposition(merc_id: int, disposition: String) -> Dictionary:
 			"message": "%s is not a disposition." % str(disposition).to_upper()}
 	roster.set_disposition(merc_id, wanted)
 	if wanted != now:
+		var refitted := _release_refused_hands(merc_id, wanted)
 		_notify()
+		if not refitted.is_empty():
+			armed.emit([merc_id])
 	return {"ok": true, "disposition": wanted,
 		"message": "%s fights as %s." % [roster.name_of(merc_id),
 			Contracts.disposition_label(wanted)]}
+
+## Take the pieces the new stance refuses out of a body's hands and fill those
+## hands again from the pool. A weight would only make a greatsword expensive; a
+## refusal is what the arming enforces, and a body that becomes a tank while
+## holding one would carry it to the field with the shield it costs already in
+## the stash. Only refused pieces move - a bowman's blade is not refused - and
+## nothing moves for a body that is down, below with the party, or in a lent
+## warband. Answers the ids that went back into the pool.
+func _release_refused_hands(merc_id: int, disposition: String) -> Array[String]:
+	var released: Array[String] = []
+	if lent or not roster.is_alive(merc_id):
+		return released
+	if delve.active and not delve.party.has(merc_id):
+		return released
+	for slot_id in ["main", "off"]:
+		var item_id := str(roster.equipped_of(merc_id).get(slot_id, ""))
+		if item_id.is_empty() or EquipmentRules.bare_garment(item_id):
+			continue
+		var item: Dictionary = State.ITEMS.get(item_id, {})
+		if item.is_empty() or not Contracts.disposition_refuses_gear(disposition, item):
+			continue
+		if roster.unequip(merc_id, slot_id).is_empty():
+			continue
+		field_stash().add(item_id, 1)
+		released.append(item_id)
+	if not released.is_empty():
+		_fill_slots(merc_id, ["main", "off"])
+	return released
 
 ## Step one body to the next disposition in `Contracts.DISPOSITIONS` order -
 ## what a press on the roster's chip does. TANK, MELEE, BOW and round again.

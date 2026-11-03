@@ -74,8 +74,9 @@ and the other does not.
 
 **The rack shows copies, not catalog rows.** The altar's ANOINT page lists one
 card per copy the warband carries — ten greatswords with ten different sets are
-ten cards, each printing its own welded names and its own `n / 6` — sorted by
-piece value and then by how much that copy carries. A **WORN ONLY** toggle in
+ten cards, each printing its own welded names and its own `n / 6` — the copies a
+body is wearing first, then sorted by piece value and then by how much that copy
+carries. A **WORN ONLY** toggle in
 the rack's header narrows it to the copies a body has on right now (the same
 answer `Warband.annoint_copy` gives the field, so the rack and the body never
 disagree about which sword is worn). `AltarMenu.anoint_rows()` answers that rack

@@ -163,14 +163,25 @@ func entries_of(item_id: String, ordinal: int = 0) -> Array:
 	return out
 
 
-## The first annointed skill a copy carries, or "". Skill order is acquisition
-## order, so the first ability welded on is the one that fires.
-func ability_of(item_id: String, ordinal: int = 0) -> String:
+## Every annointed skill a copy carries, in weld order. A piece may hold several
+## ability welds, and every one of them is a hotbar skill; duplicate ids and
+## entries the build cannot play are dropped.
+func skills_of(item_id: String, ordinal: int = 0) -> Array[String]:
+	var out: Array[String] = []
 	for entry in entries_of(item_id, ordinal):
-		if int(entry.kind) == Catalog.Kind.ABILITY and not str(entry.ability).is_empty():
-			if not AbilityRules.by_id(str(entry.ability)).is_empty():
-				return str(entry.ability)
-	return ""
+		if int(entry.kind) != Catalog.Kind.ABILITY:
+			continue
+		var id := str(entry.ability)
+		if id.is_empty() or out.has(id) or AbilityRules.by_id(id).is_empty():
+			continue
+		out.append(id)
+	return out
+
+
+## The first annointed skill a copy carries, or "". Used where a card names one.
+func ability_of(item_id: String, ordinal: int = 0) -> String:
+	var skills := skills_of(item_id, ordinal)
+	return skills[0] if not skills.is_empty() else ""
 
 
 ## `refs` is an Array of `ref()` dictionaries: the worn pieces of one body.
@@ -199,20 +210,21 @@ func procs_for(refs: Array) -> Array:
 	return out
 
 
-## Skill ids a kit wakes, in order. The caller caps them at the three slots.
-func abilities_for(refs: Array, limit: int = 3) -> Array[String]:
+## Skill ids a kit wakes, in order, one entry per welded ability. The caller
+## caps them at the hotbar's slots.
+func abilities_for(refs: Array, limit: int = AbilityRules.SLOT_COUNT) -> Array[String]:
 	var out: Array[String] = []
 	for payload in refs:
 		if not payload is Dictionary:
 			continue
 		var item_id := str((payload as Dictionary).get("item_id", ""))
 		var ordinal := int((payload as Dictionary).get("ordinal", 0))
-		var skill := ability_of(item_id, ordinal)
-		if skill.is_empty() or out.has(skill):
-			continue
-		out.append(skill)
-		if out.size() >= limit:
-			break
+		for skill in skills_of(item_id, ordinal):
+			if out.has(skill):
+				continue
+			out.append(skill)
+			if out.size() >= limit:
+				return out
 	return out
 
 

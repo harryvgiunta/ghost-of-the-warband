@@ -55,9 +55,9 @@ const STATS := {
 	"ring_ironhide": {"health":20.0, "guard":0.02},
 }
 
-## Trinkets that grant a skill in the amulet (third) ability slot. The neck
-## wins over the rings, then ring 1 over ring 2, so a kit always resolves the
-## same slot deterministically. `AbilityRules` owns the definitions.
+## Trinkets that grant a skill, read in slot order: the necklace, ring 1 and
+## ring 2 each hand their grant to its own hotbar slot. `AbilityRules` owns the
+## definitions and the slot assignment.
 const ABILITY_ORDER := ["neck", "ring1", "ring2"]
 const ABILITY_GRANTS := {
 	"neck_shield": "energy_shield",
@@ -103,16 +103,6 @@ static func kit(equipped: Dictionary) -> Dictionary:
 	for slot in SLOTS:
 		trinkets[slot] = str(equipped.get(slot, ""))
 	return trinkets
-
-
-## The trinket item that owns the amulet ability slot, or "" when the kit
-## grants none. `AbilityRules` maps the id to its definition.
-static func ability_item(trinkets: Dictionary) -> String:
-	for slot in ABILITY_ORDER:
-		var id := str(trinkets.get(slot, ""))
-		if ABILITY_GRANTS.has(id):
-			return id
-	return ""
 
 
 static func grant_for(id: String) -> String:

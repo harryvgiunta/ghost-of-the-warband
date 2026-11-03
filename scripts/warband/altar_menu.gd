@@ -493,9 +493,16 @@ func _refresh_anoint() -> void:
 				"message": str(copy.get("message", "")),
 				"button": null,
 			})
-	# Dearest piece first, and inside one piece the copies that already carry
-	# something, so the one a player came to look at sits at the top of its group.
+	# The copies a body is wearing first - the steel a player walks to the altar
+	# to work is the steel in his hands, and every spare waits behind it. Inside
+	# each group the dearest piece leads, and inside one piece the copies that
+	# already carry something, so the one a player came to look at sits at the
+	# top of its group.
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_worn := not str(a["worn"]).is_empty()
+		var b_worn := not str(b["worn"]).is_empty()
+		if a_worn != b_worn:
+			return a_worn
 		if int(a["value"]) != int(b["value"]):
 			return int(a["value"]) > int(b["value"])
 		if str(a["name"]) != str(b["name"]):
@@ -797,18 +804,19 @@ func _paint_carries(item_id: String, ordinal: int) -> void:
 		line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 ## What the piece's hand will carry: the skill the altar already welded on, or
-## the one the stock piece would wake into, and the key that looses it.
+## the one the stock piece would wake into, and the hand that performs it. The
+## hotbar number is not promised here - it depends on the rest of the worn kit.
 func _wakes_text(row: Dictionary, item_id: String) -> String:
-	var key := str(row.get("key", "1"))
+	var hand := "OFF HAND" if str(row.get("key", "1")) == "2" else "MAIN HAND"
 	var welded := str(row.get("ability", ""))
 	if not welded.is_empty():
 		var name := str(AbilityRules.by_id(welded).get("name", welded))
-		return "CARRIES %s  ·  KEY %s" % [name.to_upper(), key]
+		return "CARRIES %s  ·  %s" % [name.to_upper(), hand]
 	var stock: Dictionary = WarbandCruor.anoint_skill(item_id)
 	if stock.is_empty():
 		return ""
-	return "WOULD WAKE %s  ·  KEY %s" % [
-		str(stock.get("name", "")).to_upper(), key]
+	return "WOULD WAKE %s  ·  %s" % [
+		str(stock.get("name", "")).to_upper(), hand]
 
 ## The four bands the altar's die is cut into, in the order they are cut.
 func _odds_text(odds: Dictionary) -> String:
@@ -949,7 +957,18 @@ func _refresh_brand() -> void:
 		_brand_item = ""
 		_refresh_brand_preview()
 		return
+	# A vessel a body is wearing leads, for the rack's own reason: the sigil a
+	# player came to burn goes on the piece in his hands before a spare. Inside
+	# each group the dearest vessel leads.
+	var worn := {}
+	for item_id in candidates:
+		if not _worn_tags(item_id).is_empty():
+			worn[item_id] = true
 	candidates.sort_custom(func(a: String, b: String) -> bool:
+		var a_worn := worn.has(a)
+		var b_worn := worn.has(b)
+		if a_worn != b_worn:
+			return a_worn
 		var a_value := WarbandStash.value_of(a, cruor.brand_of(a))
 		var b_value := WarbandStash.value_of(b, cruor.brand_of(b))
 		if a_value != b_value:

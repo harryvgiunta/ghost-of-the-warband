@@ -167,17 +167,33 @@ func advance(delta: float) -> void:
 
 ## A weapon swap cancels the trailing cooldown of the weapon being put away.
 ## That keeps a testing session able to fire every skill back to back; the
-## cost prevents swap-spam from being a free damage loop.
+## cost prevents swap-spam from being a free damage loop. A skill the player
+## merely moved to another key keeps its timer: the cooldown belongs to the
+## skill, not to the key, so reordering the row is never a way to shed one.
 func _refresh_grants() -> void:
 	if not is_instance_valid(rig):
 		return
 	var grants := AbilityRules.granted(rig)
+	var moved := false
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		if str(grants[slot].get("id", "")) != _grant_ids[slot]:
+			moved = true
+			break
+	if not moved:
+		return
+	# Where each skill's timer stood on the key it was on, read before the row
+	# moves. A skill new to the row has none and starts ready.
+	var timers := {}
+	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
+		if not _grant_ids[slot].is_empty() and slot < cooldowns.size():
+			timers[_grant_ids[slot]] = cooldowns[slot]
 	for slot in mini(AbilityRules.SLOT_COUNT, _grant_ids.size()):
 		var id := str(grants[slot].get("id", ""))
-		if id != _grant_ids[slot]:
-			_grant_ids[slot] = id
-			if slot < cooldowns.size():
-				cooldowns[slot] = 0.0
+		if id == _grant_ids[slot]:
+			continue
+		_grant_ids[slot] = id
+		if slot < cooldowns.size():
+			cooldowns[slot] = float(timers.get(id, 0.0))
 
 
 func _emit_due_cues() -> void:
@@ -223,20 +239,22 @@ func allows_movement() -> bool:
 	return active and bool(active_definition.get("move", false))
 
 
-func hud_state(slot: int = 0) -> Dictionary:
-	var definition := definition(slot)
-	if definition.is_empty():
-		return {}
+## Every hotbar slot in one pass. The HUD asks once a frame instead of walking
+## the whole worn kit once per tile.
+func hud_states() -> Array:
+	var definitions := AbilityRules.granted(rig)
+	var out: Array = []
+	for slot in definitions.size():
+		var definition: Dictionary = definitions[slot]
+		out.append({} if definition.is_empty() else _hud_state(definition, slot))
+	return out
+
+
+func _hud_state(definition: Dictionary, slot: int) -> Dictionary:
 	var cost := float(definition.stamina_cost)
 	return {
-		"slot": slot,
 		"id": str(definition.id),
-		"name": str(definition.name),
-		"key": str(definition.key),
-		"item": str(definition.get("item", "")),
 		"active": active and active_slot == slot,
-		"elapsed": elapsed if active_slot == slot else 0.0,
-		"duration": duration if active_slot == slot else float(definition.duration),
 		"cooldown": cooldowns[slot] if slot < cooldowns.size() else 0.0,
 		"stamina_cost": cost,
 		"affordable": float(actor.stamina) >= cost if is_instance_valid(actor) else true,

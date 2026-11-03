@@ -93,6 +93,7 @@ WARBAND_TESTS = [
     "armor_flair_regression",
     "checkpoint_regression",
     "warband_abilities_regression",
+    "hotbar_regression",
     "warband_menu_regression",
     "keybind_screen_regression",
     "warband_vendors_regression",

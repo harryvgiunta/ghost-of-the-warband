@@ -69,6 +69,12 @@ func tile_key(tile) -> String:
 	return str(label.text) if label != null else ""
 
 
+## The skill a tile is currently drawing, "" for an empty tile.
+func tile_id(tile) -> String:
+	var definition = tile.get("_definition")
+	return str(definition.get("id", "")) if definition is Dictionary else ""
+
+
 ## A real arena body with its own rig, built the way the campaign spawns one.
 func fighter(parent: Node3D, index: int, at: Vector3) -> Node3D:
 	var actor := Actor.new()
@@ -119,8 +125,9 @@ func run() -> void:
 	quit(0 if failures == 0 else 1)
 
 
-## Plain 1/2/3 is the warband's binding. The key travels through the real input
-## pump, so the controller's own `_unhandled_input` is what answers.
+## The number row is the warband's binding, and the tenth slot rides the 0 key.
+## The key travels through the real input pump, so the controller's own
+## `_unhandled_input` is what answers.
 func _check_number_row(actor) -> void:
 	Input.parse_input_event(key_event(KEY_1, true))
 	Input.flush_buffered_events()
@@ -146,9 +153,37 @@ func _check_number_row(actor) -> void:
 	actor.ability.cooldowns[0] = 0.0
 	actor.stamina = actor.max_stamina
 
+	# Ten skills fill ten slots, and the tenth is fired by KEY_0. A bow with every
+	# bow weld plus the shield pool and the amulet's ward is ten grants exactly.
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR))
+	actor.rig.anointed = {"main": AbilityRules.skill_ids([
+		"barrage", "triple_volley", "piercing_shot", "rain_of_ash", "skewer",
+		"shield_bash", "shield_charge", "shield_slam", "rebuke", "energy_shield",
+	]), "off": []}
+	var grants: Array = AbilityRules.granted(actor.rig)
+	check(grants.size() == AbilityRules.SLOT_COUNT and not grants[9].is_empty(),
+		"ten grants fill ten slots")
+	check(str(grants[9].get("id", "")) == "energy_shield",
+		"the tenth slot is the tenth grant, got %s" % str(grants[9].get("id", "")))
+	actor.combat.grounded = true
+	Input.parse_input_event(key_event(KEY_0, true))
+	Input.flush_buffered_events()
+	var tenth := await _wait_until(func(): return bool(actor.ability.active), 1.5)
+	Input.parse_input_event(key_event(KEY_0, false))
+	Input.flush_buffered_events()
+	check(tenth, "KEY_0 starts slot 10")
+	check(int(actor.ability.active_slot) == 9,
+		"KEY_0 fires the tenth slot, got %d" % int(actor.ability.active_slot))
+	check(str(actor.ability.active_id) == "energy_shield",
+		"KEY_0 starts the tenth grant, got %s" % str(actor.ability.active_id))
+	actor.ability.cancel()
+	actor.ability.reset()
+	actor.rig.apply_loadout(State.build_loadout("", "", ARMOR))
+	actor.stamina = actor.max_stamina
 
-## The HUD reads the possessed body: stamina beside health, and one tile per
-## skill slot labelled with the key that actually fires it.
+
+## The HUD reads the possessed body: stamina beside health, and one hotbar tile
+## per slot labelled with the key that actually fires it.
 func _check_hud(world: Node3D, actor) -> void:
 	var hud := HudScript.new()
 	hud.name = "Hud"
@@ -166,37 +201,85 @@ func _check_hud(world: Node3D, actor) -> void:
 			% [bar.value, float(actor.stamina)])
 	var tiles: Array = hud.ability_tiles()
 	check(tiles.size() == AbilityRules.SLOT_COUNT,
-		"the HUD has one tile per skill slot, got %d" % tiles.size())
+		"the hotbar has one tile per slot, got %d" % tiles.size())
+	check(tiles.size() == 10, "the hotbar is ten keys, got %d" % tiles.size())
 	for index in tiles.size():
 		check(str(tiles[index].name) == "Ability%d" % (index + 1),
 			"tile %d is named Ability%d" % [index, index + 1])
-	check(tiles[0].visible, "the granted slot is shown")
+	check(tiles[0].visible and tile_id(tiles[0]) == "charge",
+		"the granted slot is shown")
 	check(tile_key(tiles[0]) == "1", "the first tile is labelled 1, got %s"
 		% tile_key(tiles[0]))
-	check(not tiles[1].visible, "a hand with no grant hides its tile")
+	check(tiles[1].visible and tile_id(tiles[1]).is_empty(),
+		"a hand with no grant keeps an empty numbered slot")
 
-	# Stock steel carries no skill: a dagger and a buckler off the shelf leave both
-	# hand tiles dark, while the amulet's grant is worn, not anointed, and shows.
+	# Stock steel carries no skill: a dagger and a buckler off the shelf leave the
+	# hand slots empty, while the amulet's worn grant takes the first free slot.
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
 		{"neck": "neck_shield"}))
 	actor.stamina = actor.max_stamina
 	hud.set_body(actor, "Probe", 1)
-	check(not tiles[0].visible and not tiles[1].visible,
-		"stock steel in both hands shows no hand tile")
-	check(tiles[2].visible, "the worn amulet still shows its grant")
+	check(tile_id(tiles[0]) == "energy_shield",
+		"the worn amulet's grant takes slot 1, got %s" % tile_id(tiles[0]))
+	check(tile_id(tiles[1]).is_empty() and tile_key(tiles[1]) == "2",
+		"stock steel in both hands leaves the second slot empty and numbered")
 
-	# The same kit anointed grants all three slots: main hand, shield and amulet.
+	# The same kit anointed grants three skills: main hand, shield and amulet.
 	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
 		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
 	hud.set_body(actor, "Probe", 1)
-	for index in tiles.size():
-		check(tiles[index].visible, "slot %d is shown for an anointed kit" % index)
+	check(_granted(tiles) == 3, "an anointed kit fills three slots, got %d" % _granted(tiles))
+	var anointed_ids := ["backstab", "shield_bash", "energy_shield"]
+	for index in anointed_ids.size():
+		check(tile_id(tiles[index]) == anointed_ids[index],
+			"slot %d draws %s, got %s" % [index, anointed_ids[index],
+			tile_id(tiles[index])])
 		check(tile_key(tiles[index]) == str(index + 1),
 			"tile %d is labelled %d, got %s" % [index, index + 1,
 			tile_key(tiles[index])])
+
+	# The bug this exists for: a piece can carry several welded skills and every
+	# worn trinket can grant one, so each has to take its own hotbar slot instead
+	# of being hidden behind the first.
+	actor.rig.apply_loadout(State.build_loadout("bow_short", "", ARMOR,
+		{"neck": "neck_shield", "ring1": "ring_dash"}))
+	actor.rig.anointed = {"main": AbilityRules.skill_ids(["barrage", "triple_volley"]),
+		"off": []}
+	hud.set_body(actor, "Probe", 1)
+	var welded_ids := ["barrage", "triple_volley", "energy_shield", "dash"]
+	check(_granted(tiles) == welded_ids.size(),
+		"two welded skills and two trinkets fill four slots, got %d" % _granted(tiles))
+	for index in welded_ids.size():
+		check(tile_id(tiles[index]) == welded_ids[index],
+			"slot %d draws %s, got %s" % [index, welded_ids[index],
+			tile_id(tiles[index])])
+		check(tile_key(tiles[index]) == str(index + 1),
+			"hotbar slot %d keeps its number, got %s" % [index + 1,
+			tile_key(tiles[index])])
+	check(tile_id(tiles[welded_ids.size()]).is_empty(),
+		"the rest of the hotbar stays empty")
+	check(tile_key(tiles[AbilityRules.SLOT_COUNT - 1]) == "10",
+		"the tenth slot is labelled 10, got %s"
+		% tile_key(tiles[AbilityRules.SLOT_COUNT - 1]))
+
+	# Hand the later checks a melee kit back: the guard checks below need a blade
+	# in the hand, and this test's last kit is a bow.
+	actor.rig.apply_loadout(State.build_loadout("dagger_iron", "shield_buckler", ARMOR,
+		{"neck": "neck_shield"}, ["dagger_iron", "shield_buckler"]))
+	actor.stamina = actor.max_stamina
+
 	hud.set_body(null, "", -1)
 	check(not tiles[0].visible, "no body hides every tile")
 	hud.queue_free()
+
+
+## How many hotbar slots are drawing a skill this frame.
+func _granted(tiles: Array) -> int:
+	var out := 0
+	for tile in tiles:
+		if not tile_id(tile).is_empty():
+			out += 1
+	return out
 
 
 ## RMB in cover is a guard that also leans out; outside cover it is only a

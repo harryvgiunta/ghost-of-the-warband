@@ -11,7 +11,7 @@ extends SceneTree
 ##   2. builds the deep-wood band - eight briar wolves in `guards`, with the
 ##      `MobCuller` that keeps a walked-past wolf cheap;
 ##   3. paints the HUD against a living body: a stamina bar with a real maximum
-##      and three ability tiles;
+##      and the ten-key hotbar;
 ##   4. opens and closes the campaign menu from a real Escape key without pausing
 ##      the tree;
 ##   5. never hands a human-occupied body to the squad brains - the rule that keeps
@@ -19,6 +19,7 @@ extends SceneTree
 
 const WorldScene := "res://scenes/warband_world.tscn"
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 const TEST_SAVE := "user://warband_integration_player.json"
 const WARBAND_SAVE := "user://warband_integration_warband.json"
 ## The bookmark the world opens on: on the trail, past the cages, so the opening
@@ -141,8 +142,9 @@ func check_world_pieces() -> void:
 	check(bar != null, "the HUD carries a stamina bar")
 	if bar != null:
 		check(bar.max_value > 0.0, "the stamina bar has a real maximum (%.1f)" % bar.max_value)
-	check(game.hud.ability_tiles().size() == 3,
-		"the HUD carries three ability tiles (%d)" % game.hud.ability_tiles().size())
+	check(game.hud.ability_tiles().size() == AbilityRules.SLOT_COUNT \
+			and game.hud.ability_tiles().size() == 10,
+		"the HUD carries the ten-key hotbar (%d)" % game.hud.ability_tiles().size())
 
 
 # --- the menu --------------------------------------------------------------

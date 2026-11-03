@@ -256,12 +256,17 @@ var focus_active := false
 ## Presentation never reads these; the damage/timing getters below do.
 var trinkets := {"neck":"", "ring1":"", "ring2":"", "off":""}
 var trinket_stats := {}
-## The skill each held hand was anointed with at the altar, by ability id
-## (`{main, off}`; "" for a plain piece). A stock weapon carries no skill:
-## `AbilityRules.granted` hands a held piece its skill only when this names it
-## for that hand, and `apply_loadout` rewrites it on every dressing, so a hand
-## that swaps pieces never keeps the last one's skill.
-var anointed := {"main":"", "off":""}
+## The skills each held hand was anointed with, by ability id, in weld order
+## (`{main, off}`; an empty list for a plain piece). A stock weapon carries no
+## skill: `AbilityRules.granted` hands a held piece its skills only when this
+## names them for that hand, and `apply_loadout` rewrites it on every dressing,
+## so a hand that swaps pieces never keeps the last one's skills.
+var anointed := {"main": [], "off": []}
+## The player's own hotbar sequence, by ability id, set on every dressing by
+## `SeatLoadout` from the mercenary's roster record. `AbilityRules.granted` lays
+## the kit's grants into the slots this names first and appends the rest in kit
+## order; an id whose piece is stowed is skipped, so the layout survives a swap.
+var hotbar_order: Array[String] = []
 ## How many annointments the altar welded to the copy in each hand, 0..6. The rig
 ## hands these to the piece it is drawing, so a worked blade carries its marks in
 ## the hand, on the floor and in the paperdoll's mirror - never in a menu alone.
@@ -1358,9 +1363,13 @@ func apply_loadout(loadout: Dictionary) -> void:
 	var main_id := str(loadout.get("main",""))
 	var off_id := str(loadout.get("off",""))
 	apply_trinkets(loadout.get("trinkets",{}))
+	# A hand carries a list of skills: the altar can weld several to one copy.
+	# Old dressings (and `PlayerState.build_loadout`) hand a bare id, so both
+	# shapes are accepted here and every consumer reads the list.
 	var hands: Variant = loadout.get("anointed",{})
 	var anointed_hands: Dictionary = hands if hands is Dictionary else {}
-	anointed = {"main":str(anointed_hands.get("main","")), "off":str(anointed_hands.get("off",""))}
+	anointed = {"main": AbilityRules.skill_ids(anointed_hands.get("main","")),
+		"off": AbilityRules.skill_ids(anointed_hands.get("off",""))}
 	set_blade_skins("makeshift" if main_id == "sword_makeshift" or off_id == "sword_makeshift" else "")
 	var staff_value := int(loadout.get("staff",-1))
 	var bow_value := int(loadout.get("bow",0))

@@ -870,7 +870,9 @@ func _push_warband() -> void:
 	receive_warband.rpc(JSON.stringify(warband.to_dict()), warband.gold())
 
 ## What each fielded body wears, so a copy that moved somebody's kit re-dresses
-## exactly those bodies.
+## exactly those bodies. The hotbar layout is part of the dressing: the host's
+## key order is the one the guest's HUD has to draw, or the same skill fires
+## from a key the other machine answers with a different one.
 func _worn_signatures(target: WarbandState) -> Dictionary:
 	var out := {}
 	if controller == null:
@@ -878,8 +880,12 @@ func _worn_signatures(target: WarbandState) -> Dictionary:
 	for actor in controller.bodies():
 		var merc_id := controller.merc_of(actor)
 		if merc_id > 0 and target.roster.has(merc_id):
-			out[merc_id] = str(target.roster.equipped_of(merc_id))
+			out[merc_id] = _dressing_signature(target, merc_id)
 	return out
+
+func _dressing_signature(target: WarbandState, merc_id: int) -> String:
+	return "%s|%s" % [str(target.roster.equipped_of(merc_id)),
+		str(target.roster.hotbar_order_of(merc_id))]
 
 func _redress(target: WarbandState, before: Dictionary) -> void:
 	if controller == null:
@@ -887,7 +893,7 @@ func _redress(target: WarbandState, before: Dictionary) -> void:
 	for key in before:
 		var merc_id := int(key)
 		if target.roster.has(merc_id) \
-				and str(target.roster.equipped_of(merc_id)) != str(before[key]):
+				and _dressing_signature(target, merc_id) != str(before[key]):
 			controller.refresh_gear(merc_id)
 
 func _send_snapshots() -> void:

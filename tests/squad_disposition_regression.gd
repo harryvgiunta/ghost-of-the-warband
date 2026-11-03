@@ -9,9 +9,10 @@ extends SceneTree
 ##      press makes, each disposition's skill order and what a piece is worth to it;
 ##   2. the record: one field per mercenary, sanitised on the way in and out of a
 ##      save, and the warband verb that writes it (a lent band and a typo refused);
-##   3. the automatic arming: a tank takes a shield and a one-hander over a dearer
-##      greatsword, a melee body takes the greatsword, a bow takes the bow, and a
-##      pickup only displaces what it is actually worth more than to that body;
+##   3. the automatic arming: a tank never takes a two-hander - it dresses in the
+##      best shield and the one-hander the pool holds - a melee body takes the
+##      greatsword, a bow takes the bow, and a pickup only displaces what it is
+##      actually worth more than to that body;
 ##   4. the behaviour: a tank advances and waits behind its guard and never falls
 ##      back, a melee body falls back under 30% to bind its wound and goes at the
 ##      densest knot, a bow gives ground when struck or crowded and looses again
@@ -141,13 +142,16 @@ func check_contract() -> void:
 	# A weight only makes a piece expensive; a refusal makes it never picked. A
 	# melee body and a tank do not reach for a bow or a staff, however empty the
 	# hand - the arming waits for the blade instead (a body the player dresses by
-	# hand is not asked).
+	# hand is not asked). A tank also refuses the two-hander, because a greatsword
+	# would lock the shield out of the other hand and the stance is the shield.
 	var staff := {"kind": "staff", "category": "staff"}
 	var bow_item := {"kind": "bow", "category": "bow"}
 	check(Contracts.disposition_refuses_gear("melee", bow_item),
 		"a melee body's arming never reaches for a bow")
 	check(Contracts.disposition_refuses_gear("tank", bow_item),
 		"nor a tank's")
+	check(Contracts.disposition_refuses_gear("tank", greatsword),
+		"and a tank's never reaches for a two-hander, dear or not")
 	check(Contracts.disposition_refuses_gear("melee", staff),
 		"and a staff is no more a blade's business")
 	check(not Contracts.disposition_refuses_gear("bow", bow_item),
@@ -286,6 +290,58 @@ func check_arming() -> void:
 	snap = warband.auto_equip(tank, "shield_kite")
 	check(bool(snap.get("ok", false)) and str(snap.get("slot", "")) == "off",
 		"a tank takes a shield into an empty off hand (%s)" % str(snap.get("message", "")))
+
+	# The tank's stance is the shield, and a two-hander costs the off hand. The
+	# greatsword used to win on price alone (340 - 70 = 270 against a shortsword's
+	# 230) and the main hand fills before the off, so the body walked out with the
+	# greatsword and no board. The refusal makes the stance absolute: the tank
+	# takes the best shield and the one-hander, and the greatsword waits.
+	warband.reset_state()
+	var wall: int = warband.add_mercenary("Wall")
+	warband.set_disposition(wall, Contracts.DISPOSITION_TANK)
+	for item_id in ["sword_short", "sword_great", "shield_buckler", "shield_tower"]:
+		warband.stash.add(item_id, 1)
+	warband.dress_recruit(wall)
+	var wall_gear: Dictionary = warband.roster.equipped_of(wall)
+	check(str(wall_gear.get("main", "")) == "sword_short",
+		"a tank takes the cheap one-hander over the dear greatsword, got %s"
+			% str(wall_gear.get("main", "")))
+	check(str(wall_gear.get("off", "")) == "shield_tower",
+		"and its best shield, got %s" % str(wall_gear.get("off", "")))
+	check(warband.stash.pooled_count("sword_great") == 1,
+		"the greatsword waits in the pool for a melee body")
+	snap = warband.auto_equip(wall, "sword_great")
+	check(not bool(snap.get("ok", true)),
+		"and a greatsword does not snap into a tank's hand")
+	warband.reequip_merc(wall)
+	wall_gear = warband.roster.equipped_of(wall)
+	check(str(wall_gear.get("main", "")) == "sword_short"
+			and str(wall_gear.get("off", "")) == "shield_tower",
+		"and a re-kit dresses it the same way, got %s / %s"
+			% [str(wall_gear.get("main", "")), str(wall_gear.get("off", ""))])
+
+	# A body the band already dressed as a melee body, then made the front line:
+	# the greatsword in its hands is a piece the new stance never carries, so the
+	# change itself puts it back in the pool and fills the hands again. Otherwise
+	# the chip would only rename a body still holding two hands on a hilt with the
+	# shield it costs sitting in the stash.
+	warband.reset_state()
+	var turned: int = warband.add_mercenary("Turned")
+	for item_id in ["sword_short", "sword_great", "shield_kite"]:
+		warband.stash.add(item_id, 1)
+	warband.dress_recruit(turned)
+	check(str(warband.roster.equipped_of(turned).get("main", "")) == "sword_great",
+		"the melee body holds the greatsword before the change, got %s"
+			% str(warband.roster.equipped_of(turned).get("main", "")))
+	warband.set_disposition(turned, Contracts.DISPOSITION_TANK)
+	var turned_gear: Dictionary = warband.roster.equipped_of(turned)
+	check(str(turned_gear.get("main", "")) == "sword_short",
+		"a body made a tank hands the greatsword back and takes the one-hander, got %s"
+			% str(turned_gear.get("main", "")))
+	check(str(turned_gear.get("off", "")) == "shield_kite",
+		"and the shield in the off hand, got %s" % str(turned_gear.get("off", "")))
+	check(warband.stash.pooled_count("sword_great") == 1,
+		"the greatsword is back in the pool for a melee body")
 
 	# A bow is not a blade's spare. The band's pool can run out of blades while a
 	# bow is still lying in it, and the arming used to close the empty hand on the

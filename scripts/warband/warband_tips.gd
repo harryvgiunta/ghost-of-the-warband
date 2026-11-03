@@ -28,7 +28,7 @@ const BOTTOM := 208.0
 ## The tokens that become a key tile. A token with an underscore is one key with a
 ## two-word name: `WHEEL_UP` prints WHEEL UP on one tile.
 const KEYS := ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "G", "P", "K", "R",
-	"T", "O", "M", "C", "Q", "E", "6", "TAB", "ESC", "ENTER", "SPACE", "SHIFT",
+	"T", "O", "M", "C", "Q", "E", "Z", "6", "TAB", "ESC", "ENTER", "SPACE", "SHIFT",
 	"CTRL", "LMB", "RMB", "MOUSE", "WHEEL_UP", "WHEEL_DOWN", "W", "A", "S", "D",
 	"[", "]"]
 

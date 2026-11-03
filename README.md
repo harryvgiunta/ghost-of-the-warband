@@ -69,8 +69,8 @@ difference - and the warband is the thing that survives a battle.
   pieces only - a worn piece is on its wearer's slots), the **Sacrificial Altar** — a
   blood-stained stone stele under candles and skull sticks, named **THE ALTAR** —
   whose ANOINT page is a rack of individual copies (ten greatswords are ten
-  cards, each with its own welded annointments and its own count, with a WORN
-  ONLY toggle for the copies a body has on) over a bench
+  cards, each with its own welded annointments and its own count, the copies a
+  body is wearing leading it, with a WORN ONLY toggle for the copies a body has on) over a bench
   that spends a warden's ichor on the picked copy alone — and **a worked copy
   marks its own steel**: one inlaid mark per annointment, glowing a step hotter
   with each (deep ember at one, hot bone at six, with the blade's edges lit from
@@ -261,8 +261,8 @@ A **neck** piece, either **ring** and the **off hand** can change the ranger's n
 
 | Slot | Item | Effect |
 | --- | --- | --- |
-| Neck | **Amulet of Energy Shield** | Grants **ENERGY SHIELD** on **SHIFT + 3**: a yellow bubble that absorbs **50%** of every hit and takes **twice** that share from stamina instead. Lasts **60 s**, the bubble pops when the pool cannot pay |
-| Ring | **Ring of Dash** | Grants **DASH** on **SHIFT + 3** (double speed for 1 s, down the crosshair) |
+| Neck | **Amulet of Energy Shield** | Grants **ENERGY SHIELD**, a yellow bubble that absorbs **50%** of every hit and takes **twice** that share from stamina instead. Lasts **60 s**, the bubble pops when the pool cannot pay |
+| Ring | **Ring of Dash** | Grants **DASH** (double speed for 1 s, down the crosshair) |
 | Off hand | **Skull of Life** | **+15 life** on every kill you land |
 | Off hand | **Skull of Death** | **+15 stamina** on every kill you land |
 | Ring | **Ring of Health** | +25 max health |
@@ -280,7 +280,7 @@ A **neck** piece, either **ring** and the **off hand** can change the ranger's n
 | Ring | **Ring of Echoes** | -15% skill cooldown |
 
 - The three worn trinkets add up: two health rings and the ironhide band give **145** max health on a 100 base.
-- The **necklace wins the third ability slot**, then ring 1, then ring 2, so a kit always resolves one skill deterministically. A stat-only ring leaves that tile hidden and **SHIFT + 3** inert.
+- Every worn trinket that grants a skill takes its own hotbar slot: the necklace first, then ring 1, then ring 2, after the held hands' skills. A stat-only trinket grants nothing and leaves its slot to the next piece.
 - **Skulls pay out on every kill** — the killer is recorded on every mob, and only that body's own skulls refill. Both skulls are off-hand holds, so they are unavailable while a bow, staff, greatsword, shield or dual-wield pair is out.
 - The plain **Ember Charm**, **Bone Talisman** and the three cheap rings remain flavor pieces with no combat effect.
 - Health and stamina maxima are per-actor now: **125/125** and **1150** read that way on every HUD, and a removed ring clamps the live pool back down instead of leaving an over-full bar.
@@ -308,7 +308,7 @@ Reduction runs on **two channels**. The helmet alone answers a **head** hit, whi
 
 Armor is equipped per slot at the paperdoll, one catalog piece at a time; what a body wears is the roster record the save holds. The band also dresses itself: a purchase fills empty slots and the naked starting set with the dearest spare in the shared stash, and right-clicking a stash row holds that item id back from every automatic equip (for example, to keep a rare blade for a chosen mercenary) while leaving it wearable by hand.
 
-**RE-EQUIP** is the deliberate re-kit the arming pass is not. The arming pass only fills what is empty, so a body wearing the salvage tier keeps it however much better kit the stash has collected; the paperdoll's **RE-EQUIP** button hands everything that body wears back into the pool first and then lets the band choose again — the dearest spare for every slot, scored by the body's own disposition, so a tank comes back in a shield and a one-hander, a bowman in a bow and a melee body in the greatsword (a bow or a staff is no blade's spare, so it stays in the pool for the body that draws it). The off hand is the one slot where the stance beats the price: a tank's wooden board outranks a dearer second blade, because holding the line is what that hand is for, while a melee body pairs a second blade there and a bowman keeps a ward in it. Nothing is minted and nothing is lost: a released piece is a stash row before the refill reads it, so the warband's worth is the same number either side of the press. The rags a body is born in stay on — they are the mesh the rig draws, not gear — and a body carrying a second weapon set comes back with one. **RE-EQUIP THE BAND** runs the same thing for the whole roster: every dressable body hands its kit back, then the roster is dressed **one body at a time in recruitment order**, so the oldest name takes the pick of the one shared pool and the next one takes what is left. Held pieces stay pooled through either pass, and a body that is down is refused rather than stripped.
+**RE-EQUIP** is the deliberate re-kit the arming pass is not. The arming pass only fills what is empty, so a body wearing the salvage tier keeps it however much better kit the stash has collected; the paperdoll's **RE-EQUIP** button hands everything that body wears back into the pool first and then lets the band choose again — the dearest spare for every slot, scored by the body's own disposition, so a tank comes back in a shield and a one-hander, a bowman in a bow and a melee body in the greatsword (a bow or a staff is no blade's spare, and a two-hander is no tank's because it locks the shield out of the other hand, so they stay in the pool for the body that uses them). The off hand is the one slot where the stance beats the price: a tank's wooden board outranks a dearer second blade, because holding the line is what that hand is for, while a melee body pairs a second blade there and a bowman keeps a ward in it. Nothing is minted and nothing is lost: a released piece is a stash row before the refill reads it, so the warband's worth is the same number either side of the press. The rags a body is born in stay on — they are the mesh the rig draws, not gear — and a body carrying a second weapon set comes back with one. **RE-EQUIP THE BAND** runs the same thing for the whole roster: every dressable body hands its kit back, then the roster is dressed **one body at a time in recruitment order**, so the oldest name takes the pick of the one shared pool and the next one takes what is left. Held pieces stay pooled through either pass, and a body that is down is refused rather than stripped.
 
 ## Play with friends over Tailscale
 
@@ -417,14 +417,10 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 | Hold right mouse with a shield | Raise the shield. Full front block, no parry, **18 stamina**; arrows that hit it deal no damage and stick in the shield |
 | Hold right mouse in cover | Guard and peek over low cover or around the selected edge of tall cover |
 | X | Swap shoulder camera and select the left/right lookout while in cover |
-| 1 | Equip the selected bow |
-| 2 | Equip the selected sword |
-| 3 | Equip the dagger |
-| 4 | Equip or stow the shield (any one-handed sword or the dagger) |
-| 5 | Dual-wield the selected one-handed sword in the right hand and the dagger in the left; press again to return to the sword |
-| TAB | Swap between the two weapon sets; the active set's pair is stowed and the other set's pair is equipped |
-| 6 | Use a bandage: three-second channel, then 35 health over the next three seconds |
-| 7 | Drink a healing potion: half-second channel, then 50 health |
+| TAB | Swap the active weapon set; the held pair is stowed and the other set's pair is equipped |
+| 1 - 9, 0 | Fire the hotbar skill in that slot (10 is the 0 key). Each slot has its own stamina cost and cooldown; a piece carries a skill only once the altar has anointed it, and an empty slot shows only its frame and number. The keys are the player's: the P screen's HOTBAR row moves a skill to the key it should fire from, and that layout is saved with the body |
+| Z | Use a bandage: three-second channel, then 35 health over the next three seconds |
+| V | Drink a healing potion: half-second channel, then 50 health |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
 | Hold left mouse with bow | Raise and draw while aiming; automatically expose from cover |
 | Release left mouse with bow | Launch one arrow; cover shots wait for exposure without gaining charge |
@@ -438,7 +434,7 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
 | Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill of an anointed main hand / anointed off-hand shield, or the worn trinket's grant; stock steel carries no skill, so a piece that has never been to the altar grants nothing; each costs 1 stamina for testing |
 | G | Interact with a keeper, the stash, the campfire, a cage latch or a corpse the squad may revive |
-| P | Open or close the equipment screen (ten worn slots, a live ranger, the shared stash, the kit summary, **RE-EQUIP** for that body and **RE-EQUIP THE BAND**); while open it owns the cursor and blocks movement, attacks and interactions |
+| P | Open or close the equipment screen (ten worn slots, a live ranger, the shared stash, the kit summary, the ten-key **HOTBAR** row, **RE-EQUIP** for that body and **RE-EQUIP THE BAND**); while open it owns the cursor and blocks movement, attacks and interactions |
 | I | Open the same screen |
 | Escape | Close the paperdoll, keeper or stash panel first; otherwise open the **quick menu** with the pointer free. It never pauses the world, so a hosted session stays connected while it is up: **RESUME**, the party's mode (**OFFENSIVE** / **DEFENSIVE** / **PASSIVE**), **SAVE GAME**, the window mode switch, **KEYS**, the SOUND page, **EXIT TO TITLE** and **EXIT GAME**. It opens by itself when a host disappears |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
@@ -447,9 +443,9 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 
 ### Abilities and stamina
 
-The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and three ability slots: **SHIFT + 1** for the main hand, **SHIFT + 2** for the off-hand shield and **SHIFT + 3** for the worn trinket, each with its icon, stamina cost and cooldown.
+The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and a ten-slot hotbar under the body's plate: **1..9** fire the first nine slots and **0** fires the tenth, each with its icon, number and cooldown. A slot with no grant keeps its dark frame and number, so no key promises a skill the body does not have. The order is the player's, not the kit's: the equipment screen (`P`) draws the same ten keys under the ranger, and clicking a skill then the key it should fire from moves it there (**KIT ORDER** hands the keys back to main hand, off hand, necklace, ring 1, ring 2). The layout is written into the mercenary's record, so it survives a reload, a body swap and a co-op mirror, and a skill moved mid-fight keeps its cooldown.
 
-Abilities are data-driven by `scripts/ability_rules.gd`. Stock weapons carry no skill: `AbilityRules.granted(rig)` wakes a weapon's skill in the main hand, or a shield's in the off hand, only once the warband's altar has anointed that piece (`rig.anointed`), so looted steel is plain until it is taken to the altar. Wearing the amulet or the dash ring grants its skill to the trinket slot. The table below is the skill each piece wakes into; the makeshift tier resolves through the same class/index (twig bow → Long Piercing Shot, club and heavy branch → Spinning AOE Spin, ironwood shiv → Backstab, wooden shield → Ground Shield Slam, makeshift cleaver → Double Slash). A definition carries the stock item it belongs to, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
+Abilities are data-driven by `scripts/ability_rules.gd`. Stock weapons carry no skill: `AbilityRules.granted(rig)` wakes a weapon's skills in the main hand, or a shield's in the off hand, only once the warband's altar has anointed that piece (`rig.anointed`), so looted steel is plain until it is taken to the altar. An anointed copy can carry several welded skills and every one of them takes its own hotbar slot; each worn granting trinket does the same, in necklace, ring 1, ring 2 order. The table below is the skill each piece wakes into; the makeshift tier resolves through the same class/index (twig bow → Long Piercing Shot, club and heavy branch → Spinning AOE Spin, ironwood shiv → Backstab, wooden shield → Ground Shield Slam, makeshift cleaver → Double Slash). A definition carries the stock item it belongs to, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
 
 `move` decides what the feet do. **Double Slash, Lunging Thrust, Spinning AOE Spin, Headbutt, Shield Charge and Ground Shield Slam** keep normal walking input; **Barrage, Triple Fan Volley, Long Piercing Shot, Fireball, Bone Spear**, the unarmed **Charge** and **Backstab** stay planted. Committed travel still wins during its window (**0.24 s** lunge, **0.16 s** headbutt, **0.48 s** shield charge), and the walk resumes once it ends; no ability allows sprinting or jumping. A definition's `aim` flag makes that committed step travel down the live crosshair instead of the heading the key was pressed from, so the lunge, the headbutt and the shield charge all turn the body onto the crosshair and dash along it. Skills that cannot be performed from a crouch — every blade, shield and dagger skill plus the unarmed Charge — are performed standing: activating one cancels a manual crouch, snaps the capsule upright and only spends the skill once the body has headroom to stand, so the authored clip always owns the whole pose. The planted bow and staff casts still layer over a crouch.
 

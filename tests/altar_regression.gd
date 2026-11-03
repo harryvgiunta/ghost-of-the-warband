@@ -81,9 +81,9 @@ func run() -> void:
 
 # --- helpers ---------------------------------------------------------------
 
-func _fresh(merc_name: String = "") -> int:
+func _fresh(merc_name: String = "", kit: Dictionary = {}) -> int:
 	warband.reset_state()
-	return warband.add_mercenary(merc_name) if not merc_name.is_empty() else -1
+	return warband.add_mercenary(merc_name, kit) if not merc_name.is_empty() else -1
 
 func _unbind_row(item_id: String) -> Dictionary:
 	for row in menu.unbind_rows():
@@ -221,8 +221,9 @@ func check_anoint() -> void:
 	check(stash.pooled_count(reagent) == 0, "exactly one ichor left the shared stash")
 	check(warband.quests.is_complete("bind_the_ichor"), "the ichor order heard about it")
 	var skill_id := str(entry.ability)
-	check(str(warband.annointment_skills(merc).get("main", "")) == skill_id,
-		"the body's main hand wakes the skill")
+	var main_welds: Array = warband.annointment_skills(merc).get("main", [])
+	check(main_welds.has(skill_id),
+		"the body's main hand wakes the skill (%s)" % str(main_welds))
 	check(str(body.ability.definition(0).get("id", "")) == skill_id,
 		"the fielded body carries the skill at once, got %s" \
 			% str(body.ability.definition(0).get("id", "")))
@@ -242,6 +243,32 @@ func check_anoint() -> void:
 			% [int(body.rig.active_bow.annoint_glyphs()), welded])
 	check(body.rig.active_bow.get_node_or_null("AnnointMarks") != null,
 		"the marks are drawn on the held piece, not only counted")
+
+	# A copy can hold several ability welds, and every one has to reach the
+	# hotbar: the old one-per-hand read displayed only the first and left the
+	# rest unusable. Weld a second ability straight into the ledger and re-dress.
+	var copy := int(warband.annoint_copy(merc, "main"))
+	var second_weld = null
+	for candidate in AnnointCatalog.for_item(State.ITEMS["bow_short"]):
+		if int(candidate.kind) == AnnointCatalog.Kind.ABILITY \
+				and not warband.annoints.has("bow_short", copy, str(candidate.id)):
+			second_weld = candidate
+			break
+	check(second_weld != null, "the bow pool carries a second ability")
+	if second_weld != null:
+		check(warband.annoints.add("bow_short", copy, str(second_weld.id)),
+			"the copy takes a second ability weld")
+		controller.refresh_gear(merc)
+		var main_welds_now: Array = body.rig.anointed.get("main", [])
+		check(main_welds_now.has(skill_id) and main_welds_now.has(str(second_weld.ability)),
+			"the rig carries both welded skills (%s)" % str(main_welds_now))
+		check(str(body.ability.definition(0).get("id", "")) == skill_id,
+			"the first weld keeps hotbar slot 1")
+		check(str(body.ability.definition(1).get("id", "")) == str(second_weld.ability),
+			"the second weld takes hotbar slot 2, got %s"
+			% str(body.ability.definition(1).get("id", "")))
+		check(int(body.ability.definition(1).get("slot", -1)) == 0,
+			"both welds fire from the main hand")
 
 	# Six annointments fit, so a marked piece is not "done": the second rite is
 	# spent, and it can only ever add, strip or swap - never destroy.
@@ -381,11 +408,24 @@ func check_rack() -> void:
 	menu.refresh()
 	check(menu.anoint_rows().size() == 5, "a copy added behind the panel is a card")
 
-	# The filter: only the copies a body is wearing right now.
+	# The copy a body wears leads the rack whatever it costs: Brann's arming
+	# sword (195) stands above the greatsword spare (340), so the piece a player
+	# walked in carrying is the first card he reads and the square lays it.
+	check(not menu.select_anoint_item(""), "the square is emptied for the check")
 	var wielder: int = warband.add_mercenary("Brann")
-	check(bool(warband.equip_merc(wielder, "main", "sword_great").get("ok", false)),
-		"a body takes a greatsword")
+	check(bool(warband.equip_merc(wielder, "main", "sword_arming").get("ok", false)),
+		"a body takes an arming sword")
 	menu.refresh()
+	var lead: Dictionary = menu.anoint_rows()[0]
+	check(str(lead.get("item_id", "")) == "sword_arming"
+		and not str(lead.get("worn", "")).is_empty(),
+		"the worn arming sword is the rack's first card: %s" % str(lead.get("worn", "")))
+	check(int(lead["value"]) < int(_rack_row("sword_great", 0)["value"]),
+		"a worn copy outranks a dearer spare")
+	check(menu.selected_anoint_item() == "sword_arming",
+		"and the square holds a copy the rack leads with")
+
+	# The filter: only the copies a body is wearing right now.
 	check(menu.rack_filter() == AltarMenuScript.RACK_ALL, "the rack starts listing every copy")
 	var every: int = menu.anoint_rows().size()
 	check(menu.set_rack_filter(AltarMenuScript.RACK_WORN), "the rack filters to worn copies")
@@ -394,7 +434,7 @@ func check_rack() -> void:
 	check(not str(worn_rows[0]["worn"]).is_empty(),
 		"the listed copy says who wears it: %s" % str(worn_rows[0]["worn"]))
 	check(worn_rows.size() < every, "the filter drops the copies nobody wears")
-	check(menu.selected_anoint_item() == "sword_great",
+	check(menu.selected_anoint_item() == "sword_arming",
 		"the square holds a copy the filtered rack shows")
 	check(not menu.set_rack_filter("nonsense"), "an unknown filter is refused")
 	check(menu.rack_filter() == AltarMenuScript.RACK_WORN, "a refused filter changes nothing")
@@ -532,15 +572,22 @@ func check_distill() -> void:
 # --- branding --------------------------------------------------------------
 
 func check_brand() -> void:
-	var merc := _fresh("Wren")
+	var merc := _fresh("Wren", {"main": "bow_short"})
+	var bearer: int = warband.add_mercenary("Ledge")
 	var stash = warband.stash
 	stash.add("sword_arming", 1)
 	stash.add("shield_buckler", 1)
-	check(bool(warband.equip_merc(merc, "off", "shield_buckler").get("ok", false)),
+	check(bool(warband.equip_merc(bearer, "off", "shield_buckler").get("ok", false)),
 		"the shield is worn")
 	warband.cruor.add(T3, 4)
 	menu.refresh()
 
+	# A vessel a body is wearing leads the list, even when a spare costs more:
+	# the shortbow in Wren's hand (120) stands above the pooled arming sword
+	# (195), for the rack's own reason - the sigil goes on the steel he carries.
+	var vessels: Array = menu.brand_rows()
+	check(not vessels.is_empty() and str(vessels[0]["item_id"]) == "bow_short",
+		"the worn shortbow leads the vessels: %s" % str(vessels[0]["item_id"] if not vessels.is_empty() else "none"))
 	var offered: Array[String] = []
 	for row in menu.brand_rows():
 		offered.append(str(row["item_id"]))

@@ -13,9 +13,10 @@ extends CanvasLayer
 ## The corners are the readout, and each one is one object:
 ##
 ##   * **Bottom left - the soul.** A bust of the body you are inside, framed by
-##     the ledger's own iron clamp, with his name and state, health over stamina
-##     and the skill row in the same plate. Every fact about the body you are
-##     driving is in that one plate and nowhere else.
+##     the ledger's own iron clamp, with his name and state and health over
+##     stamina. Under that plate sits the ten-slot hotbar, one compact tile per
+##     skill the worn kit grants, numbered from 1 to 10. Every fact about the
+##     body you are driving is in that corner and nowhere else.
 ##   * **Top right - the band.** Headed by the purse (gold and the quiver, which
 ##     is what a bow runs out of), then one row per mercenary in the field: the
 ##     badge for how he fights, his name, his health and his state. The campaign
@@ -38,10 +39,8 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
 const LAYER := 6
-## The two corner plates are the same width, and that width is the skill row:
-## three 72 px tiles, the two gaps between them and the plate's own padding. It
-## was 336 px around 96 px tiles - a quarter of a 1440 px screen for each corner,
-## over the fight it is meant to sit beside.
+## The soul's plate keeps the width the paperdoll corner always had; the hotbar
+## below it is wider, so the bottom-left column takes the hotbar's measure.
 const PANEL_WIDTH := 244.0
 const MARGIN := 14.0
 const PANEL_PAD := 10
@@ -77,12 +76,15 @@ const DISPOSITION_BADGE := {
 ## banner is only the moment.
 const AGGRO_BANNER_SECONDS := 3.5
 const AGGRO_REPEAT_SECONDS := 6.0
-## The skill row: three tiles and the two gaps between them are what the plates
-## are wide, so the corners and the row share one measure. The tile is
-## `AbilitySlot.TILE`, which the warband asks for at 72 px instead of the arena's
-## 96: three of them plus these gaps and the plate padding is `PANEL_WIDTH`.
-const TILE_GAP := 4
-const TILE_SIZE := 72.0
+## The hotbar: one compact tile per `AbilityRules.SLOT_COUNT`, half the measure
+## of the old skill card (40 px with a 26 px icon) so all ten fit under the soul's
+## plate. A tile advertises the plain number row: 1..9, then 10 on the 0 key.
+const TILE_GAP := 3
+const TILE_SIZE := 40.0
+## The column that holds the plate over the hotbar: the hotbar's own content
+## measure plus the plate's padding, so the two left-align.
+const HOTBAR_WIDTH := TILE_SIZE * AbilityRules.SLOT_COUNT \
+	+ TILE_GAP * (AbilityRules.SLOT_COUNT - 1) + PANEL_PAD * 2
 ## Nothing in the warband is clicked while the pointer is captured, so the
 ## reticle is the only thing that says where the soul is aiming. It is drawn by
 ## `Reticle` below, which carries its own measurements.
@@ -373,17 +375,19 @@ func _build() -> void:
 
 # --- the soul's plate ------------------------------------------------------
 
-## The bottom left: the body the soul is inside, as one plate. The bust in the
-## ledger's iron clamp, the name and its state, health over stamina and the skill
-## row those two pay for - all of it in the same object, so the eye never has to
-## cross the screen to read the body it is driving.
+## The bottom left: the body the soul is inside, as one plate, with the hotbar
+## under it. The bust in the ledger's iron clamp, the name and its state, health
+## over stamina - all of it in the same object, so the eye never has to cross the
+## screen to read the body it is driving. The hotbar is a separate plate below,
+## because ten compact keys are wider than the body plate and the two measures
+## should not fight.
 func _build_soul_plate(parent: Control) -> void:
 	var column := VBoxContainer.new()
 	column.name = "SoulColumn"
 	column.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	column.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	column.offset_left = MARGIN
-	column.offset_right = MARGIN + PANEL_WIDTH
+	column.offset_right = MARGIN + HOTBAR_WIDTH
 	column.offset_top = -MARGIN
 	column.offset_bottom = -MARGIN
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -392,6 +396,8 @@ func _build_soul_plate(parent: Control) -> void:
 	var plate := PanelContainer.new()
 	plate.name = "SoulPanel"
 	plate.add_theme_stylebox_override("panel", _plate_style())
+	plate.custom_minimum_size = Vector2(PANEL_WIDTH, 0)
+	plate.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(plate)
 	var body := VBoxContainer.new()
@@ -436,8 +442,8 @@ func _build_soul_plate(parent: Control) -> void:
 	_state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vitals.add_child(_state_label)
 
-	# Health over stamina, both paid into the skill row underneath: the two bars
-	# are the same widget in two colours, each with the number it is spent down to.
+	# Health over stamina: the two bars are the same widget in two colours, each
+	# with the number it is spent down to.
 	var health := _meter_row(vitals, "HEALTH", HEALTH_FILL)
 	_health_bar = health[0]
 	_health_label = health[1]
@@ -447,26 +453,32 @@ func _build_soul_plate(parent: Control) -> void:
 	_stamina_label = stamina[1]
 	_stamina_bar.name = "Stamina"
 
-	# The hairline that ties the bars to the skill row: one rule, then the tiles.
-	var rule := ColorRect.new()
-	rule.name = "Rule"
-	rule.color = Color(0.86, 0.72, 0.42, 0.22)
-	rule.custom_minimum_size = Vector2(0, 1)
-	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body.add_child(rule)
+	_build_hotbar(column)
 
-	var ability_row := HBoxContainer.new()
-	ability_row.name = "Abilities"
-	ability_row.add_theme_constant_override("separation", TILE_GAP)
-	ability_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	ability_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body.add_child(ability_row)
+
+## The ten hotbar keys, under the soul's plate. One tile per
+## `AbilityRules.SLOT_COUNT`, in the order `granted` lays the worn kit out:
+## main hand, off hand, then the necklace, ring 1 and ring 2. A body with no
+## grant in a slot hides that tile instead of advertising a key that does
+## nothing, so a plain kit reads as empty space, not ten dead frames.
+func _build_hotbar(parent: Node) -> void:
+	var panel := PanelContainer.new()
+	panel.name = "Hotbar"
+	panel.add_theme_stylebox_override("panel", _plate_style())
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(panel)
+	var row := HBoxContainer.new()
+	row.name = "Abilities"
+	row.add_theme_constant_override("separation", TILE_GAP)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(row)
 	_ability_tiles.clear()
 	for index in AbilityRules.SLOT_COUNT:
 		var tile = AbilitySlotScript.new()
 		tile.name = "Ability%d" % (index + 1)
 		tile.configure(index, TILE_SIZE)
-		ability_row.add_child(tile)
+		row.add_child(tile)
 		_ability_tiles.append(tile)
 
 
@@ -705,7 +717,7 @@ func _text(parent: Node, text: String, font_size: int, color: Color) -> Label:
 func stamina_bar() -> ProgressBar:
 	return _stamina_bar
 
-## One tile per `AbilityRules.SLOT_COUNT`, in key order (1, 2, 3).
+## One tile per `AbilityRules.SLOT_COUNT`, in key order (1..9, then 10).
 func ability_tiles() -> Array:
 	return _ability_tiles.duplicate()
 
@@ -732,9 +744,11 @@ func _refresh_body() -> void:
 		_stamina_bar.value = 0.0
 		_stamina_label.text = ""
 		# No body, no skills: hide every tile rather than leave the pool's last
-		# grants up over a spectator.
+		# grants up over a spectator. An empty hotbar still shows its ten frames
+		# for a body that has a soul in it.
 		for tile in _ability_tiles:
 			tile.update_state({})
+			tile.visible = false
 		_tint_portrait(-1)
 		return
 	var health: float = float(_body.get("health"))
@@ -779,25 +793,19 @@ func _paint_state(state: int) -> void:
 	_state_label.add_theme_color_override("font_color", ink)
 	_state_label.add_theme_stylebox_override("normal", _chip_style(chip))
 
-## The three skill tiles, read from the body's own runner every frame. A body
-## with no grant in a slot hides that tile instead of advertising a key that
-## would do nothing.
+## The hotbar tiles, read from the body's own runner every frame. A body with no
+## grant in a slot hides that tile instead of advertising a key that would do
+## nothing; a kit that grants several skills fills the slots in kit order.
 func _refresh_skills() -> void:
 	if _ability_tiles.is_empty():
 		return
 	var runner = _body.get("ability") if _body != null and is_instance_valid(_body) else null
+	var states: Array = []
+	if runner != null and is_instance_valid(runner) and runner.has_method("hud_states"):
+		states = runner.hud_states()
 	for index in _ability_tiles.size():
-		var state := {}
-		if runner != null and is_instance_valid(runner) and runner.has_method("hud_state"):
-			state = runner.hud_state(index)
-		var tile = _ability_tiles[index]
-		tile.update_state(state)
-		# The tile is the shared arena widget, which advertises the arena's
-		# `SHIFT + n`. The warband fires the same slots from the number row, so
-		# only the key line is rewritten here - one tile design, two bindings.
-		var key_label = tile.get("_key")
-		if key_label != null:
-			key_label.text = str(index + 1)
+		var state: Dictionary = states[index] if index < states.size() else {}
+		_ability_tiles[index].update_state(state)
 
 func _refresh_squad() -> void:
 	if _squad_box == null or _warband == null:

@@ -166,7 +166,7 @@ const ITEMS := {
 	"neck_shield": {"name":"Amulet of Energy Shield", "short":"Shield Amulet", "kind":"neck", "index":2, "price":340,
 		"category":"jewelry", "slot":"neck",
 		"summary":"A yellow lodestone humming on a woven cord",
-		"detail":"Neck only / grants Energy Shield (SHIFT + 3) / 1 min"},
+		"detail":"Neck only / grants Energy Shield as a hotbar skill / 1 min"},
 	"ring_copper": {"name":"Copper Ring", "short":"Cu Ring", "kind":"ring", "index":0, "price":40,
 		"category":"jewelry", "slot":"ring",
 		"summary":"A soft hammered band",
@@ -182,7 +182,7 @@ const ITEMS := {
 	"ring_dash": {"name":"Ring of Dash", "short":"Dash Ring", "kind":"ring", "index":3, "price":260,
 		"category":"jewelry", "slot":"ring",
 		"summary":"A cold iron band that leans the moment you look away",
-		"detail":"Ring slot only / grants the Dash skill (SHIFT + 3)"},
+		"detail":"Ring slot only / grants the Dash skill on the hotbar"},
 	"ring_health": {"name":"Ring of Health", "short":"Health Ring", "kind":"ring", "index":4, "price":180,
 		"category":"jewelry", "slot":"ring",
 		"summary":"Warm as a pulse you can hold",
@@ -469,14 +469,14 @@ static func build_loadout(main_id: String, off_id: String, armor_pieces: Diction
 		"armor":armor, "shield":shield, "off_weapon":off_weapon, "focus":focus,
 		"trinkets":TrinketStats.kit(trinket_ids) if not trinket_ids.is_empty() \
 			else {"neck":"", "ring1":"", "ring2":"", "off":off_id},
-		"anointed":{"main":_anointed_skill(main_id, 0, anointed_ids),
-			"off":_anointed_skill(off_id, 1, anointed_ids)},
+		"anointed":{"main":anointed_skill(main_id, 0, anointed_ids),
+			"off":anointed_skill(off_id, 1, anointed_ids)},
 	}
 
 ## The skill a held piece carries onto the rig: its own, fired from the hand it
 ## is held in, and only while the altar's ledger lists it. An off-hand blade
 ## carries nothing, because its skill is a main-hand one.
-static func _anointed_skill(item_id: String, slot: int, anointed_ids: Array) -> String:
+static func anointed_skill(item_id: String, slot: int, anointed_ids: Array) -> String:
 	if item_id.is_empty() or not anointed_ids.has(item_id):
 		return ""
 	var entry: Dictionary = ITEMS.get(item_id, {})

@@ -6,6 +6,7 @@ extends RefCounted
 const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
+const AbilityRules = preload("res://scripts/ability_rules.gd")
 
 const TRINKET_SLOTS := ["neck", "ring1", "ring2"]
 
@@ -19,7 +20,9 @@ static func hand(value: Variant, slot: String) -> String:
 	return id
 
 ## Stats ride the rig's own trinket dictionary; skills replace the hand gates,
-## so a welded skill fires from the hand that holds the piece.
+## so every welded skill on a held piece fires from the hand that holds it. A
+## hand with no weld keeps the stock skill `apply_loadout` put there, and a hand
+## with several welds keeps all of them.
 static func _apply_annoints(rig, annoints: Dictionary) -> void:
 	if rig == null or annoints.is_empty():
 		return
@@ -34,10 +37,16 @@ static func _apply_annoints(rig, annoints: Dictionary) -> void:
 		rig.set_annoint_marks(marks)
 	if not skills is Dictionary:
 		return
-	var hands := {"main": str((skills as Dictionary).get("main", "")),
-		"off": str((skills as Dictionary).get("off", ""))}
-	if hands["main"].is_empty() and hands["off"].is_empty():
-		return
+	var current: Variant = rig.get("anointed")
+	var held: Dictionary = current if current is Dictionary else {}
+	var hands := {
+		"main": AbilityRules.skill_ids(held.get("main", "")),
+		"off": AbilityRules.skill_ids(held.get("off", "")),
+	}
+	for hand in ["main", "off"]:
+		var welded := AbilityRules.skill_ids((skills as Dictionary).get(hand, ""))
+		if not welded.is_empty():
+			hands[hand] = welded
 	rig.anointed = hands
 
 ## The worn kit travels beside the hands. Each id must be a real catalog item
@@ -58,11 +67,14 @@ static func trinkets(value: Variant) -> Dictionary:
 ## warband's own ledger, never a loadout field. `{stats: Dictionary,
 ## skills: {main, off}, marks: {main, off}}`; a bare dictionary leaves the rig
 ## alone. `marks` is how many annointments each held copy carries, which the rig
-## draws on the piece.
+## draws on the piece. `hotbar_order` is the player's own sequence for the ten
+## keys, read off the mercenary's record: it changes the slot a skill fires from
+## and never which skills the kit grants, so it rides beside the loadout too.
 static func apply(rig, loadout: Dictionary, anointed: Array = [],
-		annoints: Dictionary = {}) -> void:
+		annoints: Dictionary = {}, hotbar_order: Array = []) -> void:
 	if rig == null or loadout.is_empty():
 		return
+	rig.set("hotbar_order", AbilityRules.skill_ids(hotbar_order))
 	var bow: Variant = loadout.get("bow")
 	var sword: Variant = loadout.get("sword")
 	var armor: Variant = loadout.get("armor")

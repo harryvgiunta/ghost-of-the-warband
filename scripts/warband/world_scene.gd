@@ -160,7 +160,7 @@ const GUEST_HANDS_TEXT := "Co-op: latches, counters, corpses and loot are the ho
 ## body down, and a wound with nobody near enough to punish a bandage. They are
 ## the same channel the opening teaches with - nothing pauses, nothing is read.
 const REVIVE_LESSON := {"keys": "HOLD G", "text": "PICK UP A FALLEN SQUADMATE"}
-const BANDAGE_LESSON := {"keys": "6", "text": "BANDAGE · +35 · HOLD STILL"}
+const BANDAGE_LESSON := {"keys": "Z", "text": "BANDAGE · +35 · HOLD STILL"}
 const DOWNED_LESSON := {"keys": "HOLD G   F1", "text": "YOU ARE DOWN · AN ALLY LIFTS YOU"}
 
 

@@ -225,6 +225,12 @@ const DISPOSITION_ABILITIES := {
 ## `dagger` refines `1h`, so a body's opinion of a knife is not its opinion of a
 ## sword - while a kind the row does not name falls through to the category, which
 ## keeps `2h`, `bow`, `shield`, `focus` and plain armour on their single entry.
+##
+## A weight is a preference and price still carries the choice inside it: a tank's
+## -70 does not keep a dear greatsword out of its hand, because 340 - 70 still beat
+## a 110-shortsword's 230. A kind the stance must not carry at all belongs in
+## `DISPOSITION_GEAR_REFUSED` below; the tank's two-hander is refused there and the
+## weight is only the score it would get.
 const DISPOSITION_GEAR := {
 	DISPOSITION_TANK: {"shield": 170.0, "1h": 120.0, "focus": 40.0, "2h": -70.0,
 		"bow": -220.0, "staff": -120.0, "dagger": -20.0},
@@ -241,8 +247,15 @@ const DISPOSITION_GEAR := {
 ## answer to that: a blade's trade keeps its hands empty for the blade the field
 ## will offer (or for the player's own hand on the paperdoll, which is not bound
 ## by this table), and the bow stays in the pool for a body that draws it.
+##
+## A tank's list carries `2h` for the same reason, on its own line: a two-hander
+## locks the off hand, and the shield the tank's whole stance is built around can
+## only follow it into the pool. A price weight can never say that - a dear
+## greatsword outscores a cheap blade however negative the number - so the tank
+## refuses the piece outright and dresses in the best shield and one-hander the
+## pool holds, or waits for one with its hands empty.
 const DISPOSITION_GEAR_REFUSED := {
-	DISPOSITION_TANK: ["bow", "staff"],
+	DISPOSITION_TANK: ["2h", "bow", "staff"],
 	DISPOSITION_MELEE: ["bow", "staff"],
 	DISPOSITION_BOW: [],
 }

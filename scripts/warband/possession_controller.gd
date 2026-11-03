@@ -271,8 +271,11 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 		},
 	}
 	var annoints := _warband_annoints(merc_id)
+	# The player's own key order rides beside the kit: it changes the slot a
+	# skill fires from, never which skills the kit grants.
 	SeatLoadout.apply(actor.rig, loadout,
-		_warband.cruor.anointed_among([main_id, off_id]), annoints)
+		_warband.cruor.anointed_among([main_id, off_id]), annoints,
+		_warband.roster.hotbar_order_of(merc_id))
 	# The rig holds the stats; the body owns the maxima and the runtime, so it is
 	# told with an empty stat payload (the rig already has them) and the procs.
 	if actor.has_method("apply_annointments"):
@@ -1061,25 +1064,40 @@ func _hotkey(keycode: int) -> bool:
 
 ## The possessed body's bindings. What a body carries is its gear, so there is no
 ## key that puts a weapon or a shield in its hands: `refresh_gear()` dresses the
-## body from its roster record and the paperdoll moves pieces in and out. 6/7 stay
-## the consumables.
+## body from its roster record and the paperdoll moves pieces in and out. The
+## number row is the ten-slot hotbar, so the consumables moved to Z and V.
 func _command(event: InputEventKey) -> bool:
 	var actor := active_actor
 	var yaw := camera_rig.yaw if camera_rig != null else 0.0
 	var right := Vector3(cos(yaw), 0, -sin(yaw))
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
 	match event.keycode:
-		# The three item skills sit on the number row, plain: a warband player
+		# The ten item skills sit on the number row, plain: a warband player
 		# never needs Shift to reach a skill, and Shift+1 is the same press.
+		# The tenth slot is the 0 key, labelled 10 on the hotbar.
 		KEY_1:
 			_act("ability", 0)
 		KEY_2:
 			_act("ability", 1)
 		KEY_3:
 			_act("ability", 2)
+		KEY_4:
+			_act("ability", 3)
+		KEY_5:
+			_act("ability", 4)
 		KEY_6:
-			_act("consume", "bandage")
+			_act("ability", 5)
 		KEY_7:
+			_act("ability", 6)
+		KEY_8:
+			_act("ability", 7)
+		KEY_9:
+			_act("ability", 8)
+		KEY_0:
+			_act("ability", 9)
+		KEY_Z:
+			_act("consume", "bandage")
+		KEY_V:
 			_act("consume", "potion")
 		KEY_SPACE:
 			_act("jump", event.shift_pressed)
