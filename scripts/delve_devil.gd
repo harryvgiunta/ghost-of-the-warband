@@ -20,6 +20,7 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const SeveredHead = preload("res://scripts/severed_head.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
@@ -164,6 +165,10 @@ var _attack_cooldown := 0.0
 var _struck := false
 var _side_bias := 1.0
 var _death_handled := false
+## The flight of a killing headshot, named by the arrow that landed it or by the
+## death snapshot a replica was handed. Spent by the next blow.
+var _head_shot := Vector3.ZERO
+var _sever := Vector3.ZERO
 var _received_pose := false
 var _net_position := Vector3.ZERO
 ## Buffered server states for the replica's delayed render (see `enemy.gd`).
@@ -551,6 +556,9 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	# A headshot is only worth a head if this blow is the arrow that named it.
+	var flight := _head_shot
+	_head_shot = Vector3.ZERO
 	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0,health-applied)
@@ -558,9 +566,17 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
-		_die(true)
+		_sever = flight
+		_die(true, applied)
 		return
 	_respond_to_attack()
+
+
+## An arrow that lands on the head names its flight here before its blow, so a
+## killing shot can throw the head off with the shaft still in it.
+func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
+	if alive:
+		_head_shot = velocity
 
 
 ## The projectile, blade or spell that landed names itself here before it
@@ -603,7 +619,9 @@ func _wake_pack() -> void:
 
 func snapshot() -> Dictionary:
 	return {"id":enemy_id,"pos":position,"yaw":rotation.y,"state":state,"time":_state_time,
-		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth,"role":_role}
+		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth,"role":_role,
+		# A death that took a head with it: w = 1 and xyz the arrow's flight.
+		"kill":Vector4(_sever.x,_sever.y,_sever.z,1.0 if _sever != Vector3.ZERO else 0.0)}
 
 
 func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
@@ -641,6 +659,8 @@ func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
 	if is_instance_valid(_warning):
 		_warning.visible = next_alive and state == STATE_WINDUP
 	if not next_alive:
+		var cause: Vector4 = snapshot_state.get("kill",Vector4.ZERO)
+		_sever = Vector3(cause.x,cause.y,cause.z) if cause.w > 0.5 else Vector3.ZERO
 		_die(false)
 	elif not _death_handled:
 		alive = true
@@ -761,7 +781,7 @@ func _strike() -> void:
 		_enter(STATE_STAGGER)
 
 
-func _die(announce: bool) -> void:
+func _die(announce: bool, damage := 0.0) -> void:
 	if _death_handled:
 		return
 	_death_handled = true
@@ -775,6 +795,10 @@ func _die(announce: bool) -> void:
 	collision_mask = 1
 	if is_instance_valid(_warning):
 		_warning.visible = false
+	# The head comes away before the ragdoll is built, so the stump the corpse
+	# keeps is the one its bones were read in.
+	if is_instance_valid(_visual) and _sever != Vector3.ZERO:
+		SeveredHead.sever(_visual, _sever, maxf(damage, 12.0))
 	if is_instance_valid(_visual):
 		if _visual_kind == "mob":
 			_visual.die(fall)

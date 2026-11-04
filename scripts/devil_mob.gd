@@ -17,6 +17,7 @@ const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const SeveredHead = preload("res://scripts/severed_head.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
@@ -105,6 +106,12 @@ var max_health := 50.0
 var last_hitter := -1
 var alive := true
 var _impact_force := Vector3.ZERO
+## The flight of a killing headshot, named by the arrow that landed it
+## (`note_arrow_headshot`) or by the death snapshot a replica was handed. It is
+## spent by the next blow, so a headshot that leaves the body standing cannot
+## take a later kill's head.
+var _head_shot := Vector3.ZERO
+var _sever := Vector3.ZERO
 var state := "IDLE"
 
 var _state_time := 0.0
@@ -965,6 +972,9 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	# A headshot is only worth a head if this blow is the arrow that named it.
+	var flight := _head_shot
+	_head_shot = Vector3.ZERO
 	# Being hit is not something a parked body can miss: it wakes and turns.
 	mob_wake()
 	last_hitter = source_id
@@ -978,9 +988,16 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,
 		health <= 0.0, blood_scale())
 	if health <= 0.0:
-		_enter_dead(true)
+		_enter_dead(true, flight, applied)
 		return
 	_respond_to_attack()
+
+
+## An arrow that lands on the head names its flight here before its blow, so a
+## killing shot can throw the head off with the shaft still in it.
+func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
+	if alive:
+		_head_shot = velocity
 
 
 ## The projectile, blade or spell that landed names itself here before it
@@ -1023,17 +1040,22 @@ func hear_alert(attacker: Node3D, at: Vector3) -> void:
 ## The local death: stopped combat collision, falling root, the limp ragdoll
 ## and the shared hold. Replicas call it with `announce = false` so gold and the
 ## kill stay on the host.
-func _enter_dead(announce: bool) -> void:
+func _enter_dead(announce: bool, severed := Vector3.ZERO, damage := 0.0) -> void:
 	Perf.begin("mob.dead")
 	alive = false
 	state = "DEAD"
 	_struck = true
+	_sever = severed
 	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \
 		else CorpsePhysics.fall_direction(self, velocity)
 	set_deferred("collision_layer", 0)
 	set_deferred("collision_mask", 1)
 	velocity = Vector3.ZERO
+	# The head comes away before the ragdoll is built from the lethal pose, so
+	# the stump the corpse keeps is the one the bones were read in.
 	if is_instance_valid(_visual):
+		if severed != Vector3.ZERO:
+			SeveredHead.sever(_visual, severed, maxf(damage, 12.0))
 		_visual.die(fall)
 	# Presentation, so every machine that runs this body hears it: the authority
 	# because it killed it, a replica because the snapshot just said so. `alive`
@@ -1063,6 +1085,9 @@ func snapshot() -> Dictionary:
 		"t": _state_time,
 		"h": health,
 		"a": alive,
+		# A death that took a head with it: w = 1 and xyz the arrow's flight.
+		"k": Vector4(_sever.x, _sever.y, _sever.z,
+			1.0 if _sever != Vector3.ZERO else 0.0),
 		"x": Vector4.ZERO,
 	}
 
@@ -1128,7 +1153,9 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 		BloodFx.wound(self, blood_rig(), get_aim_position(), applied, false,
 			health <= 0.0, blood_scale())
 	if was_alive and not alive:
-		_enter_dead(false)
+		var cause: Vector4 = state.get("k", Vector4.ZERO)
+		_enter_dead(false,
+			Vector3(cause.x, cause.y, cause.z) if cause.w > 0.5 else Vector3.ZERO)
 
 
 func get_aim_position() -> Vector3:

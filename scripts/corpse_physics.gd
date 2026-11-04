@@ -44,7 +44,7 @@ static func settle_root(host: CharacterBody3D, delta: float) -> void:
 ## the presentation has no skeleton (procedural mobs keep their authored
 ## collapse, and the root gravity above still applies).
 static func start_limp(visual: Node3D, fall: Vector3 = Vector3.ZERO) -> PhysicalBoneSimulator3D:
-	var skeleton := _find_skeleton(visual)
+	var skeleton := skeleton_in(visual)
 	if skeleton == null:
 		return null
 	if skeleton.has_meta("corpse_ragdoll"):
@@ -130,11 +130,13 @@ static func _apply_topple(simulator: PhysicalBoneSimulator3D, visual: Node3D,
 
 ## True while the visible bones are still driven by physics.
 static func is_limp(visual: Node3D) -> bool:
-	var skeleton := _find_skeleton(visual)
+	var skeleton := skeleton_in(visual)
 	return skeleton != null and skeleton.has_meta("corpse_ragdoll")
 
 
-static func _find_skeleton(visual: Node3D) -> Skeleton3D:
+## The rig's skeleton, wherever the presentation node keeps it: the imported
+## GLBs hang it under an armature, and a prop can be the skeleton itself.
+static func skeleton_in(visual: Node3D) -> Skeleton3D:
 	if visual == null or not is_instance_valid(visual):
 		return null
 	if visual is Skeleton3D:
@@ -248,7 +250,13 @@ static func _adopt_stray_bones(skeleton: Skeleton3D, visual: Node3D) -> void:
 		var keep := skeleton.get_bone_global_pose(bone_id)
 		var parent_pose := skeleton.get_bone_global_pose(target)
 		skeleton.set_bone_parent(bone_id, target)
-		skeleton.set_bone_pose(bone_id, parent_pose.affine_inverse() * keep)
+		var pose := parent_pose.affine_inverse() * keep
+		# An anchor with no volume left is a head an arrow took off
+		# (`SeveredHead`): the stray it carries goes with the head, and the head
+		# it would follow is a stump now.
+		if parent_pose.basis.get_scale().x < 0.05:
+			pose.basis = pose.basis.scaled(Vector3.ONE * 0.001)
+		skeleton.set_bone_pose(bone_id, pose)
 	skeleton.force_update_all_bone_transforms()
 
 
@@ -367,6 +375,13 @@ static func _add_torso_shapes(simulator: PhysicalBoneSimulator3D,
 	for index in skeleton.get_bone_count():
 		var lower := skeleton.get_bone_name(index).to_lower()
 		if not _is_torso(lower):
+			continue
+		# A head an arrow took off has no volume left to catch the floor: its
+		# bone was collapsed into the neck the stump keeps (`SeveredHead`), and a
+		# capsule there would drag the corpse's ragdoll at a head that is not
+		# there any more.
+		if lower == "head" \
+				and skeleton.get_bone_pose(index).basis.get_scale().x < 0.05:
 			continue
 		var children := skeleton.get_bone_children(index)
 		if children.is_empty():

@@ -659,10 +659,10 @@ func _stagger_threshold() -> float:
 
 ## A dead watcher reports its defeat once, from the inherited death, and leaves
 ## the body in the mud for the loot vacuum to read.
-func _enter_dead(announce: bool) -> void:
+func _enter_dead(announce: bool, severed := Vector3.ZERO, damage := 0.0) -> void:
 	_awake = false
 	_enraged = false
-	super(announce)
+	super(announce, severed, damage)
 
 
 # --- the body and the kit --------------------------------------------------

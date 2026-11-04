@@ -8,6 +8,7 @@ const Geo = preload("res://scripts/geo.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
+const SeveredHead = preload("res://scripts/severed_head.gd")
 const WolfVisual = preload("res://scripts/wolf_visual.gd")
 const DevilVisual = preload("res://scripts/cinder_devil_visual.gd")
 const DodgeStep = preload("res://scripts/dodge_step.gd")
@@ -69,6 +70,10 @@ var max_health := 38.0
 var last_hitter := -1
 var alive := true
 var _impact_force := Vector3.ZERO
+## The flight of a killing headshot, named by the arrow that landed it or by the
+## death snapshot a replica was handed. Spent by the next blow.
+var _head_shot := Vector3.ZERO
+var _sever := Vector3.ZERO
 var home := Vector3.ZERO
 var state := "IDLE"
 var _state_time := 0.0
@@ -994,6 +999,9 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
+	# A headshot is only worth a head if this blow is the arrow that named it.
+	var flight := _head_shot
+	_head_shot = Vector3.ZERO
 	# Being hit is not something a parked body can miss: it wakes and turns.
 	mob_wake()
 	last_hitter = source_id
@@ -1005,9 +1013,17 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	BloodFx.wound(self,blood_rig(),get_aim_position(),applied,headshot,
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
-		_enter_dead(true)
+		_sever = flight
+		_enter_dead(true, applied)
 		return
 	_respond_to_attack()
+
+
+## An arrow that lands on the head names its flight here before its blow, so a
+## killing shot can throw the head off with the shaft still in it.
+func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
+	if alive:
+		_head_shot = velocity
 
 
 ## The projectile, blade or spell that landed names itself here before it
@@ -1083,7 +1099,7 @@ func _replay_tick(delta: float) -> void:
 ## The local death: combat collision off, gravity on, the limp collapse, then
 ## the shared hold. Replicas call it with `announce = false` so the kill stays
 ## on the host.
-func _enter_dead(announce: bool) -> void:
+func _enter_dead(announce: bool, damage := 0.0) -> void:
 	alive = false
 	state = "DEAD"
 	_warning.visible = false
@@ -1110,11 +1126,17 @@ func _enter_dead(announce: bool) -> void:
 	# Collapse first, then hold the corpse for the shared five minutes.
 	var death_tween := create_tween()
 	if kind == 0:
+		# A head an arrow took off leaves before the ragdoll is built from the
+		# lethal pose, so the stump the corpse keeps is the one its bones read.
+		if _sever != Vector3.ZERO:
+			SeveredHead.sever(_wolf, _sever, maxf(damage, 12.0))
 		# The wolf's imported skeleton ragdolls limp from its current pose.
 		_wolf.die(fall)
 		death_tween.tween_interval(0.45)
 		CorpseHold.append(death_tween, self, _body)
 	else:
+		if _sever != Vector3.ZERO:
+			SeveredHead.sever(_devil, _sever, maxf(damage, 12.0))
 		# The imported cinder's skeleton ragdolls from its lethal pose.
 		_devil.die(fall)
 		death_tween.tween_interval(0.90)
@@ -1130,6 +1152,9 @@ func snapshot() -> Dictionary:
 		"t": _state_time,
 		"h": health,
 		"a": alive,
+		# A death that took a head with it: w = 1 and xyz the arrow's flight.
+		"k": Vector4(_sever.x, _sever.y, _sever.z,
+			1.0 if _sever != Vector3.ZERO else 0.0),
 		"x": _packed_pose(),
 	}
 
@@ -1179,5 +1204,7 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 		BloodFx.wound(self,blood_rig(),get_aim_position(),applied,false,
 			health <= 0.0,blood_scale())
 	if was_alive and not alive:
+		var cause: Vector4 = state.get("k", Vector4.ZERO)
+		_sever = Vector3(cause.x, cause.y, cause.z) if cause.w > 0.5 else Vector3.ZERO
 		_enter_dead(false)
 

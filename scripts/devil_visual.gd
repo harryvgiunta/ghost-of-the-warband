@@ -51,6 +51,9 @@ var _step_progress := -1.0
 var _step_direction := Vector3.RIGHT
 var _slide_progress := -1.0
 var _dead := false
+## The head has left the body: it is a piece in the world now, so the pose
+## stops writing it.
+var _severed := false
 var _death_time := 0.0
 
 func _ready() -> void:
@@ -245,6 +248,24 @@ func die() -> void:
 	_death_time = 0.0
 	_action = "DEAD"
 
+
+## A killing arrow took this head off: the body stops posing it and the node is
+## cut loose at the pose it was wearing, so a `SeveredHead` can throw it. The
+## corpse keeps the torso, the claws and its authored fall.
+func sever_head() -> Node3D:
+	if _severed or not is_instance_valid(_head) or _head.get_parent() == null:
+		return null
+	var holder := get_parent()
+	if holder == null:
+		return null
+	_severed = true
+	var keep := _head.global_transform
+	_head.get_parent().remove_child(_head)
+	_head.top_level = true
+	holder.add_child(_head)
+	_head.global_transform = keep
+	return _head
+
 func is_dead() -> bool:
 	return _dead
 
@@ -392,7 +413,8 @@ func _apply_pose(_delta: float) -> void:
 		_leg_r.rotation.x = 0.35*fall
 	_pelvis.rotation = pelvis_rotation
 	_torso.rotation = torso_rotation
-	_head.rotation = head_rotation
+	if is_instance_valid(_head) and not _severed:
+		_head.rotation = head_rotation
 	_rig.position = rig_position
 	_rig.rotation = rig_rotation
 	# Tail sway is independent of the body pose.
