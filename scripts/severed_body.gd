@@ -6,8 +6,8 @@ extends RefCounted
 ##   way down. The bones above the cut own the upper piece, the corpse keeps its
 ##   lower half with those bones collapsed onto the cut, and the top falls away.
 ## - **apart** (`vertical`): a two-handed overhead slices the body in two down the
-##   blade's own plane. Both halves are cut out of the rig and the two of them
-##   topple away from each other.
+##   blade's own plane. Both halves are cut out of the rig, every layer the corpse
+##   was drawing is hidden behind them, and the two fall apart.
 ##
 ## Rigged, upright bodies only: a cut only means something on a body tall enough
 ## to have a third of it, and a wolf is as long as it is tall. Presentation only -
@@ -24,11 +24,10 @@ const WORLD_MASK := 1
 const CUT_SHARE := 0.62
 ## A cut only means something on a body tall enough to have a third of it.
 const MIN_HEIGHT := 1.2
-const TOPPLE_SECONDS := 0.55
 const TOPPLE_DEGREES := 82.0
 ## How far a piece is thrown past the corpse before it lands.
 const THROW_REACH := 0.55
-const HALF_REACH := 0.22
+const HALF_REACH := 0.30
 const COILS := 5
 const LUMPS := 4
 
@@ -77,13 +76,13 @@ static func _down(visual: Node3D, skeleton: Skeleton3D, root: Vector3, head: Vec
 	# collapse happens before the ragdoll is built from the lethal pose.
 	_stump(skeleton, owned, cut)
 	_wound(visual, cut, push, damage)
-	_topple(holder, frame, push, piece, THROW_REACH)
+	_fall(holder, frame, piece, push, THROW_REACH, TOPPLE_DEGREES, 0.0, 0.0)
 	return holder
 
 
-## The overhead: the blade's own plane takes the body in two, and both halves
-## fall apart. The rig is hidden, because a vertical cut cannot be drawn with a
-## bone: the two halves are the body now.
+## The overhead: the blade's own plane takes the body in two and both halves fall
+## apart. The corpse draws nothing afterwards, because a vertical cut cannot be
+## drawn with a bone: the halves are the body now.
 static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		push: Vector3, damage: float) -> Node3D:
 	var normal := Vector3.UP.cross(push)
@@ -97,10 +96,10 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		normal.dot(frame.affine_inverse() * root))
 	if halves[0] == null and halves[1] == null:
 		return null
+	# Every layer the corpse was drawing goes - the skinned body, the static one
+	# under it, the props - or a whole head would stand beside the cut pieces.
 	for node in visual.find_children("*", "MeshInstance3D", true, false):
-		var instance := node as MeshInstance3D
-		if instance.visible and SeveredHead.skins_to(instance, skeleton):
-			instance.visible = false
+		(node as MeshInstance3D).visible = false
 	var holder := _holder(visual, frame)
 	for half in 2:
 		var piece: MeshInstance3D = halves[half]
@@ -112,8 +111,12 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		arm.top_level = true
 		arm.global_transform = frame
 		arm.add_child(piece)
-		_topple(arm, frame, normal * (1.0 if half == 0 else -1.0), piece,
-			HALF_REACH)
+		# Two halves, two falls: the near one goes first and further, the far one
+		# leans away and lands a heartbeat later.
+		var side := normal if half == 0 else -normal
+		_fall(arm, frame, piece, side, HALF_REACH,
+			94.0 if half == 0 else 88.0, 0.0 if half == 0 else 0.06,
+			-0.16 if half == 0 else 0.12)
 	_wound(visual, middle, push, damage)
 	return holder
 
@@ -125,6 +128,39 @@ static func _holder(visual: Node3D, frame: Transform3D) -> Node3D:
 	holder.top_level = true
 	holder.global_transform = frame
 	return holder
+
+
+## A piece turning over where it stands: it leans away from the blow, tips over
+## past the vertical, and rocks back a degree as it settles. The first half of the
+## turn is the short part - it is already falling - so the ease is quadratic, and
+## the piece is set down by its own lowest vertex so it never hangs in the air.
+static func _fall(holder: Node3D, frame: Transform3D, piece: MeshInstance3D,
+		force: Vector3, reach: float, degrees: float, delay: float,
+		lean: float) -> void:
+	var push := Vector3(force.x, 0.0, force.z)
+	if push.length_squared() < 0.001:
+		push = Vector3.FORWARD
+	push = push.normalized()
+	var axis := Vector3.UP.cross(push)
+	if axis.length_squared() < 0.001:
+		axis = Vector3.RIGHT
+	var turn := Basis(Vector3.UP, lean) * Basis(axis.normalized(), deg_to_rad(degrees))
+	var basis := turn * frame.basis
+	var landing := frame.origin + push * reach
+	var ground := _ground_at(holder, landing)
+	var target := Transform3D(basis,
+		Vector3(landing.x, ground - _lowest(piece, basis), landing.z))
+	var turned := frame.interpolate_with(target, 0.45)
+	var settled := target.interpolate_with(turned, 0.08)
+	var tween := holder.create_tween()
+	if delay > 0.0:
+		tween.tween_interval(delay)
+	tween.tween_property(holder, "global_transform", turned, 0.20) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_property(holder, "global_transform", target, 0.30) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_property(holder, "global_transform", settled, 0.13) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 ## The bones that own everything above the cut: every bone whose origin is above
@@ -177,28 +213,6 @@ static func _stump(skeleton: Skeleton3D, owned: Dictionary, cut: Vector3) -> voi
 static func _wound(visual: Node3D, at: Vector3, push: Vector3, damage: float) -> void:
 	BloodFx.arterial(visual, at, push, maxf(damage, 30.0), 1.3)
 	_spill(visual, at, push, maxf(damage, 30.0))
-
-
-## The piece tips away from the blow and lands on the floor beside the corpse.
-static func _topple(holder: Node3D, frame: Transform3D, force: Vector3,
-		piece: MeshInstance3D, reach: float) -> void:
-	var push := Vector3(force.x, 0.0, force.z)
-	if push.length_squared() < 0.001:
-		push = Vector3.FORWARD
-	push = push.normalized()
-	var axis := Vector3.UP.cross(push)
-	if axis.length_squared() < 0.001:
-		axis = Vector3.RIGHT
-	var basis := Basis(axis.normalized(), deg_to_rad(TOPPLE_DEGREES)) * frame.basis
-	var landing := frame.origin + push * reach
-	var ground := _ground_at(holder, landing)
-	# Sit the piece on the floor: its own lowest vertex once turned over, because
-	# a box around a body is a box around its antlers and would leave it hanging.
-	var target := Transform3D(basis,
-		Vector3(landing.x, ground - _lowest(piece, basis), landing.z))
-	var tween := holder.create_tween()
-	tween.tween_property(holder, "global_transform", target, TOPPLE_SECONDS) \
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
 
 
 ## The lowest point of the turned piece, in the frame it lands in.

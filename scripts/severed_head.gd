@@ -351,7 +351,31 @@ static func build_piece(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 	return piece
 
 
-## A body cut clean through by a plane into two halves, in one pose pass: every
+## One vertex of a static (unskinned) mesh, moved into the piece's frame.
+static func _static_vertex(into_frame: Transform3D, vertices, raw_normal, raw_uv,
+		raw_uv2, raw_color, raw_tangent, vertex: int) -> Array:
+	var basis := into_frame.basis
+	var normal := Vector3.UP
+	var tangent := Vector3.RIGHT
+	var handedness := 1.0
+	if raw_normal != null:
+		normal = (basis * (raw_normal[vertex] as Vector3)).normalized()
+	if raw_tangent != null:
+		var corner := vertex * 4
+		tangent = (basis * Vector3(raw_tangent[corner], raw_tangent[corner + 1],
+			raw_tangent[corner + 2])).normalized()
+		handedness = raw_tangent[corner + 3]
+	return [
+		into_frame * (vertices[vertex] as Vector3),
+		normal,
+		(raw_uv[vertex] as Vector2) if raw_uv != null else Vector2.ZERO,
+		(raw_uv2[vertex] as Vector2) if raw_uv2 != null else Vector2.ZERO,
+		(raw_color[vertex] as Color) if raw_color != null else Color.WHITE,
+		Plane(tangent.x, tangent.y, tangent.z, handedness),
+	]
+
+
+## A body cut clean through by a plane into two halves, in one pass over every every
 ## skinned surface is posed once at the death frame and its triangles are dealt
 ## to the side their corners mostly fall on. Returns `[positive, negative]`
 ## meshes, either of which may be empty. The vertices are written in `frame`, so
@@ -366,18 +390,33 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 	var meshes: Array = [ArrayMesh.new(), ArrayMesh.new()]
 	for node in visual.find_children("*", "MeshInstance3D", true, false):
 		var instance := node as MeshInstance3D
-		if not instance.visible or not skins_to(instance, skeleton):
+		if not instance.visible or instance.mesh == null:
+			continue
+		# Blood laid on the body is a decal, not a layer of it: cutting a soak in
+		# two would paint the same stain onto both halves.
+		if instance.has_meta("blood_stain"):
+			continue
+		# A body can be drawn by more than the skinned skeleton: a baked static
+		# layer (the ranger's own body under a creature's skin) is cut too, in its
+		# own space, or it would stand whole beside the halves as a second antler.
+		var skinned := skins_to(instance, skeleton)
+		if not skinned and instance.skin != null:
 			continue
 		var skin := instance.skin
+		var into_static := frame.affine_inverse() * instance.global_transform
 		for surface in instance.mesh.get_surface_count():
 			var arrays := instance.mesh.surface_get_arrays(surface)
 			var vertices = arrays[Mesh.ARRAY_VERTEX]
 			var bones = arrays[Mesh.ARRAY_BONES]
 			var weights = arrays[Mesh.ARRAY_WEIGHTS]
-			if vertices == null or bones == null or weights == null:
+			if vertices == null:
+				continue
+			if skinned and (bones == null or weights == null):
 				continue
 			var count: int = vertices.size()
-			var per: int = bones.size() / maxi(count, 1)
+			var per: int = 0
+			if skinned:
+				per = bones.size() / maxi(count, 1)
 			var raw_normal = arrays[Mesh.ARRAY_NORMAL]
 			var raw_uv = arrays[Mesh.ARRAY_TEX_UV]
 			var raw_uv2 = arrays[Mesh.ARRAY_TEX_UV2]
@@ -388,9 +427,14 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 			var across := PackedFloat32Array()
 			across.resize(count)
 			for vertex in count:
-				var data: Array = pose_vertex(skin, skeleton, bones, weights, per,
-					vertices, raw_normal, raw_uv, raw_uv2, raw_color, raw_tangent,
-					vertex, into_frame)
+				var data: Array
+				if skinned:
+					data = pose_vertex(skin, skeleton, bones, weights, per,
+						vertices, raw_normal, raw_uv, raw_uv2, raw_color, raw_tangent,
+						vertex, into_frame)
+				else:
+					data = _static_vertex(into_static, vertices, raw_normal, raw_uv,
+						raw_uv2, raw_color, raw_tangent, vertex)
 				posed[vertex] = data
 				across[vertex] = side.dot(data[0] as Vector3) - offset
 			var order := PackedInt32Array()
