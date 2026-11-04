@@ -259,6 +259,9 @@ func check_mouth_and_pack() -> void:
 				check(warband.delve.inventory.pooled_count(clicked_id) == 0
 						and warband.stash.pooled_count(clicked_id) == clicked_before,
 					"and a click on the packed row brings that one copy back")
+	# A spare is a copy nobody wears: a worn one is on a body, not on the shelf.
+	if warband.stash.pooled_count("sword_arming") <= 0:
+		warband.stash.add("sword_arming", 1)
 	var spare_before: int = warband.stash.pooled_count("sword_arming")
 	area.prep.pack("sword_arming")
 	check(warband.delve.inventory.pooled_count("sword_arming") == 1, "a click packs one spare blade")

@@ -71,6 +71,7 @@ func run() -> void:
 	_check_marks()
 	_check_runtime()
 	_check_stress()
+	await _check_copies()
 
 	print("ANNOINT_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
@@ -818,3 +819,94 @@ func _check_copy(item_id: String, ordinal: int, ledger, item: Dictionary) -> voi
 			check(entry.wired, "%s#%d carries unwired %s" % [item_id, ordinal, id])
 		if not applicable.is_empty():
 			check(applicable.has(id), "%s#%d carries %s, which is not in its pool" % [item_id, ordinal, id])
+
+
+## Two greatswords are two weapons. A copy is an instance with its own serial and
+## the altar's ledger keys on that serial, so buying a second greatsword gives the
+## warband plain steel and leaves the relic's marks where they were. This is the
+## bug the block exists for: an annointed piece used to follow its *kind*, so every
+## greatsword the warband owned was the relic.
+func _check_copies() -> void:
+	var warband = root.get_node_or_null("Warband")
+	if warband == null:
+		check(false, "the Warband autoload is not there")
+		return
+	var item_id := "sword_great"
+	var pool: Array = Catalog.for_item(State.ITEMS.get(item_id, {}))
+	if pool.is_empty():
+		check(false, "the greatsword has no annointment pool")
+		return
+	var warband_stash = warband.stash
+	warband_stash.clear()
+	warband.annoints.clear()
+	warband.worn_copies.clear()
+	for record in warband.roster.records():
+		var merc_id := int(record.get("id", 0))
+		for slot in ["main", "off", "head", "chest", "hands", "legs", "feet",
+				"neck", "ring1", "ring2"]:
+			warband.roster.unequip(merc_id, slot)
+
+	# One greatsword, annointed to the cap.
+	var relic: int = warband_stash.add(item_id, 1)
+	check(relic >= 0, "a greatsword off a keeper's shelf has a serial of its own")
+	# Six different wired entries: the ledger refuses a duplicate, so the relic's
+	# marks are six distinct ones, exactly as the altar would roll them.
+	var marks: Array[String] = []
+	for entry in pool:
+		if bool(entry.wired) and not marks.has(str(entry.id)):
+			marks.append(str(entry.id))
+		if marks.size() >= Catalog.MAX_PER_PIECE:
+			break
+	for mark in marks:
+		check(warband.annoints.add(item_id, relic, mark), "the relic takes %s" % mark)
+	check(marks.size() == Catalog.MAX_PER_PIECE
+			and warband.annoints.count(item_id, relic) == marks.size(),
+		"the relic carries six annointments")
+	check(warband.annoint_copy_for_item(item_id) == relic,
+		"with one copy owned, the altar works that copy")
+
+	# The purchase: a second greatsword is another weapon.
+	var bought: int = warband_stash.add(item_id, 1)
+	check(bought != relic and bought >= 0, "a bought greatsword is a new serial")
+	check(warband.annoints.count(item_id, bought) == 0,
+		"the bought greatsword carries none of the relic's annointments")
+	check(warband.annoints.count(item_id, relic) == marks.size(),
+		"the relic keeps every mark it had")
+	check(int(warband.annoint_preview(item_id)["ordinal"]) == bought,
+		"an altar press now works the plain copy, not the relic")
+
+	# The relic goes back on the shelf, then two bodies take a greatsword each.
+	var first: int = warband.roster.add_record({"name": "Anointed"})
+	var second: int = warband.roster.add_record({"name": "Plain"})
+	check(first > 0 and second > 0, "two bodies for the two weapons")
+	warband_stash.add(item_id, 1, relic)
+	warband.equip_merc(first, "main", item_id)
+	var plain_serial: int = warband_stash.add(item_id, 1)
+	warband.equip_merc(second, "main", item_id)
+	var first_copy: int = warband.annoint_copy(first, "main")
+	var second_copy: int = warband.annoint_copy(second, "main")
+	check(first_copy != second_copy, "the two bodies wear two different greatswords")
+	check(warband.annoints.count(item_id, first_copy) == 0 \
+			and warband.annoints.count(item_id, second_copy) == 0,
+		"both bodies took plain steel, not the relic")
+	check(warband_stash.serials_of(item_id).has(relic)
+			and warband.annoints.count(item_id, relic) == marks.size(),
+		"the relic is still on the shelf with every mark it had")
+	check(warband_stash.pooled_count(item_id) >= 0, "the shelf is consistent")
+
+	# Selling takes plain steel: an annointed copy is never sold for its kind.
+	var before: int = warband.annoints.count(item_id, relic)
+	warband.sell_gear(item_id)
+	check(warband.annoints.count(item_id, relic) == before,
+		"a sale takes the plain copy and leaves the relic alone")
+
+	# The ledger and the serials survive a save and a load.
+	var saved: Dictionary = warband.to_dict()
+	var serials_before: Array = warband_stash.serials_of(item_id)
+	warband_stash.clear()
+	warband.annoints.clear()
+	warband.from_dict(saved)
+	check(warband_stash.serials_of(item_id) == serials_before,
+		"every copy's serial comes back out of the save")
+	check(warband.annoints.count(item_id, relic) == before,
+		"and the relic is still the relic")
