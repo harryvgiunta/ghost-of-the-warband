@@ -33,7 +33,15 @@ const DEFAULT := {
 const GUARD_CAP := 0.60
 
 const STATS := {
-	# Neck
+	# Neck - the amulet is the one trinket that carries a body's numbers, so
+	# every cord in the catalogue does something on its own. The altar's
+	# annointments then stack on top of these, which is why the pieces are the
+	# pieces and a welded stat is a bonus, never the whole of an amulet.
+	"neck_ember": {"stamina":40.0, "stamina_regen":0.10},
+	"neck_bone": {"health":8.0, "stagger":0.10},
+	"neck_heartstone": {"health":25.0},
+	"neck_fervor": {"melee_damage":0.08, "attack_speed":0.06},
+	"neck_luck": {"gold_find":0.25},
 	"neck_shield": {},
 	# Off hand
 	"focus_skull_life": {"heal_on_kill":15.0},

@@ -19,6 +19,7 @@ const Rules = preload("res://scripts/ability_rules.gd")
 const State = preload("res://scripts/player_state.gd")
 const Runtime = preload("res://scripts/warband/annoint_runtime.gd")
 const Marks = preload("res://scripts/annoint_marks.gd")
+const TrinketArt = preload("res://scripts/trinket_art.gd")
 const SwordScript = preload("res://scripts/sword.gd")
 const DaggerScript = preload("res://scripts/dagger.gd")
 const StaffScript = preload("res://scripts/staff.gd")
@@ -53,6 +54,7 @@ const SAMPLE_ITEMS := [
 	"sword_short", "sword_arming", "sword_great", "dagger_iron", "dagger_ironwood",
 	"bow_short", "bow_recurve", "bow_long", "staff_fire", "staff_bone",
 	"shield_buckler", "shield_kite", "shield_tower", "focus_tome", "focus_skull",
+	"neck_bone", "neck_heartstone",
 ]
 
 const SAMPLE_ARMOUR := ["head", "chest", "hands", "legs", "feet"]
@@ -108,9 +110,9 @@ func _check_catalog() -> void:
 			Catalog.Kind.STAT:
 				check(not entry.stats.is_empty(), "%s is a STAT with no stats" % entry.id)
 			Catalog.Kind.PROC:
-				check(int(entry.trigger) >= 0 and int(entry.trigger) <= Catalog.Trigger.KILL,
+				check(int(entry.trigger) >= 0 and int(entry.trigger) <= Catalog.Trigger.HIT,
 					"%s has no trigger" % entry.id)
-				check(int(entry.proc) >= 0 and int(entry.proc) <= Catalog.Proc.BLEED,
+				check(int(entry.proc) >= 0 and int(entry.proc) <= Catalog.Proc.LIFESTEAL,
 					"%s has no proc verb" % entry.id)
 				check(entry.chance > 0.0 and entry.chance <= 1.0,
 					"%s chance out of range" % entry.id)
@@ -175,6 +177,130 @@ func _check_applicability() -> void:
 	print("  pools: sword %d, dagger %d, 2h %d, bow %d, staff %d, shield %d, tome %d" % [
 		sword.size(), dagger.size(), greatsword.size(), bow.size(), staff.size(),
 		shield.size(), tome.size()])
+	_check_jewelry()
+
+
+## The necklace is a piece the altar can work, and its pool is its own: the
+## amulet's ten stat ladders, three bundles with a visible price, three procs
+## (one of them the pool's only lifesteal) and the two skills welded to the cord -
+## and not one of them reaches a ring, a blade or a helm.
+func _check_jewelry() -> void:
+	var necklace := Catalog.for_item(State.ITEMS["neck_bone"])
+	var ring := Catalog.for_item(State.ITEMS["ring_haste"])
+	var ids: Array[String] = []
+	var keys := {}
+	var kinds := {Catalog.Kind.STAT: 0, Catalog.Kind.PROC: 0, Catalog.Kind.ABILITY: 0}
+	for entry in necklace:
+		ids.append(str(entry.id))
+		check(entry.groups.has(Catalog.GROUP_JEWELRY),
+			"%s offered to a necklace is not jewelry" % entry.id)
+		check(entry.slots.has("neck"), "%s does not name the neck" % entry.id)
+		kinds[int(entry.kind)] = int(kinds[int(entry.kind)]) + 1
+		for key in entry.stats:
+			keys[str(key)] = true
+	# The amulet is the stat piece: every ladder key is represented, and no rung
+	# climbs past the ceiling the ledger would clamp it at.
+	for key in ["health", "stamina", "stamina_regen", "melee_damage", "ranged_damage",
+			"cooldown", "gold_find", "stagger", "heal_on_kill", "stamina_on_kill"]:
+		check(keys.has(key), "the amulet pool lost its %s ladder" % key)
+	for entry in necklace:
+		for key in entry.stats:
+			var ceiling := float(Ledger.CEILINGS.get(str(key), 0.0))
+			check(ceiling <= 0.0 or float(entry.stats[key]) <= ceiling + 0.0001,
+				"%s rung is over the %s ceiling" % [entry.id, key])
+	for key in ["j_quick_hit", "j_poison_hit", "j_blood_thirst", "j_ward_bead",
+			"j_cinder_surge", "j_greedy_cord", "j_blood_cord", "j_long_breath",
+			"k_three_strike", "k_stone_skin"]:
+		check(ids.has(key), "the necklace pool lost %s" % key)
+	check(int(kinds[Catalog.Kind.STAT]) >= 50,
+		"the amulet should carry a stat for every rung of ten ladders, got %d"
+		% int(kinds[Catalog.Kind.STAT]))
+	check(int(kinds[Catalog.Kind.PROC]) == 5, "the amulet procs are %d, expected five"
+		% int(kinds[Catalog.Kind.PROC]))
+	check(int(kinds[Catalog.Kind.ABILITY]) == 2, "the amulet skills are %d, expected two"
+		% int(kinds[Catalog.Kind.ABILITY]))
+	check(Catalog.by_id("f_jewelry_health_5") != null, "the health ladder has no top rung")
+	check(Catalog.by_id("f_jewelry_health_5").slots == ["neck"],
+		"a ladder rung climbed off the cord")
+	check(ring.is_empty(), "a ring rolled %d entries, and none are written for one" % ring.size())
+	check(Catalog.slots_of(State.ITEMS["ring_haste"]) == ["ring1", "ring2"],
+		"a ring's catalog row fits either finger")
+	check(Catalog.slots_of(State.ITEMS["neck_bone"]) == ["neck"], "a necklace fits the neck")
+	# Every other pool stays shut: jewellery is not a general-purpose cord.
+	for item_id in ["sword_short", "bow_short", "staff_fire", "shield_kite", "focus_tome"]:
+		for entry in Catalog.for_item(State.ITEMS[item_id]):
+			check(not ids.has(str(entry.id)), "%s welded to a %s" % [entry.id, item_id])
+
+	# The cords themselves carry numbers, so an amulet is a piece before the altar
+	# works it, and every one of them is offered at the altar.
+	var cords := {"neck_ember": {"stamina": 40.0}, "neck_bone": {"health": 8.0},
+		"neck_heartstone": {"health": 25.0}, "neck_fervor": {"melee_damage": 0.08},
+		"neck_luck": {"gold_find": 0.25}}
+	for item_id in cords:
+		check(Stats.has_stats(item_id), "%s carries no stats at all" % item_id)
+		var summed := Stats.sum({"neck": item_id})
+		for key in cords[item_id]:
+			check(is_equal_approx(float(summed.get(key, 0.0)), float(cords[item_id][key])),
+				"%s does not sum its %s" % [item_id, key])
+		var rows := Stats.effect_rows(item_id)
+		check(not rows.is_empty(), "%s shows no stat row on its card" % item_id)
+		check(not Catalog.for_item(State.ITEMS[item_id]).is_empty(),
+			"%s is not offered at the altar" % item_id)
+
+	# The two attack-side procs plus the lifesteal are the pool's only
+	# landed-blow verbs.
+	var quick := Catalog.by_id("j_quick_hit")
+	check(int(quick.trigger) == Catalog.Trigger.HIT and int(quick.proc) == Catalog.Proc.QUICK_STRIKE,
+		"Quick Hit is not a landed-blow proc")
+	check(is_equal_approx(float(quick.chance), 0.20) and float(quick.scale) >= 5.0,
+		"Quick Hit should be a 20%% chance at five times the swing rate")
+	var poison := Catalog.by_id("j_poison_hit")
+	check(int(poison.trigger) == Catalog.Trigger.HIT and int(poison.proc) == Catalog.Proc.POISON,
+		"Poison Hit is not a landed-blow proc")
+	check(is_equal_approx(float(poison.magnitude), 5.0) and is_equal_approx(float(poison.duration), 5.0),
+		"Poison Hit should be 5 a second for 5 s")
+	var thirst := Catalog.by_id("j_blood_thirst")
+	check(int(thirst.trigger) == Catalog.Trigger.HIT and int(thirst.proc) == Catalog.Proc.LIFESTEAL,
+		"Bloodthirst is not a landed-blow lifesteal")
+	var three := Catalog.by_id("k_three_strike")
+	check(three.wired and not Rules.by_id(str(three.ability)).is_empty(),
+		"the three-strike weld does not resolve to a skill")
+	var skill: Dictionary = Rules.by_id("three_strike")
+	var effect: Dictionary = skill.get("effect", {})
+	check(str(effect.get("kind", "")) == "melee_wave", "the three-strike is not a wave skill")
+	check(Rules.is_melee(skill), "the three-strike must swing the body's own blades")
+	check(int(effect.get("victims_per_wave", 0)) == 3, "a wave must reach three bodies")
+	var cues: Array = skill.get("cues", [])
+	check(cues.size() == 3, "the three-strike must land three waves, got %d" % cues.size())
+	check((effect.get("wave_scales", []) as Array).size() == cues.size(),
+		"every wave needs its own damage figure")
+	# The cord's ward is performed by the cord, not by a hand.
+	var stone := Catalog.by_id("k_stone_skin")
+	check(stone.wired and not Rules.by_id(str(stone.ability)).is_empty(),
+		"the stone-skin weld does not resolve to a skill")
+	var ward: Dictionary = Rules.ward(Rules.by_id("stone_skin"))
+	check(not ward.is_empty() and float(ward.get("absorb", 0.0)) > 0.0,
+		"stone skin is not a ward")
+	check(str(Rules.by_id("stone_skin").get("item", "")) != "sword_short",
+		"stone skin should not be read off a blade's damage")
+
+	# The grant: a welded trinket skill reaches the hotbar, stock grant untouched.
+	var granted: Array = Rules.grants_for("", "", {"neck": ["three_strike", "stone_skin"]},
+		{"neck": "neck_shield", "ring1": "", "ring2": ""})
+	var found := {"three_strike": false, "stone_skin": false, "energy_shield": false}
+	for definition in granted:
+		found[str(definition.get("id", ""))] = true
+	check(bool(found["three_strike"]) and bool(found["stone_skin"]),
+		"a welded necklace skill never reached the hotbar")
+	check(bool(found["energy_shield"]), "the amulet's stock grant was lost to the weld channel")
+	var bare: Array = Rules.grants_for("", "", {"neck": ["three_strike"]},
+		{"neck": "", "ring1": "", "ring2": ""})
+	for definition in bare:
+		check(str(definition.get("id", "")) != "three_strike",
+			"a weld on an empty neck still granted a skill")
+	print("  jewelry: necklace pool %d (%d stats, %d procs, %d skills), ring pool %d" % [
+		necklace.size(), int(kinds[Catalog.Kind.STAT]),
+		int(kinds[Catalog.Kind.PROC]), int(kinds[Catalog.Kind.ABILITY]), ring.size()])
 
 
 # --- the die ---------------------------------------------------------------
@@ -277,6 +403,18 @@ func _check_ledger() -> void:
 	var negative := {"melee_damage": 5.0 * -0.30}
 	var clamped := ledger._clamp(negative)
 	check(float(clamped.get("melee_damage", 0.0)) >= Ledger.FLOOR, "floor breached")
+	# A necklace carries a welded skill exactly like a blade: the copy is the
+	# piece, the skill is the cord's, and the ledger answers with its id.
+	var neck := Ledger.new()
+	check(neck.add("neck_bone", 0, "k_three_strike"), "the altar refused a necklace weld")
+	check(neck.skills_of("neck_bone", 0) == ["three_strike"],
+		"the necklace weld did not resolve: %s" % str(neck.skills_of("neck_bone", 0)))
+	check(neck.ability_of("neck_bone", 0) == "three_strike", "ability_of lost the cord's skill")
+	check(neck.add("neck_bone", 0, "j_poison_hit"), "the altar refused a necklace proc")
+	check(neck.procs_for([Ledger.ref("neck_bone", 0)]).size() == 1,
+		"the necklace proc never armed")
+	check(not neck.add("neck_bone", 0, "j_poison_hit"), "the same proc welded twice")
+
 	# Ability selection: the first welded skill is the one that fires.
 	var sword_pool := Catalog.abilities_of(Catalog.for_item(State.ITEMS["sword_great"]))
 	if not sword_pool.is_empty():
@@ -372,6 +510,23 @@ func _check_marks() -> void:
 		piece.queue_free()
 	holder.queue_free()
 
+	# The cord is a piece the altar can work too: the inlay burns on its stone,
+	# one mark per annointment, and a plain cord draws none at all.
+	var skeleton := Skeleton3D.new()
+	skeleton.add_bone("neck_01")
+	root.add_child(skeleton)
+	var kit := {"neck": "neck_bone", "ring1": "", "ring2": ""}
+	TrinketArt.apply(skeleton, kit, {"neck": 0})
+	check(_emissive_surfaces(skeleton) == 0, "a plain cord draws no inlay")
+	TrinketArt.apply(skeleton, kit, {"neck": 1})
+	var one_mark := _emissive_surfaces(skeleton)
+	check(one_mark >= 1, "one annointment on a cord draws nothing")
+	TrinketArt.apply(skeleton, kit, {"neck": 4})
+	check(_emissive_surfaces(skeleton) > one_mark,
+		"four annointments should draw more inlay than one (%d vs %d)"
+		% [_emissive_surfaces(skeleton), one_mark])
+	skeleton.queue_free()
+
 
 ## How many surfaces of a piece carry an emission: the inlaid marks, once worked.
 func _emissive_surfaces(piece: Node3D) -> int:
@@ -401,9 +556,17 @@ class Punchbag extends Node:
 	var max_stamina := 1000.0
 	var slot := 3
 	var taken := 0.0
+	## What a queued quick strike would ask the body for, and whether the body
+	## would take it. A harness has no blades, so this answers both shapes.
+	var strikes: Array = []
+	var swings := true
 
 	func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 		taken += amount
+
+	func quick_strike(hand: String, rate: float) -> bool:
+		strikes.append({"hand": hand, "rate": rate})
+		return swings
 
 
 func _check_runtime() -> void:
@@ -455,9 +618,78 @@ func _check_runtime() -> void:
 	playback.after_damage(10.0, attacker.slot)
 	playback.tick(3.2)
 	check(is_equal_approx(attacker.taken, before), "a stale attacker was still bled")
+
+	# An attack-side poison walks the body that was opened, not the bearer: 5 a
+	# second for 5 s is 25 damage, dealt in one-point steps. The die is a real
+	# 20%, so the roll is walked until a dose lands.
+	var victim := Punchbag.new()
+	root.add_child(victim)
+	playback.arm([Catalog.by_id("j_poison_hit")])
+	for i in 300:
+		playback.on_hit(victim, "right")
+	check(playback._dots.size() == 1, "the poison never landed: %d dots" % playback._dots.size())
+	var landed_health: float = victim.taken
+	for i in 120:
+		playback.tick(0.05)
+	check(victim.taken - landed_health >= 24.0 and victim.taken - landed_health <= 26.0,
+		"the poison dealt %.1f over 6 s, expected 25" % (victim.taken - landed_health))
+	# A second dose refreshes the clock instead of stacking a twin: the ledger
+	# carries one dot, and the figure on the card is the figure per second.
+	playback.arm([Catalog.by_id("j_poison_hit")])
+	for i in 300:
+		playback.on_hit(victim, "right")
+	check(playback._dots.size() == 1, "two doses stacked into %d dots" % playback._dots.size())
+	playback.tick(6.0)
+	check(playback._dots.is_empty(), "the poison outlived its own duration")
+
+	# A quick strike is queued from the landed blow and asked of the body on the
+	# next tick - never begun under the sweep that named the hit.
+	bag.strikes.clear()
+	bag.swings = true
+	playback.arm([Catalog.by_id("j_quick_hit")])
+	for i in 400:
+		playback.on_hit(victim, "left")
+	check(bag.strikes.is_empty(), "a quick strike began inside the blow")
+	playback.tick(0.016)
+	check(not bag.strikes.is_empty(), "the 20% beak never asked for a second swing")
+	var asked: Dictionary = bag.strikes[0]
+	check(str(asked["hand"]) == "left", "the second swing left the wrong hand")
+	check(is_equal_approx(float(asked["rate"]), 5.0), "the second swing is not at five times the rate")
+	# A body that cannot swing (a bow, a stagger) spends the chance and stops
+	# asking once `STRIKE_GRACE` runs out - one chance, not a queue for ever.
+	# Lifesteal reads the blow: a share of the damage the bearer dealt comes back
+	# as health, and a blow that reports no figure heals nothing.
+	bag.health = 40.0
+	playback.arm([Catalog.by_id("j_blood_thirst")])
+	var healed_before: float = bag.health
+	for i in 400:
+		playback.on_hit(victim, "right", 100.0)
+	check(bag.health > healed_before,
+		"the lifesteal never returned health: %.1f" % bag.health)
+	check(bag.health <= bag.max_health + 0.001, "lifesteal overshot the pool")
+	var silent: float = bag.health
+	for i in 400:
+		playback.on_hit(victim, "right")
+	check(is_equal_approx(bag.health, silent),
+		"a blow with no figure healed %.1f" % (bag.health - silent))
+
+	bag.strikes.clear()
+	bag.swings = false
+	playback.arm([Catalog.by_id("j_quick_hit")])
+	for i in 400:
+		playback.on_hit(victim, "right")
+	for i in 40:
+		playback.tick(0.05)
+	var asked_for_good: int = bag.strikes.size()
+	check(asked_for_good > 0, "a refused turn was never even tried")
+	for i in 20:
+		playback.tick(0.05)
+	check(bag.strikes.size() == asked_for_good,
+		"the queued strike kept asking: %d more" % (bag.strikes.size() - asked_for_good))
 	bag.queue_free()
 	attacker.queue_free()
-	print("  procs: absorb, lethal save, heal, stamina, bleed, expiry all played")
+	victim.queue_free()
+	print("  procs: absorb, lethal save, heal, stamina, bleed, poison, quick strike, expiry all played")
 
 
 # --- 99,999 rituals --------------------------------------------------------

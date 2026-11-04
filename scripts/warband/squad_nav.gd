@@ -59,17 +59,22 @@ var _plan_px := CELL
 var _plan_step := 1
 var _plan_solid := PackedByteArray()
 ## The floor a collider is measured against: NAN reads the wood's heightfield
-## under it; a mapped area with its own flat floor (the delve's cave, far off the
-## field) names that height instead.
+## under it; a mapped area with its own floor names that height instead - a flat
+## one (a slab) as a number, or, where the ground is a surface of its own (the
+## delve's cave, whose floor falls away and pitches), a `Callable(x, z) -> float`
+## in the map's own frame.
 var _floor_y := NAN
+var _floor_at := Callable()
 
 
 ## Map `area` (flat, x/z) from the colliders under `root`. `skip` holds nodes whose
-## whole subtree stays off the map. `floor_y` is the area's own floor height, for
-## ground that is not the wood's heightfield.
-func build(root: Node, area: Rect2, skip: Array = [], floor_y: float = NAN) -> void:
+## whole subtree stays off the map. `floor_y` is the area's own floor - a height,
+## for ground that is not the wood's heightfield and is level, or a callable for
+## ground that is not level.
+func build(root: Node, area: Rect2, skip: Array = [], floor_y = NAN) -> void:
 	rect = area
-	_floor_y = floor_y
+	_floor_at = floor_y if floor_y is Callable else Callable()
+	_floor_y = NAN if floor_y is Callable else float(floor_y)
 	_size = Vector2i(ceili(area.size.x / CELL), ceili(area.size.y / CELL))
 	_solid = PackedByteArray()
 	_solid.resize(_size.x * _size.y)
@@ -342,6 +347,8 @@ func _stamp(holder: CollisionShape3D) -> void:
 		return
 	var ground := _floor_y if not is_nan(_floor_y) \
 		else TerrainScript.height_at(xform.origin.x, xform.origin.z)
+	if _floor_at.is_valid():
+		ground = float(_floor_at.call(xform.origin.x, xform.origin.z))
 	if bounds.position.y > ground + BAND_HIGH or bounds.end.y < ground + BAND_LOW:
 		return
 	var inverse := xform.affine_inverse()

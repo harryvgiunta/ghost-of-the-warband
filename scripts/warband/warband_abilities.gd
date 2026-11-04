@@ -29,6 +29,9 @@ const BACKSTAB_RANGE := 8.0
 ## Missiles are real damage nodes owned by the authority. The cap is a leak
 ## guard, not a gameplay limit: the oldest shot goes before the tree grows.
 const MAX_MISSILES := 32
+## Cold steel, one shade brighter than a plain cut: the necklace's waves and the
+## glow they leave on both blades.
+const WAVE_TINT := Color("eef5ff")
 
 var _world: Node3D
 var _controller
@@ -109,6 +112,8 @@ func _on_cue(id: String, cue: String, index: int, actor) -> void:
 			_backstab(actor, cue, damage)
 		"melee_arc", "melee_ring":
 			_melee(actor, runner, definition, cue, index, damage)
+		"melee_wave":
+			_melee_wave(actor, runner, definition, cue, index, damage)
 	# A travelling skill's lane is swept by `ArenaActor._sweep_ability_path`;
 	# a ward is a body state the runner has already started. Neither needs a
 	# beat here, and neither may be applied twice.
@@ -122,7 +127,14 @@ func _on_activated(_id: String, definition: Dictionary, actor) -> void:
 		return
 	if actor.has_meta("backstab_target"):
 		actor.remove_meta("backstab_target")
-	if str(definition.get("effect", {}).get("kind", "")) != "backstab":
+	var effect: Dictionary = definition.get("effect", {})
+	var kind := str(effect.get("kind", ""))
+	# The three-strike necklace lights both weapons before the first wave: the
+	# glow is the tell, and it is the rig's hands that are lit, not the world.
+	if kind == "melee_wave":
+		_weapon_glow(actor, float(effect.get("glow_seconds", 0.8)))
+		return
+	if kind != "backstab":
 		return
 	var target := _backstab_target(actor)
 	if target != null:
@@ -340,6 +352,83 @@ func _melee(actor, runner, definition: Dictionary, cue: String, index: int,
 		_fx_call("slash_arc", [rig.global_position,
 			forward.rotated(Vector3.UP, 0.32 * alternate), radius,
 			minf(arc, 200.0), AbilityFx.STEEL])
+
+
+# --- the three-strike wave -------------------------------------------------
+
+## One wave of the necklace's three-strike. Every cue is its own cut with its own
+## victim list, so the skill reaches across a rank instead of re-cutting one body:
+## the wave stops at `victims_per_wave` (three), the three waves together stop at
+## `ABILITY_MAX_VICTIMS` as every activation does. `wave_scales` is the authored
+## damage per wave and `wave_sides` says which hand throws it - right, left, then
+## both, which is the authored reading of the skill.
+func _melee_wave(actor, runner, definition: Dictionary, cue: String, index: int,
+		damage: float) -> void:
+	if cue != "wave":
+		return
+	var effect: Dictionary = definition.get("effect", {})
+	var rig = actor.rig
+	var scales: Array = effect.get("wave_scales", [])
+	var sides: Array = effect.get("wave_sides", [])
+	var share := float(scales[index]) if index < scales.size() else 1.0
+	var side := float(sides[index]) if index < sides.size() else 1.0
+	var radius := float(effect.get("radius", 2.4))
+	var arc := float(effect.get("arc_degrees", 130.0))
+	var per_wave := int(effect.get("victims_per_wave", 3))
+	var forward: Vector3 = runner.combat.aim_point - rig.global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = -rig.global_basis.z
+	forward = forward.normalized()
+	runner.combat.ability_strike(radius, arc, damage * share,
+		float(effect.get("stagger", 0.0)), false, true, {}, per_wave)
+	# The wave leaves the blades: a crescent at arm's length that carries the
+	# wave's own outward push, thrown off-centre by the hand that threw it.
+	var origin: Vector3 = rig.global_position + forward * (0.55 + 0.30 * float(index)) \
+		+ forward.cross(Vector3.UP) * 0.22 * side
+	_fx_call("slash_arc", [origin, forward.rotated(Vector3.UP, 0.20 * side), radius,
+		minf(arc, 200.0), WAVE_TINT])
+	_fx_call("blade_trail", [rig, 0.20])
+	if is_zero_approx(side):
+		# The last wave is both blades coming down together.
+		_fx_call("spin_burst", [rig.global_position, radius * 0.75])
+
+
+## Both weapons lit for the length of the skill: the held steel burns cold for
+## `hold`, a lamp on each hand spills that light onto the arms, and a ribbon
+## follows the blade tip. The emission is an override on each drawn surface and
+## is put back when the beat ends, so the altar's own inlaid marks (child meshes,
+## never an override) are untouched and no material is mutated in place.
+func _weapon_glow(actor, seconds: float) -> void:
+	var rig = actor.rig
+	if rig == null or not is_instance_valid(rig):
+		return
+	if not rig.has_method("get_blade_base") or not rig.has_method("swing_weapon_class"):
+		return
+	var hold := clampf(seconds, 0.2, 2.0)
+	var lit := AbilityFx.glow_material(WAVE_TINT, 2.6, 0.9)
+	for hand in ["right", "left"]:
+		# A hand with nothing to swing (a bow, an empty off hand) lights nothing.
+		if str(rig.swing_weapon_class(hand)).is_empty():
+			continue
+		var light := AbilityFx.flash_light(WAVE_TINT, 1.8, 1.6)
+		rig.add_child(light)
+		light.position = rig.to_local(rig.get_blade_base(hand))
+		var fade := light.create_tween()
+		fade.tween_property(light, "light_energy", 0.0, hold)
+		fade.tween_callback(light.queue_free)
+	if rig.has_method("held_weapon_nodes"):
+		for node in rig.held_weapon_nodes():
+			for child in (node as Node).find_children("*", "MeshInstance3D", true, false):
+				var mesh := child as MeshInstance3D
+				var previous: Material = mesh.material_override
+				mesh.material_override = lit
+				var put_back := mesh.create_tween()
+				put_back.tween_interval(hold)
+				put_back.tween_callback(func() -> void:
+					if is_instance_valid(mesh):
+						mesh.material_override = previous)
+	_fx_call("blade_trail", [rig, hold])
 
 
 # --- helpers ---------------------------------------------------------------

@@ -7,6 +7,7 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Rules = preload("res://scripts/equipment_rules.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const TrinketStats = preload("res://scripts/trinket_stats.gd")
 
 const TRINKET_SLOTS := ["neck", "ring1", "ring2"]
 
@@ -43,10 +44,14 @@ static func _apply_annoints(rig, annoints: Dictionary) -> void:
 		"main": AbilityRules.skill_ids(held.get("main", "")),
 		"off": AbilityRules.skill_ids(held.get("off", "")),
 	}
-	for hand in ["main", "off"]:
+	# The worn trinkets weld their own skills: a necklace carries its cord's
+	# skill the same way a hand carries its steel's.
+	for slot in TrinketStats.ABILITY_ORDER:
+		hands[slot] = AbilityRules.skill_ids(held.get(slot, ""))
+	for hand in skills.keys():
 		var welded := AbilityRules.skill_ids((skills as Dictionary).get(hand, ""))
 		if not welded.is_empty():
-			hands[hand] = welded
+			hands[str(hand)] = welded
 	rig.anointed = hands
 
 ## The worn kit travels beside the hands. Each id must be a real catalog item
@@ -65,11 +70,12 @@ static func trinkets(value: Variant) -> Dictionary:
 ## the wire, and a peer must not be able to claim a skill its steel was never given.
 ## `annoints` is the same kind of trusted-local argument as `anointed`: the
 ## warband's own ledger, never a loadout field. `{stats: Dictionary,
-## skills: {main, off}, marks: {main, off}}`; a bare dictionary leaves the rig
-## alone. `marks` is how many annointments each held copy carries, which the rig
-## draws on the piece. `hotbar_order` is the player's own sequence for the ten
-## keys, read off the mercenary's record: it changes the slot a skill fires from
-## and never which skills the kit grants, so it rides beside the loadout too.
+## skills: {main, off, neck, ring1, ring2}, marks: {main, off}}`; a bare
+## dictionary leaves the rig alone. `marks` is how many annointments each held
+## copy carries, which the rig draws on the piece. `hotbar_order` is the player's
+## own sequence for the ten keys, read off the mercenary's record: it changes the
+## slot a skill fires from and never which skills the kit grants, so it rides
+## beside the loadout too.
 static func apply(rig, loadout: Dictionary, anointed: Array = [],
 		annoints: Dictionary = {}, hotbar_order: Array = []) -> void:
 	if rig == null or loadout.is_empty():

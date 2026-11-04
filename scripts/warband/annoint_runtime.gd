@@ -2,10 +2,13 @@ extends RefCounted
 ## Plays the PROC entries a kit arms. One instance per body, armed at dress time,
 ## ticked by the body's own authoritative frame.
 ##
-## Every verb here is receiver-side on purpose: a landed blow is the only event
-## the engine knows without a new signal, and the attacker's node arrives through
-## `ArenaActor.struck_by` before the blow resolves. That covers the whole proc
-## vocabulary in `AnnointCatalog.Proc` without touching `combat.gd`.
+## Two edges feed it. Every receiver-side verb (`HEAL`/`STAMINA`/`REFLECT`/
+## `ABSORB`/`LETHAL_SAVE`/`STAGGER`/`GUARD_BREAK`/`BLEED`) hangs off a landed blow
+## the body *took*, which is the only event the engine knows without a new signal:
+## the attacker's node arrives through `ArenaActor.struck_by` before the blow
+## resolves. The two attack-side verbs (`QUICK_STRIKE`, `POISON`) hang off
+## `Trigger.HIT` - a blow this body *landed* - which `Combat` names through the
+## body's own `note_attack_landed`. Neither edge touches `combat.gd`'s damage.
 ##
 ## Rules, and why they are these rules:
 ##   * one roll per blow, never per frame
@@ -14,14 +17,24 @@ extends RefCounted
 ##   * `every N` counts the bearer's own triggers and is reset by re-arming
 ##   * the attacker is remembered for `ATTACKER_MEMORY` seconds, because
 ##     `struck_by` and the damage call are the same beat
-##   * a bleed is applied through the target's own `take_damage`, so a dead body
-##     stops bleeding without this file knowing what death means
+##   * a bleed or a poison is applied through the target's own `take_damage`, so a
+##     dead body stops losing health without this file knowing what death means
+##   * the quick strike is queued to the next tick rather than begun inside the
+##     blow: `Combat` is still sweeping its victim list when it names the hit, and
+##     a second swing started under that sweep would reset the list it is walking
 
 const Catalog = preload("res://scripts/warband/annoint_catalog.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
 
 const ATTACKER_MEMORY := 1.0
 ## Bleeds tick in one-damage steps so a 2/s DoT is visible, not a float trickle.
 const BLEED_STEP := 1.0
+## How long a queued quick strike keeps trying to get the blade moving before it
+## gives up. A swing in its recovery frees the hand in well under this; a body
+## staggered, rolling, drinking or holding a bow never frees it at all.
+const STRIKE_GRACE := 0.6
+## The bloom a poisoned body gives off. Not blood, so not `BloodFx`.
+const POISON_TINT := Color("7ee06a")
 
 var _body = null
 var _procs: Array = []
@@ -29,7 +42,8 @@ var _cooldown: Dictionary = {}   # index -> seconds left
 var _ticks: Dictionary = {}      # index -> trigger count since arming
 var _attacker = null
 var _attacker_left := 0.0
-var _bleeds: Array = []          # {target, dps, left, carry, slot}
+var _dots: Array = []            # {kind, target, dps, left, carry}
+var _strikes: Array = []         # {hand, rate, left}
 var _armed := 0
 
 
@@ -42,7 +56,8 @@ func arm(procs: Array) -> void:
 	_procs = procs.duplicate()
 	_cooldown.clear()
 	_ticks.clear()
-	_bleeds.clear()
+	_dots.clear()
+	_strikes.clear()
 	_attacker = null
 	_attacker_left = 0.0
 	_armed = _procs.size()
@@ -137,6 +152,22 @@ func on_block() -> void:
 		_pay(index, entry, 0.0, -1)
 
 
+## The bearer's own blow landed on `target`: the attack-side edge. `hand` is the
+## wrist that swung, so a dual pair's quick strike comes from the same hand;
+## `landed` is the blow's own figure, which a lifesteal share is taken from.
+func on_hit(target, hand: String = "", landed: float = 0.0) -> void:
+	if _procs.is_empty() or not is_instance_valid(_body):
+		return
+	for index in _procs.size():
+		var entry = _procs[index]
+		if not bool(entry.wired) or int(entry.trigger) != Catalog.Trigger.HIT:
+			continue
+		if not _ready_now(index) or not _passes(index, entry):
+			continue
+		_spend(index, entry.cooldown)
+		_pay_hit(entry, target, hand, landed)
+
+
 # --- the verbs -------------------------------------------------------------
 
 func _pay(index: int, entry, landed: float, source_id: int) -> void:
@@ -163,9 +194,68 @@ func _pay(index: int, entry, landed: float, source_id: int) -> void:
 	elif int(entry.proc) == Catalog.Proc.BLEED:
 		var target = _striker()
 		if target != null and float(entry.magnitude) > 0.0:
-			_bleeds.append({"target": target, "dps": float(entry.magnitude),
-				"left": maxf(float(entry.duration), 1.0), "carry": 0.0,
-				"slot": int(_body.slot)})
+			_dots.append({"kind": "bleed", "target": target,
+				"dps": float(entry.magnitude),
+				"left": maxf(float(entry.duration), 1.0), "carry": 0.0})
+
+
+## The attack-side verbs. A quick strike is queued for the next tick (see the
+## header); a poison is laid on the body that was just opened.
+func _pay_hit(entry, target, hand: String, landed: float) -> void:
+	if int(entry.proc) == Catalog.Proc.LIFESTEAL:
+		# A share of the blow comes back as health, on the bearer. A blow that
+		# reports no figure (a harness naming a hit) heals nothing rather than
+		# guessing at a number the receiver owns.
+		var share := landed * float(entry.scale)
+		if share > 0.0:
+			_body.health = minf(float(_body.health) + share,
+				float(_body.max_health))
+		return
+	if int(entry.proc) == Catalog.Proc.QUICK_STRIKE:
+		if float(entry.scale) <= 1.0:
+			return
+		_strikes.append({"hand": hand if hand in ["left", "right"] else "right",
+			"rate": float(entry.scale), "left": STRIKE_GRACE})
+	elif int(entry.proc) == Catalog.Proc.POISON:
+		if not is_instance_valid(target) or target.get("alive") == false:
+			return
+		_poison(target, float(entry.magnitude), float(entry.duration))
+
+
+## One poison per target per runtime: a second dose refreshes the clock instead of
+## stacking a twin, so the figure on the card is the figure the body loses each
+## second. The bloom marks the dose, not the tick - five green bursts a second on
+## a whole pack would be the frame's cost, not the mechanic's.
+func _poison(target, dps: float, seconds: float) -> void:
+	if dps <= 0.0:
+		return
+	var left := maxf(seconds, 1.0)
+	for dot in _dots:
+		if str(dot["kind"]) != "poison" or dot["target"] != target:
+			continue
+		dot["dps"] = maxf(float(dot["dps"]), dps)
+		dot["left"] = maxf(float(dot["left"]), left)
+		_bloom(target, 0.55)
+		return
+	_dots.append({"kind": "poison", "target": target, "dps": dps,
+		"left": left, "carry": 0.0})
+	_bloom(target, 1.0)
+
+
+## A green bloom at the wound. Presentation only: nothing here reads health.
+func _bloom(target, scale: float) -> void:
+	var parent := _fx_parent()
+	if parent == null or not is_instance_valid(target):
+		return
+	var at: Vector3 = target.get_aim_position() if target.has_method("get_aim_position") \
+		else (target as Node3D).global_position + Vector3.UP
+	AbilityFx.burst(parent, at, POISON_TINT, clampf(scale, 0.4, 1.2))
+
+
+func _fx_parent() -> Node3D:
+	if not is_instance_valid(_body):
+		return null
+	return _body.get_parent() as Node3D
 
 
 func _striker():
@@ -197,18 +287,40 @@ func tick(delta: float) -> void:
 		_attacker_left = maxf(0.0, _attacker_left - delta)
 		if _attacker_left <= 0.0:
 			_attacker = null
-	if _bleeds.is_empty():
+	_advance_strikes(delta)
+	if _dots.is_empty():
 		return
 	var still: Array = []
-	for bleed in _bleeds:
-		var target = bleed["target"]
+	for dot in _dots:
+		var target = dot["target"]
 		if not is_instance_valid(target):
 			continue
-		bleed["left"] = float(bleed["left"]) - delta
-		bleed["carry"] = float(bleed["carry"]) + float(bleed["dps"]) * delta
-		while float(bleed["carry"]) >= BLEED_STEP:
-			bleed["carry"] = float(bleed["carry"]) - BLEED_STEP
+		dot["left"] = float(dot["left"]) - delta
+		dot["carry"] = float(dot["carry"]) + float(dot["dps"]) * delta
+		while float(dot["carry"]) >= BLEED_STEP:
+			dot["carry"] = float(dot["carry"]) - BLEED_STEP
 			_hurt(target, BLEED_STEP)
-		if float(bleed["left"]) > 0.0 and is_instance_valid(target):
-			still.append(bleed)
-	_bleeds = still
+		if float(dot["left"]) > 0.0 and is_instance_valid(target):
+			still.append(dot)
+	_dots = still
+
+
+## The queued quick strikes, oldest first. A hand that cannot swing yet - still in
+## its own cut, rolling, staggered, holding a bow - keeps its place until
+## `STRIKE_GRACE` runs out; the proc spends its chance either way.
+func _advance_strikes(delta: float) -> void:
+	if _strikes.is_empty():
+		return
+	var still: Array = []
+	for strike in _strikes:
+		if not is_instance_valid(_body):
+			continue
+		var began := false
+		if _body.has_method("quick_strike"):
+			began = bool(_body.quick_strike(strike["hand"], float(strike["rate"])))
+		if began:
+			continue
+		strike["left"] = float(strike["left"]) - delta
+		if float(strike["left"]) > 0.0:
+			still.append(strike)
+	_strikes = still

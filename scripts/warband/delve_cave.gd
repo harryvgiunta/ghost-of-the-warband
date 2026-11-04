@@ -17,7 +17,10 @@ extends Node3D
 ## place. The rooms are rasterised onto
 ## a half-metre grid and every cell that is not floor is rock, merged into as few
 ## collider boxes as the grid allows, so the squad's map (`squad_nav.gd`) sees the
-## same boxes the bodies collide with. What is drawn is more than the boxes: each
+## same boxes the bodies collide with. The floor is not a box: every room's ground
+## is a surface of its own (`delve_floor.gd`), drawn and collided from the same
+## vertices, and everything that stands on it - the crowd, the lights, the
+## dressing - is set on it, not on a level. What is drawn is more than the boxes: each
 ## room's own shell carries only the rock nearest it (`Layout.wall_rects`), and
 ## over it a rock skin, the dripstone and breakdown grown along it and the life
 ## that moves in it (`delve_rock.gd`, `delve_dressing.gd`, `delve_fauna.gd`), so a
@@ -41,6 +44,8 @@ signal den_woke(den_id: String, label: String)
 signal master_slain(master_name: String)
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
+const Floor = preload("res://scripts/warband/delve_floor.gd")
+const Rock = preload("res://scripts/warband/delve_rock.gd")
 const Dressing = preload("res://scripts/warband/delve_dressing.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ArcherScript = preload("res://scripts/warband/watcher_archer.gd")
@@ -170,19 +175,23 @@ func at_exit(actor) -> bool:
 ## floor. The eye is asked this every frame, so it is a box test.
 func contains(point: Vector3) -> bool:
 	var local := point - global_position
-	if local.y < -6.0 or local.y > Layout.TOP + 6.0:
+	if local.y < Floor.LOW - 3.0 or local.y > Layout.TOP + 6.0:
 		return false
 	return Layout.BOUNDS.has_point(Vector2(local.x, local.z))
 
 
-## The ground a party lands on at one shaft, in the world, one post per body.
+## The ground a party lands on at one shaft, in the world, one post per body. Each
+## post stands on the floor there (`delve_floor.gd`): the ring is dressed flat, so
+## a body lands on the level it walked into.
 func entry_posts(landing_id: String, count: int) -> Array[Vector3]:
 	var centre: Vector3 = _landing(landing_id)["centre"]
 	var out: Array[Vector3] = []
 	for index in maxi(1, count):
 		var angle := TAU * float(index % ENTRY_POSTS) / float(ENTRY_POSTS)
 		var radius := ENTRY_RADIUS + 1.2 * float(index / ENTRY_POSTS)
-		out.append(to_global(centre + Vector3(cos(angle) * radius, SPAWN_LIFT, sin(angle) * radius)))
+		var x := centre.x + cos(angle) * radius
+		var z := centre.z + sin(angle) * radius
+		out.append(to_global(Vector3(x, Floor.height(x, z) + SPAWN_LIFT, z)))
 	return out
 
 
@@ -350,14 +359,16 @@ func _warm_view(room_id: String) -> void:
 	if index < 0 or not is_inside_tree():
 		return
 	var rect: Rect2 = Layout.ROOMS[index]["rect"]
-	var at := to_global(Vector3(rect.get_center().x, 2.2, rect.get_center().y))
+	var centre := rect.get_center()
+	var at := to_global(Vector3(centre.x, Floor.height(centre.x, centre.y) + 2.2, centre.y))
 	var previous := get_viewport().get_camera_3d()
 	var warm := Camera3D.new()
 	warm.fov = 85.0
 	warm.far = 200.0
 	add_child(warm)
 	warm.global_position = at
-	warm.look_at(to_global(Vector3(rect.get_center().x, 1.0, rect.end.y)), Vector3.UP)
+	var goal := Vector3(centre.x, 0.0, rect.end.y)
+	warm.look_at(to_global(Vector3(goal.x, Floor.height(goal.x, goal.z) + 1.0, goal.z)), Vector3.UP)
 	warm.current = true
 	# The floor's air goes on the host camera for these frames as well: the
 	# environment itself is a thing the renderer builds the first time an eye
@@ -441,8 +452,12 @@ func _build_fauna() -> void:
 func _build_nav() -> void:
 	nav = NavScript.new()
 	var bounds := Layout.BOUNDS
+	# The map reads the colliders against the ground they stand on, which below is
+	# a surface and not a slab: the floor's own field, in world space.
+	var ground := func(x: float, z: float) -> float:
+		return Floor.height(x - global_position.x, z - global_position.z) + global_position.y
 	nav.build(self, Rect2(global_position.x + bounds.position.x, global_position.z + bounds.position.y,
-		bounds.size.x, bounds.size.y), [], global_position.y)
+		bounds.size.x, bounds.size.y), [], ground)
 
 
 func _finish_build() -> void:
@@ -483,11 +498,13 @@ func _build_environment() -> void:
 	environment.glow_hdr_threshold = 1.1
 
 
-## The rock: one floor slab under everything, a collider box for every run of grid
-## that is not floor, and a ceiling over every room. Each room's node draws its
-## own floor, roof and the rock nearest it in its area's stone. Split into a
-## start, a step a room and an end, so a descent can build it across frames
-## (`build_staged`) instead of stopping the game for one.
+## The rock: a collider box for every run of grid that is not floor, a ceiling
+## over every room, and each room's own floor (`_floor_collider`) - the ground is
+## a surface, not a slab, and what a body walks on is the very mesh the eye sees
+## (`delve_floor.gd`). Each room's node draws its own floor, roof and the rock
+## nearest it in its area's stone. Split into a start, a step a room and an end, so
+## a descent can build it across frames (`build_staged`) instead of stopping the
+## game for one.
 var _rock_solids: StaticBody3D = null
 var _rock_walls: Array = []
 
@@ -498,9 +515,11 @@ func _rock_start() -> void:
 	solids.collision_mask = 0
 	add_child(solids)
 	_rock_solids = solids
+	# A bed of rock under the whole floor, deep enough that nothing which somehow
+	# left the ground falls out of the world. The floor itself is above this.
 	var bounds := Layout.BOUNDS
 	_box_collider(solids, Vector3(bounds.size.x, 1.0, bounds.size.y),
-		Vector3(bounds.get_center().x, -0.5, bounds.get_center().y))
+		Vector3(bounds.get_center().x, Floor.LOW - 3.5, bounds.get_center().y))
 	_rock_walls = Layout.wall_rects()
 	_room_lit.resize(Layout.ROOMS.size())
 	_room_lit.fill(1)
@@ -516,24 +535,38 @@ func _rock_room(index: int) -> void:
 	var stone: Dictionary = Dressing.stone(str(room["area"]))
 	var shell := VillageKit.Merged.new()
 	var rect: Rect2 = room["rect"]
-	var height := float(room["height"])
-	VillageKit.add_box(shell, Vector3(rect.size.x, 0.2, rect.size.y),
-		Vector3(rect.get_center().x, -0.1, rect.get_center().y), stone["floor"])
-	var ceiling := Vector3(rect.size.x, Layout.TOP - height, rect.size.y)
-	var ceiling_at := Vector3(rect.get_center().x, (height + Layout.TOP) * 0.5, rect.get_center().y)
+	var top: float = Rock.ceiling(index)
+	shell.add(Floor.mesh(index), Transform3D.IDENTITY, stone["floor"])
+	var ceiling := Vector3(rect.size.x, maxf(0.05, Layout.TOP - top), rect.size.y)
+	var ceiling_at := Vector3(rect.get_center().x, (top + Layout.TOP) * 0.5, rect.get_center().y)
 	VillageKit.add_box(shell, ceiling, ceiling_at, stone["roof"])
 	_box_collider(_rock_solids, ceiling, ceiling_at)
+	# The wall's rock reaches down to the lowest the floor can be anywhere on the
+	# floor: a hall cut into ground that has fallen away still stands in rock.
+	var tall := Layout.TOP - Floor.LOW
 	for block in _rock_walls[index]:
 		var wall: Rect2 = block
-		VillageKit.add_box(shell, Vector3(wall.size.x, Layout.TOP, wall.size.y),
-			Vector3(wall.get_center().x, Layout.TOP * 0.5, wall.get_center().y), stone["wall"])
+		VillageKit.add_box(shell, Vector3(wall.size.x, tall, wall.size.y),
+			Vector3(wall.get_center().x, (Layout.TOP + Floor.LOW) * 0.5, wall.get_center().y), stone["wall"])
 	shell.commit(node, "Shell", false)
+	_floor_collider(index)
+
+
+## The ground of one room, as the physics of the ground: the same vertices the room
+## draws, so a foot, an arrow or a thrown blade stops exactly on the surface under
+## it, dips and mounds and all.
+func _floor_collider(index: int) -> void:
+	var shape := ConcavePolygonShape3D.new()
+	shape.set_faces(Floor.faces(index))
+	var holder := CollisionShape3D.new()
+	holder.shape = shape
+	_rock_solids.add_child(holder)
 
 
 func _rock_end() -> void:
 	for block in Layout.rock_rects():
-		_box_collider(_rock_solids, Vector3(block.size.x, Layout.TOP, block.size.y),
-			Vector3(block.get_center().x, Layout.TOP * 0.5, block.get_center().y))
+		_box_collider(_rock_solids, Vector3(block.size.x, Layout.TOP - Floor.LOW, block.size.y),
+			Vector3(block.get_center().x, (Layout.TOP + Floor.LOW) * 0.5, block.get_center().y))
 
 
 func _box_collider(solids: StaticBody3D, size: Vector3, at: Vector3) -> void:
@@ -549,7 +582,8 @@ func _box_collider(solids: StaticBody3D, size: Vector3, at: Vector3) -> void:
 func _build_ropes() -> void:
 	for landing in Layout.LANDINGS:
 		var index := Layout.room_index(str(landing["room"]))
-		_own(index, Dressing.rope(_rooms[index], landing, float(Layout.ROOMS[index]["height"])))
+		var rope_at: Vector3 = landing["rope"]
+		_own(index, Dressing.rope(_rooms[index], landing, Rock.roof_height(index, rope_at.x, rope_at.z)))
 
 
 func _build_lights() -> void:
@@ -740,7 +774,7 @@ func _mobs_end() -> void:
 	master = DemonScript.new()
 	master.boss = true
 	master.name = MASTER_NAME
-	master.position = Layout.MASTER_POINT + Vector3(0.0, SPAWN_LIFT, 0.0)
+	master.position = Floor.lift(Layout.MASTER_POINT) + Vector3(0.0, SPAWN_LIFT, 0.0)
 	master.rotation.y = Layout.MASTER_YAW
 	_mobs_root.add_child(master)
 	master.home = master.global_position
@@ -764,7 +798,7 @@ func _spawn_watcher(parent: Node3D, label: String, species: String, at: Vector3,
 	var watcher = WatcherScript.new()
 	watcher.name = label
 	watcher.mob_id = species
-	watcher.position = at + Vector3(0.0, SPAWN_LIFT, 0.0)
+	watcher.position = Floor.lift(at) + Vector3(0.0, SPAWN_LIFT, 0.0)
 	watcher.rotation.y = yaw
 	parent.add_child(watcher)
 	watcher.home = watcher.global_position
@@ -782,7 +816,7 @@ func _spawn_archer(parent: Node3D, label: String, species: String, at: Vector3, 
 	var archer = ArcherScript.new()
 	archer.name = label
 	archer.mob_id = species
-	archer.position = at + Vector3(0.0, SPAWN_LIFT, 0.0)
+	archer.position = Floor.lift(at) + Vector3(0.0, SPAWN_LIFT, 0.0)
 	archer.rotation.y = yaw
 	parent.add_child(archer)
 	archer.home = archer.global_position
@@ -802,7 +836,7 @@ func _spawn_demon(parent: Node3D, label: String, species: String, at: Vector3, y
 	var demon = DemonScript.new()
 	demon.name = label
 	demon.mob_id = species
-	demon.position = at + Vector3(0.0, SPAWN_LIFT, 0.0)
+	demon.position = Floor.lift(at) + Vector3(0.0, SPAWN_LIFT, 0.0)
 	demon.rotation.y = yaw
 	parent.add_child(demon)
 	demon.home = demon.global_position

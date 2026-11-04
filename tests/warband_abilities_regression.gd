@@ -393,4 +393,129 @@ func _check_ability_node(world: Node3D, actor, controller) -> void:
 	check(abilities.missiles().size() == 2,
 		"the cast cue spawns the spell, got %d missiles" % abilities.missiles().size())
 	actor.ability.cancel()
+	_check_necklace(world, actor, abilities)
 	abilities.queue_free()
+
+
+## The necklace's three words on a real rig and a real victim: a landed blow is
+## the attack-side edge (Quick Hit asks for a five-times swing on the next tick),
+## a poison walks the body it opened, and the welded three-strike is a skill of
+## three waves that each stop at three bodies.
+func _check_necklace(world: Node3D, actor, abilities) -> void:
+	var catalog = preload("res://scripts/warband/annoint_catalog.gd")
+	var victim := fighter(world, 4, Vector3(0.0, 0.0, -1.7))
+	victim.health = 900.0
+	victim.max_health = 900.0
+	actor.rig.apply_loadout(State.build_loadout("sword_short", "", ARMOR,
+		{"neck": "neck_bone"}))
+	actor.combat.aim_point = victim.global_position + Vector3.UP * 1.0
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+
+	# --- Quick Hit: the blow lands, the body is asked for a fast second swing
+	var normal := 0.0
+	if actor.rig.begin_melee("right"):
+		normal = float(actor.rig.melee_seconds("right"))
+		actor.rig.abort_melee("right")
+	check(normal > 0.05, "the rig could not raise a plain swing to time against")
+	actor.apply_annointments({}, [catalog.by_id("j_quick_hit")])
+	check(actor.annoint_playback.armed_count() == 1, "the necklace proc did not arm")
+	var before_health: float = victim.health
+	for i in 200:
+		# A landed blow named by `Combat`, exactly as a real contact names it.
+		actor.note_attack_landed(victim, "right")
+	check(victim.health <= before_health, "naming a blow must not wound the victim twice")
+	check(actor.annoint_playback._strikes.size() > 0,
+		"the 20% beak never queued a second swing")
+	# The queue is walked on the tick, and the swing it raises is five times as
+	# fast as the plain one it interrupts.
+	var began := false
+	for i in 4:
+		actor.annoint_playback.tick(0.016)
+		if actor.rig.melee_seconds("right") < normal * 0.5:
+			began = true
+			break
+	check(began, "the queued quick strike never raised a faster swing")
+
+	# --- Poison Hit: a landed blow lays a dot on the body it opened
+	var poison_victim := fighter(world, 5, Vector3(0.9, 0.0, -1.7))
+	poison_victim.health = 900.0
+	poison_victim.max_health = 900.0
+	actor.apply_annointments({}, [catalog.by_id("j_poison_hit")])
+	var start: float = poison_victim.health
+	for i in 300:
+		actor.note_attack_landed(poison_victim, "right")
+	check(actor.annoint_playback._dots.size() == 1,
+		"the poison never landed on a real body")
+	for i in 120:
+		actor.annoint_playback.tick(0.05)
+	check(poison_victim.health < start - 5.0,
+		"the poison dealt %.1f to a real body" % (start - poison_victim.health))
+
+	# --- Stone Skin: a ward the cord itself performs, on any hand
+	actor.rig.apply_loadout(State.build_loadout("sword_short", "", ARMOR,
+		{"neck": "neck_bone"}))
+	actor.rig.anointed = {"main": [], "off": [], "neck": ["stone_skin"]}
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+	var ward_slot := -1
+	var ward_grants: Array = AbilityRules.granted(actor.rig)
+	for index in ward_grants.size():
+		if str(ward_grants[index].get("id", "")) == "stone_skin":
+			ward_slot = index
+	check(ward_slot >= 0, "the cord's ward never reached the hotbar")
+	check(bool(actor.try_ability(ward_slot).get("ok", false)), "Stone Skin starts")
+	check(float(actor.ward_seconds) > 0.0, "Stone Skin never started a ward")
+	check(absf(float(actor.ward_absorb) - 0.33) < 0.001,
+		"Stone Skin absorbed %.2f, expected a third" % float(actor.ward_absorb))
+	actor.ability.cancel()
+
+	# --- the welded three-strike: three waves, three bodies apiece
+	actor.apply_annointments({}, [])
+	# Five bodies packed inside the 2.4 m reach and the 130 degree arc, so the
+	# only thing that can spare two of them is the wave's own three-body cap.
+	var spots := [Vector3(0.0, 0.0, -1.0), Vector3(-0.5, 0.0, -1.2),
+		Vector3(0.5, 0.0, -1.2), Vector3(0.0, 0.0, -1.8), Vector3(-0.8, 0.0, -1.6)]
+	var lineup: Array = []
+	for index in spots.size():
+		var dummy := fighter(world, 10 + index, spots[index])
+		dummy.health = 1200.0
+		dummy.max_health = 1200.0
+		lineup.append(dummy)
+	actor.rig.apply_loadout(State.build_loadout("sword_short", "dagger_iron", ARMOR,
+		{"neck": "neck_bone"}))
+	actor.rig.anointed = {"main": [], "off": [], "neck": ["three_strike"]}
+	var grants: Array = AbilityRules.granted(actor.rig)
+	var slot := -1
+	for index in grants.size():
+		if str(grants[index].get("id", "")) == "three_strike":
+			slot = index
+	check(slot >= 0, "a welded necklace skill never reached the hotbar")
+	# The harness's own bodies ride layer 4 and the arena's mask is "world and
+	# mobs"; the wave has to be asked to cut the bodies standing in it.
+	actor.combat.target_mask = 1 | 4
+	actor.combat.aim_point = Vector3(0.0, 0.0, -2.8)
+	actor.stamina = actor.max_stamina
+	actor.combat.grounded = true
+	check(bool(actor.try_ability(slot).get("ok", false)), "the three-strike starts")
+	for beat in 4:
+		actor.ability.advance(0.24)
+	var hurt: int = 0
+	var per_body: Array[float] = []
+	for dummy in lineup:
+		var lost: float = 1200.0 - float(dummy.health)
+		per_body.append(lost)
+		if lost > 0.0:
+			hurt += 1
+	check(hurt == 3, "a wave reached %d bodies, the cap is three" % hurt)
+	check(per_body[0] > 0.0 and per_body[1] > 0.0 and per_body[2] > 0.0,
+		"the wave skipped one of the three nearest: %s" % str(per_body))
+	check(per_body[3] == 0.0 and per_body[4] == 0.0,
+		"a body past the third of the rank was cut: %s" % str(per_body))
+	# Every one of the three waves went into that rank, so each of the three took
+	# three cuts rather than one.
+	check(per_body[0] > per_body[1] * 0.9 and per_body[1] > 0.0,
+		"the three were not cut alike: %s" % str(per_body))
+	actor.ability.cancel()
+	print("  necklace: quick hit %.2fs -> %.2fs, poison, three-strike %s" % [
+		normal, normal / 5.0, str(per_body)])

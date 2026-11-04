@@ -999,6 +999,11 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		SfxScript.landed(rig, at, hand)
 		if actor.has_method("note_weapon_blood"):
 			actor.note_weapon_blood(damage)
+		# The one edge the receiver cannot see: the bearer's own blow landed.
+		# `AnnointCatalog.Trigger.HIT` procs roll from here, and the wrist is
+		# named because a dual pair keeps two clocks.
+		if actor.has_method("note_attack_landed"):
+			actor.note_attack_landed(unit, hand, damage)
 		if _unit_is_dead(unit):
 			# The kill throws blood back over the body that landed it.
 			BloodFx.spatter_kill(actor,rig,at,damage)
@@ -1009,16 +1014,20 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 ## damage numbers behave exactly like an authored swing. Returns victims hit.
 ## `victims` is shared across every beat of one activation (a travelling lunge
 ## sweeps the same dictionary each tick), so no body is ever struck twice and the
-## whole activation strikes at most `ABILITY_MAX_VICTIMS` bodies.
+## whole activation strikes at most `ABILITY_MAX_VICTIMS` bodies. `max_victims`
+## lowers that ceiling for one beat: a wave that may only reach three bodies
+## passes 3 and keeps the rest of the skill's budget for the waves after it.
 func ability_strike(radius: float, arc_degrees: float, damage: float,
 		stagger_seconds: float = 0.0, ring: bool = false,
-		require_sight: bool = true, victims: Dictionary = {}) -> int:
+		require_sight: bool = true, victims: Dictionary = {},
+		max_victims: int = ABILITY_MAX_VICTIMS) -> int:
 	if not is_instance_valid(actor):
 		return 0
+	var cap := clampi(max_victims, 1, ABILITY_MAX_VICTIMS)
 	var struck := _ability_area(actor.global_position+Vector3.UP*0.95,radius,damage,
-		stagger_seconds,arc_degrees,ring,require_sight,victims)
+		stagger_seconds,arc_degrees,ring,require_sight,victims,cap)
 	struck += _lag_area_strike(actor.global_position+Vector3.UP*0.95,radius,damage,
-		stagger_seconds,arc_degrees,ring,require_sight,victims)
+		stagger_seconds,arc_degrees,ring,require_sight,victims,cap)
 	return struck
 
 ## A blast centred away from the caster (a fireball burst). Sight is ignored:
@@ -1035,7 +1044,8 @@ func ability_blast(centre: Vector3, radius: float, damage: float,
 ## The same radial beat against the bodies as their owner last saw them.
 func _lag_area_strike(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float, arc_degrees: float, ring: bool,
-		require_sight: bool, victims: Dictionary = {}) -> int:
+		require_sight: bool, victims: Dictionary = {},
+		max_victims: int = ABILITY_MAX_VICTIMS) -> int:
 	if lag_ticks <= 0 or not is_instance_valid(lag_rewind) or not damage_enabled:
 		return 0
 	if not is_instance_valid(actor) or actor.get("alive") == false or radius <= 0.0:
@@ -1052,7 +1062,7 @@ func _lag_area_strike(centre: Vector3, radius: float, damage: float,
 	var half := deg_to_rad(clampf(arc_degrees,0.0,360.0))*0.5
 	var struck := 0
 	for candidate in lag_rewind.candidates(tick):
-		if victims.size() >= ABILITY_MAX_VICTIMS:
+		if victims.size() >= max_victims:
 			break
 		if not is_instance_valid(candidate) or not candidate.has_method("take_damage"):
 			continue
@@ -1097,7 +1107,8 @@ func _lag_area_strike(centre: Vector3, radius: float, damage: float,
 
 func _ability_area(centre: Vector3, radius: float, damage: float,
 		stagger_seconds: float, arc_degrees: float, ring: bool,
-		require_sight: bool, victims: Dictionary = {}) -> int:
+		require_sight: bool, victims: Dictionary = {},
+		max_victims: int = ABILITY_MAX_VICTIMS) -> int:
 	if not damage_enabled or not is_instance_valid(actor) or not is_instance_valid(rig):
 		return 0
 	if actor.get("alive") == false or radius <= 0.0:
@@ -1122,13 +1133,13 @@ func _ability_area(centre: Vector3, radius: float, damage: float,
 	_blast_query.exclude = state.exclude
 	var space := actor.get_world_3d().direct_space_state
 	var hits := space.intersect_shape(_blast_query,MAX_CLEAVE_CONTACTS)
-	# More bodies than the activation may still strike: the nearest go first.
-	if hits.size() > ABILITY_MAX_VICTIMS - victims.size():
+	# More bodies than this beat may still strike: the nearest go first.
+	if hits.size() > max_victims - victims.size():
 		hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 			return _distance_from(a, centre) < _distance_from(b, centre))
 	var hit_count := 0
 	for hit in hits:
-		if victims.size() >= ABILITY_MAX_VICTIMS:
+		if victims.size() >= max_victims:
 			break
 		var unit = hit.collider
 		if not is_instance_valid(unit) or not unit.has_method("take_damage") \

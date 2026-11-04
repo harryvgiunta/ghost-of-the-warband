@@ -22,8 +22,11 @@ const AbilityRules = preload("res://scripts/ability_rules.gd")
 ## What an entry is. The roll only cares about ABILITY versus everything else.
 enum Kind { STAT, PROC, ABILITY }
 
-## When a PROC is rolled. STAT entries ignore this.
-enum Trigger { DAMAGE_TAKEN, BLOCK, PARRY, LETHAL, KILL }
+## When a PROC is rolled. STAT entries ignore this. `HIT` is the one
+## damage-dealing edge: a blow the bearer's own hand or shaft landed, which the
+## receiver never knows about, so `Combat` names the striker through the body's
+## own `note_attack_landed`.
+enum Trigger { DAMAGE_TAKEN, BLOCK, PARRY, LETHAL, KILL, HIT }
 
 ## The proc verbs `AnnointRuntime` can play. Keep this list short and literal:
 ## every verb here is one branch on the receiver, never a bespoke system.
@@ -36,6 +39,9 @@ enum Proc {
 	STAGGER,       # seconds: stagger the source
 	GUARD_BREAK,   # drops the source's guard where it is a bare guard
 	BLEED,         # dps * duration: a real damage-over-time on the source
+	QUICK_STRIKE,  # scale: strike again now, at `scale` times the swing rate
+	POISON,        # magnitude * duration: a real damage-over-time on the target
+	LIFESTEAL,     # scale: share of the damage the bearer deals, returned as health
 }
 
 const SLOT_MAIN := "main"
@@ -58,6 +64,12 @@ const GROUP_SHIELD := "shield"
 const GROUP_FOCUS := "focus"
 const GROUP_RANGED := "ranged"
 const GROUP_ARMOUR := "armour"
+## Necklaces and rings. One group, split by slot: a necklace entry names `neck`
+## and only ever welds to the cord around the throat.
+const GROUP_JEWELRY := "jewelry"
+## The worn trinket slots a jewellery copy can occupy - the same three the altar
+## offers, in the order `AbilityRules` lays their skills on the hotbar.
+const JEWELRY_SLOTS := ["neck", "ring1", "ring2"]
 
 class Entry extends RefCounted:
 	var id: String = ""
@@ -209,6 +221,40 @@ const FAMILIES := [
 		"unit": "flat", "tags": ["sustain"]},
 ]
 
+## The amulet's own ladders. An amulet is the trinket that carries a body's
+## numbers, so the cord is the one piece with a broad stat pool: ten keys, five
+## rungs each, neck-only (`slots`), and every figure sits under the kit ceiling in
+## `AnnointLedger.CEILINGS` so a top rung plus the piece's own stats never reaches
+## a clamp that silently does nothing.
+const JEWEL_FAMILIES := [
+	{"key": "health", "name": "Heartstone", "group": "jewelry", "slots": ["neck"],
+		"values": [6.0, 10.0, 14.0, 20.0, 30.0], "unit": "flat", "tags": ["defence"]},
+	{"key": "stamina", "name": "Bellows Bead", "group": "jewelry", "slots": ["neck"],
+		"values": [40.0, 70.0, 100.0, 150.0, 200.0], "unit": "flat",
+		"tags": ["defence", "sustain"]},
+	{"key": "stamina_regen", "name": "Steady Pulse", "group": "jewelry", "slots": ["neck"],
+		"values": [0.05, 0.10, 0.15, 0.20, 0.30], "unit": "pct", "tags": ["sustain"]},
+	{"key": "melee_damage", "name": "Wolf Fang", "group": "jewelry", "slots": ["neck"],
+		"values": [0.03, 0.05, 0.08, 0.12, 0.18], "unit": "pct",
+		"tags": ["offence", "melee"]},
+	{"key": "ranged_damage", "name": "Far Eye", "group": "jewelry", "slots": ["neck"],
+		"values": [0.03, 0.05, 0.08, 0.12, 0.18], "unit": "pct",
+		"tags": ["offence", "ranged"]},
+	{"key": "cooldown", "name": "Hastened Rite", "group": "jewelry", "slots": ["neck"],
+		"values": [0.03, 0.05, 0.08, 0.12, 0.18], "unit": "pct",
+		"tags": ["tempo", "ability"]},
+	{"key": "gold_find", "name": "Miser's Knot", "group": "jewelry", "slots": ["neck"],
+		"values": [0.05, 0.10, 0.20, 0.30, 0.50], "unit": "pct", "tags": ["utility"]},
+	{"key": "stagger", "name": "Stout Cord", "group": "jewelry", "slots": ["neck"],
+		"values": [0.05, 0.10, 0.15, 0.20, 0.30], "unit": "pct", "tags": ["defence"],
+		"note": "Shortens the recoil, not the save roll."},
+	{"key": "heal_on_kill", "name": "Red Bead", "group": "jewelry", "slots": ["neck"],
+		"values": [2.0, 3.0, 5.0, 8.0, 12.0], "unit": "flat", "tags": ["sustain"]},
+	{"key": "stamina_on_kill", "name": "Killer's Breath", "group": "jewelry", "slots": ["neck"],
+		"values": [5.0, 10.0, 20.0, 35.0, 50.0], "unit": "flat",
+		"tags": ["sustain", "tempo"]},
+]
+
 ## Authored modifiers. Every row is a small, literal bundle: stats, or one proc
 ## the runtime already owns. `wired=false` rows are the pool's backlog - they are
 ## listed so the sheet and the code agree, and they never reach a player.
@@ -256,6 +302,63 @@ const NAMES := [
 	{"id": "w_bleed_edge", "name": "Whetstone Edge", "groups": ["melee"], "kind": "proc",
 		"trigger": "damage_taken", "proc": "bleed", "chance": 0.15, "magnitude": 2.0, "duration": 3.0,
 		"line": "15% on being hit: the attacker bleeds 2/s for 3 s", "tags": ["control"], "power": 0.45},
+
+	# --- jewellery: the necklace's own three words --------------------------
+	# Neck only, and each one is a different shape of the same idea: the cord
+	# changes what a blow does. Quick Hit and Poison Hit are attack-side procs
+	# (`Trigger.HIT`), Three Strike is a welded skill.
+	{"id": "j_quick_hit", "name": "Quick Hit", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "proc", "trigger": "hit", "proc": "quick_strike",
+		"chance": 0.20, "scale": 5.0,
+		"line": "20% on a landed blade hit: strike again at 500% attack speed",
+		"tags": ["melee", "offence", "tempo"], "power": 0.78,
+		"note": "Blades only - there is no quick second draw for a bow."},
+	{"id": "j_poison_hit", "name": "Poison Hit", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "proc", "trigger": "hit", "proc": "poison",
+		"chance": 0.20, "magnitude": 5.0, "duration": 5.0,
+		"line": "20% on hit: 5 damage a second poison for 5 s",
+		"tags": ["offence", "control"], "power": 0.72},
+	{"id": "k_three_strike", "name": "Dual Wield Three Strike", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "ability", "ability": "three_strike",
+		"line": "three waves of steel, up to three bodies each",
+		"tags": ["melee", "offence"], "power": 0.8},
+	{"id": "k_stone_skin", "name": "Stone Skin", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "ability", "ability": "stone_skin",
+		"line": "a short ward that pays a third of each blow in stamina",
+		"tags": ["defence"], "power": 0.72,
+		"note": "Any hand can perform it: the cord, not the steel, is the ward."},
+	# The amulet's bundles. A cord buys a number and pays for it somewhere a
+	# player can see on the card.
+	{"id": "j_greedy_cord", "name": "Miser's Locket", "groups": ["jewelry"],
+		"slots": ["neck"], "stats": {"gold_find": 0.30}, "drawback": {"ranged_damage": -0.08},
+		"line": "+30% gold from kills, -8% ranged damage",
+		"tags": ["utility"], "power": 0.5},
+	{"id": "j_blood_cord", "name": "Blood Cord", "groups": ["jewelry"],
+		"slots": ["neck"], "stats": {"melee_damage": 0.12}, "drawback": {"stamina": -40.0},
+		"line": "+12% melee damage, -40 stamina",
+		"tags": ["offence", "melee"], "power": 0.55},
+	{"id": "j_long_breath", "name": "Long Breath", "groups": ["jewelry"],
+		"slots": ["neck"], "stats": {"stamina_regen": 0.20}, "drawback": {"health": -6.0},
+		"line": "+20% stamina regen, -6 health",
+		"tags": ["sustain"], "power": 0.45},
+	# --- the amulet's procs -------------------------------------------------
+	# `LIFESTEAL` is the one verb here that reads the blow rather than the body:
+	# a share of the damage the bearer deals comes back as health.
+	{"id": "j_blood_thirst", "name": "Bloodthirst", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "proc", "trigger": "hit", "proc": "lifesteal",
+		"chance": 0.25, "scale": 0.15,
+		"line": "25% on a landed hit: 15% of that damage returns as health",
+		"tags": ["sustain", "offence"], "power": 0.65},
+	{"id": "j_ward_bead", "name": "Ward Bead", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "proc", "trigger": "damage_taken",
+		"proc": "absorb", "scale": 0.18, "cooldown": 7.0,
+		"line": "first blow each 7 s is reduced 18%",
+		"tags": ["defence"], "power": 0.5},
+	{"id": "j_cinder_surge", "name": "Cinder Surge", "groups": ["jewelry"],
+		"slots": ["neck"], "kind": "proc", "trigger": "damage_taken",
+		"proc": "reflect", "chance": 0.12, "scale": 0.22,
+		"line": "12% on being hit: return 22% of the blow",
+		"tags": ["defence", "offence"], "power": 0.55},
 
 	# --- armour: stat bundles ---------------------------------------------
 	{"id": "a_second_skin", "name": "Second Skin", "slots": ["chest", "legs"],
@@ -444,6 +547,8 @@ static func _build() -> void:
 	_built = true
 	for family in FAMILIES:
 		_build_family(family)
+	for family in JEWEL_FAMILIES:
+		_build_family(family)
 	for row in NAMES:
 		_build_named(row)
 	# An ability entry can only be wired when the rules table knows the skill.
@@ -470,7 +575,14 @@ static func _build_family(family: Dictionary) -> void:
 		entry.note = str(family.get("note", ""))
 		entry.tags = _tags(family.get("tags", []))
 		entry.power = 0.18 + 0.18 * float(index)
-		if group == GROUP_ARMOUR:
+		var declared: Array = family.get("slots", [])
+		if not declared.is_empty():
+			# A ladder that names its slot owns exactly that slot: the amulet's
+			# numbers belong on a cord and nowhere else.
+			entry.groups = [group]
+			for slot in declared:
+				entry.slots.append(str(slot))
+		elif group == GROUP_ARMOUR:
 			entry.groups = [GROUP_ARMOUR]
 			entry.slots = ARMOUR_SLOTS.duplicate()
 		elif group == "weapon":
@@ -540,6 +652,8 @@ static func _trigger_of(word: String) -> int:
 			return Trigger.LETHAL
 		"kill":
 			return Trigger.KILL
+		"hit":
+			return Trigger.HIT
 	return Trigger.DAMAGE_TAKEN
 
 
@@ -559,6 +673,12 @@ static func _proc_of(word: String) -> int:
 			return Proc.GUARD_BREAK
 		"bleed":
 			return Proc.BLEED
+		"quick_strike":
+			return Proc.QUICK_STRIKE
+		"poison":
+			return Proc.POISON
+		"lifesteal":
+			return Proc.LIFESTEAL
 	return Proc.HEAL
 
 
@@ -640,6 +760,8 @@ static func groups_of(item: Dictionary) -> Array:
 				out.append(GROUP_SWORD)
 		"armor":
 			out.append(GROUP_ARMOUR)
+		"jewelry":
+			out.append(GROUP_JEWELRY)
 	return out
 
 
@@ -659,6 +781,15 @@ static func slots_of(item: Dictionary) -> Array:
 			var slot := str(item.get("slot", ""))
 			if ARMOUR_SLOTS.has(slot):
 				out.append(slot)
+		"jewelry":
+			# The catalog says "ring" because one row fits either finger; the
+			# worn slot is where it actually sits.
+			match str(item.get("slot", "")):
+				"neck":
+					out.append("neck")
+				"ring":
+					out.append("ring1")
+					out.append("ring2")
 	return out
 
 

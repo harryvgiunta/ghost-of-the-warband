@@ -39,6 +39,7 @@ const Stamina = preload("res://scripts/stamina.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const AnnointRuntime = preload("res://scripts/warband/annoint_runtime.gd")
+const AbilityFx = preload("res://scripts/ability_fx.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const MAX_HEALTH := 100.0
 const WALK_SPEED := 5.5
@@ -797,6 +798,37 @@ func apply_annointments(stats: Dictionary, procs: Array = []) -> void:
 	_sync_trinket_limits()
 	annoint_playback.bind(self)
 	annoint_playback.arm(procs)
+
+## A blow this body's own hand just landed, named by `Combat` at the one moment
+## the attacker exists in the same call as the victim. The necklace's attack-side
+## procs (`Trigger.HIT`) roll from here and nowhere else.
+func note_attack_landed(target: Node3D, hand: String = "",
+		landed: float = 0.0) -> void:
+	# Only the body that owns its own simulation deals damage at all, so only it
+	# may roll an attack-side proc: a replica rolling its own die would lay a
+	# second poison on a body the host already poisoned.
+	if not authoritative or not alive:
+		return
+	if target == null or not is_instance_valid(target):
+		return
+	annoint_playback.on_hit(target, hand, landed)
+
+
+## Swing again at `rate` times the speed, asked by the runtime on the frame after
+## a landed blow. False when the hand cannot swing (a bow, a spell, a stagger), so
+## the proc spends its one chance rather than queueing for ever.
+func quick_strike(hand: String, rate: float) -> bool:
+	if not authoritative or not alive or downed:
+		return false
+	if not is_instance_valid(rig) or not rig.has_method("quick_melee"):
+		return false
+	var began: bool = rig.quick_melee(hand, rate)
+	if began:
+		var parent := get_parent() as Node3D
+		if parent != null:
+			AbilityFx.blade_trail(parent, rig, 0.16)
+	return began
+
 
 func _sync_trinket_limits() -> void:
 	if not is_instance_valid(rig):

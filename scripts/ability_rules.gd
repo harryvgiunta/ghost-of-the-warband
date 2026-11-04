@@ -68,7 +68,7 @@ const SHIELD_ITEMS := ["shield_buckler", "shield_kite", "shield_tower"]
 ## Effect kinds that swing the body's own weapon. They play their authored
 ## blade clip over the whole skeleton, so the stance has to be upright before
 ## they start; a cast can layer over a crouch, a cut cannot.
-const MELEE_EFFECTS := ["melee_arc", "melee_ring", "backstab"]
+const MELEE_EFFECTS := ["melee_arc", "melee_ring", "melee_wave", "backstab"]
 
 const ABILITIES := [
 	{
@@ -588,6 +588,40 @@ const ABILITIES := [
 			"radius": 2.0, "stagger": 0.3},
 		"cues": [{"at": 0.32, "cue": "arc"}],
 	},
+	{
+		"id": "three_strike", "name": "THREE STRIKE", "item": "sword_short",
+		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 35.0,
+		"cooldown": 8.0, "duration": 0.8, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "slash", "move": true, "animation": "Sword_Double_Slash",
+		"lean": 0.05, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/three_strike.png",
+		"description": "Three waves of steel: right, left, then both together.",
+		# One wave per cue. Each wave is its own cut through the front arc and
+		# stops at `victims_per_wave` bodies, so the skill reaches at most nine -
+		# three waves of three, never one blade re-cutting the same rank.
+		"effect": {"kind": "melee_wave", "damage_scale": 0.8, "radius": 2.4,
+			"arc_degrees": 130.0, "stagger": 0.18, "victims_per_wave": 3,
+			"wave_scales": [0.7, 0.7, 1.5], "wave_sides": [1.0, -1.0, 0.0],
+			"glow_seconds": 0.8},
+		"cues": [
+			{"at": 0.16, "cue": "wave"},
+			{"at": 0.40, "cue": "wave"},
+			{"at": 0.66, "cue": "wave"},
+		],
+	},
+	{
+		"id": "stone_skin", "name": "STONE SKIN", "item": "", "hitem": "",
+		"slot": 0, "key": "SHIFT + 1", "stamina_cost": 30.0,
+		"cooldown": 18.0, "duration": 0.5, "travel_seconds": 0.0, "speed_scale": 0.0,
+		"sound": "ward", "move": true, "animation": "Staff_Fireball_Cast",
+		"lean": -0.02, "annoint_only": true,
+		"icon": "res://assets/ui/abilities/stone_skin.png",
+		"description": "A ward off the cord: a third of every blow is paid in stamina.",
+		# `item` is empty on purpose: the cord is the ward, so the skill is the
+		# same on a bare body as on a blade and its damage figure is never read.
+		"effect": {"kind": "ward", "absorb": 0.33, "stamina_scale": 1.6, "seconds": 5.0},
+		"cues": [{"at": 0.20, "cue": "ward"}],
+	},
 	# The two consumables. They are not the kit's: nothing is worn to grant them
 	# and nothing is anointed, so `granted` appends them after the kit's skills -
 	# the bandage on key 9 and the potion on key 0 until the player moves them.
@@ -740,7 +774,6 @@ static func granted(rig) -> Array:
 	grants.append_array(consumable_definitions())
 	return _layout(grants, rig.get("hotbar_order"))
 
-
 ## The grants a kit wakes, before any slot layout: the stock ids the hands
 ## resolve to (`main_item`/`off_item` on a rig, or `stock_item` off a catalog
 ## row), the anointed id list per hand and the worn trinket kit. One table for
@@ -755,7 +788,7 @@ static func grants_for(main: String, off: String, anointed: Variant,
 		grants.append_array(_hand_skills("main", by_item(main, 0), anointed))
 	if not off.is_empty():
 		grants.append_array(_hand_skills("off", by_item(off, 1), anointed))
-	grants.append_array(_trinket_skills(trinkets))
+	grants.append_array(_trinket_skills(trinkets, anointed))
 	return grants
 
 
@@ -858,11 +891,15 @@ static func _hand_skills(hand: String, stock: Dictionary, anointed: Variant) -> 
 
 
 ## The worn trinket grants, one per slot that carries a granting piece: the
-## necklace, ring 1 and ring 2 may each wake a skill of their own.
-static func _trinket_skills(trinkets: Variant) -> Array:
+## necklace, ring 1 and ring 2 may each wake a skill of their own. A piece the
+## altar welded a skill to carries every welded skill beside its stock one - the
+## necklace's own weld is the whole point of the cord, and the altar is the only
+## source of that list, so a replica cannot invent one.
+static func _trinket_skills(trinkets: Variant, anointed: Variant = null) -> Array:
 	var out: Array = []
 	if not trinkets is Dictionary:
 		return out
+	var welds: Dictionary = anointed if anointed is Dictionary else {}
 	for slot in TrinketStats.ABILITY_ORDER:
 		var item_id := str((trinkets as Dictionary).get(slot, ""))
 		if item_id.is_empty():
@@ -870,6 +907,11 @@ static func _trinket_skills(trinkets: Variant) -> Array:
 		var definition: Dictionary = by_id(TrinketStats.grant_for(item_id))
 		if not definition.is_empty():
 			out.append(definition)
+		for id in skill_ids(welds.get(slot, "")):
+			var welded: Dictionary = by_id(id)
+			if welded.is_empty():
+				continue
+			out.append(welded)
 	return out
 
 
@@ -951,7 +993,7 @@ static func damage_for(definition: Dictionary, rig) -> float:
 	match str(effect.get("kind", "")):
 		"barrage", "volley", "piercing_shot", "projectile":
 			return damage * ranged_scale(rig)
-		"melee_arc", "melee_ring", "backstab":
+		"melee_arc", "melee_ring", "melee_wave", "backstab":
 			return damage * melee_scale(rig)
 	return damage
 

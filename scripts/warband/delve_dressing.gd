@@ -10,6 +10,11 @@ extends RefCounted
 ## with. Every light made here is handed back to the caller, so the cave can put a
 ## room's lights out while the eye is far from it.
 ##
+## Nothing is placed at a height the plan authored: every piece that stands is set
+## on the ground under it (`delve_floor.gd`, `Floor.height`), so a spire on a swell
+## of the floor stands higher than its neighbour in a hollow, a pool lies in the
+## pan cut for it and a body's post is on level ground.
+##
 ## Each area reads differently: dry limestone and warm torchlight at the mouth and
 ## the dens, dark wet rock and witch-light over the drowned gallery's black water,
 ## pale fungus and green-filmed stone through the garden, curtains and columns
@@ -18,6 +23,7 @@ extends RefCounted
 ## red rock round Gorehorn's blood in the lair.
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
+const Floor = preload("res://scripts/warband/delve_floor.gd")
 const Rock = preload("res://scripts/warband/delve_rock.gd")
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
@@ -31,22 +37,34 @@ const FUNGUS := {
 }
 
 ## How much rock each area grows. `roof` is stalactite clusters per 10 m² of roof,
-## `wall` the chance of a piece every couple of metres of wall foot, and the four
-## weights pick what that piece is: dripstone `spires`, a `flowstone` mound, fallen
-## `breakdown` or a `talus` pile. `curtains` hang along a hall's wall heads per 40 m
-## of wall.
+## `wall` the chance of a piece every couple of metres of wall foot, `floor` the
+## stands of dripstone growing up out of every 10 m² of open floor, and the four
+## weights pick what a wall piece is: dripstone `spires`, a `flowstone` mound,
+## fallen `breakdown` or a `talus` pile. `curtains` hang along a hall's wall heads
+## per 40 m of wall.
 const FORMATIONS := {
-	"mouth": {"roof": 0.5, "wall": 0.4, "spires": 3, "flowstone": 1, "breakdown": 3, "talus": 3, "curtains": 1},
-	"den": {"roof": 0.4, "wall": 0.35, "spires": 2, "flowstone": 1, "breakdown": 4, "talus": 3, "curtains": 0},
-	"gallery": {"roof": 1.1, "wall": 0.55, "spires": 4, "flowstone": 3, "breakdown": 1, "talus": 1, "curtains": 3},
-	"ossuary": {"roof": 0.45, "wall": 0.35, "spires": 3, "flowstone": 1, "breakdown": 2, "talus": 2, "curtains": 1},
-	"garden": {"roof": 0.8, "wall": 0.5, "spires": 4, "flowstone": 3, "breakdown": 1, "talus": 1, "curtains": 2},
-	"mere": {"roof": 1.2, "wall": 0.6, "spires": 5, "flowstone": 3, "breakdown": 1, "talus": 1, "curtains": 4},
-	"chapel": {"roof": 0.5, "wall": 0.35, "spires": 3, "flowstone": 2, "breakdown": 1, "talus": 1, "curtains": 2},
-	"rooted": {"roof": 0.25, "wall": 0.4, "spires": 1, "flowstone": 1, "breakdown": 3, "talus": 3, "curtains": 0},
-	"workings": {"roof": 0.2, "wall": 0.5, "spires": 1, "flowstone": 0, "breakdown": 5, "talus": 4, "curtains": 0},
-	"ring": {"roof": 0.6, "wall": 0.45, "spires": 3, "flowstone": 1, "breakdown": 2, "talus": 2, "curtains": 1},
-	"lair": {"roof": 0.7, "wall": 0.5, "spires": 4, "flowstone": 1, "breakdown": 3, "talus": 2, "curtains": 1},
+	"mouth": {"roof": 0.5, "wall": 0.4, "floor": 0.3, "spires": 3, "flowstone": 1, "breakdown": 3,
+		"talus": 3, "curtains": 1},
+	"den": {"roof": 0.4, "wall": 0.35, "floor": 0.25, "spires": 2, "flowstone": 1, "breakdown": 4,
+		"talus": 3, "curtains": 0},
+	"gallery": {"roof": 1.1, "wall": 0.55, "floor": 0.7, "spires": 4, "flowstone": 3, "breakdown": 1,
+		"talus": 1, "curtains": 3},
+	"ossuary": {"roof": 0.45, "wall": 0.35, "floor": 0.3, "spires": 3, "flowstone": 1, "breakdown": 2,
+		"talus": 2, "curtains": 1},
+	"garden": {"roof": 0.8, "wall": 0.5, "floor": 0.45, "spires": 4, "flowstone": 3, "breakdown": 1,
+		"talus": 1, "curtains": 2},
+	"mere": {"roof": 1.2, "wall": 0.6, "floor": 0.8, "spires": 5, "flowstone": 3, "breakdown": 1,
+		"talus": 1, "curtains": 4},
+	"chapel": {"roof": 0.5, "wall": 0.35, "floor": 0.35, "spires": 3, "flowstone": 2, "breakdown": 1,
+		"talus": 1, "curtains": 2},
+	"rooted": {"roof": 0.25, "wall": 0.4, "floor": 0.2, "spires": 1, "flowstone": 1, "breakdown": 3,
+		"talus": 3, "curtains": 0},
+	"workings": {"roof": 0.2, "wall": 0.5, "floor": 0.12, "spires": 1, "flowstone": 0, "breakdown": 5,
+		"talus": 4, "curtains": 0},
+	"ring": {"roof": 0.6, "wall": 0.45, "floor": 0.3, "spires": 3, "flowstone": 1, "breakdown": 2,
+		"talus": 2, "curtains": 1},
+	"lair": {"roof": 0.7, "wall": 0.5, "floor": 0.4, "spires": 4, "flowstone": 1, "breakdown": 3,
+		"talus": 2, "curtains": 1},
 }
 ## Hanging length below the root of each stalactite piece, at scale 1.
 const HANG := {"StalactiteCarrot": 1.7, "StalactiteRibbed": 0.95, "Curtain": 1.4}
@@ -143,7 +161,8 @@ static func materials() -> Dictionary:
 ## vaulted roof over the collider boxes - and the cave that grows on it:
 ## stalactite clusters and curtains hanging from the roof with their tips clear of
 ## any head, dripstone spires, flowstone, fallen breakdown and talus along the wall
-## feet and in the corners, and water dripping from the roofs of the wet areas.
+## feet and in the corners, the stands of stalagmites out in the open floor of a
+## hall, and water dripping from the roofs of the wet areas.
 ## Nothing grows within `JAMB_CLEAR` of a way out, on a landing, at a den's post,
 ## or under a light or a prop. The big pieces - a spire as tall as a man, a boulder
 ## to the knee, a corner cluster - stop bodies and stand on the squad's map; the
@@ -190,6 +209,7 @@ static func _grow(index: int) -> Dictionary:
 	var style: Dictionary = FORMATIONS.get(area, FORMATIONS["mouth"])
 	_roof_rock(grown, index, style, rng)
 	_wall_rock(grown, index, style, rng)
+	_floor_rock(grown, index, style, rng)
 	var kit: VillageKit.Merged = grown["kit"]
 	var out := {"mesh": null if kit.is_empty() else kit.build_mesh(), "stops": grown["stops"], "tips": grown["tips"]}
 	_grown[index] = out
@@ -253,7 +273,6 @@ static func _roof_rock(grown: Dictionary, index: int, style: Dictionary, rng: Ra
 	var room: Dictionary = Layout.ROOMS[index]
 	var rect: Rect2 = room["rect"]
 	var tunnel := bool(room.get("tunnel", false))
-	var height := float(room["height"])
 	var headroom := HEADROOM_TUNNEL if tunnel else HEADROOM
 	var kit: VillageKit.Merged = grown["kit"]
 	var material: Material = grown["material"]
@@ -271,7 +290,7 @@ static func _roof_rock(grown: Dictionary, index: int, style: Dictionary, rng: Ra
 			var piece := "StalactiteCarrot" if rng.randf() < 0.66 else "StalactiteRibbed"
 			var roof := Rock.roof_height(index, spot.x, spot.y)
 			var size := rng.randf_range(0.6, 1.3) if k == 0 else rng.randf_range(0.22, 0.6)
-			size = minf(size, (roof - headroom) / float(HANG[piece]))
+			size = minf(size, _clearance(spot, roof) / float(HANG[piece]))
 			if size < 0.15:
 				continue
 			var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled_local(
@@ -297,9 +316,10 @@ static func _roof_rock(grown: Dictionary, index: int, style: Dictionary, rng: Ra
 		if absf(dir.x) > 0.5 and absf(dir.y) > 0.5:
 			continue
 		var point: Vector2 = sample["point"]
-		var at := point + dir * (Rock.relief(index, point.x, height - 0.15, point.y, sample["open"], sample["arch"]) + 0.1)
+		var at := point + dir * (Rock.relief(index, point.x, Rock.ceiling(index) - 0.15, point.y,
+			sample["open"], sample["arch"]) + 0.1)
 		var roof := Rock.roof_height(index, at.x, at.y)
-		var size := minf(rng.randf_range(0.7, 1.25), (roof - headroom) / float(HANG["Curtain"]))
+		var size := minf(rng.randf_range(0.7, 1.25), _clearance(at, roof) / float(HANG["Curtain"]))
 		if size < 0.3 or _near_rope(at, 2.4):
 			continue
 		var tangent: Vector2 = sample["tangent"]
@@ -357,7 +377,8 @@ static func _wall_piece(grown: Dictionary, index: int, sample: Dictionary, kind:
 	var point: Vector2 = sample["point"]
 	var dir: Vector2 = sample["dir"]
 	var tangent: Vector2 = sample["tangent"]
-	var foot := Rock.relief(index, point.x, 0.3, point.y, sample["open"], sample["arch"])
+	var ground := Floor.height(point.x, point.y)
+	var foot := Rock.relief(index, point.x, ground + 0.3, point.y, sample["open"], sample["arch"])
 	match kind:
 		"spires":
 			var size := rng.randf_range(0.35, 0.7) if tunnel else rng.randf_range(0.5, 1.15)
@@ -374,7 +395,7 @@ static func _wall_piece(grown: Dictionary, index: int, sample: Dictionary, kind:
 					+ dir * (foot + 0.3 * small + rng.randf_range(0.0, 0.2))
 				_stand(kit, material, "StalagmiteSquat" if rng.randf() < 0.5 else "StalagmiteTall", beside, small, rng)
 			if not tunnel and size >= 0.75 and piece == "StalagmiteTall":
-				_stop(grown, Vector3(at.x, 0.0, at.y), 0.3 * size + 0.05, 2.4 * size)
+				_stop(grown, _at_ground(at), 0.3 * size + 0.05, 2.4 * size)
 		"flowstone":
 			var size := rng.randf_range(0.45, 0.7) if tunnel else rng.randf_range(0.6, 1.05)
 			var at := point + dir * (foot * 0.55 + 0.5 * size)
@@ -383,9 +404,10 @@ static func _wall_piece(grown: Dictionary, index: int, sample: Dictionary, kind:
 			var across := Vector3(tangent.x, 0.0, tangent.y)
 			var basis := Basis(across, Vector3.UP, across.cross(Vector3.UP)).scaled_local(
 				Vector3(size, size * rng.randf_range(0.8, 1.2), size))
-			kit.add(CaveKit.formation("Flowstone"), Transform3D(basis, Vector3(at.x, -0.04, at.y)), material)
+			kit.add(CaveKit.formation("Flowstone"), Transform3D(basis, _at_ground(at) - Vector3(0.0, 0.04, 0.0)),
+				material)
 			if not tunnel and size >= 0.8:
-				_stop(grown, Vector3(at.x, 0.0, at.y), 0.55 * size, 0.8 * size)
+				_stop(grown, _at_ground(at), 0.55 * size, 0.8 * size)
 		"breakdown":
 			var piece: String = ["BoulderA", "BoulderB", "BoulderC", "Slab"][rng.randi() % 4]
 			var size := rng.randf_range(0.3, 0.55) if tunnel else rng.randf_range(0.45, 1.0)
@@ -394,7 +416,7 @@ static func _wall_piece(grown: Dictionary, index: int, sample: Dictionary, kind:
 				return
 			_lay(kit, material, piece, at, size, rng)
 			if not tunnel and size >= 0.65:
-				_stop(grown, Vector3(at.x, 0.0, at.y), 0.7 * size, 1.1 * size)
+				_stop(grown, _at_ground(at), 0.7 * size, 1.1 * size)
 			if rng.randf() < 0.6:
 				var chips := point + dir * (foot + 0.3) + tangent * rng.randf_range(-1.0, 1.0)
 				_lay(kit, material, "Talus", chips, rng.randf_range(0.45, 0.75), rng)
@@ -406,6 +428,47 @@ static func _wall_piece(grown: Dictionary, index: int, sample: Dictionary, kind:
 			_lay(kit, material, "Talus", at, size, rng)
 
 
+## Dripstone growing up out of the open floor: stands of stalagmites out in the
+## middle of a hall, where the wall's talus does not reach, each on the ground
+## under it - so a stand on a swell of the floor stands higher and one in a hollow
+## lower - with the wet flowstone the water leaves banked at its foot. A stand
+## taller than a knee stops bodies and stands on the squad's map; a snub of stone
+## stops nobody. Ways out keep their middle clear: a passage is not a hall.
+static func _floor_rock(grown: Dictionary, index: int, style: Dictionary, rng: RandomNumberGenerator) -> void:
+	var room: Dictionary = Layout.ROOMS[index]
+	var rect: Rect2 = room["rect"]
+	if bool(room.get("tunnel", false)):
+		return
+	var stands := int(round(rect.get_area() * float(style.get("floor", 0.0)) / 10.0))
+	var inner := rect.grow(-2.8)
+	if stands <= 0 or inner.size.x < 1.8 or inner.size.y < 1.8:
+		return
+	var kit: VillageKit.Merged = grown["kit"]
+	var material: Material = grown["material"]
+	var pieces := ["StalagmiteSquat", "StalagmiteStump", "StalagmiteTall"]
+	for stand in stands:
+		var at := Vector2(rng.randf_range(inner.position.x, inner.end.x),
+			rng.randf_range(inner.position.y, inner.end.y))
+		if _near_rope(at, 2.6) or not _is_clear(grown["clear"], at, 1.3):
+			continue
+		var main := rng.randf_range(0.45, 1.15)
+		if rng.randf() < 0.3:
+			# A snub of stone, knee high, that grew and stopped.
+			main *= 0.4
+		_stand(kit, material, "StalagmiteTall", at, main, rng)
+		for extra in rng.randi_range(0, 2):
+			var beside := at + Vector2(rng.randf_range(-1.2, 1.2), rng.randf_range(-1.2, 1.2))
+			_stand(kit, material, pieces[rng.randi() % pieces.size()], beside,
+				main * rng.randf_range(0.28, 0.6), rng)
+		if main >= 0.7:
+			_stop(grown, _at_ground(at), 0.26 * main + 0.06, 2.2 * main)
+		if rng.randf() < 0.55:
+			var across := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled_local(
+				Vector3.ONE * main * rng.randf_range(0.75, 1.15))
+			kit.add(CaveKit.formation("Flowstone"), Transform3D(across,
+				_at_ground(at) - Vector3(0.0, 0.03, 0.0)), material)
+
+
 ## A hall's own corner: a stand of dripstone round a tall spire, flowstone banked
 ## behind it, one collider round the lot.
 static func _corner(grown: Dictionary, index: int, sample: Dictionary, rng: RandomNumberGenerator) -> void:
@@ -413,7 +476,8 @@ static func _corner(grown: Dictionary, index: int, sample: Dictionary, rng: Rand
 	var dir: Vector2 = sample["dir"]
 	var kit: VillageKit.Merged = grown["kit"]
 	var material: Material = grown["material"]
-	var foot := Rock.relief(index, point.x, 0.3, point.y, sample["open"], sample["arch"])
+	var foot := Rock.relief(index, point.x, Floor.height(point.x, point.y) + 0.3, point.y,
+		sample["open"], sample["arch"])
 	var at := point + dir * (foot + 0.55)
 	if not _is_clear(grown["clear"], at, 1.0):
 		return
@@ -427,25 +491,38 @@ static func _corner(grown: Dictionary, index: int, sample: Dictionary, rng: Rand
 		var behind := point + dir * (foot * 0.4 + 0.2)
 		var across := Vector3(-dir.y, 0.0, dir.x).normalized()
 		var basis := Basis(across, Vector3.UP, across.cross(Vector3.UP)).scaled_local(Vector3.ONE * rng.randf_range(0.7, 1.0))
-		kit.add(CaveKit.formation("Flowstone"), Transform3D(basis, Vector3(behind.x, -0.04, behind.y)), material)
-	_stop(grown, Vector3(at.x, 0.0, at.y), 0.75, 2.6)
+		kit.add(CaveKit.formation("Flowstone"), Transform3D(basis, _at_ground(behind) - Vector3(0.0, 0.04, 0.0)),
+			material)
+	_stop(grown, _at_ground(at), 0.75, 2.6)
 
 
-## A floor piece stood upright at a cave point, turned at random.
+## A floor piece stood upright at a cave point, turned at random: its foot on the
+## ground there, whatever the ground is doing.
 static func _stand(kit: VillageKit.Merged, material: Material, piece: String, at: Vector2, size: float,
 		rng: RandomNumberGenerator) -> void:
 	var girth := size * rng.randf_range(0.85, 1.15)
 	var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled_local(
 		Vector3(girth, size * rng.randf_range(0.9, 1.25), girth))
-	kit.add(CaveKit.formation(piece), Transform3D(basis, Vector3(at.x, 0.0, at.y)), material)
+	kit.add(CaveKit.formation(piece), Transform3D(basis, _at_ground(at)), material)
 
 
-## A fallen piece laid at a cave point: any yaw, a little tilt.
+## A fallen piece laid at a cave point: any yaw, a little tilt, on the ground.
 static func _lay(kit: VillageKit.Merged, material: Material, piece: String, at: Vector2, size: float,
 		rng: RandomNumberGenerator) -> void:
 	var basis := (Basis(Vector3.UP, rng.randf_range(0.0, TAU)) * Basis(Vector3.RIGHT, rng.randf_range(-0.14, 0.14))) \
 		.scaled_local(Vector3.ONE * size)
-	kit.add(CaveKit.formation(piece), Transform3D(basis, Vector3(at.x, 0.0, at.y)), material)
+	kit.add(CaveKit.formation(piece), Transform3D(basis, _at_ground(at)), material)
+
+
+## A cave point on the floor: the ground there and no other height.
+static func _at_ground(at: Vector2) -> Vector3:
+	return Vector3(at.x, Floor.height(at.x, at.y), at.y)
+
+
+## How much clear air there is under a piece of roof over a cave point, in metres:
+## the rock overhead less the ground under it.
+static func _clearance(at: Vector2, roof: float) -> float:
+	return roof - Floor.height(at.x, at.y)
 
 
 ## Water dripping off a few stalactite tips onto the floor of a wet room.
@@ -485,16 +562,21 @@ static func _drips(node: Node3D, tips: Array, index: int) -> void:
 
 ## One shaft's way up: a knotted rope out of a hole of night in the chamber's roof,
 ## the cold light that falls through it - a pale cone with dust turning in it -
-## and a word on the stone so it is found. Returns the light.
-static func rope(node: Node3D, landing: Dictionary, roof: float) -> Array[Light3D]:
+## and a word on the stone so it is found. `top` is the rock over the rope, in the
+## cave's frame: the rope is as long as the ground under it is low, so a shaft that
+## opens over a fallen floor is a longer climb and a shaft over a mound a shorter
+## one. Returns the light.
+static func rope(node: Node3D, landing: Dictionary, top: float) -> Array[Light3D]:
 	var mats: Dictionary = CampKit.materials()
 	var rope_at: Vector3 = landing["rope"]
+	var foot := Floor.height(rope_at.x, rope_at.z)
+	var rise := maxf(1.0, top - foot)
 	var m := VillageKit.Merged.new()
-	var hang := rope_at + Vector3(0.0, roof, 0.0)
-	VillageKit.add_beam(m, hang, rope_at + Vector3(0.0, 0.25, 0.0), 0.045, mats["drift"], 6)
-	var knots := int((roof - 0.6) / 0.9)
+	var hang := Vector3(rope_at.x, foot + rise, rope_at.z)
+	VillageKit.add_beam(m, hang, Vector3(rope_at.x, foot + 0.25, rope_at.z), 0.045, mats["drift"], 6)
+	var knots := int((rise - 0.6) / 0.9)
 	for index in knots:
-		VillageKit.add_ball(m, 0.075, rope_at + Vector3(0.0, 0.7 + float(index) * 0.9, 0.0),
+		VillageKit.add_ball(m, 0.075, Vector3(rope_at.x, foot + 0.7 + float(index) * 0.9, rope_at.z),
 			mats["drift"], Vector3(1.0, 0.8, 1.0), 6, 4)
 	# The hole sits just under the roof skin, which flattens to meet it.
 	VillageKit.add_cyl_disc(m, 0.9, 0.04, hang - Vector3(0.0, 0.08, 0.0), materials()["sky"], 18)
@@ -502,7 +584,7 @@ static func rope(node: Node3D, landing: Dictionary, roof: float) -> Array[Light3
 	var cone := CylinderMesh.new()
 	cone.top_radius = 0.85
 	cone.bottom_radius = 1.9
-	cone.height = roof
+	cone.height = rise
 	cone.radial_segments = 24
 	cone.rings = 1
 	cone.cap_top = false
@@ -510,18 +592,18 @@ static func rope(node: Node3D, landing: Dictionary, roof: float) -> Array[Light3
 	var beam := MeshInstance3D.new()
 	beam.name = "Beam_%s" % str(landing["id"])
 	beam.mesh = cone
-	beam.material_override = CaveKit.shaft_material(Color(0.55, 0.66, 0.92), roof)
-	beam.position = rope_at + Vector3(0.0, roof * 0.5, 0.0)
+	beam.material_override = CaveKit.shaft_material(Color(0.55, 0.66, 0.92), rise)
+	beam.position = Vector3(rope_at.x, foot + rise * 0.5, rope_at.z)
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(beam)
-	node.add_child(_motes(rope_at + Vector3(0.0, roof * 0.5, 0.0), roof))
+	node.add_child(_motes(Vector3(rope_at.x, foot + rise * 0.5, rope_at.z), rise))
 	var shaft := SpotLight3D.new()
 	shaft.name = "NightShaft_%s" % str(landing["id"])
 	shaft.position = hang - Vector3(0.0, 0.2, 0.0)
 	shaft.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
 	shaft.light_color = Color(0.62, 0.72, 0.95)
 	shaft.light_energy = 3.0
-	shaft.spot_range = roof + 2.0
+	shaft.spot_range = rise + 2.0
 	shaft.spot_angle = 32.0
 	shaft.shadow_enabled = false
 	node.add_child(shaft)
@@ -534,7 +616,7 @@ static func rope(node: Node3D, landing: Dictionary, roof: float) -> Array[Light3
 	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	word.modulate = Color(0.86, 0.90, 1.0)
 	word.outline_modulate = Color(0.02, 0.03, 0.06, 0.9)
-	word.position = rope_at + Vector3(0.0, 2.7, 0.0)
+	word.position = Vector3(rope_at.x, foot + 2.7, rope_at.z)
 	node.add_child(word)
 	var out: Array[Light3D] = [shaft]
 	return out
@@ -596,6 +678,10 @@ static func light(node: Node3D, spec: Dictionary, seed_value: int) -> Array[Ligh
 		inward = mount["inward"]
 	else:
 		at = spec["at"]
+	# Whatever the plan authored at the floor is a spot on the ground: a fire, a
+	# brazier, a wall's sconce two metres up it - every one of them is read from the
+	# ground under it, not from a level the cave no longer has.
+	at = Floor.lift(at)
 	match kind:
 		"sconce":
 			return _sconce(node, at, inward, seed_value, false, 10.0 if tunnel else 13.0)
@@ -823,7 +909,7 @@ static func prop(node: Node3D, clutter, solids: StaticBody3D, spec: Dictionary,
 	var out: Array[Light3D] = []
 	var vmats: Dictionary = VillageKit.materials()
 	var kind := str(spec["kind"])
-	var at: Vector3 = spec.get("at", Vector3.ZERO)
+	var at: Vector3 = Floor.lift(spec.get("at", Vector3.ZERO))
 	var yaw := float(spec.get("yaw", 0.0))
 	var height := float(Layout.room(str(spec["room"])).get("height", 6.0))
 	var rng := RandomNumberGenerator.new()
@@ -843,10 +929,7 @@ static func prop(node: Node3D, clutter, solids: StaticBody3D, spec: Dictionary,
 			if glow != null:
 				out.append(glow)
 		"blood":
-			var radius := float(spec.get("radius", 3.2))
-			VillageKit.add_cyl_disc(clutter, radius, 0.02, at + Vector3(0.0, 0.01, 0.0), materials()["blood"], 28)
-			VillageKit.add_ring(clutter, at + Vector3(0.0, 0.03, 0.0), 0.0, radius + 0.1, radius + 0.25,
-				vmats["bone"], 0.0, 28, 4)
+			_blood(clutter, at, float(spec.get("radius", 3.2)), vmats["bone"], rng)
 		"pool":
 			_pool(clutter, at, spec.get("size", Vector2(3.0, 2.0)), bool(spec.get("square", false)), rock, rng)
 		"column":
@@ -861,7 +944,7 @@ static func prop(node: Node3D, clutter, solids: StaticBody3D, spec: Dictionary,
 			_frame(clutter, at, yaw, height)
 		"post":
 			var mount: Dictionary = Layout.wall_point(str(spec["room"]), str(spec["wall"]), float(spec["along"]))
-			_post(clutter, mount["at"], mount["inward"], height)
+			_post(clutter, Floor.lift(mount["at"]), mount["inward"], height)
 		"cart":
 			_cart(clutter, solids, at, yaw, rock, rng)
 		"rubble":
@@ -891,6 +974,64 @@ static func _cylinder(solids: StaticBody3D, at: Vector3, radius: float, tall: fl
 
 static func _box(solids: StaticBody3D, at: Vector3, size: Vector3, yaw: float) -> void:
 	VillageKit.add_collider(solids, Transform3D.IDENTITY, size, at + Vector3(0.0, size.y * 0.5, 0.0), yaw)
+
+
+## A stain of old blood, and a rim of bone set in the stone round it. The floor of
+## a hall is not level and a stain is not a table: the disc is laid ring by ring on
+## the ground it covers (`Floor.height`), so it follows the hall's own pitch, and
+## the rim is drawn as short lengths of bone from point to point of the ground
+## rather than as one flat hoop. Shallow, and it stops nothing.
+static func _blood(m, at: Vector3, radius: float, bone: Material, rng: RandomNumberGenerator) -> void:
+	var segments := 32
+	var rings := 3
+	var verts := PackedVector3Array([Vector3(at.x, Floor.height(at.x, at.z) + 0.02, at.z)])
+	var normals := PackedVector3Array([Vector3.UP])
+	for ring in range(1, rings + 1):
+		var reach := radius * float(ring) / float(rings)
+		for k in segments:
+			var angle := TAU * float(k) / float(segments)
+			var x := at.x + cos(angle) * reach
+			var z := at.z + sin(angle) * reach
+			verts.append(Vector3(x, Floor.height(x, z) + 0.02, z))
+			normals.append(Vector3.UP)
+	var indices := PackedInt32Array()
+	for k in segments:
+		var next := (k + 1) % segments
+		indices.append_array(PackedInt32Array([0, 1 + k, 1 + next]))
+	for ring in range(1, rings):
+		var here := 1 + (ring - 1) * segments
+		var out := here + segments
+		for k in segments:
+			var next := (k + 1) % segments
+			indices.append_array(PackedInt32Array([here + k, out + k, out + next,
+				here + k, out + next, here + next]))
+	# The side Godot draws a triangle from is the one its winding turns away from:
+	# the floor's own triangles (`delve_floor.mesh`) have (b - a) x (c - a) turning
+	# down, so a stain that is to be seen from above is wound the same way.
+	var first := PackedVector3Array([verts[indices[0]], verts[indices[1]], verts[indices[2]]])
+	if (first[1] - first[0]).cross(first[2] - first[0]).y > 0.0:
+		for k in range(0, indices.size(), 3):
+			var swap := indices[k + 1]
+			indices[k + 1] = indices[k + 2]
+			indices[k + 2] = swap
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var stain := ArrayMesh.new()
+	stain.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	m.add(stain, Transform3D.IDENTITY, materials()["blood"])
+	# The rim of bone, laid on the ground point to point.
+	var count := maxi(16, int(round(TAU * radius / 1.3)))
+	var rim := PackedVector3Array()
+	for k in count + 1:
+		var angle := TAU * float(k % count) / float(count)
+		var x := at.x + cos(angle) * radius * rng.randf_range(0.99, 1.03)
+		var z := at.z + sin(angle) * radius * rng.randf_range(0.99, 1.03)
+		rim.append(Vector3(x, Floor.height(x, z) + 0.04, z))
+	for k in count:
+		VillageKit.add_beam(m, rim[k], rim[k + 1], 0.075, bone, 4)
 
 
 ## Still black water lying in a hollow of the floor, its rim broken stone. Shallow:
@@ -935,7 +1076,7 @@ static func _column(m, solids: StaticBody3D, at: Vector3, radius: float, index: 
 		rng: RandomNumberGenerator) -> void:
 	var roof := Rock.roof_height(index, at.x, at.z)
 	var girth := radius * 1.4
-	var rise := (roof + 0.2) / 6.1
+	var rise := (roof - at.y + 0.2) / 6.1
 	var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU)).scaled_local(Vector3(girth, rise, girth))
 	m.add(CaveKit.formation("Column"), Transform3D(basis, at), rock)
 	var pieces := ["Talus", "BoulderA", "BoulderB"]
@@ -944,7 +1085,7 @@ static func _column(m, solids: StaticBody3D, at: Vector3, radius: float, index: 
 		var spot := Vector2(at.x, at.z) + Vector2(cos(angle), sin(angle)) * radius * 1.25
 		var size := 0.9 if piece % 3 == 0 else rng.randf_range(0.3, 0.5)
 		_lay(m, rock, pieces[piece % 3], spot, size, rng)
-	_cylinder(solids, at, radius * 0.9, Layout.TOP)
+	_cylinder(solids, at, radius * 0.9, maxf(1.0, roof - at.y))
 
 
 ## A stand of pale fungus taller than a man: the kit's giant caps leaning out of
@@ -976,9 +1117,9 @@ static func _roots(m, at: Vector3, size: Vector2, ceiling: float, rng: RandomNum
 	var bark: Material = VillageKit.materials()["bark"]
 	var count := int(size.x * size.y / 3.5)
 	for index in count:
-		var top := at + Vector3(rng.randf_range(-size.x, size.x) * 0.5, ceiling + 0.1,
-			rng.randf_range(-size.y, size.y) * 0.5)
-		var end := rng.randf_range(3.4, ceiling - 1.2)
+		var top := Vector3(at.x + rng.randf_range(-size.x, size.x) * 0.5, at.y + ceiling + 0.1,
+			at.z + rng.randf_range(-size.y, size.y) * 0.5)
+		var end := at.y + rng.randf_range(3.4, maxf(3.5, ceiling - 1.2))
 		var point := top
 		var radius := rng.randf_range(0.05, 0.12)
 		var steps := 3
@@ -997,8 +1138,9 @@ static func _root_post(m, solids: StaticBody3D, at: Vector3, ceiling: float, rng
 	var radius := 0.22
 	var steps := 5
 	for step in steps:
-		var next := at + Vector3(rng.randf_range(-0.25, 0.25), ceiling * (1.0 - float(step + 1) / float(steps)),
-			rng.randf_range(-0.25, 0.25))
+		var next := Vector3(at.x + rng.randf_range(-0.25, 0.25),
+			at.y + ceiling * (1.0 - float(step + 1) / float(steps)),
+			at.z + rng.randf_range(-0.25, 0.25))
 		if step == steps - 1:
 			next = at
 		VillageKit.add_beam(m, point, next, radius, bark, 7, radius * 1.12)

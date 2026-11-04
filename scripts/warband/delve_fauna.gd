@@ -15,6 +15,7 @@ extends Node3D
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Rock = preload("res://scripts/warband/delve_rock.gd")
+const Floor = preload("res://scripts/warband/delve_floor.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
 ## What lives in each area, spread over its rooms: rats and webs by wall length,
@@ -180,6 +181,7 @@ func _bats(holder: Node3D, index: int, roosts: int, flyers: int) -> Dictionary:
 	var room: Dictionary = Layout.ROOMS[index]
 	var rect: Rect2 = room["rect"]
 	var height := float(room["height"])
+	var foot := Layout.room_floor(index)
 	var list: Array[Dictionary] = []
 	var sites: Array[Vector2] = []
 	for site in roosts:
@@ -190,9 +192,10 @@ func _bats(holder: Node3D, index: int, roosts: int, flyers: int) -> Dictionary:
 			var spot := at + Vector2(_rng.randf_range(-0.45, 0.45), _rng.randf_range(-0.45, 0.45))
 			var home := Vector3(spot.x, Rock.roof_height(index, spot.x, spot.y) - 0.055, spot.y)
 			list.append({"mode": ROOST, "home": home, "site": site, "pos": home, "yaw": _rng.randf_range(0.0, TAU),
-				"timer": 0.0, "phase": _rng.randf(), "shade": _rng.randf(), "loop": _loop(rect, height, home)})
+				"timer": 0.0, "phase": _rng.randf(), "shade": _rng.randf(),
+				"loop": _loop(rect, height, foot, home)})
 	for bat in flyers:
-		var loop := _loop(rect, height, Vector3(rect.get_center().x, 0.0, rect.get_center().y))
+		var loop := _loop(rect, height, foot, Vector3(rect.get_center().x, 0.0, rect.get_center().y))
 		list.append({"mode": FLY, "home": Vector3.ZERO, "site": -1, "pos": loop["c"], "yaw": 0.0,
 			"timer": 0.0, "phase": _rng.randf(), "shade": _rng.randf(), "loop": loop})
 	var node := _multimesh(holder, "bats", CaveKit.fauna("Bat"), CaveKit.fauna_material(0), list.size(), true)
@@ -201,8 +204,9 @@ func _bats(holder: Node3D, index: int, roosts: int, flyers: int) -> Dictionary:
 	return state
 
 
-## A flight loop under a hall's roof: a slow figure the bat follows round `c`.
-func _loop(rect: Rect2, height: float, centre: Vector3) -> Dictionary:
+## A flight loop under a hall's roof: a slow figure the bat follows round `c`,
+## `foot` metres up (the room's own floor, which has fallen with the Hollow).
+func _loop(rect: Rect2, height: float, foot: float, centre: Vector3) -> Dictionary:
 	var rx := maxf(1.5, rect.size.x * _rng.randf_range(0.18, 0.34))
 	var rz := maxf(1.5, rect.size.y * _rng.randf_range(0.18, 0.34))
 	var c := Vector3(clampf(centre.x, rect.position.x + rx + 0.5, rect.end.x - rx - 0.5), 0.0,
@@ -211,7 +215,7 @@ func _loop(rect: Rect2, height: float, centre: Vector3) -> Dictionary:
 		c.x = rect.get_center().x
 	if rect.size.y < 2.0 * rz + 1.0:
 		c.z = rect.get_center().y
-	c.y = clampf(height * _rng.randf_range(0.5, 0.72), 3.0, height - 1.0)
+	c.y = foot + clampf(height * _rng.randf_range(0.5, 0.72), 3.0, height - 1.0)
 	return {"c": c, "rx": rx, "rz": rz, "w": BAT_PACE / maxf(rx, rz), "p": _rng.randf() * TAU,
 		"q": _rng.randf() * TAU, "k": _rng.randf_range(1.25, 1.6)}
 
@@ -366,10 +370,13 @@ func _step_rats(state: Dictionary, delta: float) -> void:
 		var spot: Vector2 = at["point"]
 		var dir: Vector2 = at["dir"]
 		var tangent: Vector2 = at["tangent"]
-		var out := Rock.relief(index, spot.x, 0.05, spot.y, at["open"], at["arch"]) + 0.1
+		var out := Rock.relief(index, spot.x, Floor.height(spot.x, spot.y) + 0.05, spot.y,
+			at["open"], at["arch"]) + 0.1
 		var facing := tangent * float(rat["heading"])
 		var basis := Basis(Vector3.UP, atan2(-facing.x, -facing.y))
-		multimesh.set_instance_transform(i, Transform3D(basis, Vector3(spot.x + dir.x * out, 0.0, spot.y + dir.y * out)))
+		var under := Vector2(spot.x + dir.x * out, spot.y + dir.y * out)
+		multimesh.set_instance_transform(i, Transform3D(basis,
+			Vector3(under.x, Floor.height(under.x, under.y), under.y)))
 		multimesh.set_instance_custom_data(i, Color(speed, float(rat["phase"]), float(rat["shade"]), 0.0))
 
 
@@ -430,7 +437,8 @@ func _webs(holder: Node3D, index: int, count: int) -> void:
 		var spot: Dictionary = spots[web % spots.size()]
 		var point: Vector2 = spot["point"]
 		var bisector: Vector2 = (spot["dir"] as Vector2).normalized()
-		var y := _rng.randf_range(1.3, minf(height - 1.0, 3.6)) if web < spots.size() else _rng.randf_range(0.5, 1.2)
+		var y := Layout.room_floor(index) + (_rng.randf_range(1.3, minf(height - 1.0, 3.6)) if web < spots.size()
+			else _rng.randf_range(0.5, 1.2))
 		var size := _rng.randf_range(0.7, 1.2) if not tunnel else _rng.randf_range(0.5, 0.9)
 		var reach := Rock.relief(index, point.x, y, point.y, spot["open"], spot["arch"]) * 1.42 + size * 0.38
 		var at := Vector3(point.x + bisector.x * reach, y, point.y + bisector.y * reach)

@@ -682,10 +682,12 @@ take what the cave holds, and climb out alive with it.
 
 1. **At the mouth** - the rope pit with the A-frame by the square's east lanes
    (the fingerpost's **THE DELVE** board points at it) - **G** opens the panel.
-   **THE PARTY** lists every body standing on the field, each a toggle (all go
-   by default). **THE TOWN STASH** is the warband's free pieces: a click packs one
-   copy into **THE DELVE INVENTORY**, a shift-click packs every copy, and the
-   inventory's rows go back the same way. A pack left at the mouth stays packed.
+   **PARTY MEMBERS** lists every body standing on the field, each with a switch:
+   green goes down, red stays in the town (all go by default). **TOWN STASH** is
+   the warband's free pieces, with a search line; **DELVE INVENTORY** is what
+   goes down, and every free arrow and bandage is already in it. A click on a
+   row sends one copy one way, a shift-click asks how many, and the inventory's
+   rows go back the same way. A pack left at the mouth stays packed.
 2. **GO DOWN** lowers the party down one of six shafts into a **fresh instance**
    of floor I, built when the party goes down and freed when it comes back up.
    The build is a load, not a freeze: the floor comes up a frame's worth at a
@@ -723,6 +725,15 @@ take what the cave holds, and climb out alive with it.
    rest are three rooms of bent tunnel away with their lights already out. No
    den can see a landing. **Gorehorn**, the Hollow's demon, waits in the middle of
    the lair in a ring of old blood.
+
+   The ground is not a shelf. It falls away from the mouth all the way back to
+   Gorehorn's ring - thirteen metres by the far rim, so every step deeper is a
+   step down - and over that fall it pitches: broad swells, basins a body can
+   stand in, mounds it climbs over, stalagmites growing up out of the open floor,
+   and the pools lying in hollows the water cut for them. No two metres of the
+   floor are the same height, and what stops a foot is the very floor the eye
+   sees; the rock overhead has fallen with it, so a hall deep in the dark is the
+   room it was authored as, moved down.
 
    The Hollow pays thin: a watcher below leaves about **30%** of what the same body
    leaves in the wood - each piece of its kit survives the fall on its own roll -

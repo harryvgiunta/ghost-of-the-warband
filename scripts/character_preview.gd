@@ -150,7 +150,7 @@ func apply_kit(loadout: Dictionary, trinkets: Dictionary, marks: Dictionary = {}
 	_marks = marks
 	rig.apply_loadout(loadout)
 	rig.set_annoint_marks(_marks) if rig.has_method("set_annoint_marks") else null
-	TrinketArt.apply(rig.skeleton,trinkets)
+	TrinketArt.apply(rig.skeleton,trinkets,marks)
 	_frame_camera()
 
 

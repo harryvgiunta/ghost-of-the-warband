@@ -38,8 +38,8 @@ const WorldScene := "res://scenes/warband_world.tscn"
 const TEST_SAVE := "user://delve_player.json"
 const WARBAND_SAVE := "user://delve_warband.json"
 const AreaScript = preload("res://scripts/warband/delve_area.gd")
-const PrepScript = preload("res://scripts/warband/delve_prep_menu.gd")
 const Layout = preload("res://scripts/warband/delve_layout.gd")
+const Floor = preload("res://scripts/warband/delve_floor.gd")
 
 var state
 var warband
@@ -90,6 +90,7 @@ func run() -> void:
 	check_floor_plan()
 	check_demon_ring()
 	check_plan_geometry()
+	check_floor_relief()
 	check_eye_culling()
 	await check_floor_map()
 	await _gather_at("mouth")
@@ -135,6 +136,30 @@ func _frames(count: int) -> void:
 		await physics_frame
 
 
+## The row's own press, handed to the panel exactly the way the button hands a
+## click on. What a real mouse adds on top is Godot's own hit test, and the
+## windowed captures under `tools/ui_theme` are where that is driven.
+func _press_row(control: Control, shift: bool = false) -> void:
+	if control == null or not is_instance_valid(control):
+		check(false, "a row to press")
+		return
+	if shift:
+		Input.parse_input_event(_key_event(KEY_SHIFT, true))
+		await process_frame
+	(control as BaseButton).pressed.emit()
+	if shift:
+		Input.parse_input_event(_key_event(KEY_SHIFT, false))
+	await process_frame
+
+
+func _key_event(code: int, pressed: bool) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.key_label = code
+	event.pressed = pressed
+	return event
+
+
 ## Whether the warband owns a piece anywhere: the stash or any body's slots.
 func _owned(item_id: String) -> bool:
 	if warband.stash.pooled_count(item_id) > 0:
@@ -162,37 +187,78 @@ func check_mouth_and_pack() -> void:
 	check(area.at_mouth(soul), "a body by the pit is at the mouth")
 	check(area.prompt_line(soul) == AreaScript.MOUTH_PROMPT,
 		"the crosshair names the way down (%s)" % area.prompt_line(soul))
+	# The supplies a party is never asked to pack by hand.
+	warband.stash.add("bandage_linen", 4)
+	var quiver: int = warband.stash.pooled_count("arrow")
+	var dressings: int = warband.stash.pooled_count("bandage_linen")
 	game._try_interact()
 	check(area.prep.is_open(), "G at the mouth opens the delve panel")
 	var offered: Array[int] = area.prep.candidates()
 	check(offered.size() == 5, "every standing body is offered (%d)" % offered.size())
 	check(area.prep.selected().size() == offered.size(), "and every one starts chosen")
-	var arrows: int = warband.stash.pooled_count("arrow")
-	check(arrows > 0, "the town's quiver has shafts to pack (%d)" % arrows)
-	check(area.prep.amount() == 1, "a click moves one copy until the dial says otherwise")
-	area.prep.pack("arrow", true)
-	check(warband.delve.inventory.pooled_count("arrow") == arrows,
-		"a shift-click packs every shaft (%d)" % warband.delve.inventory.pooled_count("arrow"))
-	check(warband.stash.pooled_count("arrow") == 0, "and the stash has none left")
-	# The dial: one click moves as many copies as the party says, which is what a
-	# quiver needs and what "click once per arrow" was paying for.
-	area.prep.set_amount(6)
-	check(area.prep.amount() == 6, "the dial holds the copies a click moves")
-	area.prep.unpack("arrow")
-	check(warband.delve.inventory.pooled_count("arrow") == arrows - 6
-			and warband.stash.pooled_count("arrow") == 6,
-		"one click moves the dial's six shafts back to the stash (%d / %d)" % [
-			warband.delve.inventory.pooled_count("arrow"), warband.stash.pooled_count("arrow")])
-	area.prep.pack("arrow")
-	check(warband.delve.inventory.pooled_count("arrow") == arrows
+	check(quiver > 0 and dressings > 0, "the town keeps a quiver and dressings (%d / %d)" % [
+		quiver, dressings])
+	check(warband.delve.inventory.pooled_count("arrow") == quiver
 			and warband.stash.pooled_count("arrow") == 0,
-		"and one click packs them down again (%d)" % warband.delve.inventory.pooled_count("arrow"))
-	# Outside the dial's range, and back to a click of one for the blade below.
-	area.prep.set_amount(0)
-	check(area.prep.amount() == 1, "the dial cannot go below one copy")
-	area.prep.set_amount(9999)
-	check(area.prep.amount() == PrepScript.MAX_AMOUNT, "nor above the panel's ceiling")
-	area.prep.set_amount(1)
+		"the quiver is packed the moment the page opens (%d)" % quiver)
+	check(warband.delve.inventory.pooled_count("bandage_linen") == dressings
+			and warband.stash.pooled_count("bandage_linen") == 0,
+		"and so are the bandages (%d)" % dressings)
+	# A click sends one copy; the prompt a shift-click opens sends as many as it is
+	# told, and never fewer than one.
+	area.prep.unpack("arrow")
+	check(warband.stash.pooled_count("arrow") == 1
+			and warband.delve.inventory.pooled_count("arrow") == quiver - 1,
+		"one click sends a single shaft back to the stash (%d)" % quiver)
+	area.prep.open_count("arrow", true)
+	area.prep.submit_count(0)
+	check(warband.stash.pooled_count("arrow") == 0
+			and warband.delve.inventory.pooled_count("arrow") == quiver,
+		"a typed zero still moves one copy, no more and no less")
+	check(not area.prep.count_open(), "and the prompt shuts once it has moved")
+	var ask := mini(6, quiver)
+	area.prep.click("arrow", false, true)
+	check(area.prep.count_open() and area.prep.prompt_item() == "arrow",
+		"a shift-click opens the how-many prompt on that row")
+	area.prep.submit_count(ask)
+	check(warband.stash.pooled_count("arrow") == ask
+			and warband.delve.inventory.pooled_count("arrow") == quiver - ask,
+		"the typed %d shafts come back to the stash" % ask)
+	area.prep.open_count("arrow", true)
+	area.prep.submit_count(-1)
+	check(warband.stash.pooled_count("arrow") == 0
+			and warband.delve.inventory.pooled_count("arrow") == quiver,
+		"and ALL packs every spare shaft down again (%d)" % quiver)
+	# The rows themselves, driven the way a player drives them: a real left click
+	# on a stash row sends one copy, a shift-click asks how many instead. The top
+	# row is used because the list scrolls and a piece further down is out of view.
+	var rows: Array[Dictionary] = area.prep.stash_rows()
+	check(rows.size() > 0, "the stash has rows to click (%d)" % rows.size())
+	if not rows.is_empty():
+		var clicked_id := str(rows[0]["item_id"])
+		var clicked_before: int = warband.stash.pooled_count(clicked_id)
+		var clicked_row: Control = area.prep.stash_row_control(clicked_id)
+		check(clicked_row != null and clicked_before > 0,
+			"the top stash row is a piece to click (%s)" % clicked_id)
+		if clicked_row != null:
+			await _press_row(clicked_row)
+			check(warband.stash.pooled_count(clicked_id) == clicked_before - 1
+					and warband.delve.inventory.pooled_count(clicked_id) == 1,
+				"a click on the row packs exactly one copy")
+			var packed_row: Control = area.prep.pack_row_control(clicked_id)
+			check(packed_row != null, "the inventory shows the piece that went down")
+			if packed_row != null:
+				await _press_row(packed_row, true)
+				check(area.prep.count_open() and area.prep.prompt_item() == clicked_id,
+					"and a shift-click asks how many instead of moving anything")
+				check(warband.delve.inventory.pooled_count(clicked_id) == 1,
+					"which moves nothing until the number is given")
+				area.prep.cancel_count()
+				packed_row = area.prep.pack_row_control(clicked_id)
+				await _press_row(packed_row)
+				check(warband.delve.inventory.pooled_count(clicked_id) == 0
+						and warband.stash.pooled_count(clicked_id) == clicked_before,
+					"and a click on the packed row brings that one copy back")
 	var spare_before: int = warband.stash.pooled_count("sword_arming")
 	area.prep.pack("sword_arming")
 	check(warband.delve.inventory.pooled_count("sword_arming") == 1, "a click packs one spare blade")
@@ -483,6 +549,118 @@ func check_plan_geometry() -> void:
 	if not _on_its_floor(Layout.MASTER_ROOM, Vector2(Layout.MASTER_POINT.x, Layout.MASTER_POINT.z)):
 		stray.append("the master's ring")
 	check(stray.is_empty(), "every piece of the plan stands on its own room's floor (%s)" % str(stray))
+
+
+## The floor is a surface and not a shelf. It falls away from the mouth all the
+## way into the dark - the lair stands metres lower than the chamber a party lands
+## in, which is what makes a descent read as one - and over that fall it pitches:
+## every hall's ground rises and dips a metre or more between its high point and
+## its low. What stops a body is the mesh it is looking at (`_floor_collider` is
+## the drawn floor's own vertices), so a ray down from over a hall stops on the
+## field's own height; and the stone grown out of the floor stands in the open
+## middle of the halls, not only along their walls.
+func check_floor_relief() -> void:
+	var cave = game.delve_area.cave
+	var mouth_rope: Vector3 = Layout.landing("mouth")["rope"]
+	var mouth := Floor.height(mouth_rope.x, mouth_rope.z)
+	check(absf(mouth) < 1.0,
+		"the mouth's own floor is the level the rest is read from (%.2f m)" % mouth)
+	var master := Floor.height(Layout.MASTER_POINT.x, Layout.MASTER_POINT.z)
+	check(master <= mouth - 5.0,
+		"the ground falls away from the mouth into the dark (lair %.1f m, %.1f m of fall)"
+		% [master, mouth - master])
+	var flat: Array[String] = []
+	var steep: Array[String] = []
+	var level: Array[String] = []
+	for index in Layout.ROOMS.size():
+		var room: Dictionary = Layout.ROOMS[index]
+		if bool(room.get("tunnel", false)):
+			continue
+		var rect: Rect2 = room["rect"]
+		if rect.get_area() < 150.0:
+			continue
+		var low := INF
+		var high_at := -INF
+		for i in 12:
+			for j in 12:
+				var x := rect.position.x + rect.size.x * (float(i) + 0.5) / 12.0
+				var z := rect.position.y + rect.size.y * (float(j) + 0.5) / 12.0
+				var ground := Floor.height(x, z)
+				low = minf(low, ground)
+				high_at = maxf(high_at, ground)
+		if high_at - low < 0.5:
+			flat.append("%s %.2f" % [str(room["id"]), high_at - low])
+		# Nowhere does the ground rise more in a metre than a body can walk up.
+		for step in 24:
+			var x := rect.position.x + rect.size.x * (float(step) + 0.5) / 24.0
+			var z := rect.position.y + rect.size.y * (float(step % 7) + 0.5) / 7.0
+			var rise := absf(Floor.height(x + 1.0, z) - Floor.height(x, z))
+			if rise > 0.8:
+				steep.append("%s %.2f" % [str(room["id"]), rise])
+		# A hall deep in the dark is lower than the mouth's own chamber.
+		var centre := rect.get_center()
+		if Vector2(centre.x, centre.y).distance_to(Vector2(mouth_rope.x, mouth_rope.z)) > 150.0 \
+				and Floor.height(centre.x, centre.y) > -1.0:
+			level.append(str(room["id"]))
+	check(flat.is_empty(), "every hall's floor pitches underfoot (%s)" % str(flat))
+	check(steep.is_empty(), "and never rises more in a metre than a body can climb (%s)" % str(steep))
+	check(level.is_empty(), "a hall far from the mouth is lower than it (%s)" % str(level))
+	# What stops a body is the drawn floor: every room's ground is one collider of
+	# the floor's own vertices, and a body standing on open ground - a landing's
+	# post, which the map already holds open - is standing on the field's height and
+	# not on a level the cave never had.
+	var missing: Array[String] = []
+	for index in Layout.ROOMS.size():
+		var drawn := Floor.faces(index)
+		var found := false
+		for child in cave._rock_solids.get_children():
+			if not (child is CollisionShape3D):
+				continue
+			var shape = (child as CollisionShape3D).shape
+			if not (shape is ConcavePolygonShape3D):
+				continue
+			var faces: PackedVector3Array = (shape as ConcavePolygonShape3D).get_faces()
+			if faces.size() == drawn.size() and faces == drawn:
+				found = true
+				break
+		if not found:
+			missing.append(str(Layout.ROOMS[index]["id"]))
+	check(missing.is_empty(), "every room's ground is the floor it draws (%s)" % str(missing))
+	var space: PhysicsDirectSpaceState3D = cave.get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.new()
+	query.collision_mask = 1
+	var off: Array[String] = []
+	for entry in Layout.LANDINGS:
+		for post in cave.entry_posts(str(entry["id"]), cave.ENTRY_POSTS):
+			var local: Vector3 = cave.to_local(post)
+			var ground := Floor.height(local.x, local.z)
+			query.from = cave.to_global(Vector3(local.x, ground + 2.0, local.z))
+			query.to = cave.to_global(Vector3(local.x, ground - 1.0, local.z))
+			var hit := space.intersect_ray(query)
+			if hit.is_empty() or absf(float(hit["position"].y) - cave.to_global(
+					Vector3(local.x, ground, local.z)).y) > 0.05:
+				off.append("%s %.2f" % [str(entry["id"]), ground])
+	check(off.is_empty(), "a body landed on open ground stands on the field's own height (%s)" % str(off))
+	# Dripstone out of the open floor: a stand of stone away from every wall.
+	var open_stands := 0
+	var halls := 0
+	for index in Layout.ROOMS.size():
+		var room: Dictionary = Layout.ROOMS[index]
+		if bool(room.get("tunnel", false)) or (room["rect"] as Rect2).get_area() < 150.0:
+			continue
+		halls += 1
+		var rect: Rect2 = room["rect"]
+		for child in cave._rooms[index].get_node_or_null("RockSolids").get_children():
+			if not (child is CollisionShape3D) or not ((child as CollisionShape3D).shape is CylinderShape3D):
+				continue
+			var at: Vector3 = (child as Node3D).position
+			var edge := minf(minf(at.x - rect.position.x, rect.end.x - at.x),
+				minf(at.z - rect.position.y, rect.end.y - at.z))
+			if edge > 3.5:
+				open_stands += 1
+				break
+	check(open_stands * 2 > halls,
+		"stone grows out of the open floor of most halls (%d of %d)" % [open_stands, halls])
 
 
 ## Whether a cave-frame point is on the floor of the room it names.

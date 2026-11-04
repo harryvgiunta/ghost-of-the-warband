@@ -422,6 +422,11 @@ var _left_melee_time := -1.0
 var _right_melee_time := -1.0
 var _left_melee_duration := float(dagger_profile(0).seconds)
 var _right_melee_duration := 1.0
+## One swing's extra rate, 1.0 by default. Only a proc sets it (the necklace's
+## Quick Hit), and only for the swing it begins: the clock the rig hands `Combat`
+## is one figure, so a fast cut is a cut whose duration is divided here rather
+## than a second timer nobody reads.
+var _swing_rate := 1.0
 var _swing_start_hand: Array[Transform3D] = [Transform3D.IDENTITY,Transform3D.IDENTITY]
 var _swing_start_valid: Array[bool] = [false,false]
 ## A diagonal pivots over the stance it starts in. The authored overhead's
@@ -1837,9 +1842,10 @@ func _duration_for(hand: String, variant: String) -> float:
 		# A stab is the dagger clock, whichever hand swings it: a sword's thrust
 		# is not a sword's overhead. A dagger keeps its own profile's timing.
 		base = float(profile_for_hand(hand).seconds if dagger else dagger_profile(0).seconds)
-	# Trinket haste and the held item's passive compose as one rate, so the
-	# same wheel-up lunge is fast for every hand that carries a shank.
-	return base/maxf(attack_rate()*variant_attack_rate(hand,variant),0.01)
+	# Trinket haste, the held item's passive and this swing's own rate compose as
+	# one figure, so the same wheel-up lunge is fast for every hand that carries
+	# a shank and a proc's quick cut is simply five times that figure.
+	return base/maxf(attack_rate()*variant_attack_rate(hand,variant)*_swing_rate,0.01)
 
 func _valid_variant(variant: String) -> bool:
 	return variant in MELEE_VARIANTS
@@ -1920,6 +1926,24 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 	melee_started.emit(key)
 	_update_pose(0.0)
 	return true
+
+## Strike again at `rate` times the swing rate: the recovery of the cut already
+## in the air is given up and the blade comes round on a clock divided by `rate`.
+## `AnnointCatalog.Proc.QUICK_STRIKE` is the only caller, and it only ever asks
+## on the frame after a blow of this wrist landed, so re-arming the same hand is
+## the point rather than a bug.
+func quick_melee(hand: String, rate: float) -> bool:
+	var key := "left" if hand == "left" else "right"
+	if weapon not in ["sword","dagger","dual"] or swing_weapon_class(key).is_empty():
+		return false
+	if _roll_progress >= 0.0 or is_consuming():
+		return false
+	abort_melee(key)
+	_swing_rate = clampf(rate, 1.0, 8.0)
+	var variant := "diagonal_right" if is_diagonal_swing(key) else "overhead"
+	var began := begin_melee(key, variant)
+	_swing_rate = 1.0
+	return began
 
 func abort_melee(hand: String) -> void:
 	if hand == "left":
@@ -2556,6 +2580,18 @@ func get_joint_positions() -> Dictionary:
 		result[prefix+"_foot"] = foot.origin - foot.basis*_foot_up[side]*_foot_height[side]
 	result["anchor"] = _jaw_anchor()
 	return result
+
+## The weapon nodes actually drawn in the hands, for a presentation that lights
+## them (the necklace's three-strike). Invisible stowed pieces are left out, so a
+## one-hander with an empty off hand lights one blade and a dual pair lights two;
+## a board is a defence, not a weapon, and never takes the glow.
+func held_weapon_nodes() -> Array:
+	var out: Array = []
+	for node in [active_sword, active_dagger, active_staff, active_off_weapon]:
+		if node is Node3D and is_instance_valid(node) and (node as Node3D).visible:
+			out.append(node)
+	return out
+
 
 func get_blade_base(hand: String = "") -> Vector3:
 	var key := hand if hand in ["left","right"] else _melee_hand

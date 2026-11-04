@@ -956,11 +956,14 @@ func annoint_copy_for_item(item_id: String) -> int:
 	var ordinals := annoints.ordinals_of(item_id)
 	return int(ordinals[0]) if not ordinals.is_empty() else 0
 
-## The annointment-bearing pieces one body wears, as ledger refs.
+## The annointment-bearing pieces one body wears, as ledger refs. The armour, the
+## hands and the worn jewellery: a necklace or a ring is a piece the altar can
+## work exactly like steel, and its weld is the cord's own.
 func annoint_refs(merc_id: int) -> Array:
 	var out: Array = []
 	var kit := roster.equipped_of(merc_id)
-	for slot in AnnointCatalog.ARMOUR_SLOTS + ["main", "off"]:
+	for slot in AnnointCatalog.ARMOUR_SLOTS + ["main", "off"] \
+			+ AnnointCatalog.JEWELRY_SLOTS:
 		var item_id := str(kit.get(slot, ""))
 		if item_id.is_empty():
 			continue
@@ -971,12 +974,15 @@ func annoint_refs(merc_id: int) -> Array:
 func annointment_stats(merc_id: int) -> Dictionary:
 	return annoints.stats_for(annoint_refs(merc_id))
 
-## The skills this body's annointments wake, one list per hand: a copy may carry
-## several ability welds and every one of them reaches the hotbar.
+## The skills this body's annointments wake, one list per worn slot: a copy may
+## carry several ability welds and every one of them reaches the hotbar - a hand's
+## from the hand that holds it, a necklace's from the neck that wears it.
 func annointment_skills(merc_id: int) -> Dictionary:
 	var kit := roster.equipped_of(merc_id)
 	var out := {"main": [], "off": []}
-	for slot in ["main", "off"]:
+	for slot in AnnointCatalog.JEWELRY_SLOTS:
+		out[slot] = []
+	for slot in ["main", "off"] + AnnointCatalog.JEWELRY_SLOTS:
 		var item_id := str(kit.get(slot, ""))
 		if item_id.is_empty():
 			continue
@@ -988,12 +994,15 @@ func annointment_skills(merc_id: int) -> Dictionary:
 func annointment_procs(merc_id: int) -> Array:
 	return annoints.procs_for(annoint_refs(merc_id))
 
-## How many annointments each held copy carries, per hand. The rig draws them as
-## inlaid marks on the piece itself, one per annointment.
+## How many annointments each held copy carries, per worn slot. The rig draws a
+## hand's as inlaid marks on the weapon; the preview draws the necklace's on its
+## stone, one per annointment.
 func annointment_marks(merc_id: int) -> Dictionary:
 	var kit := roster.equipped_of(merc_id)
 	var out := {"main": 0, "off": 0}
-	for slot in ["main", "off"]:
+	for slot in AnnointCatalog.JEWELRY_SLOTS:
+		out[slot] = 0
+	for slot in ["main", "off"] + AnnointCatalog.JEWELRY_SLOTS:
 		var item_id := str(kit.get(slot, ""))
 		if item_id.is_empty():
 			continue
@@ -1035,6 +1044,16 @@ func hotbar_kit(merc_id: int) -> Array[String]:
 		hands["off"] = _hotbar_hand(off_id, "off", merc_id)
 	var trinkets := {"neck": str(gear.get("neck", "")),
 		"ring1": str(gear.get("ring1", "")), "ring2": str(gear.get("ring2", ""))}
+	# A worn necklace or ring wakes the skills the altar welded to that copy,
+	# exactly as the rig hears it through `SeatLoadout`; the stock grant rides
+	# alongside whichever ids the cord carries.
+	for slot in AnnointCatalog.JEWELRY_SLOTS:
+		var worn_id := str(gear.get(slot, ""))
+		if worn_id.is_empty():
+			continue
+		var welded := annoints.skills_of(worn_id, annoint_copy(merc_id, slot))
+		if not welded.is_empty():
+			hands[slot] = welded
 	for definition in AbilityRules.grants_for(main, off, hands, trinkets):
 		var id := str(definition.get("id", ""))
 		if id.is_empty() or out.has(id):

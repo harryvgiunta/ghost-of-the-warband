@@ -2,8 +2,10 @@ extends RefCounted
 ## The Weeping Hollow's rock as a surface: a skin over every wall a room shows, a
 ## lintel over every lower way out of it, and a vaulted roof.
 ##
-## The colliders are boxes on the half-metre raster (`delve_layout.gd`): what stops
-## a body and what the squad's map sees. This draws the rock those boxes stand for.
+## The walls and roofs are collider boxes on the half-metre raster
+## (`delve_layout.gd`): what stops a body and what the squad's map sees. The floor
+## is not one of them - it is a surface of its own (`delve_floor.gd`) - and this
+## draws the rock those boxes stand for, hung off that floor.
 ## Every edge where a room's floor meets rock is followed lattice point by lattice
 ## point and a strip is raised on it from under the floor to over the roof, pushed
 ## out into the room by one field (`relief`): a talus skirt at the foot, broken
@@ -33,8 +35,10 @@ extends RefCounted
 ## descent after the first reuses them, and a co-op guest draws what its host drew.
 
 const Layout = preload("res://scripts/warband/delve_layout.gd")
+const Floor = preload("res://scripts/warband/delve_floor.gd")
 
-## The skin starts this far under the floor and ends this far over the roof.
+## The skin starts this far under the lowest ground a room's walls stand on and
+## ends this far over its roof.
 const BURY := 0.15
 const OVER := 0.4
 ## The least the rock stands off its collider face.
@@ -83,11 +87,10 @@ static func skin(index: int) -> ArrayMesh:
 	if _skins.has(index):
 		return _skins[index]
 	_noises()
-	var height := float(Layout.ROOMS[index]["height"])
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
-	var rows := _rows(-BURY, height)
+	var rows := _rows(Floor.low(index) - BURY, ceiling(index))
 	for run in wall_runs(index):
 		var points: PackedVector2Array = run["points"]
 		var dirs: PackedVector2Array = run["dirs"]
@@ -115,16 +118,26 @@ static func skin(index: int) -> ArrayMesh:
 	return mesh
 
 
+## The rock's height over a room, in the cave's frame: the room's authored height
+## over its own floor, and that floor has fallen away from the mouth
+## (`Layout.room_floor`). A hall deep in the dark is the same room moved down, so
+## the rock over it is exactly as thick as the rock over the mouth and the
+## clearance under it is the height it was authored with.
+static func ceiling(index: int) -> float:
+	return float(Layout.ROOMS[index]["height"]) + Layout.room_floor(index)
+
+
 ## Every wall a room shows, as runs of raster lattice points round its floor, in
 ## the floor's own winding. Per run: `points` (cave x/z), `dirs` (the way each is
 ## pushed out into the room: a straight wall's normal, both walls' at a corner),
 ## `along` (metres from the run's start), `open` (metres to the nearer jamb) and
-## `arch` (the head height of the way out at that nearer jamb). A run ends where a
-## way out begins - at a jamb - and turns with the room's own corners.
+## `arch` (the head height of the way out at that nearer jamb, in the cave's own
+## frame - the ceiling of the lower room at that jamb). A run ends where a way out
+## begins - at a jamb - and turns with the room's own corners.
 static func wall_runs(index: int) -> Array:
 	if _runs.has(index):
 		return _runs[index]
-	var height := float(Layout.ROOMS[index]["height"])
+	var height := ceiling(index)
 	var stretches := _grouped(_perimeter(index))
 	var out: Array = []
 	for order in stretches.size():
@@ -134,8 +147,8 @@ static func wall_runs(index: int) -> Array:
 		# The ways out at either end of the run, and how high each one is.
 		var before := int(stretches[(order - 1 + stretches.size()) % stretches.size()]["key"])
 		var after := int(stretches[(order + 1) % stretches.size()]["key"])
-		var arch_start := minf(height, float(Layout.ROOMS[before]["height"])) if before >= 0 else height
-		var arch_end := minf(height, float(Layout.ROOMS[after]["height"])) if after >= 0 else height
+		var arch_start := minf(height, ceiling(before)) if before >= 0 else height
+		var arch_end := minf(height, ceiling(after)) if after >= 0 else height
 		var segments: Array = run["segments"]
 		var points := PackedVector2Array()
 		var dirs := PackedVector2Array()
@@ -186,15 +199,16 @@ static func sample(run: Dictionary, s: float) -> Dictionary:
 
 ## The ways out of a room into a lower one: `{points, normal, low}` per opening -
 ## the opening's lattice points jamb to jamb, the room's inward normal there and
-## the lower roof's height. The taller room owns the rock over the opening.
+## the lower roof's height in the cave's frame. The taller room owns the rock over
+## the opening.
 static func lintels(index: int) -> Array:
-	var height := float(Layout.ROOMS[index]["height"])
+	var height := ceiling(index)
 	var out: Array = []
 	for run in _grouped(_perimeter(index)):
 		var neighbour := int(run["key"])
 		if neighbour < 0:
 			continue
-		var low := float(Layout.ROOMS[neighbour]["height"])
+		var low := ceiling(neighbour)
 		if low > height - 0.05:
 			continue
 		var segments: Array = run["segments"]
@@ -209,27 +223,32 @@ static func lintels(index: int) -> Array:
 ## metres - always at least `PROUD`. `open` is how far along the wall the point is
 ## from the nearer way out, and `arch` that way's head height: the jamb two rooms
 ## share comes out the same from either, and the mouth swells toward the head.
+## Everything the wall does relative to the floor it stands on - the talus skirt at
+## its foot, where the rock starts to reach into the room over a body's head - is
+## read against the ground under that point (`Floor.height`), because the floor of
+## a hall is not level: a wall's foot in a deep hollow carries its skirt there.
 static func relief(index: int, x: float, y: float, z: float, open: float = INF, arch: float = INF) -> float:
 	_noises()
 	var room: Dictionary = Layout.ROOMS[index]
-	var height := float(room["height"])
+	var top := ceiling(index)
 	var tunnel := bool(room.get("tunnel", false))
+	var rise := y - Floor.height(x, z)
 	var shape := smoothstep(0.0, JAMB_BLEND, open)
 	var broad := 0.5 + 0.5 * _field.get_noise_3d(x, y * 0.75, z)
 	var mass := 0.5 + 0.5 * _mass.get_noise_3d(x, y * 0.6, z)
 	var grain := 0.5 + 0.5 * _grain.get_noise_3d(x, y, z)
 	var high := lerpf(WAY_REACH, WAY_REACH if tunnel else HALL_REACH, shape)
-	var reach := lerpf(FOOT_REACH, high, smoothstep(2.0, 3.0, y))
+	var reach := lerpf(FOOT_REACH, high, smoothstep(2.0, 3.0, rise))
 	var push := PROUD + reach * (0.5 * broad + 0.5 * mass) + 0.05 * grain
 	# Strata: ledges every metre and a third that wander up and down the wall.
 	var level := y + 0.55 * _vault.get_noise_2d(x * 1.7, z * 1.7)
 	var ledge := pow(maxf(sin(level * TAU / 1.35), 0.0), 8.0)
-	push += ledge * 0.09 * smoothstep(0.4, 1.0, y)
+	push += ledge * 0.09 * smoothstep(0.4, 1.0, rise)
 	# The talus skirt at the foot.
-	push += 0.3 * (1.0 - smoothstep(-0.1, 0.65, y)) * (0.5 + 0.5 * broad)
+	push += 0.3 * (1.0 - smoothstep(-0.1, 0.65, rise)) * (0.5 + 0.5 * broad)
 	# The cove into the roof: the room's own, so it fades out at a jamb.
-	var cove_height := 1.4 if tunnel else minf(2.6, height * 0.35)
-	var cove := smoothstep(height - cove_height, height + OVER, y)
+	var cove_height := 1.4 if tunnel else minf(2.6, float(room["height"]) * 0.35)
+	var cove := smoothstep(top - cove_height, top + OVER, y)
 	push += (0.35 if tunnel else 0.75) * cove * cove * shape
 	# The mouth of a way out: the rock swells in toward the head of the opening.
 	if arch < INF:
@@ -242,13 +261,13 @@ static func relief(index: int, x: float, y: float, z: float, open: float = INF, 
 
 
 ## The roof's underside over a point of a room (cave frame): just under the room's
-## height at its walls and round a shaft's hole, sagging into a vault toward the
+## ceiling at its walls and round a shaft's hole, sagging into a vault toward the
 ## middle of a hall.
 static func roof_height(index: int, x: float, z: float) -> float:
 	_noises()
 	var room: Dictionary = Layout.ROOMS[index]
 	var rect: Rect2 = room["rect"]
-	var height := float(room["height"])
+	var top := ceiling(index)
 	var edge := minf(minf(x - rect.position.x, rect.end.x - x), minf(z - rect.position.y, rect.end.y - z))
 	var fade := smoothstep(0.0, 1.8, edge)
 	for landing in Layout.LANDINGS:
@@ -256,7 +275,7 @@ static func roof_height(index: int, x: float, z: float) -> float:
 		fade *= smoothstep(1.0, 2.4, Vector2(x - rope.x, z - rope.z).length())
 	var dome := 0.5 + 0.5 * _vault.get_noise_2d(x, z)
 	var grain := 0.5 + 0.5 * _grain.get_noise_2d(x * 1.3, z * 1.3)
-	return height - UNDER - vault(index) * fade * (0.25 + 0.75 * dome) - 0.12 * fade * grain
+	return top - UNDER - vault(index) * fade * (0.25 + 0.75 * dome) - 0.12 * fade * grain
 
 
 ## How deep a room's roof sags at most.
@@ -407,15 +426,18 @@ static func _push(ix: int, iz: int, fallback: Vector2) -> Vector2:
 	return push if push.length_squared() > 0.25 else fallback
 
 
-static func _rows(from: float, height: float) -> PackedFloat32Array:
-	var out := PackedFloat32Array([from, 0.0, 0.12, 0.3, 0.55, 0.85, 1.2])
-	var y := 1.65
-	while y < height - 1.4:
+## The rows of a wall sheet, bottom to top: dense from `from` (under the lowest
+## ground the room's walls stand on), then a row every 0.45 m, then the rows that
+## carry the cove over `top`.
+static func _rows(from: float, top: float) -> PackedFloat32Array:
+	var out := PackedFloat32Array([from, from + 0.12, from + 0.3, from + 0.55, from + 0.85, from + 1.2])
+	var y := from + 1.65
+	while y < top - 1.4:
 		out.append(y)
 		y += 0.45
-	for top in [height - 1.0, height - 0.65, height - 0.35, height - 0.12, height + 0.1, height + OVER]:
-		if top > out[out.size() - 1] + 0.08:
-			out.append(top)
+	for high in [top - 1.0, top - 0.65, top - 0.35, top - 0.12, top + 0.1, top + OVER]:
+		if high > out[out.size() - 1] + 0.08:
+			out.append(high)
 	return out
 
 
@@ -449,7 +471,6 @@ static func _sheet(grid: PackedVector3Array, cols: int, rows: int, verts: Packed
 ## tucked back over the lower roof so the opening's head has no open edge.
 static func _lintel(index: int, lintel: Dictionary, verts: PackedVector3Array, normals: PackedVector3Array,
 		indices: PackedInt32Array) -> void:
-	var height := float(Layout.ROOMS[index]["height"])
 	var lattice: Array = lintel["lattice"]
 	var inward: Vector2 = lintel["normal"]
 	var low := float(lintel["low"])
@@ -462,7 +483,7 @@ static func _lintel(index: int, lintel: Dictionary, verts: PackedVector3Array, n
 	var width := a.distance_to(b)
 	var axis := (b - a) / maxf(width, 0.0001)
 	var keep := PackedFloat32Array([low - 0.06])
-	for y in _rows(-BURY, height):
+	for y in _rows(Floor.low(index) - BURY, ceiling(index)):
 		if y > low - 0.02:
 			keep.append(y)
 	var count := keep.size() + 1

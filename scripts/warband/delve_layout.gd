@@ -32,8 +32,24 @@ extends RefCounted
 ## floor; 1.0 is the plan as drawn.
 const SCALE := 2.0
 
+## How far the floor has fallen by the plan's rim. The Hollow is not a shelf cut
+## level into the rock: the ground runs down and away from the mouth all the way
+## back to the lair, so a hall at the far rim lies `DESCENT` metres below the
+## chamber a party lands in and every step it takes deeper is a step down. The
+## fall is a smooth bowl round the mouth's own rope (`DESCENT_FROM`), complete at
+## `DESCENT_SPREAD` metres out - the far rim of the plan, where the last three
+## shafts stand - so no room edge and no way out ever carries a step a body has to
+## climb, and the steepest grade anywhere is `1.5 * DESCENT / DESCENT_SPREAD`, a
+## walkable five per cent.
+const DESCENT := 13.0
+const DESCENT_SPREAD := 360.0
+## The mouth's rope, in the built frame: the bottom of the bowl, where the fall is
+## nil and every other height in the cave is measured from.
+const DESCENT_FROM := Vector2(0.0, 3.6 * SCALE)
+
 ## The raster the rock is derived from, and the rock's height: every wall rises to
-## `TOP`, and each room's ceiling fills down from it to the room's own height.
+## `TOP`, and each room's ceiling fills down from it to the room's own - its
+## authored `height` over the `floor` it stands on.
 const CELL := 0.5
 const AUTHORED_TOP := 11.0
 ## The rock box the rooms are cut out of, in the cave's frame (x/z): every room
@@ -592,18 +608,40 @@ static func _flat(at: Vector3) -> Vector3:
 	return Vector3(at.x * SCALE, at.y, at.z * SCALE)
 
 
+## How far below the mouth's own floor a cave-local x/z point lies: 0 at the
+## mouth's rope, `-DESCENT` at the plan's rim and beyond, and a smooth bowl
+## between, so the ground falls away from the one place the party always arrives
+## at and levels out where the far shafts stand. The ground is a function of the
+## point, never of the room, so two rooms that share a way out meet on the same
+## level along it.
+static func descent(x: float, z: float) -> float:
+	var t := clampf(Vector2(x, z).distance_to(DESCENT_FROM) / DESCENT_SPREAD, 0.0, 1.0)
+	return -DESCENT * t * t * (3.0 - 2.0 * t)
+
+
+## The floor a room is cut from: how far below the mouth the ground under its
+## middle lies. Its ceiling stands `height` above that, so a hall deep in the dark
+## is the same room it was authored as, moved down.
+static func room_floor(index: int) -> float:
+	return float(ROOMS[index].get("floor", 0.0))
+
+
 static func _flat_rect(rect: Rect2) -> Rect2:
 	return Rect2(rect.position * SCALE, rect.size * SCALE)
 
 
 ## `AUTHORED_ROOMS` at `SCALE`: the footprint moved and grown, the ceiling with it,
-## so a room keeps its shape.
+## so a room keeps its shape - and the floor it is cut from, which is how far the
+## ground has fallen under its middle (`descent`). Nothing else about a room
+## moves: its ceiling is `height` above its own floor, exactly as authored.
 static func _scaled_rooms(source: Array) -> Array:
 	var out: Array = []
 	for row in source:
 		var room: Dictionary = row.duplicate()
 		room["rect"] = _flat_rect(row["rect"])
 		room["height"] = float(row["height"]) * SCALE
+		var centre: Vector2 = (room["rect"] as Rect2).get_center()
+		room["floor"] = descent(centre.x, centre.y)
 		out.append(room)
 	return out
 
