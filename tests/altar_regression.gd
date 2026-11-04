@@ -67,6 +67,7 @@ func run() -> void:
 	await check_anoint()
 	check_bench()
 	check_rack()
+	check_controlled_order()
 	check_unbind_list()
 	check_unbind_press()
 	check_distill()
@@ -441,6 +442,64 @@ func check_rack() -> void:
 	check(menu.set_rack_filter(AltarMenuScript.RACK_ALL), "the rack can list everything again")
 	check(menu.anoint_rows().size() == every, "and every copy comes back")
 
+## The rack is the body's before it is the band's. The copies on the body the
+## soul is inside lead - in the order a body is worn in, main hand then off hand
+## - and every other body's kit and every spare waits behind them, however dear.
+## A soul between bodies falls back to the oldest order: worn, then dearest.
+func check_controlled_order() -> void:
+	_fresh()
+	var stash = warband.stash
+	stash.add("sword_arming", 1)
+	stash.add("sword_great", 1)
+	stash.add("shield_tower", 1)
+	var mine: int = warband.add_mercenary("Wick")
+	var other: int = warband.add_mercenary("Ash")
+	check(bool(warband.equip_merc(mine, "main", "sword_arming").get("ok", false)),
+		"the controlled body takes the arming sword")
+	check(bool(warband.equip_merc(other, "main", "sword_great").get("ok", false)),
+		"another body takes the greatsword")
+	menu.refresh()
+	check(not _rack_row("shield_tower", 0).is_empty(), "a tower shield takes anointings")
+
+	menu.set_controlled(-1)
+	menu.open()
+	check(str(menu.anoint_rows()[0]["item_id"]) == "sword_great",
+		"with no body named the dearest worn copy leads")
+
+	# The soul is in Wick: his sword is the first card over Ash's dearer one.
+	menu.set_controlled(mine)
+	menu.open()
+	var lead: Dictionary = menu.anoint_rows()[0]
+	check(str(lead["item_id"]) == "sword_arming" and bool(lead["mine"]),
+		"the controlled body's own sword is the rack's first card: %s" % str(lead["item_id"]))
+	check(int(lead["holder"]) == mine, "and the card names that body as the holder")
+	check(int(lead["value"]) < int(_rack_row("sword_great", 0)["value"]),
+		"a controlled body's copy outranks a dearer one on another body")
+	check(str(menu.selected_anoint_item()) == "sword_arming",
+		"the square opens on the first card, so the controlled body's steel is laid")
+
+	# The body's own steel is ordered the way he is worn: main hand then off hand,
+	# so a dearer shield still waits behind the sword in his hand.
+	check(bool(warband.equip_merc(mine, "off", "shield_tower").get("ok", false)),
+		"the controlled body takes a tower shield")
+	menu.open()
+	var kit: Array = menu.anoint_rows()
+	check(str(kit[0]["item_id"]) == "sword_arming" and str(kit[1]["item_id"]) == "shield_tower",
+		"the controlled body's main hand leads his off hand")
+	check(int(kit[0]["slot_rank"]) < int(kit[1]["slot_rank"]), "and the ranks are the wear order")
+	check(int(_rack_row("shield_tower", 0)["value"]) > int(_rack_row("sword_arming", 0)["value"]),
+		"a dearer off-hand piece still waits behind the main hand")
+
+	# A soul changes bodies: the lead follows the body on the next paint.
+	menu.set_controlled(other)
+	menu.open()
+	check(str(menu.anoint_rows()[0]["item_id"]) == "sword_great"
+		and bool(menu.anoint_rows()[0]["mine"]),
+		"a soul in another body leads with that body's steel")
+	check(str(menu.selected_anoint_item()) == "sword_great", "and the square follows it")
+	menu.set_controlled(-1)
+	menu.close()
+
 ## An RNG whose first draw lands in `[lo, hi]`, so a band can be forced without
 ## reaching into the roll's guts.
 func _seed_in_band(lo: int, hi: int) -> RandomNumberGenerator:
@@ -705,3 +764,23 @@ func check_altar() -> void:
 		"the created panel reads the live stash")
 	check(_menu_count(root) == 1, "exactly one panel exists, got %d" % _menu_count(root))
 	check(not altar.is_open(), "ensure_menu alone does not open the panel")
+
+	# The altar reads the body the peer is inside when it is touched, so kneeling
+	# as a soul in a body opens the rack on that body's own steel. The soul map is
+	# the warband's, not a guess from the scene.
+	_fresh()
+	var body_merc: int = warband.add_mercenary("Wick")
+	warband.stash.add("sword_arming", 1)
+	check(bool(warband.equip_merc(body_merc, "main", "sword_arming").get("ok", false)),
+		"the kneeling body takes a sword")
+	warband.souls.register_body(body_merc, altar)
+	check(warband.souls.assign(31, body_merc), "the soul map knows the body the peer is in")
+	check(altar.controlled_merc_for(31) == body_merc,
+		"the altar asks the soul map which body the peer controls")
+	check(altar.controlled_merc_for(32) == -1, "a peer between bodies controls nothing")
+	altar.interact(31)
+	check(int(fresh.controlled_merc) == body_merc,
+		"kneeling hands the panel the controlled body")
+	check(str(fresh.selected_anoint_item()) == "sword_arming",
+		"the altar opens with the controlled body's steel in the square")
+	altar.close()

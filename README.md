@@ -69,8 +69,9 @@ difference - and the warband is the thing that survives a battle.
   pieces only - a worn piece is on its wearer's slots), the **Sacrificial Altar** — a
   blood-stained stone stele under candles and skull sticks, named **THE ALTAR** —
   whose ANOINT page is a rack of individual copies (ten greatswords are ten
-  cards, each with its own welded annointments and its own count, the copies a
-  body is wearing leading it, with a WORN ONLY toggle for the copies a body has on) over a bench
+  cards, each with its own welded annointments and its own count, the copies the
+  body the player is inside is wearing leading it - main hand, then off hand,
+  then the armour - with a WORN ONLY toggle for the copies a body has on) over a bench
   that spends a warden's ichor on the picked copy alone — and **a worked copy
   marks its own steel**: one inlaid mark per annointment, glowing a step hotter
   with each (deep ember at one, hot bone at six, with the blade's edges lit from

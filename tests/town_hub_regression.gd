@@ -180,6 +180,22 @@ func check_altar() -> void:
 	check(menu != null, "the altar owns its ritual menu")
 	if menu != null:
 		check(menu.distill_rows().size() == 5, "all five cruor tiers are listed")
+		# The steel a player carries to the altar is the steel in the body he is
+		# inside: the panel reads that body off the soul map and leads its rack
+		# with that body's own copies, not with the band's dearest piece.
+		var controlled: int = game.controller.merc_for_peer(1)
+		check(int(menu.controlled_merc) == controlled,
+			"the altar opens on the body the soul is in (%d, expected %d)"
+			% [int(menu.controlled_merc), controlled])
+		var rows: Array = menu.anoint_rows()
+		var mine_rows := 0
+		for row in rows:
+			if bool(row["mine"]):
+				mine_rows += 1
+		check(mine_rows > 0, "the possessed body wears something the altar can mark")
+		if mine_rows > 0 and not rows.is_empty():
+			check(bool(rows[0]["mine"]),
+				"the rack leads with the controlled body's own gear")
 	if game.altar.is_open():
 		game.altar.close()
 

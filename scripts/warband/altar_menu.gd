@@ -69,6 +69,12 @@ const PIECE_ICON := {
 ## The warband this panel renders. Assigned by `configure()`; every read goes
 ## through `_cruor()`/`_stash()` so a half-initialised panel cannot crash.
 var warband: Node = null
+## The body the soul is inside, or -1 when the soul is between bodies or the
+## scene has not said. The rack and the brand's vessel list lead with the copies
+## this body wears: the steel a player walks to the altar with is the steel in
+## his own hands, so it is the first card he reads and the square he works, and
+## every other body's kit and every spare waits behind it.
+var controlled_merc := -1
 
 var _root: Control
 var _gold_label: Label
@@ -138,14 +144,27 @@ func configure(source: Node) -> void:
 func is_open() -> bool:
 	return _opened
 
+## The body the soul is inside. Every route that opens the panel sets this before
+## `open()` - `SacrificialAltar.interact` reads it off the warband's soul map -
+## so the rack leads with the gear the player is wearing. -1 for a soul between
+## bodies: nobody is being dressed, so worn copies lead as they always did.
+func set_controlled(merc_id: int) -> void:
+	if merc_id == controlled_merc:
+		return
+	controlled_merc = merc_id
+	refresh()
+
 ## The altar always opens on the reagent rite: it is the verb a player is sent to
-## the altar for.
+## the altar for. The square takes the rack's first card, which is the body's
+## own gear whenever this process knows which body the soul is in.
 func open() -> void:
 	_build()
 	_opened = true
 	_page = PAGE_ANOINT
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_socket_item = ""
+	_socket_ordinal = 0
 	refresh()
 	_free_pointer()
 
@@ -184,9 +203,11 @@ func brand_rows() -> Array[Dictionary]:
 ## One row per **copy** the warband carries that the pool can mark (pooled or
 ## worn), so ten greatswords are ten rows: `{item_id, ordinal, copy_key, name,
 ## value, ability, key, count, max, pool, odds, full, entries, welded, worn,
-## recipe, recipe_text, ok, message, button}`. A row's `button` is the card that
-## lays that copy in the square; the one ANOINT button under the square works
-## whatever is laid there.
+## holder, mine, slot_rank, recipe, recipe_text, ok, message, button}`. `holder`
+## is the mercenary wearing that copy (-1 for a spare), `mine` says it is worn by
+## `controlled_merc`, and `slot_rank` is its place in `Contracts.SLOT_ORDER`. A
+## row's `button` is the card that lays that copy in the square; the one ANOINT
+## button under the square works whatever is laid there.
 func anoint_rows() -> Array[Dictionary]:
 	return _anoint_rows
 
@@ -465,6 +486,7 @@ func _refresh_anoint() -> void:
 		var item: Dictionary = State.ITEMS.get(item_id, {})
 		var worn := _worn_tags(item_id)
 		for ordinal in _copy_ordinals(item_id, _copy_total(item_id)):
+			var tag: Dictionary = worn.get(ordinal, {})
 			var copy: Dictionary = warband.annoint_preview(item_id, ordinal)
 			var entries: Array = warband.annoints.entries_of(item_id, ordinal)
 			var names: Array[String] = []
@@ -486,19 +508,29 @@ func _refresh_anoint() -> void:
 				"full": bool(copy.get("full", false)),
 				"entries": entries,
 				"welded": "  ·  ".join(PackedStringArray(names)),
-				"worn": str(worn.get(ordinal, "")),
+				"worn": str(tag.get("label", "")),
+				"holder": int(tag.get("merc", -1)),
+				"mine": _controlled_holds(tag),
+				"slot_rank": _slot_rank(str(tag.get("slot", ""))),
 				"recipe": recipe,
 				"recipe_text": WarbandCruor.recipe_text(recipe),
 				"ok": bool(copy.get("ok", false)),
 				"message": str(copy.get("message", "")),
 				"button": null,
 			})
-	# The copies a body is wearing first - the steel a player walks to the altar
-	# to work is the steel in his hands, and every spare waits behind it. Inside
-	# each group the dearest piece leads, and inside one piece the copies that
-	# already carry something, so the one a player came to look at sits at the
-	# top of its group.
+	# The copies on the body the soul is inside come first, in the order a body
+	# is worn in - main hand, off hand, then the armour and the trinkets - because
+	# that is the steel a player carried to the altar and the steel he came to
+	# work. Then every other body's kit, then the spares: inside each group the
+	# dearest piece leads, and inside one piece the copies that already carry
+	# something, so the one a player came to look at sits at the top of its group.
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_mine := bool(a["mine"])
+		var b_mine := bool(b["mine"])
+		if a_mine != b_mine:
+			return a_mine
+		if a_mine and int(a["slot_rank"]) != int(b["slot_rank"]):
+			return int(a["slot_rank"]) < int(b["slot_rank"])
 		var a_worn := not str(a["worn"]).is_empty()
 		var b_worn := not str(b["worn"]).is_empty()
 		if a_worn != b_worn:
@@ -555,9 +587,11 @@ func _copy_ordinals(item_id: String, total: int) -> Array[int]:
 	out.sort()
 	return out
 
-## Which copies of `item_id` are worn, `ordinal -> "Wick main"`. The copy a body
-## wears is the warband's own answer (`annoint_copy`), so the rack and the field
-## agree on which sword carries which annointments.
+## Which copies of `item_id` are worn, `ordinal -> {label, merc, slot}`. The copy
+## a body wears is the warband's own answer (`annoint_copy`), so the rack and the
+## field agree on which sword carries which annointments. When two bodies are
+## somehow filed under one copy the body the soul is inside wins the label, since
+## that is the one the rack is leading with.
 func _worn_tags(item_id: String) -> Dictionary:
 	var out := {}
 	var roster: Variant = _roster()
@@ -570,10 +604,29 @@ func _worn_tags(item_id: String) -> Dictionary:
 			if str(wear.get("item", "")) != item_id:
 				continue
 			var ordinal := int(warband.annoint_copy(merc_id, slot))
-			if not out.has(ordinal):
-				out[ordinal] = "%s %s" % [str(merc.get("name", "Mercenary")),
-					Contracts.slot_id_label(slot)]
+			if out.has(ordinal) and merc_id != controlled_merc:
+				continue
+			out[ordinal] = {
+				"label": "%s %s" % [str(merc.get("name", "Mercenary")),
+					Contracts.slot_id_label(slot)],
+				"merc": merc_id,
+				"slot": slot,
+			}
 	return out
+
+## Whether a worn tag belongs to the body the soul is inside - the copies the
+## rack leads with.
+func _controlled_holds(tag: Dictionary) -> bool:
+	return controlled_merc > 0 and int(tag.get("merc", -1)) == controlled_merc
+
+## Where a slot sits in the order a body is worn in (`Contracts.SLOT_ORDER`):
+## main hand, off hand, then the armour, then the trinkets. A spare, or a slot
+## the table does not name, sits at the end.
+func _slot_rank(slot_id: String) -> int:
+	for index in Contracts.SLOT_ORDER.size():
+		if str(Contracts.SLOT_IDS[Contracts.SLOT_ORDER[index]]) == slot_id:
+			return index
+	return Contracts.SLOT_ORDER.size()
 
 ## The row for the piece in the square: `ordinal` -1 takes the first copy of
 ## `item_id`, `{}` when the altar offers none.
@@ -957,14 +1010,26 @@ func _refresh_brand() -> void:
 		_brand_item = ""
 		_refresh_brand_preview()
 		return
-	# A vessel a body is wearing leads, for the rack's own reason: the sigil a
-	# player came to burn goes on the piece in his hands before a spare. Inside
-	# each group the dearest vessel leads.
+	# A vessel the body the soul is inside is wearing leads, then any other
+	# body's, for the rack's own reason: the sigil a player came to burn goes on
+	# the piece in his own hands before anyone else's kit and before a spare.
+	# Inside each group the dearest vessel leads.
+	var mine := {}
 	var worn := {}
 	for item_id in candidates:
-		if not _worn_tags(item_id).is_empty():
-			worn[item_id] = true
+		var tags := _worn_tags(item_id)
+		if tags.is_empty():
+			continue
+		worn[item_id] = true
+		for ordinal in tags:
+			if _controlled_holds(tags[ordinal]):
+				mine[item_id] = true
+				break
 	candidates.sort_custom(func(a: String, b: String) -> bool:
+		var a_mine := mine.has(a)
+		var b_mine := mine.has(b)
+		if a_mine != b_mine:
+			return a_mine
 		var a_worn := worn.has(a)
 		var b_worn := worn.has(b)
 		if a_worn != b_worn:

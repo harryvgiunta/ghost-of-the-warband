@@ -74,13 +74,23 @@ and the other does not.
 
 **The rack shows copies, not catalog rows.** The altar's ANOINT page lists one
 card per copy the warband carries — ten greatswords with ten different sets are
-ten cards, each printing its own welded names and its own `n / 6` — the copies a
-body is wearing first, then sorted by piece value and then by how much that copy
-carries. A **WORN ONLY** toggle in
+ten cards, each printing its own welded names and its own `n / 6` — the copies
+**the body the soul is inside** is wearing first, in the order a body is worn in
+(main hand, off hand, then the armour, then the trinkets), then every other
+body's kit, then the spares by piece value and then by how much that copy
+carries. `AltarMenu.controlled_merc` is that body: `set_controlled(merc_id)` is
+how a caller names it, and `SacrificialAltar.interact(peer_id)` reads it off
+`Warband.souls` at the moment the altar is touched, so a player who kneels opens
+on the steel he is carrying — the square takes the rack's first card. `-1` (a
+soul between bodies) leaves the older order: any worn copy first, then value.
+A **WORN ONLY** toggle in
 the rack's header narrows it to the copies a body has on right now (the same
 answer `Warband.annoint_copy` gives the field, so the rack and the body never
 disagree about which sword is worn). `AltarMenu.anoint_rows()` answers that rack
-as `{item_id, ordinal, copy_key, …}`; `select_anoint_item(item_id, ordinal)` lays
+as `{item_id, ordinal, copy_key, worn, holder, mine, slot_rank, …}`, where
+`holder` is the mercenary wearing that copy, `mine` says it is worn by
+`controlled_merc` and `slot_rank` is its place in `Contracts.SLOT_ORDER`;
+`select_anoint_item(item_id, ordinal)` lays
 one copy in the square, `selected_anoint_ordinal()` says which, `rack_filter()`/
 `set_rack_filter("all" | "worn")` drive the toggle, and the one ANOINT button
 spends a vial on that copy alone. A row hands its ordinal to the hover card

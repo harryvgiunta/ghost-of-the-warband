@@ -57,12 +57,28 @@ func _exit_tree() -> void:
 func in_reach(world_position: Vector3) -> bool:
 	return global_position.distance_to(world_position) <= interact_range
 
-## Open the ritual panel for the peer who knelt here.
+## Open the ritual panel for the peer who knelt here. The panel leads its rack
+## with the gear of the body that peer is inside - the steel a player carried to
+## the altar is the steel in his own hands - so the soul is read here, at the
+## one moment the altar is touched, rather than guessed at from the scene.
 func interact(peer_id: int) -> void:
 	last_peer = peer_id
 	var panel := ensure_menu()
+	panel.set_controlled(controlled_merc_for(peer_id))
 	panel.open()
 	opened.emit(peer_id)
+
+## The mercenary a peer is inside, or -1 when that soul is between bodies. The
+## warband's own soul map (`SoulRouter`) is the one answer to "which body is the
+## player controlling", the same map the gear page follows.
+func controlled_merc_for(peer_id: int) -> int:
+	var warband := get_node_or_null("/root/Warband")
+	if warband == null:
+		return -1
+	var souls: Variant = warband.get("souls")
+	if souls == null or not (souls as Object).has_method("body_of"):
+		return -1
+	return int((souls as Object).call("body_of", peer_id))
 
 func is_open() -> bool:
 	return _menu != null and is_instance_valid(_menu) and _menu.is_open()
