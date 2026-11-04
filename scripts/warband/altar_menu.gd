@@ -485,7 +485,7 @@ func _refresh_anoint() -> void:
 			continue
 		var item: Dictionary = State.ITEMS.get(item_id, {})
 		var worn := _worn_tags(item_id)
-		for ordinal in _copy_ordinals(item_id, _copy_total(item_id)):
+		for ordinal in _copy_serials(item_id):
 			var tag: Dictionary = worn.get(ordinal, {})
 			var copy: Dictionary = warband.annoint_preview(item_id, ordinal)
 			var entries: Array = warband.annoints.entries_of(item_id, ordinal)
@@ -557,33 +557,26 @@ func _refresh_anoint() -> void:
 	_sync_anoint_rows()
 	_paint_anoint()
 
-## How many copies of `item_id` the warband owns: the pool plus every worn one.
-func _copy_total(item_id: String) -> int:
-	var stash := _stash()
-	var total := stash.pooled_count(item_id) if stash != null else 0
-	var roster: Variant = _roster()
-	if roster == null:
-		return total
-	for merc in roster.records():
-		for wear in roster.worn_entries(int(merc.get("id", 0))):
-			if str(wear.get("item", "")) == item_id:
-				total += 1
-	return total
-
-## The ordinals the rack offers for `item_id`: every copy the ledger already
-## carries annointments on, then plain copies up to the number the warband owns.
-func _copy_ordinals(item_id: String, total: int) -> Array[int]:
+## Every copy of `item_id` the warband owns, by the serial the copy itself
+## carries: the pool's own list plus the serial each body's slot is wearing. The
+## rack lists these, so a copy is the weapon and not a number counted off a total.
+func _copy_serials(item_id: String) -> Array[int]:
 	var out: Array[int] = []
-	if warband != null:
-		for ordinal in warband.annoints.ordinals_of(item_id):
-			if out.size() >= total:
-				break
-			out.append(ordinal)
-	var next := 0
-	while out.size() < total:
-		while out.has(next):
-			next += 1
-		out.append(next)
+	var stash := _stash()
+	if stash != null:
+		for serial in stash.serials_of(item_id):
+			if not out.has(int(serial)):
+				out.append(int(serial))
+	var roster: Variant = _roster()
+	if roster != null and warband != null:
+		for merc in roster.records():
+			var merc_id := int(merc.get("id", 0))
+			for wear in roster.worn_entries(merc_id):
+				if str(wear.get("item", "")) != item_id:
+					continue
+				var serial := int(warband.annoint_copy(merc_id, str(wear.get("slot", ""))))
+				if not out.has(serial):
+					out.append(serial)
 	out.sort()
 	return out
 

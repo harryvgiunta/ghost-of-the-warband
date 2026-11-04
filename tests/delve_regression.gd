@@ -259,6 +259,9 @@ func check_mouth_and_pack() -> void:
 				check(warband.delve.inventory.pooled_count(clicked_id) == 0
 						and warband.stash.pooled_count(clicked_id) == clicked_before,
 					"and a click on the packed row brings that one copy back")
+	# A spare is a copy nobody wears: a worn one is on a body, not on the shelf.
+	if warband.stash.pooled_count("sword_arming") <= 0:
+		warband.stash.add("sword_arming", 1)
 	var spare_before: int = warband.stash.pooled_count("sword_arming")
 	area.prep.pack("sword_arming")
 	check(warband.delve.inventory.pooled_count("sword_arming") == 1, "a click packs one spare blade")
@@ -1006,7 +1009,20 @@ func check_climb_out() -> void:
 	var cave = game.delve_area.cave
 	var soul = _soul()
 	var rope_id := "mere" if game.delve_area.landing != "mere" else "chapel"
-	soul.teleport_to(cave.rope_point(rope_id) + Vector3(0.0, 0.12, 1.0), 0.0)
+	# The rope a body walks up to is reached across the ground: the plan's rope
+	# points are authored at y = 0 and the floor under a deep shaft is metres
+	# below that, so a body standing at the foot of the rope used to be out of its
+	# own reach (`G` did nothing at the far ropes).
+	var deep: Vector3 = cave.rope_point(rope_id) + Vector3(0.0, -8.0, 1.0)
+	soul.teleport_to(deep, 0.0)
+	await _frames(2)
+	check(cave.exit_at(soul) == rope_id,
+		"a body 8 m below the plan's rope point is still at the %s rope" % rope_id)
+	var Floor = load("res://scripts/warband/delve_floor.gd")
+	var plan: Vector3 = cave.to_local(cave.rope_point(rope_id))
+	var foot: Vector3 = cave.rope_point(rope_id)
+	foot.y = cave.to_global(Vector3(plan.x, Floor.height(plan.x, plan.z), plan.z)).y
+	soul.teleport_to(foot + Vector3(0.0, 0.12, 1.0), 0.0)
 	await _frames(2)
 	check(cave.exit_at(soul) == rope_id, "a body at the %s rope is at a way up" % rope_id)
 	check(game.delve_area.prompt_line(soul).begins_with("G  -  CLIMB OUT"),

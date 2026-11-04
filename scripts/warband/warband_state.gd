@@ -67,7 +67,7 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## fights offensive, a file without holds arms from every piece, as it always did,
 ## a file without a disposition fields every body as melee, and a file without a
 ## hotbar layout fires every skill from the key the kit's own order gives it.
-const SAVE_VERSION := 13
+const SAVE_VERSION := 14
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -790,7 +790,16 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 	var display := str(item.get("name", id))
 	# The pool is the authority on whether there is a copy to sell: a worn piece
 	# is on a body, not on the keeper's shelf, and a failed removal must never pay.
-	if not stash.remove(id, 1):
+	# Sell the plainest copy first: an annointed copy is one of a kind and never
+	# leaves by accident because its kind was cheaper than its marks.
+	var plainest := -1
+	var fewest := -1
+	for serial in stash.serials_of(id):
+		var marks := annoints.count(id, int(serial))
+		if fewest < 0 or marks < fewest:
+			plainest = int(serial)
+			fewest = marks
+	if not stash.remove(id, 1, plainest):
 		return {"ok": false, "price": 0, "item_id": id,
 			"message": "You have no spare %s in the stash." % display}
 	var payout := int(floor(float(list_price) * clampf(share, 0.0, 1.0)))
@@ -833,7 +842,7 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 			CruorScript.BASIC_REAGENT, {}).get("name", CruorScript.BASIC_REAGENT)),
 			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
 			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	var copy := maxi(ordinal, 0)
+	var copy := _resolve_copy(item_id, ordinal)
 	var existing := annoints.ids(item_id, copy)
 	var at_cap := existing.size() >= AnnointCatalog.MAX_PER_PIECE
 	if rng == null:
@@ -879,7 +888,7 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	var pool := _annoint_pool(item, str(item.get("slot", "")))
-	var copy := maxi(ordinal, 0)
+	var copy := _resolve_copy(item_id, ordinal)
 	var owned := not item.is_empty() and stash.available_ids(roster).has(item_id)
 	var can := owned and int(item.get("price", 0)) >= CruorScript.MAGIC_PRICE \
 		and not pool.is_empty() \
@@ -923,38 +932,91 @@ func annoint_copy(merc_id: int, slot_id: String) -> int:
 	worn_copies[key] = {"item": item_id, "ordinal": ordinal}
 	return ordinal
 
+## The copy a body takes up, named by the serial every physical copy carries.
+##
+## A body claims a *free* copy from the pool - the plainest one first, so a piece
+## bought off a keeper is plain steel even when a relic of the same kind is
+## sitting beside it - and the claim takes that copy out of the pool and remembers
+## its serial for the slot. The relic is only ever worn by a body that claimed it,
+## which is what stops one annointed greatsword turning every greatsword into one.
 func _claim_copy(merc_id: int, slot_id: String, item_id: String) -> int:
 	if item_id.is_empty():
 		return 0
-	var taken := {}
-	var mine := "%d:%s" % [merc_id, slot_id]
+	var key := "%d:%s" % [merc_id, slot_id]
+	var best := -1
+	var best_marks := -1
+	for serial in stash.serials_of(item_id):
+		if _serial_is_worn_elsewhere(int(serial), item_id, key):
+			continue
+		var marks := annoints.count(item_id, int(serial))
+		if best_marks < 0 or marks < best_marks:
+			best = int(serial)
+			best_marks = marks
+	if best >= 0:
+		stash.remove(item_id, 1, best)
+	else:
+		# Nothing in the pool to take (the piece was put on a body before the pool
+		# ever held it): give the copy an identity of its own, but do not invent a
+		# spare - a phantom copy in the pool is a piece the warband does not own.
+		best = stash.mint_serial(item_id)
+	worn_copies[key] = {"item": item_id, "ordinal": best}
+	return best
+
+
+## Whether another slot's copy is this same serial. A serial is worn by one body
+## at a time; a legacy save may name one that two slots still claim.
+func _serial_is_worn_elsewhere(serial: int, item_id: String, mine: String) -> bool:
 	for key in worn_copies:
 		if str(key) == mine:
 			continue
 		var held: Variant = worn_copies[key]
-		if held is Dictionary and str((held as Dictionary).get("item", "")) == item_id:
-			taken[int((held as Dictionary).get("ordinal", 0))] = true
-	var best := 0
-	var best_count := -1
-	for ordinal in annoints.ordinals_of(item_id):
-		if taken.has(ordinal):
-			continue
-		var count := annoints.count(item_id, ordinal)
-		if count > best_count:
-			best = ordinal
-			best_count = count
-	if best_count <= 0:
-		best = 0
-		while taken.has(best) and best < 32:
-			best += 1
-	return best
+		if held is Dictionary and str((held as Dictionary).get("item", "")) == item_id \
+				and int((held as Dictionary).get("ordinal", 0)) == serial:
+			return true
+	return false
+
+
+## A copy leaving a body: the slot forgets it and the caller gets the piece and
+## the serial it was worn under, so the weapon that was annointed is the weapon
+## that comes off the body. The caller puts it back; this only lets go.
+func _release_copy(merc_id: int, slot_id: String) -> Dictionary:
+	var key := "%d:%s" % [merc_id, slot_id]
+	var held: Variant = worn_copies.get(key, {})
+	worn_copies.erase(key)
+	if not held is Dictionary:
+		return {}
+	var item_id := str((held as Dictionary).get("item", ""))
+	if item_id.is_empty():
+		return {}
+	return {"item": item_id, "serial": int((held as Dictionary).get("ordinal", -1))}
 
 ## Which copy a card for `item_id` is showing: the first copy that exists, else
 ## the first one a body wears, else 0. Cards are read off the piece, not a body,
 ## so this is the least surprising answer for a stash row.
 func annoint_copy_for_item(item_id: String) -> int:
-	var ordinals := annoints.ordinals_of(item_id)
-	return int(ordinals[0]) if not ordinals.is_empty() else 0
+	return _resolve_copy(item_id, -1)
+
+
+## The copy an altar press means when it names none: the copy a body is wearing
+## (the piece in the hand is the piece the player walked up with), else the
+## plainest spare. A copy is an instance, so a press never reaches across to a
+## relic the warband is not wearing, and a purchase is a new weapon with no marks.
+## `ordinal >= 0` is taken as given.
+func _resolve_copy(item_id: String, ordinal: int) -> int:
+	if ordinal >= 0:
+		return ordinal
+	for key in worn_copies:
+		var held: Variant = worn_copies[key]
+		if held is Dictionary and str((held as Dictionary).get("item", "")) == item_id:
+			return int((held as Dictionary).get("ordinal", 0))
+	var best := -1
+	var fewest := -1
+	for serial in stash.serials_of(item_id):
+		var marks := annoints.count(item_id, int(serial))
+		if fewest < 0 or marks < fewest:
+			best = int(serial)
+			fewest = marks
+	return maxi(best, 0)
 
 ## The annointment-bearing pieces one body wears, as ledger refs. The armour, the
 ## hands and the worn jewellery: a necklace or a ring is a piece the altar can
@@ -1264,25 +1326,59 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 	if str(gear.get(slot_id, "")) == item_id:
 		return {"ok": true, "message": "%s is already worn there." % roster.name_of(merc_id),
 			"displaced": {}}
+	var was_wearing := str(gear.get(slot_id, ""))
 	var moved_from := ""
+	var moved_serial := -1
 	if pool.pooled_count(item_id) <= 0:
 		var taken := _strip_worn(item_id, pool)
 		if not bool(taken.get("ok", false)):
 			return {"ok": false, "message": "You do not own that piece yet.", "displaced": {}}
 		moved_from = str(taken.get("from", ""))
+		# The stripped copy comes with the serial it was worn under.
+		moved_serial = int(taken.get("serial", -1))
 	var result := roster.equip(merc_id, slot_id, item_id)
 	if not bool(result.get("ok", false)):
 		# Put the stripped piece back where it came from: a refused equip must
 		# not quietly pocket somebody else's gear.
 		if not moved_from.is_empty():
-			pool.remove(item_id, 1)
+			pool.remove(item_id, 1, moved_serial)
 		return result
-	pool.remove(item_id, 1)
 	var displaced: Dictionary = result.get("displaced", {})
+	if moved_serial < 0:
+		# A copy off the shelf: take the plainest one, by its own serial.
+		var plainest := -1
+		var fewest := -1
+		for serial in pool.serials_of(item_id):
+			var marks := annoints.count(item_id, int(serial))
+			if fewest < 0 or marks < fewest:
+				plainest = int(serial)
+				fewest = marks
+		moved_serial = plainest
+	pool.remove(item_id, 1, moved_serial)
+	# The copy this body was wearing in that slot, if any, goes back to the pool
+	# as itself.
+	var let_go := _release_copy(merc_id, slot_id)
+	if not let_go.is_empty():
+		pool.add(str(let_go.get("item", "")), 1, int(let_go.get("serial", -1)))
+	elif not was_wearing.is_empty():
+		# A copy that was worn before copies had serials (a dress that never
+		# claimed one): the piece itself still comes back to the pool.
+		pool.add(was_wearing, 1)
+	worn_copies["%d:%s" % [merc_id, slot_id]] = {"item": item_id,
+		"ordinal": moved_serial}
 	for slot in displaced:
+		# The slot being equipped was released above; releasing it twice would hand
+		# the newly worn copy straight back to the pool.
+		if str(slot) == slot_id:
+			continue
 		var old_id := str(displaced[slot])
-		if not old_id.is_empty():
+		if old_id.is_empty():
+			continue
+		var off := _release_copy(merc_id, slot)
+		if off.is_empty():
 			pool.add(old_id, 1)
+		else:
+			pool.add(str(off.get("item", old_id)), 1, int(off.get("serial", -1)))
 	if not moved_from.is_empty():
 		result["message"] = "%s taken from %s." % [str(result.get("message", "")), moved_from]
 	if announce:
@@ -1308,8 +1404,12 @@ func _strip_worn(item_id: String, pool: WarbandStash) -> Dictionary:
 		var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(slot_id)]
 		if roster.take_worn(merc_id, slot_id, int(entry.get("set", -1))) != item_id:
 			continue
-		pool.add(item_id, 1)
-		return {"ok": true, "from": label}
+		# The copy leaves the body with the serial it was wearing: a relic handed
+		# from one body to another is still the same weapon.
+		var let_go := _release_copy(merc_id, slot_id)
+		var serial := int(let_go.get("serial", -1))
+		pool.add(item_id, 1, serial)
+		return {"ok": true, "from": label, "serial": serial}
 	return {"ok": false, "from": ""}
 
 ## Every worn piece in the warband, both weapon sets included, as `{merc, slot,
@@ -1374,7 +1474,9 @@ func unequip_merc(merc_id: int, slot_id: String) -> String:
 	var item_id := roster.unequip(merc_id, slot_id)
 	if item_id.is_empty():
 		return ""
-	field_stash().add(item_id, 1)
+	# The copy comes off the body as itself: its serial returns with the piece.
+	var off := _release_copy(merc_id, slot_id)
+	field_stash().add(item_id, 1, int(off.get("serial", -1)))
 	_notify()
 	return item_id
 

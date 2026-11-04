@@ -15,41 +15,92 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
 const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 
-## item_id -> copies nobody is wearing.
+## item_id -> the serials of the copies nobody is wearing, ascending.
+##
+## A copy is an *instance*: every piece the warband ever owned has its own serial,
+## minted once and never reused, and that serial is what the altar's ledger keys
+## an annointment on (`town_stash`'s ordinal). Two greatswords off a keeper's
+## shelf are therefore two different weapons: one can be a relic and the other
+## plain steel, and buying the second cannot hand the first's marks over to it.
 var _pooled: Dictionary = {}
+## The next serial to mint, per item id. Serials run from zero for each kind, so
+## the first copy of an item keeps the `id#0` key older saves and every card
+## already name, and two kinds can both be copy zero.
+var _next_serial: Dictionary = {}
 
 func clear() -> void:
 	_pooled.clear()
+	_next_serial.clear()
 
 # --- pooled storage --------------------------------------------------------
 
-func add(item_id: String, count: int = 1) -> void:
+## Put copies into the pool. `serial` carries an existing identity back in (a
+## piece that came off a body), so a relic stays the same weapon when it is taken
+## off and put down again; -1 mints new ones. Returns the serial added.
+func add(item_id: String, count: int = 1, serial: int = -1) -> int:
 	item_id = State.migrate_item_id(item_id)
 	if item_id.is_empty() or count <= 0:
-		return
-	_pooled[item_id] = int(_pooled.get(item_id, 0)) + count
+		return 0
+	var list: Array = _pooled.get(item_id, [])
+	var first := -1
+	for index in count:
+		var minted := serial if index == 0 and serial >= 0 else _mint_serial(item_id)
+		if index == 0:
+			first = minted
+		list.append(minted)
+	list.sort()
+	_pooled[item_id] = list
+	return first
 
-## Take copies out of the pool. False when the pool does not hold that many.
-func remove(item_id: String, count: int = 1) -> bool:
+## A serial for a copy that is not (and never was) in the pool: a piece that was
+## put on a body before the warband had a shelf for it, or a slot claiming a copy
+## another slot already holds. It still gets an identity of its own.
+func mint_serial(item_id: String) -> int:
+	return _mint_serial(State.migrate_item_id(item_id))
+
+func _mint_serial(item_id: String) -> int:
+	var serial := int(_next_serial.get(item_id, 0))
+	_next_serial[item_id] = serial + 1
+	return serial
+
+## Take copies out of the pool. `serial` names the exact copy to take (that is how
+## a body claims the weapon it means); -1 drops the lowest serials. False when the
+## pool does not hold what was asked for.
+func remove(item_id: String, count: int = 1, serial: int = -1) -> bool:
 	if item_id.is_empty() or count <= 0:
 		return false
-	var have := int(_pooled.get(item_id, 0))
-	if have < count:
+	var list: Array = _pooled.get(item_id, [])
+	if list.size() < count:
 		return false
-	var left := have - count
-	if left <= 0:
+	if serial >= 0:
+		if not list.has(serial):
+			return false
+		list.erase(serial)
+	else:
+		list = list.slice(count)
+	if list.is_empty():
 		_pooled.erase(item_id)
 	else:
-		_pooled[item_id] = left
+		_pooled[item_id] = list
 	return true
 
+## The serials of the copies nobody is wearing, lowest first.
+func serials_of(item_id: String) -> Array[int]:
+	var out: Array[int] = []
+	for serial in _pooled.get(item_id, []):
+		out.append(int(serial))
+	return out
+
+func has_serial(item_id: String, serial: int) -> bool:
+	return (_pooled.get(item_id, []) as Array).has(serial)
+
 func pooled_count(item_id: String) -> int:
-	return int(_pooled.get(item_id, 0))
+	return (_pooled.get(item_id, []) as Array).size()
 
 func pooled_total() -> int:
 	var total := 0
 	for item_id in _pooled:
-		total += int(_pooled[item_id])
+		total += (_pooled[item_id] as Array).size()
 	return total
 
 func pooled_ids() -> Array[String]:
@@ -61,7 +112,10 @@ func pooled_ids() -> Array[String]:
 
 ## item_id -> copies, for persistence and tests.
 func pooled_map() -> Dictionary:
-	return _pooled.duplicate()
+	var out := {}
+	for item_id in _pooled:
+		out[str(item_id)] = (_pooled[item_id] as Array).size()
+	return out
 
 # --- value -----------------------------------------------------------------
 
@@ -83,7 +137,8 @@ static func value_of(item_id: String, brand: Dictionary = {}) -> int:
 func rows(roster, brands: Dictionary = {}) -> Array[Dictionary]:
 	var by_item: Dictionary = {}   # item_id -> {pooled:int, worn:Array}
 	for item_id in _pooled:
-		by_item[str(item_id)] = {"pooled": int(_pooled[item_id]), "worn": []}
+		by_item[str(item_id)] = {"pooled": (_pooled[item_id] as Array).size(),
+			"worn": []}
 	if roster != null:
 		# Both weapon sets count as worn: a piece waiting in the set the hands are
 		# not carrying is still on that mercenary, and a stash row that forgot it
@@ -158,14 +213,41 @@ func available_ids(roster) -> Array[String]:
 # --- persistence -----------------------------------------------------------
 
 func to_dict() -> Dictionary:
-	return {"pooled": _pooled.duplicate()}
+	var pooled := {}
+	for item_id in _pooled:
+		pooled[str(item_id)] = (_pooled[item_id] as Array).duplicate()
+	return {"pooled": pooled, "next_serial": _next_serial.duplicate()}
 
 func from_dict(data: Dictionary) -> void:
 	_pooled.clear()
+	_next_serial.clear()
+	var saved_next: Variant = data.get("next_serial", {})
+	if saved_next is Dictionary:
+		for item_id in saved_next:
+			_next_serial[str(item_id)] = int(saved_next[item_id])
 	var saved: Variant = data.get("pooled", {})
-	if saved is Dictionary:
-		for item_id in saved:
-			var count := int(saved[item_id])
-			var restored := State.migrate_item_id(str(item_id))
-			if count > 0 and not restored.is_empty():
-				_pooled[restored] = count
+	if not saved is Dictionary:
+		return
+	for item_id in saved:
+		var restored := State.migrate_item_id(str(item_id))
+		if restored.is_empty():
+			continue
+		var entry: Variant = saved[item_id]
+		var list: Array = []
+		if entry is Array:
+			# A save from v14 on: the copies' own serials.
+			for serial in entry:
+				list.append(int(serial))
+		else:
+			# A count from before copies had serials: mint them now, in order, so
+			# the ledger's `id#N` keys and the pool's own serials cannot collide.
+			var count := int(entry)
+			for index in maxi(0, count):
+				list.append(_mint_serial(restored))
+		if list.is_empty():
+			continue
+		list.sort()
+		for serial in list:
+			_next_serial[restored] = maxi(int(_next_serial.get(restored, 0)),
+				int(serial) + 1)
+		_pooled[restored] = list

@@ -105,6 +105,8 @@ func _fly(delta: float) -> void:
 			if authoritative_damage:
 				_note_attacker(collider)
 				_note_impact(collider)
+				if pierced_headshot:
+					_note_headshot(collider)
 				collider.take_damage(damage, source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
 			pierce -= 1
@@ -128,6 +130,8 @@ func _fly(delta: float) -> void:
 				headshot = Hitbox.is_headshot(collider as Node, hit.position)
 				_note_attacker(collider)
 				_note_impact(collider)
+				if headshot:
+					_note_headshot(collider)
 				collider.take_damage(damage, source_id, headshot)
 				applied_hit = true
 		if applied_hit:
@@ -173,6 +177,8 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 			var headshot := Hitbox.is_headshot(candidate,point+Vector3.UP*1.1)
 			_note_attacker(candidate)
 			_note_impact(candidate)
+			if headshot:
+				_note_headshot(candidate)
 			candidate.take_damage(damage,source_id,headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
 		impacted.emit(true,point)
@@ -193,6 +199,14 @@ func _note_attacker(collider: Object) -> void:
 func _note_impact(collider: Object) -> void:
 	if collider != null and collider.has_method("note_impact"):
 		collider.note_impact(ImpactRules.projectile_force(velocity))
+
+
+## A shaft that lands on the head names the headshot on the body before the blow
+## lands, so a killing shot can take the head off with the arrow still in it.
+## Bodies that do not care (the player, arena fighters) are untouched.
+func _note_headshot(collider: Object) -> void:
+	if is_instance_valid(collider) and collider.has_method("note_arrow_headshot"):
+		collider.note_arrow_headshot(velocity, damage)
 
 func _place_visual() -> void:
 	if not is_instance_valid(_visual):

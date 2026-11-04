@@ -12,6 +12,7 @@ extends SceneTree
 const Actor = preload("res://scripts/warband/warband_body.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 
 ## A blow the victim did not land itself: `receive_melee` refuses `source == slot`.
 const KILLER_SLOT := 7
@@ -68,6 +69,12 @@ func hit_from_plus_x(actor, amount: float) -> int:
 ## The drip node the body carries, or null when it carries none.
 func drip_of(actor):
 	return actor.get_node_or_null("BleedDrip")
+
+## The head the body threw, or null while it still wears it.
+func severed_of(actor):
+	if not is_instance_valid(actor) or not is_instance_valid(actor.rig):
+		return null
+	return actor.rig.find_child("SeveredHead", true, false)
 
 func run() -> void:
 	scene = Node3D.new()
@@ -196,6 +203,90 @@ func run() -> void:
 		"A replicated revive stands the body back up")
 	check(not replica.rig.is_downed_pose(),"A replicated revive clears the prone pose")
 	check(replica_drip != null and not replica_drip.attached(),"A replicated revive stops the drip")
+
+	# --- an arrow in the head of a player: a stump for a corpse ------------
+	# A campaign body never dies from a blow, so the head leaves on the *finisher*:
+	# an arrow in the head of a body already on the ground, whatever it is wearing.
+	var plated = make_actor(5,5,false,Vector3(0,0,30))
+	plated.rig.set_armor(ArmorData.SET_IDS.find("plate"))
+	await _frames(2)
+	plated.note_arrow_headshot(Vector3(0,0,-40),5.0)
+	plated.take_damage(5.0,KILLER_SLOT,true)
+	await _frames(1)
+	check(plated.alive and not plated.downed,
+		"A headshot the plate turns into a normal hit leaves the body standing")
+	check(severed_of(plated) == null,"and takes no head with it")
+	plated.note_arrow_headshot(Vector3(0,0,-40),200.0)
+	plated.take_damage(200.0,KILLER_SLOT,true)
+	await _frames(1)
+	check(plated.downed and plated.alive,
+		"A killing headshot only puts a campaign body on the ground")
+	check(severed_of(plated) == null,"A downed body still wears its head")
+	plated.note_arrow_headshot(Vector3(0,0,-40),60.0)
+	plated.take_damage(60.0,KILLER_SLOT,true)
+	await _frames(1)
+	check(not plated.alive,"The finisher kills the downed body")
+	var piece = severed_of(plated)
+	check(piece != null,"An arrow in the head of a downed body takes the head off")
+	var plated_skeleton := plated.rig.find_child("Skeleton3D", true, false) as Skeleton3D
+	var plated_head := plated_skeleton.find_bone("Head")
+	check(plated_skeleton.get_bone_pose(plated_head).basis.get_scale().x < 0.05,
+		"The corpse keeps a head bone with no volume left")
+	# The rig's clips write the head back on every solve, so the removal is a
+	# stump node that wins the frame: it must be on the corpse, and it must take
+	# a head the pose gave volume back to.
+	var stump = plated_skeleton.find_child("HeadStump", false, false)
+	check(stump != null and stump.is_processing(),
+		"The corpse carries the stump that keeps the head removed")
+	if stump != null:
+		var full := plated_skeleton.get_bone_pose(plated_head)
+		plated_skeleton.set_bone_pose(plated_head,
+			Transform3D(full.basis.orthonormalized(), full.origin))
+		stump.enforce()
+		check(plated_skeleton.get_bone_pose(plated_head).basis.get_scale().x < 0.05,
+			"A pose solve that gives the head back is collapsed again")
+	if piece != null:
+		var piece_mesh := piece.find_child("GorePiece", true, false) as MeshInstance3D
+		check(piece_mesh != null and piece_mesh.mesh != null
+				and piece_mesh.mesh.get_surface_count() > 0,
+			"The thrown head is a mesh of its own")
+		var helmet_nodes: Array = plated.rig._armor_meshes["head"][
+			ArmorData.SET_IDS.find("plate")]
+		var helmet_material = (helmet_nodes[0] as MeshInstance3D).get_active_material(0)
+		var carries := false
+		if piece_mesh != null and piece_mesh.mesh != null:
+			for surface in piece_mesh.mesh.get_surface_count():
+				if piece_mesh.mesh.surface_get_material(surface) == helmet_material:
+					carries = true
+		check(carries,"The plate helm is part of the head that flew")
+		await _frames(90)
+		check((piece as Node3D).global_position.distance_to(plated.global_position) > 0.4,
+			"The head is thrown clear of the corpse")
+		check(not piece.is_physics_processing(),"and comes to a rest on the ground")
+
+	# A body that bled out, and one finished with a blade, keep their heads.
+	check(severed_of(fallen) == null,"A body that bleeds out keeps its head")
+	var struck = make_actor(6,6,false,Vector3(0,0,40))
+	hit_from_plus_x(struck,100.0)
+	hit_from_plus_x(struck,10.0)
+	await _frames(1)
+	check(not struck.alive,"A melee finisher kills a downed body")
+	check(severed_of(struck) == null,"A melee finisher takes no head")
+
+	# The wire carries the flight, so a guest sees the same decapitation.
+	var cut_source = make_actor(7,7,false,Vector3(0,0,50))
+	var cut_replica = make_actor(8,8,false,Vector3(0,0,56))
+	cut_replica.authoritative = false
+	var death_wire: Dictionary = cut_source.snapshot()
+	death_wire["health"] = 0.0
+	death_wire["alive"] = false
+	death_wire["sever"] = Vector4(0.0,0.0,-40.0,1.0)
+	cut_replica.apply_snapshot(death_wire,3,[])
+	await _frames(1)
+	check(severed_of(cut_replica) != null,
+		"A replica throws the head its death snapshot carries")
+	check(severed_of(cut_source) == null,
+		"A living body's snapshot carries no flight")
 
 	if failures == 0:
 		print("DOWNED_BLEEDOUT_OK %d" % checks)

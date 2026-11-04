@@ -33,6 +33,8 @@ func run() -> void:
 	var Enemy = load("res://scripts/enemy.gd")
 	var Mob = load("res://scripts/devil_mob.gd")
 	var DelveDevil = load("res://scripts/delve_devil.gd")
+	var ForestMob = load("res://scripts/forest_mob.gd")
+	var CageWatcher = load("res://scripts/warband/cage_watcher.gd")
 
 	check(is_equal_approx(CorpseHold.SECONDS, 300.0),
 		"A corpse lies in the world for five minutes by default")
@@ -167,6 +169,225 @@ func run() -> void:
 	check(not CorpsePhysics.is_limp(falling_proc._visual),
 		"The procedural delve corpse has no physical skeleton")
 
+	# --- A killing arrow takes the head with it. ---
+	# Five bodies: one whose headshot is survivable, one killed by a plain blow,
+	# one killed by a headshot, one procedural devil killed by a headshot, and one
+	# replica told about a decapitation by the wire.
+	var spared = Mob.new()
+	spared.mob_id = "hell_goat"
+	spared.position = Vector3(-12.0, 0.12, 0.0)
+	fixture.add_child(spared)
+	var plain = Mob.new()
+	plain.mob_id = "hell_goat"
+	plain.position = Vector3(-15.0, 0.12, 0.0)
+	fixture.add_child(plain)
+	var cut = Mob.new()
+	cut.mob_id = "hell_goat"
+	cut.position = Vector3(-18.0, 0.12, 0.0)
+	fixture.add_child(cut)
+	var cut_proc = DelveDevil.new()
+	cut_proc.configure(3, "claw", 1)
+	cut_proc.position = Vector3(-21.0, 0.12, 0.0)
+	fixture.add_child(cut_proc)
+	var beheaded_replica = Mob.new()
+	beheaded_replica.mob_id = "hell_goat"
+	beheaded_replica.position = Vector3(-24.0, 0.12, 0.0)
+	fixture.add_child(beheaded_replica)
+	await physics_frame
+	await physics_frame
+
+	spared.note_arrow_headshot(Vector3(0.0, 0.0, -45.0), 5.0)
+	spared.take_damage(5.0, 0, true)
+	check(spared.alive, "A headshot that does not kill leaves the head on the body")
+	spared.take_damage(999.0, 0, false)
+	check(spared._visual.find_child("SeveredHead", true, false) == null,
+		"A headshot a body survived is never spent on a later kill")
+
+	plain.take_damage(999.0, 0, false)
+	check(plain._visual.find_child("SeveredHead", true, false) == null,
+		"A body kill leaves the head on the corpse")
+	var plain_skeleton := plain._visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	var plain_head := plain_skeleton.find_bone("Head")
+	check(plain_skeleton.get_bone_pose(plain_head).basis.get_scale().x > 0.5,
+		"An untouched head bone keeps its volume")
+
+	# The real thing: a live arrow at the head, the blow kills, the head goes.
+	var Arrow = load("res://scripts/arrow.gd")
+	var aim: Vector3 = cut.head_hitbox_center()
+	var facing: Vector3 = aim - cut.global_position
+	facing.y = 0.0
+	facing = facing.normalized()
+	var shot: Node3D = Arrow.new()
+	fixture.add_child(shot)
+	var excluded: Array[RID] = []
+	shot.launch(aim + facing * 0.9, -facing, 32.0, 60.0, excluded)
+	await pause(0.3)
+	var cut_skeleton := cut._visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	var cut_head := cut_skeleton.find_bone("Head")
+	check(not cut.alive, "The killing headshot kills the body")
+	check(cut_skeleton.get_bone_pose(cut_head).basis.get_scale().x < 0.05,
+		"The corpse keeps a head bone with no volume left")
+	check(cut_skeleton.get_bone_parent(cut_head) >= 0,
+		"The stump stays jointed on the neck instead of flying with the head")
+	var flight = cut._visual.find_child("SeveredHead", true, false)
+	check(flight != null, "A killing headshot throws a head into the world")
+	if flight != null:
+		var piece := flight.find_child("GorePiece", true, false) as MeshInstance3D
+		check(piece != null and piece.mesh != null
+				and piece.mesh.get_surface_count() > 0
+				and piece.mesh.surface_get_array_len(0) > 0,
+			"The thrown piece is a mesh of its own, carrying the rig's surfaces")
+		check(flight.get_child_count() == 2,
+			"The arrow that killed it leaves the body with the head")
+	await pause(1.2)
+	if flight != null and is_instance_valid(flight):
+		check((flight as Node3D).global_position.distance_to(cut.global_position) > 0.6,
+			"The thrown head travels clear of the corpse")
+		check((flight as Node3D).global_position.y < 0.9,
+			"The thrown head comes down to the ground")
+	await pause(1.4)
+	if flight != null and is_instance_valid(flight):
+		check(not flight.is_physics_processing(),
+			"A head that has come to rest stops being simulated")
+
+	cut_proc.note_arrow_headshot(Vector3(0.0, 0.0, -45.0), 60.0)
+	cut_proc.take_damage(60.0, 0, true)
+	var proc_head: Node3D = cut_proc._visual._head
+	check(cut_proc._visual._severed,
+		"A procedural devil stops posing the head it lost")
+	check(proc_head.get_parent() != null
+			and str(proc_head.get_parent().name) == "SeveredHead",
+		"A procedural devil's head node is cut loose and thrown")
+
+	var death_state := {
+		"p": beheaded_replica.global_position, "y": 0.0, "v": Vector3.ZERO,
+		"g": true, "s": "DEAD", "t": 0.0, "h": 0.0, "a": false,
+		"x": Vector4.ZERO, "k": Vector4(0.0, 0.0, -45.0, 1.0),
+	}
+	beheaded_replica.apply_snapshot(death_state, 1)
+	check(not beheaded_replica.alive, "A replica dies from the death snapshot")
+	check(beheaded_replica._visual.find_child("SeveredHead", true, false) != null,
+		"A replica throws the head its death snapshot names")
+
+
+	# --- every rig family loses the head that flew -------------------------
+	# The stump is only believable if the corpse draws nothing where the head was:
+	# each species poses its own skeleton, and one that wrote the head back after
+	# the sever would leave a face on the corpse with a head in the air beside it.
+	var rest := []
+	var slots := ["succubus", "spawn", "beast", "gargoyle"]
+	for index in slots.size():
+		var body = Mob.new()
+		body.mob_id = slots[index]
+		rest.append([slots[index], body, Vector3(-24.0, 0.12, 10.0 + 3.0 * index)])
+	for index in 2:
+		var species: String = ["ossuary_stalker", "gallowsroot"][index]
+		var body = ForestMob.new()
+		body.mob_id = species
+		rest.append([species, body, Vector3(-24.0, 0.12, 22.0 + 3.0 * index)])
+	var watcher = CageWatcher.new()
+	watcher.mob_id = "hollow_warden"
+	rest.append(["cage_watcher", watcher, Vector3(-24.0, 0.12, 28.0)])
+	for entry in rest:
+		entry[1].position = entry[2]
+		fixture.add_child(entry[1])
+	await physics_frame
+	await physics_frame
+	for entry in rest:
+		entry[1].note_arrow_headshot(Vector3(0.0, 0.0, -45.0), 200.0)
+		entry[1].take_damage(200.0, 0, true)
+	await physics_frame
+	await physics_frame
+	for entry in rest:
+		var label := str(entry[0])
+		var visual: Node3D = entry[1]._visual
+		var skeleton := visual.find_child("Skeleton3D", true, false) as Skeleton3D
+		var head := _head_bone(skeleton)
+		check(not entry[1].alive, label + " dies to the arrow")
+		check(head >= 0 and skeleton.get_bone_pose(head).basis.get_scale().x < 0.05,
+			label + " corpse keeps no head where the head was")
+		check(visual.find_child("SeveredHead", true, false) != null,
+			label + " threw the head into the world")
+
+	# --- a two-handed overhead takes the body in two ----------------------
+	# `SeveredBody`: the bones above the cut own the piece, the corpse keeps its
+	# lower half, the guts spill under the cut, and the piece lands beside it.
+	var cleaved = Mob.new()
+	cleaved.mob_id = "hell_goat"
+	cleaved.position = Vector3(-18.0, 0.12, 12.0)
+	fixture.add_child(cleaved)
+	var cleaved_proc = DelveDevil.new()
+	cleaved_proc.configure(1, "claw", 1)
+	cleaved_proc.position = Vector3(-18.0, 0.12, 18.0)
+	fixture.add_child(cleaved_proc)
+	var stabbed = Mob.new()
+	stabbed.mob_id = "hell_goat"
+	stabbed.position = Vector3(-18.0, 0.12, 24.0)
+	fixture.add_child(stabbed)
+	var bisected = Mob.new()
+	bisected.mob_id = "hell_goat"
+	bisected.position = Vector3(-12.0, 0.12, 12.0)
+	fixture.add_child(bisected)
+	var low_cut = Enemy.new()
+	low_cut.kind = 0
+	low_cut.position = Vector3(-12.0, 0.12, 18.0)
+	fixture.add_child(low_cut)
+	await physics_frame
+	await physics_frame
+	cleaved.note_cleave(Vector3(0.0, 0.0, -1.0))
+	cleaved.take_damage(999.0, 0, false)
+	cleaved_proc.note_cleave(Vector3(0.0, 0.0, -1.0))
+	cleaved_proc.take_damage(999.0, 0, false)
+	stabbed.take_damage(999.0, 0, false)
+	bisected.note_cleave(Vector3(0.0, 0.0, -1.0), "vertical")
+	bisected.take_damage(999.0, 0, false)
+	low_cut.note_cleave(Vector3(0.0, 0.0, -1.0), "vertical")
+	low_cut.take_damage(999.0, 0, false)
+	await physics_frame
+	await physics_frame
+	var cleaved_skeleton := cleaved._visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	var collapsed := 0
+	var solid := 0
+	for index in cleaved_skeleton.get_bone_count():
+		if cleaved_skeleton.get_bone_pose(index).basis.get_scale().x < 0.05:
+			collapsed += 1
+		else:
+			solid += 1
+	var holder = cleaved._visual.find_child("SplitBody", true, false)
+	var piece := holder.find_child("GorePiece", true, false) as MeshInstance3D \
+		if holder != null else null
+	check(not cleaved.alive, "The two-handed chop kills the body")
+	check(holder != null and piece != null and piece.mesh != null
+			and piece.mesh.get_surface_count() > 0,
+		"A two-handed overhead takes the upper body off as a piece")
+	check(collapsed > 0 and solid > 0,
+		"The corpse keeps its lower half and loses the bones above the cut")
+	check(cleaved._visual.find_child("Entrails", true, false) != null,
+		"The guts spill on the floor under the cut")
+	check(stabbed._visual.find_child("SplitBody", true, false) == null,
+		"A blow that is not a two-handed overhead does not split the body")
+	check(cleaved_proc._visual.find_child("SplitBody", true, false) == null,
+		"A body with no skeleton is not cut in two")
+	var halves_holder = bisected._visual.find_child("SplitBody", true, false)
+	# Two arms, each carrying its own half and the meat its cut face is made of.
+	var halves: int = halves_holder.get_child_count() if halves_holder != null else 0
+	var halves_drawn := 0
+	if halves_holder != null:
+		for arm in halves_holder.get_children():
+			if arm.find_child("GoreHalf", true, false) != null \
+					and arm.find_child("CutFace", true, false) != null:
+				halves_drawn += 1
+	check(halves == 2 and halves_drawn == 2,
+		"An overhead slices the body into two halves, each with its cut face")
+	check(bisected._visual.find_child("BodyStump", true, false) == null,
+		"A sliced body is replaced by its halves instead of keeping a stump")
+	check(low_cut._wolf.find_child("SplitBody", true, false) == null,
+		"A body with no third of itself to cut is not split")
+	await pause(0.9)
+	if holder != null and is_instance_valid(holder):
+		check((holder as Node3D).global_position.y < 1.2,
+			"The upper body comes down to the floor")
+
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.
 	await pause(5.2)
@@ -219,6 +440,27 @@ func run() -> void:
 	await process_frame
 	print("CORPSE_REGRESSION checks=%d failures=%d" % [checks, failures])
 	quit(0 if failures == 0 else 1)
+
+
+## The deforming head bone of a rig, the same rule `SeveredHead` uses: the outer
+## bone wins where a rig carries an empty `head` helper under `Head`.
+func _head_bone(skeleton: Skeleton3D) -> int:
+	if skeleton == null:
+		return -1
+	var found := -1
+	for index in skeleton.get_bone_count():
+		if skeleton.get_bone_name(index).to_lower() != "head":
+			continue
+		if found < 0:
+			found = index
+			continue
+		var parent := skeleton.get_bone_parent(found)
+		while parent >= 0:
+			if parent == index:
+				found = index
+				break
+			parent = skeleton.get_bone_parent(parent)
+	return found
 
 
 func _bone_world(visual: Node3D, bone_name: String) -> Vector3:
