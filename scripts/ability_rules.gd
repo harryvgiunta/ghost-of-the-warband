@@ -592,13 +592,18 @@ const ABILITIES := [
 		"id": "three_strike", "name": "THREE STRIKE", "item": "sword_short",
 		"hitem": "", "slot": 0, "key": "SHIFT + 1", "stamina_cost": 35.0,
 		"cooldown": 8.0, "duration": 0.8, "travel_seconds": 0.0, "speed_scale": 0.0,
-		"sound": "slash", "move": true, "animation": "Sword_Double_Slash",
-		"lean": 0.05, "annoint_only": true,
+		"sound": "slash", "move": true, "animation": "Sword_Three_Strike",
+		# The clip authors its own weight shift and lean, and both of its wrists:
+		# `Sword_Three_Strike` is the one clip where a dual pair swings two
+		# blades, so the rig must not re-solve the off arm to the carry pose.
+		"lean": 0.0, "offhand_authored": true, "annoint_only": true,
 		"icon": "res://assets/ui/abilities/three_strike.png",
-		"description": "Three waves of steel: right, left, then both together.",
-		# One wave per cue. Each wave is its own cut through the front arc and
+		"description": "Three sweeping cuts: right blade, left blade, then both together.",
+		# One wave per cue, each on the frame its cut lands in the clip (0.20,
+		# 0.50 and 0.80 of it). Each wave is its own cut through the front arc and
 		# stops at `victims_per_wave` bodies, so the skill reaches at most nine -
-		# three waves of three, never one blade re-cutting the same rank.
+		# three waves of three, never one blade re-cutting the same rank. Each
+		# wave also sends out its own ripple.
 		"effect": {"kind": "melee_wave", "damage_scale": 0.8, "radius": 2.4,
 			"arc_degrees": 130.0, "stagger": 0.18, "victims_per_wave": 3,
 			"wave_scales": [0.7, 0.7, 1.5], "wave_sides": [1.0, -1.0, 0.0],
@@ -606,7 +611,7 @@ const ABILITIES := [
 		"cues": [
 			{"at": 0.16, "cue": "wave"},
 			{"at": 0.40, "cue": "wave"},
-			{"at": 0.66, "cue": "wave"},
+			{"at": 0.64, "cue": "wave"},
 		],
 	},
 	{

@@ -60,6 +60,7 @@ CLIPS = [
     ('Sword_Double_Slash', 1.0, None, 'sword'),
     ('Sword_Lunge_Thrust', 0.95, None, 'sword'),
     ('Sword_Spin_Slash', 0.3166667, None, 'sword'),
+    ('Sword_Three_Strike', 0.8, None, 'dual'),
     ('Dagger_Backstab', 0.9, None, 'dagger'),
     ('Staff_Fireball_Cast', 1.2, None, 'staff'),
     ('Staff_Bone_Spear_Cast', 1.15, None, 'staff'),
@@ -69,10 +70,11 @@ CLIPS = [
 ]
 AUTHORED = {name for name, _s, _b, _k in CLIPS}
 # Clips re-authored in this pass. Everything else already in the shipped GLB is
-# left byte-for-byte untouched, so the merge copies only these. The spin is
+# left byte-for-byte untouched, so the merge copies only these. The spin was
 # 3x compressed in time: 19 frames (0.3166667 s) with the same normalized
-# tracks, because the runtime's 360 degree turn and trail are time-scaled too.
-REWORKED = ('Sword_Spin_Slash',)
+# tracks, because the runtime's 360 degree turn and trail are time-scaled too -
+# it is already shipped, so a re-run only carries the new sweep.
+REWORKED = ('Sword_Three_Strike',)
 RETIRED = {'Dagger_Dash_Stab'}
 
 for action in list(bpy.data.actions):
@@ -277,6 +279,16 @@ def aim_quat(direction, flat_up=Vector((0.0, 0.0, 1.0))):
 def hand_for_direction(direction, flat_up=Vector((0.0, 0.0, 1.0))):
     """hand_r basis that puts hand_r * sword_grip's -Z on `direction`."""
     return aim_quat(direction, flat_up) @ GRIP_ROT.inverted()
+
+
+def hand_for_direction_left(direction, flat_up=Vector((0.0, 0.0, 1.0))):
+    """hand_l basis that puts hand_l * sword_grip_left's -Z on `direction`.
+
+    The off-hand socket is the mirrored grip (`GRIP_ROT_LEFT`), and mirroring
+    across X leaves the blade's own -Z axis alone, so the same aim basis drives
+    the left blade as the right one.
+    """
+    return aim_quat(direction, flat_up) @ GRIP_ROT_LEFT.inverted()
 
 
 def grip_frame(wrist, hand_q):
@@ -622,6 +634,104 @@ def build_spin_slash(t):
     return p
 
 
+def build_three_strike(t):
+    # The dual-wield beat behind `three_strike`: three wide sweeps, one per wave
+    # cue - the right blade across, the left blade back, then both blades driven
+    # in together. Both arms are authored on purpose (no `support` hilt grip):
+    # the coin's skill is a two-blade reading, and the rig keeps this off arm
+    # while the ability plays (`offhand_authored`), so a dual pair sweeps two
+    # blades instead of one blade and a hand on the hilt.
+    #
+    # Impacts land at 0.20, 0.50 and 0.80 of the clip, which is where
+    # `three_strike`'s three wave cues sit. The torso leads every change of
+    # direction: hips and chest turn first, the blade arrives after them.
+    p = pose(weight=envelope(t, 0.05, 0.10))
+    p['wrist_r'] = track(t, [
+        (0.00, BASE_WRIST['r']),
+        (0.08, Vector((-0.150, 0.020, 1.470))),
+        (0.14, Vector((-0.200, 0.040, 1.480))),
+        (0.20, Vector((-0.010, -0.255, 1.255))),
+        (0.26, Vector((0.055, -0.200, 1.195))),
+        (0.34, Vector((0.020, -0.140, 1.280))),
+        (0.44, Vector((-0.070, -0.150, 1.360))),
+        (0.50, Vector((-0.085, -0.150, 1.400))),
+        (0.58, Vector((-0.105, -0.115, 1.440))),
+        (0.68, Vector((-0.180, -0.020, 1.500))),
+        (0.80, Vector((-0.055, -0.300, 1.220))),
+        (0.86, Vector((0.010, -0.235, 1.185))),
+        (1.00, BASE_WRIST['r']),
+    ])
+    p['handq_r'] = hand_for_direction(track(t, [
+        (0.00, Vector((0.10, 0.30, 0.95))),
+        (0.08, Vector((-0.58, 0.42, 0.58))),
+        (0.14, Vector((-0.70, 0.24, 0.55))),
+        (0.20, Vector((0.72, -0.58, 0.10))),
+        (0.26, Vector((0.80, -0.22, 0.12))),
+        (0.34, Vector((0.36, -0.62, 0.36))),
+        (0.44, Vector((-0.28, -0.52, 0.60))),
+        (0.50, Vector((-0.42, -0.46, 0.64))),
+        (0.58, Vector((-0.56, -0.26, 0.70))),
+        (0.68, Vector((-0.76, 0.10, 0.44))),
+        (0.80, Vector((0.34, -0.94, 0.02))),
+        (0.86, Vector((0.58, -0.52, 0.10))),
+        (1.00, Vector((0.10, 0.30, 0.95))),
+    ]))
+    p['wrist_l'] = track(t, [
+        (0.00, BASE_WRIST['l']),
+        (0.12, Vector((0.150, 0.020, 1.450))),
+        (0.30, Vector((0.185, 0.035, 1.470))),
+        (0.40, Vector((0.205, 0.040, 1.480))),
+        (0.50, Vector((0.010, -0.255, 1.255))),
+        (0.56, Vector((-0.050, -0.200, 1.195))),
+        (0.62, Vector((0.020, -0.150, 1.300))),
+        (0.68, Vector((0.180, -0.020, 1.500))),
+        (0.80, Vector((0.060, -0.300, 1.230))),
+        (0.86, Vector((-0.010, -0.235, 1.190))),
+        (1.00, BASE_WRIST['l']),
+    ])
+    p['handq_l'] = hand_for_direction_left(track(t, [
+        (0.00, Vector((0.10, 0.30, 0.95))),
+        (0.12, Vector((0.52, 0.36, 0.62))),
+        (0.30, Vector((0.62, 0.30, 0.57))),
+        (0.40, Vector((0.70, 0.22, 0.55))),
+        (0.50, Vector((-0.72, -0.58, 0.10))),
+        (0.56, Vector((-0.80, -0.22, 0.12))),
+        (0.62, Vector((-0.30, -0.62, 0.40))),
+        (0.68, Vector((0.76, 0.10, 0.44))),
+        (0.80, Vector((-0.34, -0.94, 0.02))),
+        (0.86, Vector((-0.58, -0.52, 0.10))),
+        (1.00, Vector((0.10, 0.30, 0.95))),
+    ]))
+    p['elbow_r'] = Vector((-0.40, 0.10, 1.32))
+    p['elbow_l'] = Vector((0.40, 0.10, 1.32))
+    p['yaw'] = track(t, [(0.00, 0.0), (0.08, -16.0), (0.14, -22.0), (0.20, 24.0), (0.26, 28.0),
+                         (0.34, 10.0), (0.40, -22.0), (0.50, -28.0), (0.56, -26.0),
+                         (0.62, -8.0), (0.68, 4.0), (0.80, 0.0), (0.88, 2.0), (1.00, 0.0)])
+    p['lean'] = track(t, [(0.00, 0.0), (0.14, -5.0), (0.20, 14.0), (0.26, 16.0), (0.34, 6.0),
+                          (0.40, -4.0), (0.50, 15.0), (0.56, 17.0), (0.62, 5.0),
+                          (0.68, -6.0), (0.80, 18.0), (0.88, 8.0), (1.00, 0.0)])
+    p['drop'] = track(t, [(0.00, 0.0), (0.14, 0.020), (0.20, 0.060), (0.26, 0.070), (0.34, 0.045),
+                          (0.40, 0.030), (0.50, 0.065), (0.56, 0.075), (0.62, 0.045),
+                          (0.68, 0.030), (0.80, 0.100), (0.88, 0.040), (1.00, 0.0)])
+    p['shift'] = (
+        track(t, [(0.00, 0.0), (0.14, -0.030), (0.20, 0.040), (0.26, 0.045), (0.34, 0.010),
+                  (0.40, 0.030), (0.50, -0.040), (0.56, -0.045), (0.62, -0.015),
+                  (0.68, 0.020), (0.80, 0.0), (0.88, 0.0), (1.00, 0.0)]),
+        track(t, [(0.00, 0.0), (0.14, 0.020), (0.20, -0.050), (0.26, -0.040), (0.34, -0.010),
+                  (0.40, 0.020), (0.50, -0.050), (0.56, -0.040), (0.62, -0.010),
+                  (0.68, 0.030), (0.80, -0.080), (0.88, -0.020), (1.00, 0.0)]),
+        0.0)
+    p['head_yaw'] = -0.30 * p['yaw']
+    p['head_pitch'] = track(t, [(0.00, 0.0), (0.14, -4.0), (0.20, 4.0), (0.26, 2.0), (0.40, -4.0),
+                                (0.50, 4.0), (0.56, 2.0), (0.68, -6.0), (0.80, 8.0),
+                                (0.88, 3.0), (1.00, 0.0)])
+    p['ankle_l'] = BASE_ANKLE['l'] + Vector((0.055, -0.045, 0.0))
+    p['ankle_r'] = BASE_ANKLE['r'] + Vector((-0.055, 0.030, 0.0))
+    p['foot_yaw_l'] = 9.0
+    p['foot_yaw_r'] = -7.0
+    return p
+
+
 # --- Dagger ---------------------------------------------------------------- #
 def build_dagger_backstab(t):
     # Gathering crouch (0-0.20), a compressed blink at 0.20, then the arrival:
@@ -905,6 +1015,7 @@ BUILDERS = {
     'Sword_Double_Slash': build_double_slash,
     'Sword_Lunge_Thrust': build_lunge_thrust,
     'Sword_Spin_Slash': build_spin_slash,
+    'Sword_Three_Strike': build_three_strike,
     'Dagger_Backstab': build_dagger_backstab,
     'Staff_Fireball_Cast': build_fireball,
     'Staff_Bone_Spear_Cast': build_bone_spear,
@@ -1022,6 +1133,9 @@ def build_shield(bm):
 
 PROXIES = {
     'sword': make_proxy('Proxy_Sword', lambda bm: build_sword(bm), (0.62, 0.64, 0.68), 0.85, 0.32),
+    # QA only: the off-hand blade of a dual pair, so a two-blade sweep can be
+    # read on both hands instead of judged from the right one.
+    'sword_left': make_proxy('Proxy_Sword_Left', lambda bm: build_sword(bm), (0.58, 0.60, 0.64), 0.85, 0.32),
     'dagger': make_proxy('Proxy_Dagger', build_dagger, (0.60, 0.62, 0.66), 0.85, 0.30),
     'staff': make_proxy('Proxy_Staff', build_staff, (0.36, 0.24, 0.13), 0.05, 0.6),
     'bow': make_proxy('Proxy_Bow', build_bow, (0.30, 0.19, 0.10), 0.05, 0.55),
@@ -1040,7 +1154,8 @@ BOW_BASIS = Matrix((Vector((0.0, 0.0, 1.0)), Vector((0.0, 1.0, 0.0)), Vector((-1
 
 def place_proxies(kind):
     for key, obj in PROXIES.items():
-        obj.hide_render = key != kind
+        shown = key == kind or (kind == 'dual' and key in ('sword', 'sword_left'))
+        obj.hide_render = not shown
     if not RENDER_QA:
         return
     rig_world = rig.matrix_world
@@ -1048,6 +1163,14 @@ def place_proxies(kind):
         obj = PROXIES[kind]
         grip_matrix = Matrix.Translation(GRIP_POS) @ GRIP_ROT.to_matrix().to_4x4()
         obj.matrix_world = rig_world @ rig.pose.bones['hand_r'].matrix @ grip_matrix
+    elif kind == 'dual':
+        # Both blades, each on its own hand's socket. `hand_for_direction_left`
+        # authors the off hand against the mirrored grip, so the QA blade must
+        # be placed with the same mirrored socket to check what was authored.
+        right = Matrix.Translation(GRIP_POS) @ GRIP_ROT.to_matrix().to_4x4()
+        left = Matrix.Translation(GRIP_POS) @ GRIP_ROT_LEFT.to_matrix().to_4x4()
+        PROXIES['sword'].matrix_world = rig_world @ rig.pose.bones['hand_r'].matrix @ right
+        PROXIES['sword_left'].matrix_world = rig_world @ rig.pose.bones['hand_l'].matrix @ left
     elif kind == 'bow':
         palm = rig.pose.bones['hand_l'].matrix @ PALM_L
         PROXIES['bow'].matrix_world = rig_world @ Matrix.Translation(palm) @ BOW_BASIS.to_4x4()
@@ -1102,6 +1225,23 @@ for name, _seconds, builder, _kind in CLIPS:
         assert worst < 0.002 and worst_q < 0.002, f'{name} frame {frame} does not return to base: {worst:.4f} {worst_q:.4f}'
 
 
+# Blade read-out: where each tip actually is at a sweep's impact. This is the
+# numeric check that the three cuts travel across the front arc instead of the
+# blade hanging in one place.
+if 'Sword_Three_Strike' in authored:
+    set_action(authored['Sword_Three_Strike'])
+    sweep_frames = round(0.8 * FPS)
+    for beat, beat_t in (('cut1', 0.20), ('cut2', 0.50), ('cut3', 0.80)):
+        scene.frame_set(int(round(beat_t * sweep_frames)))
+        update()
+        for side, grip in (('r', GRIP_ROT), ('l', GRIP_ROT_LEFT)):
+            hand = rig.pose.bones['hand_' + side].matrix
+            socket = hand @ Matrix.Translation(GRIP_POS) @ grip.to_matrix().to_4x4()
+            blade = (socket.to_quaternion() @ Vector((0.0, 0.0, -1.0))).normalized()
+            tip = socket.translation + blade * 1.02
+            print('SWEEP', beat, side, 'dir', tuple(round(v, 2) for v in blade),
+                  'tip', tuple(round(v, 2) for v in tip))
+
 # --------------------------------------------------------------------------- #
 # QA renders
 # --------------------------------------------------------------------------- #
@@ -1115,6 +1255,9 @@ QA_VIEWS = {
     # Straight right-side profile: reads thrust level, sweep height and foot
     # clearance without foreshortening.
     'side': Vector((-3.05, -0.55, 1.42)),
+    # High three-quarter: a sweeping cut travels mostly sideways in world
+    # space, so the arc is read in plan instead of end-on at chest height.
+    'top': Vector((0.65, -2.10, 3.15)),
 }
 
 
@@ -1222,10 +1365,20 @@ qa_objects = []
 if RENDER_QA:
     QA_DIR.mkdir(parents=True, exist_ok=True)
     qa_objects = setup_qa_scene()
-    for name in REWORKED:
-        render_clip(name, (0.0, 0.25, 0.5, 0.75, 1.0))
-        render_clip(name, (0.0, 0.25, 0.5, 0.75, 1.0), view='side')
-        render_clip(name, tuple(i / 5.0 for i in range(6)), strip=True)
+    # The sweep clip is read at its three impacts, not at even quarters: the
+    # whole point of the clip is where the cuts land.
+    QA_SAMPLES = {
+        'Sword_Three_Strike': (0.0, 0.2, 0.35, 0.5, 0.65, 0.8, 1.0),
+    }
+    QA_CLIPS = REWORKED + (('Sword_Double_Slash',) if 'qacompare' in sys.argv else ())
+    for name in QA_CLIPS:
+        samples = QA_SAMPLES.get(name, (0.0, 0.25, 0.5, 0.75, 1.0))
+        render_clip(name, samples)
+        render_clip(name, samples, view='side')
+        if name in QA_SAMPLES:
+            render_clip(name, samples, view='top')
+        render_clip(name, tuple(i / 11.0 for i in range(12)) if name in QA_SAMPLES
+                    else tuple(i / 5.0 for i in range(6)), strip=True)
 
 # QA-only geometry never reaches the export.
 doomed = {o.name for o in qa_objects if isinstance(o, bpy.types.Object)}
@@ -1304,6 +1457,7 @@ RUNTIME_OVERRIDES = {
     'spin_slash': 'The runtime adds a full 360 degree model turn over Sword_Spin_Slash (blade trail starts at 0.20, damage at 0.50). The clip authors only a fast low wide pivot with the greatsword extended horizontally from 0.15 to 0.85 of the clip, compact feet on the floor and a small weight shift, never a full turn or a stride.',
     'lunge_thrust': 'The controller travels 1.78 m over the first 0.24 s. The lead-foot step, pelvis travel and weight transfer are authored inside 0.02-0.24 s, the level thrust lands at 0.42 and holds, then the clip recovers; both hands stay on the hilt.',
     'dagger_backstab': 'The actor is teleported behind the target at 0.20. Frames 0-0.20 are a gathering crouch and a compressed blink tucked low; 0.30-0.55 is the arrival plunge straight down-forward with the off hand guarding, impact at 0.50, recovery by 0.90. No forward dash is authored.',
+    'three_strike_sweeps': 'Three wide sweeps with impacts at 0.20, 0.50 and 0.80 of the clip: the right blade across, the left blade back, then both blades driven in together. Both arms are authored (no hilt support grip); `three_strike` sets `offhand_authored` so the rig keeps the authored off arm on a dual pair instead of re-solving it to the carry pose.',
     'blend': 'Every clip starts and ends at the Idle_Loop frame-0 pose so the 0.12 s runtime blend does not pop. The root bone is never moved.',
     'feet': 'Legs are authored as ankle targets; the runtime re-solves knees to terrain. Ankles stay at their shipped 84-86 mm height and only leave it for deliberate step lifts.',
     'barrage_beats': 'Six draw-release pulses peaking at 0.22, 0.34, 0.46, 0.58, 0.70 and 0.82 s with visible weight pulses and small recoils.',
@@ -1317,7 +1471,8 @@ for name, seconds, _builder, kind in CLIPS:
         'frames': round(seconds * FPS) + 1,
         'weapon': kind,
         'two_handed': kind in ('sword', 'staff'),
-        'proxy': kind if kind != 'dagger' else 'dagger',
+        # A dual clip drives a blade on each hand; the QA proxy is the sword.
+        'proxy': 'sword' if kind == 'dual' else kind,
     }
 metadata['ability_authoring'] = {
     'authoring_fps': FPS,

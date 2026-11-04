@@ -25,6 +25,9 @@ static var _dot_texture: Texture2D
 
 var _rig
 var _color := Color("e9f2ff")
+## Which blade this swish follows: the right hand's unless a caller names the
+## off hand (a dual-wield cut trails the hand that threw it).
+var _hand := "right"
 var _remaining := 0.0
 var _stopped := 0.0
 var _clock := 0.0
@@ -41,10 +44,13 @@ func _ready() -> void:
 	_build_view()
 
 
-## Called by AbilityFx right after the node is parented.
-func start(rig, seconds: float, color: Color) -> void:
+## Called by AbilityFx right after the node is parented. `hand` names the blade
+## the swish belongs to: a dual pair swings two, and each cut should trail the
+## hand that threw it.
+func start(rig, seconds: float, color: Color, hand: String = "right") -> void:
 	_rig = rig
 	_color = color
+	_hand = "left" if hand == "left" else "right"
 	_remaining = clampf(seconds, 0.05, 3.0)
 	_build_view()
 	_build_sparks()
@@ -94,8 +100,8 @@ func _update_sparks() -> void:
 
 
 func _sample() -> void:
-	var base: Vector3 = _rig.get_blade_base("right")
-	var tip: Vector3 = _rig.get_blade_tip("right")
+	var base: Vector3 = _rig.get_blade_base(_hand)
+	var tip: Vector3 = _rig.get_blade_tip(_hand)
 	if not base.is_finite() or not tip.is_finite():
 		return
 	if base.distance_squared_to(tip) < 0.0001:

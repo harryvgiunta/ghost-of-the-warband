@@ -382,16 +382,24 @@ func _melee_wave(actor, runner, definition: Dictionary, cue: String, index: int,
 	forward = forward.normalized()
 	runner.combat.ability_strike(radius, arc, damage * share,
 		float(effect.get("stagger", 0.0)), false, true, {}, per_wave)
-	# The wave leaves the blades: a crescent at arm's length that carries the
-	# wave's own outward push, thrown off-centre by the hand that threw it.
-	var origin: Vector3 = rig.global_position + forward * (0.55 + 0.30 * float(index)) \
-		+ forward.cross(Vector3.UP) * 0.22 * side
-	_fx_call("slash_arc", [origin, forward.rotated(Vector3.UP, 0.20 * side), radius,
-		minf(arc, 200.0), WAVE_TINT])
-	_fx_call("blade_trail", [rig, 0.20])
+	# The wave leaves the blades: a crescent that sweeps through the arc it just
+	# cut and a ripple pair that runs out to the same reach, thrown off-centre by
+	# the hand that threw it. `side` turns the sweep the way the cut travels, so
+	# the right blade, the left blade and the two-handed finisher each read.
+	_fx_call("wave_ripple", [rig.global_position, forward, radius, arc, side,
+		WAVE_TINT])
+	# The light follows the blade that threw the wave: the right hand, the left,
+	# or both together on the finisher. A hand with nothing to swing trails
+	# nothing.
+	var hands: Array[String] = []
 	if is_zero_approx(side):
-		# The last wave is both blades coming down together.
-		_fx_call("spin_burst", [rig.global_position, radius * 0.75])
+		hands.assign(["right", "left"])
+	else:
+		hands.assign(["right" if side > 0.0 else "left"])
+	for hand in hands:
+		if str(rig.swing_weapon_class(hand)).is_empty():
+			continue
+		_fx_call("blade_trail_hand", [rig, 0.20, hand])
 
 
 ## Both weapons lit for the length of the skill: the held steel burns cold for
@@ -411,6 +419,9 @@ func _weapon_glow(actor, seconds: float) -> void:
 		# A hand with nothing to swing (a bow, an empty off hand) lights nothing.
 		if str(rig.swing_weapon_class(hand)).is_empty():
 			continue
+		# The beat that lights a blade also leaves its ribbon, so a dual pair
+		# reads as two blades working for the whole skill.
+		_fx_call("blade_trail_hand", [rig, hold, hand])
 		var light := AbilityFx.flash_light(WAVE_TINT, 1.8, 1.6)
 		rig.add_child(light)
 		light.position = rig.to_local(rig.get_blade_base(hand))
@@ -428,7 +439,6 @@ func _weapon_glow(actor, seconds: float) -> void:
 				put_back.tween_callback(func() -> void:
 					if is_instance_valid(mesh):
 						mesh.material_override = previous)
-	_fx_call("blade_trail", [rig, hold])
 
 
 # --- helpers ---------------------------------------------------------------
@@ -444,6 +454,9 @@ func _fx_call(method: String, args: Array) -> void:
 	match method:
 		"blade_trail":
 			AbilityFx.blade_trail(parent, args[0], float(args[1]))
+		"blade_trail_hand":
+			AbilityFx.blade_trail(parent, args[0], float(args[1]), AbilityFx.STEEL,
+				str(args[2]))
 		"lunge_wake":
 			AbilityFx.lunge_wake(parent, args[0], float(args[1]))
 		"smoke_puff":
@@ -457,6 +470,9 @@ func _fx_call(method: String, args: Array) -> void:
 		"slash_arc":
 			AbilityFx.slash_arc(parent, args[0], args[1], float(args[2]),
 				float(args[3]), args[4])
+		"wave_ripple":
+			AbilityFx.wave_ripple(parent, args[0], args[1], float(args[2]),
+				float(args[3]), float(args[4]), args[5])
 		"backstab_flash":
 			AbilityFx.backstab_flash(parent, args[0], args[1])
 

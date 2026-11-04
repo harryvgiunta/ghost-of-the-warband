@@ -453,6 +453,11 @@ var ability_draw_curve: Array = []
 ## lunge/charge window whose authored full-body travel must survive unchanged.
 var ability_move := false
 var ability_travel := 0.0
+## The clip authored both wrists on purpose (the dual-wield three-strike): the
+## rig keeps the off arm the clip posed instead of re-solving it to the neutral
+## carry, so a dual pair swings two blades rather than one blade and a hand on
+## the hilt.
+var ability_offhand_authored := false
 var _neutral_right_arm: Dictionary = {}
 var _offhand_offset := Vector3(0.03,-0.23,0.28)
 ## Where the off hand rides once the body is running: down beside the hip, level
@@ -1104,6 +1109,7 @@ func begin_ability(definition: Dictionary, direction: Vector3) -> void:
 	ability_draw_curve = definition.get("bow_draw", [])
 	ability_move = bool(definition.get("move",false))
 	ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
+	ability_offhand_authored = bool(definition.get("offhand_authored", false))
 	phase = "ABILITY"
 	_phase_time = 0.0
 	draw_amount = 0.0
@@ -1167,6 +1173,7 @@ func _reset_ability_state() -> void:
 	ability_draw_curve = []
 	ability_move = false
 	ability_travel = 0.0
+	ability_offhand_authored = false
 
 func _update_consumable_props() -> void:
 	if _bandage_prop == null or _potion_prop == null:
@@ -2454,6 +2461,7 @@ func apply_animation_state(state: Variant) -> void:
 		ability_draw_curve = definition.get("bow_draw", [])
 		ability_move = bool(definition.get("move",false))
 		ability_travel = maxf(float(definition.get("travel_seconds",0.0)),0.0)
+		ability_offhand_authored = bool(definition.get("offhand_authored", false))
 		phase = "ABILITY"
 		_phase_time = float(state.time)
 		draw_amount = 0.0
@@ -3108,7 +3116,7 @@ func _solve_pose(delta: float) -> void:
 		var head := _bone_world(_bones.Head)
 		head.basis = Basis(Vector3.UP,-STANCE_YAW*archery)*head.basis
 		_set_bone_world(_bones.Head,head)
-	if weapon == "dual" and not consuming:
+	if weapon == "dual" and not consuming and not (ability and ability_offhand_authored):
 		_pose_dual_arms(moving)
 		if _right_melee_time >= 0.0 and _right_variant == "stab":
 			_aim_sword_thrust()

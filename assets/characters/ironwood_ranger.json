@@ -219,7 +219,8 @@
     "Shield_Bash": 0.8,
     "Shield_Charge": 1.15,
     "Shield_Ground_Slam": 1.1,
-    "Dagger_Backstab": 0.9
+    "Dagger_Backstab": 0.9,
+    "Sword_Three_Strike": 0.8
   },
   "authoring_fps": 60,
   "gres_height_scale": 0.5092428046251969,
@@ -502,6 +503,13 @@
         "two_handed": true,
         "proxy": "sword"
       },
+      "Sword_Three_Strike": {
+        "duration": 0.8,
+        "frames": 49,
+        "weapon": "dual",
+        "two_handed": false,
+        "proxy": "sword"
+      },
       "Dagger_Backstab": {
         "duration": 0.9,
         "frames": 55,
@@ -552,6 +560,7 @@
       "Sword_Double_Slash": 1.0,
       "Sword_Lunge_Thrust": 0.95,
       "Sword_Spin_Slash": 0.3166666667,
+      "Sword_Three_Strike": 0.8,
       "Dagger_Backstab": 0.9,
       "Staff_Fireball_Cast": 1.2,
       "Staff_Bone_Spear_Cast": 1.15,
@@ -567,6 +576,7 @@
       "spin_slash": "The runtime adds a full 360 degree model turn over Sword_Spin_Slash (blade trail starts at 0.20, damage at 0.50). The clip authors only a fast low wide pivot with the greatsword extended horizontally from 0.15 to 0.85 of the clip, compact feet on the floor and a small weight shift, never a full turn or a stride.",
       "lunge_thrust": "The controller travels 1.78 m over the first 0.24 s. The lead-foot step, pelvis travel and weight transfer are authored inside 0.02-0.24 s, the level thrust lands at 0.42 and holds, then the clip recovers; both hands stay on the hilt.",
       "dagger_backstab": "The actor is teleported behind the target at 0.20. Frames 0-0.20 are a gathering crouch and a compressed blink tucked low; 0.30-0.55 is the arrival plunge straight down-forward with the off hand guarding, impact at 0.50, recovery by 0.90. No forward dash is authored.",
+      "three_strike_sweeps": "Three wide sweeps with impacts at 0.20, 0.50 and 0.80 of the clip: the right blade across, the left blade back, then both blades driven in together. Both arms are authored (no hilt support grip); `three_strike` sets `offhand_authored` so the rig keeps the authored off arm on a dual pair instead of re-solving it to the carry pose.",
       "blend": "Every clip starts and ends at the Idle_Loop frame-0 pose so the 0.12 s runtime blend does not pop. The root bone is never moved.",
       "feet": "Legs are authored as ankle targets; the runtime re-solves knees to terrain. Ankles stay at their shipped 84-86 mm height and only leave it for deliberate step lifts.",
       "barrage_beats": "Six draw-release pulses peaking at 0.22, 0.34, 0.46, 0.58, 0.70 and 0.82 s with visible weight pulses and small recoils.",

@@ -373,23 +373,34 @@ func refresh_gear(merc_id: int) -> bool:
 	_apply_gear(actor, merc_id)
 	return true
 
-## The altar woke a piece: every body holding a copy is dressed again, so the
-## skill is in its hands now rather than at the next spawn.
+## The altar woke a piece: every body wearing a copy is dressed again, so the
+## skill is on the rig that draws and fires it now rather than at the next spawn.
 func _on_piece_anointed(item_id: String, _ability: String) -> void:
-	for merc_id in _merc_bodies.keys():
-		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
-		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
-			refresh_gear(int(merc_id))
+	_redress_wearers(item_id)
 
 
 ## The altar welded an annointment to a copy: the piece draws a new mark and its
-## storage is bigger, so every body holding that copy is dressed again. The signal
+## storage is bigger, so every body wearing that copy is dressed again. The signal
 ## carries the ledger's id list; only the copy's owner cares which entries they are.
 func _on_piece_annointed(item_id: String, _entries: Array) -> void:
-	for merc_id in _merc_bodies.keys():
-		var gear: Dictionary = _warband.roster.equipped_of(int(merc_id))
-		if str(gear.get("main", "")) == item_id or str(gear.get("off", "")) == item_id:
-			refresh_gear(int(merc_id))
+	_redress_wearers(item_id)
+
+
+## Dress again every fielded body whose kit wears `item_id` in any slot. The
+## altar works a hand, an armour piece or a worn trinket alike, and a weld is a
+## grant on the rig wherever its piece is worn - the hands-only read left a
+## welded necklace's skill off the HUD's hotbar until the next dressing. The
+## signal names the catalog id, not the copy ordinal, and a dress re-reads the
+## ledger for the copy the body actually wears, so re-dressing a body holding a
+## different copy of the same row costs nothing and changes nothing.
+func _redress_wearers(item_id: String) -> void:
+	if item_id.is_empty() or _warband == null:
+		return
+	for raw_id in _merc_bodies.keys():
+		var gear: Dictionary = _warband.roster.equipped_of(int(raw_id))
+		if gear.values().has(item_id):
+			refresh_gear(int(raw_id))
+
 
 ## The warband armed itself from a purchase or a recruit's dressing: re-dress
 ## exactly the bodies whose roster kit changed, so the blade is in their hands

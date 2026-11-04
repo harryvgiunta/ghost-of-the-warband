@@ -498,8 +498,44 @@ func _check_necklace(world: Node3D, actor, abilities) -> void:
 	actor.stamina = actor.max_stamina
 	actor.combat.grounded = true
 	check(bool(actor.try_ability(slot).get("ok", false)), "the three-strike starts")
+	# The skill plays its own three-cut clip, not the two-cut double slash it
+	# used to share, and the clip authors both wrists: the rig keeps the off arm
+	# so a dual pair sweeps two blades.
+	check(str(actor.rig.ability_clip) == "Sword_Three_Strike",
+		"the three-strike plays its own sweep clip, got %s" % str(actor.rig.ability_clip))
+	check(actor.rig.has_clip("Sword_Three_Strike"),
+		"the shipped rig carries the three-strike's sweep clip")
+	check(bool(actor.rig.ability_offhand_authored),
+		"the sweep clip keeps its authored off hand on a dual pair")
+	# The wave lands on the frame its cut does: the clip's impacts are at 0.20,
+	# 0.50 and 0.80 of its length and the three cues divide by the duration to
+	# exactly those beats.
+	var definition := AbilityRules.by_id("three_strike")
+	var seconds := maxf(float(definition.get("duration", 0.0)), 0.01)
+	var cue_beats: Array = definition.get("cues", [])
+	check(is_equal_approx(float(cue_beats[0].get("at", 0.0)) / seconds, 0.20)
+			and is_equal_approx(float(cue_beats[1].get("at", 0.0)) / seconds, 0.50)
+			and is_equal_approx(float(cue_beats[2].get("at", 0.0)) / seconds, 0.80),
+		"the three cues sit on the clip's cut beats (0.20, 0.50, 0.80)")
+	# Every wave sends its own ripple out to the arc it cut.
+	var ripples: Array[int] = []
 	for beat in 4:
 		actor.ability.advance(0.24)
+		ripples.append(world.find_children("AbilityWaveRipple*", "Node3D", true, false).size())
+	check(ripples[0] == 1 and ripples[1] == 2 and ripples[2] == 3,
+		"each wave sends one ripple, got %s" % str(ripples))
+	# And each wave carries a real floor wavefront instead of a hoop: the cut's
+	# own arc, laid on the ground and opened out to the wave's reach. A ring
+	# around the body is exactly what this effect must never be.
+	var hoops := 0
+	var wavefronts := 0
+	for node in world.find_children("AbilityWaveRipple*", "Node3D", true, false):
+		for mesh in node.find_children("*", "MeshInstance3D", true, false):
+			if mesh.mesh is TorusMesh or mesh.mesh is SphereMesh:
+				hoops += 1
+		wavefronts += node.find_children("Wavefront*", "Node3D", true, false).size()
+	check(hoops == 0, "a wave must not draw a hoop around the body, got %d" % hoops)
+	check(wavefronts >= 3, "each wave sends a floor wavefront, got %d" % wavefronts)
 	var hurt: int = 0
 	var per_body: Array[float] = []
 	for dummy in lineup:
@@ -516,6 +552,24 @@ func _check_necklace(world: Node3D, actor, abilities) -> void:
 	# three cuts rather than one.
 	check(per_body[0] > per_body[1] * 0.9 and per_body[1] > 0.0,
 		"the three were not cut alike: %s" % str(per_body))
+	# The clip authors both wrists; with the flag off the rig would re-solve the
+	# off hand to the neutral carry and the left blade would hang at the hip
+	# instead of sweeping. Same clip, same beat, two poses: the authored one lifts
+	# the off hand away from the carry line.
+	actor.ability.cancel()
+	var carried: Dictionary = definition.duplicate(true)
+	carried["offhand_authored"] = false
+	actor.rig.begin_ability(carried, Vector3.FORWARD)
+	actor.rig.advance_animation(0.40)
+	var carry_wrist: Vector3 = actor.rig.get_joint_positions()["left_wrist"]
+	actor.rig.cancel_ability()
+	actor.rig.begin_ability(definition.duplicate(true), Vector3.FORWARD)
+	actor.rig.advance_animation(0.40)
+	var authored_wrist: Vector3 = actor.rig.get_joint_positions()["left_wrist"]
+	check(authored_wrist.distance_to(carry_wrist) > 0.15,
+		"the sweep keeps its authored off arm, %.2f m from the carry pose"
+		% authored_wrist.distance_to(carry_wrist))
+	actor.rig.cancel_ability()
 	actor.ability.cancel()
 	print("  necklace: quick hit %.2fs -> %.2fs, poison, three-strike %s" % [
 		normal, normal / 5.0, str(per_body)])

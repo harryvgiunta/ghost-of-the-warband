@@ -224,6 +224,130 @@ static func slash_arc(parent: Node3D, origin: Vector3, forward: Vector3,
 	tween.tween_callback(root.queue_free)
 
 
+## One wave of the three-strike, as the cut reads in the wood. Three things move
+## together and none of them is a ring around the body: a crescent of blade light
+## sweeps through the arc the wave hit, a second, flatter band of the same arc
+## runs along the floor out to the wave's reach, and the floor band drags dust
+## and cold sparks with it. `side` is the hand that threw the cut - +1 right
+## blade (right to left), -1 left blade, 0 both blades driven in from either
+## side - and every element turns with it, so the light is the blade's own arc.
+static func wave_ripple(parent: Node3D, origin: Vector3, forward: Vector3,
+		radius: float, arc_degrees: float, side: float,
+		color: Color = STEEL) -> void:
+	if not is_instance_valid(parent):
+		return
+	var flat := Vector3(forward.x, 0.0, forward.z)
+	if flat.length_squared() < 0.000001:
+		return
+	flat = flat.normalized()
+	var root := Node3D.new()
+	root.name = "AbilityWaveRipple"
+	# Readable duplicates: three waves land inside one activation and each one
+	# keeps its own node, so nothing here relies on an auto-renamed name.
+	parent.add_child(root, true)
+	var chest := origin + Vector3.UP * 1.24
+	var facing := Basis.looking_at(flat, Vector3.UP)
+	# A positive turn about +Y carries the crescent from forward toward the
+	# character's left, so a right-blade cut (which travels right to left) starts
+	# wide right and ends left, and the left blade is its mirror.
+	var spread := deg_to_rad(clampf(arc_degrees, 20.0, 200.0)) * 0.5
+	var starts: Array[float] = []
+	var ends: Array[float] = []
+	if is_zero_approx(side):
+		starts = [spread, -spread]
+		ends = [spread * 0.10, -spread * 0.10]
+	elif side > 0.0:
+		starts = [-spread]
+		ends = [spread]
+	else:
+		starts = [spread]
+		ends = [-spread]
+	# The wave is cold steel a shade deeper than the steel that threw it; white
+	# is the blade's own heat and stays on the blade.
+	var wave := color.lerp(Color("3f7fd2"), 0.55)
+	var arc := minf(arc_degrees, 200.0)
+	var air_mesh := arc_ribbon_mesh(arc, 26)
+	var floor_mesh := arc_ribbon_mesh(arc, 32, 0.78)
+	for index in starts.size():
+		# The crescent at chest height: it turns through the cut's arc on the
+		# floor of the swing and drifts out to where the blade finished.
+		var pivot := Node3D.new()
+		root.add_child(pivot)
+		pivot.global_basis = facing
+		pivot.global_position = chest + flat * 0.55
+		var air_material := ribbon_material(wave)
+		air_material.albedo_color.a = 0.62
+		var ribbon := MeshInstance3D.new()
+		ribbon.name = "WaveArc"
+		ribbon.mesh = air_mesh
+		ribbon.material_override = air_material
+		ribbon.rotation.y = starts[index]
+		pivot.add_child(ribbon)
+		var sweep := pivot.create_tween()
+		sweep.set_parallel(true)
+		sweep.tween_property(ribbon, "rotation:y", ends[index], 0.17) \
+			.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		sweep.tween_property(pivot, "global_position",
+			chest + flat * (0.55 + radius * 0.32), 0.24) \
+			.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		sweep.tween_property(air_material, "albedo_color",
+			Color(color.r, color.g, color.b, 0.0), 0.27)
+		# The same arc laid on the floor and let go: it opens out to the reach the
+		# wave actually cut, so the light on the ground is the hit volume and not
+		# a circle the body is standing in. The band's transform is rebuilt from
+		# the sweep itself (facing * turn * radius) rather than scaling a rotated
+		# node, so the arc keeps its own shape as it grows.
+		for layer in 2:
+			var turn := 0.92 - 0.15 * float(layer)
+			var reach := radius * (1.0 + 0.10 * float(layer))
+			var floor_material := ribbon_material(wave)
+			floor_material.albedo_color.a = 0.34 if layer == 0 else 0.20
+			# Three plain levels: an unrotated scale node (uniform across the
+			# floor, so the arc keeps its shape as it grows), a node holding the
+			# wave's facing, and the band turned along the cut. No node both turns
+			# and scales, and no basis is rebuilt mid-tween.
+			var scale_node := Node3D.new()
+			scale_node.name = "Wavefront" if layer == 0 else "WavefrontTail"
+			root.add_child(scale_node)
+			scale_node.global_position = origin + Vector3.UP * (0.05 + 0.03 * float(layer))
+			scale_node.scale = Vector3(0.72, 1.0, 0.72)
+			var turn_node := Node3D.new()
+			scale_node.add_child(turn_node)
+			turn_node.basis = facing
+			var band := MeshInstance3D.new()
+			band.mesh = floor_mesh
+			band.material_override = floor_material
+			turn_node.add_child(band)
+			band.rotation.y = starts[index] * turn
+			var run := band.create_tween()
+			run.set_parallel(true)
+			run.tween_property(band, "rotation:y", ends[index] * turn,
+				0.34 + 0.08 * float(layer)).set_delay(0.02 * float(layer)) \
+				.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			run.tween_property(scale_node, "scale", Vector3(reach, 1.0, reach),
+				0.34 + 0.08 * float(layer)).set_delay(0.02 * float(layer)) \
+				.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			run.tween_property(floor_material, "albedo_color",
+				Color(wave.r, wave.g, wave.b, 0.0), 0.34 + 0.10 * float(layer)) \
+				.set_delay(0.05 * float(layer))
+	# The floor the wave crosses: dust lifted along the leading edge and a short
+	# spray of cold sparks, so the band has weight instead of reading as a decal.
+	var front := origin + flat * radius * 0.62 + Vector3.UP * 0.12
+	var dust := smoke_particles(Color("8f8474"), 12, 0.75)
+	dust.position = front
+	dust.emission_sphere_radius = 0.55
+	dust.initial_velocity_max = 1.6
+	root.add_child(dust)
+	dust.emitting = true
+	var sparks := spark_particles(wave, 18, 2.0, 4.8, 0.28, 0.024)
+	sparks.position = front + Vector3.UP * 0.55
+	root.add_child(sparks)
+	sparks.emitting = true
+	var done := root.create_tween()
+	done.tween_interval(0.80)
+	done.tween_callback(root.queue_free)
+
+
 ## Low, dusty ground ring for a full-turn cut. A chest-height ring is nearly
 ## edge-on to the shoulder camera; the read belongs at the feet.
 static func spin_dust(parent: Node3D, origin: Vector3, radius: float) -> void:
@@ -677,16 +801,18 @@ static func _smoke_tint(index: int, mode: int) -> Color:
 # --- Ability cues -----------------------------------------------------------
 
 ## Real blade ribbon for the spin, the double slash and the lunge. The trail
-## follows the rig's equipped right blade for `seconds` and frees itself. It is
-## presentation only: no damage, no authority, no changes to the rig.
-static func blade_trail(parent: Node3D, rig, seconds: float, color: Color = STEEL) -> void:
+## follows the rig's equipped blade for `seconds` and frees itself. It is
+## presentation only: no damage, no authority, no changes to the rig. `hand`
+## picks the blade - the right one unless a dual-wield cut names the off hand.
+static func blade_trail(parent: Node3D, rig, seconds: float, color: Color = STEEL,
+		hand: String = "right") -> void:
 	if not is_instance_valid(parent) or not is_instance_valid(rig):
 		return
 	if not rig.has_method("get_blade_base") or not rig.has_method("get_blade_tip"):
 		return
 	var trail = BladeTrail.new()
 	parent.add_child(trail)
-	trail.start(rig, seconds, color)
+	trail.start(rig, seconds, color, hand)
 
 
 ## Backstab blink beat. With `dark` it is the engulfing burst: a near-black cloud

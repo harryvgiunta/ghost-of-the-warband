@@ -65,6 +65,7 @@ func run() -> void:
 
 	check_recipes()
 	await check_anoint()
+	await check_worn_weld_redress()
 	check_bench()
 	check_rack()
 	check_controlled_order()
@@ -129,6 +130,17 @@ func _menu_count(scan: Node) -> int:
 			total += 1
 		total += _menu_count(child)
 	return total
+
+## The non-empty skill ids the HUD's hotbar is drawing, in slot order - the very
+## list `WarbandHud._refresh_skills` reads off the body's runner.
+func _hud_ids(body) -> Array:
+	var out := []
+	var states: Array = body.ability.hud_states()
+	for state in states:
+		var id := str((state as Dictionary).get("id", ""))
+		if not id.is_empty():
+			out.append(id)
+	return out
 
 func _on_altar_opened(peer_id: int) -> void:
 	altar_opens.append(peer_id)
@@ -311,6 +323,85 @@ func check_anoint() -> void:
 		"the bench names the reagent it wants: %s" % menu.doctrine_text())
 
 	menu.close()
+	field.queue_free()
+	await process_frame
+
+## A weld can land on any slot the altar takes, and the body wearing it is
+## dressed again on the spot. The re-dress used to test the hands alone, so a
+## skill welded to the worn Energy Shield amulet reached the roster record - the
+## paperdoll's row drew it - but never the live rig: the HUD's hotbar reads the
+## rig, so the amulet's stock ward was all it ever showed. The same stale read
+## left every armour weld off the rig until the next dressing.
+func check_worn_weld_redress() -> void:
+	warband.reset_state()
+	var reagent := WarbandCruor.BASIC_REAGENT
+	var merc: int = warband.add_mercenary("Cord",
+		{"main": "sword_short", "neck": "neck_shield", "chest": "armor_mail_chest"})
+	warband.stash.add(reagent, 2)
+
+	# A body dressed off the roster, the way every scene fields one.
+	var field := Node3D.new()
+	field.name = "WeldField"
+	root.add_child(field)
+	var bodies_root := Node3D.new()
+	bodies_root.name = "Bodies"
+	field.add_child(bodies_root)
+	var camera := Camera3D.new()
+	field.add_child(camera)
+	var controller = ControllerScript.new()
+	controller.name = "WeldSoul"
+	controller.auto_simulate = false
+	field.add_child(controller)
+	controller.setup(warband, camera, bodies_root)
+	var posts: Array[Vector3] = [Vector3.ZERO]
+	controller.spawn_mercenaries(posts, true)
+	await physics_frame
+	var body = controller.body_of(merc)
+	check(body != null, "the wearer of the amulet is fielded")
+	if body == null:
+		field.queue_free()
+		return
+
+	# The amulet's own stock ward is on the row before the altar touches it.
+	check(_hud_ids(body).has("energy_shield"),
+		"the amulet's stock ward starts on the hotbar, got %s" % str(_hud_ids(body)))
+
+	# Add an ability through the real ritual, forced into the first band.
+	var result: Dictionary = warband.anoint("neck_shield", -1, _seed_in_band(0, 24))
+	var skill := str(result.get("skill", ""))
+	check(not skill.is_empty(),
+		"the rite welds a hotbar skill to the amulet: %s" % str(result.get("message", "")))
+	var welded: Array = warband.annointment_skills(merc).get("neck", [])
+	check(welded.has(skill), "the record wakes the skill on the worn neck (%s)" % str(welded))
+	var rig_welds: Array = body.rig.anointed.get("neck", [])
+	check(rig_welds.has(skill),
+		"the body wearing the amulet is dressed again at once, the rig carries %s" % str(rig_welds))
+	var hud := _hud_ids(body)
+	check(hud.has(skill),
+		"the HUD's hotbar draws the welded skill on the spot, got %s" % str(hud))
+	check(hud.has("energy_shield"), "the amulet's own ward keeps its key")
+	var page: Array = []
+	for id in warband.hotbar_layout(merc):
+		if not str(id).is_empty():
+			page.append(str(id))
+	check(hud == page, "the page and the fight draw the same row: %s vs %s" % [
+		str(hud), str(page)])
+
+	# The same rule on an armour slot. The signal the ritual emits is what the
+	# weld rides, so this is the handler's contract, not a side door: a stat
+	# bundle welded to the worn chest must land in the rig's own dictionary.
+	var chest_copy := int(warband.annoint_copy(merc, "chest"))
+	var before := float(body.rig.trinket_stats.get("guard", 0.0))
+	check(warband.annoints.add("armor_mail_chest", chest_copy, "a_iron_seams"),
+		"the worn chest takes a stat weld")
+	warband.annointed_state.emit("armor_mail_chest",
+		warband.annoints.ids("armor_mail_chest", chest_copy))
+	check(float(body.rig.trinket_stats.get("guard", 0.0)) > before,
+		"the worn chest's guard reaches the rig at once, got %s"
+		% str(body.rig.trinket_stats.get("guard", 0.0)))
+	check(float(body.rig.trinket_stats.get("health", 0.0)) >= 8.0,
+		"and so does its health, got %s" % str(body.rig.trinket_stats.get("health", 0.0)))
+
 	field.queue_free()
 	await process_frame
 
