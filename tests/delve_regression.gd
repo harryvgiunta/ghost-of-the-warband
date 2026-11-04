@@ -1034,9 +1034,20 @@ func check_climb_out() -> void:
 	check(essence > 0, "the party carries Ritual Tallow off the Hollow's dead (%d)" % essence)
 	var stash_before: Dictionary = warband.stash.pooled_map()
 	var below_mobs: Array = cave.mobs()
-	game._try_interact()
+	# A guest's `G` on a rope arrives as this intent, so the host has to judge the
+	# reach itself: a body nowhere near a rope is refused, and the same call at the
+	# rope is what brings the whole party up - the way out that a host whose own
+	# body is dead in the dark cannot press.
+	soul.teleport_to(foot + Vector3(0.0, 0.12, 40.0), 0.0)
+	await _frames(2)
+	check(not game._on_world_action(soul, "climb_out", null),
+		"a climb-out intent from away from the rope is refused")
+	soul.teleport_to(foot + Vector3(0.0, 0.12, 1.0), 0.0)
+	await _frames(2)
+	check(game._on_world_action(soul, "climb_out", null),
+		"a climb-out intent at the rope is the guest's way out")
 	await create_timer(0.2).timeout
-	check(not game.delve_area.below() and not warband.delve.active, "G at the rope ends the descent")
+	check(not game.delve_area.below() and not warband.delve.active, "the rope ends the descent")
 	check(warband.delve.inventory.pooled_total() == 0, "the delve inventory is emptied")
 	var home := true
 	for item_id in carried:

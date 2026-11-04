@@ -236,7 +236,11 @@ func interact(actor) -> bool:
 	var hud = host.get("hud")
 	if below() and cave.at_exit(actor):
 		if bool(host.get("_client")):
-			hud.set_status(GUEST_TEXT, 3.0)
+			# The host owns the descent, but a guest on a rope still has to be able
+			# to get the party out - a host whose own body is dead in the dark
+			# cannot press anything. The press rides the intent channel.
+			host.controller.act("climb_out")
+			hud.set_status("Asked the host to climb out.", 2.5)
 		else:
 			climb_out()
 		return true

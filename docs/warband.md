@@ -601,7 +601,17 @@ These landed on the same world without a second rulebook. Each has one owner:
   unregisters a body the host still names), a take it names must be in its own
   body's reach on the host's ground, and a body that changes hands restarts the
   new soul's frame numbers (`WarbandBody.reset_network_frames`) instead of
-  dropping the new owner's first minutes of input.
+  dropping the new owner's first minutes of input. Only what changed crosses the
+  wire: a calm mob costs no packet until its state moves (a full copy once a
+  second), a body snapshot or mob stream is sent once a frame however long the
+  frame before it ran, and a purse that moves without the books beside it is one
+  number (`receive_purse`) instead of a whole campaign reload on every guest.
+  The optimisations follow every soul: `MobCuller` measures from every body a soul
+  could be inside, so the other player's ground is swept, woken and streamed like
+  the host's, and a `G` on a rope from a guest is an intent the host runs
+  (`_climb_out_for`) - the way out when the host's own body is dead in the dark.
+  A booked piece is announced (`announce_booked`), so a guest's looted list is
+  the same list.
   `save_state`/`load_state` refuse, and the host mirrors every change back
   (`receive_warband`, 0.25 s at most), so
   the roster, stash, purse and orders on both screens are the host's. The host

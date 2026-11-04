@@ -483,10 +483,13 @@ func _cull_presentation(nearest: float) -> void:
 ## The culler's only call into a parked body: one distance check per sweep.
 ## Sight rays, steering, the state machine, the swept move and the skinning are
 ## all behind the physics process `mob_sleep` turns off.
-func mob_lod_sweep() -> void:
+func mob_lod_sweep(eye_distance: float = -1.0) -> void:
 	if not alive:
 		return
-	var nearest := _nearest_ranger()
+	# The culler measures from every body a soul could be inside, not from one
+	# ranger: `eye_distance` is that measurement. Its own check is the fallback for
+	# a body swept without a scene behind it.
+	var nearest := eye_distance if eye_distance >= 0.0 else _nearest_ranger()
 	if not MobLod.dormant(nearest, dormant):
 		if dormant:
 			mob_wake()

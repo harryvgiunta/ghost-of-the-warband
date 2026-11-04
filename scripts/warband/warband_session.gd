@@ -51,6 +51,8 @@ const MOB_SNAPSHOT_HZ := 15.0
 ## A mob only matters to a soul that could reach it: beyond this, the mob is the
 ## wood's business and the wire stays quiet.
 const MOB_REACH_METRES := 70.0
+## How often the mob stream repeats an unchanged body anyway: one second at 15 Hz.
+const MOB_REFRESH_TICKS := 15
 ## Loot is a one-shot announcement, so it is polled slowly; a missile's visual
 ## start must look immediate, so it is polled with the physics frame.
 const LOOT_POLL_SECONDS := 0.2
@@ -127,6 +129,13 @@ var _sent_missiles: Dictionary = {}
 ## Mob names whose final (dead) state was already sent. A living guard is sent
 ## every tick; a corpse is sent exactly once, so a replica can fall.
 var _dead_sent: Dictionary = {}
+## The last state sent for each mob, so a calm body is not re-sent 15 times a
+## second. Bounded by the mob count and cleared with the scene.
+var _mob_sent: Dictionary = {}
+## The last campaign copy sent, text and purse, so an unchanged one is skipped.
+var _mirror_sent := false
+var _mirror_text := ""
+var _mirror_gold := -1
 ## Payload keys a client already spawned, so a repeated announcement is a no-op.
 var _delivered_loot: Dictionary = {}
 var _delivered_arrows: Dictionary = {}
@@ -179,6 +188,11 @@ func detach_scene() -> void:
 	_fielded.clear()
 	_waiting.clear()
 	_driven.clear()
+	# A new scene's mobs are new bodies: the delta book and the one-shot books
+	# belong to the wood that is going away.
+	_mob_sent.clear()
+	_dead_sent.clear()
+	_sent_loot.clear()
 
 ## "offline", "host" or "client".
 func role() -> String:
@@ -363,7 +377,9 @@ func field_ready() -> void:
 	_seat_waiting()
 	_broadcast_ownership()
 	# The lent copy was taken when the guest announced itself; the field may have
-	# moved while its world was building.
+	# moved while its world was building. This peer needs the copy whatever the
+	# last one was, so it is sent rather than marked.
+	_push_warband(true)
 	_mirror_dirty = true
 	# And the bodies already on the ground: a guest that joins after the fight
 	# still has to be able to search what it sees. The one-shot books are cleared
@@ -428,6 +444,39 @@ func bind_gear_requests() -> void:
 		return
 	target.gear_requester = Callable(self, "_send_gear_request") \
 		if _role == "client" else Callable()
+
+## Host -> every guest: the host's purse, when it moved and the books did not.
+@rpc("authority", "call_remote", "reliable")
+func receive_purse(gold_amount: int) -> void:
+	if _role != "client":
+		return
+	var target: WarbandState = warband if warband != null else get_node_or_null("/root/Warband")
+	if target == null or not target.lent:
+		return
+	target.lend_purse(gold_amount)
+
+## Host -> every guest: one piece the warband booked, so a guest's looted list is
+## the same list. The booking itself stays on the host (`WarbandLoot.booked`).
+func announce_booked(item_id: String, collector_peer: int) -> void:
+	if _role != "host" or not shared_warband or not _has_peers():
+		return
+	if item_id.is_empty():
+		return
+	var who := name_of(int(collector_peer))
+	if who.is_empty():
+		who = "the host" if int(collector_peer) == 1 else "another soul"
+	receive_booked.rpc(item_id, int(collector_peer), who)
+
+## Host -> every guest: a booked piece, and whose hands took it. A line for this
+## peer's own take reads as its own hands; another soul's carries its name.
+@rpc("authority", "call_remote", "reliable")
+func receive_booked(item_id: String, collector_peer: int, collector_name: String) -> void:
+	if _role != "client" or world == null:
+		return
+	if not world.has_method("note_booked"):
+		return
+	var mine := multiplayer != null and multiplayer.get_unique_id() == collector_peer
+	world.call("note_booked", item_id, "" if mine else collector_name)
 
 ## Guest -> host. `_has_peers` is the reachability check the other requests use;
 ## false means the request never left and the verb refuses like it used to.
@@ -957,13 +1006,14 @@ func _tick_session(delta: float) -> void:
 		_tick_mirror(delta)
 		Perf.end()
 	var interval := 1.0 / SNAPSHOT_HZ
-	# A hitch must not turn into a burst of stale snapshots.
+	# A hitch must not turn into a burst of stale snapshots: what is banked is
+	# dropped to one send, because the newest pose is the only one that matters.
 	_accumulator = minf(_accumulator + delta, interval * 4.0)
-	Perf.begin("net.snapshot")
-	while _accumulator >= interval:
-		_accumulator -= interval
+	if _accumulator >= interval:
+		_accumulator = fmod(_accumulator, interval)
+		Perf.begin("net.snapshot")
 		_send_snapshots()
-	Perf.end()
+		Perf.end()
 	Perf.begin("net.world")
 	_tick_world(delta)
 	Perf.end()
@@ -1022,7 +1072,8 @@ func _seat_waiting() -> void:
 		# out in the same call and before the map, so a mercenary that joined the
 		# warband since the last copy is already in it when the seat arrives.
 		if shared_warband:
-			_push_warband()
+			# A seat is a new guest: the copy goes out whatever the last one was.
+			_push_warband(true)
 		_host_transfer(peer_id, free)
 
 ## The first living, unoccupied body on the field, in roster order - one the
@@ -1055,10 +1106,29 @@ func _tick_mirror(delta: float) -> void:
 ## The host's warband as its file would hold it, to every guest. Reliable and in
 ## order, which is what lets a seat name a mercenary the guest has just been told
 ## about.
-func _push_warband() -> void:
+func _push_warband(force: bool = false) -> void:
 	_mirror_dirty = false
 	_mirror_elapsed = 0.0
-	receive_warband.rpc(JSON.stringify(warband.to_dict()), warband.gold())
+	if warband == null:
+		return
+	var text := JSON.stringify(warband.to_dict())
+	var gold_amount := warband.gold()
+	# A change that does not change the books is not worth re-sending the whole
+	# campaign: every guest would decode and rebuild it (`lend` -> `from_dict`),
+	# which is a jump in the frame time for nothing. A guest arriving needs the
+	# copy regardless, so the seat paths force it.
+	if not force and _mirror_sent and text == _mirror_text:
+		# The books are the same as the copy every guest already has; only the
+		# purse moved (a kill, a sale), and one number is not a whole campaign
+		# reload on every guest's screen.
+		if gold_amount != _mirror_gold:
+			_mirror_gold = gold_amount
+			receive_purse.rpc(gold_amount)
+		return
+	_mirror_sent = true
+	_mirror_text = text
+	_mirror_gold = gold_amount
+	receive_warband.rpc(text, gold_amount)
 
 ## What each fielded body wears, so a copy that moved somebody's kit re-dresses
 ## exactly those bodies. The hotbar layout is part of the dressing: the host's
@@ -1113,8 +1183,10 @@ func _tick_world(delta: float) -> void:
 		return
 	var mob_interval := 1.0 / MOB_SNAPSHOT_HZ
 	_mob_accumulator = minf(_mob_accumulator + delta, mob_interval * 4.0)
-	while _mob_accumulator >= mob_interval:
-		_mob_accumulator -= mob_interval
+	# One stream per frame, never a burst: a hitch banks the surplus, and paying it
+	# back as four batches in the next frame is how one hiccup becomes a stutter.
+	if _mob_accumulator >= mob_interval:
+		_mob_accumulator = fmod(_mob_accumulator, mob_interval)
 		_send_mobs()
 	_loot_accumulator += delta
 	if _loot_accumulator >= LOOT_POLL_SECONDS:
@@ -1136,8 +1208,34 @@ func _send_mobs() -> void:
 	var entries := collect_mob_entries(MOB_REACH_METRES)
 	if entries.is_empty():
 		return
-	for batch in NetLimits.batches(entries, [_mob_tick]):
+	# A crowded hall is thirty calm bodies twice over; re-sending each one's whole
+	# state fifteen times a second is the traffic that turns walking through it
+	# into a stutter. Only what changed goes out, with a full copy once a second so
+	# a lost delta cannot leave a mob frozen for good.
+	var changed := changed_mob_entries(entries, _mob_tick % MOB_REFRESH_TICKS == 0)
+	if changed.is_empty():
+		return
+	for batch in NetLimits.batches(changed, [_mob_tick]):
 		receive_mobs.rpc(_mob_tick, batch)
+
+## The entries worth sending: one that changed since the last copy, or all of
+## them on a refresh. Public so the unit regression can drive the rule without a
+## socket.
+func changed_mob_entries(entries: Array, refresh: bool) -> Array:
+	var changed: Array = []
+	for entry in entries:
+		if typeof(entry) != TYPE_ARRAY or (entry as Array).size() < 2:
+			continue
+		var mob_name := str(entry[0])
+		var state: Variant = entry[1]
+		if not refresh:
+			var previous: Variant = _mob_sent.get(mob_name, null)
+			if previous is Dictionary and state is Dictionary \
+					and previous.hash() == state.hash():
+				continue
+		_mob_sent[mob_name] = state
+		changed.append(entry)
+	return changed
 
 ## Host -> everyone: bodies that stopped being alive. Reliable and separate from
 ## the pose stream, so a dropped pose can never leave a ghost standing.
@@ -1335,6 +1433,10 @@ func _teardown() -> void:
 	_names.clear()
 	_fielded.clear()
 	_waiting.clear()
+	_mob_sent.clear()
+	_mirror_sent = false
+	_mirror_text = ""
+	_mirror_gold = -1
 	_accumulator = 0.0
 	_tick = 0
 	# The session is the only door a lent copy's gear verbs had: shut it.

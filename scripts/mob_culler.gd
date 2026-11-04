@@ -27,6 +27,32 @@ var sweeps := 0
 var parked := 0
 
 var _elapsed := 0.0
+## Where the eyes are: the warband's bodies, whoever is inside them. A sweep that
+## measures from the host's own body alone parks a mob standing in front of a
+## guest two hundred metres away - a frozen wolf with no brain behind it, on the
+## screen of the soul that is looking straight at it. The scene hands its own
+## controller over (`attach`); without one every body keeps its own ranger check.
+var souls = null
+
+
+## Point the sweeps at the warband whose bodies are the eyes.
+func attach(controller) -> void:
+	souls = controller
+
+
+## How far `point` is from the nearest body on the field, or -1 when there is no
+## field to measure from.
+func nearest_eye(point: Vector3) -> float:
+	if souls == null:
+		return -1.0
+	var best := INF
+	for actor in souls.bodies():
+		if not is_instance_valid(actor):
+			continue
+		best = minf(best, point.distance_squared_to((actor as Node3D).global_position))
+	if best == INF:
+		return -1.0
+	return sqrt(best)
 
 
 func _process(delta: float) -> void:
@@ -54,7 +80,7 @@ func sweep() -> void:
 			continue
 		if not body.has_method("mob_lod_sweep"):
 			continue
-		body.mob_lod_sweep()
+		body.mob_lod_sweep(nearest_eye((body as Node3D).global_position))
 		if bool(body.get("dormant")):
 			sleeping += 1
 	parked = sleeping

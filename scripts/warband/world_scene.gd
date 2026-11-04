@@ -763,8 +763,19 @@ func _build_loot() -> void:
 
 
 func _on_loot_booked(item_id: String, collector_peer: int) -> void:
-	if loot_feed != null:
-		loot_feed.note(item_id, "" if collector_peer > 0 else "squad")
+	note_booked(item_id, "" if collector_peer > 0 else "squad")
+	# The booking happened here; every other soul's own loot list is told the same
+	# line, or a guest's list stays empty for the whole session while its warband
+	# is the same one being fed.
+	if flow != null and flow.session != null:
+		flow.session.announce_booked(item_id, collector_peer)
+
+
+## One line on the looted list, from this machine's own booking or from the
+## host's. `who` is empty for the soul whose hands took it.
+func note_booked(item_id: String, who: String = "") -> void:
+	if loot_feed != null and not item_id.is_empty():
+		loot_feed.note(item_id, who)
 
 
 ## The orders' ground: four caged soldiers down the wood and three warcamps of
@@ -1432,7 +1443,24 @@ func _on_world_action(actor, action: String, value) -> bool:
 			return _revive_from(actor, bool(value))
 		"loot":
 			return _loot_from(actor, value)
+		"climb_out":
+			return _climb_out_for(actor)
 	return false
+
+
+## A soul on the rope asks the party out. The host owns the descent, so a guest's
+## `G` is an intent: it is honoured only from a body standing at a rope, and it
+## brings the whole party up exactly as the host's own press does. Without it a
+## guest standing over the only standing body has no way out of the Hollow.
+func _climb_out_for(actor) -> bool:
+	if _client or delve_area == null or actor == null or not is_instance_valid(actor):
+		return false
+	if not delve_area.below() or delve_area.cave == null:
+		return false
+	if not delve_area.cave.at_exit(actor):
+		return false
+	var result: Dictionary = delve_area.climb_out()
+	return bool(result.get("ok", false))
 
 
 ## A guest's take, answered on the host for the guest's body. `value` names what

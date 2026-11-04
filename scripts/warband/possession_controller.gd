@@ -972,10 +972,10 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 		"stop":
 			combat.stop()
 			return true
-		"swap_set", "revive", "loot":
+		"swap_set", "revive", "loot", "climb_out":
 			# The scene's verbs: the authority's world answers them for this body,
-			# so a guest's TAB, revive and loot press land on the host's warband
-			# and ground.
+			# so a guest's TAB, revive, loot and rope press land on the host's
+			# warband, ground and descent.
 			if world_action.is_valid():
 				return bool(world_action.call(actor, action, value))
 	return false

@@ -186,6 +186,17 @@ func lend(data: Dictionary, gold_amount: int) -> void:
 	_lent_gold = maxi(0, gold_amount)
 	from_dict(data)
 
+## A co-op host's purse moved on its own, with no change to the books beside it: a
+## kill's gold, a sale. The whole copy does not need re-sending for one number.
+func lend_purse(amount: int) -> void:
+	if not lent:
+		return
+	var next := maxi(0, amount)
+	if next == _lent_gold:
+		return
+	_lent_gold = next
+	_notify()
+
 ## Hand the lent warband back: this machine's own save is read again, or a fresh
 ## warband stands in when there is none, so the title opens exactly the campaign
 ## it opened before the session.

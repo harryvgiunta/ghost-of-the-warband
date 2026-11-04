@@ -80,6 +80,15 @@ class StubWorld:
 		struck += 1
 
 
+## The warband's bodies, as the culler reads them.
+class StubSouls:
+	extends RefCounted
+	var list: Array = []
+
+	func bodies() -> Array:
+		return list
+
+
 func check(condition: bool, message: String) -> void:
 	checks += 1
 	if not condition:
@@ -187,6 +196,22 @@ func run() -> void:
 		if culler != null:
 			culler.sweep()
 		check(bool(stray.dormant), "one sweep parks the wolf left 300 m behind")
+		# The optimisations follow every soul's ground, not the first player's: a
+		# body standing beside that wolf - the other player's, two hundred metres
+		# from the first - keeps it awake and hunting.
+		if culler != null and stray != null:
+			var other := Node3D.new()
+			other.name = "GuestRanger"
+			other.position = (stray as Node3D).global_position + Vector3(6.0, 0.0, 0.0)
+			world.add_child(other)
+			var souls := StubSouls.new()
+			souls.list = [target, other]
+			culler.attach(souls)
+			culler.sweep()
+			check(not bool(stray.dormant),
+				"a body standing beside the wolf keeps it awake, whoever is inside it")
+			culler.attach(null)
+			other.queue_free()
 
 	world.queue_free()
 	await process_frame

@@ -19,6 +19,7 @@ extends SceneTree
 
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const State = preload("res://scripts/player_state.gd")
 const REPORT_NAME := "CoopReport"
 const TRAIL_POINT := Vector3(6.0, 0.0, -90.0)
 ## The two bodies the host's save stands on the trail.
@@ -250,6 +251,19 @@ func _host_run() -> void:
 		and bool((reports["seat"] as Dictionary).get("own_body", false)), 10.0)
 	check(guest_ready, "The guest's own world seats it in the body the host gave it")
 
+	# --- the purse moves without the books ---------------------------------
+	# A kill's gold changes nothing in the roster or the stash, so it must not cost
+	# every guest a whole campaign reload: one number goes out on its own.
+	warband.award_gold(37)
+	await create_timer(0.4).timeout
+	report.probe.rpc_id(guest_peer, "purse")
+	var purse_seen := await _wait_until(func(): return reports.has("purse"), 10.0)
+	check(purse_seen, "The guest answers for the host's purse")
+	if purse_seen:
+		check(int((reports["purse"] as Dictionary).get("gold", -1)) == warband.gold(),
+			"The guest's purse is the host's (%s vs %s)" % [
+				str((reports["purse"] as Dictionary).get("gold", -1)), str(warband.gold())])
+
 	# --- a guest's press wears gear on the host's books --------------------
 	# The paperdoll on a guest is the host's warband: the verb travels as a
 	# request, the host runs the same verb on its own books, and the guest sees
@@ -448,6 +462,16 @@ func _host_run() -> void:
 		var taken := await _wait_until(func(): return drop != null \
 			and is_instance_valid(drop) and bool(drop.get("collected")), 10.0)
 		check(taken, "The guest's K takes the host's drop")
+		# The booking happens on the host, so the guest's own looted list can only
+		# be fed from the wire: the list is how a guest reads what the warband is
+		# winning, and an empty one for a whole session is the "no loot stream"
+		# report.
+		var piece_name := str(State.ITEMS.get("sword_short", {}).get("name", "sword_short"))
+		var fed := await _wait_until(func(): return world.loot_feed != null \
+			and " ".join(world.loot_feed.lines()).to_upper().contains(
+				piece_name.to_upper()), 5.0)
+		check(fed, "the guest's looted list carries the host's booking (%s)" % str(
+			world.loot_feed.lines() if world.loot_feed != null else []))
 		# A death is a one-shot fact on the reliable channel: the guest's copy of
 		# a body killed on the host falls here even when every pose packet for it
 		# was lost, instead of standing over the host's corpse forever.
@@ -879,6 +903,7 @@ func _probe_payload(tag: String) -> Dictionary:
 		"watching_holder": holder,
 		"mission_watch": lines.size() >= 2 and String(lines[1]).contains("no body is free"),
 		"body_lines": lines,
+		"gold": warband.gold() if warband != null else -1,
 		"failed": failed_checks,
 	}
 

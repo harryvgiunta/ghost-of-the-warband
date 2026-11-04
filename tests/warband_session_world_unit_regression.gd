@@ -283,6 +283,24 @@ func run() -> void:
 		"the guest's own campaign comes back from its own file")
 	check(warband.gold() == own_credits, "and so does its own purse (%d)" % warband.gold())
 
+	# --- the mob stream only carries news -------------------------------
+	# Thirty calm bodies in a hall are the traffic that turns a walk through it
+	# into a stutter: an unchanged body costs no packet, and a refresh repeats
+	# everything so a lost delta cannot freeze a mob for good.
+	var first_pass: Array = session.changed_mob_entries(
+		[["wolf", {"pos": [1.0, 0.0, 0.0]}], ["rat", {"pos": [2.0, 0.0, 0.0]}]], false)
+	check(first_pass.size() == 2, "a first pass sends every mob (%d)" % first_pass.size())
+	var repeated: Array = session.changed_mob_entries(
+		[["wolf", {"pos": [1.0, 0.0, 0.0]}], ["rat", {"pos": [2.0, 0.0, 0.0]}]], false)
+	check(repeated.is_empty(), "an unchanged mob costs no packet (%d)" % repeated.size())
+	var moved: Array = session.changed_mob_entries(
+		[["wolf", {"pos": [5.0, 0.0, 0.0]}], ["rat", {"pos": [2.0, 0.0, 0.0]}]], false)
+	check(moved.size() == 1 and str(moved[0][0]) == "wolf",
+		"the body that moved is the one sent (%s)" % str(moved))
+	var refreshed: Array = session.changed_mob_entries(
+		[["wolf", {"pos": [5.0, 0.0, 0.0]}], ["rat", {"pos": [2.0, 0.0, 0.0]}]], true)
+	check(refreshed.size() == 2, "a refresh repeats every mob (%d)" % refreshed.size())
+
 	# --- the campaign doors ------------------------------------------------
 	warband.reset_state()
 	warband.save_state()

@@ -349,6 +349,9 @@ func _ensure_culler() -> void:
 	_culler = MobCullerScript.new()
 	_culler.name = "MobCuller"
 	add_child(_culler)
+	# The eyes are every body a soul could be inside, so a guest's own ground is
+	# swept by the same optimisations as the host's.
+	_culler.attach(_world.get("controller"))
 
 
 ## A second setup replaces the band rather than stacking two on the same road.
