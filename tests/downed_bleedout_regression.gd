@@ -246,7 +246,7 @@ func run() -> void:
 		check(plated_skeleton.get_bone_pose(plated_head).basis.get_scale().x < 0.05,
 			"A pose solve that gives the head back is collapsed again")
 	if piece != null:
-		var piece_mesh := piece.find_child("HeadPiece", true, false) as MeshInstance3D
+		var piece_mesh := piece.find_child("GorePiece", true, false) as MeshInstance3D
 		check(piece_mesh != null and piece_mesh.mesh != null
 				and piece_mesh.mesh.get_surface_count() > 0,
 			"The thrown head is a mesh of its own")

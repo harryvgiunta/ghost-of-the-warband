@@ -21,6 +21,7 @@ const CorpseHold = preload("res://scripts/corpse_hold.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
 const CorpsePhysics = preload("res://scripts/corpse_physics.gd")
 const SeveredHead = preload("res://scripts/severed_head.gd")
+const SeveredBody = preload("res://scripts/severed_body.gd")
 const HeldWeapon = preload("res://scripts/held_weapon.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
@@ -168,7 +169,11 @@ var _death_handled := false
 ## The flight of a killing headshot, named by the arrow that landed it or by the
 ## death snapshot a replica was handed. Spent by the next blow.
 var _head_shot := Vector3.ZERO
+## A two-handed overhead's shove, named before the blow (`note_cleave`).
+var _cleave := Vector3.ZERO
+var _cleave_kind := "horizontal"
 var _sever := Vector3.ZERO
+var _split := Vector3.ZERO
 var _received_pose := false
 var _net_position := Vector3.ZERO
 ## Buffered server states for the replica's delayed render (see `enemy.gd`).
@@ -556,9 +561,12 @@ func note_impact(force: Vector3) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if not alive:
 		return
-	# A headshot is only worth a head if this blow is the arrow that named it.
+	# A headshot is only worth a head, and a chop only worth a split, if this is
+	# the blow that named it.
 	var flight := _head_shot
 	_head_shot = Vector3.ZERO
+	var chop := _cleave
+	_cleave = Vector3.ZERO
 	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	health = maxf(0.0,health-applied)
@@ -567,6 +575,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 		health <= 0.0,blood_scale())
 	if health <= 0.0:
 		_sever = flight
+		_split = chop
 		_die(true, applied)
 		return
 	_respond_to_attack()
@@ -577,6 +586,14 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
 	if alive:
 		_head_shot = velocity
+
+
+## A two-handed overhead names its shove here before its blow: the chop that
+## kills this devil takes it in two (`SeveredBody`).
+func note_cleave(force: Vector3, kind: String = "horizontal") -> void:
+	if alive:
+		_cleave = force
+		_cleave_kind = kind
 
 
 ## The projectile, blade or spell that landed names itself here before it
@@ -617,11 +634,23 @@ func _wake_pack() -> void:
 	MobSenses.alert_pack(self, target, target.global_position)
 
 
+## The death cause the wire carries: w = 1 a head (xyz the arrow's flight),
+## w = 2 a body opened across, w = 3 one sliced in half (xyz the chop's shove).
+func _death_cause() -> Vector4:
+	if _sever != Vector3.ZERO:
+		return Vector4(_sever.x, _sever.y, _sever.z, 1.0)
+	if _split != Vector3.ZERO:
+		return Vector4(_split.x, _split.y, _split.z,
+			3.0 if _cleave_kind == "vertical" else 2.0)
+	return Vector4.ZERO
+
+
 func snapshot() -> Dictionary:
 	return {"id":enemy_id,"pos":position,"yaw":rotation.y,"state":state,"time":_state_time,
 		"health":health,"alive":alive,"weapon":devil_weapon,"depth":depth,"role":_role,
-		# A death that took a head with it: w = 1 and xyz the arrow's flight.
-		"kill":Vector4(_sever.x,_sever.y,_sever.z,1.0 if _sever != Vector3.ZERO else 0.0)}
+		# The death that took a piece: w = 1 is a head (xyz the arrow's flight),
+		# w = 2 a body opened across, w = 3 one sliced in half (xyz the chop's shove).
+		"kill":_death_cause()}
 
 
 func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
@@ -660,7 +689,10 @@ func apply_snapshot(snapshot_state: Dictionary, tick: int = -1) -> void:
 		_warning.visible = next_alive and state == STATE_WINDUP
 	if not next_alive:
 		var cause: Vector4 = snapshot_state.get("kill",Vector4.ZERO)
-		_sever = Vector3(cause.x,cause.y,cause.z) if cause.w > 0.5 else Vector3.ZERO
+		_sever = Vector3(cause.x,cause.y,cause.z) \
+			if cause.w > 0.5 and cause.w < 1.5 else Vector3.ZERO
+		_split = Vector3(cause.x,cause.y,cause.z) if cause.w > 1.5 else Vector3.ZERO
+		_cleave_kind = "vertical" if cause.w > 2.5 else "horizontal"
 		_die(false)
 	elif not _death_handled:
 		alive = true
@@ -799,6 +831,8 @@ func _die(announce: bool, damage := 0.0) -> void:
 	# keeps is the one its bones were read in.
 	if is_instance_valid(_visual) and _sever != Vector3.ZERO:
 		SeveredHead.sever(_visual, _sever, maxf(damage, 12.0))
+	elif is_instance_valid(_visual) and _split != Vector3.ZERO:
+		SeveredBody.split(_visual, _split, maxf(damage, 30.0))
 	if is_instance_valid(_visual):
 		if _visual_kind == "mob":
 			_visual.die(fall)

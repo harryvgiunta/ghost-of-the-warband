@@ -663,6 +663,9 @@ func _on_melee_started(hand: String) -> void:
 	state.reach = rig.melee_reach(hand)
 	state.half_angle = rig.melee_half_angle(hand)
 	state.variant = rig.melee_variant(hand)
+	# Whether the piece in the main hand is swung with both: a two-handed
+	# overhead that kills is the one cut that takes a body in two.
+	state.two_handed = hand == "right" and rig.swings_two_handed()
 	state.side = 1.0 if rig.melee_variant(hand) == "diagonal_right" else -1.0
 	state.cut = 0.0
 	state.max_victims = _swing_victim_cap(hand)
@@ -978,6 +981,15 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		unit.note_attacker(actor)
 	if unit.has_method("note_impact"):
 		unit.note_impact(_impact_force(state, at, unit))
+	# A two-handed sword is the one blade that takes a body apart: an overhead
+	# slices it in half, a side chop opens it across. Name it on the victim
+	# before the blow lands, so a killing cut can spend it.
+	var variant := str(state.get("variant", ""))
+	if is_instance_valid(actor) and bool(state.get("two_handed", false)) \
+			and variant in ["overhead", "diagonal_left", "diagonal_right"] \
+			and unit.has_method("note_cleave"):
+		unit.note_cleave(at - actor.global_position,
+			"vertical" if variant == "overhead" else "horizontal")
 	if unit.has_method("receive_melee"):
 		outcome = int(unit.receive_melee(damage,source_id,actor.global_position,headshot))
 	else:

@@ -61,12 +61,16 @@ var _query := PhysicsRayQueryParameters3D.new()
 static var _faces := {}
 
 
-## The guarantee that the head is gone: the collapse runs last in the frame,
-## after every writer a rig has (a clip solve, a ragdoll bake, a script posing the
-## head), so no pose pipeline can draw the face back onto the corpse.
+## The guarantee that a piece of body is gone: the collapse runs last in the
+## frame, after every writer a rig has (a clip solve, a ragdoll bake, a script
+## posing the bone), so no pose pipeline can draw it back onto the corpse. With
+## `point` set, the bones collapse onto one place in the skeleton instead of onto
+## their own joints - a body taken off at a cut keeps a stump where the cut was.
 class Stump extends Node:
 	const COLLAPSE := 0.001
-	var bone := -1
+	var bones := PackedInt32Array()
+	## Skeleton-space collapse point; `INF` collapses each bone on its own origin.
+	var point := Vector3.INF
 	var _skeleton: Skeleton3D
 
 	func _ready() -> void:
@@ -76,16 +80,27 @@ class Stump extends Node:
 	func _process(_delta: float) -> void:
 		enforce()
 
-	## Collapses the head again if a pose write gave it volume back. Idempotent,
-	## and the one place the removal can be checked from.
+	## Collapses the bones again if a pose write gave them volume back.
+	## Idempotent, and the one place the removal can be checked from.
 	func enforce() -> void:
-		if _skeleton == null or bone < 0 or bone >= _skeleton.get_bone_count():
+		if _skeleton == null:
 			return
-		var pose := _skeleton.get_bone_pose(bone)
-		if pose.basis.get_scale().x < 0.01:
-			return
-		_skeleton.set_bone_pose(bone,
-			Transform3D(pose.basis.scaled(Vector3.ONE * COLLAPSE), pose.origin))
+		var count := _skeleton.get_bone_count()
+		for bone in bones:
+			if bone < 0 or bone >= count:
+				continue
+			var pose := _skeleton.get_bone_pose(bone)
+			if pose.basis.get_scale().x < 0.01:
+				continue
+			if point.is_finite():
+				var parent := _skeleton.get_bone_parent(bone)
+				var parent_pose := Transform3D.IDENTITY if parent < 0 \
+					else _skeleton.get_bone_global_pose(parent)
+				_skeleton.set_bone_pose(bone, parent_pose.affine_inverse() \
+					* Transform3D(Basis().scaled(Vector3.ONE * COLLAPSE), point))
+			else:
+				_skeleton.set_bone_pose(bone,
+					Transform3D(pose.basis.scaled(Vector3.ONE * COLLAPSE), pose.origin))
 
 
 ## Throws the head of `visual` off along `shot` - the arrow's velocity - and
@@ -175,7 +190,7 @@ static func _stump(visual: Node3D, skeleton: Skeleton3D, bone: int,
 		if skeleton.find_child("HeadStump", false, false) == null:
 			var stump := Stump.new()
 			stump.name = "HeadStump"
-			stump.bone = bone
+			stump.bones = PackedInt32Array([bone])
 			skeleton.add_child(stump)
 	var amount: float = maxf(damage, 10.0)
 	if visual.has_method("blood_anchor"):
@@ -232,6 +247,7 @@ func setup(visual: Node3D, shot: Vector3, frame: Transform3D, offset: Transform3
 	elif skeleton != null and bone >= 0:
 		var piece := _build_head(visual, skeleton, bone, frame)
 		if is_instance_valid(piece):
+			add_child(piece)
 			# The piece comes out of a wound: it is wet before it is thrown.
 			BloodFx.stain_projectile(piece, maxf(damage, 10.0))
 	var direction := shot.normalized()
@@ -263,15 +279,24 @@ func _build_head(visual: Node3D, skeleton: Skeleton3D, bone: int,
 	for index in skeleton.get_bone_count():
 		if _is_ancestor_of(skeleton, bone, index):
 			owned[index] = true
+	return build_piece(visual, skeleton, frame, owned, skeleton.get_bone_name(bone))
+
+
+## Every body piece this file cuts is the same operation: the rig's own skinned
+## surfaces, posed once at the death frame, reduced to the triangles that belong
+## to `owned` (a set of bone indices) and written in `frame`'s space. `tag` names
+## the split in the cache, because the triangle set depends on which bones own it.
+static func build_piece(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D,
+		owned: Dictionary, tag: String) -> MeshInstance3D:
 	var into_frame := frame.affine_inverse() * skeleton.get_global_transform()
 	var mesh := ArrayMesh.new()
 	for node in visual.find_children("*", "MeshInstance3D", true, false):
 		var instance := node as MeshInstance3D
-		if not instance.visible or not _skins_to(instance, skeleton):
+		if not instance.visible or not skins_to(instance, skeleton):
 			continue
 		var skin := instance.skin
 		for surface in instance.mesh.get_surface_count():
-			var faces := _head_faces(instance.mesh, skin, surface, skeleton, bone, owned)
+			var faces := faces_for(instance.mesh, skin, surface, skeleton, owned, tag)
 			if faces.is_empty():
 				continue
 			var arrays := instance.mesh.surface_get_arrays(surface)
@@ -293,7 +318,7 @@ func _build_head(visual: Node3D, skeleton: Skeleton3D, bone: int,
 				if posed.has(id):
 					continue
 				posed[id] = order.size()
-				order.append(_pose_vertex(skin, skeleton, bones, weights, per,
+				order.append(pose_vertex(skin, skeleton, bones, weights, per,
 					vertices, raw_normal, raw_uv, raw_uv2, raw_color,
 					raw_tangent, id, into_frame))
 			var tool := SurfaceTool.new()
@@ -320,21 +345,127 @@ func _build_head(visual: Node3D, skeleton: Skeleton3D, bone: int,
 			mesh.surface_set_material(mesh.get_surface_count() - 1,
 				instance.get_active_material(surface))
 	var piece := MeshInstance3D.new()
-	piece.name = "HeadPiece"
+	piece.name = "GorePiece"
 	piece.mesh = mesh
 	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	add_child(piece)
 	return piece
+
+
+## A body cut clean through by a plane into two halves, in one pose pass: every
+## skinned surface is posed once at the death frame and its triangles are dealt
+## to the side their corners mostly fall on. Returns `[positive, negative]`
+## meshes, either of which may be empty. The vertices are written in `frame`, so
+## each half can be turned over rigidly on its own.
+static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D,
+		normal: Vector3, offset: float) -> Array:
+	var into_frame := frame.affine_inverse() * skeleton.get_global_transform()
+	var side := Vector3(normal.x, 0.0, normal.z)
+	if side.length_squared() < 0.000001:
+		side = Vector3.RIGHT
+	side = side.normalized()
+	var meshes: Array = [ArrayMesh.new(), ArrayMesh.new()]
+	for node in visual.find_children("*", "MeshInstance3D", true, false):
+		var instance := node as MeshInstance3D
+		if not instance.visible or not skins_to(instance, skeleton):
+			continue
+		var skin := instance.skin
+		for surface in instance.mesh.get_surface_count():
+			var arrays := instance.mesh.surface_get_arrays(surface)
+			var vertices = arrays[Mesh.ARRAY_VERTEX]
+			var bones = arrays[Mesh.ARRAY_BONES]
+			var weights = arrays[Mesh.ARRAY_WEIGHTS]
+			if vertices == null or bones == null or weights == null:
+				continue
+			var count: int = vertices.size()
+			var per: int = bones.size() / maxi(count, 1)
+			var raw_normal = arrays[Mesh.ARRAY_NORMAL]
+			var raw_uv = arrays[Mesh.ARRAY_TEX_UV]
+			var raw_uv2 = arrays[Mesh.ARRAY_TEX_UV2]
+			var raw_color = arrays[Mesh.ARRAY_COLOR]
+			var raw_tangent = arrays[Mesh.ARRAY_TANGENT]
+			# Pose every vertex once and record which side of the blade it sits on.
+			var posed := {}
+			var across := PackedFloat32Array()
+			across.resize(count)
+			for vertex in count:
+				var data: Array = pose_vertex(skin, skeleton, bones, weights, per,
+					vertices, raw_normal, raw_uv, raw_uv2, raw_color, raw_tangent,
+					vertex, into_frame)
+				posed[vertex] = data
+				across[vertex] = side.dot(data[0] as Vector3) - offset
+			var order := PackedInt32Array()
+			var indices = arrays[Mesh.ARRAY_INDEX]
+			if indices == null:
+				order.resize(count)
+				for vertex in count:
+					order[vertex] = vertex
+			else:
+				order = indices
+			for half in 2:
+				var sign := 1.0 if half == 0 else -1.0
+				var kept := PackedInt32Array()
+				for corner in range(0, order.size() - 2, 3):
+					var a := int(order[corner])
+					var b := int(order[corner + 1])
+					var c := int(order[corner + 2])
+					if sign * (across[a] + across[b] + across[c]) <= 0.0:
+						continue
+					kept.append(a)
+					kept.append(b)
+					kept.append(c)
+				if kept.is_empty():
+					continue
+				var local := {}
+				var data_list: Array = []
+				for vertex in kept:
+					var id := int(vertex)
+					if local.has(id):
+						continue
+					local[id] = data_list.size()
+					data_list.append(posed[id])
+				var tool := SurfaceTool.new()
+				tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+				for entry in data_list:
+					var data: Array = entry
+					if raw_normal != null:
+						tool.set_normal(data[1])
+					if raw_uv != null:
+						tool.set_uv(data[2])
+					if raw_uv2 != null:
+						tool.set_uv2(data[3])
+					if raw_color != null:
+						tool.set_color(data[4])
+					if raw_tangent != null:
+						tool.set_tangent(data[5])
+					tool.add_vertex(data[0])
+				for vertex in kept:
+					tool.add_index(int(local[int(vertex)]))
+				var target: ArrayMesh = meshes[half]
+				target = tool.commit(target)
+				target.surface_set_material(target.get_surface_count() - 1,
+					instance.get_active_material(surface))
+				meshes[half] = target
+	var pieces: Array = []
+	for index in 2:
+		var mesh: ArrayMesh = meshes[index]
+		if mesh.get_surface_count() == 0:
+			pieces.append(null)
+			continue
+		var piece := MeshInstance3D.new()
+		piece.name = "GoreHalf"
+		piece.mesh = mesh
+		piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		pieces.append(piece)
+	return pieces
 
 
 ## The triangles of one surface that belong to the head. Which triangles those
 ## are does not depend on the pose, only on the bind, so the split is solved once
 ## per mesh and reused: a ranger's body is ninety-five thousand vertices, and
 ## walking them again on every beheading is a frame a kill cannot pay for.
-static func _head_faces(mesh: ArrayMesh, skin: Skin, surface: int,
-		skeleton: Skeleton3D, bone: int, owned: Dictionary) -> PackedInt32Array:
-	var key := "%d:%d:%s" % [mesh.get_instance_id(), surface,
-		skeleton.get_bone_name(bone)]
+static func faces_for(mesh: ArrayMesh, skin: Skin, surface: int,
+		skeleton: Skeleton3D, owned: Dictionary, tag: String) -> PackedInt32Array:
+	var key := "%d:%d:%s" % [mesh.get_instance_id(), surface, tag]
 	if _faces.has(key):
 		return _faces[key]
 	var arrays := mesh.surface_get_arrays(surface)
@@ -354,7 +485,7 @@ static func _head_faces(mesh: ArrayMesh, skin: Skin, surface: int,
 			var weight: float = weights[slot]
 			if weight <= 0.0001:
 				continue
-			if owned.has(_bind_bone(skin, skeleton, int(bones[slot]))):
+			if owned.has(bind_bone(skin, skeleton, int(bones[slot]))):
 				total += weight
 		share[vertex] = total
 	var order := PackedInt32Array()
@@ -386,7 +517,7 @@ static func _head_faces(mesh: ArrayMesh, skin: Skin, surface: int,
 
 ## One vertex of the head, skinned at the lethal pose and written in the head's
 ## frame: position, normal, uv, uv2, colour and tangent.
-static func _pose_vertex(skin: Skin, skeleton: Skeleton3D, bones, weights, per: int,
+static func pose_vertex(skin: Skin, skeleton: Skeleton3D, bones, weights, per: int,
 		vertices, raw_normal, raw_uv, raw_uv2, raw_color, raw_tangent,
 		vertex: int, into_frame: Transform3D) -> Array:
 	var point := Vector3.ZERO
@@ -403,7 +534,7 @@ static func _pose_vertex(skin: Skin, skeleton: Skeleton3D, bones, weights, per: 
 		if weight <= 0.0001:
 			continue
 		var bind := int(bones[slot])
-		var limb := _bind_bone(skin, skeleton, bind)
+		var limb := bind_bone(skin, skeleton, bind)
 		if limb < 0:
 			continue
 		var skinning := skeleton.get_bone_global_pose(limb) * skin.get_bind_pose(bind)
@@ -427,7 +558,7 @@ static func _pose_vertex(skin: Skin, skeleton: Skeleton3D, bones, weights, per: 
 	]
 
 
-static func _bind_bone(skin: Skin, skeleton: Skeleton3D, bind: int) -> int:
+static func bind_bone(skin: Skin, skeleton: Skeleton3D, bind: int) -> int:
 	var limb := skin.get_bind_bone(bind)
 	if limb >= 0:
 		return limb
@@ -438,7 +569,7 @@ static func _bind_bone(skin: Skin, skeleton: Skeleton3D, bind: int) -> int:
 ## True when this mesh instance is skinned to `skeleton`: the imported rigs name
 ## it with a NodePath, and a mesh that names nothing is checked against a bind
 ## name, so a prop that merely sits near the body is never cut into.
-static func _skins_to(instance: MeshInstance3D, skeleton: Skeleton3D) -> bool:
+static func skins_to(instance: MeshInstance3D, skeleton: Skeleton3D) -> bool:
 	if instance.mesh == null or instance.skin == null or skeleton == null:
 		return false
 	if instance.skeleton != NodePath():

@@ -376,12 +376,11 @@ static func _add_torso_shapes(simulator: PhysicalBoneSimulator3D,
 		var lower := skeleton.get_bone_name(index).to_lower()
 		if not _is_torso(lower):
 			continue
-		# A head an arrow took off has no volume left to catch the floor: its
-		# bone was collapsed into the neck the stump keeps (`SeveredHead`), and a
-		# capsule there would drag the corpse's ragdoll at a head that is not
-		# there any more.
-		if lower == "head" \
-				and skeleton.get_bone_pose(index).basis.get_scale().x < 0.05:
+		# A piece of body the death effect took off has no volume left to catch
+		# the floor: the bone was collapsed into the stump (`SeveredHead`,
+		# `SeveredBody`), and a capsule there would drag the corpse's ragdoll at
+		# a part that is not there any more.
+		if skeleton.get_bone_pose(index).basis.get_scale().x < 0.05:
 			continue
 		var children := skeleton.get_bone_children(index)
 		if children.is_empty():

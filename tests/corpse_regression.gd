@@ -232,11 +232,11 @@ func run() -> void:
 	var flight = cut._visual.find_child("SeveredHead", true, false)
 	check(flight != null, "A killing headshot throws a head into the world")
 	if flight != null:
-		var piece := flight.find_child("HeadPiece", true, false) as MeshInstance3D
+		var piece := flight.find_child("GorePiece", true, false) as MeshInstance3D
 		check(piece != null and piece.mesh != null
 				and piece.mesh.get_surface_count() > 0
 				and piece.mesh.surface_get_array_len(0) > 0,
-			"The thrown head is a mesh of its own, carrying the rig's surfaces")
+			"The thrown piece is a mesh of its own, carrying the rig's surfaces")
 		check(flight.get_child_count() == 2,
 			"The arrow that killed it leaves the body with the head")
 	await pause(1.2)
@@ -308,6 +308,78 @@ func run() -> void:
 			label + " corpse keeps no head where the head was")
 		check(visual.find_child("SeveredHead", true, false) != null,
 			label + " threw the head into the world")
+
+	# --- a two-handed overhead takes the body in two ----------------------
+	# `SeveredBody`: the bones above the cut own the piece, the corpse keeps its
+	# lower half, the guts spill under the cut, and the piece lands beside it.
+	var cleaved = Mob.new()
+	cleaved.mob_id = "hell_goat"
+	cleaved.position = Vector3(-18.0, 0.12, 12.0)
+	fixture.add_child(cleaved)
+	var cleaved_proc = DelveDevil.new()
+	cleaved_proc.configure(1, "claw", 1)
+	cleaved_proc.position = Vector3(-18.0, 0.12, 18.0)
+	fixture.add_child(cleaved_proc)
+	var stabbed = Mob.new()
+	stabbed.mob_id = "hell_goat"
+	stabbed.position = Vector3(-18.0, 0.12, 24.0)
+	fixture.add_child(stabbed)
+	var bisected = Mob.new()
+	bisected.mob_id = "hell_goat"
+	bisected.position = Vector3(-12.0, 0.12, 12.0)
+	fixture.add_child(bisected)
+	var low_cut = Enemy.new()
+	low_cut.kind = 0
+	low_cut.position = Vector3(-12.0, 0.12, 18.0)
+	fixture.add_child(low_cut)
+	await physics_frame
+	await physics_frame
+	cleaved.note_cleave(Vector3(0.0, 0.0, -1.0))
+	cleaved.take_damage(999.0, 0, false)
+	cleaved_proc.note_cleave(Vector3(0.0, 0.0, -1.0))
+	cleaved_proc.take_damage(999.0, 0, false)
+	stabbed.take_damage(999.0, 0, false)
+	bisected.note_cleave(Vector3(0.0, 0.0, -1.0), "vertical")
+	bisected.take_damage(999.0, 0, false)
+	low_cut.note_cleave(Vector3(0.0, 0.0, -1.0), "vertical")
+	low_cut.take_damage(999.0, 0, false)
+	await physics_frame
+	await physics_frame
+	var cleaved_skeleton := cleaved._visual.find_child("Skeleton3D", true, false) as Skeleton3D
+	var collapsed := 0
+	var solid := 0
+	for index in cleaved_skeleton.get_bone_count():
+		if cleaved_skeleton.get_bone_pose(index).basis.get_scale().x < 0.05:
+			collapsed += 1
+		else:
+			solid += 1
+	var holder = cleaved._visual.find_child("SplitBody", true, false)
+	var piece := holder.find_child("GorePiece", true, false) as MeshInstance3D \
+		if holder != null else null
+	check(not cleaved.alive, "The two-handed chop kills the body")
+	check(holder != null and piece != null and piece.mesh != null
+			and piece.mesh.get_surface_count() > 0,
+		"A two-handed overhead takes the upper body off as a piece")
+	check(collapsed > 0 and solid > 0,
+		"The corpse keeps its lower half and loses the bones above the cut")
+	check(cleaved._visual.find_child("Entrails", true, false) != null,
+		"The guts spill on the floor under the cut")
+	check(stabbed._visual.find_child("SplitBody", true, false) == null,
+		"A blow that is not a two-handed overhead does not split the body")
+	check(cleaved_proc._visual.find_child("SplitBody", true, false) == null,
+		"A body with no skeleton is not cut in two")
+	var halves_holder = bisected._visual.find_child("SplitBody", true, false)
+	var halves: Array = halves_holder.find_children("*", "MeshInstance3D", true, false) \
+		if halves_holder != null else []
+	check(halves.size() == 2, "An overhead slices the body into two halves")
+	check(bisected._visual.find_child("BodyStump", true, false) == null,
+		"A sliced body is replaced by its halves instead of keeping a stump")
+	check(low_cut._wolf.find_child("SplitBody", true, false) == null,
+		"A body with no third of itself to cut is not split")
+	await pause(0.9)
+	if holder != null and is_instance_valid(holder):
+		check((holder as Node3D).global_position.y < 1.2,
+			"The upper body comes down to the floor")
 
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.
