@@ -963,6 +963,11 @@ func _maintain_watchers() -> void:
 
 
 func _on_watcher_defeated(enemy, _reward: int) -> void:
+	# A guest's watcher is a replica falling from the host's snapshot. Its death
+	# was booked there: the drop, the corpse and the lesson's count are the host's
+	# and reach this machine through the session, not through a second local one.
+	if host != null and bool(host.get("_client")):
+		return
 	if sequencer != null:
 		sequencer.note_guard_killed()
 	if duel != null and watchers_down() >= GATE_WATCHERS.size():

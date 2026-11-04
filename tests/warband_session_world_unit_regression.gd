@@ -239,9 +239,36 @@ func run() -> void:
 	check(not bool(bought.get("ok", true)) and str(bought.get("message", "")) == warband.LENT_MESSAGE,
 		"buying into the host's stash is the host's to do (%s)" % str(bought.get("message", "")))
 	var equipped: Dictionary = warband.equip_merc(host_id, "main", "sword_iron")
-	check(not bool(equipped.get("ok", true)), "a guest cannot dress the host's mercenary")
-	check(not bool(warband.swap_weapon_set(host_id).get("ok", true)),
-		"a guest's own TAB never swaps on its lent copy (the host's world does it)")
+	check(not bool(equipped.get("ok", true)),
+		"a lent copy with no session to ask refuses to dress the host's mercenary")
+	var refused_swap: Dictionary = warband.swap_weapon_set(host_id)
+	check(not bool(refused_swap.get("ok", true)),
+		"and refuses a swap (%s)" % str(refused_swap.get("message", "")))
+	# With a session behind it, the same verb travels instead of writing: the
+	# callable the session installs is the whole of the guest's side of it.
+	var asked: Array[Dictionary] = []
+	warband.gear_requester = func(request: Dictionary) -> bool:
+		asked.append(request)
+		return true
+	var routed: Dictionary = warband.equip_merc(host_id, "main", "sword_iron")
+	check(bool(routed.get("pending", false)),
+		"a guest's equip is sent to the host (%s)" % str(routed.get("message", "")))
+	check(asked.size() == 1 and str(asked[0].get("verb", "")) == "equip"
+			and int((asked[0].get("args", []) as Array)[0]) == host_id,
+		"the request names the verb and the body (%s)" % str(asked))
+	check(str(warband.roster.equipped_of(host_id).get("main", "")) != "sword_iron",
+		"and the lent copy is still not the guest's to write")
+	var swapped: Dictionary = warband.swap_weapon_set(host_id)
+	check(bool(swapped.get("pending", false)) and asked.size() == 2
+			and str(asked[1].get("verb", "")) == "swap_set",
+		"a guest's own TAB travels the same way (%s)" % str(asked))
+	var laid: Dictionary = warband.set_hotbar_order(host_id, ["rending_strike"])
+	check(bool(laid.get("pending", false)) and asked.size() == 3
+			and str(asked[2].get("verb", "")) == "hotbar_order",
+		"and the keys a guest lays out are the host's to lay (%s)" % str(asked))
+	warband.gear_requester = Callable()
+	check(not bool(warband.equip_merc(host_id, "main", "sword_iron").get("ok", true)),
+		"and the door shuts with the session")
 	check(int(player.credits) == own_credits, "the guest's own purse is untouched")
 	warband.save_state()
 	check(FileAccess.get_file_as_string(WARBAND_SAVE) == own_text,

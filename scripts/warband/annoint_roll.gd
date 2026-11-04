@@ -57,6 +57,29 @@ static func _rand(values: Array, rng: RandomNumberGenerator) -> Variant:
 	return values[rng.randi_range(0, values.size() - 1)]
 
 
+## A draw from a pool of entries, weighted by the item's class rules: a family
+## the class lists as "sometimes" is a rarer slice of the same pool, not a
+## hidden second die. A pool with no class groups (a test, a bare call) draws
+## uniformly, which is the old behaviour.
+static func _rand_entry(values: Array, rng: RandomNumberGenerator,
+		groups: Array = []) -> Variant:
+	if values.is_empty():
+		return null
+	if groups.is_empty():
+		return _rand(values, rng)
+	var total := 0.0
+	for entry in values:
+		total += Catalog.weight_of(entry, groups)
+	if total <= 0.0:
+		return _rand(values, rng)
+	var roll := rng.randf() * total
+	for entry in values:
+		roll -= Catalog.weight_of(entry, groups)
+		if roll <= 0.0:
+			return entry
+	return values[values.size() - 1]
+
+
 ## Free entries from `pool` whose id is not already in `existing`.
 static func _open(pool: Array, existing: Array[String]) -> Array:
 	var out: Array = []
@@ -74,7 +97,7 @@ static func _open(pool: Array, existing: Array[String]) -> Array:
 ## `""` on REMOVE and `removed_id` is `""` when nothing was taken. `converted` is
 ## true when the cap turned an add into a replace.
 static func roll(pool: Array, existing: Array[String], at_cap: bool,
-		rng: RandomNumberGenerator) -> Dictionary:
+		rng: RandomNumberGenerator, groups: Array = []) -> Dictionary:
 	var result := {"outcome": Outcome.NOTHING, "converted": false, "entry_id": "",
 		"removed_id": "", "message": "The ichor does nothing."}
 	if pool.is_empty():
@@ -87,9 +110,9 @@ static func roll(pool: Array, existing: Array[String], at_cap: bool,
 		result["converted"] = true
 	match outcome:
 		Outcome.ADD_ABILITY:
-			return _add(pool, existing, true, result, rng)
+			return _add(pool, existing, true, result, rng, groups)
 		Outcome.ADD_PASSIVE:
-			return _add(pool, existing, false, result, rng)
+			return _add(pool, existing, false, result, rng, groups)
 		Outcome.REMOVE:
 			if existing.is_empty():
 				result["outcome"] = Outcome.NOTHING
@@ -101,12 +124,12 @@ static func roll(pool: Array, existing: Array[String], at_cap: bool,
 			result["message"] = "The ichor takes %s." % _name_of(pool, stripped)
 			return result
 		Outcome.REPLACE:
-			return _replace(pool, existing, result, rng, drawn)
+			return _replace(pool, existing, result, rng, drawn, groups)
 	return result
 
 
 static func _add(pool: Array, existing: Array[String], want_ability: bool,
-		result: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
+		result: Dictionary, rng: RandomNumberGenerator, groups: Array = []) -> Dictionary:
 	var kind_pool: Array = []
 	for entry in pool:
 		var is_ability := int(entry.kind) == Catalog.Kind.ABILITY
@@ -121,8 +144,8 @@ static func _add(pool: Array, existing: Array[String], want_ability: bool,
 				open.append(entry)
 		open = _open(open, existing)
 	if open.is_empty():
-		return _replace(pool, existing, result, rng, -1)
-	var picked = _rand(open, rng)
+		return _replace(pool, existing, result, rng, -1, groups)
+	var picked = _rand_entry(open, rng, groups)
 	result["outcome"] = Outcome.ADD_ABILITY if want_ability else Outcome.ADD_PASSIVE
 	result["entry_id"] = str(picked.id)
 	result["message"] = "The ichor wakes %s." % str(picked.name)
@@ -130,7 +153,7 @@ static func _add(pool: Array, existing: Array[String], want_ability: bool,
 
 
 static func _replace(pool: Array, existing: Array[String], result: Dictionary,
-		rng: RandomNumberGenerator, drawn: int) -> Dictionary:
+		rng: RandomNumberGenerator, drawn: int, groups: Array = []) -> Dictionary:
 	var removed := ""
 	if not existing.is_empty():
 		removed = str(_rand(existing, rng))
@@ -144,7 +167,7 @@ static func _replace(pool: Array, existing: Array[String], result: Dictionary,
 		result["removed_id"] = ""
 		result["message"] = "The ichor turns the piece over and settles again."
 		return result
-	var picked = _rand(open, rng)
+	var picked = _rand_entry(open, rng, groups)
 	result["outcome"] = Outcome.REPLACE if drawn >= 0 else Outcome.REPLACE
 	result["converted"] = bool(result.get("converted", false)) or drawn < 0
 	result["entry_id"] = str(picked.id)

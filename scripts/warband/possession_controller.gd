@@ -515,6 +515,11 @@ func _wire(peer_id: int, merc_id: int) -> void:
 ## Hand a body to a peer: it becomes the input target for that peer only.
 func _dress(actor: Actor, peer_id: int) -> void:
 	var mine := peer_id == local_peer_id
+	# A body that changes hands starts the new owner's frame stream from zero: the
+	# sequence numbers and the queue in it belong to the soul that left, and a
+	# stale `ack_seq` silently drops every frame the new one sends.
+	if int(actor.peer_id) != peer_id:
+		actor.reset_network_frames()
 	actor.peer_id = peer_id
 	actor.is_local = mine
 	# A guest integrates its own body between snapshots; the host never does.
@@ -538,6 +543,7 @@ func _detach(actor: Actor) -> void:
 	actor.jump_requested = false
 	actor.peek_requested = false
 	actor.input_age = 0.0
+	actor.reset_network_frames()
 	actor.combat.stop()
 	actor.combat.stop_block()
 	actor.combat.clear_camera_ray()
@@ -966,9 +972,10 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 		"stop":
 			combat.stop()
 			return true
-		"swap_set", "revive":
+		"swap_set", "revive", "loot":
 			# The scene's verbs: the authority's world answers them for this body,
-			# so a guest's TAB and revive land on the host's warband and field.
+			# so a guest's TAB, revive and loot press land on the host's warband
+			# and ground.
 			if world_action.is_valid():
 				return bool(world_action.call(actor, action, value))
 	return false

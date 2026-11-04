@@ -18,6 +18,7 @@ extends SceneTree
 ## `-- --coop-client <port> <savepath>`.
 
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
+const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const REPORT_NAME := "CoopReport"
 const TRAIL_POINT := Vector3(6.0, 0.0, -90.0)
 ## The two bodies the host's save stands on the trail.
@@ -62,6 +63,7 @@ class Report:
 	extends Node
 	signal submitted(payload: Dictionary)
 	signal probe_requested(tag: String)
+	signal strike_requested(point: Vector3)
 	signal finish_requested()
 
 	@rpc("any_peer", "call_remote", "reliable")
@@ -71,6 +73,10 @@ class Report:
 	@rpc("authority", "call_remote", "reliable")
 	func probe(tag: String) -> void:
 		probe_requested.emit(tag)
+
+	@rpc("authority", "call_remote", "reliable")
+	func strike(point: Vector3) -> void:
+		strike_requested.emit(point)
 
 	@rpc("authority", "call_remote", "reliable")
 	func finish() -> void:
@@ -158,6 +164,8 @@ func _host_run() -> void:
 		var equipped: Dictionary = warband.roster.equip(merc_id, "main", "sword_short")
 		check(bool(equipped.get("ok", false)),
 			"Mercenary %s takes its shortsword" % str(merc_name))
+	# A spare on the shelf: the guest's own press is what has to wear it.
+	warband.stash.add("sword_arming", 1)
 	warband.save_checkpoint("trail_start", "trail", TRAIL_POINT, "COOP")
 	check(warband.has_checkpoint(), "The host's save holds the trail bookmark")
 	check(FileAccess.file_exists(host_save), "The host save was written")
@@ -233,6 +241,232 @@ func _host_run() -> void:
 	var host_merc := int(flow.session.ownership().get(1, -1))
 	check(flow.session.controller.body_for_peer(guest_peer) != null,
 		"The host's field holds the guest's body")
+
+	# The host's map is one reliable RPC in front of the guest's own controller:
+	# wait until the seat has actually landed there before asking that soul to
+	# press a key, or the press is made by a spectator with no body.
+	report.probe.rpc_id(guest_peer, "seat")
+	var guest_ready := await _wait_until(func(): return reports.has("seat") \
+		and bool((reports["seat"] as Dictionary).get("own_body", false)), 10.0)
+	check(guest_ready, "The guest's own world seats it in the body the host gave it")
+
+	# --- a guest's press wears gear on the host's books --------------------
+	# The paperdoll on a guest is the host's warband: the verb travels as a
+	# request, the host runs the same verb on its own books, and the guest sees
+	# the result when the copy comes back. The guest checks both directions on
+	# its own copy (a lent copy only ever changes with a mirror); here the host
+	# checks that the requests landed on its books and left nothing half-done.
+	var geared := await _wait_until(func(): return reports.has("gear"), 20.0)
+	check(geared, "The guest reports its gear press")
+	if geared:
+		var data: Dictionary = reports["gear"]
+		var geared_merc := int(data.get("merc", 0))
+		check(host_roster.has(geared_merc), "The guest dressed one of the host's bodies (%d)"
+			% geared_merc)
+		check(str(warband.roster.equipped_of(geared_merc).get("main", "")) != "sword_arming",
+			"and the host took the spare back off (%s)"
+				% str(warband.roster.equipped_of(geared_merc).get("main", "")))
+		check(warband.stash.pooled_count("sword_arming") == 1,
+			"with the spare back on the host's shelf (%d)"
+				% warband.stash.pooled_count("sword_arming"))
+
+	# The rest of the test measures the wire, not the wood: a cultist that happens
+	# to stand inside its reach would stagger the body between a press and its
+	# blow, and the band's own sweep would claim the corpse and the drop before
+	# the guest's press. Replicas still snapshot; they just do not think, and the
+	# escort holds its ground.
+	for guard in world.get("guards"):
+		if is_instance_valid(guard):
+			guard.set("replica", true)
+	var squad = world.get("squad")
+	if squad != null:
+		squad.following = false
+
+	# --- the wood's own mobs run on the guest's screen ----------------------
+	# A warden the host moves has to move here too, from the snapshot alone: the
+	# guest runs no brain and steps no body of its own, so a copy that never
+	# arrives is a mob standing still while the host's walks away. The warren is
+	# built on both machines with the same names, which is what lets the state
+	# find it.
+	var combat_actor = flow.session.controller.body_for_peer(guest_peer)
+	var warren = world.get("watcher_warren")
+	var warden = warren.get_node_or_null("HollowWarden1_1") if warren != null else null
+	check(warden != null, "The host fields the warcamp's wardens")
+	if warden != null and combat_actor != null and is_instance_valid(combat_actor):
+		# Far enough that a warden that wakes up has nobody in its sight (its own
+		# reach is 30 m) and cannot spend the test hitting the guest's body, and
+		# still inside the session's 70 m replication band.
+		var first_at: Vector3 = (combat_actor as Node3D).global_position + Vector3(40.0, 0.0, 0.0)
+		warden.global_position = first_at
+		warden.home = first_at
+		# The fixture's body is the stream, not a fight: a replica on the host
+		# runs no brain, so it cannot wander out from under the comparison while
+		# the guest is being measured.
+		warden.set("replica", true)
+		warden.call("rest", true)
+		# The host polls its mob stream at 15 Hz; give the batch that names this
+		# body time to reach the guest before asking it where the copy stands.
+		await create_timer(0.6).timeout
+		var entries: Array = flow.session.collect_mob_entries(70.0)
+		var named := false
+		for entry in entries:
+			if str(entry[0]) == "HollowWarden1_1":
+				named = true
+		check(named, "The host's mob stream names the warden")
+		# Where the body actually came to rest, not the point the test asked for:
+		# a capsule dropped inside a rock is depenetrated on the next move.
+		var host_first: Vector3 = warden.global_position
+		reports.erase("mob")
+		report.probe.rpc_id(guest_peer, "mob")
+		var first_seen := await _wait_until(func(): return reports.has("mob"), 10.0)
+		check(first_seen, "The guest's copy of the warden answers")
+		var first_pos := Vector3.ZERO
+		if first_seen:
+			var data: Dictionary = reports["mob"]
+			first_pos = Vector3(data.get("pos", [0.0, 0.0, 0.0])[0],
+				data.get("pos", [0.0, 0.0, 0.0])[1], data.get("pos", [0.0, 0.0, 0.0])[2])
+			check(bool(data.get("replica", false)),
+				"The guest's warden is a replica, not a second brain")
+			check(not bool(data.get("resting", true)),
+				"The guest's warden leaves the rest its build put it under")
+			check(first_pos.distance_to(host_first) < 1.5,
+				"The guest's warden stands where the host put it (%s vs %s)"
+					% [str(first_pos), str(host_first)])
+		var second_at := first_at + Vector3(0.0, 0.0, 2.5)
+		warden.global_position = second_at
+		await create_timer(0.7).timeout
+		var host_second: Vector3 = warden.global_position
+		reports.erase("mob")
+		report.probe.rpc_id(guest_peer, "mob")
+		var moved_seen := await _wait_until(func(): return reports.has("mob"), 10.0)
+		check(moved_seen, "The guest's copy answers after the warden moves")
+		if moved_seen:
+			var moved: Dictionary = reports["mob"]
+			var moved_pos := Vector3(moved.get("pos", [0.0, 0.0, 0.0])[0],
+				moved.get("pos", [0.0, 0.0, 0.0])[1], moved.get("pos", [0.0, 0.0, 0.0])[2])
+			check(moved_pos.distance_to(host_second) < 1.5,
+				"The guest's warden runs on the snapshot alone (%s vs %s)"
+					% [str(moved_pos), str(host_second)])
+			check(moved_pos.distance_to(host_first) > 1.0,
+				"The guest's warden actually moved (%s vs %s)"
+					% [str(moved_pos), str(host_first)])
+		# The host stops naming the body - the kill that missed a datagram, or
+		# the body that walked out of the 70 m band. The guest's copy must leave
+		# the screen instead of standing where the host no longer has one.
+		(world.get("guards") as Array).erase(warden)
+		await create_timer(1.1).timeout
+		reports.erase("mob")
+		report.probe.rpc_id(guest_peer, "mob_gone")
+		var gone_seen := await _wait_until(func(): return reports.has("mob_gone"), 5.0)
+		check(gone_seen, "The guest's copy answers after the host stops naming it")
+		if gone_seen:
+			var gone: Dictionary = reports["mob_gone"]
+			check(not bool(gone.get("visible", true)), "The stale copy leaves the screen")
+			check(bool(gone.get("stale", false)), "and knows it has gone quiet")
+
+	# --- the guest's verbs land on the host's field ------------------------
+	# A body the host alone fields stands in front of the guest. The guest
+	# presses its own attack, and the host resolves the blow, books the corpse
+	# and drops the steel; then the guest's K and its corpse screen take a piece
+	# each. This is the whole guest half of the campaign in one pass: an intent
+	# becomes a hit, a death becomes a record, and a record becomes a take.
+	check(combat_actor != null and is_instance_valid(combat_actor),
+		"The guest's body stands before the fight")
+	var dummy = null
+	var drop = null
+	var corpse_id := 0
+	if combat_actor != null and is_instance_valid(combat_actor):
+		var WatcherScript = load("res://scripts/warband/cage_watcher.gd")
+		dummy = WatcherScript.new()
+		dummy.name = "CoopDummy"
+		dummy.mob_id = "hollow_warden"
+		dummy.health_pool = 8.0
+		var forward: Vector3 = -(combat_actor as Node3D).global_basis.z
+		forward.y = 0.0
+		forward = forward.normalized()
+		var point: Vector3 = (combat_actor as Node3D).global_position + forward * 1.5
+		dummy.position = point
+		world.add_child(dummy)
+		dummy.global_position = point
+		dummy.set("replica", true)
+		# No arm: the only drop near the guest is the piece the host spawns for
+		# the K check, so `_nearest_pickup` cannot pick another body's steel.
+		dummy.defeated.connect(Callable(world, "_on_enemy_defeated"))
+		world.guards.append(dummy)
+		# A few frames so the rewind has recorded the body and the guest has a
+		# playout tick to name.
+		for _beat in 4:
+			await physics_frame
+		reports.erase("strike")
+		report.strike.rpc_id(guest_peer, point + Vector3.UP * 1.2)
+		var press_seen := await _wait_until(func(): return reports.has("strike"), 5.0)
+		check(press_seen and bool((reports.get("strike", {}) as Dictionary).get("sent", false)),
+			"The guest's own press is sent from the body it was given")
+		var struck := await _wait_until(func(): return is_instance_valid(dummy) \
+			and (not bool(dummy.get("alive")) \
+				or float(dummy.get("health")) < float(dummy.get("max_health"))), 6.0)
+		check(struck, "The guest's swing reaches the host's field (%s hp)"
+			% str(dummy.get("health") if is_instance_valid(dummy) else "gone"))
+		if is_instance_valid(dummy) and bool(dummy.get("alive")):
+			dummy.take_damage(999.0, 0)
+		var vacuum = world.get("loot")
+		var bodies := await _wait_until(func(): return vacuum != null \
+			and not (vacuum.corpse_ids() as Array).is_empty(), 5.0)
+		if bodies:
+			corpse_id = int((vacuum.corpse_ids() as Array)[0])
+		check(corpse_id > 0, "The guest's kill leaves a body to search")
+		# The record goes out reliably, so the guest sees the same body.
+		report.probe.rpc_id(guest_peer, "corpse")
+		var seen := await _wait_until(func(): return reports.has("corpse"), 10.0)
+		check(seen, "The guest's corpse screen lists the host's body")
+		if seen:
+			check(int((reports["corpse"] as Dictionary).get("corpses", 0)) > 0,
+				"The guest imported the corpse record")
+		var emptied := await _wait_until(func(): return corpse_id > 0 \
+			and not vacuum.has_corpse(corpse_id), 10.0)
+		check(emptied, "The guest's take empties the host's body")
+		# And a drop on the host's ground is a drop the guest's K can take.
+		var at: Vector3 = (combat_actor as Node3D).global_position + Vector3(0.8, 0.0, 0.0)
+		drop = world.spawn_pickup("sword_short", at)
+		check(drop != null, "The host drops a piece beside the guest")
+		# A guest names a point and the point is only a hint: the host takes a drop
+		# for a body only when the piece is in *that body's* reach. The guest's
+		# replica knows where every drop lies, so without this a modified client
+		# names a distant piece at its own position and empties the host's ground.
+		var distant_at: Vector3 = at + Vector3(30.0, 0.0, 0.0)
+		var distant = world.spawn_pickup("sword_short", distant_at)
+		check(distant != null, "The host also drops a piece across the field")
+		if distant != null:
+			check(not bool(world.loot_for_peer(guest_peer, "drop", 0, "sword_short",
+				(distant as Node3D).global_position)),
+				"a drop named at its own position but out of the body's reach is refused")
+			check(is_instance_valid(distant) and not bool(distant.get("collected")),
+				"and that piece stays on the host's ground")
+		for _beat in 3:
+			await process_frame
+		report.probe.rpc_id(guest_peer, "drop")
+		var taken := await _wait_until(func(): return drop != null \
+			and is_instance_valid(drop) and bool(drop.get("collected")), 10.0)
+		check(taken, "The guest's K takes the host's drop")
+		# A death is a one-shot fact on the reliable channel: the guest's copy of
+		# a body killed on the host falls here even when every pose packet for it
+		# was lost, instead of standing over the host's corpse forever.
+		var dying = warren.get_node_or_null("HollowWarden1_2") if warren != null else null
+		if dying != null and combat_actor != null and is_instance_valid(combat_actor):
+			var dead_at: Vector3 = (combat_actor as Node3D).global_position + Vector3(3.0, 0.0, 0.0)
+			dying.global_position = dead_at
+			dying.set("replica", true)
+			dying.take_damage(999.0, 0)
+			reports.erase("mob_dead")
+			report.probe.rpc_id(guest_peer, "mob_dead")
+			var dead_seen := await _wait_until(func(): return reports.has("mob_dead"), 10.0)
+			check(dead_seen, "The guest answers for the body the host killed")
+			if dead_seen:
+				var dead: Dictionary = reports["mob_dead"]
+				check(not bool(dead.get("alive", true)),
+					"The guest's copy falls on the one-shot death")
+				check(bool(dead.get("visible", false)),
+					"and its corpse is on the screen")
 
 	# --- killing the guest's body with the last one left -------------------
 	# A blow on a downed campaign body finishes it. The soul inside is ejected,
@@ -403,6 +637,7 @@ func _client_run() -> void:
 	report = Report.new()
 	report.name = REPORT_NAME
 	report.probe_requested.connect(_on_probe)
+	report.strike_requested.connect(_on_strike)
 	report.finish_requested.connect(_on_finish)
 	root.add_child(report)
 
@@ -444,6 +679,50 @@ func _client_run() -> void:
 	check(_own_merc() != -1 and int(flow.session.ownership().get(_own_peer(), 0)) == _own_merc(),
 		"The guest's map agrees with its own body")
 
+	# --- the guest's own gear press wears the host's spare ------------------
+	# Driven the way a player drives it: open the paperdoll, click the spare row,
+	# then click the worn slot to take it back off. On a lent copy each press is a
+	# request; the piece moves when the host's copy comes back.
+	var gear_merc := _own_merc()
+	var worn_before := str(warband.roster.equipped_of(gear_merc).get("main", ""))
+	check(worn_before != "sword_arming" and warband.stash.pooled_count("sword_arming") == 1,
+		"The guest sees the host's spare on the shelf (%d)" % warband.stash.pooled_count("sword_arming"))
+	var doll = DollScript.new()
+	doll.name = "GuestDoll"
+	root.add_child(doll)
+	doll.configure(warband)
+	doll.open(gear_merc)
+	await process_frame
+	var spare_row: Variant = doll._stash_controls.get("sword_arming")
+	check(spare_row is Button, "the guest's paperdoll lists the spare blade")
+	if spare_row is Button:
+		(spare_row as Button).pressed.emit()
+	check(str(warband.roster.equipped_of(gear_merc).get("main", "")) == worn_before,
+		"and the press does not change the lent copy by itself (%s)" % doll.status_text())
+	var worn := await _wait_until(func(): return str(
+		warband.roster.equipped_of(gear_merc).get("main", "")) == "sword_arming", 12.0)
+	check(worn, "The host's answer wears the piece on the guest's copy (%s) after [%s]" % [
+		str(warband.roster.equipped_of(gear_merc).get("main", "")), doll.status_text()])
+	check(str(flow.session.controller.seat_loadout(gear_merc).get("main", "")) == "sword_arming",
+		"and the guest's own body wears it (%s)" % str(
+			flow.session.controller.seat_loadout(gear_merc).get("main", "")))
+	await process_frame
+	check(doll.slot_rows.get("main", {}).get("button", null) != null,
+		"the guest's paperdoll has a worn main slot to click")
+	var slot_button: Variant = doll.slot_rows.get("main", {}).get("button")
+	if slot_button is Button:
+		(slot_button as Button).pressed.emit()
+	var bare := await _wait_until(func(): return str(
+		warband.roster.equipped_of(gear_merc).get("main", "")) != "sword_arming", 12.0)
+	check(bare, "and the host takes it back off the copy (%s) after [%s]" % [
+		str(warband.roster.equipped_of(gear_merc).get("main", "")), doll.status_text()])
+	check(warband.stash.pooled_count("sword_arming") == 1,
+		"The spare is back on the guest's shelf (%d) after [%s]" % [
+			warband.stash.pooled_count("sword_arming"), doll.status_text()])
+	doll.close()
+	_submit({"kind": "gear", "tag": "gear", "merc": gear_merc,
+		"worn": str(warband.roster.equipped_of(gear_merc).get("main", ""))})
+
 	var told := await _wait_until(func(): return guest_left, int((WATCHDOG_SECONDS - 30.0) * 1000.0))
 	if not told:
 		_submit({"kind": "error", "tag": "finish", "detail": "the host never dismissed the guest"})
@@ -469,7 +748,7 @@ func _on_probe(tag: String) -> void:
 	if world == null or not is_instance_valid(world):
 		_submit({"kind": "error", "tag": tag, "detail": "the guest has no world"})
 		return
-	if tag == "watch":
+	if tag == "watch" or tag == "seat":
 		# The map that took this soul's body away has just landed; the eye and the
 		# body panel settle on the next physics frame, so the report is read after
 		# a couple of them rather than on the frame the map arrived.
@@ -481,7 +760,100 @@ func _on_probe(tag: String) -> void:
 		# on their own clocks: the report waits for the soul to settle in it.
 		await _wait_until(func(): return _own_merc() > 0 and flow.session != null \
 			and flow.session.controller.body_of(_own_merc()) != null, 5.0)
+	elif tag == "corpse":
+		# The record is a reliable RPC behind the kill's snapshot: wait for it, then
+		# take the lot through the same intent a row click sends.
+		var vacuum = world.get("loot")
+		await _wait_until(func(): return vacuum != null \
+			and not (vacuum.corpse_ids() as Array).is_empty(), 5.0)
+		var ids: Array = vacuum.corpse_ids() if vacuum != null else []
+		if ids.is_empty():
+			_submit({"kind": "probe", "tag": tag, "corpses": 0})
+			return
+		world.call("request_loot_take", int(ids[0]), "", Vector3.ZERO, true)
+		_submit({"kind": "probe", "tag": tag, "corpses": ids.size(),
+			"corpse": int(ids[0])})
+		return
+	elif tag == "mob" or tag == "mob_gone" or tag == "mob_dead":
+		var warren = world.get("watcher_warren")
+		var watched := "HollowWarden1_2" if tag == "mob_dead" else "HollowWarden1_1"
+		var warden = warren.get_node_or_null(watched) if warren != null else null
+		var payload := {"kind": "probe", "tag": tag, "replica": false, "resting": true,
+			"pos": [0.0, 0.0, 0.0], "visible": false, "stale": false, "alive": true}
+		# A hitch can empty the guest's receive for longer than a poll: wait for
+		# the stream to be live again before reading the copy, which is the
+		# property the check is about. A stream that never comes back still fails.
+		if tag == "mob" and warden != null and is_instance_valid(warden):
+			var before := _mob_tick()
+			await _wait_until(func(): return _mob_tick() > before, 2.0)
+			# A fresh sample still needs its playout to reach it: two intervals.
+			for _beat in 12:
+				await process_frame
+		elif tag == "mob_dead":
+			# The kill is booked on the host on the next mob poll; the probe names
+			# the body and waits for the one-shot death to land before reading it.
+			await _wait_until(func(): return warden == null or not is_instance_valid(warden) \
+				or not bool(warden.get("alive")), 3.0)
+		if warden != null and is_instance_valid(warden):
+			var at: Vector3 = (warden as Node3D).global_position
+			payload["replica"] = bool(warden.get("replica"))
+			payload["resting"] = bool(warden.get("resting"))
+			payload["pos"] = [at.x, at.y, at.z]
+			payload["visible"] = bool(warden.get("visible"))
+			payload["stale"] = bool(warden.get("stale"))
+			payload["alive"] = bool(warden.get("alive"))
+		_submit(payload)
+		return
+	elif tag == "drop":
+		# The host's K test: the guest's own hand on its own world's drop, which
+		# travels as an intent and is booked on the other machine. The drop is
+		# announced on the host's loot poll, so wait for the copy to land here and
+		# take the piece the test named, not whatever else happens to lie nearer.
+		var arrived := await _wait_until(func(): return _find_drop("sword_short") != null, 5.0)
+		if arrived:
+			world.call("_try_loot")
+		_submit({"kind": "probe", "tag": tag, "near": arrived})
+		return
 	_submit(_probe_payload(tag))
+
+
+## The newest mob tick the guest's warden copy has been handed, -1 for none.
+func _mob_tick() -> int:
+	var warren = world.get("watcher_warren") if world != null else null
+	var warden = warren.get_node_or_null("HollowWarden1_1") if warren != null else null
+	if warden == null or not is_instance_valid(warden):
+		return -1
+	var timeline = warden.get("_timeline")
+	return int(timeline.newest_tick()) if timeline != null else -1
+
+
+## The guest's own copy of a named drop, or null while it has not landed yet.
+func _find_drop(item_id: String):
+	var vacuum = world.get("loot") if world != null else null
+	if vacuum == null:
+		return null
+	for pickup in vacuum.pickups():
+		if is_instance_valid(pickup) and not bool(pickup.get("collected")) \
+				and str(pickup.get("item_id")) == item_id:
+			return pickup
+	return null
+
+
+## A swing the host asked the guest's body for: the owning peer presses its own
+## attack with the aim point the host chose.
+func _on_strike(point: Vector3) -> void:
+	if flow == null or flow.session == null or flow.session.controller == null:
+		return
+	var controller = flow.session.controller
+	var actor = controller.active_actor
+	var sent := false
+	if actor != null:
+		sent = controller.act("melee", {"aim": point, "hand": "right",
+			"variant": "overhead"})
+	_submit({"kind": "strike", "tag": "strike", "actor": actor != null,
+		"sent": sent, "view": controller.view_tick(),
+		"owned": int(controller.merc_for_peer(controller.local_peer_id)),
+		"active": int(controller.merc_of(actor)) if actor != null else -1})
 
 func _probe_payload(tag: String) -> Dictionary:
 	var controller = flow.session.controller if flow.session != null else null

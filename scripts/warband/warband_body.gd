@@ -306,6 +306,24 @@ func configure(owner_id: int, player_name: String, spawn: Vector3) -> void:
 	combat.damage_enabled = authoritative
 	revive()
 
+## Everything the frame stream owns, back to a blank slate. A body changes hands -
+## a soul leaves it and another is seated - and the sequence numbers, the queue and
+## the prediction ring all belong to the owner that left: a new owner numbers its
+## frames from zero again, so a stale `ack_seq` drops every frame it sends until
+## its counter overtakes the old owner's. That is a silent freeze the length of the
+## old session, on a body that then reads as "my input does nothing".
+func reset_network_frames() -> void:
+	_prediction.clear()
+	_pending_seq = -1
+	_pending_state = {}
+	ack_seq = -1
+	ack_position = position
+	ack_velocity = velocity
+	_input_queue.clear()
+	_frame_consumed = false
+	frame_driven = false
+	view_tick = -1
+
 ## Stand the body up fresh at its spawn point: full pools, no stance and no
 ## prediction history. `configure()` calls it, and so does a fixture that reuses
 ## a body.
@@ -314,13 +332,7 @@ func revive() -> void:
 	_timeline.reset_to(position)
 	_timeline_ready = false
 	_predicted_last = false
-	_prediction.clear()
-	_pending_seq = -1
-	_pending_state = {}
-	ack_seq = -1
-	_input_queue.clear()
-	_frame_consumed = false
-	frame_driven = false
+	reset_network_frames()
 	_rig_offset = Vector3.ZERO
 	_rig_drawn = position
 	_rig_drawn_ready = false
@@ -1375,6 +1387,10 @@ func _hold_position(delta: float) -> void:
 	move_and_slide()
 	velocity.x = held_x
 	velocity.z = held_z
+	# The tick covered no ground, so the rig must not keep running on the spot:
+	# the pose presentation below reads this travel, and a held body with a
+	# running gait was the "stuck run" a peer saw on somebody else's body.
+	_last_motion = Vector3.ZERO
 
 ## Frames still queued after this tick's own: motion only. Their clocks have
 ## already advanced this tick, so they are integrated the way a correction
@@ -1461,6 +1477,11 @@ func _predict_body(delta: float, actors: Array) -> void:
 		_pending_state = {}
 		reconcile(state,actors)
 	step(delta,actors)
+	# The owner's feet are its own: the wire's motion clock is the host's body,
+	# and a host that is holding a frame must not freeze the run this peer is
+	# actually making. Combat and ability clips still read the snapshot.
+	if prediction_active():
+		rig.set_locomotion(_last_motion,is_on_floor() and not roll.active)
 
 
 ## True while this peer owns and integrates the body itself. Cover is a
@@ -1737,6 +1758,7 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 		_reset_rig_glide()
 		reset_stance()
 	rig.set_cover(cover.active,cover.normal,cover.crouch_amount,cover.peeking,cover.lean)
+	rig.local_locomotion = prediction_active()
 	rig.set_locomotion(velocity,bool(state.grounded) and Archer.animation_roll(state.animation) < 0)
 	rig.apply_animation_state(state.animation)
 	combat.attack_progress = state.progress

@@ -152,9 +152,10 @@ const REVIVE_LESSON_RADIUS := 12.0
 const REVIVE_LESSON_STEP := "lesson_revive"
 ## The door the menu's "exit to title" row opens.
 const TITLE_SCENE := "res://title.tscn"
-## What a co-op guest is told when it reaches for something that changes the
-## host's warband or ground: those are worked from the host's own hands.
-const GUEST_HANDS_TEXT := "Co-op: latches, counters, corpses and loot are the host's to work."
+## What a co-op guest is told when it reaches for a latch, a counter or the
+## Hollow's mouth: those are worked from the host's own hands. A corpse and a
+## drop are the guest's to search, and ride the intent channel like a swing.
+const GUEST_HANDS_TEXT := "Co-op: latches, counters and the Hollow's mouth are the host's to work."
 ## The world's three one-line lessons. Each is a key and a command, offered once,
 ## the first time the fact it names is true: a squadmate down, the player's own
 ## body down, and a wound with nobody near enough to punish a bandage. They are
@@ -1194,7 +1195,7 @@ func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: fl
 		return
 	var rig = actor.rig
 	var damage := float(CombatScript.damage_for(int(rig.bow_index), charge,
-		rig.ranged_scale()))
+		rig.ranged_scale(), rig.flat_bonus("flat_ranged")))
 	var arrow := ArrowScript.new()
 	arrow.source_id = int(actor.slot)
 	arrow.shooter = actor
@@ -1372,6 +1373,10 @@ func _become_client() -> void:
 		camp.dismiss_lesson()
 	if squad != null:
 		squad.following = false
+	# The corpse screen is the guest's own copy of the host's record, and every
+	# take on it is the host's to book.
+	if paperdoll != null:
+		paperdoll.corpse_request = Callable(self, "request_corpse_take")
 
 ## What a guest's world must copy from this one to field the same mobs: whether
 ## the camp was built past its opening. Sent with the campaign.
@@ -1425,6 +1430,29 @@ func _on_world_action(actor, action: String, value) -> bool:
 			return _swap_set_on(actor)
 		"revive":
 			return _revive_from(actor, bool(value))
+		"loot":
+			return _loot_from(actor, value)
+	return false
+
+
+## A guest's take, answered on the host for the guest's body. `value` names what
+## it wants: `{kind: "drop", item, at}` or `{kind: "corpse", corpse, item}`.
+func _loot_from(actor, value) -> bool:
+	if actor == null or not is_instance_valid(actor) or not value is Dictionary:
+		return false
+	var peer_id := int(actor.get("peer_id"))
+	if peer_id <= 0:
+		return false
+	var kind := str(value.get("kind", ""))
+	var item_id := str(value.get("item", ""))
+	if kind == "drop":
+		var at: Variant = value.get("at", Vector3.ZERO)
+		if typeof(at) != TYPE_VECTOR3:
+			return false
+		return loot_for_peer(peer_id, "drop", 0, item_id, at)
+	if kind == "corpse":
+		var corpse_id := int(value.get("corpse", 0))
+		return loot_for_peer(peer_id, "corpse", corpse_id, item_id, Vector3.ZERO)
 	return false
 
 ## TAB on one body: its mercenary's two weapon sets trade places on the roster
@@ -1621,6 +1649,8 @@ func _on_enemy_defeated(enemy, reward: int) -> void:
 	# hostile list, exactly as the camp's and the trail's fallen do.
 	drop_held_weapon(enemy)
 	if loot != null and loot.has_method("register_corpse"):
+		# The vacuum's own `corpse_registered` is what fills a guest's screen;
+		# every area that books a kill this way is copied without a second call.
 		loot.register_corpse(enemy)
 	note_kill(enemy)
 	if screen != null:
@@ -2012,6 +2042,17 @@ func _sync_roster(delta: float) -> void:
 		var merc_id: int = controller.merc_of(actor)
 		if merc_id <= 0:
 			continue
+		if _client:
+			# The host's books are the ones that reap. A guest mirrors what it can
+			# see - health, the downed flag - but never books a death here: that
+			# fires `died`, reaps this copy of the books and unregisters a body the
+			# host still names, and the next mirror cannot put the router back.
+			warband.roster.set_health(merc_id, float(actor.get("health")))
+			if bool(actor.get("downed")):
+				warband.roster.set_state(merc_id, Contracts.HealthState.DOWNED)
+			elif bool(actor.get("alive")):
+				warband.roster.set_state(merc_id, Contracts.HealthState.ALIVE)
+			continue
 		var state := Contracts.HealthState.ALIVE
 		if bool(actor.get("downed")):
 			state = Contracts.HealthState.DOWNED
@@ -2178,8 +2219,17 @@ func _try_interact() -> void:
 			hud.set_status("The soul is loose. There is nobody to act with.", 2.5)
 		return
 	if _client:
-		# Latches, counters, corpses and loose steel all change the host's warband
-		# and the host's ground; in co-op they are worked from the host's hands.
+		# Latches, counters and the Hollow's mouth are the host's to work: they
+		# change its world and its warband. A body at this soul's feet is still
+		# the soul's to search, though, and a drop is still a drop - those two
+		# travel as intents like a swing and land on the host's ground.
+		if loot != null and loot.has_method("corpse_at"):
+			var corpse_id: int = loot.corpse_at(actor.global_position, LOOT_REACH)
+			if corpse_id != 0 and paperdoll.open_corpse(loot, corpse_id):
+				return
+		if _nearest_pickup() != null:
+			_try_loot()
+			return
 		if hud != null:
 			hud.set_status(GUEST_HANDS_TEXT, 3.0)
 		return
@@ -2234,7 +2284,7 @@ func _loot_click(event: InputEvent) -> bool:
 	var mouse := event as InputEventMouseButton
 	if not mouse.pressed:
 		return false
-	if _panel_open() or _reviving or _wiped or _client:
+	if _panel_open() or _reviving or _wiped:
 		return false
 	var actor = _soul()
 	if actor == null or not is_instance_valid(actor):
@@ -2253,6 +2303,18 @@ func _loot_click(event: InputEvent) -> bool:
 		sample.get("target", null))
 	if target.is_empty():
 		return false
+	if _client:
+		# A guest's ground and pool are the host's: a shift-click, a delve click
+		# and the row a window opens on are all one intent here. The host books
+		# it for this soul's body and the answer comes back down the session.
+		if delve_area != null and delve_area.in_cave(actor):
+			_request_take(target, true)
+		elif mouse.shift_pressed:
+			_request_take(target, true)
+		elif loot_window == null or not loot_window.open_on(actor, target):
+			return false
+		get_viewport().set_input_as_handled()
+		return true
 	if delve_area != null and delve_area.in_cave(actor):
 		if loot_hand.take_now(actor, target).is_empty():
 			return false
@@ -2263,6 +2325,42 @@ func _loot_click(event: InputEvent) -> bool:
 		return false
 	get_viewport().set_input_as_handled()
 	return true
+
+
+## Send one take to the host for this soul's body. `target` is the hand's own
+## resolution (`{kind, corpse_id, pickup}`), so the window, the shift-click and
+## the delve click all name the same container. `all` empty-takes a body; a drop
+## is always one piece.
+func _request_take(target: Dictionary, all: bool) -> void:
+	var kind := str(target.get("kind", ""))
+	if kind == "corpse":
+		controller.act("loot", {"kind": "corpse", "corpse": int(target.get("corpse_id", 0)),
+			"item": "" if all else str(target.get("item", ""))})
+	elif kind == "drop":
+		var pickup = target.get("pickup")
+		if pickup == null or not is_instance_valid(pickup):
+			return
+		controller.act("loot", {"kind": "drop", "item": str(pickup.item_id),
+			"at": (pickup as Node3D).global_position})
+
+
+## The loot window and the hand ask this for a take the guest resolved itself:
+## the corpse it lists and the drop under its crosshair are the host's rows.
+func request_loot_take(corpse_id: int, item_id: String, at: Vector3,
+		all: bool = false) -> void:
+	if not _client or controller == null:
+		return
+	if corpse_id > 0:
+		controller.act("loot", {"kind": "corpse", "corpse": corpse_id,
+			"item": "" if all else item_id})
+	elif not item_id.is_empty():
+		controller.act("loot", {"kind": "drop", "item": item_id, "at": at})
+
+
+## The corpse screen's request hook (`WarbandPaperdoll.corpse_request`), which
+## names the take `(corpse_id, item_id, all)`.
+func request_corpse_take(corpse_id: int, item_id: String, all: bool) -> void:
+	request_loot_take(corpse_id, item_id, Vector3.ZERO, all)
 
 
 ## What `G` says when it found nothing to use.
@@ -2312,21 +2410,95 @@ func _swap_weapon_set() -> void:
 
 
 ## `K` still works for a human; the squad loots itself and nothing announces it.
+## A guest's press is an intent: the piece is on the host's ground and the pool
+## is the host's, so the host takes it for this soul's body and tells everyone.
 func _try_loot() -> void:
-	if _client:
-		if hud != null:
-			hud.set_status(GUEST_HANDS_TEXT, 3.0)
-		return
 	var pickup = _nearest_pickup()
 	if pickup == null:
 		if hud != null:
 			hud.set_status("Nothing within reach.", 1.5)
+		return
+	if _client:
+		controller.act("loot", {"kind": "drop", "item": str(pickup.item_id),
+			"at": pickup.global_position})
+		if hud != null:
+			hud.set_status("Taking %s..." % str(pickup.label_text()), 1.5)
 		return
 	var result: Dictionary = loot.quick_loot(pickup, controller.local_peer_id)
 	if bool(result.get("ok", false)):
 		controller.refresh_gear(_soul_merc())
 	if hud != null:
 		hud.set_status(str(result.get("message", "")), 2.5)
+
+
+## One take the wire asked a body to make. `peer_id` is the ENet sender the
+## session read, never a value the guest chose; the body is looked up from the
+## router, and the target must be inside that body's reach. Both the drop and the
+## corpse paths book through the same vacuum and the same shared pool the host's
+## own presses use, so co-op loot can never cost the warband two pieces.
+func loot_for_peer(peer_id: int, kind: String, corpse_id: int, item_id: String,
+		at: Vector3) -> bool:
+	if _client or controller == null or loot == null or peer_id <= 0:
+		return false
+	var actor = controller.body_for_peer(peer_id)
+	if actor == null or not is_instance_valid(actor) \
+			or not bool(actor.get("alive")) or bool(actor.get("downed")):
+		return false
+	if kind == "drop":
+		var pickup = _drop_near(at, item_id, LOOT_REACH + 0.75)
+		if pickup == null:
+			return false
+		# `at` travels from the guest and is only a hint: the piece has to be in
+		# *this body's* reach, exactly as the corpse branch demands. Without this a
+		# guest names any drop's position and takes the host's ground from across
+		# the map.
+		if (actor as Node3D).global_position.distance_to(
+				(pickup as Node3D).global_position) > LOOT_REACH + 0.75:
+			return false
+		# Below, a drop goes into the delve inventory with nothing dressed onto
+		# the taker; above, the piece snaps into the body that took it.
+		var drop_pooled: bool = delve_area != null and delve_area.in_cave(actor)
+		var taken: Dictionary = loot.quick_loot(pickup, peer_id, not drop_pooled)
+		if bool(taken.get("ok", false)) and not drop_pooled:
+			controller.refresh_gear(controller.merc_for_peer(peer_id))
+		return bool(taken.get("ok", false))
+	if kind != "corpse" or corpse_id <= 0 or not loot.has_corpse(corpse_id):
+		return false
+	if (actor as Node3D).global_position.distance_to(loot.corpse_position(corpse_id)) \
+			> LOOT_REACH + 0.75:
+		return false
+	# Below, the screen and the shift-click put the lot in the delve inventory with
+	# nothing dressed onto the taker; above they dress the body that took it.
+	var pooled: bool = delve_area != null and delve_area.in_cave(actor)
+	var result: Dictionary
+	if item_id.is_empty():
+		result = loot.take_all_from_corpse(corpse_id, peer_id, not pooled)
+	elif loot.corpse_items(corpse_id).has(item_id):
+		result = loot.take_from_corpse(corpse_id, item_id, peer_id)
+	else:
+		return false
+	if bool(result.get("ok", false)) and not pooled:
+		controller.refresh_gear(controller.merc_for_peer(peer_id))
+	return bool(result.get("ok", false))
+
+
+## The open drop `item_id` names nearest `at`, or null. A guest names a point and
+## a piece, never a node: the host's own node is the one that is taken.
+func _drop_near(at: Vector3, item_id: String, radius: float):
+	if loot == null or not loot.has_method("pickups"):
+		return null
+	var best = null
+	var best_distance := maxf(radius, 0.0)
+	for pickup in loot.pickups():
+		if not is_instance_valid(pickup) or bool(pickup.get("collected")):
+			continue
+		if not item_id.is_empty() and str(pickup.get("item_id")) != item_id:
+			continue
+		var distance: float = (pickup as Node3D).global_position.distance_to(at)
+		if distance <= best_distance:
+			best_distance = distance
+			best = pickup
+	return best
 
 
 # --- revive ----------------------------------------------------------------

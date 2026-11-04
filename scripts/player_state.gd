@@ -202,7 +202,7 @@ const ITEMS := {
 	"ring_ranged": {"name":"Ring of Ranged Damage", "short":"Range Ring", "kind":"ring", "index":5, "price":210,
 		"category":"jewelry", "slot":"ring",
 		"summary":"A knapped obsidian flake in a horn setting",
-		"detail":"Ring slot only / +10% ranged damage"},
+		"detail":"Ring slot only / +10% bow damage"},
 	"ring_melee": {"name":"Ring of Melee Damage", "short":"Melee Ring", "kind":"ring", "index":6, "price":210,
 		"category":"jewelry", "slot":"ring",
 		"summary":"Iron from a broken blade, worn smooth",

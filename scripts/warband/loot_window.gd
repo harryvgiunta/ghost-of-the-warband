@@ -30,6 +30,8 @@ const OFFSET := Vector2(48.0, -96.0)
 const LEAVE_SLACK := 1.0
 ## A drop this close to the clicked body or drop is part of the same container.
 const PILE_RADIUS := 2.0
+## The host's peer id, and the only peer a local take can name: a guest's own
+## takes never book here, they travel as intents.
 const LOCAL_PEER := 1
 const DEFAULT_REACH := 2.6
 const SUMMARY_SECONDS := 3.5
@@ -155,6 +157,13 @@ func take(item_id: String) -> Array[String]:
 	var ids: Array[String] = []
 	if not _open or _loot == null:
 		return ids
+	if _remote():
+		if _corpse_id != 0 and _loot.corpse_items(_corpse_id).has(item_id):
+			_request(_corpse_id, item_id, Vector3.ZERO, false)
+		for pickup in _pile():
+			if str(pickup.item_id) == item_id:
+				_request(0, item_id, (pickup as Node3D).global_position, false)
+		return ids
 	if _corpse_id != 0:
 		while _loot.corpse_items(_corpse_id).has(item_id):
 			var taken: Dictionary = _loot.take_from_corpse(_corpse_id, item_id, LOCAL_PEER)
@@ -175,6 +184,12 @@ func take(item_id: String) -> Array[String]:
 func take_all() -> Array[String]:
 	var ids: Array[String] = []
 	if not _open or _loot == null:
+		return ids
+	if _remote():
+		if _corpse_id != 0:
+			_request(_corpse_id, "", Vector3.ZERO, true)
+		for pickup in _pile():
+			_request(0, str(pickup.item_id), (pickup as Node3D).global_position, false)
 		return ids
 	if _corpse_id != 0:
 		var taken: Dictionary = _loot.take_all_from_corpse(_corpse_id, LOCAL_PEER)
@@ -218,6 +233,23 @@ func _contents() -> Dictionary:
 		var id := str(pickup.item_id)
 		counts[id] = int(counts.get(id, 0)) + 1
 	return counts
+
+
+## True on a co-op guest: the window lists the host's body through the session's
+## copy, but every take is the host's to book.
+func _remote() -> bool:
+	return world != null and is_instance_valid(world) and bool(world.get("_client"))
+
+
+## Ask the host to take. `corpse_id` 0 means the drop at `at`; `all` with a body
+## empties it. The next `tick()` repaints what the host has actually left.
+func _request(corpse_id: int, item_id: String, at: Vector3, all: bool) -> void:
+	if world == null or not is_instance_valid(world) \
+			or not world.has_method("request_loot_take"):
+		return
+	world.call("request_loot_take", corpse_id, item_id, at, all)
+	if _hud != null and is_instance_valid(_hud) and _hud.has_method("set_status"):
+		_hud.set_status("Taking...", 1.5)
 
 
 func _after(ids: Array[String]) -> void:

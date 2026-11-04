@@ -224,17 +224,21 @@ func die(direction: Vector3 = Vector3.ZERO) -> void:
 		return
 	_dead = true
 	_death_time = 0.0
-	# The imported skeleton goes limp from the lethal pose; the weapon
-	# attachments are hidden because a BoneAttachment3D cannot follow a
-	# simulator-driven bone.
-	_death_held = true
+	# The authored collapse lands the body; the shared ragdoll takes the
+	# skeleton over from its final pose once the clip has played out (see
+	# `_advance_death`), so the corpse never snaps back to the lethal frame.
+	# The weapon attachments are hidden because a BoneAttachment3D cannot
+	# follow a simulator-driven bone.
+	_death_held = false
 	_clip = str(CLIPS.death)
-	_player.pause()
+	_player.speed_scale = 1.0
+	_player.play(_clip, 0.06)
 	if is_instance_valid(_melee_attachment):
 		_melee_attachment.visible = false
 	if is_instance_valid(_bow_attachment):
 		_bow_attachment.visible = false
-	CorpsePhysics.start_limp(self, direction)
+	CorpsePhysics.start_limp(self, direction,
+		_player.get_animation(_clip).length)
 
 
 func is_dead() -> bool:
@@ -420,9 +424,12 @@ func _advance_death(delta: float) -> void:
 		return
 	_death_time += delta
 	var length := _player.get_animation(str(CLIPS.death)).length
+	if _instance != null:
+		_instance.rotation = _instance.rotation.lerp(Vector3(0.0, 0.0, 0.0), minf(1.0, delta * 6.0))
 	if _death_time >= length:
 		_death_held = true
 		_player.seek(length, true)
 		_player.pause()
-	if _instance != null:
-		_instance.rotation = _instance.rotation.lerp(Vector3(0.0, 0.0, 0.0), minf(1.0, delta * 6.0))
+		# The clip has landed the body: the corpse goes limp from where the
+		# collapse left it and the shared ragdoll settles it for good.
+		CorpsePhysics.begin_limp(self)

@@ -255,6 +255,47 @@ func _check_join_form() -> void:
 	check(title._join_layer.visible, "a refused join keeps the form open")
 	check(flow.warband_intent.is_empty() and flow.session == null, "a refused join opens no session")
 	check(cache.address == "100.64.0.44", "a refused join remembers nothing")
+
+	# The field shows the port it holds: a fresh open must not leave the line
+	# edit reading a previous port while the widget carries the cached one.
+	check(int(title._port_input.value) == 8111 and title._port_input.get_line_edit().text == "8111",
+		"the form's port field shows the cached port it holds (%s)" % title._port_input.get_line_edit().text)
+
+	# What the player typed is what is dialled. A SpinBox copies its line edit
+	# into `value` only when the line edit loses focus, and the form's buttons
+	# take no focus, so a JOIN click must read the typed text itself.
+	title._address_input.text = "100.64.0.77"
+	title._port_input.get_line_edit().text = "8123"
+	check(int(title._port_input.value) == 8111,
+		"the typed port is still only text on the SpinBox (%d)" % int(title._port_input.value))
+	title._confirm_join()
+	var intent: Dictionary = flow.warband_intent
+	check(str(intent.get("mode", "")) == "join" and not intent.is_empty(),
+		"a filled join form dials the host (%s)" % str(intent))
+	check(str(intent.get("address", "")) == "100.64.0.77" and int(intent.get("port", 0)) == 8123,
+		"JOIN dials the address and port that were typed (%s)" % str(intent))
+	check(cache.address == "100.64.0.77" and cache.port == 8123,
+		"the typed endpoint is what the cache remembers")
+	check(not title._join_layer.visible, "a join closes the form")
+	flow.leave_warband()
+	check(flow.session == null and flow.warband_intent.is_empty(), "the checked join leaves no session")
+
+	# A port outside the field's range is refused where the player can see it,
+	# never clamped into a different port behind their back.
+	title._open_join()
+	title._address_input.text = "100.64.0.77"
+	title._port_input.get_line_edit().text = "80"
+	title._confirm_join()
+	check(title._form_error.text == "Choose a UDP port between 1024 and 65535.",
+		"an out-of-range typed port is refused (%s)" % title._form_error.text)
+	check(title._join_layer.visible, "a refused port keeps the form open")
+	check(title._port_input.get_line_edit().text == "80", "the refused port is left as typed")
+	check(cache.port == 8123 and flow.warband_intent.is_empty(),
+		"a refused port dials and remembers nothing")
+	title._port_input.get_line_edit().text = "7777x"
+	title._confirm_join()
+	check(title._join_layer.visible and cache.port == 8123,
+		"a non-numeric typed port is refused too")
 	title.free()
 	cache.reset()
 
@@ -397,10 +438,11 @@ func _check_campaign_doors() -> void:
 	# HOST GAME, NEW GAME: a fresh campaign whose socket opens on the host port.
 	var port := _free_udp_port()
 	cache.remember("JoinRanger", "100.64.0.12", 8123)
-	cache.remember_host("HostRanger", port)
+	cache.remember_host("HostRanger", 7799)
 	flow.world_start = "town"
 	title = _open_title()
 	title._open_host()
+	title._host_port_input.get_line_edit().text = str(port)
 	if audio != null:
 		audio.last_event = ""
 	title.host_new_button.pressed.emit()

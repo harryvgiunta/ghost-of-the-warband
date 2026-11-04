@@ -205,7 +205,7 @@ Every launch opens the **main menu**: Ghost of the Warband, four doors.
 | **Join Game** | Name, host address and UDP port, reread from the cache every time the form opens. You connect first and play **from the host's warband** - you need no save of your own. |
 | **Host Game** | Name and the port you open. **New Game** starts a fresh campaign; **From Checkpoint** opens the save on its bookmark (or in Hearthstead when it has none). The line under the buttons says what that checkpoint would open. |
 
-**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Only the host changes gear, buys, hires, loots a corpse or works a keeper; a guest's own TAB, revive and combat verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband.
+**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Gear is the host's too - a guest's click on the paperdoll travels as a request and the host's books answer it - while buying, hiring and the keepers stay the host's alone. A guest's own TAB, revive, combat and loot verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband and a corpse or a drop the guest searches empties on every screen.
 
 Bodies are the shared pool, and every soul hops freely between the free ones (`[` and `]`, or `F1..F8`). The only way a soul loses a body is dying in it. With one body left standing the soul already inside keeps it, and everyone else watches that body in free look - the body panel names who is inside - and takes the next body that comes free, in the order the souls lost theirs.
 
@@ -268,7 +268,7 @@ A **neck** piece, either **ring** and the **off hand** can change the ranger's n
 | Off hand | **Skull of Death** | **+15 stamina** on every kill you land |
 | Ring | **Ring of Health** | +25 max health |
 | Ring | **Ring of Ironhide** | +20 max health, +2% damage reduction |
-| Ring | **Ring of Ranged Damage** | +10% ranged damage (arrows, bow skills, spells) |
+| Ring | **Ring of Ranged Damage** | +10% ranged damage (arrows and bow skills; spells scale with cloth) |
 | Ring | **Ring of Melee Damage** | +10% melee damage (blades, blade skills, backstab) |
 | Ring | **Ring of Throwing** | +25% thrown weapon damage |
 | Ring | **Ring of the Swift** | +8% movement speed |
@@ -325,10 +325,10 @@ the host. Hosting and joining both start on the title screen:
 
 **One warband, the host's.** A guest is sent the host's campaign and plays that
 roster, stash, purse and orders; its own save is untouched for the session and
-is handed back when the session ends. Only the host changes gear, buys, hires,
-loots a corpse or works a keeper - a guest's TAB, revive and combat verbs travel
-as intents and are resolved on the host's field. Everyone fields exactly the
-host's bodies.
+is handed back when the session ends. Only the host changes gear, buys, hires or
+works a keeper - a guest's TAB, revive, combat and loot presses travel as intents
+and are resolved on the host's field. Everyone fields exactly the host's bodies,
+and every corpse and drop the party searches empties on every screen.
 
 Find the address to send privately to your friends:
 
@@ -395,6 +395,20 @@ the character stepping into place.
 Everyone else is drawn **in the past**: a body, mob or clone keeps a short buffer
 of host states and renders a delay behind the newest one, interpolating between
 two known poses and dead-reckoning along the last velocity when a packet drops.
+Each stream is measured in its own ticks: the bodies' buffer counts 60 Hz
+simulation ticks, while the mobs' buffer is told their 15 Hz cadence, so two
+intervals behind is a fifth of a second on the screen instead of half a second.
+A copy of a mob the host never sent a state for - a body that died before the
+join, or one only the host fields - is neither drawn nor solid until its first
+snapshot proves it exists, and a replica never integrates its own motion: the
+wire is its only writer of pose and state. Deaths are the one fact sent on the
+**reliable** channel, because a lost pose is a missed frame and a lost death is a
+ghost standing over a corpse; a living copy the host stops naming for three
+snapshot intervals hides itself and drops its collision until a state comes back,
+which is what keeps the 70 m band from leaving a mob behind. The peer that owns
+a body also keeps its **gait** local: a host holding a frame must not freeze the
+run its peer is actually making, so the locomotion clock is predicted while
+combat and ability clips still read the wire.
 The playout clock is nudged toward its delay target rather than snapped, and only
 a genuine discontinuity - a revive, a backstab blink, a scene hand-off - restarts
 the buffer. The guest's render tick is also what its actions are named by: the

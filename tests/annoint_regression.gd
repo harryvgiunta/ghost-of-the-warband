@@ -16,6 +16,8 @@ const Roll = preload("res://scripts/warband/annoint_roll.gd")
 const Ledger = preload("res://scripts/warband/annoint_ledger.gd")
 const Stats = preload("res://scripts/trinket_stats.gd")
 const Rules = preload("res://scripts/ability_rules.gd")
+const Combat = preload("res://scripts/combat.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 const State = preload("res://scripts/player_state.gd")
 const Runtime = preload("res://scripts/warband/annoint_runtime.gd")
 const Marks = preload("res://scripts/annoint_marks.gd")
@@ -59,6 +61,15 @@ const SAMPLE_ITEMS := [
 
 const SAMPLE_ARMOUR := ["head", "chest", "hands", "legs", "feet"]
 
+## One worn piece per material: the pieces the class rules are read on.
+const MATERIAL_ITEMS := {
+	"leather": "armor_leather_chest",
+	"mail": "armor_mail_chest",
+	"plate": "armor_plate_chest",
+	"cloth": "armor_cloth_chest",
+	"makeshift": "armor_makeshift_chest",
+}
+
 func run() -> void:
 	var watchdog := create_timer(90.0)
 	watchdog.timeout.connect(_on_watchdog)
@@ -66,6 +77,8 @@ func run() -> void:
 
 	_check_catalog()
 	_check_applicability()
+	_check_class_rules()
+	_check_damage_channels()
 	_check_die()
 	_check_ledger()
 	_check_marks()
@@ -94,7 +107,8 @@ func _check_catalog() -> void:
 		check(not entry.tags.is_empty(), "entry %s is unclassed for AI" % entry.id)
 		for tag in entry.tags:
 			check(tag in ["offence", "defence", "utility", "sustain", "control", "tempo",
-				"melee", "ranged", "mobility", "ability"], "unknown tag %s on %s" % [tag, entry.id])
+				"melee", "ranged", "mobility", "ability", "spell"],
+				"unknown tag %s on %s" % [tag, entry.id])
 		for disposition in ["tank", "melee", "bow"]:
 			var want := float(entry.want(disposition))
 			check(want >= 0.0 and want <= 1.0, "%s want(%s) out of range" % [entry.id, disposition])
@@ -160,16 +174,21 @@ func _check_applicability() -> void:
 	check(not shield.is_empty(), "the shield pool is empty")
 	check(not tome.is_empty(), "the focus pool is empty")
 	for entry in tome:
-		check(entry.groups.has(Catalog.GROUP_FOCUS) or _only(entry.groups, Catalog.GROUP_ANY_WEAPON),
+		check(entry.groups.has(Catalog.GROUP_FOCUS)
+			or entry.groups.has(Catalog.GROUP_SPELL)
+			or _only(entry.groups, Catalog.GROUP_ANY_WEAPON),
 			"tome rolled %s" % entry.id)
 		check(not _only(entry.slots, Catalog.SLOT_MAIN), "tome rolled a main-hand-only entry %s" % entry.id)
-	# Armour: every pool is armour-grouped and names its own slot.
-	for slot in SAMPLE_ARMOUR:
-		var pool := Catalog.for_armour_slot(slot)
-		check(not pool.is_empty(), "empty armour pool for %s" % slot)
-		for entry in pool:
-			check(entry.groups.has(Catalog.GROUP_ARMOUR), "%s welded to %s" % [entry.id, slot])
-			check(entry.slots.has(slot), "%s does not fit %s" % [entry.id, slot])
+	# Armour: every pool is its material's and names its own slot.
+	for material in ["leather", "mail", "plate", "cloth", "makeshift"]:
+		var set_index := ArmorData.SET_IDS.find(material)
+		for slot in SAMPLE_ARMOUR:
+			var pool := Catalog.for_item({"category": "armor", "slot": slot, "set": set_index})
+			check(not pool.is_empty(), "empty %s pool for %s" % [material, slot])
+			for entry in pool:
+				check(entry.groups.has(Catalog.GROUP_ARMOUR) or entry.groups.has(Catalog.GROUP_SPELL),
+					"%s welded to a %s %s" % [entry.id, material, slot])
+				check(entry.slots.has(slot), "%s does not fit %s" % [entry.id, slot])
 	# A one-hander fits either hand; a staff never fits the off hand.
 	check(Catalog.slots_of(State.ITEMS["dagger_iron"]).size() == 2, "dagger should fit both hands")
 	check(not Catalog.slots_of(State.ITEMS["staff_fire"]).has(Catalog.SLOT_OFF), "staff took the off hand")
@@ -304,7 +323,271 @@ func _check_jewelry() -> void:
 		int(kinds[Catalog.Kind.PROC]), int(kinds[Catalog.Kind.ABILITY]), ring.size()])
 
 
-# --- the die ---------------------------------------------------------------
+# --- the class rules -------------------------------------------------------
+
+## The item rework, asserted rather than trusted. Every statement the design
+## sheet makes about a material or a weapon class is a statement about the pool
+## that class draws from, so this walks the pools and checks the words:
+##   cloth   spell damage and spell modifiers, never movement, attack speed or
+##           damage reduction.
+##   leather ranged damage, attack speed, movement speed, and guard only as the
+##           rarer draw.
+##   plate   defence first, a few aggressive layers, never attack or movement
+##           speed.
+##   mail    mostly aggressive, some defence, attack and movement speed rarer.
+##   bows    ranged damage and flat arrow damage, never throwing.
+##   swords  melee damage, flat blade damage as the rarer draw.
+##   daggers their own class.
+##   shields anything but the bow's own damage.
+func _check_class_rules() -> void:
+	var cloth := Catalog.for_item(State.ITEMS[MATERIAL_ITEMS["cloth"]])
+	var leather := Catalog.for_item(State.ITEMS[MATERIAL_ITEMS["leather"]])
+	var mail := Catalog.for_item(State.ITEMS[MATERIAL_ITEMS["mail"]])
+	var plate := Catalog.for_item(State.ITEMS[MATERIAL_ITEMS["plate"]])
+	var cloth_keys := _keys_of(cloth)
+	var leather_keys := _keys_of(leather)
+	var mail_keys := _keys_of(mail)
+	var plate_keys := _keys_of(plate)
+
+	# Cloth: spells and the casting that pays for them, and nothing else at all.
+	check(cloth_keys.has("spell_damage"), "cloth never adds spell damage")
+	check(cloth_keys.has("cooldown"), "cloth adds no spell modifier")
+	for forbidden in ["move_speed", "attack_speed", "guard", "health", "stamina",
+			"melee_damage", "ranged_damage", "flat_melee", "flat_ranged", "throw_damage"]:
+		check(not cloth_keys.has(forbidden), "cloth adds %s" % forbidden)
+	for entry in cloth:
+		check(int(entry.kind) != Catalog.Kind.PROC,
+			"a robe armed the %s proc, and every ward is damage reduction" % entry.id)
+		for key in entry.stats:
+			check(Catalog.FAMILY_OF_KEY.get(str(key), "") != "defence",
+				"cloth writes %s, a defensive family" % key)
+	check(_class_weight(MATERIAL_ITEMS["cloth"], "spell") > _class_weight(MATERIAL_ITEMS["cloth"], "sustain"),
+		"a robe should be mostly spell work")
+
+	# Leather: the archer's material.
+	for wanted in ["ranged_damage", "attack_speed", "move_speed"]:
+		check(leather_keys.has(wanted), "leather adds no %s" % wanted)
+	check(leather_keys.has("guard"), "leather never adds damage reduction")
+	for forbidden in ["spell_damage", "melee_damage", "throw_damage"]:
+		check(not leather_keys.has(forbidden), "leather adds %s" % forbidden)
+	check(_class_weight(MATERIAL_ITEMS["leather"], "defence") < _class_weight(MATERIAL_ITEMS["leather"], "bow"),
+		"leather's guard should be the rarer draw, not its bread")
+
+	# Plate: the wall, never speed.
+	check(plate_keys.has("guard"), "plate adds no damage reduction")
+	check(not plate_keys.has("move_speed"), "plate adds movement speed")
+	check(not plate_keys.has("attack_speed"), "plate adds attack speed")
+	check(_class_weight(MATERIAL_ITEMS["plate"], "defence") > _class_weight(MATERIAL_ITEMS["plate"], "melee"),
+		"plate should be mostly defensive")
+	var aggressive := _class_weight(MATERIAL_ITEMS["plate"], "melee") \
+		+ _class_weight(MATERIAL_ITEMS["plate"], "bow")
+	check(aggressive > 0.0, "plate has no aggressive layer at all")
+
+	# Mail: the aggressive body, with speed as the rarer draw.
+	check(mail_keys.has("melee_damage"), "mail adds no melee damage")
+	check(mail_keys.has("ranged_damage"), "mail adds no ranged damage")
+	check(mail_keys.has("attack_speed") and mail_keys.has("move_speed"),
+		"mail never takes attack or movement speed")
+	var mail_aggression := _class_weight(MATERIAL_ITEMS["mail"], "melee") \
+		+ _class_weight(MATERIAL_ITEMS["mail"], "bow")
+	check(mail_aggression > _class_weight(MATERIAL_ITEMS["mail"], "defence"),
+		"mail should be mostly aggressive")
+	check(_class_weight(MATERIAL_ITEMS["mail"], "tempo") < _class_weight(MATERIAL_ITEMS["mail"], "melee"),
+		"mail's attack speed should be the rarer draw")
+	for forbidden in ["spell_damage", "throw_damage"]:
+		check(not mail_keys.has(forbidden), "mail adds %s" % forbidden)
+
+	# Bows: the arrow's own damage, and never the thrown blade's.
+	var bow := Catalog.for_item(State.ITEMS["bow_short"])
+	var bow_keys := _keys_of(bow)
+	check(bow_keys.has("ranged_damage"), "a bow adds no ranged damage")
+	check(bow_keys.has("flat_ranged"), "a bow adds no flat arrow damage")
+	check(not bow_keys.has("throw_damage"), "a bow adds throwing damage")
+	check(not bow_keys.has("melee_damage"), "a bow adds melee damage")
+
+	# Swords: every one of them, the greatsword included.
+	for item_id in ["sword_short", "sword_arming", "sword_great"]:
+		var sword := Catalog.for_item(State.ITEMS[item_id])
+		var sword_keys := _keys_of(sword)
+		check(sword_keys.has("melee_damage"), "%s adds no melee damage" % item_id)
+		check(sword_keys.has("flat_melee"), "%s adds no flat blade damage" % item_id)
+		for forbidden in ["ranged_damage", "flat_ranged", "throw_damage", "spell_damage"]:
+			check(not sword_keys.has(forbidden), "%s adds %s" % [item_id, forbidden])
+		check(_class_weight(item_id, "flat") < _class_weight(item_id, "melee"),
+			"%s's flat damage should be the rarer draw" % item_id)
+	# A greatsword is a sword before it is a two-hander.
+	check(Catalog.groups_of(State.ITEMS["sword_great"]).has(Catalog.GROUP_SWORD),
+		"the greatsword is not in the sword class")
+
+	# Daggers: their own class, not a small sword.
+	var dagger := Catalog.for_item(State.ITEMS["dagger_iron"])
+	var dagger_keys := _keys_of(dagger)
+	check(dagger_keys.has("melee_damage"), "a dagger adds no melee damage")
+	check(dagger_keys.has("attack_speed"), "a dagger adds no attack speed")
+	check(not dagger_keys.has("flat_melee"), "a dagger is not a sword: no flat blade damage")
+	check(not dagger_keys.has("guard"), "a dagger is not plate")
+	check(_ids(Catalog.for_item(State.ITEMS["sword_short"])) != _ids(dagger),
+		"the dagger pool is the shortsword's pool")
+
+	# Shields: anything but the bow's own damage.
+	var shield := Catalog.for_item(State.ITEMS["shield_kite"])
+	var shield_keys := _keys_of(shield)
+	check(not shield_keys.has("ranged_damage"), "a shield adds bow damage")
+	check(not shield_keys.has("flat_ranged"), "a shield adds arrow damage")
+	for wanted in ["guard", "stamina", "spell_damage", "throw_damage", "melee_damage"]:
+		check(shield_keys.has(wanted), "a shield cannot take %s, and it may take anything" % wanted)
+
+	# Casting implements ride the robe channel, never the bow's.
+	var staff := Catalog.for_item(State.ITEMS["staff_fire"])
+	var focus := Catalog.for_item(State.ITEMS["focus_tome"])
+	check(_keys_of(staff).has("spell_damage"), "a staff adds no spell damage")
+	check(_keys_of(focus).has("spell_damage"), "a focus adds no spell damage")
+	check(not _keys_of(staff).has("ranged_damage"), "a staff still adds bow damage")
+	check(not _keys_of(focus).has("ranged_damage"), "a focus still adds bow damage")
+
+	# The altar's gate: the four forged sets are worked at any price; salvage
+	# hide and a bare shirt are not.
+	for material in ["leather", "mail", "plate", "cloth"]:
+		check(Catalog.workable(State.ITEMS[MATERIAL_ITEMS[material]]),
+			"%s is beyond the altar" % material)
+	check(not Catalog.workable(State.ITEMS["armor_makeshift_chest"]),
+		"the altar takes salvage hide")
+	check(not Catalog.workable(State.ITEMS["armor_naked_chest"]),
+		"the altar takes a bare shirt")
+
+	# The weight is not decoration: the die itself must hand leather its arrows
+	# more often than its guard. Same stated seed, so the check never flakes.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 771533
+	var leather_item: Dictionary = State.ITEMS[MATERIAL_ITEMS["leather"]]
+	var leather_groups := Catalog.groups_of(leather_item)
+	var guard_draws := 0
+	var arrow_draws := 0
+	for i in 4000:
+		var result := Roll.roll(leather, [], false, rng, leather_groups)
+		var welded := str(result["entry_id"])
+		if welded.is_empty():
+			continue
+		var entry := Catalog.by_id(welded)
+		if entry == null:
+			continue
+		if Catalog.families_of(entry).has("defence"):
+			guard_draws += 1
+		if Catalog.families_of(entry).has("bow"):
+			arrow_draws += 1
+	check(arrow_draws > guard_draws,
+		"the die drew leather %d arrows and %d guard" % [arrow_draws, guard_draws])
+
+	print("  class rules: cloth %d, leather %d, mail %d, plate %d, bow %d, dagger %d, shield %d" % [
+		cloth.size(), leather.size(), mail.size(), plate.size(), bow.size(),
+		dagger.size(), shield.size()])
+
+
+## Every stat key any entry in the pool writes, drawbacks included.
+func _keys_of(pool: Array) -> Dictionary:
+	var out := {}
+	for entry in pool:
+		for key in entry.stats:
+			out[str(key)] = true
+		for key in entry.drawback:
+			out[str(key)] = true
+	return out
+
+
+## The pool weight this item's class gives one family, summed: the share of a
+## draw that family takes. Half of "sometimes" is this number.
+func _class_weight(item_id: String, family: String) -> float:
+	var item: Dictionary = State.ITEMS[item_id]
+	var groups := Catalog.groups_of(item)
+	var total := 0.0
+	for entry in Catalog.for_item(item):
+		if Catalog.families_of(entry).has(family):
+			total += Catalog.weight_of(entry, groups)
+	return total
+
+
+func _ids(pool: Array) -> Array[String]:
+	var out: Array[String] = []
+	for entry in pool:
+		out.append(str(entry.id))
+	return out
+
+
+# --- the damage channels ---------------------------------------------------
+
+## The rig-shaped stub: the four scale accessors `AbilityRules` asks for, with
+## numbers far apart so a wrong channel cannot pass for a right one.
+class ChannelRig extends Node:
+	var trinket_stats := {}
+	var melee := 1.0
+	var ranged := 1.0
+	var spell := 1.0
+	var flat_melee := 0.0
+	var flat_ranged := 0.0
+
+	func melee_scale() -> float:
+		return melee
+
+	func ranged_scale() -> float:
+		return ranged
+
+	func spell_scale() -> float:
+		return spell
+
+	func flat_bonus(key: String) -> float:
+		match key:
+			"flat_melee":
+				return flat_melee
+			"flat_ranged":
+				return flat_ranged
+		return 0.0
+
+
+## Spell damage, arrow damage and flat damage are three channels, and each one
+## reads its own key: a robe's spell bonus never moves an arrow, a bow's flat
+## never moves a blade.
+func _check_damage_channels() -> void:
+	for key in ["spell_damage", "flat_melee", "flat_ranged"]:
+		check(Stats.DEFAULT.has(key), "the stat table has no %s" % key)
+	check(is_equal_approx(Stats.damage_scale({"spell_damage": 0.25}, "spell_damage"), 1.25),
+		"spell damage does not scale")
+	check(is_equal_approx(Stats.damage_scale({"spell_damage": 0.25}, "ranged_damage"), 1.0),
+		"a spell bonus leaked into the arrow channel")
+	check(is_equal_approx(Stats.flat_damage({"flat_ranged": 5.0}, "flat_ranged"), 5.0),
+		"flat damage does not read back")
+	var rows := Stats.effect_rows("ring_ranged")
+	check(not rows.is_empty(), "a statted trinket shows no rows")
+
+	# The arrow: base x draw x scale, then the flat.
+	check(is_equal_approx(Combat.damage_for(0, 1.0, 1.5, 4.0), 30.0 * 1.5 + 4.0),
+		"the bow's flat damage is not added after the multipliers")
+	check(is_equal_approx(Combat.damage_for(0, 1.0, 1.5), 45.0),
+		"a bow with no flat weld changed its figure")
+
+	var rig := ChannelRig.new()
+	rig.melee = 1.5
+	rig.ranged = 2.0
+	rig.spell = 1.5
+	rig.flat_melee = 3.0
+	rig.flat_ranged = 4.0
+	root.add_child(rig)
+
+	# A staff's spell reads the robe channel: 50 x 1.6 x 1.5, and no arrow flat.
+	var spell := Rules.damage_for(Rules.by_id("fireball"), rig)
+	check(is_equal_approx(spell, 50.0 * 1.6 * 1.5),
+		"the fireball used %s instead of the robe channel" % str(spell))
+	# An arrow skill reads the bow channel, plus the bow's flat.
+	var arrows := Rules.damage_for(Rules.by_id("barrage"), rig)
+	check(is_equal_approx(arrows, 30.0 * 0.5 * 2.0 + 4.0),
+		"barrage reads %s, expected the bow channel plus its flat" % str(arrows))
+	# A blade skill reads melee, plus the blade's flat.
+	var cut := Rules.damage_for(Rules.by_id("double_slash"), rig)
+	check(is_equal_approx(cut, 30.0 * 0.9 * 1.5 + 3.0),
+		"double slash reads %s, expected the melee channel plus its flat" % str(cut))
+	rig.queue_free()
+	print("  channels: spell %.1f, arrow %.1f, blade %.1f" % [spell, arrows, cut])
+
+
 
 func _check_die() -> void:
 	check(Roll.outcome_of(0) == Roll.Outcome.ADD_ABILITY, "band 0")
@@ -704,9 +987,10 @@ func _check_stress() -> void:
 	var pools := {}
 	for catalog_id in SAMPLE_ITEMS:
 		pools[catalog_id] = {"item": State.ITEMS[catalog_id], "pool": Catalog.for_item(State.ITEMS[catalog_id])}
-	for slot in SAMPLE_ARMOUR:
-		pools[slot] = {"item": {"category": "armor", "slot": slot},
-			"pool": Catalog.for_armour_slot(slot)}
+	for material in MATERIAL_ITEMS:
+		var armour_id: String = MATERIAL_ITEMS[material]
+		pools[armour_id] = {"item": State.ITEMS[armour_id],
+			"pool": Catalog.for_item(State.ITEMS[armour_id])}
 	var keys: Array = pools.keys()
 	var outcomes := {Roll.Outcome.ADD_ABILITY: 0, Roll.Outcome.ADD_PASSIVE: 0,
 		Roll.Outcome.REMOVE: 0, Roll.Outcome.REPLACE: 0, Roll.Outcome.NOTHING: 0}
@@ -729,11 +1013,9 @@ func _check_stress() -> void:
 		# Eight copies per key, walked round robin so caps are hit and replaced.
 		ordinal = (i / keys.size()) % 8
 		item_id = str(key)
-		if item_id in SAMPLE_ARMOUR:
-			item_id = "armour_" + key
 		var existing := ledger.ids(item_id, ordinal)
 		var at_cap := existing.size() >= Catalog.MAX_PER_PIECE
-		var result := Roll.roll(pool, existing, at_cap, rng)
+		var result := Roll.roll(pool, existing, at_cap, rng, Catalog.groups_of(row["item"]))
 		var outcome := int(result["outcome"])
 		outcomes[outcome] = int(outcomes[outcome]) + 1
 		if at_cap:
@@ -767,9 +1049,10 @@ func _check_stress() -> void:
 	for catalog_id in SAMPLE_ITEMS:
 		for copy in 8:
 			_check_copy(catalog_id, copy, ledger, State.ITEMS[catalog_id])
-	for slot in SAMPLE_ARMOUR:
+	for material in MATERIAL_ITEMS:
+		var armour_id: String = MATERIAL_ITEMS[material]
 		for copy in 8:
-			_check_copy("armour_" + slot, copy, ledger, {"category": "armor", "slot": slot})
+			_check_copy(armour_id, copy, ledger, State.ITEMS[armour_id])
 
 	var total := float(RITUALS)
 	print("  rituals: %d in %d ms, %d annointments landed, %d converted at cap" % [

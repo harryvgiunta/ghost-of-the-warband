@@ -281,6 +281,7 @@ func _attach_warband_link() -> void:
 		session.peer_left.connect(_on_warband_peer_changed)
 		session.ownership_changed.connect(_on_warband_ownership_changed)
 		session.transfer_refused.connect(_on_warband_refusal)
+		session.gear_refused.connect(_on_warband_gear_refused)
 		session.campaign_received.connect(_on_campaign_received)
 		session.session_ended.connect(_on_session_ended)
 	if banner == null:
@@ -393,6 +394,12 @@ func _on_warband_ownership_changed(_assignments: Dictionary) -> void:
 func _on_warband_refusal(_merc_id: int, reason: String) -> void:
 	if banner != null and not reason.is_empty():
 		banner.note_refusal(reason)
+
+## A gear change the host turned down: the guest asked, nothing moved, and the
+## host's own words are what it is told.
+func _on_warband_gear_refused(message: String) -> void:
+	if banner != null and not message.is_empty():
+		banner.note_refusal(message)
 
 ## The socket closed under this peer (the host left, the address never answered).
 func _on_session_ended(reason: String) -> void:

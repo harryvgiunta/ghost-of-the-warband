@@ -16,6 +16,9 @@ const DEFAULT := {
 	"stamina": 0.0,
 	"melee_damage": 0.0,
 	"ranged_damage": 0.0,
+	"spell_damage": 0.0,
+	"flat_melee": 0.0,
+	"flat_ranged": 0.0,
 	"throw_damage": 0.0,
 	"move_speed": 0.0,
 	"attack_speed": 0.0,
@@ -129,6 +132,14 @@ static func damage_scale(stats: Dictionary, key: String) -> float:
 	return maxf(0.0, 1.0 + float(stats.get(key, 0.0)))
 
 
+## Flat damage rides the weapon that lands the blow, not the blow's class: a
+## blade's weld adds `flat_melee` to every swing, a bow's adds `flat_ranged` to
+## every arrow. Scaling stays multiplicative and this stays additive, so a flat
+## weld is worth more the faster the carrier attacks and never less than itself.
+static func flat_damage(stats: Dictionary, key: String) -> float:
+	return float(stats.get(key, 0.0))
+
+
 static func move_scale(stats: Dictionary) -> float:
 	return clampf(1.0 + float(stats.get("move_speed", 0.0)), 0.5, 2.0)
 
@@ -180,6 +191,15 @@ static func effect_rows(id: String) -> Array:
 	var ranged := float(stats.get("ranged_damage", 0.0))
 	if ranged > 0.0:
 		rows.append({"label":"RANGED DAMAGE", "value":"+%d%%" % int(round(ranged * 100.0))})
+	var spell := float(stats.get("spell_damage", 0.0))
+	if spell > 0.0:
+		rows.append({"label":"SPELL DAMAGE", "value":"+%d%%" % int(round(spell * 100.0))})
+	var flat_melee := float(stats.get("flat_melee", 0.0))
+	if not is_zero_approx(flat_melee):
+		rows.append({"label":"BLADE DAMAGE", "value":"%+d" % int(round(flat_melee))})
+	var flat_ranged := float(stats.get("flat_ranged", 0.0))
+	if not is_zero_approx(flat_ranged):
+		rows.append({"label":"ARROW DAMAGE", "value":"%+d" % int(round(flat_ranged))})
 	var thrown := float(stats.get("throw_damage", 0.0))
 	if thrown > 0.0:
 		rows.append({"label":"THROWN DAMAGE", "value":"+%d%%" % int(round(thrown * 100.0))})

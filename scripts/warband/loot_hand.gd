@@ -21,8 +21,10 @@ extends Node
 ## or `cancel()` from the world for the cases only it can see (a panel opening, a
 ## wipe). A cancelled channel takes nothing, and the corpse is untouched.
 ##
-## A guest owns no loot: the host's world spawns the kills and books them, so a
-## click on this machine is refused before a channel opens.
+## A guest owns no booking: the host's world spawns the kills and books them, so
+## a guest's click resolves the target here and sends the take as an intent. The
+## host empties its corpse or drop and copies the record back; this node's own
+## channel never opens on a guest.
 
 const SummaryScript = preload("res://scripts/warband/loot_summary.gd")
 
@@ -104,8 +106,6 @@ func try_click(actor, point: Vector3, aim_target: Variant = null) -> bool:
 func target_at(actor, point: Vector3, aim_target: Variant = null) -> Dictionary:
 	if _loot == null or not is_instance_valid(_loot):
 		return {}
-	if _is_client():
-		return {}
 	if not _can_work(actor):
 		return {}
 	if _aims_at_a_living_body(aim_target):
@@ -128,6 +128,10 @@ func target_at(actor, point: Vector3, aim_target: Variant = null) -> Dictionary:
 ## Start the duck-and-take on a target `target_at` resolved. False when there is
 ## nothing to work, the hands are already busy, or the cooldown is still running.
 func begin_on(actor, target: Dictionary) -> bool:
+	# A guest owns no booking: its press goes to the host through the world's
+	# intent channel, and a local channel here would mutate the lent copy.
+	if _is_client():
+		return false
 	if target.is_empty() or _cool > 0.0 or active() or not _can_work(actor):
 		return false
 	var kind := str(target.get("kind", ""))
@@ -148,6 +152,8 @@ func begin_on(actor, target: Dictionary) -> bool:
 ## order; empty when there was nothing to take or the hands are busy.
 func take_now(actor, target: Dictionary) -> Array[String]:
 	var ids: Array[String] = []
+	if _is_client():
+		return ids
 	if target.is_empty() or active() or not _can_work(actor) or _loot == null:
 		return ids
 	var anchor := Vector3.ZERO
@@ -155,7 +161,7 @@ func take_now(actor, target: Dictionary) -> Array[String]:
 	if kind == KIND_CORPSE:
 		var corpse_id := int(target.get("corpse_id", 0))
 		anchor = _loot.corpse_position(corpse_id)
-		var taken: Dictionary = _loot.take_all_from_corpse(corpse_id, LOCAL_PEER, false)
+		var taken: Dictionary = _loot.take_all_from_corpse(corpse_id, _local_peer(), false)
 		for entry in taken.get("ids", []):
 			ids.append(str(entry))
 	elif kind == KIND_DROP and target.get("pickup") != null and is_instance_valid(target.get("pickup")):
@@ -163,11 +169,11 @@ func take_now(actor, target: Dictionary) -> Array[String]:
 	else:
 		return ids
 	for pickup in _loot.pickups():
-		if not is_instance_valid(pickup) or pickup.collected or pickup.blocked_for(LOCAL_PEER):
+		if not is_instance_valid(pickup) or pickup.collected or pickup.blocked_for(_local_peer()):
 			continue
 		if pickup.global_position.distance_to(anchor) > PILE_RADIUS:
 			continue
-		var result: Dictionary = _loot.quick_loot(pickup, LOCAL_PEER, false)
+		var result: Dictionary = _loot.quick_loot(pickup, _local_peer(), false)
 		if bool(result.get("ok", false)):
 			ids.append(str(result.get("item_id", "")))
 	if ids.is_empty():
@@ -283,7 +289,7 @@ func _on_body_killed(_slot: int = 0, _source: int = 0) -> void:
 func _finish() -> void:
 	var ids: Array[String] = []
 	if _kind == KIND_CORPSE:
-		var taken: Dictionary = _loot.take_all_from_corpse(_corpse_id, LOCAL_PEER)
+		var taken: Dictionary = _loot.take_all_from_corpse(_corpse_id, _local_peer())
 		for entry in taken.get("ids", []):
 			ids.append(str(entry))
 	elif _kind == KIND_DROP:
@@ -312,7 +318,7 @@ func _drop_at(point: Vector3) -> WarbandPickup:
 	for pickup in _loot.pickups():
 		if not is_instance_valid(pickup) or pickup.collected:
 			continue
-		if pickup.blocked_for(LOCAL_PEER):
+		if pickup.blocked_for(_local_peer()):
 			continue
 		var distance: float = pickup.global_position.distance_to(point)
 		if distance <= best_distance:
@@ -336,7 +342,7 @@ func _take_drop_batch() -> Array[String]:
 		if pickup.global_position.distance_to(centre) <= PILE_RADIUS:
 			batch.append(pickup)
 	for pickup in batch:
-		var result: Dictionary = _loot.quick_loot(pickup, LOCAL_PEER)
+		var result: Dictionary = _loot.quick_loot(pickup, _local_peer())
 		if bool(result.get("ok", false)):
 			ids.append(str(result.get("item_id", "")))
 	return ids
@@ -386,7 +392,7 @@ func _merc_id() -> int:
 	if _controller == null or not is_instance_valid(_controller):
 		return -1
 	if _controller.has_method("merc_for_peer"):
-		var answer: Variant = _controller.merc_for_peer(LOCAL_PEER)
+		var answer: Variant = _controller.merc_for_peer(_local_peer())
 		if typeof(answer) == TYPE_INT:
 			return int(answer)
 	if _actor != null and _controller.has_method("merc_of"):
@@ -401,8 +407,17 @@ func _say_prompt(text: String) -> void:
 		_hud.set_prompt(text)
 
 
-## A guest's world is the host's: its corpses and drops were booked on the other
-## machine, so a click here must fall through to an ordinary swing.
+## The peer this machine's own press belongs to. The host is 1; a guest is its
+## ENet id, and a local take named after the wrong soul would dress the wrong
+## body even if the booking itself were right.
+func _local_peer() -> int:
+	if _controller != null and is_instance_valid(_controller):
+		var raw: Variant = _controller.get("local_peer_id")
+		if typeof(raw) == TYPE_INT and int(raw) > 0:
+			return int(raw)
+	return LOCAL_PEER
+
+
 func _is_client() -> bool:
 	if world == null or not is_instance_valid(world):
 		return false

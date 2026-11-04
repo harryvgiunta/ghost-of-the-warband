@@ -25,6 +25,16 @@ extends Node
 ## One piece just entered the warband's pool. `collector_peer` is the soul whose
 ## hands took it, or 0 for the warband itself (a squadmate, a sweep).
 signal booked(item_id: String, collector_peer: int)
+## A body became a container. The host's session copies this record to every
+## guest the moment it exists, wherever the kill was booked (a camp, the trail,
+## the delve or the open wood).
+signal corpse_registered(corpse_id: int)
+## A body's list of pieces changed, so a co-op guest's copy can be told without
+## shipping the whole corpse every time. Fires after the piece has left the body.
+signal corpse_changed(corpse_id: int, items: Array)
+## A drop left the ground, with where it lay: the one announcement that lets a
+## guest's own copy of the drop go away at the same instant the host's does.
+signal drop_taken(item_id: String, at: Vector3)
 
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const State = preload("res://scripts/player_state.gd")
@@ -108,6 +118,7 @@ func quick_loot(pickup: WarbandPickup, collector_peer: int = 1, dress: bool = tr
 	var at := pickup.global_position
 	var awoke := _book_piece(stash, item_id, collector_peer, pickup.anointed)
 	pickup.collect()
+	drop_taken.emit(item_id, at)
 	SfxScript.pickup(at)
 	_notify_warband()
 	var message := _dress_message(item_id, collector_peer if dress else 0)
@@ -192,6 +203,7 @@ func register_corpse(enemy) -> int:
 	var corpse_id := _next_corpse_id
 	_next_corpse_id += 1
 	_corpses[corpse_id] = {"id": corpse_id, "enemy": enemy, "items": ids}
+	corpse_registered.emit(corpse_id)
 	return corpse_id
 
 ## A member of the party below who dies keeps what he still wore on his own body:
@@ -210,12 +222,16 @@ func register_remains(body: Node3D, items: Array[String], label: String) -> int:
 	_next_corpse_id += 1
 	_corpses[corpse_id] = {"id": corpse_id, "enemy": body, "items": items.duplicate(),
 		"label": label, "remains": true}
+	corpse_registered.emit(corpse_id)
 	return corpse_id
 
 ## Forget a body: what is still on it is nobody's now. The Hollow calls this for
 ## the dead the party leaves below when its instance closes.
 func forget_corpse(corpse_id: int) -> void:
+	if not _corpses.has(corpse_id):
+		return
 	_corpses.erase(corpse_id)
+	corpse_changed.emit(corpse_id, [])
 
 ## Whether the body a corpse id names is registered and still holds something.
 ## False for a stripped body and for one whose enemy has been freed, so a caller
@@ -234,6 +250,76 @@ func has_corpse(corpse_id: int) -> bool:
 func registered_corpses() -> int:
 	_prune_corpses()
 	return _corpses.size()
+
+
+# --- co-op copies -----------------------------------------------------------
+#
+# A guest's vacuums never register a body of their own: the host owns every kill
+# and every booking. These four calls are the host's record arriving over the
+# session, so the guest's corpse screen can list a body and then watch pieces
+# leave it when somebody else takes them. The id is the host's, which is the one
+# every take is named by, so no local id has to be translated.
+
+## Take the host's record for a fallen body: its id, who it was, what it still
+## holds, and where it lies. A repeated announcement replaces the record, so a
+## guest that joins late and one that saw the death both end up with one row.
+func import_corpse(corpse_id: int, body_name: String, label: String,
+		items: Array, at: Vector3, remains: bool = false) -> void:
+	if corpse_id <= 0:
+		return
+	var held: Array[String] = []
+	for entry in items:
+		var item_id := str(entry)
+		if not item_id.is_empty() and State.ITEMS.has(item_id):
+			held.append(item_id)
+	if held.is_empty():
+		drop_corpse(corpse_id)
+		return
+	_corpses[corpse_id] = {"id": corpse_id, "items": held, "label": label,
+		"at": at, "name": body_name, "remains": remains, "remote": true}
+	_next_corpse_id = maxi(_next_corpse_id, corpse_id + 1)
+
+
+## The host's answer to a take: this is what the body holds now. An empty list
+## is a stripped body, and the row goes.
+func set_corpse_items(corpse_id: int, items: Array) -> void:
+	var record := _corpse_record(corpse_id)
+	if record.is_empty():
+		return
+	var held: Array[String] = []
+	for entry in items:
+		var item_id := str(entry)
+		if not item_id.is_empty():
+			held.append(item_id)
+	if held.is_empty():
+		drop_corpse(corpse_id)
+		return
+	record["items"] = held
+	_corpses[corpse_id] = record
+
+
+## The body is nobody's now: the host has forgotten it, or the last piece left.
+func drop_corpse(corpse_id: int) -> void:
+	_corpses.erase(corpse_id)
+
+
+## Whether this body is a fallen comrade rather than a hostile: the squad never
+## strips the party's own dead, and a guest's copy has to know which one it has.
+func corpse_is_remains(corpse_id: int) -> bool:
+	var record := _corpse_record(corpse_id)
+	return not record.is_empty() and bool(record.get("remains", false))
+
+
+## Who this body was, for a take that has to name it back to the host.
+func corpse_name(corpse_id: int) -> String:
+	var record := _corpse_record(corpse_id)
+	if record.is_empty():
+		return ""
+	var named := str(record.get("name", ""))
+	if not named.is_empty():
+		return named
+	var enemy = record.get("enemy")
+	return str((enemy as Node).name) if is_instance_valid(enemy) else ""
 
 
 ## Every body still worth searching, oldest first. A stripped body stays out of
@@ -283,6 +369,11 @@ func corpse_position(corpse_id: int) -> Vector3:
 	var record := _corpse_record(corpse_id)
 	if record.is_empty():
 		return Vector3.ZERO
+	# A guest's copy is imported from the host: the body here is the guest's own
+	# replica and may be hidden, but where the host says it lies is the truth the
+	# loot window opens on.
+	if bool(record.get("remote", false)):
+		return record.get("at", Vector3.ZERO)
 	var enemy = record["enemy"]
 	if not (enemy is Node3D):
 		return Vector3.ZERO
@@ -296,7 +387,9 @@ func corpse_label(corpse_id: int) -> String:
 	var label := str(record.get("label", ""))
 	if not label.is_empty():
 		return label
-	var enemy = record["enemy"]
+	var enemy = record.get("enemy")
+	if not is_instance_valid(enemy):
+		return ""
 	if enemy.has_method("get_display_name"):
 		var named := str(enemy.get_display_name())
 		if not named.is_empty():
@@ -324,6 +417,7 @@ func take_from_corpse(corpse_id: int, item_id: String, collector_peer: int = 1) 
 	_book_piece(stash, item_id, collector_peer)
 	items.remove_at(index)
 	record["items"] = items
+	corpse_changed.emit(corpse_id, items.duplicate())
 	_notify_warband()
 	return {"ok": true, "item_id": item_id, "remaining": items.size(),
 		"message": _dress_message(item_id, collector_peer)}
@@ -339,6 +433,7 @@ func take_all_from_corpse(corpse_id: int, collector_peer: int = 1, dress: bool =
 	if stash == null:
 		return {"ok": false, "ids": ids, "count": 0, "value": 0}
 	var record := _corpse_record(corpse_id)
+	var remaining: Array = []
 	if not record.is_empty():
 		var items: Array[String] = record["items"]
 		for item_id in items.duplicate():
@@ -350,7 +445,9 @@ func take_all_from_corpse(corpse_id: int, collector_peer: int = 1, dress: bool =
 			value += StashScript.value_of(item_id)
 			items.remove_at(items.find(item_id))
 		record["items"] = items
+		remaining = items
 	if not ids.is_empty():
+		corpse_changed.emit(corpse_id, remaining.duplicate())
 		_notify_warband()
 	return {"ok": not ids.is_empty(), "ids": ids, "count": ids.size(), "value": value}
 
@@ -417,16 +514,21 @@ func _corpse_record(corpse_id: int) -> Dictionary:
 	var record: Dictionary = _corpses.get(corpse_id, {})
 	if record.is_empty():
 		return {}
+	if bool(record.get("remote", false)):
+		return record
 	if not is_instance_valid(record.get("enemy")):
 		_corpses.erase(corpse_id)
 		return {}
 	return record
 
 ## Forget every body whose enemy has left the tree. Cheap: a battlefield holds a
-## handful of corpses, and this only runs when somebody asks about them.
+## handful of corpses, and this only runs when somebody asks about them. A copy
+## imported from the host has no enemy here at all and lives until the host says
+## the body is gone.
 func _prune_corpses() -> void:
 	for corpse_id in _corpses.keys():
-		if is_instance_valid((_corpses[corpse_id] as Dictionary).get("enemy")):
+		var record: Dictionary = _corpses[corpse_id]
+		if bool(record.get("remote", false)) or is_instance_valid(record.get("enemy")):
 			continue
 		_corpses.erase(corpse_id)
 

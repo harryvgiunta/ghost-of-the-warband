@@ -406,7 +406,7 @@ func _open_join() -> void:
 	var cache := get_node_or_null("/root/NetCache")
 	_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
 	_address_input.text = DEFAULT_ADDRESS if cache == null else str(cache.address)
-	_port_input.value = clampi(DEFAULT_PORT if cache == null else int(cache.port), MIN_PORT, MAX_PORT)
+	_set_port(_port_input, clampi(DEFAULT_PORT if cache == null else int(cache.port), MIN_PORT, MAX_PORT))
 	_form_error.text = ""
 	_join_layer.visible = true
 	_name_input.grab_focus()
@@ -426,10 +426,12 @@ func _confirm_join() -> void:
 	if address.is_empty():
 		_form_error.text = "Enter the host's address."
 		return
-	var port := int(_port_input.value)
-	if port < MIN_PORT or port > MAX_PORT:
+	var port := _typed_port(_port_input)
+	if port < 0:
 		_form_error.text = "Choose a UDP port between %d and %d." % [MIN_PORT, MAX_PORT]
+		_port_input.get_line_edit().grab_focus()
 		return
+	_set_port(_port_input, port)
 	var player_name := _clean_name(_name_input.text)
 	var cache := get_node_or_null("/root/NetCache")
 	if cache != null:
@@ -503,7 +505,7 @@ func _open_host() -> void:
 	_close_campaigns()
 	var cache := get_node_or_null("/root/NetCache")
 	_host_name_input.text = DEFAULT_NAME if cache == null else str(cache.player_name)
-	_host_port_input.value = clampi(DEFAULT_PORT if cache == null else int(cache.host_port), MIN_PORT, MAX_PORT)
+	_set_port(_host_port_input, clampi(DEFAULT_PORT if cache == null else int(cache.host_port), MIN_PORT, MAX_PORT))
 	_host_error.text = ""
 	_refresh_campaigns()
 	_host_layer.visible = true
@@ -573,10 +575,12 @@ func _refresh_host_checkpoint() -> void:
 ## host, so hosting a session can never write over a campaign already saved; FROM
 ## CHECKPOINT opens the campaign the selector names on its bookmark.
 func _confirm_host(start: String) -> void:
-	var port := int(_host_port_input.value)
-	if port < MIN_PORT or port > MAX_PORT:
+	var port := _typed_port(_host_port_input)
+	if port < 0:
 		_host_error.text = "Choose a UDP port between %d and %d." % [MIN_PORT, MAX_PORT]
+		_host_port_input.get_line_edit().grab_focus()
 		return
+	_set_port(_host_port_input, port)
 	var flow := get_node_or_null("/root/GameFlow")
 	if flow == null:
 		_host_error.text = "The campaign is unavailable."
@@ -691,6 +695,30 @@ func _form_panel(layer: Control, panel_size: Vector2) -> Panel:
 	panel.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
 	layer.add_child(panel)
 	return panel
+
+
+## The port the field shows, exactly as typed. A SpinBox copies its line edit
+## into `value` only when the line edit loses focus or Enter submits it, and this
+## form's buttons take no focus (`_button`), so a click on JOIN after typing a
+## port read the previous value and dialled the cached port instead. -1 when the
+## field is not a whole number in range, so the form can say so rather than clamp
+## the player's input into a different port behind their back.
+func _typed_port(box: SpinBox) -> int:
+	var typed := box.get_line_edit().text.strip_edges()
+	if not typed.is_valid_int():
+		return -1
+	var port := int(typed)
+	if port < MIN_PORT or port > MAX_PORT:
+		return -1
+	return port
+
+
+## Writes the port a form is to show. A SpinBox refreshes its line edit from
+## `value` on the next frame, never once the player has typed in it, so the line
+## edit is written too: the field must not show one port while holding another.
+func _set_port(box: SpinBox, port: int) -> void:
+	box.value = port
+	box.get_line_edit().text = str(port)
 
 
 func _port_box(parent: Node, position_at: Vector2) -> SpinBox:

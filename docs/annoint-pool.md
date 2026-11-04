@@ -10,7 +10,7 @@ against the real base values, listed below.
 Armour has its own sheet: `docs/annoint-pool-armour.md`. Kit-wide ceilings that
 span both live there, §2.
 
-## Status — implemented (build of 2026-11-03)
+## Status — implemented (build of 2026-11-03; item rework 2026-11-04)
 
 This sheet is the review artifact; **the code is the authority** and the ids
 below (`#1..#100`) are review numbers, not the ids in the pool. The pool lives in
@@ -18,14 +18,21 @@ below (`#1..#100`) are review numbers, not the ids in the pool. The pool lives i
 
 | | |
 | --- | --- |
-| Entries in the pool | **163** — 161 wired, 2 deferred (`#5` Gristle, `#21` Cinder Lining, both waiting on a damage-source tag) |
-| Blanket ladders | 19 families × 5 rungs = 95 entries (`f_<group>_<key>_<tier>`) |
-| Authored bundles | 44 stat/proc rows (`w_*`, `a_*`, `o_*`) |
-| Skills | **24** (`k_*`): the 12 catalog skills join the pool, plus 12 annoint-only ones added to `AbilityRules` |
-| Applicable pool today | sword 47 · dagger 46 · two-hand 49 · bow 46 · staff 44 · shield 41 · focus 39 |
+| Entries in the pool | **257** — 255 wired, 2 deferred (`#5` Gristle, `#21` Cinder Lining, both waiting on a damage-source tag) |
+| Blanket ladders | 34 families × 5 rungs = 170 entries (`f_<group>_<key>_<tier>`); 24 gear families and 10 amulet families |
+| Authored bundles | 61 stat/proc rows (43 stat bundles, 18 procs: `w_*`, `a_*`, `o_*`, `c_*`, `j_*`) |
+| Skills | **26** (`k_*`) in the registry: the catalog skills join the pool, plus the annoint-only ones added to `AbilityRules` |
+| Applicable pool today | sword 37 · dagger 30 · two-hand 43 · bow 35 · staff 27 · shield 45 · focus 27 · necklace 60 |
+| Armour pools by material | cloth 16 · leather 38 · mail 57 · plate 55 (a chest piece) |
 | Piece cap | 6, and a full piece converts an add into a replace |
 | Ritual cost | 1 `ichor_vial`, no destruction, ever |
 | Rows implemented | every stat ladder, every stat bundle, the 6 armour/weapon procs that ride the receiver (`HEAL`, `STAMINA`, `REFLECT`, `ABSORB`, `LETHAL_SAVE`, `STAGGER`, `GUARD_BREAK`, `BLEED`) |
+
+The item rework split the damage channels and gated every pool by class, which is
+why the applicable counts above are smaller than the 2026-11-03 figures: a bow no
+longer draws a thrown-blade weld, a plate harness no longer draws a stride, and a
+robe draws nothing but spells. The class rules are `AnnointCatalog.POLICY` and
+are asserted by `tests/annoint_regression.gd`; the summary is §0.5 below.
 
 The skills that are *not* here are the ones the sheet flags as needing a system
 the build lacks — silence, summon, blink-step, throw-and-return, the bleed
@@ -35,10 +42,52 @@ onto an existing effect kind (`melee_arc`, `melee_ring`, `barrage`, `piercing_sh
 art (a missing icon is a null texture by design).
 
 What is wired, end to end, and verified by `tests/annoint_regression.gd`:
-the pool and its invariants, applicability, the die's four bands, the cap
-conversion, per-copy storage and independence, the kit ceilings, the card rows,
-the proc verbs, and **99,999 rituals** (~1.8 s) with no piece over six, no
-duplicates, no dead entry, and 161 of 161 wired entries welded at least once.
+the pool and its invariants, applicability, the class rules, the die's four
+bands, the cap conversion, per-copy storage and independence, the kit ceilings,
+the card rows, the proc verbs, and **99,999 rituals** with no piece over six, no
+duplicates, no dead entry, and every wired entry welded at least once.
+
+## 0.5 The item rework — what a class may carry
+
+A weld has to fit the piece, not just its slot. An item resolves to a **class**
+(`AnnointCatalog.groups_of`): armour resolves to its material as well as to
+`armour`, and a sword, a dagger, a bow, a shield, a staff and a focus each name
+themselves. `AnnointCatalog.POLICY` then says what that class may be welded with,
+as a hard key gate (`keys`), a proc gate (`procs`), and a pool share per family
+(`weights`). A weight below 1.0 is the design sheet's "sometimes": the entry is
+legal, it is simply a rarer draw — and the die itself is weighted, so the rarity
+is observable in play and in the stress.
+
+| Class | Carries | Never carries |
+| --- | --- | --- |
+| **Cloth** (robe, hood, wraps) | spell damage, spell cooldowns, stamina regen. Spell families only | movement speed, attack speed, damage reduction of any kind (no `guard`, no ward procs), health, stamina, weapon damage |
+| **Leather** | ranged damage, flat arrow damage, attack speed, movement speed; guard and stagger as rarer draws | spell damage, melee damage, thrown damage |
+| **Mail** | melee and ranged damage, guard, health, stamina; attack and movement speed as rarer draws | spell damage, thrown damage |
+| **Plate** | guard, health, stamina, stagger, kill healing; melee and ranged damage as rare draws | movement speed, attack speed, spell damage, thrown damage |
+| **Bow** | ranged damage, flat arrow damage, attack speed, cooldowns, stamina regen | **thrown damage**, melee damage, spell damage |
+| **Sword** (short, arming, great, makeshift cleaver, club, branch) | melee damage always in the pool, flat blade damage as the rarer draw, attack speed, guard, health, stamina | ranged damage, flat arrow damage, thrown damage, spell damage |
+| **Dagger** | melee damage, attack speed, movement speed, cooldowns; its own pool, not a small sword | flat blade damage, guard, ranged, thrown and spell damage |
+| **Shield** | anything except the bow's own damage | ranged damage, flat arrow damage |
+| **Staff / focus** | spell damage and spell modifiers, defence as the rarer draw | ranged damage, melee damage, thrown damage |
+
+Three damage channels follow from that:
+
+| Key | Channel | Scaled where |
+| --- | --- | --- |
+| `ranged_damage`, `flat_ranged` | the bow's arrows and bow skills | `Archer.ranged_scale`, `AbilityRules.damage_for` (bow items), `Combat.damage_for` |
+| `spell_damage` | a staff's spells | `Archer.spell_scale`, `AbilityRules.damage_for` (staff items) |
+| `melee_damage`, `flat_melee` | blades, blade skills, the backstab | `Archer.melee_scale`, `Archer.melee_damage`, `AbilityRules.damage_for` (melee effects) |
+
+Flat damage is additive after every multiplier: a bow's `flat_ranged` is added to
+every arrow, a sword's `flat_melee` to every swing, and neither reaches the other
+weapon's channel. A robe's `spell_damage` never moves an arrow, and the
+Ring of Ranged Damage now buys bow damage only — spells are the robe's business.
+
+**The altar's gate.** The four forged sets (leather, mail, plate, cloth) are
+worked at any price: a jerkin's price is the wood's, and its material is the
+whole of what it can carry. Salvage hide and a bare shirt stay outside the
+altar, whatever their price.
+
 
 ## 0. Units and the dials they sit against
 

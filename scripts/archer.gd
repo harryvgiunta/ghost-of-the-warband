@@ -296,6 +296,11 @@ var _landing_weight := 0.0
 ## clock a sample cannot drive from the pose alone - the flip - runs locally
 ## between samples. set_roll() clears it for a body that owns its roll clock.
 var _pose_from_snapshots := false
+## The predicting peer owns its own gait: the wire's motion clock is the host's
+## body, and a held host pose re-applied every 20 Hz made a locally moving body
+## look like it was running on the spot. Combat, ability and roll state still
+## come from the wire; only the locomotion phase and speed stay local.
+var local_locomotion := false
 var _release_draw := 0.0
 var _release_charge := 0.0
 var _release_raise := 0.0
@@ -2003,7 +2008,7 @@ func melee_damage(hand: String = "") -> float:
 		base = float(_off_profile().damage)
 	elif weapon == "dagger":
 		base = float(profile_for_hand(key).damage)
-	return base*melee_scale()
+	return base*melee_scale() + flat_bonus("flat_melee")
 
 ## Trinket modifiers read by the controllers, `Combat` and the ability cues.
 ## Fold a body's annointment stats into the same dictionary every accessor
@@ -2029,6 +2034,16 @@ func melee_scale() -> float:
 
 func ranged_scale() -> float:
 	return TrinketStats.damage_scale(trinket_stats,"ranged_damage")
+
+## Spells are their own damage channel: a staff's fireball scales with the robe
+## on the body, never with the arrows the other hand might be able to loose.
+func spell_scale() -> float:
+	return TrinketStats.damage_scale(trinket_stats,"spell_damage")
+
+## Flat damage, in the weapon's own class: `flat_melee` rides a swung blade,
+## `flat_ranged` rides a loosed arrow.
+func flat_bonus(key: String) -> float:
+	return TrinketStats.flat_damage(trinket_stats,key)
 
 func throw_scale() -> float:
 	return TrinketStats.damage_scale(trinket_stats,"throw_damage")
@@ -2519,8 +2534,9 @@ func apply_animation_state(state: Variant) -> void:
 	slide_progress = slide.x
 	_slide_direction = Vector3(slide.y,0.0,slide.z)
 	_slide_weight = slide.w
-	_motion_time = float(state.motion_time)
-	_locomotion_phase = float(state.locomotion_phase)
+	if not local_locomotion:
+		_motion_time = float(state.motion_time)
+		_locomotion_phase = float(state.locomotion_phase)
 	_air_time = float(state.air_time)
 	_landing_weight = float(state.landing)
 	# The owning actor applies its single authoritative cover snapshot via set_cover first.
@@ -3012,12 +3028,17 @@ func _solve_pose(delta: float) -> void:
 	elif moving:
 		clip = _locomotion_clip(speed)
 		time = _locomotion_clip_time(clip)
+	var first_pose := _display_clip.is_empty()
 	if clip != _display_clip or lower_clip != _display_lower_clip or weapon != _display_weapon or drawing != _display_drawing or diagonal_id != _display_diagonal:
 		# The skeleton still holds the pose the last solve left, so the transition
 		# reads it directly instead of keeping a 65-bone copy of it every frame.
 		for bone in _bone_count:
 			_blend_pose[bone] = skeleton.get_bone_pose(bone)
-		_blend_time = 0.0
+		# A rig's first pose is not a transition: there is no drawn pose on the far
+		# side of it, only whatever the build left in the skeleton while it
+		# sampled the crouch and cover copies. Blending from that put a standing
+		# body in the measured crouch and left the head zone riding it.
+		_blend_time = BLEND_SECONDS if first_pose else 0.0
 		_display_clip = clip
 		_display_lower_clip = lower_clip
 		_display_weapon = weapon

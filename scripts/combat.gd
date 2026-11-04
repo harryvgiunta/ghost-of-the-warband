@@ -1400,10 +1400,12 @@ static func aim_point_valid(at: Vector3, point: Vector3) -> bool:
 		return false
 	return point.distance_squared_to(at) <= AIM_REACH * AIM_REACH
 
-## `scale` is the shooter's trinket multiplier; enemies pass nothing.
-static func damage_for(bow_index: int, charge: float, scale: float = 1.0) -> float:
+## `scale` is the shooter's trinket multiplier; enemies pass nothing. `flat` is
+## the arrow's additive bonus, added once after the draw multiplier.
+static func damage_for(bow_index: int, charge: float, scale: float = 1.0,
+		flat: float = 0.0) -> float:
 	return float(BASE_DAMAGE[clampi(bow_index, 0, BASE_DAMAGE.size() - 1)]) \
-		* clampf(charge, 0.0, 1.0) * maxf(scale, 0.0)
+		* clampf(charge, 0.0, 1.0) * maxf(scale, 0.0) + flat
 
 static func throw_damage(weapon_name: String, weapon_index: int, charge: float,
 		scale: float = 1.0) -> float:

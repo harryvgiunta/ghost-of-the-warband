@@ -65,6 +65,11 @@ var title_label: Label
 ## The vacuum a corpse's pieces are booked through. `CorpseLootPanel` binds it;
 ## null means the corpse screen can list the kit but take nothing.
 var corpse_loot = null
+## Set only on a co-op guest: `(corpse_id, item_id, all) -> void`. The body and
+## the pool are the host's, so a take is a request and the record that comes back
+## down the session is what repaints this screen. Unset means the vacuum books
+## locally, which is what the host's own screen does.
+var corpse_request: Callable = Callable()
 ## The body being shown; 0 while the screen dresses mercenaries.
 var corpse_id := 0
 ## The carried pieces exactly as listed, in carry order: `{item_id, name, value,
@@ -252,6 +257,12 @@ func set_title(text: String) -> void:
 func take_piece(item_id: String) -> Dictionary:
 	if not _corpse_active:
 		return {"ok": false, "item_id": item_id, "message": ""}
+	if corpse_request.is_valid():
+		# A guest's take: the row stays until the host's answer lands, and the
+		# record that arrives is what moves it off the body.
+		corpse_request.call(corpse_id, item_id, false)
+		set_status("Taking %s..." % str((State.ITEMS.get(item_id, {}) as Dictionary).get("name", item_id)))
+		return {"ok": true, "item_id": item_id, "message": ""}
 	if corpse_loot == null or not is_instance_valid(corpse_loot) \
 			or not corpse_loot.has_method("take_from_corpse"):
 		set_status("There is no way to take that piece.")
@@ -286,6 +297,10 @@ func _corpse_holds(item_id: String) -> bool:
 func take_all() -> Dictionary:
 	if not _corpse_active:
 		return {"ok": false, "ids": [], "count": 0, "value": 0}
+	if corpse_request.is_valid():
+		corpse_request.call(corpse_id, "", true)
+		set_status("Taking everything on that body...")
+		return {"ok": true, "ids": [], "count": 0, "value": 0}
 	if corpse_loot == null or not is_instance_valid(corpse_loot) \
 			or not corpse_loot.has_method("take_all_from_corpse"):
 		set_status("There is no way to take that gear.")

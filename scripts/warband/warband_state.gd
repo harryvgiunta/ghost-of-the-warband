@@ -119,10 +119,12 @@ var party_mode: String = Contracts.DEFAULT_PARTY_MODE
 ## of a session (`GameFlow.join_campaign`). A lent warband is shown and played and
 ## never touches this machine's files: `save_state` and `load_state` refuse, so the
 ## guest's own campaign is exactly as it was when the session ends. The host is
-## the only place the shared warband changes - its gear, its purse, its roll - so
-## every gear and purse verb below answers `LENT_MESSAGE` instead, and the host's
-## own updates arrive through `lend()`. `end_loan()` gives this machine its own
-## warband back.
+## the only place the shared warband changes - its purse, its roll and its kit -
+## so every purse verb below answers `LENT_MESSAGE`, and every gear verb is
+## carried to the host through `gear_requester` and comes back with the next copy
+## (`lend()`); a gear verb with no session to ask refuses like the rest, and the
+## host's own updates arrive through `lend()` as well. `end_loan()` gives this
+## machine its own warband back.
 var lent := false
 ## Item ids the player has held back from automatic equipping: `arm_warband`,
 ## `dress_recruit` and a loot pickup leave them in the pool, while a hand on the
@@ -192,6 +194,7 @@ func end_loan() -> void:
 		return
 	lent = false
 	_lent_gold = 0
+	gear_requester = Callable()
 	clear_possession()
 	if not load_state():
 		reset_state()
@@ -202,6 +205,87 @@ func _lent_refusal(fields: Dictionary = {}) -> Dictionary:
 	var out := {"ok": false, "message": LENT_MESSAGE}
 	out.merge(fields)
 	return out
+
+# --- gear on a lent warband --------------------------------------------------
+#
+# A guest plays the host's warband and never writes it, but its kit is the pool
+# everyone shares: wearing a piece, taking one off, swapping a weapon set or
+# re-kitting a body are all things a guest may *ask* for. The verb below is
+# carried to the host, the host runs the same verb on its own books, and the
+# answer comes back with the next mirror (`WarbandSession.receive_warband`).
+# A lent copy with no session to ask - the title screen - refuses as it always
+# did.
+
+## What a guest is told while a gear verb is on its way to the host.
+const GEAR_SENT := "Sent to the host."
+## The gear verbs a guest may ask the host for, by the name a request carries:
+## the kit on a body and the order its skills sit on the ten keys, which is part
+## of the same dressing (`_worn_signatures` compares both).
+const GEAR_VERBS := ["equip", "unequip", "swap_set", "reequip", "reequip_band",
+	"restrict", "hotbar_order", "hotbar_move", "hotbar_reset"]
+
+## Where a lent warband's gear verbs go: the co-op session installs a callable
+## that sends the request to the host. Empty on a host and on a machine with no
+## session.
+var gear_requester := Callable()
+
+## Hand one gear verb to the host. False when there is nowhere to send it, which
+## leaves the verb's own lent refusal standing.
+func ask_gear(verb: String, args: Array) -> bool:
+	if not gear_requester.is_valid():
+		return false
+	return bool(gear_requester.call({"verb": verb, "args": args}))
+
+## Run one gear request a guest sent, on these books - the one place a shared
+## warband's kit ever changes. The change goes out with the session's mirror, so
+## the guest sees it on the next copy; `{ok, message}` is what it is told.
+func apply_gear_request(request: Dictionary) -> Dictionary:
+	if lent:
+		return _lent_refusal({})
+	var verb := str(request.get("verb", ""))
+	var raw: Variant = request.get("args", [])
+	var args: Array = raw if raw is Array else []
+	if not GEAR_VERBS.has(verb):
+		return {"ok": false, "message": "That is not a gear request."}
+	match verb:
+		"equip":
+			if args.size() < 3:
+				return {"ok": false, "message": "That is not a gear request."}
+			return equip_merc(int(args[0]), str(args[1]), str(args[2]))
+		"unequip":
+			if args.size() < 2:
+				return {"ok": false, "message": "That is not a gear request."}
+			var taken := unequip_merc(int(args[0]), str(args[1]))
+			if taken.is_empty():
+				return {"ok": false, "message": "Nothing comes off that slot."}
+			return {"ok": true, "item_id": taken, "message": "Taken off the body."}
+		"swap_set":
+			if args.is_empty():
+				return {"ok": false, "message": "That is not a gear request."}
+			return swap_weapon_set(int(args[0]))
+		"reequip":
+			if args.is_empty():
+				return {"ok": false, "message": "That is not a gear request."}
+			return reequip_merc(int(args[0]))
+		"reequip_band":
+			return reequip_warband()
+		"restrict":
+			if args.is_empty():
+				return {"ok": false, "message": "That is not a gear request."}
+			return restrict_auto_equip(str(args[0]), bool(args[1]) if args.size() > 1 else true)
+		"hotbar_order":
+			if args.size() < 2 or not args[1] is Array:
+				return {"ok": false, "message": "That is not a gear request."}
+			return set_hotbar_order(int(args[0]), args[1])
+		"hotbar_move":
+			if args.size() < 3:
+				return {"ok": false, "message": "That is not a gear request."}
+			return move_hotbar_skill(int(args[0]), int(args[1]), int(args[2]))
+		"hotbar_reset":
+			if args.is_empty():
+				return {"ok": false, "message": "That is not a gear request."}
+			return reset_hotbar(int(args[0]))
+	return {"ok": false, "message": "That is not a gear request."}
 
 # --- the quiver ------------------------------------------------------------
 
@@ -528,6 +612,9 @@ func reequip_merc(merc_id: int) -> Dictionary:
 	var released: Array[String] = []
 	var fitted: Array[Dictionary] = []
 	if lent:
+		if ask_gear("reequip", [merc_id]):
+			return {"ok": true, "pending": true, "merc_id": merc_id,
+				"released": released, "fitted": fitted, "message": GEAR_SENT}
 		return _lent_refusal({"merc_id": merc_id, "released": released, "fitted": fitted})
 	if _arming:
 		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
@@ -570,6 +657,9 @@ func reequip_warband() -> Dictionary:
 	var mercs: Array[int] = []
 	var released: Array[String] = []
 	if lent:
+		if ask_gear("reequip_band", []):
+			return {"ok": true, "pending": true, "mercs": mercs,
+				"released": released, "fitted": fitted, "message": GEAR_SENT}
 		return _lent_refusal({"mercs": mercs, "released": released, "fitted": fitted})
 	if _arming:
 		return {"ok": false, "mercs": mercs, "released": released, "fitted": fitted,
@@ -619,7 +709,11 @@ func _release_worn(merc_id: int, pool: WarbandStash) -> Array[String]:
 		if roster.take_worn(merc_id, str(entry.get("slot", "")),
 				int(entry.get("set", -1))) != item_id:
 			continue
-		pool.add(item_id, 1)
+		# The copy comes off the body as itself, exactly as `unequip_merc` and
+		# `_strip_worn` do: a claim left behind is a piece the next equip into this
+		# slot hands to the pool a second time.
+		var slot_id := str(entry.get("slot", ""))
+		pool.add(item_id, 1, _release_claim(merc_id, slot_id, item_id))
 		out.append(item_id)
 	return out
 
@@ -705,6 +799,9 @@ func _arm_message(fitted: Array) -> String:
 ## Returns `{ok, item_id, restricted, message}`; a lent warband is refused.
 func restrict_auto_equip(item_id: String, restricted: bool = true) -> Dictionary:
 	if lent:
+		if ask_gear("restrict", [item_id, restricted]):
+			return {"ok": true, "pending": true, "item_id": item_id,
+				"restricted": restricted, "message": GEAR_SENT}
 		return _lent_refusal({"item_id": item_id, "restricted": false})
 	var id := State.migrate_item_id(item_id)
 	var item: Dictionary = State.ITEMS.get(id, {})
@@ -829,7 +926,7 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
 			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
 	var pool := _annoint_pool(item, str(item.get("slot", "")))
-	if int(item.get("price", 0)) < CruorScript.MAGIC_PRICE or pool.is_empty():
+	if not _annoint_worth(item) or pool.is_empty():
 		return {"ok": false, "message": "The altar will not take that.",
 			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
 			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
@@ -848,7 +945,8 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 	if rng == null:
 		rng = RandomNumberGenerator.new()
 		rng.randomize()
-	var rolled := AnnointRoll.roll(pool, existing, at_cap, rng)
+	var rolled := AnnointRoll.roll(pool, existing, at_cap, rng,
+		AnnointCatalog.groups_of(item))
 	stash.remove(CruorScript.BASIC_REAGENT, 1)
 	var outcome := int(rolled["outcome"])
 	var added := str(rolled["entry_id"])
@@ -890,13 +988,12 @@ func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
 	var pool := _annoint_pool(item, str(item.get("slot", "")))
 	var copy := _resolve_copy(item_id, ordinal)
 	var owned := not item.is_empty() and stash.available_ids(roster).has(item_id)
-	var can := owned and int(item.get("price", 0)) >= CruorScript.MAGIC_PRICE \
-		and not pool.is_empty() \
+	var can := owned and _annoint_worth(item) and not pool.is_empty() \
 		and stash.pooled_count(CruorScript.BASIC_REAGENT) >= 1
 	var reason := ""
 	if not owned:
 		reason = "The warband does not carry one."
-	elif int(item.get("price", 0)) < CruorScript.MAGIC_PRICE:
+	elif not _annoint_worth(item):
 		reason = "The altar will not take that."
 	elif pool.is_empty():
 		reason = "Nothing fits that piece."
@@ -909,11 +1006,20 @@ func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
 		"full": annoints.is_full(item_id, copy), "odds": AnnointRoll.CHANCES,
 		"reagent": CruorScript.BASIC_REAGENT}
 
-## The pool a piece rolls from: its type's pool, or its armour slot's.
+## The pool a piece rolls from: its type's pool, or its armour material's.
 func _annoint_pool(item: Dictionary, slot: String) -> Array:
 	if str(item.get("category", "")) == "armor":
-		return AnnointCatalog.for_armour_slot(slot)
+		return AnnointCatalog.for_armour_slot(slot, AnnointCatalog.material_of(item))
 	return AnnointCatalog.for_item(item)
+
+
+## What the altar will take. A piece of gear worth working is worth the vial:
+## the four forged armour sets are worked whatever their price, because their
+## price is the wood's, not the woodwork's. Everything else keeps the old floor.
+func _annoint_worth(item: Dictionary) -> bool:
+	if str(item.get("category", "")) == "armor":
+		return AnnointCatalog.workable(item)
+	return int(item.get("price", 0)) >= CruorScript.MAGIC_PRICE
 
 # --- copies ----------------------------------------------------------------
 
@@ -975,6 +1081,19 @@ func _serial_is_worn_elsewhere(serial: int, item_id: String, mine: String) -> bo
 			return true
 	return false
 
+
+## Let go of the copy `merc_id` wears in `slot_id` when that claim names this very
+## piece, and answer the serial to put it back under. `-1` when the slot holds no
+## claim of its own - a slot dressed behind the state's back, or a piece waiting
+## in the weapon set the hands are not carrying - so the caller mints a copy
+## instead of handing over another weapon's identity.
+func _release_claim(merc_id: int, slot_id: String, item_id: String) -> int:
+	var key := "%d:%s" % [merc_id, slot_id]
+	var held: Variant = worn_copies.get(key, {})
+	if not held is Dictionary or str((held as Dictionary).get("item", "")) != item_id:
+		return -1
+	worn_copies.erase(key)
+	return int((held as Dictionary).get("ordinal", -1))
 
 ## A copy leaving a body: the slot forgets it and the caller gets the piece and
 ## the serial it was worn under, so the weapon that was annointed is the weapon
@@ -1190,6 +1309,9 @@ func hotbar_layout(merc_id: int) -> Array[String]:
 ## permutation of what the body can actually fire. Answers `{ok, message, order}`.
 func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 	if lent:
+		if ask_gear("hotbar_order", [merc_id, order]):
+			return {"ok": true, "pending": true, "order": order.duplicate(),
+				"message": GEAR_SENT}
 		return _lent_refusal({"order": []})
 	if not roster.has(merc_id):
 		return {"ok": false, "message": "No such mercenary.", "order": []}
@@ -1226,6 +1348,9 @@ func set_hotbar_order(merc_id: int, order: Array) -> Dictionary:
 ## movable: a body always has them. Answers `{ok, message, order}`.
 func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary:
 	if lent:
+		if ask_gear("hotbar_move", [merc_id, from_slot, to_slot]):
+			return {"ok": true, "pending": true, "order": hotbar_layout(merc_id),
+				"message": GEAR_SENT}
 		return _lent_refusal({"order": []})
 	if not roster.has(merc_id):
 		return {"ok": false, "message": "No such mercenary.", "order": []}
@@ -1260,6 +1385,9 @@ func move_hotbar_skill(merc_id: int, from_slot: int, to_slot: int) -> Dictionary
 ## off hand, then the necklace, ring 1 and ring 2.
 func reset_hotbar(merc_id: int) -> Dictionary:
 	if lent:
+		if ask_gear("hotbar_reset", [merc_id]):
+			return {"ok": true, "pending": true, "order": hotbar_layout(merc_id),
+				"message": GEAR_SENT}
 		return _lent_refusal({"order": []})
 	if not roster.has(merc_id):
 		return {"ok": false, "message": "No such mercenary.", "order": []}
@@ -1315,6 +1443,8 @@ func hire_cost() -> int:
 func equip_merc(merc_id: int, slot_id: String, item_id: String,
 		announce: bool = true) -> Dictionary:
 	if lent:
+		if ask_gear("equip", [merc_id, slot_id, item_id]):
+			return {"ok": true, "pending": true, "displaced": {}, "message": GEAR_SENT}
 		return _lent_refusal({"displaced": {}})
 	if item_id.is_empty():
 		return {"ok": false, "message": "Choose a piece of gear.", "displaced": {}}
@@ -1468,6 +1598,10 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 ## Strip a worn piece back into the pool the field works.
 func unequip_merc(merc_id: int, slot_id: String) -> String:
 	if lent:
+		if ask_gear("unequip", [merc_id, slot_id]):
+			# The piece the row is showing: the host takes it off, and the mirror
+			# that comes back has it in the pool.
+			return str(roster.equipped_of(merc_id).get(slot_id, ""))
 		return ""
 	if delve.active and not delve.party.has(merc_id):
 		return ""
@@ -1487,6 +1621,9 @@ func unequip_merc(merc_id: int, slot_id: String) -> String:
 ## it with `refresh_gear()`.
 func swap_weapon_set(merc_id: int) -> Dictionary:
 	if lent:
+		if ask_gear("swap_set", [merc_id]):
+			return {"ok": true, "pending": true,
+				"set": int(roster.active_weapon_set(merc_id)), "message": GEAR_SENT}
 		return _lent_refusal({"set": 0})
 	var result := roster.swap_weapon_set(merc_id)
 	_notify()
@@ -1732,7 +1869,7 @@ func _release_refused_hands(merc_id: int, disposition: String) -> Array[String]:
 			continue
 		if roster.unequip(merc_id, slot_id).is_empty():
 			continue
-		field_stash().add(item_id, 1)
+		field_stash().add(item_id, 1, _release_claim(merc_id, slot_id, item_id))
 		released.append(item_id)
 	if not released.is_empty():
 		_fill_slots(merc_id, ["main", "off"])
@@ -1771,6 +1908,7 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	# A reset is a fresh warband of this machine's own, never a host's.
 	lent = false
 	_lent_gold = 0
+	gear_requester = Callable()
 	_arming = false
 	roster.clear()
 	stash.clear()

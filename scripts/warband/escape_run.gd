@@ -325,6 +325,10 @@ func wake_road(prey) -> void:
 ## the ground as well, and nothing is taken out of its hand: the corpse screen
 ## lists what the body was carrying.
 func _on_cultist_defeated(enemy, _reward: int) -> void:
+	# A guest only draws the host's cultists: the kill, its drop and its corpse
+	# are booked on the host and arrive here as a snapshot and a record.
+	if host != null and bool(host.get("_client")):
+		return
 	_kills += 1
 	# The blade it was swinging falls out of its hand and lies where a body can
 	# take it: the trail's cultists feed the squad's arming and the player's K.

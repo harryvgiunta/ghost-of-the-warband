@@ -76,6 +76,9 @@ signal peer_left(peer_id: int)
 signal ownership_changed(assignments: Dictionary)
 ## A transfer this peer asked for was refused; `reason` is the router's words.
 signal transfer_refused(merc_id: int, reason: String)
+## A gear change this guest asked the host for was refused; nothing moved, and
+## `message` is the host's own words ("Aldous is not with the party.").
+signal gear_refused(message: String)
 ## The host's campaign reached this guest: `{warband, gold, bodies, focus,
 ## layout}`. Sent once when the guest announces itself and again whenever the
 ## host's world opens anew (a checkpoint reload, the host's LOAD row).
@@ -160,6 +163,7 @@ func setup(possession_controller: PossessionController, warband_node: WarbandSta
 	if purse != null and purse.has_signal("changed") \
 			and not purse.changed.is_connected(_on_warband_changed):
 		purse.changed.connect(_on_warband_changed)
+	bind_gear_requests()
 
 ## The scene that fielded the bodies is going away while the socket stays open:
 ## a checkpoint reload, the host's LOAD row, a guest following the host into its
@@ -262,6 +266,7 @@ func join(address: String, port: int, guest_name: String) -> bool:
 	# The world scene, when it fielded the bodies, already handed this session
 	# its mobs; a guest never runs their AI, so they become replicas now.
 	_mark_world_replicas()
+	bind_gear_requests()
 	_wire_signals()
 	role_changed.emit(_role)
 	return true
@@ -344,6 +349,12 @@ func field_ready() -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	if sender <= 0 or not multiplayer.get_peers().has(sender):
 		return
+	# One announcement per join: a client that repeats it (a retry, a modified
+	# build) must not be able to re-announce every corpse and drop on every peer's
+	# channel at will. A soul whose world genuinely rebuilt says so through
+	# `receive_campaign`, which is the host's own call.
+	if _fielded.has(sender):
+		return
 	_fielded[sender] = true
 	if controller.merc_for_peer(sender) <= 0 and not _waiting.has(sender):
 		_waiting.append(sender)
@@ -354,6 +365,25 @@ func field_ready() -> void:
 	# The lent copy was taken when the guest announced itself; the field may have
 	# moved while its world was building.
 	_mirror_dirty = true
+	# And the bodies already on the ground: a guest that joins after the fight
+	# still has to be able to search what it sees. The one-shot books are cleared
+	# so the next poll re-announces every corpse pose and every open drop; the
+	# guest's own delivery book ignores anything it already has.
+	_dead_sent.clear()
+	_sent_loot.clear()
+	_send_corpses()
+
+
+## Host -> every guest: every body still holding something. A late joiner's world
+## has no record of a kill that happened before it arrived.
+func _send_corpses() -> void:
+	if _role != "host" or world == null or not _has_peers():
+		return
+	var vacuum = world.get("loot")
+	if vacuum == null or not vacuum.has_method("corpse_ids"):
+		return
+	for corpse_id in vacuum.call("corpse_ids"):
+		report_corpse(int(corpse_id))
 
 ## The guest's half of `field_ready`.
 func report_fielded() -> void:
@@ -381,11 +411,61 @@ func receive_warband(text: String, gold_amount: int) -> void:
 	target.lend(parsed, gold_amount)
 	_redress(target, worn)
 
+# --- gear on the shared warband ---------------------------------------------
+#
+# A guest plays the host's copy of the warband, so the paperdoll's verbs - wear a
+# piece, take one off, swap the weapon set, re-kit a body or the band, hold a piece
+# back from auto-equip - are requests, not writes. `WarbandState.ask_gear` hands
+# each one here; the host runs the same verb on its own books and the answer comes
+# back with the mirror. A refused request is the one thing the mirror cannot show
+# (nothing changed), so it is sent as its own line.
+
+## Point a lent warband's gear verbs at this session, or away from it. Called on
+## `join`, on `setup` and on teardown, so a copy never points at a dead session.
+func bind_gear_requests() -> void:
+	var target: WarbandState = warband if warband != null else get_node_or_null("/root/Warband")
+	if target == null:
+		return
+	target.gear_requester = Callable(self, "_send_gear_request") \
+		if _role == "client" else Callable()
+
+## Guest -> host. `_has_peers` is the reachability check the other requests use;
+## false means the request never left and the verb refuses like it used to.
+func _send_gear_request(request: Dictionary) -> bool:
+	if _role != "client" or not shared_warband or not _has_peers():
+		return false
+	gear_request.rpc_id(1, request)
+	return true
+
+## Guest -> host: one gear verb for the shared warband. The host is the only
+## place the kit changes; a guest can do exactly what the host could do, because
+## the request runs through the same verb.
+@rpc("any_peer", "call_remote", "reliable")
+func gear_request(request: Dictionary) -> void:
+	if _role != "host" or not shared_warband or warband == null:
+		return
+	var result: Dictionary = warband.apply_gear_request(request)
+	if bool(result.get("ok", false)):
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender > 0 and multiplayer.get_peers().has(sender):
+		receive_gear_refusal.rpc_id(sender, str(result.get("message", "")))
+
+## Host -> the one guest whose gear change was refused. Nothing moved on the
+## host's books, so this line is the whole of the answer.
+@rpc("authority", "call_remote", "reliable")
+func receive_gear_refusal(message: String) -> void:
+	gear_refused.emit(message)
+
 ## The host's world opened anew under a session that stays up: every guest is
 ## sent the campaign again and rebuilds its own world on it.
 func broadcast_campaign() -> void:
 	if _role != "host" or not shared_warband or controller == null or not _has_peers():
 		return
+	# Every guest rebuilds its world on this, and each says `field_ready` again
+	# once its new field is up: the one-announcement latch is opened for them, or
+	# a reload would leave the whole band unseated.
+	_fielded.clear()
 	receive_campaign.rpc(campaign_payload())
 
 ## What a guest needs to field the host's world: the warband (as its save would
@@ -468,6 +548,7 @@ func attach_world(world_node: Node3D) -> void:
 		_reset_world_trackers()
 	_watch_world_tree()
 	_wire_world_guards()
+	_wire_world_loot()
 	if _role == "client":
 		_mark_world_replicas()
 
@@ -512,8 +593,12 @@ func apply_mob_states(tick: int, states: Array) -> void:
 		if typeof(state) != TYPE_DICTIONARY:
 			continue
 		# The switch the mob classes already honour: no AI, no local authority,
-		# and `apply_snapshot` becomes the only writer of pose and health.
-		guard.set("replica", true)
+		# and `apply_snapshot` becomes the only writer of pose and health. A class
+		# that can hide a copy the host never fielded is asked to do so first.
+		if guard.has_method("mark_replica"):
+			guard.call("mark_replica")
+		else:
+			guard.set("replica", true)
 		guard.call("apply_snapshot", state, tick)
 
 ## Pickups the host has not announced yet, as `[item_id, position]`. The instance
@@ -626,6 +711,106 @@ func report_ammo_spent(count: int) -> void:
 		return
 	receive_ammo_spent.rpc(count)
 
+# --- the shared ground ------------------------------------------------------
+#
+# Looting is host-authoritative like every other booking: the warband's pool,
+# the corpse records and the drop nodes are the host's, so a guest's press is an
+# intent and never a local take. The guest still needs to see what it is
+# searching, which is why the host copies the corpse records and every take back
+# down the same peer. Nothing here trusts the guest with an id it could invent:
+# `loot_for_peer` validates the body, the reach and the item on the host.
+
+## Host -> everyone: a fallen body this session may search. Sent once when the
+## body is registered, with what it still holds, and the id is the host's own, so
+## the guest's screen and the host's takes name the same row.
+@rpc("authority", "call_remote", "reliable")
+func receive_corpse(corpse_id: int, body_name: String, label: String,
+		items: Array, at: Vector3, remains: bool = false) -> void:
+	var vacuum = world.get("loot") if world != null else null
+	if vacuum == null or not vacuum.has_method("import_corpse"):
+		return
+	vacuum.call("import_corpse", corpse_id, body_name, label, items, at, remains)
+
+## Host -> everyone: what that body holds now. An empty list is a stripped body.
+@rpc("authority", "call_remote", "reliable")
+func receive_corpse_items(corpse_id: int, items: Array) -> void:
+	var vacuum = world.get("loot") if world != null else null
+	if vacuum == null or not vacuum.has_method("set_corpse_items"):
+		return
+	vacuum.call("set_corpse_items", corpse_id, items)
+
+## Host -> everyone: a drop left the ground where `at` names it.
+@rpc("authority", "call_remote", "reliable")
+func receive_drop_taken(item_id: String, at: Vector3) -> void:
+	var vacuum = world.get("loot") if world != null else null
+	if vacuum == null or not vacuum.has_method("pickups"):
+		return
+	# One take is one node: a second identical drop lying beside the first is
+	# still on the ground on the host, so only the nearest match goes here.
+	var best = null
+	var best_distance := 3.0
+	for pickup in vacuum.call("pickups"):
+		if not is_instance_valid(pickup) or bool(pickup.get("collected")):
+			continue
+		if str(pickup.get("item_id")) != item_id:
+			continue
+		var distance: float = (pickup as Node3D).global_position.distance_to(at)
+		if distance <= best_distance:
+			best_distance = distance
+			best = pickup
+	if best != null:
+		best.collect()
+
+## Tell the peers about a body the scene just registered.
+func report_corpse(corpse_id: int) -> void:
+	if _role != "host" or corpse_id <= 0 or world == null:
+		return
+	var vacuum = world.get("loot")
+	if vacuum == null or not vacuum.has_method("corpse_items"):
+		return
+	var items: Array = vacuum.call("corpse_items", corpse_id)
+	if items.is_empty():
+		return
+	if not _has_peers():
+		return
+	receive_corpse.rpc(corpse_id, str(vacuum.call("corpse_name", corpse_id)),
+		str(vacuum.call("corpse_label", corpse_id)), items,
+		vacuum.call("corpse_position", corpse_id),
+		bool(vacuum.call("corpse_is_remains", corpse_id)))
+
+## Host: a body's record moved under the loot window. Only the host's copy emits
+## this for a real take; a guest's copy is written by the RPC above and would
+## otherwise echo the change back into the wire.
+func _on_loot_corpse_changed(corpse_id: int, items: Array) -> void:
+	if _role != "host" or not _has_peers():
+		return
+	# An empty list is `forget_corpse`; it travels as a take to nothing, and the
+	# guest's row goes with it.
+	receive_corpse_items.rpc(corpse_id, items)
+
+## Host: any drop taken, by any soul, leaves every screen at the same time. The
+## guest that took it has already had its press answered; this is the removal.
+func _on_loot_drop_taken(item_id: String, at: Vector3) -> void:
+	if _role != "host" or not _has_peers():
+		return
+	receive_drop_taken.rpc(item_id, at)
+
+## Bind the world's one vacuum to this peer. The guest only receives; the host
+## only sends, so the same signal cannot bounce twice.
+func _wire_world_loot() -> void:
+	if world == null:
+		return
+	var vacuum = world.get("loot")
+	if vacuum == null or not vacuum.has_signal("corpse_changed"):
+		return
+	if vacuum.has_signal("corpse_registered") \
+			and not vacuum.corpse_registered.is_connected(report_corpse):
+		vacuum.corpse_registered.connect(report_corpse)
+	if not vacuum.corpse_changed.is_connected(_on_loot_corpse_changed):
+		vacuum.corpse_changed.connect(_on_loot_corpse_changed)
+	if vacuum.has_signal("drop_taken") and not vacuum.drop_taken.is_connected(_on_loot_drop_taken):
+		vacuum.drop_taken.connect(_on_loot_drop_taken)
+
 # --- internals: the host ---------------------------------------------------
 
 ## One decision, shared by the host's own hotkeys and by the RPC above.
@@ -657,6 +842,12 @@ func _refuse(peer_id: int, merc_id: int, reason: String) -> Dictionary:
 
 func _broadcast_ownership() -> void:
 	if _role != "host" or not _has_peers():
+		return
+	# A scene hand-off nulls the controller for the length of a reload. The map is
+	# derived from it, so a broadcast in that window would tell every guest that
+	# nobody owns anything - a blank HUD and a soul with no body until the next
+	# campaign arrives. The field is announced again when it is back.
+	if controller == null or warband == null:
 		return
 	receive_ownership.rpc(ownership(), _names.duplicate())
 
@@ -936,12 +1127,23 @@ func _tick_world(delta: float) -> void:
 
 func _send_mobs() -> void:
 	_mob_tick += 1
+	# A death is a one-shot fact. Left in the unreliable batch, one lost datagram
+	# leaves the guest with a living copy of a body the host buried; the reliable
+	# channel makes the corpse appear on every screen even across a hitch.
+	var deaths := _collect_death_states()
+	for batch in NetLimits.batches(deaths, [_mob_tick]):
+		receive_mob_deaths.rpc(_mob_tick, batch)
 	var entries := collect_mob_entries(MOB_REACH_METRES)
-	entries.append_array(_collect_death_states())
 	if entries.is_empty():
 		return
 	for batch in NetLimits.batches(entries, [_mob_tick]):
 		receive_mobs.rpc(_mob_tick, batch)
+
+## Host -> everyone: bodies that stopped being alive. Reliable and separate from
+## the pose stream, so a dropped pose can never leave a ghost standing.
+@rpc("authority", "call_remote", "reliable")
+func receive_mob_deaths(tick: int, states: Array) -> void:
+	apply_mob_states(tick, states)
 
 ## A guard that has died is no longer "living", so the collector above stops
 ## naming it - but a replica still has to see it fall. Each corpse is sent once,
@@ -1044,7 +1246,12 @@ func _mark_replica(guard) -> void:
 		return
 	# The one switch every wilderness mob already honours: its physics frame
 	# returns before any AI, and `apply_snapshot` is the sole writer of pose.
-	(guard as Node).set("replica", true)
+	# `mark_replica` also hides the copy until the host proves it exists here,
+	# which is what keeps a guest from seeing a mob the host already killed.
+	if guard.has_method("mark_replica"):
+		guard.call("mark_replica")
+	else:
+		(guard as Node).set("replica", true)
 
 func _watch_world_tree() -> void:
 	if _world_watch or not is_inside_tree():
@@ -1126,8 +1333,12 @@ func _teardown() -> void:
 	if multiplayer != null:
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	_names.clear()
+	_fielded.clear()
+	_waiting.clear()
 	_accumulator = 0.0
 	_tick = 0
+	# The session is the only door a lent copy's gear verbs had: shut it.
+	bind_gear_requests()
 
 func _on_connected() -> void:
 	_sync_local_peer()

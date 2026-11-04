@@ -63,7 +63,23 @@ var replica := false
 ## uneven packets read as motion, and dead-reckons when the buffer runs dry.
 var _timeline = NetReplication.mob_timeline()
 var _received_pose := false
+## The last state this copy was handed, and whether it has gone quiet. A replica
+## the host stopped naming - a kill outside the batch, a body past the 70 m band -
+## otherwise stands where it was, on a screen the host no longer shows it on.
+var _state_at := -1.0
+var stale := false
+const STALE_SECONDS := 0.75
 var safe_center := Vector3.ZERO
+## A body is placed on its ground by whoever spawned it, and the wilderness
+## streams its terrain tile by tile: a body whose feet find nothing under them
+## must not sink out of the world, one coarse LOD step at a time. The fall is
+## taken only where there is something to fall to, asked of the world at most
+## four times a second - which is also what catches terrain that streams in
+## under a body spawned ahead of it.
+var _ground_below := true
+var _ground_probe_at := -1.0
+const GROUND_PROBE_SECONDS := 0.25
+const GROUND_PROBE_DEPTH := 12.0
 var health := 38.0
 var max_health := 38.0
 ## Slot of the ranger whose damage landed last; the frontier reads it on death
@@ -458,9 +474,28 @@ func _drive_wolf(delta: float, direction: Vector3, speed: float) -> void:
 		rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(delta * 8.0, 1.0))
 	velocity.x = move_toward(velocity.x, direction.x * speed, delta * 12.0)
 	velocity.z = move_toward(velocity.z, direction.z * speed, delta * 12.0)
-	velocity.y = 0.0 if is_on_floor() else velocity.y - 18.0 * delta
+	if is_on_floor() or not _ground_below_feet():
+		velocity.y = 0.0
+	else:
+		velocity.y = velocity.y - 18.0 * delta
 	MobLod.move(self, delta)
 	_update_cosmetics(delta)
+
+## Whether there is anything to land on under this body. One standing on the
+## floor never asks its world; an airborne one asks a quarter of a second at a
+## time. Nothing below is not "falling" - it is a body the wilderness has no
+## ground for, and it keeps the altitude it was placed at.
+func _ground_below_feet() -> bool:
+	if is_on_floor():
+		return true
+	var now := Time.get_ticks_msec() / 1000.0
+	if _ground_probe_at >= 0.0 and now - _ground_probe_at < GROUND_PROBE_SECONDS:
+		return _ground_below
+	_ground_probe_at = now
+	_query.from = global_position + Vector3.UP * 0.1
+	_query.to = _query.from - Vector3.UP * GROUND_PROBE_DEPTH
+	_ground_below = not get_world_3d().direct_space_state.intersect_ray(_query).is_empty()
+	return _ground_below
 
 
 ## Nothing in sight and nothing remembered: keep the patch alive. Without this
@@ -611,7 +646,7 @@ func mob_wake() -> void:
 	dormant = false
 	_lod.resume()
 	set_physics_process(true)
-	visible = true
+	visible = not stale
 	# Re-apply the presentation band for the distance it woke at.
 	_present_band = -1
 
@@ -742,6 +777,10 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 		velocity.x = move_toward(velocity.x,target.x,control*delta)
 		velocity.z = move_toward(velocity.z,target.z,control*delta)
 	if was_grounded and velocity.y <= 0.0:
+		velocity.y = 0.0
+	elif not was_grounded and not _ground_below_feet():
+		# Nothing under the body to land on: it holds the altitude it was placed
+		# at instead of sinking out of the world a physics frame per LOD slice.
 		velocity.y = 0.0
 	elif not was_grounded:
 		velocity.y -= 18.0*delta
@@ -1106,6 +1145,11 @@ func _replay_tick(delta: float) -> void:
 		_voice.tick(delta)
 	if not replica or not alive or not _received_pose:
 		return
+	if not stale and _state_at > 0.0 \
+			and Time.get_ticks_msec() / 1000.0 - _state_at > STALE_SECONDS:
+		stale = true
+		visible = false
+		collision_layer = 0
 	_timeline.advance(delta)
 	var sample: Dictionary = _timeline.sample()
 	global_position = sample.pos
@@ -1214,6 +1258,11 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	health = state.h
 	alive = state.a
 	velocity = state.v
+	_state_at = Time.get_ticks_msec() / 1000.0
+	if stale:
+		stale = false
+		visible = not dormant or not alive
+		collision_layer = 2 if alive else 0
 	var grounded: bool = state.g
 	var pose: Vector4 = state.x
 	_warning.visible = self.state == "WINDUP"

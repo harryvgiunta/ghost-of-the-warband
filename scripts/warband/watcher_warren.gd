@@ -83,10 +83,13 @@ var _elapsed := 0.0
 ## the caller has not done it yet: the bodies have to be in the tree for their
 ## global positions, their pack and their tick.
 ##
-## A co-op guest builds nothing. The wood is the host's: a guest that spawned its
-## own three camps would stand twenty-one wardens beside the twenty-one replicas
-## the session already streams it, and a second mob on the same ground is a fight
-## with itself.
+## A co-op guest builds the same camps: the warren's names are derived from the
+## camp table, never from spawn order, so the host's name-keyed snapshots find
+## exactly these bodies. The session marks each warden a replica before its first
+## state arrives, so nothing here runs a brain on the guest's machine - but the
+## camps, their dressing and the bodies a soul can see are the wood's, and a
+## guest standing in an empty camp the host is fighting in was the visible half of
+## the same bug.
 func setup(world: Node3D) -> void:
 	if not is_instance_valid(world):
 		push_error("WatcherWarren.setup() needs the world")
@@ -96,8 +99,6 @@ func setup(world: Node3D) -> void:
 	if not is_inside_tree() and world.is_inside_tree():
 		world.add_child(self)
 	_clear()
-	if _is_guest():
-		return
 	_build()
 
 
@@ -348,10 +349,6 @@ func _path():
 	if not (forest is Dictionary):
 		return null
 	return (forest as Dictionary).get("path")
-
-
-func _is_guest() -> bool:
-	return host != null and bool(host.get("_client"))
 
 
 ## A second setup replaces the camps rather than stacking two on the same ground.

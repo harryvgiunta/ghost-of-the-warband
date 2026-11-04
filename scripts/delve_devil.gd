@@ -745,10 +745,11 @@ func held_weapon_id() -> String:
 
 
 ## The delve advances living devils through `step`; a dead one still owns its
-## own fall so a corpse killed during a leap reaches the chamber floor.
+## own fall so a corpse killed during a leap reaches the chamber floor. Gravity
+## is not authority: this body's `authoritative` flag is only ever true for the
+## host's copy, and a replica's corpse has to reach the floor where its snapshot
+## died just the same, so the settle runs for every dead body.
 func _physics_process(delta: float) -> void:
-	if not authoritative:
-		return
 	if not alive:
 		CorpsePhysics.settle_root(self, delta)
 

@@ -83,6 +83,10 @@ class SnapshotTimeline:
 
 	var samples: Array = []
 	var tick_seconds := 1.0 / 60.0
+	## How far past the newest sample a body may be carried by its last velocity.
+	## In `tick_seconds` units, so a slower stream (the mobs' 15 Hz) spends the
+	## same wall-clock time instead of eight of its own ticks.
+	var extrapolation_ticks := EXTRAPOLATION_TICKS
 	var delay_ticks := MIN_DELAY_TICKS
 	## A caller-imposed floor: the scene's `interp_delay`, or two snapshot
 	## intervals for a mob stream that arrives slower than the sim tick.
@@ -195,7 +199,7 @@ class SnapshotTimeline:
 			return {"pos": Vector3.ZERO, "vel": Vector3.ZERO, "yaw": 0.0, "extrapolated": false}
 		var newest: Dictionary = samples[-1]
 		if playout >= float(newest.tick):
-			var over := minf(playout - float(newest.tick), EXTRAPOLATION_TICKS)
+			var over := minf(playout - float(newest.tick), extrapolation_ticks)
 			var velocity: Vector3 = newest.vel
 			return {"pos": Vector3(newest.pos) + velocity * (over * tick_seconds),
 				"vel": velocity, "yaw": float(newest.yaw), "extrapolated": over > 0.001}
@@ -221,11 +225,19 @@ class SnapshotTimeline:
 			"yaw": float(last.yaw), "extrapolated": false}
 
 
-## A render buffer for a mob stream. Mobs arrive at their own unthrottled
-## cadence, so the delay floor is two intervals rather than one sim tick.
-static func mob_timeline() -> SnapshotTimeline:
+## A render buffer for a mob stream. Mobs arrive at their own cadence, and the
+## host numbers them one per batch, not one per physics tick: the whole timeline
+## must therefore be told that one tick is one mob interval. Left at the sim's
+## 60 Hz, six ticks of delay look like 0.1 s here and are half a second in the
+## player's hands, and the dead-reckoning extrapolates four intervals of travel
+## as if they were four physics frames.
+static func mob_timeline(rate: float = 15.0) -> SnapshotTimeline:
 	var timeline := SnapshotTimeline.new()
-	timeline.floor_delay_ticks = 6.0
+	timeline.configure(rate)
+	# Two snapshot intervals: enough to render across one lost datagram, short
+	# enough that a mob's run reads as the run it is.
+	timeline.floor_delay_ticks = 2.0
+	timeline.extrapolation_ticks = 2.0
 	timeline.discontinuity_metres = 2.0
 	return timeline
 

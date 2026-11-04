@@ -85,6 +85,7 @@ func run() -> void:
 
 	input_ring_checks()
 	timeline_checks()
+	mob_timeline_checks()
 	clock_checks()
 
 	_build_field(warband)
@@ -144,6 +145,41 @@ func timeline_checks() -> void:
 	check(timeline.oldest_tick() == 40, "a jump larger than travel restarts the buffer")
 	timeline.clear()
 	check(timeline.newest_tick() == -1, "clear forgets every sample")
+
+
+## The mob stream is numbered one per batch, not one per physics tick. Measured
+## as if it were 60 Hz, a two-interval delay became 0.4 s in the player's hands
+## and the dead-reckoning carried four intervals of travel; this holds the
+## timeline to the rate the host actually sends.
+func mob_timeline_checks() -> void:
+	var mobs = NetReplication.mob_timeline(15.0)
+	check(is_equal_approx(mobs.tick_seconds, 1.0 / 15.0),
+		"a mob timeline counts its own 15 Hz ticks (%.4f s)" % mobs.tick_seconds)
+	check(is_equal_approx(mobs.floor_delay_ticks, 2.0),
+		"the mob delay floor is two snapshot intervals (%s)" % str(mobs.floor_delay_ticks))
+	check(is_equal_approx(mobs.extrapolation_ticks, 2.0),
+		"dead reckoning is two mob intervals, not eight physics ticks (%s)"
+			% str(mobs.extrapolation_ticks))
+	mobs.reset_to(Vector3.ZERO, Vector3.ZERO, 0.0, 0, 0.0)
+	var interval := 1.0 / 15.0
+	for index in 4:
+		mobs.push(index + 1, Vector3(0.35 * float(index + 1), 0.0, 0.0),
+			Vector3(5.25, 0.0, 0.0), 0.0, interval * float(index))
+	check(is_equal_approx(mobs.delay_ticks, 2.0),
+		"an even 15 Hz stream settles on the two-interval floor (%s)" % str(mobs.delay_ticks))
+	# A stream keeps arriving: the playout must stay a couple of intervals
+	# behind the newest sample, not drift past it and extrapolate a stale mob.
+	var tick := 4
+	for frame in 60:
+		if frame % 4 == 0:
+			tick += 1
+			mobs.push(tick, Vector3(0.35 * float(tick), 0.0, 0.0),
+				Vector3(5.25, 0.0, 0.0), 0.0, interval * float(tick - 1))
+		mobs.advance(1.0 / 60.0)
+	var playout: float = mobs.render_tick()
+	var lag_ticks := float(mobs.newest_tick()) - playout
+	check(lag_ticks >= 0.5 and lag_ticks <= 3.5,
+		"the mob renders a couple of intervals behind (%s ticks)" % str(lag_ticks))
 
 
 func clock_checks() -> void:
@@ -249,6 +285,22 @@ func frame_tick_checks() -> void:
 	await run_ticks(5)
 	check(idle.global_position.distance_to(resting) < 0.05,
 		"a body with no peer frame stays where it stands")
+	# A body changing hands: the frames the last owner sent must not lock the next
+	# one out. Sequence numbers restart at zero for a new soul, so a body left
+	# holding the old owner's acknowledgement would drop every frame the new one
+	# sends - a freeze that reads as "my input does nothing" and lasts as long as
+	# the old soul had the body.
+	idle.accept_network_input(Vector2(0.0, -1.0), true, 700, -1, [])
+	await run_ticks(4)
+	controller._dress(idle, 2)
+	var holding: Vector3 = idle.global_position
+	for step in 20:
+		idle.accept_network_input(Vector2(0.0, -1.0), true, step, -1, [])
+		await run_ticks(1)
+	var walked_again: float = idle.global_position.distance_to(holding)
+	check(walked_again > 0.05,
+		"a body handed to a new soul walks on that soul's own frame numbers (%.2f m)"
+			% walked_again)
 
 
 # --- 3. prediction ---------------------------------------------------------

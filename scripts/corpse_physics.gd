@@ -7,10 +7,12 @@ extends RefCounted
 ## - a rigged presentation gets a Godot `PhysicalBoneSimulator3D` ragdoll. The
 ##   pelvis carries the whole torso and head as one rigid collision body, while
 ##   the limbs are pin-jointed physical bones. That keeps a corpse's silhouette
-##   when it topples instead of folding into a heap, and stops the head spinning
-##   on a free neck joint. The authored death clip is replaced by the fall; the
-##   simulation settles, its pose is baked into the skeleton, and the rigid
-##   bodies are freed, so five-minute corpses cost nothing after the fall.
+## when it topples instead of folding into a heap, and stops the head spinning
+## on a free neck joint. The authored death clip is replaced by the fall; the
+## simulation settles, its pose is baked into the skeleton, and the rigid
+## bodies are freed, so five-minute corpses cost nothing after the fall. A rig
+## whose own death clip lands the body (the cinder devil's `Cinder_Death`) hands
+## over later instead of never: see `start_limp`'s `begin_in`.
 ##
 ## The ragdoll is presentation only: it never owns damage, loot or authority.
 ## Both host and replica build their own from the replicated death position.
@@ -40,17 +42,24 @@ static func settle_root(host: CharacterBody3D, delta: float) -> void:
 
 ## Turns the skeleton under `visual` into a limp physical body. `fall` is the
 ## world direction the body should topple; zero lets the corpse pick a stable
-## backward-side lean from its spawn point. Returns the simulator, or null when
-## the presentation has no skeleton (procedural mobs keep their authored
-## collapse, and the root gravity above still applies).
-static func start_limp(visual: Node3D, fall: Vector3 = Vector3.ZERO) -> PhysicalBoneSimulator3D:
+## backward-side lean from its spawn point. `begin_in` defers the simulation by
+## that many seconds for a rig whose authored death clip lands the body first:
+## the ragdoll is built and registered now (so `is_limp` reads true the moment
+## the body dies), the bones stay with the clip, and the skeleton goes limp from
+## the pose the clip left it in. Returns the simulator, or null when the
+## presentation has no skeleton (procedural mobs keep their authored collapse,
+## and the root gravity above still applies).
+static func start_limp(visual: Node3D, fall: Vector3 = Vector3.ZERO,
+		begin_in: float = 0.0) -> PhysicalBoneSimulator3D:
 	var skeleton := skeleton_in(visual)
 	if skeleton == null:
 		return null
 	if skeleton.has_meta("corpse_ragdoll"):
 		var existing = skeleton.get_meta("corpse_ragdoll")
 		return existing as PhysicalBoneSimulator3D
-	_pause_animation(visual)
+	if begin_in <= 0.0:
+		_pause_animation(visual)
+	_enforce_pieces(skeleton)
 	_adopt_stray_bones(skeleton, visual)
 	var candidates := _candidates(skeleton)
 	if candidates.is_empty():
@@ -83,10 +92,61 @@ static func start_limp(visual: Node3D, fall: Vector3 = Vector3.ZERO) -> Physical
 			else PhysicalBone3D.JOINT_TYPE_NONE
 	_add_torso_shapes(simulator, skeleton)
 	skeleton.set_meta("corpse_ragdoll", simulator)
+	if begin_in > 0.0:
+		_defer(simulator, skeleton, visual, fall, begin_in)
+		return simulator
+	_begin(simulator, skeleton, visual, fall)
+	return simulator
+
+
+## Starts a ragdoll `start_limp` built with `begin_in > 0`. Idempotent: a rig
+## that already simulates is left alone.
+static func begin_limp(visual: Node3D) -> void:
+	var skeleton := skeleton_in(visual)
+	if skeleton == null or not skeleton.has_meta("corpse_ragdoll"):
+		return
+	var simulator = skeleton.get_meta("corpse_ragdoll")
+	if not is_instance_valid(simulator):
+		return
+	_begin(simulator as PhysicalBoneSimulator3D, skeleton, visual,
+		simulator.get_meta("corpse_fall", Vector3.ZERO))
+
+
+## The one place a built ragdoll takes the bones: the clip is pinned at the pose
+## it reached, then the physical bones fall from there and settle.
+static func _begin(simulator: PhysicalBoneSimulator3D, skeleton: Skeleton3D,
+		visual: Node3D, fall: Vector3) -> void:
+	if simulator.has_meta("corpse_live"):
+		return
+	simulator.set_meta("corpse_live", true)
+	simulator.set_meta("corpse_fall", fall)
+	_pause_animation(visual)
+	_enforce_pieces(skeleton)
 	simulator.physical_bones_start_simulation()
 	_apply_topple(simulator, visual, fall)
 	_poll(simulator, skeleton, 0.0, 0)
-	return simulator
+
+
+static func _defer(simulator: PhysicalBoneSimulator3D, skeleton: Skeleton3D,
+		visual: Node3D, fall: Vector3, seconds: float) -> void:
+	simulator.set_meta("corpse_fall", fall)
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.wait_time = seconds
+	timer.timeout.connect(_on_begin_timer.bind(timer, simulator, skeleton, visual))
+	skeleton.add_child(timer)
+	timer.start()
+
+
+static func _on_begin_timer(timer: Timer, simulator: PhysicalBoneSimulator3D,
+		skeleton: Skeleton3D, visual: Node3D) -> void:
+	timer.queue_free()
+	if not is_instance_valid(simulator) or not is_instance_valid(skeleton) \
+			or not is_instance_valid(visual):
+		return
+	if not skeleton.has_meta("corpse_ragdoll"):
+		return
+	_begin(simulator, skeleton, visual, simulator.get_meta("corpse_fall", Vector3.ZERO))
 
 
 ## A body killed on its feet has no lateral momentum, so a free ragdoll folds
@@ -128,7 +188,10 @@ static func _apply_topple(simulator: PhysicalBoneSimulator3D, visual: Node3D,
 	pelvis.apply_central_impulse(direction * pelvis.mass * 0.45 * push)
 
 
-## True while the visible bones are still driven by physics.
+## True while the visible bones are still driven by the corpse ragdoll: from the
+## hand-off until it settles, its pose is baked and the simulator retires. A rig
+## that asked for a deferred start (`begin_in`) reads true from the death, the
+## moment the ragdoll exists.
 static func is_limp(visual: Node3D) -> bool:
 	var skeleton := skeleton_in(visual)
 	return skeleton != null and skeleton.has_meta("corpse_ragdoll")
@@ -157,6 +220,20 @@ static func _find_node(node: Node, type_name: String) -> Node:
 static func _pause_animation(visual: Node3D) -> void:
 	for player in visual.find_children("*", "AnimationPlayer", true, false):
 		(player as AnimationPlayer).pause()
+
+
+## A death hands the corpse over to the ragdoll last, after the lethal pose has
+## been written once more: a hit-react or abort solve restores every bone it
+## touches, the head included, so a head an arrow took off can be drawn back onto
+## the corpse - and the corpse would keep a face beside the skull in the air.
+## `SeveredHead.Stump` undoes that late in the frame, but a body far from the
+## camera does not pose every frame, so the hand-off runs the pass itself. The
+## bones are read below (stray parenting, bone volume, the shapes themselves), so
+## this also keeps a gone piece from keeping its collision.
+static func _enforce_pieces(skeleton: Skeleton3D) -> void:
+	for child in skeleton.get_children():
+		if child.has_method("enforce"):
+			child.call("enforce")
 
 
 ## Some source assets carry a leaf helper (the hell goat's `neutral_bone`)

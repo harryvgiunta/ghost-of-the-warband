@@ -205,12 +205,20 @@ runtime carries only values glTF cannot express.
   pin-jointed. Killing blows record a style/angle force through
   `scripts/impact_rules.gd`; a pelvis shove in that direction makes the body
   fall onto a side or its face. The death clip is no longer played; the ragdoll settles, bakes its
-  final pose into the skeleton, and retires its rigid bodies. `scripts/corpse_hold.gd` then
+  final pose into the skeleton, and retires its rigid bodies. A rig whose authored
+  death clip lands the body first (the cinder devil's `Cinder_Death`) asks
+  `start_limp` for a `begin_in` deferral instead: the ragdoll is built and
+  registered at death, the clip plays its collapse, and the skeleton goes limp
+  from the pose the clip left it in, never from the lethal frame it died on.
+  `scripts/corpse_hold.gd` then
   holds the limp body for `CorpseHold.SECONDS` (300 s) before a short dissolve
   frees the node. The frontier, delve and arena share that one lifetime, so a
   fight leaves the battlefield littered instead of erasing bodies after four
   seconds. Corpses keep no blocking collision, so wave and aggro filters that
-  read `alive` ignore them.
+  read `alive` ignore them. Gravity is not authority: a corpse settles from its
+  own `_physics_process` whatever the body's `authoritative` flag says, so a
+  replica's copy falls where its snapshot died and a host body killed mid-leap
+  reaches the floor even before the flag is set.
 
 - The `aggro` profile key is now `sight`: aggression is owned by
   `scripts/mob_senses.gd`, not by a distance radius. A devil fights only what

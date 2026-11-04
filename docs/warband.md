@@ -323,10 +323,12 @@ what exposed the engine fog trap above.
   it was wearing. `EquipmentRules.bare_garment` pieces stay on the body: they are
   the mesh the rig draws, not gear, and the fill trades them for real armour. A
   body carrying a second weapon set keeps one (`_refill` fills the set in its
-  hands, swaps, fills the other and swaps back). A lent warband, a body outside the
-  party and a body that is down are refused with the kit untouched, and the pool is
-  worth the same number either side of the press. Answers `{ok, merc_id, released,
-  fitted, message}`.
+  hands, swaps, fills the other and swaps back). A body outside the
+  party and a body that is down are refused with the kit untouched; a lent
+  warband's pass travels to the host like every other gear verb, so the guest is
+  told it was sent and the kit changes on the copy the host sends back, and the
+  pool is worth the same number either side of the press. Answers `{ok, merc_id,
+  released, fitted, message}`.
 - `Warband.reequip_warband()` runs that over every dressable, living body in two
   loops on purpose: every kit goes back into the pool first, then the roster is
   dressed **one body at a time in recruitment order**, so the oldest name takes the
@@ -589,9 +591,19 @@ These landed on the same world without a second rulebook. Each has one owner:
   JOIN GAME connects **before** the world opens: the host answers with its whole
   campaign (`receive_campaign`), the guest lends it (`WarbandState.lend`) and
   fields exactly the host's bodies as replicas, then says `field_ready` and is
-  seated in the first free body. The lent copy is read-only on the guest - every
-  gear and purse verb answers `LENT_MESSAGE`, `save_state`/`load_state` refuse -
-  and the host mirrors every change back (`receive_warband`, 0.25 s at most), so
+  seated in the first free body. The lent copy is the host's books on the guest:
+  a gear verb - wear a piece, take it off, swap a weapon set, re-kit a body or the
+  band, hold a piece from auto-equip, lay the ten keys out - is a request
+  (`WarbandState.ask_gear` -> `WarbandSession.gear_request`), run on the host and
+  answered with its words or with the next copy, and every purse verb answers
+  `LENT_MESSAGE`. A guest's roster poll mirrors the health and downed flag its
+  replicas show but never books a death (that fires `died`, reaps the copy and
+  unregisters a body the host still names), a take it names must be in its own
+  body's reach on the host's ground, and a body that changes hands restarts the
+  new soul's frame numbers (`WarbandBody.reset_network_frames`) instead of
+  dropping the new owner's first minutes of input.
+  `save_state`/`load_state` refuse, and the host mirrors every change back
+  (`receive_warband`, 0.25 s at most), so
   the roster, stash, purse and orders on both screens are the host's. The host
   owns the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
   replica that runs no AI), the loot, the missiles and the kill. A guest writes no

@@ -169,6 +169,18 @@ var resting := false
 ## it is hidden and its rig is parked - but it is not dormant, so an owner that
 ## only asked for less drawing never silenced a fight.
 var culled := false
+## A replica's own last word on its feet: the physics body never moves here, so
+## `is_on_floor()` is whatever the spawn left behind and the rig must read the
+## snapshot's answer instead.
+var _replica_grounded := true
+## The clock of the last state a replica was handed. A copy the host has stopped
+## naming - it died outside a peer's batch, or walked past the 70 m band - holds
+## its last pose forever otherwise, a mob standing where the host has none.
+var _state_at := -1.0
+var stale := false
+## How long a replica may go without a state before it leaves the screen. Three
+## times the 15 Hz interval, so ordinary jitter never blinks a living mob.
+const STALE_SECONDS := 0.75
 ## The drawn frame this body's brain last ran in, and the tick time it has banked
 ## from further ticks inside the same frame (`_physics_process`).
 var _brain_frame := -1
@@ -264,6 +276,9 @@ func _ready() -> void:
 	# The voice is named by the profile, so a hollow warden and a gallowsroot look
 	# their takes up in their own folders without this file knowing either one.
 	_voice = VoiceEmitterScript.create(voice_id(), self, false, 2711 + int(absf(global_position.x)))
+	# `node_added` marks a replica before this body has a capsule to hide; the
+	# first state is a packet away, so the hidden copy must be settled here.
+	_apply_shown()
 
 
 ## The voice this body speaks with: the profile id, which is also the folder of
@@ -309,6 +324,15 @@ func _physics_process(delta: float) -> void:
 		# A ragdoll that falls five frames at a time drops a body through the
 		# floor, so settling is not on the decision clock either.
 		CorpsePhysics.settle_root(self, delta)
+		return
+	# A replica is the host's mob drawn here: `apply_snapshot` is the only writer
+	# of its pose, health and state. Its brain never runs, and its body must not
+	# integrate either - stepping it along the snapshot's velocity between packets
+	# walks the copy ahead of the authority and then snaps it back, which reads as
+	# stutter and, once the packets stop, as a mob that runs off on its own. What
+	# is left is presentation: the rig still poses and advances its clips.
+	if replica:
+		_advance_presentation()
 		return
 	_advance_strike(delta)
 	_advance_motion(delta)
@@ -535,11 +559,34 @@ func set_culled(value: bool) -> void:
 ## One place decides whether the body and its rig are drawn: parked by the
 ## culler and culled by its owner are two reasons for the same treatment, and a
 ## rig that keeps sampling tracks while hidden costs what a visible one does.
+##
+## A replica that has never been sent a state is a third: the guest built this
+## copy of the wood's mob, but the host may not have one there at all - killed
+## before the join, or a body only the host fields. Until the wire proves it
+## exists, it is neither drawn nor solid, so the guest cannot see a ghost or walk
+## into one.
 func _apply_shown() -> void:
-	var hidden := dormant or culled
+	var unseen := replica and not _received_pose
+	var hidden := dormant or culled or unseen or stale
 	visible = not hidden
+	if (unseen or stale) and _collision != null:
+		_collision.disabled = true
+	elif _collision != null and _collision.disabled:
+		_collision.disabled = false
+	if replica:
+		# A replica's only LOD is whether the local eye can see its state: a
+		# hidden copy skips the clip pass, a shown one animates from the wire.
+		_present_band = 2 if hidden else 0
 	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
 		_visual.set_parked(hidden)
+
+
+## Take the replica switch from the session. A mob the host owns is marked before
+## its first snapshot arrives, and until that snapshot it is a copy of a body
+## that may not exist here: hide it and take its capsule out of the world.
+func mark_replica() -> void:
+	replica = true
+	_apply_shown()
 
 
 ## Nothing in sight and nothing remembered: keep the patch alive. This is the
@@ -700,7 +747,11 @@ func _advance_motion(delta: float) -> void:
 func _advance_presentation() -> void:
 	if _present_band > 1 or not is_instance_valid(_visual):
 		return
-	_visual.set_motion(get_real_velocity(), is_on_floor())
+	# A replica's physics body is never stepped, so its measured velocity is
+	# meaningless: the run/walk clip has to read the motion the snapshot carried.
+	var motion: Vector3 = velocity if replica else get_real_velocity()
+	var grounded: bool = _replica_grounded if replica else is_on_floor()
+	_visual.set_motion(motion, grounded)
 	_visual.set_combat(state, _state_time)
 	_visual.set_poise(_present_blocking(), _present_crouch())
 
@@ -1153,6 +1204,10 @@ func _replay_tick(delta: float) -> void:
 		_voice.tick(delta)
 	if not replica or not alive or not _received_pose:
 		return
+	if not stale and _state_at > 0.0 \
+			and Time.get_ticks_msec() / 1000.0 - _state_at > STALE_SECONDS:
+		stale = true
+		_apply_shown()
 	_timeline.advance(delta)
 	var sample: Dictionary = _timeline.sample()
 	global_position = sample.pos
@@ -1171,6 +1226,18 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	health = state.h
 	alive = state.a
 	velocity = state.v
+	_replica_grounded = bool(state.get("g", true))
+	_state_at = Time.get_ticks_msec() / 1000.0
+	stale = false
+	if replica:
+		# The host's clock is the only one a replica has: lift the rest its
+		# owner's build put it under, and put the rig back on the animation band
+		# a replica always reads at. Without this a delve copy stays `resting`
+		# and its walk clip never advances, so the mob glides with its legs set.
+		rest(false)
+		if dormant:
+			mob_wake()
+		_apply_shown()
 	if is_instance_valid(_visual):
 		_visual.set_motion(velocity, state.g)
 		_visual.set_combat(self.state, _state_time)
@@ -1185,6 +1252,10 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 		BloodFx.wound(self, blood_rig(), get_aim_position(), applied, false,
 			health <= 0.0, blood_scale())
 	if was_alive and not alive:
+		# The host strips a body before it becomes a container, so its record and
+		# its drop hold the blade once. The guest's copy empties the same hand.
+		if replica and has_method("take_weapon_item"):
+			call("take_weapon_item")
 		var cause: Vector4 = state.get("k", Vector4.ZERO)
 		_cleave_kind = "vertical" if cause.w > 2.5 else "horizontal"
 		_enter_dead(false,

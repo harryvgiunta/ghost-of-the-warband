@@ -1,5 +1,6 @@
 extends RefCounted
 const AbilityRules = preload("res://scripts/ability_rules.gd")
+const ArmorData = preload("res://scripts/armor_data.gd")
 
 ## The annointment pool: every modifier the altar can weld to a piece of gear.
 ##
@@ -51,6 +52,147 @@ const ARMOUR_SLOTS := ["head", "chest", "hands", "legs", "feet"]
 ## Soft cap on one piece, and the hard ceiling the ledger enforces.
 const MAX_PER_PIECE := 6
 
+## --- what a class may be welded with ---------------------------------------
+##
+## The item rework: a weld has to fit the *material* it is laid on, not just the
+## slot. These three tables are the whole of that rule - `keys` is the hard gate
+## (a key absent here can never reach that class), `procs` the same gate for a
+## proc's verb, and `weights` how much of the pool the family takes when the
+## table does admit it. A weight below 1.0 is the "sometimes" in the design: the
+## entry is legal, it is simply a rarer draw than the class's own bread.
+##
+## Every stat key belongs to exactly one family. `spell` is the robe channel -
+## cloth armour and casting implements - and is deliberately separate from
+## `bow`: a robe buys spells, leather buys arrows, and no piece buys both.
+const FAMILY_OF_KEY := {
+	"spell_damage": "spell",
+	"cooldown": "spell",
+	"ranged_damage": "bow",
+	"flat_ranged": "flat",
+	"flat_melee": "flat",
+	"melee_damage": "melee",
+	"throw_damage": "throw",
+	"attack_speed": "tempo",
+	"move_speed": "mobility",
+	"guard": "defence",
+	"health": "defence",
+	"stamina": "defence",
+	"stagger": "defence",
+	"stamina_regen": "sustain",
+	"heal_on_kill": "sustain",
+	"stamina_on_kill": "sustain",
+	"gold_find": "utility",
+}
+
+## A proc's verb read as a family, so a robe never arms a ward and a plate never
+## arms a second strike.
+const FAMILY_OF_PROC := {
+	Proc.HEAL: "sustain",
+	Proc.STAMINA: "sustain",
+	Proc.LIFESTEAL: "sustain",
+	Proc.REFLECT: "defence",
+	Proc.ABSORB: "defence",
+	Proc.LETHAL_SAVE: "defence",
+	Proc.STAGGER: "defence",
+	Proc.GUARD_BREAK: "control",
+	Proc.BLEED: "melee",
+	Proc.POISON: "melee",
+	Proc.QUICK_STRIKE: "melee",
+}
+
+## The forged materials, in `ArmorData.SET_IDS` order, and their rules.
+##
+##   cloth   spell damage and spell modifiers, nothing else: never movement
+##           speed, never attack speed, never damage reduction.
+##   leather arrows and the body that draws them: ranged damage, attack speed,
+##           movement speed, and guard only as a rarer draw.
+##   plate   the wall: defence first, a few aggressive layers, never attack
+##           speed and never movement speed.
+##   mail    the soldier's compromise: mostly aggressive, some defence, and
+##           attack and movement speed as the rarer draws.
+const POLICY := {
+	GROUP_CLOTH: {
+		"keys": ["spell_damage", "cooldown", "stamina_regen"],
+		"procs": [],
+		"weights": {"spell": 1.0, "sustain": 0.35},
+	},
+	GROUP_LEATHER: {
+		"keys": ["ranged_damage", "flat_ranged", "attack_speed", "move_speed", "guard",
+			"stagger", "stamina_regen"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.ABSORB, Proc.REFLECT, Proc.STAGGER],
+		"weights": {"bow": 1.0, "flat": 0.7, "tempo": 1.0, "mobility": 1.0,
+			"defence": 0.25, "sustain": 0.6},
+	},
+	GROUP_MAIL: {
+		"keys": ["melee_damage", "flat_melee", "ranged_damage", "guard", "health",
+			"stamina", "stagger", "stamina_regen", "attack_speed", "move_speed"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.REFLECT, Proc.ABSORB, Proc.LETHAL_SAVE,
+			Proc.STAGGER, Proc.GUARD_BREAK, Proc.BLEED, Proc.POISON, Proc.LIFESTEAL],
+		"weights": {"melee": 1.0, "bow": 0.9, "flat": 0.6, "defence": 0.2,
+			"sustain": 0.4, "tempo": 0.35, "mobility": 0.3},
+	},
+	GROUP_PLATE: {
+		"keys": ["guard", "health", "stamina", "stagger", "stamina_regen",
+			"melee_damage", "ranged_damage", "heal_on_kill", "stamina_on_kill"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.REFLECT, Proc.ABSORB, Proc.LETHAL_SAVE,
+			Proc.STAGGER, Proc.GUARD_BREAK, Proc.BLEED],
+		"weights": {"defence": 1.0, "melee": 0.3, "bow": 0.25, "sustain": 0.5},
+	},
+	GROUP_MAKESHIFT: {
+		"keys": ["ranged_damage", "attack_speed", "move_speed", "guard",
+			"health", "stamina", "stamina_regen"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.ABSORB, Proc.STAGGER],
+		"weights": {"bow": 0.8, "tempo": 0.8, "mobility": 0.8, "defence": 0.5,
+			"sustain": 0.5},
+	},
+	GROUP_NAKED: {"keys": [], "procs": [], "weights": {}},
+	# --- weapons ---------------------------------------------------------
+	GROUP_BOW: {
+		"keys": ["ranged_damage", "flat_ranged", "attack_speed", "cooldown", "stamina_regen"],
+		"procs": [Proc.HEAL, Proc.STAMINA],
+		"weights": {"bow": 1.0, "flat": 1.0, "tempo": 0.6, "spell": 0.4, "sustain": 0.4},
+	},
+	GROUP_SWORD: {
+		"keys": ["melee_damage", "flat_melee", "attack_speed", "guard", "cooldown",
+			"stamina_regen", "health", "stamina"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.BLEED, Proc.LIFESTEAL, Proc.QUICK_STRIKE,
+			Proc.GUARD_BREAK, Proc.ABSORB],
+		"weights": {"melee": 1.0, "flat": 0.4, "tempo": 0.6, "defence": 0.4,
+			"spell": 0.4, "sustain": 0.5},
+	},
+	GROUP_DAGGER: {
+		"keys": ["melee_damage", "attack_speed", "move_speed", "cooldown", "stamina_regen"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.BLEED, Proc.POISON, Proc.QUICK_STRIKE,
+			Proc.LIFESTEAL, Proc.GUARD_BREAK],
+		"weights": {"melee": 1.0, "tempo": 0.8, "mobility": 0.5, "spell": 0.4,
+			"sustain": 0.4},
+	},
+	GROUP_SHIELD: {
+		# Anything but an arrow: a board may carry a spell, a thrown blade, a
+		# weld of plate or a stride, and never the bow's own damage.
+		"keys": ["health", "stamina", "melee_damage", "flat_melee", "throw_damage",
+			"move_speed", "attack_speed", "guard", "stamina_regen", "stagger",
+			"gold_find", "cooldown", "heal_on_kill", "stamina_on_kill", "spell_damage"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.REFLECT, Proc.ABSORB, Proc.LETHAL_SAVE,
+			Proc.STAGGER, Proc.GUARD_BREAK, Proc.BLEED, Proc.POISON, Proc.QUICK_STRIKE,
+			Proc.LIFESTEAL],
+		"weights": {},
+	},
+	GROUP_STAFF: {
+		"keys": ["spell_damage", "cooldown", "stamina_regen", "guard", "health",
+			"stamina", "attack_speed"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.ABSORB, Proc.REFLECT, Proc.STAGGER,
+			Proc.LETHAL_SAVE],
+		"weights": {"spell": 1.0, "defence": 0.5, "sustain": 0.5},
+	},
+	GROUP_FOCUS: {
+		"keys": ["spell_damage", "cooldown", "stamina_regen", "health", "stamina",
+			"stagger", "stamina_on_kill"],
+		"procs": [Proc.HEAL, Proc.STAMINA, Proc.ABSORB, Proc.LIFESTEAL],
+		"weights": {"spell": 1.0, "defence": 0.7, "sustain": 0.6},
+	},
+}
+
 ## Gear groups an entry can name. An item resolves to a group set in
 ## `groups_of`; the entry matches when the two sets intersect.
 const GROUP_ANY_WEAPON := "weapon"
@@ -67,6 +209,18 @@ const GROUP_ARMOUR := "armour"
 ## Necklaces and rings. One group, split by slot: a necklace entry names `neck`
 ## and only ever welds to the cord around the throat.
 const GROUP_JEWELRY := "jewelry"
+## The four forged armour materials, and the two salvage ones. A worn piece
+## resolves to exactly one of these, and the material - not the slot - decides
+## what may be welded to it.
+const GROUP_CLOTH := "cloth"
+const GROUP_LEATHER := "leather"
+const GROUP_MAIL := "mail"
+const GROUP_PLATE := "plate"
+const GROUP_MAKESHIFT := "makeshift"
+const GROUP_NAKED := "naked"
+## The robe channel. Cloth armour and casting implements carry this group, so a
+## `spell` entry can reach a robe's chest and a staff's shaft and nothing else.
+const GROUP_SPELL := "spell"
 ## The worn trinket slots a jewellery copy can occupy - the same three the altar
 ## offers, in the order `AbilityRules` lays their skills on the hotbar.
 const JEWELRY_SLOTS := ["neck", "ring1", "ring2"]
@@ -194,6 +348,22 @@ const FAMILIES := [
 		"unit": "flat", "tags": ["sustain", "tempo"]},
 	{"key": "stamina_regen", "name": "Deep Lungs", "group": "weapon", "values": [0.05, 0.10, 0.15, 0.20, 0.30],
 		"unit": "pct", "tags": ["sustain"]},
+	# Flat damage, additive on the weapon that lands the blow. A bow's arrow and
+	# a sword's cut carry their own: the two never cross, so a heavy broadhead
+	# on the string adds nothing to the blade in the other hand.
+	{"key": "flat_ranged", "name": "Broadhead", "group": "bow", "values": [2.0, 3.0, 5.0, 8.0, 12.0],
+		"unit": "flat", "tags": ["ranged", "offence"],
+		"note": "Added to every arrow after the draw multiplier."},
+	{"key": "flat_melee", "name": "Ground Edge", "group": "sword", "values": [2.0, 3.0, 5.0, 8.0, 12.0],
+		"unit": "flat", "tags": ["melee", "offence"],
+		"note": "Added to every swing after the melee multiplier."},
+	# The robe channel. Cloth armour and the casting implements share this ladder,
+	# so a robe and a staff draw the same spells and nothing the bow wears.
+	{"key": "spell_damage", "name": "Ember Thread", "group": "spell",
+		"slots": ["main", "off", "head", "chest", "hands", "legs", "feet"],
+		"values": [0.04, 0.07, 0.10, 0.15, 0.20], "unit": "pct",
+		"tags": ["spell", "offence"],
+		"note": "Scales the staff's spells, never an arrow."},
 	# --- armour ------------------------------------------------------------
 	{"key": "guard", "name": "Case-Hardened", "group": "armour", "values": [0.01, 0.02, 0.03, 0.05, 0.07],
 		"unit": "pct", "tags": ["defence"],
@@ -219,6 +389,13 @@ const FAMILIES := [
 		"unit": "flat", "tags": ["sustain"]},
 	{"key": "stamina_on_kill", "name": "Dead Weight", "group": "armour", "values": [5.0, 10.0, 20.0, 35.0, 50.0],
 		"unit": "flat", "tags": ["sustain"]},
+	# The two aggressive armour ladders. Leather's own is the ranged one; mail
+	# and plate may carry either, and the class table decides how much of the
+	# pool each of them takes.
+	{"key": "ranged_damage", "name": "Far Eye", "group": "armour", "values": [0.03, 0.05, 0.08, 0.12, 0.15],
+		"unit": "pct", "tags": ["ranged", "offence"]},
+	{"key": "melee_damage", "name": "Honed Gauntlet", "group": "armour", "values": [0.03, 0.05, 0.08, 0.12, 0.15],
+		"unit": "pct", "tags": ["melee", "offence"]},
 ]
 
 ## The amulet's own ladders. An amulet is the trinket that carries a body's
@@ -287,6 +464,22 @@ const NAMES := [
 	{"id": "w_iron_constitution", "name": "Iron Constitution", "groups": ["weapon"],
 		"stats": {"health": 8.0, "stamina": 40.0},
 		"line": "+8 health, +40 stamina", "tags": ["defence"], "power": 0.35},
+	# The class bundles. A blade's flat cut, an arrow's heavy head, and the
+	# dagger's own quiet trade - each names its own group, so a class that does
+	# not want it never sees it in its pool.
+	{"id": "w_honed_edge", "name": "Honed Edge", "groups": ["sword"],
+		"stats": {"flat_melee": 4.0, "melee_damage": 0.05},
+		"line": "+4 blade damage, +5% melee damage", "tags": ["melee", "offence"], "power": 0.55},
+	{"id": "w_broadhead", "name": "Barbed Broadhead", "groups": ["bow"],
+		"stats": {"flat_ranged": 4.0, "ranged_damage": 0.04},
+		"line": "+4 arrow damage, +4% ranged damage", "tags": ["ranged", "offence"], "power": 0.55},
+	{"id": "w_quiet_step", "name": "Quiet Step", "groups": ["dagger"],
+		"stats": {"move_speed": 0.06, "attack_speed": 0.05},
+		"line": "+6% move, +5% attack speed", "tags": ["mobility", "tempo"], "power": 0.5},
+	{"id": "w_needle_point", "name": "Needle Point", "groups": ["dagger"],
+		"stats": {"melee_damage": 0.10}, "drawback": {"stamina_regen": -0.06},
+		"line": "+10% dagger damage, -6% stamina regen",
+		"tags": ["melee", "offence"], "power": 0.5},
 
 	# --- weapons: procs ----------------------------------------------------
 	{"id": "w_thirst_hit", "name": "Leech", "groups": ["weapon"], "kind": "proc",
@@ -431,6 +624,30 @@ const NAMES := [
 		"line": "-25% damage from burns and bleeds", "tags": ["defence"], "power": 0.35,
 		"wired": false, "note": "DoT-typed incoming only; the source tag does not exist yet."},
 
+	# --- cloth: the robe's own words --------------------------------------
+	# A robe buys spells and the casting that pays for them, and nothing else.
+	# No movement, no attack speed, no damage reduction: the class table in
+	# `POLICY` enforces that even against the armour ladders above.
+	{"id": "c_ash_body", "name": "Ashen Body", "groups": ["cloth"],
+		"stats": {"spell_damage": 0.08}, "drawback": {"stamina_regen": -0.06},
+		"line": "+8% spell damage, -6% stamina regen", "tags": ["spell", "offence"], "power": 0.5},
+	{"id": "c_quickened_rite", "name": "Quickened Rite", "groups": ["cloth"],
+		"stats": {"cooldown": 0.10}, "drawback": {"stamina_regen": -0.05},
+		"line": "-10% skill cooldowns, -5% stamina regen",
+		"tags": ["spell", "tempo", "ability"], "power": 0.45},
+	{"id": "c_bonfire_hem", "name": "Bonfire Hem", "groups": ["cloth"],
+		"stats": {"spell_damage": 0.06, "stamina_regen": 0.08},
+		"line": "+6% spell damage, +8% stamina regen",
+		"tags": ["spell", "sustain"], "power": 0.45},
+	{"id": "c_star_chart", "name": "Star Chart", "groups": ["cloth"],
+		"stats": {"spell_damage": 0.04, "cooldown": 0.06},
+		"line": "+4% spell damage, -6% skill cooldowns",
+		"tags": ["spell", "tempo"], "power": 0.4},
+	{"id": "c_live_stitch", "name": "Live Stitch", "groups": ["cloth"],
+		"stats": {"spell_damage": 0.12}, "drawback": {"stamina_regen": -0.08},
+		"line": "+12% spell damage, -8% stamina regen",
+		"tags": ["spell", "offence"], "power": 0.65},
+
 	# --- shields and focuses: the off hand's own words ---------------------
 	{"id": "o_banded", "name": "Banded", "groups": ["shield"],
 		"stats": {"guard": 0.04}, "line": "+4% guard", "tags": ["defence"], "power": 0.45},
@@ -442,8 +659,8 @@ const NAMES := [
 		"stats": {"melee_damage": 0.06}, "line": "+6% shield damage",
 		"tags": ["offence", "melee"], "power": 0.4},
 	{"id": "o_quiet_words", "name": "Quiet Words", "groups": ["focus"],
-		"stats": {"ranged_damage": 0.08}, "line": "+8% spell damage",
-		"tags": ["ranged", "offence"], "power": 0.5},
+		"stats": {"spell_damage": 0.08}, "line": "+8% spell damage",
+		"tags": ["spell", "offence"], "power": 0.5},
 	{"id": "o_bone_lattice", "name": "Bone Lattice", "groups": ["focus"],
 		"stats": {"stagger": 0.15}, "line": "-15% stagger time",
 		"tags": ["defence"], "power": 0.4},
@@ -712,6 +929,12 @@ static func _format(unit: String, value: float, key: String) -> String:
 			return "%s attack speed" % shown
 		"throw_damage":
 			return "%s throw damage" % shown
+		"spell_damage":
+			return "%s spell damage" % shown
+		"flat_melee":
+			return "%s blade damage" % shown
+		"flat_ranged":
+			return "%s arrow damage" % shown
 	return "%s %s" % [shown, key.replace("_", " ")]
 
 
@@ -727,7 +950,21 @@ static func by_id(id: String) -> Entry:
 	return _by_id.get(id, null) as Entry
 
 
-## The gear groups an item resolves to. Armour answers exactly `["armour"]`.
+## The material a worn armour piece is made of, `""` when it is not armour or
+## the piece does not name a set. The catalogue carries the set index; a caller
+## that only holds a slot asks for a material by name in `for_armour_slot`.
+static func material_of(item: Dictionary) -> String:
+	if str(item.get("category", "")) != "armor":
+		return ""
+	var index := int(item.get("set", -1))
+	if index < 0 or index >= ArmorData.SET_IDS.size():
+		return ""
+	return str(ArmorData.SET_IDS[index])
+
+
+## The gear groups an item resolves to. Armour answers `armour` plus its
+## material, and the materials are what the class table keys on: a robe is
+## `armour` + `cloth` + `spell`, a mail shirt `armour` + `mail`.
 static func groups_of(item: Dictionary) -> Array:
 	var out: Array = []
 	if item.is_empty():
@@ -742,24 +979,36 @@ static func groups_of(item: Dictionary) -> Array:
 		"staff":
 			out.append(GROUP_ANY_WEAPON)
 			out.append(GROUP_STAFF)
-			out.append(GROUP_RANGED)
+			out.append(GROUP_SPELL)
 		"shield":
 			out.append(GROUP_ANY_WEAPON)
 			out.append(GROUP_SHIELD)
+			# "Anything but an arrow": a board may carry a spell's own bonus.
+			out.append(GROUP_SPELL)
 		"focus":
 			out.append(GROUP_ANY_WEAPON)
 			out.append(GROUP_FOCUS)
+			out.append(GROUP_SPELL)
 		"1h", "2h":
 			out.append(GROUP_ANY_WEAPON)
 			out.append(GROUP_MELEE)
 			if kind == "dagger":
+				# A dagger is its own class: it shares the melee channel with a
+				# sword and nothing else, and the class table does the rest.
 				out.append(GROUP_DAGGER)
-			elif category == "2h":
-				out.append(GROUP_TWO_HAND)
 			else:
+				# Every sword, including the greatsword: a two-hander is a
+				# sword first and a two-handed weapon second.
 				out.append(GROUP_SWORD)
+				if category == "2h":
+					out.append(GROUP_TWO_HAND)
 		"armor":
 			out.append(GROUP_ARMOUR)
+			var material := material_of(item)
+			if not material.is_empty():
+				out.append(material)
+				if material == GROUP_CLOTH:
+					out.append(GROUP_SPELL)
 		"jewelry":
 			out.append(GROUP_JEWELRY)
 	return out
@@ -803,17 +1052,98 @@ static func for_item(item: Dictionary) -> Array[Entry]:
 	if groups.is_empty() or slots.is_empty():
 		return out
 	for entry in all():
-		if entry.wired and entry.fits(groups, slots):
+		if entry.wired and entry.fits(groups, slots) and admits(entry, groups):
 			out.append(entry)
 	return out
 
 
-## The armour pool for a worn slot ("head", "chest", ...).
-static func for_armour_slot(slot: String) -> Array[Entry]:
+## Whether the item's class rules allow this entry at all. Every stat key the
+## entry writes - and every key its drawback writes - must be one the class
+## names, and a proc's verb must be one the class arms. Abilities are gated by
+## their own `groups`, which already name the implement they belong to.
+static func admits(entry: Entry, item_groups: Array) -> bool:
+	if entry == null:
+		return false
+	for group in item_groups:
+		if not POLICY.has(group):
+			continue
+		var policy: Dictionary = POLICY[group]
+		var keys: Array = policy.get("keys", [])
+		for key in entry.stats:
+			if not keys.has(str(key)):
+				return false
+		for key in entry.drawback:
+			if not keys.has(str(key)):
+				return false
+		if int(entry.kind) == Kind.PROC:
+			var procs: Array = policy.get("procs", [])
+			if not procs.has(int(entry.proc)):
+				return false
+	return true
+
+
+## The families an entry writes, in the order it writes them. A proc is read by
+## its verb, a stat bundle by its keys.
+static func families_of(entry: Entry) -> Array[String]:
+	var out: Array[String] = []
+	if entry == null:
+		return out
+	for key in entry.stats:
+		var family := str(FAMILY_OF_KEY.get(str(key), "utility"))
+		if not out.has(family):
+			out.append(family)
+	for key in entry.drawback:
+		var family := str(FAMILY_OF_KEY.get(str(key), "utility"))
+		if not out.has(family):
+			out.append(family)
+	if int(entry.kind) == Kind.PROC:
+		var family := str(FAMILY_OF_PROC.get(int(entry.proc), "defence"))
+		if not out.has(family):
+			out.append(family)
+	return out
+
+
+## How likely this entry is to be drawn for an item of these groups. 1.0 is a
+## class's own bread; 0.4 is the "sometimes" a design sheet writes in words.
+## The rarest family an entry writes decides: a bundle is only as common as its
+## least typical ingredient.
+static func weight_of(entry: Entry, item_groups: Array) -> float:
+	if entry == null:
+		return 1.0
+	var weight := 1.0
+	var families := families_of(entry)
+	for group in item_groups:
+		if not POLICY.has(group):
+			continue
+		var weights: Dictionary = POLICY[group].get("weights", {})
+		for family in families:
+			weight = minf(weight, float(weights.get(family, 1.0)))
+	return weight
+
+
+## The four forged materials. These are the pieces the altar works at any price:
+## the price of a jerkin is the wood's, and the material is the whole of what it
+## can carry. Salvage hide and a bare shirt are not gear worth a vial.
+const FORGED_MATERIALS := [GROUP_LEATHER, GROUP_MAIL, GROUP_PLATE, GROUP_CLOTH]
+
+
+## Whether the altar takes this piece at all, before its pool is asked.
+static func workable(item: Dictionary) -> bool:
+	return FORGED_MATERIALS.has(material_of(item))
+
+
+## The armour pool for a worn slot ("head", "chest", ...). `material` names the
+## set - `leather`, `mail`, `plate`, `cloth`, `makeshift`, `naked` - and an empty
+## material answers the slot's generic pool, which is what a caller with no piece
+## in hand should see.
+static func for_armour_slot(slot: String, material: String = "") -> Array[Entry]:
 	var out: Array[Entry] = []
 	if not ARMOUR_SLOTS.has(slot):
 		return out
 	var item := {"category": "armor", "slot": slot}
+	var index := ArmorData.SET_IDS.find(material)
+	if index >= 0:
+		item["set"] = index
 	return for_item(item)
 
 

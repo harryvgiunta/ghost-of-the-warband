@@ -992,14 +992,19 @@ static func damage_for(definition: Dictionary, rig) -> float:
 	var damage := base * float(effect.get("damage_scale", 1.0))
 	if not is_instance_valid(rig):
 		return damage
-	# Ranged trinkets scale arrows and spells; melee trinkets scale blade
-	# skills and the backstab. Every scene reads this one function, so the
-	# frontier, the arena and the delve cannot drift apart.
+	# Ranged trinkets scale arrows; melee trinkets scale blade skills and the
+	# backstab; robe trinkets scale the staff's spells. The *item* the skill is
+	# fired from decides which of the two ranged channels it rides, because a
+	# bow's damage and a spell's damage are separate pools of modifiers. Every
+	# scene reads this one function, so the frontier, the arena and the delve
+	# cannot drift apart.
 	match str(effect.get("kind", "")):
 		"barrage", "volley", "piercing_shot", "projectile":
-			return damage * ranged_scale(rig)
+			if STAFF_ITEMS.has(item):
+				return damage * spell_scale(rig)
+			return damage * ranged_scale(rig) + flat_bonus(rig, "flat_ranged")
 		"melee_arc", "melee_ring", "melee_wave", "backstab":
-			return damage * melee_scale(rig)
+			return damage * melee_scale(rig) + flat_bonus(rig, "flat_melee")
 	return damage
 
 
@@ -1023,6 +1028,22 @@ static func melee_scale(rig) -> float:
 	if not is_instance_valid(rig) or not rig.has_method("melee_scale"):
 		return 1.0
 	return float(rig.melee_scale())
+
+
+## The robe channel: a staff's spells scale with `spell_damage` and with nothing
+## the bow wears.
+static func spell_scale(rig) -> float:
+	if not is_instance_valid(rig) or not rig.has_method("spell_scale"):
+		return 1.0
+	return float(rig.spell_scale())
+
+
+## Flat damage, additive after every multiplier, in the weapon's own class.
+static func flat_bonus(rig, key: String) -> float:
+	if not is_instance_valid(rig) or not rig.has_method("flat_bonus"):
+		return 0.0
+	var value: Variant = rig.flat_bonus(key)
+	return float(value) if value != null else 0.0
 
 
 ## The ward block of a definition, or {} for every other skill.

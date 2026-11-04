@@ -9,7 +9,7 @@ A body wears five armour pieces. Six annointments each is **30** on armour, plus
 12 on the two weapon hands — 42 on a finished body. That number is why §2's
 ceilings matter more than any single entry.
 
-## Status — implemented (build of 2026-11-03)
+## Status — implemented (build of 2026-11-03; item rework 2026-11-04)
 
 The armour sheet's stat ladders and the receiver-side procs are live; its
 **abilities are not** — they need the third slot contest described in §3, so
@@ -18,18 +18,21 @@ holds them:
 
 | | |
 | --- | --- |
-| Armour families | 11 ladders × 5 rungs = 55 entries (`f_armour_*`) |
-| Armour bundles | 14 stat rows + 9 rows on shields and focuses (`a_*`, `o_*`) |
-| Armour procs | 6 wired (`a_bone_rivets`, `a_return_fire`, `a_iron_retort`, `a_sanguine_board`, `a_second_heart`, `a_snap_stitching`, `o_copper_ward`); 2 deferred |
+| Armour families | 13 ladders × 5 rungs = 65 entries (`f_armour_*`; the ranged and melee ladders joined on 2026-11-04) |
+| Cloth family | 1 ladder × 5 rungs — `f_spell_spell_damage_*`, shared by robes and casting implements |
+| Armour bundles | 14 stat rows + 9 rows on shields and focuses + 5 cloth rows (`a_*`, `o_*`, `c_*`) |
+| Armour procs | 6 wired (`a_bone_rivets`, `a_return_fire`, `a_iron_retort`, `a_sanguine_board`, `a_second_heart`, `a_snap_stitching`, `o_copper_ward`); 2 deferred; **none cloth** |
 | Armour skills | **0 of the 8 in this sheet** — deferred, see below |
-| Slots | all five armour slots roll from their own pool; shields and focuses roll from theirs |
+| Slots | all five armour slots roll from their **material's** pool (§2.5); shields and focuses roll from theirs |
+| Material pools | cloth 16 · leather 38 · mail 57 · plate 55 on a chest piece; a robe draws no stat a material table does not name |
 
 Every stat this sheet asks for that already has a `TrinketStats` key is
 implemented as that key — `guard`, `health`, `stamina`, `stamina_regen`,
-`move_speed`, `attack_speed`, `melee_damage`, `ranged_damage`, `throw_damage`,
-`stagger`, `cooldown`, `gold_find`, `heal_on_kill`, `stamina_on_kill`. The kit
-ceilings in §2 are enforced in `AnnointLedger.CEILINGS` and the armour channel's
-0.60 clamp still sits above them.
+`move_speed`, `attack_speed`, `melee_damage`, `ranged_damage`, `spell_damage`,
+`flat_melee`, `flat_ranged`, `throw_damage`, `stagger`, `cooldown`, `gold_find`,
+`heal_on_kill`, `stamina_on_kill`. The kit ceilings in §2 are enforced in
+`AnnointLedger.CEILINGS` and the armour channel's 0.60 clamp still sits above
+them.
 
 The 43 ⊕ entries that need new plumbing (sight, sprint, crouch, loot clocks,
 revive speed, per-source resist, head-only reduction) are **not** wired. They
@@ -100,6 +103,8 @@ underneath and are not counted here):
 | attack speed | +25% |
 | move speed | +20% |
 | melee / ranged / throw damage | +30% each |
+| spell damage | +30% |
+| flat blade / flat arrow damage | +24 each |
 | cooldown reduction | −30% |
 | gold find | +50% |
 | conditional reductions (all sources combined) | −50% |
@@ -108,10 +113,30 @@ The engine already clamps `move_scale` at 2.0 and `attack_rate` at 3.0. These
 ceilings sit well below those on purpose: a player who hits a silent clamp
 believes the entry is broken.
 
+## 2.5 The material rule — what a set may carry
+
+A worn piece resolves to its **material** as well as to `armour`
+(`AnnointCatalog.groups_of`), and `AnnointCatalog.POLICY` is the only place that
+says what the material may be welded with: a hard key gate, a proc gate, and a
+pool share per family. A share below 1.0 is the sheet's "sometimes" and the die
+is weighted by it, so rarity is visible in play.
+
+| Set | Carries | Never carries |
+| --- | --- | --- |
+| **Cloth** (Emberweave) | spell damage, spell cooldowns, stamina regen — the `spell` family and its sustain | movement speed, attack speed, damage reduction of any kind (no `guard`, no ward procs), health, stamina, weapon damage, **no procs at all** |
+| **Leather** | ranged damage, flat arrow damage, attack speed, movement speed at full share; guard, stagger and regen as rarer draws | spell damage, melee damage, thrown damage |
+| **Mail** | melee and ranged damage at full share, some guard/health/stamina/regen, attack and movement speed as rarer draws | spell damage, thrown damage |
+| **Plate** | guard, health, stamina, stagger, kill healing at full share; melee and ranged damage as rare aggressive layers | movement speed, attack speed, spell damage, thrown damage |
+
+The altar works all four forged sets at any price — a jerkin's price is the
+wood's, and the material is the whole of what it can carry. Salvage hide and the
+bare shirt stay outside (no pool), whatever their price.
+
 ## 3. How armour rolls
 
 Same `d100` as the weapon sheet — add ability / add passive / remove / replace,
-25% each, cap 6, no destruction. Two armour-only rules:
+25% each, cap 6, no destruction; the draw itself is weighted by §2.5. Two
+armour-only rules:
 
 - **Abilities on armour fight for the third slot.** That slot belongs to the
   trinkets today (`ABILITY_GRANTS`, order neck → ring1 → ring2). Armour extends
