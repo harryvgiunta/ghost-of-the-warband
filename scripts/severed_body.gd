@@ -114,10 +114,11 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		arm.top_level = true
 		arm.global_transform = frame
 		arm.add_child(piece)
-		# Two halves, two falls: both slump over their own bases and lean apart a
-		# little, the far one a heartbeat later.
+		# Two halves, two falls: the cut holds for a breath, then each half goes
+		# over its own base and lands flat, the far one a heartbeat later. A body
+		# cut in two falls; it does not keep standing there in two pieces.
 		_fall(arm, frame, piece, side,
-			26.0 if half == 0 else 21.0, 0.0 if half == 0 else 0.05,
+			93.0 if half == 0 else 87.0, 0.12 if half == 0 else 0.19,
 			-0.06 if half == 0 else 0.05)
 	_wound(visual, middle, push, damage)
 	return holder
