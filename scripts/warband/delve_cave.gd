@@ -156,12 +156,19 @@ func rope_point(landing_id: String) -> Vector3:
 
 
 ## The shaft whose rope a body stands close enough to climb, or "".
+##
+## The reach is measured across the ground, the way a body walks to a rope. The
+## plan's rope points are authored on the flat plan (`y = 0`) while the floor
+## under them is a height field that falls metres away from the mouth, so a
+## straight-line distance put a body standing at the foot of a deep shaft's rope
+## out of reach of it - `G` did nothing at the far ropes at all.
 func exit_at(actor) -> String:
 	if actor == null or not is_instance_valid(actor):
 		return ""
 	var at: Vector3 = (actor as Node3D).global_position
 	for landing in Layout.LANDINGS:
-		if at.distance_to(to_global(landing["rope"])) <= EXIT_REACH:
+		var rope: Vector3 = to_global(landing["rope"])
+		if Vector2(at.x - rope.x, at.z - rope.z).length() <= EXIT_REACH:
 			return str(landing["id"])
 	return ""
 

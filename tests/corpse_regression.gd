@@ -369,9 +369,16 @@ func run() -> void:
 	check(cleaved_proc._visual.find_child("SplitBody", true, false) == null,
 		"A body with no skeleton is not cut in two")
 	var halves_holder = bisected._visual.find_child("SplitBody", true, false)
-	var halves: Array = halves_holder.find_children("*", "MeshInstance3D", true, false) \
-		if halves_holder != null else []
-	check(halves.size() == 2, "An overhead slices the body into two halves")
+	# Two arms, each carrying its own half and the meat its cut face is made of.
+	var halves: int = halves_holder.get_child_count() if halves_holder != null else 0
+	var halves_drawn := 0
+	if halves_holder != null:
+		for arm in halves_holder.get_children():
+			if arm.find_child("GoreHalf", true, false) != null \
+					and arm.find_child("CutFace", true, false) != null:
+				halves_drawn += 1
+	check(halves == 2 and halves_drawn == 2,
+		"An overhead slices the body into two halves, each with its cut face")
 	check(bisected._visual.find_child("BodyStump", true, false) == null,
 		"A sliced body is replaced by its halves instead of keeping a stump")
 	check(low_cut._wolf.find_child("SplitBody", true, false) == null,

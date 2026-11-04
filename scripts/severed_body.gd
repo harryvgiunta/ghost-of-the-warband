@@ -27,7 +27,9 @@ const MIN_HEIGHT := 1.2
 const TOPPLE_DEGREES := 82.0
 ## How far a piece is thrown past the corpse before it lands.
 const THROW_REACH := 0.55
-const HALF_REACH := 0.30
+## The halves stay at the cut: a body opened down the middle slumps where it
+## stood, it is not thrown across the room in two pieces.
+const HALF_REACH := 0.07
 const COILS := 5
 const LUMPS := 4
 
@@ -105,20 +107,103 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		var piece: MeshInstance3D = halves[half]
 		if piece == null:
 			continue
+		var side := normal if half == 0 else -normal
+		# The cut is a wound, not a parting: a face of meat closes the open side
+		# of each half, or the two of them read as two whole bodies lying near each
+		# other instead of one opened down the middle.
+		_section(piece, frame, side)
 		var arm := Node3D.new()
 		arm.name = "BodyHalf"
 		holder.add_child(arm)
 		arm.top_level = true
 		arm.global_transform = frame
 		arm.add_child(piece)
-		# Two halves, two falls: the near one goes first and further, the far one
-		# leans away and lands a heartbeat later.
-		var side := normal if half == 0 else -normal
+		# Two halves, two falls: both slump over their own bases and lean apart a
+		# little, the far one a heartbeat later.
 		_fall(arm, frame, piece, side, HALF_REACH,
-			94.0 if half == 0 else 88.0, 0.0 if half == 0 else 0.06,
-			-0.16 if half == 0 else 0.12)
+			58.0 if half == 0 else 51.0, 0.0 if half == 0 else 0.05,
+			-0.10 if half == 0 else 0.08)
 	_wound(visual, middle, push, damage)
 	return holder
+
+
+## The cut face of one half: the meat the blade went through, filled in the plane
+## from where the piece's own triangles meet it - the outline of the section, not
+## a box around the half, or the face is a billboard where the body used to be.
+static func _section(piece: MeshInstance3D, frame: Transform3D, side: Vector3) -> void:
+	var local := frame.basis.inverse() * side
+	if local.length_squared() < 0.001:
+		return
+	local = local.normalized()
+	var points := PackedVector3Array()
+	var mesh := piece.mesh
+	for surface in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(surface)
+		var vertices = arrays[Mesh.ARRAY_VERTEX]
+		if vertices == null:
+			continue
+		var count: int = vertices.size()
+		var triangles: PackedInt32Array
+		var indices = arrays[Mesh.ARRAY_INDEX]
+		if indices == null:
+			triangles.resize(count)
+			for vertex in count:
+				triangles[vertex] = vertex
+		else:
+			triangles = indices
+		for corner in range(0, triangles.size() - 2, 3):
+			var a: Vector3 = vertices[triangles[corner]]
+			var b: Vector3 = vertices[triangles[corner + 1]]
+			var c: Vector3 = vertices[triangles[corner + 2]]
+			var da := local.dot(a)
+			var db := local.dot(b)
+			var dc := local.dot(c)
+			if (da > 0.0 and db > 0.0 and dc > 0.0) \
+					or (da < 0.0 and db < 0.0 and dc < 0.0):
+				continue
+			# The two edges this triangle loses to the blade, in the plane.
+			for pair in [[a, da, b, db], [b, db, c, dc], [c, dc, a, da]]:
+				var p0: Vector3 = pair[0]
+				var d0: float = pair[1]
+				var p1: Vector3 = pair[2]
+				var d1: float = pair[3]
+				if (d0 > 0.0 and d1 > 0.0) or (d0 < 0.0 and d1 < 0.0) or is_equal_approx(d0, d1):
+					continue
+				points.append(p0.lerp(p1, d0 / (d0 - d1)))
+	if points.size() < 3:
+		return
+	# Order the crossings around the middle of the section and fill it with a fan.
+	var centre := Vector3.ZERO
+	for point in points:
+		centre += point
+	centre /= float(points.size())
+	centre -= local * local.dot(centre)
+	var axis_a := Vector3.UP
+	var axis_b := local.cross(axis_a)
+	if axis_b.length_squared() < 0.001:
+		axis_b = Vector3.RIGHT
+	axis_b = axis_b.normalized()
+	var ordered: Array = Array(points)
+	ordered.sort_custom(func(left, right):
+		var la := atan2(left.dot(axis_a), left.dot(axis_b))
+		var ra := atan2(right.dot(axis_a), right.dot(axis_b))
+		return la < ra)
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for index in ordered.size():
+		var next: Vector3 = ordered[(index + 1) % ordered.size()]
+		for vertex in [centre, ordered[index] as Vector3, next]:
+			tool.set_normal(local)
+			tool.add_vertex(vertex - local * 0.02)
+	var meat := StandardMaterial3D.new()
+	meat.albedo_color = Color("3a1214")
+	meat.roughness = 0.5
+	meat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var slab := MeshInstance3D.new()
+	slab.name = "CutFace"
+	slab.mesh = tool.commit()
+	slab.material_override = meat
+	piece.add_child(slab)
 
 
 static func _holder(visual: Node3D, frame: Transform3D) -> Node3D:
