@@ -61,6 +61,33 @@ var _query := PhysicsRayQueryParameters3D.new()
 static var _faces := {}
 
 
+## The guarantee that the head is gone: the collapse runs last in the frame,
+## after every writer a rig has (a clip solve, a ragdoll bake, a script posing the
+## head), so no pose pipeline can draw the face back onto the corpse.
+class Stump extends Node:
+	const COLLAPSE := 0.001
+	var bone := -1
+	var _skeleton: Skeleton3D
+
+	func _ready() -> void:
+		process_priority = 1000
+		_skeleton = get_parent() as Skeleton3D
+
+	func _process(_delta: float) -> void:
+		enforce()
+
+	## Collapses the head again if a pose write gave it volume back. Idempotent,
+	## and the one place the removal can be checked from.
+	func enforce() -> void:
+		if _skeleton == null or bone < 0 or bone >= _skeleton.get_bone_count():
+			return
+		var pose := _skeleton.get_bone_pose(bone)
+		if pose.basis.get_scale().x < 0.01:
+			return
+		_skeleton.set_bone_pose(bone,
+			Transform3D(pose.basis.scaled(Vector3.ONE * COLLAPSE), pose.origin))
+
+
 ## Throws the head of `visual` off along `shot` - the arrow's velocity - and
 ## leaves a stump behind. Returns the flying head, or null when this body has no
 ## head to give.
@@ -104,11 +131,8 @@ static func sever(visual: Node3D, shot: Vector3, damage: float) -> Node3D:
 	flight.setup(visual, shot, frame, frame.affine_inverse() * origin, radius,
 		skeleton, bone, head, damage)
 	_stump(visual, skeleton, bone, center, shot, damage)
-	# A presentation that re-poses its own bones (the ranger rig's clips write the
-	# head back every solve) has to be told the head is gone, or the corpse grows
-	# a face again on the next frame.
-	if head == null and visual.has_method("head_taken"):
-		visual.call("head_taken")
+	if bone >= 0:
+		_spurt(flight, visual, skeleton, bone, shot, damage)
 	return flight
 
 
@@ -141,19 +165,54 @@ static func _is_ancestor_of(skeleton: Skeleton3D, ancestor: int, bone: int) -> b
 ## fresh soak.
 static func _stump(visual: Node3D, skeleton: Skeleton3D, bone: int,
 		center: Vector3, shot: Vector3, damage: float) -> void:
-	# A presentation that re-poses its own bones keeps the stump itself
-	# (`head_taken`): shrinking here as well would only compound its scale.
-	if skeleton != null and bone >= 0 and not visual.has_method("head_taken"):
+	if skeleton != null and bone >= 0:
+		# The frame the head leaves: shrink now, and keep it shrunk through the
+		# modifier so no later pose solve can give the corpse its head back.
 		var pose := skeleton.get_bone_pose(bone)
 		skeleton.set_bone_pose(bone,
 			Transform3D(pose.basis.scaled(Vector3.ONE * STUMP_SCALE), pose.origin))
 		skeleton.force_update_all_bone_transforms()
+		if skeleton.find_child("HeadStump", false, false) == null:
+			var stump := Stump.new()
+			stump.name = "HeadStump"
+			stump.bone = bone
+			skeleton.add_child(stump)
 	var amount: float = maxf(damage, 10.0)
 	if visual.has_method("blood_anchor"):
 		var rig: Node3D = visual.call("blood_anchor")
 		if is_instance_valid(rig):
 			BloodFx.wound(visual, rig, center, amount, true, true)
-	BloodFx.impact(visual, center, shot, amount, true)
+	# The neck's own fountain, not a contact spray: a head coming off is the one
+	# death in the game that should be read in blood from across the room.
+	BloodFx.arterial(visual, center, shot, amount, 1.0)
+
+
+## A decapitated body does not bleed once: three more jets leave the stump as the
+## corpse goes down, each read from the neck as it is at that moment.
+static func _spurt(flight: Node3D, visual: Node3D, skeleton: Skeleton3D, bone: int,
+		shot: Vector3, damage: float) -> void:
+	if not is_instance_valid(flight) or skeleton == null or bone < 0:
+		return
+	var tween := flight.create_tween()
+	var times := [0.14, 0.30, 0.52]
+	var shares := [0.62, 0.46, 0.34]
+	var previous := 0.0
+	for index in times.size():
+		tween.tween_interval(float(times[index]) - previous)
+		previous = float(times[index])
+		tween.tween_callback(_pulse.bind(visual, skeleton, bone, shot,
+			damage * float(shares[index])))
+
+
+static func _pulse(visual: Node3D, skeleton: Skeleton3D, bone: int, shot: Vector3,
+		damage: float) -> void:
+	if not is_instance_valid(visual) or not is_instance_valid(skeleton):
+		return
+	if not skeleton.is_inside_tree():
+		return
+	var at: Vector3 = (skeleton.get_global_transform()
+		* skeleton.get_bone_global_pose(bone)).origin
+	BloodFx.arterial(visual, at, shot, maxf(damage, 8.0), 0.8)
 
 
 func setup(visual: Node3D, shot: Vector3, frame: Transform3D, offset: Transform3D,
@@ -171,7 +230,10 @@ func setup(visual: Node3D, shot: Vector3, frame: Transform3D, offset: Transform3
 		head.transform = offset
 		head.visible = true
 	elif skeleton != null and bone >= 0:
-		_build_head(visual, skeleton, bone, frame)
+		var piece := _build_head(visual, skeleton, bone, frame)
+		if is_instance_valid(piece):
+			# The piece comes out of a wound: it is wet before it is thrown.
+			BloodFx.stain_projectile(piece, maxf(damage, 10.0))
 	var direction := shot.normalized()
 	var speed: float = clampf(shot.length() * SPEED_SHARE, MIN_SPEED, MAX_SPEED)
 	_velocity = direction * speed + Vector3.UP * LIFT
@@ -196,7 +258,7 @@ func setup(visual: Node3D, shot: Vector3, frame: Transform3D, offset: Transform3
 ## so it is part of the head and leaves with it. A mesh that is not drawn right
 ## now (the armour sets the body is not wearing) is never cut in.
 func _build_head(visual: Node3D, skeleton: Skeleton3D, bone: int,
-		frame: Transform3D) -> void:
+		frame: Transform3D) -> MeshInstance3D:
 	var owned := {bone: true}
 	for index in skeleton.get_bone_count():
 		if _is_ancestor_of(skeleton, bone, index):
@@ -262,6 +324,7 @@ func _build_head(visual: Node3D, skeleton: Skeleton3D, bone: int,
 	piece.mesh = mesh
 	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	add_child(piece)
+	return piece
 
 
 ## The triangles of one surface that belong to the head. Which triangles those

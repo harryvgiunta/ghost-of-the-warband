@@ -33,6 +33,8 @@ func run() -> void:
 	var Enemy = load("res://scripts/enemy.gd")
 	var Mob = load("res://scripts/devil_mob.gd")
 	var DelveDevil = load("res://scripts/delve_devil.gd")
+	var ForestMob = load("res://scripts/forest_mob.gd")
+	var CageWatcher = load("res://scripts/warband/cage_watcher.gd")
 
 	check(is_equal_approx(CorpseHold.SECONDS, 300.0),
 		"A corpse lies in the world for five minutes by default")
@@ -268,6 +270,45 @@ func run() -> void:
 		"A replica throws the head its death snapshot names")
 
 
+	# --- every rig family loses the head that flew -------------------------
+	# The stump is only believable if the corpse draws nothing where the head was:
+	# each species poses its own skeleton, and one that wrote the head back after
+	# the sever would leave a face on the corpse with a head in the air beside it.
+	var rest := []
+	var slots := ["succubus", "spawn", "beast", "gargoyle"]
+	for index in slots.size():
+		var body = Mob.new()
+		body.mob_id = slots[index]
+		rest.append([slots[index], body, Vector3(-24.0, 0.12, 10.0 + 3.0 * index)])
+	for index in 2:
+		var species: String = ["ossuary_stalker", "gallowsroot"][index]
+		var body = ForestMob.new()
+		body.mob_id = species
+		rest.append([species, body, Vector3(-24.0, 0.12, 22.0 + 3.0 * index)])
+	var watcher = CageWatcher.new()
+	watcher.mob_id = "hollow_warden"
+	rest.append(["cage_watcher", watcher, Vector3(-24.0, 0.12, 28.0)])
+	for entry in rest:
+		entry[1].position = entry[2]
+		fixture.add_child(entry[1])
+	await physics_frame
+	await physics_frame
+	for entry in rest:
+		entry[1].note_arrow_headshot(Vector3(0.0, 0.0, -45.0), 200.0)
+		entry[1].take_damage(200.0, 0, true)
+	await physics_frame
+	await physics_frame
+	for entry in rest:
+		var label := str(entry[0])
+		var visual: Node3D = entry[1]._visual
+		var skeleton := visual.find_child("Skeleton3D", true, false) as Skeleton3D
+		var head := _head_bone(skeleton)
+		check(not entry[1].alive, label + " dies to the arrow")
+		check(head >= 0 and skeleton.get_bone_pose(head).basis.get_scale().x < 0.05,
+			label + " corpse keeps no head where the head was")
+		check(visual.find_child("SeveredHead", true, false) != null,
+			label + " threw the head into the world")
+
 	# The old four-second corpse is the exact behavior this replaces: every
 	# body must still be lying there well past it.
 	await pause(5.2)
@@ -320,6 +361,27 @@ func run() -> void:
 	await process_frame
 	print("CORPSE_REGRESSION checks=%d failures=%d" % [checks, failures])
 	quit(0 if failures == 0 else 1)
+
+
+## The deforming head bone of a rig, the same rule `SeveredHead` uses: the outer
+## bone wins where a rig carries an empty `head` helper under `Head`.
+func _head_bone(skeleton: Skeleton3D) -> int:
+	if skeleton == null:
+		return -1
+	var found := -1
+	for index in skeleton.get_bone_count():
+		if skeleton.get_bone_name(index).to_lower() != "head":
+			continue
+		if found < 0:
+			found = index
+			continue
+		var parent := skeleton.get_bone_parent(found)
+		while parent >= 0:
+			if parent == index:
+				found = index
+				break
+			parent = skeleton.get_bone_parent(parent)
+	return found
 
 
 func _bone_world(visual: Node3D, bone_name: String) -> Vector3:

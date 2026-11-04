@@ -49,6 +49,16 @@ static func wound(parent: Node, rig: Node3D, at: Vector3, amount: float,
 	if field != null:
 		field.wound(rig, at, amount, headshot, lethal, scale)
 
+## A decapitation: the neck's fountain, with the floor around it soaked. Used
+## once when a head leaves and again by the spurts that follow it.
+static func arterial(parent: Node, at: Vector3, direction: Vector3,
+		amount: float, scale: float = 1.0) -> void:
+	if amount <= 0.0:
+		return
+	var field := field_for(parent)
+	if field != null:
+		field.arterial(at, direction, amount, scale)
+
 ## Blood from someone else landing on this body: the limb of a clawed or fanged
 ## attacker, with no second floor decal under it.
 static func bloodied(parent: Node, rig: Node3D, at: Vector3, amount: float,

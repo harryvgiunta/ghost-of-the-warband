@@ -115,6 +115,35 @@ func _fling(at: Vector3, direction: Vector3, amount: float, headshot: bool) -> v
 		var normal: Vector3 = hit.normal
 		_spawn_patch(hit.position, normal, radius * _rng.randf_range(0.45, 1.0), false)
 
+## A head coming off: the neck throws a fountain rather than a splash. Two wide
+## bursts - one up and along the shaft, one down the shot - and a ring of soaks
+## on the floor around the body, so a decapitation reads from across the room
+## instead of only at the stump.
+func arterial(at: Vector3, direction: Vector3, amount: float, scale: float = 1.0) -> void:
+	var size_scale := clampf(scale, 0.35, 2.5)
+	var weight := clampf(amount, 10.0, 90.0)
+	var throw := direction
+	if throw.length_squared() < 0.000001:
+		throw = Vector3.UP
+	throw = throw.normalized()
+	_spawn_burst(at, (Vector3.UP * 1.3 + throw * 0.45).normalized(),
+		weight * 2.2, size_scale * 1.6)
+	_spawn_burst(at, throw, weight * 1.1, size_scale * 1.2, -0.35)
+	for index in 6:
+		var angle := TAU * float(index) / 6.0 + _rng.randf() * 0.5
+		var reach := (0.30 + _rng.randf_range(0.0, 0.85)) * size_scale
+		var point := at + Vector3(cos(angle) * reach, 0.0, sin(angle) * reach)
+		var hit := _ray(point + Vector3.UP * 0.8, point + Vector3.DOWN * 1.4,
+			GROUND_MASK)
+		if hit.is_empty():
+			continue
+		_spawn_patch(hit.position, hit.normal,
+			clampf(0.09 + weight * 0.0045, 0.12, 0.42) * size_scale, false)
+	# Flung as well as sprayed: the fall from a fountain marks the ground it
+	# lands on, and two fans reach further than one.
+	_fling(at, Vector3.UP, weight, true)
+	_fling(at, throw, weight, true)
+
 ## Damage that actually landed: body coating, floor spatter, and the death
 ## pool. `rig` may be null for a target with no visible body.
 func wound(rig: Node3D, at: Vector3, amount: float, headshot: bool,

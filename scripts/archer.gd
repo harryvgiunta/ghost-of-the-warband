@@ -235,10 +235,6 @@ var downed_pose := false
 ## A body that died on the ground is not still dragging itself: the lie is held
 ## where it fell, with the pull cycle parked and the arm planted.
 var corpse_still := false
-## The head an arrow took off (`SeveredHead`): the piece is a body in the world,
-## so the bone it left keeps no volume - and because every pose solve writes the
-## head back from its clip, the solve collapses it again on its way out.
-var head_gone := false
 var _downed_clock := 0.0
 var _downed_blend := 0.0
 var _bandage_prop: Node3D
@@ -646,24 +642,6 @@ func set_corpse(value: bool) -> void:
 	# The pull is a cycle: parked at its start, the arm is planted and the body
 	# lies still instead of breathing its way through the dirt.
 	_downed_clock = 0.0
-
-
-## The head left with an arrow (`SeveredHead`): the rig stops drawing it. The
-## clip poses every bone it knows on every solve, so the collapse is re-applied at
-## the end of the solve rather than trusted to survive one.
-func head_taken() -> void:
-	head_gone = true
-	_collapse_head()
-
-
-## The head bone keeps its joint and loses its volume, so the stump falls with the
-## body and no face is left on the corpse.
-func _collapse_head() -> void:
-	if not head_gone or skeleton == null or _bones.Head < 0:
-		return
-	var pose := skeleton.get_bone_pose(_bones.Head)
-	skeleton.set_bone_pose(_bones.Head,
-		Transform3D(pose.basis.scaled(Vector3.ONE * 0.001), pose.origin))
 
 
 ## True when the body is down or still falling to the floor.
@@ -3171,8 +3149,6 @@ func _solve_pose(delta: float) -> void:
 	_chest.transform = Transform3D(chest_pose.basis*_chest_rest_basis.inverse(),chest_pose.origin)
 	_update_consumable_props()
 	_sync_weapon_visibility()
-	# Last, so no clip above can give the corpse its face back.
-	_collapse_head()
 
 ## The two-hander's held guard. The authored clip carries the stance, the plant
 ## and the breathing; the arms are solved here, because the socket hangs the

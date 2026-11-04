@@ -232,6 +232,19 @@ func run() -> void:
 	var plated_head := plated_skeleton.find_bone("Head")
 	check(plated_skeleton.get_bone_pose(plated_head).basis.get_scale().x < 0.05,
 		"The corpse keeps a head bone with no volume left")
+	# The rig's clips write the head back on every solve, so the removal is a
+	# stump node that wins the frame: it must be on the corpse, and it must take
+	# a head the pose gave volume back to.
+	var stump = plated_skeleton.find_child("HeadStump", false, false)
+	check(stump != null and stump.is_processing(),
+		"The corpse carries the stump that keeps the head removed")
+	if stump != null:
+		var full := plated_skeleton.get_bone_pose(plated_head)
+		plated_skeleton.set_bone_pose(plated_head,
+			Transform3D(full.basis.orthonormalized(), full.origin))
+		stump.enforce()
+		check(plated_skeleton.get_bone_pose(plated_head).basis.get_scale().x < 0.05,
+			"A pose solve that gives the head back is collapsed again")
 	if piece != null:
 		var piece_mesh := piece.find_child("HeadPiece", true, false) as MeshInstance3D
 		check(piece_mesh != null and piece_mesh.mesh != null
