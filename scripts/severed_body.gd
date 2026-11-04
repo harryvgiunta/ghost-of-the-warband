@@ -25,11 +25,7 @@ const CUT_SHARE := 0.62
 ## A cut only means something on a body tall enough to have a third of it.
 const MIN_HEIGHT := 1.2
 const TOPPLE_DEGREES := 82.0
-## How far a piece is thrown past the corpse before it lands.
-const THROW_REACH := 0.55
-## The halves stay at the cut: a body opened down the middle slumps where it
-## stood, it is not thrown across the room in two pieces.
-const HALF_REACH := 0.07
+## The cut is a place, not a throw: the pieces tip over where they stand.
 const COILS := 5
 const LUMPS := 4
 
@@ -78,7 +74,7 @@ static func _down(visual: Node3D, skeleton: Skeleton3D, root: Vector3, head: Vec
 	# collapse happens before the ragdoll is built from the lethal pose.
 	_stump(skeleton, owned, cut)
 	_wound(visual, cut, push, damage)
-	_fall(holder, frame, piece, push, THROW_REACH, TOPPLE_DEGREES, 0.0, 0.0)
+	_fall(holder, frame, piece, push, TOPPLE_DEGREES, 0.0, 0.0)
 	return holder
 
 
@@ -120,9 +116,9 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 		arm.add_child(piece)
 		# Two halves, two falls: both slump over their own bases and lean apart a
 		# little, the far one a heartbeat later.
-		_fall(arm, frame, piece, side, HALF_REACH,
-			58.0 if half == 0 else 51.0, 0.0 if half == 0 else 0.05,
-			-0.10 if half == 0 else 0.08)
+		_fall(arm, frame, piece, side,
+			26.0 if half == 0 else 21.0, 0.0 if half == 0 else 0.05,
+			-0.06 if half == 0 else 0.05)
 	_wound(visual, middle, push, damage)
 	return holder
 
@@ -215,13 +211,13 @@ static func _holder(visual: Node3D, frame: Transform3D) -> Node3D:
 	return holder
 
 
-## A piece turning over where it stands: it leans away from the blow, tips over
-## past the vertical, and rocks back a degree as it settles. The first half of the
-## turn is the short part - it is already falling - so the ease is quadratic, and
-## the piece is set down by its own lowest vertex so it never hangs in the air.
+## A piece turning over where it stands: it tips about its own base - the point
+## of it already on the floor - so its feet never swing through the other half and
+## the piece never lifts off the ground. Gravity does the first half of the turn
+## and the weight of it the rest, and the last step is it rocking back a degree as
+## it settles.
 static func _fall(holder: Node3D, frame: Transform3D, piece: MeshInstance3D,
-		force: Vector3, reach: float, degrees: float, delay: float,
-		lean: float) -> void:
+		force: Vector3, degrees: float, delay: float, lean: float) -> void:
 	var push := Vector3(force.x, 0.0, force.z)
 	if push.length_squared() < 0.001:
 		push = Vector3.FORWARD
@@ -229,23 +225,65 @@ static func _fall(holder: Node3D, frame: Transform3D, piece: MeshInstance3D,
 	var axis := Vector3.UP.cross(push)
 	if axis.length_squared() < 0.001:
 		axis = Vector3.RIGHT
-	var turn := Basis(Vector3.UP, lean) * Basis(axis.normalized(), deg_to_rad(degrees))
-	var basis := turn * frame.basis
-	var landing := frame.origin + push * reach
-	var ground := _ground_at(holder, landing)
-	var target := Transform3D(basis,
-		Vector3(landing.x, ground - _lowest(piece, basis), landing.z))
-	var turned := frame.interpolate_with(target, 0.45)
-	var settled := target.interpolate_with(turned, 0.08)
+	axis = (Basis(push, lean) * axis.normalized()).normalized()
+	# The base: the lowest point of the piece at the death pose, on the floor.
+	var base := frame * _lowest_point(piece)
+	var ground := _ground_at(holder, base)
+	var full := deg_to_rad(degrees)
 	var tween := holder.create_tween()
 	if delay > 0.0:
 		tween.tween_interval(delay)
-	tween.tween_property(holder, "global_transform", turned, 0.20) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.tween_property(holder, "global_transform", target, 0.30) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tween.tween_property(holder, "global_transform", settled, 0.13) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_method(_turn.bind(holder, piece, frame, axis, base, ground),
+		0.0, full * 0.45, 0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_method(_turn.bind(holder, piece, frame, axis, base, ground),
+		full * 0.45, full, 0.30).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_method(_turn.bind(holder, piece, frame, axis, base, ground),
+		full, full * 0.96, 0.13).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+static func _turn(angle: float, holder: Node3D, piece: MeshInstance3D,
+		frame: Transform3D, axis: Vector3, base: Vector3, ground: float) -> void:
+	if not is_instance_valid(holder) or not is_instance_valid(piece):
+		return
+	var hinge := Transform3D(Basis(axis, angle), base) \
+		* Transform3D(Basis.IDENTITY, -base) * frame
+	# The lowest point is held on the floor through the whole turn: a piece of
+	# corpse tips over its own edge, it does not hover while it swings.
+	var lowest := _lowest_world(piece, hinge)
+	holder.global_transform = Transform3D(hinge.basis,
+		hinge.origin + Vector3.UP * (ground - lowest))
+
+
+## The piece's lowest vertex in its own frame - where it touches the floor.
+static func _lowest_point(piece: MeshInstance3D) -> Vector3:
+	var lowest := Vector3.ZERO
+	var found := false
+	var mesh := piece.mesh
+	for surface in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(surface)
+		var vertices = arrays[Mesh.ARRAY_VERTEX]
+		if vertices == null:
+			continue
+		for vertex in vertices.size():
+			var point: Vector3 = vertices[vertex]
+			if not found or point.y < lowest.y:
+				lowest = point
+				found = true
+	return lowest
+
+
+## The lowest point of the piece under a whole transform, in world space.
+static func _lowest_world(piece: MeshInstance3D, xform: Transform3D) -> float:
+	var lowest := INF
+	var mesh := piece.mesh
+	for surface in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(surface)
+		var vertices = arrays[Mesh.ARRAY_VERTEX]
+		if vertices == null:
+			continue
+		for vertex in vertices.size():
+			lowest = minf(lowest, (xform * (vertices[vertex] as Vector3)).y)
+	return lowest if lowest < INF else 0.0
 
 
 ## The bones that own everything above the cut: every bone whose origin is above
@@ -298,20 +336,6 @@ static func _stump(skeleton: Skeleton3D, owned: Dictionary, cut: Vector3) -> voi
 static func _wound(visual: Node3D, at: Vector3, push: Vector3, damage: float) -> void:
 	BloodFx.arterial(visual, at, push, maxf(damage, 30.0), 1.3)
 	_spill(visual, at, push, maxf(damage, 30.0))
-
-
-## The lowest point of the turned piece, in the frame it lands in.
-static func _lowest(piece: MeshInstance3D, basis: Basis) -> float:
-	var lowest := INF
-	var mesh := piece.mesh
-	for surface in mesh.get_surface_count():
-		var arrays := mesh.surface_get_arrays(surface)
-		var vertices = arrays[Mesh.ARRAY_VERTEX]
-		if vertices == null:
-			continue
-		for vertex in vertices.size():
-			lowest = minf(lowest, (basis * (vertices[vertex] as Vector3)).y)
-	return lowest if lowest < INF else 0.0
 
 
 ## The floor under a point in the body's own world, or a body's own drop when the
