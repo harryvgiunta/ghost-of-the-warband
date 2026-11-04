@@ -41,6 +41,7 @@ const TrinketStats = preload("res://scripts/trinket_stats.gd")
 const AnnointRuntime = preload("res://scripts/warband/annoint_runtime.gd")
 const AbilityFx = preload("res://scripts/ability_fx.gd")
 const NetReplication = preload("res://scripts/net_replication.gd")
+const SeveredHead = preload("res://scripts/severed_head.gd")
 const MAX_HEALTH := 100.0
 const WALK_SPEED := 5.5
 ## Packed focus silhouettes in the `gear` snapshot field: three bits, so the
@@ -82,6 +83,15 @@ var downed := false
 var downed_seconds := 0.0
 ## The slot that put this body down, credited if it bleeds out.
 var downed_by := -1
+## The flight of an arrow that landed on this body's head, named by the shaft
+## before its blow and spent by that blow (`note_arrow_headshot`). A campaign
+## body only goes down from a blow, so a headshot takes the head on the finisher.
+var _head_shot := Vector3.ZERO
+## The flight the corpse carries, so a replica throws the same head the host did.
+var _sever := Vector3.ZERO
+## The head has already left (`SeveredHead`): a replica reads a death off every
+## snapshot it receives, and throws the head only once.
+var _head_severed := false
 ## Seconds of standing, unhealed time banked toward the next point of the
 ## contract's slow regeneration (`HEALTH_REGEN_SECONDS` per point).
 var _regen_elapsed := 0.0
@@ -547,8 +557,7 @@ func crawl_step(point: Vector3, speed: float, delta: float) -> void:
 ## The one death path: the corpse and the kill credit. A finisher, the bleed
 ## clock and a lethal blow all land here, so a body that dies is a body that died
 ## the same way whatever put it down.
-## so a body that dies is a body that died the same way whatever put it down.
-func _die(source_id: int) -> void:
+func _die(source_id: int, severed := Vector3.ZERO, damage := 0.0) -> void:
 	health = 0.0
 	alive = false
 	downed = false
@@ -560,6 +569,10 @@ func _die(source_id: int) -> void:
 	roll.reset()
 	_store_body_collision()
 	_reset_rig_glide()
+	# An arrow in the head is spent on the head: it leaves before the corpse is
+	# laid out, so the piece is cut from the pose the body died in.
+	_sever = severed
+	_head_severed = _sever == Vector3.ZERO or _throw_head(damage)
 	# The drip stops on the frame the body dies, and the body keeps the ground:
 	# its model stays in the lie it fell in, so a corpse is a thing you walk past
 	# rather than a body that winked out of the world.
@@ -567,6 +580,23 @@ func _die(source_id: int) -> void:
 	if _voice != null:
 		_voice.stood_up()
 	killed.emit(slot, source_id)
+
+
+## An arrow that lands on this body's head names its flight here before its blow,
+## so the blow that finishes it can take the head off with the shaft still in it.
+func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
+	if alive:
+		_head_shot = velocity
+
+
+## Throws this body's head off once. Returns true when there is no head left to
+## throw, so a replica that reads the same death again does nothing.
+func _throw_head(damage: float) -> bool:
+	if _head_severed:
+		return true
+	if _sever == Vector3.ZERO or not is_instance_valid(rig):
+		return true
+	return SeveredHead.sever(rig, _sever, maxf(damage, 12.0)) != null
 
 func try_ability(slot: int = 0) -> Dictionary:
 	if not authoritative or not alive or downed:
@@ -875,10 +905,15 @@ func _tick_ward(delta: float) -> void:
 func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
+	# A headshot is only worth a head if this blow is the arrow that named it: the
+	# note is spent here whether the blow downs the body or finishes it.
+	var flight := _head_shot
+	_head_shot = Vector3.ZERO
 	if downed:
 		# A blow on a downed body is a finisher, not damage: lying in the dirt,
-		# any blow that lands ends it.
-		_die(source_id)
+		# any blow that lands ends it - and an arrow in the head takes the head
+		# with it, whatever armour the body is wearing.
+		_die(source_id, flight, amount)
 		return
 	_cancel_consumable()
 	# A lethal save and an absorb move the *incoming* figure before the armour
@@ -1585,6 +1620,10 @@ func snapshot() -> Dictionary:
 		# One positional block, like every other wire value: the acknowledgement
 		# rides inside the clamped datagram beside an already-full snapshot.
 		state["ack"] = [ack_seq, ack_position, ack_velocity]
+	# A corpse that lost its head carries the flight, so a guest throws it too.
+	# A living body sends nothing extra.
+	if not alive and _sever != Vector3.ZERO:
+		state["sever"] = Vector4(_sever.x, _sever.y, _sever.z, 1.0)
 	return state
 
 func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> void:
@@ -1650,6 +1689,13 @@ func apply_snapshot(state: Dictionary, tick: int = -1, actors: Array = []) -> vo
 	# the instant the authority says it is over - and a body that joined the scene
 	# already dead is lying on the ground like every other one. Idempotent.
 	if not alive:
+		# A death that took a head with it: the flight rides the wire, and the
+		# guest throws that head once.
+		if not _head_severed and state.has("sever"):
+			var flight: Vector4 = state.sever
+			if flight.w > 0.5:
+				_sever = Vector3(flight.x, flight.y, flight.z)
+				_head_severed = _throw_head(12.0)
 		_hold_corpse()
 	rig.visible = true
 	collision_layer = 4 if alive else 0
