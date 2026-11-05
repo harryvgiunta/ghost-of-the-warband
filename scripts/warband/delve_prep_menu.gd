@@ -13,6 +13,12 @@ extends CanvasLayer
 ## The inventory is real warband state (`Warband.pack_for_delve`), so a pack made
 ## up and left at the mouth is still packed next time. GO DOWN asks the scene to
 ## take the chosen bodies below; the scene answers and the panel closes.
+##
+## Under the columns is the floor's difficulty: a three-way toggle - EASY, MEDIUM,
+## HARD (`delve_mode.gd`) - that says how many bodies stand in every den, what pool
+## they carry and how fast they move and swing. It is warband state
+## (`Warband.set_delve_mode`), saved with the books and lent with them, and it opens
+## on EASY for a band that has never been down the Hollow.
 
 signal descend_requested(party: Array)
 
@@ -21,6 +27,7 @@ const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const ItemHover = preload("res://scripts/warband/item_hover.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 
 const INK := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -63,6 +70,10 @@ var _pack_meta: Label
 var _status: Label
 var _search_box: LineEdit
 var _descend_button: Button
+## The difficulty row: the three toggle plates by mode id, and the line that says
+## what the lit one does to the floor.
+var _mode_buttons: Dictionary = {}
+var _mode_line: Label
 var _prompt: Control
 var _prompt_name: Label
 var _prompt_note: Label
@@ -137,6 +148,40 @@ func set_member(merc_id: int, going: bool) -> void:
 			ordered.append(merc_id_in)
 	_chosen = ordered
 	refresh()
+
+
+# --- the difficulty --------------------------------------------------------
+
+## The three toggle plates, by mode id (`DelveMode.ORDER`), so a test or a hint
+## reads them instead of walking the tree.
+func mode_buttons() -> Dictionary:
+	if not _built:
+		_build()
+	return _mode_buttons.duplicate()
+
+
+## The difficulty the next party goes down on: the warband's own, which a co-op
+## guest reads off the host's books.
+func mode() -> String:
+	if _warband == null or _warband.get("delve") == null:
+		return DelveMode.DEFAULT
+	return DelveMode.id_of(str(_warband.get("delve").mode))
+
+
+## Put the descent on `mode`. The warband owns the choice
+## (`Warband.set_delve_mode`, saved and lent with the books), so the panel adds
+## nothing but the press: a guest's press is the host's refusal on the status
+## line, exactly as the party's mode is.
+func set_mode(mode_id: String) -> bool:
+	var ok := false
+	var message := "No warband to take down in this scene."
+	if _warband != null and _warband.has_method("set_delve_mode"):
+		var result: Dictionary = _warband.set_delve_mode(mode_id)
+		ok = bool(result.get("ok", false))
+		message = str(result.get("message", ""))
+	set_status(message)
+	refresh()
+	return ok
 
 
 # --- moving pieces ---------------------------------------------------------
@@ -341,6 +386,21 @@ func refresh() -> void:
 		value += int(row["count"]) * int(row["value"])
 	_pack_meta.text = "%d piece%s  ·  %d G" % [pieces, "" if pieces == 1 else "s", value]
 	_descend_button.disabled = _chosen.is_empty()
+	_paint_mode()
+
+
+## Light the difficulty the warband holds - the host's, on a guest - and say what
+## it does to the floor below.
+func _paint_mode() -> void:
+	if _mode_line == null:
+		return
+	var chosen := mode()
+	for key in _mode_buttons:
+		var button: Button = _mode_buttons[key]
+		var lit: bool = key == chosen
+		button.set_pressed_no_signal(lit)
+		button.theme_type_variation = "PrimaryButton" if lit else ""
+	_mode_line.text = DelveMode.line_of(chosen)
 
 
 func _paint_party() -> void:
@@ -549,6 +609,8 @@ func _build() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(0, 20)
 
+	_build_descent_row(column)
+
 	var plates := HBoxContainer.new()
 	plates.add_theme_constant_override("separation", 12)
 	plates.alignment = BoxContainer.ALIGNMENT_END
@@ -573,6 +635,50 @@ func _build() -> void:
 func _on_search_changed(text: String) -> void:
 	_search = text.strip_edges().to_lower()
 	refresh()
+
+
+## The floor's difficulty, under the columns: a rule, then THE DESCENT and the
+## three plates - one lit - then the line that says what the lit one does. The
+## press is the warband's (`set_mode`); the panel only draws the answer.
+func _build_descent_row(parent: Node) -> void:
+	var rule := ColorRect.new()
+	rule.custom_minimum_size = Vector2(0, 1)
+	rule.color = Color(INK.r, INK.g, INK.b, 0.30)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(rule)
+	var row := HBoxContainer.new()
+	row.name = "Descent"
+	row.add_theme_constant_override("separation", 10)
+	parent.add_child(row)
+	var caption := _label(row, "THE DESCENT", 13, LedgerThemeScript.INK_SOFT)
+	caption.custom_minimum_size = Vector2(118, 0)
+	for entry in DelveMode.ORDER:
+		var button := Button.new()
+		button.name = "Delve" + str(entry).capitalize()
+		button.text = DelveMode.label_of(entry)
+		button.toggle_mode = true
+		button.focus_mode = Control.FOCUS_NONE
+		button.custom_minimum_size = Vector2(132, 34)
+		button.add_theme_font_size_override("font_size", 13)
+		# A lit plate is brass, and the theme's ink on brass is the dark one: the
+		# pressed states are pinned by hand because a toggled button falls back to
+		# the default theme's light inks for them, which brass swallows.
+		for state in ["font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+			button.add_theme_color_override(state, LedgerThemeScript.BRASS_TEXT)
+		button.tooltip_text = DelveMode.line_of(str(entry))
+		button.pressed.connect(set_mode.bind(str(entry)))
+		row.add_child(button)
+		_mode_buttons[str(entry)] = button
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(gap)
+	# What the lit plate does to the floor, in the panel's ink: the line is a
+	# sentence on parchment, and the parchment is what it has to read on. It is not
+	# clipped: a clipped label asks a box container for no width at all, and the
+	# spacer beside it takes the whole row.
+	_mode_line = _label(row, "", 13, LedgerThemeScript.INK_MUTED)
+	_mode_line.name = "DescentLine"
 
 
 ## The column header: the name in the window's own face over a hairline, with the

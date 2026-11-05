@@ -35,6 +35,7 @@ const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 const AnnointRoll = preload("res://scripts/warband/annoint_roll.gd")
 const AnnointLedger = preload("res://scripts/warband/annoint_ledger.gd")
 const DelveScript = preload("res://scripts/warband/delve_state.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
@@ -57,17 +58,19 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## auto-equip holds (`auto_equip_restricted`), the pieces the player keeps out of
 ## the band's automatic arming; v11 added each record's disposition (the `tank` /
 ## `melee` / `bow` behaviour the squad AI reads per body and the arming reads when
-## it picks a piece); v13 added each record's hotbar layout (`hotbar_order`), the
-## sequence of ability ids the player has laid on the ten keys. Older files still
-## load: a record with no sets puts
+## it picks a piece); v15 added the Hollow's difficulty (`delve.mode`), the crowd,
+## pool and rate the floor is built with; v13 added each record's hotbar layout
+## (`hotbar_order`), the sequence of ability ids the player has laid on the ten
+## keys. Older files still load: a record with no sets puts
 ## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
 ## checkpoint resumes at the town as it always did, a file without quests opens
 ## with an empty ledger, a file without anointings carries plain steel, a file
 ## without a delve has an empty pack and nobody below, a file without a party mode
 ## fights offensive, a file without holds arms from every piece, as it always did,
-## a file without a disposition fields every body as melee, and a file without a
-## hotbar layout fires every skill from the key the kit's own order gives it.
-const SAVE_VERSION := 14
+## a file without a disposition fields every body as melee, a file without a
+## hotbar layout fires every skill from the key the kit's own order gives it, and a
+## file without a delve mode goes down an easy Hollow.
+const SAVE_VERSION := 15
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -1708,6 +1711,31 @@ func _move_pooled(from: WarbandStash, to: WarbandStash, item_id: String, count: 
 	_notify()
 	return {"ok": true, "item_id": item_id, "count": moved,
 		"message": "%s%s %s." % [display, " x%d" % moved if moved > 1 else "", where]}
+
+## What a guest is told when it reaches for the Hollow's difficulty: the floor is
+## built from the host's books, and a guest has no say in how hard it is.
+const LENT_DELVE_MODE_MESSAGE := "This is the host's warband: only the host sets the Hollow's difficulty."
+
+## How hard the next descent is (`delve_mode.gd`: `easy`, `medium`, `hard`).
+## Returns `{ok, mode, message}`, `mode` being what the floor is built with
+## afterwards. An unknown difficulty is refused, so is a lent warband's, and so is
+## a floor somebody is already on - the cave below was built with the mode it went
+## down on. Only a real change is announced and written.
+func set_delve_mode(mode: String) -> Dictionary:
+	if lent:
+		return {"ok": false, "mode": delve.mode, "message": LENT_DELVE_MODE_MESSAGE}
+	if not DelveMode.ORDER.has(mode):
+		return {"ok": false, "mode": delve.mode,
+			"message": "The Hollow has no %s floor." % mode.to_upper()}
+	if delve.active:
+		return {"ok": false, "mode": delve.mode,
+			"message": "The party is below: its floor is settled."}
+	if mode != delve.mode:
+		delve.mode = mode
+		_notify()
+		save_state()
+	return {"ok": true, "mode": delve.mode,
+		"message": "The Hollow goes down %s." % DelveMode.label_of(mode)}
 
 ## Send a party down. Every name must be on the field and standing - the scene
 ## checks the bodies, this checks the books. Going down is the commitment, so it

@@ -40,6 +40,7 @@ const WARBAND_SAVE := "user://delve_warband.json"
 const AreaScript = preload("res://scripts/warband/delve_area.gd")
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Floor = preload("res://scripts/warband/delve_floor.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 
 var state
 var warband
@@ -47,6 +48,13 @@ var flow
 var game
 var checks := 0
 var failures := 0
+## The easy floor's dials on one named body, for the hard floor to be compared
+## against: the same authored post stands on both, so a hard floor must be four
+## times its pool, twice its pace and half its beat.
+var _probe_name := ""
+var _probe_pool := 0.0
+var _probe_walk := 0.0
+var _probe_beat := 0.0
 
 
 func check(condition: bool, message: String) -> void:
@@ -89,6 +97,7 @@ func run() -> void:
 	await check_descent()
 	check_floor_plan()
 	check_demon_ring()
+	check_difficulty()
 	check_plan_geometry()
 	check_floor_relief()
 	check_eye_culling()
@@ -193,6 +202,25 @@ func check_mouth_and_pack() -> void:
 	var dressings: int = warband.stash.pooled_count("bandage_linen")
 	game._try_interact()
 	check(area.prep.is_open(), "G at the mouth opens the delve panel")
+	# The floor's difficulty: the panel opens on EASY, and the three plates are the
+	# warband's own choice (`Warband.set_delve_mode`) - the floor below is built from
+	# it, so the press has to land on the books and be refused where they are not
+	# the player's to write.
+	var modes: Dictionary = area.prep.mode_buttons()
+	check(modes.size() == 3, "the mouth offers three difficulties (%d)" % modes.size())
+	check(area.prep.mode() == DelveMode.DEFAULT and warband.delve.mode == DelveMode.DEFAULT,
+		"a band that has never been down opens on the easy Hollow (%s)" % area.prep.mode())
+	(modes["hard"] as Button).pressed.emit()
+	check(area.prep.mode() == "hard" and warband.delve.mode == "hard",
+		"a press on HARD puts the next descent on hard (%s)" % area.prep.mode())
+	check((modes["hard"] as Button).button_pressed and not (modes["easy"] as Button).button_pressed,
+		"and the plate lit is the one pressed")
+	check(not bool(warband.set_delve_mode("brutal").get("ok", false))
+			and warband.delve.mode == "hard",
+		"a difficulty the Hollow does not have is refused")
+	(modes["easy"] as Button).pressed.emit()
+	check(area.prep.mode() == "easy" and (modes["easy"] as Button).button_pressed,
+		"and the party is put back on the easy Hollow")
 	var offered: Array[int] = area.prep.candidates()
 	check(offered.size() == 5, "every standing body is offered (%d)" % offered.size())
 	check(area.prep.selected().size() == offered.size(), "and every one starts chosen")
@@ -361,7 +389,7 @@ func check_floor_plan() -> void:
 			var at: Vector3 = cave.to_local(mob.global_position)
 			if room.has_point(Vector2(at.x, at.z)):
 				inside += 1
-		if fielded.size() != Layout.den_bodies(spec) or inside != fielded.size():
+		if fielded.size() != Layout.den_bodies(spec, warband.delve.mode) or inside != fielded.size():
 			thin.append("%s %d/%d" % [spec["id"], inside, fielded.size()])
 	check(thin.is_empty(), "every den fields its crowd a post, all in its own room (%s)" % str(thin))
 	var misplaced: Array[String] = []
@@ -498,8 +526,94 @@ func check_demon_ring() -> void:
 	for mob in cave.den_mobs("ring_s"):
 		if mob.has_method("demon"):
 			keeper = mob
-	check(keeper != null and float(keeper.get("max_health")) > 200.0,
-		"a chamber's keeper is a demon of the floor's own weight (%s)" % str(keeper.get("max_health") if keeper != null else 0))
+	# A keeper is the floor's own weight, not the wardens' - and the difficulty
+	# scales every body on the floor by the same factor, so the comparison is taken
+	# between two bodies standing on this floor whatever mode it was built with.
+	var warden = null
+	for mob in cave.den_mobs("den"):
+		if not mob.has_method("demon") and not mob.has_method("begin_ambush"):
+			warden = mob
+			break
+	check(keeper != null and warden != null
+			and float(keeper.get("max_health")) >= float(warden.get("max_health")) * 2.0,
+		"a chamber's keeper is a demon of the floor's own weight (%s against a warden's %s)" % [
+			str(keeper.get("max_health")) if keeper != null else 0,
+			str(warden.get("max_health")) if warden != null else 0])
+
+
+## The difficulty a party goes down on, on the floor it actually built. EASY is the
+## default, so this is the floor the first descent made: a third of every den's
+## crowd a post, half the pool, and the speeds the bodies were authored with. The
+## three dials are proved on real rigs - one of the floor's wardens and one of its
+## archers - by scaling them the way a hard floor would and reading the numbers
+## back, then putting the body back where the floor left it.
+func check_difficulty() -> void:
+	var cave = game.delve_area.cave
+	check(cave.mode == "easy", "the first floor is built on the easy Hollow (%s)" % cave.mode)
+	var expected := 1
+	for spec in Layout.DENS:
+		expected += Layout.den_bodies(spec, "easy")
+	check(cave.mobs().size() == expected,
+		"the easy floor stands %d bodies (%d)" % [expected, cave.mobs().size()])
+	var hard_total := 1
+	for spec in Layout.DENS:
+		hard_total += Layout.den_bodies(spec, "hard")
+	check(hard_total > expected * 2,
+		"and the hard Hollow stands %d over the easy one's %d" % [hard_total, expected])
+	check(Layout.den_crowd(Layout.DENS[0], "easy") < Layout.den_crowd(Layout.DENS[0], "medium")
+			and Layout.den_crowd(Layout.DENS[0], "medium") < Layout.den_crowd(Layout.DENS[0], "hard"),
+		"the crowd a post stands climbs easy, medium, hard (%d / %d / %d)" % [
+			Layout.den_crowd(Layout.DENS[0], "easy"),
+			Layout.den_crowd(Layout.DENS[0], "medium"),
+			Layout.den_crowd(Layout.DENS[0], "hard")])
+	var watcher = null
+	var archer = null
+	for mob in cave.den_mobs("workings"):
+		if mob.has_method("begin_ambush"):
+			archer = mob
+		elif watcher == null:
+			watcher = mob
+	check(watcher != null and archer != null, "a hall's warden and its archer stand on the floor")
+	if watcher == null or archer == null:
+		return
+	# The body the hard floor is compared against: the same authored post, standing
+	# on both floors (the authored posts are never thinned).
+	_probe_name = str(watcher.name)
+	_probe_pool = float(watcher.get("max_health"))
+	_probe_walk = float(watcher.profile.walk_speed)
+	_probe_beat = float(watcher._cooldown_seconds())
+	check(is_equal_approx(_probe_pool, float(watcher.get("health"))),
+		"a body scaled at spawn starts on its whole pool (%.1f)" % _probe_pool)
+	# Idempotent: the same difficulty applied again is the same body.
+	watcher.apply_difficulty(0.5, 1.0)
+	check(is_equal_approx(float(watcher.get("max_health")), _probe_pool),
+		"a difficulty applied twice is one floor, not two (%.1f)" % float(watcher.get("max_health")))
+	var archer_beat := float(archer._cooldown_seconds())
+	var archer_pool := float(archer.get("max_health"))
+	for mob in [watcher, archer]:
+		mob.apply_difficulty(2.0, 2.0)
+	check(is_equal_approx(float(watcher.get("max_health")), _probe_pool * 4.0)
+			and is_equal_approx(float(archer.get("max_health")), archer_pool * 4.0),
+		"twice the pool where the easy floor gave half of it (%s / %s)" % [
+			str(watcher.get("max_health")), str(archer.get("max_health"))])
+	check(is_equal_approx(float(watcher.profile.walk_speed), _probe_walk * 2.0)
+			and is_equal_approx(float(watcher.profile.run_speed),
+				float(watcher._authored["run_speed"]) * 2.0),
+		"twice the walk and the run (%.2f m/s)" % float(watcher.profile.walk_speed))
+	check(is_equal_approx(float(watcher._cooldown_seconds()), _probe_beat / 2.0),
+		"and a swing every half the beat (%.2f s of %.2f)" % [
+			float(watcher._cooldown_seconds()), _probe_beat])
+	check(is_equal_approx(float(archer._cooldown_seconds()), archer_beat / 2.0),
+		"the archer looses on the floor's own clock too (%.2f s of %.2f)" % [
+			float(archer._cooldown_seconds()), archer_beat])
+	# Back to the floor under test: every later check fights the easy Hollow.
+	watcher.apply_difficulty(0.5, 1.0)
+	archer.apply_difficulty(0.5, 1.0)
+	check(is_equal_approx(float(watcher.get("max_health")), _probe_pool)
+			and is_equal_approx(float(archer.get("max_health")), archer_pool),
+		"and a body put back on easy is the body it was")
+	check(game.loot_feed.header_text().contains(DelveMode.label_of("easy")),
+		"the floor's own line names the difficulty (%s)" % game.loot_feed.header_text())
 
 
 ## The middle of a room's floor, in the cave's frame (y is a metre up).
@@ -1091,9 +1205,38 @@ func check_fall() -> void:
 	for merc_id in party:
 		worn += warband.roster.worn_entries(merc_id).size()
 	check(worn > 0, "the second party wears something to lose (%d)" % worn)
+	# The next descent is on the hard floor: the same cave, built with twice the
+	# pool and twice the speed, and every den's crowd at its authored size.
+	check(bool(warband.set_delve_mode("hard").get("ok", false)),
+		"the mouth can put the next descent on the hard Hollow")
 	var result: Dictionary = await area.descend(party)
 	check(bool(result.get("ok", false)), "a second party goes down (%s)" % str(result.get("message", "")))
 	check(not area.cave.is_awake("den"), "into a fresh instance: the den sleeps again")
+	var hard = area.cave
+	check(hard.mode == "hard", "the second floor is built on the hard Hollow (%s)" % hard.mode)
+	var hard_expected := 1
+	for spec in Layout.DENS:
+		hard_expected += Layout.den_bodies(spec, "hard")
+	check(hard.mobs().size() == hard_expected,
+		"the hard floor stands %d bodies (%d)" % [hard_expected, hard.mobs().size()])
+	var probe = null
+	for mob in hard.den_mobs("workings"):
+		if str(mob.name) == _probe_name:
+			probe = mob
+	check(probe != null, "the same post stands on both floors (%s)" % _probe_name)
+	if probe != null:
+		check(is_equal_approx(float(probe.get("max_health")), _probe_pool * 4.0)
+				and is_equal_approx(float(probe.get("health")), float(probe.get("max_health"))),
+			"the hard floor gives the body four times the easy pool (%.1f of %.1f)"
+			% [float(probe.get("max_health")), _probe_pool])
+		check(is_equal_approx(float(probe.profile.walk_speed), _probe_walk * 2.0),
+			"and twice the walk it had on easy (%.2f of %.2f)"
+			% [float(probe.profile.walk_speed), _probe_walk])
+		check(is_equal_approx(float(probe._cooldown_seconds()), _probe_beat / 2.0),
+			"and swings on half the beat (%.2f s of %.2f)"
+			% [float(probe._cooldown_seconds()), _probe_beat])
+	check(not bool(warband.set_delve_mode("easy").get("ok", false)),
+		"a floor somebody is below cannot be re-cut under the party")
 	for merc_id in party:
 		game.controller.body_of(merc_id).take_damage(9999.0, 90)
 	await create_timer(AreaScript.WIPE_BEAT + 0.6).timeout
@@ -1125,5 +1268,7 @@ func check_load_forfeit() -> void:
 	check(bool(warband.begin_delve([merc_id]).get("ok", false)), "the books take a party down")
 	warband.load_state()
 	check(not warband.delve.active, "a save that still holds a party below loads with nobody below")
+	check(warband.delve.mode == "hard",
+		"and the Hollow's difficulty comes back with the books (%s)" % warband.delve.mode)
 	check(warband.roster.worn_entries(merc_id).is_empty(), "and that party's gear is lost")
 	check(warband.delve.inventory.pooled_total() == 0, "with what it packed")

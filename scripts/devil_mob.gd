@@ -641,6 +641,44 @@ func _windup_seconds() -> float:
 	return float(profile.get("windup", 0.45))
 
 
+# --- the owner's difficulty --------------------------------------------------
+
+## This body's share of its owner's difficulty (`delve_mode.gd`): how often it
+## swings. 1.0 is the body as authored, and the frontier's own mobs never leave it.
+## The swing's telegraph and strike are the animation's and stay as authored - a
+## body that swings twice as often still lands its blow on the clip's own impact
+## frame - so this divides the wait *between* blows only.
+var difficulty_rate := 1.0
+## The pool, walk and run this body was born with, taken the first time a floor
+## scales it: `apply_difficulty` sets from these rather than compounding, so a body
+## re-scaled twice is still its authored self.
+var _authored := {}
+
+
+## Set this body's numbers for a floor of a given difficulty: `life` multiplies its
+## pool and `rate` multiplies how fast it walks and runs and how often it swings
+## (`difficulty_rate`, which `_cooldown_seconds` divides by). A body refilled to
+## its new pool, since a floor scales a body at spawn and never under a fight.
+##
+## The authored numbers are taken on the first call and every later one sets from
+## them, so the verb is idempotent: the same difficulty applied twice is the floor
+## that difficulty asks for, not four times it.
+func apply_difficulty(life: float, rate: float) -> void:
+	if not alive:
+		return
+	if _authored.is_empty():
+		_authored = {
+			"max_health": max_health,
+			"walk_speed": float(profile.get("walk_speed", 0.0)),
+			"run_speed": float(profile.get("run_speed", 0.0)),
+		}
+	max_health = maxf(1.0, float(_authored["max_health"]) * life)
+	health = max_health
+	profile["walk_speed"] = float(_authored["walk_speed"]) * rate
+	profile["run_speed"] = float(_authored["run_speed"]) * rate
+	difficulty_rate = maxf(0.01, rate)
+
+
 ## Calm: the mob keeps its patch. It walks to the territory's current goal at
 ## its own walk speed, rests when it arrives, and hurries home if a chase left
 ## it outside.
@@ -1004,9 +1042,10 @@ func _strike_damage() -> float:
 
 
 ## The beat between two swings. A scene may own this as a dial - a body that
-## swings too often is not the same fight as one that does not.
+## swings too often is not the same fight as one that does not - and the floor's
+## difficulty scales it through `difficulty_rate`.
 func _cooldown_seconds() -> float:
-	return float(profile.cooldown)
+	return float(profile.cooldown) / maxf(0.01, difficulty_rate)
 
 
 ## Whether a body at `focus` may be fought: the town's safe ring shuts every

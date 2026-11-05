@@ -32,6 +32,8 @@ extends RefCounted
 ## floor; 1.0 is the plan as drawn.
 const SCALE := 2.0
 
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
+
 ## How far the floor has fallen by the plan's rim. The Hollow is not a shelf cut
 ## level into the rock: the ground runs down and away from the mouth all the way
 ## back to the lair, so a hall at the far rim lies `DESCENT` metres below the
@@ -741,25 +743,33 @@ static func area_name(area_id: String) -> String:
 ## unless the den names its own `crowd`. A den's barracks is ten a post; a hall a
 ## party walks through keeps its own number, so the floor can be populated where
 ## the walking happens without a hall turning into a second barracks.
-static func den_crowd(den: Dictionary) -> int:
-	return maxi(1, int(den.get("crowd", DEN_CROWD)))
+##
+## `mode` (a `delve_mode.gd` id) thins that number for an easier floor: easy stands
+## a third of it a post, medium two thirds. `""` is the den as authored - every
+## body the floor can ever stand - which is what the ground under the posts and the
+## stone grown round them are planned for, so a party's difficulty never changes
+## the shape of the room it fights in.
+static func den_crowd(den: Dictionary, mode: String = "") -> int:
+	var base := maxi(1, int(den.get("crowd", DEN_CROWD)))
+	return base if mode.is_empty() else DelveMode.crowd_of(base, mode)
 
 
 ## Every post a den fields, `{species, at, face}`: its authored `members` first,
 ## then the crowd (`den_crowd`). A post written `bow` or `demon` is one body and
 ## is never crowded (`_crowdable`); the crowd repeats the den's melee posts up to
 ## `den_crowd` bodies for each, so ten a post stays ten a post and an archer or a
-## demon stays the one it was written as. Pure and cached, so the cave, the
-## dressing that keeps the posts clear and a co-op guest's copy all stand the same
-## bodies on the same spots.
-static func den_members(den: Dictionary) -> Array:
-	var den_id := str(den["id"])
-	if _crowds.has(den_id):
-		return _crowds[den_id]
+## demon stays the one it was written as. `mode` thins the crowd (`den_crowd`);
+## `""` is the den as authored, every post the floor can ever stand.
+## Pure and cached per den and difficulty, so the cave, the dressing that keeps the
+## posts clear and a co-op guest's copy all stand the same bodies on the same spots.
+static func den_members(den: Dictionary, mode: String = "") -> Array:
+	var key := "%s|%s" % [str(den["id"]), mode]
+	if _crowds.has(key):
+		return _crowds[key]
 	var authored: Array = den["members"]
 	var out: Array = authored.duplicate()
 	var index := room_index(str(den["room"]))
-	_crowds[den_id] = out
+	_crowds[key] = out
 	if index < 0 or authored.is_empty():
 		return out
 	var melee := _crowdable(authored)
@@ -789,7 +799,7 @@ static func den_members(den: Dictionary) -> Array:
 	gaps.fill(INF)
 	for row in authored:
 		_narrow(gaps, spots, row["at"])
-	var want := melee.size() * den_crowd(den) + (authored.size() - melee.size())
+	var want := melee.size() * den_crowd(den, mode) + (authored.size() - melee.size())
 	while out.size() < want:
 		var best := -1
 		for spot_index in spots.size():
@@ -816,11 +826,13 @@ static func _crowdable(authored: Array) -> Array:
 
 
 ## How many bodies a den fields: `den_crowd` for each melee post it was written
-## with, and one for each archer or demon it names. The regression asks this of
-## the plan and counts the bodies the built floor stands on its floor.
-static func den_bodies(den: Dictionary) -> int:
+## with, and one for each archer or demon it names - on a floor of `mode`'s
+## difficulty (`""` for the den as authored). The regression asks this of the plan
+## and counts the bodies the built floor stands on its floor.
+static func den_bodies(den: Dictionary, mode: String = "") -> int:
 	var authored: Array = den["members"]
-	return _crowdable(authored).size() * den_crowd(den) + authored.size() - _crowdable(authored).size()
+	var crowdable := _crowdable(authored).size()
+	return crowdable * den_crowd(den, mode) + authored.size() - crowdable
 
 
 static func _narrow(gaps: PackedFloat32Array, spots: Array[Vector2], at: Vector3) -> void:

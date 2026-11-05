@@ -239,7 +239,7 @@ func _windup_seconds() -> float:
 
 
 func _cooldown_seconds() -> float:
-	return COOLDOWN_SECONDS * maxf(0.0, swing_gap_scale)
+	return COOLDOWN_SECONDS * maxf(0.0, swing_gap_scale) / maxf(0.01, difficulty_rate)
 
 
 ## What one shaft is worth. The scene's `blow_scale` still weights it.

@@ -17,6 +17,7 @@ extends RefCounted
 ## Pure data, like the stash and the ledger: no node, and `Warband` persists it.
 
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 
 ## The Hollow has one floor so far.
 const FLOOR_ONE := 1
@@ -24,6 +25,11 @@ const FLOOR_ONE := 1
 ## True from the moment a party goes down until it climbs out or falls.
 var active := false
 var depth := FLOOR_ONE
+## How hard the floor is, chosen at the mouth (`delve_mode.gd`): one of
+## `DelveMode.ORDER`, and `DelveMode.DEFAULT` until the player says otherwise. It
+## is the descent's difficulty, not a per-party setting, so it survives a climb
+## out - the next party goes down the same way until the toggle moves.
+var mode: String = DelveMode.DEFAULT
 ## The bodies that went down, by mercenary id, in the order they were chosen.
 var party: Array[int] = []
 ## The delve inventory: the packed supplies, then everything looted below.
@@ -55,9 +61,11 @@ func finish() -> void:
 	depth = FLOOR_ONE
 
 
-## Forget the descent and the pack: a fresh campaign.
+## Forget the descent and the pack: a fresh campaign. The difficulty goes back to
+## what a new warband opens on.
 func clear() -> void:
 	finish()
+	mode = DelveMode.DEFAULT
 	inventory.clear()
 
 
@@ -65,18 +73,21 @@ func to_dict() -> Dictionary:
 	return {
 		"active": active,
 		"depth": depth,
+		"mode": mode,
 		"party": party.duplicate(),
 		"inventory": inventory.to_dict(),
 	}
 
 
 ## Read a saved record. Anything that is not a well-formed descent reads as no
-## descent, and a descent with nobody in it is not one.
+## descent, and a descent with nobody in it is not one. A file from before the
+## Hollow had difficulties carries no `mode` and opens on the default one.
 func from_dict(data: Variant) -> void:
 	clear()
 	if not (data is Dictionary):
 		return
 	var record: Dictionary = data
+	mode = DelveMode.id_of(str(record.get("mode", DelveMode.DEFAULT)))
 	var saved_inventory: Variant = record.get("inventory", {})
 	if saved_inventory is Dictionary:
 		inventory.from_dict(saved_inventory)

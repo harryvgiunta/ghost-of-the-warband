@@ -41,6 +41,7 @@ const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 
 ## Where the mouth stands, in the square's own frame: the plot the expedition gate
 ## used to hold, which the square's fingerpost still points down.
@@ -166,6 +167,17 @@ func panels_open() -> bool:
 func close_panels() -> void:
 	if prep != null:
 		prep.close()
+
+
+## How hard the floor is going down (`Warband.delve.mode`, chosen at the mouth).
+## The host's books decide it and a guest mirrors them, so both machines build the
+## same floor; a warband that has no book yet gets the default.
+func delve_mode() -> String:
+	var warband = host.get("warband") if host != null else null
+	var delve = warband.get("delve") if warband != null else null
+	if delve == null:
+		return DelveMode.DEFAULT
+	return DelveMode.id_of(str(delve.mode))
 
 
 # --- the HUD lines -----------------------------------------------------------
@@ -322,8 +334,9 @@ func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 	var controller = host.controller
 	if not ids.has(int(controller.merc_for_peer(controller.local_peer_id))):
 		controller.direct(controller.local_peer_id, ids[0])
-	host.hud.set_status("The party goes down into the Weeping Hollow: %s." % Layout.area_name(
-		str(Layout.landing(landing)["area"])), 4.0)
+	host.hud.set_status("The party goes down into the Weeping Hollow: %s  ·  %s." % [
+		Layout.area_name(str(Layout.landing(landing)["area"])),
+		DelveMode.label_of(cave.mode)], 4.0)
 	descended.emit(ids.duplicate())
 	return {"ok": true, "party": ids, "landing": landing, "message": str(booked.get("message", ""))}
 
@@ -430,7 +443,7 @@ func _open_instance(as_replica: bool, warm_room: String = "") -> void:
 	# The floor comes up a frame's worth at a time: the loading line counts while
 	# the window keeps painting. Nothing below is trusted until `cave.built`.
 	_building = true
-	await cave.build_staged(host, as_replica, warm_room)
+	await cave.build_staged(host, as_replica, warm_room, delve_mode())
 	_building = false
 	cave.den_woke.connect(_on_den_woke)
 	cave.master_slain.connect(_on_master_slain)
@@ -518,7 +531,8 @@ func _paint_header() -> void:
 	for item_id in pooled:
 		value += StashScript.value_of(str(item_id)) * int(pooled[item_id])
 	var pieces: int = pool.pooled_total()
-	var lines := PackedStringArray(["%s  ·  %s" % [CaveScript.TITLE, CaveScript.FLOOR_LABEL]])
+	var lines := PackedStringArray(["%s  ·  %s  ·  %s" % [CaveScript.TITLE,
+		CaveScript.FLOOR_LABEL, DelveMode.label_of(cave.mode)]])
 	var body = host.controller.active_body() if host.controller != null else null
 	var rope := {}
 	if body != null and is_instance_valid(body) and cave != null and cave.contains(body.global_position):

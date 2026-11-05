@@ -37,6 +37,14 @@ extends Node3D
 ## blow, or a body walks into the room. Then the whole den wakes at once - the
 ## archers spring with it - and joins `host.guards`, where the squad, the retarget
 ## and the session find it like any other hostile.
+##
+## **The floor's difficulty** (`delve_mode.gd`, `mode`) is settled before the first
+## step of the build and reaches every body on the floor: it thins each den's crowd
+## (`Layout.den_members(spec, mode)`) and scales each body's pool, walk, run and
+## swing cadence (`devil_mob.apply_difficulty`). It costs a body nothing at runtime -
+## the numbers are set once, at spawn - and the rock, the dressing and the dressing
+## that keeps a post clear are built for every post the floor could ever stand, so
+## the room a party fights in does not change with the difficulty.
 
 ## A den just woke: `label` is how the HUD names it.
 signal den_woke(den_id: String, label: String)
@@ -55,6 +63,7 @@ const MobWander = preload("res://scripts/mob_wander.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
 const FaunaScript = preload("res://scripts/warband/delve_fauna.gd")
 const Loot = preload("res://scripts/warband/delve_loot.gd")
+const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
 const TITLE := "THE WEEPING HOLLOW"
@@ -122,6 +131,11 @@ var host: Node3D = null
 ## True on a co-op guest: the bodies are the host's to drive, so they go straight
 ## onto the hostile list as replicas and nothing here wakes them.
 var replica := false
+## How hard this floor is (`delve_mode.gd`), read off the warband's books when the
+## instance is built: it decides the crowd a den stands and the pool, speed and
+## swing cadence of every body on the floor. A floor's difficulty is settled at the
+## mouth - the whole cave is built with it, host and guest alike.
+var mode: String = DelveMode.DEFAULT
 ## The squad's map of the floor (`squad_nav.gd`).
 var nav = null
 ## The camera's environment while the eye is below.
@@ -309,8 +323,9 @@ var _step_index := 0
 ## are all read in world space. A descent in the running game uses
 ## `build_staged` instead - the same steps, a few per frame - so no frame ever
 ## stops for the two to four seconds this costs.
-func build(world: Node3D, as_replica: bool = false) -> void:
-	_plan_build(world, as_replica)
+func build(world: Node3D, as_replica: bool = false,
+		difficulty: String = DelveMode.DEFAULT) -> void:
+	_plan_build(world, as_replica, difficulty)
 	Perf.begin("build")
 	while _step_index < _steps.size():
 		Perf.begin(_step_name(_step_index))
@@ -331,8 +346,9 @@ func build(world: Node3D, as_replica: bool = false) -> void:
 ## longer than a playing one, and left alone the engine pays the debt back as a
 ## burst of eight steps on one frame - a hundred and seventy milliseconds of a
 ## stall on the frame the floor was finished, which is the freeze this replaces.
-func build_staged(world: Node3D, as_replica: bool = false, warm_room: String = "") -> void:
-	_plan_build(world, as_replica)
+func build_staged(world: Node3D, as_replica: bool = false, warm_room: String = "",
+		difficulty: String = DelveMode.DEFAULT) -> void:
+	_plan_build(world, as_replica, difficulty)
 	built = false
 	built_share = 0.0
 	var steps_allowance := Engine.max_physics_steps_per_frame
@@ -416,11 +432,12 @@ func _step_name(index: int) -> String:
 
 ## The ordered steps. One per room for the rock, its dressing and its crowd, so a
 ## frame's share of the build is a room and not a hundred of them.
-func _plan_build(world: Node3D, as_replica: bool) -> void:
+func _plan_build(world: Node3D, as_replica: bool, difficulty: String) -> void:
 	_steps.clear()
 	_step_index = 0
 	host = world
 	replica = as_replica
+	mode = DelveMode.id_of(difficulty)
 	loot_rng.randomize()
 	_steps.append(_step_environment)
 	_steps.append(_rock_start)
@@ -745,7 +762,7 @@ func _build_den(spec: Dictionary) -> void:
 	var members: Array = []
 	var index := 0
 	var tag := str(spec["id"]).replace("_", " ").capitalize().replace(" ", "")
-	for row in Layout.den_members(spec):
+	for row in Layout.den_members(spec, mode):
 		index += 1
 		var at: Vector3 = row["at"]
 		var face: Vector3 = row["face"]
@@ -757,6 +774,11 @@ func _build_den(spec: Dictionary) -> void:
 			members.append(_spawn_archer(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
 		else:
 			members.append(_spawn_watcher(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
+	# The floor's difficulty on the body itself: the pool it carries and how fast it
+	# moves and swings. Set once, here, before the den is ever asked anything.
+	for mob in members:
+		if is_instance_valid(mob) and mob.has_method("apply_difficulty"):
+			mob.apply_difficulty(DelveMode.life_of(mode), DelveMode.rate_of(mode))
 	MobWander.assign_all(members, PACK_RADIUS)
 	# A body stands its post asleep, not simulating until the poll has had a
 	# look at where the party landed. Built awake, a floor's 298 bodies all ran
@@ -786,6 +808,8 @@ func _mobs_end() -> void:
 	_mobs_root.add_child(master)
 	master.home = master.global_position
 	master.safe_center = _safe_center()
+	if master.has_method("apply_difficulty"):
+		master.apply_difficulty(DelveMode.life_of(mode), DelveMode.rate_of(mode))
 	_wire(master)
 	master.defeated.connect(_on_master_defeated)
 	if master.has_method("set_culled"):

@@ -623,7 +623,8 @@ func _windup_seconds() -> float:
 ## The beat between two swings: the profile's own cycle, stretched by the dial a
 ## wave sets on its own bodies.
 func _cooldown_seconds() -> float:
-	return float(profile.get("cooldown", 1.0)) * maxf(0.0, swing_gap_scale)
+	return float(profile.get("cooldown", 1.0)) * maxf(0.0, swing_gap_scale) \
+		/ maxf(0.01, difficulty_rate)
 
 
 func _present_blocking() -> bool:

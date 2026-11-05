@@ -708,6 +708,20 @@ take what the cave holds, and climb out alive with it.
    goes down, and every free arrow and bandage is already in it. A click on a
    row sends one copy one way, a shift-click asks how many, and the inventory's
    rows go back the same way. A pack left at the mouth stays packed.
+   **THE DESCENT** picks how hard the floor below is - three plates, **EASY**
+   lit unless you move it:
+
+   | | The crowd | The pool | The pace |
+   | --- | --- | --- | --- |
+   | **EASY** | a third of every den's crowd a post - **118 bodies** | **half** the pool | the speed it always fought at |
+   | **MEDIUM** | two thirds a post - **217 bodies** | the pool it always had | **30%** faster on its feet and between blows |
+   | **HARD** | every body - **299**, the floor as it always was | **twice** the pool | **twice** as fast |
+
+   Every den keeps its own species and its archer whatever you pick, and the ring
+   and the lair are the same fights in all three; what the toggle changes is the
+   crowd round them, the pool each body carries and how fast it closes and
+   swings. It is saved with the warband, comes down with the next party, and a
+   floor somebody is on cannot be re-cut under them.
 2. **GO DOWN** lowers the party down one of six shafts into a **fresh instance**
    of floor I, built when the party goes down and freed when it comes back up.
    The build is a load, not a freeze: the floor comes up a frame's worth at a
@@ -736,7 +750,9 @@ take what the cave holds, and climb out alive with it.
    of them: a hall is held by a scattered few and one archer, a tunnel by a pair, each
    chamber of the ring by **a demon and two archers**, the lair by **five demons -
    one of every species the floor fields - and two archers** - **298 bodies
-   below**, 299 with Gorehorn - until one of them sees you, hears a fight or takes
+   below**, 299 with Gorehorn on the **hard** floor, which is the floor as it was
+   authored; the easier descents stand a third and two thirds of each den's crowd
+   (`THE DESCENT`, above) - until one of them sees you, hears a fight or takes
    a blow, or a body walks into the room - then the whole den wakes, the archers
    with it. A den that has
    woken lets go again once the eye has lost it and no body of the party is
@@ -785,8 +801,9 @@ take what the cave holds, and climb out alive with it.
    save that still holds a party below loads with that party's gear and pack
    gone.
 
-The HUD carries the floor's line over the looted list (the floor, the area you
-are in, what the inventory holds, **WAY UP** - the nearest rope by walking
+The HUD carries the floor's line over the looted list (the floor and its
+difficulty, the area you are in, what the inventory holds, **WAY UP** - the
+nearest rope by walking
 distance - and Gorehorn's blood once he is up), and the crosshair line names the
 objective and, once Gorehorn is dead, the nearest rope. **M** below opens the
 **floor's plan**: every hall and way of floor I on one surveyor's sheet, the six
