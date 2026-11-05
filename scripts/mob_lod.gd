@@ -1,10 +1,9 @@
 extends RefCounted
-## Frame budget for the wilderness tick.
+## Frame budget for the wilderness brain.
 ##
-## Seventy-five bodies cannot each run sight, steering, the state machine and a
-## swept collision move every frame: at 60 Hz that alone eats most of the
-## physics budget. One rule instead - the tick rate follows the distance to the
-## nearest ranger:
+## Seventy-five bodies cannot each run sight, steering and the state machine
+## every frame: at 60 Hz that alone eats most of the physics budget. One rule
+## instead - the *decision rate* follows the distance to the nearest ranger:
 ##
 ##   near  (<= 22 m)   every frame        (30 Hz once calm: a fight is the
 ##                                         only thing that needs 60)
@@ -13,10 +12,20 @@ extends RefCounted
 ##   deep  (> 95 m)    every twenty-four  (2.5 Hz)
 ##   parked (> 150 m)  never              (no tick, no draw, no state change)
 ##
-## A skipped frame is not lost time: the pending delta is carried into the next
-## tick, so a far body covers the same ground in coarser steps. Beyond 55 m no
+## `MobLod` decides how often a body may *tick*; a family may spread its brain
+## further inside those ticks. `enemy.gd` thinks on the budget itself (60/20/5/2.5
+## Hz by band); `devil_mob` re-spreads its brain over every fifth tick
+## (`THINK_FRAMES`), so a near body decides 12 times a second, mid 4, far 1 and
+## deep 0.5 - the further away a body is, the less it is asked to notice, and a
+## hall of two hundred of them is not two hundred brains at 60 Hz.
+##
+## The budget buys **decisions, not motion**. A body's feet move on every frame
+## it is awake, on the motion its last decided tick set (`MobLod.move`), so a
+## body on the far budget walks as smoothly as a near one. A skipped frame is
+## not lost time either: the pending delta is carried into the next decision, so
+## a far body decides over the same wall clock in coarser steps. Beyond 55 m no
 ## profile can see past 32 m, so a low-rate body can never miss a sighting it
-## could have made, and it is far enough away that 5 Hz reads as motion.
+## could have made.
 ##
 ## Past `DORMANT_DISTANCE` a low rate is still a wasted frame: nothing that far
 ## away can be seen at all - the frontier's fog is opaque well before it - so a
@@ -136,26 +145,36 @@ static func band(nearest: float) -> int:
 	return 2
 
 
-## `move_and_slide` integrates exactly one physics frame, but a budgeted tick
-## has to cover several. The sweep is scaled up for this call and the body's
-## velocity is restored after it, so a body on a 24-frame budget still covers
-## 24 frames of ground in one cast (and one collision query). Views of `delta`
-## inside the AI stay in real seconds.
-static func move(body: CharacterBody3D, delta: float) -> void:
-	if not is_instance_valid(body):
-		return
-	var engine := maxf(float(body.get_physics_process_delta_time()), 0.0001)
-	var scale := clampf(delta / engine, 1.0, float(DEEP_FRAMES))
-	if scale <= 1.0001:
+## Below this horizontal speed a body with its feet down has nowhere to go.
+const STILL_SPEED := 0.02
+
+## The body's own step: exactly one physics frame, every frame it is awake.
+## Every mob family steps its feet here and puts only its *decisions* on the
+## budget, so a body on the far budget covers the same ground in the same shape
+## as one in a fight. (This used to scale the sweep by the banked budget, which
+## is why a body at sixty metres crossed the ground in metre-long steps five
+## times a second.)
+##
+## **A standing body does not sweep.** `move_and_slide` is the most expensive
+## thing a mob does in a frame - a capsule cast at the terrain, 2.6 us on this
+## project's world - and for a body with its feet down and no motion it resolves
+## to standing still. Half of a stand-off is spent standing or circling on the
+## spot: two hundred bodies holding a hall was two hundred casts a frame, 0.5 ms,
+## for nothing.
+static func move(body: CharacterBody3D) -> void:
+	if is_instance_valid(body) and moving(body):
 		body.move_and_slide()
-		return
-	# Only the horizontal sweep is scaled. A scaled fall would drive the capsule
-	# into the floor and the recovery step would eat the horizontal motion with
-	# it - the body would stand still with a velocity set.
-	var effective := body.velocity
-	body.velocity = Vector3(effective.x * scale, effective.y, effective.z * scale)
-	body.move_and_slide()
-	body.velocity = Vector3(body.velocity.x / scale, body.velocity.y, body.velocity.z / scale)
+
+
+## Whether this body has anywhere to go this frame: it is off its feet, or it is
+## moving. The one rule `move` applies and the one a regression can read - a body
+## with its feet down and no motion asks the world nothing at all.
+static func moving(body: CharacterBody3D) -> bool:
+	if not is_instance_valid(body):
+		return false
+	if not body.is_on_floor():
+		return true
+	return Vector2(body.velocity.x, body.velocity.z).length() >= STILL_SPEED
 
 
 ## One render budget for a GLB body: animation evaluation and the shadow pass

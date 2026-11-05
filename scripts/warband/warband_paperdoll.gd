@@ -54,6 +54,29 @@ const HOTBAR_GAP := 3
 ## has one left edge and one right edge instead of three.
 const HOTBAR_WIDTH := HOTBAR_TILE * AbilityRules.SLOT_COUNT \
 	+ HOTBAR_GAP * (AbilityRules.SLOT_COUNT - 1)
+## The strip of dressable bodies over the page: four chips a row, and two rows
+## before the strip scrolls. Eight chips in one row measured 1488 px against the
+## page's 1112 and dragged the band-wide press out of the window; the cap is the
+## deployment cap, and a longer roster (a rescue leaves names in the reserve) is
+## read a row at a time. A chip is a fixed measure with clipped text, so a long
+## name can never widen the row - the strip is the same width for one name and
+## for twenty.
+const PICKER_COLUMNS := 4
+const PICKER_ROWS := 2
+const PICKER_GAP := 6
+## Rows sit closer than columns: two rows of chips are 76 px, and the page's ten
+## worn slots and the hotbar are the rest of the budget.
+const PICKER_VGAP := 4
+const PICKER_CHIP := Vector2(210, 30)
+## The page the frame draws inside its own edges, and the three columns that
+## share it. The centre column is the hotbar's own measure, so the two side
+## columns take what is left: a page that does not add up draws its own right
+## edge, and the stash with it, out past the vellum.
+const PAGE_WIDTH := SIZE.x - 2.0 * (
+	LedgerFrameScript.PAGE_INSET + LedgerFrameScript.BODY_PAD_X)
+const GUTTER := 16.0
+const WORN_WIDTH := 320.0
+const STASH_WIDTH := PAGE_WIDTH - WORN_WIDTH - 2.0 * GUTTER - HOTBAR_WIDTH
 const SLOT_ICON := {
 	"head": "helm", "chest": "cuirass", "hands": "gauntlet", "legs": "greaves",
 	"feet": "boot", "neck": "amulet", "ring1": "ring", "ring2": "ring",
@@ -98,7 +121,8 @@ var _open := false
 ## True once the player has chosen a slot by hand; until then a stash click
 ## falls back to `EquipmentRules.auto_slot` so one click still dresses a body.
 var _slot_chosen := false
-var _picker_box: HBoxContainer
+var _picker_box: GridContainer
+var _picker_scroll: ScrollContainer
 var _head_hint: Label
 var _worn_title: Label
 var _stash_title: Label
@@ -394,6 +418,12 @@ func status_text() -> String:
 	return _status.text if _status != null else ""
 
 func _on_warband_changed() -> void:
+	# A closed page is repainted by `open()`, and `Warband.changed` is a coarse
+	# event - a shaft leaving the quiver, a spare booked - that fires many times a
+	# second in a fight. Repainting the whole sheet (stash rows, slots, picker,
+	# hotbar, preview) for a picture nobody is looking at is pure frame cost.
+	if not _open:
+		return
 	refresh()
 
 func _detach_source() -> void:
@@ -430,7 +460,7 @@ func _ensure_built() -> void:
 	shell.add_child(frame)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
+	column.add_theme_constant_override("separation", 4)
 	frame.body.add_child(column)
 
 	# Two header lines, each on the frame's edges: the screen's name and the body
@@ -451,28 +481,43 @@ func _ensure_built() -> void:
 	var picker_line := HBoxContainer.new()
 	picker_line.add_theme_constant_override("separation", 12)
 	column.add_child(picker_line)
-	_picker_box = HBoxContainer.new()
-	_picker_box.add_theme_constant_override("separation", 6)
-	picker_line.add_child(_picker_box)
+	# The strip is a bounded window on the chips: the grid inside is shot to the
+	# page's width and the scroll only ever moves up and down, so a roster of five
+	# or of twenty leaves the band-wide press on the same edge of the page.
+	_picker_scroll = ScrollContainer.new()
+	_picker_scroll.name = "Picker"
+	_picker_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_picker_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	picker_line.add_child(_picker_scroll)
+	_picker_box = GridContainer.new()
+	_picker_box.name = "Bodies"
+	_picker_box.columns = PICKER_COLUMNS
+	_picker_box.add_theme_constant_override("h_separation", PICKER_GAP)
+	_picker_box.add_theme_constant_override("v_separation", PICKER_VGAP)
+	_picker_box.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_picker_scroll.add_child(_picker_box)
 	var spacer_pick := Control.new()
 	spacer_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	picker_line.add_child(spacer_pick)
 	_reequip_all_button = Button.new()
 	_reequip_all_button.text = "RE-EQUIP THE BAND"
 	_reequip_all_button.focus_mode = Control.FOCUS_NONE
+	# The press sits at the top of the strip's column, not stretched down it: two
+	# rows of chips must not turn one button into a plate.
+	_reequip_all_button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_reequip_all_button.custom_minimum_size = Vector2(0, 28)
 	_reequip_all_button.tooltip_text = "Every body hands its kit back, then the roster is dressed one body at a time: the first names get the pick of the pool."
 	_reequip_all_button.pressed.connect(_reequip_band)
 	picker_line.add_child(_reequip_all_button)
 
 	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation", 16)
+	body.add_theme_constant_override("separation", int(GUTTER))
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(body)
 
 	var left := VBoxContainer.new()
 	left.add_theme_constant_override("separation", 3)
-	left.custom_minimum_size = Vector2(320, 0)
+	left.custom_minimum_size = Vector2(WORN_WIDTH, 0)
 	body.add_child(left)
 	_worn_title = _label(left, "WORN GEAR", 10, MUTED)
 	for slot in Contracts.SLOT_ORDER:
@@ -574,7 +619,7 @@ func _ensure_built() -> void:
 
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 3)
-	right.custom_minimum_size = Vector2(340, 0)
+	right.custom_minimum_size = Vector2(STASH_WIDTH, 0)
 	body.add_child(right)
 	_stash_title = _label(right, "COLLECTIVE STASH  \u00b7  VALUE ORDER", 10, MUTED)
 	_stash_hint = _label(right,
@@ -608,6 +653,11 @@ func _ensure_built() -> void:
 	_corpse_box.add_child(_take_all_button)
 	_status = _label(column, "", 12, TEAL)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# The status line is the only part of the column whose height a message
+	# decides, and the page has no room for a third line: a long answer would
+	# push the hotbar and the stash off the bottom of the vellum. Two lines are
+	# what the instruction needs, so two lines are what the page keeps for it.
+	_status.max_lines_visible = 2
 
 func _make_slot_row(parent: Node, slot: int) -> Dictionary:
 	var button := ItemHover.Row.new()
@@ -639,7 +689,11 @@ func _sync_picker() -> void:
 			button = Button.new()
 			button.toggle_mode = true
 			button.focus_mode = Control.FOCUS_NONE
-			button.custom_minimum_size = Vector2(150, 30)
+			# One measure for every chip, and the label is cut to it rather than
+			# the other way round: a row of chips is the page's width whatever the
+			# names are, so the strip cannot push the page's own press off it.
+			button.custom_minimum_size = PICKER_CHIP
+			button.clip_text = true
 			button.pressed.connect(func() -> void: select_merc(merc_id))
 			_picker_box.add_child(button)
 			picker_buttons[merc_id] = button
@@ -647,11 +701,28 @@ func _sync_picker() -> void:
 		# The body under the player's hands carries its own mark: the chip is the
 		# first thing on the page and it must answer "whose kit am I looking at"
 		# before the gear and the hotbar are read.
-		button.text = "%s  %s%s" % [str(_warband.roster.name_of(merc_id)),
+		var line := "%s  %s%s" % [str(_warband.roster.name_of(merc_id)),
 			Contracts.state_name(int(_warband.roster.state_of(merc_id))),
 			"  \u00b7  YOU" if merc_id == controlled_merc else ""]
+		button.text = line
+		button.tooltip_text = "%s. Press to dress this body." % line
 		button.set_pressed_no_signal(merc_id == selected_merc)
 		button.theme_type_variation = "PrimaryButton" if merc_id == selected_merc else ""
+	_fit_picker()
+
+## Hold the strip at the rows it actually needs, and at `PICKER_ROWS` once the
+## roster is longer than the two rows the page has room for. Without this the
+## strip is either taller than its chips (a short roster) or as tall as the whole
+## roster (a long one, which is what walked the page out of the window).
+func _fit_picker() -> void:
+	if _picker_scroll == null:
+		return
+	var rows: int = ceili(float(picker_buttons.size()) / float(PICKER_COLUMNS))
+	var shown: int = clampi(rows, 1, PICKER_ROWS)
+	var chip := PICKER_CHIP.y
+	for button in picker_buttons.values():
+		chip = maxf(chip, (button as Control).get_combined_minimum_size().y)
+	_picker_scroll.custom_minimum_size = Vector2(0, chip * shown + PICKER_VGAP * (shown - 1))
 
 func _first_merc_id() -> int:
 	var ids: Array[int] = _dressable_ids()
@@ -905,7 +976,10 @@ func _sync_stash(rows: Array[Dictionary]) -> void:
 		if button == null:
 			button = _make_stash_row(item_id)
 			_stash_controls[item_id] = button
-		_stash_box.move_child(button, stash_rows.size())
+		# A Container re-sorts on every `move_child`, even when the child is
+		# already there; a repaint of an unchanged shelf should not churn it.
+		if button.get_index() != stash_rows.size():
+			_stash_box.move_child(button, stash_rows.size())
 		_apply_stash_row(button, data, free_count)
 		var view: Dictionary = data.duplicate()
 		view["pooled"] = free_count
@@ -1002,7 +1076,7 @@ func _on_stash_row_input(event: InputEvent, item_id: String) -> void:
 ## hiding the mercenary picker is all it takes: the worn rows and the list are
 ## already the two views a corpse needs.
 func _paint_mode() -> void:
-	_picker_box.visible = not _corpse_active
+	_picker_scroll.visible = not _corpse_active
 	_stage.visible = not _corpse_active
 	_set_label.visible = not _corpse_active
 	_set_button.visible = not _corpse_active

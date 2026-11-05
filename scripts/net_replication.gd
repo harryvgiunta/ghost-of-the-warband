@@ -1,4 +1,44 @@
 extends RefCounted
+## The simulated link this process was asked to run under, `(lag, jitter, drop)`
+## - seconds, seconds, and a 0..1 chance - from `--coop-lag <seconds> [jitter]
+## [drop]` on the user command line or `IRONWOOD_COOP_LAG` /
+## `IRONWOOD_COOP_JITTER` / `IRONWOOD_COOP_DROP` in the environment.
+## `Vector3.ZERO` - the ordinary case - makes every deferral below an inline call
+## with one comparison spent on it.
+##
+## A two-window local match and a Tailscale match are not the same game: at 0.1 ms
+## prediction, interpolation and the hitbox rewind are all measuring the same
+## frame and agree for free. This is how a session is asked to prove otherwise.
+static func requested_link() -> Vector3:
+	var lag := 0.0
+	var jitter := 0.0
+	var drop := 0.0
+	var args := OS.get_cmdline_user_args()
+	var index := args.find("--coop-lag")
+	if index >= 0 and args.size() > index + 1:
+		lag = maxf(0.0, float(args[index + 1]))
+		if args.size() > index + 2:
+			jitter = maxf(0.0, float(args[index + 2]))
+		if args.size() > index + 3:
+			drop = clampf(float(args[index + 3]), 0.0, 1.0)
+	if lag <= 0.0 and OS.has_environment("IRONWOOD_COOP_LAG"):
+		lag = maxf(0.0, float(OS.get_environment("IRONWOOD_COOP_LAG")))
+	if jitter <= 0.0 and OS.has_environment("IRONWOOD_COOP_JITTER"):
+		jitter = maxf(0.0, float(OS.get_environment("IRONWOOD_COOP_JITTER")))
+	if drop <= 0.0 and OS.has_environment("IRONWOOD_COOP_DROP"):
+		drop = clampf(float(OS.get_environment("IRONWOOD_COOP_DROP")), 0.0, 1.0)
+	return Vector3(lag, maxf(0.0, jitter), drop)
+
+## The wire's tick rate: one tick per physics frame, held at 60 for every machine
+## by `physics/common/physics_ticks_per_second`. Every stride a session fires on
+## and every timeline a replica renders from is counted in these ticks, so this
+## constant is the one place the wire's unit is written down.
+const WIRE_TICK_HZ := 60.0
+## One mob sample every fourth tick. The sender's stride (`WarbandSession.
+## MOB_SEND_TICKS`) and the delay a replica renders it at are both built from this
+## figure, so a body cannot be told the stream arrives at a rate it does not.
+const MOB_INTERVAL_SECONDS := 4.0 / WIRE_TICK_HZ
+
 ## The client-side netcode primitives every Ironwood scene shares.
 ##
 ## `InputRing` is the local ranger's movement history: the owning peer records
@@ -149,15 +189,22 @@ class SnapshotTimeline:
 			jitter = lerpf(jitter, absf(actual - expected), JITTER_SMOOTHING)
 			delay_ticks = clampf(maxf(MIN_DELAY_TICKS + jitter / tick_seconds * JITTER_GAIN,
 				floor_delay_ticks), MIN_DELAY_TICKS, MAX_DELAY_TICKS)
-		if velocity.is_zero_approx() and not samples.is_empty():
-			# A stream without a velocity field (the delve's devils) still gets
-			# dead reckoning from the distance it covered between samples.
+		if not samples.is_empty():
+			# The pose is the truth and the velocity is the authority's intent.
+			# A body held against a wall reports its run speed while covering
+			# none of it, and dead reckoning along that intent walks the replica
+			# into the wall and snaps it back on the next packet - the pop a
+			# player reads as a mob near cover jumping. Travel between two
+			# samples is what carries forward, never faster than the intent it
+			# was measured against; a stream with no velocity field at all (the
+			# delve's devils) gets that travel and nothing else.
 			var previous: Dictionary = samples[-1]
 			var span := float(tick - int(previous.tick)) * tick_seconds
 			if span > 0.0001:
 				var implied: Vector3 = (position - Vector3(previous.pos)) / span
 				if implied.length() < 24.0:
-					velocity = implied
+					var intent := velocity.length()
+					velocity = implied if intent <= 0.0 else implied.limit_length(intent)
 		var entry := {"tick": tick, "pos": position, "vel": velocity, "yaw": yaw}
 		if not samples.is_empty():
 			var previous: Dictionary = samples[-1]
@@ -225,19 +272,33 @@ class SnapshotTimeline:
 			"yaw": float(last.yaw), "extrapolated": false}
 
 
-## A render buffer for a mob stream. Mobs arrive at their own cadence, and the
-## host numbers them one per batch, not one per physics tick: the whole timeline
-## must therefore be told that one tick is one mob interval. Left at the sim's
-## 60 Hz, six ticks of delay look like 0.1 s here and are half a second in the
-## player's hands, and the dead-reckoning extrapolates four intervals of travel
-## as if they were four physics frames.
-static func mob_timeline(rate: float = 15.0) -> SnapshotTimeline:
+## A render buffer for one body: the wire clock, with the playout filled in from
+## the body's own `interp_delay` on every snapshot it is handed.
+static func body_timeline() -> SnapshotTimeline:
 	var timeline := SnapshotTimeline.new()
-	timeline.configure(rate)
+	timeline.configure(WIRE_TICK_HZ)
+	return timeline
+
+
+## A render buffer for a mob stream. Every mob sample is labelled with the same
+## 60 Hz simulation tick the bodies are - one tick is one physics frame here as it
+## is everywhere else - and the mobs simply *send* on every fourth one. The two
+## knobs that used to be counted in stream intervals (the delay floor and the
+## dead-reckoning window) are wall clock, converted through `tick_seconds`, so the
+## receiver renders the same 133 ms behind it always did.
+##
+## The old default configured this timeline at 15 Hz, which meant a mob counter
+## that advanced once per packet: after the sender dropped a banked interval on a
+## hitch, its numbers no longer mapped to elapsed time and the receiver sized the
+## gap from a label that lied. The mobs were the only stream whose tick was a
+## packet count.
+static func mob_timeline() -> SnapshotTimeline:
+	var timeline := SnapshotTimeline.new()
+	timeline.configure(WIRE_TICK_HZ)
 	# Two snapshot intervals: enough to render across one lost datagram, short
 	# enough that a mob's run reads as the run it is.
-	timeline.floor_delay_ticks = 2.0
-	timeline.extrapolation_ticks = 2.0
+	timeline.floor_delay_ticks = 2.0 * MOB_INTERVAL_SECONDS / timeline.tick_seconds
+	timeline.extrapolation_ticks = 2.0 * MOB_INTERVAL_SECONDS / timeline.tick_seconds
 	timeline.discontinuity_metres = 2.0
 	return timeline
 
@@ -280,29 +341,68 @@ class LagQueue:
 	var lag := 0.0
 	## Uniform spread added or subtracted from `lag`, in seconds.
 	var jitter := 0.0
+	## Chance that a packet marked `lossy` is thrown away instead of delayed. A
+	## real link loses datagrams, and the failures a player reports - a mob
+	## blinking, a hit that does not land - are loss failures far more often than
+	## latency ones. Only streams the wire already sends unreliably may be marked:
+	## dropping a reliable intent would be the harness failing the game, not the
+	## game failing the link.
+	var drop := 0.0
+	## Lossy packets thrown away since `configure`.
+	var discarded := 0
+	## Seconds spent *in the queue* by every released packet - from the moment it
+	## was deferred to the moment it was let go, not the overshoot past its due
+	## time - and how many were released. `mean_wait()` is how a run proves the
+	## delay it asked for, instead of proving only that packets passed through a
+	## queue at all.
+	var waited := 0.0
+	var delivered := 0
 	## Callbacks still waiting, for a QC readout.
 	var held := 0
+	## Callbacks released since `configure`: a match proves the link was really on
+	## by counting them, so a lag run cannot quietly pass with the switch off.
+	var released := 0
 	var _items: Array = []
 	var _rng := RandomNumberGenerator.new()
 
-	func configure(seconds: float, spread_seconds: float) -> void:
+	func configure(seconds: float, spread_seconds: float, loss: float = 0.0) -> void:
 		lag = maxf(seconds,0.0)
+		# Jitter wider than the lag would time-travel a packet into the past.
 		jitter = clampf(spread_seconds,0.0,lag)
+		drop = clampf(loss,0.0,1.0)
 		# Seeded so a repeated run measures the same link.
 		_rng.seed = 0x51ED
 		_items.clear()
 		held = 0
+		released = 0
+		discarded = 0
+		waited = 0.0
+		delivered = 0
 
 	func active() -> bool:
-		return lag > 0.0 or jitter > 0.0
+		return lag > 0.0 or jitter > 0.0 or drop > 0.0
 
-	func defer(call: Callable) -> void:
+	## The mean time a released packet spent held, in seconds.
+	func mean_wait() -> float:
+		return 0.0 if delivered <= 0 else waited / float(delivered)
+
+	func defer(call: Callable, lossy: bool = false) -> void:
 		if not active():
 			call.call()
 			return
+		if lossy and drop > 0.0 and _rng.randf() < drop:
+			discarded += 1
+			return
 		var now := Time.get_ticks_msec()/1000.0
-		_items.append({"at":now+maxf(0.0,lag+_rng.randf_range(-jitter,jitter)),"call":call})
+		_items.append({"at":now+maxf(0.0,lag+_rng.randf_range(-jitter,jitter)),
+			"from":now,"call":call})
 		held = _items.size()
+
+	## Releases what the wall clock has made due. The caller owns the tick: a peer
+	## drains once per physics frame, so a held packet lands on the frame the link
+	## would have delivered it.
+	func drain() -> void:
+		release(Time.get_ticks_msec() / 1000.0)
 
 	## Runs every callback whose delay has elapsed. Due calls are collected
 	## first, so a callback may queue more work without disturbing the sweep.
@@ -313,14 +413,21 @@ class LagQueue:
 		var pending: Array = []
 		for item in _items:
 			if float(item.at) <= now:
-				due.append(item.call)
+				due.append(item)
 			else:
 				pending.append(item)
 		_items = pending
 		held = _items.size()
-		for call in due:
-			(call as Callable).call()
+		for item in due:
+			waited += maxf(0.0, now - float(item.get("from", item.at)))
+			delivered += 1
+			(item.call as Callable).call()
+		released += due.size()
 
 	func clear() -> void:
 		_items.clear()
 		held = 0
+		released = 0
+		discarded = 0
+		waited = 0.0
+		delivered = 0

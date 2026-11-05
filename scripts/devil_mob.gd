@@ -147,15 +147,22 @@ var _wander := MobWander.new()
 var _lod := MobLod.new()
 ## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
 var _present_band := -1
-## Drawn frames between two brain ticks, and the offset this body takes into them
-## so a den never lands its brains on the same frame. A brain is a decision rate:
-## where to stand, who to chase, whether to swing. None of that needs the drawn
-## frame's rate, and a hall of a hundred of them doing it was a fifth of the
-## cave's frame. The blow itself is not a decision and does not run on this clock
-## (`_advance_strike`).
+## Physics frames between two brain ticks, and the offset this body takes into
+## them so a den never lands its brains on the same frame. A brain is a decision
+## rate: where to stand, who to chase, whether to swing. None of that needs the
+## drawn frame's rate, and a hall of a hundred of them doing it was a fifth of
+## the cave's frame. The blow itself is not a decision and does not run on this
+## clock (`_advance_strike`).
+##
+## **Physics frames, never drawn ones**: the gate below used to count rendered
+## frames, which made the brain run `fps / THINK_FRAMES` times a second - 12 at
+## 60 fps, 29 at 144, 4 at 21 - so a mob's reaction time was a property of the
+## host's GPU, and in co-op of the whole party's fight. One figure now: 12 Hz on
+## every machine, with the LOD budget still deciding how many of those a distant
+## body gets.
 const THINK_FRAMES := 5
 var _phase := 0
-## The drawn frame perception last ran in, and the tick time banked for it.
+## The physics frame perception last ran in, and the tick time banked for it.
 var _sense_frame := -1
 var _sense_bank := 0.0
 ## Seconds left before a committed blow lands: armed by the brain, spent on the
@@ -178,9 +185,19 @@ var _replica_grounded := true
 ## its last pose forever otherwise, a mob standing where the host has none.
 var _state_at := -1.0
 var stale := false
-## How long a replica may go without a state before it leaves the screen. Three
-## times the 15 Hz interval, so ordinary jitter never blinks a living mob.
-const STALE_SECONDS := 0.75
+## How long a replica may go without a state before it leaves the screen. The
+## host repeats an unchanged body once a second (`MOB_REFRESH_TICKS`) and names
+## the ones it stops streaming at once (`receive_mob_leaves`), so this is only
+## the last resort - a knot of missed datagrams. Shorter than one refresh, it hid
+## a living mob for a quarter of a second, every second.
+const STALE_SECONDS := 2.0
+## The stream tick at which the host stopped naming this copy to this peer. A
+## state from before that is a datagram still in flight, not news.
+var _stream_left := -1
+## Distance to the eye this machine draws through (`MobCuller.view_distance`), or
+## -1 while nothing has measured it: what a body is drawn at is that camera's
+## business, what it is simulated at is every soul's.
+var _view_distance := -1.0
 ## The drawn frame this body's brain last ran in, and the tick time it has banked
 ## from further ticks inside the same frame (`_physics_process`).
 var _brain_frame := -1
@@ -337,9 +354,17 @@ func _physics_process(delta: float) -> void:
 	_advance_strike(delta)
 	_advance_motion(delta)
 	_advance_presentation()
-	var frame := Engine.get_process_frames()
-	# Sight once a drawn frame - the rate a brain used to keep, so nothing that
-	# could be seen before is missed now.
+	# The physics frame, never the drawn one: `get_process_frames()` counts
+	# rendered frames, so a brain gated on it thinks `fps / THINK_FRAMES` times a
+	# second - 12 at 60 fps, 29 at 144, 4 at 21. Mobs reacted four times faster on
+	# a better GPU, and in co-op the host's frame rate set every mob's reaction
+	# time for the whole party. The tick budget decides *how often* a body thinks;
+	# this gate only spreads those decisions over the frames inside one tick.
+	var frame := Engine.get_physics_frames()
+	# Sight every physics frame (the rate a 60 Hz brain used to keep, so nothing
+	# that could be seen before is missed now), and a decision every
+	# `THINK_FRAMES` of them - one figure on every machine, whatever the frame
+	# rate is.
 	if frame == _sense_frame:
 		_sense_bank += delta
 	else:
@@ -367,7 +392,7 @@ func _think(delta: float) -> void:
 		CorpsePhysics.settle_root(self, delta)
 		return
 	var nearest := _nearest_ranger()
-	_cull_presentation(nearest)
+	_cull_presentation(_present_distance(nearest))
 	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
 	if budget <= 0.0:
 		return
@@ -483,13 +508,21 @@ func _cull_presentation(nearest: float) -> void:
 ## The culler's only call into a parked body: one distance check per sweep.
 ## Sight rays, steering, the state machine, the swept move and the skinning are
 ## all behind the physics process `mob_sleep` turns off.
-func mob_lod_sweep(eye_distance: float = -1.0) -> void:
+##
+## `eye_distance` is measured from every body a soul could be inside - the tick
+## budget follows the fight, whoever is in it. `view_distance` is measured from
+## this machine's own camera, and is the only one the presentation bands read.
+func mob_lod_sweep(eye_distance: float = -1.0, view_distance: float = -1.0) -> void:
 	if not alive:
 		return
-	# The culler measures from every body a soul could be inside, not from one
-	# ranger: `eye_distance` is that measurement. Its own check is the fallback for
-	# a body swept without a scene behind it.
+	if view_distance >= 0.0:
+		_view_distance = view_distance
 	var nearest := eye_distance if eye_distance >= 0.0 else _nearest_ranger()
+	if replica:
+		# A replica's band is its presentation and nothing else: no brain runs to
+		# re-apply it, and a copy fifty metres up a hall was being skinned for the
+		# shadow pass it does not need.
+		_cull_presentation(_present_distance(nearest))
 	if not MobLod.dormant(nearest, dormant):
 		if dormant:
 			mob_wake()
@@ -498,6 +531,13 @@ func mob_lod_sweep(eye_distance: float = -1.0) -> void:
 		return
 	if replica or _may_sleep():
 		mob_sleep()
+
+
+## How far this body is from the eye that draws it: the camera on this machine
+## when the culler has measured one, and the nearest ranger as the fallback for a
+## scene with no camera behind it.
+func _present_distance(nearest: float) -> float:
+	return _view_distance if _view_distance >= 0.0 else nearest
 
 
 ## Only a calm body with its feet down may park. A body that is hunting has to
@@ -529,7 +569,7 @@ func mob_sleep() -> void:
 ## with nothing banked from the rest.
 func rest(value: bool, nearest: float = INF) -> void:
 	if value:
-		_cull_presentation(nearest)
+		_cull_presentation(_present_distance(nearest))
 	elif resting:
 		_lod.resume()
 	resting = value
@@ -578,8 +618,9 @@ func _apply_shown() -> void:
 		_collision.disabled = false
 	if replica:
 		# A replica's only LOD is whether the local eye can see its state: a
-		# hidden copy skips the clip pass, a shown one animates from the wire.
-		_present_band = 2 if hidden else 0
+		# hidden copy skips the clip pass; a shown one is posed on the band this
+		# machine's own camera puts it in, not always at full detail.
+		_present_band = 2 if hidden else MobLod.band(maxf(_view_distance, 0.0))
 	if is_instance_valid(_visual) and _visual.has_method("set_parked"):
 		_visual.set_parked(hidden)
 
@@ -589,6 +630,21 @@ func _apply_shown() -> void:
 ## that may not exist here: hide it and take its capsule out of the world.
 func mark_replica() -> void:
 	replica = true
+	_apply_shown()
+
+
+## The host has stopped naming this body to this peer: it walked out of that
+## player's reach. The copy is put down here and kept down until the host names it
+## again; the state that brings it back is a reset, not an interpolation from
+## wherever it stood when it left. Waiting for `STALE_SECONDS` instead left a mob
+## frozen in place for a second first.
+func set_streamed(value: bool, tick: int = -1) -> void:
+	if value:
+		return
+	_stream_left = maxi(_stream_left, tick)
+	_received_pose = false
+	stale = false
+	_timeline.clear()
 	_apply_shown()
 
 
@@ -968,7 +1024,7 @@ func _drive(delta: float) -> void:
 	if not is_on_floor() \
 			or Vector2(velocity.x, velocity.z).length_squared() > 0.0004 \
 			or desired.length_squared() > 0.0004:
-		MobLod.move(self, delta)
+		MobLod.move(self)
 
 
 ## Which way the body looks, on the clock it decides on. Facing is a decision like
@@ -1259,6 +1315,10 @@ func _replay_tick(delta: float) -> void:
 ## Presentation-side mirror of the host's mob: the host owns AI, damage and
 ## gold, so a replica only replays the snapshot it was handed.
 func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
+	if tick >= 0 and tick <= _stream_left:
+		# A state from before the host stopped naming this copy: a datagram still
+		# in flight, not news. It must not put a body back on the screen.
+		return
 	var previous_health := health
 	var was_alive := alive
 	var previous_state := self.state

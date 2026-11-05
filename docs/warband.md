@@ -177,8 +177,8 @@ failure pass; fix the contract instead.
 | `scripts/warband/passive_duel_brain.gd` (`PassiveDuelBrain`) | `attach(body, opponent)`, `set_active`, `step(delta)` for fighter bodies (before `physics_step`) |
 | `scripts/warband/downed_state.gd` / `crawl_to_safety.gd` / `revive_channel.gd` / `bleed_drip.gd` | `DownedRules.*` (including `bleed_fraction`, `drip_interval`, `drip_volume`), `CrawlToSafety.attach/manual`, `ReviveChannel.set_bodies/begin/tick/cancel/progress`, `BleedDrip.attach/detach/attached`. `ArenaActor.enter_downed` puts the rig in its prone drag pose (`Archer.set_downed`) and attaches one drip; revive and respawn clear all of it, `apply_snapshot` drives the same three things so a replica lies down and bleeds off the unchanged wire, and `_die` either clears it (arena seats) or holds the corpse - rig visible, lie kept, drip off - for the warband bodies flagged `warband_death`. Those bodies also never die from the blow itself and are finished by any blow that lands while they are down. `bleed_loss` is written from the 30 s clock every downed frame and is the only input the drip reads. |
 | `scripts/warband/loot_vacuum.gd` / `warband_pickup.gd` / `corpse_loot_panel.gd` | `WarbandLoot.setup/spawn/quick_loot/sweep/pickups` plus the corpse registry: `register_corpse(enemy) -> int` (one read of `gear_items()`, stable ids, the record dies with the body), `has_corpse/corpse_ids/corpse_items/corpse_value/corpse_at/corpse_position/corpse_label`, `take_from_corpse`, `take_all_from_corpse`, `claim_corpse(id, peer = 0)` (silent, the AI's entry point). Every one of them books through the same `_book_piece()`, so a piece cannot be duplicated and peer 0 never dresses a body. `CorpseLootPanel extends WarbandPaperdoll` adds `open_corpse(loot, id) -> bool`, `showing_corpse()`, `take_piece`, `take_all` and `set_title`; `G` at a corpse opens it and `P` still opens the mercenary paperdoll. `SoldierLootRun.run(pickups)` now also jogs survivors to corpses and claims each once. |
-| `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu/controlled_merc_for` (the body: `_build_body()`); `AltarMenu.configure/page/show_page/anoint_rows/select_anoint_item/selected_anoint_item/anoint_button/press_anoint/unbind_rows/distill_rows/brand_rows/set_controlled`, two pages `PAGE_ANOINT` (every open lands here, and the rack leads with the copies of the body the soul is inside - `interact` reads it off `Warband.souls`, so the square opens on the steel the player is carrying; the bench is **one square** the piece is laid in, the reagent well and its held count beside it, the one brass ANOINT under them, and the altar's own words below - the spend, the skill the piece wakes, the annointments the copy already carries and the four bands of the die; a chip per carried piece whose pool is not empty only lays that piece in the square, `select_anoint_item` re-reads the stash on the press so a vial spent since the last paint refuses out loud, and the button works the square rather than a row) and `PAGE_ESSENCE` |
-| `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with a per-row disposition chip (TANK / MELEE / BOW, cycled, the host's to set on a lent band) and `possess_requested(merc_id)`; mercenary paperdoll over the collective stash, whose worn slot line adds "Anointed - <SKILL> [key]" or, for a plain weapon, "Plain - the altar wakes <SKILL>", plus the brand line when branded; under the stage sits the ten-key **HOTBAR** row - click a skill, then the key it should fire from, or **KIT ORDER** to hand the keys back to the kit - saved with the body and refused on a lent band. The row names the body whose keys it is (`HOTBAR / ASH / THE BODY YOU CONTROL`, or `NOT YOUR BODY` when the stage is another name): the page opens on the body the soul is inside, that body's chip carries `· YOU`, and it follows the soul when the soul changes bodies (`controlled_merc`, `set_controlled`, `follow_controlled`). The bandage and the healing potion keep the last two keys (`9` and `0`) on every body and are not movable - the kit arranges the eight keys before them - so a dressing and a draught are always on the bar. `Contracts.SLOT_ORDER` lists the steel first - main hand, off hand, then the armour, then the trinkets - which is the order a body is armed in and the order an unwritten hotbar takes, and the block is cut to its ten keys (`HOTBAR_WIDTH`), so the header, **KIT ORDER** and the tenth key share one edge. Every item row answers hover with `scripts/warband/item_card.gd` (`WarbandItemCard`, handed out by `item_hover.gd`'s `Row`/`LabelRow` through `_make_custom_tooltip`): the name, type line, the catalogue's `summary`/`detail`, `ArmorData`/`TrinketStats` rows, the brand/anointing, the worth and the row's click instruction |
+| `scripts/warband/sacrificial_altar.gd` / `altar_menu.gd` | `SacrificialAltar.interact/in_reach/menu/controlled_merc_for` (the body: `_build_body()`); `AltarMenu.configure/page/show_page/anoint_rows/select_anoint_item/selected_anoint_item/anoint_button/press_anoint/unbind_rows/distill_rows/brand_rows/set_controlled`, two pages `PAGE_ANOINT` (every open lands here, and the rack leads with the copies of the body the soul is inside - `interact` reads it off `Warband.souls`, so the square opens on the steel the player is carrying; the bench is **one square** the piece is laid in, the reagent well and its held count beside it, the one brass ANOINT under them, and the altar's own words below - the spend, the skill the piece wakes, the annointments the copy already carries and the four bands of the die; a chip per carried piece whose pool is not empty only lays that piece in the square, `select_anoint_item` re-reads the stash on the press so a vial spent since the last paint refuses out loud, and the button works the square rather than a row; the press re-reads that one piece's cards and repaints them and the square - never the rack - so the one brass button stays spam-clickable on a shelf of hundreds) and `PAGE_ESSENCE` |
+| `scripts/warband/warband_screen.gd` / `warband_paperdoll.gd` | roster screen with a per-row disposition chip (TANK / MELEE / BOW, cycled, the host's to set on a lent band) and `possess_requested(merc_id)`; mercenary paperdoll over the collective stash, whose worn slot line adds "Anointed - <SKILL> [key]" or, for a plain weapon, "Plain - the altar wakes <SKILL>", plus the brand line when branded; under the stage sits the ten-key **HOTBAR** row - click a skill, then the key it should fire from, or **KIT ORDER** to hand the keys back to the kit - saved with the body and refused on a lent band. The row names the body whose keys it is (`HOTBAR / ASH / THE BODY YOU CONTROL`, or `NOT YOUR BODY` when the stage is another name): the page opens on the body the soul is inside, that body's chip carries `· YOU`, and it follows the soul when the soul changes bodies (`controlled_merc`, `set_controlled`, `follow_controlled`). The chips are a **fixed measure**: four a row and two rows before the strip scrolls (`PICKER_COLUMNS`/`PICKER_ROWS`), each `PICKER_CHIP` wide with its label clipped, so the eight bodies of the deployment cap are two tidy rows and a longer roster (a rescue leaves names in the reserve) scrolls rather than widening the page - eight chips in one row measured 1488 px against the page's 1112 and pushed **RE-EQUIP THE BAND** out of the window. The three columns share that page (`PAGE_WIDTH`, 1112): the worn slots 320, the hotbar's 427 in the middle, and the stash takes the rest; the status line keeps `max_lines_visible` 2 so no long answer can grow the column past the vellum. The bandage and the healing potion keep the last two keys (`9` and `0`) on every body and are not movable - the kit arranges the eight keys before them - so a dressing and a draught are always on the bar. `Contracts.SLOT_ORDER` lists the steel first - main hand, off hand, then the armour, then the trinkets - which is the order a body is armed in and the order an unwritten hotbar takes, and the block is cut to its ten keys (`HOTBAR_WIDTH`), so the header, **KIT ORDER** and the tenth key share one edge. Every item row answers hover with `scripts/warband/item_card.gd` (`WarbandItemCard`, handed out by `item_hover.gd`'s `Row`/`LabelRow` through `_make_custom_tooltip`): the name, type line, the catalogue's `summary`/`detail`, `ArmorData`/`TrinketStats` rows, the brand/anointing, the worth and the row's click instruction |
 | `scripts/warband/warband_hud.gd` (`WarbandHud`) | four corner objects and the centre lines. **Bottom left, the soul**: a live bust in the ledger's iron clamp (`CharacterPreview` parked bust-framed on the rig's own `head_hitbox_center()`, re-dressed only when the body or its kit changes and rendered for a few frames), the name in Pirata, the state on the ledger's chip, health over stamina and the ten-key hotbar, laid out in the body's own key order, in the same iron plate - everything about the body the soul is inside, one object. **Top right, the band**: the purse (gold and the quiver) on the header rail, then a row per mercenary in the field - the disposition badge (`icon_sm_shield`/`icon_sm_blade`/`icon_sm_bow`), his name over that word, his health and his state - with the campaign ledger on its own plate under it. Rows are built once and painted in place, so a band taking hits repaints no textures. The centre keeps the reticle, the contextual prompt and the two banners; **there is no standing key line** (`set_hint` is gone, and so are the scenes' `hint_line()`s: the tips and the lesson cards teach the keys, and nothing repeats them over a fight) |
 | `scripts/admin_arena.gd` + `admin_arena.tscn` | the gate scene: two three-body brawls 42 m apart, eight roster bodies, two souls, the altar, the stash chest, battlefield loot |
 
@@ -266,6 +266,67 @@ authoritative for every body; a client asks to enter a body and the host's soul
 router answers (one peer per body, alive only), then broadcasts the ownership map.
 Bodies are served at 20 Hz through `NetLimits.batches`, the guest predicts the
 body it is inside, and a leaving peer's body falls back to its own AI.
+
+**One tick, one physics frame, and the wire fires on it.** `project.godot` fixes
+the physics rate at 60 and every netcode number is counted in those ticks. The
+session's heartbeat is `_physics_process`, one beat per tick (`_beat_tick` makes it
+idempotent whoever calls it), and every stream is a **stride of that tick** rather
+than an elapsed-time accumulator: `CADENCE` is the table - bodies every 3 ticks
+(20 Hz), mobs 4 (15 Hz), missiles 3, loot 12 (5 Hz), the campaign mirror 15 (4 Hz),
+the seat poll 30 (2 Hz). Every stride divides `TICK_HZ`, which is the whole reason
+the cadence is exact: a 144 Hz client and a 21 fps host fire on the same ticks
+forever, and because the label is the step that produced the pose beside it, a
+hitch cannot put a stale pose under a fresh number. On the render frame with float
+accumulators (the code this replaced) a 47 fps host produced 2-and-3-frame gaps
+for a 3-tick interval, which fed every receiver's jitter estimator a wobble it then
+paid for in playout delay, and could not hold 20 Hz at all below 20 fps.
+
+Labels: a body snapshot carries `PossessionController.sim_tick()`, the number the
+rewind history is keyed on, and a peer's action carries the tick it was *drawing*
+(`view_tick()`) so the host can rewind to it (`arm_lag`, `MAX_LAG_TICKS` 30). The
+view clock is configured from `WarbandBody.REPLICA_INTERP_DELAY`
+(`_clock.configure(SIM_TICK_HZ, …)`) so the tick a guest names is the tick its eye
+was on - left on the clock's 1.5-tick default it named the newest tick, ~120 ms
+ahead of what the player saw, and lag compensation refused swings that looked
+landed and landed swings on bodies that had already stepped behind cover. Bodies
+are drawn `interp_delay` 0.12 behind (7.2 of the 60 Hz ticks, ~2.4 packets); mobs
+on the same timeline, `NetReplication.mob_timeline()` - 60 Hz ticks, floor and
+dead-reckoning window expressed as two 15 Hz intervals = 8 ticks = 133 ms, so a
+mob sample is a genuine 4-tick gap and a hitch can no longer leave the sender's
+numbers mapping to nothing. **A simulated link, because localhost lies.** `NetReplication.requested_link()`
+reads `--coop-lag <seconds> [jitter] [drop]` or `IRONWOOD_COOP_LAG` /
+`IRONWOOD_COOP_JITTER` / `IRONWOOD_COOP_DROP`, and both peers hold every
+**high-frequency** packet - a guest's `move_input`/`action_input` on the uplink,
+the host's snapshots, mob stream, deaths, leaves and missiles on the downlink - for
+`lag ± jitter` before letting it go (`LagQueue`, drained once per physics tick).
+Control traffic never goes through it: a delayed handshake is a broken handshake,
+not a slow one. Off by default (one comparison); on, a held packet is dropped when
+the peer it names has gone.
+
+**Loss is typed.** Only a stream the wire already sends `unreliable` may be thrown
+away by the simulated link - snapshots, the mob stream, missiles, move frames. A
+death, a leave and a combat verb are `reliable` and are never dropped, or the
+harness would be failing the game instead of measuring it. `LagQueue` reports what
+it did: `released`, `discarded` and `mean_wait()` - the mean time a packet spent
+*in the queue*, not its overshoot past due (that distinction is what makes the
+assertion mean "delayed by 60 ms" rather than "delayed by one frame").
+
+`warband_coop_campaign_regression` runs the whole campaign at **60 ms each way,
+20 ms jitter, 5% loss**, asserts the releases, the loss and the mean hold on both
+sides - so a lag run cannot quietly pass with the switch off - and still passes at
+**250 ms ± 60 ms**, past the interpolation window (12 ticks = 200 ms) and half the
+rewind cap (`MAX_LAG_TICKS` 30 = 500 ms). `warband_netcode_regression.link_checks`
+owns the instrument itself: off with no switch, inline when inactive, held in
+order, a lambda capturing its own loop value (a sender that deferred the last batch
+six times would be a harness that lies), loss only on `lossy`, and jitter clamped
+to the lag. Localhost is the one link on which prediction, interpolation and the
+hitbox rewind can all be wrong and still agree - at 0.1 ms the past and the
+present are the same frame.
+
+Mob *decisions* are counted in physics frames too
+(`THINK_FRAMES` 5 = 12 Hz on every machine); counting rendered frames made a mob's
+reaction time `fps / 5` - 29 Hz on a 144 Hz host, 4 Hz on a 21 fps one - so the
+host's GPU set the pace of every fight in the session.
 
 ### Gate 2 result
 
@@ -593,10 +654,16 @@ These landed on the same world without a second rulebook. Each has one owner:
   fields exactly the host's bodies as replicas, then says `field_ready` and is
   seated in the first free body. The lent copy is the host's books on the guest:
   a gear verb - wear a piece, take it off, swap a weapon set, re-kit a body or the
-  band, hold a piece from auto-equip, lay the ten keys out - is a request
+  band, hold a piece from auto-equip, lay the ten keys out, work a copy at the
+  altar - is a request
   (`WarbandState.ask_gear` -> `WarbandSession.gear_request`), run on the host and
   answered with its words or with the next copy, and every purse verb answers
-  `LENT_MESSAGE`. A guest's roster poll mirrors the health and downed flag its
+  `LENT_MESSAGE`. The altar is that same door: a guest's ANOINT names the copy it
+  laid in the square, the host throws the die and spends the pooled ichor, and the
+  weld comes back on the mirror - `WarbandState.lend` announces every copy whose
+  welds moved by catalog id (`annointed_state`), so the bodies wearing it are
+  dressed again with their new marks, stats and skills instead of waiting for the
+  next spawn. A guest's roster poll mirrors the health and downed flag its
   replicas show but never books a death (that fires `died`, reaps the copy and
   unregisters a body the host still names), a take it names must be in its own
   body's reach on the host's ground, and a body that changes hands restarts the
@@ -606,17 +673,31 @@ These landed on the same world without a second rulebook. Each has one owner:
   second), a body snapshot or mob stream is sent once a frame however long the
   frame before it ran, and a purse that moves without the books beside it is one
   number (`receive_purse`) instead of a whole campaign reload on every guest.
-  The optimisations follow every soul: `MobCuller` measures from every body a soul
-  could be inside, so the other player's ground is swept, woken and streamed like
-  the host's, and a `G` on a rope from a guest is an intent the host runs
-  (`_climb_out_for`) - the way out when the host's own body is dead in the dark.
+  The optimisations follow every soul: `MobCuller` measures the *tick budget* from
+  every body a soul could be inside, so the other player's ground is swept, woken
+  and fight-capable like the host's, and a `G` on a rope from a guest is an intent
+  the host runs (`_climb_out_for`) - the way out when the host's own body is dead
+  in the dark. What a body is **drawn** at is a second distance: the camera on the
+  machine doing the drawing (`MobCuller.view_distance` -> `mob_lod_sweep(eyes,
+  view)`), so a host does not skin, shadow and animate the whole of a guest's
+  fight two hundred metres from its own eye.
   A booked piece is announced (`announce_booked`), so a guest's looted list is
   the same list.
   `save_state`/`load_state` refuse, and the host mirrors every change back
   (`receive_warband`, 0.25 s at most), so
   the roster, stash, purse and orders on both screens are the host's. The host
   owns the mobs (15 Hz, name-keyed snapshots, and every guard a guest holds is a
-  replica that runs no AI), the loot, the missiles and the kill. A guest writes no
+  replica that runs no AI), the loot, the missiles and the kill. **Each guest is
+  told about its own ground**: the stream is built per peer from that peer's own
+  body (`_stream_mobs_to`), with a release band (`MOB_REACH_METRES` 70 m out,
+  `MOB_RELEASE_METRES` 92 m back so a mob on the boundary cannot flap) and a
+  reliable `receive_mob_leaves` naming the bodies that left it - a copy is put
+  down at once (`set_streamed`) instead of standing frozen until the stale clock
+  (2 s, one refresh plus jitter) expires. A shared 70 m band broadcast to
+  everybody cost each guest the whole party's fight: measured on two dens 200 m
+  apart (48 mobs in reach of one player or the other) a guest was sent 12
+  datagrams and 12.6 kB a tick, 184 kB/s, and is now sent its own 6 and 6.3 kB,
+  92 kB/s. A guest writes no
   checkpoint, works no keeper, latch, corpse or pickup, and runs no squad AI; its
   TAB and revive travel as intents (`swap_set`, `revive`) and are resolved on the
   host's field. The arena bout still exists in `admin_arena.tscn` for its own

@@ -68,7 +68,19 @@ var _received_pose := false
 ## otherwise stands where it was, on a screen the host no longer shows it on.
 var _state_at := -1.0
 var stale := false
-const STALE_SECONDS := 0.75
+## How long a replica may go without a state before it leaves the screen. The
+## host repeats an unchanged body once a second (`MOB_REFRESH_TICKS`) and names
+## the ones it stops streaming at once (`receive_mob_leaves`), so this is only
+## the last resort - a knot of missed datagrams. Shorter than one refresh, it hid
+## a living mob for a quarter of a second, every second.
+const STALE_SECONDS := 2.0
+## The stream tick at which the host stopped naming this copy to this peer. A
+## state from before that is a datagram still in flight, not news.
+var _stream_left := -1
+## Distance to the eye this machine draws through (`MobCuller.view_distance`), or
+## -1 while nothing has measured it: what a body is drawn at is that camera's
+## business, what it is simulated at is every soul's.
+var _view_distance := -1.0
 var safe_center := Vector3.ZERO
 ## A body is placed on its ground by whoever spawned it, and the wilderness
 ## streams its terrain tile by tile: a body whose feet find nothing under them
@@ -379,9 +391,14 @@ func _think(delta: float) -> void:
 		CorpsePhysics.settle_root(self, delta)
 		return
 	var nearest := _nearest_ranger()
-	_cull_presentation(nearest)
+	_cull_presentation(_present_distance(nearest))
 	var budget := _lod.slice(nearest, delta, not _senses.aggressive())
 	if budget <= 0.0:
+		# The brain sits the frame out; the body does not. This body used to move on
+		# one frame in twelve, so a wolf at seventy metres crossed the ground in
+		# metre-long steps five times a second - the pop a player reads as a mob
+		# stuttering forward, and the staircase a replica could only interpolate.
+		_glide(delta)
 		return
 	delta = budget
 	# Sight and the pursuit memory decide aggression for the wolf and the
@@ -474,12 +491,46 @@ func _drive_wolf(delta: float, direction: Vector3, speed: float) -> void:
 		rotation.y = lerp_angle(rotation.y, atan2(-direction.x, -direction.z), minf(delta * 8.0, 1.0))
 	velocity.x = move_toward(velocity.x, direction.x * speed, delta * 12.0)
 	velocity.z = move_toward(velocity.z, direction.z * speed, delta * 12.0)
+	_hold_altitude(delta)
+	# One physics frame of motion, never the banked budget: the frames this body's
+	# brain sat out already stepped it (`_glide`), and a scaled sweep here would
+	# cover that ground twice.
+	MobLod.move(self)
+	_present_body(delta)
+
+
+## The body's own step on a frame its brain was not granted: gravity, one sweep,
+## the presentation. Nothing is decided here - the motion the last granted tick
+## set carries the body - so a body on a twelve-frame budget still walks, runs and
+## turns smoothly, and the brain still costs what it did.
+func _glide(delta: float) -> void:
+	_hold_altitude(delta)
+	MobLod.move(self)
+	_present_body(delta)
+
+
+## The rig's own read of this frame, and nothing past the resting band: a body
+## whose clips stopped being evaluated (`MobLod.band` 2, past `ANIMATE_DISTANCE`)
+## was still being asked for its motion every frame.
+func _present_body(delta: float) -> void:
+	if _present_band < 2:
+		_update_cosmetics(delta)
+
+
+## Gravity and the feet, in one place for both the decided tick and the glide.
+func _hold_altitude(delta: float) -> void:
 	if is_on_floor() or not _ground_below_feet():
 		velocity.y = 0.0
 	else:
 		velocity.y = velocity.y - 18.0 * delta
-	MobLod.move(self, delta)
-	_update_cosmetics(delta)
+
+
+## How far this body is from the eye that draws it: the camera on this machine
+## when the culler has measured one, and the nearest ranger as the fallback for a
+## scene with no camera behind it.
+func _present_distance(nearest: float) -> float:
+	return _view_distance if _view_distance >= 0.0 else nearest
+
 
 ## Whether there is anything to land on under this body. One standing on the
 ## floor never asks its world; an airborne one asks a quarter of a second at a
@@ -604,13 +655,17 @@ func _cull_presentation(nearest: float) -> void:
 ## The culler's only call into a parked body: one distance check per sweep.
 ## Sight rays, steering, the state machine, the swept move and the skinning are
 ## all behind the physics process `mob_sleep` turns off.
-func mob_lod_sweep(eye_distance: float = -1.0) -> void:
+##
+## `eye_distance` is measured from every body a soul could be inside - the tick
+## budget follows the fight, whoever is in it. `view_distance` is measured from
+## this machine's own camera, and is the only one the presentation bands read.
+func mob_lod_sweep(eye_distance: float = -1.0, view_distance: float = -1.0) -> void:
 	if not alive:
 		return
-	# The culler measures from every body a soul could be inside, not from one
-	# ranger: `eye_distance` is that measurement. Its own check is the fallback for
-	# a body swept without a scene behind it.
+	if view_distance >= 0.0:
+		_view_distance = view_distance
 	var nearest := eye_distance if eye_distance >= 0.0 else _nearest_ranger()
+	_cull_presentation(_present_distance(nearest))
 	if not MobLod.dormant(nearest, dormant):
 		if dormant:
 			mob_wake()
@@ -640,7 +695,7 @@ func mob_sleep() -> void:
 		# Nothing banked from before the sleep; the first frame back is granted.
 		_lod.resume()
 		set_physics_process(false)
-	visible = false
+	_apply_shown()
 
 
 func mob_wake() -> void:
@@ -649,7 +704,7 @@ func mob_wake() -> void:
 	dormant = false
 	_lod.resume()
 	set_physics_process(true)
-	visible = not stale
+	_apply_shown()
 	# Re-apply the presentation band for the distance it woke at.
 	_present_band = -1
 
@@ -793,8 +848,10 @@ func _step_devil(delta: float, pursuit: bool) -> void:
 	if facing.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing.x,-facing.z),minf(delta*12.0,1.0))
 	var before := global_position
-	MobLod.move(self, delta)
-	var actual := (global_position-before)/maxf(delta,0.0001)
+	# The body steps every frame whatever its brain's budget, so this tick's own
+	# step is one physics frame - the frames it sat out already moved it.
+	MobLod.move(self)
+	var actual := (global_position-before)/maxf(get_physics_process_delta_time(),0.0001)
 	if state == "LEAP" and not was_grounded and is_on_floor() and _leap_air_time > 0.18:
 		if devil_weapon != "bow" and distance < 2.8 and _attack_cooldown <= 0.0 and _pack_attackers() < DEVIL_MAX_ATTACKERS:
 			_devil_begin_windup(_leap_damage)
@@ -1151,12 +1208,46 @@ func _replay_tick(delta: float) -> void:
 	if not stale and _state_at > 0.0 \
 			and Time.get_ticks_msec() / 1000.0 - _state_at > STALE_SECONDS:
 		stale = true
-		visible = false
 		collision_layer = 0
+		_apply_shown()
 	_timeline.advance(delta)
 	var sample: Dictionary = _timeline.sample()
 	global_position = sample.pos
 	rotation.y = sample.yaw
+
+
+## One place decides whether the body is drawn, so no path can talk over another:
+## parked by the culler (`dormant`), quiet for too long (`stale`), and a replica
+## the host has never named or has stopped streaming to this peer (no pose), are
+## three reasons for the same treatment.
+func _apply_shown() -> void:
+	var unseen := replica and not _received_pose
+	visible = not (dormant or stale or unseen)
+
+
+## Take the replica switch from the session, the way `devil_mob` does: a guest
+## builds its own copy of the wood, and one the host may not have at all - killed
+## before the join, or a body only the host fields - is neither drawn nor solid
+## until the wire proves it exists here.
+func mark_replica() -> void:
+	replica = true
+	_apply_shown()
+
+
+## The host has stopped naming this body to this peer: it walked out of that
+## player's reach. The copy is put down here and kept down until the host names it
+## again; the state that brings it back is a reset, not an interpolation from
+## wherever it stood when it left. Waiting for `STALE_SECONDS` instead left a mob
+## frozen in place for a second first.
+func set_streamed(value: bool, tick: int = -1) -> void:
+	if value:
+		return
+	_stream_left = maxi(_stream_left, tick)
+	_received_pose = false
+	stale = false
+	collision_layer = 0
+	_timeline.clear()
+	_apply_shown()
 
 
 ## The local death: combat collision off, gravity on, the limp collapse, then
@@ -1252,9 +1343,14 @@ func _packed_pose() -> Vector4:
 ## Presentation-side mirror of the host's mob: the host owns AI, damage and
 ## arrows, so a replica only replays the snapshot it was handed.
 func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
+	if tick >= 0 and tick <= _stream_left:
+		# A state from before the host stopped naming this copy: a datagram still
+		# in flight, not news. It must not put a body back on the screen.
+		return
 	var previous_health := health
 	var was_alive := alive
 	var previous_state := self.state
+	var had_pose := _received_pose
 	_ingest_pose(state,tick)
 	self.state = state.s
 	_state_time = state.t
@@ -1262,10 +1358,10 @@ func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
 	alive = state.a
 	velocity = state.v
 	_state_at = Time.get_ticks_msec() / 1000.0
-	if stale:
+	if stale or not had_pose:
 		stale = false
-		visible = not dormant or not alive
 		collision_layer = 2 if alive else 0
+	_apply_shown()
 	var grounded: bool = state.g
 	var pose: Vector4 = state.x
 	_warning.visible = self.state == "WINDUP"

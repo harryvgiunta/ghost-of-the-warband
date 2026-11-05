@@ -18,6 +18,7 @@ const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
 const ItemCard = preload("res://scripts/warband/item_card.gd")
 const SacrificialAltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
 const ControllerScript = preload("res://scripts/warband/possession_controller.gd")
+const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
 
 const TEST_SAVE := "user://altar_regression_state.json"
 const T1: int = Contracts.CruorTier.T1_RITUAL_TALLOW
@@ -74,6 +75,7 @@ func run() -> void:
 	check_distill()
 	check_brand()
 	check_shortfall()
+	check_lent_rite()
 	check_open_close()
 	check_altar()
 
@@ -794,6 +796,61 @@ func check_shortfall() -> void:
 	check(warband.cruor.total() == before, "a refused brand spends nothing")
 	check(changed_hits == before_hits, "a refused brand announces nothing")
 	check(int(warband.cruor.brand_of("sword_arming")["rerolls"]) == 1, "a refused brand does not reroll")
+
+# --- the guest's altar -----------------------------------------------------
+
+## A co-op guest at the altar. The panel is the host's books, so the press is a
+## request rather than a write: the rite travels, the host's books pay the one
+## pooled vial and throw the die, and the mirrored answer repaints the panel the
+## guest still has open. Both sides are their own `WarbandState`, so the autoload
+## left behind by the shortfall is untouched.
+func check_lent_rite() -> void:
+	var host = WarbandStateScript.new()
+	host.add_mercenary("Hostsen")
+	host.stash.add("bow_short", 1)
+	host.stash.add("ichor_vial", 2)
+	var guest = WarbandStateScript.new()
+	guest.lend(host.to_dict(), 999)
+	var guest_menu = AltarMenuScript.new()
+	guest_menu.name = "GuestAltarMenu"
+	root.add_child(guest_menu)
+	guest_menu.configure(guest)
+	guest_menu.open()
+	var asked: Array[Dictionary] = []
+	guest.gear_requester = func(request: Dictionary) -> bool:
+		asked.append(request)
+		return true
+	var copy := int(guest.annoint_copy_for_item("bow_short"))
+	var before := int(guest.stash.pooled_count("ichor_vial"))
+	guest_menu.press_anoint("bow_short", copy)
+	check(asked.size() == 1 and str(asked[0].get("verb", "")) == "anoint"
+			and int((asked[0].get("args", []) as Array)[1]) == copy,
+		"a guest's ANOINT is a request that names the copy (%s)" % str(asked))
+	check(guest.stash.pooled_count("ichor_vial") == before
+			and guest.annoints.count("bow_short", copy) == 0,
+		"and the lent books spend nothing until the host answers")
+
+	# The host runs the same verb on its own books: the vial leaves the pooled
+	# stash and the die lands on the copy the guest named.
+	var answer: Dictionary = host.apply_gear_request(
+		{"verb": "anoint", "args": ["bow_short", copy]})
+	check(int(host.stash.pooled_count("ichor_vial")) == before - 1,
+		"the host's books pay one pooled vial (%s)" % str(answer.get("message", "")))
+
+	# The answer is the next mirror, and the open panel follows it.
+	guest.lend(host.to_dict(), 999)
+	var repainted: Dictionary = {}
+	for row in guest_menu.anoint_rows():
+		if str(row["item_id"]) == "bow_short" and int(row["ordinal"]) == copy:
+			repainted = row
+	check(int(repainted.get("count", -1)) == host.annoints.count("bow_short", copy),
+		"the open panel repaints from the host's answer (%s)" % str(repainted.get("count", -1)))
+	check(str(guest_menu.selected_anoint_item()) == "bow_short",
+		"and the worked copy stays in the square")
+	root.remove_child(guest_menu)
+	guest_menu.free()
+	guest.free()
+	host.free()
 
 # --- open / close ----------------------------------------------------------
 

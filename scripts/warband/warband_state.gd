@@ -187,7 +187,36 @@ func award_gold(amount: int) -> void:
 func lend(data: Dictionary, gold_amount: int) -> void:
 	lent = true
 	_lent_gold = maxi(0, gold_amount)
+	var before := annoints.to_dict()
 	from_dict(data)
+	_announce_annointments(before)
+
+## The welds in a host's copy that this machine did not already hold. A mirror is
+## not an altar press, so nothing else here would know a copy's marks moved - and
+## the marks on the steel, the stats in the rig's dictionary and the skills on the
+## hotbar are all read off the ledger when a body is dressed. Named by catalog id,
+## exactly like the altar's own `annointed_state`, which the controller answers by
+## re-dressing every wearer of that row.
+func _announce_annointments(before: Dictionary) -> void:
+	var previous: Variant = before.get("pieces", {})
+	var current: Variant = annoints.to_dict().get("pieces", {})
+	if not previous is Dictionary or not current is Dictionary:
+		return
+	var moved := {}
+	for key in previous:
+		if str(previous[key]) != str(current.get(str(key), [])):
+			moved[_annointment_item(str(key))] = true
+	for key in current:
+		if not previous.has(key):
+			moved[_annointment_item(str(key))] = true
+	for item_id in moved:
+		annointed_state.emit(str(item_id), annoints.ids(str(item_id)))
+
+## `AnnointLedger.key_of` is "item_id#ordinal". A catalog id never carries the
+## separator, so a key without one is the id it names.
+static func _annointment_item(key: String) -> String:
+	var cut := key.rfind("#")
+	return key.substr(0, cut) if cut > 0 else key
 
 ## A co-op host's purse moved on its own, with no change to the books beside it: a
 ## kill's gold, a sale. The whole copy does not need re-sending for one number.
@@ -232,11 +261,16 @@ func _lent_refusal(fields: Dictionary = {}) -> Dictionary:
 
 ## What a guest is told while a gear verb is on its way to the host.
 const GEAR_SENT := "Sent to the host."
+## What a guest is told when it works the altar: the die is the host's to throw
+## and the vial comes out of the one pooled stash both machines read, so the
+## press is a request like the paperdoll's.
+const RITE_SENT := "Sent to the host - the rite spends the warband's ichor."
 ## The gear verbs a guest may ask the host for, by the name a request carries:
-## the kit on a body and the order its skills sit on the ten keys, which is part
-## of the same dressing (`_worn_signatures` compares both).
+## the kit on a body, the order its skills sit on the ten keys, which is part of
+## the same dressing (`_worn_signatures` compares both), and the altar's reagent
+## rite, which is the shared stash's vials spent on the shared steel.
 const GEAR_VERBS := ["equip", "unequip", "swap_set", "reequip", "reequip_band",
-	"restrict", "hotbar_order", "hotbar_move", "hotbar_reset"]
+	"restrict", "hotbar_order", "hotbar_move", "hotbar_reset", "anoint"]
 
 ## Where a lent warband's gear verbs go: the co-op session installs a callable
 ## that sends the request to the host. Empty on a host and on a machine with no
@@ -287,6 +321,14 @@ func apply_gear_request(request: Dictionary) -> Dictionary:
 			if args.is_empty():
 				return {"ok": false, "message": "That is not a gear request."}
 			return restrict_auto_equip(str(args[0]), bool(args[1]) if args.size() > 1 else true)
+		"anoint":
+			# The rite the guest pressed: the host throws the die and pays the
+			# vial out of the stash both players pool into. No rng crosses the
+			# wire - a client that named its own band would be rolling its own
+			# gains.
+			if args.is_empty():
+				return {"ok": false, "message": "That is not a gear request."}
+			return anoint(str(args[0]), int(args[1]) if args.size() > 1 else -1)
 		"hotbar_order":
 			if args.size() < 2 or not args[1] is Array:
 				return {"ok": false, "message": "That is not a gear request."}
@@ -931,6 +973,16 @@ func sell_gear(item_id: String, share: float = 0.6) -> Dictionary:
 ## band - the game never passes one.
 func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = null) -> Dictionary:
 	if lent:
+		# The altar is not shut to a guest: the steel, the vials and the die are
+		# the shared warband's, so the press travels and the host works it. The
+		# answer arrives as the copied ledger (the new marks, the spent vial), and
+		# a `rng` handed to this call is ignored - only the host throws.
+		if ask_gear("anoint", [item_id, ordinal]):
+			return {"ok": true, "pending": true, "message": RITE_SENT,
+				"item_id": item_id, "ordinal": ordinal, "outcome": -1,
+				"entry_id": "", "removed_id": "", "skill": "", "completed": [],
+				"count": annoints.count(item_id, ordinal),
+				"max": AnnointCatalog.MAX_PER_PIECE}
 		return _lent_refusal({"item_id": item_id, "outcome": -1, "entry_id": "",
 			"removed_id": "", "count": 0, "max": AnnointCatalog.MAX_PER_PIECE})
 	var item: Dictionary = State.ITEMS.get(item_id, {})
@@ -944,7 +996,7 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 		return {"ok": false, "message": "The altar will not take that.",
 			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
 			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
-	if not stash.available_ids(roster).has(item_id):
+	if not stash.owns(item_id, roster):
 		return {"ok": false, "message": "The warband does not carry a %s." % piece,
 			"item_id": item_id, "outcome": -1, "entry_id": "", "removed_id": "",
 			"count": 0, "max": AnnointCatalog.MAX_PER_PIECE}
@@ -1001,7 +1053,7 @@ func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
 	var item: Dictionary = State.ITEMS.get(item_id, {})
 	var pool := _annoint_pool(item, str(item.get("slot", "")))
 	var copy := _resolve_copy(item_id, ordinal)
-	var owned := not item.is_empty() and stash.available_ids(roster).has(item_id)
+	var owned := not item.is_empty() and stash.owns(item_id, roster)
 	var can := owned and _annoint_worth(item) and not pool.is_empty() \
 		and stash.pooled_count(CruorScript.BASIC_REAGENT) >= 1
 	var reason := ""

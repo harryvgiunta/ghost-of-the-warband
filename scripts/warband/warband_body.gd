@@ -63,7 +63,12 @@ var dodge
 var slide
 var cover
 var bounds := 31.5
-var interp_delay := 0.12
+## How far behind the newest snapshot a remote body is drawn: 7.2 ticks of the
+## 60 Hz clock, plus up to two packet intervals. `PossessionController`'s view
+## clock is configured with this same figure, because the tick a peer names with
+## a swing has to be the tick it was looking at.
+const REPLICA_INTERP_DELAY := 0.12
+var interp_delay := REPLICA_INTERP_DELAY
 var peek_requested := false
 var peek_view_right := Vector3.RIGHT
 var peek_shoulder := 1
@@ -140,7 +145,9 @@ var _gear_bits := -1
 var _prediction = NetReplication.InputRing.new()
 ## The remote fighter's server states, played back a short delay behind the
 ## host so uneven packet arrivals render as motion instead of jumps.
-var _timeline = NetReplication.SnapshotTimeline.new()
+## The wire clock, not a timeline of its own: `WarbandBody.apply_snapshot` fills
+## in the playout from `interp_delay` on every state it is handed.
+var _timeline = NetReplication.body_timeline()
 var _predicted_last := false
 var _timeline_ready := false
 ## The last movement frame this body consumed as authority, and the state it

@@ -494,7 +494,10 @@ strong a finished weapon is.
   A guest rolling Double Nock is a second arrow nobody asked for.
 - **Resolve the roll once, server-side of the item, and write it to the save.**
   No reroll-on-reload. Because there is no destruction, a client-side reroll is
-  now pure gain — this is the new exploit surface, not the old one.
+  now pure gain — this is the new exploit surface, not the old one. In co-op the
+  host is that server: a guest's ANOINT is a gear request
+  (`WarbandState.apply_gear_request`), the host throws the die with its own rng
+  and spends the one pooled vial, and the guest reads the weld off the mirror.
 - Annointment and brand are separate ledgers; `#100` and the brand's own cost
   reductions must be read together, not double-counted.
 - Quests: `bind_the_ichor` and the `APPLY` goal count applications; with no

@@ -22,6 +22,7 @@ const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const Catalog = preload("res://scripts/warband/cruor_catalog.gd")
 const Branded = preload("res://scripts/warband/branded_skills.gd")
 const State = preload("res://scripts/player_state.gd")
+const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
@@ -69,6 +70,9 @@ const PIECE_ICON := {
 ## The warband this panel renders. Assigned by `configure()`; every read goes
 ## through `_cruor()`/`_stash()` so a half-initialised panel cannot crash.
 var warband: Node = null
+## The warband whose `changed` signal this panel is listening to, so a repaint can
+## follow the shared books (a co-op host's answer, a load, another panel's take).
+var _source: Node = null
 ## The body the soul is inside, or -1 when the soul is between bodies or the
 ## scene has not said. The rack and the brand's vessel list lead with the copies
 ## this body wears: the steel a player walks to the altar with is the steel in
@@ -109,6 +113,9 @@ var _rack_note: Label
 var _rack_rows: Dictionary = {}      # copy key -> {row, icon, name, welded, count}
 var _socket_item := ""
 var _socket_ordinal := 0
+## True while `Warband.anoint` runs from this panel: the verb's own `changed` is
+## the press's repaint, not a second one.
+var _in_rite := false
 var _page := PAGE_ANOINT
 var _pages: Dictionary = {}          # page -> Control
 var _page_buttons: Dictionary = {}   # page -> Button
@@ -135,11 +142,37 @@ func _unhandled_input(event: InputEvent) -> void:
 # --- lifecycle -------------------------------------------------------------
 
 ## Point the panel at a warband. Safe to call again after a save is loaded: it
-## rebuilds from whatever the roster, stash and wallet say now.
+## rebuilds from whatever the roster, stash and wallet say now, and it follows
+## that warband's `changed` signal from here on.
 func configure(source: Node) -> void:
+	_detach_source()
 	warband = source
+	_attach_source()
 	_build()
 	refresh()
+
+## The shared books moved without this panel's hand: a co-op guest's rite was
+## rolled on the host and its answer is the next mirrored ledger, and another
+## window (or the host's own altar) may have spent the vial this panel is
+## showing. The panel owns no arithmetic, so a repaint is the whole of the fix.
+func _on_source_changed() -> void:
+	if _opened and not _in_rite:
+		refresh_page()
+
+func _attach_source() -> void:
+	_source = warband
+	if _source == null or not _source.has_signal("changed"):
+		_source = null
+		return
+	if not _source.is_connected("changed", _on_source_changed):
+		_source.connect("changed", _on_source_changed)
+
+func _detach_source() -> void:
+	if _source != null and is_instance_valid(_source) \
+			and _source.has_signal("changed") \
+			and _source.is_connected("changed", _on_source_changed):
+		_source.disconnect("changed", _on_source_changed)
+	_source = null
 
 func is_open() -> bool:
 	return _opened
@@ -183,6 +216,21 @@ func refresh() -> void:
 	_refresh_unbind()
 	_refresh_distill()
 	_refresh_brand()
+	_apply_page()
+	visible = _opened
+
+## Repaint the page that is up and the head of the frame. The anoint bench is the
+## hot path - a rite changes that rack alone - so the essence bindings behind it
+## are not rebuilt on every press of the one brass button.
+func refresh_page() -> void:
+	_build()
+	_refresh_header()
+	if _page == PAGE_ESSENCE:
+		_refresh_unbind()
+		_refresh_distill()
+		_refresh_brand()
+	else:
+		_refresh_anoint()
 	_apply_page()
 	visible = _opened
 
@@ -261,11 +309,13 @@ func page() -> String:
 	return _page
 
 ## Turn the frame to one of its two pages. False for a page it does not have.
+## The page is repainted as it is turned: a repaint now refreshes only the page
+## that is up, so the one behind the turn may have been waiting on the books.
 func show_page(page_name: String) -> bool:
 	if not _pages.has(page_name):
 		return false
 	_page = page_name
-	_apply_page()
+	refresh_page()
 	return true
 
 func brand_button() -> Button:
@@ -353,7 +403,12 @@ func press_anoint(item_id: String, ordinal: int = -1) -> void:
 		ordinal = int(_anoint_row_for(item_id, wanted).get("ordinal", 0))
 	_socket_item = item_id
 	_socket_ordinal = ordinal
+	# The verb notifies the warband on the host path, and the panel already
+	# repaints once at the end of the press: the second repaint is the double
+	# frame a spam of presses used to cost.
+	_in_rite = true
 	var result: Dictionary = warband.anoint(item_id, ordinal)
+	_in_rite = false
 	var completed: Variant = result.get("completed", [])
 	if bool(result.get("ok", false)) and completed is Array and not (completed as Array).is_empty():
 		result["message"] = str(result.get("message", "")) \
@@ -407,16 +462,22 @@ func press_brand() -> void:
 		return
 	_report(cruor.brand(_brand_item, _brand_tier))
 
-## Say what a verb did. A rite is reported at its own bench (`bench` true); the
-## essence verbs share the line at the foot of the frame.
+## Say what a verb did. A rite is reported at its own bench (`bench` true) and
+## repaints only the page it is on; the essence verbs share the line at the foot
+## of the frame and rebuild every page they can touch.
 func _report(result: Dictionary, bench: bool = false) -> void:
 	var ok := bool(result.get("ok", false))
 	var message := str(result.get("message", ""))
 	if bench:
 		_bench_report(message, ok)
+		# A co-op guest's press changed nothing here yet - the host's answer is
+		# the next mirror - so the sent line is the whole repaint. A press on the
+		# books themselves re-reads the one piece it worked, not the whole rack.
+		if not bool(result.get("pending", false)):
+			_patch_anoint_rows(str(result.get("item_id", "")))
 	else:
 		_set_status(message, ok)
-	refresh()
+		refresh()
 	if ok:
 		changed.emit()
 
@@ -476,116 +537,169 @@ func _refresh_anoint() -> void:
 		_paint_anoint()
 		return
 	var roster: Variant = _roster()
+	var worn_index := _worn_index()
 	var rows: Array[Dictionary] = []
 	for item_id in stash.available_ids(roster):
-		# Eligibility is the pool, not a fixed recipe: anything the pool can
-		# weld to - steel, a bow, a board, a helm - is offered.
+		# Eligibility, the odds and the one reagent are the item's, not the
+		# copy's: one preview serves every card of the row. Only the welds, the
+		# count and the fullness are the copy's own, and those are read off the
+		# ledger directly instead of asking the same question per copy.
 		var preview: Dictionary = warband.annoint_preview(item_id)
 		if int(preview.get("pool", 0)) <= 0:
 			continue
-		var item: Dictionary = State.ITEMS.get(item_id, {})
-		var worn := _worn_tags(item_id)
-		for ordinal in _copy_serials(item_id):
-			var tag: Dictionary = worn.get(ordinal, {})
-			var copy: Dictionary = warband.annoint_preview(item_id, ordinal)
-			var entries: Array = warband.annoints.entries_of(item_id, ordinal)
-			var names: Array[String] = []
-			for entry in entries:
-				names.append(str(entry.name))
-			var recipe := {str(copy.get("reagent", WarbandCruor.BASIC_REAGENT)): 1}
-			rows.append({
-				"item_id": item_id,
-				"ordinal": ordinal,
-				"copy_key": "%s#%d" % [item_id, ordinal],
-				"name": _item_name(item_id),
-				"value": _item_price(item_id),
-				"ability": warband.annoints.ability_of(item_id, ordinal),
-				"key": str(AbilityRules.hand_slot(item) + 1),
-				"count": int(copy.get("count", 0)),
-				"max": int(copy.get("max", 6)),
-				"pool": int(copy.get("pool", 0)),
-				"odds": copy.get("odds", {}),
-				"full": bool(copy.get("full", false)),
-				"entries": entries,
-				"welded": "  ·  ".join(PackedStringArray(names)),
-				"worn": str(tag.get("label", "")),
-				"holder": int(tag.get("merc", -1)),
-				"mine": _controlled_holds(tag),
-				"slot_rank": _slot_rank(str(tag.get("slot", ""))),
-				"recipe": recipe,
-				"recipe_text": WarbandCruor.recipe_text(recipe),
-				"ok": bool(copy.get("ok", false)),
-				"message": str(copy.get("message", "")),
-				"button": null,
-			})
+		var facts := _item_facts(item_id, preview)
+		var worn_entry: Variant = worn_index.get(item_id, {})
+		var worn: Dictionary = {}
+		if worn_entry is Dictionary:
+			worn = (worn_entry as Dictionary).get("tags", {})
+		for ordinal in _copy_serials(item_id, worn_entry if worn_entry is Dictionary else {}):
+			rows.append(_row_for(item_id, ordinal, facts, worn.get(ordinal, {})))
 	# The copies on the body the soul is inside come first, in the order a body
 	# is worn in - main hand, off hand, then the armour and the trinkets - because
 	# that is the steel a player carried to the altar and the steel he came to
 	# work. Then every other body's kit, then the spares: inside each group the
 	# dearest piece leads, and inside one piece the copies that already carry
 	# something, so the one a player came to look at sits at the top of its group.
-	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		var a_mine := bool(a["mine"])
-		var b_mine := bool(b["mine"])
-		if a_mine != b_mine:
-			return a_mine
-		if a_mine and int(a["slot_rank"]) != int(b["slot_rank"]):
-			return int(a["slot_rank"]) < int(b["slot_rank"])
-		var a_worn := not str(a["worn"]).is_empty()
-		var b_worn := not str(b["worn"]).is_empty()
-		if a_worn != b_worn:
-			return a_worn
-		if int(a["value"]) != int(b["value"]):
-			return int(a["value"]) > int(b["value"])
-		if str(a["name"]) != str(b["name"]):
-			return str(a["name"]) < str(b["name"])
-		if int(a["count"]) != int(b["count"]):
-			return int(a["count"]) > int(b["count"])
-		return int(a["ordinal"]) < int(b["ordinal"]))
+	rows.sort_custom(_row_before)
 	for row in rows:
 		# The rack's filter: a player hunting the sword a body is already wearing
 		# does not want the seventeen spares standing between him and it.
 		if _rack_only_worn and str(row["worn"]).is_empty():
 			continue
 		_anoint_rows.append(row)
-	if _anoint_row_for(_socket_item, _socket_ordinal).is_empty():
-		_socket_item = ""
-		_socket_ordinal = 0
-		if not _anoint_rows.is_empty():
-			_socket_item = str(_anoint_rows[0]["item_id"])
-			_socket_ordinal = int(_anoint_rows[0]["ordinal"])
+	_keep_socket_listed()
 	_sync_anoint_rows()
 	_paint_anoint()
 
-## Every copy of `item_id` the warband owns, by the serial the copy itself
-## carries: the pool's own list plus the serial each body's slot is wearing. The
-## rack lists these, so a copy is the weapon and not a number counted off a total.
-func _copy_serials(item_id: String) -> Array[int]:
-	var out: Array[int] = []
-	var stash := _stash()
-	if stash != null:
-		for serial in stash.serials_of(item_id):
-			if not out.has(int(serial)):
-				out.append(int(serial))
-	var roster: Variant = _roster()
-	if roster != null and warband != null:
-		for merc in roster.records():
-			var merc_id := int(merc.get("id", 0))
-			for wear in roster.worn_entries(merc_id):
-				if str(wear.get("item", "")) != item_id:
-					continue
-				var serial := int(warband.annoint_copy(merc_id, str(wear.get("slot", ""))))
-				if not out.has(serial):
-					out.append(serial)
-	out.sort()
-	return out
+## The item-level half of a rack row: everything every copy of a piece shares,
+## asked once per piece. `preview` is `Warband.annoint_preview(item_id)`.
+func _item_facts(item_id: String, preview: Dictionary) -> Dictionary:
+	var item: Dictionary = State.ITEMS.get(item_id, {})
+	var recipe := {str(preview.get("reagent", WarbandCruor.BASIC_REAGENT)): 1}
+	return {
+		"name": _item_name(item_id),
+		"value": _item_price(item_id),
+		"key": str(AbilityRules.hand_slot(item) + 1),
+		"max": int(preview.get("max", 6)),
+		"pool": int(preview.get("pool", 0)),
+		"odds": preview.get("odds", {}),
+		"recipe": recipe,
+		"recipe_text": WarbandCruor.recipe_text(recipe),
+		"ok": bool(preview.get("ok", false)),
+		"message": str(preview.get("message", "")),
+	}
 
-## Which copies of `item_id` are worn, `ordinal -> {label, merc, slot}`. The copy
-## a body wears is the warband's own answer (`annoint_copy`), so the rack and the
+## One card's row: the copy's welds and count over the item's shared facts.
+func _row_for(item_id: String, ordinal: int, facts: Dictionary, tag: Dictionary) -> Dictionary:
+	var entries: Array = warband.annoints.entries_of(item_id, ordinal)
+	var names: Array[String] = []
+	var ability := ""
+	for entry in entries:
+		names.append(str(entry.name))
+		if ability.is_empty() and int(entry.kind) == AnnointCatalog.Kind.ABILITY:
+			ability = str(entry.ability)
+	var count := int(warband.annoints.count(item_id, ordinal))
+	var max_welds := int(facts["max"])
+	return {
+		"item_id": item_id,
+		"ordinal": ordinal,
+		"copy_key": "%s#%d" % [item_id, ordinal],
+		"name": facts["name"],
+		"value": facts["value"],
+		"ability": ability,
+		"key": facts["key"],
+		"count": count,
+		"max": max_welds,
+		"pool": facts["pool"],
+		"odds": facts["odds"],
+		"full": count >= max_welds,
+		"entries": entries,
+		"welded": "  ·  ".join(PackedStringArray(names)),
+		"worn": str(tag.get("label", "")),
+		"holder": int(tag.get("merc", -1)),
+		"mine": _controlled_holds(tag),
+		"slot_rank": _slot_rank(str(tag.get("slot", ""))),
+		"recipe": facts["recipe"],
+		"recipe_text": facts["recipe_text"],
+		"ok": facts["ok"],
+		"message": facts["message"],
+		"button": null,
+	}
+
+## The rack's one ordering, shared by a full build and a one-piece patch.
+func _row_before(a: Dictionary, b: Dictionary) -> bool:
+	var a_mine := bool(a["mine"])
+	var b_mine := bool(b["mine"])
+	if a_mine != b_mine:
+		return a_mine
+	if a_mine and int(a["slot_rank"]) != int(b["slot_rank"]):
+		return int(a["slot_rank"]) < int(b["slot_rank"])
+	var a_worn := not str(a["worn"]).is_empty()
+	var b_worn := not str(b["worn"]).is_empty()
+	if a_worn != b_worn:
+		return a_worn
+	if int(a["value"]) != int(b["value"]):
+		return int(a["value"]) > int(b["value"])
+	if str(a["name"]) != str(b["name"]):
+		return str(a["name"]) < str(b["name"])
+	if int(a["count"]) != int(b["count"]):
+		return int(a["count"]) > int(b["count"])
+	return int(a["ordinal"]) < int(b["ordinal"])
+
+## The square never points at a card the rack no longer holds: it falls back to
+## the rack's first copy, exactly as a full build does.
+func _keep_socket_listed() -> void:
+	if not _anoint_row_for(_socket_item, _socket_ordinal).is_empty():
+		return
+	_socket_item = ""
+	_socket_ordinal = 0
+	if not _anoint_rows.is_empty():
+		_socket_item = str(_anoint_rows[0]["item_id"])
+		_socket_ordinal = int(_anoint_rows[0]["ordinal"])
+
+## One rite changed one piece's ledger. Rebuild that piece's cards where they
+## stand instead of the whole rack - a press is meant to be spam-clickable - and
+## repaint the bench from the fresh row. A piece that no longer takes a weld (or
+## has left the warband) falls back to the full rebuild.
+func _patch_anoint_rows(item_id: String) -> void:
+	var stash := _stash()
+	if warband == null or stash == null or item_id.is_empty() \
+			or not stash.owns(item_id, _roster()):
+		refresh_page()
+		return
+	var preview: Dictionary = warband.annoint_preview(item_id)
+	if int(preview.get("pool", 0)) <= 0:
+		refresh_page()
+		return
+	var facts := _item_facts(item_id, preview)
+	var worn_entry: Variant = _worn_index().get(item_id, {})
+	var worn: Dictionary = {}
+	if worn_entry is Dictionary:
+		worn = (worn_entry as Dictionary).get("tags", {})
+	var kept: Array[Dictionary] = []
+	for row in _anoint_rows:
+		if str(row["item_id"]) != item_id:
+			kept.append(row)
+	for ordinal in _copy_serials(item_id, worn_entry if worn_entry is Dictionary else {}):
+		var tag: Dictionary = worn.get(ordinal, {})
+		if _rack_only_worn and str(tag.get("label", "")).is_empty():
+			continue
+		kept.append(_row_for(item_id, ordinal, facts, tag))
+	_anoint_rows = kept
+	_anoint_rows.sort_custom(_row_before)
+	_keep_socket_listed()
+	_sync_anoint_rows()
+	_paint_anoint()
+
+## One pass over every body's worn slots for the whole repaint:
+## `item_id -> {tags: {ordinal: {label, merc, slot}}, serials: [ordinal]}`.
+## The rack asks per item id and the brand's vessel list asks again; walking
+## every body's slots per item made those questions O(items x bodies). The copy a
+## body wears is the warband's own answer (`annoint_copy`), so the rack and the
 ## field agree on which sword carries which annointments. When two bodies are
 ## somehow filed under one copy the body the soul is inside wins the label, since
 ## that is the one the rack is leading with.
-func _worn_tags(item_id: String) -> Dictionary:
+func _worn_index() -> Dictionary:
 	var out := {}
 	var roster: Variant = _roster()
 	if roster == null or warband == null or not warband.has_method("annoint_copy"):
@@ -593,18 +707,42 @@ func _worn_tags(item_id: String) -> Dictionary:
 	for merc in roster.records():
 		var merc_id := int(merc.get("id", 0))
 		for wear in roster.worn_entries(merc_id):
+			var item_id := str(wear.get("item", ""))
+			if item_id.is_empty():
+				continue
 			var slot := str(wear.get("slot", ""))
-			if str(wear.get("item", "")) != item_id:
-				continue
 			var ordinal := int(warband.annoint_copy(merc_id, slot))
-			if out.has(ordinal) and merc_id != controlled_merc:
-				continue
-			out[ordinal] = {
-				"label": "%s %s" % [str(merc.get("name", "Mercenary")),
-					Contracts.slot_id_label(slot)],
-				"merc": merc_id,
-				"slot": slot,
-			}
+			var entry: Variant = out.get(item_id)
+			if entry == null:
+				entry = {"tags": {}, "serials": []}
+				out[item_id] = entry
+			var tags: Dictionary = entry["tags"]
+			if not tags.has(ordinal) or merc_id == controlled_merc:
+				tags[ordinal] = {
+					"label": "%s %s" % [str(merc.get("name", "Mercenary")),
+						Contracts.slot_id_label(slot)],
+					"merc": merc_id,
+					"slot": slot,
+				}
+			var serials: Array = entry["serials"]
+			if not serials.has(ordinal):
+				serials.append(ordinal)
+	return out
+
+## Every copy of `item_id` the warband owns, by the serial the copy itself
+## carries: the pool's own list plus the serials the worn index holds.
+func _copy_serials(item_id: String, worn: Dictionary) -> Array[int]:
+	var out: Array[int] = []
+	var stash := _stash()
+	if stash != null:
+		for serial in stash.serials_of(item_id):
+			out.append(int(serial))
+	var worn_serials: Variant = worn.get("serials", [])
+	if worn_serials is Array:
+		for serial in worn_serials:
+			if not out.has(int(serial)):
+				out.append(int(serial))
+	out.sort()
 	return out
 
 ## Whether a worn tag belongs to the body the soul is inside - the copies the
@@ -643,25 +781,33 @@ func _lay_in_socket(item_id: String, ordinal: int = 0) -> void:
 
 ## One card per copy, cached by `item_id#ordinal` and painted in place: a repaint
 ## keeps the scroll where the player left it and never frees the card whose press
-## led here.
+## led here. The listed keys are indexed once - a per-row linear search over the
+## rack is O(n^2) on a shelf holding hundreds of copies.
 func _sync_anoint_rows() -> void:
 	if _rack_box == null:
 		return
+	var listed := {}
+	for row in _anoint_rows:
+		listed[str(row["copy_key"])] = row
 	for key in _rack_rows.keys():
-		if _anoint_row_for_key(str(key)).is_empty():
+		if not listed.has(str(key)):
 			var parts: Dictionary = _rack_rows[key]
 			var stale: Control = parts["row"]
 			_rack_box.remove_child(stale)
 			stale.queue_free()
 			_rack_rows.erase(key)
 	for index in _anoint_rows.size():
-		var row := _anoint_rows[index]
+		var row: Dictionary = listed[str(_anoint_rows[index]["copy_key"])]
 		var key := str(row["copy_key"])
 		var parts: Variant = _rack_rows.get(key)
 		if parts == null:
 			parts = _build_rack_row(row)
 			_rack_rows[key] = parts
-		_rack_box.move_child(parts["row"], index)
+		var button: Button = parts["row"]
+		# `move_child` re-sorts the container even when the child is already
+		# there; on a full rack that was most of a repaint.
+		if button.get_index() != index:
+			_rack_box.move_child(button, index)
 		_paint_rack_row(parts, row)
 	if _rack_note != null:
 		_rack_note.visible = _anoint_rows.is_empty()
@@ -670,12 +816,6 @@ func _sync_anoint_rows() -> void:
 	if _anoint_rack_count != null:
 		var count := _anoint_rows.size()
 		_anoint_rack_count.text = "%d %s" % [count, "copy" if count == 1 else "copies"]
-
-func _anoint_row_for_key(key: String) -> Dictionary:
-	for row in _anoint_rows:
-		if str(row["copy_key"]) == key:
-			return row
-	return {}
 
 ## A rack card: the piece's glyph, its name, what is welded to that copy and its
 ## count. The button under it only lays the copy in the square.
@@ -730,47 +870,64 @@ func _build_rack_row(row: Dictionary) -> Dictionary:
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.custom_minimum_size = Vector2(52, 0)
-	return {"row": button, "icon": icon, "name": name_label, "welded": welded,
-		"count": count_label}
-
-## Paint one card from its row: the piece, the annointments on that copy and how
-## full it is. Selection is the same brass the one ANOINT button wears.
-func _paint_rack_row(parts: Dictionary, row: Dictionary) -> void:
-	var button: Button = parts["row"]
-	var item_id := str(row["item_id"])
-	var selected := item_id == _socket_item and int(row["ordinal"]) == _socket_ordinal
-	var fill := Color(0.25, 0.19, 0.11) if selected else WELL_INK
-	var edge := WELL_EDGE_LIT if selected else Color(WELL_EDGE, 0.45)
-	var rest := _style(fill, edge, 4, 0, 1)
-	if selected:
-		# A brass spine down the card a player has laid in the square, readable at
-		# a glance in a rack of ten near-identical pieces.
-		rest.border_width_left = 4
+	# A card's chrome is fixed for the copy it stands for: the glyph, the name,
+	# the tooltip and both styleboxes are built once, and a repaint only moves
+	# the brass spine and the two lines that read the ledger.
+	var rest := _style(WELL_INK, Color(WELL_EDGE, 0.45), 4, 0, 1)
+	var laid := _style(Color(0.25, 0.19, 0.11), WELL_EDGE_LIT, 4, 0, 1)
+	# A brass spine down the card a player has laid in the square, readable at a
+	# glance in a rack of ten near-identical pieces.
+	laid.border_width_left = 4
 	button.add_theme_stylebox_override("normal", rest)
-	button.add_theme_stylebox_override("hover",
-		_style(Color(0.17, 0.13, 0.09), WELL_EDGE, 4, 0, 1))
 	button.add_theme_stylebox_override("pressed", rest)
 	button.add_theme_stylebox_override("hover_pressed", rest)
-	button.set_pressed_no_signal(selected)
-	(parts["icon"] as TextureRect).texture = LedgerThemeScript.icon_small(
+	button.add_theme_stylebox_override("hover",
+		_style(Color(0.17, 0.13, 0.09), WELL_EDGE, 4, 0, 1))
+	icon.texture = LedgerThemeScript.icon_small(
 		_piece_icon_key(State.ITEMS.get(item_id, {})))
-	(parts["name"] as Label).text = str(row["name"]).to_upper()
+	name_label.text = str(row["name"]).to_upper()
+	button.show_item(item_id, warband, "Lay this copy on the altar.", 1, "", ordinal)
+	return {"row": button, "icon": icon, "name": name_label, "welded": welded,
+		"count": count_label, "rest": rest, "laid": laid, "selected": false,
+		"line_tint": null, "count_tint": null}
+
+## Paint one card from its row: whether it is the copy in the square, the
+## annointments welded to that copy and how full it is. Only what changed is
+## written - a rack of two hundred cards repaints on every press, and the cards
+## whose count and selection did not move are the great majority.
+func _paint_rack_row(parts: Dictionary, row: Dictionary) -> void:
+	var button: Button = parts["row"]
+	var selected := str(row["item_id"]) == _socket_item \
+		and int(row["ordinal"]) == _socket_ordinal
+	if bool(parts["selected"]) != selected:
+		parts["selected"] = selected
+		var rest: StyleBox = parts["laid"] if selected else parts["rest"]
+		button.add_theme_stylebox_override("normal", rest)
+		button.add_theme_stylebox_override("pressed", rest)
+		button.add_theme_stylebox_override("hover_pressed", rest)
+		button.set_pressed_no_signal(selected)
 	var welded := str(row["welded"])
 	var worn := str(row["worn"])
 	var line := welded if not welded.is_empty() else "Nothing welded"
 	if not worn.is_empty():
 		line = "%s   ·   Worn %s" % [line, worn]
 	var line_label: Label = parts["welded"]
-	line_label.text = line
-	line_label.add_theme_color_override("font_color",
-		CARD_DIM if not welded.is_empty() else CARD_FAINT)
+	if line_label.text != line:
+		line_label.text = line
+	var line_tint := CARD_DIM if not welded.is_empty() else CARD_FAINT
+	if parts["line_tint"] != line_tint:
+		parts["line_tint"] = line_tint
+		line_label.add_theme_color_override("font_color", line_tint)
 	var count := int(row["count"])
 	var cap := int(row["max"])
 	var count_label: Label = parts["count"]
-	count_label.text = "%d / %d" % [count, cap]
-	count_label.add_theme_color_override("font_color",
-		WELL_EDGE_LIT if count >= cap else CARD_DIM)
-	button.show_item(item_id, warband, "Lay this copy on the altar.", 1, "", int(row["ordinal"]))
+	var count_text := "%d / %d" % [count, cap]
+	if count_label.text != count_text:
+		count_label.text = count_text
+	var count_tint := WELL_EDGE_LIT if count >= cap else CARD_DIM
+	if parts["count_tint"] != count_tint:
+		parts["count_tint"] = count_tint
+		count_label.add_theme_color_override("font_color", count_tint)
 	row["button"] = button
 
 ## What the square, the reagent well, the one button and the words under them
@@ -1009,8 +1166,10 @@ func _refresh_brand() -> void:
 	# Inside each group the dearest vessel leads.
 	var mine := {}
 	var worn := {}
+	var worn_index := _worn_index()
 	for item_id in candidates:
-		var tags := _worn_tags(item_id)
+		var entry: Variant = worn_index.get(item_id, {})
+		var tags: Dictionary = entry.get("tags", {}) if entry is Dictionary else {}
 		if tags.is_empty():
 			continue
 		worn[item_id] = true

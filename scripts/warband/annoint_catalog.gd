@@ -756,6 +756,11 @@ const NAMES := [
 static var _entries: Array[Entry] = []
 static var _by_id: Dictionary = {}
 static var _built := false
+## The applicability answer per (groups, slots), built once. `for_item` is asked
+## on every repaint of the altar's rack, the item card and every hover, and the
+## filter walks the whole registry each time: the class rules are pure, so the
+## pool is cached and handed out as a copy (the entries themselves never change).
+static var _pools: Dictionary = {}
 
 
 static func _build() -> void:
@@ -1043,6 +1048,8 @@ static func slots_of(item: Dictionary) -> Array:
 
 
 ## Every entry that may be welded to this item, wired ones only, stable order.
+## Pure in the item's class (`groups_of` + `slots_of`), so the answer is cached
+## and copied out: the rack asks for the same pool once per copy on every press.
 static func for_item(item: Dictionary) -> Array[Entry]:
 	var out: Array[Entry] = []
 	if item.is_empty():
@@ -1051,9 +1058,17 @@ static func for_item(item: Dictionary) -> Array[Entry]:
 	var slots := slots_of(item)
 	if groups.is_empty() or slots.is_empty():
 		return out
+	var key := "%s|%s" % [",".join(PackedStringArray(groups)),
+		",".join(PackedStringArray(slots))]
+	var cached: Variant = _pools.get(key)
+	if cached is Array:
+		for entry in cached:
+			out.append(entry)
+		return out
 	for entry in all():
 		if entry.wired and entry.fits(groups, slots) and admits(entry, groups):
 			out.append(entry)
+	_pools[key] = out.duplicate()
 	return out
 
 

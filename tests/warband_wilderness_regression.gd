@@ -210,8 +210,112 @@ func run() -> void:
 			culler.sweep()
 			check(not bool(stray.dormant),
 				"a body standing beside the wolf keeps it awake, whoever is inside it")
+			# What a body is *drawn* at is this machine's own camera, not the
+			# nearest soul: the host was skinning and shadow-casting the whole of a
+			# guest's fight two hundred metres from its own eye. The wolf stays
+			# awake - it must still fight - and rests its presentation.
+			var eye := Camera3D.new()
+			eye.name = "HostEye"
+			root.add_child(eye)
+			eye.global_position = Vector3(400.0, 3.0, 400.0)
+			eye.current = true
+			var wolf_at: Vector3 = (stray as Node3D).global_position
+			check(is_equal_approx(culler.view_distance(wolf_at), wolf_at.distance_to(eye.global_position)),
+				"the culler measures to this machine's eye (%.1f m)"
+					% culler.view_distance(wolf_at))
+			check(culler.nearest_eye(wolf_at) < 30.0, "while a soul stands beside the wolf")
+			culler.sweep()
+			check(not bool(stray.dormant),
+				"a body beside the wolf still keeps its brain running")
+			check(int(stray.get("_present_band")) == 2,
+				"and the far eye rests its presentation (%s)"
+					% str(stray.get("_present_band")))
+			eye.global_position = (stray as Node3D).global_position + Vector3(0.0, 2.0, 4.0)
+			culler.sweep()
+			check(int(stray.get("_present_band")) == 0,
+				"an eye beside the wolf draws it at full detail (%s)"
+					% str(stray.get("_present_band")))
+			eye.queue_free()
 			culler.attach(null)
 			other.queue_free()
+
+	# --- the body steps on frames its brain sits out -----------------------
+	# A wolf on the deep budget used to move on one frame in twelve: at seventy
+	# metres that is a metre a step, five times a second, which is what a mob
+	# popping forward reads as. The brain still decides on its budget; the body
+	# walks every frame.
+	var walking = spawned[1] if spawned.size() > 1 else null
+	check(walking != null, "a second wolf is there to walk")
+	if walking != null:
+		# Far enough from the ranger for the far band, and off its own patch so it
+		# is walking back rather than standing on the goal.
+		walking.global_position = Vector3(TARGET_POST.x + 70.0, 0.12, TARGET_POST.z)
+		await _settle([walking])
+		walking.mob_wake()
+		var before: Vector3 = walking.global_position
+		var moved := 0
+		for _frame in 24:
+			await physics_frame
+			if not is_instance_valid(walking):
+				break
+			var step: float = (walking.global_position - before).length()
+			before = walking.global_position
+			if step > 0.004:
+				moved += 1
+		check(moved > 12,
+			"a wolf on the far budget moves on most frames, not one in twelve (%d/24)" % moved)
+
+	# --- a guest's copy is put down the moment the host stops naming it ----
+	# The stream names what a player can reach; a body that leaves it used to stand
+	# frozen where it was until the stale clock noticed, and the clock is longer
+	# than the host's own refresh, so a living mob blinked out for a quarter of a
+	# second at a time. The host says so, and the copy goes at once.
+	var named = spawned[2] if spawned.size() > 2 else null
+	check(named != null, "a third wolf is there to be streamed")
+	if named != null:
+		var pose := func(at: Vector3) -> Dictionary:
+			return {"p": at, "y": 0.0, "v": Vector3.ZERO, "g": true, "s": "IDLE",
+				"t": 0.0, "h": 38.0, "a": true, "x": Vector4.ZERO}
+		named.call("mark_replica")
+		check(not named.visible, "a copy the host has never named is not drawn")
+		named.call("apply_snapshot", pose.call(Vector3(4.0, 0.2, 4.0)), 40)
+		check(named.visible, "the first state the host sends puts it on the screen")
+		check((named as Node3D).global_position.distance_to(Vector3(4.0, 0.2, 4.0)) < 0.01,
+			"and it stands where the host says, not at its own spawn post")
+		named.call("set_streamed", false, 41)
+		check(not named.visible, "a body the host stops naming is put down at once")
+		named.call("apply_snapshot", pose.call(Vector3(9.0, 0.2, 9.0)), 40)
+		check(not named.visible, "a state from before the leave does not bring it back")
+		check((named as Node3D).global_position.distance_to(Vector3(9.0, 0.2, 9.0)) > 0.5,
+			"and does not move it either")
+		named.call("apply_snapshot", pose.call(Vector3(12.0, 0.2, 12.0)), 42)
+		check(named.visible, "the next state does")
+		check((named as Node3D).global_position.distance_to(Vector3(12.0, 0.2, 12.0)) < 0.01,
+			"at the pose it names, a reset rather than a slide from the old one")
+
+	# --- a standing body asks the world for nothing ------------------------
+	# `move_and_slide` is the most expensive thing a mob does in a frame (2.6 us
+	# on this project's world, 0.5 ms for two hundred of them at 60 Hz), and for a
+	# body with its feet down and no motion it resolves to standing still. The rule
+	# is `MobLod.moving`: airborne, or actually moving. This is what keeps a hall of
+	# bodies holding position from costing a capsule cast each, every frame.
+	var level = spawned[3] if spawned.size() > 3 else null
+	if level != null:
+		var lod = load("res://scripts/mob_lod.gd")
+		await _settle([level])
+		(level as Node3D).global_position = Vector3(TARGET_POST.x + 30.0, 0.12, TARGET_POST.z)
+		await _settle([level])
+		level.velocity = Vector3.ZERO
+		await physics_frame
+		level.velocity = Vector3.ZERO
+		check(level.is_on_floor(), "a settled wolf stands on its feet")
+		check(not lod.moving(level),
+			"a standing wolf has nowhere to go, so it asks the world nothing")
+		# The rule is the contract (a live wolf always has an intent, so it is never
+		# "standing" for long): `MobLod.move` is `if moving(body): move_and_slide()`.
+		level.velocity = Vector3(2.0, 0.0, 0.0)
+		check(lod.moving(level), "a walking wolf does sweep")
+		level.velocity = Vector3.ZERO
 
 	world.queue_free()
 	await process_frame

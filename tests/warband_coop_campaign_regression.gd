@@ -19,6 +19,7 @@ extends SceneTree
 
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
 const State = preload("res://scripts/player_state.gd")
 const REPORT_NAME := "CoopReport"
 const TRAIL_POINT := Vector3(6.0, 0.0, -90.0)
@@ -165,14 +166,33 @@ func _host_run() -> void:
 		var equipped: Dictionary = warband.roster.equip(merc_id, "main", "sword_short")
 		check(bool(equipped.get("ok", false)),
 			"Mercenary %s takes its shortsword" % str(merc_name))
-	# A spare on the shelf: the guest's own press is what has to wear it.
+	# A spare on the shelf: the guest's own press is what has to wear it. And one
+	# warden's ichor beside it: the guest's press at the altar spends the pool the
+	# whole party shares.
 	warband.stash.add("sword_arming", 1)
+	warband.stash.add("ichor_vial", 1)
 	warband.save_checkpoint("trail_start", "trail", TRAIL_POINT, "COOP")
 	check(warband.has_checkpoint(), "The host's save holds the trail bookmark")
 	check(FileAccess.file_exists(host_save), "The host save was written")
 	var host_roster: Array[int] = warband.roster.ids()
 	check(host_roster.size() == SQUAD_NAMES.size(), "The save holds the two-body squad (%d)"
 		% host_roster.size())
+
+	# The whole session runs over a link that is not instantaneous. Localhost is
+	# the one link on which prediction, interpolation and the hitbox rewind can
+	# all be wrong and still agree: at 0.1 ms the past and the present are the
+	# same frame. 60 ms each way with 20 ms of jitter is a cable or a Tailscale
+	# path, and it is the only way this test measures netcode rather than luck.
+	# Set before the socket opens, because the session reads it on `setup`, and
+	# inherited by the guest process this test spawns.
+	OS.set_environment("IRONWOOD_COOP_LAG", "0.06")
+	OS.set_environment("IRONWOOD_COOP_JITTER", "0.02")
+	# And it loses pose packets, the way a bad link does: the streams marked
+	# `lossy` are exactly the ones the wire already sends unreliably (snapshots,
+	# the mob stream, missiles, move frames), so a death, a leave or a combat verb
+	# is still never thrown away. Loss is what a `stale` copy, a re-sync and a
+	# replayed input frame are for; latency alone does not exercise them.
+	OS.set_environment("IRONWOOD_COOP_DROP", "0.05")
 
 	var probe := PacketPeerUDP.new()
 	check(probe.bind(0) == OK, "The fixture gets an available UDP port")
@@ -284,6 +304,25 @@ func _host_run() -> void:
 			"with the spare back on the host's shelf (%d)"
 				% warband.stash.pooled_count("sword_arming"))
 
+	# --- a guest's press works the altar on the host's books ----------------
+	# The altar is the same shared books as the paperdoll: the request names the
+	# copy, the host throws the die and pays the vial out of the pool both players
+	# draw on, and the weld comes back on the mirror. The guest checks its own
+	# copy and the mirror; here the host checks the pool it paid from and the
+	# ledger the guest is reading.
+	var rited := await _wait_until(func(): return reports.has("rite"), 20.0)
+	check(rited, "The guest reports its altar press")
+	if rited:
+		var rite: Dictionary = reports["rite"]
+		check(warband.stash.pooled_count("ichor_vial") == 0,
+			"the pooled vial left the host's stash (%d)"
+				% warband.stash.pooled_count("ichor_vial"))
+		var rite_copy := int(rite.get("copy", -1))
+		check(warband.annoints.count("sword_arming", rite_copy) == int(rite.get("count", -1)),
+			"and the host's ledger is the count the guest reads (%d vs %d)" % [
+				warband.annoints.count("sword_arming", rite_copy),
+				int(rite.get("count", -1))])
+
 	# The rest of the test measures the wire, not the wood: a cultist that happens
 	# to stand inside its reach would stagger the body between a press and its
 	# blow, and the band's own sweep would claim the corpse and the drop before
@@ -335,8 +374,10 @@ func _host_run() -> void:
 		var first_seen := await _wait_until(func(): return reports.has("mob"), 10.0)
 		check(first_seen, "The guest's copy of the warden answers")
 		var first_pos := Vector3.ZERO
+		var first_tick := -1
 		if first_seen:
 			var data: Dictionary = reports["mob"]
+			first_tick = int(data.get("stream_tick", -1))
 			first_pos = Vector3(data.get("pos", [0.0, 0.0, 0.0])[0],
 				data.get("pos", [0.0, 0.0, 0.0])[1], data.get("pos", [0.0, 0.0, 0.0])[2])
 			check(bool(data.get("replica", false)),
@@ -356,6 +397,14 @@ func _host_run() -> void:
 		check(moved_seen, "The guest's copy answers after the warden moves")
 		if moved_seen:
 			var moved: Dictionary = reports["mob"]
+			# The mob stream is labelled with the physics clock, not with a packet
+			# counter: two probes 0.7 s apart must show ~0.7 s of ticks. Numbered one
+			# per batch this read ~10; it reads ~42 now. That is the whole difference
+			# between a label that maps to elapsed time and one that lies after every
+			# hitch.
+			var span := int(moved.get("stream_tick", -1)) - first_tick
+			check(span >= 30,
+				"The mob stream's tick is the physics clock (%d ticks across 0.7 s)" % span)
 			var moved_pos := Vector3(moved.get("pos", [0.0, 0.0, 0.0])[0],
 				moved.get("pos", [0.0, 0.0, 0.0])[1], moved.get("pos", [0.0, 0.0, 0.0])[2])
 			check(moved_pos.distance_to(host_second) < 1.5,
@@ -365,8 +414,11 @@ func _host_run() -> void:
 				"The guest's warden actually moved (%s vs %s)"
 					% [str(moved_pos), str(host_first)])
 		# The host stops naming the body - the kill that missed a datagram, or
-		# the body that walked out of the 70 m band. The guest's copy must leave
-		# the screen instead of standing where the host no longer has one.
+		# the body that walked out of the 70 m band. A body leaving a peer's
+		# stream is named once, reliably, so the guest's copy leaves the screen
+		# instead of standing where the host no longer has one. The wait is 1.1 s,
+		# inside the 2 s stale clock on purpose: a copy still waiting on a timeout
+		# would be standing here, so what is measured is the word from the host.
 		(world.get("guards") as Array).erase(warden)
 		await create_timer(1.1).timeout
 		reports.erase("mob")
@@ -375,8 +427,10 @@ func _host_run() -> void:
 		check(gone_seen, "The guest's copy answers after the host stops naming it")
 		if gone_seen:
 			var gone: Dictionary = reports["mob_gone"]
-			check(not bool(gone.get("visible", true)), "The stale copy leaves the screen")
-			check(bool(gone.get("stale", false)), "and knows it has gone quiet")
+			check(not bool(gone.get("visible", true)),
+				"The copy the host stops streaming leaves the screen")
+			check(not bool(gone.get("stale", true)),
+				"put down by the stream, not left to the stale clock")
 
 	# --- the guest's verbs land on the host's field ------------------------
 	# A body the host alone fields stands in front of the guest. The guest
@@ -416,6 +470,43 @@ func _host_run() -> void:
 		var press_seen := await _wait_until(func(): return reports.has("strike"), 5.0)
 		check(press_seen and bool((reports.get("strike", {}) as Dictionary).get("sent", false)),
 			"The guest's own press is sent from the body it was given")
+		# The tick a guest names is read back by the host against the bodies that
+		# guest was looking at. Its clock has to trail the newest snapshot by the
+		# delay its own eye draws a remote body at, or every correction is short:
+		# a blow that looked landed is refused, a body is hit where it had already
+		# stopped being. Left on the clock's default this read 1.5 ticks against
+		# the body's 7.2 - a hundred milliseconds of the wrong moment.
+		if press_seen:
+			var seen: Dictionary = reports.get("strike", {})
+			var clock_delay := float(seen.get("clock_delay", -1.0))
+			var replica_delay := float(seen.get("replica_delay", -1.0))
+			var newest := int(seen.get("newest", -1))
+			var view := int(seen.get("view", -1))
+			check(replica_delay > 0.0 and absf(clock_delay - replica_delay) < 1.0,
+				"The tick a guest names is the tick it draws (%.2f vs %.2f)"
+					% [clock_delay, replica_delay])
+			check(newest >= 0 and view >= 0 and float(newest - view) >= 5.0,
+				"and it trails the newest snapshot by that delay (%d vs %d)"
+					% [newest, view])
+			# The link really was on, both ways: the guest's intents sat in its
+			# uplink queue and were released, or this run proves nothing about
+			# latency. The host's own count is checked with the same intent.
+			check(int(seen.get("uplink", 0)) > 200,
+				"The guest's intents ran through the simulated link (%d released)"
+					% int(seen.get("uplink", 0)))
+			check(int(flow.session._link.released) > 200,
+				"The host's poses ran through the simulated link too (%d released)"
+					% int(flow.session._link.released))
+			# Passing through a queue is not the same as being delayed by it: the
+			# hold time is what the game felt.
+			var wait := float(flow.session._link.mean_wait())
+			check(wait >= 0.06 and wait <= 0.10,
+				"The host's poses were held for the delay asked for (%.3f s)" % wait)
+			check(int(flow.session._link.discarded) > 0,
+				"And the link lost pose packets, as an unreliable one does (%d)"
+					% int(flow.session._link.discarded))
+			check(float(flow.session._link.drop) > 0.0,
+				"with the losses typed: deaths and leaves are reliable and never drop")
 		var struck := await _wait_until(func(): return is_instance_valid(dummy) \
 			and (not bool(dummy.get("alive")) \
 				or float(dummy.get("health")) < float(dummy.get("max_health"))), 6.0)
@@ -747,6 +838,33 @@ func _client_run() -> void:
 	_submit({"kind": "gear", "tag": "gear", "merc": gear_merc,
 		"worn": str(warband.roster.equipped_of(gear_merc).get("main", ""))})
 
+	# --- the guest's own rite at the altar ---------------------------------
+	# The altar's panel is the host's books like the paperdoll: the press is a
+	# request, the host's arm pays the one pooled vial and throws the die, and the
+	# weld comes back on the mirrored ledger. Nothing here rolls locally.
+	var altar_menu = AltarMenuScript.new()
+	altar_menu.name = "GuestAltar"
+	root.add_child(altar_menu)
+	altar_menu.configure(warband)
+	altar_menu.open()
+	var rite_copy := int(warband.annoint_copy_for_item("sword_arming"))
+	var vial_before := int(warband.stash.pooled_count("ichor_vial"))
+	check(vial_before == 1, "The guest sees the host's pooled vial (%d)" % vial_before)
+	altar_menu.press_anoint("sword_arming", rite_copy)
+	check(warband.annoints.count("sword_arming", rite_copy) == 0
+			and warband.stash.pooled_count("ichor_vial") == vial_before,
+		"The guest's rite spends nothing on the lent copy by itself")
+	var spent := await _wait_until(func(): return warband.stash.pooled_count(
+		"ichor_vial") < vial_before, 12.0)
+	check(spent, "The host works the rite and the pooled vial leaves (%d) after [%s]" % [
+		warband.stash.pooled_count("ichor_vial"), altar_menu.status_text()])
+	var rite_rows: int = altar_menu.anoint_rows().size()
+	check(rite_rows > 0, "and the open altar still lists the copies (%d)" % rite_rows)
+	altar_menu.close()
+	_submit({"kind": "rite", "tag": "rite", "copy": rite_copy,
+		"count": warband.annoints.count("sword_arming", rite_copy),
+		"vials": warband.stash.pooled_count("ichor_vial")})
+
 	var told := await _wait_until(func(): return guest_left, int((WATCHDOG_SECONDS - 30.0) * 1000.0))
 	if not told:
 		_submit({"kind": "error", "tag": "finish", "detail": "the host never dismissed the guest"})
@@ -825,6 +943,7 @@ func _on_probe(tag: String) -> void:
 			payload["pos"] = [at.x, at.y, at.z]
 			payload["visible"] = bool(warden.get("visible"))
 			payload["stale"] = bool(warden.get("stale"))
+			payload["stream_tick"] = _mob_tick()
 			payload["alive"] = bool(warden.get("alive"))
 		_submit(payload)
 		return
@@ -874,8 +993,22 @@ func _on_strike(point: Vector3) -> void:
 	if actor != null:
 		sent = controller.act("melee", {"aim": point, "hand": "right",
 			"variant": "overhead"})
+	# What the host is about to rewind against, from the guest's own books: the
+	# clock that answers `view_tick()` and the delay a remote body is really
+	# drawn at. They have to be the same number or the blow is judged against a
+	# moment nobody was looking at.
+	var replica = controller.body_for_peer(1)
+	var replica_delay := -1.0
+	if replica != null and is_instance_valid(replica):
+		var timeline = replica.get("_timeline")
+		if timeline != null:
+			replica_delay = float(timeline.floor_delay_ticks)
 	_submit({"kind": "strike", "tag": "strike", "actor": actor != null,
 		"sent": sent, "view": controller.view_tick(),
+		"newest": int(controller._clock.newest_tick()),
+		"clock_delay": float(controller._clock.timeline.floor_delay_ticks),
+		"replica_delay": replica_delay,
+		"uplink": int(controller.sync._link.released),
 		"owned": int(controller.merc_for_peer(controller.local_peer_id)),
 		"active": int(controller.merc_of(actor)) if actor != null else -1})
 

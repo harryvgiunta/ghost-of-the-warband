@@ -13,8 +13,11 @@ extends SceneTree
 
 const SessionScript = preload("res://scripts/warband/warband_session.gd")
 const NetLimits = preload("res://scripts/net_limits.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const GameFlowScript = preload("res://scripts/warband/game_flow.gd")
 const WarbandStateScript = preload("res://scripts/warband/warband_state.gd")
+const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
+const State = preload("res://scripts/player_state.gd")
 
 const WARBAND_SAVE := "user://warband_session_world_unit_warband.json"
 const PLAYER_SAVE := "user://warband_session_world_unit_player.json"
@@ -25,8 +28,9 @@ var failures := 0
 
 # --- fakes -----------------------------------------------------------------
 
-## A mob with the full surface: health, the replica switch, and the snapshot
-## pair the session actually calls.
+## A mob with the full surface: health, the replica switch, the snapshot pair the
+## session actually calls, and the stream switch every real mob family answers
+## (`set_streamed`) - a body the host stops naming is put down where it stands.
 class FakeGuard:
 	extends Node3D
 	signal defeated(enemy: Node3D, reward: int)
@@ -36,6 +40,10 @@ class FakeGuard:
 	var max_health := 50.0
 	var replica := false
 	var applied_tick := -1
+	## The stream tick the host last put this copy down at, and whether it is
+	## drawn right now. The real classes keep the same two facts.
+	var left_at := -1
+	var drawn := true
 
 	func snapshot() -> Dictionary:
 		return {
@@ -43,9 +51,21 @@ class FakeGuard:
 			"s": "IDLE", "t": 0.0, "h": health, "a": alive, "x": Vector4.ZERO,
 		}
 
+	func set_streamed(value: bool, tick: int = -1) -> void:
+		if value:
+			drawn = true
+			return
+		left_at = maxi(left_at, tick)
+		drawn = false
+		visible = false
+
 	func apply_snapshot(state: Dictionary, tick: int = -1) -> void:
+		if tick >= 0 and tick <= left_at:
+			return
 		health = float(state.get("h", health))
 		applied_tick = tick
+		drawn = true
+		visible = true
 
 
 ## A guard the session cannot encode: no snapshot, no apply. It must be skipped
@@ -95,6 +115,15 @@ func check(condition: bool, message: String) -> void:
 func _remove(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## The mob names an entry list carries, in order.
+func _names_of(entries: Array) -> Array:
+	var out: Array = []
+	for entry in entries:
+		if typeof(entry) == TYPE_ARRAY and not (entry as Array).is_empty():
+			out.append(str(entry[0]))
+	return out
 
 func run() -> void:
 	_remove(WARBAND_SAVE)
@@ -227,6 +256,8 @@ func run() -> void:
 	var host_id: int = lender.add_mercenary("Host Man")
 	lender.add_mercenary("Host Second")
 	lender.stash.add("sword_iron", 1)
+	lender.stash.add("bow_short", 1)
+	lender.stash.add("ichor_vial", 1)
 	var host_dict: Dictionary = lender.to_dict()
 	lender.free()
 	warband.lend(host_dict, 444)
@@ -266,6 +297,47 @@ func run() -> void:
 	check(bool(laid.get("pending", false)) and asked.size() == 3
 			and str(asked[2].get("verb", "")) == "hotbar_order",
 		"and the keys a guest lays out are the host's to lay (%s)" % str(asked))
+	# The altar is open to a guest: the press is a request naming the copy, the
+	# pooled vial is the host's to spend, and the die is the host's to throw.
+	var copy := int(warband.annoint_copy_for_item("bow_short"))
+	var rite: Dictionary = warband.anoint("bow_short", copy)
+	check(bool(rite.get("pending", false)) and asked.size() == 4
+			and str(asked[3].get("verb", "")) == "anoint"
+			and int((asked[3].get("args", []) as Array)[1]) == copy,
+		"a guest's rite travels to the host with the copy it laid (%s)" % str(asked))
+	check(warband.annoints.count("bow_short", copy) == 0
+			and warband.stash.pooled_count("ichor_vial") == 1,
+		"and the lent books spend no vial until the host answers")
+	# The host runs the same verb on the books it lent. One weld is already on the
+	# copy so every band of the die - add, take, replace - commits on the host and
+	# the test cannot hang on a roll of nothing.
+	var host: Variant = WarbandStateScript.new()
+	host.from_dict(host_dict)
+	var pool: Array = AnnointCatalog.for_item(State.ITEMS.get("bow_short", {}))
+	var seed_id := ""
+	for entry in pool:
+		if bool(entry.wired):
+			seed_id = str(entry.id)
+			break
+	check(not seed_id.is_empty() and host.annoints.add("bow_short", copy, seed_id),
+		"the host's copy carries a weld to begin with")
+	var seeded: Array = host.annoints.ids("bow_short", copy)
+	var answered: Dictionary = host.apply_gear_request(
+		{"verb": "anoint", "args": ["bow_short", copy]})
+	check(bool(answered.get("ok", false))
+			and str(answered.get("item_id", "")) == "bow_short",
+		"the host answers with the rite's own result (%s)" % str(answered.get("message", "")))
+	check(host.annoints.ids("bow_short", copy) != seeded,
+		"the host's die landed on the copy the guest named")
+	check(host.stash.pooled_count("ichor_vial") == 0,
+		"the rite spends the pooled vial on the host's books")
+	var re_dressed: Array[String] = []
+	warband.annointed_state.connect(func(item_id: String, _entries: Array) -> void:
+		re_dressed.append(item_id))
+	warband.lend(host.to_dict(), 444)
+	check(re_dressed.has("bow_short"),
+		"and the host's welds re-dress the guest's bodies (%s)" % str(re_dressed))
+	host.free()
 	warband.gear_requester = Callable()
 	check(not bool(warband.equip_merc(host_id, "main", "sword_iron").get("ok", true)),
 		"and the door shuts with the session")
@@ -300,6 +372,104 @@ func run() -> void:
 	var refreshed: Array = session.changed_mob_entries(
 		[["wolf", {"pos": [5.0, 0.0, 0.0]}], ["rat", {"pos": [2.0, 0.0, 0.0]}]], true)
 	check(refreshed.size() == 2, "a refresh repeats every mob (%d)" % refreshed.size())
+
+	# --- a guest is told about its own ground, not the party's -------------
+	# The whole of the party's fight used to ride one broadcast: a soul two
+	# hundred metres away was sent every mob near the rest of the band - mobs it
+	# could not see, drawn and animated on its machine, and enough extra datagrams
+	# to lose the ones it could. The reach is measured from the body being told.
+	var near_body := Node3D.new()
+	near_body.name = "NearBody"
+	world.add_child(near_body)
+	near_body.global_position = Vector3.ZERO
+	var far_body := Node3D.new()
+	far_body.name = "FarBody"
+	world.add_child(far_body)
+	far_body.global_position = Vector3(0.0, 0.0, 200.0)
+	var far_guard := FakeGuard.new()
+	far_guard.name = "FarWatcher"
+	world.add_child(far_guard)
+	far_guard.global_position = Vector3(0.0, 0.0, 195.0)
+	world.guards.append(far_guard)
+	var near_names := _names_of(session.collect_mob_entries(70.0, [near_body]))
+	check(not near_names.has("FarWatcher"),
+		"a mob near another soul's body is not in this guest's stream (%s)" % str(near_names))
+	var far_names := _names_of(session.collect_mob_entries(70.0, [far_body]))
+	check(far_names.has("FarWatcher"), "and it is in the stream of the guest standing there")
+	check(not far_names.has("CampWatcher1"),
+		"who is not told about the mob standing beside the host's body (%s)" % str(far_names))
+
+	# The band that stops a mob flapping at the edge of a reach: in the stream it
+	# waits for a movement, out of it a mob is named once.
+	far_guard.global_position = Vector3(0.0, 0.0, 85.0)
+	check(not _names_of(session.collect_mob_entries(70.0, [near_body])).has("FarWatcher"),
+		"past the reach a mob is not sent to a guest that never had it")
+	var kept_names := _names_of(
+		session.collect_mob_entries(70.0, [near_body], {"FarWatcher": true}))
+	check(kept_names.has("FarWatcher"),
+		"and is kept while it is already in that stream, inside the release band (%s)"
+			% str(kept_names))
+	far_guard.global_position = Vector3(0.0, 0.0, session.MOB_RELEASE_METRES + 6.0)
+	check(not _names_of(session.collect_mob_entries(70.0, [near_body],
+		{"FarWatcher": true})).has("FarWatcher"),
+		"past the release band even a streamed body leaves it")
+	far_guard.global_position = Vector3(0.0, 0.0, 195.0)
+
+	# What leaves a stream is named once, and the name is the whole message.
+	var leaving: Array = session.mob_leaves({"FarWatcher": true, "CampWatcher1": true},
+		{"CampWatcher1": true})
+	check(leaving.size() == 1 and str(leaving[0]) == "FarWatcher",
+		"the mob that left the stream is the one named (%s)" % str(leaving))
+	check(session.mob_leaves({"CampWatcher1": true}, {"CampWatcher1": true}).is_empty(),
+		"a body still in the stream is never named as gone")
+
+	# The guest's half of that: the copy is put down here, at once - not a second
+	# later through the stale clock - and a datagram still in flight from before
+	# the leave cannot put it back.
+	session.apply_mob_states(MOB_TICK + 5, [["CampWatcher1", {"h": 30.0}]])
+	check(guard.drawn, "a mob the host names is drawn")
+	session.receive_mob_leaves(MOB_TICK + 6, ["CampWatcher1"])
+	check(not guard.drawn and not guard.visible, "a mob the host stops naming is put down at once")
+	session.apply_mob_states(MOB_TICK + 5, [["CampWatcher1", {"h": 3.0}]])
+	check(is_equal_approx(guard.health, 30.0),
+		"a state from before the leave is not news (%f)" % guard.health)
+	check(not guard.drawn, "and it puts nothing back on the screen")
+	session.apply_mob_states(MOB_TICK + 7, [["CampWatcher1", {"h": 7.0}]])
+	check(is_equal_approx(guard.health, 7.0),
+		"a state from after the leave is (%f)" % guard.health)
+	check(guard.drawn, "and the body is back on the screen")
+
+	# --- the send clock is the physics clock --------------------------------
+	# Every stream fires on a stride of the simulation tick, never on a rendered
+	# frame: the cadence is exact on a 144 Hz client and on a 21 fps host alike,
+	# and a packet's tick label is always the step that produced its pose. Each
+	# stride has to divide the clock, or the rate stops being the rate it claims
+	# and every second lands on a different phase.
+	# The engine's own rate and the wire's rate are one number, or nothing below
+	# means anything: a project at 90 physics ticks would make every stride 1.5x
+	# the rate it says it is, on every machine, silently.
+	var engine_hz := float(ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 0))
+	check(is_equal_approx(engine_hz, float(session.TICK_HZ)),
+		"the project's physics rate is the wire's tick rate (%s vs %s)"
+			% [str(engine_hz), str(session.TICK_HZ)])
+	check(is_equal_approx(float(session.MOB_SEND_TICKS) / float(session.TICK_HZ),
+			float(NetReplication.MOB_INTERVAL_SECONDS)),
+		"the sender's mob stride is the interval a replica renders at (%.4f s)"
+			% (float(session.MOB_SEND_TICKS) / float(session.TICK_HZ)))
+	var strides: Dictionary = session.CADENCE
+	check(strides.size() == 6, "every stream is in the cadence table (%s)" % str(strides))
+	for stream in strides:
+		var stride := int(strides[stream])
+		check(stride > 0 and int(session.TICK_HZ) % stride == 0,
+			"the %s stride divides the clock (%d ticks of %d)"
+				% [stream, stride, int(session.TICK_HZ)])
+	check(int(strides["snapshot"]) == 3 and int(strides["mob"]) == 4,
+		"bodies go at 20 Hz and mobs at 15 Hz (%d, %d)"
+			% [strides["snapshot"], strides["mob"]])
+	check(session.TICK_HZ / int(strides["snapshot"]) == 20.0
+			and session.TICK_HZ / int(strides["mob"]) == 15.0
+			and session.TICK_HZ / int(strides["loot"]) == 5.0,
+		"and the rates the docs name are the ones the strides give")
 
 	# --- the campaign doors ------------------------------------------------
 	warband.reset_state()

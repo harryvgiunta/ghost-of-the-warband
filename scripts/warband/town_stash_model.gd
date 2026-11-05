@@ -192,6 +192,20 @@ static func _sort_rows(a: Dictionary, b: Dictionary) -> bool:
 		return a_name < b_name
 	return str(a["item_id"]) < str(b["item_id"])
 
+## Whether the warband carries a copy of `item_id` at all - pooled or on a body.
+## A caller that holds one id should not pay for the whole set and its sort
+## (`available_ids`), which is the paperdoll's question, not the altar card's.
+func owns(item_id: String, roster) -> bool:
+	if not (_pooled.get(item_id, []) as Array).is_empty():
+		return true
+	if roster == null:
+		return false
+	for merc in roster.records():
+		for wear in roster.worn_entries(int(merc.get("id", 0))):
+			if str(wear.get("item", "")) == item_id:
+				return true
+	return false
+
 ## Every id a mercenary could be equipped with, pooled or already worn: used by
 ## the paperdoll's gear picker.
 func available_ids(roster) -> Array[String]:

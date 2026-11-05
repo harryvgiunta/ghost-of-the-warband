@@ -351,28 +351,73 @@ static func build_piece(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 	return piece
 
 
-## One vertex of a static (unskinned) mesh, moved into the piece's frame.
-static func _static_vertex(into_frame: Transform3D, vertices, raw_normal, raw_uv,
-		raw_uv2, raw_color, raw_tangent, vertex: int) -> Array:
-	var basis := into_frame.basis
-	var normal := Vector3.UP
-	var tangent := Vector3.RIGHT
-	var handedness := 1.0
-	if raw_normal != null:
-		normal = (basis * (raw_normal[vertex] as Vector3)).normalized()
-	if raw_tangent != null:
-		var corner := vertex * 4
-		tangent = (basis * Vector3(raw_tangent[corner], raw_tangent[corner + 1],
-			raw_tangent[corner + 2])).normalized()
-		handedness = raw_tangent[corner + 3]
-	return [
-		into_frame * (vertices[vertex] as Vector3),
-		normal,
-		(raw_uv[vertex] as Vector2) if raw_uv != null else Vector2.ZERO,
-		(raw_uv2[vertex] as Vector2) if raw_uv2 != null else Vector2.ZERO,
-		(raw_color[vertex] as Color) if raw_color != null else Color.WHITE,
-		Plane(tangent.x, tangent.y, tangent.z, handedness),
-	]
+## Every vertex of one surface, posed the way `pose_vertex` poses one, in three
+## packed arrays. The bind's limb and its posed transform are resolved once per
+## bind and reused across the surface: a body's ninety-five thousand vertices
+## read the same thirty-odd bones, and asking the skin for each of them per corner
+## is what a two-handed kill used to spend its whole frame on.
+static func _posed_surface(skinned: bool, skin: Skin, skeleton: Skeleton3D,
+		arrays: Array, count: int, per: int, into: Transform3D) -> Dictionary:
+	var vertices = arrays[Mesh.ARRAY_VERTEX]
+	var raw_normal = arrays[Mesh.ARRAY_NORMAL]
+	var raw_tangent = arrays[Mesh.ARRAY_TANGENT]
+	var basis := into.basis
+	var points := PackedVector3Array()
+	points.resize(count)
+	var normals := PackedVector3Array()
+	normals.resize(count)
+	var tangents := PackedVector3Array()
+	tangents.resize(count)
+	if skinned:
+		var bones = arrays[Mesh.ARRAY_BONES]
+		var weights = arrays[Mesh.ARRAY_WEIGHTS]
+		var limbs := {}
+		var xforms := {}
+		for vertex in count:
+			var point := Vector3.ZERO
+			var normal := Vector3.ZERO
+			var tangent := Vector3.ZERO
+			var corner := vertex * 4
+			var at: Vector3 = vertices[vertex]
+			for influence in per:
+				var slot := vertex * per + influence
+				var weight: float = weights[slot]
+				if weight <= 0.0001:
+					continue
+				var bind := int(bones[slot])
+				var limb: int = limbs.get(bind, -2)
+				if limb == -2:
+					limb = bind_bone(skin, skeleton, bind)
+					limbs[bind] = limb
+				if limb < 0:
+					continue
+				var limb_pose: Transform3D
+				if xforms.has(bind):
+					limb_pose = xforms[bind]
+				else:
+					limb_pose = skeleton.get_bone_global_pose(limb) * skin.get_bind_pose(bind)
+					xforms[bind] = limb_pose
+				point += (limb_pose * at) * weight
+				if raw_normal != null:
+					normal += (limb_pose.basis * (raw_normal[vertex] as Vector3)) * weight
+				if raw_tangent != null:
+					tangent += Vector3(raw_tangent[corner], raw_tangent[corner + 1],
+						raw_tangent[corner + 2]) * weight
+			points[vertex] = into * point
+			normals[vertex] = (basis * normal).normalized() if raw_normal != null else Vector3.UP
+			tangents[vertex] = (basis * tangent).normalized() if raw_tangent != null else Vector3.RIGHT
+	else:
+		for vertex in count:
+			points[vertex] = into * (vertices[vertex] as Vector3)
+			normals[vertex] = (basis * (raw_normal[vertex] as Vector3)).normalized() \
+				if raw_normal != null else Vector3.UP
+			if raw_tangent != null:
+				var corner := vertex * 4
+				tangents[vertex] = (basis * Vector3(raw_tangent[corner],
+					raw_tangent[corner + 1], raw_tangent[corner + 2])).normalized()
+			else:
+				tangents[vertex] = Vector3.RIGHT
+	return {"points": points, "normals": normals, "tangents": tangents}
 
 
 ## A body cut clean through by a plane into two halves, in one pass over every every
@@ -422,21 +467,21 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 			var raw_uv2 = arrays[Mesh.ARRAY_TEX_UV2]
 			var raw_color = arrays[Mesh.ARRAY_COLOR]
 			var raw_tangent = arrays[Mesh.ARRAY_TANGENT]
-			# Pose every vertex once and record which side of the blade it sits on.
-			var posed := {}
+			# Every vertex of the body is posed once, on the frame of a kill: the
+			# pass is the whole cost of a cut, so it keeps the two things a vertex
+			# loop otherwise pays for every corner twice - the bind's limb and its
+			# posed transform - and holds the result in packed arrays instead of a
+			# dictionary of six-element arrays.
+			var posed := _posed_surface(skinned, skin, skeleton, arrays, count, per,
+				into_frame if skinned else into_static)
+			var points: PackedVector3Array = posed["points"]
+			var normals: PackedVector3Array = posed["normals"]
+			var tangents: PackedVector3Array = posed["tangents"]
+			# Which side of the blade each corner sits on.
 			var across := PackedFloat32Array()
 			across.resize(count)
 			for vertex in count:
-				var data: Array
-				if skinned:
-					data = pose_vertex(skin, skeleton, bones, weights, per,
-						vertices, raw_normal, raw_uv, raw_uv2, raw_color, raw_tangent,
-						vertex, into_frame)
-				else:
-					data = _static_vertex(into_static, vertices, raw_normal, raw_uv,
-						raw_uv2, raw_color, raw_tangent, vertex)
-				posed[vertex] = data
-				across[vertex] = side.dot(data[0] as Vector3) - offset
+				across[vertex] = side.dot(points[vertex]) - offset
 			var order := PackedInt32Array()
 			var indices = arrays[Mesh.ARRAY_INDEX]
 			if indices == null:
@@ -460,28 +505,28 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 				if kept.is_empty():
 					continue
 				var local := {}
-				var data_list: Array = []
+				var ids := PackedInt32Array()
 				for vertex in kept:
 					var id := int(vertex)
 					if local.has(id):
 						continue
-					local[id] = data_list.size()
-					data_list.append(posed[id])
+					local[id] = ids.size()
+					ids.append(id)
 				var tool := SurfaceTool.new()
 				tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-				for entry in data_list:
-					var data: Array = entry
+				for id in ids:
 					if raw_normal != null:
-						tool.set_normal(data[1])
+						tool.set_normal(normals[id])
 					if raw_uv != null:
-						tool.set_uv(data[2])
+						tool.set_uv(raw_uv[id])
 					if raw_uv2 != null:
-						tool.set_uv2(data[3])
+						tool.set_uv2(raw_uv2[id])
 					if raw_color != null:
-						tool.set_color(data[4])
+						tool.set_color(raw_color[id])
 					if raw_tangent != null:
-						tool.set_tangent(data[5])
-					tool.add_vertex(data[0])
+						tool.set_tangent(Plane(tangents[id].x, tangents[id].y,
+							tangents[id].z, raw_tangent[id * 4 + 3]))
+					tool.add_vertex(points[id])
 				for vertex in kept:
 					tool.add_index(int(local[int(vertex)]))
 				var target: ArrayMesh = meshes[half]

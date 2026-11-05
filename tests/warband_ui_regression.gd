@@ -9,6 +9,7 @@ extends SceneTree
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
@@ -49,6 +50,7 @@ func run() -> void:
 	_check_rows_and_control()
 	_check_refresh()
 	_check_paperdoll()
+	await _check_strip()
 	_check_item_hover()
 	_check_reequip_buttons()
 	_check_recruiter()
@@ -359,6 +361,88 @@ func _check_paperdoll() -> void:
 		"a held piece can still be worn by the player's hand")
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
+
+# --- the strip of bodies ---------------------------------------------------
+
+## The strip over the page carries one chip per dressable body, and eight of them
+## in one row measured 1488 px against the page's 1112: the page grew past the
+## frame and `RE-EQUIP THE BAND` was drawn outside the window. The check is the
+## frame's own page - where the frame puts its content, not where the content
+## asked to be - on a real layout pass: nothing the strip draws may reach past it,
+## and the whole column must still fit the page's height. A roster past the
+## eight-body cap (a rescue leaves names in the reserve) keeps the two rows and
+## scrolls instead of growing.
+func _check_strip() -> void:
+	warband.reset_state()
+	_set_gold(1000)
+	var names := ["Aldous", "Kestrel", "Bartholomew", "Wren", "Sable",
+		"Ulric", "Ysolde", "Fenwick"]
+	for index in names.size():
+		var merc_id: int = warband.add_mercenary(names[index])
+		if index % 3 == 1:
+			warband.roster.apply_damage(merc_id, 100.0)
+	var doll = DollScript.new()
+	root.add_child(doll)
+	doll.configure(warband)
+	doll.open(-1)
+	# Four frames: the panel, the frame's page and then the strip's own sort.
+	for _pass in 4:
+		await process_frame
+	var frame: Control = doll.get_node("WarbandPaperdoll/Frame")
+	var page := _page_rect(frame)
+	check(doll.picker_buttons.size() == 8, "eight sworn bodies make eight chips, got %d"
+		% doll.picker_buttons.size())
+	check(doll._picker_box.columns * 2 >= doll.picker_buttons.size(),
+		"two rows hold the cap of eight")
+	var needed: Vector2 = frame.body.get_combined_minimum_size()
+	check(needed.x <= page.size.x, "the page holds the strip: %s of %s"
+		% [str(needed), str(page.size)])
+	check(needed.y <= page.size.y, "and the stacked screen still fits: %s of %s"
+		% [str(needed), str(page.size)])
+	check(frame.body.size.x <= page.size.x, "the page is not widened by its own content")
+	for merc_id in doll.picker_buttons.keys():
+		var chip: Control = doll.picker_buttons[merc_id]
+		check(page.encloses(chip.get_global_rect()),
+			"chip %s sits inside the page, at %s"
+			% [str((chip as Button).text), str(chip.get_global_rect())])
+	check(page.encloses(doll._reequip_all_button.get_global_rect()),
+		"RE-EQUIP THE BAND stays on the page, at %s"
+		% str(doll._reequip_all_button.get_global_rect()))
+	check(page.encloses(doll._hotbar_box.get_global_rect()), "and so does the hotbar")
+	var strip: ScrollContainer = doll._picker_scroll
+	check(not strip.get_v_scroll_bar().visible, "eight bodies need no strip scrollbar")
+	var strip_height := strip.size.y
+	for index in 4:
+		warband.add_mercenary("Reserve %d" % (index + 1))
+	for _pass in 3:
+		await process_frame
+	page = _page_rect(frame)
+	needed = frame.body.get_combined_minimum_size()
+	check(doll.picker_buttons.size() == 12, "a rescue's names join the strip, got %d"
+		% doll.picker_buttons.size())
+	check(needed.x <= page.size.x and needed.y <= page.size.y,
+		"the page still holds a roster past the cap: %s of %s" % [str(needed), str(page.size)])
+	check(frame.body.size.x <= page.size.x, "and its content still does not widen it")
+	check(is_equal_approx(strip.size.y, strip_height),
+		"the strip keeps its two rows (%s -> %s)" % [str(strip_height), str(strip.size.y)])
+	check(strip.get_v_scroll_bar().visible, "the names below the fold are scrolled to")
+	doll.close()
+	doll.queue_free()
+	await process_frame
+
+## The page the frame hands its content: the frame's own rect less the inset and
+## padding it reserves for the clamp, the title rail and the page's torn edge.
+## Read from the frame, never from the body - a body that grew to fit an
+## overflowing strip would otherwise measure itself and pass.
+func _page_rect(frame: Control) -> Rect2:
+	var rect := frame.get_global_rect()
+	var inset := LedgerFrameScript.PAGE_INSET + LedgerFrameScript.BODY_PAD_X
+	var top := rect.position.y + LedgerFrameScript.PAGE_INSET \
+		+ LedgerFrameScript.HEADER + LedgerFrameScript.BODY_PAD_TOP
+	var bottom := rect.end.y - LedgerFrameScript.PAGE_INSET \
+		- LedgerFrameScript.BODY_PAD_BOTTOM
+	return Rect2(rect.position.x + inset, top,
+		rect.size.x - 2.0 * inset, bottom - top)
 
 # --- item hover details ----------------------------------------------------
 

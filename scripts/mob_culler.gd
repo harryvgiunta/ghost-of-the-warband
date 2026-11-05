@@ -55,6 +55,24 @@ func nearest_eye(point: Vector3) -> float:
 	return sqrt(best)
 
 
+## How far `point` is from the eye *this machine draws through*, or -1 when there
+## is no camera (a headless run, a scene with no eye yet).
+##
+## The two distances answer two different questions and must not be one number.
+## The tick budget follows every soul, because a guest's fight has to be real on
+## the host. What a body is *drawn* at - its shadow pass, its animation solve,
+## whether its rig keeps its own clock - follows this camera alone: a host whose
+## own ranger stands two hundred metres from the guest's was paying full detail
+## for the whole of that fight, on a body at the edge of nothing.
+func view_distance(point: Vector3) -> float:
+	if not is_inside_tree():
+		return -1.0
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return -1.0
+	return point.distance_to(camera.global_position)
+
+
 func _process(delta: float) -> void:
 	Perf.begin("mob.cull")
 	_tick_sweep(delta)
@@ -75,12 +93,32 @@ func _tick_sweep(delta: float) -> void:
 func sweep() -> void:
 	sweeps += 1
 	var sleeping := 0
+	# The eye list once per sweep: three sweeps a second over three hundred bodies
+	# is three hundred walks of the party per sweep otherwise.
+	var eyes: Array = []
+	if souls != null:
+		for actor in souls.bodies():
+			if is_instance_valid(actor):
+				eyes.append((actor as Node3D).global_position)
+	# The drawing eye once, not once a body: three hundred bodies walked the
+	# viewport three hundred times a sweep for one camera.
+	var camera := get_viewport().get_camera_3d() if is_inside_tree() else null
 	for body in get_tree().get_nodes_in_group(MobSenses.GROUP):
 		if not is_instance_valid(body):
 			continue
 		if not body.has_method("mob_lod_sweep"):
 			continue
-		body.mob_lod_sweep(nearest_eye((body as Node3D).global_position))
+		var at: Vector3 = (body as Node3D).global_position
+		var nearest := -1.0
+		var best := INF
+		for eye in eyes:
+			best = minf(best, at.distance_squared_to(eye))
+		if best != INF:
+			nearest = sqrt(best)
+		var view := -1.0
+		if camera != null:
+			view = at.distance_to(camera.global_position)
+		body.mob_lod_sweep(nearest, view)
 		if bool(body.get("dormant")):
 			sleeping += 1
 	parked = sleeping

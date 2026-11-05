@@ -112,6 +112,10 @@ var _wander := MobWander.new()
 var _lod := MobLod.new()
 ## Presentation band last applied (0 shadowed, 1 animate-only, 2 resting).
 var _present_band := -1
+## Distance to the eye this machine draws through (`MobCuller.view_distance`), or
+## -1 while nothing has measured it: what a body is drawn at is that camera's
+## business, what it is simulated at is every soul's.
+var _view_distance := -1.0
 ## Parked by `MobCuller`: no tick, no draw, no state change while it is true.
 var dormant := false
 ## Whether this clone has already called the pack to the fight.
@@ -328,13 +332,17 @@ func _cull_presentation(nearest: float) -> void:
 ## The culler's only call into a parked body: one distance check per sweep.
 ## The pursuit, the bow ladder, the rig sampling and the swept move are all
 ## behind the physics process `mob_sleep` turns off.
-func mob_lod_sweep(eye_distance: float = -1.0) -> void:
+##
+## `eye_distance` is measured from every body a soul could be inside - the tick
+## budget follows the fight, whoever is in it. `view_distance` is measured from
+## this machine's own camera, and is the only one the presentation bands read.
+func mob_lod_sweep(eye_distance: float = -1.0, view_distance: float = -1.0) -> void:
 	if not alive:
 		return
-	# The culler measures from every body a soul could be inside, not from one
-	# ranger: `eye_distance` is that measurement. Its own check is the fallback for
-	# a body swept without a scene behind it.
+	if view_distance >= 0.0:
+		_view_distance = view_distance
 	var nearest := eye_distance if eye_distance >= 0.0 else _nearest_ranger()
+	_cull_presentation(_present_distance(nearest))
 	if not MobLod.dormant(nearest, dormant):
 		if dormant:
 			mob_wake()
@@ -343,6 +351,13 @@ func mob_lod_sweep(eye_distance: float = -1.0) -> void:
 		return
 	if replica or _may_sleep():
 		mob_sleep()
+
+
+## How far this body is from the eye that draws it: the camera on this machine
+## when the culler has measured one, and the nearest ranger as the fallback for a
+## clone swept without a scene behind it.
+func _present_distance(nearest: float) -> float:
+	return _view_distance if _view_distance >= 0.0 else nearest
 
 
 ## Only a calm body with its feet down may park. A clone that is hunting has to
@@ -542,7 +557,7 @@ func _apply_motion(delta: float, facing_direction: Vector3) -> void:
 	if facing_direction.length_squared() > 0.0001:
 		rotation.y = lerp_angle(rotation.y,atan2(-facing_direction.x,-facing_direction.z),minf(delta * 10.0,1.0))
 	var before := global_position
-	MobLod.move(self, delta)
+	MobLod.move(self)
 	position.x = clampf(position.x,-bounds,bounds)
 	position.z = clampf(position.z,-bounds,bounds)
 	var actual := (global_position - before) / maxf(delta,0.0001)

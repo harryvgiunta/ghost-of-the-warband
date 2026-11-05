@@ -168,6 +168,10 @@ func _detach_sources() -> void:
 		_warband.changed.disconnect(_on_warband_changed)
 
 func _on_warband_changed() -> void:
+	# A closed screen is repainted by `open()`; a coarse warband change (an arrow
+	# spent, a looted piece booked) must not rebuild a hidden roster.
+	if not _open:
+		return
 	refresh()
 
 # --- build -----------------------------------------------------------------
@@ -261,7 +265,9 @@ func _sync_rows() -> void:
 		if not rows.has(merc_id):
 			rows[merc_id] = _make_row(merc_id)
 		var row: Dictionary = rows[merc_id]
-		_rows_box.move_child(row["root"], index)
+		# `move_child` re-sorts the box even when the child already sits there.
+		if (row["root"] as Node).get_index() != index:
+			_rows_box.move_child(row["root"], index)
 		_apply_row(merc_id)
 	_empty_label.visible = ids.is_empty()
 

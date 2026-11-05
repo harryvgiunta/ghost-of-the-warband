@@ -114,6 +114,13 @@ var _next_swing_side := 1
 
 func _ready() -> void:
 	set_physics_process(true)
+	# The tick this peer names with a swing is read back by the host against the
+	# bodies it was looking at, so the clock that answers `view_tick()` trails the
+	# newest snapshot by exactly the delay a remote body is drawn at. Left at its
+	# default (a tick and a half) it named a frame 100 ms newer than the player's
+	# eye, and every correction that was short is a blow that looked landed and
+	# was not, or a body hit through a wall it had already stepped behind.
+	_clock.configure(SIM_TICK_HZ, Actor.REPLICA_INTERP_DELAY)
 
 ## Wire the soul into a scene: the warband that owns it, the camera to own, and
 ## the node the bodies hang under.
@@ -984,6 +991,10 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 
 ## The longest rewind the host performs for one client action: half a second.
 const MAX_LAG_TICKS := 30
+## One tick is one physics frame - `sim_tick()`'s unit, the number a snapshot is
+## named by and the number a peer's action is rewound to (`project.godot` holds
+## the physics rate at 60 for every machine).
+const SIM_TICK_HZ := 60.0
 
 ## Arms one body's damage window with the rewind its owner needs. `view` is the
 ## server tick that peer was drawing when it acted; a host-driven body carries

@@ -76,7 +76,9 @@ difference - and the warband is the thing that survives a battle.
   marks its own steel**: one inlaid mark per annointment, glowing a step hotter
   with each (deep ember at one, hot bone at six, with the blade's edges lit from
   four), so the copy the rack says is worked is the copy the body is carrying —
-  and whose ESSENCE page
+  and in co-op the altar is every player's: a guest's press is a request, the
+  host throws the die, and the vial comes out of the one pool the party shares.
+  Its **ESSENCE page**
   unbinds spare magic items into Cruor, distils 5:1 up five tiers and brands
   weapons with active sigils; the **Gold recruiter** (bodies up to the deployment
   cap of 8), the **quartermaster** (plain steel and arrows bought into the shared
@@ -205,7 +207,7 @@ Every launch opens the **main menu**: Ghost of the Warband, four doors.
 | **Join Game** | Name, host address and UDP port, reread from the cache every time the form opens. You connect first and play **from the host's warband** - you need no save of your own. |
 | **Host Game** | Name and the port you open. **New Game** starts a fresh campaign; **From Checkpoint** opens the save on its bookmark (or in Hearthstead when it has none). The line under the buttons says what that checkpoint would open. |
 
-**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Gear is the host's too - a guest's click on the paperdoll travels as a request and the host's books answer it - while buying, hiring and the keepers stay the host's alone. A guest's own TAB, revive, combat and loot verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband and a corpse or a drop the guest searches empties on every screen.
+**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Gear is the host's too - a guest's click on the paperdoll or press at the altar travels as a request and the host's books answer it (the rite draws on the party's one pool of ichor and the host throws the die) - while buying, hiring and the keepers stay the host's alone. A guest's own TAB, revive, combat and loot verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband and a corpse or a drop the guest searches empties on every screen.
 
 Bodies are the shared pool, and every soul hops freely between the free ones (`[` and `]`, or `F1..F8`). The only way a soul loses a body is dying in it. With one body left standing the soul already inside keeps it, and everyone else watches that body in free look - the body panel names who is inside - and takes the next body that comes free, in the order the souls lost theirs.
 
@@ -325,10 +327,12 @@ the host. Hosting and joining both start on the title screen:
 
 **One warband, the host's.** A guest is sent the host's campaign and plays that
 roster, stash, purse and orders; its own save is untouched for the session and
-is handed back when the session ends. Only the host changes gear, buys, hires or
-works a keeper - a guest's TAB, revive, combat and loot presses travel as intents
-and are resolved on the host's field. Everyone fields exactly the host's bodies,
-and every corpse and drop the party searches empties on every screen.
+is handed back when the session ends. Only the host's books change: a guest's
+gear click, its press at the altar, its TAB, revive, combat and loot presses all
+travel as requests and are resolved on the host's field - the altar spends the
+party's pooled ichor and the host throws the die. Everyone fields exactly the
+host's bodies, and every corpse and drop the party searches empties on every
+screen.
 
 Find the address to send privately to your friends:
 
@@ -726,7 +730,12 @@ take what the cave holds, and climb out alive with it.
    of floor I, built when the party goes down and freed when it comes back up.
    The build is a load, not a freeze: the floor comes up a frame's worth at a
    time under **THE WEEPING HOLLOW · GOING DOWN** with a percentage, the window
-   keeps painting, and the party is put down the frame it is whole.
+   keeps painting, and the party is put down the frame it is whole. A **body** is
+   a step and a **room** is a step, and either owns its frame outright - the
+   engine builds a rig's surfaces and a room's collider after the step returns,
+   which no budget measured inside the step can see. The scenes every species is
+   built from are read off the main thread while the rock goes up, so the first
+   body of a kind is not a third of a second of stall.
    The shaft is drawn every descent, so you never know which corner of the
    Hollow you will start in. The floor is built for an extraction crowd: eleven
    areas, 320 by 380 metres, in three rings - the shafts and their dens on the

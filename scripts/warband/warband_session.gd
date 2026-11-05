@@ -39,24 +39,42 @@ extends Node
 ## same node path, because that path is the RPC address.
 
 const NetLimits = preload("res://scripts/net_limits.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const ArrowScript = preload("res://scripts/arrow.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
-## How often the host writes every body to the wire.
-const SNAPSHOT_HZ := 20.0
+## Every stream below is keyed on the **physics tick**, one per frame at 60 Hz,
+## and every rate is an exact divisor of that clock: 3 ticks is 20 Hz, 4 is 15,
+## 12 is 5, 15 is 4, 30 is 2. Nothing is counted in rendered frames and nothing is
+## banked, so a 144 Hz client and a 21 fps host send on the same ticks forever -
+## and the tick a packet is labelled with is always the step that produced the
+## pose inside it.
+const SNAPSHOT_TICKS := 3
 ## The world's mobs. 15 Hz is enough for a replica that interpolates between two
-## poses, and a fifth of the body rate keeps the datagrams from doubling.
-const MOB_SNAPSHOT_HZ := 15.0
+## poses, and a fourth of the body rate keeps the datagrams from doubling.
+const MOB_SEND_TICKS := 4
 ## A mob only matters to a soul that could reach it: beyond this, the mob is the
-## wood's business and the wire stays quiet.
+## wood's business and the wire stays quiet. It is measured from *that guest's*
+## own body, never from whoever happens to be nearest: a soul two hundred metres
+## from the rest of the party was being sent the whole of their fight - mobs it
+## could not see, drawn, animated and shadowed on its machine, and enough extra
+## datagrams to lose the ones it could.
 const MOB_REACH_METRES := 70.0
-## How often the mob stream repeats an unchanged body anyway: one second at 15 Hz.
-const MOB_REFRESH_TICKS := 15
+## How far past the reach a body already in a peer's stream stays in it. Without
+## a band the mob standing on the boundary flaps in and out of the stream as a
+## player walks, and every flap is a body that vanishes from a screen.
+const MOB_RELEASE_METRES := 92.0
+## How often the mob stream repeats an unchanged body anyway: one second of ticks,
+## so a lost delta cannot freeze a mob for good.
+const MOB_REFRESH_TICKS := 60
 ## Loot is a one-shot announcement, so it is polled slowly; a missile's visual
-## start must look immediate, so it is polled with the physics frame.
-const LOOT_POLL_SECONDS := 0.2
-const MISSILE_POLL_SECONDS := 0.05
+## start must look immediate, so it is polled every third tick.
+const LOOT_SEND_TICKS := 12
+const MISSILE_SEND_TICKS := 3
+## The number of physics ticks in a second: the clock every stride in this file
+## divides. It is the netcode primitive's figure, not a second copy of it.
+const TICK_HZ := NetReplication.WIRE_TICK_HZ
 ## The group every wilderness mob joins; a late spawn must be a replica too.
 const WILD_MOB_GROUP := "wild_mobs"
 ## How many payload keys the client remembers. An announcement is rare, and the
@@ -65,11 +83,25 @@ const DELIVERY_BOOK_CAP := 512
 ## ENet slots. The deployment cap is eight bodies, so eight souls is the field.
 const MAX_CLIENTS := 8
 ## The longest the host lets warband changes pile up before the next copy goes
-## out. The first change after a quiet spell leaves on the same frame, so a TAB a
+## out. The first change after a quiet spell leaves on the next tick, so a TAB a
 ## guest asked for is back on its screen within a round trip.
-const MIRROR_SECONDS := 0.25
+const MIRROR_TICKS := 15
 ## How often the host looks for a free body for a soul that has none.
-const SEAT_POLL_SECONDS := 0.5
+const SEAT_TICKS := 30
+
+## Every stream and the stride it fires on, by name - the cadence contract in one
+## place. Each stride divides `TICK_HZ` exactly, or a rate stops being the rate it
+## says it is (a 7-tick stride is 8.57 Hz, and the second it lands on slides). The
+## unit regression reads this: the cadence is only exact because every figure here
+## is a divisor of the clock.
+const CADENCE := {
+	"snapshot": SNAPSHOT_TICKS,
+	"mob": MOB_SEND_TICKS,
+	"missile": MISSILE_SEND_TICKS,
+	"loot": LOOT_SEND_TICKS,
+	"mirror": MIRROR_TICKS,
+	"seat": SEAT_TICKS,
+}
 
 signal role_changed(role: String)
 signal peer_joined(peer_id: int)
@@ -100,8 +132,38 @@ var _names: Dictionary = {}
 var _adopted: Dictionary = {}
 var _peer: ENetMultiplayerPeer
 var _signals_wired := false
-var _accumulator := 0.0
-var _tick := 0
+## The simulation tick this peer last beat on: one heartbeat per tick, whoever
+## calls it, so a scene that also drives the session cannot double-send.
+var _beat_tick := -1
+## The high-frequency downlink: every pose this host sends, held for the simulated
+## link when one was asked for (`NetReplication.requested_link`). Control traffic
+## - ownership, the campaign, loot, gear - never comes through here: a delayed
+## handshake is a broken handshake, not a slow one.
+var _link = NetReplication.LagQueue.new()
+
+## Send one high-frequency stream, through the simulated link when one is
+## configured. `peer_id` 0 is the whole party.
+##
+## `lossy` mirrors the channel the packet really travels on: the pose streams are
+## `unreliable` and may be thrown away by a bad link, while a death, a leave or an
+## intent is `reliable` and must never be - a harness that dropped those would be
+## failing the game, not measuring it.
+##
+## A link outlives the peer it was carrying: a packet still held when a guest
+## leaves must be dropped, not sent into a socket that no longer names it, or a
+## session's last second is a page of `unknown peer ID`. The guard is inside the
+## deferred call for that reason, and an ordinary link never builds one.
+func _stream(send: Callable, peer_id: int = 0, lossy: bool = false) -> void:
+	if not _link.active():
+		send.call()
+		return
+	var guarded := func():
+		if not _has_peers():
+			return
+		if peer_id != 0 and not multiplayer.get_peers().has(peer_id):
+			return
+		send.call()
+	_link.defer(guarded, lossy)
 ## Campaign co-op: one warband, the host's, for every soul on the field (see the
 ## class notes). Off for the arena bout, where both machines carry one save.
 var shared_warband := false
@@ -113,8 +175,8 @@ var _waiting: Array[int] = []
 ## the soul whichever way it changed bodies.
 var _driven: Dictionary = {}
 var _mirror_dirty := false
-var _mirror_elapsed := MIRROR_SECONDS
-var _seat_elapsed := 0.0
+## The tick the last campaign copy went out on (`MIRROR_TICKS` since then).
+var _mirror_tick := -10 ** 9
 
 # --- the world beyond the bodies -------------------------------------------
 #
@@ -126,12 +188,26 @@ var world: Node3D
 ## Pickup/projectile instance ids the host has already announced.
 var _sent_loot: Dictionary = {}
 var _sent_missiles: Dictionary = {}
-## Mob names whose final (dead) state was already sent. A living guard is sent
-## every tick; a corpse is sent exactly once, so a replica can fall.
+## Mob names whose final (dead) state was already sent, per peer. A living guard
+## is sent every tick; a corpse is sent exactly once to each guest that was
+## being told about it, so a replica can fall.
 var _dead_sent: Dictionary = {}
 ## The last state sent for each mob, so a calm body is not re-sent 15 times a
-## second. Bounded by the mob count and cleared with the scene.
+## second. Bounded by the mob count and cleared with the scene, as the one book a
+## peer with no entry of its own reads (`changed_mob_entries`).
 var _mob_sent: Dictionary = {}
+## Host only, per peer: the mob names that peer is being told about right now.
+## A body leaving this set is named once so the guest can put its copy down
+## without waiting out a timeout.
+var _mob_live: Dictionary = {}
+## Host only, per peer: that peer's own copy of `_mob_sent`. A shared book is
+## wrong once each guest is told about a different ground - a body near the
+## host's body would look "already sent" to the guest that was never sent it.
+var _mob_sent_by_peer: Dictionary = {}
+## Guard name -> guard for the stream tick being applied. A hall holds three
+## hundred bodies, and the state batch names them one at a time.
+var _guards_by_name: Dictionary = {}
+var _guards_stamp := -1
 ## The last campaign copy sent, text and purse, so an unchanged one is skipped.
 var _mirror_sent := false
 var _mirror_text := ""
@@ -139,10 +215,6 @@ var _mirror_gold := -1
 ## Payload keys a client already spawned, so a repeated announcement is a no-op.
 var _delivered_loot: Dictionary = {}
 var _delivered_arrows: Dictionary = {}
-var _mob_accumulator := 0.0
-var _loot_accumulator := 0.0
-var _missile_accumulator := 0.0
-var _mob_tick := 0
 var _world_watch := false
 
 ## Bind the session to the soul it carries. The controller's own `PossessionSync`
@@ -159,6 +231,8 @@ func setup(possession_controller: PossessionController, warband_node: WarbandSta
 		controller.sync.name = "PossessionSync"
 		controller.add_child(controller.sync)
 	controller.sync.setup(warband, controller)
+	var asked := NetReplication.requested_link()
+	_link.configure(asked.x, asked.y, asked.z)
 	# A world opened under a socket that already has a guest on it keeps the
 	# rewind history from its first frame, not from the next connection.
 	controller.lag_tracking = _role == "host" and peer_count() > 1
@@ -251,8 +325,7 @@ func host(port: int, host_name: String) -> bool:
 	_player_name = host_name.strip_edges()
 	_names = {1: _player_name}
 	_adopted = {}
-	_accumulator = 0.0
-	_tick = 0
+	_beat_tick = -1
 	# The host is ENet peer 1 and its soul is the controller's own by default.
 	controller.local_peer_id = 1
 	_role = "host"
@@ -274,8 +347,7 @@ func join(address: String, port: int, guest_name: String) -> bool:
 	_player_name = guest_name.strip_edges()
 	_names = {}
 	_adopted = {}
-	_accumulator = 0.0
-	_tick = 0
+	_beat_tick = -1
 	_role = "client"
 	# The world scene, when it fielded the bodies, already handed this session
 	# its mobs; a guest never runs their AI, so they become replicas now.
@@ -601,24 +673,33 @@ func attach_world(world_node: Node3D) -> void:
 	if _role == "client":
 		_mark_world_replicas()
 
-## Every living mob in `world.guards` within `limit_metres` of any body, as
-## `[name, snapshot]`. Bodies without a snapshot are skipped instead of being
-## sent as an entry a client could never read.
-func collect_mob_entries(limit_metres: float) -> Array:
+## Every living mob in `world.guards` within `limit_metres` of any body in
+## `bodies_in` (the whole field when it is empty), as `[name, snapshot]`. A name
+## that is in `keep` - the mobs this peer is already being told about - stays in
+## the answer out to `MOB_RELEASE_METRES`, so a body on the boundary cannot flap
+## in and out of the stream. Bodies without a snapshot are skipped instead of
+## being sent as an entry a client could never read.
+func collect_mob_entries(limit_metres: float, bodies_in: Array = [],
+		keep: Dictionary = {}) -> Array:
 	var entries: Array = []
 	if world == null:
 		return entries
-	var bodies: Variant = world.get("bodies")
-	var body_list: Array = []
-	if bodies is Array:
-		body_list = bodies
+	var body_list: Array = bodies_in
+	if body_list.is_empty():
+		var bodies: Variant = world.get("bodies")
+		if bodies is Array:
+			body_list = bodies
+	var release := maxf(limit_metres, MOB_RELEASE_METRES)
 	for guard in _world_guards():
 		if not is_instance_valid(guard) or not _mob_living(guard):
 			continue
 		if not guard is Node3D or not guard.has_method("snapshot"):
 			continue
-		if not _near_any_body((guard as Node3D).global_position, body_list, limit_metres):
-			continue
+		var at: Vector3 = (guard as Node3D).global_position
+		if not _near_any_body(at, body_list, limit_metres):
+			var held := not keep.is_empty() and keep.has(str((guard as Node).name))
+			if not held or not _near_any_body(at, body_list, release):
+				continue
 		entries.append([str((guard as Node).name), guard.call("snapshot")])
 	return entries
 
@@ -635,7 +716,7 @@ func apply_mob_states(tick: int, states: Array) -> void:
 		var pair: Array = entry
 		if pair.size() < 2:
 			continue
-		var guard = _guard_named(str(pair[0]))
+		var guard = _guard_named(str(pair[0]), tick)
 		if guard == null or not guard.has_method("apply_snapshot"):
 			continue
 		var state: Variant = pair[1]
@@ -707,6 +788,28 @@ func collect_new_missiles() -> Array:
 @rpc("authority", "call_remote", "unreliable")
 func receive_mobs(tick: int, states: Array) -> void:
 	apply_mob_states(tick, states)
+
+## Host -> one guest: the mobs this guest is no longer being told about at stream
+## tick `tick`, because they left its reach. Reliable, and a copy is put down here
+## rather than left for a timeout - a body that left the stream used to stand
+## frozen wherever it was when it left, for as long as the stale clock took to
+## notice. The tick rides along because it is the host's stream clock that the
+## states are numbered on, and a state from before the leave is a datagram still
+## in flight rather than news.
+@rpc("authority", "call_remote", "reliable")
+func receive_mob_leaves(tick: int, names: Array) -> void:
+	if world == null:
+		return
+	for raw in names:
+		var guard = _guard_named(str(raw))
+		if guard == null or not is_instance_valid(guard):
+			continue
+		if guard.has_method("set_streamed"):
+			guard.call("set_streamed", false, tick)
+		elif guard is Node3D:
+			# A mob class this build does not know how to put down still must not
+			# stand there: hiding it is the one answer every body shares.
+			(guard as Node3D).visible = false
 
 ## Host -> everyone: a piece of loot hit the ground. Reliable, because a drop
 ## that is missed is a piece the guest can never see or take.
@@ -983,39 +1086,57 @@ func _sync_local_peer() -> void:
 
 # --- internals: the wire ---------------------------------------------------
 
-func _process(delta: float) -> void:
-	Perf.begin("net.session")
-	_tick_session(delta)
-	Perf.end()
-
-func _tick_session(delta: float) -> void:
+## The wire's heartbeat: one beat per simulation tick, on the physics clock.
+##
+## It used to ride the rendered frame with three float accumulators, and that is
+## the seam this replaced. A send clock on the render frame is quantised to the
+## frame: a 47 fps host produced 2-and-3-frame gaps for a 3-tick interval, fed
+## every receiver's jitter estimator a wobble it then paid for in playout delay,
+## and could not hold 20 Hz at all below 20 fps. Keyed on the tick number instead,
+## the cadence is exact on every machine - and because the tick label is the step
+## that produced the pose beside it, a hitch can no longer put a stale pose under
+## a fresh number. A tick that never ran is a tick that was never sent; there is
+## nothing to bank and nothing to replay.
+func _physics_process(_delta: float) -> void:
+	if _link.active():
+		_link.drain()
 	if _role == "client":
+		# A guest keeps no send clock: it predicts its own body and waits for the
+		# host's snapshots. Only its soul id can move under it.
 		_sync_local_peer()
 		return
 	if _role != "host" or controller == null or warband == null:
 		return
-	if not _waiting.is_empty():
-		_seat_elapsed += delta
-		if _seat_elapsed >= SEAT_POLL_SECONDS:
-			_seat_elapsed = 0.0
-			_seat_waiting()
+	# The engine's physics frame, not the controller's simulation tick: the two
+	# advance together (one per physics step), but the controller's counter only
+	# runs while it has bodies spawned, and a host between worlds still has to
+	# seat a guest and mirror a purse. The body stream is labelled with the
+	# controller's tick because that is the number the rewind history is keyed on;
+	# the mobs are labelled with this one. Both are 60 Hz counts, and no receiver
+	# ever compares the two.
+	var tick := Engine.get_physics_frames()
+	if tick == _beat_tick:
+		return
+	_beat_tick = tick
+	Perf.begin("net.session")
+	_tick_session(tick)
+	Perf.end()
+
+func _tick_session(tick: int) -> void:
+	if not _waiting.is_empty() and tick % SEAT_TICKS == 0:
+		_seat_waiting()
 	if not _has_peers():
 		return
 	if shared_warband:
 		Perf.begin("net.mirror")
-		_tick_mirror(delta)
+		_tick_mirror(tick)
 		Perf.end()
-	var interval := 1.0 / SNAPSHOT_HZ
-	# A hitch must not turn into a burst of stale snapshots: what is banked is
-	# dropped to one send, because the newest pose is the only one that matters.
-	_accumulator = minf(_accumulator + delta, interval * 4.0)
-	if _accumulator >= interval:
-		_accumulator = fmod(_accumulator, interval)
+	if tick % SNAPSHOT_TICKS == 0:
 		Perf.begin("net.snapshot")
 		_send_snapshots()
 		Perf.end()
 	Perf.begin("net.world")
-	_tick_world(delta)
+	_tick_world(tick)
 	Perf.end()
 
 # --- internals: the shared warband -------------------------------------------
@@ -1095,11 +1216,10 @@ func _on_warband_changed() -> void:
 	if _role == "host" and shared_warband:
 		_mirror_dirty = true
 
-## Send the warband the moment it changes after a quiet spell, and at most every
-## `MIRROR_SECONDS` while it keeps changing.
-func _tick_mirror(delta: float) -> void:
-	_mirror_elapsed = minf(_mirror_elapsed + delta, MIRROR_SECONDS)
-	if not _mirror_dirty or _mirror_elapsed < MIRROR_SECONDS:
+## Send the warband on the first change after a quiet spell, and at most every
+## `MIRROR_TICKS` while it keeps changing.
+func _tick_mirror(tick: int) -> void:
+	if not _mirror_dirty or tick - _mirror_tick < MIRROR_TICKS:
 		return
 	_push_warband()
 
@@ -1108,7 +1228,7 @@ func _tick_mirror(delta: float) -> void:
 ## about.
 func _push_warband(force: bool = false) -> void:
 	_mirror_dirty = false
-	_mirror_elapsed = 0.0
+	_mirror_tick = _beat_tick
 	if warband == null:
 		return
 	var text := JSON.stringify(warband.to_dict())
@@ -1157,11 +1277,10 @@ func _redress(target: WarbandState, before: Dictionary) -> void:
 				and _dressing_signature(target, merc_id) != str(before[key]):
 			controller.refresh_gear(merc_id)
 
+## Every body, named by the simulation tick it was stepped on - the number a
+## guest's action names back and the host rewinds to (`arm_lag`).
 func _send_snapshots() -> void:
-	# The tick on the wire is the simulation tick the bodies were stepped on, not
-	# this sender's own packet counter: a guest's actions name it back, and the
-	# host rewinds to it.
-	_tick = int(controller.sim_tick())
+	var tick := int(controller.sim_tick())
 	var entries: Array = []
 	for merc_id in warband.roster.ids():
 		var actor := controller.body_of(merc_id)
@@ -1170,58 +1289,123 @@ func _send_snapshots() -> void:
 		entries.append([merc_id, actor.snapshot()])
 	if entries.is_empty():
 		return
-	for batch in NetLimits.batches(entries, [_tick]):
-		receive_snapshot.rpc(_tick, batch)
+	for batch in NetLimits.batches(entries, [tick]):
+		_stream(func(): receive_snapshot.rpc(tick, batch), 0, true)
 
 # --- internals: the world --------------------------------------------------
 
 ## The world's clocks. Mobs and missiles are polled, not event-driven: a mob's
 ## pose only means "now", and a missile that was announced on the frame it was
 ## fired would arrive before the host's own first physics step moved it.
-func _tick_world(delta: float) -> void:
+func _tick_world(tick: int) -> void:
 	if world == null:
 		return
-	var mob_interval := 1.0 / MOB_SNAPSHOT_HZ
-	_mob_accumulator = minf(_mob_accumulator + delta, mob_interval * 4.0)
-	# One stream per frame, never a burst: a hitch banks the surplus, and paying it
-	# back as four batches in the next frame is how one hiccup becomes a stutter.
-	if _mob_accumulator >= mob_interval:
-		_mob_accumulator = fmod(_mob_accumulator, mob_interval)
-		_send_mobs()
-	_loot_accumulator += delta
-	if _loot_accumulator >= LOOT_POLL_SECONDS:
-		_loot_accumulator = fmod(_loot_accumulator, LOOT_POLL_SECONDS)
+	if tick % MOB_SEND_TICKS == 0:
+		_send_mobs(tick)
+	if tick % LOOT_SEND_TICKS == 0:
 		_send_loot()
-	_missile_accumulator += delta
-	if _missile_accumulator >= MISSILE_POLL_SECONDS:
-		_missile_accumulator = fmod(_missile_accumulator, MISSILE_POLL_SECONDS)
+	if tick % MISSILE_SEND_TICKS == 0:
 		_send_missiles()
 
-func _send_mobs() -> void:
-	_mob_tick += 1
+func _send_mobs(tick: int) -> void:
 	# A death is a one-shot fact. Left in the unreliable batch, one lost datagram
 	# leaves the guest with a living copy of a body the host buried; the reliable
 	# channel makes the corpse appear on every screen even across a hitch.
-	var deaths := _collect_death_states()
-	for batch in NetLimits.batches(deaths, [_mob_tick]):
-		receive_mob_deaths.rpc(_mob_tick, batch)
-	var entries := collect_mob_entries(MOB_REACH_METRES)
+	# Every stream is per guest, because every guest is only told about its own
+	# ground: one batch for all of them is how a soul two hundred metres away paid
+	# for the whole party's fight in draw calls and datagrams.
+	for peer_id in _guest_ids():
+		_stream_mobs_to(peer_id, tick)
+
+## One guest's mob stream: the bodies within `MOB_REACH_METRES` of *that peer's*
+## own body, everything it is already being told about out to
+## `MOB_RELEASE_METRES`, the changes since its last batch, and a reliable name for
+## every body that just left it.
+func _stream_mobs_to(peer_id: int, tick: int) -> void:
+	var book: Dictionary = _mob_sent_by_peer.get(peer_id, {})
+	if not book is Dictionary:
+		book = {}
+	_mob_sent_by_peer[peer_id] = book
+	var known: Dictionary = _mob_live.get(peer_id, {})
+	if not known is Dictionary:
+		known = {}
+	var bodies := _peer_bodies(peer_id)
+	var deaths := _collect_death_states(bodies, _dead_book(peer_id))
+	for batch in NetLimits.batches(deaths, [tick]):
+		_stream(func(): receive_mob_deaths.rpc_id(peer_id, tick, batch), peer_id)
+	var entries := collect_mob_entries(MOB_REACH_METRES, bodies, known)
+	var live := {}
+	for entry in entries:
+		live[str(entry[0])] = true
+	var left := mob_leaves(known, live)
+	for mob_name in left:
+		# Forgotten with the announcement: a body that walks back into reach must
+		# be sent again even if it has not moved a millimetre since.
+		book.erase(mob_name)
+	if not left.is_empty():
+		_stream(func(): receive_mob_leaves.rpc_id(peer_id, tick, left), peer_id)
+	_mob_live[peer_id] = live
 	if entries.is_empty():
 		return
 	# A crowded hall is thirty calm bodies twice over; re-sending each one's whole
 	# state fifteen times a second is the traffic that turns walking through it
 	# into a stutter. Only what changed goes out, with a full copy once a second so
 	# a lost delta cannot leave a mob frozen for good.
-	var changed := changed_mob_entries(entries, _mob_tick % MOB_REFRESH_TICKS == 0)
+	var changed := changed_mob_entries(entries, tick % MOB_REFRESH_TICKS == 0, book)
 	if changed.is_empty():
 		return
-	for batch in NetLimits.batches(changed, [_mob_tick]):
-		receive_mobs.rpc(_mob_tick, batch)
+	for batch in NetLimits.batches(changed, [tick]):
+		_stream(func(): receive_mobs.rpc_id(peer_id, tick, batch), peer_id, true)
+
+## The names in a peer's stream that the live set no longer names: what that
+## guest is told to put down. Pure, so the wire contract is driveable without a
+## socket.
+static func mob_leaves(known: Dictionary, live: Dictionary) -> Array:
+	var out: Array = []
+	for mob_name in known:
+		if not live.has(mob_name):
+			out.append(mob_name)
+	return out
+
+## The guests this peer names: every other peer on the field, host or not.
+func _guest_ids() -> Array:
+	var out: Array = []
+	if multiplayer == null:
+		return out
+	for peer_id in multiplayer.get_peers():
+		out.append(int(peer_id))
+	out.sort()
+	return out
+
+## The ground one peer draws: its own body. A soul still waiting for a seat has
+## none, and is told about the whole party's ground until it is fielded.
+func _peer_bodies(peer_id: int) -> Array:
+	var bodies: Array = []
+	if controller != null:
+		var actor: Variant = controller.body_for_peer(peer_id)
+		if actor != null and is_instance_valid(actor) and actor is Node3D:
+			bodies.append(actor)
+	if bodies.is_empty() and world != null:
+		var listed: Variant = world.get("bodies")
+		if listed is Array:
+			return listed
+	return bodies
+
+## The corpse book of one peer, made on first use.
+func _dead_book(peer_id: int) -> Dictionary:
+	var book: Variant = _dead_sent.get(peer_id, null)
+	if book is Dictionary:
+		return book
+	var fresh := {}
+	_dead_sent[peer_id] = fresh
+	return fresh
 
 ## The entries worth sending: one that changed since the last copy, or all of
-## them on a refresh. Public so the unit regression can drive the rule without a
-## socket.
-func changed_mob_entries(entries: Array, refresh: bool) -> Array:
+## them on a refresh. `book` is the peer's own last-copy table; `null` means the
+## shared one, for a caller with no peer behind it. Public so the unit regression
+## can drive the rule without a socket.
+func changed_mob_entries(entries: Array, refresh: bool, book: Variant = null) -> Array:
+	var memo: Dictionary = _mob_sent if book == null else book
 	var changed: Array = []
 	for entry in entries:
 		if typeof(entry) != TYPE_ARRAY or (entry as Array).size() < 2:
@@ -1229,11 +1413,11 @@ func changed_mob_entries(entries: Array, refresh: bool) -> Array:
 		var mob_name := str(entry[0])
 		var state: Variant = entry[1]
 		if not refresh:
-			var previous: Variant = _mob_sent.get(mob_name, null)
+			var previous: Variant = memo.get(mob_name, null)
 			if previous is Dictionary and state is Dictionary \
 					and previous.hash() == state.hash():
 				continue
-		_mob_sent[mob_name] = state
+		memo[mob_name] = state
 		changed.append(entry)
 	return changed
 
@@ -1244,27 +1428,30 @@ func receive_mob_deaths(tick: int, states: Array) -> void:
 	apply_mob_states(tick, states)
 
 ## A guard that has died is no longer "living", so the collector above stops
-## naming it - but a replica still has to see it fall. Each corpse is sent once,
-## with the snapshot whose `a` is false, and then the wire forgets it.
-func _collect_death_states() -> Array:
+## naming it - but a replica still has to see it fall. Each corpse is sent once to
+## each guest it stood near, with the snapshot whose `a` is false, and then that
+## peer's book forgets it.
+func _collect_death_states(bodies: Array = [], sent: Variant = null) -> Array:
 	var out: Array = []
 	if world == null:
 		return out
-	var bodies: Variant = world.get("bodies")
-	var body_list: Array = []
-	if bodies is Array:
-		body_list = bodies
+	var book: Dictionary = _dead_sent if sent == null else sent
+	var body_list: Array = bodies
+	if body_list.is_empty():
+		var listed: Variant = world.get("bodies")
+		if listed is Array:
+			body_list = listed
 	for guard in _world_guards():
 		if not is_instance_valid(guard) or not guard is Node3D:
 			continue
 		if not guard.has_method("snapshot") or _mob_living(guard):
 			continue
 		var guard_name := str((guard as Node).name)
-		if _dead_sent.has(guard_name):
+		if book.has(guard_name):
 			continue
 		if not _near_any_body((guard as Node3D).global_position, body_list, MOB_REACH_METRES):
 			continue
-		_dead_sent[guard_name] = true
+		book[guard_name] = true
 		out.append([guard_name, guard.call("snapshot")])
 	return out
 
@@ -1274,7 +1461,10 @@ func _send_loot() -> void:
 
 func _send_missiles() -> void:
 	for entry in collect_new_missiles():
-		receive_arrow.rpc(entry[0], entry[1], float(entry[2]))
+		var origin: Vector3 = entry[0]
+		var heading: Vector3 = entry[1]
+		var speed := float(entry[2])
+		_stream(func(): receive_arrow.rpc(origin, heading, speed), 0, true)
 
 func _world_guards() -> Array:
 	if world == null:
@@ -1284,15 +1474,31 @@ func _world_guards() -> Array:
 		return guards
 	return []
 
-func _guard_named(guard_name: String):
+## `tick` names the stream tick an apply is running for, so one build of the
+## name table serves a whole batch: a hall holds three hundred guards and a batch
+## names sixty of them, and a scan per name is sixty scans of the same list.
+func _guard_named(guard_name: String, tick: int = -1):
 	if guard_name.is_empty():
 		return null
+	if tick >= 0:
+		return _guards_for(tick).get(guard_name, null)
 	for guard in _world_guards():
 		if not is_instance_valid(guard) or not guard is Node:
 			continue
 		if str((guard as Node).name) == guard_name:
 			return guard
 	return null
+
+## Name -> guard for one stream tick.
+func _guards_for(tick: int) -> Dictionary:
+	if tick == _guards_stamp:
+		return _guards_by_name
+	_guards_stamp = tick
+	_guards_by_name.clear()
+	for guard in _world_guards():
+		if is_instance_valid(guard) and guard is Node:
+			_guards_by_name[str((guard as Node).name)] = guard
+	return _guards_by_name
 
 ## A guard with no `alive` property is still treated as living: the wire must not
 ## silently hide a class this build does not recognise, and the regression's
@@ -1382,10 +1588,11 @@ func _reset_world_trackers() -> void:
 	_dead_sent.clear()
 	_delivered_loot.clear()
 	_delivered_arrows.clear()
-	_mob_accumulator = 0.0
-	_loot_accumulator = 0.0
-	_missile_accumulator = 0.0
-	_mob_tick = 0
+	_mob_live.clear()
+	_mob_sent_by_peer.clear()
+	_mob_sent.clear()
+	_guards_by_name.clear()
+	_guards_stamp = -1
 
 ## Book a payload that has been spawned, clearing the book when it is full. A
 ## repeat announcement then costs one dictionary lookup.
@@ -1437,8 +1644,8 @@ func _teardown() -> void:
 	_mirror_sent = false
 	_mirror_text = ""
 	_mirror_gold = -1
-	_accumulator = 0.0
-	_tick = 0
+	_mirror_tick = -10 ** 9
+	_beat_tick = -1
 	# The session is the only door a lent copy's gear verbs had: shut it.
 	bind_gear_requests()
 
@@ -1462,6 +1669,11 @@ func _on_peer_disconnected(peer_id: int) -> void:
 		controller.lag_tracking = false
 	_driven.erase(peer_id)
 	_names.erase(peer_id)
+	# The stream books of a soul that is gone: nothing is ever sent to it again,
+	# and a peer id that joins later must not inherit what it was told.
+	_mob_live.erase(peer_id)
+	_mob_sent_by_peer.erase(peer_id)
+	_dead_sent.erase(peer_id)
 	if _role == "host":
 		_seat_waiting()
 		_broadcast_ownership()

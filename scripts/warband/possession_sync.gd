@@ -15,17 +15,33 @@ signal possession_applied(peer_id: int, merc_id: int)
 signal possession_refused(peer_id: int, merc_id: int, reason: String)
 
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
+const NetReplication = preload("res://scripts/net_replication.gd")
 
 ## Untyped so the controller and this script do not preload each other.
 var controller
 var warband: WarbandState
 var _router: SoulRouter
 
+## The high-frequency uplink: what this soul sends to the host, held for the
+## simulated link when one was asked for (`NetReplication.requested_link`).
+var _link = NetReplication.LagQueue.new()
+
 func setup(warband_node: WarbandState, possession_controller = null) -> void:
 	warband = warband_node
 	_router = warband.souls if warband != null else null
 	if possession_controller != null:
 		controller = possession_controller
+	# One direction of a simulated link: this peer's intents take `lag` seconds to
+	# leave, and the host's answers take it to come back, which is a round trip.
+	var asked := NetReplication.requested_link()
+	_link.configure(asked.x, asked.y, asked.z)
+
+
+## The simulated link's own clock. A deferred packet lands on the physics frame
+## the link would have delivered it on, so the 60 Hz intents keep their cadence.
+func _physics_process(_delta: float) -> void:
+	if _link.active():
+		_link.drain()
 
 ## 1 is the host in ENet, and an offline game is its own host.
 func is_host() -> bool:
@@ -93,13 +109,26 @@ func send_move(direction: Vector2, running: bool, point: Variant = null,
 		origin: Variant = null, seq: int = -1, view: int = -1, history: Array = []) -> void:
 	if is_host() or multiplayer == null or not multiplayer.has_multiplayer_peer():
 		return
-	move_input.rpc_id(1, direction, running, point, origin, seq, view, history)
+	# A move frame travels `unreliable_ordered`, so a real link may lose it and the
+	# simulated one may too; a combat verb below is `reliable` and never is.
+	var guarded := func():
+		# Held past the handshake: the socket may be gone by the time it is due.
+		if multiplayer == null or not multiplayer.has_multiplayer_peer() \
+				or multiplayer.get_peers().is_empty():
+			return
+		move_input.rpc_id(1, direction, running, point, origin, seq, view, history)
+	_link.defer(guarded, true)
 
 func send_action(action: String, value: Variant = null, origin: Variant = null,
 		view: int = -1) -> void:
 	if is_host() or multiplayer == null or not multiplayer.has_multiplayer_peer():
 		return
-	action_input.rpc_id(1, action, value, origin, view)
+	var guarded := func():
+		if multiplayer == null or not multiplayer.has_multiplayer_peer() \
+				or multiplayer.get_peers().is_empty():
+			return
+		action_input.rpc_id(1, action, value, origin, view)
+	_link.defer(guarded)
 
 func _sender_body() -> int:
 	if _router == null or multiplayer == null:

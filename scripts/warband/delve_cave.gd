@@ -58,6 +58,10 @@ const Dressing = preload("res://scripts/warband/delve_dressing.gd")
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 const ArcherScript = preload("res://scripts/warband/watcher_archer.gd")
 const DemonScript = preload("res://scripts/warband/delve_demon.gd")
+## The two visual tables the floor's species are read from: what a body is built
+## out of is the list `_prewarm_species` starts reading before the crowds exist.
+const DevilVisual = preload("res://scripts/devil_mob_visual.gd")
+const WatcherVisual = preload("res://scripts/warband/watcher_visual.gd")
 const NavScript = preload("res://scripts/warband/squad_nav.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
@@ -316,6 +320,16 @@ const BUILD_FRAME_USEC := 14000
 
 var _steps: Array[Callable] = []
 var _step_index := 0
+## 1 for a step heavy enough to own its frame (`build_staged`): a body's rig, a
+## room's rock. The budget cannot see what the engine spends after the call, so
+## these do not share a frame with anything.
+var _solo := PackedByteArray()
+## The scenes `_retrieve_species` took out of the threaded loader, held until every
+## body of the floor exists.
+var _prewarmed: Array = []
+## The members of the den being built, filled one step at a time: `_spawn_member`
+## makes one body, `_close_den` settles the den they belong to.
+var _den_members: Array = []
 
 
 ## Build the floor into `world` in one call. The node must already be in the tree
@@ -346,6 +360,12 @@ func build(world: Node3D, as_replica: bool = false,
 ## longer than a playing one, and left alone the engine pays the debt back as a
 ## burst of eight steps on one frame - a hundred and seventy milliseconds of a
 ## stall on the frame the floor was finished, which is the freeze this replaces.
+##
+## The budget is measured on the steps themselves, and a step is not always what
+## a frame pays: a body's rig and its surfaces are built by the engine after the
+## step returns (a quarter of a second for a den's ten bodies), and they cannot
+## be counted from inside it. So a **heavy** step - a body, a room's rock - ends
+## the frame by itself (`_solo`), whatever the budget still has left.
 func build_staged(world: Node3D, as_replica: bool = false, warm_room: String = "",
 		difficulty: String = DelveMode.DEFAULT) -> void:
 	_plan_build(world, as_replica, difficulty)
@@ -357,8 +377,13 @@ func build_staged(world: Node3D, as_replica: bool = false, warm_room: String = "
 		var started := Time.get_ticks_usec()
 		while _step_index < _steps.size() \
 				and Time.get_ticks_usec() - started < BUILD_FRAME_USEC:
+			Perf.begin(_step_name(_step_index))
 			(_steps[_step_index] as Callable).call()
+			Perf.end()
+			var solo := _solo[_step_index] != 0
 			_step_index += 1
+			if solo:
+				break
 		built_share = float(_step_index) / float(_steps.size())
 		await get_tree().process_frame
 	built = true
@@ -430,32 +455,100 @@ func _step_name(index: int) -> String:
 	return "build.mobs"
 
 
-## The ordered steps. One per room for the rock, its dressing and its crowd, so a
-## frame's share of the build is a room and not a hundred of them.
+## The ordered steps. One per room for the rock and its dressing, and **one per
+## body** for the crowds: a den used to be one step, so a single frame paid for
+## every rig it stands at once - the imported devils' first builds alone were nine
+## hundred milliseconds in the lair's court. A step marked heavy (`_solo`, a body
+## or a room's rock) ends its frame on its own, because what the engine spends
+## building it happens after the step has returned.
 func _plan_build(world: Node3D, as_replica: bool, difficulty: String) -> void:
 	_steps.clear()
+	_solo.clear()
+	_den_members.clear()
 	_step_index = 0
 	host = world
 	replica = as_replica
 	mode = DelveMode.id_of(difficulty)
 	loot_rng.randomize()
-	_steps.append(_step_environment)
-	_steps.append(_rock_start)
+	_add_step(_step_environment)
+	_add_step(_rock_start)
 	for index in Layout.ROOMS.size():
-		_steps.append(_rock_room.bind(index))
-	_steps.append(_rock_end)
+		_add_step(_rock_room.bind(index), true)
+	_add_step(_rock_end)
 	for index in Layout.ROOMS.size():
-		_steps.append(_dress_room.bind(index))
-	_steps.append(_build_ropes)
-	_steps.append(_build_lights)
-	_steps.append(_build_props)
-	_steps.append(_mobs_start)
+		_add_step(_dress_room.bind(index))
+	_add_step(_build_ropes)
+	_add_step(_build_lights)
+	_add_step(_build_props)
+	_add_step(_mobs_start)
+	# The scenes every body of this floor is made of are read off the main thread
+	# while the rock goes up, and retrieved just before the crowds exist: a `load`
+	# on the frame a species is first spawned was a third of a second of stall.
+	_prewarm_species()
+	_add_step(_retrieve_species)
 	for spec in Layout.DENS:
-		_steps.append(_build_den.bind(spec))
-	_steps.append(_mobs_end)
-	_steps.append(_build_fauna)
-	_steps.append(_build_nav)
-	_steps.append(_finish_build)
+		var rows: Array = Layout.den_members(spec, mode)
+		for index in rows.size():
+			_add_step(_spawn_member.bind(spec, rows[index], index + 1), true)
+		_add_step(_close_den.bind(spec))
+	_add_step(_mobs_end)
+	_add_step(_build_fauna)
+	_add_step(_build_nav)
+	_add_step(_finish_build)
+
+
+func _add_step(action: Callable, solo: bool = false) -> void:
+	_steps.append(action)
+	_solo.append(1 if solo else 0)
+
+
+## Start a threaded read of every scene the floor's species are built from. The
+## request is only a request: `_retrieve_species` is what puts them in the cache.
+func _prewarm_species() -> void:
+	for spec in Layout.DENS:
+		for row in Layout.den_members(spec, mode):
+			var species := str(row["species"])
+			if bool(row.get("demon", false)):
+				_preload_one(str(DevilVisual.SCENES.get(species, "")))
+				continue
+			var entry: Dictionary = WatcherVisual.SPECIES.get(species, {})
+			_preload_one(str(entry.get("skin", "")))
+			_preload_one(str(entry.get("materials", "")))
+
+
+func _preload_one(path: String) -> void:
+	if path.is_empty() or not ResourceLoader.exists(path):
+		return
+	if ResourceLoader.load_threaded_get_status(path) != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		return
+	ResourceLoader.load_threaded_request(path)
+
+
+## Take the prewarmed scenes into the cache and keep a reference to each until
+## the crowds exist: the loader hands the resource out of the cache, and a
+## reference that is dropped hands it back. By now the rock has been built for
+## whole seconds, so this is a cache read; anything still in flight waits once.
+func _retrieve_species() -> void:
+	Perf.begin("build.retrieve")
+	for path in _prewarm_paths():
+		var status := ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS or status == ResourceLoader.THREAD_LOAD_LOADED:
+			_prewarmed.append(ResourceLoader.load_threaded_get(path))
+	Perf.end()
+
+
+func _prewarm_paths() -> PackedStringArray:
+	var paths := PackedStringArray()
+	for spec in Layout.DENS:
+		for row in Layout.den_members(spec, mode):
+			var species := str(row["species"])
+			if bool(row.get("demon", false)):
+				paths.append(str(DevilVisual.SCENES.get(species, "")))
+				continue
+			var entry: Dictionary = WatcherVisual.SPECIES.get(species, {})
+			paths.append(str(entry.get("skin", "")))
+			paths.append(str(entry.get("materials", "")))
+	return paths
 
 
 func _step_environment() -> void:
@@ -487,6 +580,9 @@ func _build_nav() -> void:
 func _finish_build() -> void:
 	_sync_lights(true)
 	_settle_air(1.0)
+	# Every body of the floor exists now: the cache has the scenes the floor's
+	# species were built from, and the holds go.
+	_prewarmed.clear()
 
 
 ## Underground: no sky, a dim ambient that keeps rock readable between the torches,
@@ -564,7 +660,6 @@ func _rock_room(index: int) -> void:
 	var ceiling := Vector3(rect.size.x, maxf(0.05, Layout.TOP - top), rect.size.y)
 	var ceiling_at := Vector3(rect.get_center().x, (top + Layout.TOP) * 0.5, rect.get_center().y)
 	VillageKit.add_box(shell, ceiling, ceiling_at, stone["roof"])
-	_box_collider(_rock_solids, ceiling, ceiling_at)
 	# The wall's rock reaches down to the lowest the floor can be anywhere on the
 	# floor: a hall cut into ground that has fallen away still stands in rock.
 	var tall := Layout.TOP - Floor.LOW
@@ -573,6 +668,7 @@ func _rock_room(index: int) -> void:
 		VillageKit.add_box(shell, Vector3(wall.size.x, tall, wall.size.y),
 			Vector3(wall.get_center().x, (Layout.TOP + Floor.LOW) * 0.5, wall.get_center().y), stone["wall"])
 	shell.commit(node, "Shell", false)
+	_box_collider(_rock_solids, ceiling, ceiling_at)
 	_floor_collider(index)
 
 
@@ -758,22 +854,25 @@ func _mobs_start() -> void:
 	add_child(_mobs_root)
 
 
-func _build_den(spec: Dictionary) -> void:
-	var members: Array = []
-	var index := 0
+func _spawn_member(spec: Dictionary, row: Dictionary, index: int) -> void:
+	var at: Vector3 = row["at"]
+	var face: Vector3 = row["face"]
+	var yaw := atan2(-(face.x - at.x), -(face.z - at.z))
+	var species := str(row["species"])
 	var tag := str(spec["id"]).replace("_", " ").capitalize().replace(" ", "")
-	for row in Layout.den_members(spec, mode):
-		index += 1
-		var at: Vector3 = row["at"]
-		var face: Vector3 = row["face"]
-		var yaw := atan2(-(face.x - at.x), -(face.z - at.z))
-		var species := str(row["species"])
-		if bool(row.get("demon", false)):
-			members.append(_spawn_demon(_mobs_root, "Demon%s%d" % [tag, index], species, at, yaw))
-		elif bool(row.get("bow", false)):
-			members.append(_spawn_archer(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
-		else:
-			members.append(_spawn_watcher(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
+	Perf.begin("spawn.%s" % species)
+	if bool(row.get("demon", false)):
+		_den_members.append(_spawn_demon(_mobs_root, "Demon%s%d" % [tag, index], species, at, yaw))
+	elif bool(row.get("bow", false)):
+		_den_members.append(_spawn_archer(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
+	else:
+		_den_members.append(_spawn_watcher(_mobs_root, "Hollow%s%d" % [tag, index], species, at, yaw))
+	Perf.end()
+
+
+func _close_den(spec: Dictionary) -> void:
+	var members := _den_members
+	_den_members = []
 	# The floor's difficulty on the body itself: the pool it carries and how fast it
 	# moves and swings. Set once, here, before the den is ever asked anything.
 	for mob in members:

@@ -87,6 +87,7 @@ func run() -> void:
 	timeline_checks()
 	mob_timeline_checks()
 	clock_checks()
+	link_checks()
 
 	_build_field(warband)
 	await physics_frame
@@ -147,39 +148,133 @@ func timeline_checks() -> void:
 	check(timeline.newest_tick() == -1, "clear forgets every sample")
 
 
-## The mob stream is numbered one per batch, not one per physics tick. Measured
-## as if it were 60 Hz, a two-interval delay became 0.4 s in the player's hands
-## and the dead-reckoning carried four intervals of travel; this holds the
-## timeline to the rate the host actually sends.
+## The mob stream is one tick per physics frame like every other number on the
+## wire - the bodies' own 60 Hz clock, sampled every fourth tick - and the knobs
+## that are wall clock (the delay floor, the dead-reckoning window) are converted
+## into it. It used to be numbered one per batch at 15 Hz, so a sender that
+## dropped a banked interval on a hitch sent numbers that no longer mapped to
+## elapsed time.
 func mob_timeline_checks() -> void:
-	var mobs = NetReplication.mob_timeline(15.0)
-	check(is_equal_approx(mobs.tick_seconds, 1.0 / 15.0),
-		"a mob timeline counts its own 15 Hz ticks (%.4f s)" % mobs.tick_seconds)
-	check(is_equal_approx(mobs.floor_delay_ticks, 2.0),
-		"the mob delay floor is two snapshot intervals (%s)" % str(mobs.floor_delay_ticks))
-	check(is_equal_approx(mobs.extrapolation_ticks, 2.0),
-		"dead reckoning is two mob intervals, not eight physics ticks (%s)"
-			% str(mobs.extrapolation_ticks))
+	var mobs = NetReplication.mob_timeline()
+	check(is_equal_approx(mobs.tick_seconds, 1.0 / 60.0),
+		"a mob timeline counts the simulation tick (%.4f s)" % mobs.tick_seconds)
+	check(is_equal_approx(mobs.floor_delay_ticks, 8.0),
+		"the mob delay floor is two 15 Hz intervals in ticks (%s)" % str(mobs.floor_delay_ticks))
+	check(is_equal_approx(mobs.extrapolation_ticks, 8.0),
+		"dead reckoning is that same window in ticks (%s)" % str(mobs.extrapolation_ticks))
+	# A sample every fourth tick, arriving on time: an even 15 Hz stream on the
+	# 60 Hz clock settles on its floor.
 	mobs.reset_to(Vector3.ZERO, Vector3.ZERO, 0.0, 0, 0.0)
-	var interval := 1.0 / 15.0
+	var tick := 0
 	for index in 4:
-		mobs.push(index + 1, Vector3(0.35 * float(index + 1), 0.0, 0.0),
-			Vector3(5.25, 0.0, 0.0), 0.0, interval * float(index))
-	check(is_equal_approx(mobs.delay_ticks, 2.0),
-		"an even 15 Hz stream settles on the two-interval floor (%s)" % str(mobs.delay_ticks))
-	# A stream keeps arriving: the playout must stay a couple of intervals
-	# behind the newest sample, not drift past it and extrapolate a stale mob.
-	var tick := 4
+		tick += 4
+		mobs.push(tick, Vector3(0.35 * float(index + 1), 0.0, 0.0),
+			Vector3(5.25, 0.0, 0.0), 0.0, 4.0 / 60.0 * float(index))
+	check(mobs.newest_tick() == 16, "the buffer keeps the simulation tick it was handed")
+	check(is_equal_approx(mobs.delay_ticks, 8.0),
+		"an even 15 Hz stream on the 60 Hz clock settles on the floor (%s)"
+			% str(mobs.delay_ticks))
+	# A stream keeps arriving: the playout must stay two intervals behind the
+	# newest sample, not drift past it and extrapolate a stale mob.
 	for frame in 60:
 		if frame % 4 == 0:
-			tick += 1
+			tick += 4
 			mobs.push(tick, Vector3(0.35 * float(tick), 0.0, 0.0),
-				Vector3(5.25, 0.0, 0.0), 0.0, interval * float(tick - 1))
+				Vector3(5.25, 0.0, 0.0), 0.0, 4.0 / 60.0 * float(tick))
 		mobs.advance(1.0 / 60.0)
 	var playout: float = mobs.render_tick()
 	var lag_ticks := float(mobs.newest_tick()) - playout
-	check(lag_ticks >= 0.5 and lag_ticks <= 3.5,
-		"the mob renders a couple of intervals behind (%s ticks)" % str(lag_ticks))
+	check(lag_ticks >= 5.0 and lag_ticks <= 11.0,
+		"the mob renders two intervals behind (%s ticks)" % str(lag_ticks))
+
+	# A body held against a wall reports its run speed and covers none of it. Dead
+	# reckoning along that intent walked the replica through the wall and snapped
+	# it back on the next packet - the pop a player reads as a mob jumping beside
+	# cover. The travel between two samples is what carries forward.
+	var walled = NetReplication.mob_timeline()
+	walled.reset_to(Vector3(2.0, 0.0, 0.0), Vector3.ZERO, 0.0, 0, 0.0)
+	walled.push(4, Vector3(2.0, 0.0, 0.0), Vector3(6.0, 0.0, 0.0), 0.0, 4.0 / 60.0)
+	walled.push(8, Vector3(2.0, 0.0, 0.0), Vector3(6.0, 0.0, 0.0), 0.0, 8.0 / 60.0)
+	check(is_zero_approx(Vector3(walled.samples[-1].vel).length()),
+		"a blocked body carries no travel into its dead reckoning (%s)"
+			% str(walled.samples[-1].vel))
+	for frame in 20:
+		walled.advance(1.0 / 60.0)
+	var held: Dictionary = walled.sample()
+	check(Vector3(held.pos).distance_to(Vector3(2.0, 0.0, 0.0)) < 0.05,
+		"so a late packet leaves the replica where the body really is (%s)" % str(held.pos))
+
+	# A body that does move keeps its real travel, and never more than the intent
+	# it was measured against.
+	var walking_mob = NetReplication.mob_timeline()
+	walking_mob.reset_to(Vector3.ZERO, Vector3.ZERO, 0.0, 0, 0.0)
+	walking_mob.push(4, Vector3(0.40, 0.0, 0.0), Vector3(9.0, 0.0, 0.0), 0.0, 4.0 / 60.0)
+	check(is_equal_approx(Vector3(walking_mob.samples[-1].vel).x, 6.0),
+		"a travelling body carries its own travel, under the intent it reported (%s)"
+			% str(walking_mob.samples[-1].vel))
+
+
+## The simulated link is a test instrument, so it is tested like one: off unless
+## asked, holding for the delay it was given, in order, losing only what it was
+## told may be lost. A harness that quietly misbehaves turns every other check in
+## this file into a coin toss.
+func link_checks() -> void:
+	# The negative control: an ordinary launch runs with no link at all, so the
+	# comparisons the deferral costs must not be hiding a queue.
+	var asked = NetReplication.requested_link()
+	check(asked.is_equal_approx(Vector3.ZERO),
+		"no switch means no simulated link (%s)" % str(asked))
+
+	var inline := []
+	var plain = NetReplication.LagQueue.new()
+	plain.defer(func(): inline.append(1), true)
+	check(inline.size() == 1 and not plain.active(),
+		"an inactive link calls the work inline and holds nothing")
+
+	# A lambda made inside a loop captures the value it was made with. The sender
+	# defers one per batch, so the alternative - every batch after the first
+	# arriving as the last one - would be a harness that lies about what it sent.
+	var link = NetReplication.LagQueue.new()
+	link.configure(0.05, 0.02)
+	var sent := []
+	for index in 3:
+		link.defer(func(): sent.append(index))
+	check(sent.is_empty() and link.held == 3,
+		"a configured link holds what it is given (%d held)" % link.held)
+	link.release(Time.get_ticks_msec() / 1000.0 + 0.2)
+	check(sent.size() == 3 and str(sent) == "[0, 1, 2]",
+		"every held packet is released once, in the order it was deferred (%s)" % str(sent))
+	check(link.held == 0 and link.released == 3, "and the queue empties (%d held)" % link.held)
+	check(link.mean_wait() >= 0.05,
+		"the wait it reports is time in the queue, not overshoot past due (%.3f s)"
+			% link.mean_wait())
+
+	# Loss is typed. A pose stream is `unreliable` and may vanish; a death, a leave
+	# or a combat verb is `reliable` and must not, or the harness is failing the
+	# game rather than measuring it.
+	var lossy = NetReplication.LagQueue.new()
+	lossy.configure(0.05, 0.0, 1.0)
+	# Arrays, not counters: a lambda captures a local by value, so an `int`
+	# accumulator inside one counts into a copy nobody can read. That is also the
+	# property the loop test above relies on.
+	var kept := []
+	var went := []
+	for index in 10:
+		lossy.defer(func(): kept.append(index), true)
+	for index in 10:
+		lossy.defer(func(): went.append(index), false)
+	check(lossy.discarded == 10 and kept.is_empty(),
+		"a lossy packet at total loss is thrown away (%d discarded)" % lossy.discarded)
+	lossy.release(Time.get_ticks_msec() / 1000.0 + 0.2)
+	check(kept.is_empty() and went.size() == 10,
+		"and a reliable one is always delivered (%d lossy arrived, %d reliable)"
+			% [kept.size(), went.size()])
+	check(lossy.drop > 0.0, "the loss rate it reports is the one it was configured with")
+
+	# Jitter wider than the lag would time-travel a packet into the past.
+	var clamped := NetReplication.LagQueue.new()
+	clamped.configure(0.02, 0.5)
+	check(clamped.jitter <= clamped.lag, "jitter is clamped to the lag (%.3f s)" % clamped.jitter)
 
 
 func clock_checks() -> void:
