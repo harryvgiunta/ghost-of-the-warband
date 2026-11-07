@@ -1,11 +1,12 @@
 extends Node
 ## Autoload `GameFlow`: the door between the warband's scenes.
 ##
-## The campaign is one world: the camp, the trail and the town all stand in one
-## scene, and walking is the only way between them. This node is the only thing
-## that changes scene - the title's doors open the world, a checkpoint reload
-## reopens it, and a guest whose session ended goes back to the title - so a test
-## can drive a whole scene without being teleported out of it.
+## The campaign is one world: Hearthstead, the road through the wood and the deep
+## wood it ends at all stand in one scene, and walking is the only way between
+## them. This node is the only thing that changes scene - the title's doors open
+## the world, a checkpoint reload reopens it, and a guest whose session ended goes
+## back to the title - so a test can drive a whole scene without being teleported
+## out of it.
 ##
 ## `active` stays false until the flow is entered from the title menu, which is
 ## what keeps a regression harness's world from reloading a checkpoint under it.
@@ -14,14 +15,15 @@ extends Node
 ## (`enter_warband`, the campaign a row opens), HOST GAME (`host_campaign`, a new
 ## game or a campaign's checkpoint) and JOIN GAME (`join_campaign`).
 
-## The campaign is one world: the camp, the trail through the wood and the town
-## all stand in this one scene, and walking is the only way between them.
+## The campaign is one world: Hearthstead, the road through the wood and the deep
+## wood it ends at all stand in this one scene, and walking is the only way
+## between them.
 const WORLD_SCENE := "res://scenes/warband_world.tscn"
 ## Where a guest goes when its session ends under it: the host left, or never
 ## answered.
 const TITLE_SCENE := "res://title.tscn"
 
-## HOST GAME's two doors: a fresh campaign in the cages, or the saved warband on
+## HOST GAME's two doors: a fresh campaign at Hearthstead, or the saved warband on
 ## its last checkpoint.
 const HOST_NEW := "new"
 const HOST_CHECKPOINT := "checkpoint"
@@ -47,11 +49,11 @@ signal notice_posted(text: String)
 
 var active := false
 var last_scene := ""
-## Where the world puts the warband down when it opens: `"camp"` for a fresh run
-## (the cages), `"town"` for a resumed save without a bookmark, `"checkpoint"`
-## for the autosave's bookmark, and `"guest"` for a co-op guest fielding the
-## host's bodies. The world reads it once, in its own `_ready`.
-var world_start := "camp"
+## Where the world puts the warband down when it opens: `"town"` for Hearthstead,
+## where a fresh run and a resumed save without a bookmark both stand,
+## `"checkpoint"` for the autosave's bookmark, and `"guest"` for a co-op guest
+## fielding the host's bodies. The world reads it once, in its own `_ready`.
+var world_start := "town"
 var transitions := 0
 ## The co-op request in force: `{mode, address, port, name, scene}`. It stays here
 ## (not in the menu) so the flow - the only thing that outlives the menu - can
@@ -87,7 +89,7 @@ func _process(delta: float) -> void:
 			str(warband_intent.get("address", "")), int(warband_intent.get("port", 0))])
 
 ## A campaign from the title's list: the warband where its last checkpoint
-## stands, or the cages when that campaign has nothing saved in it yet. The
+## stands, or Hearthstead when that campaign has nothing saved in it yet. The
 ## folder is the title's to bind (`SaveSlots`); this only reads what it bound.
 func enter_warband() -> void:
 	var warband := get_node_or_null("/root/Warband")
@@ -101,12 +103,12 @@ func enter_warband() -> void:
 		return
 	warband.reset_state()
 	warband.save_state()
-	world_start = "camp"
+	world_start = "town"
 	goto(WORLD_SCENE)
 
-## NEW CAMPAIGN: the five cages, whatever the save says. The campaign folder is
-## the title's to make (`SaveSlots.new_slot` + `bind`), so this writes a new
-## campaign and never an old one.
+## NEW CAMPAIGN: one naked body in Hearthstead's square, whatever the save says.
+## The campaign folder is the title's to make (`SaveSlots.new_slot` + `bind`), so
+## this writes a new campaign and never an old one.
 func start_campaign() -> void:
 	var warband := get_node_or_null("/root/Warband")
 	_end_warband_link("a new campaign")
@@ -116,15 +118,21 @@ func start_campaign() -> void:
 
 ## A fresh warband and a fresh purse, written at once. The purse is the shared
 ## wallet, so a fresh campaign has to reset the journey too: otherwise the last
-## run's gold and pack walk into the cages with the soul.
+## run's gold and pack walk into Hearthstead with the soul.
 func _fresh_campaign(warband) -> void:
 	var state := get_node_or_null("/root/PlayerState")
 	if state != null:
 		state.reset(true)
 	if warband != null:
 		warband.reset_state()
+		# A new campaign stands its band up here, not in the scene that happens to
+		# open first: a host that starts a game owns one naked body before any
+		# world is built, and the square only decides where it stands. Everything
+		# it wears is won off the kills it makes, and the second body is the cage
+		# on the road or the recruiter's desk.
+		warband.seed_starting_band()
 		warband.save_state()
-	world_start = "camp"
+	world_start = "town"
 
 ## Put the warband back on the ground its last checkpoint remembers, without
 ## changing scene. The save is the snapshot: reloading it restores the roster,
@@ -222,7 +230,7 @@ func _post_notice(text: String) -> void:
 # then opens the world on it - the guest plays from the host's roster, stash and
 # purse, and its own save is never read or written while the session lasts.
 
-## HOST GAME. `start` is `HOST_NEW` (a fresh campaign in the cages) or
+## HOST GAME. `start` is `HOST_NEW` (a fresh naked body at Hearthstead) or
 ## `HOST_CHECKPOINT` (the saved warband on its bookmark, or the town end when it
 ## has none). A checkpoint door with nothing saved behind it opens a fresh run.
 func host_campaign(port: int, player_name: String, start: String = HOST_NEW) -> void:

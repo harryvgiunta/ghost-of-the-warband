@@ -13,9 +13,9 @@ extends Node3D
 ## and the three keepers' counters (Orla, Brann, Vey).
 ##
 ## Behind every counter stands a keeper - an armoured humanoid, one of the five
-## who run this place - and over the head of whichever of them has something to
-## say hangs a gold "TALK TO HIM" arrow (`QuestGiver.marker_service()` decides,
-## this scene only moves the arrow). Three archers of the watch hold the gate and
+## who run this place - and every one of them is a `G` away: there is no board of
+## orders and no arrow over a head, because the town sells, buys and forges and
+## has nothing to ask of anybody. Three archers of the watch hold the gate and
 ## shoot what comes up the road at it.
 ##
 ## There is no combat in the square itself: nothing hostile is fielded inside the
@@ -36,15 +36,13 @@ const HudScript = preload("res://scripts/warband/warband_hud.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const PaperdollScript = preload("res://scripts/warband/warband_paperdoll.gd")
 const AltarScript = preload("res://scripts/warband/sacrificial_altar.gd")
+const ArenaMenuScript = preload("res://scripts/warband/arena_menu.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const State = preload("res://scripts/player_state.gd")
-const ArmorData = preload("res://scripts/armor_data.gd")
 const WarbandState = preload("res://scripts/warband/warband_state.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
 const FireFx = preload("res://scripts/world/fire_fx.gd")
-const QuestGiverScript = preload("res://scripts/warband/quest_giver.gd")
-const MarkerScript = preload("res://scripts/warband/quest_marker.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
@@ -74,9 +72,7 @@ const TOWN_WOOD_SEED := 7717
 ## How often the gold arrow re-reads who has business. The ledger moves without a
 ## signal when the world counts a kill, so a slow clock is the only honest way to
 ## ask again.
-const MARKER_POLL := 0.35
 ## Where the arrow hangs: over the name, high enough to clear the tallest rig.
-const TALK_ARROW_HEIGHT := 2.42
 
 ## The square's standing services, arranged so no two 3 m rings overlap: walking
 ## the square always names exactly one thing.
@@ -85,6 +81,8 @@ const ALTAR_POINT := Vector3(8.0, 0.0, 4.0)
 const RECRUITER_POINT := Vector3(-8.0, 0.0, -6.0)
 const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
+## The arena's gate: a stone arch out on the east lane, clear of every counter.
+const ARENA_POINT := Vector3(17.0, 0.0, -4.0)
 
 ## The paved middle of the square: its size, the size of one laid stone, and how
 ## far the outer stones wander in and out of the course.
@@ -174,16 +172,6 @@ const SPAWN_POSTS := [
 	Vector3(4.2, 0.0, -1.2), Vector3(-3.6, 0.0, -1.6),
 ]
 
-## The first-run warband: identical bodies in plain dusk gear, so the town is
-## playable from its first minute. An existing warband is left exactly as it is.
-const TOWN_LINEUP := [
-	{"name": "Aldous", "main": "sword_short", "off": "shield_buckler", "armor": "leather"},
-	{"name": "Brine", "main": "dagger_iron", "off": "shield_kite", "armor": "mail"},
-	{"name": "Cael", "main": "bow_short", "off": "", "armor": "cloth"},
-	{"name": "Dorn", "main": "sword_great", "off": "", "armor": "plate"},
-	{"name": "Edda", "main": "sword_arming", "off": "shield_tower", "armor": "mail"},
-]
-
 ## Spares the collective stash starts with, so the paperdoll and the altar have
 ## something to move from the first minute.
 const TOWN_SPARES := [
@@ -218,13 +206,11 @@ var vendor_brann: Node3D
 var vendor_vey: Node3D
 var vendor_menu
 var signpost: Node3D
+## The arena's gate and its board.
+var arena_gate: Node3D
+var arena_menu
 ## The keeper `interact_at` resolves by service id (`town_folk.gd`).
 var keepers: Dictionary = {}
-## The keepers' mouths: the hire lesson, the campaign's orders and the choice of
-## which keeper wears the gold arrow.
-var quest_giver
-## The one gold arrow in the town, riding whichever keeper has business.
-var quest_marker
 ## The watch at the gate (`town_guard.gd`).
 var guards: Array = []
 ## The stake count the ring came out at, for the settlement's own readout.
@@ -245,7 +231,6 @@ var _iron: StandardMaterial3D
 ## registers each shape against the caller's own solid, so collision keeps one
 ## owner per scene.
 var _solids: StaticBody3D
-var _marker_clock := 0.0
 
 func _ready() -> void:
 	warband = get_node_or_null("/root/Warband") as WarbandState
@@ -263,7 +248,6 @@ func _ready() -> void:
 	_build_wood()
 	if host == null:
 		_build_ui()
-		_build_quest_layer(null)
 		controller.possession_changed.connect(_on_possession_changed)
 		controller.transfer_refused.connect(_on_transfer_refused)
 		controller.possession_released.connect(_on_possession_released)
@@ -283,7 +267,6 @@ func embed(world: Node3D) -> void:
 	hud = world.hud
 	screen = world.screen
 	paperdoll = world.paperdoll
-	_build_quest_layer(world.get("tips"))
 
 
 ## Where the warband stands when the campaign starts in the town.
@@ -324,12 +307,6 @@ func _process(delta: float) -> void:
 		var wanted := Input.MOUSE_MODE_VISIBLE if _panel_open() else Input.MOUSE_MODE_CAPTURED
 		if Input.mouse_mode != wanted:
 			Input.mouse_mode = wanted
-	# The arrow is asked again on a slow clock as well as on every talk and every
-	# ledger change: the world counts its kills without telling anyone.
-	_marker_clock += delta
-	if _marker_clock >= MARKER_POLL:
-		_marker_clock = 0.0
-		_refresh_marker()
 	Perf.end()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -757,6 +734,7 @@ func _build_services() -> void:
 	vendor_vey = _build_vendor_counter("VendorVey", VENDOR_VEY_POINT,
 		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
+	arena_gate = _build_arena_gate()
 
 	# Behind every counter, a keeper: a face and a kit, not a service.
 	keepers = FolkScript.build(self, {
@@ -786,14 +764,32 @@ func _build_services() -> void:
 	# the moment the coin lands rather than bound when the board was built.
 	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
 	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
-	# The one gold arrow over the town. It rides its own keeper and this scene
-	# only decides when it is shown (`_refresh_marker`).
-	quest_marker = MarkerScript.new()
-	quest_marker.name = "TalkArrow"
-	add_child(quest_marker)
-	quest_marker.set_label("TALK TO HIM")
-	quest_marker.visible = false
 	DressingScript.build(self)
+
+
+## The arena's gate: four stone posts and two lintels, standing in the dirt east
+## of the fire. Placeholder stone, like the ring it opens - the press is the thing.
+func _build_arena_gate() -> Node3D:
+	var gate := Node3D.new()
+	gate.name = "ArenaGate"
+	gate.position = ARENA_POINT
+	add_child(gate)
+	var stone := StandardMaterial3D.new()
+	stone.albedo_color = Color(0.36, 0.35, 0.33)
+	stone.roughness = 0.95
+	for side in [-1.0, 1.0]:
+		Geo.box(gate, Vector3(0.9, 3.6, 0.9), Vector3(float(side) * 2.2, 1.8, 0.0), stone)
+	Geo.box(gate, Vector3(5.6, 0.7, 1.1), Vector3(0.0, 3.9, 0.0), stone)
+	var plate := Label3D.new()
+	plate.name = "ArenaNameplate"
+	plate.text = "THE ARENA"
+	plate.font_size = 48
+	plate.pixel_size = 0.007
+	plate.modulate = Color(0.94, 0.86, 0.62)
+	plate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	plate.position = Vector3(0.0, 3.9, 0.6)
+	gate.add_child(plate)
+	return gate
 
 
 func _build_stash_chest() -> Node3D:
@@ -918,6 +914,11 @@ func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HudLayer"
 	add_child(layer)
+	arena_menu = ArenaMenuScript.new()
+	arena_menu.name = "ArenaMenu"
+	arena_menu.visible = false
+	layer.add_child(arena_menu)
+	arena_menu.fight_requested.connect(_on_arena_fight_requested)
 	hud = HudScript.new()
 	hud.name = "WarbandHud"
 	layer.add_child(hud)
@@ -935,36 +936,9 @@ func _build_ui() -> void:
 
 # --- the keepers' business -------------------------------------------------
 
-## The one mouth of the town. Built after the UI, because it writes the HUD and
-## reads the tip channel; re-configured from `embed()` with the world's own tips,
-## so the hire line and the campaign's orders come from the same channel the rest
-## of the world uses.
-func _build_quest_layer(tips) -> void:
-	if quest_giver == null:
-		quest_giver = QuestGiverScript.new()
-		quest_giver.name = "QuestGiver"
-		add_child(quest_giver)
-	quest_giver.configure(warband, hud, tips)
-	if not warband.changed.is_connected(_refresh_marker):
-		warband.changed.connect(_refresh_marker)
-	_refresh_marker()
-
-
-## Hang the gold arrow over whichever keeper has business, or put it away. Asked
-## on every ledger change, after every `G`, and on a slow clock - the three ways
-## "who has something to say" can change without a panel closing.
-func _refresh_marker() -> void:
-	if quest_marker == null:
-		return
-	var service: String = quest_giver.marker_service() if quest_giver != null else ""
-	var keeper: Node3D = keepers.get(service, null) as Node3D
-	if keeper == null or not is_instance_valid(keeper):
-		quest_marker.visible = false
-		quest_marker.detach()
-		return
-	quest_marker.visible = true
-	if quest_marker.target() != keeper:
-		quest_marker.attach_to(keeper, TALK_ARROW_HEIGHT)
+## Every counter a `G` opens is a panel here; nothing in the town is a board of
+## orders, so there is no mouth to build and no arrow to hang. The keepers are
+## nodes (`town_folk.gd`) and `interact_at` resolves which one is in reach.
 
 # --- interaction -----------------------------------------------------------
 
@@ -1014,32 +988,27 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			hud.set_status("The altar: lay a warden's ichor on a weapon and it wakes into its skill.", 4.0)
 		"recruiter":
 			_hide_panels()
-			# The first G names the hire rows in one tip over the board it is
-			# describing. Once that line is offered - and always at the cap, when
-			# talk has nothing to say - `G` is the board and nothing else.
 			screen.open()
-			var hiring := "Hire from the recruiter board: the first eight oaths cost nothing," \
-				+ " and every body arms itself out of the shared stash."
+			var hiring := "Hire from the recruiter board: every oath under the cap costs" \
+				+ " nothing, and every body arms itself out of the shared stash."
 			screen.set_status(hiring)
-			if quest_giver == null or not quest_giver.talk("recruiter", peer_id):
-				hud.set_status(hiring, 5.0)
-			else:
-				hud.set_status("The recruiter has something to say about the eight.", 4.0)
+			hud.set_status(hiring, 5.0)
 		"quartermaster":
 			_hide_panels()
-			if quest_giver != null and quest_giver.talk("quartermaster", peer_id):
-				hud.set_status("The quartermaster has an order.", 4.0)
-			else:
-				quartermaster.open()
-				hud.set_status("The quartermaster sells plain steel and arrows into the shared stash.", 4.0)
+			quartermaster.open()
+			hud.set_status("The quartermaster sells plain steel and arrows into the shared stash.", 4.0)
 		"vendor_orla":
 			_open_vendor(0)
 		"vendor_brann":
 			_open_vendor(1)
 		"vendor_vey":
 			_open_vendor(2)
-	# The arrow is a question about the ledger, and a press can answer it.
-	_refresh_marker()
+		"arena":
+			_hide_panels()
+			if arena_menu != null:
+				arena_menu.open()
+			hud.set_status("THE ARENA: pick how hard the ring is, then step in.", 4.0)
+
 	return service
 
 ## One keeper line, at the counter they are standing behind. Two cues exist
@@ -1109,6 +1078,7 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_orla", "point": vendor_orla.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
+		{"id": "arena", "point": arena_gate.global_position, "reach": SERVICE_REACH + 1.0},
 	]
 	var best := ""
 	var best_distance := INF
@@ -1137,7 +1107,25 @@ func service_point(service: String) -> Vector3:
 			return vendor_brann.global_position
 		"vendor_vey":
 			return vendor_vey.global_position
+		"arena":
+			return arena_gate.global_position if arena_gate != null else Vector3.ZERO
 	return Vector3.ZERO
+
+## The board's press: the tier is the ring's own, and the ring is the world's.
+## A town standing alone (its own preview scene) has no campaign around it, so it
+## says so rather than pretending.
+func _on_arena_fight_requested(tier: String) -> void:
+	if host == null or host.get("arena") == null:
+		hud.set_status("The ring needs the campaign around it.", 3.0)
+		return
+	var result: Dictionary = host.arena.enter(tier)
+	if bool(result.get("ok", false)):
+		if arena_menu != null:
+			arena_menu.close()
+		_hide_panels()
+	else:
+		hud.set_status(str(result.get("message", "")), 3.0)
+
 
 ## A paperdoll change has to reach the body standing in the square, or the
 ## mercenary keeps the old kit in the only place the player can see it.
@@ -1191,35 +1179,29 @@ func _hide_panels() -> void:
 		quartermaster.close()
 	if vendor_menu != null and vendor_menu.is_open():
 		vendor_menu.close()
+	if arena_menu != null and arena_menu.is_open():
+		arena_menu.close()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
 		or (paperdoll != null and paperdoll.is_open()) \
 		or (altar != null and altar.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
-		or (vendor_menu != null and vendor_menu.is_open())
+		or (vendor_menu != null and vendor_menu.is_open()) \
+		or (arena_menu != null and arena_menu.is_open())
 
 # --- seeding ---------------------------------------------------------------
 
 ## A first-run warband, so the square is playable from its first minute. An
 ## existing warband (from a save or the camp) is never touched. The world calls
-## this only when the campaign starts in the town; a camp start has already
-## dressed its prisoners.
+## this only when the campaign starts in the town; a camp start has already stood
+## its prisoners up. The body itself comes naked (`seed_starting_band`) and is
+## never dressed here: the square only stocks the shared stash and the quiver, so
+## the first piece he wears is one he takes off a kill.
 func seed_warband() -> void:
 	if not warband.roster.is_empty():
 		return
-	for entry in TOWN_LINEUP:
-		var merc_id: int = warband.add_mercenary(str(entry["name"]))
-		var main_id := str(entry["main"])
-		var off_id := str(entry["off"])
-		warband.roster.equip(merc_id, "main", main_id)
-		if not Contracts.two_handed_item(State.ITEMS.get(main_id, {})) and not off_id.is_empty():
-			warband.roster.equip(merc_id, "off", off_id)
-		var set_id := str(entry["armor"])
-		for slot in ArmorData.SLOTS:
-			var armor_id := "armor_%s_%s" % [set_id, slot]
-			if State.ITEMS.has(armor_id):
-				warband.roster.equip(merc_id, slot, armor_id)
+	warband.seed_starting_band()
 	for item_id in TOWN_SPARES:
 		if State.ITEMS.has(str(item_id)):
 			warband.stash.add(str(item_id), 1)

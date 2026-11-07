@@ -22,8 +22,7 @@ const TEST_SAVE := "user://audio_settings_test.json"
 ## Every scene the campaign can be in. All of them are the game, so all of them
 ## carry the soundtrack; only the title is the menu theme.
 const GAME_SCENES := [
-	"res://scenes/warband_world.tscn", "res://scenes/cage_escape.tscn",
-	"res://scenes/town_hub.tscn",
+	"res://scenes/warband_world.tscn", "res://scenes/town_hub.tscn",
 ]
 
 var checks := 0

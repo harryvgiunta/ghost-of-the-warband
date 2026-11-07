@@ -3,10 +3,11 @@
 A Godot 4 third-person possession campaign. There is no main character: you are
 a floating soul that enters any living mercenary of a warband, and every
 mercenary is a real body with identical base stats - gear is the only thing that
-makes one different from another. One world holds the cages you wake in, a
-kilometre and a third of trail, and the walled town of Hearthstead; a warband
+makes one different from another. One world holds the walled town of
+Hearthstead, a kilometre and a third of trail north of it, and the deep wood where
+the road ends; a warband
 carries a shared **stash**, a shared **purse** and a **Cruor** ledger, and one
-save remembers the roster, the gear, the essence, the orders and the last
+save remembers the roster, the gear, the essence and the last
 checkpoint. It plays solo, or **hosted over Tailscale** for up to four souls who
 all share the host's warband.
 
@@ -24,26 +25,27 @@ difference - and the warband is the thing that survives a battle.
   where its last autosave left it; **NEW CAMPAIGN** asks for a name and makes a
   new folder, so starting a game can never write over a saved one. The ranger's
   kit is untouched.
-- **Start here, and play it:** the title's **GHOST OF THE WARBAND** puts you
-  inside the **first of five** prisoners, shut in a cage. The opening teaches by
-  being played, not by being read:
-  * **take the ironwood shiv through the bars** (**K**) - it lies on the dirt
-    right outside your cell door, with two lit hand torches on the ground beside
-    it - and **cut your own latch** with it (**G**); bare hands open nothing;
-  * **get your bearings**: the fire, the shelters, and the four other cages
-    scattered through the wood;
-  * the objective arrives - **free your warband** - and the first fight teaches
-    itself in one-line tips under the crosshair, never a paused page: the three
-    cuts (**LMB** diagonal, **WHEEL UP** stab, **WHEEL DOWN** overhead) are named
-    as the armed body steps out and wake the pair, and the guard (**hold RMB**)
-    comes on the second watcher's raised club. The pair are two of the wood's
-    creatures - a **hollow warden** and an **ossuary stalker** - and they sleep
-    until you are armed and out of the cage, and are the softest bodies in the
-    game: a 1.3 s telegraph, half their blow, no guard.
-  * Then **one latch per press** at each of the four remaining cages (a blade in
-    hand and `G` at the bars; bare hands are refused, your own cage included).
-    The last latch puts five bodies on their feet, turns them into squad AI that
-    arms itself off the ground, and the objective turns over: **run to the town**.
+- **Start here, and play it:** the title's **GHOST OF THE WARBAND** puts you in
+  **Hearthstead** - the walled square, the fire, five keepers behind their
+  counters - with three bodies on the field and nothing asking anything of you.
+  There is **no cage and no lesson** any more: the town is the seat, and the two
+  ways out of it are the two things to do.
+  * **The road** runs 1,374 m of wood north out of the square: a caged line on it
+    (four soldiers, a blade and `G` at the bars, a `FREE HIM` arrow on the nearest
+    shut one), cultists, two packs of briar wolves and three warcamps of wardens.
+    At its far end, in a ragged pocket nobody holds, **the Horned Thing** stands on
+    his patch with two keepers beside him - the Hollow's goat, in the open air,
+    carrying the floor's prize. **He is optional**, and killing him is the one
+    thing in the wood that fights back properly.
+  * **The delve** is under the square: make up a party, pack what it carries, pick
+    how hard the Hollow is, and climb out with what you found - or lose it.
+  * **The arena** is east of the fire: three plates (**EASY**, **MEDIUM**,
+    **HARD**) and one press put your whole field in a stone ring against a
+    **mirrored warband** - one of the grander bits of theft in the game, because
+    the foes are the same bodies, the same ten slots and the same skills, dressed
+    by tier (makeshift steel and no anoint; leather and mail with one; plate,
+    greatswords, a longbow and a weld on every body) and driven by the same honest
+    rules a squadmate is. Nothing is kept but the purse.
 - **Controls:** **Esc → KEYS** (in the quick menu, the warband menu and the
   title's settings) opens the CONTROLS sheet: the keyboard itself, drawn in the
   ledger's carved bone keycaps, every bound key washed in blood, and an arrow from
@@ -202,14 +204,14 @@ Every launch opens the **main menu**: Ghost of the Warband, four doors.
 
 | Menu action | Result |
 | --- | --- |
-| **New Campaign** | A fresh warband and a fresh purse, starting in the five cages of the camp with the shiv in the dirt. |
+| **New Campaign** | A fresh warband and a fresh purse, starting in Hearthstead with the recruiter's board and the road out. |
 | **Resume Campaign** | Opens your save where its last autosave stands: the trail checkpoint or Hearthstead. Disabled until a warband save exists. |
 | **Join Game** | Name, host address and UDP port, reread from the cache every time the form opens. You connect first and play **from the host's warband** - you need no save of your own. |
 | **Host Game** | Name and the port you open. **New Game** starts a fresh campaign; **From Checkpoint** opens the save on its bookmark (or in Hearthstead when it has none). The line under the buttons says what that checkpoint would open. |
 
-**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash, purse and orders: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Gear is the host's too - a guest's click on the paperdoll or press at the altar travels as a request and the host's books answer it (the rite draws on the party's one pool of ichor and the host throws the die) - while buying, hiring and the keepers stay the host's alone. A guest's own TAB, revive, combat and loot verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband and a corpse or a drop the guest searches empties on every screen.
+**Hosting shares one warband.** Everyone who joins plays from the host's roster, stash and purse: the guest is sent the host's campaign, keeps its own save untouched for as long as the session lasts, and gets it back when the session ends. Gear is the host's too - a guest's click on the paperdoll or press at the altar travels as a request and the host's books answer it (the rite draws on the party's one pool of ichor and the host throws the die) - while buying, hiring and the keepers stay the host's alone. A guest's own TAB, revive, combat and loot verbs are resolved on the host's field, so a swap or a revive still lands on the shared warband and a corpse or a drop the guest searches empties on every screen.
 
-Bodies are the shared pool, and every soul hops freely between the free ones (`[` and `]`, or `F1..F8`). The only way a soul loses a body is dying in it. With one body left standing the soul already inside keeps it, and everyone else watches that body in free look - the body panel names who is inside - and takes the next body that comes free, in the order the souls lost theirs.
+Bodies are the shared pool, and every soul hops freely between the free ones (`[` and `]`, or `F1..F3`). The only way a soul loses a body is dying in it. With one body left standing the soul already inside keeps it, and everyone else watches that body in free look - the body panel names who is inside - and takes the next body that comes free, in the order the souls lost theirs.
 
 There is no out-of-game depot. **Hearthstead** is the staging town inside the open PvE world, and every service is a real object you walk up to and press **G** on:
 
@@ -221,7 +223,7 @@ There is no out-of-game depot. **Hearthstead** is the staging town inside the op
 | **Town Stash** | Open market awning | The warband's shared, uncapped storage |
 | **Hearthstead Campfire** | Town square | Restores health and stamina |
 
-The warband starts in the cages with nothing worth the name: an old shirt, tight shorts, bare hands and a shiv in the dirt. Every piece a run carries came off a corpse, out of the shared stash or off a keeper's counter; the tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**, and selling pays 60% of the purchase price.
+The warband starts in Hearthstead with nothing worth the name: an old shirt, tight shorts and a makeshift club or shiv off the ground. Every piece a run carries came off a corpse, out of the shared stash or off a keeper's counter; the tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**, and selling pays 60% of the purchase price.
 
 Press **P** anywhere in the world to open the **paperdoll**: the ten worn slots, a live ranger wearing them, the trinket rail and the kit's derived attack, guard, life and stamina summary over the **shared stash** - the warband's one pool of unequipped gear, uncapped and sorted by value; a piece a body is wearing shows on that body's slots, never in the list. Click a worn slot to take a piece off into the stash; click a stash piece to wear it (handing gear between mercenaries is those two clicks); **right-click a stash row to hold that item back from the band's automatic arming** (the row says `HELD`; a left click still wears it by hand). Drag between slots to move or swap. The two **RE-EQUIP** buttons under the ranger rebuild a kit out of that same pool instead of you picking it piece by piece: one for the body on the stage, one for the whole band (see [Armor](#armor-four-sets-five-slots)). The **QUARTERMASTER**, **SMITH** and **STORE** keepers open their own counters over the same stash, and a purchase arms the band from the pool as it lands - every empty slot, and every slot still in the naked starting set, takes the dearest legal spare - so buying a counter's worth of kit dresses the whole warband. The corpse screen opens the dead the same way.
 
@@ -326,7 +328,7 @@ the host. Hosting and joining both start on the title screen:
 | **Join Game** | Name, host address and UDP port, reread from the cache every time the form opens. You connect while still on the title and the world opens when the host answers. |
 
 **One warband, the host's.** A guest is sent the host's campaign and plays that
-roster, stash, purse and orders; its own save is untouched for the session and
+roster, stash and purse; its own save is untouched for the session and
 is handed back when the session ends. Only the host's books change: a guest's
 gear click, its press at the altar, its TAB, revive, combat and loot presses all
 travel as requests and are resolved on the host's field - the altar spends the
@@ -668,10 +670,11 @@ Combat is scored from the recordings, not from placeholders: a swing whooshes (t
 1,374 m trail through the wood, and the walled town of Hearthstead. Walking is the
 only way between them - nothing in the world changes scene.
 
-**The cages** are where a run starts: five prisoners in five cages, one shiv in
-the dirt outside your own door, and watchers asleep in the trees. Cut a latch with
-a blade in hand and **G**, fight the pair that wakes, then free the other four -
-each freed body arms itself off the ground and joins the squad.
+**Hearthstead** is where a run starts, and **the road** is what it starts with:
+1,374 m of wood between the square and the deep pocket at its far end, with the
+caged line, the cultists, the wolves and the warcamps on it. Cut a cage's latch
+with a blade in hand and **G** and its soldier joins the roll - or waits in the
+town's reserve when the field is full.
 
 **The trail** is the wood the squad walks: torch pairs every eighteen metres,
 briar walls, the cinder cult's watcher camps and the briar wolves that hunt off
@@ -679,12 +682,14 @@ the lane. Three small checkpoints mark how far the warband got.
 
 **Hearthstead** is the staging town inside the same walk: three keeper counters
 (**Smith Brann**, **Storekeeper Orla**, **Quartermaster Vey**), the market stash
-chest, the **quartermaster's orders**, the recruiter's board, the wardens' altar
-where an anointed piece wakes into a skill, and the fire.
+chest, the recruiter's board, the wardens' altar where an anointed piece wakes
+into a skill, and the fire.
 
-**The orders** are the campaign's own goal track (`scripts/warband/quest_log.gd`):
-one of five goal shapes (`KILL`, `RESCUE`, `COLLECT`, `APPLY`, `REACH`), offered,
-accepted and turned in at a keeper, with the chain in `next`.
+**There are no quests.** No log, no board, no keeper with an order, no arrow over
+a head: every counter is a `G` and a panel, and the campaign is the places -
+the camp, the trail, the cages on it, the warcamps, the Hollow - and what is
+standing in them. The four caged soldiers still join the band when their latches
+are cut; nothing counts it.
 
 **The wood's creatures.** The campaign's hostiles are the **hollow warden**,
 **ossuary stalker** and **gallowsroot** on the warband's own skeleton (one AI and

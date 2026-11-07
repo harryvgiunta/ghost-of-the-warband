@@ -1,22 +1,21 @@
 extends SceneTree
 ## Auto save / checkpoints: the campaign remembers how far it got.
 ##
-## The warband save is now also a bookmark. The camp's six watchers down and the
-## squad on the road writes `trail_start`; the town square writes `town`. The
+## The warband save is now also a bookmark. Standing anywhere out on the road
+## writes `trail_start` at the soul's own feet; the town square writes `town`. The
 ## bookmark rides in the same file as the roster, stash and essence, so a load is
 ## one truthful picture, and it must survive a save/load round trip, reject a
 ## hand-edited record rather than half-read it, and never appear in a file written
 ## before checkpoints existed.
 ##
-## This drives the real world twice: once opening on a trail bookmark (the cages
-## hang open, nobody is clamped, no watcher is fielded, the squad walks with the
-## soul and the bookmark is not rewritten), then walks the soul into the square so
-## the town bookmark replaces it, then opens a second world on that town bookmark.
-## The restore door is exercised separately: a downed body wakes, the dead stay
-## dead, and a checkpoint with no living body refuses to be loaded at all.
+## This drives the real world twice: once opening on a trail bookmark (the party
+## stands in a ring on the bookmark with the squad walking and the bookmark itself
+## not rewritten), then walks the soul into the square so the town bookmark
+## replaces it, then opens a second world on that town bookmark. The restore door
+## is exercised separately: a downed body wakes, the dead stay dead, and a
+## checkpoint with no living body refuses to be loaded at all.
 
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
-const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
 const WorldScene := "res://scenes/warband_world.tscn"
 const TEST_SAVE := "user://checkpoint_player.json"
 const WARBAND_SAVE := "user://checkpoint_warband.json"
@@ -76,7 +75,7 @@ func run() -> void:
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
 	flow.active = false
-	flow.world_start = "camp"
+	flow.world_start = "town"
 
 	check_persistence()
 	check_sanitising()
@@ -85,7 +84,7 @@ func run() -> void:
 	check_wipe_door()
 	await check_retry_reload()
 	await check_title_door()
-	await check_opening_into_town()
+	await check_out_of_the_square_and_back()
 	_finish()
 
 func _finish() -> void:
@@ -94,7 +93,7 @@ func _finish() -> void:
 		game.queue_free()
 	await process_frame
 	flow.active = false
-	flow.world_start = "camp"
+	flow.world_start = "town"
 	for path in [TEST_SAVE, WARBAND_SAVE, OLD_SAVE, BAD_SAVE]:
 		_remove(path)
 	_remove_tree(SLOT_ROOT)
@@ -115,7 +114,7 @@ func _seed_warband() -> void:
 func check_persistence() -> void:
 	_seed_warband()
 	check(not warband.has_checkpoint(), "a fresh warband has no checkpoint")
-	warband.save_checkpoint("trail_start", "trail", Vector3(4.5, 0.25, -90.0), "THE CAMP IS BEHIND YOU")
+	warband.save_checkpoint("trail_start", "trail", Vector3(4.5, 0.25, -90.0), "ON THE ROAD")
 	var file := FileAccess.open(WARBAND_SAVE, FileAccess.READ)
 	check(file != null, "the checkpoint writes a save file")
 	if file == null:
@@ -132,7 +131,7 @@ func check_persistence() -> void:
 	check(stored.get("area", "") == "trail", "the bookmark is on the trail")
 	check(warband.checkpoint_position().distance_to(Vector3(4.5, 0.25, -90.0)) < 0.01,
 		"the position survives the round trip")
-	check(warband.checkpoint_label() == "THE CAMP IS BEHIND YOU", "the label survives too")
+	check(warband.checkpoint_label() == "ON THE ROAD", "the label survives too")
 
 	# Mutating the warband after the bookmark must not change the bookmark, and a
 	# reload must bring back the state the file holds.
@@ -162,8 +161,8 @@ func check_sanitising() -> void:
 	check(warband.sanitise_checkpoint({}).is_empty(), "no record means no bookmark")
 	check(warband.sanitise_checkpoint({"id": "", "area": "trail", "position": [0, 0, 0]}).is_empty(),
 		"a nameless bookmark is refused")
-	check(warband.sanitise_checkpoint({"id": "x", "area": "camp", "position": [0, 0, 0]}).is_empty(),
-		"the camp is never a bookmark")
+	check(warband.sanitise_checkpoint({"id": "x", "area": "nowhere", "position": [0, 0, 0]}).is_empty(),
+		"an area the campaign keeps no bookmark for is refused")
 	check(warband.sanitise_checkpoint({"id": "x", "area": "trail", "position": [0, 0]}).is_empty(),
 		"a two-value position is refused")
 	check(warband.sanitise_checkpoint({"id": "x", "area": "trail", "position": ["a", 0, 0]}).is_empty(),
@@ -198,7 +197,7 @@ func check_restore() -> void:
 	warband.roster.set_state(int(ids[1]), Contracts.HealthState.DEAD)
 	warband.save_state()
 	var credits: int = int(state.credits)
-	flow.world_start = "camp"
+	flow.world_start = "town"
 	check(flow.restore_checkpoint(), "the restore door opens on a real bookmark")
 	check(flow.world_start == "checkpoint", "and names the checkpoint as the world's start")
 	check(warband.roster.state_of(int(ids[0])) == Contracts.HealthState.ALIVE,
@@ -216,9 +215,9 @@ func check_restore() -> void:
 	for merc_id in warband.roster.ids():
 		warband.roster.set_state(int(merc_id), Contracts.HealthState.DEAD)
 	warband.save_checkpoint("town", "town", Vector3.ZERO, "EMPTY")
-	flow.world_start = "camp"
+	flow.world_start = "town"
 	check(not flow.restore_checkpoint(), "a bookmark whose whole squad is dead refuses to load")
-	check(flow.world_start == "camp", "and leaves the start where it was")
+	check(flow.world_start == "town", "and leaves the start where it was")
 
 # --- the world opening on a bookmark ---------------------------------------
 
@@ -232,7 +231,7 @@ func check_world_resume() -> void:
 	# Two bodies on their feet, one dead: a resume fields the two.
 	var ids: Array = warband.roster.ids()
 	warband.roster.set_state(int(ids[2]), Contracts.HealthState.DEAD)
-	warband.save_checkpoint("trail_start", "trail", Vector3(6.0, 0.0, -90.0), "THE CAMP IS BEHIND YOU")
+	warband.save_checkpoint("trail_start", "trail", Vector3(6.0, 0.0, -90.0), "ON THE ROAD")
 	flow.world_start = "checkpoint"
 	await _build_world()
 	if game == null or not game.has_method("stats"):
@@ -240,10 +239,9 @@ func check_world_resume() -> void:
 		return
 	check(game.start_area == "checkpoint", "the world opens on the bookmark (%s)" % game.start_area)
 	check(game.bodies.size() == 2, "the bookmark's standing bodies take the field (%d)" % game.bodies.size())
-	check(game.camp.sequencer == null, "no tutorial runs on a resumed trail")
-	check(not game.camp.lesson_running(), "and the camp lesson is not running")
-	check(game.camp.guards.is_empty(), "no watcher is fielded past the cages (%d)" % game.camp.guards.size())
-	check(game.camp.cages_open(), "the cages hang open")
+	check(game.wood != null and game.wood.master_alive(),
+		"the wood's master stands whether or not the party walks in")
+	check(game.wood.get_node_or_null("Cage1") == null, "and no cage stands there to be cut")
 	check(game.squad.following, "the squad walks with the soul")
 	var anchor: Vector3 = warband.checkpoint_position()
 	for body in game.bodies:
@@ -278,7 +276,7 @@ func check_world_resume() -> void:
 		return
 	check(game.start_area == "checkpoint", "the town bookmark is a checkpoint start (%s)" % game.start_area)
 	check(game.bodies.size() == 2, "the town resume fields the standing bodies (%d)" % game.bodies.size())
-	check(game.camp.sequencer == null, "and never restarts the lesson")
+	check(game.wood.master_alive(), "and the wood's master still stands")
 	for body in game.bodies:
 		check(is_instance_valid(body) and game.town.in_square(body),
 			"a resumed body stands in the square")
@@ -353,7 +351,7 @@ func check_retry_reload() -> void:
 	await process_frame
 	game = null
 	_seed_warband()
-	warband.save_checkpoint("trail_start", "trail", Vector3(6.0, 0.0, -90.0), "THE CAMP IS BEHIND YOU")
+	warband.save_checkpoint("trail_start", "trail", Vector3(6.0, 0.0, -90.0), "ON THE ROAD")
 	flow.active = true
 	check(flow.retry_checkpoint(), "the retry door restores the bookmark")
 	var resumed = await _wait_world(8.0)
@@ -361,7 +359,8 @@ func check_retry_reload() -> void:
 	if resumed != null:
 		check(resumed.start_area == "checkpoint", "on the checkpoint start")
 		check(resumed.bodies.size() == 3, "with the bookmark's bodies (%d)" % resumed.bodies.size())
-		check(resumed.camp.sequencer == null, "and no lesson")
+		check(resumed.start_area == "checkpoint" and not paused,
+			"with no lesson to read")
 		check(resumed.controller.active_body(1) != null, "the soul is seated")
 	flow.active = false
 	if current_scene != null:
@@ -418,66 +417,63 @@ func check_title_door() -> void:
 	await process_frame
 
 
-# --- the opening walked into the town --------------------------------------
+# --- out of the square and back --------------------------------------------
 
-## A session that played the opening keeps its camp cleared for good. That used to
-## be enough to write `trail_start` again on the frame after the square wrote
-## `town`, and `town` again on the frame after that: the status line flipped between
-## the two bookmarks and the save hit the disk every frame. The bookmark only moves
-## forward - and the trail's objective is a countdown to the square, gone inside it.
-func check_opening_into_town() -> void:
+## The bookmark only moves forward: `CHECKPOINT_ORDER` is ["trail_start", "town"],
+## so a body that steps out of the square writes the road at its own feet, the
+## square writes the town, and walking back out never pulls the line back to the
+## road. A body standing in the square is never told to reach it, and the walk in
+## counts its metres down, never back up.
+func check_out_of_the_square_and_back() -> void:
 	warband.reset_state()
 	warband.clear_checkpoint()
-	flow.world_start = "camp"
+	flow.world_start = "town"
 	await _build_world()
-	if game == null or not game.has_method("stats") or game.camp.sequencer == null:
-		check(false, "the world opened on the cages with the lesson running")
+	if game == null or not game.has_method("stats"):
+		check(false, "the world opened at the town")
 		return
-	# The opening's end, as the sequencer books it: the leaving happened and the
-	# six watchers it called out are down.
-	var sequencer = game.camp.sequencer
-	sequencer._state = SequencerScript.State.ESCAPING
-	sequencer._guards_down = SequencerScript.GUARD_COUNT
-	check(game.camp.tutorial_cleared(), "the opening reads as cleared")
-	game._check_checkpoints()
-	check(warband.checkpoint_id() == "trail_start",
-		"the cleared opening writes the trail bookmark (%s)" % warband.checkpoint_id())
 	var soul = game.controller.focus_body()
 	check(soul != null, "the party has a body to walk")
 	if soul == null:
 		return
-	# Several frames standing in the square, the camp still cleared behind it.
+	var centre: Vector3 = game.town.global_position
+	var gate: Vector3 = game.trail.town_gate()
+	# A fresh campaign opens in the square, so the world writes the town bookmark
+	# on its own first frame: the book starts on the town, not empty.
+	check(warband.checkpoint_id() == "town",
+		"opening in the square writes the town bookmark (%s)" % warband.checkpoint_id())
+	# Forget it, the way an old file without a bookmark is: the road is what this
+	# section is about, and `CHECKPOINT_ORDER` would otherwise never let the trail
+	# be written after the town.
+	warband.clear_checkpoint()
+	# Out on the road: the bookmark follows the soul's own feet, not the gate.
+	var outside: Vector3 = gate + (gate - centre).normalized() * 24.0
+	soul.global_position = Vector3(outside.x, soul.global_position.y, outside.z)
+	await create_timer(0.2).timeout
+	game._check_checkpoints()
+	check(warband.checkpoint_id() == "trail_start",
+		"the road writes the trail bookmark (%s)" % warband.checkpoint_id())
+	check(warband.checkpoint_area() == "trail", "and says so")
+	var feet: Vector3 = warband.checkpoint_position()
+	check(Vector2(feet.x - soul.global_position.x, feet.z - soul.global_position.z).length() < 1.5,
+		"the bookmark stands at the soul's own feet (%.1f, %.1f vs %.1f, %.1f)"
+		% [feet.x, feet.z, soul.global_position.x, soul.global_position.z])
+	# In the square: the town replaces it.
+	soul.global_position = centre + Vector3(0.0, 1.0, 0.0)
+	await create_timer(0.2).timeout
+	game._check_checkpoints()
+	check(warband.checkpoint_id() == "town",
+		"the square writes the town bookmark (%s)" % warband.checkpoint_id())
+	# Several frames standing in the square: the bookmark stays put.
 	for frame in 4:
-		soul.global_position = game.town.global_position + Vector3(0.0, 1.0, 0.0)
+		soul.global_position = centre + Vector3(0.0, 1.0, 0.0)
 		game._check_checkpoints()
 		check(warband.checkpoint_id() == "town",
 			"frame %d in the square keeps the town bookmark (%s)" % [frame, warband.checkpoint_id()])
 	check(game.hud.status_line().contains("HEARTHSTEAD"),
 		"the status line stays on the town (%s)" % game.hud.status_line())
-	check(game._trail_objective_line(soul).is_empty(),
-		"a body in the square is never told to reach the town (%s)" % game._trail_objective_line(soul))
-	# Walking back out does not pull the bookmark back to the trail either.
-	soul.global_position = game.trail.town_gate() + Vector3(0.0, 1.0, 0.0)
+	# Walking back out does not pull the bookmark back to the road either.
+	soul.global_position = gate + Vector3(0.0, 1.0, 0.0)
 	game._check_checkpoints()
 	check(warband.checkpoint_id() == "town",
 		"walking back out keeps the town bookmark (%s)" % warband.checkpoint_id())
-	# The walk in, from outside the gate to the fire: the objective's figure only
-	# ever falls, and the line is gone once the square is reached.
-	var centre: Vector3 = game.town.global_position
-	var gate: Vector3 = game.trail.town_gate()
-	var outside: Vector3 = gate + (gate - centre).normalized() * 24.0
-	var previous := INF
-	var falling := true
-	var gone := false
-	for step in 13:
-		var at: Vector3 = outside.lerp(centre, float(step) / 12.0)
-		soul.global_position = Vector3(at.x, soul.global_position.y, at.z)
-		var line: String = game._trail_objective_line(soul)
-		if line.is_empty():
-			gone = game.town.in_square(soul)
-			continue
-		var metres := float(line.get_slice("\u00b7", 1).to_int())
-		falling = falling and metres <= previous and not gone
-		previous = metres
-	check(falling, "the walk to the town counts its metres down, never back up")
-	check(gone, "and the line is gone in the square")

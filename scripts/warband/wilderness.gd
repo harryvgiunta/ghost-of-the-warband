@@ -1,25 +1,38 @@
 class_name WarbandWilderness
 extends Node
-## The briar wolves of the way out: the band the warband meets between the camp's
-## mouth and the first stretch of the trail.
+## The briar wolves of the way out: six small packs holding the road from the
+## camp's mouth to within a couple of hundred metres of the town gate.
 ##
-## The camp road is the only place in the campaign where a body can learn to
-## fight without a tutorial card in the way, so the wood is not empty, but the
-## road itself is: eight briar wolves hunt the widened forest in two deep packs of
-## four - one beside the corridor `cage_escape.gd` cuts through the trees at 38-50
-## m, one off the lane far down at 688-712 m. Their posts are derived, never
-## rolled - the corridor from `GATE_POINT` for `CAMP_TO_ROAD_METRES`, then the
-## lane the world places at `trail_offset()` - so two visits meet the same packs
-## standing in the same places, and no wolf is ever inside the camp pocket, the
-## town square, or a body's sight of the route it is walking.
+## The road is the only place in the campaign where a body can learn to fight
+## without a tutorial card in the way, and a road that is empty is a walk while a
+## road held by two great packs is a wall. The band is therefore a grind: the
+## corridor pack of two beside the way out at 62-72 m, then five packs of three, a
+## pack every ~190 m of lane, each standing 19-26 m off the centre line - outside
+## the trunk rows a body can walk into, outside the walked band, and inside the
+## reach of a squad that steps off the road to meet it. Their posts are derived,
+## never rolled - the lane's own polyline for the lane packs, the corridor's
+## straight cut for the first - so two visits meet the same packs standing in the
+## same places, and no wolf is ever inside the camp pocket, the town square, or a
+## warden camp's patch.
 ##
 ## "Level 1" is not a stat the mobs carry: `enemy.gd` has one authored wolf, kind
 ## 0 at 38 health, and that base body is what a first road should hold. The band
 ## is spawned unbuffed, aimed at the warband's own bodies and wired to the world's
 ## one kill/attack handler, exactly like the camp's watchers.
 ##
+## A pack that is cut down comes back. The clock is one per pack, never one per
+## wolf: the pack's first death arms it, and when `RESPAWN_SECONDS` have run every
+## wolf of that pack which is not still on its feet is put back on its own post.
+## A refill waits while any party body stands within `RESPAWN_QUIET` metres of the
+## pack's posts, so a squad walking the road never has bodies appear inside its own
+## sight, and the wood refills behind a party that has moved on. A wolf that
+## survived the clock is left exactly where it stands - a fight is never teleported
+## - and a pack with nothing dead has no clock, so nothing can spawn twice. A body
+## that comes back is asleep on its post exactly like a fresh one: it wakes when a
+## party comes near.
+##
 ## The wilderness owns only what is different from the rest of the frontier: the
-## posts, the 0.5 s target refresh (the warband changes what it is driving, and a
+## posts, the 0.5 s refill/aim tick (the warband changes what it is driving, and a
 ## body seated later must be huntable) and the `MobCuller` that keeps a wolf the
 ## squad has walked past from costing a tick behind the fog.
 
@@ -27,58 +40,68 @@ const EnemyScript = preload("res://scripts/enemy.gd")
 const MobCullerScript = preload("res://scripts/mob_culler.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
-const CampScript = preload("res://scripts/warband/cage_escape.gd")
+const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
 ## Cleared ground: a wolf closer than this to the camp's mouth would be standing
 ## on the pocket's own edge, and the opening fight belongs to the camp's watchers.
 const MOUTH_CLEARANCE := 25.0
-## The deep-wood packs, and the whole band. There is no wolf on the lane or the
-## corridor: the trail belongs to the cult and the archer ambushes, and a wolf
-## pack is a thing a body finds by leaving the road. Two packs of four live well
-## out in the widened wood, one either side of the route, their members 6-16 m
-## apart inside one `PACK_RADIUS` so `assign_all` hands each pack one territory.
-## `along` is metres from the camp's mouth measured on the lane itself, and
-## `side` is metres off the centre line. Every post is past `DEEP_WOOD_INNER` and
-## beyond the wolf's own 23 m sight of the lane (28-50 m out), so a body on the
-## trail is never pulled into a pack, and clear of the two solid tree rows (the
-## outermost solid trunk reaches ~10.5 m with its jitter), so no wolf spawns in a
-## trunk collider.
-const DEEP_WOOD_INNER := 15.0
+## Where the band stands, pack by pack. A `corridor` pack is posted `along` metres
+## from the camp's mouth and `side` metres off the corridor's straight line; a lane
+## pack is posted by `fraction` of the lane's measured length - 0.0 the first
+## waypoint past the corridor, 1.0 the town gate - and metres off the centre line.
+## The fractions sit between the warcamps' own (`watcher_warren.gd`), so a squad
+## standing on the lane at a camp never has a wolf pack in reach at the same time.
 const PACKS := [
 	# The first pack is off the corridor beside the trail-start checkpoint, deep
-	# enough (38-50 m) that a body on the road never sees it, near enough that a
-	# squad that leaves the path finds it - and that a co-op guest at the
+	# enough that a body on the road never sees it (38-45 m out), near enough that
+	# a squad that leaves the path finds it - and that a co-op guest at the
 	# checkpoint has one in its 70 m replication band.
-	{"name": "BriarPackA", "corridor": true, "stations": [
-		[62.0, -38.0], [68.0, -46.0], [74.0, -42.0], [80.0, -50.0],
-	]},
-	{"name": "BriarPackB", "stations": [
-		[688.0, 30.0], [696.0, 36.0], [704.0, 43.0], [712.0, 50.0],
-	]},
+	{"name": "BriarPackA", "corridor": true, "stations": [[62.0, -38.0], [72.0, -45.0]]},
+	{"name": "BriarPackB", "stations": [[0.130, 19.0], [0.134, 26.0], [0.140, 21.0]]},
+	{"name": "BriarPackC", "stations": [[0.270, -22.0], [0.274, -27.0], [0.280, -20.0]]},
+	{"name": "BriarPackD", "stations": [[0.410, 20.0], [0.414, 26.0], [0.420, 22.0]]},
+	{"name": "BriarPackE", "stations": [[0.550, -21.0], [0.554, -26.0], [0.560, -19.0]]},
+	{"name": "BriarPackF", "stations": [[0.690, 22.0], [0.694, 26.0], [0.700, 20.0]]},
 ]
-## Both deep packs, for the tests that count the whole band.
-const PACK_COUNT := 8
+## Every wolf the band fields: the corridor pack's two and five lane packs of
+## three, by the table above. The tests that count the whole band read it.
+const PACK_COUNT := 17
+## The nearest a lane pack stands to the centre line. The two solid rows of trunk
+## reach ~11 m into the wood with their jitter, `RunForestScript.CLEAR_HALF`
+## (1.55 m) is the walked band, and this is the floor under both: no wolf spawns
+## in a body's way or inside a collider.
+const LANE_LATERAL_MIN := 15.0
 ## The same 12 cm the frontier lifts every mob spawn by, so a body dropped on the
 ## analytic ground starts just clear of it instead of inside the collider.
 const SPAWN_LIFT := 0.12
 ## The warband can seat, down or hand over a body at any moment; half a second is
 ## fast enough that a wolf never hunts a body that has left, and cheap enough that
-## the frontier's hosts do not notice it.
+## the frontier's hosts do not notice the tick.
 const REFRESH_SECONDS := 0.5
-## `main.gd`'s pack radius for every wilderness band. The corridor posts are
-## eighteen to twenty-six metres apart, so they keep their own patches; each deep
-## pack's posts sit inside this radius of one another, so `assign_all` gives that
-## pack one shared territory to roam.
+## How long a cut pack stays cut. A party that farms the wood meets the same packs
+## again instead of emptying the road once and walking it empty forever.
+const RESPAWN_SECONDS := 180.0
+## A refill holds while any party body stands this close to the pack's posts: a
+## squad on the road must never have bodies appear inside its own sight, and a
+## wolf's sight is 23 m, so this is the whole of the road plus the verge.
+const RESPAWN_QUIET := 45.0
+## `main.gd`'s pack radius for every wilderness band. A pack's posts sit inside it
+## of one another and the packs are hundreds of metres apart, so `assign_all`
+## gives each pack one shared territory to roam and never merges two.
 const PACK_RADIUS := 14.0
 
 var _world: Node3D
+## Every wolf this node holds, in pack order.
 var _wolves: Array = []
-## The deep-wood packs, one array of wolves per entry in `PACKS`, in spawn order.
+## One entry per `PACKS` row: `{posts, names, mobs, respawn_at}`.
 var _packs: Array = []
 var _culler
 var _elapsed := 0.0
+## Seconds this node has run: the refill clocks are absolute on it, so a clock
+## survives a frame budget hitch the way a wall clock does.
+var _clock := 0.0
 
 
 ## Spawn the band against `world`, whose own contract is the frontier's: `bodies`,
@@ -87,35 +110,42 @@ var _elapsed := 0.0
 ##
 ## The node parents itself under the world if the caller has not done it yet:
 ## the wolves have to be in the tree for the `wild_mobs` group and for their
-## global positions, and a setup call that silently produced seven orphans would
-## be worse than a little adoption.
+## global positions, and a setup call that silently produced a band of orphans
+## would be worse than a little adoption.
 func setup(world: Node3D) -> Array:
 	if not is_instance_valid(world):
 		push_error("WarbandWilderness.setup() needs a world")
 		return []
 	_world = world
 	_elapsed = 0.0
+	_clock = 0.0
 	if not is_inside_tree() and world.is_inside_tree():
 		world.add_child(self)
 	_ensure_culler()
 	_clear_wolves()
-	# The deep wood has its own bands: each pack's posts are close enough to one
-	# another to merge under `PACK_RADIUS`, and far enough from the lane that a
-	# body has to leave the trail to meet one.
-	_packs.clear()
-	for pack in PACKS:
-		var members: Array = []
-		for station in pack["stations"] as Array:
-			# A corridor pack is measured from the camp's mouth like the old band;
-			# the lane packs follow the lane's own polyline.
-			var point := _post(float(station[0]), float(station[1])) \
-				if bool(pack.get("corridor", false)) \
+	var numbered := 0
+	for spec in PACKS:
+		var posts: Array[Vector3] = []
+		var names: Array[String] = []
+		for station in spec["stations"] as Array:
+			# A corridor pack is measured from the camp's mouth; the lane packs
+			# follow the lane's own polyline by fraction of its length.
+			var point := _corridor_post(float(station[0]), float(station[1])) \
+				if bool(spec.get("corridor", false)) \
 				else _lane_post(float(station[0]), float(station[1]))
-			members.append(_spawn_wolf(point))
-		_packs.append(members)
+			posts.append(point)
+			numbered += 1
+			names.append("BriarWolf%d" % numbered)
+		var members: Array = []
+		for index in posts.size():
+			members.append(_spawn_wolf(posts[index], names[index]))
+		_packs.append({
+			"posts": posts, "names": names,
+			"mobs": members, "respawn_at": -1.0,
+		})
 	# Every wilderness body owns a patch; each pack's members spawned close
 	# enough to share one frame of the wood, exactly as the frontier's own packs
-	# do. One call, so the two packs stay two territories.
+	# do. One call, so the packs stay separate territories.
 	MobWander.assign_all(_wolves, PACK_RADIUS)
 	_refresh()
 	return _wolves.duplicate()
@@ -123,6 +153,7 @@ func setup(world: Node3D) -> Array:
 
 func _process(delta: float) -> void:
 	Perf.begin("wild.tick")
+	_clock += delta
 	_tick_refresh(delta)
 	Perf.end()
 
@@ -134,18 +165,40 @@ func _tick_refresh(delta: float) -> void:
 	if _elapsed < REFRESH_SECONDS:
 		return
 	_elapsed = fmod(_elapsed, REFRESH_SECONDS)
+	_refill()
 	_refresh()
 
 
-## The wolves this node holds, in spawn order.
+## The wolves this node holds, in pack order.
 func wolves() -> Array:
 	return _wolves.duplicate()
 
 
-## The deep-wood packs, one array of wolves per `PACKS` entry. The corridor band
-## is not one of them: those posts are solo, exactly as they were.
+## The band's packs, one array of wolves per `PACKS` entry, in spawn order.
 func packs() -> Array:
-	return _packs.duplicate()
+	var out: Array = []
+	for pack in _packs:
+		out.append((pack["mobs"] as Array).duplicate())
+	return out
+
+
+## Seconds left on pack `index`'s refill clock, or -1.0 while the pack has
+## nothing dead. The packs refill on their own; this is what the regression and
+## the HUD read.
+func pack_refill_in(index: int) -> float:
+	if index < 0 or index >= _packs.size():
+		return -1.0
+	var at := float(_packs[index].get("respawn_at", -1.0))
+	return -1.0 if at < 0.0 else maxf(at - _clock, 0.0)
+
+
+## Put pack `index`'s fallen back on their posts now, on the same path the clock
+## takes, and return how many bodies came back. The three minutes are the clock's
+## business; a scripted encounter may refill a pack by hand.
+func refill_pack(index: int) -> int:
+	if index < 0 or index >= _packs.size():
+		return 0
+	return _refill_one(_packs[index])
 
 
 ## The one sweep that parks a wolf the squad has left far behind.
@@ -155,7 +208,7 @@ func culler():
 
 # --- the band ---------------------------------------------------------------
 
-func _spawn_wolf(point: Vector3) -> Node:
+func _spawn_wolf(point: Vector3, wolf_name: String) -> Node:
 	var wolf = EnemyScript.new()
 	# kind 0 is the authored briar wolf: level 1 in everything but name.
 	wolf.kind = 0
@@ -168,9 +221,11 @@ func _spawn_wolf(point: Vector3) -> Node:
 	# still leave the wolf standing on the world point, with that point as home.
 	wolf.global_position = point
 	wolf.home = point
-	# `_ready` gives every wolf the species name; the band numbers them so a
-	# corpse, a pack or a log line can name the one it means.
-	wolf.name = "BriarWolf%d" % (_wolves.size() + 1)
+	# `_ready` names every wolf after its species; the band names it after its
+	# post instead, so a corpse, a pack or a log line can name the one it means -
+	# and a body that comes back takes the name of the one it replaced, which is
+	# the name the wire finds a mob by.
+	wolf.name = wolf_name
 	if _world.has_method("_on_enemy_defeated"):
 		wolf.defeated.connect(Callable(_world, "_on_enemy_defeated"))
 	elif _wolves.is_empty():
@@ -236,32 +291,137 @@ func _safe_center() -> Vector3:
 	return Vector3(0.0, 0.0, -100000.0)
 
 
+# --- the refill -------------------------------------------------------------
+
+## One refill clock per pack, never one per wolf. A pack with nothing dead has no
+## clock; a pack whose first body fell gets one `RESPAWN_SECONDS` out, and the
+## clock is read here on the 0.5 s tick with the aim.
+func _refill() -> void:
+	for pack in _packs:
+		var lost := 0
+		for mob in pack["mobs"] as Array:
+			if not is_instance_valid(mob) or not bool(mob.get("alive")):
+				lost += 1
+		if lost == 0:
+			pack["respawn_at"] = -1.0
+			continue
+		var at := float(pack["respawn_at"])
+		if at < 0.0:
+			pack["respawn_at"] = _clock + RESPAWN_SECONDS
+			continue
+		if _clock < at:
+			continue
+		_refill_one(pack)
+
+
+## The pack's fallen back on their own posts. A body still on its feet is left
+## exactly where it is - a refill is never a teleport and never a second body -
+## and a body that comes back is booked into the world's one hostile list and into
+## its pack's own territory.
+func _refill_one(pack: Dictionary) -> int:
+	# A guest fielded the same band, but the bodies it draws are the host's: a
+	# second wolf spawned here would be a wolf the host never spawned.
+	if _is_client():
+		return 0
+	var posts: Array = pack["posts"]
+	var names: Array = pack["names"]
+	var members: Array = pack["mobs"]
+	var quiet := true
+	for post in posts:
+		if _body_within(post as Vector3, RESPAWN_QUIET):
+			quiet = false
+			break
+	if not quiet:
+		return 0
+	var fresh: Array = []
+	for index in members.size():
+		var old = members[index]
+		if is_instance_valid(old) and bool(old.get("alive")):
+			continue
+		if is_instance_valid(old):
+			_retire(old)
+		var wolf := _spawn_wolf(posts[index], str(names[index]))
+		members[index] = wolf
+		fresh.append(wolf)
+	if fresh.is_empty():
+		pack["respawn_at"] = -1.0
+		return 0
+	_join_territory(members, fresh)
+	pack["respawn_at"] = -1.0
+	_sync_band()
+	return fresh.size()
+
+
+## The patch a body that came back belongs to: its packmates' own territory while
+## any of them is still walking it, and a freshly handed one when the pack was cut
+## down to the last body.
+func _join_territory(members: Array, fresh: Array) -> void:
+	var shared: MobWander = null
+	var pack_group := ""
+	for mob in members:
+		if fresh.has(mob) or not is_instance_valid(mob):
+			continue
+		var wander: MobWander = mob.get("_wander")
+		if wander == null or wander.territory == null:
+			continue
+		shared = wander
+		pack_group = wander.group
+		break
+	if shared == null:
+		MobWander.assign_all(fresh, PACK_RADIUS)
+		return
+	for mob in fresh:
+		mob.assign_territory(shared.territory, members.find(mob), pack_group)
+		if not pack_group.is_empty():
+			(mob as Node).add_to_group(pack_group)
+
+
+## Make room for a replacement. `queue_free` leaves the corpse in the tree for the
+## rest of the frame, and the newcomer takes its predecessor's name - so the corpse
+## steps aside first, and off the world's hostile list, which the replacement
+## rejoins under that name.
+func _retire(corpse: Node) -> void:
+	var guards = _world.get("guards") if is_instance_valid(_world) else null
+	if guards is Array:
+		(guards as Array).erase(corpse)
+	corpse.name = "%sCorpse" % corpse.name
+	corpse.queue_free()
+
+
+## True while any party body - standing or down - is inside `metres` of `point`.
+func _body_within(point: Vector3, metres: float) -> bool:
+	var bodies = _world.get("bodies") if is_instance_valid(_world) else null
+	if not (bodies is Array):
+		return false
+	var reach := metres * metres
+	for body in bodies as Array:
+		if not is_instance_valid(body) or not body is Node3D:
+			continue
+		if (body as Node3D).global_position.distance_squared_to(point) <= reach:
+			return true
+	return false
+
+
+func _is_client() -> bool:
+	if not is_instance_valid(_world):
+		return false
+	var client = _world.get("_client")
+	return client is bool and bool(client)
+
+
+func _sync_band() -> void:
+	_wolves.clear()
+	for pack in _packs:
+		_wolves.append_array(pack["mobs"] as Array)
+
+
 # --- the posts --------------------------------------------------------------
 
-## A post `along` metres from the camp's mouth, `side` metres off the line. The
-## corridor is the camp's own straight line; past `CAMP_TO_ROAD_METRES` the lane
-## takes over, and the lane's heading is the world's offset applied to the lane's
-## authored points - the one table the trail is built from.
-func _post(along: float, side: float) -> Vector3:
-	var mouth: Vector3 = CampScript.GATE_POINT
-	var point: Vector3
-	if along <= CampScript.CAMP_TO_ROAD_METRES:
-		point = mouth + Vector3(side, 0.0, -along)
-	else:
-		var lane_start: Vector3 = RunForestScript.LANE_POINTS[0] + _trail_offset()
-		var heading: Vector3 = RunForestScript.LANE_POINTS[1] - RunForestScript.LANE_POINTS[0]
-		heading.y = 0.0
-		if heading.length_squared() < 0.0001:
-			heading = Vector3(0.0, 0.0, -1.0)
-		heading = heading.normalized()
-		var across := Vector3(-heading.z, 0.0, heading.x)
-		point = lane_start + heading * (along - CampScript.CAMP_TO_ROAD_METRES) + across * side
-	# A world whose trail offset sends the lane back over the camp is not one this
-	# band may stand in: fall back to the corridor's own line, which is always
-	# `along` metres of ordinary wood past the mouth.
-	if not _clear_of_camp(point):
-		point = mouth + Vector3(side, 0.0, -along)
-	return _ground(point)
+## A corridor post: `along` metres from the camp's mouth down the straight cut the
+## way out is made through the trees, `side` metres off that line.
+func _corridor_post(along: float, side: float) -> Vector3:
+	var mouth: Vector3 = WoodScript.GATE_POINT
+	return _ground(mouth + Vector3(side, 0.0, -along))
 
 
 func _trail_offset() -> Vector3:
@@ -270,25 +430,20 @@ func _trail_offset() -> Vector3:
 	return Vector3.ZERO
 
 
-## A post `along` metres from the camp's mouth, `side` metres left or right of the
-## **lane itself**. `_post()` extrapolates the lane's first tangent, which is fine
-## for the first 250 m and wrong by tens of metres at 500: the deep packs are laid
-## on the real polyline so "15-30 m off the lane" means off the lane a body walks.
-## The lateral offset is held at `DEEP_WOOD_INNER`'s edge of the solid tree rows,
-## so no member spawns inside a trunk collider.
-func _lane_post(along: float, side: float) -> Vector3:
-	var mouth: Vector3 = CampScript.GATE_POINT
-	if along <= CampScript.CAMP_TO_ROAD_METRES:
-		return _post(along, side)
-	var reach := along - CampScript.CAMP_TO_ROAD_METRES
-	var offset := _trail_offset()
+## A lane post at `fraction` of the lane's measured length, `side` metres off the
+## centre line. The polyline is the world's own table, so a waypoint the road's
+## owner moves takes the pack with it; the lateral offset is held at
+## `LANE_LATERAL_MIN`, so no member spawns inside a trunk collider or in the band
+## a body walks.
+func _lane_post(fraction: float, side: float) -> Vector3:
 	var lane: Array = RunForestScript.LANE_POINTS
+	var reach := clampf(fraction, 0.0, 1.0) * lane_metres()
 	var travelled := 0.0
-	var point := Vector3.ZERO
+	var point: Vector3 = lane[0]
 	var heading := Vector3(0.0, 0.0, -1.0)
 	for index in range(lane.size() - 1):
-		var from: Vector3 = lane[index] + offset
-		var to: Vector3 = lane[index + 1] + offset
+		var from: Vector3 = lane[index]
+		var to: Vector3 = lane[index + 1]
 		var span := from.distance_to(to)
 		if travelled + span >= reach or index == lane.size() - 2:
 			var t := clampf((reach - travelled) / maxf(span, 0.0001), 0.0, 1.0)
@@ -302,23 +457,34 @@ func _lane_post(along: float, side: float) -> Vector3:
 		travelled += span
 	var across := Vector3(-heading.z, 0.0, heading.x)
 	var lateral := side
-	if absf(lateral) < DEEP_WOOD_INNER:
-		lateral = signf(lateral if absf(lateral) > 0.001 else 1.0) * DEEP_WOOD_INNER
-	var at := point + across * lateral
+	if absf(lateral) < LANE_LATERAL_MIN:
+		lateral = signf(lateral if absf(lateral) > 0.001 else 1.0) * LANE_LATERAL_MIN
+	point = point + _trail_offset() + across * lateral
 	# A world whose lane doubles back over the camp is not one this band may stand
-	# in: fall back to the corridor's own line.
-	if not _clear_of_camp(at):
-		at = mouth + Vector3(lateral, 0.0, -along)
-	return _ground(at)
+	# in: fall back to the corridor's own line, which is always on the road's side
+	# of the mouth.
+	if not _clear_of_camp(point):
+		point = WoodScript.GATE_POINT + Vector3(lateral, 0.0, -reach - WoodScript.CAMP_TO_ROAD_METRES)
+	return _ground(point)
+
+
+## The lane's measured length, from the one table the world lays it out on:
+## ~1,376 m of road between the corridor and the town gate.
+static func lane_metres() -> float:
+	var total := 0.0
+	var lane: Array = RunForestScript.LANE_POINTS
+	for index in range(lane.size() - 1):
+		total += (lane[index] as Vector3).distance_to(lane[index + 1] as Vector3)
+	return total
 
 
 ## Never on the mouth, never inside the pocket.
 static func _clear_of_camp(point: Vector3) -> bool:
-	var mouth: Vector3 = CampScript.GATE_POINT
+	var mouth: Vector3 = WoodScript.GATE_POINT
 	if Vector2(point.x - mouth.x, point.z - mouth.z).length() < MOUTH_CLEARANCE:
 		return false
-	var in_pocket := absf(point.x - mouth.x) < CampScript.YARD_HALF_WIDTH \
-		and point.z > CampScript.YARD_FRONT - 2.0 and point.z < CampScript.YARD_BACK + 2.0
+	var in_pocket := absf(point.x - mouth.x) < WoodScript.YARD_HALF_WIDTH \
+		and point.z > WoodScript.YARD_FRONT - 2.0 and point.z < WoodScript.YARD_BACK + 2.0
 	return not in_pocket
 
 

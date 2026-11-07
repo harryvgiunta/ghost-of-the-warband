@@ -269,27 +269,39 @@ func check_arming() -> void:
 	check(str(bow_gear.get("off", "")).is_empty(),
 		"and a bow leaves the other hand empty")
 
-	# A pickup only displaces a piece it is worth more than *to that body*.
+	# A pickup only fills a hand, so the bowman holding a blade keeps it until the
+	# player asks for the band's choice; `reequip_merc` is that ask.
 	warband.stash.add("sword_short", 1)
 	warband.equip_merc(bow, "main", "sword_short")
 	var snap: Dictionary = warband.auto_equip(bow, "bow_short")
-	check(bool(snap.get("ok", false)) and str(snap.get("slot", "")) == "main",
-		"a bow that reaches a bowman's hands is taken up (%s)" % str(snap.get("message", "")))
-	check(str(warband.roster.equipped_of(bow).get("main", "")) == "bow_short",
-		"and the bow is what it holds")
+	check(not bool(snap.get("ok", true)),
+		"a looted bow does not trade a bowman's worn blade")
+	check(str(warband.roster.equipped_of(bow).get("main", "")) == "sword_short",
+		"the blade stays in the hand")
 	snap = warband.auto_equip(bow, "sword_great")
 	check(not bool(snap.get("ok", true)),
-		"a dearer blade does not take a bowman's bow")
+		"nor does a dearer blade")
+	warband.reequip_merc(bow)
+	check(str(warband.roster.equipped_of(bow).get("main", "")) == "bow_short",
+		"the bowman's own re-equip takes the bow its trade wants, got %s"
+			% str(warband.roster.equipped_of(bow).get("main", "")))
 	# The melee body has the greatsword in its hands and no use for a bow.
 	warband.stash.add("bow_short", 1)
 	snap = warband.auto_equip(melee, "bow_short")
 	check(not bool(snap.get("ok", true)),
 		"a melee body does not trade its blade for a bow")
-	# The tank keeps its one-hander and takes a shield it did not have.
+	# The tank keeps its one-hander: a pickup never fills the free hand of a body
+	# that already holds steel. Its own press puts the board back in the other hand.
 	warband.unequip_merc(tank, "off")
 	snap = warband.auto_equip(tank, "shield_kite")
-	check(bool(snap.get("ok", false)) and str(snap.get("slot", "")) == "off",
-		"a tank takes a shield into an empty off hand (%s)" % str(snap.get("message", "")))
+	check(not bool(snap.get("ok", true)),
+		"a pickup does not arm the free hand of a body holding a blade")
+	check(str(warband.roster.equipped_of(tank).get("off", "")).is_empty(),
+		"and the off hand stays empty")
+	warband.reequip_merc(tank)
+	check(str(warband.roster.equipped_of(tank).get("off", "")).begins_with("shield"),
+		"the tank's own re-equip takes a shield again, got %s"
+			% str(warband.roster.equipped_of(tank).get("off", "")))
 
 	# The tank's stance is the shield, and a two-hander costs the off hand. The
 	# greatsword used to win on price alone (340 - 70 = 270 against a shortsword's
@@ -788,6 +800,11 @@ func check_cluster() -> void:
 	var pair_b = _watcher_at(Vector3(0.0, 0.0, 8.6))
 	var body := _body_at(Vector3.ZERO)
 	var drive = _squad_for(7, Contracts.DISPOSITION_MELEE)
+	# Which fights the squad takes at all is the party's mode, and a fresh band is
+	# DEFENSIVE: it answers only a hostile it is already at war with, so an untouched
+	# one is never a candidate. This fixture measures the melee body's pick among
+	# hostiles it may fight, so the squad is set to the mode that goes looking.
+	drive.party_mode = Contracts.PARTY_OFFENSIVE
 	drive.watchers = [lone, pair_a, pair_b]
 	check(drive._nearest_watcher(body, false) == lone,
 		"without the AOE preference the nearest body is the target")

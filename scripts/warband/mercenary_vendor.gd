@@ -14,10 +14,10 @@ const HIRE_BASE_COST := 120
 ## costs more than a top-up and the early loop stays affordable.
 const HIRE_STEP_COST := 35
 ## The town's first oaths are free: the recruiter is garrisoning a warband, not
-## selling one, and eight bodies is the deployment cap itself. Past that line the
-## old price curve applies - it is the cap that refuses a ninth body, not the
-## purse, until the cap moves.
-const FREE_HIRES := 8
+## selling one, and the deployment cap is the whole roster now. Every oath that
+## can be sworn is therefore free - the cap refuses a body past its third, not
+## the purse - and the price curve below only bites if the cap ever grows.
+const FREE_HIRES := 3
 
 ## Names the recruiter cycles through, so a fresh warband reads as people.
 const NAMES := [

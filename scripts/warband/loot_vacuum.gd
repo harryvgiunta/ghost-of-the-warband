@@ -490,11 +490,21 @@ func _book_piece(stash: WarbandStash, item_id: String, collector_peer: int, anoi
 ## by a soul standing in a living body snaps into that body's hands instead of only
 ## landing in the stash. The piece is a stash row either way, so what the warband
 ## is worth never disagrees with what it wears.
+##
+## Below, in the delve, there is no hand-off: the pool a take lands in is the delve
+## inventory (`_stash`), and the party's pack is the whole of what it takes - the
+## delve's own right click books exactly that way (`WarbandLootHand.take_now`
+## passes `dress` false). Dressing the taker out of that pool would lift the piece
+## straight back out of the pool the take is meant to fill, so a body searching a
+## corpse below would come up with an empty pack and a full suit. The take stays
+## whole; a body that wants to wear one of the pieces does it from the paperdoll.
 func _dress_message(item_id: String, collector_peer: int) -> String:
 	var message := "%s goes into %s." % [WarbandPickup.item_name(item_id), _pool_name()]
 	# Peer 0 is the warband itself - a squad soldier or a sweep - and has no body
 	# a piece could be worn by, so the booking stays a plain stash row.
 	if collector_peer <= 0:
+		return message
+	if _below():
 		return message
 	var merc_id := _equip_owner(collector_peer)
 	if merc_id <= 0 or _warband == null or not is_instance_valid(_warband):
@@ -625,6 +635,16 @@ func _stash() -> WarbandStash:
 	var stash: Variant = _warband.call("field_stash") if _warband.has_method("field_stash") \
 		else _warband.get("stash")
 	return stash if stash is WarbandStash else null
+
+## Whether a party is below: the field pool is the delve inventory, so what a take
+## books is the pack's and nothing is worn off it (`_dress_message`).
+func _below() -> bool:
+	if _warband == null or not is_instance_valid(_warband):
+		_warband = get_node_or_null("/root/Warband") if is_inside_tree() else null
+	if _warband == null:
+		return false
+	var delve: Variant = _warband.get("delve")
+	return delve != null and bool(delve.get("active"))
 
 ## How a message names that pool.
 func _pool_name() -> String:

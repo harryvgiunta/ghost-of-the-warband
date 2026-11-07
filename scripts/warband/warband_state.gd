@@ -29,7 +29,6 @@ const CruorCatalog = preload("res://scripts/warband/cruor_catalog.gd")
 const State = preload("res://scripts/player_state.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const EquipmentRules = preload("res://scripts/equipment_rules.gd")
-const QuestScript = preload("res://scripts/warband/quest_log.gd")
 const AnnointScript = preload("res://scripts/warband/annoint_ledger.gd")
 const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 const AnnointRoll = preload("res://scripts/warband/annoint_roll.gd")
@@ -40,17 +39,18 @@ const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 ## Item categories a body can wear; the same list `EquipmentRules` enforces.
 const EQUIPPABLE_CATEGORIES := ["1h", "2h", "bow", "staff", "shield", "focus", "armor", "jewelry"]
 
-## The order a fresh body is armed in: steel first, then armour, then the
-## trinkets. `dress_recruit` walks this list and takes the dearest spare the
-## shared stash holds for each slot.
+## The order a body is armed in: steel first, then armour, then the trinkets.
+## `dress_recruit` walks this list and takes the dearest spare the shared stash
+## holds for each slot; `arm_one_piece` walks the same order and stops at the
+## first slot it can fill, which is how one kill arms one hand.
 const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "neck", "ring1", "ring2"]
 
 ## Additive save format. v3 added each mercenary's two weapon sets (`weapon_sets`
 ## plus `active_set` per record), the pair `TAB` brings up; v4 added the
 ## checkpoint bookmark (`checkpoint`), the autosave that remembers which stretch
-## of the world the warband has already played; v5 added the campaign ledger
-## (`quests`), the objectives the quartermaster has handed over and how far each
-## one got; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
+## of the world the warband has already played; v5 carried a campaign ledger that
+## v17 deleted - the game has no quests, and a file that still names one opens with
+## no orders at all; v6 added the altar's anointed pieces (`cruor.anointed`), the stock
 ## steel that has been given its skill; v7 dropped the expedition's battle ledger
 ## (`runs`, `run_totals`); v8 added the delve (`delve`): the inventory packed at
 ## the Hollow's mouth and, while a party is below, who went down; v9 added the
@@ -61,16 +61,19 @@ const DRESS_SLOTS := ["main", "off", "head", "chest", "hands", "legs", "feet", "
 ## it picks a piece); v15 added the Hollow's difficulty (`delve.mode`), the crowd,
 ## pool and rate the floor is built with; v13 added each record's hotbar layout
 ## (`hotbar_order`), the sequence of ability ids the player has laid on the ten
-## keys. Older files still load: a record with no sets puts
+## keys; v16 added each record's hand-set slots (`manual`), the pieces automatic
+## arming may never touch. Older files still load: a record with no sets puts
 ## the pair already in its hands in Set 1 and starts Set 2 empty, a file without a
-## checkpoint resumes at the town as it always did, a file without quests opens
-## with an empty ledger, a file without anointings carries plain steel, a file
+## checkpoint resumes at the town as it always did, a file still carrying a
+## ledger ignores it, a file without anointings carries plain steel, a file
 ## without a delve has an empty pack and nobody below, a file without a party mode
-## fights offensive, a file without holds arms from every piece, as it always did,
+## fights defensive, the band's own answer,
+## a file without holds arms from every piece, as it always did,
 ## a file without a disposition fields every body as melee, a file without a
-## hotbar layout fires every skill from the key the kit's own order gives it, and a
-## file without a delve mode goes down an easy Hollow.
-const SAVE_VERSION := 15
+## hotbar layout fires every skill from the key the kit's own order gives it, a
+## file without a delve mode goes down an easy Hollow, and a file without hand-set
+## slots leaves every slot to the arming, as it always did.
+const SAVE_VERSION := 17
 const DEFAULT_SAVE_PATH := "user://warband_state.json"
 ## The areas a checkpoint may name. A checkpoint is a *place in the campaign*,
 ## not a save slot: the camp is the only place a run starts, so it is never a
@@ -88,10 +91,6 @@ var annoints: AnnointLedger = AnnointScript.new()
 ## Which copy a worn piece is: `"<merc id>:<slot>" -> {item, ordinal}`. The
 ## roster stores catalog ids, so the copy is bookkeeping that lives here.
 var worn_copies: Dictionary = {}
-## The campaign ledger: which objectives the quartermaster has handed over and
-## how far each has got. Pure state (no scene, no node), saved with everything
-## else, so a checkpoint restores the orders as they stood.
-var quests: WarbandQuests = QuestScript.new()
 ## The delve: the inventory a party carries below and who went down with it
 ## (`delve_state.gd`). While a party is below, every verb that moves gear between
 ## a body and the pool works that inventory instead of the town stash
@@ -270,7 +269,7 @@ const RITE_SENT := "Sent to the host - the rite spends the warband's ichor."
 ## the same dressing (`_worn_signatures` compares both), and the altar's reagent
 ## rite, which is the shared stash's vials spent on the shared steel.
 const GEAR_VERBS := ["equip", "unequip", "swap_set", "reequip", "reequip_band",
-	"restrict", "hotbar_order", "hotbar_move", "hotbar_reset", "anoint"]
+	"restrict", "hotbar_order", "hotbar_move", "hotbar_reset", "anoint", "weld"]
 
 ## Where a lent warband's gear verbs go: the co-op session installs a callable
 ## that sends the request to the host. Empty on a host and on a machine with no
@@ -426,7 +425,7 @@ func alive_merc_ids() -> Array[int]:
 #
 # The field is the bodies the warband has standing: at most `deployment_cap` of
 # them. A name sworn while the field is full - a soldier cut out of a cage past
-# the eighth body - waits in the reserve (`WarbandRoster.is_reserve`) with no body
+# the third body - waits in the reserve (`WarbandRoster.is_reserve`) with no body
 # at all, and takes a place again only in the town (the world decides where; this
 # only keeps the books).
 
@@ -498,9 +497,26 @@ func reap_dead() -> Array[Dictionary]:
 func _on_merc_died(_merc_id: int) -> void:
 	reap_dead()
 
-## Hack a body into the warband (the cage tutorial's four prisoners, the admin
-## arena's eight test bodies, a soldier cut out of a cage). No gold changes hands.
-## The body takes the field when there is room for it, and the reserve when not.
+## The band a new campaign opens with: one body, and nothing else. He is naked on
+## purpose - the naked base set the paperdoll draws for an empty slot is all he
+## wears - because a campaign's kit is won, not issued: every piece he ends the
+## run with came off a body he put down (`arm_one_piece`) or out of a cage.
+const STARTING_BAND := [
+	{"name": "Aldous"},
+]
+
+## Seed a campaign's one starting body, naked. An existing warband is never
+## touched: a resume, a lend or a second boot of the same save must not multiply
+## the band. Nothing is equipped here - the pool is the only armorer.
+func seed_starting_band() -> int:
+	if not roster.is_empty():
+		return roster.count()
+	for entry in STARTING_BAND:
+		add_mercenary(str(entry["name"]))
+	_notify()
+	return roster.count()
+
+
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
 	var room := field_room() > 0
 	var merc_id := roster.create(merc_name, equipped)
@@ -535,12 +551,45 @@ func dress_recruit(merc_id: int, slots: Array = DRESS_SLOTS) -> Dictionary:
 			", ".join(fitted.map(func(item_id: String): return str(
 				State.ITEMS.get(item_id, {}).get("name", item_id))))]}
 
+## One piece, off one kill: the campaign's own arming. A body walks the same
+## `DRESS_SLOTS` order `dress_recruit` walks - steel first, then the armour, then
+## the trinkets - and stops at the first slot that is still bare (empty, or the
+## naked set) and that the pool can actually fill, taking exactly that one piece
+## and nothing more. The body's disposition decides what the slot wants, exactly
+## as it does for the arming passes, and the held pieces stay held.
+##
+## Nothing is minted and nothing is dressed twice: a body with a full kit walks
+## its whole order to no effect and answers "", as does an empty pool, a lent
+## warband and a body that is not alive. The one notify and one `armed` signal
+## let a live rig re-dress the body the piece landed on.
+## Returns the item id that walked across, or "".
+func arm_one_piece(merc_id: int) -> String:
+	if lent or _arming:
+		return ""
+	if merc_id <= 0 or not roster.is_alive(merc_id):
+		return ""
+	_arming = true
+	var taken := ""
+	for raw_slot in DRESS_SLOTS:
+		var filled := _fill_slots(merc_id, [raw_slot])
+		if filled.is_empty():
+			continue
+		taken = str(filled[0].get("item_id", ""))
+		break
+	_arming = false
+	if taken.is_empty():
+		return ""
+	_notify()
+	armed.emit([merc_id])
+	return taken
+
 ## Arm the whole band out of the pool it can reach. The automatic answer to a
 ## shopping spree: every body the field can dress fills each slot that is empty
 ## or still wearing the naked set, taking the dearest legal, unheld spare the
 ## pool holds. A real worn piece is never upgraded, so a kit the player chose by
-## hand is not overruled by a lucky purchase. One notify and one `armed` signal
-## are emitted for the pass, never one per piece.
+## hand is not overruled by a lucky purchase, and a slot the player filled by hand
+## is not even looked at - the pin outranks the pass. One notify and one `armed`
+## signal are emitted for the pass, never one per piece.
 ## Returns `{ok, fitted, mercs, message}`; `fitted` is `[{merc_id, slot, item_id}]`.
 func arm_warband() -> Dictionary:
 	var fitted: Array[Dictionary] = []
@@ -564,15 +613,20 @@ func arm_warband() -> Dictionary:
 	return {"ok": true, "fitted": fitted, "mercs": mercs, "message": _arm_message(fitted)}
 
 ## Fill every named slot on one body from the field's pool. A slot is open when
-## it is empty or still wears the naked set; a real worn piece is left alone. The
-## dearest legal, unheld copy wins, and a two-handed main never costs an off-hand
-## already in use. Returns `[{merc_id, slot, item_id}]`; the caller owns the one
+## it is empty or still wears the naked set; a real worn piece is left alone, and
+## so is a slot the player filled by hand - that is the piece the pass must never
+## take back. The dearest legal, unheld copy wins, and a two-handed main never
+## costs an off-hand already in use. The equip is the band's, not a hand's
+## (`manual` false): it never pins a slot and never carries a pinned piece off
+## another body. Returns `[{merc_id, slot, item_id}]`; the caller owns the one
 ## notify, which is what keeps a band-wide pass from repainting eight times.
 func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
 	var fitted: Array[Dictionary] = []
 	var disposition := roster.disposition_of(merc_id)
 	for raw_slot in slots:
 		var slot_id := str(raw_slot)
+		if roster.is_manual(merc_id, slot_id):
+			continue
 		var gear := roster.equipped_of(merc_id)
 		var current := str(gear.get(slot_id, ""))
 		if not current.is_empty() and not EquipmentRules.bare_garment(current):
@@ -584,7 +638,7 @@ func _fill_slots(merc_id: int, slots: Array) -> Array[Dictionary]:
 		var best := _best_spare(slot_id, gear, disposition)
 		if best.is_empty():
 			continue
-		var result := equip_merc(merc_id, slot_id, best, false)
+		var result := equip_merc(merc_id, slot_id, best, false, false)
 		if not bool(result.get("ok", false)):
 			continue
 		fitted.append({"merc_id": merc_id, "slot": slot_id, "item_id": best})
@@ -685,6 +739,9 @@ func reequip_merc(merc_id: int) -> Dictionary:
 		return {"ok": false, "merc_id": merc_id, "released": released, "fitted": fitted,
 			"message": "%s cannot be dressed right now." % roster.name_of(merc_id)}
 	var second_set := _second_set_bound(merc_id)
+	# The press that clears every pin on this body: the player has asked the band
+	# to choose for it, which is the one answer the arming may give over a hand's.
+	roster.clear_manual(merc_id)
 	_arming = true
 	released = _release_worn(merc_id, field_stash())
 	fitted = _refill(merc_id, second_set)
@@ -702,7 +759,9 @@ func reequip_merc(merc_id: int) -> Dictionary:
 ## into the pool first, then the roster is built one body at a time in recruitment
 ## order, so the oldest name takes the pick of it. That is the point of the pass
 ## rather than a flaw in it - the pool is one pile of gear, the first body to be
-## dressed gets the plate and the next one gets the mail.
+## dressed gets the plate and the next one gets the mail. A slot the player filled
+## by hand is the one exception: it is neither handed back nor overruled, so the
+## band press still gears up every body without undoing the hands that dressed one.
 ##
 ## Both halves run in separate loops on purpose: releasing as each body is filled
 ## would let a body keep a piece the later one is better suited to only because it
@@ -732,7 +791,10 @@ func reequip_warband() -> Dictionary:
 	var pool := field_stash()
 	_arming = true
 	for merc_id in bodies:
-		released.append_array(_release_worn(merc_id, pool))
+		# A slot the player filled by hand is not the band's to hand back: the
+		# pass still gears up every body, it just leaves a chosen weapon where the
+		# player put it.
+		released.append_array(_release_worn(merc_id, pool, true))
 	for merc_id in bodies:
 		var got := _refill(merc_id, bool(seconds.get(merc_id, false)))
 		if got.is_empty():
@@ -753,8 +815,10 @@ func reequip_warband() -> Dictionary:
 ## Hand every real piece a body wears back into `pool`, both weapon sets included.
 ## The rags it is born in stay on: `EquipmentRules.bare_garment` is the mesh the
 ## rig draws rather than gear, and no arming pass would ever hand it out again.
+## `keep_manual` leaves the slots the player filled by hand where they are - the
+## band's own press sets it, the body's own press has already cleared its pins.
 ## Returns the ids released, in wear order. The caller owns the notify.
-func _release_worn(merc_id: int, pool: WarbandStash) -> Array[String]:
+func _release_worn(merc_id: int, pool: WarbandStash, keep_manual: bool = false) -> Array[String]:
 	var out: Array[String] = []
 	if pool == null:
 		return out
@@ -762,13 +826,15 @@ func _release_worn(merc_id: int, pool: WarbandStash) -> Array[String]:
 		var item_id := str(entry.get("item", ""))
 		if item_id.is_empty() or EquipmentRules.bare_garment(item_id):
 			continue
-		if roster.take_worn(merc_id, str(entry.get("slot", "")),
+		var slot_id := str(entry.get("slot", ""))
+		if keep_manual and roster.is_manual(merc_id, slot_id):
+			continue
+		if roster.take_worn(merc_id, slot_id,
 				int(entry.get("set", -1))) != item_id:
 			continue
 		# The copy comes off the body as itself, exactly as `unequip_merc` and
 		# `_strip_worn` do: a claim left behind is a piece the next equip into this
 		# slot hands to the pool a second time.
-		var slot_id := str(entry.get("slot", ""))
 		pool.add(item_id, 1, _release_claim(merc_id, slot_id, item_id))
 		out.append(item_id)
 	return out
@@ -980,7 +1046,7 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 		if ask_gear("anoint", [item_id, ordinal]):
 			return {"ok": true, "pending": true, "message": RITE_SENT,
 				"item_id": item_id, "ordinal": ordinal, "outcome": -1,
-				"entry_id": "", "removed_id": "", "skill": "", "completed": [],
+				"entry_id": "", "removed_id": "", "skill": "",
 				"count": annoints.count(item_id, ordinal),
 				"max": AnnointCatalog.MAX_PER_PIECE}
 		return _lent_refusal({"item_id": item_id, "outcome": -1, "entry_id": "",
@@ -1026,10 +1092,6 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 			committed = annoints.remove_id(item_id, copy, removed)
 		AnnointRoll.Outcome.REPLACE:
 			committed = annoints.replace(item_id, copy, removed, added)
-	var completed: Array[String] = []
-	for quest_id in quests.note_applied(CruorScript.BASIC_REAGENT, 1):
-		if quests.is_complete(quest_id):
-			completed.append(quest_id)
 	if committed and not added.is_empty():
 		var entry := AnnointCatalog.by_id(added)
 		if entry != null and int(entry.kind) == AnnointCatalog.Kind.ABILITY:
@@ -1046,7 +1108,140 @@ func anoint(item_id: String, ordinal: int = -1, rng: RandomNumberGenerator = nul
 		"outcome": outcome, "converted": bool(rolled["converted"]),
 		"entry_id": added, "removed_id": removed, "skill": skill,
 		"count": annoints.count(item_id, copy), "max": AnnointCatalog.MAX_PER_PIECE,
-		"spent": {CruorScript.BASIC_REAGENT: 1}, "completed": completed}
+		"spent": {CruorScript.BASIC_REAGENT: 1}}
+
+## The altar's rack: every weld this copy could take, and what each one costs.
+##
+## The altar is deterministic now. There is no die to throw: a piece's next weld
+## is a row the player reads - its name, what it does and its price - and a press
+## either takes it or is refused. What replaces the gacha is the *choice*: each
+## rung is dearer than the last, so a body's steel is a ladder somebody climbed on
+## purpose, and PvP gear is a thing a warband can reason about instead of a thing
+## it rolled.
+##
+## One row: `{entry_id, name, kind, kind_name, line, cost_tier, cost_count,
+## cost_name, vials, affordable, reason, owned}`.
+func weld_options(item_id: String, ordinal: int = -1) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var item: Dictionary = State.ITEMS.get(item_id, {})
+	if item.is_empty():
+		return out
+	var copy := ordinal if ordinal >= 0 else 0
+	var owned := annoints.ids(item_id, copy)
+	for entry in AnnointCatalog.for_item(item):
+		if not entry.wired:
+			continue
+		var cost := _weld_cost(entry, annoints.count(item_id, copy))
+		var tier := int(cost["tier"])
+		var count := int(cost["count"])
+		var vials := int(cost["vials"])
+		var has_materials: bool = cruor.tier_count(tier) >= count \
+			and stash.pooled_count(CruorScript.BASIC_REAGENT) >= vials
+		var row := {
+			"entry_id": str(entry.id),
+			"name": str(entry.name),
+			"kind": int(entry.kind),
+			"kind_name": _weld_kind_name(int(entry.kind)),
+			"line": str(entry.line),
+			"cost_tier": tier,
+			"cost_count": count,
+			"cost_name": CruorCatalog.tier_name(tier),
+			"vials": vials,
+			"owned": owned.has(str(entry.id)),
+			"affordable": has_materials,
+			"reason": "" if has_materials else "Not enough cruor or ichor.",
+		}
+		if bool(row["owned"]):
+			row["reason"] = "The piece already carries it."
+		elif annoints.is_full(item_id, copy):
+			row["reason"] = "The piece is full: unbind a weld first."
+		out.append(row)
+	return out
+
+
+## The price of one weld: a vial always, plus cruor by kind - abilities are the
+## dearest (a skill in the hand), procs sit in the middle, a plain stat line is
+## the cheap one.
+static func _weld_cost(entry, owned: int = 1) -> Dictionary:
+	match int(entry.kind):
+		AnnointCatalog.Kind.ABILITY:
+			return {"tier": Contracts.CruorTier.T2_BLACK_BILE, "count": 2, "vials": 1}
+		AnnointCatalog.Kind.PROC:
+			return {"tier": Contracts.CruorTier.T2_BLACK_BILE, "count": 1, "vials": 1}
+	return {"tier": Contracts.CruorTier.T1_RITUAL_TALLOW, "count": 3, "vials": 1}
+
+
+static func _weld_kind_name(kind: int) -> String:
+	match kind:
+		AnnointCatalog.Kind.ABILITY:
+			return "ABILITY"
+		AnnointCatalog.Kind.PROC:
+			return "PROC"
+	return "STAT"
+
+
+## Weld one entry onto one copy, for its price, or refuse. Deterministic to the
+## letter: the same piece, the same books and the same row always give the same
+## steel. The copy is `ordinal`; -1 means the first copy that is not full.
+func weld(item_id: String, ordinal: int, entry_id: String) -> Dictionary:
+	if lent:
+		if ask_gear("weld", [item_id, ordinal, entry_id]):
+			return {"ok": true, "pending": true, "message": RITE_SENT,
+				"item_id": item_id, "ordinal": ordinal, "entry_id": entry_id}
+		return _lent_refusal({"item_id": item_id, "entry_id": entry_id})
+	var item: Dictionary = State.ITEMS.get(item_id, {})
+	if item.is_empty():
+		return {"ok": false, "message": "No such piece.", "item_id": item_id}
+	if entry_id.is_empty():
+		return {"ok": false, "message": "Pick a weld from the rack.", "item_id": item_id}
+	var entry := AnnointCatalog.by_id(entry_id)
+	if entry == null or not entry.wired:
+		return {"ok": false, "message": "That weld does not exist.", "item_id": item_id}
+	var allowed := false
+	for candidate in AnnointCatalog.for_item(item):
+		if str(candidate.id) == entry_id:
+			allowed = true
+			break
+	if not allowed:
+		return {"ok": false, "item_id": item_id,
+			"message": "%s cannot take %s." % [str(item.get("name", item_id)), str(entry.name)]}
+	var copy := ordinal if ordinal >= 0 else 0
+	if annoints.has(item_id, copy, entry_id):
+		return {"ok": false, "item_id": item_id,
+			"message": "The piece already carries %s." % str(entry.name)}
+	if annoints.is_full(item_id, copy):
+		return {"ok": false, "item_id": item_id,
+			"message": "That piece is full: unbind a weld before laying another."}
+	var cost := _weld_cost(entry, annoints.count(item_id, copy))
+	var tier := int(cost["tier"])
+	var count := int(cost["count"])
+	var vials := int(cost["vials"])
+	if cruor.tier_count(tier) < count or stash.pooled_count(CruorScript.BASIC_REAGENT) < vials:
+		return {"ok": false, "item_id": item_id,
+			"message": "That weld costs %d %s and %d ichor; the warband does not have it."
+				% [count, CruorCatalog.tier_name(tier), vials]}
+	if not cruor.spend(tier, count):
+		return {"ok": false, "message": "The cruor is short.", "item_id": item_id}
+	stash.remove(CruorScript.BASIC_REAGENT, vials)
+	if not annoints.add(item_id, copy, entry_id):
+		# The books refused after the price was taken: give it back rather than
+		# charge for a weld that did not land.
+		cruor.add(tier, count)
+		stash.add(CruorScript.BASIC_REAGENT, vials)
+		return {"ok": false, "message": "The piece refused the weld.", "item_id": item_id}
+	var skill := ""
+	if int(entry.kind) == AnnointCatalog.Kind.ABILITY:
+		skill = str(entry.ability)
+		anointed.emit(item_id, skill)
+	annointed_state.emit(item_id, annoints.ids(item_id, copy))
+	_notify()
+	var line := "%s takes %s  [%d / %d]" % [str(item.get("name", item_id)),
+		str(entry.name), annoints.count(item_id, copy), AnnointCatalog.MAX_PER_PIECE]
+	return {"ok": true, "message": line, "item_id": item_id, "ordinal": copy,
+		"entry_id": entry_id, "skill": skill, "outcome": int(entry.kind),
+		"count": annoints.count(item_id, copy), "max": AnnointCatalog.MAX_PER_PIECE,
+		"spent_tier": tier, "spent_count": count, "spent_vials": vials}
+
 
 ## What the altar would tell a player before they spend the vial.
 func annoint_preview(item_id: String, ordinal: int = -1) -> Dictionary:
@@ -1505,9 +1700,13 @@ func hire_cost() -> int:
 ## prisoner, which is exactly what the first scene asks the player to do.
 ## `announce` false lets a caller that is fitting several pieces in one pass
 ## (`arm_warband`, `dress_recruit`) emit a single `changed` instead of one per
-## slot; the caller then owns the notify.
+## slot; the caller then owns the notify. `manual` says whose hand did it: the
+## player's (the default, and every paperdoll press) pins the slot so no automatic
+## arming touches it again and lets the equip take a worn copy off another body,
+## while the band's own passes pass false - they never pin, and they never reach
+## into a slot the player pinned.
 func equip_merc(merc_id: int, slot_id: String, item_id: String,
-		announce: bool = true) -> Dictionary:
+		announce: bool = true, manual: bool = true) -> Dictionary:
 	if lent:
 		if ask_gear("equip", [merc_id, slot_id, item_id]):
 			return {"ok": true, "pending": true, "displaced": {}, "message": GEAR_SENT}
@@ -1520,13 +1719,19 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 	var pool := field_stash()
 	var gear := roster.equipped_of(merc_id)
 	if str(gear.get(slot_id, "")) == item_id:
+		# The piece is already there; a hand on it still makes the slot the
+		# player's, which is the whole point of the second press.
+		if manual:
+			roster.set_manual(merc_id, slot_id, true)
+			if announce:
+				_notify()
 		return {"ok": true, "message": "%s is already worn there." % roster.name_of(merc_id),
 			"displaced": {}}
 	var was_wearing := str(gear.get(slot_id, ""))
 	var moved_from := ""
 	var moved_serial := -1
 	if pool.pooled_count(item_id) <= 0:
-		var taken := _strip_worn(item_id, pool)
+		var taken := _strip_worn(item_id, pool, manual)
 		if not bool(taken.get("ok", false)):
 			return {"ok": false, "message": "You do not own that piece yet.", "displaced": {}}
 		moved_from = str(taken.get("from", ""))
@@ -1563,6 +1768,9 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 	worn_copies["%d:%s" % [merc_id, slot_id]] = {"item": item_id,
 		"ordinal": moved_serial}
 	for slot in displaced:
+		# The piece that came off is the pool's again, so the slot it left is the
+		# arming's: a two-hander taking the off hand is not a pinned empty hand.
+		roster.set_manual(merc_id, str(slot), false)
 		# The slot being equipped was released above; releasing it twice would hand
 		# the newly worn copy straight back to the pool.
 		if str(slot) == slot_id:
@@ -1575,6 +1783,11 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 			pool.add(old_id, 1)
 		else:
 			pool.add(str(off.get("item", old_id)), 1, int(off.get("serial", -1)))
+	# Whose the slot is. A hand on the paperdoll makes it the player's; the band's
+	# own passes leave the question exactly as they found it. (The slot a piece was
+	# stripped out of unpins itself inside `WarbandRoster.take_worn`.)
+	if manual:
+		roster.set_manual(merc_id, slot_id, true)
 	if not moved_from.is_empty():
 		result["message"] = "%s taken from %s." % [str(result.get("message", "")), moved_from]
 	if announce:
@@ -1582,13 +1795,17 @@ func equip_merc(merc_id: int, slot_id: String, item_id: String,
 	return result
 
 ## Take one worn copy of `item_id` off whichever mercenary holds it and drop it
-## into `pool`. Returns `{ok, from}` where `from` names the mercenary. Only a
-## body whose gear may move right now is searched (`dressable_ids`): below, a
-## piece is handed between the party's own and never fetched out of the town.
+## into `pool`. Returns `{ok, from, serial}` where `from` names the mercenary. Only
+## a body whose gear may move right now is searched
+## (`dressable_ids`): below, a piece is handed between the party's own and never
+## fetched out of the town.
 ##
 ## Both weapon sets are searched, not just the hands: a piece waiting in the set
-## the body is not carrying is still the warband's to hand over.
-func _strip_worn(item_id: String, pool: WarbandStash) -> Dictionary:
+## the body is not carrying is still the warband's to hand over. A slot the player
+## dressed by hand is not, though - `allow_manual` is true only for the player's
+## own press (the paperdoll moving a piece to another body), so an automatic pass
+## can never carry a chosen weapon out of the hands it was put into.
+func _strip_worn(item_id: String, pool: WarbandStash, allow_manual: bool = true) -> Dictionary:
 	var reachable := dressable_ids()
 	for entry in _worn_entries_all():
 		if str(entry.get("item", "")) != item_id:
@@ -1597,6 +1814,8 @@ func _strip_worn(item_id: String, pool: WarbandStash) -> Dictionary:
 		if not reachable.has(merc_id):
 			continue
 		var slot_id := str(entry.get("slot", ""))
+		if not allow_manual and roster.is_manual(merc_id, slot_id):
+			continue
 		var label := "%s (%s)" % [roster.name_of(merc_id), Contracts.slot_id_label(slot_id)]
 		if roster.take_worn(merc_id, slot_id, int(entry.get("set", -1))) != item_id:
 			continue
@@ -1620,13 +1839,32 @@ func _worn_entries_all() -> Array[Dictionary]:
 			out.append(row)
 	return out
 
-## The piece a loot pickup should snap into the soul's hands if it can. It only
-## takes a slot that is empty or holds something clearly worth less *to this body*,
-## so a player never loses a good blade to a lucky drop - and a bowman's bow beats
-## a dearer sword, a tank's shield beats a dearer second blade, and a melee
-## body's greatsword beats a cheaper one-hander. A piece the body's trade refuses
-## is never taken at all, even into an empty hand. Anything else stays in the
-## stash. Returns `{ok, slot, displaced, message}`.
+## Whether a body's hands already hold something to fight with - the one question
+## the loot arming asks before it touches anything. A stowed weapon in the other
+## weapon set is not in hand and does not count, and the naked coverings are not
+## steel, so a body born in rags is still bare.
+func hands_armed(merc_id: int) -> bool:
+	var gear := roster.equipped_of(merc_id)
+	for slot_id in RosterScript.HAND_SLOTS:
+		var item_id := str(gear.get(slot_id, ""))
+		if item_id.is_empty() or EquipmentRules.bare_garment(item_id):
+			continue
+		return true
+	return false
+
+## The piece a loot pickup should snap into the soul's hands - and the one arming
+## the player never has to take back.
+##
+## It only ever *fills* a bare body. A member whose hands already hold something
+## is not auto-armed at all, so no pickup can swap a weapon under the player (or
+## a squadmate) in the middle of a fight: a spare blade waits in the stash for the
+## paperdoll or the body's own RE-EQUIP, which are the two presses that choose for
+## a body outright. For the same reason the target slot must be empty or hold the
+## naked set, and never one the player filled by hand
+## (`WarbandRoster.is_manual`). A piece the body's trade refuses is not taken at
+## all, even into an empty hand (`Contracts.disposition_refuses_gear`: a bow to a
+## blade), and a piece held back from auto-equip stays pooled. Anything else stays
+## in the stash. Returns `{ok, slot, displaced, message}`.
 func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 	if lent:
 		return _lent_refusal({"slot": ""})
@@ -1642,20 +1880,23 @@ func auto_equip(merc_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "message": "", "slot": ""}
 	var disposition := roster.disposition_of(merc_id)
 	# A piece this body's trade never carries is not a pickup it can use: a melee
-	# body does not trade its blade for the band's spare bow, and does not take one
-	# into a hand the blade will fill later. It stays a pool row.
+	# body does not take a bow into a hand the blade will fill later. It stays a
+	# pool row.
 	if Contracts.disposition_refuses_gear(disposition, item):
+		return {"ok": false, "message": "", "slot": ""}
+	# Armed hands are the player's hands, however they were filled.
+	if hands_armed(merc_id):
 		return {"ok": false, "message": "", "slot": ""}
 	var gear := roster.equipped_of(merc_id)
 	var slot_id := EquipmentRules.auto_slot(item, gear)
 	if slot_id.is_empty():
 		return {"ok": false, "message": "", "slot": ""}
+	if roster.is_manual(merc_id, slot_id):
+		return {"ok": false, "message": "", "slot": slot_id}
 	var worn := str(gear.get(slot_id, ""))
-	if not worn.is_empty():
-		var worn_score := _gear_score(worn, State.ITEMS.get(worn, {}), disposition)
-		if _gear_score(item_id, item, disposition) <= worn_score:
-			return {"ok": false, "message": "", "slot": slot_id}
-	var result := equip_merc(merc_id, slot_id, item_id)
+	if not worn.is_empty() and not EquipmentRules.bare_garment(worn):
+		return {"ok": false, "message": "", "slot": slot_id}
+	var result := equip_merc(merc_id, slot_id, item_id, true, false)
 	if not bool(result.get("ok", false)):
 		return {"ok": false, "message": str(result.get("message", "")), "slot": slot_id}
 	return {"ok": true, "slot": slot_id, "message": str(result.get("message", "")),
@@ -2008,7 +2249,6 @@ func reset_state(cap: int = Contracts.MAX_DEPLOYMENT_CAP) -> void:
 	annoints.clear()
 	worn_copies.clear()
 	souls.clear()
-	quests.reset()
 	deployment_cap = maxi(1, cap)
 	seeded = false
 	possession.clear()
@@ -2033,7 +2273,6 @@ func to_dict() -> Dictionary:
 		"annoints": annoints.to_dict(),
 		"worn_copies": worn_copies.duplicate(true),
 		"checkpoint": checkpoint.duplicate(true),
-		"quests": quests.to_dict(),
 		"delve": delve.to_dict(),
 		"party_mode": party_mode,
 		"auto_equip_restricted": restricted_ids(),
@@ -2072,11 +2311,8 @@ func from_dict(data: Dictionary) -> void:
 	# A v3 file has no checkpoint: it resumes at the town, which is what every
 	# save written before autosave existed meant.
 	checkpoint = sanitise_checkpoint(data.get("checkpoint", {}))
-	# A v4 file has no ledger: it opens with no orders, which is exactly the
-	# quartermaster's slate before he speaks.
-	quests.from_dict(QuestScript.sanitise(data.get("quests", {})))
-	# A v8 file has no party mode: the squad fights offensive, as it always did,
-	# and so does a mode this build has never heard of.
+	# A v8 file has no party mode: the squad fights defensive, the band's own
+	# answer, and so does a mode this build has never heard of.
 	var mode := str(data.get("party_mode", Contracts.DEFAULT_PARTY_MODE))
 	party_mode = mode if Contracts.PARTY_MODES.has(mode) else Contracts.DEFAULT_PARTY_MODE
 	# A file written before the dead left the books still carries their records.

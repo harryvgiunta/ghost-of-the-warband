@@ -14,6 +14,10 @@ extends SceneTree
 ## Every hostile here stands frozen (no tick of its own), so nothing it does by
 ## itself can be why the squad went in or stayed out; the town's watch is stood
 ## down for the same reason, and its arrow is asked for once, by hand.
+##
+## A campaign opens with one naked body (`Warband.STARTING_BAND`) - the soul's -
+## so this harness swears the second body the AI drives and arms it out of the
+## shared stash itself: a band of one has nobody else to measure.
 
 const WORLD := "res://scenes/warband_world.tscn"
 const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
@@ -69,9 +73,17 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
+	# The campaign opens with one naked body (`Warband.STARTING_BAND`): the soul's.
+	# This test needs a second body for the AI to drive, so one is sworn here and
+	# armed out of the pool by hand - the square stocks the stash, never a body.
+	warband.seed_starting_band()
+	var sworn: int = warband.add_mercenary("Brine")
+	warband.stash.add("sword_short", 1)
+	check(bool(warband.dress_recruit(sworn).get("ok", false)),
+		"a second body is sworn and armed for the AI to drive")
 	var flow = root.get_node("GameFlow")
 	flow.active = false
-	# The town start: a seeded, armed band and no lesson.
+	# The town start, both bodies standing, and no lesson.
 	flow.world_start = "town"
 	game = load(WORLD).instantiate()
 	root.add_child(game)
@@ -80,7 +92,9 @@ func run() -> void:
 		if game.town != null:
 			for guard in game.town.guards:
 				(guard as Node).process_mode = Node.PROCESS_MODE_DISABLED
-		check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a fresh band fights offensive")
+		check(warband.party_mode == Contracts.DEFAULT_PARTY_MODE
+				and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+			"a fresh band answers rather than hunts (%s)" % str(warband.party_mode))
 		await check_offensive()
 		await check_defensive()
 		await check_passive()
@@ -111,6 +125,9 @@ func _find_bodies() -> bool:
 # --- 1. offensive ------------------------------------------------------------
 
 func check_offensive() -> void:
+	var result: Dictionary = warband.set_party_mode(Contracts.PARTY_OFFENSIVE)
+	check(bool(result.get("ok", false)),
+		"the band takes OFFENSIVE (%s)" % str(result.get("message", "")))
 	var hostile = spawn_hostile("Idle")
 	check(await goes_in(), "OFFENSIVE: an ally goes in on a hostile that has done nothing")
 	await remove_hostile(hostile)

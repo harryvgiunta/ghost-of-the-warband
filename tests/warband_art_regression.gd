@@ -1,34 +1,33 @@
 extends SceneTree
-## Phase 3, wt-15: the camp and the town have to read as places, not as a
+## Phase 3, wt-15: the wood and the town have to read as places, not as a
 ## collection of boxes.
 ##
-## Builds both real scenes headless and holds the dressing to the contract the
-## brief sets: known groups with known child counts, kit-textured materials plus
-## the flame shader exactly where fire belongs, no collider anywhere a body can
-## reach, nothing standing on a spawn or a `G` point, and no prop floating
-## outside the floor the scene actually built.
+## Builds the town's real scene and the wood's own builder headless and holds the
+## dressing to the contract the brief sets: known groups with known child counts,
+## kit-textured materials plus the flame shader exactly where fire belongs, no
+## collider anywhere a body can reach, nothing standing on a spawn or a `G` point,
+## and no prop floating outside the floor the scene actually built.
 ##
-## The spawns and interaction points come from the two scene scripts' own
-## constants - `CAGE_POSTS`, `CAGE_CLAMP_RADIUS`, `GATE_POINT`,
-## `GATE_WATCHERS`, `REINFORCE_POSTS`, `WEAPON_DROPS`, `SPAWN_POSTS` and the four
-## service points - and the dressing modules' declared bounds are compared with
-## the scenes' so the two can never drift apart in silence. Every point a body
-## stands in is a claim this test can make without a rendered window: the
-## geometry source is the authority here, not a screenshot.
+## The spawns and interaction points come from the scene scripts' own constants -
+## `SPAWN_POSTS` and the four service points in the town, `BOSS_POINT` in the wood
+## - and the dressing module's declared bounds are compared with the pocket's so
+## the two can never drift apart in silence. Every point a body stands in is a
+## claim this test can make without a rendered window: the geometry source is the
+## authority here, not a screenshot. The cages are gone with the opening, so the
+## camp section is gone with them: what is left of it is the wood.
 
 const CampDressingScript = preload("res://scripts/warband/camp_dressing.gd")
 const TownDressingScript = preload("res://scripts/warband/town_dressing.gd")
-const CageScript = preload("res://scripts/warband/cage_escape.gd")
+const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
 
 const TEST_SAVE := "user://warband_art_state.json"
 const WARBAND_SAVE := "user://warband_art_warband.json"
-const FLAME_SHADER := "res://scripts/world/shaders/flame.gdshader"
 ## A body's own footprint. A prop may not cover a spot a body stands in, so the
 ## prop's extent plus this has to fit between the prop's anchor and the point.
 const BODY_RADIUS := 0.45
 
-var camp
+var wood
 var town
 var state
 var warband
@@ -69,7 +68,7 @@ func run() -> void:
 	root.add_child(watchdog)
 	watchdog.start()
 
-	await check_camp()
+	await check_wood()
 	await check_town()
 	_finish()
 
@@ -78,7 +77,7 @@ func _on_watchdog() -> void:
 	_finish()
 
 func _finish() -> void:
-	for scene_node in [camp, town]:
+	for scene_node in [wood, town]:
 		if scene_node != null and is_instance_valid(scene_node):
 			scene_node.queue_free()
 	await process_frame
@@ -104,15 +103,8 @@ func lights_under(node: Node, found: Array = []) -> Array:
 		lights_under(child, found)
 	return found
 
-func particles_under(node: Node, found: Array = []) -> Array:
-	if node is CPUParticles3D:
-		found.append(node)
-	for child in node.get_children():
-		particles_under(child, found)
-	return found
-
 ## Anything that could stop, block or touch a body. The dressing may never own
-## one: the camp yard and the town square are the play space.
+## one: the wood's pocket and the town square are the play space.
 func solids_under(node: Node, found: Array = []) -> Array:
 	if node is CollisionObject3D or node is CollisionShape3D:
 		found.append(node)
@@ -142,19 +134,6 @@ func textured_surfaces(materials: Array) -> int:
 	var count := 0
 	for material in materials:
 		if material is StandardMaterial3D and (material as StandardMaterial3D).albedo_texture != null:
-			count += 1
-	return count
-
-func is_flame(material) -> bool:
-	if not (material is ShaderMaterial):
-		return false
-	var shader: Shader = (material as ShaderMaterial).shader
-	return shader != null and String(shader.resource_path) == FLAME_SHADER
-
-func flame_surfaces(materials: Array) -> int:
-	var count := 0
-	for material in materials:
-		if is_flame(material):
 			count += 1
 	return count
 
@@ -190,230 +169,109 @@ func assert_clear(props: Array, points: Array, label: String) -> void:
 		check(margin > 0.0, "%s dressing stands off %s: %s" % [label, String(entry["what"]), closest])
 
 
-## Every record has to be on the ground it claims: inside the walled yard, or
-## outside the walls but still on the floor (the camp gibbets).
-func assert_in_zone(props: Array, label: String, half: float, front: float, back: float,
-		floor_half: float, floor_front: float, floor_back: float) -> void:
-	var strays := 0
-	var detail := ""
-	for record in props:
-		var at: Vector3 = record["position"]
-		var inside_yard: bool = absf(at.x) <= half and at.z >= front and at.z <= back
-		var inside_floor: bool = absf(at.x) <= floor_half and at.z >= floor_front and at.z <= floor_back
-		var wanted_yard := String(record["zone"]) == "yard"
-		var ok := inside_yard if wanted_yard else (inside_floor and not inside_yard)
-		if not ok:
-			strays += 1
-			if detail.is_empty():
-				detail = "%s at (%.1f, %.1f)" % [String(record["name"]), at.x, at.z]
-	check(strays == 0, "%s dressing keeps every prop on its own ground (%d stray: %s)" % [label, strays, detail])
+# --- the wood at the far end of the road -----------------------------------
 
-
-# --- the cage camp ---------------------------------------------------------
-
-func check_camp() -> void:
-	camp = load("res://scenes/cage_escape.tscn").instantiate()
-	root.add_child(camp)
+## The wood is the camp's own builders with the cages taken out: the same pocket,
+## the same ragged stake line, the same shelters, fire and dressing. What is
+## asserted here is what the deletion changed - the clearing is built with no cage
+## at all, the master's patch is clear of everything a body can hit, and he stands
+## on it.
+func check_wood() -> void:
+	wood = Node3D.new()
+	wood.name = "Wood"
+	wood.set_script(WoodScript)
+	root.add_child(wood)
 	await create_timer(0.9).timeout
-	var dressing = camp.get_node_or_null("CampDressing")
-	check(dressing != null and dressing is Node3D, "the cage camp builds its dressing")
-	if dressing == null:
+	var clearing: Dictionary = wood.clearing
+	check(not clearing.is_empty(), "the wood built its clearing")
+	var dressing = wood.get_node_or_null("CampDressing")
+	check(dressing != null and dressing is Node3D, "the wood builds its dressing")
+	if clearing.is_empty() or dressing == null:
 		return
 
-	var groups := ["CageHardware", "Banners", "Gibbets", "AltarDressing", "Braziers", "GroundScatter"]
-	check(dressing.get_child_count() == groups.size(),
-		"the camp dressing is %d prop groups (%d)" % [groups.size(), dressing.get_child_count()])
-	for label in groups:
-		check(dressing.get_node_or_null(label) != null, "the camp dressing has a %s group" % label)
-
-	# Every cage carries its own hardware, bolted to the cage node the scene built.
+	# The cages are gone at the source, not merely hidden.
+	check((clearing.get("cages", []) as Array).is_empty(),
+		"the clearing is built with zero cages (%d)" % (clearing.get("cages", []) as Array).size())
+	check((clearing.get("doors", []) as Array).is_empty(), "and no doors to open")
+	var standing := 0
+	for index in 4:
+		if wood.get_node_or_null("Cage%d" % (index + 1)) != null:
+			standing += 1
+	check(standing == 0, "not one cage node stands in the wood (%d)" % standing)
 	var hardware = dressing.get_node_or_null("CageHardware")
-	check(hardware != null and hardware.get_child_count() == CageScript.CAGE_POSTS.size(),
-		"every cage carries hardware (%d)" % (0 if hardware == null else hardware.get_child_count()))
-	if hardware != null:
-		for index in CageScript.CAGE_POSTS.size():
-			var cage_mesh := hardware.get_node_or_null("Cage%dHardware" % (index + 1)) as MeshInstance3D
-			var post: Vector3 = CageScript.CAGE_POSTS[index]
-			var cage_node := camp.get_node_or_null("Cage%d" % (index + 1)) as Node3D
-			check(cage_mesh != null and cage_node != null, "cage %d has its merged hardware" % (index + 1))
-			if cage_mesh == null or cage_node == null:
+	check(hardware != null and hardware.get_child_count() == 0,
+		"and the dressing bolts no iron to a cage (%d)"
+		% (0 if hardware == null else hardware.get_child_count()))
+	for label in ["Banners", "Gibbets", "AltarDressing", "Braziers", "GroundScatter"]:
+		var group = dressing.get_node_or_null(label)
+		check(group != null and group.get_child_count() > 0,
+			"the wood still carries its %s" % label)
+
+	# The master stands on his own patch, in the open air, with his pair beside
+	# him - the one thing in the wood that fights back properly.
+	check(wood.boss_point().is_equal_approx(WoodScript.BOSS_POINT),
+		"the wood names the demon's patch (%s)" % str(wood.boss_point()))
+	check(wood.master != null and is_instance_valid(wood.master),
+		"the Horned Thing stands in the wood")
+	if wood.master != null and is_instance_valid(wood.master):
+		# Flat only: this build has no baked ground under it, so the body's own
+		# height here is where gravity left it. The patch it stands on is the claim.
+		var at: Vector3 = (wood.master as Node3D).position
+		check(Vector2(at.x - WoodScript.BOSS_POINT.x,
+			at.z - WoodScript.BOSS_POINT.z).length() < 0.01,
+			"on the patch it is named for (%.1f, %.1f)" % [at.x, at.z])
+		check(wood.master_alive(), "and he is on his feet at the build")
+	check(wood.guards.size() == 1 + WoodScript.GUARD_POSTS.size(),
+		"the master and his keepers are the wood's own list (%d)" % wood.guards.size())
+	check(wood.guards.has(wood.master), "the master is on it")
+	for index in WoodScript.GUARD_POSTS.size():
+		var post: Vector3 = WoodScript.GUARD_POSTS[index]
+		var keeper = wood.get_node_or_null("WoodKeeper%d" % (index + 1))
+		check(keeper != null, "keeper %d stands with him" % (index + 1))
+		if keeper != null:
+			check(Vector2(keeper.position.x - post.x, keeper.position.z - post.z).length() < 0.01,
+				"keeper %d holds its own post" % (index + 1))
+
+	# Clearance: nothing solid stands inside the patch, and no dressing prop's
+	# footprint reaches a body standing on it.
+	var solids = clearing.get("solids")
+	var nearest := INF
+	var nearest_name := "nothing"
+	if solids != null:
+		for child in (solids as Node).get_children():
+			if not (child is CollisionShape3D):
 				continue
-			# The hardware is built in the cage's own frame and then placed on it,
-			# so it moves with the cage the scene placed.
-			check(cage_mesh.position.distance_to(cage_node.position) < 0.01,
-				"cage %d hardware sits on its own cage" % (index + 1))
-			check(Vector2(cage_node.position.x, cage_node.position.z).distance_to(
-				Vector2(post.x, post.z)) < 0.01, "cage %d stands on its own post" % (index + 1))
-			check(surfaces_of(cage_mesh) >= 5,
-				"cage %d hardware merges iron, straw and bone (%d surfaces)" % [index + 1, surfaces_of(cage_mesh)])
-
-	# The cult's banners.
-	var banners = dressing.get_node_or_null("Banners")
-	check(banners != null and banners.get_child_count() == CampDressingScript.BANNER_POSTS.size(),
-		"the palisade carries %d banners" % CampDressingScript.BANNER_POSTS.size())
-	if banners != null:
-		for index in banners.get_child_count():
-			var banner := banners.get_child(index) as MeshInstance3D
-			check(banner != null and surfaces_of(banner) >= 3,
-				"banner %d is cloth, sigil and skull in one merge" % (index + 1))
-			var box := world_aabb(banner)
-			check(box.size.y > 3.0, "banner %d hangs the height of the palisade (%.1f m)" % [index + 1, box.size.y])
-
-	# The gibbets on the road in.
-	var gibbets = dressing.get_node_or_null("Gibbets")
-	check(gibbets != null and gibbets.get_child_count() == CampDressingScript.GIBBET_POSTS.size(),
-		"two gibbets frame the gate road")
-	if gibbets != null:
-		for index in gibbets.get_child_count():
-			var gibbet := gibbets.get_child(index) as MeshInstance3D
-			check(gibbet != null and surfaces_of(gibbet) >= 3,
-				"gibbet %d is a frame, a hanging cage and its bones" % (index + 1))
-			var box := world_aabb(gibbet)
-			check(box.size.y > 3.0 and box.size.x > 2.0,
-				"gibbet %d is a gallows, not a stick (%.1f x %.1f m)" % [index + 1, box.size.x, box.size.y])
-
-	# The cold altar: the only place in the camp that burns cold.
-	var altar_group = dressing.get_node_or_null("AltarDressing")
-	var altar_meshes := meshes_under(altar_group)
-	check(altar_meshes.size() == 1, "the altar dressing is one merged mesh (%d)" % altar_meshes.size())
-	var altar_materials := materials_of(altar_meshes)
-	check(textured_surfaces(altar_materials) >= 2,
-		"the altar dressing uses the kit's stone, bone and twig (%d textured)" % textured_surfaces(altar_materials))
-	var cold_flames := 0
-	for material in altar_materials:
-		if not is_flame(material):
-			continue
-		cold_flames += 1
-		var hot = (material as ShaderMaterial).get_shader_parameter("hot_color")
-		var cool = (material as ShaderMaterial).get_shader_parameter("cool_color")
-		check(hot is Color and (hot as Color).b > (hot as Color).r,
-			"the altar's flame cards ask the flame shader for a cold palette")
-		check(cool is Color and (cool as Color).b > (cool as Color).r,
-			"the altar's flame tips are blue, not orange")
-	check(cold_flames == 1, "the altar owns its own cold flame material, not the fire's (%d)" % cold_flames)
-	check(lights_under(altar_group).size() == 1, "the cold altar casts one light")
-
-	# Four ember braziers: flame cards, embers and a light each.
-	var braziers = dressing.get_node_or_null("Braziers")
-	check(braziers != null and braziers.get_child_count() == CampDressingScript.BRAZIER_POSTS.size(),
-		"the yard has %d braziers" % CampDressingScript.BRAZIER_POSTS.size())
-	if braziers != null:
-		for index in braziers.get_child_count():
-			var brazier := braziers.get_child(index) as Node3D
-			var brazier_meshes := meshes_under(brazier)
-			check(brazier_meshes.size() == 1, "brazier %d is one merged iron-and-coals mesh" % (index + 1))
-			check(flame_surfaces(materials_of(brazier_meshes)) >= 1,
-				"brazier %d burns on the flame shader" % (index + 1))
-			check(particles_under(brazier).size() >= 1, "brazier %d throws embers" % (index + 1))
-			var brazier_lights := lights_under(brazier)
-			check(brazier_lights.size() == 1 and (brazier_lights[0] as Light3D).light_energy > 1.0,
-				"brazier %d lights the yard" % (index + 1))
-			check(brazier_lights.size() == 1 and brazier_lights[0] is FireFlicker,
-				"brazier %d breathes instead of glowing flat" % (index + 1))
-
-	# The litter. The cart ruts are not litter any more: they are worn into the
-	# world's ground map, which `warband_world_regression` reads.
-	var scatter = dressing.get_node_or_null("GroundScatter")
-	check(scatter != null and scatter.get_child_count() == 2,
-		"the ground carries straw and blood (%d)" % (0 if scatter == null else scatter.get_child_count()))
-	if scatter != null:
-		for label in ["StrawScatter", "BloodStains"]:
-			var flat := scatter.get_node_or_null(label) as MeshInstance3D
-			check(flat != null and surfaces_of(flat) >= 1, "%s is merged into one mesh" % label)
-			if flat == null:
-				continue
-			check(flat.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
-				"%s is ground litter, so it casts no shadow" % label)
-			check(world_aabb(flat).size.y < 0.6, "%s lies flat on the yard (%.2f m)" % [label, world_aabb(flat).size.y])
-		var stains := scatter.get_node_or_null("BloodStains") as MeshInstance3D
-		if stains != null and stains.mesh != null:
-			# A stain is a soft splat, never a hard-edged disc of flat colour.
-			for surface in stains.mesh.get_surface_count():
-				var blood := stains.mesh.surface_get_material(surface) as StandardMaterial3D
-				check(blood != null and blood.albedo_texture != null
-					and blood.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED,
-					"stain surface %d is a soft-edged splat, not a disc" % surface)
-				if blood != null:
-					var colour: Color = blood.albedo_color
-					check(colour.r > colour.g * 2.0 and colour.r > colour.b * 2.0,
-						"the stains are blood and not paint (%s)" % colour.to_html(false))
-
-	# Materials: every surface has one, the kits' textures are in use, and the
-	# flame shader appears exactly where something burns.
-	var camp_meshes := meshes_under(dressing)
-	var camp_materials := materials_of(camp_meshes)
-	var unset := 0
-	for material in camp_materials:
-		if material == null:
-			unset += 1
-	check(unset == 0, "every merged surface carries a material (%d unset)" % unset)
-	check(textured_surfaces(camp_materials) >= 6,
-		"the camp dressing is textured from the world kits (%d textured surfaces)" % textured_surfaces(camp_materials))
-	check(flame_surfaces(camp_materials) >= 5,
-		"four braziers and the altar share the flame shader (%d flame surfaces)" % flame_surfaces(camp_materials))
-
-	# No collider. Not one, anywhere in the dressing.
-	var solids := solids_under(dressing)
-	check(solids.is_empty(), "the camp dressing adds no collider (%d found)" % solids.size())
-
-	# Bounds: the dressing's declared yard is the scene's yard, the declared floor
-	# is bigger than the walls (rule 12), and no prop orbits off the ground.
-	check(is_equal_approx(CampDressingScript.YARD_HALF_WIDTH, CageScript.YARD_HALF_WIDTH)
-		and is_equal_approx(CampDressingScript.YARD_FRONT, CageScript.YARD_FRONT)
-		and is_equal_approx(CampDressingScript.YARD_BACK, CageScript.YARD_BACK),
-		"the dressing's yard mirrors cage_escape.gd's YARD_*")
-	check(CampDressingScript.FLOOR_HALF_WIDTH > CageScript.YARD_HALF_WIDTH
-		and CampDressingScript.FLOOR_FRONT < CageScript.YARD_FRONT
-		and CampDressingScript.FLOOR_BACK > CageScript.YARD_BACK,
-		"the declared floor is bigger than the walls, always")
-
+			var at: Vector3 = (child as Node3D).global_position
+			var gap := Vector2(at.x - WoodScript.BOSS_POINT.x, at.z - WoodScript.BOSS_POINT.z).length()
+			if gap < nearest:
+				nearest = gap
+				nearest_name = "a trunk at (%.1f, %.1f)" % [at.x, at.z]
+	check(nearest >= 7.0, "no trunk stands inside the fight's patch (nearest %s, %.1f m)"
+		% [nearest_name, nearest])
 	var props := props_of(dressing)
-	check(props.size() >= 30, "the camp dressing records %d props for the clearance check" % props.size())
-	assert_in_zone(props, "camp", CageScript.YARD_HALF_WIDTH, CageScript.YARD_FRONT,
-		CageScript.YARD_BACK, CampDressingScript.FLOOR_HALF_WIDTH,
-		CampDressingScript.FLOOR_FRONT, CampDressingScript.FLOOR_BACK)
+	check(props.size() >= 20, "the wood dressing records %d props for the clearance check" % props.size())
+	assert_clear(props, [{"what": "the master's patch", "point": WoodScript.BOSS_POINT,
+		"reach": 0.0}], "wood")
 
-	# Real geometry, not just records: every merged mesh of every yard group has
-	# to sit inside the walled yard, and the gibbets outside it.
-	var inside_groups := ["CageHardware", "Banners", "AltarDressing", "Braziers", "GroundScatter"]
-	var outside_yard := 0
-	var half := float(CageScript.YARD_HALF_WIDTH)
-	var front := float(CageScript.YARD_FRONT)
-	var back := float(CageScript.YARD_BACK)
-	for label in inside_groups:
-		for mesh_instance in meshes_under(dressing.get_node_or_null(label)):
-			var box := world_aabb(mesh_instance)
-			var inside: bool = box.position.x >= -half - 0.05 and box.end.x <= half + 0.05
-			inside = inside and box.position.z >= front - 0.05 and box.end.z <= back + 0.05
-			if not inside:
-				outside_yard += 1
-	check(outside_yard == 0, "every yard prop's geometry is inside the palisade (%d outside)" % outside_yard)
-	var off_floor := 0
-	for mesh_instance in meshes_under(dressing.get_node_or_null("Gibbets")):
-		var box := world_aabb(mesh_instance)
-		var on_floor: bool = box.end.z < front and box.position.z > CampDressingScript.FLOOR_FRONT
-		on_floor = on_floor and absf(box.position.x) < CampDressingScript.FLOOR_HALF_WIDTH
-		if not on_floor:
-			off_floor += 1
-	check(off_floor == 0, "the gibbets stand outside the walls but on the floor (%d off)" % off_floor)
+	# The dressing's declared yard is the pocket's, so the two cannot drift.
+	check(is_equal_approx(CampDressingScript.YARD_HALF_WIDTH, WoodScript.YARD_HALF_WIDTH)
+		and is_equal_approx(CampDressingScript.YARD_FRONT, WoodScript.YARD_FRONT)
+		and is_equal_approx(CampDressingScript.YARD_BACK, WoodScript.YARD_BACK),
+		"the dressing's yard mirrors wood_boss.gd's YARD_*")
+	check(CampDressingScript.FLOOR_HALF_WIDTH > WoodScript.YARD_HALF_WIDTH
+		and CampDressingScript.FLOOR_FRONT < WoodScript.YARD_FRONT
+		and CampDressingScript.FLOOR_BACK > WoodScript.YARD_BACK,
+		"the declared floor is bigger than the pocket, always")
+	check(int(clearing.get("trees", 0)) >= 150,
+		"the pocket still sits inside a real wood (%d trees)" % int(clearing.get("trees", 0)))
+	check(int(clearing.get("stakes", 0)) >= 60,
+		"its boundary is still a ragged stake line (%d)" % int(clearing.get("stakes", 0)))
 
-	# Nobody's spawn, no `G` point, no drop is under a prop.
-	var points: Array = []
-	for post in CageScript.CAGE_POSTS:
-		points.append({"what": "a cage", "point": post, "reach": float(CageScript.CAGE_CLAMP_RADIUS)})
-	points.append({"what": "the gate", "point": CageScript.GATE_POINT, "reach": float(CageScript.GATE_RADIUS)})
-	for entry in CageScript.GATE_WATCHERS:
-		points.append({"what": "a gate watcher's post", "point": entry["post"], "reach": 0.5})
-	for post in CageScript.REINFORCE_POSTS:
-		points.append({"what": "a reinforcement post", "point": post, "reach": 0.0})
-	for drop in CageScript.WEAPON_DROPS:
-		points.append({"what": "a weapon drop", "point": drop[1], "reach": 0.4})
-	assert_clear(props, points, "camp")
+	print("WARBAND_ART_WOOD groups=%d trees=%d stakes=%d props=%d nearest_solid=%.1f" % [
+		dressing.get_child_count(), int(clearing.get("trees", 0)),
+		int(clearing.get("stakes", 0)), props.size(), nearest])
 
-	print("WARBAND_ART_CAMP groups=%d meshes=%d props=%d materials=%d" % [
-		dressing.get_child_count(), camp_meshes.size(), props.size(), camp_materials.size()])
-
-	camp.queue_free()
+	wood.queue_free()
 	await process_frame
 
 

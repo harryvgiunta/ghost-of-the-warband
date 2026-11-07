@@ -5,7 +5,8 @@ extends RefCounted
 ##
 ## A mercenary is a plain dictionary so it survives save/load and the wire
 ## without a serializer: `id`, `name`, `health`, `max_health`, `state`,
-## `equipped`, `downed_seconds`, `reserve`. Every record is created
+## `equipped`, `downed_seconds`, `reserve`, the two weapon sets, the player's
+## hotbar layout and the slots the player dressed by hand. Every record is created
 ## at `WarbandContracts.BASE_MAX_HEALTH` with empty hands: the ONLY thing that
 ## differentiates two mercenaries is the gear in `equipped`.
 ##
@@ -56,6 +57,13 @@ const KEY_DISPOSITION := "disposition"
 ## order. An id whose piece is stowed is kept here and skipped by
 ## `AbilityRules.granted`, so a swap does not erase the place the player gave it.
 const KEY_HOTBAR := "hotbar_order"
+## The slots the player filled by hand, in the order they did it. A pinned slot
+## is the player's: the loot arming never fills it, the band's arming pass never
+## takes the piece back, and no hand-off reaches into it for another body. The
+## pins survive a save, a body hop and the wire; the press that clears them is the
+## body's own re-equip (`Warband.reequip_merc`), the one button that says "choose
+## for me" outright.
+const KEY_MANUAL := "manual"
 
 var _mercs: Array[Dictionary] = []
 var _next_id := 1
@@ -84,7 +92,23 @@ static func make_record(merc_id: int, merc_name: String,
 		KEY_RESERVE: false,
 		KEY_DISPOSITION: Contracts.DEFAULT_DISPOSITION,
 		KEY_HOTBAR: [],
+		KEY_MANUAL: [],
 	}
+
+
+## The hand-set slots a save wrote: legal slot ids, each once, in the order the
+## player filled them. A record from a file that predates the pins has none, and
+## nothing is pinned - which is exactly what an empty list means.
+static func sanitise_manual(value: Variant) -> Array[String]:
+	var out: Array[String] = []
+	if not value is Array:
+		return out
+	for entry in value:
+		var slot_id := str(entry) if typeof(entry) == TYPE_STRING else ""
+		if slot_id.is_empty() or not slot_id in EquipmentRules.SLOTS or out.has(slot_id):
+			continue
+		out.append(slot_id)
+	return out
 
 
 ## A saved hotbar layout in the shape the game writes: ability ids, each once,
@@ -266,6 +290,9 @@ func add_record(record: Dictionary) -> int:
 	# A record written before the keys could be rearranged carries no layout:
 	# the kit's own order, which is exactly what an empty list means.
 	copy[KEY_HOTBAR] = sanitise_hotbar(copy.get(KEY_HOTBAR, []))
+	# A record written before the player could set a piece by hand carries no
+	# pins: every slot is the arming's, as it always was.
+	copy[KEY_MANUAL] = sanitise_manual(copy.get(KEY_MANUAL, []))
 	var gear := empty_equipment()
 	var saved_gear: Variant = copy.get(KEY_EQUIPPED, {})
 	if saved_gear is Dictionary:
@@ -554,8 +581,42 @@ func worn_entries(merc_id: int) -> Array[Dictionary]:
 				out.append({"slot": slot, "item": item_id, "set": index})
 	return out
 
+## The slots this body's kit was filled into by hand, in the order the player did
+## it. Empty for a body the band dressed itself.
+func manual_slots(merc_id: int) -> Array[String]:
+	return sanitise_manual(find(merc_id).get(KEY_MANUAL, []))
+
+## Whether one slot is the player's. Every automatic path asks this before it
+## touches a piece: the loot arming, the band's own dressing and a hand-off that
+## would carry the piece to another body.
+func is_manual(merc_id: int, slot_id: String) -> bool:
+	return manual_slots(merc_id).has(slot_id)
+
+## Pin or unpin one slot; idempotent, so a click that equips over a pinned slot
+## keeps it pinned instead of writing the slot twice.
+func set_manual(merc_id: int, slot_id: String, pinned: bool = true) -> void:
+	var record := find(merc_id)
+	if record.is_empty() or not slot_id in EquipmentRules.SLOTS:
+		return
+	var slots := sanitise_manual(record.get(KEY_MANUAL, []))
+	if pinned and not slots.has(slot_id):
+		slots.append(slot_id)
+	elif not pinned:
+		slots.erase(slot_id)
+	record[KEY_MANUAL] = slots
+
+## Let the band choose for this body again: every pin goes at once, which is what
+## the body's own re-equip press asks for.
+func clear_manual(merc_id: int) -> void:
+	var record := find(merc_id)
+	if not record.is_empty():
+		record[KEY_MANUAL] = []
+
 ## Take one worn piece off. `set_index` -1 is a body slot, otherwise the weapon
 ## set the hand belongs to. Returns the item id that came off (empty when bare).
+## A slot a piece has left is no longer the player's: the pin protected the piece,
+## and a bare slot is the arming's again - which is what lets a hand emptied by a
+## disarm, a sale or a drop be filled again.
 func take_worn(merc_id: int, slot_id: String, set_index: int = -1) -> String:
 	var record := find(merc_id)
 	if record.is_empty():
@@ -569,11 +630,13 @@ func take_worn(merc_id: int, slot_id: String, set_index: int = -1) -> String:
 		item_id = str(pair.get(slot_id, ""))
 		pair[slot_id] = ""
 		sets[set_index] = pair
+		set_manual(merc_id, slot_id, false)
 		_sync_hands(record)
 		return item_id
 	var gear: Dictionary = _sync_hands(record)
 	item_id = str(gear.get(slot_id, ""))
 	gear[slot_id] = ""
+	set_manual(merc_id, slot_id, false)
 	if slot_id in HAND_SLOTS:
 		_store_hands(record)
 	return item_id
@@ -711,6 +774,8 @@ func unequip(merc_id: int, slot_id: String) -> String:
 	var gear: Dictionary = _sync_hands(record)
 	var item_id := str(gear.get(slot_id, ""))
 	gear[slot_id] = ""
+	# The piece leaves, so the slot is the arming's again (see `take_worn`).
+	set_manual(merc_id, slot_id, false)
 	if str(slot_id) in HAND_SLOTS:
 		_store_hands(record)
 	return item_id

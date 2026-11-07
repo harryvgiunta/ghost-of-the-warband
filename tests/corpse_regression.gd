@@ -6,6 +6,12 @@ extends SceneTree
 
 var failures := 0
 var checks := 0
+## The whole regression is a handful of physics frames and about twelve seconds
+## of waits; a scene that is still running well past that is stalled, not slow.
+## The budget sits under the harness's kill so a stalled run fails here, on its
+## own clock and with its own report, instead of being terminated by the runner
+## with no failing check in the log.
+const BUDGET_SECONDS := 60.0
 
 
 func _initialize() -> void:
@@ -25,7 +31,7 @@ func pause(seconds: float) -> void:
 
 
 func run() -> void:
-	var watchdog := create_timer(90.0)
+	var watchdog := create_timer(BUDGET_SECONDS)
 	watchdog.timeout.connect(_on_watchdog)
 	var CorpseHold = load("res://scripts/corpse_hold.gd")
 	var CorpsePhysics = load("res://scripts/corpse_physics.gd")
@@ -131,18 +137,20 @@ func run() -> void:
 	# depth-role devils keep their authored collapse and fall by root.
 	check(CorpsePhysics.is_limp(wolf._wolf), "The wolf corpse is a physical ragdoll")
 	check(CorpsePhysics.is_limp(cinder._devil), "The cinder corpse is a physical ragdoll")
-	check(CorpsePhysics.is_limp(pack._visual), "An imported devil corpse is a physical ragdoll")
 	check(CorpsePhysics.is_limp(delve_species._visual), "A delve species corpse is a physical ragdoll")
 	check(not CorpsePhysics.is_limp(delve._visual), "A procedural corpse keeps its authored collapse")
 	var wolf_sim := wolf._wolf.find_child("CorpseRagdoll", true, false) as PhysicalBoneSimulator3D
 	var wolf_bones := wolf_sim.get_child_count() if wolf_sim != null else 0
 	check(wolf_bones >= 10, "The wolf ragdoll builds its driven bone chain")
+	# The goat is no longer an animal on the imported skeleton he shipped with:
+	# he wears a fitted skin on the warband's own rig, so his corpse has to hang
+	# on the ranger's 65 bones and fall as the shared ragdoll a ranger's does.
 	var goat_skeleton := pack._visual.find_child("Skeleton3D", true, false) as Skeleton3D
-	var eye_bone := goat_skeleton.find_bone("neutral_bone")
-	var eye_parent := goat_skeleton.get_bone_name(goat_skeleton.get_bone_parent(eye_bone)) \
-		if eye_bone >= 0 else ""
-	check(eye_parent in ["Head", "head"],
-		"The goat's stray eye bone is adopted by the head before simulation")
+	var goat_bones := -1 if goat_skeleton == null else goat_skeleton.get_bone_count()
+	check(goat_bones == 65,
+		"The goat corpse stands on the warband's own 65-bone rig (%d)" % goat_bones)
+	check(CorpsePhysics.is_limp(pack._visual),
+		"A fitted skin's corpse is a limp ragdoll like a ranger's")
 	if wolf_sim != null:
 		var first_bone := wolf_sim.get_child(0) as PhysicalBone3D
 		check(first_bone.collision_layer == 0 and first_bone.collision_mask == 1,
@@ -235,7 +243,7 @@ func run() -> void:
 		var piece := flight.find_child("GorePiece", true, false) as MeshInstance3D
 		check(piece != null and piece.mesh != null
 				and piece.mesh.get_surface_count() > 0
-				and piece.mesh.surface_get_array_len(0) > 0,
+				and _vertices(piece.mesh) > 0,
 			"The thrown piece is a mesh of its own, carrying the rig's surfaces")
 		check(flight.get_child_count() == 2,
 			"The arrow that killed it leaves the body with the head")
@@ -379,6 +387,54 @@ func run() -> void:
 				halves_drawn += 1
 	check(halves == 2 and halves_drawn == 2,
 		"An overhead slices the body into two halves, each with its cut face")
+	# A half is a half: the two pieces carry the body once between them, no half
+	# carries the whole posed mesh, and the blade's plane is the only place the
+	# two of them meet.
+	var half_vertices: Array = []
+	var first_side := {}
+	var shared := {}
+	if halves_holder != null:
+		for arm in halves_holder.get_children():
+			var arm_piece := arm.find_child("GoreHalf", true, false) as MeshInstance3D
+			var total := 0
+			if arm_piece != null and arm_piece.mesh != null:
+				for surface in arm_piece.mesh.get_surface_count():
+					var arrays := arm_piece.mesh.surface_get_arrays(surface)
+					if arrays.is_empty():
+						continue
+					var points = arrays[Mesh.ARRAY_VERTEX]
+					if points == null:
+						continue
+					total += points.size()
+					for vertex in points.size():
+						var point: Vector3 = points[vertex]
+						var key := _quantized(point)
+						if half_vertices.is_empty():
+							first_side[key] = point
+						elif first_side.has(key):
+							shared[key] = point
+			half_vertices.append(total)
+	var body_vertices := 0
+	for node in bisected._visual.find_children("*", "MeshInstance3D", true, false):
+		var drawn := node as MeshInstance3D
+		if drawn.mesh == null or drawn.has_meta("blood_stain"):
+			continue
+		var split := false
+		var parent := drawn.get_parent()
+		while parent != null:
+			if str(parent.name) == "SplitBody":
+				split = true
+				break
+			parent = parent.get_parent()
+		if split:
+			continue
+		body_vertices += _vertices(drawn.mesh)
+	check(half_vertices.size() == 2 and body_vertices > 0
+			and int(half_vertices[0]) < body_vertices
+			and int(half_vertices[1]) < body_vertices,
+		"Each half carries its own side of the cut, not the whole posed body")
+	check(shared.is_empty() or _coplanar(shared.values()),
+		"The two halves meet only along the blade's plane")
 	check(bisected._visual.find_child("BodyStump", true, false) == null,
 		"A sliced body is replaced by its halves instead of keeping a stump")
 	check(low_cut._wolf.find_child("SplitBody", true, false) == null,
@@ -442,6 +498,26 @@ func run() -> void:
 	quit(0 if failures == 0 else 1)
 
 
+## The vertex count of a mesh, on any `Mesh`. Godot 3's `surface_get_array_len`
+## is gone in Godot 4 and was never on a primitive (`CylinderMesh`, `TorusMesh`):
+## the one answer every `Mesh` gives is `surface_get_arrays`, whose
+## `Mesh.ARRAY_VERTEX` is the count. A surface that answers no vertex array -
+## an unset mesh, a proxy with nothing drawn - counts as none instead of
+## erroring the check it is read in.
+func _vertices(mesh: Mesh) -> int:
+	if mesh == null:
+		return 0
+	var total := 0
+	for surface in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(surface)
+		if arrays.is_empty():
+			continue
+		var points = arrays[Mesh.ARRAY_VERTEX]
+		if points is PackedVector3Array:
+			total += (points as PackedVector3Array).size()
+	return total
+
+
 ## The deforming head bone of a rig, the same rule `SeveredHead` uses: the outer
 ## bone wins where a rig carries an empty `head` helper under `Head`.
 func _head_bone(skeleton: Skeleton3D) -> int:
@@ -473,6 +549,47 @@ func _bone_world(visual: Node3D, bone_name: String) -> Vector3:
 	return skeleton.get_global_transform() * skeleton.get_bone_global_pose(bone).origin
 
 
+## A corner of a piece, quantised to a tenth of a millimetre: two halves that
+## wrote the same corner of the body are found as one.
+func _quantized(point: Vector3) -> Vector3i:
+	return Vector3i(roundi(point.x * 10000.0), roundi(point.y * 10000.0),
+		roundi(point.z * 10000.0))
+
+
+## True when every point lies in one plane: the two halves of one body only share
+## a corner where the blade's plane went through it.
+func _coplanar(points: Array) -> bool:
+	var first: Vector3 = points[0]
+	var second := Vector3.ZERO
+	var spread := false
+	for index in range(1, points.size()):
+		var other: Vector3 = points[index]
+		if other.distance_to(first) > 0.001:
+			second = other
+			spread = true
+			break
+	if not spread:
+		return true
+	var normal := Vector3.ZERO
+	for index in range(1, points.size()):
+		var other: Vector3 = points[index]
+		var cross := (second - first).cross(other - first)
+		if cross.length_squared() > 0.000001:
+			normal = cross.normalized()
+			break
+	if normal == Vector3.ZERO:
+		return true
+	for point in points:
+		var at: Vector3 = point
+		if absf(normal.dot(at - first)) > 0.002:
+			return false
+	return true
+
+
 func _on_watchdog() -> void:
-	print("CORPSE_WATCHDOG failures=", failures, " checks=", checks)
-	quit(2)
+	# A run that never reached its own `quit` is a failure, and it says so on its
+	# own clock: the harness's kill leaves no failing check behind, only a hang.
+	check(false, "The corpse regression reaches its own finish inside its budget")
+	print("CORPSE_REGRESSION checks=%d failures=%d watchdog=stalled"
+		% [checks, failures])
+	quit(1)

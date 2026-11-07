@@ -39,13 +39,20 @@ static func fits(args: Array) -> bool:
 ## (the snapshot tick) rides beside them. `batches([])` is empty. An entry too
 ## big to share a datagram is still returned alone rather than dropped, so a
 ## regression can catch the oversized snapshot instead of hiding it.
-static func batches(entries: Array, fixed: Array = []) -> Array:
+## `sizes`, when given, is the encoded size of each entry, measured once by a
+## caller that found the same state already (the mob stream measures every
+## guard once per send tick and shares it with every peer). Sizing an entry is a
+## full `var_to_bytes`; measuring the same body again per peer was the largest
+## term in the host's send tick.
+static func batches(entries: Array, fixed: Array = [],
+		sizes: PackedInt32Array = PackedInt32Array()) -> Array:
 	var base := message_size(fixed) + ARRAY_HEADER
 	var out: Array = []
 	var batch: Array = []
 	var used := base
-	for entry in entries:
-		var cost := size(entry)
+	for index in entries.size():
+		var entry: Variant = entries[index]
+		var cost := int(sizes[index]) if index < sizes.size() else size(entry)
 		if not batch.is_empty() and used + cost > PAYLOAD:
 			out.append(batch)
 			batch = []

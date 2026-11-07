@@ -2,7 +2,7 @@ extends SceneTree
 ## GHOST OF THE WARBAND: the four doors on the title, through the real `GameFlow`
 ## and the real world scene.
 ##
-## New Campaign opens the world at the cages with a fresh warband and a fresh
+## New Campaign opens the world in Hearthstead with a fresh warband and a fresh
 ## purse; Resume Campaign opens it where the save's bookmark stands; a campaign
 ## that was left through the menu is on disk and resumes; and leaving the world
 ## never strands the flow. The world's own content is proven by its own
@@ -14,7 +14,7 @@ const RosterScript = preload("res://scripts/warband/warband_roster.gd")
 
 const TEST_SAVE := "user://game_flow_state.json"
 const WARBAND_SAVE := "user://game_flow_warband.json"
-## The campaign is one world: the cages, the trail and the town are the same scene.
+## The campaign is one world: the wood, the trail and the town are the same scene.
 const WORLD := "res://scenes/warband_world.tscn"
 
 var flow
@@ -48,7 +48,7 @@ func run() -> void:
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
 
-	# --- NEW CAMPAIGN: the cages, a fresh warband and a fresh purse -----------
+	# --- NEW CAMPAIGN: Hearthstead, a fresh warband and a fresh purse ---------
 	check(int(state.credits) > 0, "the purse starts with the new-game credits")
 	warband.hire("Old Hand")
 	warband.add_mercenary("Survivor")
@@ -62,9 +62,13 @@ func run() -> void:
 	if world == null:
 		_finish()
 		return
-	check(flow.world_start == "camp", "at the cages, which is where a run starts")
-	check(world.bodies.size() >= 5, "the cages field the squad (%d bodies)" % world.bodies.size())
-	check(warband.roster.count() >= 5, "and the warband owns them (%d)" % warband.roster.count())
+	check(flow.world_start == "town", "at Hearthstead, which is where a run starts")
+	# A fresh band is one naked body: nothing is issued at the door, and every
+	# piece it ends the run in is taken off a kill.
+	check(world.bodies.size() == warband.STARTING_BAND.size(),
+		"the square fields the starting band (%d bodies)" % world.bodies.size())
+	check(warband.roster.count() == warband.STARTING_BAND.size(),
+		"and the warband owns them (%d)" % warband.roster.count())
 	check(flow.transitions == 1, "one transition so far")
 	check(int(state.credits) > 0, "the purse is the new-game purse, not a previous run's")
 
@@ -92,7 +96,7 @@ func run() -> void:
 	if resumed == null:
 		_finish()
 		return
-	check(flow.world_start == "checkpoint", "at the bookmark, not the cages (%s)" % flow.world_start)
+	check(flow.world_start == "checkpoint", "at the bookmark, not the square (%s)" % flow.world_start)
 	check(warband.has_checkpoint(), "and the bookmark is still the one the save holds")
 	check(flow.transitions == 2, "each door is one transition (%d)" % flow.transitions)
 

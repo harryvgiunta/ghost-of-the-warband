@@ -1,12 +1,17 @@
 class_name SoldierCages
 extends Node3D
-## Four of the warband's own, shut in iron cages along the way to town.
+## One of the warband's own, shut in an iron cage on the way to town.
 ##
-## The quartermaster's first order points at cages in the wood, and until now
-## there were none past the camp: the opening's four latches are the lesson, and
+## The quartermaster's first order points at the cage line in the wood, and until
+## now there were none past the camp: the opening's latches are the lesson, and
 ## the road beyond them belonged to the cult. This node is the rest of that line -
-## four soldiers the wardens took on the road, caged at four stretches of the
-## walk and left there, one per quarter of the lane.
+## one soldier the wardens took on the road, caged half way along the walk and
+## left there.
+##
+## He is the second body of the party, and that is the whole of the road's
+## recruitment: the warband leaves the intro one body strong and walks into town
+## two, the rescued man dressed out of the shared stash when his name reaches the
+## roll.
 ##
 ## A cage is the camp's own furniture (`camp_clearing.gd::_build_cage`): a slab,
 ## four corner posts, bars on three sides and a door of bars on the fourth. The
@@ -21,7 +26,7 @@ extends Node3D
 ##
 ## The two rules the world measures this against are the lane's clearance - the
 ## wood is walked on a 1.55 m half-band and a post on the centre line stops a body
-## dead, so every cage stands 6-9 m out and its nearest post is more than 6 m from
+## dead, so the cage stands 6-9 m out and its nearest post is more than 6 m from
 ## the worn line - and the reach of a latch: a press is a cut made from the dirt
 ## at the bars, and bare hands do not cut iron.
 ##
@@ -36,22 +41,22 @@ const State = preload("res://scripts/player_state.gd")
 const WarbandLooks = preload("res://scripts/warband/warband_looks.gd")
 const Archer = preload("res://scripts/archer.gd")
 const RigPresence = preload("res://scripts/rig_presence.gd")
-const QuestMarker = preload("res://scripts/warband/quest_marker.gd")
+const LessonArrow = preload("res://scripts/warband/lesson_arrow.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
-## Where on the way each cage stands, as a fraction of the lane's own length.
-## Four stretches, spread far enough apart that a body meets the first one before
-## it has walked a third of the road and the last one near the town.
-const CAGE_FRACTIONS := [0.34, 0.52, 0.68, 0.86]
-## Alternating sides, so walking the road passes a cage on the left, then the
-## right: the line reads as a road the wardens work, not a row of a pen.
-const CAGE_SIDES := [1.0, -1.0, 1.0, -1.0]
+## Where on the road the cage stands, as a fraction of the lane's own length:
+## half way to town, the stretch a body walks into with the camp still behind it
+## and the gate not yet in sight.
+const CAGE_FRACTIONS := [0.45]
+## The side of the lane he stands off: the left shoulder, so the bars and the
+## gold arrow read across the walk rather than behind it.
+const CAGE_SIDES := [1.0]
 ## Metres off the lane's centre line. The band the wood keeps clear is
-## `RunForestScript.CLEAR_HALF` (1.55 m), and a cage's own footprint reaches
-## 1.25 m back toward the road from its centre - so at 7.6-8.6 m out no post is
-## ever inside 6 m of the worn line, and the walk is untouched.
-const CAGE_OFFSETS := [7.9, 8.6, 7.6, 8.3]
+## `RunForestScript.CLEAR_HALF` (1.55 m), and the cage's own footprint reaches
+## 1.25 m back toward the road from its centre - so at 7.9 m out no post is ever
+## inside 6 m of the worn line, and the walk is untouched.
+const CAGE_OFFSETS := [7.9]
 ## Along the lane, tried in order, until the cage's footprint clears every solid
 ## trunk. The near tree rows stand 11 m apart, so a few metres either way always
 ## finds a gap between them.
@@ -81,18 +86,18 @@ const MARKER_POLL := 0.35
 const MARKER_HEIGHT := 3.45
 const MARKER_LABEL := "FREE HIM"
 
-## The four names the roll takes, in cage order. One per cage, never offered
-## twice: a freed soldier is a name on the warband, not a respawn.
-const SOLDIER_NAMES := ["Bren", "Hask", "Ilse", "Torvin"]
-## The looks the caged figures wear. A look is a pure function of an id
-## (`WarbandLooks.profile_for`), so a prisoner is given one of his own: he is a
+## The one name the roll takes. A freed soldier is a name on the warband, not a
+## respawn, so it is offered once and never again.
+const SOLDIER_NAMES := ["Bren"]
+## The look the caged figure wears. A look is a pure function of an id
+## (`WarbandLooks.profile_for`), so the prisoner is given one of his own: he is a
 ## body to look at behind the bars, and the man the roll fields when the latch
 ## opens is dressed from the id the roster hands him.
-const SOLDIER_LOOKS := [13, 19, 26, 31]
-## Prisoners, not soldiers: the makeshift set where a rag survived the taking and
-## bare skin everywhere else, and nothing at all in either hand.
+const SOLDIER_LOOKS := [13]
+## A prisoner, not a soldier: the makeshift set where a rag survived the taking
+## and bare skin everywhere else, and nothing at all in either hand.
 const SOLDIER_RAGS := [
-	["legs", "feet"], ["chest"], ["legs"], ["chest", "hands"],
+	["legs", "feet"],
 ]
 const RAG_SET := "makeshift"
 
@@ -103,16 +108,16 @@ var host: Node3D = null
 ## shut, freed}`. `shut` goes false the frame the latch is cut; `freed` goes true
 ## when the name reaches the roll, so the two are not the same fact.
 var _cages: Array[Dictionary] = []
-var _marker: QuestMarker = null
+var _marker: LessonArrow = null
 var _poll := 0.0
 var _wood: Material = null
 var _iron: Material = null
 
 
-## Build the four cages into `world`. The node parents itself under the world if
-## the caller has not done it yet: a cage's global position is what the marker and
-## the tests read, and a setup that silently produced four orphans would be worse
-## than a little adoption.
+## Build the cage into `world`. The node parents itself under the world if the
+## caller has not done it yet: a cage's global position is what the marker and the
+## tests read, and a setup that silently produced an orphan would be worse than a
+## little adoption.
 func setup(world: Node3D) -> void:
 	if not is_instance_valid(world):
 		push_error("SoldierCages.setup() needs the world")
@@ -338,14 +343,14 @@ func _discard(index: int) -> void:
 
 # --- the arrow -------------------------------------------------------------
 
-## The gold arrow points at the nearest shut cage while the quartermaster's first
-## order is on the roll, and at nothing otherwise: a marker over a cage nobody has
-## been asked to open is furniture.
+## The gold arrow points at the nearest shut cage while any of them is still
+## shut, and at nothing once the line is open: a marker over an empty cage is
+## furniture. The road has no orders on it any more - the cages are a place, and
+## the arrow is how a body finds the next one.
 func _update_marker() -> void:
 	if _marker == null:
 		return
-	var quests = _quests()
-	if quests == null or not quests.is_active("free_the_soldiers"):
+	if remaining() <= 0:
 		_hide_marker()
 		return
 	var body = _player_body()
@@ -462,8 +467,8 @@ func _clear_of_wood(path, at: Vector3, trunks: Array) -> bool:
 ## door's own body, which rises with the door - because a cage a body can walk
 ## through is a picture of a cage.
 ##
-## The iron is merged into two meshes rather than drawn bar by bar: four cages of
-## twenty-eight separate cylinders is a hundred draws for furniture standing in
+## The iron is merged into two meshes rather than drawn bar by bar: one cage of
+## twenty-eight separate cylinders is twenty-eight draws for furniture standing in
 ## the dark. One surface per material keeps the cage's look and the camp's rule
 ## that a structure is a mesh, not a mesh per nail.
 func _build_cage(cage: Node3D) -> Node3D:
@@ -530,7 +535,7 @@ func _rags(index: int) -> Dictionary:
 
 
 func _build_marker() -> void:
-	_marker = QuestMarker.new()
+	_marker = LessonArrow.new()
 	_marker.name = "FreeHimMarker"
 	add_child(_marker)
 	_marker.set_label(MARKER_LABEL)
@@ -575,15 +580,6 @@ func _trunks() -> Array:
 		return []
 	var listed = (forest as Dictionary).get("trunks")
 	return listed if listed is Array else []
-
-
-func _quests():
-	if host == null:
-		return null
-	var warband = host.get("warband")
-	if warband == null:
-		return null
-	return warband.get("quests")
 
 
 func _player_body():

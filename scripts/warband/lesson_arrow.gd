@@ -33,9 +33,20 @@ const BOB := 0.16        ## how far the arrow swings up and down
 const BOB_RATE := 2.6    ## radians/second of the bob
 const SPIN_RATE := 1.1   ## radians/second of the slow roll
 const SCALE_PULSE := 0.06
+## Where the arrow hangs over a standing body: the rig is 1.8-2.0 m to the crown
+## and `HOVER` sits it another 1.7 m up.
+const HEAD_HEIGHT := 2.05
+## A word read from three or four metres, not from the cage line: the shared label
+## is sized for a marker twenty metres out, and at a conversation distance it
+## fills half the screen.
+const NEAR_LABEL_PIXEL := 0.0042
+const NEAR_LABEL_FONT := 40
 
 var _base := Vector3.ZERO
 var _clock := 0.0
+## The body this arrow rides, or null when it points at a spot on the dirt.
+var _target: Node3D = null
+var _height := HEAD_HEIGHT
 ## An optional word over the arrow ("PRESS G", "RUN HERE"). The marker carries no
 ## text by default: the shiv floats its own name, so an arrow over it needs none.
 var _label: Label3D = null
@@ -50,7 +61,42 @@ func _ready() -> void:
 ## Point at a spot in the world. Safe to call every frame: the arrow reads its
 ## anchor back on its own clock.
 func anchor_at(point: Vector3) -> void:
+	_target = null
 	_base = point
+	_place()
+
+
+## Ride a standing body (a caged soldier, a keeper) at `height` above its feet.
+## The arrow is unparented from it on purpose: a marker under a rig would inherit
+## the rig's scale (the band's bodies are 0.86-1.14 of the authored skeleton), and
+## a gold arrow that comes out different sizes over two heads reads as two
+## different markers. Safe before the target is in the tree - the position is read
+## on the arrow's own clock.
+func attach_to(target: Node3D, height: float = HEAD_HEIGHT) -> void:
+	_target = target
+	_height = height
+	_read_target()
+
+
+## Let go of the body and keep pointing where it last stood.
+func detach() -> void:
+	_target = null
+
+
+## Whether the arrow is riding a live body.
+func attached() -> bool:
+	return _target != null and is_instance_valid(_target)
+
+
+## The body the arrow points at, or null.
+func target() -> Node3D:
+	return _target if attached() else null
+
+
+func _read_target() -> void:
+	if not attached():
+		return
+	_base = _target.global_position + Vector3(0.0, _height, 0.0)
 	_place()
 
 
@@ -81,6 +127,11 @@ func set_label(text: String) -> void:
 		add_child(_label)
 	_label.text = text
 	_label.visible = true
+	# A word over a body is read from a conversation distance, so it is built at
+	# the size a keeper's marker needs rather than the cage line's.
+	if attached():
+		_label.pixel_size = NEAR_LABEL_PIXEL
+		_label.font_size = NEAR_LABEL_FONT
 
 
 ## The word over the arrow, or "" (read by the scene that owns the marker).
@@ -91,7 +142,10 @@ func label_text() -> String:
 func _process(delta: float) -> void:
 	Perf.begin("hud.marker")
 	_clock += delta
-	_place()
+	if attached():
+		_read_target()
+	else:
+		_place()
 	Perf.end()
 
 

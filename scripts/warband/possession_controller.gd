@@ -80,7 +80,7 @@ var auto_simulate := true
 ## which is why the controller itself never touches `Input.mouse_mode` policy.
 var input_enabled := true
 ## How the local soul asks for a body while this process is not the authority.
-## The session sets it: a guest's `[`/`]`, F1..F8 and warband-screen click become a
+## The session sets it: a guest's `[`/`]`, F1..F3 and warband-screen click become a
 ## request the host answers with its ownership map, never a move made here - two
 ## guests deciding for themselves is how two souls ended up in one body.
 var transfer_requester: Callable = Callable()
@@ -596,7 +596,7 @@ func _on_body_state_changed(body_id: int, state: int) -> void:
 	_eject(peer_id, Contracts.state_name(state))
 
 ## A body knocked onto its chest. The router records DOWNED, which keeps the soul
-## where it is and refuses everybody else: `[`/`]`, F1..F8 and a click on the
+## where it is and refuses everybody else: `[`/`]`, F1..F3 and a click on the
 ## warband screen cannot put a second soul into a body that is already on the floor.
 func _on_body_downed_state(_slot: int, actor: Actor) -> void:
 	var merc_id := merc_of(actor)
@@ -1075,7 +1075,9 @@ func _input(event: InputEvent) -> void:
 		_act("throw_release", sample["point"], sample["origin"])
 
 ## Soul-level hotkeys. These work even with no body, because that is how a
-## spectator gets back into one.
+## spectator gets back into one. One key per place on the field, so the keys are
+## `F1..F3` in the shipped game (the deployment cap) and follow the warband's own
+## figure rather than a second copy of it.
 func _hotkey(keycode: int) -> bool:
 	if keycode == KEY_BRACKETLEFT:
 		cycle(local_peer_id, -1)
@@ -1083,7 +1085,9 @@ func _hotkey(keycode: int) -> bool:
 	if keycode == KEY_BRACKETRIGHT:
 		cycle(local_peer_id, 1)
 		return true
-	for index in 8:
+	var places: int = _warband.deployment_cap if _warband != null \
+		else Contracts.MAX_DEPLOYMENT_CAP
+	for index in places:
 		if keycode == KEY_F1 + index:
 			var ids := living_merc_ids()
 			if index < ids.size():

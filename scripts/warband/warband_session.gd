@@ -80,7 +80,8 @@ const WILD_MOB_GROUP := "wild_mobs"
 ## How many payload keys the client remembers. An announcement is rare, and the
 ## book is capped so a long campaign cannot grow it forever.
 const DELIVERY_BOOK_CAP := 512
-## ENet slots. The deployment cap is eight bodies, so eight souls is the field.
+## ENet slots. A field is three bodies, so a peer past the third watches rather
+## than rides: the slots stay eight because a spectator costs nothing.
 const MAX_CLIENTS := 8
 ## The longest the host lets warband changes pile up before the next copy goes
 ## out. The first change after a quiet spell leaves on the next tick, so a TAB a
@@ -1308,20 +1309,77 @@ func _tick_world(tick: int) -> void:
 		_send_missiles()
 
 func _send_mobs(tick: int) -> void:
+	var peers := _guest_ids()
+	if peers.is_empty():
+		return
+	# One snapshot of every living guard, taken once and shared by every peer.
+	# The stream used to call `snapshot()` (a ten-key dictionary, two Vector4s)
+	# once per guard *per guest*, then hash it twice per guest and encode it once
+	# per guest to size the batch and again in the RPC. Two peers was two copies
+	# of the same authority state; eight was eight.
+	# Every guest body, once: a guard outside every soul's release band is not in
+	# any stream this tick, so its snapshot is not built at all.
+	var points := PackedVector3Array()
+	for peer_id in peers:
+		points.append_array(_positions_of(_peer_bodies(peer_id)))
+	var candidates := _mob_candidates(points)
 	# A death is a one-shot fact. Left in the unreliable batch, one lost datagram
 	# leaves the guest with a living copy of a body the host buried; the reliable
-	# channel makes the corpse appear on every screen even across a hitch.
-	# Every stream is per guest, because every guest is only told about its own
-	# ground: one batch for all of them is how a soul two hundred metres away paid
-	# for the whole party's fight in draw calls and datagrams.
-	for peer_id in _guest_ids():
-		_stream_mobs_to(peer_id, tick)
+	# channel makes the corpse appear on every screen even across a hitch. Every
+	# stream is per guest, because every guest is only told about its own ground.
+	for peer_id in peers:
+		_stream_mobs_to(peer_id, tick, candidates)
+
+## Every living guard's state and position, once per send tick. `stamp` is the
+## change detector (a state hash, computed once instead of once per peer) and
+## `size` is the encoded bytes of `[name, state]`, measured once so a peer's
+## batches can be cut without re-encoding.
+func _mob_candidates(points: PackedVector3Array) -> Array:
+	var out: Array = []
+	for guard in _world_guards():
+		if not is_instance_valid(guard) or not guard is Node3D or not _mob_living(guard):
+			continue
+		if not guard.has_method("snapshot"):
+			continue
+		var at: Vector3 = (guard as Node3D).global_position
+		if not _near_points(at, points, MOB_RELEASE_METRES):
+			continue
+		var state: Variant = guard.call("snapshot")
+		if typeof(state) != TYPE_DICTIONARY:
+			continue
+		var mob_name := str((guard as Node).name)
+		out.append({
+			"name": mob_name,
+			"pos": at,
+			"state": state,
+			"stamp": state.hash(),
+			"size": NetLimits.size([mob_name, state]),
+		})
+	return out
+
+## The entries worth sending to this peer: one that changed since its last copy,
+## or all of them on a refresh. `book` is the peer's own last-stamp table, so a
+## calm body costs one integer compare instead of a recursive dictionary hash.
+## Returns `{entries, sizes}`: the `[name, state]` pairs and the encoded size each
+## candidate already measured.
+func _changed_candidates(candidates: Array, refresh: bool, book: Dictionary) -> Dictionary:
+	var changed: Array = []
+	var sizes := PackedInt32Array()
+	for candidate in candidates:
+		var mob_name := str(candidate.name)
+		var stamp := int(candidate.stamp)
+		if not refresh and book.has(mob_name) and int(book[mob_name]) == stamp:
+			continue
+		book[mob_name] = stamp
+		changed.append([mob_name, candidate.state])
+		sizes.append(int(candidate.size))
+	return {"entries": changed, "sizes": sizes}
 
 ## One guest's mob stream: the bodies within `MOB_REACH_METRES` of *that peer's*
 ## own body, everything it is already being told about out to
 ## `MOB_RELEASE_METRES`, the changes since its last batch, and a reliable name for
 ## every body that just left it.
-func _stream_mobs_to(peer_id: int, tick: int) -> void:
+func _stream_mobs_to(peer_id: int, tick: int, candidates: Array) -> void:
 	var book: Dictionary = _mob_sent_by_peer.get(peer_id, {})
 	if not book is Dictionary:
 		book = {}
@@ -1330,13 +1388,22 @@ func _stream_mobs_to(peer_id: int, tick: int) -> void:
 	if not known is Dictionary:
 		known = {}
 	var bodies := _peer_bodies(peer_id)
-	var deaths := _collect_death_states(bodies, _dead_book(peer_id))
+	var points := _positions_of(bodies)
+	var deaths := _collect_death_states(points, _dead_book(peer_id))
 	for batch in NetLimits.batches(deaths, [tick]):
 		_stream(func(): receive_mob_deaths.rpc_id(peer_id, tick, batch), peer_id)
-	var entries := collect_mob_entries(MOB_REACH_METRES, bodies, known)
 	var live := {}
-	for entry in entries:
-		live[str(entry[0])] = true
+	var streamed: Array = []
+	for candidate in candidates:
+		var mob_name := str(candidate.name)
+		if not _near_points(candidate.pos, points, MOB_REACH_METRES):
+			# A body on the release band stays until it leaves it: no flapping at
+			# the edge of a reach.
+			if not known.has(mob_name) or not _near_points(candidate.pos, points,
+					MOB_RELEASE_METRES):
+				continue
+		live[mob_name] = true
+		streamed.append(candidate)
 	var left := mob_leaves(known, live)
 	for mob_name in left:
 		# Forgotten with the announcement: a body that walks back into reach must
@@ -1345,16 +1412,17 @@ func _stream_mobs_to(peer_id: int, tick: int) -> void:
 	if not left.is_empty():
 		_stream(func(): receive_mob_leaves.rpc_id(peer_id, tick, left), peer_id)
 	_mob_live[peer_id] = live
-	if entries.is_empty():
+	if streamed.is_empty():
 		return
 	# A crowded hall is thirty calm bodies twice over; re-sending each one's whole
 	# state fifteen times a second is the traffic that turns walking through it
 	# into a stutter. Only what changed goes out, with a full copy once a second so
 	# a lost delta cannot leave a mob frozen for good.
-	var changed := changed_mob_entries(entries, tick % MOB_REFRESH_TICKS == 0, book)
+	var delta := _changed_candidates(streamed, tick % MOB_REFRESH_TICKS == 0, book)
+	var changed: Array = delta.entries
 	if changed.is_empty():
 		return
-	for batch in NetLimits.batches(changed, [tick]):
+	for batch in NetLimits.batches(changed, [tick], delta.sizes):
 		_stream(func(): receive_mobs.rpc_id(peer_id, tick, batch), peer_id, true)
 
 ## The names in a peer's stream that the live set no longer names: what that
@@ -1431,25 +1499,21 @@ func receive_mob_deaths(tick: int, states: Array) -> void:
 ## naming it - but a replica still has to see it fall. Each corpse is sent once to
 ## each guest it stood near, with the snapshot whose `a` is false, and then that
 ## peer's book forgets it.
-func _collect_death_states(bodies: Array = [], sent: Variant = null) -> Array:
+func _collect_death_states(points: PackedVector3Array, sent: Variant = null) -> Array:
 	var out: Array = []
 	if world == null:
 		return out
 	var book: Dictionary = _dead_sent if sent == null else sent
-	var body_list: Array = bodies
-	if body_list.is_empty():
-		var listed: Variant = world.get("bodies")
-		if listed is Array:
-			body_list = listed
 	for guard in _world_guards():
 		if not is_instance_valid(guard) or not guard is Node3D:
 			continue
 		if not guard.has_method("snapshot") or _mob_living(guard):
 			continue
+		var at: Vector3 = (guard as Node3D).global_position
+		if not _near_points(at, points, MOB_REACH_METRES):
+			continue
 		var guard_name := str((guard as Node).name)
 		if book.has(guard_name):
-			continue
-		if not _near_any_body((guard as Node3D).global_position, body_list, MOB_REACH_METRES):
 			continue
 		book[guard_name] = true
 		out.append([guard_name, guard.call("snapshot")])
@@ -1518,6 +1582,31 @@ func _near_any_body(point: Vector3, bodies: Array, limit_metres: float) -> bool:
 		if not is_instance_valid(body) or not body is Node3D:
 			continue
 		if (body as Node3D).global_position.distance_squared_to(point) <= reach:
+			return true
+	return false
+
+## The body positions a peer's reach is measured from, read once per send tick.
+## A guard is 200 points against 8 bodies; asking each point for each body's
+## `global_position` again was the send tick's dominant term.
+static func _positions_of(bodies: Array) -> PackedVector3Array:
+	var points := PackedVector3Array()
+	points.resize(bodies.size())
+	for index in bodies.size():
+		var body = bodies[index]
+		if is_instance_valid(body) and body is Node3D:
+			points[index] = (body as Node3D).global_position
+		else:
+			points[index] = Vector3.INF
+	return points
+
+## Whether `point` is within `limit_metres` of any of the peer's bodies. Pure
+## floating point over a packed array: no node, no array, no call per body.
+static func _near_points(point: Vector3, points: PackedVector3Array,
+		limit_metres: float) -> bool:
+	var reach := maxf(limit_metres, 0.0)
+	reach *= reach
+	for other in points:
+		if other.distance_squared_to(point) <= reach:
 			return true
 	return false
 

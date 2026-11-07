@@ -41,6 +41,7 @@ const AreaScript = preload("res://scripts/warband/delve_area.gd")
 const Layout = preload("res://scripts/warband/delve_layout.gd")
 const Floor = preload("res://scripts/warband/delve_floor.gd")
 const DelveMode = preload("res://scripts/warband/delve_mode.gd")
+const TownHub = preload("res://scripts/warband/town_hub.gd")
 
 var state
 var warband
@@ -145,6 +146,15 @@ func _frames(count: int) -> void:
 		await physics_frame
 
 
+## Walk the soul to a spot, when the party below still has one. A body the books
+## have lost fails the check that looked for it; it must not take the rest of the
+## staged block down with an engine error.
+func _soul_to(soul, at: Vector3, yaw: float = 0.0) -> void:
+	if soul == null or not is_instance_valid(soul):
+		return
+	soul.teleport_to(at, yaw)
+
+
 ## The row's own press, handed to the panel exactly the way the button hands a
 ## click on. What a real mouse adds on top is Godot's own hit test, and the
 ## windowed captures under `tools/ui_theme` are where that is driven.
@@ -185,13 +195,69 @@ func _owned(item_id: String) -> bool:
 var _party: Array[int] = []
 var _stayer := -1
 
+## The names this test swears to its band, and the piece each one is owed by the
+## square's shelf if the shelf has none of it left.
+const SWORN := [["Brine", "sword_short"], ["Cael", "club_makeshift"]]
+
+## The band a campaign opens with is one naked body (`Warband.STARTING_BAND`), and
+## a naked body alone has nobody below to lose and nothing to lose: the delve's own
+## party is sworn here, at the square's fire, the way a player swears it - each name
+## taken onto the roster (`Warband.add_mercenary`) and dressed out of the shared
+## shelf (`Warband.dress_recruit`), with the one piece the shelf could not spare put
+## back into it by hand first. The world lays a body for a place taken after it was
+## seated (`WorldScene._sync_field`), so the musters stand in the square a frame or
+## two before the mouth is used.
+func _swear_party() -> void:
+	# One naked body is what the town seeded (`TownHub.seed_warband`); the two
+	# sworn here are the test's own, and the count every check below reads is this.
+	var band: int = warband.STARTING_BAND.size() + SWORN.size()
+	for entry in SWORN:
+		var sworn: int = warband.add_mercenary(str(entry[0]))
+		check(sworn > 0, "%s swears to the warband" % str(entry[0]))
+		if sworn <= 0:
+			continue
+		# The shelf is the only armorer: a piece the first recruit took is stood
+		# back on it before the second one's oath, so nobody is dressed from air.
+		if warband.stash.pooled_count(str(entry[1])) <= 0:
+			warband.stash.add(str(entry[1]), 1)
+		var dressed: Dictionary = warband.dress_recruit(sworn)
+		check(bool(dressed.get("ok", false)), "%s is armed out of the shelf (%s)"
+			% [str(entry[0]), str(dressed.get("message", ""))])
+		if warband.roster.worn_entries(sworn).is_empty():
+			warband.equip_merc(sworn, "main", str(entry[1]))
+		check(not warband.roster.worn_entries(sworn).is_empty(),
+			"%s takes the field dressed" % str(entry[0]))
+	# An oath is the pool's (`dress_recruit` walks every slot): the two recruits
+	# took what the shared shelf could spare, so the square is stocked back to the
+	# one spare of each piece it opens with (`TownHub.TOWN_SPARES`). The packing
+	# checks below read that shelf, and a band that swears musters a fresh one.
+	for item_id in TownHub.TOWN_SPARES:
+		if warband.stash.pooled_count(str(item_id)) <= 0:
+			warband.stash.add(str(item_id), 1)
+	check(warband.roster.count() == band,
+		"the band is one and the two sworn here (%d)" % warband.roster.count())
+	check(warband.roster.field_ids().size() == band,
+		"and every one of them stands on the field (%d of %d)"
+		% [warband.roster.field_ids().size(), band])
+	await _frames(4)
+	var bodied := 0
+	for merc_id in warband.roster.field_ids():
+		var body = game.controller.body_of(int(merc_id))
+		if body != null and is_instance_valid(body):
+			bodied += 1
+	check(bodied == band, "every name on the field has a body in the square (%d of %d)"
+		% [bodied, band])
+
+
 func check_mouth_and_pack() -> void:
+	await _swear_party()
 	var area = game.delve_area
 	var soul = _soul()
 	check(soul != null, "a body stands in the square")
 	check(area.mouth != null and area.mouth.get_node_or_null("MouthName") != null,
 		"the Hollow's mouth stands in the square, named")
-	soul.teleport_to(area.mouth_point() + Vector3(0.0, 0.12, 2.2), 0.0)
+	if soul != null:
+		soul.teleport_to(area.mouth_point() + Vector3(0.0, 0.12, 2.2), 0.0)
 	await _frames(2)
 	check(area.at_mouth(soul), "a body by the pit is at the mouth")
 	check(area.prompt_line(soul) == AreaScript.MOUTH_PROMPT,
@@ -222,7 +288,10 @@ func check_mouth_and_pack() -> void:
 	check(area.prep.mode() == "easy" and (modes["easy"] as Button).button_pressed,
 		"and the party is put back on the easy Hollow")
 	var offered: Array[int] = area.prep.candidates()
-	check(offered.size() == 5, "every standing body is offered (%d)" % offered.size())
+	check(offered.size() == warband.roster.field_ids().size()
+			and offered.size() == warband.STARTING_BAND.size() + SWORN.size(),
+		"every standing body is offered (%d of %d on the field)"
+		% [offered.size(), warband.roster.field_ids().size()])
 	check(area.prep.selected().size() == offered.size(), "and every one starts chosen")
 	check(quiver > 0 and dressings > 0, "the town keeps a quiver and dressings (%d / %d)" % [
 		quiver, dressings])
@@ -317,6 +386,9 @@ func check_descent() -> void:
 	check(area.below() and warband.delve.active, "the party is below")
 	check(warband.delve.party == _party, "the books hold the chosen party (%s)" % str(warband.delve.party))
 	var cave = area.cave
+	check(cave != null, "the floor is built under the party that came down")
+	if cave == null:
+		return
 	var landed: Dictionary = Layout.landing(area.landing)
 	check(not landed.is_empty(), "the party came down one of the shafts (%s)" % area.landing)
 	var shaft := Layout.room_index(str(landed.get("room", "")))
@@ -370,6 +442,9 @@ func check_descent() -> void:
 ## `den_crowd` bodies for each post it was written with, each inside its own room.
 func check_floor_plan() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to lay out")
+	if cave == null:
+		return
 	var areas := {}
 	var closest := INF
 	for first in Layout.LANDINGS.size():
@@ -467,6 +542,9 @@ func check_floor_plan() -> void:
 ## curiosity below, it is what holds the far side of a room while the rest close.
 func check_demon_ring() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to read its rings")
+	if cave == null:
+		return
 	var chambers: Array[String] = []
 	for spec in Layout.DENS:
 		if str(Layout.room(str(spec["room"])).get("area", "")) == "ring":
@@ -549,6 +627,9 @@ func check_demon_ring() -> void:
 ## back, then putting the body back where the floor left it.
 func check_difficulty() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to read its difficulty")
+	if cave == null:
+		return
 	check(cave.mode == "easy", "the first floor is built on the easy Hollow (%s)" % cave.mode)
 	var expected := 1
 	for spec in Layout.DENS:
@@ -631,6 +712,9 @@ func _room_centre(room_id: String) -> Vector3:
 ## floor is built, a body in the room the eye stands in is drawn.
 func check_plan_geometry() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to measure")
+	if cave == null:
+		return
 	var box: Rect2 = Layout.BOUNDS
 	check(box.size.is_equal_approx(Layout.AUTHORED_BOUNDS.size * Layout.SCALE),
 		"the rock box is built at %s times the authored plan (%s)" % [Layout.SCALE, box.size])
@@ -678,6 +762,9 @@ func check_plan_geometry() -> void:
 ## middle of the halls, not only along their walls.
 func check_floor_relief() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to feel its relief")
+	if cave == null:
+		return
 	var mouth_rope: Vector3 = Layout.landing("mouth")["rope"]
 	var mouth := Floor.height(mouth_rope.x, mouth_rope.z)
 	check(absf(mouth) < 1.0,
@@ -794,8 +881,13 @@ func _on_its_floor(room_id: String, at: Vector2) -> bool:
 ## standing where it was.
 func check_eye_culling() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to cull")
+	if cave == null:
+		return
 	var mobs: Array = cave.mobs()
 	check(mobs.size() > 20, "the floor fields bodies to cull (%d)" % mobs.size())
+	if mobs.is_empty():
+		return
 	var target = mobs[0]
 	var at: Vector3 = target.global_position
 	var inside := 0
@@ -864,11 +956,14 @@ func check_floor_map() -> void:
 				soul_mark = marker
 	check(ropes == Layout.LANDINGS.size(), "every rope is on the plan (%d)" % ropes)
 	check(ringed == 1, "one rope is ringed as the shortest walk up (%d)" % ringed)
-	var local: Vector3 = area.cave.to_local(_soul().global_position)
-	var index := Layout.room_index_at(Vector2(local.x, local.z))
-	check(not soul_mark.is_empty() and index >= 0
-		and (drawn[index]["rect"] as Rect2).grow(1.0).has_point(soul_mark["screen"]),
-		"the soul is drawn in the room it stands in (%s)" % str(soul_mark.get("screen", "")))
+	var soul = _soul()
+	check(soul != null and area.cave != null, "a soul on a floor to be drawn on the plan")
+	if soul != null and area.cave != null:
+		var local: Vector3 = area.cave.to_local(soul.global_position)
+		var index := Layout.room_index_at(Vector2(local.x, local.z))
+		check(not soul_mark.is_empty() and index >= 0
+			and (drawn[index]["rect"] as Rect2).grow(1.0).has_point(soul_mark["screen"]),
+			"the soul is drawn in the room it stands in (%s)" % str(soul_mark.get("screen", "")))
 	_press_key(KEY_M)
 	await process_frame
 	await process_frame
@@ -887,6 +982,9 @@ func _press_key(keycode: int) -> void:
 ## Walk the party over to another shaft's landing, as if it had come down there.
 func _gather_at(landing_id: String) -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to gather the party on")
+	if cave == null:
+		return
 	var posts: Array[Vector3] = cave.entry_posts(landing_id, _party.size())
 	for index in _party.size():
 		var body = game.controller.body_of(_party[index])
@@ -899,12 +997,22 @@ func _gather_at(landing_id: String) -> void:
 
 func check_den_and_loot() -> void:
 	var cave = game.delve_area.cave
+	check(cave != null, "the floor is below to wake a den on")
+	if cave == null:
+		return
 	var soul = _soul()
+	check(soul != null, "the soul stands on the floor beside the den")
+	# The hall the den posts in: the wake and the kit both read it, so it is read
+	# once, out here, where every check below can see it.
 	var room: Rect2 = Layout.room("den")["rect"]
-	soul.teleport_to(cave.to_global(Vector3(0.0, 0.12, room.end.y - 3.0)), 0.0)
+	if soul != null:
+		soul.teleport_to(cave.to_global(Vector3(0.0, 0.12, room.end.y - 3.0)), 0.0)
 	await create_timer(0.45).timeout
 	check(cave.is_awake("den"), "a body in the den's room wakes it")
 	var den: Array = cave.den_mobs("den")
+	check(not den.is_empty(), "the den fields bodies to wake")
+	if den.is_empty():
+		return
 	var listed := 0
 	for mob in den:
 		if game.guards.has(mob):
@@ -952,16 +1060,20 @@ func check_den_and_loot() -> void:
 	check(not warband.cruor.is_anointed(anointed_id), "and nothing is awake before it is taken")
 	var corpse_id: int = game.loot.corpse_at(victim.global_position, 1.0)
 	check(corpse_id != 0, "a fallen watcher is a body to search")
-	soul.teleport_to(victim.global_position + Vector3(1.2, 0.12, 0.0), 0.0)
+	_soul_to(soul, victim.global_position + Vector3(1.2, 0.12, 0.0))
 	await _frames(1)
-	var target: Dictionary = game.loot_hand.target_at(soul, victim.global_position + Vector3(0.0, 0.4, 0.0))
+	var target: Dictionary = {}
+	if soul != null:
+		target = game.loot_hand.target_at(soul, victim.global_position + Vector3(0.0, 0.4, 0.0))
 	check(str(target.get("kind", "")) == "corpse", "a press on the body finds the corpse")
 	# Below, the right click is the take itself: the whole body and the steel that
 	# fell beside it, straight into the delve inventory and onto nobody.
 	var soul_merc := int(game.controller.merc_for_peer(1))
 	var worn_before: Array = warband.roster.worn_entries(soul_merc)
 	var on_body: Array[String] = game.loot.corpse_items(corpse_id)
-	var took: Array[String] = game.loot_hand.take_now(soul, target)
+	var took: Array[String] = []
+	if soul != null:
+		took = game.loot_hand.take_now(soul, target)
 	var whole := not on_body.is_empty()
 	for item_id in on_body:
 		if not took.has(item_id):
@@ -978,8 +1090,13 @@ func check_den_and_loot() -> void:
 	check(warband.stash.pooled_map() == stash_before, "the town stash did not move while below")
 	check(not game.loot_feed.lines().is_empty(), "the looted list names what came up (%s)" % str(game.loot_feed.lines()))
 	check(game.loot_feed.header_text().contains("DELVE INVENTORY"), "and the delve's line heads it")
-	# The loot window is the right click above; opened on a body below it still
-	# books into the delve inventory.
+	# The loot window is the right click above; opened on a body below it lists that
+	# body's container - what the dead body still wore and carried, and the steel
+	# that fell out of its hand and lies beside it - and books the lot into the
+	# delve inventory. A corpse holds the Hollow's own rolls (a watcher keeps 30% of
+	# its kit, piece by piece), so the row count is read here and never assumed: the
+	# invariant is that the window's whole list comes up, into the pack, and that the
+	# window lets go of a body it has emptied.
 	var second_id := 0
 	var second_at := Vector3.ZERO
 	for mob in den:
@@ -988,15 +1105,39 @@ func check_den_and_loot() -> void:
 			second_id = other_id
 			second_at = mob.global_position
 			break
-	soul.teleport_to(second_at + Vector3(1.2, 0.12, 0.0), 0.0)
+	_soul_to(soul, second_at + Vector3(1.2, 0.12, 0.0))
 	await _frames(1)
-	var window_rows := 0
-	if game.loot_window.open_on(soul, {"kind": "corpse", "corpse_id": second_id, "pickup": null}):
-		window_rows = game.loot_window.rows().size()
+	var window_rows: Array = []
+	if soul != null and game.loot_window.open_on(soul,
+			{"kind": "corpse", "corpse_id": second_id, "pickup": null}):
+		window_rows = game.loot_window.rows()
+	# The body's own contents are part of what the window lists, each piece on a row
+	# of its own (copies of one piece share a row, with a count).
+	var on_second: Array[String] = game.loot.corpse_items(second_id)
+	var window_ids: Array[String] = []
+	var window_pieces := 0
+	for row in window_rows:
+		window_ids.append(str(row.get("item_id", "")))
+		window_pieces += int(row.get("count", 0))
+	var holds_all := not on_second.is_empty()
+	for item_id in on_second:
+		if not window_ids.has(item_id):
+			holds_all = false
+	check(holds_all, "the window lists every piece still on the body (%s of %s)"
+		% [str(window_ids), str(on_second)])
 	var held_before: int = warband.delve.inventory.pooled_total()
-	game.loot_window.take_all()
-	check(window_rows > 0 and not game.loot_window.is_open() and warband.delve.inventory.pooled_total() > held_before,
-		"the loot window lists a body below and takes the lot into the inventory (%d rows)" % window_rows)
+	var stash_below: Dictionary = warband.stash.pooled_map()
+	var worn_on_taker: Array = warband.roster.worn_entries(soul_merc)
+	var took_all: Array[String] = game.loot_window.take_all()
+	check(window_pieces > 0 and took_all.size() == window_pieces and not game.loot_window.is_open(),
+		"the loot window lists a body below and takes the lot (%d rows, %d of %d pieces)"
+		% [window_rows.size(), took_all.size(), window_pieces])
+	check(warband.delve.inventory.pooled_total() == held_before + window_pieces,
+		"and every piece lands in the delve inventory (%d -> %d)"
+		% [held_before, warband.delve.inventory.pooled_total()])
+	check(warband.roster.worn_entries(soul_merc) == worn_on_taker,
+		"nothing of it is dressed onto the body that searched it")
+	check(warband.stash.pooled_map() == stash_below, "and the town stash is untouched by it")
 	# The rest of the den is the squad's: it walks the cave's map down to the soul
 	# and strips the bodies and the steel on the floor into the same inventory. A
 	# den is a crowd now, so the check is that the squad works it - a few bodies
@@ -1031,20 +1172,29 @@ func check_den_and_loot() -> void:
 			by_squad = true
 	check(by_squad, "and the looted list says the squad took it (%s)" % str(game.loot_feed.lines()))
 	check(warband.stash.pooled_map() == stash_before, "none of it reached the town stash")
-	# The master: woken, killed, and taken whole with one right click.
+	# The master: woken, killed, and taken whole with one right click. A floor
+	# that never stood him up records the failure and the paperdoll below still
+	# runs, which is a better report than a coroutine killed on a nil.
 	var master = cave.master
-	master.take_damage(99999.0, 1)
-	await _frames(2)
-	check(not cave.master_alive(), "Gorehorn dies")
-	var master_corpse: int = game.loot.corpse_at(master.global_position, 1.0)
-	check(master_corpse != 0 and game.loot.corpse_items(master_corpse).has("ring_blood"),
-		"the master's body carries the floor's prize")
-	soul.teleport_to(master.global_position + Vector3(1.0, 0.12, 0.0), 0.0)
-	await _frames(1)
-	var spoils: Dictionary = game.loot_hand.target_at(soul, master.global_position + Vector3(0.0, 0.4, 0.0))
-	check(game.loot_hand.take_now(soul, spoils).has("ring_blood"), "a right click takes the master's body whole")
-	check(warband.delve.inventory.pooled_count("ring_blood") == 1, "the prize is in the delve inventory")
-	check(warband.stash.pooled_count("ring_blood") == 0, "and not yet in the stash")
+	check(master != null, "Gorehorn holds the centre of the new floor")
+	if master != null:
+		master.take_damage(99999.0, 1)
+		await _frames(2)
+		check(not cave.master_alive(), "Gorehorn dies")
+		var master_corpse: int = game.loot.corpse_at(master.global_position, 1.0)
+		check(master_corpse != 0 and game.loot.corpse_items(master_corpse).has("ring_blood"),
+			"the master's body carries the floor's prize")
+		if soul != null:
+			soul.teleport_to(master.global_position + Vector3(1.0, 0.12, 0.0), 0.0)
+		await _frames(1)
+		if soul != null:
+			var spoils: Dictionary = game.loot_hand.target_at(soul,
+				master.global_position + Vector3(0.0, 0.4, 0.0))
+			check(game.loot_hand.take_now(soul, spoils).has("ring_blood"),
+				"a right click takes the master's body whole")
+			check(warband.delve.inventory.pooled_count("ring_blood") == 1,
+				"the prize is in the delve inventory")
+			check(warband.stash.pooled_count("ring_blood") == 0, "and not yet in the stash")
 	game.paperdoll.open(int(game.controller.merc_for_peer(1)))
 	var shows_inventory := false
 	for row in game.paperdoll.stash_rows:
@@ -1073,6 +1223,10 @@ func check_fallen_member() -> void:
 	if fallen_id <= 0:
 		return
 	var body = game.controller.body_of(fallen_id)
+	check(body != null and cave != null, "%s is below, on a floor, with a body to fall"
+		% warband.roster.name_of(fallen_id))
+	if body == null or cave == null:
+		return
 	var kit: Array[String] = []
 	for entry in warband.roster.worn_entries(fallen_id):
 		kit.append(str(entry.get("item", "")))
@@ -1101,11 +1255,17 @@ func check_fallen_member() -> void:
 		"and none of it is booked for him")
 	check(not game.loot.corpse_ids(false).has(remains), "the squad's sweep leaves a fallen comrade alone")
 	var soul = _soul()
-	soul.teleport_to(body.global_position + Vector3(1.0, 0.12, 0.0), 0.0)
+	check(soul != null, "the soul is below to take a comrade's kit back")
+	if soul != null:
+		soul.teleport_to(body.global_position + Vector3(1.0, 0.12, 0.0), 0.0)
 	await _frames(1)
-	var target: Dictionary = game.loot_hand.target_at(soul, body.global_position + Vector3(0.0, 0.4, 0.0))
-	check(int(target.get("corpse_id", 0)) == remains, "a press on his body finds him")
-	var took: Array[String] = game.loot_hand.take_now(soul, target)
+	var target: Dictionary = {}
+	if soul != null:
+		target = game.loot_hand.target_at(soul, body.global_position + Vector3(0.0, 0.4, 0.0))
+		check(int(target.get("corpse_id", 0)) == remains, "a press on his body finds him")
+	var took: Array[String] = []
+	if soul != null:
+		took = game.loot_hand.take_now(soul, target)
 	took.sort()
 	check(took == kit and not game.loot.has_corpse(remains),
 		"a right click takes all of it back (%s)" % str(took))
@@ -1122,6 +1282,9 @@ func check_fallen_member() -> void:
 func check_climb_out() -> void:
 	var cave = game.delve_area.cave
 	var soul = _soul()
+	check(cave != null and soul != null, "a soul on the floor stands at a rope to climb out")
+	if cave == null or soul == null:
+		return
 	var rope_id := "mere" if game.delve_area.landing != "mere" else "chapel"
 	# The rope a body walks up to is reached across the ground: the plan's rope
 	# points are authored at y = 0 and the floor under a deep shaft is metres
@@ -1132,7 +1295,6 @@ func check_climb_out() -> void:
 	await _frames(2)
 	check(cave.exit_at(soul) == rope_id,
 		"a body 8 m below the plan's rope point is still at the %s rope" % rope_id)
-	var Floor = load("res://scripts/warband/delve_floor.gd")
 	var plan: Vector3 = cave.to_local(cave.rope_point(rope_id))
 	var foot: Vector3 = cave.rope_point(rope_id)
 	foot.y = cave.to_global(Vector3(plan.x, Floor.height(plan.x, plan.z), plan.z)).y
@@ -1211,8 +1373,11 @@ func check_fall() -> void:
 		"the mouth can put the next descent on the hard Hollow")
 	var result: Dictionary = await area.descend(party)
 	check(bool(result.get("ok", false)), "a second party goes down (%s)" % str(result.get("message", "")))
-	check(not area.cave.is_awake("den"), "into a fresh instance: the den sleeps again")
 	var hard = area.cave
+	check(hard != null, "the second floor is built below the party")
+	if hard == null:
+		return
+	check(not hard.is_awake("den"), "into a fresh instance: the den sleeps again")
 	check(hard.mode == "hard", "the second floor is built on the hard Hollow (%s)" % hard.mode)
 	var hard_expected := 1
 	for spec in Layout.DENS:
@@ -1238,7 +1403,10 @@ func check_fall() -> void:
 	check(not bool(warband.set_delve_mode("easy").get("ok", false)),
 		"a floor somebody is below cannot be re-cut under the party")
 	for merc_id in party:
-		game.controller.body_of(merc_id).take_damage(9999.0, 90)
+		var doomed = game.controller.body_of(merc_id)
+		check(doomed != null, "%s is below to fall" % warband.roster.name_of(merc_id))
+		if doomed != null:
+			doomed.take_damage(9999.0, 90)
 	await create_timer(AreaScript.WIPE_BEAT + 0.6).timeout
 	check(not area.below() and not warband.delve.active, "a party with nobody standing falls")
 	var stripped := true
@@ -1259,6 +1427,18 @@ func check_load_forfeit() -> void:
 	var merc_id := -1
 	for candidate in warband.roster.ids():
 		if warband.roster.is_alive(candidate) and not warband.roster.worn_entries(candidate).is_empty():
+			merc_id = candidate
+			break
+	# A warband of three has already sent two parties down and lost their kits, so
+	# nothing may be left on a body: the order still needs one dressed man to lose
+	# his gear below, and the shared stash is where the harness dresses him.
+	if merc_id <= 0:
+		for candidate in warband.roster.ids():
+			if not warband.roster.is_alive(candidate):
+				continue
+			if warband.stash.pooled_count("sword_short") <= 0:
+				warband.stash.add("sword_short", 1)
+			warband.equip_merc(candidate, "main", "sword_short")
 			merc_id = candidate
 			break
 	check(merc_id > 0, "a dressed body is left to test the load with")

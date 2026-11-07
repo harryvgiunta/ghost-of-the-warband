@@ -43,8 +43,8 @@ const FLOOR_HALF_WIDTH := 34.0
 const FLOOR_FRONT := -70.0
 const FLOOR_BACK := 40.0
 
-## Five cages, in `CAGE_POSTS` order: `Cage1`..`Cage5`.
-const CAGE_COUNT := 5
+## One cage per post in `cage_escape.CAGE_POSTS`: `Cage1`..`Cage3`.
+const CAGE_COUNT := 3
 
 ## The cult's standards, staked in the dirt round the cage line - there is no
 ## palisade left to lash them to, so each one is its own mast with guy-lines.
@@ -228,7 +228,7 @@ static func _straw(m, mats: Dictionary, at: Vector3, rng: RandomNumberGenerator,
 
 # --- the cages -------------------------------------------------------------
 
-## Padlocks, hasp, slack chain, straw and bone charms on the four cages.
+## Padlocks, hasp, slack chain, straw and bone charms on every cage.
 ##
 ## Every iron fitting sits on the *fixed* frame, never on the door: the door is
 ## the node `cage_escape.gd` lifts when the latch is cut, and a padlock welded to

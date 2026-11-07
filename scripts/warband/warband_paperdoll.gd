@@ -343,7 +343,7 @@ func take_all() -> Dictionary:
 ## Choose whose ten slots are shown. The slot selection resets to the main hand,
 ## because an off-hand pick on one mercenary rarely means anything on the next.
 ## The one instruction the screen needs: how to move a piece, in either direction.
-const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. RE-EQUIP hands a kit back and picks it again by priority. TAB swaps the weapon set. On the hotbar, click a skill then the key it should fire from."
+const USAGE_HINT := "Click a worn slot to take it off  /  click a stash row to wear it  /  right-click a stash row to hold it back from auto-equip. What you wear by hand stays yours: RE-EQUIP hands this body's kit back, forgets those pins and picks again by priority; RE-EQUIP THE BAND does the same for everyone but leaves your own slots alone. TAB swaps the weapon set. On the hotbar, click a skill then the key it should fire from."
 
 func select_merc(merc_id: int, announce: bool = true) -> void:
 	selected_merc = merc_id if _can_dress(merc_id) else -1
@@ -561,7 +561,7 @@ func _ensure_built() -> void:
 	_reequip_button.text = "RE-EQUIP"
 	_reequip_button.focus_mode = Control.FOCUS_NONE
 	_reequip_button.custom_minimum_size = Vector2(0, 30)
-	_reequip_button.tooltip_text = "Hand this body's kit back to the stash and dress it again: the dearest spare for every slot, a shield for a tank, a bow for an archer."
+	_reequip_button.tooltip_text = "Hand this body's kit back to the stash and dress it again: the dearest spare for every slot, a shield for a tank, a bow for an archer. It forgets the pieces you set by hand, so the band chooses this body outright."
 	_reequip_button.pressed.connect(_reequip_selected)
 	centre.add_child(_reequip_button)
 
@@ -803,7 +803,10 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 	elif _corpse_active:
 		button.show_item(worn, _warband, "Click to take it from the body.")
 	else:
-		button.show_item(worn, _warband, "Click to take it off.")
+		var hint := "Click to take it off."
+		if _warband.roster.is_manual(selected_merc, str(row["id"])):
+			hint = "Set by hand: the band's auto-equip leaves this slot alone. Click to take it off."
+		button.show_item(worn, _warband, hint)
 
 ## The panel's own QR: the same swap the world's `TAB` runs, on the body this
 ## screen is showing. The roster owns both pairs, so a piece put in a slot after

@@ -359,6 +359,13 @@ func _check_paperdoll() -> void:
 	_stash_row(doll, "sword_short")["button"].pressed.emit()
 	check(str(warband.roster.equipped_of(other).get("main", "")) == "sword_short",
 		"a held piece can still be worn by the player's hand")
+	check(warband.roster.is_manual(other, "main"),
+		"and the slot a hand filled is marked as the player's")
+	# The body's own RE-EQUIP is the press that hands that choice back: it clears
+	# the pins and lets the band pick for the body again.
+	doll._reequip_button.pressed.emit()
+	check(not warband.roster.is_manual(other, "main"),
+		"RE-EQUIP clears the hand-set slot, got %s" % str(warband.roster.manual_slots(other)))
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
 

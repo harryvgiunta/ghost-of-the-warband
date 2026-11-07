@@ -25,12 +25,24 @@ extends CanvasLayer
 ##    pointer comes back for the page and is captured again when it closes, exactly
 ##    as the town's panels do, and the squad, the cult and the clock keep going
 ##    underneath. Reading the map is a risk, not a pause.
+##
+## The page also carries the campaign's one way home: `RETURN TO HEARTHSTEAD`, in
+## the footer with the scale and the key. It is drawn from `FastTravel`'s own
+## answer - the verb while the band may make the trip, and that rule's refusal in
+## the sheet's own words when it may not - so the page can never offer a press the
+## world would refuse, or hide one it would take.
 
 const LedgerThemeScript = preload("res://scripts/ui/ledger_theme.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const TravelScript = preload("res://scripts/warband/fast_travel.gd")
 
 const TITLE := "THE WOOD"
 const SUBTITLE := "THE CAMP'S RING TO THE TOWN'S WALL  \u00b7  NORTH IS UP"
+## The sheet's one action: the press that puts the whole band back in the square,
+## and the words the footer offers it in. The rule behind it is `fast_travel.gd`'s;
+## the page only says what that rule answered.
+const RETURN_KEY := "H"
+const RETURN_VERB := "RETURN TO HEARTHSTEAD"
 ## The map's own half-width around the lane, in metres: the wood a body can read
 ## from the road, so the sheet is a road-map of the strip and not of the county.
 const MAP_VERGE := 60.0
@@ -38,11 +50,11 @@ const MAP_VERGE := 60.0
 ## flat over its yard; this is that same twenty metres, named here because a stub
 ## host has no camp to ask and the ring has to have a size.
 const CAMP_RADIUS := 20.0
-## Where the sheet's furniture sits: a header for the title, a footer for the scale
-## and the legend, and the margin each side of the road band that the camp's, the
-## town's and the clearings' names are written in.
+## Where the sheet's furniture sits: a header for the title, a footer for the scale,
+## the way home and the legend, and the margin each side of the road band that the
+## camp's, the town's and the clearings' names are written in.
 const HEADER := 76.0
-const FOOTER := 132.0
+const FOOTER := 190.0
 const SIDE_MARGIN := 120.0
 const MIN_PAGE := Vector2(320.0, 360.0)
 ## Symbol sizes, in pixels. A map's marks are signs rather than scale drawings:
@@ -54,6 +66,15 @@ const QUEST_RADIUS := 4.6
 const CLEARING_RADIUS := 2.6
 const LABEL_SIZE := 11
 const LEGEND_SIZE := 11
+## The action's own two sizes: the verb is a legend line made heavier, the refusal
+## a note under it.
+const ACTION_SIZE := 12
+const REASON_SIZE := 10
+## The action's band in the footer, measured down from the road band's foot: the
+## rule that sets it off, the verb, and room for a refusal of two lines. Paint and
+## click share it, so the thing a pointer presses is the thing the page drew.
+const ACTION_TOP := 28.0
+const ACTION_HEIGHT := 64.0
 ## How often the sheet is repainted while it is open. The world moves under it, so
 ## the marks move; ten frames a second is enough for that and none at all for a
 ## page nobody is reading.
@@ -81,13 +102,26 @@ var _elapsed := 0.0
 
 ## The one Control the sheet is painted on. It exists as a class because a map
 ## needs a `_draw()` and a `CanvasLayer` has none; it asks the map what to paint
-## and holds no state of its own.
+## and holds no state of its own. A click inside the action's band is the same
+## press the key is - the pointer is on the page while the sheet is open, and an
+## offered action has to answer it.
 class Board extends Control:
 	var map = null
 
 	func _draw() -> void:
 		if map != null:
 			map.paint(self)
+
+	func _gui_input(event: InputEvent) -> void:
+		if map == null or not (event is InputEventMouseButton) or not event.pressed:
+			return
+		var click := event as InputEventMouseButton
+		if click.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if not map.action_rect().has_point(click.position):
+			return
+		map.travel_home()
+		accept_event()
 
 
 func _ready() -> void:
@@ -245,6 +279,36 @@ func legend() -> Array[String]:
 		"A CONTRACT  \u00b7  the ringed mark on the road",
 		"THE CAMP  \u00b7  a ring;  THE TOWN  \u00b7  a walled square",
 	]
+
+
+# --- the way home ---------------------------------------------------------
+
+## What the transport rule answers for this page's world: `{ok, reason}`, straight
+## from `fast_travel.gd`. The sheet asks it on every paint, so the answer it shows
+## is the answer the press would get on the same frame.
+func travel_verdict() -> Dictionary:
+	return TravelScript.can_travel(_host)
+
+
+## The action as one line of the sheet's text: the verb while the band may make
+## the trip, and the rule's own refusal when it may not. Anything that reads the
+## page as text - the headless regression, a status line - reads it here, so the
+## page and its test cannot disagree about what it says.
+func travel_line() -> String:
+	var verdict := travel_verdict()
+	if bool(verdict.get("ok", false)):
+		return "%s  \u00b7  %s" % [RETURN_KEY, RETURN_VERB]
+	return "%s  \u00b7  %s" % [RETURN_KEY, str(verdict.get("reason", ""))]
+
+
+## The press. Returns `fast_travel.gd`'s answer - the world moves, or the line it
+## would give does - and repaints, because the page has just changed what it can
+## offer (a homecoming leaves the band in the square, where the door is shut).
+func travel_home() -> Dictionary:
+	var result: Dictionary = TravelScript.travel(_host)
+	if _board != null:
+		_board.queue_redraw()
+	return result
 
 
 ## How many world metres one pixel of the road band covers. One number: the page
@@ -487,6 +551,7 @@ func paint(canvas: CanvasItem) -> void:
 	for marker in markers():
 		_paint_marker(canvas, marker)
 	_paint_scale(canvas)
+	_paint_action(canvas)
 	_paint_legend(canvas)
 
 
@@ -587,10 +652,60 @@ func _paint_scale(canvas: CanvasItem) -> void:
 		LedgerThemeScript.INK_SOFT)
 
 
+## The action's band on the page, in screen space: what the footer draws and what
+## the pointer may press. One rect, so a click cannot land somewhere the page did
+## not offer the action.
+func action_rect() -> Rect2:
+	var page := page_rect()
+	var panel := panel_rect()
+	return Rect2(page.position.x + 12.0, panel.end.y + ACTION_TOP,
+		maxf(1.0, page.size.x - 24.0), ACTION_HEIGHT)
+
+
+## The sheet's one action, ruled off under the scale: the press and the verb while
+## the band may make the trip, and the rule's own refusal under them when it may
+## not. The page says the reason in the refuser's words rather than offering a
+## press that would only be turned down.
+func _paint_action(canvas: CanvasItem) -> void:
+	var band := action_rect()
+	var verdict := travel_verdict()
+	var allowed := bool(verdict.get("ok", false))
+	canvas.draw_line(Vector2(band.position.x, band.position.y),
+		Vector2(band.end.x, band.position.y), Color(0.42, 0.34, 0.22, 0.35), 1.0)
+	canvas.draw_string(LedgerThemeScript.FONT_BODY, band.position + Vector2(6.0, 20.0),
+		"%s  \u00b7  %s" % [RETURN_KEY, RETURN_VERB], HORIZONTAL_ALIGNMENT_LEFT, -1,
+		ACTION_SIZE, LedgerThemeScript.INK if allowed else LedgerThemeScript.INK_MUTED)
+	if allowed:
+		return
+	var at := band.position + Vector2(6.0, 36.0)
+	for line in _wrapped(str(verdict.get("reason", "")), band.size.x - 12.0, REASON_SIZE):
+		canvas.draw_string(LedgerThemeScript.FONT_ITALIC, at, line,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, REASON_SIZE, LedgerThemeScript.BLOOD)
+		at.y += 13.0
+
+
+## Prose broken to the page's width, so a refusal reads as a sentence instead of
+## running off the vellum.
+func _wrapped(text: String, width: float, size: int) -> Array[String]:
+	var out: Array[String] = []
+	var line := ""
+	for word in text.split(" ", false):
+		var probe := word if line.is_empty() else "%s %s" % [line, word]
+		if not line.is_empty() and LedgerThemeScript.FONT_ITALIC.get_string_size(probe,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > width:
+			out.append(line)
+			line = word
+		else:
+			line = probe
+	if not line.is_empty():
+		out.append(line)
+	return out
+
+
 func _paint_legend(canvas: CanvasItem) -> void:
 	var panel := panel_rect()
 	var page := page_rect()
-	var at := Vector2(page.position.x + 18.0, panel.end.y + 44.0)
+	var at := Vector2(page.position.x + 18.0, panel.end.y + 96.0)
 	for line in legend():
 		canvas.draw_string(LedgerThemeScript.FONT_BODY, at, line,
 			HORIZONTAL_ALIGNMENT_LEFT, page.size.x - 36.0, LEGEND_SIZE,

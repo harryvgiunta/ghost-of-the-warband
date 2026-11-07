@@ -91,6 +91,7 @@ func run() -> void:
 	check(controller != null, "the world owns a possession controller")
 
 	await build_range()
+	await swear_escort()
 	await settle(SETTLE_FRAMES)
 	await check_bow()
 	await check_shoulder()
@@ -122,6 +123,26 @@ func close_cards() -> void:
 func settle(frames: int) -> void:
 	for index in frames:
 		await physics_frame
+
+
+## Every shaft in the world that is still in the tree, by whichever hand loosed it.
+##
+## A body's own hand-shot arrow is the world's (`game.projectiles`: `Combat.shot`
+## -> `_on_body_shot`), and a bow *skill* - the archer's fan volley, the barrage -
+## fans its arrows out from the abilities runner and keeps them in its own list
+## (`WarbandAbilities._fire_arrows` -> `_track`). Both are the same `Arrow`, both
+## are spawned on the authority, and both spend a shaft from the one quiver; the
+## squad's own archers open with the skill, so a reader that only counts the first
+## list answers "no arrow" while the quiver is dropping and the body is bleeding.
+func live_arrows() -> Array:
+	var out: Array = []
+	for node in game.projectiles:
+		if is_instance_valid(node) and node is ArrowScript:
+			out.append(node)
+	for node in game.abilities.get_children():
+		if is_instance_valid(node) and node is ArrowScript and not out.has(node):
+			out.append(node)
+	return out
 
 
 # --- the range -------------------------------------------------------------
@@ -167,6 +188,24 @@ func build_range() -> void:
 	controller.refresh_gear(merc)
 	await settle(2)
 	check(str(body.rig.weapon) == "bow", "and the rig is holding it (%s)" % str(body.rig.weapon))
+
+
+## The band is one body at a campaign's start, and both squad sections below are
+## about an ally: a name is sworn the way the game swears one, and the world's own
+## field sync stands its body beside the party - the soul is on the plate, so the
+## muster ring is on the plate too.
+func swear_escort() -> void:
+	var merc_id: int = warband.add_mercenary("Cass")
+	check(merc_id > 0, "a name can be sworn beside the starting body")
+	var waited := 0.0
+	while waited < 4.0 and game.bodies.size() < 2:
+		await physics_frame
+		waited += 1.0 / 60.0
+	check(game.bodies.size() == 2,
+		"the field seats the sworn name beside the soul (%d bodies)" % game.bodies.size())
+	check(game.squad.squad_ids.has(merc_id),
+		"and the squad drives it (%s of %s)"
+			% [str(game.squad.squad_ids), str(merc_id)])
 
 
 # --- 1/2/3. the shot -------------------------------------------------------
@@ -296,6 +335,12 @@ func check_shoulder() -> void:
 ## on the plate - past the 34 m `engage_radius` the squad walks to a hostile, so
 ## the fight can only happen because the body has a bow. The ally takes it, looses,
 ## and puts the shaft in the body without ever closing on it.
+##
+## The party is on OFFENSIVE for it: a fresh band is DEFENSIVE, and under that
+## mode the squad answers only a hostile the band is already at war with - a blow
+## it took (`note_struck`) or one a band body wounded first - which an inert dummy
+## never becomes. Going looking is the shipped mode in which a bow's own reach is
+## what draws the line, and the band is put back on the mode it came in on.
 func check_squad_ranged() -> void:
 	var ally = null
 	var ally_id := 0
@@ -316,6 +361,24 @@ func check_squad_ranged() -> void:
 	# The plate, alone with the dummy: the camp's own watchers are on the ground
 	# forty metres below and would be the nearest hostile to a body standing here.
 	var kept: Array = game.squad.watchers
+	# How the party picks its fights is the warband's, and a fresh band is
+	# DEFENSIVE: under it the squad only answers a hostile that struck the band
+	# (`squad.note_struck`) or that a band body wounded first, and this dummy has
+	# both of its clocks switched off (`set_physics_process(false)` below), so it
+	# never strikes and nothing puts it on that book. A party that goes looking is
+	# the mode in which a bow's own reach decides the fight, so the band is put on
+	# OFFENSIVE through the same call the `B` key and the menu make, and put back
+	# to the mode it came in on before the section lets go of the field.
+	var kept_mode: String = warband.party_mode
+	warband.set_party_mode(SquadDrive.Contracts.PARTY_OFFENSIVE)
+	var looking := 0
+	while looking < 30 and game.squad.party_mode != SquadDrive.Contracts.PARTY_OFFENSIVE:
+		await physics_frame
+		looking += 1
+	check(game.squad.party_mode == SquadDrive.Contracts.PARTY_OFFENSIVE,
+		"the party is on the mode that goes looking (%s)" % str(game.squad.party_mode))
+	check(bool(game.squad.eligible.call(ally_id)),
+		"and the world's own list answers for the ally (%s)" % str(ally_id))
 	var hunter = WatcherScript.new()
 	hunter.name = "RangedHunter"
 	hunter.mob_id = "hollow_warden"
@@ -363,11 +426,22 @@ func check_squad_ranged() -> void:
 
 	var hp_before := float(hunter.health)
 	var arrows_before: int = warband.arrows()
-	var shots_before: int = game.projectiles.size()
+	var shots_before: Array = live_arrows()
+	var loosed = null
+	var shaft_count := shots_before.size()
 	var closest := INF
 	var hit_at := -1
 	for index in 420:
 		await physics_frame
+		# The shaft is counted while it is in the air: a fan volley's arrows are
+		# gone from the tree the frame they land, and the frame the target bleeds
+		# is after them.
+		var airborne: Array = live_arrows()
+		shaft_count = maxi(shaft_count, airborne.size())
+		for shaft in airborne:
+			if not shots_before.has(shaft) and shaft.get("shooter") == ally:
+				loosed = shaft
+				break
 		closest = minf(closest, (ally as Node3D).global_position.distance_to(
 			(hunter as Node3D).global_position))
 		if float(hunter.health) < hp_before:
@@ -376,9 +450,9 @@ func check_squad_ranged() -> void:
 	check(hit_at >= 0,
 		"an ally with a bow shoots a body %.0f m off (health %.0f -> %.0f)"
 		% [SQUAD_RANGE, hp_before, float(hunter.health)])
-	check(game.projectiles.size() > shots_before,
+	check(loosed != null,
 		"and it is a real arrow in the world (%d -> %d)"
-		% [shots_before, game.projectiles.size()])
+		% [shots_before.size(), shaft_count])
 	check(warband.arrows() < arrows_before,
 		"a shaft left the shared quiver for it (%d -> %d)"
 		% [arrows_before, warband.arrows()])
@@ -394,6 +468,7 @@ func check_squad_ranged() -> void:
 
 	# Give the body back: the plate is forty metres of air above the soul, and an
 	# escort left standing on it walks off the edge the moment the fight ends.
+	warband.set_party_mode(kept_mode)
 	game.squad.watchers = kept
 	game.guards.erase(hunter)
 	hunter.queue_free()
@@ -533,8 +608,10 @@ func check_archer_drop() -> void:
 ## The notifier is proved here because this test owns the one harness in the suite
 ## that runs the real world scene with a real squad, the real guard list and the
 ## real HUD: the dummy is stood next to an *ally* (not next to the soul, who is up
-## on the plate), the squad's own `_nearest_watcher` picks it up, and everything
-## after that is what a player reads.
+## on the plate), the blow that puts it on the party's book is booked through
+## `squad.note_struck` (the call a body's own `struck_by` signal makes), the
+## squad's own `_nearest_watcher` picks it up under the shipped DEFENSIVE mode,
+## and everything after that is what a player reads.
 const BEARINGS := ["ahead", "ahead-left", "ahead-right", "left", "right",
 	"back-left", "back-right", "behind"]
 
@@ -561,6 +638,13 @@ func check_band_breaks_off() -> void:
 	game.add_child(hunter)
 	hunter.global_position = (ally as Node3D).global_position + Vector3(6.0, 0.0, 0.0)
 	game.guards.append(hunter)
+	# The blow that starts this is booked rather than waited for. A fresh band is
+	# DEFENSIVE (`WarbandContracts.DEFAULT_PARTY_MODE`): the squad answers a
+	# hostile that struck a band body, and `note_struck` is the call the body's
+	# own `struck_by` signal makes when one lands (`_adopt_body`). Whether this
+	# dummy's own walk-in connects inside the loop below is the mob's business and
+	# the notifier's section is not about it - the party's answer is what is read.
+	game.squad.note_struck(hunter)
 	var engaged: Array = []
 	for index in 300:
 		await physics_frame

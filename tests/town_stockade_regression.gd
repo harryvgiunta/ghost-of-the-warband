@@ -17,7 +17,6 @@ const TownScript = preload("res://scripts/warband/town_hub.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
-const GiverScript = preload("res://scripts/warband/quest_giver.gd")
 const EnemyScript = preload("res://scripts/enemy.gd")
 
 const SCENE := "res://scenes/town_hub.tscn"
@@ -93,7 +92,6 @@ func run() -> void:
 	check_buildings()
 	check_dressing()
 	check_keepers()
-	await check_marker()
 	await check_talk()
 	check_services()
 	await check_guard()
@@ -373,69 +371,19 @@ func check_keepers() -> void:
 			and standing_clear(counter), "the %s ring is still walkable" % service)
 
 
-# --- the gold arrow --------------------------------------------------------
-
-func check_marker() -> void:
-	var giver = town.quest_giver
-	check(giver != null, "the town has a keeper who talks")
-	if giver == null:
-		return
-	check(town.quest_marker != null, "the town owns one gold arrow")
-	if town.quest_marker == null:
-		return
-	check(town.quest_marker.visible, "the arrow is up for a band under the cap")
-	check(town.quest_marker.label_text() == "TALK TO HIM",
-		"the arrow says what to do (%s)" % town.quest_marker.label_text())
-	check(giver.marker_service() == "recruiter",
-		"a band short of the cap is the recruiter's business (%s)" % giver.marker_service())
-	check(town.quest_marker.target() == town.keepers.get("recruiter"),
-		"the arrow rides the recruiter")
-
-	# Fill the band to the cap: the recruiter has nothing left to sell, and the
-	# campaign's first order is the quartermaster's.
-	while warband.roster.count() < warband.deployment_cap:
-		warband.add_mercenary("Oath %d" % warband.roster.count())
-	check(warband.roster.count() >= warband.deployment_cap,
-		"the band is at the cap (%d)" % warband.roster.count())
-	await create_timer(TownScript.MARKER_POLL * 1.6).timeout
-	check(giver.marker_service() == "quartermaster",
-		"at the cap the arrow is the quartermaster's business (%s)" % giver.marker_service())
-	check(town.quest_marker.target() == town.keepers.get("quartermaster"),
-		"and it has moved onto the quartermaster")
-
-
 # --- the keepers' business -------------------------------------------------
 
+## Every counter is a `G`: no keeper has an order to hand over, so a press opens
+## the panel and nothing else. The square's gold arrow is gone with the ledger.
 func check_talk() -> void:
-	var giver = town.quest_giver
-	if giver == null:
-		return
-	var tips = giver.tips
-	check(tips != null, "the town has a tip channel to name its lessons on")
-	if tips == null:
-		return
-
-	# The recruiter: the line once, then the board it teaches.
 	var desk: Vector3 = town.service_point("recruiter")
 	check(town.interact_at(1, desk) == "recruiter", "G at the desk names the recruiter")
-	check(tips.has_shown(GiverScript.HIRE_LESSON), "the first G offers the hire tip")
-	check(town.screen.is_open(), "the hire board opens straight away")
-	tips.hide()
-	await create_timer(0.15).timeout
-	check(town.interact_at(1, desk) == "recruiter", "G at the desk names it again")
-	check(town.screen.is_open(), "from then on G is the recruiter board itself")
+	check(town.screen.is_open(), "the hire board opens on the press")
 	town.screen.close()
-
-	# The quartermaster: the campaign's first order, handed over at the cap.
 	var quartermaster: Vector3 = town.service_point("quartermaster")
 	check(town.interact_at(1, quartermaster) == "quartermaster",
 		"G at the desk names the quartermaster")
-	check(warband.quests.is_active("free_the_soldiers"),
-		"the quartermaster's talk accepts the rescue order")
-	check(tips.has_shown("offer_free_the_soldiers"), "the order is one tip")
-	check(town.quartermaster.is_open(), "his counter opens instead of a page")
-	tips.hide()
-	await create_timer(0.15).timeout
+	check(town.quartermaster.is_open(), "his counter opens on the press")
 
 
 func check_services() -> void:
@@ -456,14 +404,6 @@ func check_services() -> void:
 	check(town.panels_open(), "an open altar counts as an open panel")
 	town.close_panels()
 	check(not town.altar.is_open(), "the altar closes with the rest")
-
-	# The ichor order lives on the ledger, which is where the altar is named now
-	# that the square has no standing key line.
-	check(warband.quests.offer("bind_the_ichor") or warband.quests.is_active("bind_the_ichor"),
-		"the ichor order can be offered")
-	if not warband.quests.is_active("bind_the_ichor"):
-		warband.quests.accept("bind_the_ichor")
-	check(warband.quests.is_active("bind_the_ichor"), "the ichor order is on the ledger")
 
 	# The vendors are still three stalls with a keeper each.
 	for index in TownScript.VENDOR_SERVICES.size():

@@ -480,8 +480,8 @@ func _refresh_recruiter() -> void:
 	var offered := _fresh_names(_hire_rows.size())
 	var cost := int(_warband.hire_cost())
 	var full: bool = int(_warband.roster.count()) >= int(_warband.deployment_cap)
-	# The first eight oaths cost nothing, and a board that says "0 gold" makes the
-	# player look for a catch. It says FREE.
+	# Every oath under the cap costs nothing, and a board that says "0 gold" makes
+	# the player look for a catch. It says FREE.
 	if cost <= 0:
 		_cost_label.text = "Next oath: free  /  %d of %d sworn" % [
 			int(_warband.roster.count()), int(_warband.deployment_cap)]

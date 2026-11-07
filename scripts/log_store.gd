@@ -13,6 +13,12 @@ const KEEP_RECENT_SECONDS := 90.0
 
 const SESSION_SUFFIXES := [".active.json", ".meta.json", ".reported.json", ".jsonl", ".log"]
 
+## The tail read's first window and its ceiling: a window grows until it holds
+## the whole lines asked for, and never reads past the ceiling for a line that
+## is not a line.
+const TAIL_WINDOW := 16384
+const TAIL_CEILING := 4 << 20
+
 
 static func utc_iso(unix_time: float = -1.0) -> String:
 	var seconds := Time.get_unix_time_from_system() if unix_time < 0.0 else unix_time
@@ -129,13 +135,44 @@ static func copy_file(from_path: String, to_path: String) -> bool:
 		ProjectSettings.globalize_path(to_path)) == OK
 
 
+## The last `count` lines of `path`, read backwards from the end.
+##
+## A session log is chapters of JSON, tens of megabytes after an evening, and
+## the crash scan reads the tail of every session once a minute on the main
+## thread. `get_file_as_string` on the whole file - which is what this used to
+## do to answer for its last two lines - made that scan a second-long freeze in
+## the middle of a fight. Only the tail is ever asked for, so only the tail is
+## read: a window that grows until it holds `count` whole lines.
+
 static func tail_lines(path: String, count: int) -> PackedStringArray:
-	if not FileAccess.file_exists(path):
+	if count <= 0 or not FileAccess.file_exists(path):
 		return PackedStringArray()
-	var lines := FileAccess.get_file_as_string(path).split("\n")
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return PackedStringArray()
+	var size := file.get_length()
+	var window := TAIL_WINDOW
+	var text := ""
+	while true:
+		var start := maxi(0, size - window)
+		file.seek(start)
+		text = file.get_buffer(size - start).get_string_from_utf8()
+		# A window that starts mid-line cannot use that line: a fragment of a
+		# record is not a record. Drop it, and let the newline count say whether
+		# enough whole lines are in hand.
+		if start > 0:
+			var first := text.find("\n")
+			text = text.substr(first + 1) if first >= 0 else ""
+		if start <= 0 or text.count("\n") >= count or window >= TAIL_CEILING:
+			break
+		window = mini(window * 4, TAIL_CEILING)
+	file.close()
+	if text.is_empty():
+		return PackedStringArray()
+	var lines := text.split("\n")
 	if not lines.is_empty() and lines[lines.size() - 1].is_empty():
 		lines.remove_at(lines.size() - 1)
-	var begin := maxi(0, lines.size() - maxi(0, count))
+	var begin := maxi(0, lines.size() - count)
 	return PackedStringArray(lines.slice(begin))
 
 

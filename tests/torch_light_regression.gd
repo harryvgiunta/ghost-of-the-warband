@@ -126,7 +126,9 @@ func _check_world() -> void:
 		% str(again.get("reason", "")))
 	await create_timer(0.3).timeout
 	game.drop_merc_gear(body, merc_id)
-	await create_timer(0.3).timeout
+	# Read the drop on the frame it lands: a squadmate in the square walks to it
+	# and takes it, which is the shared stash working as intended and not this
+	# check's business.
 	var dropped = null
 	for pickup in game.pickups:
 		if is_instance_valid(pickup) and str(pickup.item_id) == "torch_hand":

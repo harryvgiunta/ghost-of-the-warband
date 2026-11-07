@@ -476,21 +476,24 @@ func run() -> void:
 	warband.save_state()
 	flow.active = true
 	flow.host_campaign(0, "Host")
-	check(flow.world_start == "camp", "HOST GAME's new game opens in the cages (%s)" % flow.world_start)
+	check(flow.world_start == "town", "HOST GAME's new game opens in the square (%s)" % flow.world_start)
 	check(str(flow.warband_intent.get("scene", "")) == GameFlowScript.WORLD_SCENE,
 		"the host door asks for the world scene")
 	check(str(flow.warband_intent.get("mode", "")) == "host", "the host door carries the host mode")
 
+	var roster_before: int = warband.roster.count()
 	warband.add_mercenary("Test")
 	warband.save_state()
-	check(warband.roster.count() == 1, "the temp save holds a roster")
+	check(warband.roster.count() == roster_before + 1, "the temp save holds a roster (%d)"
+		% warband.roster.count())
 	flow.host_campaign(0, "Host", GameFlowScript.HOST_CHECKPOINT)
 	check(flow.world_start == "town",
 		"hosting from a save with no checkpoint opens at the town (%s)" % flow.world_start)
-	check(warband.roster.count() == 1, "hosting from the checkpoint keeps the saved roster")
+	check(warband.roster.count() == roster_before + 1,
+		"hosting from the checkpoint keeps the saved roster (%d)" % warband.roster.count())
 	flow.host_campaign(0, "Host", GameFlowScript.HOST_NEW)
-	check(flow.world_start == "camp" and warband.roster.count() == 0,
-		"hosting a new game throws the saved warband away for the cages (%d)" % warband.roster.count())
+	check(flow.world_start == "town" and warband.roster.count() == warband.STARTING_BAND.size(),
+		"hosting a new game throws the saved warband away for a fresh one (%d)" % warband.roster.count())
 
 	# JOIN connects from the title and opens nothing until the host answers.
 	var probe := PacketPeerUDP.new()

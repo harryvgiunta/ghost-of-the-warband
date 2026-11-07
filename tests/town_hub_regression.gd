@@ -65,7 +65,7 @@ func run() -> void:
 	if game != null and is_instance_valid(game):
 		game.queue_free()
 	await process_frame
-	root.get_node("GameFlow").world_start = "camp"
+	root.get_node("GameFlow").world_start = "town"
 	_remove(TEST_SAVE)
 	_remove(WARBAND_SAVE)
 	print("TOWN_HUB_REGRESSION checks=", checks, " failures=", failures)
@@ -75,10 +75,12 @@ func run() -> void:
 
 func check_square() -> void:
 	check(game.start_area == "town", "the world put the warband down at the town end (%s)" % game.start_area)
-	check(game.camp != null and game.trail != null,
-		"the camp and the trail are the same world, 300 m up the road")
-	check(warband.roster.count() >= 5, "the hub seeds a warband (%d)" % warband.roster.count())
-	check(game.bodies.size() >= 5, "at least five bodies stand in the square (%d)" % game.bodies.size())
+	check(game.wood != null and game.trail != null,
+		"the wood and the trail are the same world, up the road")
+	check(warband.roster.count() == warband.STARTING_BAND.size(),
+		"the hub seeds the starting band (%d)" % warband.roster.count())
+	check(game.bodies.size() == warband.STARTING_BAND.size(),
+		"one body stands in the square (%d)" % game.bodies.size())
 	check(game.bodies.size() <= warband.deployment_cap,
 		"the square fields no more than the cap (%d)" % game.bodies.size())
 	var actor = game.controller.active_body(1)
@@ -165,8 +167,11 @@ func check_stash() -> void:
 	check(now_main == swap_id, "the paperdoll wears the stashed piece (%s)" % now_main)
 	check(warband.stash.pooled_count(swap_id) == swap_pool - 1,
 		"the equipped copy leaves the pool (%d -> %d)" % [swap_pool, warband.stash.pooled_count(swap_id)])
-	check(warband.stash.pooled_count(worn_main) == worn_pool + 1,
-		"the displaced main hand returns to the pool")
+	# A campaign's first body walks in naked, so its first piece displaces
+	# nothing: the pool only grows a row when a hand had something to give back.
+	if not worn_main.is_empty():
+		check(warband.stash.pooled_count(worn_main) == worn_pool + 1,
+			"the displaced main hand returns to the pool")
 
 # --- altar -----------------------------------------------------------------
 
@@ -212,9 +217,52 @@ func check_recruiter() -> void:
 	if not game.screen.is_open():
 		return
 
+	# A campaign opens with one body, so the field is filled to the cap here -
+	# sworn in the books rather than hired at the desk, because the desk is a
+	# replacement line, not a recruiting one.
+	var oathbound: int = warband.deployment_cap - warband.roster.count()
+	for index in maxi(0, oathbound):
+		warband.add_mercenary("Oathbound %d" % (index + 1))
+	await physics_frame
+	await physics_frame
+	check(warband.roster.count() == warband.deployment_cap,
+		"the square's band stands at the cap (%d of %d)"
+		% [warband.roster.count(), warband.deployment_cap])
+	var cap_count: int = warband.roster.count()
+	var cap_gold: int = warband.gold()
+	game.screen.refresh()
+	var cap_button: Button = null
+	for button in game.screen.hire_buttons:
+		if not button.disabled:
+			cap_button = button
+			break
+	check(cap_button != null, "the board keeps a pressable row at the cap")
+	if cap_button != null:
+		cap_button.pressed.emit()
+	check(warband.roster.count() == cap_count, "the recruiter refuses at the cap")
+	check(warband.gold() == cap_gold, "a refused hire costs nothing")
+
+	# A place opens when a body is reaped, and only then does the desk swear one.
+	var soul_merc: int = game.controller.merc_for_peer(1)
+	var fallen := -1
+	for merc_id in warband.roster.ids():
+		if merc_id != soul_merc:
+			fallen = merc_id
+			break
+	var fallen_body = game.controller.body_of(fallen)
+	check(fallen_body != null, "a squadmate stands to fall")
+	if fallen_body == null:
+		return
+	fallen_body._die(0)
+	# The world mirrors a body's death into the books on its own roster clock.
+	await create_timer(0.8).timeout
+	check(not warband.roster.has(fallen), "the fallen leave the books and free a place")
+	check(warband.field_room() == 1, "and the field has a place again (%d)" % warband.field_room())
+
 	var count_before: int = warband.roster.count()
 	var gold_before: int = warband.gold()
 	var cost: int = warband.hire_cost()
+	game.screen.refresh()
 	var hire_button: Button = null
 	for button in game.screen.hire_buttons:
 		if not button.disabled:
@@ -229,7 +277,7 @@ func check_recruiter() -> void:
 	check(warband.gold() == gold_before - cost,
 		"hiring spends exactly the hire cost (%d -> %d, cost %d)"
 			% [gold_before, warband.gold(), cost])
-	check(warband.hire_cost() == 0, "the next oath is still free under the eight")
+	check(cost == 0, "an oath sworn under the cap is free (cost %d)" % cost)
 	# An oath is a body in the square, not a name on a list: under the cap the
 	# hire takes a place on the field and stands up beside the band.
 	var hired_ids: Array[int] = warband.roster.ids()
@@ -243,24 +291,6 @@ func check_recruiter() -> void:
 	if hired_body != null and is_instance_valid(hired_body):
 		check(game.town.in_square(hired_body), "in the square (%s)" % str(hired_body.global_position))
 		check(game.bodies.has(hired_body), "and the world fields him with the rest of the band")
-
-	# At the cap the board must refuse and leave the purse and roster alone.
-	while warband.roster.count() < warband.deployment_cap:
-		warband.add_mercenary("Oath %d" % warband.roster.count())
-	game.screen.refresh()
-	var cap_count: int = warband.roster.count()
-	var cap_gold: int = warband.gold()
-	var cap_button: Button = null
-	for button in game.screen.hire_buttons:
-		if not button.disabled:
-			cap_button = button
-			break
-	check(cap_button != null, "the board keeps a pressable row at the cap")
-	if cap_button != null:
-		cap_button.pressed.emit()
-	check(warband.roster.count() == cap_count, "the recruiter refuses at the cap")
-	check(warband.gold() == cap_gold, "a refused hire costs nothing")
-	game.screen.close()
 
 	# The cap is the field. Every sworn name now stands in the square; one more,
 	# sworn past it (a soldier cut out of a cage), waits in the reserve with no
@@ -278,22 +308,22 @@ func check_recruiter() -> void:
 	await physics_frame
 	await physics_frame
 	check(game.controller.body_of(waiting_id) == null, "and has no body on the field")
-	var soul_merc: int = game.controller.merc_for_peer(1)
-	var fallen := -1
+	var soul_again: int = game.controller.merc_for_peer(1)
+	var last_fallen := -1
 	for merc_id in warband.roster.ids():
-		if merc_id != soul_merc and merc_id != waiting_id:
-			fallen = merc_id
+		if merc_id != soul_again and merc_id != waiting_id:
+			last_fallen = merc_id
 			break
-	var fallen_body = game.controller.body_of(fallen)
-	check(fallen_body != null, "a squadmate stands to fall")
-	if fallen_body == null:
+	var last_body = game.controller.body_of(last_fallen)
+	check(last_body != null, "and another squadmate stands to fall")
+	if last_body == null:
 		return
-	fallen_body._die(0)
-	# The world mirrors a body's death into the books on its own roster clock.
+	last_body._die(0)
 	await create_timer(0.8).timeout
-	check(not warband.roster.has(fallen), "the fallen leave the books and free a place")
+	check(not warband.roster.has(last_fallen), "the second fallen frees a place too")
 	check(not warband.roster.is_reserve(waiting_id), "in the square, the reserve takes the place")
 	var called_up = game.controller.body_of(waiting_id)
 	check(called_up != null and is_instance_valid(called_up), "and stands up as a body")
 	if called_up != null and is_instance_valid(called_up):
 		check(game.town.in_square(called_up), "by the town's fire (%s)" % str(called_up.global_position))
+	game.screen.close()

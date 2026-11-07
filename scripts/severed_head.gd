@@ -420,18 +420,129 @@ static func _posed_surface(skinned: bool, skin: Skin, skeleton: Skeleton3D,
 	return {"points": points, "normals": normals, "tangents": tangents}
 
 
-## A body cut clean through by a plane into two halves, in one pass over every every
-## skinned surface is posed once at the death frame and its triangles are dealt
-## to the side their corners mostly fall on. Returns `[positive, negative]`
-## meshes, either of which may be empty. The vertices are written in `frame`, so
-## each half can be turned over rigidly on its own.
+## A corner this close to the blade's plane is written on it: a crossing found
+## inside a tenth of a millimetre is a corner of the cut, not a sliver of face.
+const PLANE_EPSILON := 0.0001
+
+
+## One half of one surface while it is built: only the corners its own triangles
+## use, and one corner per edge the blade crossed, shared by both triangles that
+## meet on it - so a cut ring is one ring and a corner is written once per half.
+## The posed arrays are read in place; nothing here copies the body's pose.
+class HalfPiece:
+	## A triangle the clip has squeezed onto a line is no triangle.
+	const FLAT := 0.000000000001
+	var posed_points := PackedVector3Array()
+	var posed_normals := PackedVector3Array()
+	var posed_tangents := PackedVector3Array()
+	var handedness := PackedFloat32Array()
+	var raw_uvs = null
+	var raw_uv2s = null
+	var raw_colors = null
+	var points := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var tangents := PackedVector3Array()
+	var handed := PackedFloat32Array()
+	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()
+	var colors := PackedColorArray()
+	var faces := PackedInt32Array()
+	var _whole := {}
+	var _seam := {}
+
+	## A corner the posed body already has.
+	func whole(id: int) -> int:
+		var slot: int = _whole.get(id, -1)
+		if slot < 0:
+			slot = _add(id, posed_points[id], posed_normals[id], posed_tangents[id],
+				_uv(id, id, 0.0), _uv2(id, id, 0.0), _color(id, id, 0.0))
+			_whole[id] = slot
+		return slot
+
+	## Where the edge `a`-`b` meets the blade, `along` the way from `a` to `b`: the
+	## corner the cut ring is made of, at the pose the two corners were solved to.
+	func seam(a: int, b: int, along: float) -> int:
+		var key := Vector2i(mini(a, b), maxi(a, b))
+		var slot: int = _seam.get(key, -1)
+		if slot >= 0:
+			return slot
+		var forwards := a <= b
+		var from := a if forwards else b
+		var to := b if forwards else a
+		var t := along if forwards else 1.0 - along
+		var normal := posed_normals[from].lerp(posed_normals[to], t)
+		var tangent := posed_tangents[from].lerp(posed_tangents[to], t)
+		if normal.length_squared() > 0.000001:
+			normal = normal.normalized()
+		else:
+			normal = posed_normals[from]
+		if tangent.length_squared() > 0.000001:
+			tangent = tangent.normalized()
+		else:
+			tangent = posed_tangents[from]
+		slot = _add(from, posed_points[from].lerp(posed_points[to], t), normal,
+			tangent, _uv(from, to, t), _uv2(from, to, t), _color(from, to, t))
+		_seam[key] = slot
+		return slot
+
+	## One triangle of the half. A crossing that has left it flat is dropped, so a
+	## cut never leaves a degenerate face or a normal solved out of nothing.
+	func face(a: int, b: int, c: int) -> void:
+		if (points[b] - points[a]).cross(points[c] - points[a]).length_squared() < FLAT:
+			return
+		faces.append(a)
+		faces.append(b)
+		faces.append(c)
+
+	func _add(source: int, point: Vector3, normal: Vector3, tangent: Vector3,
+			uv: Vector2, uv2: Vector2, color: Color) -> int:
+		points.append(point)
+		normals.append(normal)
+		tangents.append(tangent)
+		handed.append(handedness[source])
+		uvs.append(uv)
+		uv2s.append(uv2)
+		colors.append(color)
+		return points.size() - 1
+
+	func _uv(from: int, to: int, along: float) -> Vector2:
+		if raw_uvs == null:
+			return Vector2.ZERO
+		var first: Vector2 = raw_uvs[from]
+		var second: Vector2 = raw_uvs[to]
+		return first.lerp(second, along)
+
+	func _uv2(from: int, to: int, along: float) -> Vector2:
+		if raw_uv2s == null:
+			return Vector2.ZERO
+		var first: Vector2 = raw_uv2s[from]
+		var second: Vector2 = raw_uv2s[to]
+		return first.lerp(second, along)
+
+	func _color(from: int, to: int, along: float) -> Color:
+		if raw_colors == null:
+			return Color.WHITE
+		var first: Color = raw_colors[from]
+		var second: Color = raw_colors[to]
+		return first.lerp(second, along)
+
+
+## A body cut clean through by a plane into two halves. Every surface the body is
+## drawn with is posed once at the death frame, and every triangle of it is clipped
+## against the plane through the frame's own origin along `normal`: what lies on a
+## half's side is that half's, what straddles is cut on the plane and each half
+## keeps its own part of it, and what lies beyond is dropped - so the two halves
+## together are the body exactly once, and the blade's plane is the only place a
+## corner of it is in both. Returns `[positive, negative]` meshes, either of which
+## may be empty. The vertices are written in `frame`, so each half can be turned
+## over rigidly on its own.
 static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D,
-		normal: Vector3, offset: float) -> Array:
-	var into_frame := frame.affine_inverse() * skeleton.get_global_transform()
-	var side := Vector3(normal.x, 0.0, normal.z)
-	if side.length_squared() < 0.000001:
-		side = Vector3.RIGHT
-	side = side.normalized()
+		normal: Vector3) -> Array:
+	var to_frame := frame.affine_inverse()
+	var into_frame := to_frame * skeleton.get_global_transform()
+	# The blade's plane, in the frame the corners are written in: the body is cut
+	# along its own middle, not along a world axis it may have been turned off.
+	var plane := (to_frame.basis * normal).normalized()
 	var meshes: Array = [ArrayMesh.new(), ArrayMesh.new()]
 	for node in visual.find_children("*", "MeshInstance3D", true, false):
 		var instance := node as MeshInstance3D
@@ -448,15 +559,21 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 		if not skinned and instance.skin != null:
 			continue
 		var skin := instance.skin
-		var into_static := frame.affine_inverse() * instance.global_transform
+		var into_static := to_frame * instance.global_transform
 		for surface in instance.mesh.get_surface_count():
 			var arrays := instance.mesh.surface_get_arrays(surface)
+			# A surface that answers no vertex array draws nothing to cut: a
+			# primitive proxy or an unset mesh contributes no triangles to either
+			# half instead of erroring the whole cut.
+			if arrays.is_empty():
+				continue
 			var vertices = arrays[Mesh.ARRAY_VERTEX]
 			var bones = arrays[Mesh.ARRAY_BONES]
 			var weights = arrays[Mesh.ARRAY_WEIGHTS]
-			if vertices == null:
+			if vertices == null or vertices.size() < 3:
 				continue
-			if skinned and (bones == null or weights == null):
+			if skinned and (bones == null or weights == null
+					or bones.is_empty() or weights.is_empty()):
 				continue
 			var count: int = vertices.size()
 			var per: int = 0
@@ -477,11 +594,16 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 			var points: PackedVector3Array = posed["points"]
 			var normals: PackedVector3Array = posed["normals"]
 			var tangents: PackedVector3Array = posed["tangents"]
-			# Which side of the blade each corner sits on.
+			# One pass prepares both halves: the side of the blade each corner sits
+			# on, and the handedness its tangent arrives with.
 			var across := PackedFloat32Array()
 			across.resize(count)
+			var handedness := PackedFloat32Array()
+			handedness.resize(count)
 			for vertex in count:
-				across[vertex] = side.dot(points[vertex]) - offset
+				across[vertex] = plane.dot(points[vertex])
+				handedness[vertex] = float(raw_tangent[vertex * 4 + 3]) \
+					if raw_tangent != null else 1.0
 			var order := PackedInt32Array()
 			var indices = arrays[Mesh.ARRAY_INDEX]
 			if indices == null:
@@ -491,44 +613,69 @@ static func build_sides(visual: Node3D, skeleton: Skeleton3D, frame: Transform3D
 			else:
 				order = indices
 			for half in 2:
-				var sign := 1.0 if half == 0 else -1.0
-				var kept := PackedInt32Array()
+				var keep := 1.0 if half == 0 else -1.0
+				var half_piece := HalfPiece.new()
+				half_piece.posed_points = points
+				half_piece.posed_normals = normals
+				half_piece.posed_tangents = tangents
+				half_piece.handedness = handedness
+				half_piece.raw_uvs = raw_uv
+				half_piece.raw_uv2s = raw_uv2
+				half_piece.raw_colors = raw_color
 				for corner in range(0, order.size() - 2, 3):
 					var a := int(order[corner])
 					var b := int(order[corner + 1])
 					var c := int(order[corner + 2])
-					if sign * (across[a] + across[b] + across[c]) <= 0.0:
+					var da: float = keep * across[a]
+					var db: float = keep * across[b]
+					var dc: float = keep * across[c]
+					var lowest: float = minf(da, minf(db, dc))
+					var highest: float = maxf(da, maxf(db, dc))
+					# Flat in the blade's plane: that is the cut, not a half of it.
+					if lowest >= -PLANE_EPSILON and highest <= PLANE_EPSILON:
 						continue
-					kept.append(a)
-					kept.append(b)
-					kept.append(c)
-				if kept.is_empty():
+					if lowest >= 0.0:
+						half_piece.face(half_piece.whole(a), half_piece.whole(b),
+							half_piece.whole(c))
+						continue
+					if highest <= 0.0:
+						continue
+					# The blade crossed this triangle: each half keeps the part on
+					# its own side, closed by a fresh edge lying in the plane.
+					var cut := PackedInt32Array()
+					var ids := [a, b, c]
+					var sides := [da, db, dc]
+					for edge in 3:
+						var next: int = (edge + 1) % 3
+						var here: float = sides[edge]
+						var there: float = sides[next]
+						if here >= 0.0:
+							cut.append(half_piece.whole(int(ids[edge])))
+						if (here > 0.0 and there < 0.0) or (here < 0.0 and there > 0.0):
+							cut.append(half_piece.seam(int(ids[edge]), int(ids[next]),
+								here / (here - there)))
+					for fan in range(1, cut.size() - 1):
+						half_piece.face(cut[0], cut[fan], cut[fan + 1])
+				if half_piece.faces.is_empty():
 					continue
-				var local := {}
-				var ids := PackedInt32Array()
-				for vertex in kept:
-					var id := int(vertex)
-					if local.has(id):
-						continue
-					local[id] = ids.size()
-					ids.append(id)
 				var tool := SurfaceTool.new()
 				tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-				for id in ids:
+				for slot in half_piece.points.size():
 					if raw_normal != null:
-						tool.set_normal(normals[id])
+						tool.set_normal(half_piece.normals[slot])
 					if raw_uv != null:
-						tool.set_uv(raw_uv[id])
+						tool.set_uv(half_piece.uvs[slot])
 					if raw_uv2 != null:
-						tool.set_uv2(raw_uv2[id])
+						tool.set_uv2(half_piece.uv2s[slot])
 					if raw_color != null:
-						tool.set_color(raw_color[id])
+						tool.set_color(half_piece.colors[slot])
 					if raw_tangent != null:
-						tool.set_tangent(Plane(tangents[id].x, tangents[id].y,
-							tangents[id].z, raw_tangent[id * 4 + 3]))
-					tool.add_vertex(points[id])
-				for vertex in kept:
-					tool.add_index(int(local[int(vertex)]))
+						var tangent: Vector3 = half_piece.tangents[slot]
+						tool.set_tangent(Plane(tangent.x, tangent.y, tangent.z,
+							half_piece.handed[slot]))
+					tool.add_vertex(half_piece.points[slot])
+				for index in half_piece.faces:
+					tool.add_index(index)
 				var target: ArrayMesh = meshes[half]
 				target = tool.commit(target)
 				target.surface_set_material(target.get_surface_count() - 1,
@@ -558,6 +705,8 @@ static func faces_for(mesh: ArrayMesh, skin: Skin, surface: int,
 	if _faces.has(key):
 		return _faces[key]
 	var arrays := mesh.surface_get_arrays(surface)
+	if arrays.is_empty():
+		return PackedInt32Array()
 	var vertices = arrays[Mesh.ARRAY_VERTEX]
 	var bones = arrays[Mesh.ARRAY_BONES]
 	var weights = arrays[Mesh.ARRAY_WEIGHTS]

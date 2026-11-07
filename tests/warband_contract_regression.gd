@@ -56,6 +56,7 @@ func run() -> void:
 	check_party_mode(warband)
 	check_auto_arm(warband)
 	check_reequip(warband)
+	check_hand_set(warband)
 
 	_remove_test_save()
 	print("WARBAND_CONTRACT_REGRESSION checks=", checks, " failures=", failures)
@@ -169,25 +170,34 @@ func check_gear_transfer(_state, warband) -> void:
 	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
 		"a refused equip leaves the body alone")
 
-	# A pickup snaps into a hand only when it beats what is already there.
+	# A pickup only ever *fills* a hand, and only a body with nothing in them is
+	# filled at all.
+	var dara: int = warband.add_mercenary("Dara")
 	stash.add("sword_short", 1)
-	var empty_hand: Dictionary = warband.auto_equip(ash, "sword_short")
+	var empty_hand: Dictionary = warband.auto_equip(dara, "sword_short")
 	check(bool(empty_hand.get("ok", false)), "a looted blade fills an empty main hand")
-	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
+	check(str(roster.equipped_of(dara).get("main", "")) == "sword_short",
 		"the shortsword is worn")
 	stash.add("dagger_iron", 1)
-	var worse: Dictionary = warband.auto_equip(ash, "dagger_iron")
-	check(worse.get("ok") == false, "a piece no better than the worn one stays in the stash")
+	var worse: Dictionary = warband.auto_equip(dara, "dagger_iron")
+	check(worse.get("ok") == false,
+		"a second piece does not follow the first into a body holding steel")
 	check(warband.stash.pooled_count("dagger_iron") == 1, "and it is still owned")
+	# A body already holding steel keeps it, however much better the drop is:
+	# nothing is swapped under the player (or a squadmate) in the middle of a fight.
 	stash.add("sword_arming", 1)
-	var better: Dictionary = warband.auto_equip(ash, "sword_arming")
-	check(bool(better.get("ok", false)), "a better blade goes straight into the hand")
-	check(str(roster.equipped_of(ash).get("main", "")) == "sword_arming",
-		"the arming sword replaced the shortsword")
-	check(warband.stash.pooled_count("sword_short") == 1,
-		"the displaced shortsword returns to the pool")
-	check(str(roster.equipped_of(ash).get("off", "")) == "dagger_ironwood",
-		"the off hand is untouched by a main-hand upgrade")
+	var better: Dictionary = warband.auto_equip(dara, "sword_arming")
+	check(not bool(better.get("ok", true)), "a better blade does not trade a worn one")
+	check(str(roster.equipped_of(dara).get("main", "")) == "sword_short",
+		"the shortsword stays in the hand")
+	check(warband.stash.pooled_count("sword_arming") == 1,
+		"and the arming sword waits in the pool")
+	# The press that chooses again is the body's own re-equip.
+	var kit: Dictionary = warband.reequip_merc(dara)
+	check(bool(kit.get("ok", false)), "the body re-equips: %s" % str(kit.get("message", "")))
+	check(str(roster.equipped_of(dara).get("main", "")) == "sword_arming",
+		"and the arming sword wins on the band's own priority, got %s"
+		% str(roster.equipped_of(dara).get("main", "")))
 
 	# Unarmed bodies get the first thing they pick up - but only what their trade
 	# fights with. A blade's body leaves the band's spare bow in the pool
@@ -644,42 +654,52 @@ func check_persistence(warband) -> void:
 
 # --- the party's mode ------------------------------------------------------
 
-## How the squad picks its fights is the warband's: a fresh band is offensive, a
-## named mode takes and is announced once (the co-op mirror sends on `changed`),
-## an unknown mode and a guest's press change nothing, and the mode rides the save -
-## a file from before it existed fights offensive.
+## How the squad picks its fights is the warband's: a fresh band answers rather
+## than hunts (`Contracts.DEFAULT_PARTY_MODE`), a named mode takes and is announced
+## once (the co-op mirror sends on `changed`), an unknown mode and a guest's press
+## change nothing, and the mode rides the save - a file from before it existed
+## comes up on the same default.
 func check_party_mode(warband) -> void:
 	warband.reset_state()
-	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a fresh warband fights offensive")
+	check(warband.party_mode == Contracts.DEFAULT_PARTY_MODE
+			and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+		"a fresh warband answers before it hunts: the default is defensive (%s)"
+		% str(warband.party_mode))
 	var told := [0]
 	var count := func() -> void: told[0] += 1
 	warband.changed.connect(count)
-	var result: Dictionary = warband.set_party_mode(Contracts.PARTY_DEFENSIVE)
-	check(bool(result.get("ok", false)) and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+	var result: Dictionary = warband.set_party_mode(Contracts.PARTY_OFFENSIVE)
+	check(bool(result.get("ok", false)) and warband.party_mode == Contracts.PARTY_OFFENSIVE,
 		"the party takes a named mode (%s)" % str(result.get("message", "")))
 	check(told[0] == 1, "and says so once (%d)" % told[0])
-	warband.set_party_mode(Contracts.PARTY_DEFENSIVE)
+	warband.set_party_mode(Contracts.PARTY_OFFENSIVE)
 	check(told[0] == 1, "the mode it is already in is no change (%d)" % told[0])
 	result = warband.set_party_mode("berserk")
-	check(not bool(result.get("ok", true)) and warband.party_mode == Contracts.PARTY_DEFENSIVE,
+	check(not bool(result.get("ok", true)) and warband.party_mode == Contracts.PARTY_OFFENSIVE,
 		"an unknown mode is refused and the party keeps its own")
 	warband.changed.disconnect(count)
 
 	warband.set_party_mode(Contracts.PARTY_PASSIVE)
 	warband.save_state()
 	warband.reset_state()
-	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a reset is a fresh band on offensive")
+	check(warband.party_mode == Contracts.DEFAULT_PARTY_MODE,
+		"a reset is a fresh band on the default (%s)" % str(warband.party_mode))
 	check(warband.load_state() and warband.party_mode == Contracts.PARTY_PASSIVE,
 		"the party's mode survives a save")
 	var old: Dictionary = warband.to_dict()
 	old.erase("party_mode")
 	warband.from_dict(old)
-	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "a v8 file, with no mode, fights offensive")
+	check(warband.party_mode == Contracts.DEFAULT_PARTY_MODE,
+		"a file written before the mode existed comes up on the default (%s)"
+		% str(warband.party_mode))
 	old["party_mode"] = "berserk"
 	warband.from_dict(old)
-	check(warband.party_mode == Contracts.PARTY_OFFENSIVE, "and so does a mode this build never heard of")
+	check(warband.party_mode == Contracts.DEFAULT_PARTY_MODE,
+		"and so does a mode this build never heard of (%s)" % str(warband.party_mode))
 
 	# The world's `B` steps through the modes in the menu's order and round again.
+	# From OFFENSIVE the walk is the shipped order and the last step comes back.
+	warband.set_party_mode(Contracts.PARTY_OFFENSIVE)
 	var stepped: Array[String] = []
 	for _press in Contracts.PARTY_MODES.size():
 		stepped.append(str(warband.cycle_party_mode().get("mode", "")))
@@ -1012,4 +1032,88 @@ func check_reequip(warband) -> void:
 	check(bool(idle.get("ok", false)), "an empty band answers instead of failing")
 	check(str(idle.get("message", "")).contains("nothing to re-equip"),
 		"and it says there is nothing to re-equip: %s" % str(idle.get("message", "")))
+	warband.reset_state()
+
+
+# --- the player's own hands ------------------------------------------------
+
+## The three rules that keep automatic arming out of the player's way. A pickup
+## only fills a bare body; what a hand dressed is never swapped and never carried
+## off to another body; and the band's own press still gears up everyone it can
+## without undoing a slot the player filled.
+func check_hand_set(warband) -> void:
+	warband.reset_state()
+	var roster = warband.roster
+	var stash = warband.stash
+	var ash: int = warband.add_mercenary("Ash")
+
+	# 1. A body with steel in its hands is never armed by a pickup - not into the
+	# free hand, and not over the piece already in it.
+	stash.add("sword_short", 1)
+	stash.add("shield_wood", 1)
+	check(bool(warband.equip_merc(ash, "main", "sword_short").get("ok", false)),
+		"the player sets a blade in a hand")
+	check(roster.is_manual(ash, "main"), "and the slot is marked as a hand's")
+	var free_hand: Dictionary = warband.auto_equip(ash, "shield_wood")
+	check(not bool(free_hand.get("ok", true)), "a pickup leaves an armed body alone")
+	check(str(roster.equipped_of(ash).get("off", "")).is_empty(),
+		"the free hand stays empty")
+	stash.add("sword_great", 1)
+	check(not bool(warband.auto_equip(ash, "sword_great").get("ok", true)),
+		"and a dearer blade never trades the one in hand")
+	check(str(roster.equipped_of(ash).get("main", "")) == "sword_short",
+		"the worn blade is where the player put it")
+	check(stash.pooled_count("sword_great") == 1, "the better blade waits in the pool")
+
+	# 2. A bare body is still armed by a pickup - and that arming pins nothing.
+	var bare: int = warband.add_mercenary("Bare")
+	stash.add("dagger_iron", 1)
+	check(bool(warband.auto_equip(bare, "dagger_iron").get("ok", false)),
+		"a bare body takes the blade it loots")
+	check(not roster.is_manual(bare, "main"), "and the arming pins no slot")
+	stash.add("sword_arming", 1)
+	check(not bool(warband.auto_equip(bare, "sword_arming").get("ok", true)),
+		"but the next drop of a better blade waits in the pool")
+
+	# 3. The band's press gears up every body and still leaves a hand-set kit where
+	# it is: the pool is re-dealt, a chosen weapon is not.
+	warband.reset_state()
+	var first: int = warband.add_mercenary("Ash")
+	var next: int = warband.add_mercenary("Corvin")
+	stash.add("dagger_ironwood", 1)
+	stash.add("sword_short", 1)
+	check(bool(warband.equip_merc(first, "main", "dagger_ironwood").get("ok", false)),
+		"the player arms one hand")
+	check(bool(warband.equip_merc(first, "off", "sword_short").get("ok", false)),
+		"and the other")
+	stash.add("sword_great", 1)
+	var band: Dictionary = warband.reequip_warband()
+	check(bool(band.get("ok", false)), "the band re-equips: %s" % str(band.get("message", "")))
+	check(str(roster.equipped_of(first).get("main", "")) == "dagger_ironwood"
+			and str(roster.equipped_of(first).get("off", "")) == "sword_short",
+		"and does not take the chosen pair off the body (%s / %s)"
+		% [str(roster.equipped_of(first).get("main", "")),
+			str(roster.equipped_of(first).get("off", ""))])
+	check(str(roster.equipped_of(next).get("main", "")) == "sword_great",
+		"while the next body is geared up from the pool, got %s"
+		% str(roster.equipped_of(next).get("main", "")))
+	check(stash.pooled_count("dagger_ironwood") == 0 and stash.pooled_count("sword_short") == 0,
+		"the hand-set pieces never became pool rows")
+
+	# 4. The body's own press is the one that clears the pins.
+	var cleared: Dictionary = warband.reequip_merc(first)
+	check(bool(cleared.get("ok", false)), "the body re-equips: %s" % str(cleared.get("message", "")))
+	check(not roster.is_manual(first, "main") and not roster.is_manual(first, "off"),
+		"and the pins go with the press")
+
+	# 5. A pin rides the save with the kit it belongs to.
+	check(bool(warband.equip_merc(first, "main", "sword_great").get("ok", false))
+			or bool(warband.equip_merc(first, "main", "sword_short").get("ok", false)),
+		"the player sets a blade again")
+	warband.save_state()
+	warband.reset_state()
+	check(not warband.roster.is_manual(first, "main"), "a fresh warband pins nothing")
+	check(warband.load_state(), "the saved warband loads")
+	check(warband.roster.is_manual(first, "main"),
+		"the hand-set slot rides in the save (%s)" % str(warband.roster.manual_slots(first)))
 	warband.reset_state()

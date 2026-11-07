@@ -11,15 +11,18 @@ extends SceneTree
 ##
 ## What is measured:
 ##
-##   1. **The line.** Four cages, four ragged prisoners, four latches - each cage
-##      on the ground, inside its 6-9 m band and well clear of the walked line.
+##   1. **The line.** One cage, `CAGE_FRACTIONS` long - the soldier the watchers
+##      took, caged half way along the walk - on the ground, inside its 6-9 m band
+##      and well clear of the walked line.
 ##   2. **The latch.** Bare hands answer the press and change nothing; a blade in
-##      reach cuts exactly one cage; a second press does nothing; four presses put
-##      four names on the roll and four marks on the rescue order.
-##   3. **The warren.** Three camps, twenty-one `hollow_warden` bodies, every one
-##      of them in the world's hostile list, on the ground, off the lane and clear
-##      of the town's wall - and one of them killed through the signal path counts
-##      toward the watcher bounty.
+##      reach cuts the cage; a second press does nothing; the one press puts one
+##      name on the roll and empties the rescue order's marker.
+##   3. **The warren.** Every camp in `WatcherWarren.CAMPS`, `CAMP_SIZE`
+##      `hollow_warden` bodies each, every one of them in the world's hostile
+##      list, on the ground, off the lane and clear of the town's wall - one of
+##      them killed through the signal path counts toward the watcher bounty, and
+##      that camp alone refills its fallen on its own clock while the others are
+##      left exactly as they stood.
 ##
 ## Bodies are moved by setting `global_position`; nothing here walks the 900 m of
 ## wood, so the whole run is a few seconds of simulation on top of the world's
@@ -37,8 +40,8 @@ const State = preload("res://scripts/player_state.gd")
 
 ## The world's own build is a heightfield and a wood; this is the ceiling for it.
 const WORLD_TIMEOUT := 45.0
-## Four doors, four walks and four fades, all started within a second of one
-## another: 4 s of animation, and the rest is slack.
+## The door's lift, the soldier's walk out and the fade, all started on the cut:
+## 3.2 s of animation, and the rest is the marker's poll and slack.
 const FREE_TIMEOUT := 12.0
 ## Nothing solid within 6 m of the lane's centre line. The walked band's own rule
 ## is `RunForestScript.CLEAR_HALF`; the cage line keeps a wider one.
@@ -55,7 +58,7 @@ const STAND_DRIFT := 2.0
 ## plus the patch it roams, with room to spare. A camp that had converged on the
 ## road would be tens of metres out.
 const RING_REACH := 14.0
-## Half a second of simulation at each of the three camps: enough for the far
+## Half a second of simulation at each camp in the table: enough for the far
 ## band's own tick to take a sighting, if a sighting were possible.
 const ROAD_FRAMES := 30
 ## The same clearance the watchers must keep off the town's wall.
@@ -117,14 +120,6 @@ func run() -> void:
 		return
 	check(true, "the campaign world built")
 
-	var quests = warband.quests
-	check(quests.offer("free_the_soldiers"), "the quartermaster offers the cage line")
-	check(bool(quests.accept("free_the_soldiers").get("ok", false)),
-		"and the rescue order is taken")
-	check(quests.offer("cull_the_watchers"), "he offers the watcher bounty")
-	check(bool(quests.accept("cull_the_watchers").get("ok", false)),
-		"and the kill order is taken")
-
 	var body = game.controller.active_body(1)
 	check(body != null, "a body is seated in the world")
 	if body == null:
@@ -136,15 +131,22 @@ func run() -> void:
 	check(game.watcher_warren != null, "and the watcher warren")
 	check(game.loot_hand != null, "the loot hand is built with the vacuum")
 	check(game.world_map != null, "the map sheet is built with the world")
-	check(game.map_markers().size() == 7,
-		"the map is told where the four cages and three camps are (%d)"
+	check(game.map_markers().size()
+			== CagesScript.CAGE_FRACTIONS.size() + WarrenScript.CAMPS.size(),
+		"the map is told where every cage and every camp stands (%d)"
 			% game.map_markers().size())
 	var roster_before: int = warband.roster.count()
+	# The campaign opens one naked body strong (`Warband.STARTING_BAND`): the cage
+	# line is the only place the wood adds a name to that band, so every count
+	# below is measured against this one.
+	check(roster_before == warband.STARTING_BAND.size(),
+		"the campaign opens with the starting band (%d of %d)"
+			% [roster_before, warband.STARTING_BAND.size()])
 
 	await _check_cages()
-	await _check_warren(body, quests)
+	await _check_warren(body)
 	_check_latches(body)
-	await _check_rescue(body, quests, roster_before)
+	await _check_rescue(body, roster_before)
 	_finish()
 
 
@@ -159,9 +161,15 @@ func _check_cages() -> void:
 	check(cages != null and is_instance_valid(cages), "the world builds the cage line")
 	if cages == null:
 		return
-	check(cages.cages().size() == 4, "four cages stand on the way to town")
-	check(cages.open_cages().size() == 4, "and each of them has a shut latch")
-	check(cages.remaining() == 4, "nothing on the line is open yet")
+	# The line's length is the product's own table, never a literal: one fraction
+	# is one cage, one prisoner and one latch.
+	var count: int = CagesScript.CAGE_FRACTIONS.size()
+	check(cages.cages().size() == count,
+		"the line fields one cage per fraction (%d of %d)"
+			% [cages.cages().size(), count])
+	check(cages.open_cages().size() == count, "and each of them has a shut latch")
+	check(cages.remaining() == count, "nothing on the line is open yet (%d shut)"
+		% cages.remaining())
 	check(cages.freed() == 0, "and nobody has been freed")
 
 	var path = game.trail.forest.get("path")
@@ -192,11 +200,14 @@ func _check_cages() -> void:
 		check(lateral - CagesScript.CAGE_HALF >= RunForestScript.CLEAR_HALF,
 			"cage %d keeps the walked band clear of its bars (%.2f m from the line)"
 			% [index + 1, lateral])
-	check(on_ground == 4, "every cage stands on the ground (%d of 4)" % on_ground)
-	check(clear == 4, "no cage comes inside %.1f m of the lane (%d of 4)"
-		% [CAGE_CLEARANCE, clear])
-	check(banded == 4, "every cage stands in its own 6-9 m band (%d of 4)" % banded)
-	check(soldiers == 4, "one ragged soldier waits in each cage (%d of 4)" % soldiers)
+	check(on_ground == count, "every cage stands on the ground (%d of %d)"
+		% [on_ground, count])
+	check(clear == count, "no cage comes inside %.1f m of the lane (%d of %d)"
+		% [CAGE_CLEARANCE, clear, count])
+	check(banded == count, "every cage stands in its own 6-9 m band (%d of %d)"
+		% [banded, count])
+	check(soldiers == count, "one ragged soldier waits in each cage (%d of %d)"
+		% [soldiers, count])
 	print("WILD_CAGES_CAGES offsets=%s metres=%s" % [
 		str(offsets.map(func(v: float) -> String: return "%.2f" % v)),
 		str(cages.cages().map(func(c: Node3D) -> String:
@@ -216,41 +227,54 @@ func _check_cages() -> void:
 		if door_bars != null and door_bars.get_child_count() == 1 \
 				and door_bars.collision_layer == 1:
 			doored += 1
-	check(walled == 4, "every cage has three standing walls of bars (%d of 4)" % walled)
-	check(doored == 4, "and a door whose collider rises with it (%d of 4)" % doored)
+	check(walled == count, "every cage has three standing walls of bars (%d of %d)"
+		% [walled, count])
+	check(doored == count, "and a door whose collider rises with it (%d of %d)"
+		% [doored, count])
 
-	check(cages.marker_points().size() == 4, "every shut cage is a point on the map")
+	check(cages.marker_points().size() == count,
+		"every shut cage is a point on the map (%d of %d)"
+			% [cages.marker_points().size(), count])
 
 	# The arrow points at the nearest shut cage while the rescue order is on the
-	# roll. The body is on the town square, so that is the last cage on the line.
+	# roll. The body is on the town square, at the town's end of the walk, so on a
+	# line of one the last cage is the only candidate.
 	await create_timer(POLL_WAIT).timeout
 	var marker = cages.get_node_or_null("FreeHimMarker")
 	check(marker != null, "the gold arrow exists")
 	check(marker != null and marker.visible and marker.attached(),
 		"the arrow marks a shut cage while the order is open")
-	check(marker != null and marker.target() == cages.cages()[3],
+	check(marker != null and marker.target() == cages.cages()[count - 1],
 		"and it is the nearest shut cage to the body")
 
 
 # --- 2. the warren ---------------------------------------------------------
 
-func _check_warren(body, quests) -> void:
+func _check_warren(body) -> void:
 	# The world builds the warren itself (`WorldScene._build_orders`), so this
 	# adopts the instance the campaign plays against instead of adding a second
-	# one beside it - two warrens would field forty-two wardens while every
-	# assertion below still passed.
+	# one beside it - two warrens would field the table's wardens twice over while
+	# every assertion below still passed.
 	warren = game.watcher_warren
 	check(warren != null and is_instance_valid(warren), "the world builds the warren")
 	if warren == null:
 		return
 	await create_timer(0.6).timeout
 
-	check(warren.total() == 21, "the warren is three camps of seven (%d)" % warren.total())
-	check(warren.camps().size() == 3, "three camps stand in the wood near the town")
-	check(warren.mobs().size() == 21, "twenty-one wardens were fielded (%d)"
-		% warren.mobs().size())
-	check(warren.living() == 21, "and all of them are on their feet (%d)" % warren.living())
-	check(warren.camp_points().size() == 3, "each camp is a place on the map")
+	# Every count is the camp table's own arithmetic: `CAMPS.size()` camps of
+	# `CAMP_SIZE` bodies, and the module's `total()` is the table read back.
+	var fielded: int = WarrenScript.CAMPS.size() * WarrenScript.CAMP_SIZE
+
+	check(warren.total() == fielded, "the warren is %d camps of %d (%d)"
+		% [WarrenScript.CAMPS.size(), WarrenScript.CAMP_SIZE, warren.total()])
+	check(warren.camps().size() == WarrenScript.CAMPS.size(),
+		"every camp in the table stands in the wood (%d)" % warren.camps().size())
+	check(warren.mobs().size() == fielded, "%d wardens were fielded (%d)"
+		% [fielded, warren.mobs().size()])
+	check(warren.living() == fielded, "and all of them are on their feet (%d)"
+		% warren.living())
+	check(warren.camp_points().size() == WarrenScript.CAMPS.size(),
+		"each camp is a place on the map")
 
 	var town_centre: Vector3 = game.town.global_position
 	var wall := TownScript.WALL_RADIUS
@@ -271,11 +295,14 @@ func _check_warren(body, quests) -> void:
 		if str(mob.mob_id) == "hollow_warden":
 			named += 1
 		closest = minf(closest, path.distance_to(Vector2(at.x, at.z)))
-	check(on_ground == 21, "every warden stands on the ground (%d of 21)" % on_ground)
-	check(outside == 21, "every warden keeps %.0f m off the town's wall (%d of 21)"
-		% [wall + WALL_CLEARANCE, outside])
-	check(listed == 21, "every warden is on the world's one hostile list (%d of 21)" % listed)
-	check(named == 21, "every warden is a hollow warden (%d of 21)" % named)
+	check(on_ground == fielded, "every warden stands on the ground (%d of %d)"
+		% [on_ground, fielded])
+	check(outside == fielded, "every warden keeps %.0f m off the town's wall (%d of %d)"
+		% [wall + WALL_CLEARANCE, outside, fielded])
+	check(listed == fielded, "every warden is on the world's one hostile list (%d of %d)"
+		% [listed, fielded])
+	check(named == fielded, "every warden is a hollow warden (%d of %d)"
+		% [named, fielded])
 	check(closest >= LATERAL_MIN,
 		"no warden stands inside %.0f m of the lane (nearest is %.1f m)"
 		% [LATERAL_MIN, closest])
@@ -285,16 +312,98 @@ func _check_warren(body, quests) -> void:
 
 	await _check_road_is_calm(body)
 
-	# A kill through the mob's own signal path reaches the world's handler and the
-	# ledger: this is the bounty's whole chain.
+	# A kill through the mob's own signal path reaches the world's handler, pays
+	# the purse and drops the steel: nothing counts it beyond that.
 	var prey = warren.mobs()[0]
-	var before: int = quests.progress_of("cull_the_watchers")
+	var gold_before: int = warband.gold()
 	prey.take_damage(4000.0, 0)
 	await create_timer(0.3).timeout
-	check(quests.progress_of("cull_the_watchers") == before + 1,
-		"a warden's death counts toward the bounty (%d -> %d)"
-		% [before, quests.progress_of("cull_the_watchers")])
-	check(warren.living() == 20, "and one body fewer stands (%d)" % warren.living())
+	check(warband.gold() >= gold_before, "a warden's death leaves the purse no worse (%d -> %d)"
+		% [gold_before, warband.gold()])
+	check(warren.living() == fielded - 1, "and one body fewer stands (%d of %d)"
+		% [warren.living(), fielded])
+
+	# The wood is a place a party can farm, not a place it empties once: a camp
+	# that lost a body gets *one* clock for the camp, and when it runs the fallen
+	# warden comes back on his own post - asleep there like a fresh one - while the
+	# camps that lost nothing are not touched at all.
+	await create_timer(0.6).timeout
+	var counting: float = warren.refill_in(0)
+	check(counting > 0.0 and counting <= WarrenScript.RESPAWN_SECONDS,
+		"the cut camp is counting down its refill (%.1f s of %.0f)"
+			% [counting, WarrenScript.RESPAWN_SECONDS])
+	check(warren.refill_in(1) < 0.0,
+		"a camp nothing died in has no clock (%.1f)" % warren.refill_in(1))
+	var before: Array = []
+	for index in range(1, warren.camps().size()):
+		before.append((warren.camps()[index]["mobs"] as Array).duplicate())
+	var post: Vector3 = warren.camps()[0]["posts"][0]
+
+	# The quiet hold, measured on the module's own refill seam: while a party body
+	# stands inside the camp's `RESPAWN_QUIET`, the camp stays cut - a squad must
+	# never have wardens appear inside its own sight. The stand is written and the
+	# seam asked in the same frame, so nothing here walks or fights.
+	body.global_position = post + Vector3(0.0, 0.5, 0.0)
+	body.velocity = Vector3.ZERO
+	check(_flat(body.global_position, post) < WarrenScript.RESPAWN_QUIET,
+		"a body standing in the camp is inside the refill's quiet hold (%.1f m of %.0f)"
+			% [_flat(body.global_position, post), WarrenScript.RESPAWN_QUIET])
+	check(warren.refill_camp(0) == 0,
+		"and the camp holds its refill while that body stands there")
+	check(warren.living() == fielded - 1,
+		"the fallen warden stays down until the squad leaves (%d of %d)"
+			% [warren.living(), fielded])
+
+	# Away from every camp - the town square, at the other end of the walk - the
+	# same seam puts the camp back on its own posts. The hold is measured on the
+	# nearest of that camp's posts, exactly as `_refill_one` measures it.
+	body.global_position = game.town.global_position + Vector3(0.0, 0.5, 0.0)
+	body.velocity = Vector3.ZERO
+	var nearest_post := INF
+	for point in warren.camps()[0]["posts"]:
+		nearest_post = minf(nearest_post, _flat(body.global_position, point as Vector3))
+	check(nearest_post > WarrenScript.RESPAWN_QUIET,
+		"and the body stands clear of that hold before the refill is asked (%.1f m of %.0f)"
+			% [nearest_post, WarrenScript.RESPAWN_QUIET])
+	var back: int = warren.refill_camp(0)
+	check(back == 1, "the camp refills only what it lost (%d bodies)" % back)
+	check(warren.mobs().size() == fielded and warren.living() == fielded,
+		"and the camp is whole again (%d bodies, %d standing of %d)"
+			% [warren.mobs().size(), warren.living(), fielded])
+	var camp_standing := 0
+	for member in warren.camps()[0]["mobs"]:
+		if is_instance_valid(member) and bool(member.get("alive")):
+			camp_standing += 1
+	check(camp_standing == WarrenScript.CAMP_SIZE,
+		"the cut camp is back to its own %d wardens (%d standing)"
+			% [WarrenScript.CAMP_SIZE, camp_standing])
+	var revived = (warren.camps()[0]["mobs"] as Array)[0]
+	check(is_instance_valid(revived) and bool(revived.get("alive")),
+		"the warden is back on his feet")
+	check(revived != null and str((revived as Node).name) == "HollowWarden1_1",
+		"under the name the wire knows him by (%s)"
+			% (str((revived as Node).name) if revived != null else "no body"))
+	check(revived != null and game.guards.has(revived),
+		"and back on the world's one hostile list")
+	check(revived != null and (revived as Node).is_in_group("wild_mobs"),
+		"as a wilderness body, so the culler and the packs find him")
+	check(revived != null and _flat((revived as Node3D).global_position, post) < 0.6,
+		"standing on his own post (%.2f m off)"
+			% (_flat((revived as Node3D).global_position, post) if revived != null else -1.0))
+	check(revived != null and (revived as Node3D).home.distance_to(post) < 0.01,
+		"with that post as his home, so the leash holds")
+	check(warren.refill_camp(0) == 0, "a second refill spawns nobody")
+	check(warren.refill_in(0) < 0.0, "and the clock is spent until another body falls")
+	var untouched := 0
+	for index in range(1, warren.camps().size()):
+		var mobs: Array = warren.camps()[index]["mobs"]
+		for slot in mobs.size():
+			if mobs[slot] == before[index - 1][slot]:
+				untouched += 1
+	# Every camp but the cut one, as the table lays them out.
+	check(untouched == (WarrenScript.CAMPS.size() - 1) * WarrenScript.CAMP_SIZE,
+		"the other camps are exactly the bodies they were (%d of %d)"
+			% [untouched, (WarrenScript.CAMPS.size() - 1) * WarrenScript.CAMP_SIZE])
 	print("WILD_CAGES_WARREN camps=%s mobs=%d" % [
 		str(warren.camp_points().map(func(p: Vector3) -> String:
 			return "(%.1f,%.2f,%.1f)" % [p.x, p.y, p.z])), warren.mobs().size()])
@@ -360,16 +469,20 @@ func _check_latches(body) -> void:
 	check(cages.latch_target(body) == 0, "the first latch is in reach from the bars")
 	check(cages.interact(body), "the press at the bars is answered")
 	check(not cages.open_cages()[0], "bare hands leave the cage shut")
-	check(cages.remaining() == 4, "and the line has not moved (%d shut)" % cages.remaining())
+	check(cages.remaining() == CagesScript.CAGE_FRACTIONS.size(),
+		"and the line has not moved (%d shut)" % cages.remaining())
 
 	# A makeshift blade in the hand: one press, one cage.
 	body.rig.apply_loadout(State.build_loadout("dagger_ironwood", "", {}))
 	check(cages.holds_blade(body), "a dagger in the hand is a blade")
 
 
-func _check_rescue(body, quests, roster_before: int) -> void:
+func _check_rescue(body, roster_before: int) -> void:
+	# One press per cage, and the line's length is the product's own table.
+	var line: int = cages.cages().size()
 	var room_at_start: int = warband.field_room()
-	for index in 4:
+	var reserves_before: int = warband.roster.reserve_ids().size()
+	for index in line:
 		var node: Node3D = cages.cages()[index]
 		_stand_at(body, node)
 		var shut_before: int = cages.remaining()
@@ -383,17 +496,14 @@ func _check_rescue(body, quests, roster_before: int) -> void:
 		check(not cages.interact(body), "a second press on an open cage does nothing")
 		check(not cages.open_latch(index), "and open_latch refuses the same cage twice")
 		# The door lifts, the soldier walks out, and only then does the roll hear
-		# about him: one press is one record and one mark, never four at once.
+		# about him: one press is one record and one mark, never the whole line at
+		# once.
 		var out := await _await(func() -> bool: return cages.freed() == index + 1,
 			FREE_TIMEOUT)
 		check(out, "cage %d's soldier walked out (%d freed)" % [index + 1, cages.freed()])
 		check(warband.roster.count() == roster_before + index + 1,
 			"one press puts one body on the roll (%d -> %d)"
 			% [roster_before, warband.roster.count()])
-		check(quests.progress_of("free_the_soldiers") == index + 1,
-			"and one mark on the rescue order (%d of %d)"
-			% [quests.progress_of("free_the_soldiers"),
-				quests.goal_count("free_the_soldiers")])
 		# With a place on the field he takes it where he stands, out at the cage;
 		# past a full field he waits in the town's reserve and nothing stands up.
 		var rescued_ids: Array[int] = warband.roster.ids()
@@ -412,9 +522,10 @@ func _check_rescue(body, quests, roster_before: int) -> void:
 			check(warband.roster.is_reserve(rescued),
 				"cage %d's soldier, past a full field, waits in the reserve" % (index + 1))
 			check(rescued_body == null, "and no body stands up for him out in the wood")
-	check(warband.roster.reserve_ids().size() == maxi(0, 4 - room_at_start),
-		"the field took %d of the four and the rest wait in the reserve (%d waiting)"
-		% [mini(4, room_at_start), warband.roster.reserve_ids().size()])
+	check(warband.roster.reserve_ids().size()
+			== reserves_before + maxi(0, line - room_at_start),
+		"the field took %d of the line's %d and the rest wait in the reserve (%d waiting)"
+		% [mini(line, room_at_start), line, warband.roster.reserve_ids().size()])
 
 	check(cages.remaining() == 0, "the line is open (%d shut)" % cages.remaining())
 	check(cages.marker_points().is_empty(), "an open line has nothing left to mark")
@@ -424,28 +535,26 @@ func _check_rescue(body, quests, roster_before: int) -> void:
 		if door != null \
 				and absf((door as Node3D).position.y - CagesScript.CAGE_BAR_LIFT) <= 0.02:
 			lifted += 1
-	check(lifted == 4, "every door stands %.1f m clear of its cage (%d of 4)"
-		% [CagesScript.CAGE_BAR_LIFT, lifted])
+	check(lifted == line, "every door stands %.1f m clear of its cage (%d of %d)"
+		% [CagesScript.CAGE_BAR_LIFT, lifted, line])
 
 	# One roster record per cage, and no more: the world's one rescue call is what
 	# puts a name on the roll.
-	check(warband.roster.count() == roster_before + 4,
-		"four cages put four bodies on the roll (%d -> %d)"
-		% [roster_before, warband.roster.count()])
+	check(warband.roster.count() == roster_before + line,
+		"the line put %d bodies on the roll (%d -> %d)"
+		% [line, roster_before, warband.roster.count()])
 	var names: Array[String] = []
 	for merc in warband.roster.records():
 		names.append(str(merc.get("name", "")))
 	var on_roll := 0
 	for soldier in CagesScript.SOLDIER_NAMES:
-		var count := names.count(str(soldier))
-		if count == 1:
+		var found := names.count(str(soldier))
+		if found == 1:
 			on_roll += 1
-		check(count == 1, "%s is on the roll exactly once (%d)" % [soldier, count])
-	check(on_roll == 4, "every freed soldier is a name on the roll (%d of 4)" % on_roll)
-	check(quests.progress_of("free_the_soldiers") == 4,
-		"the rescue order counted all four (%d of %d)"
-		% [quests.progress_of("free_the_soldiers"),
-			quests.goal_count("free_the_soldiers")])
+		check(found == 1, "%s is on the roll exactly once (%d)" % [soldier, found])
+	check(on_roll == CagesScript.SOLDIER_NAMES.size(),
+		"every freed soldier is a name on the roll (%d of %d)"
+			% [on_roll, CagesScript.SOLDIER_NAMES.size()])
 
 	# The cages stay open and empty, and the arrow is gone with the order's work.
 	# The figures dissolve after the name is booked, so this waits for the fade.

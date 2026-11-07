@@ -279,8 +279,33 @@ func check_long_session() -> void:
 			release.pressed = false
 			controller._mouse_release(release)
 		if frames == 1200 or frames == 2400:
+			# The swap is a step taken between cuts, deliberately. A body the soul
+			# leaves with a cut in the air has its clip cancelled by `_detach`
+			# (`combat.stop` -> `cancel_draw` -> `_clear_melee`), and its recovery
+			# copy cannot drain until somebody steps the body again: the soul that
+			# later re-enters it is handed the earned tail of a swing it never saw.
+			# That tail is the swap rule working (`check_swap_keeps_recovery`
+			# above), not a wedge - but it is a hand that is idle with the gate
+			# still shut, and the counter below cannot tell the two apart. So the
+			# swap waits for the very state the counter reads: the rig idle *and*
+			# the recovery of the cut that just ended at 1.0 (a finished clip whose
+			# copy is a frame short is the same thing), and what the session
+			# measures is a real transfer between two bodies.
+			var rested := 0
+			while rested < 400 and (bool(rig.is_melee())
+					or float(combat.melee_progress_for("right")) < 1.0 - 0.000001):
+				await physics_frame
+				rested += 1
+			check(float(combat.melee_progress_for("right")) >= 1.0 - 0.000001,
+				"the hand the soul leaves behind is at rest (%.3f)"
+					% float(combat.melee_progress_for("right")))
+			var previous: int = controller.merc_for_peer(1)
 			var moved: Dictionary = controller.cycle(1, 1)
-			check(bool(moved.get("ok", false)), "the soul changes body mid-session (%s)" % str(moved.get("reason", "")))
+			check(bool(moved.get("ok", false)),
+				"the soul changes body mid-session (%s)" % str(moved.get("reason", "")))
+			check(int(moved.get("body_id", -1)) != previous,
+				"and it is a transfer into the other body (%s -> %s)"
+					% [str(previous), str(moved.get("body_id", -1))])
 			await physics_frame
 			body = controller.active_body(1)
 			rig = body.rig
@@ -349,11 +374,6 @@ func wedge_probe(wedged: int) -> void:
 func check_far_from_origin() -> void:
 	var dressed: bool = await arm("dagger_ironwood")
 	check(dressed, "the shiv is in the hand before the far cut")
-	# The camp's leash holds a body inside its own cage until the latch is cut, and
-	# a clamped body is snapped home every frame. Tell the camp the warband has
-	# already left it, exactly as the world does for a checkpoint past the cages,
-	# so the walk out of the origin is a place a body can stand.
-	game.camp.place_resumed(game.bodies)
 	var far := Vector3(0.0, 0.0, -1150.0)
 	plate(far)
 	body.position = far + Vector3(0.0, 0.6, 0.0)
@@ -432,6 +452,31 @@ func check_bow() -> void:
 
 # --- main -----------------------------------------------------------------
 
+## The campaign opens with one body, and the long session below swaps the soul
+## between bodies: the band is two names, sworn the way the game swears one, and
+## the world's own field sync stands the new body beside the party. A one-body
+## band makes `cycle` a no-op, so every mid-session "swap" would re-arm and
+## re-swing the same body instead of the swap this test measures - so this also
+## reads the router, which is what `cycle` actually asks: a name can be on the
+## squad's book and still have no body a soul may enter.
+func swear_second_body() -> void:
+	var sworn: int = warband.add_mercenary("Cass")
+	var waited := 0.0
+	while waited < 4.0 and game.bodies.size() < 2:
+		await physics_frame
+		waited += 1.0 / frames_per_second
+	check(game.bodies.size() == 2,
+		"the sworn name takes the field beside the soul (%d bodies)" % game.bodies.size())
+	check(game.squad_ids.size() >= 2,
+		"and the soul has a body to swap into (%d on the squad's book)"
+			% game.squad_ids.size())
+	check(controller.body_of(sworn) != null,
+		"the sworn name stands in a body of its own (%s)" % str(sworn))
+	check(warband.souls.possessable_ids().has(sworn),
+		"and the router will put a soul in it (%s of %s)"
+			% [str(warband.souls.possessable_ids()), str(sworn)])
+
+
 func run() -> void:
 	var watchdog := Timer.new()
 	watchdog.name = "Watchdog"
@@ -461,6 +506,7 @@ func run() -> void:
 	plate(Vector3(-7.6, 0.0, 6.0))
 	await settle_grounded()
 	check(bool(combat.grounded), "the possessed body is standing on the ground")
+	await swear_second_body()
 	close_card()
 
 	await measure_cut("dagger_ironwood", 0.6)

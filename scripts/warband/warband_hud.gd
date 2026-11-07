@@ -127,16 +127,9 @@ var _aggro_ids: Array[int] = []
 var _aggro_names: Dictionary = {}   # merc_id -> the name last reported
 var _aggro_mute: Dictionary = {}    # merc_id -> seconds of quiet left
 var _purse_label: Label
-## The campaign ledger block (see `set_quests`) and the signature of what it
-## currently shows, so a repaint only happens when the objectives actually move.
-var _quest_box: VBoxContainer
-var _quest_sig := ""
 var _prompt_label: Label
 var _status_label: Label
 var _status_seconds := 0.0
-## The wrong-way banner: the one line in the warband that is a warning rather
-## than an objective. It stays up until the world says the body turned around.
-var _warning_label: Label
 ## The aim reticle, drawn at the screen centre while the mouse is captured.
 var _reticle: Control
 
@@ -200,30 +193,14 @@ func set_prompt(text: String) -> void:
 		_prompt_label.text = text
 		_prompt_label.visible = not text.is_empty()
 
-## The wrong-way banner: one loud line across the top of the screen, or "" to put
-## it away. Unlike the status line it has no clock - the trail's own distance
-## decides how long it is up, so it cannot lie about a body that is still walking
-## the wrong way.
-func set_warning(text: String) -> void:
-	if _warning_label == null:
-		return
-	_warning_label.text = text
-	_warning_label.visible = not text.is_empty()
-
-## The banner itself, for the world and for a test that must not read a private
-## label.
-func warning_label() -> Label:
-	return _warning_label
-
-
 ## The purse strip's text: gold and the party's quiver on one line, because a bow
 ## with no shafts is the one number a player has to be able to see at a glance.
 func purse_line() -> String:
 	return str(_purse_label.text) if _purse_label != null else ""
 
 
-## The temporary banner's current text, for the same reason as `warning_label()`:
-## a test reads the line instead of a private label.
+## The temporary banner's current text, for a test that must not read a private
+## label.
 func status_line() -> String:
 	return str(_status_label.text) if _status_label != null else ""
 
@@ -235,67 +212,6 @@ func set_status(text: String, seconds: float = 2.5) -> void:
 	_status_label.text = text
 	_status_label.visible = not text.is_empty()
 	_status_seconds = maxf(0.0, seconds)
-
-## The campaign ledger: one row per objective (`WarbandQuests.rows()`), repainted
-## only when the signature moves. An empty list puts the block away.
-func set_quests(rows: Array) -> void:
-	if _quest_box == null:
-		return
-	var signature := ""
-	for row in rows:
-		if not (row is Dictionary):
-			continue
-		signature += "%s|%s|%s|%s;" % [str(row.get("title", "")), str(row.get("line", "")),
-			str(row.get("detail", "")), str(row.get("done", false))]
-	if signature == _quest_sig:
-		return
-	_quest_sig = signature
-	for child in _quest_box.get_children():
-		# Detached before it is freed: a queued free leaves the old rows in the
-		# tree for the rest of the frame, and a reader (or a test) would still see
-		# objectives the ledger no longer holds.
-		_quest_box.remove_child(child)
-		child.queue_free()
-	var panel := _quest_box.get_parent() as Control
-	if panel != null:
-		panel.visible = not signature.is_empty()
-	if signature.is_empty():
-		return
-	for row in rows:
-		if not (row is Dictionary):
-			continue
-		var entry: Dictionary = row
-		var title := Label.new()
-		title.text = str(entry.get("title", ""))
-		title.add_theme_font_size_override("font_size", 11)
-		title.add_theme_color_override("font_color",
-			Color(0.96, 0.83, 0.55) if not bool(entry.get("done", false)) else Color(0.62, 0.86, 0.60))
-		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_quest_box.add_child(title)
-		var detail := Label.new()
-		detail.text = "%s   ·   %s" % [str(entry.get("line", "")), str(entry.get("detail", ""))]
-		detail.add_theme_font_size_override("font_size", 10)
-		detail.add_theme_color_override("font_color", Color(0.82, 0.79, 0.68))
-		detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_quest_box.add_child(detail)
-
-## The ledger block itself, and the text it currently carries, for a test that
-## must not read a private label.
-func quest_panel() -> Control:
-	if _quest_box == null:
-		return null
-	return _quest_box.get_parent() as Control
-
-func quest_lines() -> Array[String]:
-	var out: Array[String] = []
-	if _quest_box == null:
-		return out
-	for child in _quest_box.get_children():
-		if child is Label:
-			out.append(str((child as Label).text))
-	return out
 
 func _process(delta: float) -> void:
 	Perf.begin("hud")
@@ -355,22 +271,6 @@ func _build() -> void:
 	_status_label.add_theme_font_size_override("font_size", 17)
 	_status_label.visible = false
 	root_control.add_child(_status_label)
-
-	# The warning sits above the status line, in gold on a blood outline: it is
-	# the only banner that must be read from the corner of an eye while a squad
-	# is being walked the wrong way up a dark trail.
-	_warning_label = Label.new()
-	_warning_label.name = "Warning"
-	_warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_warning_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_warning_label.position = Vector2(-360, 16)
-	_warning_label.custom_minimum_size = Vector2(720, 0)
-	_warning_label.add_theme_font_size_override("font_size", 26)
-	_warning_label.add_theme_color_override("font_color", Color(1.0, 0.79, 0.26))
-	_warning_label.add_theme_color_override("font_outline_color", Color(0.52, 0.03, 0.02))
-	_warning_label.add_theme_constant_override("outline_size", 7)
-	_warning_label.visible = false
-	root_control.add_child(_warning_label)
 
 
 # --- the soul's plate ------------------------------------------------------
@@ -641,22 +541,6 @@ func _build_band_plate(parent: Control) -> void:
 	_aggro_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_aggro_label.visible = false
 	_aggro_box.add_child(_aggro_label)
-
-	# The campaign ledger: one block per objective the quartermaster has handed
-	# over, read from `WarbandQuests`. It is a tracker, not a menu - nothing here
-	# is clicked while the pointer is captured - and it stays hidden until there
-	# is an order to show.
-	var quest_panel := PanelContainer.new()
-	quest_panel.name = "QuestPanel"
-	quest_panel.add_theme_stylebox_override("panel", _plate_style())
-	quest_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	quest_panel.visible = false
-	column.add_child(quest_panel)
-	_quest_box = VBoxContainer.new()
-	_quest_box.name = "Quests"
-	_quest_box.add_theme_constant_override("separation", 2)
-	_quest_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	quest_panel.add_child(_quest_box)
 
 
 # --- the ledger's materials ------------------------------------------------

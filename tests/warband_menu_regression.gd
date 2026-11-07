@@ -110,7 +110,7 @@ func run() -> void:
 	var modes: Dictionary = menu.party_buttons()
 	check(modes.size() == Contracts.PARTY_MODES.size(),
 		"the party row carries one toggle per mode (%d)" % modes.size())
-	check(_lit(modes) == [Contracts.PARTY_OFFENSIVE],
+	check(_lit(modes) == [Contracts.DEFAULT_PARTY_MODE],
 		"a fresh band's mode is the one lit (%s)" % str(_lit(modes)))
 	_click(modes[Contracts.PARTY_DEFENSIVE])
 	check(warband.party_mode == Contracts.PARTY_DEFENSIVE, "a press puts the party in that mode")

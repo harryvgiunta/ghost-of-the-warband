@@ -712,7 +712,14 @@ func mob_wake() -> void:
 func assign_territory(shared, ring_slot: int, pack_group: String) -> void:
 	_wander.assign(shared, ring_slot, pack_group)
 
+## The rig's read of this frame. Only the wolf owns a `_wolf`: a cinder devil is
+## built by `_build_devil_visual` and its sampler is fed from `_step_devil` on the
+## brain's tick (and from `apply_snapshot` for a replica), so a body of any other
+## kind has nothing here to drive - reaching for the wolf it never built is the
+## Nil base the drawn frame used to call `set_motion` on.
 func _update_cosmetics(_delta: float) -> void:
+	if kind != 0:
+		return
 	var actual_velocity := get_real_velocity()
 	_wolf.set_motion(Vector2(actual_velocity.x, actual_velocity.z).length())
 	_wolf.set_combat(state, _state_time)

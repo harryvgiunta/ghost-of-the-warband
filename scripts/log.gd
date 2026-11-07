@@ -106,6 +106,13 @@ var _last_marker_msec := 0
 var _last_sample_msec := 0
 var _last_scan_msec := 0
 var _beat_msec := 0
+## Marker path -> modified time for every marker already proven clean (or
+## already reported). A clean session's marker never changes again, so the
+## minute scan can skip it without opening or parsing its JSON. Live peers
+## rewrite their marker every two seconds and are re-read (one file); a session
+## is identified by an id that is never reused, so a cached clean verdict cannot
+## go stale in the direction that matters.
+var _settled_markers: Dictionary = {}
 
 var _pending_reports: Array = []
 
@@ -1053,11 +1060,17 @@ func scan_for_crashes() -> Array:
 		if sid.is_empty() or sid == session_id:
 			continue
 		var marker_path := _sessions_dir.path_join(str(name))
+		var written := FileAccess.get_modified_time(marker_path)
+		if int(_settled_markers.get(marker_path, -1)) == written:
+			continue
 		var marker: Variant = Store.read_json(marker_path)
 		if typeof(marker) != TYPE_DICTIONARY:
+			if _was_reported(sid):
+				_settled_markers[marker_path] = written
+				continue
 			# A torn marker can be a crash mid-write. Only trust it once it is old
 			# enough that no live instance could still own the file.
-			var age := Time.get_unix_time_from_system() - float(FileAccess.get_modified_time(marker_path))
+			var age := Time.get_unix_time_from_system() - float(written)
 			if age < UNREADABLE_MARKER_AGE_SECONDS:
 				continue
 			candidates.append({"sid": sid, "marker": {"session_id": sid, "clean": false},
@@ -1065,19 +1078,40 @@ func scan_for_crashes() -> Array:
 			continue
 		var data: Dictionary = marker
 		if _was_reported(sid) or bool(data.get("reported_crash", false)) or bool(data.get("clean", false)):
+			_settled_markers[marker_path] = written
 			continue
 		if int(data.get("pid", 0)) == OS.get_process_id():
 			continue
 		candidates.append({"sid": sid, "marker": data, "name": str(name), "reason": "process_missing"})
+	var now := Time.get_unix_time_from_system()
+	# A live instance rewrites its marker every two seconds. A fresh heartbeat is
+	# proof the process is alive, and it is free; asking Windows for the process
+	# table to learn the same thing costs about a second of the player's frame
+	# (`tasklist` measured at 936 ms here), so the table is read only for a
+	# marker that has stopped beating.
+	var stale: Array = []
+	for candidate in candidates:
+		var marker: Dictionary = candidate.marker
+		var beat := float(marker.get("beat_unix", 0.0))
+		var pid := int(marker.get("pid", 0))
+		# A child this process spawned answers for itself: an exit code means the
+		# process is gone even within the heartbeat grace (a crash is the one case
+		# where the beat is fresh and the news is bad). Another instance's pid is
+		# not ours - `get_process_exit_code` stays -1 - so a fresh heartbeat is the
+		# cheap proof it is alive.
+		var finished := pid > 0 and OS.get_process_exit_code(pid) >= 0
+		if not finished and beat > 0.0 and now - beat < LIVE_GRACE_SECONDS:
+			continue
+		stale.append(candidate)
+	candidates = stale
 	# `OS.is_process_running` only answers for processes this OS object created,
 	# so another game instance needs the real OS process table. It is read once
-	# per scan, and only when an unclean marker actually exists.
+	# per scan, and only when a stale unclean marker actually exists.
 	var live_pids := {}
 	var pid_table_ready := false
 	if not candidates.is_empty():
 		live_pids = _running_pids()
 		pid_table_ready = not live_pids.is_empty()
-	var now := Time.get_unix_time_from_system()
 	for candidate in candidates:
 		var marker_data: Dictionary = candidate.marker
 		var pid := int(marker_data.get("pid", 0))

@@ -1,0 +1,58 @@
+{
+  "asset": "ironwood_devil_fur.png",
+  "normal": "ironwood_devil_fur_n.png",
+  "size": 512,
+  "tileable": true,
+  "channels": "RGB, display space (authored in paint/display space, nothing linearised)",
+  "layers": [
+    {
+      "strands": 56,
+      "weight": 1.0,
+      "lean": 2
+    },
+    {
+      "strands": 112,
+      "weight": 0.42,
+      "lean": 3
+    },
+    {
+      "strands": 27,
+      "weight": 0.62,
+      "lean": 1
+    }
+  ],
+  "albedo_stops": {
+    "root": [
+      0.024,
+      0.024,
+      0.026
+    ],
+    "body": [
+      0.056,
+      0.057,
+      0.062
+    ],
+    "tip": [
+      0.132,
+      0.134,
+      0.145
+    ],
+    "sheen": [
+      0.02,
+      0.024,
+      0.032
+    ]
+  },
+  "normal_slope": 4.0,
+  "normal_convention": "tangent space, OpenGL (+Y up)",
+  "roughness": 0.88,
+  "specular": 0.22,
+  "used_by": "ironwood_hell_goat: the body surface of its fitted skin (material Skin_HellGoat), the coat the removed Fur_HellGoat spike proxy used to stand in for",
+  "source": "Original procedural work authored by tools/devil_fur.py: periodic cosine strand layers and wrap-around value noise. No third-party image or scan.",
+  "seed": 20261106,
+  "sha256": {
+    "ironwood_devil_fur.png": "62d0aeab67ebc12efd7d8bc7e5c21a519cc6866d989ad2bd3c8394e18afbadfd",
+    "ironwood_devil_fur_n.png": "140d54f44fe49c17778a51709fe0707382532c7847ea77e48b216cb5ae3b45ae"
+  },
+  "reproducer": "python tools/devil_fur.py"
+}

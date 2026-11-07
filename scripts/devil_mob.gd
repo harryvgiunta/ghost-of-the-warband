@@ -22,6 +22,8 @@ const SeveredBody = preload("res://scripts/severed_body.gd")
 const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
+const DuelBrainScript = preload("res://scripts/warband/duel_brain.gd")
+const DemonFireScript = preload("res://scripts/warband/demon_fire.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
 const VoiceScript = preload("res://scripts/audio/voice.gd")
@@ -213,7 +215,8 @@ var _warband_guard := 0.0
 ## other.
 const GUARD_REDUCTION := 0.35
 const GUARD_HOLD := 0.35
-## Opt-in, and only the warband's cultists opt in: the frontier's mobs keep the
+## Opt-in, and only a body that raises its own guard opts in - the warband's
+## cultists, and the Hollow's duelists (`duelist`). The frontier's mobs keep the
 ## fight they were tuned for.
 var guard_between_swings := false
 ## Seconds left on a rolled guard window (`brace`). A braced body refuses to
@@ -221,6 +224,49 @@ var guard_between_swings := false
 ## swing when the window closes. The cultists brace on their own clock; the
 ## camp's watchers roll for it once an exchange.
 var _braced := 0.0
+## A duelist fights rather than grinds: it runs the ladder in `duel_brain.gd`
+## instead of the walk-into-reach loop, guards on its temper's share and commits
+## to a blow only into an opening. Set by whatever spawns the body before it
+## enters the tree, or carried in the profile row as `"duelist": true`. Every
+## other demon and every watcher keeps the grind.
+var duelist := false
+## What a duelist's temper is: how often it holds its guard, the beat before a
+## blow, the seconds it circles, how far it leads a moving body, and that it
+## waits for an opening. Its reach is the profile's, and how often it may swing
+## stays the profile's own cooldown and clip timing.
+const DUEL_TEMPER := {"guard": 0.55, "beat": 0.2, "step": 0.6, "lead": 0.3, "window": true}
+## How far past its own reach a duelist stops closing: the band its swing already
+## covers, so it starts the windup outside contact and carries itself in on the
+## blow (the same gate the mob's own circle uses).
+const DUEL_CLOSE_PAD := 1.15
+## The guard a duelist writes on every brain tick while the ladder holds it up.
+## Longer than one tick at 12 Hz, so a guard never blinks between two.
+const DUEL_GUARD_HOLD := 0.2
+## The ladder itself, built for a duelist and null for every other body.
+var _duel = null
+var _duel_temper: Dictionary = {}
+## The fire kit (`demon_fire.gd`): the spells this body was born with, in the
+## order it tries them, and the seconds left on each one's own clock. It is empty
+## on every body whose owner names no spells, which is the whole frontier
+## unchanged - a demon with a kit gets a third action beside its swing and guard.
+var _fire_spells: Array[String] = []
+var _fire_cooldowns: Dictionary = {}
+## The spell winding up now ("" when none) and the seconds left on its tell. The
+## windup is the tell the player answers; a stagger cancels it before it resolves.
+var _cast_spell := ""
+var _cast_left := -1.0
+## The point and the line the windup was aimed down. A cast lands where the
+## target stood when it was loosed, and never follows it: that is the dodge.
+var _cast_aim := Vector3.ZERO
+var _cast_facing := Vector3.FORWARD
+## What the cast leaves in the world: the coal a windup gathers, the fireball in
+## the air and the burning ground this body has. The body frees all three.
+var _cast_tell: Node3D
+var _cast_missile: Node3D
+var _hazard: Node3D
+## The beat before a body's second and third spell are ready, so a meeting is
+## answered with fire and not with the whole kit on one tick.
+const CAST_STAGGER := 1.5
 ## Two bodies of one family closer than this push apart (`_separate`).
 const SEPARATION_RADIUS := 1.35
 ## The family's bodies by `SEPARATION_RADIUS` cell, gathered once per physics
@@ -240,6 +286,9 @@ func _ready() -> void:
 		push_error("Unknown mob id: " + mob_id)
 		return
 	profile = (table[mob_id] as Dictionary).duplicate(true)
+	# A body whose profile names it a duelist fights the ladder below; the scene
+	# that spawns it may also say so on the body itself, before it enters the tree.
+	duelist = duelist or bool(profile.get("duelist", false))
 	name = _node_prefix() + mob_id
 	kind = int(profile.kind)
 	max_health = float(profile.health)
@@ -286,6 +335,20 @@ func _ready() -> void:
 	_strafe_dir = 1.0 if (_rng.randi() & 1) == 0 else -1.0
 	# A pack that meets the same barrier splits around both of its sides.
 	_steering.bias = _strafe_dir
+	# A duelist fights the shared ladder: its own clock in the fight, its temper
+	# built from the profile's reach, and a guard raised on its own window rather
+	# than on the cultists' cooldown clock.
+	if duelist:
+		guard_between_swings = true
+		_duel_temper = DUEL_TEMPER.duplicate()
+		_duel_temper["range"] = float(profile.reach)
+		_duel_temper["pad"] = DUEL_CLOSE_PAD
+		_duel = DuelBrainScript.new(_strafe_dir)
+	# What this body throws, and when each spell is first ready. A body with no
+	# kit is the frontier's own demon: nothing below is ever reached for it.
+	_fire_spells.assign(_fire_kit())
+	for index in _fire_spells.size():
+		_fire_cooldowns[_fire_spells[index]] = float(index) * CAST_STAGGER
 	_lod = MobLod.new(int(absf(global_position.x) * 7.0 + absf(global_position.z) * 13.0))
 	_attack_cooldown = _rng.randf_range(0.25, 0.85)
 	state = "IDLE"
@@ -352,6 +415,7 @@ func _physics_process(delta: float) -> void:
 		_advance_presentation()
 		return
 	_advance_strike(delta)
+	_advance_cast(delta)
 	_advance_motion(delta)
 	_advance_presentation()
 	# The physics frame, never the drawn one: `get_process_frames()` counts
@@ -413,12 +477,14 @@ func _think(delta: float) -> void:
 	# Ghost of the Warband: the brain's guard window rides the cooldown clock.
 	_warband_guard = maxf(0.0, _warband_guard - delta)
 	_braced = maxf(0.0, _braced - delta)
+	_advance_cast_clock(delta)
 	# Between its own swings a cultist is not wide open: it keeps its guard up
 	# while it re-arms. That is what makes a swing an opening instead of a rhythm.
 	# It is braced for most of its cycle and opens for the half second before it
 	# can swing again: a cultist is something you catch off its guard, not something
-	# you out-trade, and that is what makes the fight last.
-	if guard_between_swings and _attack_cooldown > 0.30:
+	# you out-trade, and that is what makes the fight last. A duelist's guard is
+	# its ladder's own window (`_duel_step`) and is left to it.
+	if guard_between_swings and not duelist and _attack_cooldown > 0.30:
 		_warband_guard = maxf(_warband_guard, GUARD_HOLD)
 	var focus := _senses.focus() if pursuit else _target.global_position
 	var to_target := focus - global_position
@@ -446,8 +512,16 @@ func _think(delta: float) -> void:
 		"CIRCLE":
 			if not aggro:
 				_enter("RETURN")
-			else:
+			elif not _duel_step(delta):
 				_circle(delta, distance, direction)
+			# The third action: fire is what a body does between blows, and it is
+			# only asked once the swing the ladder decided on has had its say.
+			_cast_step(distance, direction)
+		"CAST":
+			# The windup holds the line it was loosed on: the body plants and
+			# looks where the fire is going, and the cast resolves on its own
+			# clock (`_advance_cast`), not on this one.
+			_face_intent = _cast_facing
 		"WINDUP":
 			_face_intent = direction
 			if _state_time >= _windup_seconds():
@@ -570,6 +644,9 @@ func mob_sleep() -> void:
 func rest(value: bool, nearest: float = INF) -> void:
 	if value:
 		_cull_presentation(_present_distance(nearest))
+		# A body put to sleep mid-windup does not leave a tell standing over a
+		# fire it will never throw.
+		_cancel_cast()
 	elif resting:
 		_lod.resume()
 	resting = value
@@ -658,8 +735,12 @@ func _calm_tick(delta: float) -> void:
 	_state_time += delta
 	_attack_cooldown = maxf(0.0, _attack_cooldown - delta)
 	# The guard window is a beat in an exchange, not a state: it runs out even
-	# when there is nothing left to fight.
+	# when there is nothing left to fight. A duelist that loses its quarry must
+	# not stand guard at a body that is no longer there.
 	_braced = maxf(0.0, _braced - delta)
+	_warband_guard = maxf(0.0, _warband_guard - delta)
+	# A body out of the fight re-arms its spells as it re-arms its arm.
+	_advance_cast_clock(delta)
 	_move_intent = Vector3.ZERO
 	_move_speed = 0.0
 	_face_intent = Vector3.ZERO
@@ -803,6 +884,216 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	if warband_passive:
 		_move_speed = float(profile.walk_speed)
 	_face_intent = direction
+
+
+## The duel ladder, for a body that fights a body rather than grinding it: it
+## guards on its temper's share, steps off the line between blows and commits to
+## a swing only when the target is in a window (`DuelBrainScript.observe`).
+## Returns false for anything that is not a duelist with a target it can see, so
+## the mob's own circle keeps every other body exactly as it was - and a duelist
+## that loses its quarry falls back to the same hunt and wander it always had.
+##
+## It decides only what the mob's states already take: where to stand, where to
+## look, whether the guard is up, and whether a windup starts. The windup, the
+## strike's impact frame and the cooldowns stay the states' own (`_enter`,
+## `_advance_strike`, `_cooldown_seconds`), so the tell a player answers and the
+## pace of the fight do not change.
+func _duel_step(delta: float) -> bool:
+	if not duelist or _duel == null or not _senses.seen or not is_instance_valid(_target):
+		return false
+	var to_target := _target.global_position - global_position
+	to_target.y = 0.0
+	var answer: Dictionary = _duel.tick(delta, _duel_temper, {
+		"position": global_position,
+		"target": _target.global_position,
+		"target_velocity": _target.velocity,
+		"weapon": "blade",
+		"ready": _attack_cooldown <= 0.0 and _braced <= 0.0,
+		"target_open": _duel.observe(_target.get("combat")),
+	})
+	# The guard is the body's own window: the reduction `take_damage` applies and
+	# the pose the sampler reads both come off this one answer.
+	warband_guard(DUEL_GUARD_HOLD if bool(answer["guard"]) else 0.0)
+	var move: Vector3 = answer["move"]
+	_move_intent = _steer(move) if move.length_squared() > 0.0001 else Vector3.ZERO
+	if _move_intent.length_squared() > 0.0001:
+		_move_speed = float(profile.run_speed) if bool(answer["run"]) else float(profile.walk_speed)
+	else:
+		_move_speed = 0.0
+	if to_target.length_squared() > 0.0001:
+		_face_intent = to_target.normalized()
+	if not str(answer["swing"]).is_empty():
+		_choose_attack()
+		_enter("WINDUP")
+	return true
+
+
+# --- the fire kit -----------------------------------------------------------
+
+## What this body may throw, in the order it tries them. The base demon fights
+## with its hands alone, so an empty kit is every frontier mob and every watcher
+## unchanged; the Hollow's goatmen name their fire in `delve_demon.gd`.
+func _fire_kit() -> Array[String]:
+	return []
+
+
+## The kit this body was born with.
+func fire_spells() -> Array[String]:
+	return _fire_spells.duplicate()
+
+
+## Seconds left on one spell's clock, 0 when it may be thrown.
+func fire_cooldown(spell_id: String) -> float:
+	return float(_fire_cooldowns.get(spell_id, 0.0))
+
+
+## Whether a windup is standing: the tell a player answers, and never a second
+## cast on top of a first.
+func casting() -> bool:
+	return not _cast_spell.is_empty()
+
+
+## Everyone this body's fire can burn: the same bodies its melee picks from, so
+## the blast, the cone and the patch all read the live party.
+func fire_targets() -> Array:
+	return _candidates()
+
+
+## The chest the fire comes out of: the rig's own drawn height, so a fitted
+## goatman throws from the body it is actually wearing.
+func _throw_point() -> Vector3:
+	var chest := 1.12
+	if is_instance_valid(_visual) and _visual.has_method("drawn_height"):
+		chest *= maxf(0.4, float(_visual.drawn_height()))
+	return global_position + Vector3.UP * chest
+
+
+## The kit's clocks, on the brain's own budget like the swing's cooldown.
+func _advance_cast_clock(delta: float) -> void:
+	for spell_id in _fire_cooldowns.keys():
+		_fire_cooldowns[spell_id] = maxf(0.0, float(_fire_cooldowns[spell_id]) - delta)
+
+
+## The third action, beside a swing and a guard: the first spell of the kit that
+## is off cooldown, in range and not already burning the ground. It never begins
+## while the body is swinging, holding a rolled guard, or already winding one up -
+## the state is the gate - so a demon with fire is still a duelist and not a
+## turret. A spell is spent as its windup starts: interrupting the tell costs the
+## body the cast.
+func _cast_step(distance: float, direction: Vector3) -> void:
+	if _fire_spells.is_empty() or replica or not _senses.seen:
+		return
+	if state != "CIRCLE" or casting() or _braced > 0.0:
+		return
+	if not is_instance_valid(_target) or not _aggro_allowed(_target.global_position):
+		return
+	for spell_id in _fire_spells:
+		if fire_cooldown(spell_id) > 0.0:
+			continue
+		var row: Dictionary = DemonFireScript.spell(spell_id)
+		if not DemonFireScript.in_range(row, distance):
+			continue
+		# One patch at a time per body: the ground is a place, not a rhythm.
+		if str(row.get("shape", "")) == "hazard" and is_instance_valid(_hazard):
+			continue
+		_begin_cast(spell_id, row, direction)
+		return
+
+
+func _begin_cast(spell_id: String, row: Dictionary, direction: Vector3) -> void:
+	_cast_spell = spell_id
+	_cast_aim = _target.global_position
+	_cast_facing = direction
+	_cast_left = maxf(0.05, float(row.get("windup", 0.5)))
+	_fire_cooldowns[spell_id] = float(row.get("cooldown", 0.0))
+	# The guard comes down for the windup: the tell is the opening, and a body
+	# that reads it gets a free exchange.
+	warband_guard(0.0)
+	_enter("CAST")
+	# The noise belongs to the tell rather than to the fire, as a swing's does.
+	_voice.say("attack")
+	_cast_tell = DemonFireScript.telegraph(get_parent() as Node3D, _throw_point(), row)
+
+
+## Spends a windup on the physics tick, exactly as a blow's countdown is spent: the
+## tell runs on the clock the eye reads and the fire lands on the frame its windup
+## ends, not on the next decision.
+func _advance_cast(delta: float) -> void:
+	if _cast_left < 0.0:
+		return
+	_cast_left -= delta
+	if _cast_left > 0.0:
+		return
+	var spell_id := _cast_spell
+	_cast_left = -1.0
+	_cast_spell = ""
+	_free_tell()
+	if state != "CAST":
+		# A stagger, a corpse or a hunt took the body off the windup: nothing is
+		# spawned and nothing is burned.
+		return
+	_resolve_cast(spell_id)
+	_enter("CIRCLE")
+	# The body spent a beat on the fire: its arm re-arms from here.
+	_attack_cooldown = _cooldown_seconds()
+
+
+## The spell lands where the windup remembered it and down the line it reared back
+## on. The target is not read again: fire is where the body was, so walking out of
+## it is the answer, and a target that died mid-windup leaves the cast aimed at an
+## empty patch of ground rather than at nothing.
+func _resolve_cast(spell_id: String) -> void:
+	var row: Dictionary = DemonFireScript.spell(spell_id)
+	var parent := get_parent() as Node3D
+	if row.is_empty() or not is_instance_valid(parent):
+		return
+	match str(row.get("shape", "")):
+		"projectile":
+			_cast_missile = DemonFireScript.launch(parent, _throw_point(), _cast_aim, row,
+				Callable(self, "_fire_blast"))
+		"cone":
+			DemonFireScript.breath(parent, global_position, _cast_facing, row, self)
+		"hazard":
+			_hazard = DemonFireScript.ember_rain(parent, _cast_aim, row,
+				Callable(self, "_fire_burn"))
+
+
+## A fireball arriving: the blast at the point it landed, out of this body's own
+## hand. The shot only carries the point; the fire is the demon's.
+func _fire_blast(at: Vector3, row: Dictionary) -> void:
+	DemonFireScript.blast(get_parent() as Node3D, at, row, self)
+
+
+## One tick of this body's burning ground.
+func _fire_burn(at: Vector3, row: Dictionary) -> void:
+	DemonFireScript.burn(at, row, self)
+
+
+## Takes the windup's coal off the screen.
+func _free_tell() -> void:
+	if is_instance_valid(_cast_tell):
+		_cast_tell.queue_free()
+	_cast_tell = null
+
+
+## A windup that never lands: nothing is spawned, nothing is burned, and the tell
+## comes off the screen. The spell stays spent.
+func _cancel_cast() -> void:
+	_cast_left = -1.0
+	_cast_spell = ""
+	_free_tell()
+
+
+## The body's own fire goes out with it: a windup is dropped, a patch is put out
+## and a fireball still in the air is taken with the hand that threw it.
+func _release_fire() -> void:
+	_cancel_cast()
+	if is_instance_valid(_cast_missile):
+		_cast_missile.queue_free()
+	_cast_missile = null
+	if is_instance_valid(_hazard):
+		_hazard.queue_free()
+	_hazard = null
 
 
 ## Lost sight but still remembers: run down the place the ranger was last
@@ -1006,7 +1297,7 @@ func _drive(delta: float) -> void:
 	if state == "STRIKE":
 		var spent := clampf(_state_time / maxf(0.01, float(profile.strike)), 0.0, 1.0)
 		desired = _strike_direction * float(profile.lunge) * (1.0 - 0.62 * spent)
-	elif state == "WINDUP" or state == "STAGGER":
+	elif state == "WINDUP" or state == "STAGGER" or state == "CAST":
 		desired = Vector3.ZERO
 	var control := 26.0 if is_on_floor() else 7.0
 	velocity.x = move_toward(velocity.x, desired.x, control * delta)
@@ -1045,6 +1336,9 @@ func stagger(seconds: float) -> void:
 	if not alive:
 		return
 	mob_wake()
+	# A blow that breaks the body breaks the spell with it: the windup is the only
+	# thing standing between a telegraph and the fire, and a stagger takes it.
+	_cancel_cast()
 	state = "STAGGER"
 	_state_time = 0.0
 	_stagger_duration = maxf(0.0, seconds)
@@ -1110,10 +1404,11 @@ func _aggro_allowed(focus: Vector3) -> bool:
 	return not MobSenses.in_safe_ring(safe_center, focus)
 
 
-## What the body is holding up, for the sampler. The devils neither brace nor
-## crouch; a body that does answers here.
+## What the body is holding up, for the sampler. A duelist's guard is a stance
+## the eye can read and answer; every body that grinds keeps the arms it was
+## authored with.
 func _present_blocking() -> bool:
-	return false
+	return duelist and guard_up()
 
 
 func _present_crouch() -> bool:
@@ -1212,6 +1507,10 @@ func _enter_dead(announce: bool, severed := Vector3.ZERO, damage := 0.0,
 	alive = false
 	state = "DEAD"
 	_struck = true
+	# A demon's fire goes out with it: a windup is dropped, a patch is put out and
+	# a fireball still in the air is taken with the hand that threw it. Nothing
+	# this body made outlives it.
+	_release_fire()
 	_sever = severed
 	_split = cleaved
 	var fall := _impact_force if _impact_force.length_squared() > 0.0001 \

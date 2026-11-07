@@ -72,13 +72,14 @@ WARBAND_TESTS = [
     "watcher_variants_regression",
     "town_hub_regression",
     "town_stockade_regression",
-    "quest_log_regression",
     "loot_wow_regression",
+    "arena_regression",
+    "weld_regression",
+    "demon_duel_regression",
     "delve_regression",
+    "demon_fire_regression",
     "wild_cages_regression",
     "world_map_regression",
-    "duel_lesson_regression",
-    "cage_escape_regression",
     "escape_run_regression",
     "warband_world_regression",
     "squad_medicine_regression",
@@ -132,7 +133,7 @@ TOTAL_BUDGET = 240.0
 ## The top of the allowed band, for the tests that walk a fixed clock or a
 ## kilometre of world. They must still fit inside two minutes.
 TIMEOUTS = {"cover_movement_regression": 120.0, "warband_world_regression": 120.0,
-            "escape_run_regression": 120.0, "cage_escape_regression": 120.0}
+            "escape_run_regression": 120.0}
 
 
 def engine_path() -> str:
@@ -190,7 +191,7 @@ def main() -> int:
         want_warband = True
     selected = budget_tests(want_base, want_warband)
     if "--only" in arguments:
-        # `--only cage_escape_regression,warband_world_regression` runs exactly
+        # `--only town_hub_regression,warband_world_regression` runs exactly
         # those, for a change whose blast radius is two tests and not fifty.
         names = arguments[arguments.index("--only") + 1].split(",")
         selected = [name.strip() for name in names if name.strip()]

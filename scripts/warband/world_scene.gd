@@ -1,25 +1,31 @@
 extends Node3D
 ## GHOST OF THE WARBAND: the campaign, as one continuous world.
 ##
-## There used to be three scenes with two doors between them: a cage yard that
-## handed the squad to a road, and a road that handed them to a town. Walking was
-## not the way anything happened - pressing G on an arch was. This scene is the
-## answer: the camp in the deep wood (with the four cages in it), the trail
-## through the wood, and the town with its counters, its altar and its expedition
-## gate all stand in **one coordinate space**, and the only way between them is to
-## walk. They also stand on **one ground**: `terrain.gd`'s heightfield, with the
-## camp pocket and the town square padded flat into a rolling forest floor.
+## Hearthstead is where a run starts: the walled square with its counters, its
+## altar, the recruiter's board and the two gates that lead out of it. Walking is
+## the only way anywhere - there is no scene door to press - and the two
+## directions are the two things to do: **the road**, 1,374 m of wood with a
+## cage, cultists and warcamps on it, ending at the deep wood where the
+## Horned Thing holds his patch; and **the Hollow**, the descent under the square.
+## They stand in **one coordinate space** on **one ground**: `terrain.gd`'s
+## heightfield, with the town square padded flat into a rolling forest floor.
+##
+## The band a run opens with is one naked body standing in that square: nothing
+## is issued, and every piece he ends the campaign in was won off a body he put
+## down - one piece per kill, onto a field body this world owns (`arm_one_piece`,
+## from `_arm_from_kill`). The second body is the one cage on the road, or the
+## recruiter's desk in the square.
 ##
 ## It owns the things a warband scene must own exactly once - the
 ## `PossessionController` and its bodies, the camera, the `WarbandHud`, the
 ## warband screen, the paperdoll, the tips, the ability scene, the
 ## campaign menu, the loot vacuum, the revive channel, the downed-crawl, the
-## branded runner, and the wilderness band on the way out - and it builds three
+## branded runner, and the wilderness band on the way out - and it builds the
 ## areas that bring only their own geometry and their own business:
 ##
-##   * `Camp` - `cage_escape.gd`: the ragged pocket in the wood, the cages, the
-##     lesson. No fence and no road: a camp with trees standing in it, and a gap
-##     in those trees at its front line.
+##   * `Wood` - `wood_boss.gd`: the ragged pocket at the road's far end and the
+##     demon in it. No fences and no cages: a hole in the trees with a fire, and
+##     the Horned Thing standing in the middle of it.
 ##   * `Trail` - `escape_run.gd`: the 915 m way through the wood, with the twenty
 ##     cultists on it. There is no lane: a faint worn line between trunks that
 ##     stand in it, marked by a pair of torches every twelve metres. Its first
@@ -68,11 +74,15 @@ const MenuScript = preload("res://scripts/warband/warband_menu.gd")
 ## is a real body.
 const WildernessScript = preload("res://scripts/warband/wilderness.gd")
 const TorchScript = preload("res://scripts/warband/torch_light.gd")
-const CampScript = preload("res://scripts/warband/cage_escape.gd")
+const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
+## What a slot is read with when a kill arms a body: an empty slot and the naked
+## set a body is born in are both bare, and a piece is called by its own name.
+const EquipmentRules = preload("res://scripts/equipment_rules.gd")
+const State = preload("res://scripts/player_state.gd")
 ## Bows and thrown steel. The warband mode had no projectile spawner at all: a
 ## body could draw a bow, release it, and the arrow simply never existed. These are
 ## the same classes the frontier and the arena spawn, with the campaign's target
@@ -83,7 +93,7 @@ const CombatScript = preload("res://scripts/combat.gd")
 const ArcherScript = preload("res://scripts/archer.gd")
 const BloodFx = preload("res://scripts/blood_fx.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
-## The two places the quartermaster's orders happen: four caged soldiers strung
+## The two places the quartermaster's orders happen: the caged soldier strung
 ## down the wood, and three warcamps of watchers near the town wall. Both take the
 ## world the way an area does and build only their own content.
 const SoldierCagesScript = preload("res://scripts/warband/soldier_cages.gd")
@@ -100,6 +110,7 @@ const WorldMapScript = preload("res://scripts/warband/world_map.gd")
 ## The delve: the Weeping Hollow's mouth in the square, the counter a party and its
 ## delve inventory are made up at, and the cave instance it goes down into.
 const DelveAreaScript = preload("res://scripts/warband/delve_area.gd")
+const ArenaAreaScript = preload("res://scripts/warband/arena_area.gd")
 
 ## How far past the lane's far end the town square stands. The lane ends at the
 ## town's north gate; the square's centre is this far beyond it.
@@ -142,9 +153,6 @@ const PROJECTILE_HIT_MASK := 1 | 2
 const PROJECTILE_CAP := 64
 ## How long the warband lies in the mud before the world stops pretending.
 const WIPE_BEAT := 2.5
-## The trail's objective. It counts down to the square's own ring and is gone
-## inside it: the town is where it is reached, so a body there never reads it.
-const TRAIL_OBJECTIVE := "REACH THE TOWN"
 ## The band a fallen squadmate is taught in: close enough that the player is in
 ## the fight that put them down, wide enough that the tip does not wait for a body
 ## to fall at their feet.
@@ -165,19 +173,6 @@ const BANDAGE_LESSON := {"keys": "Z", "text": "BANDAGE · +35 · HOLD STILL"}
 const DOWNED_LESSON := {"keys": "HOLD G   F1", "text": "YOU ARE DOWN · AN ALLY LIFTS YOU"}
 
 
-## The wrong-way sign. It measures the distance still to run, so the three numbers
-## are read off the trail's own length: the banner arms once the body has come
-## 120 m in from the camp's mouth, and it comes up once the body has carried the
-## squad 50 m back the way it came. On the 1,374 m lane that is 1,250 / 1,300 /
-## 1,280 m from the town's end - the gap between the last two is the sign's
-## hysteresis, so a body standing on the line does not flicker.
-const WRONG_WAY_ARM_METRES := 1250.0
-const WRONG_WAY_TRIGGER_METRES := 1300.0
-const WRONG_WAY_CLEAR_METRES := 1280.0
-const WRONG_WAY_TEXT := "You're running the wrong way!"
-## How high over the gap in the trees the roadside word stands. High enough to be
-## read from the trail's first torch, low enough not to sit in the canopy.
-const WRONG_WAY_SIGN_HEIGHT := 4.2
 ## The score is the wood's, and the town is where the run ends: the first frame
 ## the soul stands in the square the soundtrack fades out, and it comes back only
 ## if the squad walks back out through the gate. Long enough that arriving reads as
@@ -225,7 +220,7 @@ var _retarget_ticks := 0
 ## The band between the camp's mouth and the lane. Built after the warband is
 ## seated, because a wolf's first target is a real body.
 var wilderness
-## The quartermaster's orders, where they happen: the four caged soldiers down the
+## The quartermaster's orders, where they happen: the caged soldier down the
 ## wood, and the warcamps of watchers near the town.
 var soldier_cages
 var watcher_warren
@@ -236,8 +231,11 @@ var loot_feed
 var world_map
 ## The delve (`delve_area.gd`): the mouth in the square and the instance below.
 var delve_area
+## The arena (`arena_area.gd`): the ring above the world, and the warband it
+## stands against the party.
+var arena
 ## The three areas. Each is the same script its standalone preview uses.
-var camp
+var wood
 var trail
 var town
 var bodies: Array = []
@@ -248,22 +246,16 @@ var guards: Array = []
 ## Every weapon on the ground, in one list, for the one loot vacuum.
 var pickups: Array = []
 var squad_ids: Array[int] = []
-## "camp" (the campaign's opening), "town" (a resumed save, or the arena's
-## return), "checkpoint" (the autosave's bookmark) or "guest" (a co-op guest
-## fielding the host's bodies). Read from `GameFlow.world_start`.
-var start_area := "camp"
+## "town" (Hearthstead - where a fresh run and a resumed save both stand),
+## "checkpoint" (the autosave's bookmark) or "guest" (a co-op guest fielding the
+## host's bodies). Read from `GameFlow.world_start`.
+var start_area := "town"
 
 var _crawls: Array = []
 ## Every arrow and thrown blade in flight. Nothing else in this mode owns them.
 var projectiles: Array = []
 var _reviving := false
 var _prompt_text := ""
-## The wrong-way sign's own memory: whether the road has been learned yet (armed),
-## whether the banner is up, and the word standing at the gap in the trees. Both
-## the banner and the sign are driven from the one poll, so they cannot disagree.
-var _wrong_way_armed := false
-var _wrong_way := false
-var _wrong_way_sign: Label3D
 ## The player's own body went down while a panel was up: the tip is offered on
 ## the first frame the screen is clear again rather than written over a read.
 var _downed_tip_pending := false
@@ -282,9 +274,6 @@ var _watched_body = null
 ## A guest's revive is the host's channel; this is the guest's own count of it,
 ## for the prompt.
 var _guest_revive := 0.0
-## Whether the camp was built past its opening (a trail bookmark). A guest builds
-## its camp the way the host built its own, so both fields hold the same mobs.
-var _camp_resumed := false
 ## What the heightfield was baked to: `{triangles, cell, min, max}`.
 var _terrain: Dictionary = {}
 ## Where the town square stands, worked out before the ground so its pad can be
@@ -322,9 +311,8 @@ func _ready() -> void:
 	_build_delve()
 	if _client:
 		_become_client()
-	_build_wrong_way_sign()
 	# The soul is wired before it is seated: the very first possession is the
-	# camp's first seen body, and a signal connected afterwards would miss it.
+	# field's first seen body, and a signal connected afterwards would miss it.
 	_wire_possession()
 	_seat_warband()
 	# The band comes after the seating: a wolf's first target is a real body.
@@ -372,6 +360,13 @@ func _note_hitch() -> void:
 	Log.event("hitch", "a frame the player would feel", {
 		"ms": roundi(float(spent) / 1000.0),
 		"tick": Engine.get_physics_frames(),
+		"fps": roundi(Engine.get_frames_per_second()),
+		# The engine's own split: process is the drawn frame's CPU, physics the
+		# steps it ran. A hitch whose physics figure is small and whose process
+		# figure is also small is neither - it is the GPU or the driver, and the
+		# draw-call count beside it says which way to look.
+		"process_ms": snappedf(float(Performance.get_monitor(Performance.TIME_PROCESS)) * 1000.0, 0.01),
+		"physics_ms": snappedf(float(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)) * 1000.0, 0.01),
 		"draws": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 		"objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
 		"guards": guards.size() if guards != null else 0,
@@ -467,6 +462,10 @@ func _step_world(delta: float) -> void:
 		SquadDriveScript.retarget(_local_guards(), _targetable_bodies(), AGGRO_RADIUS)
 		Perf.end()
 	# The delve's own clock: dens that wake, a party that falls, the eye's sky.
+	if arena != null:
+		Perf.begin("arena.tick")
+		arena.tick(delta)
+		Perf.end()
 	if delve_area != null:
 		Perf.begin("delve.tick")
 		delve_area.tick(delta)
@@ -476,7 +475,6 @@ func _step_world(delta: float) -> void:
 		loot_window.tick()
 	_sync_roster(delta)
 	_sync_field()
-	_sync_quests()
 	# The loot channel runs on the world's clock and breaks the moment a panel is
 	# over the body doing the work: a screen does not pause the tree, so nothing
 	# else would ever say the hands are needed back.
@@ -489,7 +487,6 @@ func _step_world(delta: float) -> void:
 	_update_prompt()
 	_push_downed_tip()
 	_update_bandage_tip()
-	_update_wrong_way()
 	Perf.end()
 	Perf.begin("world.flow")
 	_sync_town_music()
@@ -538,6 +535,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_K:
 			_try_loot()
 			get_viewport().set_input_as_handled()
+		KEY_H:
+			# Fast travel home: the map's own verb, and only while the sheet is
+			# open. `H` rather than `T`, which is the throw binding the controller
+			# reads before this handler.
+			if world_map != null and world_map.is_open():
+				world_map.travel_home()
+				get_viewport().set_input_as_handled()
 		KEY_M:
 			# One page, and it never pauses: the map is something a body reads
 			# while it keeps walking. Above it is the wood's sheet; below, the
@@ -610,20 +614,20 @@ func _build_ground() -> void:
 	var style: WorldStyle = RunForestScript.night_style()
 	_town_at = lane_end() + Vector3(0.0, 0.0, -TOWN_BEHIND)
 	var pads := [
-		{"rect": Rect2(-CampScript.YARD_HALF_WIDTH, CampScript.YARD_FRONT,
-			CampScript.YARD_HALF_WIDTH * 2.0,
-			CampScript.YARD_BACK - CampScript.YARD_FRONT),
+		{"rect": Rect2(-WoodScript.YARD_HALF_WIDTH, WoodScript.YARD_FRONT,
+			WoodScript.YARD_HALF_WIDTH * 2.0,
+			WoodScript.YARD_BACK - WoodScript.YARD_FRONT),
 			"y": TerrainScript.PAD_Y, "blend": 14.0},
 		{"rect": Rect2(_town_at.x - TOWN_PAD, _town_at.z - TOWN_PAD,
 			TOWN_PAD * 2.0, TOWN_PAD * 2.0), "y": TerrainScript.PAD_Y, "blend": 16.0},
 	]
 	# What feet have worn, painted into the ground's own map: the line of torches,
-	# the camp's yard, its corridor out through the wood and its cart ruts, and the
+	# the deep wood's pocket, its corridor out through the trees and its ruts, and the
 	# ring of the town's square with the road in through its gate.
 	var worn := [
 		{"points": _lane_line(), "half_width": 3.2, "strength": 0.95},
 	]
-	worn.append_array(CampScript.trodden_ground())
+	worn.append_array(WoodScript.trodden_ground())
 	worn.append_array(TownScript.trodden_ground(_town_at))
 	_terrain = TerrainScript.build(self, style, pads, worn)
 	# The net: a slab under the strip's lowest point, as wide and as long as the
@@ -778,7 +782,7 @@ func note_booked(item_id: String, who: String = "") -> void:
 		loot_feed.note(item_id, who)
 
 
-## The orders' ground: four caged soldiers down the wood and three warcamps of
+## The orders' ground: the caged soldier down the wood and three warcamps of
 ## watchers near the town. Both take this world the way an area does - they are
 ## built from the lane the trail has already grown - and both know to field
 ## nothing on a guest, whose wood is the host's.
@@ -824,16 +828,10 @@ func _build_brand() -> void:
 ## origin; the town stands past the trail's far end, which is measured off the
 ## lane's own constants so a moved mouth moves the trail with it.
 func _build_areas() -> void:
-	camp = CampScript.new()
-	camp.name = "Camp"
-	camp.host = self
-	# A checkpoint past the cages opens the world with the lesson already behind
-	# it: the cages hang open and empty and the pair are never fielded.
-	_camp_resumed = _resuming_trail()
-	if _camp_resumed:
-		camp.prepare_resume()
-	add_child(camp)
-	camp.embed(self)
+	wood = WoodScript.new()
+	wood.name = "Wood"
+	wood.host = self
+	add_child(wood)
 
 	town = TownScript.new()
 	town.name = "Town"
@@ -850,29 +848,10 @@ func _build_delve() -> void:
 	delve_area.name = "Delve"
 	add_child(delve_area)
 	delve_area.setup(self)
-
-
-## The word that answers the banner in the world itself: a body walking back up
-## the trail sees it standing over the gap in the trees it just came through. It
-## billsboards towards the camera and reads through the wood, because a sign that
-## a body has to find with its nose is not a sign.
-func _build_wrong_way_sign() -> void:
-	var word := Label3D.new()
-	word.name = "WrongWaySign"
-	word.text = WRONG_WAY_TEXT
-	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	word.no_depth_test = true
-	# About a metre of letter height over a dozen metres of line: a hanging sign
-	# the size of a hut, because it stands in the trees rather than on a wall.
-	word.pixel_size = 0.0125
-	word.font_size = 72
-	word.outline_size = 16
-	word.modulate = Color(0.99, 0.78, 0.26)
-	word.outline_modulate = Color(0.42, 0.03, 0.02, 0.95)
-	word.position = CampScript.GATE_POINT + Vector3(0.0, WRONG_WAY_SIGN_HEIGHT, 0.0)
-	word.visible = false
-	add_child(word)
-	_wrong_way_sign = word
+	arena = ArenaAreaScript.new()
+	arena.name = "Arena"
+	add_child(arena)
+	arena.setup(self)
 
 
 ## The lane, and the cult standing on it. Built after the warband is seated: two
@@ -906,8 +885,8 @@ func _build_wilderness() -> void:
 ## and the geometry builds the corridor through the trees to match it, so the way
 ## out cannot creep up on the cages again.
 func trail_offset() -> Vector3:
-	var trail_start := Vector3(CampScript.GATE_POINT.x, 0.0,
-		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES)
+	var trail_start := Vector3(WoodScript.GATE_POINT.x, 0.0,
+		WoodScript.GATE_POINT.z - WoodScript.CAMP_TO_ROAD_METRES)
 	return trail_start - (RunForestScript.LANE_POINTS[0] as Vector3)
 
 
@@ -928,17 +907,11 @@ func _seat_warband() -> void:
 		_seat_guest()
 	elif start_area == "checkpoint" and warband.has_checkpoint():
 		_seat_checkpoint()
-	elif start_area == "town":
+	else:
 		town.seed_warband()
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
 		town.place_warband(bodies)
-	else:
-		camp.seed_warband()
-		bodies = controller.spawn_mercenaries(camp.spawn_posts(), true)
-		camp.place_warband(bodies)
 	_adopt_bodies()
-	if start_area == "camp":
-		camp.begin_lesson()
 	_on_possession_changed(controller.local_peer_id, _soul_merc())
 
 
@@ -954,8 +927,7 @@ func _seat_checkpoint() -> void:
 	var ground := _checkpoint_ground()
 	var posts := _spawn_ring(ground, maxi(1, warband.roster.field_count()))
 	bodies = controller.spawn_mercenaries(posts, true)
-	camp.place_resumed(bodies)
-	# The squad is out of the camp on a resumed trail: it walks with the soul.
+	# A party resumed on the trail walks with the soul.
 	if squad != null:
 		squad.following = true
 		squad.engage_radius = 34.0
@@ -974,7 +946,7 @@ func _seat_guest() -> void:
 	if raw is Array and (raw as Array).size() == 3:
 		focus = Vector3(float(raw[0]), float(raw[1]), float(raw[2]))
 	if focus.is_zero_approx() or not focus.is_finite():
-		focus = _checkpoint_ground() if warband.has_checkpoint() else CampScript.GATE_POINT
+		focus = _checkpoint_ground() if warband.has_checkpoint() else WoodScript.GATE_POINT
 	var posts := _spawn_ring(TerrainScript.grounded(focus), maxi(1, wanted.size()))
 	bodies = controller.spawn_mercenaries(posts, false, wanted)
 
@@ -984,7 +956,7 @@ func _seat_guest() -> void:
 func _checkpoint_ground() -> Vector3:
 	var point: Vector3 = warband.checkpoint_position()
 	if point.is_zero_approx():
-		point = Vector3(CampScript.GATE_POINT.x, 0.0, CampScript.GATE_POINT.z - 55.0)
+		point = Vector3(WoodScript.GATE_POINT.x, 0.0, WoodScript.GATE_POINT.z - 55.0)
 	return TerrainScript.grounded(point)
 
 
@@ -1342,11 +1314,9 @@ func _build_squad() -> void:
 	squad.eligible = Callable(self, "_is_free_ally")
 
 
-## Who may act as a squadmate this frame: the camp answers with its latches (a
-## prisoner still in a cage is not free, and the rescuer is the player's beat
-## until the squad is out). A body a human soul is inside is never a squadmate,
-## local or remote: the AI would be writing a second intent into a body somebody
-## is already walking.
+## Who may act as a squadmate this frame: a body a human soul is inside is never
+## a squadmate, local or remote - the AI would be writing a second intent into a
+## body somebody is already walking.
 func _is_free_ally(merc_id: int) -> bool:
 	if merc_id <= 0:
 		return false
@@ -1356,16 +1326,13 @@ func _is_free_ally(merc_id: int) -> bool:
 	# stands where it was left until the party comes back up.
 	if warband != null and warband.delve.active and not warband.delve.is_member(merc_id):
 		return false
-	if camp == null:
-		return true
-	return camp.is_free(merc_id)
+	return true
 
 
-## Whether a body can walk off on its own right now: a prisoner still held by
-## the opening's clamp cannot. The host's session seats a co-op guest in a body
-## that can move before it settles for one that is still caged.
+## Whether a body can walk off on its own right now. Every body this world seats
+## can: the host's session seats a co-op guest in one that moves.
 func is_free_body(merc_id: int) -> bool:
-	return merc_id > 0 and (camp == null or camp.is_free(merc_id))
+	return merc_id > 0
 
 
 # --- the co-op role --------------------------------------------------------
@@ -1374,14 +1341,12 @@ func is_free_body(merc_id: int) -> bool:
 # guest fields the host's bodies from the host's lent warband and follows the
 # host's word on everything else.
 
-## A guest does not replay the cages and does not write the campaign. The camp
-## throws its lesson away (the host's cage state is the truth, and the opening is
-## a solo beat), and this machine runs no squad AI and no local mob brains - the
-## session marks the host's mobs as replicas.
+## A guest does not work the orders and does not write the campaign: the host's
+## cage state is the truth (`_build_orders` fields none on a guest), and this
+## machine runs no squad AI and no local mob brains - the session marks the host's
+## mobs as replicas.
 func _become_client() -> void:
 	_client = true
-	if camp != null:
-		camp.dismiss_lesson()
 	if squad != null:
 		squad.following = false
 	# The corpse screen is the guest's own copy of the host's record, and every
@@ -1392,7 +1357,7 @@ func _become_client() -> void:
 ## What a guest's world must copy from this one to field the same mobs: whether
 ## the camp was built past its opening. Sent with the campaign.
 func guest_layout() -> Dictionary:
-	return {"camp_resumed": _camp_resumed, "start": start_area}
+	return {"start": start_area}
 
 ## The host's answer this guest's world is built on (`GameFlow.guest_field`).
 func _guest_field() -> Dictionary:
@@ -1525,22 +1490,11 @@ func _local_guards() -> Array:
 	return local
 
 
-## The warband bodies a hostile may take as a quarry: every standing body the
-## camp's cages do not hold. A clamped prisoner behind bars is not a sighting, and
-## the pair that wake in the camp would otherwise be pointed at the nearest caged
-## squadmate - and swing at bars - while the player walked around them.
+## The warband bodies a hostile may take as a quarry: every standing body on this
+## field. A body left below in the Hollow, or one fighting in the ring, is not in
+## this list.
 func _targetable_bodies() -> Array:
-	if camp == null:
-		return bodies
-	var out: Array = []
-	for body in bodies:
-		if not is_instance_valid(body):
-			continue
-		var merc_id: int = controller.merc_of(body)
-		if merc_id > 0 and camp.is_cage_clamped(merc_id):
-			continue
-		out.append(body)
-	return out
+	return bodies
 
 
 func _wire_possession() -> void:
@@ -1568,8 +1522,6 @@ func _on_possession_changed(peer_id: int, merc_id: int) -> void:
 		# player's number keys fire.
 		if paperdoll != null:
 			paperdoll.follow_controlled(merc_id)
-	if camp != null:
-		camp.note_possession(merc_id)
 	_attach_brand()
 	_write_prompt("")
 
@@ -1658,7 +1610,8 @@ func drop_held_weapon(enemy) -> bool:
 ## One hostile dies, and the world pays for it once. The wilderness band reports
 ## here and nowhere else - the camp's watchers and the trail's cultists have their
 ## own areas' handlers for the lesson's bookkeeping, but the purse belongs to the
-## world, so the reward cannot be booked twice.
+## world, so the reward cannot be booked twice. The same kill arms one warband
+## body: a party's kit is won off what it puts down, never issued.
 func _on_enemy_defeated(enemy, reward: int) -> void:
 	if not is_instance_valid(enemy):
 		return
@@ -1672,67 +1625,24 @@ func _on_enemy_defeated(enemy, reward: int) -> void:
 		return
 	if not bool(enemy.get("replica")):
 		_pay_kill(reward)
+		# The same kill is the band's armorer: one piece off the pool onto one
+		# body, so the kit a campaign fights with is won rather than issued.
+		_arm_from_kill()
 	# The steel comes out of its hand and lands in the dirt; what it still wears is
 	# the corpse screen's, so nothing is on offer twice. The body stays on the one
-	# hostile list, exactly as the camp's and the trail's fallen do.
+	# hostile list, exactly as the trail's and the warren's fallen do.
 	drop_held_weapon(enemy)
 	if loot != null and loot.has_method("register_corpse"):
 		# The vacuum's own `corpse_registered` is what fills a guest's screen;
 		# every area that books a kill this way is copied without a second call.
 		loot.register_corpse(enemy)
-	note_kill(enemy)
 	if screen != null:
 		screen.refresh()
 
 
-# --- the campaign ledger ----------------------------------------------------
-#
-# The world is the one place that sees every hostile die, so it is the one place
-# a bounty is counted. Areas report here (`note_kill`) instead of writing to the
-# ledger themselves, and the two facts the campaign is built on - a death and a
-# body out of a cage - are the only things the world needs to know about.
-
-## The ledger, for an area that wants to read the orders.
-func campaign_quests() -> WarbandQuests:
-	return warband.quests if warband != null else null
-
-## The id a death is booked under: the mob's own `mob_id`, or the shape its class
-## declares. A body that names neither is not counted, because a bounty that
-## answers to every corpse is not a bounty.
-static func kill_id_of(enemy) -> String:
-	if enemy == null:
-		return ""
-	if "mob_id" in enemy:
-		var named := str(enemy.mob_id).strip_edges()
-		if not named.is_empty():
-			return named
-	if "kind" in enemy:
-		# `enemy.gd`: 0 briar wolf, 1 ranger clone, 2 cinder devil. The dogs of the
-		# wood answer to their own name, so a wolf bounty is a table row away.
-		match int(enemy.kind):
-			0:
-				return "briar_wolf"
-			1:
-				return "ranger_clone"
-			2:
-				return "cinder_devil"
-	return ""
-
-## Book one death on the ledger. Public because the trail's own area owns the
-## `defeated` signal of its cultists and calls this rather than duplicating the
-## purse bookkeeping.
-func note_kill(enemy) -> void:
-	if warband == null:
-		return
-	var mob_id := kill_id_of(enemy)
-	if mob_id.is_empty():
-		return
-	_announce_quests(warband.quests.note_kill(mob_id))
-
 ## Everything the map sheet marks beyond its own geography: every soldier still
 ## shut in a cage, and every warcamp in the wood. The sheet asks and this answers;
-## nothing here draws. A place that does not exist yet - the Crypt - is a quest row
-## and never a mark, which is exactly what "there is nothing to find" means.
+## nothing here draws.
 func map_markers() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if soldier_cages != null and soldier_cages.has_method("marker_points"):
@@ -1745,8 +1655,7 @@ func map_markers() -> Array[Dictionary]:
 
 
 ## A soldier comes out of a cage and swears to the band: one roster record, the
-## best spare kit the shared stash holds, one mark on the ledger, one line on the
-## HUD. The area that cut the latch calls this and nothing else. `at` is where he
+## best spare kit the shared stash holds, one line on the HUD. The area that cut the latch calls this and nothing else. `at` is where he
 ## stands: with a place on the field he takes it there, and past a full field he
 ## waits in the reserve and his figure fades with nobody in its place.
 func note_soldier_freed(merc_name: String, at: Vector3 = Vector3.INF) -> int:
@@ -1759,49 +1668,14 @@ func note_soldier_freed(merc_name: String, at: Vector3 = Vector3.INF) -> int:
 	var waiting: bool = warband.roster.is_reserve(merc_id)
 	if not waiting and at.is_finite():
 		_muster_at[merc_id] = at
-	var moved: Array = warband.quests.note_rescue()
-	_announce_quests(moved)
 	if hud != null:
-		var quests: WarbandQuests = warband.quests
 		var line := "%s joins the warband." % merc_name
 		var seconds := 3.5
-		if quests.is_complete("free_the_soldiers"):
-			line = "%s is out of the cage. Every name is off the roll - back to" % merc_name \
-				+ " the quartermaster."
-			seconds = 4.5
-		elif quests.is_active("free_the_soldiers"):
-			line = "%s is out of the cage. Freed %d of %d." % [merc_name,
-				quests.progress_of("free_the_soldiers"),
-				quests.goal_count("free_the_soldiers")]
-			seconds = 4.0
 		if waiting:
 			line += " The field is full: he waits in the town's reserve."
 			seconds += 1.0
 		hud.set_status(line, seconds)
 	return merc_id
-
-## Paint the ledger block. Cheap by construction: the HUD repaints only when the
-## signature of what it shows has moved.
-func _sync_quests() -> void:
-	if hud == null or warband == null:
-		return
-	hud.set_quests(warband.quests.rows())
-
-## One line for the objectives that moved this frame, read off the ledger rather
-## than recomputed here.
-func _announce_quests(moved: Array) -> void:
-	if hud == null or warband == null:
-		return
-	_sync_quests()
-	if moved.is_empty():
-		return
-	var quest_id := str(moved[0])
-	var title := str(WarbandQuests.def_of(quest_id).get("title", quest_id))
-	if warband.quests.is_complete(quest_id):
-		hud.set_status("%s  -  done. The quartermaster is waiting." % title, 4.5)
-	else:
-		hud.set_status(warband.quests.objective(), 3.0)
-
 
 ## Book a reward into the shared purse and let the strip above it hear about it.
 ## `Warband` is the one funnel - it writes the same `PlayerState` credits every
@@ -1814,6 +1688,56 @@ func _pay_kill(reward: int) -> void:
 	# purse lives in `PlayerState`, so `award_gold` announces nothing by itself.
 	if hud != null and hud.has_method("_refresh_purse"):
 		hud.call("_refresh_purse")
+
+
+## Whether one body still has a slot to fill: empty, or the naked set it was born
+## in. The same reading `Warband.arm_one_piece` makes of a slot, taken before the
+## call so a dressed body is passed over for one that can still take a piece.
+func _has_bare_slot(merc_id: int) -> bool:
+	if warband == null:
+		return false
+	var gear: Dictionary = warband.roster.equipped_of(merc_id)
+	for slot_id in EquipmentRules.SLOTS:
+		var item_id := str(gear.get(str(slot_id), ""))
+		if item_id.is_empty() or EquipmentRules.bare_garment(item_id):
+			return true
+	return false
+
+
+## A kill arms a body, one piece at a time: this is the only thing that puts kit
+## on the band a campaign starts with. The party body the soul is not inside takes
+## the piece first, when it still has a slot to fill - so the second body a run
+## wins is not the one that ends up carrying it all - and the soul's own body is
+## the fallback. Only the field bodies of this world are read, so a body left
+## below in the Hollow or in the ring is not dressed by a kill on the road; only a
+## hostile this world killed and the party's own warband arm anything, and a lent
+## one answers "" inside `arm_one_piece`. One piece and no more: the body that has
+## nothing to take leaves this kill silent, and the next one too.
+func _arm_from_kill() -> void:
+	if warband == null or controller == null or _client:
+		return
+	var soul := _soul_merc()
+	var chosen := -1
+	for actor in bodies:
+		if not is_instance_valid(actor) or not bool(actor.get("alive")) \
+				or bool(actor.get("downed")):
+			continue
+		var merc_id: int = controller.merc_of(actor)
+		if merc_id <= 0 or merc_id == soul or not _has_bare_slot(merc_id):
+			continue
+		chosen = merc_id
+		break
+	if chosen <= 0:
+		chosen = soul
+	if chosen <= 0:
+		return
+	var item_id: String = warband.arm_one_piece(chosen)
+	if item_id.is_empty():
+		return
+	controller.refresh_gear(chosen)
+	if hud != null:
+		hud.set_status("%s takes up a %s." % [warband.roster.name_of(chosen),
+			str(State.ITEMS.get(item_id, {}).get("name", item_id))], 2.5)
 
 
 ## A hostile's blow lands on a warband body. The mob emits the swing; the body's
@@ -1965,49 +1889,6 @@ func _hostile_near(at: Vector3, radius: float) -> bool:
 	return false
 
 
-## The wrong-way sign, read off the trail's own ruler. A body only learns the road
-## once it has stood within `WRONG_WAY_ARM_METRES` of town - the escape's first
-## steps are 1070 m out and never raise it. After that, climbing back up the trail
-## past a kilometre raises the banner; turning round drops it under 980, so a body
-## standing on the line does not flicker.
-func _update_wrong_way() -> void:
-	if trail == null or controller == null or camp == null or not camp.escaping():
-		_set_wrong_way(false)
-		return
-	var soul = _soul()
-	if soul == null or not is_instance_valid(soul):
-		_set_wrong_way(false)
-		return
-	var metres: float = trail.metres_to_town((soul as Node3D).global_position)
-	if metres <= WRONG_WAY_ARM_METRES:
-		_wrong_way_armed = true
-	if not _wrong_way_armed:
-		return
-	if _wrong_way:
-		if metres < WRONG_WAY_CLEAR_METRES:
-			_set_wrong_way(false)
-	elif metres >= WRONG_WAY_TRIGGER_METRES:
-		_set_wrong_way(true)
-
-
-## One answer for the banner and the roadside word: they are the same sentence,
-## and they go up and down together.
-func _set_wrong_way(on: bool) -> void:
-	if on == _wrong_way:
-		return
-	_wrong_way = on
-	if hud != null:
-		hud.set_warning(WRONG_WAY_TEXT if on else "")
-	if _wrong_way_sign != null and is_instance_valid(_wrong_way_sign):
-		_wrong_way_sign.visible = on
-
-
-## Whether the wrong-way warning is up, for a test that must not read a private
-## label.
-func wrong_way() -> bool:
-	return _wrong_way
-
-
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
 	if not _leave_remains(actor, merc_id):
 		drop_merc_gear(actor, merc_id)
@@ -2036,9 +1917,7 @@ func _leave_remains(actor, merc_id: int) -> bool:
 	return true
 
 
-func _on_pickup_taken(pickup) -> void:
-	if camp != null:
-		camp.note_pickup(pickup)
+func _on_pickup_taken(_pickup) -> void:
 	if screen != null:
 		screen.refresh()
 
@@ -2197,13 +2076,12 @@ func _check_checkpoints() -> void:
 	var actor = controller.focus_body()
 	if actor == null or not is_instance_valid(actor) or not bool(actor.get("alive")):
 		return
-	# The opening is behind us: the six watchers are dead and the leaving has
-	# happened. The bookmark sits a little down the road, past the ambush's own
-	# posts, so a reload never drops the squad inside a fight it has just lost.
-	if camp != null and camp.tutorial_cleared() and _checkpoint_ahead("trail_start"):
-		var at := Vector3(CampScript.GATE_POINT.x, 0.0, CampScript.GATE_POINT.z - 60.0)
-		_save_checkpoint("trail_start", "trail", TerrainScript.grounded(at),
-			"THE CAMP IS BEHIND YOU")
+	# Out on the road: the party has left the square, so the bookmark follows the
+	# soul's own feet. A reload puts the squad back where it stood rather than at
+	# Hearthstead, and it never drops it inside the wood's own fight.
+	if town != null and not town.in_square(actor) and _checkpoint_ahead("trail_start"):
+		_save_checkpoint("trail_start", "trail",
+			TerrainScript.grounded(actor.global_position), "ON THE ROAD")
 		return
 	if town != null and town.in_square(actor) and _checkpoint_ahead("town"):
 		_save_checkpoint("town", "town", actor.global_position, "HEARTHSTEAD")
@@ -2261,14 +2139,14 @@ func _try_interact() -> void:
 		if hud != null:
 			hud.set_status(GUEST_HANDS_TEXT, 3.0)
 		return
-	if camp != null and camp.interact(actor):
-		return
-	# The wood's own cages stand in the ground the body walks on, exactly as the
-	# camp's do: one in reach takes the press, and one out of reach hands it on to
-	# whatever else is standing here.
+	# The wood's own cages stand in the ground the body walks on: one in reach
+	# takes the press, and one out of reach hands it on to whatever else is
+	# standing here.
 	if soldier_cages != null and soldier_cages.interact(actor):
 		return
 	# The Hollow's mouth in the square, and the rope out of it below.
+	if arena != null and arena.try_leave():
+		return
 	if delve_area != null and delve_area.interact(actor):
 		return
 	if town != null and not town.interact_at(controller.local_peer_id, actor.global_position).is_empty():
@@ -2284,7 +2162,7 @@ func _try_interact() -> void:
 	if pickup != null:
 		_try_loot()
 		return
-	_interaction_status(actor)
+	_interaction_status()
 
 
 ## A right click on lootable ground is the loot, not the guard.
@@ -2392,15 +2270,10 @@ func request_corpse_take(corpse_id: int, item_id: String, all: bool) -> void:
 
 
 ## What `G` says when it found nothing to use.
-func _interaction_status(actor) -> void:
+func _interaction_status() -> void:
 	if hud == null:
 		return
-	var line := ""
-	if camp != null:
-		line = camp.prompt_line(actor)
-	if line.is_empty():
-		line = _trail_objective_line(actor)
-	hud.set_status(line if not line.is_empty() else "Nothing within reach.", 3.0)
+	hud.set_status("Nothing within reach.", 3.0)
 
 
 func _nearest_pickup():
@@ -2635,10 +2508,11 @@ func _activate_brand() -> void:
 
 # --- the one HUD line ------------------------------------------------------
 
-## The prompt: the counter under the body's nose, then the camp's lesson, then the
-## metres left to the town. It is the only standing line the world writes; the key
-## legend that used to sit under it is gone - the lesson cards and the tips teach
-## the controls, and nothing on this HUD repeats them over a fight.
+## The prompt: the counter under the body's nose, then the camp's lesson. It is the
+## only standing line the world writes, and it is empty where no place has
+## something to say; the key legend that used to sit under it is gone - the lesson
+## cards and the tips teach the controls, and nothing on this HUD repeats them
+## over a fight.
 func _update_prompt() -> void:
 	if hud == null or controller == null:
 		return
@@ -2653,41 +2527,23 @@ func _update_prompt() -> void:
 		_write_prompt("HOLD G  ·  PICK UP %s" % warband.roster.name_of(
 			int(controller.merc_of(fallen))).to_upper())
 		return
-	# A cage in reach outranks the trail's distance line and nothing else: it is
-	# the one thing standing at the body's feet wherever in the wood it is.
+	# A cage in reach outranks every other line: it is the one thing standing at
+	# the body's feet wherever in the wood it is.
 	if soldier_cages != null and actor != null and is_instance_valid(actor) \
 			and soldier_cages.latch_target(actor) >= 0:
 		_write_prompt("G  -  CUT THE LATCH   ·   %d CAGE%s LEFT" % [soldier_cages.remaining(),
 			"" if soldier_cages.remaining() == 1 else "S"])
-	# The counter under the body's nose wins over the camp's lesson, and the
-	# lesson wins over the trail: a body can only be standing in one of them.
 	# The Hollow first: below, its objective is the only line that means anything,
 	# and at the mouth it names the way down.
 	if delve_area != null:
 		text = delve_area.prompt_line(actor)
+	# The ring is not on the map: its own fight is the only line worth reading
+	# there.
+	if arena != null and arena.is_open():
+		text = "THE ARENA  ·  %s" % arena.difficulty.to_upper()
 	if text.is_empty() and town != null and town.in_square(actor):
 		text = town.prompt_line(actor)
-	if text.is_empty() and camp != null:
-		text = camp.prompt_line(actor)
-	if text.is_empty():
-		text = _trail_objective_line(actor)
 	_write_prompt(text)
-
-
-## "REACH THE TOWN · 214 m", or "" for a body already standing in the square. The
-## figure is the distance to the square's ring - where the town's own lines take
-## over - not to the gate arch outside it: counted to the arch it fell to zero at
-## the gate, then climbed again all the way across the square.
-func _trail_objective_line(actor) -> String:
-	if trail == null or actor == null or not is_instance_valid(actor):
-		return ""
-	var at: Vector3 = (actor as Node3D).global_position
-	var metres: float = trail.metres_to_town(at)
-	if town != null:
-		if town.in_square(actor):
-			return ""
-		metres = town.metres_to_square(at)
-	return "%s   ·   %d m" % [TRAIL_OBJECTIVE, int(round(metres))]
 
 
 ## The one line under the crosshair. Only the prompt is written: it is the world
@@ -2698,11 +2554,6 @@ func _write_prompt(prompt: String) -> void:
 	if prompt != _prompt_text:
 		_prompt_text = prompt
 		hud.set_prompt(prompt)
-
-
-## What the HUD says the trail is, for a test that must not read a private label.
-func objective_text() -> String:
-	return TRAIL_OBJECTIVE
 
 
 func prompt_text() -> String:
@@ -2870,11 +2721,11 @@ func stats() -> Dictionary:
 		"warcamps": (watcher_warren.camps() as Array).size() if watcher_warren != null else 0,
 		"watchers_living": watcher_warren.living() if watcher_warren != null else 0,
 		"start": start_area,
-		"clearing": camp.clearing.get("clear", Vector2.ZERO) if camp != null else Vector2.ZERO,
-		"clearing_trees": int(camp.clearing.get("trees", 0)) if camp != null else 0,
-		"clearing_bushes": int(camp.clearing.get("bushes", 0)) if camp != null else 0,
-		"clearing_huts": int(camp.clearing.get("huts", 0)) if camp != null else 0,
-		"camp_to_road": CampScript.CAMP_TO_ROAD_METRES,
+		"clearing": wood.clearing.get("clear", Vector2.ZERO) if wood != null else Vector2.ZERO,
+		"clearing_trees": int(wood.clearing.get("trees", 0)) if wood != null else 0,
+		"clearing_bushes": int(wood.clearing.get("bushes", 0)) if wood != null else 0,
+		"clearing_huts": int(wood.clearing.get("huts", 0)) if wood != null else 0,
+		"camp_to_road": WoodScript.CAMP_TO_ROAD_METRES,
 		"lane_length": float(trail.forest.get("length", 0.0)) if trail != null else 0.0,
 		"lane_width": float(trail.forest.get("width", 0.0)) if trail != null else 0.0,
 		"torches": (trail.forest.get("torches", []) as Array).size() if trail != null else 0,
@@ -2892,9 +2743,9 @@ func town_gate() -> Vector3:
 	return trail.town_gate() if trail != null else Vector3.ZERO
 
 
-## The camp pocket's own size: a ragged pocket in the wood, not a walled yard.
+## The deep wood's pocket: a ragged hole in the trees, not a walled yard.
 func clearing_size() -> Vector2:
-	return camp.clearing.get("clear", Vector2.ZERO) if camp != null else Vector2.ZERO
+	return wood.clearing.get("clear", Vector2.ZERO) if wood != null else Vector2.ZERO
 
 
 func _count_nodes(node: Node) -> int:
@@ -2915,29 +2766,22 @@ func _count_type(node: Node, type_name: String) -> int:
 
 # --- startup ---------------------------------------------------------------
 
-## Where the campaign puts this body down: the camp for a fresh run, a saved
-## checkpoint for a resumed one, or the town end for the arena's return.
+## Where the campaign puts this body down: Hearthstead for a fresh run, a saved
+## checkpoint for a resumed one, or the host's field for a guest.
 func _wanted_start() -> String:
 	if flow == null:
-		return "camp"
+		return "town"
 	var wanted := str(flow.world_start)
 	if wanted == "guest" and _client:
 		return "guest"
 	if wanted == "checkpoint":
 		return "checkpoint" if warband != null and warband.has_checkpoint() else "town"
-	return "town" if wanted == "town" else "camp"
+	return "town" if wanted == "town" else "town"
 
 
-## True when the world is opening on a bookmark past the cages. A guest builds
-## the camp the way the host built it, which is what the host's layout says.
-func _resuming_trail() -> bool:
-	if start_area == "guest":
-		var layout: Variant = _guest_field().get("layout", {})
-		return layout is Dictionary and bool((layout as Dictionary).get("camp_resumed", false))
-	return start_area == "checkpoint" and warband != null \
-		and warband.has_checkpoint() and warband.checkpoint_area() != "town"
-
-
+## Say what the world was built from, once, in one line: the start it opened on,
+## the bodies and hostiles it fields, the lane it grew and the ground under it. A
+## harness reads this line back to prove the world it asked for is the one built.
 func _announce() -> void:
 	var readout: Dictionary = stats()
 	print("WARBAND_WORLD_READY start=%s bodies=%d guards=%d lane=%.1f road=%.0fm torches=%d trees=%d nodes=%d draws=%d shapes=%d ground=%.1f..%.1fm/%d tris"

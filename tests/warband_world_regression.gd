@@ -1,24 +1,21 @@
 extends SceneTree
-## The one world: camp, trail and town in a single coordinate space.
+## The one world: the wood, the trail and the town in a single coordinate space.
 ##
 ## This regression is the campaign's spine. It proves the things the old chain of
 ## three scenes could not:
 ##
 ##   1. **One of everything.** The world owns exactly one `PossessionController`,
-##      one camera, one `WarbandHud` and one tutorial card, and its three areas
-##      adopt them instead of building their own.
-##   2. **The camp is in a wood.** The pocket carries a deep wood on every side
-##      *and* trees standing inside its own footprint, a ragged stake line where
-##      the cult's fence used to be, shelters and a fire round the cages, the four
-##      cages on their own anchors - and a long run of ordinary trees between the
-##      gap in the wood and the road's first torch.
-##   3. **The lesson still works.** CAGED -> the shiv taken through the bars and
-##      the own latch cut with it -> the pair on the freed armed body -> one latch
-##      per cage cut with G -> the squad out and armed -> walking out through the
-##      gap is ESCAPING and the six come out of the wood, with every out-of-order
-##      beat refused and nothing opening on its own.
-##   4. **Walking is the only travel.** A real body is driven out of the camp,
-##      down the 915 m trail and into the town square: no scene is requested, no
+##      one camera, one `WarbandHud` and one tip channel, and its areas adopt them
+##      instead of building their own.
+##   2. **The wood is a place.** The pocket at the road's far end carries a deep
+##      wood on every side *and* trees standing inside its own footprint, a ragged
+##      stake line, shelters and a fire, not one cage - and the Hollow's own master
+##      standing on his patch with his two keepers, on the world's one hostile list.
+##   3. **The ground is one heightfield.** The wood's pocket and the town square are
+##      padded flat into it, the walk between them rolls over real slopes, and the
+##      trodden ground is the field's own map rather than geometry laid on it.
+##   4. **Walking is the only travel.** A real body is driven north out of the town
+##      square, up the whole road to the wood's mouth: no scene is requested, no
 ##      transition is made, the scene object never changes, the body never leaves
 ##      the walkable ground, and the walk is timed.
 ##   5. **The town end is the town.** The stash, the altar, the recruiter and the
@@ -27,28 +24,23 @@ extends SceneTree
 ##   6. **The budget.** One world is one scene: nodes, multimesh draws, lights and
 ##      collision shapes are counted and bounded.
 
-const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
-const SequencerScript = preload("res://scripts/warband/tutorial_sequencer.gd")
-const CampScript = preload("res://scripts/warband/cage_escape.gd")
 const WildernessScript = preload("res://scripts/warband/wilderness.gd")
 const TrailScript = preload("res://scripts/warband/escape_run.gd")
-const DuelScript = preload("res://scripts/warband/duel_lesson.gd")
+const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
+const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
+const CagesScript = preload("res://scripts/warband/soldier_cages.gd")
 
 const TEST_SAVE := "user://warband_world_state.json"
 const WARBAND_SAVE := "user://warband_world_warband.json"
 const WORLD := "res://scenes/warband_world.tscn"
-## How long the first fight has to start before the test calls it a hang.
-const PAIR_TIMEOUT := 40.0
 ## How long the driven walk may take before the test calls it a hang.
 const WALK_LIMIT := 200.0
 ## The walk is played at five times the simulation per second so a kilometre and a
-## third of trail fits inside the suite's ninety-second ceiling even with the pool
+## half of road fits inside the suite's ninety-second ceiling even with the pool
 ## running seven other Godots; the recorded time is game time at 1x, so the distance
 ## and the pace asserted below are the campaign's own.
 const WALK_SCALE := 5.0
-## Where the campaign's walk begins: the cage the soul wakes in (`CAGE_POSTS[0]`).
-const CAGE_LINE := Vector3(0.0, 0.2, 6.0)
 
 var game
 var flow
@@ -56,14 +48,9 @@ var warband
 var state
 var checks := 0
 var failures := 0
-var state_log: Array = []
-## Ground the opening itself walks: the cages to the mouth, which the ambush
-## interrupts. Counted into the campaign's 359 m below so the number the docs
-## quote is the whole walk, not the half of it the walk test times.
-var opening_metres := 0.0
 ## The band on the way out: the briar wolves `wilderness.gd` spawns into
 ## `world.guards` before anything here reads the count, so every hostile tally in
-## this run is the camp's watchers plus the trail's cultists plus these.
+## this run is the wood's own three plus the trail's cultists plus these.
 var wolves: int = WildernessScript.PACK_COUNT
 
 
@@ -95,13 +82,13 @@ func run() -> void:
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
 	flow.active = false
-	flow.world_start = "camp"
+	flow.world_start = "town"
 
 	# A scene that fails to parse would park this coroutine forever; the watchdog
 	# turns that hang into a failing run.
 	var watchdog := Timer.new()
 	watchdog.name = "Watchdog"
-	# The walk plays at 3x, and a Timer counts scaled time: this is ~500 s real.
+	# The walk plays at five times the simulation, and a Timer counts scaled time.
 	watchdog.wait_time = 1500.0
 	watchdog.one_shot = true
 	watchdog.timeout.connect(_on_watchdog)
@@ -116,19 +103,18 @@ func run() -> void:
 		return
 	current_scene = game
 	await create_timer(1.0).timeout
-	game.camp.sequencer.state_changed.connect(_on_state_changed)
 	# From here on the flow is live: if anything in the world opened a door, the
 	# transition counter would move and the walk checks would catch it.
 	flow.active = true
 
 	check_one_of_each()
-	check_camp_in_the_woods()
+	await swear_escort()
+	check_wood()
 	check_ground()
-	await check_lesson()
-	await check_leaving()
-	await check_walk()
+	check_wood_and_road()
 	await check_town_end()
-	check_down_drops_steel()
+	await check_walk()
+	await check_down_drops_steel()
 	check_keys()
 	check_budget()
 	check_doors()
@@ -136,10 +122,6 @@ func run() -> void:
 	_finish()
 
 
-## A warband body that goes down lets go of what it was holding, into the one
-## floor list a soul takes back with `K`. Measured here, in the live world, because
-## the wiring is the part that could silently break: `downed_started` has to reach
-## the roster and the loot vacuum on the same frame the body falls.
 func check_down_drops_steel() -> void:
 	var victim = null
 	var merc_id := 0
@@ -154,6 +136,13 @@ func check_down_drops_steel() -> void:
 	check(victim != null, "a warband body is standing to drop its steel")
 	if victim == null:
 		return
+	# A campaign's bodies are naked: the steel this check watches fall is the
+	# pool's, worn through the same roster call every gear change uses - a club in
+	# the main hand and a blade in the off.
+	warband.stash.add("dagger_ironwood", 1)
+	warband.equip_merc(merc_id, "off", "dagger_ironwood")
+	game.controller.refresh_gear(merc_id)
+	await physics_frame
 	var gear: Dictionary = warband.roster.equipped_of(merc_id)
 	var held: Array[String] = []
 	for slot in ["off", "main"]:
@@ -247,7 +236,7 @@ func _finish() -> void:
 	Engine.time_scale = 1.0
 	Engine.physics_ticks_per_second = 60
 	flow.active = false
-	flow.world_start = "camp"
+	flow.world_start = "town"
 	if is_instance_valid(game):
 		game.queue_free()
 	await process_frame
@@ -255,23 +244,6 @@ func _finish() -> void:
 	_remove(WARBAND_SAVE)
 	print("WARBAND_WORLD_REGRESSION checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
-
-
-func _on_state_changed(new_state: int, objective: String) -> void:
-	state_log.append([new_state, objective])
-
-
-## How many times the machine *entered* `value`: a state is announced again on
-## every counter change while it is held, and that is not a transition.
-func state_count(value: int) -> int:
-	var total := 0
-	var previous := -1
-	for entry in state_log:
-		var current := int(entry[0])
-		if current == value and previous != value:
-			total += 1
-		previous = current
-	return total
 
 
 func flat_range(from: Vector3, to: Vector3) -> float:
@@ -286,19 +258,6 @@ func dismiss_card(label: String) -> void:
 	check(not paused, "the game is never held still by a read (%s)" % label)
 	if game.tips != null and is_instance_valid(game.tips):
 		game.tips.hide()
-
-
-## Poll a condition while playing the player: any card that opens during the wait
-## is read and closed, so the world keeps moving.
-func await_condition(predicate: Callable, timeout: float, label: String) -> bool:
-	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
-	while Time.get_ticks_msec() < deadline:
-		dismiss_card(label)
-		if bool(predicate.call()):
-			return true
-		await create_timer(0.05).timeout
-	dismiss_card(label)
-	return bool(predicate.call())
 
 
 # --- 1. one of everything --------------------------------------------------
@@ -336,55 +295,73 @@ func check_one_of_each() -> void:
 		if not inside_viewport:
 			cameras += 1
 	check(cameras == 1, "exactly one camera is current (%d)" % cameras)
-	# The three areas are the same scripts their standalone previews use, and they
-	# are all pointed at the world's one controller, HUD and card.
-	check(game.camp != null and game.trail != null and game.town != null,
-		"the world built its camp, its trail and its town")
-	check(game.camp.controller == game.controller and game.town.controller == game.controller,
-		"the areas adopt the world's controller instead of building one")
-	check(game.camp.hud == game.hud and game.town.hud == game.hud,
-		"the areas write to the world's one HUD")
-	check(game.camp.tips == game.tips, "the areas share the world's one tip channel")
-	check(game.camp.squad == game.squad,
-		"the camp drives the world's one squad module, not a copy")
-	check(game.bodies.size() == 5, "five bodies stand in the camp (%d)" % game.bodies.size())
-	check(warband.roster.count() == 5, "five mercenaries are sworn (%d)" % warband.roster.count())
+	# The areas are the same scripts their standalone previews use, and they are
+	# all pointed at the world's one controller and HUD.
+	check(game.wood != null and game.trail != null and game.town != null,
+		"the world built its wood, its trail and its town")
+	check(game.town.controller == game.controller,
+		"the town adopts the world's controller instead of building one")
+	check(game.town.hud == game.hud, "the town writes to the world's one HUD")
+	check(game.town.warband == warband, "and to the one warband")
+	check(game.squad != null and game.squad.watchers == game.guards,
+		"the squad drives the world's one hostile list, not a copy")
+	# A new campaign starts in the town with the band `Warband.STARTING_BAND`
+	# names - one naked body - and the soul is inside it.
+	check(game.start_area == "town", "a new campaign opens in the town (%s)" % game.start_area)
+	check(game.bodies.size() == warband.STARTING_BAND.size(),
+		"the starting band stands in the square (%d bodies for %d sworn)"
+			% [game.bodies.size(), warband.STARTING_BAND.size()])
+	check(warband.roster.count() == warband.STARTING_BAND.size(),
+		"and that is the whole of it (%d sworn)" % warband.roster.count())
 	var local = game.controller.active_body(1)
 	check(local != null, "the local soul starts inside a body")
-	check(game.camp.caged_ids.has(game.controller.merc_for_peer(1)),
-		"the soul starts inside one of the five prisoners")
-	check(game.camp.caged_ids.size() == 5, "all five of the warband are in cages (%d)"
-		% game.camp.caged_ids.size())
-	# The tutorial machine ends in the escape: there is no TOWN beat.
-	check(SequencerScript.state_name_of(SequencerScript.State.ESCAPING) == "escaping",
-		"the escape is the tutorial's last state")
-	check(SequencerScript.state_name_of(SequencerScript.State.ESCAPING + 1) == "unknown",
-		"the state machine stops at the escape - there is no town state")
-	# The opening's whole script is a table of one-line tips: no paragraph, no
-	# page, and every one of them a command.
-	var tips_table: Dictionary = game.camp.OPENING_TIPS
-	check(tips_table.size() == 8, "the opening has eight tips (%d)" % tips_table.size())
-	for id in tips_table.keys():
-		var row: Dictionary = tips_table[id]
-		var text := str(row.get("text", ""))
-		var keys := str(row.get("keys", ""))
-		check(not text.contains("\n") and not keys.contains("\n"),
-			"%s is one line" % id)
-		check(text.length() <= 48, "%s is short enough to read over a fight (%d)"
-			% [id, text.length()])
-		check(not text.ends_with("."), "%s is a command, not a sentence" % id)
-	var run_row: Dictionary = tips_table[game.camp.TIP_RUN]
-	check(str(run_row["text"]).to_lower().contains("town"),
-		"the last tip names the town (%s)" % str(run_row["text"]))
-	check(game.camp.RUN_MARKER_LABEL == "RUN TO TOWN",
-		"and the arrow over the way out says the same (%s)" % game.camp.RUN_MARKER_LABEL)
+	check(local != null and game.town.in_square(local), "and the body it is inside stands in the square")
 
 
-# --- 2. the camp is in a wood ----------------------------------------------
+## The band a campaign opens with is one body, and this walk is an escort walk: a
+## squad is the thing it proves is not lost. Two names are sworn the way the game
+## swears one - the roster takes them, the shared pool dresses them through the
+## roster call every gear change uses, and the world's own field sync stands their
+## bodies beside the party (the field holds `MAX_DEPLOYMENT_CAP`, so both take it).
+func swear_escort() -> Array:
+	var ids: Array = []
+	for merc_name in ["Cass", "Bram"]:
+		var merc_id: int = warband.add_mercenary(merc_name)
+		ids.append(merc_id)
+	# Naked bodies cannot fight back, and the road refills behind the walk: the
+	# pair carry the pool's spare blade and a mail set each, through the roster
+	# call every gear change uses. The walk is about the ground, not about the
+	# escort losing a fight to a pack that came back while it walked past.
+	var kit := {"main": "club_makeshift", "chest": "armor_mail_chest",
+		"head": "armor_mail_head", "hands": "armor_mail_hands",
+		"legs": "armor_mail_legs", "feet": "armor_mail_feet"}
+	for slot_id in kit:
+		warband.stash.add(str(kit[slot_id]), ids.size())
+	for merc_id in ids:
+		if int(merc_id) <= 0:
+			continue
+		for slot_id in kit:
+			warband.equip_merc(int(merc_id), str(slot_id), str(kit[slot_id]))
+	var waited := 0.0
+	while waited < 4.0 and game.bodies.size() < 1 + ids.size():
+		await physics_frame
+		waited += 0.016
+	for merc_id in ids:
+		if int(merc_id) > 0:
+			game.controller.refresh_gear(int(merc_id))
+	check(game.bodies.size() == 1 + ids.size(),
+		"the field seats every name the band swears (%d bodies)" % game.bodies.size())
+	check(game.squad_ids.size() == game.bodies.size(),
+		"and each of them is on the squad's book (%d of %d)"
+			% [game.squad_ids.size(), game.bodies.size()])
+	return ids
 
-func check_camp_in_the_woods() -> void:
-	var wood: Dictionary = game.camp.clearing
-	check(int(wood.get("trees", 0)) >= 150, "the camp sits inside a real wood (%d trees)"
+
+# --- 2. the wood at the far end of the road --------------------------------
+
+func check_wood() -> void:
+	var wood: Dictionary = game.wood.clearing
+	check(int(wood.get("trees", 0)) >= 150, "the wood sits inside a real wood (%d trees)"
 		% int(wood.get("trees", 0)))
 	check(int(wood.get("bushes", 0)) >= 200, "undergrowth fills it (%d bushes)"
 		% int(wood.get("bushes", 0)))
@@ -392,15 +369,15 @@ func check_camp_in_the_woods() -> void:
 		"the boundary is a ragged stake line, not a fence (%d)" % int(wood.get("stakes", 0)))
 	check(int(wood.get("wall", 0)) >= 5, "the wood behind the trunks is solid (%d wall runs)"
 		% int(wood.get("wall", 0)))
-	check(int(wood.get("huts", 0)) >= 2, "shelters stand round the cages (%d huts)"
+	check(int(wood.get("huts", 0)) >= 2, "shelters stand round the pocket (%d huts)"
 		% int(wood.get("huts", 0)))
-	# A camp, not a parade ground: the walkable pocket shrank, and the wood runs far
-	# past it in every direction.
+	# A pocket cut into the wood, not a parade ground: the walkable ground is a
+	# yard, and the wood runs far past it in every direction.
 	var clear: Vector2 = game.clearing_size()
 	check(clear.x >= 30.0 and clear.y >= 40.0,
-		"the pocket still holds the cages, a fire and a squad (%.0f x %.0f m)" % [clear.x, clear.y])
+		"the pocket holds a fire, a squad and the demon's patch (%.0f x %.0f m)" % [clear.x, clear.y])
 	check(clear.x <= 50.0 and clear.y <= 60.0,
-		"and it is a camp, not a field (%.0f x %.0f m)" % [clear.x, clear.y])
+		"and it is a pocket, not a field (%.0f x %.0f m)" % [clear.x, clear.y])
 	var band: Rect2 = wood.get("band", Rect2())
 	check(band.size.x >= clear.x + 300.0 and band.size.y >= clear.y + 300.0,
 		"the wood runs at least 150 m out on every side (%.0f x %.0f m)"
@@ -408,69 +385,64 @@ func check_camp_in_the_woods() -> void:
 	# Trees stand inside the pocket's own footprint, which is what stops it reading
 	# as a mown field with a treeline painted behind it.
 	var inside := int(wood.get("inside_trees", 0))
-	check(inside >= 6, "trees stand inside the camp itself (%d trunks)" % inside)
-	check(game.camp.get_node_or_null("Clearing/Wood") != null,
-		"the camp's wood is one batched group")
-	# The campsite: shelters, a fire and the junk, all close in around the cages,
+	check(inside >= 6, "trees stand inside the wood itself (%d trunks)" % inside)
+	check(game.wood.get_node_or_null("Clearing/Wood") != null,
+		"the wood's own trees are one batched group")
+	# The campsite: shelters, a fire and the junk, all close in around the pocket,
 	# and grass round the trodden yard.
 	for label in ["Huts", "CampFire", "CampJunk", "Grass", "StakeRing", "WoodLitter"]:
-		check(game.camp.get_node_or_null("Clearing/%s" % label) != null,
-			"the camp builds its %s" % label)
+		check(game.wood.get_node_or_null("Clearing/%s" % label) != null,
+			"the wood builds its %s" % label)
+	check(game.wood.get_node_or_null("CampDressing") != null, "and its dressing")
 	print("WORLD_CLEARING size=%.0fx%.0f band=%.0fx%.0f inside=%d trees=%d bushes=%d stakes=%d wall=%d"
 		% [clear.x, clear.y, band.size.x, band.size.y, inside,
 			int(wood.get("trees", 0)), int(wood.get("bushes", 0)),
 			int(wood.get("stakes", 0)), int(wood.get("wall", 0))])
 
-	# Four cages, on their own anchors, inside the clearing.
-	for index in game.camp.CAGE_POSTS.size():
-		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		var cage := game.camp.get_node_or_null("Cage%d" % (index + 1)) as Node3D
-		check(cage != null, "cage %d stands in the camp" % (index + 1))
-		if cage == null:
-			continue
-		check(flat_range(cage.position, post) < 0.01,
-			"cage %d stands on its own anchor" % (index + 1))
-		check(absf(post.x) <= clear.x * 0.5
-				and post.z >= game.camp.YARD_FRONT and post.z <= game.camp.YARD_BACK,
-			"cage %d's anchor is inside the pocket" % (index + 1))
-	check(game.camp.get_node_or_null("ColdAltar") != null, "the cold altar stands behind the cages")
-	check(game.camp.get_node_or_null("CampDressing") != null, "the camp's dressing is built")
-	# Torches in the clearing and along the trail: one night, one fire vocabulary.
+	# The cages are gone with the opening they belonged to: not one post, not one
+	# cage node, and no door for the dressing to bolt iron to.
+	check((wood.get("cages", []) as Array).is_empty(),
+		"the pocket is built with zero cages (%d)" % (wood.get("cages", []) as Array).size())
+	check(game.wood.get_node_or_null("Cage1") == null, "and no cage node stands in it")
+	var hardware = game.wood.get_node_or_null("CampDressing/CageHardware")
+	check(hardware != null and hardware.get_child_count() == 0,
+		"the dressing bolts no iron to a cage (%d)"
+		% (0 if hardware == null else hardware.get_child_count()))
+	# Torches in the pocket and along the road: one night, one fire vocabulary.
 	check((game.trail.forest.get("torches", []) as Array).size() >= 40,
 		"the trail carries its torch line (%d)" % (game.trail.forest.get("torches", []) as Array).size())
-	# The way out is a gap in the trees, and the road is a long run of ordinary wood
-	# past it - the distance is the camp's own number, so the two cannot drift.
+	# The way in is a gap in the trees, and the road is a long run of ordinary wood
+	# past it - the distance is the wood's own number, so the two cannot drift.
 	var lane: PackedVector3Array = game.trail.forest["lane"]
-	var road_gap := flat_range(lane[0], game.camp.GATE_POINT)
+	var road_gap := flat_range(lane[0], game.wood.GATE_POINT)
 	check(road_gap >= 150.0 and road_gap <= 210.0,
-		"the road stands %.0f m of wood off the camp's mouth" % road_gap)
-	check(absf(road_gap - game.camp.CAMP_TO_ROAD_METRES) < 1.0,
-		"which is the camp's own CAMP_TO_ROAD_METRES (%.0f)" % game.camp.CAMP_TO_ROAD_METRES)
-	check(road_gap >= 150.0, "nothing of the road is in sight of the cages")
-	var corridor: Array = game.camp.clearing.get("corridor", [])
+		"the road stands %.0f m of wood off the wood's mouth" % road_gap)
+	check(absf(road_gap - game.wood.CAMP_TO_ROAD_METRES) < 1.0,
+		"which is the wood's own CAMP_TO_ROAD_METRES (%.0f)" % game.wood.CAMP_TO_ROAD_METRES)
+	var corridor: Array = game.wood.clearing.get("corridor", [])
 	check(corridor.size() >= 8, "the way out is a corridor cut through the trees (%d gaps)"
 		% corridor.size())
-	check(int(game.camp.MOUTH_HALF_WIDTH) * 2 >= 8,
-		"the gap is walkable (%d m)" % (int(game.camp.MOUTH_HALF_WIDTH) * 2))
-	# The warband's enemies are the wood's mobs: the camp's watchers are on the
-	# field before the first latch, the road's cultists are down the lane, the
-	# briar wolves hold the way between them and the quartermaster's warcamps are
-	# in the deep wood - one list for all four.
-	var camp_guards: int = game.camp.guards.size()
-	check(camp_guards == 2, "two watchers hold the camp (%d)" % camp_guards)
+	check(int(game.wood.MOUTH_HALF_WIDTH) * 2 >= 8,
+		"the gap is walkable (%d m)" % (int(game.wood.MOUTH_HALF_WIDTH) * 2))
+	# The warband's enemies are the wood's mobs: the master and his pair stand in
+	# the pocket, the road's cultists are down the lane, the briar wolves hold the
+	# way between them and the quartermaster's warcamps are in the deep wood - one
+	# list for all four.
+	var wood_guards: int = game.wood.guards.size()
+	check(wood_guards == 1 + WoodScript.GUARD_POSTS.size(),
+		"the master and his two keepers hold the wood (%d)" % wood_guards)
 	var warcamps: int = game.watcher_warren.total() if game.watcher_warren != null else 0
-	check(game.guards.size() == camp_guards + 20 + TrailScript.ARCHER_COUNT + wolves + warcamps,
+	check(game.guards.size() == wood_guards + 20 + TrailScript.ARCHER_COUNT + wolves + warcamps,
 		"twenty cultists, %d wolves and %d warcamp wardens join them on the same hostile"
 			% [wolves, warcamps] + " list (%d in all)" % game.guards.size())
-	for watcher in game.camp.guards:
-		check(is_equal_approx(float(watcher.max_health), float(game.camp.PAIR_LESSON_HEALTH)),
-			"the pair Corvin fights carry the lesson's thin pool (%s)" % str(watcher.max_health))
-		check(watcher.global_position.y > -1.0, "the watcher stands on the ground")
+	for guard in game.wood.guards:
+		check(game.guards.has(guard), "a wood body is on the world's hostile list")
+		check(guard.global_position.y > -1.0, "and stands on the ground")
 
 
 # --- 2b. the ground -------------------------------------------------------
 
-## One heightfield under the whole strip: the camp pocket and the town square
+## One heightfield under the whole strip: the wood's pocket and the town square
 ## padded flat into it, and the walk between them rolling over real slopes. The
 ## world used to lie on a single flat box; this is what replaced it.
 func check_ground() -> void:
@@ -480,19 +452,15 @@ func check_ground() -> void:
 	check(int(readout["terrain_tris"]) >= 20000,
 		"the ground is one heightfield (%d triangles)" % int(readout["terrain_tris"]))
 	check(high - low >= 2.0, "the wood rises and falls (%.1f .. %.1f m)" % [low, high])
-	# The cages are scattered through the pocket, so each one stands on the ground
-	# at its own anchor: a cage that floats or sinks is a body in the wood, not a
-	# prisoner in a cage.
-	for index in game.camp.CAGE_POSTS.size():
-		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		var cage := game.camp.get_node_or_null("Cage%d" % (index + 1)) as Node3D
-		check(cage != null, "cage %d stands in the camp" % (index + 1))
-		if cage == null:
+	# The wood's own bodies stand on the ground they were posted on: a demon that
+	# floats or sinks is a body in the wood, not a fight waiting for a party.
+	for guard in game.wood.guards:
+		if not is_instance_valid(guard):
 			continue
-		var ground := TerrainScript.height_at(post.x, post.z)
-		check(absf(cage.global_position.y - ground) < 0.05,
-			"cage %d sits on the ground it was planted on (%.3f vs %.3f)"
-				% [index + 1, cage.global_position.y, ground])
+		var ground := TerrainScript.height_at(guard.global_position.x, guard.global_position.z)
+		check(absf(guard.global_position.y - ground) < 0.05,
+			"the %s stands on the ground it holds (%.3f vs %.3f)"
+				% [String(guard.name), guard.global_position.y, ground])
 	# ... and so does the square.
 	var centre: Vector3 = game.town.global_position
 	var corner: Variant = null
@@ -523,20 +491,22 @@ func check_ground() -> void:
 ## earth where feet go, untouched wood off the route, and an edge softer than one of
 ## the heightfield's 7 m cells. The old dirt rode the mesh's vertex alpha, which
 ## cannot draw anything narrower than a cell - every trodden patch came out as a
-## polygon of triangles - and the camp's own dirt was a set of hard discs on the
+## polygon of triangles - and the wood's own yard was a set of hard discs on the
 ## grass. (Where the grass stands is not read here: a headless run keeps no
 ## MultiMesh instance data.)
 func check_worn_ground() -> void:
-	for index in game.camp.CAGE_POSTS.size():
-		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		var worn := TerrainScript.wear_at(post.x, post.z)
-		check(worn >= 0.6, "the ground at cage %d is trodden earth (%.2f)" % [index + 1, worn])
+	# The demon's patch is the most walked ground in the pocket: the fight happens
+	# there and the ground says so.
+	for point in [game.wood.BOSS_POINT, WoodScript.GUARD_POSTS[0], WoodScript.GUARD_POSTS[1]]:
+		var worn := TerrainScript.wear_at((point as Vector3).x, (point as Vector3).z)
+		check(worn >= 0.6, "the ground at (%.0f, %.0f) is trodden earth (%.2f)"
+			% [(point as Vector3).x, (point as Vector3).z, worn])
 	var path = game.trail.forest["path"]
 	var thinnest := 1.0
 	var widest := 0.0
 	var wild := 0.0
 	# Off the swamp (0.42-0.62 of the way, where the bowl is mud beside the lane)
-	# and off the camp's corridor, which meets the lane at its start.
+	# and off the wood's corridor, which meets the lane at its start.
 	for fraction in [0.12, 0.2, 0.28, 0.36, 0.7, 0.78, 0.86, 0.94]:
 		var frame: Dictionary = path.sample(path.total * float(fraction))
 		var at: Vector3 = frame["position"]
@@ -569,296 +539,103 @@ func check_worn_ground() -> void:
 	print("WORLD_WORN lane_core=%.2f edge=%.1fm wild=%.2f" % [thinnest, widest, wild])
 
 
-# --- 3. the lesson ---------------------------------------------------------
+# --- 3. the wood, the Horned Thing, and the road ------------------------
 
-func check_lesson() -> void:
-	dismiss_card("the opening")
-	check(game.camp.sequencer.state() == SequencerScript.State.CAGED,
-		"the opening wakes the player in a cage")
-	check(game.camp.sequencer.objective() == "Take the shiv through the bars",
-		"with one thing to do (%s)" % game.camp.sequencer.objective())
-	check(game.camp.cages_open_count() == 0, "the cages are all shut")
-	check(game.camp.caged_ids.size() == 5, "five bodies are held (%d)" % game.camp.caged_ids.size())
-	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES
-			+ game.camp.START_TORCH_POSTS.size(),
-		"three cultist weapons, the camp's shiv, five dressings and two torches lie on the dirt (%d)"
-		% game.camp.pickups().size())
-	check(game.tips != null and game.tips.has_shown(game.camp.TIP_BLADE),
-		"and the first key was named as a tip over the crosshair")
-
-	# A caged body cannot leave its cage: the clamp is what holds it, not a script.
-	var merc_id: int = game.controller.merc_for_peer(1)
-	var actor = game.controller.body_of(merc_id)
-	var anchor: Vector3 = game.camp.cage_anchor_for(merc_id)
-	actor.global_position = anchor + Vector3(6.0, 0.0, 0.0)
-	await physics_frame
-	await physics_frame
-	check(flat_range(actor.global_position, anchor) <= 1.2,
-		"a caged body is snapped back inside its cage (%.2f m)"
-		% flat_range(actor.global_position, anchor))
-
-	# Every out-of-order beat is refused on the live opening.
-	check(not game.camp.sequencer.note_cage_opened(9), "a cage that does not exist is never booked")
-	check(not game.camp.sequencer.note_cage_opened(-1), "nor a negative one")
-	check(not game.camp.sequencer.note_looked_around(),
-		"the bearings beat cannot start before the cage is open")
-	check(not game.camp.sequencer.note_guard_killed(), "a guard death before the fight is not progress")
-	check(not game.camp.sequencer.note_weapon_looted(), "loot before the cage is open is not progress")
-	check(not game.camp.sequencer.note_escaped(), "and the escape cannot happen from a cage")
-	check(game.camp.sequencer.cages_opened() == 0, "nothing was booked on the live opening")
-
-	# The cage is worked with the blade on the dirt outside its door: a bare-handed
-	# press opens nothing, `K` takes the shiv through the bars, and the same blade
-	# cuts the latch.
-	check(not game.camp.holds_blade(actor), "the player wakes with empty hands")
-	check(game.camp.latch_target(actor) == game.camp.OWN_CAGE,
-		"and its own latch is the one in reach (%d)" % game.camp.latch_target(actor))
-	game._try_interact()
-	check(game.camp.cages_open_count() == 0, "a bare-handed G opens nothing (%d)"
-		% game.camp.cages_open_count())
-	game._try_loot()
-	check(game.camp.holds_blade(actor), "K takes the shiv through the bars")
-	check(game.camp.is_cage_clamped(merc_id), "and the body never left its cage for it")
-	game._try_interact()
-	check(game.camp.cages_open_count() == 1, "and the shiv opens the player's own cage (%d)"
-		% game.camp.cages_open_count())
-	check(game.camp.sequencer.state() == SequencerScript.State.LOOSE,
-		"the opening moves out into the camp (%s)" % game.camp.sequencer.state_name())
-	check(not game.camp.is_cage_clamped(merc_id), "the clamp is gone from the player's body")
-	check(game.tips.has_shown(game.camp.TIP_CAGE), "the latch was named")
-	check(game.tips.has_shown(game.camp.TIP_WALK), "the walk was named")
-
-	# Bearings: the beat ends on the freed body stepping away from its own cage.
-	actor.global_position = game.camp.CAGE_POSTS[game.camp.OWN_CAGE] + Vector3(0.0, 0.2, -7.0)
-	# The beat is polled in `_process`, and two `physics_frame` awaits can both
-	# resume inside one physics phase - so wait on the process frame the radius is
-	# crossed, the way the cage's own bearings check does.
-	var bearing_frames := 0
-	while game.camp.sequencer.state() == SequencerScript.State.LOOSE and bearing_frames < 60:
-		await process_frame
-		bearing_frames += 1
-	check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
-		"stepping out carries it to the objective (%s)" % game.camp.sequencer.state_name())
-	check(game.camp.duel.step() == DuelScript.Step.FIGHT,
-		"and the first fight's lesson starts on the armed body (%s)" % game.camp.duel.step_name())
-	var opening_prompt: String = game.camp.prompt_line(actor)
-	check(opening_prompt.contains("warband 1/5"),
-		"the prompt carries the objective's count (%s)" % opening_prompt)
-
-	# The shiv was taken through the bars, so the fight is already on: the cuts
-	# were named when the armed body stepped out, and the pair wake on it.
-	check(game.camp.holds_blade(actor), "the ironwood shiv is in the player's hands")
-	check(game.tips.has_shown(game.camp.TIP_SWING), "the cuts were named")
-	check(not paused, "none of it held the game still")
-	var pair_woke := await await_condition(
-		func() -> bool:
-			for watcher in game.camp.guards:
-				if is_instance_valid(watcher) and bool(watcher.hunting()):
-					return true
-			return false, 8.0, "the pair waking")
-	check(pair_woke, "the pair wake on the body that took the blade")
-	dismiss_card("the pair waking")
-	# This regression is about the world around the fight: the melee itself is
-	# `cage_escape_regression`'s, and the pair fall through the same damage path a
-	# landed swing ends in.
-	for watcher in game.camp.guards.duplicate():
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(1000.0, 0)
-	await physics_frame
-	check(game.camp.watchers_down() == 2, "the pair are down (%d)" % game.camp.watchers_down())
-	check(game.camp.sequencer.guards_down() == 2,
-		"both kills count on the tally (%d)" % game.camp.sequencer.guards_down())
-	check(game.camp.cages_open_count() == 1, "the pair falling cuts nothing by itself")
-
-	# The player walks to each shut cage and cuts one latch per press. Only the
-	# last one puts the warband on its feet.
-	var shut: Array[int] = []
-	for index in game.camp.CAGE_POSTS.size():
-		if index != game.camp.OWN_CAGE:
-			shut.append(index)
-	for step in shut.size():
-		var index: int = shut[step]
-		var post: Vector3 = game.camp.CAGE_POSTS[index]
-		actor.global_position = Vector3(post.x, 0.2, post.z + 2.6)
-		await physics_frame
-		game._try_interact()
-		check(game.camp.cages_open_count() == step + 2,
-			"latch %d is cut one cage at a time (%d)" % [index + 1, game.camp.cages_open_count()])
-		if step < shut.size() - 1:
-			check(game.camp.sequencer.state() == SequencerScript.State.FREEING,
-				"and the warband is not loose at %d of 5 (%s)"
-				% [step + 2, game.camp.sequencer.state_name()])
-	check(game.camp.cages_open(), "every latch is cut")
-	check(state_count(SequencerScript.State.WARBAND) == 1, "WARBAND is entered exactly once")
-	check(game.camp.sequencer.state() == SequencerScript.State.WARBAND,
-		"the last latch puts five bodies on their feet (%s)" % game.camp.sequencer.state_name())
-	for index in game.camp.caged_ids.size():
-		check(not game.camp.is_cage_clamped(int(game.camp.caged_ids[index])),
-			"cage %d stopped clamping its prisoner" % (index + 1))
-	check(game.camp.sequencer.objective() == "Run to the town",
-		"the objective turns over to the road (%s)" % game.camp.sequencer.objective())
-	check(game.tips.has_shown(game.camp.TIP_RUN), "and the run was named")
-	check(game.camp._run_marker != null and game.camp._run_marker.visible,
-		"the gold arrow stands over the gap in the trees")
-	check(game.squad.following, "the freed warband follows the soul round the camp")
-
-	# The freed squad arms itself off the ground - silently, with no loot step.
-	var armed := await await_condition(
-		func() -> bool: return game.camp.allies_armed() >= 1, 16.0, "the squad arming")
-	check(armed, "a freed ally picks a weapon off the ground and holds it")
-	var fallen_pair := 0
-	for watcher in game.camp.guards:
-		if is_instance_valid(watcher) and not bool(watcher.get("alive")):
-			fallen_pair += 1
-	check(game.camp.pickups().size() == 3 + 1 + game.camp.STARTING_BANDAGES
-			+ game.camp.START_TORCH_POSTS.size() + fallen_pair,
-		"three drops, the shiv, the altar's five dressings, two torches and one blade per fallen watcher lie where they were (%d for %d fallen)"
-		% [game.camp.pickups().size(), fallen_pair])
-
-
-# --- 3b. the leaving is the ambush ---------------------------------------
-
-## ESCAPING is not a body count: it is the soul walking out of the clearing. The
-## ground from the cages to the mouth is walked here, timed, and the six come out
-## of the trees on the frame the mouth is crossed.
-func check_leaving() -> void:
-	# The cage bars are solid now: give the cut latches their 1.2 s lift before
-	# driving a body through a door that is still coming up.
-	await create_timer(1.4).timeout
-	dismiss_card("the latches")
-	var local = game.controller.active_body(1)
-	check(local != null, "the soul still has a body for the walk out")
-	# The cage bars are solid, so the driven body has to walk round the cage line
-	# instead of straight through it. A player sees the bars and steps around; the
-	# test follows the clear spine through the gap beside the soul's cage.
-	var side_x := -5.1 if local.global_position.x < 0.0 else 5.1
-	var route: Array[Vector3] = [
-		Vector3(side_x, 0.0, 9.0),
-		Vector3(side_x, 0.0, 3.2),
-		Vector3(0.0, 0.0, 1.0),
-		game.camp.GATE_POINT,
-	]
-	var route_index := 0
-	# The campaign's walk starts at the cage line the soul woke on. The ground
-	# between there and the mouth is covered by the opening itself - Corvin's run
-	# at the pair, then the walk out - so it is banked here and the lane's metres
-	# are added on top: one walk from the cages to the square, not two halves.
-	opening_metres = flat_range(local.global_position,
-		game.camp.CAGE_POSTS[game.camp.OWN_CAGE])
-	check(game.camp.guards.size() == 2,
-		"the camp holds no more watchers than the pair (%d)" % game.camp.guards.size())
-	check(game.camp.sequencer.state() == SequencerScript.State.WARBAND,
-		"the camp is held, not escaped (%s)" % game.camp.sequencer.state_name())
-	game.controller.input_enabled = false
-	await physics_frame
-	var ticks := 0
-	var last: Vector3 = local.global_position
-	var mouth_started := Time.get_ticks_msec()
-	Engine.physics_ticks_per_second = 180
-	Engine.max_physics_steps_per_frame = 32
-	Engine.time_scale = WALK_SCALE
-	var mouth_stall := 0
-	while ticks < 3000:
-		if game.camp.sequencer.state() == SequencerScript.State.ESCAPING:
-			break
-		var target: Vector3 = route[mini(route_index, route.size() - 1)]
-		var to: Vector3 = target - local.global_position
-		to.y = 0.0
-		if to.length() <= 0.9:
-			if route_index >= route.size() - 1:
-				break
-			route_index += 1
+## What stands at the road's far end, and what the road still carries: the wood is
+## built whether or not the party ever walks that far, the Hollow's master stands on
+## his own patch in the open air, and the road's own caged line and warcamps - the
+## quartermaster's orders' ground - are built on it.
+func check_wood_and_road() -> void:
+	dismiss_card("the wood")
+	check(game.wood.boss_point().is_equal_approx(WoodScript.BOSS_POINT),
+		"the wood names the demon's patch (%s)" % str(game.wood.boss_point()))
+	var master = game.wood.master
+	check(master != null and is_instance_valid(master), "the Horned Thing stands in the wood")
+	if master == null or not is_instance_valid(master):
+		return
+	check(flat_range(master.global_position, game.wood.boss_point()) < 0.1,
+		"on the patch it is named for (%.2f m)" % flat_range(master.global_position,
+			game.wood.boss_point()))
+	check(game.wood.master_alive(), "and he is on his feet at boot")
+	check(bool(master.get("boss")), "he is the Hollow's master, not a keeper")
+	check(game.guards.has(master), "he is on the world's one hostile list")
+	check(float(master.max_health) > 240.0,
+		"and carries more than a keeper's pool (%d)" % int(master.max_health))
+	# His pair hold their own posts, one either side of him.
+	var keepers := 0
+	for index in WoodScript.GUARD_POSTS.size():
+		var keeper = game.wood.get_node_or_null("WoodKeeper%d" % (index + 1))
+		check(keeper != null, "keeper %d stands with him" % (index + 1))
+		if keeper == null:
 			continue
-		var direction := to.normalized()
-		local.accept_network_input(Vector2(direction.x, direction.z), true)
-		await physics_frame
-		ticks += 1
-		var step := flat_range(last, local.global_position)
-		opening_metres += step
-		last = local.global_position
-		# A body that cannot move is a broken world, not a long walk: fail fast.
-		if step < 0.01:
-			mouth_stall += 1
-			if mouth_stall > 240:
-				print("WORLD_STALL mouth walk stuck at %s" % str(local.global_position))
-				break
-		else:
-			mouth_stall = 0
-	Engine.time_scale = 1.0
-	Engine.physics_ticks_per_second = 60
-	game.controller.input_enabled = true
-	var real_seconds := float(Time.get_ticks_msec() - mouth_started) / 1000.0
-	var game_seconds := float(ticks) / 60.0
-	check(game.camp.sequencer.state() == SequencerScript.State.ESCAPING,
-		"walking out through the gap in the trees is the escape (%s)" % game.camp.sequencer.state_name())
-	check(state_count(SequencerScript.State.ESCAPING) == 1, "ESCAPING is entered exactly once")
-	check(game.camp.sequencer.guards_down() == 2,
-		"the escape is not a kill quota: only Corvin's pair are down (%d)"
-		% game.camp.sequencer.guards_down())
-	check(game.squad.following, "the squad turns escort the moment the trees answer")
-	print("WORLD_OPENING metres=%.0f game_seconds=%.1f real_seconds=%.1f"
-		% [opening_metres, game_seconds, real_seconds])
+		keepers += 1
+		var post: Vector3 = WoodScript.GUARD_POSTS[index]
+		check(flat_range((keeper as Node3D).global_position, post) < 0.1,
+			"keeper %d holds its post (%.2f m)" % [index + 1,
+				flat_range((keeper as Node3D).global_position, post)])
+		check(bool(keeper.get("alive")), "keeper %d is alive" % (index + 1))
+	check(keepers == WoodScript.GUARD_POSTS.size(),
+		"the wood fields his whole guard (%d)" % keepers)
+	# Nothing points at him: he is optional, and no order, no counter and no door
+	# sends a party to the pocket. The wood simply stands there.
+	check(game.trail.cultists_alive() == game.trail.guards.size(),
+		"the road is at its own full strength (%d)" % game.trail.cultists_alive())
 
-	# Six armed watchers out of the trees on that frame.
-	var expected_guards: int = 2 + CampScript.AMBUSH_COUNT
-	check(game.camp.guards.size() == expected_guards,
-		"the ambush comes out of the trees (%d camp watchers of %d)" % [game.camp.guards.size(), expected_guards])
-	await create_timer(0.6).timeout
-	dismiss_card("the ambush")
-	var armed_reinforcements := 0
-	var visible_blades := 0
-	for index in range(2, game.camp.guards.size()):
-		var watcher = game.camp.guards[index]
-		check(bool(watcher.get("alive")), "reinforcement %d is on its feet" % index)
-		if str(watcher.weapon_item) in ["club_makeshift", "dagger_ironwood",
-				"branch_heavy", "bow_twig"]:
-			armed_reinforcements += 1
-		if watcher.has_weapon_visual():
-			visible_blades += 1
-		check(watcher.global_position.y > -1.0,
-			"reinforcement %d did not fall out of the world (y=%.2f)"
-			% [index, watcher.global_position.y])
-	check(armed_reinforcements == CampScript.AMBUSH_COUNT,
-		"every reinforcement carries a weapon (%d)" % armed_reinforcements)
-	check(visible_blades == CampScript.AMBUSH_COUNT,
-		"and the blade is in its hand (%d)" % visible_blades)
-	# The camp's pair plus the ambush, plus the road's twenty and the wolves on the
-	# way out, plus the three warcamps the quartermaster's bounty points at: one
-	# list for the whole wood, so a watcher in the camp, a wolf on the corridor, a
-	# cultist on the lane and a warden in a warcamp are the same system.
-	var warren: int = game.watcher_warren.total() if game.watcher_warren != null else 0
-	var expected_hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves + warren
-	check(game.guards.size() == expected_hostiles,
-		"the world's hostile list holds all %d (%d)" % [expected_hostiles, game.guards.size()])
-
+	# The road's own caged line: the table's soldiers strung down the lane - one
+	# of them, the second body the band can reach, which is the whole of the
+	# road's recruitment.
+	check(game.soldier_cages != null, "the road's caged line is built")
+	if game.soldier_cages != null:
+		check(game.soldier_cages.remaining() == CagesScript.CAGE_FRACTIONS.size(),
+			"the table's soldiers are held down the road (%d of %d)"
+			% [game.soldier_cages.remaining(), CagesScript.CAGE_FRACTIONS.size()])
+		var lane: PackedVector3Array = game.trail.forest["lane"]
+		var lane_start: Vector3 = lane[0]
+		var lane_end: Vector3 = lane[lane.size() - 1]
+		for point in game.soldier_cages.marker_points():
+			check((point as Vector3).z < lane_start.z and (point as Vector3).z > lane_end.z - 40.0,
+				"a cage stands on the lane (%s)" % str(point))
+	# ... and the warcamps of wardens in the deep wood.
+	check(game.watcher_warren != null, "the watcher warren is built")
+	if game.watcher_warren != null:
+		check((game.watcher_warren.camps() as Array).size() == WatcherWarren.CAMPS.size(),
+			"every warcamp in the table stands off the lane (%d)"
+			% (game.watcher_warren.camps() as Array).size())
+		check(game.watcher_warren.total() > 0,
+			"and every warden is on the list (%d)" % game.watcher_warren.total())
+		check(game.watcher_warren.living() == game.watcher_warren.total(),
+			"all of them alive at boot (%d)" % game.watcher_warren.living())
+	print("WORLD_WOOD boss=%s health=%d keepers=%d hostiles=%d"
+		% [str(master.get("display")), int(master.max_health), keepers, game.guards.size()])
 
 
 # --- 4. walk the whole world ----------------------------------------------
 
 ## The proof that there is no travel scene any more: one body, driven with real
-## movement, from where the opening leaves it - past the gap in the trees, with the
-## ambush the whole opening warned about on its heels - down the
-## trail and into the town square, with the scene, the flow and the walkable floor
-## watched the whole way. The ground the opening itself walks is added in, so the
-## distance the docs quote is the campaign's, not this half of it.
+## movement, north out of the town square, up the whole road and through the gap in
+## the trees to the wood's mouth - with the scene, the flow and the walkable floor
+## watched the whole way. The distance the docs quote is this walk, driven end to
+## end by the same body.
 func check_walk() -> void:
 	var lane: PackedVector3Array = game.trail.forest["lane"]
 	var path = game.trail.forest["path"]
 	var town_gate: Vector3 = game.trail.town_gate()
 	var town_at: Vector3 = game.town.global_position
+	var wood_mouth: Vector3 = game.wood.GATE_POINT
 	var half := float(game.trail.forest["width"]) * 0.5
 	var body = game.controller.active_body(1)
 	check(body != null, "the soul still has a body for the walk")
-	# Clear the road first: the walk proves the ground, not the fight. The camp's
-	# ambush is the opening's own fight and is cleared with it, and the band on the
-	# way out is cleared with them: a live band would decide the run instead of
+	if body == null:
+		return
+	# Clear the road first: the walk proves the ground, not the fight. A live band
+	# of cultists, wolves or the wood's own pair would decide the run instead of
 	# measuring it.
 	for watcher in game.trail.guards:
 		if is_instance_valid(watcher) and bool(watcher.get("alive")):
 			watcher.take_damage(4000.0, 0)
-	for watcher in game.camp.guards:
-		if is_instance_valid(watcher) and bool(watcher.get("alive")):
-			watcher.take_damage(4000.0, 0)
+	for guard in game.wood.guards:
+		if is_instance_valid(guard) and bool(guard.get("alive")):
+			guard.take_damage(4000.0, 0)
 	if game.wilderness != null:
 		for wolf in game.wilderness.wolves():
 			if is_instance_valid(wolf) and bool(wolf.get("alive")):
@@ -867,35 +644,37 @@ func check_walk() -> void:
 	# A one-time lesson may have opened after the field went quiet (the bandage
 	# card is the usual one); a paused tree would read as a body that cannot walk.
 	dismiss_card("the wound card")
-	check(game.trail.cultists_alive() == 0, "the trail can be cleared (%d left)"
+	check(game.trail.cultists_alive() == 0, "the road can be cleared (%d left)"
 		% game.trail.cultists_alive())
 	check(game.loot.corpse_ids().size() >= game.trail.guards.size(),
 		"every cultist is a lootable corpse (%d registered for %d bodies)"
 		% [game.loot.corpse_ids().size(), game.trail.guards.size()])
 
-	# No teleport: the body is where the ambush left it, and it walks on from there.
-	check(flat_range(body.global_position, game.camp.GATE_POINT) <= game.camp.ESCAPE_RADIUS + 1.0,
-		"the walk begins at the mouth the ambush opened (%.1f m)"
-		% flat_range(body.global_position, game.camp.GATE_POINT))
+	# No teleport: the body is where the town left it, and it walks out from there.
+	check(game.town.in_square(body), "the walk begins on the square's own ground")
 	game.controller.input_enabled = false
 	await physics_frame
 
 	# Follow the road itself instead of the polyline's own corners: a body steered
 	# at a 45 m waypoint cuts the inside of every bend, and on a lane this long the
-	# cut reaches the tree row. Sampling the path every few metres keeps the body on the
-	# line the torches mark, which is the line the lateral assertion is about.
-	var waypoints: Array[Vector3] = []
-	var along := 6.0
-	while along < float(path.total):
+	# cut reaches the tree row. Sampling the path every few metres keeps the body on
+	# the line the torches mark, which is the line the lateral assertion is about.
+	# The walk runs the lane backwards - town first - and then up the corridor the
+	# wood cut through its own trees to the mouth.
+	var waypoints: Array[Vector3] = [town_gate + Vector3(0.0, 0.2, 0.0)]
+	var along := float(path.total) - 6.0
+	while along > 0.0:
 		var sample: Dictionary = path.sample(along)
 		waypoints.append((sample["position"] as Vector3) + Vector3(0.0, 0.2, 0.0))
-		along += 6.0
-	waypoints.append(town_gate + Vector3(0.0, 0.2, 0.0))
-	waypoints.append(Vector3(town_at.x, 0.2, town_at.z))
+		along -= 6.0
+	var corridor: PackedVector3Array = ClearingScript.corridor_line(wood_mouth,
+		game.wood.CAMP_TO_ROAD_METRES)
+	for index in range(corridor.size() - 1, -1, -1):
+		waypoints.append(corridor[index] + Vector3(0.0, 0.2, 0.0))
+	waypoints.append(wood_mouth + Vector3(0.0, 0.2, 0.0))
 
 	var transitions_before: int = flow.transitions
 	var scene_before = current_scene
-	var previous := flat_range(body.global_position, town_at)
 	var travelled := 0.0
 	var last: Vector3 = body.global_position
 	var off_ground := 0
@@ -929,8 +708,9 @@ func check_walk() -> void:
 		else:
 			walk_stall = 0
 		# Lateral drift is a claim about the lane, so it is measured on the lane:
-		# the clearing and the square are wide open by design.
-		if body.global_position.z < lane[0].z - 1.0 and body.global_position.z > lane[lane.size() - 1].z + 1.0:
+		# the wood's corridor and the square are wide open by design.
+		if body.global_position.z > lane[lane.size() - 1].z + 1.0 \
+				and body.global_position.z < lane[0].z - 1.0:
 			var lateral: float = path.distance_to(Vector2(body.global_position.x, body.global_position.z))
 			worst_lateral = maxf(worst_lateral, lateral)
 		if not _walkable(body.global_position, path, half, town_at):
@@ -951,14 +731,13 @@ func check_walk() -> void:
 	check(off_ground == 0, "the body never left the walkable ground (%d ticks off)" % off_ground)
 	check(worst_lateral <= half + 0.6,
 		"the body never left the %.1f m trail (%.2f m off centre)" % [half * 2.0, worst_lateral])
-	check(flat_range(body.global_position, town_at) <= 3.0,
-		"the body reached the town square (%.2f m from the fire)"
-		% flat_range(body.global_position, town_at))
+	check(flat_range(body.global_position, wood_mouth) <= 3.0,
+		"the body reached the wood's mouth (%.2f m from the gap)"
+		% flat_range(body.global_position, wood_mouth))
 	check(real_seconds < WALK_LIMIT, "the walk finished inside the watchdog (%.1f s real)" % real_seconds)
 	# The squad is an escort, not a decoration: a body left wedged on a trunk
-	# somewhere in a kilometre and a third of wood is a squad the player loses for
-	# the rest of the run. Half of the free allies must still be walking with the
-	# soul, and none may be dead.
+	# somewhere in a kilometre and a half of wood is a squad the player loses for
+	# the rest of the run. None of the free allies may be dead, and none abandoned.
 	var soul_id: int = int(game.controller.merc_for_peer(1))
 	var free_allies := 0
 	var alive_allies := 0
@@ -978,41 +757,55 @@ func check_walk() -> void:
 		report.append("%s %.0f m" % [warband.roster.name_of(int(merc_id)), gap])
 	check(free_allies >= 2, "the walk had a squad to lose (%d allies)" % free_allies)
 	check(alive_allies == free_allies,
-		"every ally walked out of the wood on his feet (%d of %d)" % [alive_allies, free_allies])
-	# A soul that sprints the whole 1,575 m without ever stopping is faster than an
+		"every ally walked the road on his feet (%d of %d)" % [alive_allies, free_allies])
+	# A soul that sprints the whole 1,560 m without ever stopping is faster than an
 	# escort, and the squad is allowed to trail it - the trail's own regression is
 	# where "they arrive and stand beside you" is proved (`escape_run_regression`
 	# waits at the end of a stretch and requires three within 20 m). What this walk
-	# proves is that nobody is *lost*: a body left wedged in the camp when the soul
-	# reaches the gate is a body the player never gets back, and the difference
-	# between "trailing" and "abandoned" is the whole point.
-	check(farthest < 700.0, "no ally is stranded in the wood (%s)" % ", ".join(report))
-	# The campaign's walk is the opening's ground plus the wood plus the lane's, and
-	# the same body walks all of it.
-	check(travelled >= 850.0, "the trail half of the walk is a real one (%.0f m of ground)"
+	# proves is that nobody is *lost*: a body left wedged in a tree when the soul
+	# reaches the wood is a body the player never gets back.
+	check(farthest < 700.0, "no ally is stranded on the road (%s)" % ", ".join(report))
+	# The campaign is one walk from the square to the wood, and the same body walks
+	# all of it.
+	check(travelled >= 1500.0, "the walk from the square to the wood is a real one (%.0f m)"
 		% travelled)
-	check(opening_metres + travelled >= 900.0,
-		"the campaign is one walk from the cages to the square (%.0f m)"
-		% (opening_metres + travelled))
-	check(game.town.in_square(body), "the body stands on the square's own ground")
-	# The prompt counts the trail down on the way and names the town at the end.
-	check(game.prompt_text().begins_with("REACH THE TOWN") or game.prompt_text().is_empty()
-			or game.prompt_text().contains("G -"),
-		"the prompt names the town, not a door (%s)" % game.prompt_text())
-	print("WORLD_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f opening=%.0f lateral=%.2f"
-		% [game_seconds, real_seconds, ticks, travelled, opening_metres, worst_lateral])
+	# The kill loop above emptied the wood, and every pack took its own
+	# `RESPAWN_SECONDS` clock from that first death. A clock that runs out behind
+	# the walker puts the same bodies back on the same posts; one held by
+	# `RESPAWN_QUIET` waits, because a party body is still that near. Either way
+	# the rule that survives the walk is the band's own: never more bodies than the
+	# table names, and every body it puts back is a live hostile standing on the
+	# world's ground - nothing comes out of the wood in front of the walker.
+	if game.wilderness != null:
+		check(game.wilderness.wolves().size() == WildernessScript.PACK_COUNT,
+			"the band is still its %d wolves after the walk (%d)"
+				% [WildernessScript.PACK_COUNT, game.wilderness.wolves().size()])
+		var recovered := 0
+		for wolf in game.wilderness.wolves():
+			if not is_instance_valid(wolf) or not bool(wolf.get("alive")):
+				continue
+			recovered += 1
+			check(game.guards.has(wolf), "%s is on the world's one hostile list" % wolf.name)
+			var ground := TerrainScript.height_at((wolf as Node3D).global_position.x,
+				(wolf as Node3D).global_position.z)
+			check(absf(float((wolf as Node3D).global_position.y) - ground) < 1.0,
+				"%s stands on the ground it was put back on (%.2f m off)"
+					% [wolf.name, absf(float((wolf as Node3D).global_position.y) - ground)])
+		print("WORLD_PACKS living=%d of %d" % [recovered, WildernessScript.PACK_COUNT])
+	print("WORLD_WALK game_seconds=%.1f real_seconds=%.1f ticks=%d metres=%.0f lateral=%.2f"
+		% [game_seconds, real_seconds, ticks, travelled, worst_lateral])
 
 
-## Whether a point is on ground a body is meant to stand on: the clearing, the
-## lane's walkable band, the camp's own wood (the pocket and the corridor to the
-## road), the approach road, or the square itself.
+## Whether a point is on ground a body is meant to stand on: the wood's pocket, the
+## lane's walkable band, the wood's own corridor out to the road, the approach road,
+## or the square itself.
 func _walkable(point: Vector3, path, half: float, town_at: Vector3) -> bool:
-	if absf(point.x) <= game.camp.YARD_HALF_WIDTH + 1.0 \
-			and point.z >= game.camp.YARD_FRONT - 1.5 and point.z <= game.camp.YARD_BACK + 1.0:
+	if absf(point.x) <= game.wood.YARD_HALF_WIDTH + 1.0 \
+			and point.z >= game.wood.YARD_FRONT - 1.5 and point.z <= game.wood.YARD_BACK + 1.0:
 		return true
-	# The camp's wood: pocket, corridor and the band the layout measured. A body is
-	# meant to stand in all of it - the trees near the camp are the only obstacles.
-	var band: Rect2 = game.camp.clearing.get("band", Rect2())
+	# The wood's own band: pocket, corridor and the wood the layout measured. A body
+	# is meant to stand in all of it - the trees near the wood are the only obstacles.
+	var band: Rect2 = game.wood.clearing.get("band", Rect2())
 	if band.size.x > 0.0 and point.x >= band.position.x - 1.0 \
 			and point.x <= band.end.x + 1.0 and point.z >= band.position.y - 1.0 \
 			and point.z <= band.end.y + 1.0:
@@ -1063,11 +856,11 @@ func check_budget() -> void:
 	var draws := int(readout["draws"])
 	var shapes := int(readout["shapes"])
 	var lights := int(readout["lights"])
-	# One world is one scene: a camp in a 170 m wood, a kilometre and a third of
-	# trail, the four cages and three warcamps the orders point at, a square and
-	# fifty-odd watchers all in one tree. The caps follow what the deep wood and the
-	# road actually cost - a deep band batched into multimeshes, trunk colliders only
-	# in the rows a body can walk up to - and the readout below is the measured
+	# One world is one scene: a pocket in a deep wood, a kilometre and a half of
+	# road, the road's caged line and the warcamps the orders point at, a square
+	# and fifty-odd hostiles all in one tree. The caps follow what the deep wood and
+	# the road actually cost - a deep band batched into multimeshes, trunk colliders
+	# only in the rows a body can walk up to - and the readout below is the measured
 	# number, so a regression that starts creeping can be narrowed from it.
 	check(nodes <= 26000, "the world stays inside its node budget (%d)" % nodes)
 	check(draws <= 800, "the world stays inside its draw budget (%d multimesh)" % draws)
@@ -1077,10 +870,11 @@ func check_budget() -> void:
 	# warcamps' braziers and the town's own lanterns share the same ceiling.
 	check(lights <= 210, "the world stays inside its light budget (%d)" % lights)
 	var warren: int = game.watcher_warren.total() if game.watcher_warren != null else 0
-	var hostiles: int = 2 + CampScript.AMBUSH_COUNT + 20 + TrailScript.ARCHER_COUNT + wolves + warren
+	var hostiles: int = 1 + WoodScript.GUARD_POSTS.size() + 20 \
+		+ TrailScript.ARCHER_COUNT + wolves + warren
 	check(int(readout["guards"]) == hostiles,
 		"all %d hostiles are on the list (%d)" % [hostiles, int(readout["guards"])])
-	# The wood is a kilometre and a third of lane now: a band, not a number, so a
+	# The wood is a kilometre and a third of lane: a band, not a number, so a
 	# waypoint can be nudged without a test about the art failing.
 	check(float(readout["lane_length"]) >= 1250.0 and float(readout["lane_length"]) <= 1500.0,
 		"the trail is a long run (%.1f m)" % float(readout["lane_length"]))
@@ -1094,4 +888,4 @@ func check_doors() -> void:
 	check(flow.WORLD_SCENE == WORLD, "the flow's campaign scene is the world (%s)" % flow.WORLD_SCENE)
 	check(flow.TITLE_SCENE == "res://title.tscn", "and its way out is the title")
 	flow.active = false
-	flow.world_start = "camp"
+	flow.world_start = "town"

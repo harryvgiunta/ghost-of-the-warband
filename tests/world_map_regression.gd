@@ -7,7 +7,7 @@ extends SceneTree
 ##   1. **The lane is a big wood.** `run_forest.build()` stands a road 1,250-1,500 m
 ##      long on the ground, with a chain of fire along it and nothing solid inside
 ##      the clear walking band, and the heightfield under it covers the whole of it,
-##      the camp's pocket and the town's pad without a single sample falling off the
+##      the wood's pocket and the town's pad without a single sample falling off the
 ##      field or up the mountain rim.
 ##   2. **The map is the ground.** `world_map.configure()` against a stub host that
 ##      carries the real lane: the projection is uniform and monotonically
@@ -22,7 +22,7 @@ extends SceneTree
 const RunForest = preload("res://scripts/warband/run_forest.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const MapScript = preload("res://scripts/warband/world_map.gd")
-const CampScript = preload("res://scripts/warband/cage_escape.gd")
+const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 
 ## The grown road, as a band rather than a number: 1,375 m is the design, and a
 ## point either way of it - or a hundred - is still the same wood.
@@ -31,7 +31,7 @@ const LANE_MAX := 1500.0
 ## The world's own light ceiling. The torches are the route, so this is the one
 ## art budget that scales with the road at all.
 const LIGHT_CAP := 210
-## The world's draw ceiling, and the forest's share of it: the camp and the town
+## The world's draw ceiling, and the forest's share of it: the wood and the town
 ## take the rest of the 800 the world regression enforces.
 const DRAW_CAP := 650
 ## A lane step: 45 m of z plus the drift, and a bend may not be a jump.
@@ -130,12 +130,12 @@ func run() -> void:
 
 	var started := Time.get_ticks_msec()
 	# --- where the lane will stand in the one world ------------------------
-	# The lane's own first point lands a long run of wood past the camp's mouth,
+	# The lane's own first point lands a long run of wood past the wood's mouth,
 	# and the town stands `TOWN_BEHIND` beyond its far end. Both are derived the
 	# way `world_scene.gd` derives them, so the ground this test bakes is the
 	# ground the campaign walks.
-	var offset := Vector3(CampScript.GATE_POINT.x, 0.0,
-		CampScript.GATE_POINT.z - CampScript.CAMP_TO_ROAD_METRES) - RunForest.LANE_POINTS[0]
+	var offset := Vector3(WoodScript.GATE_POINT.x, 0.0,
+		WoodScript.GATE_POINT.z - WoodScript.CAMP_TO_ROAD_METRES) - RunForest.LANE_POINTS[0]
 	var lane_end := (RunForest.LANE_POINTS[RunForest.LANE_POINTS.size() - 1] as Vector3) + offset
 	var town_at := lane_end + Vector3(0.0, 0.0, -TOWN_BEHIND)
 	var line := PackedVector3Array()
@@ -147,8 +147,8 @@ func run() -> void:
 	ground_host.name = "Ground"
 	root.add_child(ground_host)
 	var pads := [
-		{"rect": Rect2(-CampScript.YARD_HALF_WIDTH, CampScript.YARD_FRONT,
-			CampScript.YARD_HALF_WIDTH * 2.0, CampScript.YARD_BACK - CampScript.YARD_FRONT),
+		{"rect": Rect2(-WoodScript.YARD_HALF_WIDTH, WoodScript.YARD_FRONT,
+			WoodScript.YARD_HALF_WIDTH * 2.0, WoodScript.YARD_BACK - WoodScript.YARD_FRONT),
 			"y": TerrainScript.PAD_Y, "blend": 14.0},
 		{"rect": Rect2(town_at.x - TOWN_PAD, town_at.z - TOWN_PAD, TOWN_PAD * 2.0,
 			TOWN_PAD * 2.0), "y": TerrainScript.PAD_Y, "blend": 16.0},
@@ -179,23 +179,22 @@ func run() -> void:
 			and town_at.z - TOWN_PAD - 16.0 >= south and town_at.z + TOWN_PAD + 16.0 <= north,
 		"the town's pad and its blend are inside the field (%s)" % str(town_at))
 
-	# The camp's pocket is flat, cages and yard floor alike, and so is the square.
-	# The check stands a stride inside each pad: a pad blends into the slopes it was
-	# cut into over 14-16 m, and the mesh interpolates across the cell that straddles
-	# its edge, so its last grid cell is a ramp by design and not a fault.
-	var camp_first := TerrainScript.height_at(CampScript.CAGE_POSTS[0].x,
-		CampScript.CAGE_POSTS[0].z)
-	var camp_flat := true
-	for post in CampScript.CAGE_POSTS:
-		if absf(TerrainScript.height_at(post.x, post.z) - camp_first) >= 0.01:
-			camp_flat = false
-	for probe in [Vector2(-CampScript.YARD_HALF_WIDTH + 6.0, 0.0),
-			Vector2(CampScript.YARD_HALF_WIDTH - 6.0, 0.0),
-			Vector2(0.0, CampScript.YARD_FRONT + 6.0),
-			Vector2(0.0, CampScript.YARD_BACK - 6.0)]:
-		if absf(TerrainScript.height_at(probe.x, probe.y) - camp_first) >= 0.01:
-			camp_flat = false
-	check(camp_flat, "the camp's pad is flat (%.4f m)" % camp_first)
+	# The wood's pocket is flat, the demon's patch and the yard floor alike, and so
+	# is the square. The check stands a stride inside each pad: a pad blends into the
+	# slopes it was cut into over 14-16 m, and the mesh interpolates across the cell
+	# that straddles its edge, so its last grid cell is a ramp by design and not a
+	# fault.
+	var wood_first := TerrainScript.height_at(WoodScript.BOSS_POINT.x,
+		WoodScript.BOSS_POINT.z)
+	var wood_flat := true
+	for probe in [Vector2(WoodScript.BOSS_POINT.x, WoodScript.BOSS_POINT.z),
+			Vector2(-WoodScript.YARD_HALF_WIDTH + 6.0, 0.0),
+			Vector2(WoodScript.YARD_HALF_WIDTH - 6.0, 0.0),
+			Vector2(0.0, WoodScript.YARD_FRONT + 6.0),
+			Vector2(0.0, WoodScript.YARD_BACK - 6.0)]:
+		if absf(TerrainScript.height_at(probe.x, probe.y) - wood_first) >= 0.01:
+			wood_flat = false
+	check(wood_flat, "the wood's pad is flat (%.4f m)" % wood_first)
 	var town_first := TerrainScript.height_at(town_at.x, town_at.z)
 	var town_flat := true
 	for step in [Vector2(-12.0, -10.0), Vector2(12.0, -10.0), Vector2(-12.0, 10.0),
@@ -377,12 +376,12 @@ func run() -> void:
 	check(bounds.encloses(Rect2(Vector2(west, south), Vector2(east - west, north - south)))
 			== false, "the sheet covers the lane's own strip, not the whole field")
 	check(bounds.has_point(Vector2.ZERO) and bounds.has_point(Vector2(town_at.x, town_at.z)),
-		"the page holds the camp and the town (%s)" % str(bounds))
+		"the page holds the wood and the town (%s)" % str(bounds))
 	check(absf(scale * panel.size.x - bounds.size.x) <= 0.01
 			and absf(scale * panel.size.y - bounds.size.y) <= 0.01,
 		"the scale is the bounds and the panel agreeing (%.4f m/px)" % scale)
 
-	# The road: one continuous line from the camp's end of the page to the town's,
+	# The road: one continuous line from the wood's end of the page to the town's,
 	# monotonically north-up, every point on the band.
 	var drawn: PackedVector2Array = map.road()
 	check(drawn.size() >= 100, "the road is sampled along the lane (%d points)" % drawn.size())
@@ -404,7 +403,7 @@ func run() -> void:
 	var camp_screen: Vector2 = map.project(Vector3.ZERO)
 	var town_screen: Vector2 = map.project(town_at)
 	check(camp_screen.y > town_screen.y,
-		"the camp is at the bottom of the page and the town at the top (%.0f vs %.0f)"
+		"the wood is at the bottom of the page and the town at the top (%.0f vs %.0f)"
 		% [camp_screen.y, town_screen.y])
 	check(drawn[0].distance_to(map.project(lane[0])) < 0.01
 			and drawn[drawn.size() - 1].distance_to(map.project(lane[lane.size() - 1])) < 0.01,
@@ -442,7 +441,7 @@ func run() -> void:
 	for mark in marks:
 		labels[str(mark["label"])] = true
 	check(labels.has("THE CAMP") and labels.has("THE TOWN"),
-		"the camp and the town are named on the page")
+		"the wood's ring and the town are named on the page")
 	check(labels.has("CLEARING 1") and labels.has("CLEARING 4"),
 		"the clearings are named on the page")
 	check(labels.has("THE RECRUITER") and labels.has("FAR CONTRACT"),

@@ -8,8 +8,9 @@ extends SceneTree
 ##
 ##   1. builds the one `WarbandAbilities` scene and binds every seated body to it,
 ##      so a looted weapon's cue can actually spawn its arrow;
-##   2. builds the deep-wood band - eight briar wolves in `guards`, with the
-##      `MobCuller` that keeps a walked-past wolf cheap;
+##   2. builds the deep-wood band - every wolf its pack table fields, all on the
+##      world's `guards`, with the `MobCuller` that keeps a walked-past wolf
+##      cheap;
 ##   3. paints the HUD against a living body: a stamina bar with a real maximum
 ##      and the ten-key hotbar;
 ##   4. opens and closes the campaign menu from a real Escape key without pausing
@@ -125,7 +126,9 @@ func check_world_pieces() -> void:
 	# The band on the way out, and its culler.
 	check(game.wilderness != null, "the world builds the wilderness band")
 	var wolves: int = game.wilderness.wolves().size() if game.wilderness != null else 0
-	check(wolves >= 6, "the way out holds its wolves (%d)" % wolves)
+	check(wolves == WarbandWilderness.PACK_COUNT,
+		"the way out holds its whole band (%d of %d wolves)" % [wolves,
+			WarbandWilderness.PACK_COUNT])
 	check(game.find_child("MobCuller", true, false) != null,
 		"the band owns its MobCuller")
 	# They are the world's mobs: the same `guards` list the squad and retarget read.
@@ -184,7 +187,7 @@ func check_menu() -> void:
 
 # --- the orders, the map and the click -------------------------------------
 
-## The three things the campaign's quests are played against, as the world builds
+## The three things the campaign is played against, as the world builds
 ## them: the cages, the warcamps, and the map sheet the player reads to find both.
 ## Then the one gesture that turns a kill into loot, through the world's own press
 ## path - a click on lootable ground must never also be a swing.
@@ -193,7 +196,9 @@ func check_orders() -> void:
 	check(game.watcher_warren != null, "the world builds the watcher warcamps")
 	check(game.world_map != null, "the world builds the map sheet")
 	if game.soldier_cages != null:
-		check(game.soldier_cages.remaining() == 4, "four soldiers wait in the wood")
+		check(game.soldier_cages.remaining() == SoldierCages.CAGE_FRACTIONS.size(),
+			"every soldier the line holds waits in the wood (%d of %d shut)"
+			% [game.soldier_cages.remaining(), SoldierCages.CAGE_FRACTIONS.size()])
 	if game.watcher_warren != null:
 		check(game.watcher_warren.living() == game.watcher_warren.total(),
 			"every warden in the warcamps is standing")

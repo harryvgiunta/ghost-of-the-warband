@@ -344,18 +344,19 @@ static func _measure_bones(skeleton: Skeleton3D, meshes: Array) -> Dictionary:
 		var mesh := mesh_node.mesh
 		if mesh_node.skin == null or mesh == null:
 			continue
-		var array_mesh := mesh as ArrayMesh
-		if array_mesh != null:
-			# `surface_get_array_len` is the vertex count and costs a call: the
-			# counting pass must not copy every surface's arrays just to size
-			# the sampling stride.
-			for surface in array_mesh.get_surface_count():
-				total += array_mesh.surface_get_array_len(surface)
-			continue
+		# There is no length accessor every `Mesh` answers - a primitive
+		# (`CylinderMesh`) answers none, which is what the Godot 3 call here used
+		# to assume. `surface_get_arrays` is the one answer an `ArrayMesh` and a
+		# primitive both give, and `Mesh.ARRAY_VERTEX` in it is the vertex count:
+		# the same arrays the sampling pass below reads, so the count costs one
+		# call per surface rather than a second walk over the vertices. A surface
+		# that answers no vertex array is skipped instead of erroring the frame.
 		for surface in mesh.get_surface_count():
 			var arrays := mesh.surface_get_arrays(surface)
+			if arrays.is_empty():
+				continue
 			var vertices = arrays[Mesh.ARRAY_VERTEX]
-			if vertices != null:
+			if vertices is PackedVector3Array:
 				total += (vertices as PackedVector3Array).size()
 	var step: int = maxi(1, int(ceil(float(total) / float(MAX_SAMPLED_VERTICES))))
 	for node in meshes:

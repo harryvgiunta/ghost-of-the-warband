@@ -4,24 +4,38 @@ extends Node3D
 ## the quartermaster's second order is counted on.
 ##
 ## The road's cult holds the lane, the camp's watchers hold the opening, and
-## neither is a place the warband goes to on purpose. The warren is: three camps
-## of wardens standing off the way, each a fireless patch of totems and skull
-## stakes with seven antlered bodies in it, 78-96 m out from the lane - past
-## twice a warden's 60 m sight, so a body walking the road is never pulled into a
-## fight it did not go looking for - and clear of the square's wall by a wall and
-## a half. What makes them findable is the map's markers and the dressing itself:
-## a place a body can see from the lane and walk to.
+## neither is a place the warband goes to on purpose. The warren is: seven camps of
+## three wardens standing off the way, each a fireless patch of totems and skull
+## stakes - a hunting ground a squad can walk to all the way up the road, from the
+## dark end where the demon stands (lane fraction 0.06) to the last bend before the
+## town's gate (0.90). Every camp stands 78-96 m out from the lane, past twice a
+## warden's 30 m sight, so a body walking the road is never pulled into a fight it
+## did not go looking for, and clear of the square's wall by a wall and a half.
+## What makes them findable is the map's markers and the dressing itself: a place a
+## body can see from the lane and walk to.
 ##
 ## A camp is a real camp because the dressing is real: `VillageKit` totems and
 ## skull stakes on their own collision, so the place reads as somewhere people
 ## live before the first body turns. The watchers are the wood's own creature
 ## (`cage_watcher.gd`: `hollow_warden`, the makeshift tier in its hand, the shared
 ## mob state machine), appended to `host.guards` - the world's one hostile list -
-## and wired to the world's one kill handler, so a corpse here pays the bounty
-## through `host.note_kill` exactly as a road cultist's does.
+## and wired to the world's one kill handler, so a corpse here pays exactly as a
+## road cultist's does.
+##
+## A camp that is cut down comes back. The clock is one per camp, never one per
+## warden: the camp's first death arms it, and when `RESPAWN_SECONDS` have run,
+## every warden of that camp which is not still on its feet is put back on its own
+## post - a wipe of one camp refills that camp and leaves the other six exactly as
+## they stood. A refill waits while any party body stands within `RESPAWN_QUIET`
+## metres of the camp's posts, so a squad never has bodies appear inside its own
+## sight, and the wood refills behind a party that has left. A warden that
+## survived the clock is left exactly where it stands - a fight is never teleported
+## - and a camp with nothing dead has no clock, so nothing can spawn twice. A body
+## that comes back is asleep on its post exactly like a fresh one: it wakes when a
+## party comes near.
 ##
 ## The warren owns only what is different from the rest of the frontier: the
-## posts, its dressing, the 0.5 s aim refresh (the warband changes what it is
+## posts, its dressing, the 0.5 s refill/aim tick (the warband changes what it is
 ## driving, and a body seated later must be huntable) and the one shared territory
 ## per camp.
 
@@ -31,38 +45,50 @@ const MobWander = preload("res://scripts/mob_wander.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
-## Three camps, each a lane fraction and a side. The fractions are the last third
-## of the walk, so a warband on its way to town passes all three before the gate;
-## the offsets are deep wood, 78-96 m out. They used to stand 18-40 m off the
-## lane, which is inside a warden's sight: seven bodies a camp came off their
-## marks the moment the squad walked past and met it in the middle of the road.
-## A hunting ground the road cannot see is the only hunting ground a warband can
-## choose to walk into.
+## Seven camps, each a lane fraction and a side, spread the whole walk: the first
+## on the dark end where the demon stands, the last on the bend before the town's
+## gate. The offsets are deep wood, 78-96 m out. They used to stand 18-40 m off the
+## lane, which is inside a warden's sight: seven bodies a camp came off their marks
+## the moment the squad walked past and met it in the middle of the road. A hunting
+## ground the road cannot see is the only hunting ground a warband can choose to
+## walk into. The fractions sit between the wolf packs' own
+## (`wilderness.gd`), so the road is never two fights at once by accident.
 const CAMPS := [
-	{"fraction": 0.72, "side": 1.0, "offset": 78.0, "yaw": 0.4, "seed": 611},
-	{"fraction": 0.80, "side": -1.0, "offset": 96.0, "yaw": 2.1, "seed": 617},
-	{"fraction": 0.90, "side": 1.0, "offset": 86.0, "yaw": 4.6, "seed": 619},
+	{"fraction": 0.06, "side": 1.0, "offset": 78.0, "yaw": 0.4, "seed": 611},
+	{"fraction": 0.20, "side": -1.0, "offset": 96.0, "yaw": 2.1, "seed": 617},
+	{"fraction": 0.34, "side": 1.0, "offset": 86.0, "yaw": 4.6, "seed": 623},
+	{"fraction": 0.48, "side": -1.0, "offset": 92.0, "yaw": 1.2, "seed": 631},
+	{"fraction": 0.62, "side": 1.0, "offset": 80.0, "yaw": 3.3, "seed": 641},
+	{"fraction": 0.76, "side": -1.0, "offset": 88.0, "yaw": 5.2, "seed": 643},
+	{"fraction": 0.90, "side": 1.0, "offset": 94.0, "yaw": 2.7, "seed": 647},
 ]
-## Seven watchers a camp. Three camps of seven is one order's worth of bodies and
+## Three watchers a camp. Seven camps of three is one order's worth of bodies and
 ## then some: twenty is the quartermaster's count, and a hunting ground that
 ## exactly met it would leave a squad that lost one kill short with nowhere to go.
-const CAMP_SIZE := 7
-## Every body the camps field: three camps of seven, by the table above.
+const CAMP_SIZE := 3
+## Every body the camps field: seven camps of three, by the table above.
 const TOTAL := 21
 ## Members stand on this ring around the camp's dressing: inside the totem's
 ## reach and clear of its collider.
 const RING_INNER := 3.4
 const RING_STEP := 1.3
-## The makeshift tier in their hands, by camp and by body, so a camp is not seven
+## The makeshift tier in their hands, by camp and by body, so a camp is not three
 ## copies of one warden.
 const ARMS := ["club_makeshift", "dagger_ironwood", "branch_heavy", "dagger_ironwood"]
 ## The same 12 cm every body in this world is spawned clear of its ground by.
 const SPAWN_LIFT := 0.12
 ## The warband can seat, down or hand over a body at any moment; half a second is
 ## fast enough that a warden never hunts a body that has left, and cheap enough
-## that the wood's hosts do not notice it.
+## that the wood's hosts do not notice the tick.
 const REFRESH_SECONDS := 0.5
-## `main.gd`'s pack radius. Each camp's seven stand inside it of one another, so
+## How long a cut camp stays cut. A party that farms the wood meets the camps
+## again instead of emptying them once and walking a dead wood forever.
+const RESPAWN_SECONDS := 180.0
+## A refill holds while any party body stands this close to the camp's posts: a
+## squad must never have bodies appear inside its own sight, and a warden's sight
+## is 30 m, so this is the whole of a camp's reach of the road.
+const RESPAWN_QUIET := 45.0
+## `main.gd`'s pack radius. Each camp's three stand inside it of one another, so
 ## `assign_all` hands that camp one territory to roam.
 const PACK_RADIUS := 14.0
 ## How far from its own camp a warden will take a target: past this it is a body in
@@ -72,30 +98,36 @@ const LEASH_METRES := 55.0
 ## The world this warren is built into.
 var host: Node3D = null
 
-## One entry per camp, in `CAMPS` order: `{node, centre, mobs}`.
+## One entry per camp, in `CAMPS` order:
+## `{node, centre, mobs, posts, respawn_at}`.
 var _camps: Array[Dictionary] = []
 ## Every warden this node fielded, in spawn order.
 var _mobs: Array = []
 var _elapsed := 0.0
+## Seconds this node has run: the refill clocks are absolute on it, so a clock
+## survives a frame budget hitch the way a wall clock does.
+var _clock := 0.0
 
 
-## Build the three camps into `world`. The node parents itself under the world if
-## the caller has not done it yet: the bodies have to be in the tree for their
-## global positions, their pack and their tick.
+## Build the camps into `world`. The node parents itself under the world if the
+## caller has not done it yet: the bodies have to be in the tree for their global
+## positions, their pack and their tick.
 ##
 ## A co-op guest builds the same camps: the warren's names are derived from the
 ## camp table, never from spawn order, so the host's name-keyed snapshots find
 ## exactly these bodies. The session marks each warden a replica before its first
 ## state arrives, so nothing here runs a brain on the guest's machine - but the
-## camps, their dressing and the bodies a soul can see are the wood's, and a
-## guest standing in an empty camp the host is fighting in was the visible half of
-## the same bug.
+## camps, their dressing and the bodies a soul can see are the wood's, and a guest
+## standing in an empty camp the host is fighting in was the visible half of the
+## same bug. A guest never refills a camp of its own: the bodies it draws are the
+## host's.
 func setup(world: Node3D) -> void:
 	if not is_instance_valid(world):
 		push_error("WatcherWarren.setup() needs the world")
 		return
 	host = world
 	_elapsed = 0.0
+	_clock = 0.0
 	if not is_inside_tree() and world.is_inside_tree():
 		world.add_child(self)
 	_clear()
@@ -104,6 +136,7 @@ func setup(world: Node3D) -> void:
 
 func _process(delta: float) -> void:
 	Perf.begin("warren.tick")
+	_clock += delta
 	_tick_refresh(delta)
 	Perf.end()
 
@@ -115,12 +148,13 @@ func _tick_refresh(delta: float) -> void:
 	if _elapsed < REFRESH_SECONDS:
 		return
 	_elapsed = fmod(_elapsed, REFRESH_SECONDS)
+	_refill()
 	_refresh()
 
 
 # --- reading ---------------------------------------------------------------
 
-## The three camps, in camp order: `{node, centre, mobs}`.
+## The camps, in camp order: `{node, centre, mobs, posts, respawn_at}`.
 func camps() -> Array:
 	return _camps.duplicate()
 
@@ -152,6 +186,25 @@ func total() -> int:
 	return TOTAL
 
 
+## Seconds left on camp `index`'s refill clock, or -1.0 while that camp has
+## nothing dead. The camps refill on their own; this is what the regression and
+## the map read.
+func refill_in(index: int) -> float:
+	if index < 0 or index >= _camps.size():
+		return -1.0
+	var at := float(_camps[index].get("respawn_at", -1.0))
+	return -1.0 if at < 0.0 else maxf(at - _clock, 0.0)
+
+
+## Put camp `index`'s fallen back on their posts now, on the same path the clock
+## takes, and return how many wardens came back. The three minutes are the clock's
+## business; a scripted encounter may refill a camp by hand.
+func refill_camp(index: int) -> int:
+	if index < 0 or index >= _camps.size():
+		return 0
+	return _refill_one(index)
+
+
 # --- the build -------------------------------------------------------------
 
 func _build() -> void:
@@ -169,13 +222,19 @@ func _build() -> void:
 		at = TerrainScript.grounded(Vector3(at.x, 0.0, at.z))
 		var camp := _build_camp(index, at, float(spec["yaw"]), mats)
 		var members: Array = []
+		var posts: Array[Vector3] = []
 		for member in CAMP_SIZE:
-			members.append(_spawn_watcher(index, member, at, int(spec["seed"])))
-		# One patch of wood per camp: the seven spawned inside `PACK_RADIUS` of one
+			var point := _post(at, index, member, int(spec["seed"]))
+			posts.append(point)
+			members.append(_spawn_watcher(index, member, point))
+		# One patch of wood per camp: the three spawned inside `PACK_RADIUS` of one
 		# another, so `assign_all` hands the camp one shared territory instead of
-		# seven private ones.
+		# three private ones.
 		MobWander.assign_all(members, PACK_RADIUS)
-		_camps.append({"node": camp, "centre": at, "mobs": members})
+		_camps.append({
+			"node": camp, "centre": at, "mobs": members, "posts": posts,
+			"respawn_at": -1.0,
+		})
 		_mobs.append_array(members)
 	_refresh()
 
@@ -212,16 +271,15 @@ func _build_camp(index: int, at: Vector3, yaw: float, mats: Dictionary) -> Node3
 	return camp
 
 
-## One warden: the wood's own creature, armed off the makeshift tier, aimed at
-## whichever body is nearest right now, and booked into the world's hostile list
-## and its one kill handler.
-func _spawn_watcher(camp_index: int, member: int, centre: Vector3, seed: int) -> Node:
+## One warden: the wood's own creature, armed off the makeshift tier, standing on
+## `point`, aimed at whichever body is nearest right now, and booked into the
+## world's hostile list and its one kill handler.
+func _spawn_watcher(camp_index: int, member: int, point: Vector3) -> Node:
 	var watcher := WatcherScript.new()
 	watcher.name = "HollowWarden%d_%d" % [camp_index + 1, member + 1]
 	# Named before the tree sees it: `cage_watcher.gd::_init` sets the warden id,
 	# and `_ready` keeps whatever name the scene gave it.
 	watcher.mob_id = WatcherScript.WARDEN_ID
-	var point := _post(centre, camp_index, member, seed)
 	watcher.position = point
 	add_child(watcher)
 	# `_ready` read the local transform; a container with its own transform must
@@ -255,6 +313,127 @@ func _post(centre: Vector3, camp_index: int, member: int, seed: int) -> Vector3:
 	var radius := RING_INNER + float(member % 3) * RING_STEP
 	var at := centre + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
 	return TerrainScript.grounded(Vector3(at.x, 0.0, at.z)) + Vector3(0.0, SPAWN_LIFT, 0.0)
+
+
+# --- the refill -------------------------------------------------------------
+
+## One refill clock per camp, never one per warden. A camp with nothing dead has no
+## clock; a camp whose first body fell gets one `RESPAWN_SECONDS` out, and the
+## clock is read here on the 0.5 s tick with the aim.
+func _refill() -> void:
+	for index in _camps.size():
+		var camp: Dictionary = _camps[index]
+		var lost := 0
+		for mob in camp["mobs"] as Array:
+			if not is_instance_valid(mob) or not bool(mob.get("alive")):
+				lost += 1
+		if lost == 0:
+			camp["respawn_at"] = -1.0
+			continue
+		var at := float(camp["respawn_at"])
+		if at < 0.0:
+			camp["respawn_at"] = _clock + RESPAWN_SECONDS
+			continue
+		if _clock < at:
+			continue
+		_refill_one(index)
+
+
+## The camp's fallen back on their own posts - and no one else's. A warden still on
+## its feet is left exactly where it is: a refill is never a teleport and never a
+## second body. A body that comes back is booked into the world's one hostile list
+## and into its camp's own territory.
+func _refill_one(index: int) -> int:
+	# The guest fielded the same camps, but the bodies it draws are the host's: a
+	# second warden spawned here would be a warden the host never spawned.
+	if _is_client():
+		return 0
+	var camp: Dictionary = _camps[index]
+	var posts: Array = camp["posts"]
+	for post in posts:
+		if _body_within(post as Vector3, RESPAWN_QUIET):
+			return 0
+	var members: Array = camp["mobs"]
+	var fresh: Array = []
+	for member in members.size():
+		var old = members[member]
+		if is_instance_valid(old) and bool(old.get("alive")):
+			continue
+		if is_instance_valid(old):
+			_retire(old)
+		var watcher := _spawn_watcher(index, member, posts[member] as Vector3)
+		members[member] = watcher
+		fresh.append(watcher)
+	if fresh.is_empty():
+		camp["respawn_at"] = -1.0
+		return 0
+	_join_territory(members, fresh)
+	camp["respawn_at"] = -1.0
+	_sync_mobs()
+	return fresh.size()
+
+
+## The patch a body that came back belongs to: its campmates' own territory while
+## any of them is still walking it, and a freshly handed one when the camp was cut
+## down to its last body.
+func _join_territory(members: Array, fresh: Array) -> void:
+	var shared: MobWander = null
+	var pack_group := ""
+	for mob in members:
+		if fresh.has(mob) or not is_instance_valid(mob):
+			continue
+		var wander: MobWander = mob.get("_wander")
+		if wander == null or wander.territory == null:
+			continue
+		shared = wander
+		pack_group = wander.group
+		break
+	if shared == null:
+		MobWander.assign_all(fresh, PACK_RADIUS)
+		return
+	for mob in fresh:
+		mob.assign_territory(shared.territory, members.find(mob), pack_group)
+		if not pack_group.is_empty():
+			(mob as Node).add_to_group(pack_group)
+
+
+## Make room for a replacement. `queue_free` leaves the corpse in the tree for the
+## rest of the frame, and the newcomer takes its predecessor's name - so the corpse
+## steps aside first, and off the world's hostile list, which the replacement
+## rejoins under that name.
+func _retire(corpse: Node) -> void:
+	var guards = host.get("guards") if is_instance_valid(host) else null
+	if guards is Array:
+		(guards as Array).erase(corpse)
+	corpse.name = "%sCorpse" % corpse.name
+	corpse.queue_free()
+
+
+## True while any party body - standing or down - is inside `metres` of `point`.
+func _body_within(point: Vector3, metres: float) -> bool:
+	var bodies = host.get("bodies") if is_instance_valid(host) else null
+	if not (bodies is Array):
+		return false
+	var reach := metres * metres
+	for body in bodies as Array:
+		if not is_instance_valid(body) or not body is Node3D:
+			continue
+		if (body as Node3D).global_position.distance_squared_to(point) <= reach:
+			return true
+	return false
+
+
+func _is_client() -> bool:
+	if not is_instance_valid(host):
+		return false
+	var client = host.get("_client")
+	return client is bool and bool(client)
+
+
+func _sync_mobs() -> void:
+	_mobs.clear()
+	for camp in _camps:
+		_mobs.append_array(camp["mobs"] as Array)
 
 
 # --- the aim ---------------------------------------------------------------

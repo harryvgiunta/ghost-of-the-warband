@@ -3,14 +3,15 @@ extends "res://scripts/devil_mob.gd"
 ##
 ## Two things come out of this file, and `boss` says which one a body is.
 ##
-## **The master.** Gorehorn is the Hellish goat man - the same imported body, rig
-## and clips as the frontier devil (`devil_mob_visual.gd`, `mob_id` "hell_goat") and
-## the same authoritative AI - fought as the floor's master: five and a half times
-## the goat's pool, a heavier blow, a longer reach and a longer stare (`OVERRIDES`),
-## and a body that holds its post in the lair instead of roaming. It carries the
-## floor's prize, so its corpse is a container like a watcher's (`gear_items`), and
-## it answers the world's hunt surface (`hunt`, `hunting`) so the squad's retarget
-## can point it at a body like any other hostile.
+## **The master.** Gorehorn is the Hellish goat man - the frontier devil's own
+## body (`devil_mob_visual.gd`, `mob_id` "hell_goat") worn on the warband's rig:
+## the ranger's bones and authored clips, the goat's hide fitted onto them, and
+## the same authoritative AI. Fought as the floor's master: five and a half times
+## the goat's pool, a heavier blow, a longer reach and a longer stare
+## (`OVERRIDES`), and a body that holds its post in the lair instead of roaming.
+## It carries the floor's prize, so its corpse is a container like a watcher's
+## (`gear_items`), and it answers the world's hunt surface (`hunt`, `hunting`) so
+## the squad's retarget can point it at a body like any other hostile.
 ##
 ## **The floor's other demons.** The same body and the same AI, one per chamber of
 ## the demons' ring and one of every species in the squad that keeps the lair, on
@@ -28,6 +29,9 @@ const BOSS_ID := "hell_goat"
 const OVERRIDES := {
 	"display": "Gorehorn", "health": 400.0, "damage": 21.0, "reach": 2.35,
 	"sight": 34.0, "gold": 60, "cooldown": 1.6, "roam": 0.0, "packed": false,
+	# The master fights the ring's ladder, not the wood's grind: it guards,
+	# circles, and only commits into an opening.
+	"duelist": true,
 }
 ## What the master's body carries: the floor's prize.
 const SPOILS := ["sword_arming", "ring_blood", "focus_skull_death", "ichor_vial", "ichor_vial"]
@@ -38,7 +42,14 @@ const SPOILS := ["sword_arming", "ring_blood", "focus_skull_death", "ichor_vial"
 ## keeper is worth two and a half of the wardens that share its floor; and its
 ## sight is the floor's own 30 m, past nothing a sleeper in another room could see.
 const KEEPER_OVERRIDES := {"health": 240.0, "damage": 17.0, "sight": 30.0, "gold": 24,
-	"cooldown": 1.4, "roam": 0.0}
+	"cooldown": 1.4, "roam": 0.0, "duelist": true}
+
+## What each body carries in fire (`demon_fire.gd`): the master the whole kit, so
+## its fight is a fireball, a breath and burning ground between its blows; a keeper
+## the two that answer a party at range. The breath is the master's own tell, which
+## is what makes the bottom of the Hollow a step up from the ring above it.
+const BOSS_FIRE := ["fireball", "hellfire_breath", "ember_rain"]
+const KEEPER_FIRE := ["fireball", "ember_rain"]
 
 ## True for the floor's master (Gorehorn): its own numbers, its prize, and the
 ## hellfire under it. Every other demon of the floor takes `KEEPER_OVERRIDES`.
@@ -67,10 +78,15 @@ func _ready() -> void:
 		return
 	spoils.assign(SPOILS)
 	# A dull hellfire under the body: the lair's master is the one thing in the
-	# dark that is lit from where it stands.
+	# dark that is lit from where it stands. It hangs off the chest the body is
+	# actually drawn at - the fit scale the rig stands at - instead of a metre
+	# two that was a guess when the goat was its own creature.
+	var chest := 1.12
+	if is_instance_valid(_visual) and _visual.has_method("drawn_height"):
+		chest *= maxf(0.4, float(_visual.drawn_height()))
 	var glow := OmniLight3D.new()
 	glow.name = "Hellfire"
-	glow.position = Vector3(0.0, 1.2, 0.0)
+	glow.position = Vector3(0.0, chest, 0.0)
 	glow.light_color = Color(1.0, 0.28, 0.12)
 	# The floor is built `Layout.SCALE` times its drawn size, and the light under the
 	# master goes with it: the same glow at twice the distance.
@@ -85,6 +101,14 @@ func _ready() -> void:
 ## keeps no watcher's kit (see `delve_loot.settle`).
 func demon() -> bool:
 	return true
+
+
+## The spells this body throws, in the order its brain tries them. Every number is
+## `demon_fire.gd`'s table: which spells a body has is the only thing here.
+func _fire_kit() -> Array[String]:
+	var kit: Array[String] = []
+	kit.assign(BOSS_FIRE if boss else KEEPER_FIRE)
+	return kit
 
 
 ## Commit to a body: the world's retarget calls this for a hostile that is not

@@ -103,8 +103,10 @@ const PARTY_DEFENSIVE := "defensive"
 const PARTY_PASSIVE := "passive"
 ## Most willing first: the order the menu lays them out in.
 const PARTY_MODES: Array[String] = [PARTY_OFFENSIVE, PARTY_DEFENSIVE, PARTY_PASSIVE]
-## What a warband that was never told otherwise fights as - a fresh one, a v8 file.
-const DEFAULT_PARTY_MODE := PARTY_OFFENSIVE
+## What a warband that was never told otherwise fights as: a fresh one, a v8 file.
+## The band answers before it hunts - the soul's own blade is what starts a fight,
+## and a squad that goes looking for one is a choice the player makes at the menu.
+const DEFAULT_PARTY_MODE := PARTY_DEFENSIVE
 
 # --- the party member's disposition ----------------------------------------
 
@@ -366,8 +368,12 @@ const REVIVE_CHANNEL_SECONDS := 5.0
 ## Mercenaries in a warband have identical base stats: gear is the only lever.
 const BASE_MAX_HEALTH := 100.0
 const BASE_MAX_STAMINA := 1000.0
-## How many mercenaries a warband may swear in.
-const MAX_DEPLOYMENT_CAP := 8
+## How many bodies a warband may stand on the field: the soul and two it can
+## hop between. One player can drive and *watch* three units; past that the band
+## is a blur, the hotkeys are a juggling act and dressing eight paperdolls is a
+## chore no one performs by hand. Every place that reads a roster size reads it
+## from here, so this one number is the roster, the hotkeys and the HUD.
+const MAX_DEPLOYMENT_CAP := 3
 ## How close a human must stand to hold a revive channel.
 const REVIVE_REACH := 2.5
 ## Seconds a downed body survives before bleeding out, and its crawl pace.

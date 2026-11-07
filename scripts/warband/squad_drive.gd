@@ -2511,8 +2511,11 @@ func _hold(actor) -> void:
 
 
 ## A squadmate takes a drop for themselves: the vacuum books the piece into the
-## shared stash and the body wears it, because the player's pickup rule would arm
-## the soul instead. Silent on purpose.
+## shared stash and, if the ally is still bare-handed, the body wears it - the
+## player's pickup rule would arm the soul instead. An ally who already holds a
+## weapon only gets the stash row: `auto_equip` only ever fills a bare hand, and a
+## body that is mid-swing is not stopped to hold a spare it will not carry. Silent
+## on purpose.
 func _take(actor, merc_id: int, pickup) -> void:
 	if loot == null:
 		return
@@ -2520,7 +2523,9 @@ func _take(actor, merc_id: int, pickup) -> void:
 	var result: Dictionary = loot.quick_loot(pickup, 0)
 	if not bool(result.get("ok", false)):
 		return
-	warband.auto_equip(merc_id, item_id)
+	var worn: Dictionary = warband.auto_equip(merc_id, item_id)
+	if not bool(worn.get("ok", false)):
+		return
 	controller.refresh_gear(merc_id)
 	actor.combat.stop()
 

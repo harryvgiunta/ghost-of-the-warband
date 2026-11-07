@@ -85,6 +85,10 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = TEST_SAVE
 	warband.reset_state()
+	# The soul layer is one key per place on the field, whatever the cap is: this
+	# harness stands a wide field so every kit class is exercised, and the shipped
+	# game fields three (`Contracts.MAX_DEPLOYMENT_CAP`).
+	warband.deployment_cap = KITS.size()
 
 	var merc_ids: Array[int] = []
 	for index in KITS.size():

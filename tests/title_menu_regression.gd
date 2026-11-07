@@ -388,7 +388,7 @@ func _check_cache_restart() -> void:
 ## never writes over a saved one" is the whole point of the ledger.
 func _check_campaign_doors() -> void:
 	# NEW CAMPAIGN: a name, a new folder, and a fresh warband and purse in the
-	# cages, while the campaign already saved keeps its bodies.
+	# square, while the campaign already saved keeps its bodies.
 	_clear_ledger()
 	var kept := _seed_save(true)
 	warband.load_state()
@@ -403,8 +403,9 @@ func _check_campaign_doors() -> void:
 	if audio != null:
 		check(audio.last_event == "menu_thud", "NEW CAMPAIGN sounds as a door (%s)" % audio.last_event)
 		check(audio.music_track == "warband", "NEW CAMPAIGN hands the score to the campaign (%s)" % audio.music_track)
-	check(flow.world_start == "camp", "NEW CAMPAIGN starts at the cages (%s)" % flow.world_start)
-	check(warband.roster.count() == 0, "NEW CAMPAIGN begins a fresh warband (%d bodies)" % warband.roster.count())
+	check(flow.world_start == "town", "NEW CAMPAIGN starts in the square (%s)" % flow.world_start)
+	check(warband.roster.count() == warband.STARTING_BAND.size(),
+		"NEW CAMPAIGN begins with its own band (%d bodies)" % warband.roster.count())
 	check(warband.gold() == int(state.STARTING_CREDITS),
 		"NEW CAMPAIGN starts on the starting purse (%d)" % warband.gold())
 	check(flow.warband_intent.is_empty(), "NEW CAMPAIGN is a campaign of this machine's own")
@@ -452,8 +453,9 @@ func _check_campaign_doors() -> void:
 	check(str(intent.get("name", "")) == "HostRanger", "NEW GAME seats the host's name")
 	check(str(intent.get("scene", "")) == flow.WORLD_SCENE, "NEW GAME opens the campaign world")
 	check(flow.session != null, "NEW GAME creates the warband session")
-	check(flow.world_start == "camp", "NEW GAME starts at the cages (%s)" % flow.world_start)
-	check(warband.roster.count() == 0, "NEW GAME begins a fresh warband")
+	check(flow.world_start == "town", "NEW GAME starts in the square (%s)" % flow.world_start)
+	check(warband.roster.count() == warband.STARTING_BAND.size(),
+		"NEW GAME begins with its own band")
 	check(not title._host_layer.visible, "hosting closes the panel")
 	check(cache.host_port == port, "hosting remembers its own port")
 	check(cache.port == 8123 and cache.address == "100.64.0.12", "hosting leaves the join endpoint untouched")

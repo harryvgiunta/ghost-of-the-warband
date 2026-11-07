@@ -90,8 +90,7 @@ static func _apart(visual: Node3D, skeleton: Skeleton3D, root: Vector3,
 	var middle := Vector3(root.x, root.y + 1.0, root.z)
 	var frame := Transform3D(skeleton.get_global_transform().basis.orthonormalized(),
 		middle)
-	var halves := SeveredHead.build_sides(visual, skeleton, frame, normal,
-		normal.dot(frame.affine_inverse() * root))
+	var halves := SeveredHead.build_sides(visual, skeleton, frame, normal)
 	if halves[0] == null and halves[1] == null:
 		return null
 	# Every layer the corpse was drawing goes - the skinned body, the static one

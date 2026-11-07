@@ -184,8 +184,6 @@ func check_anoint() -> void:
 	stash.add("sword_short", 1)
 	stash.add("ring_silver", 1)
 	stash.add(reagent, 1)
-	check(warband.quests.offer("bind_the_ichor") and bool(warband.quests.accept("bind_the_ichor").get("ok", false)),
-		"the ichor order is on the ledger")
 
 	# A body dressed off the roster, the way every scene fields one.
 	var field := Node3D.new()
@@ -234,7 +232,6 @@ func check_anoint() -> void:
 		"the piece took an ability")
 	check(warband.annoints.has("bow_short", 0, str(entry.id)), "the copy carries it")
 	check(stash.pooled_count(reagent) == 0, "exactly one ichor left the shared stash")
-	check(warband.quests.is_complete("bind_the_ichor"), "the ichor order heard about it")
 	var skill_id := str(entry.ability)
 	var main_welds: Array = warband.annointment_skills(merc).get("main", [])
 	check(main_welds.has(skill_id),
@@ -427,18 +424,44 @@ func check_bench() -> void:
 	check(menu.selected_anoint_item() == "sword_arming",
 		"a refused piece leaves the square alone")
 
-	# The one button works the piece in the square, and the square keeps it. The
-	# roll may come back with nothing to take (a vial can be spent for nothing),
-	# so the bench must announce the rite exactly when the copy really changed.
+	# The one button takes the cheapest weld the rack offers - never a die - and
+	# the bench must announce the rite exactly when the copy really changed.
+	# The rack is paid in cruor, so the sandbox makes sure the altar's own pool
+	# has some: a warband that has killed a warden has plenty.
+	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 20)
+	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 10)
+	# The one button takes the cheapest weld the rack offers - never a die - so
+	# the check picks a copy the rack still has room for.
+	var pick_item := ""
+	var pick_row: Dictionary = {}
+	for carried in warband.stash.available_ids(warband.roster):
+		for row in warband.weld_options(str(carried), 0):
+			if not str(row.get("reason", "")).is_empty():
+				continue
+			if pick_row.is_empty() or int(row.get("cost_count", 0)) < int(pick_row.get("cost_count", 0)):
+				pick_row = row
+				pick_item = str(carried)
+		if not pick_row.is_empty():
+			break
+	check(not pick_row.is_empty(), "the rack offers a weld on something")
+	if pick_row.is_empty():
+		return
+	check(menu.select_anoint_item(pick_item, 0), "the copy is laid on the altar (%s)" % pick_item)
 	var before: int = stash.pooled_count("ichor_vial")
-	var before_ids: Array = warband.annoints.ids("sword_arming", 0)
+	var before_cruor: int = warband.cruor.tier_count(int(pick_row.get("cost_tier", 0)))
+	var before_ids: Array = warband.annoints.ids(pick_item, 0)
 	var hits := changed_hits
 	menu.anoint_button().pressed.emit()
-	check(stash.pooled_count("ichor_vial") == before - 1, "the one button spends one vial")
-	var after_ids: Array = warband.annoints.ids("sword_arming", 0)
+	check(stash.pooled_count("ichor_vial") == before - int(pick_row.get("vials", 0)),
+		"the one button spends the weld's ichor (%d -> %d)" % [before, stash.pooled_count("ichor_vial")])
+	check(warband.cruor.tier_count(int(pick_row.get("cost_tier", 0))) ==
+		before_cruor - int(pick_row.get("cost_count", 0)),
+		"and the cruor the row names")
+	var after_ids: Array = warband.annoints.ids(pick_item, 0)
+	check(after_ids.has(str(pick_row.get("entry_id", ""))), "the weld is on the copy")
 	check((changed_hits == hits + 1) == (after_ids != before_ids),
 		"the bench announces the rite exactly when the copy changed")
-	check(menu.selected_anoint_item() == "sword_arming", "the worked piece stays in the square")
+	check(menu.selected_anoint_item() == pick_item, "the worked piece stays in the square")
 	check(stash.pooled_count("dagger_ironwood") == 1, "the chips spend nothing by being pressed")
 
 	# Taking the piece off leaves nothing to work, and the button says so by

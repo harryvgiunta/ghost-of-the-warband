@@ -127,6 +127,9 @@ var _unbind_rows: Array[Dictionary] = []
 var _distill_rows: Array[Dictionary] = []
 var _brand_rows: Array[Dictionary] = []
 var _anoint_rows: Array[Dictionary] = []
+## The welds the laid copy can still take, and what each costs (`Warband.weld_options`).
+var _weld_rows: Array[Dictionary] = []
+var _weld_box: VBoxContainer
 var _brand_item := ""
 var _brand_tier: int = Contracts.CruorTier.T1_RITUAL_TALLOW
 
@@ -259,6 +262,11 @@ func brand_rows() -> Array[Dictionary]:
 func anoint_rows() -> Array[Dictionary]:
 	return _anoint_rows
 
+## The deterministic rack: one row per weld the laid copy could take, with its
+## price. `press_weld(entry_id)` takes it or is refused; there is no die.
+func weld_rows() -> Array[Dictionary]:
+	return _weld_rows
+
 ## Which copies the rack lists: `RACK_ALL` or `RACK_WORN` (currently equipped).
 func rack_filter() -> String:
 	return RACK_WORN if _rack_only_worn else RACK_ALL
@@ -384,11 +392,30 @@ func select_brand_tier(tier: int) -> bool:
 
 ## The one brass button: work whatever copy the square holds. A button nobody
 ## can pay for still presses, so the refusal is read rather than guessed at.
+## The one brass ANOINT, and it is no longer a die: it takes the **cheapest weld
+## the rack is offering** for the copy in the square. A player who wants a
+## particular one presses that row instead (`press_weld`); the button is for the
+## body who just wants the next rung, and it never spends on a gamble.
 func press_anoint_selected() -> void:
 	if _socket_item.is_empty():
 		_set_status("Lay a piece on the altar first.", false)
 		return
-	press_anoint(_socket_item, _socket_ordinal)
+	var best: Dictionary = {}
+	for row in weld_rows():
+		if not str(row.get("reason", "")).is_empty():
+			continue
+		if best.is_empty() or int(row.get("cost_count", 0)) < int(best.get("cost_count", 0)):
+			best = row
+	if best.is_empty():
+		var why := "The altar takes nothing: the piece is full or the cruor is short."
+		for row in weld_rows():
+			if not str(row.get("reason", "")).is_empty():
+				why = str(row["reason"])
+				break
+		_set_status(why, false)
+		_bench_report(why, false)
+		return
+	press_weld(str(best.get("entry_id", "")), _socket_item, _socket_ordinal)
 
 ## Lay the altar's reagents on one copy of a piece. The spend, the ledger and the
 ## orders are the warband's (`Warband.anoint`); a refusal is printed, never
@@ -409,11 +436,55 @@ func press_anoint(item_id: String, ordinal: int = -1) -> void:
 	_in_rite = true
 	var result: Dictionary = warband.anoint(item_id, ordinal)
 	_in_rite = false
-	var completed: Variant = result.get("completed", [])
-	if bool(result.get("ok", false)) and completed is Array and not (completed as Array).is_empty():
-		result["message"] = str(result.get("message", "")) \
-			+ "  ·  Tell the quartermaster what the steel can do now."
 	_report(result, true)
+
+## Take one weld off the rack, for its price. The row's own id is the whole
+## choice: the verb refuses a weld the piece cannot take or a purse that cannot
+## pay it, so the panel only reports what the books said.
+func press_weld(entry_id: String, item_id: String = "", ordinal: int = -1) -> Dictionary:
+	if warband == null or not warband.has_method("weld"):
+		_set_status("No warband to work steel for.", false)
+		return {"ok": false, "message": "No warband."}
+	var piece := item_id if not item_id.is_empty() else _socket_item
+	var copy := ordinal if ordinal >= 0 else _socket_ordinal
+	_socket_item = piece
+	_socket_ordinal = copy
+	_in_rite = true
+	var result: Dictionary = warband.weld(piece, copy, entry_id)
+	_in_rite = false
+	_report(result, true)
+	return result
+
+
+## Repaint the rack for the copy in the square: its name, its kind and its price,
+## one press per row. A row the books would refuse says why before it is pressed.
+func _paint_weld_rack() -> void:
+	if _weld_box == null:
+		return
+	for child in _weld_box.get_children():
+		_weld_box.remove_child(child)
+		child.queue_free()
+	_weld_rows.clear()
+	if warband == null or not warband.has_method("weld_options") or _socket_item.is_empty():
+		return
+	var options: Array = warband.weld_options(_socket_item, _socket_ordinal)
+	for option in options:
+		var row: Dictionary = option
+		_weld_rows.append(row)
+		var button := Button.new()
+		button.name = "Weld_%s" % str(row.get("entry_id", ""))
+		button.text = "%s  ·  %s  ·  %d %s%s" % [str(row.get("name", "")),
+			str(row.get("kind_name", "")), int(row.get("cost_count", 0)),
+			str(row.get("cost_name", "")),
+			"" if int(row.get("vials", 0)) <= 0 else " + ichor"]
+		button.tooltip_text = str(row.get("reason", "")) if not str(row.get("reason", "")).is_empty() \
+			else str(row.get("line", ""))
+		button.custom_minimum_size = Vector2(0, 34)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.disabled = not str(row.get("reason", "")).is_empty()
+		button.pressed.connect(func() -> void: press_weld(str(row.get("entry_id", ""))))
+		_weld_box.add_child(button)
+
 
 ## Say what the rite did, under the button that did it.
 func _bench_report(text: String, ok: bool) -> void:
@@ -936,6 +1007,7 @@ func _paint_rack_row(parts: Dictionary, row: Dictionary) -> void:
 func _paint_anoint() -> void:
 	if _anoint_socket == null or _anoint_button == null:
 		return
+	_paint_weld_rack()
 	var row := _anoint_row_for(_socket_item, _socket_ordinal)
 	var stash := _stash()
 	var reagent := WarbandCruor.BASIC_REAGENT
@@ -1482,6 +1554,10 @@ func _build() -> void:
 	_anoint_button.theme_type_variation = "PrimaryButton"
 	_anoint_button.pressed.connect(press_anoint_selected)
 	bench.add_child(_anoint_button)
+	_weld_box = VBoxContainer.new()
+	_weld_box.name = "WeldRack"
+	_weld_box.add_theme_constant_override("separation", 4)
+	bench.add_child(_weld_box)
 
 	# What the last press did, at the press: the bench reports itself instead of
 	# sending the player to a line at the foot of the frame.
