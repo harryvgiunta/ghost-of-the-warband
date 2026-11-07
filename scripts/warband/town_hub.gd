@@ -1195,9 +1195,10 @@ func _panel_open() -> bool:
 ## A first-run warband, so the square is playable from its first minute. An
 ## existing warband (from a save or the camp) is never touched. The world calls
 ## this only when the campaign starts in the town; a camp start has already stood
-## its prisoners up. The body itself comes naked (`seed_starting_band`) and is
-## never dressed here: the square only stocks the shared stash and the quiver, so
-## the first piece he wears is one he takes off a kill.
+## its prisoners up. The body comes out of `seed_starting_band` with the one club
+## the campaign issues and nothing else, and is never dressed here: the square only
+## stocks the shared stash and the quiver, so the rest of the kit is won off the
+## kills it makes.
 func seed_warband() -> void:
 	if not warband.roster.is_empty():
 		return

@@ -63,8 +63,9 @@ func run() -> void:
 		_finish()
 		return
 	check(flow.world_start == "town", "at Hearthstead, which is where a run starts")
-	# A fresh band is one naked body: nothing is issued at the door, and every
-	# piece it ends the run in is taken off a kill.
+	# A fresh band is one body and the one club the campaign issues: nothing else
+	# is handed over at the door, and every piece it ends the run in is taken off
+	# a kill.
 	check(world.bodies.size() == warband.STARTING_BAND.size(),
 		"the square fields the starting band (%d bodies)" % world.bodies.size())
 	check(warband.roster.count() == warband.STARTING_BAND.size(),

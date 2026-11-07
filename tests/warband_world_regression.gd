@@ -306,13 +306,24 @@ func check_one_of_each() -> void:
 	check(game.squad != null and game.squad.watchers == game.guards,
 		"the squad drives the world's one hostile list, not a copy")
 	# A new campaign starts in the town with the band `Warband.STARTING_BAND`
-	# names - one naked body - and the soul is inside it.
+	# names - one body, the issued club in its hand - and the soul is inside it.
 	check(game.start_area == "town", "a new campaign opens in the town (%s)" % game.start_area)
 	check(game.bodies.size() == warband.STARTING_BAND.size(),
 		"the starting band stands in the square (%d bodies for %d sworn)"
 			% [game.bodies.size(), warband.STARTING_BAND.size()])
 	check(warband.roster.count() == warband.STARTING_BAND.size(),
 		"and that is the whole of it (%d sworn)" % warband.roster.count())
+	# The one piece the campaign issues: a club in the main hand, out of the shared
+	# pool. A body that opens the run bare-handed cannot cut a latch or win the
+	# wood's first duel, and the runts in the warcamps are tuned for exactly this.
+	var starting_id: int = warband.roster.ids()[0] if warband.roster.count() > 0 else 0
+	var starting_gear: Dictionary = warband.roster.equipped_of(starting_id) \
+		if starting_id > 0 else {}
+	check(str(starting_gear.get("main", "")) == warband.STARTING_ARMS,
+		"the starting body opens with the issued club (%s)"
+			% str(starting_gear.get("main", "")))
+	check(warband.stash.owns(warband.STARTING_ARMS, warband.roster),
+		"and the issued club is a piece the warband owns, not a phantom hand")
 	var local = game.controller.active_body(1)
 	check(local != null, "the local soul starts inside a body")
 	check(local != null and game.town.in_square(local), "and the body it is inside stands in the square")

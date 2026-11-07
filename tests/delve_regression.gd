@@ -199,8 +199,9 @@ var _stayer := -1
 ## square's shelf if the shelf has none of it left.
 const SWORN := [["Brine", "sword_short"], ["Cael", "club_makeshift"]]
 
-## The band a campaign opens with is one naked body (`Warband.STARTING_BAND`), and
-## a naked body alone has nobody below to lose and nothing to lose: the delve's own
+## The band a campaign opens with is one body with the issued club
+## (`Warband.STARTING_BAND`), and one body alone has nobody below to lose and little
+## to lose: the delve's own
 ## party is sworn here, at the square's fire, the way a player swears it - each name
 ## taken onto the roster (`Warband.add_mercenary`) and dressed out of the shared
 ## shelf (`Warband.dress_recruit`), with the one piece the shelf could not spare put
@@ -208,8 +209,8 @@ const SWORN := [["Brine", "sword_short"], ["Cael", "club_makeshift"]]
 ## seated (`WorldScene._sync_field`), so the musters stand in the square a frame or
 ## two before the mouth is used.
 func _swear_party() -> void:
-	# One naked body is what the town seeded (`TownHub.seed_warband`); the two
-	# sworn here are the test's own, and the count every check below reads is this.
+	# One body is what the town seeded (`TownHub.seed_warband`), club in hand; the
+	# two sworn here are the test's own, and the count every check below reads is this.
 	var band: int = warband.STARTING_BAND.size() + SWORN.size()
 	for entry in SWORN:
 		var sworn: int = warband.add_mercenary(str(entry[0]))

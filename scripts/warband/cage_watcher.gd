@@ -4,7 +4,11 @@ extends "res://scripts/forest_mob.gd"
 ##
 ## A watcher is one of the three Unholy Forest mobs - the Hollow warden, the
 ## Ossuary stalker or the Gallowsroot - and it is the wood's creature to look at
-## and a human to fight. `scripts/warband/watcher_visual.gd` dresses the shared
+## and a human to fight, or the Hollow runt: the same creature at a child's build,
+## a third of a body's pool and a third of its blow, which is the only watcher a
+## warband that has just picked up a club can beat.
+##
+## `scripts/warband/watcher_visual.gd` dresses the shared
 ## `Archer` rig with a body skin made from the creature's own mesh
 ## (`tools/prepare_watcher_skins.py`), so the body walks, runs, cuts, guards,
 ## flinches and falls on the ranger's authored clips while every surface on it is
@@ -33,13 +37,34 @@ const ArmorData = preload("res://scripts/armor_data.gd")
 ## The item catalog: a variant names catalog pieces and the corpse lists them.
 const Catalog = preload("res://scripts/player_state.gd")
 
-## The three species the wood fields. `mob_id` is the species, and it is what
-## the scene sets before the body enters the tree; a scene that forgets gets the
-## warden, because that is the camp's gate.
+## The species the wood fields. `mob_id` is the species, and it is what the scene
+## sets before the body enters the tree; a scene that forgets gets the warden,
+## because that is the camp's gate. The runt is the younger warden - the wood's
+## small thing, and the first body a warband with nothing but a club is meant to
+## cut down.
 const WARDEN_ID := "hollow_warden"
 const STALKER_ID := "ossuary_stalker"
 const GALLOWSROOT_ID := "gallowsroot"
-const SPECIES_IDS := [WARDEN_ID, STALKER_ID, GALLOWSROOT_ID]
+const RUNT_ID := "hollow_runt"
+const SPECIES_IDS := [WARDEN_ID, STALKER_ID, GALLOWSROOT_ID, RUNT_ID]
+
+## The pool a hard body carries. The lesson pair sits 30% under its old pool (31);
+## the hard pool is 71 - 30 points off the 101 it had, which made a road watcher a
+## slog to cut down.
+const HARDENED_HEALTH := 71.0
+const PAIR_HEALTH := 31.0
+## The runt's whole point: a third of a hard body's pool and a third of the
+## warden's 16 damage. One share, so the two can never drift apart.
+const RUNT_SHARE := 1.0 / 3.0
+const RUNT_HEALTH := HARDENED_HEALTH * RUNT_SHARE
+const RUNT_DAMAGE := 16.0 * RUNT_SHARE
+## The share of exchanges a runt braces through. It is the first thing an
+## unarmed warband swings at, so it trades rather than turtles.
+const RUNT_GUARD := 0.30
+## The smallest build a runt may be drawn at. The full bodies floor at
+## `SILHOUETTE_FLOOR` (0.88, the table's own narrowest row); a runt is under it on
+## purpose, and `watcher_visual.set_silhouette` accepts down to 0.50.
+const RUNT_SILHOUETTE_FLOOR := 0.50
 
 ## The species' gameplay, inherited from the forest's own numbers so a watcher
 ## moves, reaches and swings like the creature it is. `roam` is zeroed at spawn -
@@ -78,13 +103,24 @@ const WATCHER_PROFILES := {
 		"behaviour": "brute", "strafe": 0.0, "blood": 1.50,
 		"packed": true, "roam": 3.0,
 	},
+	# The wood's small thing: the warden's shape at a third of its body and a
+	# third of its blow, and a shorter reach to go with the smaller arm. `height`
+	# is the authored height every silhouette is scaled from, so a runt stands
+	# ~1.3 m tall once its variant's build is applied - the drawn body and its
+	# capsule shrink together. `gold` is a fourth of the warden's and the corpse
+	# still carries a rag, which is what makes the runts a way to arm a band.
+	RUNT_ID: {
+		"display": "Hollow runt", "kind": 12,
+		"health": RUNT_HEALTH, "damage": RUNT_DAMAGE, "reach": 1.75,
+		"walk_speed": 1.20, "run_speed": 3.20, "orbit": 4.6,
+		"sight": 26.0, "gold": 4,
+		"radius": 0.32, "height": 2.20, "aim": 1.05,
+		"windup": 0.60, "strike": 0.20, "recover": 0.70,
+		"cooldown": 1.70, "lunge": 4.4, "turn": 8.0,
+		"behaviour": "charger", "strafe": 0.70, "blood": 0.60,
+		"packed": true, "roam": 5.0,
+	},
 }
-
-## The pair the lesson fields are thinned bodies; everything else that holds the
-## road is a hard body. The pair is 30% under its old pool (31); the hard pool is
-## 71 - 30 points off the 101 it had, which made a road watcher a slog to cut down.
-const PAIR_HEALTH := 31.0
-const HARDENED_HEALTH := 71.0
 
 ## The makeshift tier, in catalog order. No forged steel is allowed in the camp,
 ## so this is the whole pool a variant may name - and the twig bow is in it
@@ -203,6 +239,32 @@ const VARIANTS := [
 		"main": "dagger_ironwood", "swing": SWING_STAB,
 		"armor": "makeshift", "pieces": ["chest", "head", "legs"],
 		"guard": 0.58, "crouch": true},
+	# The runts: the same warden under a small build, 0.58-0.70 of the rig's own
+	# height. They are the wood's first bodies - one to a camp, standing on the
+	# road's own end of the hunting ground - so their guard share is the lowest in
+	# the table, they carry a club or a shiv and nothing they cannot lift, and the
+	# corpse still offers one rag: the runts are how a band with a club gets the
+	# armour to stand in front of a warden.
+	{"name": "Thin Whelp", "species": RUNT_ID, "scale": 0.62,
+		"tint": Color(0.72, 0.86, 0.62),
+		"main": "club_makeshift", "swing": SWING_SLASH,
+		"armor": "makeshift", "pieces": ["chest"],
+		"guard": 0.24, "crouch": false},
+	{"name": "Ash Whelp", "species": RUNT_ID, "scale": 0.58,
+		"tint": Color(0.84, 0.86, 0.90),
+		"main": "dagger_ironwood", "swing": SWING_STAB,
+		"armor": "naked", "pieces": [],
+		"guard": 0.30, "crouch": true},
+	{"name": "Tallow Whelp", "species": RUNT_ID, "scale": 0.70,
+		"tint": Color(1.00, 0.92, 0.68),
+		"main": "club_makeshift", "swing": SWING_OVERHEAD,
+		"armor": "makeshift", "pieces": ["legs"],
+		"guard": 0.28, "crouch": false},
+	{"name": "Violet Whelp", "species": RUNT_ID, "scale": 0.65,
+		"tint": Color(0.82, 0.74, 0.96),
+		"main": "dagger_ironwood", "swing": SWING_STAB,
+		"armor": "makeshift", "pieces": ["chest"],
+		"guard": 0.26, "crouch": true},
 ]
 
 ## Set before the body enters the tree: the pair Corvin fights are the thinned
@@ -275,6 +337,13 @@ func _ready() -> void:
 	super()
 	name = label
 	variant = _pick_variant()
+	# A runt is a third of a body whatever a scene left the pool at: it is only
+	# ever fielded as the wood's first fight, and a scene that spawns one and
+	# forgets its pool must not stand a full warden's health behind a small body.
+	# A scene that means something else (a scripted bout) sets the pool under the
+	# hard one and keeps it.
+	if mob_id == RUNT_ID and health_pool >= HARDENED_HEALTH:
+		health_pool = RUNT_HEALTH
 	_rng.seed = absi(mob_id.hash()) + _variant_slot * 977 + 17
 	collision_layer = WATCHER_LAYER
 	_shape_body()
@@ -442,6 +511,13 @@ func _pick_variant() -> Dictionary:
 	out["armor"] = worn
 	if worn == "naked":
 		out["pieces"] = []
+	# A runt is the wood's lesser body, not a thinned warden: its rows are the
+	# whole of what it wears and carries, and its guard share is its own - the
+	# thinning below belongs to the lesson's pair, which is the same pool fact
+	# (a body under the hard one) reached from a different table row.
+	if mob_id == RUNT_ID:
+		out["guard"] = minf(float(out.get("guard", 0.5)), RUNT_GUARD)
+		return out
 	if health_pool >= HARDENED_HEALTH:
 		return out
 	# The pair Corvin fights are still their own bodies - their own paint, build
@@ -679,8 +755,15 @@ func _enter_dead(announce: bool, severed := Vector3.ZERO, damage := 0.0,
 ## antler crown stays outside the capsule exactly as the profile's height has it.
 ## The scale goes to the rig (the species' fit scale times this), never to the
 ## body container: the rig's own height drives its head zone and its aim.
+##
+## The floor is the smallest build a full body wears. A runt is deliberately under
+## it - the wood's small thing has to read as small from the road - so the species
+## sets its own floor rather than the table being widened for everyone.
+const SILHOUETTE_FLOOR := 0.88
+const SILHOUETTE_CEILING := 1.30
 func _shape_body() -> void:
-	_body_scale = clampf(float(variant.get("scale", 1.0)), 0.88, 1.30)
+	var floor_scale := RUNT_SILHOUETTE_FLOOR if mob_id == RUNT_ID else SILHOUETTE_FLOOR
+	_body_scale = clampf(float(variant.get("scale", 1.0)), floor_scale, SILHOUETTE_CEILING)
 	var capsule: CapsuleShape3D = null
 	if is_instance_valid(_collision):
 		capsule = _collision.shape as CapsuleShape3D

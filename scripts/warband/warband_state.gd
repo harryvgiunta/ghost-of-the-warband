@@ -497,24 +497,41 @@ func reap_dead() -> Array[Dictionary]:
 func _on_merc_died(_merc_id: int) -> void:
 	reap_dead()
 
-## The band a new campaign opens with: one body, and nothing else. He is naked on
-## purpose - the naked base set the paperdoll draws for an empty slot is all he
-## wears - because a campaign's kit is won, not issued: every piece he ends the
-## run with came off a body he put down (`arm_one_piece`) or out of a cage.
+## The band a new campaign opens with: one body, one club. He is naked apart from
+## the naked base set the paperdoll draws for an empty slot - the rest of a
+## campaign's kit is won, not issued, and every piece he ends the run with came off
+## a body he put down (`arm_one_piece`) or out of a cage.
 const STARTING_BAND := [
 	{"name": "Aldous"},
 ]
+## The one piece a campaign issues: a knotted club, in the main hand, in the
+## shared stash before it is worn. A body that opens the run with bare hands can
+## neither cut a latch (`soldier_cages.holds_blade`) nor take the first corpse's
+## kit, and the wood's first fight is a runt precisely so that this club wins it.
+const STARTING_ARMS := "club_makeshift"
 
-## Seed a campaign's one starting body, naked. An existing warband is never
-## touched: a resume, a lend or a second boot of the same save must not multiply
-## the band. Nothing is equipped here - the pool is the only armorer.
+## Seed a campaign's one starting body, naked but for the club. An existing warband
+## is never touched: a resume, a lend or a second boot of the same save must not
+## multiply the band. The club walks the one path every other piece walks - into
+## the shared stash and then onto the body through `equip_merc` - so the pool stays
+## the only armorer and the purse is never charged for it.
 func seed_starting_band() -> int:
 	if not roster.is_empty():
 		return roster.count()
 	for entry in STARTING_BAND:
-		add_mercenary(str(entry["name"]))
+		var merc_id := add_mercenary(str(entry["name"]))
+		_issue_starting_arms(merc_id)
 	_notify()
 	return roster.count()
+
+
+## Put the campaign's one club in a fresh body's hand. Silent: the seeding owns the
+## single notify, and a piece that came out of the pool is not a purchase.
+func _issue_starting_arms(merc_id: int) -> void:
+	if merc_id <= 0 or not roster.is_alive(merc_id):
+		return
+	field_stash().add(STARTING_ARMS, 1)
+	equip_merc(merc_id, "main", STARTING_ARMS, false, false)
 
 
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:

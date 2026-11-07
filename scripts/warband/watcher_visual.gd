@@ -32,12 +32,17 @@ const Catalog = preload("res://scripts/player_state.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
 
-## The three watcher species, by the mob id a scene sets: the skin the fit tool
+## The watcher species, by the mob id a scene sets: the skin the fit tool
 ## exported, the creature GLB whose PBR atlases it borrows (the skin ships no
 ## images of its own), and the measured fit scale - the creature's neck height
 ## over the ranger's, which is both how the skin was authored and how tall the
 ## body stands at runtime. `tests/watcher_variants_regression.gd` compares the
-## three numbers against the exported metadata.
+## three skin numbers against the exported metadata.
+##
+## The Hollow runt wears the warden's own skin and its own atlases: it is the same
+## creature, younger, so its fit is the warden's measured one and its size comes
+## from the variant's silhouette (`cage_watcher.VARIANTS`, 0.58-0.70 against the
+## full bodies' 0.88-1.30) rather than from a second export.
 const SPECIES := {
 	"hollow_warden": {
 		"skin": "res://assets/characters/watchers/ironwood_watcher_hollow_warden.glb",
@@ -59,6 +64,13 @@ const SPECIES := {
 		"node": "Watcher_Gallowsroot",
 		"fit": 1.1444,
 		"display": "Gallowsroot",
+	},
+	"hollow_runt": {
+		"skin": "res://assets/characters/watchers/ironwood_watcher_hollow_warden.glb",
+		"materials": "res://assets/characters/forest/ironwood_hollow_warden.glb",
+		"node": "Watcher_HollowWarden",
+		"fit": 1.1312,
+		"display": "Hollow runt",
 	},
 }
 ## A watcher is a warden whatever an older scene sets.

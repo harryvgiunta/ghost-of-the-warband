@@ -17,8 +17,9 @@ extends SceneTree
 ##   2. **The latch.** Bare hands answer the press and change nothing; a blade in
 ##      reach cuts the cage; a second press does nothing; the one press puts one
 ##      name on the roll and empties the rescue order's marker.
-##   3. **The warren.** Every camp in `WatcherWarren.CAMPS`, `CAMP_SIZE`
-##      `hollow_warden` bodies each, every one of them in the world's hostile
+##   3. **The warren.** Every camp in `WatcherWarren.CAMPS`, each fielding the
+##      row's own body count (one each: the three nearest town a `hollow_runt`,
+##      the rest a `hollow_warden`), every one of them in the world's hostile
 ##      list, on the ground, off the lane and clear of the town's wall - one of
 ##      them killed through the signal path counts toward the watcher bounty, and
 ##      that camp alone refills its fallen on its own clock while the others are
@@ -37,6 +38,7 @@ const TownScript = preload("res://scripts/warband/town_hub.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const State = preload("res://scripts/player_state.gd")
+const WatcherScript = preload("res://scripts/warband/cage_watcher.gd")
 
 ## The world's own build is a heightfield and a wood; this is the ceiling for it.
 const WORLD_TIMEOUT := 45.0
@@ -261,12 +263,14 @@ func _check_warren(body) -> void:
 		return
 	await create_timer(0.6).timeout
 
-	# Every count is the camp table's own arithmetic: `CAMPS.size()` camps of
-	# `CAMP_SIZE` bodies, and the module's `total()` is the table read back.
-	var fielded: int = WarrenScript.CAMPS.size() * WarrenScript.CAMP_SIZE
+	# Every count is the camp table's own arithmetic: the rows' `members` summed,
+	# and the module's `total()` is that same table read back.
+	var fielded := 0
+	for row in WarrenScript.CAMPS:
+		fielded += int(row.get("members", WarrenScript.CAMP_MEMBERS))
 
-	check(warren.total() == fielded, "the warren is %d camps of %d (%d)"
-		% [WarrenScript.CAMPS.size(), WarrenScript.CAMP_SIZE, warren.total()])
+	check(warren.total() == fielded, "the warren is %d camps, %d bodies (%d)"
+		% [WarrenScript.CAMPS.size(), fielded, warren.total()])
 	check(warren.camps().size() == WarrenScript.CAMPS.size(),
 		"every camp in the table stands in the wood (%d)" % warren.camps().size())
 	check(warren.mobs().size() == fielded, "%d wardens were fielded (%d)"
@@ -283,6 +287,12 @@ func _check_warren(body) -> void:
 	var listed := 0
 	var named := 0
 	var closest := INF
+	# What species each camp's row asked for, by body: the field is asked to be the
+	# table, row for row, not to be one creature repeated.
+	var camp_species := {}
+	for camp_index in WarrenScript.CAMPS.size():
+		for mob in warren.camps()[camp_index]["mobs"] as Array:
+			camp_species[mob] = str(WarrenScript.CAMPS[camp_index]["species"])
 	var path = game.trail.forest.get("path")
 	for mob in warren.mobs():
 		var at: Vector3 = mob.global_position
@@ -292,7 +302,7 @@ func _check_warren(body) -> void:
 			outside += 1
 		if game.guards.has(mob):
 			listed += 1
-		if str(mob.mob_id) == "hollow_warden":
+		if str(mob.mob_id) == str(camp_species.get(mob, "")):
 			named += 1
 		closest = minf(closest, path.distance_to(Vector2(at.x, at.z)))
 	check(on_ground == fielded, "every warden stands on the ground (%d of %d)"
@@ -301,8 +311,29 @@ func _check_warren(body) -> void:
 		% [wall + WALL_CLEARANCE, outside, fielded])
 	check(listed == fielded, "every warden is on the world's one hostile list (%d of %d)"
 		% [listed, fielded])
-	check(named == fielded, "every warden is a hollow warden (%d of %d)"
+	check(named == fielded, "every camp fields the species its row names (%d of %d)"
 		% [named, fielded])
+	# The ladder the first grind is built on: one body a camp, and the three camps
+	# nearest the town are the runts.
+	var lone := 0
+	for camp in warren.camps():
+		if (camp["mobs"] as Array).size() == 1:
+			lone += 1
+	check(lone == fielded, "every camp is one body, so every fight is a duel (%d of %d)"
+		% [lone, fielded])
+	var runts := 0
+	for camp_index in WarrenScript.CAMPS.size():
+		if str(WarrenScript.CAMPS[camp_index]["species"]) != WatcherScript.RUNT_ID:
+			continue
+		runts += 1
+		check(float(WarrenScript.CAMPS[camp_index]["fraction"]) > 0.5,
+			"the runts stand on the town's end of the walk (camp %d at %.2f)"
+				% [camp_index + 1, float(WarrenScript.CAMPS[camp_index]["fraction"])])
+		var runt = (warren.camps()[camp_index]["mobs"] as Array)[0]
+		check(is_equal_approx(float(runt.max_health), WatcherScript.RUNT_HEALTH),
+			"and carry a third of a hard pool (%.2f of %.2f)"
+				% [float(runt.max_health), WatcherScript.HARDENED_HEALTH])
+	check(runts >= 2, "the wood fields more than one runt camp (%d)" % runts)
 	check(closest >= LATERAL_MIN,
 		"no warden stands inside %.0f m of the lane (nearest is %.1f m)"
 		% [LATERAL_MIN, closest])
@@ -374,9 +405,9 @@ func _check_warren(body) -> void:
 	for member in warren.camps()[0]["mobs"]:
 		if is_instance_valid(member) and bool(member.get("alive")):
 			camp_standing += 1
-	check(camp_standing == WarrenScript.CAMP_SIZE,
+	check(camp_standing == WarrenScript.CAMPS[0]["members"],
 		"the cut camp is back to its own %d wardens (%d standing)"
-			% [WarrenScript.CAMP_SIZE, camp_standing])
+			% [int(WarrenScript.CAMPS[0]["members"]), camp_standing])
 	var revived = (warren.camps()[0]["mobs"] as Array)[0]
 	check(is_instance_valid(revived) and bool(revived.get("alive")),
 		"the warden is back on his feet")
@@ -401,9 +432,10 @@ func _check_warren(body) -> void:
 			if mobs[slot] == before[index - 1][slot]:
 				untouched += 1
 	# Every camp but the cut one, as the table lays them out.
-	check(untouched == (WarrenScript.CAMPS.size() - 1) * WarrenScript.CAMP_SIZE,
+	var others := fielded - int(WarrenScript.CAMPS[0]["members"])
+	check(untouched == others,
 		"the other camps are exactly the bodies they were (%d of %d)"
-			% [untouched, (WarrenScript.CAMPS.size() - 1) * WarrenScript.CAMP_SIZE])
+			% [untouched, others])
 	print("WILD_CAGES_WARREN camps=%s mobs=%d" % [
 		str(warren.camp_points().map(func(p: Vector3) -> String:
 			return "(%.1f,%.2f,%.1f)" % [p.x, p.y, p.z])), warren.mobs().size()])

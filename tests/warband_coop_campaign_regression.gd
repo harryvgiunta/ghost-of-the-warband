@@ -342,8 +342,7 @@ func _host_run() -> void:
 	# built on both machines with the same names, which is what lets the state
 	# find it.
 	var combat_actor = flow.session.controller.body_for_peer(guest_peer)
-	var warren = world.get("watcher_warren")
-	var warden = warren.get_node_or_null("HollowWarden1_1") if warren != null else null
+	var warden = _warren_body(world, 0)
 	check(warden != null, "The host fields the warcamp's wardens")
 	if warden != null and combat_actor != null and is_instance_valid(combat_actor):
 		# Far enough that a warden that wakes up has nobody in its sight (its own
@@ -363,7 +362,7 @@ func _host_run() -> void:
 		var entries: Array = flow.session.collect_mob_entries(70.0)
 		var named := false
 		for entry in entries:
-			if str(entry[0]) == "HollowWarden1_1":
+			if str(entry[0]) == str((warden as Node).name):
 				named = true
 		check(named, "The host's mob stream names the warden")
 		# Where the body actually came to rest, not the point the test asked for:
@@ -566,7 +565,7 @@ func _host_run() -> void:
 		# A death is a one-shot fact on the reliable channel: the guest's copy of
 		# a body killed on the host falls here even when every pose packet for it
 		# was lost, instead of standing over the host's corpse forever.
-		var dying = warren.get_node_or_null("HollowWarden1_2") if warren != null else null
+		var dying = _warren_body(world, 1)
 		if dying != null and combat_actor != null and is_instance_valid(combat_actor):
 			var dead_at: Vector3 = (combat_actor as Node3D).global_position + Vector3(3.0, 0.0, 0.0)
 			dying.global_position = dead_at
@@ -917,9 +916,7 @@ func _on_probe(tag: String) -> void:
 			"corpse": int(ids[0])})
 		return
 	elif tag == "mob" or tag == "mob_gone" or tag == "mob_dead":
-		var warren = world.get("watcher_warren")
-		var watched := "HollowWarden1_2" if tag == "mob_dead" else "HollowWarden1_1"
-		var warden = warren.get_node_or_null(watched) if warren != null else null
+		var warden = _warren_body(world, 1 if tag == "mob_dead" else 0)
 		var payload := {"kind": "probe", "tag": tag, "replica": false, "resting": true,
 			"pos": [0.0, 0.0, 0.0], "visible": false, "stale": false, "alive": true}
 		# A hitch can empty the guest's receive for longer than a poll: wait for
@@ -962,12 +959,26 @@ func _on_probe(tag: String) -> void:
 
 ## The newest mob tick the guest's warden copy has been handed, -1 for none.
 func _mob_tick() -> int:
-	var warren = world.get("watcher_warren") if world != null else null
-	var warden = warren.get_node_or_null("HollowWarden1_1") if warren != null else null
+	var warden = _warren_body(world, 0)
 	if warden == null or not is_instance_valid(warden):
 		return -1
 	var timeline = warden.get("_timeline")
 	return int(timeline.newest_tick()) if timeline != null else -1
+
+
+## A warcamp body by its place in the field, on whichever machine this runs on.
+## The camps are built from `WatcherWarren.CAMPS` on both peers and the table's
+## own order is the spawn order, so index 0 is the same body on the host and on the
+## guest - which is the property the mob stream is asked about. The names off the
+## table would do too; the index does not have to know them.
+func _warren_body(world_in, index: int):
+	var warren = world_in.get("watcher_warren") if world_in != null else null
+	if warren == null:
+		return null
+	var fielded: Array = warren.mobs()
+	if index < 0 or index >= fielded.size():
+		return null
+	return fielded[index]
 
 
 ## The guest's own copy of a named drop, or null while it has not landed yet.

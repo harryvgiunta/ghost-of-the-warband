@@ -113,6 +113,7 @@ func run() -> void:
 	check_bodies()
 	await check_blood()
 	check_pairs()
+	await check_runts()
 	await check_weapon()
 	check_arm_round_trip()
 	check_gear()
@@ -226,8 +227,13 @@ func check_table() -> void:
 		check(Catalog.ITEMS.has(main_id), "the table's main is catalog gear (%s)" % main_id)
 		var scale := float(spec.get("scale", 0.0))
 		scales.append(scale)
-		check(scale >= 0.88 and scale <= 1.30,
-			"a body scale stays inside 0.88-1.30 (%f)" % scale)
+		# A full body is floored at the smallest build the wood draws a warden at;
+		# the runt is deliberately under it, and its floor is its own.
+		var floor_scale := WatcherScript.RUNT_SILHOUETTE_FLOOR \
+			if species == WatcherScript.RUNT_ID else WatcherScript.SILHOUETTE_FLOOR
+		check(scale >= floor_scale and scale <= WatcherScript.SILHOUETTE_CEILING,
+			"a %s build stays inside %.2f-%.2f (%f)"
+				% [species, floor_scale, WatcherScript.SILHOUETTE_CEILING, scale])
 		var guard := float(spec.get("guard", 1.0))
 		check(guard > 0.0 and guard < 0.70, "a guard share is a share, never certain (%f)" % guard)
 		if bool(spec.get("crouch", false)):
@@ -252,9 +258,10 @@ func check_table() -> void:
 		"the table spans visibly different builds (%.2f-%.2f)" % [scales.min(), scales.max()])
 	check(swings.size() == 3, "the table mixes all three swings (%s)" % str(swings.keys()))
 	check(crouched >= 2, "some watchers are crouch-armed (%d)" % crouched)
-	# Three species, and enough of each that a squad is mixed rather than one
-	# creature and a token.
-	for species in SPECIES:
+	# Every species, and enough rows of each that a squad is mixed rather than one
+	# creature and a token - the runts included, because they are what the first
+	# three camps field.
+	for species in SPECIES + [WatcherScript.RUNT_ID]:
 		check(int(species_seen.get(species, 0)) >= 3,
 			"%s fields at least three variants (%d)" % [species, int(species_seen.get(species, 0))])
 		var rows := WatcherScript.table_for(species)
@@ -403,6 +410,79 @@ func check_pairs() -> void:
 		check(watcher.guard_chance() < 0.56, "the pair still rolls its guard")
 		check(watcher.has_weapon_visual(), "the pair's weapon is in its hand")
 		check(str(watcher.species_id()) in SPECIES, "and it is a creature like the rest")
+
+
+## The runt: the wood's lesser body, and the first fight a warband with a club is
+## given. A third of a hard body's pool, a third of a warden's blow, and small
+## enough on screen that the drawn head and the hit capsule still meet. The floor a
+## full body is clamped to would draw it as a short warden - that is the failure
+## this species exists to avoid, so the build is measured against it.
+func check_runts() -> void:
+	var rows: Array = WatcherScript.table_for(WatcherScript.RUNT_ID)
+	check(not rows.is_empty(), "the runts have their own table rows (%d)" % rows.size())
+	var warden_damage := float((WatcherScript.WATCHER_PROFILES[WatcherScript.WARDEN_ID]
+		as Dictionary).get("damage", 0.0))
+	var bodies: Array = []
+	var x := -0.5 * SPAWN_STEP * float(rows.size())
+	for row in rows:
+		# The hard pool is handed in on purpose: a scene that spawns a runt while
+		# meaning a full body must still get the runt's own third.
+		var watcher = _spawn(_field, "Runt%d" % bodies.size(), WatcherScript.RUNT_ID,
+			Vector3(x, 0.1, 24.0), WatcherScript.HARDENED_HEALTH)
+		bodies.append(watcher)
+		x += SPAWN_STEP
+	await physics_frame
+	await physics_frame
+	check(bodies.size() == rows.size(),
+		"every runt row stands for the measurement (%d of %d)" % [bodies.size(), rows.size()])
+	check(absf(WatcherScript.RUNT_HEALTH * 3.0 - WatcherScript.HARDENED_HEALTH) < 0.001,
+		"the runt's pool is a third of a hard body's (%.2f)" % WatcherScript.RUNT_HEALTH)
+	check(absf(WatcherScript.RUNT_DAMAGE * 3.0 - warden_damage) < 0.001,
+		"and its blow a third of a warden's (%.2f)" % WatcherScript.RUNT_DAMAGE)
+	for raw in bodies:
+		var watcher = raw
+		check(is_instance_valid(watcher) and watcher.alive, "a runt stands on its feet")
+		check(str(watcher.species_id()) == WatcherScript.RUNT_ID,
+			"and is the runt species (%s)" % str(watcher.species_id()))
+		check(str(watcher.species_display()) == "Hollow runt",
+			"under the wood's own name for it (%s)" % str(watcher.species_display()))
+		check(is_equal_approx(float(watcher.max_health), WatcherScript.RUNT_HEALTH),
+			"a runt carries a third of the hard pool (%.2f of %.2f)"
+				% [float(watcher.max_health), WatcherScript.HARDENED_HEALTH])
+		check(is_equal_approx(float(watcher._strike_damage()),
+				warden_damage * WatcherScript.RUNT_SHARE),
+			"and swings for a third of a warden's blow (%.2f of %.2f)"
+				% [float(watcher._strike_damage()), warden_damage])
+		# Smaller than any full body may be drawn, and built to its own row.
+		var built := float(watcher.variant.get("scale", 1.0))
+		var fit := float((Presenter.SPECIES[WatcherScript.RUNT_ID] as Dictionary)["fit"])
+		check(float(watcher.body_scale()) < WatcherScript.SILHOUETTE_FLOOR,
+			"the body is drawn under the smallest full build (%.2f of %.2f)"
+				% [float(watcher.body_scale()), WatcherScript.SILHOUETTE_FLOOR])
+		check(absf(float(watcher.body_scale()) - fit * built) < 0.01,
+			"at the species' fit times its own row's build (%.3f / %.3f)"
+				% [float(watcher.body_scale()), fit * built])
+		# The hit volume shrinks with the body: a runt's capsule and the body the
+		# arrow sees are the same height, on a body no taller than a child's.
+		var capsule: CapsuleShape3D = watcher._collision.shape
+		var drawn := 1.869 * float(watcher.body_scale())
+		check(absf(float(capsule.height) - float(watcher.profile.get("height", 0.0)) * built) < 0.02,
+			"the hit capsule is its own build of the species' height (%.2f m)"
+				% float(capsule.height))
+		check(absf(float(capsule.height) - drawn) < 0.25,
+			"and stands as tall as the body is drawn (capsule %.2f m, drawn %.2f m)"
+				% [float(capsule.height), drawn])
+		check(watcher.guard_chance() <= WatcherScript.RUNT_GUARD,
+			"a runt trades rather than turtles (%.2f of %.2f)"
+				% [watcher.guard_chance(), WatcherScript.RUNT_GUARD])
+		var main_id := str(watcher.weapon_item)
+		check(WatcherScript.MAKESHIFT_TIER.has(main_id),
+			"and holds a makeshift piece it can lift (%s)" % main_id)
+		check(str(watcher.variant.get("armor", "")) in ["naked", "makeshift"],
+			"the corpse carries salvage or nothing (%s)" % str(watcher.variant.get("armor", "")))
+	for raw in bodies:
+		raw.queue_free()
+	await process_frame
 
 
 # --- the hand --------------------------------------------------------------
@@ -852,7 +932,9 @@ func check_death() -> void:
 func check_hit_volume() -> void:
 	var bodies: Array = []
 	var x := -0.5 * SPAWN_STEP * float(WatcherScript.VARIANTS.size())
-	for species in SPECIES:
+	# The runts are in the volley because a small body is where the capsule and the
+	# drawn head are most likely to part company.
+	for species in SPECIES + [WatcherScript.RUNT_ID]:
 		var rows := WatcherScript.table_for(species)
 		var fielded := {}
 		for ordinal in range(1, 200):

@@ -15,7 +15,7 @@ extends SceneTree
 ## itself can be why the squad went in or stayed out; the town's watch is stood
 ## down for the same reason, and its arrow is asked for once, by hand.
 ##
-## A campaign opens with one naked body (`Warband.STARTING_BAND`) - the soul's -
+## A campaign opens with one body and its club (`Warband.STARTING_BAND`) - the soul's -
 ## so this harness swears the second body the AI drives and arms it out of the
 ## shared stash itself: a band of one has nobody else to measure.
 
@@ -73,7 +73,7 @@ func run() -> void:
 	state.reset(false)
 	warband.save_path = WARBAND_SAVE
 	warband.reset_state()
-	# The campaign opens with one naked body (`Warband.STARTING_BAND`): the soul's.
+	# The campaign opens with one body and its club (`Warband.STARTING_BAND`): the soul's.
 	# This test needs a second body for the AI to drive, so one is sworn here and
 	# armed out of the pool by hand - the square stocks the stash, never a body.
 	warband.seed_starting_band()

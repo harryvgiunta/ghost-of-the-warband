@@ -196,6 +196,119 @@ first in the next session.
 - Audio: cage ambience, gate crowd, impact layers for the squad, the woods.
 - Balancing pass driven by a bot-only headless run (win rates per wave count).
 
+### Phase 5 (backlog, asked for 2026-11-06): the open wood, the Hollow's mouth, one drop table, and the wagon traders
+
+Four big pieces. A and B are level-design cuts on the one world and land in the
+shared world files; C and D are content/economy and touch the loot and vendor
+libraries. Run them as worktrees: A alone (it owns the lane), B alone (it owns the
+pocket and the delve mouth), C and D together (both edit loot/vendor stock).
+
+**A. The wood becomes an open world, not a corridor.** Today the middle of the
+campaign is one 1,374.6 m lane: `run_forest.gd` builds a single `Path` of 31
+waypoints and every piece of content is hung off a *fraction of that one line* -
+the four caged soldiers (`soldier_cages.CAGE_FRACTIONS`), the seven warcamps
+(`watcher_warren.CAMPS[].fraction`), the six wolf packs
+(`wilderness.PACKS[].stations`), the two archer ambushes
+(`escape_run.ARCHER_FRACTIONS`), the cult's pursuer and clearing posts
+(`run_forest._pursuer_posts` / `_clearing_posts`). Walk one road, meet every
+thing, in order.
+
+  - **A graph, not a line**: a lane *network* - a `TrailGraph` (junctions, loops,
+    dead ends) replacing the single `Path` as the thing content is placed
+    against. Keep `Path` as the per-lane sampler so every existing
+    "fraction of the lane" placement keeps working inside a segment; add
+    "segment + fraction" as the placement vocabulary, and a distance-along-graph
+    for the prompts (`metres_to_town`).
+  - **Width and relief**: the wood should read as more than an 11 m band between
+    two trunk rows - a wide, walkable outer wood with its own trails off the
+    trunk road. `terrain.gd` already owns the one heightfield; the open wood is
+    more of the same field walked in every direction, not a second mesh.
+  - **Density**: trees, bushes, leaves, log piles, rocks, stumps, webs, fungus,
+    deadfall, standing stones, and authored set-pieces (a burned wagon, a
+    stake-ring, a drowned shrine) instead of two rows of trunks and a verge. The
+    art kits already exist (`TreeKit`, `BushKit`, `RockKit`, `VillageKit`,
+    `CampKit`); this is scatter density, batching (`WorldScatter`, one merged
+    mesh per cell) and `SOLID_WOOD_DEPTH`-style collision budgets, not new
+    assets.
+  - **The map sheet follows**: `world_map.gd` draws one sampled lane today; it
+    must draw the graph with the party's position on it.
+  - **Acceptance**: `warband_world_regression`'s single-lane walk becomes a walk
+    of a loop that leaves the trunk road and rejoins it; every cage, camp, wolf
+    pack and ambush still clears the walked band and every trunk collider; the
+    draw-call and object counts stay inside the window the current world holds
+    (`perf_context`, the F12 overlay); and rendered frames from three vantages
+    show a wood, not a hedge.
+
+**B. The delve is found in the wood, behind Gorehorn, with the altar beside it.**
+Today the floor is entered from a rope pit in the town square
+(`delve_area.MOUTH_POINT` = `Vector3(8, 0, -6)` in the square's frame), the wood's
+optional boss is a separate `HornedThing` in the camp pocket
+(`wood_boss.gd`, `BOSS_POINT`), and the altar stands in the square
+(`town_hub.ALTAR_POINT`, `SacrificialAltar` + `AltarMenu`). The two halves of the
+loop - kill, then spend - are three places apart.
+
+  - **One boss, one mouth**: the wood's boss becomes the Gorehorn the floor is
+    named for (one body, one name: `delve_demon.gd`'s `"display": "Gorehorn"`
+    behind both the pocket and the lair), and a cave mouth opens in the pocket
+    *behind him* - the delve's entrance (`delve_area`) moves from the square to
+    that mouth, so the floor is stumbled on rather than scheduled. The square
+    keeps its services; only the entrance travels.
+  - **The altar beside the mouth**: `SacrificialAltar` + `AltarMenu` stand at the
+    cave mouth, so a party that has just cut Gorehorn down can anoint and weld
+    what he dropped without walking back to town.
+  - **Acceptance**: a regression that walks a body from the town to the pocket,
+    kills the boss, descends at the mouth, climbs out, and spends at the altar;
+    the square's own panels still work with no delve mouth in it
+    (`town_hub_regression`, `delve_regression`, `altar_regression`); the mouth's
+    prompt and the map marker point at the pocket, not at `MOUTH_POINT`.
+
+**C. One drop table for the wood.** A watcher's corpse should pay exactly: the
+piece it was holding, a bandage, an arrow or two, makeshift armour, and its gold.
+Nothing better, nothing off-table. Today the payout is three separate facts that
+can drift apart - the variant's `armor`/`pieces` (`cage_watcher.VARIANTS`, held to
+`WATCHER_ARMOUR` = naked/makeshift by `_pick_variant`), the `carried` list
+(`bandage_linen` plus a one-in-three `ichor_vial`), the hand
+(`WarbandGearDrop.strip_enemy` / `take_weapon_item`), and the rare anointed body
+`delve_loot.gd` can stamp - and the kill's gold comes from the profile's `gold`
+through `WorldScene._pay_kill`.
+
+  - One `WatcherDrop` table, one function, one place to tune: tier ceiling
+    (makeshift only - no forged steel, no jewellery, no trinket), a short list of
+    consumables (bandage, arrows), the held piece, and a gold roll per species
+    (a runt pays a fourth of a warden's).
+  - The corpse registry, the ground drop and the delve inventory must all read
+    that one table, so a co-op guest's screen and the host's body agree.
+  - **Acceptance**: a table-driven regression that kills a body of every species
+    and every variant and asserts the corpse offers only on-table ids, that a
+    forged piece can never appear (`armor_leather_*` / `sword_*` / `ring_*` all
+    refused), that gold scales with species, and that a runt pays strictly less
+    than a warden.
+
+**D. Travelling vendors with wagons in the woods.** The town's keepers are the
+only shop, so the middle of the map has no economy and a party that has just
+cleared a camp has to walk 1.4 km to spend. The asks: a few wandering traders with
+a wagon and cart, standing on turnouts off the trails, selling simple stock.
+
+  - A `TravellingVendor` (`Node3D`) that owns a parked wagon-and-cart dressing
+    (the `VillageKit`/`CampKit` vocabulary plus the delve's `_cart` silhouette,
+    no new art), a keeper body off `WarbandLooks` (unpossessable, unhittable, like
+    `town_hub`'s), and `VendorMenu`, which already re-points itself with
+    `configure(warband, seat)` - so a wood seat is a new stock table, not a new
+    window.
+  - Stock: simple gear (makeshift blades, a buckler, leathers, a hand torch), the
+    consumables the band actually uses (bandages, arrows), and a small purse of
+    Cruor. Priced dearer than the town (`SELL_SHARE` 0.6 is the town's payout;
+    the wood's is worse), and each trader's stock is a subset so no one wagon is
+    a mall.
+  - Posts are off-lane turnouts at the clearings, so a squad walking past finds
+    one without being dragged in, and each has its own `MobWander`-free safe ring
+    so no wolf or warden fights on the counter.
+  - **Acceptance**: a regression that walks to a trader, buys a piece and an
+    arrow bunch through the real menu path, asserts the purse moved and the stock
+    dropped by one, that an empty purse is refused with the same line the
+    town gives, and that no two traders share a post (`WARBAND` world boot).
+    Rendered frames of the wagon from the trail.
+
 ---
 
 ## 7. Session-start checklist for the next agent

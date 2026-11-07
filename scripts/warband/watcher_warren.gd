@@ -4,23 +4,36 @@ extends Node3D
 ## the quartermaster's second order is counted on.
 ##
 ## The road's cult holds the lane, the camp's watchers hold the opening, and
-## neither is a place the warband goes to on purpose. The warren is: seven camps of
-## three wardens standing off the way, each a fireless patch of totems and skull
-## stakes - a hunting ground a squad can walk to all the way up the road, from the
-## dark end where the demon stands (lane fraction 0.06) to the last bend before the
-## town's gate (0.90). Every camp stands 78-96 m out from the lane, past twice a
+## neither is a place the warband goes to on purpose. The warren is: seven camps
+## standing off the way, each a fireless patch of totems and skull stakes - a
+## hunting ground a squad can walk to all the way up the road, from the dark end
+## where the demon stands (lane fraction 0.06) to the last bend before the town's
+## gate (0.90). Every camp stands 78-96 m out from the lane, past twice a
 ## warden's 30 m sight, so a body walking the road is never pulled into a fight it
 ## did not go looking for, and clear of the square's wall by a wall and a half.
 ## What makes them findable is the map's markers and the dressing itself: a place a
 ## body can see from the lane and walk to.
 ##
+## **One body a camp, and the first three are runts.** A camp of three wardens is
+## not a hunting ground a band with a club walks out of, and a squad that has just
+## picked its first weapon off a corpse has nowhere else to go: the road's cult
+## fights in pairs and the wolves in packs. So every camp fields a single watcher -
+## one body, one duel - and the three camps nearest the town (fractions 0.62, 0.76,
+## 0.90, the end a warband reaches first) field the wood's older children, the
+## `hollow_runt`: the warden's shape at 0.58-0.70 of its height with a third of a
+## hard body's pool and a third of its blow (`cage_watcher.RUNT_SHARE`). Its corpse
+## still carries a rag, so the runts are how a band arms itself: three bodies a
+## camp, a three-minute clock each, and a kit that arrives one piece at a time.
+## The four deeper camps are the same duel against a full warden - the next step a
+## grind is supposed to have.
+##
 ## A camp is a real camp because the dressing is real: `VillageKit` totems and
 ## skull stakes on their own collision, so the place reads as somewhere people
 ## live before the first body turns. The watchers are the wood's own creature
-## (`cage_watcher.gd`: `hollow_warden`, the makeshift tier in its hand, the shared
-## mob state machine), appended to `host.guards` - the world's one hostile list -
-## and wired to the world's one kill handler, so a corpse here pays exactly as a
-## road cultist's does.
+## (`cage_watcher.gd`: `hollow_warden` or `hollow_runt`, the makeshift tier in its
+## hand, the shared mob state machine), appended to `host.guards` - the world's one
+## hostile list - and wired to the world's one kill handler, so a corpse here pays
+## exactly as a road cultist's does.
 ##
 ## A camp that is cut down comes back. The clock is one per camp, never one per
 ## warden: the camp's first death arms it, and when `RESPAWN_SECONDS` have run,
@@ -53,28 +66,52 @@ const Perf = preload("res://scripts/perf_probe.gd")
 ## ground the road cannot see is the only hunting ground a warband can choose to
 ## walk into. The fractions sit between the wolf packs' own
 ## (`wilderness.gd`), so the road is never two fights at once by accident.
+##
+## `species` is the body the camp fields and `members` how many of it stand there.
+## One each: a camp is a duel, and the ladder runs the way a warband walks it -
+## the runts on the town end (0.62, 0.76, 0.90), where the first party out of the
+## gate meets them, and a full warden in the four camps deeper in.
 const CAMPS := [
-	{"fraction": 0.06, "side": 1.0, "offset": 78.0, "yaw": 0.4, "seed": 611},
-	{"fraction": 0.20, "side": -1.0, "offset": 96.0, "yaw": 2.1, "seed": 617},
-	{"fraction": 0.34, "side": 1.0, "offset": 86.0, "yaw": 4.6, "seed": 623},
-	{"fraction": 0.48, "side": -1.0, "offset": 92.0, "yaw": 1.2, "seed": 631},
-	{"fraction": 0.62, "side": 1.0, "offset": 80.0, "yaw": 3.3, "seed": 641},
-	{"fraction": 0.76, "side": -1.0, "offset": 88.0, "yaw": 5.2, "seed": 643},
-	{"fraction": 0.90, "side": 1.0, "offset": 94.0, "yaw": 2.7, "seed": 647},
+	{"fraction": 0.06, "side": 1.0, "offset": 78.0, "yaw": 0.4, "seed": 611,
+		"species": "hollow_warden", "members": 1},
+	{"fraction": 0.20, "side": -1.0, "offset": 96.0, "yaw": 2.1, "seed": 617,
+		"species": "hollow_warden", "members": 1},
+	{"fraction": 0.34, "side": 1.0, "offset": 86.0, "yaw": 4.6, "seed": 623,
+		"species": "hollow_warden", "members": 1},
+	{"fraction": 0.48, "side": -1.0, "offset": 92.0, "yaw": 1.2, "seed": 631,
+		"species": "hollow_warden", "members": 1},
+	{"fraction": 0.62, "side": 1.0, "offset": 80.0, "yaw": 3.3, "seed": 641,
+		"species": "hollow_runt", "members": 1},
+	{"fraction": 0.76, "side": -1.0, "offset": 88.0, "yaw": 5.2, "seed": 643,
+		"species": "hollow_runt", "members": 1},
+	{"fraction": 0.90, "side": 1.0, "offset": 94.0, "yaw": 2.7, "seed": 647,
+		"species": "hollow_runt", "members": 1},
 ]
-## Three watchers a camp. Seven camps of three is one order's worth of bodies and
-## then some: twenty is the quartermaster's count, and a hunting ground that
-## exactly met it would leave a squad that lost one kill short with nowhere to go.
-const CAMP_SIZE := 3
-## Every body the camps field: seven camps of three, by the table above.
-const TOTAL := 21
+## What a camp fields when its row names no species: the species the camp's gate
+## is made of.
+const CAMP_SPECIES := "hollow_warden"
+## How many bodies a camp fields when its row names no count. One: every camp in
+## the table is a single body, and a row that asks for a squad has to say so.
+const CAMP_MEMBERS := 1
+## The name a camp's bodies are numbered under. A guest builds the same camps, and
+## the session finds its bodies by name - so the name is a function of the table
+## row (species and camp number), never of spawn order.
+const NAME_PREFIX := {
+	"hollow_warden": "HollowWarden",
+	"hollow_runt": "HollowRunt",
+	"ossuary_stalker": "HollowStalker",
+	"gallowsroot": "HollowRoot",
+}
 ## Members stand on this ring around the camp's dressing: inside the totem's
 ## reach and clear of its collider.
 const RING_INNER := 3.4
 const RING_STEP := 1.3
-## The makeshift tier in their hands, by camp and by body, so a camp is not three
-## copies of one warden.
+## The makeshift tier in their hands, by camp and by body, so no two camps are the
+## same fight.
 const ARMS := ["club_makeshift", "dagger_ironwood", "branch_heavy", "dagger_ironwood"]
+## What a runt can lift: the short pieces only. A body a third of a warden's size
+## with a two-handed limb in its hands reads as a full body wearing a small one.
+const RUNT_ARMS := ["club_makeshift", "dagger_ironwood"]
 ## The same 12 cm every body in this world is spawned clear of its ground by.
 const SPAWN_LIFT := 0.12
 ## The warband can seat, down or hand over a body at any moment; half a second is
@@ -88,7 +125,7 @@ const RESPAWN_SECONDS := 180.0
 ## squad must never have bodies appear inside its own sight, and a warden's sight
 ## is 30 m, so this is the whole of a camp's reach of the road.
 const RESPAWN_QUIET := 45.0
-## `main.gd`'s pack radius. Each camp's three stand inside it of one another, so
+## `main.gd`'s pack radius. A camp's bodies stand inside it of one another, so
 ## `assign_all` hands that camp one territory to roam.
 const PACK_RADIUS := 14.0
 ## How far from its own camp a warden will take a target: past this it is a body in
@@ -182,8 +219,13 @@ func camp_points() -> Array[Vector3]:
 
 
 ## The camp table's count, not the living one: what the warren was built to hold.
+## Summed off the rows, so a camp that grows or shrinks is counted by the same
+## number the build walked.
 func total() -> int:
-	return TOTAL
+	var count := 0
+	for spec in CAMPS:
+		count += int(spec.get("members", CAMP_MEMBERS))
+	return count
 
 
 ## Seconds left on camp `index`'s refill clock, or -1.0 while that camp has
@@ -221,15 +263,17 @@ func _build() -> void:
 		var at: Vector3 = (frame["position"] as Vector3) + right * side * float(spec["offset"])
 		at = TerrainScript.grounded(Vector3(at.x, 0.0, at.z))
 		var camp := _build_camp(index, at, float(spec["yaw"]), mats)
+		var species := str(spec.get("species", CAMP_SPECIES))
+		var size := maxi(1, int(spec.get("members", CAMP_MEMBERS)))
 		var members: Array = []
 		var posts: Array[Vector3] = []
-		for member in CAMP_SIZE:
-			var point := _post(at, index, member, int(spec["seed"]))
+		for member in size:
+			var point := _post(at, index, member, size, int(spec["seed"]))
 			posts.append(point)
-			members.append(_spawn_watcher(index, member, point))
-		# One patch of wood per camp: the three spawned inside `PACK_RADIUS` of one
+			members.append(_spawn_watcher(index, member, point, species))
+		# One patch of wood per camp: the bodies spawned inside `PACK_RADIUS` of one
 		# another, so `assign_all` hands the camp one shared territory instead of
-		# three private ones.
+		# one private patch a body.
 		MobWander.assign_all(members, PACK_RADIUS)
 		_camps.append({
 			"node": camp, "centre": at, "mobs": members, "posts": posts,
@@ -271,15 +315,20 @@ func _build_camp(index: int, at: Vector3, yaw: float, mats: Dictionary) -> Node3
 	return camp
 
 
-## One warden: the wood's own creature, armed off the makeshift tier, standing on
+## One watcher: the wood's own creature, armed off the makeshift tier, standing on
 ## `point`, aimed at whichever body is nearest right now, and booked into the
 ## world's hostile list and its one kill handler.
-func _spawn_watcher(camp_index: int, member: int, point: Vector3) -> Node:
+##
+## `species` is the camp row's own: a warden is a full body and a runt is the
+## wood's small one, with its pool from the species' own table
+## (`cage_watcher.gd::_ready`) and only the pieces it can lift in its hands.
+func _spawn_watcher(camp_index: int, member: int, point: Vector3, species: String) -> Node:
 	var watcher := WatcherScript.new()
-	watcher.name = "HollowWarden%d_%d" % [camp_index + 1, member + 1]
+	watcher.name = "%s%d_%d" % [str(NAME_PREFIX.get(species, NAME_PREFIX[CAMP_SPECIES])),
+		camp_index + 1, member + 1]
 	# Named before the tree sees it: `cage_watcher.gd::_init` sets the warden id,
 	# and `_ready` keeps whatever name the scene gave it.
-	watcher.mob_id = WatcherScript.WARDEN_ID
+	watcher.mob_id = species
 	watcher.position = point
 	add_child(watcher)
 	# `_ready` read the local transform; a container with its own transform must
@@ -299,16 +348,26 @@ func _spawn_watcher(camp_index: int, member: int, point: Vector3) -> Node:
 		watcher.attacked.connect(Callable(host, "_on_enemy_attack"))
 	elif _mobs.is_empty():
 		push_warning("WatcherWarren: the world has no _on_enemy_attack; blows land nowhere")
-	watcher.arm(str(ARMS[(camp_index + member) % ARMS.size()]))
+	watcher.arm(_arm_for(camp_index, member, species))
 	var guards = host.get("guards")
 	if guards is Array:
 		(guards as Array).append(watcher)
 	return watcher
 
 
-## A body's post: on a loose ring around the camp's dressing, on the ground.
-func _post(centre: Vector3, camp_index: int, member: int, seed: int) -> Vector3:
-	var angle := TAU * float(member) / float(CAMP_SIZE) + float(seed % 7) * 0.37 \
+## The piece a body is given: a runt takes the short tier, a full body the whole
+## of it, and the ordinal in the camp decides which - so two camps never stand the
+## same fight and a refill gives the camp's own body the same arm it had.
+func _arm_for(camp_index: int, member: int, species: String) -> String:
+	var table: Array = RUNT_ARMS if species == WatcherScript.RUNT_ID else ARMS
+	return str(table[(camp_index + member) % table.size()])
+
+
+## A body's post: on a loose ring around the camp's dressing, on the ground. `size`
+## is the camp's own count, so a lone body and a packed one both land on the ring
+## rather than all but the first standing on the same angle.
+func _post(centre: Vector3, camp_index: int, member: int, size: int, seed: int) -> Vector3:
+	var angle := TAU * float(member) / float(maxi(1, size)) + float(seed % 7) * 0.37 \
 		+ float(camp_index) * 0.21
 	var radius := RING_INNER + float(member % 3) * RING_STEP
 	var at := centre + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
@@ -354,6 +413,8 @@ func _refill_one(index: int) -> int:
 		if _body_within(post as Vector3, RESPAWN_QUIET):
 			return 0
 	var members: Array = camp["mobs"]
+	var species := str(CAMPS[index].get("species", CAMP_SPECIES)) if index < CAMPS.size() \
+		else CAMP_SPECIES
 	var fresh: Array = []
 	for member in members.size():
 		var old = members[member]
@@ -361,7 +422,7 @@ func _refill_one(index: int) -> int:
 			continue
 		if is_instance_valid(old):
 			_retire(old)
-		var watcher := _spawn_watcher(index, member, posts[member] as Vector3)
+		var watcher := _spawn_watcher(index, member, posts[member] as Vector3, species)
 		members[member] = watcher
 		fresh.append(watcher)
 	if fresh.is_empty():
@@ -442,9 +503,9 @@ func _sync_mobs() -> void:
 ## while they are the camp's own quarry.
 ##
 ## A warcamp is a place the warband goes to, not a patrol of the road: handed the
-## nearest body unconditionally, twenty-one wardens leave their patches and walk
-## the kilometre and a third of lane behind a squad that never turned off it,
-## which peels the escort off one fight at a time and is not what an order about
+## nearest body unconditionally, every warden of the seven camps leaves its patch
+## and walks the kilometre and a third of lane behind a squad that never turned off
+## it, which peels the escort off one fight at a time and is not what an order about
 ## hunting grounds means. Past `LEASH_METRES` from its own camp a warden is given
 ## nothing, and its pack's `MobWander` territory keeps it at home; walk within the
 ## leash and the camp wakes as one.
