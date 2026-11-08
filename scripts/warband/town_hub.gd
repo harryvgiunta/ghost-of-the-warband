@@ -29,6 +29,7 @@ const ControllerScript = preload("res://scripts/warband/possession_controller.gd
 const ClearingScript = preload("res://scripts/warband/camp_clearing.gd")
 const RunForestScript = preload("res://scripts/warband/run_forest.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const QuartermasterScript = preload("res://scripts/warband/quartermaster_menu.gd")
 const VendorMenuScript = preload("res://scripts/warband/vendor_menu.gd")
@@ -58,6 +59,9 @@ const WALL_RADIUS := 22.0
 const NORTH_GATE_HALF := 5.0
 ## The stakes' lean, the gate's height and the seed the ring is rebuilt from.
 const GATE_HEIGHT := 4.6
+## Where the gate's name board hangs: east of the hide banner in the middle of the
+## span, inside the posts.
+const SIGN_BOARD_X := 2.7
 const GATE_SEED := 19
 const WALL_SEED := 7719
 ## The angles the stake ring is cut at: the road in on the +Z axis, and two
@@ -494,14 +498,12 @@ func _build_north_gate() -> void:
 	gate.position = Vector3(0.0, 0.0, WALL_RADIUS)
 	add_child(gate)
 	VillageKit.gate(gate, VillageKit.materials(), _solids, NORTH_GATE_HALF, GATE_HEIGHT, GATE_SEED)
-	var label := Label3D.new()
-	label.name = "GateSign"
-	label.text = "THE WOOD ROAD"
-	label.font_size = 56
-	label.pixel_size = 0.006
-	label.modulate = Color(0.96, 0.82, 0.56)
-	label.position = Vector3(0.0, GATE_HEIGHT + 0.3, 0.2)
-	gate.add_child(label)
+	# The road's name, painted on a board hung under the gate's tie beam: east of
+	# the hide banner that holds the middle of the span, high enough to walk under.
+	var sign_at := Vector3(SIGN_BOARD_X, GATE_HEIGHT - 0.90, 0.14)
+	SignKit.plank_board(gate, "wood_road", sign_at, 0.0, "GateSign")
+	var top := sign_at.y + SignKit.size_of("wood_road").y * 0.5 + 0.10
+	SignKit.hangers(gate, "wood_road", GATE_HEIGHT - 0.33, top, [0.62, -0.62], 0.14)
 	for side in [-1.0, 1.0]:
 		# An iron bowl lashed to the post, with the fire of the gate in it.
 		Geo.cylinder(gate, 0.24, 0.15, 0.20,
@@ -780,15 +782,8 @@ func _build_arena_gate() -> Node3D:
 	for side in [-1.0, 1.0]:
 		Geo.box(gate, Vector3(0.9, 3.6, 0.9), Vector3(float(side) * 2.2, 1.8, 0.0), stone)
 	Geo.box(gate, Vector3(5.6, 0.7, 1.1), Vector3(0.0, 3.9, 0.0), stone)
-	var plate := Label3D.new()
-	plate.name = "ArenaNameplate"
-	plate.text = "THE ARENA"
-	plate.font_size = 48
-	plate.pixel_size = 0.007
-	plate.modulate = Color(0.94, 0.86, 0.62)
-	plate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	plate.position = Vector3(0.0, 3.9, 0.6)
-	gate.add_child(plate)
+	# The name of the press, cut into a stone plate set on the lintel's face.
+	SignKit.plaque(gate, "arena", Vector3(0.0, 3.9, 0.605), 0.0, "ArenaNameplate")
 	return gate
 
 
@@ -890,13 +885,12 @@ func _build_signpost() -> Node3D:
 	post.position = SIGN_POINT
 	add_child(post)
 	Geo.cylinder(post, 0.13, 0.11, 3.0, Vector3(0.0, 1.5, 0.0), _wood, 8)
-	var board := Geo.material(Color(0.24, 0.17, 0.11), 0.0, 0.9)
-	Geo.box(post, Vector3(2.4, 1.1, 0.1), Vector3(0.0, 2.35, 0.0), board)
-	var text := _label("THE SQUARE\nSTASH   ALTAR\nRECRUITER",
-		Vector3(0.0, 2.35, 0.08), Color(0.94, 0.88, 0.76))
-	text.font_size = 48
-	text.pixel_size = 0.0045
-	post.add_child(text)
+	# What the square offers, painted on a board nailed to the post's face and
+	# turned to the fire - the one direction a body in this square comes from.
+	var to_fire := atan2(-SIGN_POINT.x, -SIGN_POINT.z)
+	SignKit.plank_board(post, "square",
+		Vector3(0.0, 2.30, 0.0) + Vector3(sin(to_fire), 0.0, cos(to_fire)) * 0.15,
+		to_fire, "SquareBoard", false)
 	return post
 
 func _label(text: String, at: Vector3, color: Color) -> Label3D:

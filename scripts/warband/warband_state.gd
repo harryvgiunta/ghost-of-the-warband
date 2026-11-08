@@ -509,6 +509,10 @@ const STARTING_BAND := [
 ## neither cut a latch (`soldier_cages.holds_blade`) nor take the first corpse's
 ## kit, and the wood's first fight is a runt precisely so that this club wins it.
 const STARTING_ARMS := "club_makeshift"
+## The one weld a campaign issues with it: the heavy blow the wood's first fight
+## is won with (`AnnointCatalog` `k_heavy_swing`). It rides the copy, not the
+## catalog row, so the runts' clubs in the hollow are still plain wood.
+const STARTING_ANNOINT := "k_heavy_swing"
 
 ## Seed a campaign's one starting body, naked but for the club. An existing warband
 ## is never touched: a resume, a lend or a second boot of the same save must not
@@ -525,13 +529,21 @@ func seed_starting_band() -> int:
 	return roster.count()
 
 
-## Put the campaign's one club in a fresh body's hand. Silent: the seeding owns the
-## single notify, and a piece that came out of the pool is not a purchase.
+## Put the campaign's one club in a fresh body's hand, annointed. Silent: the
+## seeding owns the single notify, and a piece that came out of the pool - or a
+## weld its own band was born with - is not a purchase.
+##
+## The weld is laid on the copy the body actually claimed (`annoint_copy` mints or
+## takes the serial inside `equip_merc`), so the relic is the steel in his hand and
+## not every club in the warband.
 func _issue_starting_arms(merc_id: int) -> void:
 	if merc_id <= 0 or not roster.is_alive(merc_id):
 		return
 	field_stash().add(STARTING_ARMS, 1)
 	equip_merc(merc_id, "main", STARTING_ARMS, false, false)
+	if str(roster.equipped_of(merc_id).get("main", "")) != STARTING_ARMS:
+		return
+	annoints.add(STARTING_ARMS, annoint_copy(merc_id, "main"), STARTING_ANNOINT)
 
 
 func add_mercenary(merc_name: String = "", equipped: Dictionary = {}) -> int:
@@ -1429,9 +1441,24 @@ func annoint_refs(merc_id: int) -> Array:
 		out.append(AnnointLedger.ref(item_id, annoint_copy(merc_id, slot)))
 	return out
 
-## Every stat this body's annointments add, in `TrinketStats` shape.
+## Every stat this body's annointments add, in `TrinketStats` shape. The welds
+## that ride one hand's steel are not in it (`AnnointLedger.HAND_KEYS`): those are
+## the hand's, and `annointment_hands` answers them.
 func annointment_stats(merc_id: int) -> Dictionary:
 	return annoints.stats_for(annoint_refs(merc_id))
+
+## The welds that ride the steel in a hand, `{main: {...}, off: {...}}`, read off
+## the copy each hand holds. A body carrying a Heavy Swing club and a greatsword
+## in its other set swings the greatsword on the greatsword's own clock.
+func annointment_hands(merc_id: int) -> Dictionary:
+	var kit := roster.equipped_of(merc_id)
+	var out := {"main": {}, "off": {}}
+	for slot in ["main", "off"]:
+		var item_id := str(kit.get(slot, ""))
+		if item_id.is_empty():
+			continue
+		out[slot] = annoints.hand_stats_for(item_id, annoint_copy(merc_id, slot))
+	return out
 
 ## The skills this body's annointments wake, one list per worn slot: a copy may
 ## carry several ability welds and every one of them reaches the hotbar - a hand's

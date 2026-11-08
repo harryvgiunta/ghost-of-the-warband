@@ -290,7 +290,8 @@ func _apply_gear(actor: Actor, merc_id: int) -> void:
 	_loadouts[merc_id] = loadout
 
 ## The warband's annointments as the rig consumes them: stats in `TrinketStats`
-## shape, and the skill each hand's copy wakes. Both are local ledger reads, so a
+## shape, the skill each hand's copy wakes, the welds that ride each hand's steel
+## (`hands`) and the marks drawn on the piece. All are local ledger reads, so a
 ## replica cannot claim a modifier its steel was never given.
 func _warband_annoints(merc_id: int) -> Dictionary:
 	if _warband == null or not _warband.has_method("annointment_stats"):
@@ -298,6 +299,7 @@ func _warband_annoints(merc_id: int) -> Dictionary:
 	return {"stats": _warband.annointment_stats(merc_id),
 		"skills": _warband.annointment_skills(merc_id),
 		"procs": _warband.annointment_procs(merc_id),
+		"hands": _warband.annointment_hands(merc_id),
 		"marks": _warband.annointment_marks(merc_id)}
 
 # --- reading ---------------------------------------------------------------
@@ -840,10 +842,12 @@ func _aim(actor: Actor, point: Vector3, origin: Variant = null) -> bool:
 	else:
 		actor.combat.clear_camera_ray()
 	if actor.combat.blocking:
-		var facing: Vector3 = point - actor.global_position
-		facing.y = 0.0
+		# The guard rides the crosshair, elevation included: the eye is where the
+		# body is looking, so the same line that aims the blow raises the guard.
+		var facing: Vector3 = point - (actor.global_position
+			+ Vector3.UP * CombatScript.BLOCK_CHEST_HEIGHT)
 		if facing.length_squared() > 0.000001:
-			actor.combat.face_block(facing)
+			actor.combat.face_block(facing.normalized())
 	return true
 
 ## A movement frame for a peer's body, arriving from the wire. The frame's own
@@ -930,7 +934,9 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 			var forward: Vector3 = value.forward
 			if not forward.is_finite() or (value.pressed and forward.length_squared() < 0.25):
 				return false
-			actor.set_block(value.pressed, Vector3(forward.x, 0, forward.z))
+			# The guard line carries the eye's elevation as well as its yaw: a
+			# raised guard is a different defence from a level one.
+			actor.set_block(value.pressed, forward.normalized())
 			return true
 		"jump":
 			if typeof(value) != TYPE_BOOL:
@@ -979,6 +985,20 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 		"stop":
 			combat.stop()
 			return true
+		"nock":
+			# The wheel inside a draw: another shaft on the string. The rig
+			# clamps it to one plus `Archer.MAX_NOCK_STACK`.
+			if typeof(value) != TYPE_INT:
+				return false
+			var notch := clampi(int(value), -1, 1)
+			if notch == 0:
+				return false
+			if not actor.has_method("stack_nock"):
+				return false
+			actor.stack_nock(notch)
+			return true
+		"loot_stuck":
+			return pull_lodged(actor)
 		"swap_set", "revive", "loot", "climb_out":
 			# The scene's verbs: the authority's world answers them for this body,
 			# so a guest's TAB, revive, loot and rope press land on the host's
@@ -986,6 +1006,42 @@ func _perform(actor: Actor, action: String, value: Variant, origin: Variant = nu
 			if world_action.is_valid():
 				return bool(world_action.call(actor, action, value))
 	return false
+
+
+## How close a body has to be for `K` to pull a blade out of it.
+const LODGED_REACH := 2.6
+
+
+## The body's `K`: the nearest body carrying a thrown blade gives one back, and
+## the piece walks into the shared stash. The soul's own back is asked too, so a
+## blade that stuck in the thrower can be recovered. Answers whether one came out.
+func pull_lodged(actor: Actor) -> bool:
+	if actor == null or not is_instance_valid(actor):
+		return false
+	var found: Actor = null
+	var best := LODGED_REACH
+	for candidate in _spawned:
+		if not is_instance_valid(candidate) or candidate == actor:
+			continue
+		if not candidate.has_method("lodged_pieces") or candidate.lodged_pieces().is_empty():
+			continue
+		var gap: float = candidate.global_position.distance_to(actor.global_position)
+		if gap > best:
+			continue
+		found = candidate
+		best = gap
+	if found == null and actor.has_method("lodged_pieces") \
+			and not actor.lodged_pieces().is_empty():
+		found = actor
+	if found == null:
+		return false
+	var piece := str(found.take_lodged())
+	if piece.is_empty():
+		return false
+	if _warband != null:
+		_warband.stash.add(piece, 1)
+	SfxScript.pickup(actor.global_position + Vector3.UP)
+	return true
 
 # --- backward reconciliation ------------------------------------------------
 
@@ -1186,6 +1242,15 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 	var yaw := camera_rig.yaw if camera_rig != null else 0.0
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
 	var weapon: String = actor.rig.weapon
+	# Where the eye is pointing, elevation included: the guard is held along this
+	# line, so looking up raises it over the head and looking down covers the legs.
+	var look := forward
+	if camera_rig != null:
+		var ray: Dictionary = camera_rig.aim_ray()
+		var direction: Variant = ray.get("direction", null)
+		if typeof(direction) == TYPE_VECTOR3 and (direction as Vector3).is_finite() \
+				and (direction as Vector3).length_squared() > 0.25:
+			look = (direction as Vector3).normalized()
 	match event.button_index:
 		MOUSE_BUTTON_LEFT:
 			if weapon == "bow":
@@ -1206,13 +1271,19 @@ func _mouse_press(event: InputEventMouseButton) -> void:
 				_melee("right", "diagonal_right", sample)
 			else:
 				_throw_held = false
-				_act("block", {"pressed": true, "forward": forward})
+				_act("block", {"pressed": true, "forward": look})
 				# Holding the guard against cover also leans out of it: the body
 				# stays behind the wall, the eye and the weapon come round it.
 				# Outside cover the same press is only a guard.
 				actor.peek_requested = bool(actor.cover.active)
 		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
-			if weapon in ["sword", "dagger", "dual"]:
+			var notch := 1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1
+			if weapon == "bow":
+				# The wire is live: a notch forward pulls another shaft out of the
+				# quiver and pinches it between the fingers, a notch back puts one
+				# away. Outside a draw the wheel does nothing on a bow.
+				_act("nock", notch)
+			elif weapon in ["sword", "dagger", "dual"]:
 				var variant := "stab" if event.button_index == MOUSE_BUTTON_WHEEL_UP else "overhead"
 				_melee("right", variant, sample)
 

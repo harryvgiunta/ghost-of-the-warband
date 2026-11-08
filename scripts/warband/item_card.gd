@@ -21,6 +21,7 @@ extends PanelContainer
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const TrinketStats = preload("res://scripts/trinket_stats.gd")
+const ItemPassives = preload("res://scripts/item_passives.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
 const Ledger = preload("res://scripts/ui/ledger_theme.gd")
 
@@ -78,9 +79,14 @@ static func type_line(item_id: String, item: Dictionary) -> String:
 
 
 ## The numbers the catalogue's prose cannot carry: guard, trinket modifiers, the
-## ammunition bundle, a dressing's wound. One row per fact, label/value.
+## ammunition bundle, a dressing's wound, and the passive a swung piece carries
+## (`ItemPassives` - the dagger's shank, the club's heavy overhand).
+## One row per fact, label/value.
 static func detail_rows(item_id: String, item: Dictionary) -> Array:
 	var rows: Array = []
+	var swung := ItemPassives.class_of(item)
+	if not swung.is_empty():
+		rows.append_array(ItemPassives.effect_rows(swung))
 	match str(item.get("category", "")):
 		"armor":
 			var set_index := clampi(int(item.get("set", 0)), 0, ArmorData.SET_IDS.size() - 1)
@@ -129,7 +135,7 @@ static func wear_lines(item_id: String, cruor: Variant) -> Array:
 	if not skill.is_empty():
 		var ability := str(skill.get("id", ""))
 		var recipe := WarbandCruor.recipe_text(WarbandCruor.anoint_recipe(ability))
-		lines.append({"text":"Plain - the altar wakes %s  ·  %s" % [
+		lines.append({"text":"Plain - anoint it to wake %s  ·  %s" % [
 			str(skill.get("name", ability)), recipe], "skill":true})
 	return lines
 

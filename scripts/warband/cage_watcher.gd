@@ -125,8 +125,14 @@ const WATCHER_PROFILES := {
 ## The makeshift tier, in catalog order. No forged steel is allowed in the camp,
 ## so this is the whole pool a variant may name - and the twig bow is in it
 ## because a scene may still hand one over, not because a warden is an archer.
-const MAKESHIFT_TIER := ["dagger_ironwood", "club_makeshift", "branch_heavy",
-	"bow_twig", "shield_wood"]
+const MAKESHIFT_TIER := ["dagger_ironwood", "club_makeshift", "sword_makeshift",
+	"branch_heavy", "bow_twig", "shield_wood"]
+
+## What a runt can lift: the short pieces only. A body a third of a warden's size
+## with a two-handed limb in its hands reads as a full body wearing a small one.
+## Every scene that fields a runt (the warcamps, the road) arms it off this list,
+## so the small body never draws a weapon it could not hold.
+const RUNT_ARMS := ["club_makeshift", "dagger_ironwood", "sword_makeshift"]
 
 ## What a watcher may wear. The camp is the first scenario and it pays in salvage,
 ## so a corpse carries the makeshift set or nothing at all; the creature wears no
@@ -273,6 +279,14 @@ var health_pool := HARDENED_HEALTH
 ## The catalog piece in the right hand, or "" for an empty hand. `arm` writes it,
 ## `take_weapon_item` hands it back so the scene can drop it.
 var weapon_item := ""
+## The piece in the left hand (a board, on the road's shield-bearing runts), or
+## "". `arm_off` writes it, `take_off_item` hands it back with the corpse.
+var off_item := ""
+## How far this body drifts from its mark while it has no quarry: 0 is the post a
+## warcamp's watcher holds, and the road's chain hands its bands a disc instead so
+## the wood does not read as a line of statue posts. Set by the scene before the
+## body enters the tree (it is read in `_ready`).
+var patrol_radius := 0.0
 ## True while the piece in the hand is already anointed: a rare body below
 ## (`delve_loot.gd`). The drop it leaves carries that; an empty hand carries nothing.
 var weapon_anointed := false
@@ -354,8 +368,9 @@ func _ready() -> void:
 	_apply_weapon()
 	max_health = maxf(health_pool, 1.0)
 	health = max_health
-	# A mob does not roam like a beast on its patch: a watcher holds its post.
-	profile["roam"] = 0.0
+	# A body with no quarry holds its post unless the scene gave it a disc to
+	# walk: the road's chain does, the warcamps and the archers do not.
+	profile["roam"] = patrol_radius
 
 
 # --- the mob surface the scenes call ---------------------------------------
@@ -436,18 +451,43 @@ func take_weapon_item() -> String:
 	return item
 
 
+## Put a board in the left hand. A watcher's off hand is empty unless its scene
+## says otherwise: the road's shield-bearing runts are the ones that do.
+func arm_off(item_id: String) -> void:
+	off_item = item_id
+	if is_node_ready():
+		_apply_weapon()
+
+
+## Strip the off-hand piece (the scene drops it) and clear that hand.
+func take_off_item() -> String:
+	var item := off_item
+	off_item = ""
+	if is_node_ready():
+		_apply_weapon()
+	return item
+
+
+## True while the board `off_item` names is actually strapped to the left hand.
+func has_shield_visual() -> bool:
+	return is_instance_valid(_visual) and not off_item.is_empty() \
+		and _visual.has_method("shield_up") and bool(_visual.shield_up())
+
+
 ## True while the hand is actually holding the catalog piece `weapon_item` names.
 func has_weapon_visual() -> bool:
 	return is_instance_valid(_visual) and not weapon_item.is_empty() \
 		and _visual.held_item() == weapon_item
 
 
-## Everything worth taking off this body: the piece in its hand and the rag on
+## Everything worth taking off this body: the pieces in its hands and the rag on
 ## its back. The scene spawns each where it fell.
 func gear_items() -> Array[String]:
 	var out: Array[String] = []
 	if not weapon_item.is_empty():
 		out.append(weapon_item)
+	if not off_item.is_empty():
+		out.append(off_item)
 	for piece in armor_items:
 		if not piece.is_empty():
 			out.append(piece)
@@ -779,6 +819,7 @@ func _shape_body() -> void:
 func _apply_weapon() -> void:
 	if is_instance_valid(_visual):
 		_visual.set_held_weapon(weapon_item)
+		_visual.set_held_off(off_item)
 
 
 ## Every body in the wood walks the table with a field dressing tied at its belt:

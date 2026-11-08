@@ -29,6 +29,13 @@ const DEFAULT := {
 	"cooldown": 0.0,
 	"heal_on_kill": 0.0,
 	"stamina_on_kill": 0.0,
+	# The heavy blow's own channel. These two are the only keys here a body's kit
+	# never sums: they ride one hand's steel (`AnnointLedger.HAND_KEYS`) and the rig
+	# reads them per hand (`Archer.variant_annoint_rate`, `variant_damage_scale`),
+	# so `overhead_damage` welded on a club never reaches the greatsword in the
+	# other weapon set. Registered here because this is the one stat vocabulary.
+	"overhead_damage": 0.0,
+	"overhead_speed": 0.0,
 }
 
 ## The guard a trinket can add to one armor channel. Armor's own figures peak

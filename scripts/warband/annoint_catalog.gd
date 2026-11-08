@@ -1,6 +1,7 @@
 extends RefCounted
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
+const ItemPassives = preload("res://scripts/item_passives.gd")
 
 ## The annointment pool: every modifier the altar can weld to a piece of gear.
 ##
@@ -71,8 +72,10 @@ const FAMILY_OF_KEY := {
 	"flat_ranged": "flat",
 	"flat_melee": "flat",
 	"melee_damage": "melee",
+	"overhead_damage": "melee",
 	"throw_damage": "throw",
 	"attack_speed": "tempo",
+	"overhead_speed": "tempo",
 	"move_speed": "mobility",
 	"guard": "defence",
 	"health": "defence",
@@ -153,8 +156,10 @@ const POLICY := {
 		"weights": {"bow": 1.0, "flat": 1.0, "tempo": 0.6, "spell": 0.4, "sustain": 0.4},
 	},
 	GROUP_SWORD: {
+		# `overhead_*` is the heavy blow's own channel: a blunt piece names it
+		# (see `GROUP_BLUNT`), and the gate is the class that holds the steel.
 		"keys": ["melee_damage", "flat_melee", "attack_speed", "guard", "cooldown",
-			"stamina_regen", "health", "stamina"],
+			"stamina_regen", "health", "stamina", "overhead_damage", "overhead_speed"],
 		"procs": [Proc.HEAL, Proc.STAMINA, Proc.BLEED, Proc.LIFESTEAL, Proc.QUICK_STRIKE,
 			Proc.GUARD_BREAK, Proc.ABSORB],
 		"weights": {"melee": 1.0, "flat": 0.4, "tempo": 0.6, "defence": 0.4,
@@ -198,6 +203,7 @@ const POLICY := {
 const GROUP_ANY_WEAPON := "weapon"
 const GROUP_MELEE := "melee"
 const GROUP_SWORD := "sword"
+const GROUP_BLUNT := "blunt"
 const GROUP_DAGGER := "dagger"
 const GROUP_TWO_HAND := "two_hand"
 const GROUP_BOW := "bow"
@@ -703,6 +709,17 @@ const NAMES := [
 	{"id": "k_gut_hook", "name": "Gut Hook", "kind": "ability", "groups": ["sword"],
 		"ability": "gut_hook", "line": "one narrow, heavy cut",
 		"tags": ["melee", "offence"], "power": 0.6},
+	# The heavy blow, and blunt steel's own weld: the makeshift club and the whole
+	# tree limb carry `blunt`, so no forged blade can take it. A club's overhand
+	# already runs at twice its profile's clip; this makes that blow three times
+	# the damage at half again the speed on top (`ItemPassives`), which is the club
+	# the campaign issues. The altar's worth floor is above a club's price, so the
+	# named weld is the only way onto one - the starter kit, or the paperdoll's bench.
+	{"id": "k_heavy_swing", "name": "Heavy Swing", "kind": "stat", "groups": ["blunt"],
+		"stats": {"overhead_damage": 2.0, "overhead_speed": 0.5},
+		"line": "3x damage on the overhand, swung 1.5x as fast",
+		"note": "The wheel-down blow only: a club's sweep keeps its own clock.",
+		"tags": ["melee", "offence"], "power": 0.85},
 	{"id": "k_backstab", "name": "Backstab", "kind": "ability", "groups": ["dagger"],
 		"ability": "backstab", "line": "blink behind the target and stab for double",
 		"tags": ["melee", "offence"], "power": 0.8},
@@ -1003,8 +1020,12 @@ static func groups_of(item: Dictionary) -> Array:
 				out.append(GROUP_DAGGER)
 			else:
 				# Every sword, including the greatsword: a two-hander is a
-				# sword first and a two-handed weapon second.
+				# sword first and a two-handed weapon second. The makeshift
+				# tier - the club and the whole tree limb - carries `blunt` as
+				# well, which is the group the heavy blow's own welds name.
 				out.append(GROUP_SWORD)
+				if ItemPassives.is_blunt_index(int(item.get("index", 0))):
+					out.append(GROUP_BLUNT)
 				if category == "2h":
 					out.append(GROUP_TWO_HAND)
 		"armor":

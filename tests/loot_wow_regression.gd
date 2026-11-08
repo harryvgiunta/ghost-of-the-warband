@@ -358,23 +358,12 @@ func check_hand() -> void:
 	var pelts_before := stash.pooled_count(PELT)
 	var fangs_before := stash.pooled_count("wolf_tooth")
 
-	check(hand.try_click(body, corpse.global_position), "a click on the body begins a loot")
-	check(body.crouching, "the body ducks over the corpse")
-	check(hand.active() and hand.target_kind() == "corpse", "the channel names what it works")
-	check(hand.progress() < 0.1, "the channel starts at nothing")
-	check(not hand.try_click(body, corpse.global_position), "a second click opens no second channel")
-
-	hand.tick(0.4)
-	check(hand.active(), "the channel is still running mid-way")
-	check(hand.progress() > 0.3 and hand.progress() < 0.9,
-		"progress tracks the beat, got %.2f" % hand.progress())
-	hand.tick(0.6)
-	check(not hand.active(), "the channel ends")
-	check(not body.crouching, "the body stands up again")
-	check(loot.corpse_items(corpse_id).is_empty(), "the body was emptied")
+	check(hand.try_click(body, corpse.global_position), "a right click on the body takes it")
+	check(loot.corpse_items(corpse_id).is_empty(), "the body was emptied at once")
 	check(stash.pooled_count(PELT) == pelts_before + 1, "the pelt is a stash row")
 	check(stash.pooled_count("wolf_tooth") == fangs_before + 1, "and so is the fang")
-	check(controller.refreshed.has(3), "the looted body was re-dressed")
+	check(not controller.refreshed.has(3),
+		"nothing is dressed onto the body that searched (K is that verb)")
 	var summary := hand.last_summary()
 	check(summary.contains("Wolf Pelt") and summary.contains("Looted 2"),
 		"one line says what came up, got %s" % summary)
@@ -383,7 +372,6 @@ func check_hand() -> void:
 		"the HUD raised that line")
 
 	# The ground is bare: a click is an attack again, and the hand must say so.
-	hand.tick(0.3)
 	check(not hand.try_click(body, corpse.global_position),
 		"a click on a stripped body in bare ground is not a loot")
 
@@ -395,7 +383,6 @@ func check_hand() -> void:
 	world._client = true
 	check(not hand.try_click(body, guest_corpse.global_position),
 		"a guest's click falls through to an attack")
-	check(not hand.active(), "and no channel opened")
 	world._client = false
 
 	# A drop, and the pile it fell in. One click gathers the pile, not one piece.
@@ -403,82 +390,46 @@ func check_hand() -> void:
 	var pile = loot.spawn("wolf_bone", body.global_position + Vector3(1.3, 0.0, 0.4))
 	var far = loot.spawn("wolf_paw", body.global_position + Vector3(8.0, 0.0, 0.0))
 	check(drop != null and pile != null and far != null, "the drops are real nodes")
-	hand.tick(0.3)
-	check(hand.try_click(body, drop.global_position), "a click on a drop begins a loot")
-	check(hand.target_kind() == "drop", "the channel names the drop")
-	check(body.crouching, "the body ducks over a drop too")
-	hand.tick(1.0)
-	check(drop.collected and pile.collected, "the pile around the clicked drop was taken")
+	check(hand.try_click(body, drop.global_position), "a click on a drop takes it at once")
+	check(drop.collected and pile.collected, "the pile around the clicked drop came up")
 	check(not far.collected, "a drop across the clearing was not")
-	# The body's reach is what opens a channel, not the crosshair alone: a click
-	# on a drop across the clearing is a swing, never a loot from ten paces off.
-	hand.tick(0.3)
+	# The body's reach is what opens a take, not the crosshair alone: a click on a
+	# drop across the clearing is a swing, never a take from ten paces off.
 	check(not hand.try_click(body, far.global_position),
 		"a drop out of the body's reach is an attack")
-	check(not hand.active(), "and no channel opened")
 
 	# The same rule for a corpse. This is the click that used to steal a swing
-	# aimed at a fighter standing over the dead: the channel is the body's work,
-	# so a corpse across the field cannot be worked from here.
+	# aimed at a fighter standing over the dead.
 	var distant := StubCorpse.new()
 	distant.carried = ["wolf_paw"]
 	_field.add_child(distant)
 	distant.global_position = body.global_position + Vector3(25.0, 0.0, 0.0)
 	var distant_id := loot.register_corpse(distant)
-	hand.tick(0.3)
 	check(not hand.try_click(body, distant.global_position),
 		"a corpse out of the body's reach is an attack")
-	check(not hand.active(), "and no channel opened")
 	check(loot.corpse_items(distant_id) == ["wolf_paw"], "the distant corpse is untouched")
 	distant.queue_free()
 	check(stash.pooled_count(ICHOR) >= 1, "the ichor is in the shared stash")
 	check(hand.last_summary().contains("Warden's Ichor"),
 		"the line names the reagent, got %s" % hand.last_summary())
+	# A weapon lying beside a stripped body is still a take: the emptied corpse is
+	# ground, and must never shadow the blade that fell on it.
+	var steel = loot.spawn("sword_short", body.global_position + Vector3(0.5, 0.0, -0.5))
+	check(steel != null, "a blade lies by the body")
+	check(hand.try_click(body, steel.global_position),
+		"a right click on the weapon picks it up")
+	check(steel.collected, "the blade came up")
 
-	# Cancelled: a blow, a panel or a walk takes nothing.
+	# A downed body cannot search, and a prop or no body at all is no looter.
 	var second := StubCorpse.new()
 	second.carried = ["wolf_paw"]
 	_field.add_child(second)
 	second.global_position = body.global_position + Vector3(0.6, 0.0, 0.0)
 	var second_id := loot.register_corpse(second)
 	var banked := stash.pooled_total()
-	hand.tick(0.3)
-	check(hand.try_click(body, second.global_position), "a second body can be worked")
-	hand.cancel()
-	check(not hand.active() and not body.crouching, "cancel straightens the body")
-	check(stash.pooled_total() == banked, "and books nothing")
-	check(loot.corpse_items(second_id) == ["wolf_paw"], "the corpse is untouched")
-
-	# A body that walks off the spot cannot still be working it.
-	hand.tick(0.3)
-	check(hand.try_click(body, second.global_position), "the channel opens again")
-	body.global_position += Vector3(0.0, 0.0, HandScript.LEAVE_DISTANCE + 1.0)
-	hand.tick(0.1)
-	check(not hand.active() and not body.crouching, "walking away breaks the channel")
-	check(stash.pooled_total() == banked, "and books nothing")
-	body.global_position -= Vector3(0.0, 0.0, HandScript.LEAVE_DISTANCE + 1.0)
-
-	# A body that goes down mid-channel drops the work.
-	hand.tick(0.3)
-	check(hand.try_click(body, second.global_position), "the channel opens once more")
 	body.downed = true
-	hand.tick(0.1)
-	check(not hand.active() and not body.crouching, "going down breaks the channel")
-	check(stash.pooled_total() == banked, "and books nothing")
-	check(not hand.try_click(body, second.global_position),
-		"a downed body cannot start a loot")
+	check(not hand.try_click(body, second.global_position), "a downed body cannot take")
 	body.downed = false
-
-	# A blow that puts the body down ends the channel on the frame it lands, not a
-	# tick later.
-	hand.tick(0.3)
-	check(hand.try_click(body, second.global_position), "the channel opens once more")
-	body.downed_started.emit(1)
-	check(not hand.active() and not body.crouching,
-		"the body's own downed signal breaks the channel")
-	check(stash.pooled_total() == banked, "and books nothing")
-
-	# Not a body at all: the hand only duck-types, and only a crouching body loots.
 	var prop := Node3D.new()
 	world.add_child(prop)
 	check(not hand.try_click(prop, second.global_position), "a prop is not a looter")
@@ -486,6 +437,7 @@ func check_hand() -> void:
 	check(not hand.try_click(body, Vector3(9000.0, 0.0, 9000.0)),
 		"nothing within reach is an attack")
 	check(stash.pooled_total() == banked, "no refused click booked anything")
+	check(loot.corpse_items(second_id) == ["wolf_paw"], "the second body is untouched")
 
 	world.queue_free()
 	await process_frame

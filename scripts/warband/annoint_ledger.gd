@@ -30,6 +30,11 @@ const CEILINGS := {
 	"attack_speed": 0.25,
 	"move_speed": 0.20,
 	"melee_damage": 0.30,
+	# The heavy blow is one weld's own figure: a club only exists in two hands at
+	# most, and three times the overhand at half again its speed is the ceiling
+	# the piece was authored at. A second copy adds nothing rather than doubling it.
+	"overhead_damage": 2.0,
+	"overhead_speed": 0.5,
 	"ranged_damage": 0.30,
 	"spell_damage": 0.30,
 	"flat_melee": 24.0,
@@ -44,6 +49,11 @@ const CEILINGS := {
 
 ## A drawback may not push a kit into the dirt.
 const FLOOR := -0.25
+
+## The welds that ride the steel in one hand rather than the body's whole kit.
+## `overhead_damage` on a club is not a weld on the greatsword in the other set:
+## `stats_for` never returns these, and a body asks `hand_stats_for` per copy.
+const HAND_KEYS := ["overhead_damage", "overhead_speed"]
 
 ## copy key -> Array[String] of entry ids, oldest first.
 var pieces: Dictionary = {}
@@ -197,6 +207,23 @@ func stats_for(refs: Array) -> Dictionary:
 		var ordinal := int((payload as Dictionary).get("ordinal", 0))
 		for entry in entries_of(item_id, ordinal):
 			Catalog.apply_entry(total, entry)
+	for key in HAND_KEYS:
+		total.erase(key)
+	return _clamp(total)
+
+
+## The hand keys one copy carries, clamped like every other weld. The hand that
+## holds the piece reads these (`Archer.variant_annoint_rate`), so the club's
+## heavy overhand is the club's and not the body's.
+func hand_stats_for(item_id: String, ordinal: int = 0) -> Dictionary:
+	var total := {}
+	for entry in entries_of(item_id, ordinal):
+		for key in entry.stats:
+			if HAND_KEYS.has(str(key)):
+				total[str(key)] = float(total.get(str(key), 0.0)) + float(entry.stats[key])
+		for key in entry.drawback:
+			if HAND_KEYS.has(str(key)):
+				total[str(key)] = float(total.get(str(key), 0.0)) - float(entry.drawback[key])
 	return _clamp(total)
 
 

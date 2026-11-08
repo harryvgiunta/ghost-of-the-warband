@@ -17,6 +17,7 @@ extends "res://scripts/warband/cage_watcher.gd"
 ## that lands on the archer springs it the same way.
 
 const ArrowScript = preload("res://scripts/arrow.gd")
+const TerrainScript = preload("res://scripts/warband/terrain.gd")
 
 ## The catalog piece in the hand, and the grip `forest_mob_visual.gd` already
 ## authors for a bow on the warden's hand bone.
@@ -50,6 +51,25 @@ const MAX_SHOT := 18.0
 ## squad down the lane - an archer is an ambush, not a hunter.
 const LEASH := 13.0
 
+## **The lone archer.** A band of one is not a volley from cover: there is no
+## packmate to cover the ground it gives up, so the body fights the way the
+## arena's cloned ranger does instead of standing in its trees. It holds a longer
+## ring, walks to a fresh spot around its post after every shot (and every time a
+## blade closes), and answers contact by breaking to that spot rather than
+## backstepping three metres. `elite` is set by the scene; the road's chain
+## archers are not elite - they are the wood's small bodies with a twig bow, and
+## they hold a post like everything else in their band.
+const ELITE_HOLD_NEAR := 11.0
+const ELITE_HOLD_FAR := 24.0
+const ELITE_BREAK := 9.0
+const ELITE_LEASH := 26.0
+## How long it walks to the next spot before it starts looking for a shot again.
+const ELITE_STEP_SECONDS := 2.2
+## Where the next spot is drawn: a ring around the post, out of a blade's reach
+## and inside its own.
+const ELITE_SPOT_NEAR := 12.0
+const ELITE_SPOT_FAR := 20.0
+
 ## The cinder devil's bow, the one the frontier's own archers fire: 30 m/s with
 ## the arrow's own 4 m/s^2 drop, aimed a tenth of a second ahead. The release is
 ## the warden's stab clip's hold, stretched so a body can see the draw.
@@ -79,9 +99,17 @@ var host: Node3D = null
 var shots_fired := 0
 ## True once the ambush is sprung; a hidden archer crouches and holds its fire.
 var ambush_awake := false
+## True for the lone watchman whose brain is the arena clone's: see `ELITE_*`.
+var elite := false
+## What one shaft takes off this body's bow, before the scene's `blow_scale`: a
+## runt's twig bow looses a runt's blow, a warden's the warden's.
+var shot_damage := ARROW_DAMAGE
 
 var _retreat := 0.0
 var _has_anchor := false
+## Seconds left walking to a fresh spot, and the spot itself (elite only).
+var _step := 0.0
+var _step_to := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -97,9 +125,19 @@ func _ready() -> void:
 	profile["windup"] = DRAW_SECONDS
 	profile["sight"] = 40.0
 	profile["strafe"] = 0.55
+	# A runt stays a runt at range: the wood's small body looses a third of a
+	# warden's shaft, the same share its blade carries (`cage_watcher.RUNT_SHARE`).
+	if mob_id == RUNT_ID:
+		shot_damage = ARROW_DAMAGE * RUNT_SHARE
 	weapon_item = BOW_ITEM
 	_apply_weapon()
 	_attack_cooldown = 0.4
+
+
+## A bow in the open: the road's chain fields archers that are not hidden, so
+## they stand their watch and fight whoever comes instead of sleeping in a crouch.
+func stand_watch() -> void:
+	ambush_awake = true
 
 
 ## The group's post. Held as both the roam home and the leash centre.
@@ -187,17 +225,34 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	var gap := to_target.length()
 	var facing := to_target.normalized() if gap > 0.001 else direction
 	_face_intent = facing
-	# A squad that runs off down the trail is not chased: the group's own tree
-	# line is the whole of its territory.
+	# A squad that runs off down the trail is not chased: its own post is the
+	# whole of its territory.
 	if _has_anchor:
 		var home_offset := anchor - global_position
 		home_offset.y = 0.0
-		if home_offset.length() > LEASH:
+		if home_offset.length() > (ELITE_LEASH if elite else LEASH):
 			_move_intent = _steer(home_offset.normalized())
 			_move_speed = float(profile.run_speed) * MOVE_SCALE
 			_face_intent = facing
 			return
-	if gap < RETREAT_UNDER and _retreat <= 0.0:
+	# The lone watchman's one difference: it walks to the spot it picked instead
+	# of holding the ground the last shaft left from.
+	if elite and _step > 0.0:
+		_step = maxf(0.0, _step - delta)
+		var to_spot := _step_to - global_position
+		to_spot.y = 0.0
+		if to_spot.length() > 0.7:
+			_move_intent = _steer(to_spot.normalized())
+			_move_speed = float(profile.run_speed) * MOVE_SCALE
+			_face_intent = facing
+			return
+		_step = 0.0
+	if gap < (ELITE_BREAK if elite else RETREAT_UNDER) and _retreat <= 0.0:
+		if elite:
+			# Contact is answered by leaving it, not by a three-metre backstep: the
+			# spot is out of blade reach and it keeps the bow up on the way there.
+			_pick_step()
+			return
 		# One beat of giving ground per close: 0.8-1.4 s at the run speed is the
 		# 3-6 m the ring wants back.
 		_retreat = _rng.randf_range(0.8, 1.4)
@@ -208,7 +263,7 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 		_move_speed = float(profile.run_speed) * MOVE_SCALE
 		_face_intent = facing
 		return
-	if gap > HOLD_FAR:
+	if gap > (ELITE_HOLD_FAR if elite else HOLD_FAR):
 		_move_intent = _steer(facing)
 		_move_speed = float(profile.run_speed) * MOVE_SCALE
 		return
@@ -217,7 +272,8 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 	var tangent := Vector3(-facing.z, 0.0, facing.x) * _strafe_dir
 	_move_intent = _steer(tangent * 0.55)
 	_move_speed = float(profile.walk_speed) * 0.85 * STRAFE_SCALE
-	if _attack_cooldown > 0.0 or gap > MAX_SHOT or not _senses.seen:
+	if _attack_cooldown > 0.0 or gap > (ELITE_HOLD_FAR if elite else MAX_SHOT) \
+			or not _senses.seen:
 		return
 	if not _shot_lane(_bow_origin()):
 		# A trunk in the way: hold the shot and re-aim a beat later instead of
@@ -226,6 +282,19 @@ func _circle(delta: float, distance: float, direction: Vector3) -> void:
 		return
 	_choose_attack()
 	_enter("WINDUP")
+
+
+## The next spot around the post: drawn on the ring, out of a blade's reach, and
+## inside the body's own leash. A lone archer that stood where it loosed was a
+## turret; the arena's clone walks off its shot and the wood's does now as well.
+func _pick_step() -> void:
+	if not _has_anchor:
+		return
+	var angle := _rng.randf_range(0.0, TAU)
+	var radius := _rng.randf_range(ELITE_SPOT_NEAR, ELITE_SPOT_FAR)
+	_step_to = TerrainScript.grounded(Vector3(anchor.x + cos(angle) * radius, 0.0,
+		anchor.z + sin(angle) * radius))
+	_step = ELITE_STEP_SECONDS
 
 
 ## The draw is the warden's stab clip, held for the whole telegraph.
@@ -244,7 +313,7 @@ func _cooldown_seconds() -> float:
 
 ## What one shaft is worth. The scene's `blow_scale` still weights it.
 func _strike_damage() -> float:
-	return ARROW_DAMAGE * blow_scale
+	return shot_damage * blow_scale
 
 
 ## The release. No `attacked` signal: an arrow owns its own hit, so emitting the
@@ -280,6 +349,9 @@ func _resolve_strike() -> void:
 	if is_instance_valid(host) and host.has_method("_keep_projectile"):
 		host._keep_projectile(arrow)
 	shots_fired += 1
+	# A lone watchman does not loose twice from the same patch of dirt.
+	if elite:
+		_pick_step()
 
 
 ## Where the shaft leaves: the bow the body is holding - its own arrow rest, at

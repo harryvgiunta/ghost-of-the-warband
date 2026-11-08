@@ -99,6 +99,7 @@ func run() -> void:
 	await check_lane()
 	check_art()
 	check_pursuers()
+	await check_chain()
 	await kill_cultists()
 	await check_walk()
 	await check_follow()
@@ -174,9 +175,9 @@ func check_the_world() -> void:
 	check(soul != null and _flat(soul.global_position, start) < 8.0,
 		"and the party stands on the lane's first stretch (%.1f m)"
 		% (_flat(soul.global_position, start) if soul != null else -1.0))
-	check(game.trail.guards.size() == 20 + TrailScript.ARCHER_COUNT,
-		"twenty cultists and two archer ambushes hold the trail (%d)"
-		% game.trail.guards.size())
+	check(game.trail.guards.size() == game.trail.cultists.size() + TrailScript.ARCHER_COUNT,
+		"the blade cultists and the two archer ambushes hold the trail (%d bodies, %d of them blades)"
+		% [game.trail.guards.size(), game.trail.cultists.size()])
 	# Where they stand is what matters (asserted with the lane, below): a mob's
 	# `player` field is its current quarry, not a spawn-time script.
 
@@ -299,9 +300,9 @@ func check_pursuers() -> void:
 			visible += 1
 		if bool(watcher.hunting()) and is_instance_valid(watcher.player):
 			hunting += 1
-		check(is_equal_approx(float(watcher.max_health), float(WatcherScript.HARDENED_HEALTH)),
-			"a road cultist carries the hardened pool (%s of %s)"
-			% [str(watcher.max_health), str(WatcherScript.HARDENED_HEALTH)])
+		check(is_equal_approx(float(watcher.max_health), _pool_for(watcher)),
+			"a road cultist carries its species' pool (%s of %s)"
+			% [str(watcher.max_health), str(_pool_for(watcher))])
 		# On the ground it was posted on, wherever that is: the trail is hill
 		# country, so "y above zero" was a claim about the old flat floor, and a
 		# cultist standing in a hollow at -15 m is a cultist on its feet.
@@ -335,21 +336,128 @@ func check_pursuers() -> void:
 	# a cultist sees 60 m, so anything closer joins the party's first fight.
 	var start: Vector3 = game.trail.forest["start"]
 	var near := 0
-	var far := 0
 	for watcher in game.trail.guards:
-		var distance := _flat(watcher.global_position, start)
-		if distance <= 60.0:
+		if _flat(watcher.global_position, start) <= 60.0:
 			near += 1
-		if distance < 250.0:
-			far += 1
 	check(near == 0, "nobody stands within sight of the lane's head (%d within 60 m)"
 		% near)
-	# Two rings stand inside the first 250 m of a 1,374 m road; the rest are spaced
-	# down it. The claim is that the road is held, not that the first quarter km is.
-	check(far >= 4, "the cult is still on the road (%d within 250 m)" % far)
+	# **The first fight of a campaign is the smallest one.** What a party out of the
+	# gate meets first is the body nearest the town's gate, and it is a single
+	# hollow runt: one body, a third of a warden's pool, and no partner within a
+	# warden's reach. A ring of four full wardens at the first clearing was the bug
+	# this holds shut - the road's chain is `TrailScript.CHAIN_*`.
+	var gate: Vector3 = game.trail.town_gate()
+	var first = null
+	var nearest := INF
+	for cultist in game.trail.cultists:
+		if not is_instance_valid(cultist) or not bool(cultist.get("alive")):
+			continue
+		var distance := _flat(cultist.global_position, gate)
+		if distance < nearest:
+			nearest = distance
+			first = cultist
+	check(first != null, "the town end of the road is held")
+	if first != null:
+		check(str(first.get("mob_id")) == WatcherScript.RUNT_ID,
+			"the first cultist out of the town gate is a hollow runt (%s)"
+			% str(first.get("mob_id")))
+		check(is_equal_approx(float(first.max_health), WatcherScript.RUNT_HEALTH),
+			"at a third of a warden's pool (%s)" % str(first.max_health))
+		var companions := 0
+		for cultist in game.trail.cultists:
+			if cultist == first or not is_instance_valid(cultist):
+				continue
+			if bool(cultist.get("alive")) \
+					and _flat(cultist.global_position, first.global_position) < 20.0:
+				companions += 1
+		check(companions == 0, "and it stands alone (%d within 20 m)" % companions)
 	check(game.squad != null and game.squad.following, "the squad is an escort on the road")
 	check(game.squad.watchers == game.guards,
 		"the squad fights the world's one hostile list, not a copy of it")
+
+
+## The pool a body of that species is owed: a runt is a third of a hard body's, and
+## a warden the hard pool itself, whatever the scene spawned it with.
+func _pool_for(watcher) -> float:
+	return WatcherScript.RUNT_HEALTH if str(watcher.get("mob_id")) == WatcherScript.RUNT_ID \
+		else WatcherScript.HARDENED_HEALTH
+
+
+## **The road is a chain.** The first band stands `CHAIN_FIRST` out of the town
+## gate, the second `CHAIN_SECOND_STEP` beyond it, and every gap after that is drawn
+## between `CHAIN_GAP_MIN` and `CHAIN_GAP_MAX` - so the wood is held ground a squad
+## meets every fifty-odd metres, not four set-pieces with three hundred empty metres
+## between them. Every band is also handed a disc to wander in: a band that never
+## moves is a row of posts.
+func check_chain() -> void:
+	var gate: Vector3 = game.trail.town_gate()
+	var marks: Array[float] = []
+	for cultist in game.trail.cultists:
+		if is_instance_valid(cultist):
+			marks.append(_flat(cultist.global_position, gate))
+	marks.sort()
+	var bands: Array[float] = []
+	for distance in marks:
+		if bands.is_empty() or distance - float(bands[bands.size() - 1]) > 5.0:
+			bands.append(distance)
+	check(bands.size() >= 10, "the road is a chain, not a handful of camps (%d bands)"
+		% bands.size())
+	check(absf(float(bands[0]) - TrailScript.CHAIN_FIRST) <= 6.0,
+		"the first band stands %.0f m out of the town gate (%.1f)"
+		% [TrailScript.CHAIN_FIRST, float(bands[0])])
+	var worst := 0.0
+	for index in range(1, bands.size()):
+		worst = maxf(worst, float(bands[index]) - float(bands[index - 1]))
+	check(worst <= TrailScript.CHAIN_GAP_MAX + 6.0,
+		"no gap in the chain is longer than %.0f m (%.1f)"
+		% [TrailScript.CHAIN_GAP_MAX, worst])
+	# The pieces: the makeshift tier in the hand, a board the only off-hand, and a
+	# bow only in a body fielded as an archer.
+	for cultist in game.trail.cultists:
+		var main := str(cultist.get("weapon_item"))
+		check(WatcherScript.MAKESHIFT_TIER.has(main),
+			"a chain body carries the salvage tier (%s)" % main)
+		var off := str(cultist.get("off_item"))
+		check(off.is_empty() or off == "shield_wood",
+			"and a board is the only off hand (%s)" % off)
+		# The board is on the rig, not only in the roster's idea of the body: the
+		# presenter straps it to the left hand and the rig wears it.
+		check(bool(cultist.has_shield_visual()) == (off == "shield_wood"),
+			"the board is actually strapped on the body (%s, %s)"
+				% [off, str(cultist.has_shield_visual())])
+		check(float(cultist.get("patrol_radius")) > 0.0, "and it is given a disc to walk")
+	# Wandering, for real. A far-away body is parked by the culler (that is the
+	# world's own LOD, not the band's), so the soul is stood ninety metres off the
+	# first band - outside the fifty-five the world re-targets within, inside the
+	# wake ring - and the band is watched for one leg of a patrol.
+	var mover = null
+	for cultist in game.trail.cultists:
+		if is_instance_valid(cultist):
+			mover = cultist
+			break
+	var watched = game.controller.active_body(1)
+	check(mover != null and watched != null, "there is a band to watch")
+	if mover != null and watched != null:
+		var from: Vector3 = (mover as Node3D).global_position
+		var away: Vector3 = from + Vector3(90.0, 0.0, 0.0)
+		var home: Vector3 = (watched as Node3D).global_position
+		(watched as Node3D).global_position = TerrainScript.grounded(Vector3(away.x, 0.0, away.z))
+		await create_timer(6.0).timeout
+		# Waited for, not assumed: a body woken by the culler settles for two to
+		# four seconds before its first goal, and a pool of eight Godots stretching
+		# the frame is not a fault in the band. Fifteen seconds is the ceiling for
+		# one leg of a patrol.
+		var moved := 0.0
+		for step in 60:
+			await create_timer(0.25).timeout
+			if not is_instance_valid(mover):
+				break
+			moved = (mover as Node3D).global_position.distance_to(from)
+			if moved > 0.5:
+				break
+		check(moved > 0.5, "the band walks its patch (%s moved %.2f m)"
+			% [str(mover.name), moved])
+		(watched as Node3D).global_position = home
 
 
 func kill_cultists() -> void:

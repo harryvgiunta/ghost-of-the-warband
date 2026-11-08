@@ -277,6 +277,27 @@ static func paving_material(tint: Color = Color.WHITE) -> StandardMaterial3D:
 	return material
 
 
+## A sign face: the words baked into the board's own albedo, with the paint's or
+## the carving's relief in the normal map. Never tiled - a sign is one board - and
+## filtered for a surface read at an angle from across a square. `sign_id` is a
+## key of `SignKit.SIGNS`; the files are `sign_<id>.png` and `sign_<id>_n.png`.
+static func sign_material(sign_id: String) -> StandardMaterial3D:
+	var key := "sign:" + sign_id
+	if _materials.has(key):
+		return _materials[key]
+	var id := "sign_" + sign_id
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = texture(id)
+	material.normal_enabled = true
+	material.normal_texture = _normal_texture(id)
+	material.normal_scale = 1.0
+	material.roughness = 0.84
+	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_materials[key] = material
+	return material
+
+
 ## Natural granite, tintable per instance: the scattered boulders and everything
 ## else that is just broken stone. World-triplanar, so no mesh needs UVs.
 static func rock_material() -> StandardMaterial3D:

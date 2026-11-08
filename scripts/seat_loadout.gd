@@ -32,6 +32,9 @@ static func _apply_annoints(rig, annoints: Dictionary) -> void:
 	if rig.has_method("apply_annointments"):
 		rig.apply_annointments(stats if stats is Dictionary else {},
 			procs if procs is Array else [])
+	var hand_stats: Variant = annoints.get("hands", {})
+	if hand_stats is Dictionary and rig.has_method("set_hand_annointments"):
+		rig.set_hand_annointments(hand_stats)
 	var skills: Variant = annoints.get("skills", {})
 	var marks: Variant = annoints.get("marks", {})
 	if marks is Dictionary and rig.has_method("set_annoint_marks"):
@@ -70,9 +73,11 @@ static func trinkets(value: Variant) -> Dictionary:
 ## the wire, and a peer must not be able to claim a skill its steel was never given.
 ## `annoints` is the same kind of trusted-local argument as `anointed`: the
 ## warband's own ledger, never a loadout field. `{stats: Dictionary,
-## skills: {main, off, neck, ring1, ring2}, marks: {main, off}}`; a bare
-## dictionary leaves the rig alone. `marks` is how many annointments each held
-## copy carries, which the rig draws on the piece. `hotbar_order` is the player's
+## skills: {main, off, neck, ring1, ring2}, marks: {main, off},
+## hands: {main, off}}`; a bare dictionary leaves the rig alone. `marks` is how
+## many annointments each held copy carries, which the rig draws on the piece,
+## and `hands` the welds that ride one hand's steel (`overhead_damage` and its
+## like) rather than the body's whole kit. `hotbar_order` is the player's
 ## own sequence for the ten keys, read off the mercenary's record: it changes the
 ## slot a skill fires from and never which skills the kit grants, so it rides
 ## beside the loadout too.

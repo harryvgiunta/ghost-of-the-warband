@@ -23,6 +23,7 @@ const MobSenses = preload("res://scripts/mob_senses.gd")
 const MobSteering = preload("res://scripts/mob_steering.gd")
 const MobWander = preload("res://scripts/mob_wander.gd")
 const DuelBrainScript = preload("res://scripts/warband/duel_brain.gd")
+const CombatScript = preload("res://scripts/combat.gd")
 const DemonFireScript = preload("res://scripts/warband/demon_fire.gd")
 const MobLod = preload("res://scripts/mob_lod.gd")
 const SfxScript = preload("res://scripts/audio/sfx.gd")
@@ -118,6 +119,11 @@ var _head_shot := Vector3.ZERO
 ## killing chop splits it where the blade lands (`SeveredBody`).
 var _cleave := Vector3.ZERO
 var _cleave_kind := "horizontal"
+## The class of the piece behind the blow in flight, named by the striker before
+## its contact (`note_strike`) and spent by the blow that lands. A devil has no
+## `Combat` and no stagger roll of its own: a blunt blow is the one that breaks
+## its line (`Combat.blunt_stagger`), and the stagger state is its own.
+var _strike_class := ""
 var _sever := Vector3.ZERO
 var _split := Vector3.ZERO
 var state := "IDLE"
@@ -1428,14 +1434,19 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	_head_shot = Vector3.ZERO
 	var chop := _cleave
 	_cleave = Vector3.ZERO
+	# The piece behind the blow is spent here too, whatever comes of it.
+	var strike := _strike_class
+	_strike_class = ""
 	# Being hit is not something a parked body can miss: it wakes and turns.
 	mob_wake()
 	last_hitter = source_id
 	var applied := amount * Hitbox.damage_multiplier(headshot)
 	# A raised guard turns most of the blow: you have to catch the cultist with
 	# its blade down (its strike, or the moment its guard breaks on a stagger).
+	var turned := false
 	if guard_between_swings and _warband_guard > 0.0:
 		applied *= GUARD_REDUCTION
+		turned = true
 	health = maxf(0.0, health - applied)
 	DamageNumbers.spawn(get_parent(), get_aim_position(), applied, "hit", headshot, health <= 0.0)
 	BloodFx.wound(self, blood_rig(), get_aim_position(), applied, headshot,
@@ -1443,6 +1454,13 @@ func take_damage(amount: float, source_id: int, headshot: bool = false) -> void:
 	if health <= 0.0:
 		_enter_dead(true, flight, applied, chop)
 		return
+	# A blunt head rocks the body where an edge would only open it: the same roll
+	# the campaign's own bodies make, spent here as the mob's own stagger - which
+	# stands it still, drops its guard window and cancels a windup or a cast.
+	if not turned:
+		var stunned := CombatScript.blunt_stagger(applied, max_health, strike)
+		if stunned > 0.0:
+			stagger(stunned)
 	_respond_to_attack()
 
 
@@ -1459,6 +1477,14 @@ func note_cleave(force: Vector3, kind: String = "horizontal") -> void:
 	if alive:
 		_cleave = force
 		_cleave_kind = kind
+
+
+## The piece behind a blow, named by the striker before its contact: a blunt head
+## is the one that breaks a devil's line (`Combat.blunt_stagger`). `at` is where
+## the blow would land; a devil has no guard for it to matter to.
+func note_strike(weapon_class: String, _at: Vector3 = Vector3.INF) -> void:
+	if alive:
+		_strike_class = weapon_class
 
 
 ## The projectile, blade or spell that landed names itself here before it

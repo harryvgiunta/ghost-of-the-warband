@@ -607,17 +607,13 @@ static func rope(node: Node3D, landing: Dictionary, top: float) -> Array[Light3D
 	shaft.spot_angle = 32.0
 	shaft.shadow_enabled = false
 	node.add_child(shaft)
-	var word := Label3D.new()
-	word.name = "WayUp_%s" % str(landing["id"])
-	word.text = "THE WAY UP"
-	word.font_size = 56
-	word.pixel_size = 0.006
-	word.outline_size = 10
-	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	word.modulate = Color(0.86, 0.90, 1.0)
-	word.outline_modulate = Color(0.02, 0.03, 0.06, 0.9)
-	word.position = Vector3(rope_at.x, foot + 2.7, rope_at.z)
-	node.add_child(word)
+	# The way up is cut into a stone tablet set on the floor at the rope's foot,
+	# facing back along the landing it serves - a waymark, not a floating word.
+	var to_centre: Vector3 = landing.get("centre", rope_at) - rope_at
+	var yaw := atan2(to_centre.x, to_centre.z)
+	var side := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var tablet_at := Vector3(rope_at.x, foot, rope_at.z) + side * 0.85
+	SignKit.tablet(node, "way_up", tablet_at, yaw, "WayUp_%s" % str(landing["id"]))
 	var out: Array[Light3D] = [shaft]
 	return out
 

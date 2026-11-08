@@ -37,6 +37,7 @@ const Layout = preload("res://scripts/warband/delve_layout.gd")
 const PrepScript = preload("res://scripts/warband/delve_prep_menu.gd")
 const MapScript = preload("res://scripts/warband/delve_map.gd")
 const VillageKit = preload("res://scripts/world/village_kit.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const StashScript = preload("res://scripts/warband/town_stash_model.gd")
@@ -52,6 +53,11 @@ const MOUTH_REACH := 3.0
 const ORIGIN := Vector3(0.0, 0.0, 1100.0)
 ## How long the party lies in the dark before the Hollow takes what it carried.
 const WIPE_BEAT := 2.5
+## The Hollow's name board: carried on its own two stakes in front of the pit, high
+## enough that a body walks under it and far enough out to clear the lantern post.
+const MOUTH_SIGN_Z := 1.30
+const MOUTH_SIGN_TOP := 2.90
+
 ## The ring a party comes back up onto, on the square's side of the mouth.
 const RETURN_RADIUS := 2.2
 const RETURN_STEP := 3.2
@@ -317,8 +323,6 @@ func descend(party_ids: Array, landing_id: String = "") -> Dictionary:
 	var booked: Dictionary = host.warband.begin_delve(ids)
 	if not bool(booked.get("ok", false)):
 		return booked
-	if host.get("loot_hand") != null:
-		host.loot_hand.cancel()
 	if host.has_method("_hide_panels"):
 		host._hide_panels()
 	# The shaft is drawn before the floor is built: the build warms the room the
@@ -640,14 +644,19 @@ func _build_mouth() -> void:
 	holder.shape = back
 	holder.position = Vector3(0.0, 0.9, -1.75)
 	solids.add_child(holder)
-	var word := Label3D.new()
-	word.name = "MouthName"
-	word.text = "THE WEEPING HOLLOW"
-	word.font_size = 64
-	word.pixel_size = 0.006
-	word.outline_size = 12
-	word.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	word.modulate = Color(0.95, 0.78, 0.48)
-	word.outline_modulate = Color(0.10, 0.04, 0.02, 0.9)
-	word.position = Vector3(0.0, 3.25, -0.1)
-	mouth.add_child(word)
+	# The Hollow's name, painted on a board carried over the pit on two stakes. The
+	# A-frame over the shaft is the hoist, so the sign has its own frame standing
+	# clear of it and of the lantern post, out toward the square.
+	var frame := VillageKit.Merged.new()
+	for side in [-1.0, 1.0]:
+		VillageKit.add_beam(frame, Vector3(side * 1.34, -0.05, MOUTH_SIGN_Z),
+			Vector3(side * 1.30, MOUTH_SIGN_TOP, MOUTH_SIGN_Z), 0.062,
+			mats["drift_dark"], 6, 0.05)
+	VillageKit.add_beam(frame, Vector3(-1.34, MOUTH_SIGN_TOP, MOUTH_SIGN_Z),
+		Vector3(1.34, MOUTH_SIGN_TOP, MOUTH_SIGN_Z), 0.055, mats["drift_dark"], 6)
+	frame.commit(mouth, "MouthSignPosts")
+	var name_board := Vector3(0.0, MOUTH_SIGN_TOP - 0.62, MOUTH_SIGN_Z)
+	SignKit.plank_board(mouth, "weeping_hollow", name_board, 0.0, "MouthName")
+	SignKit.hangers(mouth, "weeping_hollow", MOUTH_SIGN_TOP,
+		name_board.y + SignKit.size_of("weeping_hollow").y * 0.5 + 0.10,
+		[0.62, -0.62], MOUTH_SIGN_Z)

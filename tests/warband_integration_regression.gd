@@ -221,31 +221,28 @@ func check_orders() -> void:
 	check(actor != null, "a body stands for the click")
 	if actor == null or game.loot_hand == null:
 		return
-	# A piece under the crosshair but out of the body's reach is a swing. The
-	# channel is the body's own work: a click on a drop across the clearing used
-	# to loot it and steal the attack aimed at a fighter standing over it.
+	# A take is the body's own work: a piece under the crosshair but out of the
+	# body's reach is a swing, never a take from thirty paces off.
 	var far_drop = game.spawn_pickup("wolf_pelt",
 		actor.global_position + actor.global_basis.x * 30.0)
 	check(far_drop != null, "a pelt lies thirty metres off")
 	check(not game.loot_hand.try_click(actor, far_drop.global_position),
 		"a drop out of the body's reach is left to the sword")
-	check(not game.loot_hand.active(), "and no channel opened")
 	far_drop.queue_free()
-	# The same gesture on a piece at the body's feet is the loot.
+	# The same gesture on a piece at the body's feet is the take, and it is
+	# instant: no channel, no window, nothing dressed onto the body that searched.
+	var merc_id: int = game.controller.merc_for_peer(1)
+	var worn_before: Dictionary = warband.roster.equipped_of(merc_id)
 	var drop = game.spawn_pickup("wolf_pelt",
 		actor.global_position - actor.global_basis.z * 1.0)
 	check(drop != null, "a pelt lies at the body's feet")
 	check(game.loot_hand.try_click(actor, drop.global_position),
-		"the left button begins the loot")
-	check(game.loot_hand.active(), "the body is working the ground")
-	check(game.loot_hand.target_kind() == "drop", "and it is the drop it found")
-	# The world owns the channel's clock, so the test drives one full beat instead
-	# of racing a squadmate to the piece the body is already working.
-	game.loot_hand.tick(1.0)
-	check(not game.loot_hand.active(), "the channel closes on its own")
+		"a right click on the drop takes it")
 	check(warband.stash.pooled_count("wolf_pelt") >= 1, "the pelt is in the shared stash")
+	check(warband.roster.equipped_of(merc_id) == worn_before,
+		"and nothing was dressed onto the body that took it")
 	check(game.loot_hand.last_summary().contains("Wolf Pelt"),
-		"and one line says what came back (%s)" % game.loot_hand.last_summary())
+		"one line says what came up (%s)" % game.loot_hand.last_summary())
 
 	# A fighter under the reticle is what the press was for, whatever lies at its
 	# feet. The aim point of a mob across the fight sits on its own chest, so a drop
@@ -253,7 +250,6 @@ func check_orders() -> void:
 	# body ducked to work the ground in the middle of the fight and the click never
 	# swung. That is the report "clicking to attack is unresponsive", and it starts
 	# once the ground has steel on it.
-	game.loot_hand.tick(0.3)
 	var stand: Vector3 = actor.global_position
 	var ray: Dictionary = game.controller.camera_rig.aim_ray()
 	var ray_origin: Vector3 = ray.get("origin", stand)
@@ -296,7 +292,6 @@ func check_orders() -> void:
 		check(aimed.get("target") == fighter, "the reticle is on the living watcher")
 		# The piece that steals the press: inside the body's reach and inside the
 		# aim point's, so distance alone calls it "under the crosshair".
-		game.loot_hand.tick(0.3)
 		var under = game.spawn_pickup("wolf_pelt",
 			stand + toward.normalized() * 0.9 + Vector3.UP * 0.2)
 		check(under != null, "a pelt lies between the two bodies")
@@ -304,22 +299,24 @@ func check_orders() -> void:
 		# piece has to be the same one for every press below.
 		var under_at: Vector3 = under.global_position
 		var strike := InputEventMouseButton.new()
-		strike.button_index = MOUSE_BUTTON_LEFT
+		strike.button_index = MOUSE_BUTTON_RIGHT
 		strike.pressed = true
 		check(not game._loot_click(strike),
-			"a press aimed at a living fighter is a cut, not a loot")
-		check(not game.loot_hand.active(), "and the body does not duck to work the ground")
+			"a right press aimed at a living fighter is a cut, not a loot")
 		check(not game.loot_hand.try_click(actor, under_at, fighter),
 			"a living fighter under the reticle is never a loot")
-		check(not game.loot_hand.active(), "and no channel opened")
+		check(is_instance_valid(under) and not under.collected,
+			"and the pelt between them is untouched")
 		# The same piece, the same arm: only the body on the reticle changes, and a
 		# body that has stopped fighting is ground to work.
 		fighter.take_damage(1000.0, 0)
 		check(not bool(fighter.get("alive")), "the watcher is down")
+		var banked: int = warband.stash.pooled_total()
 		check(game.loot_hand.try_click(actor, under_at, fighter),
 			"a press on that body once it is down is the loot")
-		check(game.loot_hand.active(), "and the body works the ground")
-		game.loot_hand.cancel()
+		check(warband.stash.pooled_total() > banked,
+			"and the take is booked at once (%d -> %d)"
+				% [banked, warband.stash.pooled_total()])
 		if is_instance_valid(under):
 			under.queue_free()
 		fighter.queue_free()

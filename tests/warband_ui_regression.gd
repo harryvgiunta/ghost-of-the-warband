@@ -9,6 +9,7 @@ extends SceneTree
 const Contracts = preload("res://scripts/warband/warband_contracts.gd")
 const ScreenScript = preload("res://scripts/warband/warband_screen.gd")
 const DollScript = preload("res://scripts/warband/warband_paperdoll.gd")
+const Cruor = preload("res://scripts/warband/cruor_manager.gd")
 const LedgerFrameScript = preload("res://scripts/ui/ledger_frame.gd")
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
@@ -50,6 +51,7 @@ func run() -> void:
 	_check_rows_and_control()
 	_check_refresh()
 	_check_paperdoll()
+	_check_bench()
 	await _check_strip()
 	_check_item_hover()
 	_check_reequip_buttons()
@@ -368,6 +370,153 @@ func _check_paperdoll() -> void:
 		"RE-EQUIP clears the hand-set slot, got %s" % str(warband.roster.manual_slots(other)))
 	doll.close()
 	check(not doll.is_open(), "close() closes the paperdoll")
+
+# --- the bench -------------------------------------------------------------
+
+## The gear page's own anoint bench: the altar's rack without the altar. What this
+## owns is that the door is the page's, that a weld lands on **the copy in the
+## hand** and on no other copy of the same kind, that the price is the altar's
+## price (so the bench is a shortcut and never a subsidy), and that a refusal is
+## said out loud instead of swallowed. No `SacrificialAltar` exists in this tree:
+## if the bench needed one, nothing here would land.
+func _check_bench() -> void:
+	warband.reset_state()
+	_set_gold(500)
+	var body: int = warband.add_mercenary("Wren")
+	# Two shortswords: one goes in the hand, one stays in the pool. The mark must
+	# follow the serial the hand claimed, which is the difference between "the
+	# warband owns a worked shortsword" and "the shortsword this body carries".
+	warband.stash.add("sword_short", 2)
+	warband.stash.add(Cruor.BASIC_REAGENT, 4)
+	warband.cruor.add(Contracts.CruorTier.T1_RITUAL_TALLOW, 12)
+	warband.cruor.add(Contracts.CruorTier.T2_BLACK_BILE, 6)
+	var doll = DollScript.new()
+	doll.configure(warband)
+	root.add_child(doll)
+	doll.open(body)
+	check(not doll.bench_is_open(), "the bench starts shut")
+
+	doll.slot_rows["main"]["button"].pressed.emit()
+	var sword_row := _stash_row(doll, "sword_short")
+	check(not sword_row.is_empty(), "the shortsword waits in the stash")
+	sword_row["button"].pressed.emit()
+	check(str(warband.roster.equipped_of(body)["main"]) == "sword_short",
+		"the body wears a shortsword")
+	var worn_copy: int = doll.bench_ordinal()
+	check(warband.stash.pooled_count("sword_short") == 1,
+		"one shortsword left the pool to be worn, %d stay"
+			% warband.stash.pooled_count("sword_short"))
+
+	check(doll.open_bench("main"), "the bench opens on the main hand")
+	check(doll.bench_is_open() and doll.bench_slot() == "main",
+		"and reads back which hand it is working")
+	check(doll.bench_item() == "sword_short", "the piece laid in it is the worn one")
+	check(doll.bench_ordinal() == worn_copy,
+		"and the serial is the copy the hand claimed (%d vs %d)"
+			% [doll.bench_ordinal(), worn_copy])
+	var rows: Array = doll.bench_rows()
+	check(rows.size() > 2, "the bench shows the rack the steel can take (%d rows)"
+		% rows.size())
+	var priced := true
+	for option in rows:
+		if int((option as Dictionary).get("cost_count", 0)) <= 0 \
+				or str((option as Dictionary).get("cost_name", "")).is_empty():
+			priced = false
+	check(priced, "every row on it names a price")
+
+	var cheapest: Dictionary = {}
+	for option in rows:
+		var row: Dictionary = option
+		if not str(row.get("reason", "")).is_empty():
+			continue
+		if cheapest.is_empty() \
+				or int(row["cost_count"]) < int(cheapest["cost_count"]):
+			cheapest = row
+	check(not cheapest.is_empty(), "some weld in the rack is affordable")
+	var pick := str(cheapest.get("entry_id", ""))
+	var tier := int(cheapest.get("cost_tier", 0))
+	var count := int(cheapest.get("cost_count", 0))
+	var tier_before: int = warband.cruor.tier_count(tier)
+	var ichor_before: int = warband.stash.pooled_count(Cruor.BASIC_REAGENT)
+
+	var laid: Dictionary = doll.press_weld(pick)
+	check(bool(laid.get("ok", false)), "the page lays the weld: %s"
+		% str(laid.get("message", "")))
+	check(warband.annoints.has("sword_short", worn_copy, pick),
+		"the mark is welded to the copy the hand is holding")
+	check(warband.annoints.count("sword_short", worn_copy) == 1,
+		"one annointment on it")
+	var spare_marks := 0
+	for serial in warband.stash.serials_of("sword_short"):
+		spare_marks += int(warband.annoints.count("sword_short", int(serial)))
+	check(spare_marks == 0, "the spare shortsword stays plain (%d marks)" % spare_marks)
+	check(warband.cruor.tier_count(tier) == tier_before - count,
+		"the price came out of the cruor (%d -> %d)"
+			% [tier_before, warband.cruor.tier_count(tier)])
+	check(warband.stash.pooled_count(Cruor.BASIC_REAGENT) == ichor_before - 1,
+		"and one vial of ichor with it")
+	check(doll.bench_status_text().contains("Shortsword"),
+		"the bench says what it did: %s" % doll.bench_status_text())
+	check(doll.slot_rows["main"]["button"].text.contains("Welded"),
+		"the worn slot reads as worked, got %s"
+			% doll.slot_rows["main"]["button"].text.replace("\n", " | "))
+
+	# The same row again: the piece already carries it, the press is refused, and
+	# a refusal costs nothing.
+	var again: Dictionary = doll.press_weld(pick)
+	check(not bool(again.get("ok", false)), "the same weld is refused twice")
+	check(warband.cruor.tier_count(tier) == tier_before - count,
+		"and the refusal spends no cruor")
+	var repainted := false
+	for option in doll.bench_rows():
+		var row: Dictionary = option
+		if str(row.get("entry_id", "")) == pick:
+			repainted = str(row.get("reason", "")).contains("already carries")
+	check(repainted, "the rack now says the piece already carries it")
+
+	# A dry wallet: every row reads why it cannot be laid, and pressing one says so
+	# under the rack instead of spending nothing and saying nothing.
+	warband.cruor.spend(Contracts.CruorTier.T1_RITUAL_TALLOW,
+		warband.cruor.tier_count(Contracts.CruorTier.T1_RITUAL_TALLOW))
+	warband.cruor.spend(Contracts.CruorTier.T2_BLACK_BILE,
+		warband.cruor.tier_count(Contracts.CruorTier.T2_BLACK_BILE))
+	warband.stash.remove(Cruor.BASIC_REAGENT, warband.stash.pooled_count(Cruor.BASIC_REAGENT))
+	doll.refresh()
+	var dry: Array = doll.bench_rows()
+	var refused := not dry.is_empty()
+	for option in dry:
+		if str((option as Dictionary).get("reason", "")).is_empty():
+			refused = false
+	check(refused, "with a dry wallet every row says why it cannot be laid")
+	if not dry.is_empty():
+		var dry_press: Dictionary = doll.press_weld(str((dry[0] as Dictionary)["entry_id"]))
+		check(not bool(dry_press.get("ok", false))
+				and doll.bench_status_text().contains("does not have"),
+			"and a press on one is refused in its own words: %s"
+				% doll.bench_status_text())
+
+	# A bare hand has nothing to work: no rack, and a press on it is refused.
+	check(doll.open_bench("off"), "the bench opens on the off hand too")
+	check(doll.bench_slot() == "off", "and the tabs move the work to it")
+	check(doll.bench_rows().is_empty(), "a bare hand offers no rack")
+	var bare: Dictionary = doll.press_weld(pick)
+	check(not bool(bare.get("ok", false)), "and a press on it is refused")
+
+	doll.close_bench()
+	check(not doll.bench_is_open(), "the bench shuts on DONE")
+	check(doll.open_bench("main"), "and opens again on a hand")
+	doll.open_bench("head")
+	check(doll.bench_slot() == "main", "a slot that is not a hand leaves the work where it was")
+	doll.close()
+	check(not doll.is_open() and not doll.bench_is_open(),
+		"closing the page shuts the bench with it")
+
+	# The page is a body's page: with the roster empty there is nobody to work for,
+	# and the bench refuses rather than drawing a rack against no steel.
+	warband.reset_state()
+	doll.refresh()
+	check(not doll.open_bench("main"), "a page with no body refuses to open the bench")
+	doll.queue_free()
 
 # --- the strip of bodies ---------------------------------------------------
 

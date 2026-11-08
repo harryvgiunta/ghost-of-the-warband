@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 TEX_DIR = ROOT / "assets" / "world" / "textures"
@@ -2395,6 +2395,308 @@ def make_village_surface(kind):
 
 
 # ---------------------------------------------------------------------------
+# signs: painted plank boards and carved stone plates (sign_<id>.png + _n)
+# ---------------------------------------------------------------------------
+
+## Pixels per metre of board face. Every sign is baked at this one scale, so a
+## letter is the same size on a fingerpost as on a gate board and the wear on
+## the paint is the same physical size everywhere. Board sizes are chosen so the
+## multiplication lands on whole 8-pixel steps (2.40 m -> 768 px exactly), which
+## keeps the texture's aspect ratio equal to the board's to the pixel.
+SIGN_PPM = 320.0
+
+## The words are painted in the game's own display face: the sign on a board and
+## the title over a menu are the same hand.
+SIGN_FONT_PATH = ROOT / "assets" / "ui" / "fonts" / "PirataOne-Regular.ttf"
+
+## Diamonds are drawn as shapes, not typed: the face is a blackletter, and a
+## separator glyph that a font happens to lack is a sign that reads wrong.
+SIGN_SEPARATOR = "\u25c6"
+
+## One row per sign in the world. `size` is the face itself in metres and is the
+## contract `scripts/world/sign_kit.gd` builds its quads from; `cut` says whether
+## the words are painted on timber ("plank") or cut into stone ("stone").
+SIGN_SPECS = [
+    dict(id="sign_wood_road", text="THE WOOD ROAD", size=(2.40, 0.55), cut="plank",
+         description="Gate board: 'THE WOOD ROAD' painted in bone on aged oak planks."),
+    dict(id="sign_square", text="THE SQUARE\nSTASH \u25c6 ALTAR \u25c6 RECRUITER",
+         size=(2.30, 1.00), cut="plank",
+         description="Square board: 'THE SQUARE' over the three services, painted on planks."),
+    dict(id="sign_altar_board", text="THE ALTAR", size=(1.50, 0.25), cut="plank",
+         description="Finger board: 'THE ALTAR', painted on one oak plank."),
+    dict(id="sign_keepers", text="THE KEEPERS", size=(1.50, 0.25), cut="plank",
+         description="Finger board: 'THE KEEPERS', painted on one oak plank."),
+    dict(id="sign_delve", text="THE DELVE", size=(1.50, 0.25), cut="plank",
+         description="Finger board: 'THE DELVE', painted on one oak plank."),
+    dict(id="sign_weeping_hollow", text="THE WEEPING HOLLOW", size=(2.20, 0.45),
+         cut="plank",
+         description="Delve mouth board: 'THE WEEPING HOLLOW' painted on planks."),
+    dict(id="sign_way_up", text="THE WAY UP", size=(1.10, 0.35), cut="stone",
+         description="Cave waymark: 'THE WAY UP' cut into a dark stone tablet."),
+    dict(id="sign_town", text="TOWN", size=(1.30, 0.50), cut="plank",
+         description="Approach board: 'TOWN' painted on planks over the forest gate."),
+    dict(id="sign_arena", text="THE ARENA", size=(2.60, 0.50), cut="stone",
+         description="Arena lintel plate: 'THE ARENA' cut into dark stone."),
+    dict(id="sign_altar", text="THE ALTAR", size=(0.60, 0.30), cut="stone",
+         description="Altar stele plate: 'THE ALTAR' cut into dark wet stone."),
+]
+
+
+def sign_pixels(spec):
+    """The face's pixel size: metres x SIGN_PPM, both axes a multiple of 8."""
+    return (int(round(spec["size"][0] * SIGN_PPM)),
+            int(round(spec["size"][1] * SIGN_PPM)))
+
+
+def _cap_height(font):
+    box = font.getbbox("H")
+    return float(box[3] - box[1])
+
+
+def _fit_line(draw, line, inner_w, cap_target):
+    """Largest face size whose capitals fit `cap_target` tall and `inner_w` wide."""
+    size = max(10, int(cap_target * 1.7))
+    font = ImageFont.truetype(str(SIGN_FONT_PATH), size)
+    while size > 10 and (draw.textlength(line, font=font) > inner_w
+                         or _cap_height(font) > cap_target):
+        size -= 1
+        font = ImageFont.truetype(str(SIGN_FONT_PATH), size)
+    return font
+
+
+def _sign_ink_mask(w, h, spec, seed):
+    """Coverage of the sign's words: laid out to fill the board, then warped.
+
+    The layout is typeset (so the words are even and centred) at twice the face's
+    resolution and reduced, and only then warped and worn: a stroke that starts
+    from a soft edge can wander by a couple of pixels without turning into the
+    staircase a direct render would give.
+    """
+    ss = 2
+    img = Image.new("L", (w * ss, h * ss), 0)
+    d = ImageDraw.Draw(img)
+    lines = [ln for ln in spec["text"].split("\n") if ln.strip()]
+    inner_w = w * ss * 0.90
+    inner_h = h * ss * 0.66
+    top = (h * ss - inner_h) * 0.5
+    if len(lines) == 1:
+        bands = [(top, inner_h, 0.86)]
+    else:
+        head = inner_h * 0.46
+        rest = (inner_h - head) / (len(lines) - 1.0)
+        bands = [(top, head, 0.80)]
+        for i in range(len(lines) - 1):
+            bands.append((top + head + rest * i, rest, 0.72))
+    for line, (y0, band_h, fill) in zip(lines, bands):
+        probe = line.replace(SIGN_SEPARATOR, "  ")
+        font = _fit_line(d, probe, inner_w, band_h * fill)
+        cap = _cap_height(font)
+        tokens = line.split(SIGN_SEPARATOR)
+        widths = [d.textlength(t, font=font) for t in tokens]
+        space = d.textlength(" ", font=font)
+        dia = cap * 0.32
+        gap = space * 1.15
+        total = sum(widths) + (len(tokens) - 1) * (2.0 * gap + dia)
+        x = (w * ss - total) * 0.5
+        base = y0 + (band_h + cap) * 0.5
+        for i, token in enumerate(tokens):
+            if token:
+                d.text((x, base), token, font=font, fill=255, anchor="ls")
+            x += widths[i]
+            if i < len(tokens) - 1:
+                cx = x + gap + dia * 0.5
+                cy = base - cap * 0.34
+                d.polygon([(cx, cy - dia * 0.5), (cx + dia * 0.5, cy),
+                           (cx, cy + dia * 0.5), (cx - dia * 0.5, cy)], fill=255)
+                x += 2.0 * gap + dia
+
+    mask = np.asarray(img.resize((w, h), Image.LANCZOS), np.float32) / 255.0
+    # The hand: a slow warp of a couple of pixels, so no two strokes are parallel.
+    wander_x = fbm(w, h, 7, 7, seed + 21, octaves=3, wrap="none") - 0.5
+    wander_y = fbm(w, h, 7, 7, seed + 22, octaves=3, wrap="none") - 0.5
+    xs = (np.arange(w, dtype=np.float32) + 0.5)[None, :] / w
+    ys = (np.arange(h, dtype=np.float32) + 0.5)[:, None] / h
+    mask = sample_field(mask, xs + wander_x * (3.0 / w), ys + wander_y * (1.6 / h),
+                        wrap_x=False, wrap_y=False)
+    # The weather: broad chips take the paint back to the timber, and the rest of
+    # the stroke only thins. Paint fades where it is eaten; it never fragments
+    # into line work, because a board that cannot be read is not a sign.
+    chip = smoothstep(0.58, 0.90, fbm(w, h, 11, 8, seed + 23, octaves=3, wrap="none"))
+    speck = fbm(w, h, 60, 50, seed + 24, octaves=3, wrap="none")
+    mask *= np.clip(1.0 - 0.72 * chip, 0.0, 1.0) * (0.74 + 0.42 * speck)
+    return np.clip(mask, 0.0, 1.0)
+
+
+def _sign_grain(w, h, seed):
+    """Wood grain running along the board's length.
+
+    Three combs of different widths, each sampled through a different slow warp
+    down the board, so the lines bunch, part and wander like sawn timber. A
+    single unwarped comb read as brushed metal: even, machined, wrong.
+    """
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :] / w
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None] / h
+    out = np.zeros((h, w), np.float32)
+    for i, (cells, amp, bend) in enumerate(((34, 0.42, 0.075), (76, 0.36, 0.055),
+                                            (148, 0.22, 0.032))):
+        comb = value_noise(w, h, 1, cells, seed + 17 * i, wrap="x")
+        warp = (value_noise(w, h, 3, 2, seed + 61 + i, wrap="x") - 0.5) * 2.0 * bend
+        out += amp * sample_field(comb, X, Y + warp, wrap_x=True, wrap_y=False)
+    return np.clip(out, 0.0, 1.0)
+
+
+def _sign_planks(w, h, spec, seed):
+    """Bog-dark oak at the board's own scale: one plank every ~0.11 m with
+    staggered butt joints, grain along the length, forged nails at both ends."""
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    rows = max(2, int(round(spec["size"][1] / 0.11)))
+    plank_h = h / float(rows)
+    row = np.clip((Y // plank_h).astype(np.int32), 0, rows - 1)
+    ly = np.mod(Y, plank_h)
+    tone = _hash_table(seed, rows)
+    rng = np.random.default_rng(seed + 1)
+    joint = (rng.random(rows) * w).astype(np.float32)
+
+    grain = _sign_grain(w, h, seed + 2)
+    grain2 = fbm(w, h, 2, 22, seed + 3, octaves=3)
+    fine = fbm(w, h, 130, 90, seed + 4, octaves=3)
+    knots = smoothstep(0.74, 0.88, fbm(w, h, 7, 9, seed + 5, octaves=3))
+
+    jx = (X - joint[row]) % w
+    joints = np.minimum(jx, w - jx)
+    joint_mask = 1.0 - smoothstep(0.7, 2.4, joints)
+    ed = np.minimum(ly, plank_h - ly)
+    gap = 1.0 - smoothstep(0.0, 2.4, ed)
+
+    tone_prev = tone[(row - 1) % rows]
+    tone_mix = tone_prev + (tone[row] - tone_prev) * smoothstep(0.0, 9.0, ly)
+    base = mix(rgb(92, 72, 50), rgb(126, 101, 71), tone_mix)
+    base = mix(base, rgb(72, 54, 36), 0.26 + 0.22 * grain2)
+    base *= (0.74 + 0.52 * grain + 0.08 * (fine - 0.5))[..., None]
+    base *= (0.93 + 0.10 * np.sin(math.pi * ly / plank_h))[..., None]
+    base = mix(base, rgb(38, 28, 18), np.clip(joint_mask * 0.80 + gap * 0.95, 0.0, 1.0))
+    base = mix(base, rgb(56, 40, 26), knots * 0.50)
+    # Nails: every plank takes one at each end, and the iron is still there.
+    for fx in (0.055, 0.945):
+        d = np.sqrt((X - fx * w) ** 2 + (Y - (row + 0.5) * plank_h) ** 2)
+        base = mix(base, rgb(44, 42, 40), (1.0 - smoothstep(2.2, 3.2, d)) * 0.92)
+        base = mix(base, rgb(98, 92, 84), smoothstep(1.4, 2.0, d)
+                   * (1.0 - smoothstep(2.6, 3.6, d)) * 0.5)
+
+    height = (0.55 - 0.30 * np.clip(joint_mask + gap, 0.0, 1.0)
+              + 0.10 * (grain - 0.5) + 0.06 * np.sin(math.pi * ly / plank_h)
+              - 0.10 * knots)
+    return base, height, grain
+
+
+def _sign_stone(w, h, spec, seed):
+    """The altar's dark wet stone as a plate: broad mottling, weathered veins and
+    a heavy mineral grain, with none of the coursing a wall would carry."""
+    big = fbm(w, h, 5, 5, seed + 11, octaves=4, wrap="none")
+    mid = fbm(w, h, 20, 20, seed + 12, octaves=4, wrap="none")
+    grain = fbm(w, h, 140, 140, seed + 13, octaves=3, wrap="none")
+    ridge = 1.0 - np.abs(2.0 * fbm(w, h, 24, 24, seed + 14, octaves=4, wrap="none") - 1.0)
+    vein = smoothstep(0.90, 0.995, ridge)
+    pores = smoothstep(0.80, 0.90, fbm(w, h, 200, 200, seed + 15, octaves=2,
+                                       wrap="none"))
+    quartz = smoothstep(0.70, 0.80, fbm(w, h, 260, 260, seed + 16, octaves=2,
+                                        wrap="none"))
+    mica = smoothstep(0.70, 0.80, fbm(w, h, 260, 260, seed + 17, octaves=2,
+                                      wrap="none"))
+
+    base = mix(rgb(56, 53, 50), rgb(104, 97, 89), big)
+    base = mix(base, rgb(48, 52, 60), smoothstep(0.44, 0.76, mid) * 0.38)
+    base = mix(base, rgb(122, 114, 100), smoothstep(0.58, 0.86, 1.0 - mid) * 0.26)
+    base *= (0.90 + 0.20 * grain)[..., None]
+    base = mix(base, rgb(148, 146, 138), quartz * 0.22)
+    base = mix(base, rgb(40, 40, 40), mica * 0.20)
+    base = mix(base, rgb(44, 43, 42), vein * 0.45)
+    base = mix(base, rgb(50, 48, 46), pores * 0.32)
+
+    height = 0.5 + 0.14 * (grain - 0.5) - 0.22 * vein - 0.10 * pores
+    return base, height
+
+
+def _blur_mask(mask, radius):
+    img = Image.fromarray((np.clip(mask, 0.0, 1.0) * 255.0).astype(np.uint8), "L")
+    return np.asarray(img.filter(ImageFilter.GaussianBlur(radius)), np.float32) / 255.0
+
+
+def make_sign(spec):
+    """One sign face, painted or carved, as albedo + tangent normal."""
+    w, h = sign_pixels(spec)
+    seed = SEED + 5100 + sum(ord(c) for c in spec["id"])
+    stone = spec["cut"] == "stone"
+    if stone:
+        base, height = _sign_stone(w, h, spec, seed)
+        grain = np.full((h, w), 0.5, np.float32)
+    else:
+        base, height, grain = _sign_planks(w, h, spec, seed)
+    mask = _sign_ink_mask(w, h, spec, seed)
+
+    # The face's own chamfer: a centimetre of bevel, so the plate reads as a cut
+    # board and not as a picture pasted on one.
+    X = (np.arange(w, dtype=np.float32) + 0.5)[None, :]
+    Y = (np.arange(h, dtype=np.float32) + 0.5)[:, None]
+    edge = np.minimum(np.minimum(X, w - X), np.minimum(Y, h - Y))
+    bevel = 1.0 - smoothstep(0.0, 4.0, edge)
+    base = mix(base, base * 0.70, bevel * 0.55)
+    height = height - 0.34 * bevel
+
+    if stone:
+        # Cut letters: the recess is dark, its upper wall takes the shadow and its
+        # lower wall catches the light. The height field is the cut itself, so the
+        # normal map keeps the carving when the sun moves.
+        cut = _blur_mask(mask, 1.3)
+        # Dirt and a chip ring sit just outside the cut; the chisel left a rough
+        # floor inside it. Both are what separate carving from painted lettering
+        # when the plate is three metres away.
+        ring = np.clip(_blur_mask(mask, 2.6) - mask, 0.0, 1.0)
+        chisel = fbm(w, h, 90, 26, seed + 41, octaves=3, wrap="none")
+        base = mix(base, rgb(24, 23, 22), cut * (0.66 + 0.12 * (chisel - 0.5)))
+        top_wall = np.clip(cut - np.roll(cut, 2, axis=0), 0.0, 1.0)
+        low_wall = np.clip(cut - np.roll(cut, -2, axis=0), 0.0, 1.0)
+        base = mix(base, rgb(14, 13, 12), top_wall * 0.75)
+        base = mix(base, rgb(202, 194, 172), low_wall * 0.62)
+        base = mix(base, rgb(30, 28, 26), ring * 0.45)
+        height = height - 0.46 * cut
+    else:
+        # Painted letters: the film casts a little shadow on the plank under it and
+        # its own bevel catches the light on the upper left. The paint is thin
+        # enough that the grain reads through it, which is what stops a board from
+        # looking like a printed placard.
+        film = _blur_mask(mask, 1.1)
+        shadow = np.clip(np.roll(np.roll(film, 2, axis=0), 2, axis=1) - film, 0.0, 1.0)
+        # Thin paint lets the plank's own grain through: fine streaks along the
+        # board and a soft blotch of tone, never a slow band that reads as metal.
+        fleck = fbm(w, h, 150, 120, seed + 42, octaves=2, wrap="none")
+        ink = rgb(226, 203, 158) * (0.94 + 0.10 * (grain - 0.5)
+                                    + 0.08 * (fleck - 0.5))[..., None]
+        base = mix(base, rgb(24, 17, 11), shadow * 0.50)
+        base = mix(base, ink, mask * 0.94)
+        gx = np.roll(film, 1, axis=1) - np.roll(film, -1, axis=1)
+        gy = np.roll(film, 1, axis=0) - np.roll(film, -1, axis=0)
+        base *= (1.0 + 0.12 * np.clip(gx + gy, 0.0, 1.0)
+                 - 0.14 * np.clip(-(gx + gy), 0.0, 1.0))[..., None]
+        height = height + 0.12 * film
+
+    # Weathering that arrives from outside: rain streaks down from the top edge,
+    # mud and splash up from the ground, and a general grey cast over the paint.
+    streak = fbm(w, h, 40, 3, seed + 31, octaves=3, wrap="none")
+    wash = smoothstep(0.55, 0.95, streak) * (1.0 - smoothstep(0.25, 0.62, Y / h))
+    base = mix(base, base * 0.80, wash * 0.55)
+    splash = 1.0 - smoothstep(0.0, 0.22, Y / h)
+    base = mix(base, mix(base, rgb(70, 58, 44), 0.45), splash * 0.55 * (0.5 + 0.5 * streak))
+    dust = smoothstep(0.35, 0.95, fbm(w, h, 14, 10, seed + 32, octaves=3, wrap="none"))
+    base = mix(base, base * 0.90 + rgb(120, 112, 96) * 0.10, dust * (0.35 if stone else 0.20))
+
+    albedo = to_image(np.clip(base, 0.0, 1.0), "RGB")
+    normal = normal_from_height(np.clip(height, 0.0, 1.0), 2.6 if stone else 2.0)
+    return albedo, to_image(normal, "RGB")
+
+
+# ---------------------------------------------------------------------------
 # fire: a 2x2 atlas of flame tongues cycled by shaders/flame.gdshader
 # ---------------------------------------------------------------------------
 
@@ -2654,6 +2956,15 @@ ASSETS = [
          description="Tileable animated ripple normal map (OpenGL +Y up)."),
 ]
 
+## Every sign face is declared from `SIGN_SPECS`, so the words, the metres and the
+## baked size are one declaration: the manifest, the report and the game cannot
+## disagree about how wide a board is.
+for _sign in SIGN_SPECS:
+    ASSETS.append(dict(
+        id=_sign["id"], file=_sign["id"] + ".png", size=sign_pixels(_sign),
+        channels=3, tiling="none", n_version=_sign["id"] + "_n.png", kind="sign",
+        description=_sign["description"]))
+
 NORMALS = {
     "bark_oak_n.png": ("bark_oak", 6.0), "bark_pine_n.png": ("bark_pine", 5.0),
     "bark_birch_n.png": ("bark_birch", 3.0), "bark_dead_n.png": ("bark_dead", 5.0),
@@ -2665,6 +2976,11 @@ NORMALS = {
     "terrain_dirt_n.png": ("terrain_dirt", TERRAIN_DIRT_STRENGTH),
     "terrain_rock_n.png": ("terrain_rock", TERRAIN_ROCK_STRENGTH),
 }
+
+for _sign in SIGN_SPECS:
+    NORMALS[_sign["id"] + "_n.png"] = (
+        _sign["id"], 2.6 if _sign["cut"] == "stone" else 2.0)
+del _sign
 
 LICENSE_TEXT = """IRONWOOD WORLD TEXTURES - LICENSE AND PROVENANCE
 
@@ -2683,8 +2999,9 @@ alpha atlases (incl. the grass-tuft cards), the height-blended terrain ground
 layers (grass, forest-floor litter, trail dirt, rock/scree: albedo + height
 alpha + normals), the linear terrain noise data map and macro variation,
 rock and water normals, building materials (planks, timber, plaster,
-shingles, stone) and the forest-camp surfaces (thatch, hide, bone) and the
-flame atlas.
+shingles, stone) and the forest-camp surfaces (thatch, hide, bone), the
+flame atlas, and the world's sign faces (painted plank boards and carved
+stone plates, letters composed with the project's own display face).
 
 The textures are distributed under Creative Commons
 Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0),
@@ -2959,6 +3276,33 @@ def sheet_sky_seam(sky, path):
     sheet.save(path)
 
 
+def sheet_signs(tex_dir, path):
+    """Every sign face at (nearly) 1:1 over its normal map: the boards read as
+    the player reads them, not as a swatch of timber."""
+    rows = []
+    for spec in SIGN_SPECS:
+        alb = Image.open(tex_dir / (spec["id"] + ".png")).convert("RGB")
+        nrm = Image.open(tex_dir / (spec["id"] + "_n.png")).convert("RGB")
+        rows.append((spec["id"], alb, nrm))
+    width, pad, label = 1024, 10, 18
+    scale = min(1.0, (width - 2 * pad) / max(im.width for _, im, _ in rows))
+    height = pad + sum(int(im.height * scale) * 2 + label + pad for _, im, _ in rows)
+    sheet = Image.new("RGB", (width, height), (26, 24, 22))
+    d = ImageDraw.Draw(sheet)
+    y = pad
+    for sid, alb, nrm in rows:
+        if scale < 1.0:
+            box = (int(alb.width * scale), int(alb.height * scale))
+            alb = alb.resize(box, Image.LANCZOS)
+            nrm = nrm.resize(box, Image.LANCZOS)
+        sheet.paste(alb, (pad, y))
+        d.text((pad + alb.width + pad // 2, y + 2), sid, fill=(230, 226, 214))
+        y += alb.height + 4
+        sheet.paste(nrm, (pad, y))
+        y += nrm.height + label + pad
+    sheet.save(path)
+
+
 # ---------------------------------------------------------------------------
 # build / CLI
 # ---------------------------------------------------------------------------
@@ -3029,6 +3373,11 @@ def build_all(only=None):
             alb, nrm = make_village_surface(vid)
             out[f"{vid}.png"] = alb
             out[f"{vid}_n.png"] = nrm
+    for sign in SIGN_SPECS:
+        if _want(only, sign["id"]):
+            alb, nrm = make_sign(sign)
+            out[f"{sign['id']}.png"] = alb
+            out[f"{sign['id']}_n.png"] = nrm
     if _want(only, "water_normal"):
         out["water_normal.png"] = make_water_normal()
     return out
@@ -3153,6 +3502,30 @@ def validate_and_report(t_start):
             tid, "%dx%d" % (cols, rows), ga, ea, cov, "PASS" if ok else "FAIL"))
 
     add("")
+    add("SIGN FACES (every board carries its words, at its board's own aspect)")
+    add("%-20s %-34s %-11s %-9s %-9s %s" % (
+        "id", "words", "size px", "face", "ink", "verdict"))
+    for spec in SIGN_SPECS:
+        fn = spec["id"] + ".png"
+        if fn not in loaded:
+            checks.append(False)
+            add("%-20s %-34s MISSING" % (spec["id"], spec["text"].split("\n")[0]))
+            continue
+        img = loaded[fn]
+        lum = np.asarray(img.convert("L"), np.float32) / 255.0
+        p1, p50, p99 = np.percentile(lum, [1, 50, 99])
+        # Paint sits above the timber; carving sits below the stone. Either way a
+        # face whose ink has not been drawn has a flat distribution and fails.
+        ink = (p99 - p50) if spec["cut"] == "plank" else (p50 - p1)
+        want = 0.10 if spec["cut"] == "plank" else 0.05
+        sized = tuple(img.size) == sign_pixels(spec)
+        ok = sized and ink >= want
+        checks.append(ok)
+        add("%-20s %-34s %-11s %-9s %-9.3f %s" % (
+            spec["id"], spec["text"].split("\n")[0][:34],
+            "%dx%d" % img.size, spec["cut"], ink, "PASS" if ok else "FAIL"))
+
+    add("")
     add("NORMAL MAPS (OpenGL +Y up; mean 128/128 neutral, positive z)")
     add("%-14s %-7s %-7s %-7s %-8s %-8s" % (
         "file", "meanR", "meanG", "meanB", "minZ", "mean|dx|"))
@@ -3216,7 +3589,8 @@ def validate_and_report(t_start):
     add("")
     add("NOTE: the numbers above are gates, not a look; review the contact sheets.")
     add("Contact sheets for human review: .runtime/world-art/texture_sheet.png,")
-    add("foliage_sheet.png, terrain_review.png, sky_seam.png, sky_thumb.png")
+    add("foliage_sheet.png, terrain_review.png, sign_sheet.png, sky_seam.png,")
+    add("sky_thumb.png")
     add("")
     result = "PASS" if all(checks) else "FAIL"
     add("RESULT: %s  (%d checks, %d failed)" % (result, len(checks), checks.count(False)))
@@ -3257,6 +3631,7 @@ def main(argv=None):
             sheet_tiling(TEX_DIR, ids, SCRATCH / "texture_sheet.png")
             sheet_foliage(TEX_DIR, list(ATLAS_LAYOUT), SCRATCH / "foliage_sheet.png")
             sheet_terrain_review(TEX_DIR, SCRATCH / "terrain_review.png")
+            sheet_signs(TEX_DIR, SCRATCH / "sign_sheet.png")
             sky = Image.open(TEX_DIR / "sky_frontier.png")
             sheet_sky_seam(sky, SCRATCH / "sky_seam.png")
             sky.resize((1024, 512), Image.LANCZOS).save(SCRATCH / "sky_thumb.png")

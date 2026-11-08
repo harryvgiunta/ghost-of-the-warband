@@ -33,6 +33,8 @@ const Looks = preload("res://scripts/warband/warband_looks.gd")
 const ItemHover = preload("res://scripts/warband/item_hover.gd")
 const AbilityRules = preload("res://scripts/ability_rules.gd")
 const AbilitySlotScript = preload("res://scripts/ability_slot.gd")
+const CruorCatalogScript = preload("res://scripts/warband/cruor_catalog.gd")
+const AnnointCatalog = preload("res://scripts/warband/annoint_catalog.gd")
 
 const CREAM := LedgerThemeScript.INK
 const MUTED := LedgerThemeScript.INK_MUTED
@@ -82,6 +84,19 @@ const SLOT_ICON := {
 	"feet": "boot", "neck": "amulet", "ring1": "ring", "ring2": "ring",
 	"main": "blade", "off": "shield",
 }
+
+## The anoint bench: the altar's craft without the walk. It is an iron plate laid
+## over the sheet, one hand's copy at a time, and a scroll of the welds the pool
+## can put on that copy - the same rows the altar's rack offers, at the same
+## price, because the spend and the ledger are `Warband.weld`'s either way.
+const BENCH_SIZE := Vector2(600.0, 528.0)
+const BENCH_ROW := 32.0
+## The bench is dark iron, so its good news and its refusals wear the plate inks
+## and not the vellum page's (the sheet's own teal would vanish on it).
+const BENCH_OK := Color("7fd7c4")
+const BENCH_NO := Color("d9836e")
+## The hands the bench can work, in the order its tabs stand.
+const BENCH_HANDS := ["main", "off"]
 
 ## The header line: the screen's name, or the body it is stripping in corpse mode.
 var title_label: Label
@@ -158,10 +173,34 @@ var _hotbar_box: VBoxContainer
 var _hotbar_label: Label
 var _reset_hotbar_button: Button
 
+## The bench's own state: the hand it is working, the rows it is offering, and
+## the nodes it paints them into. `_bench_layer` covers the sheet while it is
+## open, so a press meant for a weld can never fall through to a worn slot.
+var _bench_layer: Control
+var _bench_piece: Label
+var _bench_welded: Label
+var _bench_wallet: Label
+var _bench_list: VBoxContainer
+var _bench_status: Label
+var _bench_tabs: Dictionary = {}     # slot id -> Button
+var _bench_button: Button
+var _bench_open := false
+var _bench_slot := "main"
+var _bench_rows: Array[Dictionary] = []
+
 func _ready() -> void:
 	layer = 25
 	visible = _open
 	_ensure_built()
+
+
+## The bench is one layer over the page, so one Escape backs out of it and the
+## next one closes the page - the same two-step the altar's panel keeps.
+func _unhandled_input(event: InputEvent) -> void:
+	if not _bench_open or not event.is_action_pressed("ui_cancel"):
+		return
+	close_bench()
+	get_viewport().set_input_as_handled()
 
 func _exit_tree() -> void:
 	_detach_source()
@@ -227,6 +266,9 @@ func follow_controlled(merc_id: int) -> void:
 func close() -> void:
 	if not _open:
 		return
+	# The bench is the page's own plate: it closes with the page it covers, so a
+	# reopen never shows a bench left hanging over closed steel.
+	close_bench()
 	_open = false
 	visible = false
 	# A shut screen draws nothing: its stage stops rendering and posing.
@@ -238,6 +280,9 @@ func close() -> void:
 ## squad took on its own never lingers here.
 func show_corpse(new_corpse_id: int, ids: Array[String]) -> void:
 	_ensure_built()
+	# A dead body's kit is not the warband's to work: the bench is shut before the
+	# screen turns, so no row of welds can be pressed against a corpse.
+	close_bench()
 	_corpse_active = true
 	corpse_id = new_corpse_id
 	_corpse_ids = ids.duplicate()
@@ -364,6 +409,7 @@ func refresh() -> void:
 		return
 	if _warband == null:
 		_sync_hotbar()
+		_sync_bench()
 		return
 	if selected_merc <= 0 or not _can_dress(selected_merc):
 		selected_merc = controlled_merc if _can_dress(controlled_merc) else _first_merc_id()
@@ -374,6 +420,7 @@ func refresh() -> void:
 	_refresh_preview()
 	_sync_hotbar()
 	_sync_stash(_pool().rows(_warband.roster, _warband.cruor.brands))
+	_sync_bench()
 
 ## The pool the stash half shows and dresses from: the town stash, or the delve
 ## inventory while a party is below (`Warband.field_stash`).
@@ -565,6 +612,18 @@ func _ensure_built() -> void:
 	_reequip_button.pressed.connect(_reequip_selected)
 	centre.add_child(_reequip_button)
 
+	# The altar's craft, wherever the body stands. A warband out in the wood has
+	# the vials it looted; making it walk back to town for a weld was the only
+	# thing the ritual asked that the fight did not.
+	_bench_button = Button.new()
+	_bench_button.name = "AnointButton"
+	_bench_button.text = "ANOINT THE STEEL"
+	_bench_button.focus_mode = Control.FOCUS_NONE
+	_bench_button.custom_minimum_size = Vector2(0, 30)
+	_bench_button.tooltip_text = "Work the weapon in this body's hands: every weld its steel can take, one row each, paid out of the warband's cruor and ichor. No altar needed."
+	_bench_button.pressed.connect(func() -> void: open_bench())
+	centre.add_child(_bench_button)
+
 	# The ten keys, in the order this body fires them. The HUD draws the same
 	# row during a fight; this is the only place the order can be changed, and
 	# the change is saved with the body and carried onto its rig at the next
@@ -658,6 +717,9 @@ func _ensure_built() -> void:
 	# push the hotbar and the stash off the bottom of the vellum. Two lines are
 	# what the instruction needs, so two lines are what the page keeps for it.
 	_status.max_lines_visible = 2
+	# The bench is the last child of the shell: it has to draw over the page it
+	# lays its plate on, and it is hidden until a press asks for it.
+	_build_bench(shell)
 
 func _make_slot_row(parent: Node, slot: int) -> Dictionary:
 	var button := ItemHover.Row.new()
@@ -786,9 +848,16 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 		if not anointed.is_empty():
 			text += "\n" + anointed
 		else:
-			var sleeping: Dictionary = WarbandCruor.anoint_skill(worn)
-			if not sleeping.is_empty():
-				text += "\nPlain - the altar wakes %s" % str(sleeping.get("name", ""))
+			# What the copy in the hand actually carries: a worked piece says so on
+			# its own row instead of saying it is plain, and a plain one still says
+			# which skill the work would wake in it.
+			var welded := _worn_welds(worn, str(row["id"]))
+			if not welded.is_empty():
+				text += "\n" + welded
+			else:
+				var sleeping: Dictionary = WarbandCruor.anoint_skill(worn)
+				if not sleeping.is_empty():
+					text += "\nPlain - anoint it to wake %s" % str(sleeping.get("name", ""))
 		if not _warband.cruor.brand_of(worn).is_empty():
 			text += "\n" + _warband.cruor.brand_line(worn)
 	if button.text != text:
@@ -807,6 +876,22 @@ func _apply_slot_row(row: Dictionary, slot: int, worn: String) -> void:
 		if _warband.roster.is_manual(selected_merc, str(row["id"])):
 			hint = "Set by hand: the band's auto-equip leaves this slot alone. Click to take it off."
 		button.show_item(worn, _warband, hint)
+
+## The welds on the copy this body wears in `slot_id`, as the slot row's one
+## line: the leading mark, the count of the others, and the room left. A row is
+## one glance wide, so the names are the card's job and the row says how worked
+## the steel is.
+func _worn_welds(item_id: String, slot_id: String) -> String:
+	if _warband == null or _corpse_active or item_id.is_empty() or selected_merc <= 0:
+		return ""
+	var ordinal := int(_warband.annoint_copy(selected_merc, slot_id))
+	var entries: Array = _warband.annoints.entries_of(item_id, ordinal)
+	if entries.is_empty():
+		return ""
+	var extra := entries.size() - 1
+	return "Welded - %s%s  [%d / %d]" % [str(entries[0].name),
+		"" if extra <= 0 else " +%d" % extra, entries.size(),
+		AnnointCatalog.MAX_PER_PIECE]
 
 ## The panel's own QR: the same swap the world's `TAB` runs, on the body this
 ## screen is showing. The roster owns both pairs, so a piece put in a slot after
@@ -961,6 +1046,306 @@ func _reset_hotbar() -> void:
 	set_status(str(result.get("message", "")))
 	refresh()
 
+# --- the bench -------------------------------------------------------------
+
+## Everything the altar's ANOINT page does for one copy, laid over this sheet so
+## a warband between fights can work its steel where it stands. The bench owns no
+## arithmetic either: `Warband.weld_options` is the rack it draws and
+## `Warband.weld` is the press, so a weld laid here and a weld laid at the altar
+## are the same weld for the same price on the same copy. What the bench is *not*
+## is a second way to cheat: it works the two hands of the body on the page, and
+## nothing else.
+func _build_bench(shell: Node) -> void:
+	_bench_layer = Control.new()
+	_bench_layer.name = "Bench"
+	_bench_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_bench_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_bench_layer.visible = false
+	shell.add_child(_bench_layer)
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.color = Color(0.02, 0.015, 0.01, 0.66)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_bench_layer.add_child(dim)
+
+	var plate := PanelContainer.new()
+	plate.name = "Plate"
+	plate.add_theme_stylebox_override("panel", LedgerThemeScript.iron_panel())
+	plate.set_anchors_preset(Control.PRESET_CENTER)
+	plate.offset_left = -BENCH_SIZE.x * 0.5
+	plate.offset_right = BENCH_SIZE.x * 0.5
+	plate.offset_top = -BENCH_SIZE.y * 0.5
+	plate.offset_bottom = BENCH_SIZE.y * 0.5
+	_bench_layer.add_child(plate)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	plate.add_child(margin)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	margin.add_child(column)
+
+	# The title, and the wallet the rows are paid out of on the same line: a weld
+	# that cannot be afforded must read as unaffordable before it is pressed.
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 10)
+	column.add_child(head)
+	_label(head, "ANOINT THE STEEL", 13, BRASS_INK)
+	var head_spacer := Control.new()
+	head_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(head_spacer)
+	_bench_wallet = _label(head, "", 11, BONE_DIM)
+	_bench_wallet.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	# One tab per hand: the bench works the copy a hand is actually holding, and
+	# a body with a blade and a plank has two different pieces to talk about.
+	var tabs := HBoxContainer.new()
+	tabs.name = "Hands"
+	tabs.add_theme_constant_override("separation", 8)
+	column.add_child(tabs)
+	for slot_id in BENCH_HANDS:
+		var tab := Button.new()
+		tab.name = "Hand_%s" % str(slot_id)
+		tab.toggle_mode = true
+		tab.focus_mode = Control.FOCUS_NONE
+		tab.clip_text = true
+		tab.custom_minimum_size = Vector2(0, 28)
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab.pressed.connect(func() -> void: _select_bench_hand(str(slot_id)))
+		tabs.add_child(tab)
+		_bench_tabs[str(slot_id)] = tab
+
+	_bench_piece = _label(column, "", 13, BONE)
+	_bench_welded = _label(column, "", 11, BONE_DIM)
+	_bench_welded.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bench_welded.custom_minimum_size = Vector2(0, 34)
+	var rule := ColorRect.new()
+	rule.color = Color(0.36, 0.30, 0.22, 0.7)
+	rule.custom_minimum_size = Vector2(0, 1)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(rule)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "Welds"
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 236)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(scroll)
+	_bench_list = VBoxContainer.new()
+	_bench_list.name = "Rows"
+	_bench_list.add_theme_constant_override("separation", 4)
+	_bench_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_bench_list)
+
+	_bench_status = _label(column, "", 12, BENCH_OK)
+	_bench_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_bench_status.max_lines_visible = 2
+	var done := Button.new()
+	done.name = "Done"
+	done.text = "DONE"
+	done.focus_mode = Control.FOCUS_NONE
+	done.custom_minimum_size = Vector2(0, 30)
+	done.pressed.connect(close_bench)
+	column.add_child(done)
+
+
+## Point the bench at the live books. A closed bench, a corpse screen and a page
+## with no body chosen all draw nothing, and the stage's button is dead on them.
+func _sync_bench() -> void:
+	if _bench_layer == null:
+		return
+	var workable := not _corpse_active and _warband != null and selected_merc > 0
+	if _bench_button != null:
+		_bench_button.disabled = not workable
+	var showing := _bench_open and workable
+	_bench_layer.visible = showing
+	if not showing:
+		return
+	var gear: Dictionary = _warband.roster.equipped_of(selected_merc)
+	for slot_id in BENCH_HANDS:
+		var tab: Button = _bench_tabs.get(str(slot_id))
+		if tab == null:
+			continue
+		var held := str(gear.get(str(slot_id), ""))
+		var lit := str(slot_id) == _bench_slot
+		tab.text = "%s  /  %s" % [str(slot_id).to_upper(), _item_name(held)]
+		tab.tooltip_text = "The weapon in the %s hand%s." % [str(slot_id),
+			"" if not held.is_empty() else " (empty)"]
+		tab.set_pressed_no_signal(lit)
+		tab.theme_type_variation = "PrimaryButton" if lit else ""
+	var item := bench_item()
+	var ordinal := bench_ordinal()
+	var marks := 0 if item.is_empty() else int(_warband.annoints.count(item, ordinal))
+	_bench_piece.text = "%s  ·  %s   [%d / %d]" % [
+		str(_warband.roster.name_of(selected_merc)).to_upper(), _item_name(item),
+		marks, AnnointCatalog.MAX_PER_PIECE]
+	var names: Array[String] = []
+	if not item.is_empty():
+		for entry in _warband.annoints.entries_of(item, ordinal):
+			names.append(str(entry.name))
+	if names.is_empty():
+		_bench_welded.text = "Plain steel: nothing welded to it. Every row below is a mark the pool can lay on this copy."
+	else:
+		_bench_welded.text = "Welded: " + "  ·  ".join(PackedStringArray(names))
+	var ichor := int(_warband.stash.pooled_count(WarbandCruor.BASIC_REAGENT))
+	var tallow_tier := int(Contracts.CruorTier.T1_RITUAL_TALLOW)
+	var bile_tier := int(Contracts.CruorTier.T2_BLACK_BILE)
+	var tallow := int(_warband.cruor.tier_count(tallow_tier))
+	var bile := int(_warband.cruor.tier_count(bile_tier))
+	# The header is one line wide, so the wallet reads in the tiers' last word -
+	# the row below each weld names its price in full.
+	_bench_wallet.text = "ICHOR %d   ·   %s %d   ·   %s %d" % [ichor,
+		_short_tier(tallow_tier), tallow, _short_tier(bile_tier), bile]
+	_bench_wallet.tooltip_text = "%d Warden's Ichor in the stash  ·  %s %d  ·  %s %d" % [
+		ichor, CruorCatalogScript.tier_name(tallow_tier), tallow,
+		CruorCatalogScript.tier_name(bile_tier), bile]
+	_paint_bench_rows(item, ordinal)
+
+
+## A tier's name in the one word the bench header has room for.
+func _short_tier(tier: int) -> String:
+	var words := CruorCatalogScript.tier_name(tier).split(" ", false)
+	return str(words[words.size() - 1]).to_upper() if not words.is_empty() else "CRUOR"
+
+
+## One row per weld this copy can take, with the price and the reason it cannot
+## be taken. A row the books would refuse is drawn dead and says why on hover,
+## exactly as the altar's rack does.
+func _paint_bench_rows(item: String, ordinal: int) -> void:
+	if _bench_list == null:
+		return
+	for child in _bench_list.get_children():
+		_bench_list.remove_child(child)
+		child.queue_free()
+	_bench_rows.clear()
+	if item.is_empty() or _warband == null:
+		return
+	for option in _warband.weld_options(item, ordinal):
+		var row: Dictionary = option
+		_bench_rows.append(row)
+		var why := str(row.get("reason", ""))
+		var line := str(row.get("line", ""))
+		var button := Button.new()
+		button.name = "Weld_%s" % str(row.get("entry_id", ""))
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text = "%s  ·  %s  ·  %d %s%s" % [str(row.get("name", "")),
+			str(row.get("kind_name", "")), int(row.get("cost_count", 0)),
+			str(row.get("cost_name", "")),
+			"" if int(row.get("vials", 0)) <= 0 else " + ichor"]
+		button.tooltip_text = line if why.is_empty() else "%s\n%s" % [line, why]
+		button.focus_mode = Control.FOCUS_NONE
+		button.clip_text = true
+		button.custom_minimum_size = Vector2(0, BENCH_ROW)
+		button.add_theme_font_size_override("font_size", 13)
+		button.disabled = not why.is_empty()
+		button.pressed.connect(func() -> void: press_weld(str(row.get("entry_id", ""))))
+		_bench_list.add_child(button)
+
+
+## Turn the bench to the other hand: the rows, the piece and its marks follow.
+func _select_bench_hand(slot_id: String) -> void:
+	if not BENCH_HANDS.has(slot_id) or slot_id == _bench_slot:
+		return
+	_bench_slot = slot_id
+	_bench_status_line("", true)
+	_sync_bench()
+
+
+func _bench_status_line(text: String, ok: bool) -> void:
+	if _bench_status == null:
+		return
+	_bench_status.text = text
+	_bench_status.add_theme_color_override("font_color", BENCH_OK if ok else BENCH_NO)
+
+
+## Whether the bench is over the sheet.
+func bench_is_open() -> bool:
+	return _bench_open
+
+
+## The hand the bench is working: `main` or `off`.
+func bench_slot() -> String:
+	return _bench_slot
+
+
+## The piece laid in the bench: the copy this body wears in that hand, or "" for
+## a bare hand.
+func bench_item() -> String:
+	if _warband == null or selected_merc <= 0:
+		return ""
+	return str(_warband.roster.equipped_of(selected_merc).get(_bench_slot, ""))
+
+
+## The serial of that copy - the ledger's own answer (`Warband.annoint_copy`), so
+## a weld lands on the weapon in the hand and never on a spare of the same kind.
+func bench_ordinal() -> int:
+	if _warband == null or selected_merc <= 0:
+		return 0
+	return int(_warband.annoint_copy(selected_merc, _bench_slot))
+
+
+## The welds the laid copy can take: `Warband.weld_options` rows, the same ones
+## the altar's rack reads.
+func bench_rows() -> Array[Dictionary]:
+	return _bench_rows
+
+
+## What the bench last said: the weld's line, or the refusal in its own words.
+func bench_status_text() -> String:
+	return _bench_status.text if _bench_status != null else ""
+
+
+## Open the bench on `slot_id` (`""` keeps the hand it is on). This page is a
+## body's page, so a corpse screen, an empty roster and a body the scene cannot
+## dress all refuse out loud.
+func open_bench(slot_id: String = "") -> bool:
+	if _corpse_active or _warband == null or selected_merc <= 0:
+		set_status("Choose a mercenary first.")
+		return false
+	if BENCH_HANDS.has(slot_id):
+		_bench_slot = slot_id
+	_bench_open = true
+	_bench_status_line("", true)
+	_sync_bench()
+	return true
+
+
+## Shut the bench. The sheet underneath is untouched.
+func close_bench() -> void:
+	if not _bench_open:
+		return
+	_bench_open = false
+	_bench_status_line("", true)
+	_sync_bench()
+
+
+## Lay one weld on the copy in the bench's hand, for its price, or read the
+## refusal. The spend, the ledger and the words are `Warband.weld`'s: the bench
+## only presses the row - which is the whole difference from walking to an altar.
+func press_weld(entry_id: String) -> Dictionary:
+	if _warband == null or not _warband.has_method("weld"):
+		_bench_status_line("No warband to work steel for.", false)
+		return {"ok": false, "message": "No warband."}
+	var item := bench_item()
+	if item.is_empty():
+		_bench_status_line("That hand is bare: a bare hand takes no mark.", false)
+		return {"ok": false, "message": "That hand is bare.", "item_id": item}
+	var result: Dictionary = _warband.weld(item, bench_ordinal(), entry_id)
+	var ok := bool(result.get("ok", false))
+	_bench_status_line(str(result.get("message", "")), ok)
+	# A guest's press is a request: the host's answer is the next mirrored ledger,
+	# and the row that lands with it is the repaint. Redrawing the local books for
+	# a weld that has not happened would promise steel the warband does not have.
+	if not bool(result.get("pending", false)):
+		_sync_bench()
+	if ok:
+		changed.emit()
+	return result
+
 # --- stash -----------------------------------------------------------------
 
 func _sync_stash(rows: Array[Dictionary]) -> void:
@@ -1085,6 +1470,7 @@ func _paint_mode() -> void:
 	_set_button.visible = not _corpse_active
 	_reequip_button.visible = not _corpse_active
 	_reequip_all_button.visible = not _corpse_active
+	_bench_button.visible = not _corpse_active
 	_hotbar_box.visible = not _corpse_active
 	_stash_hint.visible = not _corpse_active
 	_stash_box.visible = not _corpse_active

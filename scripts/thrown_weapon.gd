@@ -17,6 +17,12 @@ const SPIN_SPEED := 11.0
 var weapon := "sword"
 var weapon_index := 0
 var blade_length := 1.0
+## The catalog id of the copy this blade stands for, so a body it sticks in can
+## hand the same piece back (`K`) instead of guessing one.
+var piece_id := ""
+## True once a body has taken this blade into itself: the scene's projectile
+## keeping never frees it, and its own flight clock stops.
+var lodged := false
 var velocity := Vector3.ZERO
 var flying := true
 var age := 0.0
@@ -97,6 +103,11 @@ func _fly(delta: float) -> void:
 					collider.note_impact(ImpactRules.projectile_force(velocity))
 				collider.take_damage(damage, source_id, headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, headshot)
+				# A body takes the blade with it: the piece stays where it landed
+				# and is the thrower's to pull back out (`WarbandBody.lodge_weapon`).
+				if not piece_id.is_empty() and collider.has_method("lodge_weapon") \
+						and bool(collider.lodge_weapon(self, piece_id)):
+					return
 			visible = false
 		impacted.emit(hit_enemy, global_position)
 		return

@@ -20,11 +20,13 @@ const AltarMenuScript = preload("res://scripts/warband/altar_menu.gd")
 const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 const Geo = preload("res://scripts/geo.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 
-## The word over the altar, in the keepers' plate style (`town_folk.gd`).
-const NAMEPLATE_TEXT := "THE ALTAR"
-const NAMEPLATE_HEIGHT := 2.2
-const NAMEPLATE_COLOR := Color(1.0, 0.78, 0.68)
+## Where the altar's name is cut in: the plinth's broad face is on -X, the square's
+## side, and the skull and horns the ritual hangs on the stele sit above it - a
+## name on the stele would be behind them.
+const PLINTH_FACE := -0.475
+const PLINTH_NAME_Y := 0.62
 
 ## Every piece of the body stands within this distance of the node origin.
 const BODY_RADIUS := 2.5
@@ -197,19 +199,11 @@ func _build_body() -> void:
 	light.position = Vector3(-0.2, 1.75, 0.0)
 	add_child(light)
 
-	var plate := Label3D.new()
-	plate.name = "AltarNameplate"
-	plate.text = NAMEPLATE_TEXT
-	plate.font_size = 44
-	plate.pixel_size = 0.0046
-	plate.modulate = NAMEPLATE_COLOR
-	plate.outline_size = 10
-	plate.outline_modulate = Color(0.10, 0.02, 0.02, 0.9)
-	plate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	plate.no_depth_test = true
-	plate.render_priority = 1
-	plate.position = Vector3(0.0, NAMEPLATE_HEIGHT, 0.0)
-	add_child(plate)
+	# The altar's name, cut into a plate let into the plinth's broad face, which
+	# looks down -X: the square's side of the altar in town, and below the skull
+	# and horns the stele carries.
+	SignKit.plaque(self, "altar", Vector3(PLINTH_FACE - 0.004, PLINTH_NAME_Y, 0.0),
+		-PI * 0.5, "AltarNameplate")
 
 ## The altar's own materials beside the camp kit's: dark wet granite, the camp's
 ## iron and old blood, fresh gore, the ichor in the bowl, tallow, and the flame

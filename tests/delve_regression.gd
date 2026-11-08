@@ -39,6 +39,7 @@ const TEST_SAVE := "user://delve_player.json"
 const WARBAND_SAVE := "user://delve_warband.json"
 const AreaScript = preload("res://scripts/warband/delve_area.gd")
 const Layout = preload("res://scripts/warband/delve_layout.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const Floor = preload("res://scripts/warband/delve_floor.gd")
 const DelveMode = preload("res://scripts/warband/delve_mode.gd")
 const TownHub = preload("res://scripts/warband/town_hub.gd")
@@ -255,8 +256,26 @@ func check_mouth_and_pack() -> void:
 	var area = game.delve_area
 	var soul = _soul()
 	check(soul != null, "a body stands in the square")
-	check(area.mouth != null and area.mouth.get_node_or_null("MouthName") != null,
-		"the Hollow's mouth stands in the square, named")
+	var mouth_board = area.mouth.get_node_or_null("MouthName") if area.mouth != null else null
+	check(mouth_board != null, "the Hollow's mouth stands in the square, named")
+	if mouth_board != null:
+		check(not (mouth_board is Label3D),
+			"the mouth's name is a board, not text in the air")
+		check(SignKit.text_of("weeping_hollow") == "THE WEEPING HOLLOW",
+			"the board names the hollow (%s)" % SignKit.text_of("weeping_hollow"))
+		check(area.mouth.get_node_or_null("MouthSignPosts") is MeshInstance3D,
+			"the board is carried on its own two stakes")
+		var box := AABB()
+		var first := true
+		for child in (mouth_board as Node).get_children():
+			var mesh := child as MeshInstance3D
+			if mesh == null or mesh.mesh == null:
+				continue
+			var child_box: AABB = mesh.global_transform * mesh.mesh.get_aabb()
+			box = child_box if first else box.merge(child_box)
+			first = false
+		check(not first and box.position.y > 1.6,
+			"a body walks under the board (%.2f m)" % box.position.y)
 	if soul != null:
 		soul.teleport_to(area.mouth_point() + Vector3(0.0, 0.12, 2.2), 0.0)
 	await _frames(2)
@@ -1091,13 +1110,12 @@ func check_den_and_loot() -> void:
 	check(warband.stash.pooled_map() == stash_before, "the town stash did not move while below")
 	check(not game.loot_feed.lines().is_empty(), "the looted list names what came up (%s)" % str(game.loot_feed.lines()))
 	check(game.loot_feed.header_text().contains("DELVE INVENTORY"), "and the delve's line heads it")
-	# The loot window is the right click above; opened on a body below it lists that
-	# body's container - what the dead body still wore and carried, and the steel
-	# that fell out of its hand and lies beside it - and books the lot into the
-	# delve inventory. A corpse holds the Hollow's own rolls (a watcher keeps 30% of
-	# its kit, piece by piece), so the row count is read here and never assumed: the
-	# invariant is that the window's whole list comes up, into the pack, and that the
-	# window lets go of a body it has emptied.
+	# A right click below is the take itself (`WarbandLootHand.take_now`): the body's
+	# whole container and the steel that fell out of its hand go straight into the
+	# delve inventory, with nothing dressed onto the body that searched it. A corpse
+	# holds the Hollow's own rolls (a watcher keeps 30% of its kit, piece by piece),
+	# so the count is read here and never assumed: the invariant is that every piece
+	# left on the body comes up, into the pack.
 	var second_id := 0
 	var second_at := Vector3.ZERO
 	for mob in den:
@@ -1108,34 +1126,21 @@ func check_den_and_loot() -> void:
 			break
 	_soul_to(soul, second_at + Vector3(1.2, 0.12, 0.0))
 	await _frames(1)
-	var window_rows: Array = []
-	if soul != null and game.loot_window.open_on(soul,
-			{"kind": "corpse", "corpse_id": second_id, "pickup": null}):
-		window_rows = game.loot_window.rows()
-	# The body's own contents are part of what the window lists, each piece on a row
-	# of its own (copies of one piece share a row, with a count).
 	var on_second: Array[String] = game.loot.corpse_items(second_id)
-	var window_ids: Array[String] = []
-	var window_pieces := 0
-	for row in window_rows:
-		window_ids.append(str(row.get("item_id", "")))
-		window_pieces += int(row.get("count", 0))
-	var holds_all := not on_second.is_empty()
-	for item_id in on_second:
-		if not window_ids.has(item_id):
-			holds_all = false
-	check(holds_all, "the window lists every piece still on the body (%s of %s)"
-		% [str(window_ids), str(on_second)])
 	var held_before: int = warband.delve.inventory.pooled_total()
 	var stash_below: Dictionary = warband.stash.pooled_map()
 	var worn_on_taker: Array = warband.roster.worn_entries(soul_merc)
-	var took_all: Array[String] = game.loot_window.take_all()
-	check(window_pieces > 0 and took_all.size() == window_pieces and not game.loot_window.is_open(),
-		"the loot window lists a body below and takes the lot (%d rows, %d of %d pieces)"
-		% [window_rows.size(), took_all.size(), window_pieces])
-	check(warband.delve.inventory.pooled_total() == held_before + window_pieces,
-		"and every piece lands in the delve inventory (%d -> %d)"
-		% [held_before, warband.delve.inventory.pooled_total()])
+	var pool_before: int = game.loot.pickups().size()
+	var took_all: Array[String] = game.loot_hand.take_now(soul,
+		{"kind": "corpse", "corpse_id": second_id, "pickup": null})
+	# The same take with the same target twice is the second click on bare ground:
+	# nothing is left, so nothing is booked and no id comes back.
+	check(took_all.size() >= on_second.size(),
+		"the take brings up every piece still on the body (%d of %d, %d drops beside it)"
+			% [took_all.size(), on_second.size(), pool_before])
+	check(warband.delve.inventory.pooled_total() >= held_before + on_second.size(),
+		"and every one lands in the delve inventory (%d -> %d)"
+			% [held_before, warband.delve.inventory.pooled_total()])
 	check(warband.roster.worn_entries(soul_merc) == worn_on_taker,
 		"nothing of it is dressed onto the body that searched it")
 	check(warband.stash.pooled_map() == stash_below, "and the town stash is untouched by it")

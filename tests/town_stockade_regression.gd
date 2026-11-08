@@ -14,6 +14,7 @@ extends SceneTree
 const State = preload("res://scripts/player_state.gd")
 const ArmorData = preload("res://scripts/armor_data.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
@@ -164,6 +165,52 @@ func standing_clear(at: Vector3) -> bool:
 
 # --- the ring and its gate -------------------------------------------------
 
+## The baked face material among `node`'s meshes: a sign's words are this and
+## nothing else. Null when the prop carries no sign texture at all.
+func face_material(node: Node) -> Material:
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var at: Node = stack.pop_back()
+		if at is MeshInstance3D and (at as MeshInstance3D).mesh != null:
+			var mesh: Mesh = (at as MeshInstance3D).mesh
+			for surface in mesh.get_surface_count():
+				var material: Material = mesh.surface_get_material(surface)
+				if material is StandardMaterial3D:
+					var texture: Texture2D = (material as StandardMaterial3D).albedo_texture
+					if texture != null and texture.resource_path.get_file().begins_with("sign_"):
+						return material
+		for child in at.get_children():
+			stack.append(child)
+	return null
+
+
+## Anything written in the air under `node`: what a sign must not be.
+func floating_text_under(node: Node) -> Array:
+	var found: Array = []
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var at: Node = stack.pop_back()
+		if at is Label3D:
+			found.append(at)
+		for child in at.get_children():
+			stack.append(child)
+	return found
+
+
+## The footprint of every mesh under a prop, in world space.
+func board_box(node: Node) -> AABB:
+	var box := AABB()
+	var first := true
+	for child in node.get_children():
+		var mesh := child as MeshInstance3D
+		if mesh == null or mesh.mesh == null:
+			continue
+		var at: AABB = mesh.global_transform * mesh.mesh.get_aabb()
+		box = at if first else box.merge(at)
+		first = false
+	return box
+
+
 func check_ring() -> void:
 	check(is_equal_approx(TownScript.WALL_RADIUS, 22.0),
 		"the town is a ring of stakes %d m across (%.1f)" % [44, TownScript.WALL_RADIUS])
@@ -197,8 +244,20 @@ func check_ring() -> void:
 		check(absf(box.get_center().x) < 0.5 and box.size.x > 8.0,
 			"the gate spans the lane (%.1f m wide)" % box.size.x)
 		check(box.end.y > 4.0, "the gate stands a lintel over a body's head (%.1f m)" % box.end.y)
-	var label := town.get_node_or_null("NorthGate/GateSign") as Label3D
-	check(label != null and label.text == "THE WOOD ROAD", "the gate still names the wood road")
+	# The road's name is painted on a board hung under the gate, not written in the
+	# air over it: a sign is part of the prop it is on.
+	var sign := town.get_node_or_null("NorthGate/GateSign") as Node3D
+	check(sign != null, "the gate still carries a board")
+	if sign != null:
+		check(face_material(sign) != null, "the board's words are painted on the board")
+		check(SignKit.text_of("wood_road") == "THE WOOD ROAD",
+			"the board names the wood road (%s)" % SignKit.text_of("wood_road"))
+		check(floating_text_under(sign).is_empty(), "no text floats over the gate")
+		var board := board_box(sign)
+		check(board.size != Vector3.ZERO and board.get_center().y > 3.2 and board.end.y < 4.4,
+			"the board hangs under the lintel and over a body's head (%.2f-%.2f m)"
+				% [board.position.y, board.end.y])
+		check(board.size.x > 2.0, "the board is a board, not a tag (%.1f m wide)" % board.size.x)
 
 	# Nothing stands in the road: the lane is walkable from the fire to the wall
 	# and a stride outside it.

@@ -24,7 +24,7 @@ const BLOOD := LedgerThemeScript.BLOOD
 ## bows spend) plus the cheapest armour and rings, so a fresh warband can be armed
 ## without a single lucky drop.
 const STOCK := [
-	"dagger_ironwood", "club_makeshift", "bow_twig", "branch_heavy", "shield_wood",
+	"dagger_ironwood", "club_makeshift", "axe_makeshift", "bow_twig", "branch_heavy", "shield_wood",
 	"armor_naked_head", "armor_naked_chest", "armor_naked_hands",
 	"armor_naked_legs", "armor_naked_feet",
 	"sword_short", "dagger_iron", "bow_short", "arrow", "shield_buckler",

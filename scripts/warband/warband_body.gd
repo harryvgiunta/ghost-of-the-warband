@@ -92,6 +92,13 @@ var downed_by := -1
 ## before its blow and spent by that blow (`note_arrow_headshot`). A campaign
 ## body only goes down from a blow, so a headshot takes the head on the finisher.
 var _head_shot := Vector3.ZERO
+## The class of the piece that dealt the blow in flight, named by the striker
+## before its contact (`note_strike`) and spent by the blow that lands: a club
+## rocks a body that a blade of the same reach only cuts.
+var _strike_class := ""
+## Where a noted blow would have landed: the guard is tested against the strike
+## itself, so a raised guard and a level one are different defences.
+var _strike_at := Vector3.INF
 ## The flight the corpse carries, so a replica throws the same head the host did.
 var _sever := Vector3.ZERO
 ## The head has already left (`SeveredHead`): a replica reads a death off every
@@ -608,6 +615,17 @@ func note_arrow_headshot(velocity: Vector3, _amount: float) -> void:
 		_head_shot = velocity
 
 
+## The class of the piece behind a blow, named by the striker before its contact
+## (`Combat` names the hand it swung with) and spent by the blow that resolves it:
+## a blunt head staggers for far more of the roll than its damage alone earns.
+## `at` is where the blow would land, which is what a raised guard is tested
+## against (`Combat.resolve_melee_defense`); `INF` means the caller did not say.
+func note_strike(weapon_class: String, at: Vector3 = Vector3.INF) -> void:
+	if authoritative and alive:
+		_strike_class = weapon_class
+		_strike_at = at
+
+
 ## Throws this body's head off once. Returns true when there is no head left to
 ## throw, so a replica that reads the same death again does nothing.
 func _throw_head(damage: float) -> bool:
@@ -660,6 +678,12 @@ func note_attacker(attacker: Node3D) -> void:
 		struck_by.emit(attacker)
 
 func receive_melee(amount: float, source_id: int, attacker_position: Vector3, headshot: bool = false) -> int:
+	# The note is this blow's alone: it is spent here whether the blow lands, is
+	# turned, or never resolves at all, so it can never reach a later hit.
+	var strike := _strike_class
+	var strike_at := _strike_at
+	_strike_class = ""
+	_strike_at = Vector3.INF
 	if not authoritative or not alive or source_id == slot:
 		return Combat.DEFENSE_NONE
 	if downed:
@@ -667,34 +691,37 @@ func receive_melee(amount: float, source_id: int, attacker_position: Vector3, he
 		# not a defence roll at all. `take_damage` owns the downed rule and turns
 		# it into the contract's finisher check - a heavy strike ends the body, a
 		# light one is shrugged off.
-		take_damage(amount,source_id,headshot,false)
+		take_damage(amount,source_id,headshot,false,strike)
 		return Combat.DEFENSE_NONE
-	var outcome: int = combat.resolve_melee_defense(attacker_position)
+	var outcome: int = combat.resolve_melee_defense(attacker_position,strike_at)
 	if outcome == Combat.DEFENSE_PARRY:
 		return outcome
 	if outcome == Combat.DEFENSE_BLOCK or outcome == Combat.DEFENSE_WEAK_BLOCK:
-		stamina = maxf(0.0,stamina-combat.block_stamina_cost())
-		var push := global_position - attacker_position
-		push.y = 0.0
-		if push.length_squared() > 0.000001:
-			push = push.normalized() * Combat.BLOCK_PUSH_SPEED
-			velocity.x = push.x
-			velocity.z = push.z
-		# The blow was stopped and the pool paid `block_stamina_cost` for it. What
-		# that does to the guard is what stopped it: a shield is a boss to be hit,
-		# so the arm stays up and only the stamina goes - the pool is the wall's
-		# whole price. A bare blade cannot hold its line, so one raised guard buys
-		# one block and the crowd cannot be stood off by leaning on the button.
-		if not rig.shield_equipped:
-			combat.break_guard()
-			guard_broken.emit(slot)
+		# A paired guard is the off blade in the way rather than a held line: it
+		# spends no pool and there is no guard on it to break.
+		if rig.weapon != "dual":
+			stamina = maxf(0.0,stamina-combat.block_stamina_cost())
+			var push := global_position - attacker_position
+			push.y = 0.0
+			if push.length_squared() > 0.000001:
+				push = push.normalized() * Combat.BLOCK_PUSH_SPEED
+				velocity.x = push.x
+				velocity.z = push.z
+			# The blow was stopped and the pool paid `block_stamina_cost` for it.
+			# What that does to the guard is what stopped it: a shield is a boss to
+			# be hit, so the arm stays up and only the stamina goes - the pool is the
+			# wall's whole price. A bare blade cannot hold its line, so one raised
+			# guard buys one block and the crowd cannot be stood off by the button.
+			if not rig.shield_equipped:
+				combat.break_guard()
+				guard_broken.emit(slot)
 		annoint_playback.on_block()
 		if outcome == Combat.DEFENSE_WEAK_BLOCK:
 			# The raised dagger absorbs the impact: half damage, and the attacker's
-			# swing continues.
-			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false)
+			# swing continues. A turned blow rolls no stagger, blunt or not.
+			take_damage(amount * Combat.WEAK_BLOCK_DAMAGE_SCALE,source_id,headshot,false,strike)
 		return outcome
-	take_damage(amount,source_id,headshot)
+	take_damage(amount,source_id,headshot,true,strike)
 	return Combat.DEFENSE_NONE
 
 func clash_bounce(direction: Vector3) -> void:
@@ -746,6 +773,69 @@ func try_step(direction: Vector3) -> bool:
 	rig.set_slide(-1.0,Vector3.FORWARD)
 	stamina = maxf(0.0,stamina-DodgeStep.STAMINA_COST)
 	return true
+
+
+## The wheel while a draw is open: pinch another shaft onto the string (`+1`),
+## or put one back (`-1`). The rig owns the count and the fan; the body only
+## refuses a hand that is not on a bow, a dead body and a downed one.
+func stack_nock(delta: int) -> int:
+	if not alive or downed or not is_instance_valid(rig) or not rig.has_method("stack_nock"):
+		return 0
+	return int(rig.stack_nock(delta))
+
+
+## The blades thrown into this body, newest last: `{piece, node}`. A thrown
+## piece sticks where it landed and is the thrower's to pull back out, which is
+## how an axe thrown in a fight comes home (`take_lodged`, bound to K).
+const LODGED_LIMIT := 4
+var _lodged: Array[Dictionary] = []
+
+
+## Take a blade into the body. The projectile stops flying where it struck and
+## becomes the body's, so `queue_free` on a spent missile never eats it. Answers
+## whether the piece stuck.
+func lodge_weapon(missile: Node3D, piece_id: String) -> bool:
+	if not is_instance_valid(missile) or piece_id.is_empty():
+		return false
+	if not authoritative or not alive or _lodged.size() >= LODGED_LIMIT:
+		return false
+	if missile is Node:
+		missile.set("lodged", true)
+		missile.set_physics_process(false)
+		# The blade stays exactly where it struck: the node is re-parented to the
+		# body, so its world pose is captured and re-applied, or it would jump by
+		# the body's own offset the moment it stopped being the world's child.
+		var pose := missile.global_transform
+		var parent := missile.get_parent()
+		if parent != null:
+			parent.remove_child(missile)
+		add_child(missile)
+		missile.global_transform = pose
+	_lodged.append({"piece": piece_id, "node": missile})
+	return true
+
+
+## The pieces still in the body, oldest first.
+func lodged_pieces() -> Array[String]:
+	var out: Array[String] = []
+	for entry in _lodged:
+		out.append(str(entry.get("piece", "")))
+	return out
+
+
+## Pull one blade back out and answer the catalog id it was. `index` -1 takes
+## the newest. An empty answer means there was nothing in the body.
+func take_lodged(index: int = -1) -> String:
+	if _lodged.is_empty():
+		return ""
+	var at := clampi(index if index >= 0 else _lodged.size() - 1, 0, _lodged.size() - 1)
+	var entry: Dictionary = _lodged[at]
+	_lodged.remove_at(at)
+	var node: Variant = entry.get("node")
+	if is_instance_valid(node):
+		(node as Node).queue_free()
+	return str(entry.get("piece", ""))
+
 
 func set_crouch(requested: bool) -> void:
 	if not requested:
@@ -921,13 +1011,18 @@ func _tick_ward(delta: float) -> void:
 ## A campaign body dies by the ground, never by the blow: a lethal hit leaves it
 ## DOWNED for the whole bleed clock, any blow that lands on it there ends it, and
 ## a body that does die keeps its corpse where it fell.
-func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true) -> void:
+func take_damage(amount: float, source_id: int, headshot: bool = false, react: bool = true,
+		weapon_class: String = "") -> void:
 	if not authoritative or not alive or source_id == slot:
 		return
 	# A headshot is only worth a head if this blow is the arrow that named it: the
-	# note is spent here whether the blow downs the body or finishes it.
+	# note is spent here whether the blow downs the body or finishes it. The
+	# striking piece's class is spent the same way, and a call that names it
+	# outright (a melee contact that went through the guard roll) wins over the note.
 	var flight := _head_shot
 	_head_shot = Vector3.ZERO
+	var strike := weapon_class if not weapon_class.is_empty() else _strike_class
+	_strike_class = ""
 	if downed:
 		# A blow on a downed body is a finisher, not damage: lying in the dirt,
 		# any blow that lands ends it - and an arrow in the head takes the head
@@ -950,7 +1045,7 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	DamageNumbers.spawn(get_parent(),global_position,applied,"self" if is_local else "hit",headshot,health <= 0.0)
 	BloodFx.wound(self,rig,get_aim_position(),applied,headshot,health <= 0,1.0)
 	if react:
-		var seconds: float = combat.stagger_from_damage(applied,max_health)
+		var seconds: float = combat.stagger_from_damage(applied,max_health,strike)
 		rig.set_hit_react(seconds)
 		dodge.reset()
 	if bool(outcome.died) or bool(outcome.downed):
@@ -1464,6 +1559,11 @@ func predict_action(action: String, value: Variant) -> void:
 			if absf(flat.length()-1.0) > 0.1:
 				return
 			try_step(flat)
+		"nock":
+			# The stack is the shooter's own screen before the host confirms it:
+			# the string hand draws the bundle on the frame the wheel turns.
+			if typeof(value) == TYPE_INT:
+				stack_nock(int(value))
 
 
 ## One frame of the owning peer's own movement: the same `step()` the authority

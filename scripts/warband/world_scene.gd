@@ -103,7 +103,6 @@ const WatcherWarrenScript = preload("res://scripts/warband/watcher_warren.gd")
 const LootHandScript = preload("res://scripts/warband/loot_hand.gd")
 ## The tiny loot window a plain right click on a body opens, and the looted list
 ## every booked piece is written to.
-const LootWindowScript = preload("res://scripts/warband/loot_window.gd")
 const LootFeedScript = preload("res://scripts/warband/loot_feed.gd")
 ## The campaign's map sheet. One page, drawn by one `_draw()`, opened with `M`.
 const WorldMapScript = preload("res://scripts/warband/world_map.gd")
@@ -148,6 +147,10 @@ const WILDERNESS_SOURCE := 92
 ## A squadmate is deliberately not in the set - the warband's swords do not cut
 ## its own, and neither do its arrows.
 const PROJECTILE_HIT_MASK := 1 | 2
+## A thrown piece finds the warband's own bodies as well as the wood's: a blade
+## that sticks in a player is the whole point of throwing one, and the thrower's
+## own body is excluded at launch. Arrows keep to the world and the mobs.
+const THROWN_HIT_MASK := 1 | 2 | 4
 ## A ceiling on live missiles, oldest freed first, so a long trail fight cannot
 ## grow the tree without bound.
 const PROJECTILE_CAP := 64
@@ -226,7 +229,6 @@ var soldier_cages
 var watcher_warren
 ## The take-it-all, the loot window, the looted list, and the campaign's map sheet.
 var loot_hand
-var loot_window
 var loot_feed
 var world_map
 ## The delve (`delve_area.gd`): the mouth in the square and the instance below.
@@ -471,17 +473,8 @@ func _step_world(delta: float) -> void:
 		delve_area.tick(delta)
 		Perf.end()
 	Perf.begin("world.books")
-	if loot_window != null:
-		loot_window.tick()
 	_sync_roster(delta)
 	_sync_field()
-	# The loot channel runs on the world's clock and breaks the moment a panel is
-	# over the body doing the work: a screen does not pause the tree, so nothing
-	# else would ever say the hands are needed back.
-	if loot_hand != null:
-		if _panel_open():
-			loot_hand.cancel()
-		loot_hand.tick(delta)
 	Perf.end()
 	Perf.begin("world.prompts")
 	_update_prompt()
@@ -754,10 +747,6 @@ func _build_loot() -> void:
 	loot_hand.name = "LootHand"
 	add_child(loot_hand)
 	loot_hand.setup(self)
-	loot_window = LootWindowScript.new()
-	loot_window.name = "LootWindow"
-	add_child(loot_window)
-	loot_window.setup(self)
 	# Every piece the warband books - the soul's hands, a squadmate's, a sweep's -
 	# is one line on the looted list.
 	loot_feed = LootFeedScript.new()
@@ -1111,7 +1100,11 @@ func _call_up_reserve() -> void:
 func _muster_point(merc_id: int, index: int) -> Vector3:
 	var own: Variant = _muster_at.get(merc_id)
 	if own is Vector3:
-		return TerrainScript.grounded(own)
+		# A point that came from the world is already on the ground, and
+		# `Terrain.grounded()` *adds* the y it is handed: passing that point through
+		# it doubled the terrain's height, so a soldier cut out of his cage on a
+		# slope stood below it (or above it) by the height of the hill he was on.
+		return TerrainScript.grounded(Vector3((own as Vector3).x, 0.0, (own as Vector3).z))
 	var focus = controller.focus_body()
 	var party: bool = focus != null and is_instance_valid(focus)
 	if town != null and (not party or town.in_square(focus)):
@@ -1191,6 +1184,19 @@ func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: fl
 	_keep_projectile(arrow)
 
 
+## What the throwing hand let go of, as a catalog id: the main-hand copy on the
+## mercenary's record. A body with no record (a test fixture, an unkitted mob)
+## answers "" and its blade simply spends itself, which is what every throw did
+## before a piece could stick.
+func _thrown_piece(actor) -> String:
+	if warband == null or controller == null or actor == null:
+		return ""
+	var merc: int = controller.merc_of(actor)
+	if merc <= 0:
+		return ""
+	return str(warband.roster.equipped_of(merc).get("main", ""))
+
+
 ## A blade let go of mid-swing. Same authority, same layers.
 func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float,
 		weapon: String, weapon_index: int, actor) -> void:
@@ -1204,7 +1210,7 @@ func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: 
 	thrown.weapon_index = weapon_index
 	thrown.source_id = int(actor.slot)
 	thrown.shooter = actor
-	thrown.hit_mask = PROJECTILE_HIT_MASK
+	thrown.hit_mask = THROWN_HIT_MASK
 	thrown.authoritative_damage = true
 	_arm_projectile(thrown, actor)
 	if weapon == "dagger":
@@ -1213,6 +1219,9 @@ func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: 
 		thrown.blade_length = float(ArcherScript.SWORD_DATA[
 			clampi(weapon_index, 0, ArcherScript.SWORD_DATA.size() - 1)].length)
 	add_child(thrown)
+	# What the hand let go of: the worn copy's catalog id, so a blade that sticks
+	# in a body can be pulled back out as the same piece (`K`).
+	thrown.piece_id = _thrown_piece(actor)
 	thrown.launch(origin, direction, speed, damage, _projectile_exclude(actor))
 	_keep_projectile(thrown)
 
@@ -1270,7 +1279,7 @@ func _keep_projectile(missile) -> void:
 	projectiles.append(missile)
 	while projectiles.size() > PROJECTILE_CAP:
 		var oldest = projectiles.pop_front()
-		if is_instance_valid(oldest):
+		if is_instance_valid(oldest) and not bool(oldest.get("lodged")):
 			oldest.queue_free()
 
 
@@ -1597,14 +1606,20 @@ func spawn_pickup(item_id: String, at: Vector3, announced: bool = false):
 ## before the hand is emptied.
 func drop_held_weapon(enemy) -> bool:
 	var anointed: bool = is_instance_valid(enemy) and enemy.get("weapon_anointed") == true
-	var item_id: String = GearDropScript.strip_enemy(enemy)
-	if item_id.is_empty():
-		return false
-	var at: Vector3 = (enemy as Node3D).global_position
-	var pickup = spawn_pickup(item_id, GearDropScript.drop_point(at, GearDropScript.forward_of(enemy)))
-	if pickup != null and anointed:
-		pickup.anoint()
-	return true
+	var dropped := false
+	# The off hand first, so the blade is the last thing to hit the dirt - the same
+	# order a warband body lets go in (`WarbandGearDrop.strip_hands`).
+	for off in [true, false]:
+		var item_id: String = GearDropScript.strip_enemy_hand(enemy, off)
+		if item_id.is_empty():
+			continue
+		var at: Vector3 = (enemy as Node3D).global_position
+		var pickup = spawn_pickup(item_id, GearDropScript.drop_point(at,
+			GearDropScript.forward_of(enemy)))
+		if pickup != null and anointed and not off:
+			pickup.anoint()
+		dropped = true
+	return dropped
 
 
 ## One hostile dies, and the world pays for it once. The wilderness band reports
@@ -1619,7 +1634,8 @@ func _on_enemy_defeated(enemy, reward: int) -> void:
 	# steel, books the corpse and the orders, and every piece of that reaches this
 	# machine through the session. Here the dead hand only lets go of its blade.
 	if _client:
-		GearDropScript.strip_enemy(enemy)
+		for off in [true, false]:
+			GearDropScript.strip_enemy_hand(enemy, off)
 		if screen != null:
 			screen.refresh()
 		return
@@ -2165,17 +2181,18 @@ func _try_interact() -> void:
 	_interaction_status()
 
 
-## A right click on lootable ground is the loot, not the guard.
+## A right click on lootable ground is the loot, not the guard - and it is the
+## take itself, at once, with no window and no channel (`WarbandLootHand.take_now`):
+## a corpse gives its whole list, a drop gives itself and the pile it fell in, and
+## a weapon lying on the dirt is picked up. Nothing is dressed onto the body that
+## searched; `K` is the key that puts a piece into a hand.
 ##
 ## The world sees the press before the soul controller does (`_input` runs ahead of
 ## `_unhandled_input`, and consuming the event stops it reaching the guard), so a
 ## right click with a body or a drop under the crosshair and in the body's reach
-## opens the loot window on it - a click on a row takes it, a shift-click takes the
-## lot - and with shift held the body ducks and takes everything at once. Below, in
-## the delve, the click is the take itself: the body and everything piled beside it
-## go straight into the delve inventory (`WarbandLootHand.take_now`). A right
-## click with nothing lootable there is left alone and raises the guard exactly as
-## before.
+## takes it and never raises a guard. Below, in the delve, the same gesture empties
+## the container into the delve inventory. A right click with nothing lootable
+## there is left alone and raises the guard exactly as before.
 ##
 ## "Under the crosshair" is the ray's own answer, not a radius around it: a fighter
 ## the player is looking at is what the press was for, so the ray's living target
@@ -2210,38 +2227,30 @@ func _loot_click(event: InputEvent) -> bool:
 	if target.is_empty():
 		return false
 	if _client:
-		# A guest's ground and pool are the host's: a shift-click, a delve click
-		# and the row a window opens on are all one intent here. The host books
-		# it for this soul's body and the answer comes back down the session.
-		if delve_area != null and delve_area.in_cave(actor):
-			_request_take(target, true)
-		elif mouse.shift_pressed:
-			_request_take(target, true)
-		elif loot_window == null or not loot_window.open_on(actor, target):
-			return false
+		# A guest's ground and pool are the host's: the take is one intent here.
+		# The host books it for this soul's body and the answer comes back down the
+		# session.
+		_request_take(target)
 		get_viewport().set_input_as_handled()
 		return true
-	if delve_area != null and delve_area.in_cave(actor):
-		if loot_hand.take_now(actor, target).is_empty():
-			return false
-	elif mouse.shift_pressed:
-		if not loot_hand.begin_on(actor, target):
-			return false
-	elif loot_window == null or not loot_window.open_on(actor, target):
+	# The take is instant, above and below: a corpse gives its whole list and a
+	# drop gives itself and its pile, with nothing dressed onto the body that
+	# searched it. `K` is the verb that puts a piece in a hand.
+	if loot_hand.take_now(actor, target).is_empty():
 		return false
 	get_viewport().set_input_as_handled()
 	return true
 
 
 ## Send one take to the host for this soul's body. `target` is the hand's own
-## resolution (`{kind, corpse_id, pickup}`), so the window, the shift-click and
-## the delve click all name the same container. `all` empty-takes a body; a drop
-## is always one piece.
-func _request_take(target: Dictionary, all: bool) -> void:
+## resolution (`{kind, corpse_id, pickup}`), so every guest press names the same
+## container the local one would have taken. A body is emptied whole; a drop is
+## always its own piece (and the host sweeps the pile beside it).
+func _request_take(target: Dictionary) -> void:
 	var kind := str(target.get("kind", ""))
 	if kind == "corpse":
 		controller.act("loot", {"kind": "corpse", "corpse": int(target.get("corpse_id", 0)),
-			"item": "" if all else str(target.get("item", ""))})
+			"item": ""})
 	elif kind == "drop":
 		var pickup = target.get("pickup")
 		if pickup == null or not is_instance_valid(pickup):
@@ -2316,6 +2325,12 @@ func _swap_weapon_set() -> void:
 func _try_loot() -> void:
 	var pickup = _nearest_pickup()
 	if pickup == null:
+		# A blade thrown into a body is a take too: K pulls the nearest one back
+		# out of whoever is wearing it, and the piece returns to the shared stash.
+		if controller != null and bool(controller.act("loot_stuck")):
+			if hud != null:
+				hud.set_status("Pulled a blade back out.", 2.0)
+			return
 		if hud != null:
 			hud.set_status("Nothing within reach.", 1.5)
 		return
@@ -2356,30 +2371,25 @@ func loot_for_peer(peer_id: int, kind: String, corpse_id: int, item_id: String,
 		if (actor as Node3D).global_position.distance_to(
 				(pickup as Node3D).global_position) > LOOT_REACH + 0.75:
 			return false
-		# Below, a drop goes into the delve inventory with nothing dressed onto
-		# the taker; above, the piece snaps into the body that took it.
-		var drop_pooled: bool = delve_area != null and delve_area.in_cave(actor)
-		var taken: Dictionary = loot.quick_loot(pickup, peer_id, not drop_pooled)
-		if bool(taken.get("ok", false)) and not drop_pooled:
-			controller.refresh_gear(controller.merc_for_peer(peer_id))
+		# A take is a take: the piece goes into the pool (the delve's below, the
+		# town's above) and nothing is dressed onto the body that searched it. `K`
+		# is the armorer's verb, on the press that names a piece.
+		var taken: Dictionary = loot.quick_loot(pickup, peer_id, false)
 		return bool(taken.get("ok", false))
 	if kind != "corpse" or corpse_id <= 0 or not loot.has_corpse(corpse_id):
 		return false
 	if (actor as Node3D).global_position.distance_to(loot.corpse_position(corpse_id)) \
 			> LOOT_REACH + 0.75:
 		return false
-	# Below, the screen and the shift-click put the lot in the delve inventory with
-	# nothing dressed onto the taker; above they dress the body that took it.
-	var pooled: bool = delve_area != null and delve_area.in_cave(actor)
+	# Nothing is dressed onto the taker either way: the pool takes the piece, and
+	# `K` is the verb that wears one.
 	var result: Dictionary
 	if item_id.is_empty():
-		result = loot.take_all_from_corpse(corpse_id, peer_id, not pooled)
+		result = loot.take_all_from_corpse(corpse_id, peer_id, false)
 	elif loot.corpse_items(corpse_id).has(item_id):
 		result = loot.take_from_corpse(corpse_id, item_id, peer_id)
 	else:
 		return false
-	if bool(result.get("ok", false)) and not pooled:
-		controller.refresh_gear(controller.merc_for_peer(peer_id))
 	return bool(result.get("ok", false))
 
 
@@ -2565,8 +2575,6 @@ func _hide_panels() -> void:
 		screen.close()
 	if paperdoll != null and paperdoll.is_open():
 		paperdoll.close()
-	if loot_window != null and loot_window.is_open():
-		loot_window.close()
 	if delve_area != null:
 		delve_area.close_panels()
 	if town != null:
@@ -2579,8 +2587,6 @@ func _panel_open() -> bool:
 	if menu != null and menu.is_open():
 		return true
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
-		return true
-	if loot_window != null and loot_window.is_open():
 		return true
 	if delve_area != null and delve_area.panels_open():
 		return true

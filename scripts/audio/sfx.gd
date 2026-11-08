@@ -1,5 +1,6 @@
 class_name Sfx
 extends RefCounted
+const ItemPassives = preload("res://scripts/item_passives.gd")
 ## The combat sound vocabulary, resolved from the thing that swung.
 ##
 ## Call sites say what happened ("a blade landed here"), never which file to
@@ -22,9 +23,6 @@ const BLUNT_ITEMS := ["club_makeshift", "branch_heavy", "staff_fire", "staff_bon
 const TWO_HAND_ITEMS := ["branch_heavy", "staff_fire", "staff_bone"]
 ## Catalog pieces swung one-handed from a blade that is barely a blade.
 const DAGGER_ITEMS := ["dagger_iron", "dagger_ironwood"]
-## Blade span index where `Archer.SWORD_DATA` turns makeshift: club at 3, branch
-## at 4. Read as a floor rather than an equality so a new blunt piece is blunt.
-const CLUB_INDEX := 3
 ## `Archer.shield_variant` of the wooden shield (`State.ITEMS["shield_wood"]`):
 ## the one guard that answers a blow with wood instead of steel.
 const WOODEN_SHIELD := 3
@@ -160,6 +158,11 @@ static func kind_of(source: Variant, hand: String = "right") -> Dictionary:
 			return {"two_handed": false, "blunt": false, "dagger": true}
 		if blade_class == "staff":
 			return {"two_handed": true, "blunt": true, "dagger": false}
+		if blade_class == "blunt":
+			# The club and the whole tree limb. The class is read per hand, so an
+			# off-hand club is heard as wood beside a main-hand blade.
+			return {"two_handed": source.has_method("swings_two_handed") \
+				and bool(source.swings_two_handed()), "blunt": true, "dagger": false}
 	if not source.has_method("swings_two_handed"):
 		return UNARMED
 	var staff := bool(source.get("staff_active")) if source.get("staff_active") != null else false
@@ -168,7 +171,7 @@ static func kind_of(source: Variant, hand: String = "right") -> Dictionary:
 		index = int(source.get("sword_index"))
 	return {
 		"two_handed": bool(source.swings_two_handed()) or staff,
-		"blunt": staff or index >= CLUB_INDEX,
+		"blunt": staff or ItemPassives.is_blunt_index(index),
 		"dagger": false,
 	}
 

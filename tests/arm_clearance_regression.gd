@@ -61,9 +61,9 @@ func advance(seconds: float, label: String) -> void:
 
 ## The carried piece must not find its own head. A two-hander shouldered into a
 ## sprint reached straight through the skull, and a club held up on the bounce
-## clipped it: the rig carries the weapon pointed at the dirt above a jog
-## (`Archer.CARRY_DEGREES` at 64), and this measures the clearance instead of
-## trusting the pose.
+## clipped it: the rig carries a one-hand piece forward and down above a jog
+## (`Archer.CARRY_PITCH`), and this measures the clearance instead of trusting
+## the pose.
 func check_carry_clearance() -> void:
 	var head_bone: int = rig._bones.Head
 	# [weapon, index, tip length, must the tip end up below the head]. The

@@ -31,12 +31,18 @@ difference - and the warband is the thing that survives a battle.
   There is **no cage and no lesson** any more: the town is the seat, and the two
   ways out of it are the two things to do.
   * **The road** runs 1,374 m of wood north out of the square: a caged line on it
-    (four soldiers, a blade and `G` at the bars, a `FREE HIM` arrow on the nearest
-    shut one), cultists, two packs of briar wolves and three warcamps of wardens.
-    At its far end, in a ragged pocket nobody holds, **the Horned Thing** stands on
-    his patch with two keepers beside him - the Hollow's goat, in the open air,
-    carrying the floor's prize. **He is optional**, and killing him is the one
-    thing in the wood that fights back properly.
+    (a prisoner, a blade and `G` at the bars, a `FREE HIM` arrow riding the shut
+    cage), then the cult's **chain** - a small band every fifty-odd metres, the
+    first one 50 m out of the gate and the second 75 m past it, all of them
+    **hollow runts** with the makeshift tier in their hands (club, cleaver, shiv, a
+    wooden board in the off hand, a twig bow) and a disc to wander in, hardening to
+    a warden in front of its runt on the dark end of the walk - two lone archers
+    asleep in the tree rows, two packs of briar wolves and **seven warcamps** 78-96
+    m off the lane (one watcher each, and the three nearest town the same runt). At
+    its far end, in a ragged pocket nobody holds, **the Horned Thing** stands on his
+    patch with two keepers beside him - the Hollow's goat, in the open air, carrying
+    the floor's prize. **He is optional**, and killing him is the one thing in the
+    wood that fights back properly.
   * **The delve** is under the square: make up a party, pack what it carries, pick
     how hard the Hollow is, and climb out with what you found - or lose it.
   * **The arena** is east of the fire: three plates (**EASY**, **MEDIUM**,
@@ -80,6 +86,8 @@ difference - and the warband is the thing that survives a battle.
   four), so the copy the rack says is worked is the copy the body is carrying —
   and in co-op the altar is every player's: a guest's press is a request, the
   host throws the die, and the vial comes out of the one pool the party shares.
+  **The same rack rides the gear page** (see below): the altar is where the whole
+  rack and the essence rites live, not the only place a weld can be laid.
   Its **ESSENCE page**
   unbinds spare magic items into Cruor, distils 5:1 up five tiers and brands
   weapons with active sigils; the **Gold recruiter** (bodies up to the deployment
@@ -95,11 +103,14 @@ difference - and the warband is the thing that survives a battle.
   never called up out in the wood.
 - **Steel is plain until anointed:** no stock weapon carries a skill. Four of the
   twelve hollow-warden variants carry a vial of ichor; with one in the stash the
-  quartermaster hands over **ICHOR IN THE STEEL**, and one vial at the altar wakes
-  a piece into its skill (a twig bow into Long Piercing Shot, a club or heavy
-  branch into Spinning AOE Spin, the ironwood shiv into Backstab, the wooden shield
-  into Ground Shield Slam). The paperdoll names it: "Anointed - <SKILL> [key]", or
-  "Plain - the altar wakes <SKILL>".
+  quartermaster hands over **ICHOR IN THE STEEL**, and the piece wakes into its
+  own skill once a weld is laid on it (a twig bow into Long Piercing Shot, a club
+  or heavy branch into Spinning AOE Spin, the ironwood shiv into Backstab, the
+  wooden shield into Ground Shield Slam). **The gear page works steel as well as
+  the altar does**: **ANOINT THE STEEL** under the ranger opens the same rack for
+  the weapon in that body's hand, at the same price out of the same wallet, with no
+  altar to walk back to - and the paperdoll names the result: "Welded - <mark>
+  [n / 6]", or, for plain steel, "Plain - anoint it to wake <SKILL>".
 - **The field:** cultist waves in three escalating size/kit tiers. Combat near a
   human-possessed body is real (100% damage); every fight more than ~30 m from
   any human runs as a convincing background brawl at **10% damage**, so distant
@@ -116,11 +127,12 @@ difference - and the warband is the thing that survives a battle.
   quartermaster, with a stash to pay for it.
 - **Bodies are lootable:** every fallen cultist and watcher is a corpse you can
   open with **G** - their character screen, their slots, and each piece moved into
-  the infinite stash (or **TAKE ALL**). A **right click** on a body in reach opens a
-  small loot window beside the crosshair: a click takes a row, a **shift-click**
-  takes everything, and **Shift + right click** on the body ducks and takes the
-  lot without a window. Below, in the delve, the right click itself takes the
-  whole body - and the steel lying beside it - straight into the delve inventory.
+  the infinite stash (or **TAKE ALL**). A **right click** on a body in reach takes
+  everything on it **at once** - no window, no channel - and the same click on a
+  weapon lying on the dirt picks it up; **K** still quick-loots the drop at your
+  feet and puts it straight into the hand it belongs in. Below, in the delve, the
+  right click takes the whole body - and the steel lying beside it - straight into
+  the delve inventory.
   The squad strips bodies on its own once the field is quiet, into the same pool,
   and every piece anyone takes is written on the **looted list** at the right of
   the screen.
@@ -162,8 +174,7 @@ difference - and the warband is the thing that survives a battle.
 | `TAB` | quick weapon swap: the body puts away the set in its hands and takes up the other one |
 | `P` | mercenary paperdoll over the shared stash (click a worn slot to take it off into the stash; click a stash piece to wear it; **SWAP SET** or `TAB` changes the weapon set; **RE-EQUIP** hands the body's kit back and dresses it again by its own priorities, **RE-EQUIP THE BAND** does that for the whole roster, one body at a time) |
 | `G` | cut a cage latch, use the altar / stash / quartermaster / recruiter you stand at, open the Hollow's mouth, or climb the rope out of it |
-| `RMB` on a body | the loot window: click a row to take it, shift-click to take everything |
-| `Shift` + `RMB` on a body | duck and take everything on it |
+| `RMB` on a body or a drop | take it all at once: a corpse's kit, or a weapon and the pile it fell in |
 | `1` / `2` / `3` | loose the skill of an anointed main hand / an anointed shield / the worn trinket (Shift+1..3 is the same press) |
 | `K` | quick-loot the drop at your feet |
 | `G` (hold) | revive the downed body beside you: five seconds, and a blow breaks the channel |
@@ -225,11 +236,11 @@ There is no out-of-game depot. **Hearthstead** is the staging town inside the op
 
 The warband starts in Hearthstead with nothing worth the name: an old shirt, tight shorts and a makeshift club or shiv off the ground. Every piece a run carries came off a corpse, out of the shared stash or off a keeper's counter; the tab buttons in the town shops are **STORE**, **SMITH** and **QUARTERMASTER**, and selling pays 60% of the purchase price.
 
-Press **P** anywhere in the world to open the **paperdoll**: the ten worn slots, a live ranger wearing them, the trinket rail and the kit's derived attack, guard, life and stamina summary over the **shared stash** - the warband's one pool of unequipped gear, uncapped and sorted by value; a piece a body is wearing shows on that body's slots, never in the list. Click a worn slot to take a piece off into the stash; click a stash piece to wear it (handing gear between mercenaries is those two clicks); **right-click a stash row to hold that item back from the band's automatic arming** (the row says `HELD`; a left click still wears it by hand). Drag between slots to move or swap. The two **RE-EQUIP** buttons under the ranger rebuild a kit out of that same pool instead of you picking it piece by piece: one for the body on the stage, one for the whole band (see [Armor](#armor-four-sets-five-slots)). The **QUARTERMASTER**, **SMITH** and **STORE** keepers open their own counters over the same stash, and a purchase arms the band from the pool as it lands - every empty slot, and every slot still in the naked starting set, takes the dearest legal spare - so buying a counter's worth of kit dresses the whole warband. The corpse screen opens the dead the same way.
+Press **P** anywhere in the world to open the **paperdoll**: the ten worn slots, a live ranger wearing them, the trinket rail and the kit's derived attack, guard, life and stamina summary over the **shared stash** - the warband's one pool of unequipped gear, uncapped and sorted by value; a piece a body is wearing shows on that body's slots, never in the list. Click a worn slot to take a piece off into the stash; click a stash piece to wear it (handing gear between mercenaries is those two clicks); **right-click a stash row to hold that item back from the band's automatic arming** (the row says `HELD`; a left click still wears it by hand). Drag between slots to move or swap. **ANOINT THE STEEL** under the ranger works the weapon in that body's hand without leaving the page or walking to an altar: an iron plate over the sheet lists the two hands, the piece in each and every weld the pool can lay on that copy with its price, and a row is the press. The two **RE-EQUIP** buttons under the ranger rebuild a kit out of that same pool instead of you picking it piece by piece: one for the body on the stage, one for the whole band (see [Armor](#armor-four-sets-five-slots)). The **QUARTERMASTER**, **SMITH** and **STORE** keepers open their own counters over the same stash, and a purchase arms the band from the pool as it lands - every empty slot, and every slot still in the naked starting set, takes the dearest legal spare - so buying a counter's worth of kit dresses the whole warband. The corpse screen opens the dead the same way.
 
 Every catalog item keeps its data row in `scripts/player_state.gd` (`ITEMS`), and the paperdoll, the tooltips, the vendors and the loot all read that one table.
 
-**Hovering any item row shows the piece's card**: its name and type line, the catalogue's own summary and detail (damage, draw or swing time, reach), the numbers a table owns (an armor piece's guard, a ring's modifier and granted skill, an ammunition bunch, a dressing's wound), the brand and anointing the altar's ledger holds (or the skill it would wake in plain steel), its worth and the row's own click instruction. One card backs every item row — `WarbandItemCard`, handed out by `WarbandItemHover.Row`/`LabelRow` through Godot's custom-tooltip callback — so the paperdoll's worn slots and stash rows, a corpse's kit, the delve pouch, the small loot window, both keeper boards and the altar's anoint and unbind lists all describe a piece the same way. `tests/warband_ui_regression.gd` owns it.
+**Hovering any item row shows the piece's card**: its name and type line, the catalogue's own summary and detail (damage, draw or swing time, reach), the numbers a table owns (an armor piece's guard, a ring's modifier and granted skill, an ammunition bunch, a dressing's wound), the brand and anointing the altar's ledger holds (or the skill it would wake in plain steel), its worth and the row's own click instruction. One card backs every item row — `WarbandItemCard`, handed out by `WarbandItemHover.Row`/`LabelRow` through Godot's custom-tooltip callback — so the paperdoll's worn slots and stash rows, a corpse's kit, the delve pouch, both keeper boards and the altar's anoint and unbind lists all describe a piece the same way. `tests/warband_ui_regression.gd` owns it.
 
 **TAB swaps between two weapon sets.** Every mercenary carries two complete weapon sets — a main hand and an off hand each — and exactly one is active: the hands hold its pair, and the pair lives on the roster record so a swap survives a body hop and a reload. Pressing TAB while Set 1 is active brings up Set 2; the next press brings Set 1 back, and the paperdoll always says which set is active. Equipping, unequipping or dropping a weapon rewrites **the active set only**: the other set keeps the weapon waiting in it, and a weapon you equip by hand comes back when you TAB back to that set. Any legal main/off combination works: bow, one- or two-handed sword, dagger, staff, shield, focus or a dual-wield pair. Both sets are written to the save, and both pairs must be carried in the backpack or hands; a stashed piece blocks the swap with a message.
 
@@ -292,7 +303,7 @@ A **neck** piece, either **ring** and the **off hand** can change the ranger's n
 
 ### Looting the dead
 
-A hostile leaves a **corpse you can work**: walk up to it and press **G** for its character screen, or **right-click** it for the small loot window beside the crosshair (click a row to take it, shift-click to take everything; **Shift + right click** on the body takes the lot at once). The corpse screen lists every carried piece - and a trail archer leaves the twig bow it fired plus four of its own shafts - and a stripped body is never offered twice. **K** quick-loots the drop at your feet. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings; the stash is shared, so any body in the warband can then be dressed from it at the paperdoll. Every piece the warband takes - by your hands or a squadmate's - is written on the **looted list** at the right of the screen.
+A hostile leaves a **corpse you can work**: walk up to it and press **G** for its character screen, or **right-click** it to take the lot at once - a right click on a dropped weapon picks that up the same way, and nothing a take brings up is dressed onto the body that searched it. The corpse screen lists every carried piece - and a trail archer leaves the twig bow it fired plus four of its own shafts - and a stripped body is never offered twice. **K** quick-loots the drop at your feet and snaps it into the hand it belongs in. Loot covers swords, daggers, shields, staffs, foci, armor, necklaces and rings; the stash is shared, so any body in the warband can then be dressed from it at the paperdoll. Every piece the warband takes - by your hands or a squadmate's - is written on the **looted list** at the right of the screen.
 
 Dropping gear from the paperdoll in town or on the trail spawns a pickup at the body's feet. That drop starts **unarmed**: it arms only after the dropper steps out of the pickup radius, so walking back over it later banks it into the stash normally.
 
@@ -441,7 +452,7 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 | Hold right mouse in cover | Guard and peek over low cover or around the selected edge of tall cover |
 | X | Swap shoulder camera and select the left/right lookout while in cover |
 | TAB | Swap the active weapon set; the held pair is stowed and the other set's pair is equipped |
-| 1 - 9, 0 | Fire the hotbar skill in that slot (10 is the 0 key). Each slot has its own stamina cost and cooldown; a piece carries a skill only once the altar has anointed it, and an empty slot shows only its frame and number. The keys are the player's: the P screen's HOTBAR row moves a skill to the key it should fire from, and that layout is saved with the body. The bandage and the healing potion ride the last two keys on every body - **9** and **0** - and keep them; the kit's own skills take the eight keys before them |
+| 1 - 9, 0 | Fire the hotbar skill in that slot (10 is the 0 key). Each slot has its own stamina cost and cooldown; a piece carries a skill only once a weld is on it, and an empty slot shows only its frame and number. The keys are the player's: the P screen's HOTBAR row moves a skill to the key it should fire from, and that layout is saved with the body. The bandage and the healing potion ride the last two keys on every body - **9** and **0** - and keep them; the kit's own skills take the eight keys before them |
 | Z | The bandage on key 9, on the same channel: three-second bind, then 35 health over the next three seconds |
 | V | The healing potion on key 0: half-second drink, then 50 health |
 | Mouse movement | Mouse-look with a fixed center crosshair; no aim assistance |
@@ -455,9 +466,9 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 | Click left mouse while dual wielding | Left-hand diagonal cut from the left |
 | Click right mouse while dual wielding | Right-hand diagonal cut from the right; never a guard |
 | Q / E | Side-step left / right with the shoulders turning into the move; grounded, short cooldown, 7 stamina |
-| Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill of an anointed main hand / anointed off-hand shield, or the worn trinket's grant; stock steel carries no skill, so a piece that has never been to the altar grants nothing; each costs 1 stamina for testing |
+| Shift + 1 / Shift + 2 / Shift + 3 | Cast the skill of an anointed main hand / anointed off-hand shield, or the worn trinket's grant; stock steel carries no skill, so a piece that has never been worked grants nothing; each costs 1 stamina for testing |
 | G | Interact with a keeper, the stash, the campfire, a cage latch or a corpse the squad may revive |
-| P | Open or close the equipment screen (ten worn slots, a live ranger, the shared stash, the kit summary, the ten-key **HOTBAR** row, **RE-EQUIP** for that body and **RE-EQUIP THE BAND**); while open it owns the cursor and blocks movement, attacks and interactions |
+| P | Open or close the equipment screen (ten worn slots, a live ranger, the shared stash, the kit summary, the ten-key **HOTBAR** row, **ANOINT THE STEEL** for the weapon in hand, **RE-EQUIP** for that body and **RE-EQUIP THE BAND**); while open it owns the cursor and blocks movement, attacks and interactions |
 | I | Open the same screen |
 | Escape | Close the paperdoll, keeper or stash panel first; otherwise open the **quick menu** with the pointer free. It never pauses the world, so a hosted session stays connected while it is up: **RESUME**, the party's mode (**OFFENSIVE** / **DEFENSIVE** / **PASSIVE**), **SAVE GAME**, the window mode switch, **KEYS**, the SOUND page, **EXIT TO TITLE** and **EXIT GAME**. It opens by itself when a host disappears |
 | Click the world / right mouse | Resume captured mouse-look; right mouse also raises a sword guard |
@@ -468,7 +479,7 @@ and `warband_coop_campaign_regression` run two real ENet processes.
 
 The base stamina pool is **1000**. Sprinting and sliding drain **19/s**, standing recovery is **13/s**, and guarding pauses recovery; block and step costs are unchanged. The HUD shows the pool and a ten-slot hotbar under the body's plate: **1..9** fire the first nine slots and **0** fires the tenth, each with its icon, number and cooldown. A slot with no grant keeps its dark frame and number, so no key promises a skill the body does not have. The order is the player's, not the kit's: the equipment screen (`P`) opens on the body the soul is inside, says whose row it is, and draws the same ten keys under the ranger, and clicking a skill then the key it should fire from moves it there (**KIT ORDER** hands the keys back to main hand, off hand, necklace, ring 1, ring 2 - which is exactly the order an unwritten layout takes, the order the body is worn). The last two keys are the exceptions: the **bandage** keeps key 9 and the **healing potion** key 0 on every body, so the kit's skills arrange the eight keys before them and a body always has its dressing and its draught. The layout is written into the mercenary's record, so it survives a reload, a body swap and a co-op mirror, and a skill moved mid-fight keeps its cooldown.
 
-Abilities are data-driven by `scripts/ability_rules.gd`. Stock weapons carry no skill: `AbilityRules.granted(rig)` wakes a weapon's skills in the main hand, or a shield's in the off hand, only once the warband's altar has anointed that piece (`rig.anointed`), so looted steel is plain until it is taken to the altar. An anointed copy can carry several welded skills and every one of them takes its own hotbar slot; each worn granting trinket does the same, in necklace, ring 1, ring 2 order. The table below is the skill each piece wakes into; the makeshift tier resolves through the same class/index (twig bow → Long Piercing Shot, club and heavy branch → Spinning AOE Spin, ironwood shiv → Backstab, wooden shield → Ground Shield Slam, makeshift cleaver → Double Slash). A definition carries the stock item it belongs to, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Two definitions are not the kit's at all: the **bandage** and the **healing potion** carry a `consume` kind instead of an effect, and a press hands the body its own channel (the clip, the wound, the heal over time) while the key takes the cooldown - so the same ten-key path serves a sword skill, a dressing and a draught. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
+Abilities are data-driven by `scripts/ability_rules.gd`. Stock weapons carry no skill: `AbilityRules.granted(rig)` wakes a weapon's skills in the main hand, or a shield's in the off hand, only once the warband's ledger has a weld on that copy (`rig.anointed`), so looted steel is plain until it is worked - at the altar or from the gear page's own bench. An anointed copy can carry several welded skills and every one of them takes its own hotbar slot; each worn granting trinket does the same, in necklace, ring 1, ring 2 order. The table below is the skill each piece wakes into; the makeshift tier resolves through the same class/index (twig bow → Long Piercing Shot, club and heavy branch → Spinning AOE Spin, ironwood shiv → Backstab, wooden shield → Ground Shield Slam, makeshift cleaver → Double Slash). A definition carries the stock item it belongs to, hand slot, keybind, stamina cost, cooldown, durations, travel window, a `move` flag, animation clip, lean or spin, sound, icon and an effect block; `scripts/ability_runner.gd` owns eligibility, spend, cooldown, committed travel, timed effect cues and replication. Two definitions are not the kit's at all: the **bandage** and the **healing potion** carry a `consume` kind instead of an effect, and a press hands the body its own channel (the clip, the wound, the heal over time) while the key takes the cooldown - so the same ten-key path serves a sword skill, a dressing and a draught. Every weapon skill currently costs **1 stamina** and has a short cooldown so the set can be exercised back to back. Swapping the granted weapon clears that slot's trailing cooldown; the cooldown exists so swapping cannot become a free damage loop. An empty main hand keeps the legacy unarmed **Charge** (10 stamina, 200% walk speed for one second).
 
 `move` decides what the feet do. **Double Slash, Lunging Thrust, Spinning AOE Spin, Headbutt, Shield Charge and Ground Shield Slam** keep normal walking input; **Barrage, Triple Fan Volley, Long Piercing Shot, Fireball, Bone Spear**, the unarmed **Charge** and **Backstab** stay planted. Committed travel still wins during its window (**0.24 s** lunge, **0.16 s** headbutt, **0.48 s** shield charge), and the walk resumes once it ends; no ability allows sprinting or jumping. A definition's `aim` flag makes that committed step travel down the live crosshair instead of the heading the key was pressed from, so the lunge, the headbutt and the shield charge all turn the body onto the crosshair and dash along it. Skills that cannot be performed from a crouch — every blade, shield and dagger skill plus the unarmed Charge — are performed standing: activating one cancels a manual crouch, snaps the capsule upright and only spends the skill once the body has headroom to stand, so the authored clip always owns the whole pose. The planted bow and staff casts still layer over a crouch.
 
@@ -503,7 +514,7 @@ Press **C** again to cancel and stand when headroom permits. **Space** jumps and
 
 ## Quick steps
 
-**Q** and **E** perform a grounded side step left or right relative to the camera. The step covers about **2.95 m in 0.30 s**, spends **7 stamina**, and enters a **0.55-second cooldown**. It is not a roll and grants no invulnerability. A step cancels a held bow draw, a melee swing, a throw or a guard, exits sticky cover, and ends immediately if the feet leave the ground. The character keeps the facing it had before the step: the hips and shoulders rotate into the travel while the head stays on the target, the leading foot reaches out and lifts, and the trailing foot braces. Q and E no longer draw, attack or interact; **G** interacts with the campfire, waystones and the Sunken Delve hatch inside the Wayfarer Inn.
+**Q** and **E** perform a grounded side step left or right relative to the camera. The step covers about **1.5 m in 0.30 s** (it was 2.95 m; the sidestep is positioning, and the roll is the way out of trouble), spends **7 stamina**, and enters a **0.55-second cooldown**. It is not a roll and grants no invulnerability. A step cancels a held bow draw, a melee swing, a throw or a guard, exits sticky cover, and ends immediately if the feet leave the ground. The character keeps the facing it had before the step: the hips and shoulders rotate into the travel while the head stays on the target, the leading foot reaches out and lifts, and the trailing foot braces. Q and E no longer draw, attack or interact; **G** interacts with the campfire, waystones and the Sunken Delve hatch inside the Wayfarer Inn.
 
 `playtest/sidestep_lab.tscn` opens an isolated plaza for tuning this move: a facing tree, a metre grid and a measured trace of the last step. Launch it with **`playtest/Sidestep Lab.cmd`** or run the scene directly. It uses the real `Archer` and `DodgeStep` code; only the camera and the test props are local to the lab.
 
@@ -537,7 +548,10 @@ Both shoulder views aim at the world point under the crosshair, independently of
 arrow damage = bow base damage × clamp(draw amount, 0, 1)
 ```
 
-Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage. The hit's own armor channel applies afterward: the helmet on a head hit, the body kit on the rest. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
+Zero draw gives zero damage, half draw gives half damage, and full draw gives full damage.
+
+**Nock-stacking.** While the string is back (**DRAWING** or **HOLDING**), a notch of the **forward wheel** pulls one more shaft out of the quiver and pinches it between the fingers - up to **three** extras, so a release puts **four** arrows in the air - and a notch of the **back wheel** puts one away. The extras are drawn on the string hand as a fanned bundle, and the release fires the whole stack at once: one missile per shaft, gently fanned (**3 degrees** apart, a touch of rise on the outer pair), each shaft stopping on its own target. Every arrow in a fan spends its own shaft from the shared quiver, so a stack of four out of a quiver of two is two arrows. A fresh draw always starts with one shaft. `Archer.stack_nock`/`nock_arrows` own the count, `Archer.release_string` the fan, `WarbandBody.stack_nock` the hand.
+ The hit's own armor channel applies afterward: the helmet on a head hit, the body kit on the rest. Arrow flight and world obstruction use real swept physics collision. Full-draw arrows leave at **66 m/s**, **84 m/s** and **102 m/s** for the shortbow, recurve and longbow; partial draws scale speed from 45% to 100%.
 
 **Every loosed arrow costs one shaft.** In the warband campaign the party carries one shared quiver (`Warband.arrows()`, the `arrow` item in the shared stash), and each release - a plain bow shot or a shaft from **Barrage**, **Triple Volley** or **Piercing Shot** - takes one out of it. At zero the string will not come up at all: the HUD strip shows `gold · arrows`, a refused press prints **Out of arrows**, and the two ways to fill the quiver are a keeper's bunch (ten shafts for 20 gold at **Storekeeper Orla** or **Smith Brann**) or a dead trail archer, whose corpse carries the twig bow it fired and four of its own shafts. The frontier, arena and delve rangers have no quiver and are unaffected.
 
@@ -571,7 +585,12 @@ thrown damage = weapon base damage × clamp(charge, 0, 1)
 
 Charge time follows the equipped weapon's own attack duration: **1 / 2 / 3 seconds** for the shortsword, arming sword and greatsword, and **0.5 seconds** for the dagger. Full damage is the weapon's normal melee base damage (30 / 38 / 50 for swords, 14 for the dagger), halved at half charge and zero at zero charge. A thrown weapon falls under the same gravity as an arrow, uses swept physics collision, stops on the first world or body contact, and applies the normal **2x head-zone** multiplier before armor. It cannot be parried as melee; it uses the projectile damage path.
 
-The hand weapon leaves the hand for the release frame and the **endless supply** restores the same equipped weapon as recovery begins. Throwing does not remove gear from the paperdoll or backpack. **T never replaces melee**; left mouse and the wheel still perform the normal sword or dagger attacks. Throws automatically expose from cover like a bow, and a wall between the hand and the aim line cancels the throw rather than passing the weapon through cover. In the arena the host owns the thrown projectile, its damage and its replication; clients only send the charge/release intent and aim.
+The hand weapon leaves the hand for the release frame and the **endless supply** restores the same equipped weapon as recovery begins. Throwing does not remove gear from the paperdoll or backpack. **T never replaces melee**; left mouse and the wheel still perform the normal sword or dagger attacks.
+
+The **makeshift axe** (`axe_makeshift`, sold by the smith and the quartermaster) is the one piece built to leave the hand: **14** swung, **x2 thrown damage**, so a full-charge throw lands for **28**.
+
+A thrown piece that strikes a **player** - a warband body, the soul's own included, though never the thrower's - **sticks where it landed** and stays there: the blade keeps its flight pose, rides the body, and is the warband's to take back. **K** (the same **TAKE** key as a drop or a corpse) pulls the nearest stuck blade out of the body beside the soul and puts the piece in the shared stash, so a thrown axe comes home. `ThrownWeapon.piece_id` names the catalog copy, `WarbandBody.lodge_weapon`/`take_lodged` hold up to **4** blades, `Combat`'s `"loot_stuck"` verb is the pull, and thrown missiles alone reach the warband's body layer (`THROWN_HIT_MASK`) while arrows keep to the wood and the mobs.
+ Throws automatically expose from cover like a bow, and a wall between the hand and the aim line cancels the throw rather than passing the weapon through cover. In the arena the host owns the thrown projectile, its damage and its replication; clients only send the charge/release intent and aim.
 
 ## Swords and jump-rolls
 
@@ -587,7 +606,13 @@ Melee has no held charge: each click starts one attack, never a held-button repe
 
 The **dagger** (key **3**) uses the same alternating LMB diagonals, with a **0.42-second** cut, **14** base damage, **1.2 m** reach and a **150-degree** full frontal arc. Wheel up uses its **0.5-second** authored aim-directed stab; wheel down also uses that precision stab because the dagger has no authored overhead. The thrust follows the crosshair rather than auto-targeting: low aim angles toward a wolf, high aim stays high.
 
-The dagger's **Prison shank** passive speeds the **forward lunge only**: wheel up runs at **+200% attack speed** (**0.167 s** per stab, three stabs in the time one used to take), while wheel down keeps the authored 0.5 s. `scripts/item_passives.gd` owns the row and `Archer.variant_attack_rate()` applies it, so both daggers carry it, a sword never inherits it, trinket attack speed multiplies with it, and the item tooltip on either dagger lists it.
+The dagger's **Prison shank** passive speeds the **forward lunge only**: wheel up runs at **+200% attack speed** (**0.167 s** per stab, three stabs in the time one used to take), while wheel down keeps the authored 0.5 s. `scripts/item_passives.gd` owns the row and `Archer.variant_attack_rate()` applies it, so both daggers carry it, a sword never inherits it, trinket attack speed multiplies with it, and the item card lists it.
+
+**A shiv's wheel-down is a downward stab, at double damage**: the dagger's heavy blow plays the authored overhead and drives the point down through the body for **2x** (14 -> **28** on the iron dagger), while the wheel-up lunge stays the fast forward stab. **A greatsword's second click** of the alternating pair comes round **30% quicker** off the weight the first cut was already moving (`Rolling cut`), and a stab or an overhead between clicks breaks the pair. `Archer._advance_diagonal_chain` counts it; `ItemPassives` holds the figures.
+
+**Blunt steel** - the club and the whole tree limb, which `ItemPassives.sword_class` reads off a profile index of 3 or higher - carries **Knockabout**, the same table's other row: its **overhand keeps the profile's own clip** (the club's 0.9 s, the limb's 1.6 s - already the slower of the two swings a bludgeon has, since its diagonal sweep keeps `DIAGONAL_SECONDS`, 0.55 s and 0.92 s), and its blows **stagger** harder - **+35% odds** added to the receiver's own damage roll and a **50% longer** flinch. `Combat.stagger_chance_for`/`stagger_seconds` own the figures, `Combat.blunt_stagger` is the same roll for a mob with no `Combat` of its own (an edge never breaks a line, so only a piece with weight of its own rolls at all), `Combat` names the class on the victim before the blow (`note_strike`, spent by `WarbandBody.take_damage` or `DevilMob.take_damage`), and `Sfx` reads the class for the wooden impact.
+
+The campaign's club is issued **annointed** with **Heavy Swing**: **3x damage** on the overhand at **1.5x** its speed, so the wheel-down blow is 0.9 s -> **0.6 s** for **18** damage. It is a `STAT` weld admitted on `AnnointCatalog.GROUP_BLUNT` only, so no forged blade can take it, laid on the copy the body claims (`Warband.STARTING_ANNOINT`), and its two keys (`overhead_damage`, `overhead_speed`) ride **that hand's steel** - `AnnointLedger.HAND_KEYS` keeps them out of the body's kit, `SeatLoadout` hands them to `Archer.set_hand_annointments` - so a club in one weapon set never speeds the greatsword in the other. `AnnointLedger.CEILINGS` holds two welds to one piece's figure.
 
 During the active diagonal stroke, damage sweeps a **frontal sector** in the cut's direction, rather than requiring a thin blade to touch every body. Shortsword / arming sword / greatsword reach is **1.8 / 2.1 / 2.5 m**, with full arcs of **160 / 170 / 180 degrees**. Staffs use the same damage and swing clock but a swing of their own rather than the two-handed sword's: the right hand sits just below the shaft centre and the left hand grips **0.32 m** above it, both hands drive forward as a piston, the shaft barrells through a wider arc than the hands travel, the leading end finishes ahead and low while the rear end counterweights up and behind, and the ember/bone shafts reach **1.6 / 1.5 m** (the catalog and HUD show the same values). This catches short enemies across the front while excluding targets behind or beyond reach. **One attack strikes a capped number of bodies** (`Combat.ONE_HAND_MAX_VICTIMS` / `TWO_HAND_MAX_VICTIMS` / `ABILITY_MAX_VICTIMS`): every one-handed piece - swords, clubs, daggers, either hand of a dual pair - strikes **one** body per swing, a two-hander (greatsword, heavy branch, staff) **two**, and one item-skill activation (every beat of a spin, one blast) at most **ten**, nearest first. A capped cut is spent on the bodies it crosses first: from the loaded side along the sweep, nearest first among bodies on one line, whatever the frame rate. Every victim is checked separately against world cover, so a wall protects the target behind it without spending the cut's strike. Each hand damages each victim **once per swing**, only during the active stroke, with normal **base body damage** (30 / 38 / 50 for swords, 14 for daggers)—never incidental cleave headshots. Precision stabs, authored overheads, arrows and thrown weapons retain actual-contact **2x headshots**. Guards, parries, clashes, cancellation and host-only damage remain in force. Switching weapons or rolling cancels further hits without erasing melee recovery; bow readiness stays independent.
 
@@ -603,7 +628,7 @@ Left click performs **diagonal_left** with the left-hand weapon; right click per
 
 ## Guarding, parries and clashes
 
-Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. A hit from the front resolves from the guard timer and weapon, not exact blade geometry:
+Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounded and ready to guard. The character faces the camera, stops rotating with movement, and does not regenerate stamina while guarding. **The guard is held along the eye, not across the front**: looking up raises it over the head, looking down drops it to the legs, and a level look sets it in front of the chest. A blow is blocked when it arrives inside a **52-degree cone** (`SHIELD_BLOCK_HALF_ANGLE` **66**) around that line - so a guard held up does not stop a blow from the front, and a guard held level does not stop one falling on the head. The poses follow: the greatsword's hilt and blade climb with the look, the shield disc turns and rises, and the one-hand guard's hilt is solved onto the guard line (`Archer._pose_one_hand_guard`, `_pose_two_hand_guard`, `_update_shield_pose`). A hit inside the cone then resolves from the guard timer and weapon, not exact blade geometry:
 
 | Outcome | Trigger | Result |
 | --- | --- | --- |
@@ -612,11 +637,12 @@ Equip a sword with **2** or the dagger with **3** and hold **RMB** while grounde
 | Weak dagger block | Any hit into a raised dagger | **Half damage** still applies, **30 stamina** spent, no parry, and the attacker's swing continues. |
 | Shield block | Any front hit into a raised shield | **No damage**, **18 stamina** spent, the defender is pushed back, and no parry is possible. |
 | Attack parry | Dual wield and the strike is inside its contact window and facing the attacker | No damage and the attacker is staggered for **0.8 s**; the dual wielder's swing continues. No stamina cost. |
-| Unblocked | Guard down, wrong facing, rolling, attacking outside a dual strike window, or no weapon | Normal damage applies. |
+| Unblocked | Guard down, the blow outside the guard's cone (a raised guard against a frontal blow), rolling, attacking outside a dual strike window, or no weapon | Normal damage applies. |
+| Twin guard | A matched pair of one-handed swords, **25%** of what reaches the body | No damage, no stamina spent, no guard to lose: the off blade is in the way (`ItemPassives.dual_block_chance`). |
 
 The **shield** (**4**) is a physical off-hand item carried on the left arm and legal with the dagger or any one-handed sword, including the shortsword. Holding RMB raises it in front of the chest and head, overriding the dagger's weak guard or the sword's parry timing with a **full front block**. The shield is a moving collision body in both modes: an arrow that hits it — raised or merely carried, whether it came from a player bow, a cinder devil's bow or a ranger clone — deals **zero damage** to the player and **sticks into the shield**. An arrow that reaches the body still deals damage and **sticks into the player** where it landed. Stowed shields are hidden and inert; switching to a bow, greatsword, staff or dual wield automatically stows the shield.
 
-Releasing RMB drops the guard; pressing an attack while guarding also drops it. Dual wielders cannot guard at all: RMB attacks with the right-hand sword instead, and defense comes from the timed attack parry above. Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for the dagger, short and arming swords, and the two-handed `Sword_Block_Loop` for every two-hander (the greatsword and the makeshift branch). Both are **120-sample / 1.983-second** breathing loops with planted feet. The one-hand clips own their own arms; a **two-hander's raised guard is solved at runtime** over that clip's stance, because the socket hangs the weapon off the main hand and an authored wrist at chest height holds a metre and a half of steel across its owner's own ribs. The solved guard puts one hilt in front of the sternum (`0.34 m` out), both hands on it `0.12 m` apart, the blade standing up over the face and the flat turned to the blow, breathing a centimetre and a degree over the loop; the hilt is drawn inside both arms' reach before either arm is solved, so the support palm is on the handle rather than near it. These clips animate the Ranger rig only; the held weapon remains the normal socketed runtime model, and the lower-body crouch/slide layer does not overwrite the guard arms.
+Releasing RMB drops the guard; pressing an attack while guarding also drops it. Dual wielders cannot guard at all: RMB attacks with the right-hand sword instead, and defense comes from the timed attack parry above. **A matched pair of one-handed swords** - the **Twin edge** passive - swings **20% quicker** than either blade alone and turns a passive **25%** of what reaches the body, and both figures are listed on the piece's card (`ItemPassives` `sword` row, `Archer.dual_block_chance`). Guarding pauses stamina recovery, so repeated blocks cannot be turtled for free, and a guard with insufficient stamina still spends what remains. The held pose is a dedicated character-only animation: `Sword_Block_Loop_OneHand` for the dagger, short and arming swords, and the two-handed `Sword_Block_Loop` for every two-hander (the greatsword and the makeshift branch). Both are **120-sample / 1.983-second** breathing loops with planted feet. The one-hand clips own their own arms; a **two-hander's raised guard is solved at runtime** over that clip's stance, because the socket hangs the weapon off the main hand and an authored wrist at chest height holds a metre and a half of steel across its owner's own ribs. The solved guard puts one hilt in front of the sternum (`0.34 m` out), both hands on it `0.12 m` apart, the blade standing up over the face and the flat turned to the blow, breathing a centimetre and a degree over the loop; the hilt is drawn inside both arms' reach before either arm is solved, so the support palm is on the handle rather than near it. These clips animate the Ranger rig only; the held weapon remains the normal socketed runtime model, and the lower-body crouch/slide layer does not overwrite the guard arms.
 
 If two **sword** users are in their active downstroke at the same time and facing each other, their blades **clash** instead of trading damage: sparks and a loud clang, zero damage in both directions, a small bounce apart, and both swings reset so either fighter can immediately act again. A clash never uses an exact sword-to-sword contact test; simultaneous active hit-frames plus mutual facing are sufficient. A dagger never clashes; it can only weak-block and must rely on its speed and short recovery.
 
@@ -628,7 +654,7 @@ The character uses a 65-bone skinned humanoid and authored animation clips. The 
 
 Authored walk, jog and sprint clips follow actual movement speed with a continuous gait phase. The sprint includes knee/heel recovery, flight, body lean and alternating arm drive. Bow aiming and terrain contact use skeletal corrections.
 
-A **single-hand carry settles into the run**: above walking speed (`3..6 m/s`, eased over a fifth of a second) the piece in a one-hand grip, a dagger or either half of a dual-wield pair turns in the actor's own frame to `22` degrees below the horizontal, `34` degrees out from the body and `14` degrees of roll, so the blade trails behind the fist, past the calf and clear of the dirt while the arm keeps its own pump. It is a frame, not a pitch about one axis: a hand bone rolls and pumps through a run, and a piece that inherited that roll swept its tip through the chest and dragged a one-metre blade along the ground. A dual wielder's off hand rides down beside the hip (`0.10 m` out, `0.40 m` below the shoulder) and counter-swings against the sword hand's own authored swing, so both blades trail together instead of one at the hip and one folded up at the chest. **A two-hander and a staff are excluded**: both hands own the piece, so turning it in the actor's frame would pull it out of its own grip - the greatsword keeps its coupled two-hand carry and the staff its middle grip. Collisions that stop movement also stop the running gait.
+A **single-hand carry settles into the run**: above walking speed (`3..6 m/s`, eased over a fifth of a second) the piece in a one-hand grip, a dagger or either half of a dual-wield pair turns in the actor's own frame to `24` degrees below the horizontal and `16` degrees out from the body, with `14` degrees of roll, so the blade hangs ahead of the runner with the hilt behind the fist where it is gripped, past the thigh and clear of the dirt while the arm keeps its own pump. A piece pointed the other way reads as held upside down: the hilt leads and the tip trails out of the hand. It is a frame, not a pitch about one axis: a hand bone rolls and pumps through a run, and a piece that inherited that roll swept its tip through the chest and dragged a one-metre blade along the ground. A dual wielder's off hand rides down beside the hip (`0.10 m` out, `0.40 m` below the shoulder) and counter-swings against the sword hand's own authored swing, so both blades trail together instead of one at the hip and one folded up at the chest. **A two-hander and a staff are excluded**: both hands own the piece, so turning it in the actor's frame would pull it out of its own grip - the greatsword keeps its coupled two-hand carry and the staff its middle grip. Collisions that stop movement also stop the running gait.
 
 ## Multiplayer feel
 
@@ -672,9 +698,12 @@ only way between them - nothing in the world changes scene.
 
 **Hearthstead** is where a run starts, and **the road** is what it starts with:
 1,374 m of wood between the square and the deep pocket at its far end, with the
-caged line, the cultists, the wolves and the warcamps on it. Cut a cage's latch
-with a blade in hand and **G** and its soldier joins the roll - or waits in the
-town's reserve when the field is full.
+caged line, the cult held in **a chain of small bands**, the wolves and the
+warcamps on it. The first thing a band out of the gate meets is **one hollow runt**
+- the warden's shape at a third of its pool and a third of its blow, with a club,
+a cleaver, a shiv, a board or a twig bow in its hands - fifty metres out, and the
+road hardens from there. Cut a cage's latch with a blade in hand and **G** and its soldier joins the
+roll - or waits in the town's reserve when the field is full.
 
 **The trail** is the wood the squad walks: torch pairs every eighteen metres,
 briar walls, the cinder cult's watcher camps and the briar wolves that hunt off
@@ -688,12 +717,14 @@ into a skill, and the fire.
 **There are no quests.** No log, no board, no keeper with an order, no arrow over
 a head: every counter is a `G` and a panel, and the campaign is the places -
 the camp, the trail, the cages on it, the warcamps, the Hollow - and what is
-standing in them. The four caged soldiers still join the band when their latches
-are cut; nothing counts it.
+standing in them. The caged soldier still joins the band when his latch is cut;
+nothing counts it.
 
 **The wood's creatures.** The campaign's hostiles are the **hollow warden**,
 **ossuary stalker** and **gallowsroot** on the warband's own skeleton (one AI and
-one sampler, three profiles), the trail's **archer ambushers**, and eight briar
+one sampler, three profiles), their lesser body the **hollow runt** (a warden at
+0.58-0.70 of its height, a third of a hard body's pool and a third of its blow -
+the first watcher a run meets), the trail's **archer ambushers**, and eight briar
 wolves in two deep-wood packs. They share the engine's one rule set:
 
 - `scripts/mob_senses.gd` - a 140 degree sight cone, line of sight to the chest,

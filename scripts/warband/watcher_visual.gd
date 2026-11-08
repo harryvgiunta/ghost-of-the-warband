@@ -126,6 +126,9 @@ var _tint := Color.WHITE
 var _paint: Array[StandardMaterial3D] = []
 var _base: Array[Color] = []
 var _held_item := ""
+## The piece in the left hand: "" for every watcher but the road's shield-bearing
+## runts, whose board is strapped on and shown on the rig.
+var _held_off := ""
 var _band := -1
 ## Whether the last distance reading was inside `MobLod.POSE_NEAR`: a rig in a
 ## hall poses every other frame, one at arm's length every frame.
@@ -361,18 +364,47 @@ func held_item() -> String:
 	return ""
 
 
+## Strap a board to the left hand, or clear it. Only a shield is honoured: a
+## watcher's off hand carries a board and nothing else, and a piece the rig cannot
+## hold one-handed is refused by `Archer.set_shield` itself.
+func set_held_off(item_id: String) -> void:
+	if item_id == _held_off:
+		# Still the same hand, but the piece in the other one may have changed:
+		# a board is only legal beside a one-hander, and `set_shield` decides that.
+		_dress_off()
+		return
+	_held_off = item_id
+	_dress_off()
+
+
+## True while the board is actually strapped to the rig's left arm.
+func shield_up() -> bool:
+	return is_instance_valid(rig) and bool(rig.shield_equipped)
+
+
+func _dress_off() -> void:
+	if not is_instance_valid(rig):
+		return
+	var item: Dictionary = Catalog.ITEMS.get(_held_off, {})
+	if str(item.get("kind", "")) != "shield":
+		rig.set_shield(false)
+		return
+	rig.set_shield_variant(rig.shield_variant_for(_held_off))
+	rig.set_shield(true)
+
+
 func _dress_weapon() -> void:
 	if not is_instance_valid(rig):
 		return
 	var item: Dictionary = Catalog.ITEMS.get(_held_item, {})
 	var kind := str(item.get("kind", ""))
 	var index := int(item.get("index", 0))
-	# A watcher carries one piece and nothing in the other hand: no focus, no
-	# off-hand blade, no shield.
+	# A watcher swings one piece: no staff, no focus, no off-hand blade. The left
+	# hand is the board's (`_dress_off`), and it is dressed after this so a change
+	# of weapon never takes the board off a body that still holds it.
 	rig.set_staff(0, false)
 	rig.set_off_focus("", 0, false)
 	rig.set_off_weapon("", 0, false)
-	rig.set_shield(false)
 	match kind:
 		"sword":
 			rig.set_sword(index)
@@ -385,6 +417,7 @@ func _dress_weapon() -> void:
 			rig.set_weapon("bow")
 		_:
 			rig.set_weapon("none")
+	_dress_off()
 
 
 # --- the variant's own dial -------------------------------------------------

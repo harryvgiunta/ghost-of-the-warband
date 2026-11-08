@@ -101,6 +101,7 @@ WARBAND_TESTS = [
     "warband_wilderness_regression",
     "warband_session_world_unit_regression",
     "warband_integration_regression",
+    "weapon_traits_regression",
     "warband_swing_clock_regression",
     "blood_cost_regression",
     "warband_netcode_regression",

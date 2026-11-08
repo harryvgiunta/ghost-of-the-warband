@@ -12,6 +12,7 @@ const SfxScript = preload("res://scripts/audio/sfx.gd")
 const Geo = preload("res://scripts/geo.gd")
 const Hitbox = preload("res://scripts/hitbox.gd")
 const ImpactRules = preload("res://scripts/impact_rules.gd")
+const ItemPassives = preload("res://scripts/item_passives.gd")
 ## Bow damage at full draw, in catalog `index` order: the three forged bows
 ## and the twig bow a warband starts with.
 const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0]
@@ -40,6 +41,19 @@ const SHIELD_BLOCK_STAMINA := 18.0
 const WEAK_BLOCK_DAMAGE_SCALE := 0.5
 const BLOCK_PUSH_SPEED := 5.5
 const BLOCK_FACING_DOT := 0.35
+## The guard is a cone around the look direction, in three dimensions. A weapon
+## covers a narrower cone than a board: 52 degrees off the guard line is the
+## edge of a blade's cover, 66 the edge of a shield's.
+const BLOCK_HALF_ANGLE := deg_to_rad(52.0)
+const SHIELD_BLOCK_HALF_ANGLE := deg_to_rad(66.0)
+## Where a blow's direction is measured from: the chest, so a strike over the
+## head and one at the belly are different directions from one attacker.
+const BLOCK_CHEST_HEIGHT := 1.15
+## How far above the chest a landing counts as a full "from above": a head-high
+## contact is a blow a level guard does not answer.
+const BLOCK_RISE_METRES := 0.55
+## The guard's own direction, set by `face_block` from the way the body looks.
+var block_normal := Vector3.BACK
 const CLASH_FACING_DOT := 0.35
 const CLASH_BOUNCE_SPEED := 4.5
 const CLASH_BOT_DELAY := 0.4
@@ -377,6 +391,7 @@ func start_block(forward: Vector3) -> bool:
 		return false
 	blocking = true
 	block_time = 0.0
+	_set_block_normal(forward)
 	rig.set_blocking(true,forward)
 	return true
 
@@ -401,9 +416,25 @@ func break_guard() -> void:
 
 func face_block(forward: Vector3) -> void:
 	if blocking and is_instance_valid(rig):
+		_set_block_normal(forward)
 		rig.face_block(forward)
 
-func resolve_melee_defense(attacker_position: Vector3) -> int:
+
+## The direction the guard is held in, as a unit vector. A guard raised to the
+## sky is `Vector3.UP`; a level one is the way the body looks. Invalid or empty
+## answers the body's own facing, so a caller with no eye still blocks forward.
+func _set_block_normal(forward: Vector3) -> void:
+	if forward.is_finite() and forward.length_squared() > 0.000001:
+		block_normal = forward.normalized()
+		return
+	var flat: Vector3 = -rig.global_basis.z if is_instance_valid(rig) else Vector3.FORWARD
+	block_normal = flat.normalized()
+
+
+## `contact` is where the blow would land, when the caller knows it. The guard has
+## to cover *that*: a raised guard meets what falls on the head and misses what
+## comes at the chest, and a level one is the other way round.
+func resolve_melee_defense(attacker_position: Vector3, contact: Vector3 = Vector3.INF) -> int:
 	if not is_instance_valid(rig) or rig._roll_progress >= 0.0:
 		return DEFENSE_NONE
 	if is_instance_valid(actor) and actor.get("alive") == false:
@@ -415,13 +446,39 @@ func resolve_melee_defense(attacker_position: Vector3) -> int:
 	forward.y = 0.0
 	var facing := to_attacker.length_squared() <= 0.000001 or forward.length_squared() <= 0.000001 \
 		or forward.normalized().dot(to_attacker.normalized()) >= BLOCK_FACING_DOT
+	# The guard is a cone around the way the body is *looking*, in three
+	# dimensions. What has to be covered is the strike itself: its bearing comes
+	# from where the attacker stands, its height from where the blow would land.
+	# A guard held up therefore stops what falls on the head and leaves the belly
+	# open, and a guard held level does not answer a blow from directly above.
+	var guard := block_normal
+	if guard.length_squared() < 0.000001:
+		guard = forward.normalized() if forward.length_squared() > 0.000001 else Vector3.FORWARD
+	var bearing := to_attacker
+	if bearing.length_squared() <= 0.000001:
+		bearing = guard
+	bearing = bearing.normalized()
+	var rise := 0.0
+	if contact.is_finite():
+		rise = clampf((contact.y - origin.y - BLOCK_CHEST_HEIGHT) / BLOCK_RISE_METRES,-1.0,1.0)
+	var needed := (bearing + Vector3.UP * rise).normalized()
+	var cone := cos(SHIELD_BLOCK_HALF_ANGLE if rig.shield_equipped else BLOCK_HALF_ANGLE)
+	var in_guard := needed.length_squared() <= 0.000001 or needed.dot(guard) >= cone
 	# Dual wielders cannot guard. Their active blade is the defense: a strike
-	# already inside its authored contact window parries a front melee hit.
+	# already inside its authored contact window parries a front melee hit, and a
+	# matched pair of one-handed swords turns a quarter of what else reaches the
+	# body (`ItemPassives.dual_block_chance`) with the off blade that is always in
+	# the way - no pool spent, no guard to break.
 	if rig.weapon == "dual":
-		return DEFENSE_PARRY if rig.in_strike_window() and facing else DEFENSE_NONE
-	if not blocking or rig.is_melee() or not facing:
+		if rig.in_strike_window() and facing:
+			return DEFENSE_PARRY
+		if rig.has_method("dual_block_chance") \
+				and randf() < float(rig.dual_block_chance()):
+			return DEFENSE_BLOCK
 		return DEFENSE_NONE
-	# A shield is a full front block and never parries.
+	if not blocking or rig.is_melee() or not in_guard:
+		return DEFENSE_NONE
+	# A shield is a full block inside its cone and never parries.
 	if rig.shield_equipped:
 		return DEFENSE_BLOCK
 	# A dagger cannot set a proper edge or lever: it never parries and only
@@ -442,16 +499,45 @@ static func stagger_chance(amount: float, max_health: float = 100.0) -> float:
 	return clampf((fraction-HIT_STAGGER_FLOOR_FRACTION) \
 		/(HIT_STAGGER_CERTAIN_FRACTION-HIT_STAGGER_FLOOR_FRACTION),0.0,1.0)
 
-func stagger_from_damage(amount: float, max_health: float = 100.0) -> float:
+## The chance this blow staggers, with the piece that landed it counted: a blunt
+## head adds its weight (`ItemPassives.stagger_bonus`) on top of the damage roll,
+## so a club that takes a sixth of a pool still rocks the body it lands on.
+static func stagger_chance_for(amount: float, max_health: float = 100.0,
+		weapon_class: String = "") -> float:
+	return clampf(stagger_chance(amount,max_health)+ItemPassives.stagger_bonus(weapon_class),
+		0.0,1.0)
+
+## How long a landed stagger holds a body, unrolled: the damage ramp, then the
+## striking piece's own hold on top of it, inside the same ceiling.
+static func stagger_seconds(amount: float, max_health: float = 100.0,
+		weapon_class: String = "") -> float:
+	var fraction := maxf(amount,0.0)/max_health if max_health > 0.0 else 1.0
+	var base := clampf(HIT_STAGGER_MIN+fraction*HIT_STAGGER_PER_FRACTION,
+		HIT_STAGGER_MIN,HIT_STAGGER_MAX)
+	return minf(base*(1.0+ItemPassives.stagger_hold(weapon_class)),HIT_STAGGER_MAX)
+
+func stagger_from_damage(amount: float, max_health: float = 100.0,
+		weapon_class: String = "") -> float:
 	# Returns the rig's visible recoil in every case. Only a landed roll also
 	# cancels the swing, guard and movement: the fraction of max health carries
-	# the weight, so 5% chips are traded through and 50% hits always interrupt.
-	var fraction := maxf(amount,0.0)/max_health if max_health > 0.0 else 1.0
-	var seconds := clampf(HIT_STAGGER_MIN+fraction*HIT_STAGGER_PER_FRACTION,HIT_STAGGER_MIN,HIT_STAGGER_MAX) * clampf(stagger_scale,0.0,1.0)
-	if randf() >= stagger_chance(amount,max_health):
+	# the weight, so 5% chips are traded through and 50% hits always interrupt -
+	# a blunt head rolls for far more of that line than its damage alone earns.
+	var seconds := stagger_seconds(amount,max_health,weapon_class) \
+		* clampf(stagger_scale,0.0,1.0)
+	if randf() >= stagger_chance_for(amount,max_health,weapon_class):
 		return minf(seconds,HIT_REACT_MAX)
 	stagger(seconds)
 	return seconds
+
+## The same roll for a body with no `Combat` of its own - a mob. An edge does not
+## break a line however hard it lands, so only a piece with weight of its own
+## rolls at all; `0.0` means this blow did not stagger it.
+static func blunt_stagger(amount: float, max_health: float, weapon_class: String) -> float:
+	if ItemPassives.stagger_bonus(weapon_class) <= 0.0:
+		return 0.0
+	if randf() >= stagger_chance_for(amount,max_health,weapon_class):
+		return 0.0
+	return stagger_seconds(amount,max_health,weapon_class)
 
 func stagger(seconds: float) -> void:
 	stagger_time = maxf(stagger_time,seconds)
@@ -658,7 +744,7 @@ func _on_melee_started(hand: String) -> void:
 	state.active = true
 	state.blocked = false
 	state.weapon = rig.weapon
-	state.damage = rig.melee_damage(hand)
+	state.damage = rig.swing_damage(hand)
 	state.diagonal = rig.is_diagonal_swing(hand)
 	state.reach = rig.melee_reach(hand)
 	state.half_angle = rig.melee_half_angle(hand)
@@ -979,12 +1065,17 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 	# that hit it, even a backstab it never saw coming.
 	if is_instance_valid(actor) and unit.has_method("note_attacker"):
 		unit.note_attacker(actor)
+	var variant := str(state.get("variant", ""))
+	# The piece behind a swung blow is named too: a blunt head rocks a body that
+	# the same reach in an edge would only cut (`Combat.stagger_chance_for`). A
+	# skill is its own blow with its own stagger, so it names nothing.
+	if is_instance_valid(rig) and variant != "ability" and unit.has_method("note_strike"):
+		unit.note_strike(rig.swing_weapon_class(hand), at)
 	if unit.has_method("note_impact"):
 		unit.note_impact(_impact_force(state, at, unit))
 	# A two-handed sword is the one blade that takes a body apart: an overhead
 	# slices it in half, a side chop opens it across. Name it on the victim
 	# before the blow lands, so a killing cut can spend it.
-	var variant := str(state.get("variant", ""))
 	if is_instance_valid(actor) and bool(state.get("two_handed", false)) \
 			and variant in ["overhead", "diagonal_left", "diagonal_right"] \
 			and unit.has_method("note_cleave"):

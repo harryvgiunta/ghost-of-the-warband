@@ -550,6 +550,18 @@ func _check_rescue(body, roster_before: int) -> void:
 				and _flat(rescued_body.global_position, node.global_position) < 4.0,
 				"and stands up as a body at his cage (%s)" % (
 					str(rescued_body.global_position) if rescued_body != null else "no body"))
+			# **On the ground, not under it.** A muster point that came from the
+			# world was already at the terrain's height, so feeding it back through
+			# `Terrain.grounded()` (which *adds* the y it is handed) stood the man at
+			# twice the hill's height - below it on every downhill stretch.
+			var off_ground := absf((rescued_body.global_position as Vector3).y
+				- TerrainScript.height_at(rescued_body.global_position.x,
+					rescued_body.global_position.z))
+			check(off_ground <= 0.6,
+				"and stands on the field's own ground, not under it (%.2f m off)"
+					% off_ground)
+			check(game.squad_ids.has(rescued) and game.bodies.has(rescued_body),
+				"and he is the party's from the frame he stands up")
 		else:
 			check(warband.roster.is_reserve(rescued),
 				"cage %d's soldier, past a full field, waits in the reserve" % (index + 1))

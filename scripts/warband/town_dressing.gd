@@ -27,6 +27,7 @@ extends RefCounted
 ##    and `WALL_RADIUS` mirrors the scene's own constant.
 
 const Geo = preload("res://scripts/geo.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 
 ## Mirrors `town_hub.gd::WALL_RADIUS`: the walkable settlement is inside this
 ## radius, and the regression compares the two so a wall move fails loudly.
@@ -40,9 +41,9 @@ const SIGN_POST := Vector3(7.5, 0.0, 10.5)
 ## point in this square that it really is. `SIGN_TARGETS` is what the yaw is
 ## solved from, so the sign cannot point at nothing.
 const SIGN_BOARDS := [
-	{"text": "THE ALTAR", "target": Vector3(8.0, 0.0, 4.0)},
-	{"text": "THE KEEPERS", "target": Vector3(-4.0, 0.0, -9.0)},
-	{"text": "THE DELVE", "target": Vector3(8.0, 0.0, -6.0)},
+	{"sign": "altar_board", "text": "THE ALTAR", "target": Vector3(8.0, 0.0, 4.0)},
+	{"sign": "keepers", "text": "THE KEEPERS", "target": Vector3(-4.0, 0.0, -9.0)},
+	{"sign": "delve", "text": "THE DELVE", "target": Vector3(8.0, 0.0, -6.0)},
 ]
 
 ## The lanterns: one at the mouth of each alley the halls leave, each arm
@@ -302,18 +303,12 @@ static func _build_fingerpost(root: Root, mats: Dictionary) -> void:
 			mats["ochre"])
 		VillageKit.add_box(bm, Vector3(0.22, 0.32, 0.045), Vector3(1.68, 0.0, 0.0),
 			mats["log_dark"], 0.0, 0.0, PI * 0.25)
+		# The words are painted on both faces of the board - a fingerpost is read
+		# coming and going - and on no label and no billboard at all.
+		var sign_id := String(SIGN_BOARDS[index]["sign"])
+		SignKit.add_face(bm, sign_id, Vector3(0.86, 0.0, 0.024))
+		SignKit.add_face(bm, sign_id, Vector3(0.86, 0.0, -0.024), PI)
 		bm.commit(board, "Board")
-		var label := Label3D.new()
-		label.name = "BoardText"
-		label.text = String(SIGN_BOARDS[index]["text"])
-		label.font_size = 64
-		label.pixel_size = 0.0034
-		label.modulate = Color(0.94, 0.89, 0.78)
-		label.outline_size = 8
-		label.outline_modulate = Color(0.09, 0.06, 0.04, 0.85)
-		label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-		label.position = Vector3(0.86, 0.0, 0.032)
-		board.add_child(label)
 		_record(root, "SignBoard%d" % (index + 1), at, 1.70, false)
 	_record(root, "SignPost", at, 0.30)
 

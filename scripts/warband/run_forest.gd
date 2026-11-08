@@ -42,6 +42,7 @@ extends RefCounted
 ## terrain's own wet ground, not a mesh.
 
 const Geo = preload("res://scripts/geo.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 ## The camp's dressing module owns the handful of materials the world kits do not
 ## carry (iron, steel, blood); it is the shared source, not copied.
@@ -52,6 +53,11 @@ const CampDressing = preload("res://scripts/warband/camp_dressing.gd")
 ## wood is kept roughly passable either side of the worn line.
 const WIDTH := 11.0
 const HALF_WIDTH := WIDTH * 0.5
+
+## The gate that ends the lane: its height over the road, and where the name of the
+## place hangs under its tie beam, east of the hide banner in the middle of the span.
+const ARCH_HEIGHT := 5.2
+const TOWN_BOARD_X := 2.6
 ## How far off the centre line nothing solid may stand. Two and a half metres of
 ## clear walking is the number `mob_steering.gd`'s probe and a two-slide elite body
 ## need; this leaves a margin either side of it.
@@ -151,8 +157,6 @@ class Root extends Node3D:
 	var torches: Array = []
 	var spawn_posts: Array = []
 	var clearings: Array = []
-	var pursuer_posts: Array = []
-	var clearing_posts: Array = []
 	## Every trunk a body can walk into, as `{"at": Vector2 (x/z), "radius": float}`:
 	## the scene's ambushers and the wood's own placements stand clear of them.
 	var trunks: Array = []
@@ -265,8 +269,6 @@ static func build(parent: Node3D, options: Dictionary = {}) -> Dictionary:
 	root.arch = path.points[path.points.size() - 1]
 	root.spawn_posts = _spawn_posts(path)
 	root.clearings = _clearing_points(path)
-	root.pursuer_posts = _pursuer_posts(path)
-	root.clearing_posts = _clearing_posts(path)
 
 	var style := night_style()
 	var environment: Dictionary = WorldEnvironmentKit.build(root, style)
@@ -307,8 +309,6 @@ static func build(parent: Node3D, options: Dictionary = {}) -> Dictionary:
 		"spawn_posts": root.spawn_posts,
 		"arch": root.arch,
 		"clearings": root.clearings,
-		"pursuer_posts": root.pursuer_posts,
-		"clearing_posts": root.clearing_posts,
 		"start": root.start,
 		"path": path,
 		"swamp": root.swamp,
@@ -523,41 +523,15 @@ static func _spawn_posts(path: Path) -> Array:
 	return posts
 
 
-## The three clearings the cult waits in, at the lane's own fractions.
+## The three clearings the cult waits in, at the lane's own fractions. The fires
+## and the bowl are dressed here; the garrison is the scene's (`escape_run.gd`
+## builds its own chain of bands along the lane, not a pair a clearing).
 static func _clearing_points(path: Path) -> Array:
 	var points: Array = []
 	for fraction in CLEARING_FRACTIONS:
 		var frame := path.sample(path.total * float(fraction))
 		points.append(TerrainScript.grounded(frame["position"]))
 	return points
-
-
-## The two that start behind the squad, at the camp mouth: close enough to be on
-## them at once, inside the lane so they are never walled off from the run.
-static func _pursuer_posts(path: Path) -> Array:
-	# The first ambush stands well down the road, not on the camp's doorstep. The
-	# camp's own fight happens around the cages and a cultist's sight reaches 60 m,
-	# so anything closer joins the tutorial. On this road that is ~140 m in, past
-	# the corridor and out of sight of the mouth; the rest follow every ~280 m.
-	var at := path.total * 0.10
-	var head := path.sample(at)
-	var back: Vector3 = (head["position"] as Vector3) - (head["forward"] as Vector3) * 3.2
-	var right: Vector3 = head["right"]
-	return [TerrainScript.grounded(back + right * 1.9),
-		TerrainScript.grounded(back - right * 1.9)]
-
-
-## A pair in each clearing, split across the lane so the run is intercepted from
-## both sides rather than by a single body in the middle.
-static func _clearing_posts(path: Path) -> Array:
-	var posts: Array = []
-	for fraction in CLEARING_FRACTIONS:
-		var frame := path.sample(path.total * float(fraction))
-		var point: Vector3 = frame["position"]
-		var right: Vector3 = frame["right"]
-		posts.append(TerrainScript.grounded(point + right * 1.7))
-		posts.append(TerrainScript.grounded(point - right * 1.7))
-	return posts
 
 
 # --- ground ----------------------------------------------------------------
@@ -1143,15 +1117,13 @@ static func _build_arch(root: Root, path: Path) -> void:
 	var host := _host(group, tail, yaw)
 	host.name = "Gate"
 	var mats: Dictionary = VillageKit.materials()
-	VillageKit.gate(host, mats, root.solids, HALF_WIDTH + 0.45, 5.2, 9)
-	var label := Label3D.new()
-	label.text = "TOWN"
-	label.position = Vector3(0.0, 5.9, 0.0)
-	label.font_size = 96
-	label.pixel_size = 0.013
-	label.modulate = Color(1.0, 0.78, 0.5)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	host.add_child(label)
+	VillageKit.gate(host, mats, root.solids, HALF_WIDTH + 0.45, ARCH_HEIGHT, 9)
+	# The name of the place, painted on a board hung under the gate's tie beam,
+	# east of the hide banner and high enough for a body to walk under.
+	var sign_at := Vector3(TOWN_BOARD_X, ARCH_HEIGHT - 0.90, 0.14)
+	SignKit.plank_board(host, "town", sign_at, 0.0, "TownSign")
+	SignKit.hangers(host, "town", ARCH_HEIGHT - 0.33,
+		sign_at.y + SignKit.size_of("town").y * 0.5 + 0.10, [0.42, -0.42], 0.14)
 	# The gate's own threshold stones read the lane closed at the far end.
 	var stone := Geo.material(Color(0.20, 0.19, 0.17))
 	for side in [-1.0, 1.0]:

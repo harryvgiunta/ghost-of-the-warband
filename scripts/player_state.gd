@@ -72,6 +72,10 @@ const ITEMS := {
 		"category":"2h", "grip":"2h", "slot":"main",
 		"summary":"A whole limb, bark and all, swung with both hands",
 		"detail":"15 damage / 1.6 s swing / 2.0 m reach / two-handed"},
+	"axe_makeshift": {"name":"Makeshift Axe", "short":"Msh Axe", "kind":"sword", "index":5, "price":18,
+		"category":"1h", "grip":"1h", "slot":"main",
+		"summary":"A hafted iron head lashed to a straight branch, still balanced to throw",
+		"detail":"14 damage / 1.0 s swing / 1.75 m reach / x2 thrown damage"},
 	"shield_wood": {"name":"Wooden Shield", "short":"Wood Shld", "kind":"shield", "index":3, "price":5,
 		"category":"shield", "slot":"off",
 		"summary":"Planks off a hut wall, lashed to a forearm",
@@ -390,6 +394,7 @@ const VENDORS := [
 	]},
 	{"name":"Smith Brann", "tag":"SMITH", "line":"Swords, daggers and shields balanced on the anvil.", "stock":[
 		"sword_makeshift","dagger_ironwood","bow_twig","club_makeshift","branch_heavy",
+		"axe_makeshift",
 		"sword_short","sword_arming","sword_great","dagger_iron",
 		"shield_buckler","shield_kite","shield_tower","shield_wood","arrow",
 	]},

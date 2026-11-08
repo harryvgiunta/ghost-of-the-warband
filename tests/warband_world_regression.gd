@@ -443,9 +443,12 @@ func check_wood() -> void:
 	check(wood_guards == 1 + WoodScript.GUARD_POSTS.size(),
 		"the master and his two keepers hold the wood (%d)" % wood_guards)
 	var warcamps: int = game.watcher_warren.total() if game.watcher_warren != null else 0
-	check(game.guards.size() == wood_guards + 20 + TrailScript.ARCHER_COUNT + wolves + warcamps,
-		"twenty cultists, %d wolves and %d warcamp wardens join them on the same hostile"
-			% [wolves, warcamps] + " list (%d in all)" % game.guards.size())
+	var cultists: int = game.trail.cultist_count()
+	check(cultists == game.trail.cultists.size() and cultists > 0,
+		"the road fields its own garrison (%d)" % cultists)
+	check(game.guards.size() == wood_guards + cultists + TrailScript.ARCHER_COUNT + wolves + warcamps,
+		"%d cultists, %d wolves and %d warcamp wardens join them on the same hostile"
+			% [cultists, wolves, warcamps] + " list (%d in all)" % game.guards.size())
 	for guard in game.wood.guards:
 		check(game.guards.has(guard), "a wood body is on the world's hostile list")
 		check(guard.global_position.y > -1.0, "and stands on the ground")
@@ -881,7 +884,7 @@ func check_budget() -> void:
 	# warcamps' braziers and the town's own lanterns share the same ceiling.
 	check(lights <= 210, "the world stays inside its light budget (%d)" % lights)
 	var warren: int = game.watcher_warren.total() if game.watcher_warren != null else 0
-	var hostiles: int = 1 + WoodScript.GUARD_POSTS.size() + 20 \
+	var hostiles: int = 1 + WoodScript.GUARD_POSTS.size() + game.trail.cultist_count() \
 		+ TrailScript.ARCHER_COUNT + wolves + warren
 	check(int(readout["guards"]) == hostiles,
 		"all %d hostiles are on the list (%d)" % [hostiles, int(readout["guards"])])

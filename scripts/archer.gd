@@ -80,6 +80,9 @@ const SWORD_DATA = [
 	{"name":"Greatsword", "seconds":3.0, "length":1.40, "reach":2.5, "damage":50.0, "throw_speed":24.0, "two_handed":true},
 	{"name":"Club", "seconds":0.9, "length":0.68, "reach":1.7, "damage":6.0, "throw_speed":20.0, "two_handed":false},
 	{"name":"Heavy tree branch", "seconds":1.6, "length":1.16, "reach":2.0, "damage":15.0, "throw_speed":16.0, "two_handed":true},
+	# The makeshift axe: a hafted head with weight behind the edge, which is why
+	# it is the makeshift tier's best blade and the one piece it can throw.
+	{"name":"Makeshift axe", "seconds":1.0, "length":0.64, "reach":1.75, "damage":14.0, "throw_speed":28.0, "two_handed":false},
 ]
 ## Dagger profiles in catalog `index` order: the forged iron blade, then the
 ## whittled ironwood shiv the makeshift tier fields.
@@ -119,7 +122,7 @@ const ABILITY_SHIELD_LEG_CLEAR := 0.60
 ## One entry per sword profile, in catalog order. The makeshift tier's club is
 ## the shortest cut and the limb the longest; a profile with no row of its own
 ## would index past the end of these tables.
-const DIAGONAL_SECONDS = [0.60,0.78,1.02,0.55,0.92]
+const DIAGONAL_SECONDS = [0.60,0.78,1.02,0.55,0.92,0.66]
 ## The swing runs on one clock for every weapon: the body loads through 30% of
 ## the clip, the hips and chest snap the strike through 30-45%, the blade
 ## overshoots and is cushioned through 45-65%, and the last third eases back
@@ -169,6 +172,14 @@ const DIAGONAL_BLADE = [
 		"blade_load":2.10, "blade_cross":1.88, "tip_load":0.70, "tip_down":-0.26,
 		"pelvis_load":0.60, "pelvis_cross":0.40, "chest_load":1.02, "chest_cross":0.52,
 		"lean_load":0.16, "lean_cross":0.36, "clavicle":0.22},
+	# An axe falls where it is aimed rather than rolling over: the hilt drives out
+	# further than a club's and the head drops through the sector, so the wedge
+	# bites on the way down instead of sweeping flat across the body.
+	{"yaw_load":1.74, "yaw_cross":0.80, "rad_load":0.22, "rad_cross":0.40,
+		"fwd_load":0.04, "fwd_cross":0.36, "up_load":0.28, "up_cross":-0.40,
+		"blade_load":1.72, "blade_cross":1.62, "tip_load":0.58, "tip_down":-0.34,
+		"pelvis_load":0.44, "pelvis_cross":0.30, "chest_load":0.84, "chest_cross":0.38,
+		"lean_load":0.15, "lean_cross":0.30, "clavicle":0.16},
 ]
 ## A staff is held around its middle, so its swing is not a sword hilt orbit:
 ## both hands stay near the shaft centre and drive forward as a piston while
@@ -283,6 +294,11 @@ var _grounded := true
 var _cover_active := false
 var _blocking := false
 var _block_forward := Vector3.FORWARD
+## The guard's own line, in three dimensions, and its elevation in radians: what
+## the eye is doing decides whether the guard is over the head or at the belly
+## (`face_block`). A level guard is 0.
+var _block_normal := Vector3.FORWARD
+var _block_pitch := 0.0
 var _cover_normal := Vector3.ZERO
 var _cover_lean := Vector3.ZERO
 var _crouch_amount := 0.0
@@ -422,7 +438,22 @@ var _sword_grip := Transform3D.IDENTITY
 var _sword_grip_left := Transform3D.IDENTITY
 var _melee_hand := "right"
 var _right_variant := "overhead"
+## The welds that ride the steel in one hand (`{main: {...}, off: {...}}`), set by
+## `SeatLoadout` off the warband's ledger: `overhead_damage`, `overhead_speed`.
+var hand_annointments: Dictionary = {"main": {}, "off": {}}
+## Where the alternating click cuts are in their chain: `0` is the first cut of a
+## pair, `1` the second - the one a greatsword swings off the first's momentum.
+## A stab, an overhead or an aborted swing breaks the chain.
+var _diagonal_chain := 0
 var _left_variant := "overhead"
+## Extra arrows pinched between the string fingers beside the one on the string,
+## fed by the wheel while a draw is open (`stack_nock`). One to three: the shot
+## is a fan of `nock_arrows()`.
+const MAX_NOCK_STACK := 3
+## How far apart the fan's shafts leave, in degrees.
+const NOCK_FAN_DEGREES := 3.0
+var nock_stack := 0
+var _nock_props: Array[Node3D] = []
 var _left_melee_time := -1.0
 var _right_melee_time := -1.0
 var _left_melee_duration := float(dagger_profile(0).seconds)
@@ -1228,6 +1259,8 @@ func set_bow(index: int) -> void:
 	loadout_changed.emit()
 
 func set_sword(index: int) -> void:
+	# A new blade starts its own pair of clicks.
+	_diagonal_chain = 0
 	cancel_consumable()
 	if is_melee():
 		_clear_melee()
@@ -1345,6 +1378,10 @@ func set_weapon(value: String) -> bool:
 		_blocking = false
 	if value == "dual" and not _dual_ready():
 		return false
+	# A different piece in the hand starts its clicks from the first cut: the
+	# pair's momentum belongs to the blade that was swinging.
+	if value != weapon:
+		_diagonal_chain = 0
 	if value == weapon:
 		# Pressing the sword key while a staff supplies this same "sword" mode
 		# must still hand the session back to the actual sword.
@@ -1407,7 +1444,7 @@ func apply_loadout(loadout: Dictionary) -> void:
 	if off_weapon.has("kind"):
 		set_off_weapon(str(off_weapon.get("kind","")),int(off_weapon.get("index",0)),true)
 	if shield_on:
-		set_shield_variant(_shield_variant_for(off_id))
+		set_shield_variant(shield_variant_for(off_id))
 	var dual_ready := sword_value <= 1 and staff_value < 0 and not focus_active \
 		and off_weapon_active and off_weapon_kind in ["dagger","sword"]
 	match mode:
@@ -1484,7 +1521,11 @@ func set_shield_variant(index: int) -> void:
 		return
 	_update_pose(0.0)
 
-func _shield_variant_for(item_id: String) -> int:
+## The board's own shape, from the catalog row: buckler 0, kite 1, tower 2, and
+## the wooden board the campaign's salvage tier carries last. Public because a
+## presenter dressing a body from an id (`watcher_visual.gd`) names a piece, not an
+## index.
+func shield_variant_for(item_id: String) -> int:
 	match item_id:
 		"shield_buckler":
 			return 0
@@ -1854,10 +1895,12 @@ func _duration_for(hand: String, variant: String) -> float:
 		# A stab is the dagger clock, whichever hand swings it: a sword's thrust
 		# is not a sword's overhead. A dagger keeps its own profile's timing.
 		base = float(profile_for_hand(hand).seconds if dagger else dagger_profile(0).seconds)
-	# Trinket haste, the held item's passive and this swing's own rate compose as
-	# one figure, so the same wheel-up lunge is fast for every hand that carries
-	# a shank and a proc's quick cut is simply five times that figure.
-	return base/maxf(attack_rate()*variant_attack_rate(hand,variant)*_swing_rate,0.01)
+	# Trinket haste, the held item's passive, the annointments welded onto the
+	# steel and this swing's own rate compose as one figure, so the same wheel-up
+	# lunge is fast for every hand that carries a shank and a proc's quick cut is
+	# simply five times that figure.
+	return base/maxf(attack_rate()*variant_attack_rate(hand,variant) \
+		*variant_annoint_rate(hand,variant)*_swing_rate,0.01)
 
 func _valid_variant(variant: String) -> bool:
 	return variant in MELEE_VARIANTS
@@ -1934,10 +1977,24 @@ func begin_melee(hand: String = "right", variant: String = "overhead") -> bool:
 		_right_melee_duration = _duration_for(key,requested)
 		_right_melee_time = 0.0
 	_swing_start_valid[0 if key == "left" else 1] = false
+	# The chain this swing belongs to is spent here: the clock above already read
+	# it, so the next click is the other cut of the pair (or the first cut again,
+	# when this one was a stab or an overhead and broke the rhythm).
+	_advance_diagonal_chain(requested)
 	_sync_primary_hand()
 	melee_started.emit(key)
 	_update_pose(0.0)
 	return true
+
+## Where the next click cut stands in its pair. `0` is the first cut (the one
+## that loads the weight), `1` the second - and only the second is sped by a
+## greatsword's `Rolling cut`. A stab or an overhead breaks the pair, and so does
+## putting a different piece in the hand.
+func _advance_diagonal_chain(variant: String) -> void:
+	if variant in ["diagonal_left","diagonal_right"]:
+		_diagonal_chain = 0 if _diagonal_chain == 1 else 1
+	else:
+		_diagonal_chain = 0
 
 ## Strike again at `rate` times the swing rate: the recovery of the cut already
 ## in the air is given up and the blade comes round on a clock divided by `rate`.
@@ -2010,6 +2067,14 @@ func melee_damage(hand: String = "") -> float:
 		base = float(profile_for_hand(key).damage)
 	return base*melee_scale() + flat_bonus("flat_melee")
 
+## The damage one committed swing carries: the hand's own profile scaled by the
+## body's trinkets and flat welds, then by whatever this piece names for the
+## variant it is swinging (a club's `overhead_damage` weld). An item skill asks
+## `melee_damage` instead - a sigil is its own blow, not an overhand.
+func swing_damage(hand: String = "") -> float:
+	var key := hand if hand in ["left","right"] else _melee_hand
+	return melee_damage(key)*variant_damage_scale(key,melee_variant(key))
+
 ## Trinket modifiers read by the controllers, `Combat` and the ability cues.
 ## Fold a body's annointment stats into the same dictionary every accessor
 ## already reads (`melee_scale`, `attack_rate`, `move_scale`,
@@ -2045,8 +2110,11 @@ func spell_scale() -> float:
 func flat_bonus(key: String) -> float:
 	return TrinketStats.flat_damage(trinket_stats,key)
 
+## Both the trinkets' `throw_damage` and the piece's own balance: an axe leaves
+## the hand for double what its edge is worth swung.
 func throw_scale() -> float:
-	return TrinketStats.damage_scale(trinket_stats,"throw_damage")
+	return TrinketStats.damage_scale(trinket_stats,"throw_damage") \
+		* ItemPassives.throw_scale(swing_weapon_class("right"))
 
 ## Rate multiplier: a 1.0 s draw becomes `1.0 / attack_rate()` seconds.
 func attack_rate() -> float:
@@ -2057,17 +2125,81 @@ func attack_rate() -> float:
 ## because it is the level every replica already knows from the wire.
 func swing_weapon_class(hand: String) -> String:
 	if hand == "left":
-		return off_weapon_kind if off_weapon_active else ""
+		if not off_weapon_active:
+			return ""
+		return ItemPassives.sword_class(off_weapon_index) \
+			if off_weapon_kind == "sword" else off_weapon_kind
 	if weapon == "dagger":
 		return "dagger"
 	if weapon == "sword" or weapon == "dual":
-		return "staff" if staff_active else "sword"
+		return ItemPassives.sword_class(sword_index,staff_active)
 	return ""
 
 ## The swung weapon's attack-rate multiplier for one melee variant (1.0 when it
 ## grants nothing). `attack_rate()` composes with it as a second rate.
+##
+## Three class rules ride here with it: a matched pair of one-handed swords is
+## quicker than either blade (`dual_rate`), and a greatsword's second click comes
+## round off the first cut's momentum (`combo_rate`, `_diagonal_chain`). They
+## multiply, so a trinket's haste still stacks on top of all of it.
 func variant_attack_rate(hand: String, variant: String) -> float:
-	return ItemPassives.variant_rate(swing_weapon_class(hand),variant)
+	var gained := ItemPassives.variant_rate(swing_weapon_class(hand),variant)
+	if weapon == "dual":
+		gained *= ItemPassives.dual_rate(swing_weapon_class("right"),
+			swing_weapon_class("left"))
+	if variant in ["diagonal_left","diagonal_right"] and _diagonal_chain == 1:
+		gained *= ItemPassives.combo_rate(swing_weapon_class(hand))
+	return gained
+
+
+## The pairing's passive guard: the share of what reaches a body a matched pair
+## of one-handed swords turns without a raised hand. `0.0` for every other kit,
+## which is what `Combat` reads.
+func dual_block_chance() -> float:
+	if weapon != "dual":
+		return 0.0
+	return ItemPassives.dual_block_chance(swing_weapon_class("right"),
+		swing_weapon_class("left"))
+
+
+## The worn annointments' own factor on one melee variant's rate: a weld that
+## names `overhead_speed` speeds the overhand the way `item_passives.gd`'s class
+## row does, as a second rate beside it. The weld rides the steel in that hand
+## (`SeatLoadout` lays it down from the warband's ledger), so a Heavy Swing club
+## does not speed the greatsword in the other set.
+func variant_annoint_rate(hand: String, variant: String) -> float:
+	var bonus := _hand_variant_bonus(hand,ItemPassives.variant_key(variant))
+	return clampf(1.0 + bonus,1.0,ItemPassives.MAX_RATE)
+
+
+## The damage on one melee variant, as a multiplier: the class's own rule (a
+## shiv's downward blow is double) with the welded figure on that hand's steel
+## multiplied on top. `1.0` when neither names the variant.
+func variant_damage_scale(hand: String, variant: String) -> float:
+	var gained := ItemPassives.variant_damage_scale(swing_weapon_class(hand),variant)
+	return maxf(0.0,gained * (1.0 + _hand_variant_bonus(hand,
+		ItemPassives.variant_damage_key(variant))))
+
+
+## The weld figure `key` names on the piece this hand is swinging, or 0.0.
+func _hand_variant_bonus(hand: String, key: String) -> float:
+	if key.is_empty():
+		return 0.0
+	var payload: Variant = hand_annointments.get("off" if hand == "left" else "main",{})
+	if not payload is Dictionary:
+		return 0.0
+	return float((payload as Dictionary).get(key,0.0))
+
+
+## The welds that ride the steel in one hand, `{main: {...}, off: {...}}`, laid
+## down by `SeatLoadout` from the warband's ledger. A hand with no weld swings the
+## clip its profile authored.
+func set_hand_annointments(hands: Dictionary) -> void:
+	hand_annointments = {"main": {}, "off": {}}
+	for side in ["main", "off"]:
+		var payload: Variant = hands.get(side,{})
+		if payload is Dictionary:
+			hand_annointments[side] = (payload as Dictionary).duplicate()
 
 func move_scale() -> float:
 	return TrinketStats.move_scale(trinket_stats)
@@ -2107,6 +2239,8 @@ func begin_draw() -> void:
 		return
 	draw_amount = 0.0
 	charge_frozen = false
+	# A fresh draw starts with the one shaft already nocked.
+	_clear_nock_stack()
 	phase = "DRAWING"
 	_phase_time = 0.0
 	_update_pose(0.0)
@@ -2187,7 +2321,28 @@ func release_string(override_origin: Vector3 = Vector3.INF, override_direction: 
 	phase = "RELEASE"
 	_phase_time = 0.0
 	active_bow.set_arrow_visible(false)
-	arrow_released.emit(origin,direction,float(BOW_DATA[bow_index].speed)*lerpf(0.45,1.0,_release_charge),_release_charge)
+	var speed := float(BOW_DATA[bow_index].speed)*lerpf(0.45,1.0,_release_charge)
+	var shafts := nock_arrows()
+	_clear_nock_stack()
+	if shafts <= 1:
+		arrow_released.emit(origin,direction,speed,_release_charge)
+	else:
+		# The whole bundle leaves at once, gently fanned: the middle shaft keeps
+		# the crosshair and the outer ones open from it, so a stack is a cluster
+		# rather than one arrow fired repeatedly. Each shaft is its own missile,
+		# and each one is paid for out of the quiver by its own shooter.
+		var fan := deg_to_rad(NOCK_FAN_DEGREES)
+		var up_axis := direction.cross(Vector3.UP)
+		if up_axis.length_squared() < 0.0001:
+			up_axis = global_basis.x
+		up_axis = up_axis.normalized()
+		for index in shafts:
+			var offset := (float(index) - float(shafts - 1) * 0.5)
+			var shot := direction.rotated(Vector3.UP,offset * fan)
+			# A touch of rise on the outer shafts: the fan opens, it does not
+			# stay a level line.
+			shot = shot.rotated(up_axis,-offset * fan * 0.35)
+			arrow_released.emit(origin,shot.normalized(),speed,_release_charge)
 	_update_pose(0.0)
 
 func release_throw() -> void:
@@ -2211,6 +2366,7 @@ func release_throw() -> void:
 func cancel_draw() -> void:
 	charge_frozen = false
 	cancel_consumable()
+	_clear_nock_stack()
 	if phase not in ["DRAWING","HOLDING","T_DRAW","T_HOLD"] and not phase.begins_with("MELEE"):
 		return
 	_clear_melee()
@@ -2218,6 +2374,64 @@ func cancel_draw() -> void:
 	draw_amount = 0.0
 	_phase_time = 0.0
 	_update_pose(0.0)
+
+
+## How many shafts are on the string: the nocked one plus the pinched extras.
+func nock_arrows() -> int:
+	return 1 + nock_stack
+
+
+## The wheel while a draw is open: forward pulls one more shaft out of the quiver
+## and pinches it between the fingers (`delta` +1), back puts one away. Only a
+## bow with the string back has anything to stack, and the fan is capped at
+## `MAX_NOCK_STACK` extras + 1. Answers the shafts now on the string.
+func stack_nock(delta: int) -> int:
+	if weapon != "bow" or phase not in ["DRAWING","HOLDING"]:
+		return nock_arrows()
+	nock_stack = clampi(nock_stack + delta,0,MAX_NOCK_STACK)
+	_apply_nock_stack()
+	return nock_arrows()
+
+
+## The extras the string hand is holding, drawn. They follow the hand bone every
+## pose, so a stack rides the draw exactly as the nocked arrow does.
+func _apply_nock_stack() -> void:
+	if _nock_props.is_empty():
+		_build_nock_props()
+	for index in _nock_props.size():
+		var shown := index < nock_stack
+		_nock_props[index].visible = shown and weapon == "bow" and not is_consuming()
+		if not shown:
+			continue
+		# A gentle fan in the hand itself: the outer shafts sit a finger's width
+		# off the middle one and tip away from it, so the stack reads as a bundle
+		# rather than one thick arrow.
+		var spread := float(index + 1) / float(MAX_NOCK_STACK)
+		var side := 1.0 if index % 2 == 0 else -1.0
+		_nock_props[index].position = Vector3(side * 0.022 * spread, -0.004 * spread, 0.0)
+		_nock_props[index].rotation = Vector3(side * 0.06 * spread, side * 0.05 * spread, 0.0)
+
+
+func _build_nock_props() -> void:
+	if not is_instance_valid(string_hand):
+		return
+	var shaft := Geo.material(Color("8c6a45"))
+	var head := Geo.material(Color("9aa0a0"),0.4,0.4)
+	var fletch := Geo.material(Color("cfc4a8"))
+	for index in MAX_NOCK_STACK:
+		var prop := Node3D.new()
+		prop.name = "StackedArrow%d" % index
+		prop.visible = false
+		string_hand.add_child(prop)
+		Geo.beam(prop,Vector3(0,0,0.06),Vector3(0,0,-0.52),0.006,shaft)
+		Geo.box(prop,Vector3(0.018,0.008,0.05),Vector3(0,0,-0.56),head)
+		Geo.box(prop,Vector3(0.004,0.030,0.09),Vector3(0,0,0.02),fletch)
+		_nock_props.append(prop)
+
+
+func _clear_nock_stack() -> void:
+	nock_stack = 0
+	_apply_nock_stack()
 
 ## A revived body must attack on its first click. A draw, a swing, a release,
 ## a recovery, a raised guard or a consumable channel that was running when the
@@ -2314,6 +2528,12 @@ func face_block(forward: Vector3) -> void:
 	if planar.length_squared() > 0.000001:
 		_block_forward = planar.normalized()
 		global_basis = Basis(Vector3.UP,atan2(-planar.x,-planar.z))
+	# The guard follows the eye, not just its yaw: looking up sets it over the
+	# head, looking down sets it low, and the body keeps facing the way the feet
+	# were already turned. `_block_pitch` is that elevation in radians.
+	if forward.is_finite() and forward.length_squared() > 0.000001:
+		_block_normal = forward.normalized()
+		_block_pitch = clampf(asin(clampf(_block_normal.y,-1.0,1.0)),-1.30,1.30)
 
 func is_blocking() -> bool:
 	return _blocking
@@ -2851,6 +3071,11 @@ func _melee_clip_for(hand: String, variant: String) -> Dictionary:
 		# Reuse the grounded load, drive and recovery of the authored heavy
 		# overhead, not the one-hand finisher's airborne leg kick.
 		return _profile.clips.overhead
+	# The wheel-down is the dagger's big blow: the authored downward strike, not
+	# the poke the wheel-up lunge is. A shiv has no authored overhead of its own,
+	# so it borrows the one-hander's and drives its point down through a body.
+	if variant == "overhead" and weapon == "dagger":
+		return _profile.clips.overhead_one_hand
 	if key == "left" or weapon == "dagger" or variant == "stab":
 		return _profile.clips.stab
 	return _profile.clips.overhead if sword_index == 2 else _profile.clips.overhead_one_hand
@@ -3122,6 +3347,8 @@ func _solve_pose(delta: float) -> void:
 	# a half of steel across its owner's own chest.
 	if _blocking and swings_two_handed() and not _staff_shown():
 		_pose_two_hand_guard()
+	elif _blocking:
+		_pose_one_hand_guard()
 	_apply_hit_react_pose()
 	if ability:
 		_apply_ability_pose()
@@ -3197,11 +3424,21 @@ func _pose_two_hand_guard() -> void:
 	# than a statue with a sword welded to its fist.
 	var breath := sin(_motion_time*TAU/maxf(_clip_length("Sword_Block_Loop"),0.001))
 	var pivot := (_bone_world(_arms[0][0]).origin+_bone_world(_arms[1][0]).origin)*0.5
+	# The eye decides the height of the guard: looking up turns the blade from
+	# standing over the face to lying over the head, looking down drops it toward
+	# the knees, and the whole hilt rises with it.
+	var tilt := -_block_pitch
 	var blade := (Vector3.UP+forward*(GUARD_LEAN+GUARD_BREATH_LEAN*breath) \
 		+right*GUARD_CANT).normalized()
+	blade = blade.rotated(right,tilt)
+	pivot += Vector3.UP*(maxf(_block_pitch,0.0)*0.24)
+	var wanted_lift := GUARD_HILT_LIFT+GUARD_BREATH*breath+maxf(_block_pitch,0.0)*0.16
 	# `looking_at` puts the weapon's -Z on the blade and its +Y on the flat, and
 	# the flat faces the same way the body is blocking.
-	var blade_basis := Basis.looking_at(blade,forward)
+	var blade_up := blade.cross(right).normalized()
+	if blade_up.length_squared() < 0.000001:
+		blade_up = forward
+	var blade_basis := Basis.looking_at(blade,blade_up)
 	var support_basis := blade_basis*_sword_grip_left.basis.inverse()
 	# Where the support wrist sits once the main hand holds the hilt: fixed by the
 	# blade frame, which lets the hilt be drawn into both arms' reach before
@@ -3216,7 +3453,7 @@ func _pose_two_hand_guard() -> void:
 	var left_reach := left_shoulder.distance_to(left_elbow) \
 		+left_elbow.distance_to(_bone_world(_arms[0][2]).origin)
 	var wanted := pivot+forward*GUARD_HILT_FORWARD \
-		+Vector3.UP*(GUARD_HILT_LIFT+GUARD_BREATH*breath) \
+		+Vector3.UP*wanted_lift \
 		+right*(GUARD_BREATH*0.6*breath)
 	var hilt := _two_hand_wrist_target(wanted,right_shoulder,right_reach*0.94,
 		left_shoulder-support_shift,left_reach*0.94,forward)
@@ -3229,6 +3466,34 @@ func _pose_two_hand_guard() -> void:
 		- support_basis*_palm_left
 	_solve_limb(_arms[0],support_target,support_basis,
 		(-right*0.9+forward*0.25-Vector3.UP*0.75).normalized())
+
+## A one-handed guard, solved from the eye. The authored clip has no idea where
+## the crosshair is pointing and a wrist alone cannot lift a guard, so the hilt
+## is placed on the guard line: level it sits in front of the chest, raised it
+## goes overhead with the elbow under it, dropped it covers the legs.
+func _pose_one_hand_guard() -> void:
+	var forward := _block_forward
+	forward.y = 0.0
+	if forward.length_squared() < 0.000001:
+		forward = -global_basis.z
+	forward = forward.normalized()
+	var guard := _block_normal
+	if guard.length_squared() < 0.000001:
+		guard = forward
+	guard = guard.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	var chest := _bone_world(_bones.spine_03).origin
+	# A shiv guards close to the chest; a sword holds its line further out.
+	var reach := 0.46 if weapon == "dagger" else 0.58
+	var hilt := chest+guard*reach+right*0.06-Vector3.UP*0.02
+	var up_hint := Vector3.UP
+	if absf(guard.dot(Vector3.UP)) > 0.94:
+		up_hint = forward
+	var basis := Basis.looking_at(guard,up_hint)
+	var grip := _sword_grip
+	_solve_limb(_arms[1],hilt,basis*grip.basis.inverse(),
+		(right*0.6-forward*0.25-Vector3.UP*0.7).normalized())
+
 
 func _pose_dual_arms(moving: bool) -> void:
 	# Precision strikes extend the left hand along the crosshair. Diagonal
@@ -4010,10 +4275,19 @@ func _update_shield_pose() -> void:
 		# guard bracer reaches almost to the face, so a close carry clips it.
 		# Crouching brings that hand further forward relative to the chest.
 		var reach := 0.58+size_delta+0.06*_crouch_amount
-		var center := chest+forward*reach+Vector3.UP*0.02-right*0.08
-		var basis := Basis.looking_at(forward,Vector3.UP)
+		# The board goes where the eye is: raised overhead against a blow coming
+		# down, level against one from the front (`Combat.block_normal`).
+		var guard := _block_normal
+		if guard.length_squared() < 0.0001:
+			guard = forward
+		guard = guard.normalized()
+		var center := chest+guard*reach+Vector3.UP*0.02-right*0.08
+		var up_hint := Vector3.UP
+		if absf(guard.dot(Vector3.UP)) > 0.94:
+			up_hint = forward
+		var basis := Basis.looking_at(guard,up_hint)
 		active_shield.global_transform = Transform3D(basis,center)
-		var hand := center-forward*0.12-Vector3.UP*0.03
+		var hand := center-guard*0.12-Vector3.UP*0.03
 		_solve_limb(_arms[0],hand,basis,-right*0.55-forward*0.15+Vector3.UP*0.1)
 	else:
 		# A carried shield hangs flat against the outside of the left forearm
@@ -4178,14 +4452,17 @@ const GUARD_BREATH_LEAN := 0.030
 ## branch's is gripped 0.20 m up, so this lands on both.
 const GUARD_SUPPORT_DEPTH := 0.12
 
-## A carried piece trails behind the fist: below the horizontal by `CARRY_TILT`,
-## out from the body by `CARRY_CANT`, with its flat rolled `CARRY_ROLL` off the
-## outward axis so a blade is not a paddle seen edge-on. Pointing a one-metre
-## arming sword at the ground would bury it — a hand rides a hip at about 0.9 m —
-## so the tip goes back and down past the calf instead, clear of the legs and of
-## the dirt, and the two hands mirror each other.
-const CARRY_TILT := -22.0
-const CARRY_CANT := 34.0
+## A carried piece hangs forward from the fist: below the horizontal by
+## `CARRY_PITCH`, out from the body by `CARRY_CANT`, with its flat rolled
+## `CARRY_ROLL` off the outward axis so a blade is not a paddle seen edge-on.
+## The tip leads the runner, so the hilt sits behind the hand where the fist
+## grips it and the piece reads as held rather than inverted; the outward cant
+## keeps it off the near leg and the two hands mirror each other. Pointing a
+## one-metre arming sword at the ground would bury it — a fist rides a hip at
+## about 0.9 m — so the drop is held to `CARRY_PITCH`, which leaves the longest
+## one-hander's tip a hand's width above the dirt at every stride phase.
+const CARRY_PITCH := -24.0
+const CARRY_CANT := 16.0
 const CARRY_ROLL := 14.0
 const CARRY_RATE := 5.0
 
@@ -4202,16 +4479,15 @@ func _carry_basis(side: float) -> Basis:
 	if forward.length_squared() < 0.000001:
 		forward = Vector3.FORWARD
 	forward = forward.normalized()
-	var back := -forward
 	var out := global_basis.x
 	out.y = 0.0
 	out = (out if out.length_squared() > 0.000001 else Vector3.RIGHT).normalized()*side
 	var cant := deg_to_rad(CARRY_CANT)
-	var tilt := deg_to_rad(CARRY_TILT)
+	var pitch := deg_to_rad(CARRY_PITCH)
 	var roll := deg_to_rad(CARRY_ROLL)
-	var level := back*cos(cant)+out*sin(cant)
-	var blade := level*cos(tilt)+Vector3.UP*sin(tilt)
-	var flat := (out*cos(cant)-back*sin(cant))*cos(roll)+Vector3.UP*sin(roll)
+	var level := forward*cos(cant)+out*sin(cant)
+	var blade := level*cos(pitch)+Vector3.UP*sin(pitch)
+	var flat := (out*cos(cant)-forward*sin(cant))*cos(roll)+Vector3.UP*sin(roll)
 	return Basis.looking_at(blade.normalized(),flat.normalized())
 
 
@@ -4219,7 +4495,7 @@ func _carry_basis(side: float) -> Basis:
 ## zero, so every fighting pose keeps the authored grip exactly. The blend is a
 ## frame in the actor's own space rather than a pitch about one axis: the hand bone
 ## rolls and pumps through a run, and a piece that inherits that roll swings its
-## tip through the chest and the dirt instead of trailing the body.
+## tip through the chest and the dirt instead of holding the carry.
 func _carry_socket(grip: Transform3D, side: float = 1.0) -> Transform3D:
 	if _carry_blend <= 0.0001:
 		return grip

@@ -4,7 +4,10 @@ extends Node
 ## is a positioning move that can be chained after a brief cooldown.
 
 const DURATION := 0.30
-const TRAVEL := 2.95
+## The default Q/E travel: a step, not a dive. It was 2.95 m - a body length and
+## a half of sideways launch - and the player asked for it halved: 1.5 m keeps the
+## move as positioning, where the roll is the way out of trouble.
+const TRAVEL := 1.5
 const COOLDOWN := 0.55
 const STAMINA_COST := 7.0
 

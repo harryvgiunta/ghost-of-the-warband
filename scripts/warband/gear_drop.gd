@@ -33,13 +33,17 @@ static func strip_hands(warband, merc_id: int) -> Array[String]:
 			out.append(item_id)
 	return out
 
-## The catalog piece in a mob's hand, taken out of it. Answers "" for a body with
-## empty hands, for one that is already gone, and for a kind of body that does not
-## carry catalog gear at all.
-static func strip_enemy(enemy) -> String:
-	if not is_instance_valid(enemy) or not enemy.has_method("take_weapon_item"):
+## The catalog pieces in a mob's hands, taken out of it - the off hand first, the
+## way a warband body lets go of its own (`strip_hands`). Answers "" entries for a
+## body with empty hands, for one that is already gone, and for a kind of body that
+## does not carry catalog gear at all.
+static func strip_enemy_hand(enemy, off: bool) -> String:
+	if not is_instance_valid(enemy):
 		return ""
-	return str(enemy.take_weapon_item())
+	var verb := "take_off_item" if off else "take_weapon_item"
+	if not enemy.has_method(verb):
+		return ""
+	return str(enemy.call(verb))
 
 ## Where a dropped piece lands: in front of the body and on the body's own
 ## ground, so the drop's origin is the floor the corpse lies on.

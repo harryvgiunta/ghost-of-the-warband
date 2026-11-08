@@ -20,6 +20,8 @@ const CampDressingScript = preload("res://scripts/warband/camp_dressing.gd")
 const TownDressingScript = preload("res://scripts/warband/town_dressing.gd")
 const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 const TownScript = preload("res://scripts/warband/town_hub.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
+const TextureLibrary = preload("res://scripts/world/texture_library.gd")
 
 const TEST_SAVE := "user://warband_art_state.json"
 const WARBAND_SAVE := "user://warband_art_warband.json"
@@ -68,6 +70,7 @@ func run() -> void:
 	root.add_child(watchdog)
 	watchdog.start()
 
+	check_signs()
 	await check_wood()
 	await check_town()
 	_finish()
@@ -119,6 +122,78 @@ func surfaces_of(mesh_instance) -> int:
 	if mesh == null:
 		return 0
 	return mesh.get_surface_count()
+
+## Every label under `node`: a sign is paint on a board, so a sign prop that still
+## carries one is a sign that never got made.
+func labels_under(node: Node, found: Array = []) -> Array:
+	if node is Label3D:
+		found.append(node)
+	for child in node.get_children():
+		labels_under(child, found)
+	return found
+
+
+## The material wearing `sign_id`'s baked face, wherever the prop merged it. Null
+## when the prop carries no such face - which is what a board built before the
+## switch, or one pointed at the wrong sign, looks like.
+func face_of(mesh_instance: Node, sign_id: String) -> Material:
+	if not (mesh_instance is MeshInstance3D):
+		return null
+	var instance := mesh_instance as MeshInstance3D
+	var wanted := "sign_%s.png" % sign_id
+	var override: Material = instance.material_override
+	if override is StandardMaterial3D and _wears(override as StandardMaterial3D, wanted):
+		return override
+	if instance.mesh == null:
+		return null
+	for surface in instance.mesh.get_surface_count():
+		var material: Material = instance.mesh.surface_get_material(surface)
+		if material is StandardMaterial3D and _wears(material as StandardMaterial3D, wanted):
+			return material
+	return null
+
+
+func _wears(material: StandardMaterial3D, wanted: String) -> bool:
+	return material.albedo_texture != null \
+		and material.albedo_texture.resource_path.ends_with(wanted)
+
+
+## Every sign in `SignKit.SIGNS` has a face on disk of the board's own aspect, at
+## the one scale the tool bakes (320 px per metre). This is the check that stops a
+## resized board from becoming stretched paint.
+func check_signs() -> void:
+	var png := 0
+	for id in SignKit.SIGNS:
+		var spec: Dictionary = SignKit.spec_of(id)
+		var size: Vector2 = spec["size"]
+		var path := "res://assets/world/textures/sign_%s.png" % id
+		var normal_path := "res://assets/world/textures/sign_%s_n.png" % id
+		check(not String(spec["text"]).strip_edges().is_empty(),
+			"sign %s carries words" % id)
+		check(ResourceLoader.exists(path) and ResourceLoader.exists(normal_path),
+			"sign %s is baked (%s)" % [id, path.get_file()])
+		if not ResourceLoader.exists(path):
+			continue
+		png += 1
+		var texture := load(path) as Texture2D
+		check(texture != null and texture.get_width() > 0, "sign %s loads" % id)
+		if texture == null:
+			continue
+		var expected := Vector2(size.x * SignKit.PIXELS_PER_METRE,
+			size.y * SignKit.PIXELS_PER_METRE)
+		check(absf(float(texture.get_width()) - expected.x) <= 1.0
+			and absf(float(texture.get_height()) - expected.y) <= 1.0,
+			"sign %s is baked at its board's size (%dx%d for %.2f x %.2f m)"
+				% [id, texture.get_width(), texture.get_height(), size.x, size.y])
+		var material := TextureLibrary.sign_material(id)
+		check(material.albedo_texture == texture,
+			"sign %s wears its own face" % id)
+		check(material.normal_enabled, "sign %s carries the paint's relief" % id)
+		var face := SignKit.face_mesh(id)
+		check(is_equal_approx(face.size.x, size.x) and is_equal_approx(face.size.y, size.y),
+			"sign %s's quad is the board's face, not a guess" % id)
+	check(png == SignKit.SIGNS.size(), "every sign in the table is baked")
+
 
 func materials_of(meshes: Array) -> Array:
 	var found: Array = []
@@ -326,28 +401,26 @@ func check_town() -> void:
 
 	# The fingerpost: real text, and each board really points at what it names.
 	var signpost = dressing.get_node_or_null("Signpost")
-	var labels: Array = []
-	if signpost != null:
-		for child in signpost.get_children():
-			for label_node in child.get_children():
-				if label_node is Label3D:
-					labels.append(label_node)
-	check(labels.size() == TownDressingScript.SIGN_BOARDS.size(),
-		"the fingerpost carries %d lettered boards" % labels.size())
+	check(labels_under(signpost).is_empty() if signpost != null else false,
+		"the fingerpost's words are painted on its boards, not floated over them")
 	var lettered := 0
 	for board_index in TownDressingScript.SIGN_BOARDS.size():
 		if signpost == null:
 			break
+		var row: Dictionary = TownDressingScript.SIGN_BOARDS[board_index]
 		var board := signpost.get_node_or_null("Board%d" % (board_index + 1)) as Node3D
 		check(board != null, "finger board %d exists" % (board_index + 1))
 		if board == null:
 			continue
-		var board_label := board.get_node_or_null("BoardText") as Label3D
-		check(board_label != null and not board_label.text.is_empty(),
-			"finger board %d carries real text" % (board_index + 1))
-		if board_label != null:
-			check(board_label.text == String(TownDressingScript.SIGN_BOARDS[board_index]["text"]),
-				"finger board %d reads \"%s\"" % [board_index + 1, board_label.text])
+		var sign_id := String(row["sign"])
+		var board_mesh := board.get_node_or_null("Board") as MeshInstance3D
+		check(face_of(board_mesh, sign_id) != null,
+			"finger board %d is painted with %s's words" % [board_index + 1, sign_id])
+		check(SignKit.text_of(sign_id) == String(row["text"]),
+			"finger board %d's paint says \"%s\"" % [board_index + 1, SignKit.text_of(sign_id)])
+		check(labels_under(board).is_empty(),
+			"finger board %d carries no floating text" % (board_index + 1))
+		if face_of(board_mesh, sign_id) != null:
 			lettered += 1
 		# The board's own +X has to point at its destination.
 		var target: Vector3 = TownDressingScript.SIGN_BOARDS[board_index]["target"]
@@ -358,7 +431,33 @@ func check_town() -> void:
 		wanted = wanted.normalized()
 		check(heading.dot(wanted) > 0.999,
 			"finger board %d points at what it names (%.3f)" % [board_index + 1, heading.dot(wanted)])
-	check(lettered == labels.size(), "every lettered board is direction-correct")
+	check(lettered == TownDressingScript.SIGN_BOARDS.size(),
+		"every lettered board is direction-correct")
+
+	# The square's own board, and the arena's name and the altar's cut into stone:
+	# words in the surface of the prop, never a label floating over it.
+	var square = town.get_node_or_null("Signpost/SquareBoard") as Node3D
+	check(square != null, "the square's board is nailed to the signpost")
+	if square != null:
+		check(face_of(square.get_node_or_null("Board"), "square") != null,
+			"the square's board is painted with its own words")
+		check(labels_under(square).is_empty(),
+			"the square's board carries no floating text")
+		check(square.position.z > 0.13,
+			"the board stands proud of its post (%.2f m)" % square.position.z)
+	var arena_plate = town.get_node_or_null("ArenaGate/ArenaNameplate")
+	check(arena_plate != null, "the arena's name stands on its gate")
+	if arena_plate != null:
+		check(face_of(arena_plate.get_node_or_null("Plate"), "arena") != null,
+			"the arena's name is cut into the lintel's stone")
+		check(labels_under(arena_plate).is_empty(), "nothing floats over the arena gate")
+	var altar_node = town.get_node_or_null("SacrificialAltar")
+	check(altar_node != null, "the altar stands in the square")
+	if altar_node != null:
+		var altar_plate = altar_node.get_node_or_null("AltarNameplate")
+		check(altar_plate != null and face_of(altar_plate.get_node_or_null("Plate"), "altar") != null,
+			"the altar's name is cut into its stele")
+		check(labels_under(altar_node).is_empty(), "the altar says its name in stone")
 
 	# The ring around the fire: centred on the scene's own pit, wider than it,
 	# with the woodpile as its own merge beside the seats.

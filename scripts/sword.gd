@@ -10,7 +10,7 @@ const Geo = preload("res://scripts/geo.gd")
 const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 ## Which kinds are not steel by default. The catalog's `index` is the key, so a
 ## club is a club because it is item index 3, not because a caller said so.
-const NATURAL_FAMILY := {3: "club", 4: "branch"}
+const NATURAL_FAMILY := {3: "club", 4: "branch", 5: "axe"}
 var blade_length := 0.8
 var sword_kind := 0
 var skin := ""
@@ -66,6 +66,8 @@ func _build() -> void:
 			_build_club()
 		"branch":
 			_build_branch()
+		"axe":
+			_build_axe()
 		_:
 			_build_steel()
 	# Thirteen primitives are thirteen draw calls: baked into one instance with a
@@ -205,6 +207,61 @@ func _build_club() -> void:
 	# A worked club carries the altar's bands up its haft.
 	_annoint_glyphs = AnnointMarks.rings(self,Vector3(0.0,0.0,-0.12),
 		Vector3(0,0,-1),span*0.62,0.036,annoint_tier)
+
+
+## A hafted axe head, lashed on with wet cord and left unpolished: the makeshift
+## tier's one piece with an edge. The socket axis is the sword's - the haft runs
+## down -Z from the grip, the wedge drops out of the far end, and the back of the
+## head carries a stub of a spike so the whole thing reads as a tool first.
+func _build_axe() -> void:
+	var haft_mat := Geo.material(Color("4a3524"), 0.0, 0.93)
+	var haft_light := Geo.material(Color("6b4d31"), 0.0, 0.9)
+	var iron := Geo.material(Color("6d7175"), 0.55, 0.42)
+	var iron_edge := Geo.material(Color("a9b1b2"), 0.72, 0.24)
+	var cord := Geo.material(Color("8d7852"), 0.0, 0.88)
+	var hide := Geo.material(Color("2b2019"), 0.0, 0.92)
+	var span := maxf(blade_length, 0.34)
+	# Haft: a straight branch, thicker at the head where the weight is.
+	var haft := Geo.cylinder(self, 0.024, 0.029, span * 0.96,
+		Vector3(0.0, 0.0, -0.02 - span * 0.46), haft_mat, 8)
+	haft.name = "Blade"
+	haft.rotation.x = PI / 2.0
+	haft.rotation.z = 0.03
+	# The head: a wedge that grows out of the haft on the swing side (+X here,
+	# which the socket turns into the leading edge) and a blunt poll behind it.
+	var head_at := Vector3(0.048, 0.0, -0.08 - span * 0.82)
+	var head := Geo.box(self, Vector3(0.096, 0.052, 0.150), head_at, iron)
+	head.name = "Head"
+	head.rotation.z = 0.06
+	# The edge itself: a thinner, brighter plate standing proud of the head.
+	var edge := Geo.box(self, Vector3(0.022, 0.060, 0.164),
+		head_at + Vector3(0.052, 0.0, 0.0), iron_edge)
+	edge.rotation.z = 0.06
+	var bevel := Geo.box(self, Vector3(0.040, 0.034, 0.170),
+		head_at + Vector3(0.030, 0.0, 0.0), iron_edge)
+	bevel.rotation.z = 0.06
+	# A stub of a poll behind the head, and the socket collar it hangs on.
+	var poll := Geo.cylinder(self, 0.026, 0.020, 0.070,
+		head_at + Vector3(-0.062, 0.0, 0.0), iron, 6)
+	poll.rotation.z = PI / 2.0
+	var collar := Geo.cylinder(self, 0.036, 0.036, 0.052,
+		head_at + Vector3(-0.030, 0.0, 0.0), iron, 8)
+	collar.rotation.x = PI / 2.0
+	# Wet cord across the socket, still drying, and a tail of it hanging free.
+	for index in 3:
+		var lash := Geo.cylinder(self, 0.034, 0.034, 0.010,
+			head_at + Vector3(-0.026 + index * 0.026, 0.0, -0.004), cord, 8)
+		lash.rotation.x = PI / 2.0
+		lash.rotation.z = 0.10 * float(index % 2) - 0.05
+	var tail := Geo.beam(self, head_at + Vector3(-0.02, -0.03, 0.0),
+		head_at + Vector3(-0.02, -0.11, 0.045), 0.006, cord)
+	tail.rotation.z = 0.12
+	# Hide grip and a knob of the haft left bare at the butt.
+	var grip := Geo.cylinder(self, 0.030, 0.032, 0.175, Vector3(0.0, 0.0, 0.03), hide, 9)
+	grip.rotation.x = PI / 2.0
+	Geo.sphere(self, 0.030, Vector3(0.0, 0.0, 0.118), haft_light, Vector3(1.0, 0.9, 1.0))
+	_annoint_glyphs = AnnointMarks.rings(self, Vector3(0.0, 0.0, -0.10),
+		Vector3(0, 0, -1), span * 0.55, 0.030, annoint_tier)
 
 
 ## A whole limb swung with both hands: long, bent, and heavy enough that a body

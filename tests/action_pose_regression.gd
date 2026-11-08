@@ -457,10 +457,13 @@ func check_guard(rig: Node3D, size: int) -> void:
 	rig.advance_animation(0.2)
 
 
-## The run carry: a blade held in one hand trails behind the fist, out past the
-## leg and clear of the dirt, on both sides at once. The old carry pitched every
-## socket at the ground, which on a dual pair pointed both blades down the legs
-## and drove the off hand's tip through the floor.
+## The run carry: a blade held in one hand hangs forward from the fist, below
+## the horizontal but ahead of the runner, out past the leg and clear of the
+## dirt, on both sides at once. A blade that points back over the fist puts the
+## hilt forward and the tip behind it, and the piece reads as held upside down;
+## the old carry pitched every socket at the ground, which on a dual pair
+## pointed both blades down the legs and drove the off hand's tip through the
+## floor.
 func check_run_carry(rig: Node3D) -> void:
 	rig.set_weapon("sword")
 	rig.set_sword(1)
@@ -471,7 +474,8 @@ func check_run_carry(rig: Node3D) -> void:
 	rig.advance_animation(0.4)
 	var lowest_steel := INF
 	var closest_leg := INF
-	var trailing := INF
+	var leading := INF
+	var hanging := INF
 	var canting := INF
 	var sampled := 0
 	for frame in 120:
@@ -492,7 +496,8 @@ func check_run_carry(rig: Node3D) -> void:
 			var tip: Vector3 = rig.get_blade_tip(hand)
 			var blade: Vector3 = (tip-base).normalized()
 			lowest_steel = minf(lowest_steel,minf(base.y,tip.y))
-			trailing = minf(trailing,-blade.dot(forward))
+			leading = minf(leading,blade.dot(forward))
+			hanging = minf(hanging,blade.y)
 			canting = minf(canting,absf(blade.dot(side_axis)))
 			for leg in legs:
 				for step in 9:
@@ -502,8 +507,9 @@ func check_run_carry(rig: Node3D) -> void:
 	check(sampled > 60,"The sprint reaches its carry on both hands")
 	check(lowest_steel > 0.22,"Neither carried blade reaches the dirt at a sprint (%.3f)" % lowest_steel)
 	check(closest_leg > 0.08,"Neither carried blade passes through a leg (%.3f)" % closest_leg)
-	check(trailing > 0.45,"Both carried blades trail behind the runner (%.2f)" % trailing)
-	check(canting > 0.22,"Both carried blades cant out away from the body (%.2f)" % canting)
+	check(leading > 0.60,"Both carried blades point ahead of the runner (%.2f)" % leading)
+	check(hanging > -0.60,"Neither carried blade hangs straight down off the fist (%.2f)" % hanging)
+	check(canting > 0.15,"Both carried blades cant out away from the body (%.2f)" % canting)
 	rig.set_off_weapon("",0,false)
 	rig.set_weapon("sword")
 	rig.set_locomotion(Vector3.ZERO,true)

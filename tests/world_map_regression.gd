@@ -22,6 +22,7 @@ extends SceneTree
 const RunForest = preload("res://scripts/warband/run_forest.gd")
 const TerrainScript = preload("res://scripts/warband/terrain.gd")
 const MapScript = preload("res://scripts/warband/world_map.gd")
+const SignKit = preload("res://scripts/world/sign_kit.gd")
 const WoodScript = preload("res://scripts/warband/wood_boss.gd")
 
 ## The grown road, as a band rather than a number: 1,375 m is the design, and a
@@ -103,6 +104,46 @@ func _initialize() -> void:
 func _remove(path: String) -> void:
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func _find_named(node: Node, wanted: String) -> Node:
+	if node.name == wanted:
+		return node
+	for child in node.get_children():
+		var found := _find_named(child, wanted)
+		if found != null:
+			return found
+	return null
+
+
+## True when a mesh under `node` wears one of the baked sign faces.
+func _painted_face(node: Node) -> bool:
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var at: Node = stack.pop_back()
+		if at is MeshInstance3D and (at as MeshInstance3D).mesh != null:
+			var mesh: Mesh = (at as MeshInstance3D).mesh
+			for surface in mesh.get_surface_count():
+				var material: Material = mesh.surface_get_material(surface)
+				if material is StandardMaterial3D:
+					var texture: Texture2D = (material as StandardMaterial3D).albedo_texture
+					if texture != null and texture.resource_path.get_file().begins_with("sign_"):
+						return true
+		for child in at.get_children():
+			stack.append(child)
+	return false
+
+
+func _floating_text(node: Node) -> Array:
+	var found: Array = []
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var at: Node = stack.pop_back()
+		if at is Label3D:
+			found.append(at)
+		for child in at.get_children():
+			stack.push_back(child)
+	return found
 
 
 func _count_type(node: Node, type_name: String) -> int:
@@ -265,6 +306,15 @@ func run() -> void:
 	check(int(stats.get("trees", 0)) > 1000 and int(stats.get("bushes", 0)) > 1500,
 		"the wood scales with the lane (%d trees, %d bushes)"
 		% [int(stats.get("trees", 0)), int(stats.get("bushes", 0))])
+
+	# The arch names the town the way the rest of the world is named: paint on a
+	# board hung under its beam, never a word written in the air.
+	var town_sign = _find_named(wood_host, "TownSign")
+	check(town_sign != null, "the arch at the lane's end carries the town's board")
+	if town_sign != null:
+		check(SignKit.text_of("town") == "TOWN", "the board says where the lane goes")
+		check(_painted_face(town_sign), "the board's words are painted on it")
+		check(_floating_text(town_sign).is_empty(), "nothing floats over the arch")
 
 	# The lane is one continuous walk: no step is a teleport, and the road's own
 	# clearance rule holds for every trunk a body can walk into.

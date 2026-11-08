@@ -109,9 +109,8 @@ const RING_STEP := 1.3
 ## The makeshift tier in their hands, by camp and by body, so no two camps are the
 ## same fight.
 const ARMS := ["club_makeshift", "dagger_ironwood", "branch_heavy", "dagger_ironwood"]
-## What a runt can lift: the short pieces only. A body a third of a warden's size
-## with a two-handed limb in its hands reads as a full body wearing a small one.
-const RUNT_ARMS := ["club_makeshift", "dagger_ironwood"]
+## What a runt can lift is the species' own rule (`cage_watcher.RUNT_ARMS`): the
+## short pieces only.
 ## The same 12 cm every body in this world is spawned clear of its ground by.
 const SPAWN_LIFT := 0.12
 ## The warband can seat, down or hand over a body at any moment; half a second is
@@ -359,7 +358,7 @@ func _spawn_watcher(camp_index: int, member: int, point: Vector3, species: Strin
 ## of it, and the ordinal in the camp decides which - so two camps never stand the
 ## same fight and a refill gives the camp's own body the same arm it had.
 func _arm_for(camp_index: int, member: int, species: String) -> String:
-	var table: Array = RUNT_ARMS if species == WatcherScript.RUNT_ID else ARMS
+	var table: Array = WatcherScript.RUNT_ARMS if species == WatcherScript.RUNT_ID else ARMS
 	return str(table[(camp_index + member) % table.size()])
 
 
