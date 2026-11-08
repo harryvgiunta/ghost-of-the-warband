@@ -32,6 +32,18 @@ var source_id := -1
 var shooter: Node3D
 var hit_mask := 1 | 2
 var authoritative_damage := true
+## The arena's reading of this throw: whether it rolled a crit, how heavy the arc
+## is, and the proc coefficient the on-hit chain reads. A campaign throw leaves
+## all three at the defaults and flies exactly as it always did.
+var crit := false
+var proc_coeff := 1.0
+## How much this piece takes a body apart: a hatchet and a javelin name a cleave
+## on the body before the blow, so the shared gore path does the rest.
+var gore_mult := 1.0
+var impact_scale := 1.0
+var gravity_scale := 1.0
+## `(target, position, damage, crit, proc_coeff)` on the authority.
+var on_hit: Callable = Callable()
 ## Backward reconciliation for a blade a client threw (see `arrow.gd`).
 var lag_comp = null
 var lag_ticks := 0
@@ -73,8 +85,9 @@ func _fly(delta: float) -> void:
 		return
 	if is_instance_valid(_visual):
 		_visual.rotation.x = fposmod(_visual.rotation.x + SPIN_SPEED * delta, TAU)
-	var next := global_position + velocity * delta + GRAVITY * (0.5 * delta * delta)
-	velocity += GRAVITY * delta
+	var gravity := GRAVITY * maxf(gravity_scale, 0.0)
+	var next := global_position + velocity * delta + gravity * (0.5 * delta * delta)
+	velocity += gravity * delta
 	var from := global_position
 	_query.from = from
 	_query.to = next
@@ -100,9 +113,16 @@ func _fly(delta: float) -> void:
 				if is_instance_valid(shooter) and collider.has_method("note_attacker"):
 					collider.note_attacker(shooter)
 				if collider.has_method("note_impact"):
-					collider.note_impact(ImpactRules.projectile_force(velocity))
+					collider.note_impact(ImpactRules.projectile_force(velocity) * impact_scale)
+				# A heavy thrown piece is the one ranged blow that can take a body
+				# in two: it names the chop before the damage, exactly as a
+				# two-handed blade does.
+				if gore_mult >= 1.5 and collider.has_method("note_cleave"):
+					collider.note_cleave(velocity, "horizontal")
 				collider.take_damage(damage, source_id, headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, headshot)
+				if on_hit.is_valid():
+					on_hit.call(collider, hit.position, damage, crit, proc_coeff)
 				# A body takes the blade with it: the piece stays where it landed
 				# and is the thrower's to pull back out (`WarbandBody.lodge_weapon`).
 				if not piece_id.is_empty() and collider.has_method("lodge_weapon") \
@@ -142,6 +162,8 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 				candidate.note_impact(ImpactRules.projectile_force(velocity))
 			candidate.take_damage(damage, source_id, headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
+			if on_hit.is_valid():
+				on_hit.call(candidate, point, damage, crit, proc_coeff)
 		impacted.emit(true,point)
 		return true
 	return false

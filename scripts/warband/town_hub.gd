@@ -48,6 +48,7 @@ const FolkScript = preload("res://scripts/warband/town_folk.gd")
 const GuardScript = preload("res://scripts/warband/town_guard.gd")
 const DressingScript = preload("res://scripts/warband/town_dressing.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+const ForgePanelScript = preload("res://scripts/roguelite/town_forge_panel.gd")
 
 ## How close a body must stand to the chest and the desks. The altar keeps its own
 ## `interact_range`.
@@ -87,6 +88,11 @@ const QUARTERMASTER_POINT := Vector3(0.0, 0.0, -12.0)
 const SIGN_POINT := Vector3(2.0, 0.0, 9.0)
 ## The arena's gate: a stone arch out on the east lane, clear of every counter.
 const ARENA_POINT := Vector3(17.0, 0.0, -4.0)
+## The arena loop's three fixtures, in the muster ring's line so a fresh body
+## walks out of the fire and straight into them.
+const TOTEM_POINT := Vector3(-5.5, 0.0, -1.5)
+const RACK_POINT := Vector3(5.5, 0.0, -1.5)
+const RUN_PORTAL_POINT := Vector3(0.0, 0.0, -8.0)
 
 ## The paved middle of the square: its size, the size of one laid stone, and how
 ## far the outer stones wander in and out of the course.
@@ -213,6 +219,10 @@ var signpost: Node3D
 ## The arena's gate and its board.
 var arena_gate: Node3D
 var arena_menu
+var unlock_totem: Node3D
+var weapon_rack: Node3D
+var run_portal: Node3D
+var forge_panel
 ## The keeper `interact_at` resolves by service id (`town_folk.gd`).
 var keepers: Dictionary = {}
 ## The watch at the gate (`town_guard.gd`).
@@ -737,6 +747,9 @@ func _build_services() -> void:
 		Color(0.72, 0.82, 0.96), 2)
 	signpost = _build_signpost()
 	arena_gate = _build_arena_gate()
+	unlock_totem = _build_unlock_totem()
+	weapon_rack = _build_weapon_rack()
+	run_portal = _build_run_portal()
 
 	# Behind every counter, a keeper: a face and a kit, not a service.
 	keepers = FolkScript.build(self, {
@@ -766,6 +779,15 @@ func _build_services() -> void:
 	# the moment the coin lands rather than bound when the board was built.
 	vendor_menu.purchased.connect(func(_item_id: String): _on_stall_traded())
 	quartermaster.purchased.connect(func(_item_id: String): _speak_keeper("quartermaster", "done"))
+	# The arena board. It lives on its own layer above the HUD, like the stalls.
+	var forge_layer := CanvasLayer.new()
+	forge_layer.name = "ForgeLayer"
+	forge_layer.layer = 9
+	add_child(forge_layer)
+	forge_panel = ForgePanelScript.new()
+	forge_panel.name = "ForgePanel"
+	forge_layer.add_child(forge_panel)
+	forge_panel.configure(self)
 	DressingScript.build(self)
 
 
@@ -785,6 +807,110 @@ func _build_arena_gate() -> Node3D:
 	# The name of the press, cut into a stone plate set on the lintel's face.
 	SignKit.plaque(gate, "arena", Vector3(0.0, 3.9, 0.605), 0.0, "ArenaNameplate")
 	return gate
+
+
+## The Unlock Totem: a bone pillar with a bowl of keys and fire on top. Its press
+## spends keys on a random locked weapon (`Roguelite.roll_unlock`).
+func _build_unlock_totem() -> Node3D:
+	var totem := Node3D.new()
+	totem.name = "UnlockTotem"
+	totem.position = TOTEM_POINT
+	add_child(totem)
+	var bone := StandardMaterial3D.new()
+	bone.albedo_color = Color(0.76, 0.70, 0.56)
+	bone.roughness = 0.72
+	var ember := StandardMaterial3D.new()
+	ember.albedo_color = Color(0.95, 0.62, 0.24)
+	ember.emission_enabled = true
+	ember.emission = Color(0.95, 0.54, 0.18)
+	ember.emission_energy_multiplier = 1.4
+	Geo.cylinder(totem, 0.24, 0.32, 2.4, Vector3(0.0, 1.2, 0.0), bone, 8)
+	Geo.cylinder(totem, 0.52, 0.44, 0.36, Vector3(0.0, 2.52, 0.0), _iron, 8)
+	Geo.sphere(totem, 0.34, Vector3(0.0, 2.78, 0.0), ember, Vector3(1.0, 0.7, 1.0))
+	for index in 4:
+		var angle := TAU * float(index) / 4.0
+		var horn := Geo.cylinder(totem, 0.07, 0.02, 0.52,
+			Vector3(cos(angle) * 0.3, 2.2, sin(angle) * 0.3), bone, 5)
+		horn.rotation.z = cos(angle) * 0.45
+		horn.rotation.x = sin(angle) * 0.45
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.68, 0.30)
+	light.light_energy = 1.4
+	light.omni_range = 6.0
+	light.position = Vector3(0.0, 2.8, 0.0)
+	totem.add_child(light)
+	totem.add_child(_label("UNLOCK TOTEM", Vector3(0.0, 3.5, 0.0),
+		Color(0.95, 0.78, 0.42)))
+	return totem
+
+
+## The Weapon Rack: three hafts and a bound rack, where an unlocked piece is taken
+## up before the portal.
+func _build_weapon_rack() -> Node3D:
+	var rack := Node3D.new()
+	rack.name = "WeaponRack"
+	rack.position = RACK_POINT
+	add_child(rack)
+	for side in [-1.0, 1.0]:
+		Geo.box(rack, Vector3(0.18, 2.0, 0.18), Vector3(float(side) * 1.25, 1.0, 0.0), _wood)
+	Geo.box(rack, Vector3(2.9, 0.18, 0.24), Vector3(0.0, 1.85, 0.0), _wood)
+	Geo.box(rack, Vector3(2.9, 0.14, 0.24), Vector3(0.0, 0.9, 0.0), _wood)
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.70, 0.74, 0.75)
+	steel.metallic = 0.7
+	steel.roughness = 0.3
+	for index in 3:
+		var x := (float(index) - 1.0) * 0.78
+		Geo.cylinder(rack, 0.035, 0.035, 1.45, Vector3(x, 1.4, 0.12), _wood, 6)
+		var blade := Geo.box(rack, Vector3(0.11, 0.5, 0.03),
+			Vector3(x, 2.18, 0.12), steel if index != 1 else _iron)
+		blade.rotation.z = 0.12 if index == 0 else (-0.1 if index == 2 else 0.0)
+	rack.add_child(_label("WEAPON RACK", Vector3(0.0, 2.95, 0.0),
+		Color(0.92, 0.86, 0.68)))
+	return rack
+
+
+## The Start Run Portal: a stone arch with a sheet of the next run's own light.
+## Its press opens the board that begins the run.
+func _build_run_portal() -> Node3D:
+	var portal := Node3D.new()
+	portal.name = "RunPortal"
+	portal.position = RUN_PORTAL_POINT
+	add_child(portal)
+	for side in [-1.0, 1.0]:
+		Geo.box(portal, Vector3(0.7, 4.4, 0.8), Vector3(float(side) * 2.1, 2.2, 0.0), _stone)
+	Geo.box(portal, Vector3(4.9, 0.7, 0.9), Vector3(0.0, 4.6, 0.0), _stone)
+	var veil := StandardMaterial3D.new()
+	veil.albedo_color = Color(0.30, 0.52, 0.72, 0.20)
+	veil.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	veil.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	veil.emission_enabled = true
+	veil.emission = Color(0.34, 0.58, 0.80)
+	veil.emission_energy_multiplier = 0.35
+	veil.cull_mode = BaseMaterial3D.CULL_DISABLED
+	Geo.box(portal, Vector3(3.5, 4.0, 0.08), Vector3(0.0, 2.2, 0.0), veil)
+	var light := OmniLight3D.new()
+	light.light_color = Color(0.58, 0.82, 0.95)
+	light.light_energy = 2.0
+	light.omni_range = 12.0
+	light.position = Vector3(0.0, 2.2, 1.2)
+	portal.add_child(light)
+	portal.add_child(_label("START RUN", Vector3(0.0, 5.4, 0.0),
+		Color(0.72, 0.90, 0.96)))
+	return portal
+
+
+## Open the arena board on one of its three pages. The panel is the one thing in
+## the square that is not a counter: it is where a loadout is decided.
+func _open_forge(mode: String) -> void:
+	_hide_panels()
+	if forge_panel != null:
+		forge_panel.open(mode)
+
+
+func _meta_keys() -> int:
+	var meta := get_node_or_null("/root/Roguelite")
+	return int(meta.keys) if meta != null else 0
 
 
 func _build_stash_chest() -> Node3D:
@@ -887,7 +1013,9 @@ func _build_signpost() -> Node3D:
 	Geo.cylinder(post, 0.13, 0.11, 3.0, Vector3(0.0, 1.5, 0.0), _wood, 8)
 	# What the square offers, painted on a board nailed to the post's face and
 	# turned to the fire - the one direction a body in this square comes from.
-	var to_fire := atan2(-SIGN_POINT.x, -SIGN_POINT.z)
+	# The extra half-turn is the board's painted side: `plank_board` cuts its
+	# face on local -Z, so the board stands proud on +Z and looks back at the fire.
+	var to_fire := atan2(-SIGN_POINT.x, -SIGN_POINT.z) + PI
 	SignKit.plank_board(post, "square",
 		Vector3(0.0, 2.30, 0.0) + Vector3(sin(to_fire), 0.0, cos(to_fire)) * 0.15,
 		to_fire, "SquareBoard", false)
@@ -1002,6 +1130,15 @@ func interact_at(peer_id: int, point: Vector3) -> String:
 			if arena_menu != null:
 				arena_menu.open()
 			hud.set_status("THE ARENA: pick how hard the ring is, then step in.", 4.0)
+		"roguelite_totem":
+			_open_forge("totem")
+			hud.set_status("THE UNLOCK TOTEM: keys open the armory.", 4.0)
+		"roguelite_rack":
+			_open_forge("rack")
+			hud.set_status("THE WEAPON RACK: bind the two pieces the run carries.", 4.0)
+		"roguelite_portal":
+			_open_forge("portal")
+			hud.set_status("THE START RUN PORTAL: six islands, then the run is won.", 4.0)
 
 	return service
 
@@ -1073,6 +1210,9 @@ func service_at(point: Vector3) -> String:
 		{"id": "vendor_brann", "point": vendor_brann.global_position, "reach": SERVICE_REACH},
 		{"id": "vendor_vey", "point": vendor_vey.global_position, "reach": SERVICE_REACH},
 		{"id": "arena", "point": arena_gate.global_position, "reach": SERVICE_REACH + 1.0},
+		{"id": "roguelite_totem", "point": unlock_totem.global_position, "reach": SERVICE_REACH},
+		{"id": "roguelite_rack", "point": weapon_rack.global_position, "reach": SERVICE_REACH},
+		{"id": "roguelite_portal", "point": run_portal.global_position, "reach": SERVICE_REACH + 1.0},
 	]
 	var best := ""
 	var best_distance := INF
@@ -1103,6 +1243,12 @@ func service_point(service: String) -> Vector3:
 			return vendor_vey.global_position
 		"arena":
 			return arena_gate.global_position if arena_gate != null else Vector3.ZERO
+		"roguelite_totem":
+			return unlock_totem.global_position if unlock_totem != null else Vector3.ZERO
+		"roguelite_rack":
+			return weapon_rack.global_position if weapon_rack != null else Vector3.ZERO
+		"roguelite_portal":
+			return run_portal.global_position if run_portal != null else Vector3.ZERO
 	return Vector3.ZERO
 
 ## The board's press: the tier is the ring's own, and the ring is the world's.
@@ -1151,6 +1297,12 @@ func prompt_line(actor) -> String:
 			return "G - Smith Brann"
 		"vendor_vey":
 			return "G - Quartermaster Vey"
+		"roguelite_totem":
+			return "G - UNLOCK TOTEM  ·  %d keys" % _meta_keys()
+		"roguelite_rack":
+			return "G - WEAPON RACK"
+		"roguelite_portal":
+			return "G - START RUN PORTAL"
 	return ""
 
 
@@ -1175,6 +1327,8 @@ func _hide_panels() -> void:
 		vendor_menu.close()
 	if arena_menu != null and arena_menu.is_open():
 		arena_menu.close()
+	if forge_panel != null and forge_panel.is_open():
+		forge_panel.close_panel()
 
 func _panel_open() -> bool:
 	return (screen != null and screen.is_open()) \
@@ -1182,7 +1336,8 @@ func _panel_open() -> bool:
 		or (altar != null and altar.is_open()) \
 		or (quartermaster != null and quartermaster.is_open()) \
 		or (vendor_menu != null and vendor_menu.is_open()) \
-		or (arena_menu != null and arena_menu.is_open())
+		or (arena_menu != null and arena_menu.is_open()) \
+		or (forge_panel != null and forge_panel.is_open())
 
 # --- seeding ---------------------------------------------------------------
 

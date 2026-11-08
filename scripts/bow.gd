@@ -29,6 +29,10 @@ var _string_half_length := 0.0
 var annoint_tier := 0
 var _annoint_glyphs := 0
 var _annoint_marks: Node3D
+## `"bow"` or `"crossbow"`. The rig sets this from `Archer.BOW_DATA` before the
+## piece enters the tree; a crossbow keeps the same draw solve and string, and
+## gains the stock, rail and trigger that make it read as one.
+var style := "bow"
 const SEGMENTS: int = 9
 
 func _ready() -> void:
@@ -111,6 +115,16 @@ func _build() -> void:
 	elif bow_kind == 2:
 		for side in [-1.0, 1.0]:
 			Geo.sphere(self, 0.035, Vector3(0, side * 0.13, -0.025), edge, Vector3(0.8, 1.4, 0.55))
+	if style == "crossbow":
+		# The stock runs back along +Z from the hand, the rail carries the bolt
+		# forward along -Z, and the trigger hangs under the grip. Nothing here
+		# moves in the draw solve: the prod bends exactly like a bow's limbs, and
+		# the bolt slides along the rail as the string comes back.
+		Geo.box(self, Vector3(0.075, 0.062, 0.58), Vector3(0.0, -0.035, 0.20), wood)
+		Geo.box(self, Vector3(0.042, 0.020, 0.86), Vector3(0.0, 0.010, -0.10), edge)
+		Geo.box(self, Vector3(0.115, 0.075, 0.06), Vector3(0.0, 0.012, -0.42), edge)
+		Geo.cylinder(self, 0.016, 0.012, 0.10, Vector3(0.0, -0.095, 0.06), edge, 8)
+		Geo.sphere(self, 0.022, Vector3(0.0, -0.140, 0.075), leather)
 	nocked_arrow = create_arrow_visual()
 	nocked_arrow.name = "NockedArrow"
 	add_child(nocked_arrow)

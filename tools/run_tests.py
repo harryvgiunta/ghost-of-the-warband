@@ -74,6 +74,7 @@ WARBAND_TESTS = [
     "town_stockade_regression",
     "loot_wow_regression",
     "arena_regression",
+    "roguelite_regression",
     "weld_regression",
     "demon_duel_regression",
     "delve_regression",

@@ -69,6 +69,10 @@ const BOW_DATA = [
 	{"name":"Recurve", "subtitle":"Balanced horn-and-yew recurve", "draw_seconds":2.0, "speed":84.0, "length":1.4},
 	{"name":"Longbow", "subtitle":"Heavy heartwood war bow", "draw_seconds":3.0, "speed":102.0, "length":1.8},
 	{"name":"Twig bow", "subtitle":"A green sapling and a length of cord", "draw_seconds":0.7, "speed":48.0, "length":0.82},
+	# The arena's crossbows: a bow's firing contract with a crossbow's stock.
+	# `style` is read by `bow.gd` when the visible piece is built.
+	{"name":"Heavy crossbow", "subtitle":"A windlass prod of iron and horn", "draw_seconds":2.4, "speed":120.0, "length":1.05, "style":"crossbow"},
+	{"name":"Repeater crossbow", "subtitle":"A crank-fed magazine repeater", "draw_seconds":0.55, "speed":70.0, "length":0.95, "style":"crossbow"},
 ]
 ## Melee profiles in catalog `index` order. The last two are the makeshift tier
 ## a warband actually carries out of the wood: a club and a whole tree limb, both
@@ -83,12 +87,16 @@ const SWORD_DATA = [
 	# The makeshift axe: a hafted head with weight behind the edge, which is why
 	# it is the makeshift tier's best blade and the one piece it can throw.
 	{"name":"Makeshift axe", "seconds":1.0, "length":0.64, "reach":1.75, "damage":14.0, "throw_speed":28.0, "two_handed":false},
+	# The arena's iron javelin: a long hafted shaft with a spear head, swung as a
+	# two-hander and thrown as a heavy spear.
+	{"name":"Iron javelin", "seconds":1.5, "length":1.30, "reach":2.4, "damage":24.0, "throw_speed":34.0, "two_handed":true},
 ]
 ## Dagger profiles in catalog `index` order: the forged iron blade, then the
 ## whittled ironwood shiv the makeshift tier fields.
 const DAGGER_DATA := [
 	{"name":"Iron dagger", "seconds":0.5, "length":0.34, "reach":1.2, "damage":14.0, "throw_speed":30.0},
 	{"name":"Ironwood shiv", "seconds":0.55, "length":0.30, "reach":1.15, "damage":10.0, "throw_speed":26.0},
+	{"name":"Throwing knife", "seconds":0.45, "length":0.32, "reach":1.15, "damage":12.0, "throw_speed":34.0},
 ]
 
 
@@ -600,6 +608,7 @@ func _ready() -> void:
 		var bow := Bow.new()
 		bow.bow_kind = index
 		bow.bow_length = float(BOW_DATA[index].length)
+		bow.style = str(BOW_DATA[index].get("style", "bow"))
 		add_child(bow)
 		_bows.append(bow)
 	for index in SWORD_DATA.size():
@@ -1307,6 +1316,7 @@ func _make_bow(index: int) -> Bow:
 	bow.name = "Bow%d" % index
 	bow.bow_kind = index
 	bow.bow_length = float(BOW_DATA[index].length)
+	bow.style = str(BOW_DATA[index].get("style", "bow"))
 	add_child(bow)
 	return bow
 
@@ -2116,9 +2126,14 @@ func throw_scale() -> float:
 	return TrinketStats.damage_scale(trinket_stats,"throw_damage") \
 		* ItemPassives.throw_scale(swing_weapon_class("right"))
 
+## The arena's rate layer: the run's own fire-rate and attack-speed mods, and the
+## profile of the piece in the hand. Worn trinkets still compose beside it, so a
+## ring of haste means in a run exactly what it means in the wood.
+var run_rate_scale := 1.0
+
 ## Rate multiplier: a 1.0 s draw becomes `1.0 / attack_rate()` seconds.
 func attack_rate() -> float:
-	return TrinketStats.attack_rate(trinket_stats)
+	return TrinketStats.attack_rate(trinket_stats) * maxf(run_rate_scale, 0.01)
 
 ## The weapon class one hand is actually swinging, or "" when that hand is
 ## empty or holding a bow. The class — not the catalog id — decides a passive,

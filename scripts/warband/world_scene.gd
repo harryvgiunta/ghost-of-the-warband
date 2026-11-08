@@ -59,6 +59,9 @@ const ReviveScript = preload("res://scripts/warband/revive_channel.gd")
 const BrandedScript = preload("res://scripts/warband/branded_runner.gd")
 const SquadDriveScript = preload("res://scripts/warband/squad_drive.gd")
 const Perf = preload("res://scripts/perf_probe.gd")
+## The arena loop: the director that runs a wave campaign and the plate it reads.
+const RogueliteDirectorScript = preload("res://scripts/roguelite/run_director.gd")
+const RogueliteHudScript = preload("res://scripts/roguelite/roguelite_hud.gd")
 ## The F12 overlay asks this world for its own line through the overlay's group.
 const PerfOverlayScript = preload("res://scripts/perf_overlay.gd")
 ## The scene half of the item skills: one node for the whole campaign, exactly
@@ -236,6 +239,10 @@ var delve_area
 ## The arena (`arena_area.gd`): the ring above the world, and the warband it
 ## stands against the party.
 var arena
+## The arena run: director, island and its plate. Always present; idle until the
+## Start Run Portal opens a run.
+var roguelite
+var roguelite_hud
 ## The three areas. Each is the same script its standalone preview uses.
 var wood
 var trail
@@ -278,6 +285,10 @@ var _watched_body = null
 var _guest_revive := 0.0
 ## What the heightfield was baked to: `{triangles, cell, min, max}`.
 var _terrain: Dictionary = {}
+## Bodies currently wearing the arena's dress because they stand in the square.
+## The campaign's gear is restored the moment one walks out of the walls.
+var _town_dressed: Dictionary = {}
+var _roguelite_was_running := false
 ## Where the town square stands, worked out before the ground so its pad can be
 ## cut into the field.
 var _town_at := Vector3.ZERO
@@ -311,6 +322,7 @@ func _ready() -> void:
 	_build_squad()
 	_build_areas()
 	_build_delve()
+	_build_roguelite()
 	if _client:
 		_become_client()
 	# The soul is wired before it is seated: the very first possession is the
@@ -472,9 +484,14 @@ func _step_world(delta: float) -> void:
 		Perf.begin("delve.tick")
 		delve_area.tick(delta)
 		Perf.end()
+	if roguelite != null:
+		Perf.begin("roguelite.tick")
+		roguelite.tick(delta)
+		Perf.end()
 	Perf.begin("world.books")
 	_sync_roster(delta)
 	_sync_field()
+	_sync_town_dress()
 	Perf.end()
 	Perf.begin("world.prompts")
 	_update_prompt()
@@ -510,6 +527,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				paperdoll.open(_soul_merc())
 			get_viewport().set_input_as_handled()
 		KEY_ESCAPE:
+			if roguelite_hud != null and roguelite_hud.close_top():
+				get_viewport().set_input_as_handled()
+				return
 			# The warband's window is the menu: close it, close whatever panel is
 			# under it, or open it. The menu is the settings page's door now, so
 			# Escape no longer opens a second, narrower settings window.
@@ -843,6 +863,31 @@ func _build_delve() -> void:
 	arena.setup(self)
 
 
+## The roguelite loop's own node and plate. Built with the other areas so the
+## director can answer a request made before the first run, and so a guest's HUD
+## exists before the host's first state arrives.
+func _build_roguelite() -> void:
+	roguelite = RogueliteDirectorScript.new()
+	roguelite.name = "Roguelite"
+	add_child(roguelite)
+	roguelite.setup(self)
+	roguelite_hud = RogueliteHudScript.new()
+	roguelite_hud.name = "RoguelitePlate"
+	add_child(roguelite_hud)
+	roguelite_hud.setup(self, roguelite)
+	var ledger = get_node_or_null("/root/Roguelite")
+	if ledger != null and ledger.has_signal("announcement") \
+			and not ledger.announcement.is_connected(_on_roguelite_announcement):
+		ledger.announcement.connect(_on_roguelite_announcement)
+
+
+## A key banked, a weapon opened: the meta ledger's own line, said once on the
+## world's status strip. A guest hears it for the keys the host's run paid too.
+func _on_roguelite_announcement(text: String) -> void:
+	if hud != null and hud.has_method("set_status") and not text.is_empty():
+		hud.set_status(text, 3.5)
+
+
 ## The lane, and the cult standing on it. Built after the warband is seated: two
 ## of the eight start on the soul's own body, so there has to be one.
 func _attach_trail() -> void:
@@ -901,6 +946,7 @@ func _seat_warband() -> void:
 		bodies = controller.spawn_mercenaries(town.spawn_posts(), true)
 		town.place_warband(bodies)
 	_adopt_bodies()
+	_sync_town_dress()
 	_on_possession_changed(controller.local_peer_id, _soul_merc())
 
 
@@ -1148,6 +1194,10 @@ func _quiver_has_arrow() -> bool:
 ## not see the spend would shoot free. Answers false when the quiver is empty, so
 ## the caller can refuse the missile rather than fly an arrow nobody paid for.
 func spend_arrow() -> bool:
+	# A run has no quiver to spend: arrows are the arena's, not the campaign's,
+	# and an ability volley must not empty a purse the run never opened.
+	if roguelite != null and roguelite.is_running():
+		return true
 	if warband == null:
 		return true
 	if warband.take_arrows(1) <= 0:
@@ -1163,6 +1213,11 @@ func spend_arrow() -> bool:
 func _on_body_shot(origin: Vector3, direction: Vector3, speed: float, charge: float,
 		actor) -> void:
 	if not _projectile_authority(actor):
+		return
+	# An arena run owns its own shot: the plan, the spend and the fan all go
+	# through the director, which is the only thing that knows this body's mods.
+	if roguelite != null and roguelite.is_running() \
+			and roguelite.fire(actor, origin, direction, speed, charge):
 		return
 	# The shaft leaves the quiver as it leaves the string. A draw let through
 	# before the count ran out - a stale prediction, a hand-fired signal - still
@@ -1201,6 +1256,10 @@ func _thrown_piece(actor) -> String:
 func _on_body_thrown(origin: Vector3, direction: Vector3, speed: float, charge: float,
 		weapon: String, weapon_index: int, actor) -> void:
 	if not _projectile_authority(actor):
+		return
+	if roguelite != null and roguelite.is_running() \
+			and roguelite.throw_weapon(actor, origin, direction, speed, charge,
+				weapon, weapon_index):
 		return
 	var rig = actor.rig
 	var damage := float(CombatScript.throw_damage(weapon, weapon_index, charge,
@@ -1810,6 +1869,11 @@ func drop_merc_gear(actor, merc_id: int) -> void:
 
 
 func _on_body_downed(_slot: int, actor, merc_id: int) -> void:
+	# An arena run holds a downed body: its hands are the run's, and emptying the
+	# campaign's roster slots because a wave dropped it would take a body's kit
+	# away for a fight that is not the campaign's.
+	if roguelite != null and roguelite.is_running():
+		return
 	drop_merc_gear(actor, merc_id)
 	# The player's own body is a different lesson from a squadmate's: the revive
 	# tip is about somebody else, this one is about what the soul can still do.
@@ -1906,6 +1970,8 @@ func _hostile_near(at: Vector3, radius: float) -> bool:
 
 
 func _on_body_killed(_slot: int, _source: int, actor, merc_id: int) -> void:
+	if roguelite != null and roguelite.is_running():
+		return
 	if not _leave_remains(actor, merc_id):
 		drop_merc_gear(actor, merc_id)
 
@@ -1992,6 +2058,11 @@ func _check_wipe(delta: float) -> void:
 	# The host decides a wipe and reloads its checkpoint; a guest's world follows
 	# it there when the host's campaign arrives again.
 	if _wiped or _client:
+		return
+	# An arena run decides its own loss (`RogueliteDirector._tick_down_check`):
+	# a wipe on the island would reload a campaign checkpoint under the fight.
+	if roguelite != null and roguelite.is_running():
+		_wipe_beat = -1.0
 		return
 	# A party below falls by its own rule (`delve_area.gd`): the bodies left in the
 	# town are still standing, and the Hollow - not the checkpoint - decides what a
@@ -2084,6 +2155,10 @@ const CHECKPOINT_ORDER := ["trail_start", "town"]
 func _check_checkpoints() -> void:
 	if warband == null or controller == null or _wiped:
 		return
+	# A bookmark taken on an island would name a place the campaign's heightfield
+	# has never stood on. The run does not write the campaign's line.
+	if roguelite != null and roguelite.is_running():
+		return
 	# A guest does not own the campaign: writing its own bookmark would move the
 	# line every machine reloads from to wherever one guest happened to stand.
 	if _client:
@@ -2130,6 +2205,42 @@ func _reload_checkpoint() -> bool:
 
 # --- interaction -----------------------------------------------------------
 
+## The square's own dress. A body inside the walls holds the rack's ranged piece;
+## a body that walks back out is re-dressed from the roster, so the campaign's
+## kit is exactly what it was before the player stepped inside. While a run is
+## live the island owns the hands and this does nothing.
+func _sync_town_dress() -> void:
+	if roguelite == null or controller == null or town == null:
+		return
+	var running := bool(roguelite.is_running())
+	if _roguelite_was_running and not running:
+		# The run let the bodies go back to the roster; the square may dress them
+		# again on this same frame.
+		_town_dressed.clear()
+	_roguelite_was_running = running
+	if running:
+		return
+	for body in bodies:
+		if not is_instance_valid(body):
+			continue
+		var inside: bool = bool(town.in_square(body))
+		if inside and not _town_dressed.has(body):
+			roguelite.dress_body_ranged(body)
+			_town_dressed[body] = true
+		elif not inside and _town_dressed.has(body):
+			_town_dressed.erase(body)
+			var merc: int = int(controller.merc_of(body))
+			if merc > 0:
+				controller.refresh_gear(merc)
+
+
+## The rack changed the pair: put every body in the square back into the new
+## ranged piece on this very frame, rather than waiting for one to walk out and in.
+func refresh_town_dress() -> void:
+	_town_dressed.clear()
+	_sync_town_dress()
+
+
 ## The one `G`: a cage latch in the camp, a counter in the town, a corpse at your
 ## feet, or a piece of steel lying loose. The camp is asked first, because its
 ## latches stand in the ground a body walks on - and a camp that refused the press
@@ -2139,6 +2250,10 @@ func _try_interact() -> void:
 	if actor == null or not is_instance_valid(actor):
 		if hud != null:
 			hud.set_status("The soul is loose. There is nobody to act with.", 2.5)
+		return
+	# The island's own furniture outranks the wood's counters: a chest, a draft,
+	# a portal. A guest's press is a request the host answers.
+	if roguelite != null and roguelite.is_running() and roguelite.interact(actor):
 		return
 	if _client:
 		# Latches, counters and the Hollow's mouth are the host's to work: they
@@ -2309,6 +2424,11 @@ func _nearest_pickup():
 ## conjured onto a body that was not carrying it.
 func _swap_weapon_set() -> void:
 	if warband == null or controller == null:
+		return
+	if roguelite != null and roguelite.is_running():
+		var run_actor = _soul()
+		if run_actor != null and is_instance_valid(run_actor):
+			roguelite.swap_hands(run_actor)
 		return
 	if _soul_merc() <= 0:
 		if hud != null:
@@ -2537,6 +2657,16 @@ func _update_prompt() -> void:
 		_write_prompt("HOLD G  ·  PICK UP %s" % warband.roster.name_of(
 			int(controller.merc_of(fallen))).to_upper())
 		return
+	if roguelite != null and roguelite.is_running():
+		var line := str(roguelite.prompt_line(actor))
+		if line.is_empty():
+			var run_state: Dictionary = roguelite.state()
+			line = "%s  ·  WAVE %d / %d  ·  %d HOSTILES  ·  TAB swaps hands" % [
+				str(run_state.get("biome_name", "")),
+				int(run_state.get("wave", 0)), int(run_state.get("waves", 3)),
+				int(run_state.get("living", 0))]
+		_write_prompt(line)
+		return
 	# A cage in reach outranks every other line: it is the one thing standing at
 	# the body's feet wherever in the wood it is.
 	if soldier_cages != null and actor != null and is_instance_valid(actor) \
@@ -2577,6 +2707,8 @@ func _hide_panels() -> void:
 		paperdoll.close()
 	if delve_area != null:
 		delve_area.close_panels()
+	if roguelite_hud != null:
+		roguelite_hud.close_all()
 	if town != null:
 		town.close_panels()
 
@@ -2589,6 +2721,8 @@ func _panel_open() -> bool:
 	if (screen != null and screen.is_open()) or (paperdoll != null and paperdoll.is_open()):
 		return true
 	if delve_area != null and delve_area.panels_open():
+		return true
+	if roguelite_hud != null and roguelite_hud.open_panels():
 		return true
 	return town != null and town.panels_open()
 

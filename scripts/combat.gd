@@ -15,7 +15,7 @@ const ImpactRules = preload("res://scripts/impact_rules.gd")
 const ItemPassives = preload("res://scripts/item_passives.gd")
 ## Bow damage at full draw, in catalog `index` order: the three forged bows
 ## and the twig bow a warband starts with.
-const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0]
+const BASE_DAMAGE := [30.0, 38.0, 50.0, 10.0, 45.0, 16.0]
 ## How far from a body an aim point may lie and still be a place that body could
 ## be shooting at. The longest ray either mode casts is 120 m, so this is the
 ## sanity bound with room to spare, not a reach.
@@ -745,6 +745,17 @@ func _on_melee_started(hand: String) -> void:
 	state.blocked = false
 	state.weapon = rig.weapon
 	state.damage = rig.swing_damage(hand)
+	# The arena's swing layer: damage mods, the crit roll and the knockback share
+	# of the blow are decided here, once per cut, on the authority. A campaign
+	# body answers the plain number and this block changes nothing.
+	state.crit = false
+	state.knockback = 1.0
+	if is_instance_valid(actor) and actor.has_method("roguelite_melee_swing"):
+		var swing: Dictionary = actor.roguelite_melee_swing(
+			float(state.damage), hand, rig.melee_variant(hand))
+		state.damage = float(swing.get("damage", state.damage))
+		state.crit = bool(swing.get("crit", false))
+		state.knockback = float(swing.get("knockback", 1.0))
 	state.diagonal = rig.is_diagonal_swing(hand)
 	state.reach = rig.melee_reach(hand)
 	state.half_angle = rig.melee_half_angle(hand)
@@ -1049,7 +1060,7 @@ func _impact_force(state: Dictionary, at: Vector3, unit: Node3D) -> Vector3:
 	forward = forward.normalized()
 	var right := forward.cross(Vector3.UP)
 	return ImpactRules.melee_force(actor.global_position, forward, right, at, style,
-		float(state.get("side", 1.0)))
+		float(state.get("side", 1.0))) * float(state.get("knockback", 1.0))
 
 
 func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
@@ -1106,7 +1117,7 @@ func _resolve_melee_contact(hand: String, state: Dictionary, unit: Node3D,
 		# `AnnointCatalog.Trigger.HIT` procs roll from here, and the wrist is
 		# named because a dual pair keeps two clocks.
 		if actor.has_method("note_attack_landed"):
-			actor.note_attack_landed(unit, hand, damage)
+			actor.note_attack_landed(unit, hand, damage, bool(state.get("crit", false)))
 		if _unit_is_dead(unit):
 			# The kill throws blood back over the body that landed it.
 			BloodFx.spatter_kill(actor,rig,at,damage)

@@ -21,6 +21,28 @@ var shooter: Node3D
 var hit_mask := 1 | 2
 var authoritative_damage := true
 var pierce := 0
+## The arena's own reading of this shaft. `crit` is whether the shot rolled one
+## (damage is already multiplied by the shooter); `proc_coeff` is the profile's
+## coefficient times the run's proc mods; `homing` is a turn rate and `bounces` a
+## budget of fresh bodies. None of it is a campaign number, and a campaign shaft
+## leaves all of it at the defaults below.
+var crit := false
+var proc_coeff := 1.0
+## Force multiplier for the body it lands in (Heavy Caliber, a heavy profile):
+## the corpse's fall and the gore spray read the same figure.
+var impact_scale := 1.0
+var homing := 0.0
+var homing_target: Node3D
+var homing_provider: Callable = Callable()
+var bounces := 0
+var bounce_provider: Callable = Callable()
+## The damage a pierced body adds to the next one (`Piercing Wave`: +15% a body).
+var pierce_growth := 0.0
+## `(target, position, damage, crit, proc_coeff)` on the authority, for the run's
+## on-hit chain. Never called on a replica: a guest draws the flight, the host
+## rolls the consequence.
+var on_hit: Callable = Callable()
+var _bounced: Dictionary = {}
 ## Backward reconciliation for a shaft a client released: how far behind the
 ## host that peer was drawing, and the history to rewind targets to.
 var lag_comp = null
@@ -70,6 +92,8 @@ func _fly(delta: float) -> void:
 		if age > 10.0:
 			queue_free()
 		return
+	if homing > 0.0:
+		_steer_homing(delta)
 	var next := global_position + velocity * delta + GRAVITY * (0.5 * delta * delta)
 	velocity += GRAVITY * delta
 	var from := global_position
@@ -109,7 +133,10 @@ func _fly(delta: float) -> void:
 					_note_headshot(collider)
 				collider.take_damage(damage, source_id, pierced_headshot)
 				BloodFx.impact(self, hit.position, velocity, damage, pierced_headshot)
+				_notify_hit(collider, hit.position)
 			pierce -= 1
+			# Piercing Wave pays the next body for every body already opened.
+			damage *= 1.0 + maxf(pierce_growth, 0.0)
 			_pierced[hit.collider_id] = true
 			if not _exclude.has(hit.rid):
 				_exclude.append(hit.rid)
@@ -136,6 +163,12 @@ func _fly(delta: float) -> void:
 				applied_hit = true
 		if applied_hit:
 			BloodFx.impact(self, hit.position, velocity, damage, headshot)
+			# A shaft that still has a bounce folded away leaves this body for
+			# the next one instead of settling: it is one projectile with several
+			# victims, not several projectiles.
+			if hit_enemy and not hit_player and _try_bounce(collider, hit.position):
+				return
+			_notify_hit(collider, hit.position)
 		# A shield intercepts the arrow without transferring damage to its
 		# owner. Players and shields keep the shaft so it visibly sticks where
 		# it landed; the arrow still times out with the existing age limit.
@@ -154,6 +187,66 @@ func _fly(delta: float) -> void:
 	_place_visual()
 	if age > 8.0 or global_position.y < -30.0:
 		queue_free()
+
+## Turn the shaft toward the body the provider names. A homing shot re-acquires
+## its target once its own is dead or was already pierced; the provider is the
+## world's, because a projectile must not sweep the whole hostile list itself.
+func _steer_homing(delta: float) -> void:
+	if not is_instance_valid(homing_target) or _pierced.has(homing_target.get_instance_id()):
+		homing_target = null
+		if homing_provider.is_valid():
+			var found: Variant = homing_provider.call(global_position, _pierced)
+			if found is Node3D and is_instance_valid(found):
+				homing_target = found
+	if not is_instance_valid(homing_target):
+		return
+	var speed := velocity.length()
+	if speed <= 0.01:
+		return
+	var wanted: Vector3 = ((homing_target as Node3D).global_position
+		+ Vector3.UP * 1.15) - global_position
+	if wanted.length_squared() <= 0.04:
+		return
+	var turn := clampf(homing * delta, 0.0, 1.0)
+	velocity = velocity.lerp(wanted.normalized() * speed, turn)
+
+
+## Fold away to another body inside the arena's 12 m ricochet reach. The arrow
+## keeps one projectile's worth of life, loses a tenth of its damage per bounce
+## and never returns to a body it has already opened.
+func _try_bounce(collider: Object, at: Vector3) -> bool:
+	if bounces <= 0 or not bounce_provider.is_valid():
+		return false
+	if collider != null and collider is Node:
+		_bounced[(collider as Node).get_instance_id()] = true
+	var found: Variant = bounce_provider.call(at, _bounced, 12.0)
+	if not (found is Node3D) or not is_instance_valid(found):
+		return false
+	var target: Node3D = found
+	var direction: Vector3 = (target.global_position + Vector3.UP * 1.1) - at
+	if direction.length_squared() <= 0.0001:
+		return false
+	bounces -= 1
+	damage *= 0.9
+	flying = true
+	global_position = at + direction.normalized() * 0.08
+	velocity = direction.normalized() * maxf(velocity.length(), 12.0)
+	look_at(global_position + velocity, Vector3.UP)
+	_exclude.append(target.get_rid())
+	_query.exclude = _exclude
+	homing_target = target
+	impacted.emit(true, at)
+	return true
+
+
+## Tell the shooter's run what this shaft struck, once, on the authority.
+func _notify_hit(collider: Object, at: Vector3) -> void:
+	if not authoritative_damage or not on_hit.is_valid():
+		return
+	if collider == null or not (collider is Node):
+		return
+	on_hit.call(collider, at, damage, crit, proc_coeff)
+
 
 ## A body the shooter's frame put under this swept shaft, resolved now. The
 ## first such body takes the impact exactly like a present-time hit would.
@@ -181,6 +274,7 @@ func _lag_historical_hit(from: Vector3, to: Vector3) -> bool:
 				_note_headshot(candidate)
 			candidate.take_damage(damage,source_id,headshot)
 			BloodFx.impact(self,point,velocity,damage,headshot)
+			_notify_hit(candidate, point)
 		impacted.emit(true,point)
 		return true
 	return false
@@ -198,7 +292,7 @@ func _note_attacker(collider: Object) -> void:
 ## The arrow's flight direction is the corpse's fall force.
 func _note_impact(collider: Object) -> void:
 	if collider != null and collider.has_method("note_impact"):
-		collider.note_impact(ImpactRules.projectile_force(velocity))
+		collider.note_impact(ImpactRules.projectile_force(velocity) * impact_scale)
 
 
 ## A shaft that lands on the head names the headshot on the body before the blow

@@ -10,7 +10,7 @@ const Geo = preload("res://scripts/geo.gd")
 const AnnointMarks = preload("res://scripts/annoint_marks.gd")
 ## Which kinds are not steel by default. The catalog's `index` is the key, so a
 ## club is a club because it is item index 3, not because a caller said so.
-const NATURAL_FAMILY := {3: "club", 4: "branch", 5: "axe"}
+const NATURAL_FAMILY := {3: "club", 4: "branch", 5: "axe", 6: "spear"}
 var blade_length := 0.8
 var sword_kind := 0
 var skin := ""
@@ -68,12 +68,62 @@ func _build() -> void:
 			_build_branch()
 		"axe":
 			_build_axe()
+		"spear":
+			_build_spear()
 		_:
 			_build_steel()
 	# Thirteen primitives are thirteen draw calls: baked into one instance with a
 	# surface per material, the whole blade is four or five. Nothing on a held
 	# blade moves on its own, so nothing is lost but the draws.
 	Geo.bake_parts(self)
+
+
+## The arena's iron javelin: one long ash shaft, an iron head on a socket, and
+## the leather grip a throwing hand wants. It is the only blade in the catalog
+## whose reach is the shaft and not the edge.
+func _build_spear() -> void:
+	var ash := Geo.material(Color("7a5a34"), 0.0, 0.9)
+	var ash_dark := Geo.material(Color("4c3720"), 0.0, 0.93)
+	var iron := Geo.material(Color("727a7e"), 0.6, 0.38)
+	var iron_edge := Geo.material(Color("b3bcbe"), 0.78, 0.22)
+	var cord := Geo.material(Color("8d7852"), 0.0, 0.88)
+	var hide := Geo.material(Color("2f241c"), 0.0, 0.92)
+	var span := maxf(blade_length, 0.9)
+	var shaft := Geo.cylinder(self, 0.020, 0.024, span,
+		Vector3(0.0, 0.0, -0.06 - span * 0.5), ash, 8)
+	shaft.name = "Blade"
+	shaft.rotation.x = PI / 2.0
+	# The head: a socket collar, a leaf of iron and a bright edge down its spine.
+	var head_at := Vector3(0.0, 0.0, -0.08 - span)
+	var socket := Geo.cylinder(self, 0.028, 0.020, 0.10,
+		head_at + Vector3(0.0, 0.0, 0.08), iron, 8)
+	socket.rotation.x = PI / 2.0
+	var leaf := Geo.box(self, Vector3(0.074, 0.016, 0.30),
+		head_at + Vector3(0.0, 0.0, -0.12), iron)
+	leaf.name = "Head"
+	leaf.rotation.y = 0.02
+	var edge := Geo.box(self, Vector3(0.026, 0.020, 0.28),
+		head_at + Vector3(0.0, 0.0, -0.13), iron_edge)
+	var point := Geo.cylinder(self, 0.038, 0.0, 0.16,
+		head_at + Vector3(0.0, 0.0, -0.34), iron_edge, 4)
+	point.rotation.x = -PI / 2.0
+	point.scale.z = 0.34
+	# A pair of barbs at the neck, so the head reads as a weapon and not a spike.
+	for side in [-1.0, 1.0]:
+		var barb := Geo.box(self, Vector3(0.10, 0.014, 0.05),
+			head_at + Vector3(float(side) * 0.05, 0.0, 0.02), iron)
+		barb.rotation.y = float(side) * 0.5
+	# Cord binding where the socket meets the shaft.
+	for index in 4:
+		var wrap := Geo.cylinder(self, 0.030, 0.030, 0.012,
+			head_at + Vector3(0.0, 0.0, 0.12 + index * 0.018), cord, 8)
+		wrap.rotation.x = PI / 2.0
+	# The throwing grip: leather over the balance point, and a bare butt behind.
+	var grip := Geo.cylinder(self, 0.030, 0.032, 0.26, Vector3(0.0, 0.0, 0.02), hide, 9)
+	grip.rotation.x = PI / 2.0
+	Geo.sphere(self, 0.028, Vector3(0.0, 0.0, 0.16), ash_dark, Vector3(1.0, 0.9, 1.0))
+	_annoint_glyphs = AnnointMarks.rings(self, Vector3(0.0, 0.0, -0.06),
+		Vector3(0, 0, -1), span * 0.8, 0.026, annoint_tier)
 
 
 func _build_steel() -> void:

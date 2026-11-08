@@ -11,6 +11,16 @@ save remembers the roster, the gear, the essence and the last
 checkpoint. It plays solo, or **hosted over Tailscale** for up to four souls who
 all share the host's warband.
 
+**The Arena** is the same game's roguelite mode: Hearthstead is the hub, the
+**Start Run Portal** takes the party through six bounded islands against
+Watchers, Demons and Blood Clones, and every cleared island pays a **reward
+chest**, a **pedestal mod draft**, a **Greed Totem** and two **portals**. Keys
+earned in runs open the armory at the **Unlock Totem**; the **Weapon Rack** binds
+the two weapons a body carries. The campaign's Host/Join session, gore, weapons
+and enemy rigs are reused unchanged. Controls, stacking rules, factions and the
+co-op wire are in [docs/roguelite.md](docs/roguelite.md); the regression is
+`tests/roguelite_regression.gd`.
+
 ## Ghost of the Warband (possession campaign)
 
 The same engine, a second game on top of it. There is no main character: you are

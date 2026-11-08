@@ -78,6 +78,13 @@ var health := MAX_HEALTH
 var max_health := MAX_HEALTH
 var weapon_blood := 0.0
 var alive := true
+## The arena run this body is fighting, when one is on (`RoguelitePlayer`). Null
+## in the campaign: every hook below is a no-op on the wood's own rules.
+var roguelite = null
+## True while a run holds this body: a downed body cannot bleed out and cannot be
+## finished, because the run wakes it when the island is cleared. The flag is the
+## body's own so the snapshot and the downed clock need no knowledge of the mode.
+var roguelite_hold_downed := false
 # Ghost of the Warband: the lifecycle a blow can put this body in. `alive` stays
 # true while DOWNED - the body keeps its collision, its model and its claim on
 # the slot, and only a finisher or the bleed clock kills it - so every existing
@@ -942,7 +949,7 @@ func apply_annointments(stats: Dictionary, procs: Array = []) -> void:
 ## the attacker exists in the same call as the victim. The necklace's attack-side
 ## procs (`Trigger.HIT`) roll from here and nowhere else.
 func note_attack_landed(target: Node3D, hand: String = "",
-		landed: float = 0.0) -> void:
+		landed: float = 0.0, crit: bool = false) -> void:
 	# Only the body that owns its own simulation deals damage at all, so only it
 	# may roll an attack-side proc: a replica rolling its own die would lay a
 	# second poison on a body the host already poisoned.
@@ -951,6 +958,30 @@ func note_attack_landed(target: Node3D, hand: String = "",
 	if target == null or not is_instance_valid(target):
 		return
 	annoint_playback.on_hit(target, hand, landed)
+	# The arena's on-melee-hit chain: the same landed blow, a second consumer.
+	if roguelite != null:
+		roguelite.melee_hit(target, hand, landed, crit)
+
+
+## The arena's reading of one committed cut: the damage the mods make of it, and
+## whether it crit. `Combat` asks this where it already asks the rig for a swing's
+## number, so the swing and its procs are decided on the same beat. A body with no
+## run answers the plain number, which is every body in the campaign.
+func roguelite_melee_swing(damage: float, _hand: String = "",
+		_variant: String = "") -> Dictionary:
+	if roguelite == null or not authoritative or not alive or downed:
+		return {"damage": damage, "crit": false, "knockback": 1.0}
+	var forward: Vector3 = -rig.global_basis.z
+	if combat != null and (combat.aim_point - global_position).length_squared() > 0.0001:
+		forward = combat.aim_point - global_position
+		forward.y = 0.0
+		forward = forward.normalized()
+	var answer: Dictionary = roguelite.melee_swing(forward)
+	return {
+		"damage": damage * float(answer.get("damage_scale", 1.0)),
+		"crit": bool(answer.get("crit", false)),
+		"knockback": float(answer.get("knockback", 1.0)),
+	}
 
 
 ## Swing again at `rate` times the speed, asked by the runtime on the frame after
@@ -1024,12 +1055,25 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 	var strike := weapon_class if not weapon_class.is_empty() else _strike_class
 	_strike_class = ""
 	if downed:
+		# A body the arena is holding waits out the wave as a spectator: the run
+		# wakes it when the island is cleared, so a finisher on the dirt has
+		# nothing to finish yet.
+		if roguelite_hold_downed:
+			return
 		# A blow on a downed body is a finisher, not damage: lying in the dirt,
 		# any blow that lands ends it - and an arrow in the head takes the head
 		# with it, whatever armour the body is wearing.
 		_die(source_id, flight, amount)
 		return
 	_cancel_consumable()
+	# The arena's dodge and incoming-damage layer: rolled before the armour, so a
+	# dodged blow costs nothing at all and Glass Cannon's price is paid where the
+	# number is still the blow's own.
+	if roguelite != null:
+		var answer: Dictionary = roguelite.filter_incoming(amount, source_id)
+		if bool(answer.get("dodged", false)):
+			return
+		amount = float(answer.get("damage", amount))
 	# A lethal save and an absorb move the *incoming* figure before the armour
 	# channel sees it, which is the only place a modifier can stop a blow.
 	amount = annoint_playback.on_incoming(amount, source_id)
@@ -1063,6 +1107,9 @@ func take_damage(amount: float, source_id: int, headshot: bool = false, react: b
 func try_consume(kind: String) -> bool:
 	if not authoritative or not alive or downed or consume_kind != "":
 		return false
+	# A run can close the passive heals (Bloodthirst): no dressing, no draught.
+	if roguelite != null and roguelite.blocks_passive_healing():
+		return false
 	if not Archer.CONSUMABLE_DATA.has(kind) or health >= max_health-0.001:
 		return false
 	if combat.stagger_time > 0.0 or not is_on_floor() or roll.active or slide.active or ability.active:
@@ -1087,6 +1134,8 @@ func _advance_consumable(delta: float) -> void:
 				consume_kind = ""
 				_consume_elapsed = 0.0
 				rig.end_consumable()
+				if roguelite != null and roguelite.blocks_passive_healing():
+					return
 				if kind == "bandage":
 					_heal_remaining = float(data.heal)
 					_heal_rate = float(data.heal)/maxf(float(data.heal_seconds),0.001)
@@ -1102,6 +1151,8 @@ func _advance_consumable(delta: float) -> void:
 ## out of a fight recovers over minutes, not seconds - and it runs on the one
 ## peer that owns the health, so a replica sees the rise in its snapshots.
 func _advance_health_regen(delta: float) -> void:
+	if roguelite != null and roguelite.blocks_passive_healing():
+		return
 	if health >= max_health:
 		# A whole body banks nothing: the first wound starts a fresh clock.
 		_regen_elapsed = 0.0
@@ -1153,7 +1204,10 @@ func _step_body(delta: float, actors: Array, simulation_tick: int) -> void:
 		# hold the revive channel.
 		if authoritative:
 			downed_seconds += delta
-			if DownedRules.bled_out(downed_seconds):
+			# An arena run holds the bleed clock: a player who goes down while a
+			# wave is live stays down as a spectator until the island is cleared,
+			# and is woken at half HP off the reward chest.
+			if not roguelite_hold_downed and DownedRules.bled_out(downed_seconds):
 				_die(downed_by)
 		return
 	input_age += delta

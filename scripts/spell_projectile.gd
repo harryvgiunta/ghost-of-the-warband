@@ -24,6 +24,10 @@ var pierce := 0
 var source_id := -1
 var hit_mask := 1 | 2
 var authoritative_damage := true
+## The arena's on-hit chain for a staff's bolt. A campaign spell leaves it empty.
+var crit := false
+var proc_coeff := 1.0
+var on_hit: Callable = Callable()
 var source_rig
 ## The caster's body; mobs read it through `note_attacker`.
 var shooter: Node3D
@@ -142,6 +146,8 @@ func _apply_direct(unit: Node3D, at: Vector3) -> void:
 		BloodFx.impact(source_rig, at, direction, damage, false)
 	else:
 		AbilityFx.burst(get_parent() as Node3D, at, AbilityFx.BONE, 0.7)
+	if on_hit.is_valid():
+		on_hit.call(unit, at, damage, crit, proc_coeff)
 
 
 func _build_visual() -> void:

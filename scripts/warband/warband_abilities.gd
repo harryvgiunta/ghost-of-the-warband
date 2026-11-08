@@ -191,6 +191,13 @@ func _fire_arrows(actor, runner, definition: Dictionary, index: int, damage: flo
 		arrow.shooter = actor
 		arrow.hit_mask = TARGET_MASK
 		arrow.authoritative_damage = true
+		var run = actor.get("roguelite")
+		if run != null:
+			var plan: Dictionary = run.spell_plan(damage)
+			damage = float(plan.get("damage", damage))
+			arrow.crit = bool(plan.get("crit", false))
+			arrow.proc_coeff = float(plan.get("proc", 1.0))
+			arrow.on_hit = run.hit_hook()
 		add_child(arrow)
 		arrow.launch(origin, direction, speed, damage, excluded, origin, pierce)
 		_track(arrow)
@@ -222,6 +229,15 @@ func _launch_spell(actor, runner, definition: Dictionary, damage: float) -> void
 	spell.hit_mask = TARGET_MASK
 	spell.shooter = actor
 	spell.authoritative_damage = true
+	# A body fighting a run rolls its staff's damage and on-hit chain exactly as
+	# it rolls a bow's: the spell is one more projectile of the same arsenal.
+	var run = actor.get("roguelite")
+	if run != null:
+		var plan: Dictionary = run.spell_plan(damage)
+		damage = float(plan.get("damage", damage))
+		spell.crit = bool(plan.get("crit", false))
+		spell.proc_coeff = float(plan.get("proc", 1.0))
+		spell.on_hit = run.hit_hook()
 	add_child(spell)
 	var excluded: Array[RID] = []
 	if actor is CollisionObject3D:

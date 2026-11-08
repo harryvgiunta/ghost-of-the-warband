@@ -201,6 +201,9 @@ var _mob_sent: Dictionary = {}
 ## A body leaving this set is named once so the guest can put its copy down
 ## without waiting out a timeout.
 var _mob_live: Dictionary = {}
+## The host's unlocked armory, delivered before this machine's world existed:
+## kept here and handed to the director the moment `attach_world` gives it one.
+var _roguelite_pool: Array = []
 ## Host only, per peer: that peer's own copy of `_mob_sent`. A shared book is
 ## wrong once each guest is told about a different ground - a body near the
 ## host's body would look "already sent" to the guest that was never sent it.
@@ -673,6 +676,12 @@ func attach_world(world_node: Node3D) -> void:
 	_wire_world_loot()
 	if _role == "client":
 		_mark_world_replicas()
+		if not _roguelite_pool.is_empty():
+			_apply_roguelite_event({"t": "pool", "ids": _roguelite_pool})
+		# A run may already be live: ask the host for its state, its props and
+		# the bodies it has standing, in one round trip.
+		if multiplayer.has_multiplayer_peer():
+			send_roguelite_request({"t": "sync"})
 
 ## Every living mob in `world.guards` within `limit_metres` of any body in
 ## `bodies_in` (the whole field when it is empty), as `[name, snapshot]`. A name
@@ -876,6 +885,80 @@ func report_ammo_spent(count: int) -> void:
 ## Host -> everyone: a fallen body this session may search. Sent once when the
 ## body is registered, with what it still holds, and the id is the host's own, so
 ## the guest's screen and the host's takes name the same row.
+## Host -> everyone: one arena event. State, props, spawns, drafts, keys and
+## flashes all ride the same envelope, because they are all one director's
+## decisions and a guest applies them in the order the host made them.
+@rpc("authority", "call_remote", "reliable")
+func receive_roguelite(event: Dictionary) -> void:
+	if typeof(event) != TYPE_DICTIONARY:
+		return
+	if str(event.get("t", "")) == "pool":
+		_roguelite_pool = event.get("ids", [])
+	if world == null:
+		return
+	_apply_roguelite_event(event)
+
+
+func _apply_roguelite_event(event: Dictionary) -> void:
+	if world == null:
+		return
+	var run = world.get("roguelite")
+	if run != null and run.has_method("apply_event"):
+		run.apply_event(event)
+
+
+func send_roguelite_event(event: Dictionary) -> void:
+	if _role != "host":
+		return
+	for peer_id in _guest_ids():
+		receive_roguelite.rpc_id(peer_id, event)
+
+
+func send_roguelite_request(request: Dictionary) -> void:
+	if _role != "client":
+		return
+	roguelite_request.rpc_id(1, request)
+
+
+## Guest -> host: one arena request, attributed on arrival by the sender's own
+## id. The wire never lets a guest name another body as the doer.
+@rpc("any_peer", "call_remote", "reliable")
+func roguelite_request(request: Dictionary) -> void:
+	if _role != "host" or typeof(request) != TYPE_DICTIONARY:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender <= 0:
+		return
+	if world == null:
+		return
+	var run = world.get("roguelite")
+	if run == null or not run.has_method("handle_request"):
+		return
+	if str(request.get("t", "")) == "sync":
+		run.handle_request(sender, {"t": "sync"})
+		send_roguelite_event({"t": "pool", "ids": _host_pool()})
+		return
+	run.handle_request(sender, request)
+
+
+## What this host lends: the autoload's own ledger, never the loan it holds.
+func _host_pool() -> Array:
+	var meta = get_node_or_null("/root/Roguelite")
+	if meta == null or not meta.has_method("lent_pool"):
+		return []
+	return meta.lent_pool()
+
+
+## The armory is part of what a guest is lent with the warband, so it is sent
+## when the socket opens rather than waiting for the first run.
+func sync_roguelite_pool() -> void:
+	if _role != "host":
+		return
+	var ids := _host_pool()
+	for peer_id in _guest_ids():
+		receive_roguelite.rpc_id(peer_id, {"t": "pool", "ids": ids})
+
+
 @rpc("authority", "call_remote", "reliable")
 func receive_corpse(corpse_id: int, body_name: String, label: String,
 		items: Array, at: Vector3, remains: bool = false) -> void:
@@ -1699,6 +1782,12 @@ func _wire_signals() -> void:
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	# A host that opens a weapon at the totem lends it at once: the rack's pool
+	# is live, not a snapshot taken when the socket opened.
+	var ledger = get_node_or_null("/root/Roguelite")
+	if ledger != null and ledger.has_signal("meta_changed") \
+			and not ledger.meta_changed.is_connected(sync_roguelite_pool):
+		ledger.meta_changed.connect(sync_roguelite_pool)
 
 func _unwire_signals() -> void:
 	if not _signals_wired or multiplayer == null:
@@ -1714,8 +1803,18 @@ func _unwire_signals() -> void:
 		multiplayer.connection_failed.disconnect(_on_connection_failed)
 	if multiplayer.server_disconnected.is_connected(_on_server_disconnected):
 		multiplayer.server_disconnected.disconnect(_on_server_disconnected)
+	var ledger = get_node_or_null("/root/Roguelite")
+	if ledger != null and ledger.has_signal("meta_changed") \
+			and ledger.meta_changed.is_connected(sync_roguelite_pool):
+		ledger.meta_changed.disconnect(sync_roguelite_pool)
 
 func _teardown() -> void:
+	# The host's armory was a loan, not a purchase: a guest that leaves the
+	# session takes the lent rows back out of its rack.
+	if _role == "client":
+		var ledger = get_node_or_null("/root/Roguelite")
+		if ledger != null and ledger.has_method("share_pool"):
+			ledger.share_pool([])
 	_unwire_signals()
 	_detach_world()
 	if controller != null and is_instance_valid(controller):
@@ -1748,6 +1847,8 @@ func _on_peer_connected(peer_id: int) -> void:
 	if _role == "host" and controller != null:
 		controller.clear_lag_history()
 		controller.lag_tracking = true
+	if _role == "host":
+		sync_roguelite_pool()
 	peer_joined.emit(peer_id)
 
 func _on_peer_disconnected(peer_id: int) -> void:
